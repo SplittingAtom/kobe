@@ -2,20 +2,16 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { installSettings } from "@kobe/db";
 import { REQUIRE_TWO_FACTOR, readRequireTwoFactor, type AuthVariables } from "../auth/session.js";
+import { requireInstallPermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 
 const settingsSchema = z.object({ requireTwoFactor: z.boolean() }).strict();
 
-/** Install settings (install Owner/Admin only; the full role matrix arrives in KOBE-14). */
+/** Install settings (install Owner/Admin only). */
 export function installSettingsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
 
-  app.use(async (c, next) => {
-    if (c.get("installRole") === null) {
-      return c.json({ code: "forbidden", message: "Install admins only." }, 403);
-    }
-    await next();
-  });
+  app.use(requireInstallPermission("install.settings.manage"));
 
   app.get("/", async (c) => c.json({ requireTwoFactor: await readRequireTwoFactor(deps) }));
 

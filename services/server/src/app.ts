@@ -3,9 +3,13 @@ import { requireSession, type AuthVariables } from "./auth/session.js";
 import type { ServerDeps } from "./deps.js";
 import type { IsolationGate } from "./isolation/gate.js";
 import { installIsolationRoutes } from "./routes/install-isolation.js";
+import { installRolesRoutes } from "./routes/install-roles.js";
 import { installSettingsRoutes } from "./routes/install-settings.js";
+import { installTeamsRoutes } from "./routes/install-teams.js";
 import { meRoutes } from "./routes/me.js";
+import { myTeamsRoutes } from "./routes/my-teams.js";
 import { setupRoutes } from "./routes/setup.js";
+import { teamRoutes } from "./routes/team.js";
 
 const SERVICE = "server";
 
@@ -44,8 +48,12 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
     await next();
   });
   api.use(requireSession(deps));
+  api.route("/me/teams", myTeamsRoutes(deps));
   api.route("/me", meRoutes());
+  api.route("/team", teamRoutes(deps));
   api.route("/install/settings", installSettingsRoutes(deps));
+  api.route("/install/teams", installTeamsRoutes(deps));
+  api.route("/install/roles", installRolesRoutes(deps));
   if (isolation) api.route("/install/isolation", installIsolationRoutes(isolation));
   app.route("/v1", api);
   return app;

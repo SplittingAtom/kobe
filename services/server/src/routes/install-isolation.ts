@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AuthVariables } from "../auth/session.js";
+import { requireInstallPermission } from "../authz/middleware.js";
 import type { IsolationGate, IsolationStatus } from "../isolation/gate.js";
 
 const DOCS = "docs/install.md#isolation";
@@ -43,12 +44,7 @@ export function installIsolationRoutes(
 ): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
 
-  app.use(async (c, next) => {
-    if (c.get("installRole") === null) {
-      return c.json({ code: "forbidden", message: "Install admins only." }, 403);
-    }
-    await next();
-  });
+  app.use(requireInstallPermission("install.settings.manage"));
 
   app.get("/", (c) => c.json(toBody(isolation.status())));
   app.post("/check", async (c) => c.json(toBody(await isolation.check())));
