@@ -8,6 +8,10 @@
 docs
 *.md
 !apps/**/*.md
-.env
-.env.*
-!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+**/.npmrc
+**/*.pem
+**/*.key
+**/kubeconfig*
