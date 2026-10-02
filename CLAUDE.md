@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project
 
 Kobe is a self-hosted, Apache-2.0 conversational agent platform for one organization and its teams,
-deployed only with Helm on k3s. The agreed spec (32 decisions, D1–D32) lives in the vault at
-`~/Documents/AI Notes/Product Specs/Skunkwerks/Kobe/specs/Kobe — Product Spec.md`. Decisions there are
+deployed only with Helm on k3s. The agreed spec (32 decisions, D1–D32) lives outside this repo (path
+in `CLAUDE.local.md`). Decisions there are
 final — do not re-litigate them. Kobe inherits nothing from Catalyst Agents/Foundry.
 
 Work is tracked in Hadron (project `kobe`, tickets KOBE-1..65, four phases each closed by a gate ticket).
@@ -35,9 +35,9 @@ pnpm --filter @kobe/server exec vitest run -t "healthz"      # one test by name
 pnpm images:check   # build every service image, assert non-root (needs Docker)
 ```
 
-There is no local Docker engine on the dev Mac; build on a cluster node with
-`DOCKER_HOST=ssh://claude@compute2.atom.splittingatom.io` (amd64, matching the cluster).
-Cluster access: `ssh claude@compute1.atom.splittingatom.io` then `sudo k3s kubectl`.
+There is no local Docker engine on the dev Mac; build on a remote amd64 Docker host via `DOCKER_HOST`.
+Host names, cluster access and the dev Postgres URL are in `CLAUDE.local.md` (gitignored, local only):
+this repository is public, so infrastructure details never go into tracked files (CI checks this).
 
 ## Architecture
 
