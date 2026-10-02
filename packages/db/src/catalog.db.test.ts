@@ -183,6 +183,33 @@ describe("app role privileges", () => {
     expect(p).toEqual({ schema_create: false, db_create: false, db_temp: false });
   });
 
+  it("can only append to and read audit_log: no UPDATE, DELETE or TRUNCATE (KOBE-15)", async () => {
+    const [p] = await rows<Record<string, boolean>>(
+      `SELECT ${["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"]
+        .map((p) => `has_table_privilege($1, 'public.audit_log', '${p}') AS "${p}"`)
+        .join(", ")}`,
+      [appRole],
+    );
+    expect(p).toEqual({
+      SELECT: true,
+      INSERT: true,
+      UPDATE: false,
+      DELETE: false,
+      TRUNCATE: false,
+      REFERENCES: false,
+      TRIGGER: false,
+    });
+    const triggers = await rows<{ name: string; enabled: string }>(
+      `SELECT tgname AS name, tgenabled::text AS enabled FROM pg_trigger
+       WHERE tgrelid = 'public.audit_log'::regclass AND NOT tgisinternal ORDER BY 1`,
+    );
+    expect(triggers).toEqual([
+      { name: "audit_log_append", enabled: "O" },
+      { name: "audit_log_refuse_truncate", enabled: "O" },
+      { name: "audit_log_refuse_update_delete", enabled: "O" },
+    ]);
+  });
+
   it("holds exactly the privileges in the grants matrix on every table", async () => {
     const tables = (await relations()).filter((r) => r.schema === "public");
     const grants = await rows<{ table: string; privilege: string }>(

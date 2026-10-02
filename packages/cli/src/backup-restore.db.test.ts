@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { cp, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MIGRATION_LOCK_KEY } from "@kobe/db";
+import { MIGRATION_LOCK_KEY, createDb, verifyAuditChain } from "@kobe/db";
 import { createTestDatabase, testServerUrl, type TestDatabase } from "@kobe/db/testing";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -39,6 +39,11 @@ import {
 const pgBinDir = process.env.KOBE_PG_BIN_DIR || undefined;
 const KEY = randomBytes(32);
 const UNREACHABLE_DB = "postgres://nobody:nothing@127.0.0.1:1/none";
+
+async function auditHashAt(url: string, seq: number): Promise<string | undefined> {
+  const [row] = await sql<{ hash: string }>(url, `SELECT hash FROM audit_log WHERE seq = ${seq}`);
+  return row?.hash;
+}
 
 describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql)", () => {
   const server = testServerUrl();
@@ -293,7 +298,16 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
       const dst = await target();
       const forcedBefore = await forcedTables(dst.adminUrl);
       const tmp = await mkdtemp(join(tmpdir(), "kobe-tmpdir-"));
-      const report = await restore(dst, backupDir, { tmpDir: tmp });
+      // The signed manifest carries the snapshot's audit head; an off-box anchor can be checked too.
+      expect(manifest.auditHead).toMatchObject({
+        seq: 2,
+        hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+      });
+      const report = await restore(dst, backupDir, {
+        tmpDir: tmp,
+        operator: "ops.test",
+        expectAuditHead: { seq: 1, hash: (await auditHashAt(src.adminUrl, 1)) ?? "" },
+      });
       expect(await readdir(tmp)).toEqual([]); // the decrypted dump is gone
       expect(report).toMatchObject({
         fingerprint: manifest.fingerprint,
@@ -302,11 +316,45 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
         objects: { checked: 2, problems: 0 },
       });
 
-      for (const t of manifest.tables) {
+      for (const t of manifest.tables.filter((t) => t.name !== "audit_log")) {
         expect(await rowsOf(dst.adminUrl, t.name), t.name).toEqual(
           await rowsOf(src.adminUrl, t.name),
         );
       }
+      // Audit log (KOBE-15): restored verbatim (seq, hashes), then the restore's own event
+      // extends the chain; the chain verifies and the append-only triggers are back.
+      const audit = (url: string) =>
+        sql<{ r: string }>(url, `SELECT to_jsonb(a)::text AS r FROM audit_log a ORDER BY seq`);
+      const restoredAudit = await audit(dst.adminUrl);
+      expect(restoredAudit.slice(0, -1)).toEqual(await audit(src.adminUrl));
+      expect(restoredAudit).toHaveLength(3);
+      expect(JSON.parse(restoredAudit.at(-1)?.r ?? "{}")).toMatchObject({
+        seq: 3,
+        actor_kind: "system",
+        action: "platform.restore.completed",
+        target: {
+          backupCreatedAt: manifest.createdAt,
+          tables: manifest.tables.length,
+          operator: "ops.test",
+          auditHeadSeq: 2,
+          auditHeadHash: manifest.auditHead?.hash,
+        },
+      });
+      expect(report.auditHead).toEqual({ seq: 3, hash: await auditHashAt(dst.adminUrl, 3) });
+      const dstDb = createDb(dst.appUrl, { max: 1 });
+      try {
+        expect(await verifyAuditChain(dstDb.db)).toMatchObject({ ok: true, checked: 3 });
+      } finally {
+        await dstDb.close();
+      }
+      expect(
+        await sql(
+          dst.adminUrl,
+          `SELECT tgname, tgenabled FROM pg_trigger WHERE tgrelid = 'audit_log'::regclass
+           AND NOT tgisinternal AND tgenabled = 'O'`,
+        ),
+      ).toHaveLength(3);
+      await expect(sql(dst.appUrl, "DELETE FROM audit_log")).rejects.toThrow(/permission denied/);
       expect(await rowsOf(dst.adminUrl, "sessions")).toEqual([]);
       expect(await rowsOf(dst.adminUrl, "verifications")).toEqual([]);
 
@@ -366,6 +414,40 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
       await expect(restore(dst)).rejects.toThrow(/already has data/);
       expect(await rowsOf(dst.adminUrl, "users")).toEqual(await rowsOf(src.adminUrl, "users"));
       expect(await forcedTables(dst.adminUrl)).toEqual(forcedBefore);
+    });
+
+    it("refuses a backup whose audit chain was tampered with, and restores nothing (KOBE-15)", async () => {
+      const [original] = await sql<{ target: string }>(
+        src.adminUrl,
+        "SELECT target::text AS target FROM audit_log WHERE seq = 1",
+      );
+      const tamper = (target: string) =>
+        sql(
+          src.adminUrl,
+          `BEGIN; SET LOCAL session_replication_role = replica;
+           UPDATE audit_log SET target = '${target}'::jsonb WHERE seq = 1; COMMIT;`,
+        );
+      const tampered = join(work, "b-tampered");
+      await tamper('{"method":"passkey"}');
+      try {
+        await backup(tampered);
+      } finally {
+        await tamper(original?.target ?? "{}");
+      }
+      const dst = await target();
+      await expect(restore(dst, tampered)).rejects.toThrow(
+        /audit chain in the backup is broken at seq 1 \(the row does not match its hash\)/,
+      );
+      expect(await rowsOf(dst.adminUrl, "users")).toEqual([]);
+      expect(await rowsOf(dst.adminUrl, "audit_log")).toEqual([]);
+    });
+
+    it("refuses when the restored chain doesn't contain an expected head", async () => {
+      const dst = await target();
+      await expect(
+        restore(dst, backupDir, { expectAuditHead: { seq: 1, hash: "0".repeat(64) } }),
+      ).rejects.toThrow(/does not contain 1:0{64} \(expect-audit-head\)/);
+      expect(await rowsOf(dst.adminUrl, "users")).toEqual([]);
     });
 
     it("refuses a target whose applied migrations differ", async () => {

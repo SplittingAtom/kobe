@@ -6,6 +6,7 @@ import { runs, sql, teamMembers, threads, withTeam } from "@kobe/db";
 import { createTestDatabase, testServerUrl, type TestDatabase } from "@kobe/db/testing";
 import { createApp } from "../app.js";
 import { createServerDeps, type ServerDeps, type ServerDepsOptions } from "../deps.js";
+import { runWithAuditContext } from "../audit/context.js";
 import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js";
 import { createTeamWithAdmin } from "../teams/members.js";
 import { waitForAppSessionsToClose } from "./app-sessions.js";
@@ -81,7 +82,11 @@ export class EventStreamFixture {
   }
 
   async team(slug: string, admin: Person, members: readonly Person[] = []): Promise<string> {
-    const team = await createTeamWithAdmin(this.db, { slug, name: slug }, admin.id);
+    // Store call outside a request: name the actor its audit event records (KOBE-15).
+    const team = await runWithAuditContext(
+      { actor: { kind: "user", id: admin.id }, ip: null, userAgent: null },
+      () => createTeamWithAdmin(this.db, { slug, name: slug }, admin.id),
+    );
     for (const m of members) await this.addMember(team.id, m);
     for (const p of [admin, ...members]) await this.activate(p, team.id);
     return team.id;

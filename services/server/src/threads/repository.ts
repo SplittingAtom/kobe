@@ -19,6 +19,7 @@ import {
   type ThreadSummary,
   type UpdateThreadBody,
 } from "./schemas.js";
+import { recordAudit } from "../audit/record.js";
 
 /**
  * Thread data access (spec D9, D15, D18, D23, §6.1). Every function runs inside the caller's
@@ -303,6 +304,13 @@ export async function updateThread(
     .where(and(eq(threads.teamId, viewer.teamId), eq(threads.id, id)))
     .returning(summaryColumns);
   if (!row) throw new Error("thread update returned no row");
+  if (row.projectId !== null && row.sharedToProject !== locked.thread.sharedToProject) {
+    await recordAudit(tx, {
+      action: "thread.sharing_changed",
+      teamId: viewer.teamId,
+      target: { threadId: id, projectId: row.projectId, shared: row.sharedToProject },
+    });
+  }
   return { ok: true, thread: toSummary(row) };
 }
 
@@ -359,6 +367,11 @@ export async function trashThread(tx: KobeTx, viewer: Viewer, id: string): Promi
     .where(and(eq(threads.teamId, viewer.teamId), eq(threads.id, id)))
     .returning(summaryColumns);
   if (!row) throw new Error("thread update returned no row");
+  await recordAudit(tx, {
+    action: "thread.trashed",
+    teamId: viewer.teamId,
+    target: { threadId: id },
+  });
   return { ok: true, thread: toSummary(row) };
 }
 
@@ -378,7 +391,13 @@ export async function restoreThread(tx: KobeTx, viewer: Viewer, id: string): Pro
       ),
     )
     .returning(summaryColumns);
-  return row ? { ok: true, thread: toSummary(row) } : { ok: false, error: "thread_not_found" };
+  if (!row) return { ok: false, error: "thread_not_found" };
+  await recordAudit(tx, {
+    action: "thread.restored",
+    teamId: viewer.teamId,
+    target: { threadId: id },
+  });
+  return { ok: true, thread: toSummary(row) };
 }
 
 /** One page of the thread's entries in append order (`seq`), after `afterSeq`. */

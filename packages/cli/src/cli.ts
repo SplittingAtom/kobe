@@ -43,6 +43,8 @@ async function run(cmd: Command): Promise<void> {
     skipObjects: cmd.skipObjects,
     pgBinDir: cmd.pgBinDir,
     tmpDir: cmd.tmpDir,
+    operator: cmd.operator,
+    expectAuditHead: cmd.expectAuditHead,
     log,
   });
   log(
@@ -52,6 +54,11 @@ async function run(cmd: Command): Promise<void> {
         ? `; S3 objects checked: ${report.objects.checked}, problems: ${report.objects.problems}`
         : "") +
       `. Users sign in again (sessions are not backed up). Scale the server and scheduler back up.`,
+  );
+  log(
+    report.auditHead
+      ? `audit chain verified; head ${report.auditHead.seq}:${report.auditHead.hash} (record it outside the cluster)`
+      : "audit log empty",
   );
 }
 

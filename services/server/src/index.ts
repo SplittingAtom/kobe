@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
+import { isolationAuditor } from "./audit/isolation.js";
 import { loadConfig } from "./config.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
 import { createIsolationGate } from "./isolation/gate.js";
@@ -38,10 +39,12 @@ if (config.auth && config.smtp) {
 
 // Spec D4: the process's own isolation check (startup + periodic). Agent work must go through
 // isolation.require(); without a verified gVisor/Kata RuntimeClass the server keeps serving.
+const auditIsolation = deps ? isolationAuditor(deps.database.db) : undefined;
 const isolation = createIsolationGate({
   runtimeClassName: config.runtimeClassName,
   listRuntimeClasses,
   onChange: (status) => {
+    void auditIsolation?.(status);
     if (status.state === "verified") {
       logger.info(
         { runtimeClass: status.runtimeClassName, handler: status.handler },
@@ -52,6 +55,8 @@ const isolation = createIsolationGate({
     }
   },
 });
+// Audit chain head in the server log at startup and every 5 minutes (KOBE-15): ship it off the box.
+deps?.auditAnchor.start();
 isolation.start().catch((err: unknown) => logger.error({ err }, "isolation check failed"));
 
 // The scheduler serves health endpoints only (its jobs arrive in KOBE-64).
@@ -62,6 +67,7 @@ const server = serve({ fetch: createApp(deps, { isolation }).fetch, port: config
 function shutdown(signal: string): void {
   logger.info({ signal }, "shutting down");
   isolation.stop();
+  deps?.auditAnchor.stop();
   // End event streams first so browsers reconnect (with Last-Event-ID) to another replica.
   void deps?.eventStream.hub.close();
   server.close((err) => {

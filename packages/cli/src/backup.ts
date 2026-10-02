@@ -68,6 +68,7 @@ interface Snapshot {
   readonly migrations: Manifest["migrations"];
   readonly tables: Manifest["tables"];
   readonly excludedTables: Manifest["excludedTables"];
+  readonly auditHead: { readonly seq: number; readonly hash: string } | null;
   readonly objects: readonly StoredObject[] | null;
   readonly referencedObjects: number;
   readonly database: Manifest["files"]["database"];
@@ -168,6 +169,9 @@ async function snapshotAndDump(
       const excludedTables = all
         .filter((t) => isExcluded(t.name))
         .map((t) => ({ name: t.name, reason: EXCLUDED_TABLES[t.name] ?? "" }));
+      const auditHead = all.some((t) => t.name === "audit_log")
+        ? await readAuditHead(client)
+        : null;
 
       const referenced = await referencedObjectKeys(
         client,
@@ -198,6 +202,7 @@ async function snapshotAndDump(
         migrations,
         tables,
         excludedTables,
+        auditHead,
         objects,
         referencedObjects: referenced.length,
         database,
@@ -264,6 +269,7 @@ export async function runBackup(
       migrations: snap.migrations,
       tables: snap.tables,
       excludedTables: snap.excludedTables,
+      auditHead: snap.auditHead,
       files: { database: snap.database, objects: objectFile },
       encryption: { cipher: "aes-256-gcm", kdf: "hkdf-sha256", salt: salt.toString("hex") },
       coverage: { schemas: ["public"], otherSchemasChecked: true, largeObjects: 0 },
@@ -276,4 +282,15 @@ export async function runBackup(
     await rm(partial, { recursive: true, force: true });
     throw err;
   }
+}
+
+/** Last row of the audit hash chain in the current snapshot (KOBE-15), or null when empty. */
+export async function readAuditHead(
+  client: pg.ClientBase,
+): Promise<{ readonly seq: number; readonly hash: string } | null> {
+  const { rows } = await client.query<{ seq: string; hash: string }>(
+    `SELECT a.seq::text AS seq, a.hash FROM public.audit_log a ORDER BY a.seq DESC LIMIT 1`,
+  );
+  const row = rows[0];
+  return row ? { seq: Number(row.seq), hash: row.hash } : null;
 }
