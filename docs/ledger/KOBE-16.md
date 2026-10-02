@@ -67,7 +67,8 @@ transaction_read_only = on`; (5) the read, narrowed to the scope (team / one own
 
 - **Self-approval follows D10, not a blanket ban:** the brief said "no self-approval"; the spec
   says single-admin installs self-approve and are flagged. Refused (403 `self_approval_forbidden`,
-  and in the trigger) whenever another active Owner/Admin exists; allowed and flagged otherwise.
+  and in the trigger) whenever any other Owner/Admin role exists (even deactivated); allowed and
+  flagged otherwise.
   One person holding two accounts is out of scope (can't be detected); noted for Chris.
 - **Enforcement shape:** the spec says "a row that RLS policies honor". Adding grant-aware policies
   to every team table would break the catalog rule "exactly one canonical team policy" and touch
@@ -103,11 +104,24 @@ transaction_read_only = on`; (5) the read, narrowed to the scope (team / one own
 - **Out-of-scope reads aren't audited** (they return 404 and roll back); only reads that returned
   content leave a row.
 
+## Review round 1 (security-review subagent; resolved)
+
+- **HIGH, legal hold in the team audit view:** under a legal hold, `requested`/`approved` targets
+  leave out `subjectUserId` and `threadId`, and `read` events leave out `threadId` (the grant row,
+  resolved by `grantId` in the install console, keeps them). Test: legal-hold events carry neither.
+- **HIGH, subject who is an install admin:** a legal-hold grant is invisible to its subject in the
+  install list and detail (404); the subject can't deny or revoke any request about them (store
+  403 `subject_cannot_decide`, and the trigger); the subject is never mailed a `requested` notice.
+- **MEDIUM, manufacturing "sole admin":** self-approval now requires that no other install role row
+  exists at all (deactivated admins count), and the trigger share-locks those rows so a concurrent
+  demotion waits. Demoting the other admin is Owner-only and audited
+  (`identity.install_role.revoked`); a concurrent promotion is not blocked (accepted; flagged).
+- **LOW, cursor overflow:** the reader's cursor accepts at most 17 non-negative digits.
+- Not changed: refused reads aren't audited (open question below); `decided_by` is set by the
+  server from the session (the trigger can't know the session user).
+
 ## Open questions (for Chris or the coordinator)
 
-- **Legal hold vs. team audit view:** audit targets keep `subjectUserId` / `threadId` even under
-  legal hold (evidence first), and the team audit view shows them to team admins, who may include
-  the subject. Hide them under legal hold (install log only), or accept?
 - **Two accounts, one person:** the two-person rule can't detect one human with two admin accounts.
   Out of scope; a policy/onboarding matter.
 - **Reason visibility:** team admins see the reason (not under legal hold). OK?

@@ -346,8 +346,38 @@ describe("two-person approval", () => {
     });
   });
 
+  it("hides a legal hold from a subject who is an install admin, who can't end it either", async () => {
+    await admin.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, 'admin')`, [
+      ids.carol,
+    ]);
+    try {
+      const grantId = await activeGrant({ userId: ids.carol, legalHold: true });
+      const list = await as.carol.get("/v1/install/break-glass");
+      expect(list.json.grants.map((g: { id: string }) => g.id)).not.toContain(grantId);
+      expect((await as.carol.get(`/v1/install/break-glass/${grantId}`)).status).toBe(404);
+      const revoke = await as.carol.post(`/v1/install/break-glass/${grantId}/revoke`);
+      expect(revoke.json.code).toBe("subject_cannot_decide");
+      expect((await as.owner.get(`/v1/install/break-glass/${grantId}`)).json.grant.status).toBe(
+        "active",
+      );
+      await settled();
+      expect(mailer.to(email("carol")).filter((m) => /break-glass/i.test(m.subject))).toEqual([]);
+    } finally {
+      await admin.query(`DELETE FROM install_roles WHERE user_id = $1`, [ids.carol]);
+    }
+  });
+
   it("lets a single-admin install self-approve, flagged", async () => {
+    // Deactivating the other admin is not enough (it would let one admin unlock self-approval).
     await admin.query(`UPDATE users SET deactivated_at = now() WHERE id = $1`, [ids.owner]);
+    try {
+      const blocked = await requestGrant();
+      const refused = await as.investigator.post(`/v1/install/break-glass/${blocked}/approve`);
+      expect(refused.json.code).toBe("self_approval_forbidden");
+    } finally {
+      await admin.query(`UPDATE users SET deactivated_at = NULL WHERE id = $1`, [ids.owner]);
+    }
+    await admin.query(`DELETE FROM install_roles WHERE user_id = $1`, [ids.owner]);
     try {
       const before = mailer.to(email("alice")).length;
       const grantId = await requestGrant();
@@ -360,7 +390,9 @@ describe("two-person approval", () => {
       const alice = await mailTo("alice", before + 1);
       expect(alice.at(-1)?.text).toContain("approved it alone");
     } finally {
-      await admin.query(`UPDATE users SET deactivated_at = NULL WHERE id = $1`, [ids.owner]);
+      await admin.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, 'owner')`, [
+        ids.owner,
+      ]);
     }
   });
 

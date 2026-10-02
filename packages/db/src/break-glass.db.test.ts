@@ -259,11 +259,39 @@ describe("break_glass_grants guard trigger", () => {
     ).toBe("42501");
   });
 
-  it("lets a single-admin install self-approve, flagged (D10)", async () => {
-    // Every other install admin is deactivated for the duration of this test.
+  it("doesn't unlock self-approval by deactivating the other admins", async () => {
     const { rows } = await admin.query<{ user_id: string }>(
       `UPDATE users u SET deactivated_at = now() FROM install_roles r
        WHERE r.user_id = u.id AND u.id <> $1 AND u.deactivated_at IS NULL RETURNING u.id AS user_id`,
+      [requester],
+    );
+    try {
+      const id = await request();
+      expect(await errorCode(approve(id, requester))).toBe("42501");
+    } finally {
+      await admin.query(`UPDATE users SET deactivated_at = NULL WHERE id = ANY($1)`, [
+        rows.map((r) => r.user_id),
+      ]);
+    }
+  });
+
+  it("refuses denial and revocation by the subject", async () => {
+    const subjectAdmin = await user("Subject admin 2", "admin");
+    const id = await approved({ userId: subjectAdmin });
+    expect(
+      await errorCode(
+        appClient.query(
+          `UPDATE break_glass_grants SET status = 'revoked', decided_by = $2 WHERE id = $1`,
+          [id, subjectAdmin],
+        ),
+      ),
+    ).toBe("42501");
+  });
+
+  it("lets a single-admin install self-approve, flagged (D10)", async () => {
+    // Every other install role is removed for the duration of this test.
+    const { rows } = await admin.query<{ user_id: string; role: string }>(
+      `DELETE FROM install_roles WHERE user_id <> $1 RETURNING user_id, role::text`,
       [requester],
     );
     try {
@@ -275,9 +303,12 @@ describe("break_glass_grants guard trigger", () => {
         self_approved: true,
       });
     } finally {
-      await admin.query(`UPDATE users SET deactivated_at = NULL WHERE id = ANY($1)`, [
-        rows.map((r) => r.user_id),
-      ]);
+      for (const r of rows) {
+        await admin.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, $2)`, [
+          r.user_id,
+          r.role,
+        ]);
+      }
     }
   });
 });

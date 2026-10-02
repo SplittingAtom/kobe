@@ -135,7 +135,7 @@ const uuid = z.uuid();
 const readSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("threads"),
-    cursor: z.object({ micros: z.string().regex(/^-?\d{1,20}$/), id: uuid }).nullish(),
+    cursor: z.object({ micros: z.string().regex(/^(0|[1-9]\d{0,16})$/), id: uuid }).nullish(),
     limit: z.number().int().min(1).max(BREAK_GLASS_THREADS_MAX),
   }),
   z.object({ kind: z.literal("thread"), threadId: uuid }),
@@ -337,7 +337,8 @@ export async function readWithBreakGlass(
       target: {
         grantId: grant.id,
         object: AUDIT_OBJECT[parsed.kind],
-        ...(threadId ? { threadId } : {}),
+        // Under legal hold the team's audit view must not reveal which thread (or whose) was read.
+        ...(threadId && !grant.legalHold ? { threadId } : {}),
       },
       ...(access.request ? { request: access.request } : {}),
     });

@@ -41,6 +41,7 @@ export type GrantError =
   | "request_lapsed"
   | "self_approval_forbidden"
   | "subject_cannot_approve"
+  | "subject_cannot_decide"
   | "cannot_deny_own";
 
 export type GrantResult = { ok: true; grant: GrantRow } | { ok: false; error: GrantError };
@@ -62,13 +63,18 @@ export function effectiveStatus(grant: GrantRow, now = new Date()): EffectiveSta
   return grant.status;
 }
 
-/** The audit target describing a grant's scope (ids only, never the reason). */
+/**
+ * The audit target describing a grant's scope (ids only, never the reason). Team-scope events show
+ * in the team's audit view, so a legal hold leaves out the subject and thread (the grant row,
+ * resolved by `grantId` in the install console, keeps them).
+ */
 function scopeTarget(grant: GrantRow) {
+  const shown = !grant.legalHold;
   return {
     grantId: grant.id,
     scope: scopeOf(grant),
-    ...(grant.userId ? { subjectUserId: grant.userId } : {}),
-    ...(grant.threadId ? { threadId: grant.threadId } : {}),
+    ...(grant.userId && shown ? { subjectUserId: grant.userId } : {}),
+    ...(grant.threadId && shown ? { threadId: grant.threadId } : {}),
     legalHold: grant.legalHold,
   };
 }
@@ -87,7 +93,13 @@ export async function activeInstallAdmins(
 
 /** Whether `adminId` is the only active install admin, so D10 lets them approve their own request. */
 export async function isSoleInstallAdmin(db: KobeDb | KobeTx, adminId: string): Promise<boolean> {
-  return (await activeInstallAdmins(db, adminId)).length === 0;
+  // Deactivated admins count too: deactivating the other admin must not unlock self-approval.
+  const [other] = await db
+    .select({ userId: installRoles.userId })
+    .from(installRoles)
+    .where(ne(installRoles.userId, adminId))
+    .limit(1);
+  return other === undefined;
 }
 
 async function lockGrant(tx: KobeTx, id: string): Promise<GrantRow | undefined> {
@@ -182,6 +194,7 @@ export async function denyGrant(db: KobeDb, by: string, grantId: string): Promis
     if (!current) return { ok: false, error: "grant_not_found" };
     if (current.status !== "pending") return { ok: false, error: "not_pending" };
     if (current.adminId === by) return { ok: false, error: "cannot_deny_own" };
+    if (current.userId === by) return { ok: false, error: "subject_cannot_decide" };
     const [row] = await tx
       .update(breakGlassGrants)
       .set({ status: "denied", decidedBy: by })
@@ -205,6 +218,7 @@ export async function revokeGrant(db: KobeDb, by: string, grantId: string): Prom
   return db.transaction(async (tx): Promise<GrantResult> => {
     const current = await lockGrant(tx, grantId);
     if (!current) return { ok: false, error: "grant_not_found" };
+    if (current.userId === by) return { ok: false, error: "subject_cannot_decide" };
     const status = effectiveStatus(current);
     if (status !== "pending" && status !== "active") return { ok: false, error: "not_open" };
     const [row] = await tx
@@ -325,22 +339,44 @@ async function withDetails(db: KobeDb, rows: readonly GrantRow[]): Promise<Grant
   });
 }
 
-/** Grants with their people and team, newest first (install view). */
+/**
+ * Grants with their people and team, newest first (install view). A legal hold is invisible to
+ * its subject, even when the subject is an install admin.
+ */
 export async function listGrants(
   db: KobeDb,
+  viewerId: string,
   filter: { teamId?: string | undefined; limit?: number } = {},
 ): Promise<GrantDetail[]> {
   const rows = await db
     .select()
     .from(breakGlassGrants)
-    .where(filter.teamId ? eq(breakGlassGrants.teamId, filter.teamId) : undefined)
+    .where(
+      and(
+        filter.teamId ? eq(breakGlassGrants.teamId, filter.teamId) : undefined,
+        hiddenFrom(viewerId),
+      ),
+    )
     .orderBy(desc(breakGlassGrants.requestedAt), desc(breakGlassGrants.id))
     .limit(filter.limit ?? 200);
   return withDetails(db, rows);
 }
 
-export async function getGrant(db: KobeDb, id: string): Promise<GrantDetail | undefined> {
-  const rows = await db.select().from(breakGlassGrants).where(eq(breakGlassGrants.id, id));
+/** Excludes legal-hold grants about `viewerId`. */
+function hiddenFrom(viewerId: string) {
+  return sql`NOT (${breakGlassGrants.legalHold} AND ${breakGlassGrants.userId} IS NOT DISTINCT FROM ${viewerId}::uuid)`;
+}
+
+/** One grant; with `viewerId`, a legal hold about the viewer is not found. */
+export async function getGrant(
+  db: KobeDb,
+  id: string,
+  viewerId?: string,
+): Promise<GrantDetail | undefined> {
+  const rows = await db
+    .select()
+    .from(breakGlassGrants)
+    .where(and(eq(breakGlassGrants.id, id), viewerId ? hiddenFrom(viewerId) : undefined));
   return (await withDetails(db, rows))[0];
 }
 

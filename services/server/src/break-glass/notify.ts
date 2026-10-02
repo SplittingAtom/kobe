@@ -79,7 +79,8 @@ export async function recipientsFor(
   const seen = new Set<string>();
   return list.filter((r) => {
     if (seen.has(r.id) || r.id === options.actorId) return false;
-    if (grant.legalHold && r.id === grant.userId) return false;
+    // The subject never hears of a legal hold, and never gets asked to decide a request about them.
+    if ((grant.legalHold || event === "requested") && r.id === grant.userId) return false;
     seen.add(r.id);
     return true;
   });

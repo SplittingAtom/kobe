@@ -52,6 +52,7 @@ const ERRORS = {
     "A second install admin must approve your request. You can approve your own only when you are the install's only admin.",
   ],
   subject_cannot_approve: [403, "The subject of a request can't approve it."],
+  subject_cannot_decide: [403, "The subject of a request can't deny or revoke it."],
   cannot_deny_own: [403, "Withdraw your own request instead of denying it."],
   grant_not_active: [
     403,
@@ -164,7 +165,7 @@ export function installBreakGlassRoutes(deps: ServerDeps): Hono<{ Variables: Aut
     if (!query.success) return invalidRequest(c, "Filter by status and teamId only.");
     const viewer = c.get("user").id;
     const sole = await isSoleInstallAdmin(db, viewer);
-    const grants = (await listGrants(db, { teamId: query.data.teamId }))
+    const grants = (await listGrants(db, viewer, { teamId: query.data.teamId }))
       .map((d) => grantJson(d, viewer, sole))
       .filter((g) => query.data.status === undefined || g.status === query.data.status);
     return c.json({ grants, selfApprovalAllowed: sole });
@@ -190,7 +191,7 @@ export function installBreakGlassRoutes(deps: ServerDeps): Hono<{ Variables: Aut
   app.get("/:id", async (c) => {
     const id = idParamSchema.safeParse(c.req.param("id"));
     if (!id.success) return fail(c, "grant_not_found");
-    const detail = await getGrant(db, id.data);
+    const detail = await getGrant(db, id.data, c.get("user").id);
     if (!detail) return fail(c, "grant_not_found");
     const viewer = c.get("user").id;
     return c.json({ grant: grantJson(detail, viewer, await isSoleInstallAdmin(db, viewer)) });

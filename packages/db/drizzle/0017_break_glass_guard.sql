@@ -60,10 +60,11 @@ BEGIN
     END IF;
     IF NEW.approver_id = OLD.admin_id THEN
       -- D10: a second Admin or the Owner approves when one exists; only a single-admin install
-      -- self-approves, and the grant is flagged.
-      IF EXISTS (
-        SELECT 1 FROM "public"."install_roles" r JOIN "public"."users" u ON u.id = r.user_id
-        WHERE r.user_id <> OLD.admin_id AND u.deactivated_at IS NULL) THEN
+      -- self-approves, and the grant is flagged. Any other install role counts, deactivated or
+      -- not: deactivating the only other admin must not unlock self-approval. The rows are
+      -- share-locked so a concurrent demotion waits for this approval.
+      PERFORM 1 FROM "public"."install_roles" r WHERE r.user_id <> OLD.admin_id FOR SHARE;
+      IF FOUND THEN
         RAISE EXCEPTION 'a second install admin must approve this request' USING ERRCODE = '42501';
       END IF;
       NEW.self_approved := true;
@@ -85,9 +86,13 @@ BEGIN
 
   IF (OLD.status = 'pending' AND NEW.status IN ('denied', 'revoked'))
      OR (OLD.status = 'approved' AND NEW.status = 'revoked') THEN
-    -- Denied by an install admin other than the requester; revoked (or withdrawn) by any.
+    -- Denied by an install admin other than the requester; revoked (or withdrawn) by any install
+    -- admin except the subject.
     IF NEW.decided_by IS NULL OR NOT "public"."break_glass_is_install_admin"(NEW.decided_by) THEN
       RAISE EXCEPTION 'only an install admin can deny or revoke break-glass' USING ERRCODE = '42501';
+    END IF;
+    IF NEW.decided_by IS NOT DISTINCT FROM OLD.user_id THEN
+      RAISE EXCEPTION 'the subject of a break-glass request cannot decide it' USING ERRCODE = '42501';
     END IF;
     IF NEW.status = 'denied' AND NEW.decided_by = OLD.admin_id THEN
       RAISE EXCEPTION 'withdraw your own request instead of denying it' USING ERRCODE = '42501';
