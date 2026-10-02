@@ -1,6 +1,6 @@
 # KOBE-35: Policy engine and tool rules
 
-- **Status:** in review
+- **Status:** in review (PR #22)
 - **Branch / worktree:** `kobe-35-policy-engine` in `../Kobe-wt35`
 - **Depends on:** KOBE-14 (merged), contracts wave 0 (merged, `packages/protocol` policy/tools/glob)
 
@@ -170,6 +170,16 @@ approvedTool, remember, now })` inside your withTeam transaction after verifying
 3. Strict schemas deny edit's legacy `oldText`/`newText` form. If Pi's `tool_call` hook sees
    arguments before `prepareArguments`, models using the legacy form get a clear deny; KOBE-36 to
    confirm which form the hook sees.
+
+## Contract gaps (for the coordinator's contracts follow-up PR; not changed here)
+
+- Reason codes missing from `POLICY_REASON_CODES`: `policy_error` (internal errors currently
+  report `install_deny_rule` at stage `install_deny`), `team_allow_rule` (team allow-listing
+  reports `user_allow_rule`), `not_available` (MCP resource tools report `connector_not_enabled`).
+- `BUILTIN_TOOLS.grep.primary_arg` and `BUILTIN_TOOLS.find.primary_arg` should be `/path`, not
+  `/pattern` (overridden server-side in `policy/patterns.ts`).
+- Optional: `unknown_tool` / `invalid_input` have no stage of their own; built-in input schemas
+  (`policy/tool-inputs.ts`) could move next to `BUILTIN_TOOLS`.
 
 ## Review round 1 (coordinator, 2 HIGH + 5 MEDIUM + 4 LOW) — resolution
 
