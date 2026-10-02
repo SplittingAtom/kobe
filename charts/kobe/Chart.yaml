@@ -1,0 +1,7 @@
+apiVersion: v2
+name: kobe
+description: Kobe self-hosted conversational agent platform (umbrella chart)
+type: application
+version: 0.0.0
+appVersion: "0.0.0"
+# Scaffold only: templates, isolation preflight, and dependencies arrive in KOBE-6.
