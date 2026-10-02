@@ -1,0 +1,14 @@
+# Scratch volumes for CI runners (Docker data, workspaces): one replica, deleted with the runner.
+# Keeps CI off the nodes' root disks, which have little free space.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-ci-scratch
+provisioner: driver.longhorn.io
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+allowVolumeExpansion: false
+parameters:
+  numberOfReplicas: "1"
+  dataLocality: best-effort
+  staleReplicaTimeout: "30"

@@ -69,16 +69,16 @@ Parallel-work rules: [parallel-work.md](parallel-work.md).
 
 - Dev loop targets Chris's k3s via Tilt; k3d only in GitHub Actions CI (Chris, 2026-10-01).
 - No local Docker engine on the dev Mac: build images with
-  `DOCKER_HOST=ssh://claude@compute2.atom.splittingatom.io` (amd64, matches the cluster).
+  `DOCKER_HOST` pointing at the remote Docker host (see `CLAUDE.local.md`).
 - TypeScript pinned to 6.0 because typescript-eslint does not yet support TS 7.
 - License exception: `caniuse-lite` (CC-BY-4.0, data) — **needs Chris's sign-off**. `sharp` excluded
   (LGPL libvips).
 - Deferred from review: pin base images by digest (do with Renovate/Dependabot, before images ship).
 - Branching: tickets build on stacked branches until PR #1 merges to main (PR #2 → retarget to
   main after #1 merges).
-- Dev Postgres: container `kobe-dev-pg` on compute2, port 15432 (test-only credentials).
+- Dev Postgres: a test-only container on the remote Docker host (URL in `CLAUDE.local.md`).
 - Ask Chris: make CI `checks`, `db`, `images` required status checks on `main`.
 - Tools: helm/kubectl/k3d binaries live in the session scratchpad `bin/` (not installed globally);
-  CI installs helm via azure/setup-helm. k3d test cluster `kobe` runs on compute2's Docker
-  (`DOCKER_HOST=ssh://claude@compute2...`); compute2 inotify limit 128 → single-node k3d only.
+  CI installs helm via azure/setup-helm. k3d test cluster `kobe` runs on the remote Docker host;
+  CI runs on self-hosted runners (`ci/runners/`).
 - Pending Chris sign-off: license exceptions caniuse-lite (CC-BY-4.0) and argparse (Python-2.0).

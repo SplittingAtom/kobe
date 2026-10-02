@@ -12,3 +12,6 @@ next-env.d.ts
 
 # packages/db migration rebase stash (scripts/rebase-migrations.mjs)
 .migration-stash.json
+
+# Local-only notes for agents (infrastructure details; never committed: the repo is public)
+CLAUDE.local.md
