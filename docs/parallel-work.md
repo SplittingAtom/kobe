@@ -8,6 +8,7 @@ below.
 
 ```bash
 git worktree add ../Kobe-wt<N> -b kobe-<N>-<slug> origin/main
+cp ../Kobe/CLAUDE.local.md ../Kobe-wt<N>/   # local infra notes (gitignored)
 cd ../Kobe-wt<N> && pnpm install --frozen-lockfile
 ```
 
