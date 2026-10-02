@@ -1,4 +1,5 @@
 import { quoteIdent } from "@kobe/db";
+import { isSeeded } from "./seeded.js";
 
 export interface MigrationRecord {
   readonly hash: string;
@@ -76,6 +77,7 @@ function doBlock(body: string): string {
 export function restorePrelude(plan: RestorePlan): string {
   const lockKey = Math.trunc(plan.lockKey);
   const nonEmptyChecks = plan.loadTables
+    .filter((t) => !isSeeded(t.name))
     .map(
       (t) =>
         `  IF EXISTS (SELECT 1 FROM ${table(t.name)}) THEN found := found || ' ' || ${literal(t.name)}; END IF;`,
@@ -109,6 +111,8 @@ export function restorePrelude(plan: RestorePlan): string {
     doBlock(
       `DECLARE found text := '';\nBEGIN\n${nonEmptyChecks}\n  IF found <> '' THEN\n    RAISE EXCEPTION 'kobe restore: the target already has data in:%; restore only into a freshly installed Kobe. Nothing was restored', found;\n  END IF;\nEND`,
     ),
+    // Rows a migration seeded on the fresh target give way to the backup's (seeded.ts).
+    ...plan.loadTables.filter((t) => isSeeded(t.name)).map((t) => `DELETE FROM ${table(t.name)};`),
     "",
   ]
     .filter((line, i, all) => line !== "" || i === all.length - 1)
