@@ -7,8 +7,10 @@ import type { KobeTx } from "@kobe/db";
  * - Projects (KOBE-57): `viewerProjectIds` returns the active team's projects the viewer is a
  *   member of; threads shared to those projects become readable (D23). Until projects exist it is
  *   empty and no thread can be created in a project.
- * - Agents (KOBE-45/46): `resolveAgentPin` returns the version a new thread pins (D19). Until
- *   agents exist only the install default agent (null) is accepted.
+ * - Agents (KOBE-46): `resolveAgentPin` returns the version a new thread pins (D19). Agent
+ *   definitions exist since KOBE-45 (team_agents / install_agents), but a pin needs a published
+ *   version, which arrives with KOBE-46; until then only the install default agent (null) is
+ *   accepted.
  */
 
 export async function viewerProjectIds(_tx: KobeTx, _userId: string): Promise<readonly string[]> {

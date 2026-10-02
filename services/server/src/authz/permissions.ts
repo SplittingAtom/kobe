@@ -44,6 +44,7 @@ export const TEAM_PERMISSIONS = {
   "team.grants.connect": "member",
   "team.schedules.personal": "member",
   // Builder: create and publish to the team.
+  "team.agents.build": "builder",
   "team.agents.publish": "builder",
   "team.skills.publish": "builder",
   "team.projects.create": "builder",
@@ -58,6 +59,8 @@ export const TEAM_PERMISSIONS = {
   "team.retention.manage": "team_admin",
   "team.schedules.pause": "team_admin",
   "team.agents.suspend": "team_admin",
+  // Edit or delete any team agent, not only your own (KOBE-45; like projects, D23).
+  "team.agents.manage": "team_admin",
   "team.projects.manage": "team_admin",
 } as const satisfies Record<`team.${string}`, TeamRole>;
 

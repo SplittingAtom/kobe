@@ -134,7 +134,9 @@ Derived from D9, D15, D17, D18, D23, §6.1, U2, U15:
 - **Tracked follow-up (security review):** rate limiting for `POST /v1/threads` (per user), and a
   request body size cap in `teams/http.ts parseBody` (shared by all JSON routes) or as Hono
   `bodyLimit` middleware on `/v1`. Not done here: both are cross-cutting.
-- **KOBE-45/46:** implement `resolveAgentPin` (current published version; D19 pinning).
+- **KOBE-46:** implement `resolveAgentPin` (current published version; D19 pinning). KOBE-45
+  (merged while this was in review) added agent definitions but no versions, so a thread still
+  can't pin an agent: `agent_id` → 404 `agent_not_found` until KOBE-46.
 - **KOBE-18:** purge from `threads_deleted_idx`. If a user's Trash is large, consider an index
   `(team_id, owner_user_id, deleted_at DESC, id DESC) WHERE deleted_at IS NOT NULL` (see evidence).
 
