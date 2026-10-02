@@ -62,11 +62,11 @@ wait_endpoints() { # namespace service... → waits up to REACH_TIMEOUT s for re
     done
   done
 }
-# Shell snippet for a probe pod: runs a command until it succeeds or REACH_TIMEOUT s pass; its exit
+# Shell snippet for a probe pod: runs a command until it succeeds or [seconds] (default REACH_TIMEOUT) pass; its exit
 # status says which, so `$(retry ...) && ...` gates on it. (No double quotes: team_pod embeds the
 # pod command in JSON.)
-retry() {
-  echo "ok=0; end=\$((\$(date +%s) + $REACH_TIMEOUT)); while :; do if $1 >/dev/null 2>&1; then ok=1; break; fi; \
+retry() { # command [seconds]
+  echo "ok=0; end=\$((\$(date +%s) + ${2:-$REACH_TIMEOUT})); while :; do if $1 >/dev/null 2>&1; then ok=1; break; fi; \
 [ \$(date +%s) -ge \$end ] && break; sleep 1; done; [ \$ok = 1 ]"
 }
 answers() { echo "wget -qO- -T 3 $1"; } # [wget options] URL → a command that succeeds once it answers
@@ -317,7 +317,7 @@ team_pod() { # namespace, name, shell command → a sandbox-like pod (gVisor, bo
 team_probe() { # shell command → its output, run from a sandbox-like pod in the team namespace
   local name="tprobe-$RANDOM$RANDOM" phase="" i
   team_pod "$TEAM_NS" "$name" "$1" || { echo "team probe could not start"; return; }
-  for i in $(seq 1 90); do
+  for i in $(seq 1 180); do
     phase=$($KUBECTL -n "$TEAM_NS" get pod "$name" -o jsonpath='{.status.phase}' 2>/dev/null || true)
     [[ "$phase" == Succeeded || "$phase" == Failed ]] && break
     sleep 2
@@ -365,10 +365,11 @@ controls=$(probe "$NS" "$(retry "$(answers http://$server_ip/healthz)"); \
 contains "control: the API Service is reachable from the release namespace" '^api=REACHED$' "$controls"
 contains "control: the kubelet is reachable from the release namespace" '^kubelet=REACHED$' "$controls"
 contains "control: the user API is reachable from the release namespace" '^user-api=REACHED$' "$controls"
-# A new pod joins the CNI's policy ipsets after a short delay: the sandbox probes run only once
-# the sandbox port (the positive control from the same pod) answers, so BLOCKED is the policy.
-egress=$(team_probe "if ! $(retry "$(answers http://$server_ip:8081/healthz)"); then echo sandbox-port=BLOCKED; \
-  echo egress=UNTESTED; exit 0; fi; \
+# A new pod joins the CNI's policy ipsets after a delay: the sandbox probes run only once the
+# sandbox port (the positive control from the same pod) answers, so BLOCKED is the policy. A new
+# gVisor team pod can take over a minute to be admitted on a busy runner: allow 180 s.
+egress=$(team_probe "t0=\$(date +%s); if ! $(retry "$(answers http://$server_ip:8081/healthz)" 180); then \
+  echo sandbox-port=BLOCKED; echo egress=UNTESTED; exit 0; fi; echo admitted-after=\$((\$(date +%s) - t0))s; \
   wget -qO- -T 5 http://${diag_ip:-0.0.0.0}:8080/ >/dev/null 2>&1 && echo diag-8080=REACHED || echo diag-8080=BLOCKED; \
   wget -qO- -T 5 http://${diag_ip:-0.0.0.0}:9090/ >/dev/null 2>&1 && echo diag-9090=REACHED || echo diag-9090=BLOCKED; \
   wget -qO- -T 5 http://${web_pod_ip:-0.0.0.0}:8080/api/healthz >/dev/null 2>&1 && echo web-pod=REACHED || echo web-pod=BLOCKED; \
