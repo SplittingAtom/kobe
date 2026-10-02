@@ -31,7 +31,7 @@ KOBE_DEV_CONTEXT=<kube-context> KOBE_DEV_REGISTRY=<registry the cluster can pull
   KOBE_DEV_VALUES=<values.yaml> tilt up
 ```
 
-The dev release lives in namespace `kobe-dev`, never `kobe`.
+The dev release lives in namespace `kobe-dev` (or `kobe-dev-<suffix>` via `KOBE_DEV_NAMESPACE`, with `KOBE_DEV_WEB_PORT` for the port-forward; see [parallel-work.md](parallel-work.md)), never `kobe`.
 
 The cluster must already meet the prerequisites in [install.md](install.md#isolation).
 

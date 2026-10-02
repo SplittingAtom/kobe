@@ -9,3 +9,6 @@ coverage/
 !.env.example
 .DS_Store
 next-env.d.ts
+
+# packages/db migration rebase stash (scripts/rebase-migrations.mjs)
+.migration-stash.json

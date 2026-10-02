@@ -11,6 +11,9 @@ final — do not re-litigate them. Kobe inherits nothing from Catalyst Agents/Fo
 
 Work is tracked in Hadron (project `kobe`, tickets KOBE-1..65, four phases each closed by a gate ticket).
 Start each session by reading `docs/RUN-LEDGER.md` and running Hadron ignite; keep the ledger current.
+Several agents work in parallel: follow `docs/parallel-work.md` (worktree per ticket, per-ticket
+ledger in `docs/ledger/`, tables in your area's `packages/db/src/tenancy/<area>.ts`, `db:rebase` for
+migration conflicts).
 
 ## Commands
 

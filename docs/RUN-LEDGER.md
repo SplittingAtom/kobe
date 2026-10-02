@@ -5,12 +5,16 @@ Hadron ignite and re-read the current ticket).
 
 ## Current
 
-- **Run:** Chris (2026-10-01): "start KOBE-6 and keep going until all tickets that depend on KOBE-5
-  and KOBE-8 are done" → KOBE-6, KOBE-68, KOBE-21, KOBE-7, KOBE-12, KOBE-14, KOBE-29, KOBE-69. Each:
-  tests first → CI green → review → merge → complete in Hadron → transition to done.
-- **Done in this run:** KOBE-6 (PR #3), KOBE-68 (#4), KOBE-21 (#5), KOBE-7 (#6).
-- **In progress:** KOBE-12 (worktree `../Kobe-wt12`, branch kobe-12-better-auth, PR #8, security
-  review running). Next: KOBE-14, KOBE-29, KOBE-69.
+Index only: the coordinator edits this file; each ticket keeps notes in `docs/ledger/KOBE-<N>.md`.
+Parallel-work rules: [parallel-work.md](parallel-work.md).
+
+- **Run:** Chris (2026-10-02): "do the setup ticket and start wave 0". Parallel agents, one worktree
+  per ticket, coordinator merges one PR at a time.
+- **Wave 0 (in progress):** KOBE-9, KOBE-11, KOBE-13, KOBE-14, KOBE-29, plus contracts (protocol
+  interfaces for sandbox WSS, event stream, run orchestrator, policy decisions).
+- **Wave 1 (next, as deps merge):** 15, 20, 22, 23, 31, 33, 34, 35, 45.
+- **Earlier run:** KOBE-6 (PR #3), KOBE-68 (#4), KOBE-21 (#5), KOBE-7 (#6), KOBE-12 (#8) merged.
+  KOBE-69 was listed for that run but is not in the implementation prompt: check Hadron.
 
 ## Done
 
@@ -34,6 +38,10 @@ Hadron ignite and re-read the current ticket).
   wait on drizzle.kobe_grants_applied; review: 1 HIGH fixed.
 - KOBE-21: sandbox image (digest-pinned, Pi lockfile, hashed pip lock, setuid stripped), license
   audit, Trivy gate; review: 7 MEDIUM fixed.
+- KOBE-12 (PR #8, merged): Better Auth accounts, passkeys, TOTP, first-run Owner; security review
+  fixes in 68d5997.
+- Parallel setup (PR pending): tenancy registry split per spec area, `db:rebase` migration script,
+  union merge on barrels, per-ticket ledgers, `KOBE_DEV_NAMESPACE`/`KOBE_DEV_WEB_PORT` for Tilt.
 - KOBE-7: Tilt dev loop (kobe-dev namespace, context-pinned), e2e/run.sh (20 checks incl. agent-sandbox
   Sandbox under gVisor), e2e/publish workflows; review: 4 HIGH fixed.
 
