@@ -21,6 +21,7 @@ import {
 } from "./policy/rule-store.js";
 import { TestBrowser, type TestResponse } from "./testing/browser.js";
 import { MemoryMailer } from "./testing/mailer.js";
+import { runWithAuditContext } from "./audit/context.js";
 import { policyInput, type InputOptions } from "./testing/policy-fixtures.js";
 
 const PUBLIC_URL = "http://kobe.test";
@@ -64,6 +65,10 @@ async function createTeam(slug: string, admin: Person): Promise<string> {
   expect(res.status, JSON.stringify(res.json)).toBe(201);
   return res.json.team.id as string;
 }
+
+/** Store calls outside a request record their audit events as Dave (KOBE-15). */
+const asDave = <T>(fn: () => Promise<T>) =>
+  runWithAuditContext({ actor: { kind: "user", id: ids.dave }, ip: null, userAgent: null }, fn);
 
 /** Adds an existing user through a team invitation they accept (KOBE-13). */
 async function addMember(teamAdmin: Person, who: Person, role: string): Promise<void> {
@@ -343,20 +348,12 @@ describe("team policy routes (D8: team admins manage, members read)", () => {
     const db = deps.database.db;
     const limits = { rules: 1, argEntries: 100 };
     const fields = { tool_glob: "x", arg_pattern: null, note: null, expires_at: null };
-    const first = await createTeamRule(
-      db,
-      marketing,
-      { ...fields, effect: "deny" },
-      ids.dave,
-      limits,
+    const first = await asDave(() =>
+      createTeamRule(db, marketing, { ...fields, effect: "deny" }, ids.dave, limits),
     );
     expect(first.ok).toBe(true);
-    const second = await createTeamRule(
-      db,
-      marketing,
-      { ...fields, effect: "deny" },
-      ids.dave,
-      limits,
+    const second = await asDave(() =>
+      createTeamRule(db, marketing, { ...fields, effect: "deny" }, ids.dave, limits),
     );
     expect(second).toEqual({ ok: false, error: "too_many_rules" });
     if (first.ok) await as.dave.delete(`${path}/${first.rule.id}`);
@@ -368,38 +365,22 @@ describe("team policy routes (D8: team admins manage, members read)", () => {
     const pattern = (n: number) =>
       Object.fromEntries(Array.from({ length: n }, (_, i) => [`/k${i}`, "*"]));
     const base = { tool_glob: "x", note: null, expires_at: null, effect: "deny" as const };
-    const a = await createTeamRule(
-      db,
-      marketing,
-      { ...base, arg_pattern: pattern(2) },
-      ids.dave,
-      limits,
+    const a = await asDave(() =>
+      createTeamRule(db, marketing, { ...base, arg_pattern: pattern(2) }, ids.dave, limits),
     );
     expect(a.ok).toBe(true);
-    const b = await createTeamRule(
-      db,
-      marketing,
-      { ...base, arg_pattern: pattern(2) },
-      ids.dave,
-      limits,
+    const b = await asDave(() =>
+      createTeamRule(db, marketing, { ...base, arg_pattern: pattern(2) }, ids.dave, limits),
     );
     expect(b).toEqual({ ok: false, error: "too_many_rules" });
     if (!a.ok) return;
     // Replacing a rule's own entries doesn't count them twice.
-    const grown = await updateTeamRule(
-      db,
-      marketing,
-      a.rule.id,
-      { ...base, arg_pattern: pattern(3) },
-      limits,
+    const grown = await asDave(() =>
+      updateTeamRule(db, marketing, a.rule.id, { ...base, arg_pattern: pattern(3) }, limits),
     );
     expect(grown.ok).toBe(true);
-    const tooBig = await updateTeamRule(
-      db,
-      marketing,
-      a.rule.id,
-      { ...base, arg_pattern: pattern(4) },
-      limits,
+    const tooBig = await asDave(() =>
+      updateTeamRule(db, marketing, a.rule.id, { ...base, arg_pattern: pattern(4) }, limits),
     );
     expect(tooBig).toEqual({ ok: false, error: "too_many_rules" });
     await as.dave.delete(`${path}/${a.rule.id}`);

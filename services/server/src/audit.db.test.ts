@@ -62,6 +62,16 @@ async function recorded(fn: () => Promise<unknown>): Promise<Row[]> {
 
 const actions = (rows: Row[]) => rows.map((r) => r.action);
 
+/** Events after `mark` once at least `count` have landed (off-path writes), within 5 s. */
+async function settled(mark: number, count: number): Promise<Row[]> {
+  const deadline = Date.now() + 5_000;
+  for (;;) {
+    await h.mailer.settle();
+    const rows = await since(mark);
+    if (rows.length >= count || Date.now() > deadline) return rows;
+  }
+}
+
 beforeAll(async () => {
   h = await openHarness();
   const setup = await h.browser().post("/v1/setup", {
@@ -160,9 +170,10 @@ describe("auth events", () => {
   });
 
   it("records a password reset request and the reset, never the token", async () => {
-    const requested = await recorded(() =>
-      h.browser().post("/api/auth/request-password-reset", { email: email("carol") }),
-    );
+    // The reset email (and its audit event) is sent off the request path: wait for it.
+    const mark = await head();
+    await h.browser().post("/api/auth/request-password-reset", { email: email("carol") });
+    const requested = await settled(mark, 1);
     expect(requested.map((r) => [r.action, r.actor_id, r.target])).toEqual([
       ["auth.password.reset_requested", null, { userId: ids.carol }],
     ]);
@@ -430,6 +441,89 @@ describe("team events", () => {
     expect(rows[2]?.target.forkedFrom).toBe(id);
     expect(rows[3]?.target.revision).toBe(2);
     expect(JSON.stringify(rows)).not.toContain(PROMPT);
+  });
+});
+
+describe("policy and thread events", () => {
+  it("records tool-rule changes and policy switches by metadata, never notes or patterns", async () => {
+    let installRule = "";
+    let teamRule = "";
+    const rows = await recorded(async () => {
+      const created = await admin.post("/v1/install/policy/rules", {
+        effect: "deny",
+        tool_glob: "bash",
+        arg_pattern: { "/command": "rm -rf *SECRET-PATTERN*" },
+        note: "NOTE-must-not-be-audited",
+      });
+      expect(created.status, JSON.stringify(created.json)).toBe(201);
+      installRule = created.json.rule.id;
+      await admin.request("PUT", `/v1/install/policy/rules/${installRule}`, {
+        effect: "ask",
+        tool_glob: "bash",
+        arg_pattern: null,
+        note: null,
+        expires_at: null,
+      });
+      await admin.delete(`/v1/install/policy/rules/${installRule}`);
+      await admin.put("/v1/install/policy/settings", { promptSandboxWrites: true });
+      const team = await alice.post("/v1/team/policy/rules", {
+        effect: "deny",
+        tool_glob: "write",
+      });
+      expect(team.status, JSON.stringify(team.json)).toBe(201);
+      teamRule = team.json.rule.id;
+      await alice.delete(`/v1/team/policy/rules/${teamRule}`);
+    });
+    expect(
+      rows.map((r) => [r.action, r.team_id, r.target.scope ?? null, r.target.effect ?? null]),
+    ).toEqual([
+      ["policy.rule.created", null, "install", "deny"],
+      ["policy.rule.updated", null, "install", "ask"],
+      ["policy.rule.deleted", null, "install", "ask"],
+      ["policy.settings.updated", null, null, null],
+      ["policy.rule.created", finance, "team", "deny"],
+      ["policy.rule.deleted", finance, "team", "deny"],
+    ]);
+    expect(rows[0]?.target).toEqual({
+      ruleId: installRule,
+      scope: "install",
+      effect: "deny",
+      toolGlob: "bash",
+      argPatternEntries: 1,
+      expiresAt: null,
+    });
+    const text = JSON.stringify(rows);
+    expect(text).not.toContain("SECRET-PATTERN");
+    expect(text).not.toContain("NOTE-must-not-be-audited");
+  });
+
+  it("records a member revoking their own remember-rule in the team", async () => {
+    const { rows: inserted } = await h.admin.query<{ id: string }>(
+      `INSERT INTO tool_rules (team_id, scope, user_id, effect, tool_glob, created_by)
+       VALUES ($1, 'user', $2, 'allow', 'read', $2) RETURNING id`,
+      [finance, ids.alice],
+    );
+    const id = inserted[0]?.id ?? "";
+    const rows = await recorded(() => alice.delete(`/v1/team/policy/my-rules/${id}`));
+    expect(rows.map((r) => [r.action, r.team_id, r.actor_id, r.target.scope])).toEqual([
+      ["policy.rule.deleted", finance, ids.alice, "user"],
+    ]);
+  });
+
+  it("records moving a thread to Trash and restoring it, without its title", async () => {
+    const created = await alice.post("/v1/threads", { title: "TITLE-must-not-be-audited" });
+    expect(created.status, JSON.stringify(created.json)).toBe(201);
+    const threadId = created.json.thread_id as string;
+    const rows = await recorded(async () => {
+      await alice.delete(`/v1/threads/${threadId}`);
+      await alice.delete(`/v1/threads/${threadId}`); // already in Trash: no second event
+      await alice.post(`/v1/threads/${threadId}/restore`);
+    });
+    expect(rows.map((r) => [r.action, r.team_id, r.actor_id, r.target])).toEqual([
+      ["thread.trashed", finance, ids.alice, { threadId }],
+      ["thread.restored", finance, ids.alice, { threadId }],
+    ]);
+    expect(JSON.stringify(rows)).not.toContain("TITLE-must-not-be-audited");
   });
 });
 

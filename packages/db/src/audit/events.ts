@@ -45,6 +45,17 @@ const signInMethod = z.enum(SIGN_IN_METHODS);
 const agentScope = z.enum(["team", "personal", "gallery"]);
 const agentRef = { agentId: id, scope: agentScope, slug };
 const isolationState = z.enum(["checking", "verified", "missing"]);
+/** A tool rule (KOBE-35) by its policy metadata; never its free-text note or arg values. */
+const toolRule = {
+  ruleId: id,
+  scope: z.enum(["install", "team", "user"]),
+  effect: z.enum(["deny", "ask", "allow"]),
+  /** Tool-name glob (e.g. `mcp__jira__*`), policy metadata. */
+  toolGlob: z.string().min(1).max(512),
+  /** How many `arg_pattern` entries the rule has (the patterns themselves are not recorded). */
+  argPatternEntries: z.number().int().nonnegative(),
+  expiresAt: z.iso.datetime({ offset: true }).nullable(),
+};
 
 const event = <const S extends AuditScope, T extends z.ZodRawShape>(scope: S, shape: T) => ({
   scope,
@@ -118,6 +129,21 @@ export const AUDIT_EVENTS = {
     tables: z.number().int().nonnegative(),
     rows: z.number().int().nonnegative(),
   }),
+
+  // ── policy: tool rules and switches (D29, KOBE-35); install rules install-only, others team ──
+  "policy.rule.created": event("any", toolRule),
+  "policy.rule.updated": event("any", toolRule),
+  /** Includes a member revoking their own remember-rule (scope `user`). */
+  "policy.rule.deleted": event("any", toolRule),
+  "policy.settings.updated": event("install", {
+    setting: z.enum(["prompt_sandbox_writes"]),
+    value: z.boolean(),
+  }),
+
+  // ── thread: lifecycle metadata only, never titles or content (KOBE-34, D18, D23) ──
+  "thread.trashed": event("team", { threadId: id }),
+  "thread.restored": event("team", { threadId: id }),
+  "thread.sharing_changed": event("team", { threadId: id, projectId: id, shared: z.boolean() }),
 
   // ── agent: definitions (D19); team agents in the team view, personal and gallery install-only ──
   "agent.created": event("any", {

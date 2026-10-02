@@ -69,7 +69,8 @@ export function createAuth({ db, publicUrl, secret, trustedProxies, mailer }: Au
    */
   async function mailResetLink(user: { id: string; email: string }, token: string) {
     if (await isDeactivated(db, user.id)) return;
-    await recordAuditAfter(db, {
+    // Not awaited: the email must not wait on the audit write (it never throws).
+    void recordAuditAfter(db, {
       action: "auth.password.reset_requested",
       actor: { kind: "user", id: null },
       target: { userId: user.id },

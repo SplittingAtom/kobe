@@ -30,7 +30,15 @@ describe("audit event taxonomy", () => {
   );
 
   it("has the categories the read API filters on", () => {
-    expect(AUDIT_CATEGORIES.sort()).toEqual(["agent", "auth", "identity", "install", "platform"]);
+    expect(AUDIT_CATEGORIES.sort()).toEqual([
+      "agent",
+      "auth",
+      "identity",
+      "install",
+      "platform",
+      "policy",
+      "thread",
+    ]);
   });
 
   it("is documented: docs/audit-log.md lists every action", () => {

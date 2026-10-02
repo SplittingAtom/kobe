@@ -12,6 +12,7 @@ import {
   type KobeTx,
 } from "@kobe/db";
 import { argPatternSchema, globSchema, type ArgPattern } from "@kobe/protocol";
+import { recordAudit } from "../audit/record.js";
 import type { PolicyRuleSource, PolicySettingsSource } from "./engine.js";
 import { allowGlobScoped, isLiteralGlob } from "./patterns.js";
 import type { PolicyRule, RuleEffect, RuleScope } from "./rules.js";
@@ -146,13 +147,40 @@ export function createDbSettingsSource(db: KobeDb, ttlMs = 5_000): PolicySetting
 
 export async function writePromptSandboxWrites(db: KobeDb, value: boolean): Promise<void> {
   const text = String(value);
-  await db
-    .insert(installSettings)
-    .values({ key: PROMPT_SANDBOX_WRITES_KEY, value: text })
-    .onConflictDoUpdate({
-      target: installSettings.key,
-      set: { value: text, updatedAt: new Date() },
+  await db.transaction(async (tx) => {
+    await tx
+      .insert(installSettings)
+      .values({ key: PROMPT_SANDBOX_WRITES_KEY, value: text })
+      .onConflictDoUpdate({
+        target: installSettings.key,
+        set: { value: text, updatedAt: new Date() },
+      });
+    await recordAudit(tx, {
+      action: "policy.settings.updated",
+      target: { setting: "prompt_sandbox_writes", value },
     });
+  });
+}
+
+/** Audits a rule change (KOBE-15) by its policy metadata: never the note or the arg patterns. */
+function auditRule(
+  tx: KobeTx,
+  action: "policy.rule.created" | "policy.rule.updated" | "policy.rule.deleted",
+  rule: StoredRule,
+  teamId: string | null,
+) {
+  return recordAudit(tx, {
+    action,
+    teamId,
+    target: {
+      ruleId: rule.id,
+      scope: rule.scope,
+      effect: rule.effect,
+      toolGlob: rule.tool_glob,
+      argPatternEntries: entryCount(rule.arg_pattern),
+      expiresAt: rule.expires_at,
+    },
+  });
 }
 
 // --- Admin CRUD -------------------------------------------------------------------------------
@@ -286,6 +314,7 @@ export async function createInstallRule(
       .values({ effect: body.effect, createdBy, ...columns(body) })
       .returning();
     if (!row) throw new Error("install rule insert returned no row");
+    await auditRule(tx, "policy.rule.created", storedInstall(row), null);
     return { ok: true, rule: storedInstall(row) } as const;
   });
 }
@@ -303,18 +332,21 @@ export async function updateInstallRule(
       .set({ effect: body.effect, ...columns(body) })
       .where(eq(installToolRules.id, id))
       .returning();
-    return row ? ({ ok: true, rule: storedInstall(row) } as const) : NOT_FOUND;
+    if (!row) return NOT_FOUND;
+    await auditRule(tx, "policy.rule.updated", storedInstall(row), null);
+    return { ok: true, rule: storedInstall(row) } as const;
   });
 }
 
 const NOT_FOUND = { ok: false, error: "not_found" } as const;
 
 export async function deleteInstallRule(db: KobeDb, id: string): Promise<boolean> {
-  const rows = await db
-    .delete(installToolRules)
-    .where(eq(installToolRules.id, id))
-    .returning({ id: installToolRules.id });
-  return rows.length > 0;
+  return db.transaction(async (tx) => {
+    const [row] = await tx.delete(installToolRules).where(eq(installToolRules.id, id)).returning();
+    if (!row) return false;
+    await auditRule(tx, "policy.rule.deleted", storedInstall(row), null);
+    return true;
+  });
 }
 
 export async function listTeamRules(db: KobeDb, teamId: string): Promise<StoredRule[]> {
@@ -344,6 +376,7 @@ export async function createTeamRule(
       .values({ teamId, scope: "team", effect: body.effect, createdBy, ...columns(body) })
       .returning();
     if (!row) throw new Error("team rule insert returned no row");
+    await auditRule(tx, "policy.rule.created", storedTeam(row), teamId);
     return { ok: true, rule: storedTeam(row) } as const;
   });
 }
@@ -363,18 +396,22 @@ export async function updateTeamRule(
       .set({ effect: body.effect, ...columns(body) })
       .where(and(eq(toolRules.id, id), eq(toolRules.scope, "team")))
       .returning();
-    return row ? ({ ok: true, rule: storedTeam(row) } as const) : NOT_FOUND;
+    if (!row) return NOT_FOUND;
+    await auditRule(tx, "policy.rule.updated", storedTeam(row), teamId);
+    return { ok: true, rule: storedTeam(row) } as const;
   });
 }
 
 export async function deleteTeamRule(db: KobeDb, teamId: string, id: string): Promise<boolean> {
-  const rows = await withTeam(db, teamId, (tx) =>
-    tx
+  return withTeam(db, teamId, async (tx) => {
+    const [row] = await tx
       .delete(toolRules)
       .where(and(eq(toolRules.id, id), eq(toolRules.scope, "team")))
-      .returning({ id: toolRules.id }),
-  );
-  return rows.length > 0;
+      .returning();
+    if (!row) return false;
+    await auditRule(tx, "policy.rule.deleted", storedTeam(row), teamId);
+    return true;
+  });
 }
 
 export async function listUserRules(
@@ -399,13 +436,15 @@ export async function deleteUserRule(
   userId: string,
   id: string,
 ): Promise<boolean> {
-  const rows = await withTeam(db, teamId, (tx) =>
-    tx
+  return withTeam(db, teamId, async (tx) => {
+    const [row] = await tx
       .delete(toolRules)
       .where(and(eq(toolRules.id, id), eq(toolRules.scope, "user"), eq(toolRules.userId, userId)))
-      .returning({ id: toolRules.id }),
-  );
-  return rows.length > 0;
+      .returning();
+    if (!row) return false;
+    await auditRule(tx, "policy.rule.deleted", storedTeam(row), teamId);
+    return true;
+  });
 }
 
 export { storedTeam };
