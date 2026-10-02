@@ -15,16 +15,24 @@ import { pgBinary, runTool } from "../pg-tools.js";
 
 // Fixtures for the backup/restore round-trip tests (not part of the build).
 
-/** Values that must never appear in a backup file (plaintext markers for leak checks). */
-export const SECRETS = {
+/** Rows in excluded tables: must not be in the backup even after decryption. */
+export const EXCLUDED_MARKERS = {
   session: "SESSION-TOKEN-PLAINTEXT-1f2e3d",
   reset: "RESET-TOKEN-PLAINTEXT-4a5b6c",
   jwks: "JWKS-PRIVATE-KEY-7d8e9f",
+  rateLimit: "RATE-LIMIT-KEY-9e8d7c",
+} as const;
+/**
+ * Better Auth OAuth tokens in `accounts` (if SSO providers are added). `accounts` IS backed up, so
+ * these are in the decrypted dump: protected by the backup encryption only.
+ */
+export const OAUTH_TOKENS = {
   oauthAccess: "OAUTH-ACCESS-TOKEN-0a1b2c",
   oauthRefresh: "OAUTH-REFRESH-TOKEN-3d4e5f",
   oauthId: "OAUTH-ID-TOKEN-6a7b8c",
 } as const;
-/** Ordinary data: in the backup, but only as ciphertext. */
+const SECRETS = { ...EXCLUDED_MARKERS, ...OAUTH_TOKENS };
+/** Ordinary data: in the decrypted dump, never readable in the backup files themselves. */
 export const PERSONAL_DATA = ["ann@example.com", "scrypt:salt:hash", "enc:totp", "beta-only"];
 const { session: SESSION_TOKEN, reset: RESET_TOKEN, jwks: JWKS_PRIVATE } = SECRETS;
 
@@ -108,7 +116,7 @@ export async function seed(db: TestDatabase): Promise<void> {
      INSERT INTO sessions (user_id, token, expires_at) VALUES ($3, '${SESSION_TOKEN}', now() + interval '1 day');
      INSERT INTO verifications (identifier, value, expires_at) VALUES ('reset', '${RESET_TOKEN}', now() + interval '1 hour');
      INSERT INTO jwks (public_key, private_key) VALUES ('pub', '${JWKS_PRIVATE}');
-     INSERT INTO rate_limits (key, count, last_request) VALUES ('ip', 3, 1);
+     INSERT INTO rate_limits (key, count, last_request) VALUES ('${EXCLUDED_MARKERS.rateLimit}', 3, 1);
      INSERT INTO widgets (team_id, id, parent_id, name, blob_ref) VALUES
        ($1, 1, 2, 'child', 'teams/a1/uploads/report.csv'), ($1, 2, NULL, 'parent', NULL),
        ($2, 3, NULL, 'beta-only', NULL);

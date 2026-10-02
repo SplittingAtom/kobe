@@ -115,7 +115,7 @@ export async function sha256File(path: string): Promise<{ sha256: string; bytes:
 export async function readSignedManifest(
   dir: string,
   master: Buffer,
-): Promise<{ manifest: Manifest; keys: BackupKeys }> {
+): Promise<{ manifest: Manifest; keys: BackupKeys; fingerprint: string }> {
   const path = join(dir, MANIFEST_FILE);
   if ((await stat(path)).size > MAX_MANIFEST_BYTES) {
     throw new Error(`${MANIFEST_FILE} is too large to be a Kobe manifest`);
@@ -143,19 +143,29 @@ export async function readSignedManifest(
       "The backup manifest signature does not verify: wrong backup key, or the backup was modified",
     );
   }
-  return { manifest: parseManifest(body.toString("utf8")), keys };
+  return {
+    manifest: parseManifest(body.toString("utf8")),
+    keys,
+    fingerprint: manifestFingerprint(body),
+  };
+}
+
+/** Short, human-comparable identity of a backup: sha256 of manifest.json's exact bytes. */
+export function manifestFingerprint(body: Buffer): string {
+  return `sha256:${createHash("sha256").update(body).digest("hex")}`;
 }
 
 export async function writeSignedManifest(
   dir: string,
   manifest: Manifest,
   keys: BackupKeys,
-): Promise<void> {
+): Promise<string> {
   const body = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
   await writeFile(join(dir, MANIFEST_FILE), body, { mode: 0o600 });
   await writeFile(join(dir, MANIFEST_SIGNATURE_FILE), `${signManifest(keys.mac, body)}\n`, {
     mode: 0o600,
   });
+  return manifestFingerprint(body);
 }
 
 /** Fails unless `dir/ref.path` has exactly the recorded size and checksum. */

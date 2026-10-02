@@ -16,6 +16,8 @@ Environment:
   both     KOBE_S3_BUCKET, KOBE_S3_ENDPOINT, KOBE_S3_REGION, KOBE_S3_PREFIX,
            KOBE_S3_FORCE_PATH_STYLE, KOBE_S3_ACCESS_KEY_ID, KOBE_S3_SECRET_ACCESS_KEY
            KOBE_PG_BIN_DIR           directory with pg_dump, pg_restore and psql (default: PATH)
+  restore  KOBE_TMPDIR               where the decrypted dump is held during the restore
+                                     (default: OS temp dir; use a memory-backed volume)
 
 See docs/backup-restore.md.`;
 
@@ -48,6 +50,7 @@ export interface RestoreCommand {
   /** Skip object verification entirely (operator passed --no-objects). */
   readonly skipObjects: boolean;
   readonly pgBinDir: string | undefined;
+  readonly tmpDir: string | undefined;
   readonly key: Buffer;
 }
 
@@ -124,6 +127,21 @@ function readUrl(env: Env, name: string): string {
   const parsed = z.object({ [name]: postgresUrl(name) }).safeParse(env);
   if (!parsed.success) fail(parsed.error);
   return parsed.data[name] as string;
+}
+
+/** A warning when the key file is readable by group or others (null when private). */
+export function keyFileWarning(env: Env, statMode: (path: string) => number): string | null {
+  const file = env.KOBE_BACKUP_KEY_FILE;
+  if (!file) return null;
+  let mode: number;
+  try {
+    mode = statMode(file);
+  } catch {
+    return null; // readBackupKey reports an unreadable file
+  }
+  return (mode & 0o077) === 0
+    ? null
+    : `WARNING: KOBE_BACKUP_KEY_FILE is readable by group or others (mode ${(mode & 0o777).toString(8)}); chmod 600 it`;
 }
 
 /** The operator's backup key: from a file or the environment, never from the command line. */
@@ -212,6 +230,7 @@ export function parseCommand(
       allowObjectMismatch: flags["allow-object-mismatch"] === true,
       skipObjects: flags["no-objects"] === true,
       pgBinDir,
+      tmpDir: env.KOBE_TMPDIR || undefined,
       key: readBackupKey(env, readKeyFile),
     };
   }

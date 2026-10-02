@@ -15,11 +15,13 @@ import {
 } from "./manifest.js";
 import type { StoredObject } from "./objects.js";
 import { runRestore, type RestoreOptions } from "./restore.js";
+import { RestrictGuard } from "./restrict-guard.js";
 import {
   BLOB_REFS,
   OBJECTS,
   PERSONAL_DATA,
-  SECRETS,
+  EXCLUDED_MARKERS,
+  OAUTH_TOKENS,
   T1,
   allBackupBytes,
   copyWithManifest,
@@ -47,7 +49,7 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
   let backupUrl: string;
   let work: string;
   let backupDir: string;
-  let manifest: Manifest;
+  let manifest: Manifest & { readonly fingerprint: string };
 
   const target = async (): Promise<TestDatabase> => {
     const db = await freshTarget(server);
@@ -107,6 +109,7 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
 
     it("backs up every table from one snapshot, encrypted and signed", async () => {
       manifest = await backup(backupDir);
+      expect(manifest.fingerprint).toMatch(/^sha256:[0-9a-f]{64}$/);
 
       const counts = Object.fromEntries(manifest.tables.map((t) => [t.name, t.rows]));
       expect(counts).toMatchObject({
@@ -147,19 +150,39 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
       }
     });
 
-    it("writes no plaintext data or secrets, including any OAuth tokens Better Auth may store", async () => {
-      const raw = (await allBackupBytes(backupDir)).toString("latin1");
-      for (const value of [...Object.values(SECRETS), ...PERSONAL_DATA, password]) {
-        expect(raw, value).not.toContain(value);
-      }
-      // Decrypted with the key, the dump holds the data but still no tokens or signing keys.
+    it("leaves sessions, verifications, jwks and rate_limits out of the decrypted dump", async () => {
       const script = await dumpScript(backupDir, KEY, pgBinDir);
-      expect(script).toContain("ann@example.com");
-      expect(script).toContain("beta-only");
-      for (const secret of [SECRETS.session, SECRETS.reset, SECRETS.jwks]) {
-        expect(script).not.toContain(secret);
+      for (const [name, marker] of Object.entries(EXCLUDED_MARKERS)) {
+        expect(script, name).not.toContain(marker);
+      }
+      for (const table of ["sessions", "verifications", "jwks", "rate_limits"]) {
+        expect(script).not.toContain(`COPY public.${table} `);
       }
       expect(script).not.toContain("__drizzle_migrations");
+      // Everything else is in it, including any OAuth tokens in `accounts`: those are protected
+      // only by the backup encryption (docs/backup-restore.md).
+      expect(script).toContain("ann@example.com");
+      expect(script).toContain("beta-only");
+      for (const token of Object.values(OAUTH_TOKENS)) expect(script).toContain(token);
+    });
+
+    it("stores that dump only encrypted (no readable data or credentials in any file)", async () => {
+      const raw = (await allBackupBytes(backupDir)).toString("latin1");
+      for (const value of [...Object.values(OAUTH_TOKENS), ...PERSONAL_DATA, password]) {
+        expect(raw, value).not.toContain(value);
+      }
+    });
+
+    it("gets a pg_restore script wrapped in \\restrict … \\unrestrict from the real client", async () => {
+      const script = await dumpScript(backupDir, KEY, pgBinDir);
+      const key = /^\\restrict (\S+)$/m.exec(script)?.[1];
+      expect(key).toBeDefined();
+      expect(script).toMatch(new RegExp(`^\\\\unrestrict ${key}$`, "m"));
+      const guard = new RestrictGuard();
+      expect(() => {
+        guard.push(Buffer.from(script));
+        guard.finish();
+      }).not.toThrow();
     });
 
     it("never overwrites an existing backup", async () => {
@@ -231,6 +254,21 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
       await refusedBeforeAnyTool(dir, KEY, /signature does not verify/);
     });
 
+    it("refuses a file whose checksum matches but whose GCM tag does not", async () => {
+      const dir = join(work, "bad-tag");
+      await copyWithManifest(backupDir, dir, KEY, (m) => ({
+        ...m,
+        files: {
+          ...m.files,
+          database: {
+            ...m.files.database,
+            tag: m.files.database.tag.replace(/^./, (c) => (c === "0" ? "1" : "0")),
+          },
+        },
+      }));
+      await refusedBeforeAnyTool(dir, KEY, /could not be decrypted/);
+    });
+
     it("refuses the wrong key", async () => {
       await refusedBeforeAnyTool(backupDir, randomBytes(32), /wrong backup key/);
     });
@@ -247,8 +285,12 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
     it("restores into a fresh install: same rows, RLS still forced, triggers back, teams still walls", async () => {
       const dst = await target();
       const forcedBefore = await forcedTables(dst.adminUrl);
-      const report = await restore(dst);
+      const tmp = await mkdtemp(join(tmpdir(), "kobe-tmpdir-"));
+      const report = await restore(dst, backupDir, { tmpDir: tmp });
+      expect(await readdir(tmp)).toEqual([]); // the decrypted dump is gone
       expect(report).toMatchObject({
+        fingerprint: manifest.fingerprint,
+        createdAt: manifest.createdAt,
         tables: manifest.tables.length,
         objects: { checked: 2, problems: 0 },
       });

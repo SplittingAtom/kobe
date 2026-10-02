@@ -94,6 +94,25 @@ transaction as the owner.
   rejected; warning for remote hosts without `sslmode=require|verify-*`; docs: sequences aren't
   rolled back on failure, backup user password via `\password` / Secret.
 
+## Review round 2 (crypto follow-up: no CRITICAL/HIGH)
+
+- **M:** decrypted dump lives in a 0700 dir under `KOBE_TMPDIR` (default OS temp); SIGINT/SIGTERM/
+  SIGHUP handlers delete it synchronously and exit 128+n (psql's input closes → rollback); docs
+  recommend `/dev/shm` / `emptyDir medium: Memory`. Decrypt-fully-then-use kept.
+- **M:** secrets test made honest: decrypted script must not contain the excluded tables' markers
+  (sessions, verifications, jwks, rate_limits) and **does** contain `accounts` OAuth tokens
+  (documented: protected only by backup encryption); separate check that backup files hold no
+  readable data. New end-to-end tests: valid checksum + bad GCM tag refused before any tool; the
+  real `pg_restore` output is wrapped in `\restrict … \unrestrict`.
+- **L:** `RestrictGuard` holds pg_restore output until the first command is `\restrict <key>` and
+  refuses to COMMIT unless the last is the matching `\unrestrict`. Version gate left at 17.6+:
+  the server is 17, so pg_dump/pg_restore must be ≥ 17 anyway; accepting 16.10+/15.14+ would never
+  apply.
+- **L:** keys with < 16 distinct bytes refused; warning when the key file is group/world readable.
+- **L (docs):** manifest fingerprint (sha256 of manifest.json) + createdAt printed at backup and
+  restore, to be recorded out of band (rollback to an older genuine backup); ~64 GiB per-file GCM
+  limit documented.
+
 ## Open questions (for Chris or the coordinator)
 
 - Should the chart create the `kobe_backup` role in CNPG mode (managed role + generated Secret)?
@@ -130,4 +149,8 @@ locally; 17 in CI), unit tests in `packages/cli/src/*.test.ts`.
 - Coverage → "refuses when data outside public (tables, large objects) would be skipped".
 - Blob refs → "refuses when the database references objects the bucket does not hold".
 - Error output → "shows only the SQLSTATE for server errors that could quote row data".
+- Round 2 → "leaves sessions, verifications, jwks and rate_limits out of the decrypted dump",
+  "stores that dump only encrypted…", "gets a pg_restore script wrapped in \restrict…", "refuses a
+  file whose checksum matches but whose GCM tag does not"; fingerprint + `KOBE_TMPDIR` emptied in the
+  round-trip test; `restrict-guard.test.ts`, `workdir.test.ts`, key-strength and key-file tests.
 - CLI smoke (built binary): backup → restore → restore again refused ("already has data").

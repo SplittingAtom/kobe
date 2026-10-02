@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { randomBytes } from "node:crypto";
-import { parseCommand, readBackupKey, tlsWarning } from "./config.js";
+import { keyFileWarning, parseCommand, readBackupKey, tlsWarning } from "./config.js";
 
 const S3 = {
   KOBE_S3_ENDPOINT: "https://s3.example.com",
@@ -64,7 +64,13 @@ describe("parseCommand", () => {
       ...S3,
       ...KEY_ENV,
     });
-    expect(cmd).toMatchObject({ s3: null, skipObjects: true });
+    expect(cmd).toMatchObject({ s3: null, skipObjects: true, tmpDir: undefined });
+    const withTmp = parseCommand(["restore", "--from", "/b"], {
+      KOBE_DB_MIGRATE_URL: OWNER_URL,
+      KOBE_TMPDIR: "/dev/shm",
+      ...KEY_ENV,
+    });
+    expect(withTmp).toMatchObject({ tmpDir: "/dev/shm" });
   });
 
   it("refuses a password in the query string", () => {
@@ -148,5 +154,16 @@ describe("tlsWarning", () => {
   it("warns for a remote host without required TLS", () => {
     expect(tlsWarning("postgres://u:p@db.example/kobe")).toMatch(/db.example.*sslmode=require/);
     expect(tlsWarning("postgres://u:p@db.example/kobe?sslmode=prefer")).toMatch(/WARNING/);
+  });
+});
+
+describe("keyFileWarning", () => {
+  it("warns when the key file is group or world readable", () => {
+    expect(keyFileWarning({ KOBE_BACKUP_KEY_FILE: "/k" }, () => 0o100600)).toBeNull();
+    expect(keyFileWarning({ KOBE_BACKUP_KEY_FILE: "/k" }, () => 0o100644)).toMatch(
+      /mode 644.*chmod 600/,
+    );
+    expect(keyFileWarning({ KOBE_BACKUP_KEY_FILE: "/k" }, () => 0o100640)).toMatch(/WARNING/);
+    expect(keyFileWarning(KEY_ENV, () => 0o100644)).toBeNull();
   });
 });

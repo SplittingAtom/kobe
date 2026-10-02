@@ -49,31 +49,61 @@ openssl rand -base64 32 > kobe-backup.key && chmod 600 kobe-backup.key
 export KOBE_BACKUP_KEY_FILE=$PWD/kobe-backup.key     # or KOBE_BACKUP_KEY=<the key>, never argv
 ```
 
+The key must be at least 32 bytes of random data, given as base64 or hex. Keys with fewer than 16
+distinct byte values are refused because they look typed or patterned. `kobe` warns when the key
+file is readable by group or others.
+
 Each backup draws a random salt and uses HKDF-SHA256 to derive two keys from it: an AES-256-GCM key
 for the files and an HMAC-SHA256 key for the manifest. Because the manifest records each file's
 ciphertext checksum, its signature covers the whole backup. Before running any tool, a restore:
 
 1. verifies the manifest signature,
 2. checks the file checksums, and
-3. decrypts and checks the GCM tags into a private temporary directory, which it deletes afterwards.
+3. decrypts the files in full and checks their GCM tags, writing into a private (`0700`)
+   temporary directory that it deletes afterwards.
 
-A modified file, a re-written manifest, a missing signature or the wrong key are all refused at
-this point. `psql` runs without `psqlrc` and with `ON_ERROR_STOP`. The client must be 17.6+, so
-that `pg_restore` wraps its script in `\restrict` and psql refuses meta-commands (such as `\!`)
-from inside the archive.
+A modified file, a re-written manifest, a missing signature, a bad GCM tag or the wrong key are
+all refused at this point.
+
+`psql` runs without `psqlrc` and with `ON_ERROR_STOP`. The client must be 17.6+, so that
+`pg_restore` wraps its script in `\restrict <key>` and psql refuses meta-commands (such as `\!`)
+from inside the archive. As defence in depth, `kobe` holds the script back until it has seen that
+the script starts with `\restrict`. It also refuses to commit unless the script ends with the
+matching `\unrestrict`.
+
+**Where the plaintext lives during a restore.** The decrypted dump sits in a private temporary
+directory for the length of the restore. That directory is `KOBE_TMPDIR` if set, otherwise the OS
+temp directory, and it is deleted:
+
+- at the end of the restore, whether it succeeds or fails;
+- on `SIGINT`, `SIGTERM` or `SIGHUP` (Ctrl-C, a Job deadline, pod deletion), after which `kobe`
+  exits non-zero and Postgres rolls back.
+
+A `SIGKILL` cannot be caught. Point `KOBE_TMPDIR` at memory-backed storage so the plaintext never
+reaches a disk:
+
+- Linux: `/dev/shm`, or any tmpfs.
+- Kubernetes Job: an `emptyDir` with `medium: Memory`, sized to hold the dump (`sizeLimit`). It
+  counts against the pod's memory limit.
+
+**Limits.** Each file is a single AES-256-GCM message, and GCM caps one message at just under
+64 GiB. A database whose compressed dump is larger than that is not supported by this format.
 
 ### Secrets
 
-A backup file never holds plaintext, because everything is encrypted under the backup key.
-Inside the encryption:
+A backup file never holds plaintext, because everything is encrypted under the backup key. Once
+decrypted, the dump contains every backed-up table, **including `accounts`**. Should a sign-in
+provider ever store OAuth tokens there, those tokens are in the dump too, and they are protected
+only by the backup encryption. The test suite seeds such tokens and asserts exactly this. Inside
+the encryption:
 
-| Data                                         | Inside the backup as                                                        |
-| -------------------------------------------- | --------------------------------------------------------------------------- |
-| Passwords                                    | scrypt hashes (`accounts.password`)                                         |
-| TOTP secrets and backup codes                | ciphertext under the **auth secret** (`two_factors`)                        |
-| OAuth tokens in `accounts` (if SSO is added) | encrypted with the rest of the backup (a test seeds them and checks)        |
-| Connector grants, header injection (later)   | ciphertext under an install key held in a Kubernetes Secret (spec D27, D28) |
-| Session/reset tokens, JWT signing keys       | not included                                                                |
+| Data                                          | Inside the backup as                                                        |
+| --------------------------------------------- | --------------------------------------------------------------------------- |
+| Passwords                                     | scrypt hashes (`accounts.password`)                                         |
+| TOTP secrets and backup codes                 | ciphertext under the **auth secret** (`two_factors`)                        |
+| OAuth tokens in `accounts` (if SSO is added)  | **as stored** (plaintext inside the encrypted dump)                         |
+| Connector grants, header injection (later)    | ciphertext under an install key held in a Kubernetes Secret (spec D27, D28) |
+| Sessions, reset tokens, JWT keys, rate limits | not included (absent even from the decrypted dump; tested)                  |
 
 Even so, a backup holds personal data (names, e-mail addresses, and conversations once they
 exist). Restrict who can read the backup files and who can read the key.
@@ -159,6 +189,13 @@ kobe backup --out /backups/kobe-$(date -u +%Y%m%dT%H%M%SZ)
 The directory must not exist yet. The backup is written to `<dir>.partial` and renamed when it
 is complete, so a directory without `.partial` holds a finished backup.
 
+`kobe backup` prints the backup's **manifest fingerprint** (sha256 of `manifest.json`) and its
+creation time. Record both outside the backup storage, for example in your runbook or ticket.
+`kobe restore` prints the same two values before it loads anything, so you can confirm you are
+restoring the backup you meant to. The signature proves a backup is genuine. It cannot tell you
+whether someone with write access to the backup store swapped in an older genuine backup; the
+recorded fingerprint can.
+
 ## Restore onto a fresh cluster
 
 A restore goes into a **freshly installed Kobe of the same version** (same migrations). It refuses
@@ -188,8 +225,12 @@ a target whose applied migrations differ or that already has data, and it never 
    export KOBE_BACKUP_KEY_FILE=/secure/kobe-backup.key
    export KOBE_DB_MIGRATE_URL="postgres://kobe_owner:$(kubectl -n kobe get secret kobe-pg-app -o jsonpath='{.data.password}' | base64 -d)@localhost:5432/kobe"
    export KOBE_S3_ENDPOINT=... KOBE_S3_BUCKET=... KOBE_S3_ACCESS_KEY_ID=... KOBE_S3_SECRET_ACCESS_KEY=...
+   export KOBE_TMPDIR=/dev/shm          # memory-backed; the decrypted dump never touches disk
    kobe restore --from /backups/kobe-20261002T120000Z
    ```
+
+   Before the load starts, check that the printed fingerprint and creation time match the
+   values you recorded when the backup was taken.
 
 5. Scale back up, either with `helm upgrade` using the same values or with
    `kubectl scale ... --replicas=<n>`. Users have to sign in again; enrolled passkeys and TOTP

@@ -18,6 +18,8 @@ import { pipeline } from "node:stream/promises";
  * ciphertext checksum, so the signature covers everything.
  */
 export const MIN_KEY_BYTES = 32;
+/** Random 32-byte keys have ~31 distinct byte values; fewer than this means a typed or patterned key. */
+export const MIN_DISTINCT_KEY_BYTES = 16;
 const KEY_BYTES = 32;
 const IV_BYTES = 12;
 
@@ -40,6 +42,11 @@ export function parseKeyMaterial(text: string): Buffer {
   else throw new Error("The backup key must be base64 or hex (e.g. openssl rand -base64 32)");
   if (key.length < MIN_KEY_BYTES) {
     throw new Error(`The backup key must be at least ${MIN_KEY_BYTES} bytes of random data`);
+  }
+  if (new Set(key).size < MIN_DISTINCT_KEY_BYTES) {
+    throw new Error(
+      "The backup key does not look random (too few distinct bytes); generate one with openssl rand -base64 32",
+    );
   }
   return key;
 }

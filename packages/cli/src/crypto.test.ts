@@ -35,6 +35,13 @@ describe("parseKeyMaterial", () => {
     expect(message).not.toContain("c2hvcnQ");
     expect(() => parseKeyMaterial("not a key!")).toThrow(/base64 or hex/);
   });
+
+  it("rejects trivial keys of the right length", () => {
+    expect(() => parseKeyMaterial("00".repeat(32))).toThrow(/does not look random/);
+    expect(() => parseKeyMaterial(Buffer.from("password".repeat(4)).toString("base64"))).toThrow(
+      /does not look random/,
+    );
+  });
 });
 
 describe("deriveKeys", () => {

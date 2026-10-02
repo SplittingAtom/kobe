@@ -1,5 +1,4 @@
-import { chmod, mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -31,7 +30,9 @@ import {
   spawnTool,
   waitForExit,
 } from "./pg-tools.js";
+import { RestrictGuard } from "./restrict-guard.js";
 import { journalText, restorePostlude, restorePrelude, type RestorePlan } from "./restore-sql.js";
+import { makePrivateWorkDir, removeOnSignal } from "./workdir.js";
 
 export interface RestoreOptions {
   /** The owner role (migrate-url): owns every table, so it can lift FORCE RLS in the transaction. */
@@ -46,10 +47,15 @@ export interface RestoreOptions {
   /** Skip object verification (operator passed --no-objects; warned loudly). */
   readonly skipObjects: boolean;
   readonly pgBinDir?: string | undefined;
+  /** Where the decrypted dump lives during the restore (KOBE_TMPDIR; default: OS temp dir). */
+  readonly tmpDir?: string | undefined;
   readonly log?: (message: string) => void;
 }
 
 export interface RestoreReport {
+  /** sha256 of manifest.json: compare with the value recorded when the backup was taken. */
+  readonly fingerprint: string;
+  readonly createdAt: string;
   readonly tables: number;
   readonly rows: number;
   readonly excludedTables: readonly string[];
@@ -177,10 +183,12 @@ async function loadData(
 
   async function* script(): AsyncGenerator<string | Buffer> {
     yield restorePrelude(plan);
-    for await (const chunk of dump.stdout ?? []) yield chunk as Buffer;
+    // Throwing anywhere below ends psql's input without COMMIT: Postgres rolls everything back.
+    const guard = new RestrictGuard();
+    for await (const chunk of dump.stdout ?? []) yield* guard.push(chunk as Buffer);
     const { code, stderr } = await dumpExit;
-    // Without COMMIT, psql's session ends and Postgres rolls everything back.
     if (code !== 0) throw new Error(`pg_restore failed (exit ${code}): ${safeToolErrors(stderr)}`);
+    yield* guard.finish();
     yield restorePostlude(plan);
   }
 
@@ -210,7 +218,7 @@ async function loadData(
 export async function runRestore(options: RestoreOptions): Promise<RestoreReport> {
   const log = options.log ?? (() => undefined);
   const dir = resolve(options.from);
-  const { manifest, keys } = await readSignedManifest(dir, options.key);
+  const { manifest, keys, fingerprint } = await readSignedManifest(dir, options.key);
   await verifyFile(dir, manifest.files.database);
   let expectedObjects: StoredObject[] | null = null;
   if (manifest.files.objects) {
@@ -220,12 +228,12 @@ export async function runRestore(options: RestoreOptions): Promise<RestoreReport
     expectedObjects = parseObjectList(decryptBuffer(keys.enc, ref.path, sealed).toString("utf8"));
   }
   log(
-    `backup from ${manifest.createdAt} (signature verified): ${manifest.tables.length} tables, ${describeJournal(manifest.migrations)}`,
+    `backup ${fingerprint} from ${manifest.createdAt} (signature verified; check both against the values recorded at backup time): ${manifest.tables.length} tables, ${describeJournal(manifest.migrations)}`,
   );
 
-  const work = await mkdtemp(join(tmpdir(), "kobe-restore-"));
+  const work = await makePrivateWorkDir(options.tmpDir);
+  const cleanup = removeOnSignal(work);
   try {
-    await chmod(work, 0o700);
     const dumpPath = join(work, "database.dump");
     const ref = manifest.files.database;
     await decryptFile(keys.enc, ref.path, join(dir, ref.path), ref, dumpPath);
@@ -261,12 +269,15 @@ export async function runRestore(options: RestoreOptions): Promise<RestoreReport
     log("loading data in one transaction…");
     await loadData(plan, dumpPath, options);
     return {
+      fingerprint,
+      createdAt: manifest.createdAt,
       tables: manifest.tables.length,
       rows: manifest.tables.reduce((sum, t) => sum + t.rows, 0),
       excludedTables: manifest.excludedTables.map((t) => t.name),
       objects,
     };
   } finally {
+    cleanup.dispose();
     await rm(work, { recursive: true, force: true });
   }
 }

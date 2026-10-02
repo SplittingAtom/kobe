@@ -214,7 +214,9 @@ async function snapshotAndDump(
  * `kobe backup`: encrypted data dump + encrypted S3 object listing + signed manifest, in a new
  * private directory.
  */
-export async function runBackup(options: BackupOptions): Promise<Manifest> {
+export async function runBackup(
+  options: BackupOptions,
+): Promise<Manifest & { readonly fingerprint: string }> {
   const log = options.log ?? (() => undefined);
   const out = resolve(options.out);
   const partial = `${out}.partial`;
@@ -267,9 +269,9 @@ export async function runBackup(options: BackupOptions): Promise<Manifest> {
       coverage: { schemas: ["public"], otherSchemasChecked: true, largeObjects: 0 },
       objectStorage,
     };
-    await writeSignedManifest(partial, manifest, keys);
+    const fingerprint = await writeSignedManifest(partial, manifest, keys);
     await rename(partial, out);
-    return manifest;
+    return { ...manifest, fingerprint };
   } catch (err) {
     await rm(partial, { recursive: true, force: true });
     throw err;

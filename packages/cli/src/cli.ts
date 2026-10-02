@@ -1,6 +1,7 @@
 #!/usr/bin/env node
+import { statSync } from "node:fs";
 import { runBackup } from "./backup.js";
-import { parseCommand, tlsWarning, type Command } from "./config.js";
+import { keyFileWarning, parseCommand, tlsWarning, type Command } from "./config.js";
 import { runRestore } from "./restore.js";
 import { s3Lister } from "./s3.js";
 
@@ -26,6 +27,9 @@ async function run(cmd: Command): Promise<void> {
         `; not included: ${m.excludedTables.map((t) => t.name).join(", ") || "-"}`,
     );
     log(
+      `manifest fingerprint ${m.fingerprint}, created ${m.createdAt}: record both outside the backup`,
+    );
+    log(
       "backup encrypted and signed with your backup key. The key and the Kubernetes Secrets (auth secret, database and S3 credentials) are not in the backup; keep them in your secret store (docs/backup-restore.md)",
     );
     return;
@@ -38,10 +42,12 @@ async function run(cmd: Command): Promise<void> {
     allowObjectMismatch: cmd.allowObjectMismatch,
     skipObjects: cmd.skipObjects,
     pgBinDir: cmd.pgBinDir,
+    tmpDir: cmd.tmpDir,
     log,
   });
   log(
-    `restored ${report.tables} tables, ${report.rows} rows` +
+    `restored backup ${report.fingerprint} (created ${report.createdAt}): ` +
+      `${report.tables} tables, ${report.rows} rows` +
       (report.objects
         ? `; S3 objects checked: ${report.objects.checked}, problems: ${report.objects.problems}`
         : "") +
@@ -57,8 +63,12 @@ async function main(): Promise<void> {
     log((err as Error).message);
     process.exit(2);
   }
-  const warning = tlsWarning(cmd.databaseUrl);
-  if (warning) log(warning);
+  for (const warning of [
+    tlsWarning(cmd.databaseUrl),
+    keyFileWarning(process.env, (path) => statSync(path).mode),
+  ]) {
+    if (warning) log(warning);
+  }
   await run(cmd);
 }
 
