@@ -168,6 +168,21 @@
     can't reach web/server for the first seconds. Sandbox agents must retry their first connection
     (KOBE-23); e2e waits for the target before probing.
 
+## Audit (after KOBE-15)
+
+- Added `sandbox.created` (team scope; `sandboxId`, `userId`) when a claim is first created, and
+  `sandbox.destroyed` (team scope; `sandboxId?`, `userId?`, `pod?`, `reason`
+  isolation_mismatch | isolation_lost) when the provider or the reconciler deletes an unverified
+  sandbox or pod. Both are Kubernetes writes with no Kobe transaction to join, so they go through
+  `recordAuditAfter` (never throws), actor = the signed-in request user, else `SYSTEM_ACTOR`.
+  Unit tests validate emitted targets against `AUDIT_EVENTS`.
+- Not audited, by choice: the session-token exchange (every ~15 min per sandbox, an
+  anyone-in-cluster-can-trigger path; logged at info with sandbox and pod) and team namespace
+  creation (idempotent apply; the first `sandbox.created` of a team marks it). The operator CLI
+  (`dist/cli/sandbox.js`) has no database connection and records nothing.
+- For KOBE-25/28: add `sandbox.hibernated`/`.woken` if wanted, an offboarding `reason`, and
+  `sandbox.volume_purged`.
+
 ## Open questions (for Chris or the coordinator)
 
 - **D12 warm pool "2 per cluster" vs per-namespace warm pools** (see Decisions): accept "1 per

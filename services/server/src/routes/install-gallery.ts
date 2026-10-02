@@ -30,6 +30,7 @@ import {
   type AgentRecord,
 } from "../agents/store.js";
 import type { AuthVariables } from "../auth/session.js";
+import { recordAuditAfter } from "../audit/record.js";
 import { requireInstallPermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { parseBody } from "../teams/http.js";
@@ -66,6 +67,7 @@ export function installGalleryRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
       slug: meta.data.slug,
       baseSlug: slugFromName(input.definition.frontmatter.name),
       ownerUserId: null,
+      source: input.source,
     });
     if (!result.ok) return createError(c, result.error);
     return agentResponse(c, result.value, GALLERY_ADMIN_ACCESS, 201);
@@ -78,7 +80,12 @@ export function installGalleryRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
 
   app.get("/:id/export", async (c) => {
     const agent = await galleryAgent(c);
-    return agent ? exportResponse(c, agent) : notFound(c);
+    if (!agent) return notFound(c);
+    await recordAuditAfter(db, {
+      action: "agent.exported",
+      target: { agentId: agent.id, scope: "gallery", slug: agent.slug },
+    });
+    return exportResponse(c, agent);
   });
 
   app.put("/:id", agentBodyLimit, async (c) => {
@@ -91,7 +98,14 @@ export function installGalleryRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
     if (!updateMetaSchema.safeParse(input.meta).success) {
       return invalidRequest(c, "Send only frontmatter and prompt; slugs can't change.");
     }
-    const result = await updateAgent(db, GALLERY, id.data, input.definition, ifMatch.revision);
+    const result = await updateAgent(
+      db,
+      GALLERY,
+      id.data,
+      input.definition,
+      ifMatch.revision,
+      input.source,
+    );
     if (!result.ok) return result.error === "not_found" ? notFound(c) : preconditionFailed(c);
     return agentResponse(c, result.value, GALLERY_ADMIN_ACCESS);
   });

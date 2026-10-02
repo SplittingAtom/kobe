@@ -42,6 +42,11 @@ const manifestSchema = z
     tables: z.array(z.object({ name: tableName, rows: count })),
     /** Tables present at backup time whose rows were deliberately left out. */
     excludedTables: z.array(z.object({ name: tableName, reason: z.string().max(500) })),
+    /**
+     * Last row of the audit hash chain in the snapshot (KOBE-15), null for an empty log. Signed with
+     * the manifest; restore requires the restored chain to end exactly here.
+     */
+    auditHead: z.object({ seq: count, hash: sha256 }).nullable().optional(),
     files: z.object({ database: fileRef, objects: fileRef.nullable() }),
     encryption: z.object({
       cipher: z.literal("aes-256-gcm"),

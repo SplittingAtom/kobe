@@ -10,7 +10,7 @@
       "get": {
         "operationId": "listThreads",
         "summary": "List the viewer's threads (or a project's readable threads), newest first",
-        "description": "Keyset pagination on (last_activity_at, id). Never Trash. With `q`, full-text search (KOBE-33; 501 `search_unavailable` until wired). Reads Postgres only (never wakes a sandbox).",
+        "description": "Keyset pagination on (last_activity_at, id). Never Trash. With `q`, full-text search (KOBE-33): web-search syntax (`\"phrase\"`, `-exclude`, `or`) over user/assistant messages (all terms in one message) and titles (plus fuzzy title matching), ranked by relevance with snippets; `cursor` is then a search cursor and `limit` is capped at 50. Reads Postgres only (never wakes a sandbox).",
         "parameters": [
           {
             "name": "project_id",
@@ -63,17 +63,24 @@
         ],
         "responses": {
           "200": {
-            "description": "A page of threads.",
+            "description": "A page of threads (`ThreadSearchPage` when `q` is given).",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ThreadPage"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ThreadPage"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ThreadSearchPage"
+                    }
+                  ]
                 }
               }
             }
           },
           "400": {
-            "description": "`invalid_request`, `invalid_cursor` or `team_header_required`.",
+            "description": "`invalid_request`, `invalid_cursor`, `invalid_query` (only excluded terms) or `team_header_required`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -112,8 +119,8 @@
               }
             }
           },
-          "501": {
-            "description": "`search_unavailable`.",
+          "503": {
+            "description": "`search_timeout`: the search exceeded its time limit.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1202,6 +1209,209 @@
                 "created_at",
                 "deleted_at",
                 "purge_after"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "next_cursor": {
+            "type": ["string", "null"]
+          }
+        },
+        "required": ["threads", "next_cursor"],
+        "additionalProperties": false
+      },
+      "ThreadSearchPage": {
+        "type": "object",
+        "properties": {
+          "threads": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "thread_id": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f-]+$"
+                    }
+                  ]
+                },
+                "title": {
+                  "type": ["string", "null"]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["idle", "running", "interrupted"]
+                },
+                "owner_user_id": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f-]+$"
+                    }
+                  ]
+                },
+                "project_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "allOf": [
+                        {
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        {
+                          "pattern": "^[0-9a-f-]+$"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "agent_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "allOf": [
+                        {
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        {
+                          "pattern": "^[0-9a-f-]+$"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "agent_version": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "shared_to_project": {
+                  "type": "boolean"
+                },
+                "leaf_entry_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "last_activity_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                },
+                "deleted_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "purge_after": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "matched_entry_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "snippet": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "text": {
+                            "type": "string"
+                          },
+                          "highlight": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["text", "highlight"],
+                        "additionalProperties": false
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "score": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "thread_id",
+                "title",
+                "status",
+                "owner_user_id",
+                "project_id",
+                "agent_id",
+                "agent_version",
+                "shared_to_project",
+                "leaf_entry_id",
+                "last_activity_at",
+                "created_at",
+                "deleted_at",
+                "purge_after",
+                "matched_entry_id",
+                "snippet",
+                "score"
               ],
               "additionalProperties": false
             }

@@ -43,6 +43,8 @@ export const U1 = "00000000-0000-4000-8000-0000000000b1";
 export const U2 = "00000000-0000-4000-8000-0000000000b2";
 export const THREAD = "00000000-0000-4000-8000-0000000000c1";
 export const U3 = "00000000-0000-4000-8000-0000000000b3";
+/** A word in a seeded message: its generated tsv must be recomputed by the restore (KOBE-33). */
+export const SEARCH_WORD = "zebrafish";
 
 export const OBJECTS: StoredObject[] = [
   { key: "teams/a1/uploads/report.csv", size: 1234, etag: '"e1"' },
@@ -125,11 +127,17 @@ export async function seed(db: TestDatabase): Promise<void> {
      SELECT setval('widgets_id_seq', 3);
      -- A conversation: entries chain to their parent, the thread points at its leaf entry (an FK
      -- cycle threads <-> thread_entries); triggers assign seq. One entry's payload lives in S3.
+     -- e1 is a Pi user message, so its generated search column (KOBE-33) is non-null.
      INSERT INTO threads (team_id, id, owner_user_id, title) VALUES ($1, '${THREAD}', $3, 'Q3 report');
      INSERT INTO thread_entries (team_id, thread_id, entry_id, parent_id, type, payload, blob_ref) VALUES
-       ($1, '${THREAD}', 'e1', NULL, 'message', '{"text":"hi"}', NULL),
+       ($1, '${THREAD}', 'e1', NULL, 'message', '{"message":{"role":"user","content":"${SEARCH_WORD} forecast"}}', NULL),
        ($1, '${THREAD}', 'e2', 'e1', 'message', '{}', 'teams/a2/artifacts/chart.html');
-     UPDATE threads SET leaf_entry_id = 'e2' WHERE team_id = $1 AND id = '${THREAD}';`.replaceAll(
+     UPDATE threads SET leaf_entry_id = 'e2' WHERE team_id = $1 AND id = '${THREAD}';
+     -- Audit events (KOBE-15): the trigger chains them; the restore must keep the chain intact.
+     INSERT INTO audit_log (actor_kind, actor_id, team_id, action, target) VALUES
+       ('user', $3, NULL, 'auth.sign_in.succeeded', '{"method":"password"}'),
+       ('user', $3, $1, 'identity.member.role_changed',
+        jsonb_build_object('userId', $4, 'from', 'builder', 'to', 'member'));`.replaceAll(
       /\$(\d)/g,
       (_, n: string) => `'${[T1, T2, U1, U2, U3][Number(n) - 1]}'`,
     ),

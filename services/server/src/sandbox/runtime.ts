@@ -1,3 +1,6 @@
+import { SYSTEM_ACTOR, type KobeDb } from "@kobe/db";
+import { currentAuditContext } from "../audit/context.js";
+import { recordAuditAfter, type ServerAuditEvent } from "../audit/record.js";
 import type { IsolationGate } from "../isolation/gate.js";
 import { loadSandboxConfig, type SandboxSettings, type SessionKeys } from "./config.js";
 import { createKubeClient } from "./kube.js";
@@ -21,6 +24,8 @@ export interface SandboxRuntime {
 export function createSandboxRuntime(
   env: Readonly<Record<string, string | undefined>>,
   isolation: Pick<IsolationGate, "require">,
+  /** Audit log (sandbox.created/destroyed); without it the events are not recorded. */
+  db?: KobeDb,
 ): SandboxRuntime | undefined {
   const config = loadSandboxConfig(env);
   if (!config) return undefined;
@@ -30,6 +35,17 @@ export function createSandboxRuntime(
     isolation,
     settings: config.settings,
     ...(runtimeClassName ? { runtimeClassName } : {}),
+    ...(db
+      ? {
+          // No transaction of ours to join (the action is a Kubernetes write): recorded after it,
+          // as the signed-in user of the current request, else as the platform.
+          audit: (event) =>
+            recordAuditAfter(db, {
+              ...event,
+              actor: currentAuditContext()?.actor ?? SYSTEM_ACTOR,
+            } as ServerAuditEvent),
+        }
+      : {}),
   });
   return {
     provider,

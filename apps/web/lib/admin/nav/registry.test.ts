@@ -56,6 +56,7 @@ const TEAM_ADMIN = [
   "team.egress.manage",
   "team.skills.review",
   "team.retention.manage",
+  "team.audit.read",
   "team.schedules.pause",
   "team.agents.suspend",
   "team.agents.manage",

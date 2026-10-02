@@ -118,7 +118,27 @@ export interface SandboxProviderOptions {
    * definitive loss of isolation (class deleted or no longer isolating) when require() fails.
    */
   readonly runtimeClassName?: string;
+  /** Receives audit events; must not throw (failures are the recorder's to log). */
+  readonly audit?: (event: SandboxAuditEvent) => Promise<void> | void;
 }
+
+/** Audit events the provider emits (recorded by the caller: packages/db `sandbox.*`). */
+export type SandboxAuditEvent =
+  | {
+      readonly action: "sandbox.created";
+      readonly teamId: string;
+      readonly target: { readonly sandboxId: string; readonly userId: string };
+    }
+  | {
+      readonly action: "sandbox.destroyed";
+      readonly teamId: string;
+      readonly target: {
+        readonly sandboxId?: string;
+        readonly userId?: string;
+        readonly pod?: string;
+        readonly reason: "isolation_mismatch" | "isolation_lost";
+      };
+    };
 
 export interface ReconcileResult {
   /** Pods deleted (namespace/name). */
@@ -176,7 +196,16 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     now = () => Date.now(),
     podWaitTimeoutMs = POD_WAIT_TIMEOUT_MS,
     runtimeClassName,
+    audit,
   } = options;
+
+  const emit = async (event: SandboxAuditEvent): Promise<void> => {
+    try {
+      await audit?.(event);
+    } catch {
+      // Recording is best effort here (no transaction of ours to join); the recorder logs failures.
+    }
+  };
 
   /**
    * The chart's admission policies confine the server's cluster-wide RBAC and pin isolation. Before
@@ -329,6 +358,7 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
   };
 
   const rejectAndDelete = async (
+    owner: { readonly teamId: string; readonly userId: string; readonly sandboxId: string },
     namespace: string,
     name: string,
     reason: string,
@@ -337,6 +367,16 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     const claimGone = await deleteWithRetry(CLAIM(namespace, name));
     // The pod directly too: it must stop even if the claim's cascade is slow or the delete failed.
     const podGone = podName ? await deleteWithRetry(POD(namespace, podName)) : true;
+    await emit({
+      action: "sandbox.destroyed",
+      teamId: owner.teamId,
+      target: {
+        sandboxId: owner.sandboxId,
+        userId: owner.userId,
+        ...(podName ? { pod: podName } : {}),
+        reason: "isolation_mismatch",
+      },
+    });
     throw new IsolationRuntimeMissingError(
       `sandbox ${namespace}/${name} ${claimGone && podGone ? "was deleted" : "is being deleted"}: ${reason}. ` +
         "Only the verified isolation runtime may run sandboxes.",
@@ -353,6 +393,13 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     if (!claim) {
       try {
         claim = await kube.create(sandboxClaimManifest(namespace, team, userId));
+        if (claim.metadata.uid) {
+          await emit({
+            action: "sandbox.created",
+            teamId: team.id,
+            target: { sandboxId: claim.metadata.uid, userId },
+          });
+        }
       } catch (err) {
         // Another replica created it first: use that one.
         if (!isKubeStatus(err, 409)) throw err;
@@ -383,6 +430,7 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     const claim = await getOrCreateClaim(namespace, team, userId);
     const name = claim.metadata.name;
     const sandboxId = claim.metadata.uid as string;
+    const owner = { teamId: team.id, userId, sandboxId };
 
     const deadline = now() + podWaitTimeoutMs;
     for (let attempt = 0; ; attempt++) {
@@ -395,7 +443,12 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
       if (sandbox && sandboxName) {
         const templateClass = str(sandbox, "spec", "podTemplate", "spec", "runtimeClassName");
         if (templateClass !== verified.runtimeClassName) {
-          return rejectAndDelete(namespace, name, `its template uses "${templateClass ?? "none"}"`);
+          return rejectAndDelete(
+            owner,
+            namespace,
+            name,
+            `its template uses "${templateClass ?? "none"}"`,
+          );
         }
         if (str(sandbox, "spec", "operatingMode") === "Suspended") {
           return { sandboxId, namespace, claimName: name, sandboxName, state: "suspended" };
@@ -410,6 +463,7 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
           const podClass = str(pod, "spec", "runtimeClassName");
           if (podClass !== verified.runtimeClassName) {
             return rejectAndDelete(
+              owner,
               namespace,
               name,
               `its pod runs under "${podClass ?? "none"}"`,
@@ -418,6 +472,7 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
           }
           if (!(await stillVerified(verified, pod))) {
             return rejectAndDelete(
+              owner,
               namespace,
               name,
               "the RuntimeClass handler changed or the class was recreated",
@@ -484,6 +539,7 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
       !(await stillVerified(verified, pod))
     ) {
       return rejectAndDelete(
+        { teamId, userId, sandboxId: claimUid },
         namespace,
         claim.metadata.name,
         "its pod is not under the verified runtime",
@@ -509,16 +565,36 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
       : `RuntimeClass ${runtimeClassName} no longer isolates`;
   };
 
-  const deletePodAndClaim = async (pod: KubeObject, withClaim: boolean): Promise<boolean> => {
+  const deletePodAndClaim = async (
+    pod: KubeObject,
+    teamId: string | undefined,
+    withClaim: boolean,
+  ): Promise<boolean> => {
     const namespace = pod.metadata.namespace as string;
-    const userId = pod.metadata.annotations?.[ANNOTATION_USER_ID];
-    if (withClaim && userId && isUuid(userId)) {
+    const annotated = pod.metadata.annotations?.[ANNOTATION_USER_ID];
+    const userId = annotated && isUuid(annotated) ? annotated : undefined;
+    const claimUid = pod.metadata.labels?.[LABEL_CLAIM_UID];
+    const sandboxId = claimUid && isUuid(claimUid) ? claimUid : undefined;
+    if (withClaim && userId) {
       const claim = await kube.get(CLAIM(namespace, claimName(userId)));
-      if (claim && claim.metadata.uid === pod.metadata.labels?.[LABEL_CLAIM_UID]) {
+      if (claim && claim.metadata.uid === claimUid) {
         await deleteWithRetry(CLAIM(namespace, claim.metadata.name));
       }
     }
-    return deleteWithRetry(POD(namespace, pod.metadata.name));
+    const gone = await deleteWithRetry(POD(namespace, pod.metadata.name));
+    if (gone && teamId && isUuid(teamId)) {
+      await emit({
+        action: "sandbox.destroyed",
+        teamId,
+        target: {
+          ...(sandboxId ? { sandboxId } : {}),
+          ...(userId ? { userId } : {}),
+          pod: pod.metadata.name,
+          reason: withClaim ? "isolation_mismatch" : "isolation_lost",
+        },
+      });
+    }
+    return gone;
   };
 
   const reconcileIsolation = async (): Promise<ReconcileResult> => {
@@ -550,7 +626,9 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
           (await stillVerified(verified, pod));
         if (ok) continue;
         // Lost isolation: stop pods, keep claims (and volumes) for when it is restored.
-        if (await deletePodAndClaim(pod, verified !== undefined)) {
+        if (
+          await deletePodAndClaim(pod, ns.metadata.labels?.[LABEL_TEAM_ID], verified !== undefined)
+        ) {
           deleted.push(`${namespace}/${pod.metadata.name}`);
         }
       }

@@ -1,3 +1,4 @@
+import { AUDIT_EVENTS } from "@kobe/db";
 import { describe, expect, it, vi } from "vitest";
 import { IsolationRuntimeMissingError, type IsolationGate } from "../isolation/gate.js";
 import { createFakeKube, simulateAgentSandbox, type FakeKube } from "../testing/fake-kube.js";
@@ -25,6 +26,7 @@ import {
   SandboxProvisioningError,
   TEAM_RECONVERGE_MS,
   createSandboxProvider,
+  type SandboxAuditEvent,
   type SandboxProviderOptions,
 } from "./provider.js";
 
@@ -693,5 +695,61 @@ describe("reconcileIsolation", () => {
       spec: { runtimeClassName: "runc" },
     });
     expect((await provider.reconcileIsolation()).deleted).toEqual([]);
+  });
+});
+
+describe("audit events (KOBE-15 taxonomy)", () => {
+  function audited(opts: Parameters<typeof setup>[0] = {}) {
+    const events: SandboxAuditEvent[] = [];
+    const ctx = setup({
+      ...opts,
+      provider: { ...opts.provider, audit: (e) => void events.push(e) },
+    });
+    return { ...ctx, events };
+  }
+  const valid = (e: SandboxAuditEvent) =>
+    expect(AUDIT_EVENTS[e.action].target.safeParse(e.target).success).toBe(true);
+
+  it("records sandbox.created once per new claim, with an allowlisted target", async () => {
+    const { provider, events } = audited();
+    const { sandboxId } = await provider.ensureSandbox(TEAM, USER);
+    await provider.ensureSandbox(TEAM, USER);
+    expect(events).toEqual([
+      { action: "sandbox.created", teamId: TEAM.id, target: { sandboxId, userId: USER } },
+    ]);
+    events.forEach(valid);
+  });
+
+  it("records sandbox.destroyed when an unverified sandbox is deleted", async () => {
+    const { provider, events } = audited({ controller: { podRuntimeClass: () => "runc" } });
+    await expect(provider.ensureSandbox(TEAM, USER)).rejects.toThrow(IsolationRuntimeMissingError);
+    expect(events.map((e) => e.action)).toEqual(["sandbox.created", "sandbox.destroyed"]);
+    expect(events[1]).toMatchObject({
+      teamId: TEAM.id,
+      target: { userId: USER, reason: "isolation_mismatch", pod: `u-${USER}` },
+    });
+    events.forEach(valid);
+  });
+
+  it("records isolation_lost for pods the reconciler stops", async () => {
+    const { kube, provider, events } = audited({ provider: { runtimeClassName: "gvisor" } });
+    await provider.ensureSandbox(TEAM, USER);
+    recreateRuntimeClass(kube, "runc");
+    await provider.reconcileIsolation();
+    const destroyed = events.filter((e) => e.action === "sandbox.destroyed");
+    expect(destroyed).toHaveLength(1);
+    expect(destroyed[0]).toMatchObject({ teamId: TEAM.id, target: { reason: "isolation_lost" } });
+    events.forEach(valid);
+  });
+
+  it("keeps working when recording fails", async () => {
+    const { provider } = setup({
+      provider: {
+        audit: () => {
+          throw new Error("audit down");
+        },
+      },
+    });
+    await expect(provider.ensureSandbox(TEAM, USER)).resolves.toMatchObject({ state: "running" });
   });
 });

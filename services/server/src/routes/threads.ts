@@ -56,7 +56,8 @@ const ERRORS = {
   not_in_trash: [409, "The thread is not in Trash."],
   not_in_project: [409, "Only threads in a project can be shared to it."],
   invalid_cursor: [400, "The cursor is not valid. Start from the first page."],
-  search_unavailable: [501, "Thread search is not available yet."],
+  invalid_query: [400, "The search needs at least one term that is not excluded with -."],
+  search_timeout: [503, "The search took too long. Try more specific terms."],
 } as const satisfies Record<string, readonly [number, string]>;
 
 type ErrorCode = keyof typeof ERRORS;
@@ -96,7 +97,7 @@ function pageBody(page: Page<ThreadSummary>) {
  * from the session's active team (never from the request), every query runs in `withTeam`, and
  * every route needs `team.chat`. Reads touch only Postgres and never wake a sandbox (D14, U15).
  * Messages and runs (`POST /v1/threads/{id}/messages`, `/v1/runs/*`) belong to the run
- * orchestrator (KOBE-30); search (`?q=`) to KOBE-33 (`threads/search.ts`).
+ * orchestrator (KOBE-30). Search (`?q=`) is `threads/search.ts` (KOBE-33).
  */
 export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();

@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
+import { isolationAuditor } from "./audit/isolation.js";
 import { loadConfig } from "./config.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
 import { createIsolationGate } from "./isolation/gate.js";
@@ -40,10 +41,12 @@ if (config.auth && config.smtp) {
 
 // Spec D4: the process's own isolation check (startup + periodic). Agent work must go through
 // isolation.require(); without a verified gVisor/Kata RuntimeClass the server keeps serving.
+const auditIsolation = deps ? isolationAuditor(deps.database.db) : undefined;
 const isolation = createIsolationGate({
   runtimeClassName: config.runtimeClassName,
   listRuntimeClasses,
   onChange: (status) => {
+    void auditIsolation?.(status);
     if (status.state === "verified") {
       logger.info(
         { runtimeClass: status.runtimeClassName, handler: status.handler },
@@ -54,11 +57,15 @@ const isolation = createIsolationGate({
     }
   },
 });
+// Audit chain head in the server log at startup and every 5 minutes (KOBE-15): ship it off the box.
+deps?.auditAnchor.start();
 isolation.start().catch((err: unknown) => logger.error({ err }, "isolation check failed"));
 
 // Sandbox provider (KOBE-22); the scheduler starts sandboxes through it from KOBE-64 on.
 const sandbox =
-  config.process === "server" ? createSandboxRuntime(process.env, isolation) : undefined;
+  config.process === "server"
+    ? createSandboxRuntime(process.env, isolation, deps?.database.db)
+    : undefined;
 if (config.process === "server" && !sandbox) {
   logger.error(
     "KOBE_SANDBOX_CONFIG is not set: sandboxes are disabled (install with the Helm chart)",
@@ -101,6 +108,7 @@ function shutdown(signal: string): void {
   isolation.stop();
   stopReconciler?.();
   sandboxServer?.close();
+  deps?.auditAnchor.stop();
   // End event streams first so browsers reconnect (with Last-Event-ID) to another replica.
   void deps?.eventStream.hub.close();
   server.close((err) => {

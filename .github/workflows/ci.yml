@@ -32,6 +32,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: No infrastructure details in tracked files (public repo)
         run: scripts/check-public-hygiene.sh
+      # The pinned Pi (sandbox image lockfile) for kobe-sandbox-agent's real-Pi integration test.
+      - run: npm ci --prefix images/sandbox/pi --omit=dev --ignore-scripts --no-audit --no-fund
       - run: pnpm format:check
       - run: pnpm build
       - run: pnpm typecheck

@@ -60,7 +60,7 @@ export function renderTeam(ui: ReactElement) {
     user: ME,
     team: TEAM,
     role: "team_admin",
-    permissions: ["team.members.manage", "team.agents.suspend"],
+    permissions: ["team.members.manage", "team.agents.suspend", "team.audit.read"],
   };
   return render(<ConsoleAccessContext.Provider value={access}>{ui}</ConsoleAccessContext.Provider>);
 }
