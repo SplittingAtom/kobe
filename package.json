@@ -15,7 +15,9 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "license:check": "turbo run license:check",
-    "images:check": "scripts/check-images.sh"
+    "images:check": "scripts/check-images.sh",
+    "test:db": "turbo run test:db",
+    "db:check": "pnpm --filter @kobe/db run db:check"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

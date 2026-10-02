@@ -4,3 +4,4 @@ LICENSE
 **/.next
 **/coverage
 charts/**/templates
+packages/db/drizzle/meta

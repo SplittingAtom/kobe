@@ -23,6 +23,11 @@
       "dependsOn": ["build"],
       "inputs": ["$TURBO_DEFAULT$", "../../pnpm-lock.yaml"],
       "cache": false
+    },
+    "test:db": {
+      "dependsOn": ["^build"],
+      "env": ["KOBE_TEST_DATABASE_URL"],
+      "cache": false
     }
   }
 }
