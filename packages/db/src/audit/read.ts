@@ -1,6 +1,6 @@
-import { and, asc, desc, eq, gt, gte, like, lt, lte, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, lt, lte, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import type { KobeDb } from "../client.js";
+import type { KobeDb, KobeTx } from "../client.js";
 import { auditLog, type AuditActorKind } from "../schema/audit.js";
 import { users } from "../schema/auth.js";
 import { AUDIT_ACTIONS, AUDIT_CATEGORIES, type AuditAction } from "./events.js";
@@ -61,8 +61,8 @@ function conditions(query: AuditQuery): SQL[] {
     query.before === undefined ? undefined : lt(auditLog.seq, query.before),
     query.after === undefined ? undefined : gt(auditLog.seq, query.after),
     query.action === undefined ? undefined : eq(auditLog.action, query.action),
-    // Categories are fixed identifiers (no LIKE wildcards in them).
-    query.category === undefined ? undefined : like(auditLog.action, `${query.category}.%`),
+    // Stored first segment of the action: uses audit_log_category_seq_idx.
+    query.category === undefined ? undefined : eq(auditLog.category, query.category),
     query.actorId === undefined ? undefined : eq(auditLog.actorId, query.actorId),
     query.teamId === undefined ? undefined : eq(auditLog.teamId, query.teamId),
     query.since === undefined ? undefined : gte(auditLog.at, new Date(query.since)),
@@ -71,14 +71,17 @@ function conditions(query: AuditQuery): SQL[] {
   return where.filter((c): c is SQL => c !== undefined);
 }
 
-/**
- * Reads the install-wide audit log (install Owner/Admin, spec D6). Validate untrusted input with
- * `auditQuerySchema` first. Keyset pagination over `seq`: stable under concurrent appends.
- */
-export async function listAuditEvents(db: KobeDb, query: AuditQuery): Promise<AuditPage> {
+/** Session-bound team of the current transaction (withTeam), or NULL outside one. */
+const ACTIVE_TEAM = sql`NULLIF(current_setting('kobe.team_id', true), '')::uuid`;
+
+async function select(
+  executor: KobeDb | KobeTx,
+  query: AuditQuery,
+  where: SQL[],
+): Promise<{ rows: AuditEntry[]; nextCursor: number | null }> {
   const limit = query.limit ?? AUDIT_PAGE_DEFAULT;
   const forwards = query.after !== undefined;
-  const rows = await db
+  const rows = await executor
     .select({
       id: auditLog.id,
       seq: auditLog.seq,
@@ -97,13 +100,13 @@ export async function listAuditEvents(db: KobeDb, query: AuditQuery): Promise<Au
     })
     .from(auditLog)
     .leftJoin(users, and(eq(users.id, auditLog.actorId), eq(auditLog.actorKind, "user")))
-    .where(and(...conditions(query)))
+    .where(and(...where))
     .orderBy(forwards ? asc(auditLog.seq) : desc(auditLog.seq))
     .limit(limit + 1);
   const page = rows.slice(0, limit);
   const last = page.at(-1);
   return {
-    events: page.map((r) => ({
+    rows: page.map((r) => ({
       id: r.id,
       seq: r.seq,
       at: r.at,
@@ -121,20 +124,36 @@ export async function listAuditEvents(db: KobeDb, query: AuditQuery): Promise<Au
 }
 
 /**
- * Reads one team's audit view (team admins, spec D6): only events recorded with that team's id.
- * `audit_log` is install-wide (no RLS), so this function is the team wall: it always filters on
- * `teamId` and ignores any `teamId` in the query. Client IPs and user agents stay in the install
- * view (personal data of other teams' members and of install admins).
+ * Reads the install-wide audit log (install Owner/Admin, spec D6). Validate untrusted input with
+ * `auditQuerySchema` first. Keyset pagination over `seq`: stable under concurrent appends.
  */
-export async function listTeamAuditEvents(
-  db: KobeDb,
-  teamId: string,
-  query: AuditQuery,
-): Promise<AuditPage> {
-  const team = z.uuid().parse(teamId);
-  const page = await listAuditEvents(db, { ...query, teamId: team });
+export async function listAuditEvents(db: KobeDb, query: AuditQuery): Promise<AuditPage> {
+  const { rows, nextCursor } = await select(db, query, conditions(query));
+  return { events: rows, nextCursor };
+}
+
+/** An event as the team view shows it: no client address, user agent or chain fields. */
+export type TeamAuditEntry = Omit<AuditEntry, "ip" | "userAgent" | "prevHash" | "hash">;
+
+export interface TeamAuditPage {
+  readonly events: TeamAuditEntry[];
+  readonly nextCursor: number | null;
+}
+
+/**
+ * Reads the team audit view (team admins, spec D6) inside a `withTeam()` transaction. The team is
+ * not a parameter: the query matches `team_id` against the transaction's `kobe.team_id`, the same
+ * setting team RLS uses, so outside withTeam it returns nothing and a `teamId` in the query is
+ * ignored. Client IPs, user agents and hash-chain fields stay in the install view.
+ */
+export async function listTeamAuditEvents(tx: KobeTx, query: AuditQuery): Promise<TeamAuditPage> {
+  const { teamId: _ignored, ...rest } = query;
+  const { rows, nextCursor } = await select(tx, rest, [
+    sql`${auditLog.teamId} = ${ACTIVE_TEAM}`,
+    ...conditions(rest),
+  ]);
   return {
-    ...page,
-    events: page.events.map((e) => ({ ...e, ip: null, userAgent: null })),
+    events: rows.map(({ ip: _ip, userAgent: _ua, prevHash: _p, hash: _h, ...event }) => event),
+    nextCursor,
   };
 }

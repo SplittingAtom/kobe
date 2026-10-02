@@ -67,7 +67,7 @@ export async function issueInvite(
     if (!row) throw new Error("invitation upsert returned no row");
     await recordAudit(tx, {
       action: "identity.invitation.created",
-      target: { invitationId: row.id, email },
+      target: { invitationId: row.id },
     });
     return { id: row.id, email, expiresAt: row.expiresAt, token };
   });
@@ -93,7 +93,7 @@ export async function reissueInvite(
     if (!row) return null;
     await recordAudit(tx, {
       action: "identity.invitation.resent",
-      target: { invitationId: row.id, email: row.email },
+      target: { invitationId: row.id },
     });
     return { ...row, token };
   });

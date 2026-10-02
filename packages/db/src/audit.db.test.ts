@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import { afterAll, describe, expect, inject, it } from "vitest";
 import {
   AUDIT_GENESIS_HASH,
+  AuditBusyError,
   AuditEventError,
   SYSTEM_ACTOR,
   audit,
@@ -201,6 +203,45 @@ describe("audit() inside the action's transaction", () => {
   });
 });
 
+describe("bounded wait for the chain lock", () => {
+  const CHAIN_LOCK = `SELECT pg_advisory_xact_lock(hashtextextended('kobe.audit_log', 0))`;
+
+  it("gives an audited transaction a lock timeout unless it has its own", async () => {
+    const own = await app.db.transaction(async (tx) => {
+      await audit(tx, signOut());
+      return (await tx.execute<{ t: string }>(sql`SELECT current_setting('lock_timeout') AS t`))
+        .rows[0]?.t;
+    });
+    expect(own).toBe("5s");
+    const kept = await app.db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL lock_timeout = '1500ms'`);
+      await audit(tx, signOut());
+      return (await tx.execute<{ t: string }>(sql`SELECT current_setting('lock_timeout') AS t`))
+        .rows[0]?.t;
+    });
+    expect(kept).toBe("1500ms");
+  });
+
+  it("fails with AuditBusyError (and rolls back) when the chain lock is held too long", async () => {
+    const holder = await owner.connect();
+    const actorId = randomUUID();
+    try {
+      await holder.query("BEGIN");
+      await holder.query(CHAIN_LOCK);
+      await expect(
+        app.db.transaction(async (tx) => {
+          await tx.execute(sql`SET LOCAL lock_timeout = '200ms'`);
+          await audit(tx, signOut(actorId));
+        }),
+      ).rejects.toBeInstanceOf(AuditBusyError);
+    } finally {
+      await holder.query("ROLLBACK");
+      holder.release();
+    }
+    expect(await count("actor_id = $1", [actorId])).toBe(0);
+  });
+});
+
 describe("hash chain verification", () => {
   /** Tampers as a superuser inside a transaction that is always rolled back. */
   async function tampered(
@@ -267,6 +308,9 @@ describe("hash chain verification", () => {
   });
 });
 
+const teamView = (teamId: string, query: Parameters<typeof listTeamAuditEvents>[1]) =>
+  withTeam(app.db, teamId, (tx) => listTeamAuditEvents(tx, query));
+
 describe("reading the audit log", () => {
   const teamA = randomUUID();
   const teamB = randomUUID();
@@ -286,28 +330,63 @@ describe("reading the audit log", () => {
 
   it("shows a team only its own events, newest first, with keyset pages", async () => {
     await seed();
-    const first = await listTeamAuditEvents(app.db, teamA, { limit: 3 });
+    const first = await teamView(teamA, { limit: 3 });
     expect(first.events).toHaveLength(3);
     expect(first.events.every((e) => e.teamId === teamA)).toBe(true);
     expect(first.nextCursor).toBe(first.events.at(-1)?.seq);
-    const second = await listTeamAuditEvents(app.db, teamA, {
-      limit: 3,
-      before: first.nextCursor ?? 0,
-    });
+    const second = await teamView(teamA, { limit: 3, before: first.nextCursor ?? 0 });
     expect(second.events).toHaveLength(2);
     expect(second.nextCursor).toBeNull();
     const seqs = [...first.events, ...second.events].map((e) => e.seq);
     expect(seqs).toEqual([...seqs].sort((x, y) => y - x));
 
     // A teamId in the query can't widen the view.
-    const sneaky = await listTeamAuditEvents(app.db, teamA, { teamId: teamB, limit: 50 });
+    const sneaky = await teamView(teamA, { teamId: teamB, limit: 50 });
     expect(sneaky.events.every((e) => e.teamId === teamA)).toBe(true);
     expect(sneaky.events).toHaveLength(5);
   });
 
-  it("hides client IPs and user agents in the team view", async () => {
-    const page = await listTeamAuditEvents(app.db, teamA, { limit: 50 });
-    expect(page.events.every((e) => e.ip === null && e.userAgent === null)).toBe(true);
+  it("leaves client IPs, user agents and chain fields out of the team view", async () => {
+    const page = await teamView(teamA, { limit: 50 });
+    for (const event of page.events) {
+      expect(Object.keys(event).sort()).toEqual(
+        ["action", "actor", "at", "id", "seq", "target", "teamId"].sort(),
+      );
+    }
+  });
+
+  it("cross-team probe: the team comes only from the transaction's kobe.team_id", async () => {
+    // Outside withTeam (no kobe.team_id) the view is empty, whatever the query names.
+    const outside = await app.db.transaction((tx) =>
+      listTeamAuditEvents(tx, { teamId: teamA, limit: 50 }),
+    );
+    expect(outside.events).toEqual([]);
+    // A team with no events sees nothing of A's or B's.
+    expect((await teamView(randomUUID(), { teamId: teamA, limit: 50 })).events).toEqual([]);
+    // Each team sees exactly its own rows, compared with the table itself.
+    for (const team of [teamA, teamB]) {
+      const { rows } = await owner.query<{ seq: string }>(
+        `SELECT seq::text FROM audit_log WHERE team_id = $1 ORDER BY seq DESC`,
+        [team],
+      );
+      const view = await teamView(team, { limit: 200 });
+      expect(view.events.map((e) => String(e.seq))).toEqual(rows.map((r) => r.seq));
+    }
+  });
+
+  it("filters by category through its index", async () => {
+    const client = await owner.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL enable_seqscan = off");
+      const { rows } = await client.query<{ "QUERY PLAN": string }>(
+        `EXPLAIN SELECT seq FROM audit_log WHERE category = 'identity' ORDER BY seq DESC LIMIT 51`,
+      );
+      expect(rows.map((r) => r["QUERY PLAN"]).join("\n")).toContain("audit_log_category_seq_idx");
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
   });
 
   it("filters the install log by action, category, actor, team and time; pages forwards", async () => {

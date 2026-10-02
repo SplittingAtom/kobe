@@ -1,5 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { accounts, createDb, installRoles, users, type KobeDatabase } from "@kobe/db";
+import { AuditAnchorLogger } from "./audit/anchor.js";
+import { AuthAttemptAudit } from "./audit/attempts.js";
 import { recordAudit } from "./audit/record.js";
 import { createAuth, type KobeAuth } from "./auth/auth.js";
 import type { Mailer } from "./mail/mailer.js";
@@ -27,6 +29,10 @@ export interface ServerDeps {
   readonly auth: KobeAuth;
   readonly publicUrl: string;
   readonly mailer: Mailer;
+  /** Logs and attests the audit chain head (started by index.ts, not in tests). */
+  readonly auditAnchor: AuditAnchorLogger;
+  /** Aggregated audit of unauthenticated auth attempts (flushed on close). */
+  readonly authAttempts: AuthAttemptAudit;
   /** Downstream steps of deactivation/reactivation (sandboxes, grants, schedules, audit). */
   readonly lifecycle: UserLifecycle;
   /** Creates an email+password user (and optional install role) atomically, without sign-up. */
@@ -45,7 +51,10 @@ const digest = (value: string): Buffer => createHash("sha256").update(value).dig
 
 export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   const database = createDb(options.databaseUrl);
+  const authAttempts = new AuthAttemptAudit(database.db);
+  authAttempts.start();
   const auth = createAuth({
+    attempts: authAttempts,
     db: database.db,
     publicUrl: options.publicUrl,
     secret: options.authSecret,
@@ -59,6 +68,8 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     auth,
     publicUrl: new URL(options.publicUrl).origin,
     mailer: options.mailer,
+    authAttempts,
+    auditAnchor: new AuditAnchorLogger(database.db, options.authSecret),
     lifecycle: new UserLifecycle(),
     async createUserWithPassword({ email, name, password }, { installRole, recordSetup } = {}) {
       const ctx = await auth.$context;
@@ -97,6 +108,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     },
     close: async () => {
       options.mailer.close();
+      await authAttempts.stop();
       await database.close();
     },
   };

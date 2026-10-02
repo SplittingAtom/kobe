@@ -17,6 +17,8 @@ export {
   type AuditEntry,
   type AuditPage,
   type AuditQuery,
+  type TeamAuditEntry,
+  type TeamAuditPage,
 } from "./read.js";
 export {
   AUDIT_GENESIS_HASH,
@@ -26,6 +28,8 @@ export {
   type VerifyOptions,
 } from "./verify.js";
 export {
+  AUDIT_LOCK_TIMEOUT,
+  AuditBusyError,
   AuditEventError,
   SYSTEM_ACTOR,
   audit,

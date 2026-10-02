@@ -1,7 +1,9 @@
 import { Hono } from "hono";
+import { AuditBusyError } from "@kobe/db";
 import { auditRequestContext, auditUserContext } from "./audit/context.js";
 import { requireSession, type AuthVariables } from "./auth/session.js";
 import type { ServerDeps } from "./deps.js";
+import { logger } from "./logger.js";
 import type { IsolationGate } from "./isolation/gate.js";
 import { agentRoutes } from "./routes/agents.js";
 import { installAuditRoutes } from "./routes/install-audit.js";
@@ -34,6 +36,18 @@ export interface AppOptions {
 export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   const { isolation } = options;
   const app = new Hono();
+  // An audited action that couldn't get the audit chain lock in time rolled back: retryable.
+  app.onError((err, c) => {
+    if (err instanceof AuditBusyError) {
+      return c.json({ code: err.code, message: err.message }, 503);
+    }
+    // Hono's default handling for everything else.
+    if ("getResponse" in err && typeof err.getResponse === "function") {
+      return err.getResponse() as Response;
+    }
+    logger.error({ err }, "unhandled error");
+    return c.text("Internal Server Error", 500);
+  });
   app.get("/healthz", (c) => c.json({ status: "ok", service: SERVICE }));
   app.get("/readyz", (c) => {
     if (!isolation) return c.json({ status: "ready", service: SERVICE });

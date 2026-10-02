@@ -1,6 +1,7 @@
 import type { BetterAuthPlugin } from "better-auth";
 import { createAuthMiddleware, getSessionFromCtx, isAPIError } from "better-auth/api";
 import { eq, users, type KobeDb } from "@kobe/db";
+import type { AuthAttemptAudit } from "./attempts.js";
 import { recordAuditAfter, type ServerAuditEvent } from "./record.js";
 
 type AuthCtx = Parameters<Parameters<typeof createAuthMiddleware>[0]>[0];
@@ -62,7 +63,14 @@ async function userIdByEmail(db: KobeDb, email: unknown): Promise<string | null>
  * after hook (which turns a password sign-in into a pending 2FA challenge) must run first.
  * Password reset request/completion are recorded by auth.ts (they have their own callbacks).
  */
-export function auditPlugin({ db }: { readonly db: KobeDb }) {
+export function auditPlugin({
+  db,
+  attempts,
+}: {
+  readonly db: KobeDb;
+  /** Aggregates unauthenticated attempts (failed sign-ins, 2FA challenges). */
+  readonly attempts: AuthAttemptAudit;
+}) {
   // Keyed by the incoming Request, which before and after hooks share; GC'd with it.
   const prior = new WeakMap<object, PriorSession>();
 
@@ -98,10 +106,11 @@ export function auditPlugin({ db }: { readonly db: KobeDb }) {
       const body = ctx.body as { email?: unknown } | undefined;
       if (failed) {
         const userId = method === "password" ? await userIdByEmail(db, body?.email) : null;
-        await recordAuditAfter(db, {
+        await attempts.record({
           action: "auth.sign_in.failed",
-          actor: user(null),
-          target: { method, reason: reasonOf(ctx.context.returned), ...(userId ? { userId } : {}) },
+          userId,
+          method,
+          reason: reasonOf(ctx.context.returned),
         });
       } else if (newUserId) {
         await recordAuditAfter(db, {
@@ -110,10 +119,10 @@ export function auditPlugin({ db }: { readonly db: KobeDb }) {
           target: { method },
         });
       } else if (method === "password") {
-        await recordAuditAfter(db, {
+        await attempts.record({
           action: "auth.sign_in.two_factor_required",
-          actor: user(await userIdByEmail(db, body?.email)),
-          target: { method },
+          userId: await userIdByEmail(db, body?.email),
+          method,
         });
       }
       return;

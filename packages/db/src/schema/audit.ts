@@ -46,6 +46,10 @@ export const auditLog = pgTable(
     actorId: uuid(),
     /** Dotted event name from `AUDIT_EVENTS`, e.g. `identity.member.role_changed`. */
     action: text().notNull(),
+    /** First segment of `action` (`auth`, `identity`, …), stored so category filters use an index. */
+    category: text()
+      .notNull()
+      .generatedAlwaysAs(sql`split_part(action, '.', 1)`),
     /** Allowlisted metadata of the action (ids, enums, short labels). */
     target: jsonb().$type<Record<string, unknown>>().notNull().default({}),
     /** Client address of the request, when there was one. */
@@ -62,6 +66,7 @@ export const auditLog = pgTable(
       .where(sql`${t.teamId} IS NOT NULL`),
     index("audit_log_actor_seq_idx").on(t.actorId, t.seq),
     index("audit_log_action_seq_idx").on(t.action, t.seq),
+    index("audit_log_category_seq_idx").on(t.category, t.seq),
     index("audit_log_at_idx").on(t.at),
     check("audit_log_action_format", sql`${t.action} ~ '^[a-z][a-z_]*(\\.[a-z][a-z_]*){1,3}$'`),
     check("audit_log_action_length", sql`char_length(${t.action}) <= 64`),

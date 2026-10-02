@@ -42,6 +42,22 @@ describe("parseCommand", () => {
     expect(cmd).toMatchObject({ command: "backup", s3: null });
   });
 
+  it("parses --operator and --expect-audit-head, and rejects malformed ones", () => {
+    const env = { KOBE_DB_MIGRATE_URL: OWNER_URL, ...S3, ...KEY_ENV };
+    const hash = "c".repeat(64);
+    const cmd = parseCommand(
+      ["restore", "--from", "/b", "--operator", "ops.jane", "--expect-audit-head", `42:${hash}`],
+      env,
+    );
+    expect(cmd).toMatchObject({ operator: "ops.jane", expectAuditHead: { seq: 42, hash } });
+    expect(() =>
+      parseCommand(["restore", "--from", "/b", "--expect-audit-head", "42"], env),
+    ).toThrow(/expect-audit-head/);
+    expect(() => parseCommand(["restore", "--from", "/b", "--operator", "bad name!"], env)).toThrow(
+      /operator/,
+    );
+  });
+
   it("parses restore with the owner URL", () => {
     const cmd = parseCommand(["restore", "--from", "/b/1", "--allow-object-mismatch"], {
       KOBE_DB_MIGRATE_URL: OWNER_URL,

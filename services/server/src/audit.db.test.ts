@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AUDIT_EVENTS, verifyAuditChain } from "@kobe/db";
 import { runWithAuditContext } from "./audit/context.js";
+import { anchorKey, anchorMac } from "./audit/anchor.js";
 import { isolationAuditor } from "./audit/isolation.js";
 import { deactivateUser, reactivateUser } from "./users/deactivation.js";
 import { RawBody, type TestBrowser } from "./testing/browser.js";
@@ -326,6 +327,9 @@ describe("identity and install events", () => {
     expect(accepted?.actor_id).toBe(accepted?.target.userId);
     expect(rows[3]?.target).toEqual({ method: "invitation" });
     expect(JSON.stringify(rows)).not.toContain(token);
+    // Invitees are identified by invitation id only: no email in an append-only record.
+    expect(JSON.stringify(rows)).not.toContain("dana@audit.test");
+    expect(JSON.stringify(rows)).not.toContain("eve@audit.test");
   });
 
   it("records install role grants, revocations and the ownership transfer", async () => {
@@ -382,7 +386,7 @@ describe("team events", () => {
       [
         "identity.team_invitation.created",
         ids.alice,
-        expect.objectContaining({ email: email("carol"), role: "member" }),
+        { invitationId: expect.any(String), role: "member" },
       ],
       [
         "identity.team_invitation.accepted",
@@ -397,7 +401,7 @@ describe("team events", () => {
       [
         "identity.team_invitation.created",
         ids.alice,
-        expect.objectContaining({ email: email("bob"), role: "builder" }),
+        { invitationId: expect.any(String), role: "builder" },
       ],
       ["identity.team_invitation.revoked", ids.alice, expect.anything()],
       ["identity.member.removed", ids.alice, { userId: ids.carol, role: "builder" }],
@@ -572,12 +576,18 @@ describe("read APIs", () => {
     expect((await admin.get("/v1/install/audit?bogus=1")).status).toBe(400);
   });
 
-  it("shows team admins only their team's events, without IPs", async () => {
+  it("shows team admins only their team's events, without IPs or chain fields", async () => {
     const view = await alice.get("/v1/team/audit?limit=200");
     expect(view.status).toBe(200);
-    const events = view.json.events as { teamId: string; action: string; ip: unknown }[];
+    const events = view.json.events as Record<string, unknown>[];
     expect(events.length).toBeGreaterThan(5);
-    expect(events.every((e) => e.teamId === finance && e.ip === null)).toBe(true);
+    expect(events.every((e) => e.teamId === finance)).toBe(true);
+    for (const field of ["ip", "userAgent", "prevHash", "hash"]) {
+      expect(
+        events.some((e) => field in e),
+        field,
+      ).toBe(false);
+    }
     expect(events.map((e) => e.action)).toContain("identity.team.created");
     expect((await alice.get(`/v1/team/audit?teamId=${marketing}`)).status).toBe(400);
 
@@ -600,8 +610,97 @@ describe("read APIs", () => {
 
   it("verifies the hash chain over everything recorded", async () => {
     const res = await admin.get("/v1/install/audit/integrity");
-    expect(res.json).toMatchObject({ ok: true, head: { seq: await head() } });
+    const seq = await head();
+    expect(res.json).toMatchObject({ ok: true, head: { seq }, anchor: { seq } });
+    // The anchor is attested with a key derived from the auth secret (not in the database).
+    expect(res.json.anchor.mac).toBe(
+      anchorMac(anchorKey("h".repeat(48)), seq, res.json.head.hash as string),
+    );
     expect((await alice.get("/v1/install/audit/integrity")).status).toBe(403);
+  });
+});
+
+describe("unauthenticated attempts are aggregated", () => {
+  it("bounds a failed sign-in flood from rotating addresses to two rows per account", async () => {
+    await h.deps.authAttempts.flush({ all: true });
+    const mark = await head();
+    for (let i = 0; i < 30; i++) {
+      await h.browser().post("/api/auth/sign-in/email", {
+        email: "nobody-flood@audit.test",
+        password: `guess-${i}`,
+      });
+      await h.browser().post("/api/auth/sign-in/email", {
+        email: email("bob"),
+        password: `guess-${i}`,
+      });
+    }
+    const during = await since(mark);
+    expect(during.map((r) => [r.action, r.target.userId ?? null])).toEqual([
+      ["auth.sign_in.failed", null],
+      ["auth.sign_in.failed", ids.bob],
+    ]);
+    await h.deps.authAttempts.flush({ all: true });
+    const summaries = (await since(mark)).slice(2);
+    expect(summaries.map((r) => [r.action, r.actor_kind, r.ip, r.target])).toEqual([
+      [
+        "auth.attempts.summarized",
+        "system",
+        null,
+        expect.objectContaining({
+          of: "auth.sign_in.failed",
+          method: "password",
+          suppressed: 29,
+          distinctIps: 29,
+        }),
+      ],
+      [
+        "auth.attempts.summarized",
+        "system",
+        null,
+        expect.objectContaining({
+          of: "auth.sign_in.failed",
+          method: "password",
+          userId: ids.bob,
+          suppressed: 29,
+        }),
+      ],
+    ]);
+    expect(JSON.stringify(summaries)).not.toContain("nobody-flood");
+  });
+
+  it("bounds reset-request floods the same way", async () => {
+    await h.deps.authAttempts.flush({ all: true });
+    const mark = await head();
+    for (let i = 0; i < 10; i++) {
+      await h.browser().post("/api/auth/request-password-reset", { email: email("bob") });
+    }
+    const first = await settled(mark, 1);
+    await h.mailer.settle();
+    await h.deps.authAttempts.flush({ all: true });
+    const rows = await since(mark);
+    expect(first[0]?.action).toBe("auth.password.reset_requested");
+    expect(rows.map((r) => [r.action, r.target.suppressed ?? null])).toEqual([
+      ["auth.password.reset_requested", null],
+      ["auth.attempts.summarized", 9],
+    ]);
+  });
+});
+
+describe("a busy audit chain", () => {
+  it("answers 503 audit_busy and changes nothing when the chain lock can't be had", async () => {
+    await h.admin.query("BEGIN");
+    try {
+      await h.admin.query(`SELECT pg_advisory_xact_lock(hashtextextended('kobe.audit_log', 0))`);
+      const res = await owner.put("/v1/install/settings", { requireTwoFactor: true });
+      expect(res.status).toBe(503);
+      expect(res.json.code).toBe("audit_busy");
+    } finally {
+      await h.admin.query("ROLLBACK");
+    }
+    const { rows } = await h.admin.query<{ value: string }>(
+      `SELECT value FROM install_settings WHERE key = 'require_2fa'`,
+    );
+    expect(rows[0]?.value).toBe("false");
   });
 });
 

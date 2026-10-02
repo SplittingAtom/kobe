@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import { auditQuerySchema, type AuditPage, type AuditQuery } from "@kobe/db";
+import { auditQuerySchema, type AuditPage, type AuditQuery, type TeamAuditPage } from "@kobe/db";
 
 type Parsed = { ok: true; value: AuditQuery } | { ok: false; response: Response };
 
@@ -25,7 +25,7 @@ export function parseAuditQuery(c: Context, { allowTeamFilter = true } = {}): Pa
 }
 
 /** JSON body of one page; `nextCursor` is a string so clients treat it as opaque. */
-export function auditPageBody(page: AuditPage) {
+export function auditPageBody(page: AuditPage | TeamAuditPage) {
   return {
     events: page.events.map((e) => ({ ...e, at: e.at.toISOString() })),
     nextCursor: page.nextCursor === null ? null : String(page.nextCursor),

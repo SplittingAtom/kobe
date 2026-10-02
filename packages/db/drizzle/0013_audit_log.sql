@@ -7,6 +7,7 @@ CREATE TABLE "audit_log" (
 	"actor_kind" "audit_actor_kind" NOT NULL,
 	"actor_id" uuid,
 	"action" text NOT NULL,
+	"category" text GENERATED ALWAYS AS (split_part(action, '.', 1)) STORED NOT NULL,
 	"target" jsonb DEFAULT '{}'::jsonb NOT NULL,
 	"ip" "inet",
 	"user_agent" text,
@@ -24,4 +25,5 @@ CREATE TABLE "audit_log" (
 CREATE INDEX "audit_log_team_seq_idx" ON "audit_log" USING btree ("team_id","seq") WHERE "audit_log"."team_id" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX "audit_log_actor_seq_idx" ON "audit_log" USING btree ("actor_id","seq");--> statement-breakpoint
 CREATE INDEX "audit_log_action_seq_idx" ON "audit_log" USING btree ("action","seq");--> statement-breakpoint
+CREATE INDEX "audit_log_category_seq_idx" ON "audit_log" USING btree ("category","seq");--> statement-breakpoint
 CREATE INDEX "audit_log_at_idx" ON "audit_log" USING btree ("at");

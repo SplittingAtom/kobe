@@ -28,7 +28,6 @@ const label = z
   .min(1)
   .max(200)
   .regex(/^[^\p{Cc}\p{Zl}\p{Zp}]*$/u);
-const email = z.email().max(254);
 const role = z.enum(teamRole.enumValues);
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
 /** Machine-readable reason (e.g. a Better Auth error code), never a free-text message. */
@@ -73,6 +72,26 @@ export const AUDIT_EVENTS = {
   }),
   /** Password accepted; the second factor is still outstanding (no session yet). */
   "auth.sign_in.two_factor_required": event("install", { method: signInMethod }),
+  /**
+   * Unauthenticated attempts are aggregated (KOBE-15 review): the first of each kind per account (or
+   * per "no account") and method in a window is recorded as itself; the rest of that window become
+   * one summary, so a flood from rotating IPs adds at most two rows per key and window.
+   */
+  "auth.attempts.summarized": event("install", {
+    of: z.enum([
+      "auth.sign_in.failed",
+      "auth.sign_in.two_factor_required",
+      "auth.password.reset_requested",
+    ]),
+    method: signInMethod.optional(),
+    userId: id.optional(),
+    /** Attempts in the window after the first (which was recorded as its own event). */
+    suppressed: z.number().int().positive(),
+    /** Distinct client addresses among them (counted up to 1,000). */
+    distinctIps: z.number().int().nonnegative(),
+    from: z.iso.datetime(),
+    to: z.iso.datetime(),
+  }),
   "auth.sign_out": event("install", {}),
   "auth.session.revoked": event("install", { which: z.enum(["one", "others", "all"]) }),
   "auth.password.changed": event("install", {}),
@@ -87,8 +106,10 @@ export const AUDIT_EVENTS = {
 
   // ── identity: users, invitations, roles, teams, membership ──
   "identity.setup.completed": event("install", { ownerUserId: id }),
-  "identity.invitation.created": event("install", { invitationId: id, email }),
-  "identity.invitation.resent": event("install", { invitationId: id, email }),
+  // No invitee email (personal data in an append-only log): the invitation id resolves it while
+  // the invitation exists (install invitations are kept; KOBE-15 review).
+  "identity.invitation.created": event("install", { invitationId: id }),
+  "identity.invitation.resent": event("install", { invitationId: id }),
   "identity.invitation.revoked": event("install", { invitationId: id }),
   /** Actor: the new user. */
   "identity.invitation.accepted": event("install", { invitationId: id, userId: id }),
@@ -99,7 +120,7 @@ export const AUDIT_EVENTS = {
   "identity.ownership.transferred": event("install", { fromUserId: id, toUserId: id }),
   "identity.team.created": event("team", { slug, name: label, adminUserId: id }),
   "identity.team.renamed": event("team", { name: label }),
-  "identity.team_invitation.created": event("team", { invitationId: id, email, role }),
+  "identity.team_invitation.created": event("team", { invitationId: id, role }),
   "identity.team_invitation.revoked": event("team", { invitationId: id }),
   /** Actor: the invitee, who joins with `role`. */
   "identity.team_invitation.accepted": event("team", { userId: id, role, invitedBy: id }),
@@ -128,6 +149,14 @@ export const AUDIT_EVENTS = {
     backupCreatedAt: z.iso.datetime(),
     tables: z.number().int().nonnegative(),
     rows: z.number().int().nonnegative(),
+    /** Who ran the restore (OS user or `--operator`). */
+    operator: z.string().regex(/^[A-Za-z0-9._@-]{1,64}$/),
+    /** Head of the restored chain, verified inside the restore transaction (absent if empty). */
+    auditHeadSeq: z.number().int().positive().optional(),
+    auditHeadHash: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
   }),
 
   // ── policy: tool rules and switches (D29, KOBE-35); install rules install-only, others team ──

@@ -69,7 +69,7 @@ export async function inviteToTeam(
     await recordAudit(tx, {
       action: "identity.team_invitation.created",
       teamId,
-      target: { invitationId: row.id, email, role: input.role },
+      target: { invitationId: row.id, role: input.role },
     });
     return { id: row.id, email, role: input.role, expiresAt: row.expiresAt.toISOString() };
   });

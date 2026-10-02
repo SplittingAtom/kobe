@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { listTeamAuditEvents } from "@kobe/db";
+import { listTeamAuditEvents, withTeam } from "@kobe/db";
 import { auditPageBody, parseAuditQuery } from "../audit/http.js";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
@@ -18,7 +18,9 @@ export function teamAuditRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariabl
   app.get("/", async (c) => {
     const query = parseAuditQuery(c, { allowTeamFilter: false });
     if (!query.ok) return query.response;
-    return c.json(auditPageBody(await listTeamAuditEvents(db, c.get("team").id, query.value)));
+    // The team comes from the withTeam transaction (kobe.team_id), not from a parameter.
+    const page = await withTeam(db, c.get("team").id, (tx) => listTeamAuditEvents(tx, query.value));
+    return c.json(auditPageBody(page));
   });
 
   return app;

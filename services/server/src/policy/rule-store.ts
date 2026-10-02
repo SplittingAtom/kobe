@@ -8,6 +8,7 @@ import {
   sql,
   toolRules,
   withTeam,
+  type AuditActor,
   type KobeDb,
   type KobeTx,
 } from "@kobe/db";
@@ -162,16 +163,21 @@ export async function writePromptSandboxWrites(db: KobeDb, value: boolean): Prom
   });
 }
 
-/** Audits a rule change (KOBE-15) by its policy metadata: never the note or the arg patterns. */
-function auditRule(
+/**
+ * Audits a rule change (KOBE-15) by its policy metadata: never the note or the arg patterns. The
+ * actor defaults to the request's signed-in user.
+ */
+export function auditRule(
   tx: KobeTx,
   action: "policy.rule.created" | "policy.rule.updated" | "policy.rule.deleted",
   rule: StoredRule,
   teamId: string | null,
+  actor?: AuditActor,
 ) {
   return recordAudit(tx, {
     action,
     teamId,
+    ...(actor ? { actor } : {}),
     target: {
       ruleId: rule.id,
       scope: rule.scope,

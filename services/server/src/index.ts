@@ -55,6 +55,8 @@ const isolation = createIsolationGate({
     }
   },
 });
+// Audit chain head in the server log at startup and every 5 minutes (KOBE-15): ship it off the box.
+deps?.auditAnchor.start();
 isolation.start().catch((err: unknown) => logger.error({ err }, "isolation check failed"));
 
 // The scheduler serves health endpoints only (its jobs arrive in KOBE-64).
@@ -65,6 +67,7 @@ const server = serve({ fetch: createApp(deps, { isolation }).fetch, port: config
 function shutdown(signal: string): void {
   logger.info({ signal }, "shutting down");
   isolation.stop();
+  deps?.auditAnchor.stop();
   server.close((err) => {
     if (err) logger.error({ err }, "shutdown error");
     void (deps?.close() ?? Promise.resolve()).finally(() => process.exit(err ? 1 : 0));

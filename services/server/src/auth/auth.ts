@@ -14,6 +14,7 @@ import {
   verifications,
   type KobeDb,
 } from "@kobe/db";
+import type { AuthAttemptAudit } from "../audit/attempts.js";
 import { auditPlugin } from "../audit/auth-plugin.js";
 import { recordAuditAfter } from "../audit/record.js";
 import { logger } from "../logger.js";
@@ -37,6 +38,8 @@ export interface AuthOptions {
   readonly trustedProxies: readonly string[];
   /** Sends password-reset emails (SMTP in production, in memory in tests). */
   readonly mailer: Mailer;
+  /** Audit of unauthenticated attempts, aggregated per window (KOBE-15). */
+  readonly attempts: AuthAttemptAudit;
 }
 
 /** Password-reset links work once, for 30 minutes. */
@@ -58,7 +61,14 @@ const PASSKEY_VERIFY_PATHS = new Set([
  * in Postgres and are looked up on every request (no cookie cache), so revocation is immediate.
  * Rate limits are stored in Postgres so every replica shares them.
  */
-export function createAuth({ db, publicUrl, secret, trustedProxies, mailer }: AuthOptions) {
+export function createAuth({
+  db,
+  publicUrl,
+  secret,
+  trustedProxies,
+  mailer,
+  attempts,
+}: AuthOptions) {
   const origin = new URL(publicUrl);
 
   /**
@@ -69,12 +79,9 @@ export function createAuth({ db, publicUrl, secret, trustedProxies, mailer }: Au
    */
   async function mailResetLink(user: { id: string; email: string }, token: string) {
     if (await isDeactivated(db, user.id)) return;
-    // Not awaited: the email must not wait on the audit write (it never throws).
-    void recordAuditAfter(db, {
-      action: "auth.password.reset_requested",
-      actor: { kind: "user", id: null },
-      target: { userId: user.id },
-    });
+    // Not awaited: the email must not wait on the audit write (it never throws). Aggregated:
+    // anyone can request resets for an address in any number.
+    void attempts.record({ action: "auth.password.reset_requested", userId: user.id });
     // A recent link is still usable: don't send another (soft; never blocks a later request).
     if (await recentResetLinkPending(db, user.id)) return;
     await mailer.send(
@@ -224,7 +231,7 @@ export function createAuth({ db, publicUrl, secret, trustedProxies, mailer }: Au
         },
       }),
       // Last: its after hook must see the session state the other plugins leave (KOBE-15).
-      auditPlugin({ db }),
+      auditPlugin({ db, attempts }),
     ],
   });
 }

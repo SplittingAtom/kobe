@@ -34,7 +34,10 @@ export function installAuditRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
     if (!allowed) {
       return c.json({ code: "rate_limited", message: "Try the check again in a minute." }, 429);
     }
-    return c.json(await verifyAuditChain(db));
+    const report = await verifyAuditChain(db);
+    // The head attested with a key outside the database: record it off the box (KOBE-19).
+    const anchor = report.head ? deps.auditAnchor.attest(report.head.seq, report.head.hash) : null;
+    return c.json({ ...report, anchor });
   });
 
   return app;

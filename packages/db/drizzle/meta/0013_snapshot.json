@@ -1,5 +1,5 @@
 {
-  "id": "22afea3a-fa27-40b5-b3c4-7d69ebedee93",
+  "id": "4158e736-1bf6-4933-b904-349d87330e07",
   "prevId": "25a85981-01d0-4bf8-abaf-439808709445",
   "version": "7",
   "dialect": "postgresql",
@@ -2787,6 +2787,16 @@
           "primaryKey": false,
           "notNull": true
         },
+        "category": {
+          "name": "category",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "generated": {
+            "as": "split_part(action, '.', 1)",
+            "type": "stored"
+          }
+        },
         "target": {
           "name": "target",
           "type": "jsonb",
@@ -2870,6 +2880,27 @@
           "columns": [
             {
               "expression": "action",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "seq",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "audit_log_category_seq_idx": {
+          "name": "audit_log_category_seq_idx",
+          "columns": [
+            {
+              "expression": "category",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

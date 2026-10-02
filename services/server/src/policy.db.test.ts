@@ -411,6 +411,7 @@ describe("D29 order end to end (rules from Postgres)", () => {
         approvedTool: tool,
         remember: rememberRule,
         now: new Date(),
+        actor: { kind: "user", id: ids[who] },
       }),
     );
   }

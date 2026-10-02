@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { sql } from "drizzle-orm";
 import { z } from "zod";
 import type { KobeDb, KobeTx } from "../client.js";
 import { auditLog, type AuditActorKind } from "../schema/audit.js";
@@ -41,6 +42,27 @@ export interface AuditRecordRef {
 export class AuditEventError extends Error {
   override readonly name = "AuditEventError";
 }
+
+/**
+ * The audit chain lock wasn't granted within the lock timeout (another audited transaction held
+ * it too long). The action rolls back with its transaction; retrying is safe. HTTP 503.
+ */
+export class AuditBusyError extends Error {
+  override readonly name = "AuditBusyError";
+  readonly code = "audit_busy";
+  readonly status = 503;
+  constructor() {
+    super("The audit log is busy; nothing was changed. Try again.");
+  }
+}
+
+/** Applied to an audited transaction that has no lock timeout of its own. */
+export const AUDIT_LOCK_TIMEOUT = "5s";
+
+const pgCode = (err: unknown): string | undefined => {
+  const e = err as { code?: string; cause?: { code?: string } } | undefined;
+  return e?.cause?.code ?? e?.code;
+};
 
 const uuid = z.uuid();
 export const USER_AGENT_MAX = 256;
@@ -108,7 +130,13 @@ export async function audit(tx: KobeTx, event: AuditEvent): Promise<AuditRecordR
     const fields = target.error.issues.map((i) => i.path.join(".") || i.code).join(", ");
     throw new AuditEventError(`audit: ${action} target rejected (${fields})`);
   }
-  const [row] = await tx
+  // Waiting for the chain lock is bounded: a transaction without a lock timeout gets one for its
+  // remainder (the append is its last write), a caller's own timeout is kept.
+  await tx.execute(
+    sql`SELECT CASE WHEN current_setting('lock_timeout') = '0'
+        THEN set_config('lock_timeout', ${AUDIT_LOCK_TIMEOUT}, true) END`,
+  );
+  const rows = await tx
     .insert(auditLog)
     .values({
       teamId,
@@ -119,7 +147,12 @@ export async function audit(tx: KobeTx, event: AuditEvent): Promise<AuditRecordR
       ip: normalizeIp(event.request?.ip),
       userAgent: normalizeUserAgent(event.request?.userAgent),
     })
-    .returning({ id: auditLog.id, seq: auditLog.seq, at: auditLog.at, hash: auditLog.hash });
+    .returning({ id: auditLog.id, seq: auditLog.seq, at: auditLog.at, hash: auditLog.hash })
+    .catch((err: unknown) => {
+      // 55P03 lock_not_available: the chain lock (or a lock_timeout) expired.
+      throw pgCode(err) === "55P03" ? new AuditBusyError() : err;
+    });
+  const [row] = rows;
   if (!row) throw new Error("audit: insert returned no row");
   return row;
 }

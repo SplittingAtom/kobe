@@ -110,7 +110,66 @@ jsonb, at)` per §5.4, install-wide, registered in the tenancy registry.
   way KOBE-35's tests were fixed (invitation + accept, `MemoryMailer`). Store-level calls in
   `policy.db.test.ts` now run with an audit actor (`runWithAuditContext`).
 
+## Review round 1 (coordinator security review; no CRITICAL/HIGH) — resolution
+
+1. **Unauthenticated growth:** `AuthAttemptAudit` (per replica, in memory) aggregates failed
+   sign-ins (all methods), 2FA challenges and reset requests per (action, method,
+   account-or-none) and 5-minute window. The first attempt is recorded as itself, with its IP;
+   the rest become one `auth.attempts.summarized` row (system; count, distinct IPs up to 1,000,
+   window) when the window closes (flushed every minute and on shutdown). That is at most two
+   rows per key and window, and keys are bounded by accounts. A crash loses the open windows'
+   counts, but their first attempts are already recorded. Test: 30 failures for an unknown address
+   and 30 for a real account, from 60 addresses, give 2 rows plus 2 summaries; a reset flood gives
+   1 plus 1. Successful and state-changing events are never aggregated.
+2. **Tamper evidence vs the owner:**
+   - `AuditAnchorLogger`: every replica logs `audit chain head` (`seq`, `hash`, `at`, `mac`) at
+     startup and every 5 minutes, after verifying the rows since its previous head and that the
+     previous head is unchanged (error log `audit chain verification failed`).
+   - `mac` = HMAC-SHA256(`seq:hash`) under a key derived from the auth secret (not in the
+     database). `/v1/install/audit/integrity` returns the attested `anchor`; it is rate limited.
+   - **Decision: no keyed hash in the DB.** The key would have to enter the DB session on every
+     insert (visible to the owner and to statement logs) or go through SECURITY DEFINER, which is
+     forbidden. Server-side attested anchors give the same protection for anchored heads.
+   - Documented: operators ship the server log off the box until KOBE-19 forwards the anchors.
+3. **Restore verifies the chain:** inside the restore transaction (after the triggers are back,
+   before the restore event and COMMIT) a DO block checks seq continuity, `prev_hash` links and
+   every row's hash.
+   - The signed manifest now records the snapshot's head (`auditHead`), and the restored chain must
+     end there.
+   - `--expect-audit-head <seq>:<sha256>` must be contained in the restored chain.
+   - `--operator` (default: the OS user) and the restored head go into `platform.restore.completed`,
+     and the CLI prints the final head.
+   - Tests: a tampered backup is refused with nothing restored; a wrong expected head is refused.
+4. **Team isolation:** `listTeamAuditEvents(tx, query)` takes the withTeam transaction and matches
+   `team_id = NULLIF(current_setting('kobe.team_id', true), '')::uuid`. The team is not a
+   parameter. Outside withTeam it returns nothing, and a `teamId` in the query is ignored. Team
+   view entries have no `ip`, `userAgent`, `prevHash` or `hash`. A cross-team probe test checks
+   each team's view against the table.
+5. **Personal data:** invitation events record the invitation id only (no invitee email). IP and
+   user agent are kept for now; their retention is an open question with Chris (below).
+
+- **LOW:**
+  - Audited transactions without their own `lock_timeout` get 5 s for the chain lock (a caller's
+    own timeout is kept). On expiry, `AuditBusyError` maps to 503 `audit_busy` and the action rolls
+    back (tested).
+  - `insertUserAllowRule` records `policy.rule.created` (scope `user`) and requires an `actor`
+    parameter.
+  - Category filter uses a stored generated `category` column with index `(category, seq)` (EXPLAIN
+    test).
+  - Recorded, not changed: Better Auth events are best effort, and there is no metric for lost
+    writes yet; failures are logged at error level (`audit event could not be recorded`), so alert
+    on that log line until a metrics stack exists (KOBE-10). Audit reads are not audited.
+    `/update-user` (name and image) and passkey rename are not audited (profile cosmetics, no
+    security effect); add them if Chris wants them.
+- Merged origin/main (KOBE-20, main fix #25): `threads.db.test.ts` is main's. The web team audit
+  nav uses `team.audit.read`.
+
 ## Open questions (for Chris or the coordinator)
+
+- **IP / user-agent retention** in an append-only log (GDPR erasure vs. evidence): kept for now.
+  Options are a retention period with a chain-preserving pruning procedure (verify from an anchored
+  `(seq, prev_hash)`), or pseudonymizing IPs with a keyed hash. Raised with Chris by the
+  coordinator.
 
 - **Spec gap:** `actor_kind` has no "anonymous" value. Unauthenticated attempts use `user` with a
   null `actor_id` (failed sign-in, reset request). Is that OK, or add `anonymous`?
@@ -143,4 +202,4 @@ team's id. KOBE-19 pages with `listAuditEvents({ after })` and anchors `verifyAu
 | ac-6 | server "stores only allowlisted target fields: no secrets, tokens or content anywhere" (every row checked against the allowlist; passwords, prompt, session tokens and invitation hashes absent); per-test checks that the wrong password, reset token, invite token and TOTP secret are absent; `events.test.ts` allowlist checks; `docs/audit-log.md`                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ac-7 | `docs/audit-log.md` record format, keyset `after` paging and `verifyAuditChain` anchors (db tests)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | ac-8 | `packages/cli/src/backup-restore.db.test.ts` round trip: audit rows restored verbatim, the restore event is appended as seq 3, the chain verifies, triggers are back (`O`), and the app role can't DELETE; `restore-sql.test.ts` ordering                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| all  | `pnpm build test typecheck lint format:check license:check` green (the chart lint fails locally on Helm 4, as before); `test:db` for db (172), server (236) and cli (22) green; `db:check` clean                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| all  | `pnpm build test typecheck lint format:check license:check` green (the chart lint fails locally on Helm 4, as before); `test:db` for db (185), server (243) and cli (24) green; `db:check` clean                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
