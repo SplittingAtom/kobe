@@ -20,9 +20,13 @@
   "dependencies": {
     "@kobe/protocol": "workspace:*",
     "pino": "^10.3.1",
+    "ws": "^8.22.0",
     "zod": "^4.0.0"
   },
   "files": [
     "dist"
-  ]
+  ],
+  "devDependencies": {
+    "@types/ws": "^8.18.2"
+  }
 }

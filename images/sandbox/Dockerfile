@@ -6,6 +6,8 @@ ARG NODE_IMAGE=node:22-trixie-slim@sha256:b26b04c123d9ff8ab646ceb18b9d75a1173acf
 ARG PYTHON_IMAGE=python:3.12-slim-trixie@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
 ARG PNPM_VERSION=12.8.1
 ARG NPM_VERSION=12.2.0
+# Init for PID 1 (reaps orphaned tool processes, forwards signals). MIT ("Expat").
+ARG TINI_VERSION=0.19.0-3+b8
 
 # kobe-sandbox-agent, built and deployed with production dependencies only (ships dist/ only).
 FROM ${NODE_IMAGE} AS agent
@@ -29,6 +31,7 @@ COPY images/sandbox/pi/package.json images/sandbox/pi/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund && npm cache clean --force
 
 FROM ${PYTHON_IMAGE}
+ARG TINI_VERSION
 ENV DEBIAN_FRONTEND=noninteractive \
     NODE_ENV=production \
     PIP_NO_CACHE_DIR=1 \
@@ -40,7 +43,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      ca-certificates git curl jq ripgrep unzip zip file less procps \
+      ca-certificates git curl jq ripgrep unzip zip file less procps "tini=${TINI_VERSION}" \
  && rm -rf /var/lib/apt/lists/*
 
 # Fully locked with hashes (pip-compile --generate-hashes from requirements.in).
@@ -57,17 +60,21 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 COPY --from=agent /out/dist /opt/kobe/sandbox-agent/dist
 COPY --from=agent /out/node_modules /opt/kobe/sandbox-agent/node_modules
 COPY --from=agent /out/package.json /opt/kobe/sandbox-agent/package.json
+COPY images/sandbox/entrypoint.sh /opt/kobe/entrypoint.sh
 
 # Non-root user; /workspace is the persistent volume, /opt/kobe/skills holds gallery skills (A6,
 # root-owned / mounted read-only). Strip setuid/setgid bits so sandbox code has no local
 # privilege-escalation helpers even if a pod spec forgets allowPrivilegeEscalation=false.
 RUN groupadd --gid 1000 kobe \
  && useradd --uid 1000 --gid 1000 --create-home --home-dir /home/kobe --shell /bin/bash kobe \
- && mkdir -p /workspace /opt/kobe/skills \
+ && mkdir -p /workspace /opt/kobe/skills /opt/kobe/pi-agent \
+ && chmod 0555 /opt/kobe/pi-agent /opt/kobe/entrypoint.sh \
  && chown kobe:kobe /workspace \
  && find / -xdev -perm /6000 -type f -exec chmod a-s {} + \
  && chmod 0644 /etc/passwd /etc/group && chmod 0640 /etc/shadow
 
 USER 1000:1000
 WORKDIR /workspace
-ENTRYPOINT ["node", "/opt/kobe/sandbox-agent/dist/index.js"]
+# tini is PID 1; the entrypoint disables core dumps and runs node with --disable-sigusr1. Pod specs
+# must set `args` only, never `command` (that would bypass all three).
+ENTRYPOINT ["/usr/bin/tini", "--", "/opt/kobe/entrypoint.sh"]

@@ -1,21 +1,62 @@
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "./config.js";
 
+const SANDBOX = "af1a2b3c-4d5e-4f60-9182-93a4b5c6d7e8";
+const base = { KOBE_SANDBOX_ID: SANDBOX };
+
 describe("sandbox-agent loadConfig", () => {
-  it("requires a wss:// server URL", () => {
+  it("requires a wss:// server URL and appends the contract path", () => {
+    const config = loadConfig({ ...base, KOBE_SERVER_URL: "wss://kobe-server.kobe-system.svc" });
+    expect(config.serverUrl).toBe("wss://kobe-server.kobe-system.svc");
+    expect(config.connectUrl).toBe("wss://kobe-server.kobe-system.svc/v1/sandbox/connect");
+  });
+
+  it("replaces any path on the server URL with the contract path", () => {
     expect(
-      loadConfig({ KOBE_SERVER_URL: "wss://kobe-server.kobe-system.svc/sandbox" }).serverUrl,
-    ).toBe("wss://kobe-server.kobe-system.svc/sandbox");
+      loadConfig({ ...base, KOBE_SERVER_URL: "wss://kobe-server/sandbox?x=1" }).connectUrl,
+    ).toBe("wss://kobe-server/v1/sandbox/connect");
   });
 
   it("allows ws:// only for in-cluster plaintext during development", () => {
-    expect(loadConfig({ KOBE_SERVER_URL: "ws://kobe-server:8080/sandbox" }).serverUrl).toBe(
-      "ws://kobe-server:8080/sandbox",
+    expect(loadConfig({ ...base, KOBE_SERVER_URL: "ws://kobe-server:8080" }).connectUrl).toBe(
+      "ws://kobe-server:8080/v1/sandbox/connect",
     );
   });
 
   it("rejects a missing or non-WebSocket server URL", () => {
-    expect(() => loadConfig({})).toThrow(/KOBE_SERVER_URL/);
-    expect(() => loadConfig({ KOBE_SERVER_URL: "https://kobe" })).toThrow(/KOBE_SERVER_URL/);
+    expect(() => loadConfig({})).toThrow(/KOBE_SERVER_URL must be a ws/);
+    expect(() => loadConfig({ ...base, KOBE_SERVER_URL: "https://kobe" })).toThrow(
+      /KOBE_SERVER_URL/,
+    );
+  });
+
+  it("rejects credentials in the server URL (the token goes in a header, never a URL)", () => {
+    expect(() => loadConfig({ ...base, KOBE_SERVER_URL: "wss://u:p@kobe-server" })).toThrow(
+      /KOBE_SERVER_URL/,
+    );
+  });
+
+  it("requires a lowercase uuid sandbox id", () => {
+    expect(() => loadConfig({ KOBE_SERVER_URL: "wss://kobe" })).toThrow(/KOBE_SANDBOX_ID/);
+    expect(() =>
+      loadConfig({ KOBE_SERVER_URL: "wss://kobe", KOBE_SANDBOX_ID: SANDBOX.toUpperCase() }),
+    ).toThrow(/KOBE_SANDBOX_ID/);
+  });
+
+  it("defaults to the image layout", () => {
+    const config = loadConfig({ ...base, KOBE_SERVER_URL: "wss://kobe" });
+    expect(config).toMatchObject({
+      tokenFile: "/var/run/kobe/sandbox-wire/token",
+      workspaceDir: "/workspace",
+      sessionDir: "/workspace/.kobe/sessions",
+      piBin: "pi",
+      maxPiProcesses: 8,
+    });
+  });
+
+  it("rejects relative directories", () => {
+    expect(() =>
+      loadConfig({ ...base, KOBE_SERVER_URL: "wss://kobe", KOBE_SESSION_DIR: "sessions" }),
+    ).toThrow(/KOBE_SESSION_DIR/);
   });
 });
