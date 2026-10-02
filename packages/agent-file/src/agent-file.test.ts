@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AGENT_FILE_LIMITS,
   agentSkills,
+  agentWarnings,
   parseAgentFile,
   serializeAgentFile,
   slugFromName,
@@ -285,5 +286,30 @@ describe("helpers", () => {
     expect(slugFromName("助手")).toBe("agent");
     expect(slugFromName("x".repeat(100))).toHaveLength(48);
     expect(slugFromName(`${"a".repeat(47)}-b`)).toBe("a".repeat(47));
+  });
+});
+
+describe("agentWarnings (non-blocking; policy is enforced at run time, KOBE-35/47)", () => {
+  it("warns about an allow-everything glob and auto approval mode", () => {
+    const warnings = agentWarnings({
+      name: "A",
+      tools: { allow: ["read_file", "*"] },
+      approval_mode: "auto",
+    });
+    expect(warnings.map((w) => w.path)).toEqual([
+      "frontmatter.tools.allow.1",
+      "frontmatter.approval_mode",
+    ]);
+    expect(agentWarnings({ name: "A", tools: { allow: ["**"] } })).toHaveLength(1);
+  });
+
+  it("is quiet for narrow allows and stricter modes", () => {
+    expect(
+      agentWarnings({
+        name: "A",
+        tools: { allow: ["mcp__jira__*"], deny: ["*"] },
+        approval_mode: "ask-all",
+      }),
+    ).toEqual([]);
   });
 });

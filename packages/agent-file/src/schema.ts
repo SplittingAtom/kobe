@@ -129,7 +129,19 @@ const toolsSchema = z
   })
   .strict();
 
-/** The agent file's frontmatter (spec §6.3); unknown keys are rejected. */
+/**
+ * The agent file's frontmatter (spec §6.3); unknown keys are rejected.
+ *
+ * HARD CONTRACT for run-time resolution and policy (KOBE-35, KOBE-46, KOBE-47): any member can
+ * write any value here in a personal agent, so these fields are requests, never grants.
+ *   - `tools.allow` only RESTRICTS: the effective tool set is the intersection of the agent's allow
+ *     list with what the team and install expose. It never adds a tool or removes a prompt.
+ *   - `tools.deny`, install/team deny rules and ask rules always win over `tools.allow`.
+ *   - `approval_mode` is clamped to the team/install floor: it can only make a run stricter (D19,
+ *     D29); `auto` below an `ask-on-write` floor runs as `ask-on-write`.
+ *   - `model`, `skills`, `connectors` are opaque names intersected with the team's settings.
+ * `agentWarnings` flags the broad values at save time, but enforcement is the policy engine's.
+ */
 export const agentFrontmatterSchema = z
   .object({
     name: line(AGENT_FILE_LIMITS.name),
@@ -173,4 +185,32 @@ export function agentSkills(frontmatter: AgentFrontmatter): {
   if (skills === undefined) return { names: [], exclusive: false };
   if (Array.isArray(skills)) return { names: skills, exclusive: false };
   return { names: skills.exclusive, exclusive: true };
+}
+
+/** A glob that matches every tool name (only `*` wildcards). */
+const MATCHES_EVERYTHING = /^\*+$/;
+
+/**
+ * Non-blocking save-time warnings for broad policy requests (allow-everything globs, `auto`
+ * approval). They change nothing at run time: see the contract on `agentFrontmatterSchema`.
+ */
+export function agentWarnings(frontmatter: AgentFrontmatter): AgentFileIssue[] {
+  const warnings: AgentFileIssue[] = [];
+  (frontmatter.tools?.allow ?? []).forEach((glob, i) => {
+    if (MATCHES_EVERYTHING.test(glob)) {
+      warnings.push({
+        path: `frontmatter.tools.allow.${i}`,
+        message:
+          "allows every tool; allow lists only narrow what the team exposes and never skip approvals",
+      });
+    }
+  });
+  if (frontmatter.approval_mode === "auto") {
+    warnings.push({
+      path: "frontmatter.approval_mode",
+      message:
+        "auto runs only allow-listed tools and denies the rest; it never loosens the team's floor",
+    });
+  }
+  return warnings;
 }

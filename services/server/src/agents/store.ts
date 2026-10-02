@@ -11,6 +11,7 @@ import {
   type KobeDb,
   type KobeTx,
 } from "@kobe/db";
+import { z } from "zod";
 import type { AgentScope } from "./access.js";
 
 /**
@@ -75,10 +76,22 @@ const toRecord = (scope: AgentScope, row: Row): AgentRecord => ({
   frontmatter: row.frontmatter as AgentFrontmatter,
 });
 
-const installWhere = (location: Exclude<AgentLocation, { scope: "team" }>) =>
-  location.scope === "personal"
-    ? and(eq(installAgents.scope, "personal"), eq(installAgents.ownerUserId, location.ownerUserId))
-    : eq(installAgents.scope, "gallery");
+const OWNER_ID = z.uuid();
+
+/**
+ * The only wall between users' personal agents: install_agents has no RLS (install-wide, D6), so
+ * every install_agents query goes through here and a personal location must name a valid owner.
+ */
+function installWhere(location: Exclude<AgentLocation, { scope: "team" }>) {
+  if (location.scope === "gallery") return eq(installAgents.scope, "gallery");
+  if (!OWNER_ID.safeParse(location.ownerUserId).success) {
+    throw new Error("store: personal agents need an owner (a user id)");
+  }
+  return and(
+    eq(installAgents.scope, "personal"),
+    eq(installAgents.ownerUserId, location.ownerUserId),
+  );
+}
 
 /** Runs `fn` in the right transaction: team-scoped (RLS) for team agents, plain otherwise. */
 function inLocation<T>(db: KobeDb, location: AgentLocation, fn: (tx: KobeTx) => Promise<T>) {

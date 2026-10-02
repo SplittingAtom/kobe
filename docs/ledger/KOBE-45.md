@@ -110,13 +110,32 @@
    serialized per location (caps and auto slugs were racy); malformed `If-Match` is 400. Noted, not
    changed: suspended agents stay listed (KOBE-47 must refuse to start them).
 
+10. **Coordinator review (PR #17), all addressed:**
+    - **HARD CONTRACT for KOBE-35/46/47 (policy fields are requests, never grants).** Any member can
+      write any frontmatter in a personal agent (e.g. `tools.allow: ['*']` + `approval_mode: auto`
+      is accepted). So: an agent's `tools.allow` is a **restriction** — intersected with what the
+      team/install expose, it never adds a tool or removes a prompt; `tools.deny`, install/team deny
+      and ask rules **always win**; `approval_mode` is **clamped to the team/install floor** (only
+      stricter, D19/D29). Also a doc comment on `agentFrontmatterSchema`. Save-time, non-blocking
+      `warnings` (from `agentWarnings`) flag allow-everything globs and `auto` in every agent
+      response.
+    - `install_agents` has no RLS backstop: every query goes through `installWhere`, which throws
+      for a personal location without a valid owner id; `src/agents/store.db.test.ts` checks every
+      store function applies the owner filter.
+    - Tests: non-admin PUT/DELETE/status/GET on `/v1/install/gallery/agents` → 403; imports can't
+      set `status`/`revision` (query or frontmatter); deeply nested YAML over HTTP → 400.
+
 ## Seams for downstream tickets
 
 - **KOBE-46:** decision 6 (versions tables, thread FK); publish copies the draft
   (`frontmatter`, `prompt`) into a version with a frozen tool manifest and sets `current_version`;
   use `team.agents.publish`. The `revision` ETag is for drafts only.
 - **KOBE-47:** resolve `threads.agent_id` via `findVisibleAgent` semantics (team → own personal →
-  gallery); refuse `status = suspended`; `agentSkills()`; model/approval mode intersections.
+  gallery); refuse `status = suspended`; `agentSkills()`; model/approval mode intersections per the
+  hard contract (decision 10). **A missing or unreadable pinned agent/version is an explicit error
+  for the run — never fall back to another (possibly looser) agent or the default.** `model` is an
+  opaque alias/id downstream: resolve it only through the team's model subset (fallback: team
+  default, D19), never pass it to Bifrost unchecked.
 - **KOBE-48:** `@kobe/agent-file` is browser-safe for the builder (validate before save, show
   `issues[].path`); `canEdit` and `ETag`/`If-Match` for concurrent editors; inventory reads
   `status`, `ownerUserId`, `currentVersion`.
@@ -137,13 +156,13 @@
 
 ## Evidence (acceptance criteria → test or command output)
 
-- ac-1, ac-2: `packages/agent-file/src/agent-file.test.ts` (57 tests: §6.3 example, 9 round-trip
+- ac-1, ac-2: `packages/agent-file/src/agent-file.test.ts` (59 tests: §6.3 example, 9 round-trip
   cases incl. CRLF/BOM/unicode/delimiters in body, canonical key order, schema rejections, unsafe
   YAML, size limits, JSON validation).
 - ac-3, ac-6 (DB): `packages/db/src/agents.db.test.ts` (slug per team, RLS invisibility and
   WITH CHECK, backstop checks, personal/gallery owner rule and slug uniqueness); catalog check and
   probe suite cover `team_agents` (`pnpm --filter @kobe/db test:db` 137/137).
-- ac-4, ac-5, ac-6 (HTTP): `services/server/src/agents.db.test.ts` (29 tests: create per role,
+- ac-4, ac-5, ac-6 (HTTP): `services/server/src/agents.db.test.ts` (33 tests: create per role,
   header guard, slugs, invalid definitions, import → export → re-import through the API, PUT from a
   file, unsafe files, 413/415, member summary vs builder definition, creator/admin edit, If-Match,
   suspend, delete, cross-team 404s incl. a member of both teams, stale tab 409, personal privacy
@@ -151,4 +170,4 @@
   `src/agents/access.test.ts` (rulebook per role and scope); `src/authz/permissions.test.ts`.
 - ac-7: decision 6; schema columns `current_version`, `status`, `revision`.
 - `pnpm build test typecheck format:check license:check` green; `lint` green except pre-existing
-  `@kobe/chart` (Helm 4); `pnpm --filter @kobe/server test:db` 79/79; `db:check` clean.
+  `@kobe/chart` (Helm 4); `pnpm --filter @kobe/server test:db` 91/91 (incl. `src/agents/store.db.test.ts`); `db:check` clean.

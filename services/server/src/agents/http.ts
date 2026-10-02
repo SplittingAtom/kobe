@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
   AGENT_FILE_LIMITS,
+  agentWarnings,
   parseAgentFile,
   serializeAgentFile,
   validateAgentDefinition,
@@ -146,7 +147,11 @@ export function agentResponse(
   status: 200 | 201 = 200,
 ) {
   c.header("ETag", etag(agent));
-  return c.json({ agent: agentDetail(agent, access) }, status);
+  // Broad policy requests are accepted but flagged; they never grant anything (agent-file schema).
+  return c.json(
+    { agent: agentDetail(agent, access), warnings: agentWarnings(agent.frontmatter) },
+    status,
+  );
 }
 
 /** The agent as a markdown file download (§6.3), named after its slug. */

@@ -7,6 +7,7 @@ export {
   FRONTMATTER_KEYS,
   agentFrontmatterSchema,
   agentSkills,
+  agentWarnings,
   skillSlugSchema,
   type AgentDefinition,
   type AgentFileIssue,

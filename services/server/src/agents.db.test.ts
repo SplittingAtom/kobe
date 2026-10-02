@@ -266,6 +266,46 @@ describe("import and export (§6.3)", () => {
     expect((await as.bob.post("/v1/agents?scope=personal", yaml)).status).toBe(415);
   });
 
+  it("never lets an import set status, revision or other server fields", async () => {
+    const viaQuery = await as.bob.post(
+      "/v1/agents?scope=personal&status=suspended&revision=9",
+      markdown(SPEC_EXAMPLE),
+    );
+    expect(viaQuery).toMatchObject({ status: 400, json: { code: "invalid_request" } });
+    const viaFrontmatter = await as.bob.post(
+      "/v1/agents?scope=personal",
+      markdown("---\nname: A\nstatus: suspended\nrevision: 9\n---\n"),
+    );
+    expect(viaFrontmatter).toMatchObject({ status: 400, json: { code: "invalid_agent" } });
+    const viaJson = await as.bob.post("/v1/agents", {
+      scope: "personal",
+      status: "suspended",
+      ...definition("Sneaky"),
+    });
+    expect(viaJson.status).toBe(400);
+  });
+
+  it("answers 400, not 500, for pathologically nested YAML", async () => {
+    const deep = `---\nname: A\nrole: ${"[".repeat(5000)}${"]".repeat(5000)}\n---\n`;
+    const res = await as.bob.post("/v1/agents?scope=personal", markdown(deep));
+    expect(res).toMatchObject({ status: 400, json: { code: "invalid_agent" } });
+  });
+
+  it("warns, without blocking, about allow-everything tools and auto approval", async () => {
+    const res = await as.bob.post("/v1/agents", {
+      scope: "personal",
+      frontmatter: { name: "Broad", tools: { allow: ["*"] }, approval_mode: "auto" },
+      prompt: "",
+    });
+    expect(res.status).toBe(201);
+    expect(res.json.warnings.map((w: { path: string }) => w.path)).toEqual([
+      "frontmatter.tools.allow.0",
+      "frontmatter.approval_mode",
+    ]);
+    const quiet = await as.bob.post("/v1/agents", { scope: "personal", ...definition("Quiet") });
+    expect(quiet.json.warnings).toEqual([]);
+  });
+
   it("requires a scope on import", async () => {
     const res = await as.bob.post("/v1/agents", markdown(SPEC_EXAMPLE));
     expect(res).toMatchObject({ status: 400, json: { code: "invalid_request" } });
@@ -433,6 +473,16 @@ describe("gallery (D19, D21)", () => {
     expect(list.json.agents.map((a: { id: string }) => a.id)).toContain(galleryId);
     const exported = await as.installAdmin.get(`/v1/install/gallery/agents/${galleryId}/export`);
     expect(exported.text).toMatch(/^---\nname: Release Notes Writer\n/);
+  });
+
+  it("refuses gallery edits, deletes and status changes to non-admins", async () => {
+    const base = `/v1/install/gallery/agents/${galleryId}`;
+    for (const who of ["alice", "bob", "carol"] as const) {
+      expect((await as[who].put(base, definition("X"), ANY)).status).toBe(403);
+      expect((await as[who].delete(base)).status).toBe(403);
+      expect((await as[who].put(`${base}/status`, { status: "suspended" })).status).toBe(403);
+      expect((await as[who].get(base)).status).toBe(403);
+    }
   });
 
   it("is read-only to every team member", async () => {
