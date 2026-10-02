@@ -1,6 +1,8 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { accounts, createDb, installRoles, users, type KobeDatabase } from "@kobe/db";
 import { createAuth, type KobeAuth } from "./auth/auth.js";
+import { createRunEventHub, type HubOptions, type RunEventHub } from "./event-stream/hub.js";
+import { STREAM_DEFAULTS, type StreamTimings } from "./event-stream/stream.js";
 
 export interface ServerDepsOptions {
   readonly databaseUrl: string;
@@ -9,6 +11,11 @@ export interface ServerDepsOptions {
   /** One-time secret proving possession of the install for first-run setup. */
   readonly setupToken: string;
   readonly trustedProxies: readonly string[];
+  /** Kobe Event Stream tuning (tests shorten the timers). */
+  readonly eventStream?: {
+    readonly hub?: Omit<HubOptions, "connectionString">;
+    readonly timings?: Partial<StreamTimings>;
+  };
 }
 
 export interface NewUser {
@@ -21,6 +28,8 @@ export interface ServerDeps {
   readonly database: KobeDatabase;
   readonly auth: KobeAuth;
   readonly publicUrl: string;
+  /** Kobe Event Stream fan-out (one LISTEN connection per process) and SSE timings (KOBE-31). */
+  readonly eventStream: { readonly hub: RunEventHub; readonly timings: StreamTimings };
   /** Creates an email+password user (and optional install role) atomically, without sign-up. */
   createUserWithPassword(
     input: NewUser,
@@ -44,11 +53,16 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     trustedProxies: options.trustedProxies,
   });
   const setupDigest = digest(options.setupToken);
+  const hub = createRunEventHub({
+    ...options.eventStream?.hub,
+    connectionString: options.databaseUrl,
+  });
 
   return {
     database,
     auth,
     publicUrl: new URL(options.publicUrl).origin,
+    eventStream: { hub, timings: { ...STREAM_DEFAULTS, ...options.eventStream?.timings } },
     async createUserWithPassword({ email, name, password }, { installRole } = {}) {
       const ctx = await auth.$context;
       const hash = await ctx.password.hash(password);
@@ -77,6 +91,9 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     isSetupToken(candidate) {
       return typeof candidate === "string" && timingSafeEqual(digest(candidate), setupDigest);
     },
-    close: () => database.close(),
+    async close() {
+      await hub.close();
+      await database.close();
+    },
   };
 }
