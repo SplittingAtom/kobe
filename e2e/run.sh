@@ -399,7 +399,8 @@ wire_token=$(mint kobe.sandbox-wire)
 gateway_token=$(mint kobe.model-gateway)
 dead_token=$(mint kobe.sandbox-wire 00000000-0000-4000-8000-0000000000de)
 upgrade() { # label token → "label=HTTP/1.1 <status>" (raw request: busybox has no WebSocket client)
-  echo "printf 'GET /v1/sandbox/connect HTTP/1.1\r\nHost: kobe-server\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Protocol: kobe.sandbox.v1\r\nAuthorization: Bearer $2\r\n\r\n' \
+  # stdin stays open: a half-closed socket (nc after EOF) is not upgraded by ws, unlike a real client.
+  echo "(printf 'GET /v1/sandbox/connect HTTP/1.1\r\nHost: kobe-server\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Protocol: kobe.sandbox.v1\r\nAuthorization: Bearer $2\r\n\r\n'; sleep 4) \
     | nc -w 5 $server_ip 8081 2>/dev/null | head -1 | grep -o 'HTTP/1.1 [0-9]*' | sed 's/^/$1=/';"
 }
 wire=$(team_probe "for i in \$(seq 1 60); do wget -qO- -T 2 http://$server_ip:8081/healthz >/dev/null 2>&1 && break; sleep 1; done; \
