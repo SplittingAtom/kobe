@@ -1,0 +1,18 @@
+packages:
+  - apps/*
+  - services/*
+  - packages/*
+  - tools/*
+minimumReleaseAgeExclude:
+  - "@turbo/darwin-64@2.11.6"
+  - "@turbo/darwin-arm64@2.11.6"
+  - "@turbo/linux-64@2.11.6"
+  - "@turbo/linux-arm64@2.11.6"
+  - "@turbo/windows-64@2.11.6"
+  - "@turbo/windows-arm64@2.11.6"
+  - globals@17.13.0
+  - turbo@2.11.6
+
+# sharp ships LGPL libvips binaries (license policy, spec D3). Kobe serves images unoptimized.
+ignoredOptionalDependencies:
+  - sharp

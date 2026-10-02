@@ -1,0 +1,6 @@
+{
+  "caniuse-lite": {
+    "license": "CC-BY-4.0",
+    "reason": "Browser-compatibility data table required by Next.js/browserslist at build time; an attribution-only data license, not copyleft or source-available."
+  }
+}

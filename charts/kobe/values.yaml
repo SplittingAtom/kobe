@@ -1,0 +1,3 @@
+# Scaffold only: populated in KOBE-6.
+global:
+  imagePullSecrets: []

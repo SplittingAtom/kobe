@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+**/coverage
+.git
+.github
+charts
+docs
+*.md
+!apps/**/*.md
