@@ -24,7 +24,7 @@
 
 ## Plan
 
-- Custom migration `0007_thread_search.sql` (was 0006 before `db:rebase` onto KOBE-14): `pg_trgm`, `kobe_entry_search_text(type, payload)`,
+- Custom migration `0009_thread_search.sql` (0006 originally; rebased onto KOBE-14, then KOBE-45): `pg_trgm`, `kobe_entry_search_text(type, payload)`,
   generated `thread_entries.tsv` and `threads.tsv`, partial index `thread_entries_search_idx`.
 - `src/thread-search.ts` (`searchThreads(tx, input)`) and `src/thread-search-format.ts` (input
   schema, cursor, snippet parsing). Tests first: `thread-search.db.test.ts`,
@@ -138,7 +138,9 @@
 
 - Rebase onto main (KOBE-14 #12, contracts #13, KOBE-9): `db:rebase` re-created the migration as
   custom `0007_thread_search.sql` after `0006_session_active_teams.sql`, byte-identical to the
-  original (diff empty; snapshot 0007 = 0006 apart from id chain). A fresh migrate has both `tsv`
+  original (diff empty; snapshot 0007 = 0006 apart from id chain).
+- Rebase onto KOBE-45 (#17, `0007_agents`/`0008_agents_rls`): now `0009_thread_search.sql`, again
+  byte-identical, custom (snapshot 0009 = 0008), last in the journal. A fresh migrate has both `tsv`
   columns (generated ALWAYS, stored) and `thread_entries_search_idx`.
 - Backup/restore (KOBE-11, merged in): pg_dump leaves stored generated columns out of the data, so
   a restore recomputes them. `packages/cli` round-trip fixture now seeds a Pi user message;
