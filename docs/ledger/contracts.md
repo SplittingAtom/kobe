@@ -1,6 +1,6 @@
 # Contracts: shared protocol interfaces (wave 0)
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #13)
 - **Branch / worktree:** `kobe-contracts` in `../Kobe-wt-contracts`
 - **Depends on:** — (KOBE-29 runs in parallel; it takes run states and event names from here)
 
