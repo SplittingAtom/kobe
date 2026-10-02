@@ -5,7 +5,7 @@ import { createDb, type KobeDatabase } from "./client.js";
 import { quoteIdent } from "./roles.js";
 import { teams } from "./schema/index.js";
 import { TEAM_TABLES } from "./tenancy.js";
-import { PROBE_FIXTURES } from "./testing/probe-fixtures.js";
+import { PROBE_FIXTURES } from "./testing/probe-fixtures/index.js";
 import { withTeam } from "./with-team.js";
 
 /**
@@ -111,7 +111,7 @@ describe("install-wide tables", () => {
       (e: unknown) => e,
     );
     expect((err as { code?: string } | undefined)?.code).toBe("42501");
-    expect((await teamIdsIn(TEAM_TABLES[0], teamB)).length).toBeGreaterThan(0);
+    expect((await teamIdsIn("team_members", teamB)).length).toBeGreaterThan(0);
   });
 });
 

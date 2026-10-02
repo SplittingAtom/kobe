@@ -1,15 +1,4 @@
-export { teams } from "./teams.js";
-export { teamMembers, teamRole } from "./team-members.js";
-export {
-  accounts,
-  installRole,
-  installRoles,
-  installSettings,
-  jwks,
-  passkeys,
-  rateLimits,
-  sessions,
-  twoFactors,
-  users,
-  verifications,
-} from "./auth.js";
+// One file per table group; each spec area adds its own `export *` line.
+export * from "./auth.js";
+export * from "./team-members.js";
+export * from "./teams.js";

@@ -15,7 +15,15 @@ if not local and current != dev_context:
 dev_registry = os.getenv("KOBE_DEV_REGISTRY", "")
 if dev_registry:
     default_registry(dev_registry)
-NAMESPACE = "kobe-dev"
+# Parallel agents each take their own namespace (kobe-dev-<ticket>) and web port; the default
+# stays kobe-dev on :3000. Never the production namespace `kobe`.
+NAMESPACE = os.getenv("KOBE_DEV_NAMESPACE", "kobe-dev")
+if NAMESPACE != "kobe-dev" and not NAMESPACE.startswith("kobe-dev-"):
+    fail("KOBE_DEV_NAMESPACE must be kobe-dev or kobe-dev-<suffix>, got %r" % NAMESPACE)
+if local and NAMESPACE != "kobe-dev":
+    # dev/postgres.yaml and dev/values.yaml are written for kobe-dev.
+    fail("KOBE_DEV_NAMESPACE is for shared real clusters; k3d dev uses kobe-dev")
+WEB_PORT = os.getenv("KOBE_DEV_WEB_PORT", "3000")
 
 update_settings(max_parallel_updates=2, k8s_upsert_timeout_secs=300)
 
@@ -67,4 +75,4 @@ for name in ["web", "server", "scheduler", "mcp-proxy", "egress-proxy", "bifrost
     k8s_resource(workload="kobe-" + name, labels=["kobe"], resource_deps=deps if name in ["server", "scheduler"] else [])
 k8s_resource(workload="kobe-migrate", labels=["kobe"], resource_deps=deps)
 k8s_resource(workload="kobe-isolation-preflight", labels=["kobe"])
-k8s_resource(workload="kobe-web", port_forwards=["3000:8080"])
+k8s_resource(workload="kobe-web", port_forwards=["%s:8080" % WEB_PORT])
