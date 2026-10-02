@@ -233,6 +233,9 @@ importers:
 
   packages/agent-file:
     dependencies:
+      '@kobe/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       yaml:
         specifier: ^2.9.1
         version: 2.9.1

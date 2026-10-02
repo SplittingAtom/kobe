@@ -1,4 +1,7 @@
+import { approvalModeSchema, connectorNameSchema, globSchema } from "@kobe/protocol";
 import { z } from "zod";
+
+export { APPROVAL_MODES, type ApprovalMode } from "@kobe/protocol";
 
 /**
  * Limits for an agent file (spec D19, §6.3). Agent files are untrusted input (imports, API), so
@@ -19,14 +22,9 @@ export const AGENT_FILE_LIMITS = {
   skills: 32,
   connectors: 32,
   toolGlobs: 100,
-  toolGlob: 256,
   starters: 8,
   starter: 300,
 } as const;
-
-/** Approval modes (D29). There is deliberately no bypass mode. */
-export const APPROVAL_MODES = ["ask-on-write", "ask-all", "auto"] as const;
-export type ApprovalMode = (typeof APPROVAL_MODES)[number];
 
 /** Frontmatter keys in canonical (export) order, as written in the file. */
 export const FRONTMATTER_KEYS = [
@@ -72,11 +70,8 @@ const uniqueList = <T extends z.ZodType<string>>(item: T, max: number) =>
     .max(max, `must list at most ${max} entries`)
     .refine((list) => new Set(list).size === list.length, "must not repeat an entry");
 
-/**
- * Skill and connector references: lowercase slugs like SKILL.md names (no `_`, so MCP tool names
- * `mcp__<connector>__<tool>` stay unambiguous).
- */
-export const referenceSlugSchema = z
+/** Skill references: lowercase slugs like SKILL.md names. */
+export const skillSlugSchema = z
   .string()
   .regex(/^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/, "must be a lowercase slug (a-z, 0-9, -)");
 
@@ -98,7 +93,7 @@ const iconSchema = z
     "must be an icon name (a-z, 0-9, -) or an emoji",
   );
 
-const skillListSchema = uniqueList(referenceSlugSchema, AGENT_FILE_LIMITS.skills);
+const skillListSchema = uniqueList(skillSlugSchema, AGENT_FILE_LIMITS.skills);
 
 /**
  * Skills (D22): a list is unioned with the user's enabled skills; `{ exclusive: [...] }` uses only
@@ -110,13 +105,13 @@ const skillsSchema = z.union([
   z.literal("exclusive").transform(() => ({ exclusive: [] as string[] })),
 ]);
 
-const toolGlobSchema = z
-  .string()
-  .min(1, "must not be empty")
-  .max(AGENT_FILE_LIMITS.toolGlob, `must be at most ${AGENT_FILE_LIMITS.toolGlob} characters`)
-  .refine((s) => !ANY_CONTROL.test(s), "must be a single line without control characters");
+/** Policy glob grammar (@kobe/protocol glob.ts), on a single line. */
+const toolGlobSchema = globSchema.refine(
+  (s) => !ANY_CONTROL.test(s),
+  "must be a single line without control characters",
+);
 
-/** Tool allow/deny globs; their matching semantics belong to the policy engine (KOBE-35). */
+/** Tool allow/deny globs, matched by the policy engine (D29, KOBE-35). */
 const toolsSchema = z
   .object({
     allow: uniqueList(toolGlobSchema, AGENT_FILE_LIMITS.toolGlobs).optional(),
@@ -133,9 +128,10 @@ export const agentFrontmatterSchema = z
     icon: iconSchema.optional(),
     model: modelSchema.optional(),
     skills: skillsSchema.optional(),
-    connectors: uniqueList(referenceSlugSchema, AGENT_FILE_LIMITS.connectors).optional(),
+    /** Connector registry names (D27); same format as @kobe/protocol `connectorNameSchema`. */
+    connectors: uniqueList(connectorNameSchema, AGENT_FILE_LIMITS.connectors).optional(),
     tools: toolsSchema.optional(),
-    approval_mode: z.enum(APPROVAL_MODES).optional(),
+    approval_mode: approvalModeSchema.optional(),
     starters: uniqueList(text(AGENT_FILE_LIMITS.starter), AGENT_FILE_LIMITS.starters).optional(),
   })
   .strict();

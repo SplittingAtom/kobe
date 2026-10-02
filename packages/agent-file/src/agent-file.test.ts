@@ -63,6 +63,12 @@ describe("parseAgentFile: the spec §6.3 example", () => {
     });
   });
 
+  it("uses the protocol's connector names (D27), which allow single underscores", () => {
+    expect(
+      parsed(file("name: A\nconnectors: [google_drive, jira-cloud]")).frontmatter.connectors,
+    ).toEqual(["google_drive", "jira-cloud"]);
+  });
+
   it("accepts every approval mode (D29) and the icon forms", () => {
     for (const mode of ["ask-on-write", "ask-all", "auto"]) {
       expect(parsed(file(`name: A\napproval_mode: ${mode}`)).frontmatter.approval_mode).toBe(mode);
@@ -150,6 +156,8 @@ describe("schema rejections", () => {
     ["duplicate skills", "skills: [docx, docx]", "skills"],
     ["duplicate connectors", "connectors: [jira, jira]", "connectors"],
     ["a tool glob with a newline", 'tools: { deny: ["a\\nb"] }', "tools.deny"],
+    ["a tool glob with a trailing escape", 'tools: { allow: ["mcp__*\\\\"] }', "tools.allow"],
+    ["a connector name with a double separator", "connectors: [my__jira]", "connectors"],
     ["an empty starter", 'starters: [""]', "starters"],
     ["an icon URL", "icon: https://evil.example/x.png", "icon"],
     ["a NUL inside a quoted string", 'role: "a\\x00b"', "role"],

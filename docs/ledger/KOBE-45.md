@@ -36,24 +36,24 @@
      (check); partial unique slugs per owner (personal) and install-wide (gallery). App role gets
      full DML (no cascades into team data, no team FK). The server pins every query to the scope
      and, for personal agents, to the owner.
-   Not three tables: personal and gallery rows are identical apart from the owner, and KOBE-46 then
-   needs one install-wide versions table instead of two.
+     Not three tables: personal and gallery rows are identical apart from the owner, and KOBE-46 then
+     needs one install-wide versions table instead of two.
 2. **A row is the agent's editable draft** (`frontmatter jsonb` = the file's YAML as JSON, `prompt`
    text). `current_version` (null until first publish) and `status active|suspended` are there for
    KOBE-46/48. `revision` (+1 per edit) is the ETag; `PUT` honours `If-Match` (412 on mismatch).
 3. **Agent-file parsing lives in a new package `@kobe/agent-file`** (pure, browser-safe: no
-   node APIs, `types: []`), depending on `yaml` (ISC, already in the lockfile) and `zod`. Not in
-   `@kobe/protocol` (pending contracts PR #13).
+   node APIs, `types: []`), depending on `yaml` (ISC, already in the lockfile) and `zod`. Not in `@kobe/protocol` (contracts change only in their own PR); it depends on it.
    - YAML 1.2 core schema; anchors, aliases, explicit tags, duplicate and non-string keys, `<<`
      merge (unknown key) and parser warnings are all refused. File ≤ 128 KiB (checked before
      parsing), frontmatter ≤ 16 KiB, prompt ≤ 100 KiB (UTF-8), C0 controls other than tab/newline
      refused anywhere (Postgres text can't store NUL). Per-field limits in `AGENT_FILE_LIMITS`.
    - Canonical export: keys in schema order, block style, no line folding, `---\n<yaml>---\n<prompt>\n`.
      Prompt normalization: CRLF→LF, leading blank lines and trailing whitespace dropped.
-   - Field formats: `icon` is an icon name or emoji, never a URL; `model` an alias/id; `skills`
-     and `connectors` lowercase slugs without `_` (keeps `mcp__<connector>__<tool>` unambiguous;
-     KOBE-59 should register connector slugs in that format); tool globs are free text ≤ 256 chars
-     (semantics owned by KOBE-35); `approval_mode` ∈ `ask-on-write|ask-all|auto` (no bypass).
+   - Field formats reuse the merged contracts (`@kobe/protocol`, PR #13): `connectors` are
+     `connectorNameSchema` registry names, `tools.allow/deny` are `globSchema` policy globs (plus
+     single-line), `approval_mode` is `approvalModeSchema` (`ask-on-write|ask-all|auto`, no bypass).
+     `icon` is an icon name or emoji, never a URL; `model` an alias/id; `skills` are lowercase
+     SKILL.md-style slugs (`skillSlugSchema`).
    - **`skills` has three forms (D22):** `[a, b]` (union with the user's enabled skills),
      `{ exclusive: [a, b] }` (only these), and `exclusive` (shorthand for `{ exclusive: [] }`).
      `agentSkills()` gives KOBE-47/49 `{ names, exclusive }`.
@@ -84,7 +84,7 @@
      team content across the wall. Export stays a deliberate human act.
    - Suspended agents remain listed (with status) and editable; refusing to run them is KOBE-47.
 6. **No FK from `threads (agent_id, agent_version)` yet** — deferred to KOBE-46 on purpose. The pin
-   targets a *version*, which doesn't exist yet, and an agent id now lives in one of two tables.
+   targets a _version_, which doesn't exist yet, and an agent id now lives in one of two tables.
    Recommendation for KOBE-46:
    - versions: team table `team_agent_versions (team_id, agent_id, version, …)` FK
      `(team_id, agent_id) → team_agents (team_id, id)`, and install-wide
@@ -113,7 +113,7 @@
 - **KOBE-48:** `@kobe/agent-file` is browser-safe for the builder (validate before save, show
   `issues[].path`); `canEdit` and `ETag`/`If-Match` for concurrent editors; inventory reads
   `status`, `ownerUserId`, `currentVersion`.
-- **KOBE-49:** skill slugs use `referenceSlugSchema` (same format as SKILL.md names).
+- **KOBE-49:** skill references use `skillSlugSchema` (same format as SKILL.md names).
 - **KOBE-50:** gallery agents are created through `/v1/install/gallery/agents` (or seeded rows in
   `install_agents` with `scope = 'gallery'`).
 - **KOBE-15 (audit):** agent create/update/delete/status/fork are not audited yet; hook the route
