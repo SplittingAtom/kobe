@@ -10,8 +10,11 @@ Parallel-work rules: [parallel-work.md](parallel-work.md).
 
 - **Run:** Chris (2026-10-02): "do the setup ticket and start wave 0". Parallel agents, one worktree
   per ticket, coordinator merges one PR at a time.
-- **Wave 0 (in progress):** KOBE-9, KOBE-11, KOBE-13, KOBE-14, KOBE-29, plus contracts (protocol
-  interfaces for sandbox WSS, event stream, run orchestrator, policy decisions).
+- **Wave 0 (in progress, agents in `../Kobe-wt{9,11,14,29,-contracts}`):** KOBE-9, KOBE-11,
+  KOBE-14, KOBE-29, plus contracts (protocol interfaces for sandbox WSS, event stream, run
+  orchestrator, policy decisions). KOBE-13 starts when KOBE-14 merges (both edit identity files).
+- **Hadron:** not reachable from the coordinator session (MCP configured elsewhere); sync ticket
+  status after merges.
 - **Wave 1 (next, as deps merge):** 15, 20, 22, 23, 31, 33, 34, 35, 45.
 - **Earlier run:** KOBE-6 (PR #3), KOBE-68 (#4), KOBE-21 (#5), KOBE-7 (#6), KOBE-12 (#8) merged.
   KOBE-69 was listed for that run but is not in the implementation prompt: check Hadron.
