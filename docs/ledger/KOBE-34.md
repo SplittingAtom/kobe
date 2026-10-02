@@ -101,18 +101,39 @@ Derived from D9, D15, D17, D18, D23, §6.1, U2, U15:
     builds the app over a `Proxy` of deps that throws if any other dependency is touched, and runs
     every read through it.
 
+15. **Security review round 1 (coordinator, no CRITICAL/HIGH).**
+    - MEDIUM: an offloaded entry (`blob_ref` set) always gets `payload: {}`, whatever was stored
+      inline. **Suggestion for whoever writes offloaded entries (KOBE-23/30/27):** add a CHECK
+      `blob_ref IS NULL OR payload = '{}'` on `thread_entries` (not this ticket's table).
+    - MEDIUM: changes (PATCH, leaf, DELETE, restore) run `SET LOCAL lock_timeout = '2s'`
+      (`THREAD_LOCK_TIMEOUT`) before `FOR UPDATE` on the thread row. Appenders (seq trigger) and the
+      orchestrator hold that row, so a change fails fast instead of piling up connections. Postgres
+      55P03 → **409 `thread_busy`**, the same code as "run active or queued" (chosen over 503 +
+      Retry-After: the client already handles it as "busy, try again"; the message says so).
+      Reads take no lock and are never blocked.
+    - LOW: Trash older than 30 days (awaiting KOBE-18's purge) is treated as gone everywhere:
+      read, entries, change, delete and restore all return 404 `thread_not_found` (in `readableBy`),
+      consistent with the Trash list.
+
 ## For downstream tickets
 
-- **KOBE-30:** lock the thread row (`FOR UPDATE`) before creating a run (lock order
-  thread → run). Refuse messages on a thread with `deleted_at` set. Never start queued runs of a
-  trashed thread. Bump `threads.last_activity_at` on each message. Mount messages/steer/cancel/retry
+- **KOBE-30 (hard requirements, security review):** lock the thread row (`FOR UPDATE`) first
+  in every transaction that creates, enqueues or promotes a run (lock order thread → run), and
+  refuse trashed threads (`deleted_at` set) there, with a concurrency test (trash racing a message
+  or promotion: never a run on a trashed thread). Never start queued runs of a trashed thread. Bump `threads.last_activity_at` on each message. Mount messages/steer/cancel/retry
   and document them in `src/openapi/document.ts`. Reuse `findThread` for visibility (readers of a
   shared thread must not post: D23, read-only).
 - **KOBE-32:** `RemoteThreadListAdapter` → `GET /v1/threads` (+ `next_cursor`), `POST /v1/threads`,
   `PATCH` (rename), `DELETE` (Trash). The thread view → `GET /v1/threads/{id}` (+ `/entries`).
   Branch switch → `POST /leaf`. Send `X-Kobe-Team` on every request.
 - **KOBE-33:** wire `threads/search.ts` (see its comment).
-- **KOBE-57:** implement `viewerProjectIds` / `canCreateInProject` in `threads/references.ts`.
+- **KOBE-57:** implement `viewerProjectIds` / `canCreateInProject` in `threads/references.ts`,
+  and **must add shared-reader authz tests over HTTP** (project member reads a shared thread
+  read-only: 403 `read_only` on every change, no messages; non-member and ex-member 404; unshared
+  and trashed hidden). Today they are covered only at the data layer.
+- **Tracked follow-up (security review):** rate limiting for `POST /v1/threads` (per user), and a
+  request body size cap in `teams/http.ts parseBody` (shared by all JSON routes) or as Hono
+  `bodyLimit` middleware on `/v1`. Not done here: both are cross-cutting.
 - **KOBE-45/46:** implement `resolveAgentPin` (current published version; D19 pinning).
 - **KOBE-18:** purge from `threads_deleted_idx`. If a user's Trash is large, consider an index
   `(team_id, owner_user_id, deleted_at DESC, id DESC) WHERE deleted_at IS NOT NULL` (see evidence).
@@ -153,6 +174,10 @@ Derived from D9, D15, D17, D18, D23, §6.1, U2, U15:
   cursor page → Index Scan on `threads_owner_activity_idx`, with the row comparison as an Index
   Cond (0.05–0.1 ms). Project list → BitmapOr of owner and project indexes (4 ms). Trash → Bitmap
   scan of `threads_deleted_idx`, filtered by owner (6 ms over 10k trashed rows in the team).
+- Review round 1: `threads.db.test.ts` › "security review fixes" (offloaded entry → `{}` on
+  both entry routes; a thread row held by another transaction → 409 `thread_busy` within 5 s
+  on PATCH, leaf, DELETE and restore, reads unblocked, change succeeds after release; Trash past
+  30 days → 404 on read, entries, PATCH, leaf, DELETE, restore). All three failed before the fix.
 - Self-review (IDOR/authz): every route sits behind `requireTeam` + `team.chat`. Every query is
   inside `withTeam` with explicit `team_id` predicates. Ids come only from the path, and
   `team_id`/owner come from the session. Visibility is checked in the same transaction as the

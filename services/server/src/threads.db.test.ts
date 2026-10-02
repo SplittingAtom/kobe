@@ -682,6 +682,71 @@ describe("list pagination (GET /v1/threads)", () => {
   });
 });
 
+describe("security review fixes", () => {
+  it("never returns a stored payload for an offloaded entry", async () => {
+    const id = await newThread(as.bob);
+    await admin.query(
+      `INSERT INTO thread_entries (team_id, thread_id, entry_id, type, payload, blob_ref)
+       VALUES ($1, $2, 'off', 'message', '{"message":{"content":"inline copy"}}', 'blobs/off')`,
+      [finance, id],
+    );
+    for (const path of [`/v1/threads/${id}`, `/v1/threads/${id}/entries`]) {
+      const res = await as.bob.get(path);
+      expect(res.json.entries, path).toEqual([
+        expect.objectContaining({ entry_id: "off", payload: {}, payload_offloaded: true }),
+      ]);
+      expect(JSON.stringify(res.json)).not.toContain("inline copy");
+    }
+  });
+
+  it("answers thread_busy instead of waiting when the thread row stays locked", async () => {
+    const id = await newThread(as.bob);
+    await appendEntries(finance, id, [{ id: "l1", parent: null }]);
+    await as.bob.delete(`/v1/threads/${id}`);
+    await as.bob.post(`/v1/threads/${id}/restore`);
+    // An appender (seq trigger) or another writer holding the row past the lock timeout.
+    const holder = new pg.Client({ connectionString: database.adminUrl });
+    await holder.connect();
+    try {
+      await holder.query("BEGIN");
+      await holder.query("SELECT 1 FROM threads WHERE id = $1 FOR UPDATE", [id]);
+      const calls = [
+        () => as.bob.patch(`/v1/threads/${id}`, { title: "x" }),
+        () => as.bob.post(`/v1/threads/${id}/leaf`, { entry_id: "l1" }),
+        () => as.bob.delete(`/v1/threads/${id}`),
+        () => as.bob.post(`/v1/threads/${id}/restore`),
+      ];
+      for (const call of calls) {
+        const started = Date.now();
+        expect(await call()).toMatchObject({ status: 409, json: { code: "thread_busy" } });
+        expect(Date.now() - started).toBeLessThan(5_000);
+      }
+      // Reads don't lock and are not blocked.
+      expect((await as.bob.get(`/v1/threads/${id}`)).status).toBe(200);
+    } finally {
+      await holder.query("ROLLBACK");
+      await holder.end();
+    }
+    expect((await as.bob.patch(`/v1/threads/${id}`, { title: "x" })).status).toBe(200);
+  });
+
+  it("treats Trash older than 30 days as gone everywhere", async () => {
+    const id = await newThread(as.bob);
+    await appendEntries(finance, id, [{ id: "x1", parent: null }]);
+    await as.bob.delete(`/v1/threads/${id}`);
+    await admin.query(`UPDATE threads SET deleted_at = now() - interval '31 days' WHERE id = $1`, [
+      id,
+    ]);
+    const gone = { status: 404, json: { code: "thread_not_found" } };
+    expect(await as.bob.get(`/v1/threads/${id}`)).toMatchObject(gone);
+    expect(await as.bob.get(`/v1/threads/${id}/entries`)).toMatchObject(gone);
+    expect(await as.bob.delete(`/v1/threads/${id}`)).toMatchObject(gone);
+    expect(await as.bob.patch(`/v1/threads/${id}`, { title: "t" })).toMatchObject(gone);
+    expect(await as.bob.post(`/v1/threads/${id}/leaf`, { entry_id: "x1" })).toMatchObject(gone);
+    expect(await as.bob.post(`/v1/threads/${id}/restore`)).toMatchObject(gone);
+  });
+});
+
 describe("responses match the OpenAPI schemas (ac-1)", () => {
   it("returns exactly the documented fields", async () => {
     const summary = threadSummarySchema.strict();

@@ -53,6 +53,20 @@ export type ThreadError =
 export type ThreadResult = { ok: true; thread: ThreadSummary } | { ok: false; error: ThreadError };
 
 const TRASH_INTERVAL = sql.raw(`interval '${TRASH_RETENTION_DAYS} days'`);
+
+/**
+ * How long a change waits for the thread row. Appenders (the KOBE-29 seq trigger) and the run
+ * orchestrator hold it; past this the change fails with 55P03, answered as 409 `thread_busy`.
+ */
+export const THREAD_LOCK_TIMEOUT = "2s";
+
+/** Postgres lock_not_available: `lock_timeout` expired. */
+const LOCK_NOT_AVAILABLE = "55P03";
+
+export function isLockTimeout(err: unknown): boolean {
+  const e = err as { code?: string; cause?: { code?: string } } | undefined;
+  return e?.code === LOCK_NOT_AVAILABLE || e?.cause?.code === LOCK_NOT_AVAILABLE;
+}
 const DAY_MS = 86_400_000;
 
 type TimeColumn = typeof threads.lastActivityAt | typeof threads.deletedAt;
@@ -110,9 +124,12 @@ export function toSummary(row: SummaryRow): ThreadSummary {
   };
 }
 
-/** Rows the viewer may read: own (Trash included) or shared to one of their projects (not Trash). */
+/**
+ * Rows the viewer may read: own (Trash included while restorable; older Trash is awaiting purge
+ * and treated as gone) or shared to one of their projects (never from Trash).
+ */
 function readableBy(viewer: Viewer): SQL {
-  const own = eq(threads.ownerUserId, viewer.userId);
+  const own = sql`${eq(threads.ownerUserId, viewer.userId)} AND (${threads.deletedAt} IS NULL OR ${threads.deletedAt} > now() - ${TRASH_INTERVAL})`;
   if (viewer.projectIds.length === 0) return sql`${eq(threads.teamId, viewer.teamId)} AND ${own}`;
   const shared = and(
     eq(threads.sharedToProject, true),
@@ -237,6 +254,8 @@ async function lockForChange(
   viewer: Viewer,
   id: string,
 ): Promise<{ ok: true; thread: SummaryRow } | { ok: false; error: ThreadError }> {
+  // Transaction-local: fail fast (55P03) rather than queue behind a long-held row lock.
+  await tx.execute(sql.raw(`SET LOCAL lock_timeout = '${THREAD_LOCK_TIMEOUT}'`));
   const found = await findThread(tx, viewer, id, { lock: true });
   if (!found) return { ok: false, error: "thread_not_found" };
   if (found.access !== "owner") return { ok: false, error: "read_only" };
@@ -397,7 +416,8 @@ export async function listEntries(
       parent_id: r.parentId,
       seq: r.seq,
       type: r.type,
-      payload: r.payload,
+      // An offloaded body lives in object storage; never echo whatever was left inline.
+      payload: r.blobRef !== null ? {} : r.payload,
       payload_offloaded: r.blobRef !== null,
       created_at: r.createdAt.toISOString(),
     })),

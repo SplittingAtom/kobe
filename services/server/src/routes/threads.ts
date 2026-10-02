@@ -14,6 +14,7 @@ import { canCreateInProject, resolveAgentPin, viewerProjectIds } from "../thread
 import {
   createThread,
   findThread,
+  isLockTimeout,
   listEntries,
   listThreads,
   listTrash,
@@ -47,7 +48,10 @@ const ERRORS = {
   agent_not_found: [404, "No agent with that id is available in this team."],
   project_not_found: [404, "No project with that id is available to you."],
   read_only: [403, "This thread is shared with you read-only."],
-  thread_busy: [409, "The thread has an active or queued run. Stop it first."],
+  thread_busy: [
+    409,
+    "The thread is busy (a run is active or queued, or it is being written). Try again.",
+  ],
   thread_in_trash: [409, "The thread is in Trash. Restore it first."],
   not_in_trash: [409, "The thread is not in Trash."],
   not_in_project: [409, "Only threads in a project can be shared to it."],
@@ -109,8 +113,19 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     );
   };
 
-  const respond = (c: ThreadContext, result: ThreadResult) =>
-    result.ok ? c.json(result.thread) : fail(c, result.error satisfies ThreadError);
+  /** Runs a change; a thread row held past the lock timeout answers 409 `thread_busy`. */
+  const change = async (
+    c: ThreadContext,
+    fn: (tx: KobeTx, viewer: Viewer) => Promise<ThreadResult>,
+  ) => {
+    try {
+      const result = await asViewer(c, fn);
+      return result.ok ? c.json(result.thread) : fail(c, result.error satisfies ThreadError);
+    } catch (err) {
+      if (isLockTimeout(err)) return fail(c, "thread_busy");
+      throw err;
+    }
+  };
 
   app.get("/", async (c) => {
     const query = parseQuery(c, listThreadsQuerySchema);
@@ -197,26 +212,26 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     const id = threadIdParam(c);
     const body = await parseBody(c, updateThreadBodySchema);
     if (!id || !body) return invalidRequest(c, "Give title and/or shared_to_project.");
-    return respond(c, await asViewer(c, (tx, viewer) => updateThread(tx, viewer, id, body)));
+    return change(c, (tx, viewer) => updateThread(tx, viewer, id, body));
   });
 
   app.post("/:id/leaf", async (c) => {
     const id = threadIdParam(c);
     const body = await parseBody(c, setLeafBodySchema);
     if (!id || !body) return invalidRequest(c, "Give the entry_id to continue from.");
-    return respond(c, await asViewer(c, (tx, viewer) => setLeaf(tx, viewer, id, body.entry_id)));
+    return change(c, (tx, viewer) => setLeaf(tx, viewer, id, body.entry_id));
   });
 
   app.delete("/:id", async (c) => {
     const id = threadIdParam(c);
     if (!id) return invalidRequest(c);
-    return respond(c, await asViewer(c, (tx, viewer) => trashThread(tx, viewer, id)));
+    return change(c, (tx, viewer) => trashThread(tx, viewer, id));
   });
 
   app.post("/:id/restore", async (c) => {
     const id = threadIdParam(c);
     if (!id) return invalidRequest(c);
-    return respond(c, await asViewer(c, (tx, viewer) => restoreThread(tx, viewer, id)));
+    return change(c, (tx, viewer) => restoreThread(tx, viewer, id));
   });
 
   return app;
