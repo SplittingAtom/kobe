@@ -2,7 +2,7 @@
 
 - **Status:** in review (PR #15)
 - **Branch / worktree:** `kobe-33-thread-search` in `../Kobe-wt33`
-- **Depends on:** KOBE-29 (merged). Consumers: KOBE-34 (Thread API, `GET /v1/threads?q=`), KOBE-14
+- **Depends on:** KOBE-29 (merged). Wired into KOBE-34's `GET /v1/threads?q=` (decision 14). Consumers: KOBE-14
   (active team, `requireTeam`), KOBE-57 (projects), KOBE-18 (retention).
 
 ## Acceptance criteria (derived from spec D5, D9, D18, D23, D24, §5.4, §6.1, U2, U15; Hadron not reachable)
@@ -29,8 +29,8 @@
 - `src/thread-search.ts` (`searchThreads(tx, input)`) and `src/thread-search-format.ts` (input
   schema, cursor, snippet parsing). Tests first: `thread-search.db.test.ts`,
   `thread-search-format.test.ts`.
-- No HTTP route or UI. §6.1 puts search in `GET /v1/threads?q=` (KOBE-34, which needs KOBE-14's
-  active team); the thread list UI is KOBE-32.
+- Route: `GET /v1/threads?q=` in `services/server/src/threads/search.ts` once KOBE-34 merged
+  (decision 14). No UI (the thread list UI is KOBE-32).
 
 ## Decisions
 
@@ -112,10 +112,34 @@
     - **`drizzle-kit push` hazard** noted next to `schema/threads.ts`: push would drop the SQL-only
       `tsv` columns. Migrations only.
 
+14. **Route wiring (KOBE-34 merged; coordinator asked to wire it here).**
+    `GET /v1/threads?q=` (`services/server/src/threads/search.ts`) calls `searchThreads` in the
+    request's `withTeam` transaction. The viewer is the session user, and `projectIds` come from
+    `viewerProjectIds` (empty until KOBE-57). Each hit is the full thread summary (the same shape as
+    `GET /v1/threads/{id}` without entries; `deleted_at`/`purge_after` are always null, since search
+    never returns Trash) plus `matched_entry_id`, `snippet` (plain-text segments) and `score`.
+    `limit` is capped at 50 with `q`, and `cursor` is then a search cursor. Errors:
+
+    | `ThreadSearchError`     | HTTP | code                                          |
+    | ----------------------- | ---- | --------------------------------------------- |
+    | `invalid_input`         | 400  | `invalid_query` (e.g. only `-excluded` terms) |
+    | `invalid_cursor`        | 400  | `invalid_cursor`                              |
+    | `timeout` (3 s default) | 503  | `search_timeout`                              |
+    | `failed`, `no_team`     | 500  | (rethrown; message has no SQL)                |
+
+    An empty or overlong `q` is a 400 `invalid_request` from the route's zod schema. The OpenAPI
+    200 response is `oneOf [ThreadPage, ThreadSearchPage]`; the 501 `search_unavailable` is gone.
+    `@kobe/db` added an `invalid_cursor` error code, and hits now carry `createdAt` and
+    `leafEntryId` for the summary.
+
+15. **Main was red after KOBE-34 merged on top of KOBE-13:** `threads.db.test.ts` didn't pass the
+    now-required `mailer` (typecheck), and it added members through `POST /v1/team/members`, which
+    KOBE-13 replaced with invitations (404 in `beforeAll`). Fixed here as the newer tests do
+    (`MemoryMailer`, `team_members` rows inserted directly), because the search tests live in that
+    file.
+
 ## Deferred
 
-- **KOBE-34:** `GET /v1/threads?q=&project_id=` should call `searchThreads` inside `withTeam` with
-  the session user. Set `SET LOCAL statement_timeout` (e.g. 5 s) on that request.
 - **KOBE-57:** pass the viewer's project ids. **KOBE-18:** pass `activeSince` from team retention.
 - **KOBE-16 (break-glass):** no admin read path here; break-glass reads go through their own audited
   route.
@@ -193,6 +217,13 @@
   message, caller's team and `statement_timeout` intact), › "input validation" (out-of-range cursor,
   negation-only query → `invalid_input`); `thread-search-format.test.ts` (bigint bounds,
   `splitQuery`).
+- Route (decision 14): `threads.db.test.ts` › "search (GET /v1/threads?q=, KOBE-33)" (7 tests):
+  own thread by message with matched entry and snippet, hit summary equal to the thread read,
+  title search; another user's private thread hidden from them and from the team admin; active
+  team scoping for the same user across two teams; Trash; search-cursor paging and the limit cap;
+  400 `invalid_request`/`invalid_query`/`invalid_cursor`; 503 `search_timeout` with
+  `thread_entries` locked, then the same search works. OpenAPI drift test regenerated
+  (`openapi.json`). Server db suite 179/179.
 - `pnpm build test typecheck format:check license:check` green; `lint` green except the
   pre-existing `@kobe/chart` failure (Helm 4 `license` field); `pnpm --filter @kobe/db test:db`
   132/132; `db:check` clean.

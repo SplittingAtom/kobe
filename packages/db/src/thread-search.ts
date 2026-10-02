@@ -56,6 +56,9 @@ export interface ThreadSearchHit {
   readonly status: ThreadStatus;
   readonly sharedToProject: boolean;
   readonly lastActivityAt: Date;
+  readonly createdAt: Date;
+  /** The active branch's leaf entry. */
+  readonly leafEntryId: string | null;
   /** Relevance; hits are ordered by score, then most recent activity. */
   readonly score: number;
   /** Best-matching entry (may be on an inactive branch); null for a title-only match. */
@@ -80,6 +83,8 @@ interface HitRow extends Record<string, unknown> {
   status: ThreadStatus;
   shared_to_project: boolean;
   activity_micros: string;
+  created_micros: string;
+  leaf_entry_id: string | null;
   score: number;
   matched_entry_id: string | null;
   headline: string | null;
@@ -107,7 +112,7 @@ export async function searchThreads(
   }
   const params = parsed.data;
   const cursor = params.cursor === undefined ? undefined : decodeCursor(params.cursor);
-  if (cursor === null) throw new ThreadSearchError("invalid_input", "invalid cursor");
+  if (cursor === null) throw new ThreadSearchError("invalid_cursor", "invalid cursor");
 
   const rows = await runBounded(tx, params.timeoutMs, async (sp) => {
     const teamId = await activeTeam(sp);
@@ -177,6 +182,8 @@ async function activeTeam(tx: KobeTx): Promise<string> {
   return team;
 }
 
+const fromMicros = (micros: string): Date => new Date(Number(BigInt(micros) / 1000n));
+
 function toHit(row: HitRow): ThreadSearchHit {
   return {
     threadId: row.id,
@@ -188,7 +195,9 @@ function toHit(row: HitRow): ThreadSearchHit {
     status: row.status,
     sharedToProject: row.shared_to_project,
     // Raw execute returns timestamps as text; µs → ms (a Date's precision), as drizzle does.
-    lastActivityAt: new Date(Number(BigInt(row.activity_micros) / 1000n)),
+    lastActivityAt: fromMicros(row.activity_micros),
+    createdAt: fromMicros(row.created_micros),
+    leafEntryId: row.leaf_entry_id,
     score: row.score,
     matchedEntryId: row.matched_entry_id,
     snippet: row.headline === null ? null : parseSnippet(row.headline),
@@ -224,7 +233,8 @@ function searchQuery(
     ),
     visible AS MATERIALIZED (
       SELECT t.team_id, t.id, t.title, t.tsv, t.owner_user_id, t.project_id, t.agent_id,
-             t.agent_version, t.status, t.shared_to_project, t.last_activity_at
+             t.agent_version, t.status, t.shared_to_project, t.last_activity_at,
+             t.leaf_entry_id, t.created_at
       FROM threads t
       WHERE t.team_id = ${teamId}
         AND t.deleted_at IS NULL
@@ -275,7 +285,9 @@ function searchQuery(
     -- Snippets only for the rows returned (not the look-ahead row), from a bounded prefix.
     SELECT r.id, r.title, r.owner_user_id, r.project_id, r.agent_id,
            r.agent_version, r.status, r.shared_to_project,
-           r.activity_micros::text AS activity_micros, r.score, r.matched_entry_id,
+           r.activity_micros::text AS activity_micros, r.leaf_entry_id,
+           (extract(epoch FROM r.created_at) * 1000000)::bigint::text AS created_micros,
+           r.score, r.matched_entry_id,
            CASE WHEN r.rn <= ${p.limit} AND r.matched_entry_id IS NOT NULL THEN
              (SELECT ts_headline(${TS_CONFIG}::regconfig,
                                  left(translate(kobe_entry_search_text(e.type, e.payload),

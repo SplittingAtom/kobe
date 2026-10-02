@@ -6,12 +6,14 @@ import { createTestDatabase, testServerUrl, type TestDatabase } from "@kobe/db/t
 import { createApp } from "./app.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
 import { TestBrowser } from "./testing/browser.js";
+import { MemoryMailer } from "./testing/mailer.js";
 import { findThread, updateThread } from "./threads/repository.js";
 import {
   entryPageSchema,
   threadDetailSchema,
   threadEntrySchema,
   threadPageSchema,
+  threadSearchPageSchema,
   threadSummarySchema,
 } from "./threads/schemas.js";
 
@@ -46,9 +48,13 @@ async function activate(b: TestBrowser, teamId: string): Promise<void> {
   b.team = teamId;
 }
 
+/** Adds `who` to `by`'s active team (members join by invitation since KOBE-13; set up directly). */
 async function addMember(by: TestBrowser, who: Person, role: string): Promise<void> {
-  const res = await by.post("/v1/team/members", { email: email(who), role });
-  expect(res.status, JSON.stringify(res.json)).toBe(201);
+  await admin.query(`INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, $3)`, [
+    by.team,
+    ids[who],
+    role,
+  ]);
 }
 
 async function newThread(b: TestBrowser, body: object = {}): Promise<string> {
@@ -109,6 +115,7 @@ beforeAll(async () => {
     authSecret: "t".repeat(48),
     setupToken: "setup-token-for-thread-tests-01",
     trustedProxies: ["127.0.0.1/32"],
+    mailer: new MemoryMailer(),
   });
   app = createApp(deps);
   for (const who of PEOPLE) {
@@ -781,14 +788,133 @@ describe("responses match the OpenAPI schemas (ac-1)", () => {
   });
 });
 
-describe("search seam (KOBE-33)", () => {
-  it("validates q and answers search_unavailable until search is wired", async () => {
-    expect((await as.bob.get("/v1/threads?q=%20%20")).status).toBe(400);
-    expect(await as.bob.get("/v1/threads?q=numbers")).toMatchObject({
-      status: 501,
-      json: { code: "search_unavailable" },
+describe("search (GET /v1/threads?q=, KOBE-33)", () => {
+  /** Appends a Pi user message with `text` as the database owner would (writers: KOBE-30/23). */
+  async function say(teamId: string, threadId: string, entryId: string, text: string) {
+    await admin.query(
+      `INSERT INTO thread_entries (team_id, thread_id, entry_id, type, payload)
+       VALUES ($1, $2, $3, 'message', $4)`,
+      [teamId, threadId, entryId, JSON.stringify({ message: { role: "user", content: text } })],
+    );
+  }
+  const searchIds = async (b: TestBrowser, q: string): Promise<string[]> => {
+    const res = await b.get(`/v1/threads?q=${encodeURIComponent(q)}`);
+    expect(res.status, JSON.stringify(res.json)).toBe(200);
+    return threadSearchPageSchema.parse(res.json).threads.map((t) => t.thread_id);
+  };
+
+  it("finds the viewer's thread by message text, with summary, matched entry and snippet", async () => {
+    const id = await newThread(as.bob, { title: "Budget review" });
+    await say(finance, id, "s1", "the narwhal forecast for Q4");
+    const res = await as.bob.get("/v1/threads?q=narwhal");
+    expect(res.status).toBe(200);
+    const page = threadSearchPageSchema.parse(res.json);
+    expect(page.next_cursor).toBeNull();
+    expect(page.threads).toHaveLength(1);
+    expect(page.threads[0]).toMatchObject({
+      thread_id: id,
+      title: "Budget review",
+      owner_user_id: ids.bob,
+      deleted_at: null,
+      matched_entry_id: "s1",
+    });
+    expect(page.threads[0]?.snippet?.filter((s) => s.highlight).map((s) => s.text)).toEqual([
+      "narwhal",
+    ]);
+    // Title search, and the summary equals what the thread read returns.
+    const [hit] = threadSearchPageSchema.parse(
+      (await as.bob.get("/v1/threads?q=budget")).json,
+    ).threads;
+    const detail = threadDetailSchema.parse((await as.bob.get(`/v1/threads/${id}`)).json);
+    const { entries: _e, next_entries_after: _n, ...summary } = detail;
+    const { matched_entry_id: _m, snippet: _s, score: _sc, ...hitSummary } = hit ?? {};
+    expect(hitSummary).toEqual(summary);
+  });
+
+  it("never returns another user's private thread, not even to the team admin", async () => {
+    const id = await newThread(as.carol);
+    await say(finance, id, "p1", "carol's pangolin plan");
+    expect(await searchIds(as.carol, "pangolin")).toEqual([id]);
+    expect(await searchIds(as.bob, "pangolin")).toEqual([]);
+    expect(await searchIds(as.alice, "pangolin")).toEqual([]);
+  });
+
+  it("is scoped to the active team, even for the same user's own threads", async () => {
+    const inFinance = await newThread(as.bob);
+    await say(finance, inFinance, "q1", "quasar in finance");
+    await activate(as.bob, marketing);
+    try {
+      const inMarketing = await newThread(as.bob);
+      await say(marketing, inMarketing, "q1", "quasar in marketing");
+      expect(await searchIds(as.bob, "quasar")).toEqual([inMarketing]);
+      expect(await searchIds(as.dave, "quasar")).toEqual([]);
+    } finally {
+      await activate(as.bob, finance);
+    }
+    expect(await searchIds(as.bob, "quasar")).toEqual([inFinance]);
+  });
+
+  it("leaves out Trash", async () => {
+    const id = await newThread(as.bob);
+    await say(finance, id, "t1", "binned wombat");
+    expect(await searchIds(as.bob, "wombat")).toEqual([id]);
+    expect((await as.bob.delete(`/v1/threads/${id}`)).status).toBe(200);
+    expect(await searchIds(as.bob, "wombat")).toEqual([]);
+  });
+
+  it("pages with a search cursor and caps limit at 50", async () => {
+    const created: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const id = await newThread(as.bob);
+      await say(finance, id, "c1", `capybara note ${i}`);
+      created.push(id);
+    }
+    const first = await as.bob.get("/v1/threads?q=capybara&limit=2");
+    const page1 = threadSearchPageSchema.parse(first.json);
+    expect(page1.threads).toHaveLength(2);
+    const second = await as.bob.get(
+      `/v1/threads?q=capybara&limit=2&cursor=${encodeURIComponent(page1.next_cursor ?? "")}`,
+    );
+    const page2 = threadSearchPageSchema.parse(second.json);
+    expect(page2.next_cursor).toBeNull();
+    expect([...page1.threads, ...page2.threads].map((t) => t.thread_id).sort()).toEqual(
+      created.sort(),
+    );
+    expect((await as.bob.get("/v1/threads?q=capybara&limit=100")).status).toBe(200);
+  });
+
+  it("answers 400 for an empty or negation-only query and for a bad cursor", async () => {
+    expect((await as.bob.get("/v1/threads?q=%20%20")).json).toMatchObject({
+      code: "invalid_request",
+    });
+    expect(await as.bob.get(`/v1/threads?q=${encodeURIComponent('-alpha -"b c"')}`)).toMatchObject({
+      status: 400,
+      json: { code: "invalid_query" },
+    });
+    expect(await as.bob.get("/v1/threads?q=alpha&cursor=bogus")).toMatchObject({
+      status: 400,
+      json: { code: "invalid_cursor" },
     });
   });
+
+  it("answers 503 search_timeout when the search exceeds its time limit, and stays usable", async () => {
+    const id = await newThread(as.bob);
+    await say(finance, id, "l1", "locked ocelot");
+    const locker = new pg.Client({ connectionString: database.adminUrl });
+    await locker.connect();
+    try {
+      await locker.query("BEGIN");
+      await locker.query("LOCK TABLE thread_entries IN ACCESS EXCLUSIVE MODE");
+      const res = await as.bob.get("/v1/threads?q=ocelot");
+      expect(res.status).toBe(503);
+      expect(res.json).toMatchObject({ code: "search_timeout" });
+      expect(JSON.stringify(res.json)).not.toMatch(/select|ocelot/i);
+    } finally {
+      await locker.query("ROLLBACK");
+      await locker.end();
+    }
+    expect(await searchIds(as.bob, "ocelot")).toEqual([id]);
+  }, 20_000);
 });
 
 describe("history reads never wake sandboxes (ac-2)", () => {

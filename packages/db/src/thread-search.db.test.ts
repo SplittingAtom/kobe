@@ -444,6 +444,8 @@ describe("ranking and pagination (ac-4)", () => {
       agentId: null,
       agentVersion: null,
       lastActivityAt: row[0]?.lastActivityAt,
+      createdAt: row[0]?.createdAt,
+      leafEntryId: row[0]?.leafEntryId,
     });
     expect(hit?.score).toBeGreaterThan(0);
   });
@@ -466,7 +468,7 @@ describe("input validation (ac-5)", () => {
       },
     ],
     ["a negation-only query", { query: '-alpha -"beta gamma"' }],
-  ])("rejects %s with a typed error and no database round trip", async (_label, override) => {
+  ])("rejects %s with a typed error and no database round trip", async (label, override) => {
     const me = await newUser(teamA);
     const err = await search(teamA, {
       viewerUserId: me,
@@ -477,7 +479,7 @@ describe("input validation (ac-5)", () => {
       (e: unknown) => e,
     );
     expect(err).toBeInstanceOf(ThreadSearchError);
-    expect(err).toMatchObject({ code: "invalid_input" });
+    expect(err).toMatchObject({ code: /cursor/.test(label) ? "invalid_cursor" : "invalid_input" });
     expect((err as Error).message).toMatch(/^searchThreads: /);
   });
 });

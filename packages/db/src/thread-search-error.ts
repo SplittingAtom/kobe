@@ -1,5 +1,6 @@
 /** Why a search failed. Messages never include SQL, parameters or row data. */
-export type ThreadSearchErrorCode = "invalid_input" | "no_team" | "timeout" | "failed";
+export type ThreadSearchErrorCode =
+  "invalid_input" | "invalid_cursor" | "no_team" | "timeout" | "failed";
 
 export class ThreadSearchError extends Error {
   override readonly name = "ThreadSearchError";
