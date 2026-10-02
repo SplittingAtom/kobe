@@ -24,6 +24,11 @@ export interface RestorePlan {
   readonly forcedRls: readonly string[];
   /** Enabled user triggers, disabled during the load (pg_restore --disable-triggers semantics). */
   readonly userTriggers: readonly UserTrigger[];
+  /**
+   * Non-deferrable foreign keys, made DEFERRABLE INITIALLY DEFERRED for the load (data-only loads
+   * cannot order around FK cycles such as threads ⇄ thread_entries) and restored before COMMIT.
+   */
+  readonly immediateForeignKeys: readonly { readonly table: string; readonly constraint: string }[];
 }
 
 const table = (name: string): string => `public.${quoteIdent(name)}`;
@@ -68,6 +73,11 @@ export function restorePrelude(plan: RestorePlan): string {
     ...plan.userTriggers.map(
       (t) => `ALTER TABLE ${table(t.table)} DISABLE TRIGGER ${ident(t.trigger)};`,
     ),
+    ...plan.immediateForeignKeys.map(
+      (f) =>
+        `ALTER TABLE ${table(f.table)} ALTER CONSTRAINT ${ident(f.constraint)} DEFERRABLE INITIALLY DEFERRED;`,
+    ),
+    "SET CONSTRAINTS ALL DEFERRED;",
     doBlock(
       `BEGIN\n  IF (SELECT coalesce(string_agg(hash || ':' || created_at, ',' ORDER BY created_at, id), '') FROM drizzle.__drizzle_migrations) <> ${literal(journalText(plan.migrations))} THEN\n    RAISE EXCEPTION 'kobe restore: the database''s applied migrations do not match the backup; nothing was restored';\n  END IF;\nEND`,
     ),
@@ -94,6 +104,12 @@ export function restorePostlude(plan: RestorePlan): string {
   return [
     "",
     doBlock(`DECLARE n bigint;\nBEGIN\n${countChecks}\nEND`),
+    // Checks every deferred foreign key now (a violation aborts), then restores them as they were.
+    "SET CONSTRAINTS ALL IMMEDIATE;",
+    ...plan.immediateForeignKeys.map(
+      (f) =>
+        `ALTER TABLE ${table(f.table)} ALTER CONSTRAINT ${ident(f.constraint)} NOT DEFERRABLE INITIALLY IMMEDIATE;`,
+    ),
     ...plan.userTriggers.map(enable),
     ...plan.forcedRls.map((t) => `ALTER TABLE ${table(t)} FORCE ROW LEVEL SECURITY;`),
     "COMMIT;",

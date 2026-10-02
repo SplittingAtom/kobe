@@ -7,6 +7,13 @@ export {
   type KobeTx,
 } from "./client.js";
 export {
+  TEAM_ROLES,
+  getMembership,
+  listMemberships,
+  type TeamMembership,
+  type TeamRole,
+} from "./memberships.js";
+export {
   DEFAULT_MIGRATIONS_FOLDER,
   MIGRATION_LOCK_KEY,
   runMigrations,
@@ -25,4 +32,4 @@ export {
 export { withTeam } from "./with-team.js";
 export { waitForMigrations, type WaitOptions } from "./wait.js";
 // Query helpers re-exported so dependents share this package's drizzle-orm instance (one copy, one type identity).
-export { and, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+export { and, asc, count, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";

@@ -24,12 +24,13 @@ with the operator's backup key. There is no plaintext mode.
   ran.
 - **Not backed up (by design):**
 
-  | Table           | Why                                                            |
-  | --------------- | -------------------------------------------------------------- |
-  | `sessions`      | bearer session tokens; after a restore everyone signs in again |
-  | `verifications` | one-time email-verification and password-reset tokens          |
-  | `jwks`          | JWT signing keys; the server generates a new one on first use  |
-  | `rate_limits`   | throwaway counters                                             |
+  | Table                  | Why                                                                                                 |
+  | ---------------------- | --------------------------------------------------------------------------------------------------- |
+  | `sessions`             | bearer session tokens; after a restore everyone signs in again                                      |
+  | `verifications`        | one-time email-verification and password-reset tokens                                               |
+  | `jwks`                 | JWT signing keys; the server generates a new one on first use                                       |
+  | `rate_limits`          | throwaway counters                                                                                  |
+  | `session_active_teams` | per-session pointer to the active team; it references `sessions`, so its rows could not be restored |
 
 - **Schema, grants and the migration journal are not in the dump.** The target gets them from
   Kobe's own migrations (`helm install`). Objects therefore stay owned by the owner role, and the
@@ -245,7 +246,8 @@ How restore works:
 4. Streams `pg_restore --data-only` into **one `psql` transaction**. That transaction:
    - takes the migration lock and locks every table;
    - lifts `FORCE ROW LEVEL SECURITY` for the owner only (the app role stays bound by RLS);
-   - disables user triggers;
+   - disables user triggers (e.g. the `seq`-assigning triggers on `thread_entries` and
+     `run_events`, so the backed-up `seq` values are kept) and defers foreign keys;
    - re-checks the migrations and that the target is empty;
    - loads the data and verifies every table's row count against the manifest;
    - restores the triggers and FORCE RLS, and commits.
@@ -260,8 +262,10 @@ How restore works:
 
 - Only same-version restores are supported. To move a backup to a newer Kobe, restore it on its
   own version and then run `helm upgrade`, which runs the migrations as usual.
-- Data-only loads follow foreign-key order. A cycle between two tables (a self-reference is fine)
-  would fail the restore, atomically. Kobe's schema has no such cycle.
+- Foreign keys: inside the transaction, every non-deferrable foreign key is made `DEFERRABLE
+INITIALLY DEFERRED` (the owner may do this), so FK cycles such as `threads.leaf_entry_id` ⇄
+  `thread_entries` load in any order. All keys are checked before the commit and then made
+  immediate again; a violation rolls everything back.
 - Sequence positions (`setval`) are not transactional. After a failed restore, the target's
   sequences may already have moved forward. This is harmless (ids skip), but the target is not
   byte-identical to a fresh install.

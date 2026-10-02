@@ -5,6 +5,7 @@ import { pipeline } from "node:stream/promises";
 import { MIGRATION_LOCK_KEY } from "@kobe/db";
 import pg from "pg";
 import {
+  listImmediateForeignKeys,
   listTables,
   listUserTriggers,
   readJournal,
@@ -258,6 +259,7 @@ export async function runRestore(options: RestoreOptions): Promise<RestoreReport
         loadTables: manifest.tables,
         forcedRls: tables.filter((t) => t.forcedRls).map((t) => t.name),
         userTriggers: await listUserTriggers(client),
+        immediateForeignKeys: await listImmediateForeignKeys(client),
       };
     } finally {
       await client.end().catch(() => undefined);

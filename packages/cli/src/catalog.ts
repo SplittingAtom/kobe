@@ -48,6 +48,22 @@ export async function readJournal(client: pg.ClientBase): Promise<MigrationRecor
   return rows.map((r) => ({ hash: r.hash, createdAt: Number(r.created_at) }));
 }
 
+/** Foreign keys checked immediately (not DEFERRABLE) on public tables. */
+export async function listImmediateForeignKeys(
+  client: pg.ClientBase,
+): Promise<{ table: string; constraint: string }[]> {
+  const { rows } = await client.query<{ table: string; constraint: string }>(
+    `SELECT c.relname AS table, con.conname AS constraint
+     FROM pg_constraint con
+     JOIN pg_class c ON c.oid = con.conrelid
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'public' AND c.relkind = 'r' AND con.contype = 'f'
+       AND NOT con.condeferrable AND con.conparentid = 0
+     ORDER BY c.relname, con.conname`,
+  );
+  return rows;
+}
+
 /** Enabled (origin or always) user triggers on public tables. */
 export async function listUserTriggers(client: pg.ClientBase): Promise<UserTrigger[]> {
   const { rows } = await client.query<{ table: string; trigger: string; mode: "O" | "A" }>(

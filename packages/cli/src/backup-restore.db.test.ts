@@ -118,10 +118,13 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
         team_members: 3,
         widgets: 3,
         accounts: 2,
+        threads: 1,
+        thread_entries: 2,
       });
       expect(manifest.excludedTables.map((t) => t.name).sort()).toEqual([
         "jwks",
         "rate_limits",
+        "session_active_teams",
         "sessions",
         "verifications",
       ]);
@@ -134,8 +137,11 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
         bucket: "kobe",
         objects: 2,
         bytes: 1333,
-        referencedObjects: 1,
-        blobRefColumns: [{ table: "widgets", column: "blob_ref" }],
+        referencedObjects: 2,
+        blobRefColumns: [
+          { table: "thread_entries", column: "blob_ref" },
+          { table: "widgets", column: "blob_ref" },
+        ],
       });
       expect(manifest.coverage).toEqual({
         schemas: ["public"],

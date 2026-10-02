@@ -12,7 +12,7 @@ enforces the same rule in-cluster. Keep the text identical to the server's ISOLA
 {{- if not $rc -}}
 {{- fail (printf "RuntimeClass %q does not exist. %s" $name "Kobe refuses to run agents without an isolation runtime: no RuntimeClass with a gVisor (handler 'runsc') or Kata ('kata*') handler exists in this cluster. Fix: install gVisor on every node with scripts/install-gvisor-k3s.sh (creates RuntimeClass 'gvisor', handler 'runsc'), or install Kata Containers, then retry. See docs/install.md#isolation.") -}}
 {{- end -}}
-{{- if not (regexMatch "^(runsc|kata(-[a-z0-9]+)?)$" $rc.handler) -}}
+{{- if not (regexMatch "^(runsc|kata(-[a-z0-9]+)*)$" $rc.handler) -}}
 {{- fail (printf "RuntimeClass %q has handler %q, which is not gVisor (runsc) or Kata (kata*). %s" $name $rc.handler "Kobe refuses to run agents without an isolation runtime: no RuntimeClass with a gVisor (handler 'runsc') or Kata ('kata*') handler exists in this cluster. Fix: install gVisor on every node with scripts/install-gvisor-k3s.sh (creates RuntimeClass 'gvisor', handler 'runsc'), or install Kata Containers, then retry. See docs/install.md#isolation.") -}}
 {{- end -}}
 {{- end -}}

@@ -9,4 +9,6 @@ export interface BlobRefColumn {
  * referenced key is in the bucket listing it records, and refuses otherwise. When your table
  * stores object keys, add its column here (one line per column, in the PR that adds the column).
  */
-export const BLOB_REF_COLUMNS: readonly BlobRefColumn[] = [];
+export const BLOB_REF_COLUMNS: readonly BlobRefColumn[] = [
+  { table: "thread_entries", column: "blob_ref" }, // Pi entry payloads over 64 KB (D15)
+];

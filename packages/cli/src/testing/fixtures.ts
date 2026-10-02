@@ -1,6 +1,7 @@
 import { cp, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { BLOB_REF_COLUMNS } from "@kobe/db";
 import { createTestDatabase, type TestDatabase } from "@kobe/db/testing";
 import pg from "pg";
 import { decryptFile, deriveKeys } from "../crypto.js";
@@ -40,6 +41,7 @@ export const T1 = "00000000-0000-4000-8000-0000000000a1";
 export const T2 = "00000000-0000-4000-8000-0000000000a2";
 export const U1 = "00000000-0000-4000-8000-0000000000b1";
 export const U2 = "00000000-0000-4000-8000-0000000000b2";
+export const THREAD = "00000000-0000-4000-8000-0000000000c1";
 export const U3 = "00000000-0000-4000-8000-0000000000b3";
 
 export const OBJECTS: StoredObject[] = [
@@ -120,7 +122,14 @@ export async function seed(db: TestDatabase): Promise<void> {
      INSERT INTO widgets (team_id, id, parent_id, name, blob_ref) VALUES
        ($1, 1, 2, 'child', 'teams/a1/uploads/report.csv'), ($1, 2, NULL, 'parent', NULL),
        ($2, 3, NULL, 'beta-only', NULL);
-     SELECT setval('widgets_id_seq', 3);`.replaceAll(
+     SELECT setval('widgets_id_seq', 3);
+     -- A conversation: entries chain to their parent, the thread points at its leaf entry (an FK
+     -- cycle threads <-> thread_entries); triggers assign seq. One entry's payload lives in S3.
+     INSERT INTO threads (team_id, id, owner_user_id, title) VALUES ($1, '${THREAD}', $3, 'Q3 report');
+     INSERT INTO thread_entries (team_id, thread_id, entry_id, parent_id, type, payload, blob_ref) VALUES
+       ($1, '${THREAD}', 'e1', NULL, 'message', '{"text":"hi"}', NULL),
+       ($1, '${THREAD}', 'e2', 'e1', 'message', '{}', 'teams/a2/artifacts/chart.html');
+     UPDATE threads SET leaf_entry_id = 'e2' WHERE team_id = $1 AND id = '${THREAD}';`.replaceAll(
       /\$(\d)/g,
       (_, n: string) => `'${[T1, T2, U1, U2, U3][Number(n) - 1]}'`,
     ),
@@ -156,8 +165,8 @@ export async function forcedTables(url: string): Promise<string[]> {
   return rows.map((r) => r.name);
 }
 
-/** The test table's blob-ref column, registered for these tests only. */
-export const BLOB_REFS = [{ table: "widgets", column: "blob_ref" }] as const;
+/** The real registry plus the test table's blob-ref column (registered for these tests only). */
+export const BLOB_REFS = [...BLOB_REF_COLUMNS, { table: "widgets", column: "blob_ref" }];
 
 /** Every byte of every file in a backup directory, for plaintext-leak checks. */
 export async function allBackupBytes(dir: string): Promise<Buffer> {

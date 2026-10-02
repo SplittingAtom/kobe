@@ -113,6 +113,24 @@ transaction as the owner.
   restore, to be recorded out of band (rollback to an older genuine backup); ~64 GiB per-file GCM
   limit documented.
 
+## Merge with main (KOBE-14 #12, contracts #13)
+
+- Conflict only in `packages/db/src/index.ts` (both added exports); `pnpm-lock.yaml` taken from
+  main and regenerated with `pnpm install`.
+- **`session_active_teams` excluded:** per-session pointer that references `sessions` (excluded),
+  so its rows could not be restored (FK) and would be meaningless anyway.
+- **`thread_entries.blob_ref` registered** in `BLOB_REF_COLUMNS` (Pi payloads over 64 KB, D15). The
+  registry test now maps Drizzle's camelCase keys to snake_case columns.
+- **FK cycle found:** `threads.leaf_entry_id → thread_entries` and `thread_entries → threads`. A
+  data-only load can't order around it, so restore now makes every non-deferrable FK `DEFERRABLE
+INITIALLY DEFERRED` inside the transaction, runs `SET CONSTRAINTS ALL IMMEDIATE` after the load
+  (violations abort), and restores `NOT DEFERRABLE` before COMMIT. Verified: with the deferral
+  disabled the round trip fails; with it, it passes.
+- The `seq`-assigning triggers on `thread_entries`/`run_events` (KOBE-29) reject explicit `seq`;
+  the restore already disables user triggers, so backed-up `seq` values are kept (round trip
+  seeds a thread with two entries, a leaf pointer and an S3 blob ref).
+- Coverage check: KOBE-14 added nothing outside `public`; passes.
+
 ## Open questions (for Chris or the coordinator)
 
 - Should the chart create the `kobe_backup` role in CNPG mode (managed role + generated Secret)?

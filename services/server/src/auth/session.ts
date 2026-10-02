@@ -1,6 +1,9 @@
 import { createMiddleware } from "hono/factory";
 import { eq, installRoles, installSettings } from "@kobe/db";
+import type { InstallRole } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
+
+export type { InstallRole } from "../authz/permissions.js";
 
 export interface SessionUser {
   readonly id: string;
@@ -9,10 +12,10 @@ export interface SessionUser {
   readonly twoFactorEnabled: boolean;
 }
 
-export type InstallRole = "owner" | "admin" | null;
-
 export interface AuthVariables {
   user: SessionUser;
+  /** The Better Auth session row id (the active team hangs off it, spec D9). */
+  sessionId: string;
   installRole: InstallRole;
 }
 
@@ -55,6 +58,7 @@ export function requireSession(deps: ServerDeps) {
       .from(installRoles)
       .where(eq(installRoles.userId, user.id));
     c.set("user", user);
+    c.set("sessionId", session.session.id);
     c.set("installRole", role?.role ?? null);
     await next();
   });

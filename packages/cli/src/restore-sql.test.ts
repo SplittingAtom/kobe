@@ -17,6 +17,10 @@ const plan: RestorePlan = {
     { table: "users", trigger: 'audit "x"', mode: "O" },
     { table: "team_members", trigger: "always_one", mode: "A" },
   ],
+  immediateForeignKeys: [
+    { table: "threads", constraint: "threads_leaf_entry_fk" },
+    { table: "thread_entries", constraint: "thread_entries_thread_fk" },
+  ],
 };
 
 describe("restore prelude", () => {
@@ -52,6 +56,13 @@ describe("restore prelude", () => {
     expect(sql).not.toContain('FROM public."sessions")');
   });
 
+  it("defers immediate foreign keys for the load, so FK cycles (threads ⇄ entries) load in any order", () => {
+    expect(sql).toContain(
+      'ALTER TABLE public."threads" ALTER CONSTRAINT "threads_leaf_entry_fk" DEFERRABLE INITIALLY DEFERRED;',
+    );
+    expect(sql).toContain("SET CONSTRAINTS ALL DEFERRED;");
+  });
+
   it("rejects unsafe table names", () => {
     expect(() => restorePrelude({ ...plan, lockTables: ['x"; DROP'] })).toThrow(/Invalid/);
   });
@@ -64,6 +75,14 @@ describe("restore postlude", () => {
     expect(sql).toContain('SELECT count(*) INTO n FROM public."team_members"');
     expect(sql).toContain("IF n <> 3 THEN");
     expect(sql).toContain("IF n <> 2 THEN");
+  });
+
+  it("checks deferred foreign keys, then makes them immediate again", () => {
+    expect(sql.indexOf("SET CONSTRAINTS ALL IMMEDIATE;")).toBeGreaterThan(-1);
+    expect(sql.indexOf("SET CONSTRAINTS ALL IMMEDIATE;")).toBeLessThan(
+      sql.indexOf('ALTER CONSTRAINT "threads_leaf_entry_fk" NOT DEFERRABLE INITIALLY IMMEDIATE;'),
+    );
+    expect(sql.indexOf("NOT DEFERRABLE")).toBeLessThan(sql.indexOf("COMMIT;"));
   });
 
   it("re-enables triggers in their original mode and re-forces RLS, then commits", () => {

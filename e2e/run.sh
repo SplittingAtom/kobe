@@ -84,7 +84,9 @@ gate_fmt='{range .items[*]}{range .status.initContainerStatuses[*]}{.name}={.sta
 gates=$($KUBECTL -n "$NS" get pods -l "$gated_pods" --field-selector=status.phase=Running -o jsonpath="$gate_fmt")
 expect "every server/scheduler init gate (isolation, migrations) completed" '^(isolation-preflight|wait-for-migrations)=Completed$' "$gates"
 gate_count=$(printf '%s\n' "$gates" | grep -c .)
-contains "init gates ran on all 3 server/scheduler pods" "^6$" "$gate_count"
+# 2 server pods x wait-for-migrations + 1 scheduler pod x (isolation-preflight, wait-for-migrations);
+# the server checks isolation in process instead (KOBE-9).
+contains "init gates ran on all 3 server/scheduler pods" "^4$" "$gate_count"
 expect "app-role grants recorded for the newest migration" '^t$' "$(psql_kobe \
   'select (select migration_when from drizzle.kobe_grants_applied) = (select max(created_at) from drizzle.__drizzle_migrations)')"
 expect "team tables have FORCE ROW LEVEL SECURITY" '^team_members\|true$' "$(psql_kobe \
@@ -92,6 +94,13 @@ expect "team tables have FORCE ROW LEVEL SECURITY" '^team_members\|true$' "$(psq
 contains "web answers through the Traefik ingress" '"service":"web"' \
   "$(probe "$NS" 'wget -qO- --header "Host: kobe.localtest.me" http://traefik.kube-system/api/healthz')"
 contains "server answers" '"service":"server"' "$(probe "$NS" 'wget -qO- http://kobe-server/healthz')"
+# KOBE-9: every server/scheduler process verified isolation itself (not disclosed by /readyz).
+iso=""
+for pod in $($KUBECTL -n "$NS" get pods -l "$gated_pods" --field-selector=status.phase=Running -o name); do
+  if $KUBECTL -n "$NS" logs "$pod" 2>/dev/null | grep -q '"msg":"isolation verified: agents enabled"'; then iso+="verified "
+  else iso+="$pod:unverified "; fi
+done
+contains "server and scheduler verified the gVisor RuntimeClass in process" '^verified verified verified $' "$iso"
 contains "Bifrost is reachable from the release namespace" '"status":"ok"' \
   "$(probe "$NS" 'wget -qO- -T 5 http://kobe-bifrost:8080/health')"
 np=$(probe default "wget -qO- -T 5 http://kobe-web.$NS/api/healthz >/dev/null 2>&1 && echo control=REACHED || echo control=BLOCKED; \

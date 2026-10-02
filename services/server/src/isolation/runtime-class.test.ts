@@ -9,16 +9,33 @@ import {
 const rc = (name: string, handler: string) => ({ metadata: { name }, handler });
 
 describe("isIsolationHandler", () => {
-  it.each(["runsc", "kata", "kata-qemu", "kata-clh", "kata-fc"])("accepts %s", (h) => {
-    expect(isIsolationHandler(h)).toBe(true);
-  });
-
-  it.each(["runc", "crun", "nvidia", "wasmtime", "runsc-debug", "katana", ""])(
-    "rejects %s",
+  it.each(["runsc", "kata", "kata-qemu", "kata-clh", "kata-fc", "kata-qemu-snp", "kata-clh-tdx"])(
+    "accepts %s",
     (h) => {
-      expect(isIsolationHandler(h)).toBe(false);
+      expect(isIsolationHandler(h)).toBe(true);
     },
   );
+
+  it.each([
+    "runc",
+    "crun",
+    "nvidia",
+    "wasmtime",
+    "runsc-debug",
+    "runsc2",
+    "Runsc",
+    "runsc ",
+    " runsc",
+    "katana",
+    "kataX",
+    "kata-",
+    "kata--qemu",
+    "kata-qemu-",
+    "kata-QEMU",
+    "",
+  ])("rejects %s", (h) => {
+    expect(isIsolationHandler(h)).toBe(false);
+  });
 });
 
 describe("findIsolationRuntimeClasses", () => {

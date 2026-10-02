@@ -8,6 +8,9 @@ const tables = (Object.values(schema) as unknown[])
   .filter((v) => is(v, PgTable))
   .map((t) => getTableConfig(t as PgTable));
 
+/** The client maps camelCase keys to snake_case columns (`casing: "snake_case"`). */
+const snake = (name: string): string => name.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+
 describe("blob-ref registry", () => {
   it("sees the schema's tables (so the check below is not vacuous)", () => {
     expect(tables.map((t) => t.name)).toEqual(expect.arrayContaining(["users", "team_members"]));
@@ -18,7 +21,7 @@ describe("blob-ref registry", () => {
       const table = tables.find((t) => t.name === ref.table);
       expect(table, ref.table).toBeDefined();
       expect(
-        table?.columns.map((c) => c.name),
+        table?.columns.map((c) => snake(c.name)),
         `${ref.table}.${ref.column}`,
       ).toContain(ref.column);
     }
