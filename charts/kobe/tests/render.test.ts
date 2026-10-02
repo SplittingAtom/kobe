@@ -18,6 +18,8 @@ const BASE: Record<string, string> = {
   "s3.endpoint": "https://s3.example.com",
   "s3.bucket": "kobe",
   "s3.existingSecret": "kobe-s3",
+  "smtp.host": "smtp.example.com",
+  "smtp.from": "Kobe <kobe@example.com>",
   "global.imagePullSecrets[0].name": "ghcr-pull",
   // helm template renders offline; production renders either reach the cluster or use existingSecrets.
   "global.allowGeneratedSecretsOffline": "true",
@@ -568,5 +570,56 @@ describe("ClamAV", () => {
   it("is off by default and optional", () => {
     expect(find(render(), "Deployment", "kobe-clamav")).toBeUndefined();
     expect(find(render({ "clamav.enabled": "true" }), "Deployment", "kobe-clamav")).toBeDefined();
+  });
+});
+
+describe("SMTP (KOBE-13)", () => {
+  const env = (ms: Manifest[], name: string) =>
+    find(ms, "Deployment", name)?.spec.template.spec.containers[0].env as unknown[];
+
+  it("is required: a host and a sender (spec D7)", () => {
+    expect(renderError({}, ["smtp.host"])).toMatch(/smtp\/host|smtp\.host/);
+    expect(renderError({}, ["smtp.from"])).toMatch(/smtp\/from|smtp\.from/);
+    expect(renderError({ "smtp.security": "ssl" })).toMatch(/security/);
+    expect(renderError({ "smtp.bogus": "1" })).toMatch(/additional properties/i);
+  });
+
+  it("gives only the API server the SMTP settings, with STARTTLS on 587 by default", () => {
+    const ms = render();
+    const server = env(ms, "kobe-server");
+    expect(server).toContainEqual({ name: "KOBE_SMTP_HOST", value: "smtp.example.com" });
+    expect(server).toContainEqual({ name: "KOBE_SMTP_PORT", value: "587" });
+    expect(server).toContainEqual({ name: "KOBE_SMTP_SECURITY", value: "starttls" });
+    expect(server).toContainEqual({ name: "KOBE_SMTP_FROM", value: "Kobe <kobe@example.com>" });
+    expect(JSON.stringify(server)).not.toContain("KOBE_SMTP_PASSWORD");
+    for (const name of ["kobe-scheduler", "kobe-web", "kobe-mcp-proxy", "kobe-egress-proxy"]) {
+      expect(JSON.stringify(find(ms, "Deployment", name)), name).not.toContain("KOBE_SMTP");
+    }
+  });
+
+  it("reads SMTP credentials from a Secret, never from values", () => {
+    const server = env(
+      render({ "smtp.existingSecret": "kobe-smtp", "smtp.port": "465", "smtp.security": "tls" }),
+      "kobe-server",
+    );
+    expect(server).toContainEqual({
+      name: "KOBE_SMTP_USERNAME",
+      valueFrom: { secretKeyRef: { name: "kobe-smtp", key: "username" } },
+    });
+    expect(server).toContainEqual({
+      name: "KOBE_SMTP_PASSWORD",
+      valueFrom: { secretKeyRef: { name: "kobe-smtp", key: "password" } },
+    });
+    expect(server).toContainEqual({ name: "KOBE_SMTP_PORT", value: "465" });
+  });
+
+  it("refuses credentials over unencrypted SMTP", () => {
+    expect(renderError({ "smtp.security": "none", "smtp.existingSecret": "kobe-smtp" })).toMatch(
+      /existingSecret/,
+    );
+    expect(env(render({ "smtp.security": "none" }), "kobe-server")).toContainEqual({
+      name: "KOBE_SMTP_SECURITY",
+      value: "none",
+    });
   });
 });

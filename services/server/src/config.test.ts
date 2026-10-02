@@ -6,6 +6,8 @@ const REQUIRED = {
   KOBE_PUBLIC_URL: "https://kobe.example.com",
   KOBE_AUTH_SECRET: "x".repeat(32),
   KOBE_SETUP_TOKEN: "t".repeat(24),
+  KOBE_SMTP_HOST: "smtp.example.com",
+  KOBE_SMTP_FROM: "Kobe <kobe@example.com>",
 };
 
 describe("loadConfig", () => {
@@ -95,5 +97,85 @@ describe("loadConfig", () => {
   it("leaves the RuntimeClass unset when absent (the isolation gate then disables agents)", () => {
     expect(loadConfig(REQUIRED).runtimeClassName).toBeUndefined();
     expect(loadConfig({ ...REQUIRED, KOBE_RUNTIME_CLASS: " " }).runtimeClassName).toBeUndefined();
+  });
+
+  describe("SMTP (KOBE-13)", () => {
+    it("requires a host and a From address for the API server, with safe defaults", () => {
+      expect(loadConfig(REQUIRED).smtp).toEqual({
+        host: "smtp.example.com",
+        port: 587,
+        security: "starttls",
+        from: { name: "Kobe", address: "kobe@example.com" },
+      });
+      const { KOBE_SMTP_HOST: _h, ...noHost } = REQUIRED;
+      expect(() => loadConfig(noHost)).toThrow(/KOBE_SMTP_HOST/);
+      const { KOBE_SMTP_FROM: _f, ...noFrom } = REQUIRED;
+      expect(() => loadConfig(noFrom)).toThrow(/KOBE_SMTP_FROM/);
+    });
+
+    it("accepts a bare From address and rejects malformed ones (no header injection)", () => {
+      expect(loadConfig({ ...REQUIRED, KOBE_SMTP_FROM: "noreply@example.com" }).smtp?.from).toEqual(
+        { address: "noreply@example.com" },
+      );
+      for (const bad of [
+        "not an address",
+        "Kobe <a@b.c>\r\nBcc: x@y.z",
+        "Kobe <>",
+        "a@b.c, d@e.f",
+      ]) {
+        expect(() => loadConfig({ ...REQUIRED, KOBE_SMTP_FROM: bad }), bad).toThrow(
+          /KOBE_SMTP_FROM/,
+        );
+      }
+    });
+
+    it("reads port, security and credentials", () => {
+      const smtp = loadConfig({
+        ...REQUIRED,
+        KOBE_SMTP_PORT: "465",
+        KOBE_SMTP_SECURITY: "tls",
+        KOBE_SMTP_USERNAME: "mailer",
+        KOBE_SMTP_PASSWORD: "s3cret",
+      }).smtp;
+      expect(smtp).toMatchObject({
+        port: 465,
+        security: "tls",
+        auth: { user: "mailer", pass: "s3cret" },
+      });
+      expect(() => loadConfig({ ...REQUIRED, KOBE_SMTP_SECURITY: "ssl3" })).toThrow(
+        /KOBE_SMTP_SECURITY/,
+      );
+      expect(() => loadConfig({ ...REQUIRED, KOBE_SMTP_PORT: "0" })).toThrow(/KOBE_SMTP_PORT/);
+    });
+
+    it("requires username and password together, and never sends them over plain SMTP", () => {
+      expect(() => loadConfig({ ...REQUIRED, KOBE_SMTP_USERNAME: "mailer" })).toThrow(
+        /KOBE_SMTP_PASSWORD/,
+      );
+      expect(() =>
+        loadConfig({
+          ...REQUIRED,
+          KOBE_SMTP_SECURITY: "none",
+          KOBE_SMTP_USERNAME: "mailer",
+          KOBE_SMTP_PASSWORD: "hunter2",
+        }),
+      ).toThrow(/KOBE_SMTP_SECURITY/);
+      expect(() =>
+        loadConfig({
+          ...REQUIRED,
+          KOBE_SMTP_SECURITY: "none",
+          KOBE_SMTP_USERNAME: "mailer",
+          KOBE_SMTP_PASSWORD: "hunter2",
+        }),
+      ).not.toThrow(/hunter2/);
+      expect(loadConfig({ ...REQUIRED, KOBE_SMTP_SECURITY: "none" }).smtp?.security).toBe("none");
+    });
+
+    it("is not needed by the scheduler", () => {
+      expect(
+        loadConfig({ KOBE_PROCESS: "scheduler", KOBE_DATABASE_URL: REQUIRED.KOBE_DATABASE_URL })
+          .smtp,
+      ).toBeUndefined();
+    });
   });
 });
