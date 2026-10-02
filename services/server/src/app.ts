@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { requireSession, type AuthVariables } from "./auth/session.js";
 import type { ServerDeps } from "./deps.js";
+import type { IsolationGate } from "./isolation/gate.js";
+import { installIsolationRoutes } from "./routes/install-isolation.js";
 import { installRolesRoutes } from "./routes/install-roles.js";
 import { installSettingsRoutes } from "./routes/install-settings.js";
 import { installTeamsRoutes } from "./routes/install-teams.js";
@@ -11,11 +13,24 @@ import { teamRoutes } from "./routes/team.js";
 
 const SERVICE = "server";
 
+export interface AppOptions {
+  /** Isolation gate (spec D4): its state is shown in the install admin console only. */
+  readonly isolation?: IsolationGate;
+}
+
 /** Health endpoints always; auth and the /v1 API when dependencies are provided. */
-export function createApp(deps?: ServerDeps): Hono {
+export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
+  const { isolation } = options;
   const app = new Hono();
   app.get("/healthz", (c) => c.json({ status: "ok", service: SERVICE }));
-  app.get("/readyz", (c) => c.json({ status: "ready", service: SERVICE }));
+  app.get("/readyz", (c) => {
+    if (!isolation) return c.json({ status: "ready", service: SERVICE });
+    // Ready once the startup check has an answer; a missing runtime keeps serving (D4). The
+    // answer itself is not disclosed here (unauthenticated): see /v1/install/isolation and logs.
+    return isolation.status().state === "checking"
+      ? c.json({ status: "starting", service: SERVICE }, 503)
+      : c.json({ status: "ready", service: SERVICE });
+  });
   if (!deps) return app;
 
   app.on(["GET", "POST"], "/api/auth/*", (c) => deps.auth.handler(c.req.raw));
@@ -39,6 +54,7 @@ export function createApp(deps?: ServerDeps): Hono {
   api.route("/install/settings", installSettingsRoutes(deps));
   api.route("/install/teams", installTeamsRoutes(deps));
   api.route("/install/roles", installRolesRoutes(deps));
+  if (isolation) api.route("/install/isolation", installIsolationRoutes(isolation));
   app.route("/v1", api);
   return app;
 }

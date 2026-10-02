@@ -2,6 +2,8 @@ import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
+import { createIsolationGate } from "./isolation/gate.js";
+import { listRuntimeClasses } from "./isolation/kubernetes.js";
 import { logger } from "./logger.js";
 
 /** Open streams (SSE) get this long to finish before being cut; stays under k8s' 30 s grace period. */
@@ -23,13 +25,32 @@ if (config.auth) {
   }
 }
 
+// Spec D4: the process's own isolation check (startup + periodic). Agent work must go through
+// isolation.require(); without a verified gVisor/Kata RuntimeClass the server keeps serving.
+const isolation = createIsolationGate({
+  runtimeClassName: config.runtimeClassName,
+  listRuntimeClasses,
+  onChange: (status) => {
+    if (status.state === "verified") {
+      logger.info(
+        { runtimeClass: status.runtimeClassName, handler: status.handler },
+        "isolation verified: agents enabled",
+      );
+    } else if (status.state === "missing") {
+      logger.error({ runtimeClass: status.runtimeClassName }, `agents disabled: ${status.message}`);
+    }
+  },
+});
+isolation.start().catch((err: unknown) => logger.error({ err }, "isolation check failed"));
+
 // The scheduler serves health endpoints only (its jobs arrive in KOBE-64).
-const server = serve({ fetch: createApp(deps).fetch, port: config.port }, (info) => {
+const server = serve({ fetch: createApp(deps, { isolation }).fetch, port: config.port }, (info) => {
   logger.info({ port: info.port, process: config.process }, "listening");
 });
 
 function shutdown(signal: string): void {
   logger.info({ signal }, "shutting down");
+  isolation.stop();
   server.close((err) => {
     if (err) logger.error({ err }, "shutdown error");
     void (deps?.close() ?? Promise.resolve()).finally(() => process.exit(err ? 1 : 0));

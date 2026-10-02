@@ -10,8 +10,18 @@ Parallel-work rules: [parallel-work.md](parallel-work.md).
 
 - **Run:** Chris (2026-10-02): "do the setup ticket and start wave 0". Parallel agents, one worktree
   per ticket, coordinator merges one PR at a time.
-- **Wave 0 (in progress):** KOBE-9, KOBE-11, KOBE-13, KOBE-14, KOBE-29, plus contracts (protocol
-  interfaces for sandbox WSS, event stream, run orchestrator, policy decisions).
+- **Merged this run:** setup (#9), KOBE-9 (#10, Chris approved moving the server's isolation check
+  in-process), KOBE-29 (#11).
+- **Open:** KOBE-14 (#12, review fixes in CI), contracts (#13, fixing review: approval binding,
+  server-side tool risk, durable resume cursor), KOBE-11 (#14, fixing review: signed + encrypted
+  backups), KOBE-33 (thread search, `../Kobe-wt33`).
+- **Next:** KOBE-13 after #12; wave 1 (15, 20, 22, 23, 31, 34, 35, 45) as #12 and #13 land.
+- **Binding requirements carried forward:** KOBE-22/30/64 take `VerifiedIsolation` from
+  `require()` right before creating sandboxes (docs/ledger/KOBE-9.md); KOBE-23/24 add a durable
+  per-run sandbox seq cursor; KOBE-26 adds `runs.retry_of_run_id`; KOBE-30/31 follow the
+  thread-before-run lock order and batch deltas (docs/ledger/KOBE-29.md).
+- **Hadron:** not reachable from the coordinator session (MCP configured elsewhere); sync ticket
+  status after merges.
 - **Wave 1 (next, as deps merge):** 15, 20, 22, 23, 31, 33, 34, 35, 45.
 - **Earlier run:** KOBE-6 (PR #3), KOBE-68 (#4), KOBE-21 (#5), KOBE-7 (#6), KOBE-12 (#8) merged.
   KOBE-69 was listed for that run but is not in the implementation prompt: check Hadron.
