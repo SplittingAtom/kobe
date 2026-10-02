@@ -11,6 +11,7 @@ import {
 } from "@kobe/agent-file";
 import type { AgentAccess } from "./access.js";
 import type { AgentRecord, CreateError } from "./store.js";
+import type { AgentVersionRecord, AgentVersionSummary, PublishError } from "./versions.js";
 
 /**
  * HTTP plumbing shared by the team (`/v1/agents`) and gallery (`/v1/install/gallery/agents`)
@@ -130,6 +131,7 @@ export function agentSummary(agent: AgentRecord, access: AgentAccess) {
     status: agent.status,
     ownerUserId: agent.ownerUserId,
     currentVersion: agent.currentVersion,
+    archivedAt: agent.archivedAt?.toISOString() ?? null,
     revision: agent.revision,
     createdAt: agent.createdAt.toISOString(),
     updatedAt: agent.updatedAt.toISOString(),
@@ -187,6 +189,55 @@ export const notFound = (c: Context) =>
 
 export const forbidden = (c: Context, message = "You can't change this agent.") =>
   c.json({ code: "forbidden", message }, 403);
+
+export const archivedConflict = (c: Context) =>
+  c.json(
+    { code: "agent_archived", message: "This agent is archived. Unarchive it to change it." },
+    409,
+  );
+
+/** A version without its content: who published it, when, and from what (D19 history). */
+export function versionSummary(v: AgentVersionSummary) {
+  return {
+    version: v.version,
+    publishedBy: v.publishedBy,
+    publishedAt: v.publishedAt.toISOString(),
+    draftRevision: v.draftRevision,
+    republishedFrom: v.republishedFrom,
+  };
+}
+
+/** A version with its frozen definition and tool manifest (callers that may read definitions). */
+export function versionDetail(v: AgentVersionRecord) {
+  return {
+    ...versionSummary(v),
+    frontmatter: v.definition.frontmatter,
+    prompt: v.definition.prompt,
+    toolManifest: v.toolManifest,
+  };
+}
+
+const PUBLISH_ERRORS = {
+  not_found: [404, "agent_not_found", "No such agent."],
+  revision_mismatch: [
+    412,
+    "revision_mismatch",
+    "Someone else changed this agent. Reload it and review the draft before publishing.",
+  ],
+  archived: [409, "agent_archived", "This agent is archived. Unarchive it to publish."],
+  version_not_found: [404, "version_not_found", "This agent has no such version."],
+  already_current: [409, "already_current", "That version is already the current one."],
+  invalid_draft: [
+    409,
+    "invalid_draft",
+    "The draft is no longer a valid agent definition. Save a corrected draft first.",
+  ],
+} as const satisfies Record<PublishError, readonly [number, string, string]>;
+
+export function publishError(c: Context, error: PublishError) {
+  const [status, code, message] = PUBLISH_ERRORS[error];
+  return c.json({ code, message }, status);
+}
 
 export const preconditionFailed = (c: Context) =>
   c.json(

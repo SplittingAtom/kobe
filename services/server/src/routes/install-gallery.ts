@@ -5,6 +5,7 @@ import {
   agentBodyLimit,
   agentResponse,
   agentSummary,
+  archivedConflict,
   createError,
   exportResponse,
   invalidRequest,
@@ -21,7 +22,6 @@ import {
 } from "../agents/schemas.js";
 import {
   createAgent,
-  deleteAgent,
   findAgent,
   listAgents,
   setAgentStatus,
@@ -29,6 +29,8 @@ import {
   type AgentLocation,
   type AgentRecord,
 } from "../agents/store.js";
+import { mountVersionRoutes } from "../agents/version-routes.js";
+import { deleteOrArchiveAgent } from "../agents/versions.js";
 import type { AuthVariables } from "../auth/session.js";
 import { recordAuditAfter } from "../audit/record.js";
 import { requireInstallPermission } from "../authz/middleware.js";
@@ -106,14 +108,21 @@ export function installGalleryRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
       ifMatch.revision,
       input.source,
     );
-    if (!result.ok) return result.error === "not_found" ? notFound(c) : preconditionFailed(c);
+    if (!result.ok) {
+      if (result.error === "archived") return archivedConflict(c);
+      return result.error === "not_found" ? notFound(c) : preconditionFailed(c);
+    }
     return agentResponse(c, result.value, GALLERY_ADMIN_ACCESS);
   });
 
+  /** Never published: deleted (204). Published: archived (200); teams' pinned threads keep it. */
   app.delete("/:id", async (c) => {
     const id = agentIdSchema.safeParse(c.req.param("id"));
-    if (!id.success || !(await deleteAgent(db, GALLERY, id.data))) return notFound(c);
-    return c.body(null, 204);
+    const removed = id.success ? await deleteOrArchiveAgent(db, GALLERY, id.data) : null;
+    if (!removed) return notFound(c);
+    return removed.kind === "deleted"
+      ? c.body(null, 204)
+      : agentResponse(c, removed.agent, GALLERY_ADMIN_ACCESS);
   });
 
   app.put("/:id/status", async (c) => {
@@ -123,6 +132,15 @@ export function installGalleryRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
     if (!body) return invalidRequest(c, "status must be active or suspended.");
     const updated = await setAgentStatus(db, GALLERY, id.data, body.status);
     return updated ? agentResponse(c, updated, GALLERY_ADMIN_ACCESS) : notFound(c);
+  });
+
+  mountVersionRoutes(app, {
+    db,
+    resolve: async (c) => {
+      const agent = await galleryAgent(c);
+      return agent ? { agent, location: GALLERY, access: GALLERY_ADMIN_ACCESS } : null;
+    },
+    userId: (c) => (c as Context<{ Variables: AuthVariables }>).get("user").id,
   });
 
   return app;

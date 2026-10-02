@@ -825,7 +825,7 @@ describe("search (GET /v1/threads?q=, KOBE-33)", () => {
       (await as.bob.get("/v1/threads?q=budget")).json,
     ).threads;
     const detail = threadDetailSchema.parse((await as.bob.get(`/v1/threads/${id}`)).json);
-    const { entries: _e, next_entries_after: _n, ...summary } = detail;
+    const { entries: _e, next_entries_after: _n, agent_current_version: _v, ...summary } = detail;
     const { matched_entry_id: _m, snippet: _s, score: _sc, ...hitSummary } = hit ?? {};
     expect(hitSummary).toEqual(summary);
   });
