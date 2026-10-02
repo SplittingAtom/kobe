@@ -132,11 +132,10 @@
     `@kobe/db` added an `invalid_cursor` error code, and hits now carry `createdAt` and
     `leafEntryId` for the summary.
 
-15. **Main was red after KOBE-34 merged on top of KOBE-13:** `threads.db.test.ts` didn't pass the
-    now-required `mailer` (typecheck), and it added members through `POST /v1/team/members`, which
-    KOBE-13 replaced with invitations (404 in `beforeAll`). Fixed here as the newer tests do
-    (`MemoryMailer`, `team_members` rows inserted directly), because the search tests live in that
-    file.
+15. **Main was red after KOBE-34 merged on top of KOBE-13** (`threads.db.test.ts`: missing
+    `mailer`, direct member adds removed). Main fixed it in #25 (`MemoryMailer`, members join by
+    accepting an invitation); this branch's interim fix was dropped in favour of main's setup, and
+    the search tests sit on top of it.
 
 ## Deferred
 

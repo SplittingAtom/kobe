@@ -48,13 +48,12 @@ async function activate(b: TestBrowser, teamId: string): Promise<void> {
   b.team = teamId;
 }
 
-/** Adds `who` to `by`'s active team (members join by invitation since KOBE-13; set up directly). */
+/** Adds an existing user through a team invitation they accept (KOBE-13). */
 async function addMember(by: TestBrowser, who: Person, role: string): Promise<void> {
-  await admin.query(`INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, $3)`, [
-    by.team,
-    ids[who],
-    role,
-  ]);
+  const res = await by.post("/v1/team/invites", { email: email(who), role });
+  expect(res.status, JSON.stringify(res.json)).toBe(202);
+  const accepted = await as[who].post(`/v1/me/invites/${by.team}/accept`);
+  expect(accepted.status, JSON.stringify(accepted.json)).toBe(200);
 }
 
 async function newThread(b: TestBrowser, body: object = {}): Promise<string> {
