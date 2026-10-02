@@ -7,6 +7,7 @@ import { createApp } from "./app.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
 import { waitForAppSessionsToClose } from "./testing/app-sessions.js";
 import { RawBody, TestBrowser } from "./testing/browser.js";
+import { MemoryMailer } from "./testing/mailer.js";
 
 /**
  * Agent definitions over HTTP (KOBE-45): scopes, CRUD, import/export, authorization per role,
@@ -64,6 +65,7 @@ beforeAll(async () => {
     authSecret: "t".repeat(48),
     setupToken: "setup-token-for-agent-tests-0123",
     trustedProxies: ["127.0.0.1/32"],
+    mailer: new MemoryMailer(),
   });
   app = createApp(deps);
   for (const who of PEOPLE) {

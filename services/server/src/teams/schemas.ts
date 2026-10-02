@@ -21,10 +21,6 @@ export const createTeamSchema = z
 
 export const renameTeamSchema = z.object({ name: teamNameSchema }).strict();
 
-export const addMemberSchema = z
-  .object({ email: z.email().max(254), role: teamRoleSchema })
-  .strict();
-
 export const memberRoleSchema = z.object({ role: teamRoleSchema }).strict();
 
 export const activeTeamSchema = z.object({ teamId: idSchema }).strict();

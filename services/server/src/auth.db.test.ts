@@ -2,6 +2,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createApp } from "./app.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
+import { MemoryMailer } from "./testing/mailer.js";
 import { SoftwareAuthenticator } from "./testing/webauthn.js";
 import { totpFromUri } from "./testing/totp.js";
 
@@ -99,6 +100,7 @@ beforeAll(() => {
     authSecret: "s".repeat(48),
     setupToken: SETUP_TOKEN,
     trustedProxies: ["127.0.0.1/32"],
+    mailer: new MemoryMailer(),
   });
   app = createApp(deps);
 });

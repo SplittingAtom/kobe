@@ -14,7 +14,6 @@ export function invalidRequest(c: Context, message = "Check the request and try 
 
 const MEMBERSHIP_ERRORS = {
   not_a_member: [404, "That user is not a member of this team."],
-  already_member: [409, "That user is already a member of this team."],
   last_team_admin: [409, "A team needs at least one team admin. Promote someone else first."],
 } as const satisfies Record<MembershipError, readonly [number, string]>;
 

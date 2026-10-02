@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  addMemberSchema,
   createTeamSchema,
   installRoleChangeSchema,
   memberRoleSchema,
@@ -38,7 +37,6 @@ describe("request bodies", () => {
       expect(memberRoleSchema.safeParse({ role }).success).toBe(true);
     }
     expect(memberRoleSchema.safeParse({ role: "owner" }).success).toBe(false);
-    expect(addMemberSchema.safeParse({ email: "x@y.test", role: "admin" }).success).toBe(false);
   });
 
   it("never lets a role change name the Owner (ownership moves only by transfer)", () => {

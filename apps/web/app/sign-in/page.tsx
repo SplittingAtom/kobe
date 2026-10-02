@@ -55,6 +55,9 @@ export default function SignInPage() {
             </label>
             <button type="submit">Sign in</button>
           </form>
+          <p>
+            <a href="/forgot-password">Forgot your password?</a>
+          </p>
         </>
       ) : (
         <form onSubmit={onTotp}>

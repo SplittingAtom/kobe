@@ -1,3 +1,4 @@
+import { TeamInvites } from "./team-invites";
 import { TeamSwitcher } from "./team-switcher";
 
 export default function Home() {
@@ -8,6 +9,7 @@ export default function Home() {
       </header>
       <main>
         <h1>Kobe</h1>
+        <TeamInvites />
       </main>
     </>
   );
