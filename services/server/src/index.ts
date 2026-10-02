@@ -101,6 +101,8 @@ function shutdown(signal: string): void {
   isolation.stop();
   stopReconciler?.();
   sandboxServer?.close();
+  // End event streams first so browsers reconnect (with Last-Event-ID) to another replica.
+  void deps?.eventStream.hub.close();
   server.close((err) => {
     if (err) logger.error({ err }, "shutdown error");
     void (deps?.close() ?? Promise.resolve()).finally(() => process.exit(err ? 1 : 0));
