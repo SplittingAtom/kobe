@@ -209,7 +209,7 @@ existing Secret, unless explicitly allowed for throwaway environments (dev, CI).
 {{/*
 Deployment + Service for a Kobe Node service.
 Args: root, name (image + component), values, env (YAML list string), serviceAccount, healthPath,
-extraVolumes / extraMounts (YAML list strings), preflight (isolation initContainer), migrations
+extraVolumes / extraMounts / extraPorts / extraServicePorts (YAML list strings), preflight (isolation initContainer), migrations
 (wait-for-migrations initContainer).
 */}}
 {{- define "kobe.nodeService" -}}
@@ -258,6 +258,9 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+            {{- with .extraPorts }}
+            {{- . | nindent 12 }}
+            {{- end }}
           env:
             - name: PORT
               value: "8080"
@@ -299,6 +302,9 @@ spec:
     - name: http
       port: 80
       targetPort: http
+    {{- with .extraServicePorts }}
+    {{- . | nindent 4 }}
+    {{- end }}
 {{- end -}}
 
 

@@ -1,0 +1,23 @@
+{{- $s := include "kobe.sandboxValues" . | fromJson -}}
+{{- if not $s.sessionKeysSecret -}}
+{{- include "kobe.requireOnlineToGenerate" (dict "root" . "what" "the sandbox session keys" "value" "sandbox.sessionKeysSecret") -}}
+{{- $name := include "kobe.sessionKeysSecretName" . -}}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace $name -}}
+{{- $data := ($existing).data | default dict -}}
+# HMAC keys of the sandbox session tokens, one per audience (packages/protocol session-token.ts).
+# The server holds all four; each verifying service gets only its own key. Rotating one
+# invalidates that audience's tokens (sandboxes re-trade their bootstrap token for new ones).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+type: Opaque
+stringData:
+  {{- range $env, $key := include "kobe.sessionKeyNames" . | fromJson }}
+  {{ $key }}: {{ ternary (index $data $key | default "" | b64dec) (randAlphaNum 48) (hasKey $data $key) | quote }}
+  {{- end }}
+{{- end }}
