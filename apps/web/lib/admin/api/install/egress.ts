@@ -11,6 +11,8 @@ export interface CeilingDomain {
   readonly preset: EgressPreset | null;
   readonly inCeiling: boolean;
   readonly note: string | null;
+  /** Shared hosting or a CDN: domain fronting may reach other sites behind it. */
+  readonly sharedHosting: boolean;
   readonly createdBy: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -29,12 +31,12 @@ export function getEgressCeiling(): Promise<ApiResult<EgressCeiling>> {
 export async function addCeilingDomain(
   domain: string,
   note: string | null,
-): Promise<ApiResult<CeilingDomain>> {
-  const res = await apiRequest<{ domain: CeilingDomain }>(BASE, {
+): Promise<ApiResult<CeilingDomain & { readonly warnings: readonly string[] }>> {
+  const res = await apiRequest<{ domain: CeilingDomain; warnings?: string[] }>(BASE, {
     method: "POST",
     json: { domain, note },
   });
-  return res.ok ? { ...res, data: res.data.domain } : res;
+  return res.ok ? { ...res, data: { ...res.data.domain, warnings: res.data.warnings ?? [] } } : res;
 }
 
 export async function setCeilingMembership(

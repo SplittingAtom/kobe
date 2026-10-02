@@ -10,6 +10,9 @@ import { MAX_CLIENT_HELLO_BYTES, parseClientHello } from "./client-hello.js";
 import type { ConnectionReason, ConnectionRecord } from "./connection-audit.js";
 import type { BandwidthLimiter, ConnectionLimits } from "./limits.js";
 import type { ResolveHost } from "./resolver.js";
+import type { PreAuthGate } from "./preauth-gate.js";
+import { RateBuckets } from "./rate-buckets.js";
+import type { TunnelRegistry } from "./tunnel-registry.js";
 import { runTunnel } from "./tunnel.js";
 
 /**
@@ -34,8 +37,13 @@ import { runTunnel } from "./tunnel.js";
 export interface ProxySettings {
   readonly allowedPorts: readonly number[];
   readonly idleTimeoutMs: number;
+  /** TLS ClientHello deadline after the 200. */
   readonly handshakeTimeoutMs: number;
+  /** Request-head deadline for new sockets (pre-authentication; slow-loris bound). */
+  readonly preAuthTimeoutMs: number;
   readonly connectTimeoutMs: number;
+  /** Longest a tunnel may live (it also closes when the token that opened it expires). */
+  readonly maxTunnelMs: number;
 }
 
 export interface ProxyPolicy {
@@ -57,6 +65,10 @@ export interface ProxyDeps {
   readonly logger: Logger;
   readonly settings: ProxySettings;
   readonly connectUpstream?: ConnectUpstream;
+  /** Caps sockets that have not authenticated yet, per source and in total. */
+  readonly preauth?: PreAuthGate;
+  /** Open tunnels, for revocation on change hints. */
+  readonly tunnels?: TunnelRegistry;
   /** Health endpoint state (readyz turns 503 while draining). */
   readonly ready?: () => boolean;
 }
@@ -141,6 +153,8 @@ interface Attempt {
 export function createEgressProxy(deps: ProxyDeps): Server {
   const { logger, settings } = deps;
   const connectUpstream = deps.connectUpstream ?? tcpConnect;
+  // Failed authentications are logged at most a few times per source per minute.
+  const authLogs = new RateBuckets({ burst: 5, perSecond: 0.1 });
 
   const finish = (
     a: Attempt,
@@ -214,10 +228,10 @@ export function createEgressProxy(deps: ProxyDeps): Server {
 
     const auth = authenticate(req.headers["proxy-authorization"], deps.verify);
     if (!auth.ok) {
-      logger.info(
-        { reason: auth.reason, remote: socket.remoteAddress },
-        "egress proxy auth refused",
-      );
+      const source = socket.remoteAddress ?? "unknown";
+      if (authLogs.take(source)) {
+        logger.info({ reason: auth.reason, remote: source }, "egress proxy auth refused");
+      }
       reply(
         socket,
         407,
@@ -228,10 +242,39 @@ export function createEgressProxy(deps: ProxyDeps): Server {
       return;
     }
     const identity = auth.identity;
+    // Authenticated sockets leave the pre-auth pool and hold one of the sandbox's tunnel slots
+    // from here on (set-up included), so set-up floods are bounded per sandbox too.
+    deps.preauth?.authenticated(socket);
     const target = parseConnectTarget(req.url);
     const host = target ? normalizeHost(target.host) : null;
     const attempt: Attempt = { identity, host: host ?? undefined, port: target?.port, started };
+    const release = deps.connections.tryAcquire(identity.sandboxId);
+    if (!release) {
+      block(
+        socket,
+        attempt,
+        "connection_limit",
+        429,
+        "Kobe egress: too many connections",
+        "Kobe egress: this sandbox has too many open connections; close some and retry.",
+      );
+      return;
+    }
+    try {
+      await setUp(socket, head, attempt, target, host);
+    } finally {
+      release();
+    }
+  }
 
+  async function setUp(
+    socket: Socket,
+    head: Buffer,
+    attempt: Attempt,
+    target: { host: string; port: number } | undefined,
+    host: string | null,
+  ): Promise<void> {
+    const { identity } = attempt;
     if (!target || host === null || isIP(target.host) !== 0) {
       block(
         socket,
@@ -258,10 +301,7 @@ export function createEgressProxy(deps: ProxyDeps): Server {
     let decision: EgressDecision;
     try {
       if (!(await deps.policy.isActiveMember(identity.teamId, identity.userId))) {
-        logger.info(
-          { team: identity.teamId, user: identity.userId },
-          "egress refused: not an active member",
-        );
+        finish(attempt, "blocked", "inactive_member");
         reply(
           socket,
           403,
@@ -306,18 +346,6 @@ export function createEgressProxy(deps: ProxyDeps): Server {
       return;
     }
 
-    const release = deps.connections.tryAcquire(identity.sandboxId);
-    if (!release) {
-      block(
-        socket,
-        attempt,
-        "connection_limit",
-        429,
-        "Kobe egress: too many connections",
-        "Kobe egress: this sandbox has too many open connections; close some and retry.",
-      );
-      return;
-    }
     const detach = deps.bandwidth.attach(identity.sandboxId);
     let upstream: Socket | undefined;
     try {
@@ -365,8 +393,7 @@ export function createEgressProxy(deps: ProxyDeps): Server {
       socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
 
       const hello = await readClientHello(socket, head, settings.handshakeTimeoutMs);
-      const sni = hello.serverName === undefined ? null : normalizeHost(hello.serverName);
-      if (sni !== host) {
+      if (!sniMatches(hello.serverName, host)) {
         // The tunnel is open: no HTTP status can be sent any more, so the connection is cut.
         finish(attempt, "blocked", "sni_mismatch");
         deps.blocked.report({
@@ -388,28 +415,50 @@ export function createEgressProxy(deps: ProxyDeps): Server {
       }
       const tunnel = upstream;
       upstream = undefined;
-      const bytes = await runTunnel({
-        client: socket,
-        upstream: tunnel,
-        initial: hello.bytes,
-        throttle: (n) => deps.bandwidth.take(identity.sandboxId, n),
-        idleTimeoutMs: settings.idleTimeoutMs,
-      });
-      finish(attempt, "allowed", undefined, bytes);
+      // Revocation reaches open tunnels: re-checked on change hints, closed at token expiry or
+      // the maximum tunnel age, whichever comes first.
+      const unregister = deps.tunnels?.register(
+        {
+          teamId: identity.teamId,
+          userId: identity.userId,
+          host,
+          close: (reason) => {
+            logger.info({ team: identity.teamId, host, reason }, "egress tunnel closed by policy");
+            socket.destroy();
+            tunnel.destroy();
+          },
+        },
+        Math.min(identity.expiresAt, Date.now() + settings.maxTunnelMs),
+      );
+      try {
+        const bytes = await runTunnel({
+          client: socket,
+          upstream: tunnel,
+          initial: hello.bytes,
+          throttle: (n) => deps.bandwidth.take(identity.sandboxId, n),
+          idleTimeoutMs: settings.idleTimeoutMs,
+        });
+        finish(attempt, "allowed", undefined, bytes);
+      } finally {
+        unregister?.();
+      }
     } finally {
       upstream?.destroy();
-      release();
       detach();
     }
   }
 
   const server = createServer({
     maxHeaderSize: 8192,
-    requestTimeout: settings.handshakeTimeoutMs,
+    requestTimeout: settings.preAuthTimeoutMs,
     // How often Node enforces headersTimeout/requestTimeout (default 30 s): slow-loris bound.
-    connectionsCheckingInterval: Math.min(1_000, settings.handshakeTimeoutMs),
+    connectionsCheckingInterval: Math.min(1_000, settings.preAuthTimeoutMs),
   });
-  server.headersTimeout = settings.handshakeTimeoutMs;
+  server.headersTimeout = settings.preAuthTimeoutMs;
+  if (deps.preauth) {
+    const gate = deps.preauth;
+    server.on("connection", (socket: Socket) => void gate.admit(socket));
+  }
   server.on("connect", (req: IncomingMessage, socket: Socket, head: Buffer) => {
     handleConnect(req, socket, head).catch((err: unknown) => {
       logger.error({ err }, "egress proxy connect handler failed");
@@ -455,6 +504,16 @@ function handleRequest(req: IncomingMessage, res: ServerResponse, deps: ProxyDep
     connection: "close",
   });
   res.end("Kobe egress: only HTTPS (CONNECT) is allowed; use an https:// URL.\n");
+}
+
+/**
+ * The TLS server name must be the CONNECT host: compared as a lowercased literal with at most one
+ * trailing dot removed, never decoded or IDNA-converted (the host is already canonical ASCII).
+ */
+export function sniMatches(serverName: string | undefined, host: string): boolean {
+  if (serverName === undefined) return false;
+  const name = serverName.toLowerCase();
+  return (name.endsWith(".") ? name.slice(0, -1) : name) === host;
 }
 
 async function firstReachable(

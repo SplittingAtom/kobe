@@ -3,6 +3,7 @@ import {
   count,
   egressDomains,
   eq,
+  isSharedHosting,
   notifyEgressChanged,
   sql,
   type EgressPreset,
@@ -20,6 +21,11 @@ export interface CeilingEntry {
   readonly preset: EgressPreset | null;
   readonly in_ceiling: boolean;
   readonly note: string | null;
+  /**
+   * Shared hosting or a CDN (Public Suffix List private section, or a known fronting CDN): TLS only
+   * shows the front name, so a client can reach other customers of the host (domain fronting).
+   */
+  readonly shared_hosting: boolean;
   readonly created_by: string | null;
   readonly created_at: string;
   readonly updated_at: string;
@@ -32,6 +38,7 @@ const toEntry = (r: Row): CeilingEntry => ({
   preset: r.preset ?? null,
   in_ceiling: r.inCeiling,
   note: r.note,
+  shared_hosting: isSharedHosting(r.domain),
   created_by: r.createdBy,
   created_at: r.createdAt.toISOString(),
   updated_at: r.updatedAt.toISOString(),

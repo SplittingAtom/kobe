@@ -11,6 +11,8 @@ import { withTeam } from "../with-team.js";
  */
 export const EGRESS_CHANGES_CHANNEL = "kobe_egress";
 export const CEILING_CHANGED = "ceiling";
+/** `user:<uuid>`: a user's membership was removed or the user deactivated (tunnels re-checked). */
+export const EGRESS_USER_HINT_PREFIX = "user:";
 
 /**
  * Blocked-connection hints: the egress proxy records an `events` row (kind
@@ -24,6 +26,13 @@ export const EGRESS_BLOCKED_EVENT_KIND = "egress.blocked";
 /** Queues the change hint in `tx` (delivered on commit). `teamId` null: the ceiling changed. */
 export async function notifyEgressChanged(tx: KobeTx, teamId: string | null): Promise<void> {
   await tx.execute(sql`SELECT pg_notify(${EGRESS_CHANGES_CHANNEL}, ${teamId ?? CEILING_CHANGED})`);
+}
+
+/** Queues a user hint in `tx`: the egress proxies re-check that user's membership and tunnels. */
+export async function notifyEgressUserChanged(tx: KobeTx, userId: string): Promise<void> {
+  await tx.execute(
+    sql`SELECT pg_notify(${EGRESS_CHANGES_CHANNEL}, ${`${EGRESS_USER_HINT_PREFIX}${userId}`})`,
+  );
 }
 
 /** The install ceiling: patterns teams may enable (rows with `in_ceiling`). */

@@ -108,7 +108,7 @@ For each `CONNECT host:443` the proxy checks the sandbox's egress session token,
 still an active member of the team, the team's allowlist, then resolves the name itself and
 refuses it if **any** address is private, loopback, link-local (cloud metadata), CGNAT, multicast
 or reserved, or in `egressProxy.deniedCidrs` (add your pod/Service CIDRs if they are not private
-ranges). It connects to the address it checked and requires the TLS ClientHello's server name to
+ranges; IPv4 entries are also excluded in the proxy's NetworkPolicy). It connects to the address it checked and requires the TLS ClientHello's server name to
 equal the CONNECT host. It never decrypts traffic. Plain HTTP and other ports are refused
 (`egressProxy.allowedPorts`, default 443).
 
@@ -121,6 +121,20 @@ equal the CONNECT host. It never decrypts traffic. Plain HTTP and other ports ar
   Set `egressProxy.networkPolicy.databasePeers` (an `ipBlock` or selector for your database) so its
   NetworkPolicy reaches only the database on `databasePort`; when empty it may reach any address on
   that port.
+- **Known limit: domain fronting.** The proxy sees only the TLS server name. On shared hosting
+  and CDNs (CloudFront, Fastly, Akamai, App Engine, GitHub Pages, …) a client can name an allowed
+  front in TLS and ask for another customer's site inside the encrypted request. The consoles flag
+  such domains; prefer a provider's own domain. Wildcards directly on a public suffix
+  (`*.co.uk`, `*.github.io`) are refused (Public Suffix List). ClientHellos with Encrypted Client
+  Hello (ECH/ESNI) are refused, since the real name would be hidden.
+- **Revocation** reaches open tunnels: disabling a domain, changing the ceiling, removing a member
+  or deactivating a user closes the affected tunnels within a second (and a re-check every 30 s
+  catches anything missed). Tunnels also close when the session token that opened them expires
+  (15 minutes) and after `egressProxy.limits.maxTunnelSeconds` (3600).
+- **Unauthenticated sockets** have their own budget: 5 s to send the request head, at most
+  `limits.unauthenticatedPerSource` (16) per source address (one sandbox pod) and
+  `limits.unauthenticated` (1024) in total, so one sandbox's connection flood cannot take capacity
+  from other teams' tunnels.
 - **Limits** (per proxy replica): `egressProxy.limits.connectionsPerSandbox` (64),
   `connections` (4096), `bandwidthBytesPerSecond` per sandbox (20 MiB/s), `idleTimeoutSeconds` (300).
 - **Logging:** every connection is counted in the audit log (`egress.connection`, aggregated per

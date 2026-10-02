@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { MAX_CLIENT_HELLO_BYTES, parseClientHello } from "./client-hello.js";
 import { captureClientHello } from "./testing/client-hello.js";
+import { buildClientHello } from "./testing/hello-builder.js";
 
 /** A ClientHello split into two TLS records (allowed by RFC 8446 §5.1). */
 function splitIntoRecords(hello: Buffer): Buffer {
@@ -55,6 +56,23 @@ describe("parseClientHello", () => {
   it("ignores records after a complete ClientHello (0-RTT early data)", () => {
     const early = Buffer.concat([hello, Buffer.from([23, 3, 3, 0, 2, 0xab, 0xcd])]);
     expect(parseClientHello(early)).toEqual({ status: "ok", serverName: "pypi.org" });
+  });
+
+  it("refuses ClientHellos carrying ECH or ESNI (the real name would be hidden)", () => {
+    expect(parseClientHello(buildClientHello({ serverName: "pypi.org" }))).toEqual({
+      status: "ok",
+      serverName: "pypi.org",
+    });
+    for (const type of [0xfe0d, 0xffce]) {
+      const hello = buildClientHello({
+        serverName: "pypi.org",
+        extensions: [{ type, data: Buffer.alloc(8, 1) }],
+      });
+      expect(parseClientHello(hello)).toMatchObject({
+        status: "invalid",
+        why: expect.stringMatching(/ECH/),
+      });
+    }
   });
 
   it("never throws on truncated or corrupted input (fuzz)", () => {

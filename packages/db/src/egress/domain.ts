@@ -1,5 +1,6 @@
 import { isIP } from "node:net";
 import { domainToASCII } from "node:url";
+import { publicSuffixProblem } from "./public-suffix.js";
 
 /**
  * Egress domain patterns (spec D28). A pattern is a lowercase ASCII host name (IDNA, so
@@ -48,6 +49,8 @@ export function parseDomainPattern(raw: string): PatternResult {
   if (wildcard && !host.includes(".")) {
     return { ok: false, reason: "a wildcard needs at least two labels after it (*.example.com)" };
   }
+  const suffix = publicSuffixProblem(pattern);
+  if (suffix !== undefined) return { ok: false, reason: suffix };
   return { ok: true, pattern };
 }
 

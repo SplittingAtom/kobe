@@ -12,7 +12,8 @@ import {
 } from "@kobe/db";
 import { runWithAuditContext } from "./audit/context.js";
 import { EgressBlockedRelay, relayBlockedEvents } from "./egress/blocked-relay.js";
-import { createTeamWithAdmin } from "./teams/members.js";
+import { createTeamWithAdmin, removeMember } from "./teams/members.js";
+import { deactivateUser } from "./users/deactivation.js";
 import type { TestBrowser } from "./testing/browser.js";
 import { must } from "./testing/event-stream-fixture.js";
 import { openHarness, type Harness } from "./testing/harness.js";
@@ -119,6 +120,15 @@ describe("install egress ceiling", () => {
       expect(r.json.code).toBe("invalid_request");
     }
     expect((await as.owner.post(CEILING, { domain: "*.cdn.example.com" })).status).toBe(201);
+    // Public suffixes can't be wildcarded; shared hosting is accepted with a warning.
+    const suffix = await as.installAdmin.post(CEILING, { domain: "*.github.io" });
+    expect(suffix.status).toBe(400);
+    expect(suffix.json.message).toMatch(/public suffix/);
+    const fronted = await as.installAdmin.post(CEILING, { domain: "d111.cloudfront.net" });
+    expect(fronted.status).toBe(201);
+    expect(fronted.json.domain.shared_hosting).toBe(true);
+    expect(fronted.json.warnings[0]).toMatch(/domain fronting/);
+    expect(res.json.warnings).toEqual([]);
   });
 
   it("puts a preset into and out of the ceiling, as a group or one domain", async () => {
@@ -368,5 +378,25 @@ describe("egress.blocked relay", () => {
     expect(await blockedRunEvents(marketing, runId)).toEqual([
       { domain: "gitlab.com", request_access: false },
     ]);
+  });
+});
+
+describe("user hints", () => {
+  it("removing a member and deactivating a user notify the proxies (open tunnels close)", async () => {
+    const listener = new pg.Client({
+      connectionString: h.deps.database.pool.options.connectionString,
+    });
+    await listener.connect();
+    const heard: string[] = [];
+    listener.on("notification", (n) => heard.push(n.payload ?? ""));
+    await listener.query(`LISTEN ${EGRESS_CHANGES_CHANNEL}`);
+    const db = h.deps.database.db;
+    expect(await asSystem(ids.alice, () => removeMember(db, finance, ids.bob))).toEqual({
+      ok: true,
+    });
+    await asSystem(ids.installAdmin, () => deactivateUser(db, ids.dave));
+    await new Promise((r) => setTimeout(r, 200));
+    await listener.end();
+    expect(heard).toEqual([`user:${ids.bob}`, `user:${ids.dave}`]);
   });
 });

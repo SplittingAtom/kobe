@@ -115,4 +115,12 @@ describe("AllowlistCache.isActiveMember", () => {
     expect(await cache.isActiveMember(TEAM, "u1")).toBe(true);
     expect(source.isActiveMember).toHaveBeenCalledTimes(3);
   });
+
+  it("drops a user's membership in every team on a user hint, even mid-load", async () => {
+    const { state, cache } = setup({ ceiling: [], teams: {} });
+    expect(await cache.isActiveMember(TEAM, "u1")).toBe(true);
+    state.members.clear();
+    cache.invalidateUser("u1");
+    expect(await cache.isActiveMember(TEAM, "u1")).toBe(false);
+  });
 });

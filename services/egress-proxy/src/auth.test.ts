@@ -30,6 +30,7 @@ describe("authenticate", () => {
           userId: claims.user_id,
           threadHint: undefined,
           tokenId: claims.jti,
+          expiresAt: claims.exp * 1000,
         },
       });
     }

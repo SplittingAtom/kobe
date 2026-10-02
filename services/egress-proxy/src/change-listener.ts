@@ -1,15 +1,36 @@
-import { CEILING_CHANGED, EGRESS_CHANGES_CHANNEL } from "@kobe/db";
+import {
+  CEILING_CHANGED,
+  EGRESS_CHANGES_CHANNEL,
+  EGRESS_USER_HINT_PREFIX as USER_PREFIX,
+} from "@kobe/db";
 import pg from "pg";
 import type { Logger } from "pino";
 import type { AllowlistCache } from "./allowlist.js";
+import type { TunnelScope } from "./tunnel-registry.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Applies one change hint (`<team uuid>` or `ceiling`); anything else flushes everything. */
-export function applyChangeHint(cache: AllowlistCache, payload: string | undefined): void {
-  if (payload === CEILING_CHANGED) cache.invalidateCeiling();
-  else if (payload !== undefined && UUID.test(payload)) cache.invalidateTeam(payload.toLowerCase());
-  else cache.invalidateAll();
+/**
+ * Applies one change hint — `<team uuid>`, `ceiling`, or `user:<uuid>` (membership removed or user
+ * deactivated) — and returns its scope; anything else flushes everything.
+ */
+export function applyChangeHint(cache: AllowlistCache, payload: string | undefined): TunnelScope {
+  if (payload === CEILING_CHANGED) {
+    cache.invalidateCeiling();
+    return { kind: "ceiling" };
+  }
+  if (payload !== undefined && UUID.test(payload)) {
+    const teamId = payload.toLowerCase();
+    cache.invalidateTeam(teamId);
+    return { kind: "team", teamId };
+  }
+  if (payload?.startsWith(USER_PREFIX) && UUID.test(payload.slice(USER_PREFIX.length))) {
+    const userId = payload.slice(USER_PREFIX.length).toLowerCase();
+    cache.invalidateUser(userId);
+    return { kind: "user", userId };
+  }
+  cache.invalidateAll();
+  return { kind: "all" };
 }
 
 export interface ChangeListenerOptions {
@@ -19,6 +40,8 @@ export interface ChangeListenerOptions {
   readonly reconnectMinMs?: number;
   readonly reconnectMaxMs?: number;
   readonly pingMs?: number;
+  /** Called after each hint (and after a reconnect, scope "all"): re-check open tunnels. */
+  readonly onChange?: (scope: TunnelScope) => void;
 }
 
 /**
@@ -56,7 +79,11 @@ export class ChangeListener {
     });
     client.on("end", () => this.lost(client));
     client.on("notification", (n) => {
-      if (n.channel === EGRESS_CHANGES_CHANNEL) applyChangeHint(cache, n.payload);
+      if (n.channel !== EGRESS_CHANGES_CHANNEL) return;
+      // Invalidate first, unconditionally: `onChange?.(applyChangeHint(…))` would skip the
+      // invalidation itself when no callback is set.
+      const scope = applyChangeHint(cache, n.payload);
+      this.options.onChange?.(scope);
     });
     try {
       await client.connect();
@@ -69,6 +96,7 @@ export class ChangeListener {
       this.attempt = 0;
       cache.invalidateAll();
       cache.setListening(true);
+      this.options.onChange?.({ kind: "all" });
       this.ping = setInterval(() => {
         client.query("SELECT 1").catch(() => this.lost(client));
       }, this.options.pingMs ?? 30_000);

@@ -438,9 +438,23 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_pod:-}" ]]; then
   contains "the enabled domain's TLS server answered end to end (no interception)" 's_server' "$allowed"
   contains "an enabled domain that resolves to an internal address is refused" '^connect=403 ' "$(via_proxy "https://$INTERNAL_HOST/")"
   contains "a not-enabled domain is still blocked" '^connect=403 ' "$(via_proxy https://registry.npmjs.org/)"
+  # SNI must equal the CONNECT host: the same tunnel with another TLS server name is cut.
+  s_client="openssl s_client -proxy egress-proxy.kobe.internal:80 -proxy_user kobe -proxy_pass 'pass:$egress_token' -connect $UPSTREAM_HOST:443"
+  contains "control: a TLS handshake with the matching server name completes through the proxy" '^1$' \
+    "$(in_sandbox "echo | $s_client -servername $UPSTREAM_HOST 2>&1 | grep -c 'SSL handshake has read'")"
+  contains "a TLS server name that differs from the CONNECT host is cut (SNI mismatch)" '^0$' \
+    "$(in_sandbox "echo | $s_client -servername evil.example.com 2>&1 | grep -c 'SSL handshake has read'")"
 
+  # Revocation reaches open tunnels: keep one open, disable the domain, the proxy closes it.
+  in_sandbox "rm -f /tmp/kobe-e2e-tunnel.log; setsid nohup sh -c \"sleep 120 | ($s_client -servername $UPSTREAM_HOST -quiet \
+    >/dev/null 2>&1; echo CLOSED >> /tmp/kobe-e2e-tunnel.log)\" >/dev/null 2>&1 & sleep 5; echo started" >/dev/null
+  contains "an open tunnel to an enabled domain stays up" '^OPEN$' \
+    "$(in_sandbox 'grep -q CLOSED /tmp/kobe-e2e-tunnel.log 2>/dev/null && echo CLOSED || echo OPEN')"
   psql_kobe "DELETE FROM team_egress WHERE team_id = '$E2E_TEAM_ID' AND domain = '$UPSTREAM_HOST';" >/dev/null
   notify_egress
+  contains "disabling the domain closes the already-open tunnel" '^CLOSED$' \
+    "$(in_sandbox 'for i in $(seq 1 20); do grep -q CLOSED /tmp/kobe-e2e-tunnel.log 2>/dev/null && break; sleep 1; done; \
+      grep -q CLOSED /tmp/kobe-e2e-tunnel.log 2>/dev/null && echo CLOSED || echo OPEN')"
   contains "a disabled domain is blocked again (change hint, no restart)" '^connect=403 ' "$(via_proxy "https://$UPSTREAM_HOST/")"
 
   contains "blocked attempts are recorded as egress.blocked events for the run" '^[1-9][0-9]*$' \

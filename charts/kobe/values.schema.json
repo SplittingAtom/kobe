@@ -343,6 +343,21 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 86400
+            },
+            "maxTunnelSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 86400
+            },
+            "unauthenticatedPerSource": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            "unauthenticated": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
             }
           }
         },

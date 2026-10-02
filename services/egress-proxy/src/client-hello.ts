@@ -12,6 +12,9 @@ export const MAX_CLIENT_HELLO_BYTES = 64 * 1024;
 const CONTENT_HANDSHAKE = 22;
 const HANDSHAKE_CLIENT_HELLO = 1;
 const EXT_SERVER_NAME = 0;
+/** Encrypted ClientHello (draft-ietf-tls-esni, RFC 9849) and the older ESNI draft. */
+const EXT_ECH = 0xfe0d;
+const EXT_ESNI = 0xffce;
 const NAME_TYPE_HOST = 0;
 const MAX_RECORD = 16_384 + 2_048;
 
@@ -113,6 +116,9 @@ function readServerName(body: Buffer): ClientHelloResult {
     if (type === undefined || data === undefined) return invalid("truncated extension");
     if (seen.has(type)) return invalid("duplicate extension");
     seen.add(type);
+    // The real server name would be encrypted; only the outer (front) name is visible, so the
+    // SNI check would mean nothing. Refused (KOBE-38 review).
+    if (type === EXT_ECH || type === EXT_ESNI) return invalid("encrypted ClientHello (ECH/ESNI)");
     if (type !== EXT_SERVER_NAME) continue;
     const list = new Reader(data);
     const names = list.vector16();

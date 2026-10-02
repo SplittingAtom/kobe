@@ -92,6 +92,43 @@ request_access}` to the user's active runs in that team (one sandbox per (user, 
 - **IPv6:** the proxy's own NetworkPolicy has no IPv6 rule (clusters here are IPv4); AAAA records
   are still checked, and an IPv6-only destination fails to connect.
 
+## Security review of PR #36 (coordinator) — resolutions
+
+- **HIGH 1 (pre-auth socket exhaustion):** `PreAuthGate` admits each new socket against a
+  per-source cap (16, `KOBE_EGRESS_PREAUTH_PER_SOURCE`; one sandbox pod = one address) and a total
+  (1024); the request head must arrive in 5 s (`KOBE_EGRESS_PREAUTH_TIMEOUT_MS`, enforced every
+  second, 408). Authenticated sockets leave the gate and take a tunnel slot from that point
+  (set-up included); `server.maxConnections = tunnels + pre-auth total`, so the budgets are
+  separate. Tests: `preauth-gate.test.ts` (flood of 50 from one source, other source admitted),
+  `proxy.test.ts` "caps unauthenticated sockets per source; authenticated tunnels are not counted".
+- **HIGH 2 (random-host floods):** per-sandbox token buckets — new distinct audit keys (burst 32,
+  1 per 2 s): beyond it the sandbox's connections collapse into one `aggregated: true` row per
+  outcome with no `domain`; `egress.blocked` reports (burst 5, 1 per 10 s) are skipped beyond it
+  (still counted in the audit). Tests: `connection-audit.test.ts` "collapses a sandbox's
+  random-host flood…" (1000 hosts → 6 rows), `blocked-reporter.test.ts` "caps reports per
+  sandbox…".
+- **MEDIUM 3 (revocation of open tunnels):** `TunnelRegistry` tracks tunnels by (team, user, host);
+  every change hint re-checks the affected ones (team, ceiling = all, `user:<id>` = that user,
+  reconnect = all) and closes what is no longer allowed; a periodic re-check (30 s) backs it.
+  New hint `user:<uuid>` is sent by `removeMember` and `deactivateUser` (identity code, one line
+  each). Tunnels close at token expiry and after `maxTunnelSeconds` (3600). Tests:
+  `proxy.test.ts` revocation suite; server `egress.db.test.ts` "user hints"; e2e "disabling the
+  domain closes the already-open tunnel".
+- **MEDIUM 4:** ClientHellos with ECH (0xfe0d) or ESNI (0xffce) are invalid. Test:
+  `client-hello.test.ts` (synthetic ClientHello builder).
+- **MEDIUM 5:** domain fronting documented (install.md, here); `isSharedHosting` (PSL private
+  section via `tldts` (MIT) + a short list of fronting CDNs) → `shared_hosting` on ceiling/team
+  entries, a `warnings` entry on add, a note in both consoles; wildcards on a public suffix
+  refused (`*.co.uk`, `*.github.io`, `*.cloudfront.net`).
+- **LOW:** SNI compared as a lowercased literal minus one trailing dot (`sniMatches`); inactive
+  member refusals audited (`reason: inactive_member`); failed-auth log lines rate-limited per
+  source; `::/96` denied; IPv4 `deniedCidrs` mirrored into the proxy NetworkPolicy. Not done:
+  refusing tokens of sandboxes that no longer exist (no `sandboxes` table yet; KOBE-25/28) — the
+  user's active membership is checked, tokens live 15 min, and tunnels now close at expiry.
+- **e2e:** CI sets `KOBE_SANDBOX_IMAGE`, so the egress section runs there; added an SNI-mismatch
+  probe (`openssl s_client -proxy … -servername evil.example.com`, with a matching control) and
+  the open-tunnel revocation probe.
+
 ## Open questions (for Chris or the coordinator)
 
 1. **Header injection (KOBE-39) needs a design decision.** D28 per-team header injection cannot
@@ -138,8 +175,11 @@ base64(<thread uuid or any>:<kobe.egress-proxy token>)`.
   bytes and HTTP request heads (Node's parser), never decrypts payloads, and its NetworkPolicy
   limits where it can connect; still, a compromise would expose the app role (RLS still applies,
   but the role can set `kobe.team_id`). Mitigation proposed: open question 3.
-- **ECH**: clients using Encrypted Client Hello send an outer SNI (public name) that won't match;
-  they are cut (fail closed). Common CLI tools don't use ECH.
+- **ECH/ESNI** ClientHellos are refused (fail closed). Common CLI tools don't use ECH.
+- **Domain fronting** on shared hosting/CDNs cannot be prevented without TLS interception; such
+  domains are flagged in the consoles and wildcards on public suffixes are refused.
+- Tunnels close when the token that opened them expires (15 min), so very long single downloads
+  are cut and must be retried with a fresh token.
 - Membership liveness is cached 30 s; allowlist changes apply on NOTIFY (TTL 60 s backstop, 5 s while
   the listener is down).
 - Limits are per replica; with N replicas a sandbox may hold N × the per-sandbox limit.

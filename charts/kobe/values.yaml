@@ -122,6 +122,7 @@ egressProxy:
   # private, loopback, link-local (cloud metadata) and reserved is refused unless listed here.
   allowedInternalCidrs: []
   # More ranges to refuse: your cluster's pod/Service CIDRs if they are not private addresses.
+  # IPv4 entries are also excluded from the proxy's own NetworkPolicy.
   deniedCidrs: []
   # Connections are written to the audit log aggregated per user, host and outcome over this window.
   auditFlushSeconds: 60
@@ -132,6 +133,12 @@ egressProxy:
     # Per sandbox, both directions together; 0 disables.
     bandwidthBytesPerSecond: 20971520
     idleTimeoutSeconds: 300
+    # Tunnels close after this long, and when the session token that opened them expires (15 min).
+    maxTunnelSeconds: 3600
+    # Sockets that have not authenticated yet (5 s to send the request head): per source address
+    # (one sandbox pod) and in total, separate from the tunnel limit above.
+    unauthenticatedPerSource: 16
+    unauthenticated: 1024
   networkPolicy:
     # Restrict the proxy's own egress to DNS, Postgres and public addresses on allowedPorts.
     restrictEgress: true

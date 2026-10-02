@@ -34,10 +34,12 @@ describe("AddressPolicy", () => {
     }
   });
 
-  it("refuses IPv6 forms that embed an IPv4 address (mapped, NAT64, 6to4, Teredo)", () => {
+  it("refuses IPv6 forms that embed an IPv4 address (mapped, compatible, NAT64, 6to4, Teredo)", () => {
     for (const ip of [
       "::ffff:10.0.0.1",
       "::ffff:8.8.8.8",
+      "::a00:1",
+      "::8.8.8.8",
       "64:ff9b::a00:1",
       "2002:a00:1::1",
       "2001::1",

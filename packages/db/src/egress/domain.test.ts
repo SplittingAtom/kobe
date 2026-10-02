@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DOMAIN_PATTERN_SQL } from "../schema/egress.js";
+import { isPublicSuffix, isSharedHosting } from "./public-suffix.js";
 import {
   findMatchingPattern,
   normalizeHost,
@@ -66,6 +67,41 @@ describe("parseDomainPattern", () => {
     for (const p of ["*.com", "a.*.com", "10.0.0.1", "A.com", "pypi.org."]) {
       expect(re.test(p), p).toBe(false);
     }
+  });
+});
+
+describe("public suffixes and shared hosting", () => {
+  it("refuses wildcards directly on a public suffix (ICANN or private section)", () => {
+    for (const bad of [
+      "*.co.uk",
+      "*.github.io",
+      "*.cloudfront.net",
+      "*.herokuapp.com",
+      "*.s3.amazonaws.com",
+    ]) {
+      const parsed = parseDomainPattern(bad);
+      expect(parsed.ok, bad).toBe(false);
+      expect(parsed.ok ? "" : parsed.reason, bad).toMatch(/public suffix/);
+    }
+    for (const fine of ["*.example.co.uk", "*.github.com", "pypi.org", "github.io"]) {
+      expect(parseDomainPattern(fine).ok, fine).toBe(true);
+    }
+  });
+
+  it("flags shared hosting and CDNs where domain fronting is possible", () => {
+    for (const shared of [
+      "me.github.io",
+      "d1.cloudfront.net",
+      "x.global.ssl.fastly.net",
+      "*.example.appspot.com",
+    ]) {
+      expect(isSharedHosting(shared), shared).toBe(true);
+    }
+    for (const own of ["pypi.org", "*.github.com", "registry.npmjs.org"]) {
+      expect(isSharedHosting(own), own).toBe(false);
+    }
+    expect(isPublicSuffix("co.uk")).toBe(true);
+    expect(isPublicSuffix("example.co.uk")).toBe(false);
   });
 });
 

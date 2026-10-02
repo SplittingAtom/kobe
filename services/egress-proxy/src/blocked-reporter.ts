@@ -7,6 +7,7 @@ import {
   type KobeDb,
 } from "@kobe/db";
 import type { Logger } from "pino";
+import { RateBuckets } from "./rate-buckets.js";
 
 /**
  * The `egress.blocked` seam (spec D28, §6.2): when the proxy refuses a sandbox a host, the run that
@@ -66,6 +67,8 @@ export interface BlockedReporterOptions {
   readonly maxInFlight?: number;
   readonly maxKeys?: number;
   readonly now?: () => number;
+  /** Reports per sandbox across all hosts: burst, then per second (random-host floods). */
+  readonly perSandbox?: { readonly burst: number; readonly perSecond: number };
 }
 
 export class BlockedReporter {
@@ -73,9 +76,15 @@ export class BlockedReporter {
   private inFlight = 0;
   private readonly pendingWrites = new Set<Promise<void>>();
   private readonly now: () => number;
+  private readonly perSandbox: RateBuckets;
+  private suppressed = 0;
 
   constructor(private readonly options: BlockedReporterOptions) {
     this.now = options.now ?? (() => Date.now());
+    this.perSandbox = new RateBuckets({
+      ...(options.perSandbox ?? { burst: 5, perSecond: 0.1 }),
+      now: this.now,
+    });
   }
 
   report(attempt: BlockedAttempt): void {
@@ -85,6 +94,16 @@ export class BlockedReporter {
     const last = this.recent.get(key);
     if (last !== undefined && now - last < windowMs) return;
     if (this.inFlight >= (this.options.maxInFlight ?? 50)) return;
+    if (!this.perSandbox.take(`${attempt.teamId}|${attempt.sandboxId}`)) {
+      // Still counted in the egress.connection audit; only the run event is skipped.
+      if (this.suppressed++ % 1_000 === 0) {
+        this.options.logger.info(
+          { sandbox: attempt.sandboxId },
+          "egress.blocked reports rate-limited",
+        );
+      }
+      return;
+    }
     this.recent.delete(key);
     this.recent.set(key, now);
     if (this.recent.size > (this.options.maxKeys ?? 10_000)) {

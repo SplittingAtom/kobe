@@ -59,7 +59,7 @@ function AddDomainForm({
     e.preventDefault();
     const done = await mutation.run(
       () => addCeilingDomain(domain.trim(), note.trim() === "" ? null : note.trim()),
-      (added) => `Added ${added.domain} to the ceiling.`,
+      (added) => [`Added ${added.domain} to the ceiling.`, ...added.warnings].join(" "),
     );
     if (done) {
       setDomain("");
@@ -223,6 +223,7 @@ function DomainTable({
             <tr key={d.domain}>
               <th scope="row">
                 <code>{d.domain}</code>
+                {d.sharedHosting ? <SharedHostingNote /> : null}
               </th>
               <td>
                 <label>
@@ -248,5 +249,16 @@ function DomainTable({
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** Domain fronting (KOBE-38): the proxy sees only the TLS server name. */
+export function SharedHostingNote() {
+  return (
+    <span className={styles.hint}>
+      {" "}
+      Shared hosting or CDN: a sandbox allowed here may also reach other sites behind the same front
+      (domain fronting).
+    </span>
   );
 }

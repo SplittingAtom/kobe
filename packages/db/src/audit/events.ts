@@ -225,8 +225,14 @@ export const AUDIT_EVENTS = {
         "dns_failure",
         "upstream_unreachable",
         "policy_unavailable",
+        "inactive_member",
       ])
       .optional(),
+    /**
+     * Set when the row collapses hosts beyond the sandbox's rate of distinct hosts (random-name
+     * floods): `domain` is then absent and `connections` counts them all.
+     */
+    aggregated: z.literal(true).optional(),
     connections: z.number().int().positive(),
     bytesUp: count,
     bytesDown: count,

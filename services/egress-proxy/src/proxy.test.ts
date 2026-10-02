@@ -16,7 +16,15 @@ import { egressTokenVerifier } from "./auth.js";
 import type { BlockedAttempt } from "./blocked-reporter.js";
 import type { ConnectionRecord } from "./connection-audit.js";
 import { BandwidthLimiter, ConnectionLimits } from "./limits.js";
-import { createEgressProxy, parseConnectTarget, tcpConnect, type ProxyDeps } from "./proxy.js";
+import { PreAuthGate } from "./preauth-gate.js";
+import {
+  createEgressProxy,
+  parseConnectTarget,
+  sniMatches,
+  tcpConnect,
+  type ProxyDeps,
+} from "./proxy.js";
+import { TunnelRegistry } from "./tunnel-registry.js";
 import { captureClientHello } from "./testing/client-hello.js";
 
 const KEY = "p".repeat(40);
@@ -28,6 +36,7 @@ const THREAD = "9a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
 function token(
   aud: "kobe.egress-proxy" | "kobe.mcp-proxy" = "kobe.egress-proxy",
   key = KEY,
+  ttlSeconds = 900,
 ): string {
   const now = Math.floor(Date.now() / 1000);
   return signSessionToken(
@@ -38,7 +47,7 @@ function token(
       team_id: TEAM,
       user_id: USER,
       iat: now,
-      exp: now + 900,
+      exp: now + ttlSeconds,
       jti: "j".repeat(20),
     },
     key,
@@ -132,7 +141,9 @@ async function start(overrides: Partial<ProxyDeps> = {}): Promise<void> {
       allowedPorts: [443],
       idleTimeoutMs: 5_000,
       handshakeTimeoutMs: 1_000,
+      preAuthTimeoutMs: 1_000,
       connectTimeoutMs: 1_000,
+      maxTunnelMs: 60_000,
     },
     connectUpstream: (address, port, timeoutMs) => {
       connectCalls.push(`${address}:${port}`);
@@ -210,6 +221,7 @@ describe("authentication", () => {
     const { head } = await openConnect("allowed.example.com:443", auth());
     expect(status(head)).toMatch(/^HTTP\/1.1 403 .*not an active team member/);
     expect(connectCalls).toEqual([]);
+    expect(audit).toMatchObject([{ outcome: "blocked", reason: "inactive_member" }]);
   });
 });
 
@@ -377,6 +389,82 @@ describe("allowed tunnels", () => {
   });
 });
 
+describe("revocation of open tunnels", () => {
+  async function openTunnel(credentials = auth()) {
+    const opened = await openConnect("allowed.example.com:443", credentials);
+    expect(status(opened.head)).toBe("HTTP/1.1 200 Connection Established");
+    opened.socket.write(hello);
+    await readExactly(opened.socket, hello.length);
+    return opened.socket;
+  }
+
+  it("closes a tunnel when its domain is disabled (change hint re-check)", async () => {
+    const tunnels = new TunnelRegistry(deps.policy, deps.logger);
+    await start({ tunnels });
+    const socket = await openTunnel();
+    expect(tunnels.size).toBe(1);
+    ENABLED.delete("allowed.example.com");
+    try {
+      expect(await tunnels.recheck({ kind: "team", teamId: "another-team" })).toBe(0);
+      expect(await tunnels.recheck({ kind: "team", teamId: TEAM })).toBe(1);
+      await once(socket, "close");
+    } finally {
+      ENABLED.add("allowed.example.com");
+    }
+    await settle();
+    expect(tunnels.size).toBe(0);
+  });
+
+  it("closes a tunnel when its user is removed or deactivated", async () => {
+    let member = true;
+    const policy = { ...deps.policy, isActiveMember: async () => member };
+    const tunnels = new TunnelRegistry(policy, deps.logger);
+    await start({ tunnels, policy });
+    const socket = await openTunnel();
+    member = false;
+    expect(await tunnels.recheck({ kind: "user", userId: USER })).toBe(1);
+    await once(socket, "close");
+  });
+
+  it("closes a tunnel when the token that opened it expires, and at the maximum age", async () => {
+    const tunnels = new TunnelRegistry(deps.policy, deps.logger);
+    await start({ tunnels });
+    const short = await openTunnel(basic("kobe", token("kobe.egress-proxy", KEY, 2)));
+    const t0 = Date.now();
+    await once(short, "close");
+    expect(Date.now() - t0).toBeLessThan(3_500);
+    await start({ tunnels, settings: { ...deps.settings, maxTunnelMs: 300 } });
+    const aged = await openTunnel();
+    await once(aged, "close");
+  });
+});
+
+describe("pre-authentication limits", () => {
+  it("caps unauthenticated sockets per source; authenticated tunnels are not counted", async () => {
+    await start({ preauth: new PreAuthGate({ perSource: 3, total: 100 }) });
+    const tunnel = await openConnect("allowed.example.com:443", auth());
+    expect(status(tunnel.head)).toBe("HTTP/1.1 200 Connection Established");
+    const idle: Socket[] = [];
+    for (let i = 0; i < 3; i++) {
+      const s = connect(proxyPort, "127.0.0.1");
+      await once(s, "connect");
+      idle.push(s);
+    }
+    const extra = connect(proxyPort, "127.0.0.1");
+    extra.on("error", () => undefined);
+    await once(extra, "close");
+    // The open tunnel still works.
+    tunnel.socket.write(hello);
+    expect((await readExactly(tunnel.socket, hello.length)).equals(hello)).toBe(true);
+    for (const s of idle) s.destroy();
+    await settle();
+    const after = await openConnect("allowed.example.com:443", auth());
+    expect(status(after.head)).toBe("HTTP/1.1 200 Connection Established");
+    tunnel.socket.destroy();
+    after.socket.destroy();
+  });
+});
+
 describe("robustness", () => {
   it("survives an upstream that resets while the client is still sending its ClientHello", async () => {
     const flaky = createServer((s) => s.destroy());
@@ -395,7 +483,7 @@ describe("robustness", () => {
   });
 
   it("drops a client that stalls before sending its request head", async () => {
-    await start({ settings: { ...deps.settings, handshakeTimeoutMs: 200 } });
+    await start({ settings: { ...deps.settings, preAuthTimeoutMs: 200 } });
     const socket = connect(proxyPort, "127.0.0.1");
     await once(socket, "connect");
     socket.write("CONNECT allowed.example.com:443 HTTP/1.1\r\n");
@@ -460,6 +548,17 @@ describe("health", () => {
     const res = await fetch(`http://127.0.0.1:${proxyPort}/healthz`);
     expect(await res.json()).toEqual({ status: "ok", service: "egress-proxy" });
     expect((await fetch(`http://127.0.0.1:${proxyPort}/readyz`)).status).toBe(200);
+  });
+});
+
+describe("sniMatches", () => {
+  it("compares a lowercased literal with one trailing dot removed, nothing else", () => {
+    expect(sniMatches("Allowed.Example.COM", "allowed.example.com")).toBe(true);
+    expect(sniMatches("allowed.example.com.", "allowed.example.com")).toBe(true);
+    expect(sniMatches("allowed.example.com..", "allowed.example.com")).toBe(false);
+    expect(sniMatches("allowed%2eexample.com", "allowed.example.com")).toBe(false);
+    expect(sniMatches("bücher.example", "xn--bcher-kva.example")).toBe(false);
+    expect(sniMatches(undefined, "allowed.example.com")).toBe(false);
   });
 });
 

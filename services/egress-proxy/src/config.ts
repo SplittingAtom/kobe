@@ -59,6 +59,15 @@ const configSchema = z.object({
   KOBE_EGRESS_IDLE_TIMEOUT_MS: int("KOBE_EGRESS_IDLE_TIMEOUT_MS", 1_000, 86_400_000, 300_000),
   /** Request head and TLS ClientHello must arrive within this. */
   KOBE_EGRESS_HANDSHAKE_TIMEOUT_MS: int("KOBE_EGRESS_HANDSHAKE_TIMEOUT_MS", 100, 120_000, 10_000),
+  /** Request-head deadline before authentication (slow-loris bound). */
+  KOBE_EGRESS_PREAUTH_TIMEOUT_MS: int("KOBE_EGRESS_PREAUTH_TIMEOUT_MS", 100, 60_000, 5_000),
+  /** Unauthenticated sockets per source address (one sandbox pod = one address) and in total. */
+  KOBE_EGRESS_PREAUTH_PER_SOURCE: int("KOBE_EGRESS_PREAUTH_PER_SOURCE", 1, 10_000, 16),
+  KOBE_EGRESS_PREAUTH_TOTAL: int("KOBE_EGRESS_PREAUTH_TOTAL", 1, 100_000, 1_024),
+  /** Longest tunnel lifetime; tunnels also close when their session token expires. */
+  KOBE_EGRESS_MAX_TUNNEL_SECONDS: int("KOBE_EGRESS_MAX_TUNNEL_SECONDS", 1, 86_400, 3_600),
+  /** How often open tunnels are re-checked against the allowlist and membership. */
+  KOBE_EGRESS_RECHECK_MS: int("KOBE_EGRESS_RECHECK_MS", 1_000, 3_600_000, 30_000),
   KOBE_EGRESS_CONNECT_TIMEOUT_MS: int("KOBE_EGRESS_CONNECT_TIMEOUT_MS", 100, 120_000, 10_000),
   KOBE_EGRESS_DNS_TIMEOUT_MS: int("KOBE_EGRESS_DNS_TIMEOUT_MS", 100, 60_000, 3_000),
   KOBE_EGRESS_CACHE_TTL_MS: int("KOBE_EGRESS_CACHE_TTL_MS", 1_000, 3_600_000, 60_000),
@@ -78,6 +87,11 @@ export interface Config {
   readonly idleTimeoutMs: number;
   readonly handshakeTimeoutMs: number;
   readonly connectTimeoutMs: number;
+  readonly preAuthTimeoutMs: number;
+  readonly preAuthPerSource: number;
+  readonly preAuthTotal: number;
+  readonly maxTunnelMs: number;
+  readonly recheckMs: number;
   readonly dnsTimeoutMs: number;
   readonly cacheTtlMs: number;
   readonly auditFlushMs: number;
@@ -122,6 +136,11 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     idleTimeoutMs: c.KOBE_EGRESS_IDLE_TIMEOUT_MS,
     handshakeTimeoutMs: c.KOBE_EGRESS_HANDSHAKE_TIMEOUT_MS,
     connectTimeoutMs: c.KOBE_EGRESS_CONNECT_TIMEOUT_MS,
+    preAuthTimeoutMs: c.KOBE_EGRESS_PREAUTH_TIMEOUT_MS,
+    preAuthPerSource: c.KOBE_EGRESS_PREAUTH_PER_SOURCE,
+    preAuthTotal: c.KOBE_EGRESS_PREAUTH_TOTAL,
+    maxTunnelMs: c.KOBE_EGRESS_MAX_TUNNEL_SECONDS * 1000,
+    recheckMs: c.KOBE_EGRESS_RECHECK_MS,
     dnsTimeoutMs: c.KOBE_EGRESS_DNS_TIMEOUT_MS,
     cacheTtlMs: c.KOBE_EGRESS_CACHE_TTL_MS,
     auditFlushMs: c.KOBE_EGRESS_AUDIT_FLUSH_MS,

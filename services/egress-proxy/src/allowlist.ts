@@ -40,6 +40,7 @@ export class AllowlistCache {
   private allGen = 0;
   private ceilingGen = 0;
   private readonly teamGen = new Map<string, number>();
+  private readonly userGen = new Map<string, number>();
   private listening = false;
   private readonly now: () => number;
 
@@ -75,6 +76,12 @@ export class AllowlistCache {
       if (key.startsWith(`${teamId}:`)) this.members.delete(key);
   }
 
+  /** A user's membership changed somewhere (removed, deactivated): forget it in every team. */
+  invalidateUser(userId: string): void {
+    for (const key of this.members.keys()) if (key.endsWith(`:${userId}`)) this.members.delete(key);
+    this.userGen.set(userId, (this.userGen.get(userId) ?? 0) + 1);
+  }
+
   async decide(teamId: string, host: string): Promise<EgressDecision> {
     const [ceiling, team] = await Promise.all([this.getCeiling(), this.getTeam(teamId)]);
     const effective = new Set([...team].filter((p) => ceiling.has(p)));
@@ -93,7 +100,7 @@ export class AllowlistCache {
       () => this.members.get(key),
       (e) => this.store(this.members, key, e),
       () => this.source.isActiveMember(teamId, userId),
-      this.generation(teamId),
+      this.memberGeneration(teamId, userId),
       this.options.memberTtlMs,
     );
   }
@@ -129,6 +136,10 @@ export class AllowlistCache {
   // Combined so that invalidateAll changes every generation too.
   private ceilingGeneration(): number {
     return this.allGen * 1_000_003 + this.ceilingGen;
+  }
+
+  private memberGeneration(teamId: string, userId: string): number {
+    return this.generation(teamId) * 1_000_003 + (this.userGen.get(userId) ?? 0);
   }
 
   private generation(teamId: string): number {
@@ -174,7 +185,8 @@ export class AllowlistCache {
 
   private currentGen(key: string): number {
     if (key === "ceiling") return this.ceilingGeneration();
-    const teamId = key.startsWith("team:") ? key.slice(5) : key.slice(0, key.indexOf(":"));
-    return this.generation(teamId);
+    if (key.startsWith("team:")) return this.generation(key.slice(5));
+    const [teamId = "", userId = ""] = key.split(":");
+    return this.memberGeneration(teamId, userId);
   }
 }

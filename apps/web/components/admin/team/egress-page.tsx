@@ -7,6 +7,7 @@ import {
   type TeamEgressDomain,
 } from "../../../lib/admin/api/team/egress";
 import { useTeamAccess } from "../console-context";
+import { SharedHostingNote } from "../install/egress-ceiling-page";
 import { MutationStatus } from "../error-notice";
 import { DateTime, ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
@@ -60,6 +61,7 @@ export function TeamEgressPage() {
                     <tr key={d.domain}>
                       <th scope="row">
                         <code>{d.domain}</code>
+                        {d.sharedHosting ? <SharedHostingNote /> : null}
                       </th>
                       <td>
                         {!d.inCeiling

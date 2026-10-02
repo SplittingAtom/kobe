@@ -8,7 +8,7 @@ predates these keys still renders. Keep in sync with values.yaml.
   "allowedInternalCidrs" (list)
   "deniedCidrs" (list)
   "auditFlushSeconds" 60
-  "limits" (dict "connectionsPerSandbox" 64 "connections" 4096 "bandwidthBytesPerSecond" 20971520 "idleTimeoutSeconds" 300)
+  "limits" (dict "connectionsPerSandbox" 64 "connections" 4096 "bandwidthBytesPerSecond" 20971520 "idleTimeoutSeconds" 300 "maxTunnelSeconds" 3600 "unauthenticatedPerSource" 16 "unauthenticated" 1024)
   "networkPolicy" (dict "restrictEgress" true "databasePeers" (list) "databasePort" 5432 "extraEgress" (list)) -}}
 {{- mustMergeOverwrite $defaults (deepCopy (.Values.egressProxy | default dict)) | toJson -}}
 {{- end -}}
@@ -44,6 +44,12 @@ key only (never the other audiences' keys), and limits.
   value: {{ int64 $e.limits.bandwidthBytesPerSecond | quote }}
 - name: KOBE_EGRESS_IDLE_TIMEOUT_MS
   value: {{ mul (int $e.limits.idleTimeoutSeconds) 1000 | quote }}
+- name: KOBE_EGRESS_MAX_TUNNEL_SECONDS
+  value: {{ int $e.limits.maxTunnelSeconds | quote }}
+- name: KOBE_EGRESS_PREAUTH_PER_SOURCE
+  value: {{ int $e.limits.unauthenticatedPerSource | quote }}
+- name: KOBE_EGRESS_PREAUTH_TOTAL
+  value: {{ int $e.limits.unauthenticated | quote }}
 - name: KOBE_EGRESS_AUDIT_FLUSH_MS
   value: {{ mul (int $e.auditFlushSeconds) 1000 | quote }}
 {{- end -}}

@@ -61,6 +61,40 @@ describe("ConnectionAudit", () => {
     expect(events[0]?.target).toMatchObject({ connections: 2 });
   });
 
+  it("collapses a sandbox's random-host flood into one aggregated row (bounded audit writes)", async () => {
+    const written: AuditEvent[] = [];
+    const audit = new ConnectionAudit({
+      write: async (events) => void written.push(...events),
+      logger,
+      flushMs: 60_000,
+      distinctKeys: { burst: 5, perSecond: 0 },
+    });
+    for (let i = 0; i < 1_000; i++) {
+      audit.record({
+        ...base,
+        domain: `r${i}.example.com`,
+        outcome: "blocked",
+        reason: "not_in_ceiling",
+        bytesUp: 0,
+        bytesDown: 0,
+      });
+    }
+    // Another sandbox is not affected by this one's flood.
+    audit.record({ ...base, sandboxId: "5a0d3e6b-7c8f-4a01-9cd3-5e6f708192a3" });
+    await audit.flush();
+    expect(written).toHaveLength(7);
+    const collapsed = written.find((e) => (e.target as { aggregated?: boolean }).aggregated);
+    expect(collapsed?.target).toMatchObject({
+      connections: 995,
+      outcome: "blocked",
+      aggregated: true,
+    });
+    expect(collapsed?.target).not.toHaveProperty("domain");
+    for (const event of written) {
+      expect(AUDIT_EVENTS["egress.connection"].target.safeParse(event.target).success).toBe(true);
+    }
+  });
+
   it("flushes early when many distinct keys pile up", async () => {
     const write = vi.fn().mockResolvedValue(undefined);
     const audit = new ConnectionAudit({ write, logger, flushMs: 60_000, maxKeys: 3 });

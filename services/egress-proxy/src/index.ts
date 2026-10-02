@@ -8,6 +8,8 @@ import { loadConfig } from "./config.js";
 import { ConnectionAudit, dbAuditWriter } from "./connection-audit.js";
 import { BandwidthLimiter, ConnectionLimits } from "./limits.js";
 import { logger } from "./logger.js";
+import { PreAuthGate } from "./preauth-gate.js";
+import { TunnelRegistry } from "./tunnel-registry.js";
 import { createEgressProxy } from "./proxy.js";
 import { dnsResolver } from "./resolver.js";
 
@@ -26,7 +28,15 @@ const cache = new AllowlistCache(
   },
   { ttlMs: config.cacheTtlMs, degradedTtlMs: 5_000, memberTtlMs: 30_000, maxEntries: 10_000 },
 );
-const listener = new ChangeListener({ connectionString: config.databaseUrl, cache, logger });
+const tunnels = new TunnelRegistry(cache, logger);
+tunnels.start(config.recheckMs);
+const listener = new ChangeListener({
+  connectionString: config.databaseUrl,
+  cache,
+  logger,
+  // Revocation reaches open tunnels: re-check the affected ones on every hint.
+  onChange: (scope) => void tunnels.recheck(scope),
+});
 listener.start();
 const audit = new ConnectionAudit({
   write: dbAuditWriter(db),
@@ -37,6 +47,12 @@ audit.start();
 const blocked = new BlockedReporter({ sink: dbBlockedSink(db), logger });
 
 let draining = false;
+const preauth = new PreAuthGate({ perSource: config.preAuthPerSource, total: config.preAuthTotal });
+setInterval(() => {
+  const refused = preauth.drainRefused();
+  if (refused > 0)
+    logger.warn({ refused }, "egress proxy refused unauthenticated sockets over the limit");
+}, 60_000).unref();
 const server = createEgressProxy({
   verify: egressTokenVerifier(config.sessionKey),
   policy: cache,
@@ -57,12 +73,17 @@ const server = createEgressProxy({
     allowedPorts: config.allowedPorts,
     idleTimeoutMs: config.idleTimeoutMs,
     handshakeTimeoutMs: config.handshakeTimeoutMs,
+    preAuthTimeoutMs: config.preAuthTimeoutMs,
     connectTimeoutMs: config.connectTimeoutMs,
+    maxTunnelMs: config.maxTunnelMs,
   },
+  preauth,
+  tunnels,
   ready: () => !draining,
 });
-// Sockets beyond the tunnel limit (unauthenticated or slow clients) are refused outright.
-server.maxConnections = config.maxConnections + 256;
+// Tunnels and unauthenticated sockets have separate budgets (the gate enforces the latter), so a
+// flood of unauthenticated sockets never takes capacity from other sandboxes' tunnels.
+server.maxConnections = config.maxConnections + config.preAuthTotal;
 server.listen(config.port, () => {
   logger.info(
     {
@@ -82,6 +103,7 @@ async function shutdown(signal: string): Promise<void> {
   force.unref();
   await new Promise<void>((resolve) => server.close(() => resolve()));
   clearTimeout(force);
+  tunnels.stop();
   await audit.stop();
   await blocked.drain();
   await listener.close();

@@ -29,7 +29,7 @@ export const DEFAULT_DENIED_CIDRS: readonly string[] = [
   "224.0.0.0/4",
   "240.0.0.0/4",
   // IPv6
-  "::/128",
+  "::/96", // IPv4-compatible (deprecated): embeds an IPv4 address
   "::1/128",
   "::ffff:0:0/96",
   "64:ff9b::/96",

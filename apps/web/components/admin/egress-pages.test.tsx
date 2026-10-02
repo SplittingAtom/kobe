@@ -12,6 +12,7 @@ const entry = (domain: string, preset: string | null, in_ceiling: boolean) => ({
   preset,
   in_ceiling,
   note: null,
+  shared_hosting: domain.endsWith("cloudfront.net"),
   created_by: null,
   created_at: "2026-10-01T10:00:00Z",
   updated_at: "2026-10-01T10:00:00Z",
@@ -22,6 +23,7 @@ const CEILING = {
     entry("pypi.org", "package_registries", true),
     entry("github.com", "git_hosts", false),
     entry("*.example.com", null, true),
+    entry("d111.cloudfront.net", null, true),
   ],
   presets: ["package_registries", "git_hosts", "web_search"],
 };
@@ -109,11 +111,41 @@ describe("Install egress ceiling", () => {
   });
 });
 
+describe("Domain fronting warnings", () => {
+  it("marks shared hosting in the list and repeats the server's warning after adding", async () => {
+    stubApi({
+      "GET /v1/install/egress-ceiling": [200, CEILING],
+      "POST /v1/install/egress-ceiling": [
+        [
+          201,
+          {
+            domain: entry("d222.cloudfront.net", null, true),
+            warnings: ["This domain is on shared hosting or a CDN (domain fronting)."],
+          },
+        ],
+      ],
+    });
+    renderInstall(<EgressCeilingPage />);
+    const custom = await screen.findByRole("table", { name: "Custom domains" });
+    expect(custom.textContent).toMatch(/d111\.cloudfront\.net.*domain fronting/);
+    expect(screen.getByRole("table", { name: "Package registries" }).textContent).not.toMatch(
+      /fronting/,
+    );
+    const form = screen.getByRole("form", { name: "Add a domain" });
+    await userEvent.type(within(form).getByLabelText("Domain"), "d222.cloudfront.net");
+    await userEvent.click(within(form).getByRole("button", { name: "Add domain" }));
+    await screen.findByText(
+      /Added d222\.cloudfront\.net to the ceiling\. This domain is on shared hosting/,
+    );
+  });
+});
+
 describe("Team egress", () => {
   const team = (domain: string, in_ceiling: boolean, enabled: boolean) => ({
     domain,
     preset: null,
     in_ceiling,
+    shared_hosting: false,
     enabled,
     enabled_by: enabled ? "u" : null,
     enabled_at: enabled ? "2026-10-01T10:00:00Z" : null,

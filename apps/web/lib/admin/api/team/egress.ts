@@ -10,6 +10,8 @@ export interface TeamEgressDomain {
   readonly preset: EgressPreset | null;
   /** In the install ceiling now; enablement only takes effect while it is. */
   readonly inCeiling: boolean;
+  /** Shared hosting or a CDN: domain fronting may reach other sites behind it. */
+  readonly sharedHosting: boolean;
   readonly enabled: boolean;
   readonly enabledBy: string | null;
   readonly enabledAt: string | null;

@@ -1,5 +1,6 @@
 import { SYSTEM_ACTOR, audit, type AuditEvent, type KobeDb } from "@kobe/db";
 import type { Logger } from "pino";
+import { RateBuckets } from "./rate-buckets.js";
 
 /**
  * Connection log (spec D28 "every connection is logged (domain, team, user, bytes) to the audit
@@ -20,7 +21,8 @@ export type ConnectionReason =
   | "connection_limit"
   | "dns_failure"
   | "upstream_unreachable"
-  | "policy_unavailable";
+  | "policy_unavailable"
+  | "inactive_member";
 
 export interface ConnectionRecord {
   readonly teamId: string;
@@ -36,6 +38,7 @@ export interface ConnectionRecord {
 
 interface Aggregate {
   readonly record: ConnectionRecord;
+  readonly aggregated: boolean;
   connections: number;
   bytesUp: number;
   bytesDown: number;
@@ -66,12 +69,25 @@ export interface ConnectionAuditOptions {
   /** Distinct keys kept between flushes; reaching it flushes early. */
   readonly maxKeys?: number;
   readonly now?: () => Date;
+  /**
+   * New distinct (host, port, outcome, reason) keys per sandbox: burst, then per second. Beyond
+   * it a sandbox's connections collapse into one `aggregated` row per outcome (random-host floods).
+   */
+  readonly distinctKeys?: { readonly burst: number; readonly perSecond: number };
 }
 
-const keyOf = (r: ConnectionRecord): string =>
-  [r.teamId, r.userId, r.sandboxId, r.domain ?? "", r.port ?? "", r.outcome, r.reason ?? ""].join(
-    "|",
-  );
+const keyOf = (r: ConnectionRecord, aggregated: boolean): string =>
+  aggregated
+    ? [r.teamId, r.userId, r.sandboxId, "*", "*", r.outcome, "*"].join("|")
+    : [
+        r.teamId,
+        r.userId,
+        r.sandboxId,
+        r.domain ?? "",
+        r.port ?? "",
+        r.outcome,
+        r.reason ?? "",
+      ].join("|");
 
 export class ConnectionAudit {
   private pending = new Map<string, Aggregate>();
@@ -80,10 +96,13 @@ export class ConnectionAudit {
   private dropped = 0;
   private readonly maxKeys: number;
   private readonly now: () => Date;
+  private readonly newKeys: RateBuckets;
 
   constructor(private readonly options: ConnectionAuditOptions) {
     this.maxKeys = options.maxKeys ?? 5_000;
     this.now = options.now ?? (() => new Date());
+    const rate = options.distinctKeys ?? { burst: 32, perSecond: 0.5 };
+    this.newKeys = new RateBuckets({ ...rate, now: () => this.now().getTime() });
   }
 
   start(): void {
@@ -92,9 +111,15 @@ export class ConnectionAudit {
   }
 
   record(record: ConnectionRecord): void {
-    const key = keyOf(record);
     const at = this.now();
-    const existing = this.pending.get(key);
+    let aggregated = false;
+    let key = keyOf(record, false);
+    let existing = this.pending.get(key);
+    if (!existing && !this.newKeys.take(`${record.teamId}|${record.sandboxId}`)) {
+      aggregated = true;
+      key = keyOf(record, true);
+      existing = this.pending.get(key);
+    }
     if (existing) {
       existing.connections += 1;
       existing.bytesUp += record.bytesUp;
@@ -109,6 +134,7 @@ export class ConnectionAudit {
     }
     this.pending.set(key, {
       record,
+      aggregated,
       connections: 1,
       bytesUp: record.bytesUp,
       bytesDown: record.bytesDown,
@@ -175,10 +201,11 @@ function toEvent(agg: Aggregate): AuditEvent {
     target: {
       userId: r.userId,
       sandboxId: r.sandboxId,
-      ...(r.domain === undefined ? {} : { domain: r.domain }),
-      ...(r.port === undefined ? {} : { port: r.port }),
+      ...(agg.aggregated || r.domain === undefined ? {} : { domain: r.domain }),
+      ...(agg.aggregated || r.port === undefined ? {} : { port: r.port }),
       outcome: r.outcome,
-      ...(r.reason === undefined ? {} : { reason: r.reason }),
+      ...(agg.aggregated || r.reason === undefined ? {} : { reason: r.reason }),
+      ...(agg.aggregated ? { aggregated: true as const } : {}),
       connections: agg.connections,
       bytesUp: agg.bytesUp,
       bytesDown: agg.bytesDown,

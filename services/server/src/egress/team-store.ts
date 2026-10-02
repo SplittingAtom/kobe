@@ -3,6 +3,7 @@ import {
   asc,
   egressDomains,
   eq,
+  isSharedHosting,
   notifyEgressChanged,
   teamEgress,
   withTeam,
@@ -20,6 +21,8 @@ export interface TeamEgressEntry {
   readonly preset: EgressPreset | null;
   /** In the install ceiling now (enablement only takes effect while it is). */
   readonly in_ceiling: boolean;
+  /** Shared hosting / CDN: domain fronting can reach other sites behind it (see ceiling-store). */
+  readonly shared_hosting: boolean;
   readonly enabled: boolean;
   readonly enabled_by: string | null;
   readonly enabled_at: string | null;
@@ -43,6 +46,7 @@ export async function listTeamEgress(db: KobeDb, teamId: string): Promise<TeamEg
         domain: c.domain,
         preset: c.preset ?? null,
         in_ceiling: c.inCeiling,
+        shared_hosting: isSharedHosting(c.domain),
         enabled: e !== undefined,
         enabled_by: e?.enabledBy ?? null,
         enabled_at: e?.enabledAt.toISOString() ?? null,

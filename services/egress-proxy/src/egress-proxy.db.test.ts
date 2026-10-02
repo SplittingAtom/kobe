@@ -11,6 +11,7 @@ import {
   loadEgressCeiling,
   loadTeamEgress,
   notifyEgressChanged,
+  notifyEgressUserChanged,
   sql,
   teamEgress,
   teamMembers,
@@ -26,6 +27,7 @@ import { AllowlistCache } from "./allowlist.js";
 import { dbBlockedSink } from "./blocked-reporter.js";
 import { ChangeListener } from "./change-listener.js";
 import { ConnectionAudit, dbAuditWriter } from "./connection-audit.js";
+import type { TunnelScope } from "./tunnel-registry.js";
 
 /** KOBE-38: the proxy's Postgres side — allowlists with LISTEN/NOTIFY invalidation, audit, events. */
 const logger = pino({ level: "silent" });
@@ -35,6 +37,7 @@ const sandbox = randomUUID();
 let app: KobeDatabase;
 let cache: AllowlistCache;
 let listener: ChangeListener;
+const scopes: TunnelScope[] = [];
 
 const until = async (fn: () => Promise<boolean>, ms = 5_000) => {
   const deadline = Date.now() + ms;
@@ -63,7 +66,12 @@ beforeAll(async () => {
     // Long TTLs: only change hints can make the cache re-read in these tests.
     { ttlMs: 3_600_000, degradedTtlMs: 3_600_000, memberTtlMs: 3_600_000, maxEntries: 100 },
   );
-  listener = new ChangeListener({ connectionString: inject("appUrl"), cache, logger });
+  listener = new ChangeListener({
+    connectionString: inject("appUrl"),
+    cache,
+    logger,
+    onChange: (scope) => void scopes.push(scope),
+  });
   listener.start();
   await until(async () => listener.listening);
 });
@@ -107,6 +115,19 @@ describe("allowlist from Postgres", () => {
       .update(egressDomains)
       .set({ inCeiling: true })
       .where(eq(egressDomains.domain, "pypi.org"));
+  });
+});
+
+describe("tunnel re-check hints", () => {
+  it("reports the scope of every hint (team, ceiling, user) to re-check open tunnels", async () => {
+    scopes.length = 0;
+    await withTeam(app.db, team, (tx) => notifyEgressChanged(tx, team));
+    await app.db.transaction((tx) => notifyEgressUserChanged(tx, user));
+    await until(async () => scopes.length >= 2);
+    expect(scopes).toEqual([
+      { kind: "team", teamId: team },
+      { kind: "user", userId: user },
+    ]);
   });
 });
 

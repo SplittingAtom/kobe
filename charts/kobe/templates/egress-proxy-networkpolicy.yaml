@@ -68,6 +68,12 @@ spec:
             cidr: 0.0.0.0/0
             except:
               {{- toYaml (include "kobe.egressPrivateRanges" . | fromJsonArray) | nindent 14 }}
+              {{- /* The proxy refuses deniedCidrs itself; mirrored here (IPv4 only, this rule is IPv4). */ -}}
+              {{- range $e.deniedCidrs }}
+              {{- if not (contains ":" .) }}
+              - {{ . }}
+              {{- end }}
+              {{- end }}
       ports:
         {{- range $e.allowedPorts }}
         - protocol: TCP

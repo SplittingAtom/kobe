@@ -27,6 +27,19 @@ describe("BlockedReporter", () => {
     expect(sink).toHaveBeenCalledTimes(3);
   });
 
+  it("caps reports per sandbox across hosts (random-host floods)", async () => {
+    const sink = vi.fn().mockResolvedValue(undefined);
+    const reporter = new BlockedReporter({
+      sink,
+      logger: pino({ level: "silent" }),
+      perSandbox: { burst: 5, perSecond: 0 },
+    });
+    for (let i = 0; i < 500; i++) reporter.report({ ...attempt, domain: `r${i}.example.com` });
+    reporter.report({ ...attempt, sandboxId: "5a0d3e6b-7c8f-4a01-9cd3-5e6f708192a3" });
+    await reporter.drain();
+    expect(sink).toHaveBeenCalledTimes(6);
+  });
+
   it("never throws when the write fails, and bounds writes in flight", async () => {
     const sink = vi.fn(
       () => new Promise<void>((_, reject) => setTimeout(() => reject(new Error("x")), 5)),

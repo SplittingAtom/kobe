@@ -89,6 +89,9 @@ describe("egress proxy Deployment", () => {
     expect(config.allowedInternalCidrs).toEqual([]);
     expect(config.maxConnectionsPerSandbox).toBe(64);
     expect(config.idleTimeoutMs).toBe(300_000);
+    expect(config.maxTunnelMs).toBe(3_600_000);
+    expect(config.preAuthPerSource).toBe(16);
+    expect(config.preAuthTotal).toBe(1_024);
   });
 });
 
@@ -151,6 +154,13 @@ describe("egress proxy NetworkPolicy", () => {
       to: [{ ipBlock: { cidr: "10.43.200.200/32" } }],
       ports: [{ protocol: "TCP", port: 443 }],
     });
+  });
+
+  it("mirrors IPv4 deniedCidrs into the internet rule's exceptions", () => {
+    const spec = policy(render({}, { "egressProxy.deniedCidrs": ["11.0.0.0/8", "fd00::/8"] }));
+    const internet = spec?.egress.find((r: any) => r.to?.[0]?.ipBlock?.cidr === "0.0.0.0/0");
+    expect(internet.to[0].ipBlock.except).toContain("11.0.0.0/8");
+    expect(internet.to[0].ipBlock.except).not.toContain("fd00::/8");
   });
 
   it("can leave the proxy's egress unrestricted (ingress stays restricted)", () => {

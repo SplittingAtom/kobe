@@ -18,6 +18,8 @@ export interface SandboxIdentity {
   readonly userId: string;
   readonly threadHint: string | undefined;
   readonly tokenId: string;
+  /** Token expiry (ms since the epoch): tunnels opened with it close then. */
+  readonly expiresAt: number;
 }
 
 export type AuthResult =
@@ -74,6 +76,7 @@ export function authenticate(
       userId: claims.user_id,
       threadHint: hint,
       tokenId: claims.jti,
+      expiresAt: claims.exp * 1000,
     },
   };
 }

@@ -27,6 +27,12 @@ async function body<T>(c: Context, schema: z.ZodType<T>) {
   return { ok: false as const, response: invalidRequest(c, `Check the request: ${message}.`) };
 }
 
+/** Shown when a ceiling domain is on shared hosting or a CDN (domain fronting, KOBE-38 docs). */
+export const SHARED_HOSTING_WARNING =
+  "This domain is on shared hosting or a CDN. The proxy sees only the TLS server name, so a " +
+  "sandbox allowed to reach it may also reach other sites hosted behind the same front " +
+  "(domain fronting). Prefer the provider's own domain if it has one.";
+
 const notFound = (c: Context) =>
   c.json({ code: "domain_not_found", message: "That domain is not listed." }, 404);
 
@@ -45,7 +51,10 @@ export function installEgressRoutes(deps: ServerDeps): Hono<{ Variables: AuthVar
     const parsed = await body(c, addCeilingBodySchema);
     if (!parsed.ok) return parsed.response;
     const result = await addCeilingDomain(db, parsed.value, c.get("user").id);
-    if (result.ok) return c.json({ domain: result.entry }, result.created ? 201 : 200);
+    if (result.ok) {
+      const warnings = result.entry.shared_hosting ? [SHARED_HOSTING_WARNING] : [];
+      return c.json({ domain: result.entry, warnings }, result.created ? 201 : 200);
+    }
     return result.error === "already_in_ceiling"
       ? c.json(
           { code: "already_in_ceiling", message: "That domain is already in the ceiling." },
