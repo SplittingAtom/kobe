@@ -49,3 +49,17 @@ export {
   or,
   sql,
 } from "drizzle-orm";
+export {
+  searchThreads,
+  ThreadSearchError,
+  THREAD_SEARCH_DEFAULT_LIMIT,
+  THREAD_SEARCH_DEFAULT_TIMEOUT_MS,
+  THREAD_SEARCH_MAX_LIMIT,
+  THREAD_SEARCH_MAX_PROJECT_IDS,
+  THREAD_SEARCH_MAX_QUERY_LENGTH,
+  type SearchThreadsInput,
+  type SnippetSegment,
+  type ThreadSearchErrorCode,
+  type ThreadSearchHit,
+  type ThreadSearchPage,
+} from "./thread-search.js";

@@ -9,6 +9,7 @@ import {
   setLeafBodySchema,
   threadDetailSchema,
   threadPageSchema,
+  threadSearchPageSchema,
   threadSummarySchema,
   trashQuerySchema,
   updateThreadBodySchema,
@@ -89,12 +90,27 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         summary: "List the viewer's threads (or a project's readable threads), newest first",
         description:
           "Keyset pagination on (last_activity_at, id). Never Trash. With `q`, full-text search " +
-          "(KOBE-33; 501 `search_unavailable` until wired). Reads Postgres only (never wakes a sandbox).",
+          '(KOBE-33): web-search syntax (`"phrase"`, `-exclude`, `or`) over user/assistant ' +
+          "messages (all terms in one message) and titles (plus fuzzy title matching), ranked by " +
+          "relevance with snippets; `cursor` is then a search cursor and `limit` is capped at 50. " +
+          "Reads Postgres only (never wakes a sandbox).",
         parameters: [...queryParameters(listThreadsQuerySchema), teamHeader],
         responses: {
-          "200": json("ThreadPage", "A page of threads."),
-          "501": json("Error", "`search_unavailable`."),
+          "200": {
+            description: "A page of threads (`ThreadSearchPage` when `q` is given).",
+            content: {
+              "application/json": {
+                schema: { oneOf: [ref("ThreadPage"), ref("ThreadSearchPage")] },
+              },
+            },
+          },
           ...ERROR_RESPONSES,
+          "400": json(
+            "Error",
+            "`invalid_request`, `invalid_cursor`, `invalid_query` (only excluded terms) or " +
+              "`team_header_required`.",
+          ),
+          "503": json("Error", "`search_timeout`: the search exceeded its time limit."),
         },
       },
       post: {
@@ -197,6 +213,7 @@ export function threadsOpenApiSchemas(): Record<string, JsonSchema> {
     Error: withoutDialect(output(errorSchema)),
     Thread: withoutDialect(output(threadSummarySchema)),
     ThreadPage: withoutDialect(output(threadPageSchema)),
+    ThreadSearchPage: withoutDialect(output(threadSearchPageSchema)),
     ThreadDetail: withoutDialect(output(threadDetailSchema)),
     EntryPage: withoutDialect(output(entryPageSchema)),
     CreateThreadBody: withoutDialect(input(createThreadBodySchema)),
