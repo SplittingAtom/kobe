@@ -16,6 +16,7 @@ import { myTeamsRoutes } from "./routes/my-teams.js";
 import { setupRoutes } from "./routes/setup.js";
 import { teamInvitesRoutes } from "./routes/team-invites.js";
 import { teamRoutes } from "./routes/team.js";
+import { threadRoutes } from "./routes/threads.js";
 
 const SERVICE = "server";
 
@@ -59,6 +60,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/me", meRoutes());
   api.route("/team/invites", teamInvitesRoutes(deps));
   api.route("/team", teamRoutes(deps));
+  api.route("/threads", threadRoutes(deps));
   api.route("/agents", agentRoutes(deps));
   api.route("/install/settings", installSettingsRoutes(deps));
   api.route("/install/teams", installTeamsRoutes(deps));
