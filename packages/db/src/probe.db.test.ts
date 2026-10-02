@@ -104,6 +104,17 @@ describe.each(TEAM_TABLES)("cross-team probe: %s", (table) => {
   });
 });
 
+describe("install-wide tables", () => {
+  it("does not let the app role delete teams (FK cascades would bypass RLS)", async () => {
+    const err: unknown = await app.pool.query(`DELETE FROM teams WHERE id = $1`, [teamB]).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect((err as { code?: string } | undefined)?.code).toBe("42501");
+    expect((await teamIdsIn(TEAM_TABLES[0], teamB)).length).toBeGreaterThan(0);
+  });
+});
+
 describe("probe suite coverage", () => {
   it("has a fixture for every team table", () => {
     expect(Object.keys(PROBE_FIXTURES).sort()).toEqual([...TEAM_TABLES].sort());

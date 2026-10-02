@@ -16,8 +16,18 @@ export async function withTeam<T>(
   fn: (tx: KobeTx) => Promise<T>,
 ): Promise<T> {
   const parsed = teamIdSchema.safeParse(teamId);
-  if (!parsed.success) throw new Error(`withTeam: invalid team id "${teamId}" (must be a UUID)`);
+  if (!parsed.success) {
+    throw new Error(
+      `withTeam: invalid team id ${JSON.stringify(teamId.slice(0, 64))} (must be a UUID)`,
+    );
+  }
   return db.transaction(async (tx) => {
+    // A transaction-local setting survives RELEASE SAVEPOINT, so a nested withTeam would silently
+    // switch the outer transaction to another team. Refuse instead.
+    const current = await tx.execute<{ team: string | null }>(
+      sql`SELECT NULLIF(current_setting(${TEAM_ID_SETTING}, true), '') AS team`,
+    );
+    if (current.rows[0]?.team) throw new Error("withTeam: nested withTeam is not allowed");
     await tx.execute(sql`SELECT set_config(${TEAM_ID_SETTING}, ${parsed.data}, true)`);
     return fn(tx);
   });

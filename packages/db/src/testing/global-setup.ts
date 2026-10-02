@@ -5,7 +5,9 @@ import { runMigrations } from "../migrate.js";
 
 declare module "vitest" {
   export interface ProvidedContext {
+    adminUrl: string;
     ownerUrl: string;
+    ownerRole: string;
     appUrl: string;
     appRole: string;
   }
@@ -39,20 +41,34 @@ export default async function setup(project: TestProject): Promise<() => Promise
 
   const admin = new pg.Client({ connectionString: adminUrl });
   await admin.connect();
-  await admin.query(`CREATE ROLE ${ownerRole} LOGIN PASSWORD '${password}'`);
-  await admin.query(`CREATE ROLE ${appRole} LOGIN PASSWORD '${password}' NOSUPERUSER NOBYPASSRLS`);
-  await admin.query(`CREATE DATABASE ${dbName} OWNER ${ownerRole}`);
-
-  await runMigrations({ databaseUrl: urlFor(ownerRole), appRole });
-
-  project.provide("ownerUrl", urlFor(ownerRole));
-  project.provide("appUrl", urlFor(appRole));
-  project.provide("appRole", appRole);
-
-  return async () => {
+  const teardown = async (): Promise<void> => {
     await admin.query(`DROP DATABASE IF EXISTS ${dbName} WITH (FORCE)`);
     await admin.query(`DROP ROLE IF EXISTS ${appRole}`);
     await admin.query(`DROP ROLE IF EXISTS ${ownerRole}`);
     await admin.end();
   };
+
+  try {
+    await admin.query(
+      `CREATE ROLE ${ownerRole} LOGIN PASSWORD '${password}' NOSUPERUSER NOBYPASSRLS`,
+    );
+    await admin.query(
+      `CREATE ROLE ${appRole} LOGIN PASSWORD '${password}' NOSUPERUSER NOBYPASSRLS`,
+    );
+    await admin.query(`CREATE DATABASE ${dbName} OWNER ${ownerRole}`);
+    await runMigrations({ databaseUrl: urlFor(ownerRole), appRole });
+  } catch (err) {
+    await teardown();
+    throw err;
+  }
+
+  const adminDbUrl = new URL(adminUrl);
+  adminDbUrl.pathname = `/${dbName}`;
+  project.provide("adminUrl", adminDbUrl.toString());
+  project.provide("ownerUrl", urlFor(ownerRole));
+  project.provide("ownerRole", ownerRole);
+  project.provide("appUrl", urlFor(appRole));
+  project.provide("appRole", appRole);
+
+  return teardown;
 }

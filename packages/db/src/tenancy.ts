@@ -43,3 +43,32 @@ const TEAM_TABLE_SET: ReadonlySet<string> = new Set(TEAM_TABLES);
 export function isTeamTable(name: string): name is TeamTable {
   return TEAM_TABLE_SET.has(name);
 }
+
+export type Privilege = "SELECT" | "INSERT" | "UPDATE" | "DELETE";
+
+/** Team tables: full DML for the app role; RLS confines it to the active team. */
+const TEAM_TABLE_PRIVILEGES: readonly Privilege[] = ["SELECT", "INSERT", "UPDATE", "DELETE"];
+
+/**
+ * App-role privileges on install-wide tables, least privilege. Install-wide tables have no RLS, so
+ * every privilege here is reachable from any team context. No DELETE on `teams`: foreign-key
+ * cascades bypass RLS and would wipe another team's rows. A table missing here gets no grants.
+ */
+export const INSTALL_WIDE_GRANTS: Readonly<
+  Partial<Record<InstallWideTable, readonly Privilege[]>>
+> = {
+  teams: ["SELECT", "INSERT", "UPDATE"],
+};
+
+/**
+ * Install-wide tables allowed to carry `team_id` or a foreign key to `teams`, each with a reason.
+ * Any other table with either must be a team table (enforced by the catalog check).
+ */
+export const TEAM_REFERENCING_INSTALL_WIDE: Readonly<Partial<Record<InstallWideTable, string>>> =
+  {};
+
+/** Privileges the migration runner grants the app role on `table` (undefined: none). */
+export function appPrivilegesFor(table: string): readonly Privilege[] | undefined {
+  if (isTeamTable(table)) return TEAM_TABLE_PRIVILEGES;
+  return INSTALL_WIDE_GRANTS[table as InstallWideTable];
+}

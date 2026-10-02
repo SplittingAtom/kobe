@@ -23,6 +23,17 @@ describe("withTeam (Postgres)", () => {
     expect(after.rows[0]?.v).toBeNull();
   });
 
+  it("refuses to nest withTeam inside another team's transaction", async () => {
+    const outer = randomUUID();
+    const inner = randomUUID();
+    const seen = await withTeam(app.db, outer, async (tx) => {
+      await expect(withTeam(tx, inner, async () => "switched")).rejects.toThrow(/nested/i);
+      const r = await tx.execute<{ v: string }>(sql`SELECT current_setting('kobe.team_id') AS v`);
+      return r.rows[0]?.v;
+    });
+    expect(seen).toBe(outer);
+  });
+
   it("rolls back everything when the callback throws", async () => {
     const owner = createDb(inject("ownerUrl"));
     const teamId = randomUUID();

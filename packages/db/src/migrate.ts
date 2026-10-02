@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { quoteIdent } from "./roles.js";
+import { appPrivilegesFor } from "./tenancy.js";
 
 /** Migrations ship next to dist/ and src/ alike (`packages/db/drizzle`). */
 export const DEFAULT_MIGRATIONS_FOLDER = fileURLToPath(new URL("../drizzle", import.meta.url));
@@ -15,54 +16,107 @@ export interface MigrateOptions {
   readonly migrationsFolder?: string;
 }
 
-interface RoleRow {
+/** Serializes concurrent migration Jobs (e.g. overlapping Helm upgrades). */
+const MIGRATION_LOCK_KEY = 0x6b6f6265; // "kobe"
+
+interface RoleCheck {
   current_user: string;
-  rolsuper: boolean | null;
-  rolbypassrls: boolean | null;
-  owned: number;
+  current_super: boolean;
+  current_bypass: boolean;
+  app_exists: boolean;
+  app_super: boolean | null;
+  app_bypass: boolean | null;
+  app_owned: number;
+  app_memberships: string[];
 }
 
-async function verifyAppRole(client: pg.ClientBase, appRole: string): Promise<void> {
-  const { rows } = await client.query<RoleRow>(
-    `SELECT current_user, r.rolsuper, r.rolbypassrls,
-            (SELECT count(*)::int FROM pg_class c WHERE c.relowner = r.oid) AS owned
-     FROM (SELECT 1) one LEFT JOIN pg_roles r ON r.rolname = $1`,
+/** Checks both roles before any migration runs; FORCE RLS does not bind superusers or BYPASSRLS. */
+async function verifyRoles(client: pg.ClientBase, appRole: string): Promise<void> {
+  const { rows } = await client.query<RoleCheck>(
+    `SELECT current_user,
+            cur.rolsuper AS current_super, cur.rolbypassrls AS current_bypass,
+            app.oid IS NOT NULL AS app_exists, app.rolsuper AS app_super, app.rolbypassrls AS app_bypass,
+            (SELECT count(*)::int FROM pg_class c WHERE c.relowner = app.oid) AS app_owned,
+            ARRAY(SELECT g.rolname::text FROM pg_roles g
+                  WHERE app.oid IS NOT NULL AND g.oid <> app.oid AND pg_has_role(app.oid, g.oid, 'MEMBER')
+                  ORDER BY 1) AS app_memberships
+     FROM pg_roles cur LEFT JOIN pg_roles app ON app.rolname = $1
+     WHERE cur.rolname = current_user`,
     [appRole],
   );
-  const role = rows[0];
+  const r = rows[0];
+  if (!r) throw new Error("Refusing to migrate: could not read role information");
   const problems = [
-    role?.rolsuper === null || role === undefined ? `role "${appRole}" does not exist` : null,
-    role?.current_user === appRole
-      ? "migrations must run as the owner role, not the app role"
+    r.current_user === appRole ? "migrations must run as the owner role, not the app role" : null,
+    r.current_super ? `migration role "${r.current_user}" is a superuser` : null,
+    r.current_bypass ? `migration role "${r.current_user}" has BYPASSRLS` : null,
+    r.app_exists ? null : `app role "${appRole}" does not exist`,
+    r.app_super ? "app role is a superuser (bypasses RLS)" : null,
+    r.app_bypass ? "app role has BYPASSRLS" : null,
+    r.app_owned > 0 ? `app role owns ${r.app_owned} relations (owners can bypass RLS)` : null,
+    r.app_memberships.length > 0
+      ? `app role is a member of: ${r.app_memberships.join(", ")}`
       : null,
-    role?.rolsuper ? "app role is a superuser (bypasses RLS)" : null,
-    role?.rolbypassrls ? "app role has BYPASSRLS" : null,
-    role && role.owned > 0 ? `app role owns ${role.owned} relations (owners can bypass RLS)` : null,
   ].filter((p): p is string => p !== null);
   if (problems.length > 0) throw new Error(`Refusing to migrate: ${problems.join("; ")}`);
 }
 
-async function grantAppPrivileges(client: pg.ClientBase, appRole: string): Promise<void> {
-  const role = quoteIdent(appRole);
-  await client.query(`GRANT USAGE ON SCHEMA public TO ${role}`);
+/** Removes PUBLIC's ability to create objects, so the app role can't add views or functions. */
+async function lockDownSchema(client: pg.ClientBase): Promise<void> {
+  const { rows } = await client.query<{ db: string }>(`SELECT current_database() AS db`);
+  const db = rows[0]?.db ?? "";
+  await client.query(`REVOKE CREATE ON SCHEMA public FROM PUBLIC`);
   await client.query(
-    `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${role}`,
+    `REVOKE CREATE, TEMPORARY ON DATABASE "${db.replaceAll('"', '""')}" FROM PUBLIC`,
   );
-  await client.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${role}`);
 }
 
-/** Applies pending migrations as the owner, then (re)grants the app role its privileges. */
+/** Resets the app role to exactly the grants matrix (tenancy.ts), in one transaction. */
+async function grantAppPrivileges(client: pg.ClientBase, appRole: string): Promise<void> {
+  const role = quoteIdent(appRole);
+  const { rows } = await client.query<{ name: string }>(
+    `SELECT c.relname AS name FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND NOT c.relispartition`,
+  );
+  await client.query("BEGIN");
+  try {
+    await client.query(`REVOKE ALL ON ALL TABLES IN SCHEMA public FROM ${role}`);
+    await client.query(`GRANT USAGE ON SCHEMA public TO ${role}`);
+    await client.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${role}`);
+    for (const { name } of rows) {
+      const privileges = appPrivilegesFor(name);
+      if (privileges && privileges.length > 0) {
+        await client.query(`GRANT ${privileges.join(", ")} ON ${quoteIdent(name)} TO ${role}`);
+      }
+    }
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  }
+}
+
+/**
+ * Verifies roles, applies pending migrations as the owner, locks down object creation, then resets
+ * the app role's privileges to the grants matrix. Holds an advisory lock throughout.
+ */
 export async function runMigrations(options: MigrateOptions): Promise<void> {
   quoteIdent(options.appRole);
-  const pool = new pg.Pool({ connectionString: options.databaseUrl, max: 1 });
+  const pool = new pg.Pool({ connectionString: options.databaseUrl, max: 2 });
   try {
-    await migrate(drizzle({ client: pool }), {
-      migrationsFolder: options.migrationsFolder ?? DEFAULT_MIGRATIONS_FOLDER,
-    });
     const client = await pool.connect();
     try {
-      await verifyAppRole(client, options.appRole);
-      await grantAppPrivileges(client, options.appRole);
+      await client.query(`SELECT pg_advisory_lock($1)`, [MIGRATION_LOCK_KEY]);
+      try {
+        await verifyRoles(client, options.appRole);
+        await migrate(drizzle({ client: pool }), {
+          migrationsFolder: options.migrationsFolder ?? DEFAULT_MIGRATIONS_FOLDER,
+        });
+        await lockDownSchema(client);
+        await grantAppPrivileges(client, options.appRole);
+      } finally {
+        await client.query(`SELECT pg_advisory_unlock($1)`, [MIGRATION_LOCK_KEY]);
+      }
     } finally {
       client.release();
     }
