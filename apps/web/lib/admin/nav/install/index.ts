@@ -1,0 +1,20 @@
+// One line per install console section (union-merged: see .gitattributes). Order is set in each file.
+export { default as users } from "./users";
+export { default as invites } from "./invites";
+export { default as roles } from "./roles";
+export { default as teams } from "./teams";
+export { default as gallery } from "./gallery";
+export { default as models } from "./models";
+export { default as connectors } from "./connectors";
+export { default as webSearch } from "./web-search";
+export { default as policyFloor } from "./policy-floor";
+export { default as egress } from "./egress";
+export { default as skillBlocklist } from "./skill-blocklist";
+export { default as audit } from "./audit";
+export { default as breakGlass } from "./break-glass";
+export { default as legalHold } from "./legal-hold";
+export { default as retention } from "./retention";
+export { default as usage } from "./usage";
+export { default as isolation } from "./isolation";
+export { default as settings } from "./settings";
+export { default as backup } from "./backup";
