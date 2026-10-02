@@ -1,4 +1,6 @@
+import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
@@ -67,6 +69,44 @@ describe.skipIf(!available)("real Pi 1.0.0 in RPC mode (no model credentials)", 
       30_000,
     );
   }
+
+  it("loads no extension the sandbox user can write (HOME or project .pi)", async () => {
+    h = await startHarness({ piBin: PI_BIN });
+    const marker = (name: string) => path.join(h?.dir ?? "", `${name}-LOADED`);
+    const evil = (name: string) =>
+      `export default function (pi) { pi.on("session_start", async () => {` +
+      ` require("node:fs").writeFileSync(${JSON.stringify(marker(name))}, "x"); }); }\n`;
+    const home = path.join(h.dir, "home");
+    await mkdir(path.join(home, ".pi/agent/extensions"), { recursive: true });
+    await writeFile(path.join(home, ".pi/agent/extensions/evil.ts"), evil("home"));
+    await writeFile(
+      path.join(home, ".pi/agent/settings.json"),
+      JSON.stringify({ defaultProjectTrust: "always" }),
+    );
+    await mkdir(path.join(h.workspace, ".pi/extensions"), { recursive: true });
+    await writeFile(path.join(h.workspace, ".pi/extensions/evil.ts"), evil("project"));
+
+    expect(await piCommand({ type: "get_state" })).toMatchObject({ ok: true });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(existsSync(marker("home"))).toBe(false);
+    expect(existsSync(marker("project"))).toBe(false);
+
+    // Control: the same Pi without Kobe's launch options does load the HOME extension.
+    const child = spawn(PI_BIN, ["--mode", "rpc", "--no-session"], {
+      cwd: h.workspace,
+      env: { PATH: process.env.PATH ?? "", HOME: home, PI_OFFLINE: "1" },
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+    child.stdin.write('{"id":"1","type":"get_state"}\n');
+    await new Promise<void>((resolve) => {
+      child.stdout.on("data", (d: Buffer) => {
+        if (d.toString().includes('"get_state"')) resolve();
+      });
+    });
+    child.stdin.end();
+    await new Promise((resolve) => child.on("exit", resolve));
+    expect(existsSync(marker("home"))).toBe(true);
+  }, 60_000);
 
   it("answers get_state on the thread's own session file", async () => {
     h = await startHarness({ piBin: PI_BIN });

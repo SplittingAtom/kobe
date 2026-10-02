@@ -10,8 +10,11 @@
 //   "big"          emit one event larger than the wire frame cap
 //   "dirty"        emit an event with U+0000 and a __proto__ key
 //   "reject"       answer the prompt with success:false
+//   "grandchild"   spawn a tool the way Pi's bash tool does and report what it can see of fd 3
+//   "orphan"       spawn a detached long-running tool (its own process group), report its pid, hang
 //   "handled"      answer the prompt with disposition "handled"
 // Every command received is appended to <session file>.commands.jsonl for assertions.
+import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import net from "node:net";
 
@@ -40,9 +43,12 @@ let timer;
 const dialogs = new Map();
 const policy = new Map();
 let policySocket;
+let policyNonce;
 let nextPolicy = 1;
 
+let policyFdIno = null;
 if (process.env.KOBE_POLICY_FD) {
+  policyFdIno = (await import("node:fs")).fstatSync(Number(process.env.KOBE_POLICY_FD)).ino;
   policySocket = new net.Socket({
     fd: Number(process.env.KOBE_POLICY_FD),
     readable: true,
@@ -55,6 +61,10 @@ if (process.env.KOBE_POLICY_FD) {
     while ((lf = buffer.indexOf("\n")) !== -1) {
       const reply = JSON.parse(buffer.slice(0, lf));
       buffer = buffer.slice(lf + 1);
+      if (reply.type === "channel.hello") {
+        policyNonce = reply.nonce;
+        continue;
+      }
       out({ type: "kobe_test_policy_reply", reply });
       if (reply.type === "policy.result") policy.get(reply.request_id)?.(reply);
     }
@@ -104,7 +114,7 @@ function runPrompt(message) {
       settle();
     });
     policySocket.write(
-      `${JSON.stringify({ type: "policy.check", request_id: requestId, tool_call_id: "call_1", tool: message.slice(5), input: { command: "ls" } })}\n`,
+      `${JSON.stringify({ type: "policy.check", nonce: policyNonce, request_id: requestId, tool_call_id: "call_1", tool: message.slice(5), input: { command: "ls" } })}\n`,
     );
   } else if (message === "dialog") {
     start();
@@ -119,6 +129,31 @@ function runPrompt(message) {
       title: "Sure?",
       message: "x",
     });
+  } else if (message === "grandchild" || message === "grandchild-inherit") {
+    start();
+    // Like Pi's bash tool: spawn(..., { stdio: ["pipe","pipe","pipe"], detached: true }).
+    const probe = `
+      const fs = require("node:fs");
+      const r = {};
+      try { r.fd3Ino = fs.fstatSync(3).ino; } catch { r.fd3Ino = null; }
+      try { fs.writeSync(3, '{"type":"policy.check","request_id":"forged"}\\n'); r.fd3Write = true; } catch { r.fd3Write = false; }
+      try { fs.closeSync(fs.openSync("/proc/" + process.ppid + "/fd/3", "r+")); r.procOpen = true; } catch { r.procOpen = false; }
+      r.env = Object.keys(process.env).filter((k) => k.startsWith("KOBE_")).sort();
+      process.stdout.write(JSON.stringify(r));`;
+    // Control: "grandchild-inherit" hands fd 3 over explicitly, proving the probe detects it.
+    const stdio = message === "grandchild" ? ["pipe", "pipe", "pipe"] : ["pipe", "pipe", "pipe", 3];
+    const child = spawn(process.execPath, ["-e", probe], { stdio, detached: true });
+    let text = "";
+    child.stdout.on("data", (d) => (text += d));
+    child.on("exit", () => {
+      const probed = JSON.parse(text);
+      out({ type: "kobe_test_grandchild", sameChannel: probed.fd3Ino === policyFdIno, ...probed });
+      settle();
+    });
+  } else if (message === "orphan") {
+    start();
+    const child = spawn("sleep", ["300"], { stdio: "ignore", detached: true });
+    out({ type: "kobe_test_orphan", pid: child.pid });
   } else if (message === "crash") {
     process.stderr.write("fatal: something broke\n");
     process.exit(3);
@@ -186,6 +221,9 @@ function handle(cmd) {
         return respond(cmd, { success: false, error: `Entry not found: ${cmd.since}` });
       return respond(cmd, { success: true, data: { entries: all.slice(index + 1), leafId } });
     }
+    case "get_session_stats":
+      process.stderr.write("idle crash\n");
+      return process.exit(4);
     case "get_tree":
       return respond(cmd, { success: true, data: { tree: [], huge: "y".repeat(5 * 1024 * 1024) } });
     default:

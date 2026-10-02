@@ -53,7 +53,7 @@ export class Agent {
   readonly #broker: PolicyBroker;
   /** Command ids seen on the current connection (ids are not portable across reconnects). */
   #seenCommands = new Set<string>();
-  #queuedExits: PiExitedFrameT[] = [];
+  #queuedExits: { runId: string; frame: PiExitedFrameT }[] = [];
   #stopping = false;
 
   constructor(deps: AgentDeps) {
@@ -63,6 +63,7 @@ export class Agent {
     this.#broker = new PolicyBroker({ send: (frame) => this.#wire.send(frame) });
     this.#threads = new ThreadManager({
       bin: config.piBin,
+      agentDir: config.piAgentDir,
       workspaceDir: config.workspaceDir,
       sessionDir: config.sessionDir,
       home: deps.home,
@@ -86,9 +87,13 @@ export class Agent {
             request,
           });
         },
-        piExited: (threadId, exit) => this.#reportExit(threadId, exit),
+        piExited: (threadId, runId, exit) => this.#reportExit(threadId, runId, exit),
         policyCheck: (threadId, runId, check, reply) =>
           this.#broker.check(threadId, runId, check, reply),
+        policyChannelClosed: (threadId, reason) => {
+          logger.debug({ thread_id: threadId, reason }, "policy channel closed");
+          this.#broker.failThread(threadId, reason);
+        },
         diagnostic: (threadId, message) => logger.debug({ thread_id: threadId }, message),
       },
     });
@@ -159,9 +164,12 @@ export class Agent {
       if (run.durable_seq > 0) this.#outbox.ack(runId, run.durable_seq);
       for (const text of this.#outbox.resend(runId, run.durable_seq + 1)) this.#wire.sendText(text);
     }
+    // Only threads leased on this connection (through a listed run) may be named: anything else
+    // would be a lease violation and get the connection closed, again and again.
     const exits = this.#queuedExits;
     this.#queuedExits = [];
-    for (const frame of exits) this.#wire.send(frame);
+    for (const { runId, frame } of exits) if (listed.has(runId)) this.#wire.send(frame);
+    this.#threads.cancelDialogsExcept(new Set(listed.keys()));
     for (const dialog of this.#threads.pendingDialogs()) {
       this.#deps.logger.debug({ thread_id: dialog.threadId }, "re-sending pending UI request");
       this.#wire.send({
@@ -306,7 +314,7 @@ export class Agent {
     this.#wire.reconnect();
   }
 
-  #reportExit(threadId: string, exit: PiExit): void {
+  #reportExit(threadId: string, runId: string | undefined, exit: PiExit): void {
     const frame: PiExitedFrameT = {
       v: 1,
       type: "pi.exited",
@@ -316,8 +324,10 @@ export class Agent {
       stderr_tail: exit.stderrTail,
     };
     this.#deps.logger.warn({ thread_id: threadId, code: exit.exitCode }, "Pi process exited");
+    // Without an active run the thread is not leased to us: the server learns nothing it needs.
+    if (runId === undefined) return;
     if (this.#wire.send(frame)) return;
-    if (this.#queuedExits.length < MAX_QUEUED_EXITS) this.#queuedExits.push(frame);
+    if (this.#queuedExits.length < MAX_QUEUED_EXITS) this.#queuedExits.push({ runId, frame });
   }
 
   async #onFatal(reason: FatalReason): Promise<void> {

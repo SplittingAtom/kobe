@@ -30,18 +30,24 @@ export interface ThreadHooks {
     runId: string | undefined,
     request: PiExtensionUiRequest,
   ) => void;
-  readonly piExited: (threadId: string, exit: PiExit) => void;
+  /** `runId`: the run that was active when Pi exited (the thread is leased only through it). */
+  readonly piExited: (threadId: string, runId: string | undefined, exit: PiExit) => void;
   readonly policyCheck: (
     threadId: string,
     runId: string | undefined,
     check: PolicyChannelCheck,
     reply: (message: PolicyChannelReply) => void,
   ) => void;
+  /** The thread's policy channel is unusable: every pending check of the thread is denied. */
+  readonly policyChannelClosed: (threadId: string, reason: string) => void;
   readonly diagnostic: (threadId: string, message: string) => void;
 }
 
 export interface ThreadEnv {
   readonly bin: string;
+  readonly agentDir: string;
+  /** Root-owned extension paths loaded with `-e` (KOBE-36: kobe-policy). */
+  readonly extensions?: readonly string[];
   readonly workspaceDir: string;
   readonly sessionDir: string;
   readonly home: string;
@@ -148,6 +154,7 @@ export class Thread {
       const channel = new PolicyChannel(control, {
         onCheck: (check) =>
           this.#hooks.policyCheck(this.id, this.#run?.runId, check, (m) => channel.reply(m)),
+        onClosed: (reason) => this.#hooks.policyChannelClosed(this.id, reason),
         onDiagnostic: (message) => this.#hooks.diagnostic(this.id, message),
       });
     }
@@ -257,6 +264,12 @@ export class Thread {
       return;
     }
     const request = parsed.data;
+    const runId = this.#run?.runId;
+    if (runId === undefined) {
+      // The server leases a thread only through a run: with none active nobody may answer.
+      if (DIALOG_METHODS.has(request.method)) this.#cancelDialog(pi, request.id);
+      return;
+    }
     if (DIALOG_METHODS.has(request.method)) {
       if (this.#dialogs.size >= MAX_PENDING_DIALOGS) {
         pi.send({ type: "extension_ui_response", id: request.id, cancelled: true });
@@ -264,13 +277,27 @@ export class Thread {
       }
       this.#dialogs.set(request.id, request);
     }
-    this.#hooks.uiRequest(this.id, this.#run?.runId, request);
+    this.#hooks.uiRequest(this.id, runId, request);
+  }
+
+  /** Cancel open dialogs (their run is no longer leased to this connection). */
+  cancelDialogs(): void {
+    const pi = this.#pi;
+    for (const id of [...this.#dialogs.keys()]) {
+      this.#dialogs.delete(id);
+      if (pi !== undefined) this.#cancelDialog(pi, id);
+    }
+  }
+
+  #cancelDialog(pi: PiProcess, id: string): void {
+    pi.send({ type: "extension_ui_response", id, cancelled: true });
   }
 
   #onExit(pi: PiProcess, exit: PiExit): void {
     const expected = this.#closing.delete(pi);
+    const runId = pi === this.#pi ? this.#run?.runId : undefined;
     if (pi === this.#pi) this.#detach(pi);
-    if (!expected) this.#hooks.piExited(this.id, exit);
+    if (!expected) this.#hooks.piExited(this.id, runId, exit);
   }
 
   #detach(pi: PiProcess): void {

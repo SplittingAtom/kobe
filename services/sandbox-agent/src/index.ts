@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { Agent } from "./agent.js";
 import { loadConfig } from "./config.js";
+import { hardenProcess } from "./harden.js";
 import { logger } from "./logger.js";
 import { buildPiLaunch } from "./pi/pi-launch.js";
 import { detectPiVersion, readAgentVersion } from "./version.js";
@@ -12,9 +13,15 @@ import { detectPiVersion, readAgentVersion } from "./version.js";
 const SHUTDOWN_DEADLINE_MS = 10_000;
 
 async function main(): Promise<void> {
+  hardenProcess(process);
   const config = loadConfig(process.env);
   const home = process.env.HOME ?? "/home/kobe";
-  const piEnv = buildPiLaunch({ sessionFile: "-", home, parentEnv: process.env }).env;
+  const piEnv = buildPiLaunch({
+    sessionFile: "-",
+    home,
+    agentDir: config.piAgentDir,
+    parentEnv: process.env,
+  }).env;
   const [agentVersion, piVersion] = await Promise.all([
     readAgentVersion(new URL("../package.json", import.meta.url)),
     detectPiVersion(config.piBin, piEnv),

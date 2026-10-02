@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { EXAMPLE_IDS } from "@kobe/protocol/testing";
@@ -68,6 +68,15 @@ describe("appendBranchMarker", () => {
     expect([...(await readEntryIds(file))]).toHaveLength(3);
   });
 
+  it("never appends through a symlinked session file", async () => {
+    const victim = path.join(dir, "victim.txt");
+    await writeFile(victim, `${JSON.stringify(header)}\n${JSON.stringify(entry("a1", null))}\n`);
+    const file = path.join(dir, "t.jsonl");
+    await symlink(victim, file);
+    await expect(appendBranchMarker(file, "a1", EXAMPLE_IDS.run)).rejects.toThrow();
+    expect((await readFile(victim, "utf8")).trim().split("\n")).toHaveLength(2);
+  });
+
   it("refuses an unknown parent or a missing file", async () => {
     const file = path.join(dir, "t.jsonl");
     expect(await appendBranchMarker(file, "a1", EXAMPLE_IDS.run)).toEqual({
@@ -91,6 +100,18 @@ describe("SessionRestore", () => {
     expect((await stat(target)).mode & 0o777).toBe(0o600);
   });
 
+  it("uses an unpredictable temp name that a planted symlink cannot redirect", async () => {
+    const target = path.join(dir, "t.jsonl");
+    const victim = path.join(dir, "victim.txt");
+    await writeFile(victim, "keep");
+    await symlink(victim, `${target}.restore.tmp`); // the old, predictable name
+    const restore = new SessionRestore(target, 1_000_000);
+    await restore.writePart(0, header, [], () => header);
+    await restore.commit();
+    expect(await readFile(victim, "utf8")).toBe("keep");
+    expect((await lines(target))[0]).toMatchObject({ type: "session" });
+  });
+
   it("uses the fallback header when part 0 has none", async () => {
     const target = path.join(dir, "t.jsonl");
     const restore = new SessionRestore(target, 1_000_000);
@@ -110,6 +131,6 @@ describe("SessionRestore", () => {
     const big = Array.from({ length: 5 }, (_, i) => entry(`e${i}`, null));
     await expect(restore.writePart(1, undefined, big, () => header)).rejects.toThrow(/too large/);
     await restore.abort();
-    await expect(stat(`${target}.restore.tmp`)).rejects.toThrow();
+    expect((await readdir(dir)).filter((f) => f.endsWith(".tmp"))).toEqual([]);
   });
 });

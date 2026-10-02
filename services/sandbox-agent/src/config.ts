@@ -20,6 +20,8 @@ const configSchema = z.object({
   /** Pi session JSONL per thread; on the workspace volume so it survives hibernation (D13/D15). */
   KOBE_SESSION_DIR: z.string().startsWith("/").default("/workspace/.kobe/sessions"),
   KOBE_PI_BIN: z.string().min(1).default("pi"),
+  /** Pi's config dir (`PI_CODING_AGENT_DIR`): root-owned, read-only, empty in the image. */
+  KOBE_PI_AGENT_DIR: z.string().startsWith("/").default("/opt/kobe/pi-agent"),
   KOBE_MAX_PI_PROCESSES: positiveInt(8),
   KOBE_PI_IDLE_MS: positiveInt(10 * 60_000),
   /** Un-acked outbound pi.event bytes across all runs before the agent gives up on a run. */
@@ -37,6 +39,7 @@ export interface Config {
   readonly workspaceDir: string;
   readonly sessionDir: string;
   readonly piBin: string;
+  readonly piAgentDir: string;
   readonly maxPiProcesses: number;
   readonly piIdleMs: number;
   readonly outboxMaxBytes: number;
@@ -59,6 +62,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     workspaceDir: c.KOBE_WORKSPACE_DIR,
     sessionDir: c.KOBE_SESSION_DIR,
     piBin: c.KOBE_PI_BIN,
+    piAgentDir: c.KOBE_PI_AGENT_DIR,
     maxPiProcesses: c.KOBE_MAX_PI_PROCESSES,
     piIdleMs: c.KOBE_PI_IDLE_MS,
     outboxMaxBytes: c.KOBE_OUTBOX_MAX_BYTES,

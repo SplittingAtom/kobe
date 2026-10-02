@@ -8,6 +8,8 @@ import { localDeny, type PolicyChannelCheck, type PolicyChannelReply } from "./c
  * anything that prevents an answer from the server is a deny (fail closed).
  */
 export const MAX_PENDING_POLICY_CHECKS = 512;
+/** Per thread, so one thread's extension (or code abusing its channel) cannot starve the others. */
+export const MAX_PENDING_POLICY_CHECKS_PER_THREAD = 128;
 
 interface PendingCheck {
   readonly threadId: string;
@@ -44,7 +46,11 @@ export class PolicyBroker {
       reply(localDeny(check.request_id, "no active run on this thread"));
       return;
     }
-    if (this.#pending.size >= MAX_PENDING_POLICY_CHECKS) {
+    const perThread = [...this.#pending.values()].filter((p) => p.threadId === threadId).length;
+    if (
+      this.#pending.size >= MAX_PENDING_POLICY_CHECKS ||
+      perThread >= MAX_PENDING_POLICY_CHECKS_PER_THREAD
+    ) {
       reply(localDeny(check.request_id, "too many pending policy checks"));
       return;
     }

@@ -45,6 +45,9 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   const workspace = path.join(dir, "workspace");
   const sessions = path.join(workspace, ".kobe", "sessions");
   await mkdir(workspace, { recursive: true });
+  // Pi's config dir: empty and read-only, as in the image (/opt/kobe/pi-agent).
+  const piAgentDir = path.join(dir, "pi-agent");
+  await mkdir(piAgentDir, { mode: 0o555 });
   const tokenFile = path.join(dir, "token");
   await writeFile(tokenFile, `${TOKEN}\n`);
   const config = loadConfig({
@@ -54,6 +57,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     KOBE_WORKSPACE_DIR: workspace,
     KOBE_SESSION_DIR: sessions,
     KOBE_PI_BIN: options.piBin ?? FAKE_PI,
+    KOBE_PI_AGENT_DIR: piAgentDir,
     ...options.env,
   });
   const exits: number[] = [];

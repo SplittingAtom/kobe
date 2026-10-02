@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { appendFile, mkdir, open, rename, rm, stat, type FileHandle } from "node:fs/promises";
+import { constants, createReadStream } from "node:fs";
+import { mkdir, open, rename, rm, stat, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import { uuidSchema, type PiSessionEntry, type PiSessionHeader } from "@kobe/protocol";
 import { LineSplitter, encodeJsonl } from "../jsonl.js";
@@ -81,7 +81,13 @@ export async function appendBranchMarker(
     customType: BRANCH_CUSTOM_TYPE,
     data: { run_id: runId },
   };
-  await appendFile(file, encodeJsonl(marker), { mode: 0o600 });
+  // O_NOFOLLOW: model-run code can write the sessions dir; never append through a symlink.
+  const handle = await open(file, constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW);
+  try {
+    await handle.write(encodeJsonl(marker));
+  } finally {
+    await handle.close();
+  }
   return { ok: true, entryId };
 }
 
@@ -100,7 +106,8 @@ export class SessionRestore {
 
   constructor(target: string, maxBytes: number) {
     this.#target = target;
-    this.#temp = `${target}.restore.tmp`;
+    // Unpredictable name, created exclusively and never through a symlink (O_EXCL | O_NOFOLLOW).
+    this.#temp = `${target}.restore-${randomBytes(8).toString("hex")}.tmp`;
     this.#maxBytes = maxBytes;
   }
 
@@ -117,8 +124,9 @@ export class SessionRestore {
     if (part !== this.#nextPart) throw new Error(`expected part ${this.#nextPart}, got ${part}`);
     if (part > 0 && header !== undefined) throw new Error("header only allowed in part 0");
     if (part === 0) {
-      await rm(this.#temp, { force: true });
-      this.#handle = await open(this.#temp, "w", 0o600);
+      const flags =
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
+      this.#handle = await open(this.#temp, flags, 0o600);
     }
     const records: readonly unknown[] =
       part === 0 ? [header ?? fallbackHeader(), ...entries] : entries;

@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { parseTranslatedPiEvent, type SandboxToServerFrame } from "@kobe/protocol";
@@ -61,7 +62,14 @@ describe("run.start → Pi prompt → pi.event stream", () => {
       "rpc",
       "--session",
       path.join(h.sessions, `${THREAD}.jsonl`),
+      "--no-extensions",
+      "--no-approve",
+      "--no-context-files",
+      "--no-skills",
+      "--no-prompt-templates",
+      "--no-themes",
     ]);
+    expect(launch?.env).toContain("PI_CODING_AGENT_DIR");
     expect(launch?.env).not.toContain("SECRET_IN_AGENT_ENV");
     const kobeVars = (launch?.env as string[]).filter((k) => k.startsWith("KOBE_"));
     expect(kobeVars).toEqual(["KOBE_POLICY_FD"]);
@@ -279,6 +287,18 @@ describe("Pi process lifecycle", () => {
     expect([a.ok, b.ok].sort()).toEqual([false, true]);
   });
 
+  it("does not report a Pi exit for a thread with no active run (not leased)", async () => {
+    h = await startHarness();
+    const result = await h.server.command({
+      type: "pi.command",
+      thread_id: THREAD,
+      command: { id: "x", type: "get_session_stats" },
+    });
+    expect(result).toMatchObject({ ok: false, error: { code: "pi_unavailable" } });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(h.server.frames("pi.exited")).toEqual([]);
+  });
+
   it("reports pi_unavailable when Pi cannot be started", async () => {
     h = await startHarness({ piBin: "/nonexistent/pi" });
     expect(await h.server.command(runStart("say:x"))).toMatchObject({
@@ -342,6 +362,65 @@ describe("kobe-policy channel (fd 3)", () => {
   });
 });
 
+describe("what a tool started by Pi can reach", () => {
+  it("does not inherit the policy channel (fd 3) and cannot re-open it via /proc", async () => {
+    h = await startHarness();
+    await h.server.command(runStart("grandchild"));
+    const probe = await h.server.waitFor(
+      (f) => f.type === "pi.event" && f.event.type === "kobe_test_grandchild",
+    );
+    expect((probe as PiEvent).event).toMatchObject({
+      // Its fd 3, if any, is not Pi's policy socket (Node itself opens low fds) ...
+      sameChannel: false,
+      // ... and the socket cannot be re-opened through /proc (Linux).
+      procOpen: false,
+      // The env var is inherited (harmless: it names an fd the tool does not have).
+      env: ["KOBE_POLICY_FD"],
+    });
+    await h.server.waitFor(settled());
+    // The channel is intact: a real check still goes through.
+    await h.server.command({ ...runStart("tool:bash"), run_id: RUN_2 });
+    await h.server.waitFor((f) => f.type === "policy.check");
+  });
+
+  it("control: a tool handed fd 3 sees the channel, and its forged request closes it", async () => {
+    h = await startHarness();
+    await h.server.command(runStart("grandchild-inherit"));
+    const control = await h.server.waitFor(
+      (f) => f.type === "pi.event" && f.event.type === "kobe_test_grandchild",
+    );
+    expect((control as PiEvent).event).toMatchObject({ sameChannel: true, fd3Write: true });
+    await h.server.waitFor(settled());
+    // The forged line had no nonce: the channel is closed, so later checks fail closed in Pi.
+    await h.server.command({ ...runStart("tool:bash"), run_id: RUN_2 });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(h.server.frames("policy.check")).toEqual([]);
+  });
+
+  it.skipIf(!existsSync("/proc/self/stat"))(
+    "kills tools Pi started in their own process group when the thread's Pi stops",
+    async () => {
+      h = await startHarness();
+      await h.server.command(runStart("orphan"));
+      const orphan = await h.server.waitFor(
+        (f) => f.type === "pi.event" && f.event.type === "kobe_test_orphan",
+      );
+      const pid = (orphan as PiEvent).event.pid as number;
+      expect(() => process.kill(pid, 0)).not.toThrow();
+      await h.server.command({
+        type: "run.stop",
+        run_id: RUN,
+        thread_id: THREAD,
+        mode: "abort",
+        reason: "user_cancelled",
+      });
+      await h.agent.stop(500);
+      await new Promise((r) => setTimeout(r, 200));
+      expect(() => process.kill(pid, 0)).toThrow();
+    },
+  );
+});
+
 describe("extension UI relay", () => {
   it("forwards dialogs with the run id and relays the answer to Pi", async () => {
     h = await startHarness();
@@ -362,6 +441,22 @@ describe("extension UI relay", () => {
       (f) => f.type === "pi.event" && f.event.type === "kobe_test_dialog_answer",
     );
     expect((answer as PiEvent).event).toMatchObject({ answer: { confirmed: true } });
+  });
+
+  it("cancels open dialogs whose run the server no longer lists after a reconnect", async () => {
+    h = await startHarness({ server: { ackRuns: () => [] } });
+    await h.server.command(runStart("dialog"));
+    await h.server.waitFor((f) => f.type === "pi.ui_request");
+    h.server.terminate();
+    await h.server.waitFor((f) => f.type === "hello" && h.server.connections === 2);
+    await new Promise((r) => setTimeout(r, 200));
+    const cancelled = (await h.commandsLog()).filter(
+      (c) => c.type === "extension_ui_response" && c.id === "ui-1",
+    );
+    expect(cancelled).toEqual([{ type: "extension_ui_response", id: "ui-1", cancelled: true }]);
+    expect(
+      h.server.received.filter((r) => r.connection === 2 && r.frame.type === "pi.ui_request"),
+    ).toEqual([]);
   });
 
   it("re-sends open dialogs after a reconnect", async () => {

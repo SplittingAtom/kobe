@@ -133,24 +133,82 @@ Hadron was not reachable; criteria derived from the spec and `sandbox-wire/conne
 - **KOBE-22 (pods):** env `KOBE_SERVER_URL` (base URL; the agent appends `/v1/sandbox/connect`),
   `KOBE_SANDBOX_ID`; mount the wire token at `/var/run/kobe/sandbox-wire/token` (projected secret,
   rotation-friendly). Consider an init (e.g. `tini`) — see risks.
-- **KOBE-36 (kobe-policy):** open `new net.Socket({ fd: Number(process.env.KOBE_POLICY_FD) })`, write
-  `policy.check` JSONL, wait for `policy.result` (ignore `policy.pending`), block on deny, on channel
-  close and on its own timeout.
+- **KOBE-36 (kobe-policy):** ship the extension at a root-owned path and pass it through
+  `ThreadEnv.extensions` (Pi runs with `--no-extensions`; explicit `-e` still loads). At load, open
+  `new net.Socket({ fd: Number(process.env.KOBE_POLICY_FD) })` and read the first line
+  `{"type":"channel.hello","nonce"}` before anything else; put `nonce` in every `policy.check`; wait
+  for `policy.result` (ignore `policy.pending`); block on deny, on channel close and on its own
+  timeout. No `approval` token arrives over this channel.
+- **KOBE-22 (pods):** set `args`, never `command`; don't set `NODE_OPTIONS`; add a pids limit.
 - **KOBE-27 (S3 sync):** `ThreadManagerOptions.beforeRun(frame)` runs before each prompt reaches Pi.
 - **KOBE-41/62/47/49:** wire config into `buildPiLaunch` (args/env, allow-listed, no credentials);
   any field in the launch key restarts an idle thread's Pi when it changes.
 
-## Open risks
+## Open risks (all same uid / same PID namespace / same filesystem)
 
-- **Same uid:** Pi's tools run as uid 1000 like the agent, so model-driven code can read the token
-  file (and `/proc/<agent>/environ`, which holds no secret). With the wire token it could open its own
-  connection as this sandbox; leasing confines it to this sandbox's own runs and every tool call is
-  still decided server-side. Real fix needs a second uid (image + pod change) — flag for KOBE-22/21.
-- **PID 1 reaping:** the agent is PID 1; orphaned grandchildren of Pi tools are not reaped by Node.
-  Killing the process group on stop limits it; `tini` (MIT) in the image would remove it.
+Umbrella follow-up (coordinator is filing it): **sandbox privilege separation** — Pi and its tools
+under a second uid, wire token `0400` agent-only, session files and Pi config outside model-writable
+paths, a pids limit on the pod. Until then:
+
+- **Token readable by model-run code:** tools run as uid 1000 like the agent and can read the token
+  file. With it they could open their own wire connection as this sandbox (the server replaces the
+  agent's); leasing confines that to this sandbox's own runs and every tool call is still decided
+  server-side. Fix: second uid.
+- **Policy channel (fd 3):** verified that tools Pi starts do not hold fd 3 (Node/libuv passes only
+  the requested stdio; Linux Node 22.23 and macOS) and that the socket cannot be re-opened through
+  `/proc/<pi>/fd/3`; a tool _handed_ fd 3 is caught by the per-spawn nonce (its forged line closes
+  the channel, checks fail closed). Residual: same-uid code that can ptrace Pi or read its memory
+  (`/proc/<pi>/mem` needs ptrace access; Yama scope ≥ 1 blocks non-descendants, gVisor's behaviour
+  not verified) could act as kobe-policy — but only to _ask_ the server, never to decide; the
+  approval token is no longer relayed over fd 3. Fix: second uid.
+- **Tools escaping the process-group kill:** Pi starts tools detached (own groups). The agent walks
+  `/proc` for Pi's descendants while Pi is alive and SIGKILLs them after Pi stops (best effort: a
+  tool that double-forks between the walk and the kill, or tools of a Pi that crashed, are re-parented
+  to tini). tini (PID 1) reaps them; a pod pids limit bounds them (KOBE-22).
+- **Session files on `/workspace` are model-writable:** mirrored entries stay untrusted on the server
+  (`piGetEntriesDataSchema`); the agent never appends through a symlink (`O_NOFOLLOW`) and restores
+  via an unpredictable `O_EXCL | O_NOFOLLOW` temp file.
+- **Pod spec:** must set `args`, never `command` (that bypasses tini, `ulimit -c 0`,
+  `--disable-sigusr1` and the `NODE_OPTIONS` drop); `NODE_OPTIONS` is ignored by the launcher and
+  the agent refuses to start with an inspector requested.
 - `ws` send buffering is bounded only indirectly (≈ outbox + one resend window).
-- Session files on `/workspace` are writable by Pi's tools; the server must keep treating mirrored
-  entries as untrusted (it validates with `piGetEntriesDataSchema`).
+- `tini` is pinned to the Debian package version (`0.19.0-3+b8`); a Debian binNMU will fail the
+  build until the pin is bumped (deliberate).
+
+## Security review round (coordinator) — resolution
+
+1. HIGH user/project Pi config: Pi starts with `--no-extensions --no-approve --no-context-files
+--no-skills --no-prompt-templates --no-themes` (each in Pi 1.0.0 `--help`) and
+   `PI_CODING_AGENT_DIR=/opt/kobe/pi-agent` (root-owned, `0555`, empty; verified Pi runs with it and
+   that a `settings.json` there would fail to load because Pi takes a lock file next to it, so the
+   dir stays empty). KOBE-36 hook: `ThreadEnv.extensions` → `--extension <root-owned path>`.
+   `--no-context-files` decision: Kobe's instructions come from agent files (D19) and memory
+   (D25); `AGENTS.md`/`CLAUDE.md` in `/workspace` are model-writable and would be a persistent prompt
+   injection across all of the user's threads, and the spec never asks for them. Tests: launch args
+   (`pi-launch.test.ts`, fake-Pi argv) and real Pi: a HOME extension plus
+   `defaultProjectTrust: "always"` and a project `.pi/extensions` are not loaded, while the same Pi
+   without Kobe's options does load the HOME extension (control).
+2. HIGH fd 3: the premise did not hold for Pi's spawn path (see Open risks; test "does not inherit
+   the policy channel" with a control that hands fd 3 over). Hardened anyway: per-spawn nonce
+   handshake (`channel.hello`), wrong nonce closes the channel (fail closed), approval tokens are
+   never relayed to the extension, comment corrected.
+3. HIGH SIGUSR1: `hardenProcess` installs a SIGUSR1 listener and refuses `--inspect*` (flags,
+   `NODE_OPTIONS`, active inspector); test spawns Node and sends SIGUSR1 (control without it opens an
+   inspector). Image: `node --disable-sigusr1` (Node 22.23.3 in the pinned digest supports it),
+   `unset NODE_OPTIONS`; Pi gets `NODE_OPTIONS=--disable-sigusr1` (tools can signal Pi too).
+4. MEDIUM channel DoS: reply buffer cap 1 MiB (then close, fail closed), 20 req/s burst 50 (excess
+   denied), pending cap 128 per thread / 512 overall. The line cap stays at the 4 MiB frame cap:
+   `toolInputSchema` has no size limit and a `write` tool input can legitimately be large; it must
+   fit one `policy.check` frame anyway.
+5. MEDIUM leases after reconnect: dialogs of runs not in `hello.ack` are cancelled to Pi
+   (`extension_ui_response {cancelled}`) and not re-sent; dialogs with no active run are cancelled at
+   once; `pi.exited` is sent only for a thread with an active run, and a queued one only if that run
+   is listed.
+6. MEDIUM restore temp file: random name, `O_EXCL | O_NOFOLLOW`; branch marker appended with
+   `O_NOFOLLOW`. 9. `beforeRun` bounded (5 min).
+   Image: `tini` PID 1, launcher with `ulimit -c 0`; `test-image.sh` asserts entrypoint, tini as PID 1,
+   launcher contents/ownership, `--disable-sigusr1` effect, agent start through the entrypoint (with a
+   hostile `NODE_OPTIONS`), and the read-only empty Pi config dir.
 
 ## Self-review round (code-reviewer agent) — resolution
 
@@ -173,7 +231,7 @@ Hadron was not reachable; criteria derived from the spec and `sandbox-wire/conne
 
 ## Evidence (acceptance criteria → test or command output)
 
-`pnpm --filter @kobe/sandbox-agent test`: 12 files, 95 tests (real-Pi suite runs when
+`pnpm --filter @kobe/sandbox-agent test`: 16 files, 116 tests (real-Pi suite runs when
 `images/sandbox/pi` is installed; it is in CI).
 
 | AC  | Evidence                                                                                                                                             |

@@ -27,9 +27,12 @@ export interface ThreadManagerOptions extends ThreadEnv {
   readonly parentEnv: Readonly<Record<string, string | undefined>>;
   /** Seam for KOBE-27 (S3 ↔ /workspace sync): runs before a prompt reaches Pi. */
   readonly beforeRun?: (frame: RunStartFrame) => Promise<void>;
+  readonly beforeRunTimeoutMs?: number;
 }
 
 export const PI_REQUEST_TIMEOUT_MS = 60_000;
+/** Upper bound for the KOBE-27 `beforeRun` hook (workspace sync) before a run gives up. */
+export const BEFORE_RUN_TIMEOUT_MS = 5 * 60_000;
 export const PI_SLOW_REQUEST_TIMEOUT_MS = 10 * 60_000;
 const ABORT_SETTLE_GRACE_MS = 5000;
 const SLOW_COMMANDS = new Set(["compact", "abort"]);
@@ -92,7 +95,16 @@ export class ThreadManager {
 
     thread.beginRun(frame.run_id);
     try {
-      await this.#options.beforeRun?.(frame);
+      if (this.#options.beforeRun !== undefined) {
+        const timedOut = await withTimeout(
+          this.#options.beforeRun(frame),
+          this.#options.beforeRunTimeoutMs ?? BEFORE_RUN_TIMEOUT_MS,
+        );
+        if (timedOut) {
+          thread.endRun();
+          return fail("internal", "workspace preparation timed out");
+        }
+      }
       const response = await thread.request(
         {
           type: "prompt",
@@ -237,6 +249,14 @@ export class ThreadManager {
     );
   }
 
+  /** After a reconnect: cancel open dialogs of threads whose runs the server did not list. */
+  cancelDialogsExcept(leasedRuns: ReadonlySet<string>): void {
+    for (const thread of this.#threads.values()) {
+      const runId = thread.runId;
+      if (runId === undefined || !leasedRuns.has(runId)) thread.cancelDialogs();
+    }
+  }
+
   uiResponse(frame: Frame<"pi.ui_response">): boolean {
     return this.#threads.get(frame.thread_id)?.answerDialog(frame.response) ?? false;
   }
@@ -347,6 +367,8 @@ export class ThreadManager {
     const launch = buildPiLaunch({
       sessionFile: this.#sessionFile(thread.id),
       home: this.#options.home,
+      agentDir: this.#options.agentDir,
+      ...(this.#options.extensions === undefined ? {} : { extensions: this.#options.extensions }),
       parentEnv: this.#options.parentEnv,
       config: frame?.config,
     });
@@ -443,6 +465,17 @@ function dispositionOf(data: unknown): string | undefined {
 function piFailure(error: unknown): CommandOutcome {
   if (error instanceof PiProcessError) return fail("pi_unavailable", error.message);
   return fail("internal", "unexpected error talking to Pi");
+}
+
+/** Resolves true when `promise` did not settle within `ms` (its rejection propagates). */
+async function withTimeout(promise: Promise<void>, ms: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<true>((resolve) => (timer = setTimeout(() => resolve(true), ms)));
+  try {
+    return await Promise.race([promise.then(() => false as const), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function raceTimeout(promise: Promise<void>, ms: number): Promise<void> {

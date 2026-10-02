@@ -1,13 +1,18 @@
 import type { PolicyCheckFrame } from "@kobe/protocol";
 import { EXAMPLE_IDS } from "@kobe/protocol/testing";
 import { describe, expect, it } from "vitest";
-import { MAX_PENDING_POLICY_CHECKS, PolicyBroker } from "./broker.js";
+import {
+  MAX_PENDING_POLICY_CHECKS,
+  MAX_PENDING_POLICY_CHECKS_PER_THREAD,
+  PolicyBroker,
+} from "./broker.js";
 import type { PolicyChannelCheck, PolicyChannelReply } from "./channel.js";
 
 const T = EXAMPLE_IDS.thread;
 const R = EXAMPLE_IDS.run;
 const check = (id = "ext-1"): PolicyChannelCheck => ({
   type: "policy.check",
+  nonce: "n",
   request_id: id,
   tool_call_id: "call_1",
   tool: "bash",
@@ -83,11 +88,26 @@ describe("PolicyBroker", () => {
     expect(broker.pendingCount).toBe(0);
   });
 
-  it("bounds pending checks", () => {
+  it("bounds pending checks per thread and overall", () => {
     const { broker, replies, reply } = setup();
-    for (let i = 0; i <= MAX_PENDING_POLICY_CHECKS; i++) broker.check(T, R, check(`x${i}`), reply);
+    for (let i = 0; i <= MAX_PENDING_POLICY_CHECKS_PER_THREAD; i++) {
+      broker.check(T, R, check(`x${i}`), reply);
+    }
+    expect(broker.pendingCount).toBe(MAX_PENDING_POLICY_CHECKS_PER_THREAD);
+    expect(replies).toEqual([
+      expect.objectContaining({
+        request_id: `x${MAX_PENDING_POLICY_CHECKS_PER_THREAD}`,
+        decision: "deny",
+      }),
+    ]);
+    let thread = 0;
+    while (broker.pendingCount < MAX_PENDING_POLICY_CHECKS) {
+      const id = `00000000-0000-4000-8000-${String(thread++).padStart(12, "0")}`;
+      for (let i = 0; i < MAX_PENDING_POLICY_CHECKS_PER_THREAD; i++)
+        broker.check(id, R, check(), reply);
+    }
+    broker.check("00000000-0000-4000-8000-999999999999", R, check("last"), reply);
     expect(broker.pendingCount).toBe(MAX_PENDING_POLICY_CHECKS);
-    expect(replies).toHaveLength(1);
-    expect(replies[0]).toMatchObject({ decision: "deny" });
+    expect(replies.at(-1)).toMatchObject({ request_id: "last", decision: "deny" });
   });
 });

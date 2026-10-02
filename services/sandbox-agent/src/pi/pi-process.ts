@@ -8,14 +8,16 @@ import {
 } from "@kobe/protocol";
 import { LineSplitter, encodeJsonl } from "../jsonl.js";
 import { parsePiRecord, sanitizeString } from "../sanitize.js";
+import { descendantPids, killPids } from "./descendants.js";
 
 /**
  * One `pi --mode rpc` child process (verified Pi 1.0.0 RPC semantics, packages/protocol pi-rpc.ts):
  * JSONL on stdin/stdout split on LF only, responses correlated by the `id` the agent assigns, session
- * events and `extension_ui_request` records uncorrelated. fd 3 is a private socket pair for the
- * kobe-policy extension (see policy-channel.ts); nothing listens anywhere.
+ * events and `extension_ui_request` records uncorrelated. fd 3 is a socket pair for the kobe-policy
+ * extension (see policy/channel.ts for what tools can and cannot reach); nothing listens anywhere.
  *
- * The child runs in its own process group so a stop also reaps the tools Pi spawned.
+ * The child runs in its own process group. Pi starts its tools in their own groups too, so a stop
+ * also kills Pi's descendants found through /proc (best effort, see descendants.ts).
  */
 export const STDERR_TAIL_CHARS = 8192;
 export const PI_MAX_LINE_BYTES = 32 * 1024 * 1024;
@@ -148,17 +150,32 @@ export class PiProcess {
    */
   async close(graceMs = 3000): Promise<PiExit> {
     if (this.#exit !== undefined) return this.#exit;
+    // Tools Pi started in their own process groups escape the group signal: note them while Pi is
+    // alive (afterwards they are re-parented and unattributable) and kill whatever is left.
+    const tools = new Set(this.#descendants());
     this.#child.stdin?.end();
-    if (await this.#waitExit(graceMs)) return this.#exited;
-    this.#signalGroup("SIGTERM");
-    if (await this.#waitExit(2000)) return this.#exited;
-    this.#signalGroup("SIGKILL");
-    return this.#exited;
+    const exited = await this.#waitExit(graceMs);
+    if (!exited) {
+      for (const pid of this.#descendants()) tools.add(pid);
+      this.#signalGroup("SIGTERM");
+      if (!(await this.#waitExit(2000))) this.#signalGroup("SIGKILL");
+    }
+    const exit = await this.#exited;
+    killPids([...tools]);
+    return exit;
   }
 
   /** Synchronous last resort (agent exit). */
   kill(): void {
-    if (this.#exit === undefined) this.#signalGroup("SIGKILL");
+    if (this.#exit !== undefined) return;
+    const tools = this.#descendants();
+    this.#signalGroup("SIGKILL");
+    killPids(tools);
+  }
+
+  #descendants(): number[] {
+    const pid = this.#child.pid;
+    return pid === undefined ? [] : descendantPids(pid);
   }
 
   #signalGroup(signal: NodeJS.Signals): void {
