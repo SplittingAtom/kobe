@@ -29,6 +29,20 @@
       "when": 1790916929410,
       "tag": "0003_rate_limits",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790921851939,
+      "tag": "0004_conversations",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790921873698,
+      "tag": "0005_conversations_rls",
+      "breakpoints": true
     }
   ]
 }
