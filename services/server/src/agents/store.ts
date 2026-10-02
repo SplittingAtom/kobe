@@ -12,6 +12,7 @@ import {
   type KobeTx,
 } from "@kobe/db";
 import { z } from "zod";
+import { recordAudit } from "../audit/record.js";
 import type { AgentScope } from "./access.js";
 
 /**
@@ -93,6 +94,12 @@ function installWhere(location: Exclude<AgentLocation, { scope: "team" }>) {
   );
 }
 
+/** How a definition arrived (audit): a JSON body, an imported agent file, or a fork. */
+export type AgentSource = "json" | "import" | "fork";
+
+/** The team an agent's audit events belong to: team agents only (D6); others are install-level. */
+const auditTeam = (location: AgentLocation) => (location.scope === "team" ? location.teamId : null);
+
 /** Runs `fn` in the right transaction: team-scoped (RLS) for team agents, plain otherwise. */
 function inLocation<T>(db: KobeDb, location: AgentLocation, fn: (tx: KobeTx) => Promise<T>) {
   return location.scope === "team"
@@ -165,6 +172,9 @@ export interface NewAgent {
   readonly baseSlug: string;
   /** Creator (team agents) or owner (personal); ignored for gallery agents. */
   readonly ownerUserId: string | null;
+  /** Audit: how the definition arrived, and the agent it was forked from. */
+  readonly source?: AgentSource;
+  readonly forkedFrom?: string;
 }
 
 export async function createAgent(
@@ -202,6 +212,17 @@ export async function createAgent(
               })
               .returning(INSTALL);
       if (!row) throw new Error("agent insert returned no row");
+      await recordAudit(tx, {
+        action: "agent.created",
+        teamId: auditTeam(location),
+        target: {
+          agentId: row.id,
+          scope: location.scope,
+          slug: row.slug,
+          source: input.source ?? "json",
+          ...(input.forkedFrom ? { forkedFrom: input.forkedFrom } : {}),
+        },
+      });
       return { ok: true, value: toRecord(location.scope, row) };
     });
   } catch (err) {
@@ -243,6 +264,7 @@ export async function updateAgent(
   id: string,
   definition: AgentDefinition,
   expectedRevision?: number,
+  source: Exclude<AgentSource, "fork"> = "json",
 ): Promise<Result<AgentRecord, UpdateError>> {
   const set = {
     frontmatter: definition.frontmatter,
@@ -277,7 +299,20 @@ export async function updateAgent(
               ),
             )
             .returning(INSTALL);
-    if (row) return { ok: true, value: toRecord(location.scope, row) };
+    if (row) {
+      await recordAudit(tx, {
+        action: "agent.updated",
+        teamId: auditTeam(location),
+        target: {
+          agentId: id,
+          scope: location.scope,
+          slug: row.slug,
+          revision: row.revision,
+          source,
+        },
+      });
+      return { ok: true, value: toRecord(location.scope, row) };
+    }
     const exists = await existsIn(tx, location, id);
     return { ok: false, error: exists ? "revision_mismatch" : "not_found" };
   });
@@ -301,14 +336,23 @@ export async function deleteAgent(
   id: string,
 ): Promise<boolean> {
   return inLocation(db, location, async (tx) => {
-    const rows =
+    const [row] =
       location.scope === "team"
-        ? await tx.delete(teamAgents).where(eq(teamAgents.id, id)).returning({ id: teamAgents.id })
+        ? await tx
+            .delete(teamAgents)
+            .where(eq(teamAgents.id, id))
+            .returning({ slug: teamAgents.slug })
         : await tx
             .delete(installAgents)
             .where(and(installWhere(location), eq(installAgents.id, id)))
-            .returning({ id: installAgents.id });
-    return rows.length > 0;
+            .returning({ slug: installAgents.slug });
+    if (!row) return false;
+    await recordAudit(tx, {
+      action: "agent.deleted",
+      teamId: auditTeam(location),
+      target: { agentId: id, scope: location.scope, slug: row.slug },
+    });
+    return true;
   });
 }
 
@@ -332,7 +376,13 @@ export async function setAgentStatus(
             .set({ status, updatedAt: new Date() })
             .where(and(installWhere(location), eq(installAgents.id, id)))
             .returning(INSTALL);
-    return row ? toRecord(location.scope, row) : null;
+    if (!row) return null;
+    await recordAudit(tx, {
+      action: "agent.status_changed",
+      teamId: auditTeam(location),
+      target: { agentId: id, scope: location.scope, slug: row.slug, status },
+    });
+    return toRecord(location.scope, row);
   });
 }
 

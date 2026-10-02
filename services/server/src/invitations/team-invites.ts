@@ -14,6 +14,7 @@ import {
   type KobeTx,
   type TeamRole,
 } from "@kobe/db";
+import { recordAudit } from "../audit/record.js";
 import { normalizeEmail } from "./install-invites.js";
 
 /** Team invitations stay open for 14 days (no secret involved: acceptance needs a signed-in user). */
@@ -65,6 +66,11 @@ export async function inviteToTeam(
       .onConflictDoUpdate({ target: [teamInvitations.teamId, teamInvitations.email], set: values })
       .returning({ id: teamInvitations.id, expiresAt: teamInvitations.expiresAt });
     if (!row) throw new Error("team invitation upsert returned no row");
+    await recordAudit(tx, {
+      action: "identity.team_invitation.created",
+      teamId,
+      target: { invitationId: row.id, email, role: input.role },
+    });
     return { id: row.id, email, role: input.role, expiresAt: row.expiresAt.toISOString() };
   });
 }
@@ -99,13 +105,19 @@ export async function listTeamInvites(db: KobeDb, teamId: string): Promise<TeamI
 }
 
 export async function revokeTeamInvite(db: KobeDb, teamId: string, id: string): Promise<boolean> {
-  const rows = await withTeam(db, teamId, (tx) =>
-    tx
+  return withTeam(db, teamId, async (tx) => {
+    const rows = await tx
       .delete(teamInvitations)
       .where(and(eq(teamInvitations.teamId, teamId), eq(teamInvitations.id, id)))
-      .returning({ id: teamInvitations.id }),
-  );
-  return rows.length > 0;
+      .returning({ id: teamInvitations.id });
+    if (rows.length === 0) return false;
+    await recordAudit(tx, {
+      action: "identity.team_invitation.revoked",
+      teamId,
+      target: { invitationId: id },
+    });
+    return true;
+  });
 }
 
 /**
@@ -157,7 +169,13 @@ export async function acceptTeamInvite(
       .select({ role: teamMembers.role })
       .from(teamMembers)
       .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, user.id)));
-    return membership?.role ?? null;
+    if (!membership) return null;
+    await recordAudit(tx, {
+      action: "identity.team_invitation.accepted",
+      teamId,
+      target: { userId: user.id, role: membership.role, invitedBy: invite.invitedBy },
+    });
+    return membership.role;
   });
 }
 
@@ -185,13 +203,15 @@ export async function declineTeamInvite(
   teamId: string,
   email: string,
 ): Promise<boolean> {
-  const rows = await withTeam(db, teamId, (tx) =>
-    tx
+  return withTeam(db, teamId, async (tx) => {
+    const rows = await tx
       .delete(teamInvitations)
       .where(
         and(eq(teamInvitations.teamId, teamId), eq(teamInvitations.email, normalizeEmail(email))),
       )
-      .returning({ id: teamInvitations.id }),
-  );
-  return rows.length > 0;
+      .returning({ id: teamInvitations.id });
+    if (rows.length === 0) return false;
+    await recordAudit(tx, { action: "identity.team_invitation.declined", teamId, target: {} });
+    return true;
+  });
 }

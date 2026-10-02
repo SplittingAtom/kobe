@@ -30,6 +30,7 @@ describe("team permission matrix (spec D8)", () => {
     ["team.egress.manage", false, false, true],
     ["team.skills.review", false, false, true],
     ["team.retention.manage", false, false, true],
+    ["team.audit.read", false, false, true],
     ["team.schedules.pause", false, false, true],
     ["team.agents.suspend", false, false, true],
     ["team.agents.manage", false, false, true],

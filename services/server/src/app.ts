@@ -1,8 +1,10 @@
 import { Hono } from "hono";
+import { auditRequestContext, auditUserContext } from "./audit/context.js";
 import { requireSession, type AuthVariables } from "./auth/session.js";
 import type { ServerDeps } from "./deps.js";
 import type { IsolationGate } from "./isolation/gate.js";
 import { agentRoutes } from "./routes/agents.js";
+import { installAuditRoutes } from "./routes/install-audit.js";
 import { installGalleryRoutes } from "./routes/install-gallery.js";
 import { installInvitesRoutes } from "./routes/install-invites.js";
 import { installIsolationRoutes } from "./routes/install-isolation.js";
@@ -14,6 +16,7 @@ import { meRoutes } from "./routes/me.js";
 import { myInvitesRoutes } from "./routes/my-invites.js";
 import { myTeamsRoutes } from "./routes/my-teams.js";
 import { setupRoutes } from "./routes/setup.js";
+import { teamAuditRoutes } from "./routes/team-audit.js";
 import { teamInvitesRoutes } from "./routes/team-invites.js";
 import { teamRoutes } from "./routes/team.js";
 
@@ -39,6 +42,9 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   });
   if (!deps) return app;
 
+  // Request metadata (client IP, user agent) for audit events of unauthenticated routes (KOBE-15).
+  app.use("/api/auth/*", auditRequestContext(deps));
+  app.use("/v1/setup/*", auditRequestContext(deps));
   app.on(["GET", "POST"], "/api/auth/*", (c) => deps.auth.handler(c.req.raw));
   app.route("/v1/setup", setupRoutes(deps));
 
@@ -54,10 +60,13 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
     await next();
   });
   api.use(requireSession(deps));
+  // The signed-in user is the actor of everything audited in the request (KOBE-15).
+  api.use(auditUserContext(deps));
   api.route("/me/teams", myTeamsRoutes(deps));
   api.route("/me/invites", myInvitesRoutes(deps));
   api.route("/me", meRoutes());
   api.route("/team/invites", teamInvitesRoutes(deps));
+  api.route("/team/audit", teamAuditRoutes(deps));
   api.route("/team", teamRoutes(deps));
   api.route("/agents", agentRoutes(deps));
   api.route("/install/settings", installSettingsRoutes(deps));
@@ -66,6 +75,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/install/users", installUsersRoutes(deps));
   api.route("/install/invites", installInvitesRoutes(deps));
   api.route("/install/gallery/agents", installGalleryRoutes(deps));
+  api.route("/install/audit", installAuditRoutes(deps));
   if (isolation) api.route("/install/isolation", installIsolationRoutes(isolation));
   app.route("/v1", api);
   return app;

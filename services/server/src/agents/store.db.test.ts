@@ -10,6 +10,7 @@ import {
   updateAgent,
   type AgentLocation,
 } from "./store.js";
+import { runWithAuditContext } from "../audit/context.js";
 
 /**
  * install_agents has no RLS backstop (install-wide, D6), so the owner filter in the store is the
@@ -29,16 +30,22 @@ beforeAll(async () => {
     { id: alice, name: "Alice", email: `${alice}@store.test` },
     { id: bob, name: "Bob", email: `${bob}@store.test` },
   ]);
-  const created = await createAgent(
-    db.db,
-    { scope: "personal", ownerUserId: alice },
-    { definition, baseSlug: "private", ownerUserId: alice },
+  const created = await as(alice, () =>
+    createAgent(
+      db.db,
+      { scope: "personal", ownerUserId: alice },
+      { definition, baseSlug: "private", ownerUserId: alice },
+    ),
   );
   if (!created.ok) throw new Error(created.error);
   aliceAgent = created.value.id;
 });
 
 afterAll(() => db.close());
+
+/** Store writes are audited with the request's actor (KOBE-15). */
+const as = <T>(userId: string, fn: () => Promise<T>) =>
+  runWithAuditContext({ actor: { kind: "user", id: userId }, ip: null, userAgent: null }, fn);
 
 describe("personal locations apply the owner filter in every store function", () => {
   it("listAgents", async () => {
@@ -67,11 +74,9 @@ describe("personal locations apply the owner filter in every store function", ()
   });
 
   it("createAgent owns the row by the location, never by the input", async () => {
-    const created = await createAgent(db.db, asBob, {
-      definition,
-      baseSlug: "private",
-      ownerUserId: alice,
-    });
+    const created = await as(bob, () =>
+      createAgent(db.db, asBob, { definition, baseSlug: "private", ownerUserId: alice }),
+    );
     expect(created.ok && created.value.ownerUserId).toBe(bob);
   });
 

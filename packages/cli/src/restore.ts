@@ -260,6 +260,11 @@ export async function runRestore(options: RestoreOptions): Promise<RestoreReport
         forcedRls: tables.filter((t) => t.forcedRls).map((t) => t.name),
         userTriggers: await listUserTriggers(client),
         immediateForeignKeys: await listImmediateForeignKeys(client),
+        audit: {
+          backupCreatedAt: manifest.createdAt,
+          tables: manifest.tables.length,
+          rows: manifest.tables.reduce((sum, t) => sum + t.rows, 0),
+        },
       };
     } finally {
       await client.end().catch(() => undefined);

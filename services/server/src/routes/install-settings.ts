@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { installSettings } from "@kobe/db";
 import { REQUIRE_TWO_FACTOR, readRequireTwoFactor, type AuthVariables } from "../auth/session.js";
+import { recordAudit } from "../audit/record.js";
 import { requireInstallPermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 
@@ -26,10 +27,16 @@ export function installSettingsRoutes(deps: ServerDeps): Hono<{ Variables: AuthV
       );
     }
     const value = String(parsed.data.requireTwoFactor);
-    await deps.database.db
-      .insert(installSettings)
-      .values({ key: REQUIRE_TWO_FACTOR, value })
-      .onConflictDoUpdate({ target: installSettings.key, set: { value, updatedAt: new Date() } });
+    await deps.database.db.transaction(async (tx) => {
+      await tx
+        .insert(installSettings)
+        .values({ key: REQUIRE_TWO_FACTOR, value })
+        .onConflictDoUpdate({ target: installSettings.key, set: { value, updatedAt: new Date() } });
+      await recordAudit(tx, {
+        action: "install.settings.updated",
+        target: { setting: "require_two_factor", value: parsed.data.requireTwoFactor },
+      });
+    });
     return c.json({ requireTwoFactor: parsed.data.requireTwoFactor });
   });
 

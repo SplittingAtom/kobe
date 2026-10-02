@@ -92,4 +92,18 @@ describe("restore postlude", () => {
     expect(sql.trimEnd().endsWith("COMMIT;")).toBe(true);
     expect(sql.indexOf("count(*)")).toBeLessThan(sql.indexOf("FORCE ROW LEVEL SECURITY"));
   });
+
+  it("records the restore in the audit log after the triggers are back (KOBE-15)", () => {
+    expect(sql).not.toContain("audit_log");
+    const audited = restorePostlude({
+      ...plan,
+      audit: { backupCreatedAt: "2026-10-02T12:00:00.000Z", tables: 12, rows: 34 },
+    });
+    const insert = audited.indexOf("INSERT INTO public.audit_log");
+    expect(insert).toBeGreaterThan(audited.indexOf('ENABLE TRIGGER "audit ""x""";'));
+    expect(insert).toBeLessThan(audited.indexOf("COMMIT;"));
+    expect(audited).toContain(
+      `'platform.restore.completed', '{"backupCreatedAt":"2026-10-02T12:00:00.000Z","tables":12,"rows":34}'::jsonb`,
+    );
+  });
 });

@@ -250,7 +250,9 @@ How restore works:
      `run_events`, so the backed-up `seq` values are kept) and defers foreign keys;
    - re-checks the migrations and that the target is empty;
    - loads the data and verifies every table's row count against the manifest;
-   - restores the triggers and FORCE RLS, and commits.
+   - restores the triggers and FORCE RLS, records `platform.restore.completed` in the restored
+     audit log (its hash chain continues from the backed-up rows; see
+     [audit-log.md](audit-log.md#operations)), and commits.
 
    Any error rolls everything back, and so does the CLI dying.
 

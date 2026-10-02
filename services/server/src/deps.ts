@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { accounts, createDb, installRoles, users, type KobeDatabase } from "@kobe/db";
+import { recordAudit } from "./audit/record.js";
 import { createAuth, type KobeAuth } from "./auth/auth.js";
 import type { Mailer } from "./mail/mailer.js";
 import { UserLifecycle } from "./users/lifecycle.js";
@@ -31,7 +32,7 @@ export interface ServerDeps {
   /** Creates an email+password user (and optional install role) atomically, without sign-up. */
   createUserWithPassword(
     input: NewUser,
-    options?: { installRole?: "owner" | "admin" },
+    options?: { installRole?: "owner" | "admin"; recordSetup?: boolean },
   ): Promise<{ id: string }>;
   /** Deletes every session of a user; the next request with any of their cookies is rejected. */
   revokeAllSessions(userId: string): Promise<void>;
@@ -59,7 +60,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     publicUrl: new URL(options.publicUrl).origin,
     mailer: options.mailer,
     lifecycle: new UserLifecycle(),
-    async createUserWithPassword({ email, name, password }, { installRole } = {}) {
+    async createUserWithPassword({ email, name, password }, { installRole, recordSetup } = {}) {
       const ctx = await auth.$context;
       const hash = await ctx.password.hash(password);
       // One transaction: a failure can't leave a half-created user (e.g. an Owner without a role).
@@ -77,6 +78,13 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
         });
         if (installRole)
           await tx.insert(installRoles).values({ userId: user.id, role: installRole });
+        if (recordSetup) {
+          await recordAudit(tx, {
+            action: "identity.setup.completed",
+            actor: { kind: "user", id: user.id },
+            target: { ownerUserId: user.id },
+          });
+        }
         return { id: user.id };
       });
     },

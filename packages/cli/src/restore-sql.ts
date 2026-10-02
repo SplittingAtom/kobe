@@ -29,6 +29,15 @@ export interface RestorePlan {
    * cannot order around FK cycles such as threads ⇄ thread_entries) and restored before COMMIT.
    */
   readonly immediateForeignKeys: readonly { readonly table: string; readonly constraint: string }[];
+  /**
+   * Recorded as `platform.restore.completed` in the restored audit log (KOBE-15), inside the
+   * restore transaction after the triggers are back, so it extends the restored hash chain.
+   */
+  readonly audit?: {
+    readonly backupCreatedAt: string;
+    readonly tables: number;
+    readonly rows: number;
+  };
 }
 
 const table = (name: string): string => `public.${quoteIdent(name)}`;
@@ -91,7 +100,23 @@ export function restorePrelude(plan: RestorePlan): string {
     .join("\n");
 }
 
-/** SQL sent after the data script: verify, restore triggers and FORCE RLS, commit. */
+/** Appends the restore's own audit event (append trigger assigns seq and hashes, KOBE-15). */
+function auditRestore(audit: NonNullable<RestorePlan["audit"]>): string {
+  const target = JSON.stringify({
+    backupCreatedAt: new Date(audit.backupCreatedAt).toISOString(),
+    tables: Math.trunc(audit.tables),
+    rows: Math.trunc(audit.rows),
+  });
+  return doBlock(
+    `BEGIN
+  IF to_regclass('public.audit_log') IS NOT NULL THEN
+    INSERT INTO public.audit_log (actor_kind, action, target) VALUES ('system', 'platform.restore.completed', ${literal(target)}::jsonb);
+  END IF;
+END`,
+  );
+}
+
+/** SQL sent after the data script: verify, restore triggers and FORCE RLS, record, commit. */
 export function restorePostlude(plan: RestorePlan): string {
   const countChecks = plan.loadTables
     .map(
@@ -112,6 +137,7 @@ export function restorePostlude(plan: RestorePlan): string {
     ),
     ...plan.userTriggers.map(enable),
     ...plan.forcedRls.map((t) => `ALTER TABLE ${table(t)} FORCE ROW LEVEL SECURITY;`),
+    plan.audit ? auditRestore(plan.audit) : "",
     "COMMIT;",
     "",
   ].join("\n");

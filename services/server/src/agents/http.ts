@@ -28,7 +28,13 @@ export const agentBodyLimit = bodyLimit({
 });
 
 export type AgentInput =
-  | { ok: true; definition: AgentDefinition; meta: Record<string, unknown> }
+  | {
+      ok: true;
+      definition: AgentDefinition;
+      meta: Record<string, unknown>;
+      /** An imported agent file or a JSON body (audit, KOBE-15). */
+      source: "import" | "json";
+    }
   | { ok: false; response: Response };
 
 /**
@@ -40,7 +46,7 @@ export async function readAgentInput(c: Context): Promise<AgentInput> {
   if (MARKDOWN_TYPES.has(type)) {
     const result = parseAgentFile(await c.req.text());
     if (!result.ok) return { ok: false, response: invalidAgent(c, result.issues) };
-    return { ok: true, definition: result.definition, meta: c.req.query() };
+    return { ok: true, definition: result.definition, meta: c.req.query(), source: "import" };
   }
   if (type !== "application/json") {
     return {
@@ -61,7 +67,7 @@ export async function readAgentInput(c: Context): Promise<AgentInput> {
   const { frontmatter, prompt, ...meta } = body as Record<string, unknown>;
   const result = validateAgentDefinition({ frontmatter, prompt });
   if (!result.ok) return { ok: false, response: invalidAgent(c, result.issues) };
-  return { ok: true, definition: result.definition, meta };
+  return { ok: true, definition: result.definition, meta, source: "json" };
 }
 
 export type IfMatch =

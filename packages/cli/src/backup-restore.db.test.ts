@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { cp, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MIGRATION_LOCK_KEY } from "@kobe/db";
+import { MIGRATION_LOCK_KEY, createDb, verifyAuditChain } from "@kobe/db";
 import { createTestDatabase, testServerUrl, type TestDatabase } from "@kobe/db/testing";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -301,11 +301,38 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
         objects: { checked: 2, problems: 0 },
       });
 
-      for (const t of manifest.tables) {
+      for (const t of manifest.tables.filter((t) => t.name !== "audit_log")) {
         expect(await rowsOf(dst.adminUrl, t.name), t.name).toEqual(
           await rowsOf(src.adminUrl, t.name),
         );
       }
+      // Audit log (KOBE-15): restored verbatim (seq, hashes), then the restore's own event
+      // extends the chain; the chain verifies and the append-only triggers are back.
+      const audit = (url: string) =>
+        sql<{ r: string }>(url, `SELECT to_jsonb(a)::text AS r FROM audit_log a ORDER BY seq`);
+      const restoredAudit = await audit(dst.adminUrl);
+      expect(restoredAudit.slice(0, -1)).toEqual(await audit(src.adminUrl));
+      expect(restoredAudit).toHaveLength(3);
+      expect(JSON.parse(restoredAudit.at(-1)?.r ?? "{}")).toMatchObject({
+        seq: 3,
+        actor_kind: "system",
+        action: "platform.restore.completed",
+        target: { backupCreatedAt: manifest.createdAt, tables: manifest.tables.length },
+      });
+      const dstDb = createDb(dst.appUrl, { max: 1 });
+      try {
+        expect(await verifyAuditChain(dstDb.db)).toMatchObject({ ok: true, checked: 3 });
+      } finally {
+        await dstDb.close();
+      }
+      expect(
+        await sql(
+          dst.adminUrl,
+          `SELECT tgname, tgenabled FROM pg_trigger WHERE tgrelid = 'audit_log'::regclass
+           AND NOT tgisinternal AND tgenabled = 'O'`,
+        ),
+      ).toHaveLength(3);
+      await expect(sql(dst.appUrl, "DELETE FROM audit_log")).rejects.toThrow(/permission denied/);
       expect(await rowsOf(dst.adminUrl, "sessions")).toEqual([]);
       expect(await rowsOf(dst.adminUrl, "verifications")).toEqual([]);
       expect(

@@ -1,4 +1,5 @@
 import { accounts, and, asc, eq, gt, invitations, isNull, sql, users, type KobeDb } from "@kobe/db";
+import { recordAudit } from "../audit/record.js";
 import { hashToken, newToken, sameHash, TOKEN_PATTERN } from "./tokens.js";
 
 /** Install invitations expire after 72 hours; a resend issues a new token and a new expiry. */
@@ -53,17 +54,23 @@ export async function issueInvite(
     createdAt: dbNow,
     expiresAt: inviteExpiry,
   };
-  const [row] = await db
-    .insert(invitations)
-    .values({ email, ...fresh })
-    .onConflictDoUpdate({
-      target: invitations.email,
-      targetWhere: sql`${invitations.acceptedAt} IS NULL AND ${invitations.revokedAt} IS NULL`,
-      set: fresh,
-    })
-    .returning({ id: invitations.id, expiresAt: invitations.expiresAt });
-  if (!row) throw new Error("invitation upsert returned no row");
-  return { id: row.id, email, expiresAt: row.expiresAt, token };
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(invitations)
+      .values({ email, ...fresh })
+      .onConflictDoUpdate({
+        target: invitations.email,
+        targetWhere: sql`${invitations.acceptedAt} IS NULL AND ${invitations.revokedAt} IS NULL`,
+        set: fresh,
+      })
+      .returning({ id: invitations.id, expiresAt: invitations.expiresAt });
+    if (!row) throw new Error("invitation upsert returned no row");
+    await recordAudit(tx, {
+      action: "identity.invitation.created",
+      target: { invitationId: row.id, email },
+    });
+    return { id: row.id, email, expiresAt: row.expiresAt, token };
+  });
 }
 
 /** Re-issues an open invitation by id (new token and expiry); null if it is accepted or revoked. */
@@ -73,12 +80,23 @@ export async function reissueInvite(
   invitedBy: string,
 ): Promise<IssuedInvite | null> {
   const { token, hash } = newToken();
-  const [row] = await db
-    .update(invitations)
-    .set({ tokenHash: hash, invitedBy, createdAt: dbNow, expiresAt: inviteExpiry })
-    .where(and(eq(invitations.id, id), open()))
-    .returning({ id: invitations.id, email: invitations.email, expiresAt: invitations.expiresAt });
-  return row ? { ...row, token } : null;
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(invitations)
+      .set({ tokenHash: hash, invitedBy, createdAt: dbNow, expiresAt: inviteExpiry })
+      .where(and(eq(invitations.id, id), open()))
+      .returning({
+        id: invitations.id,
+        email: invitations.email,
+        expiresAt: invitations.expiresAt,
+      });
+    if (!row) return null;
+    await recordAudit(tx, {
+      action: "identity.invitation.resent",
+      target: { invitationId: row.id, email: row.email },
+    });
+    return { ...row, token };
+  });
 }
 
 /** The address of an open invitation, or null. */
@@ -92,12 +110,16 @@ export async function findOpenInviteEmail(db: KobeDb, id: string): Promise<strin
 
 /** Revokes an open invitation; its link stops working at once. */
 export async function revokeInvite(db: KobeDb, id: string): Promise<boolean> {
-  const rows = await db
-    .update(invitations)
-    .set({ revokedAt: dbNow })
-    .where(and(eq(invitations.id, id), open()))
-    .returning({ id: invitations.id });
-  return rows.length > 0;
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .update(invitations)
+      .set({ revokedAt: dbNow })
+      .where(and(eq(invitations.id, id), open()))
+      .returning({ id: invitations.id });
+    if (rows.length === 0) return false;
+    await recordAudit(tx, { action: "identity.invitation.revoked", target: { invitationId: id } });
+    return true;
+  });
 }
 
 /** Open invitations (pending or expired), oldest first. */
@@ -180,6 +202,11 @@ export async function acceptInvite(
       .update(invitations)
       .set({ acceptedAt: dbNow, acceptedUserId: user.id })
       .where(eq(invitations.id, invite.id));
+    await recordAudit(tx, {
+      action: "identity.invitation.accepted",
+      actor: { kind: "user", id: user.id },
+      target: { invitationId: invite.id, userId: user.id },
+    });
     return { userId: user.id };
   });
 }

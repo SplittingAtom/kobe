@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
+import { isolationAuditor } from "./audit/isolation.js";
 import { loadConfig } from "./config.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
 import { createIsolationGate } from "./isolation/gate.js";
@@ -38,10 +39,12 @@ if (config.auth && config.smtp) {
 
 // Spec D4: the process's own isolation check (startup + periodic). Agent work must go through
 // isolation.require(); without a verified gVisor/Kata RuntimeClass the server keeps serving.
+const auditIsolation = deps ? isolationAuditor(deps.database.db) : undefined;
 const isolation = createIsolationGate({
   runtimeClassName: config.runtimeClassName,
   listRuntimeClasses,
   onChange: (status) => {
+    void auditIsolation?.(status);
     if (status.state === "verified") {
       logger.info(
         { runtimeClass: status.runtimeClassName, handler: status.handler },

@@ -129,7 +129,12 @@ export async function seed(db: TestDatabase): Promise<void> {
      INSERT INTO thread_entries (team_id, thread_id, entry_id, parent_id, type, payload, blob_ref) VALUES
        ($1, '${THREAD}', 'e1', NULL, 'message', '{"text":"hi"}', NULL),
        ($1, '${THREAD}', 'e2', 'e1', 'message', '{}', 'teams/a2/artifacts/chart.html');
-     UPDATE threads SET leaf_entry_id = 'e2' WHERE team_id = $1 AND id = '${THREAD}';`.replaceAll(
+     UPDATE threads SET leaf_entry_id = 'e2' WHERE team_id = $1 AND id = '${THREAD}';
+     -- Audit events (KOBE-15): the trigger chains them; the restore must keep the chain intact.
+     INSERT INTO audit_log (actor_kind, actor_id, team_id, action, target) VALUES
+       ('user', $3, NULL, 'auth.sign_in.succeeded', '{"method":"password"}'),
+       ('user', $3, $1, 'identity.member.role_changed',
+        jsonb_build_object('userId', $4, 'from', 'builder', 'to', 'member'));`.replaceAll(
       /\$(\d)/g,
       (_, n: string) => `'${[T1, T2, U1, U2, U3][Number(n) - 1]}'`,
     ),

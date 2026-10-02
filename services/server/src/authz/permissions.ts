@@ -57,6 +57,8 @@ export const TEAM_PERMISSIONS = {
   "team.egress.manage": "team_admin",
   "team.skills.review": "team_admin",
   "team.retention.manage": "team_admin",
+  // The team's audit view (D6): events recorded for this team only (KOBE-15).
+  "team.audit.read": "team_admin",
   "team.schedules.pause": "team_admin",
   "team.agents.suspend": "team_admin",
   // Edit or delete any team agent, not only your own (KOBE-45; like projects, D23).

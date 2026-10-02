@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { and, asc, eq, installRoles, ne, users } from "@kobe/db";
 import type { AuthVariables } from "../auth/session.js";
+import { recordAudit } from "../audit/record.js";
 import { requireInstallPermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { findUserId } from "../teams/members.js";
@@ -42,16 +43,26 @@ export function installRolesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
         .where(eq(installRoles.userId, userId.data))
         .for("update");
       if (current?.role === "owner") return "owner" as const;
-      if (body.role === "admin") {
-        await tx
-          .insert(installRoles)
-          .values({ userId: userId.data, role: "admin" })
-          .onConflictDoNothing();
-      } else {
-        // Never the Owner row: a concurrent transfer may have made this user Owner meanwhile.
-        await tx
-          .delete(installRoles)
-          .where(and(eq(installRoles.userId, userId.data), ne(installRoles.role, "owner")));
+      const changed =
+        body.role === "admin"
+          ? await tx
+              .insert(installRoles)
+              .values({ userId: userId.data, role: "admin" })
+              .onConflictDoNothing()
+              .returning({ userId: installRoles.userId })
+          : // Never the Owner row: a concurrent transfer may have made this user Owner meanwhile.
+            await tx
+              .delete(installRoles)
+              .where(and(eq(installRoles.userId, userId.data), ne(installRoles.role, "owner")))
+              .returning({ userId: installRoles.userId });
+      if (changed.length > 0) {
+        await recordAudit(tx, {
+          action:
+            body.role === "admin"
+              ? "identity.install_role.granted"
+              : "identity.install_role.revoked",
+          target: { userId: userId.data, role: "admin" },
+        });
       }
       return "ok" as const;
     });
@@ -86,6 +97,10 @@ export function installRolesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
           .insert(installRoles)
           .values({ userId: body.userId, role: "owner" })
           .onConflictDoUpdate({ target: installRoles.userId, set: { role: "owner" } });
+        await recordAudit(tx, {
+          action: "identity.ownership.transferred",
+          target: { fromUserId: me, toUserId: body.userId },
+        });
         return true;
       });
       if (!transferred) {

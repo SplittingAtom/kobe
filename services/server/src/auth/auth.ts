@@ -14,6 +14,8 @@ import {
   verifications,
   type KobeDb,
 } from "@kobe/db";
+import { auditPlugin } from "../audit/auth-plugin.js";
+import { recordAuditAfter } from "../audit/record.js";
 import { logger } from "../logger.js";
 import type { Mailer } from "../mail/mailer.js";
 import { passwordResetMessage } from "../mail/messages.js";
@@ -67,6 +69,11 @@ export function createAuth({ db, publicUrl, secret, trustedProxies, mailer }: Au
    */
   async function mailResetLink(user: { id: string; email: string }, token: string) {
     if (await isDeactivated(db, user.id)) return;
+    await recordAuditAfter(db, {
+      action: "auth.password.reset_requested",
+      actor: { kind: "user", id: null },
+      target: { userId: user.id },
+    });
     // A recent link is still usable: don't send another (soft; never blocks a later request).
     if (await recentResetLinkPending(db, user.id)) return;
     await mailer.send(
@@ -108,7 +115,14 @@ export function createAuth({ db, publicUrl, secret, trustedProxies, mailer }: Au
       resetPasswordTokenExpiresIn: RESET_TOKEN_TTL_SECONDS,
       revokeSessionsOnPasswordReset: true,
       // The used link is consumed; any other mailed link dies with it.
-      onPasswordReset: async ({ user }) => revokeResetLinks(db, user.id),
+      onPasswordReset: async ({ user }) => {
+        await revokeResetLinks(db, user.id);
+        await recordAuditAfter(db, {
+          action: "auth.password.reset",
+          actor: { kind: "user", id: user.id },
+          target: { userId: user.id },
+        });
+      },
       sendResetPassword: async ({ user, token }) => {
         void mailResetLink(user, token).catch((err: unknown) =>
           logger.error({ err, userId: user.id }, "password reset email failed"),
@@ -208,6 +222,8 @@ export function createAuth({ db, publicUrl, secret, trustedProxies, mailer }: Au
           getSubject: ({ user }) => user.id,
         },
       }),
+      // Last: its after hook must see the session state the other plugins leave (KOBE-15).
+      auditPlugin({ db }),
     ],
   });
 }
