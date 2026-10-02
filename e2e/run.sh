@@ -45,6 +45,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Shell snippet for a probe pod: wait (up to ~90 s) until URL answers. A new pod joins the CNI's
+# policy ipsets on kube-router's next sync, so policy-guarded targets refuse it for its first
+# seconds (docs/ledger/KOBE-22.md); positive checks wait that out, then assert.
+until_answers() { echo "for i in \$(seq 1 30); do wget -qO- -T 2 $1 >/dev/null 2>&1 && break; sleep 1; done;"; }
 probe() { # namespace, shell command → prints its output (unique pod, cleaned up on exit)
   local ns="$1" name="probe-$RANDOM$RANDOM"
   PODS+=("-n $ns $name")
@@ -99,7 +103,8 @@ expect "team tables have FORCE ROW LEVEL SECURITY" '^team_members\|true$' "$(psq
   "select c.relname || '|' || c.relforcerowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname = 'team_members'")"
 contains "web answers through the Traefik ingress" '"service":"web"' \
   "$(probe "$NS" 'wget -qO- --header "Host: kobe.localtest.me" http://traefik.kube-system/api/healthz')"
-contains "server answers" '"service":"server"' "$(probe "$NS" 'wget -qO- http://kobe-server/healthz')"
+contains "server answers" '"service":"server"' \
+  "$(probe "$NS" "$(until_answers http://kobe-server/healthz) wget -qO- http://kobe-server/healthz")"
 # KOBE-9: every server/scheduler process verified isolation itself (not disclosed by /readyz).
 iso=""
 for pod in $($KUBECTL -n "$NS" get pods -l "$gated_pods" --field-selector=status.phase=Running -o name); do
@@ -107,9 +112,12 @@ for pod in $($KUBECTL -n "$NS" get pods -l "$gated_pods" --field-selector=status
   else iso+="$pod:unverified "; fi
 done
 contains "server and scheduler verified the gVisor RuntimeClass in process" '^verified verified verified $' "$iso"
-contains "Bifrost is reachable from the release namespace" '"status":"ok"' \
-  "$(probe "$NS" 'wget -qO- -T 5 http://kobe-bifrost:8080/health')"
-np=$(probe default "wget -qO- -T 5 http://kobe-web.$NS/api/healthz >/dev/null 2>&1 && echo control=REACHED || echo control=BLOCKED; \
+bifrost=$(probe "$NS" "$(until_answers http://kobe-bifrost:8080/health) wget -qO- -T 5 http://kobe-bifrost:8080/health")
+contains "Bifrost is reachable from the release namespace" '"status":"ok"' "$bifrost restarts=$($KUBECTL \
+  -n "$NS" get pods -l app.kubernetes.io/component=bifrost -o jsonpath='{.items[*].status.containerStatuses[*].restartCount}' 2>/dev/null)"
+# Once the control answers, the probe pod is in the policy ipsets: BLOCKED below is the policy.
+np=$(probe default "$(until_answers http://kobe-web.$NS/api/healthz) \
+  wget -qO- -T 5 http://kobe-web.$NS/api/healthz >/dev/null 2>&1 && echo control=REACHED || echo control=BLOCKED; \
   wget -qO- -T 5 http://kobe-bifrost.$NS:8080/health >/dev/null 2>&1 && echo bifrost=REACHED || echo bifrost=BLOCKED")
 contains "probe from another namespace can reach unrestricted services (control)" '^control=REACHED$' "$np"
 contains "Bifrost is not reachable from other namespaces" '^bifrost=BLOCKED$' "$np"
