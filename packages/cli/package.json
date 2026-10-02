@@ -1,0 +1,30 @@
+{
+  "name": "@kobe/cli",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Operator CLI: kobe backup and kobe restore",
+  "type": "module",
+  "bin": {
+    "kobe": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:db": "vitest run -c vitest.db.config.ts",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1144.0",
+    "@kobe/db": "workspace:*",
+    "pg": "^8.23.1",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1"
+  }
+}
