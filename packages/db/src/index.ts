@@ -17,3 +17,4 @@ export {
   type TeamTable,
 } from "./tenancy.js";
 export { withTeam } from "./with-team.js";
+export { waitForMigrations, type WaitOptions } from "./wait.js";

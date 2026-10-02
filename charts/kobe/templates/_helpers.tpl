@@ -171,6 +171,7 @@ spec:
       {{- if .preflight }}
       initContainers:
         {{- include "kobe.preflightContainer" $root | nindent 8 }}
+        {{- include "kobe.waitForMigrationsContainer" $root | nindent 8 }}
       {{- end }}
       containers:
         - name: {{ .component }}
@@ -238,4 +239,20 @@ spec:
   resources:
     requests: { cpu: 50m, memory: 64Mi }
     limits: { cpu: 500m, memory: 256Mi }
+{{- end -}}
+
+
+{{/* Holds a pod until this build's migrations are applied; runs as the app role. */}}
+{{- define "kobe.waitForMigrationsContainer" -}}
+- name: wait-for-migrations
+  image: {{ include "kobe.image" (dict "root" . "name" "server") }}
+  imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+  command: ["node", "node_modules/@kobe/db/dist/cli/wait.js"]
+  env:
+    {{- include "kobe.databaseEnv" . | nindent 4 }}
+  {{- include "kobe.containerSecurityContext" . | nindent 2 }}
+  terminationMessagePolicy: FallbackToLogsOnError
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits: { cpu: 200m, memory: 128Mi }
 {{- end -}}

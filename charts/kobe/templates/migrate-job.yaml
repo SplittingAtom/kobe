@@ -1,0 +1,22 @@
+{{- $fullname := include "kobe.fullname" . -}}
+{{- $cnpg := eq .Values.postgres.mode "cnpg" -}}
+# Schema migrations as the database owner (KOBE-68) — the only pods that ever hold owner
+# credentials. Upgrades migrate in a pre-upgrade hook. First install: external Postgres migrates in
+# a pre-install hook; a bundled CloudNativePG Cluster only exists once the release is applied, and
+# `helm install --wait` runs post-install hooks only after pods are ready (which wait for
+# migrations), so it migrates in an ordinary Job instead. Server/scheduler pods stay in their
+# wait-for-migrations initContainer until the migration lands, so a failed migration fails
+# `helm install --wait`.
+{{- /* CNPG: does the Cluster exist yet? Online we look it up (covers retrying a failed first install
+     with `helm upgrade --install`); offline renders fall back to install vs upgrade. */ -}}
+{{- $clusterExists := .Release.IsUpgrade -}}
+{{- if and $cnpg (lookup "v1" "Namespace" "" "kube-system") -}}
+{{- $clusterExists = not (empty (lookup "postgresql.cnpg.io/v1" "Cluster" .Release.Namespace (printf "%s-pg" $fullname))) -}}
+{{- end -}}
+{{- if not $cnpg }}
+{{- include "kobe.migrateJob" (dict "root" . "name" (printf "%s-migrate" $fullname) "hook" "pre-install,pre-upgrade") }}
+{{- else if $clusterExists }}
+{{- include "kobe.migrateJob" (dict "root" . "name" (printf "%s-migrate" $fullname) "hook" "pre-upgrade") }}
+{{- else }}
+{{- include "kobe.migrateJob" (dict "root" . "name" (printf "%s-migrate-initial" $fullname)) }}
+{{- end }}

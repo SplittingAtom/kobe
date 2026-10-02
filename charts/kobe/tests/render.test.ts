@@ -30,11 +30,23 @@ function helmArgs(values: Record<string, string>): string[] {
 
 function render(
   values: Record<string, string> = {},
-  { release = "kobe", namespace = "kobe" }: { release?: string; namespace?: string } = {},
+  {
+    release = "kobe",
+    namespace = "kobe",
+    upgrade = false,
+  }: { release?: string; namespace?: string; upgrade?: boolean } = {},
 ): Manifest[] {
   const out = execFileSync(
     HELM,
-    ["template", release, CHART_DIR, "-n", namespace, ...helmArgs(values)],
+    [
+      "template",
+      release,
+      CHART_DIR,
+      "-n",
+      namespace,
+      ...(upgrade ? ["--is-upgrade"] : []),
+      ...helmArgs(values),
+    ],
     { encoding: "utf8" },
   );
   return parseAllDocuments(out)
@@ -154,13 +166,13 @@ describe("isolation preflight (ac-2)", () => {
     for (const name of ["kobe-server", "kobe-scheduler"]) {
       const spec = find(ms, "Deployment", name)?.spec.template.spec;
       expect(spec.serviceAccountName, name).toBe("kobe-server");
-      expect(spec.initContainers, name).toEqual([
+      expect(spec.initContainers[0], name).toEqual(
         expect.objectContaining({
           name: "isolation-preflight",
           command: ["node", "dist/cli/preflight.js"],
           env: [{ name: "KOBE_RUNTIME_CLASS", value: "gvisor" }],
         }),
-      ]);
+      );
     }
   });
 
@@ -258,6 +270,102 @@ describe("ingress", () => {
       ["/v1", "kobe-server"],
       ["/", "kobe-web"],
     ]);
+  });
+});
+
+describe("migrations (KOBE-68)", () => {
+  const hook = (m: Manifest | undefined) => m?.metadata.annotations?.["helm.sh/hook"];
+  const weight = (m: Manifest | undefined) =>
+    Number(m?.metadata.annotations?.["helm.sh/hook-weight"]);
+  const migrateEnv = (ms: Manifest[]) =>
+    find(ms, "Job", "kobe-migrate")?.spec.template.spec.containers[0].env as unknown[];
+
+  it("external: migrates as the owner in a pre-install/pre-upgrade hook after the isolation preflight", () => {
+    const ms = render();
+    const job = find(ms, "Job", "kobe-migrate");
+    expect(hook(job)).toBe("pre-install,pre-upgrade");
+    expect(weight(job)).toBeGreaterThan(weight(find(ms, "Job", "kobe-isolation-preflight")));
+    expect(job?.spec.backoffLimit).toBe(0);
+    const c = job?.spec.template.spec.containers[0];
+    expect(c.image).toBe("ghcr.io/splittingatom/kobe-server:0.1.0");
+    expect(c.command).toEqual(["node", "node_modules/@kobe/db/dist/cli/migrate.js"]);
+    expect(migrateEnv(ms)).toEqual(
+      expect.arrayContaining([
+        {
+          name: "KOBE_DB_MIGRATE_URL",
+          valueFrom: { secretKeyRef: { name: "kobe-db", key: "migrate-url" } },
+        },
+        { name: "KOBE_DB_APP_ROLE", value: "kobe_app" },
+      ]),
+    );
+    expect(job?.spec.template.spec.automountServiceAccountToken).toBe(false);
+  });
+
+  it("defaults keys added after a release so `helm upgrade --reuse-values` keeps working", () => {
+    expect(migrateEnv(render({ "postgres.external.appRole": "null" }))).toContainEqual({
+      name: "KOBE_DB_APP_ROLE",
+      value: "kobe_app",
+    });
+  });
+
+  it("cnpg first install: migrates in an ordinary Job (post-install hooks would deadlock --wait)", () => {
+    const ms = render({ "postgres.mode": "cnpg" });
+    const initial = find(ms, "Job", "kobe-migrate-initial");
+    expect(initial).toBeDefined();
+    expect(hook(initial)).toBeUndefined();
+    expect(find(ms, "Job", "kobe-migrate")).toBeUndefined();
+    expect(initial?.spec.template.spec.containers[0].env).toContainEqual({
+      name: "KOBE_DB_MIGRATE_URL",
+      valueFrom: { secretKeyRef: { name: "kobe-pg-app", key: "uri" } },
+    });
+  });
+
+  it("cnpg upgrade: migrates in a pre-upgrade hook before new pods roll", () => {
+    const ms = render({ "postgres.mode": "cnpg" }, { upgrade: true });
+    expect(hook(find(ms, "Job", "kobe-migrate"))).toBe("pre-upgrade");
+    expect(find(ms, "Job", "kobe-migrate-initial")).toBeUndefined();
+  });
+
+  it("pre-install hook pods only use ServiceAccounts that exist before the release is applied", () => {
+    const ms = render();
+    const hookSAs = new Set(
+      ms
+        .filter((m) => m.kind === "ServiceAccount" && hook(m)?.includes("pre-install"))
+        .map((m) => m.metadata.name),
+    );
+    for (const job of ms.filter((m) => m.kind === "Job" && hook(m)?.includes("pre-install"))) {
+      const sa = job.spec.template.spec.serviceAccountName;
+      expect(
+        sa === undefined || sa === "default" || hookSAs.has(sa),
+        `${job.metadata.name} uses ${sa}`,
+      ).toBe(true);
+    }
+  });
+
+  it("mounts owner credentials only in the migration Job", () => {
+    for (const values of [{}, { "postgres.mode": "cnpg" }]) {
+      const ms = render(values);
+      const owners = podSpecs(ms)
+        .filter(({ spec }) =>
+          JSON.stringify(spec).match(/"key":"migrate-url"|"name":"kobe-pg-app"/),
+        )
+        .map(({ name }) => name);
+      expect(owners).toHaveLength(1);
+      expect(owners[0]).toMatch(/^Job\/kobe-migrate(-initial)?$/);
+    }
+  });
+
+  it("holds server and scheduler pods until this build's migrations are applied (app role)", () => {
+    const ms = render();
+    for (const name of ["kobe-server", "kobe-scheduler"]) {
+      const wait = find(ms, "Deployment", name)?.spec.template.spec.initContainers[1];
+      expect(wait?.name, name).toBe("wait-for-migrations");
+      expect(wait?.command).toEqual(["node", "node_modules/@kobe/db/dist/cli/wait.js"]);
+      expect(wait?.env).toContainEqual({
+        name: "KOBE_DATABASE_URL",
+        valueFrom: { secretKeyRef: { name: "kobe-db", key: "app-url" } },
+      });
+    }
   });
 });
 

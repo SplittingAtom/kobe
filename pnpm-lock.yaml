@@ -296,6 +296,9 @@ importers:
       '@hono/node-server':
         specifier: ^2.1.3
         version: 2.1.3(hono@4.13.12)
+      '@kobe/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@kobe/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol

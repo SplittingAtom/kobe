@@ -83,6 +83,18 @@ async function grantAppPrivileges(client: pg.ClientBase, appRole: string): Promi
     await client.query(`REVOKE ALL ON ALL TABLES IN SCHEMA public FROM ${role}`);
     await client.query(`GRANT USAGE ON SCHEMA public TO ${role}`);
     await client.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${role}`);
+    // Marker read by waiting pods (as the app role): which migration these grants belong to.
+    // Written in this transaction, so pods never see new migrations before their grants.
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS drizzle.kobe_grants_applied (migration_when bigint NOT NULL)`,
+    );
+    await client.query(`DELETE FROM drizzle.kobe_grants_applied`);
+    await client.query(
+      `INSERT INTO drizzle.kobe_grants_applied SELECT max(created_at) FROM drizzle.__drizzle_migrations`,
+    );
+    await client.query(`REVOKE ALL ON ALL TABLES IN SCHEMA drizzle FROM ${role}`);
+    await client.query(`GRANT USAGE ON SCHEMA drizzle TO ${role}`);
+    await client.query(`GRANT SELECT ON drizzle.kobe_grants_applied TO ${role}`);
     for (const { name } of rows) {
       const privileges = appPrivilegesFor(name);
       if (privileges && privileges.length > 0) {
@@ -102,7 +114,15 @@ async function grantAppPrivileges(client: pg.ClientBase, appRole: string): Promi
  */
 export async function runMigrations(options: MigrateOptions): Promise<void> {
   quoteIdent(options.appRole);
-  const pool = new pg.Pool({ connectionString: options.databaseUrl, max: 2 });
+  // lock_timeout: a migration queued behind a long transaction would otherwise block live
+  // traffic queued behind it; failing the Job is better. Migrations must be backward compatible
+  // (expand/contract), since the previous release keeps serving during the upgrade hook.
+  const pool = new pg.Pool({
+    connectionString: options.databaseUrl,
+    max: 2,
+    connectionTimeoutMillis: 10_000,
+    options: "-c lock_timeout=10s",
+  });
   try {
     const client = await pool.connect();
     try {
