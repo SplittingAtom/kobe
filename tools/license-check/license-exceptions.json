@@ -1,6 +1,7 @@
 {
   "caniuse-lite": {
     "license": "CC-BY-4.0",
-    "reason": "Browser-compatibility data table required by Next.js/browserslist at build time; an attribution-only data license, not copyleft or source-available."
+    "versions": ["1.0.30001814"],
+    "reason": "Browser-compatibility data table required by Next.js/browserslist at build time; an attribution-only data license, not copyleft or source-available. Pending Chris's sign-off (KOBE-5 review)."
   }
 }

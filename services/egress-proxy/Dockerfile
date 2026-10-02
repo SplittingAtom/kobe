@@ -17,8 +17,8 @@ RUN pnpm install --offline --frozen-lockfile \
 FROM node:${NODE_VERSION}-slim
 ENV NODE_ENV=production
 WORKDIR /app
-COPY --from=build --chown=1000:1000 /out ./
-# Numeric non-root user so Kubernetes runAsNonRoot can verify it.
+COPY --from=build /out ./
+# Files stay root-owned (read-only to the app); numeric non-root user so runAsNonRoot can verify it.
 USER 1000:1000
 EXPOSE 8080
 CMD ["node", "dist/index.js"]

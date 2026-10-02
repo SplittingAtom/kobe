@@ -14,7 +14,7 @@
     "typecheck": "turbo run typecheck",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "license:check": "pnpm --filter @kobe/license-check run check",
+    "license:check": "turbo run license:check",
     "images:check": "scripts/check-images.sh"
   },
   "devDependencies": {

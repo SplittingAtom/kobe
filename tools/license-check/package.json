@@ -16,7 +16,7 @@
     "test": "vitest run",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "check": "node dist/cli.js"
+    "license:check": "node dist/cli.js"
   },
   "dependencies": {}
 }

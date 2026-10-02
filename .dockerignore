@@ -9,3 +9,6 @@ charts
 docs
 *.md
 !apps/**/*.md
+.env
+.env.*
+!.env.example

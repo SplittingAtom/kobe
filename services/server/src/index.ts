@@ -1,22 +1,28 @@
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
+import { logger } from "./logger.js";
+
+/** Open streams (SSE) get this long to finish before being cut; stays under k8s' 30 s grace period. */
+const DRAIN_TIMEOUT_MS = 10_000;
 
 const config = loadConfig(process.env);
 const server = serve({ fetch: createApp().fetch, port: config.port }, (info) => {
-  console.log(JSON.stringify({ msg: "listening", service: "server", port: info.port }));
+  logger.info({ port: info.port }, "listening");
 });
 
 function shutdown(signal: string): void {
-  console.log(JSON.stringify({ msg: "shutting down", service: "server", signal }));
+  logger.info({ signal }, "shutting down");
   server.close((err) => {
-    if (err)
-      console.error(
-        JSON.stringify({ msg: "shutdown error", service: "server", error: String(err) }),
-      );
+    if (err) logger.error({ err }, "shutdown error");
     process.exit(err ? 1 : 0);
   });
+  if ("closeIdleConnections" in server) server.closeIdleConnections();
+  setTimeout(() => {
+    if ("closeAllConnections" in server) server.closeAllConnections();
+    setTimeout(() => process.exit(1), 1_000).unref();
+  }, DRAIN_TIMEOUT_MS).unref();
 }
 
-process.on("SIGTERM", () => shutdown("SIGTERM"));
-process.on("SIGINT", () => shutdown("SIGINT"));
+process.once("SIGTERM", () => shutdown("SIGTERM"));
+process.once("SIGINT", () => shutdown("SIGINT"));

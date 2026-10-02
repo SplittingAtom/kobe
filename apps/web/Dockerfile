@@ -17,10 +17,12 @@ RUN pnpm install --offline --frozen-lockfile \
 FROM node:${NODE_VERSION}-slim
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=8080 HOSTNAME=0.0.0.0
 WORKDIR /app
-COPY --from=build --chown=1000:1000 /repo/apps/web/.next/standalone ./
-COPY --from=build --chown=1000:1000 /repo/apps/web/.next/static ./apps/web/.next/static
-COPY --from=build --chown=1000:1000 /repo/apps/web/public ./apps/web/public
-# Numeric non-root user so Kubernetes runAsNonRoot can verify it.
+COPY --from=build /repo/apps/web/.next/standalone ./
+COPY --from=build /repo/apps/web/.next/static ./apps/web/.next/static
+COPY --from=build /repo/apps/web/public ./apps/web/public
+# Next.js needs a writable cache dir; everything else stays root-owned
+RUN mkdir -p apps/web/.next/cache && chown 1000:1000 apps/web/.next/cache
+# Files stay root-owned (read-only to the app); numeric non-root user so runAsNonRoot can verify it.
 USER 1000:1000
 EXPOSE 8080
 CMD ["node", "apps/web/server.js"]
