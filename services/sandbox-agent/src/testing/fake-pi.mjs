@@ -4,6 +4,7 @@
 //   "say:<text>"   stream <text> as two text_delta updates, then settle
 //   "hang"         start a run and wait for abort
 //   "steps"        emit turn_end every 50 ms until aborted
+//   "late-steps"   answer the prompt, emit agent_start only 200 ms later, then as "steps"
 //   "tool:<name>"  ask kobe-policy over fd 3 and report the decision as a custom event
 //   "dialog"       open a confirm dialog and report the answer
 //   "crash"        write to stderr and exit 3
@@ -103,9 +104,16 @@ function runPrompt(message) {
     }, 10);
   } else if (message === "hang") {
     start();
-  } else if (message === "steps") {
-    start();
-    timer = setInterval(() => out({ type: "turn_end", message: { role: "assistant" } }), 50);
+  } else if (message === "steps" || message === "late-steps") {
+    const steps = () => {
+      start();
+      timer = setInterval(() => {
+        appendFileSync(log, `${JSON.stringify({ emitted: "turn_end" })}\n`);
+        out({ type: "turn_end", message: { role: "assistant" } });
+      }, 50);
+    };
+    if (message === "steps") steps();
+    else setTimeout(steps, 200);
   } else if (message.startsWith("tool:")) {
     start();
     const requestId = `ext-${nextPolicy++}`;

@@ -99,6 +99,15 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   };
 }
 
+/** Poll until `check` holds (never a fixed sleep before a positive assertion). */
+export async function until(check: () => boolean | Promise<boolean>, ms = 5000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!(await check())) {
+    if (Date.now() > deadline) throw new Error("condition not met in time");
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
 export function runStart(message: string, extra: Record<string, unknown> = {}) {
   return { type: "run.start", run_id: RUN, thread_id: THREAD, message, ...extra };
 }

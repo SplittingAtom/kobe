@@ -230,9 +230,27 @@ paths, a pids limit on the pod. Until then:
    run (abort, drop, reconnect so the server interrupts it). Tests in `outbox.test.ts` and
    "abandons a run whose frames the server lost".
 
+## CI flake round (coordinator) — resolution
+
+- `after_step waits for the in-flight step` failed once in CI (abort before any `turn_end`). Real
+  ordering bug, not just a test race: Pi answers `prompt` before it emits `agent_start`, so a
+  `run.stop after_step` landing between the two saw an idle-looking thread and aborted at once,
+  i.e. before the step it was meant to let finish. Fix: `after_step` never aborts immediately; it
+  aborts on the next `turn_end` (or the run settles first). Deterministic test: fake Pi
+  `late-steps` delays `agent_start` 200 ms; the fake logs stdin and each emitted `turn_end` in
+  order, and the test asserts the first `abort` follows a `turn_end` (fails on the old code).
+- Sibling tests: two predicates read `received.at(-1).connection` instead of each frame's own
+  connection (could match an earlier connection's frame early — this was the second flake found by
+  a 50× loop, in "re-sends un-acked events"); `hello && connections === 2` matched the first
+  connection's hello. Both replaced by `FakeServer.waitForOn(connection, …)`. Fixed sleeps before
+  positive assertions replaced by polling (`until`): acks landed (`Agent.deliveryState()`), dialog
+  cancelled, restore voided (temp file gone), abort logged, orphan gone (`/proc` state, since
+  `kill(pid, 0)` succeeds on a zombie). Remaining sleeps only precede "nothing else happened"
+  assertions.
+
 ## Evidence (acceptance criteria → test or command output)
 
-`pnpm --filter @kobe/sandbox-agent test`: 16 files, 116 tests (real-Pi suite runs when
+`pnpm --filter @kobe/sandbox-agent test`: 16 files, 117 tests (real-Pi suite runs when
 `images/sandbox/pi` is installed; it is in CI).
 
 | AC  | Evidence                                                                                                                                             |

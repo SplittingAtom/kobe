@@ -150,7 +150,7 @@ export class ThreadManager {
     const ended = thread.runEnded();
     if (frame.mode === "after_step") {
       thread.onStopDue = () => void this.#abort(thread);
-      if (thread.markStopAfterStep()) void this.#abort(thread);
+      thread.markStopAfterStep();
     } else {
       void this.#abort(thread);
     }

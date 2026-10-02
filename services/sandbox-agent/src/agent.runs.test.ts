@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { parseTranslatedPiEvent, type SandboxToServerFrame } from "@kobe/protocol";
 import { afterEach, describe, expect, it } from "vitest";
@@ -10,6 +10,7 @@ import {
   THREAD_2,
   runStart,
   startHarness,
+  until,
   type Harness,
 } from "./testing/harness.js";
 
@@ -141,6 +142,15 @@ describe("run.start → Pi prompt → pi.event stream", () => {
   });
 });
 
+/** The fake logs stdin lines and each turn_end it emits, in order: abort must follow a turn_end. */
+async function expectAbortAfterTurnEnd(): Promise<void> {
+  const log = await h.commandsLog();
+  const firstTurnEnd = log.findIndex((c) => c.emitted === "turn_end");
+  const firstAbort = log.findIndex((c) => c.type === "abort");
+  expect(firstTurnEnd).toBeGreaterThan(-1);
+  expect(firstAbort).toBeGreaterThan(firstTurnEnd);
+}
+
 describe("run.steer and run.stop", () => {
   it("forwards steer to the active run only", async () => {
     h = await startHarness();
@@ -189,6 +199,23 @@ describe("run.steer and run.stop", () => {
     const stream = events().map((f) => f.event.type);
     expect(stream).toContain("turn_end");
     expect(stream.at(-1)).toBe("agent_settled");
+    await expectAbortAfterTurnEnd();
+  });
+
+  it("after_step arriving between Pi's prompt answer and agent_start still waits for a step", async () => {
+    h = await startHarness();
+    // Pi answers the prompt at once but starts the run 200 ms later: the stop lands in between.
+    await h.server.command(runStart("late-steps"));
+    const stop = await h.server.command({
+      type: "run.stop",
+      run_id: RUN,
+      thread_id: THREAD,
+      mode: "after_step",
+      reason: "budget_exhausted",
+    });
+    expect(stop).toMatchObject({ ok: true });
+    expect(events().map((f) => f.event.type)).toContain("turn_end");
+    await expectAbortAfterTurnEnd();
   });
 });
 
@@ -415,8 +442,14 @@ describe("what a tool started by Pi can reach", () => {
         reason: "user_cancelled",
       });
       await h.agent.stop(500);
-      await new Promise((r) => setTimeout(r, 200));
-      expect(() => process.kill(pid, 0)).toThrow();
+      // process.kill(pid, 0) also succeeds on a zombie: check the /proc state, polling.
+      await until(() => {
+        try {
+          return readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1]?.startsWith("Z") === true;
+        } catch {
+          return true; // gone
+        }
+      });
     },
   );
 });
@@ -448,11 +481,11 @@ describe("extension UI relay", () => {
     await h.server.command(runStart("dialog"));
     await h.server.waitFor((f) => f.type === "pi.ui_request");
     h.server.terminate();
-    await h.server.waitFor((f) => f.type === "hello" && h.server.connections === 2);
-    await new Promise((r) => setTimeout(r, 200));
-    const cancelled = (await h.commandsLog()).filter(
-      (c) => c.type === "extension_ui_response" && c.id === "ui-1",
-    );
+    await h.server.waitForOn(2, (f) => f.type === "hello");
+    const cancelledLines = async () =>
+      (await h.commandsLog()).filter((c) => c.type === "extension_ui_response" && c.id === "ui-1");
+    await until(async () => (await cancelledLines()).length > 0);
+    const cancelled = await cancelledLines();
     expect(cancelled).toEqual([{ type: "extension_ui_response", id: "ui-1", cancelled: true }]);
     expect(
       h.server.received.filter((r) => r.connection === 2 && r.frame.type === "pi.ui_request"),
@@ -464,10 +497,8 @@ describe("extension UI relay", () => {
     await h.server.command(runStart("dialog"));
     await h.server.waitFor((f) => f.type === "pi.ui_request");
     h.server.terminate();
-    await h.server.waitFor((f) => f.type === "hello" && h.server.connections === 2);
-    await h.server.waitFor(
-      (f) => f.type === "pi.ui_request" && h.server.received.at(-1)?.connection === 2,
-    );
+    await h.server.waitForOn(2, (f) => f.type === "hello");
+    await h.server.waitForOn(2, (f) => f.type === "pi.ui_request");
   });
 });
 
@@ -529,8 +560,9 @@ describe("session.restore and branching (D13, D15)", () => {
     h = await startHarness();
     await h.server.command(restore(0, false, [entry("a1", null)], { header }));
     h.server.terminate();
-    await h.server.waitFor((f) => f.type === "hello" && h.server.connections === 2);
-    await new Promise((r) => setTimeout(r, 50));
+    await h.server.waitForOn(2, (f) => f.type === "hello");
+    // The partial temp file disappears once the restore has been voided.
+    await until(async () => (await readdir(h.sessions)).every((f) => !f.endsWith(".tmp")));
     // Not "restore in progress": the thread is usable, and part 1 has no part 0 any more.
     expect(await h.server.command(restore(1, true, []))).toMatchObject({ ok: false });
     expect(await h.server.command(runStart("say:x"))).toMatchObject({ ok: true });

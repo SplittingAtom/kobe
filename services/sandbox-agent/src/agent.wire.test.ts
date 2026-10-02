@@ -1,6 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
-import { SANDBOX_CLOSE_CODES, type SandboxToServerFrame } from "@kobe/protocol";
+import { SANDBOX_CLOSE_CODES } from "@kobe/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   RUN,
@@ -9,6 +9,7 @@ import {
   TOKEN,
   runStart,
   startHarness,
+  until,
   type Harness,
 } from "./testing/harness.js";
 
@@ -18,19 +19,8 @@ afterEach(async () => {
   await h.close();
 });
 
-const settledOn = (connection: number) => (f: SandboxToServerFrame) =>
-  f.type === "pi.event" &&
-  f.event.type === "agent_settled" &&
-  h.server.received.at(-1)?.connection === connection;
 const helloOn = (connection: number) => () =>
   h.server.received.some((r) => r.connection === connection && r.frame.type === "hello");
-const until = async (check: () => boolean, ms = 5000) => {
-  const deadline = Date.now() + ms;
-  while (!check()) {
-    if (Date.now() > deadline) throw new Error("condition not met");
-    await new Promise((r) => setTimeout(r, 10));
-  }
-};
 
 describe("dial-out connection", () => {
   it("dials the contract path with the token in Authorization and says hello", async () => {
@@ -129,7 +119,7 @@ describe("delivery and resume", () => {
     await until(helloOn(2));
     const hello = h.server.frames("hello")[1];
     expect(hello?.runs).toEqual([{ run_id: RUN, thread_id: THREAD, last_seq: 6 }]);
-    await h.server.waitFor(settledOn(2));
+    await h.server.waitForOn(2, (f) => f.type === "pi.event" && f.event.type === "agent_settled");
     const resent = h.server.received
       .filter((r) => r.connection === 2 && r.frame.type === "pi.event")
       .map((r) => (r.frame as { seq: number }).seq);
@@ -140,7 +130,7 @@ describe("delivery and resume", () => {
     h = await startHarness();
     await h.server.command(runStart("say:Hi"));
     await h.server.waitFor((f) => f.type === "pi.event" && f.event.type === "agent_settled");
-    await new Promise((r) => setTimeout(r, 50));
+    await until(() => h.agent.deliveryState().length === 0); // every frame acked
     h.server.terminate();
     await until(helloOn(2));
     expect(h.server.frames("hello")[1]?.runs).toEqual([]);
@@ -205,7 +195,7 @@ describe("delivery and resume", () => {
     });
     await h.server.command(runStart("hang"));
     await h.server.waitFor((f) => f.type === "pi.event" && f.event.type === "agent_start");
-    await new Promise((r) => setTimeout(r, 50));
+    await until(() => (h.agent.deliveryState()[0]?.acked_seq ?? 0) >= 1);
     durable = 0; // server regressed below what it acked
     h.server.terminate();
     await until(helloOn(3));
@@ -218,9 +208,7 @@ describe("delivery and resume", () => {
     await h.server.command(runStart("hang"));
     h.server.terminate();
     await until(helloOn(2));
-    await new Promise((r) => setTimeout(r, 200));
-    const types = (await h.commandsLog()).map((c) => c.type);
-    expect(types).toContain("abort");
+    await until(async () => (await h.commandsLog()).some((c) => c.type === "abort"));
     h.server.terminate();
     await until(helloOn(3));
     expect(h.server.frames("hello")[2]?.runs).toEqual([]);

@@ -129,6 +129,14 @@ export class Agent {
     this.#deps.onExit(code);
   }
 
+  /** Per-run delivery cursors (diagnostics and tests). */
+  deliveryState(): { run_id: string; last_seq: number; acked_seq: number }[] {
+    return this.#outbox.runIds().map((runId) => {
+      const run = this.#outbox.get(runId);
+      return { run_id: runId, last_seq: run?.lastSeq ?? 0, acked_seq: run?.ackedSeq ?? 0 };
+    });
+  }
+
   /** Synchronous last resort on process exit: no Pi process group outlives the agent. */
   killAll(): void {
     this.#threads.killAll();

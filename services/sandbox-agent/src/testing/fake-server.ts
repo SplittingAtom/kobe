@@ -131,6 +131,21 @@ export class FakeServer {
     }
   }
 
+  /** Wait for a frame received on a given connection (scans each frame with its own connection). */
+  async waitForOn(
+    connection: number,
+    match: (frame: SandboxToServerFrame) => boolean,
+    timeoutMs = 10_000,
+  ): Promise<SandboxToServerFrame> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const hit = this.received.find((r) => r.connection === connection && match(r.frame));
+      if (hit !== undefined) return hit.frame;
+      if (Date.now() > deadline) throw new Error("timed out waiting for a frame");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+
   close(code: number, reason = ""): void {
     this.#socket?.close(code, reason);
   }

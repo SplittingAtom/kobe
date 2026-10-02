@@ -214,12 +214,14 @@ export class Thread {
     return this.#run?.ended ?? Promise.resolve();
   }
 
-  /** Stop after the in-flight step (`turn_end`); returns true when an abort is due now. */
-  markStopAfterStep(): boolean {
+  /**
+   * Stop after the in-flight step: abort on the next `turn_end` (or the run settles first). Never
+   * "now": Pi answers `prompt` before it emits `agent_start`, so a stop that arrives in between would
+   * otherwise see an idle-looking thread and abort a step that is about to run.
+   */
+  markStopAfterStep(): void {
     const run = this.#run;
-    if (run === undefined) return false;
-    run.stopAfterStep = true;
-    return !this.#streaming;
+    if (run !== undefined) run.stopAfterStep = true;
   }
 
   /** Mark the run as stopping; false when a stop is already under way. */
