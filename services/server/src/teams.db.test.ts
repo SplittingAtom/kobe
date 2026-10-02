@@ -13,7 +13,7 @@ const PASSWORD = "a long enough password";
 let database: TestDatabase;
 let deps: ServerDeps;
 let app: ReturnType<typeof createApp>;
-let admin: pg.Pool;
+let admin: pg.Client;
 
 const ids: Record<"owner" | "installAdmin" | "alice" | "bob" | "carol" | "dave", string> = {
   owner: "",
@@ -39,7 +39,9 @@ let marketing = "";
 
 beforeAll(async () => {
   database = await createTestDatabase(testServerUrl());
-  admin = new pg.Pool({ connectionString: database.adminUrl });
+  // A single client: unlike Pool#end, Client#end resolves only once the connection is closed.
+  admin = new pg.Client({ connectionString: database.adminUrl });
+  await admin.connect();
   deps = createServerDeps({
     databaseUrl: database.appUrl,
     publicUrl: PUBLIC_URL,
@@ -61,10 +63,37 @@ beforeAll(async () => {
   ) as Record<Person, TestBrowser>;
 });
 
+/**
+ * Pool#end resolves before its idle connections have closed; dropping the database WITH (FORCE)
+ * meanwhile terminates them (57P01) on clients without an error listener. Wait until the server
+ * sees none of our app-role sessions before dropping.
+ */
+async function waitForAppSessionsToClose(): Promise<void> {
+  const server = new pg.Client({ connectionString: testServerUrl() });
+  await server.connect();
+  try {
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      const { rows } = await server.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM pg_stat_activity WHERE usename = $1`,
+        [database.appRole],
+      );
+      if (rows[0]?.n === 0) return;
+      if (Date.now() > deadline) throw new Error("app-role sessions still open after 10 s");
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  } finally {
+    await server.end();
+  }
+}
+
 afterAll(async () => {
   await deps?.close();
   await admin?.end();
-  await database?.drop();
+  if (database) {
+    await waitForAppSessionsToClose();
+    await database.drop();
+  }
 });
 
 describe("install roles (ac-3)", () => {
