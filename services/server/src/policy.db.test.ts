@@ -20,6 +20,7 @@ import {
   updateTeamRule,
 } from "./policy/rule-store.js";
 import { TestBrowser, type TestResponse } from "./testing/browser.js";
+import { MemoryMailer } from "./testing/mailer.js";
 import { policyInput, type InputOptions } from "./testing/policy-fixtures.js";
 
 const PUBLIC_URL = "http://kobe.test";
@@ -64,9 +65,13 @@ async function createTeam(slug: string, admin: Person): Promise<string> {
   return res.json.team.id as string;
 }
 
+/** Adds an existing user through a team invitation they accept (KOBE-13). */
 async function addMember(teamAdmin: Person, who: Person, role: string): Promise<void> {
-  const res = await as[teamAdmin].post("/v1/team/members", { email: email(who), role });
-  expect(res.status, JSON.stringify(res.json)).toBe(201);
+  const res = await as[teamAdmin].post("/v1/team/invites", { email: email(who), role });
+  expect(res.status, JSON.stringify(res.json)).toBe(202);
+  const teamId = as[teamAdmin].team;
+  const accepted = await as[who].post(`/v1/me/invites/${teamId}/accept`);
+  expect(accepted.status, JSON.stringify(accepted.json)).toBe(200);
 }
 
 function decide(
@@ -90,6 +95,7 @@ beforeAll(async () => {
     authSecret: "p".repeat(48),
     setupToken: "setup-token-for-policy-tests-01",
     trustedProxies: ["127.0.0.1/32"],
+    mailer: new MemoryMailer(),
   });
   app = createApp(deps);
   engine = createPolicyEngine({
