@@ -113,6 +113,20 @@
       "when": 1790960500579,
       "tag": "0015_audit_log_append_only",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1790965563266,
+      "tag": "0016_sandbox_wire",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1790965563711,
+      "tag": "0017_sandbox_wire_rls",
+      "breakpoints": true
     }
   ]
 }

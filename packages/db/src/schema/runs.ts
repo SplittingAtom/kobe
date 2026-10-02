@@ -73,6 +73,12 @@ export const runs = pgTable(
     lastSeq: integer().notNull().default(0),
     /** Set by the D18 compaction job once this ended run's events are folded into entries. */
     eventsCompactedAt: timestamp({ withTimezone: true }),
+    /**
+     * Durable inbound sandbox-wire cursor (KOBE-24; `@kobe/protocol` sandbox-wire/connection.ts):
+     * the highest `pi.event` seq of this run whose effects are committed. Advanced only by a
+     * compare-and-set in the same transaction as the appended rows; never decreases (trigger).
+     */
+    sandboxSeq: integer().notNull().default(0),
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.id] }),
@@ -104,6 +110,7 @@ export const runs = pgTable(
     ),
     check("runs_queue_pos", sql`${t.queuePos} IS NULL OR ${t.status} = 'queued'`),
     check("runs_last_seq", sql`${t.lastSeq} >= 0`),
+    check("runs_sandbox_seq", sql`${t.sandboxSeq} >= 0`),
     check(
       "runs_events_compacted_at",
       sql`${t.eventsCompactedAt} IS NULL OR ${t.endedAt} IS NOT NULL`,

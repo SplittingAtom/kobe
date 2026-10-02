@@ -174,6 +174,23 @@ export const AUDIT_EVENTS = {
   "thread.restored": event("team", { threadId: id }),
   "thread.sharing_changed": event("team", { threadId: id, projectId: id, shared: z.boolean() }),
 
+  // ── run: lifecycle metadata the server decides on its own (KOBE-24; never content) ──
+  /** The wire ended an active run as interrupted (D14: sandbox or Pi lost; actor: system). */
+  "run.interrupted": event("team", {
+    runId: id,
+    threadId: id,
+    cause: z.enum(["sandbox_gone", "not_resumed", "pi_exited"]),
+  }),
+
+  // ── sandbox: the sandbox wire (KOBE-24, D13); throttled per sandbox and violation ──
+  /** A sandbox named a run, thread or command not leased to its connection (closed; system). */
+  "sandbox.lease_violation": event("team", {
+    sandboxId: id,
+    userId: id,
+    violation: z.enum(["unknown_run", "unknown_thread", "unknown_command"]),
+    frameType: z.string().regex(/^[a-z][a-z_.]{0,31}$/),
+  }),
+
   // ── agent: definitions (D19); team agents in the team view, personal and gallery install-only ──
   "agent.created": event("any", {
     ...agentRef,
