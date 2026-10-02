@@ -8,6 +8,7 @@ below.
 
 ```bash
 git worktree add ../Kobe-wt<N> -b kobe-<N>-<slug> origin/main
+cp ../Kobe/CLAUDE.local.md ../Kobe-wt<N>/   # local infra notes (gitignored)
 cd ../Kobe-wt<N> && pnpm install --frozen-lockfile
 ```
 
@@ -61,7 +62,7 @@ green afterwards.
 
 - **Postgres for tests:** `KOBE_TEST_DATABASE_URL` points at a server, not a database. Each test
   run creates its own throwaway `kobe_test_<random>` database and roles, so agents can share one
-  server (the dev Postgres on compute2) safely.
+  server (the dev Postgres; URL in `CLAUDE.local.md`) safely.
 - **Tilt against the real cluster:** each agent uses its own namespace and port-forward:
 
   ```bash
@@ -70,7 +71,7 @@ green afterwards.
 
   The namespace must be `kobe-dev` or start with `kobe-dev-`. k3d dev stays on `kobe-dev`.
 
-- **k3d end-to-end on compute2:** one cluster at a time (inotify limits). Prefer CI's `e2e` job;
+- **k3d end-to-end on the remote Docker host:** one cluster at a time (inotify limits). Prefer CI's `e2e` job;
   run `e2e/run.sh` locally only when the coordinator says the cluster is free.
 
 ## Merging

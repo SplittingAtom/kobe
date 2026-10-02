@@ -6,7 +6,7 @@ githubConfigSecret: kobe-arc-github-app
 
 runnerScaleSetName: kobe-k3s
 minRunners: 0
-maxRunners: 4
+maxRunners: 6
 
 # Docker-in-Docker, written out instead of `containerMode: dind` so Docker's data and the job
 # workspace live on per-runner Longhorn scratch volumes rather than the nodes' small root disks.
