@@ -38,11 +38,10 @@ export interface RunIngestOptions {
   readonly threadId: string;
   /** Durable cursor (`runs.sandbox_seq`) when the lease was taken. */
   readonly cursor: number;
-  readonly translator: RunTranslator;
+  /** Fresh translator state (recreated after a failed batch: resent frames are translated again). */
+  readonly createTranslator: () => RunTranslator;
   readonly host: IngestHost;
   readonly tuning: WireTuning;
-  /** Most bytes of frames this run may hold in memory before new ones are dropped (and re-sent). */
-  readonly maxQueuedBytes?: number;
 }
 
 class CursorConflict extends Error {
@@ -60,7 +59,6 @@ interface Queued {
 }
 
 const DELTAS = new Set(["text.delta", "reasoning.delta"]);
-const DEFAULT_MAX_QUEUED_BYTES = 16 * 1024 * 1024;
 
 /** Concatenates adjacent deltas of the same message part (order otherwise unchanged). */
 export function coalesceDeltas(events: readonly NewRunEvent[], maxChars = 16_384): NewRunEvent[] {
@@ -92,7 +90,7 @@ export function coalesceDeltas(events: readonly NewRunEvent[], maxChars = 16_384
  * statement) together with the appended `run_events` and mirrored `thread_entries`; the cumulative
  * `ack` goes out only after commit. Duplicates (seq ≤ cursor) are dropped and acked; a gap is
  * dropped and answered with `resend` from the next expected seq. Memory is bounded: past
- * `maxQueuedBytes` frames are dropped and fetched again with `resend` once the queue drains, so a
+ * `runQueueMaxBytes` frames are dropped and fetched again with `resend` once the queue drains, so a
  * fast sandbox never makes the server buffer without limit and the socket is never paused (command
  * results must still get through while a batch waits for `get_entries`).
  */
@@ -110,10 +108,12 @@ export class RunIngest {
   #closed = false;
   #ended = false;
   #failures = 0;
+  #translator: RunTranslator;
 
   constructor(options: RunIngestOptions) {
     this.#o = options;
-    this.#maxBytes = options.maxQueuedBytes ?? DEFAULT_MAX_QUEUED_BYTES;
+    this.#translator = options.createTranslator();
+    this.#maxBytes = options.tuning.runQueueMaxBytes;
     this.#cursor = options.cursor;
     this.#next = options.cursor + 1;
   }
@@ -155,7 +155,16 @@ export class RunIngest {
     this.#queuedBytes += bytes;
     this.#next = frame.seq + 1;
     this.#wake?.();
-    if (!this.#working) void this.#work();
+    if (!this.#working) this.#start();
+  }
+
+  #start(): void {
+    this.#working = true;
+    // Nothing may reject unhandled out of a WebSocket handler: any failure is a failed batch.
+    this.#work().catch((err: unknown) => {
+      this.#working = false;
+      this.#recover(err, this.#cursor);
+    });
   }
 
   close(): void {
@@ -165,21 +174,21 @@ export class RunIngest {
     this.#wake?.();
   }
 
-  #requestResend(from: number): void {
+  /** `force` for retries: a deduped retry could stall a run that has gone quiet. */
+  #requestResend(from: number, force = false): void {
     const now = Date.now();
     // The agent re-sends everything after `from`; every later frame of the gap would ask again.
-    if (this.#lastResend && this.#lastResend.from === from && now - this.#lastResend.at < 1_000) {
-      return;
-    }
+    const recent =
+      this.#lastResend && this.#lastResend.from === from && now - this.#lastResend.at < 1_000;
+    if (recent && !force) return;
     this.#lastResend = { from, at: now };
     this.#o.host.sendResend(this.#o.runId, from);
   }
 
-  #take(n: number): Queued[] {
-    const taken = this.#queue.slice(0, n);
-    this.#queue = this.#queue.slice(n);
-    for (const q of taken) this.#queuedBytes -= q.bytes;
-    return taken;
+  #takeOne(): Queued | undefined {
+    const item = this.#queue.shift();
+    if (item) this.#queuedBytes -= item.bytes;
+    return item;
   }
 
   /** Waits for a frame or the window to pass, whichever is first. */
@@ -196,8 +205,7 @@ export class RunIngest {
   }
 
   async #work(): Promise<void> {
-    this.#working = true;
-    const { tuning, translator, host } = this.#o;
+    const { tuning, host } = this.#o;
     try {
       let frames: number[] = [];
       let events: NewRunEvent[] = [];
@@ -216,10 +224,10 @@ export class RunIngest {
           events = [];
           continue;
         }
-        const [item] = this.#take(1);
+        const item = this.#takeOne();
         if (!item) continue;
         if (frames.length === 0) windowEnds = Date.now() + tuning.batchWindowMs;
-        const t = await translator.translate(item.frame.seq, item.frame.event);
+        const t = await this.#translator.translate(item.frame.seq, item.frame.event);
         if (t.invalid !== undefined) host.sendError("malformed_frame", t.invalid, "pi.event");
         if (t.dropped > 0) host.log.debug({ run_id: this.#o.runId }, "dropped invalid Pi output");
         frames.push(item.frame.seq);
@@ -247,18 +255,19 @@ export class RunIngest {
       this.#starvedFrom !== undefined
     ) {
       this.#starvedFrom = undefined;
-      this.#requestResend(this.#next);
+      this.#requestResend(this.#next, true);
     }
   }
 
   async #flush(frames: number[], events: NewRunEvent[], sync: boolean, settled: boolean) {
-    const { db, teamId, runId, threadId, host, translator } = this.#o;
+    const { db, teamId, runId, threadId, host } = this.#o;
+    const translator = this.#translator;
     const first = frames[0];
     const last = frames[frames.length - 1];
     if (first === undefined || last === undefined) return;
-    // Network I/O (get_entries) before the transaction, never inside it (KOBE-29/31).
-    const entries = sync ? await host.fetchNewEntries(threadId) : undefined;
     try {
+      // Network I/O (get_entries) before the transaction, never inside it (KOBE-29/31).
+      const entries = sync ? await host.fetchNewEntries(threadId) : undefined;
       const ended = await withAppendTx(db, teamId, async (tx) => {
         const touchesThread = entries !== undefined || settled;
         if (touchesThread) {
@@ -319,6 +328,8 @@ export class RunIngest {
     this.#queue = [];
     this.#queuedBytes = 0;
     this.#starvedFrom = undefined;
+    // The batch's translation (message ids, completed messages) was not committed.
+    this.#translator = this.#o.createTranslator();
     if (err instanceof CursorConflict) {
       this.#cursor = err.cursor;
       this.#next = err.cursor + 1;
@@ -343,7 +354,7 @@ export class RunIngest {
     }
     const retry = setTimeout(
       () => {
-        if (!this.#closed && !this.#ended) this.#requestResend(this.#next);
+        if (!this.#closed && !this.#ended) this.#requestResend(this.#next, true);
       },
       250 * 2 ** this.#failures,
     );

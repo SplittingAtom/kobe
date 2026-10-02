@@ -190,7 +190,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
   };
 
   const sweep = async (): Promise<SweepResult> => {
-    const result = await sweepOnce(db, bus, tuning);
+    const result = await sweepOnce(db, bus, tuning, log);
     for (const run of result.interrupted) {
       metrics.runsInterrupted += 1;
       ctx.runEnded({ ...run, status: "interrupted" });
@@ -215,6 +215,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
   if (options.sweep !== false) scheduleSweep();
 
   const detachers: (() => void)[] = [];
+  let sockets = 0;
   let closed = false;
 
   return {
@@ -228,7 +229,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
         principalAllowed,
         log,
         maxConnections: options.maxConnections ?? 5_000,
-        connections: () => registry.size,
+        connections: () => sockets,
         onRefused: (status, reason) => {
           metrics.upgradesRefused += 1;
           log.info({ status, reason }, "sandbox upgrade refused");
@@ -238,6 +239,10 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
             socket.close(1001, "server shutting down");
             return;
           }
+          sockets += 1;
+          socket.once("close", () => {
+            sockets -= 1;
+          });
           new SandboxConnection(
             ctx,
             socket,

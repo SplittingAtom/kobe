@@ -99,6 +99,8 @@ export class FakeSandbox {
   }[] = [];
   restored: { part: number; final: boolean; entries: unknown[] }[] = [];
   respond: Responder | undefined;
+  /** Observes every decoded frame after the default answers. */
+  onFrame: ((frame: ServerToSandboxFrame) => void) | undefined;
   autoAnswer = true;
 
   static async connect(
@@ -134,6 +136,7 @@ export class FakeSandbox {
       }
       this.received.push(decoded.frame);
       this.#answer(decoded.frame);
+      this.onFrame?.(decoded.frame);
     });
     socket.on("close", (code, reason) => {
       this.closed = { code, reason: reason.toString() };

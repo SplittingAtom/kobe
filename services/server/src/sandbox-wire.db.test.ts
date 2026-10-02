@@ -472,6 +472,16 @@ describe("interrupted runs (D14)", () => {
     expect((await runRow(w.team, w.runId)).status).toBe("interrupted");
   });
 
+  it("the sweep keeps a run whose sandbox reconnected and resumed it", async () => {
+    const w = await world();
+    const first = await started(w);
+    first.close();
+    await connect(1, w, [{ run_id: w.runId, thread_id: w.threadId, last_seq: 0 }]);
+    const result = await fx.replica(0).deps.sandboxWire.sweep();
+    expect(result.interrupted.map((r) => r.runId)).not.toContain(w.runId);
+    expect((await runRow(w.team, w.runId)).status).toBe("running");
+  });
+
   it("pi.exited interrupts the thread's active run", async () => {
     const w = await world();
     const sb = await started(w);
@@ -610,6 +620,36 @@ describe("leasing and the compromised-sandbox suite", () => {
     expect((await sb.waitClosed()).code).toBe(SANDBOX_CLOSE_CODES.protocol_error);
   });
 
+  it("keeps exactly one connection when the same sandbox connects twice at once", async () => {
+    const w = await world();
+    const open = async (replica: number) => {
+      const sb = await FakeSandbox.connect(url(replica), w.token);
+      if (!isFake(sb)) throw new Error("refused");
+      sandboxes.push(sb);
+      return sb;
+    };
+    const [a, b, c] = await Promise.all([open(0), open(0), open(1)]);
+    for (const sb of [a, b, c]) sb.hello(w.sandboxId);
+    await expect
+      .poll(
+        () =>
+          [a, b, c].filter((sb) => sb.closed === undefined && sb.frames("hello.ack").length > 0)
+            .length,
+        {
+          timeout: 5_000,
+        },
+      )
+      .toBe(1);
+    await sleep(300);
+    const alive = [a, b, c].filter((sb) => sb.closed === undefined);
+    expect(alive).toHaveLength(1);
+    const { rows } = await fx.admin.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM sandbox_connections WHERE team_id = $1 AND closed_at IS NULL`,
+      [w.team],
+    );
+    expect(rows[0]?.n).toBe(1);
+  });
+
   it("closes every connection of a deactivated user on every replica", async () => {
     const w = await world();
     const sb = await connect(1, w);
@@ -650,6 +690,17 @@ describe("policy.check", () => {
           (await events(w.team, w.runId)).filter((e) => e.type === "policy.denied").length,
       )
       .toBe(2);
+  });
+
+  it("answers a request id once, even when the sandbox replays it", async () => {
+    const w = await world();
+    const sb = await started(w);
+    sb.send(check(w, "dup", "read", { path: "a" }));
+    await sb.until(() => sb.frames("policy.result").find((r) => r.request_id === "dup"));
+    sb.send(check(w, "dup", "read", { path: "a" }));
+    sb.send(check(w, "after", "read", { path: "b" }));
+    await sb.until(() => sb.frames("policy.result").find((r) => r.request_id === "after"));
+    expect(sb.frames("policy.result").filter((r) => r.request_id === "dup")).toHaveLength(1);
   });
 
   it("denies when the user is no longer a team member", async () => {

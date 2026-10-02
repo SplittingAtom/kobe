@@ -26,8 +26,11 @@ export interface WireTuning {
   readonly batchWindowMs: number;
   /** Most `pi.event` frames accepted in one transaction. */
   readonly batchMaxFrames: number;
-  /** Frames queued per connection before the socket stops being read (backpressure). */
-  readonly highWaterFrames: number;
+  /**
+   * Bytes of `pi.event` frames one run may hold in memory; past it new frames are dropped and
+   * fetched again with `resend` once the queue drains (backpressure without pausing the socket).
+   */
+  readonly runQueueMaxBytes: number;
   /** Inbound frames per second per connection (token bucket) and the burst. */
   readonly frameRatePerSec: number;
   readonly frameBurst: number;
@@ -53,17 +56,17 @@ export const WIRE_DEFAULTS: WireTuning = {
   helloTimeoutMs: SANDBOX_HELLO_TIMEOUT_MS,
   heartbeatIntervalMs: SANDBOX_HEARTBEAT_INTERVAL_MS,
   heartbeatTimeoutMs: SANDBOX_HEARTBEAT_TIMEOUT_MS,
-  revalidateMs: 30_000,
+  revalidateMs: 60_000,
   touchMs: 15_000,
   staleConnectionMs: 60_000,
   lostGraceMs: 30_000,
   sweepMs: 10_000,
   batchWindowMs: 75,
   batchMaxFrames: 50,
-  highWaterFrames: 512,
+  runQueueMaxBytes: 16 * 1024 * 1024,
   frameRatePerSec: 500,
   frameBurst: 2_000,
-  maxPendingPolicyChecks: 64,
+  maxPendingPolicyChecks: 16,
   maxIngestFailures: 5,
   resultPollMs: 2_000,
   reconnectMinMs: 250,

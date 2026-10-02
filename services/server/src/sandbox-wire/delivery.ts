@@ -30,6 +30,8 @@ export interface DeliveryHost {
   leaseRun(runId: string, threadId: string, cursor: number): void;
   leaseThread(threadId: string): void;
   endLease(runId: string): void;
+  /** The sandbox has a newer connection: stop and close. */
+  replaced(): void;
 }
 
 export type IssuedCommand =
@@ -213,18 +215,19 @@ export class CommandDelivery {
     }
     if (since === undefined || outcome.error.code !== "pi_rejected") return outcome;
     this.#host.log.warn({ thread_id: threadId }, "Pi session lost; restoring from Postgres");
-    const parts = await withTeam(db, teamId, (tx) => restoreParts(tx, teamId, threadId));
-    for (const [part, entries] of parts.entries()) {
+    let part = 0;
+    for await (const { entries, final } of restoreParts(db, teamId, threadId)) {
       const restored = await this.#internal({
         v: 1,
         type: "session.restore",
         command_id: randomUUID(),
         thread_id: threadId,
         part,
-        final: part === parts.length - 1,
+        final,
         entries,
       });
       if (!restored.ok) return restored;
+      part += 1;
     }
     this.#synced.add(threadId);
     return { ok: true };
@@ -298,6 +301,13 @@ export class CommandDelivery {
       }
     }
     const claimed = await withTeam(ctx.db, teamId, async (tx) => {
+      // Only the sandbox's current connection delivers (a replaced one may not have noticed yet).
+      const current = await tx.execute(sql`
+        SELECT 1 FROM sandbox_connections
+         WHERE team_id = ${teamId} AND user_id = ${userId}
+           AND connection_id = ${this.#host.id} AND closed_at IS NULL
+         FOR SHARE`);
+      if (current.rowCount !== 1) return "replaced" as const;
       if (row.kind === "run.start") {
         const run = await loadRun(tx, teamId, row.runId ?? "");
         if (
@@ -324,6 +334,10 @@ export class CommandDelivery {
         : ("gone" as const);
     });
     if (claimed === "gone") return; // expired or taken meanwhile
+    if (claimed === "replaced") {
+      this.#host.replaced();
+      return;
+    }
     if (claimed === "run_not_active") {
       await this.#fail(row, failure("run_not_active", "the run is not active"));
       return;

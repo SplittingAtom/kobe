@@ -5,7 +5,7 @@ import {
   type PiGetEntriesData,
   type PiSessionEntry,
 } from "@kobe/protocol";
-import { sql, threadEntries, type KobeTx } from "@kobe/db";
+import { sql, threadEntries, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import type { NewRunEvent } from "../event-stream/append.js";
 import { ENTRY_EVENT_PAYLOAD_MAX_BYTES, RESTORE_PART_MAX_BYTES } from "./constants.js";
 
@@ -154,29 +154,42 @@ export function entryCommittedEvents(
   return out;
 }
 
-/** The thread's entries in append order, as `session.restore` parts of bounded size (D13, D15). */
-export async function restoreParts(
-  tx: KobeTx,
+/** Rows read per page while restoring (each row is at most one 4 MiB frame's worth). */
+const RESTORE_PAGE_ROWS = 16;
+
+/**
+ * The thread's entries in append order as `session.restore` parts of bounded size (D13, D15),
+ * read page by page (keyset on `seq`, one short transaction each), so a long thread is never held
+ * in memory at once. The last part has `final: true` (an empty thread yields one empty final part).
+ */
+export async function* restoreParts(
+  db: KobeDb,
   teamId: string,
   threadId: string,
-): Promise<PiSessionEntry[][]> {
-  const res = await tx.execute<{ payload: PiSessionEntry }>(sql`
-    SELECT payload FROM thread_entries
-     WHERE team_id = ${teamId} AND thread_id = ${threadId}
-     ORDER BY seq`);
-  const parts: PiSessionEntry[][] = [];
+): AsyncGenerator<{ entries: PiSessionEntry[]; final: boolean }> {
+  let after = 0;
   let part: PiSessionEntry[] = [];
   let bytes = 0;
-  for (const { payload } of res.rows) {
-    const size = Buffer.byteLength(JSON.stringify(payload), "utf8");
-    if (part.length > 0 && bytes + size > RESTORE_PART_MAX_BYTES) {
-      parts.push(part);
-      part = [];
-      bytes = 0;
+  for (;;) {
+    const rows = await withTeam(db, teamId, async (tx) => {
+      const res = await tx.execute<{ seq: number; payload: PiSessionEntry }>(sql`
+        SELECT seq, payload FROM thread_entries
+         WHERE team_id = ${teamId} AND thread_id = ${threadId} AND seq > ${after}
+         ORDER BY seq LIMIT ${RESTORE_PAGE_ROWS}`);
+      return res.rows;
+    });
+    for (const { seq, payload } of rows) {
+      const size = Buffer.byteLength(JSON.stringify(payload), "utf8");
+      if (part.length > 0 && bytes + size > RESTORE_PART_MAX_BYTES) {
+        yield { entries: part, final: false };
+        part = [];
+        bytes = 0;
+      }
+      part.push(payload);
+      bytes += size;
+      after = seq;
     }
-    part.push(payload);
-    bytes += size;
+    if (rows.length < RESTORE_PAGE_ROWS) break;
   }
-  parts.push(part);
-  return parts;
+  yield { entries: part, final: true };
 }

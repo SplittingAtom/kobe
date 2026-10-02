@@ -41,6 +41,9 @@ interface Lease {
 type State = "hello" | "starting" | "ready" | "closed";
 
 const MAX_BUFFERED_BYTES = 32 * 1024 * 1024;
+const POLICY_ANSWERED_MAX = 4_096;
+/** Ended leases kept to answer late frames with `run_not_active`; older ones are forgotten. */
+const ENDED_LEASES_MAX = 256;
 
 function remember(set: Set<string>, value: string, max: number): void {
   set.add(value);
@@ -74,6 +77,7 @@ export class SandboxConnection implements RegisteredConnection {
   readonly #threads = new Set<string>();
   readonly #uiSeen = new Set<string>();
   readonly #policyPending = new Map<string, AbortController>();
+  readonly #policyAnswered = new Set<string>();
   readonly #delivery: CommandDelivery;
   #state: State = "hello";
   #lastInbound = Date.now();
@@ -156,6 +160,10 @@ export class SandboxConnection implements RegisteredConnection {
     this.#delivery.poke();
   }
 
+  replaced(): void {
+    this.close("replaced", "replaced by a newer connection");
+  }
+
   // ------------------------------------------------------------------ leases (used by delivery)
 
   hasLiveLease(runId: string): boolean {
@@ -185,6 +193,10 @@ export class SandboxConnection implements RegisteredConnection {
     if (!lease) return;
     lease.ended = true;
     lease.ingest.close();
+    const ended = [...this.#leases].filter(([, l]) => l.ended);
+    for (const [id] of ended.slice(0, Math.max(0, ended.length - ENDED_LEASES_MAX))) {
+      this.#leases.delete(id);
+    }
   }
 
   #newIngest(runId: string, threadId: string, cursor: number): RunIngest {
@@ -196,7 +208,8 @@ export class SandboxConnection implements RegisteredConnection {
       threadId,
       cursor,
       tuning: ctx.tuning,
-      translator: createRunTranslator({ teamId: this.target.teamId, registry: ctx.tools }),
+      createTranslator: () =>
+        createRunTranslator({ teamId: this.target.teamId, registry: ctx.tools }),
       host: {
         metrics: ctx.metrics,
         log: this.log,
@@ -370,7 +383,8 @@ export class SandboxConnection implements RegisteredConnection {
       return;
     }
     const key = `${frame.run_id}:${frame.request_id}`;
-    if (this.#policyPending.has(key)) return; // duplicate request id: one answer
+    // One answer per request id, also after it was answered (a replay must not ask twice).
+    if (this.#policyPending.has(key) || this.#policyAnswered.has(key)) return;
     const abort = new AbortController();
     this.#policyPending.set(key, abort);
     this.#ctx.metrics.policyChecks += 1;
@@ -386,6 +400,7 @@ export class SandboxConnection implements RegisteredConnection {
       }),
     ).then((result) => {
       this.#policyPending.delete(key);
+      remember(this.#policyAnswered, key, POLICY_ANSWERED_MAX);
       // A run that ended while we decided gets a deny, whatever the decision was.
       const lease = this.#leases.get(frame.run_id);
       this.send(
@@ -420,13 +435,15 @@ export class SandboxConnection implements RegisteredConnection {
     const key = `${frame.thread_id}:${frame.request.id}`;
     if (this.#uiSeen.has(key)) return; // re-sent after a reconnect (KOBE-23): answered once
     remember(this.#uiSeen, key, UI_DEDUPE_MAX);
-    void this.#ctx.ui
-      .handle({
-        target: this.target,
-        threadId: frame.thread_id,
-        ...(frame.run_id === undefined ? {} : { runId: frame.run_id }),
-        request: frame.request,
-      })
+    Promise.resolve()
+      .then(() =>
+        this.#ctx.ui.handle({
+          target: this.target,
+          threadId: frame.thread_id,
+          ...(frame.run_id === undefined ? {} : { runId: frame.run_id }),
+          request: frame.request,
+        }),
+      )
       .then((response) => {
         if (response)
           this.send({ v: 1, type: "pi.ui_response", thread_id: frame.thread_id, response });
@@ -472,9 +489,17 @@ export class SandboxConnection implements RegisteredConnection {
       this.close("unsupported_version", `Pi ${hello.pi_version.slice(0, 32)} is not supported`);
       return;
     }
-    await this.#registry.register(this);
+    const current = await this.#registry.register(this);
     this.#registered = true;
-    if ((this.#state as State) === "closed") return;
+    if ((this.#state as State) === "closed") {
+      // Torn down while registering: nothing else will mark the row closed.
+      await this.#registry.unregister(this);
+      return;
+    }
+    if (!current) {
+      this.close("replaced", "a newer connection of this sandbox registered first");
+      return;
+    }
     const { teamId, userId } = this.target;
     const offered = new Map(hello.runs.map((r) => [r.run_id, r]));
     const { listed, lost, orphans } = await withTeam(ctx.db, teamId, async (tx) => {
