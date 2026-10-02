@@ -1,6 +1,6 @@
 # KOBE-15: Append-only audit log
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #26)
 - **Branch / worktree:** `kobe-15-audit-log` in `../Kobe-wt15`
 - **Depends on:** KOBE-14, KOBE-13, KOBE-12, KOBE-45, KOBE-9, KOBE-11 (all merged)
 
