@@ -92,6 +92,20 @@
       "when": 1790928902721,
       "tag": "0012_tool_rules_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1790929776786,
+      "tag": "0013_audit_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1790929777099,
+      "tag": "0014_audit_log_append_only",
+      "breakpoints": true
     }
   ]
 }
