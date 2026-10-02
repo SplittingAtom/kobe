@@ -10,7 +10,7 @@ import {
   type TeamPermission,
 } from "./permissions.js";
 
-/** Optional request header naming the team the client believes is active (multi-tab guard). */
+/** Header naming the team the client believes is active (multi-tab guard); required on changes. */
 export const TEAM_HEADER = "x-kobe-team";
 
 export interface ActiveTeam {
@@ -26,6 +26,7 @@ export interface TeamVariables extends AuthVariables {
 }
 
 const uuid = z.uuid();
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 /** 403 unless the caller's install role holds `permission`. Runs after requireSession. */
 export function requireInstallPermission(permission: InstallPermission) {
@@ -58,6 +59,14 @@ export async function readActiveTeamId(
 export function requireTeam(deps: ServerDeps) {
   return createMiddleware<{ Variables: TeamVariables }>(async (c, next) => {
     const claimed = c.req.header(TEAM_HEADER);
+    // Changes must name the team the client is acting on, so a stale tab can't write to the team
+    // another tab switched to. Reads may omit it (the web client always sends it).
+    if (claimed === undefined && !SAFE_METHODS.has(c.req.method)) {
+      return c.json(
+        { code: "team_header_required", message: `Send ${TEAM_HEADER} with team changes.` },
+        400,
+      );
+    }
     if (claimed !== undefined && !uuid.safeParse(claimed).success) {
       return c.json({ code: "invalid_request", message: `${TEAM_HEADER} must be a team id.` }, 400);
     }

@@ -14,6 +14,8 @@ export interface TestResponse {
 export class TestBrowser {
   readonly cookies = new Map<string, string>();
   readonly ip = `198.51.100.${nextIp++ % 250}`;
+  /** When set, sent as X-Kobe-Team (the team this "tab" believes is active). */
+  team: string | undefined;
 
   constructor(
     private readonly app: Hono,
@@ -29,6 +31,7 @@ export class TestBrowser {
     const headers: Record<string, string> = {
       origin: this.publicUrl,
       "x-forwarded-for": this.ip,
+      ...(this.team ? { "x-kobe-team": this.team } : {}),
       ...extraHeaders,
     };
     if (this.cookies.size > 0)

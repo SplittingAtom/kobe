@@ -53,8 +53,9 @@
   (session_id PK → `sessions` ON DELETE CASCADE, team_id → `teams`), not a Better Auth
   additional field: Better Auth's `update-session` endpoint could otherwise set it. Allowlisted
   in `teamReferencing` (a pointer, no team content). Per session, so two devices can sit in
-  different teams; a stale tab is caught by the optional `X-Kobe-Team` header (409
-  `team_mismatch`).
+  different teams; a stale tab is caught by the `X-Kobe-Team` header (409 `team_mismatch`),
+  which is **required on non-GET team-scoped requests** (400 `team_header_required`) and optional
+  on reads.
 - **No team is auto-selected server-side.** Team-scoped routes return 409 `no_active_team`; the web
   switcher activates the last-used team (localStorage) or the first one on load.
 - **Listing a user's teams keeps `team_members` behind its single canonical policy**: one
@@ -80,7 +81,10 @@
 ## Open questions (for Chris or the coordinator)
 
 - Should ownership transfer require a fresh password/TOTP confirmation? Not in the spec; not done.
-- Team admins can learn whether an email belongs to a Kobe user (404 vs 201 when adding by email).
+- Team admins can learn whether an email belongs to a Kobe user (404 vs 201 when adding by email)
+  (security review MEDIUM, left open): should adding by email go through KOBE-13 invitations?
+- Security review: install-admin membership changes (and an admin naming a puppet account team
+  admin) are only detectable once KOBE-15 audits them.
 
 ## Evidence (acceptance criteria → test or command output)
 

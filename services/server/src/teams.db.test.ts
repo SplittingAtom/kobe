@@ -309,6 +309,26 @@ describe("team membership via /v1/team (ac-2, ac-4)", () => {
     await as.alice.put("/v1/me/teams/active", { teamId: finance });
     await as.bob.put("/v1/me/teams/active", { teamId: finance });
     await as.carol.put("/v1/me/teams/active", { teamId: finance });
+    for (const who of ["alice", "bob", "carol"] as const) as[who].team = finance;
+  });
+
+  it("requires X-Kobe-Team on team changes (a stale tab can't write to another team)", async () => {
+    const res = await as.alice.request(
+      "PATCH",
+      `/v1/team/members/${ids.bob}`,
+      { role: "builder" },
+      { "x-kobe-team": "" },
+    );
+    expect(res.status).toBe(400);
+    as.alice.team = undefined;
+    expect(await as.alice.patch(`/v1/team/members/${ids.bob}`, { role: "builder" })).toMatchObject({
+      status: 400,
+      json: { code: "team_header_required" },
+    });
+    as.alice.team = finance;
+    expect((await as.alice.get("/v1/team/members")).json.members).toEqual(
+      expect.arrayContaining([expect.objectContaining({ userId: ids.bob, role: "member" })]),
+    );
   });
 
   it("lets members read the roster but not change it", async () => {
