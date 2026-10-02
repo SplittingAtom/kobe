@@ -1,7 +1,7 @@
 import {
   BUILTIN_TOOLS,
   canonicalJson,
-  globSchema,
+  GLOB_MAX_LENGTH,
   matchGlob,
   resolveJsonPointer,
   type ArgPattern,
@@ -30,8 +30,18 @@ function unmatchable(bias: MatchBias): boolean {
   return bias === "restrict";
 }
 
+/** The glob grammar's validity (protocol `globSchema`) without zod's per-call overhead. */
 function isValidGlob(glob: string): boolean {
-  return globSchema.safeParse(glob).success;
+  // Same bounds as `globSchema` (z.string().min(1).max(256): UTF-16 code units).
+  if (glob.length === 0 || glob.length > GLOB_MAX_LENGTH) return false;
+  const points = [...glob];
+  for (let i = 0; i < points.length; i += 1) {
+    if (points[i] === "\\") {
+      if (i === points.length - 1) return false;
+      i += 1;
+    }
+  }
+  return true;
 }
 
 /** Matches a glob against a subject, falling to `bias` when that can't be done safely. */
@@ -53,13 +63,15 @@ function subjectOf(value: unknown): string | undefined {
 
 /**
  * `arg_pattern` (contract: protocol glob.ts): every entry's pointer must resolve in the input and its
- * glob must match the value's subject. An unresolvable pointer never matches (both biases: the
- * rule simply does not apply to that input shape); an unmatchable subject falls to `bias`.
+ * glob must match the value's subject. An unresolvable pointer or an unmatchable subject falls to
+ * `bias`: a deny/ask rule whose pointer is missing still applies (an input can't dodge a rule by
+ * leaving a key out); an allow rule doesn't. JSON Pointer has no array wildcard: `/edits/0/oldText`
+ * names one element only.
  */
 export function matchArgPattern(pattern: ArgPattern, input: JsonObject, bias: MatchBias): boolean {
   return Object.entries(pattern).every(([pointer, glob]) => {
     const value = resolveJsonPointer(input, pointer);
-    if (value === undefined) return false;
+    if (value === undefined) return unmatchable(bias);
     const subject = subjectOf(value);
     if (subject === undefined) return unmatchable(bias);
     return matchSubject(glob, subject, bias);
@@ -83,16 +95,24 @@ export function splitAgentToolEntry(entry: string): { tool: string; arg: string 
   return { tool: entry, arg: undefined };
 }
 
-/** The input pointer an agent-file shorthand matches against (built-ins only, `primary_arg`). */
+/**
+ * Server-side corrections to the protocol's `primary_arg` (review KOBE-35 LOW 8): grep and find
+ * search a `path`; their `pattern` is a regex/glob, not where they read. Reported as a contract
+ * issue; the protocol table is not changed in this PR.
+ */
+const PRIMARY_ARG_OVERRIDES: Readonly<Record<string, string>> = { grep: "/path", find: "/path" };
+
+/** The input pointer an agent-file shorthand matches against (built-ins only). */
 function primaryArgPointer(tool: ToolDescriptor): string | undefined {
   if (tool.source === "mcp" || !Object.hasOwn(BUILTIN_TOOLS, tool.name)) return undefined;
-  return BUILTIN_TOOLS[tool.name]?.primary_arg;
+  return PRIMARY_ARG_OVERRIDES[tool.name] ?? BUILTIN_TOOLS[tool.name]?.primary_arg;
 }
 
 /**
  * Agent frontmatter `tools.allow` / `tools.deny` entry (D19): a tool glob, optionally with a
- * `:<glob>` over the tool's primary argument. A deny entry with an argument part on a tool that has
- * no primary argument falls back to the tool name alone (restrict); an allow entry does not match.
+ * `:<glob>` over the tool's primary argument (matched on the prepared input: canonical paths).
+ * A deny entry with an argument part on a tool that has no primary argument, or whose input lacks
+ * it, falls back to the tool name alone (restrict); an allow entry does not match.
  */
 export function matchAgentToolEntry(
   entry: string,
@@ -128,6 +148,17 @@ export function literalPrefix(glob: string): string {
 
 /** `mcp__<server segment>__` (segments as `mcpServerSegment` makes them: `[a-z0-9]` runs joined by `_`). */
 const MCP_CONNECTOR_PREFIX = /^mcp__[a-z0-9]+(?:_[a-z0-9]+)*__/;
+
+/** A valid glob with no unescaped `*` or `?`: it names exactly one tool. */
+export function isLiteralGlob(glob: string): boolean {
+  if (!isValidGlob(glob)) return false;
+  const points = [...glob];
+  for (let i = 0; i < points.length; i += 1) {
+    if (points[i] === "\\") i += 1;
+    else if (points[i] === "*" || points[i] === "?") return false;
+  }
+  return true;
+}
 
 /**
  * Allow rules (team and user) must name what they allow: exactly one built-in, or tools of one

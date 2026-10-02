@@ -1,4 +1,4 @@
-import type { ApprovalMode, RiskClass, ToolDescriptor } from "@kobe/protocol";
+import type { JsonObject, RiskClass, ToolDescriptor } from "@kobe/protocol";
 
 /**
  * Install-level policy switches. Stored in `install_settings` (one row per key), so an install
@@ -6,7 +6,7 @@ import type { ApprovalMode, RiskClass, ToolDescriptor } from "@kobe/protocol";
  */
 export interface PolicySettings {
   /**
-   * In `ask-on-write` (and `auto`, which denies what ask-on-write would prompt), whether
+   * In `ask-on-write`, whether
    * sandbox-scoped write/destructive built-ins (bash, powershell, write, edit) are prompted for by
    * risk class. Default `false`: D29 — "shell and file tools are bounded by the sandbox and egress
    * policy". Open question for Chris (KOBE-35 ledger); `true` makes them prompt like any write.
@@ -23,13 +23,19 @@ export const PROMPT_SANDBOX_WRITES_KEY = "policy.ask_on_write.prompt_sandbox_wri
 /**
  * Risk-class prompting in `ask-on-write` (D29), by where the tool's effects land and its risk.
  * `true` = prompt. `sandbox` rows follow {@link PolicySettings.promptSandboxWrites}. `kobe`-scoped
- * writes (artifacts, shared files, memory) prompt: D23/D24 make project writes approval-gated, and
- * personal `remember` is allowed by a built-in allow rule instead (allow-rules.ts).
+ * writes (artifacts, shared files, memory) prompt — D23/D24 make project writes approval-gated —
+ * except personal `remember` (D24: "personal writes via remember need no approval"), recognised by
+ * `scope: "personal"` in its input (KOBE-55/56 must define that field; anything else prompts).
+ * Only interactive runs use this table; auto mode and scheduled runs don't (evaluate.ts).
  */
 export function riskClassPrompts(
-  tool: Pick<ToolDescriptor, "risk" | "scope">,
+  tool: Pick<ToolDescriptor, "name" | "risk" | "scope" | "source">,
+  input: JsonObject,
   settings: PolicySettings,
 ): boolean {
+  if (tool.source === "kobe" && tool.name === "remember" && input.scope === "personal") {
+    return false;
+  }
   const table: Readonly<Record<ToolDescriptor["scope"], Readonly<Record<RiskClass, boolean>>>> = {
     sandbox: {
       read: false,
@@ -40,9 +46,4 @@ export function riskClassPrompts(
     external: { read: false, write: true, destructive: true },
   };
   return table[tool.scope][tool.risk];
-}
-
-/** Modes that never wait for a person: whatever would prompt is denied (D29 `auto`, D32). */
-export function modeNeverPrompts(mode: ApprovalMode): boolean {
-  return mode === "auto";
 }

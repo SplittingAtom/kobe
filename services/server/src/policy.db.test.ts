@@ -13,7 +13,12 @@ import { createApp } from "./app.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
 import { createPolicyEngine } from "./policy/engine.js";
 import { insertUserAllowRule } from "./policy/remember.js";
-import { createDbRuleSource, createDbSettingsSource, createTeamRule } from "./policy/rule-store.js";
+import {
+  createDbRuleSource,
+  createDbSettingsSource,
+  createTeamRule,
+  updateTeamRule,
+} from "./policy/rule-store.js";
 import { TestBrowser, type TestResponse } from "./testing/browser.js";
 import { policyInput, type InputOptions } from "./testing/policy-fixtures.js";
 
@@ -330,12 +335,68 @@ describe("team policy routes (D8: team admins manage, members read)", () => {
 
   it("caps rules per scope", async () => {
     const db = deps.database.db;
+    const limits = { rules: 1, argEntries: 100 };
     const fields = { tool_glob: "x", arg_pattern: null, note: null, expires_at: null };
-    const first = await createTeamRule(db, marketing, { ...fields, effect: "deny" }, ids.dave, 1);
+    const first = await createTeamRule(
+      db,
+      marketing,
+      { ...fields, effect: "deny" },
+      ids.dave,
+      limits,
+    );
     expect(first.ok).toBe(true);
-    const second = await createTeamRule(db, marketing, { ...fields, effect: "deny" }, ids.dave, 1);
+    const second = await createTeamRule(
+      db,
+      marketing,
+      { ...fields, effect: "deny" },
+      ids.dave,
+      limits,
+    );
     expect(second).toEqual({ ok: false, error: "too_many_rules" });
     if (first.ok) await as.dave.delete(`${path}/${first.rule.id}`);
+  });
+
+  it("caps arg-pattern entries per scope, counting updates", async () => {
+    const db = deps.database.db;
+    const limits = { rules: 10, argEntries: 3 };
+    const pattern = (n: number) =>
+      Object.fromEntries(Array.from({ length: n }, (_, i) => [`/k${i}`, "*"]));
+    const base = { tool_glob: "x", note: null, expires_at: null, effect: "deny" as const };
+    const a = await createTeamRule(
+      db,
+      marketing,
+      { ...base, arg_pattern: pattern(2) },
+      ids.dave,
+      limits,
+    );
+    expect(a.ok).toBe(true);
+    const b = await createTeamRule(
+      db,
+      marketing,
+      { ...base, arg_pattern: pattern(2) },
+      ids.dave,
+      limits,
+    );
+    expect(b).toEqual({ ok: false, error: "too_many_rules" });
+    if (!a.ok) return;
+    // Replacing a rule's own entries doesn't count them twice.
+    const grown = await updateTeamRule(
+      db,
+      marketing,
+      a.rule.id,
+      { ...base, arg_pattern: pattern(3) },
+      limits,
+    );
+    expect(grown.ok).toBe(true);
+    const tooBig = await updateTeamRule(
+      db,
+      marketing,
+      a.rule.id,
+      { ...base, arg_pattern: pattern(4) },
+      limits,
+    );
+    expect(tooBig).toEqual({ ok: false, error: "too_many_rules" });
+    await as.dave.delete(`${path}/${a.rule.id}`);
   });
 });
 
@@ -455,6 +516,15 @@ describe("D29 order end to end (rules from Postgres)", () => {
     );
   });
 
+  it("stores the exact tool: no widening to a connector or wildcard", async () => {
+    for (const tool_glob of ["mcp__jira__*", "mcp__jira__create_*", "*"]) {
+      expect(await remember("bob", finance, "mcp__jira__create_issue", { tool_glob })).toEqual({
+        ok: false,
+        error: "glob_too_broad",
+      });
+    }
+  });
+
   it("refuses a remember-rule for someone outside the team", async () => {
     await expect(remember("dave", finance, "bash", { tool_glob: "bash" })).rejects.toThrow();
   });
@@ -466,7 +536,8 @@ describe("D29 order end to end (rules from Postgres)", () => {
       [new Date(Date.now() - 1000)],
     );
     await as.installAdmin.put("/v1/install/policy/settings", { promptSandboxWrites: true });
-    expect((await decide("bob", finance, "edit", { path: "/workspace/x" })).effect).toBe(
+    const edits = [{ oldText: "a", newText: "b" }];
+    expect((await decide("bob", finance, "edit", { path: "/workspace/x", edits })).effect).toBe(
       "require_approval",
     );
     await as.installAdmin.put("/v1/install/policy/settings", { promptSandboxWrites: false });
@@ -482,6 +553,23 @@ describe("D29 order end to end (rules from Postgres)", () => {
       [ids.bob],
     );
     expect(rows[0]?.n).toBe(0);
+  });
+
+  it("a team allow rule only allow-lists for auto; it never lifts an interactive prompt", async () => {
+    await make("alice", team, { effect: "allow", tool_glob: "create_artifact" });
+    expect((await decide("carol", finance, "create_artifact")).effect).toBe("require_approval");
+    expect((await decide("carol", finance, "create_artifact", {}, { mode: "auto" })).effect).toBe(
+      "allow",
+    );
+    await cleanup();
+    expect((await decide("carol", finance, "create_artifact", {}, { mode: "auto" })).effect).toBe(
+      "deny",
+    );
+  });
+
+  it("denies MCP resource tools in v1", async () => {
+    const decision = await decide("carol", finance, "read_mcp_resource", { server: "x", uri: "y" });
+    expect(decision.effect).toBe("deny");
   });
 
   it("scheduled runs never wait: an ask rule becomes a deny", async () => {

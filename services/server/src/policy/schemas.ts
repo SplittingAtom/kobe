@@ -2,9 +2,12 @@ import { z } from "zod";
 import { argPatternSchema, globSchema, timestampSchema } from "@kobe/protocol";
 import { allowGlobScoped } from "./patterns.js";
 
-/** Rules per scope (install; team; one user in one team). Bounds evaluation cost per decision. */
-export const MAX_RULES_PER_SCOPE = 500;
-export const MAX_USER_RULES = 200;
+/**
+ * Caps per scope (install; team; one user in one team): rules and `arg_pattern` entries across
+ * them. Bounds evaluation work per decision (≤ 3 scopes × these).
+ */
+export const SCOPE_LIMITS = { rules: 500, argEntries: 2000 } as const;
+export const USER_LIMITS = { rules: 200, argEntries: 800 } as const;
 
 const noteSchema = z.string().trim().max(500);
 

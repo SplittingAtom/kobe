@@ -7,14 +7,15 @@ import {
   type RiskClass,
   type ToolDescriptor,
 } from "@kobe/protocol";
-import { checkAgentTools, checkConnector, type ConnectorPolicyState } from "./gates.js";
 import {
-  BUILTIN_ALLOW_RULES,
-  matchingRules,
-  type PolicyRule,
-  type PolicyRuleSet,
-} from "./rules.js";
-import { modeNeverPrompts, riskClassPrompts, type PolicySettings } from "./settings.js";
+  checkAgentTools,
+  checkAvailable,
+  checkConnector,
+  type ConnectorPolicyState,
+} from "./gates.js";
+import { matchingRules, type PolicyRule, type PolicyRuleSet } from "./rules.js";
+import { riskClassPrompts, type PolicySettings } from "./settings.js";
+import { prepareInput } from "./tool-inputs.js";
 
 /**
  * The D29 pipeline as one pure, synchronous function:
@@ -22,17 +23,19 @@ import { modeNeverPrompts, riskClassPrompts, type PolicySettings } from "./setti
  *   install deny → team deny → install/team ask → risk class → thread approval mode →
  *   user allow rules → prompt
  *
- * - Any deny (install rule, team rule, agent `tools.deny`/`tools.allow`, connector enablement,
- *   exposure or drift) decides `deny`. All matching deny reasons are reported, most significant
- *   first.
- * - A matching ask rule (install or team) decides `require_approval`. **Allow rules cannot remove
- *   it** (KOBE-35 decision (a)): the floor and team policy only tighten.
- * - Otherwise risk class and mode decide whether the call needs asking: `ask-all` asks for
- *   everything; `ask-on-write` and `auto` ask by `riskClassPrompts` (settings.ts).
- * - A user allow rule (also team allow rules and built-in allow rules) removes only a prompt that
- *   came from risk class or mode.
- * - `auto` mode and scheduled runs never return `require_approval`: whatever would prompt is
- *   denied, with the reason it would have prompted (D29, D32).
+ * - The input is checked first: built-ins against their strict Pi schema, file paths made
+ *   canonical (tool-inputs.ts). Rules match the canonical view.
+ * - Any deny (install rule, team rule, unavailable tool, agent `tools.deny`/`tools.allow`,
+ *   connector enablement, exposure or drift) decides `deny`; all deny reasons are reported.
+ * - A matching ask rule (install or team) decides `require_approval`. No allow rule removes it
+ *   (decision (a)).
+ * - Interactive runs (`ask-on-write`, `ask-all`): mode and risk class decide whether to ask
+ *   (`ask-all`: always; `ask-on-write`: `riskClassPrompts`). **Only the user's own allow rules
+ *   (approve and remember) lift that prompt** (D29: mode → user allow rules → prompt). Team allow
+ *   rules never lift a prompt (D6: team rules only tighten).
+ * - `auto` mode and scheduled runs never prompt (D29, D32): read-only tools run; anything else
+ *   runs only if allow-listed by a user or team allow rule (the agent's `tools.allow` only
+ *   narrows), else it is denied. The ask-on-write sandbox switch plays no part here.
  *
  * `tool` is the server's own descriptor (registry), never one built from what the sandbox sent.
  */
@@ -44,6 +47,11 @@ export interface EvaluationContext {
   readonly connector: ConnectorPolicyState | undefined;
   readonly settings: PolicySettings;
   readonly now: Date;
+}
+
+/** The context plus the prepared (validated, canonical-path) input rules match against. */
+interface Prepared extends EvaluationContext {
+  readonly view: JsonObject;
 }
 
 const RISK_REASON = {
@@ -64,14 +72,13 @@ function ruleReason(
   stage: PolicyReason["stage"],
   message: string,
 ): PolicyReason {
-  return { code, stage, message, ...(rule.id !== undefined ? { rule_id: rule.id } : {}) };
+  return { code, stage, message, rule_id: rule.id };
 }
 
-function denyReasons(ctx: EvaluationContext): PolicyReason[] {
-  const { tool, rules, now } = ctx;
-  const input: JsonObject = ctx.input.input;
+function denyReasons(ctx: Prepared): PolicyReason[] {
+  const { tool, rules, now, view } = ctx;
   return [
-    ...matchingRules(rules.install, "deny", tool, input, now).map((r) =>
+    ...matchingRules(rules.install, "deny", tool, view, now).map((r) =>
       ruleReason(
         r,
         "install_deny_rule",
@@ -79,29 +86,37 @@ function denyReasons(ctx: EvaluationContext): PolicyReason[] {
         `${tool.name} is blocked by install policy.`,
       ),
     ),
-    ...matchingRules(rules.team, "deny", tool, input, now).map((r) =>
+    ...matchingRules(rules.team, "deny", tool, view, now).map((r) =>
       ruleReason(r, "team_deny_rule", "team_deny", `${tool.name} is blocked by team policy.`),
     ),
-    ...checkAgentTools(ctx.input.agent, tool, input),
+    ...checkAvailable(tool),
+    ...checkAgentTools(ctx.input.agent, tool, view),
     ...checkConnector(ctx.input, tool, ctx.connector),
   ];
 }
 
-function askReasons(ctx: EvaluationContext): PolicyReason[] {
-  const { tool, rules, now } = ctx;
-  const input: JsonObject = ctx.input.input;
+function askReasons(ctx: Prepared): PolicyReason[] {
+  const { tool, rules, now, view } = ctx;
   return [
-    ...matchingRules(rules.install, "ask", tool, input, now).map((r) =>
+    ...matchingRules(rules.install, "ask", tool, view, now).map((r) =>
       ruleReason(r, "install_ask_rule", "ask_rule", `Install policy asks before ${tool.name}.`),
     ),
-    ...matchingRules(rules.team, "ask", tool, input, now).map((r) =>
+    ...matchingRules(rules.team, "ask", tool, view, now).map((r) =>
       ruleReason(r, "team_ask_rule", "ask_rule", `Team policy asks before ${tool.name}.`),
     ),
   ];
 }
 
-/** Why risk class or mode would prompt for this call; empty = no prompt. */
-function promptReasons(ctx: EvaluationContext): PolicyReason[] {
+function riskReason(tool: ToolDescriptor, suffix: string): PolicyReason {
+  return {
+    code: RISK_REASON[tool.risk],
+    stage: "risk_class",
+    message: `${tool.name} ${RISK_LABEL[tool.risk]}${suffix}`,
+  };
+}
+
+/** Why an interactive run would prompt for this call; empty = no prompt. */
+function promptReasons(ctx: Prepared): PolicyReason[] {
   const { tool } = ctx;
   if (ctx.input.run.approval_mode === "ask-all") {
     return [
@@ -112,82 +127,100 @@ function promptReasons(ctx: EvaluationContext): PolicyReason[] {
       },
     ];
   }
-  if (!riskClassPrompts(tool, ctx.settings)) return [];
-  return [
-    {
-      code: RISK_REASON[tool.risk],
-      stage: "risk_class",
-      message: `${tool.name} ${RISK_LABEL[tool.risk]}; this thread asks before writes.`,
-    },
-  ];
+  if (!riskClassPrompts(tool, ctx.view, ctx.settings)) return [];
+  return [riskReason(tool, "; this thread asks before writes.")];
 }
 
 /** Why nothing prompted: shown on allowed calls. */
-function noPromptReason(ctx: EvaluationContext): PolicyReason {
+function noPromptReason(ctx: Prepared): PolicyReason {
   const { tool } = ctx;
   if (tool.risk === "read") {
     return { code: "risk_read", stage: "risk_class", message: `${tool.name} only reads data.` };
   }
-  return {
-    code: RISK_REASON[tool.risk],
-    stage: "risk_class",
-    message: `${tool.name} runs inside your sandbox, bounded by the sandbox and egress policy.`,
-  };
+  const where =
+    tool.scope === "sandbox"
+      ? "runs inside your sandbox, bounded by the sandbox and egress policy"
+      : "writes your personal memory, which needs no approval and can be undone";
+  return { code: RISK_REASON[tool.risk], stage: "risk_class", message: `${tool.name} ${where}.` };
 }
 
-function allowRule(ctx: EvaluationContext): PolicyReason | undefined {
-  const { tool, rules, now } = ctx;
-  const input: JsonObject = ctx.input.input;
-  const [user] = matchingRules(rules.user, "allow", tool, input, now);
-  if (user) return ruleReason(user, "user_allow_rule", "user_allow", "You allowed this earlier.");
-  const [team] = matchingRules(rules.team, "allow", tool, input, now);
-  if (team) return ruleReason(team, "user_allow_rule", "user_allow", "Allowed by a team rule.");
-  const [builtin] = matchingRules(BUILTIN_ALLOW_RULES, "allow", tool, input, now);
-  if (builtin) {
-    return ruleReason(builtin, "user_allow_rule", "user_allow", builtin.message ?? "Allowed.");
-  }
-  return undefined;
+function userAllow(ctx: Prepared): PolicyReason | undefined {
+  const [rule] = matchingRules(ctx.rules.user, "allow", ctx.tool, ctx.view, ctx.now);
+  return rule && ruleReason(rule, "user_allow_rule", "user_allow", "You allowed this earlier.");
 }
 
-/** The reason a call that would prompt is denied instead, when nobody may be asked. */
+/** Allow-listed for auto mode / scheduled runs: the user's own rule, else a team allow rule. */
+function allowListed(ctx: Prepared): PolicyReason | undefined {
+  const own = userAllow(ctx);
+  if (own) return own;
+  const [team] = matchingRules(ctx.rules.team, "allow", ctx.tool, ctx.view, ctx.now);
+  return (
+    team &&
+    ruleReason(team, "user_allow_rule", "user_allow", "Allow-listed by your team for auto mode.")
+  );
+}
+
+/** The reason a call is denied instead of asked when nobody may be asked; undefined if interactive. */
 function neverPromptReason(input: PolicyInput): PolicyReason | undefined {
   if (input.actor.kind === "schedule") {
     return {
       code: "scheduled_run_no_prompt",
       stage: "prompt",
-      message: "Scheduled runs don't wait for approval; this call was skipped.",
+      message: "Scheduled runs only run allow-listed and read-only tools; this call was skipped.",
     };
   }
-  if (modeNeverPrompts(input.run.approval_mode)) {
+  if (input.run.approval_mode === "auto") {
     return {
       code: "mode_auto_not_allowlisted",
       stage: "approval_mode",
-      message: "Auto mode runs only allow-listed tools; this call was denied.",
+      message: "Auto mode runs only allow-listed and read-only tools; this call was denied.",
     };
   }
   return undefined;
 }
 
-function prompt(ctx: EvaluationContext, reasons: PolicyReason[]): PolicyDecision {
-  const never = neverPromptReason(ctx.input);
-  const risk = ctx.tool.risk;
-  if (never) return { effect: "deny", risk, reasons: [never, ...reasons] };
+function deny(ctx: Prepared, reasons: PolicyReason[]): PolicyDecision {
+  return { effect: "deny", risk: ctx.tool.risk, reasons };
+}
+
+function ask(ctx: Prepared, reasons: PolicyReason[]): PolicyDecision {
   const expires_at = new Date(ctx.now.getTime() + APPROVAL_TTL_MS).toISOString();
-  return { effect: "require_approval", risk, reasons, expires_at };
+  return { effect: "require_approval", risk: ctx.tool.risk, reasons, expires_at };
+}
+
+function allow(ctx: Prepared, reasons: PolicyReason[]): PolicyDecision {
+  return { effect: "allow", risk: ctx.tool.risk, reasons };
+}
+
+/** `auto` / scheduled: never prompt; read-only or allow-listed, else deny. */
+function decideUnattended(ctx: Prepared, never: PolicyReason): PolicyDecision {
+  if (ctx.tool.risk === "read") return allow(ctx, [noPromptReason(ctx)]);
+  const listed = allowListed(ctx);
+  if (listed) return allow(ctx, [listed]);
+  return deny(ctx, [never, riskReason(ctx.tool, " and is not allow-listed.")]);
 }
 
 export function evaluatePolicy(ctx: EvaluationContext): PolicyDecision {
-  const risk = ctx.tool.risk;
-  const denies = denyReasons(ctx);
-  if (denies.length > 0) return { effect: "deny", risk, reasons: denies };
+  const prepared = prepareInput(ctx.tool, ctx.input.input);
+  if (!prepared.ok) {
+    return {
+      effect: "deny",
+      risk: ctx.tool.risk,
+      reasons: [{ code: "invalid_input", stage: "install_deny", message: prepared.message }],
+    };
+  }
+  const p: Prepared = { ...ctx, view: prepared.view };
 
-  const asks = askReasons(ctx);
-  if (asks.length > 0) return prompt(ctx, asks);
+  const denies = denyReasons(p);
+  if (denies.length > 0) return deny(p, denies);
 
-  const prompts = promptReasons(ctx);
-  if (prompts.length === 0) return { effect: "allow", risk, reasons: [noPromptReason(ctx)] };
+  const never = neverPromptReason(p.input);
+  const asks = askReasons(p);
+  if (asks.length > 0) return never ? deny(p, [never, ...asks]) : ask(p, asks);
+  if (never) return decideUnattended(p, never);
 
-  const allowed = allowRule(ctx);
-  if (allowed) return { effect: "allow", risk, reasons: [allowed, ...prompts] };
-  return prompt(ctx, prompts);
+  const prompts = promptReasons(p);
+  if (prompts.length === 0) return allow(p, [noPromptReason(p)]);
+  const own = userAllow(p);
+  return own ? allow(p, [own, ...prompts]) : ask(p, prompts);
 }

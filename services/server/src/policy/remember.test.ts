@@ -3,20 +3,21 @@ import { allowGlobScoped, literalPrefix } from "./patterns.js";
 import { rememberGlobAllowed } from "./remember.js";
 import { toPolicyRule } from "./rule-store.js";
 
-describe("rememberGlobAllowed (approve and remember stays with the approved tool)", () => {
+describe("rememberGlobAllowed (approve and remember stores the exact tool)", () => {
   it.each([
     ["bash", "bash", true],
     ["bash*", "bash", false], // built-ins: exact name only
     ["*", "bash", false],
     ["read", "bash", false], // must match the approved tool
     ["mcp__jira__create_issue", "mcp__jira__create_issue", true],
-    ["mcp__jira__*", "mcp__jira__create_issue", true], // siblings of the same connector
-    ["mcp__jira__create_*", "mcp__jira__create_issue", true],
+    ["mcp__jira__*", "mcp__jira__create_issue", false], // exact name only (review 6)
+    ["mcp__jira__create_*", "mcp__jira__create_issue", false],
     ["mcp__jira_*", "mcp__jira__create_issue", false], // could reach mcp__jira_x__…
     ["mcp__*", "mcp__jira__create_issue", false], // other connectors
     ["*__create_issue", "mcp__jira__create_issue", false],
-    ["mcp__jira\\_\\_*", "mcp__jira__create_issue", true], // escapes count as literals
-    ["mcp__jira__?reate_issue", "mcp__jira__create_issue", true],
+    ["mcp__jira\\_\\_*", "mcp__jira__create_issue", false],
+    ["mcp__jira__?reate_issue", "mcp__jira__create_issue", false],
+    ["mcp__github__create_issue", "mcp__jira__create_issue", false],
     ["mcp__jira__x", "not_a_tool", false],
   ] as const)("%j for %s → %s", (glob, tool, expected) => {
     expect(rememberGlobAllowed(glob, tool)).toBe(expected);

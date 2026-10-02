@@ -17,6 +17,29 @@ export interface ConnectorPolicyState {
 }
 
 /**
+ * Pi's MCP resource tools (`list_mcp_resources`, `list_mcp_resource_templates`,
+ * `read_mcp_resource`) read connector data without naming a connector, so exposure and
+ * enablement can't be checked per call. D27 lists MCP resources as "Later": denied in v1.
+ */
+const UNAVAILABLE_TOOLS: ReadonlySet<string> = new Set([
+  "list_mcp_resources",
+  "list_mcp_resource_templates",
+  "read_mcp_resource",
+]);
+
+export function checkAvailable(tool: ToolDescriptor): PolicyReason[] {
+  if (tool.source === "mcp" || !UNAVAILABLE_TOOLS.has(tool.name)) return [];
+  return [
+    {
+      // No `not_available` code in the contract yet (ledger); closest existing one.
+      code: "connector_not_enabled",
+      stage: "team_deny",
+      message: `${tool.name} is not available: MCP resources are not supported in this version.`,
+    },
+  ];
+}
+
+/**
  * Agent frontmatter `tools.deny` / `tools.allow` (D19), part of the team-deny stage. `tools.deny`
  * entries deny; a non-empty `tools.allow` restricts the agent to the listed tools (anything else
  * is denied). Neither ever removes a prompt: an agent file is written by a builder, not the user.

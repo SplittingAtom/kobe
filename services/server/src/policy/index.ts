@@ -12,5 +12,6 @@ export type { ConnectorExposure, ConnectorPolicyState } from "./gates.js";
 export { createToolRegistry, NO_MCP_TOOLS, type McpToolCatalog } from "./registry.js";
 export { insertUserAllowRule, rememberGlobAllowed, type RememberResult } from "./remember.js";
 export { createDbRuleSource, createDbSettingsSource } from "./rule-store.js";
-export { BUILTIN_ALLOW_RULES, type PolicyRule, type PolicyRuleSet } from "./rules.js";
+export type { PolicyRule, PolicyRuleSet } from "./rules.js";
+export { canonicalPath, prepareInput, SANDBOX_CWD } from "./tool-inputs.js";
 export { DEFAULT_POLICY_SETTINGS, riskClassPrompts, type PolicySettings } from "./settings.js";

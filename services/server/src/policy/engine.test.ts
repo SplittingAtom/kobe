@@ -187,7 +187,7 @@ describe("createPolicyEngine", () => {
   it("works with an empty rule set", async () => {
     const decision = await createPolicyEngine({
       rules: { load: () => Promise.resolve(EMPTY_RULE_SET) },
-    }).decide(policyInput(builtin("grep")));
+    }).decide(policyInput(builtin("grep"), { pattern: "TODO" }));
     expect(decision.effect).toBe("allow");
   });
 });

@@ -13,7 +13,7 @@ import {
 } from "../policy/rule-store.js";
 import {
   installRuleBodySchema,
-  MAX_RULES_PER_SCOPE,
+  SCOPE_LIMITS,
   policySettingsBodySchema,
 } from "../policy/schemas.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
@@ -32,7 +32,7 @@ export function installPolicyRoutes(deps: ServerDeps): Hono<{ Variables: AuthVar
   app.post("/rules", async (c) => {
     const body = await parseRuleBody(c, installRuleBodySchema);
     if (!body.ok) return body.response;
-    const result = await createInstallRule(db, body.value, c.get("user").id, MAX_RULES_PER_SCOPE);
+    const result = await createInstallRule(db, body.value, c.get("user").id, SCOPE_LIMITS);
     if (!result.ok) return ruleLimitReached(c);
     return c.json({ rule: result.rule }, 201);
   });
@@ -42,8 +42,9 @@ export function installPolicyRoutes(deps: ServerDeps): Hono<{ Variables: AuthVar
     const body = await parseRuleBody(c, installRuleBodySchema);
     if (!body.ok) return body.response;
     if (id === undefined) return invalidRequest(c);
-    const rule = await updateInstallRule(db, id, body.value);
-    return rule ? c.json({ rule }) : ruleNotFound(c);
+    const result = await updateInstallRule(db, id, body.value, SCOPE_LIMITS);
+    if (result.ok) return c.json({ rule: result.rule });
+    return result.error === "not_found" ? ruleNotFound(c) : ruleLimitReached(c);
   });
 
   app.delete("/rules/:id", async (c) => {

@@ -2,7 +2,6 @@ import { z } from "zod";
 import {
   and,
   asc,
-  count,
   eq,
   installSettings,
   installToolRules,
@@ -14,7 +13,7 @@ import {
 } from "@kobe/db";
 import { argPatternSchema, globSchema, type ArgPattern } from "@kobe/protocol";
 import type { PolicyRuleSource, PolicySettingsSource } from "./engine.js";
-import { allowGlobScoped } from "./patterns.js";
+import { allowGlobScoped, isLiteralGlob } from "./patterns.js";
 import type { PolicyRule, RuleEffect, RuleScope } from "./rules.js";
 import {
   DEFAULT_POLICY_SETTINGS,
@@ -60,6 +59,7 @@ export function toPolicyRule(
   const args = row.argPattern === null ? undefined : argPatternSchema.safeParse(row.argPattern);
   const valid = glob.success && (args === undefined || args.success);
   if (row.effect === "allow" && (!valid || !allowGlobScoped(row.toolGlob))) return undefined;
+  if (row.effect === "allow" && scope === "user" && !isLiteralGlob(row.toolGlob)) return undefined;
   return {
     id: row.id,
     scope,
@@ -197,6 +197,73 @@ function columns(fields: RuleFields) {
 }
 
 export type CreateResult = { ok: true; rule: StoredRule } | { ok: false; error: "too_many_rules" };
+export type UpdateResult =
+  { ok: true; rule: StoredRule } | { ok: false; error: "too_many_rules" | "not_found" };
+
+/** Caps per scope: rules, and `arg_pattern` entries across them (bounds evaluation work). */
+export interface ScopeLimits {
+  readonly rules: number;
+  readonly argEntries: number;
+}
+
+function entryCount(argPattern: ArgPattern | null): number {
+  return argPattern === null ? 0 : Object.keys(argPattern).length;
+}
+
+/** Serializes rule writes per scope so caps hold under concurrency. */
+async function lockScope(tx: KobeTx, key: string): Promise<void> {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${key}))`);
+}
+
+type ScopeRef =
+  | { readonly table: "install" }
+  | { readonly table: "team"; readonly teamId: string }
+  | { readonly table: "user"; readonly teamId: string; readonly userId: string };
+
+function scopeKey(ref: ScopeRef): string {
+  if (ref.table === "install") return "kobe.install_tool_rules";
+  if (ref.table === "team") return `kobe.tool_rules.team.${ref.teamId}`;
+  return `kobe.tool_rules.user.${ref.teamId}.${ref.userId}`;
+}
+
+/** Rules and arg-pattern entries in a scope, optionally leaving one rule out (updates). */
+async function scopeUsage(
+  tx: KobeTx,
+  ref: ScopeRef,
+  excludeId?: string,
+): Promise<{ rules: number; entries: number }> {
+  const exclude = excludeId ?? "00000000-0000-0000-0000-000000000000";
+  const entries = sql`coalesce(sum((SELECT count(*) FROM jsonb_object_keys(r.arg_pattern))), 0)::int`;
+  const where =
+    ref.table === "install"
+      ? sql`r.id <> ${exclude}::uuid`
+      : ref.table === "team"
+        ? sql`r.id <> ${exclude}::uuid AND r.scope = 'team'`
+        : sql`r.id <> ${exclude}::uuid AND r.scope = 'user' AND r.user_id = ${ref.userId}::uuid`;
+  const from = ref.table === "install" ? sql`install_tool_rules r` : sql`tool_rules r`;
+  const result = await tx.execute<{ rules: number; entries: number }>(
+    sql`SELECT count(*)::int AS rules, ${entries} AS entries FROM ${from} WHERE ${where}`,
+  );
+  const row = result.rows[0];
+  return { rules: row?.rules ?? 0, entries: row?.entries ?? 0 };
+}
+
+/** Takes the scope lock and checks that adding `argPattern` (as a new or replacing rule) fits. */
+export async function fitsScope(
+  tx: KobeTx,
+  ref: ScopeRef,
+  argPattern: ArgPattern | null,
+  limits: ScopeLimits,
+  replacingId?: string,
+): Promise<boolean> {
+  await lockScope(tx, scopeKey(ref));
+  const usage = await scopeUsage(tx, ref, replacingId);
+  return (
+    usage.rules + 1 <= limits.rules && usage.entries + entryCount(argPattern) <= limits.argEntries
+  );
+}
+
+const TOO_MANY = { ok: false, error: "too_many_rules" } as const;
 
 export async function listInstallRules(db: KobeDb): Promise<StoredRule[]> {
   const rows = await db
@@ -210,13 +277,10 @@ export async function createInstallRule(
   db: KobeDb,
   body: RuleFields & { effect: "deny" | "ask" },
   createdBy: string,
-  limit: number,
+  limits: ScopeLimits,
 ): Promise<CreateResult> {
   return db.transaction(async (tx) => {
-    // Serialize creators so the cap holds under concurrency.
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('kobe.install_tool_rules'))`);
-    const [total] = await tx.select({ n: count() }).from(installToolRules);
-    if ((total?.n ?? 0) >= limit) return { ok: false, error: "too_many_rules" } as const;
+    if (!(await fitsScope(tx, { table: "install" }, body.arg_pattern, limits))) return TOO_MANY;
     const [row] = await tx
       .insert(installToolRules)
       .values({ effect: body.effect, createdBy, ...columns(body) })
@@ -230,14 +294,20 @@ export async function updateInstallRule(
   db: KobeDb,
   id: string,
   body: RuleFields & { effect: "deny" | "ask" },
-): Promise<StoredRule | undefined> {
-  const [row] = await db
-    .update(installToolRules)
-    .set({ effect: body.effect, ...columns(body) })
-    .where(eq(installToolRules.id, id))
-    .returning();
-  return row ? storedInstall(row) : undefined;
+  limits: ScopeLimits,
+): Promise<UpdateResult> {
+  return db.transaction(async (tx) => {
+    if (!(await fitsScope(tx, { table: "install" }, body.arg_pattern, limits, id))) return TOO_MANY;
+    const [row] = await tx
+      .update(installToolRules)
+      .set({ effect: body.effect, ...columns(body) })
+      .where(eq(installToolRules.id, id))
+      .returning();
+    return row ? ({ ok: true, rule: storedInstall(row) } as const) : NOT_FOUND;
+  });
 }
+
+const NOT_FOUND = { ok: false, error: "not_found" } as const;
 
 export async function deleteInstallRule(db: KobeDb, id: string): Promise<boolean> {
   const rows = await db
@@ -258,31 +328,17 @@ export async function listTeamRules(db: KobeDb, teamId: string): Promise<StoredR
   return rows.map(storedTeam);
 }
 
-async function countScoped(tx: KobeTx, scope: "team" | "user", userId?: string): Promise<number> {
-  const where =
-    scope === "team"
-      ? eq(toolRules.scope, "team")
-      : and(eq(toolRules.scope, "user"), eq(toolRules.userId, userId ?? ""));
-  const [total] = await tx.select({ n: count() }).from(toolRules).where(where);
-  return total?.n ?? 0;
-}
-
-/** Serializes rule creation per (team, scope[, user]) so caps hold under concurrency. */
-async function lockScope(tx: KobeTx, key: string): Promise<void> {
-  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${key}))`);
-}
-
 export async function createTeamRule(
   db: KobeDb,
   teamId: string,
   body: RuleFields & { effect: RuleEffect },
   createdBy: string,
-  limit: number,
+  limits: ScopeLimits,
 ): Promise<CreateResult> {
   return withTeam(db, teamId, async (tx) => {
-    await lockScope(tx, `kobe.tool_rules.team.${teamId}`);
-    if ((await countScoped(tx, "team")) >= limit)
-      return { ok: false, error: "too_many_rules" } as const;
+    if (!(await fitsScope(tx, { table: "team", teamId }, body.arg_pattern, limits))) {
+      return TOO_MANY;
+    }
     const [row] = await tx
       .insert(toolRules)
       .values({ teamId, scope: "team", effect: body.effect, createdBy, ...columns(body) })
@@ -297,15 +353,18 @@ export async function updateTeamRule(
   teamId: string,
   id: string,
   body: RuleFields & { effect: RuleEffect },
-): Promise<StoredRule | undefined> {
-  const [row] = await withTeam(db, teamId, (tx) =>
-    tx
+  limits: ScopeLimits,
+): Promise<UpdateResult> {
+  return withTeam(db, teamId, async (tx) => {
+    const ref = { table: "team", teamId } as const;
+    if (!(await fitsScope(tx, ref, body.arg_pattern, limits, id))) return TOO_MANY;
+    const [row] = await tx
       .update(toolRules)
       .set({ effect: body.effect, ...columns(body) })
       .where(and(eq(toolRules.id, id), eq(toolRules.scope, "team")))
-      .returning(),
-  );
-  return row ? storedTeam(row) : undefined;
+      .returning();
+    return row ? ({ ok: true, rule: storedTeam(row) } as const) : NOT_FOUND;
+  });
 }
 
 export async function deleteTeamRule(db: KobeDb, teamId: string, id: string): Promise<boolean> {
@@ -349,4 +408,4 @@ export async function deleteUserRule(
   return rows.length > 0;
 }
 
-export { countScoped, lockScope, storedTeam };
+export { storedTeam };

@@ -98,3 +98,21 @@ export const ENABLED_ALL: ConnectorPolicyState = {
   enabled_tools: [],
   drifted_tools: [],
 };
+
+/** A valid input for every built-in (strict Pi 1.0.0 schemas; kobe-tools accept any object). */
+export const SAMPLE_INPUTS: Readonly<Record<string, JsonObject>> = {
+  read: { path: "notes.md" },
+  write: { path: "notes.md", content: "x" },
+  edit: { path: "notes.md", edits: [{ oldText: "a", newText: "b" }] },
+  bash: { command: "ls" },
+  powershell: { command: "Get-ChildItem" },
+  ls: {},
+  grep: { pattern: "TODO" },
+  find: { pattern: "*.md" },
+  codemode: { code: "1" },
+  tool_search: { query: "jira" },
+};
+
+export function sampleInput(tool: ToolDescriptor): JsonObject {
+  return SAMPLE_INPUTS[tool.name] ?? {};
+}

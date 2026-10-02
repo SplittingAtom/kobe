@@ -59,51 +59,79 @@
 
 Bodies: `{effect, tool_glob, arg_pattern?, note?, expires_at?}` (snake_case like the protocol's
 `ToolRule`); PUT replaces the whole rule. 400 `invalid_request`, 404 `rule_not_found`, 409
-`too_many_rules` (500 per install/team, 200 per user in a team).
+`too_many_rules` (per install/team: 500 rules and 2 000 `arg_pattern` entries; per user in a
+team: 200 rules and 800 entries; updates counted).
 
 ## Decisions
 
 - **(a) Ask rules beat allow rules.** A matching install or team ask rule always yields
-  `require_approval` (deny in auto/scheduled). User (and team) allow rules only remove prompts that
-  come from risk class or mode. Reading: D6 "team rules can only tighten", D29 order puts ask
-  before user allow.
+  `require_approval` (deny in auto/scheduled). No allow rule removes it. Reading: D6 "team rules
+  can only tighten", D29 order puts ask before user allow.
 - **(b) Sandbox-scoped writes in `ask-on-write`: not prompted by risk class by default**, as one
   install switch `install_settings["policy.ask_on_write.prompt_sandbox_writes"]` (default false),
   flipped via `PUT /v1/install/policy/settings {promptSandboxWrites}` — no code change, no
   redeploy (engine cache 5 s). The table itself is `riskClassPrompts` in `policy/settings.ts`.
   Deny/ask rules and `ask-all` apply either way. **Awaiting Chris's confirmation.**
-- **`auto` = ask-on-write's prompt set, denied.** Auto allows what ask-on-write would allow without
-  asking (read risk, sandbox-bounded tools while the switch is off) plus allow-listed tools (user,
-  team, built-in allow rules); anything that would prompt is denied with `mode_auto_not_allowlisted`
-  followed by the reason it would have prompted. Scheduled runs (`actor.kind = schedule`) never
-  prompt in any mode: `scheduled_run_no_prompt`.
+- **Auto and scheduled runs = allow-listed only** (review 5; D29 "auto (allow-listed only)", D32
+  "allow-listed and read-only-exposed tools"). Read-risk tools run; any other tool runs only if a
+  user allow rule or a team allow rule lists it, else deny `mode_auto_not_allowlisted` /
+  `scheduled_run_no_prompt` + the risk reason. bash/write/edit included, independent of switch
+  (b). The agent's `tools.allow` only narrows. A scheduled run follows these rules in any mode.
+- **Who lifts a prompt** (review 3/4). In interactive runs (ask-on-write, ask-all) **only the
+  user's own allow rules** (approve and remember) lift a risk-class or mode prompt (D29 mode →
+  user allow → prompt). **Team allow rules never lift a prompt** (D6 "can only tighten"); their
+  only effect is to allow-list a tool for auto mode and scheduled runs. No built-in rule lifts
+  anything; there are no built-in allow rules.
 - **`kobe`-scoped writes prompt in ask-on-write** (artifacts, share_file, memory): D23/D24 make
-  project writes approval-gated. Personal `remember` is allowed by a **built-in allow rule**
-  matching `{"/scope": "personal"}` (D24). KOBE-55/56 must give `remember` a required `scope`
-  field (`personal` | `project`) or personal memory writes will prompt (fail-safe).
+  project writes approval-gated. Personal `remember` (input `scope: "personal"`) is exempt in the
+  risk-class table (D24 "need no approval"), so it runs in ask-on-write, prompts in ask-all, and is
+  denied in auto unless allow-listed. KOBE-55/56 must give `remember` a required `scope` field
+  (`personal` | `project`) or personal memory writes will prompt (fail-safe).
 - **Storage split.** Spec §5.4's `tool_rules(team_id?, …)` is two tables so every team row has
   `team_id NOT NULL` + RLS: `install_tool_rules` (install-wide, effect deny|ask only — DB check) and
   `tool_rules` (team table; scope team|user; user rules effect allow only — DB check). User rules
   are per (user, team) — a remember in team A never loosens team B — and cascade away with the
   membership (FK `(team_id, user_id) → team_members`).
-- **Team allow rules exist** (D6 "team ask/allow rules") and act like remember-rules for the whole
-  team (same stage; can't beat deny/ask). Reason code `user_allow_rule` with "Allowed by a team
-  rule" (no `team_allow_rule` code in the contract).
-- **No blanket allow rules.** Allow rules (team and user) must name exactly one built-in or one
-  connector's tools (literal `mcp__<server>__` prefix): `*`, `mcp__*`, `b*` are refused on write
-  and ignored on read/evaluation. Otherwise one rule would switch off every prompt — a bypass mode
-  in all but name. Deny/ask rules may be as broad as wanted. Remember-rules must additionally match
-  the approved tool (built-ins: exact name).
+- **Team allow rules** (D6 "team ask/allow rules") = the team's auto/scheduled allow-list (see
+  above). Reason code `user_allow_rule` with "Allow-listed by your team for auto mode" (no
+  `team_allow_rule` code in the contract).
+- **No blanket allow rules.** Team allow rules must name exactly one built-in or one connector's
+  tools (literal `mcp__<server>__` prefix): `*`, `mcp__*`, `b*` are refused on write and ignored on
+  read/evaluation. **Remember-rules store the exact approved tool name** (review 6; optional
+  `arg_pattern`), never `mcp__github__*`; a stored user rule with a wildcard is ignored. Deny/ask
+  rules may be as broad as wanted.
 - **Agent `tools.allow/deny`** are part of the team-deny stage: deny entries deny; a non-empty
   allow list restricts the agent's tools. Neither ever removes a prompt (an agent file is a
-  builder's, not the user's consent). Shorthand `tool:argglob` matches the built-in's
-  `primary_arg`; for tools without one, deny falls back to the tool name, allow doesn't match.
+  builder's, not the user's consent). Shorthand `tool:argglob` matches the built-in's primary
+  argument on the prepared input (canonical paths); grep/find use `/path` (server-side override of
+  the protocol's `/pattern`, review 8). For tools without one, or an input without it, deny falls
+  back to the tool name, allow doesn't match.
+- **Input checks before rules** (review 1, `policy/tool-inputs.ts`). Pi 1.0.0 built-ins are
+  validated against strict schemas copied from the published tarball (read, write, edit, bash,
+  powershell, ls, grep, find, codemode, tool_search): unknown or alias keys → deny `invalid_input`
+  (incl. edit's legacy top-level `oldText`/`newText`, which Pi folds into `edits[]`). kobe-tools have
+  no schema yet (KOBE-55/56) and pass as objects. MCP inputs are the MCP proxy's job (pinned schema).
+- **Canonical paths** (review 7). File tools' `path` (read/write/edit/ls/grep/find, share_file) is
+  resolved like Pi does against the sandbox cwd `/workspace` (relative → absolute, `//`, `.`, `..`
+  collapsed); an omitted ls/grep/find path is the cwd. Paths Pi rewrites opaquely (`~`, leading `@`,
+  `file:`, Unicode spaces) are denied. Rules match the canonical view; the call runs with the
+  original (signed) input. Assumes Pi's cwd is `/workspace` (KOBE-23/36 must keep it so). Pi's read
+  fallbacks (NFD / curly-quote / AM-PM filename variants when the exact file is missing) are not
+  modelled: deny rules on exact filenames can miss those variants.
+- **MCP resource tools denied in v1** (review 2): `list_mcp_resources`,
+  `list_mcp_resource_templates`, `read_mcp_resource` bypass per-connector gating; D27 lists MCP
+  resources as "Later". Reason `connector_not_enabled` ("not available"; no `not_available` code in
+  the contract).
 - **MCP exposure:** enabled/drift/exposure come from server state (`ConnectorStateSource`,
   KOBE-58/59); the exposure in the input must also allow the call (stricter wins).
 - **Fail closed by effect.** Unmatchable subjects (over 16 384 UTF-16 units, non-serializable),
   malformed globs, unreadable stored rows: deny/ask rules match (or widen), allow rules don't.
-  Unresolvable JSON pointers never match. Rule expiry uses the server's clock (`now`), not
-  Postgres's.
+  **Unresolvable JSON pointers fall the same way** (review 1): a deny/ask rule whose pointer is
+  missing from the input applies; an allow rule doesn't. JSON Pointer has no array wildcard
+  (`/edits/0/oldText` is one element). Rule expiry uses the server's clock (`now`), not Postgres's.
+- **Shell-command patterns are not a security boundary.** `bash:rm -rf*` and arg patterns on
+  `/command` are best effort (`rm  -rf`, `/bin/rm`, quoting, `sh -c` all dodge globs); the sandbox
+  and egress proxy are the boundary (D29).
 - **Deterministic:** matching rules reported in id order; same inputs → same decision.
 - **Engine re-resolves the tool** by name from the registry and ignores the input descriptor's
   risk/scope/source; the MCP catalog can't shadow a built-in.
@@ -113,6 +141,11 @@ Bodies: `{effect, tool_glob, arg_pattern?, note?, expires_at?}` (snake_case like
 - **KOBE-36 (policy.check):** build `createPolicyEngine({ rules: createDbRuleSource(db), settings:
 createDbSettingsSource(db), registry: createToolRegistry(catalog), connectors })` once per process.
   Call `decide` **outside** any `withTeam` transaction (nested withTeam is refused → deny).
+  Before calling: **verify the actor is still a member of the team** and **clamp
+  `run.approval_mode` to the install floor / team settings** (the engine trusts the effective mode
+  it is given). **Hook every codemode nested call individually** (Pi ids `<parent>/<n>`): the engine
+  checks `codemode` itself as a read-risk tool and relies on each nested call being decided on its
+  own. Keep Pi's cwd at `/workspace` (path canonicalisation assumes it).
 - **KOBE-37 (approvals):** on `remember`, call `insertUserAllowRule(tx, { teamId, userId,
 approvedTool, remember, now })` inside your withTeam transaction after verifying the approval is
   the caller's; map `glob_too_broad` / `invalid_rule` / `too_many_rules` to 400/400/409.
@@ -129,18 +162,38 @@ approvedTool, remember, now })` inside your withTeam transaction after verifying
 
 1. **(b)** Confirm sandbox-scoped bash/write/edit are not prompted in ask-on-write (switch default
    `false`).
-2. Should team allow rules exist at all, given D6 "can only tighten"? Implemented, scoped to one
-   tool/connector, never beating deny/ask.
-3. Contract gaps (for a protocol PR, not changed here): no `policy_error` reason code (internal
+2. Contract gaps (for a protocol PR, not changed here): no `policy_error` reason code (internal
    errors report `install_deny_rule` at stage `install_deny` with an explanatory message); no
-   `team_allow_rule` code; `unknown_tool`/`invalid_input` have no stage of their own (reported as
-   `install_deny`).
-4. Arg-pattern deny rules on shell commands are best effort (`rm  -rf`, `/bin/rm`, quoting
-   bypass globs): the sandbox and egress proxy are the boundary, as D29 says.
+   `team_allow_rule` or `not_available` code; `unknown_tool`/`invalid_input` have no stage of their
+   own (reported as `install_deny`); `BUILTIN_TOOLS.grep/find.primary_arg` should be `/path`
+   (overridden server-side); built-in input schemas could live next to `BUILTIN_TOOLS`.
+3. Strict schemas deny edit's legacy `oldText`/`newText` form. If Pi's `tool_call` hook sees
+   arguments before `prepareArguments`, models using the legacy form get a clear deny; KOBE-36 to
+   confirm which form the hook sees.
+
+## Review round 1 (coordinator, 2 HIGH + 5 MEDIUM + 4 LOW) — resolution
+
+1. HIGH unresolvable pointers / aliases: fail closed by effect + strict built-in schemas
+   (evaluate rows "unknown key…", "edit's legacy…", "…unresolvable pointer…"; `tool-inputs.test.ts`).
+2. HIGH MCP resource tools: denied (rows "MCP resource tools are not available…"; DB test).
+3. MEDIUM team allow: never lifts a prompt; auto/scheduled allow-list only (rows "team allow does
+   not lift…", "team allow allow-lists…"; invariant "a team allow rule never lifts a prompt";
+   DB test).
+4. MEDIUM only user allow lifts prompts; no built-in lifts ask-all (row "ask-all prompts for
+   personal remember"; invariant "in ask-all, only a user allow rule…").
+5. MEDIUM auto/scheduled allow-listed only, incl. bash/write/edit (rows "auto denies bash…",
+   "scheduled run denies bash…"; invariant "non-read tools run only when allow-listed").
+6. MEDIUM remember stores the exact tool (`remember.test.ts`; DB test "stores the exact tool").
+7. MEDIUM path canonicalisation + docs (rows "deny path rule…", "user allow path pattern…").
+8. LOW grep/find primary arg `/path`; omitted ls/grep/find path = cwd (rows "agent tools.deny grep…",
+   "…find shorthand…", "ls with no path…").
+9. LOW KOBE-36 obligations (membership, mode clamp) — ledger above.
+10. LOW caps: rules and arg entries per scope (DB tests "caps rules…", "caps arg-pattern entries…").
+11. LOW codemode nested calls — ledger above; codemode itself is decided as a read-risk built-in.
 
 ## Evidence (acceptance criteria → test or command output)
 
-- ac-1/ac-3: `src/policy/evaluate.test.ts` — 55 table rows (each D29 layer winning and losing),
+- ac-1/ac-3: `src/policy/evaluate.test.ts` — 87 table rows (each D29 layer winning and losing),
   plus invariants over 1 512 mode × trigger × switch × rule-set × tool combinations (auto/schedule
   never `require_approval`; install deny always wins; ask never yields allow; determinism) and a
   1 000-rule × 1 000-call timing check (< 5 ms per decision). Every decision parsed with

@@ -41,12 +41,13 @@ describe("matchArgPattern (JSON Pointer → glob)", () => {
     expect(matchArgPattern(pattern, input, "loosen")).toBe(expected);
   });
 
-  it("never matches an unresolvable pointer, even for restricting rules", () => {
-    expect(matchArgPattern({ "/missing": "*" }, input, "restrict")).toBe(false);
+  it("an unresolvable pointer: restricting rules match, loosening rules don't", () => {
+    expect(matchArgPattern({ "/missing": "*" }, input, "restrict")).toBe(true);
+    expect(matchArgPattern({ "/missing": "*" }, input, "loosen")).toBe(false);
   });
 
   it("does not resolve inherited properties", () => {
-    expect(matchArgPattern({ "/constructor": "*" }, {}, "restrict")).toBe(false);
+    expect(matchArgPattern({ "/constructor": "*" }, {}, "loosen")).toBe(false);
     expect(matchArgPattern({ "/toString": "*" }, { a: "x" }, "loosen")).toBe(false);
   });
 
@@ -128,8 +129,9 @@ describe("agent tools.allow / tools.deny entries", () => {
     expect(matchAgentToolEntry("read", bash, {}, "restrict")).toBe(false);
   });
 
-  it("a missing primary argument never matches", () => {
-    expect(matchAgentToolEntry("bash:*", bash, {}, "restrict")).toBe(false);
+  it("a missing primary argument: deny entries match, allow entries don't", () => {
+    expect(matchAgentToolEntry("bash:ls*", bash, {}, "restrict")).toBe(true);
+    expect(matchAgentToolEntry("bash:ls*", bash, {}, "loosen")).toBe(false);
   });
 
   it("an empty tool part fails closed", () => {

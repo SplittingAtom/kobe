@@ -10,7 +10,7 @@ import {
   listUserRules,
   updateTeamRule,
 } from "../policy/rule-store.js";
-import { MAX_RULES_PER_SCOPE, teamRuleBodySchema } from "../policy/schemas.js";
+import { SCOPE_LIMITS, teamRuleBodySchema } from "../policy/schemas.js";
 import { invalidRequest } from "../teams/http.js";
 
 /**
@@ -31,13 +31,7 @@ export function teamPolicyRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
     const body = await parseRuleBody(c, teamRuleBodySchema);
     if (!body.ok) return body.response;
     const team = c.get("team").id;
-    const result = await createTeamRule(
-      db,
-      team,
-      body.value,
-      c.get("user").id,
-      MAX_RULES_PER_SCOPE,
-    );
+    const result = await createTeamRule(db, team, body.value, c.get("user").id, SCOPE_LIMITS);
     if (!result.ok) return ruleLimitReached(c);
     return c.json({ rule: result.rule }, 201);
   });
@@ -47,8 +41,9 @@ export function teamPolicyRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
     const body = await parseRuleBody(c, teamRuleBodySchema);
     if (!body.ok) return body.response;
     if (id === undefined) return invalidRequest(c);
-    const rule = await updateTeamRule(db, c.get("team").id, id, body.value);
-    return rule ? c.json({ rule }) : ruleNotFound(c);
+    const result = await updateTeamRule(db, c.get("team").id, id, body.value, SCOPE_LIMITS);
+    if (result.ok) return c.json({ rule: result.rule });
+    return result.error === "not_found" ? ruleNotFound(c) : ruleLimitReached(c);
   });
 
   app.delete("/rules/:id", requireTeamPermission("team.policy.manage"), async (c) => {
