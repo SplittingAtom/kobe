@@ -103,8 +103,12 @@ for pod in $($KUBECTL -n "$NS" get pods -l "$gated_pods" --field-selector=status
   else iso+="$pod:unverified "; fi
 done
 contains "server and scheduler verified the gVisor RuntimeClass in process" '^verified verified verified $' "$iso"
+# Retry: under CI load Bifrost can briefly refuse connections after its rollout is "available";
+# a failure after 30 s is real, and the restart count says whether it was crashing.
+bifrost_ok=$(probe "$NS" 'for i in 1 2 3 4 5 6 7 8 9 10; do wget -qO- -T 5 http://kobe-bifrost:8080/health && exit 0; sleep 3; done; exit 1')
 contains "Bifrost is reachable from the release namespace" '"status":"ok"' \
-  "$(probe "$NS" 'wget -qO- -T 5 http://kobe-bifrost:8080/health')"
+  "$bifrost_ok restarts=$($KUBECTL -n "$NS" get pods -l app.kubernetes.io/component=bifrost \
+    -o jsonpath='{.items[*].status.containerStatuses[*].restartCount}' 2>/dev/null)"
 np=$(probe default "wget -qO- -T 5 http://kobe-web.$NS/api/healthz >/dev/null 2>&1 && echo control=REACHED || echo control=BLOCKED; \
   wget -qO- -T 5 http://kobe-bifrost.$NS:8080/health >/dev/null 2>&1 && echo bifrost=REACHED || echo bifrost=BLOCKED")
 contains "probe from another namespace can reach unrestricted services (control)" '^control=REACHED$' "$np"
