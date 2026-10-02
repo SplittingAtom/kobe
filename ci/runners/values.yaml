@@ -13,6 +13,9 @@ maxRunners: 4
 template:
   spec:
     terminationGracePeriodSeconds: 60
+    # Jobs never get a credential for the host cluster (kubectl in a job would otherwise pick up
+    # this pod's service account and namespace).
+    automountServiceAccountToken: false
     # Fresh Longhorn volumes are root-owned; the runner runs as uid 1001 in group docker (123).
     securityContext:
       fsGroup: 123

@@ -34,7 +34,9 @@ jobs:
       - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm lint
-      - run: pnpm test
+      # Node sees the node's CPUs, not the runner's limit; cap parallel suites so per-test
+      # timeouts don't trip on self-hosted runners (ci/runners).
+      - run: pnpm test --concurrency=2
       - run: pnpm license:check
 
   db:
