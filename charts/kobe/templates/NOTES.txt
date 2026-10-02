@@ -1,0 +1,8 @@
+Kobe {{ .Chart.AppVersion }} is installed in namespace {{ .Release.Namespace }}.
+
+Isolation: sandboxes run under RuntimeClass "{{ .Values.isolation.runtimeClassName }}" (gVisor/Kata
+required; the install fails without one).
+{{- if .Values.ingress.enabled }}
+
+Open: http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}
+{{- end }}

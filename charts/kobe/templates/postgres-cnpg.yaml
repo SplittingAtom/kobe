@@ -1,0 +1,60 @@
+{{- if eq .Values.postgres.mode "cnpg" -}}
+{{- $fullname := include "kobe.fullname" . -}}
+{{- $secretName := include "kobe.cnpgAppSecretName" . -}}
+{{- if not .Values.postgres.cnpg.existingAppSecret }}
+# Login for the non-owner app role; kept stable across upgrades. For GitOps/offline renders set
+# postgres.cnpg.existingAppSecret instead (a generated password would change on every render).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+    cnpg.io/reload: "true"
+  annotations:
+    helm.sh/resource-policy: keep
+type: kubernetes.io/basic-auth
+stringData:
+  username: kobe_app
+  password: {{ include "kobe.cnpgAppPassword" . | quote }}
+---
+{{- end }}
+# Bundled CloudNativePG Cluster (requires the CloudNativePG operator). The database owner runs
+# migrations; the app connects as kobe_app, which is not superuser, cannot bypass RLS and owns
+# nothing (enforced again by the migration runner).
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ $fullname }}-pg
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.postgres.cnpg.instances }}
+  imageName: {{ .Values.postgres.cnpg.imageName }}
+  {{- with .Values.global.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  storage:
+    size: {{ .Values.postgres.cnpg.storage.size }}
+    {{- with .Values.postgres.cnpg.storage.storageClass }}
+    storageClass: {{ . }}
+    {{- end }}
+  bootstrap:
+    initdb:
+      database: kobe
+      owner: kobe_owner
+  managed:
+    roles:
+      - name: kobe_app
+        ensure: present
+        login: true
+        superuser: false
+        bypassrls: false
+        createdb: false
+        createrole: false
+        inherit: true
+        inRoles: []
+        passwordSecret:
+          name: {{ $secretName }}
+{{- end }}

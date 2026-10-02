@@ -1,0 +1,35 @@
+{{- include "kobe.validateDatabase" . -}}
+{{- $fullname := include "kobe.fullname" . -}}
+{{- $dbAnnotations := include "kobe.dbChecksumAnnotations" . -}}
+{{- $common := printf "%s\n%s" (include "kobe.databaseEnv" .) (include "kobe.s3Env" .) -}}
+{{- $runtime := printf "- name: KOBE_RUNTIME_CLASS\n  value: %s" (.Values.isolation.runtimeClassName | quote) -}}
+{{- include "kobe.nodeService" (dict "root" . "component" "web" "image" "web" "values" .Values.web
+      "healthPath" "/api/healthz" "readyPath" "/api/healthz"
+      "extraMounts" "- name: next-cache\n  mountPath: /app/apps/web/.next/cache"
+      "extraVolumes" "- name: next-cache\n  emptyDir: {}") }}
+---
+{{ include "kobe.nodeService" (dict "root" . "component" "server" "image" "server" "values" .Values.server
+      "serviceAccount" (printf "%s-server" $fullname) "automountToken" true "preflight" true
+      "annotations" $dbAnnotations
+      "env" (printf "- name: KOBE_PROCESS\n  value: server\n%s\n%s" $runtime $common)) }}
+---
+{{ include "kobe.nodeService" (dict "root" . "component" "scheduler" "image" "server" "values" .Values.scheduler
+      "serviceAccount" (printf "%s-server" $fullname) "automountToken" true "preflight" true
+      "annotations" $dbAnnotations
+      "env" (printf "- name: KOBE_PROCESS\n  value: scheduler\n%s" $common)) }}
+---
+{{ include "kobe.nodeService" (dict "root" . "component" "mcp-proxy" "image" "mcp-proxy" "values" .Values.mcpProxy) }}
+---
+{{ include "kobe.nodeService" (dict "root" . "component" "egress-proxy" "image" "egress-proxy" "values" .Values.egressProxy) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $fullname }}-server
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "kobe.selectorLabels" (dict "root" . "component" "server") | nindent 6 }}

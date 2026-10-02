@@ -1,0 +1,92 @@
+{{- $fullname := include "kobe.fullname" . -}}
+{{- $sel := dict "root" . "component" "bifrost" -}}
+{{- $b := .Values.bifrost -}}
+# Bifrost model gateway (spec D30); configured by the server's config sync (KOBE-40).
+{{- if $b.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $fullname }}-bifrost
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with $b.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $b.persistence.size }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-bifrost
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bifrost
+spec:
+  replicas: {{ $b.replicas }}
+  {{- if $b.persistence.enabled }}
+  strategy:
+    type: Recreate
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "kobe.selectorLabels" $sel | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kobe.selectorLabels" $sel | nindent 8 }}
+    spec:
+      {{- include "kobe.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ $fullname }}-workload
+      automountServiceAccountToken: false
+      {{- include "kobe.podSecurityContext" . | nindent 6 }}
+      containers:
+        - name: bifrost
+          image: "{{ $b.image.repository }}:{{ $b.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          {{- include "kobe.containerSecurityContext" . | nindent 10 }}
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+          resources:
+            {{- toYaml $b.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          {{- if $b.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ $fullname }}-bifrost
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-bifrost
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bifrost
+spec:
+  selector:
+    {{- include "kobe.selectorLabels" $sel | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

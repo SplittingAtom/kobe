@@ -1,0 +1,56 @@
+{{- if .Values.clamav.enabled -}}
+{{- $fullname := include "kobe.fullname" . -}}
+{{- $sel := dict "root" . "component" "clamav" -}}
+# Optional upload scanning (spec D26). The upstream image runs freshclam/clamd as its own users and
+# needs a writable root filesystem, so it is not held to the Kobe container baseline.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-clamav
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+    app.kubernetes.io/component: clamav
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "kobe.selectorLabels" $sel | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kobe.selectorLabels" $sel | nindent 8 }}
+    spec:
+      {{- include "kobe.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ $fullname }}-workload
+      automountServiceAccountToken: false
+      containers:
+        - name: clamav
+          image: "{{ .Values.clamav.image.repository }}:{{ .Values.clamav.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+          ports:
+            - name: clamd
+              containerPort: 3310
+          readinessProbe:
+            tcpSocket: { port: clamd }
+            initialDelaySeconds: 60
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.clamav.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-clamav
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+    app.kubernetes.io/component: clamav
+spec:
+  selector:
+    {{- include "kobe.selectorLabels" $sel | nindent 4 }}
+  ports:
+    - name: clamd
+      port: 3310
+      targetPort: clamd
+{{- end }}

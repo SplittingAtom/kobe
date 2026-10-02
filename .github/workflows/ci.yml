@@ -26,6 +26,9 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.22.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
       - run: pnpm build

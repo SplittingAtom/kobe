@@ -1,0 +1,89 @@
+{{- include "kobe.isolationCheck" . -}}
+{{- $fullname := include "kobe.fullname" . -}}
+{{- $hook := "pre-install,pre-upgrade,pre-rollback" -}}
+{{- $clusterName := include "kobe.clusterName" (dict "root" . "suffix" "isolation-preflight") -}}
+# Isolation preflight (spec D4): fails the release unless the sandbox RuntimeClass isolates.
+# `--no-hooks` and `helm template | kubectl apply` skip hooks; the server and scheduler
+# initContainers enforce the same check on every pod start.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $fullname }}-isolation-preflight
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: {{ $hook }}
+    helm.sh/hook-weight: "-20"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $clusterName }}
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: {{ $hook }}
+    helm.sh/hook-weight: "-20"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: ["node.k8s.io"]
+    resources: ["runtimeclasses"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $clusterName }}
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: {{ $hook }}
+    helm.sh/hook-weight: "-19"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $clusterName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fullname }}-isolation-preflight
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-isolation-preflight
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: {{ $hook }}
+    helm.sh/hook-weight: "-10"
+    # Failed Jobs are kept so `kubectl describe` shows the remediation message.
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 120
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kobe
+        app.kubernetes.io/component: isolation-preflight
+    spec:
+      restartPolicy: Never
+      {{- include "kobe.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ $fullname }}-isolation-preflight
+      {{- include "kobe.podSecurityContext" . | nindent 6 }}
+      containers:
+        - name: preflight
+          image: {{ include "kobe.image" (dict "root" . "name" "server") }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command: ["node", "dist/cli/preflight.js"]
+          env:
+            - name: KOBE_RUNTIME_CLASS
+              value: {{ .Values.isolation.runtimeClassName | quote }}
+          {{- include "kobe.containerSecurityContext" . | nindent 10 }}
+          terminationMessagePolicy: FallbackToLogsOnError
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 500m, memory: 256Mi }

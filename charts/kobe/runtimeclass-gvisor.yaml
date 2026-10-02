@@ -1,0 +1,6 @@
+# Cluster prerequisite (not part of the release): the RuntimeClass Kobe sandboxes run under.
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: gvisor
+handler: runsc
