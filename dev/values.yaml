@@ -26,3 +26,10 @@ smtp:
   port: 1025
   security: none
   from: "Kobe Dev <kobe@kobe.localtest.me>"
+# The egress proxy reads allowlists from the dev Postgres (kobe-deps namespace).
+egressProxy:
+  networkPolicy:
+    databasePeers:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: kobe-deps

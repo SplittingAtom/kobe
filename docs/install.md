@@ -94,6 +94,39 @@ the kubelet (pods there cannot mount them). Alternatively configure registry cre
 nodes (k3s `registries.yaml`). Kobe assumes one install per cluster (`kobe-team-*` names are
 cluster-wide).
 
+## Egress
+
+Sandboxes reach the internet only through the **egress proxy** (spec D28), and only over HTTPS:
+`HTTPS_PROXY` points at it, the team NetworkPolicy allows nothing else, and the proxy admits only
+team namespaces. It is **default deny**: a fresh install reaches nothing. Install admins define the
+**ceiling** (Install console → Egress ceiling; presets: package registries, which start in the
+ceiling, and git hosts, which start out of it); team admins **enable** domains within it (Team
+console → Egress). `*.example.com` matches subdomains, never `example.com` itself. Changes apply
+within a second (Postgres `LISTEN/NOTIFY`), without restarts.
+
+For each `CONNECT host:443` the proxy checks the sandbox's egress session token, that its user is
+still an active member of the team, the team's allowlist, then resolves the name itself and
+refuses it if **any** address is private, loopback, link-local (cloud metadata), CGNAT, multicast
+or reserved, or in `egressProxy.deniedCidrs` (add your pod/Service CIDRs if they are not private
+ranges). It connects to the address it checked and requires the TLS ClientHello's server name to
+equal the CONNECT host. It never decrypts traffic. Plain HTTP and other ports are refused
+(`egressProxy.allowedPorts`, default 443).
+
+- **Internal targets** (e.g. a package mirror inside your network) must be allowed explicitly:
+  add their addresses to `egressProxy.allowedInternalCidrs` and, because the proxy's own
+  NetworkPolicy only lets it reach public addresses, a peer in `egressProxy.networkPolicy.extraEgress`
+  (for an in-cluster Service: a `namespaceSelector`/`podSelector` for its pods; NetworkPolicy
+  matches pods after Service translation). The domain must still be in the ceiling and enabled.
+- **External Postgres:** the proxy reads allowlists and writes its connection log as the app role.
+  Set `egressProxy.networkPolicy.databasePeers` (an `ipBlock` or selector for your database) so its
+  NetworkPolicy reaches only the database on `databasePort`; when empty it may reach any address on
+  that port.
+- **Limits** (per proxy replica): `egressProxy.limits.connectionsPerSandbox` (64),
+  `connections` (4096), `bandwidthBytesPerSecond` per sandbox (20 MiB/s), `idleTimeoutSeconds` (300).
+- **Logging:** every connection is counted in the audit log (`egress.connection`, aggregated per
+  user, sandbox, host and outcome every `egressProxy.auditFlushSeconds`) and logged individually as
+  JSON on the proxy's stdout. Blocked attempts are shown on the user's active run (`egress.blocked`).
+
 ## Install
 
 Create the Secrets the chart references, then install:

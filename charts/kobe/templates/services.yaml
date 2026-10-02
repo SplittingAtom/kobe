@@ -25,7 +25,11 @@
 ---
 {{ include "kobe.nodeService" (dict "root" . "component" "mcp-proxy" "image" "mcp-proxy" "values" .Values.mcpProxy) }}
 ---
-{{ include "kobe.nodeService" (dict "root" . "component" "egress-proxy" "image" "egress-proxy" "values" .Values.egressProxy) }}
+{{/* Egress proxy (KOBE-38): reads allowlists and writes connection audit as the app role; holds
+  only its own session key. Waits for migrations like the server. */}}
+{{ include "kobe.nodeService" (dict "root" . "component" "egress-proxy" "image" "egress-proxy" "values" .Values.egressProxy
+      "migrations" true "annotations" $dbAnnotations
+      "env" (include "kobe.egressProxyEnv" .)) }}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget

@@ -14,6 +14,7 @@ NS=kobe-dev
 SANDBOX_NS=kobe-e2e-sandbox
 TEAM_NS=kobe-team-e2e # KOBE-22: created by the server, not by this script
 TEAM2_NS=kobe-team-e2e2
+UPSTREAM_NS=kobe-e2e-upstream # KOBE-38: an in-cluster HTTPS server standing in for the internet
 failed=0
 
 context=$($KUBECTL config current-context)
@@ -40,7 +41,7 @@ PODS=()
 cleanup() {
   for p in "${PODS[@]+"${PODS[@]}"}"; do $KUBECTL delete pod $p --ignore-not-found --wait=false >/dev/null 2>&1 || true; done
   $KUBECTL delete namespace "$SANDBOX_NS" --ignore-not-found --wait=false >/dev/null 2>&1 || true
-  $KUBECTL delete namespace "$TEAM_NS" "$TEAM2_NS" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  $KUBECTL delete namespace "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   $KUBECTL delete runtimeclass kobe-e2e-runc --ignore-not-found >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -65,8 +66,8 @@ $KUBECTL get crd sandboxes.agents.x-k8s.io >/dev/null 2>&1 \
 
 echo "==> clean state"
 $HELM uninstall kobe -n "$NS" --wait >/dev/null 2>&1 || true
-$KUBECTL delete namespace "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" "$TEAM2_NS" --ignore-not-found --wait=false >/dev/null
-for ns in "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" "$TEAM2_NS"; do
+$KUBECTL delete namespace "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" --ignore-not-found --wait=false >/dev/null
+for ns in "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS"; do
   $KUBECTL wait --for=delete "namespace/$ns" --timeout=180s >/dev/null 2>&1 || true
 done
 
@@ -375,5 +376,93 @@ contains "the team listener is up (so BLOCKED below means the policy)" '^Running
   "$($KUBECTL -n "$TEAM_NS" get pod "$team_listener" -o jsonpath='{.status.phase}')"
 contains "a listener outside team namespaces is reachable (control)" '^control=REACHED$' "$inbound"
 contains "nothing can connect into a sandbox (no inbound)" '^sandbox=BLOCKED$' "$inbound"
+
+# KOBE-38: sandboxes reach the internet only through the egress proxy (HTTPS CONNECT, SNI match),
+# only to domains their team enabled within the install ceiling; never internal addresses.
+echo "==> egress proxy (KOBE-38)"
+UPSTREAM_HOST="upstream.$UPSTREAM_NS.svc.cluster.local"
+INTERNAL_HOST="kobe-server.$NS.svc.cluster.local"
+if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_pod:-}" ]]; then
+  # The "internet": a TLS server (self-signed, s_server -www) behind a Service on 443. It has a
+  # private ClusterIP, so the proxy may reach it only because this test allows exactly that IP.
+  $KUBECTL create namespace "$UPSTREAM_NS" --dry-run=client -o yaml | $KUBECTL apply -f - >/dev/null
+  $KUBECTL -n "$UPSTREAM_NS" run upstream --restart=Never --image="$KOBE_SANDBOX_IMAGE" --labels=app=upstream \
+    --command -- sh -c 'cd /tmp && openssl req -x509 -newkey rsa:2048 -nodes -keyout k.pem -out c.pem -days 1 \
+      -subj /CN=upstream >/dev/null 2>&1 && exec openssl s_server -quiet -accept 8443 -cert c.pem -key k.pem -www' >/dev/null
+  $KUBECTL -n "$UPSTREAM_NS" expose pod upstream --port=443 --target-port=8443 --name=upstream >/dev/null
+  $KUBECTL -n "$UPSTREAM_NS" wait --for=condition=Ready pod/upstream --timeout=180s >/dev/null 2>&1 || true
+  up_ip=$($KUBECTL -n "$UPSTREAM_NS" get svc upstream -o jsonpath='{.spec.clusterIP}')
+  # Allow exactly that Service IP as an internal target (proxy check) and its pods (proxy policy);
+  # flush the connection audit every 5 s instead of 60.
+  up_rule=$(printf '[{"to":[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"%s"}}}]}]' "$UPSTREAM_NS")
+  if out=$($HELM upgrade kobe charts/kobe -n "$NS" --reuse-values --wait --timeout 5m \
+      --set-json "egressProxy.allowedInternalCidrs=[\"$up_ip/32\"]" --set-json "egressProxy.networkPolicy.extraEgress=$up_rule" \
+      --set egressProxy.auditFlushSeconds=5 2>&1); then ok "egress proxy reconfigured with the test upstream"
+  else fail "egress proxy reconfigured with the test upstream: $out"; fi
+  # The sandbox's team and user (the proxy checks active membership, D7).
+  psql_kobe "INSERT INTO users (id, name, email) VALUES ('$E2E_USER_ID', 'E2E', 'e2e-sandbox@e2e.test') ON CONFLICT DO NOTHING;
+    INSERT INTO teams (id, slug, name) VALUES ('$E2E_TEAM_ID', 'e2e', 'E2E') ON CONFLICT DO NOTHING;
+    INSERT INTO team_members (team_id, user_id, role) VALUES ('$E2E_TEAM_ID', '$E2E_USER_ID', 'member') ON CONFLICT DO NOTHING;" >/dev/null
+  in_sandbox() { $KUBECTL -n "$TEAM_NS" exec "$sandbox_pod" -c agent -- sh -c "$1" 2>&1 || true; }
+  # The real sandbox trades its bootstrap token for its session tokens (KOBE-22) and uses the
+  # egress-audience one as proxy credentials. Retried: the server may still be warming up.
+  egress_token=$(in_sandbox 'for i in $(seq 1 30); do t=$(curl -s -m 5 -X POST \
+      -H "Authorization: Bearer $(cat /var/run/secrets/kobe/bootstrap-token)" http://server.kobe.internal:8081/v1/sandbox/session \
+      | jq -r ".tokens[\"kobe.egress-proxy\"] // empty" 2>/dev/null); [ -n "$t" ] && echo "$t" && break; sleep 2; done' | tail -1)
+  contains "a claimed sandbox gets its egress-proxy session token" '^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$' "$egress_token"
+  # → "connect=<CONNECT status> code=<origin status>" then the body; waits out a new proxy pod's
+  # CNI warm-up (until the proxy answers the CONNECT at all) instead of failing on it.
+  via_proxy() { # url [credentials]
+    in_sandbox "for i in \$(seq 1 30); do r=\$(curl -sk -m 15 -x 'http://${2-kobe:$egress_token}@egress-proxy.kobe.internal' \
+      -w '\nconnect=%{http_connect} code=%{http_code}\n' '$1' 2>/dev/null); \
+      echo \"\$r\" | grep -q 'connect=000 code=000' || break; sleep 2; done; echo \"\$r\""
+  }
+  notify_egress() { psql_kobe "SELECT pg_notify('kobe_egress', 'ceiling'); SELECT pg_notify('kobe_egress', '$E2E_TEAM_ID');" >/dev/null; }
+
+  contains "fresh install: a sandbox reaches nothing through the proxy (not in the ceiling)" '^connect=403 ' "$(via_proxy "https://$UPSTREAM_HOST/")"
+  contains "fresh install: package registries are in the ceiling but not enabled for teams" '^connect=403 ' "$(via_proxy https://pypi.org/)"
+  contains "the proxy refuses requests without the sandbox's token (407)" '^connect=407 ' "$(via_proxy "https://$UPSTREAM_HOST/" 'kobe:forged')"
+  contains "the proxy refuses plain HTTP (HTTPS only)" '^connect=000 code=403' "$(via_proxy "http://$UPSTREAM_HOST/")"
+  direct=$(in_sandbox "curl -sk -m 8 --noproxy '*' https://$up_ip/ >/dev/null 2>&1 && echo up=REACHED || echo up=BLOCKED; \
+    curl -sk -m 8 --noproxy '*' https://1.1.1.1/ >/dev/null 2>&1 && echo internet=REACHED || echo internet=BLOCKED")
+  contains "direct egress to the upstream (bypassing the proxy) is blocked by NetworkPolicy" '^up=BLOCKED$' "$direct"
+  contains "direct egress to the internet (bypassing the proxy) is blocked by NetworkPolicy" '^internet=BLOCKED$' "$direct"
+
+  # An install admin adds the domains to the ceiling; the team admin enables them (D28).
+  psql_kobe "INSERT INTO egress_domains (domain, in_ceiling) VALUES ('$UPSTREAM_HOST', true), ('$INTERNAL_HOST', true) ON CONFLICT DO NOTHING;
+    INSERT INTO team_egress (team_id, domain, enabled_by) VALUES ('$E2E_TEAM_ID', '$UPSTREAM_HOST', '$E2E_USER_ID'),
+      ('$E2E_TEAM_ID', '$INTERNAL_HOST', '$E2E_USER_ID') ON CONFLICT DO NOTHING;" >/dev/null
+  notify_egress
+  allowed=$(via_proxy "https://$UPSTREAM_HOST/")
+  contains "an enabled domain is reachable through the proxy (CONNECT 200)" '^connect=200 code=200$' "$allowed"
+  contains "the enabled domain's TLS server answered end to end (no interception)" 's_server' "$allowed"
+  contains "an enabled domain that resolves to an internal address is refused" '^connect=403 ' "$(via_proxy "https://$INTERNAL_HOST/")"
+  contains "a not-enabled domain is still blocked" '^connect=403 ' "$(via_proxy https://registry.npmjs.org/)"
+
+  psql_kobe "DELETE FROM team_egress WHERE team_id = '$E2E_TEAM_ID' AND domain = '$UPSTREAM_HOST';" >/dev/null
+  notify_egress
+  contains "a disabled domain is blocked again (change hint, no restart)" '^connect=403 ' "$(via_proxy "https://$UPSTREAM_HOST/")"
+
+  contains "blocked attempts are recorded as egress.blocked events for the run" '^[1-9][0-9]*$' \
+    "$(psql_kobe "SELECT count(*) FROM events WHERE team_id = '$E2E_TEAM_ID' AND kind = 'egress.blocked'")"
+  conn_audit=""
+  for _ in $(seq 1 20); do
+    conn_audit=$(psql_kobe "SELECT string_agg(DISTINCT target->>'outcome', ',' ORDER BY target->>'outcome') FROM audit_log
+      WHERE team_id = '$E2E_TEAM_ID' AND action = 'egress.connection'")
+    [[ "$conn_audit" == *allowed* && "$conn_audit" == *blocked* ]] && break
+    sleep 2
+  done
+  contains "every connection is in the audit log (egress.connection: allowed and blocked)" '^allowed,blocked' "$conn_audit"
+  contains "connection audit records bytes for allowed tunnels" '^[1-9][0-9]*$' \
+    "$(psql_kobe "SELECT max((target->>'bytesDown')::bigint) FROM audit_log WHERE team_id = '$E2E_TEAM_ID' AND action = 'egress.connection' AND target->>'outcome' = 'allowed'")"
+  # Receiving side: only team namespaces may connect to the proxy (release namespace is refused).
+  contains "the egress proxy admits nothing but sandboxes (probe from the release namespace)" '^proxy=BLOCKED$' \
+    "$(probe "$NS" 'for i in $(seq 1 60); do wget -qO- -T 2 http://kobe-server/healthz >/dev/null 2>&1 && break; sleep 1; done; \
+      nc -w 4 kobe-egress-proxy 80 </dev/null >/dev/null 2>&1 && echo proxy=REACHED || echo proxy=BLOCKED')"
+elif [[ "${CI:-}" == "true" ]]; then
+  fail "egress checks need KOBE_SANDBOX_IMAGE and a sandbox pod"
+else
+  echo "SKIP egress checks (KOBE_SANDBOX_IMAGE not set)"
+fi
 
 exit "$failed"
