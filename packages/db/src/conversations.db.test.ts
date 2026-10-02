@@ -190,6 +190,48 @@ describe("run_events.seq (ac-4)", () => {
     expect(message).toMatch(/cannot be changed/);
   });
 
+  it("refuses to move an event to another run of the same team", async () => {
+    const thread = await newThread(teamA);
+    const r1 = await newRun(teamA, thread, "completed");
+    const r2 = await newRun(teamA, thread);
+    await appendEvents(teamA, r1, 1);
+    await appendEvents(teamA, r2, 1);
+    const message = await errorMessage(
+      withTeam(app.db, teamA, (tx) =>
+        tx.update(runEvents).set({ runId: r2 }).where(eq(runEvents.runId, r1)),
+      ),
+    );
+    expect(message).toMatch(/cannot be changed/);
+    expect(await seqsOf(teamA, r2)).toEqual([1]);
+  });
+
+  it("still allows updating an event's payload", async () => {
+    const run = await newRun(teamA, await newThread(teamA));
+    await appendEvents(teamA, run, 1);
+    await withTeam(app.db, teamA, (tx) =>
+      tx
+        .update(runEvents)
+        .set({ payload: { edited: true } })
+        .where(eq(runEvents.runId, run)),
+    );
+  });
+
+  it.each([
+    ["sets it back", 0],
+    ["skips ahead", 50],
+    ["bumps it directly", 3],
+  ])("refuses an app write to runs.last_seq that %s", async (_label, value) => {
+    const run = await newRun(teamA, await newThread(teamA));
+    await appendEvents(teamA, run, 2);
+    const message = await errorMessage(
+      withTeam(app.db, teamA, (tx) =>
+        tx.update(runs).set({ lastSeq: value }).where(eq(runs.id, run)),
+      ),
+    );
+    expect(message).toMatch(/maintained by the database/);
+    expect(await appendEvents(teamA, run, 1)).toEqual([3]);
+  });
+
   it("rejects an event for a run that does not exist", async () => {
     const state = await sqlState(appendEvents(teamA, randomUUID(), 1));
     expect(state).toBeDefined();
@@ -227,6 +269,36 @@ describe("thread_entries mirror the Pi session tree (ac-3)", () => {
     const t2 = await newThread(teamA);
     await insertEntry(teamA, t1, "root", null);
     expect(await sqlState(insertEntry(teamA, t2, "child", "root"))).toBe("23503");
+  });
+
+  it("refuses to move an entry to another thread", async () => {
+    const t1 = await newThread(teamA);
+    const t2 = await newThread(teamA);
+    await insertEntry(teamA, t1, "m", null);
+    const message = await errorMessage(
+      withTeam(app.db, teamA, (tx) =>
+        tx.update(threadEntries).set({ threadId: t2 }).where(eq(threadEntries.threadId, t1)),
+      ),
+    );
+    expect(message).toMatch(/cannot be changed/);
+  });
+
+  it("refuses to renumber an entry or rewrite the thread's entry counter", async () => {
+    const thread = await newThread(teamA);
+    await insertEntry(teamA, thread, "r", null);
+    const renumber = await errorMessage(
+      withTeam(app.db, teamA, (tx) =>
+        tx.update(threadEntries).set({ seq: 5 }).where(eq(threadEntries.threadId, thread)),
+      ),
+    );
+    expect(renumber).toMatch(/cannot be changed/);
+    const counter = await errorMessage(
+      withTeam(app.db, teamA, (tx) =>
+        tx.update(threads).set({ lastEntrySeq: 0 }).where(eq(threads.id, thread)),
+      ),
+    );
+    expect(counter).toMatch(/maintained by the database/);
+    expect(await insertEntry(teamA, thread, "r2", "r")).toBe(2);
   });
 
   it("rejects a duplicate entry id within a thread", async () => {
@@ -324,6 +396,37 @@ describe("runs (ac-5)", () => {
       ),
     );
     expect(state).toBe("23514");
+  });
+});
+
+describe("runs: queue and compaction", () => {
+  function queued(threadId: string, queuePos: number): Promise<unknown> {
+    return withTeam(app.db, teamA, (tx) =>
+      tx.insert(runs).values({ teamId: teamA, threadId, trigger: "user", queuePos }),
+    );
+  }
+
+  it("keeps queue positions unique among a thread's queued runs", async () => {
+    const thread = await newThread(teamA);
+    await queued(thread, 1);
+    await queued(thread, 2);
+    expect(await sqlState(queued(thread, 1))).toBe("23505");
+    expect(await sqlState(queued(await newThread(teamA), 1))).toBeUndefined();
+  });
+
+  it("marks compaction only on ended runs", async () => {
+    const thread = await newThread(teamA);
+    const running = await newRun(teamA, thread);
+    const state = await sqlState(
+      withTeam(app.db, teamA, (tx) =>
+        tx.update(runs).set({ eventsCompactedAt: new Date() }).where(eq(runs.id, running)),
+      ),
+    );
+    expect(state).toBe("23514");
+    const ended = await newRun(teamA, thread, "completed");
+    await withTeam(app.db, teamA, (tx) =>
+      tx.update(runs).set({ eventsCompactedAt: new Date() }).where(eq(runs.id, ended)),
+    );
   });
 });
 

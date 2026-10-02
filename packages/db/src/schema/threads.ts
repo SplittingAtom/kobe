@@ -55,7 +55,7 @@ export const threads = pgTable(
     deletedAt: timestamp({ withTimezone: true }),
     lastActivityAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
-    /** Last allocated `thread_entries.seq`; maintained by a trigger, never written by the app. */
+    /** Last allocated `thread_entries.seq`. Only the seq trigger may change it (by exactly 1). */
     lastEntrySeq: integer().notNull().default(0),
   },
   // Annotated: threads and thread_entries reference each other (leaf and thread foreign keys).
@@ -66,12 +66,12 @@ export const threads = pgTable(
       columns: [t.teamId, t.id, t.leafEntryId],
       foreignColumns: [threadEntries.teamId, threadEntries.threadId, threadEntries.entryId],
     }),
-    // Thread list (D9, §6.1): the owner's live threads by recent activity.
+    // Thread list (D9, §6.1): the owner's live threads by recent activity; id is the keyset tiebreak.
     index("threads_owner_activity_idx")
-      .on(t.teamId, t.ownerUserId, t.lastActivityAt.desc())
+      .on(t.teamId, t.ownerUserId, t.lastActivityAt.desc(), t.id.desc())
       .where(sql`${t.deletedAt} IS NULL`),
     index("threads_project_activity_idx")
-      .on(t.teamId, t.projectId, t.lastActivityAt.desc())
+      .on(t.teamId, t.projectId, t.lastActivityAt.desc(), t.id.desc())
       .where(sql`${t.projectId} IS NOT NULL AND ${t.deletedAt} IS NULL`),
     // Trash and the 30-day hard purge (D18).
     index("threads_deleted_idx")

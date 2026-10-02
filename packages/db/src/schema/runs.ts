@@ -64,8 +64,15 @@ export const runs = pgTable(
     startedAt: timestamp({ withTimezone: true }),
     endedAt: timestamp({ withTimezone: true }),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
-    /** Last allocated `run_events.seq`; maintained by a trigger, never written by the app. */
+    /**
+     * Last allocated `run_events.seq`. Only the seq trigger may change it (by exactly 1); app writes
+     * are rejected. Appenders lock this row until commit, so status writers (stop, interrupt,
+     * approval) contend with them: keep both kinds of transaction short and set a `lock_timeout`
+     * on status paths.
+     */
     lastSeq: integer().notNull().default(0),
+    /** Set by the D18 compaction job once this ended run's events are folded into entries. */
+    eventsCompactedAt: timestamp({ withTimezone: true }),
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.id] }),
@@ -78,10 +85,15 @@ export const runs = pgTable(
     uniqueIndex("runs_one_active_per_thread")
       .on(t.teamId, t.threadId)
       .where(sql`${t.status} IN (${statusList(ACTIVE_RUN_STATUSES)})`),
-    // Compaction of ended runs' events after 7 days (D18).
-    index("runs_ended_idx")
+    // Queue order: one queued run per position; reorder by moving runs through free positions.
+    uniqueIndex("runs_queue_pos_unique")
+      .on(t.teamId, t.threadId, t.queuePos)
+      .where(sql`${t.status} = 'queued'`),
+    // D18: ended runs whose events are not yet compacted (7 days after ended_at). The marker keeps
+    // each pass from rescanning runs it already compacted.
+    index("runs_compaction_idx")
       .on(t.teamId, t.endedAt)
-      .where(sql`${t.endedAt} IS NOT NULL`),
+      .where(sql`${t.endedAt} IS NOT NULL AND ${t.eventsCompactedAt} IS NULL`),
     check(
       "runs_ended_at",
       sql`(${t.status} IN (${statusList(TERMINAL_RUN_STATUSES)})) = (${t.endedAt} IS NOT NULL)`,
@@ -92,6 +104,10 @@ export const runs = pgTable(
     ),
     check("runs_queue_pos", sql`${t.queuePos} IS NULL OR ${t.status} = 'queued'`),
     check("runs_last_seq", sql`${t.lastSeq} >= 0`),
+    check(
+      "runs_events_compacted_at",
+      sql`${t.eventsCompactedAt} IS NULL OR ${t.endedAt} IS NOT NULL`,
+    ),
   ],
 );
 

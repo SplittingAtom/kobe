@@ -1,6 +1,6 @@
 {
-  "id": "662a7223-488d-4216-a128-f8aeba32d65f",
-  "prevId": "52ca9043-a420-4b37-9b2f-84cfb882745b",
+  "id": "614ae48c-a4c9-423c-9690-eda5d701b73d",
+  "prevId": "9832587c-c996-476a-84ee-0fd89aec6fa3",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1211,6 +1211,12 @@
               "isExpression": false,
               "asc": false,
               "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -1236,6 +1242,12 @@
             },
             {
               "expression": "last_activity_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
               "isExpression": false,
               "asc": false,
               "nulls": "last"
@@ -1506,6 +1518,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
+        },
+        "events_compacted_at": {
+          "name": "events_compacted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -1558,8 +1576,36 @@
           "where": "\"runs\".\"status\" IN ('running', 'waiting_approval')",
           "concurrently": false
         },
-        "runs_ended_idx": {
-          "name": "runs_ended_idx",
+        "runs_queue_pos_unique": {
+          "name": "runs_queue_pos_unique",
+          "columns": [
+            {
+              "expression": "team_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "thread_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "queue_pos",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "where": "\"runs\".\"status\" = 'queued'",
+          "concurrently": false
+        },
+        "runs_compaction_idx": {
+          "name": "runs_compaction_idx",
           "columns": [
             {
               "expression": "team_id",
@@ -1577,7 +1623,7 @@
           "isUnique": false,
           "with": {},
           "method": "btree",
-          "where": "\"runs\".\"ended_at\" IS NOT NULL",
+          "where": "\"runs\".\"ended_at\" IS NOT NULL AND \"runs\".\"events_compacted_at\" IS NULL",
           "concurrently": false
         }
       },
@@ -1638,6 +1684,10 @@
         "runs_last_seq": {
           "name": "runs_last_seq",
           "value": "\"runs\".\"last_seq\" >= 0"
+        },
+        "runs_events_compacted_at": {
+          "name": "runs_events_compacted_at",
+          "value": "\"runs\".\"events_compacted_at\" IS NULL OR \"runs\".\"ended_at\" IS NOT NULL"
         }
       },
       "isRLSEnabled": false
@@ -1695,8 +1745,8 @@
         }
       },
       "indexes": {
-        "events_queue_idx": {
-          "name": "events_queue_idx",
+        "events_pending_idx": {
+          "name": "events_pending_idx",
           "columns": [
             {
               "expression": "team_id",
@@ -1705,7 +1755,29 @@
               "nulls": "last"
             },
             {
-              "expression": "status",
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "where": "\"events\".\"status\" = 'pending'",
+          "concurrently": false
+        },
+        "events_scheduled_idx": {
+          "name": "events_scheduled_idx",
+          "columns": [
+            {
+              "expression": "team_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1720,7 +1792,7 @@
           "isUnique": false,
           "with": {},
           "method": "btree",
-          "where": "\"events\".\"status\" IN ('pending', 'scheduled')",
+          "where": "\"events\".\"status\" = 'scheduled'",
           "concurrently": false
         }
       },

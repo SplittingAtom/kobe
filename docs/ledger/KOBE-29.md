@@ -69,6 +69,37 @@ thread_id) WHERE status IN ('running','waiting_approval')`, backing the D17 advi
 9. **`leaf_entry_id` FK is NO ACTION:** retention purges whole threads (cascade works, tested);
    deleting a single leaf entry is refused.
 
+10. **Review round 1 (coordinator DB review of PR #11).**
+    - **Immutable keys:** a `BEFORE UPDATE` trigger on every update of `run_events`/`thread_entries`
+      rejects changes to `run_id`/`thread_id` and `seq` (a same-team move planted a stray seq). Payloads
+      stay updatable. `team_id` is deliberately not checked there: any change to it is a cross-team move,
+      which the RLS `WITH CHECK` rejects (FORCE RLS), and a trigger error would pre-empt that 42501
+      (the probe suite asserts it).
+    - **Counter guards:** `runs.last_seq` / `threads.last_entry_seq` change only from inside the seq
+      triggers (`pg_trigger_depth() > 1`) and only by exactly 1; app writes are rejected.
+    - **Compaction marker:** `runs.events_compacted_at` (only on ended runs, check) and
+      `runs_compaction_idx (team_id, ended_at) WHERE ended_at IS NOT NULL AND events_compacted_at IS NULL`
+      replace `runs_ended_idx`, so each D18 pass touches only uncompacted runs.
+    - **Indexes:** `events_pending_idx (team_id, created_at, id) WHERE pending` and
+      `events_scheduled_idx (team_id, due_at) WHERE scheduled` replace `events_queue_idx`; thread-list
+      indexes end in `id DESC` as the keyset tiebreak; `runs_queue_pos_unique (team_id, thread_id,
+queue_pos) WHERE status = 'queued'` (non-deferrable: reorder by moving runs through free
+      positions, e.g. negative temporaries).
+    - Trigger functions schema-qualify `public.runs` / `public.threads`.
+11. **Per-row counter cost (MEDIUM-2): kept the per-row trigger, added `fillfactor = 70` on `runs` and
+    `threads`.** Only a `BEFORE ROW` trigger can set `NEW.seq`; batching the counter per statement
+    would need per-statement state plus an `AFTER STATEMENT` write-back, more moving parts on the
+    resume-critical path. `last_seq` is not indexed, so the updates are HOT and page pruning reclaims
+    the versions once the transaction ends (versions created inside one open transaction can't be
+    pruned until it ends, so very large batches still bloat temporarily). **Guidance for KOBE-31:**
+    coalesce `text.delta`/`reasoning.delta` into fewer events (e.g. a 50–100 ms window per event) rather
+    than one event per token, keep multi-row inserts to tens of rows, and commit each batch promptly.
+12. **Row contention (MEDIUM-3):** appenders hold the run row until commit; status writers (stop,
+    cancel, interrupt, approval wait/resume, budget stop) update the same row. Keep both kinds of
+    transaction short, never hold an append transaction open across network I/O, and set
+    `SET LOCAL lock_timeout = '2s'` (or similar) on status paths so a stuck appender surfaces as an
+    error instead of a hung request. Documented in `runs.last_seq` and the migration.
+
 ## Open questions (for Chris or the coordinator)
 
 - Spec §6.2 has no `run.cancelled` event although `run_status` has `cancelled`; flagged for the
@@ -89,7 +120,10 @@ thread_id) WHERE status IN ('running','waiting_approval')`, backing the D17 advi
   rollback leaves no gap, reader never sees n+1 before n, caller seq rejected, renumber rejected).
 - ac-5: › "runs" (second running/waiting_approval run → 23505; queued allowed; ended_at/queue_pos checks).
 - ac-6: › "team-scoped foreign keys" (entry/run/run_event in team A pointing at team B → rejected).
-- ac-7: indexes in `0004_conversations.sql` (threads owner/project activity, Trash, runs per thread,
-  one-active, ended for compaction, events queue; FK-supporting PK prefixes).
+- ac-7: indexes in `0004_conversations.sql` (threads owner/project activity + id tiebreak, Trash, runs
+  per thread, one-active, unique queue_pos, uncompacted ended runs, pending/scheduled events;
+  FK-supporting PK prefixes).
+- Review round 1: tests for same-team event/entry moves, renumbering, and app writes to the counters
+  (all rejected; payload update still allowed), unique queue_pos, compaction marker on ended runs only.
 - `pnpm build test typecheck format:check` green; `lint` green except pre-existing `@kobe/chart`
-  (Helm 4 `license` field); `pnpm --filter @kobe/db test:db` 99/99; `db:check` clean.
+  (Helm 4 `license` field); `pnpm --filter @kobe/db test:db` 108/108; `db:check` clean.

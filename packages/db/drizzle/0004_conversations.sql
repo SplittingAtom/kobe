@@ -62,11 +62,13 @@ CREATE TABLE "runs" (
 	"ended_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"last_seq" integer DEFAULT 0 NOT NULL,
+	"events_compacted_at" timestamp with time zone,
 	CONSTRAINT "runs_team_id_id_pk" PRIMARY KEY("team_id","id"),
 	CONSTRAINT "runs_ended_at" CHECK (("runs"."status" IN ('completed', 'failed', 'interrupted', 'cancelled', 'budget_stopped')) = ("runs"."ended_at" IS NOT NULL)),
 	CONSTRAINT "runs_started_at" CHECK ("runs"."status" NOT IN ('running', 'waiting_approval') OR "runs"."started_at" IS NOT NULL),
 	CONSTRAINT "runs_queue_pos" CHECK ("runs"."queue_pos" IS NULL OR "runs"."status" = 'queued'),
-	CONSTRAINT "runs_last_seq" CHECK ("runs"."last_seq" >= 0)
+	CONSTRAINT "runs_last_seq" CHECK ("runs"."last_seq" >= 0),
+	CONSTRAINT "runs_events_compacted_at" CHECK ("runs"."events_compacted_at" IS NULL OR "runs"."ended_at" IS NOT NULL)
 );
 --> statement-breakpoint
 CREATE TABLE "events" (
@@ -94,10 +96,12 @@ ALTER TABLE "runs" ADD CONSTRAINT "runs_team_id_teams_id_fk" FOREIGN KEY ("team_
 ALTER TABLE "runs" ADD CONSTRAINT "runs_thread_fk" FOREIGN KEY ("team_id","thread_id") REFERENCES "public"."threads"("team_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "events" ADD CONSTRAINT "events_team_id_teams_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."teams"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "thread_entries_parent_idx" ON "thread_entries" USING btree ("team_id","thread_id","parent_id");--> statement-breakpoint
-CREATE INDEX "threads_owner_activity_idx" ON "threads" USING btree ("team_id","owner_user_id","last_activity_at" DESC NULLS LAST) WHERE "threads"."deleted_at" IS NULL;--> statement-breakpoint
-CREATE INDEX "threads_project_activity_idx" ON "threads" USING btree ("team_id","project_id","last_activity_at" DESC NULLS LAST) WHERE "threads"."project_id" IS NOT NULL AND "threads"."deleted_at" IS NULL;--> statement-breakpoint
+CREATE INDEX "threads_owner_activity_idx" ON "threads" USING btree ("team_id","owner_user_id","last_activity_at" DESC NULLS LAST,"id" DESC NULLS LAST) WHERE "threads"."deleted_at" IS NULL;--> statement-breakpoint
+CREATE INDEX "threads_project_activity_idx" ON "threads" USING btree ("team_id","project_id","last_activity_at" DESC NULLS LAST,"id" DESC NULLS LAST) WHERE "threads"."project_id" IS NOT NULL AND "threads"."deleted_at" IS NULL;--> statement-breakpoint
 CREATE INDEX "threads_deleted_idx" ON "threads" USING btree ("team_id","deleted_at") WHERE "threads"."deleted_at" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX "runs_thread_idx" ON "runs" USING btree ("team_id","thread_id","created_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "runs_one_active_per_thread" ON "runs" USING btree ("team_id","thread_id") WHERE "runs"."status" IN ('running', 'waiting_approval');--> statement-breakpoint
-CREATE INDEX "runs_ended_idx" ON "runs" USING btree ("team_id","ended_at") WHERE "runs"."ended_at" IS NOT NULL;--> statement-breakpoint
-CREATE INDEX "events_queue_idx" ON "events" USING btree ("team_id","status","due_at") WHERE "events"."status" IN ('pending', 'scheduled');
+CREATE UNIQUE INDEX "runs_queue_pos_unique" ON "runs" USING btree ("team_id","thread_id","queue_pos") WHERE "runs"."status" = 'queued';--> statement-breakpoint
+CREATE INDEX "runs_compaction_idx" ON "runs" USING btree ("team_id","ended_at") WHERE "runs"."ended_at" IS NOT NULL AND "runs"."events_compacted_at" IS NULL;--> statement-breakpoint
+CREATE INDEX "events_pending_idx" ON "events" USING btree ("team_id","created_at","id") WHERE "events"."status" = 'pending';--> statement-breakpoint
+CREATE INDEX "events_scheduled_idx" ON "events" USING btree ("team_id","due_at") WHERE "events"."status" = 'scheduled';

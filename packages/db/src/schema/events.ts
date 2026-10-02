@@ -35,10 +35,13 @@ export const events = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.id] }),
-    // Work queue: pending and due events, oldest first.
-    index("events_queue_idx")
-      .on(t.teamId, t.status, t.dueAt)
-      .where(sql`${t.status} IN ('pending', 'scheduled')`),
+    // Work queues: pending events oldest first; scheduled events by due time.
+    index("events_pending_idx")
+      .on(t.teamId, t.createdAt, t.id)
+      .where(sql`${t.status} = 'pending'`),
+    index("events_scheduled_idx")
+      .on(t.teamId, t.dueAt)
+      .where(sql`${t.status} = 'scheduled'`),
     check("events_due_at", sql`${t.status} <> 'scheduled' OR ${t.dueAt} IS NOT NULL`),
     check("events_kind_format", sql`${t.kind} ~ '^[a-z][a-z_]*(\\.[a-z][a-z_]*)*$'`),
   ],
