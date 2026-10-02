@@ -63,11 +63,11 @@ wait_endpoints() { # namespace service... → waits up to REACH_TIMEOUT s for re
   done
 }
 # Shell snippet for a probe pod: runs a command until it succeeds or [seconds] (default REACH_TIMEOUT) pass; its exit
-# status says which, so `$(retry ...) && ...` gates on it. (No double quotes: team_pod embeds the
-# pod command in JSON.)
+# status says which: one { } group, so `! $(retry ...)`, `$(retry ...) && ...` and `if` gate on
+# it. (No double quotes: team_pod embeds the pod command in JSON.)
 retry() { # command [seconds]
-  echo "ok=0; end=\$((\$(date +%s) + ${2:-$REACH_TIMEOUT})); while :; do if $1 >/dev/null 2>&1; then ok=1; break; fi; \
-[ \$(date +%s) -ge \$end ] && break; sleep 1; done; [ \$ok = 1 ]"
+  echo "{ ok=0; end=\$((\$(date +%s) + ${2:-$REACH_TIMEOUT})); while :; do if $1 >/dev/null 2>&1; then ok=1; break; fi; \
+[ \$(date +%s) -ge \$end ] && break; sleep 1; done; [ \$ok = 1 ]; }"
 }
 answers() { echo "wget -qO- -T 3 $1"; } # [wget options] URL → a command that succeeds once it answers
 # Gated negative check, in a probe pod: when the control URL answers, prints control=REACHED and
@@ -366,8 +366,8 @@ contains "control: the API Service is reachable from the release namespace" '^ap
 contains "control: the kubelet is reachable from the release namespace" '^kubelet=REACHED$' "$controls"
 contains "control: the user API is reachable from the release namespace" '^user-api=REACHED$' "$controls"
 # A new pod joins the CNI's policy ipsets after a delay: the sandbox probes run only once the
-# sandbox port (the positive control from the same pod) answers, so BLOCKED is the policy. A new
-# gVisor team pod can take over a minute to be admitted on a busy runner: allow 180 s.
+# sandbox port (the positive control from the same pod) answers, so BLOCKED is the policy. Allow
+# 180 s, the budget of the loop this replaced; admitted-after records how long it took.
 egress=$(team_probe "t0=\$(date +%s); if ! $(retry "$(answers http://$server_ip:8081/healthz)" 180); then \
   echo sandbox-port=BLOCKED; echo egress=UNTESTED; exit 0; fi; echo admitted-after=\$((\$(date +%s) - t0))s; \
   wget -qO- -T 5 http://${diag_ip:-0.0.0.0}:8080/ >/dev/null 2>&1 && echo diag-8080=REACHED || echo diag-8080=BLOCKED; \
