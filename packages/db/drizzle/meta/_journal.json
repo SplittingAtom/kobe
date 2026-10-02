@@ -50,6 +50,20 @@
       "when": 1790924274788,
       "tag": "0006_session_active_teams",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790926392160,
+      "tag": "0007_tool_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790926392711,
+      "tag": "0008_tool_rules_rls",
+      "breakpoints": true
     }
   ]
 }
