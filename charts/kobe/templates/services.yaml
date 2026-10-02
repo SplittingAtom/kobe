@@ -2,6 +2,9 @@
 {{- $fullname := include "kobe.fullname" . -}}
 {{- $dbAnnotations := include "kobe.dbChecksumAnnotations" . -}}
 {{- $common := printf "%s\n%s" (include "kobe.databaseEnv" .) (include "kobe.s3Env" .) -}}
+{{- /* The server has no isolation initContainer: it checks in process and keeps serving the
+  admin console without isolation, agents disabled (spec D4, KOBE-9). The scheduler, which has no
+  UI, still refuses to start. Both re-check at runtime. */ -}}
 {{- $runtime := printf "- name: KOBE_RUNTIME_CLASS\n  value: %s" (.Values.isolation.runtimeClassName | quote) -}}
 {{- include "kobe.nodeService" (dict "root" . "component" "web" "image" "web" "values" .Values.web
       "healthPath" "/api/healthz" "readyPath" "/api/healthz"
@@ -9,14 +12,14 @@
       "extraVolumes" "- name: next-cache\n  emptyDir: {}") }}
 ---
 {{ include "kobe.nodeService" (dict "root" . "component" "server" "image" "server" "values" .Values.server
-      "serviceAccount" (printf "%s-server" $fullname) "automountToken" true "preflight" true
+      "serviceAccount" (printf "%s-server" $fullname) "automountToken" true "migrations" true
       "annotations" $dbAnnotations
       "env" (printf "- name: KOBE_PROCESS\n  value: server\n%s\n%s\n%s" $runtime $common (include "kobe.authEnv" .))) }}
 ---
 {{ include "kobe.nodeService" (dict "root" . "component" "scheduler" "image" "server" "values" .Values.scheduler
-      "serviceAccount" (printf "%s-server" $fullname) "automountToken" true "preflight" true
+      "serviceAccount" (printf "%s-server" $fullname) "automountToken" true "preflight" true "migrations" true
       "annotations" $dbAnnotations
-      "env" (printf "- name: KOBE_PROCESS\n  value: scheduler\n%s" $common)) }}
+      "env" (printf "- name: KOBE_PROCESS\n  value: scheduler\n%s\n%s" $runtime $common)) }}
 ---
 {{ include "kobe.nodeService" (dict "root" . "component" "mcp-proxy" "image" "mcp-proxy" "values" .Values.mcpProxy) }}
 ---

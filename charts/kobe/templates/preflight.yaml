@@ -3,8 +3,8 @@
 {{- $hook := "pre-install,pre-upgrade,pre-rollback" -}}
 {{- $clusterName := include "kobe.clusterName" (dict "root" . "suffix" "isolation-preflight") -}}
 # Isolation preflight (spec D4): fails the release unless the sandbox RuntimeClass isolates.
-# `--no-hooks` and `helm template | kubectl apply` skip hooks; the server and scheduler
-# initContainers enforce the same check on every pod start.
+# `--no-hooks` and `helm template | kubectl apply` skip hooks; the scheduler initContainer and
+# the server's in-process gate (KOBE-9) enforce the same check on every pod start and at runtime.
 apiVersion: v1
 kind: ServiceAccount
 metadata:

@@ -2,7 +2,9 @@
  * Isolation prerequisite (spec D4, principle 7): Kobe refuses to run agents without a gVisor or
  * Kata RuntimeClass. Judged by the RuntimeClass handler, never its name. There is no bypass.
  */
-const ISOLATION_HANDLER = /^(runsc|kata(-[a-z0-9]+)?)$/;
+// Kata handlers carry the hypervisor and options as dash-separated parts (kata-qemu-snp, kata-clh-tdx).
+// The chart's _isolation.tpl uses the same pattern (a chart test checks it).
+export const ISOLATION_HANDLER = /^(runsc|kata(-[a-z0-9]+)*)$/;
 
 export const ISOLATION_REMEDIATION = [
   "Kobe refuses to run agents without an isolation runtime: no RuntimeClass with a gVisor",

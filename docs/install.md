@@ -17,8 +17,8 @@ Kobe installs with Helm on k3s (single-node k3s is the minimum). There is no `do
 
 Kobe refuses to run agents without a gVisor or Kata RuntimeClass. The chart checks this at
 `helm install`/`helm upgrade` time (the release fails with remediation text) and again with a
-pre-install/pre-upgrade hook Job (the server's own startup check arrives with KOBE-9). The check looks at the
-RuntimeClass **handler** (`runsc` or `kata*`), not its name. There is no option to disable it.
+pre-install/pre-upgrade hook Job; the server checks it again itself (see below). The check looks at
+the RuntimeClass **handler** (`runsc` or `kata*`), not its name. There is no option to disable it.
 
 Install gVisor on every node (as root, one node at a time — restarting k3s keeps pods running):
 
@@ -37,9 +37,19 @@ Verify: a pod with `runtimeClassName: gvisor` running `dmesg` prints `Starting g
 
 The check applies to the RuntimeClass sandboxes will actually use (`isolation.runtimeClassName`,
 default `gvisor`): it must exist and have an isolating handler. Besides the install-time check and
-the pre-install/pre-upgrade/pre-rollback hook, the server and scheduler run the same check as an
-initContainer on every pod start, so `--no-hooks`, `helm template | kubectl apply`, or deleting the
-RuntimeClass later cannot bring Kobe up without isolation.
+the pre-install/pre-upgrade/pre-rollback hook, so that `--no-hooks`, `helm template | kubectl
+apply`, or deleting the RuntimeClass later cannot run agents without isolation:
+
+- The **server** checks in process at startup, every minute, and live before every piece of
+  agent work. Without a verified RuntimeClass it keeps serving sign-in
+  and the admin console but **agents are disabled**: chat returns `isolation_runtime_missing`
+  (HTTP 503), the server logs the problem and the fix at `error` level, and install admins see
+  both at `GET /v1/install/isolation` (`POST /v1/install/isolation/check` re-checks immediately
+  after you fix the cluster). `/readyz` does not disclose the result (it is unauthenticated); it is
+  not ready only until the first check completes. Errors and timeouts talking to the Kubernetes
+  API count as missing.
+- The **scheduler** has no UI, so it runs the same check as an initContainer and refuses to start,
+  then re-checks in process like the server.
 
 ## Install
 
