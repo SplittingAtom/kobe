@@ -106,6 +106,12 @@ live traffic. Rolling a bundled-CloudNativePG release back to its first revision
 revision's initial migration Job, which resets app-role grants to that build's matrix; the next
 upgrade restores them.
 
+## Backup and restore
+
+`kobe backup` / `kobe restore` cover Postgres and an S3 object manifest; see
+[backup-restore.md](backup-restore.md). Keep copies of the Secrets you create above (and the
+generated `<release>-auth` Secret) in your secret store: backups never contain them.
+
 ## Local development cluster
 
 `scripts/dev-cluster.sh` creates a k3d cluster with gVisor and the agent-sandbox controller
