@@ -8,7 +8,7 @@ const DRAIN_TIMEOUT_MS = 10_000;
 
 const config = loadConfig(process.env);
 const server = serve({ fetch: createApp().fetch, port: config.port }, (info) => {
-  logger.info({ port: info.port }, "listening");
+  logger.info({ port: info.port, process: config.process }, "listening");
 });
 
 function shutdown(signal: string): void {

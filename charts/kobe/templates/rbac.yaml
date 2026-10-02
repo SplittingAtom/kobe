@@ -1,0 +1,43 @@
+{{- $fullname := include "kobe.fullname" . -}}
+# Workloads that never call the Kubernetes API share a token-less ServiceAccount.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $fullname }}-workload
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+# The server re-checks isolation at startup (KOBE-9) and orchestrates sandboxes (KOBE-22).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $fullname }}-server
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $fullname }}-{{ .Release.Namespace }}-server
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["node.k8s.io"]
+    resources: ["runtimeclasses"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $fullname }}-{{ .Release.Namespace }}-server
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $fullname }}-{{ .Release.Namespace }}-server
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fullname }}-server
+    namespace: {{ .Release.Namespace }}

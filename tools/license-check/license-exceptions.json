@@ -3,5 +3,10 @@
     "license": "CC-BY-4.0",
     "versions": ["1.0.30001814"],
     "reason": "Browser-compatibility data table required by Next.js/browserslist at build time; an attribution-only data license, not copyleft or source-available. Pending Chris's sign-off (KOBE-5 review)."
+  },
+  "argparse": {
+    "license": "Python-2.0",
+    "versions": ["2.0.1"],
+    "reason": "Pulled in by js-yaml (via @kubernetes/client-node). PSF-2.0 is a permissive BSD-style license, not copyleft or source-available. Pending Chris's sign-off (KOBE-6)."
   }
 }

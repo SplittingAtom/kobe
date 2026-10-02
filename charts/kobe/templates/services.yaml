@@ -1,0 +1,19 @@
+{{- $fullname := include "kobe.fullname" . -}}
+{{- $common := printf "%s\n%s" (include "kobe.databaseEnv" .) (include "kobe.s3Env" .) -}}
+{{- $runtime := printf "- name: KOBE_RUNTIME_CLASS\n  value: %s" (.Values.isolation.runtimeClassName | quote) -}}
+{{- include "kobe.nodeService" (dict "root" . "component" "web" "image" "web" "values" .Values.web
+      "healthPath" "/api/healthz" "readyPath" "/api/healthz"
+      "extraMounts" "- name: next-cache\n  mountPath: /app/apps/web/.next/cache"
+      "extraVolumes" "- name: next-cache\n  emptyDir: {}") }}
+---
+{{ include "kobe.nodeService" (dict "root" . "component" "server" "image" "server" "values" .Values.server
+      "serviceAccount" (printf "%s-server" $fullname) "automountToken" true
+      "env" (printf "- name: KOBE_PROCESS\n  value: server\n%s\n%s" $runtime $common)) }}
+---
+{{ include "kobe.nodeService" (dict "root" . "component" "scheduler" "image" "server" "values" .Values.scheduler
+      "env" (printf "- name: KOBE_PROCESS\n  value: scheduler\n%s" $common)) }}
+---
+{{ include "kobe.nodeService" (dict "root" . "component" "mcp-proxy" "image" "mcp-proxy" "values" .Values.mcpProxy
+      "env" (include "kobe.databaseEnv" .)) }}
+---
+{{ include "kobe.nodeService" (dict "root" . "component" "egress-proxy" "image" "egress-proxy" "values" .Values.egressProxy) }}

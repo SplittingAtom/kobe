@@ -1,3 +1,107 @@
-# Scaffold only: populated in KOBE-6.
+# Kobe Helm values. Every key is validated by values.schema.json (unknown keys are rejected).
+
 global:
+  # Registry for Kobe images; images are private, so set imagePullSecrets (applied to every pod).
+  imageRegistry: ghcr.io/splittingatom
+  # Defaults to the chart appVersion.
+  imageTag: ""
+  imagePullPolicy: IfNotPresent
   imagePullSecrets: []
+
+# Kobe refuses to run agents without a gVisor or Kata RuntimeClass (spec D4). The install fails
+# when none exists; there is no switch to disable this check.
+isolation:
+  # RuntimeClass sandboxes run under; its handler must be runsc (gVisor) or kata*.
+  runtimeClassName: gvisor
+
+web:
+  replicas: 1
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+server:
+  # Stateless; at least two replicas from day one (spec D2).
+  replicas: 2
+  resources:
+    requests: { cpu: 200m, memory: 256Mi }
+    limits: { cpu: "2", memory: 1Gi }
+
+scheduler:
+  replicas: 1
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
+mcpProxy:
+  replicas: 1
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+egressProxy:
+  replicas: 1
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+# Model gateway, always installed (spec D30). Provider keys live here, never in sandboxes.
+bifrost:
+  image:
+    repository: docker.io/maximhq/bifrost
+    tag: v2.2.4
+  replicas: 1
+  persistence:
+    # Without persistence Bifrost's config lives in an emptyDir and is rebuilt by config sync.
+    enabled: false
+    size: 1Gi
+    storageClass: ""
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+postgres:
+  # external: bring your own Postgres 17 (+pg_trgm). cnpg: bundle a CloudNativePG Cluster (the
+  # CloudNativePG operator must already be installed).
+  mode: external
+  external:
+    # Secret with an app-role connection URL (non-owner role) and an owner URL for migrations.
+    existingSecret: ""
+    appUrlKey: app-url
+    migrateUrlKey: migrate-url
+  cnpg:
+    instances: 1
+    imageName: ghcr.io/cloudnative-pg/postgresql:17
+    storage:
+      size: 10Gi
+      storageClass: ""
+
+# External S3-compatible object storage (no bundled S3).
+s3:
+  endpoint: ""
+  region: us-east-1
+  bucket: ""
+  forcePathStyle: true
+  # Secret with keys access-key-id and secret-access-key.
+  existingSecret: ""
+
+ingress:
+  enabled: true
+  className: traefik
+  host: ""
+  annotations: {}
+  tls:
+    enabled: true
+    secretName: ""
+    # cert-manager ClusterIssuer; leave empty to manage the TLS Secret yourself.
+    clusterIssuer: ""
+
+# Optional upload scanning (spec D26), off by default.
+clamav:
+  enabled: false
+  image:
+    repository: docker.io/clamav/clamav
+    tag: "1.4"
+  resources:
+    requests: { cpu: 100m, memory: 1Gi }
+    limits: { cpu: "1", memory: 2Gi }

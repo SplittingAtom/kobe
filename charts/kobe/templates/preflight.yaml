@@ -1,0 +1,83 @@
+{{- include "kobe.isolationCheck" . -}}
+{{- $fullname := include "kobe.fullname" . -}}
+{{- $hook := "pre-install,pre-upgrade" -}}
+# Isolation preflight (spec D4): fails the release when no gVisor/Kata RuntimeClass exists.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $fullname }}-isolation-preflight
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: {{ $hook }}
+    helm.sh/hook-weight: "-20"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $fullname }}-{{ .Release.Namespace }}-isolation-preflight
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: {{ $hook }}
+    helm.sh/hook-weight: "-20"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: ["node.k8s.io"]
+    resources: ["runtimeclasses"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $fullname }}-{{ .Release.Namespace }}-isolation-preflight
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: {{ $hook }}
+    helm.sh/hook-weight: "-19"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $fullname }}-{{ .Release.Namespace }}-isolation-preflight
+subjects:
+  - kind: ServiceAccount
+    name: {{ $fullname }}-isolation-preflight
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-isolation-preflight
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: {{ $hook }}
+    helm.sh/hook-weight: "-10"
+    # Failed Jobs are kept so `kubectl describe` shows the remediation message.
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 120
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kobe
+        app.kubernetes.io/component: isolation-preflight
+    spec:
+      restartPolicy: Never
+      {{- include "kobe.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ $fullname }}-isolation-preflight
+      {{- include "kobe.podSecurityContext" . | nindent 6 }}
+      containers:
+        - name: preflight
+          image: {{ include "kobe.image" (dict "root" . "name" "server") }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command: ["node", "dist/cli/preflight.js"]
+          {{- include "kobe.containerSecurityContext" . | nindent 10 }}
+          terminationMessagePolicy: FallbackToLogsOnError
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 500m, memory: 256Mi }

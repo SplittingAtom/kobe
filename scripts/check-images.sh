@@ -10,12 +10,14 @@ sandbox-agent:services/sandbox-agent/Dockerfile
 mcp-proxy:services/mcp-proxy/Dockerfile
 egress-proxy:services/egress-proxy/Dockerfile"
 TAG="${IMAGE_TAG:-dev}"
+# e.g. IMAGE_PREFIX=ghcr.io/splittingatom/kobe- IMAGE_TAG=0.1.0 to build release-named images.
+PREFIX="${IMAGE_PREFIX:-kobe-}"
 failed=0
 
 for entry in ${IMAGES}; do
   svc="${entry%%:*}"
   dockerfile="${entry#*:}"
-  image="kobe-${svc}:${TAG}"
+  image="${PREFIX}${svc}:${TAG}"
   echo "==> building ${image}"
   docker build --quiet -f "${dockerfile}" -t "${image}" . >/dev/null
 

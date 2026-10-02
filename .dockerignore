@@ -5,7 +5,6 @@
 **/coverage
 .git
 .github
-charts
 docs
 *.md
 !apps/**/*.md
