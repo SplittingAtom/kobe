@@ -1,0 +1,4 @@
+/* Only for pages that render an admin console: the shell paints edge to edge. */
+body:has([data-kobe-console]) {
+  margin: 0;
+}
