@@ -6,7 +6,7 @@ export default defineTeamSection({
   description: "The team's audit events, including break-glass banners.",
   group: "Governance",
   order: 20,
-  // No team.audit.read permission exists yet; KOBE-15 should add one and switch to it here.
-  permission: "team.members.manage",
+  // GET /v1/team/audit (KOBE-15).
+  permission: "team.audit.read",
   status: comingIn("KOBE-15"),
 });
