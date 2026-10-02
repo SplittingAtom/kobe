@@ -13,19 +13,19 @@ async function ifMatch(header?: string) {
 }
 
 describe("readIfMatch", () => {
-  it("treats a missing header or * as any revision", async () => {
-    expect(await ifMatch()).toEqual({ ok: true });
-    expect(await ifMatch("*")).toEqual({ ok: true });
+  it("distinguishes a missing header from an explicit *", async () => {
+    expect(await ifMatch()).toEqual({ kind: "missing" });
+    expect(await ifMatch("*")).toEqual({ kind: "any" });
   });
 
   it("reads strong and weak ETags", async () => {
-    expect(await ifMatch('"7"')).toEqual({ ok: true, revision: 7 });
-    expect(await ifMatch('W/"7"')).toEqual({ ok: true, revision: 7 });
+    expect(await ifMatch('"7"')).toEqual({ kind: "revision", revision: 7 });
+    expect(await ifMatch('W/"7"')).toEqual({ kind: "revision", revision: 7 });
   });
 
-  it("refuses anything else (it can't match)", async () => {
+  it("flags anything else as invalid", async () => {
     for (const bad of ["7", '"x"', '"1", "2"', `"${"9".repeat(12)}"`]) {
-      expect(await ifMatch(bad)).toEqual({ ok: false });
+      expect(await ifMatch(bad)).toEqual({ kind: "invalid" });
     }
   });
 });

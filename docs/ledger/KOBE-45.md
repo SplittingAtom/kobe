@@ -1,6 +1,6 @@
 # KOBE-45: Agent definitions: markdown schema, scopes, CRUD, import/export
 
-- **Status:** in review
+- **Status:** in review (PR #17)
 - **Branch / worktree:** `kobe-45-agent-definitions` in `../Kobe-wt45`
 - **Depends on:** KOBE-14 (merged)
 
@@ -40,7 +40,9 @@
      needs one install-wide versions table instead of two.
 2. **A row is the agent's editable draft** (`frontmatter jsonb` = the file's YAML as JSON, `prompt`
    text). `current_version` (null until first publish) and `status active|suspended` are there for
-   KOBE-46/48. `revision` (+1 per edit) is the ETag; `PUT` honours `If-Match` (412 on mismatch).
+   KOBE-46/48. `revision` (+1 per edit) is the ETag; `PUT` **requires** `If-Match` (428 without it, 400 if
+   malformed, 412 on mismatch; `*` is an explicit overwrite), so concurrent editors can't silently
+   lose each other's changes.
 3. **Agent-file parsing lives in a new package `@kobe/agent-file`** (pure, browser-safe: no
    node APIs, `types: []`), depending on `yaml` (ISC, already in the lockfile) and `zod`. Not in `@kobe/protocol` (contracts change only in their own PR); it depends on it.
    - YAML 1.2 core schema; anchors, aliases, explicit tags, duplicate and non-string keys, `<<`
@@ -97,11 +99,16 @@
      become archive (status) rather than a hard delete.
    - Until then `DELETE` is a hard delete of a draft-only agent.
 7. **Caps instead of pagination:** 500 team agents per team, 100 personal per user, 100 gallery
-   (409 `limit_reached`). Checked inside the insert transaction; two concurrent creates can exceed
-   a cap by one (acceptable; caps bound list size, not security).
+   (409 `limit_reached`). Creates take a transaction-scoped advisory lock per location (team, owner,
+   or gallery), so the cap and the auto-picked slug (`name` → `name-2` …) never race.
 8. Shared test helpers: `testing/browser.ts` gained `RawBody` (raw content-type bodies), response
    `headers`/`text`, and a headers argument on `put`; `testing/app-sessions.ts` holds
    `waitForAppSessionsToClose` (teams.db.test keeps its own copy for now).
+
+9. **Security review (subagent), all fixed:** lone UTF-16 surrogates are refused like control
+   characters (Postgres jsonb rejects them: was a 500); `If-Match` required on PUT; creates
+   serialized per location (caps and auto slugs were racy); malformed `If-Match` is 400. Noted, not
+   changed: suspended agents stay listed (KOBE-47 must refuse to start them).
 
 ## Seams for downstream tickets
 
@@ -130,13 +137,13 @@
 
 ## Evidence (acceptance criteria → test or command output)
 
-- ac-1, ac-2: `packages/agent-file/src/agent-file.test.ts` (54 tests: §6.3 example, 9 round-trip
+- ac-1, ac-2: `packages/agent-file/src/agent-file.test.ts` (57 tests: §6.3 example, 9 round-trip
   cases incl. CRLF/BOM/unicode/delimiters in body, canonical key order, schema rejections, unsafe
   YAML, size limits, JSON validation).
 - ac-3, ac-6 (DB): `packages/db/src/agents.db.test.ts` (slug per team, RLS invisibility and
   WITH CHECK, backstop checks, personal/gallery owner rule and slug uniqueness); catalog check and
   probe suite cover `team_agents` (`pnpm --filter @kobe/db test:db` 137/137).
-- ac-4, ac-5, ac-6 (HTTP): `services/server/src/agents.db.test.ts` (28 tests: create per role,
+- ac-4, ac-5, ac-6 (HTTP): `services/server/src/agents.db.test.ts` (29 tests: create per role,
   header guard, slugs, invalid definitions, import → export → re-import through the API, PUT from a
   file, unsafe files, 413/415, member summary vs builder definition, creator/admin edit, If-Match,
   suspend, delete, cross-team 404s incl. a member of both teams, stale tab 409, personal privacy
@@ -144,4 +151,4 @@
   `src/agents/access.test.ts` (rulebook per role and scope); `src/authz/permissions.test.ts`.
 - ac-7: decision 6; schema columns `current_version`, `status`, `revision`.
 - `pnpm build test typecheck format:check license:check` green; `lint` green except pre-existing
-  `@kobe/chart` (Helm 4); `pnpm --filter @kobe/server test:db` 78/78; `db:check` clean.
+  `@kobe/chart` (Helm 4); `pnpm --filter @kobe/server test:db` 79/79; `db:check` clean.

@@ -40,11 +40,15 @@ export const FRONTMATTER_KEYS = [
   "starters",
 ] as const;
 
-// C0 controls except tab and newline, plus DEL. Postgres text can't store NUL at all.
-// eslint-disable-next-line no-control-regex
-export const FORBIDDEN_CONTROL = /[\u0000-\u0008\u000B-\u001F\u007F]/;
-// eslint-disable-next-line no-control-regex
-const ANY_CONTROL = /[\u0000-\u001F\u007F]/;
+// Lone UTF-16 surrogates: not valid Unicode; Postgres jsonb rejects them and UTF-8 mangles them.
+const LONE_SURROGATE =
+  "[\\uD800-\\uDBFF](?![\\uDC00-\\uDFFF])|(?<![\\uD800-\\uDBFF])[\\uDC00-\\uDFFF]";
+// C0 controls except tab and newline, plus DEL (Postgres text can't store NUL at all), or a lone
+// surrogate.
+export const FORBIDDEN_CONTROL = new RegExp(
+  `[\\u0000-\\u0008\\u000B-\\u001F\\u007F]|${LONE_SURROGATE}`,
+);
+const ANY_CONTROL = new RegExp(`[\\u0000-\\u001F\\u007F]|${LONE_SURROGATE}`);
 
 /** Single-line text: trimmed, no control characters at all. */
 const line = (max: number) =>
@@ -53,7 +57,10 @@ const line = (max: number) =>
     .trim()
     .min(1, "must not be empty")
     .max(max, `must be at most ${max} characters`)
-    .refine((s) => !ANY_CONTROL.test(s), "must be a single line without control characters");
+    .refine(
+      (s) => !ANY_CONTROL.test(s),
+      "must be a single line without control characters or invalid Unicode",
+    );
 
 /** Multi-line text: trimmed, newlines and tabs allowed. */
 const text = (max: number) =>
@@ -62,7 +69,10 @@ const text = (max: number) =>
     .trim()
     .min(1, "must not be empty")
     .max(max, `must be at most ${max} characters`)
-    .refine((s) => !FORBIDDEN_CONTROL.test(s), "must not contain control characters");
+    .refine(
+      (s) => !FORBIDDEN_CONTROL.test(s),
+      "must not contain control characters or invalid Unicode",
+    );
 
 const uniqueList = <T extends z.ZodType<string>>(item: T, max: number) =>
   z
@@ -108,7 +118,7 @@ const skillsSchema = z.union([
 /** Policy glob grammar (@kobe/protocol glob.ts), on a single line. */
 const toolGlobSchema = globSchema.refine(
   (s) => !ANY_CONTROL.test(s),
-  "must be a single line without control characters",
+  "must be a single line without control characters or invalid Unicode",
 );
 
 /** Tool allow/deny globs, matched by the policy engine (D29, KOBE-35). */

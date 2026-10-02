@@ -161,6 +161,10 @@ export async function createAgent(
 ): Promise<Result<AgentRecord, CreateError>> {
   try {
     return await inLocation(db, location, async (tx) => {
+      // Serializes creates per location, so the cap and the picked slug can't race.
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey(location)}, 0))`,
+      );
       const taken = new Set(await takenSlugs(tx, location));
       if (taken.size >= AGENT_CAPS[location.scope]) return { ok: false, error: "limit_reached" };
       const slug = input.slug ?? pickSlug(taken, input.baseSlug);
@@ -188,10 +192,16 @@ export async function createAgent(
       return { ok: true, value: toRecord(location.scope, row) };
     });
   } catch (err) {
-    // A concurrent create took the slug between our read and insert.
+    // Defensive: creates are serialized per location, so this needs a racing non-create write.
     if (pgCode(err) === "23505") return { ok: false, error: "slug_taken" };
     throw err;
   }
+}
+
+function lockKey(location: AgentLocation): string {
+  if (location.scope === "team") return `kobe.agents.team:${location.teamId}`;
+  if (location.scope === "personal") return `kobe.agents.personal:${location.ownerUserId}`;
+  return "kobe.agents.gallery";
 }
 
 function requireOwner(input: NewAgent): string {

@@ -195,6 +195,12 @@ describe("unsafe YAML is refused", () => {
   it("refuses control characters anywhere in the file (Postgres text can't hold NUL)", () => {
     expect(issuesOf(file("name: A", "prompt with \u0000 NUL"))[0]).toMatch(/control character/);
     expect(issuesOf(file("name: A", "bell \u0007"))[0]).toMatch(/control character/);
+    expect(issuesOf(file("name: A", "lone \uD800 surrogate"))[0]).toMatch(/invalid Unicode/);
+    expect(issuesOf(file('name: "a\\uD800b"'))[0]).toMatch(/^frontmatter\.name/);
+    expect(validateAgentDefinition({ frontmatter: { name: "A" }, prompt: "\uDC00" }).ok).toBe(
+      false,
+    );
+    expect(parsed(file("name: A", "pair 😀 ok")).prompt).toBe("pair 😀 ok");
     // Tabs and newlines are fine.
     expect(parsed(file("name: A", "a\tb\nc")).prompt).toBe("a\tb\nc");
   });

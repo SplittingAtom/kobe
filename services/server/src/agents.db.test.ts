@@ -29,6 +29,8 @@ starters: ["Draft notes for the latest tag"]
 You write concise, user-facing release notes grouped by feature area…
 `;
 
+/** If-Match for edits that aren't about concurrency: overwrite whatever is there. */
+const ANY = { "if-match": "*" };
 const markdown = (text: string) => new RawBody(text, "text/markdown; charset=utf-8");
 const definition = (name: string, prompt = `You are ${name}.`) => ({
   frontmatter: { name, starters: ["Hello"] },
@@ -179,6 +181,16 @@ describe("creating agents (D8, D19)", () => {
     expect(personal.status).toBe(201);
   });
 
+  it("serializes concurrent creates: distinct auto slugs, no spurious 409", async () => {
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        as.bob.post("/v1/agents", { scope: "personal", ...definition("Racer") }),
+      ),
+    );
+    expect(results.map((r) => r.status)).toEqual([201, 201, 201, 201, 201]);
+    expect(new Set(results.map((r) => r.json.agent.slug)).size).toBe(5);
+  });
+
   it("rejects invalid definitions with field-level issues", async () => {
     const res = await as.bob.post("/v1/agents", {
       scope: "team",
@@ -228,7 +240,7 @@ describe("import and export (§6.3)", () => {
   it("replaces a draft from a file with PUT", async () => {
     const created = await as.bob.post("/v1/agents", { scope: "team", ...definition("Reimport") });
     const file = SPEC_EXAMPLE.replace("Release Notes Writer", "Reimported");
-    const res = await as.bob.put(`/v1/agents/${created.json.agent.id}`, markdown(file));
+    const res = await as.bob.put(`/v1/agents/${created.json.agent.id}`, markdown(file), ANY);
     expect(res.status).toBe(200);
     expect(res.json.agent).toMatchObject({ slug: "reimport", name: "Reimported", revision: 2 });
   });
@@ -289,9 +301,13 @@ describe("reading, editing and deleting team agents", () => {
     const body = definition("Shared", "Edited.");
     expect((await as.carol.put(`/v1/agents/${agentId}`, body)).status).toBe(403);
     expect((await as.dave.put(`/v1/agents/${agentId}`, body)).status).toBe(403);
-    const byOwner = await as.bob.put(`/v1/agents/${agentId}`, body);
+    const byOwner = await as.bob.put(`/v1/agents/${agentId}`, body, ANY);
     expect(byOwner.json.agent).toMatchObject({ prompt: "Edited.", revision: 2 });
-    const byAdmin = await as.alice.put(`/v1/agents/${agentId}`, definition("Shared", "Admin."));
+    const byAdmin = await as.alice.put(
+      `/v1/agents/${agentId}`,
+      definition("Shared", "Admin."),
+      ANY,
+    );
     expect(byAdmin.json.agent).toMatchObject({ prompt: "Admin.", revision: 3 });
   });
 
@@ -310,11 +326,14 @@ describe("reading, editing and deleting team agents", () => {
     const garbage = await as.bob.put(`/v1/agents/${agentId}`, definition("Shared"), {
       "if-match": "nonsense",
     });
-    expect(garbage.status).toBe(412);
+    expect(garbage.status).toBe(400);
+    // Edits must say which revision they replace (or * to overwrite): no silent lost updates.
+    const missing = await as.bob.put(`/v1/agents/${agentId}`, definition("Shared"));
+    expect(missing).toMatchObject({ status: 428, json: { code: "if_match_required" } });
   });
 
   it("refuses slug changes on PUT", async () => {
-    const res = await as.bob.put(`/v1/agents/${agentId}`, { slug: "new", ...definition("S") });
+    const res = await as.bob.put(`/v1/agents/${agentId}`, { slug: "new", ...definition("S") }, ANY);
     expect(res.status).toBe(400);
   });
 
@@ -387,7 +406,9 @@ describe("team walls and personal agents (D5, D6, D9)", () => {
     try {
       const mine = await as.carol.get(`/v1/agents/${id}`);
       expect(mine.json.agent).toMatchObject({ prompt: "Carol's prompt.", canEdit: true });
-      expect((await as.carol.put(`/v1/agents/${id}`, definition("Carol Moved"))).status).toBe(200);
+      expect((await as.carol.put(`/v1/agents/${id}`, definition("Carol Moved"), ANY)).status).toBe(
+        200,
+      );
     } finally {
       await activate("carol", finance);
     }
@@ -457,7 +478,7 @@ describe("gallery (D19, D21)", () => {
     expect(suspended.json.agent.status).toBe("suspended");
     const listed = await as.carol.get(`/v1/agents/${galleryId}`);
     expect(listed.json.agent.status).toBe("suspended");
-    const edited = await as.installAdmin.put(base, definition("Curated"));
+    const edited = await as.installAdmin.put(base, definition("Curated"), ANY);
     expect(edited.json.agent).toMatchObject({ name: "Curated", revision: 2 });
     expect((await as.installAdmin.delete(base)).status).toBe(204);
     expect((await as.carol.get(`/v1/agents/${galleryId}`)).status).toBe(404);

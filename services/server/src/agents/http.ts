@@ -63,12 +63,48 @@ export async function readAgentInput(c: Context): Promise<AgentInput> {
   return { ok: true, definition: result.definition, meta };
 }
 
-/** Parses `If-Match` into an expected draft revision; `*` or absent means "any". */
-export function readIfMatch(c: Context): { ok: true; revision?: number } | { ok: false } {
+export type IfMatch =
+  | { readonly kind: "revision"; readonly revision: number }
+  | { readonly kind: "any" }
+  | { readonly kind: "missing" }
+  | { readonly kind: "invalid" };
+
+/**
+ * Parses `If-Match` into an expected draft revision. Edits must send it (428 otherwise) so two
+ * editors can't silently overwrite each other; `*` is an explicit "overwrite whatever is there".
+ */
+export function readIfMatch(c: Context): IfMatch {
   const header = c.req.header("if-match")?.trim();
-  if (header === undefined || header === "*") return { ok: true };
+  if (header === undefined || header === "") return { kind: "missing" };
+  if (header === "*") return { kind: "any" };
   const match = /^(?:W\/)?"(\d{1,9})"$/.exec(header);
-  return match?.[1] ? { ok: true, revision: Number(match[1]) } : { ok: false };
+  return match?.[1] ? { kind: "revision", revision: Number(match[1]) } : { kind: "invalid" };
+}
+
+/** Rejects a missing or malformed If-Match; otherwise the revision to expect (undefined: any). */
+export function ifMatchRevision(
+  c: Context,
+): { ok: true; revision: number | undefined } | { ok: false; response: Response } {
+  const ifMatch = readIfMatch(c);
+  switch (ifMatch.kind) {
+    case "revision":
+      return { ok: true, revision: ifMatch.revision };
+    case "any":
+      return { ok: true, revision: undefined };
+    case "missing":
+      return {
+        ok: false,
+        response: c.json(
+          {
+            code: "if_match_required",
+            message: "Send If-Match with the agent's ETag (or * to overwrite).",
+          },
+          428,
+        ),
+      };
+    case "invalid":
+      return { ok: false, response: invalidRequest(c, 'If-Match must be an ETag like "3" or *.') };
+  }
 }
 
 export const etag = (agent: AgentRecord): string => `"${agent.revision}"`;

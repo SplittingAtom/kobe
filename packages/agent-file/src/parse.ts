@@ -30,7 +30,10 @@ export function parseAgentFile(source: string): AgentFileResult {
   }
   const text = source.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
   if (FORBIDDEN_CONTROL.test(text)) {
-    return fail("", "file contains a control character (only tab and newline are allowed)");
+    return fail(
+      "",
+      "file contains a control character (only tab and newline are allowed) or invalid Unicode",
+    );
   }
   const split = splitFrontmatter(text);
   if (!split) {
@@ -60,7 +63,10 @@ export function validateAgentDefinition(input: unknown): AgentFileResult {
   if (extra.length > 0) return fail(extra[0] ?? "", "unknown key");
   if (typeof prompt !== "string") return fail("prompt", "prompt must be a string");
   if (FORBIDDEN_CONTROL.test(prompt)) {
-    return fail("prompt", "prompt contains a control character (only tab and newline are allowed)");
+    return fail(
+      "prompt",
+      "prompt contains a control character (only tab and newline are allowed) or invalid Unicode",
+    );
   }
   const parsed = agentFrontmatterSchema.safeParse(frontmatter ?? null);
   if (!parsed.success) return { ok: false, issues: zodIssues(parsed.error) };

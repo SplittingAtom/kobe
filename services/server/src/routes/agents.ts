@@ -19,7 +19,7 @@ import {
   notFound,
   preconditionFailed,
   readAgentInput,
-  readIfMatch,
+  ifMatchRevision,
 } from "../agents/http.js";
 import {
   agentIdSchema,
@@ -134,8 +134,8 @@ export function agentRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
     if (!agent) return notFound(c);
     const access = agentAccess(actorOf(c), agent);
     if (!access.edit) return forbidden(c);
-    const ifMatch = readIfMatch(c);
-    if (!ifMatch.ok) return preconditionFailed(c);
+    const ifMatch = ifMatchRevision(c);
+    if (!ifMatch.ok) return ifMatch.response;
     const input = await readAgentInput(c);
     if (!input.ok) return input.response;
     if (!updateMetaSchema.safeParse(input.meta).success) {
