@@ -16,3 +16,8 @@ minimumReleaseAgeExclude:
 # sharp ships LGPL libvips binaries (license policy, spec D3). Kobe serves images unoptimized.
 ignoredOptionalDependencies:
   - sharp
+
+# Dependency lifecycle scripts are denied unless listed here (supply-chain policy). esbuild (via
+# drizzle-kit and vite) works without its postinstall: it resolves its @esbuild/<platform> binary.
+allowBuilds:
+  esbuild: false
