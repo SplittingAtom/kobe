@@ -151,17 +151,22 @@
   `--kubelet-arg=pod-max-pids=4096`), node-wide, documented in docs/install.md. Under gVisor
   that cgroup limit counts the sandbox's host threads (Sentry/Gofer), not guest processes; guest
   fork bombs are bounded by the gVisor sandbox's memory/CPU limits instead.
-- **e2e finding (k3s kube-router):** the team egress rules (namespace + pod selector + port per
-  Kobe service) are enforced as "any pod in the release namespace, any port": an unlabelled
-  listener there was reachable on 8080 and 9090, while every other destination (API Service, API
-  server, kubelet, metadata IP, other team, coredns/DNS, internet) stayed blocked. So the
-  **receiving side is what limits sandboxes inside the release namespace**: Bifrost and Postgres
-  (CNPG) already had ingress policies; `<release>-not-from-sandboxes` now admits team namespaces to
-  web/server/scheduler only on the sandbox port 8081 (e2e: web pod, user API, Bifrost blocked;
-  sandbox port reached). The proxies are open to sandboxes by design. **Every future
-  release-namespace component that must not be sandbox-reachable needs its own ingress policy.**
-  New pods join kube-router's ipsets after a short delay; sandbox agents must retry their first
-  connection (KOBE-23), and e2e waits for the sandbox port before probing.
+- **e2e finding (k3s kube-router), refined over two runs:**
+  - Run A (probes in the pod's first seconds): an unlabelled listener in the release namespace was
+    reachable on 8080 and 9090 from a new sandbox pod while the server's sandbox port was not.
+  - Run B (probes after waiting until the sandbox port answers): the same listener was blocked;
+    every destination except the sandbox port was blocked.
+  - Reading: kube-router installs a new pod's egress rules and adds it to policy ipsets on its next
+    sync, so a **new pod's egress is briefly unfiltered** and other pods' ingress rules don't yet
+    recognise it. Mitigations in place: receiving-side ingress policies (Bifrost, Postgres, and
+    `<release>-not-from-sandboxes` for web/server/scheduler: team namespaces only on 8081), and a
+    sandbox can't get session tokens (so does no agent work) until 8081 admits it, which happens
+    in that same sync. Residual: a few seconds after pod start, before the agent has credentials.
+    **Every future release-namespace component that must not be sandbox-reachable needs its own
+    ingress policy.**
+  - Pods also wait out this warm-up on the receiving side: a new pod in the release namespace
+    can't reach web/server for the first seconds. Sandbox agents must retry their first connection
+    (KOBE-23); e2e waits for the target before probing.
 
 ## Open questions (for Chris or the coordinator)
 

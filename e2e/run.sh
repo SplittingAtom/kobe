@@ -351,7 +351,9 @@ contains "an unclaimed sandbox pod's bootstrap token is recognised but not assig
 contains "a forged bootstrap token is refused (401)" '^forged=HTTP/1.1 401$' "$egress"
 # Controls: the same destinations are reachable from the release namespace, so BLOCKED above is
 # the sandbox policy, not a dead target.
-controls=$(probe "$NS" "$(tcp api "$api_ip" 443) $(tcp kubelet "$node_ip" 10250) \
+# (The probe pod also waits out the CNI warm-up: web/server/scheduler admit it by namespace label.)
+controls=$(probe "$NS" "for i in \$(seq 1 60); do wget -qO- -T 2 http://$server_ip/healthz >/dev/null 2>&1 && break; sleep 1; done; \
+  $(tcp api "$api_ip" 443) $(tcp kubelet "$node_ip" 10250) \
   wget -qO- -T 5 http://$server_ip/healthz >/dev/null 2>&1 && echo user-api=REACHED || echo user-api=BLOCKED")
 contains "control: the API Service is reachable from the release namespace" '^api=REACHED$' "$controls"
 contains "control: the kubelet is reachable from the release namespace" '^kubelet=REACHED$' "$controls"
