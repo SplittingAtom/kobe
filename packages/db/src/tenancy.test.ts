@@ -1,7 +1,7 @@
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 import * as schema from "./schema/index.js";
-import { INSTALL_WIDE_TABLES, TEAM_TABLES, isTeamTable } from "./tenancy.js";
+import { INSTALL_WIDE_TABLES, TEAM_TABLES, TENANCY_DOMAINS, isTeamTable } from "./tenancy.js";
 
 const schemaTables = Object.values(schema)
   .filter((v) => typeof v === "object" && v !== null && Symbol.for("drizzle:IsDrizzleTable") in v)
@@ -16,6 +16,23 @@ describe("tenancy registry", () => {
       (INSTALL_WIDE_TABLES as readonly string[]).includes(t),
     );
     expect(overlap).toEqual([]);
+  });
+
+  it("lists every table once across all spec areas", () => {
+    const all = [...TEAM_TABLES, ...INSTALL_WIDE_TABLES];
+    expect(all.filter((t, i) => all.indexOf(t) !== i)).toEqual([]);
+  });
+
+  // Areas are merged last-wins; a grant declared by another area could silently widen access.
+  it("keeps grants and team-referencing exceptions inside the declaring area", () => {
+    for (const domain of TENANCY_DOMAINS) {
+      const own = new Set<string>(domain.installWide);
+      const foreign = [
+        ...Object.keys(domain.grants),
+        ...Object.keys(domain.teamReferencing),
+      ].filter((t) => !own.has(t));
+      expect(foreign).toEqual([]);
+    }
   });
 
   it("explicitly lists the spec's install-wide tables", () => {

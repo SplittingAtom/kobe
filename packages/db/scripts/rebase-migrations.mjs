@@ -67,6 +67,8 @@ function nameOf(tag) {
 function stash(base) {
   if (git("status", "--porcelain")) fail("working tree is not clean");
   if (existsSync(STASH)) fail(`${STASH} exists: run with --apply or delete it`);
+  if (base.startsWith("origin/")) git("fetch", "-q", "origin", base.slice("origin/".length));
+  const mergeBase = git("merge-base", "HEAD", base);
   const baseTags = new Set(readJson(JOURNAL, base).entries.map((e) => e.tag));
   const own = readJson(JOURNAL).entries.filter((e) => !baseTags.has(e.tag));
   if (own.length === 0) {
@@ -83,11 +85,13 @@ function stash(base) {
     rmSync(join(DRIZZLE, `${e.tag}.sql`));
     rmSync(snapshotPath(e.idx));
   }
-  const mergeBase = git("merge-base", "HEAD", base);
   git("checkout", mergeBase, "--", JOURNAL);
   git("add", "-A", DRIZZLE);
   git("commit", "-q", "-m", "chore: drop branch migrations for regeneration");
-  console.log(`db:rebase: stashed ${own.map((e) => e.tag).join(", ")} in ${STASH}`);
+  console.log(
+    `db:rebase: stashed ${own.map((e) => e.tag).join(", ")} in ${STASH} ` +
+      "(the originals are also in HEAD~1)",
+  );
   return base;
 }
 
@@ -96,6 +100,9 @@ function merge(base) {
     execFileSync("git", ["merge", "--no-edit", base], { stdio: "inherit" });
     return true;
   } catch {
+    if (!git("diff", "--name-only", "--diff-filter=U")) {
+      fail(`merging ${base} failed (see above); ${STASH} holds your migrations`);
+    }
     console.error(
       "db:rebase: merge stopped on conflicts. Resolve them, commit the merge, then run " +
         "`pnpm db:rebase --apply`.",
@@ -117,7 +124,26 @@ function newestTag() {
 function apply() {
   if (!existsSync(STASH)) fail(`no ${STASH}: nothing to apply`);
   if (git("status", "--porcelain", "--untracked-files=no")) fail("working tree is not clean");
+  if (git("status", "--porcelain", "--", DRIZZLE)) fail(`${DRIZZLE}/ has uncommitted changes`);
   const { base, migrations } = JSON.parse(readFileSync(STASH, "utf8"));
+  try {
+    regenerate(migrations);
+  } catch (error) {
+    // Leave drizzle/ as committed so `--apply` can simply be re-run.
+    git("checkout", "--", DRIZZLE);
+    git("clean", "-fdq", "--", DRIZZLE);
+    fail(`regeneration failed, ${DRIZZLE}/ restored: ${error.message}`);
+  }
+  git("add", "-A", DRIZZLE);
+  git("commit", "-q", "-m", `chore: regenerate migrations on ${base}`);
+  rmSync(STASH);
+  console.log(
+    `db:rebase: regenerated ${migrations.length} migration(s) on ${base}. ` +
+      "Reset any dev database that ran the old ones.",
+  );
+}
+
+function regenerate(migrations) {
   const generated = migrations.filter((m) => !m.custom);
   if (generated.length > 0) {
     drizzleGenerate("--name", generated.map((m) => m.name).join("_"));
@@ -126,10 +152,6 @@ function apply() {
     drizzleGenerate("--custom", "--name", m.name);
     writeFileSync(join(DRIZZLE, `${newestTag()}.sql`), m.sql);
   }
-  git("add", "-A", DRIZZLE);
-  git("commit", "-q", "-m", `chore: regenerate migrations on ${base}`);
-  rmSync(STASH);
-  console.log(`db:rebase: regenerated ${migrations.length} migration(s) on ${base}`);
 }
 
 const arg = process.argv[2];

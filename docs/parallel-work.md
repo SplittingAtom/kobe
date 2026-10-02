@@ -32,8 +32,10 @@ Only the coordinator edits [`docs/RUN-LEDGER.md`](RUN-LEDGER.md), which is a sho
 | `charts/kobe/values.yaml`                          | Add values under your component's key; don't reorder or reformat other sections.                                         |
 
 `schema/index.ts` and `probe-fixtures/index.ts` use git's `union` merge driver
-(`.gitattributes`), so two branches that each append a line merge cleanly. Keep those files to
-one entry per line.
+(`.gitattributes`), so two branches that each append a line merge cleanly when merged locally
+(GitHub's own conflict check may ignore it: merge `origin/main` locally before merging a PR). Union
+never reports a conflict, so keep those files to one entry per line and run `pnpm typecheck` after
+every merge: a stale or duplicate line only shows up there.
 
 ## Migrations
 
@@ -50,7 +52,8 @@ pnpm --filter @kobe/db db:rebase --apply
 
 The script regenerates all your schema changes as one migration and re-creates each custom
 migration (RLS policies, data fixes) after it with its original SQL. It merges rather than rebases,
-so expect a merge commit. Do it just before your PR merges; CI's `db` job
+so expect a merge commit; your original migrations stay in history (`HEAD~1` of the drop commit),
+and a dev database that ran them must be reset. Do it just before your PR merges; CI's `db` job
 (`drizzle-kit check`, schema-vs-migrations check, journal order test, cross-team probe) must stay
 green afterwards.
 

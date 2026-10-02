@@ -22,7 +22,8 @@ import { workspace } from "./tenancy/workspace.js";
 
 export type { Privilege } from "./tenancy/types.js";
 
-const DOMAINS = [
+/** Every spec area's slice; exported for the registry tests. */
+export const TENANCY_DOMAINS = [
   platform,
   identity,
   sandbox,
@@ -35,18 +36,17 @@ const DOMAINS = [
   schedules,
 ] as const;
 
-type Domain = (typeof DOMAINS)[number];
+type Domain = (typeof TENANCY_DOMAINS)[number];
 type TeamOf<D> = D extends { team: readonly (infer T)[] } ? T : never;
 type InstallWideOf<D> = D extends { installWide: readonly (infer T)[] } ? T : never;
 
 export type TeamTable = TeamOf<Domain>;
 export type InstallWideTable = InstallWideOf<Domain>;
 
-export const TEAM_TABLES: readonly TeamTable[] = DOMAINS.flatMap<TeamTable>((d) => d.team);
+export const TEAM_TABLES: readonly TeamTable[] = TENANCY_DOMAINS.flatMap<TeamTable>((d) => d.team);
 
-export const INSTALL_WIDE_TABLES: readonly InstallWideTable[] = DOMAINS.flatMap<InstallWideTable>(
-  (d) => d.installWide,
-);
+export const INSTALL_WIDE_TABLES: readonly InstallWideTable[] =
+  TENANCY_DOMAINS.flatMap<InstallWideTable>((d) => d.installWide);
 
 const TEAM_TABLE_SET: ReadonlySet<string> = new Set(TEAM_TABLES);
 
@@ -60,7 +60,7 @@ export function isTeamTable(name: string): name is TeamTable {
  */
 export const INSTALL_WIDE_GRANTS: Readonly<
   Partial<Record<InstallWideTable, readonly Privilege[]>>
-> = Object.assign({}, ...DOMAINS.map((d) => d.grants)) as Partial<
+> = Object.assign({}, ...TENANCY_DOMAINS.map((d) => d.grants)) as Partial<
   Record<InstallWideTable, readonly Privilege[]>
 >;
 
@@ -69,7 +69,7 @@ export const INSTALL_WIDE_GRANTS: Readonly<
  * Any other table with either must be a team table (enforced by the catalog check).
  */
 export const TEAM_REFERENCING_INSTALL_WIDE: Readonly<Partial<Record<InstallWideTable, string>>> =
-  Object.assign({}, ...DOMAINS.map((d) => d.teamReferencing)) as Partial<
+  Object.assign({}, ...TENANCY_DOMAINS.map((d) => d.teamReferencing)) as Partial<
     Record<InstallWideTable, string>
   >;
 
