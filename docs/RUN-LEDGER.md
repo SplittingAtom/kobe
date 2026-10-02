@@ -5,7 +5,7 @@ Hadron ignite and re-read the current ticket).
 
 ## Current
 
-- **Ticket:** KOBE-5 — Monorepo scaffold and toolchain (in progress → in_review)
+- **Ticket:** none claimed. KOBE-5 is `in_review` (PR #1, commit f1e7faf); awaiting Chris.
 - **Phase:** 1 (Spine). Phase 1 tickets promoted to `ready` 2026-10-01 with Chris's sign-off.
 
 ## Done
@@ -16,6 +16,7 @@ Hadron ignite and re-read the current ticket).
 - KOBE-5: pnpm 12 + turborepo monorepo; TS 6 strict, ESLint 10 flat config, Prettier, Vitest 5;
   Apache-2.0 LICENSE + NOTICE; README quickstart; multi-stage non-root (uid 1000) Dockerfiles for web,
   server, sandbox-agent, mcp-proxy, egress-proxy; license policy check; unit CI workflow.
+  Code review: 1 HIGH + 6 MEDIUM fixed. CI green (run 36951986926). Completed in Hadron → in_review.
 
 ## Next
 
@@ -29,4 +30,7 @@ Hadron ignite and re-read the current ticket).
 - No local Docker engine on the dev Mac: build images with
   `DOCKER_HOST=ssh://claude@compute2.atom.splittingatom.io` (amd64, matches the cluster).
 - TypeScript pinned to 6.0 because typescript-eslint does not yet support TS 7.
-- License exception: `caniuse-lite` (CC-BY-4.0, data). `sharp` excluded (LGPL libvips).
+- License exception: `caniuse-lite` (CC-BY-4.0, data) — **needs Chris's sign-off**. `sharp` excluded
+  (LGPL libvips).
+- Deferred from review: pin base images by digest (do with Renovate/Dependabot, before images ship).
+- Branching: tickets build on stacked branches until PR #1 merges to main.
