@@ -26,6 +26,41 @@ spec:
         - protocol: TCP
           port: 8080
     {{- end }}
+---
+# Sandboxes (team namespaces) must not reach the user-facing web app, the server's user API or the
+# scheduler: only the server's sandbox port 8081. The team namespace's own egress policy says the
+# same; this is the receiving side, so it holds even where a CNI applies egress selectors loosely.
+# Everything that is not a team namespace (ingress controller, other Kobe pods, operators) is
+# unaffected; traffic from the node itself (kubelet probes) is not subject to NetworkPolicy here.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-not-from-sandboxes
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: kobe
+      app.kubernetes.io/instance: {{ .Release.Name }}
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: ["web", "server", "scheduler"]
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchExpressions:
+              - key: kobe.splittingatom.io/team-namespace
+                operator: DoesNotExist
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kobe.splittingatom.io/team-namespace: "true"
+      ports:
+        - protocol: TCP
+          port: 8081
 {{- if .Values.clamav.enabled }}
 ---
 apiVersion: networking.k8s.io/v1

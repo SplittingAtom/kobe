@@ -184,6 +184,40 @@ describe("server sandbox configuration", () => {
   });
 });
 
+describe("release-side NetworkPolicy", () => {
+  it("admits team namespaces to web, server and scheduler only on the sandbox port", () => {
+    const np = find(render(), "NetworkPolicy", "kobe-not-from-sandboxes");
+    expect(np?.spec.podSelector.matchExpressions).toEqual([
+      {
+        key: "app.kubernetes.io/component",
+        operator: "In",
+        values: ["web", "server", "scheduler"],
+      },
+    ]);
+    expect(np?.spec.ingress).toEqual([
+      {
+        from: [
+          {
+            namespaceSelector: {
+              matchExpressions: [
+                { key: "kobe.splittingatom.io/team-namespace", operator: "DoesNotExist" },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        from: [
+          {
+            namespaceSelector: { matchLabels: { "kobe.splittingatom.io/team-namespace": "true" } },
+          },
+        ],
+        ports: [{ protocol: "TCP", port: 8081 }],
+      },
+    ]);
+  });
+});
+
 describe("session keys Secret", () => {
   it("generates four distinct keys and keeps the Secret on uninstall", () => {
     const secret = find(render(), "Secret", "kobe-sandbox-session-keys");

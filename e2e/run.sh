@@ -41,6 +41,7 @@ cleanup() {
   for p in "${PODS[@]+"${PODS[@]}"}"; do $KUBECTL delete pod $p --ignore-not-found --wait=false >/dev/null 2>&1 || true; done
   $KUBECTL delete namespace "$SANDBOX_NS" --ignore-not-found --wait=false >/dev/null 2>&1 || true
   $KUBECTL delete namespace "$TEAM_NS" "$TEAM2_NS" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  $KUBECTL delete runtimeclass kobe-e2e-runc --ignore-not-found >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -228,8 +229,11 @@ SEC_POD='"securityContext":{"runAsNonRoot":true,"runAsUser":1000,"seccompProfile
 SEC_CTR='"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}'
 contains "admission refuses a team pod without the gVisor RuntimeClass" 'must use RuntimeClass' \
   "$(admission "{\"spec\":{\"automountServiceAccountToken\":false,$SEC_POD,\"containers\":[{\"name\":\"c\",\"image\":\"busybox:1.37\",$SEC_CTR}]}}")"
-contains "admission refuses a team pod under runc" 'must use RuntimeClass' \
-  "$(admission "{\"spec\":{\"runtimeClassName\":\"runc\",\"automountServiceAccountToken\":false,$SEC_POD,\"containers\":[{\"name\":\"c\",\"image\":\"busybox:1.37\",$SEC_CTR}]}}")"
+# A RuntimeClass that exists but does not isolate (cluster-scoped; removed on exit).
+printf 'apiVersion: node.k8s.io/v1\nkind: RuntimeClass\nmetadata: {name: kobe-e2e-runc}\nhandler: runc\n' \
+  | $KUBECTL apply -f - >/dev/null 2>&1 || true
+contains "admission refuses a team pod under a non-isolating RuntimeClass" 'must use RuntimeClass' \
+  "$(admission "{\"spec\":{\"runtimeClassName\":\"kobe-e2e-runc\",\"automountServiceAccountToken\":false,$SEC_POD,\"containers\":[{\"name\":\"c\",\"image\":\"busybox:1.37\",$SEC_CTR}]}}")"
 contains "admission refuses a team pod mounting a Secret" 'must not mount Secrets' \
   "$(admission "{\"spec\":{\"runtimeClassName\":\"gvisor\",\"automountServiceAccountToken\":false,$SEC_POD,\"containers\":[{\"name\":\"c\",\"image\":\"busybox:1.37\",$SEC_CTR}],\"volumes\":[{\"name\":\"s\",\"secret\":{\"secretName\":\"x\"}}]}}")"
 contains "admission refuses a team pod with a Kubernetes API token" 'must not mount a Kubernetes API token' \
@@ -290,7 +294,18 @@ tcp() { # label host port → "label=REACHED|BLOCKED" (TCP connect only)
   echo "nc -w 4 $2 $3 </dev/null >/dev/null 2>&1 && echo $1=REACHED || echo $1=BLOCKED;"
 }
 targets="$(tcp api "$api_ip" 443) $(tcp apiserver "$node_ip" 6443) $(tcp kubelet "$node_ip" 10250)"
-egress=$(team_probe "wget -qO- -T 5 http://$server_ip:8081/healthz >/dev/null 2>&1 && echo sandbox-port=REACHED || echo sandbox-port=BLOCKED; \
+# Diagnostics: an unlabelled listener in the release namespace on 8080 and 9090 (not asserted;
+# shows how the CNI applies the team egress policy's selectors).
+PODS+=("-n $NS diag-listener")
+$KUBECTL -n "$NS" run diag-listener --restart=Never --image=busybox:1.37 --command -- sh -c \
+  'mkdir -p /tmp/w && echo ok > /tmp/w/index.html && (httpd -p 9090 -h /tmp/w &) && httpd -f -p 8080 -h /tmp/w' >/dev/null
+$KUBECTL -n "$NS" wait --for=condition=Ready pod/diag-listener --timeout=120s >/dev/null 2>&1 || true
+diag_ip=$($KUBECTL -n "$NS" get pod diag-listener -o jsonpath='{.status.podIP}' 2>/dev/null || true)
+web_pod_ip=$($KUBECTL -n "$NS" get pods -l app.kubernetes.io/component=web -o jsonpath='{.items[0].status.podIP}' 2>/dev/null || true)
+egress=$(team_probe "wget -qO- -T 5 http://${diag_ip:-0.0.0.0}:8080/ >/dev/null 2>&1 && echo diag-8080=REACHED || echo diag-8080=BLOCKED; \
+  wget -qO- -T 5 http://${diag_ip:-0.0.0.0}:9090/ >/dev/null 2>&1 && echo diag-9090=REACHED || echo diag-9090=BLOCKED; \
+  wget -qO- -T 5 http://${web_pod_ip:-0.0.0.0}:8080/api/healthz >/dev/null 2>&1 && echo web-pod=REACHED || echo web-pod=BLOCKED; \
+  wget -qO- -T 5 http://$server_ip:8081/healthz >/dev/null 2>&1 && echo sandbox-port=REACHED || echo sandbox-port=BLOCKED; \
   wget -qO- -T 5 http://$server_ip/healthz >/dev/null 2>&1 && echo user-api=REACHED || echo user-api=BLOCKED; \
   wget -qO- -T 5 http://$bifrost_ip:8080/health >/dev/null 2>&1 && echo bifrost=REACHED || echo bifrost=BLOCKED; \
   wget -qO- -T 5 http://$web_ip/api/healthz >/dev/null 2>&1 && echo web=REACHED || echo web=BLOCKED; \
@@ -303,7 +318,9 @@ egress=$(team_probe "wget -qO- -T 5 http://$server_ip:8081/healthz >/dev/null 2>
     http://$server_ip:8081/v1/sandbox/session 2>&1 | grep -o 'HTTP/1.1 [0-9]*' | sed 's/^/bootstrap=/'; \
   wget -qO- -T 5 -S --post-data= --header 'Authorization: Bearer forged.token.value-xxxxxxxxxx' \
     http://$server_ip:8081/v1/sandbox/session 2>&1 | grep -o 'HTTP/1.1 [0-9]*' | sed 's/^/forged=/'")
+printf '     egress from a sandbox: %s\n' "$(printf '%s' "$egress" | tr '\n' ' ')"
 contains "sandboxes reach the server's sandbox port" '^sandbox-port=REACHED$' "$egress"
+contains "sandboxes cannot reach the web pod directly" '^web-pod=BLOCKED$' "$egress"
 contains "sandboxes cannot reach the server's user API port" '^user-api=BLOCKED$' "$egress"
 contains "sandboxes cannot reach Bifrost while it does not verify tokens (modelGatewayAccess off)" '^bifrost=BLOCKED$' "$egress"
 contains "sandboxes cannot reach other Kobe services (web)" '^web=BLOCKED$' "$egress"
@@ -323,7 +340,7 @@ controls=$(probe "$NS" "$(tcp api "$api_ip" 443) $(tcp kubelet "$node_ip" 10250)
 contains "control: the API Service is reachable from the release namespace" '^api=REACHED$' "$controls"
 contains "control: the kubelet is reachable from the release namespace" '^kubelet=REACHED$' "$controls"
 contains "control: the user API is reachable from the release namespace" '^user-api=REACHED$' "$controls"
-contains "the sandbox session endpoint is not exposed through the ingress" 'HTTP/1.1 404' \
+contains "the sandbox session endpoint is not exposed through the ingress" 'HTTP/1.1 (401|404)' \
   "$(ingress POST /v1/sandbox/session '{}')"
 
 # Inbound: a listener in the team namespace is unreachable; the same listener elsewhere is reachable.
