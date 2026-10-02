@@ -21,11 +21,13 @@ function complete(event: ServerAuditEvent): AuditEvent {
   if (!actor) {
     throw new AuditEventError(`audit: ${event.action} has no actor (outside a signed-in request)`);
   }
-  return {
-    ...event,
-    actor,
-    request: { ip: context?.ip ?? null, userAgent: context?.userAgent ?? null },
-  } as AuditEvent;
+  // A system event is not the request's doing (e.g. an isolation re-check run by a request):
+  // it carries no client address.
+  const request =
+    actor.kind === "system"
+      ? {}
+      : { ip: context?.ip ?? null, userAgent: context?.userAgent ?? null };
+  return { ...event, actor, request } as AuditEvent;
 }
 
 /**

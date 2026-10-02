@@ -72,7 +72,8 @@ function checkTeam(action: AuditAction, teamId: string | null): void {
 
 /** A plain IPv4/IPv6 address, or null (zone ids, ports and garbage are dropped). */
 export function normalizeIp(ip: string | null | undefined): string | null {
-  if (!ip) return null;
+  // node:net accepts zone ids (fe80::1%eth0); Postgres inet does not.
+  if (!ip || ip.includes("%")) return null;
   const bare = ip.trim().replace(/^\[|\]$/g, "");
   return isIP(bare) === 0 ? null : bare;
 }

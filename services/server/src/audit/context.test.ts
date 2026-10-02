@@ -36,3 +36,38 @@ describe("clientIp (audit request metadata)", () => {
     expect(await ipFor(undefined, [])).toBeNull();
   });
 });
+
+describe("clientIp with a socket peer", () => {
+  async function ipFrom(peer: string, xff: string, trusted: string[]): Promise<string | null> {
+    const list = new BlockList();
+    for (const cidr of trusted) {
+      const [address = "", prefix = "32"] = cidr.split("/");
+      list.addSubnet(address, Number(prefix), "ipv4");
+    }
+    const app = new Hono<{ Bindings: { incoming: { socket: { remoteAddress: string } } } }>();
+    let seen: string | null = "unset";
+    app.get("/", (c) => {
+      seen = clientIp(c, list, trusted.length > 0);
+      return c.body(null, 204);
+    });
+    await app.request(
+      "/",
+      { headers: { "x-forwarded-for": xff } },
+      { incoming: { socket: { remoteAddress: peer } } },
+    );
+    return seen;
+  }
+
+  it("records a direct client's own address, never its forged header", async () => {
+    expect(await ipFrom("203.0.113.9", "1.2.3.4", ["10.0.0.0/8"])).toBe("203.0.113.9");
+    expect(await ipFrom("203.0.113.9", "1.2.3.4", [])).toBe("203.0.113.9");
+  });
+
+  it("reads the header only behind a trusted proxy (IPv4-mapped peers too)", async () => {
+    expect(await ipFrom("::ffff:10.0.0.5", "198.51.100.4", ["10.0.0.0/8"])).toBe("198.51.100.4");
+  });
+
+  it("refuses zone ids", async () => {
+    expect(await ipFrom("10.0.0.5", "fe80::1%eth0", ["10.0.0.0/8"])).toBeNull();
+  });
+});

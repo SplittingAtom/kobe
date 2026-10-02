@@ -161,21 +161,24 @@ export async function acceptTeamInvite(
       )
       .for("share");
     if (!inviter) return null;
-    await tx
+    const joined = await tx
       .insert(teamMembers)
       .values({ teamId, userId: user.id, role: invite.role })
-      .onConflictDoNothing();
+      .onConflictDoNothing()
+      .returning({ role: teamMembers.role });
     const [membership] = await tx
       .select({ role: teamMembers.role })
       .from(teamMembers)
       .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, user.id)));
-    if (!membership) return null;
-    await recordAudit(tx, {
-      action: "identity.team_invitation.accepted",
-      teamId,
-      target: { userId: user.id, role: membership.role, invitedBy: invite.invitedBy },
-    });
-    return membership.role;
+    // Recorded only when the invitation actually made them a member.
+    if (joined.length > 0) {
+      await recordAudit(tx, {
+        action: "identity.team_invitation.accepted",
+        teamId,
+        target: { userId: user.id, role: invite.role, invitedBy: invite.invitedBy },
+      });
+    }
+    return membership?.role ?? null;
   });
 }
 

@@ -4,6 +4,10 @@ import { auditPageBody, parseAuditQuery } from "../audit/http.js";
 import type { AuthVariables } from "../auth/session.js";
 import { requireInstallPermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
+import { hitRateLimit } from "../rate-limit.js";
+
+/** Full-chain checks one admin may start per minute (each reads the whole table). */
+export const INTEGRITY_CHECKS_PER_MINUTE = 3;
 
 /**
  * The install-wide audit log (spec D6, D8; §6.1 `/v1/install/audit`), install Owner/Admin only:
@@ -23,8 +27,14 @@ export function installAuditRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
 
   /** Recomputes the whole chain; `head` is the value to anchor outside the database. */
   app.get("/integrity", async (c) => {
-    const report = await verifyAuditChain(db);
-    return c.json(report);
+    const allowed = await hitRateLimit(db, `audit-integrity:${c.get("user").id}`, {
+      windowMs: 60_000,
+      max: INTEGRITY_CHECKS_PER_MINUTE,
+    });
+    if (!allowed) {
+      return c.json({ code: "rate_limited", message: "Try the check again in a minute." }, 429);
+    }
+    return c.json(await verifyAuditChain(db));
   });
 
   return app;
