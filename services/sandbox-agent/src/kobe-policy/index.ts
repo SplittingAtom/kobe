@@ -1,6 +1,10 @@
 import { fileURLToPath } from "node:url";
-import type { PolicyChecker } from "./handler.js";
-import { connectPolicy, registerKobePolicy, type ExtensionApiLike } from "./extension.js";
+import {
+  connectPolicy,
+  registerKobePolicy,
+  type ExtensionApiLike,
+  type PolicyConnection,
+} from "./extension.js";
 
 /**
  * kobe-policy: the Pi 1.0.x extension that asks the Kobe server about every tool call (spec D13,
@@ -13,10 +17,10 @@ import { connectPolicy, registerKobePolicy, type ExtensionApiLike } from "./exte
  * The channel is opened once per Pi process (module scope). If Pi re-evaluates the module (a
  * reload), the fd variable is already gone and the new instance blocks every call — fail closed.
  */
-let checker: Promise<PolicyChecker> | undefined;
+let connection: Promise<PolicyConnection> | undefined;
 
 export default async function kobePolicy(pi: ExtensionApiLike): Promise<void> {
-  checker ??= connectPolicy({
+  connection ??= connectPolicy({
     env: process.env,
     argv: process.argv.slice(2),
     cwd: process.cwd(),
@@ -24,5 +28,5 @@ export default async function kobePolicy(pi: ExtensionApiLike): Promise<void> {
     // stderr only: stdout is Pi's RPC stream.
     warn: (message) => process.stderr.write(`${message}\n`),
   });
-  await registerKobePolicy(pi, checker);
+  await registerKobePolicy(pi, connection);
 }

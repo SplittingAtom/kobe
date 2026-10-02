@@ -283,6 +283,31 @@ describe("PolicyClient checks", () => {
     expect(await verdict).toMatchObject({ allow: false });
   });
 
+  it("cannot be kept waiting forever by repeated policy.pending", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const { client, agent } = await connected();
+    client.ready();
+    let settled = false;
+    const verdict = client.check(request()).then((v) => {
+      settled = true;
+      return v;
+    });
+    const check = await sent(agent);
+    const pending = () =>
+      agent.send({
+        type: "policy.pending",
+        request_id: check.request_id,
+        tool_call_id: "call_1",
+        approval_id: "a",
+        expires_at: new Date(Date.now() + 60 * 60_000).toISOString(),
+      });
+    for (let i = 0; i < 5 && !settled; i += 1) {
+      pending();
+      await vi.advanceTimersByTimeAsync(30 * 60_000);
+    }
+    expect(await verdict).toMatchObject({ allow: false, reason: expect.stringMatching(/expired/) });
+  });
+
   it("blocks when no answer arrives in time", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const { client, agent } = await connected();

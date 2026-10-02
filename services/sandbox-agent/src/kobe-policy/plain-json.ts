@@ -43,7 +43,9 @@ export function findPlainJsonIssue(root: unknown): string | undefined {
 function primitiveIssue(value: unknown): string | undefined | null {
   if (value === null || typeof value === "string" || typeof value === "boolean") return undefined;
   if (typeof value === "number") {
-    return Number.isFinite(value) ? undefined : "tool input has a non-finite number";
+    if (!Number.isFinite(value)) return "tool input has a non-finite number";
+    // JSON.stringify(-0) is "0": the server would decide a different value than the tool reads.
+    return Object.is(value, -0) ? "tool input has a negative zero" : undefined;
   }
   if (typeof value === "object") return null;
   return `tool input has a ${typeof value} value`;
@@ -96,12 +98,17 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return proto === Object.prototype || proto === null;
 }
 
-/** Freeze a value checked by {@link findPlainJsonIssue} (no cycles, no accessors). */
+/**
+ * Freeze a value checked by {@link findPlainJsonIssue} (no cycles, no accessors), all the way down:
+ * an already (shallowly) frozen container is still descended into.
+ */
 export function deepFreeze<T>(value: T): T {
+  const seen = new Set<object>();
   const stack: unknown[] = [value];
   while (stack.length > 0) {
     const current = stack.pop();
-    if (current === null || typeof current !== "object" || Object.isFrozen(current)) continue;
+    if (current === null || typeof current !== "object" || seen.has(current)) continue;
+    seen.add(current);
     Object.freeze(current);
     for (const key of Object.keys(current)) stack.push((current as Record<string, unknown>)[key]);
   }

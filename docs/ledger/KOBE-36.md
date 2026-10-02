@@ -182,9 +182,26 @@ agent's per-thread cap); request line cap 4 MiB (the wire frame cap); reply line
   denied).
 - Tool-call ids longer than 128 chars (deep nesting) are blocked (`idSchema`).
 
+## Self-review round (code-reviewer agent: 0 CRITICAL/HIGH, 2 MEDIUM, 5 LOW) — resolution
+
+1. MEDIUM `deepFreeze` skipped already-frozen containers (a shallow-frozen parent left children
+   writable): now descends everything, tracking visited objects (test "freezes all the way down").
+2. MEDIUM `channel.ready` was sent before `pi.on` registered the handler: `connectPolicy` no longer
+   announces; `registerKobePolicy` registers, then announces (test "does not report ready when
+   registering the handler fails").
+3. LOW no cancel on abort/timeout: the server's pending approval stays until the run ends or TTL
+   (KOBE-37 resolves approvals when the run ends; noted above). No channel message added.
+4. LOW `-0` serialises as `0`: refused (handler table row "negative zero").
+5. LOW large inputs serialised several times before the 4 MiB cap: accepted (bounded by Pi/model).
+6. LOW kobe-policy listed again under another spelling: `pi-launch.ts` compares resolved paths.
+7. LOW eviction while waiting for ready: not reachable — every command claims its thread (busy)
+   before `#ensureProcess`.
+8. Repeated `policy.pending` could extend the wait indefinitely: the first pending fixes a deadline
+   (`MAX_PENDING_WAIT_MS`) no later one can move (test "cannot be kept waiting forever").
+
 ## Evidence (acceptance criteria → test or command output)
 
-`pnpm --filter @kobe/sandbox-agent test`: 224 passed, 1 skipped (root-only case) (real-Pi suites run when
+`pnpm --filter @kobe/sandbox-agent test`: 228 passed, 1 skipped (root-only case) (real-Pi suites run when
 `images/sandbox/pi` is installed, as in CI; CI runs them against the compiled `dist/kobe-policy`).
 
 | AC   | Evidence                                                                                                                                                                                 |

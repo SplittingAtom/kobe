@@ -35,13 +35,20 @@ export interface KobePolicyDeps {
   readonly warn?: (message: string) => void;
 }
 
+/** A connected (or failed) channel; `announce` sends `channel.ready` when the launch checked out. */
+export interface PolicyConnection {
+  readonly checker: PolicyChecker;
+  readonly announce: () => void;
+}
+
 /**
  * Connect to kobe-sandbox-agent over the inherited channel and complete the handshake. Never throws:
  * a failure yields a checker that blocks every call with the reason (a Pi extension that throws at
  * load is skipped by Pi and the tools would run unchecked — the agent's `channel.ready` wait is the
- * other half of that guarantee).
+ * other half of that guarantee). `channel.ready` is not sent here: only once the handler is
+ * registered ({@link registerKobePolicy}).
  */
-export async function connectPolicy(deps: KobePolicyDeps): Promise<PolicyChecker> {
+export async function connectPolicy(deps: KobePolicyDeps): Promise<PolicyConnection> {
   const raw = deps.env[POLICY_FD_ENV];
   Reflect.deleteProperty(deps.env, POLICY_FD_ENV);
   const timeout = replyTimeoutOverride(deps.env);
@@ -62,24 +69,29 @@ export async function connectPolicy(deps: KobePolicyDeps): Promise<PolicyChecker
     await client.handshake();
   } catch (error) {
     deps.warn?.(`kobe-policy: ${(error as Error).message}; every tool call will be blocked`);
-    return client;
+    return { checker: client, announce: () => undefined };
   }
   const problem = findLaunchProblem(deps.argv, deps.ownPath, deps.cwd);
   if (problem !== undefined) {
     deps.warn?.(`kobe-policy: ${problem}; every tool call will be blocked`);
     client.refuse(problem);
-    return client;
+    return { checker: client, announce: () => undefined };
   }
-  client.ready();
-  return client;
+  return { checker: client, announce: () => client.ready() };
 }
 
-/** Register the handler. Pi awaits an async factory before startup continues (Pi 1.0.0 docs). */
+/**
+ * Register the handler, then tell the agent it may use this Pi. In that order: if registering
+ * failed, Pi would skip the extension and the agent must not see `channel.ready`. Pi awaits an async
+ * factory before startup continues (Pi 1.0.0 docs).
+ */
 export async function registerKobePolicy(
   pi: ExtensionApiLike,
-  checker: Promise<PolicyChecker>,
+  connection: Promise<PolicyConnection>,
 ): Promise<void> {
-  pi.on("tool_call", createToolCallHandler(await checker));
+  const { checker, announce } = await connection;
+  pi.on("tool_call", createToolCallHandler(checker));
+  announce();
 }
 
 /** {@link REPLY_TIMEOUT_ENV}: read once, removed, and only ever shortens the default. */
@@ -90,9 +102,9 @@ function replyTimeoutOverride(env: Record<string, string | undefined>): PolicyCl
   return ms >= 1 && ms < FIRST_REPLY_TIMEOUT_MS ? { firstReplyTimeoutMs: ms } : {};
 }
 
-function unavailable(deps: KobePolicyDeps, reason: string): PolicyChecker {
+function unavailable(deps: KobePolicyDeps, reason: string): PolicyConnection {
   deps.warn?.(`kobe-policy: ${reason}; every tool call will be blocked`);
-  return { check: async () => ({ allow: false, reason }) };
+  return { checker: { check: async () => ({ allow: false, reason }) }, announce: () => undefined };
 }
 
 /** fd 3 must be the socket the agent passed (on Linux an unrelated fd 3 may be libuv's epoll fd). */

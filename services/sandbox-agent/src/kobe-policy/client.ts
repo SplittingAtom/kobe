@@ -50,6 +50,8 @@ interface Pending {
   readonly settle: (verdict: Verdict) => void;
   timer: NodeJS.Timeout;
   timeoutReason: string;
+  /** Set by the first `policy.pending`: no later one can push the wait past it. */
+  pendingDeadline?: number;
 }
 
 const deny = (reason: string): Verdict => ({ allow: false, reason });
@@ -251,15 +253,13 @@ export class PolicyClient {
       return;
     }
     clearTimeout(pending.timer);
-    pending.timeoutReason = "the approval expired before a decision arrived";
-    pending.timer = this.#timer(requestId, this.#pendingWaitMs(record.expires_at));
-  }
-
-  #pendingWaitMs(expiresAt: unknown): number {
     const now = this.#options.now?.() ?? Date.now();
-    const expiry = typeof expiresAt === "string" ? Date.parse(expiresAt) : Number.NaN;
-    if (Number.isNaN(expiry)) return MAX_PENDING_WAIT_MS;
-    return Math.min(MAX_PENDING_WAIT_MS, Math.max(0, expiry - now) + PENDING_GRACE_MS);
+    pending.pendingDeadline ??= now + MAX_PENDING_WAIT_MS;
+    pending.timeoutReason = "the approval expired before a decision arrived";
+    pending.timer = this.#timer(
+      requestId,
+      Math.min(pendingWaitMs(record.expires_at, now), pending.pendingDeadline - now),
+    );
   }
 
   #onResult(record: Record<string, unknown>): void {
@@ -269,6 +269,13 @@ export class PolicyClient {
     if (pending === undefined) return;
     this.#settle(requestId, verdictOf(record, pending.toolCallId));
   }
+}
+
+/** Until `expires_at` plus grace, at most {@link MAX_PENDING_WAIT_MS}; unparsable → the maximum. */
+function pendingWaitMs(expiresAt: unknown, now: number): number {
+  const expiry = typeof expiresAt === "string" ? Date.parse(expiresAt) : Number.NaN;
+  if (Number.isNaN(expiry)) return MAX_PENDING_WAIT_MS;
+  return Math.min(MAX_PENDING_WAIT_MS, Math.max(0, expiry - now) + PENDING_GRACE_MS);
 }
 
 function verdictOf(record: Record<string, unknown>, toolCallId: string): Verdict {

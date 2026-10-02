@@ -79,6 +79,19 @@ describe("kobe-policy extension load", () => {
     });
   });
 
+  it("does not report ready when registering the handler fails", async () => {
+    const t = setup();
+    t.agent.send({ type: "channel.hello", nonce: "N" });
+    const pi: ExtensionApiLike = {
+      on: () => {
+        throw new Error("registration failed");
+      },
+    };
+    await expect(registerKobePolicy(pi, t.checker)).rejects.toThrow("registration failed");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(t.agent.lines).toEqual([]);
+  });
+
   it("round-trips a tool call through the channel", async () => {
     const t = setup();
     t.agent.send({ type: "channel.hello", nonce: "N" });

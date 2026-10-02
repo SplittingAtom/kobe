@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { PiThreadConfig } from "@kobe/protocol";
 
 /**
@@ -62,8 +63,12 @@ export interface PiLaunchInput {
 
 export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
   const args = ["--mode", "rpc", "--session", input.sessionFile, ...PI_LOCKDOWN_ARGS];
+  const policy = path.resolve(input.policyExtension);
   for (const extension of input.extensions ?? []) {
-    if (extension !== input.policyExtension) args.push("--extension", extension);
+    // kobe-policy only once, last: a second copy would find the channel taken and block everything.
+    if (extension.startsWith("builtin:") || path.resolve(extension) !== policy) {
+      args.push("--extension", extension);
+    }
   }
   args.push("--extension", input.policyExtension);
   const config = input.config;

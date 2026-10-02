@@ -42,7 +42,12 @@ describe("buildPiLaunch", () => {
     const launch = buildPiLaunch({
       ...base,
       parentEnv,
-      extensions: ["builtin:mcp", POLICY, "/opt/kobe/pi-extensions/other.js"],
+      extensions: [
+        "builtin:mcp",
+        POLICY,
+        "/opt/kobe/pi-extensions/other.js",
+        "/opt/kobe/pi-extensions/./kobe-policy/index.js",
+      ],
       config: { thinking_level: "high" },
     });
     const extensions = launch.args.flatMap((a, i) =>

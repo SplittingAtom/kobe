@@ -77,6 +77,14 @@ describe("kobe-policy tool_call handler", () => {
     expect(await pending).toBeUndefined();
   });
 
+  it("freezes all the way down even below an already frozen container", async () => {
+    const { policy } = checker(() => ({ allow: true }));
+    const child = { command: "ls" };
+    const input = Object.freeze({ nested: child });
+    await createToolCallHandler(policy)(event({ input }), {});
+    expect(Object.isFrozen(child)).toBe(true);
+  });
+
   it("blocks when event.input was swapped for another object while waiting", async () => {
     let release: (v: Verdict) => void = () => undefined;
     const { policy } = checker(() => new Promise<Verdict>((r) => (release = r)));
@@ -102,6 +110,7 @@ describe("kobe-policy tool_call handler", () => {
     ["a function value", () => ({ command: () => "ls" })],
     ["undefined", () => ({ command: undefined })],
     ["NaN", () => ({ timeout: Number.NaN })],
+    ["negative zero", () => ({ timeout: -0 })],
     ["a symbol key", () => ({ command: "ls", [Symbol("x")]: 1 })],
     ["an array hole", () => ({ list: [1, , 3] })], // eslint-disable-line no-sparse-arrays
     ["an array with extra properties", () => ({ list: Object.assign([1], { extra: 2 }) })],
