@@ -37,7 +37,12 @@ export interface HarnessOptions {
   readonly env?: Record<string, string>;
   readonly piBin?: string;
   readonly heartbeatTimeoutMs?: number;
+  readonly policyReadyTimeoutMs?: number;
+  readonly extensions?: readonly string[];
 }
+
+/** The fake Pi ignores the file; it plays kobe-policy's handshake itself (see fake-pi.mjs). */
+export const FAKE_POLICY_EXTENSION = "/opt/kobe/pi-extensions/kobe-policy/index.js";
 
 export async function startHarness(options: HarnessOptions = {}): Promise<Harness> {
   const server = await FakeServer.start({ token: TOKEN, ...options.server });
@@ -58,6 +63,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     KOBE_SESSION_DIR: sessions,
     KOBE_PI_BIN: options.piBin ?? FAKE_PI,
     KOBE_PI_AGENT_DIR: piAgentDir,
+    KOBE_POLICY_EXTENSION: FAKE_POLICY_EXTENSION,
     ...options.env,
   });
   const exits: number[] = [];
@@ -74,6 +80,10 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     ...(options.heartbeatTimeoutMs === undefined
       ? {}
       : { heartbeatTimeoutMs: options.heartbeatTimeoutMs }),
+    ...(options.extensions === undefined ? {} : { extensions: options.extensions }),
+    ...(options.policyReadyTimeoutMs === undefined
+      ? {}
+      : { policyReadyTimeoutMs: options.policyReadyTimeoutMs }),
   });
   agent.start();
   await server.waitFor((f) => f.type === "hello");

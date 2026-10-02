@@ -1,4 +1,5 @@
 import type { PolicyCheckFrame } from "@kobe/protocol";
+import { MAX_PENDING_CHECKS } from "../kobe-policy/protocol.js";
 import { localDeny, type PolicyChannelCheck, type PolicyChannelReply } from "./channel.js";
 
 /**
@@ -9,7 +10,7 @@ import { localDeny, type PolicyChannelCheck, type PolicyChannelReply } from "./c
  */
 export const MAX_PENDING_POLICY_CHECKS = 512;
 /** Per thread, so one thread's extension (or code abusing its channel) cannot starve the others. */
-export const MAX_PENDING_POLICY_CHECKS_PER_THREAD = 128;
+export const MAX_PENDING_POLICY_CHECKS_PER_THREAD = MAX_PENDING_CHECKS;
 
 interface PendingCheck {
   readonly threadId: string;

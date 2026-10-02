@@ -41,13 +41,23 @@ function setup(now: () => number = Date.now) {
     ...extra,
   });
   const tick = () => new Promise((r) => setImmediate(r));
-  return { channel, received, checks, closed, send, check, nonce, tick, fromAgent };
+  const ready = () =>
+    send({ type: "channel.ready", nonce: nonce(), extension: "kobe-policy", version: 1 });
+  return { channel, received, checks, closed, send, check, nonce, tick, ready, fromAgent };
+}
+
+/** A channel whose extension has completed the handshake (`channel.ready`). */
+async function readySetup(now?: () => number) {
+  const t = setup(now);
+  await t.tick();
+  t.ready();
+  await t.tick();
+  return t;
 }
 
 describe("PolicyChannel", () => {
   it("opens with a per-spawn nonce and accepts requests that carry it", async () => {
-    const t = setup();
-    await t.tick();
+    const t = await readySetup();
     expect(t.received[0]).toMatchObject({ type: "channel.hello" });
     expect(t.nonce()).toMatch(/^[\w-]{32}$/);
     const other = setup();
@@ -59,8 +69,7 @@ describe("PolicyChannel", () => {
   });
 
   it("closes (fail closed) on a request without the right nonce", async () => {
-    const t = setup();
-    await t.tick();
+    const t = await readySetup();
     t.send({ ...t.check("r1"), nonce: "forged" });
     await t.tick();
     expect(t.checks).toEqual([]);
@@ -69,8 +78,7 @@ describe("PolicyChannel", () => {
   });
 
   it("never relays an approval token to the extension", async () => {
-    const t = setup();
-    await t.tick();
+    const t = await readySetup();
     t.channel.reply({
       type: "policy.result",
       request_id: "r1",
@@ -88,8 +96,7 @@ describe("PolicyChannel", () => {
   });
 
   it("rate-limits requests and denies the excess", async () => {
-    const t = setup(() => 1000);
-    await t.tick();
+    const t = await readySetup(() => 1000);
     for (let i = 0; i < POLICY_CHANNEL_BURST + 3; i++) t.send(t.check(`r${i}`));
     await t.tick();
     expect(t.checks).toHaveLength(POLICY_CHANNEL_BURST);
@@ -99,8 +106,7 @@ describe("PolicyChannel", () => {
   });
 
   it("closes when replies pile up unread", async () => {
-    const t = setup();
-    await t.tick();
+    const t = await readySetup();
     t.fromAgent.removeAllListeners("data");
     t.fromAgent.pause();
     const big = "x".repeat(64 * 1024);
@@ -111,10 +117,84 @@ describe("PolicyChannel", () => {
   });
 
   it("denies a malformed request it can identify", async () => {
-    const t = setup();
-    await t.tick();
+    const t = await readySetup();
     t.send({ ...t.check("r9"), input: [] });
     await t.tick();
     expect(t.received.at(-1)).toMatchObject({ request_id: "r9", decision: "deny" });
+  });
+
+  it("reports ready on channel.ready with the nonce", async () => {
+    const t = setup();
+    await t.tick();
+    const ready = t.channel.waitReady(1000);
+    expect(t.channel.ready).toBe(false);
+    t.ready();
+    await expect(ready).resolves.toBeUndefined();
+    expect(t.channel.ready).toBe(true);
+    await expect(t.channel.waitReady(1)).resolves.toBeUndefined();
+  });
+
+  it("denies checks that arrive before channel.ready", async () => {
+    const t = setup();
+    await t.tick();
+    t.send(t.check("early"));
+    await t.tick();
+    expect(t.checks).toEqual([]);
+    expect(t.received.at(-1)).toMatchObject({
+      request_id: "early",
+      decision: "deny",
+      message: "kobe-policy is not ready",
+    });
+  });
+
+  it("closes and rejects the ready wait when kobe-policy refuses", async () => {
+    const t = setup();
+    await t.tick();
+    const ready = t.channel.waitReady(1000);
+    t.send({ type: "channel.refused", nonce: t.nonce(), reason: "not the last extension" });
+    await expect(ready).rejects.toThrow("kobe-policy refused to start: not the last extension");
+    expect(t.closed).toEqual(["kobe-policy refused to start: not the last extension"]);
+  });
+
+  it("rejects the ready wait on timeout and on close", async () => {
+    const t = setup();
+    await t.tick();
+    await expect(t.channel.waitReady(20)).rejects.toThrow(/did not report ready/);
+    const waiting = t.channel.waitReady(1000);
+    t.channel.close("pi exited");
+    await expect(waiting).rejects.toThrow("pi exited");
+    await expect(t.channel.waitReady(1000)).rejects.toThrow("pi exited");
+  });
+
+  it.each([
+    ["a wrong extension name", { extension: "other" }],
+    ["a wrong version", { version: 2 }],
+  ])("closes on channel.ready with %s", async (_name, patch) => {
+    const t = setup();
+    await t.tick();
+    t.send({
+      type: "channel.ready",
+      nonce: t.nonce(),
+      extension: "kobe-policy",
+      version: 1,
+      ...patch,
+    });
+    await t.tick();
+    expect(t.channel.closed).toBe(true);
+  });
+
+  it("closes on a second channel.ready", async () => {
+    const t = await readySetup();
+    t.ready();
+    await t.tick();
+    expect(t.closed).toEqual(["unexpected policy channel message"]);
+  });
+
+  it("closes on a channel.ready without the nonce", async () => {
+    const t = setup();
+    await t.tick();
+    t.send({ type: "channel.ready", nonce: "forged", extension: "kobe-policy", version: 1 });
+    await t.tick();
+    expect(t.closed).toEqual(["policy request without the channel nonce"]);
   });
 });

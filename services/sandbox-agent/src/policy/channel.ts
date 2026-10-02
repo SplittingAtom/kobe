@@ -3,6 +3,15 @@ import type { Duplex } from "node:stream";
 import { idSchema, parseJsonStrict, toolInputSchema } from "@kobe/protocol";
 import { z } from "zod";
 import { LineSplitter, encodeJsonl } from "../jsonl.js";
+import {
+  CHANNEL_VERSION,
+  EXTENSION_NAME,
+  MSG_CHECK,
+  MSG_HELLO,
+  MSG_READY,
+  MSG_REFUSED,
+  MAX_REQUEST_LINE_BYTES,
+} from "../kobe-policy/protocol.js";
 
 /**
  * Sandbox-local channel between the kobe-policy Pi extension (KOBE-36) and kobe-sandbox-agent.
@@ -17,6 +26,11 @@ import { LineSplitter, encodeJsonl } from "../jsonl.js";
  * Handshake: the agent's first line is `{"type":"channel.hello","nonce"}` (random per spawn);
  * kobe-policy reads it at load, before any tool can run, and puts `nonce` in every request. A request
  * with a wrong or missing nonce closes the channel (all pending checks of the thread are denied).
+ * Once loaded and self-checked (last extension, `--no-extensions`), kobe-policy answers
+ * `{"type":"channel.ready","nonce","extension":"kobe-policy","version":1}` — the agent starts no
+ * run on a Pi that has not (KOBE-36), so a Pi without a working kobe-policy never runs a prompt — or
+ * `{"type":"channel.refused","nonce","reason"}`, which closes the channel. Message shapes and limits
+ * shared with the extension live in `kobe-policy/protocol.ts`.
  *
  * extension → agent: `{"type":"policy.check","nonce","request_id","tool_call_id",
  *   "parent_tool_call_id"?,"tool","input"}` — the agent adds `run_id` / `thread_id` itself (the
@@ -34,13 +48,13 @@ import { LineSplitter, encodeJsonl } from "../jsonl.js";
  * (burst {@link POLICY_CHANNEL_BURST}, excess denied); replies buffered towards a reader that does
  * not read are capped ({@link POLICY_CHANNEL_MAX_WRITE_BUFFER}, then the channel is closed).
  */
-export const POLICY_CHANNEL_MAX_LINE_BYTES = 4 * 1024 * 1024;
+export const POLICY_CHANNEL_MAX_LINE_BYTES = MAX_REQUEST_LINE_BYTES;
 export const POLICY_CHANNEL_MAX_WRITE_BUFFER = 1024 * 1024;
 export const POLICY_CHANNEL_RATE = 20;
 export const POLICY_CHANNEL_BURST = 50;
 
 export const policyChannelCheckSchema = z.strictObject({
-  type: z.literal("policy.check"),
+  type: z.literal(MSG_CHECK),
   nonce: z.string().min(1).max(128),
   request_id: idSchema,
   tool_call_id: idSchema,
@@ -67,6 +81,18 @@ export interface PolicyChannelHandlers {
   readonly now?: () => number;
 }
 
+const readySchema = z.strictObject({
+  type: z.literal(MSG_READY),
+  nonce: z.string(),
+  extension: z.literal(EXTENSION_NAME),
+  version: z.literal(CHANNEL_VERSION),
+});
+const refusedSchema = z.strictObject({
+  type: z.literal(MSG_REFUSED),
+  nonce: z.string(),
+  reason: z.string().max(1000),
+});
+
 export class PolicyChannel {
   readonly #stream: Duplex;
   readonly #nonce = randomBytes(24).toString("base64url");
@@ -74,6 +100,9 @@ export class PolicyChannel {
   #tokens = POLICY_CHANNEL_BURST;
   #refilledAt: number;
   #closed = false;
+  #closeReason = "policy channel closed";
+  #ready = false;
+  readonly #readyWaiters = new Set<{ resolve: () => void; reject: (error: Error) => void }>();
 
   constructor(stream: Duplex, handlers: PolicyChannelHandlers) {
     this.#stream = stream;
@@ -89,11 +118,41 @@ export class PolicyChannel {
     });
     stream.on("error", () => undefined);
     stream.on("close", () => this.close("policy channel closed"));
-    this.#write({ type: "channel.hello", nonce: this.#nonce });
+    this.#write({ type: MSG_HELLO, nonce: this.#nonce });
   }
 
   get closed(): boolean {
     return this.#closed;
+  }
+
+  get ready(): boolean {
+    return this.#ready;
+  }
+
+  /**
+   * Resolves once kobe-policy reported `channel.ready`; rejects when it refused, the channel closed,
+   * or `timeoutMs` passed first.
+   */
+  waitReady(timeoutMs: number): Promise<void> {
+    if (this.#ready) return Promise.resolve();
+    if (this.#closed) return Promise.reject(new Error(this.#closeReason));
+    return new Promise<void>((resolve, reject) => {
+      const waiter = {
+        resolve: () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        reject: (error: Error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      };
+      const timer = setTimeout(() => {
+        this.#readyWaiters.delete(waiter);
+        reject(new Error("kobe-policy extension did not report ready"));
+      }, timeoutMs);
+      this.#readyWaiters.add(waiter);
+    });
   }
 
   reply(message: PolicyChannelReply): void {
@@ -104,7 +163,10 @@ export class PolicyChannel {
   close(reason: string): void {
     if (this.#closed) return;
     this.#closed = true;
+    this.#closeReason = reason;
     this.#stream.destroy();
+    for (const waiter of this.#readyWaiters) waiter.reject(new Error(reason));
+    this.#readyWaiters.clear();
     this.#handlers.onClosed(reason);
   }
 
@@ -146,7 +208,16 @@ export class PolicyChannel {
       this.close("policy request without the channel nonce");
       return;
     }
+    const type = (value as { type?: unknown }).type;
+    if (type === MSG_READY || type === MSG_REFUSED) {
+      this.#onLifecycle(value);
+      return;
+    }
     const requestId = extractRequestId(value);
+    if (!this.#ready) {
+      if (requestId !== undefined) this.reply(localDeny(requestId, "kobe-policy is not ready"));
+      return;
+    }
     if (!this.#takeToken()) {
       if (requestId !== undefined) this.reply(localDeny(requestId, "policy requests rate-limited"));
       return;
@@ -159,6 +230,21 @@ export class PolicyChannel {
     // Answer what we can identify so the extension never waits on a malformed request.
     if (requestId !== undefined) this.reply(localDeny(requestId, "malformed policy request"));
     this.#handlers.onDiagnostic?.("malformed policy request");
+  }
+
+  #onLifecycle(value: unknown): void {
+    const refused = refusedSchema.safeParse(value);
+    if (refused.success) {
+      this.close(`kobe-policy refused to start: ${refused.data.reason}`);
+      return;
+    }
+    if (this.#ready || !readySchema.safeParse(value).success) {
+      this.close("unexpected policy channel message");
+      return;
+    }
+    this.#ready = true;
+    for (const waiter of this.#readyWaiters) waiter.resolve();
+    this.#readyWaiters.clear();
   }
 }
 

@@ -4,6 +4,7 @@ import { loadConfig } from "./config.js";
 import { hardenProcess } from "./harden.js";
 import { logger } from "./logger.js";
 import { buildPiLaunch } from "./pi/pi-launch.js";
+import { checkPolicyExtensionFile } from "./policy/extension-file.js";
 import { detectPiVersion, readAgentVersion } from "./version.js";
 
 /**
@@ -15,11 +16,14 @@ const SHUTDOWN_DEADLINE_MS = 10_000;
 async function main(): Promise<void> {
   hardenProcess(process);
   const config = loadConfig(process.env);
+  // Fail fast: without kobe-policy no thread could start (KOBE-36), so say why at startup.
+  await checkPolicyExtensionFile(config.policyExtension);
   const home = process.env.HOME ?? "/home/kobe";
   const piEnv = buildPiLaunch({
     sessionFile: "-",
     home,
     agentDir: config.piAgentDir,
+    policyExtension: config.policyExtension,
     parentEnv: process.env,
   }).env;
   const [agentVersion, piVersion] = await Promise.all([

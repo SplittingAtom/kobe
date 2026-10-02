@@ -48,6 +48,22 @@ check "agent starts through the entrypoint" 'KOBE_SERVER_URL must be a ws' host 
   "docker run ${HARDENED[*]} -e NODE_OPTIONS=--inspect=0.0.0.0:9229 \"$IMAGE\" 2>&1; true"
 check "Pi config dir is root-owned, read-only and empty" '^0:0 555 empty$' run sh -c \
   'd=/opt/kobe/pi-agent; echo "$(stat -c "%u:%g %a" $d) $([ -z "$(ls -A $d)" ] && echo empty)"'
+check "kobe-policy extension: root-owned, read-only, .js only" '^0:0 555 0:0 555 ok$' run sh -c \
+  'd=/opt/kobe/pi-extensions/kobe-policy; echo "$(stat -c "%u:%g %a" ${d%/*}) $(stat -c "%u:%g %a" $d) $(for f in $d/*; do case "$f" in *.js) [ "$(stat -c "%u:%g %a" "$f")" = "0:0 444" ] || echo "bad $f";; *) echo "extra $f";; esac; done; [ -f $d/index.js ] && echo ok)"'
+check "agent accepts the baked kobe-policy file" '^ok$' run node --input-type=module -e \
+  'import { checkPolicyExtensionFile as c } from "/opt/kobe/sandbox-agent/dist/policy/extension-file.js"; await c("/opt/kobe/pi-extensions/kobe-policy/index.js"); console.log("ok")'
+# Pi as the agent starts it (lockdown flags, read-only config dir), fd 3 a socket pair: kobe-policy
+# must load, read channel.hello and answer channel.ready with the nonce.
+check "kobe-policy loads into Pi and reports ready over fd 3" '"type":"channel.ready","nonce":"image-test","extension":"kobe-policy"' run_ws node -e '
+const { spawn } = require("node:child_process");
+const p = spawn("pi", ["--mode", "rpc", "--no-session", "--no-extensions", "--no-approve", "--no-context-files",
+  "--no-skills", "--extension", "/opt/kobe/pi-extensions/kobe-policy/index.js"], { cwd: "/workspace",
+  env: { PATH: process.env.PATH, HOME: "/home/kobe", PI_CODING_AGENT_DIR: "/opt/kobe/pi-agent",
+    PI_OFFLINE: "1", PI_TELEMETRY: "0", PI_SKIP_VERSION_CHECK: "1", KOBE_POLICY_FD: "3" },
+  stdio: ["pipe", "ignore", "inherit", "pipe"] });
+p.stdio[3].write(JSON.stringify({ type: "channel.hello", nonce: "image-test" }) + "\n");
+p.stdio[3].on("data", (d) => { process.stdout.write(d); p.kill("SIGKILL"); process.exit(0); });
+setTimeout(() => { console.log("no answer from kobe-policy"); p.kill("SIGKILL"); process.exit(1); }, 30000);'
 check "skills directory exists, root-owned" '^0:0$' run stat -c '%u:%g' /opt/kobe/skills
 check "/workspace in the image is owned by uid 1000" '^1000:1000$' run stat -c '%u:%g' /workspace
 check "workspace (volume) is writable" '^ok$' run_ws sh -c 'touch /workspace/x && echo ok'

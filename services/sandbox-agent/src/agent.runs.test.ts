@@ -8,6 +8,7 @@ import {
   RUN_2,
   THREAD,
   THREAD_2,
+  FAKE_POLICY_EXTENSION,
   runStart,
   startHarness,
   until,
@@ -69,6 +70,8 @@ describe("run.start → Pi prompt → pi.event stream", () => {
       "--no-skills",
       "--no-prompt-templates",
       "--no-themes",
+      "--extension",
+      FAKE_POLICY_EXTENSION,
     ]);
     expect(launch?.env).toContain("PI_CODING_AGENT_DIR");
     expect(launch?.env).not.toContain("SECRET_IN_AGENT_ENV");
@@ -375,6 +378,35 @@ describe("kobe-policy channel (fd 3)", () => {
       (f) => f.type === "pi.event" && f.event.type === "kobe_test_policy_decision",
     );
     expect((decision as PiEvent).event).toMatchObject({ decision: "allow" });
+  });
+
+  it("starts no run when kobe-policy refuses to start (fail closed)", async () => {
+    h = await startHarness({
+      env: { KOBE_POLICY_EXTENSION: "/opt/kobe/pi-extensions/refuse/index.js" },
+    });
+    const result = await h.server.command(runStart("say:hi"));
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "pi_unavailable",
+        message: "kobe-policy did not start: kobe-policy refused to start: fake refusal",
+      },
+    });
+    const prompts = (await h.commandsLog()).filter((c) => c.type === "prompt");
+    expect(prompts).toEqual([]);
+  });
+
+  it("starts no run when kobe-policy never reports ready (fail closed)", async () => {
+    h = await startHarness({
+      env: { KOBE_POLICY_EXTENSION: "/opt/kobe/pi-extensions/silent/index.js" },
+      policyReadyTimeoutMs: 200,
+    });
+    const result = await h.server.command(runStart("say:hi"));
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "pi_unavailable", message: expect.stringMatching(/did not report ready/) },
+    });
+    expect((await h.commandsLog()).filter((c) => c.type === "prompt")).toEqual([]);
   });
 
   it("denies pending checks when the connection drops (fail closed)", async () => {

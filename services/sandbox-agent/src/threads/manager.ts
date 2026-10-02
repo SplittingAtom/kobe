@@ -368,6 +368,7 @@ export class ThreadManager {
       sessionFile: this.#sessionFile(thread.id),
       home: this.#options.home,
       agentDir: this.#options.agentDir,
+      policyExtension: this.#options.policyExtension,
       ...(this.#options.extensions === undefined ? {} : { extensions: this.#options.extensions }),
       parentEnv: this.#options.parentEnv,
       config: frame?.config,
@@ -382,11 +383,19 @@ export class ThreadManager {
     }
     try {
       await thread.spawn(launch);
-      return undefined;
     } catch (error) {
       return fail("pi_unavailable", `cannot start Pi: ${(error as Error).message}`);
     } finally {
+      // From here on the process counts through `thread.hasProcess`.
       this.#pendingSpawns -= 1;
+    }
+    try {
+      await thread.waitPolicyReady();
+      return undefined;
+    } catch (error) {
+      // Fail closed: a Pi whose kobe-policy did not load would run tools unchecked.
+      await thread.stopProcess();
+      return fail("pi_unavailable", `kobe-policy did not start: ${(error as Error).message}`);
     }
   }
 
