@@ -5,6 +5,16 @@ let nextIp = 1;
 export interface TestResponse {
   readonly status: number;
   readonly json: any;
+  readonly headers: Headers;
+  readonly text: string;
+}
+
+/** A request body sent as-is with its own content type (e.g. a markdown file upload). */
+export class RawBody {
+  constructor(
+    readonly content: string,
+    readonly contentType: string,
+  ) {}
 }
 
 /**
@@ -36,11 +46,12 @@ export class TestBrowser {
     };
     if (this.cookies.size > 0)
       headers.cookie = [...this.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
-    if (body !== undefined) headers["content-type"] = "application/json";
+    const raw = body instanceof RawBody;
+    if (body !== undefined) headers["content-type"] = raw ? body.contentType : "application/json";
     const res = await this.app.request(`${this.publicUrl}${path}`, {
       method,
       headers,
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      ...(body !== undefined ? { body: raw ? body.content : JSON.stringify(body) } : {}),
     });
     for (const c of res.headers.getSetCookie()) {
       const [pair] = c.split(";");
@@ -59,13 +70,14 @@ export class TestBrowser {
         json = text;
       }
     }
-    return { status: res.status, json };
+    return { status: res.status, json, headers: res.headers, text };
   }
 
   get = (path: string, headers?: Record<string, string>) =>
     this.request("GET", path, undefined, headers);
   post = (path: string, body: unknown = {}) => this.request("POST", path, body);
-  put = (path: string, body: unknown = {}) => this.request("PUT", path, body);
+  put = (path: string, body: unknown = {}, headers?: Record<string, string>) =>
+    this.request("PUT", path, body, headers);
   patch = (path: string, body: unknown = {}) => this.request("PATCH", path, body);
   delete = (path: string) => this.request("DELETE", path);
 }

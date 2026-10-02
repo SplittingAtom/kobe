@@ -74,7 +74,10 @@ describe("team_agents", () => {
   it("is invisible from another team and outside withTeam", async () => {
     const [row] = await teamAgent(teamA, "hidden");
     const fromB = await withTeam(app.db, teamB, (tx) =>
-      tx.select().from(teamAgents).where(eq(teamAgents.id, row!.id)),
+      tx
+        .select()
+        .from(teamAgents)
+        .where(eq(teamAgents.id, row?.id ?? "")),
     );
     expect(fromB).toEqual([]);
     expect(await app.db.select().from(teamAgents)).toEqual([]);
@@ -82,14 +85,12 @@ describe("team_agents", () => {
 
   it("refuses rows for another team (RLS WITH CHECK)", async () => {
     const insert = withTeam(app.db, teamA, (tx) =>
-      tx
-        .insert(teamAgents)
-        .values({
-          teamId: teamB,
-          ownerUserId: alice,
-          slug: "smuggled",
-          frontmatter: { name: "x" },
-        }),
+      tx.insert(teamAgents).values({
+        teamId: teamB,
+        ownerUserId: alice,
+        slug: "smuggled",
+        frontmatter: { name: "x" },
+      }),
     );
     expect(await sqlState(insert)).toBe("42501");
   });
@@ -136,13 +137,14 @@ describe("install_agents (personal and gallery)", () => {
 
   it("lets the app role update and delete (no team data hangs off these rows)", async () => {
     const [row] = await installAgent({ slug: "temp" });
+    const id = row?.id ?? "";
     await app.db
       .update(installAgents)
       .set({ prompt: "changed", revision: 2 })
-      .where(eq(installAgents.id, row!.id));
+      .where(eq(installAgents.id, id));
     const deleted = await app.db
       .delete(installAgents)
-      .where(eq(installAgents.id, row!.id))
+      .where(eq(installAgents.id, id))
       .returning({ id: installAgents.id });
     expect(deleted).toHaveLength(1);
   });

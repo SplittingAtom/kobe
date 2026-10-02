@@ -34,10 +34,7 @@ export function parseAgentFile(source: string): AgentFileResult {
   }
   const split = splitFrontmatter(text);
   if (!split) {
-    return fail(
-      "frontmatter",
-      "file must start with YAML frontmatter between two lines of `---`",
-    );
+    return fail("frontmatter", "file must start with YAML frontmatter between two lines of `---`");
   }
   if (utf8Length(split.yaml) > AGENT_FILE_LIMITS.frontmatterBytes) {
     return fail(
