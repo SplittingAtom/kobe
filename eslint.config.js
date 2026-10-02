@@ -21,8 +21,16 @@ export default tseslint.config(
     },
     rules: {
       "@typescript-eslint/consistent-type-imports": "error",
-      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+      ],
     },
+  },
+  {
+    // Tests poke at loosely typed HTTP/JSON payloads; production code stays strict.
+    files: ["**/*.test.ts", "**/testing/**/*.ts"],
+    rules: { "@typescript-eslint/no-explicit-any": "off" },
   },
   prettier,
 );

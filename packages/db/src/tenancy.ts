@@ -22,10 +22,12 @@ export const INSTALL_WIDE_TABLES = [
   "verifications",
   "passkeys",
   "two_factors",
+  "jwks",
   "invitations",
   // Identity and governance
   "teams",
   "install_roles",
+  "install_settings",
   "break_glass_grants",
   "legal_holds",
   "audit_log",
@@ -54,10 +56,22 @@ const TEAM_TABLE_PRIVILEGES: readonly Privilege[] = ["SELECT", "INSERT", "UPDATE
  * every privilege here is reachable from any team context. No DELETE on `teams`: foreign-key
  * cascades bypass RLS and would wipe another team's rows. A table missing here gets no grants.
  */
+const AUTH_TABLE: readonly Privilege[] = ["SELECT", "INSERT", "UPDATE", "DELETE"];
+
 export const INSTALL_WIDE_GRANTS: Readonly<
   Partial<Record<InstallWideTable, readonly Privilege[]>>
 > = {
   teams: ["SELECT", "INSERT", "UPDATE"],
+  // Better Auth. Users are deactivated, never deleted (FK cascades would bypass team RLS).
+  users: ["SELECT", "INSERT", "UPDATE"],
+  sessions: AUTH_TABLE,
+  accounts: AUTH_TABLE,
+  verifications: AUTH_TABLE,
+  passkeys: AUTH_TABLE,
+  two_factors: AUTH_TABLE,
+  jwks: ["SELECT", "INSERT", "UPDATE"],
+  install_roles: ["SELECT", "INSERT", "UPDATE", "DELETE"],
+  install_settings: ["SELECT", "INSERT", "UPDATE"],
 };
 
 /**

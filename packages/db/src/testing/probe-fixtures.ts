@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { KobeTx } from "../client.js";
-import { teamMembers } from "../schema/index.js";
+import { teamMembers, users } from "../schema/index.js";
 import type { TeamTable } from "../tenancy.js";
 
 /**
@@ -11,6 +11,8 @@ export const PROBE_FIXTURES: Readonly<
   Record<TeamTable, (tx: KobeTx, teamId: string) => Promise<void>>
 > = {
   team_members: async (tx, teamId) => {
-    await tx.insert(teamMembers).values({ teamId, userId: randomUUID(), role: "member" });
+    const userId = randomUUID();
+    await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
+    await tx.insert(teamMembers).values({ teamId, userId, role: "member" });
   },
 };

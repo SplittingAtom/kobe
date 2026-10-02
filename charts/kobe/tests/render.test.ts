@@ -268,6 +268,7 @@ describe("ingress", () => {
     const paths = ing?.spec.rules[0].http.paths.map((p: any) => [p.path, p.backend.service.name]);
     expect(paths).toEqual([
       ["/v1", "kobe-server"],
+      ["/api/auth", "kobe-server"],
       ["/", "kobe-web"],
     ]);
   });
@@ -434,6 +435,55 @@ describe("CloudNativePG app credentials", () => {
     expect(env).toContainEqual({
       name: "KOBE_DB_PASSWORD",
       valueFrom: { secretKeyRef: { name: "my-app-login", key: "password" } },
+    });
+  });
+});
+
+describe("auth (KOBE-12)", () => {
+  const env = (ms: Manifest[], name: string) =>
+    find(ms, "Deployment", name)?.spec.template.spec.containers[0].env as unknown[];
+
+  it("gives server and scheduler the public URL derived from the ingress", () => {
+    for (const name of ["kobe-server", "kobe-scheduler"]) {
+      expect(env(render(), name)).toContainEqual({
+        name: "KOBE_PUBLIC_URL",
+        value: "https://kobe.example.com",
+      });
+    }
+    expect(env(render({ "ingress.tls.enabled": "false" }), "kobe-server")).toContainEqual({
+      name: "KOBE_PUBLIC_URL",
+      value: "http://kobe.example.com",
+    });
+    expect(env(render({ publicUrl: "https://chat.example.org" }), "kobe-server")).toContainEqual({
+      name: "KOBE_PUBLIC_URL",
+      value: "https://chat.example.org",
+    });
+  });
+
+  it("generates and keeps an auth secret, mounted only by server and scheduler", () => {
+    const ms = render();
+    const secret = find(ms, "Secret", "kobe-auth");
+    expect(secret?.metadata.annotations?.["helm.sh/resource-policy"]).toBe("keep");
+    expect((secret as unknown as { stringData: { secret: string } }).stringData.secret).toMatch(
+      /^[A-Za-z0-9]{48}$/,
+    );
+    const ref = {
+      name: "KOBE_AUTH_SECRET",
+      valueFrom: { secretKeyRef: { name: "kobe-auth", key: "secret" } },
+    };
+    expect(env(ms, "kobe-server")).toContainEqual(ref);
+    expect(env(ms, "kobe-scheduler")).toContainEqual(ref);
+    for (const name of ["kobe-web", "kobe-mcp-proxy", "kobe-egress-proxy", "kobe-bifrost"]) {
+      expect(JSON.stringify(find(ms, "Deployment", name)), name).not.toContain("kobe-auth");
+    }
+  });
+
+  it("uses a pre-created auth secret when given (GitOps-safe)", () => {
+    const ms = render({ "auth.existingSecret": "my-auth" });
+    expect(find(ms, "Secret", "kobe-auth")).toBeUndefined();
+    expect(env(ms, "kobe-server")).toContainEqual({
+      name: "KOBE_AUTH_SECRET",
+      valueFrom: { secretKeyRef: { name: "my-auth", key: "secret" } },
     });
   });
 });

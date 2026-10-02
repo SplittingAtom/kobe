@@ -113,6 +113,30 @@ securityContext:
 {{- end }}
 {{- end -}}
 
+{{/* Public origin: explicit publicUrl, else derived from the ingress host and TLS setting. */}}
+{{- define "kobe.publicUrl" -}}
+{{- if .Values.publicUrl -}}
+{{- .Values.publicUrl -}}
+{{- else -}}
+{{- printf "%s://%s" (ternary "https" "http" .Values.ingress.tls.enabled) .Values.ingress.host -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "kobe.authSecretName" -}}
+{{- default (printf "%s-auth" (include "kobe.fullname" .)) (.Values.auth).existingSecret -}}
+{{- end -}}
+
+{{/* Auth configuration for the server and scheduler only. */}}
+{{- define "kobe.authEnv" -}}
+- name: KOBE_PUBLIC_URL
+  value: {{ include "kobe.publicUrl" . | quote }}
+- name: KOBE_AUTH_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "kobe.authSecretName" . }}
+      key: secret
+{{- end -}}
+
 {{- define "kobe.s3Env" -}}
 - name: KOBE_S3_ENDPOINT
   value: {{ .Values.s3.endpoint | quote }}

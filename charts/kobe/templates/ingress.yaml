@@ -35,6 +35,12 @@ spec:
               service:
                 name: {{ $fullname }}-server
                 port: { name: http }
+          - path: /api/auth
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullname }}-server
+                port: { name: http }
           - path: /
             pathType: Prefix
             backend:

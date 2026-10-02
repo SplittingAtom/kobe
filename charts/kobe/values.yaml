@@ -14,6 +14,14 @@ isolation:
   # RuntimeClass sandboxes run under; its handler must be runsc (gVisor) or kata*.
   runtimeClassName: gvisor
 
+# Public origin users reach Kobe at (cookies, WebAuthn relying party). Defaults to
+# http(s)://<ingress.host>; set it when Kobe sits behind another proxy or ingress is disabled.
+publicUrl: ""
+
+auth:
+  # Secret with key "secret" (>= 32 chars). Empty: the chart generates one and keeps it.
+  existingSecret: ""
+
 web:
   replicas: 1
   resources:

@@ -1,7 +1,7 @@
 {{- include "kobe.validateDatabase" . -}}
 {{- $fullname := include "kobe.fullname" . -}}
 {{- $dbAnnotations := include "kobe.dbChecksumAnnotations" . -}}
-{{- $common := printf "%s\n%s" (include "kobe.databaseEnv" .) (include "kobe.s3Env" .) -}}
+{{- $common := printf "%s\n%s\n%s" (include "kobe.databaseEnv" .) (include "kobe.s3Env" .) (include "kobe.authEnv" .) -}}
 {{- $runtime := printf "- name: KOBE_RUNTIME_CLASS\n  value: %s" (.Values.isolation.runtimeClassName | quote) -}}
 {{- include "kobe.nodeService" (dict "root" . "component" "web" "image" "web" "values" .Values.web
       "healthPath" "/api/healthz" "readyPath" "/api/healthz"

@@ -1,19 +1,19 @@
 import { pgEnum, pgTable, primaryKey, timestamp, uuid } from "drizzle-orm/pg-core";
+import { users } from "./auth.js";
 import { teams } from "./teams.js";
 
 export const teamRole = pgEnum("team_role", ["team_admin", "builder", "member"]);
 
-/**
- * Team table. `user_id` gains its foreign key to `users` with Better Auth (KOBE-12); roles and
- * authorization arrive in KOBE-14.
- */
+/** Team table: membership and team role (authorization arrives in KOBE-14). */
 export const teamMembers = pgTable(
   "team_members",
   {
     teamId: uuid()
       .notNull()
       .references(() => teams.id, { onDelete: "cascade" }),
-    userId: uuid().notNull(),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
     role: teamRole().notNull(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
