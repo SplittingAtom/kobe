@@ -1,4 +1,5 @@
 import type { TeamTable } from "../../tenancy.js";
+import { agentsFixtures } from "./agents.js";
 import { conversationsFixtures } from "./conversations.js";
 import { identityFixtures } from "./identity.js";
 import { policyFixtures } from "./policy.js";
@@ -13,4 +14,5 @@ export const PROBE_FIXTURES: Readonly<Record<TeamTable, ProbeFixture>> = {
   ...identityFixtures,
   ...conversationsFixtures,
   ...policyFixtures,
+  ...agentsFixtures,
 };
