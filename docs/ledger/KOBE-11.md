@@ -1,6 +1,6 @@
 # KOBE-11: Backup and restore CLI
 
-- **Status:** in progress
+- **Status:** in review (PR #14)
 - **Branch / worktree:** `kobe-11-backup-restore` in `../Kobe-wt11`
 - **Depends on:** KOBE-8 (db layer, merged)
 
