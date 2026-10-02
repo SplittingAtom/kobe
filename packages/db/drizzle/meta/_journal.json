@@ -64,6 +64,20 @@
       "when": 1790925394827,
       "tag": "0008_agents_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790927978697,
+      "tag": "0009_tool_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790927978995,
+      "tag": "0010_tool_rules_rls",
+      "breakpoints": true
     }
   ]
 }
