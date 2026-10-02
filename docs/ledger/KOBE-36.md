@@ -184,7 +184,7 @@ agent's per-thread cap); request line cap 4 MiB (the wire frame cap); reply line
 
 ## Evidence (acceptance criteria → test or command output)
 
-`pnpm --filter @kobe/sandbox-agent test`: 23 files, 225 tests (real-Pi suites run when
+`pnpm --filter @kobe/sandbox-agent test`: 224 passed, 1 skipped (root-only case) (real-Pi suites run when
 `images/sandbox/pi` is installed, as in CI; CI runs them against the compiled `dist/kobe-policy`).
 
 | AC   | Evidence                                                                                                                                                                                 |
