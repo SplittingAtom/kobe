@@ -32,9 +32,10 @@ const teamRef = () =>
 
 /**
  * A conversation. `leaf_entry_id` marks the active branch of the entry tree. `agent_id`/
- * `agent_version` pin the agent version the thread started on (D19); the foreign key to agents and
- * `project_id`'s to projects arrive with those tables (KOBE-45/46, KOBE-57). Null agent = the
- * install default agent until then.
+ * `agent_version` pin the agent version the thread started on (D19); the pin's foreign key arrives
+ * with agent versions (KOBE-46: agents span team_agents and install_agents, see
+ * docs/ledger/KOBE-45.md) and `project_id`'s with projects (KOBE-57). Null agent = the install
+ * default agent.
  */
 export const threads = pgTable(
   "threads",
