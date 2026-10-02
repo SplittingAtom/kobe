@@ -1,6 +1,6 @@
 # KOBE-33: Thread search
 
-- **Status:** in review
+- **Status:** in review (PR #15)
 - **Branch / worktree:** `kobe-33-thread-search` in `../Kobe-wt33`
 - **Depends on:** KOBE-29 (merged). Consumers: KOBE-34 (Thread API, `GET /v1/threads?q=`), KOBE-14
   (active team, `requireTeam`), KOBE-57 (projects), KOBE-18 (retention).
@@ -24,7 +24,7 @@
 
 ## Plan
 
-- Custom migration `0006_thread_search.sql`: `pg_trgm`, `kobe_entry_search_text(type, payload)`,
+- Custom migration `0007_thread_search.sql` (was 0006 before `db:rebase` onto KOBE-14): `pg_trgm`, `kobe_entry_search_text(type, payload)`,
   generated `thread_entries.tsv` and `threads.tsv`, partial index `thread_entries_search_idx`.
 - `src/thread-search.ts` (`searchThreads(tx, input)`) and `src/thread-search-format.ts` (input
   schema, cursor, snippet parsing). Tests first: `thread-search.db.test.ts`,
@@ -111,6 +111,11 @@
   requires pg_trgm.
 
 ## Evidence (acceptance criteria → test or command output)
+
+- Rebase onto main (KOBE-14 #12, contracts #13, KOBE-9): `db:rebase` re-created the migration as
+  custom `0007_thread_search.sql` after `0006_session_active_teams.sql`, byte-identical to the
+  original (diff empty; snapshot 0007 = 0006 apart from id chain). A fresh migrate has both `tsv`
+  columns (generated ALWAYS, stored) and `thread_entries_search_idx`.
 
 - ac-1: `thread-search.db.test.ts` › "matching": user and assistant text with entry id and
   snippet; stemming, phrase, `-exclude`, `or`; title FTS, partial word (`kuberne`) and typo

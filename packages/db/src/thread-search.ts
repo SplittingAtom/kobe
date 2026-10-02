@@ -23,7 +23,7 @@ export {
   type SnippetSegment,
 } from "./thread-search-format.js";
 
-/** Text search configuration; must match the generated `tsv` columns (migration 0006). */
+/** Text search configuration; must match the generated `tsv` columns (migration `*_thread_search.sql`). */
 const TS_CONFIG = "english";
 /** Minimum pg_trgm word_similarity for a title to match the raw query (partial words, typos). */
 const TITLE_TRIGRAM_THRESHOLD = 0.6;

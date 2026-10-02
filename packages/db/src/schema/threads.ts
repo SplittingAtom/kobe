@@ -37,7 +37,7 @@ const teamRef = () =>
  * install default agent until then.
  *
  * `tsv` (§5.4; the title, weight A) is a stored generated column added in SQL by migration
- * 0006_thread_search, like `thread_entries.tsv`; neither is declared here (the entry column depends
+ * `*_thread_search.sql`, like `thread_entries.tsv`; neither is declared here (the entry column depends
  * on a SQL function) and the app never writes or selects them. Search: `searchThreads`.
  */
 export const threads = pgTable(
