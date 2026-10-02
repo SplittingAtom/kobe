@@ -30,6 +30,8 @@ jobs:
         with:
           version: v3.22.0
       - run: pnpm install --frozen-lockfile
+      # The pinned Pi (sandbox image lockfile) for kobe-sandbox-agent's real-Pi integration test.
+      - run: npm ci --prefix images/sandbox/pi --omit=dev --ignore-scripts --no-audit --no-fund
       - run: pnpm format:check
       - run: pnpm build
       - run: pnpm typecheck
