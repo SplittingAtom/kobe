@@ -203,6 +203,19 @@ describe("teams (ac-1)", () => {
     expect((await put(finance, ids.carol, "owner")).status).toBe(400);
     expect((await put(marketing, ids.bob, "member")).json.code).toBe("last_team_admin");
   });
+
+  it("does not let install admins add themselves to a team (no way around break-glass)", async () => {
+    const self = await as.installAdmin.put(
+      `/v1/install/teams/${finance}/members/${ids.installAdmin}`,
+      { role: "team_admin" },
+    );
+    expect(self).toMatchObject({ status: 403, json: { code: "self_membership" } });
+    const { rows } = await admin.query(
+      `SELECT count(*)::int AS n FROM team_members WHERE user_id = $1`,
+      [ids.installAdmin],
+    );
+    expect(rows[0]).toEqual({ n: 0 });
+  });
 });
 
 describe("active team and switcher API (ac-5)", () => {

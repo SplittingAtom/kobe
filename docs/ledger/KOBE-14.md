@@ -63,7 +63,10 @@
 - **Install admins manage membership** (add, re-role, remove in any team, via
   `/v1/install/teams/{id}/members`) because D7 has admins placing users into teams and teams must
   be recoverable. Membership/roles are treated as team metadata, not team content; install roles
-  still grant no team permission and can't select a team they're not in.
+  still grant no team permission and can't select a team they're not in. Install admins **cannot
+  add themselves or change their own role** through the install routes (403 `self_membership`),
+  so the install role is no way around break-glass; creating a new (empty) team with themselves
+  as first admin is allowed. Colluding admins/puppet accounts are left to the audit log (KOBE-15).
 - **Team creation names its first team admin** (`adminUserId`, may be the creator); a team can
   never lose its last team admin (row locks make concurrent demotions safe).
 - **Only the Owner grants/revokes Admin** and transfers ownership (D8 lists ownership transfer as

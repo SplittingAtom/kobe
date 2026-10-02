@@ -88,6 +88,17 @@ export function installTeamsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
     const userId = idSchema.safeParse(c.req.param("userId"));
     const body = await parseBody(c, memberRoleSchema);
     if (!teamId.success || !userId.success || !body) return invalidRequest(c);
+    // An install role must not become a way into team content (D8: break-glass only), so install
+    // admins can't add themselves or change their own team role here; a team admin must do it.
+    if (userId.data === c.get("user").id) {
+      return c.json(
+        {
+          code: "self_membership",
+          message: "Install admins can't add themselves to a team. Ask one of its team admins.",
+        },
+        403,
+      );
+    }
     if (!(await findTeam(db, teamId.data))) return c.json(teamNotFound, 404);
     if (!(await findUserId(db, { id: userId.data }))) return c.json(userNotFound, 404);
     const added = await addMember(db, teamId.data, userId.data, body.role);
