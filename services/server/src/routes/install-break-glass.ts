@@ -10,7 +10,8 @@ import {
 import type { AuthVariables } from "../auth/session.js";
 import { currentAuditContext } from "../audit/context.js";
 import { requireInstallPermission } from "../authz/middleware.js";
-import { notifyGrant } from "../break-glass/notify.js";
+import { deliverBreakGlassNotifications } from "../break-glass/outbox.js";
+import { hitRateLimit } from "../rate-limit.js";
 import {
   grantEntriesQuerySchema,
   grantThreadsQuerySchema,
@@ -39,6 +40,9 @@ import { toSummary } from "../threads/repository.js";
 
 type Ctx = Context<{ Variables: AuthVariables }>;
 
+/** Reads per install admin and minute, across replicas (every read is an audited transaction). */
+export const BREAK_GLASS_READ_LIMIT = { windowMs: 60_000, max: 120 } as const;
+
 const ERRORS = {
   team_not_found: [404, "No team with that id."],
   subject_not_member: [404, "That user is not a member of this team."],
@@ -54,6 +58,11 @@ const ERRORS = {
   subject_cannot_approve: [403, "The subject of a request can't approve it."],
   subject_cannot_decide: [403, "The subject of a request can't deny or revoke it."],
   cannot_deny_own: [403, "Withdraw your own request instead of denying it."],
+  too_many_pending: [
+    429,
+    "You already have 3 open break-glass requests. Withdraw one or wait for a decision.",
+  ],
+  rate_limited: [429, "Too many break-glass reads. Wait a minute and continue."],
   grant_not_active: [
     403,
     "This grant doesn't give access now: it is pending, ended, or you are no longer an install admin.",
@@ -140,23 +149,30 @@ export function installBreakGlassRoutes(deps: ServerDeps): Hono<{ Variables: Aut
   const db = deps.database.db;
   app.use(requireInstallPermission("install.break_glass.request"));
 
-  const respond = async (
-    c: Ctx,
-    result: GrantResult,
-    event: "approved" | "denied" | "revoked",
-    status = 200,
-  ) => {
+  const respond = async (c: Ctx, result: GrantResult, status: 200 | 201 = 200) => {
     if (!result.ok) return fail(c, result.error satisfies GrantError);
     const viewer = c.get("user").id;
+    // Queued in the grant's transaction; sent now, retried by the sweep if this fails.
+    void deliverBreakGlassNotifications(deps, { grantId: result.grant.id });
     const detail = await getGrant(db, result.grant.id);
     if (!detail) return fail(c, "grant_not_found");
-    void notifyGrant(deps, detail, event, {
-      actorId: viewer,
-      ...(event === "revoked" ? { wasActive: result.grant.startsAt !== null } : {}),
-    });
+    const warnings =
+      result.queued.teamAdmins === 0
+        ? [
+            {
+              code: "no_team_admin_notified",
+              message:
+                "No active team admin of this team could be notified. The access is recorded in the team's audit log; tell the team another way.",
+            },
+          ]
+        : [];
     return c.json(
-      { grant: grantJson(detail, viewer, await isSoleInstallAdmin(db, viewer)) },
-      status as 200,
+      {
+        grant: grantJson(detail, viewer, await isSoleInstallAdmin(db, viewer)),
+        notified: result.queued,
+        warnings,
+      },
+      status,
     );
   };
 
@@ -179,13 +195,7 @@ export function installBreakGlassRoutes(deps: ServerDeps): Hono<{ Variables: Aut
         "Give the team, a reason (10-2000 characters), a duration of 5-1440 minutes, and at most one of userId or threadId.",
       );
     }
-    const viewer = c.get("user").id;
-    const result = await requestGrant(db, viewer, body);
-    if (!result.ok) return fail(c, result.error);
-    const detail = await getGrant(db, result.grant.id);
-    if (!detail) return fail(c, "grant_not_found");
-    void notifyGrant(deps, detail, "requested", { actorId: viewer });
-    return c.json({ grant: grantJson(detail, viewer, await isSoleInstallAdmin(db, viewer)) }, 201);
+    return respond(c, await requestGrant(db, c.get("user").id, body), 201);
   });
 
   app.get("/:id", async (c) => {
@@ -197,22 +207,25 @@ export function installBreakGlassRoutes(deps: ServerDeps): Hono<{ Variables: Aut
     return c.json({ grant: grantJson(detail, viewer, await isSoleInstallAdmin(db, viewer)) });
   });
 
-  const decide =
-    (action: typeof approveGrant, event: "approved" | "denied" | "revoked") => async (c: Ctx) => {
-      const id = idParamSchema.safeParse(c.req.param("id"));
-      if (!id.success) return fail(c, "grant_not_found");
-      return respond(c, await action(db, c.get("user").id, id.data), event);
-    };
+  const decide = (action: typeof approveGrant) => async (c: Ctx) => {
+    const id = idParamSchema.safeParse(c.req.param("id"));
+    if (!id.success) return fail(c, "grant_not_found");
+    return respond(c, await action(db, c.get("user").id, id.data));
+  };
   const approver = requireInstallPermission("install.break_glass.approve");
-  app.post("/:id/approve", approver, decide(approveGrant, "approved"));
-  app.post("/:id/deny", approver, decide(denyGrant, "denied"));
-  app.post("/:id/revoke", decide(revokeGrant, "revoked"));
+  app.post("/:id/approve", approver, decide(approveGrant));
+  app.post("/:id/deny", approver, decide(denyGrant));
+  app.post("/:id/revoke", decide(revokeGrant));
 
   // ── Reads under an active grant (GET only: break-glass never writes) ──
 
   const read = async (c: Ctx, request: BreakGlassRead) => {
     const id = idParamSchema.safeParse(c.req.param("id"));
     if (!id.success) return { response: fail(c, "grant_not_found") };
+    const adminId = c.get("user").id;
+    if (!(await hitRateLimit(db, `break-glass-read:${adminId}`, BREAK_GLASS_READ_LIMIT))) {
+      return { response: fail(c, "rate_limited") };
+    }
     const context = currentAuditContext();
     try {
       const result = await readWithBreakGlass(

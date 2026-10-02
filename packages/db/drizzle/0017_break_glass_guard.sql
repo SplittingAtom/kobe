@@ -1,7 +1,8 @@
 -- Break-glass in Postgres (spec D10, KOBE-16): the two-person rule, the approver's role, the time
--- box and the allowed status transitions hold for every writer, not only the server's code paths.
--- SECURITY INVOKER (the default; the catalog check forbids DEFINER): the checks read users and
--- install_roles with the app role's own SELECT privilege.
+-- box and the allowed status transitions hold for every writer, and team content is readable under
+-- a grant only through SELECT policies that honor an approved, unexpired grant for the named admin.
+-- Everything is SECURITY INVOKER (the default; the catalog check forbids DEFINER): the functions
+-- read users, install_roles and break_glass_grants with the app role's own SELECT privilege.
 
 -- An active (not deactivated) Owner or Admin.
 CREATE FUNCTION "public"."break_glass_is_install_admin"(who uuid) RETURNS boolean
@@ -10,6 +11,28 @@ CREATE FUNCTION "public"."break_glass_is_install_admin"(who uuid) RETURNS boolea
     SELECT 1 FROM "public"."install_roles" r JOIN "public"."users" u ON u.id = r.user_id
     WHERE r.user_id = who AND u.deactivated_at IS NULL)
 $$;--> statement-breakpoint
+
+-- Serializes "is there a second active install admin?" against changes to that set: approvals
+-- take it in the guard trigger; install role changes and (de)activations take it in the triggers
+-- below. Held until commit, so a self-approval and a concurrent promotion or reactivation can't
+-- both see the old set.
+CREATE FUNCTION "public"."break_glass_lock_admin_set"() RETURNS void
+  LANGUAGE sql SET search_path = pg_catalog, public AS $$
+  SELECT pg_advisory_xact_lock(hashtextextended('kobe.install_admin_set', 0))
+$$;--> statement-breakpoint
+
+CREATE FUNCTION "public"."break_glass_admin_set_changed"() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
+BEGIN
+  PERFORM "public"."break_glass_lock_admin_set"();
+  RETURN NULL;
+END;
+$$;--> statement-breakpoint
+
+CREATE TRIGGER "install_roles_admin_set_lock" BEFORE INSERT OR UPDATE OR DELETE ON "install_roles"
+  FOR EACH STATEMENT EXECUTE FUNCTION "public"."break_glass_admin_set_changed"();--> statement-breakpoint
+CREATE TRIGGER "users_admin_set_lock" BEFORE UPDATE OF "deactivated_at" ON "users"
+  FOR EACH STATEMENT EXECUTE FUNCTION "public"."break_glass_admin_set_changed"();--> statement-breakpoint
 
 CREATE FUNCTION "public"."break_glass_grants_guard"() RETURNS trigger
   LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
@@ -52,18 +75,20 @@ BEGIN
     IF now() >= OLD.request_expires_at THEN
       RAISE EXCEPTION 'the break-glass request lapsed' USING ERRCODE = '55000';
     END IF;
+    PERFORM "public"."break_glass_lock_admin_set"();
     IF NEW.approver_id IS NULL OR NOT "public"."break_glass_is_install_admin"(NEW.approver_id) THEN
-      RAISE EXCEPTION 'only an install admin can approve break-glass' USING ERRCODE = '42501';
+      RAISE EXCEPTION 'only an active install admin can approve break-glass' USING ERRCODE = '42501';
     END IF;
     IF NEW.approver_id IS NOT DISTINCT FROM OLD.user_id THEN
       RAISE EXCEPTION 'the subject of a break-glass request cannot approve it' USING ERRCODE = '42501';
     END IF;
     IF NEW.approver_id = OLD.admin_id THEN
-      -- D10: a second Admin or the Owner approves when one exists; only a single-admin install
-      -- self-approves, and the grant is flagged. Any other install role counts, deactivated or
-      -- not: deactivating the only other admin must not unlock self-approval. The rows are
-      -- share-locked so a concurrent demotion waits for this approval.
-      PERFORM 1 FROM "public"."install_roles" r WHERE r.user_id <> OLD.admin_id FOR SHARE;
+      -- D10: a second Admin or the Owner approves "when one exists": another ACTIVE install admin.
+      -- Only a single-active-admin install self-approves, and the grant is flagged. The other
+      -- admins' rows are share-locked too (belt and braces with the admin-set lock).
+      PERFORM 1 FROM "public"."install_roles" r JOIN "public"."users" u ON u.id = r.user_id
+        WHERE r.user_id <> OLD.admin_id AND u.deactivated_at IS NULL
+        FOR SHARE OF r, u;
       IF FOUND THEN
         RAISE EXCEPTION 'a second install admin must approve this request' USING ERRCODE = '42501';
       END IF;
@@ -117,4 +142,41 @@ END;
 $$;--> statement-breakpoint
 
 CREATE TRIGGER "break_glass_grants_guard" BEFORE INSERT OR UPDATE ON "break_glass_grants"
-  FOR EACH ROW EXECUTE FUNCTION "public"."break_glass_grants_guard"();
+  FOR EACH ROW EXECUTE FUNCTION "public"."break_glass_grants_guard"();--> statement-breakpoint
+
+-- The grant the current transaction reads under (D10: "a break_glass_grants row that RLS policies
+-- honor only while unexpired, for the named admin, read-only"): zero or one row, and only when
+-- kobe.break_glass_grant names an approved grant inside its window (now() = transaction start),
+-- requested by kobe.break_glass_actor, who is still an active install admin. Unset settings
+-- (every normal request) match nothing.
+CREATE FUNCTION "public"."break_glass_active_grant"()
+  RETURNS TABLE (team_id uuid, user_id uuid, thread_id uuid)
+  LANGUAGE sql STABLE SET search_path = pg_catalog, public AS $$
+  SELECT g.team_id, g.user_id, g.thread_id
+  FROM "public"."break_glass_grants" g
+  JOIN "public"."users" u ON u.id = g.admin_id AND u.deactivated_at IS NULL
+  JOIN "public"."install_roles" r ON r.user_id = g.admin_id
+  WHERE g.id = NULLIF(current_setting('kobe.break_glass_grant', true), '')::uuid
+    AND g.admin_id = NULLIF(current_setting('kobe.break_glass_actor', true), '')::uuid
+    AND g.status = 'approved' AND g.starts_at <= now() AND g.expires_at > now()
+$$;--> statement-breakpoint
+
+-- SELECT only: no INSERT, UPDATE or DELETE path exists under a grant (writes still need the
+-- canonical team policy, i.e. kobe.team_id, which break-glass never sets). Each sub-select is an
+-- uncorrelated init plan: one grant lookup per query, not per row. A user grant reads that user's
+-- threads, a thread grant that thread; entries follow their thread.
+CREATE POLICY "break_glass_read" ON "threads" FOR SELECT
+  USING (
+    "team_id" = (SELECT g.team_id FROM "public"."break_glass_active_grant"() g)
+    AND "owner_user_id" = COALESCE((SELECT g.user_id FROM "public"."break_glass_active_grant"() g), "owner_user_id")
+    AND "id" = COALESCE((SELECT g.thread_id FROM "public"."break_glass_active_grant"() g), "id")
+  );--> statement-breakpoint
+CREATE POLICY "break_glass_read" ON "thread_entries" FOR SELECT
+  USING (
+    "team_id" = (SELECT g.team_id FROM "public"."break_glass_active_grant"() g)
+    AND "thread_id" = COALESCE((SELECT g.thread_id FROM "public"."break_glass_active_grant"() g), "thread_id")
+    AND ((SELECT g.user_id FROM "public"."break_glass_active_grant"() g) IS NULL OR EXISTS (
+      SELECT 1 FROM "public"."threads" t
+      WHERE t."team_id" = "thread_entries"."team_id" AND t."id" = "thread_entries"."thread_id"
+        AND t."owner_user_id" = (SELECT g.user_id FROM "public"."break_glass_active_grant"() g)))
+  );

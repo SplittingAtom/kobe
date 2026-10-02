@@ -1,4 +1,4 @@
-import { comingIn, defineTeamSection } from "../types";
+import { READY, defineTeamSection } from "../types";
 
 export default defineTeamSection({
   id: "audit",
@@ -8,5 +8,5 @@ export default defineTeamSection({
   order: 20,
   // GET /v1/team/audit (KOBE-15).
   permission: "team.audit.read",
-  status: comingIn("KOBE-15"),
+  status: READY,
 });

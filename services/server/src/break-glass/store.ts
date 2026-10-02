@@ -1,4 +1,5 @@
 import {
+  AuditBusyError,
   SYSTEM_ACTOR,
   and,
   breakGlassGrants,
@@ -17,6 +18,7 @@ import {
   type KobeTx,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
+import { enqueueNotifications, type QueuedCounts } from "./outbox.js";
 import type { RequestGrantBody } from "./schemas.js";
 
 /**
@@ -42,9 +44,14 @@ export type GrantError =
   | "self_approval_forbidden"
   | "subject_cannot_approve"
   | "subject_cannot_decide"
-  | "cannot_deny_own";
+  | "cannot_deny_own"
+  | "too_many_pending";
 
-export type GrantResult = { ok: true; grant: GrantRow } | { ok: false; error: GrantError };
+export type GrantResult =
+  { ok: true; grant: GrantRow; queued: QueuedCounts } | { ok: false; error: GrantError };
+
+/** Open (undecided) requests one install admin may have at a time. */
+export const BREAK_GLASS_MAX_PENDING_PER_ADMIN = 3;
 
 /** Lock wait for a grant row: approvals and revocations are short. */
 const LOCK_TIMEOUT = "5s";
@@ -93,23 +100,27 @@ export async function activeInstallAdmins(
 
 /** Whether `adminId` is the only active install admin, so D10 lets them approve their own request. */
 export async function isSoleInstallAdmin(db: KobeDb | KobeTx, adminId: string): Promise<boolean> {
-  // Deactivated admins count too: deactivating the other admin must not unlock self-approval.
-  const [other] = await db
-    .select({ userId: installRoles.userId })
-    .from(installRoles)
-    .where(ne(installRoles.userId, adminId))
-    .limit(1);
-  return other === undefined;
+  return (await activeInstallAdmins(db, adminId)).length === 0;
 }
 
-async function lockGrant(tx: KobeTx, id: string): Promise<GrantRow | undefined> {
-  await tx.execute(sql`SELECT set_config('lock_timeout', ${LOCK_TIMEOUT}, true)`);
+async function lockGrant(
+  tx: KobeTx,
+  id: string,
+  lockTimeout = LOCK_TIMEOUT,
+): Promise<GrantRow | undefined> {
+  await tx.execute(sql`SELECT set_config('lock_timeout', ${lockTimeout}, true)`);
   const [row] = await tx
     .select()
     .from(breakGlassGrants)
     .where(eq(breakGlassGrants.id, id))
     .for("update");
   return row;
+}
+
+/** A legal hold is invisible to its subject: deciding it answers like an unknown grant. */
+function subjectError(grant: GrantRow, by: string, otherwise: GrantError): GrantError | null {
+  if (grant.userId !== by) return null;
+  return grant.legalHold ? "grant_not_found" : otherwise;
 }
 
 export async function requestGrant(
@@ -126,7 +137,24 @@ export async function requestGrant(
       return { ok: false, error: "subject_not_member" };
     }
   }
-  const grant = await db.transaction(async (tx) => {
+  return db.transaction(async (tx): Promise<GrantResult> => {
+    // One admin's open requests are capped; the per-admin lock makes the count exact.
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtextextended(${`kobe.break_glass.requests:${adminId}`}, 0))`,
+    );
+    const [open] = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(breakGlassGrants)
+      .where(
+        and(
+          eq(breakGlassGrants.adminId, adminId),
+          eq(breakGlassGrants.status, "pending"),
+          sql`${breakGlassGrants.requestExpiresAt} > now()`,
+        ),
+      );
+    if ((open?.n ?? 0) >= BREAK_GLASS_MAX_PENDING_PER_ADMIN) {
+      return { ok: false, error: "too_many_pending" };
+    }
     const [row] = await tx
       .insert(breakGlassGrants)
       .values({
@@ -140,19 +168,19 @@ export async function requestGrant(
       })
       .returning();
     if (!row) throw new Error("break-glass insert returned no row");
+    const queued = await enqueueNotifications(tx, row, "requested", { actorId: adminId });
     await recordAudit(tx, {
       action: "governance.break_glass.requested",
       teamId: row.teamId,
-      target: { ...scopeTarget(row), durationMinutes: row.durationMinutes },
+      target: { ...scopeTarget(row), durationMinutes: row.durationMinutes, ...queued },
     });
-    return row;
+    return { ok: true, grant: row, queued };
   });
-  return { ok: true, grant };
 }
 
 /**
- * Approves a pending request as `approverId` (D10): a second install admin, or the requester only
- * when no other active install admin exists (flagged `selfApproved`).
+ * Approves a pending request as `approverId` (D10): a second active install admin, or the
+ * requester only when no other active install admin exists (flagged `selfApproved`).
  */
 export async function approveGrant(
   db: KobeDb,
@@ -162,9 +190,10 @@ export async function approveGrant(
   return db.transaction(async (tx): Promise<GrantResult> => {
     const current = await lockGrant(tx, grantId);
     if (!current) return { ok: false, error: "grant_not_found" };
+    const subject = subjectError(current, approverId, "subject_cannot_approve");
+    if (subject) return { ok: false, error: subject };
     if (current.status !== "pending") return { ok: false, error: "not_pending" };
     if (current.requestExpiresAt <= new Date()) return { ok: false, error: "request_lapsed" };
-    if (current.userId === approverId) return { ok: false, error: "subject_cannot_approve" };
     if (current.adminId === approverId && !(await isSoleInstallAdmin(tx, approverId))) {
       return { ok: false, error: "self_approval_forbidden" };
     }
@@ -174,6 +203,7 @@ export async function approveGrant(
       .where(eq(breakGlassGrants.id, grantId))
       .returning();
     if (!row?.expiresAt) throw new Error("break-glass approval returned no window");
+    const queued = await enqueueNotifications(tx, row, "approved", { actorId: approverId });
     await recordAudit(tx, {
       action: "governance.break_glass.approved",
       teamId: row.teamId,
@@ -181,9 +211,10 @@ export async function approveGrant(
         ...scopeTarget(row),
         expiresAt: row.expiresAt.toISOString(),
         selfApproved: row.selfApproved,
+        ...queued,
       },
     });
-    return { ok: true, grant: row };
+    return { ok: true, grant: row, queued };
   });
 }
 
@@ -192,33 +223,52 @@ export async function denyGrant(db: KobeDb, by: string, grantId: string): Promis
   return db.transaction(async (tx): Promise<GrantResult> => {
     const current = await lockGrant(tx, grantId);
     if (!current) return { ok: false, error: "grant_not_found" };
+    const subject = subjectError(current, by, "subject_cannot_decide");
+    if (subject) return { ok: false, error: subject };
     if (current.status !== "pending") return { ok: false, error: "not_pending" };
     if (current.adminId === by) return { ok: false, error: "cannot_deny_own" };
-    if (current.userId === by) return { ok: false, error: "subject_cannot_decide" };
     const [row] = await tx
       .update(breakGlassGrants)
       .set({ status: "denied", decidedBy: by })
       .where(eq(breakGlassGrants.id, grantId))
       .returning();
     if (!row) throw new Error("break-glass denial returned no row");
+    const queued = await enqueueNotifications(tx, row, "denied", { actorId: by });
     await recordAudit(tx, {
       action: "governance.break_glass.denied",
       teamId: row.teamId,
-      target: { grantId: row.id },
+      target: { grantId: row.id, ...queued },
     });
-    return { ok: true, grant: row };
+    return { ok: true, grant: row, queued };
   });
 }
 
+/** Revocation waits this long for in-flight reads and the audit chain (reads never wait this long). */
+const REVOKE_LOCK_TIMEOUT = "30s";
+const REVOKE_ATTEMPTS = 3;
+
 /**
  * Ends a pending request (withdrawal) or an active grant (revocation) at once: the next read is
- * refused, and a read in flight finishes first (it holds the grant row in share mode).
+ * refused, and a read in flight finishes first (it holds the grant row in share mode). Revocation
+ * outranks reads: it waits up to 30 s for locks (reads give up after 5 s) and retries a busy
+ * audit chain, so a flood of reads can't keep a grant alive.
  */
 export async function revokeGrant(db: KobeDb, by: string, grantId: string): Promise<GrantResult> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await revokeOnce(db, by, grantId);
+    } catch (err) {
+      if (!(err instanceof AuditBusyError) || attempt >= REVOKE_ATTEMPTS) throw err;
+    }
+  }
+}
+
+async function revokeOnce(db: KobeDb, by: string, grantId: string): Promise<GrantResult> {
   return db.transaction(async (tx): Promise<GrantResult> => {
-    const current = await lockGrant(tx, grantId);
+    const current = await lockGrant(tx, grantId, REVOKE_LOCK_TIMEOUT);
     if (!current) return { ok: false, error: "grant_not_found" };
-    if (current.userId === by) return { ok: false, error: "subject_cannot_decide" };
+    const subject = subjectError(current, by, "subject_cannot_decide");
+    if (subject) return { ok: false, error: subject };
     const status = effectiveStatus(current);
     if (status !== "pending" && status !== "active") return { ok: false, error: "not_open" };
     const [row] = await tx
@@ -227,28 +277,24 @@ export async function revokeGrant(db: KobeDb, by: string, grantId: string): Prom
       .where(eq(breakGlassGrants.id, grantId))
       .returning();
     if (!row) throw new Error("break-glass revocation returned no row");
+    const wasActive = status === "active";
+    const queued = await enqueueNotifications(tx, row, "revoked", { actorId: by, wasActive });
     await recordAudit(tx, {
       action: "governance.break_glass.revoked",
       teamId: row.teamId,
-      target: { grantId: row.id, wasActive: status === "active" },
+      target: { grantId: row.id, wasActive, ...queued },
     });
-    return { ok: true, grant: row };
+    return { ok: true, grant: row, queued };
   });
 }
 
-/** Most this sweep expires per run; the next run continues. */
+/** Most grants one sweep expires; the next run continues. */
 const SWEEP_BATCH = 100;
 
-/**
- * Records the end of grants whose window is over and requests nobody decided in time (system
- * actor). Access never waits for this: reads check `expires_at` themselves. Safe on every replica
- * at once: rows are claimed with SKIP LOCKED and re-checked by the guard trigger.
- */
-export async function expireDueGrants(
-  db: KobeDb,
-): Promise<{ grant: GrantRow; wasActive: boolean }[]> {
+/** Expires one due grant in its own transaction (each needs its own team context), or none. */
+async function expireOne(db: KobeDb): Promise<GrantRow | null> {
   return db.transaction(async (tx) => {
-    const due = await tx
+    const [due] = await tx
       .select({ id: breakGlassGrants.id, status: breakGlassGrants.status })
       .from(breakGlassGrants)
       .where(
@@ -261,32 +307,40 @@ export async function expireDueGrants(
         ),
       )
       .orderBy(breakGlassGrants.requestedAt)
-      .limit(SWEEP_BATCH)
+      .limit(1)
       .for("update", { skipLocked: true });
-    if (due.length === 0) return [];
-    const rows = await tx
+    if (!due) return null;
+    const [row] = await tx
       .update(breakGlassGrants)
       .set({ status: "expired" })
-      .where(
-        inArray(
-          breakGlassGrants.id,
-          due.map((d) => d.id),
-        ),
-      )
+      .where(eq(breakGlassGrants.id, due.id))
       .returning();
-    const wasActive = new Map(due.map((d) => [d.id, d.status === "approved"]));
-    const expired = rows.map((grant) => ({ grant, wasActive: wasActive.get(grant.id) ?? false }));
-    // Audit rows last (they hold the chain lock until commit).
-    for (const { grant, wasActive: active } of expired) {
-      await recordAudit(tx, {
-        action: "governance.break_glass.expired",
-        actor: SYSTEM_ACTOR,
-        teamId: grant.teamId,
-        target: { grantId: grant.id, wasActive: active },
-      });
-    }
-    return expired;
+    if (!row) throw new Error("break-glass expiry returned no row");
+    const wasActive = due.status === "approved";
+    const queued = await enqueueNotifications(tx, row, "expired", { actorId: null, wasActive });
+    await recordAudit(tx, {
+      action: "governance.break_glass.expired",
+      actor: SYSTEM_ACTOR,
+      teamId: row.teamId,
+      target: { grantId: row.id, wasActive, ...queued },
+    });
+    return row;
   });
+}
+
+/**
+ * Records the end of grants whose window is over and requests nobody decided in time (system
+ * actor), queuing their notifications. Access never waits for this: reads check `expires_at`
+ * themselves. Safe on every replica at once: rows are claimed with SKIP LOCKED.
+ */
+export async function expireDueGrants(db: KobeDb): Promise<GrantRow[]> {
+  const expired: GrantRow[] = [];
+  for (let i = 0; i < SWEEP_BATCH; i++) {
+    const row = await expireOne(db);
+    if (!row) break;
+    expired.push(row);
+  }
+  return expired;
 }
 
 type Person = { id: string; name: string; email: string };

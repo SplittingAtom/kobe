@@ -75,18 +75,20 @@ interface GrantInput {
   userId?: string | null;
   threadId?: string | null;
   duration?: number;
+  legalHold?: boolean;
 }
 
 async function request(input: GrantInput = {}): Promise<string> {
   const { rows } = await appClient.query<{ id: string }>(
-    `INSERT INTO break_glass_grants (team_id, admin_id, user_id, thread_id, reason, duration_minutes)
-     VALUES ($1, $2, $3, $4, 'incident 42', $5) RETURNING id`,
+    `INSERT INTO break_glass_grants (team_id, admin_id, user_id, thread_id, reason, duration_minutes, legal_hold)
+     VALUES ($1, $2, $3, $4, 'incident 42', $5, $6) RETURNING id`,
     [
       input.teamId ?? teamA,
       input.adminId ?? requester,
       input.userId ?? null,
       input.threadId ?? null,
       input.duration ?? 60,
+      input.legalHold ?? false,
     ],
   );
   const id = rows[0]?.id;
@@ -259,7 +261,7 @@ describe("break_glass_grants guard trigger", () => {
     ).toBe("42501");
   });
 
-  it("doesn't unlock self-approval by deactivating the other admins", async () => {
+  it("counts only active admins as a second approver (D10: when one exists)", async () => {
     const { rows } = await admin.query<{ user_id: string }>(
       `UPDATE users u SET deactivated_at = now() FROM install_roles r
        WHERE r.user_id = u.id AND u.id <> $1 AND u.deactivated_at IS NULL RETURNING u.id AS user_id`,
@@ -267,11 +269,55 @@ describe("break_glass_grants guard trigger", () => {
     );
     try {
       const id = await request();
-      expect(await errorCode(approve(id, requester))).toBe("42501");
+      await approve(id, requester);
+      expect(await grantRow(id)).toMatchObject({ status: "approved", self_approved: true });
     } finally {
       await admin.query(`UPDATE users SET deactivated_at = NULL WHERE id = ANY($1)`, [
         rows.map((r) => r.user_id),
       ]);
+    }
+  });
+
+  it("refuses approval by a deactivated or demoted admin", async () => {
+    const former = await user("Former admin", "admin");
+    const id = await request();
+    await admin.query(`UPDATE users SET deactivated_at = now() WHERE id = $1`, [former]);
+    expect(await errorCode(approve(id, former))).toBe("42501");
+    await admin.query(`UPDATE users SET deactivated_at = NULL WHERE id = $1`, [former]);
+    await admin.query(`DELETE FROM install_roles WHERE user_id = $1`, [former]);
+    expect(await errorCode(approve(id, former))).toBe("42501");
+    expect((await grantRow(id)).status).toBe("pending");
+  });
+
+  it("serializes a self-approval behind a concurrent promotion of a second admin", async () => {
+    // Only the requester is an active admin; a promotion is in flight when they self-approve.
+    const { rows } = await admin.query<{ user_id: string; role: string }>(
+      `DELETE FROM install_roles WHERE user_id <> $1 RETURNING user_id, role::text`,
+      [requester],
+    );
+    const promoter = new pg.Client({ connectionString: inject("appUrl") });
+    await promoter.connect();
+    try {
+      const id = await request();
+      await promoter.query("BEGIN");
+      await promoter.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, 'admin')`, [
+        mallory,
+      ]);
+      const selfApproval = errorCode(approve(id, requester));
+      await new Promise((r) => setTimeout(r, 200));
+      await promoter.query("COMMIT");
+      // The approval waited for the promotion and then saw a second active admin.
+      expect(await selfApproval).toBe("42501");
+      expect((await grantRow(id)).status).toBe("pending");
+    } finally {
+      await promoter.end();
+      await admin.query(`DELETE FROM install_roles WHERE user_id = $1`, [mallory]);
+      for (const r of rows) {
+        await admin.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, $2)`, [
+          r.user_id,
+          r.role,
+        ]);
+      }
     }
   });
 
@@ -462,6 +508,55 @@ describe("readWithBreakGlass", () => {
     expect((await grantRow(id)).status).toBe("revoked");
     expect(await errorCode(read(id, { kind: "threads", limit: 5 }))).toBe("grant_not_active");
     expect(await reads(id)).toHaveLength(1);
+  });
+
+  it("leaves the thread id out of a legal hold's read events", async () => {
+    const id = await approved({ userId: alice, legalHold: true });
+    await read(id, { kind: "thread", threadId: aliceThread });
+    expect((await reads(id)).map((r) => r.target)).toEqual([{ grantId: id, object: "thread" }]);
+  });
+
+  it("returns nothing and leaves no audit row when the audit write fails", async () => {
+    const id = await approved();
+    const blocker = new pg.Client({ connectionString: inject("appUrl") });
+    await blocker.connect();
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query(`SELECT pg_advisory_xact_lock(hashtextextended('kobe.audit_log', 0))`);
+      // The read's own lock timeout (5 s) expires on the audit chain lock.
+      await expect(read(id, { kind: "threads", limit: 5 })).rejects.toMatchObject({
+        name: "AuditBusyError",
+      });
+    } finally {
+      await blocker.query("ROLLBACK");
+      await blocker.end();
+    }
+    expect(await reads(id)).toEqual([]);
+  });
+
+  it("lets a read that started inside the window finish after it ends; the next is refused", async () => {
+    const id = await approved();
+    await admin.query(`SET session_replication_role = replica`);
+    await admin.query(
+      `UPDATE break_glass_grants SET expires_at = now() + interval '1500 milliseconds' WHERE id = $1`,
+      [id],
+    );
+    await admin.query(`SET session_replication_role = origin`);
+    const blocker = new pg.Client({ connectionString: inject("appUrl") });
+    await blocker.connect();
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query(`SELECT pg_advisory_xact_lock(hashtextextended('kobe.audit_log', 0))`);
+      const inFlight = read(id, { kind: "threads", limit: 5 });
+      await new Promise((r) => setTimeout(r, 2000));
+      await blocker.query("COMMIT");
+      const result = await inFlight;
+      if (result.kind !== "threads") throw new Error("kind");
+      expect(result.threads.length).toBe(2);
+    } finally {
+      await blocker.end();
+    }
+    expect(await errorCode(read(id, { kind: "threads", limit: 5 }))).toBe("grant_not_active");
   });
 
   it("refuses malformed reads before touching the database", async () => {

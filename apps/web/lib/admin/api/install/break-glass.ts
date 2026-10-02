@@ -63,8 +63,8 @@ export function listGrants(): Promise<ApiResult<GrantList>> {
   return apiRequest<GrantList>("/v1/install/break-glass");
 }
 
-export async function requestGrant(input: GrantRequest): Promise<ApiResult<BreakGlassGrant>> {
-  const res = await apiRequest<{ grant: BreakGlassGrant }>("/v1/install/break-glass", {
+export function requestGrant(input: GrantRequest): Promise<ApiResult<GrantChange>> {
+  return apiRequest<GrantChange>("/v1/install/break-glass", {
     method: "POST",
     json: {
       teamId: input.teamId,
@@ -75,20 +75,25 @@ export async function requestGrant(input: GrantRequest): Promise<ApiResult<Break
       ...(input.threadId ? { threadId: input.threadId } : {}),
     },
   });
-  return res.ok ? { ...res, data: res.data.grant } : res;
 }
 
 export type GrantDecision = "approve" | "deny" | "revoke";
 
-export async function decideGrant(
+export interface GrantChange {
+  readonly grant: BreakGlassGrant;
+  /** Notifications queued (delivered with retry): everyone, and the team's admins among them. */
+  readonly notified: { readonly recipients: number; readonly teamAdmins?: number };
+  /** E.g. `no_team_admin_notified`: approved, but no active team admin could be told. */
+  readonly warnings: readonly { readonly code: string; readonly message: string }[];
+}
+
+export function decideGrant(
   grantId: string,
   decision: GrantDecision,
-): Promise<ApiResult<BreakGlassGrant>> {
-  const res = await apiRequest<{ grant: BreakGlassGrant }>(
-    `/v1/install/break-glass/${enc(grantId)}/${decision}`,
-    { method: "POST" },
-  );
-  return res.ok ? { ...res, data: res.data.grant } : res;
+): Promise<ApiResult<GrantChange>> {
+  return apiRequest<GrantChange>(`/v1/install/break-glass/${enc(grantId)}/${decision}`, {
+    method: "POST",
+  });
 }
 
 // ── Reads under an active grant: every call is audited in the team's log ──

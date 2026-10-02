@@ -4,7 +4,11 @@ import { audit, type AuditRequestContext } from "../audit/write.js";
 import type { KobeDb, KobeTx } from "../client.js";
 import { breakGlassGrants, type BreakGlassStatus } from "../schema/break-glass.js";
 import { threadEntries, threads } from "../schema/threads.js";
-import { TEAM_ID_SETTING } from "../settings.js";
+import {
+  BREAK_GLASS_ACTOR_SETTING,
+  BREAK_GLASS_GRANT_SETTING,
+  TEAM_ID_SETTING,
+} from "../settings.js";
 
 /**
  * Break-glass reads (spec D10, KOBE-16): the only way an install admin reads team content.
@@ -14,11 +18,16 @@ import { TEAM_ID_SETTING } from "../settings.js";
  *      inside its window, requested by this admin, and that the admin is still an active install
  *      admin. A concurrent revocation waits for the read to finish; a read that starts after the
  *      revocation commits is refused. Nothing is cached: every call re-checks.
- *   2. sets `kobe.team_id` to the grant's team, so the canonical team RLS applies;
+ *   2. names the grant and the admin in transaction-local settings (`kobe.break_glass_grant`,
+ *      `kobe.break_glass_actor`). The `break_glass_read` SELECT policies on the readable team
+ *      tables (BREAK_GLASS_READABLE_TABLES) re-verify the grant in Postgres and expose only its
+ *      team and scope; `kobe.team_id` is never set, so no write policy can match;
  *   3. records `governance.break_glass.read` (team scope) as the transaction's only write;
  *   4. switches the transaction to read-only (`transaction_read_only`), so nothing after this
  *      point can write, whatever the query;
- *   5. runs the read, narrowed to the grant's scope (whole team, one user's threads, one thread).
+ *   5. runs the read, narrowed to the grant's scope by RLS and again by the query itself.
+ * Reads are bounded by a statement timeout; one that started inside the window finishes even if
+ * the window ends meanwhile (RLS evaluates `now()`, the transaction start).
  * A read that finds nothing in scope throws and rolls back with its audit row: nothing was read.
  *
  * The transaction is never handed to the caller: the read kinds below are the whole surface.
@@ -326,9 +335,10 @@ export async function readWithBreakGlass(
       sql`SELECT NULLIF(current_setting(${TEAM_ID_SETTING}, true), '') AS team`,
     );
     if (team.rows[0]?.team) throw new Error("readWithBreakGlass: already inside a team context");
+    await tx.execute(sql`SELECT set_config(${BREAK_GLASS_GRANT_SETTING}, ${access.grantId}, true),
+                                set_config(${BREAK_GLASS_ACTOR_SETTING}, ${access.adminId}, true)`);
 
     const grant = await lockActiveGrant(tx, access);
-    await tx.execute(sql`SELECT set_config(${TEAM_ID_SETTING}, ${grant.teamId}, true)`);
     const threadId = parsed.kind === "threads" ? undefined : parsed.threadId;
     await audit(tx, {
       action: "governance.break_glass.read",

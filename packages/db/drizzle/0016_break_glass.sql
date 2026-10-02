@@ -1,3 +1,4 @@
+CREATE TYPE "public"."break_glass_notification_status" AS ENUM('pending', 'sent', 'failed', 'skipped');--> statement-breakpoint
 CREATE TYPE "public"."break_glass_status" AS ENUM('pending', 'approved', 'denied', 'revoked', 'expired');--> statement-breakpoint
 CREATE TABLE "break_glass_grants" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
@@ -27,11 +28,33 @@ CREATE TABLE "break_glass_grants" (
 	CONSTRAINT "break_glass_grants_approved_shape" CHECK ("break_glass_grants"."status" <> 'approved' OR ("break_glass_grants"."approver_id" IS NOT NULL AND "break_glass_grants"."starts_at" IS NOT NULL))
 );
 --> statement-breakpoint
+CREATE TABLE "break_glass_notifications" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"grant_id" uuid NOT NULL,
+	"event" text NOT NULL,
+	"was_active" boolean DEFAULT false NOT NULL,
+	"recipient_id" uuid NOT NULL,
+	"recipient_role" text NOT NULL,
+	"status" "break_glass_notification_status" DEFAULT 'pending' NOT NULL,
+	"attempts" integer DEFAULT 0 NOT NULL,
+	"next_attempt_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"last_error" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"sent_at" timestamp with time zone,
+	CONSTRAINT "break_glass_notifications_event" CHECK ("break_glass_notifications"."event" IN ('requested', 'approved', 'denied', 'revoked', 'expired')),
+	CONSTRAINT "break_glass_notifications_role" CHECK ("break_glass_notifications"."recipient_role" IN ('install_admin', 'team_admin', 'subject', 'requester')),
+	CONSTRAINT "break_glass_notifications_last_error" CHECK (char_length("break_glass_notifications"."last_error") <= 64)
+);
+--> statement-breakpoint
 ALTER TABLE "break_glass_grants" ADD CONSTRAINT "break_glass_grants_team_id_teams_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."teams"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "break_glass_grants" ADD CONSTRAINT "break_glass_grants_admin_id_users_id_fk" FOREIGN KEY ("admin_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "break_glass_grants" ADD CONSTRAINT "break_glass_grants_approver_id_users_id_fk" FOREIGN KEY ("approver_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "break_glass_grants" ADD CONSTRAINT "break_glass_grants_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "break_glass_grants" ADD CONSTRAINT "break_glass_grants_decided_by_users_id_fk" FOREIGN KEY ("decided_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "break_glass_notifications" ADD CONSTRAINT "break_glass_notifications_grant_id_break_glass_grants_id_fk" FOREIGN KEY ("grant_id") REFERENCES "public"."break_glass_grants"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "break_glass_notifications" ADD CONSTRAINT "break_glass_notifications_recipient_id_users_id_fk" FOREIGN KEY ("recipient_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "break_glass_grants_team_idx" ON "break_glass_grants" USING btree ("team_id","requested_at" DESC NULLS LAST);--> statement-breakpoint
 CREATE INDEX "break_glass_grants_status_idx" ON "break_glass_grants" USING btree ("status","requested_at" DESC NULLS LAST);--> statement-breakpoint
-CREATE INDEX "break_glass_grants_open_idx" ON "break_glass_grants" USING btree ("expires_at","request_expires_at") WHERE "break_glass_grants"."status" IN ('pending', 'approved');
+CREATE INDEX "break_glass_grants_open_idx" ON "break_glass_grants" USING btree ("expires_at","request_expires_at") WHERE "break_glass_grants"."status" IN ('pending', 'approved');--> statement-breakpoint
+CREATE INDEX "break_glass_notifications_due_idx" ON "break_glass_notifications" USING btree ("next_attempt_at") WHERE "break_glass_notifications"."status" = 'pending';--> statement-breakpoint
+CREATE INDEX "break_glass_notifications_grant_idx" ON "break_glass_notifications" USING btree ("grant_id");

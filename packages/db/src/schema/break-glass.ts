@@ -119,3 +119,74 @@ export const breakGlassGrants = pgTable(
     ),
   ],
 );
+
+export const breakGlassNotificationStatus = pgEnum("break_glass_notification_status", [
+  "pending",
+  "sent",
+  "failed",
+  "skipped",
+]);
+export type BreakGlassNotificationStatus = (typeof breakGlassNotificationStatus.enumValues)[number];
+
+export const BREAK_GLASS_NOTIFICATION_EVENTS = [
+  "requested",
+  "approved",
+  "denied",
+  "revoked",
+  "expired",
+] as const;
+export type BreakGlassNotificationEvent = (typeof BREAK_GLASS_NOTIFICATION_EVENTS)[number];
+
+export const BREAK_GLASS_RECIPIENT_ROLES = [
+  "install_admin",
+  "team_admin",
+  "subject",
+  "requester",
+] as const;
+export type BreakGlassRecipientRole = (typeof BREAK_GLASS_RECIPIENT_ROLES)[number];
+
+/**
+ * Durable notification outbox for break-glass (D10: team admins are notified). One row per
+ * recipient, written in the transaction that changes the grant, so a committed approval always
+ * has its notifications queued; delivered with retry and backoff by the server's sweep. The
+ * message is rendered at delivery from the grant; the row holds ids only.
+ */
+export const breakGlassNotifications = pgTable(
+  "break_glass_notifications",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    grantId: uuid()
+      .notNull()
+      .references(() => breakGlassGrants.id),
+    event: text().notNull(),
+    /** For revoked/expired: whether the grant had given access (approved) before it ended. */
+    wasActive: boolean().notNull().default(false),
+    recipientId: uuid()
+      .notNull()
+      .references(() => users.id),
+    /** Why this person is told (decides what the message may show, e.g. the reason). */
+    recipientRole: text().notNull(),
+    status: breakGlassNotificationStatus().notNull().default("pending"),
+    attempts: integer().notNull().default(0),
+    nextAttemptAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    /** Machine-readable failure code of the last attempt (never an SMTP response text). */
+    lastError: text(),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    sentAt: timestamp({ withTimezone: true }),
+  },
+  (t) => [
+    index("break_glass_notifications_due_idx")
+      .on(t.nextAttemptAt)
+      .where(sql`${t.status} = 'pending'`),
+    index("break_glass_notifications_grant_idx").on(t.grantId),
+    check(
+      "break_glass_notifications_event",
+      sql`${t.event} IN ('requested', 'approved', 'denied', 'revoked', 'expired')`,
+    ),
+    check(
+      "break_glass_notifications_role",
+      sql`${t.recipientRole} IN ('install_admin', 'team_admin', 'subject', 'requester')`,
+    ),
+    check("break_glass_notifications_last_error", sql`char_length(${t.lastError}) <= 64`),
+  ],
+);

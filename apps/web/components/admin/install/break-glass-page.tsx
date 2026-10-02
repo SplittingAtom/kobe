@@ -73,10 +73,14 @@ export function BreakGlassPage() {
       deny: "Deny",
       revoke: grant.status === "pending" ? "Withdraw" : "Revoke",
     };
-    if (!confirmed(`${verbs[decision]} break-glass access to ${grant.team.name}?`)) return;
+    const hold = grant.legalHold ? " This is a legal hold: the subject is not notified." : "";
+    if (!confirmed(`${verbs[decision]} break-glass access to ${grant.team.name}?${hold}`)) return;
     const done = await mutation.run(
       () => decideGrant(grant.id, decision),
-      (g) => `${STATUS_LABELS[g.status]}: ${g.team.name}.`,
+      ({ grant: g, warnings }) =>
+        [`${STATUS_LABELS[g.status]}: ${g.team.name}.`, ...warnings.map((w) => w.message)].join(
+          " ",
+        ),
     );
     if (done) {
       if (reading?.id === grant.id) setReading(null);
@@ -170,7 +174,7 @@ function RequestForm({
           userId: scope === "user" ? userId : undefined,
           threadId: scope === "thread" ? threadId.trim() : undefined,
         }),
-      (g) =>
+      ({ grant: g }) =>
         soleAdmin
           ? `Requested access to ${g.team.name}. You are the only install admin: you can approve it yourself (it will be flagged).`
           : `Requested access to ${g.team.name}. A second install admin must approve it.`,
@@ -317,7 +321,12 @@ function GrantTable({
               </td>
               <td>
                 {scopeLabel(g)}
-                {g.legalHold && <> · legal hold</>}
+                {g.legalHold && (
+                  <>
+                    <br />
+                    <strong>Legal hold:</strong> the subject is not notified
+                  </>
+                )}
               </td>
               <td>{g.reason}</td>
               <td>

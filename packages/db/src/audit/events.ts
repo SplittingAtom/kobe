@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { BREAK_GLASS_MAX_MINUTES } from "../schema/break-glass.js";
+import { BREAK_GLASS_MAX_MINUTES, BREAK_GLASS_NOTIFICATION_EVENTS } from "../schema/break-glass.js";
 import { teamRole } from "../schema/team-members.js";
 
 /**
@@ -64,6 +64,12 @@ const breakGlassScope = {
   subjectUserId: id.optional(),
   threadId: id.optional(),
   legalHold: z.boolean(),
+};
+
+/** How many people a break-glass change queued notifications for (outbox rows), and how many of them are the team's admins. */
+const notified = {
+  recipients: z.number().int().nonnegative(),
+  teamAdmins: z.number().int().nonnegative().optional(),
 };
 
 const event = <const S extends AuditScope, T extends z.ZodRawShape>(scope: S, shape: T) => ({
@@ -189,19 +195,35 @@ export const AUDIT_EVENTS = {
   "governance.break_glass.requested": event("team", {
     ...breakGlassScope,
     durationMinutes: z.number().int().min(1).max(BREAK_GLASS_MAX_MINUTES),
+    ...notified,
   }),
   /** A second install admin approved; `selfApproved` flags a single-admin install (D10). */
   "governance.break_glass.approved": event("team", {
     ...breakGlassScope,
     expiresAt: z.iso.datetime({ offset: true }),
     selfApproved: z.boolean(),
+    ...notified,
   }),
-  "governance.break_glass.denied": event("team", { grantId: id }),
+  "governance.break_glass.denied": event("team", { grantId: id, ...notified }),
   /** Withdrawn while pending (`wasActive` false) or revoked during its window. */
-  "governance.break_glass.revoked": event("team", { grantId: id, wasActive: z.boolean() }),
+  "governance.break_glass.revoked": event("team", {
+    grantId: id,
+    wasActive: z.boolean(),
+    ...notified,
+  }),
   /** The window ended (`wasActive`) or the request lapsed undecided (actor: system). */
-  "governance.break_glass.expired": event("team", { grantId: id, wasActive: z.boolean() }),
-  /** Every read under a grant: what kind of object, by id only (D10: every read is audited). */
+  "governance.break_glass.expired": event("team", {
+    grantId: id,
+    wasActive: z.boolean(),
+    ...notified,
+  }),
+  /** A queued notification gave up after its retries (actor: system). */
+  "governance.break_glass.notification_failed": event("team", {
+    grantId: id,
+    recipientUserId: id,
+    event: z.enum(BREAK_GLASS_NOTIFICATION_EVENTS),
+    attempts: z.number().int().positive(),
+  }),
   "governance.break_glass.read": event("team", {
     grantId: id,
     object: z.enum(["thread_list", "thread", "thread_entries"]),

@@ -1,26 +1,20 @@
 import type { ServerDeps } from "../deps.js";
 import { logger } from "../logger.js";
-import { notifyGrant } from "./notify.js";
-import { expireDueGrants, getGrant } from "./store.js";
+import { deliverBreakGlassNotifications } from "./outbox.js";
+import { expireDueGrants } from "./store.js";
 
-/** How often each replica records ended grants. Access itself ends at `expires_at`, not here. */
+/** How often each replica records ended grants and retries notifications. Access itself ends at `expires_at`, not here. */
 export const BREAK_GLASS_SWEEP_INTERVAL_MS = 60_000;
 
 /**
  * Records `governance.break_glass.expired` for grants whose window ended (and requests that lapsed
- * undecided) and sends the notifications (D10: auto-expiring). Runs on every replica; rows are
- * claimed with SKIP LOCKED, so each expiry is recorded once.
+ * undecided), then delivers every due notification, including retries of earlier failures (D10:
+ * auto-expiring, notified). Runs on every replica; rows are claimed with SKIP LOCKED, so each
+ * expiry is recorded once and each email sent once.
  */
 export async function sweepBreakGlass(deps: ServerDeps): Promise<number> {
   const expired = await expireDueGrants(deps.database.db);
-  await Promise.all(
-    expired.map(async ({ grant, wasActive }) =>
-      notifyGrant(deps, await getGrant(deps.database.db, grant.id), "expired", {
-        actorId: null,
-        wasActive,
-      }),
-    ),
-  );
+  await deliverBreakGlassNotifications(deps);
   return expired.length;
 }
 

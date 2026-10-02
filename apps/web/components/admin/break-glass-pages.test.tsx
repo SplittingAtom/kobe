@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import { BreakGlassPage } from "./install/break-glass-page";
 import { entryText } from "./install/break-glass-reader";
+import { TeamAuditPage } from "./team/audit-page";
 import { TeamBreakGlassPage } from "./team/break-glass-page";
 import { ME, TEAM, renderInstall, renderTeam, stubApi, summary } from "./testing";
 
@@ -65,7 +66,10 @@ describe("install break-glass page", () => {
       "GET /v1/install/break-glass": [200, { grants: [], selfApprovalAllowed: false }],
       "GET /v1/install/teams": [200, TEAMS],
       "GET /v1/install/teams/t-1/members": [200, ROSTER],
-      "POST /v1/install/break-glass": [201, { grant: grant({ scope: "user" }) }],
+      "POST /v1/install/break-glass": [
+        201,
+        { grant: grant({ scope: "user" }), notified: { recipients: 1 }, warnings: [] },
+      ],
     });
     renderInstall(<BreakGlassPage />);
     const form = await screen.findByRole("form", { name: "Request break-glass access" });
@@ -109,6 +113,39 @@ describe("install break-glass page", () => {
       "A second install admin must approve",
     );
     expect(summary(calls)).toContain("POST /v1/install/break-glass/g-1/approve");
+  });
+
+  it("shows the legal-hold note and the no-team-admin warning after approval", async () => {
+    const held = grant({
+      legalHold: true,
+      scope: "user",
+      subject: { id: "u-bob", name: "Bob", email: "b@x.io" },
+    });
+    const confirm = vi.fn((_message?: string) => true);
+    vi.stubGlobal("confirm", confirm);
+    stubApi({
+      "GET /v1/install/break-glass": [200, { grants: [held], selfApprovalAllowed: false }],
+      "GET /v1/install/teams": [200, TEAMS],
+      "POST /v1/install/break-glass/g-1/approve": [
+        200,
+        {
+          grant: { ...held, status: "active" },
+          notified: { recipients: 1, teamAdmins: 0 },
+          warnings: [
+            {
+              code: "no_team_admin_notified",
+              message: "No active team admin of this team could be notified.",
+            },
+          ],
+        },
+      ],
+    });
+    renderInstall(<BreakGlassPage />);
+    const row = (await screen.findByText("Incident 42")).closest("tr") as HTMLElement;
+    expect(row.textContent).toContain("Legal hold: the subject is not notified");
+    await userEvent.click(within(row).getByRole("button", { name: "Approve" }));
+    expect(String(confirm.mock.calls[0]?.[0])).toContain("legal hold");
+    await screen.findByText(/No active team admin of this team could be notified/);
   });
 
   it("explains self-approval on a single-admin install and shows the flag", async () => {
@@ -293,5 +330,57 @@ describe("team break-glass page", () => {
     stubApi({ "GET /v1/team/break-glass": [200, { active: [], recent: [] }] });
     renderTeam(<TeamBreakGlassPage />);
     await screen.findByText(/No install admin has break-glass access/);
+  });
+});
+
+describe("team audit view", () => {
+  it("shows the active break-glass banner above the team's events", async () => {
+    const calls = stubApi({
+      "GET /v1/team/break-glass": [
+        200,
+        {
+          active: [
+            {
+              id: "g-1",
+              status: "active",
+              requestedBy: { id: "u-inv", name: "Ivy" },
+              approvedBy: { id: "u-owner", name: "Olive" },
+              selfApproved: false,
+              legalHold: false,
+              scope: "team",
+              subject: null,
+              threadId: null,
+              reason: "Incident 42",
+              startsAt: "2026-10-02T10:00:00Z",
+              expiresAt: "2026-10-02T11:00:00Z",
+              endedAt: null,
+            },
+          ],
+          recent: [],
+        },
+      ],
+      "GET /v1/team/audit?limit=50": [
+        200,
+        {
+          events: [
+            {
+              id: "ev-1",
+              seq: 9,
+              at: "2026-10-02T10:05:00Z",
+              team_id: TEAM.id,
+              actor: { kind: "user", id: "u-inv", name: "Ivy", email: null },
+              action: "governance.break_glass.read",
+              target: { grantId: "g-1", object: "thread_list" },
+            },
+          ],
+          next_cursor: null,
+        },
+      ],
+    });
+    renderTeam(<TeamAuditPage />);
+    const banner = await screen.findByRole("note", { name: "Active break-glass access" });
+    expect(banner.textContent).toContain("Incident 42");
+    expect(screen.getByText("governance.break_glass.read")).toBeTruthy();
+    expect(calls.every((c) => c.headers.get("x-kobe-team") === TEAM.id)).toBe(true);
   });
 });

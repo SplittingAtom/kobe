@@ -1,5 +1,6 @@
 import pg from "pg";
 import { afterAll, describe, expect, inject, it } from "vitest";
+import { BREAK_GLASS_READABLE_TABLES } from "./break-glass/tables.js";
 import {
   INSTALL_WIDE_TABLES,
   TEAM_REFERENCING_INSTALL_WIDE,
@@ -97,29 +98,46 @@ describe("RLS catalog check (ac-1)", () => {
   });
 
   it.each(TEAM_TABLES)(
-    "%s has exactly one policy: the canonical team policy for PUBLIC",
+    "%s has the canonical team policy for PUBLIC, plus only the break-glass SELECT policy if listed",
     async (table) => {
       const policies = await rows<{
+        name: string;
         cmd: string;
         permissive: boolean;
         roles: string;
         qual: string;
-        check: string;
+        check: string | null;
       }>(
-        `SELECT polcmd::text AS cmd, polpermissive AS permissive, polroles::text AS roles,
+        `SELECT polname AS name, polcmd::text AS cmd, polpermissive AS permissive, polroles::text AS roles,
               pg_get_expr(polqual, polrelid) AS qual, pg_get_expr(polwithcheck, polrelid) AS check
-       FROM pg_policy WHERE polrelid = to_regclass($1)`,
+       FROM pg_policy WHERE polrelid = to_regclass($1) ORDER BY polname`,
         [`public.${table}`],
       );
+      const canonical = {
+        name: "team_isolation",
+        cmd: "*",
+        permissive: true,
+        roles: "{0}",
+        qual: CANONICAL_TEAM_EXPR,
+        check: CANONICAL_TEAM_EXPR,
+      };
+      if (!(BREAK_GLASS_READABLE_TABLES as readonly string[]).includes(table)) {
+        expect(policies).toEqual([canonical]);
+        return;
+      }
+      // D10: SELECT only (cmd r, no WITH CHECK), gated on the active grant; never a write path.
       expect(policies).toEqual([
         {
-          cmd: "*",
+          name: "break_glass_read",
+          cmd: "r",
           permissive: true,
           roles: "{0}",
-          qual: CANONICAL_TEAM_EXPR,
-          check: CANONICAL_TEAM_EXPR,
+          qual: expect.stringContaining("break_glass_active_grant()"),
+          check: null,
         },
+        canonical,
       ]);
+      expect(policies[0]?.qual).toMatch(/^\(\(team_id = \( SELECT g\.team_id/);
     },
   );
 

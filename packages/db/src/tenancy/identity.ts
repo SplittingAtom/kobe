@@ -21,6 +21,7 @@ export const identity = defineDomain({
     // Active team per session (KOBE-14)
     "session_active_teams",
     "break_glass_grants",
+    "break_glass_notifications",
     "legal_holds",
     "audit_log",
   ],
@@ -48,6 +49,8 @@ export const identity = defineDomain({
     // The record behind break-glass audit events (KOBE-16): requested, decided, revoked, expired;
     // never deleted. Transitions are checked by the break_glass_grants_guard trigger.
     break_glass_grants: ["SELECT", "INSERT", "UPDATE"],
+    // Outbox (KOBE-16): queued in the grant's transaction, marked sent/failed by delivery.
+    break_glass_notifications: ["SELECT", "INSERT", "UPDATE"],
   },
   teamReferencing: {
     session_active_teams:

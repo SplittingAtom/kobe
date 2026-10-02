@@ -1,5 +1,5 @@
 {
-  "id": "21ee14f2-e79a-4792-ba15-e6e0c354976c",
+  "id": "208ad85e-095d-443d-bb93-512f280d3309",
   "prevId": "5fe7bf52-c485-45ea-93e2-39b05868b4b4",
   "version": "7",
   "dialect": "postgresql",
@@ -3261,6 +3261,170 @@
         }
       },
       "isRLSEnabled": false
+    },
+    "public.break_glass_notifications": {
+      "name": "break_glass_notifications",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "grant_id": {
+          "name": "grant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event": {
+          "name": "event",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "was_active": {
+          "name": "was_active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "recipient_id": {
+          "name": "recipient_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recipient_role": {
+          "name": "recipient_role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "break_glass_notification_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "next_attempt_at": {
+          "name": "next_attempt_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "sent_at": {
+          "name": "sent_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "break_glass_notifications_due_idx": {
+          "name": "break_glass_notifications_due_idx",
+          "columns": [
+            {
+              "expression": "next_attempt_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"break_glass_notifications\".\"status\" = 'pending'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "break_glass_notifications_grant_idx": {
+          "name": "break_glass_notifications_grant_idx",
+          "columns": [
+            {
+              "expression": "grant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "break_glass_notifications_grant_id_break_glass_grants_id_fk": {
+          "name": "break_glass_notifications_grant_id_break_glass_grants_id_fk",
+          "tableFrom": "break_glass_notifications",
+          "tableTo": "break_glass_grants",
+          "columnsFrom": [
+            "grant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "break_glass_notifications_recipient_id_users_id_fk": {
+          "name": "break_glass_notifications_recipient_id_users_id_fk",
+          "tableFrom": "break_glass_notifications",
+          "tableTo": "users",
+          "columnsFrom": [
+            "recipient_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "break_glass_notifications_event": {
+          "name": "break_glass_notifications_event",
+          "value": "\"break_glass_notifications\".\"event\" IN ('requested', 'approved', 'denied', 'revoked', 'expired')"
+        },
+        "break_glass_notifications_role": {
+          "name": "break_glass_notifications_role",
+          "value": "\"break_glass_notifications\".\"recipient_role\" IN ('install_admin', 'team_admin', 'subject', 'requester')"
+        },
+        "break_glass_notifications_last_error": {
+          "name": "break_glass_notifications_last_error",
+          "value": "char_length(\"break_glass_notifications\".\"last_error\") <= 64"
+        }
+      },
+      "isRLSEnabled": false
     }
   },
   "enums": {
@@ -3362,6 +3526,16 @@
         "user",
         "agent",
         "system"
+      ]
+    },
+    "public.break_glass_notification_status": {
+      "name": "break_glass_notification_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "sent",
+        "failed",
+        "skipped"
       ]
     },
     "public.break_glass_status": {
