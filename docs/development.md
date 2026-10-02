@@ -45,7 +45,9 @@ k3s nodes use many inotify instances. If `scripts/dev-cluster.sh` warns about
 
 ```bash
 pnpm test                                   # unit + chart render tests (needs helm on PATH)
-KOBE_TEST_DATABASE_URL=postgres://... pnpm test:db   # migrations, RLS catalog, cross-team probe
+KOBE_TEST_DATABASE_URL=postgres://... pnpm test:db   # migrations, RLS catalog, cross-team probe,
+                                            # backup/restore round trip (needs pg_dump/psql 17+ on
+                                            # PATH, e.g. brew install libpq; or KOBE_PG_BIN_DIR)
 images/sandbox/test-image.sh <image>        # sandbox image acceptance checks
 KOBE_IMAGE_TAG=<tag> e2e/run.sh             # k3d end-to-end suite (cluster from dev-cluster.sh)
 ```
