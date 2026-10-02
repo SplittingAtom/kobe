@@ -51,6 +51,49 @@ apply`, or deleting the RuntimeClass later cannot run agents without isolation:
 - The **scheduler** has no UI, so it runs the same check as an initContainer and refuses to start,
   then re-checks in process like the server.
 
+## Sandboxes
+
+Each user gets one sandbox per team (spec D11): an agent-sandbox `Sandbox` under
+`isolation.runtimeClassName`, with a persistent `/workspace` volume, in the team's namespace
+`kobe-team-<slug>`. The server creates and maintains these namespaces itself; nothing needs to be
+created by hand. Every team namespace gets:
+
+- a **default-deny NetworkPolicy** (`kobe-sandbox-isolation`): no inbound connections at all;
+  outbound only to the Kobe server's **sandbox port** (8081, a separate listener with no user API),
+  the MCP proxy and the egress proxy — and to Bifrost only with `sandbox.modelGatewayAccess: true`
+  (off until Bifrost verifies sandbox session tokens). Sandboxes get no DNS: Kobe's services
+  resolve through `/etc/hosts` (`*.kobe.internal` → the Services' ClusterIPs), so DNS cannot be
+  used to leak data past the egress proxy;
+- a **ResourceQuota** (`sandbox.teamQuota`: requests and limits for CPU, memory and ephemeral
+  storage, pods, PVCs and requested storage) and a LimitRange with per-container defaults;
+- a `SandboxTemplate` and a **warm pool** of `sandbox.warmPool.replicasPerTeam` pre-started
+  sandboxes (agent-sandbox warm pools are per namespace; each counts against the team's quota);
+- Pod Security Admission `restricted`.
+
+The chart installs **ValidatingAdmissionPolicies** that hold whatever creates the pod (server,
+agent-sandbox controller, an operator): in `kobe-team-*` namespaces every pod must use
+`isolation.runtimeClassName` and that RuntimeClass must have a gVisor/Kata handler; pods may not
+mount Secrets, read Secrets into env, mount a Kubernetes API token, use host namespaces or
+`hostPath`; and only the Kobe server may add or change NetworkPolicies there. The server's own
+cluster-wide permissions (namespaces, RoleBindings) are confined to `kobe-team-*` by the same
+mechanism. Sandboxes identify themselves to the server with a projected ServiceAccount token
+(audience `kobe.sandbox-bootstrap`, which the Kubernetes API itself rejects) and receive
+short-lived, audience-bound session tokens in return; no other credential enters a sandbox.
+
+The server refuses to provision sandboxes unless those policies are in effect (it checks with a
+server-side dry run at first use), and every minute deletes any team pod that is not running under
+the verified RuntimeClass or predates the current RuntimeClass object. NetworkPolicies need a CNI
+that enforces them (k3s's built-in kube-router does); this cannot be verified through the API, so
+the e2e suite checks enforcement from a sandbox (`e2e/run.sh`) — run it after changing the CNI.
+
+Limit processes per pod with the kubelet (k3s: `--kubelet-arg=pod-max-pids=4096` on every node);
+Kubernetes has no per-pod setting for it.
+
+Private registries: the names in `global.imagePullSecrets` are copied into each team namespace for
+the kubelet (pods there cannot mount them). Alternatively configure registry credentials on the
+nodes (k3s `registries.yaml`). Kobe assumes one install per cluster (`kobe-team-*` names are
+cluster-wide).
+
 ## Install
 
 Create the Secrets the chart references, then install:
