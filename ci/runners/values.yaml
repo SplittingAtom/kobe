@@ -13,6 +13,10 @@ maxRunners: 4
 template:
   spec:
     terminationGracePeriodSeconds: 60
+    # Fresh Longhorn volumes are root-owned; the runner runs as uid 1001 in group docker (123).
+    securityContext:
+      fsGroup: 123
+      fsGroupChangePolicy: OnRootMismatch
     topologySpreadConstraints:
       - maxSkew: 1
         topologyKey: kubernetes.io/hostname
