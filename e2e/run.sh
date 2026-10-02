@@ -181,12 +181,13 @@ ensure_sandbox() { # [team-id slug]: defaults to the e2e team
 json_field() { # field, json → value (no jq dependency)
   printf '%s' "$2" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s)[process.argv[1]]??"")}catch{console.log("")}})' "$1"
 }
-handle=$(ensure_sandbox | tail -1)
+ensure_out=$(ensure_sandbox || true)
+handle=$(printf '%s\n' "$ensure_out" | tail -1)
 sandbox_id=$(json_field sandboxId "$handle")
 sandbox_pod=$(json_field podName "$handle")
-contains "server creates a (user, team) sandbox through the isolation gate" '^[0-9a-f-]{36}$' "$sandbox_id"
+contains "server creates a (user, team) sandbox through the isolation gate" '^[0-9a-f-]{36}$' "${sandbox_id:-$ensure_out}"
 contains "ensuring it again returns the same sandbox" "^${sandbox_id:-none}$" \
-  "$(json_field sandboxId "$(ensure_sandbox | tail -1)")"
+  "$(json_field sandboxId "$( (ensure_sandbox || true) | tail -1)")"
 contains "team namespace carries its team id" "^${E2E_TEAM_ID}$" \
   "$($KUBECTL get namespace "$TEAM_NS" -o jsonpath='{.metadata.labels.kobe\.splittingatom\.io/team-id}')"
 contains "team namespace enforces Pod Security 'restricted'" '^restricted$' \
@@ -210,7 +211,7 @@ if [[ -n "$node" ]] && docker inspect "$node" >/dev/null 2>&1; then
   handler=""
   for _ in $(seq 1 30); do
     handler=$(docker exec "$node" crictl pods --name "$sandbox_pod" --namespace "$TEAM_NS" -o json 2>/dev/null \
-      | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).items[0].runtimeHandler)}catch{}})')
+      | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).items[0].runtimeHandler)}catch{}})' || true)
     [[ -n "$handler" ]] && break
     sleep 2
   done
@@ -275,16 +276,16 @@ start_listener() { # namespace → name of a running HTTP listener on 8080 there
 }
 
 # A second team (its own namespace) with a listener: sandboxes of one team must not reach it.
-handle2=$(ensure_sandbox 8e3f3c4d-2e5f-4a7b-8c1d-2e3f4a5b6c7d e2e2 | tail -1)
+handle2=$( (ensure_sandbox 8e3f3c4d-2e5f-4a7b-8c1d-2e3f4a5b6c7d e2e2 || true) | tail -1)
 contains "a second team gets its own sandbox namespace" '^kobe-team-e2e2$' "$(json_field namespace "$handle2")"
 other_listener=$(start_listener "$TEAM2_NS")
-other_ip=$($KUBECTL -n "$TEAM2_NS" get pod "$other_listener" -o jsonpath='{.status.podIP}')
+other_ip=$($KUBECTL -n "$TEAM2_NS" get pod "$other_listener" -o jsonpath='{.status.podIP}' 2>/dev/null || true)
 
 svc_ip() { $KUBECTL -n "$NS" get svc "$1" -o jsonpath='{.spec.clusterIP}'; }
-server_ip=$(svc_ip kobe-server); web_ip=$(svc_ip kobe-web); bifrost_ip=$(svc_ip kobe-bifrost)
-dns_ip=$($KUBECTL -n kube-system get svc kube-dns -o jsonpath='{.spec.clusterIP}')
-api_ip=$($KUBECTL -n default get svc kubernetes -o jsonpath='{.spec.clusterIP}')
-node_ip=$($KUBECTL get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+server_ip=$(svc_ip kobe-server || true); web_ip=$(svc_ip kobe-web || true); bifrost_ip=$(svc_ip kobe-bifrost || true)
+dns_ip=$($KUBECTL -n kube-system get svc kube-dns -o jsonpath='{.spec.clusterIP}' || true)
+api_ip=$($KUBECTL -n default get svc kubernetes -o jsonpath='{.spec.clusterIP}' || true)
+node_ip=$($KUBECTL get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' || true)
 tcp() { # label host port → "label=REACHED|BLOCKED" (TCP connect only)
   echo "nc -w 4 $2 $3 </dev/null >/dev/null 2>&1 && echo $1=REACHED || echo $1=BLOCKED;"
 }
@@ -331,8 +332,8 @@ $KUBECTL create namespace "$SANDBOX_NS" --dry-run=client -o yaml | $KUBECTL appl
 PODS+=("-n $SANDBOX_NS control-listener")
 $KUBECTL -n "$SANDBOX_NS" run control-listener --restart=Never --image=busybox:1.37 --command -- sh -c "$listener" >/dev/null
 $KUBECTL -n "$SANDBOX_NS" wait --for=condition=Ready pod/control-listener --timeout=120s >/dev/null 2>&1 || true
-team_ip=$($KUBECTL -n "$TEAM_NS" get pod "$team_listener" -o jsonpath='{.status.podIP}')
-control_ip=$($KUBECTL -n "$SANDBOX_NS" get pod control-listener -o jsonpath='{.status.podIP}')
+team_ip=$($KUBECTL -n "$TEAM_NS" get pod "$team_listener" -o jsonpath='{.status.podIP}' 2>/dev/null || true)
+control_ip=$($KUBECTL -n "$SANDBOX_NS" get pod control-listener -o jsonpath='{.status.podIP}' 2>/dev/null || true)
 inbound=$(probe "$NS" "wget -qO- -T 5 http://${control_ip:-0.0.0.0}:8080/ >/dev/null 2>&1 && echo control=REACHED || echo control=BLOCKED; \
   wget -qO- -T 5 http://${team_ip:-0.0.0.0}:8080/ >/dev/null 2>&1 && echo sandbox=REACHED || echo sandbox=BLOCKED")
 contains "the team listener is up (so BLOCKED below means the policy)" '^Running$' \

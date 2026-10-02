@@ -72,14 +72,27 @@ function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
+/**
+ * The Kubernetes Status message from a client error body. @kubernetes/client-node passes the raw
+ * response text (a JSON Status) as the body; older paths pass a parsed object.
+ */
+export function statusMessage(body: unknown): string | undefined {
+  let value = body;
+  if (typeof body === "string") {
+    try {
+      value = JSON.parse(body) as unknown;
+    } catch {
+      return body.slice(0, 500) || undefined;
+    }
+  }
+  const message = (value as { message?: unknown } | null | undefined)?.message;
+  return typeof message === "string" ? message : undefined;
+}
+
 /** Normalises client errors: status code and the API's message, never request bodies. */
 function translate(err: unknown, what: string): never {
   if (err instanceof ApiException) {
-    const body = err.body as { message?: unknown } | string | undefined;
-    const detail =
-      typeof body === "object" && body && typeof body.message === "string"
-        ? body.message
-        : `HTTP ${err.code}`;
+    const detail = statusMessage(err.body) ?? `HTTP ${err.code}`;
     throw new KubeApiError(err.code, `Kubernetes API ${what}: ${detail}`);
   }
   throw err instanceof Error ? err : new Error(String(err));
