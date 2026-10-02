@@ -9,12 +9,13 @@ import {
   riskClassSchema,
   toolScopeSchema,
   type ApprovalMode,
+  type JsonObject,
   type ToolDescriptor,
 } from "@kobe/protocol";
 import type { AgentFrontmatter } from "@kobe/agent-file";
 import { strictestApprovalMode } from "../policy/approval-floor.js";
 import { checkAvailable } from "../policy/gates.js";
-import { matchSubject, splitAgentToolEntry } from "../policy/patterns.js";
+import { matchAgentToolEntry, matchSubject, splitAgentToolEntry } from "../policy/patterns.js";
 import { isRuleActive, type PolicyRule } from "../policy/rules.js";
 
 /**
@@ -190,6 +191,27 @@ export function manifestAllowsTool(manifest: ToolManifest, toolName: string): bo
   const mcp = parseMcpToolName(toolName);
   if (!mcp) return false;
   return manifest.connectors.some((c) => mcpServerSegment(c) === mcp.server_segment);
+}
+
+/**
+ * Whether a version may make this call at all (KOBE-36/47 run-time gate): inside the manifest
+ * (`manifestAllowsTool`) and through the version's own `tools.deny` (deny wins, argument
+ * shorthands on the prepared input) and `tools.allow` (only narrows), with the policy engine's
+ * matchers and fail-closed bias. Still not sufficient: every allowed call goes on to the engine.
+ */
+export function versionAllowsCall(
+  manifest: ToolManifest,
+  tool: ToolDescriptor,
+  input: JsonObject,
+): boolean {
+  if (!manifestAllowsTool(manifest, tool.name)) return false;
+  if (manifest.tools_deny.some((e) => matchAgentToolEntry(e, tool, input, "restrict"))) {
+    return false;
+  }
+  return (
+    manifest.tools_allow.length === 0 ||
+    manifest.tools_allow.some((e) => matchAgentToolEntry(e, tool, input, "loosen"))
+  );
 }
 
 /**

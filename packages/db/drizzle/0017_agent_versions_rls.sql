@@ -11,7 +11,8 @@ CREATE POLICY "team_isolation" ON "team_agent_versions"
 -- Published versions are immutable (D19): no UPDATE, no direct DELETE, for any role. Threads pin
 -- versions with NO ACTION foreign keys, and a version's content and frozen tool manifest must stay
 -- what was published. The only delete that passes is a cascade (pg_trigger_depth() > 1: the
--- referential action of deleting the team runs it from its own trigger). A change of team_id is
+-- referential action of deleting the team runs it from its own trigger; no other trigger or
+-- function may ever delete versions, or it would pass this check too). A change of team_id is
 -- left to RLS, whose WITH CHECK refuses every cross-team move with 42501 (the probe suite asserts
 -- that error, so this trigger must not pre-empt it).
 CREATE FUNCTION "public"."agent_versions_immutable"() RETURNS trigger

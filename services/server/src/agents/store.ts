@@ -46,7 +46,7 @@ export type AgentLocation =
   | { readonly scope: "personal"; readonly ownerUserId: string }
   | { readonly scope: "gallery" };
 
-/** Per-location caps: keeps lists bounded without pagination. */
+/** Per-location caps on live (not archived) agents: keeps lists bounded without pagination. */
 export const AGENT_CAPS: Readonly<Record<AgentScope, number>> = {
   team: 500,
   personal: 100,
@@ -196,8 +196,11 @@ export async function createAgent(
       await tx.execute(
         sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey(location)}, 0))`,
       );
-      const taken = new Set(await takenSlugs(tx, location));
-      if (taken.size >= AGENT_CAPS[location.scope]) return { ok: false, error: "limit_reached" };
+      const existing = await takenSlugs(tx, location);
+      const taken = new Set(existing.map((r) => r.slug));
+      // Archived agents keep their slug (exports and history name it) but not a slot (KOBE-46).
+      const live = existing.filter((r) => r.archivedAt === null).length;
+      if (live >= AGENT_CAPS[location.scope]) return { ok: false, error: "limit_reached" };
       const slug = input.slug ?? pickSlug(taken, input.baseSlug);
       if (slug === null || taken.has(slug)) return { ok: false, error: "slug_taken" };
       const values = {
@@ -251,15 +254,16 @@ function requireOwner(input: NewAgent): string {
   return input.ownerUserId;
 }
 
-async function takenSlugs(tx: KobeTx, location: AgentLocation): Promise<string[]> {
-  const rows =
-    location.scope === "team"
-      ? await tx.select({ slug: teamAgents.slug }).from(teamAgents)
-      : await tx
-          .select({ slug: installAgents.slug })
-          .from(installAgents)
-          .where(installWhere(location));
-  return rows.map((r) => r.slug);
+async function takenSlugs(
+  tx: KobeTx,
+  location: AgentLocation,
+): Promise<{ slug: string; archivedAt: Date | null }[]> {
+  return location.scope === "team"
+    ? tx.select({ slug: teamAgents.slug, archivedAt: teamAgents.archivedAt }).from(teamAgents)
+    : tx
+        .select({ slug: installAgents.slug, archivedAt: installAgents.archivedAt })
+        .from(installAgents)
+        .where(installWhere(location));
 }
 
 /**

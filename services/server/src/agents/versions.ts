@@ -91,17 +91,31 @@ type FullRow = AgentVersionSummary & {
   toolManifest: Record<string, unknown>;
 };
 
+/** A stored version whose tool manifest doesn't parse (manual SQL, a future format). */
+export class UnreadableVersionError extends Error {
+  readonly code = "version_unreadable";
+  constructor(
+    readonly agentId: string,
+    readonly version: number,
+  ) {
+    super(`agent ${agentId} version ${version} has an unreadable tool manifest`);
+    this.name = "UnreadableVersionError";
+  }
+}
+
 /**
  * A stored version as a record. The manifest is re-validated on every read: one that doesn't
- * parse (manual SQL, a future format) throws rather than run with an unknown tool set.
+ * parse throws `UnreadableVersionError` rather than run with an unknown tool set (fail closed).
  */
 function toVersion(row: FullRow): AgentVersionRecord {
   const { frontmatter, prompt, toolManifest, ...rest } = row;
+  const manifest = toolManifestSchema.safeParse(toolManifest);
+  if (!manifest.success) throw new UnreadableVersionError(row.agentId, row.version);
   return {
     ...rest,
     // Copied from a validated draft at publish time.
     definition: { frontmatter, prompt } as AgentDefinition,
-    toolManifest: toolManifestSchema.parse(toolManifest),
+    toolManifest: manifest.data,
   };
 }
 
@@ -403,18 +417,23 @@ export type PinError = "agent_not_found" | "agent_unavailable" | "version_not_fo
 /**
  * The agent `agentId` as the user sees it from the active team: a team agent of that team (RLS),
  * one of the user's own personal agents, or a gallery agent. Anything else is "not found".
+ * `lock` takes `FOR SHARE` on the agent row for the rest of `tx`, so a concurrent archive, suspend
+ * or publish can't commit between this check and the pin being written. Lock order: thread row
+ * (if any) before agent row; agent changes (`lockAgent`) never lock threads.
  */
 export async function findPinnableAgent(
   tx: KobeTx,
   viewer: PinViewer,
   agentId: string,
+  options: { lock?: boolean } = {},
 ): Promise<AgentRecord | null> {
-  const [team]: Row[] = await tx
+  const teamQuery = tx
     .select(TEAM)
     .from(teamAgents)
     .where(and(eq(teamAgents.teamId, viewer.teamId), eq(teamAgents.id, agentId)));
+  const [team]: Row[] = await (options.lock ? teamQuery.for("share") : teamQuery);
   if (team) return toRecord("team", team);
-  const [own]: (Row & { scope: "personal" | "gallery" })[] = await tx
+  const installQuery = tx
     .select({ ...INSTALL, scope: installAgents.scope })
     .from(installAgents)
     .where(
@@ -423,6 +442,9 @@ export async function findPinnableAgent(
         sql`(${installAgents.scope} = 'gallery' OR (${installAgents.scope} = 'personal' AND ${installAgents.ownerUserId} = ${viewer.userId}::uuid))`,
       ),
     );
+  const [own]: (Row & { scope: "personal" | "gallery" })[] = await (options.lock
+    ? installQuery.for("share")
+    : installQuery);
   if (!own) return null;
   const { scope, ...row } = own;
   return toRecord(scope, row);
@@ -444,7 +466,7 @@ export async function resolveAgentPin(
   agentId: string | null,
 ): Promise<Result<AgentPin | null, PinError>> {
   if (agentId === null) return { ok: true, value: null };
-  const agent = await findPinnableAgent(tx, viewer, agentId);
+  const agent = await findPinnableAgent(tx, viewer, agentId, { lock: true });
   if (!agent) return { ok: false, error: "agent_not_found" };
   if (unavailable(agent) || agent.currentVersion === null) {
     return { ok: false, error: "agent_unavailable" };
@@ -457,16 +479,16 @@ export async function resolveAgentPin(
 
 /**
  * The pin for switching an existing thread (one-click switch, D19): `version` (default: the
- * agent's current version) of the agent the thread is already pinned to.
+ * agent's current version) of the agent the thread is already pinned to, in the same scope.
  */
 export async function resolveSwitchPin(
   tx: KobeTx,
   viewer: PinViewer,
-  agentId: string,
+  current: Pick<AgentPin, "agentScope" | "agentId">,
   version: number | undefined,
 ): Promise<Result<AgentPin, PinError>> {
-  const agent = await findPinnableAgent(tx, viewer, agentId);
-  if (!agent) return { ok: false, error: "agent_not_found" };
+  const agent = await findPinnableAgent(tx, viewer, current.agentId, { lock: true });
+  if (!agent || agent.scope !== current.agentScope) return { ok: false, error: "agent_not_found" };
   if (unavailable(agent) || agent.currentVersion === null) {
     return { ok: false, error: "agent_unavailable" };
   }
@@ -502,7 +524,8 @@ export type PinnedAgent =
     }
   | {
       readonly ok: false;
-      readonly error: "agent_not_found" | "version_not_found" | "agent_suspended";
+      readonly error:
+        "agent_not_found" | "version_not_found" | "version_unreadable" | "agent_suspended";
     };
 
 /**
@@ -510,8 +533,9 @@ export type PinnedAgent =
  * the thread's owner, inside the run's `withTeam` transaction. Never falls back: a pinned agent or
  * version that is missing or unreadable is an error for the run, never the default agent or
  * another version. Suspended agents are refused (`agent_suspended`); archived agents still serve
- * the threads already pinned to them. The caller then intersects the version with the team
- * (`manifestAllowsTool`, `effectiveApprovalMode`, the team's models and connectors).
+ * the threads already pinned to them; a version whose manifest doesn't parse is
+ * `version_unreadable`. The caller then intersects the version with the team
+ * (`versionAllowsCall`, `effectiveApprovalMode`, the team's models and connectors).
  */
 export async function resolvePinnedAgent(
   tx: KobeTx,
@@ -521,7 +545,12 @@ export async function resolvePinnedAgent(
   const agent = await findPinnableAgent(tx, owner, pin.agentId);
   if (!agent || agent.scope !== pin.agentScope) return { ok: false, error: "agent_not_found" };
   if (agent.status === "suspended") return { ok: false, error: "agent_suspended" };
-  const version = await readVersion(tx, agent.scope, agent.id, pin.agentVersion);
-  if (!version) return { ok: false, error: "version_not_found" };
-  return { ok: true, agent, version };
+  try {
+    const version = await readVersion(tx, agent.scope, agent.id, pin.agentVersion);
+    if (!version) return { ok: false, error: "version_not_found" };
+    return { ok: true, agent, version };
+  } catch (err) {
+    if (err instanceof UnreadableVersionError) return { ok: false, error: "version_unreadable" };
+    throw err;
+  }
 }

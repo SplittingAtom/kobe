@@ -385,7 +385,12 @@ export async function switchAgentVersion(
   if (await hasRunIn(tx, viewer, id, ACTIVE_RUN_STATUSES)) {
     return { ok: false, error: "thread_busy" };
   }
-  const pin = await resolveSwitchPin(tx, viewer, thread.agentId, version);
+  const pin = await resolveSwitchPin(
+    tx,
+    viewer,
+    { agentScope: thread.agentScope, agentId: thread.agentId },
+    version,
+  );
   if (!pin.ok) return pin;
   if (pin.value.agentVersion === thread.agentVersion)
     return { ok: true, thread: toSummary(thread) };

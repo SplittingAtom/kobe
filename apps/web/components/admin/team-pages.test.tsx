@@ -202,7 +202,7 @@ describe("Team invitations", () => {
 describe("Team agents", () => {
   it("lists the team's agents and suspends one", async () => {
     const calls = stubApi({
-      "GET /v1/agents?scope=team": [200, AGENTS],
+      "GET /v1/agents?scope=team&include_archived=true": [200, AGENTS],
       "PUT /v1/agents/a-1/status": [200, { agent: { ...AGENTS.agents[0], status: "suspended" } }],
     });
     renderTeam(<TeamAgentsPage />);
@@ -216,7 +216,7 @@ describe("Team agents", () => {
 
   it("shows the server's refusal (403) of a suspension", async () => {
     stubApi({
-      "GET /v1/agents?scope=team": [200, AGENTS],
+      "GET /v1/agents?scope=team&include_archived=true": [200, AGENTS],
       "PUT /v1/agents/a-1/status": [
         403,
         { code: "forbidden", message: "Only team admins suspend team agents." },
@@ -229,7 +229,7 @@ describe("Team agents", () => {
 
   it("explains 503 isolation_runtime_missing and links to the fix", async () => {
     stubApi({
-      "GET /v1/agents?scope=team": [
+      "GET /v1/agents?scope=team&include_archived=true": [
         503,
         {
           code: "isolation_runtime_missing",
@@ -248,7 +248,7 @@ describe("Team agents", () => {
 
   it("hides internals of other 5xx answers", async () => {
     stubApi({
-      "GET /v1/agents?scope=team": [
+      "GET /v1/agents?scope=team&include_archived=true": [
         500,
         { code: "boom", message: "relation team_agents does not exist" },
       ],

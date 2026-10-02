@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BUILTIN_TOOLS } from "@kobe/protocol";
+import { BUILTIN_TOOLS, builtinToolDescriptor, type ToolDescriptor } from "@kobe/protocol";
 import type { AgentFrontmatter } from "@kobe/agent-file";
 import type { PolicyRule } from "../policy/rules.js";
 import {
@@ -7,6 +7,7 @@ import {
   effectiveApprovalMode,
   manifestAllowsTool,
   toolManifestSchema,
+  versionAllowsCall,
   type PublishFloor,
 } from "./manifest.js";
 
@@ -194,6 +195,39 @@ describe("run-time helpers for KOBE-47", () => {
     expect(manifestAllowsTool(manifest, "mcp__slack__post")).toBe(false);
     expect(manifestAllowsTool(manifest, "mcp__github")).toBe(false);
     expect(manifestAllowsTool(manifest, "brand_new_builtin")).toBe(false);
+  });
+
+  it("versionAllowsCall: the manifest, then the agent's own deny (wins) and allow (narrows)", () => {
+    const m = computeToolManifest(
+      fm({
+        connectors: ["github"],
+        tools: { allow: ["read", "bash:ls *", "mcp__github__*"], deny: ["mcp__github__delete_*"] },
+      }),
+      floor(),
+      NOW,
+    );
+    const mcp = (name: string): ToolDescriptor => ({
+      name,
+      source: "mcp",
+      connector_id: "00000000-0000-4000-8000-0000000000c1",
+      risk: "destructive",
+      open_world: true,
+      scope: "external",
+    });
+    const builtin = (name: string) => {
+      const d = builtinToolDescriptor(name);
+      if (!d) throw new Error(name);
+      return d;
+    };
+    expect(versionAllowsCall(m, builtin("read"), { path: "/workspace/a" })).toBe(true);
+    expect(versionAllowsCall(m, builtin("bash"), { command: "ls -la" })).toBe(true);
+    expect(versionAllowsCall(m, builtin("bash"), { command: "rm -rf /" })).toBe(false);
+    expect(versionAllowsCall(m, builtin("write"), { path: "/workspace/a", content: "" })).toBe(
+      false,
+    );
+    expect(versionAllowsCall(m, mcp("mcp__github__create_issue"), {})).toBe(true);
+    expect(versionAllowsCall(m, mcp("mcp__github__delete_repo"), {})).toBe(false);
+    expect(versionAllowsCall(m, mcp("mcp__slack__post"), {})).toBe(false);
   });
 
   it("effectiveApprovalMode: a floor raised after publish applies; a lowered one doesn't loosen", () => {

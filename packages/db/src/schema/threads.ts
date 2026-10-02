@@ -60,9 +60,7 @@ export const threads = pgTable(
     agentId: uuid(),
     agentVersion: integer(),
     /** Generated: `agent_id` when the pinned agent is a team agent (foreign key target). */
-    teamAgentId: uuid().generatedAlwaysAs(
-      sql`CASE WHEN agent_scope = 'team' THEN agent_id END`,
-    ),
+    teamAgentId: uuid().generatedAlwaysAs(sql`CASE WHEN agent_scope = 'team' THEN agent_id END`),
     /** Generated: `agent_id` when the pinned agent is personal or gallery (foreign key target). */
     installAgentId: uuid().generatedAlwaysAs(
       sql`CASE WHEN agent_scope IN ('personal', 'gallery') THEN agent_id END`,

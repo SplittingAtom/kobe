@@ -26,10 +26,29 @@ import {
   publishAgent,
   rollbackAgent,
   unarchiveAgent,
+  UnreadableVersionError,
   type Published,
 } from "./versions.js";
+import { logger } from "../logger.js";
 import { parseBody } from "../teams/http.js";
 import { agentWarnings } from "@kobe/agent-file";
+
+/**
+ * Runs `fn`; a stored version whose manifest doesn't parse answers 500 `version_unreadable` (fail
+ * closed, logged with the agent and version for operators) instead of a bare 500.
+ */
+async function guardUnreadable(c: Context, fn: () => Promise<Response>): Promise<Response> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (!(err instanceof UnreadableVersionError)) throw err;
+    logger.error({ agentId: err.agentId, version: err.version }, err.message);
+    return c.json(
+      { code: err.code, message: "This agent version can't be read. Ask an administrator." },
+      500,
+    );
+  }
+}
 
 /** An agent the caller may see, where it lives, and what the caller may do with it. */
 export interface ResolvedAgent {
@@ -96,9 +115,11 @@ export function mountVersionRoutes<E extends { Variables: object }>(
     if (!found.access.readDefinition) {
       return forbidden(c, "Your team role doesn't allow reading team agent definitions.");
     }
-    const record = await getVersion(db, found.location, found.agent.id, version.data);
-    if (!record) return publishError(c, "version_not_found");
-    return c.json({ version: versionDetail(record) });
+    return guardUnreadable(c, async () => {
+      const record = await getVersion(db, found.location, found.agent.id, version.data);
+      if (!record) return publishError(c, "version_not_found");
+      return c.json({ version: versionDetail(record) });
+    });
   });
 
   app.post("/:id/publish", async (c) => {
@@ -122,13 +143,15 @@ export function mountVersionRoutes<E extends { Variables: object }>(
     const body = await parseBody(c, rollbackSchema);
     if (!body) return invalidRequest(c, "Give the version to roll back to.");
     if (!found.access.publish) return forbidden(c, "Your team role doesn't allow publishing it.");
-    const result = await rollbackAgent(db, found.location, found.agent.id, {
-      publishedBy: options.userId(c),
-      fromVersion: body.version,
+    return guardUnreadable(c, async () => {
+      const result = await rollbackAgent(db, found.location, found.agent.id, {
+        publishedBy: options.userId(c),
+        fromVersion: body.version,
+      });
+      return result.ok
+        ? publishedResponse(c, result.value, found.access)
+        : publishError(c, result.error);
     });
-    return result.ok
-      ? publishedResponse(c, result.value, found.access)
-      : publishError(c, result.error);
   });
 
   app.post("/:id/unarchive", async (c) => {
