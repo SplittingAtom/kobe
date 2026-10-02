@@ -35,6 +35,10 @@ const teamRef = () =>
  * `agent_version` pin the agent version the thread started on (D19); the foreign key to agents and
  * `project_id`'s to projects arrive with those tables (KOBE-45/46, KOBE-57). Null agent = the
  * install default agent until then.
+ *
+ * `tsv` (§5.4; the title, weight A) is a stored generated column added in SQL by migration
+ * 0006_thread_search, like `thread_entries.tsv`; neither is declared here (the entry column depends
+ * on a SQL function) and the app never writes or selects them. Search: `searchThreads`.
  */
 export const threads = pgTable(
   "threads",
@@ -90,7 +94,8 @@ export const threads = pgTable(
  * `type` is Pi's entry type (message, compaction, context_edit, branch_summary, …; text, so a Pi
  * 1.0.x patch adding a type needs no migration). `seq` is the per-thread append order (for
  * rebuilding the JSONL); a trigger assigns it, like `run_events.seq`. Payloads over 64 KB go to S3
- * via `blob_ref`.
+ * via `blob_ref`. `tsv` (search text of user/assistant messages, SQL-only) is generated from
+ * `type` + `payload`, so writers must store the Pi entry shape (`payload.message.content`).
  */
 export const threadEntries = pgTable(
   "thread_entries",

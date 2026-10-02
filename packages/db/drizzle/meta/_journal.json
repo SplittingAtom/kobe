@@ -43,6 +43,13 @@
       "when": 1790922775202,
       "tag": "0005_conversations_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790924180187,
+      "tag": "0006_thread_search",
+      "breakpoints": true
     }
   ]
 }
