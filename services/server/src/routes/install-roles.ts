@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { and, asc, eq, installRoles, users } from "@kobe/db";
+import { and, asc, eq, installRoles, ne, users } from "@kobe/db";
 import type { AuthVariables } from "../auth/session.js";
 import { requireInstallPermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
@@ -48,7 +48,10 @@ export function installRolesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
           .values({ userId: userId.data, role: "admin" })
           .onConflictDoNothing();
       } else {
-        await tx.delete(installRoles).where(eq(installRoles.userId, userId.data));
+        // Never the Owner row: a concurrent transfer may have made this user Owner meanwhile.
+        await tx
+          .delete(installRoles)
+          .where(and(eq(installRoles.userId, userId.data), ne(installRoles.role, "owner")));
       }
       return "ok" as const;
     });

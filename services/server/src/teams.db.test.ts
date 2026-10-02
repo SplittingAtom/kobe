@@ -123,6 +123,25 @@ describe("install roles (ac-3)", () => {
       { user_id: ids.installAdmin, role: "admin" },
     ]);
   });
+  it("never leaves the install without an Owner when a demotion races a transfer", async () => {
+    const path = "/v1/install/roles/transfer-ownership";
+    for (let i = 0; i < 5; i++) {
+      await Promise.all([
+        as.owner.post(path, { userId: ids.dave }),
+        as.owner.put(`/v1/install/roles/${ids.dave}`, { role: "user" }),
+      ]);
+      const { rows } = await admin.query(`SELECT user_id FROM install_roles WHERE role = 'owner'`);
+      expect(rows).toHaveLength(1);
+      // Restore: the Owner, the install admin, and Dave as a plain user.
+      if (rows[0].user_id === ids.dave) await as.dave.post(path, { userId: ids.owner });
+      await as.owner.put(`/v1/install/roles/${ids.dave}`, { role: "user" });
+    }
+    const { rows } = await admin.query(`SELECT user_id, role FROM install_roles ORDER BY role`);
+    expect(rows).toEqual([
+      { user_id: ids.owner, role: "owner" },
+      { user_id: ids.installAdmin, role: "admin" },
+    ]);
+  });
 });
 
 describe("teams (ac-1)", () => {
@@ -192,29 +211,30 @@ describe("teams (ac-1)", () => {
     expect(list.json.teams.map((t: { slug: string }) => t.slug)).toEqual(["finance", "marketing"]);
   });
 
-  it("lets install admins place users in teams and set their role", async () => {
-    const put = (team: string, user: string, role: string) =>
-      as.installAdmin.put(`/v1/install/teams/${team}/members/${user}`, { role });
-    expect((await put(finance, ids.bob, "member")).status).toBe(201);
-    expect((await put(finance, ids.carol, "builder")).status).toBe(201);
-    expect((await put(finance, ids.carol, "member")).status).toBe(200);
-    expect((await put(randomUUID(), ids.carol, "member")).status).toBe(404);
-    expect((await put(finance, randomUUID(), "member")).status).toBe(404);
-    expect((await put(finance, ids.carol, "owner")).status).toBe(400);
-    expect((await put(marketing, ids.bob, "member")).json.code).toBe("last_team_admin");
+  it("leaves membership of existing teams to the team's own admins", async () => {
+    // D8: install admins create teams and name the first team admin, nothing more. Otherwise an
+    // accomplice account could be made team admin and add the install admin, skipping break-glass.
+    const path = (user: string) => `/v1/install/teams/${finance}/members/${user}`;
+    for (const user of [ids.bob, ids.installAdmin, ids.alice]) {
+      expect((await as.installAdmin.put(path(user), { role: "team_admin" })).status).toBe(404);
+      expect((await as.installAdmin.patch(path(user), { role: "member" })).status).toBe(404);
+      expect((await as.installAdmin.delete(path(user))).status).toBe(404);
+      expect((await as.owner.put(path(user), { role: "team_admin" })).status).toBe(404);
+    }
+    const { rows } = await admin.query(
+      `SELECT user_id, role FROM team_members WHERE team_id = $1`,
+      [finance],
+    );
+    expect(rows).toEqual([{ user_id: ids.alice, role: "team_admin" }]);
   });
 
-  it("does not let install admins add themselves to a team (no way around break-glass)", async () => {
-    const self = await as.installAdmin.put(
-      `/v1/install/teams/${finance}/members/${ids.installAdmin}`,
-      { role: "team_admin" },
-    );
-    expect(self).toMatchObject({ status: 403, json: { code: "self_membership" } });
-    const { rows } = await admin.query(
-      `SELECT count(*)::int AS n FROM team_members WHERE user_id = $1`,
-      [ids.installAdmin],
-    );
-    expect(rows[0]).toEqual({ n: 0 });
+  it("lets the first team admin build the team", async () => {
+    await as.alice.put("/v1/me/teams/active", { teamId: finance });
+    as.alice.team = finance;
+    for (const who of ["bob", "carol"] as const) {
+      const res = await as.alice.post("/v1/team/members", { email: email(who), role: "member" });
+      expect(res.status, JSON.stringify(res.json)).toBe(201);
+    }
   });
 });
 
@@ -282,14 +302,14 @@ describe("active team and switcher API (ac-5)", () => {
 
   it("cannot be set through Better Auth's update-session endpoint", async () => {
     const before = await admin.query(`SELECT count(*)::int AS n FROM session_active_teams`);
-    const res = await as.alice.post("/api/auth/update-session", {
+    const res = await as.dave.post("/api/auth/update-session", {
       teamId: marketing,
       activeTeamId: marketing,
     });
     expect(res.status).not.toBe(200);
     const after = await admin.query(`SELECT count(*)::int AS n FROM session_active_teams`);
     expect(after.rows).toEqual(before.rows);
-    expect(await as.alice.get("/v1/team")).toMatchObject({ status: 409 });
+    expect(await as.dave.get("/v1/team")).toMatchObject({ status: 409 });
   });
 
   it("drops the active team with the session on sign-out", async () => {
@@ -383,9 +403,6 @@ describe("team membership via /v1/team (ac-2, ac-4)", () => {
     expect((await as.alice.delete(`/v1/team/members/${ids.alice}`)).json.code).toBe(
       "last_team_admin",
     );
-    expect(
-      (await as.installAdmin.delete(`/v1/install/teams/${finance}/members/${ids.alice}`)).json.code,
-    ).toBe("last_team_admin");
   });
 
   it("keeps one team admin when two admins demote themselves concurrently", async () => {

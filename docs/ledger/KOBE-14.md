@@ -61,13 +61,13 @@
 - **Listing a user's teams keeps `team_members` behind its single canonical policy**: one
   transaction visits each team with a transaction-local `kobe.team_id` (no second policy, no
   SECURITY DEFINER, so the catalog check stays as is). Cost: one query per team in the install.
-- **Install admins manage membership** (add, re-role, remove in any team, via
-  `/v1/install/teams/{id}/members`) because D7 has admins placing users into teams and teams must
-  be recoverable. Membership/roles are treated as team metadata, not team content; install roles
-  still grant no team permission and can't select a team they're not in. Install admins **cannot
-  add themselves or change their own role** through the install routes (403 `self_membership`),
-  so the install role is no way around break-glass; creating a new (empty) team with themselves
-  as first admin is allowed. Colluding admins/puppet accounts are left to the audit log (KOBE-15).
+- **Install admins do not manage membership of existing teams** (coordinator review, D8: Admins
+  get "users and invites, create teams"). They create a team and name its first team admin at
+  creation, rename teams and read rosters (`GET /v1/install/teams/{id}/members`); there are no
+  install-level member add/re-role/remove routes. Otherwise an accomplice account made team admin
+  could add the install admin, who would then read team content without break-glass. All later
+  membership changes go through the team's own admins (`/v1/team/members`). Install roles grant no
+  team permission and can't select a team they're not in.
 - **Team creation names its first team admin** (`adminUserId`, may be the creator); a team can
   never lose its last team admin (row locks make concurrent demotions safe).
 - **Only the Owner grants/revokes Admin** and transfers ownership (D8 lists ownership transfer as
@@ -78,22 +78,36 @@
 - `services/server/src/testing/browser.ts` is a shared test browser; `auth.db.test.ts` keeps its
   own copy for now (KOBE-13 is editing that file in parallel).
 
+## Known limits
+
+- **`listMemberships` scales with the number of teams** (security review MEDIUM, note only): every
+  `GET /v1/me/teams` runs one query per team in the install. Fine for one organization's teams.
+  Suggested fix if it matters: cache the list per session and invalidate it on membership changes;
+  if that's not enough, move the per-team loop into one SECURITY INVOKER SQL function (one round
+  trip, still under RLS). An install-wide copy of memberships is not an option (D6 keeps
+  membership team-scoped).
+
 ## Open questions (for Chris or the coordinator)
 
 - Should ownership transfer require a fresh password/TOTP confirmation? Not in the spec; not done.
-- Team admins can learn whether an email belongs to a Kobe user (404 vs 201 when adding by email)
-  (security review MEDIUM, left open): should adding by email go through KOBE-13 invitations?
-- Security review: install-admin membership changes (and an admin naming a puppet account team
-  admin) are only detectable once KOBE-15 audits them.
+- **For Chris:** team admins can probe whether an email is a Kobe user via
+  `POST /v1/team/members` (404 vs 201) and add any install user to their team without that user's
+  consent (security review MEDIUM; behaviour left as is). Should adding go through KOBE-13
+  invitations with acceptance, and return a uniform response?
+- An install admin can still name an accomplice as first team admin of a _new_ (empty) team; only
+  KOBE-15's audit log will show it.
 
 ## Evidence (acceptance criteria → test or command output)
 
 - ac-1: `services/server/src/teams.db.test.ts` › "teams (ac-1)" (create with admin, 403 for users,
   slug validation/duplicate, no orphan team on failure, rename keeps slug).
 - ac-2: › "team membership via /v1/team" (member read-only roster, admin add/re-role/remove,
-  last-admin guard incl. concurrent demotions, removal revokes on next request) and
-  "lets install admins place users in teams"; `packages/db/src/memberships.db.test.ts`.
-- ac-3: › "install roles (ac-3)" (Owner-only Admin grants, Owner role fixed, atomic transfer).
+  last-admin guard incl. concurrent demotions, removal revokes on next request) and "leaves
+  membership of existing teams to the team's own admins" (install PUT/PATCH/DELETE → 404, roster
+  unchanged); `packages/db/src/memberships.db.test.ts`.
+- ac-3: › "install roles (ac-3)" (Owner-only Admin grants, Owner role fixed, atomic transfer,
+  demotion racing a transfer always leaves exactly one Owner — an invariant check over 5 races;
+  the race window is timing-dependent, so the `role <> 'owner'` guard is what guarantees it).
 - ac-4: `src/authz/permissions.test.ts` (D8 matrix, hierarchy, install/team disjoint);
   › "install admins and team content" (no select, no team routes, stale pointer refused).
 - ac-5: › "active team and switcher API" (member-only selection, same 403 for unknown teams,

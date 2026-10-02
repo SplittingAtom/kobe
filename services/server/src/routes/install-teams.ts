@@ -3,22 +3,9 @@ import { asc, eq, teams } from "@kobe/db";
 import type { AuthVariables } from "../auth/session.js";
 import { requireInstallPermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
-import { invalidRequest, membershipError, parseBody } from "../teams/http.js";
-import {
-  addMember,
-  createTeamWithAdmin,
-  findTeam,
-  findUserId,
-  listMembers,
-  removeMember,
-  setMemberRole,
-} from "../teams/members.js";
-import {
-  createTeamSchema,
-  idSchema,
-  memberRoleSchema,
-  renameTeamSchema,
-} from "../teams/schemas.js";
+import { invalidRequest, parseBody } from "../teams/http.js";
+import { createTeamWithAdmin, findTeam, findUserId, listMembers } from "../teams/members.js";
+import { createTeamSchema, idSchema, renameTeamSchema } from "../teams/schemas.js";
 
 const UNIQUE_VIOLATION = "23505";
 
@@ -28,8 +15,10 @@ function isUniqueViolation(err: unknown): boolean {
 }
 
 /**
- * Install admins create teams and place users in them (spec D7, D8). Membership and roles are
- * team metadata, not team content: nothing here reads threads, files, memory or artifacts.
+ * Install admins create teams and name each team's first team admin (spec D8), rename teams and
+ * read rosters (team metadata, not content). They cannot add, re-role or remove members of an
+ * existing team: that belongs to the team's own admins, or an install admin could make an
+ * accomplice team admin, get added, and read team content without break-glass.
  */
 export function installTeamsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
@@ -80,42 +69,6 @@ export function installTeamsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
     if (!teamId.success) return invalidRequest(c);
     if (!(await findTeam(db, teamId.data))) return c.json(teamNotFound, 404);
     return c.json({ members: await listMembers(db, teamId.data) });
-  });
-
-  /** Adds the user with this role, or changes their role if they are already a member. */
-  app.put("/:teamId/members/:userId", async (c) => {
-    const teamId = idSchema.safeParse(c.req.param("teamId"));
-    const userId = idSchema.safeParse(c.req.param("userId"));
-    const body = await parseBody(c, memberRoleSchema);
-    if (!teamId.success || !userId.success || !body) return invalidRequest(c);
-    // An install role must not become a way into team content (D8: break-glass only), so install
-    // admins can't add themselves or change their own team role here; a team admin must do it.
-    if (userId.data === c.get("user").id) {
-      return c.json(
-        {
-          code: "self_membership",
-          message: "Install admins can't add themselves to a team. Ask one of its team admins.",
-        },
-        403,
-      );
-    }
-    if (!(await findTeam(db, teamId.data))) return c.json(teamNotFound, 404);
-    if (!(await findUserId(db, { id: userId.data }))) return c.json(userNotFound, 404);
-    const added = await addMember(db, teamId.data, userId.data, body.role);
-    if (added.ok) return c.json({ userId: userId.data, role: body.role }, 201);
-    const changed = await setMemberRole(db, teamId.data, userId.data, body.role);
-    if (!changed.ok) return membershipError(c, changed.error);
-    return c.json({ userId: userId.data, role: body.role });
-  });
-
-  app.delete("/:teamId/members/:userId", async (c) => {
-    const teamId = idSchema.safeParse(c.req.param("teamId"));
-    const userId = idSchema.safeParse(c.req.param("userId"));
-    if (!teamId.success || !userId.success) return invalidRequest(c);
-    if (!(await findTeam(db, teamId.data))) return c.json(teamNotFound, 404);
-    const result = await removeMember(db, teamId.data, userId.data);
-    if (!result.ok) return membershipError(c, result.error);
-    return c.body(null, 204);
   });
 
   return app;
