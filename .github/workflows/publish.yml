@@ -1,0 +1,120 @@
+# Publishes images and the Helm chart to private ghcr.io/splittingatom on every push to main
+# (KOBE-7). Each image is pushed as sha-<short>; the chart (<Chart.version>-main.<run>.<attempt>)
+# pins appVersion sha-<short>. Only after every image and the chart are published is :main moved,
+# for all images together, and only if this commit is still the head of main. Deploy sha-* tags or
+# chart versions, not :main (the chart's IfNotPresent pull policy would keep a stale :main).
+name: publish
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: publish-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  images:
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: web, dockerfile: apps/web/Dockerfile }
+          - { name: server, dockerfile: services/server/Dockerfile }
+          - { name: mcp-proxy, dockerfile: services/mcp-proxy/Dockerfile }
+          - { name: egress-proxy, dockerfile: services/egress-proxy/Dockerfile }
+          - { name: sandbox, dockerfile: images/sandbox/Dockerfile }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: tag
+        run: echo "short=sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          provenance: true
+          sbom: true
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          tags: ghcr.io/splittingatom/kobe-${{ matrix.name }}:${{ steps.tag.outputs.short }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=Apache-2.0
+
+  chart:
+    needs: images
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.22.0
+      - name: Package and push chart
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          base=$(grep '^version:' charts/kobe/Chart.yaml | awk '{print $2}')
+          version="${base}-main.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          helm package charts/kobe --version "$version" --app-version "sha-${GITHUB_SHA::12}" -d dist
+          echo "$GHCR_TOKEN" | helm registry login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          helm push "dist/kobe-${version}.tgz" oci://ghcr.io/splittingatom/charts
+
+  promote-main:
+    needs: chart
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Skip unless this commit is still the head of main
+        id: head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head=$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)
+          echo "current=$([ "$head" = "$GITHUB_SHA" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        if: steps.head.outputs.current == 'true'
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        if: steps.head.outputs.current == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Point :main at this commit for every image
+        if: steps.head.outputs.current == 'true'
+        run: |
+          for name in web server mcp-proxy egress-proxy sandbox; do
+            docker buildx imagetools create -t "ghcr.io/splittingatom/kobe-${name}:main" \
+              "ghcr.io/splittingatom/kobe-${name}:sha-${GITHUB_SHA::12}"
+          done

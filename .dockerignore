@@ -15,3 +15,6 @@ docs
 **/*.pem
 **/*.key
 **/kubeconfig*
+dev
+e2e
+Tiltfile

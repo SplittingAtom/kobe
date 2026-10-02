@@ -1,0 +1,79 @@
+# k3d end-to-end suite (KOBE-7): a k3s cluster with gVisor and agent-sandbox, the chart installed
+# from locally built images, then e2e/run.sh. Private-repo minutes are metered (spec D3), so this
+# runs on pull requests to main, nightly, and on demand — not on every push.
+name: e2e
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore: ["docs/**", "**/*.md"]
+  schedule:
+    - cron: "41 5 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  K3D_VERSION: v5.9.0
+  K3D_SHA256: 06d8f25bc3a971c4eb29e0ff08429b180402db0f4dec838c9eac427e296800a0
+  KOBE_IMAGE_TAG: e2e-${{ github.sha }}
+
+jobs:
+  k3d:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.22.0
+      - uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v5.1.0
+        with:
+          version: v1.34.6
+      - name: Install k3d (checksum-verified)
+        run: |
+          curl -fsSL -o /usr/local/bin/k3d "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64"
+          echo "${K3D_SHA256}  /usr/local/bin/k3d" | sha256sum -c -
+          chmod +x /usr/local/bin/k3d
+      - name: Free runner disk (images are built, then copied into the k3d node)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          docker system prune -af >/dev/null
+          df -h /
+      - name: Raise inotify limits (k3s nodes need them)
+        run: sudo sysctl -w fs.inotify.max_user_instances=1024 fs.inotify.max_user_watches=524288
+      - name: Create k3d cluster with gVisor and agent-sandbox
+        run: scripts/dev-cluster.sh
+      - name: Build images and load them into k3d
+        run: |
+          docker build -f apps/web/Dockerfile -t "ghcr.io/splittingatom/kobe-web:${KOBE_IMAGE_TAG}" .
+          for svc in server mcp-proxy egress-proxy; do
+            docker build -f "services/$svc/Dockerfile" -t "ghcr.io/splittingatom/kobe-$svc:${KOBE_IMAGE_TAG}" .
+          done
+          docker build -f images/sandbox/Dockerfile -t "ghcr.io/splittingatom/kobe-sandbox:${KOBE_IMAGE_TAG}" .
+          k3d image import -c kobe ghcr.io/splittingatom/kobe-{web,server,mcp-proxy,egress-proxy,sandbox}:"${KOBE_IMAGE_TAG}"
+          # The node now has its own copies; drop the host's to stay clear of disk-pressure eviction.
+          docker rmi ghcr.io/splittingatom/kobe-{web,server,mcp-proxy,egress-proxy,sandbox}:"${KOBE_IMAGE_TAG}" >/dev/null
+          docker builder prune -af >/dev/null
+          df -h /
+      - name: Run e2e suite
+        env:
+          KOBE_SANDBOX_IMAGE: ghcr.io/splittingatom/kobe-sandbox:${{ env.KOBE_IMAGE_TAG }}
+        run: e2e/run.sh
+      - name: Diagnostics
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide
+          kubectl -n kobe-dev describe pods | tail -200
+          kubectl get events -A --sort-by=.lastTimestamp | tail -80
+          kubectl -n kobe-dev logs --all-containers --prefix --tail=50 -l app.kubernetes.io/name=kobe || true
+          df -h /
