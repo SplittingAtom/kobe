@@ -6,10 +6,11 @@ Hadron ignite and re-read the current ticket).
 ## Current
 
 - **Run:** Chris (2026-10-01): "start KOBE-6 and keep going until all tickets that depend on KOBE-5
-  and KOBE-8 are done" → KOBE-6, KOBE-68, KOBE-7, KOBE-21, KOBE-12, KOBE-14, KOBE-29, KOBE-69. Each:
-  tests first → CI green → review → merge to main → complete in Hadron → transition to done.
-- **Ticket:** KOBE-68 (branch kobe-68-migrate-hook) in progress. KOBE-21 started in worktree
-  `../Kobe-wt21` (branch kobe-21-sandbox-image; only `images/sandbox/test-image.sh` so far).
+  and KOBE-8 are done" → KOBE-6, KOBE-68, KOBE-21, KOBE-7, KOBE-12, KOBE-14, KOBE-29, KOBE-69. Each:
+  tests first → CI green → review → merge → complete in Hadron → transition to done.
+- **Done in this run:** KOBE-6 (PR #3), KOBE-68 (#4), KOBE-21 (#5), KOBE-7 (#6).
+- **In progress:** KOBE-12 (worktree `../Kobe-wt12`, branch kobe-12-better-auth, PR #8, security
+  review running). Next: KOBE-14, KOBE-29, KOBE-69.
 
 ## Done
 
@@ -28,6 +29,13 @@ Hadron ignite and re-read the current ticket).
 - KOBE-6 (PR #3, merged, done): chart + isolation (Helm lookup, hook Job, server/scheduler
   initContainer), CNPG/external Postgres, NetworkPolicies, scripts. Security review: 2 HIGH fixed.
 - Decision (Chris): no bundled S3 (MinIO archived/AGPL); external S3 only.
+
+- KOBE-68: migration Job (pre-install/pre-upgrade hook; CNPG first install = ordinary Job), pods
+  wait on drizzle.kobe_grants_applied; review: 1 HIGH fixed.
+- KOBE-21: sandbox image (digest-pinned, Pi lockfile, hashed pip lock, setuid stripped), license
+  audit, Trivy gate; review: 7 MEDIUM fixed.
+- KOBE-7: Tilt dev loop (kobe-dev namespace, context-pinned), e2e/run.sh (20 checks incl. agent-sandbox
+  Sandbox under gVisor), e2e/publish workflows; review: 4 HIGH fixed.
 
 ## Next
 
