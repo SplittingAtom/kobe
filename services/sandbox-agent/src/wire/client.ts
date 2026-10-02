@@ -60,6 +60,7 @@ export class WireClient {
   #helloTimer: NodeJS.Timeout | undefined;
   #heartbeat: NodeJS.Timeout | undefined;
   #lastInbound = 0;
+  #epoch = 0;
 
   constructor(options: WireClientOptions) {
     this.#options = options;
@@ -67,6 +68,11 @@ export class WireClient {
 
   get ready(): boolean {
     return this.#ready;
+  }
+
+  /** Increments with every accepted `hello.ack`: identifies the connection a command came on. */
+  get epoch(): number {
+    return this.#epoch;
   }
 
   start(): void {
@@ -186,6 +192,7 @@ export class WireClient {
 
   #onHelloAck(socket: WebSocket, ack: HelloAckFrame): void {
     clearTimeout(this.#helloTimer);
+    this.#epoch += 1;
     this.#ready = true;
     this.#attempt = 0;
     const interval = Math.min(60_000, Math.max(1000, ack.heartbeat_interval_ms));

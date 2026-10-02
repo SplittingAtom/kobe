@@ -14,12 +14,19 @@ export interface OutboxRun {
   finished: boolean;
   readonly frames: { seq: number; text: string; bytes: number }[];
   /** Last `resend` served on this connection, to ignore its duplicates. */
-  lastResend: { from: number; through: number } | undefined;
+  lastResend: { from: number; through: number; at: number } | undefined;
 }
 
 export type AppendResult =
   | { readonly ok: true; readonly seq: number; readonly text: string }
   | { readonly ok: false; readonly reason: "overflow" | "unknown_run" };
+
+/**
+ * A `resend` for seqs re-sent this recently is a duplicate (the server answers every frame after a
+ * gap with the same `resend`); later ones are served again, so a transient server-side failure
+ * cannot stall a run until the next reconnect.
+ */
+export const RESEND_DEDUPE_MS = 2000;
 
 export class Outbox {
   readonly #runs = new Map<string, OutboxRun>();
@@ -88,14 +95,27 @@ export class Outbox {
     return true;
   }
 
-  /** Frames to re-send from `fromSeq`; empty when this resend duplicates one already served. */
-  resend(runId: string, fromSeq: number): string[] {
+  /** False when frames from `fromSeq` were already dropped as acked: the run cannot be resumed. */
+  canResendFrom(runId: string, fromSeq: number): boolean {
+    const run = this.#runs.get(runId);
+    return run !== undefined && fromSeq > run.ackedSeq;
+  }
+
+  /** Frames to re-send from `fromSeq`; empty when this resend duplicates one just served. */
+  resend(runId: string, fromSeq: number, now: number = Date.now()): string[] {
     const run = this.#runs.get(runId);
     if (run === undefined || fromSeq > run.lastSeq) return [];
     const last = run.lastResend;
-    if (last !== undefined && fromSeq >= last.from && fromSeq <= last.through) return [];
+    if (
+      last !== undefined &&
+      fromSeq >= last.from &&
+      fromSeq <= last.through &&
+      now - last.at < RESEND_DEDUPE_MS
+    ) {
+      return [];
+    }
     const frames = run.frames.filter((f) => f.seq >= fromSeq);
-    run.lastResend = { from: fromSeq, through: run.lastSeq };
+    run.lastResend = { from: fromSeq, through: run.lastSeq, at: now };
     return frames.map((f) => f.text);
   }
 

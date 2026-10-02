@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Outbox } from "./outbox.js";
+import { Outbox, RESEND_DEDUPE_MS } from "./outbox.js";
 
 const R = "run-1";
 const enc = (seq: number) => `frame-${seq}`;
@@ -38,6 +38,21 @@ describe("Outbox", () => {
     expect(outbox.resend(R, 6)).toEqual(["frame-6"]);
     outbox.resetConnectionState();
     expect(outbox.resend(R, 3)).toEqual(["frame-3", "frame-4", "frame-5", "frame-6"]);
+  });
+
+  it("serves a repeated resend again once the dedupe window has passed", () => {
+    const outbox = filled(3);
+    expect(outbox.resend(R, 2, 1000)).toEqual(["frame-2", "frame-3"]);
+    expect(outbox.resend(R, 2, 1000 + RESEND_DEDUPE_MS - 1)).toEqual([]);
+    expect(outbox.resend(R, 2, 1000 + RESEND_DEDUPE_MS)).toEqual(["frame-2", "frame-3"]);
+  });
+
+  it("knows when frames needed for a resend were already dropped as acked", () => {
+    const outbox = filled(4);
+    outbox.ack(R, 2);
+    expect(outbox.canResendFrom(R, 3)).toBe(true);
+    expect(outbox.canResendFrom(R, 2)).toBe(false);
+    expect(outbox.canResendFrom("nope", 1)).toBe(false);
   });
 
   it("ignores resends beyond the last seq", () => {

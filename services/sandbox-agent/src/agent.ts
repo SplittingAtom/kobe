@@ -152,6 +152,10 @@ export class Agent {
         this.#outbox.drop(runId);
         continue;
       }
+      if (!this.#outbox.canResendFrom(runId, run.durable_seq + 1)) {
+        this.#abandonRun(runId); // the server lost frames we already dropped as acked
+        continue;
+      }
       if (run.durable_seq > 0) this.#outbox.ack(runId, run.durable_seq);
       for (const text of this.#outbox.resend(runId, run.durable_seq + 1)) this.#wire.sendText(text);
     }
@@ -189,6 +193,10 @@ export class Agent {
         this.#outbox.ack(frame.run_id, frame.seq);
         return;
       case "resend":
+        if (!this.#outbox.canResendFrom(frame.run_id, frame.from_seq)) {
+          if (this.#outbox.has(frame.run_id)) this.#abandonRun(frame.run_id);
+          return;
+        }
         for (const text of this.#outbox.resend(frame.run_id, frame.from_seq)) {
           this.#wire.sendText(text);
         }
@@ -210,12 +218,19 @@ export class Agent {
     const commandId = frame.command_id;
     if (this.#seenCommands.has(commandId)) return;
     this.#remember(commandId);
+    // Command ids are per connection (connection.ts leasing): a result for a command that arrived
+    // on an earlier connection must not be sent on a later one; the server re-issues instead.
+    const epoch = this.#wire.epoch;
     let outcome: CommandOutcome;
     try {
       outcome = await this.#execute(frame);
     } catch (error) {
       this.#deps.logger.warn({ err: (error as Error).message, type: frame.type }, "command failed");
       outcome = fail("internal", "command failed in the sandbox agent");
+    }
+    if (this.#wire.epoch !== epoch || !this.#wire.ready) {
+      this.#deps.logger.debug({ command_id: commandId }, "result dropped: connection changed");
+      return;
     }
     this.#sendResult(commandId, outcome);
   }
@@ -285,7 +300,7 @@ export class Agent {
    * so `hello` no longer lists it and the server interrupts it (D14).
    */
   #abandonRun(runId: string): void {
-    this.#deps.logger.warn({ run_id: runId }, "outbound buffer full; abandoning run");
+    this.#deps.logger.warn({ run_id: runId }, "run cannot be delivered; abandoning it");
     this.#threads.abortRun(runId);
     this.#outbox.drop(runId);
     this.#wire.reconnect();

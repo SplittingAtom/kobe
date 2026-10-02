@@ -164,6 +164,55 @@ describe("delivery and resume", () => {
     ).toEqual([4, 5, 6]);
   });
 
+  it("never answers a command on a later connection than the one it arrived on", async () => {
+    h = await startHarness();
+    await h.server.command(runStart("hang"));
+    h.server.send({
+      v: 1,
+      type: "run.stop",
+      command_id: "old-conn",
+      run_id: RUN,
+      thread_id: THREAD,
+      mode: "after_step",
+      reason: "budget_exhausted",
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    h.server.terminate();
+    await until(helloOn(2));
+    const stop = await h.server.command({
+      type: "run.stop",
+      run_id: RUN,
+      thread_id: THREAD,
+      mode: "abort",
+      reason: "user_cancelled",
+    });
+    expect(stop).toMatchObject({ ok: true });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(h.server.frames("command.result").map((f) => f.command_id)).not.toContain("old-conn");
+  });
+
+  it("abandons a run whose frames the server lost after acking them", async () => {
+    let durable = 6;
+    h = await startHarness({
+      server: {
+        ackRuns: (hello) =>
+          hello.runs.map((r) => ({
+            run_id: r.run_id,
+            thread_id: r.thread_id,
+            durable_seq: durable,
+          })),
+      },
+    });
+    await h.server.command(runStart("hang"));
+    await h.server.waitFor((f) => f.type === "pi.event" && f.event.type === "agent_start");
+    await new Promise((r) => setTimeout(r, 50));
+    durable = 0; // server regressed below what it acked
+    h.server.terminate();
+    await until(helloOn(3));
+    expect(h.server.frames("hello")[2]?.runs).toEqual([]);
+    expect((await h.commandsLog()).map((c) => c.type)).toContain("abort");
+  });
+
   it("aborts runs the server no longer lists after a reconnect", async () => {
     h = await startHarness({ server: { ackRuns: () => [] } });
     await h.server.command(runStart("hang"));

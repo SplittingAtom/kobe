@@ -16,7 +16,10 @@ import { WebSocketServer, type WebSocket } from "ws";
  */
 export interface FakeServerOptions {
   readonly token: string;
-  /** `hello.ack.runs` for each connection; default: echo every run in `hello` with durable_seq 0. */
+  /**
+   * `hello.ack.runs` for each connection; default: every run in `hello`, with the highest seq this
+   * fake acked as `durable_seq` (what a real server's `runs.sandbox_seq` would hold).
+   */
   readonly ackRuns?: (hello: Extract<SandboxToServerFrame, { type: "hello" }>) => {
     run_id: string;
     thread_id: string;
@@ -43,6 +46,7 @@ export class FakeServer {
   #socket: WebSocket | undefined;
   #options: FakeServerOptions;
   #nextCommand = 1;
+  readonly #durable = new Map<string, number>();
 
   private constructor(server: WebSocketServer, options: FakeServerOptions) {
     this.#server = server;
@@ -161,6 +165,7 @@ export class FakeServer {
       if (frame.type === "ping" && this.#options.respondPings !== false)
         socket.send(JSON.stringify({ v: 1, type: "pong", nonce: frame.nonce }));
       if (frame.type === "pi.event" && this.#options.autoAck !== false) {
+        this.#durable.set(frame.run_id, Math.max(frame.seq, this.#durable.get(frame.run_id) ?? 0));
         socket.send(JSON.stringify({ v: 1, type: "ack", run_id: frame.run_id, seq: frame.seq }));
       }
     });
@@ -169,7 +174,11 @@ export class FakeServer {
   #ackHello(socket: WebSocket, hello: Extract<SandboxToServerFrame, { type: "hello" }>): void {
     const runs =
       this.#options.ackRuns?.(hello) ??
-      hello.runs.map((r) => ({ run_id: r.run_id, thread_id: r.thread_id, durable_seq: 0 }));
+      hello.runs.map((r) => ({
+        run_id: r.run_id,
+        thread_id: r.thread_id,
+        durable_seq: this.#durable.get(r.run_id) ?? 0,
+      }));
     socket.send(
       JSON.stringify({
         v: 1,

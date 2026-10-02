@@ -152,9 +152,28 @@ Hadron was not reachable; criteria derived from the spec and `sandbox-wire/conne
 - Session files on `/workspace` are writable by Pi's tools; the server must keep treating mirrored
   entries as untrusted (it validates with `piGetEntriesDataSchema`).
 
+## Self-review round (code-reviewer agent) — resolution
+
+1. HIGH: a `command.result` could go out on a later connection than its command (lease
+   violation). `WireClient.epoch` increments per `hello.ack`; results for an earlier epoch are
+   dropped (the server re-issues). Test: "never answers a command on a later connection".
+2. HIGH: the idle reaper could forget a thread a queued command was about to use (untracked Pi).
+   Commands now `claim()` the thread synchronously on arrival (claims count as busy); the reaper
+   re-checks and deletes inside the thread lock.
+3. MEDIUM: reaper/eviction checked `busy` outside the lock: both re-check under it.
+4. MEDIUM: process cap overshoot under concurrent spawns: slots are reserved synchronously
+   (`#pendingSpawns`), eviction holds no global lock (no deadlock). Test: concurrent starts at cap 1.
+5. MEDIUM: Stop before `agent_start` ended the run early while Pi kept working: the agent now waits
+   for `agent_settled` after `abort` (re-sends `abort` once), and stops Pi if it never settles; a
+   timed-out prompt stops Pi too.
+6. MEDIUM: resend dedupe could stall a run: duplicates are ignored only within 2 s
+   (`RESEND_DEDUPE_MS`); a `durable_seq`/`from_seq` below what the server already acked abandons the
+   run (abort, drop, reconnect so the server interrupts it). Tests in `outbox.test.ts` and
+   "abandons a run whose frames the server lost".
+
 ## Evidence (acceptance criteria → test or command output)
 
-`pnpm --filter @kobe/sandbox-agent test`: 12 files, 90 tests (real-Pi suite runs when
+`pnpm --filter @kobe/sandbox-agent test`: 12 files, 95 tests (real-Pi suite runs when
 `images/sandbox/pi` is installed; it is in CI).
 
 | AC  | Evidence                                                                                                                                             |

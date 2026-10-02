@@ -43,6 +43,8 @@ export class ThreadManager {
   readonly #options: ThreadManagerOptions;
   readonly #threads = new Map<string, Thread>();
   readonly #restores = new Map<string, SessionRestore>();
+  #pendingSpawns = 0;
+  readonly #evicting = new Set<Thread>();
   readonly #reaper: NodeJS.Timeout;
   #draining = false;
 
@@ -72,9 +74,12 @@ export class ThreadManager {
     );
   }
 
-  async startRun(frame: RunStartFrame): Promise<CommandOutcome> {
+  startRun(frame: RunStartFrame): Promise<CommandOutcome> {
+    return this.#claimed(frame.thread_id, (thread) => this.#startRun(thread, frame));
+  }
+
+  async #startRun(thread: Thread, frame: RunStartFrame): Promise<CommandOutcome> {
     if (this.#draining) return fail("pi_unavailable", "sandbox is shutting down");
-    const thread = this.#thread(frame.thread_id);
     if (thread.runId === frame.run_id) return ok({ already_started: true });
     if (thread.runId !== undefined) return fail("pi_rejected", "thread has an active run");
     if (thread.restoring) return fail("pi_rejected", "session restore in progress");
@@ -104,7 +109,9 @@ export class ThreadManager {
       if (disposition === "handled") thread.endRun();
       return ok({ disposition });
     } catch (error) {
-      if (thread.runId === frame.run_id) thread.endRun();
+      // Pi may still act on the prompt: stop it rather than leave it working without a run.
+      if (thread.runId === frame.run_id) await thread.withLock(() => thread.stopProcess());
+      thread.endRun();
       return piFailure(error);
     }
   }
@@ -146,7 +153,11 @@ export class ThreadManager {
     }
   }
 
-  async piCommand(frame: Frame<"pi.command">): Promise<CommandOutcome> {
+  piCommand(frame: Frame<"pi.command">): Promise<CommandOutcome> {
+    return this.#claimed(frame.thread_id, (thread) => this.#piCommand(thread, frame));
+  }
+
+  async #piCommand(thread: Thread, frame: Frame<"pi.command">): Promise<CommandOutcome> {
     const { id: _serverId, ...command } = frame.command;
     if (command.type === "fork") {
       return fail(
@@ -154,7 +165,6 @@ export class ThreadManager {
         "fork moves Pi to a new session file; branch with run.start parent_entry_id",
       );
     }
-    const thread = this.#thread(frame.thread_id);
     if (thread.restoring) return fail("pi_rejected", "session restore in progress");
     const prepared = await thread.withLock(() => this.#ensureProcess(thread, undefined));
     if (prepared !== undefined) return prepared;
@@ -169,8 +179,11 @@ export class ThreadManager {
     }
   }
 
-  async restore(frame: Frame<"session.restore">): Promise<CommandOutcome> {
-    const thread = this.#thread(frame.thread_id);
+  restore(frame: Frame<"session.restore">): Promise<CommandOutcome> {
+    return this.#claimed(frame.thread_id, (thread) => this.#restore(thread, frame));
+  }
+
+  async #restore(thread: Thread, frame: Frame<"session.restore">): Promise<CommandOutcome> {
     if (thread.runId !== undefined) return fail("pi_rejected", "thread has an active run");
     return thread.withLock(async () => {
       if (thread.runId !== undefined) return fail("pi_rejected", "thread has an active run");
@@ -257,8 +270,28 @@ export class ThreadManager {
   async reapIdle(now = Date.now()): Promise<void> {
     for (const thread of [...this.#threads.values()]) {
       if (thread.busy || now - thread.lastUsed < this.#options.idleMs) continue;
-      await thread.withLock(() => thread.stopProcess());
-      if (!thread.busy && !thread.hasProcess) this.#threads.delete(thread.id);
+      await thread.withLock(async () => {
+        // Re-checked under the lock: a command may have claimed the thread meanwhile.
+        if (thread.busy || Date.now() - thread.lastUsed < this.#options.idleMs) return;
+        await thread.stopProcess();
+        if (!thread.busy && this.#threads.get(thread.id) === thread) {
+          this.#threads.delete(thread.id);
+        }
+      });
+    }
+  }
+
+  /** Run a command with the thread claimed (busy) from arrival to answer. */
+  async #claimed(
+    threadId: string,
+    fn: (thread: Thread) => Promise<CommandOutcome>,
+  ): Promise<CommandOutcome> {
+    const thread = this.#thread(threadId);
+    const release = thread.claim();
+    try {
+      return await fn(thread);
+    } finally {
+      release();
     }
   }
 
@@ -319,7 +352,7 @@ export class ThreadManager {
     });
     if (thread.hasProcess) {
       const changed = frame?.config !== undefined && launch.key !== thread.launchKey;
-      if (!changed || thread.busy) return undefined;
+      if (!changed || thread.runId !== undefined || thread.streaming) return undefined;
       await thread.stopProcess();
     }
     if (!(await this.#reserveSlot(thread))) {
@@ -330,17 +363,38 @@ export class ThreadManager {
       return undefined;
     } catch (error) {
       return fail("pi_unavailable", `cannot start Pi: ${(error as Error).message}`);
+    } finally {
+      this.#pendingSpawns -= 1;
     }
   }
 
-  /** Make room for one more Pi process by closing the least recently used idle one. */
+  /**
+   * Reserve a process slot (counted synchronously with spawns in flight, so concurrent spawns cannot
+   * overshoot the cap), closing least recently used idle Pi processes to make room. The caller
+   * releases the reservation (`#pendingSpawns`) once its spawn finished. No global lock is held
+   * while waiting for another thread's lock, so this cannot deadlock.
+   */
   async #reserveSlot(thread: Thread): Promise<boolean> {
-    const live = [...this.#threads.values()].filter((t) => t.hasProcess && t !== thread);
-    if (live.length < this.#options.maxProcesses) return true;
-    const idle = live.filter((t) => !t.busy).sort((a, b) => a.lastUsed - b.lastUsed)[0];
-    if (idle === undefined) return false;
-    await idle.withLock(() => idle.stopProcess());
-    return true;
+    for (;;) {
+      const others = [...this.#threads.values()].filter((t) => t !== thread);
+      const live = others.filter((t) => t.hasProcess).length + this.#pendingSpawns;
+      if (live < this.#options.maxProcesses) {
+        this.#pendingSpawns += 1;
+        return true;
+      }
+      const idle = others
+        .filter((t) => t.hasProcess && !t.busy && !this.#evicting.has(t))
+        .sort((a, b) => a.lastUsed - b.lastUsed)[0];
+      if (idle === undefined) return false;
+      this.#evicting.add(idle);
+      try {
+        await idle.withLock(async () => {
+          if (!idle.busy) await idle.stopProcess(); // claimed meanwhile: leave it
+        });
+      } finally {
+        this.#evicting.delete(idle);
+      }
+    }
   }
 
   #checkAttachments(frame: RunStartFrame): string | undefined {
@@ -358,11 +412,14 @@ export class ThreadManager {
     const ended = thread.runEnded();
     try {
       await thread.request({ type: "clear_queue" }, PI_REQUEST_TIMEOUT_MS).catch(() => undefined);
-      const response = await thread.request({ type: "abort" }, PI_SLOW_REQUEST_TIMEOUT_MS);
-      if (!response.success) throw new Error(response.error);
-      if (!thread.streaming) thread.endRun();
-      else await raceTimeout(ended, ABORT_SETTLE_GRACE_MS);
-      thread.endRun();
+      // A run whose prompt was accepted settles even if Pi had not emitted agent_start yet when the
+      // abort arrived; never end it early, or Pi would keep working with no run to report to.
+      for (let attempt = 0; attempt < 2 && thread.runId !== undefined; attempt++) {
+        const response = await thread.request({ type: "abort" }, PI_SLOW_REQUEST_TIMEOUT_MS);
+        if (!response.success) throw new Error(response.error);
+        await raceTimeout(ended, ABORT_SETTLE_GRACE_MS);
+      }
+      if (thread.runId !== undefined) throw new Error("run did not settle after abort");
     } catch {
       // Pi did not abort cleanly: stop the process (ends the run; tools in its group die too).
       await thread.withLock(() => thread.stopProcess());

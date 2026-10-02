@@ -270,6 +270,15 @@ describe("Pi process lifecycle", () => {
     await h.server.waitFor(settled(RUN_2));
   });
 
+  it("never exceeds the process cap when threads start concurrently", async () => {
+    h = await startHarness({ env: { KOBE_MAX_PI_PROCESSES: "1" } });
+    const [a, b] = await Promise.all([
+      h.server.command(runStart("hang")),
+      h.server.command({ ...runStart("hang"), run_id: RUN_2, thread_id: THREAD_2 }),
+    ]);
+    expect([a.ok, b.ok].sort()).toEqual([false, true]);
+  });
+
   it("reports pi_unavailable when Pi cannot be started", async () => {
     h = await startHarness({ piBin: "/nonexistent/pi" });
     expect(await h.server.command(runStart("say:x"))).toMatchObject({

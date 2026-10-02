@@ -67,6 +67,8 @@ export class Thread {
   #dialogs = new Map<string, PiExtensionUiRequest>();
   #lock: Promise<unknown> = Promise.resolve();
   #inflight = 0;
+  /** Commands in progress on this thread (taken synchronously when a command arrives). */
+  #claims = 0;
   lastUsed = Date.now();
   restoring = false;
 
@@ -94,7 +96,27 @@ export class Thread {
 
   /** Busy threads are never evicted or reaped. */
   get busy(): boolean {
-    return this.#run !== undefined || this.#streaming || this.restoring || this.#inflight > 0;
+    return (
+      this.#run !== undefined ||
+      this.#streaming ||
+      this.restoring ||
+      this.#inflight > 0 ||
+      this.#claims > 0
+    );
+  }
+
+  /**
+   * Mark the thread busy for the duration of a command, from the moment it arrives, so the reaper
+   * and the process cap never stop (or forget) a thread a queued command is about to use.
+   */
+  claim(): () => void {
+    this.#claims += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.#claims -= 1;
+    };
   }
 
   get pendingDialogs(): PiExtensionUiRequest[] {
