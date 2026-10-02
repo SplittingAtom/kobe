@@ -43,10 +43,12 @@ fi
 
 if "$K3D" cluster get "$CLUSTER" >/dev/null 2>&1; then
   echo "==> k3d cluster '${CLUSTER}' exists; reusing it"
+  docker ps --format '{{.Names}}' | grep -qx "${CLUSTER}-registry" \
+    || echo "warning: no local registry ${CLUSTER}-registry (cluster predates it); Tilt needs it — recreate with: k3d cluster delete ${CLUSTER}" >&2
 else
   echo "==> creating k3d cluster '${CLUSTER}' (${K3S_IMAGE})"
   "$K3D" cluster create "$CLUSTER" --image "$K3S_IMAGE" --agents "$AGENTS" --wait \
-    --registry-create "${CLUSTER}-registry:0.0.0.0:${REGISTRY_PORT}" \
+    --registry-create "${CLUSTER}-registry:127.0.0.1:${REGISTRY_PORT}" \
     --k3s-arg "--disable=metrics-server@server:*" >/dev/null
 fi
 "$K3D" kubeconfig merge "$CLUSTER" --kubeconfig-switch-context >/dev/null

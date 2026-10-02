@@ -23,11 +23,15 @@ settings.
 
 ### Against a real k3s cluster
 
-Tilt only deploys to local clusters unless told otherwise:
+Tilt refuses any context other than `k3d-*` unless it is named explicitly, and the throwaway dev
+Postgres (public credentials) is only deployed to k3d. Bring your own values for a real cluster:
 
 ```bash
-KOBE_DEV_CONTEXT=<kube-context> KOBE_DEV_REGISTRY=<registry the cluster can pull from> tilt up
+KOBE_DEV_CONTEXT=<kube-context> KOBE_DEV_REGISTRY=<registry the cluster can pull from> \
+  KOBE_DEV_VALUES=<values.yaml> tilt up
 ```
+
+The dev release lives in namespace `kobe-dev`, never `kobe`.
 
 The cluster must already meet the prerequisites in [install.md](install.md#isolation).
 
@@ -53,9 +57,11 @@ KOBE_IMAGE_TAG=<tag> e2e/run.sh             # k3d end-to-end suite (cluster from
 | `ci`            | every push                     | format, build, typecheck, lint, unit + chart tests, license check, DB/RLS suite, image non-root check |
 | `sandbox-image` | sandbox inputs change, nightly | build, acceptance checks, license audit, Trivy (fails on fixable CRITICAL)                            |
 | `e2e`           | PRs to `main`, nightly         | k3d + gVisor cluster, chart install from fresh images, `e2e/run.sh`                                   |
-| `publish`       | push to `main`                 | images (`sha-<short>`, `main`) and the chart (`<version>-main.<run>`) to `ghcr.io/splittingatom`      |
+| `publish`       | push to `main`                 | images (`sha-<short>`; `main` moved last) and the chart (`<version>-main.<run>.<attempt>`) to ghcr    |
 
-Private-repo Actions minutes are metered, which is why e2e runs on PRs and nightly only.
+Private-repo Actions minutes are metered, which is why e2e runs on PRs and nightly only. Deploy
+`sha-*` image tags or published chart versions, never `:main` (pods with `IfNotPresent` would keep
+a stale `:main`).
 
 ### Self-hosted runner on Chris's k3s (option)
 
@@ -69,5 +75,6 @@ To stop paying for e2e minutes, register a self-hosted runner on the k3s cluster
    the nodes that host them.
 3. Change `runs-on: ubuntu-latest` to the scale set's name in `e2e.yml`.
 
-Runner pods execute repository code with Docker access, so restrict the scale set to this
-repository and keep it off nodes that run production workloads.
+Runner pods execute repository code with privileged Docker access, so restrict the scale set to
+this repository, make runners ephemeral (the e2e cluster name and registry port are fixed), and
+pin them with a nodeSelector/taint to nodes that run no production workloads.

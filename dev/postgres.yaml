@@ -1,4 +1,4 @@
-# Dev/e2e only: a throwaway Postgres 17 standing in for "external Postgres", with the same role
+# Dev/e2e only, k3d only (Tilt and e2e/run.sh refuse other contexts): a throwaway Postgres 17 standing in for "external Postgres", with the same role
 # split as production (kobe_owner owns the database and migrates; kobe_app is the app login).
 apiVersion: v1
 kind: Namespace
@@ -53,16 +53,32 @@ spec:
   ports:
     - port: 5432
 ---
+# Only the dev release namespace may reach the dev database (its credentials are public).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pg
+  namespace: kobe-deps
+spec:
+  podSelector:
+    matchLabels: { app: pg }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kobe-dev }
+        - podSelector: {}
+---
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: kobe
+  name: kobe-dev
 ---
 apiVersion: v1
 kind: Secret
 metadata:
-  name: kobe-db
-  namespace: kobe
+  name: kobe-dev-db
+  namespace: kobe-dev
 stringData:
   app-url: postgres://kobe_app:app-dev-only@pg.kobe-deps:5432/kobe
   migrate-url: postgres://kobe_owner:owner-dev-only@pg.kobe-deps:5432/kobe
@@ -70,8 +86,8 @@ stringData:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: kobe-s3
-  namespace: kobe
+  name: kobe-dev-s3
+  namespace: kobe-dev
 stringData:
   access-key-id: dev
   secret-access-key: dev

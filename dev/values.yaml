@@ -6,9 +6,9 @@ ingress:
 postgres:
   mode: external
   external:
-    existingSecret: kobe-db
+    existingSecret: kobe-dev-db
 s3:
   # Placeholder until a ticket needs object storage in dev/e2e.
   endpoint: http://s3.invalid
   bucket: kobe
-  existingSecret: kobe-s3
+  existingSecret: kobe-dev-s3

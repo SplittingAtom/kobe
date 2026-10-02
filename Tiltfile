@@ -4,11 +4,18 @@
 # cluster can pull from>. There is no docker compose.
 
 dev_context = os.getenv("KOBE_DEV_CONTEXT", "")
+current = k8s_context()
+local = current.startswith("k3d-")
 if dev_context:
     allow_k8s_contexts(dev_context)
+# allow_k8s_contexts only allows; pin the context so a stray `kubectl config use-context` can't
+# point the dev loop at another cluster.
+if not local and current != dev_context:
+    fail("refusing to deploy to context %r: use a k3d-* context or set KOBE_DEV_CONTEXT=%s" % (current, current))
 dev_registry = os.getenv("KOBE_DEV_REGISTRY", "")
 if dev_registry:
     default_registry(dev_registry)
+NAMESPACE = "kobe-dev"
 
 update_settings(max_parallel_updates=2, k8s_upsert_timeout_secs=300)
 
@@ -40,13 +47,24 @@ kobe_image("server", "services/server/Dockerfile", ["services/server"])
 kobe_image("mcp-proxy", "services/mcp-proxy/Dockerfile", ["services/mcp-proxy"])
 kobe_image("egress-proxy", "services/egress-proxy/Dockerfile", ["services/egress-proxy"])
 
-k8s_yaml("dev/postgres.yaml")
-k8s_resource(workload="pg", labels=["deps"])
+if local:
+    # Throwaway Postgres with public dev credentials: k3d only.
+    k8s_yaml("dev/postgres.yaml")
+    k8s_resource(workload="pg", labels=["deps"])
+    values = ["dev/values.yaml"]
+    deps = ["pg"]
+else:
+    # Real cluster: bring your own values (database, S3, ingress) in KOBE_DEV_VALUES.
+    values_file = os.getenv("KOBE_DEV_VALUES", "")
+    if not values_file:
+        fail("set KOBE_DEV_VALUES to a values file for context %r (dev/values.yaml is k3d-only)" % current)
+    values = [values_file]
+    deps = []
 
-k8s_yaml(helm("charts/kobe", name="kobe", namespace="kobe", values=["dev/values.yaml"]))
+k8s_yaml(helm("charts/kobe", name="kobe", namespace=NAMESPACE, values=values))
 
 for name in ["web", "server", "scheduler", "mcp-proxy", "egress-proxy", "bifrost"]:
-    k8s_resource(workload="kobe-" + name, labels=["kobe"], resource_deps=["pg"] if name in ["server", "scheduler"] else [])
-k8s_resource(workload="kobe-migrate", labels=["kobe"], resource_deps=["pg"])
+    k8s_resource(workload="kobe-" + name, labels=["kobe"], resource_deps=deps if name in ["server", "scheduler"] else [])
+k8s_resource(workload="kobe-migrate", labels=["kobe"], resource_deps=deps)
 k8s_resource(workload="kobe-isolation-preflight", labels=["kobe"])
 k8s_resource(workload="kobe-web", port_forwards=["3000:8080"])
