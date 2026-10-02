@@ -58,6 +58,8 @@ export async function readActiveTeamId(
  */
 export function requireTeam(deps: ServerDeps) {
   return createMiddleware<{ Variables: TeamVariables }>(async (c, next) => {
+    // Already resolved for this request by an enclosing router (e.g. /team and /team/invites).
+    if (c.var.team !== undefined) return next();
     const claimed = c.req.header(TEAM_HEADER);
     // Changes must name the team the client is acting on, so a stale tab can't write to the team
     // another tab switched to. Reads may omit it (the web client always sends it).

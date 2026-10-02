@@ -64,6 +64,20 @@
       "when": 1790925394827,
       "tag": "0008_agents_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790927287582,
+      "tag": "0009_invitations",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790927287908,
+      "tag": "0010_invitations_rls",
+      "breakpoints": true
     }
   ]
 }

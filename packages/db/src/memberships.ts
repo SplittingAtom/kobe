@@ -1,8 +1,8 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import type { KobeDb } from "./client.js";
-import { teamMembers, teamRole, teams } from "./schema/index.js";
-import { TEAM_ID_SETTING } from "./settings.js";
+import { teamMembers, teamRole } from "./schema/index.js";
+import { scanTeams } from "./team-scan.js";
 import { withTeam } from "./with-team.js";
 
 /** Fixed team roles (spec D8), most to least privileged. */
@@ -52,29 +52,11 @@ export async function getMembership(
  */
 export async function listMemberships(db: KobeDb, userId: string): Promise<TeamMembership[]> {
   const user = parseUserId("listMemberships", userId);
-  return db.transaction(async (tx) => {
-    const current = await tx.execute<{ team: string | null }>(
-      sql`SELECT NULLIF(current_setting(${TEAM_ID_SETTING}, true), '') AS team`,
-    );
-    if (current.rows[0]?.team) {
-      throw new Error("listMemberships: cannot run inside a team transaction");
-    }
-    const all = await tx
-      .select({ id: teams.id, slug: teams.slug, name: teams.name })
-      .from(teams)
-      .orderBy(asc(teams.name), asc(teams.slug));
-    const memberships: TeamMembership[] = [];
-    for (const team of all) {
-      await tx.execute(sql`SELECT set_config(${TEAM_ID_SETTING}, ${team.id}, true)`);
-      const [row] = await tx
-        .select({ role: teamMembers.role })
-        .from(teamMembers)
-        .where(eq(teamMembers.userId, user));
-      if (row)
-        memberships.push({ teamId: team.id, slug: team.slug, name: team.name, role: row.role });
-    }
-    // Savepoints keep transaction-local settings; clear it so nothing downstream inherits a team.
-    await tx.execute(sql`SELECT set_config(${TEAM_ID_SETTING}, '', true)`);
-    return memberships;
+  return scanTeams(db, "listMemberships", async (tx, team) => {
+    const [row] = await tx
+      .select({ role: teamMembers.role })
+      .from(teamMembers)
+      .where(eq(teamMembers.userId, user));
+    return row ? { teamId: team.id, slug: team.slug, name: team.name, role: row.role } : undefined;
   });
 }
