@@ -11,7 +11,7 @@
 {{ include "kobe.nodeService" (dict "root" . "component" "server" "image" "server" "values" .Values.server
       "serviceAccount" (printf "%s-server" $fullname) "automountToken" true "preflight" true
       "annotations" $dbAnnotations
-      "env" (printf "- name: KOBE_PROCESS\n  value: server\n%s\n%s" $runtime $common)) }}
+      "env" (printf "- name: KOBE_PROCESS\n  value: server\n%s\n%s\n%s" $runtime $common (include "kobe.authEnv" .))) }}
 ---
 {{ include "kobe.nodeService" (dict "root" . "component" "scheduler" "image" "server" "values" .Values.scheduler
       "serviceAccount" (printf "%s-server" $fullname) "automountToken" true "preflight" true

@@ -15,6 +15,20 @@
       "when": 1790905756134,
       "tag": "0001_team_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790916051903,
+      "tag": "0002_auth",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790916929410,
+      "tag": "0003_rate_limits",
+      "breakpoints": true
     }
   ]
 }

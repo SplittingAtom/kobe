@@ -99,6 +99,9 @@
             },
             "required": ["name"]
           }
+        },
+        "allowGeneratedSecretsOffline": {
+          "type": "boolean"
         }
       }
     },
@@ -423,6 +426,26 @@
         },
         "resources": {
           "$ref": "#/$defs/resources"
+        }
+      }
+    },
+    "publicUrl": {
+      "type": "string",
+      "pattern": "^(https?://[a-z0-9.-]+(:[0-9]+)?)?$"
+    },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "existingSecret": {
+          "type": "string"
+        },
+        "trustedProxies": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F:.]+/[0-9]{1,3}$"
+          }
         }
       }
     }

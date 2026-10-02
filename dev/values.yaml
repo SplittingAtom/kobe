@@ -1,4 +1,7 @@
 # Helm values for the dev loop (Tilt) and the k3d e2e suite.
+global:
+  # Tilt renders offline (helm template); throwaway clusters may generate secrets per render.
+  allowGeneratedSecretsOffline: true
 ingress:
   host: kobe.localtest.me
   tls:

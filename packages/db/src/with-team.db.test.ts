@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
 import { afterAll, describe, expect, inject, it } from "vitest";
 import { createDb } from "./client.js";
-import { teamMembers, teams } from "./schema/index.js";
+import { teamMembers, teams, users } from "./schema/index.js";
 import { withTeam } from "./with-team.js";
 
 const app = createDb(inject("appUrl"), { max: 1 });
@@ -44,7 +44,9 @@ describe("withTeam (Postgres)", () => {
 
     await expect(
       withTeam(app.db, teamId, async (tx) => {
-        await tx.insert(teamMembers).values({ teamId, userId: randomUUID(), role: "member" });
+        const userId = randomUUID();
+        await tx.insert(users).values({ id: userId, name: "R", email: `${userId}@probe.test` });
+        await tx.insert(teamMembers).values({ teamId, userId, role: "member" });
         throw new Error("boom");
       }),
     ).rejects.toThrow("boom");

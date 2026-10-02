@@ -2,6 +2,7 @@
 {{- $fullname := include "kobe.fullname" . -}}
 {{- $secretName := include "kobe.cnpgAppSecretName" . -}}
 {{- if not .Values.postgres.cnpg.existingAppSecret }}
+{{- include "kobe.requireOnlineToGenerate" (dict "root" . "what" "the kobe_app database password" "value" "postgres.cnpg.existingAppSecret") }}
 # Login for the non-owner app role; kept stable across upgrades. For GitOps/offline renders set
 # postgres.cnpg.existingAppSecret instead (a generated password would change on every render).
 apiVersion: v1

@@ -45,8 +45,12 @@ probe() { # namespace, shell command → prints its output (unique pod, cleaned 
   local ns="$1" name="probe-$RANDOM$RANDOM"
   PODS+=("-n $ns $name")
   $KUBECTL -n "$ns" run "$name" --restart=Never --image=busybox:1.37 --command -- sh -c "$2" >/dev/null
-  $KUBECTL -n "$ns" wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$name" --timeout=120s >/dev/null 2>&1 \
-    || $KUBECTL -n "$ns" wait --for=jsonpath='{.status.phase}'=Failed "pod/$name" --timeout=5s >/dev/null 2>&1 || true
+  local phase="" i
+  for i in $(seq 1 60); do # until the pod finishes either way (a failed wget is a valid answer)
+    phase=$($KUBECTL -n "$ns" get pod "$name" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+    [[ "$phase" == Succeeded || "$phase" == Failed ]] && break
+    sleep 2
+  done
   $KUBECTL -n "$ns" logs "$name" 2>/dev/null || true
 }
 
@@ -94,6 +98,22 @@ np=$(probe default "wget -qO- -T 5 http://kobe-web.$NS/api/healthz >/dev/null 2>
   wget -qO- -T 5 http://kobe-bifrost.$NS:8080/health >/dev/null 2>&1 && echo bifrost=REACHED || echo bifrost=BLOCKED")
 contains "probe from another namespace can reach unrestricted services (control)" '^control=REACHED$' "$np"
 contains "Bifrost is not reachable from other namespaces" '^bifrost=BLOCKED$' "$np"
+# First-run setup through the ingress (KOBE-12): needs the install's setup token.
+setup_token=$($KUBECTL -n "$NS" get secret kobe-auth -o jsonpath='{.data.setup-token}' | base64 -d)
+ingress() { # method path [json]: full response (status line + body) via the Traefik ingress
+  local data=""
+  if [[ -n "${3:-}" ]]; then data="--post-data '$3'"; fi
+  probe "$NS" "wget -qO- -S --header 'Host: kobe.localtest.me' --header 'Origin: http://kobe.localtest.me' \
+    --header 'Content-Type: application/json' $data http://traefik.kube-system$2 2>&1"
+}
+contains "first-run setup is required on a fresh install" '"required":true' "$(ingress GET /v1/setup)"
+contains "setup without the setup token is refused" 'HTTP/1.1 403|invalid_setup_token' \
+  "$(ingress POST /v1/setup '{"email":"owner@e2e.test","name":"Owner","password":"e2e owner password"}')"
+# Built outside "$(...)": bash 3.2 keeps backslashes from \" inside quoted command substitutions.
+owner_with_token=$(printf '{"email":"owner@e2e.test","name":"Owner","password":"e2e owner password","setupToken":"%s"}' "$setup_token")
+contains "setup with the setup token creates the Owner" 'HTTP/1.1 201' \
+  "$(ingress POST /v1/setup "$owner_with_token")"
+contains "setup is disabled once the Owner exists" '"required":false' "$(ingress GET /v1/setup)"
 contains "chart refuses a RuntimeClass that does not isolate" 'refuses to run agents' \
   "$($HELM upgrade kobe charts/kobe -n "$NS" --reuse-values --set isolation.runtimeClassName=does-not-exist 2>&1 || true)"
 

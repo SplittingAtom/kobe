@@ -113,6 +113,53 @@ securityContext:
 {{- end }}
 {{- end -}}
 
+{{/* Public origin: explicit publicUrl, else derived from the ingress host and TLS setting. */}}
+{{- define "kobe.publicUrl" -}}
+{{- if .Values.publicUrl -}}
+{{- .Values.publicUrl -}}
+{{- else -}}
+{{- printf "%s://%s" (ternary "https" "http" .Values.ingress.tls.enabled) .Values.ingress.host -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "kobe.authSecretName" -}}
+{{- default (printf "%s-auth" (include "kobe.fullname" .)) (.Values.auth).existingSecret -}}
+{{- end -}}
+
+{{/* Auth configuration: the API server only (the scheduler never gets these secrets). */}}
+{{- define "kobe.authEnv" -}}
+- name: KOBE_PUBLIC_URL
+  value: {{ include "kobe.publicUrl" . | quote }}
+- name: KOBE_AUTH_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "kobe.authSecretName" . }}
+      key: secret
+- name: KOBE_SETUP_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "kobe.authSecretName" . }}
+      key: setup-token
+- name: KOBE_TRUSTED_PROXIES
+  value: {{ join "," (default (list "10.42.0.0/16") (.Values.auth).trustedProxies) | quote }}
+{{- end -}}
+
+{{/* True when Helm can reach the cluster (install/upgrade); false for offline renders. */}}
+{{- define "kobe.online" -}}
+{{- if lookup "v1" "Namespace" "" "kube-system" -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Generated secrets are kept by looking up the existing Secret. Offline renders (helm template,
+Argo CD, Flux) can't look anything up and would rotate them on every render, so they must use an
+existing Secret, unless explicitly allowed for throwaway environments (dev, CI).
+*/}}
+{{- define "kobe.requireOnlineToGenerate" -}}
+{{- if and (not (include "kobe.online" .root)) (not .root.Values.global.allowGeneratedSecretsOffline) -}}
+{{- fail (printf "Cannot generate %s in an offline render (it would change on every render). Set %s to a pre-created Secret, or global.allowGeneratedSecretsOffline=true for a throwaway environment." .what .value) -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "kobe.s3Env" -}}
 - name: KOBE_S3_ENDPOINT
   value: {{ .Values.s3.endpoint | quote }}
