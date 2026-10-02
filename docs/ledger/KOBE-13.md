@@ -24,7 +24,9 @@
   mails only real, active accounts (off the request path); token single-use, hashed at rest
   (Better Auth `verification.storeIdentifier: "hashed"`), 30-minute TTL, delivered in the URL
   fragment; a reset revokes every session; rate-limited per IP (3/min) and per account
-  (3 emails/hour); the password policy applies.
+  (soft: no new email while a link mailed in the last 5 minutes is still valid; failed deliveries
+  don't count); a reset or password change invalidates every other outstanding link; the password
+  policy applies.
 - **ac-4 Deactivation (D7).** Install admins deactivate and reactivate users (Admins act on Users,
   only the Owner on Admins, nobody on the Owner or themselves). Deactivation immediately deletes
   every session and pending verification, blocks every sign-in method (password, password+TOTP,
@@ -79,10 +81,19 @@
   so this reveals nothing new. Re-inviting an open address re-issues it (old link dies).
 - **Install invite creation reports delivery** (`emailSent`), never returns the token: only the
   mailbox owner can accept, so acceptance proves control of the address.
+- **Team invitations end with the inviter's authority** (coordinator review, MEDIUM): acceptance
+  requires the inviter to still be an active team admin of the team (share-locking their membership
+  and user rows against a concurrent demotion/removal/deactivation), and the inviter's pending
+  invitations are deleted when they are demoted below team admin, removed, or deactivated.
+- **Reset-mail suppression is soft** (coordinator review, MEDIUM): instead of a 3/hour count, a
+  request sends nothing only while a link mailed within 5 minutes is still unused and unexpired
+  (tracked as `kobe:reset-sent:<user>:<hashed identifier>` rows in `rate_limits`, written only
+  after a successful send). An attacker's loop can't lock the owner out; a used or expired link
+  doesn't suppress anything.
 - **Rate limits:** Better Auth custom rules for `/request-password-reset` (3/min/IP),
   `/reset-password` (5/min/IP), `/invitation/lookup` (10/min/IP), `/invitation/accept`
-  (5/min/IP); our own Postgres limiter (`rate_limits`, keys `kobe:*`) for reset emails per account
-  (3/h) and team invitations per inviter (50/h).
+  (5/min/IP); our own Postgres limiter (`rate_limits`, keys `kobe:*`) for team invitations per
+  inviter (50/h) and install invitations (new or re-sent) per admin (30/h) and per address (5/h).
 - `scanTeams` (db) extracts KOBE-14's per-team loop so `listMemberships` and
   `listTeamInvitationsFor` share it; `team_invitations` stays behind its one canonical policy.
 - `requireTeam` is now idempotent per request (`/team/invites` is its own route module under
@@ -101,6 +112,10 @@
 - **KOBE-20 (admin consoles):** APIs are `/v1/install/users`, `/v1/install/invites`,
   `/v1/team/invites`; the web has only the invitee-side pages (`/invite`, `/forgot-password`,
   `/reset-password`, team invitations on the home page).
+- **JWT verifiers (KOBE-28, KOBE-61, sandbox/MCP gateway, anyone accepting `/api/auth/token`
+  JWTs):** a JWT stays cryptographically valid for up to 5 minutes after its session is revoked
+  (deactivation, sign-out, password reset). Verifiers must check that the `sid` session still
+  exists (and the user is not deactivated) before trusting it.
 - Mail: `deps.mailer.send({to, subject, text})` (plain text only); messages in `mail/messages.ts`
   keep user-supplied names on one line.
 
@@ -126,7 +141,12 @@
   install admins can't invite, U1 path from install invite into a team, RLS forced);
   `services/server/src/teams.db.test.ts` (team building via invitations);
   `packages/db/src/team-invitations.db.test.ts`; probe suite covers `team_invitations`.
-- ac-3: `services/server/src/account-lifecycle.db.test.ts` › "password reset (ac-3)".
+- ac-3: `services/server/src/account-lifecycle.db.test.ts` › "password reset (ac-3)" (incl. one
+  email while a recent link is valid, an attacker's loop not blocking a later request, failed
+  delivery not counted, other links invalidated by reset and by change-password).
+- Review fixes: `invites.db.test.ts` › "team invitations end with the inviter's authority" (demoted,
+  removed, deactivated, planted invite from a non-admin or deactivated inviter) and "install
+  invitation rate limits" (per address, per admin).
 - ac-4: › "deactivation (ac-4)" (permission rules, sessions + JWT endpoint dead, password+TOTP and
   passkey sign-in refused with no session, no reset mail, memberships inert, active-admin count,
   users list, `teamsWithoutActiveAdmin`, reactivation restores TOTP/passkey sign-in and team

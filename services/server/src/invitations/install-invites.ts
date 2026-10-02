@@ -81,6 +81,15 @@ export async function reissueInvite(
   return row ? { ...row, token } : null;
 }
 
+/** The address of an open invitation, or null. */
+export async function findOpenInviteEmail(db: KobeDb, id: string): Promise<string | null> {
+  const [row] = await db
+    .select({ email: invitations.email })
+    .from(invitations)
+    .where(and(eq(invitations.id, id), open()));
+  return row?.email ?? null;
+}
+
 /** Revokes an open invitation; its link stops working at once. */
 export async function revokeInvite(db: KobeDb, id: string): Promise<boolean> {
   const rows = await db

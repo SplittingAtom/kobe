@@ -11,6 +11,7 @@ import {
   withTeam,
   type KobeDb,
 } from "@kobe/db";
+import { revokeAllInvitesSentBy } from "../invitations/team-invites.js";
 
 /** True when the user exists and is deactivated. */
 export async function isDeactivated(db: KobeDb, userId: string): Promise<boolean> {
@@ -30,7 +31,7 @@ export async function isDeactivated(db: KobeDb, userId: string): Promise<boolean
  * the user was already deactivated.
  */
 export async function deactivateUser(db: KobeDb, userId: string): Promise<boolean> {
-  return db.transaction(async (tx) => {
+  const changed = await db.transaction(async (tx) => {
     const changed = await tx
       .update(users)
       .set({ deactivatedAt: new Date(), updatedAt: new Date() })
@@ -41,6 +42,9 @@ export async function deactivateUser(db: KobeDb, userId: string): Promise<boolea
     await tx.delete(verifications).where(eq(verifications.value, userId));
     return changed.length > 0;
   });
+  // Their pending team invitations lose their authority (acceptance re-checks it as well).
+  await revokeAllInvitesSentBy(db, userId);
+  return changed;
 }
 
 /** Reactivates a user; they sign in again with their existing credentials. False if not deactivated. */

@@ -3,12 +3,15 @@ import {
   asc,
   eq,
   gt,
+  isNull,
+  scanTeams,
   sql,
   teamInvitations,
   teamMembers,
   users,
   withTeam,
   type KobeDb,
+  type KobeTx,
   type TeamRole,
 } from "@kobe/db";
 import { normalizeEmail } from "./install-invites.js";
@@ -107,8 +110,12 @@ export async function revokeTeamInvite(db: KobeDb, teamId: string, id: string): 
 
 /**
  * The invited user joins: consumes their open invitation to the team and adds the membership, in
- * one team transaction. `email` must be the signed-in user's own (verified) address. Null when no
- * open invitation exists (unknown team, expired, revoked: one answer).
+ * one team transaction. `email` must be the signed-in user's own (verified) address. The invitation
+ * counts only while its inviter is still an active team admin of this team (the authority to grant
+ * any team role): the inviter's membership and user rows are share-locked, so a concurrent demotion,
+ * removal or deactivation either waits for this to finish (and then revokes nothing left) or wins
+ * and the invitation is refused. Null when no valid invitation exists (unknown team, expired,
+ * revoked, inviter without authority: one answer); an invalid one is deleted.
  */
 export async function acceptTeamInvite(
   db: KobeDb,
@@ -126,8 +133,22 @@ export async function acceptTeamInvite(
           gt(teamInvitations.expiresAt, sql`now()`),
         ),
       )
-      .returning({ role: teamInvitations.role });
+      .returning({ role: teamInvitations.role, invitedBy: teamInvitations.invitedBy });
     if (!invite) return null;
+    const [inviter] = await tx
+      .select({ userId: teamMembers.userId })
+      .from(teamMembers)
+      .innerJoin(users, eq(users.id, teamMembers.userId))
+      .where(
+        and(
+          eq(teamMembers.teamId, teamId),
+          eq(teamMembers.userId, invite.invitedBy),
+          eq(teamMembers.role, "team_admin"),
+          isNull(users.deactivatedAt),
+        ),
+      )
+      .for("share");
+    if (!inviter) return null;
     await tx
       .insert(teamMembers)
       .values({ teamId, userId: user.id, role: invite.role })
@@ -137,6 +158,24 @@ export async function acceptTeamInvite(
       .from(teamMembers)
       .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, user.id)));
     return membership?.role ?? null;
+  });
+}
+
+/**
+ * Deletes the pending invitations a user sent in a team, inside the caller's team transaction:
+ * used when they lose the authority to invite (demoted below team admin or removed).
+ */
+export async function revokeInvitesSentBy(tx: KobeTx, teamId: string, userId: string) {
+  await tx
+    .delete(teamInvitations)
+    .where(and(eq(teamInvitations.teamId, teamId), eq(teamInvitations.invitedBy, userId)));
+}
+
+/** Deletes a user's pending invitations in every team (deactivation), team by team under RLS. */
+export async function revokeAllInvitesSentBy(db: KobeDb, userId: string): Promise<void> {
+  await scanTeams(db, "revokeAllInvitesSentBy", async (tx, team) => {
+    await revokeInvitesSentBy(tx, team.id, userId);
+    return undefined;
   });
 }
 

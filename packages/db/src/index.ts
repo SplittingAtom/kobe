@@ -21,6 +21,7 @@ export {
 } from "./migrate.js";
 export { quoteIdent } from "./roles.js";
 export { listTeamInvitationsFor, type PendingTeamInvitation } from "./team-invitations.js";
+export { scanTeams, type ScannedTeam } from "./team-scan.js";
 export * from "./schema/index.js";
 export { TEAM_ID_SETTING } from "./settings.js";
 export {

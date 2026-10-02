@@ -1,12 +1,16 @@
 import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  INVITES_PER_ADDRESS_PER_HOUR,
+  INVITES_PER_ADMIN_PER_HOUR,
+} from "./routes/install-invites.js";
 import type { TestBrowser } from "./testing/browser.js";
 import { openHarness, PASSWORD, type Harness } from "./testing/harness.js";
 import { totpFromUri } from "./testing/totp.js";
 
 // KOBE-13 ac-1 (install invitations) and ac-2 (team invitations): invite-only onboarding (D7, U1).
 let h: Harness;
-const ids = { owner: "", admin: "", alice: "" };
+const ids = { owner: "", admin: "", alice: "", dan: "" };
 let owner: TestBrowser;
 let installAdmin: TestBrowser;
 let alice: TestBrowser;
@@ -368,5 +372,118 @@ describe("team invitations (ac-2)", () => {
        WHERE relname = 'team_invitations'`,
     );
     expect(rows).toEqual([{ rls: true, force: true }]);
+  });
+});
+
+describe("team invitations end with the inviter's authority (review)", () => {
+  let dan: TestBrowser;
+
+  async function accepts(email: string): Promise<number> {
+    const b = await h.signIn(email);
+    return (await b.post(`/v1/me/invites/${finance}/accept`)).status;
+  }
+  const pendingFor = async (email: string) =>
+    (
+      await h.admin.query(`SELECT count(*)::int AS n FROM team_invitations WHERE email = $1`, [
+        email,
+      ])
+    ).rows[0].n as number;
+
+  async function makeDanAdmin(): Promise<void> {
+    await alice.post("/v1/team/invites", { email: "dan@inv.test", role: "team_admin" });
+    expect((await dan.post(`/v1/me/invites/${finance}/accept`)).status).toBe(200);
+    await dan.put("/v1/me/teams/active", { teamId: finance });
+    dan.team = finance;
+  }
+
+  beforeAll(async () => {
+    ids.dan = await h.createUser("dan@inv.test");
+    for (const m of ["m1", "m2", "m3", "m4"]) await h.createUser(`${m}@inv.test`);
+    dan = await h.signIn("dan@inv.test");
+    await makeDanAdmin();
+  });
+
+  it("revokes them when the inviter is demoted", async () => {
+    await dan.post("/v1/team/invites", { email: "m1@inv.test", role: "team_admin" });
+    expect(await pendingFor("m1@inv.test")).toBe(1);
+    expect((await alice.patch(`/v1/team/members/${ids.dan}`, { role: "member" })).status).toBe(200);
+    expect(await pendingFor("m1@inv.test")).toBe(0);
+    expect(await accepts("m1@inv.test")).toBe(404);
+    expect((await alice.patch(`/v1/team/members/${ids.dan}`, { role: "team_admin" })).status).toBe(
+      200,
+    );
+  });
+
+  it("revokes them when the inviter is removed", async () => {
+    await dan.post("/v1/team/invites", { email: "m2@inv.test", role: "team_admin" });
+    expect((await alice.delete(`/v1/team/members/${ids.dan}`)).status).toBe(204);
+    expect(await pendingFor("m2@inv.test")).toBe(0);
+    expect(await accepts("m2@inv.test")).toBe(404);
+    await makeDanAdmin();
+  });
+
+  it("revokes them when the inviter is deactivated", async () => {
+    await dan.post("/v1/team/invites", { email: "m3@inv.test", role: "team_admin" });
+    expect((await installAdmin.post(`/v1/install/users/${ids.dan}/deactivate`)).status).toBe(200);
+    expect(await pendingFor("m3@inv.test")).toBe(0);
+    expect(await accepts("m3@inv.test")).toBe(404);
+    expect((await installAdmin.post(`/v1/install/users/${ids.dan}/reactivate`)).status).toBe(200);
+    dan = await h.signIn("dan@inv.test");
+    await dan.put("/v1/me/teams/active", { teamId: finance });
+    dan.team = finance;
+  });
+
+  it("refuses at acceptance an invitation whose inviter lacks the authority now", async () => {
+    // Planted directly (as if left behind): invited by Bob, a plain member.
+    await h.admin.query(
+      `INSERT INTO team_invitations (team_id, email, role, invited_by, expires_at)
+       VALUES ($1, 'm4@inv.test', 'team_admin', $2, now() + interval '1 day')`,
+      [
+        finance,
+        (await h.admin.query(`SELECT id FROM users WHERE email = 'bob@inv.test'`)).rows[0].id,
+      ],
+    );
+    expect(await accepts("m4@inv.test")).toBe(404);
+    expect(await pendingFor("m4@inv.test")).toBe(0);
+    // Deactivated inviter, invitation still on file.
+    await h.admin.query(
+      `INSERT INTO team_invitations (team_id, email, role, invited_by, expires_at)
+       VALUES ($1, 'm4@inv.test', 'member', $2, now() + interval '1 day')`,
+      [finance, ids.dan],
+    );
+    await h.admin.query(`UPDATE users SET deactivated_at = now() WHERE id = $1`, [ids.dan]);
+    expect(await accepts("m4@inv.test")).toBe(404);
+    await h.admin.query(`UPDATE users SET deactivated_at = NULL WHERE id = $1`, [ids.dan]);
+    // A current team admin's invitation still works.
+    await dan.post("/v1/team/invites", { email: "m4@inv.test", role: "member" });
+    expect(await accepts("m4@inv.test")).toBe(200);
+  });
+});
+
+describe("install invitation rate limits (review)", () => {
+  it("caps re-sends to one address", async () => {
+    const first = await installAdmin.post("/v1/install/invites", { email: "spam@inv.test" });
+    expect(first.status).toBe(201);
+    const statuses = [];
+    for (let i = 0; i < INVITES_PER_ADDRESS_PER_HOUR; i++) {
+      statuses.push(
+        (await installAdmin.post(`/v1/install/invites/${first.json.invitation.id}/resend`)).status,
+      );
+    }
+    expect(statuses.slice(0, -1).every((s) => s === 200)).toBe(true);
+    expect(statuses.at(-1)).toBe(429);
+    expect((await owner.post("/v1/install/invites", { email: "spam@inv.test" })).status).toBe(429);
+    expect(h.mailer.to("spam@inv.test")).toHaveLength(INVITES_PER_ADDRESS_PER_HOUR);
+  });
+
+  it("caps invitations per admin", async () => {
+    const statuses = [];
+    for (let i = 0; i <= INVITES_PER_ADMIN_PER_HOUR; i++) {
+      statuses.push(
+        (await owner.post("/v1/install/invites", { email: `bulk${i}@inv.test` })).status,
+      );
+    }
+    expect(statuses.filter((s) => s === 201).length).toBe(INVITES_PER_ADMIN_PER_HOUR - 1);
+    expect(statuses.at(-1)).toBe(429);
   });
 });

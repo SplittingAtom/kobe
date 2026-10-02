@@ -1,7 +1,7 @@
 import { passkey } from "@better-auth/passkey";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { APIError, createAuthMiddleware } from "better-auth/api";
+import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
 import { jwt, twoFactor } from "better-auth/plugins";
 import {
   accounts,
@@ -17,9 +17,9 @@ import {
 import { logger } from "../logger.js";
 import type { Mailer } from "../mail/mailer.js";
 import { passwordResetMessage } from "../mail/messages.js";
-import { hitRateLimit } from "../rate-limit.js";
 import { isDeactivated } from "../users/deactivation.js";
 import { invitationPlugin, PASSWORD_MAX, PASSWORD_MIN } from "./invitation-plugin.js";
+import { recentResetLinkPending, recordResetLinkSent, revokeResetLinks } from "./reset-links.js";
 import { isUserVerified } from "./webauthn-flags.js";
 
 export interface AuthOptions {
@@ -39,8 +39,6 @@ export interface AuthOptions {
 
 /** Password-reset links work once, for 30 minutes. */
 export const RESET_TOKEN_TTL_SECONDS = 30 * 60;
-/** At most this many reset emails per account per hour, whatever the client IPs. */
-const RESET_MAILS_PER_HOUR = 3;
 
 const ACCOUNT_DEACTIVATED = {
   code: "ACCOUNT_DEACTIVATED",
@@ -63,17 +61,14 @@ export function createAuth({ db, publicUrl, secret, trustedProxies, mailer }: Au
 
   /**
    * Mails a reset link, off the request path: the response (and its timing) is the same whether or
-   * not the address has an account. Deactivated accounts get nothing; a per-account cap stops mail
-   * bombing through many IPs. The token travels in the URL fragment, which browsers never send to
+   * not the address has an account. Deactivated accounts get nothing; while a link mailed in the last
+   * few minutes is still valid no other is sent (mail bombing through many IPs). The token travels in the URL fragment, which browsers never send to
    * servers or proxies (no token in access logs).
    */
   async function mailResetLink(user: { id: string; email: string }, token: string) {
     if (await isDeactivated(db, user.id)) return;
-    const withinCap = await hitRateLimit(db, `reset-mail:${user.id}`, {
-      windowMs: 3_600_000,
-      max: RESET_MAILS_PER_HOUR,
-    });
-    if (!withinCap) return;
+    // A recent link is still usable: don't send another (soft; never blocks a later request).
+    if (await recentResetLinkPending(db, user.id)) return;
     await mailer.send(
       passwordResetMessage({
         to: user.email,
@@ -81,6 +76,8 @@ export function createAuth({ db, publicUrl, secret, trustedProxies, mailer }: Au
         expiresInMinutes: RESET_TOKEN_TTL_SECONDS / 60,
       }),
     );
+    // Only a delivered email counts.
+    await recordResetLinkSent(db, user.id, token);
   }
 
   return betterAuth({
@@ -110,6 +107,8 @@ export function createAuth({ db, publicUrl, secret, trustedProxies, mailer }: Au
       // Single-use (consumed atomically), short-lived, and a reset ends every session.
       resetPasswordTokenExpiresIn: RESET_TOKEN_TTL_SECONDS,
       revokeSessionsOnPasswordReset: true,
+      // The used link is consumed; any other mailed link dies with it.
+      onPasswordReset: async ({ user }) => revokeResetLinks(db, user.id),
       sendResetPassword: async ({ user, token }) => {
         void mailResetLink(user, token).catch((err: unknown) =>
           logger.error({ err, userId: user.id }, "password reset email failed"),
@@ -169,6 +168,14 @@ export function createAuth({ db, publicUrl, secret, trustedProxies, mailer }: Au
         return undefined;
       }),
       after: createAuthMiddleware(async (ctx) => {
+        // A changed password also kills any reset link still in a mailbox.
+        if (
+          ctx.path === "/change-password" &&
+          ctx.context.session &&
+          !isAPIError(ctx.context.returned)
+        ) {
+          await revokeResetLinks(db, ctx.context.session.user.id);
+        }
         // Turning 2FA off also ends every other session.
         if (ctx.path === "/two-factor/disable" && ctx.context.session) {
           const { user, session } = ctx.context.session;

@@ -10,6 +10,7 @@ import {
   type KobeTx,
   type TeamRole,
 } from "@kobe/db";
+import { revokeInvitesSentBy } from "../invitations/team-invites.js";
 
 export interface TeamMember {
   readonly userId: string;
@@ -117,6 +118,8 @@ export async function setMemberRole(
       .update(teamMembers)
       .set({ role })
       .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
+    // Below team admin they can no longer invite: their pending invitations go too.
+    if (role !== "team_admin") await revokeInvitesSentBy(tx, teamId, userId);
     return OK;
   });
 }
@@ -134,6 +137,7 @@ export async function removeMember(
     await tx
       .delete(teamMembers)
       .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
+    await revokeInvitesSentBy(tx, teamId, userId);
     return OK;
   });
 }

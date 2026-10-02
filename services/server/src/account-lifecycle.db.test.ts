@@ -107,12 +107,85 @@ describe("password reset (ac-3)", () => {
     expect(statuses).toEqual([200, 200, 200, 429]);
   });
 
-  it("caps reset emails per account, whatever the client IPs", async () => {
+  /** Pretends the last reset email to this user went out `minutes` ago. */
+  const ageResetMail = (userId: string, minutes: number) =>
+    h.admin.query(
+      `UPDATE rate_limits SET last_request = last_request - $2::bigint WHERE key LIKE $1`,
+      [`kobe:reset-sent:${userId}:%`, minutes * 60_000],
+    );
+
+  it("sends one email while a recently mailed link is still valid, whatever the client IPs", async () => {
     await h.admin.query(`DELETE FROM rate_limits`);
     const sentBefore = h.mailer.to("tess@life.test").length;
     for (let i = 0; i < 5; i++) expect((await requestReset("tess@life.test")).status).toBe(200);
     await h.mailer.settle();
-    expect(h.mailer.to("tess@life.test").length - sentBefore).toBe(3);
+    expect(h.mailer.to("tess@life.test").length - sentBefore).toBe(1);
+  });
+
+  it("never lets an attacker's requests block a real request later in the hour", async () => {
+    // The attacker kept requesting; the owner of the account asks ten minutes later.
+    await ageResetMail(ids.tess, 10);
+    const sentBefore = h.mailer.to("tess@life.test").length;
+    expect((await requestReset("tess@life.test")).status).toBe(200);
+    await h.mailer.settle();
+    expect(h.mailer.to("tess@life.test").length - sentBefore).toBe(1);
+    const token = h.mailer.lastToken("tess@life.test");
+    const res = await h
+      .browser()
+      .post("/api/auth/reset-password", { token, newPassword: PASSWORD });
+    expect(res.status).toBe(200);
+    // Used: the next request is mailed at once.
+    const before = h.mailer.to("tess@life.test").length;
+    await requestReset("tess@life.test");
+    await h.mailer.settle();
+    expect(h.mailer.to("tess@life.test").length - before).toBe(1);
+    await h.admin.query(`UPDATE verifications SET expires_at = now() WHERE value = $1`, [ids.tess]);
+  });
+
+  it("doesn't count a failed delivery", async () => {
+    const before = h.mailer.to("pat@life.test").length;
+    await ageResetMail(ids.pat, 60);
+    h.mailer.failNext = new Error("SMTP down");
+    await requestReset("pat@life.test");
+    await h.mailer.settle();
+    expect(h.mailer.to("pat@life.test").length).toBe(before);
+    await requestReset("pat@life.test");
+    await h.mailer.settle();
+    expect(h.mailer.to("pat@life.test").length).toBe(before + 1);
+  });
+
+  it("invalidates other reset links when the password is reset or changed", async () => {
+    // Reset: two links mailed; using the second kills the first.
+    await ageResetMail(ids.pat, 60);
+    const first = h.mailer.lastToken("pat@life.test");
+    await ageResetMail(ids.pat, 60);
+    await requestReset("pat@life.test");
+    const second = await resetToken("pat@life.test");
+    expect(second).not.toBe(first);
+    const ok = await h
+      .browser()
+      .post("/api/auth/reset-password", { token: second, newPassword: "pat's new password" });
+    expect(ok.status).toBe(200);
+    const stale = await h
+      .browser()
+      .post("/api/auth/reset-password", { token: first, newPassword: "an attacker password" });
+    expect(stale.status).toBe(400);
+
+    // Change: a mailed link dies when the signed-in user changes the password.
+    await ageResetMail(ids.pat, 60);
+    await requestReset("pat@life.test");
+    const pending = await resetToken("pat@life.test");
+    const pat = await h.signIn("pat@life.test", "pat's new password");
+    const changed = await pat.post("/api/auth/change-password", {
+      currentPassword: "pat's new password",
+      newPassword: PASSWORD,
+    });
+    expect(changed.status, JSON.stringify(changed.json)).toBe(200);
+    const late = await h
+      .browser()
+      .post("/api/auth/reset-password", { token: pending, newPassword: "an attacker password" });
+    expect(late.status).toBe(400);
+    await h.signIn("pat@life.test");
   });
 });
 
