@@ -151,12 +151,17 @@
   `--kubelet-arg=pod-max-pids=4096`), node-wide, documented in docs/install.md. Under gVisor
   that cgroup limit counts the sandbox's host threads (Sentry/Gofer), not guest processes; guest
   fork bombs are bounded by the gVisor sandbox's memory/CPU limits instead.
-- **e2e finding (kube-router):** a sandbox reached the web pod and the server's user port
-  although the team egress policy only names the server's sandbox port and the proxy pods
-  (namespace + pod selectors). Fix: a release-namespace **ingress** policy
-  (`<release>-not-from-sandboxes`) admits team namespaces to web/server/scheduler only on 8081.
-  e2e prints diagnostics (unlabelled listener on 8080/9090) to characterise the CNI; the proxies
-  are reachable on 8080 by design.
+- **e2e finding (k3s kube-router):** the team egress rules (namespace + pod selector + port per
+  Kobe service) are enforced as "any pod in the release namespace, any port": an unlabelled
+  listener there was reachable on 8080 and 9090, while every other destination (API Service, API
+  server, kubelet, metadata IP, other team, coredns/DNS, internet) stayed blocked. So the
+  **receiving side is what limits sandboxes inside the release namespace**: Bifrost and Postgres
+  (CNPG) already had ingress policies; `<release>-not-from-sandboxes` now admits team namespaces to
+  web/server/scheduler only on the sandbox port 8081 (e2e: web pod, user API, Bifrost blocked;
+  sandbox port reached). The proxies are open to sandboxes by design. **Every future
+  release-namespace component that must not be sandbox-reachable needs its own ingress policy.**
+  New pods join kube-router's ipsets after a short delay; sandbox agents must retry their first
+  connection (KOBE-23), and e2e waits for the sandbox port before probing.
 
 ## Open questions (for Chris or the coordinator)
 
