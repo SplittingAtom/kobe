@@ -18,6 +18,8 @@ export const identity = defineDomain({
     "teams",
     "install_roles",
     "install_settings",
+    // Active team per session (KOBE-14)
+    "session_active_teams",
     "break_glass_grants",
     "legal_holds",
     "audit_log",
@@ -37,6 +39,12 @@ export const identity = defineDomain({
     rate_limits: ALL_PRIVILEGES,
     install_roles: ALL_PRIVILEGES,
     install_settings: ["SELECT", "INSERT", "UPDATE"],
+    // A pointer only; rows also go away with their session (cascade from `sessions`).
+    session_active_teams: ALL_PRIVILEGES,
   },
-  teamReferencing: {},
+  teamReferencing: {
+    session_active_teams:
+      "Which team a sign-in session has active (D9): a pointer to `teams`, no team content; " +
+      "membership is re-verified under team RLS on every request.",
+  },
 });

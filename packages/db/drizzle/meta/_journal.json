@@ -29,6 +29,13 @@
       "when": 1790916929410,
       "tag": "0003_rate_limits",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790921718310,
+      "tag": "0004_session_active_teams",
+      "breakpoints": true
     }
   ]
 }

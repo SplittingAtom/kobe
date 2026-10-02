@@ -2,3 +2,4 @@
 export * from "./auth.js";
 export * from "./team-members.js";
 export * from "./teams.js";
+export * from "./session-active-teams.js";
