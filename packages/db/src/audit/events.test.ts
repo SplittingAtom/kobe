@@ -38,6 +38,7 @@ describe("audit event taxonomy", () => {
       "install",
       "platform",
       "policy",
+      "sandbox",
       "thread",
     ]);
   });
