@@ -59,8 +59,9 @@ MCP annotation defaults. **Assumed:** how kobe-policy talks to kobe-sandbox-agen
    instead?
 3. MCP proxy second enforcement (D29): token via `_meta` (`kobe.dev/approval`) or proxy lookup by
    (run, input HMAC)? KOBE-58 to decide.
-4. KOBE-29 needs `runs.retry_of_run_id` (nullable) for the new-run retry model, and `run_events.seq`
-   per run.
+4. KOBE-29 (PR #11) matches the run-state enum exactly and assigns `run_events.seq` by trigger
+   (gapless, per run). It has no `runs.retry_of_run_id`; the new-run retry model needs that nullable
+   column (KOBE-26 can add it).
 
 ## Evidence (acceptance criteria → test or command output)
 

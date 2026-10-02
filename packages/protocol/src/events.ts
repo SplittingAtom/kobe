@@ -196,8 +196,9 @@ export type KobeEventPayload<T extends KobeEventType> = z.infer<(typeof EVENT_PA
 
 /**
  * Envelope of every event: the `run_events` row and the SSE `data:` body.
- * `seq` is per run, starts at 1, strictly increasing (assigned when written to `run_events`).
- * Producers aim for gapless; consumers must tolerate gaps and drop any `seq <= last seen`.
+ * `seq` is per run, starts at 1, gapless and monotonic: assigned by the `run_events` trigger
+ * (KOBE-29; writers omit it) and committed in seq order. Consumers still drop `seq <= last seen`
+ * (duplicates across reconnects).
  */
 export type KobeEvent<T extends KobeEventType = KobeEventType> = {
   [K in T]: {
