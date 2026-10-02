@@ -94,6 +94,25 @@ tool_call_id, tool, expires_at, input]` (tag kept at v1: nothing was published);
 
 - WS-layer frame cap noted for KOBE-23/24 (`maxPayload`).
 
+## Review round 2 (coordinator, at 2b27e53) — resolution
+
+1. Decoder DoS: `findJsonSafetyIssue` is iterative (no spread) and depth-limited; `scanJsonText`
+   pre-scans nesting (≤ 128) and duplicate keys before `JSON.parse`/zod; `decodeSandboxFrame` /
+   `decodeServerFrame` never throw (exceptions → `malformed_frame`). Tests: 1.5M-element flat array,
+   200k nested arrays, 150 nested objects.
+2. MCP names: `connectorNameSchema` (no `__`, no leading/trailing separator), `mcpServerSegment`,
+   `parseMcpToolName`; resolution normatively by (run's connector map → connector_id, Pi tool name
+   in pinned snapshot).
+3. `ApprovalStore.consume` is one conditional UPDATE (unconsumed, `allowed`, run active); failure
+   reason renamed `not_consumable`.
+4. MCP proxy normative order (parseJsonStrict → toolInputSchema → registry → policy →
+   authorizeApprovedCall → forward canonical form); `verifyApproval` rejects invalid inputs.
+5. `policyInputSchema` requires `connector_id` and `connector_exposure` for MCP tools.
+6. Cursor CAS statement; gaps on a live socket answered with new `resend` frame.
+7. Leases: command ids per connection; lease ends at terminal; late frames → `run_not_active`
+   (late `policy.check` also gets `deny`); never-leased ids → `lease_violation`.
+8. Session tokens: pin the algorithm, reject `none`, ignore embedded key URLs.
+
 ## Open questions (for Chris or the coordinator)
 
 1. §6.2 shows `entry_id` on `text.delta`; contract uses `message_id` (Pi limitation). OK?
@@ -111,6 +130,6 @@ tool_call_id, tool, expires_at, input]` (tag kept at v1: nothing was published);
 
 ## Evidence (acceptance criteria → test or command output)
 
-- `pnpm --filter @kobe/protocol test` (353 tests): canonical JSON (RFC 8785 vectors, key order, numbers,
+- `pnpm --filter @kobe/protocol test` (380 tests): canonical JSON (RFC 8785 vectors, key order, numbers,
   Unicode, rejections), approval golden MACs (independently computed), event payload/envelope/SSE
   /cursor, full transition matrix, policy schemas, wire frames both directions, fakes.

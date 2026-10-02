@@ -164,6 +164,12 @@ describe("verifyApproval (stateless half)", () => {
     });
     expect(verify({ token: null })).toEqual({ ok: false, reason: "malformed" });
     expect(verify({ input: { x: Number.NaN } })).toEqual({ ok: false, reason: "malformed" });
+    expect(verify({ input: { id: 2 ** 53 } })).toEqual({ ok: false, reason: "malformed" });
+    expect(verify({ input: [1] })).toEqual({ ok: false, reason: "malformed" });
+    expect(verify({ input: JSON.parse('{"__proto__":{"a":1}}') })).toEqual({
+      ok: false,
+      reason: "malformed",
+    });
   });
 
   it("refuses short keys", () => {
@@ -203,7 +209,7 @@ describe("authorizeApprovedCall (stateful half)", () => {
     expect((await authorizeApprovedCall({ ...base, store })).ok).toBe(true);
     expect(await authorizeApprovedCall({ ...base, store })).toEqual({
       ok: false,
-      reason: "already_consumed",
+      reason: "not_consumable",
     });
   });
 

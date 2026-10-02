@@ -22,29 +22,29 @@
  * - The server leases each run and thread to exactly one authenticated connection: the one whose
  *   token's (team, user, sandbox) owns the run's thread, and to which the server sent `run.start`
  *   (or listed in `hello.ack`). Every inbound frame's `run_id` / `thread_id` must be leased to the
- *   connection it arrived on. Otherwise the server sends `error` `unknown_run` / `unknown_thread`,
- *   drops the frame, and closes the connection with `lease_violation` (a sandbox naming another
- *   sandbox's run is compromised or broken; neither deserves a second chance on that socket).
- *
- * Session
- * 1. Sandbox sends `hello` within {@link SANDBOX_HELLO_TIMEOUT_MS} of the upgrade.
- * 2. Server answers `hello.ack` (or closes). A newer connection for the same sandbox replaces the
- *    older one (old one closed with `replaced`), so exactly one socket per sandbox is live.
- * 3. Either side sends `ping`; the other answers `pong` with the same nonce. No frame for
- *    {@link SANDBOX_HEARTBEAT_TIMEOUT_MS} → the connection is dead (server: runs on it may become
- *    `interrupted` once the sandbox is also not reconnecting within the grace period, KOBE-26).
+ *   connection it arrived on, and a `command.result`'s `command_id` must have been issued on that
+ *   same connection (ids are not portable across reconnects; the server re-issues).
+ * - A lease ends when its run goes terminal. A late frame for an ended run of this connection
+ *   (benign race after Stop) gets `error` `run_not_active` and is not executed — a late
+ *   `policy.check` is answered with `policy.result` `deny` as well, so kobe-policy unblocks.
+ * - Anything else (a run/thread/command never leased to this connection) is a violation: `error`
+ *   `unknown_run` / `unknown_thread`, frame dropped, connection closed with `lease_violation` (a
+ *   sandbox naming another sandbox's run is compromised or broken).
  *
  * Delivery and resume
  * - Sandbox → server `pi.event` frames carry `run_id` and an outbound `seq` (per run, from 1,
  *   gapless, assigned by kobe-sandbox-agent). The agent keeps un-acked frames in memory.
  * - **Durable inbound cursor:** the server keeps the last accepted sandbox seq per run in
  *   **`runs.sandbox_seq`** (integer NOT NULL DEFAULT 0; added by KOBE-23/24). Accepting a
- *   `pi.event` means, in ONE transaction: check `seq = sandbox_seq + 1`, append the resulting
- *   `run_events` / `thread_entries` rows (zero or more — Pi events and Kobe events are not 1:1, so
- *   `runs.last_seq` cannot stand in for this cursor), set `sandbox_seq = seq`. A frame with
- *   `seq <= sandbox_seq` is a duplicate and is dropped (still acked); `seq > sandbox_seq + 1` is a
- *   gap → `error` `malformed_frame` and the server waits for the resend. After commit the server
- *   sends `ack` (cumulative: "everything up to seq N of run R is durable").
+ *   `pi.event` with seq `s` is ONE transaction that starts with the compare-and-set
+ *       UPDATE runs SET sandbox_seq = $s WHERE team_id = $t AND id = $r AND sandbox_seq = $s - 1
+ *   which must affect exactly one row, then appends the resulting `run_events` / `thread_entries`
+ *   rows (zero or more — Pi events and Kobe events are not 1:1, so `runs.last_seq` cannot stand in
+ *   for this cursor), then commits. Zero rows means: `s <= sandbox_seq` → duplicate, drop it (still
+ *   `ack`); `s > sandbox_seq + 1` → gap: drop it and send `resend` with
+ *   `from_seq = sandbox_seq + 1` on the same live socket (don't wait for a reconnect); the agent
+ *   re-sends from there in order and ignores further `resend`s for seqs it already re-sent. After
+ *   commit the server sends `ack` (cumulative: "everything up to seq N of run R is durable").
  * - On reconnect `hello.runs` lists the agent's live runs and their highest sent seq; `hello.ack`
  *   returns `durable_seq` = `runs.sandbox_seq` per run; the agent re-sends everything after it. Runs the server does
  *   not list are aborted by the agent. Runs the agent does not list (Pi or agent restarted) are
@@ -85,6 +85,7 @@ export const SANDBOX_ERROR_CODES = [
   "unknown_type",
   "unknown_thread",
   "unknown_run",
+  "run_not_active", // the run ended; late frames for it are answered with this, not executed
   "pi_unavailable", // Pi process could not start or exited
   "pi_rejected", // Pi answered success:false
   "frame_too_large",

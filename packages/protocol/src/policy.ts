@@ -40,42 +40,57 @@ export const POLICY_EVALUATION_ORDER = [
 export type PolicyStage = (typeof POLICY_EVALUATION_ORDER)[number];
 
 /** The thing being decided. Built by the server from its own state; `tool` from its registry. */
-export const policyInputSchema = z.strictObject({
-  actor: z.strictObject({
-    user_id: uuidSchema,
-    /** `schedule` for scheduled runs (D32): executes as the user, but never prompts. */
-    kind: runTriggerSchema,
-  }),
-  team_id: uuidSchema,
-  agent: z.strictObject({
-    /** Null (with `version`) = the install default agent (threads.agent_id is nullable). */
-    agent_id: uuidSchema.nullable(),
-    version: z.number().int().positive().nullable(),
-    /** Agent frontmatter `tools.allow` / `tools.deny` (D19), glob grammar. */
-    tools_allow: z.array(z.string()).default([]),
-    tools_deny: z.array(z.string()).default([]),
-  }),
-  run: z.strictObject({
-    run_id: uuidSchema,
-    thread_id: uuidSchema,
-    /** Effective mode after intersecting agent, thread and floor (never looser than the floor). */
-    approval_mode: approvalModeSchema,
-  }),
-  /** Server-derived (tools.ts). Never built from anything the sandbox sent besides the name. */
-  tool: toolDescriptorSchema,
-  tool_call_id: idSchema,
-  /** Set for nested calls (Pi assigns `<parent id>/<n>`; verified Pi 1.0.0). */
-  parent_tool_call_id: idSchema.optional(),
-  /** Tool input as parsed JSON; the canonical form is `canonicalJson(input)`. */
-  input: toolInputSchema,
-  context: z.strictObject({
-    /** Which enforcement point is asking. The MCP proxy re-checks every MCP call (D27, D29). */
-    enforcement_point: z.enum(["sandbox", "mcp_proxy"]),
-    project_id: uuidSchema.optional(),
-    /** MCP connector exposure in the team (D27); required when `tool.source` is `mcp`. */
-    connector_exposure: z.enum(["read_only", "all", "custom"]).optional(),
-  }),
-});
+export const policyInputSchema = z
+  .strictObject({
+    actor: z.strictObject({
+      user_id: uuidSchema,
+      /** `schedule` for scheduled runs (D32): executes as the user, but never prompts. */
+      kind: runTriggerSchema,
+    }),
+    team_id: uuidSchema,
+    agent: z.strictObject({
+      /** Null (with `version`) = the install default agent (threads.agent_id is nullable). */
+      agent_id: uuidSchema.nullable(),
+      version: z.number().int().positive().nullable(),
+      /** Agent frontmatter `tools.allow` / `tools.deny` (D19), glob grammar. */
+      tools_allow: z.array(z.string()).default([]),
+      tools_deny: z.array(z.string()).default([]),
+    }),
+    run: z.strictObject({
+      run_id: uuidSchema,
+      thread_id: uuidSchema,
+      /** Effective mode after intersecting agent, thread and floor (never looser than the floor). */
+      approval_mode: approvalModeSchema,
+    }),
+    /** Server-derived (tools.ts). Never built from anything the sandbox sent besides the name. */
+    tool: toolDescriptorSchema,
+    tool_call_id: idSchema,
+    /** Set for nested calls (Pi assigns `<parent id>/<n>`; verified Pi 1.0.0). */
+    parent_tool_call_id: idSchema.optional(),
+    /** Tool input as parsed JSON; the canonical form is `canonicalJson(input)`. */
+    input: toolInputSchema,
+    context: z.strictObject({
+      /** Which enforcement point is asking. The MCP proxy re-checks every MCP call (D27, D29). */
+      enforcement_point: z.enum(["sandbox", "mcp_proxy"]),
+      project_id: uuidSchema.optional(),
+      /** MCP connector exposure in the team (D27); required when `tool.source` is `mcp`. */
+      connector_exposure: z.enum(["read_only", "all", "custom"]).optional(),
+    }),
+  })
+  .superRefine((value, ctx) => {
+    // MCP calls are decided against the team's connector state (D27): both must be present.
+    if (value.tool.source !== "mcp") return;
+    if (value.tool.connector_id === undefined) {
+      ctx.addIssue({ code: "custom", path: ["tool", "connector_id"], message: "required for mcp" });
+    }
+    if (value.context.connector_exposure === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["context", "connector_exposure"],
+        message: "required for mcp",
+      });
+    }
+  });
 export type PolicyInput = z.infer<typeof policyInputSchema>;
 
 /** Stable reason codes, one per stage outcome; `message` is shown on cards and in tool errors. */

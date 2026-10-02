@@ -8,6 +8,7 @@ import {
   uuidSchema,
 } from "../common.js";
 import { policyReasonSchema } from "../policy.js";
+import { connectorNameSchema } from "../tools.js";
 import { SANDBOX_ERROR_CODES, SANDBOX_WIRE_VERSION } from "./connection.js";
 import {
   piBridgeCommandSchema,
@@ -165,9 +166,7 @@ export const piThreadConfigSchema = z.strictObject({
     .optional(),
   /** Connectors to expose; Pi tool names become `mcp__<name>__<tool>` (verified Pi 1.0.0). */
   mcp_servers: z
-    .array(
-      z.strictObject({ name: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/), connector_id: uuidSchema }),
-    )
+    .array(z.strictObject({ name: connectorNameSchema, connector_id: uuidSchema }))
     .max(64)
     .optional(),
   approval_mode: approvalModeSchema.optional(),
@@ -270,6 +269,9 @@ export const sessionRestoreFrameSchema = frame("session.restore", {
 /** Cumulative ack: every `pi.event` of `run_id` with seq ≤ `seq` is durable. */
 export const ackFrameSchema = frame("ack", { run_id: uuidSchema, seq });
 
+/** Gap on a live socket: re-send this run's `pi.event` frames from `from_seq` (= durable_seq + 1). */
+export const resendFrameSchema = frame("resend", { run_id: uuidSchema, from_seq: seq });
+
 /** Drain and close: abort nothing in flight unless `deadline_ms` passes. */
 export const shutdownFrameSchema = frame("shutdown", {
   reason: z.enum(["hibernate", "destroy", "replaced"]),
@@ -287,6 +289,7 @@ export const serverToSandboxFrameSchema = z.union([
   policyResultFrameSchema,
   sessionRestoreFrameSchema,
   ackFrameSchema,
+  resendFrameSchema,
   shutdownFrameSchema,
   pingFrame,
   pongFrame,

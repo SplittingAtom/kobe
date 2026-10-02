@@ -29,8 +29,15 @@ import { idSchema, uuidSchema } from "./common.js";
  * 2. **Stateful** (`authorizeApprovedCall`, against an {@link ApprovalStore}): the `approvals` row
  *    exists for this team with status `allowed` (not pending/denied/expired), its run/tool_call ids
  *    and `input_hmac` equal the token's; the run is still active (`running`/`waiting_approval`); and
- *    the approval is **consumed exactly once** (atomic `consumed_at IS NULL → now()`). A second use
- *    of the same approval — same or different tool_call_id — is rejected.
+ *    the approval is **consumed exactly once** by ONE conditional statement that re-checks status
+ *    and run state (see `ApprovalStore.consume`), so a Stop between load and consume cannot let the
+ *    call through. A second use of the same approval — same or different tool_call_id — fails.
+ *
+ * MCP proxy (KOBE-58), normative order: parse the `tools/call` body with `parseJsonStrict`
+ * (json-safety.ts), validate `params.arguments` with `toolInputSchema`, resolve the tool from its
+ * own registry (tools.ts), run the policy re-check, and only then `authorizeApprovedCall` with
+ * that parsed input; forward upstream exactly `JSON.parse(canonicalJson(arguments))`.
+ * `verifyApproval` also rejects an input that fails `toolInputSchema` (as `malformed`).
  */
 
 export const APPROVAL_SIGNING_DOMAIN = "kobe.approval.v1";
@@ -112,7 +119,15 @@ export interface ApprovalRecord {
  */
 export interface ApprovalStore {
   load(teamId: string, approvalId: string): Promise<ApprovalRecord | undefined>;
-  /** `UPDATE approvals SET consumed_at = now() WHERE id = $1 AND consumed_at IS NULL`; true if 1 row. */
+  /**
+   * One conditional statement; true iff it updated exactly one row:
+   *
+   *     UPDATE approvals a SET consumed_at = now()
+   *      WHERE a.team_id = $1 AND a.id = $2
+   *        AND a.consumed_at IS NULL AND a.status = 'allowed'
+   *        AND EXISTS (SELECT 1 FROM runs r WHERE r.team_id = a.team_id AND r.id = a.run_id
+   *                      AND r.status IN ('running', 'waiting_approval'))
+   */
   consume(teamId: string, approvalId: string): Promise<boolean>;
 }
 

@@ -12,7 +12,9 @@ import { uuidSchema } from "./common.js";
  * `hello.sandbox_id` equals `sub`.
  *
  * SPECULATIVE (KOBE-22/24 decide): encoding (signed JWT vs opaque + introspection), TTL and
- * rotation. The claims below are the contract either way.
+ * rotation. The claims below are the contract either way. If signed (JWT/JWS), every verifier pins
+ * the algorithm (e.g. EdDSA or HS256, configured, never read from the token header), rejects
+ * `alg: "none"` and any other algorithm, and ignores `jku`/`x5u`/embedded keys.
  */
 export const SESSION_TOKEN_AUDIENCES = [
   "kobe.sandbox-wire", // server WSS (`/v1/sandbox/connect`)

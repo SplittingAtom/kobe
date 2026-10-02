@@ -152,3 +152,37 @@ export function builtinToolDescriptor(name: string): ToolDescriptor | undefined 
     scope: tool.scope,
   };
 }
+
+/**
+ * Connector names (install registry, D27) and Pi's MCP tool names. Pi 1.0.0 (verified, docs/mcp.md)
+ * names a tool `mcp__<server>__<tool>`, replacing every character other than letters, digits and
+ * `_` with `_`, and treats server names differing only in `-`/`_` as the same server. Kobe connector
+ * names are lowercase `[a-z0-9]` runs joined by single `-` or `_` — no `__`, no leading/trailing
+ * separator — so the server segment never contains `__` or ends in `_`, and the first `__` after
+ * `mcp__` always separates server from tool (tool names may contain `__`). KOBE-59 enforces this
+ * and uniqueness of `mcpServerSegment(name)` install-wide.
+ *
+ * Resolution is by server state, never by parsing alone: the server maps the segment to a
+ * `connector_id` through the run's own exposed connectors (`run.start` `config.mcp_servers`), then
+ * finds the tool by its Pi name in that connector's pinned snapshot (KOBE-59 stores the Pi name,
+ * including any collision hash suffix Pi adds). No match → unknown tool → deny.
+ */
+export const connectorNameSchema = z
+  .string()
+  .max(64)
+  .regex(/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/, "connector name");
+
+export function mcpServerSegment(connectorName: string): string {
+  return connectorName.replace(/[^A-Za-z0-9_]/g, "_");
+}
+
+export function parseMcpToolName(
+  toolName: string,
+): { readonly server_segment: string; readonly tool_segment: string } | undefined {
+  if (!toolName.startsWith("mcp__")) return undefined;
+  const rest = toolName.slice("mcp__".length);
+  const separator = rest.indexOf("__");
+  if (separator <= 0) return undefined;
+  const tool = rest.slice(separator + 2);
+  return tool === "" ? undefined : { server_segment: rest.slice(0, separator), tool_segment: tool };
+}

@@ -95,6 +95,7 @@ const sandboxFrames = {
   },
   ping: { v: 1, type: "ping", nonce: "n1" },
   error: { v: 1, type: "error", code: "unknown_run", message: "?", ref: "c1" },
+  "error run_not_active": { v: 1, type: "error", code: "run_not_active", message: "run ended" },
 } satisfies Record<string, SandboxToServerFrame>;
 
 const serverFrames = {
@@ -205,6 +206,7 @@ const serverFrames = {
     ],
   },
   ack: { v: 1, type: "ack", run_id: RUN, seq: 13 },
+  resend: { v: 1, type: "resend", run_id: RUN, from_seq: 11 },
   shutdown: { v: 1, type: "shutdown", reason: "hibernate", deadline_ms: 5000 },
   pong: { v: 1, type: "pong", nonce: "n1" },
 } satisfies Record<string, ServerToSandboxFrame>;
@@ -255,6 +257,28 @@ describe("sandbox → server frames", () => {
         message: `frame rejected: ${issue}`,
       });
     }
+  });
+
+  it("never throws on hostile shapes under the size cap (flat or deeply nested)", () => {
+    const check = JSON.stringify(sandboxFrames["policy.check"]);
+    const flat = check.replace('{"project":"OPS"}', `{"a":[${"0,".repeat(1_500_000)}0]}`);
+    const deep = check.replace(
+      '{"project":"OPS"}',
+      `{"a":${"[".repeat(200_000)}${"]".repeat(200_000)}}`,
+    );
+    const deepObject = check.replace(
+      '{"project":"OPS"}',
+      `${'{"a":'.repeat(150)}1${"}".repeat(150)}`,
+    );
+    expect(new TextEncoder().encode(flat).byteLength).toBeLessThan(SANDBOX_MAX_FRAME_BYTES);
+    expect(decodeSandboxFrame(flat)).toMatchObject({ ok: true });
+    expect(decodeSandboxFrame(deep)).toEqual({
+      ok: false,
+      code: "malformed_frame",
+      message: "frame rejected: too_deep",
+    });
+    expect(decodeSandboxFrame(deepObject)).toMatchObject({ ok: false, code: "malformed_frame" });
+    expect(decodeServerFrame(deep)).toMatchObject({ ok: false, code: "malformed_frame" });
   });
 
   it("rejects malformed JSON and oversize frames", () => {
@@ -335,6 +359,13 @@ describe("server → sandbox frames", () => {
     [
       "an oversize system prompt",
       { ...serverFrames["run.start"], config: { ...config, system_prompt: "x".repeat(100_001) } },
+    ],
+    [
+      "an ambiguous connector name",
+      {
+        ...serverFrames["run.start"],
+        config: { ...config, mcp_servers: [{ name: "a__b", connector_id: EXAMPLE_IDS.connector }] },
+      },
     ],
     [
       "a path-like skill name",

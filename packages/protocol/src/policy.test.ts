@@ -5,6 +5,9 @@ import {
   acceptsAudience,
   approvalResolutionBodySchema,
   builtinToolDescriptor,
+  connectorNameSchema,
+  mcpServerSegment,
+  parseMcpToolName,
   isOpenWorld,
   policyDecisionSchema,
   policyInputSchema,
@@ -62,6 +65,11 @@ describe("policy contract", () => {
     ["unknown enforcement point", { ...input, context: { enforcement_point: "browser" } }],
     ["missing tool_call_id", { ...input, tool_call_id: undefined }],
     ["non-uuid team", { ...input, team_id: "t1" }],
+    ["MCP tool without exposure", { ...input, context: { enforcement_point: "sandbox" } }],
+    [
+      "MCP tool without connector id",
+      { ...input, tool: { ...input.tool, connector_id: undefined } },
+    ],
     [
       "sandbox-style annotations on the tool",
       { ...input, tool: { ...input.tool, annotations: {} } },
@@ -173,6 +181,34 @@ describe("server-side tool registry", () => {
   ] as const)("derives MCP risk from pinned annotations %j", (annotations, risk, openWorld) => {
     expect(riskFromAnnotations(annotations)).toBe(risk);
     expect(isOpenWorld(annotations)).toBe(openWorld);
+  });
+});
+
+describe("MCP tool names", () => {
+  it.each(["jira", "git-hub", "my_jira2", "a-b_c"])("accepts connector name %s", (name) => {
+    expect(connectorNameSchema.safeParse(name).success).toBe(true);
+  });
+
+  it.each(["a__b", "_jira", "jira_", "-jira", "jira-", "a-_b", "Jira", "", "x".repeat(65)])(
+    "rejects connector name %j",
+    (name) => {
+      expect(connectorNameSchema.safeParse(name).success).toBe(false);
+    },
+  );
+
+  it("maps a connector name to Pi's tool-name segment", () => {
+    expect(mcpServerSegment("git-hub")).toBe("git_hub");
+  });
+
+  it.each([
+    ["mcp__jira__create_issue", { server_segment: "jira", tool_segment: "create_issue" }],
+    ["mcp__git_hub__get__x", { server_segment: "git_hub", tool_segment: "get__x" }],
+    ["mcp__jira___private", { server_segment: "jira", tool_segment: "_private" }],
+    ["mcp__jira__", undefined],
+    ["mcp____x", undefined],
+    ["bash", undefined],
+  ])("parses %s unambiguously", (name, expected) => {
+    expect(parseMcpToolName(name)).toEqual(expected);
   });
 });
 

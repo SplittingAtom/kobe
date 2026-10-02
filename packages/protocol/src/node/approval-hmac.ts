@@ -10,6 +10,7 @@ import {
   type ApprovalStore,
   type ApprovalToken,
 } from "../approval.js";
+import { toolInputSchema } from "../common.js";
 
 /**
  * Reference HMAC for approvals (Node only; import from `@kobe/protocol/node`). The server (KOBE-37)
@@ -97,7 +98,7 @@ export type VerifyFailure =
   | "not_allowed"
   | "record_mismatch"
   | "run_inactive"
-  | "already_consumed";
+  | "not_consumable";
 
 export type VerifyApprovalResult =
   | { readonly ok: true; readonly token: ApprovalToken }
@@ -113,6 +114,8 @@ function equalConstantTime(a: string, b: string): boolean {
 export function verifyApproval(args: VerifyApprovalInput): VerifyApprovalResult {
   const parsed = approvalTokenSchema.safeParse(args.token);
   if (!parsed.success) return { ok: false, reason: "malformed" };
+  // The input must itself be a valid tool input (object, no U+0000 / __proto__ / unsafe integers).
+  if (!toolInputSchema.safeParse(args.input).success) return { ok: false, reason: "malformed" };
   const token = parsed.data;
   const { expected } = args;
   if (
@@ -158,7 +161,7 @@ export async function authorizeApprovedCall(
   }
   if (!record.run_active) return { ok: false, reason: "run_inactive" };
   if (!(await args.store.consume(token.team_id, token.approval_id))) {
-    return { ok: false, reason: "already_consumed" };
+    return { ok: false, reason: "not_consumable" };
   }
   return verified;
 }

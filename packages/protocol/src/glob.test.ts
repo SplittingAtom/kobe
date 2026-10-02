@@ -7,6 +7,7 @@ import {
   matchesArgPattern,
   parseJsonStrict,
   resolveJsonPointer,
+  toolInputSchema,
 } from "./index.js";
 
 describe("glob grammar", () => {
@@ -92,6 +93,21 @@ describe("JSON boundary safety", () => {
     expect(
       findJsonSafetyIssue({ n: 0.5, s: "ok" }, { rejectUnsafeIntegers: true }),
     ).toBeUndefined();
+  });
+
+  it("handles huge and deep values without recursion", () => {
+    const flat = new Array(1_500_000).fill(0);
+    expect(findJsonSafetyIssue(flat, { rejectUnsafeIntegers: true })).toBeUndefined();
+    let deep: unknown = 0;
+    for (let i = 0; i < 200_000; i += 1) deep = [deep];
+    expect(findJsonSafetyIssue(deep)).toBe("too_deep");
+    expect(toolInputSchema.safeParse({ a: deep }).success).toBe(false);
+    expect(parseJsonStrict(`${"[".repeat(129)}${"]".repeat(129)}`)).toEqual({
+      ok: false,
+      issue: "too_deep",
+    });
+    expect(parseJsonStrict(`${"[".repeat(128)}${"]".repeat(128)}`).ok).toBe(true);
+    expect(parseJsonStrict('["[[[[[["]').ok).toBe(true);
   });
 
   it("parses strictly", () => {
