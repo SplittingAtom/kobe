@@ -88,6 +88,30 @@
     recomputes `threads.tsv` (title only, microseconds) on every thread update, including seq
     allocation. The value is unchanged and unindexed, so those updates stay HOT.
 
+13. **Review round 1 (coordinator DB review of PR #15, approve with changes):**
+    - **Errors:** `searchThreads` throws only `ThreadSearchError` (`invalid_input`, `no_team`,
+      `timeout`, `failed`) carrying the SQLSTATE, never drizzle's error with SQL and parameters.
+      Cursor micros are checked against the bigint range before any query (a 20-digit value used to
+      fail the `::bigint` cast inside the caller's transaction).
+    - **Bounded cost:** the search runs in a savepoint with `statement_timeout` (default 3 s,
+      `timeoutMs` 100–30,000; lock waits count too). The caller's timeout is restored afterwards, and
+      a timeout rolls back only the savepoint, so the caller's transaction stays usable (tested).
+      `ts_headline` now runs only for the `limit` returned rows (not the look-ahead row), on the first
+      20,000 characters of the entry. A match beyond that prefix gives an unhighlighted excerpt of
+      the start.
+    - **Exclusions on the trigram path:** the title trigram input is the query's positive words only
+      (quotes, `or` and `-terms` removed, `splitQuery`), and a title whose `tsv` matches any excluded
+      term or phrase never matches by trigram. Before, `qwerty -asdfgh` returned "qwerty asdfgh".
+    - **Query semantics (documented on the input):** terms co-occur per message (or in the title),
+      not across a thread. `a b` needs both in one message, and `a -b` excludes only messages
+      containing b. A query of only exclusions (`-a -"b c"`) is rejected as `invalid_input`; the
+      alternative was returning nothing.
+    - **Privacy rests on the caller for two inputs:** `viewerUserId` must be the session user
+      (KOBE-34) and `projectIds` the viewer's projects (KOBE-57). RLS cannot check either; the data
+      layer adds only the team-membership check.
+    - **`drizzle-kit push` hazard** noted next to `schema/threads.ts`: push would drop the SQL-only
+      `tsv` columns. Migrations only.
+
 ## Deferred
 
 - **KOBE-34:** `GET /v1/threads?q=&project_id=` should call `searchThreads` inside `withTeam` with
@@ -145,6 +169,26 @@
   - snippet: PK index scan, 21 loops.
   - Execution: common word 142 ms (cold, 17k buffers read), rare word 83 ms, two words 88 ms, title
     trigram 100 ms, with 20 project ids 90 ms. A 100-thread member scans 1/20 of that.
+- Review round 1 re-measure (one viewer, 5,000 threads, one ~100 KB matching message each; old =
+  7be7cea, same data and server, 3 runs each):
+
+  | query                   | old      | new                  |
+  | ----------------------- | -------- | -------------------- |
+  | word, limit 50          | 1,640 ms | 1,190 ms             |
+  | word, limit 20          | 1,210 ms | 1,010 ms             |
+  | phrase, limit 50        | 1,650 ms | 1,190 ms             |
+  | no hits, limit 50       | 425 ms   | 420 ms               |
+  | phrase, `timeoutMs` 500 | —        | `timeout` at ~508 ms |
+
+  The remaining ~1 s is matching and ranking 5,000 × 100 KB tsvectors, the floor of this
+  pathological shape; the default 3 s timeout bounds it. Realistic data (decision 12 evidence)
+  stays at 83–142 ms.
+
+- Review round 1 tests: › "applies exclusions and phrases to the title trigram path",
+  › "per-entry co-occurrence", › "statement timeout" (lock-held table → `timeout`, no SQL in the
+  message, caller's team and `statement_timeout` intact), › "input validation" (out-of-range cursor,
+  negation-only query → `invalid_input`); `thread-search-format.test.ts` (bigint bounds,
+  `splitQuery`).
 - `pnpm build test typecheck format:check license:check` green; `lint` green except the
   pre-existing `@kobe/chart` failure (Helm 4 `license` field); `pnpm --filter @kobe/db test:db`
   132/132; `db:check` clean.

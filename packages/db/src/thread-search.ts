@@ -9,13 +9,17 @@ import {
   encodeCursor,
   parseSnippet,
   searchThreadsInputSchema,
+  splitQuery,
   type ParsedSearchThreadsInput,
   type SearchThreadsInput,
   type SnippetSegment,
 } from "./thread-search-format.js";
+import { ThreadSearchError } from "./thread-search-error.js";
 
+export { ThreadSearchError, type ThreadSearchErrorCode } from "./thread-search-error.js";
 export {
   THREAD_SEARCH_DEFAULT_LIMIT,
+  THREAD_SEARCH_DEFAULT_TIMEOUT_MS,
   THREAD_SEARCH_MAX_LIMIT,
   THREAD_SEARCH_MAX_PROJECT_IDS,
   THREAD_SEARCH_MAX_QUERY_LENGTH,
@@ -25,12 +29,19 @@ export {
 
 /** Text search configuration; must match the generated `tsv` columns (migration `*_thread_search.sql`). */
 const TS_CONFIG = "english";
-/** Minimum pg_trgm word_similarity for a title to match the raw query (partial words, typos). */
+/** Minimum pg_trgm word_similarity for a title to match the query's positive terms (partial words, typos). */
 const TITLE_TRIGRAM_THRESHOLD = 0.6;
 /** Weight of the title trigram similarity in the score (full-text title hits weigh more, via 'A'). */
 const TITLE_TRIGRAM_WEIGHT = 0.5;
 /** ts_rank normalization 1: divide by 1 + log(document length), so long messages don't dominate. */
 const RANK_NORMALIZATION = 1;
+/**
+ * Characters of the matched entry's text given to ts_headline, which parses its whole input: a
+ * match beyond this prefix yields an unhighlighted excerpt of the start.
+ */
+const HEADLINE_INPUT_CHARS = 20_000;
+/** SQLSTATEs reported as a timeout: query_canceled (statement_timeout), lock_not_available. */
+const TIMEOUT_SQLSTATES = new Set(["57014", "55P03"]);
 const HEADLINE_OPTIONS =
   `StartSel=${HIGHLIGHT_START}, StopSel=${HIGHLIGHT_STOP}, ` +
   `MaxWords=30, MinWords=10, MaxFragments=2, FragmentDelimiter=" … "`;
@@ -79,6 +90,11 @@ interface HitRow extends Record<string, unknown> {
  * own threads and threads shared to `projectIds`, never Trash, never another team (RLS, so call it
  * inside `withTeam`). Matches user/assistant message text and titles by full text, and titles by
  * trigram similarity. Read-only; never wakes a sandbox.
+ *
+ * The caller vouches for the inputs that RLS cannot check: `viewerUserId` must be the signed-in user
+ * (KOBE-34) and `projectIds` the projects that user belongs to (KOBE-57); the data layer only adds
+ * the team-membership check. Runs in a savepoint with its own statement timeout, so a failure
+ * leaves the caller's transaction usable. Throws only `ThreadSearchError` (no SQL or parameters).
  */
 export async function searchThreads(
   tx: KobeTx,
@@ -86,15 +102,17 @@ export async function searchThreads(
 ): Promise<ThreadSearchPage> {
   const parsed = searchThreadsInputSchema.safeParse(input);
   if (!parsed.success) {
-    throw new Error(`searchThreads: invalid input: ${parsed.error.issues[0]?.message ?? ""}`);
+    const message = parsed.error.issues[0]?.message ?? "invalid";
+    throw new ThreadSearchError("invalid_input", `invalid input: ${message}`);
   }
   const params = parsed.data;
   const cursor = params.cursor === undefined ? undefined : decodeCursor(params.cursor);
-  if (cursor === null) throw new Error("searchThreads: invalid cursor");
+  if (cursor === null) throw new ThreadSearchError("invalid_input", "invalid cursor");
 
-  const teamId = await activeTeam(tx);
-  const result = await tx.execute<HitRow>(searchQuery(teamId, params, cursor));
-  const rows = result.rows;
+  const rows = await runBounded(tx, params.timeoutMs, async (sp) => {
+    const teamId = await activeTeam(sp);
+    return (await sp.execute<HitRow>(searchQuery(teamId, params, cursor))).rows;
+  });
   const page = rows.slice(0, params.limit);
   const last = page.at(-1);
   return {
@@ -106,13 +124,56 @@ export async function searchThreads(
   };
 }
 
+/**
+ * Runs `fn` in a savepoint with `statement_timeout = timeoutMs`, restoring the caller's timeout
+ * afterwards (a released savepoint keeps transaction-local settings; a rolled-back one reverts them).
+ * Database errors become ThreadSearchError carrying only the SQLSTATE.
+ */
+async function runBounded<T>(
+  tx: KobeTx,
+  timeoutMs: number,
+  fn: (sp: KobeTx) => Promise<T>,
+): Promise<T> {
+  try {
+    return await tx.transaction(async (sp) => {
+      const before = await sp.execute<{ timeout: string }>(
+        sql`SELECT current_setting('statement_timeout') AS timeout,
+                   set_config('statement_timeout', ${String(timeoutMs)}, true)`,
+      );
+      const result = await fn(sp);
+      await sp.execute(
+        sql`SELECT set_config('statement_timeout', ${before.rows[0]?.timeout ?? "0"}, true)`,
+      );
+      return result;
+    });
+  } catch (err) {
+    if (err instanceof ThreadSearchError) throw err;
+    const sqlState = sqlStateOf(err);
+    if (sqlState && TIMEOUT_SQLSTATES.has(sqlState)) {
+      throw new ThreadSearchError("timeout", `timed out after ${timeoutMs} ms`, sqlState);
+    }
+    throw new ThreadSearchError(
+      "failed",
+      `query failed (SQLSTATE ${sqlState ?? "unknown"})`,
+      sqlState,
+    );
+  }
+}
+
+/** SQLSTATE of a driver error (drizzle wraps it in `cause`). */
+function sqlStateOf(err: unknown): string | undefined {
+  const e = err as { code?: unknown; cause?: { code?: unknown } } | null;
+  const code = e?.cause?.code ?? e?.code;
+  return typeof code === "string" && /^[0-9A-Z]{5}$/.test(code) ? code : undefined;
+}
+
 /** The team set by withTeam; refuses to run without one rather than silently finding nothing. */
 async function activeTeam(tx: KobeTx): Promise<string> {
   const result = await tx.execute<{ team: string | null }>(
     sql`SELECT NULLIF(current_setting(${TEAM_ID_SETTING}, true), '') AS team`,
   );
   const team = result.rows[0]?.team;
-  if (!team) throw new Error("searchThreads: must run inside withTeam");
+  if (!team) throw new ThreadSearchError("no_team", "must run inside withTeam");
   return team;
 }
 
@@ -147,12 +208,19 @@ function searchQuery(
 ): SQL {
   const projectFilter = p.projectId ? sql`AND t.project_id = ${p.projectId}` : sql``;
   const activityFilter = p.activeSince ? sql`AND t.last_activity_at >= ${p.activeSince}` : sql``;
+  const { positive, excluded } = splitQuery(p.query);
+  // Title trigram input: positive words only; a title containing an excluded term never matches.
+  const exclusions =
+    excluded.length > 0
+      ? sql`websearch_to_tsquery(${TS_CONFIG}::regconfig, ${excluded.join(" or ")})`
+      : sql`NULL::tsquery`;
   const after = cursor
     ? sql`WHERE (s.score, s.activity_micros, s.id) < (${cursor.score}::float8, ${cursor.activityMicros}::bigint, ${cursor.id}::uuid)`
     : sql``;
   return sql`
     WITH params AS MATERIALIZED (
-      SELECT websearch_to_tsquery(${TS_CONFIG}::regconfig, ${p.query}) AS tsq, ${p.query}::text AS raw
+      SELECT websearch_to_tsquery(${TS_CONFIG}::regconfig, ${p.query}) AS tsq,
+             ${positive}::text AS trgm, ${exclusions} AS excl
     ),
     visible AS MATERIALIZED (
       SELECT t.team_id, t.id, t.title, t.tsv, t.owner_user_id, t.project_id, t.agent_id,
@@ -187,7 +255,8 @@ function searchQuery(
       FROM visible v
       CROSS JOIN params
       CROSS JOIN LATERAL (
-        SELECT coalesce(word_similarity(params.raw, v.title), 0)::float8 AS sim
+        SELECT CASE WHEN params.excl IS NOT NULL AND v.tsv @@ params.excl THEN 0
+                    ELSE coalesce(word_similarity(params.trgm, v.title), 0) END::float8 AS sim
       ) trgm
       LEFT JOIN entry_hits h ON h.thread_id = v.id
       WHERE h.thread_id IS NOT NULL OR v.tsv @@ params.tsq OR trgm.sim >= ${TITLE_TRIGRAM_THRESHOLD}
@@ -197,17 +266,26 @@ function searchQuery(
       ${after}
       ORDER BY s.score DESC, s.activity_micros DESC, s.id DESC
       LIMIT ${p.limit + 1}
+    ),
+    ranked AS (
+      SELECT page.*, row_number() OVER (
+               ORDER BY page.score DESC, page.activity_micros DESC, page.id DESC) AS rn
+      FROM page
     )
-    SELECT page.id, page.title, page.owner_user_id, page.project_id, page.agent_id,
-           page.agent_version, page.status, page.shared_to_project,
-           page.activity_micros::text AS activity_micros, page.score, page.matched_entry_id,
-           (SELECT ts_headline(${TS_CONFIG}::regconfig,
-                               translate(kobe_entry_search_text(e.type, e.payload),
-                                         ${HIGHLIGHT_START + HIGHLIGHT_STOP}, ''),
-                               params.tsq, ${HEADLINE_OPTIONS})
-            FROM thread_entries e
-            WHERE e.team_id = ${teamId} AND e.thread_id = page.id
-              AND e.entry_id = page.matched_entry_id) AS headline
-    FROM page CROSS JOIN params
-    ORDER BY page.score DESC, page.activity_micros DESC, page.id DESC`;
+    -- Snippets only for the rows returned (not the look-ahead row), from a bounded prefix.
+    SELECT r.id, r.title, r.owner_user_id, r.project_id, r.agent_id,
+           r.agent_version, r.status, r.shared_to_project,
+           r.activity_micros::text AS activity_micros, r.score, r.matched_entry_id,
+           CASE WHEN r.rn <= ${p.limit} AND r.matched_entry_id IS NOT NULL THEN
+             (SELECT ts_headline(${TS_CONFIG}::regconfig,
+                                 left(translate(kobe_entry_search_text(e.type, e.payload),
+                                                ${HIGHLIGHT_START + HIGHLIGHT_STOP}, ''),
+                                      ${HEADLINE_INPUT_CHARS}),
+                                 params.tsq, ${HEADLINE_OPTIONS})
+              FROM thread_entries e
+              WHERE e.team_id = ${teamId} AND e.thread_id = r.id
+                AND e.entry_id = r.matched_entry_id)
+           END AS headline
+    FROM ranked r CROSS JOIN params
+    ORDER BY r.rn`;
 }

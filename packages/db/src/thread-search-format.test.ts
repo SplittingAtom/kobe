@@ -6,11 +6,21 @@ import {
   encodeCursor,
   parseSnippet,
   searchThreadsInputSchema,
+  splitQuery,
 } from "./thread-search-format.js";
 
 const id = "0b6f1c3e-6a54-4f4e-9d61-3f0b2d1c9a10";
 
+const enc = (v: unknown): string => Buffer.from(JSON.stringify(v)).toString("base64url");
+
 describe("search cursor", () => {
+  it.each(["9223372036854775807", "-9223372036854775808", "0"])(
+    "accepts micros %s (bigint range)",
+    (a) => {
+      expect(decodeCursor(enc({ s: 0, a, i: id }))).toEqual({ score: 0, activityMicros: a, id });
+    },
+  );
+
   it("round-trips score, microseconds and id exactly", () => {
     const cursor = { score: 0.06079271038174629, activityMicros: "1790000000123456", id };
     expect(decodeCursor(encodeCursor(cursor))).toEqual(cursor);
@@ -29,6 +39,9 @@ describe("search cursor", () => {
       Buffer.from(JSON.stringify({ s: 1, a: "1; drop", i: id })).toString("base64url"),
     ],
     ["negative score", Buffer.from(JSON.stringify({ s: -1, a: "1", i: id })).toString("base64url")],
+    ["micros above bigint", enc({ s: 1, a: "9223372036854775808", i: id })],
+    ["micros below bigint", enc({ s: 1, a: "-9223372036854775809", i: id })],
+    ["20-digit micros", enc({ s: 1, a: "99999999999999999999", i: id })],
   ])("rejects %s", (_label, encoded) => {
     expect(decodeCursor(encoded)).toBeNull();
   });
@@ -62,6 +75,7 @@ describe("searchThreadsInputSchema", () => {
       query: "hi",
       projectIds: [],
       limit: 20,
+      timeoutMs: 3000,
     });
   });
 
@@ -69,5 +83,19 @@ describe("searchThreadsInputSchema", () => {
     expect(() =>
       searchThreadsInputSchema.parse({ viewerUserId: id, query: "x", teamId: id }),
     ).toThrow();
+  });
+});
+
+describe("splitQuery (web-search syntax)", () => {
+  it.each([
+    ["qwerty -asdfgh", "qwerty", ["asdfgh"]],
+    ['"zebra report" -"old draft" notes', "zebra report notes", ['"old draft"']],
+    ["charts or graphs", "charts graphs", []],
+    ["-alpha -beta", "", ["alpha", "beta"]],
+    ['-"unterminated phrase', "", ['"unterminated phrase"']],
+    ["e-mail - dash", "e-mail dash", []],
+    ["  spaced   words ", "spaced words", []],
+  ])("%s", (query, positive, excluded) => {
+    expect(splitQuery(query)).toEqual({ positive, excluded });
   });
 });

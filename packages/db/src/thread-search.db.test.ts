@@ -5,6 +5,7 @@ import { createDb, type KobeDatabase, type KobeTx } from "./client.js";
 import { teamMembers, teams, threadEntries, threads, users } from "./schema/index.js";
 import {
   searchThreads,
+  ThreadSearchError,
   type SearchThreadsInput,
   type ThreadSearchHit,
   type ThreadSearchPage,
@@ -242,6 +243,33 @@ describe("matching (ac-1)", () => {
     expect(await ids(teamA, { viewerUserId: me, query: "ocelot" })).toEqual([thread]);
   });
 
+  it("applies exclusions and phrases to the title trigram path too (review 2)", async () => {
+    const me = await newUser(teamA);
+    await newThread(teamA, { ownerUserId: me, title: "qwerty asdfgh" });
+    const kept = await newThread(teamA, { ownerUserId: me, title: "qwerty notes" });
+    const draft = await newThread(teamA, { ownerUserId: me, title: "qwerty old draft" });
+    expect((await ids(teamA, { viewerUserId: me, query: "qwerty -asdfgh" })).sort()).toEqual(
+      [kept, draft].sort(),
+    );
+    const excluded = await ids(teamA, { viewerUserId: me, query: 'qwert -asdfgh -"old draft"' });
+    expect(excluded).toEqual([kept]);
+    // A quoted phrase is trigram-matched on its words, without the quotes.
+    expect((await ids(teamA, { viewerUserId: me, query: '"qwerty notes"' }))[0]).toBe(kept);
+  });
+
+  it("matches terms within one message, not across messages (per-entry co-occurrence)", async () => {
+    const me = await newUser(teamA);
+    const together = await newThread(teamA, {
+      ownerUserId: me,
+      entries: [userMsg("mongoose and meerkat")],
+    });
+    await newThread(teamA, {
+      ownerUserId: me,
+      entries: [userMsg("mongoose only"), assistantMsg(text("meerkat only"))],
+    });
+    expect(await ids(teamA, { viewerUserId: me, query: "mongoose meerkat" })).toEqual([together]);
+  });
+
   it("returns nothing for a query of only stop words", async () => {
     const me = await newUser(teamA);
     await newThread(teamA, { ownerUserId: me, entries: [userMsg("the and of")] });
@@ -429,11 +457,65 @@ describe("input validation (ac-5)", () => {
     ["a bad project id", { projectIds: ["nope"] }],
     ["a limit over 50", { limit: 51 }],
     ["a tampered cursor", { cursor: "eyJzIjoiMSJ9" }],
-  ])("rejects %s", async (_label, override) => {
+    [
+      "a cursor outside the bigint range",
+      {
+        cursor: Buffer.from(
+          JSON.stringify({ s: 1, a: "99999999999999999999", i: randomUUID() }),
+        ).toString("base64url"),
+      },
+    ],
+    ["a negation-only query", { query: '-alpha -"beta gamma"' }],
+  ])("rejects %s with a typed error and no database round trip", async (_label, override) => {
     const me = await newUser(teamA);
-    await expect(
-      search(teamA, { viewerUserId: me, query: "valid", ...override } as SearchThreadsInput),
-    ).rejects.toThrow(/searchThreads/);
+    const err = await search(teamA, {
+      viewerUserId: me,
+      query: "valid",
+      ...override,
+    } as SearchThreadsInput).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(ThreadSearchError);
+    expect(err).toMatchObject({ code: "invalid_input" });
+    expect((err as Error).message).toMatch(/^searchThreads: /);
+  });
+});
+
+describe("statement timeout (review 3)", () => {
+  it("maps a timeout to a typed error without SQL or parameters, and keeps the caller's transaction usable", async () => {
+    const me = await newUser(teamA);
+    await newThread(teamA, { ownerUserId: me, entries: [userMsg("blocked puffin")] });
+    // An ACCESS EXCLUSIVE lock held elsewhere makes the search wait until its statement timeout.
+    const locker = await owner.pool.connect();
+    try {
+      await locker.query("BEGIN");
+      await locker.query("LOCK TABLE thread_entries IN ACCESS EXCLUSIVE MODE");
+      const outcome = await withTeam(app.db, teamA, async (tx) => {
+        const err = await searchThreads(tx, {
+          viewerUserId: me,
+          query: "puffin",
+          timeoutMs: 200,
+        }).then(
+          () => undefined,
+          (e: unknown) => e,
+        );
+        // The search ran in a savepoint: the caller's transaction and its settings survive.
+        const after = await tx.execute<{ team: string; timeout: string }>(
+          sql`SELECT current_setting('kobe.team_id') AS team, current_setting('statement_timeout') AS timeout`,
+        );
+        return { err, after: after.rows[0] };
+      });
+      expect(outcome.err).toBeInstanceOf(ThreadSearchError);
+      expect(outcome.err).toMatchObject({ code: "timeout" });
+      const message = (outcome.err as Error).message;
+      expect(message).not.toMatch(/select|websearch|puffin|Failed query/i);
+      expect(outcome.after).toEqual({ team: teamA, timeout: "0" });
+    } finally {
+      await locker.query("ROLLBACK");
+      locker.release();
+    }
+    expect(await ids(teamA, { viewerUserId: me, query: "puffin" })).toHaveLength(1);
   });
 });
 

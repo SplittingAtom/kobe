@@ -39,6 +39,8 @@ const teamRef = () =>
  * `tsv` (§5.4; the title, weight A) is a stored generated column added in SQL by migration
  * `*_thread_search.sql`, like `thread_entries.tsv`; neither is declared here (the entry column depends
  * on a SQL function) and the app never writes or selects them. Search: `searchThreads`.
+ * **Never run `drizzle-kit push`** against a Kobe database: it diffs the live schema against these
+ * declarations and would drop both `tsv` columns (and anything else SQL-only). Migrations only.
  */
 export const threads = pgTable(
   "threads",
