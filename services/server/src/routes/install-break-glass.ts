@@ -42,6 +42,8 @@ type Ctx = Context<{ Variables: AuthVariables }>;
 
 /** Reads per install admin and minute, across replicas (every read is an audited transaction). */
 export const BREAK_GLASS_READ_LIMIT = { windowMs: 60_000, max: 120 } as const;
+/** Requests per install admin and hour: each one emails every other install admin. */
+export const BREAK_GLASS_REQUEST_LIMIT = { windowMs: 3_600_000, max: 10 } as const;
 
 const ERRORS = {
   team_not_found: [404, "No team with that id."],
@@ -63,6 +65,10 @@ const ERRORS = {
     "You already have 3 open break-glass requests. Withdraw one or wait for a decision.",
   ],
   rate_limited: [429, "Too many break-glass reads. Wait a minute and continue."],
+  request_rate_limited: [
+    429,
+    "Too many break-glass requests in the last hour. Each one notifies every install admin.",
+  ],
   grant_not_active: [
     403,
     "This grant doesn't give access now: it is pending, ended, or you are no longer an install admin.",
@@ -195,7 +201,11 @@ export function installBreakGlassRoutes(deps: ServerDeps): Hono<{ Variables: Aut
         "Give the team, a reason (10-2000 characters), a duration of 5-1440 minutes, and at most one of userId or threadId.",
       );
     }
-    return respond(c, await requestGrant(db, c.get("user").id, body), 201);
+    const viewer = c.get("user").id;
+    if (!(await hitRateLimit(db, `break-glass-request:${viewer}`, BREAK_GLASS_REQUEST_LIMIT))) {
+      return fail(c, "request_rate_limited");
+    }
+    return respond(c, await requestGrant(db, viewer, body), 201);
   });
 
   app.get("/:id", async (c) => {

@@ -23,7 +23,7 @@ import { activeInstallAdmins, getGrant, type GrantDetail, type GrantRow } from "
  * Durable break-glass notifications (spec D10: team admins are notified). Recipients are chosen
  * and one outbox row per recipient is written **in the transaction that changes the grant**, so a
  * committed approval always has its notifications queued, even if SMTP is down or the replica
- * restarts right after. Delivery (`deliverBreakGlassNotifications`) runs right after the commit
+ * restarts right after. Delivery is at least once (a crash after sending resends). Delivery (`deliverBreakGlassNotifications`) runs right after the commit
  * and again from every replica's sweep, with backoff; a notification that gives up is audited.
  *
  * Who is told:
@@ -227,8 +227,10 @@ async function settle(
 }
 
 /**
- * Sends due notifications (all, or one grant's), each at most once: rows are claimed with a lease,
- * marked sent on success, retried with backoff on failure. Never throws; returns how many were sent.
+ * Sends due notifications (all, or one grant's) **at least once**: rows are claimed with a lease,
+ * marked sent after the SMTP server accepted the message, retried with backoff on failure. A crash
+ * (or a failed status update) between the send and the mark resends after the lease, so a
+ * recipient may get a duplicate; never none. Never throws; returns how many were sent.
  */
 export async function deliverBreakGlassNotifications(
   deps: ServerDeps,

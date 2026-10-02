@@ -534,7 +534,7 @@ describe("readWithBreakGlass", () => {
     expect(await reads(id)).toEqual([]);
   });
 
-  it("lets a read that started inside the window finish after it ends; the next is refused", async () => {
+  it("a read held up past expiry returns nothing (RLS checks per statement); the next is refused", async () => {
     const id = await approved();
     await admin.query(`SET session_replication_role = replica`);
     await admin.query(
@@ -552,7 +552,8 @@ describe("readWithBreakGlass", () => {
       await blocker.query("COMMIT");
       const result = await inFlight;
       if (result.kind !== "threads") throw new Error("kind");
-      expect(result.threads.length).toBe(2);
+      // It passed the grant check before expiry, but the read statement runs after it.
+      expect(result.threads).toEqual([]);
     } finally {
       await blocker.end();
     }

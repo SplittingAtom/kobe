@@ -186,6 +186,8 @@ afterEach(async () => {
        ended_at = now() WHERE status = 'pending'`,
   );
   await admin.query(`SET session_replication_role = origin`);
+  // Requests are rate-limited per admin and hour; tests make many.
+  await admin.query(`DELETE FROM rate_limits WHERE key LIKE 'kobe:break-glass-request:%'`);
 });
 
 async function waitForAppSessionsToClose(): Promise<void> {
@@ -736,6 +738,19 @@ describe("durable notifications and limits", () => {
       reason: "Incident 42: suspected data exfiltration",
     });
     expect([res.status, res.json.code]).toEqual([429, "too_many_pending"]);
+  });
+
+  it("rate-limits requests per admin (each one emails every install admin)", async () => {
+    await admin.query(
+      `INSERT INTO rate_limits (key, count, last_request) VALUES ($1, 10, $2)
+       ON CONFLICT (key) DO UPDATE SET count = 10, last_request = $2`,
+      [`kobe:break-glass-request:${ids.investigator}`, Date.now()],
+    );
+    const res = await as.investigator.post("/v1/install/break-glass", {
+      teamId: finance,
+      reason: "Incident 42: suspected data exfiltration",
+    });
+    expect([res.status, res.json.code]).toEqual([429, "request_rate_limited"]);
   });
 
   it("rate-limits reads per admin", async () => {

@@ -10,7 +10,7 @@ export const BREAK_GLASS_SWEEP_INTERVAL_MS = 60_000;
  * Records `governance.break_glass.expired` for grants whose window ended (and requests that lapsed
  * undecided), then delivers every due notification, including retries of earlier failures (D10:
  * auto-expiring, notified). Runs on every replica; rows are claimed with SKIP LOCKED, so each
- * expiry is recorded once and each email sent once.
+ * expiry is recorded once; emails are delivered at least once (see outbox.ts).
  */
 export async function sweepBreakGlass(deps: ServerDeps): Promise<number> {
   const expired = await expireDueGrants(deps.database.db);

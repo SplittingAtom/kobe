@@ -146,7 +146,9 @@ CREATE TRIGGER "break_glass_grants_guard" BEFORE INSERT OR UPDATE ON "break_glas
 
 -- The grant the current transaction reads under (D10: "a break_glass_grants row that RLS policies
 -- honor only while unexpired, for the named admin, read-only"): zero or one row, and only when
--- kobe.break_glass_grant names an approved grant inside its window (now() = transaction start),
+-- kobe.break_glass_grant names an approved grant inside its window, checked per statement
+-- (statement_timestamp(): a long transaction loses access at expiry, and sees an approval that
+-- committed after it began),
 -- requested by kobe.break_glass_actor, who is still an active install admin. Unset settings
 -- (every normal request) match nothing.
 CREATE FUNCTION "public"."break_glass_active_grant"()
@@ -158,7 +160,8 @@ CREATE FUNCTION "public"."break_glass_active_grant"()
   JOIN "public"."install_roles" r ON r.user_id = g.admin_id
   WHERE g.id = NULLIF(current_setting('kobe.break_glass_grant', true), '')::uuid
     AND g.admin_id = NULLIF(current_setting('kobe.break_glass_actor', true), '')::uuid
-    AND g.status = 'approved' AND g.starts_at <= now() AND g.expires_at > now()
+    AND g.status = 'approved'
+    AND g.starts_at <= statement_timestamp() AND g.expires_at > statement_timestamp()
 $$;--> statement-breakpoint
 
 -- SELECT only: no INSERT, UPDATE or DELETE path exists under a grant (writes still need the

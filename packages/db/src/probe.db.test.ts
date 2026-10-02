@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { sql } from "drizzle-orm";
+import pg from "pg";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createDb, type KobeDatabase } from "./client.js";
 import { quoteIdent } from "./roles.js";
@@ -129,6 +130,32 @@ describe("break-glass probe", () => {
     });
   }
 
+  let approver = "";
+
+  /** An approved grant for team A, optionally narrowed (the trigger applies as in production). */
+  async function approvedGrant(
+    narrow: { userId?: string; threadId?: string } = {},
+  ): Promise<string> {
+    const { rows } = await app.pool.query<{ id: string }>(
+      `INSERT INTO break_glass_grants (team_id, admin_id, user_id, thread_id, reason)
+       VALUES ($1, $2, $3, $4, 'probe') RETURNING id`,
+      [teamA, requester, narrow.userId ?? null, narrow.threadId ?? null],
+    );
+    const id = rows[0]?.id ?? "";
+    await app.pool.query(
+      `UPDATE break_glass_grants SET status = 'approved', approver_id = $2 WHERE id = $1`,
+      [id, approver],
+    );
+    return id;
+  }
+
+  const rowsUnder = (grant: string, query: string) =>
+    asGrant(
+      async (tx) => (await tx.execute<Record<string, string>>(sql.raw(query))).rows,
+      requester,
+      grant,
+    );
+
   const teamIdsUnderGrant = (table: string, actor?: string) =>
     asGrant(async (tx) => {
       const r = await tx.execute<{ team_id: string }>(
@@ -147,6 +174,7 @@ describe("break-glass probe", () => {
       await app.pool.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, 'admin')`, [id]);
     }
     requester = admins[0] ?? "";
+    approver = admins[1] ?? "";
     const { rows } = await app.pool.query<{ id: string }>(
       `INSERT INTO break_glass_grants (team_id, admin_id, reason) VALUES ($1, $2, 'probe') RETURNING id`,
       [teamA, requester],
@@ -184,6 +212,115 @@ describe("break-glass probe", () => {
         return [updated.rowCount, deleted.rowCount];
       });
       expect(counts).toEqual([0, 0]);
+    });
+  });
+
+  describe("scoped grants on the readable tables", () => {
+    let subject = "";
+    let thread = "";
+
+    beforeAll(async () => {
+      // A team A thread that has entries (from the thread_entries fixture), and its owner.
+      const [row] = await withTeam(
+        app.db,
+        teamA,
+        async (tx) =>
+          (
+            await tx.execute<{ thread_id: string; owner: string }>(
+              sql`SELECT e.thread_id, t.owner_user_id AS owner FROM thread_entries e
+                JOIN threads t ON t.team_id = e.team_id AND t.id = e.thread_id LIMIT 1`,
+            )
+          ).rows,
+      );
+      subject = row?.owner ?? "";
+      thread = row?.thread_id ?? "";
+    });
+
+    it("a user grant shows only that user's threads and their entries", async () => {
+      const id = await approvedGrant({ userId: subject });
+      const threads = await rowsUnder(id, `SELECT team_id, owner_user_id FROM threads`);
+      expect(threads.length).toBeGreaterThan(0);
+      expect(threads.every((t) => t.team_id === teamA && t.owner_user_id === subject)).toBe(true);
+      const entries = await rowsUnder(id, `SELECT team_id, thread_id FROM thread_entries`);
+      expect(entries.length).toBeGreaterThan(0);
+      expect(entries.every((e) => e.team_id === teamA && e.thread_id === thread)).toBe(true);
+    });
+
+    it("a thread grant shows only that thread and its entries", async () => {
+      const id = await approvedGrant({ threadId: thread });
+      expect(await rowsUnder(id, `SELECT id FROM threads`)).toEqual([{ id: thread }]);
+      const entries = await rowsUnder(id, `SELECT thread_id FROM thread_entries`);
+      expect(entries.length).toBeGreaterThan(0);
+      expect(entries.every((e) => e.thread_id === thread)).toBe(true);
+    });
+
+    it("an expired grant shows nothing, whatever the settings claim", async () => {
+      const id = await approvedGrant();
+      const admin = new pg.Client({ connectionString: inject("adminUrl") });
+      await admin.connect();
+      try {
+        await admin.query(`SET session_replication_role = replica`);
+        await admin.query(
+          `UPDATE break_glass_grants SET starts_at = now() - interval '2 hours',
+             expires_at = now() - interval '1 second' WHERE id = $1`,
+          [id],
+        );
+      } finally {
+        await admin.end();
+      }
+      for (const table of BREAK_GLASS_READABLE_TABLES) {
+        expect(await rowsUnder(id, `SELECT team_id FROM ${quoteIdent(table)}`)).toEqual([]);
+      }
+    });
+
+    it("a grant stops at its expiry inside a long transaction (per-statement check)", async () => {
+      const id = await approvedGrant();
+      const admin = new pg.Client({ connectionString: inject("adminUrl") });
+      await admin.connect();
+      try {
+        await admin.query(`SET session_replication_role = replica`);
+        await admin.query(
+          `UPDATE break_glass_grants SET expires_at = now() + interval '2 seconds' WHERE id = $1`,
+          [id],
+        );
+      } finally {
+        await admin.end();
+      }
+      const [before, after] = await asGrant(
+        async (tx) => {
+          const first = await tx.execute(sql`SELECT 1 FROM threads`);
+          await tx.execute(sql`SELECT pg_sleep(2.5)`);
+          const second = await tx.execute(sql`SELECT 1 FROM threads`);
+          return [first.rows.length, second.rows.length];
+        },
+        requester,
+        id,
+      );
+      expect(before).toBeGreaterThan(0);
+      expect(after).toBe(0);
+    });
+
+    it("sees an approval that committed after the transaction began", async () => {
+      const { rows } = await app.pool.query<{ id: string }>(
+        `INSERT INTO break_glass_grants (team_id, admin_id, reason) VALUES ($1, $2, 'probe') RETURNING id`,
+        [teamA, requester],
+      );
+      const id = rows[0]?.id ?? "";
+      const seen = await asGrant(
+        async (tx) => {
+          const pending = await tx.execute(sql`SELECT 1 FROM threads`);
+          await app.pool.query(
+            `UPDATE break_glass_grants SET status = 'approved', approver_id = $2 WHERE id = $1`,
+            [id, approver],
+          );
+          const approved = await tx.execute(sql`SELECT 1 FROM threads`);
+          return [pending.rows.length, approved.rows.length];
+        },
+        requester,
+        id,
+      );
+      expect(seen[0]).toBe(0);
+      expect(seen[1]).toBeGreaterThan(0);
     });
   });
 

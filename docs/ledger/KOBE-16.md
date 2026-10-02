@@ -120,9 +120,16 @@ transaction_read_only = on`; (5) the read, filtered by RLS and again by the quer
   active grant → active team admins of the team, active install admins, subject unless legal hold;
   denial/withdrawal/lapse → requester. The acting person isn't mailed; under legal hold the subject
   is in no list.
-- **Reads may overrun the window by up to the statement timeout (10 s):** a read that passed the
-  grant check before `expires_at` finishes (RLS evaluates `now()`, the transaction start); the next
-  read is refused (test "read in flight at expiry").
+- **Expiry is checked per statement** (`statement_timestamp()` in `break_glass_active_grant()`): a
+  long transaction loses access at `expires_at`, and a transaction sees an approval that committed
+  after it began. A read held up past expiry (e.g. waiting for the audit chain) passes the app-side
+  check but its query returns nothing (tests in the probe suite and the reader suite).
+- **The settings are self-asserted by the app role.** `kobe.break_glass_grant` /
+  `kobe.break_glass_actor` are ordinary transaction-local settings any app-role connection can
+  set. The policies limit the blast radius (only an approved, unexpired grant whose requester is
+  that active install admin; only its team and scope; SELECT only), but they don't authenticate the
+  admin, and they don't guarantee an audit row: those come from `readWithBreakGlass()` (session
+  user as actor, audit before read). Code that sets the settings elsewhere bypasses the audit.
 - **Approver deactivation doesn't end a grant:** the approval was valid when given (D10 is silent).
   Requester deactivation or demotion does end access at the next read. Revisit if Chris wants
   approver loss to revoke.
@@ -174,6 +181,23 @@ transaction_read_only = on`; (5) the read, filtered by RLS and again by the quer
    failed send stays pending and the sweep retries it (and a final failure is audited); Origin check
    on POST routes; a read in flight at expiry finishes and the next is refused; a self-approval
    racing a promotion waits and is refused.
+
+## Coordinator DB review (PR #34), status
+
+- **MEDIUM statement_timestamp():** done (function, catalog pin, probe tests for the 2-s long
+  transaction and for an approval committed after BEGIN; the reader test now expects an empty
+  result for a read held past expiry).
+- **MEDIUM exact pin:** the catalog check compares each `break_glass_read` USING clause exactly
+  (whitespace-normalized), its role targeting and the function body; the probe suite adds
+  user-scope and thread-scope grants on `threads`/`thread_entries`, and an expired window with
+  forged settings.
+- **LOW:** settings self-asserted (above); outbox comments say at-least-once; per-admin request
+  limit (10 per hour, 429 `request_rate_limited`).
+- **HIGH performance (PERMISSIVE policy ORs with the team policy):** reproduced (200 teams × 500
+  entries: `count(*)` on `thread_entries` 0.08 → 5.3 ms, plan loses the index; RLS-only point
+  lookup on `threads` 0.04 → 0.48 ms, index scan → bitmap). **Not fixed yet: the dedicated-role
+  approach has a provisioning/ordering blocker, reported to the coordinator before choosing**
+  (see the PR comment / report).
 
 ## Open questions (for Chris or the coordinator)
 
