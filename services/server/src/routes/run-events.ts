@@ -1,10 +1,9 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { decideStreamOpen, resolveResumeCursor } from "@kobe/protocol";
-import { getMembership, sessions, sql, eq, and } from "@kobe/db";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
+import { teamRoleAllows } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
-import { loadRun, readPage } from "../event-stream/read.js";
 import { createRunEventStream, type StreamSource } from "../event-stream/stream.js";
 import { canWatchThread } from "../event-stream/visibility.js";
 
@@ -15,15 +14,6 @@ const SSE_HEADERS = {
   "cache-control": "no-cache",
   "x-accel-buffering": "no",
 } as const;
-
-/** Whether the Better Auth session still exists and has not expired. */
-async function sessionIsLive(deps: ServerDeps, sessionId: string): Promise<boolean> {
-  const rows = await deps.database.db
-    .select({ id: sessions.id })
-    .from(sessions)
-    .where(and(eq(sessions.id, sessionId), sql`${sessions.expiresAt} > now()`));
-  return rows.length > 0;
-}
 
 /** Under @hono/node-server, `c.env.outgoing` is the Node response; destroying it drops the socket. */
 function nodeResponseDestroyer(env: unknown): (() => void) | undefined {
@@ -39,8 +29,7 @@ function nodeResponseDestroyer(env: unknown): (() => void) | undefined {
  */
 export function runEventsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();
-  const db = deps.database.db;
-  const { hub, timings } = deps.eventStream;
+  const { hub, reader, timings } = deps.eventStream;
   app.use(requireTeam(deps));
 
   app.get("/:runId/events", requireTeamPermission("team.chat"), async (c) => {
@@ -61,8 +50,17 @@ export function runEventsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariabl
     const team = c.get("team");
     const user = c.get("user");
     const sessionId = c.get("sessionId");
-    const run = await loadRun(db, team.id, runId);
+    const run = await reader.loadRun(team.id, runId);
     if (!run || !canWatchThread(run, user.id)) return notFound();
+    // No honest client holds a seq the run hasn't issued (seq is assigned on commit). Refuse it
+    // instead of waiting for it, which also ends EventSource's reconnect loop (non-200 stops it).
+    // Ended runs answer 204 below, per the contract.
+    if (!run.ended && !run.compacted && cursor.after > run.lastSeq) {
+      return c.json(
+        { code: "invalid_cursor", message: "The cursor is beyond this run's last event." },
+        400,
+      );
+    }
 
     const decision = decideStreamOpen({
       ended: run.ended,
@@ -92,12 +90,15 @@ export function runEventsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariabl
     }
 
     const source: StreamSource = {
-      read: (after) => readPage(db, team.id, runId, after),
+      read: (after) => reader.readPage(team.id, runId, after),
       async revalidate() {
-        if (!(await sessionIsLive(deps, sessionId))) return false;
-        if ((await getMembership(db, team.id, user.id)) === null) return false;
-        const current = await loadRun(db, team.id, runId);
-        return current !== null && canWatchThread(current, user.id);
+        const access = await reader.access({ teamId: team.id, runId, userId: user.id, sessionId });
+        return (
+          access.sessionLive &&
+          teamRoleAllows(access.role, "team.chat") &&
+          access.ownerUserId !== null &&
+          canWatchThread({ ownerUserId: access.ownerUserId }, user.id)
+        );
       },
     };
     const body = createRunEventStream({

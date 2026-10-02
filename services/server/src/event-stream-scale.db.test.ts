@@ -1,9 +1,11 @@
 import http from "node:http";
+import net from "node:net";
 import type { AddressInfo } from "node:net";
 import { serve, type ServerType } from "@hono/node-server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { KobeEvent } from "@kobe/protocol";
 import { appendRunEvents } from "./event-stream/append.js";
+import { createRunEventHub } from "./event-stream/hub.js";
 import {
   EventStreamFixture,
   delta,
@@ -162,6 +164,67 @@ describe("LISTEN connection loss (ac-2)", () => {
     expect(Date.now() - t1).toBeLessThan(2_000);
     await fx.complete(team, run);
     expect(seqs(await reader.rest())).toEqual([3]);
+  }, 30_000);
+});
+
+describe("half-open LISTEN connection (review LOW-9)", () => {
+  it("notices a silent connection by ping timeout, reconnects and resyncs", async () => {
+    const owner = await fx.person("halfopen");
+    const team = await fx.team("halfopenteam", owner);
+    const run = await fx.run(team, owner);
+
+    // A TCP proxy that can silently swallow traffic, like a dead NAT entry: no FIN, no RST.
+    const target = new URL(fx.database.appUrl);
+    const pairs: { client: net.Socket; upstream: net.Socket; frozen: boolean }[] = [];
+    const proxy = net.createServer((client) => {
+      const upstream = net.connect(Number(target.port || 5432), target.hostname);
+      const pair = { client, upstream, frozen: false };
+      pairs.push(pair);
+      client.on("data", (d) => void (pair.frozen || upstream.write(d)));
+      upstream.on("data", (d) => void (pair.frozen || client.write(d)));
+      const end = () => {
+        client.destroy();
+        upstream.destroy();
+      };
+      client.on("error", end).on("close", end);
+      upstream.on("error", end).on("close", end);
+    });
+    await new Promise<void>((r) => proxy.listen(0, "127.0.0.1", () => r()));
+    const via = new URL(fx.database.appUrl);
+    via.hostname = "127.0.0.1";
+    via.port = String((proxy.address() as AddressInfo).port);
+
+    const hub = createRunEventHub({
+      connectionString: via.toString(),
+      pingMs: 200,
+      pingTimeoutMs: 500,
+      reconnectMinMs: 50,
+      resyncJitterMs: 0,
+    });
+    const hints: number[] = [];
+    let resyncs = 0;
+    hub.subscribe(run, {
+      hint: (seq) => hints.push(seq),
+      resync: () => (resyncs += 1),
+      close: () => undefined,
+    });
+    try {
+      await waitFor(() => hub.state === "listening");
+      for (const p of pairs) p.frozen = true;
+      const before = resyncs;
+      await waitFor(() => hub.state !== "listening", 5_000);
+      await waitFor(() => hub.state === "listening", 10_000);
+      expect(resyncs).toBeGreaterThan(before);
+      await appendRunEvents(fx.db, team, run, [delta("after half-open")]);
+      await waitFor(() => hints.includes(1), 5_000);
+    } finally {
+      await hub.close();
+      for (const p of pairs) {
+        p.client.destroy();
+        p.upstream.destroy();
+      }
+      await new Promise<void>((r) => proxy.close(() => r()));
+    }
   }, 30_000);
 });
 

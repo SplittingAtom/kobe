@@ -6,6 +6,7 @@ import { sql, withTeam } from "@kobe/db";
 import {
   AppendError,
   MAX_APPEND_BATCH,
+  MAX_EVENT_PAYLOAD_BYTES,
   appendRunEvents,
   appendRunEventsInTx,
 } from "./event-stream/append.js";
@@ -13,7 +14,13 @@ import { createRunEventBatcher } from "./event-stream/batcher.js";
 import { RUN_EVENTS_CHANNEL } from "./event-stream/notify.js";
 import { addMember } from "./teams/members.js";
 import { SseReader } from "./testing/sse.js";
-import { EventStreamFixture, delta, range, type Person } from "./testing/event-stream-fixture.js";
+import {
+  EventStreamFixture,
+  delta,
+  range,
+  seededRandom,
+  type Person,
+} from "./testing/event-stream-fixture.js";
 
 // Replica 0 and 1: keep-alive far away, so live delivery below proves the NOTIFY path.
 // Replica 2: fast timers for revocation and per-user caps.
@@ -45,6 +52,20 @@ afterAll(() => fx.teardown());
 
 const seqs = (events: readonly KobeEvent[]) => events.map((e) => e.seq);
 
+/** Waits until some backend is blocked on a lock while touching `runId` (B queued behind A). */
+async function waitForLockWaiter(runId: string): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const { rows } = await fx.admin.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock'`,
+    );
+    if ((rows[0]?.n ?? 0) > 0) return;
+    if (Date.now() > deadline) throw new Error(`no lock waiter for run ${runId}`);
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
 describe("append (ac-1)", () => {
   it("validates, assigns gapless seq and returns envelopes", async () => {
     const run = await fx.run(finance, alice);
@@ -75,6 +96,11 @@ describe("append (ac-1)", () => {
         appendRunEvents(fx.db, finance, run, [{ type: "text.delta", payload: { delta: "x" } }]),
       ),
     ).toBe("invalid_event");
+    expect(
+      await code(
+        appendRunEvents(fx.db, finance, run, [delta("x".repeat(MAX_EVENT_PAYLOAD_BYTES))]),
+      ),
+    ).toBe("payload_too_large");
     expect(await code(appendRunEvents(fx.db, finance, run, [delta("a\u0000b")]))).toBe(
       "invalid_event",
     );
@@ -110,6 +136,37 @@ describe("append (ac-1)", () => {
     });
     expect(await fx.seqsInDb(finance, run)).toEqual([1]);
   });
+
+  it.each([
+    ["run.completed", { leaf_entry_id: null }],
+    ["run.interrupted", { reason: "cancelled", last_entry_id: null, retryable: false }],
+  ] as const)(
+    "refuses an append that waited on the run lock behind a terminal %s (review HIGH-1)",
+    async (type, payload) => {
+      const run = await fx.run(finance, alice);
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      let appended!: () => void;
+      const terminalWritten = new Promise<void>((r) => (appended = r));
+      // A: the orchestrator ends the run and holds its transaction open.
+      const a = withTeam(fx.db, finance, async (tx) => {
+        await appendRunEventsInTx(tx, finance, run, [{ type, payload }]);
+        appended();
+        await gate;
+      });
+      await terminalWritten;
+      // B: a batcher flush for the same run, which must wait for A's row lock.
+      const b = appendRunEvents(fx.replica(1).deps.database.db, finance, run, [delta("late")]).then(
+        () => "ok",
+        (e: unknown) => (e instanceof AppendError ? e.code : String(e)),
+      );
+      await waitForLockWaiter(run);
+      release();
+      await a;
+      expect(await b).toBe("run_finished");
+      expect(await fx.seqsInDb(finance, run)).toEqual([1]);
+    },
+  );
 
   it("hints fan-out with ids only, and only when the transaction commits", async () => {
     const run = await fx.run(finance, alice);
@@ -185,6 +242,38 @@ describe("GET /v1/runs/{id}/events (ac-3)", () => {
     expect((await fx.open(0, alice, run, { lastEventId: "x" })).status).toBe(400);
   });
 
+  it("refuses a cursor beyond the run's last seq, including beyond int4, without a reconnect loop (review MEDIUM-2)", async () => {
+    const run = await fx.run(finance, alice);
+    await appendRunEvents(fx.db, finance, run, [delta("x"), delta("y")]);
+    for (const cursor of ["3", "2147483648", "9007199254740991"]) {
+      const res = await fx.open(0, alice, run, { startingAfter: cursor });
+      expect(res.status, cursor).toBe(400);
+      expect(await res.json()).toMatchObject({ code: "invalid_cursor" });
+    }
+    expect((await fx.open(0, alice, run, { startingAfter: "2" })).status).toBe(200);
+    // The reader itself takes any safe-integer cursor (bigint comparison).
+    const page = await fx.replica(0).deps.eventStream.reader.readPage(finance, run, 2 ** 40);
+    expect(page).toMatchObject({ run: { lastSeq: 2 }, events: [] });
+    await fx.complete(finance, run);
+    expect((await fx.open(0, alice, run, { lastEventId: "2147483648" })).status).toBe(204);
+  });
+
+  it("coalesces concurrent reads of one run and reads on the stream pool, not the API pool (review MEDIUM-3)", async () => {
+    const run = await fx.run(finance, alice);
+    await appendRunEvents(fx.db, finance, run, [delta("x")]);
+    const reader = fx.replica(0).deps.eventStream.reader;
+    const a = reader.readPage(finance, run, 0);
+    const b = reader.readPage(finance, run, 0);
+    expect(a).toBe(b);
+    expect((await a).events).toHaveLength(1);
+    expect(reader.readPage(finance, run, 0)).not.toBe(a); // finished reads are not cached
+    const { rows } = await fx.admin.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM pg_stat_activity
+        WHERE datname = current_database() AND application_name = 'kobe-event-stream'`,
+    );
+    expect(rows[0]?.n).toBeGreaterThan(0);
+  });
+
   it("answers 204 for an ended run with nothing after the cursor", async () => {
     const run = await fx.run(finance, alice);
     await appendRunEvents(fx.db, finance, run, [delta("x")]);
@@ -228,17 +317,18 @@ describe("GET /v1/runs/{id}/events (ac-3)", () => {
   });
 
   it("resumes gapless and duplicate-free after disconnects at random points under concurrent appends (U4, Gate 1)", async () => {
+    const random = seededRandom("random-resume");
     const run = await fx.run(finance, alice);
     const writers = range(1, 3).map(async (w) => {
       for (let i = 0; i < 40; i++) {
-        const n = 1 + Math.floor(Math.random() * 6);
+        const n = 1 + Math.floor(random() * 6);
         await appendRunEvents(
           fx.replica(w % 2).deps.database.db,
           finance,
           run,
           range(1, n).map(() => delta(`w${w}-${i}`, `w${w}`)),
         );
-        if (Math.random() < 0.3) await new Promise((r) => setTimeout(r, Math.random() * 10));
+        if (random() < 0.3) await new Promise((r) => setTimeout(r, random() * 10));
       }
     });
     const done = Promise.all(writers).then(() => fx.complete(finance, run));
@@ -251,7 +341,7 @@ describe("GET /v1/runs/{id}/events (ac-3)", () => {
       if (res.status === 204) break;
       expect(res.status).toBe(200);
       const reader = new SseReader(res.body);
-      const take = 1 + Math.floor(Math.random() * 40);
+      const take = 1 + Math.floor(random() * 40);
       let ended = false;
       for (let i = 0; i < take; i++) {
         const e = await reader.nextEvent();
@@ -267,7 +357,7 @@ describe("GET /v1/runs/{id}/events (ac-3)", () => {
     }
     await done;
     const inDb = await fx.seqsInDb(finance, run);
-    expect(seqs(received)).toEqual(inDb);
+    expect(seqs(received), `KOBE_TEST_SEED=${random.seed}`).toEqual(inDb);
     expect(inDb).toEqual(range(1, inDb.length));
     expect(received.at(-1)?.type).toBe("run.completed");
     expect(reconnects).toBeGreaterThan(3);

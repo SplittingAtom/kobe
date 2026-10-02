@@ -204,3 +204,21 @@ export const delta = (text: string, message_id = "m1"): NewRunEvent => ({
 
 export const range = (from: number, to: number): number[] =>
   Array.from({ length: Math.max(0, to - from + 1) }, (_, i) => from + i);
+
+/**
+ * Seeded PRNG (mulberry32) for randomized tests. The seed comes from KOBE_TEST_SEED or the clock and
+ * is logged, so a failing interleaving can be replayed with `KOBE_TEST_SEED=<seed>`.
+ */
+export function seededRandom(label: string): (() => number) & { readonly seed: number } {
+  const seed = Number(process.env.KOBE_TEST_SEED ?? Date.now() % 2 ** 31) >>> 0;
+  console.info(`[${label}] KOBE_TEST_SEED=${seed}`);
+  let a = seed;
+  const next = () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  return Object.assign(next, { seed });
+}

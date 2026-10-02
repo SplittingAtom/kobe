@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { logger as rootLogger } from "../logger.js";
 import { decodeHint, RUN_EVENTS_CHANNEL } from "./notify.js";
@@ -36,6 +37,10 @@ export interface HubOptions {
   readonly degradedPollMs?: number;
   /** Health check of the LISTEN connection (detects half-open TCP). */
   readonly pingMs?: number;
+  /** A ping (or LISTEN, or the probe) not answered within this is a lost connection. */
+  readonly pingTimeoutMs?: number;
+  /** Resyncs after a (re)connect are spread over this window, one random delay per run. */
+  readonly resyncJitterMs?: number;
 }
 
 export const HUB_DEFAULTS = {
@@ -44,9 +49,12 @@ export const HUB_DEFAULTS = {
   reconnectMaxMs: 10_000,
   degradedPollMs: 1_000,
   pingMs: 30_000,
+  pingTimeoutMs: 10_000,
+  resyncJitterMs: 1_000,
 } as const;
 
-const PING_TIMEOUT_MS = 10_000;
+const CONNECT_TIMEOUT_MS = 10_000;
+const PROBE_PREFIX = "probe:";
 
 /**
  * Postgres LISTEN/NOTIFY fan-out for one server process (spec D16, no Redis). Exactly one dedicated
@@ -72,7 +80,29 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
     for (const set of byRun.values()) for (const s of [...set]) fn(s);
   };
 
+  /**
+   * Every subscriber re-reads, spread over `windowMs` with one random delay per run: the watchers
+   * of one run wake together (their reads coalesce into one query in the stream reader) while
+   * different runs don't all hit the database in the same instant.
+   */
+  const resyncAll = (windowMs: number) => {
+    for (const runId of byRun.keys()) {
+      const fire = () => {
+        const current = byRun.get(runId);
+        if (current) for (const s of [...current]) s.resync();
+      };
+      if (windowMs <= 0) fire();
+      else setTimeout(fire, Math.random() * windowMs).unref();
+    }
+  };
+
+  let probe: { nonce: string; resolve: () => void } | undefined;
+
   const dispatch = (payload: string | undefined) => {
+    if (payload?.startsWith(PROBE_PREFIX)) {
+      if (probe && payload === PROBE_PREFIX + probe.nonce) probe.resolve();
+      return;
+    }
     const hint = decodeHint(payload);
     if (!hint) return;
     const set = byRun.get(hint.runId);
@@ -80,7 +110,7 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
   };
 
   const startPolling = () => {
-    pollTimer ??= setInterval(() => each((s) => s.resync()), opts.degradedPollMs);
+    pollTimer ??= setInterval(() => resyncAll(opts.degradedPollMs), opts.degradedPollMs);
     pollTimer.unref();
   };
   const stopPolling = () => {
@@ -110,11 +140,15 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
     stopPing();
     lostClient.removeAllListeners("notification");
     lostClient.end().catch(() => undefined);
+    // end() waits for the server, which never answers on a half-open socket: drop the socket too.
+    (
+      lostClient as unknown as { connection?: { stream?: { destroy?: () => void } } }
+    ).connection?.stream?.destroy?.();
     if (state === "closed") return;
     state = "down";
     log.warn({ err }, "LISTEN connection lost; polling until it is back");
     startPolling();
-    each((s) => s.resync());
+    resyncAll(0);
     scheduleReconnect();
   };
 
@@ -125,7 +159,8 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
       connectionString: opts.connectionString,
       keepAlive: true,
       application_name: "kobe-event-hub",
-      query_timeout: PING_TIMEOUT_MS,
+      query_timeout: opts.pingTimeoutMs,
+      connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
     });
     client = next;
     next.on("notification", (msg) => {
@@ -136,6 +171,7 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
     try {
       await next.connect();
       await next.query(`LISTEN ${RUN_EVENTS_CHANNEL}`);
+      await probeDelivery(next);
     } catch (err) {
       lost(next, err);
       return;
@@ -153,8 +189,38 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
     }, opts.pingMs);
     pingTimer.unref();
     // Anything committed before LISTEN took effect was not heard: everyone re-reads once.
-    each((s) => s.resync());
+    resyncAll(opts.resyncJitterMs);
   };
+
+  /**
+   * Proves the session hears notifications: it notifies itself and waits for the echo. Behind a
+   * transaction-mode pooler (PgBouncer `pool_mode=transaction`) LISTEN "succeeds" on some backend
+   * and the echo never comes back; that is reported loudly and the hub stays in polling mode.
+   */
+  async function probeDelivery(c: pg.Client): Promise<void> {
+    const nonce = randomUUID();
+    let timer: NodeJS.Timeout | undefined;
+    const heard = new Promise<void>((resolve, reject) => {
+      probe = { nonce, resolve };
+      timer = setTimeout(
+        () =>
+          reject(
+            new Error(
+              "LISTEN connection does not receive notifications: KOBE_DATABASE_URL must reach " +
+                "Postgres directly or through a session-mode pooler (not transaction mode)",
+            ),
+          ),
+        opts.pingTimeoutMs,
+      );
+    });
+    try {
+      await c.query(`SELECT pg_notify($1, $2)`, [RUN_EVENTS_CHANNEL, PROBE_PREFIX + nonce]);
+      await heard;
+    } finally {
+      clearTimeout(timer);
+      probe = undefined;
+    }
+  }
 
   return {
     get state() {
@@ -206,6 +272,7 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       each((s) => s.close());
       byRun.clear();
+      probe = undefined;
       const current = client;
       client = undefined;
       if (current) {

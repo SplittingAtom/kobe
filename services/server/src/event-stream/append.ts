@@ -15,6 +15,13 @@ import { encodeHint, RUN_EVENTS_CHANNEL } from "./notify.js";
  */
 export const MAX_APPEND_BATCH = 64;
 
+/**
+ * Largest stored payload per event (UTF-8 JSON). Tool-result previews are capped at 64 KB by the
+ * protocol; tool inputs and entry payloads are not, so the stream bounds them here. Larger content
+ * belongs in S3 by `blob_ref` (D15).
+ */
+export const MAX_EVENT_PAYLOAD_BYTES = 256 * 1024;
+
 /** Lock wait for appends that own their transaction: a stuck status writer surfaces as an error. */
 export const APPEND_LOCK_TIMEOUT = "5s";
 
@@ -27,6 +34,7 @@ export interface NewRunEvent {
 export type AppendErrorCode =
   | "invalid_event" // unknown type or payload that fails its @kobe/protocol schema
   | "batch_too_large" // more than MAX_APPEND_BATCH events
+  | "payload_too_large" // one payload over MAX_EVENT_PAYLOAD_BYTES
   | "terminal_not_last" // a terminal run.* event followed by more events in the batch
   | "run_not_found" // no such run in the transaction's team
   | "run_finished"; // the run already has its terminal event
@@ -63,8 +71,15 @@ function validate(events: readonly NewRunEvent[]): ValidEvent[] {
     } catch (err) {
       throw new AppendError("invalid_event", `event ${i} (${event.type}): ${String(err)}`);
     }
+    const json = JSON.stringify(payload);
+    if (Buffer.byteLength(json, "utf8") > MAX_EVENT_PAYLOAD_BYTES) {
+      throw new AppendError(
+        "payload_too_large",
+        `event ${i} (${event.type}): payload over ${MAX_EVENT_PAYLOAD_BYTES} bytes`,
+      );
+    }
     // jsonb cannot store U+0000; refuse with a clear error instead of a driver failure mid-batch.
-    if (JSON.stringify(payload).includes("\\u0000")) {
+    if (json.includes("\\u0000")) {
       throw new AppendError("invalid_event", `event ${i} (${event.type}): contains U+0000`);
     }
     if (isTerminalEventType(event.type) && i !== events.length - 1) {
@@ -103,20 +118,23 @@ async function appendValid(
 ): Promise<KobeEvent[]> {
   if (valid.length === 0) return [];
 
-  const locked = await tx.execute<{ last_type: string | null }>(sql`
-    SELECT (SELECT e.type FROM run_events e
-             WHERE e.team_id = r.team_id AND e.run_id = r.id AND e.seq = r.last_seq) AS last_type
-      FROM runs r
+  // Lock first, then read in a separate statement. In READ COMMITTED a statement that waited on the
+  // row lock re-checks only the locked row; a subselect in the same statement would keep its
+  // pre-wait snapshot and miss a terminal event committed by the lock holder (review HIGH-1). The
+  // next statement takes a fresh snapshot that includes everything committed before we got the lock.
+  const locked = await tx.execute<{ id: string }>(sql`
+    SELECT r.id FROM runs r
      WHERE r.team_id = ${teamId} AND r.id = ${runId}
        FOR NO KEY UPDATE OF r`);
-  const run = locked.rows[0];
-  if (!run) throw new AppendError("run_not_found", `run ${runId} not found in the active team`);
-  if (
-    run.last_type !== null &&
-    isKobeEventType(run.last_type) &&
-    isTerminalEventType(run.last_type)
-  )
-    throw new AppendError("run_finished", `run ${runId} already ended with ${run.last_type}`);
+  if (!locked.rows[0])
+    throw new AppendError("run_not_found", `run ${runId} not found in the active team`);
+  const last = await tx.execute<{ type: string }>(sql`
+    SELECT e.type FROM runs r
+      JOIN run_events e ON e.team_id = r.team_id AND e.run_id = r.id AND e.seq = r.last_seq
+     WHERE r.team_id = ${teamId} AND r.id = ${runId}`);
+  const lastType = last.rows[0]?.type;
+  if (lastType !== undefined && isKobeEventType(lastType) && isTerminalEventType(lastType))
+    throw new AppendError("run_finished", `run ${runId} already ended with ${lastType}`);
 
   // Rows get seq in VALUES order (row trigger); RETURNING order is not guaranteed, so sort.
   const rows = await tx
@@ -129,10 +147,10 @@ async function appendValid(
       createdAt: runEvents.createdAt,
     });
   rows.sort((a, b) => a.seq - b.seq);
-  const last = rows[rows.length - 1];
-  if (!last) return [];
+  const newest = rows[rows.length - 1];
+  if (!newest) return [];
   await tx.execute(
-    sql`SELECT pg_notify(${RUN_EVENTS_CHANNEL}, ${encodeHint({ runId, seq: last.seq })})`,
+    sql`SELECT pg_notify(${RUN_EVENTS_CHANNEL}, ${encodeHint({ runId, seq: newest.seq })})`,
   );
   return rows.map(
     (r) =>
@@ -155,8 +173,21 @@ export async function appendRunEvents(
 ): Promise<KobeEvent[]> {
   const valid = validate(events); // fail before opening a transaction
   if (valid.length === 0) return [];
+  return withAppendTx(db, teamId, (tx) => appendValid(tx, teamId, runId, valid));
+}
+
+/**
+ * `withTeam(teamId)` plus `SET LOCAL lock_timeout` (APPEND_LOCK_TIMEOUT), for callers that combine
+ * `appendRunEventsInTx` with their own writes (KOBE-24: `runs.sandbox_seq`; KOBE-30: run status), so
+ * a stuck lock holder surfaces as an error (55P03) instead of a hung writer.
+ */
+export async function withAppendTx<T>(
+  db: KobeDb,
+  teamId: string,
+  fn: (tx: KobeTx) => Promise<T>,
+): Promise<T> {
   return withTeam(db, teamId, async (tx) => {
     await tx.execute(sql`SELECT set_config('lock_timeout', ${APPEND_LOCK_TIMEOUT}, true)`);
-    return appendValid(tx, teamId, runId, valid);
+    return fn(tx);
   });
 }

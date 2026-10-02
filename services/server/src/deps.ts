@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { accounts, createDb, installRoles, users, type KobeDatabase } from "@kobe/db";
 import { createAuth, type KobeAuth } from "./auth/auth.js";
 import { createRunEventHub, type HubOptions, type RunEventHub } from "./event-stream/hub.js";
+import { createStreamReader, type StreamReader } from "./event-stream/read.js";
 import { STREAM_DEFAULTS, type StreamTimings } from "./event-stream/stream.js";
 
 export interface ServerDepsOptions {
@@ -15,6 +16,8 @@ export interface ServerDepsOptions {
   readonly eventStream?: {
     readonly hub?: Omit<HubOptions, "connectionString">;
     readonly timings?: Partial<StreamTimings>;
+    /** Connections of the stream read pool (default STREAM_POOL_MAX). */
+    readonly poolMax?: number;
   };
 }
 
@@ -29,7 +32,11 @@ export interface ServerDeps {
   readonly auth: KobeAuth;
   readonly publicUrl: string;
   /** Kobe Event Stream fan-out (one LISTEN connection per process) and SSE timings (KOBE-31). */
-  readonly eventStream: { readonly hub: RunEventHub; readonly timings: StreamTimings };
+  readonly eventStream: {
+    readonly hub: RunEventHub;
+    readonly reader: StreamReader;
+    readonly timings: StreamTimings;
+  };
   /** Creates an email+password user (and optional install role) atomically, without sign-up. */
   createUserWithPassword(
     input: NewUser,
@@ -57,12 +64,16 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     ...options.eventStream?.hub,
     connectionString: options.databaseUrl,
   });
+  const reader = createStreamReader({
+    connectionString: options.databaseUrl,
+    ...(options.eventStream?.poolMax ? { max: options.eventStream.poolMax } : {}),
+  });
 
   return {
     database,
     auth,
     publicUrl: new URL(options.publicUrl).origin,
-    eventStream: { hub, timings: { ...STREAM_DEFAULTS, ...options.eventStream?.timings } },
+    eventStream: { hub, reader, timings: { ...STREAM_DEFAULTS, ...options.eventStream?.timings } },
     async createUserWithPassword({ email, name, password }, { installRole } = {}) {
       const ctx = await auth.$context;
       const hash = await ctx.password.hash(password);
@@ -93,6 +104,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     },
     async close() {
       await hub.close();
+      await reader.close();
       await database.close();
     },
   };

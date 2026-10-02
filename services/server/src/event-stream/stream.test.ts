@@ -80,7 +80,12 @@ class FakeHub implements RunEventHub {
   }
 }
 
-const FAST: Partial<StreamTimings> = { keepaliveMs: 20, stallTimeoutMs: 200, revalidateMs: 50 };
+const FAST: Partial<StreamTimings> = {
+  keepaliveMs: 20,
+  safetyReadMs: 20,
+  stallTimeoutMs: 200,
+  revalidateMs: 50,
+};
 
 function open(log: FakeLog, hub: FakeHub, cursor = 0, timings = FAST) {
   const ends: StreamEndReason[] = [];
@@ -136,7 +141,7 @@ describe("run event stream", () => {
     expect(ends).toEqual(["terminal"]);
   });
 
-  it("sends keep-alives while idle and re-reads on each (lost hints still arrive)", async () => {
+  it("sends keep-alives while idle and re-reads after safetyReadMs (lost hints still arrive)", async () => {
     const log = new FakeLog();
     const hub = new FakeHub();
     const { reader } = open(log, hub);
@@ -147,10 +152,23 @@ describe("run event stream", () => {
     await reader.cancel();
   });
 
+  it("does not query Postgres on keep-alive ticks before safetyReadMs", async () => {
+    const log = new FakeLog();
+    const { reader } = open(log, new FakeHub(), 0, { keepaliveMs: 10, safetyReadMs: 60_000 });
+    await reader.next(); // retry
+    for (let i = 0; i < 5; i++) expect((await reader.next())?.comment).toBe("keepalive");
+    expect(log.reads).toBe(1); // the initial replay only
+    await reader.cancel();
+  });
+
   it("does not read ahead for a client that is not reading (Postgres is the buffer)", async () => {
     const log = new FakeLog();
     const hub = new FakeHub();
-    const { reader, ends } = open(log, hub, 0, { keepaliveMs: 10, stallTimeoutMs: 10_000 });
+    const { reader, ends } = open(log, hub, 0, {
+      keepaliveMs: 10,
+      safetyReadMs: 10,
+      stallTimeoutMs: 10_000,
+    });
     await reader.next(); // retry consumed; one pull may run
     await new Promise((r) => setTimeout(r, 30));
     const readsBefore = log.reads;
@@ -226,7 +244,11 @@ describe("run event stream", () => {
   it("never sends a seq twice when hints and reads interleave", async () => {
     const log = new FakeLog();
     const hub = new FakeHub();
-    const { reader } = open(log, hub, 0, { keepaliveMs: 5, stallTimeoutMs: 10_000 });
+    const { reader } = open(log, hub, 0, {
+      keepaliveMs: 5,
+      safetyReadMs: 5,
+      stallTimeoutMs: 10_000,
+    });
     const writer = (async () => {
       for (let i = 0; i < 40; i++) {
         log.append(1 + (i % 3));

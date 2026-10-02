@@ -12,8 +12,13 @@ import type { HubSubscriber, RunEventHub } from "./hub.js";
 import type { Page } from "./read.js";
 
 export interface StreamTimings {
-  /** `: keepalive` cadence; each tick also re-reads Postgres (a safety net for lost hints). */
+  /** `: keepalive` cadence; also the granularity of the stall, safety-read and revalidation checks. */
   readonly keepaliveMs: number;
+  /**
+   * A stream that has not read Postgres for this long re-reads once (safety net for a hint lost
+   * while the LISTEN connection looked healthy; the hub's ping bounds that window anyway).
+   */
+  readonly safetyReadMs: number;
   /** A client that has not taken the last chunk for this long is disconnected (it resumes later). */
   readonly stallTimeoutMs: number;
   /** How often a long-lived stream re-checks the session, membership and visibility. */
@@ -24,6 +29,7 @@ export interface StreamTimings {
 
 export const STREAM_DEFAULTS: StreamTimings = {
   keepaliveMs: SSE_KEEPALIVE_MS,
+  safetyReadMs: 60_000,
   stallTimeoutMs: 60_000,
   revalidateMs: 30_000,
   retryMs: SSE_RETRY_MS,
@@ -86,6 +92,7 @@ export function createRunEventStream(input: RunEventStreamInput): ReadableStream
   let pulling = false;
   let lastChunkAt = Date.now();
   let lastRevalidateAt = Date.now();
+  let lastReadAt = Date.now();
   let wake: (() => void) | undefined;
   let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
   let unsubscribe: (() => void) | undefined;
@@ -151,7 +158,7 @@ export function createRunEventStream(input: RunEventStreamInput): ReadableStream
       return;
     }
     keepaliveDue = true;
-    dirty = true;
+    if (now - lastReadAt >= t.safetyReadMs) dirty = true;
     if (now - lastRevalidateAt >= t.revalidateMs) revalidateDue = true;
     signal();
   };
@@ -181,6 +188,7 @@ export function createRunEventStream(input: RunEventStreamInput): ReadableStream
       }
       if (dirty) {
         dirty = false;
+        lastReadAt = Date.now();
         const page = await input.source.read(lastSent);
         if (ended) return;
         if (!page.run || page.run.compacted) {
