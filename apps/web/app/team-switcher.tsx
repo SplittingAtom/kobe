@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
+  ACTIVE_TEAM_EVENT,
   LAST_TEAM_KEY,
   fetchMyTeams,
   roleLabel,
@@ -44,6 +45,8 @@ export function TeamSwitcher() {
         await setActiveTeam(pick);
         remember(pick);
         if (!cancelled) setMy({ ...teams, activeTeamId: pick });
+        // Views that asked for the active team before this one existed ask again.
+        window.dispatchEvent(new Event(ACTIVE_TEAM_EVENT));
       } else if (!cancelled) setMy(teams);
     })().catch((e: unknown) => {
       if (!cancelled) setError(e instanceof Error ? e.message : "Could not load your teams.");

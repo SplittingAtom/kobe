@@ -1,3 +1,5 @@
 # Barrel files that parallel tickets each append one line to: keep both sides on merge.
 packages/db/src/schema/index.ts merge=union
 packages/db/src/testing/probe-fixtures/index.ts merge=union
+apps/web/lib/admin/nav/install/index.ts merge=union
+apps/web/lib/admin/nav/team/index.ts merge=union
