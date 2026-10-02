@@ -613,6 +613,19 @@ describe("leasing and the compromised-sandbox suite", () => {
     expect((await sb.waitClosed()).code).toBe(1009);
   });
 
+  it("caps frame size by type before decoding: small types at 256 KiB, pi.event at 4 MiB", async () => {
+    const w = await world();
+    const sb = await connect(0, w);
+    // A large frame whose type may be large is decoded (and here rejected as malformed).
+    sb.sendRaw(`{"v":1,"type":"pi.event","junk":"${"x".repeat(300 * 1024)}"}`);
+    await sb.until(() => sb.frames("error").find((e) => e.code === "malformed_frame"));
+    expect(sb.closed).toBeUndefined();
+    // The same size as a ping (or with an unreadable type) is refused unparsed.
+    sb.sendRaw(`{"v":1,"type":"ping","nonce":"${"x".repeat(300 * 1024)}"}`);
+    expect((await sb.waitClosed()).code).toBe(SANDBOX_CLOSE_CODES.protocol_error);
+    await expect.poll(() => auditActions(w.team)).toContain("sandbox.limit_exceeded");
+  });
+
   it("closes a flooding sandbox", async () => {
     const w = await world();
     const sb = await connect(0, w);
@@ -653,7 +666,33 @@ describe("leasing and the compromised-sandbox suite", () => {
   it("closes every connection of a deactivated user on every replica", async () => {
     const w = await world();
     const sb = await connect(1, w);
-    await fx.replica(0).deps.sandboxWire.disconnectUser(w.owner.id);
+    await fx.admin.query(`UPDATE users SET deactivated_at = now() WHERE id = $1`, [w.owner.id]);
+    await fx.replica(0).deps.lifecycle.emit("deactivated", w.owner.id);
+    expect((await sb.waitClosed()).code).toBe(SANDBOX_CLOSE_CODES.unauthorized);
+  });
+
+  it("closes a removed member's connection in that team on every replica", async () => {
+    const w = await world();
+    const member = await fx.person("leaver");
+    await fx.addMember(w.team, member);
+    const sandboxId = randomUUID();
+    const token = auth.issue({ sandboxId, teamId: w.team, userId: member.id });
+    const sb = await FakeSandbox.connect(url(1), token);
+    if (!isFake(sb)) throw new Error("refused");
+    sandboxes.push(sb);
+    sb.hello(sandboxId);
+    await sb.ready();
+    await fx.activate(w.owner, w.team);
+    const res = await fx.replica(0).app.request(`http://kobe.test/v1/team/members/${member.id}`, {
+      method: "DELETE",
+      headers: {
+        cookie: [...w.owner.browser.cookies].map(([k, v]) => `${k}=${v}`).join("; "),
+        origin: "http://kobe.test",
+        "x-kobe-team": w.team,
+        "x-forwarded-for": w.owner.browser.ip,
+      },
+    });
+    expect(res.status).toBe(204);
     expect((await sb.waitClosed()).code).toBe(SANDBOX_CLOSE_CODES.unauthorized);
   });
 });
@@ -701,6 +740,40 @@ describe("policy.check", () => {
     sb.send(check(w, "after", "read", { path: "b" }));
     await sb.until(() => sb.frames("policy.result").find((r) => r.request_id === "after"));
     expect(sb.frames("policy.result").filter((r) => r.request_id === "dup")).toHaveLength(1);
+  });
+
+  it("applies the install and team approval-mode floors and denies when a floor is invalid", async () => {
+    const w = await world();
+    const sb = await started(w);
+    const decide = async (id: string) => {
+      sb.send(check(w, id, "read", { path: "x" }));
+      return sb.until(() => sb.frames("policy.result").find((r) => r.request_id === id));
+    };
+    expect((await decide("f0")).decision).toBe("allow");
+    // Team floor ask-all: even a read needs approval (denied by the default broker).
+    await fx.admin.query(
+      `UPDATE teams SET settings = settings || '{"approval_mode_floor":"ask-all"}' WHERE id = $1`,
+      [w.team],
+    );
+    const team = await decide("f1");
+    expect(team.decision === "deny" && team.message).toMatch(/approval/);
+    // An unreadable floor: fail closed.
+    await fx.admin.query(
+      `UPDATE teams SET settings = settings || '{"approval_mode_floor":"yolo"}' WHERE id = $1`,
+      [w.team],
+    );
+    expect((await decide("f2")).decision).toBe("deny");
+    await fx.admin.query(`UPDATE teams SET settings = '{}' WHERE id = $1`, [w.team]);
+    // Install floor ask-all applies to every team.
+    await fx.admin.query(
+      `INSERT INTO install_settings (key, value) VALUES ('policy.approval_mode_floor', 'ask-all')`,
+    );
+    try {
+      expect((await decide("f3")).decision).toBe("deny");
+    } finally {
+      await fx.admin.query(`DELETE FROM install_settings WHERE key = 'policy.approval_mode_floor'`);
+    }
+    expect((await decide("f4")).decision).toBe("allow");
   });
 
   it("denies when the user is no longer a team member", async () => {

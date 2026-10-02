@@ -45,7 +45,6 @@ export type IssuedCommand =
     }
   | { readonly kind: "internal"; readonly resolve: (outcome: CommandOutcome) => void };
 
-const INTERNAL_TIMEOUT_MS = 60_000;
 const ANSWERED_MAX = 4_096;
 const DRAIN_BATCH = 20;
 
@@ -120,6 +119,23 @@ export class CommandDelivery {
     );
   }
 
+  /** Server-initiated stop of a run the server has already ended (storage cap). Best effort. */
+  stopRun(runId: string, threadId: string): void {
+    void this.#internal(
+      {
+        v: 1,
+        type: "run.stop",
+        command_id: randomUUID(),
+        run_id: runId,
+        thread_id: threadId,
+        mode: "abort",
+        // The contract's closest reason: a resource budget of the run is exhausted.
+        reason: "budget_exhausted",
+      },
+      this.#ctx.tuning.commandTimeoutMs["run.stop"],
+    );
+  }
+
   forgetSession(threadId: string): void {
     this.#synced.delete(threadId);
   }
@@ -136,12 +152,16 @@ export class CommandDelivery {
 
   // ---------------------------------------------------------------- internal commands
 
-  #internal(frame: ServerToSandboxFrame, timeoutMs = INTERNAL_TIMEOUT_MS): Promise<CommandOutcome> {
+  #internal(
+    frame: ServerToSandboxFrame,
+    timeoutMs = this.#ctx.tuning.internalCommandTimeoutMs,
+  ): Promise<CommandOutcome> {
     if (this.#closed) return Promise.resolve(failure(COMMAND_FAILURES.connectionLost, "closed"));
     const commandId = "command_id" in frame ? frame.command_id : randomUUID();
     return new Promise<CommandOutcome>((resolve) => {
       const timer = setTimeout(() => {
-        this.#issued.delete(commandId);
+        // A result arriving after the timeout is late, not a lease violation.
+        this.takeIssued(commandId);
         resolve(failure(COMMAND_FAILURES.timeout, "the sandbox did not answer in time"));
       }, timeoutMs);
       timer.unref();
@@ -203,7 +223,13 @@ export class CommandDelivery {
     if (outcome.ok) {
       const data = parseGetEntries(outcome.data);
       if (data) {
-        await withTeam(db, teamId, (tx) => mirrorEntriesInTx(tx, teamId, threadId, data));
+        const mirrored = await withTeam(db, teamId, (tx) =>
+          mirrorEntriesInTx(tx, teamId, threadId, data, this.#ctx.tuning.threadMaxEntries),
+        );
+        if (mirrored.capped) {
+          this.#host.log.warn({ thread_id: threadId }, "thread entry cap reached");
+          this.#ctx.auditLimit(this.#host.target, this.#host.sandboxId, "thread_entries");
+        }
       }
       this.#synced.add(threadId);
       return { ok: true };

@@ -124,6 +124,7 @@ sub` closes `unauthorized`; Pi outside `1.0.x` closes `unsupported_version`.
 editor` are cancelled, notifications ignored; deduped by `(thread_id, request.id)` (`UiBroker`
   seam).
 - **No pod creation here**, so no `VerifiedIsolation` needed (KOBE-9); waking is KOBE-25's seam.
+- **Upgrade and frame limits** see the security review resolution below.
 - **Second LISTEN connection per process** (`kobe-sandbox-bus`) next to the event-stream hub's; the
   hub is run-event specific. Same robustness (reconnect, resync, poll while down, ping). Needs a
   direct or session-mode connection, like the hub.
@@ -204,9 +205,62 @@ called at every upgrade and every 60 s per connection: cache it (e.g. list claim
 9. LOW: socket cap counts accepted sockets; ended leases pruned (256); replayed `request_id`
    answered once (test); UI broker exceptions contained.
 
+## Coordinator security review (PR #33, REQUEST CHANGES, no CRITICAL) — resolution
+
+1. **HIGH event-loop saturation.** Per-connection **byte** token bucket (`byteRatePerSec` 4 MiB/s,
+   `byteBurst` 8 MiB) next to the frame bucket, both charged on the raw frame **before decoding**.
+   Size cap by type read from the raw prefix (`{"v":1,"type":"…"`, the order KOBE-23 writes):
+   `pi.event`/`command.result` ≤ 4 MiB, `policy.check` ≤ 1 MiB, anything else (or an unreadable
+   type, or anything before `hello.ack`) ≤ 256 KiB. Violations close `protocol_error` and audit
+   `sandbox.limit_exceeded`. **Deviation:** `policy.check` gets 1 MiB rather than < 256 KiB because
+   it carries a `write` tool's content as executed (KOBE-23 keeps that line at the frame cap); 1 MiB
+   still bounds decode cost and is above any single model tool call in practice. Tests: "caps frame
+   size by type before decoding", "closes a sandbox that sends more bytes than its budget".
+   **Contract note:** large frames must start with `v` and `type` (true for KOBE-23; worth stating
+   in `connection.ts`).
+2. **MEDIUM logs leaking content.** Server-wide pino `err`/`error` serializer (`log-safety.ts`,
+   `LOGGER_OPTIONS` in `logger.ts`): query errors (`DrizzleQueryError`, anything with
+   `query`/`params`, and their pg causes) are logged as type + pg code + pg message (+ routine), never
+   query, params, `detail`, `where` or the leaking stack; other errors keep type/message/code/stack;
+   causes recursively (depth 4). Test: `log-safety.test.ts`.
+3. **MEDIUM floor.** `RunPolicyContext.floor` is required and `runContext` is a required option of
+   `createSandboxWire`; production uses `createDbRunContextSource()`: install floor in
+   `install_settings['policy.approval_mode_floor']`, team floor in
+   `teams.settings.approval_mode_floor`, the stricter of both; absent = `auto` (no floor beyond D29),
+   unreadable/invalid → the call is denied. (KOBE-35 has deny/ask rules but no mode floor; this
+   adds the two keys. An admin UI/API to set them is KOBE-20/35 follow-up.) Test: "applies the
+   install and team approval-mode floors and denies when a floor is invalid".
+4. **MEDIUM unbounded growth.** Enforced in the cursor transaction: `runMaxEvents` 100 000
+   (`runs.last_seq`, room kept for the terminal event), `runMaxBytes` 256 MiB (new column
+   `runs.sandbox_bytes`, events + mirrored entries, migration `0018`), `threadMaxEntries` 50 000
+   (`threads.last_entry_seq`). At a cap the batch rolls back, the run fails (`run_too_large` /
+   `thread_too_large`), Pi is stopped (`run.stop` abort, reason `budget_exhausted` — the closest
+   contract reason), audit `sandbox.limit_exceeded`. `policy.denied`: per-run token bucket (burst 20,
+   30/min) and the event cap; every call is still denied. All `WireTuning` options. Tests: four
+   "storage caps" tests.
+5. LOW timed-out internal command ids are retired as answered (test "treats a result after the
+   command timed out as late"; red without the fix).
+6. LOW connections close `unauthorized` at token `exp` + `tokenExpiryGraceMs` (60 s; test); the
+   `user:<id>` hint now means "re-check this user's connections" (`revalidateUser`), called on
+   deactivation and on team member removal (`DELETE /v1/team/members/:id`; test).
+7. LOW `get_entries` failing at `agent_settled` is retried (3 attempts, backoff); if it still fails
+   the thread is flagged for a full sync before its next run, then the run completes (Pi keeps the
+   entries; `since` fetches them later). Logged.
+8. LOW `staleConnectionMs` 60 s → 180 s (12 touch intervals); closed connections still use the 30 s
+   grace; the ending transaction re-checks under the connection row lock.
+
+Also found while testing: a single frame larger than `runQueueMaxBytes` was never accepted (the
+run stalled); an empty queue now always takes the next frame (memory ≤ cap + one frame).
+
+**For KOBE-22 wiring (unchanged requirement):** `verify` must be KOBE-22's `verifySessionToken`
+(HS256 pinned, exact header, audience key). Sandbox tokens have no Better Auth session; the KOBE-13
+"session still exists" check maps to: sandbox `sub` live (`liveness`), account active and team
+membership — checked at upgrade, every 60 s, on deactivation/removal hints, and the connection ends
+at token expiry.
+
 ## Evidence (acceptance criteria → test or command output)
 
-`services/server/src/sandbox-wire.db.test.ts` (29 tests), `sandbox-wire-limits.db.test.ts` (3),
+`services/server/src/sandbox-wire.db.test.ts` (32 tests), `sandbox-wire-limits.db.test.ts` (10), `log-safety.test.ts` (3),
 `sandbox-wire/translate.test.ts` (9), `packages/db/src/sandbox-wire.db.test.ts` (6); wire suites
 stable over 4 repeated runs.
 
@@ -226,4 +280,4 @@ stable over 4 repeated runs.
 Commands: `pnpm build typecheck format:check` green; `lint` green except the pre-existing
 `@kobe/chart` Helm 4 failure; `license:check` fails locally on an uninstalled optional vitest peer
 variant referenced by `better-auth` (same lockfile entries on `main`; not from this change);
-`pnpm test --concurrency=2` green; `@kobe/server test:db` 306/306, `@kobe/db test:db` 247/247; `db:check` clean; `scripts/check-public-hygiene.sh` ok.
+`pnpm test --concurrency=2` green; `@kobe/server test:db` 316/316 (after the security review; wire suites 42/42, stable over 3 more runs), `@kobe/db test:db` 247/247; `db:check` clean; `scripts/check-public-hygiene.sh` ok.

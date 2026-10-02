@@ -2,6 +2,7 @@ import {
   SANDBOX_HEARTBEAT_INTERVAL_MS,
   SANDBOX_HEARTBEAT_TIMEOUT_MS,
   SANDBOX_HELLO_TIMEOUT_MS,
+  SANDBOX_MAX_FRAME_BYTES,
 } from "@kobe/protocol";
 
 /** NOTIFY channel of the sandbox wire (ids only: any session may LISTEN on any channel). */
@@ -16,7 +17,12 @@ export interface WireTuning {
   readonly revalidateMs: number;
   /** `sandbox_connections.last_seen_at` refresh interval. */
   readonly touchMs: number;
-  /** A connection row not touched for this long belongs to a dead replica. */
+  /** Open connections are closed this long after their session token's `exp`. */
+  readonly tokenExpiryGraceMs: number;
+  /**
+   * A connection row not touched for this long belongs to a dead replica. Many touch intervals:
+   * a replica that is merely slow to write must not get a healthy sandbox's runs interrupted.
+   */
   readonly staleConnectionMs: number;
   /** Active runs of a sandbox gone this long are interrupted (D14); a reconnect within it resumes. */
   readonly lostGraceMs: number;
@@ -34,10 +40,38 @@ export interface WireTuning {
   /** Inbound frames per second per connection (token bucket) and the burst. */
   readonly frameRatePerSec: number;
   readonly frameBurst: number;
+  /**
+   * Inbound bytes per second per connection (token bucket, charged before a frame is decoded) and
+   * the burst (at least one maximum frame). Decoding costs CPU per byte, garbage included.
+   */
+  readonly byteRatePerSec: number;
+  readonly byteBurst: number;
+  /** Largest frame, by type, accepted for decoding (checked on the raw bytes first). */
+  readonly frameMaxBytes: {
+    /** `pi.event`, `command.result`: up to the protocol cap (4 MiB). */
+    readonly bulk: number;
+    /** `policy.check`: carries a tool input as executed (a `write` can be large). */
+    readonly policyCheck: number;
+    /** Everything else (`hello`, `ping`, `pi.ui_request`, …). */
+    readonly small: number;
+  };
+  /**
+   * Storage caps a sandbox can't exceed (enforced in the cursor transaction): events and bytes
+   * (events + mirrored entries) per run, entries per thread. A run at its cap fails
+   * (`run_too_large` / `thread_too_large`) and is stopped in the sandbox.
+   */
+  readonly runMaxEvents: number;
+  readonly runMaxBytes: number;
+  readonly threadMaxEntries: number;
+  /** `policy.denied` events per run: burst and refill per minute (the deny itself always stands). */
+  readonly deniedEventBurst: number;
+  readonly deniedEventsPerMinute: number;
   /** Concurrent `policy.check`s per connection; beyond it, checks are denied. */
   readonly maxPendingPolicyChecks: number;
   /** Consecutive failed ingest writes before the connection is dropped. */
   readonly maxIngestFailures: number;
+  /** Deadline of the wire's own commands (`get_entries`, `session.restore` parts). */
+  readonly internalCommandTimeoutMs: number;
   /** Results are polled this often while waiting (hints may be lost). */
   readonly resultPollMs: number;
   /** Listener reconnect backoff bounds. */
@@ -58,7 +92,8 @@ export const WIRE_DEFAULTS: WireTuning = {
   heartbeatTimeoutMs: SANDBOX_HEARTBEAT_TIMEOUT_MS,
   revalidateMs: 60_000,
   touchMs: 15_000,
-  staleConnectionMs: 60_000,
+  staleConnectionMs: 180_000,
+  tokenExpiryGraceMs: 60_000,
   lostGraceMs: 30_000,
   sweepMs: 10_000,
   batchWindowMs: 75,
@@ -66,9 +101,18 @@ export const WIRE_DEFAULTS: WireTuning = {
   runQueueMaxBytes: 16 * 1024 * 1024,
   frameRatePerSec: 500,
   frameBurst: 2_000,
+  byteRatePerSec: 4 * 1024 * 1024,
+  byteBurst: 8 * 1024 * 1024,
+  frameMaxBytes: { bulk: SANDBOX_MAX_FRAME_BYTES, policyCheck: 1024 * 1024, small: 256 * 1024 },
   maxPendingPolicyChecks: 16,
+  runMaxEvents: 100_000,
+  runMaxBytes: 256 * 1024 * 1024,
+  threadMaxEntries: 50_000,
+  deniedEventBurst: 20,
+  deniedEventsPerMinute: 30,
   maxIngestFailures: 5,
   resultPollMs: 2_000,
+  internalCommandTimeoutMs: 60_000,
   reconnectMinMs: 250,
   reconnectMaxMs: 10_000,
   commandTimeoutMs: {

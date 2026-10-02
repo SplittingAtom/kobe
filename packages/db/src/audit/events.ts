@@ -56,6 +56,16 @@ const toolRule = {
   expiresAt: z.iso.datetime({ offset: true }).nullable(),
 };
 
+/** Wire and storage limits a sandbox can hit (KOBE-24). */
+export const SANDBOX_LIMITS = [
+  "frame_rate",
+  "byte_rate",
+  "frame_size",
+  "run_events",
+  "run_bytes",
+  "thread_entries",
+] as const;
+
 const event = <const S extends AuditScope, T extends z.ZodRawShape>(scope: S, shape: T) => ({
   scope,
   target: z.strictObject(shape),
@@ -189,6 +199,13 @@ export const AUDIT_EVENTS = {
     userId: id,
     violation: z.enum(["unknown_run", "unknown_thread", "unknown_command"]),
     frameType: z.string().regex(/^[a-z][a-z_.]{0,31}$/),
+  }),
+  /** A sandbox exceeded a wire or storage limit; connection closed or run stopped (system). */
+  "sandbox.limit_exceeded": event("team", {
+    sandboxId: id,
+    userId: id,
+    limit: z.enum(SANDBOX_LIMITS),
+    runId: id.optional(),
   }),
 
   // ── agent: definitions (D19); team agents in the team view, personal and gallery install-only ──

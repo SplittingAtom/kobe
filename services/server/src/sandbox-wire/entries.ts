@@ -23,6 +23,10 @@ export interface MirrorResult {
   readonly orphans: number;
   /** Entries whose id already exists (normal for overlapping syncs). */
   readonly existing: number;
+  /** The thread reached `maxEntries`: later entries were not stored. */
+  readonly capped: boolean;
+  /** UTF-8 bytes of the inserted payloads. */
+  readonly bytes: number;
   readonly leafId: string | null;
 }
 
@@ -55,9 +59,14 @@ export async function mirrorEntriesInTx(
   teamId: string,
   threadId: string,
   data: PiGetEntriesData,
+  maxEntries: number,
 ): Promise<MirrorResult> {
-  await tx.execute(sql`
-    SELECT 1 FROM threads WHERE team_id = ${teamId} AND id = ${threadId} FOR NO KEY UPDATE`);
+  const thread = await tx.execute<{ last_entry_seq: number }>(sql`
+    SELECT last_entry_seq FROM threads
+     WHERE team_id = ${teamId} AND id = ${threadId} FOR NO KEY UPDATE`);
+  let room = maxEntries - (thread.rows[0]?.last_entry_seq ?? maxEntries);
+  let capped = false;
+  let bytes = 0;
   const ids = new Set<string>();
   for (const e of data.entries) {
     ids.add(e.id);
@@ -91,8 +100,14 @@ export async function mirrorEntriesInTx(
       orphans += 1;
       continue;
     }
+    if (room <= 0) {
+      capped = true;
+      break;
+    }
+    room -= 1;
     known.add(entry.id);
     inserted.push(entry);
+    bytes += Buffer.byteLength(JSON.stringify(entry), "utf8");
   }
   for (let i = 0; i < inserted.length; i += CHUNK) {
     await tx.insert(threadEntries).values(
@@ -113,7 +128,7 @@ export async function mirrorEntriesInTx(
          SET leaf_entry_id = COALESCE(${leafId}, leaf_entry_id), last_activity_at = now()
        WHERE team_id = ${teamId} AND id = ${threadId}`);
   }
-  return { inserted, orphans, existing, leafId };
+  return { inserted, orphans, existing, leafId, capped, bytes };
 }
 
 function isAssistantMessage(entry: PiSessionEntry): boolean {

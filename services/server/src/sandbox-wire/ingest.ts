@@ -20,6 +20,10 @@ export interface IngestHost {
   fetchNewEntries(threadId: string): Promise<PiGetEntriesData | undefined>;
   /** The run ended (committed). `status` is what this ingest wrote, undefined if someone else ended it. */
   runEnded(runId: string, status: "completed" | undefined): void;
+  /** A storage cap was hit: fail and stop the run (it has not been ended yet). */
+  limitExceeded(runId: string, limit: "run_events" | "run_bytes" | "thread_entries"): void;
+  /** Entries could not be mirrored at run end: sync the thread before its next run. */
+  needsSync(threadId: string): void;
   /** Writes keep failing: drop the connection (the agent resumes from the durable cursor). */
   failed(err: unknown): void;
   log: { warn(obj: object, msg: string): void; debug(obj: object, msg: string): void };
@@ -42,6 +46,14 @@ export interface RunIngestOptions {
   readonly createTranslator: () => RunTranslator;
   readonly host: IngestHost;
   readonly tuning: WireTuning;
+}
+
+const SETTLE_SYNC_ATTEMPTS = 3;
+
+export class LimitExceeded extends Error {
+  constructor(readonly limit: "run_events" | "run_bytes" | "thread_entries") {
+    super(`sandbox storage limit: ${limit}`);
+  }
 }
 
 class CursorConflict extends Error {
@@ -146,7 +158,8 @@ export class RunIngest {
       }
       return;
     }
-    if (this.#queuedBytes + bytes > this.#maxBytes) {
+    // An empty queue always takes the next frame (a single frame may exceed the cap).
+    if (this.#queue.length > 0 && this.#queuedBytes + bytes > this.#maxBytes) {
       this.#starvedFrom = this.#next; // resent once the queue drains
       return;
     }
@@ -267,7 +280,8 @@ export class RunIngest {
     if (first === undefined || last === undefined) return;
     try {
       // Network I/O (get_entries) before the transaction, never inside it (KOBE-29/31).
-      const entries = sync ? await host.fetchNewEntries(threadId) : undefined;
+      const entries = sync ? await this.#fetchEntries(settled) : undefined;
+      const { runMaxEvents, runMaxBytes, threadMaxEntries } = this.#o.tuning;
       const ended = await withAppendTx(db, teamId, async (tx) => {
         const touchesThread = entries !== undefined || settled;
         if (touchesThread) {
@@ -276,8 +290,11 @@ export class RunIngest {
             SELECT 1 FROM threads WHERE team_id = ${teamId} AND id = ${threadId} FOR NO KEY UPDATE`);
         }
         const committed: NewRunEvent[] = [];
+        let mirroredBytes = 0;
         if (entries !== undefined) {
-          const mirrored = await mirrorEntriesInTx(tx, teamId, threadId, entries);
+          const mirrored = await mirrorEntriesInTx(tx, teamId, threadId, entries, threadMaxEntries);
+          if (mirrored.capped) throw new LimitExceeded("thread_entries");
+          mirroredBytes = mirrored.bytes;
           if (mirrored.orphans > 0) {
             host.log.warn(
               { run_id: runId, orphans: mirrored.orphans },
@@ -288,11 +305,17 @@ export class RunIngest {
             ...entryCommittedEvents(mirrored.inserted, () => translator.takeCompletedMessageId()),
           );
         }
-        const cas = await tx.execute(sql`
-          UPDATE runs SET sandbox_seq = ${last}
+        const all = coalesceDeltas([...events, ...committed]);
+        const bytes =
+          mirroredBytes +
+          all.reduce((n, e) => n + Buffer.byteLength(JSON.stringify(e.payload), "utf8"), 0);
+        const cas = await tx.execute<{ last_seq: number; sandbox_bytes: number }>(sql`
+          UPDATE runs SET sandbox_seq = ${last}, sandbox_bytes = sandbox_bytes + ${bytes}
            WHERE team_id = ${teamId} AND id = ${runId} AND sandbox_seq = ${first - 1}
-             AND status IN ('running', 'waiting_approval')`);
-        if (cas.rowCount !== 1) {
+             AND status IN ('running', 'waiting_approval')
+          RETURNING last_seq, sandbox_bytes`);
+        const counters = cas.rows[0];
+        if (cas.rowCount !== 1 || !counters) {
           const now = await tx.execute<{ sandbox_seq: number; status: string }>(sql`
             SELECT sandbox_seq, status FROM runs WHERE team_id = ${teamId} AND id = ${runId}`);
           const row = now.rows[0];
@@ -301,7 +324,10 @@ export class RunIngest {
             row?.status === "running" || row?.status === "waiting_approval",
           );
         }
-        const all = coalesceDeltas([...events, ...committed]);
+        // Room is kept for the terminal event, so a run at its cap can still end visibly.
+        if (counters.last_seq + all.length + 1 > runMaxEvents)
+          throw new LimitExceeded("run_events");
+        if (Number(counters.sandbox_bytes) > runMaxBytes) throw new LimitExceeded("run_bytes");
         for (let i = 0; i < all.length; i += MAX_APPEND_BATCH) {
           await appendRunEventsInTx(tx, teamId, runId, all.slice(i, i + MAX_APPEND_BATCH));
         }
@@ -323,8 +349,38 @@ export class RunIngest {
     }
   }
 
+  /**
+   * Entries for a sync. Before the run completes a failed fetch is retried; if it still fails the
+   * thread is flagged so its next run starts with a full sync (nothing is silently lost: Pi keeps
+   * the entries and `get_entries since` fetches them later).
+   */
+  async #fetchEntries(settling: boolean): Promise<PiGetEntriesData | undefined> {
+    const { host, threadId, runId } = this.#o;
+    const attempts = settling ? SETTLE_SYNC_ATTEMPTS : 1;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      const entries = await host.fetchNewEntries(threadId);
+      if (entries !== undefined || this.#closed) return entries;
+      if (attempt < attempts) await new Promise((r) => setTimeout(r, 250 * 2 ** attempt));
+    }
+    if (settling) {
+      host.log.warn({ run_id: runId, thread_id: threadId }, "entries not mirrored at run end");
+      host.needsSync(threadId);
+    }
+    return undefined;
+  }
+
   #recover(err: unknown, last: number): void {
     const { host, runId } = this.#o;
+    if (err instanceof LimitExceeded) {
+      // Nothing of the batch was stored. The run fails and is stopped; frames are acked so the
+      // agent can forget them.
+      this.#ended = true;
+      this.#queue = [];
+      this.#queuedBytes = 0;
+      host.sendAck(runId, last);
+      host.limitExceeded(runId, err.limit);
+      return;
+    }
     this.#queue = [];
     this.#queuedBytes = 0;
     this.#starvedFrom = undefined;

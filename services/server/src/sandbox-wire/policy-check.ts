@@ -1,5 +1,6 @@
 import {
   APPROVAL_MODES,
+  approvalModeSchema,
   type ApprovalMode,
   type PolicyCheckFrame,
   type PolicyEngine,
@@ -9,7 +10,7 @@ import {
   type ToolRegistry,
 } from "@kobe/protocol";
 import { eq, getMembership, sql, users, withTeam, type KobeDb } from "@kobe/db";
-import { appendRunEvents } from "../event-stream/append.js";
+import { appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
 import type {
   ApprovalBroker,
   ApprovalOutcome,
@@ -75,8 +76,39 @@ export const DENY_APPROVALS: ApprovalBroker = {
   },
 };
 
-/** Default run context: mode from KOBE-30 when it exists, `ask-on-write` otherwise (D29 default). */
-export const DEFAULT_RUN_CONTEXT: RunPolicyContextSource = { load: () => Promise.resolve({}) };
+/** `install_settings.key` of the install-wide approval-mode floor (D6: the install floor). */
+export const APPROVAL_MODE_FLOOR_KEY = "policy.approval_mode_floor";
+/** `teams.settings` key of a team's floor (can only tighten the install's, D6). */
+export const TEAM_APPROVAL_MODE_FLOOR = "approval_mode_floor";
+
+/** A floor value: absent = `auto` (no floor beyond the D29 modes); anything invalid throws. */
+function parseFloor(raw: unknown, where: string): ApprovalMode {
+  if (raw === undefined || raw === null) return "auto";
+  const parsed = approvalModeSchema.safeParse(raw);
+  if (!parsed.success) throw new Error(`invalid approval mode floor in ${where}`);
+  return parsed.data;
+}
+
+/**
+ * Run policy context from Postgres: the install floor (`install_settings`) and the team floor
+ * (`teams.settings`), the stricter of both. The run's own mode arrives with KOBE-30
+ * (`runs.approval_mode`); until then it is `ask-on-write` (D29 default). Agent tool lists arrive
+ * with KOBE-46/47. A floor that can't be read or parsed throws, and the call is denied.
+ */
+export function createDbRunContextSource(): RunPolicyContextSource {
+  return {
+    async load(tx, run) {
+      const res = await tx.execute<{ install: string | null; team: unknown }>(sql`
+        SELECT (SELECT value FROM install_settings WHERE key = ${APPROVAL_MODE_FLOOR_KEY}) AS install,
+               (SELECT settings -> ${TEAM_APPROVAL_MODE_FLOOR} FROM teams WHERE id = ${run.teamId}) AS team`);
+      const row = res.rows[0];
+      if (!row) throw new Error("approval mode floor unavailable");
+      const install = parseFloor(row.install ?? undefined, "install settings");
+      const team = parseFloor(row.team ?? undefined, "team settings");
+      return { floor: clampApprovalMode(team, install) };
+    },
+  };
+}
 
 export interface PolicyCheckDeps {
   readonly db: KobeDb;
@@ -84,6 +116,8 @@ export interface PolicyCheckDeps {
   readonly registry: ToolRegistry;
   readonly approvals: ApprovalBroker;
   readonly runContext: RunPolicyContextSource;
+  /** Run event cap (`WireTuning.runMaxEvents`). */
+  readonly runMaxEvents: number;
 }
 
 async function accountActive(db: KobeDb, userId: string): Promise<boolean> {
@@ -138,9 +172,10 @@ async function buildInput(
   const projectId = context.projectId ?? row.project_id ?? undefined;
   const scheduled = row.trigger === "schedule";
   const requested = scheduled ? "auto" : (context.approvalMode ?? "ask-on-write");
+  if (!APPROVAL_MODES.includes(context.floor)) return "The approval mode floor is unavailable.";
   const mode = clampApprovalMode(
     APPROVAL_MODES.includes(requested) ? requested : "ask-on-write",
-    context.floor ?? "auto",
+    context.floor,
   );
   return {
     actor: { user_id: target.userId, kind: row.trigger },
@@ -165,19 +200,31 @@ async function buildInput(
   } as PolicyInput;
 }
 
+/**
+ * Appends `policy.denied` unless the run's budget for them is spent (`mayRecord`, a per-run token
+ * bucket) or the run is at its event cap: a sandbox looping on denied calls can't grow the stream.
+ */
 async function recordDenied(
-  db: KobeDb,
+  deps: PolicyCheckDeps,
   teamId: string,
   frame: PolicyCheckFrame,
   reasons: readonly PolicyReason[],
+  mayRecord: () => boolean,
 ) {
+  if (!mayRecord()) return;
   try {
-    await appendRunEvents(db, teamId, frame.run_id, [
-      {
-        type: "policy.denied",
-        payload: { tool_call_id: frame.tool_call_id, tool: frame.tool, reasons: [...reasons] },
-      },
-    ]);
+    await withAppendTx(deps.db, teamId, async (tx) => {
+      const run = await tx.execute<{ last_seq: number }>(sql`
+        SELECT last_seq FROM runs WHERE team_id = ${teamId} AND id = ${frame.run_id}`);
+      // Keep room for the terminal event (as the ingest does).
+      if ((run.rows[0]?.last_seq ?? deps.runMaxEvents) + 2 > deps.runMaxEvents) return;
+      await appendRunEventsInTx(tx, teamId, frame.run_id, [
+        {
+          type: "policy.denied",
+          payload: { tool_call_id: frame.tool_call_id, tool: frame.tool, reasons: [...reasons] },
+        },
+      ]);
+    });
   } catch {
     // The run ended meanwhile, or the event did not fit its schema: the deny itself stands.
   }
@@ -193,6 +240,7 @@ export async function decidePolicyCheck(
   frame: PolicyCheckFrame,
   signal: AbortSignal,
   onPending: (pending: { approvalId: string; expiresAt: string }) => void,
+  mayRecordDenied: () => boolean = () => true,
 ): Promise<PolicyResultFrame> {
   try {
     const input = await buildInput(deps, target, frame);
@@ -203,7 +251,7 @@ export async function decidePolicyCheck(
           stage: "install_deny",
           message: `${input.slice("unknown_tool:".length)} is not a known tool.`,
         };
-        await recordDenied(deps.db, target.teamId, frame, [reason]);
+        await recordDenied(deps, target.teamId, frame, [reason], mayRecordDenied);
         return denyFrame(frame, [reason], reason.message);
       }
       return denyFrame(frame, [], `${input} The tool call was denied.`);
@@ -221,7 +269,7 @@ export async function decidePolicyCheck(
       } satisfies Allow;
     }
     if (decision.effect === "deny") {
-      await recordDenied(deps.db, target.teamId, frame, decision.reasons);
+      await recordDenied(deps, target.teamId, frame, decision.reasons, mayRecordDenied);
       return denyFrame(
         frame,
         decision.reasons,
@@ -254,7 +302,7 @@ export async function decidePolicyCheck(
         ...(outcome.approval === undefined ? {} : { approval: outcome.approval }),
       } satisfies Allow;
     }
-    await recordDenied(deps.db, target.teamId, frame, outcome.reasons);
+    await recordDenied(deps, target.teamId, frame, outcome.reasons, mayRecordDenied);
     return denyFrame(frame, outcome.reasons, outcome.message);
   } catch {
     return denyFrame(

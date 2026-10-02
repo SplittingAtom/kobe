@@ -8,6 +8,8 @@ export interface RegisteredConnection {
   readonly target: SandboxTarget;
   readonly sandboxId: string;
   close(reason: "replaced" | "unauthorized" | "internal", message: string): void;
+  /** Re-check liveness, account and membership now (closes when no longer allowed). */
+  revalidate(): void;
   /** Deliver pending commands now (a hint or a resync arrived). */
   pokeCommands(): void;
 }

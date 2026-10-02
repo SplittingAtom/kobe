@@ -12,7 +12,7 @@ import { SandboxConnection } from "./connection.js";
 import { WIRE_DEFAULTS, type WireTuning } from "./constants.js";
 import { newMetrics, type LeaseViolation, type WireContext, type WireMetrics } from "./context.js";
 import { attachSandboxGateway } from "./gateway.js";
-import { DEFAULT_RUN_CONTEXT, DENY_APPROVALS } from "./policy-check.js";
+import { DENY_APPROVALS } from "./policy-check.js";
 import { ConnectionRegistry } from "./registry.js";
 import { CommandRouter } from "./router.js";
 import { sweepOnce, type SweepResult } from "./sweeper.js";
@@ -37,7 +37,8 @@ export interface SandboxWireOptions {
   readonly approvals?: ApprovalBroker;
   readonly ui?: UiBroker;
   readonly hooks?: RunLifecycleHooks;
-  readonly runContext?: RunPolicyContextSource;
+  /** Run policy inputs incl. the approval-mode floor (`createDbRunContextSource()` in production). */
+  readonly runContext: RunPolicyContextSource;
   readonly waker?: SandboxWaker;
   readonly tuning?: Partial<WireTuning>;
   /** Connections one replica accepts. */
@@ -58,7 +59,12 @@ export interface SandboxWire {
     auth: { readonly verify: SessionTokenVerifier; readonly liveness: SandboxLiveness },
   ): () => void;
   /** Closes every connection of a user on every replica (deactivation, KOBE-13 lifecycle hook). */
-  disconnectUser(userId: string): Promise<void>;
+  /**
+   * Re-checks every connection of a user on every replica (account active, still a member of the
+   * connection's team, sandbox live) and closes those no longer allowed: deactivation (KOBE-13
+   * lifecycle hook) and team member removal call it.
+   */
+  revalidateUser(userId: string): Promise<void>;
   /** One lost-sandbox sweep + command expiry now. */
   sweep(): Promise<SweepResult>;
   metrics(): WireMetrics & { readonly connections: number; readonly waiting: number };
@@ -109,7 +115,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
         registry.get(hint.id)?.close("replaced", "replaced by a newer connection");
         return;
       case "user":
-        for (const c of registry.forUser(hint.id)) c.close("unauthorized", "account deactivated");
+        for (const c of registry.forUser(hint.id)) c.revalidate();
         return;
     }
   };
@@ -157,7 +163,8 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       engine,
       registry: tools,
       approvals: options.approvals ?? DENY_APPROVALS,
-      runContext: options.runContext ?? DEFAULT_RUN_CONTEXT,
+      runContext: options.runContext,
+      runMaxEvents: tuning.runMaxEvents,
     },
     ui: options.ui ?? CANCEL_DIALOGS,
     hooks,
@@ -179,6 +186,20 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
           target: { sandboxId, userId: target.userId, violation, frameType },
         }),
       ).catch((err: unknown) => log.error({ err }, "could not audit a lease violation"));
+    },
+    auditLimit(target, sandboxId, limit, runId) {
+      const key = `${target.teamId}:${target.userId}:${limit}`;
+      const last = violationAudits.get(key) ?? 0;
+      if (Date.now() - last < VIOLATION_AUDIT_EVERY_MS) return;
+      violationAudits.set(key, Date.now());
+      void withTeam(db, target.teamId, (tx) =>
+        recordAudit(tx, {
+          action: "sandbox.limit_exceeded",
+          actor: SYSTEM_ACTOR,
+          teamId: target.teamId,
+          target: { sandboxId, userId: target.userId, limit, ...(runId ? { runId } : {}) },
+        }),
+      ).catch((err: unknown) => log.error({ err }, "could not audit a sandbox limit"));
     },
     localResult: (id) => router.onResult(id),
     runEnded(event) {
@@ -246,7 +267,12 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
           new SandboxConnection(
             ctx,
             socket,
-            { sandboxId: claims.sub, teamId: claims.team_id, userId: claims.user_id },
+            {
+              sandboxId: claims.sub,
+              teamId: claims.team_id,
+              userId: claims.user_id,
+              exp: claims.exp,
+            },
             registry,
           ).start();
         },
@@ -254,8 +280,8 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       detachers.push(detach);
       return detach;
     },
-    async disconnectUser(userId) {
-      for (const c of registry.forUser(userId)) c.close("unauthorized", "account deactivated");
+    async revalidateUser(userId) {
+      for (const c of registry.forUser(userId)) c.revalidate();
       await bus.notify(db, { kind: "user", id: userId });
     },
     sweep,

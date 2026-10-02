@@ -45,6 +45,9 @@ export function newMetrics(): WireMetrics {
   };
 }
 
+export type SandboxLimit =
+  "frame_rate" | "byte_rate" | "frame_size" | "run_events" | "run_bytes" | "thread_entries";
+
 export type LeaseViolation = "unknown_run" | "unknown_thread" | "unknown_command";
 
 /** Everything a connection shares with its replica. */
@@ -67,6 +70,8 @@ export interface WireContext {
     violation: LeaseViolation,
     frameType: string,
   ): void;
+  /** Records `sandbox.limit_exceeded` (throttled per sandbox and limit). */
+  auditLimit(target: SandboxTarget, sandboxId: string, limit: SandboxLimit, runId?: string): void;
   /** A command requested on this replica has a result (skip waiting for the NOTIFY round trip). */
   localResult(commandId: string): void;
   /** Tells KOBE-30 (hooks) that the wire ended a run; never throws. */

@@ -17,7 +17,7 @@ import { withAppendTx } from "../event-stream/append.js";
 import type WebSocket from "ws";
 import { completeCommand, orphanedDeliveries } from "./commands.js";
 import { UI_DEDUPE_MAX } from "./constants.js";
-import type { LeaseViolation, WireContext } from "./context.js";
+import type { LeaseViolation, SandboxLimit, WireContext } from "./context.js";
 import { CommandDelivery, type IssuedCommand } from "./delivery.js";
 import { RunIngest } from "./ingest.js";
 import { decidePolicyCheck, denyFrame } from "./policy-check.js";
@@ -30,6 +30,8 @@ export interface ConnectionClaims {
   readonly sandboxId: string;
   readonly teamId: string;
   readonly userId: string;
+  /** Session token `exp` (seconds since the epoch). */
+  readonly exp: number;
 }
 
 interface Lease {
@@ -42,6 +44,8 @@ type State = "hello" | "starting" | "ready" | "closed";
 
 const MAX_BUFFERED_BYTES = 32 * 1024 * 1024;
 const POLICY_ANSWERED_MAX = 4_096;
+/** `{"v":1,"type":"<type>"` at the start of a frame (whitespace tolerated). */
+const FRAME_PREFIX = /^\s*\{\s*"v"\s*:\s*1\s*,\s*"type"\s*:\s*"([a-z._]{1,32})"/;
 /** Ended leases kept to answer late frames with `run_not_active`; older ones are forgotten. */
 const ENDED_LEASES_MAX = 256;
 
@@ -78,13 +82,16 @@ export class SandboxConnection implements RegisteredConnection {
   readonly #uiSeen = new Set<string>();
   readonly #policyPending = new Map<string, AbortController>();
   readonly #policyAnswered = new Set<string>();
+  readonly #deniedBuckets = new Map<string, { tokens: number; at: number }>();
   readonly #delivery: CommandDelivery;
   #state: State = "hello";
   #lastInbound = Date.now();
   #tokens: number;
+  #byteTokens: number;
   #tokensAt = Date.now();
   #timers: NodeJS.Timeout[] = [];
   #registered = false;
+  readonly #tokenExpiresAt: number;
 
   constructor(
     ctx: WireContext,
@@ -97,7 +104,9 @@ export class SandboxConnection implements RegisteredConnection {
     this.#registry = registry;
     this.target = { teamId: claims.teamId, userId: claims.userId };
     this.sandboxId = claims.sandboxId;
+    this.#tokenExpiresAt = claims.exp * 1000;
     this.#tokens = ctx.tuning.frameBurst;
+    this.#byteTokens = ctx.tuning.byteBurst;
     this.#delivery = new CommandDelivery(ctx, this);
   }
 
@@ -193,6 +202,7 @@ export class SandboxConnection implements RegisteredConnection {
     if (!lease) return;
     lease.ended = true;
     lease.ingest.close();
+    this.#deniedBuckets.delete(runId);
     const ended = [...this.#leases].filter(([, l]) => l.ended);
     for (const [id] of ended.slice(0, Math.max(0, ended.length - ENDED_LEASES_MAX))) {
       this.#leases.delete(id);
@@ -225,31 +235,61 @@ export class SandboxConnection implements RegisteredConnection {
           }
         },
         failed: () => this.close("internal", "events could not be stored"),
+        needsSync: (thread) => this.#delivery.forgetSession(thread),
+        limitExceeded: (run, limit) => void this.#limitExceeded(run, threadId, limit),
       },
     });
   }
 
   // ------------------------------------------------------------------ inbound
 
-  #rateOk(): boolean {
-    const { frameRatePerSec, frameBurst } = this.#ctx.tuning;
+  /** Frame and byte token buckets, charged before anything is decoded. */
+  #rateOk(bytes: number): SandboxLimit | undefined {
+    const { frameRatePerSec, frameBurst, byteRatePerSec, byteBurst } = this.#ctx.tuning;
     const now = Date.now();
-    this.#tokens = Math.min(
-      frameBurst,
-      this.#tokens + ((now - this.#tokensAt) / 1000) * frameRatePerSec,
-    );
+    const elapsed = (now - this.#tokensAt) / 1000;
     this.#tokensAt = now;
-    if (this.#tokens < 1) return false;
+    this.#tokens = Math.min(frameBurst, this.#tokens + elapsed * frameRatePerSec);
+    this.#byteTokens = Math.min(byteBurst, this.#byteTokens + elapsed * byteRatePerSec);
+    if (this.#tokens < 1) return "frame_rate";
+    if (this.#byteTokens < bytes) return "byte_rate";
     this.#tokens -= 1;
-    return true;
+    this.#byteTokens -= bytes;
+    return undefined;
+  }
+
+  /**
+   * Size cap by frame type, read from the raw prefix (KOBE-23 writes `{"v":1,"type":…` first):
+   * only `pi.event` / `command.result` may use the full 4 MiB, `policy.check` a smaller cap, and
+   * any other or unreadable type must be small — so a hostile frame is refused before parsing.
+   */
+  #sizeOk(raw: Buffer): boolean {
+    const max = this.#ctx.tuning.frameMaxBytes;
+    if (raw.length <= max.small) return true;
+    if (this.#state !== "ready") return false;
+    const type = FRAME_PREFIX.exec(raw.subarray(0, 64).toString("latin1"))?.[1];
+    if (type === "pi.event" || type === "command.result") return raw.length <= max.bulk;
+    if (type === "policy.check") return raw.length <= max.policyCheck;
+    return false;
+  }
+
+  #overLimit(limit: SandboxLimit, message: string): void {
+    this.#ctx.auditLimit(this.target, this.sandboxId, limit);
+    this.close("protocol_error", message);
   }
 
   #onMessage(data: WebSocket.RawData, isBinary: boolean): void {
     if (this.#state === "closed") return;
     this.#lastInbound = Date.now();
     this.#ctx.metrics.framesIn += 1;
-    if (!this.#rateOk()) {
-      this.close("protocol_error", "frame rate exceeded");
+    const raw = Buffer.isBuffer(data)
+      ? data
+      : Array.isArray(data)
+        ? Buffer.concat(data)
+        : Buffer.from(data);
+    const limit = this.#rateOk(raw.length);
+    if (limit) {
+      this.#overLimit(limit, limit === "byte_rate" ? "byte rate exceeded" : "frame rate exceeded");
       return;
     }
     if (isBinary) {
@@ -257,11 +297,11 @@ export class SandboxConnection implements RegisteredConnection {
       this.sendError("malformed_frame", "binary frames are not part of the protocol");
       return;
     }
-    const text = Buffer.isBuffer(data)
-      ? data.toString("utf8")
-      : Array.isArray(data)
-        ? Buffer.concat(data).toString("utf8")
-        : Buffer.from(data).toString("utf8");
+    if (!this.#sizeOk(raw)) {
+      this.#overLimit("frame_size", "frame too large for its type");
+      return;
+    }
+    const text = raw.toString("utf8");
     const decoded = decodeSandboxFrame(text);
     if (!decoded.ok) {
       this.#ctx.metrics.malformedFrames += 1;
@@ -388,16 +428,22 @@ export class SandboxConnection implements RegisteredConnection {
     const abort = new AbortController();
     this.#policyPending.set(key, abort);
     this.#ctx.metrics.policyChecks += 1;
-    void decidePolicyCheck(this.#ctx.policy, this.target, frame, abort.signal, (pending) =>
-      this.send({
-        v: 1,
-        type: "policy.pending",
-        request_id: frame.request_id,
-        run_id: frame.run_id,
-        tool_call_id: frame.tool_call_id,
-        approval_id: pending.approvalId,
-        expires_at: pending.expiresAt,
-      }),
+    void decidePolicyCheck(
+      this.#ctx.policy,
+      this.target,
+      frame,
+      abort.signal,
+      (pending) =>
+        this.send({
+          v: 1,
+          type: "policy.pending",
+          request_id: frame.request_id,
+          run_id: frame.run_id,
+          tool_call_id: frame.tool_call_id,
+          approval_id: pending.approvalId,
+          expires_at: pending.expiresAt,
+        }),
+      () => this.#takeDeniedToken(frame.run_id),
     ).then((result) => {
       this.#policyPending.delete(key);
       remember(this.#policyAnswered, key, POLICY_ANSWERED_MAX);
@@ -460,6 +506,47 @@ export class SandboxConnection implements RegisteredConnection {
       void this.interrupt(runId, "pi_exited");
     }
     this.#delivery.forgetSession(threadId);
+  }
+
+  /** Per-run token bucket for `policy.denied` events. */
+  #takeDeniedToken(runId: string): boolean {
+    const { deniedEventBurst, deniedEventsPerMinute } = this.#ctx.tuning;
+    const now = Date.now();
+    const b = this.#deniedBuckets.get(runId) ?? { tokens: deniedEventBurst, at: now };
+    b.tokens = Math.min(
+      deniedEventBurst,
+      b.tokens + ((now - b.at) / 60_000) * deniedEventsPerMinute,
+    );
+    b.at = now;
+    this.#deniedBuckets.set(runId, b);
+    if (b.tokens < 1) return false;
+    b.tokens -= 1;
+    return true;
+  }
+
+  /** A storage cap: the run fails (terminal event within the cap) and Pi is stopped. */
+  async #limitExceeded(
+    runId: string,
+    threadId: string,
+    limit: "run_events" | "run_bytes" | "thread_entries",
+  ): Promise<void> {
+    this.endLease(runId);
+    this.log.warn({ run_id: runId, limit }, "sandbox storage limit reached; failing the run");
+    this.#ctx.auditLimit(this.target, this.sandboxId, limit, runId);
+    this.#delivery.stopRun(runId, threadId);
+    const code = limit === "thread_entries" ? "thread_too_large" : "run_too_large";
+    try {
+      const { ended } = await withAppendTx(this.#ctx.db, this.target.teamId, (tx) =>
+        endRunInTx(tx, this.target.teamId, runId, {
+          status: "failed",
+          error: { code, message: "The run produced more output than Kobe stores for one run." },
+        }),
+      );
+      if (ended)
+        this.#ctx.runEnded({ teamId: this.target.teamId, runId, threadId, status: "failed" });
+    } catch (err) {
+      this.log.error({ err, run_id: runId }, "could not fail an oversized run");
+    }
   }
 
   /** Interrupts an active run (D14: never retried automatically). */
@@ -583,7 +670,7 @@ export class SandboxConnection implements RegisteredConnection {
   }
 
   #startTimers(): void {
-    const { tuning, liveness } = this.#ctx;
+    const { tuning } = this.#ctx;
     this.#every(tuning.heartbeatIntervalMs, () => {
       if (Date.now() - this.#lastInbound > tuning.heartbeatTimeoutMs) {
         this.close("heartbeat_timeout", "no frames from the sandbox");
@@ -599,14 +686,22 @@ export class SandboxConnection implements RegisteredConnection {
         })
         .catch((err: unknown) => this.log.warn({ err }, "connection heartbeat write failed"));
     });
-    this.#every(tuning.revalidateMs, () => {
-      void (async () => {
-        const claims = { sandboxId: this.sandboxId, ...this.target };
-        if (!(await liveness.isLive(claims))) this.close("sandbox_destroyed", "sandbox is gone");
-        else if (!(await this.#ctx.principalAllowed(this.target)))
-          this.close("unauthorized", "access revoked");
-      })().catch((err: unknown) => this.log.warn({ err }, "connection revalidation failed"));
-    });
+    this.#every(tuning.revalidateMs, () => this.revalidate());
+    // The session token expires (15 min, KOBE-22): the sandbox reconnects with a fresh one and
+    // resumes its runs from their durable cursors.
+    const expiresIn = this.#tokenExpiresAt - Date.now() + tuning.tokenExpiryGraceMs;
+    this.#later(Math.max(0, expiresIn), () => this.close("unauthorized", "session token expired"));
+  }
+
+  /** Re-checks the sandbox's liveness and its user's account and membership; closes if gone. */
+  revalidate(): void {
+    void (async () => {
+      const claims = { sandboxId: this.sandboxId, ...this.target };
+      if (!(await this.#ctx.liveness.isLive(claims)))
+        this.close("sandbox_destroyed", "sandbox is gone");
+      else if (!(await this.#ctx.principalAllowed(this.target)))
+        this.close("unauthorized", "access revoked");
+    })().catch((err: unknown) => this.log.warn({ err }, "connection revalidation failed"));
   }
 
   #teardown(): void {

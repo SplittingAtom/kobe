@@ -18,7 +18,7 @@ export type BusHint =
   | { readonly kind: "res"; readonly id: string }
   /** This connection was replaced by a newer one of the same sandbox: its holder closes it. */
   | { readonly kind: "kick"; readonly id: string }
-  /** This user was deactivated: every replica closes their connections. */
+  /** This user was deactivated or left a team: every replica re-checks their connections. */
   | { readonly kind: "user"; readonly id: string };
 
 const KINDS = new Set(["cmd", "res", "kick", "user"]);

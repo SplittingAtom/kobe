@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   check,
   foreignKey,
   index,
@@ -79,6 +80,12 @@ export const runs = pgTable(
      * compare-and-set in the same transaction as the appended rows; never decreases (trigger).
      */
     sandboxSeq: integer().notNull().default(0),
+    /**
+     * Bytes of events and entries this run's sandbox has caused to be stored (KOBE-24), advanced
+     * with `sandbox_seq`; the wire stops the run at its cap so a compromised sandbox can't grow the
+     * database without bound.
+     */
+    sandboxBytes: bigint({ mode: "number" }).notNull().default(0),
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.id] }),
@@ -111,6 +118,7 @@ export const runs = pgTable(
     check("runs_queue_pos", sql`${t.queuePos} IS NULL OR ${t.status} = 'queued'`),
     check("runs_last_seq", sql`${t.lastSeq} >= 0`),
     check("runs_sandbox_seq", sql`${t.sandboxSeq} >= 0`),
+    check("runs_sandbox_bytes", sql`${t.sandboxBytes} >= 0`),
     check(
       "runs_events_compacted_at",
       sql`${t.eventsCompactedAt} IS NULL OR ${t.endedAt} IS NOT NULL`,

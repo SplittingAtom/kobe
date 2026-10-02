@@ -9,6 +9,7 @@ import { createStreamReader, type StreamReader } from "./event-stream/read.js";
 import { STREAM_DEFAULTS, type StreamTimings } from "./event-stream/stream.js";
 import type { Mailer } from "./mail/mailer.js";
 import {
+  createDbRunContextSource,
   createSandboxWire,
   type SandboxWire,
   type SandboxWireOptions,
@@ -32,7 +33,7 @@ export interface ServerDepsOptions {
   /** Outgoing email (invitations, password resets, notifications). */
   readonly mailer: Mailer;
   /** Sandbox wire seams and tuning (KOBE-24): approvals, UI, run hooks, wake, policy context. */
-  readonly sandboxWire?: Omit<SandboxWireOptions, "db" | "databaseUrl">;
+  readonly sandboxWire?: Partial<Omit<SandboxWireOptions, "db" | "databaseUrl">>;
 }
 
 export interface NewUser {
@@ -101,6 +102,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
 
   const sandboxWire = createSandboxWire({
     ...options.sandboxWire,
+    runContext: options.sandboxWire?.runContext ?? createDbRunContextSource(),
     db: database.db,
     databaseUrl: options.databaseUrl,
   });
@@ -108,7 +110,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   // A deactivated user's sandboxes lose their connections on every replica at once (KOBE-13).
   lifecycle.on("deactivated", {
     name: "sandbox-wire",
-    run: (userId) => sandboxWire.disconnectUser(userId),
+    run: (userId) => sandboxWire.revalidateUser(userId),
   });
 
   return {

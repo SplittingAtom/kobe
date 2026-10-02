@@ -22,7 +22,7 @@ export class FakeSandboxAuth {
   readonly #tokens = new Map<string, SessionTokenClaims>();
   readonly dead = new Set<string>();
 
-  issue(claims: { sandboxId: string; teamId: string; userId: string }): string {
+  issue(claims: { sandboxId: string; teamId: string; userId: string }, ttlSeconds = 900): string {
     const token = `tok-${randomUUID()}`;
     const now = Math.floor(Date.now() / 1000);
     this.#tokens.set(token, {
@@ -32,7 +32,7 @@ export class FakeSandboxAuth {
       team_id: claims.teamId,
       user_id: claims.userId,
       iat: now,
-      exp: now + 900,
+      exp: now + ttlSeconds,
       jti: randomUUID(),
     });
     return token;
@@ -77,7 +77,8 @@ export interface Closed {
   readonly reason: string;
 }
 
-type Responder = (frame: ServerToSandboxFrame) => object | undefined;
+/** A frame to send instead of the default answer; `null` swallows the frame (no answer). */
+type Responder = (frame: ServerToSandboxFrame) => object | null | undefined;
 
 /**
  * A scripted sandbox agent. By default it answers `get_entries` with the entries in `session`
@@ -145,6 +146,7 @@ export class FakeSandbox {
 
   #answer(frame: ServerToSandboxFrame): void {
     const custom = this.respond?.(frame);
+    if (custom === null) return;
     if (custom !== undefined) {
       this.sendRaw(custom);
       return;
