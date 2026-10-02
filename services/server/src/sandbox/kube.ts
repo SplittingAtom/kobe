@@ -30,10 +30,16 @@ export interface KubeClient {
   /** Server-side apply (field manager `kobe-server`, force): create or converge. */
   apply(object: KubeObject): Promise<KubeObject>;
   /** Plain create; throws KubeApiError with status 409 when the object exists. */
-  create(object: KubeObject): Promise<KubeObject>;
+  create(object: KubeObject, options?: { readonly dryRun?: boolean }): Promise<KubeObject>;
   /** undefined when the object does not exist. */
   get(ref: ObjectRef): Promise<KubeObject | undefined>;
-  list(apiVersion: string, kind: string, namespace: string): Promise<KubeObject[]>;
+  /** Lists in a namespace, or cluster-wide for cluster-scoped kinds (namespace undefined). */
+  list(
+    apiVersion: string,
+    kind: string,
+    namespace?: string,
+    labelSelector?: string,
+  ): Promise<KubeObject[]>;
   /** Deletes with background propagation; a missing object is not an error. */
   delete(ref: ObjectRef): Promise<void>;
   reviewToken(token: string, audiences: readonly string[]): Promise<TokenReviewResult>;
@@ -126,13 +132,13 @@ export function createKubeClient(timeoutMs = KUBE_API_TIMEOUT_MS): KubeClient {
           ),
         ),
       ),
-    create: async (object) =>
+    create: async (object, options) =>
       plain(
         await call(`create ${describe({ ...object, ...object.metadata })}`, () =>
           objects.create(
             object as unknown as KubernetesObject,
             undefined,
-            undefined,
+            options?.dryRun ? "All" : undefined,
             FIELD_MANAGER,
           ),
         ),
@@ -145,9 +151,18 @@ export function createKubeClient(timeoutMs = KUBE_API_TIMEOUT_MS): KubeClient {
         throw err;
       }
     },
-    list: async (apiVersion, kind, namespace) => {
-      const result = await call(`list ${kind} in ${namespace}`, () =>
-        objects.list(apiVersion, kind, namespace),
+    list: async (apiVersion, kind, namespace, labelSelector) => {
+      const result = await call(`list ${kind} in ${namespace ?? "cluster"}`, () =>
+        objects.list(
+          apiVersion,
+          kind,
+          namespace,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          labelSelector,
+        ),
       );
       return result.items.map(plain);
     },

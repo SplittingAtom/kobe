@@ -21,6 +21,7 @@ import {
 import type { TokenReviewResult } from "./kube.js";
 import {
   SandboxAuthError,
+  ADMISSION_PROBE_NAMESPACE,
   SandboxProvisioningError,
   TEAM_RECONVERGE_MS,
   createSandboxProvider,
@@ -517,6 +518,29 @@ describe("identifyBootstrapToken", () => {
     expect(kube.all("SandboxClaim")).toHaveLength(0);
   });
 
+  it("refuses a malformed user id annotation with 401, not an internal error", async () => {
+    const { kube, provider, pod } = await withSandbox();
+    kube.seed({
+      ...pod,
+      metadata: {
+        ...pod.metadata,
+        annotations: {
+          ...pod.metadata.annotations,
+          "kobe.splittingatom.io/user-id": "-".repeat(36),
+        },
+      },
+    });
+    await expect(provider.identifyBootstrapToken(TOKEN)).rejects.toThrow(SandboxAuthError);
+  });
+
+  it("refuses a pod that predates a recreated RuntimeClass", async () => {
+    const { kube, provider } = await withSandbox();
+    recreateRuntimeClass(kube);
+    await expect(provider.identifyBootstrapToken(TOKEN)).rejects.toThrow(
+      IsolationRuntimeMissingError,
+    );
+  });
+
   it("hands out nothing without isolation", async () => {
     const { kube, provider } = await withSandbox();
     kube.seed({
@@ -528,5 +552,146 @@ describe("identifyBootstrapToken", () => {
     await expect(provider.identifyBootstrapToken(TOKEN)).rejects.toThrow(
       IsolationRuntimeMissingError,
     );
+  });
+});
+
+const recreateRuntimeClass = (kube: FakeKube, handler = "runsc") =>
+  kube.seed({
+    apiVersion: "node.k8s.io/v1",
+    kind: "RuntimeClass",
+    metadata: {
+      name: "gvisor",
+      uid: crypto.randomUUID(),
+      creationTimestamp: "2030-01-01T00:00:00Z",
+    },
+    handler,
+  });
+
+describe("admission self-check (fail closed)", () => {
+  it("dry-runs an out-of-prefix namespace once and provisions when the policy refuses it", async () => {
+    const { kube, provider } = setup();
+    await provider.ensureSandbox(TEAM, USER);
+    await provider.ensureSandbox(OTHER_TEAM, USER);
+    const probes = kube.calls.filter((c) => c.verb === "create" && c.kind === "Namespace");
+    expect(probes).toEqual([
+      {
+        verb: "create",
+        kind: "Namespace",
+        name: ADMISSION_PROBE_NAMESPACE,
+        labels: expect.any(Object),
+      },
+    ]);
+  });
+
+  it("refuses to provision anything when the admission policy is not in effect", async () => {
+    const { kube, provider } = setup();
+    kube.dryRun = (o) => o;
+    await expect(provider.ensureSandbox(TEAM, USER)).rejects.toThrow(
+      /admission policies are not in effect/,
+    );
+    expect(kube.all("Namespace")).toHaveLength(0);
+    expect(kube.all("SandboxClaim")).toHaveLength(0);
+  });
+
+  it("refuses when the dry run fails for any other reason (e.g. RBAC), and retries later", async () => {
+    const { kube, provider } = setup();
+    kube.dryRun = () => {
+      throw new Error("namespaces is forbidden");
+    };
+    await expect(provider.ensureSandbox(TEAM, USER)).rejects.toThrow(/forbidden/);
+    delete kube.dryRun;
+    await expect(provider.ensureSandbox(TEAM, USER)).resolves.toMatchObject({ state: "running" });
+  });
+});
+
+describe("deleting unverified sandboxes", () => {
+  it("retries a failed delete and also deletes the pod itself", async () => {
+    const { kube, provider } = setup({ controller: { podRuntimeClass: () => "runc" } });
+    kube.failNext("delete", "SandboxClaim", 500, 2);
+    await expect(provider.ensureSandbox(TEAM, USER)).rejects.toThrow(/was deleted/);
+    expect(kube.all("SandboxClaim")).toHaveLength(0);
+    expect(kube.calls.filter((c) => c.verb === "delete" && c.kind === "Pod")).toHaveLength(1);
+  });
+
+  it("refuses a pod older than its RuntimeClass (class recreated, even with the same name)", async () => {
+    const { kube, provider } = setup();
+    await provider.ensureSandbox(TEAM, USER);
+    recreateRuntimeClass(kube);
+    await expect(provider.ensureSandbox(TEAM, USER)).rejects.toThrow(/recreated/);
+    expect(kube.all("SandboxClaim")).toHaveLength(0);
+  });
+});
+
+describe("reconcileIsolation", () => {
+  async function twoSandboxes() {
+    const ctx = setup({ provider: { runtimeClassName: "gvisor" } });
+    const a = await ctx.provider.ensureSandbox(TEAM, USER);
+    const b = await ctx.provider.ensureSandbox(OTHER_TEAM, USER);
+    return { ...ctx, a, b };
+  }
+
+  it("leaves verified pods alone", async () => {
+    const { kube, provider } = await twoSandboxes();
+    await expect(provider.reconcileIsolation()).resolves.toEqual({ deleted: [] });
+    expect(kube.all("Pod")).toHaveLength(2);
+  });
+
+  it("deletes a team pod under another runtime, with its claim", async () => {
+    const { kube, provider, a } = await twoSandboxes();
+    const pod = must(objectAt(kube, "Pod", must(a.podName), NS));
+    kube.seed({ ...pod, spec: { ...(pod.spec as object), runtimeClassName: "runc" } });
+    const result = await provider.reconcileIsolation();
+    expect(result.deleted).toEqual([`${NS}/${a.podName}`]);
+    expect(kube.all("SandboxClaim").map((c) => c.metadata.namespace)).toEqual([
+      "kobe-team-marketing",
+    ]);
+  });
+
+  it("deletes pods that predate a recreated RuntimeClass", async () => {
+    const { kube, provider } = await twoSandboxes();
+    recreateRuntimeClass(kube);
+    expect((await provider.reconcileIsolation()).deleted).toHaveLength(2);
+  });
+
+  it("stops every team pod but keeps claims when isolation is definitively lost", async () => {
+    const { kube, provider } = await twoSandboxes();
+    recreateRuntimeClass(kube, "runc");
+    const result = await provider.reconcileIsolation();
+    expect(result).toMatchObject({ reason: expect.stringMatching(/no longer isolates/) });
+    expect(result.deleted).toHaveLength(2);
+    expect(kube.all("Pod")).toHaveLength(0);
+    expect(kube.all("SandboxClaim")).toHaveLength(2);
+  });
+
+  it("changes nothing when isolation cannot be checked (API errors are not evidence)", async () => {
+    const { kube, provider } = await twoSandboxes();
+    const failing = createSandboxProvider({
+      kube,
+      settings: SETTINGS,
+      runtimeClassName: "gvisor",
+      sleep: async () => {},
+      isolation: {
+        require: async () => {
+          throw new IsolationRuntimeMissingError("Kubernetes API timed out");
+        },
+      },
+    });
+    // The class itself still isolates: a transient failure, not a loss.
+    await expect(failing.reconcileIsolation()).resolves.toEqual({ deleted: [] });
+    kube.failNext("get", "RuntimeClass", 500);
+    await expect(failing.reconcileIsolation()).rejects.toThrow(/500/);
+    expect(kube.all("Pod")).toHaveLength(2);
+    expect(provider).toBeDefined();
+  });
+
+  it("ignores pods outside team namespaces", async () => {
+    const { kube, provider } = await twoSandboxes();
+    kube.seed({
+      apiVersion: "v1",
+      kind: "Pod",
+      metadata: { name: "x", namespace: "default" },
+      spec: { runtimeClassName: "runc" },
+    });
+    expect((await provider.reconcileIsolation()).deleted).toEqual([]);
   });
 });

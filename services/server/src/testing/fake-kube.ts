@@ -37,6 +37,8 @@ export interface FakeKube extends KubeClient {
   failNext(verb: Verb, kind: string, status: number, times?: number): void;
   /** Called after every apply/create (e.g. to simulate a controller). */
   afterWrite?: (object: KubeObject, fake: FakeKube) => void;
+  /** Answers a dry-run create (default: the admission policy denies out-of-prefix namespaces). */
+  dryRun?: (object: KubeObject) => KubeObject;
   /** Called on every get (e.g. to make a controller act lazily). */
   beforeGet?: (ref: ObjectRef, fake: FakeKube) => void;
 }
@@ -44,6 +46,8 @@ export interface FakeKube extends KubeClient {
 export function createFakeKube(): FakeKube {
   const store = new Map<string, KubeObject>();
   const failures: { verb: Verb; kind: string; status: number; times: number }[] = [];
+  /** Seconds since the epoch for creationTimestamps: strictly increasing in creation order. */
+  let fakeClock = 1_790_000_000;
 
   const maybeFail = (verb: Verb, kind: string) => {
     const f = failures.find((x) => x.verb === verb && x.kind === kind && x.times > 0);
@@ -57,6 +61,10 @@ export function createFakeKube(): FakeKube {
     const metadata: KubeMetadata = {
       ...object.metadata,
       uid: existing?.metadata.uid ?? object.metadata.uid ?? randomUUID(),
+      creationTimestamp:
+        existing?.metadata.creationTimestamp ??
+        object.metadata.creationTimestamp ??
+        new Date(fakeClock++ * 1000).toISOString(),
     };
     const stored = clone({ ...object, metadata });
     store.set(key({ ...object, ...object.metadata }), stored);
@@ -96,9 +104,16 @@ export function createFakeKube(): FakeKube {
       fake.afterWrite?.(result, fake);
       return result;
     },
-    async create(object) {
+    async create(object, options) {
       fake.calls.push({ verb: "create", kind: object.kind, ...object.metadata });
       maybeFail("create", object.kind);
+      if (options?.dryRun) {
+        if (fake.dryRun) return fake.dryRun(object);
+        throw new KubeApiError(
+          403,
+          `admission webhook denied: Kobe may only manage kobe-team-* namespaces, not ${object.metadata.name}`,
+        );
+      }
       if (store.has(key({ ...object, ...object.metadata }))) {
         throw new KubeApiError(409, `${object.kind} ${object.metadata.name} already exists`);
       }
@@ -113,13 +128,17 @@ export function createFakeKube(): FakeKube {
       const obj = store.get(key(r));
       return obj && clone(obj);
     },
-    async list(apiVersion, kind, namespace) {
-      fake.calls.push({ verb: "list", kind, namespace });
+    async list(apiVersion, kind, namespace, labelSelector) {
+      fake.calls.push({ verb: "list", kind, ...(namespace ? { namespace } : {}) });
       maybeFail("list", kind);
+      const [lk, lv] = (labelSelector ?? "").split("=");
       return [...store.values()]
         .filter(
           (o) =>
-            o.apiVersion === apiVersion && o.kind === kind && o.metadata.namespace === namespace,
+            o.apiVersion === apiVersion &&
+            o.kind === kind &&
+            o.metadata.namespace === namespace &&
+            (!lk || o.metadata.labels?.[lk] === lv),
         )
         .map(clone);
     },

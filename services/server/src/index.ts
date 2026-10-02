@@ -5,6 +5,7 @@ import { createServerDeps, type ServerDeps } from "./deps.js";
 import { createIsolationGate } from "./isolation/gate.js";
 import { listRuntimeClasses } from "./isolation/kubernetes.js";
 import { logger } from "./logger.js";
+import { createSandboxApp } from "./routes/sandbox.js";
 import { createSandboxRuntime } from "./sandbox/runtime.js";
 
 /** Open streams (SSE) get this long to finish before being cut; stays under k8s' 30 s grace period. */
@@ -56,7 +57,7 @@ if (config.process === "server" && !sandbox) {
 // The scheduler serves health endpoints only (its jobs arrive in KOBE-64).
 const server = serve(
   {
-    fetch: createApp(deps, { isolation, ...(sandbox ? { sandbox } : {}) }).fetch,
+    fetch: createApp(deps, { isolation }).fetch,
     port: config.port,
   },
   (info) => {
@@ -64,9 +65,31 @@ const server = serve(
   },
 );
 
+// Sandbox-facing listener: the only server port the sandbox NetworkPolicy allows (no user API).
+const sandboxServer = sandbox
+  ? serve(
+      {
+        fetch: createSandboxApp(sandbox).fetch,
+        port: sandbox.settings.endpoints.server.targetPort,
+      },
+      (info) => logger.info({ port: info.port }, "sandbox listener"),
+    )
+  : undefined;
+// Deletes sandbox pods found outside the verified isolation runtime (startup + every minute).
+const stopReconciler = sandbox?.startReconciler((result) => {
+  if (result.deleted.length > 0) {
+    logger.error(
+      { deleted: result.deleted, reason: result.reason },
+      "deleted unverified sandbox pods",
+    );
+  }
+});
+
 function shutdown(signal: string): void {
   logger.info({ signal }, "shutting down");
   isolation.stop();
+  stopReconciler?.();
+  sandboxServer?.close();
   server.close((err) => {
     if (err) logger.error({ err }, "shutdown error");
     void (deps?.close() ?? Promise.resolve()).finally(() => process.exit(err ? 1 : 0));

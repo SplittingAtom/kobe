@@ -171,7 +171,7 @@
         "teamQuota": {
           "type": "object",
           "propertyNames": {
-            "pattern": "^[a-z.]+$"
+            "pattern": "^[a-z][a-z.-]*$"
           },
           "additionalProperties": {
             "oneOf": [
@@ -199,6 +199,39 @@
         },
         "sessionKeysSecret": {
           "type": "string"
+        },
+        "ephemeralStorage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "request": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9]+(\\.[0-9]+)?(m|k|M|G|T|Ki|Mi|Gi|Ti)?$"
+                },
+                {
+                  "type": "number",
+                  "minimum": 0
+                }
+              ]
+            },
+            "limit": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9]+(\\.[0-9]+)?(m|k|M|G|T|Ki|Mi|Gi|Ti)?$"
+                },
+                {
+                  "type": "number",
+                  "minimum": 0
+                }
+              ]
+            }
+          }
+        },
+        "modelGatewayAccess": {
+          "type": "boolean"
         }
       }
     },

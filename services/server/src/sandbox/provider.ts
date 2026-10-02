@@ -4,6 +4,7 @@ import {
   type VerifiedIsolation,
 } from "../isolation/gate.js";
 import type { SandboxSettings } from "./config.js";
+import { isIsolationHandler } from "../isolation/runtime-class.js";
 import {
   ANNOTATION_TEAM_ID,
   ANNOTATION_USER_ID,
@@ -11,14 +12,17 @@ import {
   KOBE_ENDPOINTS,
   LABEL_CLAIM_UID,
   LABEL_TEAM_ID,
+  LABEL_TEAM_NAMESPACE,
+  POD_SECURITY_LEVEL,
   SANDBOX_SERVICE_ACCOUNT,
   TEAM_NAMESPACE_PREFIX,
 } from "./constants.js";
-import { isKubeStatus, type KubeClient, type ObjectRef } from "./kube.js";
+import { KubeApiError, isKubeStatus, type KubeClient, type ObjectRef } from "./kube.js";
 import {
   assertTeamRef,
   assertUserId,
   claimName,
+  isUuid,
   limitRangeManifest,
   namespaceManifest,
   networkPolicyManifest,
@@ -48,6 +52,9 @@ import type { SandboxPrincipal } from "./session-token.js";
  */
 
 export const POD_WAIT_TIMEOUT_MS = 30_000;
+/** Name of the dry-run namespace the admission self-check expects to be refused. */
+export const ADMISSION_PROBE_NAMESPACE = "kobe-admission-probe";
+const DELETE_RETRIES = 4;
 /** How long a converged team namespace is trusted before it is applied again. */
 export const TEAM_RECONVERGE_MS = 5 * 60_000;
 const RBAC_RETRIES = 6;
@@ -106,6 +113,17 @@ export interface SandboxProviderOptions {
   readonly sleep?: (ms: number) => Promise<void>;
   readonly now?: () => number;
   readonly podWaitTimeoutMs?: number;
+  /**
+   * The configured RuntimeClass (KOBE_RUNTIME_CLASS). Used only by the reconciler, to recognise a
+   * definitive loss of isolation (class deleted or no longer isolating) when require() fails.
+   */
+  readonly runtimeClassName?: string;
+}
+
+export interface ReconcileResult {
+  /** Pods deleted (namespace/name). */
+  readonly deleted: readonly string[];
+  readonly reason?: string;
 }
 
 export interface SandboxProvider {
@@ -115,6 +133,12 @@ export interface SandboxProvider {
   ensureSandbox(team: TeamRef, userId: string): Promise<SandboxHandle>;
   /** Verifies a sandbox pod's bootstrap token (TokenReview) and resolves who it is. */
   identifyBootstrapToken(token: string): Promise<BootstrapIdentity>;
+  /**
+   * Deletes pods in team namespaces that do not run under the verified RuntimeClass, or predate
+   * the current RuntimeClass object. If isolation is definitively gone (class deleted or not
+   * isolating) every team pod is deleted; claims and volumes are kept. API errors change nothing.
+   */
+  reconcileIsolation(): Promise<ReconcileResult>;
 }
 
 const ref = (apiVersion: string, kind: string, name: string, namespace?: string): ObjectRef => ({
@@ -151,7 +175,45 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     now = () => Date.now(),
     podWaitTimeoutMs = POD_WAIT_TIMEOUT_MS,
+    runtimeClassName,
   } = options;
+
+  /**
+   * The chart's admission policies confine the server's cluster-wide RBAC and pin isolation. Before
+   * provisioning, prove they are in effect: a server-side dry run of a namespace outside
+   * kobe-team-* must be refused by them. Otherwise refuse to provision (fail closed).
+   */
+  let admissionVerified = false;
+  const checkAdmission = async (): Promise<void> => {
+    if (admissionVerified) return;
+    try {
+      await kube.create(
+        {
+          apiVersion: "v1",
+          kind: "Namespace",
+          metadata: {
+            name: ADMISSION_PROBE_NAMESPACE,
+            labels: {
+              [LABEL_TEAM_NAMESPACE]: "true",
+              "pod-security.kubernetes.io/enforce": POD_SECURITY_LEVEL,
+            },
+          },
+        },
+        { dryRun: true },
+      );
+    } catch (err) {
+      if (err instanceof KubeApiError && /kobe-team-\* namespaces/.test(err.message)) {
+        admissionVerified = true;
+        return;
+      }
+      throw err;
+    }
+    throw new SandboxProvisioningError(
+      "Kobe's sandbox admission policies are not in effect (a dry-run namespace outside " +
+        "kobe-team-* was allowed); refusing to provision sandboxes. Install the chart's " +
+        "ValidatingAdmissionPolicies (Kubernetes >= 1.30).",
+    );
+  };
 
   /**
    * Team namespaces converged by this process, keyed by team id + RuntimeClass. Entries expire so
@@ -191,6 +253,7 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
 
   const convergeTeam = async (team: TeamRef, verified: VerifiedIsolation): Promise<string> => {
     const namespace = teamNamespaceName(team);
+    await checkAdmission();
     const existing = await kube.get(ref("v1", "Namespace", namespace));
     if (existing) {
       const owner = existing.metadata.labels?.[LABEL_TEAM_ID];
@@ -240,20 +303,43 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     return entry.pending;
   };
 
-  /** The RuntimeClass still exists with the handler that was verified. */
-  const handlerStillVerified = async (verified: VerifiedIsolation): Promise<boolean> => {
+  /**
+   * The RuntimeClass still exists with the handler that was verified, and the pod was created
+   * after that RuntimeClass object (a class recreated with another handler must not pass old pods).
+   */
+  const stillVerified = async (verified: VerifiedIsolation, pod: KubeObject): Promise<boolean> => {
     const rc = await kube.get(ref("node.k8s.io/v1", "RuntimeClass", verified.runtimeClassName));
-    return field(rc, "handler") === verified.handler;
+    if (!rc || field(rc, "handler") !== verified.handler) return false;
+    const rcCreated = Date.parse(rc.metadata.creationTimestamp ?? "");
+    const podCreated = Date.parse(pod.metadata.creationTimestamp ?? "");
+    return !(rcCreated > podCreated);
+  };
+
+  /** Deletes with retries; false if it still failed (the reconciler retries later). */
+  const deleteWithRetry = async (target: ObjectRef): Promise<boolean> => {
+    for (let attempt = 0; attempt <= DELETE_RETRIES; attempt++) {
+      try {
+        await kube.delete(target);
+        return true;
+      } catch {
+        if (attempt < DELETE_RETRIES) await sleep(200 * 2 ** attempt);
+      }
+    }
+    return false;
   };
 
   const rejectAndDelete = async (
     namespace: string,
     name: string,
     reason: string,
+    podName?: string,
   ): Promise<never> => {
-    await kube.delete(CLAIM(namespace, name));
+    const claimGone = await deleteWithRetry(CLAIM(namespace, name));
+    // The pod directly too: it must stop even if the claim's cascade is slow or the delete failed.
+    const podGone = podName ? await deleteWithRetry(POD(namespace, podName)) : true;
     throw new IsolationRuntimeMissingError(
-      `sandbox ${namespace}/${name} was deleted: ${reason}. Only the verified isolation runtime may run sandboxes.`,
+      `sandbox ${namespace}/${name} ${claimGone && podGone ? "was deleted" : "is being deleted"}: ${reason}. ` +
+        "Only the verified isolation runtime may run sandboxes.",
     );
   };
 
@@ -323,10 +409,20 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
         if (pod && owned) {
           const podClass = str(pod, "spec", "runtimeClassName");
           if (podClass !== verified.runtimeClassName) {
-            return rejectAndDelete(namespace, name, `its pod runs under "${podClass ?? "none"}"`);
+            return rejectAndDelete(
+              namespace,
+              name,
+              `its pod runs under "${podClass ?? "none"}"`,
+              podName,
+            );
           }
-          if (!(await handlerStillVerified(verified))) {
-            return rejectAndDelete(namespace, name, "the RuntimeClass handler changed");
+          if (!(await stillVerified(verified, pod))) {
+            return rejectAndDelete(
+              namespace,
+              name,
+              "the RuntimeClass handler changed or the class was recreated",
+              podName,
+            );
           }
           return { sandboxId, namespace, claimName: name, sandboxName, state: "running", podName };
         }
@@ -365,7 +461,9 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     const claimUid = pod.metadata.labels?.[LABEL_CLAIM_UID];
     const userId = pod.metadata.annotations?.[ANNOTATION_USER_ID];
     const unassigned = { state: "unassigned", namespace, podName } as const;
-    if (!claimUid || !userId || !/^[0-9a-f-]{36}$/.test(userId)) return unassigned;
+    if (!claimUid || !userId) return unassigned;
+    if (!isUuid(userId))
+      throw new SandboxAuthError(`pod ${namespace}/${podName} has a malformed user id`);
     const claim = await kube.get(CLAIM(namespace, claimName(userId)));
     const controller = pod.metadata.ownerReferences?.find((o) => o.controller);
     if (
@@ -381,11 +479,15 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     if (annotations[ANNOTATION_TEAM_ID] !== teamId || annotations[ANNOTATION_USER_ID] !== userId) {
       throw new SandboxAuthError(`claim ${namespace}/${claim.metadata.name} identity mismatch`);
     }
-    if (str(pod, "spec", "runtimeClassName") !== verified.runtimeClassName) {
+    if (
+      str(pod, "spec", "runtimeClassName") !== verified.runtimeClassName ||
+      !(await stillVerified(verified, pod))
+    ) {
       return rejectAndDelete(
         namespace,
         claim.metadata.name,
         "its pod is not under the verified runtime",
+        podName,
       );
     }
     return {
@@ -396,5 +498,68 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     };
   };
 
-  return { ensureTeam, ensureSandbox, identifyBootstrapToken };
+  /** Definitive loss only: the configured class is gone (404) or its handler does not isolate. */
+  const isolationDefinitivelyLost = async (): Promise<string | undefined> => {
+    if (!runtimeClassName) return undefined;
+    const rc = await kube.get(ref("node.k8s.io/v1", "RuntimeClass", runtimeClassName));
+    if (!rc) return `RuntimeClass ${runtimeClassName} no longer exists`;
+    const handler = field(rc, "handler");
+    return typeof handler === "string" && isIsolationHandler(handler)
+      ? undefined
+      : `RuntimeClass ${runtimeClassName} no longer isolates`;
+  };
+
+  const deletePodAndClaim = async (pod: KubeObject, withClaim: boolean): Promise<boolean> => {
+    const namespace = pod.metadata.namespace as string;
+    const userId = pod.metadata.annotations?.[ANNOTATION_USER_ID];
+    if (withClaim && userId && isUuid(userId)) {
+      const claim = await kube.get(CLAIM(namespace, claimName(userId)));
+      if (claim && claim.metadata.uid === pod.metadata.labels?.[LABEL_CLAIM_UID]) {
+        await deleteWithRetry(CLAIM(namespace, claim.metadata.name));
+      }
+    }
+    return deleteWithRetry(POD(namespace, pod.metadata.name));
+  };
+
+  const reconcileIsolation = async (): Promise<ReconcileResult> => {
+    let verified: VerifiedIsolation | undefined;
+    let lost: string | undefined;
+    try {
+      verified = await isolation.require();
+    } catch (err) {
+      if (!(err instanceof IsolationRuntimeMissingError)) throw err;
+      lost = await isolationDefinitivelyLost();
+      // Not definitive (e.g. API unreachable): change nothing, check again next time.
+      if (!lost) return { deleted: [] };
+    }
+    const namespaces = await kube.list(
+      "v1",
+      "Namespace",
+      undefined,
+      `${LABEL_TEAM_NAMESPACE}=true`,
+    );
+    const deleted: string[] = [];
+    for (const ns of namespaces) {
+      const namespace = ns.metadata.name;
+      if (!namespace.startsWith(TEAM_NAMESPACE_PREFIX)) continue;
+      for (const pod of await kube.list("v1", "Pod", namespace)) {
+        if (pod.metadata.deletionTimestamp) continue;
+        const ok =
+          verified !== undefined &&
+          str(pod, "spec", "runtimeClassName") === verified.runtimeClassName &&
+          (await stillVerified(verified, pod));
+        if (ok) continue;
+        // Lost isolation: stop pods, keep claims (and volumes) for when it is restored.
+        if (await deletePodAndClaim(pod, verified !== undefined)) {
+          deleted.push(`${namespace}/${pod.metadata.name}`);
+        }
+      }
+    }
+    return {
+      deleted,
+      ...(lost ? { reason: lost } : deleted.length > 0 ? { reason: "unverified runtime" } : {}),
+    };
+  };
+
+  return { ensureTeam, ensureSandbox, identifyBootstrapToken, reconcileIsolation };
 }

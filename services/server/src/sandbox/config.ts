@@ -60,10 +60,17 @@ export const sandboxSettingsSchema = z.strictObject({
     >,
   ),
   resources: resourcesSchema,
+  /** Container ephemeral storage (logs, writable layers, /tmp and $HOME emptyDirs). */
+  ephemeralStorage: z.strictObject({ request: quantity, limit: quantity }),
+  /**
+   * Whether sandboxes may reach the model gateway. Off until the gateway verifies session tokens
+   * (KOBE-40/41): until then, reachable Bifrost would let any agent spend model credit.
+   */
+  modelGatewayAccess: z.boolean(),
   workspace: z.strictObject({ size: quantity, storageClass: z.string().max(253) }),
   tmpSize: quantity,
   homeSize: quantity,
-  teamQuota: z.record(z.string().regex(/^[a-z.]+$/), quantity),
+  teamQuota: z.record(z.string().regex(/^[a-z][a-z.-]*$/), quantity),
   warmPool: z.strictObject({ replicasPerTeam: z.number().int().min(0).max(20) }),
 });
 export type SandboxSettings = z.infer<typeof sandboxSettingsSchema>;

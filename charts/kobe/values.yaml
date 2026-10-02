@@ -25,6 +25,11 @@ sandbox:
   resources:
     requests: { cpu: 500m, memory: 1Gi }
     limits: { cpu: "2", memory: 4Gi }
+  # Container ephemeral storage (writable layer, logs, the /tmp and $HOME emptyDirs).
+  ephemeralStorage: { request: 1Gi, limit: 4Gi }
+  # Let sandboxes reach the model gateway (Bifrost). Off until the gateway verifies sandbox
+  # session tokens (KOBE-40/41); until then any agent could spend model credit through it.
+  modelGatewayAccess: false
   workspace:
     # Persistent /workspace per sandbox.
     size: 10Gi
@@ -35,9 +40,17 @@ sandbox:
   tmpSize: 2Gi
   homeSize: 1Gi
   # ResourceQuota of every team namespace (sandbox compute is capped here, not in dollars).
+  # Limits are capped too, so a team's sandboxes cannot burst into other teams' memory.
   teamQuota:
     requests.cpu: "20"
     requests.memory: 40Gi
+    limits.cpu: "40"
+    limits.memory: 80Gi
+    requests.ephemeral-storage: 40Gi
+    limits.ephemeral-storage: 160Gi
+    requests.storage: 500Gi
+    persistentvolumeclaims: "50"
+    pods: "50"
   warmPool:
     # Pre-started sandboxes per team namespace (agent-sandbox warm pools are namespaced). Each
     # one counts against its team's quota. 0 disables warm starts.

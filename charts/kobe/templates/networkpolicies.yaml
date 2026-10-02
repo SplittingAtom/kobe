@@ -1,7 +1,7 @@
 {{- $fullname := include "kobe.fullname" . -}}
 # Components holding secrets or data are reachable only from pods in the release namespace.
-# Sandboxes (team namespaces, KOBE-22) reach only Bifrost here, with their session token; their
-# own namespace's policy limits their egress to the server, Bifrost and the two proxies.
+# Sandboxes (team namespaces, KOBE-22) are admitted to Bifrost only with sandbox.modelGatewayAccess
+# (off until Bifrost verifies their session tokens); their own namespace's policy limits egress.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -16,6 +16,8 @@ spec:
   ingress:
     - from:
         - podSelector: {}
+    {{- if (include "kobe.sandboxValues" . | fromJson).modelGatewayAccess }}
+    # Only once Bifrost verifies sandbox session tokens (sandbox.modelGatewayAccess, KOBE-40/41).
     - from:
         - namespaceSelector:
             matchLabels:
@@ -23,6 +25,7 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
+    {{- end }}
 {{- if .Values.clamav.enabled }}
 ---
 apiVersion: networking.k8s.io/v1

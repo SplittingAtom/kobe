@@ -59,10 +59,13 @@ Each user gets one sandbox per team (spec D11): an agent-sandbox `Sandbox` under
 created by hand. Every team namespace gets:
 
 - a **default-deny NetworkPolicy** (`kobe-sandbox-isolation`): no inbound connections at all;
-  outbound only to the Kobe server, Bifrost, the MCP proxy and the egress proxy. Sandboxes get no
-  DNS: those four resolve through `/etc/hosts` (`*.kobe.internal` → the Services' ClusterIPs), so
-  DNS cannot be used to leak data past the egress proxy;
-- a **ResourceQuota** (`sandbox.teamQuota`, default 20 vCPU / 40 GiB requested) and a LimitRange;
+  outbound only to the Kobe server's **sandbox port** (8081, a separate listener with no user API),
+  the MCP proxy and the egress proxy — and to Bifrost only with `sandbox.modelGatewayAccess: true`
+  (off until Bifrost verifies sandbox session tokens). Sandboxes get no DNS: Kobe's services
+  resolve through `/etc/hosts` (`*.kobe.internal` → the Services' ClusterIPs), so DNS cannot be
+  used to leak data past the egress proxy;
+- a **ResourceQuota** (`sandbox.teamQuota`: requests and limits for CPU, memory and ephemeral
+  storage, pods, PVCs and requested storage) and a LimitRange with per-container defaults;
 - a `SandboxTemplate` and a **warm pool** of `sandbox.warmPool.replicasPerTeam` pre-started
   sandboxes (agent-sandbox warm pools are per namespace; each counts against the team's quota);
 - Pod Security Admission `restricted`.
@@ -76,6 +79,12 @@ cluster-wide permissions (namespaces, RoleBindings) are confined to `kobe-team-*
 mechanism. Sandboxes identify themselves to the server with a projected ServiceAccount token
 (audience `kobe.sandbox-bootstrap`, which the Kubernetes API itself rejects) and receive
 short-lived, audience-bound session tokens in return; no other credential enters a sandbox.
+
+The server refuses to provision sandboxes unless those policies are in effect (it checks with a
+server-side dry run at first use), and every minute deletes any team pod that is not running under
+the verified RuntimeClass or predates the current RuntimeClass object. NetworkPolicies need a CNI
+that enforces them (k3s's built-in kube-router does); this cannot be verified through the API, so
+the e2e suite checks enforcement from a sandbox (`e2e/run.sh`) — run it after changing the CNI.
 
 Private registries: the names in `global.imagePullSecrets` are copied into each team namespace for
 the kubelet (pods there cannot mount them). Alternatively configure registry credentials on the

@@ -14,6 +14,8 @@
 {{ include "kobe.nodeService" (dict "root" . "component" "server" "image" "server" "values" .Values.server
       "serviceAccount" (printf "%s-server" $fullname) "automountToken" true "migrations" true
       "annotations" $dbAnnotations
+      "extraPorts" "- name: sandbox\n  containerPort: 8081"
+      "extraServicePorts" "- name: sandbox\n  port: 8081\n  targetPort: sandbox"
       "env" (printf "- name: KOBE_PROCESS\n  value: server\n%s\n%s\n%s\n%s" $runtime $common (include "kobe.authEnv" .) (include "kobe.sandboxEnv" .))) }}
 ---
 {{ include "kobe.nodeService" (dict "root" . "component" "scheduler" "image" "server" "values" .Values.scheduler

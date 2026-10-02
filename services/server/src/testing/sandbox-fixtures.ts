@@ -26,7 +26,12 @@ export const SETTINGS: SandboxSettings = {
   serverServiceAccount: "kobe-server",
   managerClusterRole: "kobe-abc-sandbox-manager",
   endpoints: {
-    server: { service: "kobe-server", port: 80, targetPort: 8080, podLabels: podLabels("server") },
+    server: {
+      service: "kobe-server",
+      port: 8081,
+      targetPort: 8081,
+      podLabels: podLabels("server"),
+    },
     modelGateway: {
       service: "kobe-bifrost",
       port: 8080,
@@ -50,10 +55,22 @@ export const SETTINGS: SandboxSettings = {
     requests: { cpu: "500m", memory: "1Gi" },
     limits: { cpu: "2", memory: "4Gi" },
   },
+  ephemeralStorage: { request: "1Gi", limit: "4Gi" },
+  modelGatewayAccess: false,
   workspace: { size: "10Gi", storageClass: "" },
   tmpSize: "2Gi",
   homeSize: "1Gi",
-  teamQuota: { "requests.cpu": "20", "requests.memory": "40Gi" },
+  teamQuota: {
+    "requests.cpu": "20",
+    "requests.memory": "40Gi",
+    "limits.cpu": "40",
+    "limits.memory": "80Gi",
+    "requests.ephemeral-storage": "40Gi",
+    "limits.ephemeral-storage": "160Gi",
+    "requests.storage": "500Gi",
+    persistentvolumeclaims: "50",
+    pods: "50",
+  },
   warmPool: { replicasPerTeam: 1 },
 };
 

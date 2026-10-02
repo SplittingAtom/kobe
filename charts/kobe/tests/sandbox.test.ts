@@ -100,10 +100,44 @@ describe("server sandbox configuration", () => {
       });
       const deployment = find(ms, "Deployment", `kobe-${component}`);
       expect(deployment?.spec.selector.matchLabels).toEqual(endpoints[key].podLabels);
-      expect(container(ms, `kobe-${component}`)?.ports[0].containerPort).toBe(
-        endpoints[key].targetPort,
-      );
+      const ports = container(ms, `kobe-${component}`)?.ports as { containerPort: number }[];
+      expect(ports.map((p) => p.containerPort)).toContain(endpoints[key].targetPort);
+      const svcPorts = find(ms, "Service", endpoints[key].service)?.spec.ports as {
+        port: number;
+      }[];
+      expect(svcPorts.map((p) => p.port)).toContain(endpoints[key].port);
     }
+  });
+
+  it("serves sandboxes on a separate server port that the ingress never routes to", () => {
+    const { server } = sandboxConfig(ms).endpoints;
+    expect(server).toMatchObject({ port: 8081, targetPort: 8081 });
+    const ingress = find(ms, "Ingress", "kobe");
+    for (const path of ingress?.spec.rules[0].http.paths ?? []) {
+      expect(path.backend.service.port).toEqual({ name: "http" });
+    }
+  });
+
+  it("keeps the model gateway closed to sandboxes by default", () => {
+    expect(sandboxConfig(ms).modelGatewayAccess).toBe(false);
+    expect(sandboxConfig(render({ "sandbox.modelGatewayAccess": "true" })).modelGatewayAccess).toBe(
+      true,
+    );
+  });
+
+  it("caps limits, pods, volumes and ephemeral storage per team, not only requests", () => {
+    expect(sandboxConfig(ms).teamQuota).toEqual({
+      "requests.cpu": "20",
+      "requests.memory": "40Gi",
+      "limits.cpu": "40",
+      "limits.memory": "80Gi",
+      "requests.ephemeral-storage": "40Gi",
+      "limits.ephemeral-storage": "160Gi",
+      "requests.storage": "500Gi",
+      persistentvolumeclaims: "50",
+      pods: "50",
+    });
+    expect(sandboxConfig(ms).ephemeralStorage).toEqual({ request: "1Gi", limit: "4Gi" });
   });
 
   it("names the manager ClusterRole the server binds in team namespaces", () => {
@@ -207,7 +241,10 @@ describe("sandbox RBAC (least privilege; D11)", () => {
           expect(rule.verbs, name).not.toEqual(expect.arrayContaining(["get"]));
           expect(rule.verbs, name).not.toContain("list");
         }
-        if (rule.resources.includes("pods")) expect(rule.verbs, name).toEqual(["get"]);
+        if (rule.resources.includes("pods")) {
+          expect(rule.verbs, name).not.toContain("create");
+          expect(rule.verbs, name).not.toContain("patch");
+        }
         expect(rule.resources.some((r) => r.includes("/exec") || r.includes("/attach"))).toBe(
           false,
         );
@@ -324,6 +361,7 @@ describe("sandbox admission policies (KOBE-9 binding requirement 3)", () => {
     expect(e).toContain(LABEL_TEAM_NAMESPACE);
     expect(e).toContain("restricted");
     expect(e).toContain(sandboxConfig(ms).managerClusterRole);
+    expect(e).toContain("oldLabels[?'kobe.splittingatom.io/team-id']");
   });
 
   it("requires Unmanaged templates and leaves team NetworkPolicies to the server", () => {

@@ -40,6 +40,7 @@ export interface KubeMetadata {
   readonly uid?: string;
   readonly labels?: Readonly<Record<string, string>>;
   readonly annotations?: Readonly<Record<string, string>>;
+  readonly creationTimestamp?: string;
   readonly deletionTimestamp?: string;
   readonly ownerReferences?: readonly {
     readonly apiVersion: string;
@@ -72,6 +73,8 @@ export function assertTeamRef(team: TeamRef): void {
   if (!SLUG.test(team.slug)) throw new TypeError(`invalid team slug "${team.slug}"`);
   if (!UUID.test(team.id)) throw new TypeError("team id must be a lowercase uuid");
 }
+
+export const isUuid = (value: string): boolean => UUID.test(value);
 
 export function assertUserId(userId: string): void {
   if (!UUID.test(userId)) throw new TypeError("user id must be a lowercase uuid");
@@ -125,6 +128,10 @@ export function serverRoleBindingManifest(namespace: string, s: SandboxSettings)
   };
 }
 
+/** Kobe services sandboxes may open connections to (the model gateway only once it verifies tokens). */
+export const sandboxEgressEndpoints = (s: SandboxSettings): KobeEndpoint[] =>
+  KOBE_ENDPOINTS.filter((e) => e !== "modelGateway" || s.modelGatewayAccess);
+
 /**
  * Default deny (spec D11, D28): no ingress at all; egress only to the Kobe server, the model
  * gateway, the MCP proxy and the egress proxy pods, on their pod ports. No DNS (see SANDBOX_HOSTS).
@@ -139,7 +146,7 @@ export function networkPolicyManifest(namespace: string, s: SandboxSettings): Ku
       podSelector: {},
       policyTypes: ["Ingress", "Egress"],
       ingress: [],
-      egress: KOBE_ENDPOINTS.map((e) => ({
+      egress: sandboxEgressEndpoints(s).map((e) => ({
         to: [
           {
             namespaceSelector: {
@@ -173,8 +180,11 @@ export function limitRangeManifest(namespace: string, s: SandboxSettings): KubeO
       limits: [
         {
           type: "Container",
-          default: { ...s.resources.limits },
-          defaultRequest: { ...s.resources.requests },
+          default: { ...s.resources.limits, "ephemeral-storage": s.ephemeralStorage.limit },
+          defaultRequest: {
+            ...s.resources.requests,
+            "ephemeral-storage": s.ephemeralStorage.request,
+          },
         },
       ],
     },
@@ -280,8 +290,8 @@ export function sandboxPodSpec(
         imagePullPolicy: s.imagePullPolicy,
         env: sandboxEnv(s),
         resources: {
-          requests: { ...s.resources.requests },
-          limits: { ...s.resources.limits },
+          requests: { ...s.resources.requests, "ephemeral-storage": s.ephemeralStorage.request },
+          limits: { ...s.resources.limits, "ephemeral-storage": s.ephemeralStorage.limit },
         },
         securityContext: {
           allowPrivilegeEscalation: false,

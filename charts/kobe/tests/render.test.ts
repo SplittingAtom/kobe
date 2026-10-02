@@ -435,8 +435,14 @@ describe("network policies", () => {
     expect(policy("kobe-clamav")?.spec.ingress).toHaveLength(1);
   });
 
-  it("also admits sandboxes (team namespaces) to Bifrost's port, nothing else (KOBE-22)", () => {
-    expect(policy("kobe-bifrost")?.spec.ingress).toEqual([
+  it("admits sandboxes to Bifrost only with sandbox.modelGatewayAccess (KOBE-22/40)", () => {
+    expect(policy("kobe-bifrost")?.spec.ingress).toEqual([{ from: [{ podSelector: {} }] }]);
+    const open = find(
+      render({ "sandbox.modelGatewayAccess": "true" }),
+      "NetworkPolicy",
+      "kobe-bifrost",
+    );
+    expect(open?.spec.ingress).toEqual([
       { from: [{ podSelector: {} }] },
       {
         from: [

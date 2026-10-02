@@ -13,6 +13,7 @@ TAG="${KOBE_IMAGE_TAG:?set KOBE_IMAGE_TAG (use a per-run tag so stale images can
 NS=kobe-dev
 SANDBOX_NS=kobe-e2e-sandbox
 TEAM_NS=kobe-team-e2e # KOBE-22: created by the server, not by this script
+TEAM2_NS=kobe-team-e2e2
 failed=0
 
 context=$($KUBECTL config current-context)
@@ -39,7 +40,7 @@ PODS=()
 cleanup() {
   for p in "${PODS[@]+"${PODS[@]}"}"; do $KUBECTL delete pod $p --ignore-not-found --wait=false >/dev/null 2>&1 || true; done
   $KUBECTL delete namespace "$SANDBOX_NS" --ignore-not-found --wait=false >/dev/null 2>&1 || true
-  $KUBECTL delete namespace "$TEAM_NS" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  $KUBECTL delete namespace "$TEAM_NS" "$TEAM2_NS" --ignore-not-found --wait=false >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -63,8 +64,8 @@ $KUBECTL get crd sandboxes.agents.x-k8s.io >/dev/null 2>&1 \
 
 echo "==> clean state"
 $HELM uninstall kobe -n "$NS" --wait >/dev/null 2>&1 || true
-$KUBECTL delete namespace "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" --ignore-not-found --wait=false >/dev/null
-for ns in "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS"; do
+$KUBECTL delete namespace "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" "$TEAM2_NS" --ignore-not-found --wait=false >/dev/null
+for ns in "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" "$TEAM2_NS"; do
   $KUBECTL wait --for=delete "namespace/$ns" --timeout=180s >/dev/null 2>&1 || true
 done
 
@@ -173,9 +174,9 @@ fi
 echo "==> sandbox provider (KOBE-22)"
 E2E_TEAM_ID=6f1d1a2b-0c3d-4e5f-8a9b-0c1d2e3f4a5b
 E2E_USER_ID=7a2e2b3c-1d4e-4f6a-9b0c-1d2e3f4a5b6c
-ensure_sandbox() {
+ensure_sandbox() { # [team-id slug]: defaults to the e2e team
   $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node dist/cli/sandbox.js ensure \
-    --team-id "$E2E_TEAM_ID" --team-slug e2e --user-id "$E2E_USER_ID" 2>&1
+    --team-id "${1:-$E2E_TEAM_ID}" --team-slug "${2:-e2e}" --user-id "$E2E_USER_ID" 2>&1
 }
 json_field() { # field, json → value (no jq dependency)
   printf '%s' "$2" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s)[process.argv[1]]??"")}catch{console.log("")}})' "$1"
@@ -244,12 +245,12 @@ contains "nobody else may add NetworkPolicies to a team namespace" 'only the Kob
     | $KUBECTL apply --dry-run=server -f - 2>&1 || true)"
 
 TEAM_PROBES=()
-team_pod() { # name, shell command → starts a sandbox-like pod (gVisor, bootstrap token) in the team namespace
-  TEAM_PROBES+=("$1")
-  PODS+=("-n $TEAM_NS $1")
-  $KUBECTL -n "$TEAM_NS" run "$1" --restart=Never --image=busybox:1.37 --overrides="{\"spec\":{
+team_pod() { # namespace, name, shell command → a sandbox-like pod (gVisor, bootstrap token)
+  TEAM_PROBES+=("$2")
+  PODS+=("-n $1 $2")
+  $KUBECTL -n "$1" run "$2" --restart=Never --image=busybox:1.37 --overrides="{\"spec\":{
     \"runtimeClassName\":\"gvisor\",\"automountServiceAccountToken\":false,\"serviceAccountName\":\"kobe-sandbox\",$SEC_POD,
-    \"containers\":[{\"name\":\"$1\",\"image\":\"busybox:1.37\",\"command\":[\"sh\",\"-c\",\"$2\"],$SEC_CTR,
+    \"containers\":[{\"name\":\"$2\",\"image\":\"busybox:1.37\",\"command\":[\"sh\",\"-c\",\"$3\"],$SEC_CTR,
       \"resources\":{\"requests\":{\"cpu\":\"50m\",\"memory\":\"32Mi\"},\"limits\":{\"cpu\":\"200m\",\"memory\":\"64Mi\"}},
       \"volumeMounts\":[{\"name\":\"kobe-bootstrap\",\"mountPath\":\"/var/run/secrets/kobe\"}]}],
     \"volumes\":[{\"name\":\"kobe-bootstrap\",\"projected\":{\"sources\":[{\"serviceAccountToken\":{
@@ -257,44 +258,78 @@ team_pod() { # name, shell command → starts a sandbox-like pod (gVisor, bootst
 }
 team_probe() { # shell command → its output, run from a sandbox-like pod in the team namespace
   local name="tprobe-$RANDOM$RANDOM" phase="" i
-  team_pod "$name" "$1" || { echo "team probe could not start"; return; }
-  for i in $(seq 1 60); do
+  team_pod "$TEAM_NS" "$name" "$1" || { echo "team probe could not start"; return; }
+  for i in $(seq 1 90); do
     phase=$($KUBECTL -n "$TEAM_NS" get pod "$name" -o jsonpath='{.status.phase}' 2>/dev/null || true)
     [[ "$phase" == Succeeded || "$phase" == Failed ]] && break
     sleep 2
   done
   $KUBECTL -n "$TEAM_NS" logs "$name" 2>/dev/null || true
 }
+listener='mkdir -p /tmp/w && echo REACHED > /tmp/w/index.html && httpd -f -p 8080 -h /tmp/w'
+start_listener() { # namespace → name of a running HTTP listener on 8080 there
+  local name="listener-$RANDOM"
+  team_pod "$1" "$name" "$listener"
+  $KUBECTL -n "$1" wait --for=condition=Ready "pod/$name" --timeout=120s >/dev/null 2>&1 || true
+  echo "$name"
+}
+
+# A second team (its own namespace) with a listener: sandboxes of one team must not reach it.
+handle2=$(ensure_sandbox 8e3f3c4d-2e5f-4a7b-8c1d-2e3f4a5b6c7d e2e2 | tail -1)
+contains "a second team gets its own sandbox namespace" '^kobe-team-e2e2$' "$(json_field namespace "$handle2")"
+other_listener=$(start_listener "$TEAM2_NS")
+other_ip=$($KUBECTL -n "$TEAM2_NS" get pod "$other_listener" -o jsonpath='{.status.podIP}')
+
 svc_ip() { $KUBECTL -n "$NS" get svc "$1" -o jsonpath='{.spec.clusterIP}'; }
 server_ip=$(svc_ip kobe-server); web_ip=$(svc_ip kobe-web); bifrost_ip=$(svc_ip kobe-bifrost)
 dns_ip=$($KUBECTL -n kube-system get svc kube-dns -o jsonpath='{.spec.clusterIP}')
-egress=$(team_probe "wget -qO- -T 5 http://$server_ip/healthz >/dev/null 2>&1 && echo server=REACHED || echo server=BLOCKED; \
+api_ip=$($KUBECTL -n default get svc kubernetes -o jsonpath='{.spec.clusterIP}')
+node_ip=$($KUBECTL get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+tcp() { # label host port → "label=REACHED|BLOCKED" (TCP connect only)
+  echo "nc -w 4 $2 $3 </dev/null >/dev/null 2>&1 && echo $1=REACHED || echo $1=BLOCKED;"
+}
+targets="$(tcp api "$api_ip" 443) $(tcp apiserver "$node_ip" 6443) $(tcp kubelet "$node_ip" 10250)"
+egress=$(team_probe "wget -qO- -T 5 http://$server_ip:8081/healthz >/dev/null 2>&1 && echo sandbox-port=REACHED || echo sandbox-port=BLOCKED; \
+  wget -qO- -T 5 http://$server_ip/healthz >/dev/null 2>&1 && echo user-api=REACHED || echo user-api=BLOCKED; \
   wget -qO- -T 5 http://$bifrost_ip:8080/health >/dev/null 2>&1 && echo bifrost=REACHED || echo bifrost=BLOCKED; \
   wget -qO- -T 5 http://$web_ip/api/healthz >/dev/null 2>&1 && echo web=REACHED || echo web=BLOCKED; \
+  wget -qO- -T 5 http://${other_ip:-0.0.0.0}:8080/ >/dev/null 2>&1 && echo other-team=REACHED || echo other-team=BLOCKED; \
+  wget -qO- -T 5 http://169.254.169.254/ >/dev/null 2>&1 && echo metadata=REACHED || echo metadata=BLOCKED; \
+  $targets \
   nslookup kubernetes.default.svc.cluster.local $dns_ip >/dev/null 2>&1 && echo dns=REACHED || echo dns=BLOCKED; \
   wget -qO- -T 5 http://1.1.1.1/ >/dev/null 2>&1 && echo internet=REACHED || echo internet=BLOCKED; \
   wget -qO- -T 5 -S --post-data= --header \\\"Authorization: Bearer \$(cat /var/run/secrets/kobe/bootstrap-token)\\\" \
-    http://$server_ip/v1/sandbox/session 2>&1 | grep -o 'HTTP/1.1 [0-9]*' | sed 's/^/bootstrap=/'; \
+    http://$server_ip:8081/v1/sandbox/session 2>&1 | grep -o 'HTTP/1.1 [0-9]*' | sed 's/^/bootstrap=/'; \
   wget -qO- -T 5 -S --post-data= --header 'Authorization: Bearer forged.token.value-xxxxxxxxxx' \
-    http://$server_ip/v1/sandbox/session 2>&1 | grep -o 'HTTP/1.1 [0-9]*' | sed 's/^/forged=/'")
-contains "sandboxes reach the Kobe server" '^server=REACHED$' "$egress"
-contains "sandboxes reach the model gateway (Bifrost)" '^bifrost=REACHED$' "$egress"
+    http://$server_ip:8081/v1/sandbox/session 2>&1 | grep -o 'HTTP/1.1 [0-9]*' | sed 's/^/forged=/'")
+contains "sandboxes reach the server's sandbox port" '^sandbox-port=REACHED$' "$egress"
+contains "sandboxes cannot reach the server's user API port" '^user-api=BLOCKED$' "$egress"
+contains "sandboxes cannot reach Bifrost while it does not verify tokens (modelGatewayAccess off)" '^bifrost=BLOCKED$' "$egress"
 contains "sandboxes cannot reach other Kobe services (web)" '^web=BLOCKED$' "$egress"
+contains "sandboxes cannot reach another team's pods" '^other-team=BLOCKED$' "$egress"
+contains "sandboxes cannot reach the Kubernetes API Service" '^api=BLOCKED$' "$egress"
+contains "sandboxes cannot reach the API server on the node" '^apiserver=BLOCKED$' "$egress"
+contains "sandboxes cannot reach the kubelet" '^kubelet=BLOCKED$' "$egress"
+contains "sandboxes cannot reach a cloud metadata endpoint" '^metadata=BLOCKED$' "$egress"
 contains "sandboxes get no DNS (no exfiltration channel)" '^dns=BLOCKED$' "$egress"
 contains "sandboxes cannot reach the internet directly" '^internet=BLOCKED$' "$egress"
 contains "an unclaimed sandbox pod's bootstrap token is recognised but not assigned (409)" '^bootstrap=HTTP/1.1 409$' "$egress"
 contains "a forged bootstrap token is refused (401)" '^forged=HTTP/1.1 401$' "$egress"
+# Controls: the same destinations are reachable from the release namespace, so BLOCKED above is
+# the sandbox policy, not a dead target.
+controls=$(probe "$NS" "$(tcp api "$api_ip" 443) $(tcp kubelet "$node_ip" 10250) \
+  wget -qO- -T 5 http://$server_ip/healthz >/dev/null 2>&1 && echo user-api=REACHED || echo user-api=BLOCKED")
+contains "control: the API Service is reachable from the release namespace" '^api=REACHED$' "$controls"
+contains "control: the kubelet is reachable from the release namespace" '^kubelet=REACHED$' "$controls"
+contains "control: the user API is reachable from the release namespace" '^user-api=REACHED$' "$controls"
 contains "the sandbox session endpoint is not exposed through the ingress" 'HTTP/1.1 404' \
   "$(ingress POST /v1/sandbox/session '{}')"
 
 # Inbound: a listener in the team namespace is unreachable; the same listener elsewhere is reachable.
-listener='mkdir -p /tmp/w && echo REACHED > /tmp/w/index.html && httpd -f -p 8080 -h /tmp/w'
-team_pod "listener-$RANDOM" "$listener"
-team_listener="${TEAM_PROBES[${#TEAM_PROBES[@]}-1]}"
+team_listener=$(start_listener "$TEAM_NS")
 $KUBECTL create namespace "$SANDBOX_NS" --dry-run=client -o yaml | $KUBECTL apply -f - >/dev/null
 PODS+=("-n $SANDBOX_NS control-listener")
 $KUBECTL -n "$SANDBOX_NS" run control-listener --restart=Never --image=busybox:1.37 --command -- sh -c "$listener" >/dev/null
-$KUBECTL -n "$TEAM_NS" wait --for=condition=Ready "pod/$team_listener" --timeout=120s >/dev/null 2>&1 || true
 $KUBECTL -n "$SANDBOX_NS" wait --for=condition=Ready pod/control-listener --timeout=120s >/dev/null 2>&1 || true
 team_ip=$($KUBECTL -n "$TEAM_NS" get pod "$team_listener" -o jsonpath='{.status.podIP}')
 control_ip=$($KUBECTL -n "$SANDBOX_NS" get pod control-listener -o jsonpath='{.status.podIP}')

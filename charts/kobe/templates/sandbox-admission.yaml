@@ -42,6 +42,8 @@ spec:
       expression: "variables.isNamespace ? request.name : request.namespace"
     - name: labels
       expression: "request.operation != 'DELETE' && variables.isNamespace && has(object.metadata.labels) ? object.metadata.labels : {}"
+    - name: oldLabels
+      expression: "request.operation == 'UPDATE' && variables.isNamespace && has(oldObject.metadata.labels) ? oldObject.metadata.labels : {}"
   validations:
     - expression: "variables.target.startsWith('kobe-team-')"
       messageExpression: "'Kobe may only manage kobe-team-* namespaces, not ' + variables.target"
@@ -50,6 +52,13 @@ spec:
         (variables.labels[?'kobe.splittingatom.io/team-namespace'].orValue('') == 'true' &&
          variables.labels[?'pod-security.kubernetes.io/enforce'].orValue('') == 'restricted')
       message: "team namespaces must be labelled as such and enforce Pod Security 'restricted'"
+    - expression: >-
+        !variables.isNamespace || request.operation == 'DELETE' ||
+        (variables.labels[?'kobe.splittingatom.io/team-id'].orValue('') != '' &&
+         (request.operation != 'UPDATE' ||
+          variables.oldLabels[?'kobe.splittingatom.io/team-id'].orValue('') ==
+            variables.labels[?'kobe.splittingatom.io/team-id'].orValue('')))
+      message: "a team namespace's team-id label is required and immutable"
     - expression: >-
         variables.isNamespace || request.operation == 'DELETE' ||
         (object.roleRef.kind == 'ClusterRole' && object.roleRef.name == '{{ $manager }}' &&

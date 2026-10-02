@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { createApp } from "../app.js";
+import { createRateLimiter } from "../sandbox/rate-limit.js";
 import { IsolationRuntimeMissingError } from "../isolation/gate.js";
 import type { BootstrapIdentity } from "../sandbox/provider.js";
 import { SandboxAuthError } from "../sandbox/provider.js";
 import { verifySessionToken } from "../sandbox/session-token.js";
+import { createSandboxApp } from "./sandbox.js";
 import { KEYS, TEAM, USER, must } from "../testing/sandbox-fixtures.js";
 
 const SANDBOX_ID = "4f9c2d5a-6b7e-4f90-8bc2-4d5e6f708192";
@@ -15,9 +17,7 @@ const ASSIGNED: BootstrapIdentity = {
 };
 
 function app(identify: (token: string) => Promise<BootstrapIdentity>) {
-  return createApp(undefined, {
-    sandbox: { provider: { identifyBootstrapToken: identify }, sessionKeys: KEYS },
-  });
+  return createSandboxApp({ provider: { identifyBootstrapToken: identify }, sessionKeys: KEYS });
 }
 
 const post = (a: ReturnType<typeof app>, headers: Record<string, string> = {}) =>
@@ -107,8 +107,33 @@ describe("POST /v1/sandbox/session", () => {
     },
   );
 
-  it("is not mounted when sandboxes are not configured", async () => {
+  it("is not served by the user-facing app (sandboxes get their own listener)", async () => {
     const res = await createApp().request("/v1/sandbox/session", { method: "POST" });
     expect(res.status).toBe(404);
+  });
+
+  it("rate-limits each source before any TokenReview (429 + Retry-After)", async () => {
+    let calls = 0;
+    let source = "10.42.0.7";
+    const limited = createSandboxApp({
+      provider: {
+        identifyBootstrapToken: async () => {
+          calls++;
+          return ASSIGNED;
+        },
+      },
+      sessionKeys: KEYS,
+      limiter: createRateLimiter({ capacity: 2, refillPerSecond: 1, now: () => 0 }),
+      sourceOf: () => source,
+    });
+    expect((await post(limited)).status).toBe(200);
+    expect((await post(limited)).status).toBe(200);
+    const res = await post(limited);
+    expect(res.status).toBe(429);
+    expect(res.headers.get("retry-after")).toBe("1");
+    expect(await res.json()).toMatchObject({ code: "rate_limited" });
+    expect(calls).toBe(2);
+    source = "10.42.0.8";
+    expect((await post(limited)).status).toBe(200);
   });
 });

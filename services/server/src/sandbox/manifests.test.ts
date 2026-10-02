@@ -90,7 +90,7 @@ describe("sandbox pod spec (D12, D13; secrets never enter sandboxes)", () => {
     ]);
     const env = Object.fromEntries(must(spec.containers[0]).env.map((e) => [e.name, e.value]));
     expect(env).toMatchObject({
-      KOBE_SERVER_URL: "ws://server.kobe.internal",
+      KOBE_SERVER_URL: "ws://server.kobe.internal:8081",
       KOBE_MODEL_GATEWAY_URL: "http://model-gateway.kobe.internal:8080",
       KOBE_MCP_PROXY_URL: "http://mcp-proxy.kobe.internal",
       HTTPS_PROXY: "http://egress-proxy.kobe.internal",
@@ -113,8 +113,8 @@ describe("sandbox pod spec (D12, D13; secrets never enter sandboxes)", () => {
       capabilities: { drop: ["ALL"] },
     });
     expect(must(spec.containers[0]).resources).toEqual({
-      requests: { cpu: "500m", memory: "1Gi" },
-      limits: { cpu: "2", memory: "4Gi" },
+      requests: { cpu: "500m", memory: "1Gi", "ephemeral-storage": "1Gi" },
+      limits: { cpu: "2", memory: "4Gi", "ephemeral-storage": "4Gi" },
     });
     expect(spec.volumes).toContainEqual({ name: "tmp", emptyDir: { sizeLimit: "2Gi" } });
   });
@@ -136,23 +136,37 @@ describe("team NetworkPolicy (D11, D28)", () => {
     expect(np.spec.ingress).toEqual([]);
   });
 
-  it("allows egress only to the server, model gateway, MCP proxy and egress proxy pods", () => {
-    expect(np.spec.egress).toHaveLength(4);
-    for (const rule of np.spec.egress) {
+  const egressOf = (policy: typeof np) =>
+    policy.spec.egress.map((rule) => {
       expect(rule.to).toHaveLength(1);
       expect(must(rule.to[0]).namespaceSelector).toEqual({
         matchLabels: { "kubernetes.io/metadata.name": "kobe" },
       });
-      expect(rule.ports).toEqual([{ protocol: "TCP", port: 8080 }]);
-    }
-    const components = np.spec.egress.map(
-      (r) =>
-        (must(r.to[0]).podSelector as { matchLabels: Record<string, string> }).matchLabels[
-          "app.kubernetes.io/component"
-        ],
-    );
-    expect(components).toEqual(["server", "bifrost", "mcp-proxy", "egress-proxy"]);
-    expect(JSON.stringify(np)).not.toMatch(/"port":53|ipBlock/);
+      const labels = (must(rule.to[0]).podSelector as { matchLabels: Record<string, string> })
+        .matchLabels;
+      return [labels["app.kubernetes.io/component"], rule.ports];
+    });
+
+  it("allows egress only to the server's sandbox port and the two proxies by default", () => {
+    expect(egressOf(np)).toEqual([
+      ["server", [{ protocol: "TCP", port: 8081 }]],
+      ["mcp-proxy", [{ protocol: "TCP", port: 8080 }]],
+      ["egress-proxy", [{ protocol: "TCP", port: 8080 }]],
+    ]);
+    expect(JSON.stringify(np)).not.toMatch(/"port":53|ipBlock|bifrost/);
+  });
+
+  it("adds the model gateway only when modelGatewayAccess is on (KOBE-40/41)", () => {
+    const open = networkPolicyManifest("kobe-team-finance", {
+      ...SETTINGS,
+      modelGatewayAccess: true,
+    }) as unknown as typeof np;
+    expect(egressOf(open).map(([c]) => c)).toEqual([
+      "server",
+      "bifrost",
+      "mcp-proxy",
+      "egress-proxy",
+    ]);
   });
 });
 

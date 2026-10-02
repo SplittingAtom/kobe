@@ -8,7 +8,9 @@ predates the `sandbox` key still renders. Keep in sync with values.yaml.
   "workspace" (dict "size" "10Gi" "storageClass" "")
   "tmpSize" "2Gi"
   "homeSize" "1Gi"
-  "teamQuota" (dict "requests.cpu" "20" "requests.memory" "40Gi")
+  "ephemeralStorage" (dict "request" "1Gi" "limit" "4Gi")
+  "modelGatewayAccess" false
+  "teamQuota" (dict "requests.cpu" "20" "requests.memory" "40Gi" "limits.cpu" "40" "limits.memory" "80Gi" "requests.ephemeral-storage" "40Gi" "limits.ephemeral-storage" "160Gi" "requests.storage" "500Gi" "persistentvolumeclaims" "50" "pods" "50")
   "warmPool" (dict "replicasPerTeam" 1)
   "sessionKeysSecret" "" -}}
 {{- mustMergeOverwrite $defaults (deepCopy (.Values.sandbox | default dict)) | toJson -}}
@@ -42,12 +44,13 @@ pod labels and port for the team NetworkPolicy).
 {{- $fullname := include "kobe.fullname" . -}}
 {{- $s := include "kobe.sandboxValues" . | fromJson -}}
 {{- $endpoints := dict -}}
-{{- range $key, $e := dict "server" (list "server" 80) "modelGateway" (list "bifrost" 8080) "mcpProxy" (list "mcp-proxy" 80) "egressProxy" (list "egress-proxy" 80) -}}
+{{- /* component, Service port, pod port. The server serves sandboxes on its own port 8081. */ -}}
+{{- range $key, $e := dict "server" (list "server" 8081 8081) "modelGateway" (list "bifrost" 8080 8080) "mcpProxy" (list "mcp-proxy" 80 8080) "egressProxy" (list "egress-proxy" 80 8080) -}}
 {{- $component := index $e 0 -}}
 {{- $_ := set $endpoints $key (dict
   "service" (printf "%s-%s" $fullname $component)
   "port" (index $e 1)
-  "targetPort" 8080
+  "targetPort" (index $e 2)
   "podLabels" (include "kobe.selectorLabels" (dict "root" $ "component" $component) | fromYaml)) -}}
 {{- end -}}
 {{- $pullSecrets := list -}}
@@ -69,6 +72,8 @@ pod labels and port for the team NetworkPolicy).
   "resources" (dict
     "requests" (dict "cpu" (toString $s.resources.requests.cpu) "memory" (toString $s.resources.requests.memory))
     "limits" (dict "cpu" (toString $s.resources.limits.cpu) "memory" (toString $s.resources.limits.memory)))
+  "ephemeralStorage" (dict "request" (toString $s.ephemeralStorage.request) "limit" (toString $s.ephemeralStorage.limit))
+  "modelGatewayAccess" $s.modelGatewayAccess
   "workspace" (dict "size" (toString $s.workspace.size) "storageClass" $s.workspace.storageClass)
   "tmpSize" (toString $s.tmpSize)
   "homeSize" (toString $s.homeSize)

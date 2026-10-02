@@ -1,6 +1,6 @@
 # KOBE-22: agent-sandbox provider: namespaces, NetworkPolicy, quotas, warm pool
 
-- **Status:** in review
+- **Status:** in review (PR #20)
 - **Branch / worktree:** `kobe-22-sandbox-provider` in `../Kobe-wt22`
 - **Depends on:** KOBE-6, KOBE-21, KOBE-14, KOBE-9 (merged); contracts PR #13 (merged)
 
@@ -93,6 +93,53 @@
   is KOBE-25's. Team namespace creation is lazy (first sandbox), not at team creation.
 - Sandbox `$HOME` is an emptyDir (wiped on hibernate like `/tmp`); root filesystem read-only.
 
+## Security review of PR #20 (coordinator) — resolutions
+
+- **HIGH 1 (Bifrost open before it verifies tokens):** `sandbox.modelGatewayAccess` (default
+  **false**) gates both the team NetworkPolicy's Bifrost egress rule and Bifrost's ingress rule for
+  team namespaces. **KOBE-40/41 must turn it on together with session-token verification in front
+  of Bifrost and restrict sandbox access to the inference path/port only** (no management API).
+- **MEDIUM 2 (quota):** `teamQuota` now caps `requests/limits.cpu`, `requests/limits.memory`,
+  `requests/limits.ephemeral-storage`, `requests.storage`, `persistentvolumeclaims`, `pods`
+  (defaults 20/40 vCPU, 40/80 GiB, 40/160 GiB, 500 GiB, 50, 50); sandbox containers and the
+  LimitRange carry ephemeral-storage requests/limits (1/4 GiB). Quotas are per team: cluster-wide
+  overcommit across teams is still possible and is capacity planning, not isolation.
+- **MEDIUM 3 (server API reachable, no rate limit): chose the port split now.** The server serves
+  sandbox endpoints on a **separate listener, port 8081** (`createSandboxApp`: `/healthz`,
+  `/v1/sandbox/*` only; Service port `sandbox`); the main app no longer mounts them, the ingress
+  only targets port `http`, and the team NetworkPolicy allows only 8081 on server pods. **KOBE-24
+  must add the WebSocket (`/v1/sandbox/connect`) to `createSandboxApp`, not to the user app.** The
+  session exchange has a per-source token bucket (burst 20, 1/s, per process) checked before any
+  TokenReview → 429 + `Retry-After`. Forwarded-header refusal kept as defence in depth.
+- **MEDIUM 4 (e2e coverage, enforcement):** e2e now probes from a sandbox-like pod: API Service
+  (443), API server on the node (6443), kubelet (10250), 169.254.169.254, another team's pod,
+  the server's user port, web, Bifrost, DNS, internet — all must be BLOCKED, with controls from
+  the release namespace proving the targets are live. **An in-process "is NetworkPolicy
+  enforced" check is infeasible**: enforcement is a CNI property not visible through the API, and
+  a canary would need pod-create rights in team namespaces, which the server deliberately lacks.
+  Mitigation: e2e is the canary (CI and nightly); docs/install.md says to re-run it after CNI
+  changes. Option for later: a chart-installed canary CronJob in a dedicated namespace.
+- **MEDIUM 5 (delete failures, recreated RuntimeClass):** deletes of a mismatching sandbox retry
+  with backoff and also delete the pod directly; a reconciler (server process, at start and every
+  60 s) deletes team pods not under the verified class or **created before the current
+  RuntimeClass object** (`creationTimestamp` comparison; also applied in `ensureSandbox` and the
+  bootstrap exchange), with their claims. If isolation is definitively lost (class 404 or
+  non-isolating handler) it deletes every team pod but keeps claims/PVCs; API errors change
+  nothing. RBAC: namespaces list, pods list/delete in team namespaces.
+- **LOW 6:** malformed user-id annotation → 401 (`SandboxAuthError`).
+- **LOW 7:** before provisioning, the server dry-runs creating namespace `kobe-admission-probe`;
+  it must be refused by the server-scope policy, else provisioning fails closed (re-checked until it
+  passes once per process). Policy 1 now requires the team-id label and makes it immutable.
+- **LOW 8:** `replicasPerTeam: 0` is valid: the v1beta1 CRD has `minimum: 0`, and the claim
+  controller cold-starts from the pool's template when no warm sandbox exists
+  (`getCandidate` → cold path, agent-sandbox v1.0.4 `sandboxclaim_controller.go`). Kept allowed.
+- **LOW 9 (threat model notes):** the bootstrap token is readable by agent code by design; it only
+  trades for this sandbox's own session tokens and dies with the pod. `hostAliases` are fixed at
+  pod creation: a changed Service ClusterIP reaches new pods after the 5-min re-converge and
+  `Recreate` warm-pool update, running pods only on restart/wake. NetworkPolicy covers pod
+  traffic only; traffic originated by the node itself (kubelet, image pulls) is not sandbox
+  traffic and is out of scope.
+
 ## Open questions (for Chris or the coordinator)
 
 - **D12 warm pool "2 per cluster" vs per-namespace warm pools** (see Decisions): accept "1 per
@@ -104,21 +151,20 @@
 
 ## For downstream tickets
 
-- **KOBE-23 (sandbox agent):** env in the pod: `KOBE_SERVER_URL=ws://server.kobe.internal`,
+- **KOBE-23 (sandbox agent):** env in the pod: `KOBE_SERVER_URL=ws://server.kobe.internal:8081`,
   `KOBE_MODEL_GATEWAY_URL`, `KOBE_MCP_PROXY_URL`, `KOBE_EGRESS_PROXY_URL`, `HTTP(S)_PROXY`,
   `NO_PROXY`, `KOBE_BOOTSTRAP_TOKEN_FILE=/var/run/secrets/kobe/bootstrap-token`. Before dialling:
-  `POST http://server.kobe.internal/v1/sandbox/session` with `Authorization: Bearer <file
+  `POST http://server.kobe.internal:8081/v1/sandbox/session` with `Authorization: Bearer <file
 contents>` (re-read the file each time: the kubelet rotates it) → 200 `{sandbox_id, team_id,
 user_id, expires_at, tokens:{"kobe.sandbox-wire":…,"kobe.model-gateway":…,"kobe.mcp-proxy":…,
 "kobe.egress-proxy":…}}`; 409 `sandbox_unassigned` → retry after `retry_after_ms` (warm-pool pod);
-  401/503 → back off. Re-trade before `expires_at` (15 min). `hello.sandbox_id` = `sandbox_id`.
+  429 → wait `Retry-After`; 401/503 → back off. Re-trade before `expires_at` (15 min). `hello.sandbox_id` = `sandbox_id`.
   Read-only root FS; writable: `/workspace` (PVC), `/tmp`, `/home/kobe` (emptyDirs). No DNS.
 - **KOBE-24 (registry):** verify the wire token with
   `verifySessionToken(token, "kobe.sandbox-wire", keys["kobe.sandbox-wire"])`
   (`services/server/src/sandbox/session-token.ts`; keys from `loadSandboxConfig`). Liveness of
-  `sub`: the claim `u-<user_id>` in `kobe-team-<slug>` with that UID. Consider serving
-  `/v1/sandbox/*` on a separate internal listener/port (today: same port, ingress requests refused
-  by forwarded headers; sandbox NetworkPolicy allows the server's pod port 8080).
+  `sub`: the claim `u-<user_id>` in `kobe-team-<slug>` with that UID. **Binding:** serve the
+  WebSocket from `createSandboxApp` (port 8081), never from the user-facing app.
 - **KOBE-25 (hibernate/wake):** hibernate = patch Sandbox `spec.operatingMode: Suspended` (RBAC
   granted: sandboxes get/patch; PVC kept). Wake = call `isolation.require()` first, re-apply the
   Sandbox `podTemplate` from the current template (image, RuntimeClass, hostAliases may have
@@ -130,9 +176,9 @@ user_id, expires_at, tokens:{"kobe.sandbox-wire":…,"kobe.model-gateway":…,"k
 - **KOBE-38 (egress proxy) / KOBE-40 (Bifrost) / KOBE-58 (MCP proxy):** give each service only its
   own key from the `<release>-sandbox-session-keys` Secret (`egress-proxy`, `model-gateway`,
   `mcp-proxy`) and verify with the same rules (HS256 pinned, exact header, `acceptsAudience`).
-  The team NetworkPolicy already allows sandboxes → those pods on 8080; Bifrost's own policy now
-  admits team namespaces; the proxies have no ingress policy yet. Sandboxes have no DNS: the
-  egress proxy resolves names.
+  The team NetworkPolicy allows sandboxes → the proxy pods on 8080, and Bifrost only with
+  `sandbox.modelGatewayAccess` (which also opens Bifrost's own policy to team namespaces); the
+  proxies have no ingress policy yet. Sandboxes have no DNS: the egress proxy resolves names.
 - **KOBE-64 (scheduler):** the scheduler process does not build the provider yet and has no
   session keys; it shares the server ServiceAccount (RBAC already covers it).
 

@@ -16,10 +16,11 @@ metadata:
   labels:
     {{- include "kobe.labels" . | nindent 4 }}
 rules:
-  # Read-back of a sandbox's pod (RuntimeClass verification, bootstrap token identity).
+  # Read-back of a sandbox's pod (RuntimeClass verification, bootstrap token identity); the
+  # isolation reconciler lists pods and deletes any not under the verified runtime.
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get"]
+    verbs: ["get", "list", "delete"]
   # Server-side apply of the namespace's fixed objects. Image pull Secrets for the kubelet are
   # copied in write-only (no get/list: the server never reads Secrets here).
   - apiGroups: [""]
@@ -48,9 +49,11 @@ metadata:
     {{- include "kobe.labels" . | nindent 4 }}
 rules:
   # Team namespaces (admission-limited to kobe-team-*, labelled, Pod Security "restricted").
+  # list: the isolation reconciler finds team namespaces by label. create also serves the
+  # admission self-check (a server-side dry run that the policies must refuse).
   - apiGroups: [""]
     resources: ["namespaces"]
-    verbs: ["get", "create", "patch"]
+    verbs: ["get", "list", "create", "patch"]
   # The per-namespace RoleBinding to the manager role (admission-limited, see above).
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["rolebindings"]

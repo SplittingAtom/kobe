@@ -1,8 +1,10 @@
-import { Hono } from "hono";
+import { getConnInfo } from "@hono/node-server/conninfo";
+import { Hono, type Context } from "hono";
 import { IsolationRuntimeMissingError } from "../isolation/gate.js";
 import { logger } from "../logger.js";
 import type { SessionKeys } from "../sandbox/config.js";
 import { SandboxAuthError, type SandboxProvider } from "../sandbox/provider.js";
+import { createRateLimiter, type RateLimiter } from "../sandbox/rate-limit.js";
 import { issueSessionTokens } from "../sandbox/session-token.js";
 
 /** How long an unclaimed warm-pool pod waits before asking again. */
@@ -14,10 +16,36 @@ export const UNASSIGNED_RETRY_MS = 2_000;
  */
 const FORWARDED_HEADERS = ["x-forwarded-for", "x-forwarded-host", "x-real-ip", "forwarded"];
 
+/** Session exchanges per source pod: a burst of 20, then one per second (each costs a TokenReview). */
+export const SESSION_RATE = { capacity: 20, refillPerSecond: 1 } as const;
+
 export interface SandboxRoutesDeps {
   readonly provider: Pick<SandboxProvider, "identifyBootstrapToken">;
   readonly sessionKeys: SessionKeys;
   readonly now?: () => Date;
+  readonly limiter?: RateLimiter;
+  /** Rate-limit key for a request (default: the peer address of the TCP connection). */
+  readonly sourceOf?: (c: Context) => string;
+}
+
+function peerAddress(c: Context): string {
+  try {
+    return getConnInfo(c).remote.address ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * The sandbox-facing HTTP app. It runs on its own listener/port (the sandbox NetworkPolicy allows
+ * only that port on server pods), so sandboxes cannot reach the user API, auth or setup routes,
+ * and the ingress never routes to it. KOBE-24 adds the WebSocket here.
+ */
+export function createSandboxApp(deps: SandboxRoutesDeps): Hono {
+  const app = new Hono();
+  app.get("/healthz", (c) => c.json({ status: "ok", service: "server-sandbox" }));
+  app.route("/v1/sandbox", sandboxRoutes(deps));
+  return app;
 }
 
 /**
@@ -32,7 +60,13 @@ export interface SandboxRoutesDeps {
  * - 503 `isolation_runtime_missing` / `sandbox_unavailable`.
  */
 export function sandboxRoutes(deps: SandboxRoutesDeps): Hono {
-  const { provider, sessionKeys, now = () => new Date() } = deps;
+  const {
+    provider,
+    sessionKeys,
+    now = () => new Date(),
+    limiter = createRateLimiter(SESSION_RATE),
+    sourceOf = peerAddress,
+  } = deps;
   const app = new Hono();
 
   app.use(async (c, next) => {
@@ -44,6 +78,14 @@ export function sandboxRoutes(deps: SandboxRoutesDeps): Hono {
   });
 
   app.post("/session", async (c) => {
+    const wait = limiter.take(sourceOf(c));
+    if (wait > 0) {
+      c.header("Retry-After", String(Math.ceil(wait / 1000)));
+      return c.json(
+        { code: "rate_limited", message: "Too many requests.", retry_after_ms: wait },
+        429,
+      );
+    }
     const match = /^Bearer ([^\s]+)$/.exec(c.req.header("authorization") ?? "");
     if (!match?.[1]) {
       return c.json({ code: "unauthorized", message: "Bearer bootstrap token required." }, 401);
