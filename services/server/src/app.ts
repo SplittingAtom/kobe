@@ -6,6 +6,7 @@ import { agentRoutes } from "./routes/agents.js";
 import { installGalleryRoutes } from "./routes/install-gallery.js";
 import { installInvitesRoutes } from "./routes/install-invites.js";
 import { installIsolationRoutes } from "./routes/install-isolation.js";
+import { installPolicyRoutes } from "./routes/install-policy.js";
 import { installRolesRoutes } from "./routes/install-roles.js";
 import { installSettingsRoutes } from "./routes/install-settings.js";
 import { installTeamsRoutes } from "./routes/install-teams.js";
@@ -14,8 +15,10 @@ import { meRoutes } from "./routes/me.js";
 import { myInvitesRoutes } from "./routes/my-invites.js";
 import { myTeamsRoutes } from "./routes/my-teams.js";
 import { setupRoutes } from "./routes/setup.js";
+import { teamPolicyRoutes } from "./routes/team-policy.js";
 import { teamInvitesRoutes } from "./routes/team-invites.js";
 import { teamRoutes } from "./routes/team.js";
+import { threadRoutes } from "./routes/threads.js";
 
 const SERVICE = "server";
 
@@ -57,12 +60,15 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/me/teams", myTeamsRoutes(deps));
   api.route("/me/invites", myInvitesRoutes(deps));
   api.route("/me", meRoutes());
+  api.route("/team/policy", teamPolicyRoutes(deps));
   api.route("/team/invites", teamInvitesRoutes(deps));
   api.route("/team", teamRoutes(deps));
+  api.route("/threads", threadRoutes(deps));
   api.route("/agents", agentRoutes(deps));
   api.route("/install/settings", installSettingsRoutes(deps));
   api.route("/install/teams", installTeamsRoutes(deps));
   api.route("/install/roles", installRolesRoutes(deps));
+  api.route("/install/policy", installPolicyRoutes(deps));
   api.route("/install/users", installUsersRoutes(deps));
   api.route("/install/invites", installInvitesRoutes(deps));
   api.route("/install/gallery/agents", installGalleryRoutes(deps));
