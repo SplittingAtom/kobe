@@ -1,4 +1,19 @@
 export * from "./audit/index.js";
+export {
+  BREAK_GLASS_ENTRIES_MAX,
+  BREAK_GLASS_THREADS_MAX,
+  BreakGlassDenied,
+  readWithBreakGlass,
+  type BreakGlassAccess,
+  type BreakGlassDeniedCode,
+  type BreakGlassEntry,
+  type BreakGlassGrantView,
+  type BreakGlassRead,
+  type BreakGlassReadResult,
+  type BreakGlassScope,
+  type BreakGlassThread,
+  type BreakGlassThreadCursor,
+} from "./break-glass/read.js";
 export { BLOB_REF_COLUMNS, type BlobRefColumn } from "./blob-refs.js";
 export {
   createDb,

@@ -45,6 +45,9 @@ export const identity = defineDomain({
     invitations: ["SELECT", "INSERT", "UPDATE"],
     // Append-only (KOBE-15): never UPDATE, DELETE or TRUNCATE; triggers refuse them for the owner too.
     audit_log: ["SELECT", "INSERT"],
+    // The record behind break-glass audit events (KOBE-16): requested, decided, revoked, expired;
+    // never deleted. Transitions are checked by the break_glass_grants_guard trigger.
+    break_glass_grants: ["SELECT", "INSERT", "UPDATE"],
   },
   teamReferencing: {
     session_active_teams:
@@ -54,5 +57,11 @@ export const identity = defineDomain({
       "Install-wide record (D6) whose events may belong to a team: team admins read their team's " +
       "events through listTeamAuditEvents(), which always filters on team_id. No FK to `teams`. " +
       "Only metadata is stored (AUDIT_EVENTS allowlist), never team content.",
+    break_glass_grants:
+      "Spec §5.4 marks it install-wide (†, D10): an install admin's request for read access to one " +
+      "team must exist before any team context and be visible to every install admin who may " +
+      "approve it. It holds the team id, an optional subject user and thread id, and the " +
+      "requester's reason, never team content. Team content is read only through " +
+      "readWithBreakGlass(), which verifies an active grant before setting kobe.team_id.",
   },
 });

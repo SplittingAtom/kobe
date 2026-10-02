@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BREAK_GLASS_MAX_MINUTES } from "../schema/break-glass.js";
 import { teamRole } from "../schema/team-members.js";
 
 /**
@@ -54,6 +55,15 @@ const toolRule = {
   /** How many `arg_pattern` entries the rule has (the patterns themselves are not recorded). */
   argPatternEntries: z.number().int().nonnegative(),
   expiresAt: z.iso.datetime({ offset: true }).nullable(),
+};
+
+/** A break-glass grant (KOBE-16) by its scope; never the free-text reason. */
+const breakGlassScope = {
+  grantId: id,
+  scope: z.enum(["team", "user", "thread"]),
+  subjectUserId: id.optional(),
+  threadId: id.optional(),
+  legalHold: z.boolean(),
 };
 
 const event = <const S extends AuditScope, T extends z.ZodRawShape>(scope: S, shape: T) => ({
@@ -173,6 +183,30 @@ export const AUDIT_EVENTS = {
   "thread.trashed": event("team", { threadId: id }),
   "thread.restored": event("team", { threadId: id }),
   "thread.sharing_changed": event("team", { threadId: id, projectId: id, shared: z.boolean() }),
+
+  // ── governance: break-glass (D10, KOBE-16); team scope, so the team's audit view shows them ──
+  /** An install admin asked for read access to the team (the reason stays in the grant row). */
+  "governance.break_glass.requested": event("team", {
+    ...breakGlassScope,
+    durationMinutes: z.number().int().min(1).max(BREAK_GLASS_MAX_MINUTES),
+  }),
+  /** A second install admin approved; `selfApproved` flags a single-admin install (D10). */
+  "governance.break_glass.approved": event("team", {
+    ...breakGlassScope,
+    expiresAt: z.iso.datetime({ offset: true }),
+    selfApproved: z.boolean(),
+  }),
+  "governance.break_glass.denied": event("team", { grantId: id }),
+  /** Withdrawn while pending (`wasActive` false) or revoked during its window. */
+  "governance.break_glass.revoked": event("team", { grantId: id, wasActive: z.boolean() }),
+  /** The window ended (`wasActive`) or the request lapsed undecided (actor: system). */
+  "governance.break_glass.expired": event("team", { grantId: id, wasActive: z.boolean() }),
+  /** Every read under a grant: what kind of object, by id only (D10: every read is audited). */
+  "governance.break_glass.read": event("team", {
+    grantId: id,
+    object: z.enum(["thread_list", "thread", "thread_entries"]),
+    threadId: id.optional(),
+  }),
 
   // ── agent: definitions (D19); team agents in the team view, personal and gallery install-only ──
   "agent.created": event("any", {
