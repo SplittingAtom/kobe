@@ -16,6 +16,8 @@ const BASE: Record<string, string> = {
   "s3.bucket": "kobe",
   "s3.existingSecret": "kobe-s3",
   "global.imagePullSecrets[0].name": "ghcr-pull",
+  // helm template renders offline; production renders either reach the cluster or use existingSecrets.
+  "global.allowGeneratedSecretsOffline": "true",
 };
 
 type Manifest = {
@@ -443,13 +445,11 @@ describe("auth (KOBE-12)", () => {
   const env = (ms: Manifest[], name: string) =>
     find(ms, "Deployment", name)?.spec.template.spec.containers[0].env as unknown[];
 
-  it("gives server and scheduler the public URL derived from the ingress", () => {
-    for (const name of ["kobe-server", "kobe-scheduler"]) {
-      expect(env(render(), name)).toContainEqual({
-        name: "KOBE_PUBLIC_URL",
-        value: "https://kobe.example.com",
-      });
-    }
+  it("gives the server the public URL derived from the ingress", () => {
+    expect(env(render(), "kobe-server")).toContainEqual({
+      name: "KOBE_PUBLIC_URL",
+      value: "https://kobe.example.com",
+    });
     expect(env(render({ "ingress.tls.enabled": "false" }), "kobe-server")).toContainEqual({
       name: "KOBE_PUBLIC_URL",
       value: "http://kobe.example.com",
@@ -460,31 +460,74 @@ describe("auth (KOBE-12)", () => {
     });
   });
 
-  it("generates and keeps an auth secret, mounted only by server and scheduler", () => {
+  it("generates and keeps auth and setup secrets, mounted only by the server", () => {
     const ms = render();
-    const secret = find(ms, "Secret", "kobe-auth");
-    expect(secret?.metadata.annotations?.["helm.sh/resource-policy"]).toBe("keep");
-    expect((secret as unknown as { stringData: { secret: string } }).stringData.secret).toMatch(
-      /^[A-Za-z0-9]{48}$/,
-    );
-    const ref = {
+    const secret = find(ms, "Secret", "kobe-auth") as unknown as {
+      metadata: { annotations: Record<string, string> };
+      stringData: { secret: string; "setup-token": string };
+    };
+    expect(secret.metadata.annotations["helm.sh/resource-policy"]).toBe("keep");
+    expect(secret.stringData.secret).toMatch(/^[A-Za-z0-9]{48}$/);
+    expect(secret.stringData["setup-token"]).toMatch(/^[A-Za-z0-9]{32}$/);
+    const server = env(ms, "kobe-server");
+    expect(server).toContainEqual({
       name: "KOBE_AUTH_SECRET",
       valueFrom: { secretKeyRef: { name: "kobe-auth", key: "secret" } },
-    };
-    expect(env(ms, "kobe-server")).toContainEqual(ref);
-    expect(env(ms, "kobe-scheduler")).toContainEqual(ref);
-    for (const name of ["kobe-web", "kobe-mcp-proxy", "kobe-egress-proxy", "kobe-bifrost"]) {
+    });
+    expect(server).toContainEqual({
+      name: "KOBE_SETUP_TOKEN",
+      valueFrom: { secretKeyRef: { name: "kobe-auth", key: "setup-token" } },
+    });
+    for (const name of [
+      "kobe-scheduler",
+      "kobe-web",
+      "kobe-mcp-proxy",
+      "kobe-egress-proxy",
+      "kobe-bifrost",
+    ]) {
       expect(JSON.stringify(find(ms, "Deployment", name)), name).not.toContain("kobe-auth");
     }
   });
 
+  it("trusts the k3s pod network's proxies for client IPs by default", () => {
+    expect(env(render(), "kobe-server")).toContainEqual({
+      name: "KOBE_TRUSTED_PROXIES",
+      value: "10.42.0.0/16",
+    });
+    expect(
+      env(
+        render({
+          "auth.trustedProxies[0]": "10.0.0.0/8",
+          "auth.trustedProxies[1]": "192.168.0.0/16",
+        }),
+        "kobe-server",
+      ),
+    ).toContainEqual({ name: "KOBE_TRUSTED_PROXIES", value: "10.0.0.0/8,192.168.0.0/16" });
+  });
+
   it("uses a pre-created auth secret when given (GitOps-safe)", () => {
-    const ms = render({ "auth.existingSecret": "my-auth" });
+    const ms = render({
+      "auth.existingSecret": "my-auth",
+      "global.allowGeneratedSecretsOffline": "false",
+    });
     expect(find(ms, "Secret", "kobe-auth")).toBeUndefined();
     expect(env(ms, "kobe-server")).toContainEqual({
       name: "KOBE_AUTH_SECRET",
       valueFrom: { secretKeyRef: { name: "my-auth", key: "secret" } },
     });
+  });
+
+  it("refuses to generate secrets in an offline render (each render would rotate them)", () => {
+    expect(renderError({ "global.allowGeneratedSecretsOffline": "false" })).toMatch(
+      /auth\.existingSecret/,
+    );
+    expect(
+      renderError({
+        "global.allowGeneratedSecretsOffline": "false",
+        "auth.existingSecret": "my-auth",
+        "postgres.mode": "cnpg",
+      }),
+    ).toMatch(/postgres\.cnpg\.existingAppSecret/);
   });
 });
 

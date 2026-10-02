@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -122,6 +123,17 @@ export const jwks = pgTable("jwks", {
   crv: text(),
   createdAt: createdAt(),
   expiresAt: timestamp({ withTimezone: true }),
+});
+
+/**
+ * Better Auth rate-limit counters in Postgres, shared by every server replica (no Redis, and an
+ * in-memory limiter would multiply the limit by the replica count).
+ */
+export const rateLimits = pgTable("rate_limits", {
+  id: uuid().primaryKey().defaultRandom(),
+  key: text().notNull().unique(),
+  count: integer().notNull(),
+  lastRequest: bigint({ mode: "number" }).notNull(),
 });
 
 export const installRole = pgEnum("install_role", ["owner", "admin"]);

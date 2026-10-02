@@ -7,6 +7,10 @@ global:
   imageTag: ""
   imagePullPolicy: IfNotPresent
   imagePullSecrets: []
+  # Generated secrets (auth, bundled-Postgres password) are kept by looking up the existing Secret.
+  # Offline renders (helm template, GitOps) can't, so they fail unless you pass existingSecrets.
+  # true only for throwaway environments (dev loop, CI).
+  allowGeneratedSecretsOffline: false
 
 # Kobe refuses to run agents without a gVisor or Kata RuntimeClass (spec D4). The install fails
 # when none exists; there is no switch to disable this check.
@@ -19,8 +23,12 @@ isolation:
 publicUrl: ""
 
 auth:
-  # Secret with key "secret" (>= 32 chars). Empty: the chart generates one and keeps it.
+  # Secret with keys "secret" (>= 32 chars) and "setup-token" (>= 24 chars). Empty: generated, kept.
   existingSecret: ""
+  # Proxies whose X-Forwarded-For is trusted for client IPs (rate limits): Traefik runs in the k3s
+  # pod network. Add your load balancer's CIDR if one sits in front.
+  trustedProxies:
+    - 10.42.0.0/16
 
 web:
   replicas: 1

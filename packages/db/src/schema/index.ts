@@ -7,6 +7,7 @@ export {
   installSettings,
   jwks,
   passkeys,
+  rateLimits,
   sessions,
   twoFactors,
   users,

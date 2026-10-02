@@ -5,6 +5,7 @@ const REQUIRED = {
   KOBE_DATABASE_URL: "postgres://kobe_app:pw@db:5432/kobe",
   KOBE_PUBLIC_URL: "https://kobe.example.com",
   KOBE_AUTH_SECRET: "x".repeat(32),
+  KOBE_SETUP_TOKEN: "t".repeat(24),
 };
 
 describe("loadConfig", () => {
@@ -33,7 +34,7 @@ describe("loadConfig", () => {
   });
 
   it("requires an http(s) public URL without a path", () => {
-    expect(loadConfig(REQUIRED).publicUrl).toBe("https://kobe.example.com");
+    expect(loadConfig(REQUIRED).auth?.publicUrl).toBe("https://kobe.example.com");
     expect(() => loadConfig({ ...REQUIRED, KOBE_PUBLIC_URL: "kobe.example.com" })).toThrow(
       /KOBE_PUBLIC_URL/,
     );
@@ -46,6 +47,32 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ ...REQUIRED, KOBE_AUTH_SECRET: "short" })).toThrow(
       /KOBE_AUTH_SECRET/,
     );
+  });
+
+  it("requires a setup token of at least 24 characters", () => {
+    expect(() => loadConfig({ ...REQUIRED, KOBE_SETUP_TOKEN: "short" })).toThrow(
+      /KOBE_SETUP_TOKEN/,
+    );
+  });
+
+  it("parses trusted proxy CIDRs", () => {
+    expect(loadConfig(REQUIRED).auth?.trustedProxies).toEqual([]);
+    expect(
+      loadConfig({ ...REQUIRED, KOBE_TRUSTED_PROXIES: "10.42.0.0/16, 10.43.0.0/16" }).auth
+        ?.trustedProxies,
+    ).toEqual(["10.42.0.0/16", "10.43.0.0/16"]);
+    expect(() => loadConfig({ ...REQUIRED, KOBE_TRUSTED_PROXIES: "not-a-cidr" })).toThrow(
+      /KOBE_TRUSTED_PROXIES/,
+    );
+  });
+
+  it("does not give the scheduler auth secrets (least privilege)", () => {
+    const scheduler = loadConfig({
+      KOBE_PROCESS: "scheduler",
+      KOBE_DATABASE_URL: REQUIRED.KOBE_DATABASE_URL,
+    });
+    expect(scheduler.auth).toBeUndefined();
+    expect(loadConfig(REQUIRED).auth).toMatchObject({ setupToken: "t".repeat(24) });
   });
 
   it("never echoes secret values in errors", () => {

@@ -24,6 +24,7 @@
     "@kobe/db": "workspace:*",
     "@kobe/protocol": "workspace:*",
     "@kubernetes/client-node": "^2.0.0",
+    "@simplewebauthn/server": "~13.3.3",
     "better-auth": "1.7.7",
     "hono": "^4.13.12",
     "pino": "^10.3.1",

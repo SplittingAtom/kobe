@@ -99,6 +99,9 @@
             },
             "required": ["name"]
           }
+        },
+        "allowGeneratedSecretsOffline": {
+          "type": "boolean"
         }
       }
     },
@@ -436,6 +439,13 @@
       "properties": {
         "existingSecret": {
           "type": "string"
+        },
+        "trustedProxies": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F:.]+/[0-9]{1,3}$"
+          }
         }
       }
     }

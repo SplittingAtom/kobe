@@ -18,6 +18,16 @@ export function createApp(deps?: ServerDeps): Hono {
   app.route("/v1/setup", setupRoutes(deps));
 
   const api = new Hono<{ Variables: AuthVariables }>();
+  // CSRF: state-changing API calls must come from the install's own origin.
+  api.use(async (c, next) => {
+    if (
+      !["GET", "HEAD", "OPTIONS"].includes(c.req.method) &&
+      c.req.header("origin") !== deps.publicUrl
+    ) {
+      return c.json({ code: "forbidden_origin", message: "Cross-origin request rejected." }, 403);
+    }
+    await next();
+  });
   api.use(requireSession(deps));
   api.route("/me", meRoutes());
   api.route("/install/settings", installSettingsRoutes(deps));

@@ -23,6 +23,7 @@ export const INSTALL_WIDE_TABLES = [
   "passkeys",
   "two_factors",
   "jwks",
+  "rate_limits",
   "invitations",
   // Identity and governance
   "teams",
@@ -69,7 +70,9 @@ export const INSTALL_WIDE_GRANTS: Readonly<
   verifications: AUTH_TABLE,
   passkeys: AUTH_TABLE,
   two_factors: AUTH_TABLE,
-  jwks: ["SELECT", "INSERT", "UPDATE"],
+  // Signing keys are only ever inserted (no rotation configured).
+  jwks: ["SELECT", "INSERT"],
+  rate_limits: AUTH_TABLE,
   install_roles: ["SELECT", "INSERT", "UPDATE", "DELETE"],
   install_settings: ["SELECT", "INSERT", "UPDATE"],
 };

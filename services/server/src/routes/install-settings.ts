@@ -22,6 +22,13 @@ export function installSettingsRoutes(deps: ServerDeps): Hono<{ Variables: AuthV
   app.put("/", async (c) => {
     const parsed = settingsSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ code: "invalid_request" }, 400);
+    // Lowering the requirement weakens every account: Owner only.
+    if (!parsed.data.requireTwoFactor && c.get("installRole") !== "owner") {
+      return c.json(
+        { code: "forbidden", message: "Only the Owner can turn off required 2FA." },
+        403,
+      );
+    }
     const value = String(parsed.data.requireTwoFactor);
     await deps.database.db
       .insert(installSettings)

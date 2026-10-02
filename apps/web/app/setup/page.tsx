@@ -19,6 +19,7 @@ export default function SetupPage() {
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
+    const setupToken = String(form.get("setupToken") ?? "").trim();
     const input = {
       email: String(form.get("email") ?? ""),
       name: String(form.get("name") ?? ""),
@@ -29,10 +30,12 @@ export default function SetupPage() {
     const res = await fetch("/v1/setup", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(input),
+      body: JSON.stringify({ ...input, setupToken }),
     });
     if (res.status === 201) setDone(true);
     else if (res.status === 409) setRequired(false);
+    else if (res.status === 403)
+      setError("The setup token is wrong. Copy it from the command in the Helm install notes.");
     else setError("Setup failed. Check the details and try again.");
   }
 
@@ -65,6 +68,13 @@ export default function SetupPage() {
       <h1>Set up Kobe</h1>
       <p>Create the Owner account. You can invite everyone else afterwards.</p>
       <form onSubmit={onSubmit}>
+        <label>
+          Setup token <input name="setupToken" autoComplete="off" spellCheck={false} required />
+        </label>
+        <p>
+          Prove you control this install: run the <code>kubectl … setup-token</code> command printed
+          by <code>helm install</code>.
+        </p>
         <label>
           Name <input name="name" autoComplete="name" required />
         </label>

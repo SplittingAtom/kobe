@@ -98,9 +98,9 @@ export class SoftwareAuthenticator {
   }
 
   /** Response to navigator.credentials.get() for authentication options from the server. */
-  authenticate(options: RequestOptions): Record<string, unknown> {
+  authenticate(options: RequestOptions, { userVerified = true } = {}): Record<string, unknown> {
     this.signCount += 1;
-    const authenticatorData = this.authData(FLAG_UP | FLAG_UV, false);
+    const authenticatorData = this.authData(userVerified ? FLAG_UP | FLAG_UV : FLAG_UP, false);
     const clientDataJSON = this.clientData("webauthn.get", options.challenge);
     const signature = createSign("sha256")
       .update(Buffer.concat([authenticatorData, sha256(clientDataJSON)]))
