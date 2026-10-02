@@ -12,7 +12,6 @@ import {
 } from "./event-stream/append.js";
 import { createRunEventBatcher } from "./event-stream/batcher.js";
 import { RUN_EVENTS_CHANNEL } from "./event-stream/notify.js";
-import { addMember } from "./teams/members.js";
 import { SseReader } from "./testing/sse.js";
 import {
   EventStreamFixture,
@@ -395,7 +394,7 @@ describe("authorization (ac-4)", () => {
 
   it("ends a live stream when the member is removed from the team", async () => {
     const carl = await fx.person("carl");
-    await addMember(fx.db, finance, carl.id, "member");
+    await fx.addMember(finance, carl);
     await fx.activate(carl, finance);
     const run = await fx.run(finance, carl);
     const reader = await fx.stream(2, carl, run);
@@ -409,7 +408,7 @@ describe("authorization (ac-4)", () => {
 
   it("ends a live stream when the session is revoked", async () => {
     const dana = await fx.person("dana");
-    await addMember(fx.db, finance, dana.id, "member");
+    await fx.addMember(finance, dana);
     await fx.activate(dana, finance);
     const run = await fx.run(finance, dana);
     const reader = await fx.stream(2, dana, run);

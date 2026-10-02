@@ -4,6 +4,8 @@ import { createAuth, type KobeAuth } from "./auth/auth.js";
 import { createRunEventHub, type HubOptions, type RunEventHub } from "./event-stream/hub.js";
 import { createStreamReader, type StreamReader } from "./event-stream/read.js";
 import { STREAM_DEFAULTS, type StreamTimings } from "./event-stream/stream.js";
+import type { Mailer } from "./mail/mailer.js";
+import { UserLifecycle } from "./users/lifecycle.js";
 
 export interface ServerDepsOptions {
   readonly databaseUrl: string;
@@ -19,6 +21,8 @@ export interface ServerDepsOptions {
     /** Connections of the stream read pool (default STREAM_POOL_MAX). */
     readonly poolMax?: number;
   };
+  /** Outgoing email (invitations, password resets, notifications). */
+  readonly mailer: Mailer;
 }
 
 export interface NewUser {
@@ -37,6 +41,9 @@ export interface ServerDeps {
     readonly reader: StreamReader;
     readonly timings: StreamTimings;
   };
+  readonly mailer: Mailer;
+  /** Downstream steps of deactivation/reactivation (sandboxes, grants, schedules, audit). */
+  readonly lifecycle: UserLifecycle;
   /** Creates an email+password user (and optional install role) atomically, without sign-up. */
   createUserWithPassword(
     input: NewUser,
@@ -58,6 +65,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     publicUrl: options.publicUrl,
     secret: options.authSecret,
     trustedProxies: options.trustedProxies,
+    mailer: options.mailer,
   });
   const setupDigest = digest(options.setupToken);
   const hub = createRunEventHub({
@@ -74,6 +82,8 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     auth,
     publicUrl: new URL(options.publicUrl).origin,
     eventStream: { hub, reader, timings: { ...STREAM_DEFAULTS, ...options.eventStream?.timings } },
+    mailer: options.mailer,
+    lifecycle: new UserLifecycle(),
     async createUserWithPassword({ email, name, password }, { installRole } = {}) {
       const ctx = await auth.$context;
       const hash = await ctx.password.hash(password);
@@ -105,6 +115,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     async close() {
       await hub.close();
       await reader.close();
+      options.mailer.close();
       await database.close();
     },
   };

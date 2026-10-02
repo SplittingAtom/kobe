@@ -2,14 +2,15 @@ import { randomBytes } from "node:crypto";
 import pg from "pg";
 import { expect } from "vitest";
 import type { KobeEvent } from "@kobe/protocol";
-import { runs, sql, threads, withTeam } from "@kobe/db";
+import { runs, sql, teamMembers, threads, withTeam } from "@kobe/db";
 import { createTestDatabase, testServerUrl, type TestDatabase } from "@kobe/db/testing";
 import { createApp } from "../app.js";
 import { createServerDeps, type ServerDeps, type ServerDepsOptions } from "../deps.js";
 import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js";
-import { addMember, createTeamWithAdmin } from "../teams/members.js";
+import { createTeamWithAdmin } from "../teams/members.js";
 import { waitForAppSessionsToClose } from "./app-sessions.js";
 import { TestBrowser } from "./browser.js";
+import { MemoryMailer } from "./mailer.js";
 import { SseReader } from "./sse.js";
 
 export const PUBLIC_URL = "http://kobe.test";
@@ -49,6 +50,7 @@ export class EventStreamFixture {
         authSecret: "e".repeat(48),
         setupToken: "setup-token-for-event-stream-tests",
         trustedProxies: ["127.0.0.1/32"],
+        mailer: new MemoryMailer(),
         eventStream,
       });
       return { deps, app: createApp(deps) };
@@ -80,9 +82,16 @@ export class EventStreamFixture {
 
   async team(slug: string, admin: Person, members: readonly Person[] = []): Promise<string> {
     const team = await createTeamWithAdmin(this.db, { slug, name: slug }, admin.id);
-    for (const m of members) await addMember(this.db, team.id, m.id, "member");
+    for (const m of members) await this.addMember(team.id, m);
     for (const p of [admin, ...members]) await this.activate(p, team.id);
     return team.id;
+  }
+
+  /** Seeds a membership directly (test setup; people normally join through KOBE-13 invites). */
+  async addMember(teamId: string, p: Person): Promise<void> {
+    await withTeam(this.db, teamId, (tx) =>
+      tx.insert(teamMembers).values({ teamId, userId: p.id, role: "member" }),
+    );
   }
 
   async activate(p: Person, teamId: string): Promise<void> {

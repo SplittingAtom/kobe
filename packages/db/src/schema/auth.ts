@@ -25,6 +25,11 @@ export const users = pgTable("users", {
   emailVerified: boolean().notNull().default(false),
   image: text(),
   twoFactorEnabled: boolean().notNull().default(false),
+  /**
+   * Set while the user is deactivated (KOBE-13, spec D7): no sign-in by any method, no API access.
+   * Not a Better Auth field, so no Better Auth endpoint can read or change it.
+   */
+  deactivatedAt: timestamp({ withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

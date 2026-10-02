@@ -11,10 +11,13 @@ Parallel-work rules: [parallel-work.md](parallel-work.md).
 - **Run:** Chris (2026-10-02): "do the setup ticket and start wave 0". Parallel agents, one worktree
   per ticket, coordinator merges one PR at a time.
 - **Merged this run:** setup (#9), KOBE-9 (#10), KOBE-29 (#11), KOBE-14 (#12), contracts (#13),
-  KOBE-11 (#14). Wave 0 complete.
-- **Wave 1 in progress:** KOBE-33 (#15, rebasing), KOBE-13, 22, 23, 31, 34, 35, 45 (worktrees
-  `../Kobe-wt<N>`).
-- **Next:** KOBE-15, 20 as slots free; then KOBE-24 (after 23), 25, 30, 36, 38.
+  KOBE-11 (#14), KOBE-45 (#17), KOBE-13 (#19). Wave 0 complete.
+- **Wave 1 open:** KOBE-33 (#15), KOBE-34 (#16), KOBE-31 (#18), KOBE-22 (#20), KOBE-23 (#21),
+  KOBE-35 (#22) — all reviewed or in review; KOBE-15 and KOBE-20 started.
+- **Next:** KOBE-24 after #21; then KOBE-25, 26, 30, 32, 36, 38, 40.
+- **Follow-ups:** contract fixes from KOBE-23 (drop `fork` from pi.command; document session.restore
+  per-part results, `kobe.event_dropped`, ui_request dedupe); route registry so tickets stop
+  conflicting on `app.ts`; KOBE-14 routes to snake_case.
 - **Questions for Chris:** text deltas carry `message_id` (not `entry_id`); Stop emits
   `run.interrupted{reason:"cancelled"}`; sandbox-scoped tools skip the risk prompt in
   ask-on-write; queued messages start after Stop.

@@ -1,0 +1,39 @@
+# Dev/e2e only, k3d only (Tilt and e2e/run.sh refuse other contexts): Mailpit (MIT) catches every
+# email Kobe sends (invitations, password resets) so they can be read in its web UI (port 8025) or
+# API. Applied after dev/postgres.yaml, which creates the kobe-deps namespace.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mailpit
+  namespace: kobe-deps
+spec:
+  selector:
+    matchLabels: { app: mailpit }
+  template:
+    metadata:
+      labels: { app: mailpit }
+    spec:
+      securityContext:
+        { runAsNonRoot: true, runAsUser: 1000, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: mailpit
+          image: axllent/mailpit:v1.31.3
+          ports:
+            - { name: smtp, containerPort: 1025 }
+            - { name: http, containerPort: 8025 }
+          readinessProbe:
+            httpGet: { path: /livez, port: 8025 }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mailpit
+  namespace: kobe-deps
+spec:
+  selector: { app: mailpit }
+  ports:
+    - { name: smtp, port: 1025, targetPort: 1025 }
+    - { name: http, port: 8025, targetPort: 8025 }
