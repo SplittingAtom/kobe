@@ -1,5 +1,5 @@
 import { createMiddleware } from "hono/factory";
-import { eq, installRoles, installSettings } from "@kobe/db";
+import { eq, installRoles, installSettings, users } from "@kobe/db";
 import type { InstallRole } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
 
@@ -38,6 +38,17 @@ export function requireSession(deps: ServerDeps) {
   return createMiddleware<{ Variables: AuthVariables }>(async (c, next) => {
     const session = await deps.auth.api.getSession({ headers: c.req.raw.headers });
     if (!session) return c.json({ code: "unauthenticated", message: "Sign in to continue." }, 401);
+    // Re-read per request: a deactivation or role change applies to the very next request.
+    const [account] = await deps.database.db
+      .select({ deactivatedAt: users.deactivatedAt, role: installRoles.role })
+      .from(users)
+      .leftJoin(installRoles, eq(installRoles.userId, users.id))
+      .where(eq(users.id, session.user.id));
+    if (!account || account.deactivatedAt !== null) {
+      // Sessions are deleted on deactivation; this catches anything that slipped through.
+      await deps.revokeAllSessions(session.user.id);
+      return c.json({ code: "unauthenticated", message: "Sign in to continue." }, 401);
+    }
     const user: SessionUser = {
       id: session.user.id,
       email: session.user.email,
@@ -53,13 +64,9 @@ export function requireSession(deps: ServerDeps) {
         403,
       );
     }
-    const [role] = await deps.database.db
-      .select({ role: installRoles.role })
-      .from(installRoles)
-      .where(eq(installRoles.userId, user.id));
     c.set("user", user);
     c.set("sessionId", session.session.id);
-    c.set("installRole", role?.role ?? null);
+    c.set("installRole", account.role ?? null);
     await next();
   });
 }

@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestDatabase, testServerUrl, type TestDatabase } from "@kobe/db/testing";
 import { createApp } from "./app.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
+import { MemoryMailer } from "./testing/mailer.js";
 import { TestBrowser } from "./testing/browser.js";
 
 // Own throwaway database: this file needs an Owner, which the first-run tests must not see.
@@ -48,6 +49,7 @@ beforeAll(async () => {
     authSecret: "t".repeat(48),
     setupToken: "setup-token-for-team-tests-0123",
     trustedProxies: ["127.0.0.1/32"],
+    mailer: new MemoryMailer(),
   });
   app = createApp(deps);
   for (const who of Object.keys(ids) as Person[]) {
@@ -261,8 +263,10 @@ describe("teams (ac-1)", () => {
     await as.alice.put("/v1/me/teams/active", { teamId: finance });
     as.alice.team = finance;
     for (const who of ["bob", "carol"] as const) {
-      const res = await as.alice.post("/v1/team/members", { email: email(who), role: "member" });
-      expect(res.status, JSON.stringify(res.json)).toBe(201);
+      // People join by accepting a team invitation (KOBE-13), never by being added.
+      const res = await as.alice.post("/v1/team/invites", { email: email(who), role: "member" });
+      expect(res.status, JSON.stringify(res.json)).toBe(202);
+      expect((await as[who].post(`/v1/me/invites/${finance}/accept`)).status).toBe(200);
     }
   });
 });
@@ -391,7 +395,7 @@ describe("team membership via /v1/team (ac-2, ac-4)", () => {
       [ids.carol, "member"],
     ]);
     expect(
-      (await as.bob.post("/v1/team/members", { email: email("dave"), role: "member" })).status,
+      (await as.bob.post("/v1/team/invites", { email: email("dave"), role: "member" })).status,
     ).toBe(403);
     expect((await as.bob.patch(`/v1/team/members/${ids.carol}`, { role: "builder" })).status).toBe(
       403,
@@ -400,20 +404,23 @@ describe("team membership via /v1/team (ac-2, ac-4)", () => {
   });
 
   it("lets the team admin add, re-role and remove members", async () => {
-    const add = await as.alice.post("/v1/team/members", {
+    const invite = await as.alice.post("/v1/team/invites", {
       email: "DAVE@teams.test",
       role: "builder",
     });
-    expect(add).toMatchObject({ status: 201, json: { userId: ids.dave, role: "builder" } });
+    expect(invite).toMatchObject({
+      status: 202,
+      json: { invitation: { email: email("dave"), role: "builder" } },
+    });
+    expect(await as.dave.post(`/v1/me/invites/${finance}/accept`)).toMatchObject({
+      status: 200,
+      json: { teamId: finance, role: "builder" },
+    });
     expect(
-      (await as.alice.post("/v1/team/members", { email: email("dave"), role: "member" })).json.code,
+      (await as.alice.post("/v1/team/invites", { email: email("dave"), role: "member" })).json.code,
     ).toBe("already_member");
     expect(
-      (await as.alice.post("/v1/team/members", { email: "nobody@teams.test", role: "member" }))
-        .status,
-    ).toBe(404);
-    expect(
-      (await as.alice.post("/v1/team/members", { email: email("dave"), role: "boss" })).status,
+      (await as.alice.post("/v1/team/invites", { email: email("dave"), role: "boss" })).status,
     ).toBe(400);
 
     expect(

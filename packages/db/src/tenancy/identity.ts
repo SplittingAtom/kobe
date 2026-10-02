@@ -2,7 +2,7 @@ import { ALL_PRIVILEGES, defineDomain } from "./types.js";
 
 /** Identity, Teams & Governance (KOBE-12–20). */
 export const identity = defineDomain({
-  team: ["team_members"],
+  team: ["team_members", "team_invitations"],
   installWide: [
     // Better Auth (KOBE-12)
     "users",
@@ -41,6 +41,8 @@ export const identity = defineDomain({
     install_settings: ["SELECT", "INSERT", "UPDATE"],
     // A pointer only; rows also go away with their session (cascade from `sessions`).
     session_active_teams: ALL_PRIVILEGES,
+    // Kept as the record of who invited whom: revoked or accepted, never deleted (KOBE-13).
+    invitations: ["SELECT", "INSERT", "UPDATE"],
   },
   teamReferencing: {
     session_active_teams:

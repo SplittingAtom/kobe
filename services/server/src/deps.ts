@@ -1,6 +1,8 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { accounts, createDb, installRoles, users, type KobeDatabase } from "@kobe/db";
 import { createAuth, type KobeAuth } from "./auth/auth.js";
+import type { Mailer } from "./mail/mailer.js";
+import { UserLifecycle } from "./users/lifecycle.js";
 
 export interface ServerDepsOptions {
   readonly databaseUrl: string;
@@ -9,6 +11,8 @@ export interface ServerDepsOptions {
   /** One-time secret proving possession of the install for first-run setup. */
   readonly setupToken: string;
   readonly trustedProxies: readonly string[];
+  /** Outgoing email (invitations, password resets, notifications). */
+  readonly mailer: Mailer;
 }
 
 export interface NewUser {
@@ -21,6 +25,9 @@ export interface ServerDeps {
   readonly database: KobeDatabase;
   readonly auth: KobeAuth;
   readonly publicUrl: string;
+  readonly mailer: Mailer;
+  /** Downstream steps of deactivation/reactivation (sandboxes, grants, schedules, audit). */
+  readonly lifecycle: UserLifecycle;
   /** Creates an email+password user (and optional install role) atomically, without sign-up. */
   createUserWithPassword(
     input: NewUser,
@@ -42,6 +49,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     publicUrl: options.publicUrl,
     secret: options.authSecret,
     trustedProxies: options.trustedProxies,
+    mailer: options.mailer,
   });
   const setupDigest = digest(options.setupToken);
 
@@ -49,6 +57,8 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     database,
     auth,
     publicUrl: new URL(options.publicUrl).origin,
+    mailer: options.mailer,
+    lifecycle: new UserLifecycle(),
     async createUserWithPassword({ email, name, password }, { installRole } = {}) {
       const ctx = await auth.$context;
       const hash = await ctx.password.hash(password);
@@ -77,6 +87,9 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     isSetupToken(candidate) {
       return typeof candidate === "string" && timingSafeEqual(digest(candidate), setupDigest);
     },
-    close: () => database.close(),
+    close: async () => {
+      options.mailer.close();
+      await database.close();
+    },
   };
 }
