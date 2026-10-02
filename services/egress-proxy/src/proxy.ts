@@ -74,6 +74,8 @@ export const tcpConnect: ConnectUpstream = (address, port, timeoutMs) =>
     socket.once("connect", () => {
       clearTimeout(timer);
       socket.removeAllListeners("error");
+      // Until the tunnel takes over (it adds its own handler): an error just closes the socket.
+      socket.on("error", () => socket.destroy());
       resolve(socket);
     });
     socket.once("error", (err) => {
@@ -81,6 +83,13 @@ export const tcpConnect: ConnectUpstream = (address, port, timeoutMs) =>
       reject(err);
     });
   });
+
+/** HTTP server sockets allow half-open connections: close for real shortly after replying. */
+const LINGER_MS = 1_000;
+
+function closeSoon(socket: Socket): void {
+  setTimeout(() => socket.destroy(), LINGER_MS).unref();
+}
 
 /** A raw HTTP/1.1 response on a CONNECT socket, then close. `reason` is built from checked values. */
 function reply(
@@ -92,6 +101,7 @@ function reply(
 ): void {
   if (socket.destroyed) return;
   const text = `${body}\n`;
+  closeSoon(socket);
   socket.end(
     [
       `HTTP/1.1 ${status} ${reason}`,
@@ -195,6 +205,11 @@ export function createEgressProxy(deps: ProxyDeps): Server {
     const started = Date.now();
     socket.setNoDelay(true);
     socket.on("error", () => socket.destroy());
+    // Bounds the whole set-up (policy lookups, DNS, connect, ClientHello); the tunnel then sets
+    // its own idle timeout on the same socket.
+    socket.setTimeout(settings.handshakeTimeoutMs + settings.connectTimeoutMs * 2, () =>
+      socket.destroy(),
+    );
     socket.pause();
 
     const auth = authenticate(req.headers["proxy-authorization"], deps.verify);
@@ -388,7 +403,12 @@ export function createEgressProxy(deps: ProxyDeps): Server {
     }
   }
 
-  const server = createServer({ maxHeaderSize: 8192, requestTimeout: settings.handshakeTimeoutMs });
+  const server = createServer({
+    maxHeaderSize: 8192,
+    requestTimeout: settings.handshakeTimeoutMs,
+    // How often Node enforces headersTimeout/requestTimeout (default 30 s): slow-loris bound.
+    connectionsCheckingInterval: Math.min(1_000, settings.handshakeTimeoutMs),
+  });
   server.headersTimeout = settings.handshakeTimeoutMs;
   server.on("connect", (req: IncomingMessage, socket: Socket, head: Buffer) => {
     handleConnect(req, socket, head).catch((err: unknown) => {
@@ -399,9 +419,15 @@ export function createEgressProxy(deps: ProxyDeps): Server {
   server.on("request", (req: IncomingMessage, res: ServerResponse) =>
     handleRequest(req, res, deps),
   );
-  server.on("clientError", (_err, socket: Socket) => {
-    if (socket.writable) socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
-    else socket.destroy();
+  server.on("clientError", (err: NodeJS.ErrnoException, socket: Socket) => {
+    if (!socket.writable) {
+      socket.destroy();
+      return;
+    }
+    const status =
+      err.code === "ERR_HTTP_REQUEST_TIMEOUT" ? "408 Request Timeout" : "400 Bad Request";
+    closeSoon(socket);
+    socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
   });
   return server;
 }

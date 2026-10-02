@@ -94,6 +94,10 @@ let resolveCalls: string[];
 let connectCalls: string[];
 
 async function start(overrides: Partial<ProxyDeps> = {}): Promise<void> {
+  if (proxy?.listening) {
+    proxy.closeAllConnections();
+    proxy.close();
+  }
   audit = [];
   blocked = [];
   received = [];
@@ -370,6 +374,37 @@ describe("allowed tunnels", () => {
     const { socket } = await openConnect("allowed.example.com:443", auth());
     await once(socket, "close");
     expect(received).toEqual([]);
+  });
+});
+
+describe("robustness", () => {
+  it("survives an upstream that resets while the client is still sending its ClientHello", async () => {
+    const flaky = createServer((s) => s.destroy());
+    flaky.listen(0, "127.0.0.1");
+    await once(flaky, "listening");
+    const port = (flaky.address() as AddressInfo).port;
+    await start({ connectUpstream: (address, _p, t) => tcpConnect(address, port, t) });
+    const { socket, head } = await openConnect("allowed.example.com:443", auth());
+    expect(status(head)).toBe("HTTP/1.1 200 Connection Established");
+    await settle();
+    socket.write(hello);
+    await once(socket, "close");
+    flaky.close();
+    // The proxy still serves.
+    expect((await fetch(`http://127.0.0.1:${proxyPort}/healthz`)).status).toBe(200);
+  });
+
+  it("drops a client that stalls before sending its request head", async () => {
+    await start({ settings: { ...deps.settings, handshakeTimeoutMs: 200 } });
+    const socket = connect(proxyPort, "127.0.0.1");
+    await once(socket, "connect");
+    socket.write("CONNECT allowed.example.com:443 HTTP/1.1\r\n");
+    const answer: Buffer[] = [];
+    socket.on("data", (c: Buffer) => answer.push(c));
+    const t0 = Date.now();
+    await once(socket, "close");
+    expect(Date.now() - t0).toBeLessThan(5_000);
+    expect(Buffer.concat(answer).toString()).toMatch(/^HTTP\/1.1 408 /);
   });
 });
 
