@@ -3,7 +3,10 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseAllDocuments } from "yaml";
-import { ISOLATION_REMEDIATION } from "../../../services/server/src/isolation/runtime-class.js";
+import {
+  ISOLATION_HANDLER,
+  ISOLATION_REMEDIATION,
+} from "../../../services/server/src/isolation/runtime-class.js";
 
 const CHART_DIR = fileURLToPath(new URL("..", import.meta.url));
 const HELM = process.env.HELM_BIN ?? "helm";
@@ -221,6 +224,11 @@ describe("isolation preflight (ac-2)", () => {
   it("uses the same remediation text as the server's startup check", () => {
     const template = readFileSync(`${CHART_DIR}/templates/_isolation.tpl`, "utf8");
     expect(template).toContain(ISOLATION_REMEDIATION);
+  });
+
+  it("uses the same handler pattern as the server's startup check", () => {
+    const template = readFileSync(`${CHART_DIR}/templates/_isolation.tpl`, "utf8");
+    expect(template).toContain(`regexMatch "${ISOLATION_HANDLER.source}"`);
   });
 });
 

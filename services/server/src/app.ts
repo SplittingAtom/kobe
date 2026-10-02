@@ -10,7 +10,7 @@ import { setupRoutes } from "./routes/setup.js";
 const SERVICE = "server";
 
 export interface AppOptions {
-  /** Isolation gate (spec D4): reported by /readyz and the install admin console. */
+  /** Isolation gate (spec D4): its state is shown in the install admin console only. */
   readonly isolation?: IsolationGate;
 }
 
@@ -21,11 +21,11 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   app.get("/healthz", (c) => c.json({ status: "ok", service: SERVICE }));
   app.get("/readyz", (c) => {
     if (!isolation) return c.json({ status: "ready", service: SERVICE });
-    // Ready once the startup check has an answer; a missing runtime keeps serving (D4).
-    const { state } = isolation.status();
-    return state === "checking"
-      ? c.json({ status: "starting", service: SERVICE, isolation: state }, 503)
-      : c.json({ status: "ready", service: SERVICE, isolation: state });
+    // Ready once the startup check has an answer; a missing runtime keeps serving (D4). The
+    // answer itself is not disclosed here (unauthenticated): see /v1/install/isolation and logs.
+    return isolation.status().state === "checking"
+      ? c.json({ status: "starting", service: SERVICE }, 503)
+      : c.json({ status: "ready", service: SERVICE });
   });
   if (!deps) return app;
 

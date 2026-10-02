@@ -11,26 +11,22 @@ describe("/readyz with the isolation gate", () => {
     const app = createApp(undefined, { isolation: gateWith(() => new Promise(() => {})) });
     const res = await app.request("/readyz");
     expect(res.status).toBe(503);
-    expect(await res.json()).toEqual({
-      status: "starting",
-      service: "server",
-      isolation: "checking",
-    });
+    expect(await res.json()).toEqual({ status: "starting", service: "server" });
   });
 
-  it("reports verified isolation", async () => {
+  it("is ready once isolation is verified", async () => {
     const gate = gateWith(async () => [{ metadata: { name: "gvisor" }, handler: "runsc" }]);
     await gate.check();
     const res = await createApp(undefined, { isolation: gate }).request("/readyz");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ status: "ready", service: "server", isolation: "verified" });
+    expect(await res.json()).toEqual({ status: "ready", service: "server" });
   });
 
-  it("stays ready without isolation so the admin console can show the fix", async () => {
+  it("stays ready without isolation (admin console shows the fix) and does not disclose it", async () => {
     const gate = gateWith(async () => []);
     await gate.check();
     const res = await createApp(undefined, { isolation: gate }).request("/readyz");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ status: "ready", service: "server", isolation: "missing" });
+    expect(await res.json()).toEqual({ status: "ready", service: "server" });
   });
 });

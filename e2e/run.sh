@@ -94,8 +94,13 @@ expect "team tables have FORCE ROW LEVEL SECURITY" '^team_members\|true$' "$(psq
 contains "web answers through the Traefik ingress" '"service":"web"' \
   "$(probe "$NS" 'wget -qO- --header "Host: kobe.localtest.me" http://traefik.kube-system/api/healthz')"
 contains "server answers" '"service":"server"' "$(probe "$NS" 'wget -qO- http://kobe-server/healthz')"
-contains "server verified the gVisor RuntimeClass in process (KOBE-9)" '"isolation":"verified"' \
-  "$(probe "$NS" 'wget -qO- http://kobe-server/readyz')"
+# KOBE-9: every server/scheduler process verified isolation itself (not disclosed by /readyz).
+iso=""
+for pod in $($KUBECTL -n "$NS" get pods -l "$gated_pods" --field-selector=status.phase=Running -o name); do
+  if $KUBECTL -n "$NS" logs "$pod" 2>/dev/null | grep -q '"msg":"isolation verified: agents enabled"'; then iso+="verified "
+  else iso+="$pod:unverified "; fi
+done
+contains "server and scheduler verified the gVisor RuntimeClass in process" '^verified verified verified $' "$iso"
 contains "Bifrost is reachable from the release namespace" '"status":"ok"' \
   "$(probe "$NS" 'wget -qO- -T 5 http://kobe-bifrost:8080/health')"
 np=$(probe default "wget -qO- -T 5 http://kobe-web.$NS/api/healthz >/dev/null 2>&1 && echo control=REACHED || echo control=BLOCKED; \

@@ -45,9 +45,9 @@ apply`, or deleting the RuntimeClass later cannot run agents without isolation:
   and the admin console but **agents are disabled**: chat returns `isolation_runtime_missing`
   (HTTP 503), the server logs the problem and the fix at `error` level, and install admins see
   both at `GET /v1/install/isolation` (`POST /v1/install/isolation/check` re-checks immediately
-  after you fix the cluster). `/readyz` reports `"isolation": "verified" | "missing"`; it is not
-  ready only until the first check completes. Errors and timeouts talking to the Kubernetes API
-  count as missing.
+  after you fix the cluster). `/readyz` does not disclose the result (it is unauthenticated); it is
+  not ready only until the first check completes. Errors and timeouts talking to the Kubernetes
+  API count as missing.
 - The **scheduler** has no UI, so it runs the same check as an initContainer and refuses to start,
   then re-checks in process like the server.
 

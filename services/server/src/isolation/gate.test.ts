@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ISOLATION_RECHECK_INTERVAL_MS,
   IsolationRuntimeMissingError,
+  VerifiedIsolation,
   createIsolationGate,
   type IsolationGateOptions,
   type IsolationStatus,
 } from "./gate.js";
+import * as gateModule from "./gate.js";
 import type { RuntimeClassLike } from "./runtime-class.js";
 
 const rc = (name: string, handler: string): RuntimeClassLike => ({ metadata: { name }, handler });
@@ -97,10 +99,10 @@ describe("isolation gate: startup check", () => {
     expect(status.state === "missing" && status.message).toMatch(/timed out/);
   });
 
-  it("deduplicates concurrent checks", async () => {
+  it("deduplicates concurrent display/ops checks", async () => {
     const list = vi.fn(async () => GVISOR);
     const { g } = gate({ listRuntimeClasses: list });
-    await Promise.all([g.check(), g.check(), g.require()]);
+    await Promise.all([g.check(), g.check()]);
     expect(list).toHaveBeenCalledTimes(1);
   });
 });
@@ -109,12 +111,18 @@ describe("isolation gate: require() before agent work", () => {
   it("returns the verified RuntimeClass sandboxes must use", async () => {
     const { g } = gate();
     await g.check();
-    await expect(g.require()).resolves.toEqual({ runtimeClassName: "gvisor", handler: "runsc" });
+    await expect(g.require()).resolves.toMatchObject({
+      runtimeClassName: "gvisor",
+      handler: "runsc",
+    });
   });
 
   it("waits for the first check instead of failing or passing early", async () => {
     const { g } = gate();
-    await expect(g.require()).resolves.toEqual({ runtimeClassName: "gvisor", handler: "runsc" });
+    await expect(g.require()).resolves.toMatchObject({
+      runtimeClassName: "gvisor",
+      handler: "runsc",
+    });
   });
 
   it("throws isolation_runtime_missing (HTTP 503) when isolation is missing", async () => {
@@ -138,6 +146,58 @@ describe("isolation gate: require() before agent work", () => {
     await expect(g.require()).rejects.toBeInstanceOf(IsolationRuntimeMissingError);
     expect(list).toHaveBeenCalledTimes(3);
     expect(g.status().state).toBe("missing");
+  });
+});
+
+describe("isolation gate: require() is live and never joins an older check", () => {
+  it("starts its own check instead of joining one that began before the call", async () => {
+    const pending: ((v: readonly RuntimeClassLike[]) => void)[] = [];
+    const list = vi.fn(
+      () => new Promise<readonly RuntimeClassLike[]>((resolve) => pending.push(resolve)),
+    );
+    const { g } = gate({ listRuntimeClasses: list });
+    const early = g.check(); // started before the class was replaced
+    const required = g.require();
+    expect(list).toHaveBeenCalledTimes(2);
+    pending[1]?.([rc("gvisor", "runc")]); // what require() sees: replaced, not isolating
+    await expect(required).rejects.toBeInstanceOf(IsolationRuntimeMissingError);
+    pending[0]?.(GVISOR); // the older check finishes last with a stale "verified"
+    await expect(early).resolves.toMatchObject({ state: "verified" });
+    // An older-started check never overwrites a newer result.
+    expect(g.status().state).toBe("missing");
+  });
+});
+
+describe("VerifiedIsolation cannot be forged", () => {
+  const forged = { runtimeClassName: "gvisor", handler: "runsc" };
+
+  it("is returned by require() and passes the runtime guard", async () => {
+    const { g } = gate();
+    const verified = await g.require();
+    expect(verified).toBeInstanceOf(VerifiedIsolation);
+    expect(() => VerifiedIsolation.assert(verified)).not.toThrow();
+    expect(Object.isFrozen(verified)).toBe(true);
+  });
+
+  it("is nominal: a structurally identical object is not assignable", () => {
+    // @ts-expect-error -- missing the private #verified brand
+    const typed: VerifiedIsolation = forged;
+    expect(() => VerifiedIsolation.assert(typed)).toThrow(TypeError);
+  });
+
+  it("cannot be constructed outside gate.ts", () => {
+    // @ts-expect-error -- the constructor is private
+    expect(() => new VerifiedIsolation(Symbol("guess"), "gvisor", "runsc")).toThrow(TypeError);
+    const viaPrototype: unknown = Object.create(VerifiedIsolation.prototype);
+    expect(() => VerifiedIsolation.assert(viaPrototype)).toThrow(TypeError);
+  });
+
+  it("does not export its mint or token", () => {
+    const exported = Object.values(gateModule);
+    expect(exported.filter((v) => typeof v === "symbol")).toEqual([]);
+    const mintKeys = Object.getOwnPropertySymbols(VerifiedIsolation);
+    expect(mintKeys).toHaveLength(1);
+    expect(exported).not.toContain(mintKeys[0]);
   });
 });
 
