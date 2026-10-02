@@ -16,7 +16,8 @@ systemctl list-unit-files k3s-agent.service >/dev/null 2>&1 && systemctl is-enab
 
 echo "==> installing runsc from the gVisor apt repository"
 curl -fsSL https://gvisor.dev/archive.key | gpg --dearmor --yes -o /usr/share/keyrings/gvisor-archive-keyring.gpg
-gpg --show-keys --with-colons /usr/share/keyrings/gvisor-archive-keyring.gpg | grep -q "^fpr:::::::::${GVISOR_KEY_FINGERPRINT}:" \
+keys=$(gpg --show-keys --with-colons /usr/share/keyrings/gvisor-archive-keyring.gpg)
+grep -q "^fpr:::::::::${GVISOR_KEY_FINGERPRINT}:" <<<"$keys" \
   || { echo "unexpected gVisor signing key fingerprint" >&2; exit 1; }
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
   > /etc/apt/sources.list.d/gvisor.list
@@ -27,7 +28,9 @@ runsc --version | head -1
 echo "==> registering the runsc runtime with k3s containerd (drop-in, k3s config untouched)"
 mkdir -p "$DROPIN_DIR"
 desired=$'[plugins.\'io.containerd.cri.v1.runtime\'.containerd.runtimes.runsc]\n  runtime_type = "io.containerd.runsc.v1"'
-if [[ "$(cat "$DROPIN_DIR/10-gvisor.toml" 2>/dev/null)" == "$desired" ]] && k3s crictl info 2>/dev/null | grep -q runsc; then
+# (Pipelines into `grep -q` are avoided throughout: pipefail + SIGPIPE gives false failures.)
+cri_info() { k3s crictl info 2>/dev/null || true; }
+if [[ "$(cat "$DROPIN_DIR/10-gvisor.toml" 2>/dev/null)" == "$desired" ]] && grep -q runsc <<<"$(cri_info)"; then
   echo "ok: runsc runtime already registered on $(hostname); no restart needed"
   exit 0
 fi
@@ -36,5 +39,5 @@ printf '%s\n' "$desired" > "$DROPIN_DIR/10-gvisor.toml"
 echo "==> restarting $SERVICE"
 systemctl restart "$SERVICE"
 for _ in $(seq 1 30); do systemctl is-active -q "$SERVICE" && break; sleep 2; done
-k3s crictl info 2>/dev/null | grep -q runsc && echo "ok: runsc runtime registered on $(hostname)" || {
+grep -q runsc <<<"$(cri_info)" && echo "ok: runsc runtime registered on $(hostname)" || {
   echo "runsc not visible in containerd config; check: journalctl -u $SERVICE" >&2; exit 1; }

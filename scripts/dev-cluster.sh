@@ -43,7 +43,8 @@ fi
 
 if "$K3D" cluster get "$CLUSTER" >/dev/null 2>&1; then
   echo "==> k3d cluster '${CLUSTER}' exists; reusing it"
-  docker ps --format '{{.Names}}' | grep -qx "${CLUSTER}-registry" \
+  running=$(docker ps --format '{{.Names}}')
+  grep -qx "${CLUSTER}-registry" <<<"$running" \
     || echo "warning: no local registry ${CLUSTER}-registry (cluster predates it); Tilt needs it — recreate with: k3d cluster delete ${CLUSTER}" >&2
 else
   echo "==> creating k3d cluster '${CLUSTER}' (${K3S_IMAGE})"
@@ -103,8 +104,10 @@ if [[ "${NO_GVISOR:-0}" != "1" ]]; then
   $KUBECTL run "$smoke" --image=busybox:1.37 --restart=Never \
     --overrides='{"spec":{"runtimeClassName":"gvisor"}}' -- dmesg >/dev/null
   $KUBECTL wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$smoke" --timeout=120s >/dev/null
-  if $KUBECTL logs "$smoke" | grep -q "Starting gVisor"; then echo "ok: pods run under gVisor"; else
-    echo "gVisor smoke test failed" >&2; $KUBECTL logs "$smoke" >&2; exit 1; fi
+  # Capture first: `kubectl logs | grep -q` can SIGPIPE kubectl and trip pipefail.
+  smoke_log=$($KUBECTL logs "$smoke")
+  if grep -q "Starting gVisor" <<<"$smoke_log"; then echo "ok: pods run under gVisor"; else
+    echo "gVisor smoke test failed" >&2; echo "$smoke_log" >&2; exit 1; fi
   $KUBECTL delete pod "$smoke" --wait=false >/dev/null
 fi
 
