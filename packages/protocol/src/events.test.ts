@@ -8,10 +8,11 @@ import {
   isTerminalEventType,
   kobeEventSchema,
   parseEventPayload,
+  decideStreamOpen,
   resolveResumeCursor,
   type KobeEvent,
 } from "./index.js";
-import { EVENT_PAYLOAD_EXAMPLES, createInMemoryEventLog } from "./testing/index.js";
+import { EVENT_PAYLOAD_EXAMPLES, EXAMPLE_IDS, createInMemoryEventLog } from "./testing/index.js";
 
 describe("Kobe Event Stream types", () => {
   it("lists every event type from the spec (§6.2)", () => {
@@ -95,7 +96,7 @@ describe("event payloads", () => {
 
 describe("event envelope", () => {
   const event: KobeEvent<"text.delta"> = {
-    run_id: "run_7f",
+    run_id: EXAMPLE_IDS.run,
     seq: 1042,
     ts: "2026-10-01T22:00:00.123Z",
     type: "text.delta",
@@ -131,7 +132,8 @@ describe("resume cursor", () => {
   it.each([
     [{}, 0],
     [{ lastEventId: "41" }, 41],
-    [{ startingAfter: "7", lastEventId: "41" }, 7],
+    [{ startingAfter: "7", lastEventId: "41" }, 41],
+    [{ startingAfter: "41", lastEventId: "7" }, 41],
     [{ startingAfter: "", lastEventId: "41" }, 41],
     [{ startingAfter: null, lastEventId: null }, 0],
     [{ startingAfter: "0" }, 0],
@@ -144,6 +146,59 @@ describe("resume cursor", () => {
       ok: false,
       error: "invalid_cursor",
     });
+  });
+});
+
+describe("stream open decision", () => {
+  it.each([
+    [{ ended: false, events_compacted: false, last_seq: 5, cursor: 9 }, "stream"],
+    [{ ended: true, events_compacted: false, last_seq: 5, cursor: 3 }, "stream"],
+    [{ ended: true, events_compacted: false, last_seq: 5, cursor: 5 }, "no_content"],
+    [{ ended: true, events_compacted: true, last_seq: 5, cursor: 0 }, "gone"],
+  ])("%j → %s", (run, kind) => {
+    expect(decideStreamOpen(run).kind).toBe(kind);
+  });
+});
+
+describe("payload id and input rules", () => {
+  it("allows the install default agent (null pin) on run.started", () => {
+    const payload = {
+      ...EVENT_PAYLOAD_EXAMPLES["run.started"],
+      agent_id: null,
+      agent_version: null,
+    };
+    expect(parseEventPayload("run.started", payload)).toEqual(payload);
+  });
+
+  it("requires uuids for Kobe ids", () => {
+    const payload = { ...EVENT_PAYLOAD_EXAMPLES["run.queued"], thread_id: "thr_1" };
+    expect(() => parseEventPayload("run.queued", payload)).toThrow();
+  });
+
+  it("applies tool-input rules to tool.call and approval.requested", () => {
+    for (const input of [{ n: 2 ** 53 }, { s: "a\u0000b" }, JSON.parse('{"__proto__":{"x":1}}')]) {
+      expect(() =>
+        parseEventPayload("tool.call", { ...EVENT_PAYLOAD_EXAMPLES["tool.call"], input }),
+      ).toThrow();
+      expect(() =>
+        parseEventPayload("approval.requested", {
+          ...EVENT_PAYLOAD_EXAMPLES["approval.requested"],
+          input,
+        }),
+      ).toThrow();
+    }
+  });
+
+  it("requires a cause on approval.resolved", () => {
+    const { cause: _cause, ...rest } = EVENT_PAYLOAD_EXAMPLES["approval.resolved"];
+    expect(() => parseEventPayload("approval.resolved", rest)).toThrow();
+    expect(
+      parseEventPayload("approval.resolved", {
+        ...rest,
+        decision: "expired",
+        cause: "run_cancelled",
+      }).cause,
+    ).toBe("run_cancelled");
   });
 });
 

@@ -103,6 +103,7 @@ describe("canonicalJson (RFC 8785 + Kobe strictness)", () => {
     ["lone surrogate in key", { "\ud800": 1 }],
     ["sparse array", [1, , 3]], // eslint-disable-line no-sparse-arrays
     ["symbol key", { [Symbol("k")]: 1 }],
+    ["__proto__ key", JSON.parse('{"a":{"__proto__":1}}')],
   ])("rejects %s", (_label, value) => {
     expect(() => canonicalJson(value)).toThrow(CanonicalJsonError);
   });

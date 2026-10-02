@@ -6,3 +6,4 @@ export {
   type FakeRunOrchestrator,
 } from "./run-orchestrator.js";
 export { EVENT_PAYLOAD_EXAMPLES } from "./event-examples.js";
+export { EXAMPLE_IDS } from "./ids.js";

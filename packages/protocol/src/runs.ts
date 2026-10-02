@@ -102,3 +102,63 @@ export function isTerminalRunStatus(status: RunStatus): boolean {
 export function isActiveRunStatus(status: RunStatus): boolean {
   return (ACTIVE_RUN_STATUSES as readonly RunStatus[]).includes(status);
 }
+
+/**
+ * Thread status (`threads.status`, KOBE-29 enum) and the queue rule (D14, D17).
+ *
+ * - A thread is `running` while one of its runs is active, `interrupted` after its active run was
+ *   interrupted, `idle` otherwise.
+ * - **`interrupted` blocks the queue:** queued runs do not auto-start after an interrupted run
+ *   ("Retry from last entry" must be able to run first, and side effects may already have happened).
+ *   The user resolves it with Retry (the retry run starts at once, ahead of the queue; the queue
+ *   resumes after it ends) or with "Continue without retry" (`resumeQueue`, thread → idle, queue
+ *   resumes). New messages on an interrupted thread queue.
+ * - After `completed`, `failed`, `cancelled` the next queued run starts (Stop leaves queued messages
+ *   in place, D17). Budget stops end queued runs too (`budget_stopped`).
+ */
+export const THREAD_STATUSES = ["idle", "running", "interrupted"] as const;
+export const threadStatusSchema = z.enum(THREAD_STATUSES);
+export type ThreadStatus = z.infer<typeof threadStatusSchema>;
+
+export type ThreadStatusEvent =
+  | {
+      readonly kind: "run_status";
+      readonly to: RunStatus;
+      /** Whether the run held the thread (was `running`/`waiting_approval`) before this change. */
+      readonly was_active: boolean;
+    }
+  | { readonly kind: "queue_resumed" };
+
+export function nextThreadStatus(current: ThreadStatus, event: ThreadStatusEvent): ThreadStatus {
+  if (event.kind === "queue_resumed") return current === "interrupted" ? "idle" : current;
+  if (isActiveRunStatus(event.to)) return "running";
+  if (!isTerminalRunStatus(event.to) || !event.was_active) return current;
+  return event.to === "interrupted" ? "interrupted" : "idle";
+}
+
+/** Whether the orchestrator may start the thread's next queued run now. */
+export function queueMayAdvance(status: ThreadStatus): boolean {
+  return status === "idle";
+}
+
+/**
+ * Retry rules (D14, KOBE-26): only the thread's latest ended run, only if `interrupted`, at most
+ * once (KOBE-26 adds `runs.retry_of_run_id` with a unique index). A repeated retry of the same run
+ * returns the existing retry run (idempotent) instead of creating another.
+ */
+export type RetryCheck = "ok" | "already_retried" | "not_interrupted" | "not_latest";
+
+export interface RetryCandidate {
+  readonly run_id: string;
+  readonly status: RunStatus;
+  readonly retry_of_run_id?: string | undefined;
+}
+
+/** `runs` is the thread's runs in creation order. */
+export function checkRetry(runs: readonly RetryCandidate[], runId: string): RetryCheck {
+  if (runs.some((r) => r.retry_of_run_id === runId)) return "already_retried";
+  const target = runs.find((r) => r.run_id === runId);
+  if (target?.status !== "interrupted") return "not_interrupted";
+  const latestEnded = runs.filter((r) => isTerminalRunStatus(r.status)).at(-1);
+  return latestEnded?.run_id === runId ? "ok" : "not_latest";
+}

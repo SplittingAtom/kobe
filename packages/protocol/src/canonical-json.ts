@@ -18,7 +18,8 @@
  *    rejected. **No Unicode normalisation** (NFC/NFD forms are different inputs: approving one must
  *    not approve the other).
  * 5. The canonical bytes are the UTF-8 encoding of the canonical string.
- * 6. Nesting deeper than {@link MAX_CANONICAL_DEPTH} is rejected.
+ * 6. Nesting deeper than {@link MAX_CANONICAL_DEPTH} is rejected, and so is a `__proto__` key (it
+ *    could become a prototype on the executor's side; see json-safety.ts).
  *
  * Pure and dependency-free so the server, the MCP proxy, and tests produce identical bytes.
  */
@@ -72,6 +73,9 @@ function serialiseObject(value: Record<string, unknown>, path: string, depth: nu
     throw new CanonicalJsonError("symbol-keyed property", path);
   }
   const keys = Object.keys(value).sort();
+  if (keys.includes("__proto__")) {
+    throw new CanonicalJsonError("__proto__ key", path);
+  }
   const parts = keys.map((key) => {
     const childPath = `${path}.${key}`;
     return `${serialiseString(key, childPath)}:${serialise(value[key], childPath, depth + 1)}`;

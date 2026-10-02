@@ -1,5 +1,6 @@
 import type { KobeEventPayload, KobeEventType } from "../events.js";
 import type { PolicyReason } from "../policy.js";
+import { EXAMPLE_IDS } from "./ids.js";
 
 const reason: PolicyReason = {
   code: "risk_write",
@@ -9,8 +10,18 @@ const reason: PolicyReason = {
 
 /** One valid payload per event type: contract documentation and fixtures for consumers' tests. */
 export const EVENT_PAYLOAD_EXAMPLES: { readonly [T in KobeEventType]: KobeEventPayload<T> } = {
-  "run.queued": { thread_id: "thr_1", trigger: "user", queue_pos: 1, user_entry_id: "a1b2c3d4" },
-  "run.started": { thread_id: "thr_1", agent_id: "agt_1", agent_version: 3, model: "smart" },
+  "run.queued": {
+    thread_id: EXAMPLE_IDS.thread,
+    trigger: "user",
+    queue_pos: 1,
+    user_entry_id: "a1b2c3d4",
+  },
+  "run.started": {
+    thread_id: EXAMPLE_IDS.thread,
+    agent_id: EXAMPLE_IDS.agent,
+    agent_version: 3,
+    model: "smart",
+  },
   "sandbox.waking": { reason: "hibernated" },
   "text.delta": { message_id: "msg_1", content_index: 0, delta: "Here is the chart" },
   "reasoning.delta": { message_id: "msg_1", content_index: 1, delta: "Thinking…" },
@@ -28,7 +39,7 @@ export const EVENT_PAYLOAD_EXAMPLES: { readonly [T in KobeEventType]: KobeEventP
     truncated: false,
   },
   "approval.requested": {
-    approval_id: "apr_31",
+    approval_id: EXAMPLE_IDS.approval,
     tool_call_id: "tc_9",
     tool: "mcp__jira__create_issue",
     input: { project: "OPS", summary: "Disk full" },
@@ -37,10 +48,11 @@ export const EVENT_PAYLOAD_EXAMPLES: { readonly [T in KobeEventType]: KobeEventP
     expires_at: "2026-10-01T22:15:00Z",
   },
   "approval.resolved": {
-    approval_id: "apr_31",
+    approval_id: EXAMPLE_IDS.approval,
     tool_call_id: "tc_9",
     decision: "allowed",
-    decided_by: "usr_1",
+    cause: "user",
+    decided_by: EXAMPLE_IDS.user,
     remembered: false,
   },
   "policy.denied": {
@@ -52,21 +64,21 @@ export const EVENT_PAYLOAD_EXAMPLES: { readonly [T in KobeEventType]: KobeEventP
   "steer.applied": { entry_id: "e5f6a7b8", content: "Use a bar chart instead" },
   "memory.updated": {
     scope: "user",
-    memory_doc_id: "mem_1",
+    memory_doc_id: EXAMPLE_IDS.memory,
     path: "MEMORY.md",
     version: 4,
     previous_version: 3,
   },
   "artifact.created": {
-    artifact_id: "art_1",
+    artifact_id: EXAMPLE_IDS.artifact,
     tool_call_id: "tc_11",
     kind: "html",
     title: "Sales by month",
     version: 1,
   },
-  "artifact.updated": { artifact_id: "art_1", version: 2 },
+  "artifact.updated": { artifact_id: EXAMPLE_IDS.artifact, version: 2 },
   "file.shared": {
-    file_id: "fil_1",
+    file_id: EXAMPLE_IDS.file,
     name: "report.docx",
     size: 48_213,
     mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",

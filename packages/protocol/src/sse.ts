@@ -16,13 +16,20 @@ import type { KobeEvent } from "./events.js";
  * `X-Accel-Buffering: no`.
  *
  * Resume — the cursor is the last `seq` the client has:
- * - `?starting_after=<seq>` wins when present; otherwise the `Last-Event-ID` header; otherwise 0.
+ * - cursor = **max**(`?starting_after`, `Last-Event-ID`), each 0 when absent. (Max, not "query
+ *   wins": on EventSource auto-reconnect the URL still carries the original, stale `starting_after`
+ *   while `Last-Event-ID` is fresh; preferring the query would replay and loop.)
  * - The server replays every `run_events` row with `seq > cursor` from Postgres, then streams live
  *   events (LISTEN/NOTIFY is only a hint to re-read; Postgres is the record). Replay and live are
- *   merged so no seq is sent twice and none is skipped.
- * - After a terminal event (`TERMINAL_EVENT_TYPES`) the server ends the response. Connecting to a
- *   finished run replays from the cursor and then ends; a cursor at/after the terminal event yields
- *   an empty, immediately closed stream.
+ *   merged so no seq is sent twice and none is skipped (seq is gapless, KOBE-29).
+ * - After a terminal event (`TERMINAL_EVENT_TYPES`) the server ends the response. EventSource then
+ *   reconnects with `Last-Event-ID` = the terminal seq; for a run that has ended and has no events
+ *   after the cursor the server answers **204 No Content**, which tells EventSource to stop.
+ * - Compacted runs (`runs.events_compacted_at` set, D18: events folded into entries after 7 days):
+ *   the server answers **410 Gone** with `{"error":{"code":"events_compacted"}}` whatever the
+ *   cursor; EventSource stops (non-200), and the client renders the thread from
+ *   `GET /v1/threads/{id}` entries instead. Clients only ever stream runs that are active or
+ *   recently ended, so this is the reload-an-old-thread path.
  * - Clients drop any event with `seq <= last seen` (duplicates across reconnects).
  * - A malformed cursor is a 400, not a silent restart from 0.
  */
@@ -54,10 +61,30 @@ export function resolveResumeCursor(input: {
   readonly startingAfter?: string | null | undefined;
   readonly lastEventId?: string | null | undefined;
 }): ResumeCursorResult {
-  const raw = present(input.startingAfter) ?? present(input.lastEventId);
-  if (raw === undefined) return { ok: true, after: 0 };
-  if (!CURSOR.test(raw)) return { ok: false, error: "invalid_cursor" };
-  const after = Number(raw);
-  if (!Number.isSafeInteger(after)) return { ok: false, error: "invalid_cursor" };
+  let after = 0;
+  for (const raw of [present(input.startingAfter), present(input.lastEventId)]) {
+    if (raw === undefined) continue;
+    if (!CURSOR.test(raw)) return { ok: false, error: "invalid_cursor" };
+    const value = Number(raw);
+    if (!Number.isSafeInteger(value)) return { ok: false, error: "invalid_cursor" };
+    after = Math.max(after, value);
+  }
   return { ok: true, after };
+}
+
+/** What `GET /v1/runs/{id}/events` answers before streaming. */
+export type StreamOpenDecision =
+  | { readonly kind: "stream" }
+  | { readonly kind: "no_content" } // 204: ended run, nothing after the cursor
+  | { readonly kind: "gone" }; // 410: events compacted into entries
+
+export function decideStreamOpen(run: {
+  readonly ended: boolean;
+  readonly events_compacted: boolean;
+  readonly last_seq: number;
+  readonly cursor: number;
+}): StreamOpenDecision {
+  if (run.events_compacted) return { kind: "gone" };
+  if (run.ended && run.cursor >= run.last_seq) return { kind: "no_content" };
+  return { kind: "stream" };
 }

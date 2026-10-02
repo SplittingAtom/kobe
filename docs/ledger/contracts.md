@@ -1,6 +1,6 @@
 # Contracts: shared protocol interfaces (wave 0)
 
-- **Status:** in review (PR #13)
+- **Status:** in review (PR #13), review round 1 addressed
 - **Branch / worktree:** `kobe-contracts` in `../Kobe-wt-contracts`
 - **Depends on:** — (KOBE-29 runs in parallel; it takes run states and event names from here)
 
@@ -22,14 +22,15 @@ interrupted, cancelled, budget_stopped`. Terminal: the last five. Retry of an `i
   budget_stopped. Each edge has named causes (`RUN_TRANSITIONS`).
 - **Event envelope** `{run_id, seq, ts, type, payload}` is the SSE `data:` body; `id:` = seq,
   `event:` = type. seq per run from 1, strictly increasing; clients dedupe `seq <= last`.
-  `starting_after` wins over `Last-Event-ID`; stream closes after a terminal `run.*` event.
+  cursor = max(`starting_after`, `Last-Event-ID`); stream closes after a terminal `run.*` event.
 - **Deltas carry `message_id`, not `entry_id`:** verified Pi 1.0.0 RPC exposes no entry id until the
   entry is persisted; `entry.committed` binds `message_id` → `entry_id`.
 - **Stop** emits `run.interrupted {reason: "cancelled", retryable: false}` with run status
   `cancelled` (§6.2 has no `run.cancelled`). Approval expiry → run `failed`.
 - **Canonicalisation:** RFC 8785 JCS + strict JSON-only, lone surrogates rejected, no Unicode
   normalisation, depth ≤ 128. Signing bytes = UTF-8 JCS of
-  `["kobe.approval.v1", run_id, tool_call_id, input]`; HMAC-SHA256, base64url; `kid` for rotation.
+  `["kobe.approval.v1", team_id, run_id, tool_call_id, tool, expires_at, input]` (review round 1);
+  HMAC-SHA256, base64url; `kid` for rotation.
   Sign/verify only in `@kobe/protocol/node`; the sandbox never holds the key.
 - **Wire:** one outbound WSS per sandbox at `/v1/sandbox/connect`, Bearer session token on the
   upgrade (not in the URL), subprotocol `kobe.sandbox.v1`; per-run outbound `seq` + cumulative
@@ -52,19 +53,64 @@ MCP annotation defaults. **Assumed:** how kobe-policy talks to kobe-sandbox-agen
 (local IPC, KOBE-36), whether Pi's MCP client can attach the approval token to `tools/call`
 (KOBE-58), how edit-and-regenerate maps onto Pi `fork` (KOBE-23).
 
+## Review round 1 (coordinator, 3 HIGH + MEDIUM/LOW) — resolution
+
+1. HIGH approval binding/replay: signed tuple is now `["kobe.approval.v1", team_id, run_id,
+tool_call_id, tool, expires_at, input]` (tag kept at v1: nothing was published); token carries
+   `team_id`, `tool`, `expires_at` (10 min after allow, speculative). Normative two-half
+   verification: `verifyApproval` (binding, expiry, MAC) + `authorizeApprovedCall` over an
+   `ApprovalStore` (row `allowed`, matching `input_hmac`, run active, consumed once via
+   `approvals.consumed_at`). New golden vectors, recomputed in Python.
+2. HIGH sandbox-supplied risk: `policy.check` carries tool name + input only. Server derives
+   `ToolDescriptor` from `BUILTIN_TOOLS` (Pi 1.0.0 names verified: bash, read, edit, write, grep,
+   find, ls, powershell, codemode, tool_search, MCP resource tools; kobe-tools) or the pinned MCP
+   snapshot; unknown → deny (`unknown_tool`). Added `scope` (sandbox/kobe/external).
+3. HIGH wire resume: `runs.sandbox_seq` (KOBE-23/24), updated in the same transaction as the
+   appended rows; `seq <= sandbox_seq` dropped (still acked); gap → error. In README column table.
+4. Schema reconcile: Kobe ids are uuids; `approval_mode` (KOBE-30), `user_entry_id` (KOBE-30),
+   `retry_of_run_id` (KOBE-26, unique) marked; null agent = install default in `run.started`,
+   policy input and thread config.
+5. Executed = `JSON.parse(canonicalJson(input))`; `toolInputSchema` rejects U+0000, `__proto__`,
+   unsafe integers; canonicalJson rejects `__proto__`; frames reject duplicate keys.
+6. SSE cursor = max(`starting_after`, `Last-Event-ID`).
+7. Ended run with nothing after cursor → 204 (EventSource stops); compacted run → 410
+   `events_compacted`, client renders entries. `decideStreamOpen`.
+8. `ThreadStatus` + `nextThreadStatus`; `interrupted` blocks the queue; Retry runs first;
+   `resumeQueue` ("Continue without retry", speculative). Fake fixed.
+9. `checkRetry`: latest ended run only, interrupted only, once; repeat returns the existing retry.
+10. U+0000: rejected by `decodeSandboxFrame`, tool-input and HTTP body schemas; the agent maps it to
+    U+FFFD in Pi output.
+11. Leasing rule + close code `lease_violation` (4007).
+12. `piThreadConfigSchema` strict, no URLs (agent builds the MCP proxy URL from env + connector id),
+    bounded system prompt, skill-name regex.
+13. `parseTranslatedPiEvent` (narrow schemas for the translated Pi events) and
+    `piGetEntriesDataSchema`.
+14. Glob grammar (`*`, `?`, `\` escape; anchored, linear-time) for tool globs; `arg_pattern` =
+    `{JSON Pointer: glob}` over string value or canonical JSON. No regex.
+15. Session tokens: one per audience (`kobe.sandbox-wire`, `kobe.model-gateway`, `kobe.mcp-proxy`,
+    `kobe.egress-proxy`), claims schema, `acceptsAudience`.
+16. Pending approvals expire with a cause when the run ends (`approval.resolved.cause`).
+17. `tool.call` / `approval.requested` input use `toolInputSchema`.
+
+- WS-layer frame cap noted for KOBE-23/24 (`maxPayload`).
+
 ## Open questions (for Chris or the coordinator)
 
 1. §6.2 shows `entry_id` on `text.delta`; contract uses `message_id` (Pi limitation). OK?
 2. No `run.cancelled` event type: Stop uses `run.interrupted{reason:"cancelled"}`. Add a type
    instead?
-3. MCP proxy second enforcement (D29): token via `_meta` (`kobe.dev/approval`) or proxy lookup by
-   (run, input HMAC)? KOBE-58 to decide.
-4. KOBE-29 (PR #11) matches the run-state enum exactly and assigns `run_events.seq` by trigger
-   (gapless, per run). It has no `runs.retry_of_run_id`; the new-run retry model needs that nullable
-   column (KOBE-26 can add it).
+3. MCP proxy carries the token via `_meta` (`kobe.dev/approval`) if Pi's MCP client can attach it;
+   otherwise the proxy finds the approval by (run, tool_call_id). KOBE-58 to decide.
+4. After Stop, queued messages start (D17 "queued messages remain" read as "not deleted"). Or should
+   Stop also pause the queue like `interrupted`?
+5. Tool `scope`: in `ask-on-write`, sandbox-local tools (bash, write) are not prompted by risk class
+   alone (D29: "bounded by the sandbox and egress policy"). KOBE-35 to confirm.
+6. Agent-file shorthand `bash:rm -rf*` (§6.3) maps to tool glob + `primary_arg` glob (KOBE-45).
+7. Review items 16, 17 and 19 were not restated in the review message; left open for the
+   coordinator.
 
 ## Evidence (acceptance criteria → test or command output)
 
-- `pnpm --filter @kobe/protocol test`: canonical JSON (RFC 8785 vectors, key order, numbers,
+- `pnpm --filter @kobe/protocol test` (353 tests): canonical JSON (RFC 8785 vectors, key order, numbers,
   Unicode, rejections), approval golden MACs (independently computed), event payload/envelope/SSE
   /cursor, full transition matrix, policy schemas, wire frames both directions, fakes.

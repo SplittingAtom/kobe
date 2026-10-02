@@ -3,6 +3,7 @@ import {
   approvalModeSchema,
   idSchema,
   runTriggerSchema,
+  uuidSchema,
   timestampSchema,
   type ActorContext,
   type ApprovalMode,
@@ -20,27 +21,38 @@ import { runStatusSchema, type RunStatus, type RunTransitionCause } from "./runs
  * - Every status change follows `RUN_TRANSITIONS` (runs.ts) and is written in the same transaction
  *   as its Kobe Event Stream event (`run.*`) in `run_events`.
  * - All calls run under `withTeam(actor.team_id)`; a run of another team is "not found".
- * - Interrupted runs are never retried automatically (D14).
+ * - Interrupted runs are never retried automatically (D14), and an interrupted thread does not
+ *   start its queued runs until the user retries or continues (`queueMayAdvance`, runs.ts).
+ * - `threads.status` follows `nextThreadStatus` (runs.ts) in the same transaction as the run change.
  */
 
 /** Message content as submitted (§6.1 `POST /v1/threads/{id}/messages`). */
-export const submitMessageBodySchema = z.object({
+export const submitMessageBodySchema = z.strictObject({
+  /** Pi entry id to branch from (edit-and-regenerate); absent = the thread's leaf. */
   parent_entry_id: idSchema.optional(),
-  content: z.string().min(1).max(200_000),
-  file_ids: z.array(idSchema).max(100).optional(),
+  content: z
+    .string()
+    .min(1)
+    .max(200_000)
+    .refine((s) => !s.includes("\u0000"), "U+0000"),
+  file_ids: z.array(uuidSchema).max(100).optional(),
 });
 export type SubmitMessageBody = z.infer<typeof submitMessageBodySchema>;
 
 /** §6.1 response: `queued` is true when another run was active and this one waits. */
-export const submitMessageResultSchema = z.object({
-  run_id: idSchema,
+export const submitMessageResultSchema = z.strictObject({
+  run_id: uuidSchema,
   queued: z.boolean(),
 });
 export type SubmitMessageResult = z.infer<typeof submitMessageResultSchema>;
 
 /** §6.1 `POST /v1/runs/{id}/steer`. */
-export const steerBodySchema = z.object({
-  content: z.string().min(1).max(200_000),
+export const steerBodySchema = z.strictObject({
+  content: z
+    .string()
+    .min(1)
+    .max(200_000)
+    .refine((s) => !s.includes("\u0000"), "U+0000"),
 });
 export type SteerBody = z.infer<typeof steerBodySchema>;
 
@@ -48,19 +60,26 @@ export type SteerBody = z.infer<typeof steerBodySchema>;
 export const updateQueuedBodySchema = steerBodySchema;
 export type UpdateQueuedBody = SteerBody;
 
-/** Public view of a run (API responses and orchestrator return values). */
-export const runSnapshotSchema = z.object({
-  run_id: idSchema,
-  thread_id: idSchema,
-  team_id: idSchema,
+/**
+ * Public view of a run (API responses and orchestrator return values). Columns beyond the KOBE-29
+ * `runs` table are marked with the ticket that adds them.
+ */
+export const runSnapshotSchema = z.strictObject({
+  run_id: uuidSchema,
+  thread_id: uuidSchema,
+  team_id: uuidSchema,
   status: runStatusSchema,
   trigger: runTriggerSchema,
   /** Position among the thread's queued runs (1 = next); absent unless `queued`. */
   queue_pos: z.number().int().positive().optional(),
-  /** Set when this run retries an interrupted run (KOBE-26). */
-  retry_of_run_id: idSchema.optional(),
-  /** The user entry this run answers. */
+  /** `runs.retry_of_run_id` uuid NULL UNIQUE — added by KOBE-26. */
+  retry_of_run_id: uuidSchema.optional(),
+  /** `runs.user_entry_id` text NULL (Pi entry id of the prompt) — added by KOBE-30. */
   user_entry_id: idSchema.optional(),
+  /**
+   * `runs.approval_mode` — added by KOBE-30: the effective mode fixed when the run is created
+   * (scheduled runs are always `auto`, D32), so a later thread-mode change cannot loosen a run.
+   */
   approval_mode: approvalModeSchema,
   started_at: timestampSchema.optional(),
   ended_at: timestampSchema.optional(),
@@ -115,8 +134,17 @@ export interface RunOrchestrator {
   cancel(actor: ActorContext, runId: string): Promise<RunSnapshot>;
   /** Edit a queued message's content. Rejects unless `queued`. */
   updateQueued(actor: ActorContext, runId: string, body: UpdateQueuedBody): Promise<RunSnapshot>;
-  /** Manual "Retry from last entry" (D14): creates a new run with `retry_of_run_id`. */
+  /**
+   * Manual "Retry from last entry" (D14): creates a new run with `retry_of_run_id`, started ahead of
+   * the queue. Rules in `checkRetry` (runs.ts): latest ended run only, `interrupted` only, at most
+   * once — a repeat returns the existing retry run.
+   */
   retry(actor: ActorContext, runId: string): Promise<SubmitMessageResult>;
+  /**
+   * "Continue without retry": an `interrupted` thread → `idle`, and its queued runs resume.
+   * SPECULATIVE UI affordance (KOBE-26/32); no-op on a thread that is not interrupted.
+   */
+  resumeQueue(actor: ActorContext, threadId: string): Promise<void>;
   getRun(actor: ActorContext, runId: string): Promise<RunSnapshot>;
   /** The thread's active run (if any) followed by queued runs in order. */
   listThreadRuns(actor: ActorContext, threadId: string): Promise<readonly RunSnapshot[]>;

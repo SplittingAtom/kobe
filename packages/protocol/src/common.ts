@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { findJsonSafetyIssue } from "./json-safety.js";
 
 /**
  * Shared primitives for every Kobe contract. Wire format is JSON with snake_case keys (spec §6.2).
@@ -10,19 +11,40 @@ export type JsonValue =
 
 export const jsonValueSchema: z.ZodType<JsonValue> = z.json();
 
-/** A JSON object (tool inputs are always objects). */
+/** A JSON object. */
 export type JsonObject = { [key: string]: JsonValue };
 
 export const jsonObjectSchema: z.ZodType<JsonObject> = z.record(z.string(), jsonValueSchema);
 
 /**
- * Opaque identifier. Kobe ids (run, thread, approval, team, user, ...) are opaque strings; the only
- * contract is "non-empty, at most 128 chars, no control characters". Pi entry ids are usually
- * 8-char hex but may fall back to a UUID (verified in Pi 1.0.0 session-format.md).
+ * A tool input as it crosses a boundary (sandbox → server, server → browser, approval signing).
+ * A JSON object with the json-safety.ts rules applied: no U+0000, no `__proto__` keys, no unsafe
+ * integers. The input that executes must be exactly `JSON.parse(canonicalJson(input))` of the
+ * input that was decided and signed (see approval.ts).
+ */
+export const toolInputSchema: z.ZodType<JsonObject> = z
+  .unknown()
+  .superRefine((value, ctx) => {
+    // Checked on the raw value: z.record would turn a `__proto__` key into a prototype.
+    const issue = findJsonSafetyIssue(value, { rejectUnsafeIntegers: true });
+    if (issue !== undefined) ctx.addIssue({ code: "custom", message: `tool input: ${issue}` });
+  })
+  .pipe(jsonObjectSchema);
+
+/**
+ * Opaque identifier for ids Kobe does not mint: Pi entry ids (usually 8-char hex, may fall back to
+ * a UUID; verified Pi 1.0.0), Pi tool-call ids, wire request/command ids. Non-empty, at most 128
+ * chars (matches `thread_entries.entry_id`'s check), no control characters.
  */
 // eslint-disable-next-line no-control-regex
 const NO_CONTROL_CHARS = /^[^\u0000-\u001f\u007f]+$/u;
 export const idSchema = z.string().min(1).max(128).regex(NO_CONTROL_CHARS);
+
+/**
+ * Ids Kobe mints are Postgres `uuid`s (KOBE-29 schema): team, user, thread, run, approval, agent,
+ * artifact, file, memory doc, project, connector, sandbox, tool rule. Lowercase canonical form.
+ */
+export const uuidSchema = z.uuid().regex(/^[0-9a-f-]+$/, "lowercase uuid");
 
 /** RFC 3339 / ISO 8601 UTC timestamp, e.g. `2026-10-01T22:15:00Z` or with milliseconds. */
 export const timestampSchema = z.iso.datetime({ offset: false });

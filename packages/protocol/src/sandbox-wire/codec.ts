@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { parseJsonStrict } from "../json-safety.js";
 import { SANDBOX_MAX_FRAME_BYTES, type SandboxErrorCode } from "./connection.js";
 import {
   sandboxToServerFrameSchema,
@@ -19,13 +20,11 @@ function decode<T>(schema: z.ZodType<T>, text: string): DecodeResult<T> {
   if (new TextEncoder().encode(text).byteLength > SANDBOX_MAX_FRAME_BYTES) {
     return { ok: false, code: "frame_too_large", message: "frame exceeds size limit" };
   }
-  let json: unknown;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    return { ok: false, code: "malformed_frame", message: "frame is not valid JSON" };
+  const strict = parseJsonStrict(text);
+  if (!strict.ok) {
+    return { ok: false, code: "malformed_frame", message: `frame rejected: ${strict.issue}` };
   }
-  const parsed = schema.safeParse(json);
+  const parsed = schema.safeParse(strict.value);
   if (!parsed.success) {
     return {
       ok: false,

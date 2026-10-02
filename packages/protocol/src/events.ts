@@ -6,9 +6,11 @@ import {
   riskClassSchema,
   runTriggerSchema,
   timestampSchema,
+  toolInputSchema,
   usageSchema,
+  uuidSchema,
 } from "./common.js";
-import { policyReasonSchema } from "./policy.js";
+import { approvalResolutionCauseSchema, policyReasonSchema } from "./policy.js";
 
 /** Kobe Event Stream event types (spec §6.2). Every event is persisted to `run_events` with a monotonic `seq` before fan-out. */
 export const KOBE_EVENT_TYPES = [
@@ -54,18 +56,19 @@ const messageId = idSchema;
 /** Payload schema per event type. Unknown keys are rejected so producers can't drift silently. */
 export const EVENT_PAYLOAD_SCHEMAS = {
   "run.queued": z.strictObject({
-    thread_id: idSchema,
+    thread_id: uuidSchema,
     trigger: runTriggerSchema,
     queue_pos: z.number().int().positive(),
     user_entry_id: idSchema.optional(),
   }),
   "run.started": z.strictObject({
-    thread_id: idSchema,
-    agent_id: idSchema,
-    agent_version: z.number().int().positive(),
+    thread_id: uuidSchema,
+    /** The thread's pinned agent; both null = the install default agent (threads.agent_id null). */
+    agent_id: uuidSchema.nullable(),
+    agent_version: z.number().int().positive().nullable(),
     /** Model alias from the team catalog (D30), e.g. `smart`. */
     model: z.string().min(1).max(128).optional(),
-    retry_of_run_id: idSchema.optional(),
+    retry_of_run_id: uuidSchema.optional(),
   }),
   "sandbox.waking": z.strictObject({
     /** `hibernated` resume, `first_start` (first-ever sandbox), `rebuild` (volume lost, D15). */
@@ -86,7 +89,7 @@ export const EVENT_PAYLOAD_SCHEMAS = {
     parent_tool_call_id: idSchema.optional(),
     message_id: messageId.optional(),
     tool: z.string().min(1).max(256),
-    input: jsonValueSchema,
+    input: toolInputSchema,
     risk: riskClassSchema,
   }),
   "tool.result": z.strictObject({
@@ -99,19 +102,21 @@ export const EVENT_PAYLOAD_SCHEMAS = {
     truncated: z.boolean(),
   }),
   "approval.requested": z.strictObject({
-    approval_id: idSchema,
+    approval_id: uuidSchema,
     tool_call_id: idSchema,
     tool: z.string().min(1).max(256),
-    input: jsonValueSchema,
+    input: toolInputSchema,
     risk: riskClassSchema,
     reasons: z.array(policyReasonSchema).min(1),
     expires_at: timestampSchema,
   }),
   "approval.resolved": z.strictObject({
-    approval_id: idSchema,
+    approval_id: uuidSchema,
     tool_call_id: idSchema,
     decision: z.enum(["allowed", "denied", "expired"]),
-    decided_by: idSchema.optional(),
+    /** `user` for allowed/denied; otherwise why it expired (ttl, or the run ended first). */
+    cause: approvalResolutionCauseSchema,
+    decided_by: uuidSchema.optional(),
     /** A remember-rule (`tool_rules` row) was written with this decision. */
     remembered: z.boolean(),
   }),
@@ -134,27 +139,27 @@ export const EVENT_PAYLOAD_SCHEMAS = {
   }),
   "memory.updated": z.strictObject({
     scope: z.enum(["user", "project"]),
-    memory_doc_id: idSchema,
+    memory_doc_id: uuidSchema,
     path: z.string().min(1).max(1024),
     version: z.number().int().positive(),
     /** Version to restore for Undo (D24); absent when the doc was created. */
     previous_version: z.number().int().positive().optional(),
   }),
   "artifact.created": z.strictObject({
-    artifact_id: idSchema,
+    artifact_id: uuidSchema,
     tool_call_id: idSchema.optional(),
     kind: z.enum(["html", "svg", "markdown", "mermaid", "code", "csv"]),
     title: z.string().max(512),
     version: z.literal(1),
   }),
   "artifact.updated": z.strictObject({
-    artifact_id: idSchema,
+    artifact_id: uuidSchema,
     tool_call_id: idSchema.optional(),
     title: z.string().max(512).optional(),
     version: z.number().int().min(2),
   }),
   "file.shared": z.strictObject({
-    file_id: idSchema,
+    file_id: uuidSchema,
     tool_call_id: idSchema.optional(),
     name: z.string().min(1).max(1024),
     size: z.number().int().nonnegative(),
@@ -212,7 +217,7 @@ export type KobeEvent<T extends KobeEventType = KobeEventType> = {
 
 function envelopeFor<T extends KobeEventType>(type: T) {
   return z.strictObject({
-    run_id: idSchema,
+    run_id: uuidSchema,
     seq: z.number().int().positive(),
     ts: timestampSchema,
     type: z.literal(type),

@@ -1,5 +1,4 @@
 import type { PolicyDecision, PolicyEngine, PolicyInput } from "../policy.js";
-import { riskFromAnnotations } from "../policy.js";
 import { APPROVAL_TTL_MS } from "../approval.js";
 
 /**
@@ -25,7 +24,7 @@ export function createFakePolicyEngine(
     },
     decide(input) {
       calls = [...calls, input];
-      const risk = riskFromAnnotations(input.tool.annotations);
+      const risk = input.tool.risk;
       const effect = effects[input.tool.name] ?? "deny";
       const noPrompt = input.run.approval_mode === "auto" || input.actor.kind === "schedule";
       if (effect === "allow") {
