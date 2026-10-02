@@ -3,12 +3,20 @@
   "version": "0.0.0",
   "private": true,
   "license": "Apache-2.0",
-  "description": "Kobe Event Stream schema shared by server and web",
+  "description": "Kobe contracts: event stream, sandbox wire, run orchestrator, policy and approvals",
   "type": "module",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node/index.d.ts",
+      "default": "./dist/node/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
     }
   },
   "scripts": {
@@ -17,5 +25,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {}
+  "dependencies": {
+    "zod": "^4.0.0"
+  }
 }
