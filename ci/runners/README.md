@@ -31,6 +31,11 @@ printf "fs.inotify.max_user_instances=1024\nfs.inotify.max_user_watches=524288\n
   | sudo tee /etc/sysctl.d/90-kobe-ci-inotify.conf && sudo sysctl -p /etc/sysctl.d/90-kobe-ci-inotify.conf
 ```
 
+Node clocks must be NTP-synchronised: GitHub rejects the App's JWTs when a node runs ahead. The
+nodes' configured server (192.168.1.3) does not answer, so a fallback is set on every node in
+`/etc/systemd/timesyncd.conf.d/90-fallback.conf` (`NTP=192.168.1.3 ntp.ubuntu.com`,
+`FallbackNTP=0.ubuntu.pool.ntp.org 1.ubuntu.pool.ntp.org`).
+
 ## Install
 
 ```bash
@@ -63,5 +68,5 @@ the node's image cache.
 ## Operations
 
 - Watch: `kubectl -n kobe-ci-runners get pods,ephemeralrunners`; controller logs in `arc-systems`.
-- Capacity: `maxRunners: 4`, each requesting 2 CPU / 5 Gi and allowed up to 8 CPU / 14 Gi.
+- Capacity: `maxRunners: 4`, each requesting 2 CPU / 5 Gi and allowed up to 12 CPU / 18 Gi.
 - Upgrade: bump `--version` for both charts together (controller first).

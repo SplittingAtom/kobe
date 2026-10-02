@@ -64,7 +64,8 @@ template:
             value: "120"
         resources:
           requests: { cpu: 500m, memory: 1Gi }
-          limits: { cpu: "2", memory: 4Gi }
+          # Test suites run here; GitHub-hosted runners give 4 vCPUs / 16 GB.
+          limits: { cpu: "6", memory: 8Gi }
         volumeMounts:
           - { name: work, mountPath: /home/runner/_work }
           - { name: dind-sock, mountPath: /var/run }
