@@ -1,6 +1,6 @@
 # KOBE-38: Egress proxy (default deny)
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #36)
 - **Branch / worktree:** `kobe-38-egress-proxy` in `../Kobe-wt38`
 - **Depends on:** KOBE-22 (merged), KOBE-35 (merged), KOBE-15 (merged), KOBE-20 (merged)
 
