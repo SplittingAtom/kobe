@@ -21,6 +21,7 @@ import { withTeam } from "./with-team.js";
 const teamA = randomUUID();
 const teamB = randomUUID();
 const alice = randomUUID();
+const bob = randomUUID();
 let app: KobeDatabase;
 let owner: KobeDatabase;
 
@@ -30,7 +31,10 @@ beforeAll(async () => {
     { id: teamA, slug: `av-a-${teamA.slice(0, 8)}`, name: "Versions A" },
     { id: teamB, slug: `av-b-${teamB.slice(0, 8)}`, name: "Versions B" },
   ]);
-  await owner.db.insert(users).values({ id: alice, name: "Alice", email: `${alice}@av.test` });
+  await owner.db.insert(users).values([
+    { id: alice, name: "Alice", email: `${alice}@av.test` },
+    { id: bob, name: "Bob", email: `${bob}@av.test` },
+  ]);
   app = createDb(inject("appUrl"));
 });
 
@@ -107,6 +111,7 @@ const pinThread = (
     agentScope: "team" | "personal" | "gallery" | null;
     agentId: string | null;
     v: number | null;
+    owner?: string;
   },
 ) =>
   withTeam(app.db, teamId, (tx) =>
@@ -114,7 +119,7 @@ const pinThread = (
       .insert(threads)
       .values({
         teamId,
-        ownerUserId: alice,
+        ownerUserId: pin.owner ?? alice,
         agentScope: pin.agentScope,
         agentId: pin.agentId,
         agentVersion: pin.v,
@@ -247,10 +252,47 @@ describe("threads pin a published version", () => {
     const personal = await publishedPersonalAgent();
     expect(
       await sqlState(pinThread(teamA, { agentScope: "gallery", agentId: teamAgent, v: 1 })),
-    ).toBe("23503");
+    ).toBe("23514");
     expect(await sqlState(pinThread(teamA, { agentScope: "team", agentId: personal, v: 1 }))).toBe(
       "23503",
     );
+  });
+
+  it("confines personal pins to the agent's owner and install pins to their scope (M2)", async () => {
+    const personal = await publishedPersonalAgent();
+    expect(
+      await sqlState(
+        pinThread(teamA, { agentScope: "personal", agentId: personal, v: 1, owner: bob }),
+      ),
+    ).toBe("23514");
+    expect(
+      await sqlState(pinThread(teamA, { agentScope: "gallery", agentId: personal, v: 1 })),
+    ).toBe("23514");
+    // Moving a pinned thread to another owner is refused too.
+    const [row] = await pinThread(teamA, { agentScope: "personal", agentId: personal, v: 1 });
+    const move = withTeam(app.db, teamA, (tx) =>
+      tx
+        .update(threads)
+        .set({ ownerUserId: bob })
+        .where(eq(threads.id, row?.id ?? "")),
+    );
+    expect(await sqlState(move)).toBe("23514");
+  });
+
+  it("lets anyone pin a gallery agent", async () => {
+    const [agent] = await app.db
+      .insert(installAgents)
+      .values({
+        scope: "gallery",
+        slug: `g-${randomUUID().slice(0, 8)}`,
+        frontmatter: { name: "G" },
+      })
+      .returning({ id: installAgents.id });
+    const agentId = agent?.id ?? "";
+    await app.db.insert(installAgentVersions).values({ agentId, ...version(1) });
+    await expect(
+      pinThread(teamA, { agentScope: "gallery", agentId, v: 1, owner: bob }),
+    ).resolves.toHaveLength(1);
   });
 
   it("requires scope, agent and version together", async () => {
@@ -295,5 +337,27 @@ describe("threads pin a published version", () => {
       threads: (await tx.select().from(threads)).length,
     }));
     expect(left).toEqual({ versions: 0, agents: 0, threads: 0 });
+  });
+});
+
+describe("catalog: version tables' triggers (L4)", () => {
+  it("has exactly the immutability triggers, and no other function touches version tables", async () => {
+    // The DELETE escape (pg_trigger_depth() > 1) is safe only while nothing but a cascade can
+    // delete versions from inside a trigger: pin the trigger set and the functions that name them.
+    const triggers = await owner.pool.query<{ rel: string; name: string }>(
+      `SELECT tgrelid::regclass::text AS rel, tgname AS name FROM pg_trigger
+       WHERE NOT tgisinternal
+         AND tgrelid IN ('team_agent_versions'::regclass, 'install_agent_versions'::regclass)
+       ORDER BY 1, 2`,
+    );
+    expect(triggers.rows).toEqual([
+      { rel: "install_agent_versions", name: "install_agent_versions_immutable" },
+      { rel: "team_agent_versions", name: "team_agent_versions_immutable" },
+    ]);
+    const functions = await owner.pool.query<{ name: string }>(
+      `SELECT p.proname AS name FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public' AND p.prosrc ILIKE '%agent_versions%' ORDER BY 1`,
+    );
+    expect(functions.rows).toEqual([{ name: "agent_versions_immutable" }]);
   });
 });

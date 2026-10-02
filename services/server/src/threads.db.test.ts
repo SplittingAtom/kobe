@@ -920,7 +920,8 @@ describe("history reads never wake sandboxes (ac-2)", () => {
   it("serves thread reads from Postgres alone", async () => {
     // Deps that expose only the database and the session check: any other dependency (sandbox
     // orchestration, isolation, user management) throws if a read path touches it.
-    const allowed = new Set<PropertyKey>(["database", "auth", "publicUrl"]);
+    // `agentLimits` is static configuration the agent routes read when mounted (KOBE-46).
+    const allowed = new Set<PropertyKey>(["database", "auth", "publicUrl", "agentLimits"]);
     const readOnlyDeps = new Proxy(deps, {
       get(target, prop, receiver) {
         if (!allowed.has(prop)) throw new Error(`thread read touched deps.${String(prop)}`);

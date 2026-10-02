@@ -218,6 +218,7 @@ export function agentRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
 
   mountVersionRoutes(app, {
     db,
+    limits: deps.agentLimits,
     resolve: async (raw) => {
       const c = raw as Ctx;
       const agent = await visible(c);

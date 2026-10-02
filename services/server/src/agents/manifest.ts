@@ -34,6 +34,10 @@ import { isRuleActive, type PolicyRule } from "../policy/rules.js";
  *   - tools added to the registry later (a Pi patch, a kobe-tool) never appear in old versions.
  * MCP tools are resolved at run time from the connector's pinned snapshot (D27, KOBE-59), limited
  * to the version's `connectors`; their exposure, drift and rules are live checks.
+ *
+ * BLOCKING for KOBE-47: `versionAllowsCall` (or at least `manifestAllowsTool`) and
+ * `effectiveApprovalMode` must sit on the run-start path, reading the pin (`resolvePinnedAgent`)
+ * under the thread row lock inside the run-start transaction; otherwise the manifest is advisory.
  */
 
 export const TOOL_MANIFEST_FORMAT = 1;
@@ -93,6 +97,7 @@ export interface PublishFloor {
   readonly install: readonly PolicyRule[];
   /** The team's own rules; ignored unless `scope` is `team`. */
   readonly team: readonly PolicyRule[];
+  /** The install's approval floor (install-wide only, D6; `policy/approval-floor.ts`). */
   readonly approvalFloor: ApprovalMode;
 }
 

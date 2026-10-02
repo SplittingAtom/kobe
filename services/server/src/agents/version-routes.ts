@@ -29,7 +29,9 @@ import {
   UnreadableVersionError,
   type Published,
 } from "./versions.js";
+import type { AgentLimits } from "../deps.js";
 import { logger } from "../logger.js";
+import { hitRateLimit } from "../rate-limit.js";
 import { parseBody } from "../teams/http.js";
 import { agentWarnings } from "@kobe/agent-file";
 
@@ -59,10 +61,18 @@ export interface ResolvedAgent {
 
 export interface VersionRouteOptions {
   readonly db: KobeDb;
+  readonly limits: AgentLimits;
   /** The agent named by `:id` if the caller may see it; null → 404 (no existence oracle). */
   readonly resolve: (c: Context) => Promise<ResolvedAgent | null>;
   /** The signed-in user publishing (recorded on the version). */
   readonly userId: (c: Context) => string;
+}
+
+/** Gallery versions: curators' user ids are for install admins only (review L3). */
+function redact<T extends { publishedBy: string | null }>(found: ResolvedAgent, version: T): T {
+  return found.agent.scope === "gallery" && !found.access.edit
+    ? { ...version, publishedBy: null }
+    : version;
 }
 
 function publishedResponse(c: Context, published: Published, access: AgentAccess) {
@@ -86,7 +96,16 @@ export function mountVersionRoutes<E extends { Variables: object }>(
   app: Hono<E>,
   options: VersionRouteOptions,
 ): void {
-  const { db, resolve } = options;
+  const { db, resolve, limits } = options;
+
+  /** Publishes and rollbacks share one per-user budget (review M3); false → 429. */
+  const withinRate = (c: Context) =>
+    hitRateLimit(db, `agent-publish:${options.userId(c)}`, limits.publishRate);
+  const rateLimited = (c: Context) =>
+    c.json(
+      { code: "rate_limited", message: "Too many publishes. Wait a few minutes and try again." },
+      429,
+    );
 
   app.get("/:id/versions", async (c) => {
     const found = await resolve(c);
@@ -102,7 +121,7 @@ export function mountVersionRoutes<E extends { Variables: object }>(
     const page = versions.slice(0, limit);
     return c.json({
       currentVersion: found.agent.currentVersion,
-      versions: page.map(versionSummary),
+      versions: page.map((v) => redact(found, versionSummary(v))),
       nextBefore: versions.length > limit ? (page.at(-1)?.version ?? null) : null,
     });
   });
@@ -118,7 +137,7 @@ export function mountVersionRoutes<E extends { Variables: object }>(
     return guardUnreadable(c, async () => {
       const record = await getVersion(db, found.location, found.agent.id, version.data);
       if (!record) return publishError(c, "version_not_found");
-      return c.json({ version: versionDetail(record) });
+      return c.json({ version: redact(found, versionDetail(record)) });
     });
   });
 
@@ -128,9 +147,11 @@ export function mountVersionRoutes<E extends { Variables: object }>(
     if (!found.access.publish) return forbidden(c, "Your team role doesn't allow publishing it.");
     const ifMatch = ifMatchRevision(c);
     if (!ifMatch.ok) return ifMatch.response;
+    if (!(await withinRate(c))) return rateLimited(c);
     const result = await publishAgent(db, found.location, found.agent.id, {
       publishedBy: options.userId(c),
       expectedRevision: ifMatch.revision,
+      limits,
     });
     return result.ok
       ? publishedResponse(c, result.value, found.access)
@@ -143,10 +164,12 @@ export function mountVersionRoutes<E extends { Variables: object }>(
     const body = await parseBody(c, rollbackSchema);
     if (!body) return invalidRequest(c, "Give the version to roll back to.");
     if (!found.access.publish) return forbidden(c, "Your team role doesn't allow publishing it.");
+    if (!(await withinRate(c))) return rateLimited(c);
     return guardUnreadable(c, async () => {
       const result = await rollbackAgent(db, found.location, found.agent.id, {
         publishedBy: options.userId(c),
         fromVersion: body.version,
+        limits,
       });
       return result.ok
         ? publishedResponse(c, result.value, found.access)

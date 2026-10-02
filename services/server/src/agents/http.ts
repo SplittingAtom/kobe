@@ -227,6 +227,16 @@ const PUBLISH_ERRORS = {
   archived: [409, "agent_archived", "This agent is archived. Unarchive it to publish."],
   version_not_found: [404, "version_not_found", "This agent has no such version."],
   already_current: [409, "already_current", "That version is already the current one."],
+  unchanged: [
+    409,
+    "unchanged",
+    "Nothing to publish: the draft (and its tool manifest) equals the current version.",
+  ],
+  version_limit: [
+    409,
+    "version_limit_reached",
+    "This agent has reached its version limit. Fork it to keep publishing.",
+  ],
   invalid_draft: [
     409,
     "invalid_draft",

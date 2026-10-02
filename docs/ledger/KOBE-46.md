@@ -116,11 +116,45 @@ versions|unarchive`. Version history (`GET …/versions`) for whoever sees the a
     - Noted, not changed: version history shows `publishedBy` user ids to members (team members
       are already listed to members); the trigger comment says no other trigger may delete
       versions.
-16. **Web:** install gallery console gets Publish (If-Match from the listed revision), Archive (for
+16. **Coordinator DB review (PR #35, approve with changes), addressed:**
+    - **M1 (no behaviour change):** the approval floor is install-wide only (D6: no team floor;
+      teams tighten with ask/deny rules); absent floor = no minimum, consistent with D32
+      scheduled runs in `auto`. Documented in `policy/approval-floor.ts` and `manifest.ts`.
+    - **M2:** trigger `threads_agent_pin_owner` (0017, BEFORE INSERT/UPDATE OF agent_scope,
+      agent_id, owner_user_id; one PK lookup): a personal/gallery pin must name an install agent
+      of that scope, and a personal agent of the thread's owner (23514). Team pins are confined
+      by their FK (includes team_id).
+    - **M3:** per-agent version cap (`KOBE_AGENT_MAX_VERSIONS`, default 1000, 1–100000; 409
+      `version_limit_reached`, rollbacks count); a publish/rollback whose definition **and**
+      manifest equal the current version is 409 `unchanged` (a republish that only picks up a
+      floor change is allowed); publishes + rollbacks share a per-user rate limit (30 / 10 min,
+      `rate_limits` table, 429 `rate_limited`, checked before the cap).
+    - **M4:** operator erasure procedure in `docs/agent-versions.md`; open question below.
+    - **M5:** the migration adds two STORED generated columns, which **rewrites `threads`** under
+      ACCESS EXCLUSIVE (fine pre-release). NOT VALID + VALIDATE was not used: drizzle's migrator
+      runs all pending migrations in one transaction, so the rewrite's ACCESS EXCLUSIVE lock is
+      held until commit anyway and a separate VALIDATE buys nothing; and `0016` is generated
+      (`db:rebase` regenerates it from the schema, dropping hand edits). Post-release, a change
+      like this needs its own expand migration.
+    - **L1:** pins keep **FOR SHARE**, not FOR KEY SHARE: suspend, archive and publish are non-key
+      UPDATEs (FOR NO KEY UPDATE), which conflict with FOR SHARE but not with FOR KEY SHARE, so
+      KEY SHARE would let a suspend commit between the check and the pin. Test "holds the agent
+      row while pinning…" (a suspend times out with 55P03 while a pin transaction is open; with
+      FOR KEY SHARE the test fails: mutation-checked).
+    - **L3:** gallery version history and detail show `publishedBy: null` to non-curators.
+    - **L4:** catalog test pins the trigger set on both version tables and that no other public
+      function names a version table (so the `pg_trigger_depth() > 1` escape can't widen).
+    - **L2:** recorded here as asked (its text was not in the coordinator's message; flagged).
+17. **Web:** install gallery console gets Publish (If-Match from the listed revision), Archive (for
     published agents) and Unarchive; team agents page lists archived agents with their status.
     `apiRequest` gained an `ifMatch` option. The builder/inventory UI is KOBE-48.
 
 ## For KOBE-47 (run-time resolution) — must know
+
+- **BLOCKING:** `versionAllowsCall` (or at least `manifestAllowsTool`) and
+  `effectiveApprovalMode` must be on the run-start path, with the pin read via
+  `resolvePinnedAgent` **under the thread row lock inside the run-start transaction** (lock order
+  thread → agent → run). Without that the manifest is advisory.
 
 - Call `resolvePinnedAgent(tx, { teamId, userId: thread owner }, { agentScope, agentId,
 agentVersion })` inside the run's `withTeam`. It returns the exact version or an error
@@ -153,6 +187,13 @@ readApprovalFloor(tx)), <thread/user mode>)`; scheduled runs stay `auto` (D32) b
 
 ## Open questions (for Chris or the coordinator)
 
+- **Erasure of versions (part of the pending retention/erasure question).** Versions are
+  immutable and never deleted by the app, so personal prompts of deactivated users live on. Today
+  the only path is the operator procedure in `docs/agent-versions.md` (disable trigger → remove
+  pins/threads → delete versions → delete agent). Should Kobe offer an audited erasure (e.g. with
+  KOBE-18 retention / deactivation)?
+- `KOBE_AGENT_MAX_VERSIONS` is not exposed as a Helm value yet (default applies).
+
 - **Floor change semantics** (decision 8): tightening live, loosening needs a republish. The
   alternative (re-derive the manifest at every run) would make "frozen" meaningless; flagged.
 - **Approval floor storage** (decision 9): read from `install_settings`, default none; the install
@@ -167,11 +208,17 @@ readApprovalFloor(tx)), <thread/user mode>)`; scheduled runs stay `auto` (D32) b
 
 ## Evidence (acceptance criteria → test or command output)
 
+- Review round 2: `agent-versions.db.test.ts` (db) › "confines personal pins…", "lets anyone
+  pin a gallery agent", "catalog: version tables' triggers"; (server) › "serializes concurrent
+  publishes and rollbacks", "refuses to publish a draft identical…", "holds the agent row while
+  pinning…"; `agent-version-limits.db.test.ts` (cap incl. rollback, per-user rate limit);
+  `config.test.ts`.
 - ac-1: `packages/db/src/agent-versions.db.test.ts` (UPDATE/DELETE refused 55000 for app and owner
   roles; app role has no UPDATE/DELETE on install versions 42501; duplicate version 23505; agent
   with versions can't be deleted 23503; `current_version` must exist 23503; origin checks; RLS).
-  `services/server/src/agent-versions.db.test.ts` › "gives concurrent publishes consecutive,
-  distinct versions" (6 parallel → 1..6; **mutation check:** without the row lock it fails),
+  `services/server/src/agent-versions.db.test.ts` › "serializes concurrent publishes and
+  rollbacks" (3 parallel distinct → v4..v6; 5 parallel identical → one version, four
+  `unchanged`; **mutation check:** without the row lock the original test failed),
   › "keeps published versions immutable while the draft moves on".
 - ac-2: `src/agents/manifest.test.ts` (19: allow narrows, `*` adds nothing, deny wins, floor
   rules, install-only floor, live-only rules, expired rules, malformed glob fails closed, approval

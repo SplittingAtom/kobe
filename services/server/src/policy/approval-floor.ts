@@ -8,6 +8,11 @@ import { eq, installSettings, type KobeTx } from "@kobe/db";
  * does, later), so a fresh install has no floor beyond the engine's own rules: `auto` (which is
  * allow-listed only, never a bypass).
  *
+ * **Install-wide only** (D6: the policy floor is an install setting; teams tighten through ask/deny
+ * rules, there is no team approval floor). An absent floor means no minimum, which is consistent
+ * with D32: scheduled runs execute in `auto` (allow-listed tools only), so a default floor above
+ * `auto` would contradict the spec.
+ *
  * Strictness: `auto` < `ask-on-write` < `ask-all`. `auto` is the loosest because it lifts the
  * prompt for allow-listed tools; everything else it denies.
  */

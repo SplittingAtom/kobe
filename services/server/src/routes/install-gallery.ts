@@ -136,6 +136,7 @@ export function installGalleryRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
 
   mountVersionRoutes(app, {
     db,
+    limits: deps.agentLimits,
     resolve: async (c) => {
       const agent = await galleryAgent(c);
       return agent ? { agent, location: GALLERY, access: GALLERY_ADMIN_ACCESS } : null;

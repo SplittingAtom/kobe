@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { withTeam } from "@kobe/db";
-import { resolvePinnedAgent } from "./agents/versions.js";
+import { resolveAgentPin, resolvePinnedAgent } from "./agents/versions.js";
 import { toolManifestSchema } from "./agents/manifest.js";
 import type { TestBrowser, TestResponse } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
@@ -34,7 +34,8 @@ async function activate(who: Person, teamId: string): Promise<void> {
 }
 
 beforeAll(async () => {
-  h = await openHarness();
+  // Generous publish rate here; the limits have their own suite below.
+  h = await openHarness({ agents: { publishRate: { windowMs: 60_000, max: 10_000 } } });
   ids.admin = await h.createUser("admin@versions.test", "owner");
   for (const who of PEOPLE.filter((p) => p !== "admin")) {
     ids[who] = await h.createUser(`${who}@versions.test`);
@@ -89,6 +90,12 @@ async function published(who: Person, id: string, base = "/v1/agents") {
 
 const edit = (who: Person, id: string, prompt: string) =>
   as[who].put(`/v1/agents/${id}`, definition("Edited", prompt), ANY);
+
+/** Changes the draft, then publishes it (identical republishes are refused as `unchanged`). */
+async function republish(who: Person, id: string) {
+  expect((await edit(who, id, `revision ${randomUUID()}`)).status).toBe(200);
+  return published(who, id);
+}
 
 async function newThread(who: Person, agentId: string | null) {
   const res = await as[who].post("/v1/threads", { agent_id: agentId });
@@ -164,14 +171,37 @@ describe("publish (D19, D8)", () => {
     expect(done.agent.currentVersion).toBe(1);
   });
 
-  it("gives concurrent publishes consecutive, distinct versions", async () => {
+  it("serializes concurrent publishes and rollbacks: distinct consecutive versions", async () => {
     const id = await create("bob", "team", "Busy");
-    const results = await Promise.all(Array.from({ length: 6 }, () => publish("bob", id)));
-    expect(results.map((r) => r.status)).toEqual(Array(6).fill(201));
-    const versions = results.map((r) => r.json.version.version as number).sort((a, b) => a - b);
-    expect(versions).toEqual([1, 2, 3, 4, 5, 6]);
-    const agent = await as.bob.get(`/v1/agents/${id}`);
-    expect(agent.json.agent.currentVersion).toBe(6);
+    await published("bob", id);
+    await republish("bob", id);
+    await republish("bob", id);
+    await edit("bob", id, "draft D");
+    // Three different contents, none equal to the current one in any order: all succeed.
+    const mixed = await Promise.all([
+      publish("bob", id),
+      as.bob.post(`/v1/agents/${id}/rollback`, { version: 1 }),
+      as.bob.post(`/v1/agents/${id}/rollback`, { version: 2 }),
+    ]);
+    expect(mixed.map((r) => r.status)).toEqual([201, 201, 201]);
+    const versions = mixed.map((r) => r.json.version.version as number).sort((a, b) => a - b);
+    expect(versions).toEqual([4, 5, 6]);
+
+    // The same draft published five times at once: one version, the rest are no-ops.
+    await edit("bob", id, "draft E");
+    const same = await Promise.all(Array.from({ length: 5 }, () => publish("bob", id)));
+    expect(same.map((r) => r.status).sort()).toEqual([201, 409, 409, 409, 409]);
+    expect(same.filter((r) => r.status === 409).map((r) => r.json.code)).toEqual(
+      Array(4).fill("unchanged"),
+    );
+    expect((await as.bob.get(`/v1/agents/${id}`)).json.agent.currentVersion).toBe(7);
+  });
+
+  it("refuses to publish a draft identical to the current version", async () => {
+    const id = await create("bob", "team", "Same");
+    await published("bob", id);
+    const again = await publish("bob", id);
+    expect(again).toMatchObject({ status: 409, json: { code: "unchanged" } });
   });
 });
 
@@ -192,7 +222,9 @@ describe("version history (§6.1 /v1/agents/{id}/versions)", () => {
 
   it("lists versions newest first with paging; members see history but not definitions", async () => {
     const id = await create("bob", "team", "Paged");
-    for (let i = 0; i < 3; i++) await published("bob", id);
+    await published("bob", id);
+    await republish("bob", id);
+    await republish("bob", id);
     const first = await as.carol.get(`/v1/agents/${id}/versions?limit=2`);
     expect(first.status).toBe(200);
     expect(first.json).toMatchObject({ currentVersion: 3, nextBefore: 2 });
@@ -293,6 +325,7 @@ describe("archive instead of delete (KOBE-45 decision 6)", () => {
     expect(back.status).toBe(200);
     expect(back.json.agent.archivedAt).toBeNull();
     expect(await audited("agent.unarchived", id)).toHaveLength(1);
+    expect((await edit("bob", id, "back in service")).status).toBe(200);
     expect((await publish("bob", id)).status).toBe(201);
   });
 
@@ -342,7 +375,7 @@ describe("threads pin the version they started on (D19, U8, Gate 3)", () => {
     const id = await create("bob", "team", "Switchy");
     await published("bob", id);
     const t = await newThread("carol", id);
-    await published("bob", id);
+    await republish("bob", id);
     const res = await as.carol.post(`/v1/threads/${t.thread_id}/agent-version`, {});
     expect(res.status, json(res)).toBe(200);
     expect(res.json.agent_version).toBe(2);
@@ -370,7 +403,7 @@ describe("threads pin the version they started on (D19, U8, Gate 3)", () => {
     const id = await create("bob", "team", "Guarded");
     await published("bob", id);
     const t = await newThread("carol", id);
-    await published("bob", id);
+    await republish("bob", id);
     const run = randomUUID();
     await h.admin.query(
       `INSERT INTO runs (team_id, id, thread_id, trigger, status, started_at) VALUES ($1, $2, $3, 'user', 'running', now())`,
@@ -403,6 +436,27 @@ describe("threads pin the version they started on (D19, U8, Gate 3)", () => {
       ),
     );
     expect(seam).toEqual({ ok: false, error: "agent_suspended" });
+  });
+
+  it("holds the agent row while pinning, so a suspend can't slip in before the pin (L1)", async () => {
+    // FOR SHARE, not FOR KEY SHARE: suspend, archive and publish are non-key UPDATEs (FOR NO KEY
+    // UPDATE), which conflict with FOR SHARE but not with FOR KEY SHARE.
+    const id = await create("bob", "team", "Raced");
+    await published("bob", id);
+    await withTeam(h.deps.database.db, finance, async (tx) => {
+      const pin = await resolveAgentPin(tx, { teamId: finance, userId: ids.carol }, id);
+      expect(pin.ok).toBe(true);
+      const suspend = h.admin.query(
+        `BEGIN; SET LOCAL lock_timeout = '300ms';
+         UPDATE team_agents SET status = 'suspended' WHERE id = '${id}'; COMMIT;`,
+      );
+      const err = await suspend.then(
+        () => undefined,
+        (e: unknown) => e as { code?: string },
+      );
+      await h.admin.query("ROLLBACK");
+      expect(err?.code).toBe("55P03");
+    });
   });
 
   it("pins only agents the caller can use from the active team", async () => {

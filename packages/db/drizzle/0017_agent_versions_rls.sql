@@ -38,3 +38,34 @@ CREATE TRIGGER "team_agent_versions_immutable" BEFORE UPDATE OR DELETE ON "team_
   FOR EACH ROW EXECUTE FUNCTION "public"."agent_versions_immutable"();--> statement-breakpoint
 CREATE TRIGGER "install_agent_versions_immutable" BEFORE UPDATE OR DELETE ON "install_agent_versions"
   FOR EACH ROW EXECUTE FUNCTION "public"."agent_versions_immutable"();
+--> statement-breakpoint
+
+-- Pins of personal and gallery agents are confined in the database too (KOBE-46 review M2). The
+-- foreign key (install_agent_id, agent_version) → install_agent_versions carries no scope or owner,
+-- so without this a thread of user B could pin user A's personal agent if a server path ever
+-- copied a pin. Enforced: the pinned install agent exists, its scope equals threads.agent_scope,
+-- and a personal agent belongs to the thread's owner. Team pins are confined by their foreign key
+-- (it includes team_id). One primary-key lookup, only when a pin column or the owner changes.
+-- SECURITY INVOKER (the app role reads install_agents).
+CREATE FUNCTION "public"."threads_agent_pin_owner"() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
+DECLARE
+  pinned_scope text;
+  pinned_owner uuid;
+BEGIN
+  IF NEW.agent_scope IS NULL OR NEW.agent_scope = 'team' THEN
+    RETURN NEW;
+  END IF;
+  SELECT a.scope::text, a.owner_user_id INTO pinned_scope, pinned_owner
+    FROM "public"."install_agents" a WHERE a.id = NEW.agent_id;
+  IF NOT FOUND OR pinned_scope <> NEW.agent_scope::text
+     OR (pinned_scope = 'personal' AND pinned_owner IS DISTINCT FROM NEW.owner_user_id) THEN
+    RAISE EXCEPTION 'thread pin: agent % is not a % agent available to the thread owner',
+      NEW.agent_id, NEW.agent_scope USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END;
+$$;--> statement-breakpoint
+CREATE TRIGGER "threads_agent_pin_owner"
+  BEFORE INSERT OR UPDATE OF "agent_scope", "agent_id", "owner_user_id" ON "threads"
+  FOR EACH ROW EXECUTE FUNCTION "public"."threads_agent_pin_owner"();

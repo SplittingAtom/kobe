@@ -13,6 +13,7 @@ import {
   type KobeDb,
   type KobeTx,
 } from "@kobe/db";
+import { canonicalJson } from "@kobe/protocol";
 import { recordAudit } from "../audit/record.js";
 import { readPublishFloor } from "./floor.js";
 import { computeToolManifest, toolManifestSchema, type ToolManifest } from "./manifest.js";
@@ -62,7 +63,18 @@ export type PublishError =
   | "archived"
   | "version_not_found"
   | "already_current"
-  | "invalid_draft";
+  | "invalid_draft"
+  | "unchanged"
+  | "version_limit";
+
+/** Limits on versions (review M3): versions are immutable and never deleted by the app. */
+export interface VersionLimits {
+  /** Versions per agent (they only grow; `current_version` is the count). */
+  readonly maxVersions: number;
+}
+
+/** Sane default: years of daily publishing per agent, small next to the per-team agent cap. */
+export const DEFAULT_VERSION_LIMITS: VersionLimits = { maxVersions: 1000 };
 
 export interface Published {
   readonly agent: AgentRecord;
@@ -178,22 +190,58 @@ async function readVersion(
 }
 
 interface NewVersion {
+  readonly limits: VersionLimits;
   readonly definition: AgentDefinition;
   readonly publishedBy: string;
   readonly draftRevision: number | null;
   readonly republishedFrom: number | null;
 }
 
-/** Inserts the next version of the locked `agent` and points `current_version` at it. */
+/** Content that makes two versions the same: definition and frozen manifest. */
+const contentKey = (definition: AgentDefinition, manifest: ToolManifest): string =>
+  canonicalJson({ frontmatter: definition.frontmatter, prompt: definition.prompt, manifest });
+
+/** Whether `definition` + `manifest` equal the agent's current version (an unreadable one never does). */
+async function sameAsCurrent(
+  tx: KobeTx,
+  location: AgentLocation,
+  agent: AgentRecord,
+  definition: AgentDefinition,
+  manifest: ToolManifest,
+): Promise<boolean> {
+  if (agent.currentVersion === null) return false;
+  try {
+    const current = await readVersion(tx, location.scope, agent.id, agent.currentVersion);
+    return (
+      current !== null &&
+      contentKey(current.definition, current.toolManifest) === contentKey(definition, manifest)
+    );
+  } catch (err) {
+    if (err instanceof UnreadableVersionError) return false;
+    throw err;
+  }
+}
+
+/**
+ * Inserts the next version of the locked `agent` and points `current_version` at it. Refuses a
+ * version identical to the current one (same definition and manifest: a republish that only picks
+ * up a changed floor is not identical) and agents at the version cap.
+ */
 async function insertVersion(
   tx: KobeTx,
   location: AgentLocation,
   agent: AgentRecord,
   input: NewVersion,
-): Promise<Published> {
+): Promise<Result<Published, "unchanged" | "version_limit">> {
   const now = new Date();
   const floor = await readPublishFloor(tx, location.scope === "team" ? "team" : "install");
   const manifest = computeToolManifest(input.definition.frontmatter, floor, now);
+  if (await sameAsCurrent(tx, location, agent, input.definition, manifest)) {
+    return { ok: false, error: "unchanged" };
+  }
+  if ((agent.currentVersion ?? 0) >= input.limits.maxVersions) {
+    return { ok: false, error: "version_limit" };
+  }
   const values = {
     agentId: agent.id,
     version: (agent.currentVersion ?? 0) + 1,
@@ -229,7 +277,7 @@ async function insertVersion(
       .returning(INSTALL);
   }
   if (!row || !updated) throw new Error("agent version insert returned no row");
-  return { agent: toRecord(location.scope, updated), version: toVersion(row) };
+  return { ok: true, value: { agent: toRecord(location.scope, updated), version: toVersion(row) } };
 }
 
 const ref = (location: AgentLocation, agent: AgentRecord) => ({
@@ -247,7 +295,11 @@ export async function publishAgent(
   db: KobeDb,
   location: AgentLocation,
   id: string,
-  input: { readonly publishedBy: string; readonly expectedRevision: number | undefined },
+  input: {
+    readonly publishedBy: string;
+    readonly expectedRevision: number | undefined;
+    readonly limits?: VersionLimits;
+  },
 ): Promise<Result<Published, PublishError>> {
   return inLocation(db, location, async (tx) => {
     const agent = await lockAgent(tx, location, id);
@@ -261,12 +313,15 @@ export async function publishAgent(
       prompt: agent.prompt,
     });
     if (!draft.ok) return { ok: false, error: "invalid_draft" };
-    const published = await insertVersion(tx, location, agent, {
+    const inserted = await insertVersion(tx, location, agent, {
+      limits: input.limits ?? DEFAULT_VERSION_LIMITS,
       definition: draft.definition,
       publishedBy: input.publishedBy,
       draftRevision: agent.revision,
       republishedFrom: null,
     });
+    if (!inserted.ok) return inserted;
+    const published = inserted.value;
     await recordAudit(tx, {
       action: "agent.published",
       teamId: auditTeam(location),
@@ -289,7 +344,11 @@ export async function rollbackAgent(
   db: KobeDb,
   location: AgentLocation,
   id: string,
-  input: { readonly publishedBy: string; readonly fromVersion: number },
+  input: {
+    readonly publishedBy: string;
+    readonly fromVersion: number;
+    readonly limits?: VersionLimits;
+  },
 ): Promise<Result<Published, PublishError>> {
   return inLocation(db, location, async (tx) => {
     const agent = await lockAgent(tx, location, id);
@@ -298,12 +357,15 @@ export async function rollbackAgent(
     if (agent.currentVersion === input.fromVersion) return { ok: false, error: "already_current" };
     const source = await readVersion(tx, location.scope, id, input.fromVersion);
     if (!source) return { ok: false, error: "version_not_found" };
-    const published = await insertVersion(tx, location, agent, {
+    const inserted = await insertVersion(tx, location, agent, {
+      limits: input.limits ?? DEFAULT_VERSION_LIMITS,
       definition: source.definition,
       publishedBy: input.publishedBy,
       draftRevision: null,
       republishedFrom: source.version,
     });
+    if (!inserted.ok) return inserted;
+    const published = inserted.value;
     await recordAudit(tx, {
       action: "agent.rolled_back",
       teamId: auditTeam(location),
