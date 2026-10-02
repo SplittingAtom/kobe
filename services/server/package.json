@@ -24,6 +24,7 @@
     "@kobe/agent-file": "workspace:*",
     "@kobe/db": "workspace:*",
     "@kobe/protocol": "workspace:*",
+    "@kobe/session-token": "workspace:*",
     "@kubernetes/client-node": "^2.0.0",
     "@simplewebauthn/server": "~13.3.3",
     "better-auth": "1.7.7",

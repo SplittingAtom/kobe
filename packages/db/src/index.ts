@@ -1,4 +1,5 @@
 export * from "./audit/index.js";
+export * from "./egress/index.js";
 export { BLOB_REF_COLUMNS, type BlobRefColumn } from "./blob-refs.js";
 export {
   createDb,

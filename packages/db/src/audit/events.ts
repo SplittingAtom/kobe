@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DOMAIN_PATTERN_SQL } from "../schema/egress.js";
 import { teamRole } from "../schema/team-members.js";
 
 /**
@@ -55,6 +56,10 @@ const toolRule = {
   argPatternEntries: z.number().int().nonnegative(),
   expiresAt: z.iso.datetime({ offset: true }).nullable(),
 };
+
+/** An egress domain pattern or host (the `egress_domains` grammar): never a URL or path. */
+const egressDomain = z.string().max(253).regex(new RegExp(DOMAIN_PATTERN_SQL));
+const count = z.number().int().nonnegative();
 
 const event = <const S extends AuditScope, T extends z.ZodRawShape>(scope: S, shape: T) => ({
   scope,
@@ -185,6 +190,48 @@ export const AUDIT_EVENTS = {
       .regex(/^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/)
       .optional(),
     reason: z.enum(["isolation_mismatch", "isolation_lost"]),
+  }),
+
+  // ── egress: ceiling (install), enablement (team), connections (team; KOBE-38, D28) ──
+  "egress.ceiling.added": event("install", { domain: egressDomain }),
+  /** A ceiling domain (preset or custom) was put into or taken out of the ceiling. */
+  "egress.ceiling.changed": event("install", { domain: egressDomain, inCeiling: z.boolean() }),
+  /** A custom domain was deleted; every team's enablement of it went with it. */
+  "egress.ceiling.removed": event("install", { domain: egressDomain }),
+  "egress.domain.enabled": event("team", { domain: egressDomain }),
+  "egress.domain.disabled": event("team", { domain: egressDomain }),
+  /**
+   * Sandbox connections through the egress proxy (actor: system), aggregated per (user, sandbox,
+   * host, outcome, reason) over a short window: high volume, so one row per key and window, every
+   * connection counted in exactly one row (D28 "every connection is logged"). `domain` is absent
+   * when the target was not a host name (IP literal, junk).
+   */
+  "egress.connection": event("team", {
+    userId: id,
+    sandboxId: id,
+    domain: egressDomain.optional(),
+    port: z.number().int().min(1).max(65535).optional(),
+    outcome: z.enum(["allowed", "blocked", "failed"]),
+    reason: z
+      .enum([
+        "not_enabled",
+        "not_in_ceiling",
+        "forbidden_address",
+        "sni_mismatch",
+        "invalid_target",
+        "port_not_allowed",
+        "plain_http",
+        "connection_limit",
+        "dns_failure",
+        "upstream_unreachable",
+        "policy_unavailable",
+      ])
+      .optional(),
+    connections: z.number().int().positive(),
+    bytesUp: count,
+    bytesDown: count,
+    from: z.iso.datetime(),
+    to: z.iso.datetime(),
   }),
 
   // ── thread: lifecycle metadata only, never titles or content (KOBE-34, D18, D23) ──
