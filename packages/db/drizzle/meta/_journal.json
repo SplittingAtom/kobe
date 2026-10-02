@@ -50,6 +50,48 @@
       "when": 1790924274788,
       "tag": "0006_session_active_teams",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790925394173,
+      "tag": "0007_agents",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790925394827,
+      "tag": "0008_agents_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790927287582,
+      "tag": "0009_invitations",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790927287908,
+      "tag": "0010_invitations_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1790928902421,
+      "tag": "0011_tool_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1790928902721,
+      "tag": "0012_tool_rules_rls",
+      "breakpoints": true
     }
   ]
 }

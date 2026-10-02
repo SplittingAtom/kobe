@@ -21,6 +21,8 @@ const BASE: Record<string, string> = {
   "s3.endpoint": "https://s3.example.com",
   "s3.bucket": "kobe",
   "s3.existingSecret": "kobe-s3",
+  "smtp.host": "smtp.example.com",
+  "smtp.from": "Kobe <kobe@example.com>",
   "global.allowGeneratedSecretsOffline": "true",
 };
 

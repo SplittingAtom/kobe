@@ -20,3 +20,9 @@ sandbox:
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "1", memory: 1Gi }
+smtp:
+  # dev/mailpit.yaml: an in-cluster SMTP sink (web UI on port 8025). Plain SMTP, no credentials.
+  host: mailpit.kobe-deps.svc.cluster.local
+  port: 1025
+  security: none
+  from: "Kobe Dev <kobe@kobe.localtest.me>"

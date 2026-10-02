@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { smtpSchema, type SmtpConfig } from "./mail/config.js";
 
 const configSchema = z.object({
   PORT: z.coerce
@@ -72,6 +73,8 @@ export interface Config {
   readonly runtimeClassName: string | undefined;
   /** Present for the API server only. */
   readonly auth?: AuthConfig;
+  /** Present for the API server only (invites, password resets, notifications). */
+  readonly smtp?: SmtpConfig;
 }
 
 function fail(error: z.ZodError): never {
@@ -92,6 +95,8 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
   if (config.process !== "server") return config;
   const auth = authSchema.safeParse(env);
   if (!auth.success) fail(auth.error);
+  const smtp = smtpSchema.safeParse(env);
+  if (!smtp.success) fail(smtp.error);
   return {
     ...config,
     auth: {
@@ -100,5 +105,6 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
       setupToken: auth.data.KOBE_SETUP_TOKEN,
       trustedProxies: auth.data.KOBE_TRUSTED_PROXIES,
     },
+    smtp: smtp.data,
   };
 }

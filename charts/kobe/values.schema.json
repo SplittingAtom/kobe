@@ -567,6 +567,50 @@
           }
         }
       }
+    },
+    "smtp": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9.:\\[\\]-]+$",
+          "description": "smtp.host is required (spec D7: SMTP is a required value)"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "security": {
+          "enum": ["starttls", "tls", "none"]
+        },
+        "from": {
+          "type": "string",
+          "minLength": 3,
+          "pattern": "^[^\\r\\n]+@[^\\r\\n]+$",
+          "description": "smtp.from is required: \"Name <address>\" or an address"
+        },
+        "existingSecret": {
+          "type": "string"
+        }
+      },
+      "if": {
+        "properties": {
+          "security": {
+            "const": "none"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "existingSecret": {
+            "maxLength": 0,
+            "description": "smtp.security=none would send SMTP credentials unencrypted"
+          }
+        }
+      }
     }
   },
   "description": "Keys with defaults are not 'required' so `helm upgrade --reuse-values` keeps working when the chart adds keys; mandatory values are enforced with minLength/conditionals."

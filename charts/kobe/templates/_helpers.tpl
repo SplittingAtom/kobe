@@ -144,6 +144,31 @@ securityContext:
   value: {{ join "," (default (list "10.42.0.0/16") (.Values.auth).trustedProxies) | quote }}
 {{- end -}}
 
+{{/* Outgoing email (KOBE-13): the API server only. Credentials come from a Secret, never values. */}}
+{{- define "kobe.smtpEnv" -}}
+{{- $smtp := .Values.smtp | default dict -}}
+- name: KOBE_SMTP_HOST
+  value: {{ required "smtp.host is required (spec D7: Kobe sends invitations and password resets by email)" $smtp.host | quote }}
+- name: KOBE_SMTP_PORT
+  value: {{ $smtp.port | default 587 | quote }}
+- name: KOBE_SMTP_SECURITY
+  value: {{ $smtp.security | default "starttls" | quote }}
+- name: KOBE_SMTP_FROM
+  value: {{ required "smtp.from is required, e.g. \"Kobe <kobe@example.com>\"" $smtp.from | quote }}
+{{- with $smtp.existingSecret }}
+- name: KOBE_SMTP_USERNAME
+  valueFrom:
+    secretKeyRef:
+      name: {{ . }}
+      key: username
+- name: KOBE_SMTP_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ . }}
+      key: password
+{{- end }}
+{{- end -}}
+
 {{/* True when Helm can reach the cluster (install/upgrade); false for offline renders. */}}
 {{- define "kobe.online" -}}
 {{- if lookup "v1" "Namespace" "" "kube-system" -}}true{{- end -}}

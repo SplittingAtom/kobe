@@ -140,6 +140,24 @@
   traffic only; traffic originated by the node itself (kubelet, image pulls) is not sandbox
   traffic and is out of scope.
 
+## Coordinator follow-ups (after KOBE-23)
+
+- **No `command`/`args` on sandbox containers**: the image's entrypoint (tini → root-owned
+  launcher that drops `NODE_OPTIONS`, `ulimit -c 0`, `node --disable-sigusr1`) must run. The pod
+  spec and template set neither (unit test "never overrides the image's command…"). KOBE-25 and
+  anyone editing `sandboxPodSpec` must keep it that way (`args` only, if ever needed).
+- **pids limit: not settable per pod.** Kubernetes has no pod-spec pids field and agent-sandbox
+  v1.0.4 adds none; the limit is the kubelet's `podPidsLimit` (k3s:
+  `--kubelet-arg=pod-max-pids=4096`), node-wide, documented in docs/install.md. Under gVisor
+  that cgroup limit counts the sandbox's host threads (Sentry/Gofer), not guest processes; guest
+  fork bombs are bounded by the gVisor sandbox's memory/CPU limits instead.
+- **e2e finding (kube-router):** a sandbox reached the web pod and the server's user port
+  although the team egress policy only names the server's sandbox port and the proxy pods
+  (namespace + pod selectors). Fix: a release-namespace **ingress** policy
+  (`<release>-not-from-sandboxes`) admits team namespaces to web/server/scheduler only on 8081.
+  e2e prints diagnostics (unlabelled listener on 8080/9090) to characterise the CNI; the proxies
+  are reachable on 8080 by design.
+
 ## Open questions (for Chris or the coordinator)
 
 - **D12 warm pool "2 per cluster" vs per-namespace warm pools** (see Decisions): accept "1 per

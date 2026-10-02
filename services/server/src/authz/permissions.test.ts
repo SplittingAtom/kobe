@@ -17,6 +17,8 @@ describe("team permission matrix (spec D8)", () => {
     ["team.members.read", true, true, true],
     ["team.chat", true, true, true],
     ["team.personal.create", true, true, true],
+    ["team.agents.use", true, true, true],
+    ["team.agents.build", false, true, true],
     ["team.agents.publish", false, true, true],
     ["team.skills.publish", false, true, true],
     ["team.projects.create", false, true, true],
@@ -30,6 +32,7 @@ describe("team permission matrix (spec D8)", () => {
     ["team.retention.manage", false, false, true],
     ["team.schedules.pause", false, false, true],
     ["team.agents.suspend", false, false, true],
+    ["team.agents.manage", false, false, true],
   ])("%s: member=%s builder=%s team_admin=%s", (permission, member, builder, admin) => {
     expect(teamRoleAllows("member", permission)).toBe(member);
     expect(teamRoleAllows("builder", permission)).toBe(builder);

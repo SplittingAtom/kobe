@@ -86,6 +86,9 @@ the verified RuntimeClass or predates the current RuntimeClass object. NetworkPo
 that enforces them (k3s's built-in kube-router does); this cannot be verified through the API, so
 the e2e suite checks enforcement from a sandbox (`e2e/run.sh`) — run it after changing the CNI.
 
+Limit processes per pod with the kubelet (k3s: `--kubelet-arg=pod-max-pids=4096` on every node);
+Kubernetes has no per-pod setting for it.
+
 Private registries: the names in `global.imagePullSecrets` are copied into each team namespace for
 the kubelet (pods there cannot mount them). Alternatively configure registry credentials on the
 nodes (k3s `registries.yaml`). Kobe assumes one install per cluster (`kobe-team-*` names are
@@ -108,13 +111,29 @@ kubectl -n kobe create secret generic kobe-db \
 kubectl -n kobe create secret generic kobe-s3 \
   --from-literal=access-key-id=... --from-literal=secret-access-key=...
 
+# SMTP credentials, if your relay needs AUTH (omit smtp.existingSecret otherwise).
+kubectl -n kobe create secret generic kobe-smtp \
+  --from-literal=username=... --from-literal=password=...
+
 helm install kobe charts/kobe -n kobe \
   --set global.imagePullSecrets[0].name=ghcr-pull \
   --set ingress.host=kobe.example.com \
   --set ingress.tls.clusterIssuer=letsencrypt \
   --set postgres.external.existingSecret=kobe-db \
-  --set s3.endpoint=https://s3.example.com --set s3.bucket=kobe --set s3.existingSecret=kobe-s3
+  --set s3.endpoint=https://s3.example.com --set s3.bucket=kobe --set s3.existingSecret=kobe-s3 \
+  --set smtp.host=smtp.example.com --set smtp.from='Kobe <kobe@example.com>' \
+  --set smtp.existingSecret=kobe-smtp
 ```
+
+### Email (SMTP)
+
+SMTP is required: Kobe is invite-only and sends invitations and password-reset links by email.
+`smtp.security` is `starttls` (default, port 587, the upgrade is required), `tls` (implicit TLS,
+port 465) or `none` (unencrypted; only for an in-cluster relay, and refused together with
+credentials). Certificates are always verified. Credentials come only from `smtp.existingSecret`
+(keys `username`, `password`), never from values. The server sends mail lazily, so a wrong SMTP
+setting shows up as `"emailSent": false` on new invitations and as errors in the server log, not
+as a failed start.
 
 With bundled Postgres instead, install the [CloudNativePG operator](https://cloudnative-pg.io)
 first and set `postgres.mode=cnpg`; the chart creates the Cluster, the `kobe_owner` database owner
@@ -145,6 +164,12 @@ migrations). A migration that waits more than 10 s for a lock fails the Job inst
 live traffic. Rolling a bundled-CloudNativePG release back to its first revision re-runs that
 revision's initial migration Job, which resets app-role grants to that build's matrix; the next
 upgrade restores them.
+
+## Backup and restore
+
+`kobe backup` / `kobe restore` cover Postgres and an S3 object manifest; see
+[backup-restore.md](backup-restore.md). Keep copies of the Secrets you create above (and the
+generated `<release>-auth` Secret) in your secret store: backups never contain them.
 
 ## Local development cluster
 

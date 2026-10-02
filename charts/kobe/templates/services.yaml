@@ -16,7 +16,7 @@
       "annotations" $dbAnnotations
       "extraPorts" "- name: sandbox\n  containerPort: 8081"
       "extraServicePorts" "- name: sandbox\n  port: 8081\n  targetPort: sandbox"
-      "env" (printf "- name: KOBE_PROCESS\n  value: server\n%s\n%s\n%s\n%s" $runtime $common (include "kobe.authEnv" .) (include "kobe.sandboxEnv" .))) }}
+      "env" (printf "- name: KOBE_PROCESS\n  value: server\n%s\n%s\n%s\n%s\n%s" $runtime $common (include "kobe.authEnv" .) (include "kobe.smtpEnv" .) (include "kobe.sandboxEnv" .))) }}
 ---
 {{ include "kobe.nodeService" (dict "root" . "component" "scheduler" "image" "server" "values" .Values.scheduler
       "serviceAccount" (printf "%s-server" $fullname) "automountToken" true "preflight" true "migrations" true

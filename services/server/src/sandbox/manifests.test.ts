@@ -98,6 +98,19 @@ describe("sandbox pod spec (D12, D13; secrets never enter sandboxes)", () => {
     });
   });
 
+  it("never overrides the image's command (tini + hardened launcher, KOBE-23) or args", async () => {
+    const spec = sandboxPodSpec(await verified(), SETTINGS, ADDRESSES) as unknown as {
+      containers: Record<string, unknown>[];
+      initContainers?: unknown;
+    };
+    expect(spec.containers).toHaveLength(1);
+    expect(must(spec.containers[0])).not.toHaveProperty("command");
+    expect(must(spec.containers[0])).not.toHaveProperty("args");
+    expect(spec.initContainers).toBeUndefined();
+    const template = sandboxTemplateManifest("ns", await verified(), SETTINGS, ADDRESSES);
+    expect(JSON.stringify(template)).not.toMatch(/"command"|"args"/);
+  });
+
   it("meets Pod Security 'restricted' and the D12 sizing", async () => {
     const spec = sandboxPodSpec(await verified(), SETTINGS, ADDRESSES) as unknown as Pod & {
       containers: { resources: unknown }[];
