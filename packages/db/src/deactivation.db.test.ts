@@ -50,9 +50,14 @@ describe("sessions_refuse_deactivated trigger", () => {
     await a.query("BEGIN");
     await a.query(deactivate, [userId]);
     await a.query(deleteSessions, [userId]);
-    const signIn = insertSession(b);
+    // Capture the outcome now: the insert can fail while COMMIT is still being awaited, before a
+    // later `rejects` handler is attached, which Node reports as an unhandled rejection.
+    const signIn = insertSession(b).then(
+      () => undefined,
+      (err: unknown) => err,
+    );
     await a.query("COMMIT");
-    await expect(signIn).rejects.toMatchObject({ code: "42501" });
+    expect(await signIn).toMatchObject({ code: "42501" });
     expect(await sessionCount()).toBe(0);
   });
 
