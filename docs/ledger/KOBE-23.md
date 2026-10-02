@@ -139,7 +139,8 @@ Hadron was not reachable; criteria derived from the spec and `sandbox-wire/conne
   `{"type":"channel.hello","nonce"}` before anything else; put `nonce` in every `policy.check`; wait
   for `policy.result` (ignore `policy.pending`); block on deny, on channel close and on its own
   timeout. No `approval` token arrives over this channel.
-- **KOBE-22 (pods):** set `args`, never `command`; don't set `NODE_OPTIONS`; add a pids limit.
+- **KOBE-22 (pods, PR #20):** set `args`, never `command` (coordinator is passing this on); don't
+  set `NODE_OPTIONS`; add a pids limit.
 - **KOBE-27 (S3 sync):** `ThreadManagerOptions.beforeRun(frame)` runs before each prompt reaches Pi.
 - **KOBE-41/62/47/49:** wire config into `buildPiLaunch` (args/env, allow-listed, no credentials);
   any field in the launch key restarts an idle thread's Pi when it changes.
