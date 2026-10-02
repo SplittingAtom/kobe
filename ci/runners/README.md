@@ -20,7 +20,7 @@ privileged. The repository also requires approval before workflows from outside 
 | GitHub App credentials                                          | Secret `kobe-arc-github-app` in `kobe-ci-runners`                       |
 | Scratch volumes                                                 | StorageClass `longhorn-ci-scratch` (1 replica, deleted with the runner) |
 
-Runners are ephemeral (one job each), scale 0–4, and run Docker-in-Docker so jobs can build images,
+Runners are ephemeral (one job each), scale 0–6, and run Docker-in-Docker so jobs can build images,
 use service containers (the `db` job's Postgres) and create the k3d cluster for e2e. Docker's data
 (60 Gi) and the job workspace (20 Gi) live on per-runner Longhorn volumes: the nodes' root disks
 have only ~10 GB free and must not fill up.
@@ -71,5 +71,5 @@ the node's image cache.
 ## Operations
 
 - Watch: `kubectl -n kobe-ci-runners get pods,ephemeralrunners`; controller logs in `arc-systems`.
-- Capacity: `maxRunners: 4`, each requesting 2 CPU / 5 Gi and allowed up to 12 CPU / 18 Gi.
+- Capacity: `maxRunners: 6`, each requesting 2 CPU / 5 Gi and allowed up to 12 CPU / 18 Gi.
 - Upgrade: bump `--version` for both charts together (controller first).
