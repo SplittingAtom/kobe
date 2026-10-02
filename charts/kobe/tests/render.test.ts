@@ -326,6 +326,22 @@ describe("migrations (KOBE-68)", () => {
     expect(find(ms, "Job", "kobe-migrate-initial")).toBeUndefined();
   });
 
+  it("pre-install hook pods only use ServiceAccounts that exist before the release is applied", () => {
+    const ms = render();
+    const hookSAs = new Set(
+      ms
+        .filter((m) => m.kind === "ServiceAccount" && hook(m)?.includes("pre-install"))
+        .map((m) => m.metadata.name),
+    );
+    for (const job of ms.filter((m) => m.kind === "Job" && hook(m)?.includes("pre-install"))) {
+      const sa = job.spec.template.spec.serviceAccountName;
+      expect(
+        sa === undefined || sa === "default" || hookSAs.has(sa),
+        `${job.metadata.name} uses ${sa}`,
+      ).toBe(true);
+    }
+  });
+
   it("mounts owner credentials only in the migration Job", () => {
     for (const values of [{}, { "postgres.mode": "cnpg" }]) {
       const ms = render(values);

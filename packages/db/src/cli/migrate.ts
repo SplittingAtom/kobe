@@ -22,7 +22,7 @@ const envSchema = z.object({
 async function waitForDatabase(url: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const client = new pg.Client({ connectionString: url });
+    const client = new pg.Client({ connectionString: url, connectionTimeoutMillis: 5_000 });
     try {
       await client.connect();
       return;

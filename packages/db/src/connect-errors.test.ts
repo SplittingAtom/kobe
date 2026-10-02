@@ -11,8 +11,8 @@ describe("isRetryableConnectError", () => {
     },
   );
 
-  it("retries while Postgres is starting or recovering (57P03)", () => {
-    expect(isRetryableConnectError(err({ code: "57P03" }))).toBe(true);
+  it.each(["57P01", "57P02", "57P03", "53300"])("retries during startup/failover (%s)", (code) => {
+    expect(isRetryableConnectError(err({ code }))).toBe(true);
   });
 
   it.each(["28P01", "28000", "3D000", "42501"])(

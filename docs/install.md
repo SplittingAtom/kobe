@@ -89,6 +89,13 @@ them from becoming ready and fails `helm install --wait`.
 The migration runner refuses a superuser or `BYPASSRLS` owner, and an app role that is
 superuser, `BYPASSRLS`, owns tables, or is a member of another role.
 
+Migrations are written expand/contract: the previous release keeps serving while an upgrade's
+migration runs, and `helm rollback` runs older code against the newer schema (no down
+migrations). A migration that waits more than 10 s for a lock fails the Job instead of stalling
+live traffic. Rolling a bundled-CloudNativePG release back to its first revision re-runs that
+revision's initial migration Job, which resets app-role grants to that build's matrix; the next
+upgrade restores them.
+
 ## Local development cluster
 
 `scripts/dev-cluster.sh` creates a k3d cluster with gVisor and the agent-sandbox controller

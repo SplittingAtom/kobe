@@ -7,9 +7,16 @@
 # migrations), so it migrates in an ordinary Job instead. Server/scheduler pods stay in their
 # wait-for-migrations initContainer until the migration lands, so a failed migration fails
 # `helm install --wait`.
-{{- if or (not $cnpg) .Release.IsUpgrade }}
-{{- include "kobe.migrateJob" (dict "root" . "name" (printf "%s-migrate" $fullname) "hook" (ternary "pre-upgrade" "pre-install,pre-upgrade" $cnpg)) }}
-{{- end }}
-{{- if and $cnpg .Release.IsInstall }}
+{{- /* CNPG: does the Cluster exist yet? Online we look it up (covers retrying a failed first install
+     with `helm upgrade --install`); offline renders fall back to install vs upgrade. */ -}}
+{{- $clusterExists := .Release.IsUpgrade -}}
+{{- if and $cnpg (lookup "v1" "Namespace" "" "kube-system") -}}
+{{- $clusterExists = not (empty (lookup "postgresql.cnpg.io/v1" "Cluster" .Release.Namespace (printf "%s-pg" $fullname))) -}}
+{{- end -}}
+{{- if not $cnpg }}
+{{- include "kobe.migrateJob" (dict "root" . "name" (printf "%s-migrate" $fullname) "hook" "pre-install,pre-upgrade") }}
+{{- else if $clusterExists }}
+{{- include "kobe.migrateJob" (dict "root" . "name" (printf "%s-migrate" $fullname) "hook" "pre-upgrade") }}
+{{- else }}
 {{- include "kobe.migrateJob" (dict "root" . "name" (printf "%s-migrate-initial" $fullname)) }}
 {{- end }}

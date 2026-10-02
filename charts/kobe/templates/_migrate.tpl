@@ -26,7 +26,8 @@ spec:
     spec:
       restartPolicy: Never
       {{- include "kobe.imagePullSecrets" $root | nindent 6 }}
-      serviceAccountName: {{ $fullname }}-workload
+      # No serviceAccountName: as a pre-install hook it runs before release ServiceAccounts exist,
+      # and it needs no API access (token not mounted).
       automountServiceAccountToken: false
       {{- include "kobe.podSecurityContext" $root | nindent 6 }}
       containers:

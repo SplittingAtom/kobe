@@ -16,6 +16,37 @@ function futureJournal(): string {
 }
 
 describe("waitForMigrations (as the app role)", () => {
+  it("fails fast on bad credentials instead of waiting out the timeout", async () => {
+    const bad = new URL(inject("appUrl"));
+    bad.password = "wrong";
+    const started = Date.now();
+    await expect(
+      waitForMigrations({ databaseUrl: bad.toString(), timeoutMs: 30_000, intervalMs: 200 }),
+    ).rejects.toThrow(/password authentication failed/);
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
+  it("compares against the newest journal entry even if entries are out of order", async () => {
+    const dir = futureJournal();
+    writeFileSync(
+      join(dir, "meta", "_journal.json"),
+      JSON.stringify({
+        entries: [
+          { idx: 0, when: Date.now() + 86_400_000, tag: "0000_future" },
+          { idx: 1, when: 1, tag: "0001_ancient" },
+        ],
+      }),
+    );
+    await expect(
+      waitForMigrations({
+        databaseUrl: inject("appUrl"),
+        migrationsFolder: dir,
+        timeoutMs: 600,
+        intervalMs: 200,
+      }),
+    ).rejects.toThrow(/0000_future/);
+  });
+
   it("resolves once this build's latest migration is applied", async () => {
     await expect(
       waitForMigrations({ databaseUrl: inject("appUrl"), timeoutMs: 5_000 }),
