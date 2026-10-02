@@ -1,6 +1,6 @@
 # KOBE-29: Schema: threads, entries, runs, run_events, events
 
-- **Status:** in progress
+- **Status:** in review (PR #11)
 - **Branch / worktree:** `kobe-29-conversation-schema` in `../Kobe-wt29`
 - **Depends on:** KOBE-8 (merged)
 
