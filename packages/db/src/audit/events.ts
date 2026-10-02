@@ -179,6 +179,24 @@ export const AUDIT_EVENTS = {
     value: z.boolean(),
   }),
 
+  // ── sandbox: lifecycle metadata only, never pod logs (KOBE-22, D11) ──
+  /** A user's sandbox in a team was claimed (system actor, or the user whose request did it). */
+  "sandbox.created": event("team", { sandboxId: id, userId: id }),
+  /**
+   * The server deleted a sandbox (its claim) or a pod because it was not running under the
+   * verified isolation runtime, or because isolation was lost (pods only; claims and volumes kept).
+   */
+  "sandbox.destroyed": event("team", {
+    sandboxId: id.optional(),
+    userId: id.optional(),
+    pod: z
+      .string()
+      .max(253)
+      .regex(/^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/)
+      .optional(),
+    reason: z.enum(["isolation_mismatch", "isolation_lost"]),
+  }),
+
   // ── thread: lifecycle metadata only, never titles or content (KOBE-34, D18, D23) ──
   "thread.trashed": event("team", { threadId: id }),
   "thread.restored": event("team", { threadId: id }),
@@ -199,6 +217,16 @@ export const AUDIT_EVENTS = {
     userId: id,
     violation: z.enum(["unknown_run", "unknown_thread", "unknown_command"]),
     frameType: z.string().regex(/^[a-z][a-z_.]{0,31}$/),
+  }),
+  /**
+   * A validly signed `kobe.sandbox-wire` token was refused: the sandbox is no longer live, its user
+   * may not use it (deactivated, left the team), or `hello` named another sandbox (system).
+   * Unsigned/forged tokens carry no trustworthy team and are only logged and counted.
+   */
+  "sandbox.token_rejected": event("team", {
+    sandboxId: id,
+    userId: id,
+    reason: z.enum(["not_live", "not_allowed", "sandbox_mismatch"]),
   }),
   /** A sandbox exceeded a wire or storage limit; connection closed or run stopped (system). */
   "sandbox.limit_exceeded": event("team", {
