@@ -6,5 +6,6 @@ export * from "./session-active-teams.js";
 export * from "./threads.js";
 export * from "./runs.js";
 export * from "./events.js";
+export * from "./tool-rules.js";
 export * from "./invitations.js";
 export * from "./agents.js";
