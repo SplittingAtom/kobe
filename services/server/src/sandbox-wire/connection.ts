@@ -569,6 +569,7 @@ export class SandboxConnection implements RegisteredConnection {
   async #hello(hello: HelloFrame): Promise<void> {
     const ctx = this.#ctx;
     if (hello.sandbox_id !== this.sandboxId) {
+      ctx.auditTokenRejected({ sandboxId: this.sandboxId, ...this.target }, "sandbox_mismatch");
       this.close("unauthorized", "sandbox_id does not match the token");
       return;
     }

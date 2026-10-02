@@ -3,7 +3,7 @@ import type { Server } from "node:http";
 import type { PolicyEngine, ToolRegistry } from "@kobe/protocol";
 import { SYSTEM_ACTOR, eq, getMembership, users, withTeam, type KobeDb } from "@kobe/db";
 import { logger as rootLogger } from "../logger.js";
-import { recordAudit } from "../audit/record.js";
+import { recordAudit, type ServerAuditEvent } from "../audit/record.js";
 import { createPolicyEngine } from "../policy/engine.js";
 import { createToolRegistry } from "../policy/registry.js";
 import { createDbRuleSource, createDbSettingsSource } from "../policy/rule-store.js";
@@ -151,6 +151,27 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
     return (await getMembership(db, target.teamId, target.userId)) !== null;
   };
 
+  /** One audit row per key per 5 minutes per replica: a looping sandbox can't flood the log. */
+  const throttledAudit = (key: string, teamId: string, event: ServerAuditEvent) => {
+    const last = violationAudits.get(key) ?? 0;
+    if (Date.now() - last < VIOLATION_AUDIT_EVERY_MS) return;
+    if (violationAudits.size > 10_000) violationAudits.clear();
+    violationAudits.set(key, Date.now());
+    void withTeam(db, teamId, (tx) => recordAudit(tx, event)).catch((err: unknown) =>
+      log.error({ err, action: event.action }, "could not record a sandbox audit event"),
+    );
+  };
+  const auditTokenRejected = (
+    claims: { sandboxId: string; teamId: string; userId: string },
+    reason: "not_live" | "not_allowed" | "sandbox_mismatch",
+  ) =>
+    throttledAudit(`${claims.teamId}:${claims.userId}:token:${reason}`, claims.teamId, {
+      action: "sandbox.token_rejected",
+      actor: SYSTEM_ACTOR,
+      teamId: claims.teamId,
+      target: { sandboxId: claims.sandboxId, userId: claims.userId, reason },
+    });
+
   const hooks = options.hooks ?? {};
   const ctx: WireContext = {
     db,
@@ -174,33 +195,22 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
     metrics,
     log,
     auditViolation(target, sandboxId, violation: LeaseViolation, frameType) {
-      const key = `${target.teamId}:${target.userId}:${violation}`;
-      const last = violationAudits.get(key) ?? 0;
-      if (Date.now() - last < VIOLATION_AUDIT_EVERY_MS) return;
-      violationAudits.set(key, Date.now());
-      void withTeam(db, target.teamId, (tx) =>
-        recordAudit(tx, {
-          action: "sandbox.lease_violation",
-          actor: SYSTEM_ACTOR,
-          teamId: target.teamId,
-          target: { sandboxId, userId: target.userId, violation, frameType },
-        }),
-      ).catch((err: unknown) => log.error({ err }, "could not audit a lease violation"));
+      throttledAudit(`${target.teamId}:${target.userId}:${violation}`, target.teamId, {
+        action: "sandbox.lease_violation",
+        actor: SYSTEM_ACTOR,
+        teamId: target.teamId,
+        target: { sandboxId, userId: target.userId, violation, frameType },
+      });
     },
     auditLimit(target, sandboxId, limit, runId) {
-      const key = `${target.teamId}:${target.userId}:${limit}`;
-      const last = violationAudits.get(key) ?? 0;
-      if (Date.now() - last < VIOLATION_AUDIT_EVERY_MS) return;
-      violationAudits.set(key, Date.now());
-      void withTeam(db, target.teamId, (tx) =>
-        recordAudit(tx, {
-          action: "sandbox.limit_exceeded",
-          actor: SYSTEM_ACTOR,
-          teamId: target.teamId,
-          target: { sandboxId, userId: target.userId, limit, ...(runId ? { runId } : {}) },
-        }),
-      ).catch((err: unknown) => log.error({ err }, "could not audit a sandbox limit"));
+      throttledAudit(`${target.teamId}:${target.userId}:${limit}`, target.teamId, {
+        action: "sandbox.limit_exceeded",
+        actor: SYSTEM_ACTOR,
+        teamId: target.teamId,
+        target: { sandboxId, userId: target.userId, limit, ...(runId ? { runId } : {}) },
+      });
     },
+    auditTokenRejected,
     localResult: (id) => router.onResult(id),
     runEnded(event) {
       void Promise.resolve()
@@ -248,6 +258,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
         verify: auth.verify,
         liveness: auth.liveness,
         principalAllowed,
+        onTokenRejected: auditTokenRejected,
         log,
         maxConnections: options.maxConnections ?? 5_000,
         connections: () => sockets,

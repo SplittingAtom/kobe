@@ -19,6 +19,11 @@ export interface GatewayOptions {
   readonly liveness: SandboxLiveness;
   readonly principalAllowed: (target: SandboxTarget) => Promise<boolean>;
   readonly accept: (socket: WebSocket, claims: SessionTokenClaims) => void;
+  /** A validly signed token refused: audited (`sandbox.token_rejected`). */
+  readonly onTokenRejected: (
+    claims: { sandboxId: string; teamId: string; userId: string },
+    reason: "not_live" | "not_allowed",
+  ) => void;
   readonly log: Logger;
   readonly onRefused: (status: number, reason: string) => void;
   /** Most connections this replica accepts (beyond: 503). */
@@ -114,8 +119,15 @@ export function attachSandboxGateway(server: Server, options: GatewayOptions): (
       return no(401, "token");
     }
     const target = { teamId: claims.team_id, userId: claims.user_id };
-    const live = await options.liveness.isLive({ sandboxId: claims.sub, ...target });
-    if (!live || !(await options.principalAllowed(target))) return no(401, "not live");
+    const principal = { sandboxId: claims.sub, ...target };
+    if (!(await options.liveness.isLive(principal))) {
+      options.onTokenRejected(principal, "not_live");
+      return no(401, "not live");
+    }
+    if (!(await options.principalAllowed(target))) {
+      options.onTokenRejected(principal, "not_allowed");
+      return no(401, "not allowed");
+    }
     if (socket.destroyed) return;
     wss.handleUpgrade(req, socket, head, (ws) => options.accept(ws, claims));
   };

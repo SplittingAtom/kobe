@@ -70,6 +70,11 @@ export interface WireContext {
     violation: LeaseViolation,
     frameType: string,
   ): void;
+  /** Records `sandbox.token_rejected` (throttled): a signed token refused after verification. */
+  auditTokenRejected(
+    claims: { sandboxId: string; teamId: string; userId: string },
+    reason: "not_live" | "not_allowed" | "sandbox_mismatch",
+  ): void;
   /** Records `sandbox.limit_exceeded` (throttled per sandbox and limit). */
   auditLimit(target: SandboxTarget, sandboxId: string, limit: SandboxLimit, runId?: string): void;
   /** A command requested on this replica has a result (skip waiting for the NOTIFY round trip). */

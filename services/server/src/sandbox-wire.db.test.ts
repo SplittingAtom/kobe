@@ -183,6 +183,13 @@ describe("upgrade authentication", () => {
     const foreign = auth.issue({ sandboxId: randomUUID(), teamId: w.team, userId: stranger.id });
     expect(await status(FakeSandbox.connect(url(0), foreign))).toBe(401);
     expect(await status(FakeSandbox.connect(url(0), w.token))).toBe(101);
+    // Signed tokens refused after verification are audited (forged ones carry no team).
+    await expect
+      .poll(
+        async () =>
+          (await auditActions(w.team)).filter((x) => x === "sandbox.token_rejected").length,
+      )
+      .toBe(2);
   });
 
   it("closes on a hello for another sandbox, an unsupported Pi, a frame before hello, or no hello", async () => {
@@ -196,6 +203,7 @@ describe("upgrade authentication", () => {
     const a = await open();
     a.hello(randomUUID());
     expect((await a.waitClosed()).code).toBe(SANDBOX_CLOSE_CODES.unauthorized);
+    await expect.poll(() => auditActions(w.team)).toContain("sandbox.token_rejected");
     const b = await open();
     b.hello(w.sandboxId, [], "2.0.0");
     expect((await b.waitClosed()).code).toBe(SANDBOX_CLOSE_CODES.unsupported_version);

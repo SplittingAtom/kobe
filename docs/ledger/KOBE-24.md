@@ -131,19 +131,28 @@ editor` are cancelled, notifications ignored; deduped by `(thread_id, request.id
 - New dependency for `@kobe/server`: `ws` ^8.22 + `@types/ws` (MIT; already in the lockfile via
   KOBE-23).
 
-## For KOBE-22 (sandbox provider, PR #20) — the remaining wiring
+## KOBE-22 wiring (after #20 merged)
 
-When #20 merges, in `services/server/src/index.ts`, after `sandboxServer` is created:
-
-```ts
-deps?.sandboxWire.attach(sandboxServer, {
-  verify: (token) => verifySessionToken(token, "kobe.sandbox-wire", keys["kobe.sandbox-wire"]),
-  liveness: { isLive: (c) => /* claim u-<user> in the team namespace with UID c.sandboxId */ },
-});
-```
-
-The WebSocket must stay on the sandbox listener (port 8081), never on `createApp`. Liveness is
-called at every upgrade and every 60 s per connection: cache it (e.g. list claims per namespace).
+- `index.ts` attaches the wire to the **sandbox listener** (`createSandboxApp`, port 8081) only:
+  `deps.sandboxWire.attach(sandboxServer, { verify: sandboxWireVerifier(keys), liveness:
+providerLiveness(provider, db) })` (`sandbox-wire/provider-auth.ts`). The user app never sees
+  `/v1/sandbox/connect` (e2e: through the ingress → 401/404).
+- **Verify** = KOBE-22 `verifySessionToken(token, "kobe.sandbox-wire", key)`: HS256 pinned, exact
+  header (no `none`/`kid`/`jku`/embedded keys), `aud` must be `kobe.sandbox-wire`, `exp`/`iat`
+  checked; the other audiences' tokens fail (own keys). Unit tests: `provider-auth.test.ts`.
+- **"Session still exists" (KOBE-13)**: sandbox tokens have no Better Auth session; the equivalent
+  is `provider.isLive(team, user, sub)` (new: the claim `u-<user>` in the team namespace has UID
+  `sub`, is not deleting, and is annotated for that team and user; positive answers cached 20 s)
+  plus account active and team membership — at upgrade, every 60 s, on deactivation/removal hints;
+  connections also end at token expiry.
+- Audit: `sandbox.token_rejected` (signed token refused: `not_live`, `not_allowed`,
+  `sandbox_mismatch`), next to `sandbox.lease_violation` and `sandbox.limit_exceeded`, in the same
+  registry as KOBE-22's `sandbox.created`/`destroyed`. Forged/unsigned tokens name no trustworthy
+  team, so they are logged and counted (`upgradesRefused`), not audited.
+- e2e (`e2e/run.sh` "sandbox wire (KOBE-24)"): seeds the e2e user/team/membership, mints tokens in
+  the server pod with the real keys, and from a sandbox-like gVisor pod sends raw upgrades: a live
+  claim + wire token → 101; forged → 401; a model-gateway token → 401; a signed wire token for a
+  sandbox that doesn't exist → 401.
 
 ## What other tickets must know
 
