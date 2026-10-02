@@ -78,13 +78,6 @@
       "when": 1790927287908,
       "tag": "0010_invitations_rls",
       "breakpoints": true
-    },
-    {
-      "idx": 11,
-      "version": "7",
-      "when": 1790928470103,
-      "tag": "0011_thread_search",
-      "breakpoints": true
     }
   ]
 }
