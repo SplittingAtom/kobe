@@ -192,8 +192,8 @@ ensure_sandbox() { # [team-id slug]: defaults to the e2e team
   $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node dist/cli/sandbox.js ensure \
     --team-id "${1:-$E2E_TEAM_ID}" --team-slug "${2:-e2e}" --user-id "$E2E_USER_ID" 2>&1
 }
-json_field() { # field, json → value (no jq dependency)
-  printf '%s' "$2" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s)[process.argv[1]]??"")}catch{console.log("")}})' "$1"
+json_field() { # field, single-line JSON object with string values → value (no node/jq on runners)
+  printf '%s' "$2" | sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p" | head -1
 }
 ensure_out=$(ensure_sandbox || true)
 handle=$(printf '%s\n' "$ensure_out" | tail -1)
@@ -225,7 +225,7 @@ if [[ -n "$node" ]] && docker inspect "$node" >/dev/null 2>&1; then
   handler=""
   for _ in $(seq 1 30); do
     handler=$(docker exec "$node" crictl pods --name "$sandbox_pod" --namespace "$TEAM_NS" -o json 2>/dev/null \
-      | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).items[0].runtimeHandler)}catch{}})' || true)
+      | sed -n 's/.*"runtimeHandler": *"\([^"]*\)".*/\1/p' | head -1 || true)
     [[ -n "$handler" ]] && break
     sleep 2
   done
