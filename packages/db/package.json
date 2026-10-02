@@ -27,7 +27,8 @@
     "zod": "^4.0.0"
   },
   "bin": {
-    "kobe-migrate": "./dist/cli/migrate.js"
+    "kobe-migrate": "./dist/cli/migrate.js",
+    "kobe-db-wait": "./dist/cli/wait.js"
   },
   "files": [
     "dist",

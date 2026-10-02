@@ -250,6 +250,10 @@
             "migrateUrlKey": {
               "type": "string",
               "minLength": 1
+            },
+            "appRole": {
+              "type": "string",
+              "pattern": "^[a-z_][a-z0-9_]{0,62}$"
             }
           }
         },

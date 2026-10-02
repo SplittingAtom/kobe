@@ -69,6 +69,8 @@ postgres:
     existingSecret: ""
     appUrlKey: app-url
     migrateUrlKey: migrate-url
+    # Login role in app-url; the migration runner grants it privileges and refuses unsafe roles.
+    appRole: kobe_app
   cnpg:
     instances: 1
     # Namespace of the CloudNativePG operator (allowed through the Postgres NetworkPolicy).

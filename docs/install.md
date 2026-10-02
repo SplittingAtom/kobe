@@ -76,6 +76,19 @@ scratch.
 
 Every value is validated by `charts/kobe/values.schema.json`; unknown keys are rejected.
 
+### Migrations
+
+Install and upgrade with `--wait`. Schema migrations run as the database owner in a Job — the
+only pod that holds owner credentials — before upgrades (`pre-upgrade` hook) and, for external
+Postgres, before the first install (`pre-install` hook). With bundled CloudNativePG the first
+install migrates in an ordinary Job once the Cluster accepts connections. Server and scheduler
+pods wait in a `wait-for-migrations` initContainer (running as the app role) until their build's
+migrations are applied, so they never start against an older schema; a failed migration keeps
+them from becoming ready and fails `helm install --wait`.
+
+The migration runner refuses a superuser or `BYPASSRLS` owner, and an app role that is
+superuser, `BYPASSRLS`, owns tables, or is a member of another role.
+
 ## Local development cluster
 
 `scripts/dev-cluster.sh` creates a k3d cluster with gVisor and the agent-sandbox controller

@@ -83,6 +83,9 @@ async function grantAppPrivileges(client: pg.ClientBase, appRole: string): Promi
     await client.query(`REVOKE ALL ON ALL TABLES IN SCHEMA public FROM ${role}`);
     await client.query(`GRANT USAGE ON SCHEMA public TO ${role}`);
     await client.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${role}`);
+    // Lets pods wait (as the app role) until their build's migrations are applied.
+    await client.query(`GRANT USAGE ON SCHEMA drizzle TO ${role}`);
+    await client.query(`GRANT SELECT ON drizzle.__drizzle_migrations TO ${role}`);
     for (const { name } of rows) {
       const privileges = appPrivilegesFor(name);
       if (privileges && privileges.length > 0) {

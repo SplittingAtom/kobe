@@ -5,9 +5,11 @@ Hadron ignite and re-read the current ticket).
 
 ## Current
 
-- **Ticket:** none claimed. In review: KOBE-5 (PR #1, f1e7faf) and KOBE-8 (PR #2 stacked on #1,
-  63a8cb9); awaiting Chris.
-- **Phase:** 1 (Spine). Phase 1 tickets promoted to `ready` 2026-10-01 with Chris's sign-off.
+- **Run:** Chris (2026-10-01): "start KOBE-6 and keep going until all tickets that depend on KOBE-5
+  and KOBE-8 are done" → KOBE-6, KOBE-68, KOBE-7, KOBE-21, KOBE-12, KOBE-14, KOBE-29, KOBE-69. Each:
+  tests first → CI green → review → merge to main → complete in Hadron → transition to done.
+- **Ticket:** KOBE-68 (branch kobe-68-migrate-hook) in progress. KOBE-21 started in worktree
+  `../Kobe-wt21` (branch kobe-21-sandbox-image; only `images/sandbox/test-image.sh` so far).
 
 ## Done
 
@@ -23,12 +25,14 @@ Hadron ignite and re-read the current ticket).
   registry + grants matrix, kobe-migrate runner, strict RLS catalog check + cross-team probe suite
   in a CI Postgres 17 job (28 tests). DB review: 1 CRITICAL + 4 HIGH fixed. CI run 36953369115.
 
+- KOBE-6 (PR #3, merged, done): chart + isolation (Helm lookup, hook Job, server/scheduler
+  initContainer), CNPG/external Postgres, NetworkPolicies, scripts. Security review: 2 HIGH fixed.
+- Decision (Chris): no bundled S3 (MinIO archived/AGPL); external S3 only.
+
 ## Next
 
-1. KOBE-6 — Helm umbrella chart with isolation preflight (needs local `kubectl`/`helm`, or run via
-   ssh on compute1; needs a ghcr.io pull secret on the cluster). Then KOBE-68 (migration hook).
-2. KOBE-9 (after KOBE-6), KOBE-12/14/29 (after KOBE-8 is done).
-3. Before Gate 1: KOBE-68 and KOBE-69 (follow-ups filed from KOBE-8).
+1. KOBE-68 → KOBE-7 (CI e2e on k3d, ghcr publish) → KOBE-21 → KOBE-12 → KOBE-14 → KOBE-29 → KOBE-69.
+2. Install on Chris's k3s needs images on ghcr (KOBE-7) and a `read:packages` pull secret.
 
 ## Open problems / decisions
 
@@ -43,3 +47,7 @@ Hadron ignite and re-read the current ticket).
   main after #1 merges).
 - Dev Postgres: container `kobe-dev-pg` on compute2, port 15432 (test-only credentials).
 - Ask Chris: make CI `checks`, `db`, `images` required status checks on `main`.
+- Tools: helm/kubectl/k3d binaries live in the session scratchpad `bin/` (not installed globally);
+  CI installs helm via azure/setup-helm. k3d test cluster `kobe` runs on compute2's Docker
+  (`DOCKER_HOST=ssh://claude@compute2...`); compute2 inotify limit 128 → single-node k3d only.
+- Pending Chris sign-off: license exceptions caniuse-lite (CC-BY-4.0) and argparse (Python-2.0).
