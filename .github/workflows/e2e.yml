@@ -86,4 +86,6 @@ jobs:
           kubectl -n kobe-dev describe pods | tail -200
           kubectl get events -A --sort-by=.lastTimestamp | tail -80
           kubectl -n kobe-dev logs --all-containers --prefix --tail=50 -l app.kubernetes.io/name=kobe || true
+          kubectl get sandboxes,sandboxclaims,sandboxwarmpools,networkpolicies -A || true
+          kubectl -n kobe-team-e2e describe pods | tail -120 || true
           df -h /
