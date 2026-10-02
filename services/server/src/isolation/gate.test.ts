@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  ISOLATION_MAX_AGE_MS,
   ISOLATION_RECHECK_INTERVAL_MS,
   IsolationRuntimeMissingError,
   createIsolationGate,
@@ -129,17 +128,15 @@ describe("isolation gate: require() before agent work", () => {
     });
   });
 
-  it("re-checks a stale verification before trusting it", async () => {
+  it("re-checks live before agent work, so a class replaced after boot is refused", async () => {
     let classes = GVISOR;
     const list = vi.fn(async () => classes);
-    const { g, advance } = gate({ listRuntimeClasses: list });
+    const { g } = gate({ listRuntimeClasses: list });
     await g.check();
-    classes = [rc("gvisor", "runc")]; // replaced after boot
-    advance(ISOLATION_MAX_AGE_MS - 1);
     await expect(g.require()).resolves.toMatchObject({ runtimeClassName: "gvisor" });
-    advance(2);
+    classes = [rc("gvisor", "runc")]; // deleted and recreated without isolation
     await expect(g.require()).rejects.toBeInstanceOf(IsolationRuntimeMissingError);
-    expect(list).toHaveBeenCalledTimes(2);
+    expect(list).toHaveBeenCalledTimes(3);
     expect(g.status().state).toBe("missing");
   });
 });
@@ -182,7 +179,34 @@ describe("isolation gate: periodic re-check", () => {
     expect(list).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the recheck interval shorter than the max age", () => {
-    expect(ISOLATION_RECHECK_INTERVAL_MS).toBeLessThan(ISOLATION_MAX_AGE_MS);
+  it("keeps re-checking even when the first check's listener throws", async () => {
+    vi.useFakeTimers();
+    const list = vi.fn(async () => GVISOR);
+    const g = createIsolationGate({
+      runtimeClassName: "gvisor",
+      listRuntimeClasses: list,
+      onChange: () => {
+        throw new Error("logger down");
+      },
+    });
+    await expect(g.start()).resolves.toMatchObject({ state: "verified" });
+    await vi.advanceTimersByTimeAsync(ISOLATION_RECHECK_INTERVAL_MS * 2);
+    expect(list).toHaveBeenCalledTimes(3);
+    g.stop();
+  });
+
+  it("fails closed if the clock throws mid-check, without an unhandled rejection", async () => {
+    let calls = 0;
+    const g = createIsolationGate({
+      runtimeClassName: "gvisor",
+      listRuntimeClasses: async () => GVISOR,
+      now: () => {
+        calls += 1;
+        if (calls === 1) throw new Error("clock broke");
+        return new Date(0);
+      },
+    });
+    await expect(g.require()).rejects.toThrow(/clock broke/);
+    expect(g.status()).toMatchObject({ state: "missing", runtimeClassName: "gvisor" });
   });
 });

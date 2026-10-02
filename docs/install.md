@@ -40,8 +40,8 @@ default `gvisor`): it must exist and have an isolating handler. Besides the inst
 the pre-install/pre-upgrade/pre-rollback hook, so that `--no-hooks`, `helm template | kubectl
 apply`, or deleting the RuntimeClass later cannot run agents without isolation:
 
-- The **server** checks in process at startup, every minute, and before agent work whenever its
-  last result is older than two minutes. Without a verified RuntimeClass it keeps serving sign-in
+- The **server** checks in process at startup, every minute, and live before every piece of
+  agent work. Without a verified RuntimeClass it keeps serving sign-in
   and the admin console but **agents are disabled**: chat returns `isolation_runtime_missing`
   (HTTP 503), the server logs the problem and the fix at `error` level, and install admins see
   both at `GET /v1/install/isolation` (`POST /v1/install/isolation/check` re-checks immediately

@@ -1,15 +1,14 @@
-import { checkIsolation, type RuntimeClassLike } from "./runtime-class.js";
+import { ISOLATION_REMEDIATION, checkIsolation, type RuntimeClassLike } from "./runtime-class.js";
 
 /**
  * The server's own isolation check (spec D4, principle 7). The chart checks at install time and
  * in a hook Job; this gate checks inside the running process at startup, every
- * ISOLATION_RECHECK_INTERVAL_MS, and again before agent work when its last result is older than
- * ISOLATION_MAX_AGE_MS. Without a verified gVisor/Kata RuntimeClass the server keeps serving
+ * ISOLATION_RECHECK_INTERVAL_MS, and live before every piece of agent work (require()), so a
+ * RuntimeClass deleted or replaced after boot is caught when it matters. Without a verified gVisor/Kata RuntimeClass the server keeps serving
  * (sign-in, the admin console showing the fix) but every agent path gets
  * IsolationRuntimeMissingError. It fails closed and has no bypass.
  */
 export const ISOLATION_RECHECK_INTERVAL_MS = 60_000;
-export const ISOLATION_MAX_AGE_MS = 120_000;
 export const ISOLATION_API_TIMEOUT_MS = 10_000;
 
 const UNSET_MESSAGE =
@@ -68,7 +67,6 @@ export interface IsolationGateOptions {
   readonly onChange?: (status: IsolationStatus) => void;
   readonly now?: () => Date;
   readonly recheckIntervalMs?: number;
-  readonly maxAgeMs?: number;
   readonly apiTimeoutMs?: number;
 }
 
@@ -79,7 +77,10 @@ export interface IsolationGate {
   /** Re-checks now (concurrent callers share one Kubernetes API call). */
   check(): Promise<IsolationStatus>;
   status(): IsolationStatus;
-  /** Gate for agent work: the verified RuntimeClass, or IsolationRuntimeMissingError. */
+  /**
+   * Gate for agent work: re-checks live (sharing an in-flight check) and returns the verified
+   * RuntimeClass sandboxes must use, or throws IsolationRuntimeMissingError.
+   */
   require(): Promise<VerifiedIsolation>;
 }
 
@@ -103,7 +104,6 @@ export function createIsolationGate(options: IsolationGateOptions): IsolationGat
     onChange,
     now = () => new Date(),
     recheckIntervalMs = ISOLATION_RECHECK_INTERVAL_MS,
-    maxAgeMs = ISOLATION_MAX_AGE_MS,
     apiTimeoutMs = ISOLATION_API_TIMEOUT_MS,
   } = options;
 
@@ -119,27 +119,46 @@ export function createIsolationGate(options: IsolationGateOptions): IsolationGat
     const changed = !reported || !sameState(current, next);
     reported = true;
     current = next;
-    if (changed) onChange?.(next);
+    if (changed) {
+      try {
+        onChange?.(next);
+      } catch {
+        // A failing listener (logger) must not break the gate; the state is already published.
+      }
+    }
     return next;
   };
 
-  const runCheck = async (name: string): Promise<IsolationStatus> => {
+  const evaluate = async (name: string): Promise<IsolationStatus> => {
     const result = await checkIsolation(
       () => withTimeout(listRuntimeClasses(), apiTimeoutMs),
       name,
     );
     const checkedAt = now();
     const [verified] = result.ok ? result.runtimeClasses : [];
-    return publish(
-      verified
-        ? { state: "verified", runtimeClassName: name, handler: verified.handler, checkedAt }
-        : {
-            state: "missing",
-            runtimeClassName: name,
-            message: result.ok ? "No isolating RuntimeClass found." : result.message,
-            checkedAt,
-          },
-    );
+    return verified
+      ? { state: "verified", runtimeClassName: name, handler: verified.handler, checkedAt }
+      : {
+          state: "missing",
+          runtimeClassName: name,
+          message: result.ok ? "No isolating RuntimeClass found." : result.message,
+          checkedAt,
+        };
+  };
+
+  /** Never rejects: any failure is published as "missing" (fail closed). */
+  const runCheck = async (name: string): Promise<IsolationStatus> => {
+    try {
+      return publish(await evaluate(name));
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      return publish({
+        state: "missing",
+        runtimeClassName: name,
+        message: `Isolation check failed (${reason}). ${ISOLATION_REMEDIATION}`,
+        checkedAt: new Date(),
+      });
+    }
   };
 
   const check = (): Promise<IsolationStatus> => {
@@ -154,15 +173,12 @@ export function createIsolationGate(options: IsolationGateOptions): IsolationGat
     return inFlight;
   };
 
-  const isFresh = (status: IsolationStatus): boolean =>
-    status.state === "verified" && now().getTime() - status.checkedAt.getTime() <= maxAgeMs;
-
   return {
-    async start() {
-      const status = await check();
-      timer ??= setInterval(() => void check(), recheckIntervalMs);
+    start() {
+      // Scheduled before the first check, so re-checks happen whatever that check does.
+      timer ??= setInterval(() => void check(), recheckIntervalMs); // check() never rejects
       timer.unref();
-      return status;
+      return check();
     },
     stop() {
       if (timer) clearInterval(timer);
@@ -171,8 +187,8 @@ export function createIsolationGate(options: IsolationGateOptions): IsolationGat
     check,
     status: () => current,
     async require() {
-      const status = isFresh(current) ? current : await check();
-      if (status.state === "verified" && isFresh(status)) {
+      const status = await check();
+      if (status.state === "verified") {
         return { runtimeClassName: status.runtimeClassName, handler: status.handler };
       }
       throw new IsolationRuntimeMissingError(
