@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { evaluateLicense, findStaleExceptions, findViolations } from "./policy.js";
 
 describe("evaluateLicense", () => {
-  it.each(["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "MPL-2.0", "ISC", "0BSD"])(
+  it.each(["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "MPL-2.0", "ISC", "0BSD", "Zlib"])(
     "allows %s",
     (license) => {
       expect(evaluateLicense(license).allowed).toBe(true);

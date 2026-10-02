@@ -16,6 +16,7 @@ export const ALLOWED_LICENSES: ReadonlySet<string> = new Set([
   "MPL-2.0",
   // Public-domain and permissive equivalents of MIT/BSD.
   "BlueOak-1.0.0",
+  "Zlib",
   "CC0-1.0",
   "Unlicense",
 ]);

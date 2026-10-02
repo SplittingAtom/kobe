@@ -8,13 +8,19 @@ import {
   type LicenseReport,
 } from "./policy.js";
 
-const exceptionsPath = fileURLToPath(new URL("../license-exceptions.json", import.meta.url));
+// Default: the pnpm workspace. LICENSE_REPORT/LICENSE_EXCEPTIONS check another report instead
+// (e.g. the sandbox image: images/sandbox/collect-licenses.sh).
+const exceptionsPath =
+  process.env.LICENSE_EXCEPTIONS ??
+  fileURLToPath(new URL("../license-exceptions.json", import.meta.url));
+const reportPath = process.env.LICENSE_REPORT;
 const lockfilePath = fileURLToPath(new URL("../../../pnpm-lock.yaml", import.meta.url));
 
 /** Packages excluded via pnpm-workspace.yaml; they never install, so the report can't see them. */
 const EXCLUDED_PACKAGES = [/^\s+sharp@/m, /^\s+'?@img\//m];
 
 function loadReport(): LicenseReport {
+  if (reportPath) return JSON.parse(readFileSync(reportPath, "utf8")) as LicenseReport;
   // Covers production and development dependencies across the whole workspace.
   const output = execFileSync("pnpm", ["licenses", "list", "--json", "--recursive"], {
     encoding: "utf8",
@@ -37,7 +43,7 @@ function main(): void {
     fail([`License exceptions need a reason and pinned versions: ${unjustified.join(", ")}`]);
   }
 
-  const lockfile = readFileSync(lockfilePath, "utf8");
+  const lockfile = reportPath ? "" : readFileSync(lockfilePath, "utf8");
   const reintroduced = EXCLUDED_PACKAGES.filter((pattern) => pattern.test(lockfile));
   if (reintroduced.length > 0) {
     fail(["pnpm-lock.yaml contains sharp/@img packages (LGPL libvips); keep them excluded."]);

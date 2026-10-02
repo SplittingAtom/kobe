@@ -1,0 +1,32 @@
+{
+  "typing_extensions": {
+    "license": "PSF-2.0",
+    "versions": ["4.16.0"],
+    "reason": "Python Software Foundation license: permissive (BSD-style), not copyleft. Transitive dependency of the data stack. Pending Chris's sign-off (KOBE-21)."
+  },
+  "matplotlib": {
+    "license": "Python-2.0",
+    "versions": ["3.11.2"],
+    "reason": "matplotlib's PSF-based license: permissive, not copyleft. Required for chart artifacts (Data Analyst, spec D21). Pending Chris's sign-off (KOBE-21)."
+  },
+  "pillow": {
+    "license": "MIT-CMU",
+    "versions": ["12.3.0"],
+    "reason": "HPND/MIT-CMU: permissive, MIT-like. matplotlib dependency. Pending Chris's sign-off (KOBE-21)."
+  },
+  "npm": {
+    "license": "Artistic-2.0",
+    "versions": ["12.2.0"],
+    "reason": "The npm CLI, shipped unmodified as a separate program so agents can install packages through the egress proxy. Artistic-2.0 is OSI-approved and not copyleft for unmodified redistribution. Pending Chris's sign-off (KOBE-21)."
+  },
+  "qrcode-terminal": {
+    "license": "Apache 2.0",
+    "versions": ["0.12.0"],
+    "reason": "Apache-2.0 declared with a non-SPDX label (npm dependency). Pending Chris's sign-off (KOBE-21)."
+  },
+  "spdx-exceptions": {
+    "license": "CC-BY-3.0",
+    "versions": ["2.5.0"],
+    "reason": "SPDX exception-list data used by npm; attribution-only data license, not copyleft. Pending Chris's sign-off (KOBE-21)."
+  }
+}
