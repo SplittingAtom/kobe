@@ -1,4 +1,5 @@
-import { readFile, stat } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -11,26 +12,39 @@ import {
   serverInfo,
   type TableInfo,
 } from "./catalog.js";
-import {
-  MANIFEST_FILE,
-  OBJECTS_FILE,
-  parseManifest,
-  verifyFile,
-  type Manifest,
-} from "./manifest.js";
+import { decryptBuffer, decryptFile } from "./crypto.js";
 import { isExcluded } from "./excluded.js";
-import { collect, compareObjects, parseObjectList, type ObjectLister } from "./objects.js";
-import { checkToolVersion, libpqConnection, pgBinary, spawnTool, waitForExit } from "./pg-tools.js";
+import { readSignedManifest, verifyFile, type Manifest } from "./manifest.js";
+import {
+  collect,
+  compareObjects,
+  parseObjectList,
+  type ObjectLister,
+  type StoredObject,
+} from "./objects.js";
+import {
+  checkToolVersion,
+  libpqConnection,
+  pgBinary,
+  safePsqlErrors,
+  safeToolErrors,
+  spawnTool,
+  waitForExit,
+} from "./pg-tools.js";
 import { journalText, restorePostlude, restorePrelude, type RestorePlan } from "./restore-sql.js";
 
 export interface RestoreOptions {
   /** The owner role (migrate-url): owns every table, so it can lift FORCE RLS in the transaction. */
   readonly databaseUrl: string;
   readonly from: string;
+  /** Operator-held key material: authenticates and decrypts the backup. */
+  readonly key: Buffer;
   /** null: object storage not configured for this restore. */
   readonly objects: ObjectLister | null;
-  /** Proceed although objects listed in the backup are missing or unverified. */
-  readonly allowMissingObjects: boolean;
+  /** Proceed although bucket objects are missing or differ from the backup's listing. */
+  readonly allowObjectMismatch: boolean;
+  /** Skip object verification (operator passed --no-objects; warned loudly). */
+  readonly skipObjects: boolean;
   readonly pgBinDir?: string | undefined;
   readonly log?: (message: string) => void;
 }
@@ -39,26 +53,7 @@ export interface RestoreReport {
   readonly tables: number;
   readonly rows: number;
   readonly excludedTables: readonly string[];
-  readonly objects: { readonly checked: number; readonly missing: number } | null;
-}
-
-const MAX_MANIFEST_BYTES = 10 * 1024 * 1024;
-
-async function readBackup(
-  dir: string,
-): Promise<{ manifest: Manifest; objectsText: string | null }> {
-  const path = join(dir, MANIFEST_FILE);
-  const size = (await stat(path)).size;
-  if (size > MAX_MANIFEST_BYTES)
-    throw new Error(`${MANIFEST_FILE} is too large to be a Kobe manifest`);
-  const manifest = parseManifest(await readFile(path, "utf8"));
-  await verifyFile(dir, manifest.files.database);
-  let objectsText: string | null = null;
-  if (manifest.files.objects) {
-    await verifyFile(dir, manifest.files.objects);
-    objectsText = await readFile(join(dir, OBJECTS_FILE), "utf8");
-  }
-  return { manifest, objectsText };
+  readonly objects: { readonly checked: number; readonly problems: number } | null;
 }
 
 function describeJournal(migrations: readonly { hash: string }[]): string {
@@ -106,42 +101,48 @@ function checkTarget(
 
 async function checkObjects(
   manifest: Manifest,
-  objectsText: string | null,
+  expected: readonly StoredObject[] | null,
   options: RestoreOptions,
 ): Promise<RestoreReport["objects"]> {
   const log = options.log ?? (() => undefined);
-  if (!manifest.objectStorage || objectsText === null) return null;
-  const expected = parseObjectList(objectsText);
-  if (!options.objects) {
-    if (!options.allowMissingObjects) {
+  if (!manifest.objectStorage || expected === null) {
+    log(
+      "WARNING: this backup has no S3 object listing (taken with --no-objects): uploads, artifacts and files are NOT verified",
+    );
+    return null;
+  }
+  if (options.skipObjects || !options.objects) {
+    if (!options.skipObjects) {
       throw new Error(
-        `The backup lists ${expected.length} S3 objects but object storage is not configured: set KOBE_S3_* to verify them, or pass --allow-missing-objects`,
+        `The backup lists ${expected.length} S3 objects but object storage is not configured: set KOBE_S3_* to verify them, or pass --no-objects to skip the check`,
       );
     }
-    log(`WARNING: ${expected.length} S3 objects were not verified (no object storage configured)`);
-    return { checked: 0, missing: expected.length };
+    log(`WARNING: --no-objects: ${expected.length} S3 objects are NOT verified`);
+    return { checked: 0, problems: 0 };
   }
   log(
     `verifying ${expected.length} objects in s3://${options.objects.location.bucket}/${options.objects.location.prefix}…`,
   );
   const diff = compareObjects(expected, await collect(options.objects));
-  const problems = diff.missing.length + diff.sizeMismatch.length;
-  if (diff.etagMismatch > 0)
-    log(`note: ${diff.etagMismatch} objects have the same size but a different ETag`);
-  if (diff.extra > 0)
+  if (diff.extra > 0) {
     log(`note: ${diff.extra} objects in the bucket are not in the backup (left untouched)`);
+  }
+  const problems = diff.missing.length + diff.sizeMismatch.length + diff.etagMismatch.length;
   if (problems > 0) {
     const sample = [
       ...diff.missing.map((o) => o.key),
       ...diff.sizeMismatch.map((o) => o.key),
+      ...diff.etagMismatch.map((o) => o.key),
     ].slice(0, 10);
-    const message = `${diff.missing.length} objects are missing and ${diff.sizeMismatch.length} differ in size in the target bucket (e.g. ${sample.join(", ")})`;
-    if (!options.allowMissingObjects) {
-      throw new Error(`${message}. Copy them into the bucket, or pass --allow-missing-objects`);
+    const message = `${diff.missing.length} objects are missing, ${diff.sizeMismatch.length} differ in size and ${diff.etagMismatch.length} differ in ETag in the target bucket (e.g. ${sample.join(", ")})`;
+    if (!options.allowObjectMismatch) {
+      throw new Error(
+        `${message}. Restore the objects (bucket versioning/replication), or pass --allow-object-mismatch`,
+      );
     }
-    log(`WARNING: ${message}`);
+    log(`WARNING: --allow-object-mismatch: ${message}`);
   }
-  return { checked: expected.length, missing: problems };
+  return { checked: expected.length, problems };
 }
 
 /** Streams prelude + pg_restore's data script + postlude into one psql session. */
@@ -155,21 +156,31 @@ async function loadData(
   const conn = libpqConnection(options.databaseUrl);
   const psql = spawnTool(
     psqlBin,
-    ["--no-psqlrc", "--quiet", "--no-password", "--set=ON_ERROR_STOP=1", `--dbname=${conn.dbname}`],
+    [
+      "--no-psqlrc",
+      "--quiet",
+      "--no-password",
+      "--set=ON_ERROR_STOP=1",
+      "--set=VERBOSITY=verbose",
+      "--set=SHOW_CONTEXT=never",
+      `--dbname=${conn.dbname}`,
+    ],
     { env: conn.env },
   );
   const psqlExit = waitForExit(psql, psqlBin);
+  psqlExit.catch(() => undefined);
   psql.stdout?.resume();
   const dump = spawnTool(restoreBin, ["--data-only", "--file=-", dumpPath]);
   dump.stdin?.end();
   const dumpExit = waitForExit(dump, restoreBin);
+  dumpExit.catch(() => undefined);
 
   async function* script(): AsyncGenerator<string | Buffer> {
     yield restorePrelude(plan);
     for await (const chunk of dump.stdout ?? []) yield chunk as Buffer;
     const { code, stderr } = await dumpExit;
     // Without COMMIT, psql's session ends and Postgres rolls everything back.
-    if (code !== 0) throw new Error(`pg_restore failed (exit ${code}): ${stderr.trim()}`);
+    if (code !== 0) throw new Error(`pg_restore failed (exit ${code}): ${safeToolErrors(stderr)}`);
     yield restorePostlude(plan);
   }
 
@@ -181,12 +192,8 @@ async function loadData(
   }
   const [{ code, stderr }] = await Promise.all([psqlExit, dumpExit.catch(() => undefined)]);
   if (code !== 0) {
-    const reason = stderr
-      .split("\n")
-      .filter((l) => /ERROR|FATAL|psql:/.test(l))
-      .join("\n");
     throw new Error(
-      `Restore failed and was rolled back; the target is unchanged:\n${reason || stderr.trim()}`,
+      `Restore failed and was rolled back; the target is unchanged:\n${safePsqlErrors(stderr) || `psql exited with ${code}`}`,
     );
   }
   if (streamError) {
@@ -196,49 +203,70 @@ async function loadData(
   }
 }
 
-/** `kobe restore`: verify the backup and the target, then load all data in one transaction. */
+/**
+ * `kobe restore`: authenticate the backup (before running any tool), decrypt it into a private
+ * temporary directory, verify the target and the bucket, then load all data in one transaction.
+ */
 export async function runRestore(options: RestoreOptions): Promise<RestoreReport> {
   const log = options.log ?? (() => undefined);
   const dir = resolve(options.from);
-  const { manifest, objectsText } = await readBackup(dir);
+  const { manifest, keys } = await readSignedManifest(dir, options.key);
+  await verifyFile(dir, manifest.files.database);
+  let expectedObjects: StoredObject[] | null = null;
+  if (manifest.files.objects) {
+    const ref = manifest.files.objects;
+    await verifyFile(dir, ref);
+    const sealed = { iv: ref.iv, tag: ref.tag, data: await readFile(join(dir, ref.path)) };
+    expectedObjects = parseObjectList(decryptBuffer(keys.enc, ref.path, sealed).toString("utf8"));
+  }
   log(
-    `backup from ${manifest.createdAt}: ${manifest.tables.length} tables, ${describeJournal(manifest.migrations)}`,
+    `backup from ${manifest.createdAt} (signature verified): ${manifest.tables.length} tables, ${describeJournal(manifest.migrations)}`,
   );
 
-  const client = new pg.Client({
-    connectionString: options.databaseUrl,
-    connectionTimeoutMillis: 10_000,
-  });
-  await client.connect();
-  let plan: RestorePlan;
-  let major: number;
+  const work = await mkdtemp(join(tmpdir(), "kobe-restore-"));
   try {
-    const info = await serverInfo(client);
-    major = info.major;
-    const tables = await listTables(client);
-    checkOwnership(tables);
-    checkTarget(manifest, tables, await readJournal(client));
-    plan = {
-      lockKey: MIGRATION_LOCK_KEY,
-      migrations: manifest.migrations,
-      lockTables: tables.map((t) => t.name),
-      loadTables: manifest.tables,
-      forcedRls: tables.filter((t) => t.forcedRls).map((t) => t.name),
-      userTriggers: await listUserTriggers(client),
+    await chmod(work, 0o700);
+    const dumpPath = join(work, "database.dump");
+    const ref = manifest.files.database;
+    await decryptFile(keys.enc, ref.path, join(dir, ref.path), ref, dumpPath);
+
+    const client = new pg.Client({
+      connectionString: options.databaseUrl,
+      connectionTimeoutMillis: 10_000,
+    });
+    await client.connect();
+    let plan: RestorePlan;
+    let major: number;
+    try {
+      const info = await serverInfo(client);
+      major = info.major;
+      const tables = await listTables(client);
+      checkOwnership(tables);
+      checkTarget(manifest, tables, await readJournal(client));
+      plan = {
+        lockKey: MIGRATION_LOCK_KEY,
+        migrations: manifest.migrations,
+        lockTables: tables.map((t) => t.name),
+        loadTables: manifest.tables,
+        forcedRls: tables.filter((t) => t.forcedRls).map((t) => t.name),
+        userTriggers: await listUserTriggers(client),
+      };
+    } finally {
+      await client.end().catch(() => undefined);
+    }
+    await checkToolVersion(pgBinary("pg_restore", options.pgBinDir), major, true);
+    await checkToolVersion(pgBinary("psql", options.pgBinDir), major, true);
+
+    const objects = await checkObjects(manifest, expectedObjects, options);
+    log("loading data in one transaction…");
+    await loadData(plan, dumpPath, options);
+    return {
+      tables: manifest.tables.length,
+      rows: manifest.tables.reduce((sum, t) => sum + t.rows, 0),
+      excludedTables: manifest.excludedTables.map((t) => t.name),
+      objects,
     };
   } finally {
-    await client.end().catch(() => undefined);
+    await rm(work, { recursive: true, force: true });
   }
-  await checkToolVersion(pgBinary("pg_restore", options.pgBinDir), major);
-  await checkToolVersion(pgBinary("psql", options.pgBinDir), major);
-
-  const objects = await checkObjects(manifest, objectsText, options);
-  log("loading data in one transaction…");
-  await loadData(plan, join(dir, manifest.files.database.path), options);
-  return {
-    tables: manifest.tables.length,
-    rows: manifest.tables.reduce((sum, t) => sum + t.rows, 0),
-    excludedTables: manifest.excludedTables.map((t) => t.name),
-    objects,
-  };
 }

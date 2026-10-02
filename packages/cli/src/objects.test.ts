@@ -3,6 +3,7 @@ import {
   compareObjects,
   parseObjectList,
   serializeObjectList,
+  unlistedReferences,
   type StoredObject,
 } from "./objects.js";
 
@@ -38,10 +39,17 @@ describe("compareObjects", () => {
     expect(diff.extra).toBe(1);
   });
 
-  it("counts ETag differences without failing on them (copies may re-chunk)", () => {
+  it("reports ETag differences (a same-size object may hold other content)", () => {
     const diff = compareObjects([a], [{ ...a, etag: '"other"' }]);
     expect(diff.missing).toEqual([]);
     expect(diff.sizeMismatch).toEqual([]);
-    expect(diff.etagMismatch).toBe(1);
+    expect(diff.etagMismatch).toEqual([{ key: a.key, expected: '"e1"', actual: '"other"' }]);
+  });
+});
+
+describe("unlistedReferences", () => {
+  it("returns referenced keys missing from the listing, once each", () => {
+    expect(unlistedReferences([a.key, "gone.bin", "gone.bin"], [a, b])).toEqual(["gone.bin"]);
+    expect(unlistedReferences([], [a])).toEqual([]);
   });
 });

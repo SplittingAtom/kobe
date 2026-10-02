@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { runBackup } from "./backup.js";
-import { parseCommand, type Command } from "./config.js";
+import { parseCommand, tlsWarning, type Command } from "./config.js";
 import { runRestore } from "./restore.js";
 import { s3Lister } from "./s3.js";
 
@@ -15,6 +15,7 @@ async function run(cmd: Command): Promise<void> {
       databaseUrl: cmd.databaseUrl,
       out: cmd.out,
       objects,
+      key: cmd.key,
       pgBinDir: cmd.pgBinDir,
       log,
     });
@@ -25,7 +26,7 @@ async function run(cmd: Command): Promise<void> {
         `; not included: ${m.excludedTables.map((t) => t.name).join(", ") || "-"}`,
     );
     log(
-      "Kubernetes Secrets (auth secret, database and S3 credentials) are not in the backup; keep copies separately (docs/backup-restore.md)",
+      "backup encrypted and signed with your backup key. The key and the Kubernetes Secrets (auth secret, database and S3 credentials) are not in the backup; keep them in your secret store (docs/backup-restore.md)",
     );
     return;
   }
@@ -33,14 +34,16 @@ async function run(cmd: Command): Promise<void> {
     databaseUrl: cmd.databaseUrl,
     from: cmd.from,
     objects,
-    allowMissingObjects: cmd.allowMissingObjects,
+    key: cmd.key,
+    allowObjectMismatch: cmd.allowObjectMismatch,
+    skipObjects: cmd.skipObjects,
     pgBinDir: cmd.pgBinDir,
     log,
   });
   log(
     `restored ${report.tables} tables, ${report.rows} rows` +
       (report.objects
-        ? `; S3 objects checked: ${report.objects.checked}, problems: ${report.objects.missing}`
+        ? `; S3 objects checked: ${report.objects.checked}, problems: ${report.objects.problems}`
         : "") +
       `. Users sign in again (sessions are not backed up). Scale the server and scheduler back up.`,
   );
@@ -54,6 +57,8 @@ async function main(): Promise<void> {
     log((err as Error).message);
     process.exit(2);
   }
+  const warning = tlsWarning(cmd.databaseUrl);
+  if (warning) log(warning);
   await run(cmd);
 }
 

@@ -1,23 +1,34 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
+import { deriveKeys, signManifest, verifyManifestSignature, type BackupKeys } from "./crypto.js";
 
 export const MANIFEST_FORMAT = "kobe-backup/1";
 export const MANIFEST_FILE = "manifest.json";
-export const DATABASE_FILE = "database.dump";
-export const OBJECTS_FILE = "objects.jsonl";
+export const MANIFEST_SIGNATURE_FILE = "manifest.json.sig";
+/** pg_dump custom format, AES-256-GCM encrypted. */
+export const DATABASE_FILE = "database.dump.enc";
+/** Object listing (JSON lines), AES-256-GCM encrypted. */
+export const OBJECTS_FILE = "objects.jsonl.enc";
+const MAX_MANIFEST_BYTES = 10 * 1024 * 1024;
 
 /** Same rule as @kobe/db's quoteIdent: plain lowercase identifiers only. */
 const tableName = z.string().regex(/^[a-z_][a-z0-9_]{0,62}$/, "invalid table name");
 const sha256 = z.string().regex(/^[0-9a-f]{64}$/, "invalid sha256");
+const hex = (bytes: number) =>
+  z.string().regex(new RegExp(`^[0-9a-f]{${bytes * 2}}$`), "invalid hex");
 const count = z.number().int().nonnegative();
 
 const fileRef = z.object({
   // Only the fixed file names: a manifest must never point outside its own directory.
   path: z.enum([DATABASE_FILE, OBJECTS_FILE]),
+  /** Checksum and size of the ciphertext on disk. */
   sha256,
   bytes: count,
+  iv: hex(12),
+  tag: hex(16),
 });
 
 const manifestSchema = z
@@ -32,6 +43,17 @@ const manifestSchema = z
     /** Tables present at backup time whose rows were deliberately left out. */
     excludedTables: z.array(z.object({ name: tableName, reason: z.string().max(500) })),
     files: z.object({ database: fileRef, objects: fileRef.nullable() }),
+    encryption: z.object({
+      cipher: z.literal("aes-256-gcm"),
+      kdf: z.literal("hkdf-sha256"),
+      salt: hex(16),
+    }),
+    /** What the backup checked it covers: only `public` holds data, no large objects. */
+    coverage: z.object({
+      schemas: z.tuple([z.literal("public")]),
+      otherSchemasChecked: z.literal(true),
+      largeObjects: z.literal(0),
+    }),
     objectStorage: z
       .object({
         endpoint: z.string().max(500),
@@ -39,6 +61,9 @@ const manifestSchema = z
         prefix: z.string().max(1024),
         objects: count,
         bytes: count,
+        /** Distinct object keys referenced from blob-ref columns, all present in the listing. */
+        referencedObjects: count,
+        blobRefColumns: z.array(z.object({ table: tableName, column: tableName })),
       })
       .nullable(),
   })
@@ -81,6 +106,56 @@ export async function sha256File(path: string): Promise<{ sha256: string; bytes:
     hash.update(buf);
   }
   return { sha256: hash.digest("hex"), bytes };
+}
+
+/**
+ * Reads manifest.json and verifies its HMAC with the operator's key before parsing it; nothing in
+ * an unsigned or re-signed-with-another-key backup is trusted.
+ */
+export async function readSignedManifest(
+  dir: string,
+  master: Buffer,
+): Promise<{ manifest: Manifest; keys: BackupKeys }> {
+  const path = join(dir, MANIFEST_FILE);
+  if ((await stat(path)).size > MAX_MANIFEST_BYTES) {
+    throw new Error(`${MANIFEST_FILE} is too large to be a Kobe manifest`);
+  }
+  const body = await readFile(path);
+  let signature: string;
+  try {
+    signature = (await readFile(join(dir, MANIFEST_SIGNATURE_FILE), "utf8")).trim();
+  } catch {
+    throw new Error(`${MANIFEST_SIGNATURE_FILE} is missing: refusing an unsigned backup`);
+  }
+  let salt: string | undefined;
+  try {
+    salt = (JSON.parse(body.toString("utf8")) as { encryption?: { salt?: unknown } }).encryption
+      ?.salt as string | undefined;
+  } catch {
+    // Reported as a signature failure below.
+  }
+  if (typeof salt !== "string" || !/^[0-9a-f]{32}$/.test(salt)) {
+    throw new Error("The backup manifest is not signed by this backup key (or was modified)");
+  }
+  const keys = deriveKeys(master, Buffer.from(salt, "hex"));
+  if (!verifyManifestSignature(keys.mac, body, signature)) {
+    throw new Error(
+      "The backup manifest signature does not verify: wrong backup key, or the backup was modified",
+    );
+  }
+  return { manifest: parseManifest(body.toString("utf8")), keys };
+}
+
+export async function writeSignedManifest(
+  dir: string,
+  manifest: Manifest,
+  keys: BackupKeys,
+): Promise<void> {
+  const body = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
+  await writeFile(join(dir, MANIFEST_FILE), body, { mode: 0o600 });
+  await writeFile(join(dir, MANIFEST_SIGNATURE_FILE), `${signManifest(keys.mac, body)}\n`, {
+    mode: 0o600,
+  });
 }
 
 /** Fails unless `dir/ref.path` has exactly the recorded size and checksum. */

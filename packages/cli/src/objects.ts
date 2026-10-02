@@ -52,8 +52,8 @@ export interface ObjectDiff {
   /** In the backup's list but not in the bucket. */
   readonly missing: readonly StoredObject[];
   readonly sizeMismatch: readonly { key: string; expected: number; actual: number }[];
-  /** Same size, different ETag: counted only (copies and multipart uploads change ETags). */
-  readonly etagMismatch: number;
+  /** Same size, different ETag: content may differ (or a copy re-chunked a multipart upload). */
+  readonly etagMismatch: readonly { key: string; expected: string; actual: string }[];
   /** In the bucket but not in the backup's list (written after the backup; harmless). */
   readonly extra: number;
 }
@@ -67,16 +67,27 @@ export function compareObjects(
   const expectedKeys = new Set(expected.map((o) => o.key));
   const missing: StoredObject[] = [];
   const sizeMismatch: { key: string; expected: number; actual: number }[] = [];
-  let etagMismatch = 0;
+  const etagMismatch: { key: string; expected: string; actual: string }[] = [];
   for (const want of expected) {
     const got = found.get(want.key);
     if (!got) missing.push(want);
     else if (got.size !== want.size) {
       sizeMismatch.push({ key: want.key, expected: want.size, actual: got.size });
-    } else if (got.etag !== want.etag) etagMismatch += 1;
+    } else if (got.etag !== want.etag) {
+      etagMismatch.push({ key: want.key, expected: want.etag, actual: got.etag });
+    }
   }
   const extra = [...found.keys()].filter((k) => !expectedKeys.has(k)).length;
   return { missing, sizeMismatch, etagMismatch, extra };
+}
+
+/** Object keys referenced from the database that the listing does not contain. */
+export function unlistedReferences(
+  referenced: Iterable<string>,
+  listing: readonly StoredObject[],
+): string[] {
+  const keys = new Set(listing.map((o) => o.key));
+  return [...new Set(referenced)].filter((k) => !keys.has(k)).sort();
 }
 
 export async function collect(lister: ObjectLister): Promise<StoredObject[]> {

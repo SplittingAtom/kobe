@@ -1,3 +1,4 @@
+export { BLOB_REF_COLUMNS, type BlobRefColumn } from "./blob-refs.js";
 export {
   createDb,
   type CreateDbOptions,

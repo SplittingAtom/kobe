@@ -58,14 +58,41 @@ transaction as the owner.
   in a secret store and how to reinstall with the same auth secret. Backup files 0600 in a 0700
   dir; manifest holds no credentials (S3 endpoint with userinfo is rejected).
 - **S3:** external only; the backup records a manifest (key, size, ETag), the restore verifies the
-  target bucket (missing/resized → refuse unless `--allow-missing-objects`; ETag differences and
-  extra objects only reported). No object copying (spec says "S3 manifest").
+  target bucket (missing/resized/ETag-changed → refuse unless `--allow-object-mismatch`; extra
+  objects only reported). No object copying (spec says "S3 manifest"; settled in review).
 - **Consistency:** counts, journal and dump from one exported snapshot; backup holds the migration
   advisory lock shared, restore exclusive; both fail fast if a migration holds it.
 - **New tables automatic:** every ordinary table in `public` is included unless on the exclusion
   list (`packages/cli/src/excluded.ts`, test pins it to real install-wide tables).
 - **CI:** `db` job installs `postgresql-client-17` from PGDG (runner client is older than the
   server; pg_dump refuses newer servers) and puts it on PATH (turbo strict env passes PATH).
+
+## Review round 1 (coordinator security review: REQUEST CHANGES)
+
+- **H1 authenticity:** operator backup key (`KOBE_BACKUP_KEY_FILE` / `KOBE_BACKUP_KEY`, never
+  argv, ≥ 32 bytes). Per backup: random salt, HKDF-SHA256 → separate AES-256-GCM and HMAC-SHA256
+  keys. `manifest.json.sig` = HMAC over the exact manifest bytes (which carry ciphertext
+  checksums + IVs + tags). Restore verifies signature → checksums → GCM-decrypts to a private temp
+  dir, all before any tool runs. psql `--no-psqlrc`, `ON_ERROR_STOP`; restore requires client
+  17.6+ so `pg_restore` emits `\restrict`.
+- **H2 encryption by default:** pg_dump stdout is encrypted on the fly (no plaintext dump on disk);
+  object listing encrypted too. No plaintext mode/escape hatch. Test seeds Better Auth OAuth
+  tokens (`accounts.access_token/refresh_token/id_token`) and other markers and asserts no backup
+  byte contains them.
+- **M1 objects:** bucket listed right after the snapshot is exported (inside the transaction);
+  `BLOB_REF_COLUMNS` registry in `@kobe/db` (`packages/db/src/blob-refs.ts`, empty, validated
+  against the Drizzle schema); backup refuses keys referenced in the snapshot but absent from the
+  listing. Restore refuses ETag mismatch too unless `--allow-object-mismatch`. `--no-objects` warns
+  at backup and restore; restore refuses if the backup has a listing but S3 isn't configured.
+- **M2 coverage:** backup refuses tables/matviews/foreign tables outside `public` (except
+  `drizzle` bookkeeping), matviews/foreign tables in `public`, and large objects; manifest records
+  `coverage`.
+- **M3 error output:** psql runs with `VERBOSITY=verbose`, `SHOW_CONTEXT=never`; only Kobe's own
+  `P0001 kobe restore:` messages are shown in full, other server errors as `ERROR <SQLSTATE>`;
+  pg_dump/pg_restore `detail:` lines dropped. Test: a check violation's failing row never appears.
+- **LOW:** child tools get a minimal env (PATH, HOME, locale, `PG*`); `?password=` in URLs
+  rejected; warning for remote hosts without `sslmode=require|verify-*`; docs: sequences aren't
+  rolled back on failure, backup user password via `\password` / Secret.
 
 ## Open questions (for Chris or the coordinator)
 
@@ -91,10 +118,16 @@ locally; 17 in CI), unit tests in `packages/cli/src/*.test.ts`.
 5. Atomic → "rolls everything back when a check fails inside the transaction" (all tables empty,
    FORCE and trigger intact).
 6. S3 → "refuses when S3 objects are missing, unless explicitly allowed"; `s3.test.ts` pagination.
-7. Secrets → dump text contains no session/reset token or JWKS private key; file modes 0600/0700;
-   manifest contains no password; `config.test.ts` endpoint-credentials refusal.
-8. Integrity → "refuses a modified dump before touching the database"; `manifest.test.ts`.
+7. Secrets → "writes no plaintext data or secrets, including any OAuth tokens…" (raw bytes of every
+   file; decrypted dump still has no session/reset token or JWKS key); file modes 0600/0700;
+   `config.test.ts` endpoint-credentials and key-handling tests.
+8. Integrity + authenticity → "restore authenticates the backup before running any tool" (modified
+   dump, modified manifest, wrong key, missing signature; trap binaries prove no tool ran);
+   `crypto.test.ts`, `manifest.test.ts`.
 9. Docs → `docs/backup-restore.md`, linked from `docs/install.md`.
 
-- Migration lock → "does not run alongside a migration…".
+- Migration lock → "does not run alongside a migration…" (backup and restore).
+- Coverage → "refuses when data outside public (tables, large objects) would be skipped".
+- Blob refs → "refuses when the database references objects the bucket does not hold".
+- Error output → "shows only the SQLSTATE for server errors that could quote row data".
 - CLI smoke (built binary): backup → restore → restore again refused ("already has data").

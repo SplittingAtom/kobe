@@ -1,3 +1,4 @@
+import { quoteIdent } from "@kobe/db";
 import type pg from "pg";
 import type { MigrationRecord, UserTrigger } from "./restore-sql.js";
 
@@ -91,4 +92,57 @@ export async function serverInfo(client: pg.ClientBase): Promise<ServerInfo> {
     version: r.version,
     major: Math.floor(r.num / 10_000),
   };
+}
+
+/**
+ * Fails when data exists that a data-only dump of `public` would silently skip: tables, partitioned
+ * tables, materialized views or foreign tables in any other schema (except Kobe's own migration
+ * bookkeeping in `drizzle`), materialized views or foreign tables in `public`, and large objects.
+ */
+export async function assertCoverage(client: pg.ClientBase): Promise<void> {
+  const { rows } = await client.query<{ name: string; kind: string }>(
+    `SELECT n.nspname || '.' || c.relname AS name, c.relkind::text AS kind
+     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE c.relkind IN ('r', 'p', 'm', 'f')
+       AND c.relpersistence <> 't'
+       AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+       AND n.nspname NOT LIKE 'pg\\_toast%' AND n.nspname NOT LIKE 'pg\\_temp%'
+       AND NOT (n.nspname = 'public' AND c.relkind IN ('r', 'p'))
+       AND NOT (n.nspname = 'drizzle' AND c.relkind = 'r'
+                AND c.relname IN ('__drizzle_migrations', 'kobe_grants_applied'))
+       AND NOT EXISTS (SELECT 1 FROM pg_depend d
+                       WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e')
+     ORDER BY 1`,
+  );
+  const lo = await client.query<{ n: number }>(
+    `SELECT count(*)::int AS n FROM pg_largeobject_metadata`,
+  );
+  const problems = [
+    ...rows.map(
+      (r) =>
+        `${r.name} (${{ r: "table", p: "table", m: "materialized view", f: "foreign table" }[r.kind] ?? r.kind})`,
+    ),
+    ...((lo.rows[0]?.n ?? 0) > 0 ? [`${lo.rows[0]?.n} large objects`] : []),
+  ];
+  if (problems.length > 0) {
+    throw new Error(
+      `Refusing to back up: data outside what a Kobe backup covers (tables in public) would be skipped: ${problems.join(", ")}`,
+    );
+  }
+}
+
+/** Distinct non-null object keys stored in the given blob-ref columns (in the current snapshot). */
+export async function referencedObjectKeys(
+  client: pg.ClientBase,
+  columns: readonly { readonly table: string; readonly column: string }[],
+): Promise<string[]> {
+  const keys = new Set<string>();
+  for (const ref of columns) {
+    const col = quoteIdent(ref.column);
+    const { rows } = await client.query<{ k: string }>(
+      `SELECT DISTINCT ${col}::text AS k FROM public.${quoteIdent(ref.table)} WHERE ${col} IS NOT NULL`,
+    );
+    for (const r of rows) keys.add(r.k);
+  }
+  return [...keys];
 }
