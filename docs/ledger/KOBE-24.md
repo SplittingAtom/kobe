@@ -1,6 +1,6 @@
 # KOBE-24: Server sandbox connection registry and routing
 
-- **Status:** in review (PR #)
+- **Status:** in review (PR #33)
 - **Branch / worktree:** `kobe-24-sandbox-registry` in `../Kobe-wt24`
 - **Depends on:** KOBE-23 (sandbox agent), KOBE-31 (append path), KOBE-35 (policy engine), KOBE-29
   (schema), KOBE-14 (authz), KOBE-15 (audit) — all merged; KOBE-22 (sandbox provider, PR #20) still
