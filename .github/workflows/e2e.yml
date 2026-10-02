@@ -27,7 +27,7 @@ env:
 jobs:
   k3d:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-latest') || vars.KOBE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -39,18 +39,28 @@ jobs:
       - uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v5.1.0
         with:
           version: v1.34.6
+      - name: Runner prerequisites
+        # The self-hosted runner image (ci/runners) is minimal; gVisor ships as .tar.bz2.
+        run: command -v bzip2 >/dev/null || { sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends bzip2; }
       - name: Install k3d (checksum-verified)
         run: |
-          curl -fsSL -o /usr/local/bin/k3d "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64"
-          echo "${K3D_SHA256}  /usr/local/bin/k3d" | sha256sum -c -
-          chmod +x /usr/local/bin/k3d
+          curl -fsSL -o /tmp/k3d "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64"
+          echo "${K3D_SHA256}  /tmp/k3d" | sha256sum -c -
+          sudo install -m 0755 /tmp/k3d /usr/local/bin/k3d
       - name: Free runner disk (images are built, then copied into the k3d node)
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           docker system prune -af >/dev/null
           df -h /
       - name: Raise inotify limits (k3s nodes need them)
-        run: sudo sysctl -w fs.inotify.max_user_instances=1024 fs.inotify.max_user_watches=524288
+        # Self-hosted runner nodes set these persistently (ci/runners/README.md); the runner
+        # container there is unprivileged and cannot write sysctls.
+        run: |
+          if [ "$(cat /proc/sys/fs/inotify/max_user_instances)" -ge 1024 ]; then
+            echo "inotify limits already sufficient"
+          else
+            sudo sysctl -w fs.inotify.max_user_instances=1024 fs.inotify.max_user_watches=524288
+          fi
       - name: Create k3d cluster with gVisor and agent-sandbox
         run: scripts/dev-cluster.sh
       - name: Build images and load them into k3d
