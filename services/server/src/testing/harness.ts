@@ -1,8 +1,9 @@
 import pg from "pg";
 import { expect } from "vitest";
-import { createTestDatabase, testServerUrl, type TestDatabase } from "@kobe/db/testing";
+import { createTestDatabase, testServerUrl } from "@kobe/db/testing";
 import { createApp } from "../app.js";
 import { createServerDeps, type ServerDeps } from "../deps.js";
+import { waitForAppSessionsToClose } from "./app-sessions.js";
 import { TestBrowser } from "./browser.js";
 import { MemoryMailer } from "./mailer.js";
 
@@ -62,28 +63,8 @@ export async function openHarness(): Promise<Harness> {
     async close() {
       await deps.close();
       await admin.end();
-      await waitForAppSessionsToClose(database);
+      await waitForAppSessionsToClose(database.appRole);
       await database.drop();
     },
   };
-}
-
-/** Pool#end resolves before idle connections close; wait so DROP ... WITH (FORCE) hits none. */
-async function waitForAppSessionsToClose(database: TestDatabase): Promise<void> {
-  const server = new pg.Client({ connectionString: testServerUrl() });
-  await server.connect();
-  try {
-    const deadline = Date.now() + 10_000;
-    for (;;) {
-      const { rows } = await server.query<{ n: number }>(
-        `SELECT count(*)::int AS n FROM pg_stat_activity WHERE usename = $1`,
-        [database.appRole],
-      );
-      if (rows[0]?.n === 0) return;
-      if (Date.now() > deadline) throw new Error("app-role sessions still open after 10 s");
-      await new Promise((r) => setTimeout(r, 50));
-    }
-  } finally {
-    await server.end();
-  }
 }
