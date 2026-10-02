@@ -100,8 +100,7 @@
             "required": ["name"]
           }
         }
-      },
-      "required": ["imageRegistry", "imageTag", "imagePullPolicy", "imagePullSecrets"]
+      }
     },
     "isolation": {
       "type": "object",
@@ -112,8 +111,7 @@
           "minLength": 1,
           "description": "RuntimeClass for sandboxes; handler must be runsc or kata*"
         }
-      },
-      "required": ["runtimeClassName"]
+      }
     },
     "web": {
       "type": "object",
@@ -126,8 +124,7 @@
         "resources": {
           "$ref": "#/$defs/resources"
         }
-      },
-      "required": ["replicas", "resources"]
+      }
     },
     "server": {
       "type": "object",
@@ -140,8 +137,7 @@
         "resources": {
           "$ref": "#/$defs/resources"
         }
-      },
-      "required": ["replicas", "resources"]
+      }
     },
     "scheduler": {
       "type": "object",
@@ -154,8 +150,7 @@
         "resources": {
           "$ref": "#/$defs/resources"
         }
-      },
-      "required": ["replicas", "resources"]
+      }
     },
     "mcpProxy": {
       "type": "object",
@@ -168,8 +163,7 @@
         "resources": {
           "$ref": "#/$defs/resources"
         }
-      },
-      "required": ["replicas", "resources"]
+      }
     },
     "egressProxy": {
       "type": "object",
@@ -182,8 +176,7 @@
         "resources": {
           "$ref": "#/$defs/resources"
         }
-      },
-      "required": ["replicas", "resources"]
+      }
     },
     "bifrost": {
       "type": "object",
@@ -208,8 +201,7 @@
               "type": "string",
               "minLength": 1
             }
-          },
-          "required": ["repository", "tag"]
+          }
         },
         "persistence": {
           "type": "object",
@@ -233,11 +225,9 @@
             "storageClass": {
               "type": "string"
             }
-          },
-          "required": ["enabled", "size", "storageClass"]
+          }
         }
-      },
-      "required": ["replicas", "resources"]
+      }
     },
     "postgres": {
       "type": "object",
@@ -261,8 +251,7 @@
               "type": "string",
               "minLength": 1
             }
-          },
-          "required": ["existingSecret", "appUrlKey", "migrateUrlKey"]
+          }
         },
         "cnpg": {
           "type": "object",
@@ -295,14 +284,18 @@
                 "storageClass": {
                   "type": "string"
                 }
-              },
-              "required": ["size", "storageClass"]
+              }
+            },
+            "operatorNamespace": {
+              "type": "string",
+              "minLength": 1
+            },
+            "existingAppSecret": {
+              "type": "string"
             }
-          },
-          "required": ["instances", "imageName", "storage"]
+          }
         }
       },
-      "required": ["mode", "external", "cnpg"],
       "if": {
         "properties": {
           "mode": {
@@ -348,8 +341,7 @@
           "type": "string",
           "minLength": 1
         }
-      },
-      "required": ["endpoint", "region", "bucket", "forcePathStyle", "existingSecret"]
+      }
     },
     "ingress": {
       "type": "object",
@@ -384,11 +376,9 @@
             "clusterIssuer": {
               "type": "string"
             }
-          },
-          "required": ["enabled", "secretName", "clusterIssuer"]
+          }
         }
       },
-      "required": ["enabled", "className", "host", "annotations", "tls"],
       "if": {
         "properties": {
           "enabled": {
@@ -425,28 +415,13 @@
               "type": "string",
               "minLength": 1
             }
-          },
-          "required": ["repository", "tag"]
+          }
         },
         "resources": {
           "$ref": "#/$defs/resources"
         }
-      },
-      "required": ["enabled", "image", "resources"]
+      }
     }
   },
-  "required": [
-    "global",
-    "isolation",
-    "web",
-    "server",
-    "scheduler",
-    "mcpProxy",
-    "egressProxy",
-    "bifrost",
-    "postgres",
-    "s3",
-    "ingress",
-    "clamav"
-  ]
+  "description": "Keys with defaults are not 'required' so `helm upgrade --reuse-values` keeps working when the chart adds keys; mandatory values are enforced with minLength/conditionals."
 }

@@ -36,6 +36,29 @@ describe("findIsolationRuntimeClasses", () => {
   });
 });
 
+describe("checkIsolation for the configured RuntimeClass", () => {
+  const cluster = async () => [rc("gvisor", "runsc"), rc("runc", "runc"), rc("kata", "kata-qemu")];
+
+  it("passes when the configured RuntimeClass has an isolation handler", async () => {
+    expect(await checkIsolation(cluster, "kata")).toEqual({
+      ok: true,
+      runtimeClasses: [{ name: "kata", handler: "kata-qemu" }],
+    });
+  });
+
+  it("fails when the configured RuntimeClass is not isolating, even if another one is", async () => {
+    const result = await checkIsolation(cluster, "runc");
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.message).toMatch(/RuntimeClass "runc" has handler "runc"/);
+  });
+
+  it("fails when the configured RuntimeClass does not exist", async () => {
+    const result = await checkIsolation(cluster, "gvisor-typo");
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.message).toMatch(/RuntimeClass "gvisor-typo" does not exist/);
+  });
+});
+
 describe("checkIsolation", () => {
   it("passes when an isolation RuntimeClass exists", async () => {
     const result = await checkIsolation(async () => [rc("crun", "crun"), rc("gvisor", "runsc")]);

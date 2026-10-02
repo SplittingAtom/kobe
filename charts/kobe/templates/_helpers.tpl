@@ -3,6 +3,52 @@
 {{- .Release.Name | trunc 40 | trimSuffix "-" -}}
 {{- end -}}
 
+{{/*
+Name for cluster-scoped objects: unique per (namespace, release) even when truncation or dashes
+would make "<release>-<namespace>" ambiguous.
+*/}}
+{{- define "kobe.clusterName" -}}
+{{- printf "%s-%s-%s" (include "kobe.fullname" .root | trunc 30 | trimSuffix "-") (printf "%s/%s" .root.Release.Namespace .root.Release.Name | sha256sum | trunc 10) .suffix -}}
+{{- end -}}
+
+{{/* Secret holding the kobe_app password in CloudNativePG mode. */}}
+{{- define "kobe.cnpgAppSecretName" -}}
+{{- default (printf "%s-db-app" (include "kobe.fullname" .)) .Values.postgres.cnpg.existingAppSecret -}}
+{{- end -}}
+
+{{/*
+Generated kobe_app password, computed once per render (memoized) so the Secret and the pod
+checksum annotation agree. Reuses the existing Secret's value on upgrades.
+*/}}
+{{- define "kobe.cnpgAppPassword" -}}
+{{- if not (hasKey .Values.postgres.cnpg "__password") -}}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace (include "kobe.cnpgAppSecretName" .) -}}
+{{- $pw := "" -}}
+{{- if and $existing $existing.data (hasKey $existing.data "password") -}}
+{{- $pw = index $existing.data "password" | b64dec -}}
+{{- else -}}
+{{- $pw = randAlphaNum 32 -}}
+{{- end -}}
+{{- $_ := set .Values.postgres.cnpg "__password" $pw -}}
+{{- end -}}
+{{- index .Values.postgres.cnpg "__password" -}}
+{{- end -}}
+
+{{/* Pod annotations that roll workloads when the generated DB password changes. */}}
+{{- define "kobe.dbChecksumAnnotations" -}}
+{{- if and (eq .Values.postgres.mode "cnpg") (not .Values.postgres.cnpg.existingAppSecret) -}}
+checksum/db-app: {{ include "kobe.cnpgAppPassword" . | sha256sum }}
+{{- end -}}
+{{- end -}}
+
+{{/* The app must never connect with the owner/migration URL. */}}
+{{- define "kobe.validateDatabase" -}}
+{{- $e := .Values.postgres.external -}}
+{{- if and (eq .Values.postgres.mode "external") (eq $e.appUrlKey $e.migrateUrlKey) -}}
+{{- fail "postgres.external.appUrlKey must differ from migrateUrlKey: the app connects as a non-owner role, never with the owner (migration) URL" -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "kobe.labels" -}}
 app.kubernetes.io/name: kobe
 app.kubernetes.io/instance: {{ .Release.Name }}
@@ -54,7 +100,7 @@ securityContext:
 - name: KOBE_DB_PASSWORD
   valueFrom:
     secretKeyRef:
-      name: {{ $fullname }}-db-app
+      name: {{ include "kobe.cnpgAppSecretName" . }}
       key: password
 - name: KOBE_DATABASE_URL
   value: {{ printf "postgres://kobe_app:$(KOBE_DB_PASSWORD)@%s-pg-rw:5432/kobe" $fullname | quote }}
@@ -113,11 +159,19 @@ spec:
     metadata:
       labels:
         {{- include "kobe.selectorLabels" $sel | nindent 8 }}
+      {{- with .annotations }}
+      annotations:
+        {{- . | nindent 8 }}
+      {{- end }}
     spec:
       {{- include "kobe.imagePullSecrets" $root | nindent 6 }}
       serviceAccountName: {{ .serviceAccount | default (printf "%s-workload" $fullname) }}
       automountServiceAccountToken: {{ .automountToken | default false }}
       {{- include "kobe.podSecurityContext" $root | nindent 6 }}
+      {{- if .preflight }}
+      initContainers:
+        {{- include "kobe.preflightContainer" $root | nindent 8 }}
+      {{- end }}
       containers:
         - name: {{ .component }}
           image: {{ include "kobe.image" (dict "root" $root "name" .image) }}
@@ -167,4 +221,21 @@ spec:
     - name: http
       port: 80
       targetPort: http
+{{- end -}}
+
+
+{{/* Isolation gate container: refuses to start unless the sandbox RuntimeClass isolates. */}}
+{{- define "kobe.preflightContainer" -}}
+- name: isolation-preflight
+  image: {{ include "kobe.image" (dict "root" . "name" "server") }}
+  imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+  command: ["node", "dist/cli/preflight.js"]
+  env:
+    - name: KOBE_RUNTIME_CLASS
+      value: {{ .Values.isolation.runtimeClassName | quote }}
+  {{- include "kobe.containerSecurityContext" . | nindent 2 }}
+  terminationMessagePolicy: FallbackToLogsOnError
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 256Mi }
 {{- end -}}

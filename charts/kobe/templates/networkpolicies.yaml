@@ -1,0 +1,57 @@
+{{- $fullname := include "kobe.fullname" . -}}
+# Components holding secrets or data are reachable only from pods in the release namespace.
+# Sandbox namespaces (KOBE-22) get explicit, narrower allows; they never reach these directly.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-bifrost
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kobe.selectorLabels" (dict "root" . "component" "bifrost") | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector: {}
+{{- if .Values.clamav.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-clamav
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kobe.selectorLabels" (dict "root" . "component" "clamav") | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector: {}
+{{- end }}
+{{- if eq .Values.postgres.mode "cnpg" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-pg
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: {{ $fullname }}-pg
+  policyTypes: ["Ingress"]
+  ingress:
+    # Kobe workloads and the Postgres instances themselves (replication).
+    - from:
+        - podSelector: {}
+    # The CloudNativePG operator manages instances over the status and Postgres ports.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.postgres.cnpg.operatorNamespace }}
+{{- end }}

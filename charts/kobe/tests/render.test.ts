@@ -28,13 +28,14 @@ function helmArgs(values: Record<string, string>): string[] {
   return Object.entries({ ...BASE, ...values }).flatMap(([k, v]) => ["--set", `${k}=${v}`]);
 }
 
-function render(values: Record<string, string> = {}): Manifest[] {
+function render(
+  values: Record<string, string> = {},
+  { release = "kobe", namespace = "kobe" }: { release?: string; namespace?: string } = {},
+): Manifest[] {
   const out = execFileSync(
     HELM,
-    ["template", "kobe", CHART_DIR, "-n", "kobe", ...helmArgs(values)],
-    {
-      encoding: "utf8",
-    },
+    ["template", release, CHART_DIR, "-n", namespace, ...helmArgs(values)],
+    { encoding: "utf8" },
   );
   return parseAllDocuments(out)
     .map((d) => d.toJSON() as Manifest | null)
@@ -126,30 +127,52 @@ describe("isolation preflight (ac-2)", () => {
   const hook = (m: Manifest) => m.metadata.annotations?.["helm.sh/hook"];
   const weight = (m: Manifest) => Number(m.metadata.annotations?.["helm.sh/hook-weight"] ?? 0);
 
-  it("runs as a pre-install/pre-upgrade hook Job that can't be retried into success", () => {
+  const HOOKS = "pre-install,pre-upgrade,pre-rollback";
+  const hooked = (kind: string) => ms.filter((m) => m.kind === kind && hook(m) === HOOKS);
+
+  it("runs as a pre-install/pre-upgrade/pre-rollback hook Job checking the configured class", () => {
     const job = find(ms, "Job", "kobe-isolation-preflight");
-    expect(job && hook(job)).toBe("pre-install,pre-upgrade");
+    expect(job && hook(job)).toBe(HOOKS);
     expect(job?.spec.backoffLimit).toBe(0);
-    expect(job?.spec.template.spec.containers[0].command).toEqual([
-      "node",
-      "dist/cli/preflight.js",
-    ]);
+    const c = job?.spec.template.spec.containers[0];
+    expect(c.command).toEqual(["node", "dist/cli/preflight.js"]);
+    expect(c.env).toContainEqual({ name: "KOBE_RUNTIME_CLASS", value: "gvisor" });
   });
 
   it("creates its least-privilege RBAC before the Job", () => {
     const job = find(ms, "Job", "kobe-isolation-preflight")!;
-    const role = find(ms, "ClusterRole", "kobe-kobe-isolation-preflight")!;
-    expect(role.rules).toEqual([
+    const [role] = hooked("ClusterRole");
+    expect(role?.rules).toEqual([
       { apiGroups: ["node.k8s.io"], resources: ["runtimeclasses"], verbs: ["get", "list"] },
     ]);
-    for (const m of [
-      role,
-      find(ms, "ClusterRoleBinding", "kobe-kobe-isolation-preflight")!,
-      find(ms, "ServiceAccount", "kobe-isolation-preflight")!,
-    ]) {
-      expect(hook(m), m.kind).toBe("pre-install,pre-upgrade");
+    for (const m of [role!, hooked("ClusterRoleBinding")[0]!, hooked("ServiceAccount")[0]!]) {
       expect(weight(m), m.kind).toBeLessThan(weight(job));
     }
+  });
+
+  it("gates the server and scheduler with a preflight initContainer (Helm flags can't skip it)", () => {
+    for (const name of ["kobe-server", "kobe-scheduler"]) {
+      const spec = find(ms, "Deployment", name)?.spec.template.spec;
+      expect(spec.serviceAccountName, name).toBe("kobe-server");
+      expect(spec.initContainers, name).toEqual([
+        expect.objectContaining({
+          name: "isolation-preflight",
+          command: ["node", "dist/cli/preflight.js"],
+          env: [{ name: "KOBE_RUNTIME_CLASS", value: "gvisor" }],
+        }),
+      ]);
+    }
+  });
+
+  it("uses collision-proof cluster-scoped names per release and namespace", () => {
+    const clusterNames = (release: string, namespace: string) =>
+      render({}, { release, namespace })
+        .filter((m) => m.kind.startsWith("ClusterRole"))
+        .map((m) => m.metadata.name);
+    const a = clusterNames("a-b", "c");
+    const b = clusterNames("a", "b-c");
+    expect(a.length).toBeGreaterThan(0);
+    expect(a.filter((n) => b.includes(n))).toEqual([]);
   });
 
   it("cannot be disabled (no isolation bypass)", () => {
@@ -235,6 +258,75 @@ describe("ingress", () => {
       ["/v1", "kobe-server"],
       ["/", "kobe-web"],
     ]);
+  });
+});
+
+describe("least privilege between components", () => {
+  it("gives mcp-proxy no database credentials (it sits at the sandbox boundary)", () => {
+    const env =
+      find(render(), "Deployment", "kobe-mcp-proxy")?.spec.template.spec.containers[0].env ?? [];
+    expect(env.map((e: { name: string }) => e.name)).not.toContain("KOBE_DATABASE_URL");
+  });
+
+  it("refuses an app connection URL key equal to the owner/migration key", () => {
+    expect(renderError({ "postgres.external.appUrlKey": "migrate-url" })).toMatch(/owner/);
+  });
+
+  it("keeps a server replica available during voluntary disruptions", () => {
+    expect(find(render(), "PodDisruptionBudget", "kobe-server")?.spec).toMatchObject({
+      minAvailable: 1,
+    });
+  });
+});
+
+describe("network policies", () => {
+  const ms = render({ "postgres.mode": "cnpg", "clamav.enabled": "true" });
+  const policy = (name: string) => find(ms, "NetworkPolicy", name);
+
+  it("lets only pods in the release namespace reach Bifrost (provider keys) and ClamAV", () => {
+    for (const name of ["kobe-bifrost", "kobe-clamav"]) {
+      expect(policy(name)?.spec.policyTypes, name).toEqual(["Ingress"]);
+      expect(policy(name)?.spec.ingress, name).toEqual([{ from: [{ podSelector: {} }] }]);
+    }
+  });
+
+  it("lets only the release namespace and the CloudNativePG operator reach Postgres", () => {
+    expect(policy("kobe-pg")?.spec.podSelector).toEqual({
+      matchLabels: { "cnpg.io/cluster": "kobe-pg" },
+    });
+    expect(policy("kobe-pg")?.spec.ingress).toEqual([
+      { from: [{ podSelector: {} }] },
+      {
+        from: [
+          { namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": "cnpg-system" } } },
+        ],
+      },
+    ]);
+  });
+});
+
+describe("CloudNativePG app credentials", () => {
+  it("rolls pods when the generated app password changes", () => {
+    const ms = render({ "postgres.mode": "cnpg" });
+    const annotations =
+      find(ms, "Deployment", "kobe-server")?.spec.template.metadata.annotations ?? {};
+    expect(annotations["checksum/db-app"]).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("uses a pre-created app Secret instead of generating one (GitOps-safe)", () => {
+    const ms = render({
+      "postgres.mode": "cnpg",
+      "postgres.cnpg.existingAppSecret": "my-app-login",
+    });
+    expect(find(ms, "Secret", "kobe-db-app")).toBeUndefined();
+    expect(find(ms, "Cluster", "kobe-pg")?.spec.managed.roles[0].passwordSecret).toEqual({
+      name: "my-app-login",
+    });
+    const env = find(ms, "Deployment", "kobe-server")?.spec.template.spec.containers[0].env;
+    expect(env).toContainEqual({
+      name: "KOBE_DB_PASSWORD",
+      valueFrom: { secretKeyRef: { name: "my-app-login", key: "password" } },
+    });
   });
 });
 

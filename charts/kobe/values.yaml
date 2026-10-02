@@ -71,6 +71,11 @@ postgres:
     migrateUrlKey: migrate-url
   cnpg:
     instances: 1
+    # Namespace of the CloudNativePG operator (allowed through the Postgres NetworkPolicy).
+    operatorNamespace: cnpg-system
+    # Pre-created kubernetes.io/basic-auth Secret for kobe_app (username kobe_app, password).
+    # Required for GitOps/offline renders; otherwise the chart generates and keeps one.
+    existingAppSecret: ""
     imageName: ghcr.io/cloudnative-pg/postgresql:17
     storage:
       size: 10Gi

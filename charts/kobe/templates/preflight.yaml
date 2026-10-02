@@ -1,7 +1,10 @@
 {{- include "kobe.isolationCheck" . -}}
 {{- $fullname := include "kobe.fullname" . -}}
-{{- $hook := "pre-install,pre-upgrade" -}}
-# Isolation preflight (spec D4): fails the release when no gVisor/Kata RuntimeClass exists.
+{{- $hook := "pre-install,pre-upgrade,pre-rollback" -}}
+{{- $clusterName := include "kobe.clusterName" (dict "root" . "suffix" "isolation-preflight") -}}
+# Isolation preflight (spec D4): fails the release unless the sandbox RuntimeClass isolates.
+# `--no-hooks` and `helm template | kubectl apply` skip hooks; the server and scheduler
+# initContainers enforce the same check on every pod start.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -16,7 +19,7 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ $fullname }}-{{ .Release.Namespace }}-isolation-preflight
+  name: {{ $clusterName }}
   labels:
     {{- include "kobe.labels" . | nindent 4 }}
   annotations:
@@ -31,7 +34,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ $fullname }}-{{ .Release.Namespace }}-isolation-preflight
+  name: {{ $clusterName }}
   labels:
     {{- include "kobe.labels" . | nindent 4 }}
   annotations:
@@ -41,7 +44,7 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: {{ $fullname }}-{{ .Release.Namespace }}-isolation-preflight
+  name: {{ $clusterName }}
 subjects:
   - kind: ServiceAccount
     name: {{ $fullname }}-isolation-preflight
@@ -76,6 +79,9 @@ spec:
           image: {{ include "kobe.image" (dict "root" . "name" "server") }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           command: ["node", "dist/cli/preflight.js"]
+          env:
+            - name: KOBE_RUNTIME_CLASS
+              value: {{ .Values.isolation.runtimeClassName | quote }}
           {{- include "kobe.containerSecurityContext" . | nindent 10 }}
           terminationMessagePolicy: FallbackToLogsOnError
           resources:

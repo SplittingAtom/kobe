@@ -35,6 +35,12 @@ scripts/install-agent-sandbox.sh
 
 Verify: a pod with `runtimeClassName: gvisor` running `dmesg` prints `Starting gVisor...`.
 
+The check applies to the RuntimeClass sandboxes will actually use (`isolation.runtimeClassName`,
+default `gvisor`): it must exist and have an isolating handler. Besides the install-time check and
+the pre-install/pre-upgrade/pre-rollback hook, the server and scheduler run the same check as an
+initContainer on every pod start, so `--no-hooks`, `helm template | kubectl apply`, or deleting the
+RuntimeClass later cannot bring Kobe up without isolation.
+
 ## Install
 
 Create the Secrets the chart references, then install:
@@ -62,7 +68,11 @@ helm install kobe charts/kobe -n kobe \
 
 With bundled Postgres instead, install the [CloudNativePG operator](https://cloudnative-pg.io)
 first and set `postgres.mode=cnpg`; the chart creates the Cluster, the `kobe_owner` database owner
-and a separate `kobe_app` login role.
+and a separate `kobe_app` login role. The chart generates and keeps the `kobe_app` password; with
+GitOps tools that render offline (Argo CD, `helm template`), pre-create a `kubernetes.io/basic-auth`
+Secret (`username: kobe_app`) and set `postgres.cnpg.existingAppSecret`, or every render would
+rotate it. The generated Secret is kept on `helm uninstall`; delete it when reinstalling from
+scratch.
 
 Every value is validated by `charts/kobe/values.schema.json`; unknown keys are rejected.
 

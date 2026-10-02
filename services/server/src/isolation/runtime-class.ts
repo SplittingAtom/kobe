@@ -37,9 +37,14 @@ export function findIsolationRuntimeClasses(
     .map((rc) => ({ name: rc.metadata?.name ?? "", handler: rc.handler }));
 }
 
-/** Lists RuntimeClasses via `list` and reports whether agents may run. Errors fail closed. */
+/**
+ * Lists RuntimeClasses via `list` and reports whether agents may run. With `runtimeClassName`
+ * (the class sandboxes will actually use) that class must exist and have an isolation handler;
+ * another isolating class elsewhere in the cluster is not enough. Errors fail closed.
+ */
 export async function checkIsolation(
   list: () => Promise<readonly RuntimeClassLike[]>,
+  runtimeClassName?: string,
 ): Promise<IsolationCheck> {
   let items: readonly RuntimeClassLike[];
   try {
@@ -50,6 +55,22 @@ export async function checkIsolation(
       ok: false,
       message: `${ISOLATION_REMEDIATION} (could not list RuntimeClasses: ${reason})`,
     };
+  }
+  if (runtimeClassName !== undefined) {
+    const configured = items.find((rc) => rc.metadata?.name === runtimeClassName);
+    if (!configured) {
+      return {
+        ok: false,
+        message: `RuntimeClass "${runtimeClassName}" does not exist. ${ISOLATION_REMEDIATION}`,
+      };
+    }
+    if (!isIsolationHandler(configured.handler)) {
+      return {
+        ok: false,
+        message: `RuntimeClass "${runtimeClassName}" has handler "${configured.handler}", which is not gVisor (runsc) or Kata (kata*). ${ISOLATION_REMEDIATION}`,
+      };
+    }
+    return { ok: true, runtimeClasses: [{ name: runtimeClassName, handler: configured.handler }] };
   }
   const runtimeClasses = findIsolationRuntimeClasses(items);
   return runtimeClasses.length > 0

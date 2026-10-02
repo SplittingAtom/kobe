@@ -3,10 +3,18 @@ import { listRuntimeClasses } from "../isolation/kubernetes.js";
 import { checkIsolation } from "../isolation/runtime-class.js";
 import { logger } from "../logger.js";
 
-// Helm pre-install/pre-upgrade hook: fail the release when no isolation RuntimeClass exists.
+// Isolation gate, run as the Helm pre-install/pre-upgrade/pre-rollback hook and as an initContainer
+// of the server and scheduler: fails unless KOBE_RUNTIME_CLASS (the class sandboxes use) exists
+// and has a gVisor or Kata handler.
 const TERMINATION_LOG = "/dev/termination-log";
 
-const result = await checkIsolation(listRuntimeClasses);
+const runtimeClassName = process.env.KOBE_RUNTIME_CLASS?.trim();
+const result = runtimeClassName
+  ? await checkIsolation(listRuntimeClasses, runtimeClassName)
+  : {
+      ok: false as const,
+      message: "KOBE_RUNTIME_CLASS is not set; refusing to start without isolation.",
+    };
 if (result.ok) {
   logger.info({ runtimeClasses: result.runtimeClasses }, "isolation preflight passed");
 } else {

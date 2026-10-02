@@ -1,14 +1,9 @@
 {{- if eq .Values.postgres.mode "cnpg" -}}
 {{- $fullname := include "kobe.fullname" . -}}
-{{- $secretName := printf "%s-db-app" $fullname -}}
-{{- $existing := lookup "v1" "Secret" .Release.Namespace $secretName -}}
-{{- $password := "" -}}
-{{- if $existing -}}
-{{- $password = index $existing.data "password" | b64dec -}}
-{{- else -}}
-{{- $password = randAlphaNum 32 -}}
-{{- end -}}
-# Login for the non-owner app role; kept stable across upgrades.
+{{- $secretName := include "kobe.cnpgAppSecretName" . -}}
+{{- if not .Values.postgres.cnpg.existingAppSecret }}
+# Login for the non-owner app role; kept stable across upgrades. For GitOps/offline renders set
+# postgres.cnpg.existingAppSecret instead (a generated password would change on every render).
 apiVersion: v1
 kind: Secret
 metadata:
@@ -21,8 +16,9 @@ metadata:
 type: kubernetes.io/basic-auth
 stringData:
   username: kobe_app
-  password: {{ $password | quote }}
+  password: {{ include "kobe.cnpgAppPassword" . | quote }}
 ---
+{{- end }}
 # Bundled CloudNativePG Cluster (requires the CloudNativePG operator). The database owner runs
 # migrations; the app connects as kobe_app, which is not superuser, cannot bypass RLS and owns
 # nothing (enforced again by the migration runner).
