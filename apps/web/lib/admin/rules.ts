@@ -2,7 +2,7 @@
  * Which actions a console offers, mirroring the server's rules so people aren't shown buttons
  * that can only fail. The server decides; these never grant anything.
  */
-import type { InstallUser } from "./api/install";
+import type { InstallUser } from "./api/install/users";
 import type { InstallRole } from "./nav/types";
 
 /** Deactivation (KOBE-13): Admins act on Users, only the Owner on Admins; nobody on the Owner or themselves. */

@@ -4,12 +4,11 @@ import { useState, type FormEvent } from "react";
 import type { ApiResult } from "../../../lib/api/client";
 import {
   listInstallRoles,
-  listUsers,
   setInstallRole,
   transferOwnership,
   type InstallRoleHolder,
-  type InstallUser,
-} from "../../../lib/admin/api/install";
+} from "../../../lib/admin/api/install/roles";
+import { listUsers, type InstallUser } from "../../../lib/admin/api/install/users";
 import { canManageInstallRoles } from "../../../lib/admin/rules";
 import { useInstallAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";

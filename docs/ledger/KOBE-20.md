@@ -18,7 +18,8 @@
   (invite/resend/revoke), install roles (Owner grants/revokes Admin, transfers ownership), teams
   (create with first team admin, rename, roster), settings (required 2FA), isolation status with
   the fix (D4), gallery agents (import/export/suspend/delete). Team: members and roles (change
-  role, remove, leave), team invitations (invite with role, revoke), team agents (list, suspend).
+  role, remove, leave), team invitations (invite with role, revoke), team agents (list, suspend). After the
+  main merge: install policy floor and team policy (KOBE-35).
 - **ac-4 Placeholders through one registry.** Sections whose APIs don't exist yet are registered
   with their ticket ("Coming in KOBE-xx") and served by one dynamic route; a later ticket adds one
   page directory and flips one entry, without touching shared lists (one file per section).
@@ -58,17 +59,27 @@ export default defineInstallSection({
 });
 ```
 
-- **Building a placeholder section** (e.g. KOBE-44): add
-  `apps/web/app/admin/install/models/page.tsx` (a static route wins over `[section]`), change the
-  entry's `status` to `READY`, update the "wires the pages whose APIs exist" test list in
-  `lib/admin/nav/registry.test.ts`.
+- **Building a placeholder section** (e.g. KOBE-44), touching no shared file:
+  1. API module(s): new files `apps/web/lib/admin/api/{install,team}/<area>.ts` (one per area, no
+     barrel; import them directly) plus their own test file.
+  2. Page: `apps/web/app/admin/install/models/page.tsx` (a static route wins over `[section]`)
+     rendering a component in `apps/web/components/admin/{install,team}/<area>-page.tsx`.
+  3. Flip the section's own entry from `comingIn("KOBE-44")` to `READY`.
+     `registry.test.ts` derives readiness from the filesystem: a READY entry without its
+     `page.tsx`, a page without READY, or a page directory without an entry all fail.
 - **A new section**: add its file and one `export { default as x } from "./x";` line to the
-  folder's `index.ts`. Both barrels use git's `union` merge driver (`.gitattributes`), like the db
-  schema index; order comes from `group`/`order`, never line order. `registry.test.ts` validates
-  ids, duplicates and that team permissions exist in the server's matrix at team-admin level.
-- Page data: add functions to `lib/admin/api/{install,team}.ts` (or a new module per area to avoid
-  conflicts) using `apiRequest`; team calls pass `teamId` (sends `X-Kobe-Team`). Render with
+  folder's `index.ts`. `registry.test.ts` fails if a section file isn't exported, if the file name
+  and `id` differ, on duplicate ids, and if a team permission isn't a team-admin permission in the
+  server's matrix.
+- **Barrels and union merge:** both `index.ts` barrels use git's `union` merge driver
+  (`.gitattributes`), like the db schema index. **It only helps a local `git merge`**: GitHub's
+  merge button and conflict check ignore it, so merge `origin/main` locally before merging a PR
+  that touches a barrel. Union never reports a conflict; the registry tests catch a lost or
+  duplicated line. Order comes from `group`/`order`, never line order.
+- Page data uses `apiRequest`; team calls pass `teamId` (sends `X-Kobe-Team`). Render with
   `useResource` / `useMutation` / `ResourceView` / `MutationStatus` from `components/admin`.
+  Response keys arrive camelized; add a key to `OPAQUE_KEYS` in `lib/api/casing.ts` if its value is
+  a document whose keys must stay verbatim (like `frontmatter` and `argPattern`).
 
 ## Decisions
 
@@ -89,11 +100,13 @@ export default defineInstallSection({
   only; builders and members are refused). Install roles grant nothing in the team console (D8).
 - **No install-wide permission list in the API:** `/v1/me` returns only the install role, so the
   registry carries `minRole` rather than mirroring `INSTALL_PERMISSIONS` (no server change).
+- **Policy sections** (KOBE-35): install floor offers deny/ask only (the floor never loosens);
+  team policy offers deny/ask/allow; the server validates globs and allow scoping and its 400/409
+  messages are shown.
 - **Team audit view** uses `team.members.manage` until KOBE-15 adds a `team.audit.read` permission
   (comment in `nav/team/audit.ts`).
 - **Placeholder ticket mapping** (best fit from the implementation prompt's ticket titles): models
-  KOBE-44, connector registry KOBE-59, web search KOBE-63, policy floor + team policy KOBE-35,
-  egress ceiling KOBE-38, team egress + access requests KOBE-39, skill blocklist + skill review
+  KOBE-44, connector registry KOBE-59, web search KOBE-63, egress ceiling KOBE-38, team egress + access requests KOBE-39, skill blocklist + skill review
   KOBE-49, audit KOBE-15, break-glass KOBE-16, legal hold KOBE-17, retention KOBE-18, usage
   KOBE-43, budgets KOBE-42, team connectors KOBE-60, inventory KOBE-48, backup status KOBE-11.
 - **Casing (no server changes):** the server's KOBE-13/14/45 routes answer in camelCase, spec
@@ -136,6 +149,29 @@ export default defineInstallSection({
   and the gating lives in the browser). The smoke flows run as component tests over the real
   shell and registry (`console-shell.test.tsx`); server-side authz is covered by the server suites.
 
+## Coordinator review (PR #24), addressed
+
+- Registry tests derive READY from `app/admin/<console>/<id>/page.tsx` (no hard-coded lists) and
+  check every section file is exported from its barrel with a matching id.
+- `lib/admin/api/install.ts` / `team.ts` split per area (`install/{users,invites,roles,teams,
+settings,isolation,gallery,policy}.ts`, `team/{members,invites,agents,policy}.ts`, shared
+  `agents.ts`, `policy.ts`), so later tickets add files instead of editing one.
+- Union-merge caveat documented here and in `lib/admin/nav/types.ts`.
+- The team console shows "Checking your access…" again while it re-asks after `kobe:active-team`,
+  and pages are keyed by team id, so no page state survives a team change in place.
+- Merged origin/main (KOBE-34, KOBE-35, KOBE-13). KOBE-35's routes are wired: install **Policy
+  floor** (deny/ask rules, the `promptSandboxWrites` switch) and team **Policy** (deny/ask/allow
+  rules), both READY. Rules come back snake_case (`tool_glob`, `arg_pattern`), which exercises the
+  client casing layer; `argPattern` values (JSON-pointer keys like `/file_path`) are kept verbatim.
+  Adding argument patterns in the UI and editing rules in place are left for a fuller editor
+  (delete + add works). KOBE-13's install users/invites were already wired.
+
+## Follow-ups
+
+- **Return-to after sign-in:** a console deep link that hits 401 sends people to `/sign-in`,
+  which always lands on `/`. Add `?next=<path>` with same-origin path validation (must start with
+  a single `/`, no `//` or `\\`, no scheme) in the sign-in page.
+
 ## Open questions (for Chris or the coordinator)
 
 - Should the API expose the caller's install permissions (like `/v1/team` does) so the install
@@ -160,7 +196,8 @@ export default defineInstallSection({
   sees the team console; member and builder refused; section outside the role not mounted; 401
   → sign in; `no_active_team` → choose a team); `overview.test.tsx` › home page links.
 - ac-3, ac-5, ac-7: `components/admin/install-pages.test.tsx` (22 tests) and
-  `components/admin/team-pages.test.tsx` (12 tests): exact method/path/body per action,
+  `components/admin/team-pages.test.tsx` (12 tests), `components/admin/policy-pages.test.tsx`
+  (6 tests), `lib/admin/api/policy.test.ts`: exact method/path/body per action,
   `X-Kobe-Team` on every team call and never on install calls, 403/404/409 (`last_team_admin`,
   `slug_taken`, `user_exists`, `team_mismatch` with Reload)/503 `isolation_runtime_missing` with
   the isolation link/500 without internals; `lib/admin/api/api.test.ts` (every resource route);
@@ -169,4 +206,4 @@ export default defineInstallSection({
   `role=status`; nav toggle test in `console-shell.test.tsx`; screenshots (desktop light/dark,
   390 px wide, keyboard skip link) attached to the PR.
 - ac-8: `pnpm build test typecheck lint format:check license:check` green except the known
-  `@kobe/chart#lint` failure on Helm 4 (pre-existing); web suite 173 tests.
+  `@kobe/chart#lint` failure on Helm 4 (pre-existing); web suite 191 tests.

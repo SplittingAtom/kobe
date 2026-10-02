@@ -6,12 +6,11 @@ import {
   TEAM_SLUG_PATTERN,
   createTeam,
   listInstallTeams,
-  listUsers,
   renameTeam,
   teamRoster,
   type InstallTeam,
-  type InstallUser,
-} from "../../../lib/admin/api/install";
+} from "../../../lib/admin/api/install/teams";
+import { listUsers, type InstallUser } from "../../../lib/admin/api/install/users";
 import { slugFromTeamName } from "../../../lib/admin/rules";
 import { roleLabel } from "../../../lib/teams";
 import { MutationStatus } from "../error-notice";

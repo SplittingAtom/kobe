@@ -5,7 +5,7 @@ import {
   getInstallSettings,
   putInstallSettings,
   type InstallSettings,
-} from "../../../lib/admin/api/install";
+} from "../../../lib/admin/api/install/settings";
 import { canTurnOffRequiredTwoFactor } from "../../../lib/admin/rules";
 import { useInstallAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";

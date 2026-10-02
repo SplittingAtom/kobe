@@ -1,3 +1,4 @@
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   INSTALL_SECTIONS,
@@ -8,12 +9,14 @@ import {
   sectionForPath,
   sectionHref,
   sectionProblems,
+  sectionsOf,
   visibleSections,
 } from "./registry";
 import {
   defineInstallSection,
   READY,
   type ConsoleAccess,
+  type ConsoleSection,
   type InstallAccess,
   type TeamAccess,
 } from "./types";
@@ -72,23 +75,60 @@ describe("registry contents", () => {
     expect(sectionProblems("team", TEAM_SECTIONS)).toEqual([]);
   });
 
-  it("wires the pages whose APIs exist and marks the rest with their ticket", () => {
-    const ready = (list: readonly { id: string; status: { kind: string } }[]) =>
-      list
-        .filter((s) => s.status.kind === "ready")
-        .map((s) => s.id)
-        .sort();
-    expect(ready(INSTALL_SECTIONS)).toEqual(
-      ["gallery", "invites", "isolation", "roles", "settings", "teams", "users"].sort(),
-    );
-    expect(ready(TEAM_SECTIONS)).toEqual(["agents", "invites", "members"]);
-    const placeholders = [...INSTALL_SECTIONS, ...TEAM_SECTIONS].filter(
-      (s) => s.status.kind === "placeholder",
-    );
-    for (const s of placeholders) {
-      expect(s.status).toMatchObject({ ticket: expect.stringMatching(/^KOBE-\d+$/) });
-    }
+  // Derived from the filesystem, so a ticket that builds a section edits no shared test list.
+  it.each(["install", "team"] as const)(
+    "%s: a READY section has its page; a placeholder has none and names its ticket",
+    (kind) => {
+      for (const s of sectionsOf(kind)) {
+        const page = existsSync(
+          new URL(`../../../app/admin/${kind}/${s.id}/page.tsx`, import.meta.url),
+        );
+        if (s.status.kind === "ready") {
+          expect(page, `${s.id} is READY: add app/admin/${kind}/${s.id}/page.tsx`).toBe(true);
+        } else {
+          expect(page, `${s.id} has a page: mark it READY`).toBe(false);
+          expect(s.status.ticket).toMatch(/^KOBE-\d+$/);
+        }
+      }
+    },
+  );
+
+  it.each(["install", "team"] as const)("%s: every page directory belongs to a section", (kind) => {
+    const dir = new URL(`../../../app/admin/${kind}/`, import.meta.url);
+    const pages = readdirSync(dir, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && !d.name.startsWith("["))
+      .map((d) => d.name);
+    const ids = sectionsOf(kind).map((s) => s.id);
+    for (const page of pages)
+      expect(ids, `app/admin/${kind}/${page} has no nav entry`).toContain(page);
   });
+
+  it.each(["install", "team"] as const)(
+    "%s: every section file is exported from the folder's index.ts",
+    async (kind) => {
+      const dir = new URL(`./${kind}/`, import.meta.url);
+      const files = readdirSync(dir).filter(
+        (f) => f.endsWith(".ts") && f !== "index.ts" && !f.endsWith(".test.ts"),
+      );
+      const barrel = readFileSync(new URL("index.ts", dir), "utf8");
+      for (const f of files) {
+        expect(barrel, `${kind}/index.ts must export ./${f.replace(/\.ts$/, "")}`).toContain(
+          `from "./${f.replace(/\.ts$/, "")}";`,
+        );
+      }
+      // …and each file's section is the one registered (no copy-paste ids).
+      const registered = new Set(sectionsOf(kind));
+      for (const f of files) {
+        const mod = (await import(`./${kind}/${f.replace(/\.ts$/, "")}.ts`)) as {
+          default: ConsoleSection;
+        };
+        expect(registered.has(mod.default), `${kind}/${f}`).toBe(true);
+        expect(mod.default.id, `${kind}/${f}: file name and id differ`).toBe(
+          f.replace(/\.ts$/, ""),
+        );
+      }
+    },
+  );
 
   it("covers every install and team area of spec §6.1", () => {
     const install = INSTALL_SECTIONS.map((s) => s.id);

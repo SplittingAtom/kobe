@@ -8,7 +8,7 @@ import {
   revokeInstallInvite,
   type InstallInvite,
   type InviteSent,
-} from "../../../lib/admin/api/install";
+} from "../../../lib/admin/api/install/invites";
 import { MutationStatus } from "../error-notice";
 import { DateTime, ResourceView, confirmed } from "../parts";
 import { useMutation, useResource } from "../use-resource";

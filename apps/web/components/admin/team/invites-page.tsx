@@ -6,7 +6,7 @@ import {
   listTeamInvites,
   revokeTeamInvite,
   type TeamInvite,
-} from "../../../lib/admin/api/team";
+} from "../../../lib/admin/api/team/invites";
 import { roleLabel, type TeamRole } from "../../../lib/teams";
 import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";

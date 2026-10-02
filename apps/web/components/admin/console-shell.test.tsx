@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiResult } from "../../lib/api/client";
 import type { ConsoleAccess, InstallAccess, TeamAccess } from "../../lib/admin/nav/types";
 import { ACTIVE_TEAM_EVENT } from "../../lib/teams";
+import { must } from "../../lib/testing/must";
 import { ConsoleShell } from "./console-shell";
 import { ISOLATION_EVENT } from "./isolation-banner";
 
@@ -248,5 +249,65 @@ describe("isolation banner", () => {
     expect((await screen.findByRole("alert")).textContent).toMatch(/isolation runtime is missing/);
     window.dispatchEvent(new CustomEvent(ISOLATION_EVENT, { detail: "verified" }));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+});
+
+describe("re-checking access", () => {
+  it("shows the checking state again while it asks after kobe:active-team", async () => {
+    let release: (v: ApiResult<ConsoleAccess>) => void = () => undefined;
+    let calls = 0;
+    const load = () => {
+      calls += 1;
+      if (calls === 1) return team("team_admin", TEAM_ADMIN)();
+      return new Promise<ApiResult<ConsoleAccess>>((resolve) => {
+        release = resolve;
+      });
+    };
+    render(
+      <ConsoleShell kind="team" pathname="/admin/team" loadAccess={load}>
+        <Page />
+      </ConsoleShell>,
+    );
+    await screen.findByRole("heading", { name: "The page" });
+    window.dispatchEvent(new Event(ACTIVE_TEAM_EVENT));
+    expect((await screen.findByText("Checking your access…")).getAttribute("role")).toBe("status");
+    expect(screen.queryByRole("heading", { name: "The page" })).toBeNull();
+    release({
+      ok: true,
+      status: 200,
+      data: {
+        console: "team",
+        user,
+        team: { id: "t-2", slug: "ops", name: "Ops" },
+        role: "team_admin",
+        permissions: TEAM_ADMIN,
+      },
+    });
+    expect(await screen.findByRole("heading", { name: "The page" })).toBeTruthy();
+  });
+
+  it("never keeps a page's state across teams: pages remount per team", async () => {
+    let calls = 0;
+    const teams = [
+      { id: "t-1", slug: "fin", name: "Finance" },
+      { id: "t-2", slug: "ops", name: "Ops" },
+    ];
+    const load = () =>
+      ok<ConsoleAccess>({
+        console: "team",
+        user,
+        team: must(teams[Math.min(calls++, 1)]),
+        role: "team_admin",
+        permissions: TEAM_ADMIN,
+      });
+    render(
+      <ConsoleShell kind="team" pathname="/admin/team" loadAccess={load}>
+        <Page />
+      </ConsoleShell>,
+    );
+    await screen.findByRole("heading", { name: "The page" });
+    expect(pageMounted).toHaveBeenCalledTimes(1);
+    window.dispatchEvent(new Event(ACTIVE_TEAM_EVENT));
+    await waitFor(() => expect(pageMounted).toHaveBeenCalledTimes(2));
   });
 });

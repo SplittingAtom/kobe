@@ -1,15 +1,14 @@
 "use client";
 
 import { useRef, type FormEvent } from "react";
+import { type AgentSaved, type AgentSummary } from "../../../lib/admin/api/agents";
 import {
   deleteGalleryAgent,
   galleryExportHref,
   importGalleryAgent,
   listGalleryAgents,
   setGalleryAgentStatus,
-  type AgentSaved,
-  type AgentSummary,
-} from "../../../lib/admin/api/install";
+} from "../../../lib/admin/api/install/gallery";
 import { MutationStatus } from "../error-notice";
 import { DateTime, ResourceView, confirmed } from "../parts";
 import { useMutation, useResource } from "../use-resource";

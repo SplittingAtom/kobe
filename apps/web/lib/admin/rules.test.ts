@@ -6,7 +6,7 @@ import {
   canTurnOffRequiredTwoFactor,
   slugFromTeamName,
 } from "./rules";
-import { TEAM_SLUG_PATTERN } from "./api/install";
+import { TEAM_SLUG_PATTERN } from "./api/install/teams";
 
 describe("canChangeActivation", () => {
   const owner = { userId: "o", role: "owner" as const };

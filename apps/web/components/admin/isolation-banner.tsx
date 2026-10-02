@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { getIsolation } from "../../lib/admin/api/install";
+import { getIsolation } from "../../lib/admin/api/install/isolation";
 import styles from "./admin.module.css";
 
 /** Fired by the Isolation page after a re-check, with `detail` = the new state. */

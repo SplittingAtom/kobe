@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchInstallAccess, fetchTeamAccess } from "./access";
-import * as install from "./install";
-import * as team from "./team";
+import * as gallery from "./install/gallery";
+import * as invites from "./install/invites";
+import * as isolation from "./install/isolation";
+import * as roles from "./install/roles";
+import * as settings from "./install/settings";
+import * as teams from "./install/teams";
+import * as users from "./install/users";
+import * as teamAgents from "./team/agents";
+import * as teamInvites from "./team/invites";
+import * as members from "./team/members";
 import { must } from "../../testing/must";
 
 type Call = { url: string; method: string; headers: Headers; body: unknown };
@@ -74,75 +82,75 @@ describe("console access", () => {
 
 describe("install resources call the right routes", () => {
   it.each([
-    ["listUsers", () => install.listUsers(), "GET /v1/install/users", { users: [] }],
+    ["listUsers", () => users.listUsers(), "GET /v1/install/users", { users: [] }],
     [
       "deactivate",
-      () => install.setUserActive("u 2", false),
+      () => users.setUserActive("u 2", false),
       "POST /v1/install/users/u%202/deactivate",
       {},
     ],
     [
       "reactivate",
-      () => install.setUserActive("u2", true),
+      () => users.setUserActive("u2", true),
       "POST /v1/install/users/u2/reactivate",
       {},
     ],
     [
       "listInvites",
-      () => install.listInstallInvites(),
+      () => invites.listInstallInvites(),
       "GET /v1/install/invites",
       { invitations: [] },
     ],
-    ["invite", () => install.createInstallInvite("b@x.io"), "POST /v1/install/invites", {}],
-    ["resend", () => install.resendInstallInvite("i1"), "POST /v1/install/invites/i1/resend", {}],
-    ["revoke", () => install.revokeInstallInvite("i1"), "DELETE /v1/install/invites/i1", undefined],
-    ["roles", () => install.listInstallRoles(), "GET /v1/install/roles", { roles: [] }],
-    ["grant", () => install.setInstallRole("u2", "admin"), "PUT /v1/install/roles/u2", {}],
+    ["invite", () => invites.createInstallInvite("b@x.io"), "POST /v1/install/invites", {}],
+    ["resend", () => invites.resendInstallInvite("i1"), "POST /v1/install/invites/i1/resend", {}],
+    ["revoke", () => invites.revokeInstallInvite("i1"), "DELETE /v1/install/invites/i1", undefined],
+    ["roles", () => roles.listInstallRoles(), "GET /v1/install/roles", { roles: [] }],
+    ["grant", () => roles.setInstallRole("u2", "admin"), "PUT /v1/install/roles/u2", {}],
     [
       "transfer",
-      () => install.transferOwnership("u2"),
+      () => roles.transferOwnership("u2"),
       "POST /v1/install/roles/transfer-ownership",
       {},
     ],
-    ["teams", () => install.listInstallTeams(), "GET /v1/install/teams", { teams: [] }],
+    ["teams", () => teams.listInstallTeams(), "GET /v1/install/teams", { teams: [] }],
     [
       "createTeam",
-      () => install.createTeam({ slug: "fin", name: "Finance", adminUserId: "u2" }),
+      () => teams.createTeam({ slug: "fin", name: "Finance", adminUserId: "u2" }),
       "POST /v1/install/teams",
       { team: {} },
     ],
-    ["rename", () => install.renameTeam("t1", "Fin"), "PATCH /v1/install/teams/t1", { team: {} }],
-    ["roster", () => install.teamRoster("t1"), "GET /v1/install/teams/t1/members", { members: [] }],
-    ["settings", () => install.getInstallSettings(), "GET /v1/install/settings", {}],
+    ["rename", () => teams.renameTeam("t1", "Fin"), "PATCH /v1/install/teams/t1", { team: {} }],
+    ["roster", () => teams.teamRoster("t1"), "GET /v1/install/teams/t1/members", { members: [] }],
+    ["settings", () => settings.getInstallSettings(), "GET /v1/install/settings", {}],
     [
       "putSettings",
-      () => install.putInstallSettings({ requireTwoFactor: true }),
+      () => settings.putInstallSettings({ requireTwoFactor: true }),
       "PUT /v1/install/settings",
       {},
     ],
-    ["isolation", () => install.getIsolation(), "GET /v1/install/isolation", {}],
-    ["recheck", () => install.recheckIsolation(), "POST /v1/install/isolation/check", {}],
+    ["isolation", () => isolation.getIsolation(), "GET /v1/install/isolation", {}],
+    ["recheck", () => isolation.recheckIsolation(), "POST /v1/install/isolation/check", {}],
     [
       "gallery",
-      () => install.listGalleryAgents(),
+      () => gallery.listGalleryAgents(),
       "GET /v1/install/gallery/agents",
       { agents: [] },
     ],
     [
       "suspend",
-      () => install.setGalleryAgentStatus("a1", "suspended"),
+      () => gallery.setGalleryAgentStatus("a1", "suspended"),
       "PUT /v1/install/gallery/agents/a1/status",
       {},
     ],
     [
       "delete",
-      () => install.deleteGalleryAgent("a1"),
+      () => gallery.deleteGalleryAgent("a1"),
       "DELETE /v1/install/gallery/agents/a1",
       undefined,
     ],
     [
       "import",
-      () => install.importGalleryAgent("---\nname: X\n---\nhi\n"),
+      () => gallery.importGalleryAgent("---\nname: X\n---\nhi\n"),
       "POST /v1/install/gallery/agents",
       {},
     ],
@@ -162,9 +170,9 @@ describe("install resources call the right routes", () => {
       "PUT /v1/install/roles/u2": [200, {}],
       "POST /v1/install/gallery/agents": [201, {}],
     });
-    await install.createTeam({ slug: "fin", name: "Finance", adminUserId: "u2" });
-    await install.setInstallRole("u2", "user");
-    await install.importGalleryAgent("---\nname: X\n---\n");
+    await teams.createTeam({ slug: "fin", name: "Finance", adminUserId: "u2" });
+    await roles.setInstallRole("u2", "user");
+    await gallery.importGalleryAgent("---\nname: X\n---\n");
     expect(JSON.parse(String(must(calls[0]).body))).toEqual({
       slug: "fin",
       name: "Finance",
@@ -176,7 +184,7 @@ describe("install resources call the right routes", () => {
 
   it("unwraps list envelopes", async () => {
     stubApi({ "GET /v1/install/users": [200, { users: [{ id: "u", deactivated_at: null }] }] });
-    expect(await install.listUsers()).toMatchObject({
+    expect(await users.listUsers()).toMatchObject({
       ok: true,
       data: [{ id: "u", deactivatedAt: null }],
     });
@@ -185,16 +193,31 @@ describe("install resources call the right routes", () => {
 
 describe("team resources name the active team on every call", () => {
   it.each([
-    ["members", () => team.listTeamMembers("t-1"), "GET /v1/team/members", { members: [] }],
-    ["role", () => team.setMemberRole("t-1", "u2", "builder"), "PATCH /v1/team/members/u2", {}],
-    ["remove", () => team.removeMember("t-1", "u2"), "DELETE /v1/team/members/u2", undefined],
-    ["invites", () => team.listTeamInvites("t-1"), "GET /v1/team/invites", { invitations: [] }],
-    ["invite", () => team.inviteToTeam("t-1", "b@x.io", "member"), "POST /v1/team/invites", {}],
-    ["revoke", () => team.revokeTeamInvite("t-1", "i1"), "DELETE /v1/team/invites/i1", undefined],
-    ["agents", () => team.listTeamAgents("t-1"), "GET /v1/agents?scope=team", { agents: [] }],
+    ["members", () => members.listTeamMembers("t-1"), "GET /v1/team/members", { members: [] }],
+    ["role", () => members.setMemberRole("t-1", "u2", "builder"), "PATCH /v1/team/members/u2", {}],
+    ["remove", () => members.removeMember("t-1", "u2"), "DELETE /v1/team/members/u2", undefined],
+    [
+      "invites",
+      () => teamInvites.listTeamInvites("t-1"),
+      "GET /v1/team/invites",
+      { invitations: [] },
+    ],
+    [
+      "invite",
+      () => teamInvites.inviteToTeam("t-1", "b@x.io", "member"),
+      "POST /v1/team/invites",
+      {},
+    ],
+    [
+      "revoke",
+      () => teamInvites.revokeTeamInvite("t-1", "i1"),
+      "DELETE /v1/team/invites/i1",
+      undefined,
+    ],
+    ["agents", () => teamAgents.listTeamAgents("t-1"), "GET /v1/agents?scope=team", { agents: [] }],
     [
       "suspend",
-      () => team.setTeamAgentStatus("t-1", "a1", "suspended"),
+      () => teamAgents.setTeamAgentStatus("t-1", "a1", "suspended"),
       "PUT /v1/agents/a1/status",
       {},
     ],

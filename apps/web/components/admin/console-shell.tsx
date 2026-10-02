@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ApiError, ApiResult } from "../../lib/api/client";
 import { fetchInstallAccess, fetchTeamAccess } from "../../lib/admin/api/access";
 import {
@@ -57,7 +57,11 @@ export function ConsoleShell({
 
   // A fresh session has no active team until the switcher picks one: check again when it does.
   useEffect(() => {
-    const retry = () => setAttempt((n) => n + 1);
+    const retry = () => {
+      // Nothing from the old answer stays on screen while we ask again.
+      setState({ status: "loading" });
+      setAttempt((n) => n + 1);
+    };
     window.addEventListener(ACTIVE_TEAM_EVENT, retry);
     return () => window.removeEventListener(ACTIVE_TEAM_EVENT, retry);
   }, []);
@@ -153,7 +157,10 @@ function Console({
         <main id="console-main" className={styles.main} tabIndex={-1} ref={main}>
           {kind === "install" && <IsolationBanner hidden={section?.id === "isolation"} />}
           {allowed ? (
-            children
+            // Keyed by team: a page never carries one team's state into another's.
+            <Fragment key={access.console === "team" ? access.team.id : "install"}>
+              {children}
+            </Fragment>
           ) : (
             <>
               <h1>{section.label}</h1>

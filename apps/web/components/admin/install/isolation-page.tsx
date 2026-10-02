@@ -5,7 +5,7 @@ import {
   getIsolation,
   recheckIsolation,
   type IsolationStatus,
-} from "../../../lib/admin/api/install";
+} from "../../../lib/admin/api/install/isolation";
 import { MutationStatus } from "../error-notice";
 import { ISOLATION_EVENT } from "../isolation-banner";
 import { DateTime, ResourceView } from "../parts";

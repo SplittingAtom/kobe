@@ -6,7 +6,7 @@ import {
   listUsers,
   type DeactivationResult,
   type InstallUser,
-} from "../../../lib/admin/api/install";
+} from "../../../lib/admin/api/install/users";
 import { canChangeActivation } from "../../../lib/admin/rules";
 import { useInstallAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";

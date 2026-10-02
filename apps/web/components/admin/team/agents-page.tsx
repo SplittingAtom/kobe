@@ -1,7 +1,7 @@
 "use client";
 
-import { listTeamAgents, setTeamAgentStatus } from "../../../lib/admin/api/team";
-import type { AgentSummary } from "../../../lib/admin/api/install";
+import { listTeamAgents, setTeamAgentStatus } from "../../../lib/admin/api/team/agents";
+import type { AgentSummary } from "../../../lib/admin/api/agents";
 import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
 import { DateTime, ResourceView, confirmed } from "../parts";

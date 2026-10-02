@@ -1,4 +1,4 @@
-import { comingIn, defineInstallSection } from "../types";
+import { READY, defineInstallSection } from "../types";
 
 export default defineInstallSection({
   id: "policy-floor",
@@ -7,5 +7,5 @@ export default defineInstallSection({
   group: "Safety",
   order: 10,
   minRole: "admin",
-  status: comingIn("KOBE-35"),
+  status: READY,
 });

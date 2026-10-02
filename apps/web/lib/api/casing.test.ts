@@ -39,6 +39,13 @@ describe("camelizeKeys", () => {
     });
   });
 
+  it("keeps policy arg patterns (JSON-pointer keys) exactly as sent", () => {
+    const pattern = { "/file_path": "/workspace/**", "/opts/dry_run": "true" };
+    expect(camelizeKeys({ rules: [{ tool_glob: "write", arg_pattern: pattern }] })).toEqual({
+      rules: [{ toolGlob: "write", argPattern: pattern }],
+    });
+  });
+
   it("does not let a key named __proto__ reach the prototype", () => {
     const out = camelizeKeys(JSON.parse('{"__proto__": {"polluted": true}, "a_b": 1}')) as Record<
       string,

@@ -8,7 +8,11 @@ export type ResourceState<T> =
   | { readonly status: "error"; readonly error: ApiError }
   | { readonly status: "ready"; readonly data: T };
 
-/** Loads `load()` on mount (and on `reload()`); a late answer from an older load is dropped. */
+/**
+ * Loads `load()` on mount (and on `reload()`); a late answer from an older load is dropped.
+ * Inputs captured by `load` (e.g. the team id) are fixed for the component's life: the console
+ * shell keys pages by team, so another team means a fresh component.
+ */
 export function useResource<T>(load: () => Promise<ApiResult<T>>): {
   readonly state: ResourceState<T>;
   readonly reload: () => void;

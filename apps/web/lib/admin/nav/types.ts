@@ -1,8 +1,13 @@
 /**
  * Admin console navigation (KOBE-20). Each console section is one file under `install/` or
  * `team/` exporting one `defineInstallSection(…)` / `defineTeamSection(…)`, listed with one line in
- * that folder's `index.ts` (a union-merged barrel, like the db schema index). Order comes from
- * `group` + `order`, never from line order, so parallel tickets append without conflicts.
+ * that folder's `index.ts`. Order comes from `group` + `order`, never from line order.
+ *
+ * The barrels use git's `union` merge driver (.gitattributes). That only helps a local
+ * `git merge`: GitHub's merge button and its conflict check ignore it, so merge `origin/main`
+ * locally before merging a PR that touches a barrel (docs/parallel-work.md). Union never reports a
+ * conflict; `registry.test.ts` catches a lost or duplicated line (every section file exported,
+ * ids unique, READY ⇔ `app/admin/<console>/<id>/page.tsx` exists).
  *
  * Visibility here is presentation only. Every page's data comes from an API that enforces the
  * same rule; `minRole` / `permission` mirror the server's check so people aren't shown dead ends.
