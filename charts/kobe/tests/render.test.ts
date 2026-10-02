@@ -164,18 +164,41 @@ describe("isolation preflight (ac-2)", () => {
     }
   });
 
-  it("gates the server and scheduler with a preflight initContainer (Helm flags can't skip it)", () => {
+  it("gates the scheduler with a preflight initContainer (Helm flags can't skip it)", () => {
+    const spec = find(ms, "Deployment", "kobe-scheduler")?.spec.template.spec;
+    expect(spec.serviceAccountName).toBe("kobe-server");
+    expect(spec.initContainers[0]).toEqual(
+      expect.objectContaining({
+        name: "isolation-preflight",
+        command: ["node", "dist/cli/preflight.js"],
+        env: [{ name: "KOBE_RUNTIME_CLASS", value: "gvisor" }],
+      }),
+    );
+  });
+
+  it("lets the server start and check isolation in process (KOBE-9: admin console shows the fix)", () => {
+    const spec = find(ms, "Deployment", "kobe-server")?.spec.template.spec;
+    expect(spec.initContainers.map((c: { name: string }) => c.name)).toEqual([
+      "wait-for-migrations",
+    ]);
+    // The in-process gate lists RuntimeClasses with the server ServiceAccount.
+    expect(spec.serviceAccountName).toBe("kobe-server");
+    expect(spec.automountServiceAccountToken).toBe(true);
+    const roles = ms.filter((m) => m.kind === "ClusterRole" && hook(m) === undefined);
+    expect(roles.map((r) => (r as { rules?: unknown }).rules)).toContainEqual([
+      { apiGroups: ["node.k8s.io"], resources: ["runtimeclasses"], verbs: ["get", "list"] },
+    ]);
+    expect(spec.containers[0].readinessProbe.httpGet.path).toBe("/readyz");
+  });
+
+  it("gives the server and scheduler processes the RuntimeClass to verify", () => {
     for (const name of ["kobe-server", "kobe-scheduler"]) {
-      const spec = find(ms, "Deployment", name)?.spec.template.spec;
-      expect(spec.serviceAccountName, name).toBe("kobe-server");
-      expect(spec.initContainers[0], name).toEqual(
-        expect.objectContaining({
-          name: "isolation-preflight",
-          command: ["node", "dist/cli/preflight.js"],
-          env: [{ name: "KOBE_RUNTIME_CLASS", value: "gvisor" }],
-        }),
-      );
+      const env = find(ms, "Deployment", name)?.spec.template.spec.containers[0].env;
+      expect(env, name).toContainEqual({ name: "KOBE_RUNTIME_CLASS", value: "gvisor" });
     }
+    const kata = render({ "isolation.runtimeClassName": "kata" });
+    const env = find(kata, "Deployment", "kobe-server")?.spec.template.spec.containers[0].env;
+    expect(env).toContainEqual({ name: "KOBE_RUNTIME_CLASS", value: "kata" });
   });
 
   it("uses collision-proof cluster-scoped names per release and namespace", () => {
@@ -361,7 +384,9 @@ describe("migrations (KOBE-68)", () => {
   it("holds server and scheduler pods until this build's migrations are applied (app role)", () => {
     const ms = render();
     for (const name of ["kobe-server", "kobe-scheduler"]) {
-      const wait = find(ms, "Deployment", name)?.spec.template.spec.initContainers[1];
+      const wait = find(ms, "Deployment", name)?.spec.template.spec.initContainers.find(
+        (c: { name: string }) => c.name === "wait-for-migrations",
+      );
       expect(wait?.name, name).toBe("wait-for-migrations");
       expect(wait?.command).toEqual(["node", "node_modules/@kobe/db/dist/cli/wait.js"]);
       expect(wait?.env).toContainEqual({

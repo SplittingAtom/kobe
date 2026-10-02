@@ -9,8 +9,9 @@ metadata:
     {{- include "kobe.labels" . | nindent 4 }}
 automountServiceAccountToken: false
 ---
-# Used by the server and scheduler: their isolation initContainer lists RuntimeClasses; the
-# server re-checks at runtime (KOBE-9) and orchestrates sandboxes (KOBE-22).
+# Used by the server and scheduler: both check isolation in process at startup and every minute
+# (KOBE-9), the scheduler's initContainer lists RuntimeClasses too, and the server orchestrates
+# sandboxes (KOBE-22).
 apiVersion: v1
 kind: ServiceAccount
 metadata:
