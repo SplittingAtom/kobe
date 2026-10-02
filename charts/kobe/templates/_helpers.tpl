@@ -184,7 +184,8 @@ existing Secret, unless explicitly allowed for throwaway environments (dev, CI).
 {{/*
 Deployment + Service for a Kobe Node service.
 Args: root, name (image + component), values, env (YAML list string), serviceAccount, healthPath,
-extraVolumes / extraMounts (YAML list strings).
+extraVolumes / extraMounts (YAML list strings), preflight (isolation initContainer), migrations
+(wait-for-migrations initContainer).
 */}}
 {{- define "kobe.nodeService" -}}
 {{- $root := .root -}}
@@ -215,10 +216,14 @@ spec:
       serviceAccountName: {{ .serviceAccount | default (printf "%s-workload" $fullname) }}
       automountServiceAccountToken: {{ .automountToken | default false }}
       {{- include "kobe.podSecurityContext" $root | nindent 6 }}
-      {{- if .preflight }}
+      {{- if or .preflight .migrations }}
       initContainers:
+        {{- if .preflight }}
         {{- include "kobe.preflightContainer" $root | nindent 8 }}
+        {{- end }}
+        {{- if .migrations }}
         {{- include "kobe.waitForMigrationsContainer" $root | nindent 8 }}
+        {{- end }}
       {{- end }}
       containers:
         - name: {{ .component }}

@@ -78,4 +78,22 @@ describe("loadConfig", () => {
   it("never echoes secret values in errors", () => {
     expect(() => loadConfig({ ...REQUIRED, KOBE_AUTH_SECRET: "hunter2" })).not.toThrow(/hunter2/);
   });
+
+  it("reads the sandbox RuntimeClass for both processes and rejects a malformed name", () => {
+    expect(loadConfig({ ...REQUIRED, KOBE_RUNTIME_CLASS: "gvisor" }).runtimeClassName).toBe(
+      "gvisor",
+    );
+    expect(
+      loadConfig({ ...REQUIRED, KOBE_PROCESS: "scheduler", KOBE_RUNTIME_CLASS: "kata-qemu" })
+        .runtimeClassName,
+    ).toBe("kata-qemu");
+    expect(() => loadConfig({ ...REQUIRED, KOBE_RUNTIME_CLASS: "Not A Name" })).toThrow(
+      /KOBE_RUNTIME_CLASS/,
+    );
+  });
+
+  it("leaves the RuntimeClass unset when absent (the isolation gate then disables agents)", () => {
+    expect(loadConfig(REQUIRED).runtimeClassName).toBeUndefined();
+    expect(loadConfig({ ...REQUIRED, KOBE_RUNTIME_CLASS: " " }).runtimeClassName).toBeUndefined();
+  });
 });

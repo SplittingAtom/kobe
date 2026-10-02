@@ -16,6 +16,20 @@ const configSchema = z.object({
     protocol: /^postgres(ql)?$/,
     error: "KOBE_DATABASE_URL must be a postgres:// URL",
   }),
+  // RuntimeClass sandboxes run under; the isolation gate verifies its handler (spec D4). Unset
+  // keeps the server up with agents disabled, so the admin console can show the fix.
+  KOBE_RUNTIME_CLASS: z
+    .string()
+    .trim()
+    .transform((v) => (v === "" ? undefined : v))
+    .pipe(
+      z
+        .string()
+        .max(253)
+        .regex(/^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/, "KOBE_RUNTIME_CLASS must be a RuntimeClass name")
+        .optional(),
+    )
+    .optional(),
 });
 
 /** Auth settings: required by the API server only (the scheduler never sees these secrets). */
@@ -54,6 +68,8 @@ export interface Config {
   readonly port: number;
   readonly process: "server" | "scheduler";
   readonly databaseUrl: string;
+  /** Sandbox RuntimeClass; undefined means agents stay disabled. */
+  readonly runtimeClassName: string | undefined;
   /** Present for the API server only. */
   readonly auth?: AuthConfig;
 }
@@ -71,6 +87,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     port: base.data.PORT,
     process: base.data.KOBE_PROCESS,
     databaseUrl: base.data.KOBE_DATABASE_URL,
+    runtimeClassName: base.data.KOBE_RUNTIME_CLASS,
   };
   if (config.process !== "server") return config;
   const auth = authSchema.safeParse(env);
