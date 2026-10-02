@@ -8,6 +8,7 @@ import { createApp } from "../app.js";
 import { createServerDeps, type ServerDeps, type ServerDepsOptions } from "../deps.js";
 import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js";
 import { addMember, createTeamWithAdmin } from "../teams/members.js";
+import { waitForAppSessionsToClose } from "./app-sessions.js";
 import { TestBrowser } from "./browser.js";
 import { SseReader } from "./sse.js";
 
@@ -166,28 +167,8 @@ export class EventStreamFixture {
     for (const r of this.replicas) await r.deps.close();
     await this.admin?.end();
     if (this.database) {
-      await this.waitForAppSessionsToClose();
+      await waitForAppSessionsToClose(this.database.appRole);
       await this.database.drop();
-    }
-  }
-
-  /** Pool#end resolves before idle connections close; wait so DROP DATABASE doesn't kill them. */
-  private async waitForAppSessionsToClose(): Promise<void> {
-    const server = new pg.Client({ connectionString: testServerUrl() });
-    await server.connect();
-    try {
-      const deadline = Date.now() + 10_000;
-      for (;;) {
-        const { rows } = await server.query<{ n: number }>(
-          `SELECT count(*)::int AS n FROM pg_stat_activity WHERE usename = $1`,
-          [this.database.appRole],
-        );
-        if (rows[0]?.n === 0) return;
-        if (Date.now() > deadline) throw new Error("app-role sessions still open after 10 s");
-        await new Promise((r) => setTimeout(r, 50));
-      }
-    } finally {
-      await server.end();
     }
   }
 }
