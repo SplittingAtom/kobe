@@ -4,9 +4,12 @@ GitHub-hosted minutes for this private repo are metered and run out quickly with
 pushing in parallel, so CI runs on our own k3s cluster with
 [Actions Runner Controller](https://github.com/actions/actions-runner-controller) (Apache-2.0).
 
-Every workflow job uses `runs-on: ${{ vars.KOBE_RUNNER || 'ubuntu-latest' }}`. With the repository
-variable `KOBE_RUNNER=kobe-k3s`, jobs run here; delete the variable to fall back to GitHub-hosted
-runners without a code change.
+Every workflow job uses
+`runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-latest') || vars.KOBE_RUNNER || 'ubuntu-latest' }}`.
+With the repository variable `KOBE_RUNNER=kobe-k3s`, jobs run here; delete the variable to fall
+back to GitHub-hosted runners without a code change. **Pull requests from forks always run on
+GitHub-hosted runners**, never on this cluster: the repository is public, and these runners are
+privileged. The repository also requires approval before workflows from outside contributors run.
 
 ## Layout
 
@@ -32,8 +35,8 @@ printf "fs.inotify.max_user_instances=1024\nfs.inotify.max_user_watches=524288\n
 ```
 
 Node clocks must be NTP-synchronised: GitHub rejects the App's JWTs when a node runs ahead. The
-nodes' configured server (192.168.1.3) does not answer, so a fallback is set on every node in
-`/etc/systemd/timesyncd.conf.d/90-fallback.conf` (`NTP=192.168.1.3 ntp.ubuntu.com`,
+nodes' configured LAN time server does not answer, so a fallback is set on every node in
+`/etc/systemd/timesyncd.conf.d/90-fallback.conf` (`NTP=<LAN server> ntp.ubuntu.com`,
 `FallbackNTP=0.ubuntu.pool.ntp.org 1.ubuntu.pool.ntp.org`).
 
 ## Install
@@ -60,9 +63,9 @@ replacing the Secret.
 ## Security
 
 Runner pods execute repository code with a **privileged** Docker daemon, which is root-equivalent
-on the node they land on. That is acceptable only because the repository is private and every
-change comes from the owner or agents working for them. Never enable runs from forks or public
-pull requests on this scale set. Runners are ephemeral, so nothing persists between jobs except
+on the node they land on. That is acceptable only because only the owner and agents working
+for them can push branches here; fork pull requests are routed to GitHub-hosted runners by the
+`runs-on` expression above. Never remove that guard or use `pull_request_target` with these runners. Runners are ephemeral, so nothing persists between jobs except
 the node's image cache.
 
 ## Operations

@@ -29,7 +29,7 @@ permissions:
 
 jobs:
   build-test-scan:
-    runs-on: ${{ vars.KOBE_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-latest') || vars.KOBE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
