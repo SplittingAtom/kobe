@@ -4,6 +4,9 @@ import { AuditAnchorLogger } from "./audit/anchor.js";
 import { AuthAttemptAudit } from "./audit/attempts.js";
 import { recordAudit } from "./audit/record.js";
 import { createAuth, type KobeAuth } from "./auth/auth.js";
+import { createRunEventHub, type HubOptions, type RunEventHub } from "./event-stream/hub.js";
+import { createStreamReader, type StreamReader } from "./event-stream/read.js";
+import { STREAM_DEFAULTS, type StreamTimings } from "./event-stream/stream.js";
 import type { Mailer } from "./mail/mailer.js";
 import { UserLifecycle } from "./users/lifecycle.js";
 
@@ -14,6 +17,13 @@ export interface ServerDepsOptions {
   /** One-time secret proving possession of the install for first-run setup. */
   readonly setupToken: string;
   readonly trustedProxies: readonly string[];
+  /** Kobe Event Stream tuning (tests shorten the timers). */
+  readonly eventStream?: {
+    readonly hub?: Omit<HubOptions, "connectionString">;
+    readonly timings?: Partial<StreamTimings>;
+    /** Connections of the stream read pool (default STREAM_POOL_MAX). */
+    readonly poolMax?: number;
+  };
   /** Outgoing email (invitations, password resets, notifications). */
   readonly mailer: Mailer;
 }
@@ -28,6 +38,12 @@ export interface ServerDeps {
   readonly database: KobeDatabase;
   readonly auth: KobeAuth;
   readonly publicUrl: string;
+  /** Kobe Event Stream fan-out (one LISTEN connection per process) and SSE timings (KOBE-31). */
+  readonly eventStream: {
+    readonly hub: RunEventHub;
+    readonly reader: StreamReader;
+    readonly timings: StreamTimings;
+  };
   readonly mailer: Mailer;
   /** Logs and attests the audit chain head (started by index.ts, not in tests). */
   readonly auditAnchor: AuditAnchorLogger;
@@ -62,11 +78,20 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     mailer: options.mailer,
   });
   const setupDigest = digest(options.setupToken);
+  const hub = createRunEventHub({
+    ...options.eventStream?.hub,
+    connectionString: options.databaseUrl,
+  });
+  const reader = createStreamReader({
+    connectionString: options.databaseUrl,
+    ...(options.eventStream?.poolMax ? { max: options.eventStream.poolMax } : {}),
+  });
 
   return {
     database,
     auth,
     publicUrl: new URL(options.publicUrl).origin,
+    eventStream: { hub, reader, timings: { ...STREAM_DEFAULTS, ...options.eventStream?.timings } },
     mailer: options.mailer,
     authAttempts,
     auditAnchor: new AuditAnchorLogger(database.db, options.authSecret),
@@ -106,7 +131,9 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     isSetupToken(candidate) {
       return typeof candidate === "string" && timingSafeEqual(digest(candidate), setupDigest);
     },
-    close: async () => {
+    async close() {
+      await hub.close();
+      await reader.close();
       options.mailer.close();
       await authAttempts.stop();
       await database.close();

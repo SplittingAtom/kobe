@@ -18,6 +18,7 @@ import { installUsersRoutes } from "./routes/install-users.js";
 import { meRoutes } from "./routes/me.js";
 import { myInvitesRoutes } from "./routes/my-invites.js";
 import { myTeamsRoutes } from "./routes/my-teams.js";
+import { runEventsRoutes } from "./routes/run-events.js";
 import { setupRoutes } from "./routes/setup.js";
 import { teamAuditRoutes } from "./routes/team-audit.js";
 import { teamInvitesRoutes } from "./routes/team-invites.js";
@@ -86,6 +87,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/team/invites", teamInvitesRoutes(deps));
   api.route("/team/audit", teamAuditRoutes(deps));
   api.route("/team", teamRoutes(deps));
+  api.route("/runs", runEventsRoutes(deps));
   api.route("/threads", threadRoutes(deps));
   api.route("/agents", agentRoutes(deps));
   api.route("/install/settings", installSettingsRoutes(deps));

@@ -65,7 +65,10 @@ const limitParam = (max: number, fallback: number) =>
 
 export const listThreadsQuerySchema = z.strictObject({
   project_id: uuidSchema.optional(),
-  /** Full-text search (KOBE-33); see `search.ts`. */
+  /**
+   * Full-text search (KOBE-33, `search.ts`): web-search syntax, matched per message and on titles.
+   * With `q`, `cursor` is a search cursor and `limit` is capped at 50.
+   */
   q: z.string().trim().min(1).max(SEARCH_QUERY_MAX).optional(),
   cursor: z.string().max(256).optional(),
   limit: limitParam(THREAD_PAGE_MAX, THREAD_PAGE_DEFAULT),
@@ -128,6 +131,25 @@ export type ThreadEntry = z.infer<typeof threadEntrySchema>;
 
 export const threadPageSchema = z.object({
   threads: z.array(threadSummarySchema),
+  next_cursor: z.string().nullable(),
+});
+
+/** A piece of a search snippet; `highlight` marks a match. Plain text: render it escaped. */
+export const snippetSegmentSchema = z.object({ text: z.string(), highlight: z.boolean() });
+
+/** A search hit (`GET /v1/threads?q=`, KOBE-33): the thread plus why it matched. */
+export const threadSearchHitSchema = threadSummarySchema.extend({
+  /** The best-matching entry (may be on an inactive branch); null for a title-only match. */
+  matched_entry_id: idSchema.nullable(),
+  /** Excerpt of that entry around the matches; null for a title-only match. */
+  snippet: z.array(snippetSegmentSchema).nullable(),
+  /** Relevance; hits are ordered by score, then most recent activity. */
+  score: z.number(),
+});
+export type ThreadSearchHit = z.infer<typeof threadSearchHitSchema>;
+
+export const threadSearchPageSchema = z.object({
+  threads: z.array(threadSearchHitSchema),
   next_cursor: z.string().nullable(),
 });
 
