@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Builds every service image and asserts it runs as a non-root numeric user (KOBE-5 ac-2).
+# Builds every control-plane service image (the sandbox image has its own checks:
+# images/sandbox/test-image.sh) and asserts it runs as a non-root numeric user (KOBE-5 ac-2).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # service:dockerfile pairs (portable to macOS bash 3.2, which lacks associative arrays)
 IMAGES="web:apps/web/Dockerfile
 server:services/server/Dockerfile
-sandbox-agent:services/sandbox-agent/Dockerfile
 mcp-proxy:services/mcp-proxy/Dockerfile
 egress-proxy:services/egress-proxy/Dockerfile"
 TAG="${IMAGE_TAG:-dev}"

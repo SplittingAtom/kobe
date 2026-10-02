@@ -20,6 +20,7 @@ by the server. Licensed under Apache-2.0.
 | `packages/protocol`      | Kobe Event Stream schema shared by server and web                      |
 | `packages/db`            | Drizzle schema, migrations, RLS policies, cross-team probe suite       |
 | `tools/license-check`    | Dependency license policy check                                        |
+| `images/sandbox`         | The one sandbox image agents run in (gVisor)                           |
 | `charts/kobe`            | Helm umbrella chart                                                    |
 
 ## Dev quickstart

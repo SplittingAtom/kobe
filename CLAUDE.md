@@ -46,6 +46,10 @@ Cluster access: `ssh claude@compute1.atom.splittingatom.io` then `sudo k3s kubec
 - **ESM everywhere**, TS `NodeNext` resolution: relative imports in services/packages use `.js` extensions.
   `apps/web` uses `Bundler` resolution.
 - **Config is validated with zod at startup** (`src/config.ts` per service); invalid env fails fast.
+- **Sandbox image:** `images/sandbox/Dockerfile` (Python 3.12 slim + Node 22 + Pi pinned 1.0.0 +
+  `kobe-sandbox-agent` + data stack from `images/sandbox/requirements.txt`); checks in
+  `images/sandbox/test-image.sh <image>`; built, tested and Trivy-scanned by
+  `.github/workflows/sandbox-image.yml` (fails on fixable CRITICAL).
 - **Images:** one multi-stage Dockerfile per service, built from the repo root (`docker build -f
 services/<svc>/Dockerfile .`), runtime `USER 1000:1000` (numeric, for `runAsNonRoot`). Node services
   ship via `pnpm deploy --prod --legacy`; web ships Next.js `standalone` output.

@@ -1,0 +1,49 @@
+# Builds, tests and scans the Kobe sandbox image (KOBE-21). The image is large (~1.4 GB), so it runs
+# only when its inputs change, nightly (to catch new CVEs), and on demand.
+name: sandbox-image
+
+on:
+  push:
+    paths:
+      - images/sandbox/**
+      - services/sandbox-agent/**
+      - packages/protocol/**
+      - pnpm-lock.yaml
+      - .github/workflows/sandbox-image.yml
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build
+        run: docker build -f images/sandbox/Dockerfile -t kobe-sandbox:ci .
+      - name: Acceptance checks (non-root, read-only root FS, Pi 1.0.x, Python data stack)
+        run: images/sandbox/test-image.sh kobe-sandbox:ci
+      - name: Vulnerability report (HIGH and CRITICAL with fixes available)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: kobe-sandbox:ci
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: table
+          exit-code: "0"
+      - name: Vulnerability gate (fail on any fixable CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: kobe-sandbox:ci
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          format: table
+          exit-code: "1"
