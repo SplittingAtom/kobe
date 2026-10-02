@@ -1,0 +1,85 @@
+# Runner scale set for SplittingAtom/kobe (Actions Runner Controller, gha-runner-scale-set chart).
+# Workflows select it with `runs-on: ${{ vars.KOBE_RUNNER || 'ubuntu-latest' }}` and the repository
+# variable KOBE_RUNNER=kobe-k3s. See ci/runners/README.md.
+githubConfigUrl: https://github.com/SplittingAtom/kobe
+githubConfigSecret: kobe-arc-github-app
+
+runnerScaleSetName: kobe-k3s
+minRunners: 0
+maxRunners: 4
+
+# Docker-in-Docker, written out instead of `containerMode: dind` so Docker's data and the job
+# workspace live on per-runner Longhorn scratch volumes rather than the nodes' small root disks.
+template:
+  spec:
+    terminationGracePeriodSeconds: 60
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            actions.github.com/scale-set-name: kobe-k3s
+    initContainers:
+      - name: init-dind-externals
+        image: ghcr.io/actions/actions-runner:latest
+        command: ["cp", "-r", "/home/runner/externals/.", "/home/runner/tmpDir/"]
+        volumeMounts:
+          - name: dind-externals
+            mountPath: /home/runner/tmpDir
+      - name: dind
+        image: docker:29-dind
+        restartPolicy: Always # native sidecar: starts before the runner, stops after it
+        args: ["dockerd", "--host=unix:///var/run/docker.sock", "--group=$(DOCKER_GROUP_GID)"]
+        env:
+          - name: DOCKER_GROUP_GID
+            value: "123"
+        securityContext:
+          privileged: true
+        startupProbe:
+          exec:
+            command: ["docker", "info"]
+          periodSeconds: 5
+          failureThreshold: 24
+        resources:
+          requests: { cpu: 1500m, memory: 4Gi }
+          limits: { cpu: "6", memory: 10Gi }
+        volumeMounts:
+          - { name: work, mountPath: /home/runner/_work }
+          - { name: dind-sock, mountPath: /var/run }
+          - { name: dind-externals, mountPath: /home/runner/externals }
+          - { name: docker-data, mountPath: /var/lib/docker }
+    containers:
+      - name: runner
+        image: ghcr.io/actions/actions-runner:latest
+        command: ["/home/runner/run.sh"]
+        env:
+          - name: DOCKER_HOST
+            value: unix:///var/run/docker.sock
+          - name: RUNNER_WAIT_FOR_DOCKER_IN_SECONDS
+            value: "120"
+        resources:
+          requests: { cpu: 500m, memory: 1Gi }
+          limits: { cpu: "2", memory: 4Gi }
+        volumeMounts:
+          - { name: work, mountPath: /home/runner/_work }
+          - { name: dind-sock, mountPath: /var/run }
+    volumes:
+      - name: dind-sock
+        emptyDir: {}
+      - name: dind-externals
+        emptyDir: {}
+      - name: work
+        ephemeral:
+          volumeClaimTemplate:
+            spec:
+              accessModes: ["ReadWriteOnce"]
+              storageClassName: longhorn-ci-scratch
+              resources: { requests: { storage: 20Gi } }
+      - name: docker-data
+        ephemeral:
+          volumeClaimTemplate:
+            spec:
+              accessModes: ["ReadWriteOnce"]
+              storageClassName: longhorn-ci-scratch
+              resources: { requests: { storage: 60Gi } }

@@ -1,0 +1,67 @@
+# Self-hosted CI runners on the k3s cluster
+
+GitHub-hosted minutes for this private repo are metered and run out quickly with several agents
+pushing in parallel, so CI runs on our own k3s cluster with
+[Actions Runner Controller](https://github.com/actions/actions-runner-controller) (Apache-2.0).
+
+Every workflow job uses `runs-on: ${{ vars.KOBE_RUNNER || 'ubuntu-latest' }}`. With the repository
+variable `KOBE_RUNNER=kobe-k3s`, jobs run here; delete the variable to fall back to GitHub-hosted
+runners without a code change.
+
+## Layout
+
+| Piece                                                           | Where                                                                   |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| ARC controller (chart `gha-runner-scale-set-controller` 0.15.0) | namespace `arc-systems`, release `arc`                                  |
+| Runner scale set `kobe-k3s` ([values.yaml](values.yaml))        | namespace `kobe-ci-runners`, release `kobe-k3s`                         |
+| GitHub App credentials                                          | Secret `kobe-arc-github-app` in `kobe-ci-runners`                       |
+| Scratch volumes                                                 | StorageClass `longhorn-ci-scratch` (1 replica, deleted with the runner) |
+
+Runners are ephemeral (one job each), scale 0–4, and run Docker-in-Docker so jobs can build images,
+use service containers (the `db` job's Postgres) and create the k3d cluster for e2e. Docker's data
+(60 Gi) and the job workspace (20 Gi) live on per-runner Longhorn volumes: the nodes' root disks
+have only ~10 GB free and must not fill up.
+
+## Node prerequisites
+
+k3s-in-Docker (e2e) needs more inotify instances than Ubuntu's default 128. Set on every node:
+
+```bash
+printf "fs.inotify.max_user_instances=1024\nfs.inotify.max_user_watches=524288\n" \
+  | sudo tee /etc/sysctl.d/90-kobe-ci-inotify.conf && sudo sysctl -p /etc/sysctl.d/90-kobe-ci-inotify.conf
+```
+
+## Install
+
+```bash
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml   # on a control-plane node, with sudo -E
+kubectl apply -f namespace.yaml -f storageclass.yaml
+helm upgrade --install arc -n arc-systems --create-namespace --version 0.15.0 \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
+kubectl -n kobe-ci-runners create secret generic kobe-arc-github-app \
+  --from-literal=github_app_id=<APP_ID> \
+  --from-literal=github_app_installation_id=<INSTALLATION_ID> \
+  --from-file=github_app_private_key=<key.pem>
+helm upgrade --install kobe-k3s -n kobe-ci-runners --version 0.15.0 -f values.yaml \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
+gh variable set KOBE_RUNNER --body kobe-k3s --repo SplittingAtom/kobe
+```
+
+The GitHub App (`kobe-arc-runners`, owned by SplittingAtom) is installed on this repository only,
+with repository permission **Administration: read and write** (needed to register repo-level
+runners) and nothing else. Rotate its private key by generating a new one in the App settings and
+replacing the Secret.
+
+## Security
+
+Runner pods execute repository code with a **privileged** Docker daemon, which is root-equivalent
+on the node they land on. That is acceptable only because the repository is private and every
+change comes from the owner or agents working for them. Never enable runs from forks or public
+pull requests on this scale set. Runners are ephemeral, so nothing persists between jobs except
+the node's image cache.
+
+## Operations
+
+- Watch: `kubectl -n kobe-ci-runners get pods,ephemeralrunners`; controller logs in `arc-systems`.
+- Capacity: `maxRunners: 4`, each requesting 2 CPU / 5 Gi and allowed up to 8 CPU / 14 Gi.
+- Upgrade: bump `--version` for both charts together (controller first).

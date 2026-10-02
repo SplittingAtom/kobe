@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   checks:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.KOBE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -39,7 +39,7 @@ jobs:
 
   db:
     # Migrations from scratch + RLS catalog check + cross-team probe suite, on every push (spec D5).
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.KOBE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 15
     services:
       postgres:
@@ -66,6 +66,10 @@ jobs:
       # client is older than the server (pg_dump refuses newer servers), so add 17 from PGDG.
       - name: PostgreSQL 17 client
         run: |
+          # Self-hosted runners (ci/runners) start from a minimal image without postgresql-common.
+          if [ ! -x /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh ]; then
+            sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends postgresql-common
+          fi
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install -y --no-install-recommends postgresql-client-17
           echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
@@ -75,7 +79,7 @@ jobs:
         run: pnpm test:db
 
   images:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.KOBE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
