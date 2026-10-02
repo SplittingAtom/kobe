@@ -16,8 +16,8 @@ export interface MigrateOptions {
   readonly migrationsFolder?: string;
 }
 
-/** Serializes concurrent migration Jobs (e.g. overlapping Helm upgrades). */
-const MIGRATION_LOCK_KEY = 0x6b6f6265; // "kobe"
+/** Serializes concurrent migration Jobs (e.g. overlapping Helm upgrades) and backups/restores. */
+export const MIGRATION_LOCK_KEY = 0x6b6f6265; // "kobe"
 
 interface RoleCheck {
   current_user: string;
