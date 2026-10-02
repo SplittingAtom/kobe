@@ -1,5 +1,8 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { accounts, createDb, installRoles, users, type KobeDatabase } from "@kobe/db";
+import { AuditAnchorLogger } from "./audit/anchor.js";
+import { AuthAttemptAudit } from "./audit/attempts.js";
+import { recordAudit } from "./audit/record.js";
 import { createAuth, type KobeAuth } from "./auth/auth.js";
 import { createRunEventHub, type HubOptions, type RunEventHub } from "./event-stream/hub.js";
 import { createStreamReader, type StreamReader } from "./event-stream/read.js";
@@ -42,12 +45,16 @@ export interface ServerDeps {
     readonly timings: StreamTimings;
   };
   readonly mailer: Mailer;
+  /** Logs and attests the audit chain head (started by index.ts, not in tests). */
+  readonly auditAnchor: AuditAnchorLogger;
+  /** Aggregated audit of unauthenticated auth attempts (flushed on close). */
+  readonly authAttempts: AuthAttemptAudit;
   /** Downstream steps of deactivation/reactivation (sandboxes, grants, schedules, audit). */
   readonly lifecycle: UserLifecycle;
   /** Creates an email+password user (and optional install role) atomically, without sign-up. */
   createUserWithPassword(
     input: NewUser,
-    options?: { installRole?: "owner" | "admin" },
+    options?: { installRole?: "owner" | "admin"; recordSetup?: boolean },
   ): Promise<{ id: string }>;
   /** Deletes every session of a user; the next request with any of their cookies is rejected. */
   revokeAllSessions(userId: string): Promise<void>;
@@ -60,7 +67,10 @@ const digest = (value: string): Buffer => createHash("sha256").update(value).dig
 
 export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   const database = createDb(options.databaseUrl);
+  const authAttempts = new AuthAttemptAudit(database.db);
+  authAttempts.start();
   const auth = createAuth({
+    attempts: authAttempts,
     db: database.db,
     publicUrl: options.publicUrl,
     secret: options.authSecret,
@@ -83,8 +93,10 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     publicUrl: new URL(options.publicUrl).origin,
     eventStream: { hub, reader, timings: { ...STREAM_DEFAULTS, ...options.eventStream?.timings } },
     mailer: options.mailer,
+    authAttempts,
+    auditAnchor: new AuditAnchorLogger(database.db, options.authSecret),
     lifecycle: new UserLifecycle(),
-    async createUserWithPassword({ email, name, password }, { installRole } = {}) {
+    async createUserWithPassword({ email, name, password }, { installRole, recordSetup } = {}) {
       const ctx = await auth.$context;
       const hash = await ctx.password.hash(password);
       // One transaction: a failure can't leave a half-created user (e.g. an Owner without a role).
@@ -102,6 +114,13 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
         });
         if (installRole)
           await tx.insert(installRoles).values({ userId: user.id, role: installRole });
+        if (recordSetup) {
+          await recordAudit(tx, {
+            action: "identity.setup.completed",
+            actor: { kind: "user", id: user.id },
+            target: { ownerUserId: user.id },
+          });
+        }
         return { id: user.id };
       });
     },
@@ -116,6 +135,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
       await hub.close();
       await reader.close();
       options.mailer.close();
+      await authAttempts.stop();
       await database.close();
     },
   };

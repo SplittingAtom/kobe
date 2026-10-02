@@ -340,9 +340,16 @@ importers:
       pino:
         specifier: ^10.3.1
         version: 10.3.1
+      ws:
+        specifier: ^8.22.0
+        version: 8.22.0
       zod:
         specifier: ^4.0.0
         version: 4.6.5
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.18.2
+        version: 8.18.2
 
   services/server:
     dependencies:
@@ -4929,6 +4936,7 @@ snapshots:
       '@types/node': 24.19.0
     transitivePeerDependencies:
       - msw
+    optional: true
 
   whatwg-mimetype@3.0.0: {}
 

@@ -1,7 +1,7 @@
-import { toolRules, type KobeTx } from "@kobe/db";
+import { toolRules, type AuditActor, type KobeTx } from "@kobe/db";
 import { BUILTIN_TOOLS, parseMcpToolName, rememberRuleSchema } from "@kobe/protocol";
 import { allowGlobScoped, isLiteralGlob } from "./patterns.js";
-import { fitsScope, storedTeam, type StoredRule } from "./rule-store.js";
+import { auditRule, fitsScope, storedTeam, type StoredRule } from "./rule-store.js";
 import { USER_LIMITS } from "./schemas.js";
 
 export type RememberError = "invalid_rule" | "glob_too_broad" | "too_many_rules";
@@ -35,6 +35,11 @@ export async function insertUserAllowRule(
     readonly approvedTool: string;
     readonly remember: unknown;
     readonly now: Date;
+    /**
+     * Who approved and remembered (audit, KOBE-15): required, so the rule is never created
+     * unaudited. Usually `{ kind: "user", id: userId }`.
+     */
+    readonly actor: AuditActor;
   },
 ): Promise<RememberResult> {
   const parsed = rememberRuleSchema.safeParse(params.remember);
@@ -63,5 +68,7 @@ export async function insertUserAllowRule(
     })
     .returning();
   if (!row) throw new Error("user rule insert returned no row");
-  return { ok: true, rule: storedTeam(row) };
+  const stored = storedTeam(row);
+  await auditRule(tx, "policy.rule.created", stored, params.teamId, params.actor);
+  return { ok: true, rule: stored };
 }

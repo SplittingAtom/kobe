@@ -92,4 +92,38 @@ describe("restore postlude", () => {
     expect(sql.trimEnd().endsWith("COMMIT;")).toBe(true);
     expect(sql.indexOf("count(*)")).toBeLessThan(sql.indexOf("FORCE ROW LEVEL SECURITY"));
   });
+
+  it("records the restore in the audit log after the triggers are back (KOBE-15)", () => {
+    expect(sql).not.toContain("audit_log");
+    const audit = {
+      backupCreatedAt: "2026-10-02T12:00:00.000Z",
+      tables: 12,
+      rows: 34,
+      operator: "ops.jane",
+      expectHeads: [
+        { seq: 7, hash: "a".repeat(64), exact: true, source: "signed manifest" },
+        { seq: 3, hash: "b".repeat(64), exact: false, source: "expect-audit-head" },
+      ],
+    };
+    const audited = restorePostlude({ ...plan, audit });
+    const verify = audited.indexOf("audit_log_canonical");
+    const insert = audited.indexOf("INSERT INTO public.audit_log");
+    expect(verify).toBeGreaterThan(audited.indexOf('ENABLE TRIGGER "audit ""x""";'));
+    expect(verify).toBeLessThan(insert);
+    expect(insert).toBeLessThan(audited.indexOf("COMMIT;"));
+    expect(audited).toContain("kobe restore: the audit chain in the backup is broken");
+    expect(audited).toContain(`head_seq = 7 AND head_hash = '${"a".repeat(64)}'`);
+    expect(audited).toContain(`WHERE seq = 3 AND hash = '${"b".repeat(64)}'`);
+    expect(audited).toContain(`'operator', 'ops.jane'`);
+    expect(audited).toContain("'platform.restore.completed'");
+    expect(() => restorePostlude({ ...plan, audit: { ...audit, operator: "x'; DROP" } })).toThrow(
+      /operator/,
+    );
+    expect(() =>
+      restorePostlude({
+        ...plan,
+        audit: { ...audit, expectHeads: [{ seq: 1, hash: "zz'", exact: true, source: "x" }] },
+      }),
+    ).toThrow(/hash/);
+  });
 });

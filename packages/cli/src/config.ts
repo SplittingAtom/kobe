@@ -6,6 +6,11 @@ import { parseKeyMaterial } from "./crypto.js";
 export const USAGE = `Usage:
   kobe backup  --out <new directory> [--no-objects]
   kobe restore --from <backup directory> [--allow-object-mismatch] [--no-objects]
+               [--operator <name>] [--expect-audit-head <seq>:<sha256>]
+
+  --operator           recorded as who ran the restore (default: the OS user)
+  --expect-audit-head  an audit chain head recorded off the box (server log, SIEM); the restore
+                       fails unless the restored chain contains it
 
 Environment:
   both     KOBE_BACKUP_KEY_FILE      file with the backup key (openssl rand -base64 32), or
@@ -52,6 +57,8 @@ export interface RestoreCommand {
   readonly pgBinDir: string | undefined;
   readonly tmpDir: string | undefined;
   readonly key: Buffer;
+  readonly operator: string | undefined;
+  readonly expectAuditHead: { readonly seq: number; readonly hash: string } | undefined;
 }
 
 export type Command = BackupCommand | RestoreCommand;
@@ -218,10 +225,21 @@ export function parseCommand(
       from: { type: "string" },
       "allow-object-mismatch": { type: "boolean", default: false },
       "no-objects": { type: "boolean", default: false },
+      operator: { type: "string" },
+      "expect-audit-head": { type: "string" },
     });
     if (typeof flags.from !== "string" || flags.from === "") {
       throw usageError("restore needs --from <dir>");
     }
+    const operator = typeof flags.operator === "string" ? flags.operator : undefined;
+    if (operator !== undefined && !/^[A-Za-z0-9._@-]{1,64}$/.test(operator)) {
+      throw usageError("--operator: use 1-64 letters, digits, . _ @ -");
+    }
+    const head =
+      typeof flags["expect-audit-head"] === "string"
+        ? /^(\d{1,15}):([0-9a-f]{64})$/.exec(flags["expect-audit-head"])
+        : undefined;
+    if (head === null) throw usageError("--expect-audit-head: give <seq>:<64 hex digits>");
     return {
       command,
       from: flags.from,
@@ -232,6 +250,8 @@ export function parseCommand(
       pgBinDir,
       tmpDir: env.KOBE_TMPDIR || undefined,
       key: readBackupKey(env, readKeyFile),
+      operator,
+      expectAuditHead: head ? { seq: Number(head[1]), hash: head[2] ?? "" } : undefined,
     };
   }
   throw usageError(command ? `Unknown command "${command}"` : "No command given");

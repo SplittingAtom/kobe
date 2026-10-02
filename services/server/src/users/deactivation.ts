@@ -11,6 +11,7 @@ import {
   withTeam,
   type KobeDb,
 } from "@kobe/db";
+import { recordAudit } from "../audit/record.js";
 import { revokeAllInvitesSentBy } from "../invitations/team-invites.js";
 
 /** True when the user exists and is deactivated. */
@@ -40,6 +41,9 @@ export async function deactivateUser(db: KobeDb, userId: string): Promise<boolea
     // Revoke even when already deactivated: cheap, and closes anything a past bug left behind.
     await tx.delete(sessions).where(eq(sessions.userId, userId));
     await tx.delete(verifications).where(eq(verifications.value, userId));
+    if (changed.length > 0) {
+      await recordAudit(tx, { action: "identity.user.deactivated", target: { userId } });
+    }
     return changed.length > 0;
   });
   // Their pending team invitations lose their authority (acceptance re-checks it as well).
@@ -49,12 +53,17 @@ export async function deactivateUser(db: KobeDb, userId: string): Promise<boolea
 
 /** Reactivates a user; they sign in again with their existing credentials. False if not deactivated. */
 export async function reactivateUser(db: KobeDb, userId: string): Promise<boolean> {
-  const changed = await db
-    .update(users)
-    .set({ deactivatedAt: null, updatedAt: new Date() })
-    .where(and(eq(users.id, userId), isNotNull(users.deactivatedAt)))
-    .returning({ id: users.id });
-  return changed.length > 0;
+  return db.transaction(async (tx) => {
+    const changed = await tx
+      .update(users)
+      .set({ deactivatedAt: null, updatedAt: new Date() })
+      .where(and(eq(users.id, userId), isNotNull(users.deactivatedAt)))
+      .returning({ id: users.id });
+    if (changed.length > 0) {
+      await recordAudit(tx, { action: "identity.user.reactivated", target: { userId } });
+    }
+    return changed.length > 0;
+  });
 }
 
 /** Teams where this user is a team admin and no other active team admin remains. */

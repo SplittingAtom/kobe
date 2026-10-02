@@ -10,6 +10,7 @@ import {
   type KobeTx,
   type TeamRole,
 } from "@kobe/db";
+import { recordAudit } from "../audit/record.js";
 import { revokeInvitesSentBy } from "../invitations/team-invites.js";
 
 export interface TeamMember {
@@ -120,6 +121,13 @@ export async function setMemberRole(
       .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
     // Below team admin they can no longer invite: their pending invitations go too.
     if (role !== "team_admin") await revokeInvitesSentBy(tx, teamId, userId);
+    if (lock.current !== role) {
+      await recordAudit(tx, {
+        action: "identity.member.role_changed",
+        teamId,
+        target: { userId, from: lock.current, to: role },
+      });
+    }
     return OK;
   });
 }
@@ -138,6 +146,11 @@ export async function removeMember(
       .delete(teamMembers)
       .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
     await revokeInvitesSentBy(tx, teamId, userId);
+    await recordAudit(tx, {
+      action: "identity.member.removed",
+      teamId,
+      target: { userId, role: lock.current },
+    });
     return OK;
   });
 }
@@ -157,11 +170,16 @@ export async function createTeamWithAdmin(
       .values({ slug: input.slug, name: input.name })
       .returning({ id: teams.id, slug: teams.slug, name: teams.name });
     if (!team) throw new Error("team insert returned no row");
-    await withTeam(tx, team.id, (inner) =>
-      inner
+    await withTeam(tx, team.id, async (inner) => {
+      await inner
         .insert(teamMembers)
-        .values({ teamId: team.id, userId: adminUserId, role: "team_admin" }),
-    );
+        .values({ teamId: team.id, userId: adminUserId, role: "team_admin" });
+      await recordAudit(inner, {
+        action: "identity.team.created",
+        teamId: team.id,
+        target: { slug: team.slug, name: team.name, adminUserId },
+      });
+    });
     return team;
   });
 }

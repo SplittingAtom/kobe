@@ -29,6 +29,30 @@ export interface RestorePlan {
    * cannot order around FK cycles such as threads ⇄ thread_entries) and restored before COMMIT.
    */
   readonly immediateForeignKeys: readonly { readonly table: string; readonly constraint: string }[];
+  /**
+   * Recorded as `platform.restore.completed` in the restored audit log (KOBE-15), inside the
+   * restore transaction after the triggers are back, so it extends the restored hash chain.
+   */
+  readonly audit?: RestoreAudit;
+}
+
+/** An audit chain head the restored chain must contain (or, with `exact`, end at). */
+export interface ExpectedAuditHead {
+  /** 0 with a null hash: the chain must be empty. */
+  readonly seq: number;
+  readonly hash: string | null;
+  readonly exact: boolean;
+  /** Where the expectation comes from, for the error message. */
+  readonly source: string;
+}
+
+export interface RestoreAudit {
+  readonly backupCreatedAt: string;
+  readonly tables: number;
+  readonly rows: number;
+  /** Who ran the restore (OS user or --operator). */
+  readonly operator: string;
+  readonly expectHeads: readonly ExpectedAuditHead[];
 }
 
 const table = (name: string): string => `public.${quoteIdent(name)}`;
@@ -91,7 +115,70 @@ export function restorePrelude(plan: RestorePlan): string {
     .join("\n");
 }
 
-/** SQL sent after the data script: verify, restore triggers and FORCE RLS, commit. */
+const OPERATOR = /^[A-Za-z0-9._@-]{1,64}$/;
+const HASH = /^[0-9a-f]{64}$/;
+
+function expectHeadCheck(head: ExpectedAuditHead): string {
+  const seq = Math.trunc(head.seq);
+  if (head.hash !== null && !HASH.test(head.hash)) throw new Error("invalid audit head hash");
+  const what = `${seq}:${head.hash ?? "(empty)"}`;
+  const ok =
+    head.hash === null
+      ? `head_seq = ${seq}`
+      : head.exact
+        ? `head_seq = ${seq} AND head_hash = ${literal(head.hash)}`
+        : `EXISTS (SELECT 1 FROM public.audit_log WHERE seq = ${seq} AND hash = ${literal(head.hash)})`;
+  const want = head.exact ? "end at" : "contain";
+  return `  IF NOT (${ok}) THEN
+    RAISE EXCEPTION 'kobe restore: the restored audit chain does not ${want} ${what} (${head.source.replace(/[^A-Za-z0-9 :-]/g, "")}); its head is %:%. Nothing was restored', head_seq, coalesce(head_hash, '(empty)');
+  END IF;`;
+}
+
+/**
+ * Verifies the restored audit hash chain (KOBE-15) inside the restore transaction and fails the
+ * whole restore on any break or unexpected head, then appends `platform.restore.completed`
+ * (append trigger assigns seq and hashes) so the chain continues past the restored rows.
+ */
+function auditRestore(audit: RestoreAudit): string {
+  if (!OPERATOR.test(audit.operator)) throw new Error("invalid operator name");
+  const target = (headSeq: string, headHash: string) =>
+    `jsonb_strip_nulls(jsonb_build_object('backupCreatedAt', ${literal(
+      new Date(audit.backupCreatedAt).toISOString(),
+    )}, 'tables', ${Math.trunc(audit.tables)}, 'rows', ${Math.trunc(audit.rows)}, 'operator', ${literal(
+      audit.operator,
+    )}, 'auditHeadSeq', NULLIF(${headSeq}, 0), 'auditHeadHash', ${headHash}))`;
+  const fail = (what: string) =>
+    `RAISE EXCEPTION 'kobe restore: the audit chain in the backup is broken at seq % (${what}); nothing was restored', want;`;
+  return doBlock(
+    [
+      "DECLARE",
+      "  r record;",
+      "  want bigint := 1;",
+      "  prev text := repeat('0', 64);",
+      "  head_seq bigint;",
+      "  head_hash text;",
+      "BEGIN",
+      "  IF to_regclass('public.audit_log') IS NULL THEN RETURN; END IF;",
+      "  FOR r IN SELECT a.seq, a.prev_hash, a.hash,",
+      "      encode(sha256(convert_to(public.audit_log_canonical(a), 'UTF8')), 'hex') AS computed",
+      "    FROM public.audit_log a ORDER BY a.seq LOOP",
+      `    IF r.seq <> want THEN ${fail("a row is missing")} END IF;`,
+      `    IF r.prev_hash <> prev THEN ${fail("prev_hash does not name the previous row")} END IF;`,
+      `    IF r.hash <> r.computed THEN ${fail("the row does not match its hash")} END IF;`,
+      "    prev := r.hash;",
+      "    want := want + 1;",
+      "  END LOOP;",
+      "  head_seq := want - 1;",
+      "  head_hash := CASE WHEN head_seq = 0 THEN NULL ELSE prev END;",
+      ...audit.expectHeads.map(expectHeadCheck),
+      "  INSERT INTO public.audit_log (actor_kind, action, target)",
+      `    VALUES ('system', 'platform.restore.completed', ${target("head_seq", "head_hash")});`,
+      "END",
+    ].join("\n"),
+  );
+}
+
+/** SQL sent after the data script: verify, restore triggers and FORCE RLS, record, commit. */
 export function restorePostlude(plan: RestorePlan): string {
   const countChecks = plan.loadTables
     .map(
@@ -112,6 +199,7 @@ export function restorePostlude(plan: RestorePlan): string {
     ),
     ...plan.userTriggers.map(enable),
     ...plan.forcedRls.map((t) => `ALTER TABLE ${table(t)} FORCE ROW LEVEL SECURITY;`),
+    plan.audit ? auditRestore(plan.audit) : "",
     "COMMIT;",
     "",
   ].join("\n");

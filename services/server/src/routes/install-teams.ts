@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { asc, eq, teams } from "@kobe/db";
 import type { AuthVariables } from "../auth/session.js";
+import { recordAudit } from "../audit/record.js";
 import { requireInstallPermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
@@ -56,11 +57,21 @@ export function installTeamsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
     const body = await parseBody(c, renameTeamSchema);
     if (!teamId.success || !body) return invalidRequest(c);
     // The slug is immutable: it names the team's sandbox namespace.
-    const [team] = await db
-      .update(teams)
-      .set({ name: body.name })
-      .where(eq(teams.id, teamId.data))
-      .returning({ id: teams.id, slug: teams.slug, name: teams.name });
+    const team = await db.transaction(async (tx) => {
+      const [renamed] = await tx
+        .update(teams)
+        .set({ name: body.name })
+        .where(eq(teams.id, teamId.data))
+        .returning({ id: teams.id, slug: teams.slug, name: teams.name });
+      if (renamed) {
+        await recordAudit(tx, {
+          action: "identity.team.renamed",
+          teamId: renamed.id,
+          target: { name: renamed.name },
+        });
+      }
+      return renamed;
+    });
     return team ? c.json({ team }) : c.json(teamNotFound, 404);
   });
 

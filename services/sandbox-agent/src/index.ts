@@ -1,6 +1,58 @@
+import { readFile } from "node:fs/promises";
+import { Agent } from "./agent.js";
 import { loadConfig } from "./config.js";
+import { hardenProcess } from "./harden.js";
 import { logger } from "./logger.js";
+import { buildPiLaunch } from "./pi/pi-launch.js";
+import { detectPiVersion, readAgentVersion } from "./version.js";
 
-// Scaffold only: the dial-out WSS connection and Pi RPC bridge arrive in KOBE-23.
-const config = loadConfig(process.env);
-logger.info({ serverUrl: config.serverUrl }, "sandbox-agent starting");
+/**
+ * kobe-sandbox-agent entry point: the sandbox's main process (D13). Dials out to the server; opens
+ * no listening socket. Exits non-zero on invalid configuration (fail fast).
+ */
+const SHUTDOWN_DEADLINE_MS = 10_000;
+
+async function main(): Promise<void> {
+  hardenProcess(process);
+  const config = loadConfig(process.env);
+  const home = process.env.HOME ?? "/home/kobe";
+  const piEnv = buildPiLaunch({
+    sessionFile: "-",
+    home,
+    agentDir: config.piAgentDir,
+    parentEnv: process.env,
+  }).env;
+  const [agentVersion, piVersion] = await Promise.all([
+    readAgentVersion(new URL("../package.json", import.meta.url)),
+    detectPiVersion(config.piBin, piEnv),
+  ]);
+  logger.info(
+    { server: config.connectUrl, sandbox_id: config.sandboxId, agentVersion, piVersion },
+    "sandbox-agent starting",
+  );
+
+  const agent = new Agent({
+    config,
+    logger,
+    readToken: async () => {
+      const token = (await readFile(config.tokenFile, "utf8")).trim();
+      if (token === "") throw new Error("sandbox token file is empty");
+      return token;
+    },
+    agentVersion,
+    piVersion,
+    home,
+    parentEnv: process.env,
+    onExit: (code) => process.exit(code),
+  });
+  process.on("exit", () => agent.killAll());
+  for (const signal of ["SIGTERM", "SIGINT"] as const) {
+    process.once(signal, () => void agent.stop(SHUTDOWN_DEADLINE_MS, 0));
+  }
+  agent.start();
+}
+
+main().catch((error: unknown) => {
+  logger.fatal({ err: error instanceof Error ? error.message : String(error) }, "startup failed");
+  process.exitCode = 1;
+});

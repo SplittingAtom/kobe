@@ -55,7 +55,7 @@ export function setupRoutes(deps: ServerDeps): Hono {
       const { email, name, password } = parsed.data;
       const owner = await deps.createUserWithPassword(
         { email, name, password },
-        { installRole: "owner" },
+        { installRole: "owner", recordSetup: true },
       );
       return c.json({ userId: owner.id }, 201);
     } finally {

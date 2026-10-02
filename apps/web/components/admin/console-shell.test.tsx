@@ -24,6 +24,7 @@ const TEAM_ADMIN = [
   "team.policy.manage",
   "team.skills.review",
   "team.retention.manage",
+  "team.audit.read",
 ];
 const team = (role: TeamAccess["role"], permissions: string[]) => () =>
   ok<ConsoleAccess>({
@@ -195,7 +196,7 @@ describe("team console", () => {
       within(nav)
         .getAllByRole("link")
         .map((a) => a.textContent),
-    ).toEqual(["Members and roles", "Invitations", "Audit view · soon, coming in KOBE-15"]);
+    ).toEqual(["Members and roles", "Invitations"]);
   });
 });
 

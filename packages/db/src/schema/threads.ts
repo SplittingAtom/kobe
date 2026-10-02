@@ -36,6 +36,12 @@ const teamRef = () =>
  * with agent versions (KOBE-46: agents span team_agents and install_agents, see
  * docs/ledger/KOBE-45.md) and `project_id`'s with projects (KOBE-57). Null agent = the install
  * default agent.
+ *
+ * `tsv` (§5.4; the title, weight A) is a stored generated column added in SQL by migration
+ * `*_thread_search.sql`, like `thread_entries.tsv`; neither is declared here (the entry column depends
+ * on a SQL function) and the app never writes or selects them. Search: `searchThreads`.
+ * **Never run `drizzle-kit push`** against a Kobe database: it diffs the live schema against these
+ * declarations and would drop both `tsv` columns (and anything else SQL-only). Migrations only.
  */
 export const threads = pgTable(
   "threads",
@@ -91,7 +97,8 @@ export const threads = pgTable(
  * `type` is Pi's entry type (message, compaction, context_edit, branch_summary, …; text, so a Pi
  * 1.0.x patch adding a type needs no migration). `seq` is the per-thread append order (for
  * rebuilding the JSONL); a trigger assigns it, like `run_events.seq`. Payloads over 64 KB go to S3
- * via `blob_ref`.
+ * via `blob_ref`. `tsv` (search text of user/assistant messages, SQL-only) is generated from
+ * `type` + `payload`, so writers must store the Pi entry shape (`payload.message.content`).
  */
 export const threadEntries = pgTable(
   "thread_entries",

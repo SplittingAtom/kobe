@@ -1,4 +1,5 @@
 import { readFile, rm } from "node:fs/promises";
+import { userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -32,7 +33,14 @@ import {
   waitForExit,
 } from "./pg-tools.js";
 import { RestrictGuard } from "./restrict-guard.js";
-import { journalText, restorePostlude, restorePrelude, type RestorePlan } from "./restore-sql.js";
+import {
+  journalText,
+  restorePostlude,
+  restorePrelude,
+  type ExpectedAuditHead,
+  type RestorePlan,
+} from "./restore-sql.js";
+import { readAuditHead } from "./backup.js";
 import { makePrivateWorkDir, removeOnSignal } from "./workdir.js";
 
 export interface RestoreOptions {
@@ -51,6 +59,10 @@ export interface RestoreOptions {
   /** Where the decrypted dump lives during the restore (KOBE_TMPDIR; default: OS temp dir). */
   readonly tmpDir?: string | undefined;
   readonly log?: (message: string) => void;
+  /** Who runs the restore, recorded in the restore's audit event (default: the OS user). */
+  readonly operator?: string | undefined;
+  /** An audit chain head recorded off the box earlier: the restored chain must contain it. */
+  readonly expectAuditHead?: { readonly seq: number; readonly hash: string } | undefined;
 }
 
 export interface RestoreReport {
@@ -61,6 +73,8 @@ export interface RestoreReport {
   readonly rows: number;
   readonly excludedTables: readonly string[];
   readonly objects: { readonly checked: number; readonly problems: number } | null;
+  /** Head of the verified audit chain after the restore (its own event included): anchor it. */
+  readonly auditHead: { readonly seq: number; readonly hash: string } | null;
 }
 
 function describeJournal(migrations: readonly { hash: string }[]): string {
@@ -260,6 +274,13 @@ export async function runRestore(options: RestoreOptions): Promise<RestoreReport
         forcedRls: tables.filter((t) => t.forcedRls).map((t) => t.name),
         userTriggers: await listUserTriggers(client),
         immediateForeignKeys: await listImmediateForeignKeys(client),
+        audit: {
+          backupCreatedAt: manifest.createdAt,
+          tables: manifest.tables.length,
+          rows: manifest.tables.reduce((sum, t) => sum + t.rows, 0),
+          operator: options.operator ?? defaultOperator(),
+          expectHeads: expectedHeads(manifest, options.expectAuditHead),
+        },
       };
     } finally {
       await client.end().catch(() => undefined);
@@ -270,6 +291,7 @@ export async function runRestore(options: RestoreOptions): Promise<RestoreReport
     const objects = await checkObjects(manifest, expectedObjects, options);
     log("loading data in one transaction…");
     await loadData(plan, dumpPath, options);
+    const auditHead = await restoredAuditHead(options.databaseUrl);
     return {
       fingerprint,
       createdAt: manifest.createdAt,
@@ -277,9 +299,51 @@ export async function runRestore(options: RestoreOptions): Promise<RestoreReport
       rows: manifest.tables.reduce((sum, t) => sum + t.rows, 0),
       excludedTables: manifest.excludedTables.map((t) => t.name),
       objects,
+      auditHead,
     };
   } finally {
     cleanup.dispose();
     await rm(work, { recursive: true, force: true });
+  }
+}
+
+/** The OS user running the CLI, reduced to the characters the audit event allows. */
+export function defaultOperator(): string {
+  let name: string;
+  try {
+    name = userInfo().username;
+  } catch {
+    name = process.env.USER ?? "";
+  }
+  const clean = name.replace(/[^A-Za-z0-9._@-]/g, "_").slice(0, 64);
+  return clean === "" ? "unknown" : clean;
+}
+
+/** The signed manifest's head (exact end of the chain) plus an operator-supplied one (contained). */
+function expectedHeads(
+  manifest: Manifest,
+  expect: RestoreOptions["expectAuditHead"],
+): ExpectedAuditHead[] {
+  const heads: ExpectedAuditHead[] = [];
+  if (manifest.auditHead !== undefined) {
+    heads.push(
+      manifest.auditHead === null
+        ? { seq: 0, hash: null, exact: true, source: "signed manifest" }
+        : { ...manifest.auditHead, exact: true, source: "signed manifest" },
+    );
+  }
+  if (expect) heads.push({ ...expect, exact: false, source: "expect-audit-head" });
+  return heads;
+}
+
+async function restoredAuditHead(databaseUrl: string): Promise<RestoreReport["auditHead"]> {
+  const client = new pg.Client({ connectionString: databaseUrl, connectionTimeoutMillis: 10_000 });
+  await client.connect();
+  try {
+    const exists = await client.query(`SELECT to_regclass('public.audit_log') IS NOT NULL AS ok`);
+    if (!exists.rows[0]?.ok) return null;
+    return await readAuditHead(client);
+  } finally {
+    await client.end().catch(() => undefined);
   }
 }

@@ -39,6 +39,7 @@ import {
   type AgentLocation,
   type AgentRecord,
 } from "../agents/store.js";
+import { recordAuditAfter } from "../audit/record.js";
 import { requireTeam, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { parseBody } from "../teams/http.js";
@@ -107,6 +108,7 @@ export function agentRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
       slug: meta.data.slug,
       baseSlug: slugFromName(input.definition.frontmatter.name),
       ownerUserId: c.get("user").id,
+      source: input.source,
     });
     if (!result.ok) return createError(c, result.error);
     return agentResponse(c, result.value, agentAccess(actorOf(c), result.value), 201);
@@ -126,6 +128,11 @@ export function agentRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
     if (!agentAccess(actorOf(c), agent).readDefinition) {
       return forbidden(c, "Your team role doesn't allow exporting team agents.");
     }
+    await recordAuditAfter(db, {
+      action: "agent.exported",
+      teamId: agent.scope === "team" ? c.get("team").id : null,
+      target: { agentId: agent.id, scope: agent.scope, slug: agent.slug },
+    });
     return exportResponse(c, agent);
   });
 
@@ -147,6 +154,7 @@ export function agentRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
       agent.id,
       input.definition,
       ifMatch.revision,
+      input.source,
     );
     if (!result.ok) return result.error === "not_found" ? notFound(c) : preconditionFailed(c);
     return agentResponse(c, result.value, access);
@@ -173,6 +181,8 @@ export function agentRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
       slug: body.slug,
       baseSlug: source.slug,
       ownerUserId: c.get("user").id,
+      source: "fork",
+      forkedFrom: source.id,
     });
     if (!result.ok) return createError(c, result.error);
     return agentResponse(c, result.value, agentAccess(actorOf(c), result.value), 201);

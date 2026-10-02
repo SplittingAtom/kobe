@@ -43,10 +43,16 @@ export const identity = defineDomain({
     session_active_teams: ALL_PRIVILEGES,
     // Kept as the record of who invited whom: revoked or accepted, never deleted (KOBE-13).
     invitations: ["SELECT", "INSERT", "UPDATE"],
+    // Append-only (KOBE-15): never UPDATE, DELETE or TRUNCATE; triggers refuse them for the owner too.
+    audit_log: ["SELECT", "INSERT"],
   },
   teamReferencing: {
     session_active_teams:
       "Which team a sign-in session has active (D9): a pointer to `teams`, no team content; " +
       "membership is re-verified under team RLS on every request.",
+    audit_log:
+      "Install-wide record (D6) whose events may belong to a team: team admins read their team's " +
+      "events through listTeamAuditEvents(), which always filters on team_id. No FK to `teams`. " +
+      "Only metadata is stored (AUDIT_EVENTS allowlist), never team content.",
   },
 });
