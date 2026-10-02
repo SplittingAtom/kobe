@@ -51,6 +51,37 @@ apply`, or deleting the RuntimeClass later cannot run agents without isolation:
 - The **scheduler** has no UI, so it runs the same check as an initContainer and refuses to start,
   then re-checks in process like the server.
 
+## Sandboxes
+
+Each user gets one sandbox per team (spec D11): an agent-sandbox `Sandbox` under
+`isolation.runtimeClassName`, with a persistent `/workspace` volume, in the team's namespace
+`kobe-team-<slug>`. The server creates and maintains these namespaces itself; nothing needs to be
+created by hand. Every team namespace gets:
+
+- a **default-deny NetworkPolicy** (`kobe-sandbox-isolation`): no inbound connections at all;
+  outbound only to the Kobe server, Bifrost, the MCP proxy and the egress proxy. Sandboxes get no
+  DNS: those four resolve through `/etc/hosts` (`*.kobe.internal` → the Services' ClusterIPs), so
+  DNS cannot be used to leak data past the egress proxy;
+- a **ResourceQuota** (`sandbox.teamQuota`, default 20 vCPU / 40 GiB requested) and a LimitRange;
+- a `SandboxTemplate` and a **warm pool** of `sandbox.warmPool.replicasPerTeam` pre-started
+  sandboxes (agent-sandbox warm pools are per namespace; each counts against the team's quota);
+- Pod Security Admission `restricted`.
+
+The chart installs **ValidatingAdmissionPolicies** that hold whatever creates the pod (server,
+agent-sandbox controller, an operator): in `kobe-team-*` namespaces every pod must use
+`isolation.runtimeClassName` and that RuntimeClass must have a gVisor/Kata handler; pods may not
+mount Secrets, read Secrets into env, mount a Kubernetes API token, use host namespaces or
+`hostPath`; and only the Kobe server may add or change NetworkPolicies there. The server's own
+cluster-wide permissions (namespaces, RoleBindings) are confined to `kobe-team-*` by the same
+mechanism. Sandboxes identify themselves to the server with a projected ServiceAccount token
+(audience `kobe.sandbox-bootstrap`, which the Kubernetes API itself rejects) and receive
+short-lived, audience-bound session tokens in return; no other credential enters a sandbox.
+
+Private registries: the names in `global.imagePullSecrets` are copied into each team namespace for
+the kubelet (pods there cannot mount them). Alternatively configure registry credentials on the
+nodes (k3s `registries.yaml`). Kobe assumes one install per cluster (`kobe-team-*` names are
+cluster-wide).
+
 ## Install
 
 Create the Secrets the chart references, then install:

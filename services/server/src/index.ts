@@ -5,6 +5,7 @@ import { createServerDeps, type ServerDeps } from "./deps.js";
 import { createIsolationGate } from "./isolation/gate.js";
 import { listRuntimeClasses } from "./isolation/kubernetes.js";
 import { logger } from "./logger.js";
+import { createSandboxRuntime } from "./sandbox/runtime.js";
 
 /** Open streams (SSE) get this long to finish before being cut; stays under k8s' 30 s grace period. */
 const DRAIN_TIMEOUT_MS = 10_000;
@@ -43,10 +44,25 @@ const isolation = createIsolationGate({
 });
 isolation.start().catch((err: unknown) => logger.error({ err }, "isolation check failed"));
 
+// Sandbox provider (KOBE-22); the scheduler starts sandboxes through it from KOBE-64 on.
+const sandbox =
+  config.process === "server" ? createSandboxRuntime(process.env, isolation) : undefined;
+if (config.process === "server" && !sandbox) {
+  logger.error(
+    "KOBE_SANDBOX_CONFIG is not set: sandboxes are disabled (install with the Helm chart)",
+  );
+}
+
 // The scheduler serves health endpoints only (its jobs arrive in KOBE-64).
-const server = serve({ fetch: createApp(deps, { isolation }).fetch, port: config.port }, (info) => {
-  logger.info({ port: info.port, process: config.process }, "listening");
-});
+const server = serve(
+  {
+    fetch: createApp(deps, { isolation, ...(sandbox ? { sandbox } : {}) }).fetch,
+    port: config.port,
+  },
+  (info) => {
+    logger.info({ port: info.port, process: config.process }, "listening");
+  },
+);
 
 function shutdown(signal: string): void {
   logger.info({ signal }, "shutting down");

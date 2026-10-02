@@ -18,6 +18,34 @@ isolation:
   # RuntimeClass sandboxes run under; its handler must be runsc (gVisor) or kata*.
   runtimeClassName: gvisor
 
+# Sandboxes (spec D11, D12): one per (user, team), in namespace kobe-team-<slug>, run by the
+# agent-sandbox controller under isolation.runtimeClassName. The server creates and manages the
+# team namespaces (default-deny NetworkPolicy, ResourceQuota, warm pool); see docs/install.md.
+sandbox:
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits: { cpu: "2", memory: 4Gi }
+  workspace:
+    # Persistent /workspace per sandbox.
+    size: 10Gi
+    # "" uses the cluster default (k3s: local-path, which pins a sandbox to its node; use
+    # Longhorn on multi-node clusters).
+    storageClass: ""
+  # /tmp and $HOME are emptyDirs, wiped on hibernate.
+  tmpSize: 2Gi
+  homeSize: 1Gi
+  # ResourceQuota of every team namespace (sandbox compute is capped here, not in dollars).
+  teamQuota:
+    requests.cpu: "20"
+    requests.memory: 40Gi
+  warmPool:
+    # Pre-started sandboxes per team namespace (agent-sandbox warm pools are namespaced). Each
+    # one counts against its team's quota. 0 disables warm starts.
+    replicasPerTeam: 1
+  # Secret with keys sandbox-wire, model-gateway, mcp-proxy, egress-proxy (>= 32 chars each, all
+  # different): HMAC keys of the per-audience sandbox session tokens. Empty: generated, kept.
+  sessionKeysSecret: ""
+
 # Public origin users reach Kobe at (cookies, WebAuthn relying party). Defaults to
 # http(s)://<ingress.host>; set it when Kobe sits behind another proxy or ingress is disabled.
 publicUrl: ""

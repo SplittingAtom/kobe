@@ -8,6 +8,7 @@ import { installSettingsRoutes } from "./routes/install-settings.js";
 import { installTeamsRoutes } from "./routes/install-teams.js";
 import { meRoutes } from "./routes/me.js";
 import { myTeamsRoutes } from "./routes/my-teams.js";
+import { sandboxRoutes, type SandboxRoutesDeps } from "./routes/sandbox.js";
 import { setupRoutes } from "./routes/setup.js";
 import { teamRoutes } from "./routes/team.js";
 
@@ -16,11 +17,13 @@ const SERVICE = "server";
 export interface AppOptions {
   /** Isolation gate (spec D4): its state is shown in the install admin console only. */
   readonly isolation?: IsolationGate;
+  /** Sandbox-facing endpoints (KOBE-22): cluster-internal, outside the session-authenticated API. */
+  readonly sandbox?: SandboxRoutesDeps;
 }
 
 /** Health endpoints always; auth and the /v1 API when dependencies are provided. */
 export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
-  const { isolation } = options;
+  const { isolation, sandbox } = options;
   const app = new Hono();
   app.get("/healthz", (c) => c.json({ status: "ok", service: SERVICE }));
   app.get("/readyz", (c) => {
@@ -31,6 +34,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
       ? c.json({ status: "starting", service: SERVICE }, 503)
       : c.json({ status: "ready", service: SERVICE });
   });
+  if (sandbox) app.route("/v1/sandbox", sandboxRoutes(sandbox));
   if (!deps) return app;
 
   app.on(["GET", "POST"], "/api/auth/*", (c) => deps.auth.handler(c.req.raw));

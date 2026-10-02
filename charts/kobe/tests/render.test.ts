@@ -430,8 +430,25 @@ describe("network policies", () => {
   it("lets only pods in the release namespace reach Bifrost (provider keys) and ClamAV", () => {
     for (const name of ["kobe-bifrost", "kobe-clamav"]) {
       expect(policy(name)?.spec.policyTypes, name).toEqual(["Ingress"]);
-      expect(policy(name)?.spec.ingress, name).toEqual([{ from: [{ podSelector: {} }] }]);
+      expect(policy(name)?.spec.ingress[0], name).toEqual({ from: [{ podSelector: {} }] });
     }
+    expect(policy("kobe-clamav")?.spec.ingress).toHaveLength(1);
+  });
+
+  it("also admits sandboxes (team namespaces) to Bifrost's port, nothing else (KOBE-22)", () => {
+    expect(policy("kobe-bifrost")?.spec.ingress).toEqual([
+      { from: [{ podSelector: {} }] },
+      {
+        from: [
+          {
+            namespaceSelector: {
+              matchLabels: { "kobe.splittingatom.io/team-namespace": "true" },
+            },
+          },
+        ],
+        ports: [{ protocol: "TCP", port: 8080 }],
+      },
+    ]);
   });
 
   it("lets only the release namespace and the CloudNativePG operator reach Postgres", () => {
@@ -541,6 +558,7 @@ describe("auth (KOBE-12)", () => {
   it("uses a pre-created auth secret when given (GitOps-safe)", () => {
     const ms = render({
       "auth.existingSecret": "my-auth",
+      "sandbox.sessionKeysSecret": "my-keys",
       "global.allowGeneratedSecretsOffline": "false",
     });
     expect(find(ms, "Secret", "kobe-auth")).toBeUndefined();
@@ -551,16 +569,26 @@ describe("auth (KOBE-12)", () => {
   });
 
   it("refuses to generate secrets in an offline render (each render would rotate them)", () => {
-    expect(renderError({ "global.allowGeneratedSecretsOffline": "false" })).toMatch(
-      /auth\.existingSecret/,
-    );
+    expect(
+      renderError({
+        "global.allowGeneratedSecretsOffline": "false",
+        "sandbox.sessionKeysSecret": "my-keys",
+      }),
+    ).toMatch(/auth\.existingSecret/);
     expect(
       renderError({
         "global.allowGeneratedSecretsOffline": "false",
         "auth.existingSecret": "my-auth",
+        "sandbox.sessionKeysSecret": "my-keys",
         "postgres.mode": "cnpg",
       }),
     ).toMatch(/postgres\.cnpg\.existingAppSecret/);
+    expect(
+      renderError({
+        "global.allowGeneratedSecretsOffline": "false",
+        "auth.existingSecret": "my-auth",
+      }),
+    ).toMatch(/sandbox\.sessionKeysSecret/);
   });
 });
 
