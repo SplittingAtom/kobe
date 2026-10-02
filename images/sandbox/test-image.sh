@@ -36,6 +36,18 @@ check "git and CLIs present" '^ok$' run sh -c 'for b in git curl jq rg unzip zip
 check "kobe-sandbox-agent installed" 'KOBE_SERVER_URL must be a ws' run sh -c 'node /opt/kobe/sandbox-agent/dist/index.js 2>&1; true'
 check "agent ships only dist, deps and manifest" '^ok$' run sh -c \
   'cd /opt/kobe/sandbox-agent && [ "$(ls -A | sort | tr "\n" " ")" = "dist node_modules package.json " ] && echo ok || ls -A'
+check "entrypoint is tini, then the hardened launcher" '^\[/usr/bin/tini -- /opt/kobe/entrypoint.sh\]$' host \
+  docker image inspect --format '{{.Config.Entrypoint}}' "$IMAGE"
+check "tini is PID 1 under the entrypoint" '^tini$' run /usr/bin/tini -- sh -c 'cat /proc/1/comm'
+check "launcher: no core dumps, NODE_OPTIONS dropped, --disable-sigusr1" '^ok$' run sh -c \
+  'f=/opt/kobe/entrypoint.sh; grep -q "^ulimit -c 0$" $f && grep -q "^unset NODE_OPTIONS$" $f && grep -q "exec node --disable-sigusr1 " $f && [ "$(stat -c %u:%a $f)" = "0:555" ] && echo ok'
+check "node honours --disable-sigusr1" '^undefined$' run node --disable-sigusr1 -e \
+  'process.kill(process.pid,"SIGUSR1");setTimeout(()=>console.log(String(require("inspector").url())),300)'
+# Through the real entrypoint: tini → launcher → agent, which fails fast without configuration.
+check "agent starts through the entrypoint" 'KOBE_SERVER_URL must be a ws' host sh -c \
+  "docker run ${HARDENED[*]} -e NODE_OPTIONS=--inspect=0.0.0.0:9229 \"$IMAGE\" 2>&1; true"
+check "Pi config dir is root-owned, read-only and empty" '^0:0 555 empty$' run sh -c \
+  'd=/opt/kobe/pi-agent; echo "$(stat -c "%u:%g %a" $d) $([ -z "$(ls -A $d)" ] && echo empty)"'
 check "skills directory exists, root-owned" '^0:0$' run stat -c '%u:%g' /opt/kobe/skills
 check "/workspace in the image is owned by uid 1000" '^1000:1000$' run stat -c '%u:%g' /workspace
 check "workspace (volume) is writable" '^ok$' run_ws sh -c 'touch /workspace/x && echo ok'
