@@ -1,6 +1,6 @@
 # KOBE-23: kobe-sandbox-agent: dial-out WSS + Pi RPC bridge
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #21)
 - **Branch / worktree:** `kobe-23-sandbox-agent` in `../Kobe-wt23`
 - **Depends on:** KOBE-21 (sandbox image), KOBE-29 (schema), contracts (#13, `packages/protocol`)
 
