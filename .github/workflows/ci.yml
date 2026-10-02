@@ -1,11 +1,10 @@
-# Unit-level CI on every push and PR. Private-repo minutes are metered (spec D3): the k3d
+# Unit-level CI on every push; its checks also report on the PR for that branch. Private-repo
+# minutes are metered (spec D3), so there is no duplicate pull_request trigger here; the k3d
 # end-to-end suite runs only on PRs to main and nightly (added in KOBE-7).
 name: ci
 
 on:
   push:
-  pull_request:
-    branches: [main]
 
 concurrency:
   group: ci-${{ github.ref }}
