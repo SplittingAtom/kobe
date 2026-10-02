@@ -29,10 +29,11 @@ function nodeResponseDestroyer(env: unknown): (() => void) | undefined {
  */
 export function runEventsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();
-  const { hub, reader, timings } = deps.eventStream;
   app.use(requireTeam(deps));
 
   app.get("/:runId/events", requireTeamPermission("team.chat"), async (c) => {
+    // Read per request, so routes that never stream don't touch the event-stream dependencies.
+    const { hub, reader, timings } = deps.eventStream;
     const notFound = () => c.json({ code: "not_found", message: "Run not found." }, 404);
     const runId = c.req.param("runId").toLowerCase();
     if (!uuid.safeParse(runId).success) return notFound();

@@ -199,9 +199,11 @@ runs.sandbox_seq })`, ack wire frames only after the write resolves, and await `
 
 ## Open questions (for Chris or the coordinator)
 
-1. Visibility is owner-only until projects (KOBE-57) define read access for threads shared to a
-   project; KOBE-34 (Thread API, parallel) should use the same rule — consolidate
-   `canWatchThread` with its thread read check when both are merged.
+1. Visibility: KOBE-34 (now merged) reads threads as owner (Trash included while restorable,
+   `threads/repository.ts` `readableBy`) or project-shared reader. The stream uses owner-only via
+   `canWatchThread` and does not yet hide runs of Trash older than the restore window (awaiting
+   purge). Follow-up: have the stream reuse KOBE-34's rule (one predicate) when projects land
+   (KOBE-57).
 2. NOTIFY serialization: accepted threshold and mitigation in review item 4.
 3. Protocol: event payloads without a size bound (review item 6); the server caps at 256 KiB.
 
