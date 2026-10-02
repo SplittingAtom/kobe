@@ -22,6 +22,7 @@ import {
   PERSONAL_DATA,
   EXCLUDED_MARKERS,
   OAUTH_TOKENS,
+  SEARCH_WORD,
   T1,
   allBackupBytes,
   copyWithManifest,
@@ -308,6 +309,20 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
       }
       expect(await rowsOf(dst.adminUrl, "sessions")).toEqual([]);
       expect(await rowsOf(dst.adminUrl, "verifications")).toEqual([]);
+
+      // Stored generated columns (thread search, KOBE-33) are not in the dump's data; the restore
+      // recomputes them, so search works on the restored install (rows above include tsv too).
+      const script = await dumpScript(backupDir, KEY, pgBinDir);
+      expect(script).toMatch(/COPY public\.thread_entries \(/);
+      expect(script).not.toMatch(/COPY public\.(threads|thread_entries) \([^)]*\btsv\b/);
+      expect(
+        await sql<{ entry: string | null; title: string | null }>(
+          dst.adminUrl,
+          `SELECT e.tsv::text AS entry, t.tsv::text AS title
+           FROM thread_entries e JOIN threads t ON t.team_id = e.team_id AND t.id = e.thread_id
+           WHERE e.entry_id = 'e1'`,
+        ),
+      ).toEqual([{ entry: `'forecast':2 '${SEARCH_WORD}':1`, title: "'q3':1A 'report':2A" }]);
       expect(
         (await rowsOf(dst.adminUrl, "jwks")).map(
           (r) => (JSON.parse(r) as { private_key: string }).private_key,

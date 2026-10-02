@@ -116,6 +116,12 @@
   custom `0007_thread_search.sql` after `0006_session_active_teams.sql`, byte-identical to the
   original (diff empty; snapshot 0007 = 0006 apart from id chain). A fresh migrate has both `tsv`
   columns (generated ALWAYS, stored) and `thread_entries_search_idx`.
+- Backup/restore (KOBE-11, merged in): pg_dump leaves stored generated columns out of the data, so
+  a restore recomputes them. `packages/cli` round-trip fixture now seeds a Pi user message;
+  `backup-restore.db.test.ts` › "restores into a fresh install" asserts the dump's `COPY` lists
+  for `threads`/`thread_entries` have no `tsv`, and after restore e1's `tsv` is
+  `'forecast':2 'zebrafish':1` and the title's `'q3':1A 'report':2A` (row-for-row equality
+  with the source already covered `tsv`). 22/22 with pg_dump 18.6 locally; CI uses 17.
 
 - ac-1: `thread-search.db.test.ts` › "matching": user and assistant text with entry id and
   snippet; stemming, phrase, `-exclude`, `or`; title FTS, partial word (`kuberne`) and typo
