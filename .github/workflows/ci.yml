@@ -62,6 +62,13 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # kobe backup/restore tests run the real pg_dump, pg_restore and psql; the runner's own
+      # client is older than the server (pg_dump refuses newer servers), so add 17 from PGDG.
+      - name: PostgreSQL 17 client
+        run: |
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y --no-install-recommends postgresql-client-17
+          echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
       - name: Migrations match the Drizzle schema
         run: pnpm --filter @kobe/db exec drizzle-kit check && pnpm db:check
       - name: RLS catalog check and cross-team probe suite

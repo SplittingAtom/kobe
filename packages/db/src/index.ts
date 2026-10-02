@@ -1,3 +1,4 @@
+export { BLOB_REF_COLUMNS, type BlobRefColumn } from "./blob-refs.js";
 export {
   createDb,
   type CreateDbOptions,
@@ -12,7 +13,12 @@ export {
   type TeamMembership,
   type TeamRole,
 } from "./memberships.js";
-export { DEFAULT_MIGRATIONS_FOLDER, runMigrations, type MigrateOptions } from "./migrate.js";
+export {
+  DEFAULT_MIGRATIONS_FOLDER,
+  MIGRATION_LOCK_KEY,
+  runMigrations,
+  type MigrateOptions,
+} from "./migrate.js";
 export { quoteIdent } from "./roles.js";
 export * from "./schema/index.js";
 export { TEAM_ID_SETTING } from "./settings.js";
