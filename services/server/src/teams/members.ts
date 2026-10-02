@@ -26,7 +26,7 @@ export interface TeamSummary {
 }
 
 /** Why a membership change was refused; routes map these to HTTP errors. */
-export type MembershipError = "not_a_member" | "already_member" | "last_team_admin";
+export type MembershipError = "not_a_member" | "last_team_admin";
 
 export type MembershipResult =
   { readonly ok: true } | { readonly ok: false; error: MembershipError };
@@ -70,40 +70,37 @@ export async function findUserId(
   return user?.id ?? null;
 }
 
-/** Locks the team's admin rows and the target row, so concurrent changes can't drop the last admin. */
+/**
+ * Locks the team's admin rows and the target row, so concurrent changes can't drop the last admin.
+ * Only active (not deactivated) team admins count: a deactivated admin can't run the team.
+ */
 async function lockForChange(
   tx: KobeTx,
   teamId: string,
   userId: string,
-): Promise<{ admins: number; current: TeamRole | null }> {
+): Promise<{ activeAdmins: number; current: TeamRole | null; targetActive: boolean }> {
   const admins = await tx
-    .select({ userId: teamMembers.userId })
+    .select({ userId: teamMembers.userId, deactivatedAt: users.deactivatedAt })
     .from(teamMembers)
+    .innerJoin(users, eq(users.id, teamMembers.userId))
     .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.role, "team_admin")))
-    .for("update");
+    .for("update", { of: teamMembers });
   const [target] = await tx
-    .select({ role: teamMembers.role })
+    .select({ role: teamMembers.role, deactivatedAt: users.deactivatedAt })
     .from(teamMembers)
+    .innerJoin(users, eq(users.id, teamMembers.userId))
     .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)))
-    .for("update");
-  return { admins: admins.length, current: target?.role ?? null };
+    .for("update", { of: teamMembers });
+  return {
+    activeAdmins: admins.filter((a) => a.deactivatedAt === null).length,
+    current: target?.role ?? null,
+    targetActive: target?.deactivatedAt === null,
+  };
 }
 
-export async function addMember(
-  db: KobeDb,
-  teamId: string,
-  userId: string,
-  role: TeamRole,
-): Promise<MembershipResult> {
-  return withTeam(db, teamId, async (tx) => {
-    const inserted = await tx
-      .insert(teamMembers)
-      .values({ teamId, userId, role })
-      .onConflictDoNothing()
-      .returning({ userId: teamMembers.userId });
-    return inserted.length > 0 ? OK : fail("already_member");
-  });
-}
+/** Whether changing the target away from team admin would leave no active team admin. */
+const losesLastActiveAdmin = (lock: Awaited<ReturnType<typeof lockForChange>>) =>
+  lock.current === "team_admin" && lock.targetActive && lock.activeAdmins <= 1;
 
 /** Changes a member's role; a team always keeps at least one team admin. */
 export async function setMemberRole(
@@ -113,11 +110,9 @@ export async function setMemberRole(
   role: TeamRole,
 ): Promise<MembershipResult> {
   return withTeam(db, teamId, async (tx) => {
-    const { admins, current } = await lockForChange(tx, teamId, userId);
-    if (current === null) return fail("not_a_member");
-    if (current === "team_admin" && role !== "team_admin" && admins <= 1) {
-      return fail("last_team_admin");
-    }
+    const lock = await lockForChange(tx, teamId, userId);
+    if (lock.current === null) return fail("not_a_member");
+    if (role !== "team_admin" && losesLastActiveAdmin(lock)) return fail("last_team_admin");
     await tx
       .update(teamMembers)
       .set({ role })
@@ -133,9 +128,9 @@ export async function removeMember(
   userId: string,
 ): Promise<MembershipResult> {
   return withTeam(db, teamId, async (tx) => {
-    const { admins, current } = await lockForChange(tx, teamId, userId);
-    if (current === null) return fail("not_a_member");
-    if (current === "team_admin" && admins <= 1) return fail("last_team_admin");
+    const lock = await lockForChange(tx, teamId, userId);
+    if (lock.current === null) return fail("not_a_member");
+    if (losesLastActiveAdmin(lock)) return fail("last_team_admin");
     await tx
       .delete(teamMembers)
       .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));

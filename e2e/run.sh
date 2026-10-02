@@ -69,6 +69,8 @@ done
 echo "==> deploying dependencies and Kobe ${TAG}"
 $KUBECTL apply -f dev/postgres.yaml >/dev/null
 $KUBECTL -n kobe-deps rollout status deploy/pg --timeout=180s >/dev/null
+$KUBECTL apply -f dev/mailpit.yaml >/dev/null
+$KUBECTL -n kobe-deps rollout status deploy/mailpit --timeout=180s >/dev/null
 $HELM upgrade --install kobe charts/kobe -n "$NS" -f dev/values.yaml \
   --set global.imageTag="$TAG" --set global.imagePullPolicy=IfNotPresent --wait --timeout 10m
 
@@ -123,6 +125,17 @@ owner_with_token=$(printf '{"email":"owner@e2e.test","name":"Owner","password":"
 contains "setup with the setup token creates the Owner" 'HTTP/1.1 201' \
   "$(ingress POST /v1/setup "$owner_with_token")"
 contains "setup is disabled once the Owner exists" '"required":false' "$(ingress GET /v1/setup)"
+# KOBE-13: password reset mails a link through the configured SMTP relay (Mailpit in e2e); unknown
+# addresses get the same answer and no email.
+contains "password reset answers 200" 'HTTP/1.1 200' \
+  "$(ingress POST /api/auth/request-password-reset '{"email":"owner@e2e.test"}')"
+contains "password reset for an unknown address answers the same" 'HTTP/1.1 200' \
+  "$(ingress POST /api/auth/request-password-reset '{"email":"nobody@e2e.test"}')"
+mail=$(probe "$NS" 'for i in $(seq 1 15); do m=$(wget -qO- -T 5 http://mailpit.kobe-deps:8025/api/v1/messages); \
+  echo "$m" | grep -q "Reset your Kobe password" && break; sleep 2; done; echo "$m"')
+contains "the server delivered the reset email over SMTP" 'Reset your Kobe password' "$mail"
+contains "the reset email went to the account's address" 'owner@e2e.test' "$mail"
+if printf '%s' "$mail" | grep -q 'nobody@e2e.test'; then fail "no email for an unknown address"; else ok "no email for an unknown address"; fi
 contains "chart refuses a RuntimeClass that does not isolate" 'refuses to run agents' \
   "$($HELM upgrade kobe charts/kobe -n "$NS" --reuse-values --set isolation.runtimeClassName=does-not-exist 2>&1 || true)"
 

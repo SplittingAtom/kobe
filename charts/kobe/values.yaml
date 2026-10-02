@@ -30,6 +30,19 @@ auth:
   trustedProxies:
     - 10.42.0.0/16
 
+# Outgoing email (spec D7: required): invitations, password resets, notifications. API server only.
+smtp:
+  # SMTP relay host (required), e.g. smtp.example.com.
+  host: ""
+  port: 587
+  # starttls: STARTTLS required (587); tls: implicit TLS (465); none: unencrypted, for an in-cluster
+  # dev relay only, and never with credentials. Certificates are always verified.
+  security: starttls
+  # Sender (required): "Kobe <kobe@example.com>" or an address.
+  from: ""
+  # Secret with keys "username" and "password" for SMTP AUTH. Empty: no authentication.
+  existingSecret: ""
+
 web:
   replicas: 1
   resources:

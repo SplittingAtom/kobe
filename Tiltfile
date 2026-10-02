@@ -59,6 +59,9 @@ if local:
     # Throwaway Postgres with public dev credentials: k3d only.
     k8s_yaml("dev/postgres.yaml")
     k8s_resource(workload="pg", labels=["deps"])
+    # SMTP sink for invitations and password resets; read them at http://localhost:8025.
+    k8s_yaml("dev/mailpit.yaml")
+    k8s_resource(workload="mailpit", labels=["deps"], port_forwards=["8025:8025"])
     values = ["dev/values.yaml"]
     deps = ["pg"]
 else:

@@ -323,6 +323,9 @@ importers:
       hono:
         specifier: ^4.13.12
         version: 4.13.12
+      nodemailer:
+        specifier: ^10.0.13
+        version: 10.0.13
       pino:
         specifier: ^10.3.1
         version: 10.3.1
@@ -2089,6 +2092,10 @@ packages:
       sass:
         optional: true
 
+  nodemailer@10.0.13:
+    resolution: {integrity: sha512-SzG86OlvcW/NNhUFC6uROMwRTL4n7MswfQqC/T8mhkmnY1YVa23zUEMYi4ijSeXSl9GLz9ZeTJDUatEDuY5FeQ==}
+    engines: {node: '>=20.0.0'}
+
   oauth4webapi@3.8.8:
     resolution: {integrity: sha512-8N28E+a/oxfXWBgOMt+ZP/JUf/XR+IFbvkAEPP3gznXOMv9BpAAwiIj0TFNz3tGTPc0ZQ8zmWBNgN1nAys0gng==}
 
@@ -3510,7 +3517,6 @@ snapshots:
       '@types/pg': 8.23.1
       kysely: 0.29.6
       pg: 8.23.1
-    optional: true
 
   drizzle-orm@0.45.3(@types/pg@8.23.1)(pg@8.23.1):
     optionalDependencies:
@@ -3951,6 +3957,8 @@ snapshots:
     transitivePeerDependencies:
       - '@babel/core'
       - babel-plugin-macros
+
+  nodemailer@10.0.13: {}
 
   oauth4webapi@3.8.8: {}
 

@@ -68,13 +68,29 @@ kubectl -n kobe create secret generic kobe-db \
 kubectl -n kobe create secret generic kobe-s3 \
   --from-literal=access-key-id=... --from-literal=secret-access-key=...
 
+# SMTP credentials, if your relay needs AUTH (omit smtp.existingSecret otherwise).
+kubectl -n kobe create secret generic kobe-smtp \
+  --from-literal=username=... --from-literal=password=...
+
 helm install kobe charts/kobe -n kobe \
   --set global.imagePullSecrets[0].name=ghcr-pull \
   --set ingress.host=kobe.example.com \
   --set ingress.tls.clusterIssuer=letsencrypt \
   --set postgres.external.existingSecret=kobe-db \
-  --set s3.endpoint=https://s3.example.com --set s3.bucket=kobe --set s3.existingSecret=kobe-s3
+  --set s3.endpoint=https://s3.example.com --set s3.bucket=kobe --set s3.existingSecret=kobe-s3 \
+  --set smtp.host=smtp.example.com --set smtp.from='Kobe <kobe@example.com>' \
+  --set smtp.existingSecret=kobe-smtp
 ```
+
+### Email (SMTP)
+
+SMTP is required: Kobe is invite-only and sends invitations and password-reset links by email.
+`smtp.security` is `starttls` (default, port 587, the upgrade is required), `tls` (implicit TLS,
+port 465) or `none` (unencrypted; only for an in-cluster relay, and refused together with
+credentials). Certificates are always verified. Credentials come only from `smtp.existingSecret`
+(keys `username`, `password`), never from values. The server sends mail lazily, so a wrong SMTP
+setting shows up as `"emailSent": false` on new invitations and as errors in the server log, not
+as a failed start.
 
 With bundled Postgres instead, install the [CloudNativePG operator](https://cloudnative-pg.io)
 first and set `postgres.mode=cnpg`; the chart creates the Cluster, the `kobe_owner` database owner

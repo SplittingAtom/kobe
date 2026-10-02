@@ -14,6 +14,7 @@ export {
 } from "./memberships.js";
 export { DEFAULT_MIGRATIONS_FOLDER, runMigrations, type MigrateOptions } from "./migrate.js";
 export { quoteIdent } from "./roles.js";
+export { listTeamInvitationsFor, type PendingTeamInvitation } from "./team-invitations.js";
 export * from "./schema/index.js";
 export { TEAM_ID_SETTING } from "./settings.js";
 export {
@@ -26,4 +27,18 @@ export {
 export { withTeam } from "./with-team.js";
 export { waitForMigrations, type WaitOptions } from "./wait.js";
 // Query helpers re-exported so dependents share this package's drizzle-orm instance (one copy, one type identity).
-export { and, asc, count, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+export {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";

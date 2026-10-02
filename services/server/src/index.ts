@@ -5,14 +5,25 @@ import { createServerDeps, type ServerDeps } from "./deps.js";
 import { createIsolationGate } from "./isolation/gate.js";
 import { listRuntimeClasses } from "./isolation/kubernetes.js";
 import { logger } from "./logger.js";
+import { createSmtpMailer } from "./mail/mailer.js";
 
 /** Open streams (SSE) get this long to finish before being cut; stays under k8s' 30 s grace period. */
 const DRAIN_TIMEOUT_MS = 10_000;
 
 const config = loadConfig(process.env);
 let deps: ServerDeps | undefined;
-if (config.auth) {
-  deps = createServerDeps({ databaseUrl: config.databaseUrl, ...config.auth });
+if (config.auth && config.smtp) {
+  deps = createServerDeps({
+    databaseUrl: config.databaseUrl,
+    ...config.auth,
+    mailer: createSmtpMailer(config.smtp),
+  });
+  if (config.smtp.security === "none") {
+    logger.warn(
+      { smtpHost: config.smtp.host },
+      "KOBE_SMTP_SECURITY=none: email is sent unencrypted",
+    );
+  }
   const publicHost = new URL(config.auth.publicUrl).hostname;
   if (
     config.auth.publicUrl.startsWith("http:") &&
