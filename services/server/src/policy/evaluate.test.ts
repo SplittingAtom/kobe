@@ -914,5 +914,6 @@ describe("evaluatePolicy: invariants over every combination", () => {
     const perDecisionMs = (performance.now() - start) / 1000;
     // Generous for shared CI runners; locally this is well under 1 ms.
     expect(perDecisionMs).toBeLessThan(10);
-  });
+    // The budget above allows up to 10 s; vitest's default 5 s timeout would cut it short.
+  }, 30_000);
 });
