@@ -1,0 +1,282 @@
+/* Admin consoles (KOBE-20). The rest of the web app is unstyled browser defaults; this keeps to
+   system fonts and colours so the consoles read as the same app, with a layout that works from
+   phone width up. */
+
+.shell {
+  --admin-fg: #1b1b1f;
+  --admin-muted: #5b5b66;
+  --admin-bg: #ffffff;
+  --admin-panel: #f4f4f6;
+  --admin-border: #d9d9df;
+  --admin-accent: #2449c7;
+  --admin-danger: #a4161a;
+  --admin-danger-bg: #fdecec;
+  --admin-warn-bg: #fff4d6;
+  min-height: 100vh;
+  color: var(--admin-fg);
+  background: var(--admin-bg);
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+}
+
+@media (prefers-color-scheme: dark) {
+  .shell {
+    --admin-fg: #ececf1;
+    --admin-muted: #a5a5b2;
+    --admin-bg: #16161a;
+    --admin-panel: #202027;
+    --admin-border: #3a3a45;
+    --admin-accent: #8fa8ff;
+    --admin-danger: #ff8a8a;
+    --admin-danger-bg: #3a1c1e;
+    --admin-warn-bg: #3a3218;
+  }
+}
+
+.shell a {
+  color: var(--admin-accent);
+}
+
+.shell :focus-visible {
+  outline: 3px solid var(--admin-accent);
+  outline-offset: 2px;
+}
+
+.skipLink {
+  position: absolute;
+  left: -10000px;
+}
+
+.skipLink:focus {
+  position: static;
+  display: inline-block;
+  padding: 0.5rem 1rem;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--admin-border);
+}
+
+.brandRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: baseline;
+}
+
+.brand,
+.who {
+  margin: 0;
+}
+
+.who {
+  color: var(--admin-muted);
+}
+
+.body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 48rem) {
+  .body {
+    grid-template-columns: 15rem minmax(0, 1fr);
+  }
+
+  .bodySingle {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.nav {
+  padding: 0.5rem 1rem 1rem;
+  background: var(--admin-panel);
+  border-bottom: 1px solid var(--admin-border);
+}
+
+@media (min-width: 48rem) {
+  .nav {
+    border-bottom: none;
+    border-right: 1px solid var(--admin-border);
+    min-height: calc(100vh - 3.5rem);
+  }
+}
+
+.navToggle {
+  margin-top: 0.5rem;
+}
+
+@media (max-width: 47.99rem) {
+  .navFolded {
+    display: none;
+  }
+}
+
+@media (min-width: 48rem) {
+  .navToggle {
+    display: none;
+  }
+}
+
+.navGroup ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.navHeading {
+  margin: 1rem 0 0.25rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--admin-muted);
+}
+
+.navLink {
+  display: block;
+  padding: 0.3rem 0.5rem;
+  border-radius: 0.375rem;
+  text-decoration: none;
+}
+
+.navLink[aria-current="page"] {
+  background: var(--admin-bg);
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--admin-accent);
+}
+
+.soon {
+  color: var(--admin-muted);
+  font-size: 0.85em;
+}
+
+.main {
+  padding: 1rem;
+  max-width: 64rem;
+}
+
+@media (min-width: 48rem) {
+  .main {
+    padding: 1.5rem 2rem;
+  }
+}
+
+.main:focus {
+  outline: none;
+}
+
+.error {
+  padding: 0.5rem 0.75rem;
+  border-left: 4px solid var(--admin-danger);
+  background: var(--admin-danger-bg);
+}
+
+.error p {
+  margin: 0.25rem 0;
+}
+
+.banner {
+  margin-bottom: 1rem;
+  padding: 0.5rem 0.75rem;
+  border-left: 4px solid #b7791f;
+  background: var(--admin-warn-bg);
+}
+
+.notice:empty {
+  display: none;
+}
+
+.notice {
+  padding: 0.25rem 0;
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table caption {
+  text-align: left;
+  font-weight: 600;
+  padding-bottom: 0.5rem;
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--admin-border);
+  vertical-align: top;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  margin: 1rem 0;
+}
+
+.form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.hint {
+  color: var(--admin-muted);
+  font-size: 0.9em;
+}
+
+.cards {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.75rem;
+}
+
+.card {
+  padding: 0.75rem;
+  border: 1px solid var(--admin-border);
+  border-radius: 0.5rem;
+}
+
+.card p {
+  margin: 0.25rem 0 0;
+}
+
+.dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+}
+
+.dl dd {
+  margin: 0;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

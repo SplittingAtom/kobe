@@ -6,6 +6,7 @@ import { createTestDatabase, testServerUrl, type TestDatabase } from "@kobe/db/t
 import { createApp } from "./app.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
 import { TestBrowser } from "./testing/browser.js";
+import { MemoryMailer } from "./testing/mailer.js";
 import { findThread, updateThread } from "./threads/repository.js";
 import {
   entryPageSchema,
@@ -46,9 +47,12 @@ async function activate(b: TestBrowser, teamId: string): Promise<void> {
   b.team = teamId;
 }
 
+/** Adds an existing user through a team invitation they accept (KOBE-13). */
 async function addMember(by: TestBrowser, who: Person, role: string): Promise<void> {
-  const res = await by.post("/v1/team/members", { email: email(who), role });
-  expect(res.status, JSON.stringify(res.json)).toBe(201);
+  const res = await by.post("/v1/team/invites", { email: email(who), role });
+  expect(res.status, JSON.stringify(res.json)).toBe(202);
+  const accepted = await as[who].post(`/v1/me/invites/${by.team}/accept`);
+  expect(accepted.status, JSON.stringify(accepted.json)).toBe(200);
 }
 
 async function newThread(b: TestBrowser, body: object = {}): Promise<string> {
@@ -109,6 +113,7 @@ beforeAll(async () => {
     authSecret: "t".repeat(48),
     setupToken: "setup-token-for-thread-tests-01",
     trustedProxies: ["127.0.0.1/32"],
+    mailer: new MemoryMailer(),
   });
   app = createApp(deps);
   for (const who of PEOPLE) {
