@@ -3,6 +3,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import pg from "pg";
 import { pino } from "pino";
 import { z } from "zod";
+import { isRetryableConnectError } from "../connect-errors.js";
 import { runMigrations } from "../migrate.js";
 
 // Entry point for the Helm pre-install/pre-upgrade migration Job.
@@ -26,7 +27,7 @@ async function waitForDatabase(url: string, timeoutMs: number): Promise<void> {
       await client.connect();
       return;
     } catch (err) {
-      if (Date.now() >= deadline) throw err;
+      if (!isRetryableConnectError(err) || Date.now() >= deadline) throw err;
       logger.info("database not reachable yet; retrying");
       await sleep(3_000);
     } finally {
