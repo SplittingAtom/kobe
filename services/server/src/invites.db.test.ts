@@ -355,6 +355,13 @@ describe("team invitations (ac-2)", () => {
     ]);
   });
 
+  it("match on an address the user can't change (Better Auth change-email stays off)", async () => {
+    const bob = await h.signIn("bob@inv.test");
+    const res = await bob.post("/api/auth/change-email", { newEmail: "stranger@inv.test" });
+    expect(res.status).not.toBe(200);
+    expect((await bob.get("/v1/me")).json.user.email).toBe("bob@inv.test");
+  });
+
   it("store team invitations behind team RLS", async () => {
     const { rows } = await h.admin.query(
       `SELECT relrowsecurity AS rls, relforcerowsecurity AS force FROM pg_class
