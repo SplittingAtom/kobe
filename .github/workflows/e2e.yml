@@ -1,0 +1,64 @@
+# k3d end-to-end suite (KOBE-7): a k3s cluster with gVisor and agent-sandbox, the chart installed
+# from locally built images, then e2e/run.sh. Private-repo minutes are metered (spec D3), so this
+# runs on pull requests to main, nightly, and on demand — not on every push.
+name: e2e
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "41 5 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  K3D_VERSION: v5.9.0
+  K3D_SHA256: 06d8f25bc3a971c4eb29e0ff08429b180402db0f4dec838c9eac427e296800a0
+  KOBE_IMAGE_TAG: e2e
+
+jobs:
+  k3d:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.22.0
+      - uses: azure/setup-kubectl@829323503d1be3d00ca8346e5391ca0b07a9ab0d # v5.1.0
+      - name: Install k3d (checksum-verified)
+        run: |
+          curl -fsSL -o /usr/local/bin/k3d "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64"
+          echo "${K3D_SHA256}  /usr/local/bin/k3d" | sha256sum -c -
+          chmod +x /usr/local/bin/k3d
+      - name: Raise inotify limits (k3s nodes need them)
+        run: sudo sysctl -w fs.inotify.max_user_instances=1024 fs.inotify.max_user_watches=524288
+      - name: Create k3d cluster with gVisor and agent-sandbox
+        run: scripts/dev-cluster.sh
+      - name: Build images
+        run: |
+          docker build -f apps/web/Dockerfile -t ghcr.io/splittingatom/kobe-web:e2e .
+          for svc in server mcp-proxy egress-proxy; do
+            docker build -f "services/$svc/Dockerfile" -t "ghcr.io/splittingatom/kobe-$svc:e2e" .
+          done
+          docker build -f images/sandbox/Dockerfile -t ghcr.io/splittingatom/kobe-sandbox:e2e .
+      - name: Load images into k3d
+        run: k3d image import -c kobe ghcr.io/splittingatom/kobe-{web,server,mcp-proxy,egress-proxy,sandbox}:e2e
+      - name: Run e2e suite
+        env:
+          KOBE_SANDBOX_IMAGE: ghcr.io/splittingatom/kobe-sandbox:e2e
+        run: e2e/run.sh
+      - name: Diagnostics
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide
+          kubectl -n kobe describe pods | tail -200
+          kubectl get events -A --sort-by=.lastTimestamp | tail -80

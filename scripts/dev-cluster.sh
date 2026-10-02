@@ -11,6 +11,8 @@ CLUSTER="${KOBE_CLUSTER:-kobe}"
 K3S_IMAGE="${K3S_IMAGE:-rancher/k3s:v1.34.6-k3s1}"
 # Single node by default (k3d nodes are inotify-hungry); set KOBE_AGENTS=1 to add an agent.
 AGENTS="${KOBE_AGENTS:-0}"
+# Local registry for Tilt (discovered via the local-registry-hosting ConfigMap k3d creates).
+REGISTRY_PORT="${KOBE_REGISTRY_PORT:-5005}"
 GVISOR_RELEASE="${GVISOR_RELEASE:-20260928.0}"
 K3D="${K3D:-k3d}"
 KUBECTL="${KUBECTL:-kubectl}"
@@ -44,6 +46,7 @@ if "$K3D" cluster get "$CLUSTER" >/dev/null 2>&1; then
 else
   echo "==> creating k3d cluster '${CLUSTER}' (${K3S_IMAGE})"
   "$K3D" cluster create "$CLUSTER" --image "$K3S_IMAGE" --agents "$AGENTS" --wait \
+    --registry-create "${CLUSTER}-registry:0.0.0.0:${REGISTRY_PORT}" \
     --k3s-arg "--disable=metrics-server@server:*" >/dev/null
 fi
 "$K3D" kubeconfig merge "$CLUSTER" --kubeconfig-switch-context >/dev/null

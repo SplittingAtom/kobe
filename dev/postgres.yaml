@@ -1,0 +1,77 @@
+# Dev/e2e only: a throwaway Postgres 17 standing in for "external Postgres", with the same role
+# split as production (kobe_owner owns the database and migrates; kobe_app is the app login).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kobe-deps
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pg-init
+  namespace: kobe-deps
+data:
+  init.sql: |
+    CREATE ROLE kobe_owner LOGIN PASSWORD 'owner-dev-only' NOSUPERUSER NOBYPASSRLS;
+    CREATE ROLE kobe_app LOGIN PASSWORD 'app-dev-only' NOSUPERUSER NOBYPASSRLS;
+    CREATE DATABASE kobe OWNER kobe_owner;
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pg
+  namespace: kobe-deps
+spec:
+  selector:
+    matchLabels: { app: pg }
+  template:
+    metadata:
+      labels: { app: pg }
+    spec:
+      containers:
+        - name: pg
+          image: postgres:17
+          env:
+            - { name: POSTGRES_PASSWORD, value: superuser-dev-only }
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec: { command: [pg_isready, -U, postgres] }
+          volumeMounts:
+            - { name: init, mountPath: /docker-entrypoint-initdb.d }
+      volumes:
+        - name: init
+          configMap: { name: pg-init }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pg
+  namespace: kobe-deps
+spec:
+  selector: { app: pg }
+  ports:
+    - port: 5432
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kobe
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kobe-db
+  namespace: kobe
+stringData:
+  app-url: postgres://kobe_app:app-dev-only@pg.kobe-deps:5432/kobe
+  migrate-url: postgres://kobe_owner:owner-dev-only@pg.kobe-deps:5432/kobe
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kobe-s3
+  namespace: kobe
+stringData:
+  access-key-id: dev
+  secret-access-key: dev

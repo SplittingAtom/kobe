@@ -1,0 +1,14 @@
+# Helm values for the dev loop (Tilt) and the k3d e2e suite.
+ingress:
+  host: kobe.localtest.me
+  tls:
+    enabled: false
+postgres:
+  mode: external
+  external:
+    existingSecret: kobe-db
+s3:
+  # Placeholder until a ticket needs object storage in dev/e2e.
+  endpoint: http://s3.invalid
+  bucket: kobe
+  existingSecret: kobe-s3
