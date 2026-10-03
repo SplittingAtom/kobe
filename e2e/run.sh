@@ -1102,7 +1102,8 @@ JS
   contains "every MCP decision is in the audit log (mcp.tool_call: allowed and denied)" '^allowed,denied$' \
     "$(psql_kobe "SELECT string_agg(DISTINCT target->>'decision', ',' ORDER BY target->>'decision') FROM audit_log
       WHERE team_id = '$E2E_TEAM_ID' AND action = 'mcp.tool_call'")"
-  contains "the denied write is audited with why its approval was missing" '^risk_write\|no_approval$' \
+  # unavailable: the deny-by-default verifier until KOBE-37's approvals are wired; no_approval after.
+  contains "the denied write is audited with why its approval was missing" '^risk_write\|(unavailable|no_approval)$' \
     "$(psql_kobe "SELECT (target->>'reason') || '|' || (target->>'approvalFailure') FROM audit_log
       WHERE team_id = '$E2E_TEAM_ID' AND action = 'mcp.tool_call' AND target->>'decision' = 'denied' ORDER BY seq DESC LIMIT 1")"
   # Sandboxes cannot skip the proxy and ask the server's internal port themselves.
