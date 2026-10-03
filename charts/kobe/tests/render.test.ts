@@ -126,6 +126,20 @@ describe("workloads", () => {
     }
   });
 
+  it("holds liveness checks until each long-running container has started", () => {
+    for (const d of byKind(ms, "Deployment")) {
+      for (const c of d.spec.template.spec.containers) {
+        const name = `${d.metadata.name}/${c.name}`;
+        expect(c.startupProbe?.httpGet, name).toEqual(c.livenessProbe?.httpGet);
+        // At least a minute before liveness may restart a slow-starting container.
+        expect(
+          c.startupProbe.periodSeconds * c.startupProbe.failureThreshold,
+          name,
+        ).toBeGreaterThanOrEqual(60);
+      }
+    }
+  });
+
   it("runs every pod non-root with a hardened container security context", () => {
     for (const { name, spec } of podSpecs(ms)) {
       expect(spec.securityContext?.runAsNonRoot, name).toBe(true);

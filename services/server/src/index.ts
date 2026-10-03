@@ -26,6 +26,7 @@ if (config.auth && config.smtp) {
     ...config.auth,
     mailer: createSmtpMailer(config.smtp),
     sandboxWire: { waker },
+    agents: { maxVersions: config.agentMaxVersions },
   });
   if (config.smtp.security === "none") {
     logger.warn(
@@ -62,6 +63,12 @@ const isolation = createIsolationGate({
       logger.error({ runtimeClass: status.runtimeClassName }, `agents disabled: ${status.message}`);
     }
   },
+});
+// New runs are refused at once while the isolation runtime is missing (sandbox creation enforces
+// it regardless through isolation.require()).
+deps?.runs.useIsolation(() => {
+  const { state } = isolation.status();
+  return state === "verified" ? "available" : state;
 });
 // Audit chain head in the server log at startup and every 5 minutes (KOBE-15): ship it off the box.
 deps?.auditAnchor.start();

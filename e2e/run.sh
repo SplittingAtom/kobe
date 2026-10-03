@@ -45,17 +45,52 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Reachability: positive checks wait for their target (bounded), then assert, so a dead target
+# still fails. A Service answers only once it has ready endpoints, and a new pod joins the CNI's
+# policy ipsets on kube-router's next sync, so policy-guarded targets refuse it for its first
+# seconds (docs/ledger/KOBE-22.md). Negative checks (BLOCKED) run only after a positive control
+# succeeded from the same pod; otherwise they report UNTESTED and fail, never pass vacuously.
+REACH_TIMEOUT=60
+wait_endpoints() { # namespace service... → waits up to REACH_TIMEOUT s for ready endpoints
+  local ns="$1" svc deadline=$((SECONDS + REACH_TIMEOUT))
+  shift
+  for svc in "$@"; do
+    until [[ -n "$($KUBECTL -n "$ns" get endpointslices -l "kubernetes.io/service-name=$svc" \
+      -o jsonpath='{.items[*].endpoints[?(@.conditions.ready==true)].addresses[0]}' 2>/dev/null)" ]]; do
+      if ((SECONDS >= deadline)); then echo "warning: $ns/$svc has no ready endpoints" >&2; break; fi
+      sleep 1
+    done
+  done
+}
+# Shell snippet for a probe pod: runs a command until it succeeds or [seconds] (default REACH_TIMEOUT) pass; its exit
+# status says which: one { } group, so `! $(retry ...)`, `$(retry ...) && ...` and `if` gate on
+# it. (No double quotes: team_pod embeds the pod command in JSON.)
+retry() { # command [seconds]
+  echo "{ ok=0; end=\$((\$(date +%s) + ${2:-$REACH_TIMEOUT})); while :; do if $1 >/dev/null 2>&1; then ok=1; break; fi; \
+[ \$(date +%s) -ge \$end ] && break; sleep 1; done; [ \$ok = 1 ]; }"
+}
+answers() { echo "wget -qO- -T 3 $1"; } # [wget options] URL → a command that succeeds once it answers
+# Gated negative check, in a probe pod: when the control URL answers, prints control=REACHED and
+# label=REACHED|BLOCKED for URL; otherwise control=BLOCKED and label=UNTESTED.
+gated() { # control-url label url
+  echo "if $(retry "$(answers "$1")"); then echo control=REACHED; \
+$(answers "$3") >/dev/null 2>&1 && echo $2=REACHED || echo $2=BLOCKED; else echo control=BLOCKED; echo $2=UNTESTED; fi"
+}
 probe() { # namespace, shell command → prints its output (unique pod, cleaned up on exit)
   local ns="$1" name="probe-$RANDOM$RANDOM"
   PODS+=("-n $ns $name")
   $KUBECTL -n "$ns" run "$name" --restart=Never --image=busybox:1.37 --command -- sh -c "$2" >/dev/null
   local phase="" i
-  for i in $(seq 1 60); do # until the pod finishes either way (a failed wget is a valid answer)
+  for i in $(seq 1 120); do # until the pod finishes either way (a failed wget is a valid answer)
     phase=$($KUBECTL -n "$ns" get pod "$name" -o jsonpath='{.status.phase}' 2>/dev/null || true)
     [[ "$phase" == Succeeded || "$phase" == Failed ]] && break
     sleep 2
   done
   $KUBECTL -n "$ns" logs "$name" 2>/dev/null || true
+}
+reachable() { # namespace service-namespace service [wget options] URL → URL's body once it answers
+  wait_endpoints "$2" "$3"
+  probe "$1" "$(retry "$(answers "$4")"); $(answers "$4")"
 }
 
 echo "==> prerequisites"
@@ -97,9 +132,10 @@ expect "app-role grants recorded for the newest migration" '^t$' "$(psql_kobe \
   'select (select migration_when from drizzle.kobe_grants_applied) = (select max(created_at) from drizzle.__drizzle_migrations)')"
 expect "team tables have FORCE ROW LEVEL SECURITY" '^team_members\|true$' "$(psql_kobe \
   "select c.relname || '|' || c.relforcerowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname = 'team_members'")"
+wait_endpoints "$NS" kobe-web
 contains "web answers through the Traefik ingress" '"service":"web"' \
-  "$(probe "$NS" 'wget -qO- --header "Host: kobe.localtest.me" http://traefik.kube-system/api/healthz')"
-contains "server answers" '"service":"server"' "$(probe "$NS" 'wget -qO- http://kobe-server/healthz')"
+  "$(reachable "$NS" kube-system traefik "--header 'Host: kobe.localtest.me' http://traefik.kube-system/api/healthz")"
+contains "server answers" '"service":"server"' "$(reachable "$NS" "$NS" kobe-server http://kobe-server/healthz)"
 # KOBE-9: every server/scheduler process verified isolation itself (not disclosed by /readyz).
 iso=""
 for pod in $($KUBECTL -n "$NS" get pods -l "$gated_pods" --field-selector=status.phase=Running -o name); do
@@ -107,10 +143,11 @@ for pod in $($KUBECTL -n "$NS" get pods -l "$gated_pods" --field-selector=status
   else iso+="$pod:unverified "; fi
 done
 contains "server and scheduler verified the gVisor RuntimeClass in process" '^verified verified verified $' "$iso"
-contains "Bifrost is reachable from the release namespace" '"status":"ok"' \
-  "$(probe "$NS" 'wget -qO- -T 5 http://kobe-bifrost:8080/health')"
-np=$(probe default "wget -qO- -T 5 http://kobe-web.$NS/api/healthz >/dev/null 2>&1 && echo control=REACHED || echo control=BLOCKED; \
-  wget -qO- -T 5 http://kobe-bifrost.$NS:8080/health >/dev/null 2>&1 && echo bifrost=REACHED || echo bifrost=BLOCKED")
+bifrost=$(reachable "$NS" "$NS" kobe-bifrost http://kobe-bifrost:8080/health)
+contains "Bifrost is reachable from the release namespace" '"status":"ok"' "$bifrost restarts=$($KUBECTL \
+  -n "$NS" get pods -l app.kubernetes.io/component=bifrost -o jsonpath='{.items[*].status.containerStatuses[*].restartCount}' 2>/dev/null)"
+# Once the control answers, the probe pod is in the policy ipsets: BLOCKED below is the policy.
+np=$(probe default "$(gated http://kobe-web.$NS/api/healthz bifrost http://kobe-bifrost.$NS:8080/health)")
 contains "probe from another namespace can reach unrestricted services (control)" '^control=REACHED$' "$np"
 contains "Bifrost is not reachable from other namespaces" '^bifrost=BLOCKED$' "$np"
 # First-run setup through the ingress (KOBE-12): needs the install's setup token.
@@ -118,7 +155,9 @@ setup_token=$($KUBECTL -n "$NS" get secret kobe-auth -o jsonpath='{.data.setup-t
 ingress() { # method path [json]: full response (status line + body) via the Traefik ingress
   local data=""
   if [[ -n "${3:-}" ]]; then data="--post-data '$3'"; fi
-  probe "$NS" "wget -qO- -S --header 'Host: kobe.localtest.me' --header 'Origin: http://kobe.localtest.me' \
+  wait_endpoints kube-system traefik
+  probe "$NS" "$(retry 'nc -w 3 traefik.kube-system 80 </dev/null'); \
+    wget -qO- -S --header 'Host: kobe.localtest.me' --header 'Origin: http://kobe.localtest.me' \
     --header 'Content-Type: application/json' $data http://traefik.kube-system$2 2>&1"
 }
 contains "first-run setup is required on a fresh install" '"required":true' "$(ingress GET /v1/setup)"
@@ -135,8 +174,9 @@ contains "password reset answers 200" 'HTTP/1.1 200' \
   "$(ingress POST /api/auth/request-password-reset '{"email":"owner@e2e.test"}')"
 contains "password reset for an unknown address answers the same" 'HTTP/1.1 200' \
   "$(ingress POST /api/auth/request-password-reset '{"email":"nobody@e2e.test"}')"
-mail=$(probe "$NS" 'for i in $(seq 1 15); do m=$(wget -qO- -T 5 http://mailpit.kobe-deps:8025/api/v1/messages); \
-  echo "$m" | grep -q "Reset your Kobe password" && break; sleep 2; done; echo "$m"')
+mailbox=http://mailpit.kobe-deps:8025/api/v1/messages
+wait_endpoints kobe-deps mailpit
+mail=$(probe "$NS" "$(retry "$(answers $mailbox) | grep -q 'Reset your Kobe password'"); $(answers $mailbox)")
 contains "the server delivered the reset email over SMTP" 'Reset your Kobe password' "$mail"
 contains "the reset email went to the account's address" 'owner@e2e.test' "$mail"
 if printf '%s' "$mail" | grep -q 'nobody@e2e.test'; then fail "no email for an unknown address"; else ok "no email for an unknown address"; fi
@@ -277,7 +317,7 @@ team_pod() { # namespace, name, shell command → a sandbox-like pod (gVisor, bo
 team_probe() { # shell command → its output, run from a sandbox-like pod in the team namespace
   local name="tprobe-$RANDOM$RANDOM" phase="" i
   team_pod "$TEAM_NS" "$name" "$1" || { echo "team probe could not start"; return; }
-  for i in $(seq 1 90); do
+  for i in $(seq 1 180); do
     phase=$($KUBECTL -n "$TEAM_NS" get pod "$name" -o jsonpath='{.status.phase}' 2>/dev/null || true)
     [[ "$phase" == Succeeded || "$phase" == Failed ]] && break
     sleep 2
@@ -315,9 +355,26 @@ $KUBECTL -n "$NS" run diag-listener --restart=Never --image=busybox:1.37 --comma
 $KUBECTL -n "$NS" wait --for=condition=Ready pod/diag-listener --timeout=120s >/dev/null 2>&1 || true
 diag_ip=$($KUBECTL -n "$NS" get pod diag-listener -o jsonpath='{.status.podIP}' 2>/dev/null || true)
 web_pod_ip=$($KUBECTL -n "$NS" get pods -l app.kubernetes.io/component=web -o jsonpath='{.items[0].status.podIP}' 2>/dev/null || true)
-# A new pod joins the CNI's policy ipsets after a short delay: wait until the sandbox port answers
-# (up to 60 s) before probing, so BLOCKED results are the policy and not the warm-up.
-egress=$(team_probe "for i in \$(seq 1 60); do wget -qO- -T 2 http://$server_ip:8081/healthz >/dev/null 2>&1 && break; sleep 1; done; \
+# Controls first: the destinations the sandbox must not reach are up and reachable from the
+# release namespace, so BLOCKED below is the sandbox policy, not a dead target.
+wait_endpoints "$NS" kobe-server kobe-web kobe-bifrost
+controls=$(probe "$NS" "$(retry "$(answers http://$server_ip/healthz)"); \
+  $(retry "nc -w 3 $api_ip 443 </dev/null"); $(retry "nc -w 3 $node_ip 10250 </dev/null"); \
+  $(tcp api "$api_ip" 443) $(tcp kubelet "$node_ip" 10250) \
+  wget -qO- -T 5 http://$server_ip/healthz >/dev/null 2>&1 && echo user-api=REACHED || echo user-api=BLOCKED")
+contains "control: the API Service is reachable from the release namespace" '^api=REACHED$' "$controls"
+contains "control: the kubelet is reachable from the release namespace" '^kubelet=REACHED$' "$controls"
+contains "control: the user API is reachable from the release namespace" '^user-api=REACHED$' "$controls"
+# A new pod joins the CNI's policy ipsets after a delay: the sandbox probes run only once the
+# sandbox port (the positive control from the same pod) answers, so BLOCKED is the policy. Allow
+# 180 s, the budget of the loop this replaced; admitted-after records how long it took.
+# Team-probe prefix: the sandbox port is the positive control from the same pod. On timeout it
+# prints sandbox-port=BLOCKED and <label>=UNTESTED and ends the probe, so every check after fails.
+sandbox_port_gate() { # label
+  echo "t0=\$(date +%s); if ! $(retry "$(answers http://$server_ip:8081/healthz)" 180); then \
+echo sandbox-port=BLOCKED; echo $1=UNTESTED; exit 0; fi; echo admitted-after=\$((\$(date +%s) - t0))s;"
+}
+egress=$(team_probe "$(sandbox_port_gate egress) \
   wget -qO- -T 5 http://${diag_ip:-0.0.0.0}:8080/ >/dev/null 2>&1 && echo diag-8080=REACHED || echo diag-8080=BLOCKED; \
   wget -qO- -T 5 http://${diag_ip:-0.0.0.0}:9090/ >/dev/null 2>&1 && echo diag-9090=REACHED || echo diag-9090=BLOCKED; \
   wget -qO- -T 5 http://${web_pod_ip:-0.0.0.0}:8080/api/healthz >/dev/null 2>&1 && echo web-pod=REACHED || echo web-pod=BLOCKED; \
@@ -349,15 +406,6 @@ contains "sandboxes get no DNS (no exfiltration channel)" '^dns=BLOCKED$' "$egre
 contains "sandboxes cannot reach the internet directly" '^internet=BLOCKED$' "$egress"
 contains "an unclaimed sandbox pod's bootstrap token is recognised but not assigned (409)" '^bootstrap=HTTP/1.1 409$' "$egress"
 contains "a forged bootstrap token is refused (401)" '^forged=HTTP/1.1 401$' "$egress"
-# Controls: the same destinations are reachable from the release namespace, so BLOCKED above is
-# the sandbox policy, not a dead target.
-# (The probe pod also waits out the CNI warm-up: web/server/scheduler admit it by namespace label.)
-controls=$(probe "$NS" "for i in \$(seq 1 60); do wget -qO- -T 2 http://$server_ip/healthz >/dev/null 2>&1 && break; sleep 1; done; \
-  $(tcp api "$api_ip" 443) $(tcp kubelet "$node_ip" 10250) \
-  wget -qO- -T 5 http://$server_ip/healthz >/dev/null 2>&1 && echo user-api=REACHED || echo user-api=BLOCKED")
-contains "control: the API Service is reachable from the release namespace" '^api=REACHED$' "$controls"
-contains "control: the kubelet is reachable from the release namespace" '^kubelet=REACHED$' "$controls"
-contains "control: the user API is reachable from the release namespace" '^user-api=REACHED$' "$controls"
 contains "the sandbox session endpoint is not exposed through the ingress" 'HTTP/1.1 (401|404)' \
   "$(ingress POST /v1/sandbox/session '{}')"
 
@@ -369,8 +417,7 @@ $KUBECTL -n "$SANDBOX_NS" run control-listener --restart=Never --image=busybox:1
 $KUBECTL -n "$SANDBOX_NS" wait --for=condition=Ready pod/control-listener --timeout=120s >/dev/null 2>&1 || true
 team_ip=$($KUBECTL -n "$TEAM_NS" get pod "$team_listener" -o jsonpath='{.status.podIP}' 2>/dev/null || true)
 control_ip=$($KUBECTL -n "$SANDBOX_NS" get pod control-listener -o jsonpath='{.status.podIP}' 2>/dev/null || true)
-inbound=$(probe "$NS" "wget -qO- -T 5 http://${control_ip:-0.0.0.0}:8080/ >/dev/null 2>&1 && echo control=REACHED || echo control=BLOCKED; \
-  wget -qO- -T 5 http://${team_ip:-0.0.0.0}:8080/ >/dev/null 2>&1 && echo sandbox=REACHED || echo sandbox=BLOCKED")
+inbound=$(probe "$NS" "$(gated "http://${control_ip:-0.0.0.0}:8080/" sandbox "http://${team_ip:-0.0.0.0}:8080/")")
 contains "the team listener is up (so BLOCKED below means the policy)" '^Running$' \
   "$($KUBECTL -n "$TEAM_NS" get pod "$team_listener" -o jsonpath='{.status.phase}')"
 contains "a listener outside team namespaces is reachable (control)" '^control=REACHED$' "$inbound"
@@ -403,7 +450,8 @@ upgrade() { # label token → "label=HTTP/1.1 <status>" (raw request: busybox ha
   echo "(printf 'GET /v1/sandbox/connect HTTP/1.1\r\nHost: kobe-server\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Protocol: kobe.sandbox.v1\r\nAuthorization: Bearer $2\r\n\r\n'; sleep 4) \
     | nc -w 5 $server_ip 8081 2>/dev/null | head -1 | grep -o 'HTTP/1.1 [0-9]*' | sed 's/^/$1=/';"
 }
-wire=$(team_probe "for i in \$(seq 1 60); do wget -qO- -T 2 http://$server_ip:8081/healthz >/dev/null 2>&1 && break; sleep 1; done; \
+# Gated like the egress probe: the upgrades run only once the sandbox port answers this pod.
+wire=$(team_probe "$(sandbox_port_gate wire) \
   $(upgrade valid "$wire_token") $(upgrade forged forged.token.value-xxxxxxxxxx) \
   $(upgrade gateway "$gateway_token") $(upgrade dead "$dead_token") \
   wget -qO- -T 5 -S http://$server_ip:8081/v1/sandbox/connect 2>&1 | grep -o 'HTTP/1.1 [0-9]*' | head -1 | sed 's/^/plain=/'")
@@ -415,7 +463,7 @@ contains "a signed token for a sandbox that does not exist is refused (401)" '^d
 contains "the wire endpoint is not on the user-facing ingress" 'HTTP/1.1 (401|404)' \
   "$(ingress GET /v1/sandbox/connect)"
 
-# KOBE-25: hibernate → wake (D14) with the real sandbox agent, and the Gate 1 cold-start harness.
+# KOBE-25: hibernate → wake (D14) with the real sandbox agent, and the cold-start harness (Pi ready).
 # The e2e sandbox (KOBE-22) runs kobe-sandbox-agent; with the database rows above it trades its
 # bootstrap token for session tokens and connects. Waits are bounded and end on a positive
 # condition (never a fixed sleep before an assertion).
@@ -503,5 +551,63 @@ contains "its /workspace survived hibernation" '^kobe-25$' "$(in_sandbox 'cat /w
 contains "its /tmp was wiped by hibernation" '^gone$' "$(in_sandbox 'test -e /tmp/kobe-25-marker && echo kept || echo gone')"
 audit_counts=$(psql_kobe "SELECT (SELECT count(*) FROM audit_log WHERE team_id = '$E2E_TEAM_ID' AND action = 'sandbox.hibernated' AND target->>'trigger' = 'operator') >= $((trials + 1)) AND (SELECT count(*) FROM audit_log WHERE team_id = '$E2E_TEAM_ID' AND action = 'sandbox.woken') >= $((trials + 1))")
 contains "every hibernation and wake is audited" '^t$' "$audit_counts"
+
+# KOBE-30: messages and runs through the server API against the in-cluster Postgres. No model or
+# agent answers yet, so the run is stopped while its start waits for the (unwoken) sandbox.
+echo "==> runs (KOBE-30)"
+owner_id=$(psql_kobe "SELECT id FROM users WHERE email = 'owner@e2e.test'")
+psql_kobe "INSERT INTO team_members (team_id, user_id, role) VALUES ('$E2E_TEAM_ID', '$owner_id', 'member') ON CONFLICT DO NOTHING;" >/dev/null
+read -r -d '' RUNS_JS <<'JS' || true
+const [team] = process.argv.slice(1);
+const base = "http://127.0.0.1:" + process.env.PORT;
+const origin = new URL(process.env.KOBE_PUBLIC_URL).origin;
+const jar = new Map();
+const call = async (method, path, body) => {
+  const res = await fetch(base + path, {
+    method,
+    headers: {
+      origin,
+      "content-type": "application/json",
+      "x-kobe-team": team,
+      cookie: [...jar].map(([k, v]) => k + "=" + v).join("; "),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  for (const c of res.headers.getSetCookie()) {
+    const [pair] = c.split(";");
+    const at = pair.indexOf("=");
+    jar.set(pair.slice(0, at), pair.slice(at + 1));
+  }
+  const text = await res.text();
+  let json = {};
+  try { json = JSON.parse(text); } catch {}
+  return { status: res.status, json, text };
+};
+const out = (k, v) => console.log(k + "=" + v);
+out("signin", (await call("POST", "/api/auth/sign-in/email", { email: "owner@e2e.test", password: "e2e owner password" })).status);
+out("active", (await call("PUT", "/v1/me/teams/active", { teamId: team })).status);
+const thread = await call("POST", "/v1/threads", { title: "e2e" });
+const id = thread.json.thread_id;
+const first = await call("POST", "/v1/threads/" + id + "/messages", { content: "hello" });
+out("message", first.status + ":" + first.json.queued);
+const second = await call("POST", "/v1/threads/" + id + "/messages", { content: "again" });
+out("queued", second.status + ":" + second.json.queued + ":" + second.json.run_id);
+out("run", (await call("GET", "/v1/runs/" + first.json.run_id)).json.status);
+out("cancel", (await call("POST", "/v1/runs/" + first.json.run_id + "/cancel")).json.status);
+out("cancel2", (await call("POST", "/v1/runs/" + second.json.run_id + "/cancel")).json.status);
+const events = await call("GET", "/v1/runs/" + first.json.run_id + "/events");
+out("events", (events.text.match(/^event: .*$/gm) || []).map((l) => l.slice(7)).join(","));
+out("retry", (await call("POST", "/v1/runs/" + first.json.run_id + "/retry")).json.code);
+JS
+runs_out=$($KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$RUNS_JS" "$E2E_TEAM_ID" 2>&1 | tail -12)
+printf '     runs: %s\n' "$(printf '%s' "$runs_out" | tr '\n' ' ')"
+contains "a team member signs in and selects the team" '^active=200$' "$runs_out"
+contains "a message starts a run at once on an idle thread" '^message=201:false$' "$runs_out"
+contains "a second message queues behind the active run" '^queued=201:true:' "$runs_out"
+contains "the run is running while its sandbox start is pending" '^run=running$' "$runs_out"
+contains "Stop cancels the active run" '^cancel=cancelled$' "$runs_out"
+contains "Stop deletes the queued message (or stops it once it started)" '^cancel2=cancelled$' "$runs_out"
+contains "the event stream records the start and the stop, then ends" '^events=run.started,(sandbox.waking,)?run.interrupted$' "$runs_out"
+contains "a cancelled run cannot be retried (interrupted runs only)" '^retry=invalid_transition$' "$runs_out"
 
 exit "$failed"

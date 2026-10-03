@@ -180,6 +180,10 @@ export class SandboxConnection implements RegisteredConnection {
     return lease !== undefined && !lease.ended;
   }
 
+  hasLease(runId: string): boolean {
+    return this.#leases.has(runId);
+  }
+
   leaseThread(threadId: string): void {
     this.#threads.add(threadId);
   }

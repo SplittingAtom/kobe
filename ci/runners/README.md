@@ -73,3 +73,10 @@ the node's image cache.
 - Watch: `kubectl -n kobe-ci-runners get pods,ephemeralrunners`; controller logs in `arc-systems`.
 - Capacity: `maxRunners: 6`, each requesting 2 CPU / 5 Gi and allowed up to 12 CPU / 18 Gi.
 - Upgrade: bump `--version` for both charts together (controller first).
+- Changing `values.yaml`: apply it with the `helm upgrade --install kobe-k3s …` line above in the
+  same change, so the deployed scale set and the repository never differ (`helm get values
+kobe-k3s -n kobe-ci-runners` shows what is deployed). Running runners keep their old spec.
+- Failed image builds print the daemon's state with `scripts/ci-docker-diagnostics.sh`: `docker
+info`, disk, memory, and the dind daemon log, which the dind sidecar copies to
+  `/home/runner/_work/_dind/dockerd.log` on the shared work volume (the runner has no access to
+  the sidecar's container log).
