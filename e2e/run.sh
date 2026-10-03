@@ -483,7 +483,7 @@ contains "the wire endpoint is not on the user-facing ingress" 'HTTP/1.1 (401|40
 # bootstrap token for session tokens and connects. Waits are bounded and end on a positive
 # condition (never a fixed sleep before an assertion).
 echo "==> hibernate and wake (KOBE-25)"
-wait_for() { # seconds command... → succeeds as soon as the command does, fails after `seconds`
+until_ok() { # seconds command... → succeeds as soon as the command does, fails after `seconds`
   local deadline=$((SECONDS + $1))
   shift
   until "$@"; do
@@ -507,7 +507,7 @@ lifecycle() { # hibernate|wake → the CLI's answer (same path, lock and audit a
     --team-id "$E2E_TEAM_ID" --user-id "$E2E_USER_ID" 2>&1 | grep -E '^\{"(hibernated|woken)"' || true
 }
 claim_sandbox=$($KUBECTL -n "$TEAM_NS" get sandboxclaim "u-$E2E_USER_ID" -o jsonpath='{.status.sandbox.name}' 2>/dev/null || true)
-if wait_for 240 wire_open; then ok "the real sandbox agent trades its bootstrap token and connects over the wire"
+if until_ok 240 wire_open; then ok "the real sandbox agent trades its bootstrap token and connects over the wire"
 else
   fail "the real sandbox agent trades its bootstrap token and connects over the wire"
   $KUBECTL -n "$TEAM_NS" logs "$(sandbox_pod_name)" -c agent --tail=30 2>&1 | sed 's/^/     agent: /' || true
@@ -554,16 +554,16 @@ contains "the harness cleaned up its thread" '^0$' \
 contains "an idle sandbox can be hibernated" '"hibernated":true' "$(lifecycle hibernate)"
 contains "hibernation suspends the agent-sandbox Sandbox" '^Suspended$' \
   "$($KUBECTL -n "$TEAM_NS" get sandbox "${claim_sandbox:-none}" -o jsonpath='{.spec.operatingMode}' 2>&1)"
-if wait_for 120 pod_gone; then ok "a hibernated sandbox has no pod"; else fail "a hibernated sandbox has no pod"; fi
+if until_ok 120 pod_gone; then ok "a hibernated sandbox has no pod"; else fail "a hibernated sandbox has no pod"; fi
 contains "its /workspace volume is kept" '^Bound$' \
   "$($KUBECTL -n "$TEAM_NS" get pvc "workspace-${claim_sandbox:-none}" -o jsonpath='{.status.phase}' 2>&1)"
 contains "the server records it hibernated and closed its connection" '^hibernated\|0$' \
   "$(psql_kobe "SELECT s.state || '|' || (SELECT count(*) FROM sandbox_connections c WHERE c.team_id = s.team_id AND c.user_id = s.user_id AND c.closed_at IS NULL) FROM sandboxes s WHERE s.team_id = '$E2E_TEAM_ID' AND s.user_id = '$E2E_USER_ID'")"
 contains "a hibernated sandbox can be woken" '"woken":true' "$(lifecycle wake)"
-if wait_for 120 pod_running; then ok "waking starts a new pod"; else fail "waking starts a new pod"; fi
+if until_ok 120 pod_running; then ok "waking starts a new pod"; else fail "waking starts a new pod"; fi
 contains "the woken pod runs under gVisor" '^gvisor$' \
   "$($KUBECTL -n "$TEAM_NS" get pod "$(sandbox_pod_name)" -o jsonpath='{.spec.runtimeClassName}' 2>&1)"
-if wait_for 120 wire_open; then ok "the woken sandbox reconnects"; else fail "the woken sandbox reconnects"; fi
+if until_ok 120 wire_open; then ok "the woken sandbox reconnects"; else fail "the woken sandbox reconnects"; fi
 contains "its /workspace survived hibernation" '^kobe-25$' "$(in_sandbox 'cat /workspace/kobe-25-marker')"
 contains "its /tmp was wiped by hibernation" '^gone$' "$(in_sandbox 'test -e /tmp/kobe-25-marker && echo kept || echo gone')"
 audit_counts=$(psql_kobe "SELECT (SELECT count(*) FROM audit_log WHERE team_id = '$E2E_TEAM_ID' AND action = 'sandbox.hibernated' AND target->>'trigger' = 'operator') >= $((trials + 1)) AND (SELECT count(*) FROM audit_log WHERE team_id = '$E2E_TEAM_ID' AND action = 'sandbox.woken') >= $((trials + 1))")
