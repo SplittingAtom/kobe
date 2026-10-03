@@ -22,6 +22,13 @@ describe("isRetryableConnectError", () => {
     },
   );
 
+  it("retries when a connect attempt times out (no error code: a dropped SYN, e.g. a network policy not applied yet)", () => {
+    expect(isRetryableConnectError(new Error("timeout expired"))).toBe(true); // pg.Client
+    expect(isRetryableConnectError(new Error("timeout exceeded when trying to connect"))).toBe(
+      true,
+    ); // pg.Pool
+  });
+
   it("fails fast on unknown errors", () => {
     expect(isRetryableConnectError(new Error("boom"))).toBe(false);
     expect(isRetryableConnectError("nope")).toBe(false);

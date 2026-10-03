@@ -9,5 +9,8 @@ export default defineConfig({
     testTimeout: 30_000,
     hookTimeout: 60_000,
     fileParallelism: false,
+    // expect.poll waits on a real condition (e.g. a run reaching a terminal state); vitest's 1 s
+    // default is too tight on loaded CI runners. A condition that never holds still fails.
+    expect: { poll: { timeout: 10_000 } },
   },
 });
