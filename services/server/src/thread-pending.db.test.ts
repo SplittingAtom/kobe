@@ -47,18 +47,20 @@ describe("GET /v1/threads/{id}/pending-messages", () => {
       { run_id: third, status: "queued", queue_pos: 2, content: "third", parent_entry_id: null },
     ]);
 
-    // A deleted queued message and a stopped run are no longer pending.
+    // A deleted queued message and a stopped run are no longer pending; Stop pauses the queue
+    // (KOBE-26), so the third waits until the queue is resumed.
     expect((await b.post(`/v1/runs/${second}/cancel`)).status).toBe(200);
     expect((await b.post(`/v1/runs/${first}/cancel`)).status).toBe(200);
-    await expect
-      .poll(async () => {
-        const after = await b.get(`/v1/threads/${threadId}/pending-messages`);
-        return (after.json.messages as { run_id: string; status: string }[]).map((m) => [
-          m.run_id,
-          m.status,
-        ]);
-      })
-      .toEqual([[third, "running"]]);
+    const pending = async () => {
+      const after = await b.get(`/v1/threads/${threadId}/pending-messages`);
+      return (after.json.messages as { run_id: string; status: string }[]).map((m) => [
+        m.run_id,
+        m.status,
+      ]);
+    };
+    expect(await pending()).toEqual([[third, "queued"]]);
+    expect((await b.post(`/v1/threads/${threadId}/queue/resume`)).status).toBe(200);
+    await expect.poll(pending).toEqual([[third, "running"]]);
   });
 
   it("keeps the branch point of a message sent with parent_entry_id", async () => {

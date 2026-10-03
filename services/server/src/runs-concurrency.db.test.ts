@@ -92,6 +92,8 @@ describe("Stop racing the wire and new messages", () => {
       ]);
       expect([200, 409]).toContain(stop.status);
       expect(next.status).toBe(201);
+      // A Stop that landed after the message queued paused the queue (KOBE-26): resume it.
+      await f.on(round % 2, w.owner).post(`/v1/threads/${threadId}/queue/resume`);
       const nextId = next.json.run_id as string;
       await expect.poll(() => f.status(w.team, run)).toMatch(/^(cancelled|completed)$/);
       const types = await f.types(w.team, run);
