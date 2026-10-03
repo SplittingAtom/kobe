@@ -143,6 +143,10 @@ const delta = (text: string) => ({
 const assistantStart = { type: "message_start", message: { role: "assistant" } };
 const assistantEnd = { type: "message_end", message: { role: "assistant" } };
 
+/** Waits for both replicas' off-path work (audit rows of refused tokens and violations). */
+const settled = () =>
+  Promise.all([0, 1].map((i) => fx.replica(i).deps.background.idle())).then(() => undefined);
+
 async function auditActions(teamId: string): Promise<string[]> {
   const { rows } = await fx.admin.query<{ action: string }>(
     `SELECT action FROM audit_log WHERE team_id = $1 ORDER BY seq`,
@@ -184,12 +188,10 @@ describe("upgrade authentication", () => {
     expect(await status(FakeSandbox.connect(url(0), foreign))).toBe(401);
     expect(await status(FakeSandbox.connect(url(0), w.token))).toBe(101);
     // Signed tokens refused after verification are audited (forged ones carry no team).
-    await expect
-      .poll(
-        async () =>
-          (await auditActions(w.team)).filter((x) => x === "sandbox.token_rejected").length,
-      )
-      .toBe(2);
+    await settled();
+    expect((await auditActions(w.team)).filter((x) => x === "sandbox.token_rejected")).toHaveLength(
+      2,
+    );
   });
 
   it("closes on a hello for another sandbox, an unsupported Pi, a frame before hello, or no hello", async () => {
@@ -203,7 +205,8 @@ describe("upgrade authentication", () => {
     const a = await open();
     a.hello(randomUUID());
     expect((await a.waitClosed()).code).toBe(SANDBOX_CLOSE_CODES.unauthorized);
-    await expect.poll(() => auditActions(w.team)).toContain("sandbox.token_rejected");
+    await settled();
+    expect(await auditActions(w.team)).toContain("sandbox.token_rejected");
     const b = await open();
     b.hello(w.sandboxId, [], "2.0.0");
     expect((await b.waitClosed()).code).toBe(SANDBOX_CLOSE_CODES.unsupported_version);
@@ -268,8 +271,7 @@ describe("routing across replicas", () => {
       threadId: w.threadId,
       message: "later",
     });
-    await sleep(300);
-    expect(woken).toContain(w.owner.id);
+    await expect.poll(() => woken).toContain(w.owner.id);
     const sb = await connect(0, w);
     expect(await pending).toEqual({ ok: true });
     expect(sb.frames("run.start")).toHaveLength(1);
@@ -552,7 +554,8 @@ describe("leasing and the compromised-sandbox suite", () => {
     sb.event(other.runId, other.threadId, 1, { type: "agent_start" });
     expect((await sb.waitClosed()).code).toBe(SANDBOX_CLOSE_CODES.lease_violation);
     expect(sb.frames("error").map((e) => e.code)).toContain("unknown_run");
-    await expect.poll(() => auditActions(w.team)).toContain("sandbox.lease_violation");
+    await settled();
+    expect(await auditActions(w.team)).toContain("sandbox.lease_violation");
     expect((await events(w.team, other.runId)).length).toBe(0);
   });
 
@@ -632,7 +635,8 @@ describe("leasing and the compromised-sandbox suite", () => {
     // The same size as a ping (or with an unreadable type) is refused unparsed.
     sb.sendRaw(`{"v":1,"type":"ping","nonce":"${"x".repeat(300 * 1024)}"}`);
     expect((await sb.waitClosed()).code).toBe(SANDBOX_CLOSE_CODES.protocol_error);
-    await expect.poll(() => auditActions(w.team)).toContain("sandbox.limit_exceeded");
+    await settled();
+    expect(await auditActions(w.team)).toContain("sandbox.limit_exceeded");
   });
 
   it("closes a flooding sandbox", async () => {
