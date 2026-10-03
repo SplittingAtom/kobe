@@ -6,7 +6,7 @@
  */
 export const SEEDED_TABLES: Readonly<Record<string, string>> = {
   egress_domains:
-    "egress presets seeded by migration 0026_egress_rls (KOBE-38); the backup carries the install's own ceiling",
+    "egress presets seeded by migration 0027_egress_rls (KOBE-38); the backup carries the install's own ceiling",
 };
 
 export function isSeeded(table: string): boolean {
