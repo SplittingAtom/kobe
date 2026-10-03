@@ -81,6 +81,10 @@ jobs:
         env:
           KOBE_SANDBOX_IMAGE: ghcr.io/splittingatom/kobe-sandbox:${{ env.KOBE_IMAGE_TAG }}
         run: e2e/run.sh
+      - name: Gate 1 suite (KOBE-1)
+        # Against the install e2e/run.sh left running: two teams × five users, refresh mid-run,
+        # live cross-team probe, kill mid-run + Retry, 20 cold-start trials (docs/gates/gate-1.md).
+        run: e2e/gate1.sh
       - name: Diagnostics
         if: failure()
         run: |
@@ -90,5 +94,6 @@ jobs:
           kubectl -n kobe-dev logs --all-containers --prefix --tail=50 -l app.kubernetes.io/name=kobe || true
           kubectl get sandboxes,sandboxclaims,sandboxwarmpools,networkpolicies -A || true
           kubectl -n kobe-team-e2e describe pods | tail -120 || true
+          for t in a b; do kubectl -n kobe-team-gate1-$t describe pods | tail -60 || true; done
           df -h /
           scripts/ci-docker-diagnostics.sh
