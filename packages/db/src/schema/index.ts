@@ -10,4 +10,5 @@ export * from "./tool-rules.js";
 export * from "./invitations.js";
 export * from "./agents.js";
 export * from "./audit.js";
+export * from "./break-glass.js";
 export * from "./sandbox-wire.js";
