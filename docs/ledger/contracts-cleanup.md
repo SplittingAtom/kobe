@@ -50,7 +50,10 @@
   for "latest run that ran"; omitted = treated as started (the server pre-filters in SQL, as before).
 - **Frame caps** moved into the contract: `SANDBOX_SMALL_FRAME_MAX_BYTES` (256 KiB),
   `SANDBOX_FRAME_MAX_BYTES_BY_TYPE` (`pi.event`/`command.result` 4 MiB, `policy.check` 1 MiB); the
-  server's `WIRE_DEFAULTS.frameMaxBytes` uses them. Large frames must start with `v`, `type`.
+  server's `WIRE_DEFAULTS.frameMaxBytes` takes `policyCheck` and `small` from them (one source of
+  truth). Large frames must start with `v`, `type`. KOBE-36's kobe-policy caps at 1 MiB − 4 KiB
+  (envelope room), noted on `policyCheckFrameSchema`. Test: `frames.test.ts` "states the per-type
+  frame caps".
 - **Event payload bounds** aligned with the server: payload ≤ 256 KiB (`EVENT_PAYLOAD_MAX_BYTES`,
   `parseEventPayload` throws `EventPayloadTooLargeError`; append maps it to `payload_too_large`),
   `tool.call.input` ≤ 64 KiB, `entry.committed.payload` ≤ 64 KiB. Not applied to

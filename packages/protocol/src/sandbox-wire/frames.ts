@@ -85,8 +85,9 @@ export const piUiRequestFrameSchema = frame("pi.ui_request", {
  * deep-freezes that object before asking, so the executed input is exactly the decided one. It
  * does not replace `event.input` (a re-parsed copy would be a no-op in Pi 1.0.0; KOBE-36).
  * Size: at most {@link SANDBOX_FRAME_MAX_BYTES_BY_TYPE}`["policy.check"]` (1 MiB) per frame — it
- * carries a `write`'s content as executed; a larger check closes the connection, so the agent
- * blocks such a call locally instead of sending it.
+ * carries a `write`'s content as executed; a larger check closes the connection, so the sandbox
+ * blocks such a call locally instead of sending it (kobe-policy caps the line it hands the agent at
+ * 1 MiB − 4 KiB, leaving room for the frame envelope the agent adds; KOBE-36).
  */
 export const policyCheckFrameSchema = frame("policy.check", {
   request_id: idSchema,
