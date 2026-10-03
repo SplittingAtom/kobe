@@ -30,6 +30,12 @@ export interface AgentDeps {
   readonly onExit: (code: number) => void;
   readonly backoff?: BackoffPolicy;
   readonly heartbeatTimeoutMs?: number;
+  readonly policyReadyTimeoutMs?: number;
+  /**
+   * Root-owned extensions (or `builtin:<name>`) loaded before kobe-policy, which is always last
+   * (KOBE-62 adds `builtin:mcp` here).
+   */
+  readonly extensions?: readonly string[];
 }
 
 const MAX_REMEMBERED_COMMANDS = 4096;
@@ -64,6 +70,11 @@ export class Agent {
     this.#threads = new ThreadManager({
       bin: config.piBin,
       agentDir: config.piAgentDir,
+      policyExtension: config.policyExtension,
+      ...(deps.extensions === undefined ? {} : { extensions: deps.extensions }),
+      ...(deps.policyReadyTimeoutMs === undefined
+        ? {}
+        : { policyReadyTimeoutMs: deps.policyReadyTimeoutMs }),
       workspaceDir: config.workspaceDir,
       sessionDir: config.sessionDir,
       home: deps.home,
@@ -90,6 +101,9 @@ export class Agent {
         piExited: (threadId, runId, exit) => this.#reportExit(threadId, runId, exit),
         policyCheck: (threadId, runId, check, reply) =>
           this.#broker.check(threadId, runId, check, reply),
+        policyCancel: (threadId, requestId) => {
+          this.#broker.cancel(threadId, requestId);
+        },
         policyChannelClosed: (threadId, reason) => {
           logger.debug({ thread_id: threadId, reason }, "policy channel closed");
           this.#broker.failThread(threadId, reason);

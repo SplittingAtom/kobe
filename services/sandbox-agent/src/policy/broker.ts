@@ -1,4 +1,5 @@
 import type { PolicyCheckFrame } from "@kobe/protocol";
+import { MAX_PENDING_CHECKS } from "../kobe-policy/protocol.js";
 import { localDeny, type PolicyChannelCheck, type PolicyChannelReply } from "./channel.js";
 
 /**
@@ -8,8 +9,13 @@ import { localDeny, type PolicyChannelCheck, type PolicyChannelReply } from "./c
  * anything that prevents an answer from the server is a deny (fail closed).
  */
 export const MAX_PENDING_POLICY_CHECKS = 512;
+/**
+ * The Kobe server closes the whole sandbox connection on a `policy.check` frame over 1 MiB
+ * (KOBE-24 `frameMaxBytes.policyCheck`); a larger one is denied here instead, without sending.
+ */
+export const MAX_POLICY_CHECK_FRAME_BYTES = 1024 * 1024;
 /** Per thread, so one thread's extension (or code abusing its channel) cannot starve the others. */
-export const MAX_PENDING_POLICY_CHECKS_PER_THREAD = 128;
+export const MAX_PENDING_POLICY_CHECKS_PER_THREAD = MAX_PENDING_CHECKS;
 
 interface PendingCheck {
   readonly threadId: string;
@@ -68,6 +74,10 @@ export class PolicyBroker {
       tool: check.tool,
       input: check.input,
     };
+    if (Buffer.byteLength(JSON.stringify(frame)) > MAX_POLICY_CHECK_FRAME_BYTES) {
+      reply(localDeny(check.request_id, "tool input too large for a policy check"));
+      return;
+    }
     this.#pending.set(requestId, {
       threadId,
       runId,
@@ -94,6 +104,21 @@ export class PolicyBroker {
     this.#pending.delete(frame.request_id);
     pending.reply(this.#relay(frame, pending));
     return true;
+  }
+
+  /**
+   * The extension stopped waiting (its timeout, or Stop): free the slot. A late server answer then
+   * finds nothing and is dropped. The server keeps deciding (no wire frame to cancel a check); a
+   * pending approval ends with the run (KOBE-37).
+   */
+  cancel(threadId: string, extensionRequestId: string): boolean {
+    for (const [id, pending] of this.#pending) {
+      if (pending.threadId !== threadId || pending.extensionRequestId !== extensionRequestId)
+        continue;
+      this.#pending.delete(id);
+      return true;
+    }
+    return false;
   }
 
   /** Connection lost: the server may have dropped the checks with it. */

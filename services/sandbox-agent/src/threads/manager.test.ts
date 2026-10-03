@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { EXAMPLE_IDS } from "@kobe/protocol/testing";
 import { afterEach, describe, expect, it } from "vitest";
-import { FAKE_PI } from "../testing/harness.js";
+import { FAKE_PI, FAKE_POLICY_EXTENSION } from "../testing/harness.js";
 import { ThreadManager } from "./manager.js";
 
 const noop = () => undefined;
@@ -31,6 +31,7 @@ describe("ThreadManager beforeRun seam (KOBE-27)", () => {
     manager = new ThreadManager({
       bin: FAKE_PI,
       agentDir: dir,
+      policyExtension: FAKE_POLICY_EXTENSION,
       workspaceDir: dir,
       sessionDir: path.join(dir, "sessions"),
       home: path.join(dir, "home"),
