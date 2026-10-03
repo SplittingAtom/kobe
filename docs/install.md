@@ -165,6 +165,20 @@ live traffic. Rolling a bundled-CloudNativePG release back to its first revision
 revision's initial migration Job, which resets app-role grants to that build's matrix; the next
 upgrade restores them.
 
+### Upgrade notes
+
+Migrations report what an upgrade changed in the migration Job's log (`"msg":"migration notice"`,
+from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it during the upgrade
+(`kubectl logs -f job/<release>-migrate`) or read it from your log aggregation afterwards.
+
+- **One approval floor (migration `0024_approval_floor_unify`).** The minimum approval mode is
+  install-wide only (spec D6), stored as `install_settings['policy.approval_floor']`. The older key
+  `policy.approval_mode_floor` is folded into it (the stricter value wins), and team floors
+  (`teams.settings.approval_mode_floor`) are removed. Each team whose floor was stricter than
+  `auto` is named in a notice (`kobe: dropped team approval floor <mode> of team <id>`): such a
+  team is looser after the upgrade. Restore its strictness with team ask rules (an `ask` rule on
+  `*` asks for every tool, like `ask-all`).
+
 ## Backup and restore
 
 `kobe backup` / `kobe restore` cover Postgres and an S3 object manifest; see

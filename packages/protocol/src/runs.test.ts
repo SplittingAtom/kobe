@@ -126,6 +126,21 @@ describe("thread status and queue rule", () => {
       checkRetry([...runs, { run_id: "d", status: "running", retry_of_run_id: "b" }], "b"),
     ).toBe("already_retried");
   });
+
+  it("skips runs that ended without ever starting when finding the latest run that ran", () => {
+    const runs = [
+      { run_id: "a", status: "interrupted", started_at: "2026-10-01T10:00:00.000Z" },
+      { run_id: "q", status: "cancelled", started_at: null }, // a deleted queued message
+      { run_id: "r", status: "failed", started_at: null }, // a queued message that failed to start
+    ] as const;
+    expect(checkRetry(runs, "a")).toBe("ok");
+    expect(
+      checkRetry(
+        [...runs, { run_id: "b", status: "completed", started_at: "2026-10-01T10:05:00.000Z" }],
+        "a",
+      ),
+    ).toBe("not_latest");
+  });
 });
 
 describe("API bodies", () => {

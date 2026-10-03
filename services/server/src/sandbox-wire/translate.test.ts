@@ -141,3 +141,22 @@ describe("tool input and preview bounds", () => {
     expect(toolResultPreview("nope")).toEqual({ preview: "", truncated: false });
   });
 });
+
+describe("events that do not fit the contract", () => {
+  it("reports a payload over the protocol bound (type and size only) instead of dropping it silently", async () => {
+    const dropped: { type: string; reason: string; bytes?: number }[] = [];
+    const t = createRunTranslator({
+      teamId: TEAM,
+      registry: createToolRegistry(),
+      onDropped: (d) => dropped.push(d),
+    });
+    await t.translate(1, { type: "message_start", message: { role: "assistant" } } as never);
+    const huge = "x".repeat(300 * 1024);
+    const out = await t.translate(2, update({ type: "text_delta", contentIndex: 0, delta: huge }));
+    expect(out.events).toEqual([]);
+    expect(dropped).toEqual([
+      { type: "text.delta", reason: "payload_too_large", bytes: expect.any(Number) },
+    ]);
+    expect(JSON.stringify(dropped)).not.toContain("xxxx");
+  });
+});

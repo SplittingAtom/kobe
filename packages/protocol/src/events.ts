@@ -53,6 +53,31 @@ export function isKobeEventType(value: unknown): value is KobeEventType {
  */
 const messageId = idSchema;
 
+/**
+ * Size bounds (UTF-8 bytes of the JSON text), as the server already enforces them (KOBE-24/31):
+ * a whole event payload at most {@link EVENT_PAYLOAD_MAX_BYTES} (bigger content lives in S3 by
+ * `blob_ref`, D15); a `tool.call` input at most {@link EVENT_TOOL_INPUT_MAX_BYTES} (the server
+ * replaces a larger one with `{kobe_omitted: "too_large", bytes}`); an `entry.committed` payload at
+ * most {@link EVENT_ENTRY_PAYLOAD_MAX_BYTES} (larger entries are stored, not streamed: the field is
+ * omitted and clients read the entry from the thread).
+ */
+export const EVENT_PAYLOAD_MAX_BYTES = 256 * 1024;
+export const EVENT_TOOL_INPUT_MAX_BYTES = 64 * 1024;
+export const EVENT_ENTRY_PAYLOAD_MAX_BYTES = 64 * 1024;
+
+const utf8 = new TextEncoder();
+
+/** UTF-8 bytes of `value` as JSON text (what `run_events.payload` and the SSE body carry). */
+export function jsonByteLength(value: unknown): number {
+  return utf8.encode(JSON.stringify(value) ?? "").length;
+}
+
+function withinBytes<T extends z.ZodType>(schema: T, max: number): T {
+  return schema.refine((value) => jsonByteLength(value) <= max, {
+    message: `over ${max} bytes as JSON`,
+  }) as unknown as T;
+}
+
 /** Payload schema per event type. Unknown keys are rejected so producers can't drift silently. */
 export const EVENT_PAYLOAD_SCHEMAS = {
   "run.queued": z.strictObject({
@@ -89,7 +114,7 @@ export const EVENT_PAYLOAD_SCHEMAS = {
     parent_tool_call_id: idSchema.optional(),
     message_id: messageId.optional(),
     tool: z.string().min(1).max(256),
-    input: toolInputSchema,
+    input: withinBytes(toolInputSchema, EVENT_TOOL_INPUT_MAX_BYTES),
     risk: riskClassSchema,
   }),
   "tool.result": z.strictObject({
@@ -172,8 +197,11 @@ export const EVENT_PAYLOAD_SCHEMAS = {
     entry_type: z.string().min(1).max(64),
     /** Present when the entry finalises a streamed message. */
     message_id: messageId.optional(),
-    /** The Pi entry as stored in `thread_entries.payload`; omitted when stored by `blob_ref`. */
-    payload: jsonValueSchema.optional(),
+    /**
+     * The Pi entry as stored in `thread_entries.payload`; omitted when it is over
+     * {@link EVENT_ENTRY_PAYLOAD_MAX_BYTES} or stored by `blob_ref`.
+     */
+    payload: withinBytes(jsonValueSchema, EVENT_ENTRY_PAYLOAD_MAX_BYTES).optional(),
   }),
   "run.completed": z.strictObject({
     leaf_entry_id: idSchema.nullable(),
@@ -247,10 +275,23 @@ export function isTerminalEventType(type: KobeEventType): boolean {
   return (TERMINAL_EVENT_TYPES as readonly KobeEventType[]).includes(type);
 }
 
-/** Validate a payload for a known type (producers call this before writing `run_events`). */
+/**
+ * Validate a payload for a known type (producers call this before writing `run_events`),
+ * including the whole-payload bound {@link EVENT_PAYLOAD_MAX_BYTES}.
+ */
 export function parseEventPayload<T extends KobeEventType>(
   type: T,
   payload: unknown,
 ): KobeEventPayload<T> {
-  return EVENT_PAYLOAD_SCHEMAS[type].parse(payload) as KobeEventPayload<T>;
+  const parsed = EVENT_PAYLOAD_SCHEMAS[type].parse(payload) as KobeEventPayload<T>;
+  if (jsonByteLength(parsed) > EVENT_PAYLOAD_MAX_BYTES) throw new EventPayloadTooLargeError(type);
+  return parsed;
+}
+
+/** `parseEventPayload`: the payload is valid but over {@link EVENT_PAYLOAD_MAX_BYTES}. */
+export class EventPayloadTooLargeError extends RangeError {
+  constructor(readonly type: KobeEventType) {
+    super(`${type} payload over ${EVENT_PAYLOAD_MAX_BYTES} bytes as JSON`);
+    this.name = "EventPayloadTooLargeError";
+  }
 }

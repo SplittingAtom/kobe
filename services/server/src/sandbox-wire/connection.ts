@@ -223,7 +223,14 @@ export class SandboxConnection implements RegisteredConnection {
       cursor,
       tuning: ctx.tuning,
       createTranslator: () =>
-        createRunTranslator({ teamId: this.target.teamId, registry: ctx.tools }),
+        createRunTranslator({
+          teamId: this.target.teamId,
+          registry: ctx.tools,
+          onDropped: (dropped) => {
+            ctx.metrics.eventsDropped += 1;
+            this.log.warn({ run_id: runId, ...dropped }, "dropped a translated event");
+          },
+        }),
       host: {
         metrics: ctx.metrics,
         log: this.log,
@@ -419,7 +426,9 @@ export class SandboxConnection implements RegisteredConnection {
     const check = this.#checkRun(frame.run_id, frame.thread_id, "policy.check");
     if (check === "violation") return;
     if (check === "ended") {
-      this.send(denyFrame(frame, [], "The run has ended, so the tool call was denied."));
+      this.send(
+        denyFrame(frame, [], "The run has ended, so the tool call was denied.", "run_not_active"),
+      );
       return;
     }
     if (this.#policyPending.size >= this.#ctx.tuning.maxPendingPolicyChecks) {
@@ -455,7 +464,12 @@ export class SandboxConnection implements RegisteredConnection {
       const lease = this.#leases.get(frame.run_id);
       this.send(
         lease?.ended && result.decision === "allow"
-          ? denyFrame(frame, [], "The run has ended, so the tool call was denied.")
+          ? denyFrame(
+              frame,
+              [],
+              "The run has ended, so the tool call was denied.",
+              "run_not_active",
+            )
           : result,
       );
     });

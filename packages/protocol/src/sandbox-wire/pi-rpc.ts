@@ -15,7 +15,10 @@ import { z } from "zod";
  *
  * Schemas here validate the envelope (`type`, discriminators, ids) and pass the rest through
  * (`looseObject`), so a Pi 1.0.x patch adding fields does not break the bridge. Only the commands
- * the server may issue are admitted (no `bash`, `switch_session`, `export_html`, ...).
+ * the server may issue are admitted (no `bash`, `switch_session`, `export_html`, `fork`, ...).
+ * `fork` is excluded because it moves Pi to a new session file with fresh history (verified 1.0.0),
+ * which would split the thread from the session file Kobe mirrors; edit-and-regenerate branches
+ * with `run.start.parent_entry_id` instead (KOBE-23 refused it before the contract dropped it).
  */
 export const PI_PINNED_VERSION = "1.0.0";
 
@@ -33,7 +36,6 @@ export const piBridgeCommandSchema = z.discriminatedUnion("type", [
   z.strictObject({ id: piId, type: z.literal("get_tree") }),
   z.strictObject({ id: piId, type: z.literal("get_session_stats") }),
   z.strictObject({ id: piId, type: z.literal("get_fork_messages") }),
-  z.strictObject({ id: piId, type: z.literal("fork"), entryId: z.string().min(1) }),
   z.strictObject({ id: piId, type: z.literal("clear_queue") }),
   z.strictObject({
     id: piId,

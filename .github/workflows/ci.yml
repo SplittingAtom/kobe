@@ -5,6 +5,9 @@ name: ci
 
 on:
   push:
+    # The merge queue's temporary branches are checked via merge_group below.
+    branches-ignore: ["gh-readonly-queue/**"]
+  merge_group:
 
 concurrency:
   group: ci-${{ github.ref }}

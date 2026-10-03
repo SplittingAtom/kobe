@@ -52,7 +52,10 @@ export interface BuiltinTool {
   readonly risk: RiskClass;
   readonly open_world: boolean;
   readonly scope: ToolScope;
-  /** Input pointer an agent-file shorthand like `bash:rm -rf*` matches against (KOBE-45). */
+  /**
+   * Input pointer an agent-file shorthand like `bash:rm -rf*` matches against (KOBE-45): where the
+   * tool reads or acts (grep/find search a `path`; their `pattern` is a regex/glob, not a place).
+   */
   readonly primary_arg?: string;
   readonly note?: string;
 }
@@ -70,14 +73,14 @@ export const BUILTIN_TOOLS: Readonly<Record<string, BuiltinTool>> = {
     risk: "read",
     scope: "sandbox",
     open_world: false,
-    primary_arg: "/pattern",
+    primary_arg: "/path",
   },
   find: {
     source: "pi",
     risk: "read",
     scope: "sandbox",
     open_world: false,
-    primary_arg: "/pattern",
+    primary_arg: "/path",
   },
   ls: { source: "pi", risk: "read", scope: "sandbox", open_world: false, primary_arg: "/path" },
   edit: { source: "pi", risk: "write", scope: "sandbox", open_world: false, primary_arg: "/path" },

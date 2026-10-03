@@ -48,6 +48,8 @@ async function main(): Promise<void> {
   await runMigrations({
     databaseUrl: parsed.data.KOBE_DB_MIGRATE_URL,
     appRole: parsed.data.KOBE_DB_APP_ROLE,
+    // Upgrade notes a migration raises (no content beyond ids and setting values).
+    onNotice: (message) => logger.warn({ notice: message }, "migration notice"),
   });
   logger.info({ appRole: parsed.data.KOBE_DB_APP_ROLE }, "migrations applied");
 }

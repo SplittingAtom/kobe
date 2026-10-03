@@ -6,13 +6,7 @@ export {
   type SandboxWire,
   type SandboxWireOptions,
 } from "./wire.js";
-export {
-  APPROVAL_MODE_FLOOR_KEY,
-  DENY_APPROVALS,
-  TEAM_APPROVAL_MODE_FLOOR,
-  clampApprovalMode,
-  createDbRunContextSource,
-} from "./policy-check.js";
+export { DENY_APPROVALS, clampApprovalMode, createDbRunContextSource } from "./policy-check.js";
 export type { WireMetrics } from "./context.js";
 export type * from "./types.js";
 export { COMMAND_FAILURES, SandboxWakeError } from "./types.js";
