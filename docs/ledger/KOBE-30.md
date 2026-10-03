@@ -1,6 +1,6 @@
 # KOBE-30: Run orchestrator: lock, queue, steer, stop, retry
 
-- **Status:** in review
+- **Status:** in review (PR #40)
 - **Branch / worktree:** `kobe-30-run-orchestrator` in `../Kobe-wt30`
 - **Depends on:** KOBE-29 (schema), KOBE-24 (wire), KOBE-31 (event stream), KOBE-34 (thread API),
   KOBE-35 (policy), KOBE-15 (audit), KOBE-22 (provider), KOBE-9 (isolation) — all merged. KOBE-46
