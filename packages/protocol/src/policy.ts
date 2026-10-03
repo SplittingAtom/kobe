@@ -93,7 +93,15 @@ export const policyInputSchema = z
   });
 export type PolicyInput = z.infer<typeof policyInputSchema>;
 
-/** Stable reason codes, one per stage outcome; `message` is shown on cards and in tool errors. */
+/**
+ * Stable reason codes, one per stage outcome; `message` is shown on cards and in tool errors.
+ *
+ * Codes for denials decided before the pipeline runs (`unknown_tool`, `invalid_input`,
+ * `policy_error`, `run_not_active`, `not_a_member`, `sandbox_policy_unavailable`) carry stage
+ * `install_deny`, the first stage: nothing later was evaluated. `team_allow_rule` carries stage
+ * `user_allow` (the allow-listing stage), `not_available` stage `team_deny`. Appending codes is
+ * backward compatible; consumers must treat an unknown code as a deny/prompt reason by its stage.
+ */
 export const POLICY_REASON_CODES = [
   "unknown_tool", // not built in and not in a pinned connector snapshot → deny
   "invalid_input", // input fails toolInputSchema (U+0000, __proto__, unsafe integer) → deny
@@ -116,6 +124,14 @@ export const POLICY_REASON_CODES = [
   "approval_granted", // a valid signed approval exists for this exact call
   "budget_exhausted", // D30: pending approvals expire at 100 %
   "default_prompt",
+  "team_allow_rule", // allow-listed by a team allow rule for auto mode / scheduled runs (D6, D32)
+  "not_available", // the tool exists but is not offered in this version (e.g. MCP resource tools)
+  "policy_error", // the decision could not be made (internal error, unreadable state) → deny
+  "run_not_active", // the run ended (or is not this sandbox's) before the call was decided → deny
+  "not_a_member", // the run's user is deactivated or no longer in the team → deny
+  // Sandbox-side deny (kobe-policy / kobe-sandbox-agent): no server decision could be obtained
+  // (policy channel closed, timed out, extension refused). Never produced by the server.
+  "sandbox_policy_unavailable",
 ] as const;
 export const policyReasonCodeSchema = z.enum(POLICY_REASON_CODES);
 export type PolicyReasonCode = z.infer<typeof policyReasonCodeSchema>;

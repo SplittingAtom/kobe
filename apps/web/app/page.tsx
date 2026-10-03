@@ -1,18 +1,7 @@
-import { ConsoleLinks } from "../components/admin/console-links";
-import { TeamInvites } from "./team-invites";
-import { TeamSwitcher } from "./team-switcher";
+import { ChatApp } from "../components/chat/chat-app";
+import "./chat-global.css";
 
+/** The chat (KOBE-32). Client-rendered: every request carries this browser's session cookie. */
 export default function Home() {
-  return (
-    <>
-      <header>
-        <TeamSwitcher />
-        <ConsoleLinks />
-      </header>
-      <main>
-        <h1>Kobe</h1>
-        <TeamInvites />
-      </main>
-    </>
-  );
+  return <ChatApp />;
 }

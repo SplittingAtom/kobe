@@ -106,12 +106,16 @@ describe("Retry (review items 1, 4, L1)", () => {
     await leased(w.team, a);
     await interrupt(w.team, a);
     await f.fx.admin.query(
-      `UPDATE teams SET settings = settings || '{"approval_mode_floor":"ask-all"}' WHERE id = $1`,
-      [w.team],
+      `INSERT INTO install_settings (key, value) VALUES ('policy.approval_floor', 'ask-all')
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
     );
-    const retry = await f.on(0, w.owner).post(`/v1/runs/${a}/retry`);
-    expect(retry.status).toBe(201);
-    expect((await f.run(w.team, retry.json.run_id as string)).approval_mode).toBe("ask-all");
+    try {
+      const retry = await f.on(0, w.owner).post(`/v1/runs/${a}/retry`);
+      expect(retry.status).toBe(201);
+      expect((await f.run(w.team, retry.json.run_id as string)).approval_mode).toBe("ask-all");
+    } finally {
+      await f.fx.admin.query(`DELETE FROM install_settings WHERE key = 'policy.approval_floor'`);
+    }
 
     const w2 = await f.world();
     const ws2 = await f.connect(w2);

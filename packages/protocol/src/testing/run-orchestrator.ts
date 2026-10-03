@@ -178,7 +178,10 @@ export function createFakeRunOrchestrator(now: () => Date = () => new Date()): F
     retry(actor, runId) {
       const run = find(actor, runId);
       const all = threadRuns(actor.team_id, run.thread_id);
-      const check = checkRetry(all, runId);
+      const check = checkRetry(
+        all.map((r) => ({ ...r, started_at: r.started_at ?? null })),
+        runId,
+      );
       if (check === "already_retried") {
         const existing = all.find((r) => r.retry_of_run_id === runId) as RunSnapshot;
         return Promise.resolve(result(existing));

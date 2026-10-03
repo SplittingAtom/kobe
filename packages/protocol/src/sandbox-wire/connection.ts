@@ -15,6 +15,14 @@
  *   frame, at most {@link SANDBOX_MAX_FRAME_BYTES} UTF-8 bytes. Every frame has `v` and `type`.
  *   The cap is enforced at the WebSocket layer too (e.g. `ws` `maxPayload`, KOBE-23/24) so an
  *   oversize frame is never buffered whole; `decode*Frame` re-checks.
+ * - Per-type caps, sandbox → server ({@link SANDBOX_FRAME_MAX_BYTES_BY_TYPE}): only `pi.event` and
+ *   `command.result` may use the full 4 MiB, `policy.check` at most 1 MiB (it carries a `write`'s
+ *   content as executed), every other frame at most {@link SANDBOX_SMALL_FRAME_MAX_BYTES}. The
+ *   server reads the type from the raw frame before decoding, so **a frame larger than
+ *   {@link SANDBOX_SMALL_FRAME_MAX_BYTES} must start with `v` then `type`** — `{"v":1,"type":"…"`,
+ *   those two keys first, within the first 64 bytes (insignificant whitespace allowed). A frame
+ *   over its type's cap, or a large frame whose type can't be read that way, closes the connection
+ *   with `protocol_error`.
  * - Inbound frames are parsed strictly (json-safety.ts): duplicate keys, U+0000 and `__proto__`
  *   keys make a frame malformed. kobe-sandbox-agent replaces U+0000 in Pi output with U+FFFD.
  *
@@ -61,6 +69,14 @@ export const SANDBOX_WS_SUBPROTOCOL = "kobe.sandbox.v1";
 
 /** SPECULATIVE limits: tune in KOBE-23/24; changing them is not a wire break. */
 export const SANDBOX_MAX_FRAME_BYTES = 4 * 1024 * 1024;
+/** Cap for any sandbox → server frame type not listed in {@link SANDBOX_FRAME_MAX_BYTES_BY_TYPE}. */
+export const SANDBOX_SMALL_FRAME_MAX_BYTES = 256 * 1024;
+/** Sandbox → server frame types allowed above {@link SANDBOX_SMALL_FRAME_MAX_BYTES}. */
+export const SANDBOX_FRAME_MAX_BYTES_BY_TYPE = {
+  "pi.event": SANDBOX_MAX_FRAME_BYTES,
+  "command.result": SANDBOX_MAX_FRAME_BYTES,
+  "policy.check": 1024 * 1024,
+} as const;
 export const SANDBOX_HELLO_TIMEOUT_MS = 10_000;
 export const SANDBOX_HEARTBEAT_INTERVAL_MS = 15_000;
 export const SANDBOX_HEARTBEAT_TIMEOUT_MS = 45_000;

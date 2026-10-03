@@ -477,12 +477,12 @@ describe("authorization and thread state", () => {
     }
   });
 
-  it("fixes the approval mode at creation, never looser than the install and team floors", async () => {
+  it("fixes the approval mode at creation, never looser than the install floor", async () => {
     const w = await f.world();
     const ws = await f.connect(w);
     const threadId = await f.thread(w.owner);
     await f.fx.admin.query(
-      `INSERT INTO install_settings (key, value) VALUES ('policy.approval_mode_floor', 'ask-all')
+      `INSERT INTO install_settings (key, value) VALUES ('policy.approval_floor', 'ask-all')
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
     );
     try {
@@ -490,9 +490,7 @@ describe("authorization and thread state", () => {
       expect((await f.run(w.team, run)).approval_mode).toBe("ask-all");
       expect((await ws.started(run)).config?.approval_mode).toBe("ask-all");
     } finally {
-      await f.fx.admin.query(
-        `DELETE FROM install_settings WHERE key = 'policy.approval_mode_floor'`,
-      );
+      await f.fx.admin.query(`DELETE FROM install_settings WHERE key = 'policy.approval_floor'`);
     }
   });
 });

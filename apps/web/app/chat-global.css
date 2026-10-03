@@ -1,0 +1,4 @@
+/* Only for pages that render the chat (KOBE-32): the app paints edge to edge. */
+body:has([data-kobe-chat]) {
+  margin: 0;
+}

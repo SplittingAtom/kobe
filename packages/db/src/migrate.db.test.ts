@@ -1,7 +1,10 @@
 import { randomBytes } from "node:crypto";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import pg from "pg";
 import { afterAll, describe, expect, inject, it } from "vitest";
-import { runMigrations } from "./migrate.js";
+import { DEFAULT_MIGRATIONS_FOLDER, runMigrations } from "./migrate.js";
 
 const admin = new pg.Pool({ connectionString: inject("adminUrl") });
 afterAll(() => admin.end());
@@ -38,5 +41,39 @@ describe("runMigrations role checks", () => {
     await expect(
       runMigrations({ databaseUrl: inject("ownerUrl"), appRole: inject("appRole") }),
     ).resolves.toBeUndefined();
+  });
+
+  it("reports the notices migrations raise (upgrade notes in the Job log)", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "kobe-migrations-"));
+    try {
+      await cp(DEFAULT_MIGRATIONS_FOLDER, dir, { recursive: true });
+      const journalPath = path.join(dir, "meta", "_journal.json");
+      const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
+        entries: { idx: number; when: number; tag: string }[];
+      };
+      const last = journal.entries.at(-1);
+      const tag = "9999_notice_probe";
+      journal.entries.push({
+        ...(last as object),
+        idx: (last?.idx ?? 0) + 1,
+        when: (last?.when ?? 0) + 1,
+        tag,
+      } as never);
+      await writeFile(journalPath, JSON.stringify(journal));
+      await writeFile(
+        path.join(dir, `${tag}.sql`),
+        "DO $$ BEGIN RAISE NOTICE 'kobe: probe notice'; END $$;",
+      );
+      const notices: string[] = [];
+      await runMigrations({
+        databaseUrl: inject("ownerUrl"),
+        appRole: inject("appRole"),
+        migrationsFolder: dir,
+        onNotice: (message) => notices.push(message),
+      });
+      expect(notices).toContain("kobe: probe notice");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
