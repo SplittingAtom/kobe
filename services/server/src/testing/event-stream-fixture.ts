@@ -40,12 +40,16 @@ export class EventStreamFixture {
   admin!: pg.Client;
   replicas: Replica[] = [];
 
-  async setup(tunings: readonly ReplicaTuning[]): Promise<void> {
+  async setup(
+    tunings: readonly ReplicaTuning[],
+    extra: (replica: number) => Partial<ServerDepsOptions> = () => ({}),
+  ): Promise<void> {
     this.database = await createTestDatabase(testServerUrl());
     this.admin = new pg.Client({ connectionString: this.database.adminUrl });
     await this.admin.connect();
-    this.replicas = tunings.map((eventStream) => {
+    this.replicas = tunings.map((eventStream, i) => {
       const deps = createServerDeps({
+        ...extra(i),
         databaseUrl: this.database.appUrl,
         publicUrl: PUBLIC_URL,
         authSecret: "e".repeat(48),
