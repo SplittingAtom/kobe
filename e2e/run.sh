@@ -135,6 +135,8 @@ expect "team tables have FORCE ROW LEVEL SECURITY" '^team_members\|true$' "$(psq
 wait_endpoints "$NS" kobe-web
 contains "web answers through the Traefik ingress" '"service":"web"' \
   "$(reachable "$NS" kube-system traefik "--header 'Host: kobe.localtest.me' http://traefik.kube-system/api/healthz")"
+contains "the web app serves the chat (KOBE-32)" 'data-kobe-chat' \
+  "$(reachable "$NS" kube-system traefik "--header 'Host: kobe.localtest.me' http://traefik.kube-system/")"
 contains "server answers" '"service":"server"' "$(reachable "$NS" "$NS" kobe-server http://kobe-server/healthz)"
 # KOBE-9: every server/scheduler process verified isolation itself (not disclosed by /readyz).
 iso=""
@@ -595,18 +597,21 @@ out("message", first.status + ":" + first.json.queued);
 const second = await call("POST", "/v1/threads/" + id + "/messages", { content: "again" });
 out("queued", second.status + ":" + second.json.queued + ":" + second.json.run_id);
 out("run", (await call("GET", "/v1/runs/" + first.json.run_id)).json.status);
+const pending = await call("GET", "/v1/threads/" + id + "/pending-messages");
+out("pending", pending.status + ":" + (pending.json.messages || []).map((m) => m.status + "/" + m.content).join(","));
 out("cancel", (await call("POST", "/v1/runs/" + first.json.run_id + "/cancel")).json.status);
 out("cancel2", (await call("POST", "/v1/runs/" + second.json.run_id + "/cancel")).json.status);
 const events = await call("GET", "/v1/runs/" + first.json.run_id + "/events");
 out("events", (events.text.match(/^event: .*$/gm) || []).map((l) => l.slice(7)).join(","));
 out("retry", (await call("POST", "/v1/runs/" + first.json.run_id + "/retry")).json.code);
 JS
-runs_out=$($KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$RUNS_JS" "$E2E_TEAM_ID" 2>&1 | tail -12)
+runs_out=$($KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$RUNS_JS" "$E2E_TEAM_ID" 2>&1 | tail -13)
 printf '     runs: %s\n' "$(printf '%s' "$runs_out" | tr '\n' ' ')"
 contains "a team member signs in and selects the team" '^active=200$' "$runs_out"
 contains "a message starts a run at once on an idle thread" '^message=201:false$' "$runs_out"
 contains "a second message queues behind the active run" '^queued=201:true:' "$runs_out"
 contains "the run is running while its sandbox start is pending" '^run=running$' "$runs_out"
+contains "pending messages: the active prompt, then the queue (KOBE-32)" '^pending=200:running/hello,queued/again$' "$runs_out"
 contains "Stop cancels the active run" '^cancel=cancelled$' "$runs_out"
 contains "Stop deletes the queued message (or stops it once it started)" '^cancel2=cancelled$' "$runs_out"
 contains "the event stream records the start and the stop, then ends" '^events=run.started,(sandbox.waking,)?run.interrupted$' "$runs_out"

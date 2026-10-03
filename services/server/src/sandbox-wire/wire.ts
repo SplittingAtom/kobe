@@ -4,6 +4,7 @@ import type { PolicyEngine, ToolRegistry } from "@kobe/protocol";
 import { SYSTEM_ACTOR, eq, getMembership, users, withTeam, type KobeDb } from "@kobe/db";
 import { logger as rootLogger } from "../logger.js";
 import { recordAudit, type ServerAuditEvent } from "../audit/record.js";
+import { BackgroundTasks } from "../background.js";
 import { createPolicyEngine } from "../policy/engine.js";
 import { createToolRegistry } from "../policy/registry.js";
 import { createDbRuleSource, createDbSettingsSource } from "../policy/rule-store.js";
@@ -45,6 +46,8 @@ export interface SandboxWireOptions {
   readonly maxConnections?: number;
   /** Run the lost-sandbox sweep on a timer (default true; tests call `sweep()`). */
   readonly sweep?: boolean;
+  /** Off-path work (audit rows of refused tokens and violations); the server's shared tracker. */
+  readonly background?: BackgroundTasks;
 }
 
 export interface SandboxWire {
@@ -91,6 +94,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
   const tuning: WireTuning = { ...WIRE_DEFAULTS, ...options.tuning };
   const db = options.db;
   const metrics = newMetrics();
+  const background = options.background ?? new BackgroundTasks();
   const tools = options.tools ?? createToolRegistry();
   const engine =
     options.engine ??
@@ -160,8 +164,11 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
     if (Date.now() - last < VIOLATION_AUDIT_EVERY_MS) return;
     if (violationAudits.size > 10_000) violationAudits.clear();
     violationAudits.set(key, Date.now());
-    void withTeam(db, teamId, (tx) => recordAudit(tx, event)).catch((err: unknown) =>
-      log.error({ err, action: event.action }, "could not record a sandbox audit event"),
+    // Off the frame path, but tracked: shutdown (and tests) wait for it.
+    background.run(
+      "could not record a sandbox audit event",
+      () => withTeam(db, teamId, (tx) => recordAudit(tx, event)),
+      { component: "sandbox-wire", action: event.action },
     );
   };
   const auditTokenRejected = (

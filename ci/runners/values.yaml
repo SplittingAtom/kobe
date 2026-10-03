@@ -37,6 +37,8 @@ template:
       - name: dind
         image: docker:29-dind
         restartPolicy: Always # native sidecar: starts before the runner, stops after it
+        # Docker Hub pulls go through the in-cluster cache (dockerhub-mirror.yaml); dockerd falls
+        # back to Docker Hub itself if the cache is down.
         # The image's own entrypoint and process chain (docker-init as PID 1 forwarding SIGTERM to
         # dockerd), plus a copy of the daemon log on the shared work volume so a failing job can
         # print it (scripts/ci-docker-diagnostics.sh). tee ignores SIGTERM and ends at EOF.
@@ -47,7 +49,10 @@ template:
             mkfifo /tmp/dockerd-log.fifo &&
             { (trap "" TERM INT; exec tee -a /home/runner/_work/_dind/dockerd.log) </tmp/dockerd-log.fifo & } &&
             exec dockerd-entrypoint.sh dockerd --host=unix:///var/run/docker.sock
-            --group=$(DOCKER_GROUP_GID) >/tmp/dockerd-log.fifo 2>&1
+            --group=$(DOCKER_GROUP_GID)
+            --registry-mirror=http://dockerhub-mirror.kobe-ci-runners.svc.cluster.local:5000
+            --insecure-registry=dockerhub-mirror.kobe-ci-runners.svc.cluster.local:5000
+            >/tmp/dockerd-log.fifo 2>&1
         env:
           - name: DOCKER_GROUP_GID
             value: "123"
