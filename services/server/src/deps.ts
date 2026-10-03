@@ -14,6 +14,11 @@ import {
   type SandboxWire,
   type SandboxWireOptions,
 } from "./sandbox-wire/index.js";
+import {
+  DbRunOrchestrator,
+  type RunOrchestratorOptions,
+  type ServerRunOrchestrator,
+} from "./runs/index.js";
 import { UserLifecycle } from "./users/lifecycle.js";
 
 export interface ServerDepsOptions {
@@ -34,6 +39,8 @@ export interface ServerDepsOptions {
   readonly mailer: Mailer;
   /** Sandbox wire seams and tuning (KOBE-24): approvals, UI, run hooks, wake, policy context. */
   readonly sandboxWire?: Partial<Omit<SandboxWireOptions, "db" | "databaseUrl">>;
+  /** Run orchestrator seams and tuning (KOBE-30): agent resolution, budgets, timings. */
+  readonly runs?: Partial<Omit<RunOrchestratorOptions, "db" | "router">>;
 }
 
 export interface NewUser {
@@ -64,6 +71,11 @@ export interface ServerDeps {
    * sandbox from any replica; `attach` serves the WebSocket on the sandbox listener only.
    */
   readonly sandboxWire: SandboxWire;
+  /**
+   * Run orchestrator (KOBE-30): messages, queue, steer, stop, retry. Reaches sandboxes through
+   * `sandboxWire.router`; the wire calls back when it ends a run.
+   */
+  readonly runs: ServerRunOrchestrator;
   /** Creates an email+password user (and optional install role) atomically, without sign-up. */
   createUserWithPassword(
     input: NewUser,
@@ -100,12 +112,28 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     ...(options.eventStream?.poolMax ? { max: options.eventStream.poolMax } : {}),
   });
 
+  // The wire is created first (the orchestrator needs its router); its run-ended hook reaches the
+  // orchestrator through this late binding.
+  const late: { runs?: ServerRunOrchestrator } = {};
+  const extraHooks = options.sandboxWire?.hooks;
   const sandboxWire = createSandboxWire({
     ...options.sandboxWire,
     runContext: options.sandboxWire?.runContext ?? createDbRunContextSource(),
+    hooks: {
+      async onRunEnded(event) {
+        await extraHooks?.onRunEnded?.(event);
+        await late.runs?.onRunEnded(event);
+      },
+    },
     db: database.db,
     databaseUrl: options.databaseUrl,
   });
+  const runs: ServerRunOrchestrator = new DbRunOrchestrator({
+    ...options.runs,
+    db: database.db,
+    router: sandboxWire.router,
+  });
+  late.runs = runs;
   const lifecycle = new UserLifecycle();
   // A deactivated user's sandboxes lose their connections on every replica at once (KOBE-13).
   lifecycle.on("deactivated", {
@@ -123,6 +151,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     auditAnchor: new AuditAnchorLogger(database.db, options.authSecret),
     lifecycle,
     sandboxWire,
+    runs,
     async createUserWithPassword({ email, name, password }, { installRole, recordSetup } = {}) {
       const ctx = await auth.$context;
       const hash = await ctx.password.hash(password);
@@ -159,6 +188,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
       return typeof candidate === "string" && timingSafeEqual(digest(candidate), setupDigest);
     },
     async close() {
+      runs.close();
       await sandboxWire.close();
       await hub.close();
       await reader.close();

@@ -430,6 +430,38 @@ describe("runs: queue and compaction", () => {
   });
 });
 
+describe("runs: orchestrator columns (KOBE-30)", () => {
+  const insert = (threadId: string, values: Partial<typeof runs.$inferInsert>) =>
+    withTeam(app.db, teamA, (tx) =>
+      tx
+        .insert(runs)
+        .values({ teamId: teamA, threadId, trigger: "user", queuePos: 1, ...values })
+        .returning({ id: runs.id }),
+    );
+
+  it("allows at most one retry per run, of a run in the same team", async () => {
+    const thread = await newThread(teamA);
+    const original = await newRun(teamA, thread, "interrupted");
+    expect(await sqlState(insert(thread, { retryOfRunId: original }))).toBeUndefined();
+    expect(await sqlState(insert(await newThread(teamA), { retryOfRunId: original }))).toBe(
+      "23505",
+    );
+    const foreign = await newRun(teamB, await newThread(teamB), "interrupted");
+    expect(await sqlState(insert(await newThread(teamA), { retryOfRunId: foreign }))).toBe("23503");
+  });
+
+  it("checks the approval mode, budget scope, entry ids and input length", async () => {
+    const thread = await newThread(teamA);
+    expect(await sqlState(insert(thread, { approvalMode: "bypass" as "auto" }))).toBe("23514");
+    expect(await sqlState(insert(thread, { budgetStopScope: "org" as "team" }))).toBe("23514");
+    expect(await sqlState(insert(thread, { parentEntryId: "" }))).toBe("23514");
+    expect(await sqlState(insert(thread, { input: "x".repeat(200_001) }))).toBe("23514");
+    expect(
+      await sqlState(insert(thread, { approvalMode: "ask-all", input: "hi", parentEntryId: "e1" })),
+    ).toBeUndefined();
+  });
+});
+
 describe("events", () => {
   it("requires due_at for scheduled events", async () => {
     const state = await sqlState(

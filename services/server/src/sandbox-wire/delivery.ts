@@ -27,6 +27,8 @@ export interface DeliveryHost {
   readonly log: Logger;
   send(frame: ServerToSandboxFrame): boolean;
   hasLiveLease(runId: string): boolean;
+  /** The run was leased to this connection (it may have ended since). */
+  hasLease(runId: string): boolean;
   leaseRun(runId: string, threadId: string, cursor: number): void;
   leaseThread(threadId: string): void;
   endLease(runId: string): void;
@@ -309,9 +311,11 @@ export class CommandDelivery {
       await this.#fail(row, failure("invalid_command", "the stored command is not a valid frame"));
       return;
     }
+    // A stop still reaches a run the server already ended (Stop, budget, failed start): ending
+    // it in Postgres first is what refuses its late frames, and Pi must still be told to abort.
     if (
-      (row.kind === "run.steer" || row.kind === "run.stop") &&
-      !this.#host.hasLiveLease(row.runId ?? "")
+      (row.kind === "run.steer" && !this.#host.hasLiveLease(row.runId ?? "")) ||
+      (row.kind === "run.stop" && !this.#host.hasLease(row.runId ?? ""))
     ) {
       await this.#fail(row, failure("run_not_active", "the run is not active on this sandbox"));
       return;
