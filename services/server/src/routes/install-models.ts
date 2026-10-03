@@ -1,0 +1,128 @@
+import { Hono, type Context } from "hono";
+import type { z } from "zod";
+import type { AuthVariables } from "../auth/session.js";
+import { requireInstallPermission } from "../authz/middleware.js";
+import type { ServerDeps } from "../deps.js";
+import {
+  addCatalogEntry,
+  addProvider,
+  deleteCatalogEntry,
+  deleteProvider,
+  gatewayStatus,
+  listCatalog,
+  listProviders,
+  updateCatalogEntry,
+  updateProvider,
+} from "../models/admin-store.js";
+import {
+  addCatalogSchema,
+  addProviderSchema,
+  aliasSchema,
+  providerIdSchema,
+  updateCatalogSchema,
+  updateProviderSchema,
+} from "../models/schemas.js";
+import { invalidRequest } from "../teams/http.js";
+
+/** Parses a JSON body; the 400 names the first problem without echoing input (API keys). */
+async function body<T>(c: Context, schema: z.ZodType<T>) {
+  const parsed = schema.safeParse(await c.req.json().catch(() => null));
+  if (parsed.success) return { ok: true as const, value: parsed.data };
+  const message = parsed.error.issues[0]?.message ?? "invalid";
+  return { ok: false as const, response: invalidRequest(c, `Check the request: ${message}.`) };
+}
+
+const err = (c: Context, status: 404 | 409 | 503, code: string, message: string) =>
+  c.json({ code, message }, status);
+const providerNotFound = (c: Context) =>
+  err(c, 404, "provider_not_found", "That provider is not configured.");
+const aliasNotFound = (c: Context) =>
+  err(c, 404, "model_not_found", "That model is not in the catalog.");
+
+/**
+ * Install model administration (`/v1/install/models`, spec D6, D8, D30): providers and their API
+ * keys (write-only), and the model catalog. Owner/Admins only (`install.models.manage`). Changes
+ * reach Bifrost through the gateway sync; `gateway` reports whether it has caught up.
+ */
+export function installModelsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
+  const app = new Hono<{ Variables: AuthVariables }>();
+  const db = deps.database.db;
+  app.use(requireInstallPermission("install.models.manage"));
+
+  app.get("/", async (c) => {
+    const [providers, catalog, gateway] = await Promise.all([
+      listProviders(db),
+      listCatalog(db),
+      gatewayStatus(db),
+    ]);
+    return c.json({ providers, catalog, gateway, configured: deps.models !== undefined });
+  });
+
+  app.post("/providers", async (c) => {
+    if (!deps.models) {
+      return err(c, 503, "models_not_configured", "The model gateway is not configured.");
+    }
+    const parsed = await body(c, addProviderSchema);
+    if (!parsed.ok) return parsed.response;
+    const result = await addProvider(db, deps.models.providerKeys, parsed.value, c.get("user").id);
+    if (result.ok) return c.json({ provider: result.provider }, 201);
+    return result.error === "exists"
+      ? err(c, 409, "provider_exists", "That provider is already configured.")
+      : err(c, 409, "too_many_providers", "The install has reached its provider limit.");
+  });
+
+  app.patch("/providers/:id", async (c) => {
+    if (!deps.models) {
+      return err(c, 503, "models_not_configured", "The model gateway is not configured.");
+    }
+    const id = providerIdSchema.safeParse(c.req.param("id"));
+    if (!id.success) return providerNotFound(c);
+    const parsed = await body(c, updateProviderSchema);
+    if (!parsed.ok) return parsed.response;
+    const result = await updateProvider(db, deps.models.providerKeys, id.data, parsed.value);
+    if (result.ok) return c.json({ provider: result.provider });
+    if (result.error === "not_found") return providerNotFound(c);
+    return result.error === "key_required"
+      ? invalidRequest(c, "This provider needs an API key; replace it instead of removing it.")
+      : invalidRequest(c, "This provider needs a base_url.");
+  });
+
+  app.delete("/providers/:id", async (c) => {
+    const id = providerIdSchema.safeParse(c.req.param("id"));
+    if (!id.success) return providerNotFound(c);
+    const result = await deleteProvider(db, id.data);
+    if (result === "deleted") return c.body(null, 204);
+    return result === "in_use"
+      ? err(c, 409, "provider_in_use", "Remove this provider's catalog models first.")
+      : providerNotFound(c);
+  });
+
+  app.post("/catalog", async (c) => {
+    const parsed = await body(c, addCatalogSchema);
+    if (!parsed.ok) return parsed.response;
+    const result = await addCatalogEntry(db, parsed.value, c.get("user").id);
+    if (result.ok) return c.json({ model: result.entry }, 201);
+    if (result.error === "provider_not_found") return providerNotFound(c);
+    return result.error === "exists"
+      ? err(c, 409, "model_exists", "That alias is already in the catalog.")
+      : err(c, 409, "too_many_models", "The catalog has reached its size limit.");
+  });
+
+  app.patch("/catalog/:alias", async (c) => {
+    const alias = aliasSchema.safeParse(c.req.param("alias"));
+    if (!alias.success) return aliasNotFound(c);
+    const parsed = await body(c, updateCatalogSchema);
+    if (!parsed.ok) return parsed.response;
+    const result = await updateCatalogEntry(db, alias.data, parsed.value);
+    if (result.ok) return c.json({ model: result.entry });
+    return result.error === "not_found" ? aliasNotFound(c) : providerNotFound(c);
+  });
+
+  app.delete("/catalog/:alias", async (c) => {
+    const alias = aliasSchema.safeParse(c.req.param("alias"));
+    if (!alias.success) return aliasNotFound(c);
+    return (await deleteCatalogEntry(db, alias.data)) ? c.body(null, 204) : aliasNotFound(c);
+  });
+
+  return app;
+}

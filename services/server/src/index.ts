@@ -10,15 +10,21 @@ import { createIsolationGate } from "./isolation/gate.js";
 import { listRuntimeClasses } from "./isolation/kubernetes.js";
 import { logger } from "./logger.js";
 import { createSmtpMailer } from "./mail/mailer.js";
+import { createHttpBifrostAdmin } from "./models/bifrost-admin.js";
+import { loadModelsConfig } from "./models/config.js";
+import { ModelGatewaySync } from "./models/sync.js";
 import { createSandboxApp } from "./routes/sandbox.js";
 import { createSandboxRuntime } from "./sandbox/runtime.js";
 import { providerLiveness, sandboxWireVerifier } from "./sandbox-wire/provider-auth.js";
 import { createDeferredWaker, createSandboxLifecycle } from "./sandbox-lifecycle/index.js";
+import { PROVIDER_KEY_PURPOSE, SecretBox, VIRTUAL_KEY_PURPOSE } from "@kobe/db";
 
 /** Open streams (SSE) get this long to finish before being cut; stays under k8s' 30 s grace period. */
 const DRAIN_TIMEOUT_MS = 10_000;
 
 const config = loadConfig(process.env);
+// Model gateway (KOBE-40): undefined without the chart's Bifrost settings (models off).
+const modelsConfig = config.process === "server" ? loadModelsConfig(process.env) : undefined;
 // The wire is built before the sandbox provider exists: its waker is set once the provider is.
 const waker = createDeferredWaker();
 let deps: ServerDeps | undefined;
@@ -29,6 +35,7 @@ if (config.auth && config.smtp) {
     mailer: createSmtpMailer(config.smtp),
     sandboxWire: { waker },
     agents: { maxVersions: config.agentMaxVersions },
+    ...(modelsConfig ? { models: { providerKeySecret: modelsConfig.providerKeySecret } } : {}),
   });
   if (config.smtp.security === "none") {
     logger.warn(
@@ -85,6 +92,29 @@ const egressRelay =
     ? new EgressBlockedRelay({ db: deps.database.db, connectionString: config.databaseUrl })
     : undefined;
 egressRelay?.start();
+
+// Bifrost config sync (KOBE-40): every server replica listens; one leads and reconciles.
+const modelSync =
+  deps && modelsConfig
+    ? new ModelGatewaySync({
+        db: deps.database.db,
+        connectionString: config.databaseUrl,
+        admin: createHttpBifrostAdmin({
+          baseUrl: modelsConfig.bifrostUrl,
+          username: modelsConfig.adminUsername,
+          password: modelsConfig.adminPassword,
+        }),
+        providerKeys: new SecretBox(modelsConfig.providerKeySecret, PROVIDER_KEY_PURPOSE),
+        virtualKeys: new SecretBox(modelsConfig.virtualKeySecret, VIRTUAL_KEY_PURPOSE),
+        fingerprintSecret: modelsConfig.providerKeySecret,
+        intervalMs: modelsConfig.syncIntervalMs,
+        logger,
+      })
+    : undefined;
+modelSync?.start();
+if (config.process === "server" && !modelsConfig) {
+  logger.warn("KOBE_BIFROST_URL is not set: the model gateway is not configured");
+}
 
 // Sandbox provider (KOBE-22); the scheduler starts sandboxes through it from KOBE-64 on.
 const sandbox =
@@ -158,6 +188,7 @@ function shutdown(signal: string): void {
   sandboxServer?.close();
   deps?.auditAnchor.stop();
   void egressRelay?.close();
+  void modelSync?.close();
   breakGlassSweeper?.stop();
   // End event streams first so browsers reconnect (with Last-Event-ID) to another replica.
   void deps?.eventStream.hub.close();

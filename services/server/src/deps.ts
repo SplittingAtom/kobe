@@ -1,5 +1,13 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { accounts, createDb, installRoles, users, type KobeDatabase } from "@kobe/db";
+import {
+  PROVIDER_KEY_PURPOSE,
+  SecretBox,
+  accounts,
+  createDb,
+  installRoles,
+  users,
+  type KobeDatabase,
+} from "@kobe/db";
 import { AuditAnchorLogger } from "./audit/anchor.js";
 import { AuthAttemptAudit } from "./audit/attempts.js";
 import { recordAudit } from "./audit/record.js";
@@ -49,6 +57,8 @@ export interface ServerDepsOptions {
   readonly sandboxWire?: Partial<Omit<SandboxWireOptions, "db" | "databaseUrl">>;
   /** Run orchestrator seams and tuning (KOBE-30): agent resolution, budgets, timings. */
   readonly runs?: Partial<Omit<RunOrchestratorOptions, "db" | "router">>;
+  /** Model gateway (KOBE-40): the secret sealing provider API keys; unset = not configured. */
+  readonly models?: { readonly providerKeySecret: string };
 }
 
 /** Limits on publishing agent versions (KOBE-46 review M3). */
@@ -100,6 +110,8 @@ export interface ServerDeps {
    * `sandboxWire.router`; the wire calls back when it ends a run.
    */
   readonly runs: ServerRunOrchestrator;
+  /** Model gateway admin (KOBE-40): seals provider API keys; undefined when not configured. */
+  readonly models: { readonly providerKeys: SecretBox } | undefined;
   /** Creates an email+password user (and optional install role) atomically, without sign-up. */
   createUserWithPassword(
     input: NewUser,
@@ -174,6 +186,9 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
 
   return {
     database,
+    models: options.models
+      ? { providerKeys: new SecretBox(options.models.providerKeySecret, PROVIDER_KEY_PURPOSE) }
+      : undefined,
     auth,
     publicUrl: new URL(options.publicUrl).origin,
     eventStream: { hub, reader, timings: { ...STREAM_DEFAULTS, ...options.eventStream?.timings } },
