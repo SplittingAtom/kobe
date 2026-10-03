@@ -193,11 +193,35 @@ transaction_read_only = on`; (5) the read, filtered by RLS and again by the quer
   forged settings.
 - **LOW:** settings self-asserted (above); outbox comments say at-least-once; per-admin request
   limit (10 per hour, 429 `request_rate_limited`).
-- **HIGH performance (PERMISSIVE policy ORs with the team policy):** reproduced (200 teams × 500
-  entries: `count(*)` on `thread_entries` 0.08 → 5.3 ms, plan loses the index; RLS-only point
-  lookup on `threads` 0.04 → 0.48 ms, index scan → bitmap). **Not fixed yet: the dedicated-role
-  approach has a provisioning/ordering blocker, reported to the coordinator before choosing**
-  (see the PR comment / report).
+- **HIGH performance (PERMISSIVE policy ORs with the team policy): resolved by decision.** The
+  dedicated-role approach was blocked: the role can't be provisioned in time on bundled-Postgres
+  upgrades (the pre-upgrade migration runs before Helm applies the Cluster's managed roles; the
+  owner has no CREATEROLE), test databases need per-database role names (so policies couldn't
+  live in a static migration), and `verifyRoles`/the catalog check forbid app-role memberships.
+  **Chris chose: keep the RLS design (no dedicated role) and state `team_id` explicitly in every
+  query on `threads` / `thread_entries`.** RLS-only queries pay the cost by design.
+  - Audit of every query on the two tables (repository, `thread-search`, event-stream reads,
+    sandbox-wire ingest/mirroring/restore/run-state/commands/policy-check from KOBE-24,
+    break-glass reads, restore SQL): all already filter on `team_id` (directly, via
+    `readableBy`/`inScope`, or by joining on `team_id` from a team-filtered `runs` row). The thread
+    list now also states it inline rather than only inside its `scope` expression.
+  - Measured:
+    - coordinator: `count(*)` on `thread_entries` 1.3 → 355 ms; RLS-only point lookup
+      0.02 → 1.6 ms
+    - here, 200 teams × 500 entries, no explicit filter: `count(*)` 0.08 → 5.3 ms (index
+      lost); point lookup on `threads` 0.04 → 0.48 ms (index scan → bitmap)
+    - `threads-plans` data (300 teams × 20 threads × 10 entries, analyzed): Postgres picks a
+      BitmapOr with both arms bounded by team, RLS-only `count(*)` 1.2 ms vs explicit 0.55 ms;
+      the break-glass arm's grant lookup costs 0.2-2 ms when it runs
+    - with the explicit filter every hot path is an index scan entered by the team value
+      (test)
+  - Guards:
+    - `services/server/src/team-filter.test.ts`: static scan of both packages; fails on a query
+      without a team predicate; opt-out `team-filter-ok: <reason>`
+    - `services/server/src/threads-plans.db.test.ts`: EXPLAIN of the captured hot-path SQL as
+      the app role over 300 teams; no seq scans; team-leading indexes entered by an explicit
+      team; a self-test proves an RLS-only lookup fails it
+    - documented in `packages/db/README.md` and `docs/parallel-work.md`
 
 ## Open questions (for Chris or the coordinator)
 
