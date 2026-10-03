@@ -63,6 +63,9 @@ ensure`), a wire token is minted in the server pod with the real keys for that c
   returns the same run, retry links the original, retry branch point = the root entry, entries
   from before the kill unchanged, the retry can be stopped.
 - The agent script was run locally against the real wire (fixture listener) before CI.
+- `wait_for` (bounded positive wait on a command's output) moved to the e2e helpers; the KOBE-7
+  "sandbox has Pi 1.0.x" check now waits for the `pi --version` line instead of a fixed 2 s (it
+  failed once after the KOBE-36 merge: the version line came later than the 2 s).
 - CI (PR #43, first run): all 20 checks ok; the run was interrupted 32 s after the pod was
   deleted (connection loss seen at once, 30 s grace, then the sweep).
 

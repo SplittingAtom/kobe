@@ -36,6 +36,18 @@ contains() { # name, regex, actual output: passes when some line matches regex
   if printf '%s\n' "$3" | grep -Eq "$2"; then ok "$1"; else fail "$1: got [$got]"; fi
 }
 
+wait_for() { # seconds regex command... → reruns command until a line matches regex (bounded); prints the last output
+  local deadline=$((SECONDS + $1)) re="$2" out=""
+  shift 2
+  while :; do
+    out=$("$@" 2>&1 || true)
+    if printf '%s\n' "$out" | grep -Eq "$re"; then break; fi
+    if ((SECONDS >= deadline)); then break; fi
+    sleep 2
+  done
+  printf '%s\n' "$out"
+}
+
 PODS=()
 cleanup() {
   for p in "${PODS[@]+"${PODS[@]}"}"; do $KUBECTL delete pod $p --ignore-not-found --wait=false >/dev/null 2>&1 || true; done
@@ -209,8 +221,9 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
   # A real agent-sandbox Sandbox (controller + CRD), not a hand-built pod.
   if ! setup=$(start_sandbox 2>&1); then fail "create agent-sandbox Sandbox: $setup"; fi
   $KUBECTL -n "$SANDBOX_NS" wait --for=condition=Ready sandbox/e2e --timeout=240s >/dev/null 2>&1 || true
-  sleep 2
-  out=$($KUBECTL -n "$SANDBOX_NS" logs e2e 2>&1 || true)
+  sandbox_logs() { $KUBECTL -n "$SANDBOX_NS" logs e2e 2>&1; }
+  # `pi --version` boots Pi (seconds under gVisor): wait for its line, not a fixed delay.
+  out=$(wait_for 90 '^1\.0\.' sandbox_logs)
   contains "agent-sandbox Sandbox becomes Ready" '^True$' \
     "$($KUBECTL -n "$SANDBOX_NS" get sandbox e2e -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')"
   contains "sandbox boots under gVisor" 'Starting gVisor' "$out"
@@ -532,17 +545,6 @@ contains "a cancelled run cannot be retried (interrupted runs only)" '^retry=inv
 # connection, interrupt the run after the grace period, hold the thread, keep the entries, and
 # accept Retry.
 echo "==> interrupted runs and Retry (KOBE-26)"
-wait_for() { # seconds regex command... → reruns command until a line matches regex (bounded); prints the last output
-  local deadline=$((SECONDS + $1)) re="$2" out=""
-  shift 2
-  while :; do
-    out=$("$@" 2>&1 || true)
-    if printf '%s\n' "$out" | grep -Eq "$re"; then break; fi
-    if ((SECONDS >= deadline)); then break; fi
-    sleep 2
-  done
-  printf '%s\n' "$out"
-}
 owner_handle=$( (ensure_sandbox "$E2E_TEAM_ID" e2e "$owner_id" || true) | tail -1)
 owner_sandbox=$(json_field sandboxId "$owner_handle")
 contains "the owner gets a (user, team) sandbox claim" '^[0-9a-f-]{36}$' "${owner_sandbox:-$owner_handle}"
