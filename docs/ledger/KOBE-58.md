@@ -1,6 +1,6 @@
 # KOBE-58: MCP proxy core: auth, exposure, policy re-check
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #47)
 - **Branch / worktree:** `kobe-58-mcp-proxy` in `../Kobe-wt58`
 - **Depends on:** KOBE-35 (policy engine), KOBE-24 (sandbox wire), KOBE-22 (sandbox provider),
   KOBE-38 (egress proxy), KOBE-15 (audit), KOBE-5 (scaffold); all merged. KOBE-37 (approvals) in
