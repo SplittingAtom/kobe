@@ -227,7 +227,7 @@ app role.
 ## Review round 2 (coordinator's independent DB review; chain design confirmed sound)
 
 - **H1 lock window:** confirmed in drizzle (`pg-core/dialect.js` `migrate()`: one transaction for
-  all pending migrations), so 0030's ADD COLUMN lock lasts to COMMIT. Now nothing in 0030-0032 is
+  all pending migrations), so the first ADD COLUMN's lock lasts to COMMIT. Now nothing in KOBE-17's migrations is
   proportional to the log: nullable columns without defaults (v1 = NULL), `NOT VALID` constraints,
   no index (the sweep walks the primary key from a stored position instead of a partial index), no
   verification, no backfill, no seal (moved to the server). The redundant `LOCK TABLE` is gone.
@@ -257,7 +257,7 @@ app role.
     pending hold doesn't pause erasure (only an approved one does).
   - **L3:** the trigger checks the ids it is given (distinct, active admins), not who the caller
     is: a compromised app role could write another admin as approver (same as break-glass). The
-    server binds the ids to the authenticated session. Wording in 0031 and this ledger corrected.
+    server binds the ids to the authenticated session. Wording in the legal_hold_guard migration and this ledger corrected.
   - **L6 lock ordering:** approvals take the legal-hold lock then the audit chain lock; purges must
     do the same (audit last), documented in `packages/db/README.md`; Postgres resolves a deadlock by
     aborting one side. A long purge transaction delays approvals (30 s lock timeout), hence short
@@ -288,6 +288,14 @@ restore` writes it); anything else pauses nothing instead of making every sweep 
   (a far-future `audit.pii_sweep_resume_at`, a position past the head, or a long retention): it
   holds INSERT/UPDATE there by design. Each only keeps data longer (privacy, not integrity); the
   retention change is audited, the other two keys aren't settings an admin can edit through the API.
+
+## Merge with main (KOBE-37, #48)
+
+Merged origin/main with `db:rebase`: KOBE-17's migrations are now `0032_legal_hold` (generated),
+`0033_legal_hold_guard` and `0034_audit_pii_commitments` (custom), unchanged in content. Conflicts
+(both sides added lines) resolved by keeping both: the approvals sweeper next to the audit PII
+sweeper in `services/server/src/index.ts`, the `approval` and `audit` categories, and the
+`docs/audit-log.md` tables (main's rows plus the KOBE-17 rows).
 
 ## Open questions (for Chris or the coordinator)
 
