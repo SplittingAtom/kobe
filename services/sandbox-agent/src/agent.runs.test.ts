@@ -384,6 +384,30 @@ describe("kobe-policy channel (fd 3)", () => {
     expect((decision as PiEvent).event).toMatchObject({ decision: "allow" });
   });
 
+  it("delivers a decision whose reason code and stage it does not know (newer server)", async () => {
+    h = await startHarness();
+    await h.server.command(runStart("tool:bash"));
+    const check = await h.server.waitFor((f) => f.type === "policy.check");
+    h.server.sendRaw(
+      JSON.stringify({
+        v: 1,
+        type: "policy.result",
+        request_id: (check as { request_id: string }).request_id,
+        run_id: RUN,
+        tool_call_id: "call_1",
+        decision: "allow",
+        reasons: [
+          { code: "a_code_from_the_future", stage: "a_future_stage", message: "new", extra: 1 },
+        ],
+      }),
+    );
+    const decision = await h.server.waitFor(
+      (f) => f.type === "pi.event" && f.event.type === "kobe_test_policy_decision",
+    );
+    expect((decision as PiEvent).event).toMatchObject({ decision: "allow" });
+    expect(h.server.frames("error")).toEqual([]);
+  });
+
   it("starts no run when kobe-policy refuses to start (fail closed)", async () => {
     h = await startHarness({
       env: { KOBE_POLICY_EXTENSION: "/opt/kobe/pi-extensions/refuse/index.js" },

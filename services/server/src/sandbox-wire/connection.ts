@@ -223,7 +223,14 @@ export class SandboxConnection implements RegisteredConnection {
       cursor,
       tuning: ctx.tuning,
       createTranslator: () =>
-        createRunTranslator({ teamId: this.target.teamId, registry: ctx.tools }),
+        createRunTranslator({
+          teamId: this.target.teamId,
+          registry: ctx.tools,
+          onDropped: (dropped) => {
+            ctx.metrics.eventsDropped += 1;
+            this.log.warn({ run_id: runId, ...dropped }, "dropped a translated event");
+          },
+        }),
       host: {
         metrics: ctx.metrics,
         log: this.log,

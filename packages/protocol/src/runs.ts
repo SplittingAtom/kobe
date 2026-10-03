@@ -113,8 +113,16 @@ export function isActiveRunStatus(status: RunStatus): boolean {
  *   The user resolves it with Retry (the retry run starts at once, ahead of the queue; the queue
  *   resumes after it ends) or with "Continue without retry" (`resumeQueue`, thread → idle, queue
  *   resumes). New messages on an interrupted thread queue.
- * - After `completed`, `failed`, `cancelled` the next queued run starts (Stop leaves queued messages
- *   in place, D17). Budget stops end queued runs too (`budget_stopped`).
+ * - After `completed` or `failed` the next queued run starts. Budget stops end queued runs too
+ *   (`budget_stopped`).
+ * - **Stop pauses the queue** (decided by Chris; behaviour lands in #43): stopping the active run
+ *   while messages are queued leaves them queued (D17) but sets `threads.queue_paused_at`, so none
+ *   starts. The pause is released by the user only: `resumeQueue` (`POST
+ *   /v1/threads/{id}/queue/resume`, which also resumes a paused queue, not only "Continue without
+ *   retry"), or a new message from the user, which joins the end of the queue and the queue
+ *   resumes in order. Scheduled and other non-user triggers do not release it. Deleting a queued
+ *   message does not pause; cancelling the last queued message clears the pause. The pause is a
+ *   column, not a {@link ThreadStatus}: a paused thread is `idle`.
  */
 export const THREAD_STATUSES = ["idle", "running", "interrupted"] as const;
 export const threadStatusSchema = z.enum(THREAD_STATUSES);
@@ -136,7 +144,11 @@ export function nextThreadStatus(current: ThreadStatus, event: ThreadStatusEvent
   return event.to === "interrupted" ? "interrupted" : "idle";
 }
 
-/** Whether the orchestrator may start the thread's next queued run now. */
+/**
+ * Whether the thread's status lets the orchestrator start its next queued run now. The
+ * orchestrator also requires the queue not to be paused by a Stop (`threads.queue_paused_at`
+ * null, #43); this function does not see that column.
+ */
 export function queueMayAdvance(status: ThreadStatus): boolean {
   return status === "idle";
 }

@@ -59,6 +59,29 @@ describe("approval floor unification migration", () => {
     expect(await floors()).toEqual({});
   });
 
+  it("raises a notice for each dropped team floor stricter than auto", async () => {
+    const ids = [randomUUID(), randomUUID()];
+    for (const [i, value] of ["ask-on-write", "auto"].entries()) {
+      const id = ids[i] as string;
+      await owner.query(
+        `INSERT INTO teams (id, slug, name, settings) VALUES ($1, $2, 'Floor', $3)`,
+        [id, `notice-${id.slice(0, 8)}`, { approval_mode_floor: value }],
+      );
+    }
+    const client = await owner.connect();
+    const notices: string[] = [];
+    client.on("notice", (n) => notices.push(n.message ?? ""));
+    try {
+      await client.query(migrationSql);
+    } finally {
+      client.release();
+      await owner.query(`DELETE FROM teams WHERE id = ANY($1)`, [ids]);
+    }
+    const dropped = notices.filter((n) => n.includes("approval floor"));
+    expect(dropped).toEqual([expect.stringContaining(`${ids[0]}`)]);
+    expect(dropped[0]).toContain("ask-on-write");
+  });
+
   it("removes team approval floors and keeps the other team settings", async () => {
     const id = randomUUID();
     await owner.query(`INSERT INTO teams (id, slug, name, settings) VALUES ($1, $2, 'Floor', $3)`, [

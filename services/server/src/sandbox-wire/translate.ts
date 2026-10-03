@@ -1,4 +1,6 @@
 import {
+  EventPayloadTooLargeError,
+  jsonByteLength,
   parseEventPayload,
   parseTranslatedPiEvent,
   toolInputSchema,
@@ -80,12 +82,12 @@ export function toolResultPreview(result: unknown): { preview: string; truncated
   return { preview: text.slice(0, TOOL_PREVIEW_MAX_CHARS), truncated: true };
 }
 
-function checked(type: KobeEventType, payload: unknown): NewRunEvent | undefined {
-  try {
-    return { type, payload: parseEventPayload(type, payload) };
-  } catch {
-    return undefined;
-  }
+/** A translated event that was not produced: its type and why (never its content). */
+export interface DroppedEvent {
+  readonly type: KobeEventType;
+  readonly reason: "payload_too_large" | "invalid_payload";
+  /** UTF-8 JSON size, for `payload_too_large`. */
+  readonly bytes?: number;
 }
 
 /**
@@ -96,10 +98,25 @@ function checked(type: KobeEventType, payload: unknown): NewRunEvent | undefined
 export function createRunTranslator(options: {
   readonly teamId: string;
   readonly registry: ToolRegistry;
+  /** Called for every event that fails its protocol schema or size bound (logged and counted). */
+  readonly onDropped?: (dropped: DroppedEvent) => void;
 }): RunTranslator {
   let current: string | undefined;
   let lastAssistant: string | undefined;
   const completed: string[] = [];
+
+  const checked = (type: KobeEventType, payload: unknown): NewRunEvent | undefined => {
+    try {
+      return { type, payload: parseEventPayload(type, payload) };
+    } catch (err) {
+      options.onDropped?.(
+        err instanceof EventPayloadTooLargeError
+          ? { type, reason: "payload_too_large", bytes: jsonByteLength(payload) }
+          : { type, reason: "invalid_payload" },
+      );
+      return undefined;
+    }
+  };
 
   const riskOf = async (tool: string): Promise<RiskClass> => {
     try {

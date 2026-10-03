@@ -130,7 +130,12 @@ export interface RunOrchestrator {
   submitMessage(actor: ActorContext, command: SubmitMessageCommand): Promise<SubmitMessageResult>;
   /** Inject into the active run at Pi's next safe point. Rejects unless running/waiting_approval. */
   steer(actor: ActorContext, runId: string, body: SteerBody): Promise<RunSnapshot>;
-  /** Stop: running → cancelled (Pi `abort`); queued → cancelled (deletes the queued message). */
+  /**
+   * Stop: running → cancelled (Pi `abort`); queued → cancelled (deletes the queued message).
+   * Stopping the active run while messages are queued pauses the queue (`threads.queue_paused_at`)
+   * until the user resumes it or sends a message (runs.ts); deleting a queued message does not
+   * pause, and cancelling the last queued message clears the pause. Behaviour lands in #43.
+   */
   cancel(actor: ActorContext, runId: string): Promise<RunSnapshot>;
   /** Edit a queued message's content. Rejects unless `queued`. */
   updateQueued(actor: ActorContext, runId: string, body: UpdateQueuedBody): Promise<RunSnapshot>;
@@ -142,8 +147,10 @@ export interface RunOrchestrator {
    */
   retry(actor: ActorContext, runId: string): Promise<SubmitMessageResult>;
   /**
-   * "Continue without retry": an `interrupted` thread → `idle`, and its queued runs resume.
-   * SPECULATIVE UI affordance (KOBE-26/32); no-op on a thread that is not interrupted.
+   * Resume the thread's queue (`POST /v1/threads/{id}/queue/resume`): "Continue without retry"
+   * (an `interrupted` thread → `idle`) and/or release a queue paused by Stop
+   * (`threads.queue_paused_at` cleared, #43); queued runs then start in order. No-op on a thread
+   * that is neither.
    */
   resumeQueue(actor: ActorContext, threadId: string): Promise<void>;
   getRun(actor: ActorContext, runId: string): Promise<RunSnapshot>;

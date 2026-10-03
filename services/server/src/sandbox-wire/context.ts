@@ -23,6 +23,8 @@ export interface WireMetrics {
   commandsDelivered: number;
   runsInterrupted: number;
   runsCompleted: number;
+  /** Translated events dropped for failing their protocol schema or size bound. */
+  eventsDropped: number;
 }
 
 export function newMetrics(): WireMetrics {
@@ -42,6 +44,7 @@ export function newMetrics(): WireMetrics {
     commandsDelivered: 0,
     runsInterrupted: 0,
     runsCompleted: 0,
+    eventsDropped: 0,
   };
 }
 

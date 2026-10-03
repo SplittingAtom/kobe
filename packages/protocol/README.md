@@ -24,6 +24,15 @@ Entry points: `@kobe/protocol` is browser-safe (the web app imports it); `@kobe/
 uses `node:crypto` and must never be imported by sandbox code (the approval key never enters a
 sandbox); `@kobe/protocol/testing` is for tests only.
 
+## Version skew on the sandbox wire
+
+After an upgrade the server is newer than the sandboxes still running. So **server→sandbox
+informational enums are open; add codes freely; decisions are closed**. Reason codes and stages
+in `policy.result`, `error` codes, `run.stop.reason` and `shutdown.reason` decode as any string
+matching `OPEN_CODE_PATTERN` (`/^[a-z][a-z0-9_]{0,63}$/`), and extra keys in a reason are kept.
+Decisions and modes (`policy.result.decision`, `run.stop.mode`, Pi config values) are closed:
+adding one is a wire version change. Sandbox→server frames stay strict.
+
 ## Database columns these contracts expect (beyond KOBE-29)
 
 | Column                                        | Added by   | Contract                                                      |
@@ -74,3 +83,6 @@ Gaps reported by KOBE-23/24/30/35/36, fixed in one contract PR:
   `type`.
 - Event payload bounds: payload ≤ 256 KiB, `tool.call.input` ≤ 64 KiB, `entry.committed.payload`
   ≤ 64 KiB (`EVENT_*_MAX_BYTES`, enforced by `parseEventPayload`).
+- Stop pauses the queue (`threads.queue_paused_at`; docs in `runs.ts` / `run-orchestrator.ts`,
+  behaviour in #43): queued messages wait for `resumeQueue` or the user's next message.
+- `encodeFrame` writes `v` and `type` first.

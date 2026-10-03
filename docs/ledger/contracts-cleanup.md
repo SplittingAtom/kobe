@@ -64,6 +64,31 @@
   `event.input`, the approval token never enters the sandbox, `primary_arg` of grep/find = `/path`
   (server override removed).
 
+## Coordinator review (#42, approve with changes) — resolution
+
+1. **MEDIUM version skew.** Server → sandbox informational enums are open: `policy.result` reasons
+   (`wirePolicyReasonSchema`: code and stage any `OPEN_CODE_PATTERN` string, extra keys kept),
+   `error.code`, `run.stop.reason`, `shutdown.reason`. Decisions and modes stay closed
+   (`decision`, `run.stop.mode`, Pi config). Sandbox → server stays strict (the server is never
+   older). Rule in `packages/protocol/README.md`. Tests: protocol "forward compatibility" (3) and
+   agent "delivers a decision whose reason code and stage it does not know". Agents built before
+   this PR still have the closed enum: the new codes the server emits on an **allow**
+   (`team_allow_rule`) reach them only after their image is updated; deny-side codes fail closed
+   anyway (a dropped result times out into a block).
+2. **MEDIUM silent team-floor drop.** `0024` raises `NOTICE` per dropped team floor stricter than
+   `auto` (team id + mode); `runMigrations({onNotice})` forwards notices and the migration Job logs
+   them (`"msg":"migration notice"`). Upgrade note in docs/install.md ("Upgrade notes"). D6 kept.
+   Tests: migration test (notice for `ask-on-write`, none for `auto`), `migrate.db.test.ts` (a probe
+   migration's notice reaches `onNotice`).
+3. **LOW** `translate.ts` reports dropped events (`onDropped`: type, reason, size — never content);
+   the connection logs a warning and counts `metrics.eventsDropped`. Test in `translate.test.ts`.
+4. **LOW** `encodeFrame` (protocol) now writes `v`, `type` first whatever the object's key order;
+   `wire/encode.test.ts` pins it for policy.check / command.result / pi.event (incl. the
+   event_dropped placeholder).
+5. **Stop pauses the queue** (Chris's decision, PR #43): doc comments in `runs.ts` (thread status
+   and `queueMayAdvance`) and `run-orchestrator.ts` (`cancel`, `resumeQueue`), README line.
+   Doc-only here; the in-memory fake is unchanged — **behaviour lands in #43**.
+
 ## Open questions (for Chris or the coordinator)
 
 1. An admin control for the install approval floor (`/v1/install/policy/settings` + the KOBE-20

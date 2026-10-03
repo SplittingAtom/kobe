@@ -7,7 +7,6 @@ import {
   timestampSchema,
   uuidSchema,
 } from "../common.js";
-import { policyReasonSchema } from "../policy.js";
 import { connectorNameSchema } from "../tools.js";
 import { SANDBOX_ERROR_CODES, SANDBOX_WIRE_VERSION } from "./connection.js";
 import {
@@ -32,12 +31,36 @@ function frame<T extends string, S extends z.ZodRawShape>(type: T, shape: S) {
 
 const pingFrame = frame("ping", { nonce });
 const pongFrame = frame("pong", { nonce });
-const errorFrame = frame("error", {
-  code: z.enum(SANDBOX_ERROR_CODES),
+/**
+ * Forward compatibility (normative). After an upgrade the server is newer than the sandboxes still
+ * running, so **server → sandbox informational enums are open**: a code the agent does not know
+ * still decodes, as an opaque string of {@link OPEN_CODE_PATTERN} shape (reason codes and stages,
+ * error codes, stop and shutdown reasons; extra keys in a reason are kept). The server may add
+ * codes freely. **Decisions and modes stay closed** (`policy.result.decision`, `run.stop.mode`, Pi
+ * config values): those change behaviour, so a new value is a wire version change. Sandbox →
+ * server frames stay strict: the server is never older than the agents it talks to.
+ */
+export const OPEN_CODE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+const openCode = z.string().regex(OPEN_CODE_PATTERN);
+
+/** A policy reason as the sandbox reads it: known shape, open code and stage. */
+export const wirePolicyReasonSchema = z.looseObject({
+  code: openCode,
+  stage: openCode,
+  message: z.string().max(1000),
+  rule_id: uuidSchema.optional(),
+});
+export type WirePolicyReason = z.infer<typeof wirePolicyReasonSchema>;
+
+const errorFields = {
   message: z.string().max(2000),
   /** The `command_id` / `request_id` / frame type the error refers to, if any. */
   ref: z.string().max(256).optional(),
-});
+};
+/** Sandbox → server: closed codes. */
+const errorFrame = frame("error", { code: z.enum(SANDBOX_ERROR_CODES), ...errorFields });
+/** Server → sandbox: open codes ({@link SANDBOX_ERROR_CODES} today; newer servers may add some). */
+const serverErrorFrame = frame("error", { code: openCode, ...errorFields });
 
 // ----------------------------------------------------------------------------- sandbox → server
 
@@ -214,7 +237,8 @@ export const runStopFrameSchema = frame("run.stop", {
   run_id: uuidSchema,
   thread_id: uuidSchema,
   mode: z.enum(["abort", "after_step"]),
-  reason: z.enum(["user_cancelled", "budget_exhausted", "approval_expired"]),
+  /** `user_cancelled` | `budget_exhausted` | `approval_expired` today; open (informational). */
+  reason: openCode,
 });
 
 /**
@@ -255,7 +279,7 @@ export const policyResultFrameSchema = z.union([
     run_id: uuidSchema,
     tool_call_id: idSchema,
     decision: z.literal("allow"),
-    reasons: z.array(policyReasonSchema).min(1),
+    reasons: z.array(wirePolicyReasonSchema).min(1),
     approval: approvalTokenSchema.optional(),
   }),
   frame("policy.result", {
@@ -263,7 +287,7 @@ export const policyResultFrameSchema = z.union([
     run_id: uuidSchema,
     tool_call_id: idSchema,
     decision: z.literal("deny"),
-    reasons: z.array(policyReasonSchema).min(1),
+    reasons: z.array(wirePolicyReasonSchema).min(1),
     message: z.string().max(2000),
   }),
 ]);
@@ -295,7 +319,8 @@ export const resendFrameSchema = frame("resend", { run_id: uuidSchema, from_seq:
 
 /** Drain and close: abort nothing in flight unless `deadline_ms` passes. */
 export const shutdownFrameSchema = frame("shutdown", {
-  reason: z.enum(["hibernate", "destroy", "replaced"]),
+  /** `hibernate` | `destroy` | `replaced` today; open (informational). */
+  reason: openCode,
   deadline_ms: z.number().int().nonnegative(),
 });
 
@@ -314,7 +339,7 @@ export const serverToSandboxFrameSchema = z.union([
   shutdownFrameSchema,
   pingFrame,
   pongFrame,
-  errorFrame,
+  serverErrorFrame,
 ]);
 export type ServerToSandboxFrame = z.infer<typeof serverToSandboxFrameSchema>;
 
