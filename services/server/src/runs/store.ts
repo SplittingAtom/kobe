@@ -11,6 +11,11 @@ import {
   type ThreadStatus,
 } from "@kobe/protocol";
 import { sql, type AgentScope, type KobeTx } from "@kobe/db";
+import {
+  auditExpiredApprovals,
+  expireRunApprovalsInTx,
+  expiryCauseOf,
+} from "../approvals/run-end.js";
 import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js";
 import { THREAD_LOCK_TIMEOUT } from "../threads/repository.js";
 import { RunError } from "./errors.js";
@@ -361,7 +366,8 @@ export interface AppliedTransition {
  * Moves a run along `RUN_TRANSITIONS` (the caller holds the thread lock and passes the locked
  * thread and run): run status (+ started/ended timestamps, queue position cleared), thread status
  * per `nextThreadStatus`, then the event (the append locks the run row and must come last).
- * Returns the thread's new status.
+ * A run that ends from an active state first expires its pending approvals (KOBE-37:
+ * `approval.resolved` before the terminal event; audited). Returns the thread's new status.
  */
 export async function applyTransition(
   tx: KobeTx,
@@ -377,6 +383,10 @@ export async function applyTransition(
   }
   const terminal = isTerminalRunStatus(to);
   const active = isActiveRunStatus(to);
+  const expired =
+    terminal && isActiveRunStatus(run.status)
+      ? await expireRunApprovalsInTx(tx, run.teamId, run.id, expiryCauseOf(cause))
+      : [];
   await tx.execute(sql`
     UPDATE runs
        SET status = ${to},
@@ -397,6 +407,7 @@ export async function applyTransition(
        WHERE team_id = ${run.teamId} AND id = ${thread.id}`);
   }
   if (event) await appendRunEventsInTx(tx, run.teamId, run.id, [event]);
+  await auditExpiredApprovals(tx, run.teamId, expired);
   return {
     threadStatus,
     transition: { runId: run.id, threadId: thread.id, from: run.status, to, cause },

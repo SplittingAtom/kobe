@@ -65,6 +65,19 @@ describe("loadConfig", () => {
     );
   });
 
+  it("reads an optional approval key of at least 32 characters (KOBE-37), never for the scheduler", () => {
+    expect(loadConfig(REQUIRED).auth?.approvalKey).toBeUndefined();
+    expect(loadConfig({ ...REQUIRED, KOBE_APPROVAL_KEY: "" }).auth?.approvalKey).toBeUndefined();
+    const key = "a".repeat(48);
+    expect(loadConfig({ ...REQUIRED, KOBE_APPROVAL_KEY: key }).auth?.approvalKey).toBe(key);
+    expect(() => loadConfig({ ...REQUIRED, KOBE_APPROVAL_KEY: "short" })).toThrow(
+      /KOBE_APPROVAL_KEY must be at least 32/,
+    );
+    expect(
+      loadConfig({ ...REQUIRED, KOBE_PROCESS: "scheduler", KOBE_APPROVAL_KEY: key }).auth,
+    ).toBeUndefined();
+  });
+
   it("parses trusted proxy CIDRs", () => {
     expect(loadConfig(REQUIRED).auth?.trustedProxies).toEqual([]);
     expect(

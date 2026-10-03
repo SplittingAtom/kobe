@@ -63,6 +63,13 @@ const authSchema = z.object({
         .filter((s) => s.length > 0),
     )
     .pipe(z.array(z.cidrv4().or(z.cidrv6()), { error: "KOBE_TRUSTED_PROXIES must be CIDRs" })),
+  // Approval HMAC key (D29, KOBE-37): signs approvals; the MCP proxy verifies with it. Unset keeps
+  // the server up, but every tool call that needs approval is denied (fail closed).
+  KOBE_APPROVAL_KEY: z
+    .string()
+    .transform((v) => (v === "" ? undefined : v))
+    .pipe(z.string().min(32, "KOBE_APPROVAL_KEY must be at least 32 characters").optional())
+    .optional(),
 });
 
 export interface AuthConfig {
@@ -70,6 +77,8 @@ export interface AuthConfig {
   readonly authSecret: string;
   readonly setupToken: string;
   readonly trustedProxies: readonly string[];
+  /** Approval HMAC key; undefined denies every approval request. */
+  readonly approvalKey?: string;
 }
 
 export interface Config {
@@ -114,6 +123,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
       authSecret: auth.data.KOBE_AUTH_SECRET,
       setupToken: auth.data.KOBE_SETUP_TOKEN,
       trustedProxies: auth.data.KOBE_TRUSTED_PROXIES,
+      ...(auth.data.KOBE_APPROVAL_KEY ? { approvalKey: auth.data.KOBE_APPROVAL_KEY } : {}),
     },
     smtp: smtp.data,
   };

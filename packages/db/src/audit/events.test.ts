@@ -32,6 +32,7 @@ describe("audit event taxonomy", () => {
   it("has the categories the read API filters on", () => {
     expect(AUDIT_CATEGORIES.sort()).toEqual([
       "agent",
+      "approval",
       "auth",
       "egress",
       "governance",

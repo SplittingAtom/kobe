@@ -109,6 +109,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       registry: tools,
       onError: (err) => log.error({ err }, "policy engine error (denied)"),
     });
+  const approvals = options.approvals ?? DENY_APPROVALS;
   let liveness: SandboxLiveness = NOT_LIVE;
   const userListeners = new Set<(userId: string) => void>();
   const violationAudits = new Map<string, number>();
@@ -131,6 +132,9 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       case "hib":
         registry.get(hint.id)?.close("hibernating", "sandbox hibernating");
         return;
+      case "apr":
+        approvals.onHint?.(hint.id);
+        return;
     }
   };
   const bus = createSandboxBus({
@@ -138,6 +142,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
     onHint,
     onResync: () => {
       router.resync();
+      approvals.onResync?.();
       for (const c of registry.all()) c.pokeCommands();
     },
     reconnectMinMs: tuning.reconnectMinMs,
@@ -200,7 +205,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       db,
       engine,
       registry: tools,
-      approvals: options.approvals ?? DENY_APPROVALS,
+      approvals,
       runContext: options.runContext,
       runMaxEvents: tuning.runMaxEvents,
     },

@@ -21,9 +21,11 @@ export type BusHint =
   /** This user was deactivated or left a team: every replica re-checks their connections. */
   | { readonly kind: "user"; readonly id: string }
   /** This connection's sandbox was hibernated (KOBE-25): its holder closes it `hibernating`. */
-  | { readonly kind: "hib"; readonly id: string };
+  | { readonly kind: "hib"; readonly id: string }
+  /** This approval left `pending` (KOBE-37): the broker waiting on it re-reads the row. */
+  | { readonly kind: "apr"; readonly id: string };
 
-const KINDS = new Set(["cmd", "res", "kick", "user", "hib"]);
+const KINDS = new Set(["cmd", "res", "kick", "user", "hib", "apr"]);
 const uuid = z.uuid();
 
 export function encodeBusHint(hint: BusHint): string {
