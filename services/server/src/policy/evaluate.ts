@@ -156,7 +156,7 @@ function allowListed(ctx: Prepared): PolicyReason | undefined {
   const [team] = matchingRules(ctx.rules.team, "allow", ctx.tool, ctx.view, ctx.now);
   return (
     team &&
-    ruleReason(team, "user_allow_rule", "user_allow", "Allow-listed by your team for auto mode.")
+    ruleReason(team, "team_allow_rule", "user_allow", "Allow-listed by your team for auto mode.")
   );
 }
 

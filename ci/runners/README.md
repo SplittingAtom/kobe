@@ -1,5 +1,10 @@
 # Self-hosted CI runners on the k3s cluster
 
+> **Status: fallback only.** Since the repository went public, CI runs on GitHub-hosted runners
+> (free for public repos, faster SSD disks, up to 20 parallel jobs). The `KOBE_RUNNER` variable is
+> unset, so every job uses `ubuntu-latest`. These runners stay installed and idle at zero; set
+> `gh variable set KOBE_RUNNER --body kobe-k3s --repo SplittingAtom/kobe` to switch back.
+
 GitHub-hosted minutes for this private repo are metered and run out quickly with several agents
 pushing in parallel, so CI runs on our own k3s cluster with
 [Actions Runner Controller](https://github.com/actions/actions-runner-controller) (Apache-2.0).

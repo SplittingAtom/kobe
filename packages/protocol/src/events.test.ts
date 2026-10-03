@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  EVENT_ENTRY_PAYLOAD_MAX_BYTES,
+  EVENT_PAYLOAD_MAX_BYTES,
   EVENT_PAYLOAD_SCHEMAS,
+  EVENT_TOOL_INPUT_MAX_BYTES,
+  EventPayloadTooLargeError,
+  jsonByteLength,
   KOBE_EVENT_TYPES,
   TERMINAL_EVENT_TYPES,
   formatSseEvent,
@@ -91,6 +96,40 @@ describe("event payloads", () => {
     ["run.queued", { thread_id: "t", trigger: "webhook", queue_pos: 1 }],
   ] as const)("rejects an invalid %s payload", (type, payload) => {
     expect(() => parseEventPayload(type, payload)).toThrow();
+  });
+});
+
+describe("payload size bounds", () => {
+  const big = (bytes: number) => "x".repeat(bytes);
+
+  it("bounds tool.call input at 64 KiB, as the server summarises larger inputs", () => {
+    const example = EVENT_PAYLOAD_EXAMPLES["tool.call"];
+    expect(() =>
+      parseEventPayload("tool.call", {
+        ...example,
+        input: { content: big(EVENT_TOOL_INPUT_MAX_BYTES) },
+      }),
+    ).toThrow();
+    expect(
+      parseEventPayload("tool.call", { ...example, input: { content: big(60 * 1024) } }),
+    ).toBeTruthy();
+  });
+
+  it("bounds entry.committed payload at 64 KiB (larger entries are stored, not streamed)", () => {
+    const example = EVENT_PAYLOAD_EXAMPLES["entry.committed"];
+    expect(() =>
+      parseEventPayload("entry.committed", {
+        ...example,
+        payload: { t: big(EVENT_ENTRY_PAYLOAD_MAX_BYTES) },
+      }),
+    ).toThrow();
+  });
+
+  it("bounds every payload at 256 KiB as UTF-8 JSON", () => {
+    expect(EVENT_PAYLOAD_MAX_BYTES).toBe(256 * 1024);
+    const delta = { ...EVENT_PAYLOAD_EXAMPLES["text.delta"], delta: "é".repeat(130 * 1024) };
+    expect(jsonByteLength(delta)).toBeGreaterThan(EVENT_PAYLOAD_MAX_BYTES);
+    expect(() => parseEventPayload("text.delta", delta)).toThrow(EventPayloadTooLargeError);
   });
 });
 

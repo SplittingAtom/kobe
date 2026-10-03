@@ -58,6 +58,11 @@ export function decodeServerFrame(text: string): DecodeResult<ServerToSandboxFra
   return decode(serverToSandboxFrameSchema, text);
 }
 
+/**
+ * JSON text of a frame with `v` then `type` first, whatever order the object was built in: the
+ * server sizes large sandbox frames by the type read from that prefix (connection.ts).
+ */
 export function encodeFrame(frame: SandboxToServerFrame | ServerToSandboxFrame): string {
-  return JSON.stringify(frame);
+  const { v, type, ...rest } = frame;
+  return JSON.stringify({ v, type, ...rest });
 }

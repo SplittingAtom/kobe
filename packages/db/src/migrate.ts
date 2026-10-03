@@ -14,6 +14,11 @@ export interface MigrateOptions {
   /** Login role the app uses; must not be superuser, BYPASSRLS, or own any table. */
   readonly appRole: string;
   readonly migrationsFolder?: string;
+  /**
+   * Called with every `RAISE NOTICE` a migration emits (upgrade notes, e.g. a dropped setting);
+   * the migration Job logs them.
+   */
+  readonly onNotice?: (message: string) => void;
 }
 
 /** Serializes concurrent migration Jobs (e.g. overlapping Helm upgrades) and backups/restores. */
@@ -123,6 +128,12 @@ export async function runMigrations(options: MigrateOptions): Promise<void> {
     connectionTimeoutMillis: 10_000,
     options: "-c lock_timeout=10s",
   });
+  const { onNotice } = options;
+  if (onNotice) {
+    pool.on("connect", (client) => {
+      client.on("notice", (notice) => onNotice(notice.message ?? ""));
+    });
+  }
   try {
     const client = await pool.connect();
     try {

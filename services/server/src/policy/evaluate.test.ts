@@ -218,20 +218,20 @@ const CASES: readonly Case[] = [
     input: { server: "jira", uri: "jira://x" },
     rules: [rule("user", "allow", "read_mcp_resource")],
     effect: "deny",
-    codes: ["connector_not_enabled"],
+    codes: ["not_available"],
   },
   {
     name: "MCP resource tools are not available in v1 (list_mcp_resources, auto)",
     tool: builtin("list_mcp_resources"),
     options: { mode: "auto" },
     effect: "deny",
-    codes: ["connector_not_enabled"],
+    codes: ["not_available"],
   },
   {
     name: "MCP resource tools are not available in v1 (list_mcp_resource_templates)",
     tool: builtin("list_mcp_resource_templates"),
     effect: "deny",
-    codes: ["connector_not_enabled"],
+    codes: ["not_available"],
   },
   // 3. ask rules: no allow rule removes them (decision (a)).
   {
@@ -567,7 +567,7 @@ const CASES: readonly Case[] = [
     options: { mode: "auto" },
     rules: [rule("team", "allow", "create_artifact")],
     effect: "allow",
-    codes: ["user_allow_rule"],
+    codes: ["team_allow_rule"],
   },
   {
     name: "team allow allow-lists a connector for scheduled runs",
@@ -575,7 +575,7 @@ const CASES: readonly Case[] = [
     options: { mode: "auto", kind: "schedule" },
     rules: [rule("team", "allow", "mcp__jira__*")],
     effect: "allow",
-    codes: ["user_allow_rule"],
+    codes: ["team_allow_rule"],
   },
   {
     name: "a blanket allow rule is ignored (no bypass)",
@@ -876,7 +876,9 @@ describe("evaluatePolicy: invariants over every combination", () => {
         settings: c.settings,
       });
       if (decision.effect === "allow" && c.tool.risk !== "read") {
-        expect(decision.reasons[0]?.code, c.tool.name).toBe("user_allow_rule");
+        expect(["user_allow_rule", "team_allow_rule"], c.tool.name).toContain(
+          decision.reasons[0]?.code,
+        );
       }
     }
   });

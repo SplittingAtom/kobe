@@ -1,8 +1,12 @@
 import {
+  EVENT_ENTRY_PAYLOAD_MAX_BYTES,
+  EVENT_TOOL_INPUT_MAX_BYTES,
   SANDBOX_HEARTBEAT_INTERVAL_MS,
   SANDBOX_HEARTBEAT_TIMEOUT_MS,
   SANDBOX_HELLO_TIMEOUT_MS,
+  SANDBOX_FRAME_MAX_BYTES_BY_TYPE,
   SANDBOX_MAX_FRAME_BYTES,
+  SANDBOX_SMALL_FRAME_MAX_BYTES,
 } from "@kobe/protocol";
 
 /** NOTIFY channel of the sandbox wire (ids only: any session may LISTEN on any channel). */
@@ -103,7 +107,11 @@ export const WIRE_DEFAULTS: WireTuning = {
   frameBurst: 2_000,
   byteRatePerSec: 4 * 1024 * 1024,
   byteBurst: 8 * 1024 * 1024,
-  frameMaxBytes: { bulk: SANDBOX_MAX_FRAME_BYTES, policyCheck: 1024 * 1024, small: 256 * 1024 },
+  frameMaxBytes: {
+    bulk: SANDBOX_MAX_FRAME_BYTES,
+    policyCheck: SANDBOX_FRAME_MAX_BYTES_BY_TYPE["policy.check"],
+    small: SANDBOX_SMALL_FRAME_MAX_BYTES,
+  },
   maxPendingPolicyChecks: 16,
   runMaxEvents: 100_000,
   runMaxBytes: 256 * 1024 * 1024,
@@ -127,10 +135,10 @@ export const WIRE_DEFAULTS: WireTuning = {
 
 /** Largest preview of a tool result kept in `tool.result` (the event payload cap is 256 KiB). */
 export const TOOL_PREVIEW_MAX_CHARS = 16_384;
-/** Largest tool input copied into `tool.call` (bigger inputs are summarised). */
-export const TOOL_INPUT_MAX_BYTES = 64 * 1024;
+/** Largest tool input copied into `tool.call` (bigger inputs are summarised; protocol bound). */
+export const TOOL_INPUT_MAX_BYTES = EVENT_TOOL_INPUT_MAX_BYTES;
 /** Largest entry payload copied into `entry.committed` (larger ones are stored, not streamed). */
-export const ENTRY_EVENT_PAYLOAD_MAX_BYTES = 64 * 1024;
+export const ENTRY_EVENT_PAYLOAD_MAX_BYTES = EVENT_ENTRY_PAYLOAD_MAX_BYTES;
 /** session.restore part size budget (the frame cap is 4 MiB). */
 export const RESTORE_PART_MAX_BYTES = 2 * 1024 * 1024;
 /** Bounded memory of answered `pi.ui_request` ids per connection (dedupe of re-sent dialogs). */

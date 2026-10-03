@@ -31,8 +31,7 @@ export function checkAvailable(tool: ToolDescriptor): PolicyReason[] {
   if (tool.source === "mcp" || !UNAVAILABLE_TOOLS.has(tool.name)) return [];
   return [
     {
-      // No `not_available` code in the contract yet (ledger); closest existing one.
-      code: "connector_not_enabled",
+      code: "not_available",
       stage: "team_deny",
       message: `${tool.name} is not available: MCP resources are not supported in this version.`,
     },
