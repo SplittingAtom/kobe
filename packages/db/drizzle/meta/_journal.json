@@ -176,6 +176,20 @@
       "when": 1791003133831,
       "tag": "0024_approval_floor_unify",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791033484775,
+      "tag": "0025_egress",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1791033485188,
+      "tag": "0026_egress_rls",
+      "breakpoints": true
     }
   ]
 }
