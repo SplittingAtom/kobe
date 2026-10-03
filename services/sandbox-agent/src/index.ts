@@ -5,7 +5,7 @@ import { hardenProcess } from "./harden.js";
 import { logger } from "./logger.js";
 import { buildPiLaunch } from "./pi/pi-launch.js";
 import { SessionClient } from "./session/exchange.js";
-import { detectPiVersion, readAgentVersion } from "./version.js";
+import { piVersion as readPiVersion, readAgentVersion } from "./version.js";
 
 /**
  * kobe-sandbox-agent entry point: the sandbox's main process (D13). Dials out to the server; opens
@@ -36,7 +36,7 @@ async function main(): Promise<void> {
         });
   const [agentVersion, piVersion, grant] = await Promise.all([
     readAgentVersion(new URL("../package.json", import.meta.url)),
-    detectPiVersion(loaded.piBin, piEnv),
+    readPiVersion(loaded.piBin, piEnv),
     session?.grant(),
   ]);
   const config = grant ? { ...loaded, sandboxId: grant.sandboxId } : loaded;

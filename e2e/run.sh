@@ -441,7 +441,7 @@ in_sandbox() { # shell command → its output inside the sandbox's agent contain
 }
 lifecycle() { # hibernate|wake → the CLI's answer (same path, lock and audit as the server)
   $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node dist/cli/lifecycle.js "$1" \
-    --team-id "$E2E_TEAM_ID" --user-id "$E2E_USER_ID" 2>&1 | tail -1
+    --team-id "$E2E_TEAM_ID" --user-id "$E2E_USER_ID" 2>&1 | grep -E '^\{"(hibernated|woken)"' || true
 }
 claim_sandbox=$($KUBECTL -n "$TEAM_NS" get sandboxclaim "u-$E2E_USER_ID" -o jsonpath='{.status.sandbox.name}' 2>/dev/null || true)
 if wait_for 240 wire_open; then ok "the real sandbox agent trades its bootstrap token and connects over the wire"
@@ -478,6 +478,11 @@ spaced=$(cold_start spaced "${KOBE_COLD_START_SPACED_TRIALS:-5}" "${KOBE_COLD_ST
 printf '%s\n' "$spaced" | sed 's/^/     cold-start: /'
 spaced_summary=$(printf '%s\n' "$spaced" | grep '"summary":true' || true)
 contains "hibernated → Pi ready (not first token) within budget with spaced trials" '"pass":true' "$spaced_summary"
+# Where an agent start spends its time (startup, session trade attempts, wire ready): last pod.
+cold_pod=$($KUBECTL -n "$TEAM_NS" get pods -l "kobe.splittingatom.io/user-id=$COLD_USER_ID" -o name 2>/dev/null | head -1)
+[[ -z "$cold_pod" ]] && cold_pod=$($KUBECTL -n "$TEAM_NS" get sandboxclaim "u-$COLD_USER_ID" -o jsonpath='pod/{.status.sandbox.name}' 2>/dev/null || true)
+$KUBECTL -n "$TEAM_NS" logs "$cold_pod" -c agent 2>/dev/null \
+  | grep -E 'sandbox-agent starting|sandbox session (acquired|retry)|sandbox wire ready' | head -6 | sed 's/^/     agent: /' || true
 contains "the harness cleaned up its thread" '^0$' \
   "$(psql_kobe "SELECT count(*) FROM threads WHERE team_id = '$E2E_TEAM_ID' AND owner_user_id = '$COLD_USER_ID'")"
 

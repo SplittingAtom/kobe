@@ -153,4 +153,18 @@ get_state`: agent reconnected + Pi spawned and answering), never labelled Gate 1
 
 ### Measured (CI k3d, self-hosted DinD runners)
 
-Pending the first green e2e run of this branch; filled in from the job log.
+Probe: **hibernated → Pi ready** (not first token). Milestones are ms after the waking command;
+pod timestamps have 1 s resolution.
+
+| Run                                           | Set          | n   | p50  | p95  | max  | container started p50/p95 | wire connected p50/p95 |
+| --------------------------------------------- | ------------ | --- | ---- | ---- | ---- | ------------------------- | ---------------------- |
+| 1 (run 37084876022, attempt 2; before tuning) | back-to-back | 20  | 3993 | 4832 | 5675 | 571 / 1186                | 3186 / 3811            |
+| 1                                             | spaced 30 s  | 5   | 4720 | 4878 | 4878 | 276 / 844                 | 3846 / 3944            |
+
+Reading run 1: the Kubernetes side is fast (Sandbox patch → pod created ≈ 0 s; container started
+≈ 0.3–1.2 s: gVisor + image present + local-path bind mount). ≈ 2.6 s go from container start to
+the wire connection (Node boot under gVisor, `pi --version` — which booted Pi just to print a
+version — the session trade, CNI admission of the new pod), then ≈ 0.8 s to spawn Pi for the
+thread. p95 is inside the 8 s budget; p50 missed 3 s.
+
+Tuning after run 1: the agent reads Pi's version from its package (no Pi boot at startup).
