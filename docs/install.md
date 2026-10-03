@@ -89,6 +89,24 @@ the e2e suite checks enforcement from a sandbox (`e2e/run.sh`) — run it after 
 Limit processes per pod with the kubelet (k3s: `--kubelet-arg=pod-max-pids=4096` on every node);
 Kubernetes has no per-pod setting for it.
 
+**Rancher-managed clusters:** Rancher's namespace webhook
+(`rancher.cattle.io.namespaces.create-non-kubesystem`) refuses namespaces carrying Pod Security
+labels unless the caller may `updatepsa` on Rancher projects, so the server cannot create team
+namespaces (runs fail `start_failed`; the server logs the webhook's `Unauthorized`). Grant the
+server's ServiceAccount that one verb:
+
+```bash
+kubectl create clusterrole kobe-rancher-updatepsa --verb=updatepsa --resource=projects.management.cattle.io
+kubectl create clusterrolebinding kobe-rancher-updatepsa --clusterrole=kobe-rancher-updatepsa \
+  --serviceaccount=<namespace>:<release>-server
+```
+
+**Workspace storage and cold start:** waking a hibernated sandbox attaches its `/workspace`
+volume again, and that attach is on the path to the first token. Measured on a 4-node cluster
+(docs/gates/gate-1.md): Longhorn (3 replicas or 1) adds 5–12 s, so a wake takes about 14 s once the
+volume has fully detached — over the 8 s target; local-path (k3d) adds well under a second. A
+Synology NFSv3 class mounted but was not writable by the sandbox user under gVisor.
+
 Private registries: the names in `global.imagePullSecrets` are copied into each team namespace for
 the kubelet (pods there cannot mount them). Alternatively configure registry credentials on the
 nodes (k3s `registries.yaml`). Kobe assumes one install per cluster (`kobe-team-*` names are
