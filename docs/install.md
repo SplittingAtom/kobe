@@ -94,6 +94,53 @@ the kubelet (pods there cannot mount them). Alternatively configure registry cre
 nodes (k3s `registries.yaml`). Kobe assumes one install per cluster (`kobe-team-*` names are
 cluster-wide).
 
+## Egress
+
+Sandboxes reach the internet only through the **egress proxy** (spec D28), and only over HTTPS:
+`HTTPS_PROXY` points at it, the team NetworkPolicy allows nothing else, and the proxy admits only
+team namespaces. It is **default deny**: a fresh install reaches nothing. Install admins define the
+**ceiling** (Install console → Egress ceiling; presets: package registries, which start in the
+ceiling, and git hosts, which start out of it); team admins **enable** domains within it (Team
+console → Egress). `*.example.com` matches subdomains, never `example.com` itself. Changes apply
+within a second (Postgres `LISTEN/NOTIFY`), without restarts.
+
+For each `CONNECT host:443` the proxy checks the sandbox's egress session token, that its user is
+still an active member of the team, the team's allowlist, then resolves the name itself and
+refuses it if **any** address is private, loopback, link-local (cloud metadata), CGNAT, multicast
+or reserved, or in `egressProxy.deniedCidrs` (add your pod/Service CIDRs if they are not private
+ranges; IPv4 entries are also excluded in the proxy's NetworkPolicy). It connects to the address it checked and requires the TLS ClientHello's server name to
+equal the CONNECT host. It never decrypts traffic. Plain HTTP and other ports are refused
+(`egressProxy.allowedPorts`, default 443).
+
+- **Internal targets** (e.g. a package mirror inside your network) must be allowed explicitly:
+  add their addresses to `egressProxy.allowedInternalCidrs` and, because the proxy's own
+  NetworkPolicy only lets it reach public addresses, a peer in `egressProxy.networkPolicy.extraEgress`
+  (for an in-cluster Service: a `namespaceSelector`/`podSelector` for its pods; NetworkPolicy
+  matches pods after Service translation). The domain must still be in the ceiling and enabled.
+- **External Postgres:** the proxy reads allowlists and writes its connection log as the app role.
+  Set `egressProxy.networkPolicy.databasePeers` (an `ipBlock` or selector for your database) so its
+  NetworkPolicy reaches only the database on `databasePort`; when empty it may reach any address on
+  that port.
+- **Known limit: domain fronting.** The proxy sees only the TLS server name. On shared hosting
+  and CDNs (CloudFront, Fastly, Akamai, App Engine, GitHub Pages, …) a client can name an allowed
+  front in TLS and ask for another customer's site inside the encrypted request. The consoles flag
+  such domains; prefer a provider's own domain. Wildcards directly on a public suffix
+  (`*.co.uk`, `*.github.io`) are refused (Public Suffix List). ClientHellos with Encrypted Client
+  Hello (ECH/ESNI) are refused, since the real name would be hidden.
+- **Revocation** reaches open tunnels: disabling a domain, changing the ceiling, removing a member
+  or deactivating a user closes the affected tunnels within a second (and a re-check every 30 s
+  catches anything missed). Tunnels also close when the session token that opened them expires
+  (15 minutes) and after `egressProxy.limits.maxTunnelSeconds` (3600).
+- **Unauthenticated sockets** have their own budget: 5 s to send the request head, at most
+  `limits.unauthenticatedPerSource` (16) per source address (one sandbox pod) and
+  `limits.unauthenticated` (1024) in total, so one sandbox's connection flood cannot take capacity
+  from other teams' tunnels.
+- **Limits** (per proxy replica): `egressProxy.limits.connectionsPerSandbox` (64),
+  `connections` (4096), `bandwidthBytesPerSecond` per sandbox (20 MiB/s), `idleTimeoutSeconds` (300).
+- **Logging:** every connection is counted in the audit log (`egress.connection`, aggregated per
+  user, sandbox, host and outcome every `egressProxy.auditFlushSeconds`) and logged individually as
+  JSON on the proxy's stdout. Blocked attempts are shown on the user's active run (`egress.blocked`).
+
 ## Install
 
 Create the Secrets the chart references, then install:

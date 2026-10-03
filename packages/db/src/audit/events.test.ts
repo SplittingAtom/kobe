@@ -33,6 +33,7 @@ describe("audit event taxonomy", () => {
     expect(AUDIT_CATEGORIES.sort()).toEqual([
       "agent",
       "auth",
+      "egress",
       "governance",
       "identity",
       "install",

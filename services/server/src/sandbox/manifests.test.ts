@@ -93,7 +93,12 @@ describe("sandbox pod spec (D12, D13; secrets never enter sandboxes)", () => {
       KOBE_SERVER_URL: "ws://server.kobe.internal:8081",
       KOBE_MODEL_GATEWAY_URL: "http://model-gateway.kobe.internal:8080",
       KOBE_MCP_PROXY_URL: "http://mcp-proxy.kobe.internal",
-      HTTPS_PROXY: "http://egress-proxy.kobe.internal",
+      // Proxy URLs always carry the port: curl (and git, through libcurl) assume 1080 otherwise.
+      HTTPS_PROXY: "http://egress-proxy.kobe.internal:80",
+      HTTP_PROXY: "http://egress-proxy.kobe.internal:80",
+      https_proxy: "http://egress-proxy.kobe.internal:80",
+      http_proxy: "http://egress-proxy.kobe.internal:80",
+      KOBE_EGRESS_PROXY_URL: "http://egress-proxy.kobe.internal:80",
       KOBE_BOOTSTRAP_TOKEN_FILE: "/var/run/secrets/kobe/bootstrap-token",
     });
   });

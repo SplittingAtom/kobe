@@ -1,0 +1,95 @@
+{{- $fullname := include "kobe.fullname" . -}}
+{{- $e := include "kobe.egressProxyValues" . | fromJson -}}
+# Egress proxy (spec D28). Ingress: only sandboxes (team namespaces), only the proxy port; the
+# team namespace's own policy says the same from the sending side, this is the receiving side that
+# holds regardless of how the CNI applies egress selectors (KOBE-22 kube-router finding).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-egress-proxy
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kobe.selectorLabels" (dict "root" . "component" "egress-proxy") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    {{- if $e.networkPolicy.restrictEgress }}
+    - Egress
+    {{- end }}
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kobe.splittingatom.io/team-namespace: "true"
+      ports:
+        - protocol: TCP
+          port: 8080
+  {{- if $e.networkPolicy.restrictEgress }}
+  # The proxy's own egress (defence in depth behind its address checks): DNS, Postgres, and public
+  # IPv4 addresses on the allowed ports only. Explicitly allowed internal targets are added below.
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- if eq .Values.postgres.mode "cnpg" }}
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: {{ $fullname }}-pg
+      ports:
+        - protocol: TCP
+          port: 5432
+    {{- else if $e.networkPolicy.databasePeers }}
+    - to:
+        {{- toYaml $e.networkPolicy.databasePeers | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ int $e.networkPolicy.databasePort }}
+    {{- else }}
+    # External Postgres without egressProxy.networkPolicy.databasePeers: any address, Postgres port
+    # only. Set databasePeers to narrow this to your database.
+    - ports:
+        - protocol: TCP
+          port: {{ int $e.networkPolicy.databasePort }}
+    {{- end }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              {{- toYaml (include "kobe.egressPrivateRanges" . | fromJsonArray) | nindent 14 }}
+              {{- /* The proxy refuses deniedCidrs itself; mirrored here (IPv4 only, this rule is IPv4). */ -}}
+              {{- range $e.deniedCidrs }}
+              {{- if not (contains ":" .) }}
+              - {{ . }}
+              {{- end }}
+              {{- end }}
+      ports:
+        {{- range $e.allowedPorts }}
+        - protocol: TCP
+          port: {{ int . }}
+        {{- end }}
+    {{- range $e.allowedInternalCidrs }}
+    - to:
+        - ipBlock:
+            cidr: {{ . }}
+      ports:
+        {{- range $e.allowedPorts }}
+        - protocol: TCP
+          port: {{ int . }}
+        {{- end }}
+    {{- end }}
+    {{- with $e.networkPolicy.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}

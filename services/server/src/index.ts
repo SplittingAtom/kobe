@@ -5,6 +5,7 @@ import { isolationAuditor } from "./audit/isolation.js";
 import { BreakGlassSweeper } from "./break-glass/sweeper.js";
 import { loadConfig } from "./config.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
+import { EgressBlockedRelay } from "./egress/blocked-relay.js";
 import { createIsolationGate } from "./isolation/gate.js";
 import { listRuntimeClasses } from "./isolation/kubernetes.js";
 import { logger } from "./logger.js";
@@ -74,6 +75,13 @@ const breakGlassSweeper = deps ? new BreakGlassSweeper(deps) : undefined;
 breakGlassSweeper?.start();
 isolation.start().catch((err: unknown) => logger.error({ err }, "isolation check failed"));
 
+// Blocked egress attempts → `egress.blocked` run events (KOBE-38); every server replica listens.
+const egressRelay =
+  deps && config.process === "server"
+    ? new EgressBlockedRelay({ db: deps.database.db, connectionString: config.databaseUrl })
+    : undefined;
+egressRelay?.start();
+
 // Sandbox provider (KOBE-22); the scheduler starts sandboxes through it from KOBE-64 on.
 const sandbox =
   config.process === "server"
@@ -129,6 +137,7 @@ function shutdown(signal: string): void {
   stopReconciler?.();
   sandboxServer?.close();
   deps?.auditAnchor.stop();
+  void egressRelay?.close();
   breakGlassSweeper?.stop();
   // End event streams first so browsers reconnect (with Last-Event-ID) to another replica.
   void deps?.eventStream.hub.close();

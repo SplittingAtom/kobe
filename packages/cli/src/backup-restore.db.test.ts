@@ -16,6 +16,7 @@ import {
 import type { StoredObject } from "./objects.js";
 import { runRestore, type RestoreOptions } from "./restore.js";
 import { RestrictGuard } from "./restrict-guard.js";
+import { isSeeded } from "./seeded.js";
 import {
   BLOB_REFS,
   OBJECTS,
@@ -478,8 +479,12 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
         (err: unknown) => err as Error,
       );
       expect(error?.message).toMatch(/rolled back[\s\S]*widgets has 3 rows, the backup has 4/);
-      for (const t of manifest.tables)
-        expect(await rowsOf(dst.adminUrl, t.name), t.name).toEqual([]);
+      for (const t of manifest.tables) {
+        // Migration-seeded rows (seeded.ts) are back too: the DELETE was rolled back with the rest.
+        if (isSeeded(t.name))
+          expect((await rowsOf(dst.adminUrl, t.name)).length, t.name).toBeGreaterThan(0);
+        else expect(await rowsOf(dst.adminUrl, t.name), t.name).toEqual([]);
+      }
       expect(await forcedTables(dst.adminUrl)).toEqual(
         expect.arrayContaining(["team_members", "widgets"]),
       );

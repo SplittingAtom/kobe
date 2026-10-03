@@ -220,7 +220,8 @@ const url = (scheme: string, host: string, port: number, defaultPort: number): s
 
 function sandboxEnv(s: SandboxSettings): { name: string; value: string }[] {
   const e = s.endpoints;
-  const egress = url("http", SANDBOX_HOSTS.egressProxy, e.egressProxy.port, 80);
+  // Always with the port: curl and git (libcurl) default a proxy URL without one to 1080, not 80.
+  const egress = `http://${SANDBOX_HOSTS.egressProxy}:${e.egressProxy.port}`;
   const noProxy = [
     SANDBOX_HOSTS.server,
     SANDBOX_HOSTS.modelGateway,

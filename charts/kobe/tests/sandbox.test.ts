@@ -169,7 +169,7 @@ describe("server sandbox configuration", () => {
     expect(sandboxConfig(render({ sandbox: "null" })).warmPool).toEqual({ replicasPerTeam: 1 });
   });
 
-  it("gives the session keys to the server only", () => {
+  it("gives all session keys to the server, and the egress proxy only its own", () => {
     const names = (d: string) =>
       envOf(ms, d)
         .map((e) => e.name)
@@ -180,9 +180,10 @@ describe("server sandbox configuration", () => {
       "KOBE_SESSION_KEY_MODEL_GATEWAY",
       "KOBE_SESSION_KEY_SANDBOX_WIRE",
     ]);
-    for (const d of ["kobe-scheduler", "kobe-web", "kobe-mcp-proxy", "kobe-egress-proxy"]) {
+    for (const d of ["kobe-scheduler", "kobe-web", "kobe-mcp-proxy"]) {
       expect(names(d), d).toEqual([]);
     }
+    expect(names("kobe-egress-proxy")).toEqual(["KOBE_SESSION_KEY_EGRESS_PROXY"]);
   });
 });
 
