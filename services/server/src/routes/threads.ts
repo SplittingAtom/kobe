@@ -10,7 +10,8 @@ import {
   encodeActivityCursor,
   type ActivityCursor,
 } from "../threads/cursor.js";
-import { canCreateInProject, resolveAgentPin, viewerProjectIds } from "../threads/references.js";
+import { latestPinnedVersion, resolveAgentPin } from "../agents/versions.js";
+import { canCreateInProject, viewerProjectIds } from "../threads/references.js";
 import {
   createThread,
   findThread,
@@ -20,6 +21,7 @@ import {
   listTrash,
   restoreThread,
   setLeaf,
+  switchAgentVersion,
   toSummary,
   trashThread,
   updateThread,
@@ -33,6 +35,7 @@ import {
   entriesQuerySchema,
   listThreadsQuerySchema,
   setLeafBodySchema,
+  switchAgentVersionBodySchema,
   trashQuerySchema,
   updateThreadBodySchema,
   uuidSchema,
@@ -46,6 +49,12 @@ const ERRORS = {
   thread_not_found: [404, "No thread with that id."],
   entry_not_found: [404, "That entry is not part of this thread."],
   agent_not_found: [404, "No agent with that id is available in this team."],
+  agent_unavailable: [
+    409,
+    "That agent can't start conversations: it is suspended, archived or not published yet.",
+  ],
+  version_not_found: [404, "That agent has no such published version."],
+  no_agent: [409, "This thread uses the default agent, which has no versions to switch."],
   project_not_found: [404, "No project with that id is available to you."],
   read_only: [403, "This thread is shared with you read-only."],
   thread_busy: [
@@ -165,14 +174,14 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
       if (projectId !== null && !(await canCreateInProject(tx, viewer.userId, projectId))) {
         return "project_not_found" as const;
       }
-      const pin = await resolveAgentPin(tx, viewer.userId, body.agent_id ?? null);
-      if (pin === undefined) return "agent_not_found" as const;
+      // D19: the thread pins the agent's current published version.
+      const pin = await resolveAgentPin(tx, viewer, body.agent_id ?? null);
+      if (!pin.ok) return pin.error;
       return createThread(tx, {
         teamId: viewer.teamId,
         ownerUserId: viewer.userId,
         projectId,
-        agentId: pin?.agentId ?? null,
-        agentVersion: pin?.agentVersion ?? null,
+        agent: pin.value,
         title: body.title ?? null,
       });
     });
@@ -187,8 +196,10 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
       const found = await findThread(tx, viewer, id);
       if (!found) return null;
       const page = await listEntries(tx, viewer, id, query.after, query.limit);
+      const latest = await latestPinnedVersion(tx, { teamId: viewer.teamId, ...found.thread });
       return {
         ...toSummary(found.thread),
+        agent_current_version: latest,
         entries: page.entries,
         next_entries_after: page.nextAfter,
       };
@@ -221,6 +232,13 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     const body = await parseBody(c, setLeafBodySchema);
     if (!id || !body) return invalidRequest(c, "Give the entry_id to continue from.");
     return change(c, (tx, viewer) => setLeaf(tx, viewer, id, body.entry_id));
+  });
+
+  app.post("/:id/agent-version", async (c) => {
+    const id = threadIdParam(c);
+    const body = await parseBody(c, switchAgentVersionBodySchema);
+    if (!id || !body) return invalidRequest(c, "Give the version to switch to, or nothing.");
+    return change(c, (tx, viewer) => switchAgentVersion(tx, viewer, id, body.version));
   });
 
   app.delete("/:id", async (c) => {

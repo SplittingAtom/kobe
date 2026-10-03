@@ -30,6 +30,13 @@ describe("team agents (D8, D19)", () => {
     expect(access("team_admin", team(OTHER)).edit).toBe(true);
   });
 
+  it("lets builders publish their own agents and team admins publish any (D8, KOBE-46)", () => {
+    expect(access("member", team(ME)).publish).toBe(false);
+    expect(access("builder", team(ME)).publish).toBe(true);
+    expect(access("builder", team(OTHER)).publish).toBe(false);
+    expect(access("team_admin", team(OTHER)).publish).toBe(true);
+  });
+
   it("lets only team admins suspend", () => {
     expect(access("builder", team(ME)).setStatus).toBe(false);
     expect(access("team_admin", team(OTHER)).setStatus).toBe(true);
@@ -42,6 +49,7 @@ describe("personal agents (D6, D9)", () => {
       see: true,
       readDefinition: true,
       edit: true,
+      publish: true,
       setStatus: false,
     });
   });
@@ -51,6 +59,7 @@ describe("personal agents (D6, D9)", () => {
       see: false,
       readDefinition: false,
       edit: false,
+      publish: false,
       setStatus: false,
     });
   });
@@ -62,6 +71,7 @@ describe("gallery agents (D19, D21)", () => {
       see: true,
       readDefinition: true,
       edit: false,
+      publish: false,
       setStatus: false,
     });
   });

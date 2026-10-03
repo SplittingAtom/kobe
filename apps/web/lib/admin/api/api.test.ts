@@ -214,7 +214,12 @@ describe("team resources name the active team on every call", () => {
       "DELETE /v1/team/invites/i1",
       undefined,
     ],
-    ["agents", () => teamAgents.listTeamAgents("t-1"), "GET /v1/agents?scope=team", { agents: [] }],
+    [
+      "agents",
+      () => teamAgents.listTeamAgents("t-1"),
+      "GET /v1/agents?scope=team&include_archived=true",
+      { agents: [] },
+    ],
     [
       "suspend",
       () => teamAgents.setTeamAgentStatus("t-1", "a1", "suspended"),

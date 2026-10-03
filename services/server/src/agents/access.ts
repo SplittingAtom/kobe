@@ -25,41 +25,47 @@ export interface AgentAccess {
   readonly see: boolean;
   /** Full definition (frontmatter + prompt) and export. */
   readonly readDefinition: boolean;
-  /** Replace the draft or delete the agent. */
+  /** Replace the draft, delete (or archive) the agent, unarchive it. */
   readonly edit: boolean;
+  /** Publish the draft as a new version, or roll back to an older one (KOBE-46). */
+  readonly publish: boolean;
   /** Suspend or reactivate (team agents, team admins). */
   readonly setStatus: boolean;
 }
 
-const NONE: AgentAccess = { see: false, readDefinition: false, edit: false, setStatus: false };
+const NONE: AgentAccess = {
+  see: false,
+  readDefinition: false,
+  edit: false,
+  publish: false,
+  setStatus: false,
+};
 
 export function agentAccess(actor: AgentActor, agent: AgentRef): AgentAccess {
   const { role } = actor;
   switch (agent.scope) {
     case "team": {
       const builder = teamRoleAllows(role, "team.agents.build");
-      const own = agent.ownerUserId === actor.userId;
+      const mine = agent.ownerUserId === actor.userId || teamRoleAllows(role, "team.agents.manage");
       return {
         see: teamRoleAllows(role, "team.agents.use"),
         readDefinition: builder,
-        edit: builder && (own || teamRoleAllows(role, "team.agents.manage")),
+        edit: builder && mine,
+        // D8: builders publish (their own agents), team admins publish any team agent.
+        publish: teamRoleAllows(role, "team.agents.publish") && mine,
         setStatus: teamRoleAllows(role, "team.agents.suspend"),
       };
     }
     case "personal": {
       // Someone else's personal agent does not exist as far as the caller is concerned.
       if (agent.ownerUserId !== actor.userId) return NONE;
-      return {
-        see: true,
-        readDefinition: true,
-        edit: teamRoleAllows(role, "team.personal.create"),
-        setStatus: false,
-      };
+      const own = teamRoleAllows(role, "team.personal.create");
+      return { see: true, readDefinition: true, edit: own, publish: own, setStatus: false };
     }
     case "gallery": {
       // Install-wide, admin-curated and read-only to teams; teams fork (D19).
       const use = teamRoleAllows(role, "team.agents.use");
-      return { see: use, readDefinition: use, edit: false, setStatus: false };
+      return { see: use, readDefinition: use, edit: false, publish: false, setStatus: false };
     }
   }
 }
@@ -83,5 +89,6 @@ export const GALLERY_ADMIN_ACCESS: AgentAccess = {
   see: true,
   readDefinition: true,
   edit: true,
+  publish: true,
   setStatus: true,
 };
