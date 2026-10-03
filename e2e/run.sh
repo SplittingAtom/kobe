@@ -463,4 +463,62 @@ contains "a signed token for a sandbox that does not exist is refused (401)" '^d
 contains "the wire endpoint is not on the user-facing ingress" 'HTTP/1.1 (401|404)' \
   "$(ingress GET /v1/sandbox/connect)"
 
+# KOBE-30: messages and runs through the server API against the in-cluster Postgres. No model or
+# agent answers yet, so the run is stopped while its start waits for the (unwoken) sandbox.
+echo "==> runs (KOBE-30)"
+owner_id=$(psql_kobe "SELECT id FROM users WHERE email = 'owner@e2e.test'")
+psql_kobe "INSERT INTO team_members (team_id, user_id, role) VALUES ('$E2E_TEAM_ID', '$owner_id', 'member') ON CONFLICT DO NOTHING;" >/dev/null
+read -r -d '' RUNS_JS <<'JS' || true
+const [team] = process.argv.slice(1);
+const base = "http://127.0.0.1:" + process.env.PORT;
+const origin = new URL(process.env.KOBE_PUBLIC_URL).origin;
+const jar = new Map();
+const call = async (method, path, body) => {
+  const res = await fetch(base + path, {
+    method,
+    headers: {
+      origin,
+      "content-type": "application/json",
+      "x-kobe-team": team,
+      cookie: [...jar].map(([k, v]) => k + "=" + v).join("; "),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  for (const c of res.headers.getSetCookie()) {
+    const [pair] = c.split(";");
+    const at = pair.indexOf("=");
+    jar.set(pair.slice(0, at), pair.slice(at + 1));
+  }
+  const text = await res.text();
+  let json = {};
+  try { json = JSON.parse(text); } catch {}
+  return { status: res.status, json, text };
+};
+const out = (k, v) => console.log(k + "=" + v);
+out("signin", (await call("POST", "/api/auth/sign-in/email", { email: "owner@e2e.test", password: "e2e owner password" })).status);
+out("active", (await call("PUT", "/v1/me/teams/active", { teamId: team })).status);
+const thread = await call("POST", "/v1/threads", { title: "e2e" });
+const id = thread.json.thread_id;
+const first = await call("POST", "/v1/threads/" + id + "/messages", { content: "hello" });
+out("message", first.status + ":" + first.json.queued);
+const second = await call("POST", "/v1/threads/" + id + "/messages", { content: "again" });
+out("queued", second.status + ":" + second.json.queued + ":" + second.json.run_id);
+out("run", (await call("GET", "/v1/runs/" + first.json.run_id)).json.status);
+out("cancel", (await call("POST", "/v1/runs/" + first.json.run_id + "/cancel")).json.status);
+out("cancel2", (await call("POST", "/v1/runs/" + second.json.run_id + "/cancel")).json.status);
+const events = await call("GET", "/v1/runs/" + first.json.run_id + "/events");
+out("events", (events.text.match(/^event: .*$/gm) || []).map((l) => l.slice(7)).join(","));
+out("retry", (await call("POST", "/v1/runs/" + first.json.run_id + "/retry")).json.code);
+JS
+runs_out=$($KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$RUNS_JS" "$E2E_TEAM_ID" 2>&1 | tail -12)
+printf '     runs: %s\n' "$(printf '%s' "$runs_out" | tr '\n' ' ')"
+contains "a team member signs in and selects the team" '^active=200$' "$runs_out"
+contains "a message starts a run at once on an idle thread" '^message=201:false$' "$runs_out"
+contains "a second message queues behind the active run" '^queued=201:true:' "$runs_out"
+contains "the run is running while its sandbox start is pending" '^run=running$' "$runs_out"
+contains "Stop cancels the active run" '^cancel=cancelled$' "$runs_out"
+contains "Stop deletes the queued message (or stops it once it started)" '^cancel2=cancelled$' "$runs_out"
+contains "the event stream records the start and the stop, then ends" '^events=run.started,run.interrupted$' "$runs_out"
+contains "a cancelled run cannot be retried (interrupted runs only)" '^retry=invalid_transition$' "$runs_out"
+
 exit "$failed"

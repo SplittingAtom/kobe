@@ -61,6 +61,12 @@ const isolation = createIsolationGate({
     }
   },
 });
+// New runs are refused at once while the isolation runtime is missing (sandbox creation enforces
+// it regardless through isolation.require()).
+deps?.runs.useIsolation(() => {
+  const { state } = isolation.status();
+  return state === "verified" ? "available" : state;
+});
 // Audit chain head in the server log at startup and every 5 minutes (KOBE-15): ship it off the box.
 deps?.auditAnchor.start();
 // Break-glass grants end at expires_at on their own; this records the end and notifies (KOBE-16).
