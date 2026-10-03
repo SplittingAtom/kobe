@@ -63,6 +63,20 @@ sandbox:
     idleMinutes: 15
     # How often each server replica looks for idle sandboxes.
     sweepSeconds: 60
+  # Durable copy of every sandbox's /workspace in object storage (s3.*), so losing or rebuilding a
+  # volume loses no files (KOBE-27). The server brokers every transfer on its sandbox port:
+  # sandboxes hold no storage credentials and gain no network access. Off without s3.bucket.
+  workspaceSync:
+    enabled: true
+    # Sandboxes push changes this often (also after every run and before hibernating).
+    pushIntervalSeconds: 60
+    # Larger files are not synced (they stay on the volume only).
+    maxFileSize: 1Gi
+    # Per workspace; empty = the /workspace volume size. Teams' storage quota (D26) comes later.
+    maxWorkspaceSize: ""
+    maxFiles: 100000
+    # How often each server replica collects unreferenced content and old deletion markers.
+    collectSeconds: 3600
   # Secret with keys sandbox-wire, model-gateway, mcp-proxy, egress-proxy (>= 32 chars each, all
   # different): HMAC keys of the per-audience sandbox session tokens. Empty: generated, kept.
   sessionKeysSecret: ""

@@ -8,9 +8,14 @@ import {
   sandboxes,
   threads,
   users,
+  workspaceBlobs,
+  workspaceFiles,
+  workspaceSync,
 } from "../../schema/index.js";
 import type { sandbox } from "../../tenancy/sandbox.js";
 import type { ProbeFixture } from "./types.js";
+
+const PROBE_SHA = "b".repeat(64);
 
 async function insertRun(
   tx: KobeTx,
@@ -72,5 +77,29 @@ export const sandboxFixtures: Record<(typeof sandbox.team)[number], ProbeFixture
     await tx
       .insert(sandboxes)
       .values({ teamId, userId, sandboxId: randomUUID(), state: "hibernated" });
+  },
+  workspace_sync: async (tx, teamId) => {
+    const { userId } = await insertRun(tx, teamId);
+    await tx
+      .insert(workspaceSync)
+      .values({ teamId, userId, headRev: 1, liveFiles: 1, liveBytes: 3 });
+  },
+  workspace_files: async (tx, teamId) => {
+    const { userId } = await insertRun(tx, teamId);
+    await tx.insert(workspaceFiles).values({
+      teamId,
+      userId,
+      path: "probe.txt",
+      rev: 1,
+      sha256: PROBE_SHA,
+      blobKey: `teams/${teamId}/users/${userId}/workspace/${PROBE_SHA}`,
+      size: 3,
+      mtimeMs: 0,
+      origin: "sandbox",
+    });
+  },
+  workspace_blobs: async (tx, teamId) => {
+    const { userId } = await insertRun(tx, teamId);
+    await tx.insert(workspaceBlobs).values({ teamId, userId, sha256: PROBE_SHA, size: 3 });
   },
 };

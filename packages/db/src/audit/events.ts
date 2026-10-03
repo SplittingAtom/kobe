@@ -87,6 +87,12 @@ export const SANDBOX_LIMITS = [
   "run_events",
   "run_bytes",
   "thread_entries",
+  // Workspace sync (KOBE-27): a push refused for size, count or quota, or bytes that did not hash
+  // to the name they were uploaded under.
+  "workspace_bytes",
+  "workspace_files",
+  "workspace_file_size",
+  "workspace_integrity",
 ] as const;
 
 const event = <const S extends AuditScope, T extends z.ZodRawShape>(scope: S, shape: T) => ({
@@ -388,6 +394,23 @@ export const AUDIT_EVENTS = {
     limit: z.enum(SANDBOX_LIMITS),
     runId: id.optional(),
   }),
+
+  // ── workspace: the durable S3 copy of each sandbox's /workspace (KOBE-27, D12, D15, D26) ──
+  /**
+   * A sandbox restored its workspace onto an empty volume from the durable copy (rebuild after a
+   * lost or new volume). Counts are the sandbox's own report (system actor).
+   */
+  "workspace.restored": event("team", {
+    sandboxId: id,
+    userId: id,
+    files: count,
+    bytes: count,
+    durationMs: count,
+  }),
+  /** A workspace file was copied to a durable shared object (KOBE-54 `share_file`). */
+  "workspace.file_shared": event("team", { userId: id, sharedId: id, bytes: count }),
+  /** Unreferenced workspace blobs and old tombstones were purged (system; counts only, D18). */
+  "workspace.purged": event("team", { userId: id, blobs: count, bytes: count, tombstones: count }),
 
   // ── agent: definitions (D19); team agents in the team view, personal and gallery install-only ──
   "agent.created": event("any", {

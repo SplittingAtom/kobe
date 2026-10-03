@@ -88,8 +88,50 @@ export const sandboxSettingsSchema = z.strictObject({
       sweepSeconds: z.number().int().min(10).max(3600),
     })
     .default({ enabled: true, idleMinutes: 15, sweepSeconds: 60 }),
+  /**
+   * KOBE-27: /workspace ↔ S3 through the server. Sandboxes push changes every
+   * `pushIntervalSeconds` (and after each run, and when stopping for hibernation) and restore
+   * before their first run. Limits per workspace; `maxWorkspaceSize` defaults to the volume size.
+   * Needs object storage (`s3.*`); without it the endpoints are off and sandboxes skip sync.
+   */
+  workspaceSync: z
+    .strictObject({
+      enabled: z.boolean(),
+      pushIntervalSeconds: z.number().int().min(5).max(3600),
+      maxFileSize: quantity,
+      maxWorkspaceSize: quantity.optional(),
+      maxFiles: z.number().int().min(1).max(1_000_000),
+      collectSeconds: z.number().int().min(60).max(86_400),
+    })
+    .default({
+      enabled: true,
+      pushIntervalSeconds: 60,
+      maxFileSize: "1Gi",
+      maxFiles: 100_000,
+      collectSeconds: 3600,
+    }),
 });
 export type SandboxSettings = z.infer<typeof sandboxSettingsSchema>;
+
+const QUANTITY_FACTORS: Readonly<Record<string, number>> = {
+  "": 1,
+  m: 0.001,
+  k: 1e3,
+  M: 1e6,
+  G: 1e9,
+  T: 1e12,
+  Ki: 2 ** 10,
+  Mi: 2 ** 20,
+  Gi: 2 ** 30,
+  Ti: 2 ** 40,
+};
+
+/** A Kubernetes quantity (as validated by the schema) in bytes, rounded down. */
+export function quantityBytes(q: string): number {
+  const m = /^(\d+(?:\.\d+)?)(m|k|M|G|T|Ki|Mi|Gi|Ti)?$/.exec(q);
+  if (!m?.[1]) throw new Error(`not a quantity: ${q}`);
+  return Math.floor(Number(m[1]) * (QUANTITY_FACTORS[m[2] ?? ""] ?? 1));
+}
 
 /** KOBE_SESSION_KEY_<AUDIENCE>: one HMAC key per audience (≥ 32 chars). */
 export const sessionKeyEnvName = (audience: SessionTokenAudience): string =>

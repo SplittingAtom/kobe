@@ -14,6 +14,13 @@ import { createSandboxApp } from "./routes/sandbox.js";
 import { createSandboxRuntime } from "./sandbox/runtime.js";
 import { providerLiveness, sandboxWireVerifier } from "./sandbox-wire/provider-auth.js";
 import { createDeferredWaker, createSandboxLifecycle } from "./sandbox-lifecycle/index.js";
+import { quantityBytes } from "./sandbox/config.js";
+import {
+  createS3ObjectStore,
+  createSandboxAuthenticator,
+  createWorkspaceSync,
+  loadS3Settings,
+} from "./workspace-sync/index.js";
 
 /** Open streams (SSE) get this long to finish before being cut; stays under k8s' 30 s grace period. */
 const DRAIN_TIMEOUT_MS = 10_000;
@@ -97,6 +104,31 @@ if (config.process === "server" && !sandbox) {
   );
 }
 
+// Workspace sync (KOBE-27): /workspace ↔ S3, brokered by the server on the sandbox listener so
+// sandboxes never hold object-store credentials. Off without a bucket (s3.bucket) or when disabled.
+const s3 = loadS3Settings(process.env);
+const syncSettings = sandbox?.settings.workspaceSync;
+const workspaceSync =
+  sandbox && deps && s3 && syncSettings?.enabled
+    ? createWorkspaceSync({
+        db: deps.database.db,
+        objects: createS3ObjectStore(s3),
+        prefix: s3.prefix,
+        limits: {
+          maxFileBytes: quantityBytes(syncSettings.maxFileSize),
+          maxWorkspaceBytes: quantityBytes(
+            syncSettings.maxWorkspaceSize ?? sandbox.settings.workspace.size,
+          ),
+          maxFiles: syncSettings.maxFiles,
+        },
+        log: logger,
+      })
+    : undefined;
+if (sandbox && syncSettings?.enabled && !s3) {
+  logger.warn("object storage is not configured (s3.bucket): workspace sync is off");
+}
+const stopCollector = workspaceSync?.startCollector((syncSettings?.collectSeconds ?? 3600) * 1000);
+
 // The scheduler serves health endpoints only (its jobs arrive in KOBE-64).
 const server = serve(
   {
@@ -112,7 +144,20 @@ const server = serve(
 const sandboxServer = sandbox
   ? serve(
       {
-        fetch: createSandboxApp(sandbox).fetch,
+        fetch: createSandboxApp({
+          ...sandbox,
+          ...(workspaceSync && deps
+            ? {
+                workspace: workspaceSync.routes(
+                  createSandboxAuthenticator({
+                    db: deps.database.db,
+                    verify: sandboxWireVerifier(sandbox.sessionKeys),
+                    liveness: providerLiveness(sandbox.provider, deps.database.db),
+                  }),
+                ),
+              }
+            : {}),
+        }).fetch,
         port: sandbox.settings.endpoints.server.targetPort,
       },
       (info) => logger.info({ port: info.port }, "sandbox listener"),
@@ -155,6 +200,7 @@ function shutdown(signal: string): void {
   isolation.stop();
   stopReconciler?.();
   stopHibernation?.();
+  stopCollector?.();
   sandboxServer?.close();
   deps?.auditAnchor.stop();
   void egressRelay?.close();
