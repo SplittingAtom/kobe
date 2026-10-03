@@ -183,6 +183,20 @@
       "when": 1791032154212,
       "tag": "0025_thread_queue_pause",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1791034201729,
+      "tag": "0026_egress",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1791034202129,
+      "tag": "0027_egress_rls",
+      "breakpoints": true
     }
   ]
 }
