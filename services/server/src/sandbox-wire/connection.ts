@@ -584,7 +584,11 @@ export class SandboxConnection implements RegisteredConnection {
       await this.#registry.unregister(this);
       return;
     }
-    if (!current) {
+    if (current === "hibernating") {
+      this.close("hibernating", "sandbox is hibernated");
+      return;
+    }
+    if (current === "replaced") {
       this.close("replaced", "a newer connection of this sandbox registered first");
       return;
     }

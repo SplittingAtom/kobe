@@ -165,8 +165,25 @@ describe("server sandbox configuration", () => {
     });
   });
 
+  it("hibernates idle sandboxes after 15 minutes by default (D14), configurable within 5-60", () => {
+    expect(sandboxConfig(ms).hibernation).toEqual({
+      enabled: true,
+      idleMinutes: 15,
+      sweepSeconds: 60,
+    });
+    expect(
+      sandboxConfig(render({ "sandbox.hibernation.idleMinutes": "30" })).hibernation,
+    ).toMatchObject({ idleMinutes: 30 });
+    expect(renderError({ "sandbox.hibernation.idleMinutes": "2" })).toMatch(/idleMinutes|minimum/);
+    expect(renderError({ "sandbox.hibernation.idleMinutes": "90" })).toMatch(/idleMinutes|maximum/);
+  });
+
   it("defaults the sandbox key so `helm upgrade --reuse-values` keeps working", () => {
     expect(sandboxConfig(render({ sandbox: "null" })).warmPool).toEqual({ replicasPerTeam: 1 });
+    expect(sandboxConfig(render({ sandbox: "null" })).hibernation).toMatchObject({
+      enabled: true,
+      idleMinutes: 15,
+    });
   });
 
   it("gives the session keys to the server only", () => {

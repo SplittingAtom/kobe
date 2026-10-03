@@ -18,6 +18,7 @@ import {
   TEAM_NAMESPACE_PREFIX,
 } from "./constants.js";
 import { KubeApiError, isKubeStatus, type KubeClient, type ObjectRef } from "./kube.js";
+import { replacingPatch } from "./merge-patch.js";
 import {
   assertTeamRef,
   assertUserId,
@@ -29,6 +30,7 @@ import {
   pullSecretManifest,
   resourceQuotaManifest,
   sandboxClaimManifest,
+  sandboxPodSpec,
   sandboxServiceAccountManifest,
   sandboxTemplateManifest,
   serverRoleBindingManifest,
@@ -84,6 +86,18 @@ export class SandboxAuthError extends Error {
     this.name = "SandboxAuthError";
   }
 }
+
+/** Outcome of {@link SandboxProvider.hibernateSandbox}. */
+export type HibernateOutcome = "suspended" | "already_suspended" | "not_found";
+
+export interface WakeResult {
+  readonly handle: SandboxHandle & { readonly state: "running" };
+  /** True when this call resumed a hibernated sandbox (false: it was running, or new). */
+  readonly resumed: boolean;
+}
+
+/** The `/workspace` PVC agent-sandbox creates for a Sandbox (volumeClaimTemplate `workspace`). */
+export const workspacePvcName = (sandboxName: string): string => `workspace-${sandboxName}`;
 
 export interface SandboxHandle {
   /** SandboxClaim UID: the session token `sub`. */
@@ -151,6 +165,20 @@ export interface SandboxProvider {
   ensureTeam(team: TeamRef, isolation: VerifiedIsolation): Promise<string>;
   /** The (user, team) sandbox, created from the warm pool if it does not exist yet. */
   ensureSandbox(team: TeamRef, userId: string): Promise<SandboxHandle>;
+  /**
+   * The (user, team) sandbox, running (KOBE-25, D14): created if missing, resumed if hibernated.
+   * A resume calls isolation.require() first, re-applies the pod template built from the current
+   * settings with that VerifiedIsolation, sets `operatingMode: Running` (guarded by the Sandbox's
+   * resourceVersion, so concurrent wakes resume once), then verifies the new pod like
+   * ensureSandbox (deleted on a RuntimeClass/handler mismatch, KOBE-9).
+   */
+  wakeSandbox(team: TeamRef, userId: string): Promise<WakeResult>;
+  /**
+   * Hibernates `sandboxId` (D14): `operatingMode: Suspended` — agent-sandbox deletes the pod and
+   * keeps the claim and its volume. Idempotent; no isolation check (stopping is always safe). The
+   * caller decides when (KOBE-25 hibernator, under the sandbox row's lock).
+   */
+  hibernateSandbox(team: TeamRef, userId: string, sandboxId: string): Promise<HibernateOutcome>;
   /**
    * Whether `sandboxId` is still the live sandbox of (team, user): its claim `u-<user>` exists in
    * the team namespace with that UID, is not being deleted, and is annotated for that team and
@@ -427,7 +455,45 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     return claim;
   };
 
-  const ensureSandbox = async (team: TeamRef, userId: string): Promise<SandboxHandle> => {
+  /**
+   * Re-applies the pod template from the current settings and sets Running, guarded by the
+   * resourceVersion read with it. False when the Sandbox changed meanwhile (409): re-read it.
+   */
+  const resume = async (
+    namespace: string,
+    sandbox: KubeObject,
+    verified: VerifiedIsolation,
+  ): Promise<boolean> => {
+    const next = sandboxPodSpec(verified, settings, await endpointAddresses());
+    const current = field(sandbox, "spec", "podTemplate", "spec");
+    try {
+      await kube.patch(
+        SANDBOX(namespace, sandbox.metadata.name),
+        {
+          spec: {
+            operatingMode: "Running",
+            podTemplate: { spec: replacingPatch(current, next) },
+          },
+        },
+        sandbox.metadata.resourceVersion
+          ? { resourceVersion: sandbox.metadata.resourceVersion }
+          : {},
+      );
+      return true;
+    } catch (err) {
+      if (isKubeStatus(err, 409)) return false;
+      throw err;
+    }
+  };
+
+  const ensureSandbox = (team: TeamRef, userId: string): Promise<SandboxHandle> =>
+    provision(team, userId, false).then((r) => r.handle);
+
+  const provision = async (
+    team: TeamRef,
+    userId: string,
+    wake: boolean,
+  ): Promise<{ handle: SandboxHandle; resumed: boolean }> => {
     assertTeamRef(team);
     assertUserId(userId);
     // KOBE-9: a fresh check immediately before creating anything that runs agent code.
@@ -439,6 +505,7 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     const owner = { teamId: team.id, userId, sandboxId };
 
     const deadline = now() + podWaitTimeoutMs;
+    let resumed = false;
     for (let attempt = 0; ; attempt++) {
       const current = await kube.get(CLAIM(namespace, name));
       if (!current || current.metadata.uid !== sandboxId) {
@@ -447,6 +514,15 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
       const sandboxName = str(current, "status", "sandbox", "name");
       const sandbox = sandboxName ? await kube.get(SANDBOX(namespace, sandboxName)) : undefined;
       if (sandbox && sandboxName) {
+        const suspended = str(sandbox, "spec", "operatingMode") === "Suspended";
+        if (suspended && wake) {
+          // The stored template is replaced wholesale (built with `verified`), then re-checked.
+          if (await resume(namespace, sandbox, verified)) resumed = true;
+          else if (now() >= deadline) {
+            throw new SandboxProvisioningError(`Sandbox ${namespace}/${name} could not be resumed`);
+          } else await sleep(Math.min(100 * 2 ** attempt, 1000));
+          continue;
+        }
         const templateClass = str(sandbox, "spec", "podTemplate", "spec", "runtimeClassName");
         if (templateClass !== verified.runtimeClassName) {
           return rejectAndDelete(
@@ -456,15 +532,21 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
             `its template uses "${templateClass ?? "none"}"`,
           );
         }
-        if (str(sandbox, "spec", "operatingMode") === "Suspended") {
-          return { sandboxId, namespace, claimName: name, sandboxName, state: "suspended" };
+        if (suspended) {
+          return {
+            handle: { sandboxId, namespace, claimName: name, sandboxName, state: "suspended" },
+            resumed,
+          };
         }
         const podName = sandbox.metadata.annotations?.[POD_NAME_ANNOTATION] ?? sandboxName;
         const pod = await kube.get(POD(namespace, podName));
+        // A pod still terminating after a hibernation is not this sandbox's next pod: wait.
         const owned =
+          !pod?.metadata.deletionTimestamp &&
           pod?.metadata.ownerReferences?.some(
             (o) => o.controller && o.kind === "Sandbox" && o.uid === sandbox.metadata.uid,
-          ) && pod.metadata.labels?.[LABEL_CLAIM_UID] === sandboxId;
+          ) &&
+          pod.metadata.labels?.[LABEL_CLAIM_UID] === sandboxId;
         if (pod && owned) {
           const podClass = str(pod, "spec", "runtimeClassName");
           if (podClass !== verified.runtimeClassName) {
@@ -485,7 +567,17 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
               podName,
             );
           }
-          return { sandboxId, namespace, claimName: name, sandboxName, state: "running", podName };
+          return {
+            handle: {
+              sandboxId,
+              namespace,
+              claimName: name,
+              sandboxName,
+              state: "running",
+              podName,
+            },
+            resumed,
+          };
         }
       }
       if (now() >= deadline) {
@@ -494,6 +586,47 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
         );
       }
       await sleep(Math.min(100 * 2 ** attempt, 1000));
+    }
+  };
+
+  const wakeSandbox = async (team: TeamRef, userId: string): Promise<WakeResult> => {
+    const { handle, resumed } = await provision(team, userId, true);
+    if (handle.state !== "running") {
+      throw new SandboxProvisioningError(
+        `Sandbox ${handle.namespace}/${handle.claimName} did not resume`,
+      );
+    }
+    return { handle: { ...handle, state: "running" }, resumed };
+  };
+
+  const hibernateSandbox = async (
+    team: TeamRef,
+    userId: string,
+    sandboxId: string,
+  ): Promise<HibernateOutcome> => {
+    const namespace = teamNamespaceName(team);
+    for (let attempt = 0; ; attempt++) {
+      const claim = await kube.get(CLAIM(namespace, claimName(userId)));
+      if (!claim || claim.metadata.uid !== sandboxId || claim.metadata.deletionTimestamp) {
+        return "not_found";
+      }
+      const sandboxName = str(claim, "status", "sandbox", "name");
+      const sandbox = sandboxName ? await kube.get(SANDBOX(namespace, sandboxName)) : undefined;
+      if (!sandbox) return "not_found";
+      if (str(sandbox, "spec", "operatingMode") === "Suspended") return "already_suspended";
+      try {
+        await kube.patch(
+          SANDBOX(namespace, sandbox.metadata.name),
+          { spec: { operatingMode: "Suspended" } },
+          sandbox.metadata.resourceVersion
+            ? { resourceVersion: sandbox.metadata.resourceVersion }
+            : {},
+        );
+        return "suspended";
+      } catch (err) {
+        // Changed since read (e.g. the claim controller synced metadata): read it again.
+        if (!isKubeStatus(err, 409) || attempt >= 3) throw err;
+      }
     }
   };
 
@@ -656,5 +789,13 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     );
   };
 
-  return { ensureTeam, ensureSandbox, identifyBootstrapToken, reconcileIsolation, isLive };
+  return {
+    ensureTeam,
+    ensureSandbox,
+    wakeSandbox,
+    hibernateSandbox,
+    identifyBootstrapToken,
+    reconcileIsolation,
+    isLive,
+  };
 }

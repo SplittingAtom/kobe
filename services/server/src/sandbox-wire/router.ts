@@ -1,15 +1,22 @@
 import { withTeam, type KobeDb, type SandboxCommandKind } from "@kobe/db";
 import type { Logger } from "pino";
 import type { SandboxBus } from "./bus.js";
-import { enqueueCommand, expireCommand, liveConnection, takeResult } from "./commands.js";
+import {
+  completeCommand,
+  enqueueCommand,
+  expireCommand,
+  liveConnection,
+  takeResult,
+} from "./commands.js";
 import type { WireTuning } from "./constants.js";
 import type { ConnectionRegistry } from "./registry.js";
-import type {
-  CommandOutcome,
-  SandboxRouter,
-  SandboxTarget,
-  SandboxWaker,
-  SendOptions,
+import {
+  SandboxWakeError,
+  type CommandOutcome,
+  type SandboxRouter,
+  type SandboxTarget,
+  type SandboxWaker,
+  type SendOptions,
 } from "./types.js";
 
 interface Waiter {
@@ -157,13 +164,26 @@ export class CommandRouter implements SandboxRouter {
       };
     }
     if (!queued.live) {
-      this.#waker
-        .wake(target)
-        .catch((err: unknown) => this.#log.warn({ err }, "sandbox wake failed"));
+      this.#waker.wake(target).catch((err: unknown) => {
+        this.#log.warn({ err }, "sandbox wake failed");
+        // Waiting cannot help (no isolation runtime, sandbox offboarded): fail the command now.
+        if (err instanceof SandboxWakeError) this.#fail(target.teamId, queued.id, err);
+      });
     } else if (queued.live.replicaId === this.#replicaId) {
       this.#registry.get(queued.live.connectionId)?.pokeCommands();
     }
     return this.#await(target.teamId, queued.id, timeoutMs);
+  }
+
+  #fail(teamId: string, id: string, err: SandboxWakeError): void {
+    withTeam(this.#db, teamId, (tx) =>
+      completeCommand(tx, this.#bus, teamId, id, {
+        ok: false,
+        error: { code: err.code, message: err.message },
+      }),
+    )
+      .then(() => this.onResult(id))
+      .catch((e: unknown) => this.#log.warn({ err: e }, "could not fail a command"));
   }
 
   #await(teamId: string, id: string, timeoutMs: number): Promise<CommandOutcome> {

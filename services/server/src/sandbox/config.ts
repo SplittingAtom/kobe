@@ -8,6 +8,10 @@ import { KOBE_ENDPOINTS, type KobeEndpoint } from "./constants.js";
  * KOBE_SESSION_KEY_* (from the generated Secret). Validated at startup; invalid config fails fast.
  */
 
+/** D14: idle time before hibernation, team range 5–60 minutes. */
+export const IDLE_MINUTES_MIN = 5;
+export const IDLE_MINUTES_MAX = 60;
+
 const quantity = z
   .string()
   .regex(/^\d+(\.\d+)?(m|k|M|G|T|Ki|Mi|Gi|Ti)?$/, "must be a Kubernetes quantity (e.g. 500m, 4Gi)");
@@ -72,6 +76,18 @@ export const sandboxSettingsSchema = z.strictObject({
   homeSize: quantity,
   teamQuota: z.record(z.string().regex(/^[a-z][a-z.-]*$/), quantity),
   warmPool: z.strictObject({ replicasPerTeam: z.number().int().min(0).max(20) }),
+  /**
+   * D14: an awake sandbox hibernates `idleMinutes` after its last activity (teams may set
+   * `teams.settings.sandbox_idle_minutes` within 5–60). Every server replica sweeps every
+   * `sweepSeconds` (jittered); the sandbox row lock keeps them from colliding.
+   */
+  hibernation: z
+    .strictObject({
+      enabled: z.boolean(),
+      idleMinutes: z.number().int().min(IDLE_MINUTES_MIN).max(IDLE_MINUTES_MAX),
+      sweepSeconds: z.number().int().min(10).max(3600),
+    })
+    .default({ enabled: true, idleMinutes: 15, sweepSeconds: 60 }),
 });
 export type SandboxSettings = z.infer<typeof sandboxSettingsSchema>;
 

@@ -15,4 +15,4 @@ export {
 } from "./policy-check.js";
 export type { WireMetrics } from "./context.js";
 export type * from "./types.js";
-export { COMMAND_FAILURES } from "./types.js";
+export { COMMAND_FAILURES, SandboxWakeError } from "./types.js";

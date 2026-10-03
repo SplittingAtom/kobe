@@ -12,6 +12,7 @@ predates the `sandbox` key still renders. Keep in sync with values.yaml.
   "modelGatewayAccess" false
   "teamQuota" (dict "requests.cpu" "20" "requests.memory" "40Gi" "limits.cpu" "40" "limits.memory" "80Gi" "requests.ephemeral-storage" "40Gi" "limits.ephemeral-storage" "160Gi" "requests.storage" "500Gi" "persistentvolumeclaims" "50" "pods" "50")
   "warmPool" (dict "replicasPerTeam" 1)
+  "hibernation" (dict "enabled" true "idleMinutes" 15 "sweepSeconds" 60)
   "sessionKeysSecret" "" -}}
 {{- mustMergeOverwrite $defaults (deepCopy (.Values.sandbox | default dict)) | toJson -}}
 {{- end -}}
@@ -78,7 +79,11 @@ pod labels and port for the team NetworkPolicy).
   "tmpSize" (toString $s.tmpSize)
   "homeSize" (toString $s.homeSize)
   "teamQuota" $quota
-  "warmPool" (dict "replicasPerTeam" (int $s.warmPool.replicasPerTeam))) -}}
+  "warmPool" (dict "replicasPerTeam" (int $s.warmPool.replicasPerTeam))
+  "hibernation" (dict
+    "enabled" $s.hibernation.enabled
+    "idleMinutes" (int $s.hibernation.idleMinutes)
+    "sweepSeconds" (int $s.hibernation.sweepSeconds))) -}}
 {{- end -}}
 
 {{/* Server env: sandbox config and the session-token keys (the server holds all four). */}}
