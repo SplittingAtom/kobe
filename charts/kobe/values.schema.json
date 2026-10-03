@@ -141,6 +141,15 @@
             },
             "storageClass": {
               "type": "string"
+            },
+            "longhornStrictLocal": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                }
+              }
             }
           }
         },
@@ -722,6 +731,15 @@
             "maxLength": 0,
             "description": "smtp.security=none would send SMTP credentials unencrypted"
           }
+        }
+      }
+    },
+    "rancher": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
         }
       }
     }

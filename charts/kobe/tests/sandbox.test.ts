@@ -446,3 +446,67 @@ describe("values.schema.json: sandbox", () => {
     expect(renderError({ "sandbox.tmpSize": "lots" })).toMatch(/tmpSize|pattern|oneOf/i);
   });
 });
+
+describe("workspace storage: Longhorn strict-local (sandbox.workspace.longhornStrictLocal)", () => {
+  it("is off by default: no StorageClass, workspaces on storageClass (cluster default)", () => {
+    const ms = render();
+    expect(byKind(ms, "StorageClass")).toHaveLength(0);
+    expect(sandboxConfig(ms).workspace.storageClass).toBe("");
+    expect(
+      sandboxConfig(render({ "sandbox.workspace.storageClass": "fast" })).workspace.storageClass,
+    ).toBe("fast");
+  });
+
+  it("creates a one-replica strict-local Longhorn class and points workspaces at it", () => {
+    const ms = render({ "sandbox.workspace.longhornStrictLocal.enabled": "true" });
+    const [sc] = byKind(ms, "StorageClass");
+    expect(sc).toMatchObject({
+      provisioner: "driver.longhorn.io",
+      volumeBindingMode: "WaitForFirstConsumer",
+      reclaimPolicy: "Delete",
+      parameters: { numberOfReplicas: "1", dataLocality: "strict-local" },
+    });
+    expect(sc?.metadata.name).toMatch(/^kobe-[0-9a-f]{10}-workspace-strict-local$/);
+    expect(sandboxConfig(ms).workspace.storageClass).toBe(sc?.metadata.name);
+  });
+
+  it("refuses a storageClass together with the strict-local class", () => {
+    expect(
+      renderError({
+        "sandbox.workspace.longhornStrictLocal.enabled": "true",
+        "sandbox.workspace.storageClass": "fast",
+      }),
+    ).toMatch(/either storageClass or longhornStrictLocal/);
+  });
+});
+
+describe("Rancher (rancher.enabled)", () => {
+  const rancherRoles = (ms: Manifest[]) =>
+    ms.filter(
+      (m) =>
+        (m.kind === "ClusterRole" || m.kind === "ClusterRoleBinding") &&
+        m.metadata.name.endsWith("-rancher-updatepsa"),
+    );
+
+  it("grants nothing by default", () => {
+    expect(rancherRoles(render())).toHaveLength(0);
+  });
+
+  it("grants the server's ServiceAccount updatepsa on Rancher projects, and nothing else", () => {
+    const ms = render({ "rancher.enabled": "true" });
+    const [role, binding] = rancherRoles(ms);
+    expect(role?.kind).toBe("ClusterRole");
+    expect(role?.rules).toEqual([
+      { apiGroups: ["management.cattle.io"], resources: ["projects"], verbs: ["updatepsa"] },
+    ]);
+    expect(binding?.kind).toBe("ClusterRoleBinding");
+    expect(binding?.roleRef).toMatchObject({ kind: "ClusterRole", name: role?.metadata.name });
+    expect(binding?.subjects).toEqual([
+      { kind: "ServiceAccount", name: "kobe-server", namespace: "kobe" },
+    ]);
+  });
+
+  it("rejects unknown keys", () => {
+    expect(renderError({ "rancher.project": "x" })).toMatch(/project|additional/i);
+  });
+});

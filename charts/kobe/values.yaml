@@ -36,6 +36,12 @@ sandbox:
     # "" uses the cluster default (k3s: local-path, which pins a sandbox to its node; use
     # Longhorn on multi-node clusters).
     storageClass: ""
+    # Longhorn only: create a StorageClass with one replica on the sandbox's own node
+    # (dataLocality strict-local) and use it for workspaces. Wakes attach a local replica (faster
+    # cold start); a lost node loses its sandboxes' volumes, which are restored from the S3
+    # workspace sync (docs/install.md). Leave storageClass empty when enabling this.
+    longhornStrictLocal:
+      enabled: false
   # /tmp and $HOME are emptyDirs, wiped on hibernate.
   tmpSize: 2Gi
   homeSize: 1Gi
@@ -68,6 +74,11 @@ sandbox:
   # Also approval-hmac (>= 32 chars): signs tool-call approvals (KOBE-37); without it every call
   # that needs approval is denied.
   sessionKeysSecret: ""
+
+# Rancher-managed clusters: grant the server's ServiceAccount `updatepsa` on Rancher projects, which
+# Rancher's namespace webhook requires to create the (Pod Security labelled) team namespaces.
+rancher:
+  enabled: false
 
 # Public origin users reach Kobe at (cookies, WebAuthn relying party). Defaults to
 # http(s)://<ingress.host>; set it when Kobe sits behind another proxy or ingress is disabled.

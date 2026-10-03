@@ -78,6 +78,18 @@ export class SandboxProvisioningError extends Error {
   }
 }
 
+/** Rancher's namespace admission webhooks (`rancher.cattle.io.namespaces*`). */
+const RANCHER_NAMESPACE_WEBHOOK = /rancher\.cattle\.io\.namespaces/;
+
+export function rancherRefusal(namespace: string): string {
+  return (
+    `Rancher's namespace webhook (rancher.cattle.io.namespaces) refused team namespace ` +
+    `${namespace}: on Rancher-managed clusters the server's ServiceAccount needs 'updatepsa' on ` +
+    `projects.management.cattle.io to create namespaces with Pod Security labels. Set the chart ` +
+    `value rancher.enabled=true (docs/install.md).`
+  );
+}
+
 /** A bootstrap token did not prove a live Kobe sandbox pod. Detail is for logs only. */
 export class SandboxAuthError extends Error {
   readonly code = "unauthorized";
@@ -319,6 +331,21 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     return Object.fromEntries(entries) as EndpointAddresses;
   };
 
+  /**
+   * Rancher's namespace webhook refuses namespaces with Pod Security labels unless the caller may
+   * `updatepsa` on Rancher projects. Name the webhook and the chart value that grants it.
+   */
+  const applyNamespace = async (namespace: string, team: TeamRef): Promise<void> => {
+    try {
+      await kube.apply(namespaceManifest(team));
+    } catch (err) {
+      if (err instanceof KubeApiError && RANCHER_NAMESPACE_WEBHOOK.test(err.message)) {
+        throw new SandboxProvisioningError(rancherRefusal(namespace));
+      }
+      throw err;
+    }
+  };
+
   const convergeTeam = async (team: TeamRef, verified: VerifiedIsolation): Promise<string> => {
     const namespace = teamNamespaceName(team);
     await checkAdmission();
@@ -335,7 +362,7 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
         throw new SandboxProvisioningError(`Namespace ${namespace} is being deleted; retry later`);
       }
     }
-    await kube.apply(namespaceManifest(team));
+    await applyNamespace(namespace, team);
     await kube.apply(serverRoleBindingManifest(namespace, settings));
     // The NetworkPolicy goes first: no pod may ever run here without default deny.
     await applyWithRbacRetry(networkPolicyManifest(namespace, settings));
