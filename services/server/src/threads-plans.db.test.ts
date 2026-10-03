@@ -5,11 +5,21 @@ import { createTestDatabase, testServerUrl, type TestDatabase } from "@kobe/db/t
 import { lastMirroredEntryId, mirrorEntriesInTx, restoreParts } from "./sandbox-wire/entries.js";
 import { loadRun } from "./sandbox-wire/run-state.js";
 import {
+  bindUserEntry,
+  entryExists,
+  latestInterruptedRow,
+  lockThreadRow,
+  setThreadStatus,
+  touchThread,
+} from "./runs/store.js";
+import { sweepRuns } from "./runs/sweeper.js";
+import {
   findThread,
   listEntries,
   listThreads,
   listTrash,
   setLeaf,
+  switchAgentVersion,
   updateThread,
   type Viewer,
 } from "./threads/repository.js";
@@ -130,10 +140,12 @@ async function plansOf(
 
 /** Every scan of threads/thread_entries is an index scan; team-leading unless `anyIndex`. */
 async function expectIndexed(
-  statements: readonly Captured[],
+  statements: Captured[],
   options: { anyIndex?: boolean } = {},
 ): Promise<void> {
   expect(statements.length, "captured no statement on threads/thread_entries").toBeGreaterThan(0);
+  // The same statement for many teams (e.g. a per-team sweep) is planned once.
+  statements = [...new Map(statements.map((st) => [st.text, st])).values()];
   for (const { text, nodes } of await plansOf(statements)) {
     const relational = nodes.filter(
       (n) => n["Relation Name"] === "threads" || n["Relation Name"] === "thread_entries",
@@ -265,6 +277,36 @@ describe("hot thread queries use the team-leading index with the break-glass pol
       for await (const _part of restoreParts(app.db, teamId, threadId)) {
         // Drains the pages.
       }
+    });
+    await expectIndexed(statements);
+  });
+
+  it("run orchestrator: thread lock, entry check, activity, status, prompt binding, retry lookup (KOBE-30)", async () => {
+    const statements = await capture(() =>
+      inTeamRolledBack(async (tx) => {
+        await lockThreadRow(tx, teamId, threadId);
+        await entryExists(tx, teamId, threadId, "e3");
+        await touchThread(tx, teamId, threadId);
+        await setThreadStatus(tx, teamId, threadId, "idle");
+        await bindUserEntry(tx, teamId, runId);
+        await latestInterruptedRow(tx, teamId, threadId);
+        // KOBE-46: switching the pinned agent version locks the thread first.
+        await switchAgentVersion(tx, viewer(), threadId, undefined);
+      }),
+    );
+    await expectIndexed(statements);
+  });
+
+  it("run sweep across teams (KOBE-30)", async () => {
+    const silent = { error: () => undefined } as unknown as Parameters<typeof sweepRuns>[2];
+    const statements = await capture(async () => {
+      await sweepRuns(
+        app.db,
+        { startDeadlineMs: 60_000, stopResendMs: 60_000, stallMs: 60_000 } as Parameters<
+          typeof sweepRuns
+        >[1],
+        silent,
+      );
     });
     await expectIndexed(statements);
   });

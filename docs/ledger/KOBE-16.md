@@ -35,7 +35,7 @@
   team-referencing reason. Columns per §5.4 plus `status`, `duration_minutes`, `self_approved`,
   `request_expires_at`, `decided_at/by`, `ended_at`. Check constraints: one narrowing at most,
   subject ≠ requester, `(approver = requester) = self_approved`, window ≤ 24 h.
-- **Guard trigger `break_glass_grants_guard` (migration `*_break_glass_guard.sql`, 0022 after the latest rebase; SECURITY INVOKER):** inserts start
+- **Guard trigger `break_glass_grants_guard` (migration `*_break_glass_guard.sql`, 0023 after the latest rebase; SECURITY INVOKER):** inserts start
   `pending` from an active install admin, with DB-stamped times; the request (team, scope, reason,
   duration, legal hold) is immutable; transitions pending→approved|denied|revoked|expired and
   approved→revoked|expired only. On approval: approver is an active install admin and not the
@@ -202,7 +202,8 @@ transaction_read_only = on`; (5) the read, filtered by RLS and again by the quer
   query on `threads` / `thread_entries`.** RLS-only queries pay the cost by design.
   - Audit of every query on the two tables (repository, `thread-search`, event-stream reads,
     sandbox-wire ingest/mirroring/restore/run-state/commands/policy-check from KOBE-24,
-    break-glass reads, restore SQL): all already filter on `team_id` (directly, via
+    break-glass reads, restore SQL; after later merges also KOBE-46's agent-version switch and
+    KOBE-30's run store, orchestrator and run sweep): all already filter on `team_id` (directly, via
     `readableBy`/`inScope`, or by joining on `team_id` from a team-filtered `runs` row). The thread
     list now also states it inline rather than only inside its `scope` expression.
   - Measured:
@@ -218,8 +219,9 @@ transaction_read_only = on`; (5) the read, filtered by RLS and again by the quer
   - Guards:
     - `services/server/src/team-filter.test.ts`: static scan of both packages; fails on a query
       without a team predicate; opt-out `team-filter-ok: <reason>`
-    - `services/server/src/threads-plans.db.test.ts`: EXPLAIN of the captured hot-path SQL as
-      the app role over 300 teams; no seq scans; team-leading indexes entered by an explicit
+    - `services/server/src/threads-plans.db.test.ts`: EXPLAIN of the captured hot-path SQL
+      (repository, sandbox wire, run store and sweep, agent-version switch, search) as the app
+      role over 300 teams; no seq scans; team-leading indexes entered by an explicit
       team; a self-test proves an RLS-only lookup fails it
     - documented in `packages/db/README.md` and `docs/parallel-work.md`
 
