@@ -102,8 +102,9 @@ parallel with the wire and Pi:
   that. `QuotaCheck` is a function of `(tx, {owner, fileBytes, liveFiles, liveBytes})` run inside
   the commit transaction — KOBE-53 passes its per-team quota there. Refusals are audited
   `sandbox.limit_exceeded` (throttled) and not retried until the file changes.
-- **Collection** (every replica, hourly, jittered): blobs no live row references, older than 1 h
-  (an upload waiting for its commit), via a `deleting` marker (mark under the workspace lock →
+- **Collection** (every replica, hourly, jittered): blobs no live row references, 15 min after
+  their upload or their release, whichever is later (an upload waiting for its commit, a reader
+  that just resolved the entry), via a `deleting` marker (mark under the workspace lock →
   delete objects → delete rows) so crashes and concurrent uploads never leave a manifest row
   pointing at a deleted object; tombstones after 7 days (horizon moves; older `since` resyncs).
 - **Audit:** `workspace.restored` (full restore onto an empty volume; counts reported by the
@@ -210,9 +211,13 @@ Isolation was confirmed; the findings were availability (one compromised sandbox
 tenant). Tests: `services/server/src/workspace-sync-limits.db.test.ts` (new) unless noted.
 
 1. **HIGH DB pool exhaustion.** Every DB-backed endpoint now goes through one gate: per sandbox
-   at most **1 commit** and **4 other short transactions** in flight (beyond: 429 at once, no
-   connection taken), per replica at most **4** workspace transactions in total (beyond: 503 +
-   `Retry-After`), so the server's 10-connection pool always has room for the user API. Each
+   at most **1 commit** and **2 other short transactions** in flight (beyond: 429 at once, no
+   connection taken), per replica at most **4** workspace transactions in total (a request waits
+   up to 250 ms for a slot, then 503 + `Retry-After`), so one sandbox can never hold every slot.
+   A download's one-row lookup counts only against the replica (its transfer slot bounds it per
+   sandbox). Ending an upload (record content + release reservation) is never refused: 2
+   dedicated replica slots, same timeouts, retried 3× with backoff on a lock timeout. At most
+   4 + 2 of the server's 10 pool connections serve workspace sync. Each
    transaction sets `lock_timeout` 5 s and `statement_timeout` 30 s (`set_config(…, true)`); a
    timeout answers 503 `retry_later`. Restore reports no longer take the workspace row lock.
    Agent: bounded retries (5, honouring `Retry-After`) for busy answers on non-streamed calls;
@@ -255,8 +260,9 @@ tenant). Tests: `services/server/src/workspace-sync-limits.db.test.ts` (new) unl
     result that fails locally no longer abandons the rest (`#applyResult` per result, the path's
     known state dropped and recomputed). Test: "keeps conflict-copy names within one path
     segment".
-11. **LOW** paths with Unicode format characters (`\p{Cf}`: bidi overrides, zero-width) are
-    invalid (protocol test). Integrity failures have their own action `workspace.integrity_failed`
+11. **LOW** paths with bidirectional controls (U+202A–202E, U+2066–2069, LRM/RLM/ALM) or a BOM
+    are invalid (protocol test). Other format characters (ZWJ/ZWNJ, needed in Persian, Indic and
+    emoji names) stay valid: rejecting all of `\p{Cf}` would silently stop syncing such files. Integrity failures have their own action `workspace.integrity_failed`
     with a `failures` count (one row per minute per sandbox; suppressed mismatches are counted into
     the next row, not dropped). The agent ignores server entries with an invalid path or in its
     excluded area (test "ignores server entries in its own area…").
@@ -267,6 +273,18 @@ tenant). Tests: `services/server/src/workspace-sync-limits.db.test.ts` (new) unl
 - Concurrency: "commits racing collection never leave a manifest row pointing at a deleted
   object" (12 rounds of upload + commit concurrently with collections), and the parallel-uploads
   quota test above.
+- Self-review of the hardening (second round): the upload-finish transaction now runs gated
+  and with timeouts (test "an upload that ends while a commit holds the workspace lock waits
+  briefly and is recorded"); compaction's state is kept even when the cap still isn't cleared
+  (otherwise deletions would be lost to pullers: rows gone, horizon not moved); collection
+  decrements the blob counters as it deletes and recomputes them in a `finally`; a workspace at
+  its upload budget triggers a collection of itself (at most every 5 minutes) and the agent
+  retries 507 on its next push instead of giving up on the file; default grace 1 h → 15 min;
+  the auth cache keeps a per-user generation so a lookup racing a revocation never re-caches.
+  Accepted: a reservation can be released twice if a commit's acknowledgement is lost (counters
+  clamp at 0 and collection recomputes them); released content within its grace still counts
+  against the upload budget (a workspace churning large files can see 507 for up to the grace
+  period, 15 min, before the kicked collection frees it).
 - Migration 0030 regenerated (unmerged): new `workspace_sync` counters, `workspace_blobs.released_at`.
 
 ## Measurements

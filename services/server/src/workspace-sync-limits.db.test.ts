@@ -42,8 +42,8 @@ function env(
   limits: Partial<WorkspaceLimits> = {},
   dbLimits: WorkspaceRoutesDeps["dbLimits"] = {},
   collect: { blobGraceMs?: number; tombstoneTtlMs?: number; batch?: number } = {},
+  objects: MemoryObjects = new MemoryObjects(),
 ): Env {
-  const objects = new MemoryObjects();
   const sync = createWorkspaceSync({
     db: fx.db,
     objects,
@@ -203,9 +203,48 @@ describe("database in-flight caps and lock timeouts", () => {
   });
 });
 
+/** Holds every put until `open()` (an upload still streaming into storage). */
+class GatedObjects extends MemoryObjects {
+  #open: () => void = () => {};
+  readonly #gate = new Promise<void>((r) => (this.#open = r));
+  started = 0;
+  override async put(...args: Parameters<MemoryObjects["put"]>): Promise<void> {
+    this.started += 1;
+    await this.#gate;
+    return super.put(...args);
+  }
+  open(): void {
+    this.#open();
+  }
+}
+
 describe("uploads: reservations and bounds", () => {
+  it("an upload that ends while a commit holds the workspace lock waits briefly and is recorded", async () => {
+    const objects = new GatedObjects();
+    const e = env({}, { lockTimeoutMs: 300 }, {}, objects);
+    const b = await box();
+    const pending = upload(e, b, "late bytes");
+    await expect.poll(() => objects.started).toBe(1); // reserved, streaming into storage
+    const locker = new pg.Client({ connectionString: fx.database.adminUrl });
+    await locker.connect();
+    await locker.query("BEGIN");
+    await locker.query(
+      "SELECT 1 FROM workspace_sync WHERE team_id = $1 AND user_id = $2 FOR UPDATE",
+      [b.teamId, b.person.id],
+    );
+    objects.open();
+    // The finish times out on the lock (300 ms), backs off and retries; the lock goes meanwhile.
+    await new Promise((r) => setTimeout(r, 700));
+    await locker.query("ROLLBACK");
+    await locker.end();
+    expect((await pending).status).toBe(201);
+    const c = await counters(b);
+    expect(c).toMatchObject({ pending_blobs: 0, blob_count: 1 });
+  });
+
   it("never lets concurrent uploads overshoot the byte budget (reserved before accepting bytes)", async () => {
-    const e = env({ maxBlobBytes: 3 << 20 });
+    // Fresh uploads are within the grace period: a collection kicked by the pressure frees nothing.
+    const e = env({ maxBlobBytes: 3 << 20 }, {}, { blobGraceMs: 60 * 60_000 });
     const b = await box();
     const blobs = Array.from({ length: 8 }, (_, i) => Buffer.alloc(1 << 20, i + 1));
     // Busy answers (429/503: in-flight caps) are retried, as the agent does.
@@ -226,7 +265,7 @@ describe("uploads: reservations and bounds", () => {
   });
 
   it("caps the number of uncommitted blobs, and committing them frees room", async () => {
-    const e = env({ maxUncommittedBlobs: 5 });
+    const e = env({ maxUncommittedBlobs: 5 }, {}, { blobGraceMs: 60 * 60_000 });
     const b = await box();
     for (let i = 0; i < 5; i++) expect((await upload(e, b, `blob ${i}`)).status).toBe(201);
     expect((await upload(e, b, "blob 5")).status).toBe(507);

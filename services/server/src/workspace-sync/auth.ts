@@ -40,12 +40,15 @@ export function createSandboxAuthenticator(options: {
 }): SandboxAuthenticator {
   const { db, verify, liveness, cacheMs = AUTH_CACHE_MS, now = () => Date.now() } = options;
   const allowed = new Map<string, number>();
+  /** Bumped by `forget`: a lookup that started before a revocation never caches its answer. */
+  const generations = new Map<string, number>();
 
   const principalAllowed = async (c: SandboxCaller): Promise<boolean> => {
     const key = `${c.teamId}:${c.userId}:${c.sandboxId}`;
     const until = allowed.get(key);
     if (until !== undefined && until > now()) return true;
     allowed.delete(key);
+    const generation = generations.get(c.userId) ?? 0;
     const [account] = await db
       .select({ deactivatedAt: users.deactivatedAt })
       .from(users)
@@ -53,7 +56,7 @@ export function createSandboxAuthenticator(options: {
     if (!account || account.deactivatedAt !== null) return false;
     if ((await getMembership(db, c.teamId, c.userId)) === null) return false;
     if (allowed.size > 10_000) allowed.clear();
-    allowed.set(key, now() + cacheMs);
+    if ((generations.get(c.userId) ?? 0) === generation) allowed.set(key, now() + cacheMs);
     return true;
   };
 
@@ -73,6 +76,8 @@ export function createSandboxAuthenticator(options: {
   };
   return Object.assign(authenticate, {
     forget(userId: string) {
+      if (generations.size > 10_000) generations.clear();
+      generations.set(userId, (generations.get(userId) ?? 0) + 1);
       for (const key of allowed.keys()) if (key.split(":")[1] === userId) allowed.delete(key);
     },
   });

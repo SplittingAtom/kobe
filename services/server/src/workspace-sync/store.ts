@@ -339,16 +339,19 @@ async function compactTombstones(
   };
 }
 
-/** Room for one more row, compacting tombstones if needed. Undefined: the cap is all live files. */
+/**
+ * Room for one more row, compacting tombstones if needed. The returned state always carries what
+ * a compaction did (rows deleted, horizon moved) — callers must keep it even when `ok` is false.
+ */
 async function roomForRow(
   tx: KobeTx,
   owner: WorkspaceOwner,
   state: SyncState,
   maxRows: number,
-): Promise<SyncState | undefined> {
-  if (state.liveFiles + state.tombstones < maxRows) return state;
+): Promise<{ readonly state: SyncState; readonly ok: boolean }> {
+  if (state.liveFiles + state.tombstones < maxRows) return { state, ok: true };
   const compacted = await compactTombstones(tx, owner, state, COMPACT_BATCH);
-  return compacted.liveFiles + compacted.tombstones < maxRows ? compacted : undefined;
+  return { state: compacted, ok: compacted.liveFiles + compacted.tombstones < maxRows };
 }
 
 /**
@@ -424,12 +427,12 @@ export async function commitChanges(
     if (current === undefined) {
       // A new row: live files + tombstones are capped (churn can't grow the manifest forever).
       const room = await roomForRow(tx, owner, state, ctx.maxRows);
-      if (room === undefined) {
+      state = room.state;
+      if (!room.ok) {
         results.push({ status: "rejected", path, code: "too_many_files" });
         refused.push("workspace_files");
         continue;
       }
-      state = room;
     }
     const liveFiles = state.liveFiles + (live ? 0 : 1);
     const liveBytes = state.liveBytes - (live ? current.size : 0) + change.size;
@@ -516,7 +519,7 @@ export async function putServerFile(
   const live = current !== undefined && !current.deleted;
   if (current === undefined && options.maxRows !== undefined) {
     // Server writes are the caller's to limit; only make room by compacting tombstones.
-    state = (await roomForRow(tx, owner, state, options.maxRows)) ?? state;
+    state = (await roomForRow(tx, owner, state, options.maxRows)).state;
   }
   const rev = state.headRev + 1;
   const entry = await writeRow(

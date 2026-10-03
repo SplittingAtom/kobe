@@ -11,7 +11,13 @@ const SHA = "a".repeat(64);
 
 describe("workspace sync contract", () => {
   it("accepts ordinary relative paths", () => {
-    for (const p of ["report.md", "out/charts/q3.html", "uploads/t1/sales data.csv", "é/ü.txt"]) {
+    for (const p of [
+      "report.md",
+      "out/charts/q3.html",
+      "uploads/t1/sales data.csv",
+      "é/ü.txt",
+      "\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645.txt", // Persian with ZWNJ
+    ]) {
       expect(workspacePathIssue(p)).toBeUndefined();
     }
   });
@@ -29,7 +35,7 @@ describe("workspace sync contract", () => {
       "a\u0000b",
       "a\nb",
       "invoice\u202Efdp.exe", // right-to-left override
-      "a\u200Bb", // zero-width space
+      "a\u2066b", // left-to-right isolate
       "x".repeat(256),
       `${"a/".repeat(600)}b`,
     ]) {

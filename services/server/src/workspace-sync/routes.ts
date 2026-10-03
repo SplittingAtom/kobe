@@ -49,13 +49,20 @@ export interface WorkspaceDbLimits {
   readonly commitsPerSandbox: number;
   readonly othersPerSandbox: number;
   readonly dbInFlight: number;
+  /** Separate small pool for ending uploads (they must not be refused, so they wait). */
+  readonly finishInFlight: number;
+  /** How long a request waits for a replica slot before 503. */
+  readonly slotWaitMs: number;
   readonly lockTimeoutMs: number;
   readonly statementTimeoutMs: number;
 }
 export const WORKSPACE_DB_LIMITS: WorkspaceDbLimits = {
   commitsPerSandbox: 1,
-  othersPerSandbox: 4,
+  // One sandbox can hold at most 1 + 2 of the replica's 4 slots: never all of them.
+  othersPerSandbox: 2,
   dbInFlight: 4,
+  finishInFlight: 2,
+  slotWaitMs: 250,
   /** Waiting for the workspace row lock (a long commit, a collection) gives up after this. */
   lockTimeoutMs: 5_000,
   statementTimeoutMs: 30_000,
@@ -74,6 +81,16 @@ class Busy extends Error {
 
 /** Counted slots per key with a ceiling; `take` returns an idempotent release or undefined. */
 class Slots {
+  /** `take`, retried every 25 ms for up to `waitMs` (a short bounded queue). */
+  async wait(key: string, max: number, waitMs: number): Promise<(() => void) | undefined> {
+    const until = Date.now() + waitMs;
+    for (;;) {
+      const release = this.take(key, max);
+      if (release || Date.now() >= until) return release;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+  }
+
   readonly #used = new Map<string, number>();
   take(key: string, max: number): (() => void) | undefined {
     const n = this.#used.get(key) ?? 0;
@@ -110,6 +127,8 @@ export interface WorkspaceRoutesDeps {
   readonly limiter?: RateLimiter;
   /** Overrides of {@link WORKSPACE_DB_LIMITS} (tests). */
   readonly dbLimits?: Partial<WorkspaceDbLimits>;
+  /** An upload was refused for the workspace's blob budget (collection may free room). */
+  readonly onQuotaPressure?: (owner: SandboxCaller) => void;
 }
 
 type Vars = { Variables: { caller: SandboxCaller } };
@@ -133,6 +152,7 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
   const commits = new Slots();
   const others = new Slots();
   const replica = new Slots();
+  const finishing = new Slots();
   const audited = new Map<string, number>();
   const integrity = new Map<string, { failures: number; at: number }>();
   const app = new Hono<Vars>();
@@ -181,31 +201,58 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
    * (throws {@link Busy}), and lock/statement timeouts so a queue on one workspace's row lock
    * can't pin pool connections.
    */
+  const bounded = <T>(teamId: string, fn: (tx: KobeTx) => Promise<T>): Promise<T> =>
+    withTeam(db, teamId, async (t) => {
+      await t.execute(sql`
+        SELECT set_config('lock_timeout', ${String(dbLimits.lockTimeoutMs)}, true),
+               set_config('statement_timeout', ${String(dbLimits.statementTimeoutMs)}, true)`);
+      return fn(t);
+    });
+  /**
+   * `kind`: `commit` and `other` count against the sandbox's own slots; `lookup` (a download's
+   * one-row read) is already bounded per sandbox by its transfer slot.
+   */
   const tx = async <T>(
     caller: SandboxCaller,
-    kind: "commit" | "other",
+    kind: "commit" | "other" | "lookup",
     fn: (tx: KobeTx) => Promise<T>,
   ): Promise<T> => {
     const mine =
       kind === "commit"
         ? commits.take(caller.sandboxId, dbLimits.commitsPerSandbox)
-        : others.take(caller.sandboxId, dbLimits.othersPerSandbox);
+        : kind === "other"
+          ? others.take(caller.sandboxId, dbLimits.othersPerSandbox)
+          : () => {};
     if (!mine) throw new Busy(429);
-    const pool = replica.take("db", dbLimits.dbInFlight);
+    const pool = await replica.wait("db", dbLimits.dbInFlight, dbLimits.slotWaitMs);
     if (!pool) {
       mine();
       throw new Busy(503);
     }
     try {
-      return await withTeam(db, caller.teamId, async (t) => {
-        await t.execute(sql`
-          SELECT set_config('lock_timeout', ${String(dbLimits.lockTimeoutMs)}, true),
-                 set_config('statement_timeout', ${String(dbLimits.statementTimeoutMs)}, true)`);
-        return fn(t);
-      });
+      return await bounded(caller.teamId, fn);
     } finally {
       pool();
       mine();
+    }
+  };
+  /**
+   * Ending an upload (record the content, release the reservation) is never refused: it waits for
+   * one of a few dedicated slots, runs with the same lock/statement timeouts, and is retried on a
+   * lock timeout (a long commit holding the workspace row). Bounded per sandbox by its transfers.
+   */
+  const finishTx = async <T>(caller: SandboxCaller, fn: (tx: KobeTx) => Promise<T>) => {
+    for (let attempt = 0; ; attempt++) {
+      const slot = await finishing.wait("db", dbLimits.finishInFlight, 60_000);
+      if (!slot) throw new Busy(503);
+      try {
+        return await bounded(caller.teamId, fn);
+      } catch (err) {
+        if (!isTimeout(err) || attempt >= 3) throw err;
+      } finally {
+        slot();
+      }
+      await new Promise((r) => setTimeout(r, 200 * 2 ** attempt));
     }
   };
 
@@ -307,6 +354,7 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
       }
       if (state === "over_quota") {
         auditLimit(caller, "workspace_bytes");
+        deps.onQuotaPressure?.(caller);
         return error(c, 507, "quota_exceeded", "The workspace holds too much unsynced content.");
       }
       // Recording and ending the reservation are short and bounded by the transfer slots: they
@@ -333,7 +381,7 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
           log.error({ err, sandbox_id: caller.sandboxId }, "workspace blob upload failed");
           return error(c, 502, "storage_unavailable", "Object storage is unavailable; retry.");
         }
-        outcome = await withTeam(db, caller.teamId, async (t) => {
+        outcome = await finishTx(caller, async (t) => {
           const recorded = await recordBlob(t, caller, sha.data, size);
           await finishUpload(t, caller, size, recorded === "added");
           return recorded;
@@ -342,7 +390,7 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
       } finally {
         // A failed upload still ends its reservation (a crash leaves it to collection).
         if (!finished) {
-          await withTeam(db, caller.teamId, (t) => finishUpload(t, caller, size, false)).catch(
+          await finishTx(caller, (t) => finishUpload(t, caller, size, false)).catch(
             (err: unknown) => log.error({ err }, "could not end an upload reservation"),
           );
         }
@@ -381,7 +429,7 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
     let object;
     let entry;
     try {
-      entry = await tx(caller, "other", (t) => currentEntry(t, caller, path.data));
+      entry = await tx(caller, "lookup", (t) => currentEntry(t, caller, path.data));
       if (!entry || entry.deleted || entry.blobKey === null) {
         release();
         return error(c, 404, "not_found", "No such file in the workspace.");

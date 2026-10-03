@@ -2,7 +2,7 @@ import { SYSTEM_ACTOR, type AuditActor, type KobeDb, type KobeTx } from "@kobe/d
 import type { Logger } from "pino";
 import { recordAudit } from "../audit/record.js";
 import type { SandboxAuthenticator } from "./auth.js";
-import { collectAll, type CollectOptions, type CollectResult } from "./gc.js";
+import { collectAll, collectWorkspace, type CollectOptions, type CollectResult } from "./gc.js";
 import { sharedKey, type WorkspaceOwner } from "./keys.js";
 import type { ObjectStore } from "./object-store.js";
 import { limitsQuota, resolveLimits, type QuotaCheck, type WorkspaceLimits } from "./quota.js";
@@ -30,11 +30,14 @@ export interface WorkspaceSyncOptions {
 }
 
 export const COLLECT_DEFAULTS = {
-  blobGraceMs: 60 * 60_000,
+  // Long enough for a reader that resolved an entry to fetch it (downloads, shareFile).
+  blobGraceMs: 15 * 60_000,
   tombstoneTtlMs: 7 * 24 * 60 * 60_000,
   batch: 500,
   budgetMs: 20_000,
 } as const;
+
+const KICK_EVERY_MS = 5 * 60_000;
 
 export interface SharedFile {
   /** Durable object key (KOBE-54 stores it as `files.blob_ref`). Never sent to a sandbox. */
@@ -83,6 +86,7 @@ export function createWorkspaceSync(options: WorkspaceSyncOptions): WorkspaceSyn
   const collectOptions: CollectOptions = { ...COLLECT_DEFAULTS, ...options.collect, prefix };
   const collect = () => collectAll(db, objects, collectOptions, log);
   const maxRows = resolveLimits(limits).maxRows;
+  const kicked = new Map<string, number>();
   return {
     objects,
     prefix,
@@ -98,6 +102,18 @@ export function createWorkspaceSync(options: WorkspaceSyncOptions): WorkspaceSyn
         quota,
         log,
         ...(options.dbLimits ? { dbLimits: options.dbLimits } : {}),
+        onQuotaPressure: (owner) => {
+          // A workspace at its upload budget: collect it now (at most every 5 minutes) rather
+          // than at the next hourly pass, so released content past its grace frees room.
+          const key = `${owner.teamId}:${owner.userId}`;
+          const last = kicked.get(key) ?? 0;
+          if (Date.now() - last < KICK_EVERY_MS) return;
+          if (kicked.size > 10_000) kicked.clear();
+          kicked.set(key, Date.now());
+          void collectWorkspace(db, objects, owner, collectOptions).catch((err: unknown) =>
+            log.error({ err }, "workspace collection on quota pressure failed"),
+          );
+        },
       }),
     collect,
     startCollector(everyMs) {

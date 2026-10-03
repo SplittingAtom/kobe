@@ -88,12 +88,20 @@ async function collectBatch(
   });
   if (marked.blobs.length === 0) return marked;
   await objects.delete(marked.blobs.map((b) => workspaceBlobKey(options.prefix, owner, b.sha256)));
-  await withTeam(db, owner.teamId, (tx) =>
-    tx.execute(sql`
+  await withTeam(db, owner.teamId, async (tx) => {
+    const gone = await tx.execute<{ size: string }>(sql`
       DELETE FROM workspace_blobs
        WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId} AND deleting
-         AND sha256 IN ${marked.blobs.map((b) => b.sha256)}`),
-  );
+         AND sha256 IN ${marked.blobs.map((b) => b.sha256)}
+      RETURNING size`);
+    // Room for new uploads at once (the exact recompute follows at the end of the run).
+    const bytes = gone.rows.reduce((n, r) => n + Number(r.size), 0);
+    await tx.execute(sql`
+      UPDATE workspace_sync
+         SET blob_count = GREATEST(blob_count - ${gone.rows.length}, 0),
+             blob_bytes = GREATEST(blob_bytes - ${bytes}, 0)
+       WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId}`);
+  });
   return marked;
 }
 
@@ -105,14 +113,23 @@ export async function collectWorkspace(
 ): Promise<CollectResult> {
   const deadline = Date.now() + options.budgetMs;
   const total = { blobs: 0, bytes: 0, tombstones: 0 };
-  for (;;) {
-    const batch = await collectBatch(db, objects, owner, options);
-    total.blobs += batch.blobs.length;
-    total.bytes += batch.blobs.reduce((n, b) => n + b.size, 0);
-    total.tombstones += batch.tombstones;
-    const drained = batch.blobs.length < options.batch && batch.tombstones < options.batch * 10;
-    if (drained || Date.now() >= deadline) break;
+  try {
+    for (;;) {
+      const batch = await collectBatch(db, objects, owner, options);
+      total.blobs += batch.blobs.length;
+      total.bytes += batch.blobs.reduce((n, b) => n + b.size, 0);
+      total.tombstones += batch.tombstones;
+      const drained = batch.blobs.length < options.batch && batch.tombstones < options.batch * 10;
+      if (drained || Date.now() >= deadline) break;
+    }
+  } finally {
+    // Also after a failed batch (e.g. storage down): counters stay exact.
+    await reconcile(db, owner, total);
   }
+  return total;
+}
+
+async function reconcile(db: KobeDb, owner: WorkspaceOwner, total: CollectResult): Promise<void> {
   await withTeam(db, owner.teamId, async (tx) => {
     await lockWorkspace(tx, owner);
     // Counters from the rows themselves; reservations no upload can still hold are dropped.
@@ -140,7 +157,6 @@ export async function collectWorkspace(
       });
     }
   });
-  return total;
 }
 
 /** One collection pass over every workspace of every team. Failures are per workspace. */

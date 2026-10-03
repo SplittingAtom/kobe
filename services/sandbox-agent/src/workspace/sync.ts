@@ -535,7 +535,9 @@ export class WorkspaceSync {
         stats.bytes += c.size;
       } catch (error) {
         failed.add(c.sha256);
-        if (error instanceof SyncHttpError && [413, 507].includes(error.status) && c.local) {
+        // 413: too large for good (until the file changes). 507 (budget full) is retried next
+        // push: collection frees room.
+        if (error instanceof SyncHttpError && error.status === 413 && c.local) {
           this.#refused.set(c.path, c.local);
           stats.rejected += 1;
         } else {
