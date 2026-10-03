@@ -132,6 +132,14 @@ export async function manifestPage(
      WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId} AND rev > ${since}
        AND rev <= ${headRev}
      ORDER BY rev LIMIT ${limit + 1}`);
+  // A compaction may have committed between the two reads (READ COMMITTED): if it moved the
+  // horizon past `since`, the rows above may miss purged deletions — resync instead.
+  if (since > 0) {
+    const after = await tx.execute<{ horizon_rev: string }>(sql`
+      SELECT horizon_rev FROM workspace_sync
+       WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId}`);
+    if (since < Number(after.rows[0]?.horizon_rev ?? 0)) return { kind: "resync_required" };
+  }
   const entries = rows.rows.slice(0, limit).map(toEntry);
   return { kind: "page", headRev, entries, more: rows.rows.length > limit };
 }
@@ -472,18 +480,31 @@ export async function commitChanges(
 }
 
 /**
- * Object keys a server write may point at: under this team's tree (`teams/<team>/…`, e.g. an
- * upload or a project file) and, inside `users/`, only this user's — never another tenant's.
+ * Which writer a server write comes from, and so the only key tree its object may live in:
+ * `uploads` (KOBE-53) → `teams/<team>/uploads/…`, `projects` (KOBE-57) → `teams/<team>/projects/…`,
+ * `user` (KOBE-54 file browser, content the user owns) → `teams/<team>/users/<user>/…`.
  */
-export function assertOwnedKey(prefix: string, owner: WorkspaceOwner, key: string): void {
+export type ServerWriteArea = "uploads" | "projects" | "user";
+
+export function keyRootFor(prefix: string, owner: WorkspaceOwner, area: ServerWriteArea): string {
   const team = `${prefix}teams/${owner.teamId}/`;
+  return area === "user" ? `${team}users/${owner.userId}/` : `${team}${area}/`;
+}
+
+/** The object must be under the caller's own key tree — never another area, team or user's. */
+export function assertOwnedKey(
+  prefix: string,
+  owner: WorkspaceOwner,
+  key: string,
+  area: ServerWriteArea,
+): void {
+  const root = keyRootFor(prefix, owner, area);
   const ok =
-    key.startsWith(team) &&
-    key.length > team.length &&
+    key.startsWith(root) &&
+    key.length > root.length &&
     key.length <= 1024 &&
-    !key.split("/").some((part) => part === "" || part === "." || part === "..") &&
-    (!key.startsWith(`${team}users/`) || key.startsWith(`${team}users/${owner.userId}/`));
-  if (!ok) throw new Error("putServerFile: blobKey is not under this team's (and user's) prefix");
+    !key.split("/").some((part) => part === "" || part === "." || part === "..");
+  if (!ok) throw new Error(`putServerFile: blobKey is not under ${area} of this team/user`);
 }
 
 export interface ServerFile {
@@ -506,14 +527,14 @@ export async function putServerFile(
   tx: KobeTx,
   owner: WorkspaceOwner,
   file: ServerFile,
-  options: { readonly prefix: string; readonly maxRows?: number },
+  options: { readonly prefix: string; readonly area: ServerWriteArea; readonly maxRows?: number },
 ): Promise<StoredEntry> {
   const issue = workspacePathIssue(file.path);
   if (issue !== undefined || isExcludedPath(file.path)) {
     throw new Error(`putServerFile: invalid workspace path (${issue ?? "excluded area"})`);
   }
   if (!/^[0-9a-f]{64}$/.test(file.sha256)) throw new Error("putServerFile: sha256 must be hex");
-  assertOwnedKey(options.prefix, owner, file.blobKey);
+  assertOwnedKey(options.prefix, owner, file.blobKey, options.area);
   let state = await lockWorkspace(tx, owner);
   const current = await currentEntry(tx, owner, file.path);
   const live = current !== undefined && !current.deleted;

@@ -174,7 +174,7 @@ export class WorkspaceSync {
   constructor(options: WorkspaceSyncOptions) {
     this.#o = {
       // Matches the server's per-sandbox limits (a few short transactions at a time).
-      concurrency: 4,
+      concurrency: 2,
       maxFiles: 200_000,
       restoreWaitMs: 60_000,
       now: () => new Date(),
@@ -326,7 +326,13 @@ export class WorkspaceSync {
     }
   }
 
-  async #manifestSince(since: number): Promise<{ head: number; entries: WorkspaceEntry[] }> {
+  /**
+   * Entries since a revision; `full` when this is a complete listing (from 0, or the server said
+   * our revision is older than its horizon) — then a path missing from it no longer exists.
+   */
+  async #manifestSince(
+    since: number,
+  ): Promise<{ head: number; entries: WorkspaceEntry[]; full: boolean }> {
     const entries: WorkspaceEntry[] = [];
     let cursor = since;
     for (;;) {
@@ -346,7 +352,9 @@ export class WorkspaceSync {
           (e) => workspacePathIssue(e.path) === undefined && !isExcludedPath(e.path),
         ),
       );
-      if (!page.more || page.entries.length === 0) return { head: page.head_rev, entries };
+      if (!page.more || page.entries.length === 0) {
+        return { head: page.head_rev, entries, full: since === 0 };
+      }
       cursor = page.entries[page.entries.length - 1]?.rev ?? page.head_rev;
     }
   }
@@ -479,8 +487,9 @@ export class WorkspaceSync {
   }
 
   async #pull(): Promise<number> {
-    const { head, entries } = await this.#manifestSince(this.#seenRev);
+    const { head, entries, full } = await this.#manifestSince(this.#seenRev);
     let applied = 0;
+    if (full && this.#seenRev > 0) applied += await this.#dropUnlisted(entries, head);
     for (const [path, e] of [...this.#retry]) {
       if (entries.some((n) => n.path === path)) continue; // a newer row is in this pull
       if (await this.#downloadSafely(e)) applied += 1;
@@ -514,6 +523,29 @@ export class WorkspaceSync {
     if (touchedOwned) await lockServerOwned(this.#o.root, WORKSPACE_SERVER_OWNED_PREFIXES);
     this.#seenRev = Math.max(this.#seenRev, head);
     return applied;
+  }
+
+  /**
+   * After a resync (our revision fell behind the server's horizon: its tombstones were purged), a
+   * known path absent from the full listing was deleted on the server. Same rule as a tombstone:
+   * the local file goes if it is still the version we knew (always in read-only areas); a local
+   * modification is kept and pushed as a new file.
+   */
+  async #dropUnlisted(entries: readonly WorkspaceEntry[], head: number): Promise<number> {
+    const listed = new Set(entries.map((e) => e.path));
+    let dropped = 0;
+    for (const [path, k] of [...this.#known]) {
+      if (k.deleted || listed.has(path) || this.#retry.has(path)) continue;
+      const file = await statLocal(this.#o.root, path);
+      if (file && !sameAs(file, k) && !isServerOwnedPath(path)) {
+        this.#known.delete(path); // new work: pushed with no base
+        continue;
+      }
+      if (file) await removeFile(this.#o.root, path);
+      this.#known.set(path, { ...k, deleted: true, rev: head });
+      dropped += 1;
+    }
+    return dropped;
   }
 
   /**

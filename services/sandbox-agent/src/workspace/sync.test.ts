@@ -46,6 +46,7 @@ afterEach(async () => {
   server.blobs.clear();
   server.reports.length = 0;
   server.failWith = undefined;
+  server.horizon = 0;
 });
 
 /** Read-only areas are 0555/0444: make them removable. */
@@ -280,6 +281,31 @@ describe("workspace sync (agent)", () => {
     );
     await sync.push();
     expect(server.content("kobe-moved/projects/mine/plan.md")).toBe("written before sync existed");
+  });
+
+  it("applies deletions it missed when the server compacted them away (resync)", async () => {
+    const root = await volume();
+    await put(root, "gone.txt", "deleted on the server");
+    await put(root, "edited.txt", "v1");
+    await put(root, "kept.txt", "kept");
+    const sync = await started(root);
+    await sync.push();
+    server.serverWrite("projects/p/old.md", "stale project file");
+    await sync.pull();
+    // Meanwhile on the server: three deletions, then their tombstones are compacted away.
+    server.serverDelete("gone.txt");
+    server.serverDelete("edited.txt");
+    server.serverDelete("projects/p/old.md");
+    await put(root, "edited.txt", "v2, edited locally");
+    server.compact();
+    server.serverWrite("new.txt", "after the compaction");
+    await sync.pull();
+    expect(await exists(root, "gone.txt")).toBe(false);
+    expect(await exists(root, "projects/p/old.md")).toBe(false);
+    expect(await text(root, "edited.txt")).toBe("v2, edited locally"); // a modification wins
+    expect(await text(root, "new.txt")).toBe("after the compaction");
+    await sync.push();
+    expect(server.livePaths()).toEqual(["edited.txt", "kept.txt", "new.txt"]);
   });
 
   it("ignores server entries in its own area or with invalid names, whatever the server says", async () => {

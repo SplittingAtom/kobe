@@ -203,8 +203,20 @@ describe("database in-flight caps and lock timeouts", () => {
   });
 });
 
-/** Holds every put until `open()` (an upload still streaming into storage). */
+/** Holds every put (or delete) until `open()`: an upload still streaming, a slow storage. */
 class GatedObjects extends MemoryObjects {
+  deletes = 0;
+  #openDeletes: () => void = () => {};
+  readonly #deleteGate = new Promise<void>((r) => (this.#openDeletes = r));
+  gateDeletes = false;
+  override async delete(keys: readonly string[]): Promise<void> {
+    this.deletes += 1;
+    if (this.gateDeletes) await this.#deleteGate;
+    return super.delete(keys);
+  }
+  openDeletes(): void {
+    this.#openDeletes();
+  }
   #open: () => void = () => {};
   readonly #gate = new Promise<void>((r) => (this.#open = r));
   started = 0;
@@ -217,6 +229,119 @@ class GatedObjects extends MemoryObjects {
     this.#open();
   }
 }
+
+async function lockRow(b: Box): Promise<pg.Client> {
+  const locker = new pg.Client({ connectionString: fx.database.adminUrl });
+  await locker.connect();
+  await locker.query("BEGIN");
+  await locker.query(
+    "SELECT 1 FROM workspace_sync WHERE team_id = $1 AND user_id = $2 FOR UPDATE",
+    [b.teamId, b.person.id],
+  );
+  return locker;
+}
+async function unlock(locker: pg.Client): Promise<void> {
+  await locker.query("ROLLBACK");
+  await locker.end();
+}
+
+describe("one sandbox can't starve another's sync on a replica (re-review M1–M4)", () => {
+  it("M1: uploads behind the sandbox's own long commit give up fast and free their slots", async () => {
+    const e = env();
+    const a = await box();
+    const other = await box();
+    expect((await upload(e, a, "seed")).status).toBe(201);
+    const locker = await lockRow(a); // stands in for a's long-running /commit
+    try {
+      const started = Date.now();
+      const statuses = await Promise.all(
+        Array.from({ length: 4 }, async (_, i) => (await upload(e, a, `blocked ${i}`)).status),
+      );
+      // Each reservation waited at most the short lock timeout, then answered "retry".
+      expect(statuses.every((st) => st === 503 || st === 429)).toBe(true);
+      expect(Date.now() - started).toBeLessThan(3_000);
+      // Another tenant's sync is unaffected meanwhile.
+      expect((await upload(e, other, "fine")).status).toBe(201);
+      expect((await commit(e, other, [put("ok.txt", "fine")])).status).toBe(200);
+      expect((await call(e, other, "GET", "/manifest")).status).toBe(200);
+    } finally {
+      await unlock(locker);
+    }
+  });
+
+  it("M2: downloads' lookups count against the sandbox's own slots", async () => {
+    const e = env({}, { othersPerSandbox: 1 });
+    const a = await box();
+    expect((await upload(e, a, "content")).status).toBe(201);
+    expect((await commit(e, a, [put("f.txt", "content")])).status).toBe(200);
+    // Every manifest read blocks for a moment: one lookup holds a's only short slot.
+    const locker = new pg.Client({ connectionString: fx.database.adminUrl });
+    await locker.connect();
+    await locker.query("BEGIN");
+    await locker.query("LOCK TABLE workspace_files IN ACCESS EXCLUSIVE MODE");
+    try {
+      const first = call(e, a, "GET", "/file?path=f.txt");
+      await new Promise((r) => setTimeout(r, 100));
+      expect((await call(e, a, "GET", "/file?path=f.txt")).status).toBe(429);
+      expect((await first).status).toBe(503); // its lock wait timed out
+    } finally {
+      await locker.query("ROLLBACK");
+      await locker.end();
+    }
+    expect((await call(e, a, "GET", "/file?path=f.txt")).status).toBe(200);
+  });
+
+  it("M3: one sandbox's queued upload finishes never hold every shared finish slot", async () => {
+    const objects = new GatedObjects();
+    // Reservation slots out of the way: this is about the finish pool.
+    // A long lock wait makes any shared slot a's finishes hold visible as b's latency.
+    const e = env(
+      {},
+      { othersPerSandbox: 8, dbInFlight: 10, shortLockTimeoutMs: 2_000 },
+      {},
+      objects,
+    );
+    const a = await box();
+    const other = await box();
+    const pending = Array.from({ length: 6 }, (_, i) => upload(e, a, `a ${i}`));
+    await expect.poll(() => objects.started).toBe(6);
+    const locker = await lockRow(a); // a's own commit holds its workspace
+    objects.open();
+    try {
+      await new Promise((r) => setTimeout(r, 200)); // a's finishes are waiting on the lock
+      // a's finishes queue behind each other (one at a time); b's takes the other slot at once.
+      const t0 = Date.now();
+      expect((await upload(e, other, "b content")).status).toBe(201);
+      expect(Date.now() - t0).toBeLessThan(1_500);
+    } finally {
+      await unlock(locker);
+    }
+    expect((await Promise.all(pending)).map((r) => r.status)).toEqual([
+      201, 201, 201, 201, 201, 201,
+    ]);
+    expect(await counters(a)).toMatchObject({ pending_blobs: 0, blob_count: 6 });
+  });
+
+  it("M4: collections kicked by quota pressure run one at a time per replica", async () => {
+    const objects = new GatedObjects();
+    objects.gateDeletes = true;
+    const e = env({ maxUncommittedBlobs: 1 }, {}, {}, objects);
+    objects.open();
+    const a = await box();
+    const b = await box();
+    expect((await upload(e, a, "a1")).status).toBe(201);
+    expect((await upload(e, a, "a2")).status).toBe(507); // kicks a collection of a (blocked)
+    await expect.poll(() => objects.deletes).toBe(1);
+    expect((await upload(e, b, "b1")).status).toBe(201);
+    expect((await upload(e, b, "b2")).status).toBe(507); // no second concurrent collection
+    await new Promise((r) => setTimeout(r, 200));
+    expect(objects.deletes).toBe(1);
+    objects.openDeletes();
+    await expect.poll(async () => (await counters(a))?.blob_count).toBe(0);
+    expect((await upload(e, b, "b2")).status).toBe(507); // now b's own collection may run
+    await expect.poll(async () => (await counters(b))?.blob_count).toBe(0);
+  });
+});
 
 describe("uploads: reservations and bounds", () => {
   it("an upload that ends while a commit holds the workspace lock waits briefly and is recorded", async () => {

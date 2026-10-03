@@ -12,6 +12,7 @@ import {
   deleteServerFile,
   putServerFile,
   type ServerFile,
+  type ServerWriteArea,
   type StoredEntry,
 } from "./store.js";
 
@@ -38,6 +39,7 @@ export const COLLECT_DEFAULTS = {
 } as const;
 
 const KICK_EVERY_MS = 5 * 60_000;
+const KICK_BUDGET_MS = 5_000;
 
 export interface SharedFile {
   /** Durable object key (KOBE-54 stores it as `files.blob_ref`). Never sent to a sandbox. */
@@ -70,7 +72,12 @@ export interface WorkspaceSync {
    * key prefix (the object must be under the team's tree, and inside `users/` the user's own)
    * and row cap. In the caller's team transaction.
    */
-  putServerFile(tx: KobeTx, owner: WorkspaceOwner, file: ServerFile): Promise<StoredEntry>;
+  putServerFile(
+    tx: KobeTx,
+    owner: WorkspaceOwner,
+    file: ServerFile,
+    area: ServerWriteArea,
+  ): Promise<StoredEntry>;
   deleteServerFile(
     tx: KobeTx,
     owner: WorkspaceOwner,
@@ -87,10 +94,12 @@ export function createWorkspaceSync(options: WorkspaceSyncOptions): WorkspaceSyn
   const collect = () => collectAll(db, objects, collectOptions, log);
   const maxRows = resolveLimits(limits).maxRows;
   const kicked = new Map<string, number>();
+  let kicking = false;
   return {
     objects,
     prefix,
-    putServerFile: (tx, owner, file) => putServerFile(tx, owner, file, { prefix, maxRows }),
+    putServerFile: (tx, owner, file, area) =>
+      putServerFile(tx, owner, file, { prefix, area, maxRows }),
     deleteServerFile: (tx, owner, path) => deleteServerFile(tx, owner, path),
     routes: (authenticate) =>
       workspaceRoutes({
@@ -105,14 +114,20 @@ export function createWorkspaceSync(options: WorkspaceSyncOptions): WorkspaceSyn
         onQuotaPressure: (owner) => {
           // A workspace at its upload budget: collect it now (at most every 5 minutes) rather
           // than at the next hourly pass, so released content past its grace frees room.
+          // One such collection per replica at a time (each holds a connection for its budget).
           const key = `${owner.teamId}:${owner.userId}`;
           const last = kicked.get(key) ?? 0;
-          if (Date.now() - last < KICK_EVERY_MS) return;
+          if (kicking || Date.now() - last < KICK_EVERY_MS) return;
           if (kicked.size > 10_000) kicked.clear();
           kicked.set(key, Date.now());
-          void collectWorkspace(db, objects, owner, collectOptions).catch((err: unknown) =>
-            log.error({ err }, "workspace collection on quota pressure failed"),
-          );
+          kicking = true;
+          void collectWorkspace(db, objects, owner, { ...collectOptions, budgetMs: KICK_BUDGET_MS })
+            .catch((err: unknown) =>
+              log.error({ err }, "workspace collection on quota pressure failed"),
+            )
+            .finally(() => {
+              kicking = false;
+            });
         },
       }),
     collect,

@@ -132,7 +132,8 @@ function workspaceAuth(d: ServerDeps, s: NonNullable<typeof sandbox>) {
   const authenticate = createSandboxAuthenticator({
     db: d.database.db,
     verify: sandboxWireVerifier(s.sessionKeys),
-    liveness: providerLiveness(s.provider, d.database.db),
+    // Short positive cache: a destroyed or replaced sandbox loses access within 5 s.
+    liveness: providerLiveness(s.provider, d.database.db, 5_000),
   });
   d.sandboxWire.onUserRevalidate((userId) => authenticate.forget(userId));
   return authenticate;

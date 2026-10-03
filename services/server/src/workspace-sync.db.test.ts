@@ -298,12 +298,17 @@ describe("consistency", () => {
     // The server writes the same path meanwhile (e.g. a file-browser upload, KOBE-54).
     const serverHash = await upload(b, "from the browser");
     await withTeam(fx.db, b.teamId, (tx) =>
-      sync.putServerFile(tx, owner, {
-        path: "notes.md",
-        sha256: serverHash,
-        size: 16,
-        blobKey: workspaceBlobKey("", owner, serverHash),
-      }),
+      sync.putServerFile(
+        tx,
+        owner,
+        {
+          path: "notes.md",
+          sha256: serverHash,
+          size: 16,
+          blobKey: workspaceBlobKey("", owner, serverHash),
+        },
+        "user",
+      ),
     );
     const stale = await push(b, "notes.md", "v2 from the sandbox", rev1);
     expect(stale).toMatchObject({
@@ -371,18 +376,26 @@ describe("consistency", () => {
     const uploadKey = `teams/${b.teamId}/uploads/obj-1`;
     objects.objects.set(uploadKey, Buffer.from("a,b\n1,2\n"));
     await withTeam(fx.db, b.teamId, (tx) =>
-      sync.putServerFile(tx, owner, {
-        path: "uploads/thread-1/sales.csv",
-        sha256: sha("a,b\n1,2\n"),
-        size: 8,
-        blobKey: uploadKey,
-      }),
+      sync.putServerFile(
+        tx,
+        owner,
+        {
+          path: "uploads/thread-1/sales.csv",
+          sha256: sha("a,b\n1,2\n"),
+          size: 8,
+          blobKey: uploadKey,
+        },
+        "uploads",
+      ),
     );
-    // A server write can only point at this team's tree, and in users/ at this user's.
+    // A server write can only point at its own area of this team (and user): uploads may not
+    // name another team, another user, a project, or the user's workspace content.
     for (const blobKey of [
       `teams/${randomUUID()}/uploads/obj-1`,
       `teams/${b.teamId}/users/${randomUUID()}/workspace/${"a".repeat(64)}`,
-      `teams/${b.teamId}/../x`,
+      `teams/${b.teamId}/users/${b.person.id}/workspace/${"a".repeat(64)}`,
+      `teams/${b.teamId}/projects/p1/spec.md`,
+      `teams/${b.teamId}/uploads/../projects/x`,
       "elsewhere/obj",
     ]) {
       await expect(
@@ -391,7 +404,7 @@ describe("consistency", () => {
             tx,
             owner,
             { path: "uploads/x.csv", sha256: "a".repeat(64), size: 1, blobKey },
-            { prefix: "" },
+            { prefix: "", area: "uploads" },
           ),
         ),
       ).rejects.toThrow(/blobKey/);

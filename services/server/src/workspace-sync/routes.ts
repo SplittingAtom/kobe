@@ -53,24 +53,34 @@ export interface WorkspaceDbLimits {
   readonly finishInFlight: number;
   /** How long a request waits for a replica slot before 503. */
   readonly slotWaitMs: number;
+  /** A commit's wait for the workspace row lock (another commit, a collection). */
   readonly lockTimeoutMs: number;
+  /**
+   * Every other transaction's wait for that lock (upload reservations and finishes, restore
+   * reports): short, so a slot is never held long behind a commit — busy answers are retried.
+   */
+  readonly shortLockTimeoutMs: number;
   readonly statementTimeoutMs: number;
 }
 export const WORKSPACE_DB_LIMITS: WorkspaceDbLimits = {
   commitsPerSandbox: 1,
-  // One sandbox can hold at most 1 + 2 of the replica's 4 slots: never all of them.
+  // One sandbox can hold at most 1 + 2 of the replica's 4 slots (downloads' lookups included),
+  // and the two short ones only for milliseconds or `shortLockTimeoutMs`: never all of them.
   othersPerSandbox: 2,
   dbInFlight: 4,
   finishInFlight: 2,
   slotWaitMs: 250,
   /** Waiting for the workspace row lock (a long commit, a collection) gives up after this. */
   lockTimeoutMs: 5_000,
+  shortLockTimeoutMs: 400,
   statementTimeoutMs: 30_000,
 };
 /** Throttle for audit rows a looping sandbox could otherwise repeat. */
 const AUDIT_EVERY_MS = 5 * 60_000;
 const INTEGRITY_AUDIT_EVERY_MS = 60_000;
 const MAX_JSON_BYTES = 1024 * 1024;
+/** Finish retries on a lock timeout (≈ 30 s of backoff in total, slots released meanwhile). */
+const FINISH_RETRIES = 8;
 
 /** Thrown when an in-flight cap is reached: answered 503/429 with Retry-After. */
 class Busy extends Error {
@@ -153,6 +163,7 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
   const others = new Slots();
   const replica = new Slots();
   const finishing = new Slots();
+  const finishOwn = new Slots();
   const audited = new Map<string, number>();
   const integrity = new Map<string, { failures: number; at: number }>();
   const app = new Hono<Vars>();
@@ -201,28 +212,27 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
    * (throws {@link Busy}), and lock/statement timeouts so a queue on one workspace's row lock
    * can't pin pool connections.
    */
-  const bounded = <T>(teamId: string, fn: (tx: KobeTx) => Promise<T>): Promise<T> =>
+  const bounded = <T>(teamId: string, lockMs: number, fn: (tx: KobeTx) => Promise<T>): Promise<T> =>
     withTeam(db, teamId, async (t) => {
       await t.execute(sql`
-        SELECT set_config('lock_timeout', ${String(dbLimits.lockTimeoutMs)}, true),
+        SELECT set_config('lock_timeout', ${String(lockMs)}, true),
                set_config('statement_timeout', ${String(dbLimits.statementTimeoutMs)}, true)`);
       return fn(t);
     });
   /**
-   * `kind`: `commit` and `other` count against the sandbox's own slots; `lookup` (a download's
-   * one-row read) is already bounded per sandbox by its transfer slot.
+   * `commit` takes the sandbox's one commit slot and may wait `lockTimeoutMs` for the workspace
+   * lock; `other` (everything else, downloads' lookups included) takes one of its short slots and
+   * waits at most `shortLockTimeoutMs`.
    */
   const tx = async <T>(
     caller: SandboxCaller,
-    kind: "commit" | "other" | "lookup",
+    kind: "commit" | "other",
     fn: (tx: KobeTx) => Promise<T>,
   ): Promise<T> => {
     const mine =
       kind === "commit"
         ? commits.take(caller.sandboxId, dbLimits.commitsPerSandbox)
-        : kind === "other"
-          ? others.take(caller.sandboxId, dbLimits.othersPerSandbox)
-          : () => {};
+        : others.take(caller.sandboxId, dbLimits.othersPerSandbox);
     if (!mine) throw new Busy(429);
     const pool = await replica.wait("db", dbLimits.dbInFlight, dbLimits.slotWaitMs);
     if (!pool) {
@@ -230,29 +240,37 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
       throw new Busy(503);
     }
     try {
-      return await bounded(caller.teamId, fn);
+      const lockMs = kind === "commit" ? dbLimits.lockTimeoutMs : dbLimits.shortLockTimeoutMs;
+      return await bounded(caller.teamId, lockMs, fn);
     } finally {
       pool();
       mine();
     }
   };
   /**
-   * Ending an upload (record the content, release the reservation) is never refused: it waits for
-   * one of a few dedicated slots, runs with the same lock/statement timeouts, and is retried on a
-   * lock timeout (a long commit holding the workspace row). Bounded per sandbox by its transfers.
+   * Ending an upload (record the content, release the reservation) waits rather than being
+   * refused: one finish per sandbox at a time (its own queue), a few per replica, the short lock
+   * timeout, and retries with backoff on a lock timeout — releasing both slots while it backs off,
+   * so a sandbox whose own commit holds its workspace lock never holds a shared slot meanwhile.
    */
   const finishTx = async <T>(caller: SandboxCaller, fn: (tx: KobeTx) => Promise<T>) => {
     for (let attempt = 0; ; attempt++) {
+      const own = await finishOwn.wait(caller.sandboxId, 1, 60_000);
+      if (!own) throw new Busy(503);
       const slot = await finishing.wait("db", dbLimits.finishInFlight, 60_000);
-      if (!slot) throw new Busy(503);
+      if (!slot) {
+        own();
+        throw new Busy(503);
+      }
       try {
-        return await bounded(caller.teamId, fn);
+        return await bounded(caller.teamId, dbLimits.shortLockTimeoutMs, fn);
       } catch (err) {
-        if (!isTimeout(err) || attempt >= 3) throw err;
+        if (!isTimeout(err) || attempt >= FINISH_RETRIES) throw err;
       } finally {
         slot();
+        own();
       }
-      await new Promise((r) => setTimeout(r, 200 * 2 ** attempt));
+      await new Promise((r) => setTimeout(r, Math.min(200 * 2 ** attempt, 5_000)));
     }
   };
 
@@ -429,7 +447,7 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
     let object;
     let entry;
     try {
-      entry = await tx(caller, "lookup", (t) => currentEntry(t, caller, path.data));
+      entry = await tx(caller, "other", (t) => currentEntry(t, caller, path.data));
       if (!entry || entry.deleted || entry.blobKey === null) {
         release();
         return error(c, 404, "not_found", "No such file in the workspace.");

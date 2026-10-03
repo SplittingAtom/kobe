@@ -22,6 +22,8 @@ export {
   listLive,
   manifestPage,
   putServerFile,
+  keyRootFor,
   type ServerFile,
+  type ServerWriteArea,
   type StoredEntry,
 } from "./store.js";

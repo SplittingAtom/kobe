@@ -26,6 +26,8 @@ export class FakeSyncServer {
   readonly reports: WorkspaceRestoreReport[] = [];
   readonly requests: string[] = [];
   head = 0;
+  /** Tombstones at or below this revision were purged (compaction). */
+  horizon = 0;
   /** Answer every request with this status (e.g. 404: sync not configured). */
   failWith: number | undefined;
   #server: Server | undefined;
@@ -62,6 +64,12 @@ export class FakeSyncServer {
   serverDelete(path: string): void {
     const row = this.rows.get(path);
     if (row && !row.deleted) this.#delete(path, row, "server");
+  }
+
+  /** Purges every tombstone and moves the horizon to the head (the server's compaction). */
+  compact(): void {
+    for (const [path, row] of this.rows) if (row.deleted) this.rows.delete(path);
+    this.horizon = this.head;
   }
 
   content(path: string): string | undefined {
@@ -124,6 +132,9 @@ export class FakeSyncServer {
     const body = await read(req);
     if (req.method === "GET" && route === "/manifest") {
       const since = Number(url.searchParams.get("since") ?? 0);
+      if (since > 0 && since < this.horizon) {
+        return json(409, { code: "resync_required", message: "" });
+      }
       const limit = Number(url.searchParams.get("limit") ?? 1000);
       const all = [...this.rows.values()]
         .filter((r) => r.rev > since)

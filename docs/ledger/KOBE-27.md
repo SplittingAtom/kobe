@@ -127,10 +127,10 @@ Server-side, from `services/server/src/workspace-sync/index.ts`, all inside your
 `withTeam(db, teamId, tx => …)` transaction (record your audit event last in it):
 
 - `workspaceSync.putServerFile(tx, {teamId, userId}, {path, sha256, size, blobKey, mtimeMs?,
-executable?})` (and `.deleteServerFile`) — writes a path into a user's workspace with origin
-  `server`. `blobKey` must be under `teams/<team>/` (e.g. `teams/<team>/uploads/<id>`,
-  `teams/<team>/projects/<id>/…`), and under `teams/<team>/users/` only that user's — anything
-  else throws; the sandbox pulls it before its
+executable?}, area)` (and `.deleteServerFile`) — writes a path into a user's workspace with
+  origin `server`. `area` names the writer and the only key tree `blobKey` may be in: `uploads` →
+  `teams/<team>/uploads/…` (KOBE-53), `projects` → `teams/<team>/projects/…` (KOBE-57), `user` →
+  `teams/<team>/users/<user>/…` (KOBE-54 file browser); anything else throws; the sandbox pulls it before its
   next run (and periodically / on wake). You own the object at `blobKey` (e.g. KOBE-53 stores the
   upload at its own key; the manifest just points at it). Workspace collection never deletes
   it (it only deletes content sandboxes uploaded, `workspace_blobs`).
@@ -286,6 +286,42 @@ tenant). Tests: `services/server/src/workspace-sync-limits.db.test.ts` (new) unl
   against the upload budget (a workspace churning large files can see 507 for up to the grace
   period, 15 min, before the kicked collection frees it).
 - Migration 0030 regenerated (unmerged): new `workspace_sync` counters, `workspace_blobs.released_at`.
+
+## Re-review (coordinator, a43b472) — resolution
+
+Tests: `workspace-sync-limits.db.test.ts` "one sandbox can't starve another's sync on a replica";
+agent `sync.test.ts`.
+
+- **M1 slots held behind the workspace row lock.** Only a commit may wait long for the
+  workspace lock (`lockTimeoutMs` 5 s, one commit per sandbox). Every other transaction (upload
+  reservation and finish, restore report, manifest, lookups) waits at most `shortLockTimeoutMs`
+  **400 ms**, then answers 503 and frees its slot. Test: uploads behind a sandbox's own held lock
+  all answer within 3 s while another tenant uploads, commits and reads normally.
+- **M2 download lookups uncounted.** They take one of the sandbox's short slots (2). Agent
+  download concurrency 2 to match. Test: with one slot, a second concurrent download is 429.
+- **M3 finish pool starvation.** One finish per sandbox at a time (its own queue) on top of the
+  2-slot replica pool, short lock timeout, and both slots released while backing off. Test: with
+  six of a sandbox's finishes stuck behind its lock (2 s waits), another tenant's upload finishes
+  in < 1.5 s (fails without the per-sandbox cap).
+- **M4 kicked collections.** At most one per replica at a time, with a 5 s budget (a later
+  pressure on any workspace is skipped while one runs). Test: a second workspace's pressure
+  starts no collection while the first is running; after it, it does.
+- **M5 deletions lost after a resync.** `#manifestSince` reports a full listing; after a resync
+  (`since` fell behind the horizon) every known path missing from it is handled as a server
+  deletion (local file removed if unchanged or read-only; a local modification is kept and
+  pushed as a new file). Test: "applies deletions it missed when the server compacted them away".
+  Accepted limit: at agent start (restore) there is no known state, so a file deleted on the
+  server _and_ compacted away while the sandbox was down is indistinguishable from unpushed local
+  work and is pushed back (lossless bias; the hibernate flush makes unpushed work rare).
+- **L1** `manifestPage` re-reads the horizon after the rows and answers `resync_required` if a
+  compaction moved it past `since` in between.
+- **L3** server writes name their area: `workspaceSync.putServerFile(tx, owner, file, area)`
+  with `uploads` → `teams/<t>/uploads/…`, `projects` → `teams/<t>/projects/…`, `user` →
+  `teams/<t>/users/<u>/…`; anything outside that one tree throws (test covers another team,
+  another user, another area, `..`, a foreign prefix).
+- **L4** the workspace authenticator's liveness cache is 5 s (the wire keeps its own 20 s); with
+  the 5 s principal cache a destroyed or replaced sandbox loses sync access within 5 s.
+- **L2:** its text was not in the coordinator's message; nothing done for it yet (asked).
 
 ## Measurements
 
