@@ -1,6 +1,6 @@
 # KOBE-25: Hibernation, wake, cold-start target
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #39), CI green (run 37099246910)
 - **Branch / worktree:** `kobe-25-hibernate-wake` in `../Kobe-wt25`
 - **Depends on:** KOBE-22 (provider), KOBE-24 (registry/routing), KOBE-23 (agent), KOBE-9 (gate) —
   all merged.
@@ -187,6 +187,13 @@ Tuning after run 1: the agent reads Pi's version from its package (no Pi boot at
 | ------------------------------------------------------- | ------------ | --- | ---- | ---- | ---- | ------------------------- | ---------------------- |
 | 2 (run 37093200720; after tuning, on main with KOBE-30) | back-to-back | 20  | 3649 | 4266 | 4920 | 949 / 1517                | 2543 / 3433            |
 | 2                                                       | spaced 30 s  | 5   | 3461 | 3700 | 3700 | 722 / 1250                | 2596 / 2796            |
+
+| 3 (run 37099246910; final, on main with KOBE-16; busy runner, 44 min job) | back-to-back | 20 | 4934 | 6756 | 7040 | 1547 / 3076 | 3556 / 4964 |
+| 3 | spaced 30 s | 5 | 4209 | 5832 | 5832 | 1130 / 1577 | 3258 / 3660 |
+
+Run 3 shows the spread on a loaded self-hosted runner: container start alone reached ≈ 3 s at
+p95; p95 Pi ready 6.8 s is still under 8 s but leaves only ≈ 1.2 s for first token. The e2e job
+now takes ≈ 45 min (timeout raised to 60).
 
 Run 2's agent log: session trade succeeded on the **first** attempt (219 ms, so no CNI admission
 wait on k3d), wire ready 37 ms later. The remaining time is Node + agent boot under gVisor
