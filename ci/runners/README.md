@@ -60,6 +60,13 @@ with repository permission **Administration: read and write** (needed to registe
 runners) and nothing else. Rotate its private key by generating a new one in the App settings and
 replacing the Secret.
 
+## Disk I/O
+
+Longhorn keeps its volumes, including every runner's Docker data, on the nodes' 5400 rpm HDDs
+(`/var/lib/longhorn`). With several builds at once, small-file work (`pnpm deploy`, layer export,
+`k3d image import`) is I/O-bound: e2e runs take 15–20 min when quiet and up to ~40 min at peak.
+Moving the `longhorn-ci-scratch` volumes to SSD, or running fewer runners, would fix it.
+
 ## Docker Hub cache
 
 Ephemeral runners start with empty image stores and all pull from one public address, so
