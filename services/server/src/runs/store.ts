@@ -382,6 +382,30 @@ export async function bindUserEntry(tx: KobeTx, teamId: string, runId: string): 
      WHERE r.team_id = ${teamId} AND r.id = ${runId} AND r.user_entry_id IS NULL`);
 }
 
+/**
+ * Where a Retry branches (D14): the original's branch point, so the retry is a sibling of the
+ * interrupted prompt. A run that started on an empty thread has none recorded (Pi continued from
+ * its leaf), and reusing that would continue after the interrupted partial answer instead; its
+ * branch point is the parent of its prompt entry (Pi 1.0 writes a settings entry at the root
+ * first). Null when the prompt was never mirrored or sits at the root (`run.start` cannot branch
+ * at the root): the retry then continues from the leaf.
+ */
+export async function retryBranchPoint(
+  tx: KobeTx,
+  teamId: string,
+  run: { readonly id: string; readonly threadId: string; readonly parentEntryId: string | null },
+): Promise<string | null> {
+  if (run.parentEntryId !== null) return run.parentEntryId;
+  await bindUserEntry(tx, teamId, run.id);
+  const res = await tx.execute<{ parent_id: string | null }>(sql`
+    SELECT te.parent_id
+      FROM runs r
+      JOIN thread_entries te
+        ON te.team_id = r.team_id AND te.thread_id = r.thread_id AND te.entry_id = r.user_entry_id
+     WHERE r.team_id = ${teamId} AND r.id = ${run.id} AND r.thread_id = ${run.threadId}`);
+  return res.rows[0]?.parent_id ?? null;
+}
+
 /** The run a client-supplied idempotency key already created on this thread. */
 export async function runByClientKey(
   tx: KobeTx,

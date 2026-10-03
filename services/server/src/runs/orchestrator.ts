@@ -46,6 +46,7 @@ import {
   existingRetry,
   latestInterruptedRow,
   requestStop,
+  retryBranchPoint,
   runByClientKey,
   getRunRow,
   insertQueuedRun,
@@ -369,7 +370,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         approvalMode: clampApprovalMode(run.approvalMode, await readApprovalModeFloor(tx, teamId)),
         input: run.input,
         // Same branch point as the original: the retry is a sibling branch; history stays intact.
-        parentEntryId: run.parentEntryId,
+        parentEntryId: await retryBranchPoint(tx, teamId, run),
         retryOfRunId: runId,
         clientKey: null,
       });
