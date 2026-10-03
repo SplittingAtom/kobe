@@ -1,0 +1,23 @@
+{
+  "name": "@kobe/session-token",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Sandbox session tokens: HS256-pinned compact JWS, one key per audience (shared by the server and every verifying service)",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@kobe/protocol": "workspace:*"
+  }
+}

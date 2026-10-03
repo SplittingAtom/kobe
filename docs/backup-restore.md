@@ -200,7 +200,9 @@ recorded fingerprint can.
 ## Restore onto a fresh cluster
 
 A restore goes into a **freshly installed Kobe of the same version** (same migrations). It refuses
-a target whose applied migrations differ or that already has data, and it never deletes anything.
+a target whose applied migrations differ or that already has data, and it never deletes anything
+except rows a migration seeds into every fresh install (the egress presets in `egress_domains`,
+listed in `packages/cli/src/seeded.ts`), which the backup's rows replace in the same transaction.
 
 1. Recreate the Secrets from your secret store. Give the auth Secret a new name so that Helm
    does not have to adopt it:

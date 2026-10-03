@@ -117,11 +117,45 @@ mcpProxy:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { cpu: "1", memory: 512Mi }
 
+# Default-deny egress proxy (spec D28): sandboxes reach the internet only through it, HTTPS only,
+# to domains their team enabled within the install's egress ceiling (admin consoles).
 egressProxy:
   replicas: 1
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { cpu: "1", memory: 512Mi }
+  # Destination ports sandboxes may CONNECT to.
+  allowedPorts: [443]
+  # Internal targets sandboxes may reach (CIDRs), still only for allowlisted domains. Everything
+  # private, loopback, link-local (cloud metadata) and reserved is refused unless listed here.
+  allowedInternalCidrs: []
+  # More ranges to refuse: your cluster's pod/Service CIDRs if they are not private addresses.
+  # IPv4 entries are also excluded from the proxy's own NetworkPolicy.
+  deniedCidrs: []
+  # Connections are written to the audit log aggregated per user, host and outcome over this window.
+  auditFlushSeconds: 60
+  limits:
+    # Concurrent tunnels per sandbox and in total (per proxy replica).
+    connectionsPerSandbox: 64
+    connections: 4096
+    # Per sandbox, both directions together; 0 disables.
+    bandwidthBytesPerSecond: 20971520
+    idleTimeoutSeconds: 300
+    # Tunnels close after this long, and when the session token that opened them expires (15 min).
+    maxTunnelSeconds: 3600
+    # Sockets that have not authenticated yet (5 s to send the request head): per source address
+    # (one sandbox pod) and in total, separate from the tunnel limit above.
+    unauthenticatedPerSource: 16
+    unauthenticated: 1024
+  networkPolicy:
+    # Restrict the proxy's own egress to DNS, Postgres and public addresses on allowedPorts.
+    restrictEgress: true
+    # External Postgres only: NetworkPolicy peers (ipBlock / namespaceSelector) of your database.
+    # Empty: the proxy may reach any address on databasePort.
+    databasePeers: []
+    databasePort: 5432
+    # Extra raw NetworkPolicy egress rules for the proxy.
+    extraEgress: []
 
 # Model gateway, always installed (spec D30). Provider keys live here, never in sandboxes.
 bifrost:

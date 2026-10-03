@@ -316,6 +316,100 @@
         },
         "resources": {
           "$ref": "#/$defs/resources"
+        },
+        "allowedPorts": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "minItems": 1
+        },
+        "allowedInternalCidrs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F:.]+(/[0-9]{1,3})?$"
+          }
+        },
+        "deniedCidrs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F:.]+(/[0-9]{1,3})?$"
+          }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "connectionsPerSandbox": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            "connections": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "bandwidthBytesPerSecond": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "idleTimeoutSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 86400
+            },
+            "maxTunnelSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 86400
+            },
+            "unauthenticatedPerSource": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            "unauthenticated": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            }
+          }
+        },
+        "networkPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "restrictEgress": {
+              "type": "boolean"
+            },
+            "databasePeers": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "databasePort": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "extraEgress": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "auditFlushSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600
         }
       }
     },

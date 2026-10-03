@@ -4,6 +4,7 @@ import {
   isNotNull,
   isNull,
   listMemberships,
+  notifyEgressUserChanged,
   sessions,
   teamMembers,
   users,
@@ -42,6 +43,8 @@ export async function deactivateUser(db: KobeDb, userId: string): Promise<boolea
     await tx.delete(sessions).where(eq(sessions.userId, userId));
     await tx.delete(verifications).where(eq(verifications.value, userId));
     if (changed.length > 0) {
+      // Egress proxies close the user's open tunnels (KOBE-38).
+      await notifyEgressUserChanged(tx, userId);
       await recordAudit(tx, { action: "identity.user.deactivated", target: { userId } });
     }
     return changed.length > 0;

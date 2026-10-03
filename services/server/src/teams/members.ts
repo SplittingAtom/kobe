@@ -2,6 +2,7 @@ import {
   and,
   asc,
   eq,
+  notifyEgressUserChanged,
   teamMembers,
   teams,
   users,
@@ -146,6 +147,8 @@ export async function removeMember(
       .delete(teamMembers)
       .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
     await revokeInvitesSentBy(tx, teamId, userId);
+    // Egress proxies close the user's open tunnels in this team (KOBE-38).
+    await notifyEgressUserChanged(tx, userId);
     await recordAudit(tx, {
       action: "identity.member.removed",
       teamId,

@@ -23,6 +23,19 @@ const plan: RestorePlan = {
   ],
 };
 
+describe("restore prelude: tables seeded by migrations", () => {
+  it("does not refuse a fresh target for seeded rows; replaces them after the emptiness check", () => {
+    const sql = restorePrelude({
+      ...plan,
+      loadTables: [...plan.loadTables, { name: "egress_domains", rows: 6 }],
+    });
+    expect(sql).not.toContain('EXISTS (SELECT 1 FROM public."egress_domains")');
+    expect(sql).toContain('DELETE FROM public."egress_domains";');
+    expect(sql.indexOf("already has data")).toBeLessThan(sql.indexOf("DELETE FROM"));
+    expect(sql).toContain('EXISTS (SELECT 1 FROM public."users")');
+  });
+});
+
 describe("restore prelude", () => {
   const sql = restorePrelude(plan);
 
