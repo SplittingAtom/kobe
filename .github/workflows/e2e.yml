@@ -65,12 +65,7 @@ jobs:
         run: scripts/dev-cluster.sh
       - name: Build images and load them into k3d
         run: |
-          docker build -f apps/web/Dockerfile -t "ghcr.io/splittingatom/kobe-web:${KOBE_IMAGE_TAG}" .
-          for svc in server mcp-proxy egress-proxy; do
-            docker build -f "services/$svc/Dockerfile" -t "ghcr.io/splittingatom/kobe-$svc:${KOBE_IMAGE_TAG}" .
-          done
-          docker build -f images/sandbox/Dockerfile -t "ghcr.io/splittingatom/kobe-sandbox:${KOBE_IMAGE_TAG}" .
-          k3d image import -c kobe ghcr.io/splittingatom/kobe-{web,server,mcp-proxy,egress-proxy,sandbox}:"${KOBE_IMAGE_TAG}"
+          e2e/load-images.sh kobe "${KOBE_IMAGE_TAG}"
           # The node now has its own copies; drop the host's to stay clear of disk-pressure eviction.
           docker rmi ghcr.io/splittingatom/kobe-{web,server,mcp-proxy,egress-proxy,sandbox}:"${KOBE_IMAGE_TAG}" >/dev/null
           docker builder prune -af >/dev/null
@@ -86,4 +81,7 @@ jobs:
           kubectl -n kobe-dev describe pods | tail -200
           kubectl get events -A --sort-by=.lastTimestamp | tail -80
           kubectl -n kobe-dev logs --all-containers --prefix --tail=50 -l app.kubernetes.io/name=kobe || true
+          kubectl get sandboxes,sandboxclaims,sandboxwarmpools,networkpolicies -A || true
+          kubectl -n kobe-team-e2e describe pods | tail -120 || true
           df -h /
+          scripts/ci-docker-diagnostics.sh

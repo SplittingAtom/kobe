@@ -2,6 +2,7 @@ import pg from "pg";
 import { expect } from "vitest";
 import { createTestDatabase, testServerUrl } from "@kobe/db/testing";
 import { createApp } from "../app.js";
+import { BackgroundTasks } from "../background.js";
 import { createServerDeps, type ServerDeps, type ServerDepsOptions } from "../deps.js";
 import { waitForAppSessionsToClose } from "./app-sessions.js";
 import { TestBrowser } from "./browser.js";
@@ -32,8 +33,10 @@ export async function openHarness(
   // A single client: unlike Pool#end, Client#end resolves only once the connection is closed.
   const admin = new pg.Client({ connectionString: database.adminUrl });
   await admin.connect();
-  const mailer = new MemoryMailer();
+  const background = new BackgroundTasks();
+  const mailer = new MemoryMailer(background);
   const deps = createServerDeps({
+    background,
     databaseUrl: database.appUrl,
     publicUrl: PUBLIC_URL,
     authSecret: "h".repeat(48),

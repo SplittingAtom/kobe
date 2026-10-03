@@ -1,0 +1,124 @@
+{{- $fullname := include "kobe.fullname" . -}}
+{{- $manager := include "kobe.sandboxManagerRole" . -}}
+{{- $orchestrator := include "kobe.clusterName" (dict "root" . "suffix" "sandbox-orchestrator") -}}
+{{- $serverSA := include "kobe.serverServiceAccount" . -}}
+# Sandbox orchestration RBAC (spec D11: "the server's ServiceAccount manages only kobe-team-*
+# namespaces"). RBAC cannot scope cluster-wide verbs by name, so the ValidatingAdmissionPolicies in
+# sandbox-admission.yaml confine every namespace and RoleBinding write by the server to kobe-team-*.
+#
+# Namespaced verbs live in this ClusterRole and are granted per team namespace by a RoleBinding the
+# server creates there (it may bind only this role: `bind` is limited by resourceNames). No Secret
+# reads, no pod create/exec, no access anywhere else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $manager }}
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+rules:
+  # Read-back of a sandbox's pod (RuntimeClass verification, bootstrap token identity); the
+  # isolation reconciler lists pods and deletes any not under the verified runtime.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "delete"]
+  # Server-side apply of the namespace's fixed objects. Image pull Secrets for the kubelet are
+  # copied in write-only (no get/list: the server never reads Secrets here).
+  - apiGroups: [""]
+    resources: ["serviceaccounts", "resourcequotas", "limitranges", "secrets"]
+    verbs: ["create", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["create", "patch"]
+  - apiGroups: ["extensions.agents.x-k8s.io"]
+    resources: ["sandboxtemplates", "sandboxwarmpools"]
+    verbs: ["create", "patch"]
+  # delete: a sandbox found outside the verified isolation runtime is deleted (KOBE-9).
+  - apiGroups: ["extensions.agents.x-k8s.io"]
+    resources: ["sandboxclaims"]
+    verbs: ["get", "create", "delete"]
+  # patch: hibernate/wake via operatingMode (KOBE-25).
+  - apiGroups: ["agents.x-k8s.io"]
+    resources: ["sandboxes"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $orchestrator }}
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+rules:
+  # Team namespaces (admission-limited to kobe-team-*, labelled, Pod Security "restricted").
+  # list: the isolation reconciler finds team namespaces by label. create also serves the
+  # admission self-check (a server-side dry run that the policies must refuse).
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "create", "patch"]
+  # The per-namespace RoleBinding to the manager role (admission-limited, see above).
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["create", "patch"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    verbs: ["bind"]
+    resourceNames: [{{ $manager | quote }}]
+  # Sandbox bootstrap tokens (projected, audience kobe.sandbox-bootstrap) are verified by TokenReview.
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $orchestrator }}
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $orchestrator }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $serverSA }}
+    namespace: {{ .Release.Namespace }}
+---
+# In the release namespace: the Services sandboxes reach (their ClusterIPs go into /etc/hosts of
+# sandbox pods) and the image pull Secrets copied into team namespaces. Read by name only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $fullname }}-sandbox-orchestrator
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get"]
+    resourceNames:
+      {{- range list "server" "bifrost" "mcp-proxy" "egress-proxy" }}
+      - {{ printf "%s-%s" $fullname . | quote }}
+      {{- end }}
+  {{- with .Values.global.imagePullSecrets }}
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+    resourceNames:
+      {{- range . }}
+      - {{ .name | quote }}
+      {{- end }}
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $fullname }}-sandbox-orchestrator
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $fullname }}-sandbox-orchestrator
+subjects:
+  - kind: ServiceAccount
+    name: {{ $serverSA }}
+    namespace: {{ .Release.Namespace }}

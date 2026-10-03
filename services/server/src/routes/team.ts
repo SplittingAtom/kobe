@@ -38,6 +38,8 @@ export function teamRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
     if (!userId.success) return invalidRequest(c);
     const result = await removeMember(db, c.get("team").id, userId.data);
     if (!result.ok) return membershipError(c, result.error);
+    // The removed member's sandbox in this team loses its connection on every replica (KOBE-24).
+    await deps.sandboxWire.revalidateUser(userId.data);
     return c.body(null, 204);
   });
 

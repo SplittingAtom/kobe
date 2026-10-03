@@ -58,6 +58,16 @@ const toolRule = {
   expiresAt: z.iso.datetime({ offset: true }).nullable(),
 };
 
+/** Wire and storage limits a sandbox can hit (KOBE-24). */
+export const SANDBOX_LIMITS = [
+  "frame_rate",
+  "byte_rate",
+  "frame_size",
+  "run_events",
+  "run_bytes",
+  "thread_entries",
+] as const;
+
 const event = <const S extends AuditScope, T extends z.ZodRawShape>(scope: S, shape: T) => ({
   scope,
   target: z.strictObject(shape),
@@ -171,6 +181,24 @@ export const AUDIT_EVENTS = {
     value: z.boolean(),
   }),
 
+  // ── sandbox: lifecycle metadata only, never pod logs (KOBE-22, D11) ──
+  /** A user's sandbox in a team was claimed (system actor, or the user whose request did it). */
+  "sandbox.created": event("team", { sandboxId: id, userId: id }),
+  /**
+   * The server deleted a sandbox (its claim) or a pod because it was not running under the
+   * verified isolation runtime, or because isolation was lost (pods only; claims and volumes kept).
+   */
+  "sandbox.destroyed": event("team", {
+    sandboxId: id.optional(),
+    userId: id.optional(),
+    pod: z
+      .string()
+      .max(253)
+      .regex(/^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/)
+      .optional(),
+    reason: z.enum(["isolation_mismatch", "isolation_lost"]),
+  }),
+
   // ── thread: lifecycle metadata only, never titles or content (KOBE-34, D18, D23) ──
   "thread.trashed": event("team", { threadId: id }),
   "thread.restored": event("team", { threadId: id }),
@@ -182,6 +210,40 @@ export const AUDIT_EVENTS = {
     scope: agentScope,
     fromVersion: version,
     toVersion: version,
+  }),
+
+  // ── run: lifecycle metadata the server decides on its own (KOBE-24; never content) ──
+  /** The wire ended an active run as interrupted (D14: sandbox or Pi lost; actor: system). */
+  "run.interrupted": event("team", {
+    runId: id,
+    threadId: id,
+    cause: z.enum(["sandbox_gone", "not_resumed", "pi_exited"]),
+  }),
+
+  // ── sandbox: the sandbox wire (KOBE-24, D13); throttled per sandbox and violation ──
+  /** A sandbox named a run, thread or command not leased to its connection (closed; system). */
+  "sandbox.lease_violation": event("team", {
+    sandboxId: id,
+    userId: id,
+    violation: z.enum(["unknown_run", "unknown_thread", "unknown_command"]),
+    frameType: z.string().regex(/^[a-z][a-z_.]{0,31}$/),
+  }),
+  /**
+   * A validly signed `kobe.sandbox-wire` token was refused: the sandbox is no longer live, its user
+   * may not use it (deactivated, left the team), or `hello` named another sandbox (system).
+   * Unsigned/forged tokens carry no trustworthy team and are only logged and counted.
+   */
+  "sandbox.token_rejected": event("team", {
+    sandboxId: id,
+    userId: id,
+    reason: z.enum(["not_live", "not_allowed", "sandbox_mismatch"]),
+  }),
+  /** A sandbox exceeded a wire or storage limit; connection closed or run stopped (system). */
+  "sandbox.limit_exceeded": event("team", {
+    sandboxId: id,
+    userId: id,
+    limit: z.enum(SANDBOX_LIMITS),
+    runId: id.optional(),
   }),
 
   // ── agent: definitions (D19); team agents in the team view, personal and gallery install-only ──

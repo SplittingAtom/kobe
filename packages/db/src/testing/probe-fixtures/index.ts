@@ -3,6 +3,7 @@ import { agentsFixtures } from "./agents.js";
 import { conversationsFixtures } from "./conversations.js";
 import { identityFixtures } from "./identity.js";
 import { policyFixtures } from "./policy.js";
+import { sandboxFixtures } from "./sandbox.js";
 import type { ProbeFixture } from "./types.js";
 
 /**
@@ -15,4 +16,5 @@ export const PROBE_FIXTURES: Readonly<Record<TeamTable, ProbeFixture>> = {
   ...conversationsFixtures,
   ...policyFixtures,
   ...agentsFixtures,
+  ...sandboxFixtures,
 };

@@ -209,7 +209,7 @@ existing Secret, unless explicitly allowed for throwaway environments (dev, CI).
 {{/*
 Deployment + Service for a Kobe Node service.
 Args: root, name (image + component), values, env (YAML list string), serviceAccount, healthPath,
-extraVolumes / extraMounts (YAML list strings), preflight (isolation initContainer), migrations
+extraVolumes / extraMounts / extraPorts / extraServicePorts (YAML list strings), preflight (isolation initContainer), migrations
 (wait-for-migrations initContainer).
 */}}
 {{- define "kobe.nodeService" -}}
@@ -258,6 +258,9 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+            {{- with .extraPorts }}
+            {{- . | nindent 12 }}
+            {{- end }}
           env:
             - name: PORT
               value: "8080"
@@ -267,6 +270,12 @@ spec:
           readinessProbe:
             httpGet: { path: {{ .readyPath | default "/readyz" }}, port: http }
             periodSeconds: 5
+          # Liveness starts only once this passes: a slow start (busy node, first migration wait)
+          # gets up to 3 minutes instead of being restarted after the liveness budget of ~30 s.
+          startupProbe:
+            httpGet: { path: {{ .healthPath | default "/healthz" }}, port: http }
+            periodSeconds: 2
+            failureThreshold: 90
           livenessProbe:
             httpGet: { path: {{ .healthPath | default "/healthz" }}, port: http }
             periodSeconds: 10
@@ -299,6 +308,9 @@ spec:
     - name: http
       port: 80
       targetPort: http
+    {{- with .extraServicePorts }}
+    {{- . | nindent 4 }}
+    {{- end }}
 {{- end -}}
 
 

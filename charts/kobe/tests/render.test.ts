@@ -126,6 +126,20 @@ describe("workloads", () => {
     }
   });
 
+  it("holds liveness checks until each long-running container has started", () => {
+    for (const d of byKind(ms, "Deployment")) {
+      for (const c of d.spec.template.spec.containers) {
+        const name = `${d.metadata.name}/${c.name}`;
+        expect(c.startupProbe?.httpGet, name).toEqual(c.livenessProbe?.httpGet);
+        // At least a minute before liveness may restart a slow-starting container.
+        expect(
+          c.startupProbe.periodSeconds * c.startupProbe.failureThreshold,
+          name,
+        ).toBeGreaterThanOrEqual(60);
+      }
+    }
+  });
+
   it("runs every pod non-root with a hardened container security context", () => {
     for (const { name, spec } of podSpecs(ms)) {
       expect(spec.securityContext?.runAsNonRoot, name).toBe(true);
@@ -432,8 +446,31 @@ describe("network policies", () => {
   it("lets only pods in the release namespace reach Bifrost (provider keys) and ClamAV", () => {
     for (const name of ["kobe-bifrost", "kobe-clamav"]) {
       expect(policy(name)?.spec.policyTypes, name).toEqual(["Ingress"]);
-      expect(policy(name)?.spec.ingress, name).toEqual([{ from: [{ podSelector: {} }] }]);
+      expect(policy(name)?.spec.ingress[0], name).toEqual({ from: [{ podSelector: {} }] });
     }
+    expect(policy("kobe-clamav")?.spec.ingress).toHaveLength(1);
+  });
+
+  it("admits sandboxes to Bifrost only with sandbox.modelGatewayAccess (KOBE-22/40)", () => {
+    expect(policy("kobe-bifrost")?.spec.ingress).toEqual([{ from: [{ podSelector: {} }] }]);
+    const open = find(
+      render({ "sandbox.modelGatewayAccess": "true" }),
+      "NetworkPolicy",
+      "kobe-bifrost",
+    );
+    expect(open?.spec.ingress).toEqual([
+      { from: [{ podSelector: {} }] },
+      {
+        from: [
+          {
+            namespaceSelector: {
+              matchLabels: { "kobe.splittingatom.io/team-namespace": "true" },
+            },
+          },
+        ],
+        ports: [{ protocol: "TCP", port: 8080 }],
+      },
+    ]);
   });
 
   it("lets only the release namespace and the CloudNativePG operator reach Postgres", () => {
@@ -543,6 +580,7 @@ describe("auth (KOBE-12)", () => {
   it("uses a pre-created auth secret when given (GitOps-safe)", () => {
     const ms = render({
       "auth.existingSecret": "my-auth",
+      "sandbox.sessionKeysSecret": "my-keys",
       "global.allowGeneratedSecretsOffline": "false",
     });
     expect(find(ms, "Secret", "kobe-auth")).toBeUndefined();
@@ -553,16 +591,26 @@ describe("auth (KOBE-12)", () => {
   });
 
   it("refuses to generate secrets in an offline render (each render would rotate them)", () => {
-    expect(renderError({ "global.allowGeneratedSecretsOffline": "false" })).toMatch(
-      /auth\.existingSecret/,
-    );
+    expect(
+      renderError({
+        "global.allowGeneratedSecretsOffline": "false",
+        "sandbox.sessionKeysSecret": "my-keys",
+      }),
+    ).toMatch(/auth\.existingSecret/);
     expect(
       renderError({
         "global.allowGeneratedSecretsOffline": "false",
         "auth.existingSecret": "my-auth",
+        "sandbox.sessionKeysSecret": "my-keys",
         "postgres.mode": "cnpg",
       }),
     ).toMatch(/postgres\.cnpg\.existingAppSecret/);
+    expect(
+      renderError({
+        "global.allowGeneratedSecretsOffline": "false",
+        "auth.existingSecret": "my-auth",
+      }),
+    ).toMatch(/sandbox\.sessionKeysSecret/);
   });
 });
 
