@@ -753,3 +753,22 @@ describe("audit events (KOBE-15 taxonomy)", () => {
     await expect(provider.ensureSandbox(TEAM, USER)).resolves.toMatchObject({ state: "running" });
   });
 });
+
+describe("isLive (sandbox wire liveness, KOBE-24)", () => {
+  it("is true only for the current claim UID of that team and user", async () => {
+    const { kube, provider } = setup();
+    const handle = await provider.ensureSandbox(TEAM, USER);
+    expect(await provider.isLive(TEAM, USER, handle.sandboxId)).toBe(true);
+    expect(await provider.isLive(TEAM, USER, "00000000-0000-4000-8000-0000000000aa")).toBe(false);
+    const other = "11111111-1111-4111-8111-111111111111";
+    expect(await provider.isLive(TEAM, other, handle.sandboxId)).toBe(false);
+    expect(await provider.isLive({ ...TEAM, id: other }, USER, handle.sandboxId)).toBe(false);
+    const claim = kube.all("SandboxClaim")[0];
+    if (!claim) throw new Error("no claim");
+    kube.seed({
+      ...claim,
+      metadata: { ...claim.metadata, deletionTimestamp: new Date().toISOString() },
+    });
+    expect(await provider.isLive(TEAM, USER, handle.sandboxId)).toBe(false);
+  });
+});

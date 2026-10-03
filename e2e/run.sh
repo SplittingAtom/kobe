@@ -377,6 +377,45 @@ contains "the team listener is up (so BLOCKED below means the policy)" '^Running
 contains "a listener outside team namespaces is reachable (control)" '^control=REACHED$' "$inbound"
 contains "nothing can connect into a sandbox (no inbound)" '^sandbox=BLOCKED$' "$inbound"
 
+# KOBE-24: the sandbox wire on the sandbox listener (8081). The e2e sandbox above belongs to a user
+# and team that only exist in Kubernetes so far; give them database rows (account, team, membership)
+# so the wire's liveness + principal checks can pass, mint session tokens inside the server pod with
+# the real per-audience keys, and send raw WebSocket upgrades from a sandbox-like pod.
+echo "==> sandbox wire (KOBE-24)"
+psql_kobe "INSERT INTO users (id, name, email, email_verified) VALUES ('$E2E_USER_ID', 'E2E sandbox user', 'sandbox-user@e2e.test', true) ON CONFLICT DO NOTHING;
+  INSERT INTO teams (id, slug, name) VALUES ('$E2E_TEAM_ID', 'e2e', 'E2E') ON CONFLICT DO NOTHING;
+  INSERT INTO team_members (team_id, user_id, role) VALUES ('$E2E_TEAM_ID', '$E2E_USER_ID', 'member') ON CONFLICT DO NOTHING;" >/dev/null
+mint() { # audience [sub] → a session token signed in the server pod with that audience's key
+  $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "
+    const { signSessionToken } = await import('/app/dist/sandbox/session-token.js');
+    const { sessionKeyEnvName } = await import('/app/dist/sandbox/config.js');
+    const [aud, sub] = process.argv.slice(1);
+    const now = Math.floor(Date.now() / 1000);
+    console.log(signSessionToken({ iss: 'kobe-server', aud, sub, team_id: '$E2E_TEAM_ID',
+      user_id: '$E2E_USER_ID', iat: now, exp: now + 600,
+      jti: 'e2e-' + now + '-' + Math.random().toString(36).slice(2) }, process.env[sessionKeyEnvName(aud)]));
+  " "$1" "${2:-${sandbox_id:-00000000-0000-4000-8000-000000000000}}" 2>&1 | tail -1
+}
+wire_token=$(mint kobe.sandbox-wire)
+gateway_token=$(mint kobe.model-gateway)
+dead_token=$(mint kobe.sandbox-wire 00000000-0000-4000-8000-0000000000de)
+upgrade() { # label token → "label=HTTP/1.1 <status>" (raw request: busybox has no WebSocket client)
+  # stdin stays open: a half-closed socket (nc after EOF) is not upgraded by ws, unlike a real client.
+  echo "(printf 'GET /v1/sandbox/connect HTTP/1.1\r\nHost: kobe-server\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Protocol: kobe.sandbox.v1\r\nAuthorization: Bearer $2\r\n\r\n'; sleep 4) \
+    | nc -w 5 $server_ip 8081 2>/dev/null | head -1 | grep -o 'HTTP/1.1 [0-9]*' | sed 's/^/$1=/';"
+}
+wire=$(team_probe "for i in \$(seq 1 60); do wget -qO- -T 2 http://$server_ip:8081/healthz >/dev/null 2>&1 && break; sleep 1; done; \
+  $(upgrade valid "$wire_token") $(upgrade forged forged.token.value-xxxxxxxxxx) \
+  $(upgrade gateway "$gateway_token") $(upgrade dead "$dead_token") \
+  wget -qO- -T 5 -S http://$server_ip:8081/v1/sandbox/connect 2>&1 | grep -o 'HTTP/1.1 [0-9]*' | head -1 | sed 's/^/plain=/'")
+printf '     sandbox wire upgrades: %s\n' "$(printf '%s' "$wire" | tr '\n' ' ')"
+contains "a sandbox with a live claim and a sandbox-wire token connects (101)" '^valid=HTTP/1.1 101$' "$wire"
+contains "a forged token is refused at the upgrade (401)" '^forged=HTTP/1.1 401$' "$wire"
+contains "a model-gateway token is refused by the wire (audience-bound, 401)" '^gateway=HTTP/1.1 401$' "$wire"
+contains "a signed token for a sandbox that does not exist is refused (401)" '^dead=HTTP/1.1 401$' "$wire"
+contains "the wire endpoint is not on the user-facing ingress" 'HTTP/1.1 (401|404)' \
+  "$(ingress GET /v1/sandbox/connect)"
+
 # KOBE-38: sandboxes reach the internet only through the egress proxy (HTTPS CONNECT, SNI match),
 # only to domains their team enabled within the install ceiling; never internal addresses.
 echo "==> egress proxy (KOBE-38)"
@@ -399,17 +438,40 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_pod:-}" ]]; then
       --set-json "egressProxy.allowedInternalCidrs=[\"$up_ip/32\"]" --set-json "egressProxy.networkPolicy.extraEgress=$up_rule" \
       --set egressProxy.auditFlushSeconds=5 2>&1); then ok "egress proxy reconfigured with the test upstream"
   else fail "egress proxy reconfigured with the test upstream: $out"; fi
-  # The sandbox's team and user (the proxy checks active membership, D7).
+  # The sandbox's team and user (the proxy checks active membership, D7); the KOBE-24 section
+  # above created them too.
   psql_kobe "INSERT INTO users (id, name, email) VALUES ('$E2E_USER_ID', 'E2E', 'e2e-sandbox@e2e.test') ON CONFLICT DO NOTHING;
     INSERT INTO teams (id, slug, name) VALUES ('$E2E_TEAM_ID', 'e2e', 'E2E') ON CONFLICT DO NOTHING;
     INSERT INTO team_members (team_id, user_id, role) VALUES ('$E2E_TEAM_ID', '$E2E_USER_ID', 'member') ON CONFLICT DO NOTHING;" >/dev/null
-  in_sandbox() { $KUBECTL -n "$TEAM_NS" exec "$sandbox_pod" -c agent -- sh -c "$1" 2>&1 || true; }
-  # The real sandbox trades its bootstrap token for its session tokens (KOBE-22) and uses the
-  # egress-audience one as proxy credentials. Retried: the server may still be warming up.
-  egress_token=$(in_sandbox 'for i in $(seq 1 30); do t=$(curl -s -m 5 -X POST \
-      -H "Authorization: Bearer $(cat /var/run/secrets/kobe/bootstrap-token)" http://server.kobe.internal:8081/v1/sandbox/session \
-      | jq -r ".tokens[\"kobe.egress-proxy\"] // empty" 2>/dev/null); [ -n "$t" ] && echo "$t" && break; sleep 2; done' | tail -1)
-  contains "a claimed sandbox gets its egress-proxy session token" '^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$' "$egress_token"
+  # Client: a sandbox-like pod in the team namespace (same NetworkPolicy, gVisor, the sandbox image
+  # for curl/openssl, the proxy at egress-proxy.kobe.internal like real sandboxes) with an
+  # egress-audience session token for this (user, team) sandbox minted with the real key. It does
+  # not depend on the sandbox agent process (the agent's own bootstrap trade is KOBE-25's e2e).
+  proxy_ip=$(svc_ip kobe-egress-proxy || true)
+  EGRESS_CLIENT="egress-client-$RANDOM"
+  PODS+=("-n $TEAM_NS $EGRESS_CLIENT")
+  $KUBECTL -n "$TEAM_NS" run "$EGRESS_CLIENT" --restart=Never --image="$KOBE_SANDBOX_IMAGE" --overrides="{\"spec\":{
+    \"runtimeClassName\":\"gvisor\",\"automountServiceAccountToken\":false,\"serviceAccountName\":\"kobe-sandbox\",$SEC_POD,
+    \"dnsPolicy\":\"None\",\"dnsConfig\":{\"nameservers\":[\"127.0.0.1\"]},
+    \"hostAliases\":[{\"ip\":\"${proxy_ip:-0.0.0.0}\",\"hostnames\":[\"egress-proxy.kobe.internal\"]}],
+    \"containers\":[{\"name\":\"client\",\"image\":\"$KOBE_SANDBOX_IMAGE\",\"command\":[\"sleep\",\"3600\"],$SEC_CTR,
+      \"resources\":{\"requests\":{\"cpu\":\"50m\",\"memory\":\"64Mi\"},\"limits\":{\"cpu\":\"500m\",\"memory\":\"256Mi\"}},
+      \"volumeMounts\":[{\"name\":\"tmp\",\"mountPath\":\"/tmp\"}]}],
+    \"volumes\":[{\"name\":\"tmp\",\"emptyDir\":{}}]}}" >/dev/null 2>&1 || true
+  # Exec only into a running, ready container; on timeout show why (status, last state, logs).
+  if $KUBECTL -n "$TEAM_NS" wait --for=condition=Ready "pod/$EGRESS_CLIENT" --timeout=240s >/dev/null 2>&1; then
+    ok "the egress client pod (sandbox image, gVisor) is ready"
+    client_ready=1
+  else
+    fail "the egress client pod (sandbox image, gVisor) is ready: $($KUBECTL -n "$TEAM_NS" get pod "$EGRESS_CLIENT" \
+      -o jsonpath='{.status.phase} {.status.containerStatuses[0].state} {.status.containerStatuses[0].lastState}' 2>&1)"
+    $KUBECTL -n "$TEAM_NS" describe pod "$EGRESS_CLIENT" 2>&1 | tail -25 || true
+    $KUBECTL -n "$TEAM_NS" logs "$EGRESS_CLIENT" --previous --tail=30 2>&1 || true
+    client_ready=0
+  fi
+  in_sandbox() { $KUBECTL -n "$TEAM_NS" exec "$EGRESS_CLIENT" -c client -- sh -c "$1" 2>&1 || true; }
+  egress_token=$(mint kobe.egress-proxy)
+  contains "an egress-proxy session token for the sandbox was minted" '^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$' "$egress_token"
   # → "connect=<CONNECT status> code=<origin status>" then the body; waits out a new proxy pod's
   # CNI warm-up (until the proxy answers the CONNECT at all) instead of failing on it.
   via_proxy() { # url [credentials]
@@ -419,12 +481,19 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_pod:-}" ]]; then
   }
   notify_egress() { psql_kobe "SELECT pg_notify('kobe_egress', 'ceiling'); SELECT pg_notify('kobe_egress', '$E2E_TEAM_ID');" >/dev/null; }
 
-  contains "fresh install: a sandbox reaches nothing through the proxy (not in the ceiling)" '^connect=403 ' "$(via_proxy "https://$UPSTREAM_HOST/")"
+  if [[ "$client_ready" == 1 ]]; then
+  fresh=$(via_proxy "https://$UPSTREAM_HOST/")
+  contains "fresh install: a sandbox reaches nothing through the proxy (not in the ceiling)" '^connect=403 ' "$fresh"
   contains "fresh install: package registries are in the ceiling but not enabled for teams" '^connect=403 ' "$(via_proxy https://pypi.org/)"
   contains "the proxy refuses requests without the sandbox's token (407)" '^connect=407 ' "$(via_proxy "https://$UPSTREAM_HOST/" 'kobe:forged')"
   contains "the proxy refuses plain HTTP (HTTPS only)" '^connect=000 code=403' "$(via_proxy "http://$UPSTREAM_HOST/")"
-  direct=$(in_sandbox "curl -sk -m 8 --noproxy '*' https://$up_ip/ >/dev/null 2>&1 && echo up=REACHED || echo up=BLOCKED; \
-    curl -sk -m 8 --noproxy '*' https://1.1.1.1/ >/dev/null 2>&1 && echo internet=REACHED || echo internet=BLOCKED")
+  # Negative checks only after a positive control from the same pod: the proxy answered it above.
+  if printf '%s\n' "$fresh" | grep -Eq '^connect=[1-9]'; then
+    direct=$(in_sandbox "curl -sk -m 8 --noproxy '*' https://$up_ip/ >/dev/null 2>&1 && echo up=REACHED || echo up=BLOCKED; \
+      curl -sk -m 8 --noproxy '*' https://1.1.1.1/ >/dev/null 2>&1 && echo internet=REACHED || echo internet=BLOCKED")
+  else
+    direct="up=UNTESTED internet=UNTESTED (the proxy never answered this pod)"
+  fi
   contains "direct egress to the upstream (bypassing the proxy) is blocked by NetworkPolicy" '^up=BLOCKED$' "$direct"
   contains "direct egress to the internet (bypassing the proxy) is blocked by NetworkPolicy" '^internet=BLOCKED$' "$direct"
 
@@ -469,10 +538,14 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_pod:-}" ]]; then
   contains "every connection is in the audit log (egress.connection: allowed and blocked)" '^allowed,blocked' "$conn_audit"
   contains "connection audit records bytes for allowed tunnels" '^[1-9][0-9]*$' \
     "$(psql_kobe "SELECT max((target->>'bytesDown')::bigint) FROM audit_log WHERE team_id = '$E2E_TEAM_ID' AND action = 'egress.connection' AND target->>'outcome' = 'allowed'")"
-  # Receiving side: only team namespaces may connect to the proxy (release namespace is refused).
-  contains "the egress proxy admits nothing but sandboxes (probe from the release namespace)" '^proxy=BLOCKED$' \
-    "$(probe "$NS" 'for i in $(seq 1 60); do wget -qO- -T 2 http://kobe-server/healthz >/dev/null 2>&1 && break; sleep 1; done; \
-      nc -w 4 kobe-egress-proxy 80 </dev/null >/dev/null 2>&1 && echo proxy=REACHED || echo proxy=BLOCKED')"
+  fi # client_ready
+  # Receiving side: only team namespaces may connect to the proxy (release namespace is refused),
+  # checked only after the same probe pod reached the server (positive control).
+  recv=$(probe "$NS" 'ok=0; for i in $(seq 1 60); do wget -qO- -T 2 http://kobe-server/healthz >/dev/null 2>&1 && ok=1 && break; sleep 1; done; \
+    if [ $ok = 1 ]; then echo control=REACHED; nc -w 4 kobe-egress-proxy 80 </dev/null >/dev/null 2>&1 && echo proxy=REACHED || echo proxy=BLOCKED; \
+    else echo control=BLOCKED; echo proxy=UNTESTED; fi')
+  contains "control: the release-namespace probe reaches the server" '^control=REACHED$' "$recv"
+  contains "the egress proxy admits nothing but sandboxes (probe from the release namespace)" '^proxy=BLOCKED$' "$recv"
 elif [[ "${CI:-}" == "true" ]]; then
   fail "egress checks need KOBE_SANDBOX_IMAGE and a sandbox pod"
 else
