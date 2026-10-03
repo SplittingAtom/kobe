@@ -4,6 +4,8 @@
 # Works with a local or remote Docker engine (DOCKER_HOST=ssh://...): binaries are copied into the
 # node containers rather than bind-mounted.
 #   NO_GVISOR=1 creates the cluster without gVisor (to prove the chart refuses to install).
+#   KOBE_DOCKERHUB_MIRROR=http://host:port makes the nodes pull docker.io images through that
+#   pull-through cache (CI: ci/runners/dockerhub-mirror.yaml); unset, they pull from Docker Hub.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -41,6 +43,24 @@ if [[ "$inotify" =~ ^[0-9]+$ && "$inotify" -lt 512 ]]; then
   echo "         (on the docker host: sudo sysctl -w fs.inotify.max_user_instances=512)" >&2
 fi
 
+# The k3s nodes resolve names with their own cluster DNS, so a mirror named by a Service of the
+# outer cluster is resolved here and handed to containerd as an address. containerd still falls
+# back to Docker Hub when the mirror fails, so a bad mirror slows pulls but breaks nothing.
+registry_args=()
+if [[ -n "${KOBE_DOCKERHUB_MIRROR:-}" ]]; then
+  mirror="${KOBE_DOCKERHUB_MIRROR#*://}"
+  mirror="${mirror%%/*}"
+  mirror_ip=$(getent hosts "${mirror%:*}" 2>/dev/null | awk '{ print $1; exit }' || true)
+  if [[ -n "$mirror_ip" ]]; then
+    registries=$(mktemp)
+    printf 'mirrors:\n  docker.io:\n    endpoint:\n      - "http://%s:%s"\n' "$mirror_ip" "${mirror##*:}" >"$registries"
+    registry_args=(--registry-config "$registries")
+    echo "==> docker.io pulls in the cluster go through ${mirror} (${mirror_ip})"
+  else
+    echo "warning: KOBE_DOCKERHUB_MIRROR host ${mirror%:*} does not resolve; pulling from Docker Hub" >&2
+  fi
+fi
+
 if "$K3D" cluster get "$CLUSTER" >/dev/null 2>&1; then
   echo "==> k3d cluster '${CLUSTER}' exists; reusing it"
   running=$(docker ps --format '{{.Names}}')
@@ -50,6 +70,7 @@ else
   echo "==> creating k3d cluster '${CLUSTER}' (${K3S_IMAGE})"
   "$K3D" cluster create "$CLUSTER" --image "$K3S_IMAGE" --agents "$AGENTS" --wait \
     --registry-create "${CLUSTER}-registry:127.0.0.1:${REGISTRY_PORT}" \
+    ${registry_args[@]+"${registry_args[@]}"} \
     --k3s-arg "--disable=metrics-server@server:*" >/dev/null
 fi
 "$K3D" kubeconfig merge "$CLUSTER" --kubeconfig-switch-context >/dev/null

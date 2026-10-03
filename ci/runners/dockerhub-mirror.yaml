@@ -1,0 +1,102 @@
+# Pull-through cache for Docker Hub, shared by the runner pods' Docker daemons (and the k3d
+# clusters they create). Ephemeral runners start with empty image stores and all pull from one
+# public address, so anonymous Docker Hub pulls hit its rate limit (429). Blobs are cached on a
+# replicated Longhorn volume that outlives the runners. See README.md.
+# kubectl apply -f dockerhub-mirror.yaml   (namespace kobe-ci-runners only)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: dockerhub-mirror
+  namespace: kobe-ci-runners
+  labels: { app.kubernetes.io/name: dockerhub-mirror }
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: longhorn
+  resources: { requests: { storage: 40Gi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dockerhub-mirror
+  namespace: kobe-ci-runners
+  labels: { app.kubernetes.io/name: dockerhub-mirror }
+spec:
+  replicas: 1
+  strategy: { type: Recreate } # one writer on the RWO volume
+  selector:
+    matchLabels: { app.kubernetes.io/name: dockerhub-mirror }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: dockerhub-mirror }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: registry
+          # Docker's official registry 3 (CNCF Distribution), from Google's Docker Hub mirror so
+          # starting the cache never needs Docker Hub itself.
+          image: mirror.gcr.io/library/registry:3@sha256:ddf754342cfc8acc51a56d5d0ab6af06826461864460636d8bd5c546dab2a7b8
+          env:
+            - { name: REGISTRY_PROXY_REMOTEURL, value: "https://registry-1.docker.io" }
+            # Cached content is dropped after a week unused; tags are re-checked upstream.
+            - { name: REGISTRY_PROXY_TTL, value: "168h" }
+            - { name: REGISTRY_STORAGE_DELETE_ENABLED, value: "true" }
+            - { name: REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY, value: /var/lib/registry }
+            - { name: REGISTRY_HTTP_ADDR, value: ":5000" }
+            - { name: OTEL_TRACES_EXPORTER, value: none }
+          ports:
+            - { name: http, containerPort: 5000 }
+          readinessProbe:
+            httpGet: { path: /v2/, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /v2/, port: http }
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: "1", memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/registry }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: dockerhub-mirror }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dockerhub-mirror
+  namespace: kobe-ci-runners
+  labels: { app.kubernetes.io/name: dockerhub-mirror }
+spec:
+  type: ClusterIP
+  selector: { app.kubernetes.io/name: dockerhub-mirror }
+  ports:
+    - { name: http, port: 5000, targetPort: http }
+---
+# Plain HTTP and no auth: only this scale set's runner pods may connect.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dockerhub-mirror
+  namespace: kobe-ci-runners
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: dockerhub-mirror }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { actions.github.com/scale-set-name: kobe-k3s }
+      ports:
+        - { port: 5000, protocol: TCP }

@@ -62,6 +62,10 @@ jobs:
             sudo sysctl -w fs.inotify.max_user_instances=1024 fs.inotify.max_user_watches=524288
           fi
       - name: Create k3d cluster with gVisor and agent-sandbox
+        env:
+          # The self-hosted runners' Docker Hub cache (ci/runners/dockerhub-mirror.yaml); elsewhere
+          # it does not resolve and the cluster pulls from Docker Hub directly.
+          KOBE_DOCKERHUB_MIRROR: http://dockerhub-mirror.kobe-ci-runners.svc.cluster.local:5000
         run: scripts/dev-cluster.sh
       - name: Build images and load them into k3d
         run: |

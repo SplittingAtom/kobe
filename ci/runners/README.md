@@ -60,6 +60,29 @@ with repository permission **Administration: read and write** (needed to registe
 runners) and nothing else. Rotate its private key by generating a new one in the App settings and
 replacing the Secret.
 
+## Docker Hub cache
+
+Ephemeral runners start with empty image stores and all pull from one public address, so
+anonymous Docker Hub pulls hit its rate limit (`429 Too Many Requests`).
+[dockerhub-mirror.yaml](dockerhub-mirror.yaml) runs a pull-through cache (CNCF Distribution
+`registry:3`, pulled from `mirror.gcr.io`) in `kobe-ci-runners`. Its data sits on a 40 Gi
+replicated `longhorn` volume that outlives the runners, and unused content is dropped after a week.
+
+- **dind:** `values.yaml` starts dockerd with `--registry-mirror` (plain HTTP, hence
+  `--insecure-registry`). Builds, `docker run` and service containers use it, and dockerd falls
+  back to Docker Hub if the cache is down.
+- **k3d clusters (e2e):** the workflow sets `KOBE_DOCKERHUB_MIRROR`. `scripts/dev-cluster.sh`
+  resolves the Service name on the runner and gives the k3s nodes a `docker.io` mirror by address,
+  because the nodes' own cluster DNS can't resolve the outer Service. Unset (local dev) or
+  unresolvable (GitHub-hosted runners), nothing changes.
+- **Access:** no auth; a NetworkPolicy admits only this scale set's runner pods on port 5000.
+- **Not cached:** ghcr.io (our images and k3d's tools) showed no rate limiting.
+
+```bash
+kubectl apply -f dockerhub-mirror.yaml       # with the helm upgrade above when values.yaml changes
+kubectl -n kobe-ci-runners logs deploy/dockerhub-mirror --tail=50
+```
+
 ## Security
 
 Runner pods execute repository code with a **privileged** Docker daemon, which is root-equivalent
