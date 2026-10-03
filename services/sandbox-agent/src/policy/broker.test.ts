@@ -2,6 +2,7 @@ import type { PolicyCheckFrame } from "@kobe/protocol";
 import { EXAMPLE_IDS } from "@kobe/protocol/testing";
 import { describe, expect, it } from "vitest";
 import {
+  MAX_POLICY_CHECK_FRAME_BYTES,
   MAX_PENDING_POLICY_CHECKS,
   MAX_PENDING_POLICY_CHECKS_PER_THREAD,
   PolicyBroker,
@@ -109,5 +110,37 @@ describe("PolicyBroker", () => {
     broker.check("00000000-0000-4000-8000-999999999999", R, check("last"), reply);
     expect(broker.pendingCount).toBe(MAX_PENDING_POLICY_CHECKS);
     expect(replies.at(-1)).toMatchObject({ request_id: "last", decision: "deny" });
+  });
+
+  it("frees the slot of a check the extension gave up on, and ignores the late answer", () => {
+    const { broker, sent, replies, reply } = setup();
+    broker.check(T, R, check("ext-1"), reply);
+    broker.check("other-thread", R, check("ext-1"), reply);
+    expect(broker.cancel(T, "ext-1")).toBe(true);
+    expect(broker.pendingCount).toBe(1);
+    expect(broker.cancel(T, "ext-1")).toBe(false);
+    expect(broker.onResult({ request_id: sent[0]?.request_id ?? "", decision: "allow" })).toBe(
+      false,
+    );
+    expect(replies).toEqual([]);
+  });
+
+  it("denies locally, without sending, a check over the server's policy.check frame limit", () => {
+    expect(MAX_POLICY_CHECK_FRAME_BYTES).toBe(1024 * 1024);
+    const { broker, sent, replies, reply } = setup();
+    const big = {
+      ...check("ext-big"),
+      input: { content: "x".repeat(MAX_POLICY_CHECK_FRAME_BYTES) },
+    };
+    broker.check(T, R, big, reply);
+    expect(sent).toEqual([]);
+    expect(broker.pendingCount).toBe(0);
+    expect(replies).toEqual([
+      expect.objectContaining({
+        request_id: "ext-big",
+        decision: "deny",
+        message: "tool input too large for a policy check",
+      }),
+    ]);
   });
 });
