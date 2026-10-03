@@ -468,3 +468,54 @@
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/* --- Markdown (agent text) ------------------------------------------------------------------- */
+
+.markdown {
+  white-space: normal;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+.tableWrap table {
+  border-collapse: collapse;
+}
+
+.tableWrap th,
+.tableWrap td {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--admin-border);
+}
+
+.codeBlock {
+  position: relative;
+  padding: 0.25rem 0.5rem;
+  background: var(--admin-panel);
+  border: 1px solid var(--admin-border);
+  border-radius: 0.5rem;
+}
+
+.copyCode {
+  float: right;
+  font-size: 0.8rem;
+}
+
+.pendingAction[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.6;
+}

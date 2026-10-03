@@ -9,6 +9,7 @@ import { must } from "../../lib/testing/must";
 let fake: FakeKobe;
 
 beforeEach(() => {
+  sessionStorage.clear(); // resume points are per tab; each test is a fresh tab
   fake = new FakeKobe();
   vi.stubGlobal("fetch", fake.fetch);
 });
@@ -159,6 +160,39 @@ describe("streaming a run (D16)", () => {
     expect(fake.openStreams[0]?.connections).toBe(2);
   });
 
+  it("a reload in the same tab resumes after what the entries hold instead of replaying", async () => {
+    const { t } = threadWithHistory();
+    const first = openApp(fake, t);
+    const { runId } = await sendAndStart("two steps", t);
+    fake.agent.commitPrompt(runId);
+    fake.agent.toolCall(runId, "tc1", "bash", { cmd: "ls" }, "m1");
+    fake.emit(runId, "policy.denied", {
+      tool_call_id: "tc1",
+      tool: "bash",
+      reasons: [{ code: "team_deny_rule", stage: "team_deny", message: "No shell here." }],
+    });
+    fake.agent.commit(
+      runId,
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "tc1", name: "bash", arguments: { cmd: "ls" } }],
+      },
+      "m1",
+    );
+    expect(await screen.findByText("No shell here.")).toBeTruthy();
+    const resumeAt = fake.run(runId).events.length;
+    first.unmount();
+    fake.agent.delta(runId, "m2", "step two");
+
+    openApp(fake, t);
+    expect(await screen.findByText("step two")).toBeTruthy();
+    const sse = fake.requests.filter((r) => r.method === "SSE");
+    expect(sse.at(-1)?.path).toBe(`/v1/runs/${runId}/events?starting_after=${resumeAt}`);
+    // What the stream said before the resume point (the denial) is kept.
+    expect(screen.getByText("No shell here.")).toBeTruthy();
+    expect(screen.getAllByText("two steps")).toHaveLength(1);
+  });
+
   it("shows Waking your workspace… until the agent starts working (D14)", async () => {
     const { t } = threadWithHistory();
     openApp(fake, t);
@@ -241,7 +275,7 @@ describe("queue, Steer and Stop (D17)", () => {
     expect([...fake.runs.values()].filter((r) => r.status === "queued")).toHaveLength(0);
   });
 
-  it("Stop cancels the run; queued messages remain and the next one starts", async () => {
+  it("Stop pauses the queue and keeps the partial answer; Resume queue runs the held messages", async () => {
     const { t } = threadWithHistory();
     openApp(fake, t);
     const { user, runId } = await sendAndStart("long job", t);
@@ -254,9 +288,48 @@ describe("queue, Steer and Stop (D17)", () => {
     expect(chatRequests(fake, "POST").some((r) => r.path === `/v1/runs/${runId}/cancel`)).toBe(
       true,
     );
+    expect(await screen.findByText("Queue paused.")).toBeTruthy();
     const next = must([...fake.runs.values()].find((r) => r.input === "next one"));
+    expect(next.status).toBe("queued");
+    expect(screen.getByText("Working on it")).toBeTruthy(); // the partial answer stays
+    expect(screen.getByText("Stopped.")).toBeTruthy();
+    expect(fake.openStreams).toHaveLength(0); // a held queue isn't followed
+
+    await user.click(screen.getByRole("button", { name: "Resume queue" }));
     await streaming(fake, next.run_id);
     expect(fake.run(next.run_id).status).toBe("running");
+    expect(chatRequests(fake, "POST").some((r) => r.path === `/v1/threads/${t}/queue/resume`)).toBe(
+      true,
+    );
+    await waitFor(() => expect(screen.queryByText("Queue paused.")).toBeNull());
+  });
+
+  it("with a server that doesn't hold the queue (KOBE-30), the next message starts after Stop", async () => {
+    fake.pauseOnStop = false;
+    const { t } = threadWithHistory();
+    openApp(fake, t);
+    const { user, runId } = await sendAndStart("long job", t);
+    await user.type(await composer(), "next one{Enter}");
+    await screen.findByRole("region", { name: "Queued messages" });
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+    const next = must([...fake.runs.values()].find((r) => r.input === "next one"));
+    await streaming(fake, next.run_id);
+    await waitFor(() => expect(screen.queryByText("Queue paused.")).toBeNull());
+    expect(fake.run(runId).status).toBe("cancelled");
+  });
+
+  it("sending while the queue is paused releases it", async () => {
+    const { t } = threadWithHistory();
+    openApp(fake, t);
+    const { user } = await sendAndStart("long job", t);
+    await user.type(await composer(), "held{Enter}");
+    await screen.findByRole("region", { name: "Queued messages" });
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+    await screen.findByText("Queue paused.");
+    await user.type(await composer(), "fresh{Enter}");
+    const held = must([...fake.runs.values()].find((r) => r.input === "held"));
+    await streaming(fake, held.run_id);
+    await waitFor(() => expect(screen.queryByText("Queue paused.")).toBeNull());
   });
 
   it("Stop on its own keeps what streamed so far and says it stopped", async () => {
@@ -368,10 +441,18 @@ describe("branches: switch, edit and regenerate (D15)", () => {
     openApp(fake, t);
     const user = userEvent.setup();
     await screen.findByText("new answer");
-    // The first message starts the conversation: it has no parent to branch from.
-    const edits = screen.getAllByRole("button", { name: "Edit" });
-    expect(edits).toHaveLength(1);
-    await user.click(must(edits[0]));
+    // The first message has no parent to branch from until root branching exists: its Edit is
+    // shown unavailable, with the reason.
+    const [first, second] = screen.getAllByRole("button", { name: "Edit" });
+    expect(first?.getAttribute("aria-disabled")).toBe("true");
+    expect(first?.getAttribute("title")).toMatch(/coming soon/);
+    expect(
+      document.getElementById(must(first?.getAttribute("aria-describedby")))?.textContent,
+    ).toMatch(/coming soon/);
+    await user.click(must(first));
+    expect(screen.queryByLabelText("Edit your message")).toBeNull();
+    expect(second?.getAttribute("aria-disabled")).toBeNull();
+    await user.click(must(second));
     const editor = await screen.findByLabelText("Edit your message");
     await user.clear(editor);
     await user.type(editor, "third question");
@@ -402,7 +483,7 @@ describe("branches: switch, edit and regenerate (D15)", () => {
     openApp(fake, t);
     await screen.findByText("new answer");
     const regenerate = screen.getAllByRole("button", { name: "Regenerate" });
-    expect(regenerate).toHaveLength(1); // not on the first answer: nothing to branch from
+    expect(regenerate.map((b) => b.getAttribute("aria-disabled"))).toEqual(["true", null]);
     await userEvent.setup().click(must(regenerate.at(-1)));
     await waitFor(() =>
       expect(chatRequests(fake, "POST").find((r) => r.path.endsWith("/messages"))?.body).toEqual({

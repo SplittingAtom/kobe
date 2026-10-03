@@ -1,6 +1,6 @@
 import type { KobeEvent, KobeEventPayload, KobeEventType } from "@kobe/protocol";
 import { describe, expect, it } from "vitest";
-import { applyRunEvents, newLiveRun, type LiveRun } from "./live";
+import { MAX_ITEMS, applyRunEvents, newLiveRun, type LiveRun } from "./live";
 
 const RUN = "00000000-0000-4000-8000-000000000101";
 const THREAD = "00000000-0000-4000-8000-000000000201";
@@ -158,5 +158,34 @@ describe("applyRunEvents", () => {
       run_id: THREAD,
     };
     expect(apply(newLiveRun(RUN), [other]).run.lastSeq).toBe(0);
+  });
+
+  it("dedupes blocked domains, artifacts and files, and keeps at most 50 of each", () => {
+    seq = 0;
+    const events: KobeEvent[] = [];
+    for (let i = 0; i < 3; i++) {
+      events.push(
+        ev("egress.blocked", { domain: "pypi.org", tool_call_id: "tc1", request_access: true }),
+      );
+      events.push(ev("egress.blocked", { domain: "pypi.org", request_access: true }));
+    }
+    for (let i = 0; i < 80; i++) {
+      events.push(ev("egress.blocked", { domain: `d${i}.example`, request_access: false }));
+      events.push(
+        ev("file.shared", {
+          file_id: `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+          tool_call_id: "tc1",
+          name: "f",
+          size: 1,
+        }),
+      );
+    }
+    const { run } = apply(newLiveRun(RUN), events);
+    expect(run.tools.tc1?.egressBlocked).toHaveLength(1);
+    expect(run.notices).toHaveLength(MAX_ITEMS);
+    expect(run.notices.at(-1)).toMatchObject({ payload: { domain: "d79.example" } });
+    const domains = run.notices.map((n) => (n.type === "egress.blocked" ? n.payload.domain : ""));
+    expect(new Set(domains).size).toBe(domains.length);
+    expect(run.tools.tc1?.files).toHaveLength(MAX_ITEMS);
   });
 });

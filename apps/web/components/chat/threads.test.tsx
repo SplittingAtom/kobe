@@ -9,6 +9,7 @@ import { must } from "../../lib/testing/must";
 let fake: FakeKobe;
 
 beforeEach(() => {
+  sessionStorage.clear(); // resume points are per tab; each test is a fresh tab
   fake = new FakeKobe();
   vi.stubGlobal("fetch", fake.fetch);
 });

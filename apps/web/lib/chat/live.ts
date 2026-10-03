@@ -71,8 +71,8 @@ export interface LiveRun {
   readonly committed: readonly string[];
   /** The run's prompt is in the tree (its first committed user message). */
   readonly promptCommitted: boolean;
-  /** Message ids already bound to entries (later deltas for them are ignored). */
-  readonly bound: readonly string[];
+  /** Message ids already bound to entries (later deltas for them are ignored); O(1) lookups. */
+  readonly bound: Readonly<Record<string, true>>;
   readonly messages: readonly LiveMessage[];
   readonly tools: Readonly<Record<string, ToolActivity>>;
   readonly notices: readonly RunNotice[];
@@ -85,11 +85,22 @@ export function newLiveRun(runId: string): LiveRun {
     started: false,
     committed: [],
     promptCommitted: false,
-    bound: [],
+    bound: {},
     messages: [],
     tools: {},
     notices: [],
   };
+}
+
+/** At most this many notices, blocked domains, artifacts and files are kept per run or tool call. */
+export const MAX_ITEMS = 50;
+
+/** Appends unless an item with the same key is there; keeps the newest MAX_ITEMS. */
+function addCapped<T>(list: readonly T[], item: T, key: (x: T) => string): readonly T[] {
+  const k = key(item);
+  if (list.some((x) => key(x) === k)) return list;
+  const next = [...list, item];
+  return next.length > MAX_ITEMS ? next.slice(next.length - MAX_ITEMS) : next;
 }
 
 const NO_TOOL: ToolActivity = { egressBlocked: [], artifacts: [], files: [] };
@@ -110,7 +121,8 @@ function upsertMessage(
   messageId: string,
   change: (parts: readonly LivePart[]) => readonly LivePart[],
 ): LiveRun {
-  const index = run.messages.findIndex((m) => m.messageId === messageId);
+  // The streaming message is the last one: searching from the end keeps a delta O(1).
+  const index = run.messages.findLastIndex((m) => m.messageId === messageId);
   if (index === -1)
     return { ...run, messages: [...run.messages, { messageId, parts: change([]) }] };
   const messages = run.messages.map((m, i) => (i === index ? { ...m, parts: change(m.parts) } : m));
@@ -119,10 +131,10 @@ function upsertMessage(
 
 function appendDelta(run: LiveRun, event: KobeEvent<"text.delta" | "reasoning.delta">): LiveRun {
   const { message_id: messageId, content_index: contentIndex, delta } = event.payload;
-  if (run.bound.includes(messageId)) return run;
+  if (run.bound[messageId]) return run;
   const kind = event.type === "text.delta" ? "text" : "reasoning";
   return upsertMessage(run, messageId, (parts) => {
-    const at = parts.findIndex(
+    const at = parts.findLastIndex(
       (p) => p.kind === kind && "contentIndex" in p && p.contentIndex === contentIndex,
     );
     if (at === -1) return [...parts, { kind, contentIndex, text: delta }];
@@ -133,7 +145,7 @@ function appendDelta(run: LiveRun, event: KobeEvent<"text.delta" | "reasoning.de
 function addToolCall(run: LiveRun, payload: Payload<"tool.call">): LiveRun {
   const withCall = withTool(run, payload.tool_call_id, (t) => ({ ...t, call: payload }));
   const messageId = payload.message_id ?? `tool:${payload.tool_call_id}`;
-  if (withCall.bound.includes(messageId)) return withCall;
+  if (withCall.bound[messageId]) return withCall;
   return upsertMessage(withCall, messageId, (parts) =>
     parts.some((p) => p.kind === "tool" && p.toolCallId === payload.tool_call_id)
       ? parts
@@ -159,7 +171,10 @@ function isUserMessage(payload: Readonly<Record<string, unknown>> | undefined): 
 function commit(run: LiveRun, payload: Payload<"entry.committed">): LiveRun {
   const entryPayload = payload.payload as Readonly<Record<string, unknown>> | undefined;
   const committedTools = toolCallIdsOf(entryPayload);
-  const bound = payload.message_id === undefined ? run.bound : [...run.bound, payload.message_id];
+  const bound =
+    payload.message_id === undefined
+      ? run.bound
+      : { ...run.bound, [payload.message_id]: true as const };
   const messages = run.messages
     .filter((m) => m.messageId !== payload.message_id)
     .map((m) => ({
@@ -179,8 +194,13 @@ function commit(run: LiveRun, payload: Payload<"entry.committed">): LiveRun {
   };
 }
 
+/** The same domain blocked twice is one notice; any other notice is its own (by seq). */
+function noticeKey(event: RunNotice): string {
+  return event.type === "egress.blocked" ? `egress:${event.payload.domain}` : `seq:${event.seq}`;
+}
+
 function notice(run: LiveRun, event: RunNotice): LiveRun {
-  return { ...run, notices: [...run.notices, event] };
+  return { ...run, notices: addCapped(run.notices, event, noticeKey) };
 }
 
 /** Events that show work started: the "waking" notice goes away. */
@@ -224,19 +244,25 @@ function applyOne(run: LiveRun, event: KobeEvent): LiveRun {
       if (id === undefined) return notice(next, event);
       return withTool(next, id, (t) => ({
         ...t,
-        egressBlocked: [...t.egressBlocked, event.payload],
+        egressBlocked: addCapped(t.egressBlocked, event.payload, (b) => b.domain),
       }));
     }
     case "artifact.created":
     case "artifact.updated": {
       const id = event.payload.tool_call_id;
       if (id === undefined) return notice(next, event);
-      return withTool(next, id, (t) => ({ ...t, artifacts: [...t.artifacts, event.payload] }));
+      return withTool(next, id, (t) => ({
+        ...t,
+        artifacts: addCapped(t.artifacts, event.payload, (a) => `${a.artifact_id}:${a.version}`),
+      }));
     }
     case "file.shared": {
       const id = event.payload.tool_call_id;
       if (id === undefined) return notice(next, event);
-      return withTool(next, id, (t) => ({ ...t, files: [...t.files, event.payload] }));
+      return withTool(next, id, (t) => ({
+        ...t,
+        files: addCapped(t.files, event.payload, (f) => f.file_id),
+      }));
     }
     case "steer.applied":
     case "memory.updated":

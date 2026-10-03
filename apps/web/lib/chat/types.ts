@@ -87,6 +87,11 @@ export interface RunSnapshot {
 export interface ThreadRuns {
   readonly runs: readonly RunSnapshot[];
   readonly interruptedRun: RunSnapshot | null;
+  /**
+   * The queue is held after Stop until the user resumes or sends (Chris's D17 decision; the server
+   * side lands with KOBE-26 — `queue_paused` is the expected field, absent on older servers).
+   */
+  readonly queuePaused?: boolean | undefined;
 }
 
 /**

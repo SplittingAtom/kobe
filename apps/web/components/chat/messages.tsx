@@ -10,12 +10,14 @@ import {
   type ReasoningMessagePartProps,
   type TextMessagePartProps,
 } from "@assistant-ui/react";
+import { ROOT_BRANCHING_AVAILABLE, ROOT_BRANCHING_PENDING } from "../../lib/chat/features";
 import { messageMeta, type KobeMessageMeta } from "../../lib/chat/tree";
 import { useKobeExtras } from "./kobe-runtime";
+import { Markdown } from "./markdown";
 import { ToolCallCard } from "./tool-call";
 import styles from "./chat.module.css";
 
-/** Agent text is shown as plain text (React escapes it); Markdown rendering is a follow-up. */
+/** The user's message as typed (React escapes it). */
 function PlainText({ text }: TextMessagePartProps) {
   return <span>{text}</span>;
 }
@@ -42,8 +44,13 @@ function Offloaded() {
   return <p className={styles.notice}>This part of the conversation is too large to show here.</p>;
 }
 
+/** Agent text: sanitised Markdown (`markdown.tsx`); the user's own text stays as typed. */
+function MarkdownText({ text }: TextMessagePartProps) {
+  return <Markdown text={text} />;
+}
+
 const ASSISTANT_PARTS = {
-  Text: PlainText,
+  Text: MarkdownText,
   Reasoning,
   tools: { Override: ToolCallCard },
   data: { by_name: { "kobe-problem": Problem, "kobe-offloaded": Offloaded } },
@@ -51,6 +58,29 @@ const ASSISTANT_PARTS = {
 
 function useMeta(): KobeMessageMeta | undefined {
   return useAuiState((s) => s.message.metadata.custom as KobeMessageMeta | undefined);
+}
+
+/**
+ * An action the first exchange can't take yet (root branching, `lib/chat/features.ts`): focusable,
+ * announced as unavailable, with the reason as its description and tooltip.
+ */
+function PendingAction({ label, id }: { readonly label: string; readonly id: string }) {
+  return (
+    <>
+      <button
+        type="button"
+        aria-disabled="true"
+        aria-describedby={id}
+        title={ROOT_BRANCHING_PENDING}
+        className={styles.pendingAction}
+      >
+        {label}
+      </button>
+      <span id={id} className={styles.visuallyHidden}>
+        {ROOT_BRANCHING_PENDING}
+      </span>
+    </>
+  );
 }
 
 function BranchPicker() {
@@ -71,6 +101,8 @@ export function UserMessage() {
   const meta = useMeta();
   const pending = meta?.kind === "user" && meta.pending;
   const canEdit = meta?.kind === "user" && !meta.pending && meta.parentEntryId !== null;
+  const firstMessage = meta?.kind === "user" && !meta.pending && meta.parentEntryId === null;
+  const messageId = useAuiState((s) => s.message.id);
   return (
     <MessagePrimitive.Root
       className={`${styles.message} ${styles.userMessage} ${pending ? styles.pending : ""}`}
@@ -86,6 +118,9 @@ export function UserMessage() {
             <ActionBarPrimitive.Edit>Edit</ActionBarPrimitive.Edit>
           </ActionBarPrimitive.Root>
         )}
+        {firstMessage && !ROOT_BRANCHING_AVAILABLE && (
+          <PendingAction label="Edit" id={`kobe-edit-pending-${messageId}`} />
+        )}
         <BranchPicker />
       </div>
     </MessagePrimitive.Root>
@@ -93,17 +128,19 @@ export function UserMessage() {
 }
 
 /** Regenerate re-sends the question before this answer from that question's parent entry. */
-function useCanRegenerate(): boolean {
+function useRegenerate(): "yes" | "root" | "no" {
   const parentId = useAuiState((s) => s.message.parentId);
   const extras = useKobeExtras();
   const parent = extras?.projection.items.find((i) => i.message.id === parentId);
   const meta = parent ? messageMeta(parent.message) : undefined;
-  return meta?.kind === "user" && !meta.pending && meta.parentEntryId !== null;
+  if (meta?.kind !== "user" || meta.pending) return "no";
+  return meta.parentEntryId !== null ? "yes" : "root";
 }
 
 export function AssistantMessage() {
   const running = useAuiState((s) => s.message.status?.type === "running");
-  const canRegenerate = useCanRegenerate();
+  const regenerate = useRegenerate();
+  const messageId = useAuiState((s) => s.message.id);
   return (
     <MessagePrimitive.Root className={styles.message} aria-busy={running}>
       <h3 className={styles.visuallyHidden}>The agent said</h3>
@@ -114,7 +151,12 @@ export function AssistantMessage() {
       <div className={styles.messageFooter}>
         <ActionBarPrimitive.Root hideWhenRunning>
           <ActionBarPrimitive.Copy>Copy</ActionBarPrimitive.Copy>
-          {canRegenerate && <ActionBarPrimitive.Reload>Regenerate</ActionBarPrimitive.Reload>}
+          {regenerate === "yes" && (
+            <ActionBarPrimitive.Reload>Regenerate</ActionBarPrimitive.Reload>
+          )}
+          {regenerate === "root" && !ROOT_BRANCHING_AVAILABLE && (
+            <PendingAction label="Regenerate" id={`kobe-regenerate-pending-${messageId}`} />
+          )}
         </ActionBarPrimitive.Root>
         <BranchPicker />
       </div>

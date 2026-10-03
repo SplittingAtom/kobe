@@ -33,6 +33,8 @@ export interface ThreadState {
   /** The active run (if any) followed by queued runs, as the server last said. */
   readonly runs: readonly RunSnapshot[];
   readonly interruptedRun: RunSnapshot | null;
+  /** Queued messages are held after Stop until the user resumes the queue or sends. */
+  readonly queuePaused: boolean;
   readonly pending: readonly PendingMessage[];
   /** The run being streamed, or the last one streamed. */
   readonly live?: LiveRun | undefined;
@@ -60,6 +62,7 @@ export function initialThreadState(threadId: string | null): ThreadState {
     serverSeq: 0,
     runs: [],
     interruptedRun: null,
+    queuePaused: false,
     pending: [],
     connection: "idle",
     busy: [],
@@ -133,6 +136,8 @@ export function runToStream(state: ThreadState): string | undefined {
   const active = activeRun(state);
   if (active) return active.runId;
   if (state.summary?.status === "interrupted" || state.interruptedRun !== null) return undefined;
+  // A held queue doesn't start: keep the stopped run (and what it streamed) on screen.
+  if (state.queuePaused) return undefined;
   return queuedRuns(state)[0]?.runId;
 }
 
@@ -167,7 +172,7 @@ function emptyRun(runId: string): LiveRun {
     started: true,
     committed: [],
     promptCommitted: false,
-    bound: [],
+    bound: {},
     messages: [],
     tools: {},
     notices: [],

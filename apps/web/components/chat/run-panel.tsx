@@ -34,7 +34,9 @@ function RunStatus({
       )}
       {state.connection === "lost" && (
         <div className={styles.banner} role="alert">
-          Live updates stopped.{" "}
+          Live updates stopped. The run goes on without you; nothing is lost. This can happen when
+          too many Kobe tabs or devices follow runs at once (each person can follow 16 per server):
+          close some, then reconnect.{" "}
           <button type="button" onClick={controller.reconnect}>
             Reconnect
           </button>
@@ -190,7 +192,23 @@ function Queue({
   if (queued.length === 0 && !showSending) return null;
   return (
     <section aria-label="Queued messages">
-      <h3 className={styles.who}>Queued: runs after the current message</h3>
+      {state.queuePaused ? (
+        <div className={styles.banner} role="status">
+          <p>
+            <strong>Queue paused.</strong> You stopped the run, so the messages below wait until you
+            resume the queue (sending a new message resumes it too).
+          </p>
+          <button
+            type="button"
+            onClick={() => void controller.resumeQueue()}
+            disabled={isBusy(state, "resume")}
+          >
+            Resume queue
+          </button>
+        </div>
+      ) : (
+        <h3 className={styles.who}>Queued: runs after the current message</h3>
+      )}
       <ol className={styles.queue}>
         {queued.map((m, i) => (
           <QueuedItem

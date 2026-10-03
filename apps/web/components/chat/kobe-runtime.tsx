@@ -179,7 +179,10 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
       }
     }
     const target = session.peek(threadId) ?? controller;
-    const sent = (await target?.send(text, parentEntryId)) ?? false;
+    // The controller reports its own failures; a throw must never leave the composer stuck.
+    const sent = await (target?.send(text, parentEntryId) ?? Promise.resolve(false)).catch(
+      () => false,
+    );
     if (created) session.threadCreated();
     return sent;
   };

@@ -7,6 +7,14 @@
 import { isTerminalRunStatus, type KobeEvent } from "@kobe/protocol";
 import type { ApiError } from "../api/client";
 import type { ChatApi } from "./api";
+import { newIdempotencyKey } from "./keys";
+import {
+  browserResumeStore,
+  clearResumePoint,
+  loadResumePoint,
+  saveResumePoint,
+  type ResumeStore,
+} from "./resume";
 import { applyRunEvents, newLiveRun } from "./live";
 import {
   openRunStream,
@@ -19,6 +27,7 @@ import {
   initialThreadState,
   mergeCommittedEntries,
   mergeServerEntries,
+  queuedRuns,
   runToStream,
   type ThreadState,
 } from "./thread-state";
@@ -31,17 +40,20 @@ export interface ControllerOptions {
   readonly newKey?: () => string;
   /** Delay before reopening a stream the server closed while its run was still active. */
   readonly reopenDelayMs?: (attempt: number) => number;
+  /** Per-tab resume points (`resume.ts`); default sessionStorage, `null` to always replay. */
+  readonly resumeStore?: ResumeStore | null | undefined;
 }
 
 const MAX_REOPEN_ATTEMPTS = 5;
 const MAX_ENTRY_PAGES = 40;
+const CLIENT_ERROR: ApiError = {
+  status: 0,
+  code: "client_error",
+  message: "Your message was not sent. Try again.",
+};
 const PARTIAL_HISTORY = "Part of this conversation could not be loaded. Reload to see all of it.";
 
 type Listener = () => void;
-
-function defaultKey(): string {
-  return globalThis.crypto.randomUUID();
-}
 
 export class ThreadController {
   #state: ThreadState;
@@ -50,6 +62,7 @@ export class ThreadController {
   readonly #eventSource: EventSourceFactory | undefined;
   readonly #newKey: () => string;
   readonly #reopenDelay: (attempt: number) => number;
+  readonly #resume: ResumeStore | undefined;
   #stream: RunStream | undefined;
   #reopenAttempts = 0;
   #reopenTimer: ReturnType<typeof setTimeout> | undefined;
@@ -64,8 +77,10 @@ export class ThreadController {
     this.#state = initialThreadState(threadId);
     this.#api = options.api;
     this.#eventSource = options.eventSource;
-    this.#newKey = options.newKey ?? defaultKey;
+    this.#newKey = options.newKey ?? newIdempotencyKey;
     this.#reopenDelay = options.reopenDelayMs ?? ((n) => Math.min(1000 * 2 ** n, 15_000));
+    this.#resume =
+      options.resumeStore === null ? undefined : (options.resumeStore ?? browserResumeStore());
   }
 
   // --- store ----------------------------------------------------------------------------------
@@ -207,7 +222,15 @@ export class ThreadController {
   }
 
   #applyRuns(data: ThreadRuns): void {
-    this.#set((s) => ({ ...s, runs: data.runs, interruptedRun: data.interruptedRun }));
+    this.#set((s) => {
+      const active = data.runs.some(
+        (r) => r.status === "running" || r.status === "waiting_approval",
+      );
+      const queued = data.runs.some((r) => r.status === "queued");
+      // The server's flag when it sends one; otherwise ours holds until a run starts or the queue empties.
+      const queuePaused = data.queuePaused ?? (s.queuePaused && !active && queued);
+      return { ...s, runs: data.runs, interruptedRun: data.interruptedRun, queuePaused };
+    });
   }
 
   /** New entries, the summary (leaf, status), runs and pending messages; then the right stream. */
@@ -297,7 +320,10 @@ export class ThreadController {
       const prompt = s.pending.find((m) => m.runId === runId);
       return {
         ...s,
-        live: newLiveRun(runId),
+        // After a reload, resume after what the entries already hold (else replay from 0).
+        live:
+          loadResumePoint(this.#resume, runId, new Set(s.entries.map((e) => e.entryId))) ??
+          newLiveRun(runId),
         livePrompt: prompt
           ? { text: prompt.content, parentEntryId: prompt.parentEntryId }
           : undefined,
@@ -334,6 +360,8 @@ export class ThreadController {
       connection: "open",
     }));
     const terminal = applied.run.terminal;
+    if (terminal !== undefined) clearResumePoint(this.#resume, runId);
+    else if (applied.entries.length > 0) saveResumePoint(this.#resume, applied.run);
     if (terminal !== undefined && live.terminal === undefined) {
       this.#onTerminal(terminal);
       return;
@@ -432,6 +460,17 @@ export class ThreadController {
    * Idempotency-Key makes the one automatic resend after a network error safe.
    */
   readonly send = async (text: string, parentEntryId?: string): Promise<boolean> => {
+    try {
+      return await this.#send(text, parentEntryId);
+    } catch {
+      // Whatever failed, the composer must not stay stuck: the message is offered back.
+      this.#set((s) => ({ ...s, sending: undefined }));
+      this.#fail(CLIENT_ERROR, text);
+      return false;
+    }
+  };
+
+  async #send(text: string, parentEntryId?: string): Promise<boolean> {
     const threadId = this.#state.threadId;
     // One message at a time: a second Enter before the server answered is not a second message.
     if (threadId === null || this.#state.sending !== undefined) return false;
@@ -442,6 +481,7 @@ export class ThreadController {
       ...s,
       sending: { key, text, parentEntryId: branchFrom, queues },
       actionError: undefined,
+      queuePaused: false, // sending releases a queue held by Stop
     }));
     const body = { content: text, parentEntryId };
     let res = await this.#api.sendMessage(threadId, body, key);
@@ -477,7 +517,7 @@ export class ThreadController {
     await this.refresh();
     this.#set((s) => (s.sending?.key === key ? { ...s, sending: undefined } : s));
     return true;
-  };
+  }
 
   /** Steer now (D17): inject into the current run at Pi's next safe point. */
   readonly steer = async (text: string): Promise<boolean> => {
@@ -493,12 +533,17 @@ export class ThreadController {
   };
 
   /** Stop (D17): cancels the current run; queued messages stay and the next one starts. */
+  /** Stop (D17): cancels the current run; queued messages are held until "Resume queue". */
   readonly stop = async (): Promise<void> => {
     const runId = currentRunId(this.#state);
     if (runId === undefined) return;
+    const holds = queuedRuns(this.#state).length > 0;
+    if (holds) this.#set((s) => ({ ...s, queuePaused: true }));
     const res = await this.#busy("stop", () => this.#api.cancel(runId));
-    if (!res.ok) this.#fail(res.error);
-    else this.#announce("Stopping…");
+    if (!res.ok) {
+      this.#set((s) => ({ ...s, queuePaused: false }));
+      this.#fail(res.error);
+    } else this.#announce(holds ? "Stopped. The queue is paused." : "Stopping…");
   };
 
   readonly cancelQueued = async (runId: string): Promise<void> => {
@@ -536,7 +581,13 @@ export class ThreadController {
   };
 
   /** "Continue without retry" (D14): the interrupted thread's queue resumes. */
-  readonly continueWithoutRetry = async (): Promise<void> => {
+  readonly continueWithoutRetry = async (): Promise<void> =>
+    this.#resumeQueue("Continuing without retry.");
+
+  /** "Resume queue" after Stop: the held messages run in order. */
+  readonly resumeQueue = async (): Promise<void> => this.#resumeQueue("The queue resumed.");
+
+  async #resumeQueue(announcement: string): Promise<void> {
     const threadId = this.#state.threadId;
     if (threadId === null) return;
     const res = await this.#busy("resume", () => this.#api.resumeQueue(threadId));
@@ -544,10 +595,11 @@ export class ThreadController {
       this.#fail(res.error);
       return;
     }
-    this.#applyRuns(res.data);
-    this.#announce("Continuing without retry.");
+    this.#set((s) => ({ ...s, queuePaused: false }));
+    this.#applyRuns({ ...res.data, queuePaused: res.data.queuePaused ?? false });
+    this.#announce(announcement);
     await this.refresh();
-  };
+  }
 
   /** Shows another branch (assistant-ui's branch picker) and makes it the thread's leaf. */
   readonly switchLeaf = async (entryId: string): Promise<void> => {

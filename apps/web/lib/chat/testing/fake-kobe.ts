@@ -15,6 +15,8 @@ interface FakeThread {
   thread_id: string;
   title: string | null;
   status: "idle" | "running" | "interrupted";
+  /** Stop holds the queue until the user resumes or sends (Chris's D17 decision, KOBE-26). */
+  queue_paused: boolean;
   leaf_entry_id: string | null;
   deleted_at: string | null;
   last_activity_at: string;
@@ -81,6 +83,8 @@ export class FakeKobe {
   readonly runs = new Map<string, FakeRun>();
   /** Requests answered with an error once, keyed "METHOD /path" (e.g. to simulate a 503). */
   readonly failNext = new Map<string, Response>();
+  /** The server holds the queue after Stop (KOBE-26); false = the KOBE-30 behaviour (next starts). */
+  pauseOnStop = true;
   #threadN = 0;
   #runN = 0;
   #entryN = 0;
@@ -97,6 +101,7 @@ export class FakeKobe {
       title,
       status: "idle",
       leaf_entry_id: null,
+      queue_paused: false,
       deleted_at: null,
       last_activity_at: `2026-10-02T09:${String(this.#threadN).padStart(2, "0")}:00.000Z`,
       created_at: NOW,
@@ -262,7 +267,7 @@ export class FakeKobe {
   /** Starts the next queued run if the thread may advance (idle, nothing active). */
   #advance(threadId: string): void {
     const thread = this.#thread(threadId);
-    if (thread.status !== "idle" || this.activeRun(threadId)) return;
+    if (thread.status !== "idle" || thread.queue_paused || this.activeRun(threadId)) return;
     const next = this.#queued(threadId)[0];
     if (next) this.#start(next);
   }
@@ -315,6 +320,7 @@ export class FakeKobe {
     return {
       runs: [...(active ? [active] : []), ...this.#queued(threadId)].map((r) => this.#snapshot(r)),
       interrupted_run: interrupted ? this.#snapshot(interrupted) : null,
+      ...(this.pauseOnStop ? { queue_paused: this.#thread(threadId).queue_paused } : {}),
     };
   }
 
@@ -413,6 +419,7 @@ export class FakeKobe {
     if (action === "pending-messages") return json(200, this.#pending(thread.thread_id));
     if (action === "queue" && sub === "resume") {
       if (thread.status === "interrupted") thread.status = "idle";
+      thread.queue_paused = false;
       this.#advance(thread.thread_id);
       return json(200, this.#threadRuns(thread.thread_id));
     }
@@ -484,6 +491,11 @@ export class FakeKobe {
     };
     this.runs.set(run.run_id, run);
     thread.last_activity_at = new Date(Date.parse(thread.last_activity_at) + 60_000).toISOString();
+    if (thread.queue_paused) {
+      // Sending releases a held queue: the held messages run first, then this one.
+      thread.queue_paused = false;
+      this.#advance(thread.thread_id);
+    }
     const waits = this.activeRun(thread.thread_id) !== undefined || thread.status === "interrupted";
     if (waits) {
       this.emit(run.run_id, "run.queued", {
@@ -526,6 +538,8 @@ export class FakeKobe {
       return json(200, this.#snapshot(run));
     }
     if (!ACTIVE.has(run.status)) return json(200, this.#snapshot(run));
+    const thread = this.#thread(run.thread_id);
+    if (this.pauseOnStop && this.#queued(run.thread_id).length > 0) thread.queue_paused = true;
     this.#end(run, "cancelled", "run.interrupted", {
       reason: "cancelled",
       last_entry_id: run.tip,

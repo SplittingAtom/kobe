@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createChatApi } from "./api";
 import { FakeKobe } from "./testing/fake-kobe";
 import { ThreadController } from "./thread-controller";
@@ -140,5 +140,41 @@ describe("ThreadController", () => {
       fake.requests.filter((r) => r.path.endsWith("/messages")).map((r) => r.idempotencyKey),
     ).toEqual(["same-key", "same-key"]);
     expect(c.getState().phase).toBe("ready");
+  });
+
+  it("sends on a plain-HTTP origin (no crypto.randomUUID) and recovers from any send failure", async () => {
+    const t = fake.addThread("x");
+    const real = globalThis.crypto;
+    vi.stubGlobal("crypto", { getRandomValues: real.getRandomValues.bind(real) });
+    try {
+      const c = new ThreadController(t, {
+        api: createChatApi(fake.teamId, fake.fetch),
+        eventSource: fake.eventSource,
+      });
+      controllers.push(c);
+      await c.load();
+      expect(await c.send("hello")).toBe(true);
+      expect(fake.requests.find((r) => r.path.endsWith("/messages"))?.idempotencyKey).toMatch(
+        /^[0-9a-f]{32}$/,
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    const broken = new ThreadController(t, {
+      api: createChatApi(fake.teamId, fake.fetch),
+      eventSource: fake.eventSource,
+      newKey: () => {
+        throw new Error("no randomness");
+      },
+    });
+    controllers.push(broken);
+    await broken.load();
+    expect(await broken.send("again")).toBe(false);
+    expect(broken.getState().sending).toBeUndefined();
+    expect(broken.getState().actionError).toMatchObject({
+      draft: "again",
+      error: { code: "client_error" },
+    });
   });
 });
