@@ -55,29 +55,25 @@ KOBE_IMAGE_TAG=<tag> e2e/run.sh             # k3d end-to-end suite (cluster from
 
 ## CI
 
-| Workflow        | When                           | What                                                                                                  |
-| --------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `ci`            | every push                     | format, build, typecheck, lint, unit + chart tests, license check, DB/RLS suite, image non-root check |
-| `sandbox-image` | sandbox inputs change, nightly | build, acceptance checks, license audit, Trivy (fails on fixable CRITICAL)                            |
-| `e2e`           | PRs to `main`, nightly         | k3d + gVisor cluster, chart install from fresh images, `e2e/run.sh`                                   |
-| `publish`       | push to `main`                 | images (`sha-<short>`; `main` moved last) and the chart (`<version>-main.<run>.<attempt>`) to ghcr    |
+| Workflow        | When                                | What                                                                                                  |
+| --------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `ci`            | every push, merge queue             | format, build, typecheck, lint, unit + chart tests, license check, DB/RLS suite, image non-root check |
+| `sandbox-image` | sandbox inputs change, nightly      | build, acceptance checks, license audit, Trivy (fails on fixable CRITICAL)                            |
+| `e2e`           | PRs to `main`, merge queue, nightly | k3d + gVisor cluster, chart install from fresh images, `e2e/run.sh`                                   |
+| `publish`       | push to `main`                      | images (`sha-<short>`; `main` moved last) and the chart (`<version>-main.<run>.<attempt>`) to ghcr    |
 
-Private-repo Actions minutes are metered, which is why e2e runs on PRs and nightly only. Deploy
-`sha-*` image tags or published chart versions, never `:main` (pods with `IfNotPresent` would keep
-a stale `:main`).
+CI runs on GitHub-hosted runners (free for public repositories). Deploy `sha-*` image tags or
+published chart versions, never `:main` (pods with `IfNotPresent` would keep a stale `:main`).
 
-### Self-hosted runner on Chris's k3s (option)
+### Merging
 
-To stop paying for e2e minutes, register a self-hosted runner on the k3s cluster with
-[Actions Runner Controller](https://github.com/actions/actions-runner-controller) (Apache-2.0):
+`main` uses GitHub's merge queue: approve-and-queue a green PR with `gh pr merge <n> --merge` (or
+the "Merge when ready" button). The queue tests the PR on top of everything queued ahead of it
+(`merge_group` runs of `ci` and `e2e`) and merges in order, so a merge no longer forces every other
+open PR to re-run. Required checks: `checks`, `db`, `images`, `k3d`.
 
-1. Install the ARC controller and a runner scale set for `SplittingAtom/kobe` in a dedicated
-   namespace, authenticated with a GitHub App (not a personal token).
-2. Use Docker-in-Docker runner pods (`containerMode: dind`) so `scripts/dev-cluster.sh` can create
-   a nested k3d cluster; give them enough disk for the images (~5 GB) and raise inotify limits on
-   the nodes that host them.
-3. Change `runs-on: ubuntu-latest` to the scale set's name in `e2e.yml`.
+### Self-hosted runners (fallback)
 
-Runner pods execute repository code with privileged Docker access, so restrict the scale set to
-this repository, make runners ephemeral (the e2e cluster name and registry port are fixed), and
-pin them with a nodeSelector/taint to nodes that run no production workloads.
+Self-hosted runners on a k3s cluster (Actions Runner Controller) are documented in
+[`ci/runners/README.md`](../ci/runners/README.md). They are idle by default; set the repository
+variable `KOBE_RUNNER=kobe-k3s` to route jobs to them.

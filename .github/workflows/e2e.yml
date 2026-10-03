@@ -8,6 +8,7 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
     paths-ignore: ["docs/**", "**/*.md"]
+  merge_group:
   schedule:
     - cron: "41 5 * * *"
   workflow_dispatch:
