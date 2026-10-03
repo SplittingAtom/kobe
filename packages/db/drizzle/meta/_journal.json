@@ -176,20 +176,6 @@
       "when": 1791003133831,
       "tag": "0024_approval_floor_unify",
       "breakpoints": true
-    },
-    {
-      "idx": 25,
-      "version": "7",
-      "when": 1791033475052,
-      "tag": "0025_sandboxes",
-      "breakpoints": true
-    },
-    {
-      "idx": 26,
-      "version": "7",
-      "when": 1791033475372,
-      "tag": "0026_sandboxes_rls",
-      "breakpoints": true
     }
   ]
 }
