@@ -32,7 +32,7 @@ console pages.
   `sandbox/session-token.ts` re-exports them (no API change for KOBE-24/58).
 - **DB** (`packages/db`): `egress_domains` † (`domain` PK = pattern, `preset`, `in_ceiling`,
   `note`, `created_by`), `team_egress` (team table, RLS; FK → `egress_domains` ON DELETE CASCADE,
-  `enabled_by`, `enabled_at`). Migrations `0024_egress` (generated) and `0025_egress_rls` (RLS +
+  `enabled_by`, `enabled_at`). Migrations `0025_egress` (generated) and `0026_egress_rls` (RLS +
   preset seed). Pattern grammar in `egress/domain.ts` and the same regex as a CHECK constraint.
   `egress/store.ts`: loaders, `isActiveTeamMember`, `notifyEgressChanged`, channel constants.
 - **Server**: `/v1/install/egress-ceiling` (GET, POST, PUT `/:domain`, PUT `/presets/:preset`,
