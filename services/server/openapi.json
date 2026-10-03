@@ -1164,7 +1164,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Active run first, then the queue (`queue_pos` 1 = next); `interrupted_run` while the thread is interrupted.",
+            "description": "Active run first, then the queue (`queue_pos` 1 = next); `interrupted_run` while the thread is interrupted; `queue_paused` after a Stop with messages queued.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1219,8 +1219,8 @@
     "/v1/threads/{id}/queue/resume": {
       "post": {
         "operationId": "resumeThreadQueue",
-        "summary": "Continue without retry: an interrupted thread's queued runs resume (D14)",
-        "description": "No-op unless the thread is interrupted. Returns the thread's runs.",
+        "summary": "Resume the queue: after a Stop, or Continue without retry on an interrupted thread (D14)",
+        "description": "Queued runs start in order. No-op unless the thread is interrupted or its queue was paused by a Stop. Returns the thread's runs.",
         "parameters": [
           {
             "name": "id",
@@ -1595,7 +1595,7 @@
       "post": {
         "operationId": "cancelRun",
         "summary": "Stop: cancel the active run (Pi aborts), or delete a queued message (D17)",
-        "description": "The run ends `cancelled` at once with `run.interrupted {reason: cancelled}`; queued messages stay and the next one starts. Idempotent for a cancelled run.",
+        "description": "The run ends `cancelled` at once with `run.interrupted {reason: cancelled}`. Stopping the active run pauses the messages queued behind it (`queue_paused`) until the user resumes the queue or sends a new message; deleting a queued message does not pause. Idempotent for a cancelled run.",
         "parameters": [
           {
             "name": "id",
@@ -3161,9 +3161,12 @@
                 "type": "null"
               }
             ]
+          },
+          "queue_paused": {
+            "type": "boolean"
           }
         },
-        "required": ["runs", "interrupted_run"],
+        "required": ["runs", "interrupted_run", "queue_paused"],
         "additionalProperties": false
       },
       "SubmitMessageBody": {

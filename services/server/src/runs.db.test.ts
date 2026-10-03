@@ -206,7 +206,7 @@ describe("steer (D17)", () => {
 });
 
 describe("stop (D17)", () => {
-  it("cancels the active run at once, aborts Pi, refuses its late frames and starts the next", async () => {
+  it("cancels the active run at once, aborts Pi, refuses its late frames and pauses the queue", async () => {
     const w = await f.world();
     const ws = await f.connect(w, 0);
     const threadId = await f.thread(w.owner);
@@ -232,7 +232,11 @@ describe("stop (D17)", () => {
     ws.event(start, piDelta("late"));
     await ws.acked(run);
     expect(await f.types(w.team, run)).toEqual(["run.started", "run.interrupted"]);
-    // Stop leaves queued messages in place; the next one starts.
+    // Stop leaves queued messages in place, paused (KOBE-26); Resume starts the next.
+    await f.fx.replica(0).deps.runs.idle();
+    await f.fx.replica(1).deps.runs.idle();
+    expect(await f.status(w.team, next)).toBe("queued");
+    await f.on(0, w.owner).post(`/v1/threads/${threadId}/queue/resume`);
     expect((await ws.started(next)).message).toBe("next");
     // Stop is idempotent; an ended run can't be stopped.
     expect((await f.on(0, w.owner).post(`/v1/runs/${run}/cancel`)).status).toBe(200);

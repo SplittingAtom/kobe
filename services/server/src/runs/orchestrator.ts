@@ -46,6 +46,8 @@ import {
   existingRetry,
   latestInterruptedRow,
   requestStop,
+  setQueuePaused,
+  isQueuePaused,
   retryBranchPoint,
   runByClientKey,
   getRunRow,
@@ -125,6 +127,8 @@ export interface ServerRunOrchestrator extends RunOrchestrator {
   ): Promise<SubmitMessageResult>;
   /** The run an `interrupted` thread waits on (Retry), or null. */
   latestInterruptedRun(actor: ActorContext, threadId: string): Promise<RunSnapshot | null>;
+  /** Messages wait behind a Stop until the user resumes the queue or sends one (KOBE-26). */
+  queuePaused(actor: ActorContext, threadId: string): Promise<boolean>;
   /** KOBE-24 `RunLifecycleHooks.onRunEnded`: the wire ended a run; advance its thread's queue. */
   onRunEnded(event: { teamId: string; runId: string; threadId: string }): Promise<void>;
   /** Refuse new runs while the isolation runtime is missing (D4); set by index.ts. */
@@ -234,6 +238,8 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         clientKey,
       });
       await touchThread(tx, teamId, thread.id);
+      // A new message releases a queue paused by Stop: it joins the end, earlier ones go first.
+      await setQueuePaused(tx, teamId, thread.id, false);
       const { promotion, queued } = await this.#promoteOrQueue(tx, teamId, thread.id, id);
       return { result: { run_id: id, queued }, promotion };
     });
@@ -298,11 +304,14 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       );
       // Durable: if this replica dies before Pi is told, the sweep sends the abort.
       if (wasActive) await requestStop(tx, teamId, runId, "abort");
+      // Stop pauses the queue behind the run (KOBE-26); deleting a queued message does not.
+      const queuePaused = wasActive && (await queuedCount(tx, teamId, thread.id)) > 0;
+      if (queuePaused) await setQueuePaused(tx, teamId, thread.id, true);
       await recordAudit(tx, {
         action: "run.cancelled",
         actor: userActor(actor),
         teamId,
-        target: { runId, threadId: thread.id, wasActive },
+        target: { runId, threadId: thread.id, wasActive, ...(queuePaused ? { queuePaused } : {}) },
       });
       return { wasActive, transition: applied.transition, threadId: thread.id };
     });
@@ -391,7 +400,9 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
   async resumeQueue(actor: ActorContext, threadId: string): Promise<void> {
     const promotion = await this.#threadTx(actor, async (tx, viewer) => {
       const thread = await lockOwnedThread(tx, viewer, threadId, "thread_not_found");
-      if (thread.status !== "interrupted") return undefined;
+      const paused = await isQueuePaused(tx, actor.team_id, thread.id);
+      if (thread.status !== "interrupted" && !paused) return undefined;
+      if (paused) await setQueuePaused(tx, actor.team_id, thread.id, false);
       await setThreadStatus(
         tx,
         actor.team_id,
@@ -432,6 +443,16 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       return latestInterruptedRow(tx, actor.team_id, threadId);
     });
     return row ? toSnapshot(row) : null;
+  }
+
+  async queuePaused(actor: ActorContext, threadId: string): Promise<boolean> {
+    return this.#readTx(actor, async (tx, viewer) => {
+      if (!(await findThread(tx, viewer, threadId))) throw new RunError("thread_not_found");
+      return (
+        (await isQueuePaused(tx, actor.team_id, threadId)) &&
+        (await queuedCount(tx, actor.team_id, threadId)) > 0
+      );
+    });
   }
 
   // ------------------------------------------------------------------------- internal entry points

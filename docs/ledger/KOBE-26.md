@@ -18,6 +18,8 @@
 4. **ac-4** While interrupted, the thread, its entries, the run to retry and the closed event
    stream are readable without waking the sandbox (D14 "reading history never wakes").
 5. **ac-5** Gate 1 e2e on k3d: kill the sandbox pod mid-run → interrupted + Retry, history intact.
+6. **ac-6** (added on review) Stop with messages queued pauses the queue until Resume or a new
+   message; budget-stop and interrupted semantics unchanged.
 
 ## Verification of what KOBE-24/30 built (no change needed)
 
@@ -64,6 +66,35 @@ ensure`), a wire token is minted in the server pod with the real keys for that c
 - CI (PR #43, first run): all 20 checks ok; the run was interrupted 32 s after the pod was
   deleted (connection loss seen at once, 30 s grace, then the sweep).
 
+## Stop pauses the queue (added on review; decided by Chris)
+
+Before: after Stop, the next queued message started once Pi acknowledged the abort or after the
+10 s grace (KOBE-30 decision 6 / open question 2). Now:
+
+- **Stop of the active run with messages queued behind it pauses the queue**: new column
+  `threads.queue_paused_at` (migration `0024_thread_queue_pause`), set in the Stop transaction
+  (thread row locked first, as before). `promoteInTx` (the only place a run starts) does not
+  start a queued run while it is set; a retry is still started ahead of the queue. The runs sweep
+  skips paused threads.
+- **Resume**: `POST /v1/threads/{id}/queue/resume` (existing) clears the pause and starts the
+  queue in order; it still does "Continue without retry" on an interrupted thread.
+- **A new message releases the queue** (decision): it joins the end and the queue resumes in
+  order, so the earlier queued messages run first (`queued: true`). Reading: the user typing again
+  means "carry on"; letting the new message jump the queue would reorder what they wrote.
+- **Not paused**: Stop with nothing queued (the next message starts at once), deleting a queued
+  message (`cancel` of a queued run), budget stops (queued runs are budget-stopped too, unchanged)
+  and interruptions (the queue is held by `interrupted` and needs Retry or Continue, unchanged).
+- **API**: `GET /v1/threads/{id}/runs` (and `…/queue/resume`) answer `queue_paused` (true while
+  paused and something is queued); OpenAPI `ThreadRuns`, cancel and resume descriptions updated.
+- **Audit**: `run.cancelled` gains `queuePaused: true` when the Stop paused the queue
+  (`docs/audit-log.md`). Resume stays unaudited (KOBE-30 L5: the user's own queue).
+- **Contract note** (for a contracts PR): `packages/protocol` `runs.ts`/`run-orchestrator.ts`
+  docs and the in-memory fake still describe "Stop → the next starts"; `resumeQueue` now also
+  resumes a paused queue.
+- Tests: `runs-queue-pause.db.test.ts` (4; three red before the change), KOBE-30's Stop test
+  updated (queue paused, Resume starts the next), the Stop/new-message race resumes a queue the
+  race paused, the EXPLAIN guard covers the new queries.
+
 ## Decisions
 
 - **No notifications for interrupted runs.** D14 asks for the interrupted state and a manual
@@ -87,7 +118,8 @@ ensure`), a wire token is minted in the server pod with the real keys for that c
 
 ## Evidence (acceptance criteria → test or command output)
 
-`services/server/src/runs-interrupted.db.test.ts` (3 tests) plus KOBE-24/30 suites:
+`services/server/src/runs-interrupted.db.test.ts` (3 tests), `runs-queue-pause.db.test.ts` (4) plus
+KOBE-24/30 suites:
 
 | AC   | Evidence                                                                                                                                                                       |
 | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -96,3 +128,4 @@ ensure`), a wire token is minted in the server pod with the real keys for that c
 | ac-3 | "…keeps what Pi wrote after the last sync, and retries" (no restore, tail entry mirrored); KOBE-30 restore test; first-run test restores on a new pod                          |
 | ac-4 | "shows the thread interrupted with its entries, the run to retry and the closed stream" (no `sandbox_commands` row added by the reads)                                         |
 | ac-5 | `e2e/run.sh` "interrupted runs and Retry (KOBE-26)" (CI `e2e` job)                                                                                                             |
+| ac-6 | Stop pauses the queue: `runs-queue-pause.db.test.ts`                                                                                                                           |

@@ -74,6 +74,11 @@ export const threads = pgTable(
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     /** Last allocated `thread_entries.seq`. Only the seq trigger may change it (by exactly 1). */
     lastEntrySeq: integer().notNull().default(0),
+    /**
+     * Set when the user stopped the active run while messages were queued (KOBE-26): the queue
+     * waits until the user resumes it or sends a new message. Null = the queue moves.
+     */
+    queuePausedAt: timestamp({ withTimezone: true }),
   },
   // Annotated: threads and thread_entries reference each other (leaf and thread foreign keys).
   (t): PgTableExtraConfigValue[] => [

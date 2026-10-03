@@ -258,6 +258,35 @@ export async function entryExists(
   return res.rows.length > 0;
 }
 
+/**
+ * Stop pauses the queue (KOBE-26): stopping the active run while messages wait behind it leaves
+ * them queued until the user resumes the queue or sends a new message. Thread row locked by the
+ * caller.
+ */
+export async function setQueuePaused(
+  tx: KobeTx,
+  teamId: string,
+  threadId: string,
+  paused: boolean,
+): Promise<void> {
+  await tx.execute(sql`
+    UPDATE threads SET queue_paused_at = CASE WHEN ${paused} THEN now() END
+     WHERE team_id = ${teamId} AND id = ${threadId}
+       AND (queue_paused_at IS NULL) = ${paused}`);
+}
+
+/** Whether the thread's queue is paused by a Stop (see `setQueuePaused`). */
+export async function isQueuePaused(
+  tx: KobeTx,
+  teamId: string,
+  threadId: string,
+): Promise<boolean> {
+  const res = await tx.execute<{ paused: boolean }>(sql`
+    SELECT queue_paused_at IS NOT NULL AS paused
+      FROM threads WHERE team_id = ${teamId} AND id = ${threadId}`);
+  return res.rows[0]?.paused === true;
+}
+
 export async function queuedCount(tx: KobeTx, teamId: string, threadId: string): Promise<number> {
   const res = await tx.execute<{ n: string | number }>(sql`
     SELECT count(*) AS n FROM runs

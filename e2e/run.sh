@@ -505,18 +505,21 @@ const second = await call("POST", "/v1/threads/" + id + "/messages", { content: 
 out("queued", second.status + ":" + second.json.queued + ":" + second.json.run_id);
 out("run", (await call("GET", "/v1/runs/" + first.json.run_id)).json.status);
 out("cancel", (await call("POST", "/v1/runs/" + first.json.run_id + "/cancel")).json.status);
+out("paused", (await call("GET", "/v1/threads/" + id + "/runs")).json.queue_paused + ":" +
+  (await call("GET", "/v1/runs/" + second.json.run_id)).json.status);
 out("cancel2", (await call("POST", "/v1/runs/" + second.json.run_id + "/cancel")).json.status);
 const events = await call("GET", "/v1/runs/" + first.json.run_id + "/events");
 out("events", (events.text.match(/^event: .*$/gm) || []).map((l) => l.slice(7)).join(","));
 out("retry", (await call("POST", "/v1/runs/" + first.json.run_id + "/retry")).json.code);
 JS
-runs_out=$($KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$RUNS_JS" "$E2E_TEAM_ID" 2>&1 | tail -12)
+runs_out=$($KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$RUNS_JS" "$E2E_TEAM_ID" 2>&1 | tail -13)
 printf '     runs: %s\n' "$(printf '%s' "$runs_out" | tr '\n' ' ')"
 contains "a team member signs in and selects the team" '^active=200$' "$runs_out"
 contains "a message starts a run at once on an idle thread" '^message=201:false$' "$runs_out"
 contains "a second message queues behind the active run" '^queued=201:true:' "$runs_out"
 contains "the run is running while its sandbox start is pending" '^run=running$' "$runs_out"
 contains "Stop cancels the active run" '^cancel=cancelled$' "$runs_out"
+contains "Stop pauses the message queued behind it (KOBE-26)" '^paused=true:queued$' "$runs_out"
 contains "Stop deletes the queued message (or stops it once it started)" '^cancel2=cancelled$' "$runs_out"
 contains "the event stream records the start and the stop, then ends" '^events=run.started,run.interrupted$' "$runs_out"
 contains "a cancelled run cannot be retried (interrupted runs only)" '^retry=invalid_transition$' "$runs_out"

@@ -169,6 +169,13 @@
       "when": 1790997633394,
       "tag": "0023_break_glass_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791004727807,
+      "tag": "0024_thread_queue_pause",
+      "breakpoints": true
     }
   ]
 }
