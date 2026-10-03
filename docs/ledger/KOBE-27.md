@@ -321,7 +321,15 @@ agent `sync.test.ts`.
   another user, another area, `..`, a foreign prefix).
 - **L4** the workspace authenticator's liveness cache is 5 s (the wire keeps its own 20 s); with
   the 5 s principal cache a destroyed or replaced sandbox loses sync access within 5 s.
-- **L2:** its text was not in the coordinator's message; nothing done for it yet (asked).
+- **L2 (noted, accepted): reservation leak window.** If a replica dies mid-upload, its reservation
+  (`pending_blobs`/`pending_bytes`) stays until a collection run finds `pending_since` older
+  than 2 h, so up to **≈ 3 h** (2 h staleness + the hourly collection interval). Meanwhile that
+  workspace's upload budget is short by the leaked bytes and one blob. Also, `pending_since` is
+  only set when the first reservation is taken and cleared when the last ends: under
+  continuously overlapping uploads it does not advance, so after 2 h of uninterrupted overlap a
+  collection could clear reservations that are still live (their later `finishUpload` clamps at 0,
+  and the next collection recomputes the blob counters). Bounded and self-healing; a
+  per-reservation row with its own timestamp would remove both if it ever matters.
 
 ## Measurements
 
