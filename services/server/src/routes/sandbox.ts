@@ -1,4 +1,5 @@
 import { getConnInfo } from "@hono/node-server/conninfo";
+import { WORKSPACE_SYNC_PATH } from "@kobe/protocol";
 import { Hono, type Context } from "hono";
 import { IsolationRuntimeMissingError } from "../isolation/gate.js";
 import { logger } from "../logger.js";
@@ -6,6 +7,7 @@ import type { SessionKeys } from "../sandbox/config.js";
 import { SandboxAuthError, type SandboxProvider } from "../sandbox/provider.js";
 import { createRateLimiter, type RateLimiter } from "../sandbox/rate-limit.js";
 import { issueSessionTokens } from "../sandbox/session-token.js";
+import type { WorkspaceSync } from "../workspace-sync/service.js";
 
 /** How long an unclaimed warm-pool pod waits before asking again. */
 export const UNASSIGNED_RETRY_MS = 2_000;
@@ -26,6 +28,8 @@ export interface SandboxRoutesDeps {
   readonly limiter?: RateLimiter;
   /** Rate-limit key for a request (default: the peer address of the TCP connection). */
   readonly sourceOf?: (c: Context) => string;
+  /** Workspace sync endpoints (KOBE-27); absent when object storage is not configured. */
+  readonly workspace?: ReturnType<WorkspaceSync["routes"]>;
 }
 
 function peerAddress(c: Context): string {
@@ -44,6 +48,14 @@ function peerAddress(c: Context): string {
 export function createSandboxApp(deps: SandboxRoutesDeps): Hono {
   const app = new Hono();
   app.get("/healthz", (c) => c.json({ status: "ok", service: "server-sandbox" }));
+  // Sandbox endpoints are cluster-internal: anything that came through the ingress is refused.
+  app.use("/v1/sandbox/*", async (c, next) => {
+    if (FORWARDED_HEADERS.some((h) => c.req.header(h) !== undefined)) {
+      return c.json({ code: "not_found", message: "Not found." }, 404);
+    }
+    await next();
+  });
+  if (deps.workspace) app.route(WORKSPACE_SYNC_PATH, deps.workspace);
   app.route("/v1/sandbox", sandboxRoutes(deps));
   return app;
 }

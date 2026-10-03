@@ -68,6 +68,11 @@ export interface SandboxWire {
    * lifecycle hook) and team member removal call it.
    */
   revalidateUser(userId: string): Promise<void>;
+  /**
+   * Called on every replica when a user must be re-checked (deactivation, team removal): other
+   * caches of "this sandbox's user may act" (workspace sync, KOBE-27) drop their entries.
+   */
+  onUserRevalidate(listener: (userId: string) => void): () => void;
   /** One lost-sandbox sweep + command expiry now. */
   sweep(): Promise<SweepResult>;
   metrics(): WireMetrics & { readonly connections: number; readonly waiting: number };
@@ -106,6 +111,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
     });
   const approvals = options.approvals ?? DENY_APPROVALS;
   let liveness: SandboxLiveness = NOT_LIVE;
+  const userListeners = new Set<(userId: string) => void>();
   const violationAudits = new Map<string, number>();
 
   const onHint = (hint: BusHint) => {
@@ -121,6 +127,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
         return;
       case "user":
         for (const c of registry.forUser(hint.id)) c.revalidate();
+        for (const listener of userListeners) listener(hint.id);
         return;
       case "hib":
         registry.get(hint.id)?.close("hibernating", "sandbox hibernating");
@@ -310,7 +317,12 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
     },
     async revalidateUser(userId) {
       for (const c of registry.forUser(userId)) c.revalidate();
+      for (const listener of userListeners) listener(userId);
       await bus.notify(db, { kind: "user", id: userId });
+    },
+    onUserRevalidate(listener) {
+      userListeners.add(listener);
+      return () => userListeners.delete(listener);
     },
     sweep,
     metrics() {

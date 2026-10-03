@@ -62,8 +62,11 @@ if local:
     # SMTP sink for invitations and password resets; read them at http://localhost:8025.
     k8s_yaml("dev/mailpit.yaml")
     k8s_resource(workload="mailpit", labels=["deps"], port_forwards=["8025:8025"])
+    # S3-compatible object storage (SeaweedFS, Apache-2.0) for workspace sync: k3d only.
+    k8s_yaml("dev/s3.yaml")
+    k8s_resource(workload="s3", labels=["deps"])
     values = ["dev/values.yaml"]
-    deps = ["pg"]
+    deps = ["pg", "s3"]
 else:
     # Real cluster: bring your own values (database, S3, ingress) in KOBE_DEV_VALUES.
     values_file = os.getenv("KOBE_DEV_VALUES", "")

@@ -178,11 +178,39 @@ describe("server sandbox configuration", () => {
     expect(renderError({ "sandbox.hibernation.idleMinutes": "90" })).toMatch(/idleMinutes|maximum/);
   });
 
+  it("syncs workspaces to object storage by default (KOBE-27), with limits", () => {
+    expect(sandboxConfig(ms).workspaceSync).toEqual({
+      enabled: true,
+      pushIntervalSeconds: 60,
+      maxFileSize: "1Gi",
+      maxFiles: 100000,
+      collectSeconds: 3600,
+    });
+    expect(
+      sandboxConfig(
+        render({
+          "sandbox.workspaceSync.maxWorkspaceSize": "20Gi",
+          "sandbox.workspaceSync.pushIntervalSeconds": "15",
+        }),
+      ).workspaceSync,
+    ).toMatchObject({ maxWorkspaceSize: "20Gi", pushIntervalSeconds: 15 });
+    expect(renderError({ "sandbox.workspaceSync.pushIntervalSeconds": "1" })).toMatch(
+      /pushIntervalSeconds|minimum/,
+    );
+    expect(renderError({ "sandbox.workspaceSync.maxFileSize": "lots" })).toMatch(
+      /maxFileSize|pattern/,
+    );
+  });
+
   it("defaults the sandbox key so `helm upgrade --reuse-values` keeps working", () => {
     expect(sandboxConfig(render({ sandbox: "null" })).warmPool).toEqual({ replicasPerTeam: 1 });
     expect(sandboxConfig(render({ sandbox: "null" })).hibernation).toMatchObject({
       enabled: true,
       idleMinutes: 15,
+    });
+    expect(sandboxConfig(render({ sandbox: "null" })).workspaceSync).toMatchObject({
+      enabled: true,
+      pushIntervalSeconds: 60,
     });
   });
 
