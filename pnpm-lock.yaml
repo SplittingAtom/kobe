@@ -454,8 +454,8 @@ importers:
         specifier: workspace:*
         version: link:../mcp-proxy
       '@levischuck/tiny-cbor':
-        specifier: ^0.2.11
-        version: 0.2.11
+        specifier: ^0.3.6
+        version: 0.3.6
       '@types/pg':
         specifier: ^8.23.1
         version: 8.23.1
@@ -1272,6 +1272,9 @@ packages:
 
   '@levischuck/tiny-cbor@0.2.11':
     resolution: {integrity: sha512-llBRm4dT4Z89aRsm6u2oEZ8tfwL/2l6BwpZ7JcyieouniDECM5AqNgr/y08zalEIvW3RSK4upYyybDcmjXqAow==}
+
+  '@levischuck/tiny-cbor@0.3.6':
+    resolution: {integrity: sha512-uh1K62xhRZbEbnXEPUJ1WHd7uJTAKg65EX/7S/DDX3u2lexCvSjqrOOR3rb+5TDhCyGVHflu/HEtFjuEQ6y+qw==}
 
   '@next/env@16.3.8':
     resolution: {integrity: sha512-Al9zqHVV7TJv0eFuOU4U7Lvv74PTih4Ch63sk2xCIpSTkE3udFnaOcnzP2lQVymiL7yS9Cj2iClUXlR3EQ5sEw==}
@@ -4771,6 +4774,8 @@ snapshots:
       - utf-8-validate
 
   '@levischuck/tiny-cbor@0.2.11': {}
+
+  '@levischuck/tiny-cbor@0.3.6': {}
 
   '@next/env@16.3.8': {}
 
