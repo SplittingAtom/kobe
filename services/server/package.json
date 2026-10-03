@@ -35,7 +35,7 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
-    "@levischuck/tiny-cbor": "^0.2.11",
+    "@levischuck/tiny-cbor": "^0.3.6",
     "@types/pg": "^8.23.1",
     "@types/ws": "^8.18.2"
   }
