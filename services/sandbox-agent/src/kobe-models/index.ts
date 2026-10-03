@@ -46,11 +46,14 @@ export interface KobeModelsDeps {
  * handlers before it validates the selected model (verified Pi 1.0.0; the same hook the faux
  * model in Kobe's tests relies on), so a model change between runs needs no Pi restart.
  */
+/** Taken from the environment once per Pi process; a reload registers the same file again. */
+let modelFile: string | undefined;
+
 export async function registerKobeModels(
   api: ExtensionApiLike,
   deps: KobeModelsDeps,
 ): Promise<void> {
-  const file = takeModelFilePath(deps.env);
+  const file = (modelFile ??= takeModelFilePath(deps.env));
   if (file === undefined) {
     // Without a model file there is nothing to register: Pi has no provider and refuses prompts.
     deps.warn("kobe-models: no model file (KOBE_MODEL_FILE); no model registered");

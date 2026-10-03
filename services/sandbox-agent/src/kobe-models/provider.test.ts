@@ -235,7 +235,7 @@ describe("kobe provider", () => {
     expect(calls).toHaveLength(1);
     expect(sleeps).toEqual([]);
     expect(result.errorMessage).toBe(
-      `${KOBE_MODEL_ERROR_PREFIX}model_not_enabled: model_not_enabled after 1 attempt`,
+      `${KOBE_MODEL_ERROR_PREFIX}model_not_enabled: gave up after 1 attempt`,
     );
   });
 
@@ -303,6 +303,34 @@ describe("kobe provider", () => {
     const model = provider.getModels()[0] as Model;
     const { result } = await collect(provider.stream(model, {}));
     expect(calls).toEqual([]);
-    expect(result.errorMessage).toMatch(/^kobe\.model_error:model_error: no_model_file/);
+    expect(result.errorMessage).toMatch(/^kobe\.model_error:model_error: gave up/);
+  });
+
+  it("ends the stream with model_error when the adapter itself throws (never a hung run)", async () => {
+    const calls: StreamOptions[] = [];
+    const throwing: ApiStreams = {
+      api: "openai-completions",
+      stream: () => {
+        throw new Error("adapter exploded");
+      },
+      streamSimple: () => {
+        throw new Error("adapter exploded");
+      },
+    };
+    const provider = createKobeProvider({
+      pi,
+      initial: state(),
+      readState: async () => state(),
+      apis: {
+        "openai-completions": throwing,
+        "anthropic-messages": fakeApi([], calls),
+        "google-generative-ai": fakeApi([], calls),
+      },
+    });
+    const model = provider.getModels()[0] as Model;
+    const { result, events } = await collect(provider.stream(model, {}));
+    expect(result.stopReason).toBe("error");
+    expect(result.errorMessage).toMatch(/^kobe\.model_error:model_error: /);
+    expect(events.at(-1)?.type).toBe("error");
   });
 });

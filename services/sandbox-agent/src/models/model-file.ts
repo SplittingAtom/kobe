@@ -28,9 +28,20 @@ export function modelFileState(content: ModelFileContent): ModelFileState {
   };
 }
 
+function sameContent(a: ModelFileContent, b: ModelFileContent): boolean {
+  return (
+    a.token === b.token &&
+    a.runId === b.runId &&
+    a.model?.gatewayModel === b.model?.gatewayModel &&
+    a.model?.api === b.model?.api
+  );
+}
+
 export class ModelFile {
   readonly path: string;
   #content: ModelFileContent;
+  /** What the last successful write put on disk (a failed write leaves it behind `#content`). */
+  #written: ModelFileContent | undefined;
   #chain: Promise<unknown> = Promise.resolve();
 
   constructor(path: string, initial: ModelFileContent) {
@@ -49,12 +60,8 @@ export class ModelFile {
 
   update(change: Partial<ModelFileContent>): Promise<void> {
     const next = { ...this.#content, ...change };
-    if (
-      next.token === this.#content.token &&
-      next.runId === this.#content.runId &&
-      next.model?.gatewayModel === this.#content.model?.gatewayModel &&
-      next.model?.api === this.#content.model?.api
-    ) {
+    // A no-op only when the disk already holds it: after a failed write, any update rewrites.
+    if (this.#written === this.#content && sameContent(next, this.#content)) {
       return this.#chain.then(() => undefined);
     }
     this.#content = next;
@@ -67,6 +74,7 @@ export class ModelFile {
     const next = this.#chain.then(async () => {
       await writeFile(temp, text, { mode: 0o600 });
       await rename(temp, this.path);
+      this.#written = content;
     });
     this.#chain = next.catch(() => undefined);
     return next;

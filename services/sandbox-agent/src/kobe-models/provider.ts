@@ -42,6 +42,7 @@ export const RETRY_BUDGET_MS = 60_000;
 export const RETRY_BASE_MS = 1_000;
 const MAX_ATTEMPTS = 8;
 const RUN_ID_HEADER = "x-kobe-run-id";
+const NO_FAILURE: Failure = { status: undefined, code: undefined, retryAfterMs: undefined };
 
 /** pi-ai's provider helpers (Pi's copy at runtime; stand-ins in unit tests). */
 export interface PiAiLike {
@@ -61,6 +62,7 @@ export interface KobeProviderDeps {
 }
 
 function defaultSleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  if (signal?.aborted) return Promise.resolve();
   return new Promise((resolve) => {
     const timer = setTimeout(done, ms);
     signal?.addEventListener("abort", done, { once: true });
@@ -154,7 +156,11 @@ export function createKobeProvider(deps: KobeProviderDeps): Provider {
       options?: StreamOptions,
     ): AssistantMessageEventStream => {
       const out = deps.pi.createAssistantMessageEventStream();
-      void pump(run, model, context, options, out);
+      // Whatever happens, the stream ends: a hung stream would stall the run for good.
+      pump(run, model, context, options, out).catch((error: unknown) => {
+        deps.warn?.(`kobe-models: model request failed: ${(error as Error).message}`);
+        fail(out, model, kobeErrorMessage("model_error", NO_FAILURE, 1));
+      });
       return out;
     };
   }
@@ -174,12 +180,7 @@ export function createKobeProvider(deps: KobeProviderDeps): Provider {
         state = await deps.readState();
       } catch (error) {
         deps.warn?.(`kobe-models: ${(error as Error).message}`);
-        const message = kobeErrorMessage(
-          "model_error",
-          { status: undefined, code: "no_model_file", retryAfterMs: undefined },
-          attempt,
-        );
-        fail(out, model, message);
+        fail(out, model, kobeErrorMessage("model_error", NO_FAILURE, attempt));
         return;
       }
       let response: ProviderResponse | undefined;

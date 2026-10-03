@@ -16,6 +16,7 @@ export interface Failure {
 
 /** Gateway codes that mean "try again shortly" even when the status alone would not. */
 const TRANSIENT_CODES = new Set([
+  "transport_failure",
   "model_access_pending",
   "model_access_unavailable",
   "model_gateway_resyncing",
@@ -24,7 +25,10 @@ const TRANSIENT_CODES = new Set([
   "too_many_bytes_in_flight",
   "rate_limited",
 ]);
-const RETRY_STATUSES = new Set([429, 502, 503, 504]);
+const RETRY_STATUSES = new Set([429, 502, 503, 504, 529]);
+/** No HTTP answer at all (the shim restarting, a reset): worth a retry like a 503. */
+const TRANSPORT_FAILURE =
+  /ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|EPIPE|fetch failed|socket hang up|other side closed|network ?error/i;
 /** Codes meaning the run's model is not allowed for this team (the shim's or Bifrost's). */
 const NOT_ENABLED_CODES = new Set(["model_not_enabled", "model_blocked", "provider_blocked"]);
 const REVOKED_CODES = new Set(["session_revoked", "invalid_session_token"]);
@@ -80,9 +84,12 @@ export function classifyFailure(
   const status = response?.status ?? statusInMessage(text);
   const retryAfter = response?.headers["retry-after"];
   const seconds = retryAfter === undefined ? NaN : Number(retryAfter);
+  const code =
+    codeInBody(text) ??
+    (status === undefined && TRANSPORT_FAILURE.test(text) ? "transport_failure" : undefined);
   return {
     status,
-    code: codeInBody(text),
+    code,
     retryAfterMs:
       Number.isFinite(seconds) && seconds >= 0
         ? Math.min(seconds * 1000, MAX_RETRY_AFTER_MS)
@@ -113,15 +120,15 @@ export function runErrorCode(failure: Failure): ModelRunErrorCode {
 }
 
 /**
- * The `errorMessage` the server reads (`parseKobeModelError`). The detail is for logs and must
- * not read as transient to Pi's own auto-retry (`isRetryableAssistantError` matches status
- * numbers and words like "rate limit"), so it carries the gateway code and attempt count only.
+ * The `errorMessage` the server reads (`parseKobeModelError`). Built from fixed parts only: it
+ * must not read as transient to Pi's own auto-retry (`isRetryableAssistantError` matches status
+ * numbers and words like "rate limit", "overloaded"), and the gateway's code is network text
+ * (`rate_limited` would match) — it goes to stderr (`warn`) per attempt instead.
  */
 export function kobeErrorMessage(
   code: ModelRunErrorCode,
-  failure: Failure,
+  _failure: Failure,
   attempts: number,
 ): string {
-  const detail = `${failure.code ?? "no_code"} after ${attempts} attempt${attempts === 1 ? "" : "s"}`;
-  return `${KOBE_MODEL_ERROR_PREFIX}${code}: ${detail}`;
+  return `${KOBE_MODEL_ERROR_PREFIX}${code}: gave up after ${attempts} attempt${attempts === 1 ? "" : "s"}`;
 }

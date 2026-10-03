@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -57,5 +57,20 @@ describe("ModelFile (agent side)", () => {
     await new Promise((r) => setTimeout(r, 20));
     await file.update({ token: "u".repeat(40) });
     expect((await stat(file.path)).mtimeMs).toBe(before.mtimeMs);
+  });
+
+  it("rewrites after a failed write even for an identical update (nothing stays stale)", async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "kobe-model-file-"));
+    const file = new ModelFile(path.join(dir, "missing", "model.json"), {
+      gatewayUrl: "http://gw",
+      model: null,
+      token: "t".repeat(40),
+      runId: null,
+    });
+    await expect(file.create()).rejects.toThrow();
+    await expect(file.update({ token: "u".repeat(40) })).rejects.toThrow();
+    await mkdir(path.join(dir, "missing"));
+    await file.update({ token: "u".repeat(40) });
+    expect(parseModelFile(await readFile(file.path, "utf8")).token).toBe("u".repeat(40));
   });
 });

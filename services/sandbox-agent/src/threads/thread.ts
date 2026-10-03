@@ -174,12 +174,12 @@ export class Thread {
     await mkdir(this.#env.home, { recursive: true }).catch(() => undefined);
     await mkdir(this.#env.runtimeDir, { recursive: true, mode: 0o700 });
     const runtimeDir = await mkdtemp(path.join(this.#env.runtimeDir, "pi-"));
-    let env: Record<string, string>;
+    let pi: PiProcess;
     let modelFile: ModelFile | undefined;
     try {
       const agentDir = path.join(runtimeDir, "agent");
       await mkdir(agentDir, { mode: 0o700 });
-      env = { ...launch.env, PI_CODING_AGENT_DIR: agentDir };
+      const env: Record<string, string> = { ...launch.env, PI_CODING_AGENT_DIR: agentDir };
       const models = this.#env.models;
       if (models !== undefined) {
         modelFile = new ModelFile(path.join(runtimeDir, "model.json"), {
@@ -191,20 +191,21 @@ export class Thread {
         await modelFile.create();
         env[MODEL_FILE_ENV] = modelFile.path;
       }
+      pi = new PiProcess({
+        bin: this.#env.bin,
+        args: launch.args,
+        cwd: this.#env.workspaceDir,
+        env,
+        onEvent: (event) => this.#onEvent(pi, event),
+        onUiRequest: (request) => this.#onUiRequest(pi, request),
+        onExit: (exit) => this.#onExit(pi, exit),
+        onDiagnostic: (message) => this.#hooks.diagnostic(this.id, message),
+      });
     } catch (error) {
+      // Nothing of a Pi that never started may stay behind (the token included).
       await rm(runtimeDir, { recursive: true, force: true }).catch(() => undefined);
       throw error;
     }
-    const pi = new PiProcess({
-      bin: this.#env.bin,
-      args: launch.args,
-      cwd: this.#env.workspaceDir,
-      env,
-      onEvent: (event) => this.#onEvent(pi, event),
-      onUiRequest: (request) => this.#onUiRequest(pi, request),
-      onExit: (exit) => this.#onExit(pi, exit),
-      onDiagnostic: (message) => this.#hooks.diagnostic(this.id, message),
-    });
     this.#runtimeDirs.set(pi, runtimeDir);
     const control = pi.control;
     let channel: PolicyChannel | undefined;

@@ -168,6 +168,26 @@ code with a server message (`pi_rejected`, `pi_unavailable` added to the table).
   (silently — decide whether an agent pinned to a disabled model should fail instead).
 - **KOBE-44 (admin UI):** nothing new; consider catalog capability flags (reasoning, context).
 
+## Self-review round (code-reviewer agent: 0 CRITICAL/HIGH, 4 MEDIUM, 4 LOW) — resolution
+
+1. MEDIUM the gateway's code (network text such as `rate_limited`) was embedded in the final
+   error message, which Pi's auto-retry pattern matches: the message is now built from fixed
+   parts only (`gave up after N attempts`); the code goes to stderr per attempt. Test: "writes an
+   error message the server parses and Pi's auto-retry leaves alone" (`rate_limited`,
+   `overloaded_error`).
+2. MEDIUM an adapter throwing synchronously would leave the stream open (a hung run): the pump
+   is guarded and ends the stream `model_error`. Test: "ends the stream with model_error when
+   the adapter itself throws".
+3. MEDIUM a failed model-file write left the in-memory content ahead of the disk, so an identical
+   later update was skipped: `ModelFile` tracks what the disk holds and rewrites after a failure.
+   Test: "rewrites after a failed write even for an identical update".
+4. MEDIUM transport failures (no HTTP answer: the shim restarting) and Anthropic's 529 were not
+   retried: both are transient now. LOW: the runtime dir is removed when `PiProcess` creation
+   itself throws; the model file path is cached at module scope (a reload registers again);
+   `Object.hasOwn` for failure codes; `defaultSleep` returns at once on an aborted signal.
+5. LOW (kept, open question 1): a pinned alias the team did not enable falls back to the default;
+   a restart (`restartPlanInTx`) re-resolves the model rather than reusing `run.started.model`.
+
 ## Open questions (for Chris or the coordinator)
 
 1. An agent whose pinned alias is not enabled for the team falls back to the team default
@@ -177,4 +197,14 @@ code with a server message (`pi_rejected`, `pi_unavailable` added to the table).
 
 ## Evidence (acceptance criteria → test or command output)
 
-(filled in below once CI ran)
+| AC / item               | Evidence                                                                                                                                                                                                                                                                                                                                                                        |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ac-1 working path       | `kobe-models.real-pi.test.ts` "streams a model's answer" (real Pi 1.0.0 → real shim → fake upstream: `fake-openai: hello-pi`, VK at the upstream, no token); e2e "the run completed with the fake model's streamed answer (Pi → shim → Bifrost → upstream)" (`e2e/run.sh` KOBE-41 section, real sandbox woken by the message); `images/sandbox/test-image.sh` kobe-models check |
+| ac-2 token rotation     | `token-keeper.test.ts` (trade at start, again inside the margin, retry on failure, no duplicate announcements); `agent.models.test.ts` "rewrites the file with a rotated token without touching Pi"; real Pi: "uses a rotated token on the next request: an expired one is refused, a fresh one works" (no `pi.exited`); `provider.test.ts` per-request read                    |
+| ac-3 model per run      | `runs-model.db.test.ts` (requested alias if enabled, else default, else none; RLS; `run.start.config.model` and `run.started.model`); real Pi: "switches models between runs without restarting Pi: Anthropic native and Gemini too"; `agent.models.test.ts` "keeps the Pi started for a pi.command and gives it the run's model later (no restart)"                            |
+| ac-4 attribution        | real Pi test: shim `calls[].runId` = the run for every call; `provider.test.ts` header set/cleared; e2e "the shim attributed the model call to the run (x-kobe-run-id from Pi)"                                                                                                                                                                                                 |
+| ac-5 errors             | `errors.test.ts`; `provider.test.ts` (Retry-After waits, budget, 401 re-read, 403 fast fail, abort); real Pi: 403 → `model_not_enabled`, 503 + Retry-After waited out; server `translate.test.ts`, wire ingest "fails the run with the server's message", `runs-model.db.test.ts` (queue advances after a failed model call; `model_not_configured` text); e2e no-model story   |
+| ac-6 tests              | unit: protocol 398, sandbox-agent 304 (+2 skipped), server 656, model-gateway 34; db: db 441, server 518, model-gateway 4; real-Pi suites run locally and in CI (`checks` installs the pinned Pi)                                                                                                                                                                               |
+| ac-7 Gate 1             | `e2e/gate1.sh` cold step: first `text.delta` required when the install has a model (`hibernated-to-first-token`); numbers from the CI k3d job below                                                                                                                                                                                                                             |
+| no secrets in sandboxes | `pi-launch.test.ts` env allow-list; `agent.models.test.ts` (`KOBE_` vars in Pi's env: `KOBE_MODEL_FILE`, `KOBE_POLICY_FD` only); `state-file.test.ts` (file path removed from the env); e2e "no session token (JWT) reached the upstream"                                                                                                                                       |
+| local checks            | `pnpm build typecheck format:check license:check` ok; `pnpm lint` ok except `@kobe/chart` (Helm 4, pre-existing); `pnpm test --concurrency=2` 18/18; `test:db` db/server/model-gateway ok; `db:check` no changes; `scripts/check-public-hygiene.sh` ok                                                                                                                          |

@@ -48,7 +48,7 @@ export interface Promotion {
  */
 export function failedEvent(code: string): NewRunEvent {
   // Codes the orchestrator does not know become `start_failed` (as before KOBE-41).
-  const known = code in FAILURE_MESSAGES ? code : "start_failed";
+  const known = Object.hasOwn(FAILURE_MESSAGES, code) ? code : "start_failed";
   const error: ErrorInfo = failureInfo(known, "start_failed");
   return { type: "run.failed", payload: { error } };
 }

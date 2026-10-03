@@ -54,6 +54,9 @@ describe("gateway failure classification", () => {
     expect(code(openai(429, "too_many_concurrent_calls"))).toBe("model_throttled");
     expect(code(openai(503, "model_access_pending"))).toBe("model_unavailable");
     expect(code("fetch failed", 502)).toBe("model_unavailable");
+    expect(code("TypeError: fetch failed")).toBe("model_unavailable");
+    expect(code("Error: connect ECONNREFUSED 10.0.0.1:80")).toBe("model_unavailable");
+    expect(code("x", 529)).toBe("model_unavailable");
     expect(code(openai(400, "invalid_request"))).toBe("model_error");
     expect(code("Unknown: UnknownError")).toBe("model_error");
     expect(code(openai(403, "run_not_leased"))).toBe("model_error");
@@ -64,6 +67,8 @@ describe("gateway failure classification", () => {
       true,
     );
     expect(isTransient(classifyFailure("x", { status: 504, headers: {} }))).toBe(true);
+    expect(isTransient(classifyFailure("socket hang up", undefined))).toBe(true);
+    expect(isTransient(classifyFailure("Unknown: UnknownError", undefined))).toBe(false);
     expect(isTransient(classifyFailure(openai(200, "too_many_bytes_in_flight"), undefined))).toBe(
       true,
     );
@@ -77,9 +82,13 @@ describe("gateway failure classification", () => {
   it("writes an error message the server parses and Pi's auto-retry leaves alone", () => {
     const failure = classifyFailure(openai(503, "model_access_pending"), undefined);
     const message = kobeErrorMessage("model_unavailable", failure, 6);
-    expect(message).toBe(
-      `${KOBE_MODEL_ERROR_PREFIX}model_unavailable: model_access_pending after 6 attempts`,
-    );
+    expect(message).toBe(`${KOBE_MODEL_ERROR_PREFIX}model_unavailable: gave up after 6 attempts`);
+    // The gateway's code never enters the message: Pi would retry on "rate_limited"/"overloaded".
+    for (const code of ["rate_limited", "overloaded_error"]) {
+      expect(
+        kobeErrorMessage("model_throttled", classifyFailure(openai(429, code), undefined), 8),
+      ).not.toMatch(/rate.?limit|overloaded/i);
+    }
     // isRetryableAssistantError (pi-ai) matches these; none may appear in a final message.
     expect(message).not.toMatch(
       /429|50[0-4]|rate.?limit|too many requests|service.?unavailable|timeout|network/i,
