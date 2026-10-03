@@ -1,5 +1,21 @@
 export * from "./audit/index.js";
 export * from "./egress/index.js";
+export {
+  BREAK_GLASS_ENTRIES_MAX,
+  BREAK_GLASS_THREADS_MAX,
+  BreakGlassDenied,
+  readWithBreakGlass,
+  type BreakGlassAccess,
+  type BreakGlassDeniedCode,
+  type BreakGlassEntry,
+  type BreakGlassGrantView,
+  type BreakGlassRead,
+  type BreakGlassReadResult,
+  type BreakGlassScope,
+  type BreakGlassThread,
+  type BreakGlassThreadCursor,
+} from "./break-glass/read.js";
+export { BREAK_GLASS_READABLE_TABLES, type BreakGlassReadableTable } from "./break-glass/tables.js";
 export { BLOB_REF_COLUMNS, type BlobRefColumn } from "./blob-refs.js";
 export {
   createDb,
@@ -25,7 +41,11 @@ export { quoteIdent } from "./roles.js";
 export { listTeamInvitationsFor, type PendingTeamInvitation } from "./team-invitations.js";
 export { scanTeams, type ScannedTeam } from "./team-scan.js";
 export * from "./schema/index.js";
-export { TEAM_ID_SETTING } from "./settings.js";
+export {
+  BREAK_GLASS_ACTOR_SETTING,
+  BREAK_GLASS_GRANT_SETTING,
+  TEAM_ID_SETTING,
+} from "./settings.js";
 export {
   INSTALL_WIDE_TABLES,
   TEAM_TABLES,

@@ -1,5 +1,6 @@
 import pg from "pg";
 import { afterAll, describe, expect, inject, it } from "vitest";
+import { BREAK_GLASS_READABLE_TABLES } from "./break-glass/tables.js";
 import {
   INSTALL_WIDE_TABLES,
   TEAM_REFERENCING_INSTALL_WIDE,
@@ -10,6 +11,24 @@ import {
 /** pg_get_expr rendering of the one allowed team policy (USING and WITH CHECK). */
 const CANONICAL_TEAM_EXPR =
   "(team_id = (NULLIF(current_setting('kobe.team_id'::text, true), ''::text))::uuid)";
+
+/** Whitespace-insensitive form of a pg_get_expr / pg_get_functiondef rendering. */
+const squash = (text: string | null): string | null =>
+  text === null ? null : text.replace(/\s+/g, " ").trim();
+
+const GRANT = "( SELECT g.%s FROM break_glass_active_grant() g(team_id, user_id, thread_id))";
+const g = (column: string) => GRANT.replace("%s", column);
+
+/** The exact `break_glass_read` USING clause per readable table (D10, KOBE-16). */
+const BREAK_GLASS_QUALS: Record<string, string> = {
+  threads:
+    `((team_id = ${g("team_id")}) AND (owner_user_id = COALESCE(${g("user_id")}, owner_user_id)) ` +
+    `AND (id = COALESCE(${g("thread_id")}, id)))`,
+  thread_entries:
+    `((team_id = ${g("team_id")}) AND (thread_id = COALESCE(${g("thread_id")}, thread_id)) ` +
+    `AND ((${g("user_id")} IS NULL) OR (EXISTS ( SELECT 1 FROM threads t WHERE ((t.team_id = thread_entries.team_id) ` +
+    `AND (t.id = thread_entries.thread_id) AND (t.owner_user_id = ${g("user_id")}))))))`,
+};
 
 /** Schemas Kobe never creates objects in; everything else is scanned. */
 const SYSTEM_SCHEMAS = ["pg_catalog", "information_schema", "pg_toast", "drizzle"];
@@ -97,28 +116,44 @@ describe("RLS catalog check (ac-1)", () => {
   });
 
   it.each(TEAM_TABLES)(
-    "%s has exactly one policy: the canonical team policy for PUBLIC",
+    "%s has the canonical team policy for PUBLIC, plus only the break-glass SELECT policy if listed",
     async (table) => {
       const policies = await rows<{
+        name: string;
         cmd: string;
         permissive: boolean;
         roles: string;
         qual: string;
-        check: string;
+        check: string | null;
       }>(
-        `SELECT polcmd::text AS cmd, polpermissive AS permissive, polroles::text AS roles,
+        `SELECT polname AS name, polcmd::text AS cmd, polpermissive AS permissive, polroles::text AS roles,
               pg_get_expr(polqual, polrelid) AS qual, pg_get_expr(polwithcheck, polrelid) AS check
-       FROM pg_policy WHERE polrelid = to_regclass($1)`,
+       FROM pg_policy WHERE polrelid = to_regclass($1) ORDER BY polname`,
         [`public.${table}`],
       );
-      expect(policies).toEqual([
+      const canonical = {
+        name: "team_isolation",
+        cmd: "*",
+        permissive: true,
+        roles: "{0}",
+        qual: CANONICAL_TEAM_EXPR,
+        check: CANONICAL_TEAM_EXPR,
+      };
+      if (!(BREAK_GLASS_READABLE_TABLES as readonly string[]).includes(table)) {
+        expect(policies).toEqual([canonical]);
+        return;
+      }
+      // D10: SELECT only (cmd r, no WITH CHECK), exactly this USING clause; never a write path.
+      expect(policies.map((p) => ({ ...p, qual: squash(p.qual) }))).toEqual([
         {
-          cmd: "*",
+          name: "break_glass_read",
+          cmd: "r",
           permissive: true,
           roles: "{0}",
-          qual: CANONICAL_TEAM_EXPR,
-          check: CANONICAL_TEAM_EXPR,
+          qual: BREAK_GLASS_QUALS[table],
+          check: null,
         },
+        { ...canonical, qual: squash(CANONICAL_TEAM_EXPR) },
       ]);
     },
   );
@@ -140,6 +175,26 @@ describe("RLS catalog check (ac-1)", () => {
       [`public.${table}`],
     );
     expect(indexes.length).toBeGreaterThan(0);
+  });
+
+  it("checks a break-glass grant per statement, for the named active admin (KOBE-16)", async () => {
+    const [fn] = await rows<{ def: string; volatility: string; definer: boolean }>(
+      `SELECT pg_get_functiondef(p.oid) AS def, p.provolatile::text AS volatility, p.prosecdef AS definer
+       FROM pg_proc p WHERE p.oid = 'public.break_glass_active_grant'::regproc`,
+    );
+    expect(fn?.definer).toBe(false);
+    expect(fn?.volatility).toBe("s");
+    const body = squash(fn?.def ?? "") ?? "";
+    for (const clause of [
+      "g.id = NULLIF(current_setting('kobe.break_glass_grant', true), '')::uuid",
+      "g.admin_id = NULLIF(current_setting('kobe.break_glass_actor', true), '')::uuid",
+      "g.status = 'approved'",
+      "g.starts_at <= statement_timestamp() AND g.expires_at > statement_timestamp()",
+      'JOIN "public"."users" u ON u.id = g.admin_id AND u.deactivated_at IS NULL',
+      'JOIN "public"."install_roles" r ON r.user_id = g.admin_id',
+    ]) {
+      expect(body).toContain(clause);
+    }
   });
 
   it("has no SECURITY DEFINER functions outside system schemas", async () => {

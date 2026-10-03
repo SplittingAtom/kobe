@@ -30,6 +30,8 @@ export const INSTALL_PERMISSIONS = {
   "install.legal_hold.manage": "admin",
   "install.audit.read": "admin",
   "install.break_glass.request": "admin",
+  // D10: a second Admin or the Owner approves (enforced again by the database trigger).
+  "install.break_glass.approve": "admin",
   "install.roles.manage": "owner",
   "install.ownership.transfer": "owner",
 } as const satisfies Record<`install.${string}`, InstallLevel>;

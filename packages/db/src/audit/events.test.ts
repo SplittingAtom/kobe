@@ -34,6 +34,7 @@ describe("audit event taxonomy", () => {
       "agent",
       "auth",
       "egress",
+      "governance",
       "identity",
       "install",
       "platform",
