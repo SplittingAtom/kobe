@@ -269,6 +269,8 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
         log,
         maxConnections: options.maxConnections ?? 5_000,
         connections: () => sockets,
+        attemptBurst: tuning.upgradeBurst,
+        attemptsPerSec: tuning.upgradeRatePerSec,
         onRefused: (status, reason) => {
           metrics.upgradesRefused += 1;
           log.info({ status, reason }, "sandbox upgrade refused");

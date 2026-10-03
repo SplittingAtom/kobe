@@ -41,6 +41,9 @@ export interface WireTuning {
    * fetched again with `resend` once the queue drains (backpressure without pausing the socket).
    */
   readonly runQueueMaxBytes: number;
+  /** WebSocket upgrade attempts per remote address (token bucket): burst and refill per second. */
+  readonly upgradeBurst: number;
+  readonly upgradeRatePerSec: number;
   /** Inbound frames per second per connection (token bucket) and the burst. */
   readonly frameRatePerSec: number;
   readonly frameBurst: number;
@@ -103,6 +106,8 @@ export const WIRE_DEFAULTS: WireTuning = {
   batchWindowMs: 75,
   batchMaxFrames: 50,
   runQueueMaxBytes: 16 * 1024 * 1024,
+  upgradeBurst: 20,
+  upgradeRatePerSec: 2,
   frameRatePerSec: 500,
   frameBurst: 2_000,
   byteRatePerSec: 4 * 1024 * 1024,

@@ -29,6 +29,10 @@ beforeAll(async () => {
         helloTimeoutMs: 1_000,
         frameBurst: 400,
         frameRatePerSec: 100,
+        // Every test connects from 127.0.0.1, so they all share one upgrade bucket; the production
+        // limit (20, refilling 2/s) throttles the suite on slower CI runners.
+        upgradeBurst: 1_000,
+        upgradeRatePerSec: 100,
       },
       hooks: { onRunEnded: (e) => void ended.push({ runId: e.runId, status: e.status }) },
       waker: { wake: (t) => Promise.resolve(void woken.push(t.userId)) },
