@@ -1,6 +1,6 @@
 # KOBE-25: Hibernation, wake, cold-start target
 
-- **Status:** in review (PR #39), CI green (run 37099246910)
+- **Status:** in review (PR #39), CI green (run 37105120968, on main with KOBE-36)
 - **Branch / worktree:** `kobe-25-hibernate-wake` in `../Kobe-wt25`
 - **Depends on:** KOBE-22 (provider), KOBE-24 (registry/routing), KOBE-23 (agent), KOBE-9 (gate) —
   all merged.
@@ -193,12 +193,19 @@ thread. p95 is inside the 8 s budget; p50 missed 3 s.
 
 Tuning after run 1: the agent reads Pi's version from its package (no Pi boot at startup).
 
-| Run                                                                       | Set          | n   | p50  | p95  | max  | container started p50/p95 | wire connected p50/p95 |
-| ------------------------------------------------------------------------- | ------------ | --- | ---- | ---- | ---- | ------------------------- | ---------------------- |
-| 2 (run 37093200720; after tuning, on main with KOBE-30)                   | back-to-back | 20  | 3649 | 4266 | 4920 | 949 / 1517                | 2543 / 3433            |
-| 2                                                                         | spaced 30 s  | 5   | 3461 | 3700 | 3700 | 722 / 1250                | 2596 / 2796            |
-| 3 (run 37099246910; final, on main with KOBE-16; busy runner, 44 min job) | back-to-back | 20  | 4934 | 6756 | 7040 | 1547 / 3076               | 3556 / 4964            |
-| 3                                                                         | spaced 30 s  | 5   | 4209 | 5832 | 5832 | 1130 / 1577               | 3258 / 3660            |
+| Run                                                                                         | Set          | n   | p50  | p95  | max  | container started p50/p95 | wire connected p50/p95 |
+| ------------------------------------------------------------------------------------------- | ------------ | --- | ---- | ---- | ---- | ------------------------- | ---------------------- |
+| 2 (run 37093200720; after tuning, on main with KOBE-30)                                     | back-to-back | 20  | 3649 | 4266 | 4920 | 949 / 1517                | 2543 / 3433            |
+| 2                                                                                           | spaced 30 s  | 5   | 3461 | 3700 | 3700 | 722 / 1250                | 2596 / 2796            |
+| 3 (run 37099246910; final, on main with KOBE-16; busy runner, 44 min job)                   | back-to-back | 20  | 4934 | 6756 | 7040 | 1547 / 3076               | 3556 / 4964            |
+| 3                                                                                           | spaced 30 s  | 5   | 4209 | 5832 | 5832 | 1130 / 1577               | 3258 / 3660            |
+| 4 (run 37105120968; on main with KOBE-36 — Pi ready includes kobe-policy's `channel.ready`) | back-to-back | 20  | 4341 | 4862 | 5036 | 717 / 1110                | 2610 / 2892            |
+| 4                                                                                           | spaced 30 s  | 5   | 4179 | 4862 | 4862 | 509 / 1207                | 2415 / 2821            |
+
+Run 4: connected → Pi ready grew from ≈ 1.1 s to ≈ 1.7 s (Pi now loads kobe-policy and the agent
+waits for its self-checked `channel.ready`). p95 4.9 s ≤ 8 s; p50 4.3 s (D14's 3 s missed, as
+before). The agent log of the sampled pod shows the CNI admission wait for the first time on
+k3d: 3 session attempts, 1.0 s until the trade succeeded.
 
 Run 3 shows the spread on a loaded self-hosted runner: container start alone reached ≈ 3 s at
 p95; p95 Pi ready 6.8 s is still under 8 s but leaves only ≈ 1.2 s for first token. The e2e job
