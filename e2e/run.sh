@@ -1381,6 +1381,115 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
     contains "re-enabling a model restores access through the shim" 'fake-openai: hello-e2e' \
       "$(until_code 200 openai/gpt-fake "$model_token" 30)"
 
+    # KOBE-41: the working path. The Owner (a team member with a real sandbox, suspended since
+    # the interrupted-run story) sends a message: the sandbox wakes, kobe-sandbox-agent trades its
+    # bootstrap token, Pi starts with kobe-models, calls the team's default model through the
+    # model-gateway shim with the sandbox's session token and the run id, Bifrost attaches the
+    # provider key, and the fake model's answer streams back to the API as text.delta events.
+    echo "==> Pi model wiring (KOBE-41)"
+    as_owner "PUT /v1/team/models/fast {\"enabled\":true,\"is_default\":true}" >/dev/null
+    # The scripted agents above held the Owner's sandbox identity; the message below must reach
+    # the Owner's REAL sandbox (woken by the router), so wait until their connections are gone.
+    $KUBECTL -n "$TEAM_NS" delete pod e2e-agent e2e-approver --ignore-not-found --wait=true >/dev/null 2>&1 || true
+    owner_closed() { [[ "$(psql_kobe "SELECT count(*) FROM sandbox_connections WHERE team_id = '$E2E_TEAM_ID' AND user_id = '$owner_id' AND closed_at IS NULL")" == 0 ]]; }
+    if until_ok 180 owner_closed; then ok "no scripted agent holds the Owner's sandbox identity any more"
+    else fail "no scripted agent holds the Owner's sandbox identity any more"; fi
+    read -r -d '' CHAT_JS <<'JS' || true
+const [team, content, timeoutMs] = process.argv.slice(1);
+const base = "http://127.0.0.1:" + process.env.PORT;
+const origin = new URL(process.env.KOBE_PUBLIC_URL).origin;
+const jar = new Map();
+const headers = () => ({ origin, "content-type": "application/json", "x-kobe-team": team,
+  cookie: [...jar].map(([k, v]) => k + "=" + v).join("; ") });
+const call = async (method, path, body) => {
+  const res = await fetch(base + path, { method, headers: headers(), body: body === undefined ? undefined : JSON.stringify(body) });
+  for (const c of res.headers.getSetCookie()) { const [pair] = c.split(";"); const at = pair.indexOf("="); jar.set(pair.slice(0, at), pair.slice(at + 1)); }
+  const text = await res.text();
+  let json = {}; try { json = JSON.parse(text); } catch {}
+  return { status: res.status, json, text };
+};
+const out = (k, v) => console.log(k + "=" + v);
+let login;
+for (let i = 0; i < 4; i++) {
+  login = await call("POST", "/api/auth/sign-in/email", { email: "owner@e2e.test", password: "e2e owner password" });
+  if (login.status !== 429) break;
+  await new Promise((r) => setTimeout(r, 11000));
+}
+out("signin", login.status);
+await call("PUT", "/v1/me/teams/active", { teamId: team });
+const thread = await call("POST", "/v1/threads", { title: "kobe-41" });
+const t0 = Date.now();
+const sent = await call("POST", "/v1/threads/" + thread.json.thread_id + "/messages", { content });
+out("message", sent.status);
+const runId = sent.json.run_id;
+out("run", runId);
+// Follow the run's event stream until a terminal event (the sandbox may have to wake first).
+const controller = new AbortController();
+const timer = setTimeout(() => controller.abort(), Number(timeoutMs));
+let text = "", terminal = "none", code = "-", errorMessage = "-", first = null, waking = "-";
+try {
+  const res = await fetch(base + "/v1/runs/" + runId + "/events", { headers: { ...headers(), accept: "text/event-stream" }, signal: controller.signal });
+  out("stream", res.status);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  while (terminal === "none") {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf("\n\n")) >= 0) {
+      const block = buf.slice(0, i); buf = buf.slice(i + 2);
+      const type = (block.match(/^event: (.*)$/m) || [])[1];
+      const data = (block.match(/^data: (.*)$/m) || [])[1];
+      if (!type) continue;
+      let payload = {}; try { payload = JSON.parse(data).payload ?? {}; } catch {}
+      if (type === "sandbox.waking") waking = payload.reason;
+      if (type === "text.delta") { if (first === null) first = Date.now() - t0; text += payload.delta ?? ""; }
+      if (type === "run.completed" || type === "run.failed" || type === "run.interrupted" || type === "run.budget_stopped") {
+        terminal = type;
+        code = payload.error?.code ?? "-";
+        errorMessage = payload.error?.message ?? "-";
+      }
+    }
+  }
+} catch (e) { out("stream_error", e.name); }
+clearTimeout(timer);
+out("waking", waking);
+out("first_token_ms", first ?? "-");
+out("terminal", terminal);
+out("code", code);
+out("error_message", errorMessage);
+out("text", text);
+JS
+    chat() { # content timeout-ms → the CHAT_JS output
+      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$CHAT_JS" "$E2E_TEAM_ID" "$1" "$2" 2>&1 | tail -12
+    }
+    chat_out=$(chat "hello-pi-$RANDOM" 300000)
+    printf '     chat: %s\n' "$(printf '%s' "$chat_out" | grep -v '^text=' | tr '\n' ' ')"
+    chat_run=$(printf '%s\n' "$chat_out" | sed -n 's/^run=//p')
+    contains "a message starts a run (201)" '^message=201$' "$chat_out"
+    contains "the run completed with the fake model's streamed answer (Pi → shim → Bifrost → upstream)" \
+      '^text=fake-openai: hello-pi-[0-9]+$' "$chat_out"
+    contains "the run ended run.completed" '^terminal=run.completed$' "$chat_out"
+    contains "the woken sandbox produced a first token" '^first_token_ms=[0-9]+$' "$chat_out"
+    contains "the shim attributed the model call to the run (x-kobe-run-id from Pi)" "\"runId\":\"$chat_run\"" \
+      "$($KUBECTL -n "$NS" logs deploy/kobe-model-gateway --since=15m 2>/dev/null | grep -F "\"runId\":\"${chat_run:-none}\"" | head -1)"
+    contains "the upstream saw the provider key, never the sandbox's session token" '^ok$' \
+      "$(in_client "curl -s -m 10 $LLM/_seen" | node -e '
+        let b = ""; process.stdin.on("data", (d) => (b += d)).on("end", () => {
+          const r = JSON.parse(b).requests; const last = r.at(-1) || { credentials: {} };
+          const creds = Object.values(last.credentials).join(" ");
+          console.log(r.length > 0 && /e2e-provider-key/.test(creds) && !/eyJ/.test(creds) ? "ok" : "bad " + creds); });')"
+    # A clear failure when the team has no model: the run fails with the server's message, nothing hangs.
+    expect "the team disables its models" '^200 ' "$(as_owner "PUT /v1/team/models/fast {\"enabled\":false}")"
+    no_model=$(chat "no-model-$RANDOM" 180000)
+    printf '     chat (no model): %s\n' "$(printf '%s' "$no_model" | grep -v '^text=' | tr '\n' ' ')"
+    contains "without a team model the run fails model_not_configured" '^terminal=run.failed$' "$no_model"
+    contains "with the server's own message" '^code=model_not_configured$' "$no_model"
+    contains "that tells the user what to do" '^error_message=No model is enabled for your team yet' "$no_model"
+    as_owner "PUT /v1/team/models/fast {\"enabled\":true,\"is_default\":true}" >/dev/null
+
     # ac-2: a revoked session token cannot call Bifrost (the member left the team; token unexpired).
     psql_kobe "DELETE FROM team_members WHERE team_id = '$E2E_TEAM_ID' AND user_id = '$MODEL_USER_ID';" >/dev/null
     contains "a revoked session token (member removed) is refused (401)" '^code=401$' \

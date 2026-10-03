@@ -125,6 +125,16 @@ export class SessionClient {
     return (await this.grant()).tokens["kobe.sandbox-wire"];
   }
 
+  /** The `kobe.model-gateway` token and its expiry (KOBE-41 `ModelTokenKeeper`). */
+  async modelGatewayGrant(): Promise<{ token: string; expiresAt: number }> {
+    const g = await this.grant();
+    return { token: g.tokens["kobe.model-gateway"], expiresAt: g.expiresAt };
+  }
+
+  get refreshMarginMs(): number {
+    return this.#o.refreshMarginMs;
+  }
+
   async #tradeUntilGranted(): Promise<SessionGrant> {
     const started = this.#o.now();
     for (let attempt = 0; ; attempt++) {

@@ -1,4 +1,5 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import path from "node:path";
 import {
   piExtensionUiRequestSchema,
   type PiExtensionUiRequest,
@@ -13,6 +14,9 @@ import {
 import { PiProcess, PiProcessError, type PiExit, type PiRecord } from "../pi/pi-process.js";
 import type { PiLaunch } from "../pi/pi-launch.js";
 import { ensureSessionDir } from "../pi/session-files.js";
+import { MODEL_FILE_ENV } from "../kobe-models/protocol.js";
+import { ModelFile } from "../models/model-file.js";
+import type { ModelWiring, RunModel } from "../models/types.js";
 
 /**
  * One Kobe thread's Pi process and its active run. All lifecycle changes (spawn, restart, stop,
@@ -49,7 +53,15 @@ export interface ThreadHooks {
 
 export interface ThreadEnv {
   readonly bin: string;
-  readonly agentDir: string;
+  /**
+   * Parent of the private per-process directories (KOBE-41): each Pi gets a fresh `mkdtemp` dir
+   * (0700) holding its `PI_CODING_AGENT_DIR` (Pi 1.0.0 writes `auth.json` there on every
+   * credential read) and its model file; removed when the process exits. Nothing in it outlives
+   * the process, so nothing a tool writes there reaches another thread or a later Pi.
+   */
+  readonly runtimeDir: string;
+  /** Model gateway wiring; absent when this sandbox has no model access. */
+  readonly models?: ModelWiring | undefined;
   /** The kobe-policy extension (root-owned file), loaded last into every Pi (KOBE-36). */
   readonly policyExtension: string;
   /** Other root-owned extension paths loaded with `-e`, before kobe-policy. */
@@ -76,6 +88,10 @@ export class Thread {
   #pi: PiProcess | undefined;
   #policy: PolicyChannel | undefined;
   #launchKey: string | undefined;
+  /** The current Pi's model file (undefined without model wiring). */
+  #modelFile: ModelFile | undefined;
+  /** Each process's private runtime directory, removed once it has exited. */
+  readonly #runtimeDirs = new Map<PiProcess, string>();
   #closing = new Set<PiProcess>();
   #run: ActiveRun | undefined;
   #streaming = false;
@@ -149,20 +165,47 @@ export class Thread {
     return next;
   }
 
-  /** Spawn Pi with `launch` (call inside the lock). */
-  async spawn(launch: PiLaunch): Promise<void> {
+  /**
+   * Spawn Pi with `launch` (call inside the lock). `model` is the run's model when known at spawn
+   * (a `run.start`); a Pi started for a `pi.command` gets none until its first run.
+   */
+  async spawn(launch: PiLaunch, model: RunModel | null = null): Promise<void> {
     await ensureSessionDir(this.#env.sessionDir);
     await mkdir(this.#env.home, { recursive: true }).catch(() => undefined);
+    await mkdir(this.#env.runtimeDir, { recursive: true, mode: 0o700 });
+    const runtimeDir = await mkdtemp(path.join(this.#env.runtimeDir, "pi-"));
+    let env: Record<string, string>;
+    let modelFile: ModelFile | undefined;
+    try {
+      const agentDir = path.join(runtimeDir, "agent");
+      await mkdir(agentDir, { mode: 0o700 });
+      env = { ...launch.env, PI_CODING_AGENT_DIR: agentDir };
+      const models = this.#env.models;
+      if (models !== undefined) {
+        modelFile = new ModelFile(path.join(runtimeDir, "model.json"), {
+          gatewayUrl: models.gatewayUrl,
+          model,
+          token: await models.tokens.current(),
+          runId: null,
+        });
+        await modelFile.create();
+        env[MODEL_FILE_ENV] = modelFile.path;
+      }
+    } catch (error) {
+      await rm(runtimeDir, { recursive: true, force: true }).catch(() => undefined);
+      throw error;
+    }
     const pi = new PiProcess({
       bin: this.#env.bin,
       args: launch.args,
       cwd: this.#env.workspaceDir,
-      env: launch.env,
+      env,
       onEvent: (event) => this.#onEvent(pi, event),
       onUiRequest: (request) => this.#onUiRequest(pi, request),
       onExit: (exit) => this.#onExit(pi, exit),
       onDiagnostic: (message) => this.#hooks.diagnostic(this.id, message),
     });
+    this.#runtimeDirs.set(pi, runtimeDir);
     const control = pi.control;
     let channel: PolicyChannel | undefined;
     if (control !== undefined) {
@@ -178,7 +221,31 @@ export class Thread {
     this.#pi = pi;
     this.#policy = channel;
     this.#launchKey = launch.key;
+    this.#modelFile = modelFile;
     this.lastUsed = Date.now();
+  }
+
+  /**
+   * Make `runId` the run Pi attributes its model calls to (`x-kobe-run-id`), with the run's
+   * model, before the prompt is sent. The extension reads the file on Pi's `input` hook and per
+   * request. No-op without model wiring.
+   */
+  async attachRun(runId: string, model: RunModel | null): Promise<void> {
+    await this.#modelFile?.update({ runId, model });
+  }
+
+  /** A rotated model-gateway token: the next model request uses it (the current one is not cut). */
+  async updateToken(token: string): Promise<void> {
+    try {
+      await this.#modelFile?.update({ token });
+    } catch (error) {
+      this.#hooks.diagnostic(this.id, `model file not updated: ${(error as Error).message}`);
+    }
+  }
+
+  /** Where the current Pi's model file is (tests and diagnostics). */
+  get modelFilePath(): string | undefined {
+    return this.#modelFile?.path;
   }
 
   /**
@@ -235,6 +302,11 @@ export class Thread {
     if (run === undefined) return;
     this.#run = undefined;
     this.lastUsed = Date.now();
+    this.#modelFile
+      ?.update({ runId: null })
+      .catch((error: unknown) =>
+        this.#hooks.diagnostic(this.id, `model file not updated: ${(error as Error).message}`),
+      );
     this.#hooks.runEnded(run.runId, this.id);
     run.resolveEnded();
   }
@@ -328,6 +400,11 @@ export class Thread {
     const expected = this.#closing.delete(pi);
     const runId = pi === this.#pi ? this.#run?.runId : undefined;
     if (pi === this.#pi) this.#detach(pi);
+    const runtimeDir = this.#runtimeDirs.get(pi);
+    this.#runtimeDirs.delete(pi);
+    // The process is gone: so is its private directory (auth.json, model file, token).
+    if (runtimeDir !== undefined)
+      void rm(runtimeDir, { recursive: true, force: true }).catch(() => undefined);
     if (!expected) this.#hooks.piExited(this.id, runId, exit);
   }
 
@@ -336,6 +413,7 @@ export class Thread {
     this.#pi = undefined;
     this.#policy = undefined;
     this.#launchKey = undefined;
+    this.#modelFile = undefined;
     this.#streaming = false;
     this.#dialogs.clear();
     this.endRun();

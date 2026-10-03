@@ -11,10 +11,10 @@ const parentEnv = {
   NODE_OPTIONS: "--inspect=0.0.0.0:9229",
 };
 const POLICY = "/opt/kobe/pi-extensions/kobe-policy/index.js";
+const MODELS = "/opt/kobe/pi-extensions/kobe-models/index.js";
 const base = {
   sessionFile: "/s/t.jsonl",
   home: "/home/kobe",
-  agentDir: "/opt/kobe/pi-agent",
   policyExtension: POLICY,
 };
 
@@ -56,13 +56,27 @@ describe("buildPiLaunch", () => {
     expect(extensions).toEqual(["builtin:mcp", "/opt/kobe/pi-extensions/other.js", POLICY]);
   });
 
+  it("loads kobe-models right before kobe-policy when models are wired (KOBE-41), once", () => {
+    const launch = buildPiLaunch({
+      ...base,
+      parentEnv,
+      modelsExtension: MODELS,
+      extensions: ["builtin:mcp", "/opt/kobe/pi-extensions/./kobe-models/index.js"],
+    });
+    const extensions = launch.args.flatMap((a, i) =>
+      a === "--extension" ? [launch.args[i + 1]] : [],
+    );
+    expect(extensions).toEqual(["builtin:mcp", MODELS, POLICY]);
+    // The model is not a launch argument: it changes per run without restarting Pi.
+    expect(launch.args.join(" ")).not.toContain("--model");
+  });
+
   it("builds Pi's environment from an allow-list: no agent config, tokens, keys or inspector", () => {
     const { env } = buildPiLaunch({ ...base, parentEnv });
     expect(env).toEqual({
       PATH: "/usr/bin",
       LANG: "C.UTF-8",
       HOME: "/home/kobe",
-      PI_CODING_AGENT_DIR: "/opt/kobe/pi-agent",
       PI_SKIP_VERSION_CHECK: "1",
       PI_TELEMETRY: "0",
       PI_OFFLINE: "1",
@@ -71,12 +85,20 @@ describe("buildPiLaunch", () => {
     });
   });
 
-  it("maps thinking level and changes the launch key when config changes", () => {
+  it("maps thinking level and changes the launch key when config changes, but not for the model", () => {
     const a = buildPiLaunch({ ...base, parentEnv: {} });
     const b = buildPiLaunch({ ...base, parentEnv: {}, config: { thinking_level: "high" } });
-    const c = buildPiLaunch({ ...base, parentEnv: {}, config: { model: { alias: "smart" } } });
+    const c = buildPiLaunch({
+      ...base,
+      parentEnv: {},
+      config: {
+        model: { alias: "smart", gateway_model: "anthropic/c", api: "anthropic-messages" },
+      },
+    });
+    const d = buildPiLaunch({ ...base, parentEnv: {}, config: { skills: ["csv"] } });
     expect(b.args).toContain("--thinking");
-    expect(new Set([a.key, b.key, c.key]).size).toBe(3);
+    expect(new Set([a.key, b.key, d.key]).size).toBe(3);
+    expect(c.key).toBe(a.key);
     expect(a.env.PATH).toBe("/usr/local/bin:/usr/bin:/bin");
   });
 });

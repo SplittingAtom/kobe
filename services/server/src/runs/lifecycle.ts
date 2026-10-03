@@ -19,6 +19,8 @@ import {
   type RunRow,
   type ThreadRow,
 } from "./store.js";
+import { FAILURE_MESSAGES, failureInfo } from "./failure-codes.js";
+import { resolveRunModel, type RunModelConfig } from "./models.js";
 import type { AgentResolution, RunAgentResolver } from "./seams.js";
 
 /** Everything a replica needs to send `run.start` for a run it just moved to `running`. */
@@ -40,26 +42,14 @@ export interface Promotion {
   readonly transitions: readonly AppliedTransition[];
 }
 
-/** Codes of `run.failed` the orchestrator writes itself; anything else becomes `start_failed`. */
-const FAILURE_MESSAGES: Record<string, string> = {
-  account_inactive: "The run could not start: the account is deactivated or no longer in the team.",
-  agent_unavailable: "The run could not start: the thread's agent version is not available.",
-  timeout: "Your workspace did not answer in time, so the run could not start.",
-  thread_not_found: "The run could not start: the thread is not available to the workspace.",
-  start_lost: "The run could not start: the server that started it stopped. Send it again.",
-  start_failed: "The run could not start in your workspace.",
-};
-
 /**
- * A `run.failed` event with a message of the server's own: the sandbox's text is untrusted and is
- * never shown to the user (only logged by the caller).
+ * A `run.failed` event with a message of the server's own (failure-codes.ts): the sandbox's text
+ * is untrusted and is never shown to the user (only logged by the caller).
  */
 export function failedEvent(code: string): NewRunEvent {
-  const message = FAILURE_MESSAGES[code];
-  const error: ErrorInfo =
-    message === undefined
-      ? { code: "start_failed", message: FAILURE_MESSAGES.start_failed ?? "" }
-      : { code, message };
+  // Codes the orchestrator does not know become `start_failed` (as before KOBE-41).
+  const known = code in FAILURE_MESSAGES ? code : "start_failed";
+  const error: ErrorInfo = failureInfo(known, "start_failed");
   return { type: "run.failed", payload: { error } };
 }
 
@@ -133,12 +123,14 @@ export async function promoteInTx(
     }
     const approvalMode = resolved.approvalMode;
     const parentEntryId = next.parentEntryId ?? thread.leafEntryId;
+    const model = await resolveRunModel(tx, teamId, resolved.config?.model?.alias);
     const started: NewRunEvent = {
       type: "run.started",
       payload: {
         thread_id: threadId,
         agent_id: resolved.agent?.agentId ?? null,
         agent_version: resolved.agent?.version ?? null,
+        ...(model === undefined ? {} : { model: model.alias }),
         ...(next.retryOfRunId !== null ? { retry_of_run_id: next.retryOfRunId } : {}),
       },
     };
@@ -149,7 +141,7 @@ export async function promoteInTx(
     transitions.push(applied.transition);
     return {
       transitions,
-      plan: planOf(thread, { ...next, parentEntryId, approvalMode }, resolved),
+      plan: planOf(thread, { ...next, parentEntryId, approvalMode }, resolved, model),
     };
   }
   return { transitions };
@@ -183,7 +175,19 @@ async function resolveForStart(
     : resolved;
 }
 
-function planOf(thread: ThreadRow, run: RunRow, resolved: Resolved): StartPlan {
+/**
+ * The plan's Pi config: the resolver's, with the run's model as resolved from the catalog (KOBE-41;
+ * the resolver's alias alone names no gateway model). No model → no `config.model`: the sandbox
+ * agent fails the run `model_not_configured`.
+ */
+function planOf(
+  thread: ThreadRow,
+  run: RunRow,
+  resolved: Resolved,
+  model: RunModelConfig | undefined,
+): StartPlan {
+  const { model: _requested, ...rest } = resolved.config ?? {};
+  const config = { ...rest, ...(model === undefined ? {} : { model }) };
   return {
     teamId: run.teamId,
     runId: run.id,
@@ -193,7 +197,7 @@ function planOf(thread: ThreadRow, run: RunRow, resolved: Resolved): StartPlan {
     parentEntryId: run.parentEntryId,
     approvalMode: resolved.approvalMode,
     agent: resolved.agent,
-    ...(resolved.config !== undefined ? { config: resolved.config } : {}),
+    ...(Object.keys(config).length > 0 ? { config } : {}),
   };
 }
 
@@ -209,5 +213,7 @@ export async function restartPlanInTx(
   run: RunRow,
 ): Promise<StartPlan | undefined> {
   const resolved = await resolveForStart(tx, agents, thread, run);
-  return resolved.ok ? planOf(thread, run, resolved) : undefined;
+  if (!resolved.ok) return undefined;
+  const model = await resolveRunModel(tx, run.teamId, resolved.config?.model?.alias);
+  return planOf(thread, run, resolved, model);
 }

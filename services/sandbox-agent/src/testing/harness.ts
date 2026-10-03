@@ -6,6 +6,7 @@ import { EXAMPLE_IDS } from "@kobe/protocol/testing";
 import { Agent } from "../agent.js";
 import { loadConfig } from "../config.js";
 import { FakeServer, type FakeServerOptions } from "./fake-server.js";
+import type { ModelWiring } from "../models/types.js";
 
 export const FAKE_PI = fileURLToPath(new URL("./fake-pi.mjs", import.meta.url));
 export const TOKEN = "test-wire-token-0123456789";
@@ -39,6 +40,8 @@ export interface HarnessOptions {
   readonly heartbeatTimeoutMs?: number;
   readonly policyReadyTimeoutMs?: number;
   readonly extensions?: readonly string[];
+  /** Model gateway wiring (KOBE-41); absent = no model access, as before. */
+  readonly models?: ModelWiring;
 }
 
 /** The fake Pi ignores the file; it plays kobe-policy's handshake itself (see fake-pi.mjs). */
@@ -50,9 +53,6 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   const workspace = path.join(dir, "workspace");
   const sessions = path.join(workspace, ".kobe", "sessions");
   await mkdir(workspace, { recursive: true });
-  // Pi's config dir: empty and read-only, as in the image (/opt/kobe/pi-agent).
-  const piAgentDir = path.join(dir, "pi-agent");
-  await mkdir(piAgentDir, { mode: 0o555 });
   const tokenFile = path.join(dir, "token");
   await writeFile(tokenFile, `${TOKEN}\n`);
   const config = loadConfig({
@@ -62,7 +62,8 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     KOBE_WORKSPACE_DIR: workspace,
     KOBE_SESSION_DIR: sessions,
     KOBE_PI_BIN: options.piBin ?? FAKE_PI,
-    KOBE_PI_AGENT_DIR: piAgentDir,
+    // Each Pi gets a private directory under here (its PI_CODING_AGENT_DIR and model file).
+    KOBE_PI_RUNTIME_DIR: path.join(dir, "pi-runtime"),
     KOBE_POLICY_EXTENSION: FAKE_POLICY_EXTENSION,
     ...options.env,
   });
@@ -81,6 +82,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       ? {}
       : { heartbeatTimeoutMs: options.heartbeatTimeoutMs }),
     ...(options.extensions === undefined ? {} : { extensions: options.extensions }),
+    ...(options.models === undefined ? {} : { models: options.models }),
     ...(options.policyReadyTimeoutMs === undefined
       ? {}
       : { policyReadyTimeoutMs: options.policyReadyTimeoutMs }),

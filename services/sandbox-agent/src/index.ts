@@ -1,10 +1,13 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
+import path from "node:path";
 import { Agent } from "./agent.js";
 import { loadConfig } from "./config.js";
 import { hardenProcess } from "./harden.js";
 import { logger } from "./logger.js";
+import { ModelTokenKeeper } from "./models/token-keeper.js";
+import type { ModelWiring } from "./models/types.js";
 import { buildPiLaunch } from "./pi/pi-launch.js";
-import { checkPolicyExtensionFile } from "./policy/extension-file.js";
+import { checkExtensionFile, checkPolicyExtensionFile } from "./policy/extension-file.js";
 import { SessionClient } from "./session/exchange.js";
 import { piVersion as readPiVersion, readAgentVersion } from "./version.js";
 
@@ -24,13 +27,18 @@ async function main(): Promise<void> {
     policyExtension: await checkPolicyExtensionFile(loaded.policyExtension),
   };
   const home = process.env.HOME ?? "/home/kobe";
-  const piEnv = buildPiLaunch({
-    sessionFile: "-",
-    home,
-    agentDir: checked.piAgentDir,
-    policyExtension: checked.policyExtension,
-    parentEnv: process.env,
-  }).env;
+  // Pi's private runtime directories live here; the version probe gets one of its own.
+  const probeDir = path.join(checked.piRuntimeDir, "version-probe");
+  await mkdir(probeDir, { recursive: true, mode: 0o700 });
+  const piEnv = {
+    ...buildPiLaunch({
+      sessionFile: "-",
+      home,
+      policyExtension: checked.policyExtension,
+      parentEnv: process.env,
+    }).env,
+    PI_CODING_AGENT_DIR: probeDir,
+  };
   // Kobe's pods carry a bootstrap token only: trade it for the sandbox id and session tokens
   // (retried until the server assigns this pod) before dialling the wire. In parallel with the
   // version probes: both sit on the cold-start path (D14).
@@ -42,14 +50,21 @@ async function main(): Promise<void> {
           bootstrapTokenFile: loaded.bootstrapTokenFile,
           logger,
         });
-  const [agentVersion, piVersion, grant] = await Promise.all([
+  const [agentVersion, piVersion, grant, models] = await Promise.all([
     readAgentVersion(new URL("../package.json", import.meta.url)),
     readPiVersion(loaded.piBin, piEnv),
     session?.grant(),
+    modelWiring(checked, session),
   ]);
   const config = grant ? { ...checked, sandboxId: grant.sandboxId } : checked;
   logger.info(
-    { server: config.connectUrl, sandbox_id: config.sandboxId, agentVersion, piVersion },
+    {
+      server: config.connectUrl,
+      sandbox_id: config.sandboxId,
+      agentVersion,
+      piVersion,
+      models: models === undefined ? "off" : models.gatewayUrl,
+    },
     "sandbox-agent starting",
   );
 
@@ -67,6 +82,7 @@ async function main(): Promise<void> {
     piVersion,
     home,
     parentEnv: process.env,
+    models,
     onExit: (code) => process.exit(code),
   });
   process.on("exit", () => agent.killAll());
@@ -74,6 +90,31 @@ async function main(): Promise<void> {
     process.once(signal, () => void agent.stop(SHUTDOWN_DEADLINE_MS, 0));
   }
   agent.start();
+}
+
+/**
+ * Model gateway wiring (KOBE-41): only with a model gateway URL (the pod spec sets it when the
+ * sandbox may reach models) and a session to trade tokens with (Kobe's pods). The kobe-models
+ * file gets the same root-owned check as kobe-policy; the keeper trades the first token now (on
+ * the cold-start path, in parallel with the other startup work) and rotates it before expiry.
+ */
+async function modelWiring(
+  config: ReturnType<typeof loadConfig>,
+  session: SessionClient | undefined,
+): Promise<ModelWiring | undefined> {
+  if (config.modelGatewayUrl === undefined) return undefined;
+  if (session === undefined) {
+    logger.warn("KOBE_MODEL_GATEWAY_URL set without a bootstrap token: models stay off");
+    return undefined;
+  }
+  const extension = await checkExtensionFile(config.modelsExtension, "kobe-models");
+  const keeper = new ModelTokenKeeper({
+    grant: () => session.modelGatewayGrant(),
+    refreshMarginMs: session.refreshMarginMs,
+    logger,
+  });
+  await keeper.start();
+  return { gatewayUrl: config.modelGatewayUrl, extension, tokens: keeper };
 }
 
 main().catch((error: unknown) => {

@@ -104,6 +104,7 @@ export const SANDBOX_ERROR_CODES = [
   "run_not_active", // the run ended; late frames for it are answered with this, not executed
   "pi_unavailable", // Pi process could not start or exited
   "pi_rejected", // Pi answered success:false
+  "model_not_configured", // run.start named no gateway model for a sandbox with model access (KOBE-41)
   "frame_too_large",
   "internal",
 ] as const;

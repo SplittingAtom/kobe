@@ -6,6 +6,7 @@ import {
 } from "@kobe/protocol";
 import { sql, withTeam, type SandboxCommandKind } from "@kobe/db";
 import { withAppendTx } from "../event-stream/append.js";
+import { failureInfo } from "../runs/failure-codes.js";
 import type { Logger } from "pino";
 import { completeCommand, markDelivered, pendingCommands, type CommandRow } from "./commands.js";
 import type { WireContext } from "./context.js";
@@ -401,9 +402,10 @@ export class CommandDelivery {
 
   async #endRun(runId: string, threadId: string, outcome: CommandOutcome): Promise<void> {
     const { teamId } = this.#host.target;
+    // The sandbox's error code with the server's own message: its text is untrusted (logged above).
     const end = outcome.ok
       ? ({ status: "completed" } as const)
-      : ({ status: "failed", error: outcome.error } as const);
+      : ({ status: "failed", error: failureInfo(outcome.error.code, "start_failed") } as const);
     const { ended } = await withAppendTx(this.#ctx.db, teamId, (tx) =>
       endRunInTx(tx, teamId, runId, end),
     );

@@ -67,18 +67,23 @@ COPY images/sandbox/entrypoint.sh /opt/kobe/entrypoint.sh
 # agent with --extension, last; root-owned and read-only so sandbox code cannot replace it. Only the
 # compiled .js files (it imports nothing but node builtins and its own files).
 COPY --from=agent /out/dist/kobe-policy/*.js /opt/kobe/pi-extensions/kobe-policy/
+# kobe-models (KOBE-41): the Pi extension that serves the run's model through the Kobe model
+# gateway with the sandbox's session token. Loaded right before kobe-policy; root-owned and
+# read-only; imports node builtins, Pi's own pi-ai and its own files only.
+COPY --from=agent /out/dist/kobe-models/*.js /opt/kobe/pi-extensions/kobe-models/
 
 # Non-root user; /workspace is the persistent volume, /opt/kobe/skills holds gallery skills (A6,
-# root-owned / mounted read-only), /opt/kobe/pi-extensions the root-owned Pi extensions. Strip
-# setuid/setgid bits so sandbox code has no local privilege-escalation helpers even if a pod spec
-# forgets allowPrivilegeEscalation=false.
+# root-owned / mounted read-only), /opt/kobe/pi-extensions the root-owned Pi extensions. Pi's own
+# config dir is not baked in: the agent creates a private one per Pi process under /tmp (KOBE-41;
+# Pi 1.0.0 must be able to write auth.json there). Strip setuid/setgid bits so sandbox code has no
+# local privilege-escalation helpers even if a pod spec forgets allowPrivilegeEscalation=false.
 RUN groupadd --gid 1000 kobe \
  && useradd --uid 1000 --gid 1000 --create-home --home-dir /home/kobe --shell /bin/bash kobe \
- && mkdir -p /workspace /opt/kobe/skills /opt/kobe/pi-agent \
- && chmod 0555 /opt/kobe/pi-agent /opt/kobe/entrypoint.sh \
+ && mkdir -p /workspace /opt/kobe/skills \
+ && chmod 0555 /opt/kobe/entrypoint.sh \
  && chown -R 0:0 /opt/kobe/pi-extensions \
- && chmod 0444 /opt/kobe/pi-extensions/kobe-policy/*.js \
- && chmod 0555 /opt/kobe/pi-extensions /opt/kobe/pi-extensions/kobe-policy \
+ && chmod 0444 /opt/kobe/pi-extensions/kobe-policy/*.js /opt/kobe/pi-extensions/kobe-models/*.js \
+ && chmod 0555 /opt/kobe/pi-extensions /opt/kobe/pi-extensions/kobe-policy /opt/kobe/pi-extensions/kobe-models \
  && chown kobe:kobe /workspace \
  && find / -xdev -perm /6000 -type f -exec chmod a-s {} + \
  && chmod 0644 /etc/passwd /etc/group && chmod 0640 /etc/shadow
