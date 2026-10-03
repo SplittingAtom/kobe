@@ -74,6 +74,12 @@ const breakGlassScope = {
   legalHold: z.boolean(),
 };
 
+/**
+ * A legal hold (KOBE-17) by its id only: never the team, the scope, the held user or the reason
+ * (a held install admin reads the install log; the console resolves the id).
+ */
+const legalHoldRef = { holdId: id };
+
 /** How many people a break-glass change queued notifications for (outbox rows), and how many of them are the team's admins. */
 const notified = {
   recipients: z.number().int().nonnegative(),
@@ -88,6 +94,10 @@ export const SANDBOX_LIMITS = [
   "run_events",
   "run_bytes",
   "thread_entries",
+  // Workspace sync (KOBE-27): a push refused for size, count or quota.
+  "workspace_bytes",
+  "workspace_files",
+  "workspace_file_size",
 ] as const;
 
 /** A Pi tool call id (`idSchema` in @kobe/protocol): no control characters, ≤ 128. */
@@ -199,8 +209,8 @@ export const AUDIT_EVENTS = {
 
   // ── install: install-wide settings ──
   "install.settings.updated": event("install", {
-    setting: z.enum(["require_two_factor"]),
-    value: z.union([z.boolean(), label]),
+    setting: z.enum(["require_two_factor", "audit_pii_retention_hours"]),
+    value: z.union([z.boolean(), z.number().int().nonnegative(), label]),
   }),
 
   // ── platform: isolation runtime, restore (actor: system) ──
@@ -399,6 +409,37 @@ export const AUDIT_EVENTS = {
     threadId: id.optional(),
   }),
 
+  // ── governance: legal hold (D18, KOBE-17); install scope: holds are confidential, and the team's
+  // admins may be the people held. Never the held user's id or the reason (the hold row keeps them).
+  /** An install admin asked for a hold on a team, or on one user in it. */
+  "governance.legal_hold.requested": event("install", legalHoldRef),
+  /** A second install admin approved (or a single-admin install self-approved, flagged): in force. */
+  "governance.legal_hold.placed": event("install", { ...legalHoldRef, selfApproved: z.boolean() }),
+  "governance.legal_hold.denied": event("install", { holdId: id }),
+  "governance.legal_hold.withdrawn": event("install", { holdId: id }),
+  /** An install admin asked to release an active hold; it stays in force until approved. */
+  "governance.legal_hold.release_requested": event("install", { holdId: id }),
+  "governance.legal_hold.release_denied": event("install", { holdId: id }),
+  "governance.legal_hold.release_withdrawn": event("install", { holdId: id }),
+  /** A second install admin approved the release (single-admin install: flagged): purges resume. */
+  "governance.legal_hold.released": event("install", {
+    ...legalHoldRef,
+    selfApproved: z.boolean(),
+  }),
+
+  // ── audit: the audit log's own maintenance (KOBE-17; actor: system) ──
+  /** The IP and user agent of rows past the retention period were erased (counts only). */
+  "audit.pii_erased": event("install", {
+    rows: count,
+    olderThanHours: z.number().int().positive(),
+  }),
+  /** Written once after the chain v2 upgrade (server): the seal over every v1 row (hex SHA-256). */
+  "audit.chain.upgraded": event("install", {
+    throughSeq: z.number().int().positive(),
+    rows: z.number().int().positive(),
+    seal: z.string().regex(/^[0-9a-f]{64}$/),
+  }),
+
   // ── run: lifecycle metadata the server decides on its own (KOBE-24; never content) ──
   /** The wire ended an active run as interrupted (D14: sandbox or Pi lost; actor: system). */
   "run.interrupted": event("team", {
@@ -506,6 +547,33 @@ export const AUDIT_EVENTS = {
     limit: z.enum(SANDBOX_LIMITS),
     runId: id.optional(),
   }),
+
+  // ── workspace: the durable S3 copy of each sandbox's /workspace (KOBE-27, D12, D15, D26) ──
+  /**
+   * A sandbox restored its workspace onto an empty volume from the durable copy (rebuild after a
+   * lost or new volume). Counts are the sandbox's own report (system actor).
+   */
+  "workspace.restored": event("team", {
+    sandboxId: id,
+    userId: id,
+    files: count,
+    bytes: count,
+    durationMs: count,
+  }),
+  /**
+   * A sandbox uploaded bytes that did not hash to the name it gave them (tampered or broken;
+   * nothing stored). One row per sandbox per minute at most; `failures` counts every mismatch
+   * since the previous row, so none is hidden by the throttle (system).
+   */
+  "workspace.integrity_failed": event("team", {
+    sandboxId: id,
+    userId: id,
+    failures: z.number().int().positive(),
+  }),
+  /** A workspace file was copied to a durable shared object (KOBE-54 `share_file`). */
+  "workspace.file_shared": event("team", { userId: id, sharedId: id, bytes: count }),
+  /** Unreferenced workspace blobs and old tombstones were purged (system; counts only, D18). */
+  "workspace.purged": event("team", { userId: id, blobs: count, bytes: count, tombstones: count }),
 
   // ── agent: definitions (D19); team agents in the team view, personal and gallery install-only ──
   "agent.created": event("any", {

@@ -103,6 +103,19 @@ describe("sandbox pod spec (D12, D13; secrets never enter sandboxes)", () => {
     });
   });
 
+  it("tells the agent how often to push its workspace (KOBE-27), 0 when sync is off", async () => {
+    const isolation = await verified();
+    const envOf = (settings: typeof SETTINGS) =>
+      (sandboxPodSpec(isolation, settings, ADDRESSES) as unknown as Pod).containers[0]?.env;
+    expect(envOf(SETTINGS)).toContainEqual({
+      name: "KOBE_WORKSPACE_SYNC_INTERVAL_MS",
+      value: "60000",
+    });
+    expect(
+      envOf({ ...SETTINGS, workspaceSync: { ...SETTINGS.workspaceSync, enabled: false } }),
+    ).toContainEqual({ name: "KOBE_WORKSPACE_SYNC_INTERVAL_MS", value: "0" });
+  });
+
   it("never overrides the image's command (tini + hardened launcher, KOBE-23) or args", async () => {
     const spec = sandboxPodSpec(await verified(), SETTINGS, ADDRESSES) as unknown as {
       containers: Record<string, unknown>[];

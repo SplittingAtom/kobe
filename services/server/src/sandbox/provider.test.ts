@@ -143,6 +143,32 @@ describe("ensureSandbox: team namespace (D11)", () => {
     await expect(provider.ensureSandbox(TEAM, USER)).resolves.toMatchObject({ state: "running" });
   });
 
+  it("names Rancher's namespace webhook and the chart value when Rancher refuses the namespace", async () => {
+    const { kube, provider } = setup();
+    kube.failNext(
+      "apply",
+      "Namespace",
+      400,
+      1,
+      `Kubernetes API apply Namespace ${NS}: admission webhook ` +
+        `"rancher.cattle.io.namespaces.create-non-kubesystem" denied the request: Unauthorized`,
+    );
+    const err = await provider.ensureSandbox(TEAM, USER).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SandboxProvisioningError);
+    expect(String(err)).toMatch(/rancher\.cattle\.io\.namespaces/);
+    expect(String(err)).toMatch(/rancher\.enabled=true/);
+    expect(String(err)).toMatch(/updatepsa/);
+    expect(kube.all("SandboxClaim")).toHaveLength(0);
+  });
+
+  it("passes other namespace failures through unchanged", async () => {
+    const { kube, provider } = setup();
+    kube.failNext("apply", "Namespace", 500);
+    const err = await provider.ensureSandbox(TEAM, USER).catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(SandboxProvisioningError);
+    expect(String(err)).toMatch(/injected 500/);
+  });
+
   it("gives up on a persistent 403 without creating any sandbox", async () => {
     const { kube, provider } = setup();
     kube.failNext("apply", "NetworkPolicy", 403, 100);

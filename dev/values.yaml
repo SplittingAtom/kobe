@@ -11,8 +11,8 @@ postgres:
   external:
     existingSecret: kobe-dev-db
 s3:
-  # Placeholder until a ticket needs object storage in dev/e2e.
-  endpoint: http://s3.invalid
+  # dev/s3.yaml: SeaweedFS in kobe-deps (Apache-2.0; dev/e2e only, never in the chart).
+  endpoint: http://s3.kobe-deps.svc.cluster.local:8333
   bucket: kobe
   existingSecret: kobe-dev-s3
 # Small sandbox requests so dev clusters and the k3d e2e runner fit several sandboxes.

@@ -4,6 +4,7 @@ import {
   check,
   index,
   inet,
+  smallint,
   jsonb,
   pgEnum,
   pgTable,
@@ -24,10 +25,12 @@ export type AuditActorKind = (typeof auditActorKind.enumValues)[number];
  * written with `audit()` in the same transaction as the action. Metadata only: `target` holds the
  * per-action allowlisted fields of `AUDIT_EVENTS`, never secrets, tokens or content.
  *
- * Append-only in Postgres (migration `audit_log_append_only`): the app role holds INSERT and SELECT
- * only, triggers refuse UPDATE, DELETE and TRUNCATE for every non-superuser role, and a BEFORE
- * INSERT trigger assigns `seq`, `at`, `prev_hash` and `hash` under a transaction-scoped advisory
- * lock, so rows form a gapless SHA-256 hash chain in commit order. Rows carry no foreign keys: an
+ * Append-only in Postgres (migrations `audit_log_append_only`, `audit_pii_commitments`): the app
+ * role holds INSERT and SELECT, plus UPDATE on `ip`, `user_agent` and `pii_salt` for their erasure
+ * after the retention period (KOBE-17); triggers refuse DELETE, TRUNCATE and every other UPDATE for
+ * every non-superuser role, and a BEFORE INSERT trigger assigns `seq`, `at`, `prev_hash`, the PII
+ * commitment and `hash` under a transaction-scoped advisory lock, so rows form a gapless SHA-256
+ * hash chain in commit order that still verifies after the erasure. Rows carry no foreign keys: an
  * audit record outlives what it describes and loads in any order on restore.
  */
 export const auditLog = pgTable(
@@ -59,6 +62,20 @@ export const auditLog = pgTable(
     prevHash: text().notNull().default(""),
     /** Hex SHA-256 over `prev_hash` and this row's canonical form (`audit_log_canonical`). */
     hash: text().notNull().default(""),
+    /**
+     * Which canonical form `hash` covers (KOBE-17). NULL: v1, rows chained before the upgrade, whose
+     * hash covers the raw IP and user agent (sealed later by `audit.chain.upgraded`). 2: the hash
+     * covers `pii_commitment` instead, so the IP and user agent can be erased. Assigned by the
+     * database. Nullable without a default so that adding it rewrites no row (KOBE-17 review H1).
+     */
+    hashVersion: smallint(),
+    /**
+     * Random salt (64 hex chars) of `pii_commitment`, assigned by the database; erased together with
+     * `ip` and `user_agent`, after which the commitment reveals nothing about them.
+     */
+    piiSalt: text(),
+    /** Hex SHA-256 over the salt, the row id, the IP and the user agent; null when both were null. */
+    piiCommitment: text(),
   },
   (t) => [
     index("audit_log_team_seq_idx")

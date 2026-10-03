@@ -77,3 +77,64 @@ export function testServerUrl(): string {
   }
   return url;
 }
+
+export interface BackdatedAuditRow {
+  readonly hours: number;
+  readonly actorId?: string | null;
+  readonly teamId?: string | null;
+  readonly ip?: string;
+  readonly userAgent?: string;
+}
+
+/**
+ * Tests only: appends an `auth.sign_out` audit row as if recorded `hours` ago, with an IP and user
+ * agent (KOBE-17 erasure tests). Built at the head of the chain by a superuser with the database's
+ * own functions (triggers skipped for this transaction), so the chain stays valid. Returns its seq.
+ */
+export async function appendBackdatedAuditRow(
+  superuser: string | pg.Client,
+  row: BackdatedAuditRow,
+): Promise<number> {
+  const own = typeof superuser === "string";
+  const client = own ? new pg.Client({ connectionString: superuser }) : superuser;
+  if (own) await client.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SET LOCAL session_replication_role = replica");
+    await client.query(`SELECT pg_advisory_xact_lock(hashtextextended('kobe.audit_log', 0))`);
+    const { rows } = await client.query<{ seq: string }>(
+      `INSERT INTO audit_log (seq, at, team_id, actor_kind, actor_id, action, target, ip, user_agent,
+                              prev_hash, hash_version, pii_salt, pii_commitment)
+       SELECT coalesce(h.seq, 0) + 1, now() - make_interval(hours => $1), $2, 'user', $3,
+              'auth.sign_out', '{}', $4, $5, coalesce(h.hash, repeat('0', 64)), 2,
+              replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', ''),
+              repeat('0', 64)
+       FROM (SELECT 1) one
+       LEFT JOIN (SELECT seq, hash FROM audit_log ORDER BY seq DESC LIMIT 1) h ON true
+       RETURNING seq::text`,
+      [
+        row.hours,
+        row.teamId ?? null,
+        row.actorId ?? null,
+        row.ip ?? "203.0.113.7",
+        row.userAgent ?? "test agent",
+      ],
+    );
+    const seq = Number(rows[0]?.seq);
+    await client.query(
+      `UPDATE audit_log a SET pii_commitment = audit_log_digest(audit_log_pii_canonical(a)) WHERE seq = $1`,
+      [seq],
+    );
+    await client.query(
+      `UPDATE audit_log a SET hash = audit_log_digest(audit_log_canonical(a)) WHERE seq = $1`,
+      [seq],
+    );
+    await client.query("COMMIT");
+    return seq;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    if (own) await client.end();
+  }
+}

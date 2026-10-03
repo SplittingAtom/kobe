@@ -19,7 +19,15 @@ export interface TenancyDomain<Team extends string, InstallWide extends string> 
   readonly grants: Readonly<Partial<Record<InstallWide, readonly Privilege[]>>>;
   /** Install-wide tables allowed to carry `team_id` or a foreign key to `teams`, with a reason. */
   readonly teamReferencing: Readonly<Partial<Record<InstallWide, string>>>;
+  /**
+   * Column-level privileges on install-wide tables, on top of `grants` (e.g. the audit log's
+   * erasable columns, KOBE-17). Keep these rare and give the reason next to them.
+   */
+  readonly columnGrants?: Readonly<Partial<Record<InstallWide, ColumnGrants>>>;
 }
+
+/** Privilege → the columns it is granted on. */
+export type ColumnGrants = Readonly<Partial<Record<"UPDATE", readonly string[]>>>;
 
 /** Identity helper that keeps each domain's table names as literal types. */
 export function defineDomain<const Team extends string, const InstallWide extends string>(

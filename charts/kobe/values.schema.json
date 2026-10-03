@@ -141,6 +141,15 @@
             },
             "storageClass": {
               "type": "string"
+            },
+            "longhornStrictLocal": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                }
+              }
             }
           }
         },
@@ -249,6 +258,38 @@
               "type": "integer",
               "minimum": 10,
               "maximum": 3600
+            }
+          }
+        },
+        "workspaceSync": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "pushIntervalSeconds": {
+              "type": "integer",
+              "minimum": 5,
+              "maximum": 3600
+            },
+            "maxFileSize": {
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]+)?(m|k|M|G|T|Ki|Mi|Gi|Ti)?$"
+            },
+            "maxWorkspaceSize": {
+              "type": "string",
+              "pattern": "^([0-9]+(\\.[0-9]+)?(m|k|M|G|T|Ki|Mi|Gi|Ti)?)?$"
+            },
+            "maxFiles": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000
+            },
+            "collectSeconds": {
+              "type": "integer",
+              "minimum": 60,
+              "maximum": 86400
             }
           }
         }
@@ -807,6 +848,15 @@
             "maxLength": 0,
             "description": "smtp.security=none would send SMTP credentials unencrypted"
           }
+        }
+      }
+    },
+    "rancher": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
         }
       }
     }

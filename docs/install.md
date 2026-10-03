@@ -91,26 +91,48 @@ Kubernetes has no per-pod setting for it.
 
 **Rancher-managed clusters:** Rancher's namespace webhook
 (`rancher.cattle.io.namespaces.create-non-kubesystem`) refuses namespaces carrying Pod Security
-labels unless the caller may `updatepsa` on Rancher projects, so the server cannot create team
-namespaces (runs fail `start_failed`; the server logs the webhook's `Unauthorized`). Grant the
-server's ServiceAccount that one verb:
-
-```bash
-kubectl create clusterrole kobe-rancher-updatepsa --verb=updatepsa --resource=projects.management.cattle.io
-kubectl create clusterrolebinding kobe-rancher-updatepsa --clusterrole=kobe-rancher-updatepsa \
-  --serviceaccount=<namespace>:<release>-server
-```
-
-**Workspace storage and cold start:** waking a hibernated sandbox attaches its `/workspace`
-volume again, and that attach is on the path to the first token. Measured on a 4-node cluster
-(docs/gates/gate-1.md): Longhorn (3 replicas or 1) adds 5–12 s, so a wake takes about 14 s once the
-volume has fully detached — over the 8 s target; local-path (k3d) adds well under a second. A
-Synology NFSv3 class mounted but was not writable by the sandbox user under gVisor.
+labels unless the caller may `updatepsa` on Rancher projects, so without it the server cannot
+create team namespaces: runs fail, and the server's error names the webhook and this setting.
+Install with `--set rancher.enabled=true`, which grants the server's ServiceAccount exactly that
+verb (a ClusterRole and ClusterRoleBinding named `<release>-<hash>-rancher-updatepsa`). Off by
+default; it changes nothing on clusters without Rancher.
 
 Private registries: the names in `global.imagePullSecrets` are copied into each team namespace for
 the kubelet (pods there cannot mount them). Alternatively configure registry credentials on the
 nodes (k3s `registries.yaml`). Kobe assumes one install per cluster (`kobe-team-*` names are
 cluster-wide).
+
+### Workspace storage
+
+Each sandbox's `/workspace` is a PersistentVolumeClaim of `sandbox.workspace.storageClass` (empty:
+the cluster default). Hibernating a sandbox stops its pod and keeps the volume; waking it attaches
+the volume again, and that attach is on the path to the user's first token (target: p95 ≤ 8 s
+from hibernated). Measurements on a 4-node cluster are in
+[gates/gate-1.md](gates/gate-1.md#storage-measurements-real-cluster):
+
+| Class                                                                   | Wake (hibernated → Pi ready) | Notes                                                                           |
+| ----------------------------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------- |
+| `local-path` (k3s default)                                              | ≈ 4 s                        | pins each sandbox to one node; single-node clusters                             |
+| Longhorn, replicated (3 or 1 replicas, no locality)                     | ≈ 14 s once detached         | volume follows the pod anywhere; too slow for the target                        |
+| Longhorn strict-local (`sandbox.workspace.longhornStrictLocal.enabled`) | ≈ 14 s once detached         | one replica on the sandbox's node; no faster: Longhorn's engine start dominates |
+| NFS (a Synology NFSv3 share was tried)                                  | —                            | not writable by the sandbox user under gVisor                                   |
+
+**Longhorn strict-local.** `--set sandbox.workspace.longhornStrictLocal.enabled=true` creates a
+StorageClass (`<release>-<hash>-workspace-strict-local`: Longhorn, `numberOfReplicas: 1`,
+`dataLocality: strict-local`, `WaitForFirstConsumer`) and uses it for new workspaces; leave
+`sandbox.workspace.storageClass` empty (setting both is refused). Existing workspaces keep their
+class. Trade-off: each workspace has exactly one copy, on one node.
+
+**When a node is lost**, strict-local volumes on it are gone (Longhorn reports them faulted).
+The durable copy of a workspace is the S3 workspace sync (KOBE-27: the agent pushes changes to
+S3 through the server every 60 s, after each run and on hibernate; a sandbox that starts on an
+empty volume restores from S3 before any prompt reaches Pi), so changes from the last minute
+before the failure can be lost, and so is anything outside `/workspace` (which hibernation wipes
+anyway). Recovery is manual for now: delete the affected sandbox's workspace PVC
+(`kubectl -n kobe-team-<slug> delete pvc workspace-u-<user-id>`); the next message wakes the
+sandbox on a fresh volume, which restores from S3. S3 sync needs `s3.bucket` and KOBE-27; without
+it a lost node loses those workspaces for good. Conversations are never at risk: Postgres is the
+record of threads and runs.
 
 ## Egress
 
@@ -214,6 +236,16 @@ helm install kobe charts/kobe -n kobe \
   --set smtp.host=smtp.example.com --set smtp.from='Kobe <kobe@example.com>' \
   --set smtp.existingSecret=kobe-smtp
 ```
+
+### Object storage (S3)
+
+Kobe keeps a durable copy of every sandbox's `/workspace` in the bucket (`sandbox.workspaceSync`,
+on by default once `s3.bucket` is set), so a lost or rebuilt volume loses no files. Only the
+server holds the S3 credentials: sandboxes send and fetch files through the server's sandbox port
+and get no network path to the object store. Objects live under
+`teams/<team-id>/users/<user-id>/workspace/<sha256>` (plus `…/shared/<id>` for shared files).
+Give the credentials read, write and delete on the bucket (collection deletes unreferenced
+content). Without `s3.bucket`, workspace sync stays off and the server logs a warning.
 
 ### Email (SMTP)
 
