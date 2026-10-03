@@ -211,20 +211,6 @@
       "when": 1791036939056,
       "tag": "0029_sandboxes_rls",
       "breakpoints": true
-    },
-    {
-      "idx": 30,
-      "version": "7",
-      "when": 1791046307237,
-      "tag": "0030_models",
-      "breakpoints": true
-    },
-    {
-      "idx": 31,
-      "version": "7",
-      "when": 1791046307774,
-      "tag": "0031_models_rls",
-      "breakpoints": true
     }
   ]
 }
