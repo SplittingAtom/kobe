@@ -12,3 +12,4 @@ export { default as egress } from "./egress";
 export { default as policy } from "./policy";
 export { default as retention } from "./retention";
 export { default as audit } from "./audit";
+export { default as breakGlass } from "./break-glass";
