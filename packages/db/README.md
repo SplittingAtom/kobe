@@ -30,7 +30,9 @@ volumes, and any later one) must:**
 2. skip held data: `isUnderLegalHold(tx, teamId, userId)` per item (without `userId` it is true
    when **any** hold exists in the team), `legalHoldsForTeam(tx, teamId)` for batches, or
    `WHERE NOT legal_hold_covers(team_id, owner_user_id)` in SQL;
-3. treat SQLSTATE `KH001` (`LEGAL_HOLD_SQLSTATE`, `isLegalHoldViolation(err)`) as "held, skip".
+3. treat SQLSTATE `KH001` (`LEGAL_HOLD_SQLSTATE`, `isLegalHoldViolation(err)`) as "held, skip";
+4. record the purge's audit event **last**, after the deletes: lock order is legal-hold lock, then
+   the audit chain lock (an approval takes them in that order); the reverse order can deadlock.
 
 Backstop: deleting a held `threads` row or `thread_entries` rows fails with `KH001`
 (`threads_legal_hold`, `thread_entries_legal_hold` triggers). Moving a thread to Trash is an

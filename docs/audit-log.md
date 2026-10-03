@@ -137,7 +137,7 @@ install for personal and gallery agents.
 | `governance.break_glass.expired`             | team    | `grantId`, `wasActive`, `recipients`, `teamAdmins?`                                                                                 | The window ended, or the request lapsed undecided after 24 h (system)                                                                            |
 | `governance.break_glass.notification_failed` | team    | `grantId`, `recipientUserId`, `event`, `attempts`                                                                                   | A queued break-glass email gave up after its retries (system)                                                                                    |
 | `governance.break_glass.read`                | team    | `grantId`, `object` (thread_list, thread, thread_entries), `threadId?`                                                              | **Every** read under a grant, in the read's own transaction (actor: the requesting admin). Under legal hold no event names the subject or thread |
-| `governance.legal_hold.requested`            | install | `holdId`, `teamId`, `scope` (team, user)                                                                                            | An install admin asked for a legal hold on a team or on one user's data in it (D18; never the user's id or the reason)                           |
+| `governance.legal_hold.requested`            | install | `holdId`                                                                                                                            | An install admin asked for a legal hold on a team or on one user's data in it (D18; the id only, see below)                                      |
 | `governance.legal_hold.placed`               | install | as requested, plus `selfApproved`                                                                                                   | A second install admin placed it (a single-admin install self-approved, flagged): purges of the data are suspended                               |
 | `governance.legal_hold.denied`               | install | `holdId`                                                                                                                            | Another install admin turned the request down                                                                                                    |
 | `governance.legal_hold.withdrawn`            | install | `holdId`                                                                                                                            | The requester withdrew it while pending                                                                                                          |
@@ -209,7 +209,8 @@ Chris, 2026-10-03): see [IP and user agent](#ip-and-user-agent).
 
 **Legal hold events** are install scope: holds are confidential (the team's admins may be the
 people held), so the team's audit view doesn't show them, and no event names the held user or the
-reason (the hold row keeps both; install admins resolve `holdId` in the console).
+team, scope or reason (a held install admin reads this log; the hold row keeps all of it, and
+install admins resolve `holdId` in the console).
 
 **Not recorded on purpose:** reads of the audit log; the normal `checking → verified` isolation
 state at every replica start; and anything before first-run setup, so that an install about to be
@@ -330,6 +331,13 @@ check (`/integrity`, restore) starts at seq 1.
 
 **Rolling upgrade.** `audit_log_canonical(row)` returns the v1 or v2 form by `hash_version`, so a
 previous release's replicas, which hash its output, keep verifying new rows during the rollout.
+
+**Copies outside the live rows.** An erased value stays in dead row versions until autovacuum
+reclaims them, and in WAL, WAL archives and replicas for as long as those are kept. Size WAL
+archive retention like backups.
+
+**Rolling back the release** after the first sweep is not supported: the previous release's
+verifier can't check erased v1 rows and reports them as tampered. Roll forward instead.
 
 **Backups.** A backup holds the values that were present when it was taken, salts included.
 Keep backups no longer than the privacy period requires. A restore loads rows verbatim, verifies

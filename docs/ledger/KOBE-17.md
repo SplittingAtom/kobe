@@ -57,9 +57,8 @@ placed_by, approved_by, released_at?)`), plus `status` (`pending`, `active`, `de
     not guarded; KOBE-18 guards any further table it purges the same way.
 - **Audit events (install scope, category `governance`):** `governance.legal_hold.requested`,
   `.placed`, `.denied`, `.withdrawn`, `.release_requested`, `.release_denied`,
-  `.release_withdrawn`, `.released`. Targets: `holdId`, `teamId`, `scope` (team/user),
-  `selfApproved` where it applies; **never the subject's user id nor the reason** (the hold row
-  keeps them; see decisions).
+  `.release_withdrawn`, `.released`. Targets: `holdId` only, plus
+  `selfApproved` on placement and release (see review round 1).
 - **Server:** `legal-hold/store.ts` (row locked `FOR UPDATE`, audit last),
   `routes/install-legal-hold.ts` under `/v1/install/legal-hold` (`install.legal_hold.manage`).
   A hold about an install admin is invisible to them (404), like a break-glass legal hold.
@@ -159,8 +158,8 @@ app role.
   nothing about legal hold in the team audit view (D10's banner is break-glass only). A hold is
   confidential by nature (break-glass's own legal-hold flag exists to keep the subject
   uninformed), and team admins may be the people held, so the team view shows nothing and no team
-  admin is notified. Targets carry `holdId`, `teamId`, `scope`, `selfApproved`; the install console
-  resolves the rest from the hold row. (docs/audit-log.md suggested `userId` in the target; left
+  admin is notified. Targets carry only `holdId` (and `selfApproved`), so a held install admin
+  reading the install log learns nothing; the install console resolves the rest from the hold row. (docs/audit-log.md suggested `userId` in the target; left
   out for the same reason.)
 - **A hold is invisible to the held user**, even an install admin (404 on list, detail and every
   action), as KOBE-16 does for break-glass legal holds. The held user can't approve, deny or
@@ -198,7 +197,35 @@ app role.
 - **CLI restore** now verifies with `audit_log_chain_problem()`; the error names the problem kind
   (`hash_mismatch`, …) instead of a sentence.
 
+## Review round 1 (security-review subagent; no CRITICAL/HIGH)
+
+- **MEDIUM, a hold on the only other admin could never be placed** (the held admin counted as
+  "a second admin" but can't approve): the held user no longer counts, in the trigger
+  (`legal_hold_other_admin_exists(who, subject)`) and the server (`mayApproveOwn`); the requester
+  places it alone, flagged. Tests in db and server.
+- **MEDIUM, migration cost:** one UPDATE pass sets version, salt and commitment together (one row
+  version per row); `LOCK TABLE audit_log IN SHARE ROW EXCLUSIVE MODE` first, so no row is appended
+  between the v1 verification and the seal. (`ADD COLUMN … DEFAULT 2` is metadata-only on PG 11+;
+  only the UPDATE rewrites.) Expected cost: one pass over `audit_log` while appends wait; v1 has no
+  production installs yet.
+- **MEDIUM-LOW, sweep cost with many held rows:** `audit_log_pii_held` is one indexed EXISTS
+  (team-wide hold on the row's team, or any hold on its actor), same semantics.
+- **LOW, held admin inferring a hold from the install log:** hold events now carry `holdId` only
+  (plus `selfApproved`), no team or scope.
+- **LOW, SQL/Node divergence on `throughSeq`:** SQL now requires a JSON number too.
+- **LOW, docs:** dead tuples/WAL keep erased values until vacuum/archive expiry; rollback after the
+  first sweep unsupported; purges record their audit event last (lock order) — in
+  `docs/audit-log.md` and `packages/db/README.md`.
+- Recorded, not changed: a pending hold suspends nothing (only an approved one does; D18 makes the
+  hold an install-admin two-person act); approver ids are asserted by the app role (as for
+  break-glass); a team hold has no subject, so an install admin who is a member of the held team
+  can still act on it (D18 doesn't exclude them); `host(ip)` drops a netmask (Kobe stores host
+  addresses only).
+
 ## Open questions (for Chris or the coordinator)
+
+- **Pending holds** protect nothing until approved (erasure and purges continue meanwhile). Should a
+  pending hold already suspend the IP erasure?
 
 - **Backups keep IP addresses** taken before erasure for as long as backups are kept. Documented
   (keep backups no longer than the privacy period requires); a shorter backup retention or a

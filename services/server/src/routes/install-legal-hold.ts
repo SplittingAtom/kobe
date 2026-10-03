@@ -2,7 +2,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import type { AuthVariables } from "../auth/session.js";
 import { requireInstallPermission } from "../authz/middleware.js";
-import { isSoleInstallAdmin } from "../break-glass/store.js";
+import { activeInstallAdmins } from "../break-glass/store.js";
 import type { ServerDeps } from "../deps.js";
 import { idParamSchema, requestHoldSchema, requestReleaseSchema } from "../legal-hold/schemas.js";
 import {
@@ -56,8 +56,10 @@ function fail(c: Ctx, code: HoldError) {
 const iso = (d: Date | null) => d?.toISOString() ?? null;
 
 /** A hold as install admins see it, with what the viewer may do with it (a courtesy). */
-function holdJson(detail: HoldDetail, viewerId: string, soleAdmin: boolean) {
+function holdJson(detail: HoldDetail, viewerId: string, otherAdmins: readonly string[]) {
   const { hold } = detail;
+  // Self-approval only when no other active admin but the held user exists (D10, flagged).
+  const soleAdmin = otherAdmins.every((id) => id === hold.userId);
   const own = hold.placedBy === viewerId;
   const releasing = hold.status === "active" && hold.releaseRequestedBy !== null;
   const ownRelease = hold.releaseRequestedBy === viewerId;
@@ -107,21 +109,24 @@ export function installLegalHoldRoutes(deps: ServerDeps): Hono<{ Variables: Auth
   const db = deps.database.db;
   app.use(requireInstallPermission("install.legal_hold.manage"));
 
+  const otherAdmins = async (viewer: string) =>
+    (await activeInstallAdmins(db, viewer)).map((a) => a.id);
+
   const respond = async (c: Ctx, result: HoldResult, status: 200 | 201 = 200) => {
     if (!result.ok) return fail(c, result.error);
     const viewer = c.get("user").id;
     const detail = await getHold(db, result.hold.id, viewer);
     if (!detail) return fail(c, "hold_not_found");
-    return c.json({ hold: holdJson(detail, viewer, await isSoleInstallAdmin(db, viewer)) }, status);
+    return c.json({ hold: holdJson(detail, viewer, await otherAdmins(viewer)) }, status);
   };
 
   app.get("/", async (c) => {
     if (Object.keys(c.req.query()).length > 0)
       return invalidRequest(c, "No filters are supported.");
     const viewer = c.get("user").id;
-    const sole = await isSoleInstallAdmin(db, viewer);
-    const holds = (await listHolds(db, viewer)).map((d) => holdJson(d, viewer, sole));
-    return c.json({ holds, selfApprovalAllowed: sole });
+    const others = await otherAdmins(viewer);
+    const holds = (await listHolds(db, viewer)).map((d) => holdJson(d, viewer, others));
+    return c.json({ holds, selfApprovalAllowed: others.length === 0 });
   });
 
   app.post("/", async (c) => {
@@ -141,7 +146,7 @@ export function installLegalHoldRoutes(deps: ServerDeps): Hono<{ Variables: Auth
     const viewer = c.get("user").id;
     const detail = await getHold(db, id.data, viewer);
     if (!detail) return fail(c, "hold_not_found");
-    return c.json({ hold: holdJson(detail, viewer, await isSoleInstallAdmin(db, viewer)) });
+    return c.json({ hold: holdJson(detail, viewer, await otherAdmins(viewer)) });
   });
 
   const decide =

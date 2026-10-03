@@ -73,12 +73,11 @@ const breakGlassScope = {
   legalHold: z.boolean(),
 };
 
-/** A legal hold (KOBE-17) by its scope; never the held user's id or the reason. */
-const legalHoldRef = {
-  holdId: id,
-  teamId: id,
-  scope: z.enum(["team", "user"]),
-};
+/**
+ * A legal hold (KOBE-17) by its id only: never the team, the scope, the held user or the reason
+ * (a held install admin reads the install log; the console resolves the id).
+ */
+const legalHoldRef = { holdId: id };
 
 /** How many people a break-glass change queued notifications for (outbox rows), and how many of them are the team's admins. */
 const notified = {

@@ -21,13 +21,15 @@ CREATE FUNCTION "public"."legal_hold_covers"(team uuid, subject uuid) RETURNS bo
       AND (h.user_id IS NULL OR h.user_id = subject))
 $$;--> statement-breakpoint
 
--- Whether another active install admin than `who` exists (D10: then the requester can't approve).
--- Share-locks those admins' rows; callers hold the admin-set lock (break_glass_lock_admin_set).
-CREATE FUNCTION "public"."legal_hold_other_admin_exists"(who uuid) RETURNS boolean
+-- Whether an active install admin other than `who` and other than the held user exists (D10:
+-- then the requester can't approve). The held user never counts: they can't approve, so a hold on
+-- the only other admin is self-approved (flagged) instead of waiting forever. Share-locks those
+-- admins' rows; callers hold the admin-set lock (break_glass_lock_admin_set).
+CREATE FUNCTION "public"."legal_hold_other_admin_exists"(who uuid, subject uuid) RETURNS boolean
   LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
 BEGIN
   PERFORM 1 FROM "public"."install_roles" r JOIN "public"."users" u ON u.id = r.user_id
-    WHERE r.user_id <> who AND u.deactivated_at IS NULL
+    WHERE r.user_id <> who AND r.user_id IS DISTINCT FROM subject AND u.deactivated_at IS NULL
     FOR SHARE OF r, u;
   RETURN FOUND;
 END;
@@ -79,7 +81,7 @@ BEGIN
     IF NEW.approved_by = OLD.placed_by THEN
       -- D10 (as D18 requires): a second Admin or the Owner approves when an active one exists;
       -- only a single-active-admin install self-approves, flagged.
-      IF "public"."legal_hold_other_admin_exists"(OLD.placed_by) THEN
+      IF "public"."legal_hold_other_admin_exists"(OLD.placed_by, OLD.user_id) THEN
         RAISE EXCEPTION 'a second install admin must approve this legal hold' USING ERRCODE = '42501';
       END IF;
       NEW.self_approved := true;
@@ -162,7 +164,7 @@ BEGIN
       RAISE EXCEPTION 'the subject of a legal hold cannot release it' USING ERRCODE = '42501';
     END IF;
     IF NEW.released_by = OLD.release_requested_by THEN
-      IF "public"."legal_hold_other_admin_exists"(OLD.release_requested_by) THEN
+      IF "public"."legal_hold_other_admin_exists"(OLD.release_requested_by, OLD.user_id) THEN
         RAISE EXCEPTION 'a second install admin must approve this release' USING ERRCODE = '42501';
       END IF;
       NEW.release_self_approved := true;

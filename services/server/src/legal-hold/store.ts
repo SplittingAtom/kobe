@@ -10,7 +10,7 @@ import {
   type KobeTx,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
-import { isSoleInstallAdmin } from "../break-glass/store.js";
+import { activeInstallAdmins } from "../break-glass/store.js";
 import type { RequestHoldBody } from "./schemas.js";
 
 /**
@@ -49,13 +49,29 @@ export type HoldResult = { ok: true; hold: HoldRow } | { ok: false; error: HoldE
 /** Row lock wait. Approvals also wait for purges in flight (shared legal-hold lock). */
 const LOCK_TIMEOUT = "30s";
 
+/**
+ * Whether `by` may approve their own request on this hold: no other active install admin exists
+ * besides the held user (who can't approve), as the trigger decides (D10, flagged).
+ */
+export async function mayApproveOwn(
+  db: KobeDb | KobeTx,
+  by: string,
+  hold: Pick<HoldRow, "userId">,
+): Promise<boolean> {
+  return (await activeInstallAdmins(db, by)).every((a) => a.id === hold.userId);
+}
+
 export function scopeOf(hold: Pick<HoldRow, "userId">): HoldScope {
   return hold.userId === null ? "team" : "user";
 }
 
-/** The audit target of a hold: never the held user's id nor the reason. */
+/**
+ * The audit target of a hold: its id only. Not the held user, the team, the scope or the reason:
+ * a held install admin who reads the install audit log must not learn of it (the hold row, behind
+ * the console, keeps everything).
+ */
 function holdRef(hold: HoldRow) {
-  return { holdId: hold.id, teamId: hold.teamId, scope: scopeOf(hold) };
+  return { holdId: hold.id };
 }
 
 /**
@@ -122,7 +138,7 @@ export async function requestHold(
 export function approveHold(db: KobeDb, by: string, id: string): Promise<HoldResult> {
   return changeHold(db, by, id, async (tx, current) => {
     if (current.status !== "pending") return { ok: false, error: "not_pending" };
-    if (current.placedBy === by && !(await isSoleInstallAdmin(tx, by))) {
+    if (current.placedBy === by && !(await mayApproveOwn(tx, by, current))) {
       return { ok: false, error: "self_approval_forbidden" };
     }
     const row = await update(tx, id, { status: "active", approvedBy: by });
@@ -186,7 +202,7 @@ export function approveRelease(db: KobeDb, by: string, id: string): Promise<Hold
   return changeHold(db, by, id, async (tx, current) => {
     if (current.status !== "active") return { ok: false, error: "not_active" };
     if (current.releaseRequestedBy === null) return { ok: false, error: "no_release_request" };
-    if (current.releaseRequestedBy === by && !(await isSoleInstallAdmin(tx, by))) {
+    if (current.releaseRequestedBy === by && !(await mayApproveOwn(tx, by, current))) {
       return { ok: false, error: "release_self_approval_forbidden" };
     }
     const row = await update(tx, id, { status: "released", releasedBy: by });

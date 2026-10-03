@@ -74,12 +74,18 @@ $$;--> statement-breakpoint
 -- Whether a legal hold keeps an audit row's IP and user agent: the row's team is held (team-wide
 -- or for its actor), or its actor is the subject of any active user hold (the values are the
 -- actor's personal data, so a user hold keeps their install-level rows such as sign-ins too).
+-- (A hold on a user in the row's team is a hold on its actor, so: a team-wide hold on the row's
+-- team, or any active hold on its actor.)
 CREATE FUNCTION "public"."audit_log_pii_held"(team uuid, actor uuid) RETURNS boolean
   LANGUAGE sql STABLE SET search_path = pg_catalog, public AS $$
-  SELECT (team IS NOT NULL AND "public"."legal_hold_covers"(team, actor))
-    OR (actor IS NOT NULL AND EXISTS (
-      SELECT 1 FROM "public"."legal_holds" h WHERE h.status = 'active' AND h.user_id = actor))
+  SELECT EXISTS (
+    SELECT 1 FROM "public"."legal_holds" h
+    WHERE h.status = 'active'
+      AND ((h.user_id IS NULL AND h.team_id = team) OR h.user_id = actor))
 $$;--> statement-breakpoint
+
+-- 0. No appends (old replicas keep running during the upgrade) until this migration commits.
+LOCK TABLE "audit_log" IN SHARE ROW EXCLUSIVE MODE;--> statement-breakpoint
 
 -- 1. The chain as it stands must verify (v1); a break is an integrity incident to investigate
 --    before upgrading, and sealing it would hide it.
@@ -104,13 +110,18 @@ $kobe$;--> statement-breakpoint
 -- 2. Existing rows are v1; those with an IP or user agent get a salt and commitment. Their stored
 --    hashes don't change. The refusal trigger is replaced below.
 ALTER TABLE "audit_log" DISABLE TRIGGER "audit_log_refuse_update_delete";--> statement-breakpoint
-UPDATE "audit_log" SET "hash_version" = 1;--> statement-breakpoint
-UPDATE "audit_log"
-  SET "pii_salt" = replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '')
-  WHERE "ip" IS NOT NULL OR "user_agent" IS NOT NULL;--> statement-breakpoint
+-- One pass over the table (one row version each): version, salt and commitment together.
 UPDATE "audit_log" a
-  SET "pii_commitment" = "public"."audit_log_digest"("public"."audit_log_pii_canonical"(a))
-  WHERE a."pii_salt" IS NOT NULL;--> statement-breakpoint
+  SET "hash_version" = 1,
+      "pii_salt" = s.salt,
+      "pii_commitment" = CASE WHEN s.salt IS NULL THEN NULL ELSE "public"."audit_log_digest"(
+        'kobe.audit.pii.v1' || chr(10) || s.salt || chr(10)
+          || jsonb_build_array(a.id, host(a.ip), a.user_agent)::text) END
+  FROM (SELECT b.seq, CASE WHEN b.ip IS NOT NULL OR b.user_agent IS NOT NULL THEN
+          replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '')
+        END AS salt
+        FROM "audit_log" b) s
+  WHERE s.seq = a.seq;--> statement-breakpoint
 DROP TRIGGER "audit_log_refuse_update_delete" ON "audit_log";--> statement-breakpoint
 
 ALTER TABLE "audit_log" ADD CONSTRAINT "audit_log_hash_version" CHECK ("hash_version" IN (1, 2));--> statement-breakpoint
@@ -249,6 +260,7 @@ BEGIN
       IF last_v1 > 0 AND NOT sealed AND (r.action <> 'audit.chain.upgraded'
           OR r.actor_kind <> 'system'
           OR r.target->>'seal' IS DISTINCT FROM seal
+          OR jsonb_typeof(r.target->'throughSeq') IS DISTINCT FROM 'number'
           OR r.target->>'throughSeq' IS DISTINCT FROM last_v1::text) THEN
         problem := 'seal_mismatch'; RETURN;
       END IF;

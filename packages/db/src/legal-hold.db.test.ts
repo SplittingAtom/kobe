@@ -218,6 +218,20 @@ describe("legal_holds_guard: the two-person rule in Postgres (ac-2)", () => {
     });
   });
 
+  it("lets the requester place a hold on the only other admin (the held one can't approve)", async () => {
+    await asSoleAdmin(requester, async () => {
+      const held = await user("Held admin", "admin");
+      const id = await request({ userId: held });
+      expect(await errorCode(approve(id, held))).toBe("42501");
+      await approve(id, requester);
+      expect(await holdRow(id)).toMatchObject({ status: "active", self_approved: true });
+      await askRelease(id, requester);
+      await release(id, requester);
+      expect(await holdRow(id)).toMatchObject({ status: "released", release_self_approved: true });
+      await admin.query(`DELETE FROM install_roles WHERE user_id = $1`, [held]);
+    });
+  });
+
   it("releases only through a release request approved by a second install admin", async () => {
     const id = await active({ userId: alice });
     // No release without a request; the requester of the release can't approve it.

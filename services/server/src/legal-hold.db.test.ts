@@ -148,14 +148,10 @@ describe("placing a hold (ac-2, ac-3)", () => {
       ["governance.legal_hold.requested", ids.admin, null],
       ["governance.legal_hold.placed", ids.owner, null],
     ]);
-    expect(events[0]?.target).toEqual({ holdId: id, teamId: finance, scope: "user" });
-    expect(events[1]?.target).toEqual({
-      holdId: id,
-      teamId: finance,
-      scope: "user",
-      selfApproved: false,
-    });
+    expect(events[0]?.target).toEqual({ holdId: id });
+    expect(events[1]?.target).toEqual({ holdId: id, selfApproved: false });
     expect(JSON.stringify(events)).not.toContain(ids.bob);
+    expect(JSON.stringify(events.map((e) => e.target))).not.toContain(finance);
     expect(JSON.stringify(events)).not.toContain("matter 2026-17");
     expect(events[0]?.ip).toBe(as.admin.ip);
     await released(id);
@@ -204,6 +200,32 @@ describe("placing a hold (ac-2, ac-3)", () => {
       expect(
         events.find((e) => e.action === "governance.legal_hold.released")?.target,
       ).toMatchObject({ selfApproved: true });
+    } finally {
+      for (const r of rows) {
+        await h.admin.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, $2)`, [
+          r.user_id,
+          r.role,
+        ]);
+      }
+    }
+  });
+});
+
+describe("a hold on the only other install admin", () => {
+  it("is placed by the requester alone, flagged: the held admin can't approve", async () => {
+    const { rows } = await h.admin.query<{ user_id: string; role: string }>(
+      `DELETE FROM install_roles WHERE user_id NOT IN ($1, $2) RETURNING user_id, role::text`,
+      [ids.owner, ids.heldAdmin],
+    );
+    try {
+      const id = await requestHold({ userId: ids.heldAdmin }, "owner");
+      const listed = await as.owner.get(`${BASE}/${id}`);
+      expect(listed.json.hold.actions.approve).toBe(true);
+      const ok = await as.owner.post(`${BASE}/${id}/approve`);
+      expect(ok.json.hold).toMatchObject({ status: "active", selfApproved: true });
+      await as.owner.post(`${BASE}/${id}/release`, { reason: "Matter settled in full" });
+      const done = await as.owner.post(`${BASE}/${id}/release/approve`);
+      expect(done.json.hold).toMatchObject({ status: "released", releaseSelfApproved: true });
     } finally {
       for (const r of rows) {
         await h.admin.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, $2)`, [
