@@ -121,8 +121,11 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     runContext: options.sandboxWire?.runContext ?? createDbRunContextSource(),
     hooks: {
       async onRunEnded(event) {
-        await extraHooks?.onRunEnded?.(event);
-        await late.runs?.onRunEnded(event);
+        try {
+          await extraHooks?.onRunEnded?.(event);
+        } finally {
+          await late.runs?.onRunEnded(event);
+        }
       },
     },
     db: database.db,

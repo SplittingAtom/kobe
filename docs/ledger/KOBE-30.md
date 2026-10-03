@@ -166,12 +166,23 @@ and calls `onRunEnded` → bind the prompt entry → promote the next run.
 
 ## Open risks
 
-- `stopGraceMs` (10 s): if Pi takes longer to abort, the next `run.start` reaches a Pi still
+- A message sent right after Stop starts at once (no grace), as does a sweep promotion; with
+  `stopGraceMs` (10 s), if Pi takes longer to abort, the next `run.start` reaches a Pi still
   aborting; KOBE-23's agent must queue or reject it (a rejection fails that run visibly).
 - `user_entry_id` binding assumes the first user-message entry committed during a run is its
   prompt (true unless a steer message is committed before the prompt, which Pi doesn't do).
 - The sweep scans every team every ~15 s per replica (two indexed queries per team), like the
   wire's sweep.
+
+## Review round (code-reviewer agent, before CI) — resolution
+
+No CRITICAL/HIGH. MEDIUM fixed: (1) the sweep advances each thread in isolation (one failing
+thread no longer stops the others) and a resolver that throws fails its run `agent_unavailable`
+instead of poisoning the queue; (2) `stopForBudget` retries busy rows and keeps stopping the other
+runs, then reports the failures; (3) `onRunEnded` always advances the queue (listener errors and a
+throwing extra hook are isolated). MEDIUM kept as a risk: after Stop, a message sent (or a sweep
+promotion) within the abort window starts its run before Pi acknowledged the abort; the grace only
+applies to the queue's own advance. See open risks.
 
 ## Evidence (acceptance criteria → test or command output)
 

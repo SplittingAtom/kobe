@@ -115,16 +115,19 @@ export async function promoteInTx(
       }
       return { transitions };
     }
-    const resolved = await agents.resolve(tx, {
-      teamId,
-      ownerUserId: thread.ownerUserId,
-      threadId,
-      runId: next.id,
-      trigger: next.trigger,
-      agentId: thread.agentId,
-      agentVersion: thread.agentVersion,
-      approvalMode: next.approvalMode,
-    });
+    // A resolver that throws must not poison the queue: the run fails like any resolution error.
+    const resolved = await agents
+      .resolve(tx, {
+        teamId,
+        ownerUserId: thread.ownerUserId,
+        threadId,
+        runId: next.id,
+        trigger: next.trigger,
+        agentId: thread.agentId,
+        agentVersion: thread.agentVersion,
+        approvalMode: next.approvalMode,
+      })
+      .catch(() => ({ ok: false as const, error: { code: "agent_unavailable", message: "" } }));
     if (!resolved.ok) {
       thread = await fail(thread, next, "agent_unavailable");
       continue;

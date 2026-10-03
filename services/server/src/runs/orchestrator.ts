@@ -381,27 +381,35 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     });
     const affected: string[] = [];
     // Queued runs first, so stopping an active run never promotes one about to be stopped.
+    let failures = 0;
     for (const c of candidates) {
-      const outcome = await withAppendTx(this.#db, teamId, async (tx) => {
-        const thread = await lockThreadRow(tx, teamId, c.thread_id);
-        const run = await lockRunRow(tx, teamId, c.id);
-        if (!thread || !run || isTerminalRunStatus(run.status)) return undefined;
-        if (run.status === "queued") {
-          const applied = await applyTransition(
-            tx,
-            thread,
-            run,
-            "budget_stopped",
-            "budget_exhausted",
-            budgetStoppedEvent(command.scope),
-          );
-          return { transition: applied.transition, active: false };
-        }
-        // Active: finish the current step (D30). The wire converts the settle into budget_stopped.
-        await tx.execute(sql`
+      const outcome = await this.#withRetry(() =>
+        withAppendTx(this.#db, teamId, async (tx) => {
+          const thread = await lockThreadRow(tx, teamId, c.thread_id);
+          const run = await lockRunRow(tx, teamId, c.id);
+          if (!thread || !run || isTerminalRunStatus(run.status)) return undefined;
+          if (run.status === "queued") {
+            const applied = await applyTransition(
+              tx,
+              thread,
+              run,
+              "budget_stopped",
+              "budget_exhausted",
+              budgetStoppedEvent(command.scope),
+            );
+            return { transition: applied.transition, active: false };
+          }
+          // Active: finish the current step (D30). The wire converts the settle into budget_stopped.
+          await tx.execute(sql`
           UPDATE runs SET budget_stop_scope = ${command.scope}
            WHERE team_id = ${teamId} AND id = ${run.id}`);
-        return { transition: undefined, active: true };
+          return { transition: undefined, active: true };
+        }),
+      ).catch((err: unknown) => {
+        // Keep stopping the others; the caller learns that some could not be stopped.
+        failures += 1;
+        this.#log.error({ err, run_id: c.id }, "budget stop failed for a run");
+        return undefined;
       });
       if (!outcome) continue;
       affected.push(c.id);
@@ -409,6 +417,9 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       if (outcome.active) {
         this.#track(this.#budgetStopActive(teamId, c.id, c.thread_id, c.owner_user_id, command));
       }
+    }
+    if (failures > 0) {
+      throw new Error(`budget stop: ${failures} run(s) could not be stopped; call again`);
     }
     return affected;
   }
@@ -448,29 +459,41 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     } catch (err) {
       this.#log.warn({ err, run_id: event.runId }, "could not bind the run's prompt entry");
     }
-    if (this.#listeners.length > 0) {
-      const row = await withTeam(this.#db, event.teamId, (tx) =>
-        getRunRow(tx, event.teamId, event.runId),
-      );
-      if (row && isTerminalRunStatus(row.status)) {
-        // The wire ended an active run; it reports neither the prior state nor the cause.
-        this.#notify(row, {
-          runId: row.id,
-          threadId: row.threadId,
-          from: "running",
-          to: row.status,
-          cause:
-            row.status === "completed"
-              ? "settled"
-              : row.status === "interrupted"
-                ? "sandbox_lost"
-                : row.status === "budget_stopped"
-                  ? "budget_exhausted"
-                  : "error",
-        });
-      }
+    try {
+      await this.#notifyWireEnd(event);
+    } catch (err) {
+      this.#log.warn({ err, run_id: event.runId }, "could not report a run transition");
     }
     await this.#advance(event.teamId, event.threadId);
+  }
+
+  async #notifyWireEnd(event: { teamId: string; runId: string }): Promise<void> {
+    if (this.#listeners.length === 0) return;
+    const row = await withTeam(this.#db, event.teamId, (tx) =>
+      getRunRow(tx, event.teamId, event.runId),
+    );
+    if (!row || !isTerminalRunStatus(row.status)) return;
+    // The wire ended an active run; it reports neither the prior state nor the cause.
+    const causes = {
+      completed: "settled",
+      interrupted: "sandbox_lost",
+      budget_stopped: "budget_exhausted",
+    } as const;
+    this.#notify(row, {
+      runId: row.id,
+      threadId: row.threadId,
+      from: "running",
+      to: row.status,
+      cause: row.status in causes ? causes[row.status as keyof typeof causes] : "error",
+    });
+  }
+
+  async #safeAdvance(teamId: string, threadId: string): Promise<void> {
+    try {
+      await this.#advance(teamId, threadId);
+    } catch (err) {
+      this.#log.error({ err, thread_id: threadId }, "queue promotion failed");
+    }
   }
 
   useIsolation(probe: IsolationProbe): void {
@@ -479,13 +502,13 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
 
   async sweep(): Promise<RunSweepResult> {
     const result = await sweepRuns(this.#db, this.#tuning, this.#log);
-    for (const stuck of result.failedStarts) {
-      this.#emit(stuck.teamId, [stuck.transition]);
-      await this.#advance(stuck.teamId, stuck.transition.threadId);
-    }
-    for (const stalled of result.stalledThreads) {
-      await this.#advance(stalled.teamId, stalled.threadId);
-    }
+    for (const stuck of result.failedStarts) this.#emit(stuck.teamId, [stuck.transition]);
+    const threads = [
+      ...result.failedStarts.map((s) => ({ teamId: s.teamId, threadId: s.transition.threadId })),
+      ...result.stalledThreads,
+    ];
+    // One failing thread never blocks the others.
+    for (const t of threads) await this.#safeAdvance(t.teamId, t.threadId);
     return result;
   }
 
@@ -771,6 +794,18 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     }
     // The sweep promotes stalled queues later.
     this.#log.warn({ thread_id: threadId }, "thread busy; queue promotion left to the sweep");
+  }
+
+  /** Retries `fn` while it fails on a busy row (lock timeout), like promotion does. */
+  async #withRetry<T>(fn: () => Promise<T>): Promise<T> {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await fn();
+      } catch (err) {
+        if (!isLockTimeout(err) || attempt + 1 >= this.#tuning.advanceAttempts) throw err;
+        await delay(200 * 2 ** attempt);
+      }
+    }
   }
 
   #scheduleSweep(): void {
