@@ -1,5 +1,6 @@
 "use client";
 
+import "../../lib/security/zod-jitless";
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";

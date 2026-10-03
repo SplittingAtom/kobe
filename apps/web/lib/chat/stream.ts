@@ -15,6 +15,7 @@ import {
   kobeEventSchema,
   type KobeEvent,
 } from "@kobe/protocol";
+import "../security/zod-jitless";
 import { runEventsUrl } from "./api";
 
 /** The part of `EventSource` used here, so tests can drive the stream without a browser. */

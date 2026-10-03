@@ -66,8 +66,11 @@ of a run in progress would vanish on reload or on a second device until Pi commi
 2. **Branch switch = `POST /leaf`** with the deepest entry of the chosen branch, optimistic, reverted
    with the server's error (e.g. 409 `thread_busy`). assistant-ui ignores switches while running.
 3. **Edit and Regenerate send `parent_entry_id` = the edited user entry's parent** (the server's
-   branch point, KOBE-30 retry semantics). A message whose entry has no parent (the very first entry
-   of a Pi session) can't be edited: no Edit button; the API offers no "branch from the root".
+   branch point, KOBE-30 retry semantics). **Root branching (Chris: supported, follow-up ticket):**
+   editing the first message / regenerating the first answer needs a protocol + sandbox-agent +
+   server change. Until then both actions are shown unavailable (`aria-disabled`, tooltip and
+   description "coming soon"); `lib/chat/features.ts ROOT_BRANCHING_AVAILABLE` is the switch and
+   `kobe-runtime.tsx branchAndSend` is where the root branch point goes.
 4. **Streaming:** the client streams the active run, else the next queued run (to see it start:
    queued runs have a `run.queued` event and an open stream gets `run.started`). After a reload the
    stream starts at `starting_after=0` and replays the run from Postgres (the uncommitted deltas
@@ -84,18 +87,31 @@ of a run in progress would vanish on reload or on a second device until Pi commi
    composer only on success. Steer shortcut Ctrl/Cmd+Shift+Enter (assistant-ui's convention).
 7. **Sends are idempotent:** one `Idempotency-Key` per message; a network error is retried once
    with the same key (the server answers with the first run).
-8. **After Stop**, what streamed stays on screen until the next run starts (an aborted step is not
-   mirrored by the server until a later sync), with "Stopped.". When a queued message starts at once
-   the cut-off text gives way to the new run.
+8. **Stop pauses the queue (Chris's decision).** The server side lands with KOBE-26 (PR #43 has
+   not implemented it yet), so the UI is built against the expected behaviour: after Stop the queue
+   is held until the user resumes (`POST /v1/threads/{id}/queue/resume`) or sends a message. The
+   client marks the queue paused on Stop (when messages are queued) and takes the server's
+   `queue_paused` from `GET /v1/threads/{id}/runs` when present (expected field name; absent =
+   client flag, cleared when a run starts or the queue empties). A held queue isn't streamed, so the
+   stopped run's partial answer and "Stopped." stay on screen; the queue shows "Queue paused" with
+   **Resume queue**. With today's server (next starts after Stop) the flag clears as soon as the
+   next run is active (tested both ways in the fake server: `pauseOnStop`). **KOBE-26:** please
+   expose `queue_paused` on ThreadRuns, keep `queue/resume` as the resume action, and release the
+   queue on a new message.
 9. **Tool activity** (`policy.denied`, `egress.blocked`, approvals, artifacts, files) comes from the
    stream of the run on screen; after a reload of an ended run a denial shows as the tool's error
    result (the toolResult entry), not as the policy card. Events of older runs are not re-read.
 10. **New thread title** = first line of the first message (≤ 80 chars), set at creation
     (`POST /v1/threads {title}`); `generateTitle` returns an empty stream (no model titling yet). The
     list reloads once after the first message so the title appears.
-11. **Text is plain** (React-escaped, `white-space: pre-wrap`); Markdown rendering is a follow-up
-    (MIT `@assistant-ui/react-markdown` when wanted). Search snippets are rendered as text with
-    `<mark>` for highlights.
+11. **Agent text is sanitised Markdown (Chris: yes, now)** — `components/chat/markdown.tsx`,
+    `react-markdown` 10 + `remark-gfm` 4 (MIT), no `rehype-raw`: raw HTML is shown as text (a
+    remark step turns `html` nodes into text), links only for absolute http/https/mailto URLs with
+    `target=_blank rel="noopener noreferrer nofollow"` (everything else is plain text, checked twice:
+    `urlTransform` and the `a` component), **images are never loaded** — a safe image URL becomes a
+    link "[Image: alt]", an unsafe one its alt text (no tracking pixels; CSP `img-src 'self' data:`
+    agrees), GFM tables/lists/task lists, fenced code with a Copy button. User messages, reasoning
+    and tool output stay plain text. Search snippets are text with `<mark>` highlights.
 12. **Session by closure, not React context, in the runtime hook:** assistant-ui runs the per-thread
     `runtimeHook` in its own host; a test that remounted the app saw the previous session through
     `useContext` there. The hook is created per session (`threadRuntimeHookFor`).
@@ -111,7 +127,37 @@ of a run in progress would vanish on reload or on a second device until Pi commi
 16. **Dependency:** `@assistant-ui/react` 0.15.23 (MIT; pulls radix-ui, zustand, assistant-stream,
     safe-content-frame, assistant-cloud client — all MIT/Apache, license check green apart from the
     pre-existing local vitest entry).
-17. **No browser e2e harness added.** Gate 1 evidence for the web is component tests over the real
+17. **Security headers (coordinator review).** `proxy.ts` (Next 16 proxy) sets a per-request CSP
+    with a nonce: `script-src 'self' 'nonce-…' 'strict-dynamic'` (+ `'unsafe-eval'` only under
+    `next dev`), `style-src 'self' 'nonce-…'`, `style-src-attr 'unsafe-inline'` (style attributes
+    only), `img-src 'self' data:`, `connect-src 'self'`, `object-src 'none'`, `base-uri 'self'`,
+    `form-action 'self'`, `frame-ancestors 'none'` (`lib/security/csp.ts`). Pages render per
+    request (`app/layout.tsx` awaits `connection()`; responses are `private, no-store`).
+    `next.config.ts headers()` adds X-Frame-Options DENY, nosniff, Referrer-Policy
+    strict-origin-when-cross-origin and a Permissions-Policy on every path. No
+    `upgrade-insecure-requests` (plain-HTTP installs). zod's eval probe is switched off
+    (`lib/security/zod-jitless.ts`, `jitless: true`) so the CSP reports nothing. KOBE-55 revisits
+    `frame-src` for `srcdoc` artifacts.
+    **Verified** (besides `lib/security/csp.test.ts`): `next build` + `next start`, then headless
+    Chrome over CDP against a smoke server serving `/v1/*` from the fake Kobe with real SSE: all 11
+    `<script>` tags and stylesheet links carry the response's nonce, no `style=` attributes in the
+    HTML, no CSP issue or console error while loading a thread, sending, streaming and finishing
+    (before `jitless`, one `kEvalViolation` from zod's probe), Markdown rendered, `<script>` text
+    shown as text.
+18. **Plain-HTTP origins:** idempotency keys fall back from `crypto.randomUUID` (secure contexts
+    only) to `getRandomValues` (`lib/chat/keys.ts`); any exception in a send clears the "sending"
+    state and offers the message back.
+19. **Resume after reload in the same tab:** when every event so far is reflected in committed
+    entries, the controller stores a small resume point per run in sessionStorage (seq, committed
+    ids, tool activity without inputs, notices); a reload whose entries contain those ids resumes
+    with `starting_after=<seq>` instead of 0. Another device (or a point the entries don't cover)
+    replays from 0 (`lib/chat/resume.ts`).
+20. **Bounded live state:** notices, blocked domains, artifacts and files keep at most 50 each
+    (newest), deduplicated (egress by domain, artifacts by id+version, files by id); delta lookups
+    search from the end and bound message ids are a record (O(1) per delta). "Live updates stopped"
+    explains the per-person stream limit (`too_many_streams`, 16 per server) since EventSource
+    can't see the 429.
+21. **No browser e2e harness added.** Gate 1 evidence for the web is component tests over the real
     runtime adapter, API client, casing layer and stream code with a fake server
     (`lib/chat/testing/fake-kobe.ts`: real wire shapes, SSE resume semantics, D14/D17 rules).
     Playwright would need browsers on the self-hosted runners and a full stack; the server side of
@@ -133,6 +179,22 @@ stream delivered; refresh coalescing can't lose a call; no `Math.max(...spread)`
 a failed load. Kept: a seeded controller that is never mounted lives until the session ends; a
 stale `?thread=` after a team switch (switching teams reloads the page).
 
+## Coordinator security review (APPROVE with changes) and Chris's answers — resolution
+
+1. CSP + security headers → decision 17 (`lib/security/csp.test.ts`, browser verification).
+2. Plain-HTTP `randomUUID` → decision 18 (`lib/chat/keys.test.ts`; `thread-controller.test.ts`
+   "sends on a plain-HTTP origin … and recovers from any send failure").
+3. Caps/dedupe, O(1) deltas, resume points, `too_many_streams` text → decisions 19–20
+   (`live.test.ts` "dedupes … at most 50", `resume.test.ts`, `conversation.test.tsx` "a reload in
+   the same tab resumes after what the entries hold").
+4. Markdown → decision 11 (`components/chat/markdown.test.tsx`: GFM, 19 hostile inputs inert,
+   raw HTML shown as text, safe links, no images, code copy).
+5. Stop pauses the queue → decision 8 (`conversation.test.tsx`: "Stop pauses the queue and keeps
+   the partial answer; Resume queue runs the held messages", "with a server that doesn't hold the
+   queue (KOBE-30) …", "sending while the queue is paused releases it").
+6. Root branching → decision 3 (`conversation.test.tsx` edit test asserts the disabled first Edit
+   with its description; Regenerate test asserts the disabled first Regenerate).
+
 ## For other tickets
 
 - **KOBE-37 (approvals):** replace `ApprovalSlot` in `components/chat/slots.tsx` (it receives the
@@ -152,11 +214,8 @@ stale `?thread=` after a team switch (switching teams reloads the page).
 
 ## Open questions (for Chris or the coordinator)
 
-1. Editing the very first message of a thread isn't possible (no Pi entry before it to branch from,
-   and the API has no "branch from the root"). Fine, or should the server accept an explicit root?
-2. Partial text of a stopped run disappears when a queued message starts right away (decision 8).
-   Keep, or should Stop pause the queue (contracts open question 4)?
-3. Markdown rendering of agent text: add `@assistant-ui/react-markdown` now or with KOBE-55?
+Answered by Chris (2026-10-03): Markdown now (decision 11); Stop pauses the queue (decision 8,
+server side with KOBE-26); root branching supported via a follow-up ticket (decision 3).
 
 ## Open risks
 
