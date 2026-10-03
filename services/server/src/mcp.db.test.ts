@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { canonicalJson, type JsonObject } from "@kobe/protocol";
-import { createSignedApprovalVerifier, DENY_UNVERIFIED_APPROVALS } from "./mcp/approvals.js";
+import { approvalKeyring } from "./approvals/index.js";
+import { DENY_UNVERIFIED_APPROVALS } from "./mcp/approvals.js";
 import { createDbMcpCatalog } from "./mcp/catalog.js";
 import { createMcpService } from "./mcp/service.js";
 import { createPolicyEngine } from "./policy/engine.js";
@@ -9,11 +10,11 @@ import { createToolRegistry } from "./policy/registry.js";
 import { createDbRuleSource } from "./policy/rule-store.js";
 import { createDbRunContextSource } from "./sandbox-wire/index.js";
 import { createInternalApp } from "./routes/internal.js";
-import { APPROVAL_KEY, MemoryApprovals, OTHER_KEY } from "./testing/approval-fixtures.js";
 import { EventStreamFixture, type Person } from "./testing/event-stream-fixture.js";
 import {
   INTERNAL_KEY,
   MCP_SESSION_KEY,
+  allowApproval,
   WIRE_SESSION_KEY,
   enableConnector,
   leaseRun,
@@ -29,20 +30,15 @@ import {
  * signed approval) and the `mcp.tool_call` audit.
  */
 const fx = new EventStreamFixture();
-const approvals = new MemoryApprovals();
+const KEYRING = approvalKeyring("a".repeat(48));
+const FORGED = { kid: KEYRING.current.kid, secret: new Uint8Array(32).fill(9) };
 const live = new Set<string>();
 let app: ReturnType<typeof createInternalApp>;
 
 beforeAll(async () => {
   await fx.setup([{}], () => ({
     sandboxWire: { sweep: false },
-    mcp: {
-      approvals: createSignedApprovalVerifier({
-        tokens: approvals,
-        store: approvals,
-        keyFor: (kid) => (kid === APPROVAL_KEY.kid ? APPROVAL_KEY : undefined),
-      }),
-    },
+    approvalKeys: KEYRING,
   }));
   app = internalApp(fx.replica(0).deps.mcp);
 });
@@ -79,7 +75,6 @@ async function world(
   live.add(sandboxId);
   const runId = await fx.run(team, owner);
   const threadId = await leaseRun(fx.admin, team, runId, owner.id, sandboxId);
-  approvals.activeRuns.add(runId);
   const connector = await registerConnector(fx.admin);
   await enableConnector(
     fx.admin,
@@ -366,47 +361,95 @@ describe("Gate 2: an MCP write runs only with a valid signed approval", () => {
   });
 
   it("allows the call with a valid signed approval, records it, and only once", async () => {
-    const token = approvals.allow({ teamId: w.team, runId: w.runId, tool: tool(), input });
+    const token = await allowApproval(fx.admin, {
+      teamId: w.team,
+      runId: w.runId,
+      threadId: w.threadId,
+      userId: w.owner.id,
+      tool: tool(),
+      input,
+      key: KEYRING.current,
+    });
     const first = await write();
     expect(first.json).toMatchObject({
       decision: "allow",
       reason: "approval_granted",
-      approval_id: token.approval_id,
+      approval_id: token.approvalId,
       input_sha256: digest(input),
     });
     const second = await write();
-    expect(second.json).toMatchObject({ decision: "deny", approval_failure: "not_consumable" });
+    // Consumed: nothing usable is left for this run, tool and input.
+    expect(second.json).toMatchObject({ decision: "deny", approval_failure: "no_approval" });
+    // Naming the consumed approval's tool call explicitly does not revive it.
+    const named = await write({ tool_call_id: token.toolCallId });
+    expect(named.json).toMatchObject({ decision: "deny", approval_failure: "not_consumable" });
     const rows = await auditRows(w.team);
     expect(rows.map((r) => [r.target.decision, r.target.reason, r.target.approvalId])).toEqual([
-      ["allowed", "approval_granted", token.approval_id],
+      ["allowed", "approval_granted", token.approvalId],
+      ["denied", "risk_write", undefined],
       ["denied", "risk_write", undefined],
     ]);
   });
 
   it("refuses a forged signature", async () => {
-    approvals.allow({ teamId: w.team, runId: w.runId, tool: tool(), input, key: OTHER_KEY });
+    await allowApproval(fx.admin, {
+      teamId: w.team,
+      runId: w.runId,
+      threadId: w.threadId,
+      userId: w.owner.id,
+      tool: tool(),
+      input,
+      key: FORGED,
+    });
     expect((await write()).json).toMatchObject({ decision: "deny", approval_failure: "bad_mac" });
   });
 
   it("refuses an approval replayed for a changed input", async () => {
-    approvals.allow({ teamId: w.team, runId: w.runId, tool: tool(), input });
-    const res = await write({ arguments: { q: "something else" } });
-    expect(res.json).toMatchObject({ decision: "deny", approval_failure: "bad_mac" });
+    const token = await allowApproval(fx.admin, {
+      teamId: w.team,
+      runId: w.runId,
+      threadId: w.threadId,
+      userId: w.owner.id,
+      tool: tool(),
+      input,
+      key: KEYRING.current,
+    });
+    const changed = { q: "something else" };
+    // Found by input: nothing approved matches the changed input.
+    expect((await write({ arguments: changed })).json).toMatchObject({
+      decision: "deny",
+      approval_failure: "no_approval",
+    });
+    // Named by tool call id: the MAC over the changed input does not verify.
+    expect(
+      (await write({ arguments: changed, tool_call_id: token.toolCallId })).json,
+    ).toMatchObject({ decision: "deny", approval_failure: "bad_mac" });
   });
 
   it("refuses an expired approval", async () => {
-    approvals.allow({
+    await allowApproval(fx.admin, {
       teamId: w.team,
       runId: w.runId,
+      threadId: w.threadId,
+      userId: w.owner.id,
       tool: tool(),
       input,
+      key: KEYRING.current,
       now: new Date(Date.now() - 30 * 60_000),
     });
     expect((await write()).json).toMatchObject({ decision: "deny", approval_failure: "expired" });
   });
 
   it("refuses an approval of another tool of the same connector (delete with create's token)", async () => {
-    approvals.allow({ teamId: w.team, runId: w.runId, tool: tool(), input });
+    await allowApproval(fx.admin, {
+      teamId: w.team,
+      runId: w.runId,
+      threadId: w.threadId,
+      userId: w.owner.id,
+      tool: tool(),
+      input,
+      key: KEYRING.current,
+    });
     const res = await callTool(w, { tool: "delete_issue", arguments: input });
     expect(res.json).toMatchObject({
       decision: "deny",
@@ -415,9 +458,44 @@ describe("Gate 2: an MCP write runs only with a valid signed approval", () => {
     });
   });
 
+  it("never reaches another user's approval in the same team, even by naming its tool call", async () => {
+    const peer = await fx.person(`p${randomUUID().slice(0, 4)}`);
+    await fx.addMember(w.team, peer);
+    const peerRun = await fx.run(w.team, peer);
+    const peerSandbox = randomUUID();
+    const peerThread = await leaseRun(fx.admin, w.team, peerRun, peer.id, peerSandbox);
+    const peers = await allowApproval(fx.admin, {
+      teamId: w.team,
+      runId: peerRun,
+      threadId: peerThread,
+      userId: peer.id,
+      tool: tool(),
+      input,
+      key: KEYRING.current,
+    });
+    // w's sandbox names the peer's thread: not its own run → no run at all.
+    expect((await write({ thread_id: peerThread })).json).toMatchObject({
+      decision: "deny",
+      code: "run_not_active",
+    });
+    // w's own run, the peer's tool call id: the verifier looks only inside w's run.
+    expect((await write({ tool_call_id: peers.toolCallId })).json).toMatchObject({
+      decision: "deny",
+      approval_failure: "no_approval",
+    });
+  });
+
   it("refuses an approval of another run (replayed across runs)", async () => {
     const other = await world();
-    approvals.allow({ teamId: other.team, runId: other.runId, tool: tool(), input });
+    await allowApproval(fx.admin, {
+      teamId: other.team,
+      runId: other.runId,
+      threadId: other.threadId,
+      userId: other.owner.id,
+      tool: tool(),
+      input,
+      key: KEYRING.current,
+    });
     expect((await write()).json).toMatchObject({
       decision: "deny",
       approval_failure: "no_approval",
@@ -438,7 +516,15 @@ describe("Gate 2: an MCP write runs only with a valid signed approval", () => {
         approvals: DENY_UNVERIFIED_APPROVALS,
       }),
     );
-    approvals.allow({ teamId: w.team, runId: w.runId, tool: tool(), input });
+    await allowApproval(fx.admin, {
+      teamId: w.team,
+      runId: w.runId,
+      threadId: w.threadId,
+      userId: w.owner.id,
+      tool: tool(),
+      input,
+      key: KEYRING.current,
+    });
     const res = await callTool(w, { tool: "create_issue", arguments: input }, w.token, stub);
     expect(res.json).toMatchObject({ decision: "deny", approval_failure: "unavailable" });
     // Reads are not affected by the stub.

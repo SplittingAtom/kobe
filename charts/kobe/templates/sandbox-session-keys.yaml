@@ -7,6 +7,8 @@
 # HMAC keys of the sandbox session tokens, one per audience (packages/protocol session-token.ts).
 # The server holds all four; each verifying service gets only its own key. Rotating one
 # invalidates that audience's tokens (sandboxes re-trade their bootstrap token for new ones).
+# approval-hmac signs tool-call approvals (D29, KOBE-37): the server signs, the MCP proxy verifies
+# (KOBE-58); never mounted in a sandbox. Rotating it voids approvals allowed but not yet used.
 apiVersion: v1
 kind: Secret
 metadata:
@@ -20,4 +22,5 @@ stringData:
   {{- range $env, $key := include "kobe.sessionKeyNames" . | fromJson }}
   {{ $key }}: {{ ternary (index $data $key | default "" | b64dec) (randAlphaNum 48) (hasKey $data $key) | quote }}
   {{- end }}
+  approval-hmac: {{ ternary (index $data "approval-hmac" | default "" | b64dec) (randAlphaNum 48) (hasKey $data "approval-hmac") | quote }}
 {{- end }}

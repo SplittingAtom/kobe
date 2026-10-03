@@ -333,6 +333,7 @@ export async function decideMcpCall(
     if (decision.effect === "require_approval") {
       const approved = await deps.approvals.authorize({
         teamId: principal.teamId,
+        userId: principal.userId,
         runId: active.run.runId,
         tool: pinned.pi_name,
         ...(request.toolCallId === undefined ? {} : { toolCallId: request.toolCallId }),

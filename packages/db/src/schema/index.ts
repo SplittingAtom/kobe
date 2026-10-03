@@ -15,3 +15,4 @@ export * from "./break-glass.js";
 export * from "./sandbox-wire.js";
 export * from "./sandboxes.js";
 export * from "./connectors.js";
+export * from "./approvals.js";

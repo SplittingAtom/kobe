@@ -8,9 +8,11 @@ export interface PolicySettings {
   /**
    * In `ask-on-write`, whether
    * sandbox-scoped write/destructive built-ins (bash, powershell, write, edit) are prompted for by
-   * risk class. Default `false`: D29 — "shell and file tools are bounded by the sandbox and egress
-   * policy". Open question for Chris (KOBE-35 ledger); `true` makes them prompt like any write.
-   * Deny/ask rules and `ask-all` apply either way.
+   * risk class. Default `false` — **user decision (Chris, 2026-10-03; KOBE-37 ledger): sandbox tools
+   * ask for approval only when a policy rule says so; there is no default prompt for them** (D29:
+   * "shell and file tools are bounded by the sandbox and egress policy"). An `ask` rule (install or
+   * team) is how a team asks for them; `true` is an install admin's explicit opt-in to prompting
+   * every sandbox write. Deny/ask rules and `ask-all` apply either way.
    */
   readonly promptSandboxWrites: boolean;
 }

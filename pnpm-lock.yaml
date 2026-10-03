@@ -439,6 +439,9 @@ importers:
         specifier: ^4.0.0
         version: 4.6.5
     devDependencies:
+      '@kobe/mcp-proxy':
+        specifier: workspace:*
+        version: link:../mcp-proxy
       '@levischuck/tiny-cbor':
         specifier: ^0.2.11
         version: 0.2.11

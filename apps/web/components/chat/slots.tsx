@@ -4,35 +4,33 @@
  * Extension points of the message renderer for later tickets. Each slot is one component in one
  * place, so a ticket replaces its own entry without touching the renderer:
  *
- * - `ApprovalSlot` (KOBE-37): `approval.requested` / `approval.resolved` on a tool call. Today it
- *   says what the server is waiting for; KOBE-37 renders the approval card (tool, input, risk,
- *   Allow/Deny, remember) and posts `POST /v1/approvals/{id}`.
+ * - `ApprovalSlot` (KOBE-37): `approval.requested` / `approval.resolved` on a tool call: the
+ *   approval card (`approval-card.tsx`: tool, input, risk, Allow/Deny, remember), which posts
+ *   `POST /v1/approvals/{id}`.
  * - `ArtifactSlot` (KOBE-55): `artifact.created` / `artifact.updated`, on a tool call or on its own
  *   (run notice). KOBE-55 opens assistant-ui's artifact panel.
  * - `FileSlot` (KOBE-54): `file.shared`; KOBE-54 renders the download card.
  * - `NoticeSlot`: run-level notices not tied to a tool call (`egress.blocked`, `steer.applied`,
  *   `memory.updated` (KOBE-56 adds Undo), artifacts and files shared outside a tool call).
  */
+import { useContext } from "react";
 import type { KobeEventPayload } from "@kobe/protocol";
 import type { RunNotice, ToolActivity } from "../../lib/chat/live";
+import { ApprovalCard } from "./approval-card";
+import { ChatSessionContext } from "./kobe-runtime";
 import styles from "./chat.module.css";
 
 export function ApprovalSlot({ tool }: { readonly tool: ToolActivity }) {
+  const session = useContext(ChatSessionContext);
   const requested = tool.approvalRequested;
   if (!requested) return null;
-  const resolved = tool.approvalResolved;
-  if (resolved) {
-    const text: Record<typeof resolved.decision, string> = {
-      allowed: "Approved.",
-      denied: "Denied.",
-      expired: "The approval request expired.",
-    };
-    return <p className={styles.notice}>{text[resolved.decision]}</p>;
-  }
   return (
-    <p className={styles.notice} role="status">
-      Waiting for approval: {requested.reasons.map((r) => r.message).join(" ")}
-    </p>
+    <ApprovalCard
+      key={requested.approval_id}
+      requested={requested}
+      resolved={tool.approvalResolved}
+      api={session?.api}
+    />
   );
 }
 

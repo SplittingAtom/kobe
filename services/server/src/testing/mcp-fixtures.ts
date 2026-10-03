@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type pg from "pg";
-import { mcpServerSegment } from "@kobe/protocol";
+import { canonicalJson, mcpServerSegment, type JsonObject } from "@kobe/protocol";
+import { signApproval, type ApprovalKey } from "@kobe/protocol/node";
 import { signSessionToken } from "@kobe/session-token";
 import type { PinnedTool } from "@kobe/db";
 
@@ -131,4 +132,60 @@ export function mcpToken(
     },
     options.key ?? MCP_SESSION_KEY,
   );
+}
+
+/**
+ * An `allowed` approval row exactly as KOBE-37's decide path stores it (canonical input, token
+ * kid/expiry, `input_hmac` = the MAC), signed with `key` (the install key, or a forger's). The row
+ * goes in as the superuser; signing is the protocol reference HMAC.
+ */
+export async function allowApproval(
+  admin: pg.Client,
+  call: {
+    teamId: string;
+    runId: string;
+    threadId: string;
+    userId: string;
+    tool: string;
+    input: JsonObject;
+    key: ApprovalKey;
+    toolCallId?: string;
+    now?: Date;
+  },
+): Promise<{ approvalId: string; toolCallId: string }> {
+  const approvalId = randomUUID();
+  const toolCallId = call.toolCallId ?? `toolu_${randomUUID().slice(0, 12)}`;
+  const now = call.now ?? new Date();
+  const token = signApproval({
+    key: call.key,
+    approval_id: approvalId,
+    team_id: call.teamId,
+    run_id: call.runId,
+    tool_call_id: toolCallId,
+    tool: call.tool,
+    input: call.input,
+    now,
+  });
+  await admin.query(
+    `INSERT INTO approvals (team_id, id, run_id, thread_id, user_id, tool_call_id, tool,
+       input_canonical, risk, reasons, status, cause, decided_by, decided_at, expires_at,
+       token_kid, token_expires_at, input_hmac)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'write', '[]'::jsonb, 'allowed', 'user', $5, $9,
+       $9::timestamptz + interval '1 hour', $10, $11, $12)`,
+    [
+      call.teamId,
+      approvalId,
+      call.runId,
+      call.threadId,
+      call.userId,
+      toolCallId,
+      call.tool,
+      canonicalJson(call.input),
+      now.toISOString(),
+      token.kid,
+      token.expires_at,
+      token.mac,
+    ],
+  );
+  return { approvalId, toolCallId };
 }

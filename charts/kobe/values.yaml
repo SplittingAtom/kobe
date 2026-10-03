@@ -65,6 +65,8 @@ sandbox:
     sweepSeconds: 60
   # Secret with keys sandbox-wire, model-gateway, mcp-proxy, egress-proxy (>= 32 chars each, all
   # different): HMAC keys of the per-audience sandbox session tokens. Empty: generated, kept.
+  # Also approval-hmac (>= 32 chars): signs tool-call approvals (KOBE-37); without it every call
+  # that needs approval is denied.
   sessionKeysSecret: ""
 
 # Public origin users reach Kobe at (cookies, WebAuthn relying party). Defaults to

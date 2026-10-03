@@ -3,8 +3,8 @@
 - **Status:** in review (PR #47)
 - **Branch / worktree:** `kobe-58-mcp-proxy` in `../Kobe-wt58`
 - **Depends on:** KOBE-35 (policy engine), KOBE-24 (sandbox wire), KOBE-22 (sandbox provider),
-  KOBE-38 (egress proxy), KOBE-15 (audit), KOBE-5 (scaffold); all merged. KOBE-37 (approvals) in
-  progress in parallel: coded against a narrow seam with a deny-by-default stub (see below).
+  KOBE-38 (egress proxy), KOBE-15 (audit), KOBE-5 (scaffold), KOBE-37 (approvals, PR #48): the MCP
+  re-check calls KOBE-37's verifier (see "Gate 2 wiring").
 
 ## Acceptance criteria (spec D27, D29, D6, non-negotiables; coordinator brief; Gate 2)
 
@@ -83,7 +83,7 @@ error is a deny; an allowed call whose audit row fails is refused.
   the sandbox's own token, which the server verifies with the `kobe.mcp-proxy` key (the proxy cannot
   speak for a sandbox whose token it has not seen). **Least-privilege DB role: not needed** — the
   proxy holds no DB credentials at all (KOBE-38's open question 3 remains for the egress proxy).
-- **Approval verification at the server, not in the proxy process.** `@kobe/protocol` approval.ts
+- **Approval verification at the server, not in the proxy process** (KOBE-37's verifier, in process). `@kobe/protocol` approval.ts
   says the MCP proxy verifies + consumes. The MCP enforcement point is the proxy _and_ its
   server-side re-check; verifying there keeps the approval HMAC key in the server only (KOBE-37
   signs there) and gives the stateful half (`ApprovalStore`) a DB. The MAC is checked over the exact
@@ -129,20 +129,52 @@ error is a deny; an allowed call whose audit row fails is refused.
   8082 is admitted only from MCP proxy pods (NetworkPolicies are additive, so without the port list
   any release-namespace pod could reach 8082). The internal key is still required.
 
+## Gate 2 wiring (after KOBE-37, PR #48)
+
+The coordinator's follow-up: replace the deny-by-default stub with KOBE-37's verifier, document
+where `run_id` and `tool_call_id` come from, and prove Gate 2 with the real proxy.
+
+- **Wired:** `createServerDeps` passes `approvalVerifierForMcp(db, approvals.verifier)` to the MCP
+  service (`services/server/src/mcp/approvals.ts`). `decideMcpCall` calls it on
+  `require_approval`; KOBE-37's `ApprovalVerifier.authorize` finds the row by (team, run,
+  tool_call_id) under RLS, checks the row's user, rebuilds the token, runs `authorizeApprovedCall`
+  against the input about to be forwarded and consumes once (`approval.consumed` /
+  `approval.rejected` audited by KOBE-37; `mcp.tool_call` by this ticket). My own interim verifier
+  and its in-memory fixtures are gone; `DENY_UNVERIFIED_APPROVALS` stays only as a test double.
+- **The approval key stays in the server.** Verification runs in the server process (the proxy's
+  re-check is server-side, see Decisions), so the proxy does **not** mount `approval-hmac`; only
+  the server holds `KOBE_APPROVAL_KEY` (KOBE-37's chart). The proxy cannot mint or verify approvals.
+- **Where `run_id` and `tool_call_id` come from (KOBE-37 open point):**
+  - team, user, sandbox: the `kobe.mcp-proxy` session token, verified by the **server** with that
+    audience's key, plus sandbox liveness (KOBE-22 claim), active account and membership;
+  - run: **never from the sandbox.** The sandbox names its thread (`Kobe-Thread-Id`, one Pi
+    process per thread); the server takes that thread's active run only if the thread belongs to
+    the token's user and the run is leased to the token's sandbox (`sandbox_run_leases`, written
+    by the server when it delivered `run.start`). Another user's or sandbox's thread yields no run
+    and the call is denied `run_not_active`; another team's is invisible under RLS;
+  - tool_call_id: `_meta["kobe.dev/tool_call_id"]` when the client sends one (a selector **inside
+    the server-derived run**, MAC-bound), otherwise derived server-side: the run's `allowed`,
+    unconsumed approval of this user for this Pi tool whose `input_canonical` equals the call's
+    canonical input (Pi's MCP client cannot attach a per-call id). KOBE-37's verifier then
+    re-checks team, user, run, tool_call_id, tool, input MAC, expiry and run state, and consumes.
+    A forged id can only select among the same user's approvals of the same run, and only one for
+    exactly this tool and input runs, once.
+- **Proof:** `services/server/src/mcp-proxy-gate2.db.test.ts` runs the **real proxy app**
+  (`@kobe/mcp-proxy`, new library entry `src/lib.ts`) against the **real server internal listener
+  over HTTP** on Postgres, with a fake remote MCP server, and a client that calls the proxy
+  directly (kobe-policy bypassed): no approval → refused, nothing upstream; a valid signed
+  approval → the write runs once (one `approval.consumed`), replays (same call, or naming the
+  consumed tool call) refused; forged MAC, changed input, expired token refused (`bad_mac`,
+  `expired` audited); another user's/run's approval cannot be borrowed by thread or tool call id.
+  `mcp.db.test.ts` "Gate 2" covers the same at the internal API with real `approvals` rows, plus a
+  same-team peer's approval. e2e signs an approval in the server pod with the chart's key: the
+  direct write is refused without it, runs once with it, and the replay is refused.
+
 ## For other tickets
 
-- **KOBE-37 (approvals) — what to swap.** Production wires `DENY_UNVERIFIED_APPROVALS`
-  (`services/server/src/mcp/approvals.ts`), so every MCP call that needs approval is refused today.
-  To enable approvals, pass `mcp: { approvals: createSignedApprovalVerifier({ tokens, store, keyFor }) }`
-  to `createServerDeps` (in `services/server/src/index.ts`), where:
-  - `tokens: ApprovalTokenSource` — `candidates({teamId, runId, tool, toolCallId?, limit})`: tokens
-    (`ApprovalToken`) of this run's **allowed** approvals for this Pi tool name, newest first,
-    rebuilt from the `approvals` row (`kid`, `approval_id`, `team_id`, `run_id`, `tool_call_id`,
-    `tool`, `expires_at`, `mac` = `input_hmac`); filter by `tool_call_id` when given.
-  - `store: ApprovalStore` — the protocol interface (load + the one conditional `consume`).
-  - `keyFor(kid)` — the verification key(s) (the server's own signing key; never leaves it).
-    `services/server/src/testing/approval-fixtures.ts` (`MemoryApprovals`) is the reference behaviour;
-    `mcp.db.test.ts` "Gate 2" is the suite to keep green with the real store.
+- **KOBE-37 (approvals):** done, see "Gate 2 wiring". Keep `approvals.input_canonical`,
+  `user_id`, `tool`, `status`, `consumed_at` and `decided_at` as they are, or update
+  `findApprovedToolCallId` in `services/server/src/mcp/approvals.ts`.
 - **KOBE-59 (registry, pinning, drift):** owns writes to `connectors` (admin API, `tools/list`
   snapshot, SHA-256 per tool, `tools_hash`, `status: drifted` + re-approval). Snapshot entry shape:
   `packages/db/src/connectors/snapshot.ts` (`name`, `pi_name` incl. any Pi collision suffix,
@@ -172,8 +204,8 @@ token>` and `Kobe-Thread-Id: <thread_id>`; server name = connector name (Pi tool
    server-side verification (see Decisions). No contract type changed; the contracts follow-up
    could reword it and drop the SPECULATIVE `APPROVAL_TOKEN_MCP_META_KEY` (unused: approvals are
    found server-side).
-2. `tool_call_id` binding needs a Pi-side hook (KOBE-62); until then approvals bind run + tool +
-   input (see Decisions).
+2. Exact `tool_call_id` binding needs a Pi-side hook (KOBE-62); until then the server derives it
+   from (user, run, tool, canonical input) — see "Gate 2 wiring".
 3. The egress proxy's least-privilege DB role (KOBE-38 open question 3) is not addressed here:
    the MCP proxy needs no DB.
 

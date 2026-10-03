@@ -90,10 +90,22 @@ export const SANDBOX_LIMITS = [
   "thread_entries",
 ] as const;
 
-/** Why a signed approval did not authorise an MCP call (`@kobe/protocol/node` VerifyFailure + 2). */
-export const MCP_APPROVAL_FAILURES = [
+/** A Pi tool call id (`idSchema` in @kobe/protocol): no control characters, ≤ 128. */
+const toolCallId = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[^\p{Cc}]*$/u);
+/** A tool name as Pi sees it (`bash`, `mcp__jira__create_issue`): policy metadata. */
+const toolName = z
+  .string()
+  .min(1)
+  .max(256)
+  .regex(/^[^\p{Cc}\p{Zl}\p{Zp}]*$/u);
+
+/** Why an enforcement point refused an approved call (`VerifyFailure` + no approval at all). */
+export const APPROVAL_REJECT_REASONS = [
   "no_approval",
-  "unavailable",
   "malformed",
   "unknown_key",
   "binding_mismatch",
@@ -103,7 +115,14 @@ export const MCP_APPROVAL_FAILURES = [
   "record_mismatch",
   "run_inactive",
   "not_consumable",
+  // Server-side, before an approval exists (KOBE-37 review).
+  "replayed_tool_call_id",
+  "too_many_approvals",
+  "run_event_cap",
 ] as const;
+
+/** Why a signed approval did not authorise an MCP call at the proxy (KOBE-58). */
+export const MCP_APPROVAL_FAILURES = [...APPROVAL_REJECT_REASONS, "unavailable"] as const;
 
 const event = <const S extends AuditScope, T extends z.ZodRawShape>(scope: S, shape: T) => ({
   scope,
@@ -404,6 +423,62 @@ export const AUDIT_EVENTS = {
     runId: id,
     threadId: id,
     scope: z.enum(["install", "team", "user"]),
+  }),
+
+  // ── approval: tool-call approvals (D29; KOBE-37); never the tool input or the signed token ──
+  /** A tool call needs a human: an `approvals` row is pending (system; `userId` decides it). */
+  "approval.requested": event("team", {
+    approvalId: id,
+    runId: id,
+    threadId: id,
+    toolCallId,
+    tool: toolName,
+    risk: z.enum(["read", "write", "destructive"]),
+    userId: id,
+  }),
+  /**
+   * The run's user allowed or denied a pending approval. `remember`: an allow rule was written in
+   * the same transaction (its own `policy.rule.created` names it as `ruleId`).
+   */
+  "approval.decided": event("team", {
+    approvalId: id,
+    runId: id,
+    toolCallId,
+    tool: toolName,
+    decision: z.enum(["allow", "deny"]),
+    remember: z.boolean(),
+    ruleId: id.optional(),
+  }),
+  /** A pending approval ended without a decision: TTL (D29, 1 h) or its run ended (system). */
+  "approval.expired": event("team", {
+    approvalId: id,
+    runId: id,
+    toolCallId,
+    tool: toolName,
+    cause: z.enum(["ttl", "run_cancelled", "run_interrupted", "budget_exhausted", "run_failed"]),
+  }),
+  /** An enforcement point verified the signed approval and used it, once (system). */
+  "approval.consumed": event("team", {
+    approvalId: id,
+    runId: id,
+    toolCallId,
+    tool: toolName,
+    enforcementPoint: z.enum(["mcp_proxy"]),
+  }),
+  /**
+   * A call needing approval was refused before it could be used: at the MCP proxy (missing,
+   * tampered input, replayed, other run, expired, used) or at the server (a tool call id replayed
+   * in its run, the run's approval or event cap). Throttled per tool call and reason; `suppressed`
+   * counts the repeats since the previous row of that key (system).
+   */
+  "approval.rejected": event("team", {
+    runId: id,
+    toolCallId,
+    tool: toolName,
+    reason: z.enum(APPROVAL_REJECT_REASONS),
+    enforcementPoint: z.enum(["mcp_proxy", "server"]),
+    approvalId: id.optional(),
+    suppressed: count.optional(),
   }),
 
   // ── sandbox: the sandbox wire (KOBE-24, D13); throttled per sandbox and violation ──
