@@ -134,20 +134,6 @@
       "when": 1790967840956,
       "tag": "0018_sandbox_run_bytes",
       "breakpoints": true
-    },
-    {
-      "idx": 19,
-      "version": "7",
-      "when": 1790989816635,
-      "tag": "0019_egress",
-      "breakpoints": true
-    },
-    {
-      "idx": 20,
-      "version": "7",
-      "when": 1790989816949,
-      "tag": "0020_egress_rls",
-      "breakpoints": true
     }
   ]
 }
