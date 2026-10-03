@@ -225,6 +225,20 @@
       "when": 1791051578466,
       "tag": "0031_approvals_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1791060925966,
+      "tag": "0032_workspace_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1791060926342,
+      "tag": "0033_workspace_sync_rls",
+      "breakpoints": true
     }
   ]
 }
