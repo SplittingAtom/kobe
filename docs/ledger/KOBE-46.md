@@ -120,7 +120,7 @@ versions|unarchive`. Version history (`GET …/versions`) for whoever sees the a
     - **M1 (no behaviour change):** the approval floor is install-wide only (D6: no team floor;
       teams tighten with ask/deny rules); absent floor = no minimum, consistent with D32
       scheduled runs in `auto`. Documented in `policy/approval-floor.ts` and `manifest.ts`.
-    - **M2:** trigger `threads_agent_pin_owner` (0017, BEFORE INSERT/UPDATE OF agent_scope,
+    - **M2:** trigger `threads_agent_pin_owner` (0020, BEFORE INSERT/UPDATE OF agent_scope,
       agent_id, owner_user_id; one PK lookup): a personal/gallery pin must name an install agent
       of that scope, and a personal agent of the thread's owner (23514). Team pins are confined
       by their FK (includes team_id).
@@ -133,7 +133,7 @@ versions|unarchive`. Version history (`GET …/versions`) for whoever sees the a
     - **M5:** the migration adds two STORED generated columns, which **rewrites `threads`** under
       ACCESS EXCLUSIVE (fine pre-release). NOT VALID + VALIDATE was not used: drizzle's migrator
       runs all pending migrations in one transaction, so the rewrite's ACCESS EXCLUSIVE lock is
-      held until commit anyway and a separate VALIDATE buys nothing; and `0016` is generated
+      held until commit anyway and a separate VALIDATE buys nothing; and `0019` is generated
       (`db:rebase` regenerates it from the schema, dropping hand edits). Post-release, a change
       like this needs its own expand migration.
     - **L1:** pins keep **FOR SHARE**, not FOR KEY SHARE: suspend, archive and publish are non-key
