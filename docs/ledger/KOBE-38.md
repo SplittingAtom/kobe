@@ -32,7 +32,7 @@ console pages.
   `sandbox/session-token.ts` re-exports them (no API change for KOBE-24/58).
 - **DB** (`packages/db`): `egress_domains` † (`domain` PK = pattern, `preset`, `in_ceiling`,
   `note`, `created_by`), `team_egress` (team table, RLS; FK → `egress_domains` ON DELETE CASCADE,
-  `enabled_by`, `enabled_at`). Migrations `0019_egress` (generated) and `0020_egress_rls` (RLS +
+  `enabled_by`, `enabled_at`). Migrations `0022_egress` (generated) and `0023_egress_rls` (RLS +
   preset seed). Pattern grammar in `egress/domain.ts` and the same regex as a CHECK constraint.
   `egress/store.ts`: loaders, `isActiveTeamMember`, `notifyEgressChanged`, channel constants.
 - **Server**: `/v1/install/egress-ceiling` (GET, POST, PUT `/:domain`, PUT `/presets/:preset`,
@@ -80,7 +80,7 @@ http://user:token@…` produces) or `Bearer`. `<user>` is free; a UUID is a thre
 - **`egress.blocked` path without KOBE-24:** the proxy writes a pending `events` row (kind
   `egress.blocked`, ref: sandbox, user, domain, port, reason, request_access, thread hint) and
   NOTIFYs `<team>:<event>` (ids only). The server relay appends `egress.blocked {domain,
-request_access}` to the user's active runs in that team (one sandbox per (user, team), D11),
+request_access}` to the active runs leased to that sandbox (`sandbox_run_leases`, KOBE-24),
   narrowed by the thread hint; marks the event processed with `run_ids`. Rate limit: one report per
   (sandbox, host, reason) per 30 s. `request_access` = in the ceiling but not enabled (matches the
   protocol comment "false when the domain is outside the ceiling"). `tool_call_id` is never set

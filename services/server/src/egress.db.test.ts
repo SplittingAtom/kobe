@@ -1,10 +1,12 @@
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
 import {
   EGRESS_BLOCKED_EVENT_KIND,
   EGRESS_CHANGES_CHANNEL,
   events,
   runs,
+  sandboxRunLeases,
   sql,
   teamMembers,
   threads,
@@ -251,9 +253,19 @@ describe("team egress", () => {
   });
 });
 
+/** One sandbox per (user, team) (D11): its id, as the proxy reads it from the token. */
+const sandboxes = new Map<string, string>();
+const sandboxOf = (teamId: string, userId: string): string => {
+  const key = `${teamId}:${userId}`;
+  if (!sandboxes.has(key)) sandboxes.set(key, randomUUID());
+  return sandboxes.get(key) as string;
+};
+
+/** A running run of `userId`'s thread, leased to their sandbox (KOBE-24) unless `leased` is false. */
 async function runFor(
   teamId: string,
   userId: string,
+  leased = true,
 ): Promise<{ runId: string; threadId: string }> {
   return withTeam(h.deps.database.db, teamId, async (tx) => {
     const [thread] = await tx
@@ -270,7 +282,17 @@ async function runFor(
         startedAt: new Date(),
       })
       .returning({ id: runs.id });
-    return { runId: must(run, "run").id, threadId: must(thread, "thread").id };
+    const ids = { runId: must(run, "run").id, threadId: must(thread, "thread").id };
+    if (leased) {
+      await tx.insert(sandboxRunLeases).values({
+        teamId,
+        runId: ids.runId,
+        userId,
+        threadId: ids.threadId,
+        sandboxId: sandboxOf(teamId, userId),
+      });
+    }
+    return ids;
   });
 }
 
@@ -296,7 +318,7 @@ describe("egress.blocked relay", () => {
   it("appends egress.blocked to the user's active run and marks the event processed", async () => {
     const { runId } = await runFor(finance, ids.bob);
     const eventId = await blockedEvent(finance, {
-      sandbox_id: "4f9c2d5a-6b7e-4f90-8bc2-4d5e6f708192",
+      sandbox_id: sandboxOf(finance, ids.bob),
       user_id: ids.bob,
       domain: "pypi.org",
       port: 443,
@@ -312,11 +334,13 @@ describe("egress.blocked relay", () => {
     expect(await relayBlockedEvents(h.deps.database.db, finance)).toBe(0);
   });
 
-  it("narrows to the hinted thread's run, and never reaches another user's runs", async () => {
+  it("narrows to the hinted thread's run; never reaches other users' or unleased runs", async () => {
     const a = await runFor(finance, ids.alice);
     const b = await runFor(finance, ids.alice);
     const other = await runFor(finance, ids.bob);
+    const unleased = await runFor(finance, ids.alice, false);
     await blockedEvent(finance, {
+      sandbox_id: sandboxOf(finance, ids.alice),
       user_id: ids.alice,
       domain: "example.org",
       request_access: false,
@@ -328,10 +352,24 @@ describe("egress.blocked relay", () => {
       { domain: "example.org", request_access: false },
     ]);
     expect(await blockedRunEvents(finance, other.runId)).toEqual([]);
+    expect(await blockedRunEvents(finance, unleased.runId)).toEqual([]);
+  });
+
+  it("only reaches runs leased to the sandbox that made the attempt", async () => {
+    const run = await runFor(finance, ids.alice);
+    await blockedEvent(finance, {
+      sandbox_id: randomUUID(),
+      user_id: ids.alice,
+      domain: "elsewhere.example.com",
+      request_access: false,
+    });
+    await relayBlockedEvents(h.deps.database.db, finance);
+    expect(await blockedRunEvents(finance, run.runId)).toEqual([]);
   });
 
   it("marks attempts without an active run processed, and malformed ones failed", async () => {
     const quiet = await blockedEvent(marketing, {
+      sandbox_id: sandboxOf(marketing, ids.dave),
       user_id: ids.dave,
       domain: "pypi.org",
       request_access: true,
@@ -363,7 +401,12 @@ describe("egress.blocked relay", () => {
         .values({
           teamId: marketing,
           kind: EGRESS_BLOCKED_EVENT_KIND,
-          ref: { user_id: ids.dave, domain: "gitlab.com", request_access: false },
+          ref: {
+            sandbox_id: sandboxOf(marketing, ids.dave),
+            user_id: ids.dave,
+            domain: "gitlab.com",
+            request_access: false,
+          },
         })
         .returning({ id: events.id });
       await tx.execute(

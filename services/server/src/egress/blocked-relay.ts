@@ -5,9 +5,9 @@ import {
   events,
   inArray,
   runs,
+  sandboxRunLeases,
   sql,
   teams,
-  threads,
   type KobeDb,
   type KobeTx,
 } from "@kobe/db";
@@ -20,14 +20,15 @@ import { logger as rootLogger } from "../logger.js";
  * Turns the egress proxy's blocked attempts into `egress.blocked` run events (spec D28, §6.2).
  *
  * The proxy records a pending `events` row (kind `egress.blocked`) in the sandbox's team and
- * NOTIFYs `<team_id>:<event_id>`. One sandbox serves one (user, team) (D11), so the attempt belongs
- * to that user's active runs in the team; a thread hint from the proxy credentials narrows it to
- * one run when it names one of them. Every replica listens; `FOR UPDATE SKIP LOCKED` makes each
+ * NOTIFYs `<team_id>:<event_id>`. The attempt belongs to the active runs leased to that sandbox
+ * (`sandbox_run_leases`, KOBE-24: the wire's authority on which run runs where, written when the
+ * run's start is delivered); a thread hint from the proxy credentials narrows it to one of them. Every replica listens; `FOR UPDATE SKIP LOCKED` makes each
  * event processed exactly once, and a periodic sweep picks up anything whose hint was missed.
  * Attempts with no active run are marked processed (nothing to show; KOBE-39's request-access flow
  * starts from the thread).
  */
 const refSchema = z.object({
+  sandbox_id: z.uuid(),
   user_id: z.uuid(),
   domain: z.string().min(1).max(253),
   request_access: z.boolean(),
@@ -73,13 +74,14 @@ async function appendToActiveRuns(
 ): Promise<string[]> {
   const active = await tx
     .select({ runId: runs.id, threadId: runs.threadId })
-    .from(runs)
+    .from(sandboxRunLeases)
     .innerJoin(
-      threads,
-      sql`${threads.teamId} = ${runs.teamId} AND ${threads.id} = ${runs.threadId}`,
+      runs,
+      sql`${runs.teamId} = ${sandboxRunLeases.teamId} AND ${runs.id} = ${sandboxRunLeases.runId}`,
     )
     .where(
-      sql`${runs.teamId} = ${teamId} AND ${threads.ownerUserId} = ${ref.user_id} AND ${inArray(runs.status, [...ACTIVE_RUN_STATUSES])}`,
+      sql`${sandboxRunLeases.teamId} = ${teamId} AND ${sandboxRunLeases.sandboxId} = ${ref.sandbox_id}
+        AND ${sandboxRunLeases.userId} = ${ref.user_id} AND ${inArray(runs.status, [...ACTIVE_RUN_STATUSES])}`,
     )
     .orderBy(runs.startedAt)
     .limit(MAX_RUNS_PER_EVENT);
