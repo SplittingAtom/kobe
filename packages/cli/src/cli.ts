@@ -60,6 +60,12 @@ async function run(cmd: Command): Promise<void> {
       ? `audit chain verified; head ${report.auditHead.seq}:${report.auditHead.hash} (record it outside the cluster)`
       : "audit log empty",
   );
+  // KOBE-17: legal holds are restored as they were when the backup was taken; holds placed since
+  // are gone. The restore paused the audit IP erasure for 24 hours for that reason.
+  log(
+    `WARNING: legal holds are as of the backup (${report.createdAt}). Re-place every legal hold placed since then ` +
+      "within 24 hours: the audit IP erasure is paused until then, and purges honor only the restored holds.",
+  );
 }
 
 async function main(): Promise<void> {

@@ -317,11 +317,27 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
         objects: { checked: 2, problems: 0 },
       });
 
-      for (const t of manifest.tables.filter((t) => t.name !== "audit_log")) {
+      for (const t of manifest.tables.filter(
+        (t) => t.name !== "audit_log" && t.name !== "install_settings",
+      )) {
         expect(await rowsOf(dst.adminUrl, t.name), t.name).toEqual(
           await rowsOf(src.adminUrl, t.name),
         );
       }
+      // Settings verbatim, plus the 24 h pause of the audit IP erasure (KOBE-17: holds are as of
+      // the backup; admins re-place newer ones first).
+      const settings = (url: string) =>
+        sql<{ key: string; value: string }>(
+          url,
+          `SELECT key, value FROM install_settings WHERE key <> 'audit.pii_sweep_resume_at' ORDER BY key`,
+        );
+      expect(await settings(dst.adminUrl)).toEqual(await settings(src.adminUrl));
+      const [pause] = await sql<{ hours: number }>(
+        dst.adminUrl,
+        `SELECT round(extract(epoch FROM value::timestamptz - now()) / 3600)::int AS hours
+         FROM install_settings WHERE key = 'audit.pii_sweep_resume_at'`,
+      );
+      expect(pause?.hours).toBe(24);
       // Audit log (KOBE-15): restored verbatim (seq, hashes), then the restore's own event
       // extends the chain; the chain verifies and the append-only triggers are back.
       const audit = (url: string) =>
@@ -354,7 +370,7 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
           `SELECT tgname, tgenabled FROM pg_trigger WHERE tgrelid = 'audit_log'::regclass
            AND NOT tgisinternal AND tgenabled = 'O'`,
         ),
-      ).toHaveLength(3);
+      ).toHaveLength(4);
       await expect(sql(dst.appUrl, "DELETE FROM audit_log")).rejects.toThrow(/permission denied/);
       expect(await rowsOf(dst.adminUrl, "sessions")).toEqual([]);
       expect(await rowsOf(dst.adminUrl, "verifications")).toEqual([]);
@@ -437,7 +453,7 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
       }
       const dst = await target();
       await expect(restore(dst, tampered)).rejects.toThrow(
-        /audit chain in the backup is broken at seq 1 \(the row does not match its hash\)/,
+        /audit chain in the backup is broken at seq 1 \(hash_mismatch\)/,
       );
       expect(await rowsOf(dst.adminUrl, "users")).toEqual([]);
       expect(await rowsOf(dst.adminUrl, "audit_log")).toEqual([]);
