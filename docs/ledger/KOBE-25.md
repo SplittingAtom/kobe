@@ -141,7 +141,7 @@ get_state`: agent reconnected + Pi spawned and answering), never labelled Gate 1
 
 ## After merging main (KOBE-30 #40, KOBE-46 #35, CI stability #38)
 
-- Migrations regenerated with `db:rebase` (after KOBE-30, KOBE-16, then #42): `0025_sandboxes`, `0026_sandboxes_rls`. All `threads` queries name `team_id` (KOBE-16 team-filter check passes).
+- Migrations regenerated with `db:rebase` (after KOBE-30, KOBE-16, #42, then #43): `0026_sandboxes`, `0027_sandboxes_rls`. All `threads` queries name `team_id` (KOBE-16 team-filter check passes).
 - **`sandbox.waking` (KOBE-30 asked KOBE-25 to emit it).** `SandboxWaker.wake(target, {runId})`:
   the router passes the run of a `run.start` that found no live connection. Right after the wake
   decision (before any Kubernetes call) the lifecycle appends `sandbox.waking {reason}` to that
