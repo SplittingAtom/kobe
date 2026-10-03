@@ -2,6 +2,7 @@ import type { Server } from "node:http";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { isolationAuditor } from "./audit/isolation.js";
+import { BreakGlassSweeper } from "./break-glass/sweeper.js";
 import { loadConfig } from "./config.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
 import { createIsolationGate } from "./isolation/gate.js";
@@ -68,6 +69,9 @@ deps?.runs.useIsolation(() => {
 });
 // Audit chain head in the server log at startup and every 5 minutes (KOBE-15): ship it off the box.
 deps?.auditAnchor.start();
+// Break-glass grants end at expires_at on their own; this records the end and notifies (KOBE-16).
+const breakGlassSweeper = deps ? new BreakGlassSweeper(deps) : undefined;
+breakGlassSweeper?.start();
 isolation.start().catch((err: unknown) => logger.error({ err }, "isolation check failed"));
 
 // Sandbox provider (KOBE-22); the scheduler starts sandboxes through it from KOBE-64 on.
@@ -125,6 +129,7 @@ function shutdown(signal: string): void {
   stopReconciler?.();
   sandboxServer?.close();
   deps?.auditAnchor.stop();
+  breakGlassSweeper?.stop();
   // End event streams first so browsers reconnect (with Last-Event-ID) to another replica.
   void deps?.eventStream.hub.close();
   server.close((err) => {
