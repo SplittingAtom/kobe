@@ -6,7 +6,7 @@ import { eq, installSettings, type KobeTx } from "@kobe/db";
  * "approval mode can only be stricter than the floor", D29 modes). Stored in `install_settings`
  * under {@link APPROVAL_FLOOR_KEY}, the only floor key: read at run creation and Retry (KOBE-30),
  * at run start and publish (KOBE-46) and per `policy.check` (KOBE-24). Migration
- * `0022_approval_floor_unify` folded KOBE-24's `policy.approval_mode_floor` into it. No admin
+ * `0024_approval_floor_unify` folded KOBE-24's `policy.approval_mode_floor` into it. No admin
  * route writes it yet (the install policy console does, later), so a fresh install has no floor
  * beyond the engine's own rules: `auto` (which is allow-listed only, never a bypass).
  *

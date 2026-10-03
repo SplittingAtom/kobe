@@ -30,7 +30,7 @@
 - **Behaviour change on an invalid floor:** KOBE-24 threw (policy check denied, run creation
   errored); now it is `ask-all` everywhere (calls need approval, which the default broker denies).
   Still fail closed, and a run can still be created.
-- **Migration `0022_approval_floor_unify`** (custom, idempotent): `policy.approval_floor` = the
+- **Migration `0024_approval_floor_unify`** (custom, idempotent): `policy.approval_floor` = the
   stricter of both stored install values (unreadable → `ask-all`); deletes
   `policy.approval_mode_floor`; strips `approval_mode_floor` from every `teams.settings`. Team
   floors are dropped, not converted: no writer existed, so only hand-written SQL could have set one.
