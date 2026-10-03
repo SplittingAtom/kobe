@@ -205,12 +205,16 @@ within the caller's own workspace).
 
 - Unit (agent ↔ in-memory fake server over localhost, macOS): full restore of 500 files
   (≈ 2 MB) onto an empty volume: **≈ 145 ms**; kept-volume wake: one manifest GET, no downloads.
-- e2e (k3d + gVisor + SeaweedFS): printed by `e2e/run.sh` ("the file is back … s after the
-  wake", and the agent's `workspace restored` log lines with `durationMs`, for the rebuilt
-  sandbox and for the cold-start user's plain wakes). Numbers: see the PR's CI run.
-- Cold start (Gate 1): on a kept volume the restore is off the first-token path except for one
-  manifest GET in `beforeRun` (it runs in parallel with the wire connect and Pi spawn). The
-  KOBE-25 cold-start harness keeps running with sync enabled in e2e, so its p95 shows any effect.
+- e2e (CI k3d + gVisor + SeaweedFS, run 37140046507): rebuilt sandbox (PVC deleted) — agent
+  full restore `durationMs` **75 ms** (1 file); the file was back in the sandbox **9 s after the
+  wake** (pod start + session trade + restore). Plain wake on a kept volume (cold-start user):
+  incremental restore **43 ms**, no downloads.
+- Cold start with sync on (KOBE-25 harness, hibernated → Pi ready, not first token): back-to-back
+  20 trials **p50 4039 ms, p95 4376 ms**; spaced 5 trials p50 3765 ms, p95 4478 ms — in line with
+  KOBE-25's run 4 (p95 4862 ms), so no measurable cost; p95 ≤ 8 s holds.
+- A full restore of a large workspace sits before the first prompt (no lazy fetch). Levers if it
+  matters: a batch download endpoint (one tar stream instead of one GET per file), prioritising
+  `uploads/` and recently modified files.
 
 ## Evidence (acceptance criteria → test or command output)
 
