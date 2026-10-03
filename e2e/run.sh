@@ -1474,7 +1474,7 @@ JS
     contains "the run ended run.completed" '^terminal=run.completed$' "$chat_out"
     contains "the woken sandbox produced a first token" '^first_token_ms=[0-9]+$' "$chat_out"
     contains "the shim attributed the model call to the run (x-kobe-run-id from Pi)" "\"runId\":\"$chat_run\"" \
-      "$($KUBECTL -n "$NS" logs deploy/kobe-model-gateway --since=15m 2>/dev/null | grep -F "\"runId\":\"${chat_run:-none}\"" | head -1)"
+      "$($KUBECTL -n "$NS" logs -l app.kubernetes.io/component=model-gateway --tail=-1 --since=15m 2>/dev/null | grep -F "\"runId\":\"${chat_run:-none}\"" | head -1)"
     seen_now=$(probe "$NS" "$(answers "$LLM/_seen")")
     contains "the upstream saw the provider key (attached by Bifrost, outside the sandbox)" 'e2e-provider-key' "$seen_now"
     if [[ -n "$seen_now" ]] && ! printf '%s' "$seen_now" | grep -q 'eyJ'; then ok "no session token (JWT) reached the upstream"
