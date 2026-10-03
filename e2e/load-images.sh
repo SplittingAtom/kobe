@@ -26,6 +26,7 @@ build() {
 images=()
 for pair in web:apps/web/Dockerfile server:services/server/Dockerfile \
   mcp-proxy:services/mcp-proxy/Dockerfile egress-proxy:services/egress-proxy/Dockerfile \
+  model-gateway:services/model-gateway/Dockerfile \
   sandbox:images/sandbox/Dockerfile; do
   image="${registry}/kobe-${pair%%:*}:${tag}"
   build "${pair#*:}" "${image}"

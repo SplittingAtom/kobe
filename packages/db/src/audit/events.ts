@@ -1,5 +1,11 @@
 import { z } from "zod";
 import { DOMAIN_PATTERN_SQL } from "../schema/egress.js";
+import {
+  MODEL_ALIAS_PATTERN,
+  MODEL_PROVIDER_KINDS,
+  PROVIDER_ID_PATTERN,
+  PROVIDER_MODEL_PATTERN,
+} from "../schema/models.js";
 import { BREAK_GLASS_MAX_MINUTES, BREAK_GLASS_NOTIFICATION_EVENTS } from "../schema/break-glass.js";
 import { teamRole } from "../schema/team-members.js";
 
@@ -63,6 +69,17 @@ const toolRule = {
 /** An egress domain pattern or host (the `egress_domains` grammar): never a URL or path. */
 const egressDomain = z.string().max(253).regex(new RegExp(DOMAIN_PATTERN_SQL));
 const count = z.number().int().nonnegative();
+/** Model gateway (KOBE-40): ids and names as the `model_providers` / `model_catalog` grammar. */
+const providerId = z.string().max(32).regex(new RegExp(PROVIDER_ID_PATTERN));
+const providerKind = z.enum(MODEL_PROVIDER_KINDS);
+const modelAlias = z.string().max(64).regex(new RegExp(MODEL_ALIAS_PATTERN));
+const providerModel = z.string().max(200).regex(new RegExp(PROVIDER_MODEL_PATTERN));
+/** A provider endpoint's host (name or IP literal, no path or credentials); null: vendor default. */
+const endpointHost = z
+  .string()
+  .max(255)
+  .regex(/^[A-Za-z0-9.:[\]-]+$/)
+  .nullable();
 
 /** A break-glass grant (KOBE-16) by its scope; never the free-text reason. */
 const breakGlassScope = {
@@ -313,6 +330,39 @@ export const AUDIT_EVENTS = {
     bytesDown: count,
     from: z.iso.datetime(),
     to: z.iso.datetime(),
+  }),
+
+  // ── models: providers and catalog (install), team enablement (team; KOBE-40, D6, D30) ──
+  // Never the API key itself: only whether one is set or changed.
+  "models.provider.added": event("install", {
+    providerId,
+    kind: providerKind,
+    keySet: z.boolean(),
+    privateNetwork: z.boolean(),
+    endpointHost,
+  }),
+  "models.provider.changed": event("install", {
+    providerId,
+    kind: providerKind,
+    keyChanged: z.boolean(),
+    baseUrlChanged: z.boolean(),
+    privateNetwork: z.boolean(),
+    /** The endpoint's host after the change (where the stored key is sent). */
+    endpointHost,
+  }),
+  "models.provider.removed": event("install", { providerId, kind: providerKind }),
+  /** A catalog alias was added, re-pointed or removed (removal also disables it for every team). */
+  "models.catalog.changed": event("install", {
+    alias: modelAlias,
+    change: z.enum(["added", "updated", "removed"]),
+    providerId: providerId.optional(),
+    model: providerModel.optional(),
+  }),
+  /** A team admin enabled or disabled a catalog alias for the team, or changed its default. */
+  "models.team.changed": event("team", {
+    alias: modelAlias,
+    enabled: z.boolean(),
+    isDefault: z.boolean(),
   }),
 
   // ── thread: lifecycle metadata only, never titles or content (KOBE-34, D18, D23) ──

@@ -27,9 +27,9 @@ sandbox:
     limits: { cpu: "2", memory: 4Gi }
   # Container ephemeral storage (writable layer, logs, the /tmp and $HOME emptyDirs).
   ephemeralStorage: { request: 1Gi, limit: 4Gi }
-  # Let sandboxes reach the model gateway (Bifrost). Off until the gateway verifies sandbox
-  # session tokens (KOBE-40/41); until then any agent could spend model credit through it.
-  modelGatewayAccess: false
+  # Let sandboxes reach models through the model-gateway shim (KOBE-40), which verifies their
+  # session tokens and forwards inference only. false cuts sandboxes off from every model.
+  modelGatewayAccess: true
   workspace:
     # Persistent /workspace per sandbox.
     size: 10Gi
@@ -159,17 +159,73 @@ egressProxy:
     # Extra raw NetworkPolicy egress rules for the proxy.
     extraEgress: []
 
-# Model gateway, always installed (spec D30). Provider keys live here, never in sandboxes.
+# Model gateway shim (spec D30, KOBE-40): the only way sandboxes reach a model. It verifies their
+# model-gateway session token, checks the member and sandbox are still live, and forwards inference
+# (only) to Bifrost with the member's virtual key. Holds no provider key.
+modelGateway:
+  # Two replicas: one shim restarting or busy does not cut every team off from models.
+  replicas: 2
+  resources:
+    requests: { cpu: 50m, memory: 256Mi }
+    # Must cover limits.inflightBytes + 256Mi (checked at render time).
+    limits: { cpu: "1", memory: 512Mi }
+  limits:
+    # Request bodies (prompts, images) up to this size.
+    maxBodyBytes: 8388608
+    # Request bytes held in memory at once, per replica and per sandbox (beyond them: 429).
+    inflightBytes: 134217728
+    inflightBytesPerSandbox: 33554432
+    # Concurrent model calls per sandbox and in total (per replica); beyond them: 429.
+    callsPerSandbox: 16
+    calls: 1024
+    # Requests per sandbox: a burst, then this many per second (per replica); beyond them: 429.
+    requestBurst: 60
+    requestsPerSecond: 10
+    # A call that moves no bytes either way for this long is cut.
+    idleTimeoutSeconds: 300
+  # Membership, sandbox liveness and virtual keys are cached this long: a removed member, a
+  # deactivated user or a destroyed sandbox loses model access within it.
+  cacheTtlSeconds: 5
+  networkPolicy:
+    # Restrict the shim's own egress to DNS, Bifrost and Postgres.
+    restrictEgress: true
+    # External Postgres only: NetworkPolicy peers of your database (as for egressProxy).
+    databasePeers: []
+    databasePort: 5432
+
+# Model gateway (spec D4, D30), always installed: Bifrost (Apache-2.0) holds the provider keys and
+# enforces each member's model allowlist. Kobe is the source of truth (install admin console and
+# API): the server pushes providers, keys, catalog models and the customer/team/virtual-key
+# hierarchy to it. Only the shim and the server can reach it.
 bifrost:
   image:
     repository: docker.io/maximhq/bifrost
-    tag: v2.2.4
+    tag: v2.2.5
+    # Multi-arch index digest of the tag (pinned; update both together).
+    digest: sha256:65854fd1941ba8159f1f98cd69df380f6e8ac8cd374bde632c4e28f822a6f115
+  # Exactly one: Bifrost keeps virtual keys (and, with budgets, spend counters) in its own store.
   replicas: 1
   persistence:
-    # Without persistence Bifrost's config lives in an emptyDir and is rebuilt by config sync.
-    enabled: false
+    # Keeps Bifrost's store across restarts (virtual keys, budget counters). Without it the sync
+    # rebuilds everything after a restart, with new virtual keys and budget counters reset.
+    enabled: true
     size: 1Gi
     storageClass: ""
+  # Secret with keys bifrost-admin-password, bifrost-encryption-key, provider-keys, virtual-keys
+  # (>= 32 chars each, all different), optionally provider-keys-previous / virtual-keys-previous
+  # during a rotation. Empty: generated, kept.
+  keysSecret: ""
+  # Test installs only (e2e with a fake provider): lets OpenAI/Anthropic/Gemini providers take a
+  # base_url and keyed providers a plain-http endpoint. Off: a provider key only ever goes to its
+  # vendor, or over https to the endpoint it was entered with.
+  allowUnsafeProviderEndpoints: false
+  networkPolicy:
+    # Restrict Bifrost's egress to DNS and public addresses on allowedPorts (model providers).
+    restrictEgress: true
+    allowedPorts: [443]
+    # Local model servers (Ollama, vLLM) on private addresses: raw NetworkPolicy egress rules, e.g.
+    # [{to: [{ipBlock: {cidr: 10.20.30.40/32}}], ports: [{protocol: TCP, port: 11434}]}].
+    extraEgress: []
   resources:
     requests: { cpu: 100m, memory: 128Mi }
     limits: { cpu: "1", memory: 512Mi }

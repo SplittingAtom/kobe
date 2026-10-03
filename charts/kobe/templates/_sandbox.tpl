@@ -9,7 +9,7 @@ predates the `sandbox` key still renders. Keep in sync with values.yaml.
   "tmpSize" "2Gi"
   "homeSize" "1Gi"
   "ephemeralStorage" (dict "request" "1Gi" "limit" "4Gi")
-  "modelGatewayAccess" false
+  "modelGatewayAccess" true
   "teamQuota" (dict "requests.cpu" "20" "requests.memory" "40Gi" "limits.cpu" "40" "limits.memory" "80Gi" "requests.ephemeral-storage" "40Gi" "limits.ephemeral-storage" "160Gi" "requests.storage" "500Gi" "persistentvolumeclaims" "50" "pods" "50")
   "warmPool" (dict "replicasPerTeam" 1)
   "hibernation" (dict "enabled" true "idleMinutes" 15 "sweepSeconds" 60)
@@ -45,8 +45,9 @@ pod labels and port for the team NetworkPolicy).
 {{- $fullname := include "kobe.fullname" . -}}
 {{- $s := include "kobe.sandboxValues" . | fromJson -}}
 {{- $endpoints := dict -}}
-{{- /* component, Service port, pod port. The server serves sandboxes on its own port 8081. */ -}}
-{{- range $key, $e := dict "server" (list "server" 8081 8081) "modelGateway" (list "bifrost" 8080 8080) "mcpProxy" (list "mcp-proxy" 80 8080) "egressProxy" (list "egress-proxy" 80 8080) -}}
+{{- /* component, Service port, pod port. The server serves sandboxes on its own port 8081; models
+  are reached through the model-gateway shim (KOBE-40), never Bifrost itself. */ -}}
+{{- range $key, $e := dict "server" (list "server" 8081 8081) "modelGateway" (list "model-gateway" 80 8080) "mcpProxy" (list "mcp-proxy" 80 8080) "egressProxy" (list "egress-proxy" 80 8080) -}}
 {{- $component := index $e 0 -}}
 {{- $_ := set $endpoints $key (dict
   "service" (printf "%s-%s" $fullname $component)

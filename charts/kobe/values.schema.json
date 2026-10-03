@@ -413,13 +413,97 @@
         }
       }
     },
-    "bifrost": {
+    "modelGateway": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "replicas": {
           "type": "integer",
           "minimum": 1
+        },
+        "resources": {
+          "$ref": "#/$defs/resources"
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxBodyBytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 67108864
+            },
+            "callsPerSandbox": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "calls": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "idleTimeoutSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600
+            },
+            "inflightBytes": {
+              "type": "integer",
+              "minimum": 1024
+            },
+            "inflightBytesPerSandbox": {
+              "type": "integer",
+              "minimum": 1024
+            },
+            "requestBurst": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            "requestsPerSecond": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            }
+          }
+        },
+        "cacheTtlSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60
+        },
+        "networkPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "restrictEgress": {
+              "type": "boolean"
+            },
+            "databasePeers": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "databasePort": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
+          }
+        }
+      }
+    },
+    "bifrost": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1,
+          "description": "Bifrost keeps virtual keys and budget counters in its own store: exactly one replica."
         },
         "resources": {
           "$ref": "#/$defs/resources"
@@ -435,6 +519,10 @@
             "tag": {
               "type": "string",
               "minLength": 1
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^(sha256:[0-9a-f]{64})?$"
             }
           }
         },
@@ -461,6 +549,36 @@
               "type": "string"
             }
           }
+        },
+        "keysSecret": {
+          "type": "string"
+        },
+        "networkPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "restrictEgress": {
+              "type": "boolean"
+            },
+            "allowedPorts": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "minItems": 1
+            },
+            "extraEgress": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "allowUnsafeProviderEndpoints": {
+          "type": "boolean"
         }
       }
     },

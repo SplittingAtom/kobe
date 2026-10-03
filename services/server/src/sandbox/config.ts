@@ -67,8 +67,8 @@ export const sandboxSettingsSchema = z.strictObject({
   /** Container ephemeral storage (logs, writable layers, /tmp and $HOME emptyDirs). */
   ephemeralStorage: z.strictObject({ request: quantity, limit: quantity }),
   /**
-   * Whether sandboxes may reach the model gateway. Off until the gateway verifies session tokens
-   * (KOBE-40/41): until then, reachable Bifrost would let any agent spend model credit.
+   * Whether sandboxes may reach the model gateway: the model-gateway shim (KOBE-40), which verifies
+   * their session tokens and forwards inference only to Bifrost. The chart's default is on.
    */
   modelGatewayAccess: z.boolean(),
   workspace: z.strictObject({ size: quantity, storageClass: z.string().max(253) }),

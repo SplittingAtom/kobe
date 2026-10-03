@@ -130,7 +130,7 @@ export function serverRoleBindingManifest(namespace: string, s: SandboxSettings)
   };
 }
 
-/** Kobe services sandboxes may open connections to (the model gateway only once it verifies tokens). */
+/** Kobe services sandboxes may open connections to (the model gateway only with modelGatewayAccess). */
 export const sandboxEgressEndpoints = (s: SandboxSettings): KobeEndpoint[] =>
   KOBE_ENDPOINTS.filter((e) => e !== "modelGateway" || s.modelGatewayAccess);
 

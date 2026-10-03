@@ -8,7 +8,8 @@ cd "$(dirname "$0")/.."
 IMAGES="web:apps/web/Dockerfile
 server:services/server/Dockerfile
 mcp-proxy:services/mcp-proxy/Dockerfile
-egress-proxy:services/egress-proxy/Dockerfile"
+egress-proxy:services/egress-proxy/Dockerfile
+model-gateway:services/model-gateway/Dockerfile"
 TAG="${IMAGE_TAG:-dev}"
 # e.g. IMAGE_PREFIX=ghcr.io/splittingatom/kobe- IMAGE_TAG=0.1.0 to build release-named images.
 PREFIX="${IMAGE_PREFIX:-kobe-}"

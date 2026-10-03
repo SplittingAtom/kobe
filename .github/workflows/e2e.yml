@@ -74,7 +74,7 @@ jobs:
         run: |
           e2e/load-images.sh kobe "${KOBE_IMAGE_TAG}"
           # The node now has its own copies; drop the host's to stay clear of disk-pressure eviction.
-          docker rmi ghcr.io/splittingatom/kobe-{web,server,mcp-proxy,egress-proxy,sandbox}:"${KOBE_IMAGE_TAG}" >/dev/null
+          docker rmi ghcr.io/splittingatom/kobe-{web,server,mcp-proxy,egress-proxy,model-gateway,sandbox}:"${KOBE_IMAGE_TAG}" >/dev/null
           docker builder prune -af >/dev/null
           df -h /
       - name: Run e2e suite
