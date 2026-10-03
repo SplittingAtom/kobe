@@ -16,13 +16,13 @@ afterEach(() => {
   for (const c of controllers) c.dispose();
 });
 
-function open(threadId: string) {
+function open(threadId: string, reopenDelayMs = 0) {
   let n = 0;
   const controller = new ThreadController(threadId, {
     api: createChatApi(fake.teamId, fake.fetch),
     eventSource: fake.eventSource,
     newKey: () => `k${++n}`,
-    reopenDelayMs: () => 0,
+    reopenDelayMs: () => reopenDelayMs,
   });
   controllers.push(controller);
   return controller;
@@ -88,5 +88,57 @@ describe("ThreadController", () => {
     );
     expect(visibleTexts(c.getState())).toEqual(["q1", "a1", "q2", "answer"]);
     expect(c.getState().entries.map((e) => e.seq)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("reopens a stream the server refused while its run is still active, then gives up visibly", async () => {
+    const t = fake.addThread("x");
+    const c = open(t, 30);
+    await c.load();
+    await c.send("go");
+    const runId = fake.latestRun(t).run_id;
+    await until(c, (s) => s.connection === "open");
+    fake.agent.delta(runId, "m1", "a");
+
+    fake.run(runId).compacted = true; // refuses every connection (as a 410 would)
+    fake.dropConnections();
+    await until(c, (s) => s.connection === "reconnecting");
+    fake.run(runId).compacted = false;
+    await until(c, (s) => s.connection === "open");
+    fake.agent.delta(runId, "m1", "b");
+    await until(c, (s) => s.live?.messages[0]?.parts[0]?.kind === "text" && s.live.lastSeq === 3);
+    expect(visibleTexts(c.getState()).at(-1)).toBe("ab");
+
+    fake.run(runId).compacted = true;
+    fake.dropConnections();
+    await until(c, (s) => s.connection === "lost");
+    expect(fake.openStreams).toHaveLength(0);
+    fake.run(runId).compacted = false;
+    c.reconnect();
+    await until(c, (s) => s.connection === "open");
+  });
+
+  it("sends once per message even when the network fails after the server got it", async () => {
+    const t = fake.addThread("x");
+    const c = open(t);
+    await c.load();
+    let calls = 0;
+    const flaky: typeof fetch = async (input, init) => {
+      const res = await fake.fetch(input, init);
+      if (String(input).endsWith("/messages") && ++calls === 1) throw new TypeError("network down");
+      return res;
+    };
+    const c2 = new ThreadController(t, {
+      api: createChatApi(fake.teamId, flaky),
+      eventSource: fake.eventSource,
+      newKey: () => "same-key",
+    });
+    controllers.push(c2);
+    await c2.load();
+    expect(await c2.send("only once")).toBe(true);
+    expect([...fake.runs.values()].map((r) => r.input)).toEqual(["only once"]);
+    expect(
+      fake.requests.filter((r) => r.path.endsWith("/messages")).map((r) => r.idempotencyKey),
+    ).toEqual(["same-key", "same-key"]);
+    expect(c.getState().phase).toBe("ready");
   });
 });

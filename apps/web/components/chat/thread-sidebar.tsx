@@ -139,6 +139,7 @@ export function ThreadSidebar({
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState<SearchState>({ status: "idle" });
   const [folded, setFolded] = useState(true);
+  const hasMore = useAuiState((s) => s.threads.hasMore);
 
   const runSearch = async (e: FormEvent) => {
     e.preventDefault();
@@ -245,7 +246,7 @@ export function ThreadSidebar({
                   {() => <ThreadItem archived={view === "trash"} />}
                 </ThreadListPrimitive.Items>
               </ul>
-              {view === "threads" && (
+              {view === "threads" && hasMore && (
                 <ThreadListPrimitive.LoadMore>Load more</ThreadListPrimitive.LoadMore>
               )}
             </>
