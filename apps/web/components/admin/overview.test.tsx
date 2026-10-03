@@ -33,15 +33,16 @@ describe("console overview", () => {
       "Team agents",
       "Inventory",
       "Audit view",
+      "Break-glass access",
     ]);
   });
 });
 
 describe("section placeholder", () => {
   it("names the ticket that builds it", () => {
-    render(<SectionPlaceholder section={must(findSection("install", "break-glass"))} />);
-    expect(screen.getByRole("heading", { name: "Break-glass" })).toBeTruthy();
-    expect(screen.getByRole("note").textContent).toBe("Coming in KOBE-16.");
+    render(<SectionPlaceholder section={must(findSection("install", "legal-hold"))} />);
+    expect(screen.getByRole("heading", { name: "Legal hold" })).toBeTruthy();
+    expect(screen.getByRole("note").textContent).toBe("Coming in KOBE-17.");
   });
 });
 
