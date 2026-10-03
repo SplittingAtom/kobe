@@ -9,6 +9,7 @@ import {
   entryExists,
   latestInterruptedRow,
   lockThreadRow,
+  retryBranchPoint,
   setThreadStatus,
   touchThread,
 } from "./runs/store.js";
@@ -290,6 +291,8 @@ describe("hot thread queries use the team-leading index with the break-glass pol
         await setThreadStatus(tx, teamId, threadId, "idle");
         await bindUserEntry(tx, teamId, runId);
         await latestInterruptedRow(tx, teamId, threadId);
+        // KOBE-26: Retry's branch point from the original prompt entry.
+        await retryBranchPoint(tx, teamId, { id: runId, threadId, parentEntryId: null });
         // KOBE-46: switching the pinned agent version locks the thread first.
         await switchAgentVersion(tx, viewer(), threadId, undefined);
       }),

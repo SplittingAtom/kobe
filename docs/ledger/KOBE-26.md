@@ -1,6 +1,6 @@
 # KOBE-26: Interrupted runs and manual retry
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #43)
 - **Branch / worktree:** `kobe-26-interrupted-runs` in `../Kobe-wt26`
 - **Depends on:** KOBE-24 (wire: interruption), KOBE-30 (Retry, Continue, `interrupted_run`) —
   both merged. KOBE-25 (wake, PR #39) still open; nothing here depends on it.
@@ -61,6 +61,8 @@ ensure`), a wire token is minted in the server pod with the real keys for that c
   returns the same run, retry links the original, retry branch point = the root entry, entries
   from before the kill unchanged, the retry can be stopped.
 - The agent script was run locally against the real wire (fixture listener) before CI.
+- CI (PR #43, first run): all 20 checks ok; the run was interrupted 32 s after the pod was
+  deleted (connection loss seen at once, 30 s grace, then the sweep).
 
 ## Decisions
 

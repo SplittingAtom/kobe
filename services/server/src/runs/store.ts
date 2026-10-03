@@ -401,7 +401,7 @@ export async function retryBranchPoint(
     SELECT te.parent_id
       FROM runs r
       JOIN thread_entries te
-        ON te.team_id = r.team_id AND te.thread_id = r.thread_id AND te.entry_id = r.user_entry_id
+        ON te.team_id = ${teamId} AND te.thread_id = ${run.threadId} AND te.entry_id = r.user_entry_id
      WHERE r.team_id = ${teamId} AND r.id = ${run.id} AND r.thread_id = ${run.threadId}`);
   return res.rows[0]?.parent_id ?? null;
 }
