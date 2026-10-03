@@ -159,6 +159,8 @@ const sandboxServer = sandbox
             : {}),
         }).fetch,
         port: sandbox.settings.endpoints.server.targetPort,
+        // Workspace uploads (KOBE-27) may take a while: up to 1 GiB per file.
+        serverOptions: { requestTimeout: 60 * 60_000 },
       },
       (info) => logger.info({ port: info.port }, "sandbox listener"),
     )

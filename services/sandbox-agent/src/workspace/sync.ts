@@ -10,6 +10,7 @@ import type { WireLogger } from "../wire/client.js";
 import { SyncHttpError, type SyncClient } from "./client.js";
 import {
   conflictCopyName,
+  ensureParents,
   hashFile,
   lockServerOwned,
   openForUpload,
@@ -87,6 +88,19 @@ export const DEFAULT_SKIP_DIRS = ["node_modules", "__pycache__", ".venv"] as con
 const COMMIT_BATCH = 250;
 const MISSING_BATCH = 1000;
 const RUN_END_DEBOUNCE_MS = 2_000;
+const UNAVAILABLE_RETRY_MS = 5 * 60_000;
+/** Where files found in a server-owned area that the server never wrote are moved (and kept). */
+export const EVICTED_PREFIX = "kobe-moved/";
+
+/** Errors that say nothing about one file: the server or the network. Retry the whole step. */
+function isTransient(error: unknown): boolean {
+  if (error instanceof SyncHttpError) {
+    return (
+      error.status === 0 || error.status === 429 || (error.status >= 500 && error.status !== 502)
+    );
+  }
+  return error instanceof TypeError; // fetch: network failure
+}
 
 const known = (e: WorkspaceEntry): Known => ({
   rev: e.rev,
@@ -139,7 +153,9 @@ export class WorkspaceSync {
   readonly #refused = new Map<string, LocalFile>();
   #seenRev = 0;
   #chain: Promise<unknown> = Promise.resolve();
+  /** Settles once the startup restore succeeded, or the server said it has no workspace sync. */
   #ready: Promise<void> | undefined;
+  #settle: () => void = () => {};
   #restored = false;
   #timer: NodeJS.Timeout | undefined;
   #soon: NodeJS.Timeout | undefined;
@@ -150,6 +166,8 @@ export class WorkspaceSync {
   #restoredFiles = 0;
   #restoredBytes = 0;
   #restoreStarted = 0;
+  /** Downloads that failed for this file only (missing object, something local in the way). */
+  readonly #retry = new Map<string, WorkspaceEntry>();
 
   constructor(options: WorkspaceSyncOptions) {
     this.#o = {
@@ -169,7 +187,10 @@ export class WorkspaceSync {
   /** Starts the restore (retried until it succeeds) and the periodic push + pull. */
   start(): void {
     if (this.#o.intervalMs <= 0) return;
-    this.#ready = this.#restoreUntilDone();
+    this.#ready = new Promise<void>((resolve) => {
+      this.#settle = resolve;
+    });
+    void this.#restoreUntilDone().finally(() => this.#settle());
     this.#timer = setInterval(() => {
       if (!this.#restored || this.#stopped) return;
       void (async () => {
@@ -191,8 +212,10 @@ export class WorkspaceSync {
       this.#ready.then(() => true),
       new Promise<false>((r) => setTimeout(() => r(false), this.#o.restoreWaitMs).unref()),
     ]);
-    if (!restored) {
-      this.#o.logger.warn({}, "workspace restore still failing: starting the run without it");
+    if (!restored || !this.#restored) {
+      if (this.enabled) {
+        this.#o.logger.warn({}, "workspace restore still failing: starting the run without it");
+      }
     } else {
       await this.#serial(() => this.#pull()).catch((error: unknown) =>
         this.#warn("workspace pull before the run failed", error),
@@ -272,6 +295,7 @@ export class WorkspaceSync {
       try {
         const stats = await this.#serial(() => this.#restore());
         this.#restored = true;
+        this.#unavailable = false;
         this.#o.logger.info({ ...stats }, "workspace restored");
         await this.#o.client
           .restoreReport({
@@ -283,14 +307,17 @@ export class WorkspaceSync {
           .catch((error: unknown) => this.#warn("workspace restore report failed", error));
         return;
       } catch (error) {
+        let delay = Math.min(30_000, 500 * 2 ** Math.min(attempt, 6)) * (0.5 + Math.random());
         if (error instanceof SyncHttpError && error.status === 404 && error.code !== "not_found") {
-          // The server has no workspace sync (no object storage configured): stay off.
+          // This server has no workspace sync (no object storage configured, or a replica from
+          // before it): off for now, asked again later (runs do not wait meanwhile).
+          if (!this.#unavailable) this.#o.logger.warn({}, "workspace sync is not available");
           this.#unavailable = true;
-          this.#o.logger.warn({}, "workspace sync is not available on this server");
-          return;
+          this.#settle();
+          delay = UNAVAILABLE_RETRY_MS;
+        } else {
+          this.#warn("workspace restore failed; retrying", error);
         }
-        this.#warn("workspace restore failed; retrying", error);
-        const delay = Math.min(30_000, 500 * 2 ** Math.min(attempt, 6)) * (0.5 + Math.random());
         await new Promise((r) => setTimeout(r, delay).unref());
       }
     }
@@ -361,15 +388,15 @@ export class WorkspaceSync {
       }
     }
     await parallel(downloads, this.#o.concurrency, async (e) => {
-      const got = await this.#download(e.path);
+      const got = await this.#downloadSafely(e);
       if (got) {
         this.#restoredFiles += 1;
         this.#restoredBytes += got.size;
       }
     });
-    // Server-owned areas mirror the server: drop what it does not list.
+    // Server-owned areas mirror the server: what it never wrote is moved out (kept, then pushed).
     for (const path of local.files.keys()) {
-      if (isServerOwnedPath(path) && !latest.has(path)) await removeFile(this.#o.root, path);
+      if (isServerOwnedPath(path) && !latest.has(path)) await this.#evict(path);
     }
     await lockServerOwned(this.#o.root, WORKSPACE_SERVER_OWNED_PREFIXES);
     this.#seenRev = head;
@@ -400,6 +427,42 @@ export class WorkspaceSync {
     return { size: entry.size };
   }
 
+  /**
+   * One file's download, failing only that file: a missing object or something local in the way
+   * (a directory where the copy has a file) is logged and retried on later pulls, keeping the
+   * local data; a server or network failure is rethrown (the whole step is retried).
+   */
+  async #downloadSafely(e: WorkspaceEntry): Promise<{ size: number } | undefined> {
+    try {
+      const got = await this.#download(e.path);
+      this.#retry.delete(e.path);
+      return got;
+    } catch (error) {
+      if (isTransient(error)) throw error;
+      this.#retry.set(e.path, e);
+      // Nothing to push or delete for this path until it is resolved.
+      if (!this.#known.has(e.path)) this.#known.set(e.path, { ...known(e), rev: e.rev - 1 });
+      this.#warn("workspace file not restored (kept the local state; retried later)", error);
+      return undefined;
+    }
+  }
+
+  /** A file in a server-owned area the server never wrote: moved to `kobe-moved/…`, never lost. */
+  async #evict(path: string): Promise<void> {
+    let target = `${EVICTED_PREFIX}${path}`;
+    if ((await statLocal(this.#o.root, target)) !== undefined) {
+      target = await conflictCopyName(this.#o.root, target, this.#o.now());
+    }
+    try {
+      await ensureParents(this.#o.root, target);
+      await ensureParents(this.#o.root, path); // makes the read-only parent writable
+      await renameWithin(this.#o.root, path, target);
+      this.#o.logger.info({}, "moved a file out of a read-only workspace area");
+    } catch (error) {
+      this.#warn("could not move a file out of a read-only area", error);
+    }
+  }
+
   async #conflictCopy(path: string): Promise<void> {
     const copy = await conflictCopyName(this.#o.root, path, this.#o.now());
     await renameWithin(this.#o.root, path, copy);
@@ -409,6 +472,10 @@ export class WorkspaceSync {
   async #pull(): Promise<number> {
     const { head, entries } = await this.#manifestSince(this.#seenRev);
     let applied = 0;
+    for (const [path, e] of [...this.#retry]) {
+      if (entries.some((n) => n.path === path)) continue; // a newer row is in this pull
+      if (await this.#downloadSafely(e)) applied += 1;
+    }
     const touchedOwned = entries.some((e) => isServerOwnedPath(e.path));
     for (const e of entries) {
       const k = this.#known.get(e.path);
@@ -433,8 +500,7 @@ export class WorkspaceSync {
         }
         await this.#conflictCopy(e.path);
       }
-      await this.#download(e.path);
-      applied += 1;
+      if (await this.#downloadSafely(e)) applied += 1;
     }
     if (touchedOwned) await lockServerOwned(this.#o.root, WORKSPACE_SERVER_OWNED_PREFIXES);
     this.#seenRev = Math.max(this.#seenRev, head);
@@ -463,9 +529,10 @@ export class WorkspaceSync {
         if (error instanceof SyncHttpError && [413, 507].includes(error.status) && c.local) {
           this.#refused.set(c.path, c.local);
           stats.rejected += 1;
-        } else if (!(error instanceof SyncHttpError && [409, 422].includes(error.status))) {
-          // 409: content being collected, 422: the file changed while uploading. Next time.
-          throw error;
+        } else {
+          // 409: content being collected, 422 or a body-length error: the file changed while
+          // uploading; anything else: logged. This file waits for the next push, the rest goes on.
+          this.#warn("workspace upload failed for one file", error);
         }
       }
     });
@@ -490,7 +557,7 @@ export class WorkspaceSync {
       if (isServerOwnedPath(path)) {
         // Read-only area: undo local edits and drop files the server never wrote.
         if (!k || k.deleted) {
-          await removeFile(this.#o.root, path);
+          await this.#evict(path);
           reverted = true;
         } else if (!sameAs(file, k)) {
           await this.#download(path).catch((error: unknown) => this.#warn("revert failed", error));
@@ -518,6 +585,7 @@ export class WorkspaceSync {
       scan.truncated || scan.incomplete.some((d) => d === "" || path.startsWith(`${d}/`));
     for (const [path, k] of this.#known) {
       if (k.deleted || scan.files.has(path) || isExcludedPath(path) || unsure(path)) continue;
+      if (this.#retry.has(path)) continue; // not restored yet: never a deletion
       if (path.split("/").some((part) => this.#o.skipDirs.has(part))) continue;
       if (isServerOwnedPath(path)) {
         await this.#download(path).catch((error: unknown) => this.#warn("revert failed", error));
@@ -587,7 +655,19 @@ export class WorkspaceSync {
       else this.#known.delete(change.path);
       return;
     }
-    if (change.op === "put") await this.#conflictCopy(change.path);
-    await this.#download(change.path);
+    if (change.op === "put") {
+      // Our own earlier write whose answer was lost, or identical content: adopt it.
+      const local = await hashFile(this.#o.root, change.path);
+      if (local !== undefined && local.sha256 === current.sha256) {
+        const file = await statLocal(this.#o.root, change.path);
+        this.#known.set(
+          change.path,
+          known({ ...current, mtime_ms: file?.mtimeMs ?? current.mtime_ms }),
+        );
+        return;
+      }
+      await this.#conflictCopy(change.path);
+    }
+    await this.#downloadSafely(current);
   }
 }

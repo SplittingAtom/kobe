@@ -172,6 +172,16 @@ helm install kobe charts/kobe -n kobe \
   --set smtp.existingSecret=kobe-smtp
 ```
 
+### Object storage (S3)
+
+Kobe keeps a durable copy of every sandbox's `/workspace` in the bucket (`sandbox.workspaceSync`,
+on by default once `s3.bucket` is set), so a lost or rebuilt volume loses no files. Only the
+server holds the S3 credentials: sandboxes send and fetch files through the server's sandbox port
+and get no network path to the object store. Objects live under
+`teams/<team-id>/users/<user-id>/workspace/<sha256>` (plus `…/shared/<id>` for shared files).
+Give the credentials read, write and delete on the bucket (collection deletes unreferenced
+content). Without `s3.bucket`, workspace sync stays off and the server logs a warning.
+
 ### Email (SMTP)
 
 SMTP is required: Kobe is invite-only and sends invitations and password-reset links by email.

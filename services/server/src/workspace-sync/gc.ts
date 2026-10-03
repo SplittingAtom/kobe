@@ -55,10 +55,14 @@ export async function collectWorkspace(
       SELECT sha256, size FROM workspace_blobs
        WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId} AND deleting
        LIMIT ${options.batch}`);
+    // Oldest first, bounded per run (revisions grow with time, so the horizon stays exact).
     const purged = await tx.execute<{ rev: string }>(sql`
       DELETE FROM workspace_files
-       WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId} AND deleted
-         AND updated_at < now() - make_interval(secs => ${options.tombstoneTtlMs / 1000})
+       WHERE (team_id, user_id, path) IN (
+         SELECT team_id, user_id, path FROM workspace_files
+          WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId} AND deleted
+            AND updated_at < now() - make_interval(secs => ${options.tombstoneTtlMs / 1000})
+          ORDER BY rev LIMIT ${options.batch * 10})
       RETURNING rev`);
     const maxRev = purged.rows.reduce((m, r) => Math.max(m, Number(r.rev)), 0);
     if (maxRev > 0) {

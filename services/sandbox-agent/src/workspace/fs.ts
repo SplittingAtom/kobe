@@ -84,8 +84,24 @@ export async function scanWorkspace(
   return { files, incomplete, truncated };
 }
 
+/**
+ * Whether every parent of `rel` is a real directory (no symlink on the way): reads, removals and
+ * uploads never act on something outside the workspace through a linked parent.
+ */
+export async function parentsAreDirs(root: string, rel: string): Promise<boolean> {
+  const parts = rel.split("/").slice(0, -1);
+  let current = root;
+  for (const part of parts) {
+    current = path.join(current, part);
+    const stat = await lstat(current).catch(() => undefined);
+    if (!stat?.isDirectory()) return false;
+  }
+  return true;
+}
+
 /** The file's current state, or undefined when it is missing or not a regular file. */
 export async function statLocal(root: string, rel: string): Promise<LocalFile | undefined> {
+  if (!(await parentsAreDirs(root, rel))) return undefined;
   try {
     const stat = await lstat(path.join(root, rel));
     return stat.isFile() ? toLocal(stat) : undefined;
@@ -99,6 +115,7 @@ export async function hashFile(
   root: string,
   rel: string,
 ): Promise<{ sha256: string; size: number } | undefined> {
+  if (!(await parentsAreDirs(root, rel))) return undefined;
   const hash = createHash("sha256");
   let size = 0;
   try {
@@ -119,6 +136,7 @@ export async function hashFile(
 
 /** A read stream of the file, opened without following a final symlink (closed at its end). */
 export async function openForUpload(root: string, rel: string): Promise<Readable> {
+  if (!(await parentsAreDirs(root, rel))) throw new Error("a parent directory is a link");
   const handle = await open(path.join(root, rel), FS.O_RDONLY | FS.O_NOFOLLOW);
   return handle.createReadStream();
 }
@@ -212,6 +230,7 @@ export async function writeFileAtomic(
 
 /** Removes a file (never a directory); missing is fine. Empty parents are left in place. */
 export async function removeFile(root: string, rel: string): Promise<void> {
+  if (!(await parentsAreDirs(root, rel))) return;
   const abs = path.join(root, rel);
   const stat = await lstat(abs).catch(() => undefined);
   if (!stat || stat.isDirectory()) return;

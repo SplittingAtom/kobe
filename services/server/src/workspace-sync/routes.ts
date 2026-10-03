@@ -32,6 +32,13 @@ import {
 
 /** Requests per sandbox: a burst big enough for a restore's downloads, then a steady rate. */
 export const WORKSPACE_RATE = { capacity: 2000, refillPerSecond: 500 } as const;
+/**
+ * Manifest, commit and report calls per sandbox (each can cost up to ~3000 queries under the
+ * workspace lock): a much smaller bucket on top of {@link WORKSPACE_RATE}.
+ */
+export const WORKSPACE_META_RATE = { capacity: 120, refillPerSecond: 20 } as const;
+/** Restore reports write a row: at most one per sandbox per minute (audit throttled apart). */
+const REPORT_EVERY_MS = 60_000;
 /** Concurrent uploads/downloads per sandbox per replica. */
 export const WORKSPACE_MAX_TRANSFERS = 16;
 /** Throttle for audit rows a looping sandbox could otherwise repeat. */
@@ -62,6 +69,8 @@ const error = (c: Context, status: number, code: string, message: string) =>
 export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
   const { db, objects, prefix, limits, quota, log } = deps;
   const limiter = deps.limiter ?? createRateLimiter(WORKSPACE_RATE);
+  const metaLimiter = createRateLimiter(WORKSPACE_META_RATE);
+  const reported = new Map<string, number>();
   const transfers = new Map<string, number>();
   const audited = new Map<string, number>();
   const app = new Hono<Vars>();
@@ -86,21 +95,42 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
       target: { sandboxId: caller.sandboxId, userId: caller.userId, limit },
     });
 
-  /** Runs a transfer under the per-sandbox concurrency cap. */
-  const transfer = async (caller: SandboxCaller, c: Context, fn: () => Promise<Response>) => {
+  /**
+   * Takes one of the sandbox's transfer slots; the returned release (idempotent) frees it. A
+   * download releases when its body stream closes, not when the response object is returned.
+   */
+  const acquire = (caller: SandboxCaller): (() => void) | undefined => {
     const n = transfers.get(caller.sandboxId) ?? 0;
-    if (n >= WORKSPACE_MAX_TRANSFERS) {
-      c.header("Retry-After", "1");
-      return error(c, 429, "rate_limited", "Too many transfers at once.");
-    }
+    if (n >= WORKSPACE_MAX_TRANSFERS) return undefined;
     transfers.set(caller.sandboxId, n + 1);
-    try {
-      return await fn();
-    } finally {
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
       const left = (transfers.get(caller.sandboxId) ?? 1) - 1;
       if (left <= 0) transfers.delete(caller.sandboxId);
       else transfers.set(caller.sandboxId, left);
+    };
+  };
+  const busy = (c: Context) => {
+    c.header("Retry-After", "1");
+    return error(c, 429, "rate_limited", "Too many transfers at once.");
+  };
+  /** Runs an upload under the per-sandbox concurrency cap. */
+  const transfer = async (caller: SandboxCaller, c: Context, fn: () => Promise<Response>) => {
+    const release = acquire(caller);
+    if (!release) return busy(c);
+    try {
+      return await fn();
+    } finally {
+      release();
     }
+  };
+  const metaAllowed = (caller: SandboxCaller, c: Context): Response | undefined => {
+    const wait = metaLimiter.take(caller.sandboxId);
+    if (wait <= 0) return undefined;
+    c.header("Retry-After", String(Math.ceil(wait / 1000)));
+    return error(c, 429, "rate_limited", "Too many requests.");
   };
 
   const readJson = async (c: Context): Promise<unknown> => {
@@ -131,6 +161,8 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
 
   app.get("/manifest", async (c) => {
     const caller = c.get("caller");
+    const limited = metaAllowed(caller, c);
+    if (limited) return limited;
     const since = Number(c.req.query("since") ?? "0");
     const limit = Number(c.req.query("limit") ?? String(WORKSPACE_MAX_BATCH));
     if (!Number.isSafeInteger(since) || since < 0 || !Number.isInteger(limit) || limit < 1) {
@@ -151,6 +183,8 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
 
   app.post("/blobs/missing", async (c) => {
     const caller = c.get("caller");
+    const limited = metaAllowed(caller, c);
+    if (limited) return limited;
     const body = workspaceBlobsMissingRequestSchema.safeParse(await readJson(c));
     if (!body.success) return error(c, 400, "invalid_request", "Expected {sha256: [...]}.");
     const missing = await withTeam(db, caller.teamId, (tx) =>
@@ -226,6 +260,8 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
 
   app.post("/commit", async (c) => {
     const caller = c.get("caller");
+    const limited = metaAllowed(caller, c);
+    if (limited) return limited;
     const body = workspaceCommitRequestSchema.safeParse(await readJson(c));
     if (!body.success) return error(c, 400, "invalid_request", "Expected {changes: [...]}.");
     const out = await withTeam(db, caller.teamId, (tx) =>
@@ -246,26 +282,36 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
       return error(c, 404, "not_found", "No such file in the workspace.");
     }
     const key = entry.blobKey;
-    return transfer(caller, c, async () => {
-      const object = await objects.get(key);
-      if (!object) {
-        log.error({ sandbox_id: caller.sandboxId, rev: entry.rev }, "workspace object missing");
-        return error(c, 502, "storage_unavailable", "The file's content is missing in storage.");
-      }
-      return new Response(Readable.toWeb(object.body) as ReadableStream, {
-        status: 200,
-        headers: {
-          "content-type": "application/octet-stream",
-          "content-length": String(entry.size),
-          "cache-control": "no-store",
-          [WORKSPACE_ENTRY_HEADER]: encodeWorkspaceEntryHeader(publicEntry(entry)),
-        },
-      });
+    const release = acquire(caller);
+    if (!release) return busy(c);
+    let object;
+    try {
+      object = await objects.get(key);
+    } catch (err) {
+      release();
+      throw err;
+    }
+    if (!object) {
+      release();
+      log.error({ sandbox_id: caller.sandboxId, rev: entry.rev }, "workspace object missing");
+      return error(c, 502, "storage_unavailable", "The file's content is missing in storage.");
+    }
+    object.body.once("close", release);
+    return new Response(Readable.toWeb(object.body) as ReadableStream, {
+      status: 200,
+      headers: {
+        "content-type": "application/octet-stream",
+        "content-length": String(entry.size),
+        "cache-control": "no-store",
+        [WORKSPACE_ENTRY_HEADER]: encodeWorkspaceEntryHeader(publicEntry(entry)),
+      },
     });
   });
 
   app.post("/restore-report", async (c) => {
     const caller = c.get("caller");
+    const limited = metaAllowed(caller, c);
+    if (limited) return limited;
     const body = workspaceRestoreReportSchema.safeParse(await readJson(c));
     if (!body.success) return error(c, 400, "invalid_request", "Invalid restore report.");
     const report = body.data;
@@ -273,23 +319,27 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
     const audit =
       full && Date.now() - (audited.get(`${caller.sandboxId}:restored`) ?? 0) > AUDIT_EVERY_MS;
     if (audit) audited.set(`${caller.sandboxId}:restored`, Date.now());
-    await withTeam(db, caller.teamId, async (tx) => {
-      await recordRestore(tx, caller, report.duration_ms);
-      if (audit) {
-        await recordAudit(tx, {
-          action: "workspace.restored",
-          actor: SYSTEM_ACTOR,
-          teamId: caller.teamId,
-          target: {
-            sandboxId: caller.sandboxId,
-            userId: caller.userId,
-            files: report.files,
-            bytes: report.bytes,
-            durationMs: report.duration_ms,
-          },
-        });
-      }
-    });
+    const write = audit || Date.now() - (reported.get(caller.sandboxId) ?? 0) > REPORT_EVERY_MS;
+    if (reported.size > 10_000) reported.clear();
+    if (write) reported.set(caller.sandboxId, Date.now());
+    if (write)
+      await withTeam(db, caller.teamId, async (tx) => {
+        await recordRestore(tx, caller, report.duration_ms);
+        if (audit) {
+          await recordAudit(tx, {
+            action: "workspace.restored",
+            actor: SYSTEM_ACTOR,
+            teamId: caller.teamId,
+            target: {
+              sandboxId: caller.sandboxId,
+              userId: caller.userId,
+              files: report.files,
+              bytes: report.bytes,
+              durationMs: report.duration_ms,
+            },
+          });
+        }
+      });
     log.info(
       { sandbox_id: caller.sandboxId, ...report },
       report.mode === "full" ? "workspace restored onto an empty volume" : "workspace restore",

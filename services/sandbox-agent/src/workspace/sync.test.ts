@@ -19,7 +19,14 @@ import { FakeSyncServer } from "../testing/fake-sync-server.js";
 import { SyncClient } from "./client.js";
 import { WorkspaceSync } from "./sync.js";
 
-const quiet = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
+const quiet = {
+  debug: () => {},
+  info: () => {},
+  warn: (o: unknown, m: string) => {
+    if (process.env.SYNC_DEBUG) console.log(m, o);
+  },
+  error: () => {},
+};
 const server = new FakeSyncServer();
 let serverUrl: string;
 const roots: string[] = [];
@@ -244,6 +251,35 @@ describe("workspace sync (agent)", () => {
     expect((await lstat(path.join(root, "uploads"))).isDirectory()).toBe(true);
     expect(await exists(outside, THREAD)).toBe(false);
     expect(await text(root, `uploads/${THREAD}/f.txt`)).toBe("upload");
+  });
+
+  it("never lets one file block the restore: the rest restores and pushes keep working", async () => {
+    const first = await volume();
+    await put(first, "a.txt", "a");
+    await put(first, "notes", "a file in the copy");
+    await (await started(first)).push();
+    const second = await volume();
+    await mkdir(path.join(second, "notes"), { recursive: true }); // a directory in the way
+    await put(second, "notes/inside.md", "local work");
+    const sync = await started(second);
+    expect(await text(second, "a.txt")).toBe("a");
+    expect(await text(second, "notes/inside.md")).toBe("local work");
+    await put(second, "after.txt", "still synced");
+    await sync.push();
+    expect(server.content("after.txt")).toBe("still synced");
+    expect(server.content("notes")).toBe("a file in the copy"); // never deleted meanwhile
+  });
+
+  it("moves files the server never wrote out of read-only areas instead of deleting them", async () => {
+    const root = await volume();
+    await put(root, "projects/mine/plan.md", "written before sync existed");
+    const sync = await started(root);
+    expect(await exists(root, "projects/mine/plan.md")).toBe(false);
+    expect(await text(root, "kobe-moved/projects/mine/plan.md")).toBe(
+      "written before sync existed",
+    );
+    await sync.push();
+    expect(server.content("kobe-moved/projects/mine/plan.md")).toBe("written before sync existed");
   });
 
   it("turns itself off when the server has no workspace sync", async () => {

@@ -1,0 +1,235 @@
+# KOBE-27: S3 ↔ /workspace sync
+
+- **Status:** in review
+- **Branch / worktree:** `kobe-27-workspace-sync` in `../Kobe-wt27`
+- **Depends on:** KOBE-23 (agent), KOBE-24 (wire), KOBE-22 (provider), KOBE-25 (hibernate/wake),
+  KOBE-38 (egress) — all merged.
+
+## Acceptance criteria
+
+Hadron (KOBE-27, spec D23, D26): ac-1 uploads are present in the sandbox before the run starts;
+ac-2 project files are read-only to the agent; ac-3 shared files persist after PVC deletion.
+Coordinator brief (D12, D13, D14, D15, D26, Gate 1/3 "sandbox deletion loses nothing"):
+
+1. **ac-4 Durable workspace.** `/workspace` survives volume loss: write a file, hibernate, destroy
+   the PVC, wake → the file is back.
+2. **ac-5 No credentials in sandboxes.** Sandboxes never hold S3 credentials, URLs or object keys;
+   sandbox egress to the object store stays closed.
+3. **ac-6 When.** On hibernate, periodically, after runs; restore on wake/rebuild before Pi gets
+   a prompt; cold start in mind (measured).
+4. **ac-7 Conflict and consistency rules.**
+5. **ac-8 Limits and a quota seam** for D26/KOBE-53.
+6. **ac-9 Isolation** of object keys and manifest rows per (team, user); cross-team probe green.
+7. **ac-10 Audit.**
+8. **ac-11 API** for KOBE-53/54/57 documented here.
+
+## Design
+
+**Transport: the server brokers every byte, over the sandbox listener (D13: the agent "syncs S3
+↔ /workspace"; §5.3: the server does "S3 sync coordination").** New HTTP endpoints under
+`/v1/sandbox/workspace` on the server's sandbox port 8081 — the only server port the team
+NetworkPolicy already allows — authenticated with the sandbox's `kobe.sandbox-wire` token and the
+same checks as the wire upgrade (signature/audience/expiry, sandbox `sub` live, account active,
+member). The server derives (team, user) from the token and every object key from that and a
+SHA-256, then streams between the sandbox and S3. Contract:
+`packages/protocol/src/sandbox-wire/workspace-sync.ts` (new, additive).
+
+Why not presigned URLs: a presigned URL is a bearer credential to the object store, and using it
+needs a network path from sandboxes to S3 (a new NetworkPolicy egress to an arbitrary external
+endpoint, or through the egress proxy, which would then have to allow the S3 host for every
+team and forward Kobe-internal traffic). Brokering needs **no new egress**, no credential of any
+kind in the sandbox, and lets the server verify content hashes and enforce limits before S3
+sees a byte. Why not over the existing WebSocket: 4 MiB frame cap and per-connection byte
+budgets (KOBE-24) that bulk transfers would compete with, and a `packages/protocol` frame change.
+Cost: workspace bytes pass through server replicas (bounded by per-sandbox concurrency and rate).
+
+**Model (Postgres is the record, S3 holds bytes; D15).** Team tables (sandbox area, FORCE RLS,
+`withTeam`): `workspace_sync` (per (team, user): `head_rev`, `horizon_rev`, live totals, last
+push/restore), `workspace_files` (one row per path: rev, sha256, size, mtime, exec bit, origin
+`sandbox|server`, `blob_key`; tombstones keep the deleted version's size/mtime),
+`workspace_blobs` (content held in the workspace's own prefix; `deleting` marker for
+collection). Content-addressed objects: `teams/<team>/users/<user>/workspace/<sha256>`; shared
+copies `…/shared/<uuid>`. `workspace_files.blob_key` is registered in `BLOB_REF_COLUMNS`, so
+`kobe backup` cross-checks it.
+
+**Protocol.** `GET manifest?since` (paged, revision order, tombstones; 409 `resync_required`
+below the horizon) · `POST blobs/missing` · `PUT blobs/<sha256>` (exact Content-Length; the
+server hashes while streaming and withholds the last chunk until the hash matches, so a
+mismatch aborts the S3 PUT and nothing is stored — verified against SeaweedFS 4.48 too) ·
+`POST commit` (per-path compare-and-set) · `GET file?path` (bytes + entry header) ·
+`POST restore-report`.
+
+**Agent (`services/sandbox-agent/src/workspace/`).** Started right after the session trade, in
+parallel with the wire and Pi:
+
+- **restore** at start: full manifest vs volume by size + mtime (no reads of unchanged files);
+  missing files downloaded (empty volume = full restore), local files newer than their copy kept
+  and pushed; server-owned areas mirrored. ThreadManager's `beforeRun` (KOBE-23 seam) waits for
+  it, then pulls, then checks the run's attachments exist — so a prompt never reaches Pi before
+  the workspace is back (a restore that keeps failing lets runs start after 60 s, logged).
+- **pull** before every run and every interval: changes since the last seen revision.
+- **push** every `pushIntervalSeconds` (60 s), 2 s after a run ends, and as the final step when
+  the agent stops (the `hibernating` close or SIGTERM: after Pi is gone, bounded 15 s inside the
+  pod's 30 s grace). Plan under a lock (scan, hash changed files, ask what content is missing),
+  upload outside it, commit under it again (dropping changes a pull touched meanwhile).
+- Never synced: `.kobe/` (Pi session JSONL is rebuilt from Postgres, KOBE-24), directories named
+  `node_modules`, `__pycache__`, `.venv` (rebuildable caches), symlinks, special files. Writes go
+  to an exclusive temp file (`O_EXCL|O_NOFOLLOW`) renamed into place, parents checked component
+  by component (never through a symlink).
+
+## Decisions
+
+- **Object store = external S3 (D4 says "external endpoint, optional bundled MinIO"; the chart
+  already ships no bundled S3 because MinIO is AGPL, D3).** Workspace sync is on when
+  `s3.bucket` is set and `sandbox.workspaceSync.enabled` (default true); otherwise the endpoints
+  are not mounted, the server logs a warning, and agents switch sync off on the 404.
+- **Auth reuses the `kobe.sandbox-wire` audience** (no new audience, so no change to the
+  published session-token contract): the audience names the server's sandbox listener, and these
+  endpoints live there. Positive principal answers cached 20 s like liveness.
+- **Areas.** `uploads/` and `projects/` are server-owned: only server writes create rows there,
+  commits to them are refused `read_only`, the agent mirrors them exactly (local edits reverted,
+  extra files removed, files 0444 / dirs 0555 as a speed bump — same uid, so the guarantee is
+  that nothing the agent does there reaches S3 and it is undone on the next sync). Everything
+  else is sandbox-owned: the live volume is authoritative, S3 its durable copy.
+- **Consistency.** Per-path compare-and-set on `base_rev`. A newer server-written version keeps
+  the path and the sandbox's edit is kept beside it as `<name>.conflict-<UTC time><ext>` (then
+  pushed); a deletion never beats a modification (conflicting delete dropped; a modification of a
+  path deleted meanwhile applies on top of the tombstone). Restore on a kept volume: a
+  sandbox-origin row that differs locally → local wins (newer work); a server-origin row → the
+  server's version, with a conflict copy if the local file is newer than the server write.
+- **Limits (seam for D26/KOBE-53).** `maxFileSize` 1 GiB (413, file stays local only),
+  `maxFiles` 100 000, `maxWorkspaceSize` = the volume size (10 GiB), uncommitted uploads ≤ 2×
+  that. `QuotaCheck` is a function of `(tx, {owner, fileBytes, liveFiles, liveBytes})` run inside
+  the commit transaction — KOBE-53 passes its per-team quota there. Refusals are audited
+  `sandbox.limit_exceeded` (throttled) and not retried until the file changes.
+- **Collection** (every replica, hourly, jittered): blobs no live row references, older than 1 h
+  (an upload waiting for its commit), via a `deleting` marker (mark under the workspace lock →
+  delete objects → delete rows) so crashes and concurrent uploads never leave a manifest row
+  pointing at a deleted object; tombstones after 7 days (horizon moves; older `since` resyncs).
+- **Audit:** `workspace.restored` (full restore onto an empty volume; counts reported by the
+  sandbox, throttled), `workspace.file_shared`, `workspace.purged` (counts), plus four new
+  `sandbox.limit_exceeded` values (`workspace_bytes`, `workspace_files`, `workspace_file_size`,
+  `workspace_integrity`). New audit category `workspace`. Periodic pushes are not audited (one
+  per sandbox per minute; content, not a security-relevant state change).
+- **Rate and size bounds per sandbox:** 2000-request burst, 500/s; 16 concurrent transfers per
+  replica; JSON bodies ≤ 1 MiB; ≤ 1000 entries per call.
+- **Test S3:** unit tests use an in-memory store and a tiny in-repo fake S3 HTTP server (no
+  dependency). dev/e2e use **SeaweedFS 4.48 (Apache-2.0)** as a test-only fixture in `kobe-deps`
+  (`dev/s3.yaml`, also in Tilt) — never in the chart; MinIO (AGPL) is not used anywhere.
+- New server dependency: `@aws-sdk/client-s3` (Apache-2.0; already in the lockfile via
+  `@kobe/cli`). Client set to `requestChecksumCalculation: WHEN_REQUIRED` (plain PUTs that
+  S3-compatible stores accept; integrity is the server's own SHA-256 check).
+
+## API for KOBE-53 (uploads), KOBE-54 (file browser, share_file), KOBE-57 (projects)
+
+Server-side, from `services/server/src/workspace-sync/index.ts`, all inside your own
+`withTeam(db, teamId, tx => …)` transaction (record your audit event last in it):
+
+- `putServerFile(tx, {teamId, userId}, {path, sha256, size, blobKey, mtimeMs?, executable?})` —
+  writes a path into a user's workspace with origin `server`; the sandbox pulls it before its
+  next run (and periodically / on wake). You own the object at `blobKey` (e.g. KOBE-53 stores the
+  upload at its own key; the manifest just points at it). Workspace collection never deletes
+  it (it only deletes content sandboxes uploaded, `workspace_blobs`).
+  - **KOBE-53:** S3 first, then `putServerFile(…, {path: "uploads/<thread_id>/<name>", …})`, then
+    send `run.start.attachments[].path = /workspace/uploads/<thread_id>/<name>`; the agent's
+    `beforeRun` pulls and fails the run if an attachment is missing (ac-1). Quota: pass your
+    `QuotaCheck` to `createWorkspaceSync({quota})` (team totals: sum `workspace_sync.live_bytes`
+    - volume sizes).
+  - **KOBE-57:** project files → one `putServerFile` per member under `projects/<slug>/…`
+    (pointing at the project's own object; `deleteServerFile` on removal). The area is
+    read-only to the agent (ac-2).
+  - **KOBE-54:** file-browser upload into any sandbox-owned path → `putServerFile` (conflict rule
+    keeps a concurrent sandbox edit as a conflict copy); delete → `deleteServerFile(tx, owner,
+path)` (audit it). Hibernated listing ("last synced listing", D26) →
+    `listLive(tx, owner, dirPrefix, limit)` / `manifestPage`, no wake. Download →
+    `currentEntry` + `workspaceSync.objects.get(entry.blobKey)`.
+  - **KOBE-54 `share_file`:** `workspaceSync.shareFile(tx, owner, path, actor)` copies the current
+    content to `teams/<t>/users/<u>/shared/<uuid>` (survives volume loss and workspace collection,
+    ac-3) and audits `workspace.file_shared`; store the returned `blobKey` as `files.blob_ref`
+    (add `files.blob_ref` to `BLOB_REF_COLUMNS`). The file must have been pushed: call the
+    agent's push first (e.g. the tool asks the agent, which pushes then calls a share endpoint
+    you add) — not built here.
+- Sandbox-side: `WorkspaceSync.push()` / `pull()` (agent), `beforeRun` already wired.
+
+## Open questions / risks
+
+1. **Contract addition (flag):** `packages/protocol/src/sandbox-wire/workspace-sync.ts` is a new,
+   additive contract (no existing contract changed). It was added inside this feature PR; split
+   it out if the coordinator prefers.
+2. **D31 says "sandbox volumes excluded (rebuildable)" from backup.** The durable workspace copy
+   is now in S3 and `workspace_files.blob_key` is in the backup's blob-ref check, so a backup
+   records it like other objects. Consistent with Gate 3 "sandbox deletion loses nothing".
+3. **Offboarding (KOBE-28) and retention (KOBE-18):** a destroyed sandbox's workspace copy must be
+   retained/purged with the volume (30 days) and honour legal hold; nothing deletes a
+   (team, user) workspace copy yet.
+4. **Cold start:** the restore on a kept volume is a scan + one manifest GET (+ one per run before
+   its prompt). A very large workspace (≫ 10 000 files) costs a stat walk under gVisor on wake.
+   A full restore after volume loss downloads everything before the first prompt (no lazy
+   fetch: Pi's tools read the filesystem directly); measured below.
+5. Same-uid model code can edit the agent's in-memory view only through the filesystem; at worst
+   it corrupts its own workspace copy (its own team/user prefix), never another's.
+6. Symlinks, empty directories and file modes other than the exec bit are not preserved.
+
+## Review round (code-reviewer agent, before PR) — resolution
+
+No isolation break found (keys derived server-side, RLS + explicit team/user, blob reuse only
+within the caller's own workspace).
+
+- **H1** one failing download (missing object, a directory in the way) made the restore retry
+  forever, so the sandbox never pushed again. Downloads now fail per file (`#downloadSafely`):
+  logged, kept for retry on later pulls, the local state kept and never turned into a deletion;
+  only server/network failures retry the whole step. Test: "never lets one file block the
+  restore".
+- **H2** the first restore deleted pre-existing files under `uploads/`/`projects/`. Files the
+  server never wrote there are now moved to `kobe-moved/<path>` (sandbox-owned, pushed), never
+  deleted. Test: "moves files the server never wrote out of read-only areas".
+- **M1** a download's transfer slot is released when its S3 stream closes, not when the response
+  object is returned (bounded by backpressure for large files).
+- **M2** any upload error now fails only that file (a growing log file can no longer block a push
+  or the hibernate flush).
+- **M3** a conflict against identical content (our own write whose answer was lost) is adopted,
+  no conflict copy.
+- **M4** the sandbox listener's `requestTimeout` is 1 h (uploads up to 1 GiB).
+- **M5** manifest/missing/commit/report get a second, smaller bucket (burst 120, 20/s per
+  sandbox); restore reports write at most once a minute per sandbox.
+- **M6** tombstone purge is batched oldest-first (≤ 5000 per workspace per run).
+- **L** reads, removals and uploads refuse paths with a symlinked parent; a 404 "no workspace
+  sync" is re-asked every 5 minutes instead of disabling sync for the process lifetime.
+- Not changed (noted): orphaned objects when the server dies between the S3 PUT and recording
+  the blob (needs a periodic bucket listing sweep); grace is measured from upload time, so a
+  freshly dereferenced blob can be collected at once (self-healing: the agent re-uploads on
+  `missing_blob`); tombstone count per workspace is bounded only by the rate limits and the
+  7-day purge.
+
+## Measurements
+
+- Unit (agent ↔ in-memory fake server over localhost, macOS): full restore of 500 files
+  (≈ 2 MB) onto an empty volume: **≈ 145 ms**; kept-volume wake: one manifest GET, no downloads.
+- e2e (k3d + gVisor + SeaweedFS): printed by `e2e/run.sh` ("the file is back … s after the
+  wake", and the agent's `workspace restored` log lines with `durationMs`, for the rebuilt
+  sandbox and for the cold-start user's plain wakes). Numbers: see the PR's CI run.
+- Cold start (Gate 1): on a kept volume the restore is off the first-token path except for one
+  manifest GET in `beforeRun` (it runs in parallel with the wire connect and Pi spawn). The
+  KOBE-25 cold-start harness keeps running with sync enabled in e2e, so its p95 shows any effect.
+
+## Evidence (acceptance criteria → test or command output)
+
+| AC    | Evidence                                                                                                                                                                                                                                                                                                                              |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ac-1  | agent `sync.test.ts` "pulls uploads before a run, read-only, and fails a run whose attachment is missing"; `agent.runs.test.ts` "restores the workspace before the prompt reaches Pi…", "fails the run when the workspace cannot be prepared"; server db "delivers server writes (uploads, project files) to the sandbox's next pull" |
+| ac-2  | agent "keeps project files read-only: local edits are reverted and never reach the server"; server db "never accepts sandbox writes to server-owned or agent-internal areas"                                                                                                                                                          |
+| ac-3  | server db "shares a file to a durable object that outlives the workspace copy" (workspace copy deleted and collected, share intact)                                                                                                                                                                                                   |
+| ac-4  | e2e "workspace sync (KOBE-27)": write → hibernate (final push, manifest row + object under the team/user prefix in SeaweedFS) → PVC deleted → wake → file back; agent "pushes the workspace and restores it onto a new, empty volume"                                                                                                 |
+| ac-5  | design (no new egress, server brokers); e2e "the sandbox holds no object-storage credentials or endpoint"; server db: manifest never contains an object key; sandbox pod env unchanged except `KOBE_WORKSPACE_SYNC_INTERVAL_MS` (`manifests.test.ts`)                                                                                 |
+| ac-6  | agent "flushes pending changes when stopping (hibernation)", "wakes on a kept volume without downloading anything", periodic + run-end push (`agent.runs.test.ts` hooks)                                                                                                                                                              |
+| ac-7  | server db "applies a change only on the revision it was based on"; agent "keeps both versions…", "propagates deletions both ways; a deletion never beats a modification", "keeps local edits made after the last push"                                                                                                                |
+| ac-8  | server db "refuses oversized files, too many files and too many bytes, and audits it"; `QuotaCheck` seam                                                                                                                                                                                                                              |
+| ac-9  | server db "never serves or reuses another team's or another user's content" (same user other team, other user same team, RLS); `@kobe/db` probe suite with the three new tables                                                                                                                                                       |
+| ac-10 | server db audit assertions (`workspace.restored`, `.file_shared`, `.purged`, `sandbox.limit_exceeded` workspace limits); `docs/audit-log.md`; `events.test.ts` documented-actions check                                                                                                                                               |
+| ac-11 | "API for KOBE-53/54/57" above                                                                                                                                                                                                                                                                                                         |
+
+Commands (local): `build typecheck lint format:check license:check` green (lint: only the known
+Helm 4 chart failure); `test --concurrency=2` 16/16; `@kobe/server test:db` 490/490 (+ the
+workspace suite after the review), `@kobe/db test:db` 429/429; `db:check` clean;
+`check-public-hygiene.sh` ok. S3 store verified against a real SeaweedFS 4.48 (put/get/copy/delete;
+a hash mismatch stores nothing).
