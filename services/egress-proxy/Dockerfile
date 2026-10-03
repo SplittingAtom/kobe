@@ -1,5 +1,7 @@
-# syntax=docker/dockerfile:1
 # Build from the repository root: docker build -f services/egress-proxy/Dockerfile .
+# No `# syntax=` directive: dockerd's built-in frontend parses this file, so builds don't start
+# the external docker/dockerfile frontend container (it crashed intermittently on CI runners:
+# "frontend grpc server closed unexpectedly").
 ARG NODE_VERSION=24
 ARG PNPM_VERSION=12.8.1
 

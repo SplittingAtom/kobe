@@ -13,13 +13,20 @@ TAG="${IMAGE_TAG:-dev}"
 # e.g. IMAGE_PREFIX=ghcr.io/splittingatom/kobe- IMAGE_TAG=0.1.0 to build release-named images.
 PREFIX="${IMAGE_PREFIX:-kobe-}"
 failed=0
+build_log="$(mktemp)"
+trap 'rm -f "${build_log}"' EXIT
 
 for entry in ${IMAGES}; do
   svc="${entry%%:*}"
   dockerfile="${entry#*:}"
   image="${PREFIX}${svc}:${TAG}"
   echo "==> building ${image}"
-  docker build --quiet -f "${dockerfile}" -t "${image}" . >/dev/null
+  if ! docker build --progress=plain -f "${dockerfile}" -t "${image}" . >"${build_log}" 2>&1; then
+    tail -n 80 "${build_log}"
+    echo "FAIL ${image}: docker build failed; daemon state follows"
+    scripts/ci-docker-diagnostics.sh
+    exit 1
+  fi
 
   configured_user="$(docker image inspect --format '{{.Config.User}}' "${image}")"
   runtime_uid="$(docker run --rm --entrypoint id "${image}" -u)"

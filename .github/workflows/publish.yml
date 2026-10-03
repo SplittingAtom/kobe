@@ -101,7 +101,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          head=$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)
+          # curl + jq, not gh: the self-hosted runner image (ci/runners) has no gh CLI.
+          head=$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/commits/main" | jq -r .sha)
           echo "current=$([ "$head" = "$GITHUB_SHA" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         if: steps.head.outputs.current == 'true'
