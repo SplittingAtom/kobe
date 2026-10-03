@@ -22,7 +22,8 @@ A superuser, or the owner after it drops the triggers, can still change rows. Th
 visible. `verifyAuditChain()` (or `GET /v1/install/audit/integrity`) recomputes every hash and
 reports the first row that was edited (`hash_mismatch`), removed (`gap`) or re-chained
 (`prev_hash_mismatch`), whose IP or user agent doesn't match its commitment (`pii_mismatch`), or,
-for rows chained before the v2 upgrade, that doesn't match the upgrade seal (`seal_mismatch`). The chain can't reveal two things on its own: a rewrite of every row from
+for rows chained before the v2 upgrade, that doesn't match the upgrade seal (`seal_mismatch`), and
+a second upgrade seal (`extra_seal`). The chain can't reveal two things on its own: a rewrite of every row from
 some point onwards, and the removal of the newest rows. To catch those, compare the reported `head`
 (`seq`, `hash`) with a copy kept outside the database. Audit export and SIEM forwarding (KOBE-19)
 are the intended places to keep that copy. Until KOBE-19 ships, the server log carries it (see
@@ -330,8 +331,11 @@ values, and stay untouched, so every head anchored before the upgrade (server lo
 backup manifests, `--expect-audit-head`) stays valid. The migration changes no row (see the time
 budget below). After it, the server verifies the v1 rows strictly and appends
 `audit.chain.upgraded { throughSeq, rows, seal }` with a running seal over all of them:
-`seal_n = sha256("kobe.audit.seal.v1" \n seal_{n-1} \n hash_n \n sha256(v2 form of row n))`. A v1
-row may be erased only once that event is **24 hours old**: by then replicas of the previous
+`seal_n = sha256("kobe.audit.seal.v1" \n seal_{n-1} \n hash_n \n sha256(v2 form of row n))`. The
+append trigger admits that event only from the system, only once, and only carrying the seal it
+recomputes itself over the v1 rows after verifying them (before taking the chain lock, so other
+appends don't wait while it reads them): the app role can't forge or pre-empt it, nor seal a
+broken chain. A v1 row may be erased only once that event is **24 hours old**: by then replicas of the previous
 release, whose verifier recomputes v1 hashes, are gone, so no false integrity alert. Once a v1
 row's values are erased its v1 hash can no longer be recomputed; the verifier then accepts it only
 under a valid seal (which covers every field but the raw values, and its stored hash) and checks

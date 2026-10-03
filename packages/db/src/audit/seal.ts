@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { sql } from "drizzle-orm";
-import type { KobeDb } from "../client.js";
+import type { KobeDb, KobeTx } from "../client.js";
 import {
   AUDIT_CHAIN_UPGRADED,
   AUDIT_GENESIS_HASH,
@@ -21,9 +21,15 @@ export type AuditSealResult =
 
 const digest = (text: string): string => createHash("sha256").update(text, "utf8").digest("hex");
 
-async function sealedAlready(db: KobeDb): Promise<boolean> {
+/**
+ * Whether the seal exists. The append trigger admits `audit.chain.upgraded` only from the system,
+ * once, carrying the seal it recomputed over the verified v1 rows, so the row is the real seal for
+ * every writer but a superuser (review N1); `audit_log_is_seal` also checks its shape.
+ */
+async function sealedAlready(db: KobeDb | KobeTx): Promise<boolean> {
   const { rows } = await db.execute(
-    sql`SELECT 1 FROM public.audit_log WHERE action = ${AUDIT_CHAIN_UPGRADED} AND actor_kind = 'system' LIMIT 1`,
+    sql`SELECT 1 FROM public.audit_log a
+        WHERE a.action = ${AUDIT_CHAIN_UPGRADED} AND public.audit_log_is_seal(a) LIMIT 1`,
   );
   return rows.length > 0;
 }
@@ -67,10 +73,7 @@ export async function sealAuditV1(db: KobeDb, batchSize = 5000): Promise<AuditSe
   const throughSeq = next - 1;
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('kobe.audit.seal', 0))`);
-    const again = await tx.execute(
-      sql`SELECT 1 FROM public.audit_log WHERE action = ${AUDIT_CHAIN_UPGRADED} AND actor_kind = 'system' LIMIT 1`,
-    );
-    if (again.rows.length > 0) return { status: "already_sealed" } as const;
+    if (await sealedAlready(tx)) return { status: "already_sealed" } as const;
     // The v1 rows end where v2 begins: the row after the last one read must be v2.
     const after = await tx.execute<{ v1: boolean }>(
       sql`SELECT hash_version IS NULL AS v1 FROM public.audit_log WHERE seq = ${throughSeq + 1}`,

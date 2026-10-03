@@ -15,7 +15,9 @@ export type AuditChainProblem =
   /** The IP or user agent doesn't match the row's commitment, or is present without one (KOBE-17). */
   | "pii_mismatch"
   /** The v1 rows don't match the seal in `audit.chain.upgraded`, or the event is missing (KOBE-17). */
-  | "seal_mismatch";
+  | "seal_mismatch"
+  /** A second `audit.chain.upgraded` (the append trigger admits one; KOBE-17). */
+  | "extra_seal";
 
 export interface AuditChainReport {
   readonly ok: boolean;
@@ -42,6 +44,7 @@ interface ChainRow extends Record<string, unknown> {
   hash_version: number | null;
   action: string;
   actor_kind: string;
+  team_id: string | null;
   target: Record<string, unknown>;
   pii_salt: string | null;
   pii_commitment: string | null;
@@ -67,7 +70,8 @@ export const AUDIT_CHAIN_UPGRADED = "audit.chain.upgraded";
 /** The SELECT both verifiers and the sealer read rows with. */
 export const chainRowsFrom = (fromSeq: number, limit: number, where = sql`true`) => sql`
   SELECT a.seq::text AS seq, a.prev_hash, a.hash, a.hash_version::int AS hash_version,
-         a.action, a.actor_kind::text AS actor_kind, a.target, a.pii_salt, a.pii_commitment,
+         a.action, a.actor_kind::text AS actor_kind, a.team_id, a.target, a.pii_salt,
+         a.pii_commitment,
          (a.ip IS NULL AND a.user_agent IS NULL) AS no_pii,
          public.audit_log_canonical(a) AS canonical,
          public.audit_log_canonical_v2(a) AS canonical_v2,
@@ -98,12 +102,14 @@ function v2Row(row: ChainRow): AuditChainProblem | null {
   return null;
 }
 
-const isUpgradeEvent = (row: ChainRow) =>
-  row.action === AUDIT_CHAIN_UPGRADED && row.actor_kind === "system";
+const isUpgradeEvent = (row: ChainRow) => row.action === AUDIT_CHAIN_UPGRADED;
 
+/** The real seal: system, no team, numeric throughSeq = the last v1 row, the running seal. */
 function sealMatches(row: ChainRow, seal: string, throughSeq: number): boolean {
   return (
     throughSeq > 0 &&
+    row.actor_kind === "system" &&
+    row.team_id === null &&
     typeof row.target.throughSeq === "number" &&
     row.target.throughSeq === throughSeq &&
     row.target.seal === seal
@@ -114,7 +120,7 @@ function sealMatches(row: ChainRow, seal: string, throughSeq: number): boolean {
  * Recomputes the audit hash chain (KOBE-15, v2 in KOBE-17): every row's hash from its current
  * contents (v1 or v2 form), every prev_hash against the row before, seq continuity, the IP and
  * user agent against their commitment while present, and (from seq 1) the seal over the v1 rows
- * against every `audit.chain.upgraded` event. An erased v1 row (v1 hash no longer recomputable,
+ * against the one `audit.chain.upgraded` event (a second is `extra_seal`). An erased v1 row (v1 hash no longer recomputable,
  * IP and user agent gone) passes only under a valid seal. Detects edited, deleted and inserted rows
  * anywhere before the head; erasing the IP and user agent is not a change. It cannot detect a
  * rewrite of the whole chain from some row on, or the removal of the newest rows, by someone with
@@ -162,6 +168,8 @@ export async function verifyAuditChain(
         if (problem) return fail(problem);
         afterV2 = true;
         if (isUpgradeEvent(row)) {
+          // The append trigger admits exactly one, carrying the real seal (review N1).
+          if (sealed) return fail("extra_seal");
           if (sealKnown && !sealMatches(row, seal, lastV1)) return fail("seal_mismatch");
           sealed = true;
         }

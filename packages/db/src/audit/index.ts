@@ -53,6 +53,7 @@ export {
   AUDIT_PII_RETENTION_MIN_HOURS,
   auditPiiRetentionHoursSchema,
   eraseExpiredAuditPii,
+  pausedUntil,
   readAuditPiiRetentionHours,
   type AuditPiiErasure,
 } from "./pii.js";

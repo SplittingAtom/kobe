@@ -177,6 +177,9 @@ BEGIN
     END IF;
     NEW.released_at := now();
     -- The audit IP erasure sweep moved past the rows this hold kept: start it over (KOBE-17).
+    -- Exclusive hold lock first: a sweep in flight (it holds the lock shared while it reads and
+    -- writes its position) commits before this reset, so the reset always wins (review N2).
+    PERFORM pg_advisory_xact_lock(hashtextextended('kobe.legal_hold', 0));
     INSERT INTO "public"."install_settings" (key, value) VALUES ('audit.pii_sweep_seq', '0')
       ON CONFLICT (key) DO UPDATE SET value = '0', updated_at = now();
     RETURN NEW;

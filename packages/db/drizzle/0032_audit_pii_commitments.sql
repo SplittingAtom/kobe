@@ -90,6 +90,46 @@ CREATE FUNCTION "public"."audit_log_pii_held"(team uuid, actor uuid) RETURNS boo
       AND ((h.user_id IS NULL AND h.team_id = team) OR h.user_id = actor))
 $$;--> statement-breakpoint
 
+-- The seal over the v1 rows as they are now, after verifying them strictly (seq from 1, prev_hash
+-- links, every v1 hash, no salt or commitment); raises if they don't verify. Only valid before
+-- any v1 row is erased (erasure needs the seal). NULLs when there are no v1 rows.
+CREATE FUNCTION "public"."audit_log_v1_seal"(OUT seal text, OUT through_seq bigint, OUT n bigint)
+  LANGUAGE plpgsql STABLE SET search_path = pg_catalog, public AS $$
+DECLARE
+  r "public"."audit_log";
+  prev text := repeat('0', 64);
+BEGIN
+  seal := repeat('0', 64);
+  through_seq := 0;
+  n := 0;
+  FOR r IN SELECT * FROM "public"."audit_log" a WHERE a.hash_version IS NULL ORDER BY a.seq LOOP
+    IF r.seq <> through_seq + 1 OR r.prev_hash <> prev OR r.pii_salt IS NOT NULL
+       OR r.pii_commitment IS NOT NULL
+       OR r.hash <> "public"."audit_log_digest"("public"."audit_log_canonical_v1"(r)) THEN
+      RAISE EXCEPTION 'audit chain: row % before the upgrade does not verify; it cannot be sealed', r.seq
+        USING ERRCODE = '42501';
+    END IF;
+    seal := "public"."audit_log_seal_step"(seal, r);
+    prev := r.hash;
+    through_seq := r.seq;
+    n := n + 1;
+  END LOOP;
+  IF n = 0 THEN
+    seal := NULL; through_seq := NULL;
+  END IF;
+END;
+$$;--> statement-breakpoint
+
+-- The seal event: `audit.chain.upgraded` by the system with a well-formed target. The append
+-- trigger admits only one, and only with the recomputed seal of verified v1 rows, so for every
+-- non-superuser writer such a row is the real seal.
+CREATE FUNCTION "public"."audit_log_is_seal"(r "public"."audit_log") RETURNS boolean
+  LANGUAGE sql STABLE SET search_path = pg_catalog, public AS $$
+  SELECT r.action = 'audit.chain.upgraded' AND r.actor_kind = 'system' AND r.team_id IS NULL
+    AND jsonb_typeof(r.target->'throughSeq') = 'number'
+    AND coalesce(r.target->>'seal', '') ~ '^[0-9a-f]{64}$'
+$$;--> statement-breakpoint
+
 -- v1 rows may be erased only once the upgrade seal exists and is 24 hours old: until then they
 -- can't be verified after erasure, and replicas of the previous release (which recompute v1 hashes)
 -- may still be running (KOBE-17 review M3).
@@ -97,7 +137,7 @@ CREATE FUNCTION "public"."audit_log_v1_erasable"() RETURNS boolean
   LANGUAGE sql STABLE SET search_path = pg_catalog, public AS $$
   SELECT EXISTS (
     SELECT 1 FROM "public"."audit_log" a
-    WHERE a.action = 'audit.chain.upgraded' AND a.actor_kind = 'system'
+    WHERE a.action = 'audit.chain.upgraded' AND "public"."audit_log_is_seal"(a)
       AND a.at <= statement_timestamp() - interval '24 hours')
 $$;--> statement-breakpoint
 
@@ -107,6 +147,7 @@ CREATE OR REPLACE FUNCTION "public"."audit_log_append"() RETURNS trigger
 DECLARE
   active_team uuid := NULLIF(current_setting('kobe.team_id', true), '')::uuid;
   head record;
+  seal_now record;
 BEGIN
   IF NEW.seq <> 0 OR NEW.prev_hash <> '' OR NEW.hash <> '' OR NEW.hash_version IS NOT NULL
      OR NEW.pii_salt IS NOT NULL OR NEW.pii_commitment IS NOT NULL THEN
@@ -118,7 +159,26 @@ BEGIN
     RAISE EXCEPTION 'audit event for team % written in the context of another team', NEW.team_id
       USING ERRCODE = '42501';
   END IF;
+  IF NEW.action = 'audit.chain.upgraded' THEN
+    -- The seal (KOBE-17 review N1): only from the system, only with the seal recomputed over the
+    -- verified v1 rows. Checked before the chain lock (v1 rows can't change before a seal exists),
+    -- so appends aren't blocked while the v1 rows are read.
+    SELECT s.seal, s.through_seq, s.n INTO seal_now FROM "public"."audit_log_v1_seal"() s;
+    IF NEW.actor_kind <> 'system' OR NEW.team_id IS NOT NULL OR seal_now.n = 0
+       OR jsonb_typeof(NEW.target->'throughSeq') IS DISTINCT FROM 'number'
+       OR jsonb_typeof(NEW.target->'rows') IS DISTINCT FROM 'number'
+       OR NEW.target->>'throughSeq' IS DISTINCT FROM seal_now.through_seq::text
+       OR NEW.target->>'rows' IS DISTINCT FROM seal_now.n::text
+       OR NEW.target->>'seal' IS DISTINCT FROM seal_now.seal THEN
+      RAISE EXCEPTION 'audit.chain.upgraded must carry the seal of the rows before the upgrade'
+        USING ERRCODE = '42501';
+    END IF;
+  END IF;
   PERFORM pg_advisory_xact_lock(hashtextextended('kobe.audit_log', 0));
+  IF NEW.action = 'audit.chain.upgraded' AND EXISTS (
+       SELECT 1 FROM "public"."audit_log" a WHERE a.action = 'audit.chain.upgraded') THEN
+    RAISE EXCEPTION 'the rows before the upgrade are already sealed' USING ERRCODE = '42501';
+  END IF;
   SELECT a.seq, a.hash INTO head FROM "public"."audit_log" a ORDER BY a.seq DESC LIMIT 1;
   NEW.seq := coalesce(head.seq, 0) + 1;
   NEW.prev_hash := coalesce(head.hash, repeat('0', 64));
@@ -200,7 +260,8 @@ ALTER TABLE "audit_log" ADD CONSTRAINT "audit_log_ip_host"
 --   v1 (hash_version NULL): only before any v2 row; no salt or commitment; its v1 hash matches, or
 --     its IP and user agent are gone (erased), which a valid upgrade seal must then vouch for.
 --   v2: its hash matches; with a salt, the commitment matches; without one, no IP or user agent.
---   audit.chain.upgraded (system): throughSeq is the last v1 row and seal the running seal.
+--   audit.chain.upgraded: exactly one, by the system, after v1 rows, throughSeq the last v1 row and
+--     seal the running seal; a second one is extra_seal.
 CREATE FUNCTION "public"."audit_log_chain_problem"(
   OUT problem_seq bigint, OUT problem text, OUT head_seq bigint, OUT head_hash text)
   LANGUAGE plpgsql STABLE SET search_path = pg_catalog, public AS $$
@@ -243,9 +304,11 @@ BEGIN
         problem := 'pii_mismatch'; RETURN;
       END IF;
       saw_v2 := true;
-      IF r.action = 'audit.chain.upgraded' AND r.actor_kind = 'system' THEN
-        IF last_v1 = 0
-           OR jsonb_typeof(r.target->'throughSeq') IS DISTINCT FROM 'number'
+      IF r.action = 'audit.chain.upgraded' THEN
+        -- The append trigger admits one, carrying the real seal: a second is "extra_seal", a
+        -- first that doesn't match is "seal_mismatch" (both only possible past the triggers).
+        IF sealed THEN problem := 'extra_seal'; RETURN; END IF;
+        IF last_v1 = 0 OR NOT "public"."audit_log_is_seal"(r.whole)
            OR r.target->>'throughSeq' IS DISTINCT FROM last_v1::text
            OR r.target->>'seal' IS DISTINCT FROM seal THEN
           problem := 'seal_mismatch'; RETURN;

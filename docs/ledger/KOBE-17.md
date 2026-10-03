@@ -1,6 +1,6 @@
 # KOBE-17: Legal hold (plus audit IP and user-agent erasure)
 
-- **Status:** in review (PR #49), round 2
+- **Status:** in review (PR #49), round 3
 - **Branch / worktree:** `kobe-17-legal-hold` in `../Kobe-wt17`
 - **Depends on:** KOBE-16, KOBE-15, KOBE-20, KOBE-11 (all merged)
 
@@ -263,6 +263,32 @@ app role.
     aborting one side. A long purge transaction delays approvals (30 s lock timeout), hence short
     purge transactions.
 
+## Review round 3 (coordinator re-review of f5e1ad5)
+
+- **N1 forged seal (MEDIUM):** the append trigger now validates `audit.chain.upgraded`: system
+  actor, no team, v1 rows exist, the v1 rows verify (seq, links, v1 hashes, no salt), `throughSeq`,
+  `rows` and `seal` equal the values it recomputes (`audit_log_v1_seal()`, read before the chain
+  lock, so other appends don't wait), and no such event exists yet (checked under the chain lock).
+  So the app role can't forge, pre-empt, duplicate or use it to seal a broken chain, and the row is
+  the real seal for every non-superuser writer: `sealAuditV1`'s "already sealed" and
+  `audit_log_v1_erasable()` match it by shape too (`audit_log_is_seal`). Both verifiers take the
+  first upgrade event as the seal and report a second as `extra_seal` (only reachable past the
+  triggers). Tests: forged `{}`, wrong seal and non-system rows refused (real seal still written
+  afterwards); a correct-content duplicate refused; a seal over a broken chain refused by the
+  trigger; a smuggled second seal → `extra_seal` in Node and SQL. Cost: sealing reads the v1 rows
+  once more inside the sealer's transaction (once per install).
+- **N2 lost cursor reset (MEDIUM):** the release branch of `legal_holds_guard` takes the exclusive
+  `kobe.legal_hold` lock before resetting `audit.pii_sweep_seq`; a sweep holds it shared while it
+  reads and writes its position, so the reset always lands after. Race test: a release blocks on a
+  sweep in flight, the sweep writes its position and commits, the release's reset wins (verified to
+  fail without the lock).
+- **LOW pause value:** `audit.pii_sweep_resume_at` is parsed strictly in Node (UTC ISO as `kobe
+restore` writes it); anything else pauses nothing instead of making every sweep throw (test).
+- **Known risk, recorded:** a compromised app role can stall the erasure through `install_settings`
+  (a far-future `audit.pii_sweep_resume_at`, a position past the head, or a long retention): it
+  holds INSERT/UPDATE there by design. Each only keeps data longer (privacy, not integrity); the
+  retention change is audited, the other two keys aren't settings an admin can edit through the API.
+
 ## Open questions (for Chris or the coordinator)
 
 - **Pending holds** protect nothing until approved (erasure and purges continue meanwhile). Should a
@@ -297,4 +323,4 @@ guard to any new table you purge (`files`, `artifacts`, `memory_docs`, …).
 | ac-3 | server: every step's audit row (actor, install scope, `holdId`/`teamId`/`scope`/`selfApproved`, IP), no subject id or reason in any target; none in the team audit view                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ac-4 | db `audit-pii.db.test.ts` (14): salted commitments, caller-supplied values refused, erasure only past the period / not held / all three columns, owner bound too, both verifiers OK after erasure and detecting a changed or restored IP, an edit next to an erasure, a swapped commitment; sweep walks from its position, skips held rows without re-reading, restarts on release, one replica at a time, paused after a restore; setting clamped. db `audit-upgrade.db.test.ts` (10): constant lock window on 100k rows (no xmin/relfilenode/index change, constraints NOT VALID, 128 ms), v1 hashes unchanged and verifying, v1 not erasable before the seal, sealed once by the server, new rows v2, verifies after v1 erasure, edited/fake-erased v1 row → `seal_mismatch`, salted v1 row → `pii_mismatch`, v1 after v2 → `hash_mismatch`, broken chain upgrades but is never sealed, erased v1 row without seal refused, fresh install stays empty. server `audit-pii.db.test.ts` (4): setting bounds and audit, sweep erases / keeps held / counts only, release lets it go, integrity OK and API shows no IP. cli: restore pauses the erasure 24 h (unit + db), fixture has an erased row (db job in CI) |
 | UI   | web `legal-hold-page.test.tsx` (4): request with user and reason, place + flagged self-approval shown, ask to release with reason, approve another's release, retention setting saved; `registry.test.ts` (READY ⇔ page)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| all  | `build`, `typecheck`, `lint` (except the pre-existing Helm 4 `@kobe/chart#lint`), `format:check`, `license:check` green; `pnpm test --concurrency=2` green; `test:db` db 434, server 490; `db:check` clean; `scripts/check-public-hygiene.sh` ok; PR #49 CI green                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| all  | `build`, `typecheck`, `lint` (except the pre-existing Helm 4 `@kobe/chart#lint`), `format:check`, `license:check` green; `pnpm test --concurrency=2` green; `test:db` db 438, server 490; `db:check` clean; `scripts/check-public-hygiene.sh` ok; PR #49 CI green                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |

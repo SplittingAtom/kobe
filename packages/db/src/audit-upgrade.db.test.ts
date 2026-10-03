@@ -288,6 +288,27 @@ describe("chain v2 upgrade of a KOBE-15 audit log", () => {
     expect(erased.rows[0]?.ok).toBe(false);
   });
 
+  it("refuses forged seals from the app role (review N1)", async () => {
+    const forge = (actor: string, target: string) =>
+      withClient(up.appUrl, (c) =>
+        c.query(
+          `INSERT INTO audit_log (actor_kind, action, target) VALUES ('${actor}', 'audit.chain.upgraded', '${target}')`,
+        ),
+      );
+    const code = async (p: Promise<unknown>) =>
+      p.then(
+        () => "ok",
+        (e: { code?: string }) => e.code,
+      );
+    expect(await code(forge("system", "{}"))).toBe("42501");
+    expect(
+      await code(forge("system", `{"throughSeq": 5, "rows": 5, "seal": "${"a".repeat(64)}"}`)),
+    ).toBe("42501");
+    expect(await code(forge("user", "{}"))).toBe("42501");
+    // Nothing got in, so the real seal is still written below.
+    expect((await rows(up.ownerUrl)).length).toBe(5);
+  });
+
   it("is sealed once by the server: audit.chain.upgraded over the v1 rows", async () => {
     expect(await sealer(up.appUrl)).toEqual({ status: "sealed", throughSeq: 5, rows: 5 });
     expect(await sealer(up.appUrl)).toEqual({ status: "already_sealed" });
@@ -295,6 +316,22 @@ describe("chain v2 upgrade of a KOBE-15 audit log", () => {
     expect(event).toMatchObject({ seq: 6, hash_version: 2, action: "audit.chain.upgraded" });
     expect(event?.target).toMatchObject({ throughSeq: 5, rows: 5 });
     expect((await verify(up.appUrl)).node).toMatchObject({ ok: true, checked: 6 });
+  });
+
+  it("refuses a second seal, even with the right content", async () => {
+    const event = (await rows(up.ownerUrl))[5];
+    const again = await withClient(up.appUrl, (c) =>
+      c
+        .query(
+          `INSERT INTO audit_log (actor_kind, action, target) VALUES ('system', 'audit.chain.upgraded', $1)`,
+          [JSON.stringify(event?.target)],
+        )
+        .then(
+          () => "ok",
+          (e: { code?: string }) => e.code,
+        ),
+    );
+    expect(again).toBe("42501");
   });
 
   it("chains new rows as v2", async () => {
@@ -348,7 +385,16 @@ describe("chain v2 upgrade of a KOBE-15 audit log", () => {
         sql: { problem_seq: 6, problem: "seal_mismatch" },
       });
     }
-    // A salt on a v1 row, a v1 row after v2 rows, a seal with a string throughSeq.
+    // A second seal smuggled in past the triggers is reported as such.
+    const copy = `INSERT INTO audit_log (seq, at, actor_kind, action, target, prev_hash, hash, hash_version)
+      SELECT 8, now(), 'system', 'audit.chain.upgraded', a.target, h.hash, 'x', 2
+      FROM audit_log a, (SELECT hash FROM audit_log WHERE seq = 7) h WHERE a.seq = 6;
+      UPDATE audit_log a SET hash = audit_log_digest(audit_log_canonical(a)) WHERE seq = 8`;
+    expect(await both(copy)).toEqual({
+      node: { seq: 8, kind: "extra_seal" },
+      sql: { problem_seq: 8, problem: "extra_seal" },
+    });
+    // A salt on a v1 row, a v1 row after v2 rows.
     expect(
       await both(
         `ALTER TABLE audit_log DROP CONSTRAINT audit_log_v1_uncommitted;
@@ -389,6 +435,19 @@ describe("chain v2 edge cases", () => {
       kind: "hash_mismatch",
     });
     expect((await rows(broken.ownerUrl)).length).toBe(5);
+    // Not even with a seal computed over the broken rows: the trigger verifies them first.
+    const direct = await withClient(broken.appUrl, (c) =>
+      c
+        .query(
+          `INSERT INTO audit_log (actor_kind, action, target)
+           VALUES ('system', 'audit.chain.upgraded', '{"throughSeq":5,"rows":5,"seal":"${"0".repeat(64)}"}')`,
+        )
+        .then(
+          () => "ok",
+          (e: { message?: string }) => e.message,
+        ),
+    );
+    expect(direct).toMatch(/row 3 before the upgrade does not verify/);
     expect((await verify(broken.appUrl)).node.problem).toEqual({ seq: 3, kind: "hash_mismatch" });
   });
 

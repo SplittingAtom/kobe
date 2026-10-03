@@ -8,6 +8,7 @@ import {
   SYSTEM_ACTOR,
   audit,
   eraseExpiredAuditPii,
+  pausedUntil,
   readAuditPiiRetentionHours,
   verifyAuditChain,
   type AuditChainReport,
@@ -343,6 +344,54 @@ describe("eraseExpiredAuditPii (the sweep's step)", () => {
     ]);
     await sweep(100_000);
     expect((await row(seq)).ip).toBeNull();
+  });
+
+  it("ignores a malformed pause instead of failing every run", async () => {
+    await admin.query(
+      `INSERT INTO install_settings (key, value) VALUES ('audit.pii_sweep_resume_at', '2026-13-45T99:00:00Z')
+       ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+    );
+    expect(await sweep(10)).not.toBeNull();
+    expect(pausedUntil("not a time")).toBe(0);
+    expect(pausedUntil("2026-10-04T10:00:00.000Z")).toBe(Date.parse("2026-10-04T10:00:00.000Z"));
+    await admin.query(`DELETE FROM install_settings WHERE key = 'audit.pii_sweep_resume_at'`);
+  });
+
+  it("lets a hold release's restart win over a sweep in flight (review N2)", async () => {
+    const id = await hold(teamA, null);
+    holds.splice(holds.indexOf(id), 1);
+    await app.pool.query(
+      `UPDATE legal_holds SET release_requested_by = $2, release_requested_at = now(), release_reason = 'done' WHERE id = $1`,
+      [id, requester],
+    );
+    // A sweep in flight: it holds the hold lock shared while it reads and writes its position.
+    const sweeper = await app.pool.connect();
+    try {
+      await sweeper.query("BEGIN");
+      await sweeper.query(`SELECT legal_hold_lock_shared()`);
+      await sweeper.query(`SELECT value FROM install_settings WHERE key = $1`, [
+        AUDIT_PII_SWEEP_SEQ_KEY,
+      ]);
+      let releasedAt = 0;
+      const release = app.pool
+        .query(`UPDATE legal_holds SET status = 'released', released_by = $2 WHERE id = $1`, [
+          id,
+          approver,
+        ])
+        .then(() => (releasedAt = Date.now()));
+      await new Promise((r) => setTimeout(r, 300));
+      expect(releasedAt).toBe(0);
+      await sweeper.query(
+        `INSERT INTO install_settings (key, value) VALUES ($1, '987654')
+         ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+        [AUDIT_PII_SWEEP_SEQ_KEY],
+      );
+      await sweeper.query("COMMIT");
+      await release;
+    } finally {
+      sweeper.release();
+    }
+    expect(await position()).toBe(0);
   });
 
   it("runs on one replica at a time", async () => {

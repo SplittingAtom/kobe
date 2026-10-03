@@ -55,6 +55,15 @@ interface PageRow extends Record<string, unknown> {
   held: boolean;
 }
 
+/** UTC ISO time as `kobe restore` writes it; anything else (malformed, unset) pauses nothing. */
+const RESUME_AT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/;
+
+export function pausedUntil(value: string | null | undefined): number {
+  if (!value || !RESUME_AT.test(value)) return 0;
+  const at = Date.parse(value);
+  return Number.isNaN(at) ? 0 : at;
+}
+
 async function setSetting(tx: KobeTx, key: string, value: string): Promise<void> {
   await tx.execute(sql`
     INSERT INTO public.install_settings (key, value) VALUES (${key}, ${value})
@@ -86,18 +95,21 @@ export async function eraseExpiredAuditPii(
     position: string | null;
     v1_open: boolean;
     v1_marked: boolean;
-    paused: boolean;
+    resume_at: string | null;
+    now: Date;
   }>(
     sql`SELECT
           (SELECT value FROM public.install_settings WHERE key = ${AUDIT_PII_SWEEP_SEQ_KEY}) AS position,
-          COALESCE((SELECT CASE WHEN value ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' THEN value::timestamptz > now() END
-                    FROM public.install_settings WHERE key = ${AUDIT_PII_SWEEP_RESUME_KEY}), false) AS paused,
+          (SELECT value FROM public.install_settings WHERE key = ${AUDIT_PII_SWEEP_RESUME_KEY}) AS resume_at,
+          now() AS now,
           public.audit_log_v1_erasable() AS v1_open,
           EXISTS (SELECT 1 FROM public.install_settings WHERE key = ${V1_OPEN_KEY}) AS v1_marked`,
   );
   const s = state.rows[0];
   // Paused after a restore (holds are as of the backup; admins re-place newer ones meanwhile).
-  if (s?.paused) return { rows: 0, olderThanHours, more: false };
+  if (s && pausedUntil(s.resume_at) > new Date(s.now).getTime()) {
+    return { rows: 0, olderThanHours, more: false };
+  }
   let position = /^\d{1,18}$/.test(s?.position ?? "") ? Number(s?.position) : 0;
   const v1Open = s?.v1_open === true;
   if (v1Open && !s?.v1_marked) {
