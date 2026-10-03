@@ -169,20 +169,6 @@
       "when": 1790997633394,
       "tag": "0023_break_glass_guard",
       "breakpoints": true
-    },
-    {
-      "idx": 24,
-      "version": "7",
-      "when": 1791004282574,
-      "tag": "0024_egress",
-      "breakpoints": true
-    },
-    {
-      "idx": 25,
-      "version": "7",
-      "when": 1791004282891,
-      "tag": "0025_egress_rls",
-      "breakpoints": true
     }
   ]
 }
