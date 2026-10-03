@@ -20,6 +20,7 @@ import {
   type UpdateThreadBody,
 } from "./schemas.js";
 import { recordAudit } from "../audit/record.js";
+import { resolveSwitchPin, type AgentPin, type PinError } from "../agents/versions.js";
 
 /**
  * Thread data access (spec D9, D15, D18, D23, §6.1). Every function runs inside the caller's
@@ -49,7 +50,9 @@ export type ThreadError =
   | "thread_in_trash"
   | "not_in_trash"
   | "not_in_project"
-  | "entry_not_found";
+  | "entry_not_found"
+  | "no_agent"
+  | PinError;
 
 export type ThreadResult = { ok: true; thread: ThreadSummary } | { ok: false; error: ThreadError };
 
@@ -81,6 +84,7 @@ const summaryColumns = {
   status: threads.status,
   ownerUserId: threads.ownerUserId,
   projectId: threads.projectId,
+  agentScope: threads.agentScope,
   agentId: threads.agentId,
   agentVersion: threads.agentVersion,
   sharedToProject: threads.sharedToProject,
@@ -96,6 +100,7 @@ type SummaryRow = {
   status: ThreadSummary["status"];
   ownerUserId: string;
   projectId: string | null;
+  agentScope: AgentPin["agentScope"] | null;
   agentId: string | null;
   agentVersion: number | null;
   sharedToProject: boolean;
@@ -220,12 +225,21 @@ export async function createThread(
     teamId: string;
     ownerUserId: string;
     projectId: string | null;
-    agentId: string | null;
-    agentVersion: number | null;
+    /** The published agent version the thread pins (D19); null = the install default agent. */
+    agent: AgentPin | null;
     title: string | null;
   },
 ): Promise<ThreadSummary> {
-  const [row] = await tx.insert(threads).values(input).returning(summaryColumns);
+  const { agent, ...rest } = input;
+  const [row] = await tx
+    .insert(threads)
+    .values({
+      ...rest,
+      agentScope: agent?.agentScope ?? null,
+      agentId: agent?.agentId ?? null,
+      agentVersion: agent?.agentVersion ?? null,
+    })
+    .returning(summaryColumns);
   if (!row) throw new Error("thread insert returned no row");
   return toSummary(row);
 }
@@ -348,6 +362,57 @@ export async function setLeaf(
     .where(and(eq(threads.teamId, viewer.teamId), eq(threads.id, id)))
     .returning(summaryColumns);
   if (!row) throw new Error("thread update returned no row");
+  return { ok: true, thread: toSummary(row) };
+}
+
+/**
+ * Pins another published version of the thread's agent (D19 one-click switch; default: the
+ * agent's current version). Owner only, like every change. Refused while a run is active (the run
+ * started on the old version); queued runs resolve the pin when they start (KOBE-47). The agent
+ * must still be available to the owner (not suspended or archived).
+ */
+export async function switchAgentVersion(
+  tx: KobeTx,
+  viewer: Viewer,
+  id: string,
+  version: number | undefined,
+): Promise<ThreadResult> {
+  const locked = await lockForChange(tx, viewer, id);
+  if (!locked.ok) return locked;
+  const thread = locked.thread;
+  if (thread.deletedAt) return { ok: false, error: "thread_in_trash" };
+  if (thread.agentId === null || thread.agentVersion === null || thread.agentScope === null) {
+    return { ok: false, error: "no_agent" };
+  }
+  if (await hasRunIn(tx, viewer, id, ACTIVE_RUN_STATUSES)) {
+    return { ok: false, error: "thread_busy" };
+  }
+  const pin = await resolveSwitchPin(
+    tx,
+    viewer,
+    { agentScope: thread.agentScope, agentId: thread.agentId },
+    version,
+  );
+  if (!pin.ok) return pin;
+  if (pin.value.agentVersion === thread.agentVersion)
+    return { ok: true, thread: toSummary(thread) };
+  const [row] = await tx
+    .update(threads)
+    .set({ agentVersion: pin.value.agentVersion })
+    .where(and(eq(threads.teamId, viewer.teamId), eq(threads.id, id)))
+    .returning(summaryColumns);
+  if (!row) throw new Error("thread update returned no row");
+  await recordAudit(tx, {
+    action: "thread.agent_switched",
+    teamId: viewer.teamId,
+    target: {
+      threadId: id,
+      agentId: thread.agentId,
+      scope: thread.agentScope,
+      fromVersion: thread.agentVersion,
+      toVersion: pin.value.agentVersion,
+    },
+  });
   return { ok: true, thread: toSummary(row) };
 }
 

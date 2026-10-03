@@ -15,6 +15,7 @@ import {
   unique,
   uuid,
 } from "drizzle-orm/pg-core";
+import { agentScope, installAgentVersions, teamAgentVersions } from "./agents.js";
 import { users } from "./auth.js";
 import { teams } from "./teams.js";
 
@@ -31,11 +32,13 @@ const teamRef = () =>
     .references(() => teams.id, { onDelete: "cascade" });
 
 /**
- * A conversation. `leaf_entry_id` marks the active branch of the entry tree. `agent_id`/
- * `agent_version` pin the agent version the thread started on (D19); the pin's foreign key arrives
- * with agent versions (KOBE-46: agents span team_agents and install_agents, see
- * docs/ledger/KOBE-45.md) and `project_id`'s with projects (KOBE-57). Null agent = the install
- * default agent.
+ * A conversation. `leaf_entry_id` marks the active branch of the entry tree. `agent_scope`/
+ * `agent_id`/`agent_version` pin the published agent version the thread started on (D19, KOBE-46).
+ * Agents live in two tables (team_agents, install_agents), so the pin's foreign keys go through
+ * two generated columns: `team_agent_id` (set for team agents) → team_agent_versions and
+ * `install_agent_id` (personal and gallery agents) → install_agent_versions; MATCH SIMPLE skips
+ * the null one. Both are NO ACTION, so a pinned version can never be deleted. Null agent = the
+ * install default agent. `project_id`'s foreign key arrives with projects (KOBE-57).
  *
  * `tsv` (§5.4; the title, weight A) is a stored generated column added in SQL by migration
  * `*_thread_search.sql`, like `thread_entries.tsv`; neither is declared here (the entry column depends
@@ -53,8 +56,15 @@ export const threads = pgTable(
       .notNull()
       .references(() => users.id),
     projectId: uuid(),
+    agentScope: agentScope(),
     agentId: uuid(),
     agentVersion: integer(),
+    /** Generated: `agent_id` when the pinned agent is a team agent (foreign key target). */
+    teamAgentId: uuid().generatedAlwaysAs(sql`CASE WHEN agent_scope = 'team' THEN agent_id END`),
+    /** Generated: `agent_id` when the pinned agent is personal or gallery (foreign key target). */
+    installAgentId: uuid().generatedAlwaysAs(
+      sql`CASE WHEN agent_scope IN ('personal', 'gallery') THEN agent_id END`,
+    ),
     title: text(),
     leafEntryId: text(),
     status: threadStatus().notNull().default("idle"),
@@ -84,9 +94,31 @@ export const threads = pgTable(
     index("threads_deleted_idx")
       .on(t.teamId, t.deletedAt)
       .where(sql`${t.deletedAt} IS NOT NULL`),
+    // The pinned version (D19). NO ACTION: versions are never deleted while a thread pins them.
+    foreignKey({
+      name: "threads_team_agent_version_fk",
+      columns: [t.teamId, t.teamAgentId, t.agentVersion],
+      foreignColumns: [
+        teamAgentVersions.teamId,
+        teamAgentVersions.agentId,
+        teamAgentVersions.version,
+      ],
+    }),
+    foreignKey({
+      name: "threads_install_agent_version_fk",
+      columns: [t.installAgentId, t.agentVersion],
+      foreignColumns: [installAgentVersions.agentId, installAgentVersions.version],
+    }),
+    // Usage per version (inventory, KOBE-48) and the foreign keys' checks on a team's cascade.
+    index("threads_team_agent_idx")
+      .on(t.teamId, t.teamAgentId, t.agentVersion)
+      .where(sql`${t.teamAgentId} IS NOT NULL`),
+    index("threads_install_agent_idx")
+      .on(t.teamId, t.installAgentId, t.agentVersion)
+      .where(sql`${t.installAgentId} IS NOT NULL`),
     check(
       "threads_agent_pin",
-      sql`(${t.agentId} IS NULL) = (${t.agentVersion} IS NULL) AND (${t.agentVersion} IS NULL OR ${t.agentVersion} > 0)`,
+      sql`(${t.agentId} IS NULL) = (${t.agentVersion} IS NULL) AND (${t.agentId} IS NULL) = (${t.agentScope} IS NULL) AND (${t.agentVersion} IS NULL OR ${t.agentVersion} > 0)`,
     ),
     check("threads_last_entry_seq", sql`${t.lastEntrySeq} >= 0`),
   ],
