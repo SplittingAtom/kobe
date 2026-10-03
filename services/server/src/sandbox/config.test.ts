@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { KEYS, SETTINGS } from "../testing/sandbox-fixtures.js";
-import { loadSandboxConfig, sessionKeyEnvName } from "./config.js";
+import { loadSandboxConfig, quantityBytes, sessionKeyEnvName } from "./config.js";
 
 const env = (over: Record<string, string | undefined> = {}) => ({
   KOBE_SANDBOX_CONFIG: JSON.stringify(SETTINGS),
@@ -14,6 +14,26 @@ const env = (over: Record<string, string | undefined> = {}) => ({
 describe("sandbox config", () => {
   it("parses the chart's settings and one key per audience", () => {
     expect(loadSandboxConfig(env())).toEqual({ settings: SETTINGS, sessionKeys: KEYS });
+  });
+
+  it("defaults workspace sync (KOBE-27) when the chart predates it, and reads quantities as bytes", () => {
+    const { workspaceSync: _ws, ...older } = SETTINGS;
+    const loaded = loadSandboxConfig(env({ KOBE_SANDBOX_CONFIG: JSON.stringify(older) }));
+    expect(loaded?.settings.workspaceSync).toEqual(SETTINGS.workspaceSync);
+    expect(quantityBytes("10Gi")).toBe(10 * 2 ** 30);
+    expect(quantityBytes("512Mi")).toBe(512 * 2 ** 20);
+    expect(quantityBytes("1G")).toBe(1e9);
+    expect(quantityBytes("100")).toBe(100);
+    expect(() =>
+      loadSandboxConfig(
+        env({
+          KOBE_SANDBOX_CONFIG: JSON.stringify({
+            ...SETTINGS,
+            workspaceSync: { ...SETTINGS.workspaceSync, pushIntervalSeconds: 1 },
+          }),
+        }),
+      ),
+    ).toThrow(/pushIntervalSeconds/);
   });
 
   it("names key variables after their audience", () => {

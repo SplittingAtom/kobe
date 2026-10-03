@@ -145,10 +145,8 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
         objects: 2,
         bytes: 1333,
         referencedObjects: 2,
-        blobRefColumns: [
-          { table: "thread_entries", column: "blob_ref" },
-          { table: "widgets", column: "blob_ref" },
-        ],
+        // Every registered blob-ref column (BLOB_REF_COLUMNS) plus the fixture's own table.
+        blobRefColumns: BLOB_REFS,
       });
       expect(manifest.coverage).toEqual({
         schemas: ["public"],

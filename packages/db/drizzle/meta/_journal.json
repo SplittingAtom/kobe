@@ -246,6 +246,20 @@
       "when": 1791060237532,
       "tag": "0034_audit_pii_commitments",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1791064635912,
+      "tag": "0035_workspace_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1791064636310,
+      "tag": "0036_workspace_sync_rls",
+      "breakpoints": true
     }
   ]
 }
