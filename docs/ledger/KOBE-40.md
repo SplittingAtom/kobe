@@ -1,6 +1,6 @@
 # KOBE-40: Bifrost deployment and config sync
 
-- **Status:** in review
+- **Status:** in review (PR #51)
 - **Branch / worktree:** `kobe-40-bifrost` in `../Kobe-wt40`
 - **Depends on:** KOBE-6, KOBE-24, KOBE-22, KOBE-38, KOBE-15, KOBE-20 (merged)
 
