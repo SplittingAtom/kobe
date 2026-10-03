@@ -7,6 +7,7 @@ import {
 } from "@kobe/protocol";
 import { SYSTEM_ACTOR, sql, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
+import { auditExpiredApprovals, expireRunApprovalsInTx } from "../approvals/run-end.js";
 import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js";
 import type { RunEnd } from "./types.js";
 
@@ -86,8 +87,9 @@ function terminalEvent(end: RunEnd, leaf: string | null): NewRunEvent {
  * terminal event in one transaction, the event last. Returns false when the run is no longer
  * active or the transition is not allowed (e.g. Stop got there first): nothing is written.
  *
- * Pending approvals of the run (KOBE-37) must expire with an `approval.resolved` event before the
- * terminal event; there is no approvals table yet, so KOBE-37 adds that step here.
+ * Pending approvals of the run expire first (KOBE-37: `approval.resolved` before the terminal
+ * event). A run Pi settled while an approval was still pending in Postgres (its waiter's replica
+ * died; the sandbox had already denied the call locally) completes from `waiting_approval`.
  */
 export async function endRunInTx(
   tx: KobeTx,
@@ -113,7 +115,11 @@ export async function endRunInTx(
   const budgetScope = run.rows[0]?.budget_stop_scope ?? null;
   const to: RunStatus = end.status === "completed" && budgetScope ? "budget_stopped" : end.status;
   const cause = to === "budget_stopped" ? "budget_exhausted" : CAUSE[end.status];
-  if (!canTransition(from, to, cause)) return { ended: false, threadId };
+  const settledWhileWaiting = from === "waiting_approval" && to === "completed";
+  if (!canTransition(settledWhileWaiting ? "running" : from, to, cause)) {
+    return { ended: false, threadId };
+  }
+  const expired = await expireRunApprovalsInTx(tx, teamId, runId, expiryCauseOfEnd(to));
   await tx.execute(sql`
     UPDATE runs SET status = ${to}, ended_at = now()
      WHERE team_id = ${teamId} AND id = ${runId}`);
@@ -148,7 +154,14 @@ export async function endRunInTx(
       target: { runId, threadId, cause: interruptCause ?? "sandbox_gone" },
     });
   }
+  await auditExpiredApprovals(tx, teamId, expired);
   return { ended: true, threadId };
+}
+
+function expiryCauseOfEnd(to: RunStatus) {
+  if (to === "budget_stopped") return "budget_exhausted" as const;
+  if (to === "failed") return "run_failed" as const;
+  return "run_interrupted" as const;
 }
 
 export interface LeasedRun {

@@ -5,6 +5,8 @@
  */
 import { apiRequest, type ApiResult } from "../api/client";
 import type {
+  ApprovalDecisionBody,
+  ApprovalView,
   EntryPage,
   PendingMessages,
   RunSnapshot,
@@ -54,6 +56,10 @@ export interface ChatApi {
   steer(runId: string, content: string): Promise<ApiResult<RunSnapshot>>;
   cancel(runId: string): Promise<ApiResult<RunSnapshot>>;
   retry(runId: string): Promise<ApiResult<SubmitResult>>;
+  /** One of your approvals with its full input (KOBE-37). */
+  getApproval(approvalId: string): Promise<ApiResult<ApprovalView>>;
+  /** `POST /v1/approvals/{id}` (§6.1): allow or deny, optionally remembering an allow. */
+  decideApproval(approvalId: string, body: ApprovalDecisionBody): Promise<ApiResult<ApprovalView>>;
 }
 
 /** The chat API for one team; `teamId` goes in `X-Kobe-Team` on every request. */
@@ -95,6 +101,21 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     steer: (runId, content) => send("POST", `/v1/runs/${enc(runId)}/steer`, { content }),
     cancel: (runId) => send("POST", `/v1/runs/${enc(runId)}/cancel`),
     retry: (runId) => send("POST", `/v1/runs/${enc(runId)}/retry`),
+    getApproval: (id) => get(`/v1/approvals/${enc(id)}`),
+    decideApproval: (id, body) =>
+      send("POST", `/v1/approvals/${enc(id)}`, {
+        decision: body.decision,
+        ...(body.remember === undefined
+          ? {}
+          : {
+              remember: {
+                tool_glob: body.remember.toolGlob,
+                ...(body.remember.expiresIn === undefined
+                  ? {}
+                  : { expires_in: body.remember.expiresIn }),
+              },
+            }),
+      }),
   };
 }
 

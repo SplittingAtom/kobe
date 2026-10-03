@@ -90,6 +90,11 @@ export class FakeKobe {
   #entryN = 0;
   #queueN = 0;
   readonly #sources = new Set<FakeEventSource>();
+  /** Approvals asked with `requestApproval` (KOBE-37), by id. */
+  readonly approvals = new Map<
+    string,
+    { runId: string; payload: KobeEventPayload<"approval.requested">; status: string }
+  >();
 
   // --- setup ----------------------------------------------------------------------------------
 
@@ -157,6 +162,13 @@ export class FakeKobe {
   }
 
   // --- the agent (what Pi does inside a run) -----------------------------------------------------
+
+  /** The server asks the run's user (KOBE-37): records the approval and emits the card event. */
+  requestApproval(runId: string, payload: KobeEventPayload<"approval.requested">): void {
+    this.approvals.set(payload.approval_id, { runId, payload, status: "pending" });
+    this.run(runId).status = "waiting_approval";
+    this.emit(runId, "approval.requested", payload);
+  }
 
   emit<T extends KobeEventType>(runId: string, type: T, payload: KobeEventPayload<T>): void {
     const run = this.run(runId);
@@ -352,7 +364,10 @@ export class FakeKobe {
       });
     }
     if (url.pathname === "/v1/me/invites") return json(200, { invitations: [] });
-    const scoped = url.pathname.startsWith("/v1/threads") || url.pathname.startsWith("/v1/runs");
+    const scoped =
+      url.pathname.startsWith("/v1/threads") ||
+      url.pathname.startsWith("/v1/runs") ||
+      url.pathname.startsWith("/v1/approvals");
     if (!scoped) return error(404, "not_found");
     if (headers.get("x-kobe-team") !== this.teamId) return error(409, "team_mismatch");
     return this.#route(method, url, body as Json | undefined, headers);
@@ -363,7 +378,35 @@ export class FakeKobe {
     const [, area, id, action, sub] = parts;
     if (area === "threads") return this.#threadRoute(method, id, action, sub, url, body, headers);
     if (area === "runs" && id) return this.#runRoute(method, id, action, body);
+    if (area === "approvals" && id) return this.#approvalRoute(method, id, body);
     return error(404, "not_found");
+  }
+
+  /** `GET`/`POST /v1/approvals/{id}`: a decision resolves the card through the stream. */
+  #approvalRoute(method: string, id: string, body: Json | undefined): Response {
+    const approval = this.approvals.get(id);
+    if (!approval) return error(404, "approval_not_found", "No pending approval with that id.");
+    const view = () => ({
+      ...approval.payload,
+      run_id: approval.runId,
+      status: approval.status,
+      remembered: false,
+    });
+    if (method === "GET") return json(200, view());
+    if (approval.status !== "pending") {
+      return error(409, "approval_resolved", `This approval is already ${approval.status}.`);
+    }
+    const allow = body?.decision === "allow";
+    approval.status = allow ? "allowed" : "denied";
+    this.run(approval.runId).status = "running";
+    this.emit(approval.runId, "approval.resolved", {
+      approval_id: id,
+      tool_call_id: approval.payload.tool_call_id,
+      decision: allow ? "allowed" : "denied",
+      cause: "user",
+      remembered: allow && body?.remember !== undefined,
+    });
+    return json(200, view());
   }
 
   #threadRoute(

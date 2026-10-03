@@ -214,6 +214,10 @@ export interface ApprovalBroker {
     request: ApprovalRequest,
     onPending: (pending: { readonly approvalId: string; readonly expiresAt: string }) => void,
   ): Promise<ApprovalOutcome>;
+  /** Bus hint `apr:<id>`: the approval left `pending` (any replica); re-read it now. */
+  onHint?(approvalId: string): void;
+  /** Hints may have been missed (bus reconnected): re-read every approval being waited on. */
+  onResync?(): void;
 }
 
 /** Pi extension dialogs (`pi.ui_request`). Kobe v1 has no UI for them; the default cancels. */
