@@ -182,3 +182,30 @@ version — the session trade, CNI admission of the new pod), then ≈ 0.8 s to 
 thread. p95 is inside the 8 s budget; p50 missed 3 s.
 
 Tuning after run 1: the agent reads Pi's version from its package (no Pi boot at startup).
+
+| Run                                                     | Set          | n   | p50  | p95  | max  | container started p50/p95 | wire connected p50/p95 |
+| ------------------------------------------------------- | ------------ | --- | ---- | ---- | ---- | ------------------------- | ---------------------- |
+| 2 (run 37093200720; after tuning, on main with KOBE-30) | back-to-back | 20  | 3649 | 4266 | 4920 | 949 / 1517                | 2543 / 3433            |
+| 2                                                       | spaced 30 s  | 5   | 3461 | 3700 | 3700 | 722 / 1250                | 2596 / 2796            |
+
+Run 2's agent log: session trade succeeded on the **first** attempt (219 ms, so no CNI admission
+wait on k3d), wire ready 37 ms later. The remaining time is Node + agent boot under gVisor
+(≈ 1–1.5 s between container start and the trade) and Pi's boot for the thread (≈ 1.1 s).
+
+**Against the targets:** p95 (Gate 1's criterion) 4.3 s ≤ 8 s with ≈ 3.7 s to spare for run
+creation + the model's first token; **p50 misses D14's 3 s already at Pi ready (≈ 3.5 s)**. e2e
+gates p95 ≤ 8 s; p50 is reported in every run and gated only when `KOBE_COLD_START_P50_MS` is set.
+Next levers, not done here (each needs review): a V8 compile cache for the agent and Pi baked
+into the image (Node `module.enableCompileCache`, read-only; a cache on `/workspace` would be
+model-writable code), spawning Pi for the thread in parallel with the session restore check
+(KOBE-24 delivery), and a smaller agent bundle.
+
+**Real cluster (inspected read-only, nothing deployed):** 4 nodes, default StorageClass
+`longhorn` (multi-node, `Immediate`), also an NFS CSI class; no `local-path`. On Longhorn a
+suspended sandbox's volume detaches and must re-attach on wake (engine start + replica attach,
+typically several seconds), which lands directly on the cold-start path; with `local-path` (CI)
+the mount is a bind mount (≈ 0). Before claiming Gate 1 there: measure with this harness against
+`sandbox.workspace.storageClass=longhorn` (and an NFS class for comparison), keep
+`imagePullPolicy: IfNotPresent` (an `Always` pull adds a registry round trip per wake), and expect
+the CNI admission delay seen in KOBE-22's e2e (kube-router) to show up as session-trade retries in
+the agent log (`attempts` > 1).
