@@ -9,7 +9,7 @@ import {
   type PolicyResultFrame,
   type ToolRegistry,
 } from "@kobe/protocol";
-import { eq, getMembership, sql, users, withTeam, type KobeDb } from "@kobe/db";
+import { eq, getMembership, sql, users, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import { appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
 import type {
   ApprovalBroker,
@@ -90,22 +90,34 @@ function parseFloor(raw: unknown, where: string): ApprovalMode {
 }
 
 /**
- * Run policy context from Postgres: the install floor (`install_settings`) and the team floor
- * (`teams.settings`), the stricter of both. The run's own mode arrives with KOBE-30
- * (`runs.approval_mode`); until then it is `ask-on-write` (D29 default). Agent tool lists arrive
+ * The approval-mode floor of a team (D6): the install floor (`install_settings`) and the team floor
+ * (`teams.settings`), the stricter of both. Absent = `auto` (no floor beyond D29); a floor that
+ * can't be read or parsed throws (callers fail closed).
+ */
+export async function readApprovalModeFloor(tx: KobeTx, teamId: string): Promise<ApprovalMode> {
+  const res = await tx.execute<{ install: string | null; team: unknown }>(sql`
+    SELECT (SELECT value FROM install_settings WHERE key = ${APPROVAL_MODE_FLOOR_KEY}) AS install,
+           (SELECT settings -> ${TEAM_APPROVAL_MODE_FLOOR} FROM teams WHERE id = ${teamId}) AS team`);
+  const row = res.rows[0];
+  if (!row) throw new Error("approval mode floor unavailable");
+  const install = parseFloor(row.install ?? undefined, "install settings");
+  const team = parseFloor(row.team ?? undefined, "team settings");
+  return clampApprovalMode(team, install);
+}
+
+/**
+ * Run policy context from Postgres: the floor (`readApprovalModeFloor`) and the run's own mode,
+ * fixed at creation by the orchestrator (`runs.approval_mode`, KOBE-30). Agent tool lists arrive
  * with KOBE-46/47. A floor that can't be read or parsed throws, and the call is denied.
  */
 export function createDbRunContextSource(): RunPolicyContextSource {
   return {
     async load(tx, run) {
-      const res = await tx.execute<{ install: string | null; team: unknown }>(sql`
-        SELECT (SELECT value FROM install_settings WHERE key = ${APPROVAL_MODE_FLOOR_KEY}) AS install,
-               (SELECT settings -> ${TEAM_APPROVAL_MODE_FLOOR} FROM teams WHERE id = ${run.teamId}) AS team`);
-      const row = res.rows[0];
-      if (!row) throw new Error("approval mode floor unavailable");
-      const install = parseFloor(row.install ?? undefined, "install settings");
-      const team = parseFloor(row.team ?? undefined, "team settings");
-      return { floor: clampApprovalMode(team, install) };
+      const floor = await readApprovalModeFloor(tx, run.teamId);
+      const res = await tx.execute<{ approval_mode: string }>(sql`
+        SELECT approval_mode FROM runs WHERE team_id = ${run.teamId} AND id = ${run.runId}`);
+      const mode = approvalModeSchema.safeParse(res.rows[0]?.approval_mode);
+      return mode.success ? { floor, approvalMode: mode.data } : { floor };
     },
   };
 }

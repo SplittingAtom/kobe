@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { ServerDeps } from "../deps.js";
+import { runRoutes, threadRunRoutes } from "../routes/runs.js";
 import { threadRoutes } from "../routes/threads.js";
 import { openApiDocument } from "./document.js";
 
@@ -30,14 +31,38 @@ describe("OpenAPI document (KOBE-34 ac-1)", () => {
     expect(JSON.parse(readFileSync(FILE, "utf8"))).toEqual(doc);
   });
 
-  it("describes exactly the thread routes the server mounts", () => {
-    // The middleware isn't run here; only the route table is read.
-    const router = threadRoutes({ database: { db: {} } } as unknown as ServerDeps);
-    const documented = Object.entries(doc.paths as Record<string, object>)
-      .filter(([path]) => path.startsWith("/v1/threads"))
+  // The middleware isn't run here; only the route tables are read.
+  const fakeDeps = { database: { db: {} } } as unknown as ServerDeps;
+  const documented = (prefix: string) =>
+    Object.entries(doc.paths as Record<string, object>)
+      .filter(([path]) => path.startsWith(prefix))
       .flatMap(([path, ops]) => Object.keys(ops).map((m) => `${m} ${path}`))
       .sort();
-    expect(documented).toEqual(mountedOperations("/v1/threads", router));
+
+  it("describes exactly the thread routes the server mounts", () => {
+    expect(documented("/v1/threads")).toEqual(
+      [
+        ...mountedOperations("/v1/threads", threadRoutes(fakeDeps)),
+        ...mountedOperations("/v1/threads", threadRunRoutes(fakeDeps)),
+      ].sort(),
+    );
+  });
+
+  it("describes exactly the run routes the orchestrator mounts (KOBE-30)", () => {
+    expect(documented("/v1/runs")).toEqual(mountedOperations("/v1/runs", runRoutes(fakeDeps)));
+  });
+
+  it("matches §6.1: messages take content (+ parent_entry_id, file_ids) and answer run_id, queued", () => {
+    const schemas = (doc.components as { schemas: Record<string, { properties: object }> }).schemas;
+    const props = (name: string) => Object.keys(schemas[name]?.properties ?? {});
+    expect(props("SubmitMessageBody")).toEqual(["parent_entry_id", "content", "file_ids"]);
+    expect(props("SubmitMessageResult")).toEqual(["run_id", "queued"]);
+    expect(props("SteerBody")).toEqual(["content"]);
+    for (const op of ["steer", "cancel", "retry"]) {
+      expect(
+        Object.keys((doc.paths as Record<string, object>)[`/v1/runs/{id}/${op}`] ?? {}),
+      ).toEqual(["post"]);
+    }
   });
 
   it("matches §6.1: create takes agent_id and project_id; read returns entries, leaf, pin, status", () => {
