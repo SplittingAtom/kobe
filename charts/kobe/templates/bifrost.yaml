@@ -55,6 +55,11 @@ spec:
           readinessProbe:
             httpGet: { path: /health, port: http }
             periodSeconds: 5
+          # As for Kobe's services (_helpers.tpl): liveness starts once Bifrost has started.
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 2
+            failureThreshold: 90
           livenessProbe:
             httpGet: { path: /health, port: http }
             periodSeconds: 10

@@ -43,6 +43,8 @@ export const SIGN_IN_METHODS = [
 const signInMethod = z.enum(SIGN_IN_METHODS);
 const agentScope = z.enum(["team", "personal", "gallery"]);
 const agentRef = { agentId: id, scope: agentScope, slug };
+/** A published agent version number (or a draft revision): a positive integer. */
+const version = z.number().int().positive();
 const isolationState = z.enum(["checking", "verified", "missing"]);
 /** A tool rule (KOBE-35) by its policy metadata; never its free-text note or arg values. */
 const toolRule = {
@@ -201,6 +203,14 @@ export const AUDIT_EVENTS = {
   "thread.trashed": event("team", { threadId: id }),
   "thread.restored": event("team", { threadId: id }),
   "thread.sharing_changed": event("team", { threadId: id, projectId: id, shared: z.boolean() }),
+  /** The thread's pinned agent version changed (D19 one-click switch, KOBE-46). */
+  "thread.agent_switched": event("team", {
+    threadId: id,
+    agentId: id,
+    scope: agentScope,
+    fromVersion: version,
+    toVersion: version,
+  }),
 
   // ── run: lifecycle metadata the server decides on its own (KOBE-24; never content) ──
   /** The wire ended an active run as interrupted (D14: sandbox or Pi lost; actor: system). */
@@ -260,6 +270,12 @@ export const AUDIT_EVENTS = {
   "agent.deleted": event("any", agentRef),
   "agent.status_changed": event("any", { ...agentRef, status: z.enum(["active", "suspended"]) }),
   "agent.exported": event("any", agentRef),
+  // Versions (KOBE-46): publish freezes the draft and its tool manifest; rollback republishes.
+  "agent.published": event("any", { ...agentRef, version, draftRevision: version }),
+  "agent.rolled_back": event("any", { ...agentRef, version, fromVersion: version }),
+  /** An agent with versions retired instead of deleted (pinned threads keep their version). */
+  "agent.archived": event("any", agentRef),
+  "agent.unarchived": event("any", agentRef),
 } as const;
 
 export type AuditAction = keyof typeof AUDIT_EVENTS;

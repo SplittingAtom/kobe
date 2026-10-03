@@ -1,7 +1,7 @@
 "use client";
 
 import { listTeamAgents, setTeamAgentStatus } from "../../../lib/admin/api/team/agents";
-import type { AgentSummary } from "../../../lib/admin/api/agents";
+import { agentStatusLabel, type AgentSummary } from "../../../lib/admin/api/agents";
 import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
 import { DateTime, ResourceView, confirmed } from "../parts";
@@ -34,8 +34,9 @@ export function TeamAgentsPage() {
     <>
       <h1>Team agents</h1>
       <p className={styles.hint}>
-        Builders create and publish team agents; team admins can suspend any of them. The full
-        inventory (versions, usage, schedules) arrives with KOBE-48.
+        Builders create and publish team agents; team admins can suspend any of them. Archived
+        agents were deleted after publishing: conversations pinned to them keep working. The full
+        inventory (usage, schedules) arrives with KOBE-48.
       </p>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="team agents">
@@ -68,7 +69,7 @@ export function TeamAgentsPage() {
                       <td>
                         <code>{a.slug}</code>
                       </td>
-                      <td>{a.status === "active" ? "Active" : "Suspended"}</td>
+                      <td>{agentStatusLabel(a)}</td>
                       <td>{a.currentVersion === null ? "Draft" : `v${a.currentVersion}`}</td>
                       <td>
                         <DateTime value={a.updatedAt} />
