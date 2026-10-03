@@ -179,26 +179,21 @@ export function createSandboxLifecycle(options: LifecycleOptions): SandboxLifecy
   ): Promise<boolean> => {
     const done = await withTeam(db, target.teamId, async (tx) => {
       const locked = await lockIfIdle(tx, target, idleMinutes, force);
-      if (!locked) return false;
-      if (locked.sandboxId) {
-        // Kubernetes first, under the lock: a rollback (commit failure) leaves the row `running`
-        // and the next command finds no connection and resumes the sandbox.
-        await provider.hibernateSandbox(team, target.userId, locked.sandboxId);
-      }
+      // No claim recorded yet (its wake failed half-way): nothing known to suspend; the next wake
+      // records it and a later sweep hibernates it.
+      if (!locked?.sandboxId) return false;
+      const sandboxId = locked.sandboxId;
+      // Kubernetes first, under the lock: a rollback (commit failure) leaves the row `running`
+      // and the next command finds no connection and resumes the sandbox.
+      await provider.hibernateSandbox(team, target.userId, sandboxId);
       const connection = await markHibernated(tx, target);
       if (connection) await notifyHintInTx(tx, { kind: "hib", id: connection });
-      if (locked.sandboxId) {
-        await recordAudit(tx, {
-          action: "sandbox.hibernated",
-          actor: SYSTEM_ACTOR,
-          teamId: target.teamId,
-          target: {
-            sandboxId: locked.sandboxId,
-            userId: target.userId,
-            idleMinutes: force ? 0 : idleMinutes,
-          },
-        });
-      }
+      await recordAudit(tx, {
+        action: "sandbox.hibernated",
+        actor: SYSTEM_ACTOR,
+        teamId: target.teamId,
+        target: { sandboxId, userId: target.userId, idleMinutes: force ? 0 : idleMinutes },
+      });
       return true;
     });
     if (done) {
