@@ -13,17 +13,21 @@ import { createSmtpMailer } from "./mail/mailer.js";
 import { createSandboxApp } from "./routes/sandbox.js";
 import { createSandboxRuntime } from "./sandbox/runtime.js";
 import { providerLiveness, sandboxWireVerifier } from "./sandbox-wire/provider-auth.js";
+import { createDeferredWaker, createSandboxLifecycle } from "./sandbox-lifecycle/index.js";
 
 /** Open streams (SSE) get this long to finish before being cut; stays under k8s' 30 s grace period. */
 const DRAIN_TIMEOUT_MS = 10_000;
 
 const config = loadConfig(process.env);
+// The wire is built before the sandbox provider exists: its waker is set once the provider is.
+const waker = createDeferredWaker();
 let deps: ServerDeps | undefined;
 if (config.auth && config.smtp) {
   deps = createServerDeps({
     databaseUrl: config.databaseUrl,
     ...config.auth,
     mailer: createSmtpMailer(config.smtp),
+    sandboxWire: { waker },
     agents: { maxVersions: config.agentMaxVersions },
   });
   if (config.smtp.security === "none") {
@@ -121,6 +125,21 @@ if (sandbox && sandboxServer && deps) {
     liveness: providerLiveness(sandbox.provider, deps.database.db),
   });
 }
+// Hibernation and wake (KOBE-25, D14): the router wakes sandboxes it finds disconnected; every
+// replica sweeps for idle ones (the sandboxes row lock keeps replicas from colliding).
+const lifecycle =
+  sandbox && deps
+    ? createSandboxLifecycle({
+        db: deps.database.db,
+        provider: sandbox.provider,
+        idleMinutes: sandbox.settings.hibernation.idleMinutes,
+      })
+    : undefined;
+if (lifecycle) waker.set(lifecycle.waker);
+const stopHibernation =
+  lifecycle && sandbox?.settings.hibernation.enabled
+    ? lifecycle.start(sandbox.settings.hibernation.sweepSeconds * 1000)
+    : undefined;
 // Deletes sandbox pods found outside the verified isolation runtime (startup + every minute).
 const stopReconciler = sandbox?.startReconciler((result) => {
   if (result.deleted.length > 0) {
@@ -135,6 +154,7 @@ function shutdown(signal: string): void {
   logger.info({ signal }, "shutting down");
   isolation.stop();
   stopReconciler?.();
+  stopHibernation?.();
   sandboxServer?.close();
   deps?.auditAnchor.stop();
   void egressRelay?.close();

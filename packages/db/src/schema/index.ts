@@ -13,3 +13,4 @@ export * from "./audit.js";
 export * from "./egress.js";
 export * from "./break-glass.js";
 export * from "./sandbox-wire.js";
+export * from "./sandboxes.js";

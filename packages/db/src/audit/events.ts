@@ -219,6 +219,22 @@ export const AUDIT_EVENTS = {
       .optional(),
     reason: z.enum(["isolation_mismatch", "isolation_lost"]),
   }),
+  /**
+   * The server hibernated an idle sandbox (D14: agent-sandbox `Suspended`, volume kept, /tmp
+   * wiped) after `idleMinutes` without activity (system actor).
+   */
+  "sandbox.hibernated": event("team", {
+    sandboxId: id,
+    userId: id,
+    idleMinutes: z.number().int().min(0).max(1440),
+    /** idle: the D14 policy; operator: forced by an operator tool (idle time skipped). */
+    trigger: z.enum(["idle", "operator"]),
+  }),
+  /**
+   * The server resumed a hibernated sandbox (D14: a command needed it) through the isolation gate,
+   * with the current pod template (system actor, or the user whose request woke it).
+   */
+  "sandbox.woken": event("team", { sandboxId: id, userId: id }),
 
   // ── egress: ceiling (install), enablement (team), connections (team; KOBE-38, D28) ──
   "egress.ceiling.added": event("install", { domain: egressDomain }),

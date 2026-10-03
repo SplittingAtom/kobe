@@ -34,9 +34,29 @@ export interface SandboxLiveness {
   isLive(claims: { sandboxId: string; teamId: string; userId: string }): Promise<boolean>;
 }
 
-/** KOBE-25 seam: start or resume the (team, user) sandbox when a command finds it disconnected. */
+/**
+ * KOBE-25 seam: start or resume the (team, user) sandbox when a command finds it disconnected.
+ * Rejecting with a {@link SandboxWakeError} fails the waiting command at once (waiting cannot
+ * help); any other rejection is logged and the command waits for its deadline.
+ */
 export interface SandboxWaker {
-  wake(target: SandboxTarget): Promise<void>;
+  /** `context.runId`: the run whose `run.start` needs the sandbox (it is told `sandbox.waking`). */
+  wake(target: SandboxTarget, context?: WakeContext): Promise<void>;
+}
+
+export interface WakeContext {
+  readonly runId?: string;
+}
+
+/** A wake that cannot succeed by waiting: no verified isolation runtime, an offboarded sandbox. */
+export class SandboxWakeError extends Error {
+  constructor(
+    readonly code: "isolation_runtime_missing" | "sandbox_unavailable",
+    message: string,
+  ) {
+    super(message);
+    this.name = "SandboxWakeError";
+  }
 }
 
 /** Outcome of one server → sandbox command (`command.result`, or a server-side failure). */

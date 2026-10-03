@@ -197,6 +197,20 @@
       "when": 1791034202129,
       "tag": "0027_egress_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1791036938752,
+      "tag": "0028_sandboxes",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1791036939056,
+      "tag": "0029_sandboxes_rls",
+      "breakpoints": true
     }
   ]
 }

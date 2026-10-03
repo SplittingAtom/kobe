@@ -55,6 +55,14 @@ sandbox:
     # Pre-started sandboxes per team namespace (agent-sandbox warm pools are namespaced). Each
     # one counts against its team's quota. 0 disables warm starts.
     replicasPerTeam: 1
+  # Spec D14: an awake sandbox hibernates (pod stopped, /workspace kept, /tmp wiped) this many
+  # minutes after its last activity; teams may choose 5-60 (team setting sandbox_idle_minutes).
+  # Waking costs a cold pod start (the warm pool only serves first sandboxes).
+  hibernation:
+    enabled: true
+    idleMinutes: 15
+    # How often each server replica looks for idle sandboxes.
+    sweepSeconds: 60
   # Secret with keys sandbox-wire, model-gateway, mcp-proxy, egress-proxy (>= 32 chars each, all
   # different): HMAC keys of the per-audience sandbox session tokens. Empty: generated, kept.
   sessionKeysSecret: ""

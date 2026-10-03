@@ -232,6 +232,25 @@
         },
         "modelGatewayAccess": {
           "type": "boolean"
+        },
+        "hibernation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "idleMinutes": {
+              "type": "integer",
+              "minimum": 5,
+              "maximum": 60
+            },
+            "sweepSeconds": {
+              "type": "integer",
+              "minimum": 10,
+              "maximum": 3600
+            }
+          }
         }
       }
     },

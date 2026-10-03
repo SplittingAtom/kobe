@@ -121,6 +121,9 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       case "user":
         for (const c of registry.forUser(hint.id)) c.revalidate();
         return;
+      case "hib":
+        registry.get(hint.id)?.close("hibernating", "sandbox hibernating");
+        return;
     }
   };
   const bus = createSandboxBus({

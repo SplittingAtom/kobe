@@ -72,6 +72,7 @@ export const SETTINGS: SandboxSettings = {
     pods: "50",
   },
   warmPool: { replicasPerTeam: 1 },
+  hibernation: { enabled: true, idleMinutes: 15, sweepSeconds: 60 },
 };
 
 export const KEYS: SessionKeys = {

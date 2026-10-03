@@ -5,7 +5,8 @@ import { hardenProcess } from "./harden.js";
 import { logger } from "./logger.js";
 import { buildPiLaunch } from "./pi/pi-launch.js";
 import { checkPolicyExtensionFile } from "./policy/extension-file.js";
-import { detectPiVersion, readAgentVersion } from "./version.js";
+import { SessionClient } from "./session/exchange.js";
+import { piVersion as readPiVersion, readAgentVersion } from "./version.js";
 
 /**
  * kobe-sandbox-agent entry point: the sandbox's main process (D13). Dials out to the server; opens
@@ -18,7 +19,7 @@ async function main(): Promise<void> {
   const loaded = loadConfig(process.env);
   // Fail fast: without kobe-policy no thread could start (KOBE-36), so say why at startup. Pi gets
   // the resolved path.
-  const config = {
+  const checked = {
     ...loaded,
     policyExtension: await checkPolicyExtensionFile(loaded.policyExtension),
   };
@@ -26,14 +27,27 @@ async function main(): Promise<void> {
   const piEnv = buildPiLaunch({
     sessionFile: "-",
     home,
-    agentDir: config.piAgentDir,
-    policyExtension: config.policyExtension,
+    agentDir: checked.piAgentDir,
+    policyExtension: checked.policyExtension,
     parentEnv: process.env,
   }).env;
-  const [agentVersion, piVersion] = await Promise.all([
+  // Kobe's pods carry a bootstrap token only: trade it for the sandbox id and session tokens
+  // (retried until the server assigns this pod) before dialling the wire. In parallel with the
+  // version probes: both sit on the cold-start path (D14).
+  const session =
+    loaded.bootstrapTokenFile === undefined
+      ? undefined
+      : new SessionClient({
+          serverUrl: loaded.serverUrl,
+          bootstrapTokenFile: loaded.bootstrapTokenFile,
+          logger,
+        });
+  const [agentVersion, piVersion, grant] = await Promise.all([
     readAgentVersion(new URL("../package.json", import.meta.url)),
-    detectPiVersion(config.piBin, piEnv),
+    readPiVersion(loaded.piBin, piEnv),
+    session?.grant(),
   ]);
+  const config = grant ? { ...checked, sandboxId: grant.sandboxId } : checked;
   logger.info(
     { server: config.connectUrl, sandbox_id: config.sandboxId, agentVersion, piVersion },
     "sandbox-agent starting",
@@ -42,11 +56,13 @@ async function main(): Promise<void> {
   const agent = new Agent({
     config,
     logger,
-    readToken: async () => {
-      const token = (await readFile(config.tokenFile, "utf8")).trim();
-      if (token === "") throw new Error("sandbox token file is empty");
-      return token;
-    },
+    readToken: session
+      ? () => session.wireToken()
+      : async () => {
+          const token = (await readFile(config.tokenFile, "utf8")).trim();
+          if (token === "") throw new Error("sandbox token file is empty");
+          return token;
+        },
     agentVersion,
     piVersion,
     home,

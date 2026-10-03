@@ -38,6 +38,8 @@ export interface KubeMetadata {
   readonly name: string;
   readonly namespace?: string;
   readonly uid?: string;
+  /** Optimistic concurrency token (a merge patch carrying it fails with 409 if it changed). */
+  readonly resourceVersion?: string;
   readonly labels?: Readonly<Record<string, string>>;
   readonly annotations?: Readonly<Record<string, string>>;
   readonly creationTimestamp?: string;
