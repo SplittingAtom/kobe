@@ -155,6 +155,19 @@ call`, `policy.denied` is appended, the run goes back to `running` (Pi continues
    sandbox's run settles (completes from `waiting_approval`) or the TTL sweep fails the run. Rare;
    a `waiter_replica` column could detect it earlier.
 
+## Self-review (code-reviewer agent: 0 CRITICAL, 1 HIGH, 2 MEDIUM) — resolution
+
+1. HIGH: a resumed card (input dropped from the resume point) showed `{}` while Allow was enabled.
+   Allow now stays off until `GET /v1/approvals/{id}` returned the exact input. The card shows
+   "Loading the exact input…" while it waits, and "could not be loaded" with Try again if the
+   request fails. Deny stays available. Test: "keeps Allow off until the exact input is loaded…".
+2. MEDIUM: a TTL expiry that found its run `running` threw on `approval_expired`, which only
+   `waiting_approval` allows, so the expiry would roll back on every poll. Such a run now fails
+   with cause `error`.
+3. MEDIUM (accepted): an MCP approval allowed in the instant before the sandbox's connection closed
+   stays `allowed`, unconsumed, until its 10-minute token or the run ends. Using it needs the exact
+   approved input and tool call id, so this is what the user approved.
+
 ## Evidence (acceptance criteria → test or command output)
 
 | AC        | Evidence                                                                                                                                                                                                                                                                                                                         |
