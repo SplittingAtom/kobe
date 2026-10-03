@@ -38,6 +38,17 @@ const configSchema = z.object({
     .min(1, "KOBE_AGENT_MAX_VERSIONS must be between 1 and 100000")
     .max(100_000, "KOBE_AGENT_MAX_VERSIONS must be between 1 and 100000")
     .default(1000),
+  // Internal listener (KOBE-58): the MCP proxy's policy re-check. Only with the proxy's key.
+  KOBE_INTERNAL_PORT: z.coerce
+    .number({ error: "KOBE_INTERNAL_PORT must be a number" })
+    .int("KOBE_INTERNAL_PORT must be an integer")
+    .min(1, "KOBE_INTERNAL_PORT must be between 1 and 65535")
+    .max(65535, "KOBE_INTERNAL_PORT must be between 1 and 65535")
+    .default(8082),
+  KOBE_MCP_PROXY_INTERNAL_KEY: z
+    .string()
+    .min(32, "KOBE_MCP_PROXY_INTERNAL_KEY must be at least 32 characters")
+    .optional(),
 });
 
 /** Auth settings: required by the API server only (the scheduler never sees these secrets). */
@@ -89,6 +100,10 @@ export interface Config {
   readonly runtimeClassName: string | undefined;
   /** Published versions per agent (KOBE-46). */
   readonly agentMaxVersions: number;
+  /** Internal listener port (MCP proxy re-check, KOBE-58). */
+  readonly internalPort: number;
+  /** Shared with the MCP proxy; without it the internal listener is not started. */
+  readonly mcpProxyInternalKey: string | undefined;
   /** Present for the API server only. */
   readonly auth?: AuthConfig;
   /** Present for the API server only (invites, password resets, notifications). */
@@ -110,6 +125,8 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     databaseUrl: base.data.KOBE_DATABASE_URL,
     runtimeClassName: base.data.KOBE_RUNTIME_CLASS,
     agentMaxVersions: base.data.KOBE_AGENT_MAX_VERSIONS,
+    internalPort: base.data.KOBE_INTERNAL_PORT,
+    mcpProxyInternalKey: base.data.KOBE_MCP_PROXY_INTERNAL_KEY,
   };
   if (config.process !== "server") return config;
   const auth = authSchema.safeParse(env);

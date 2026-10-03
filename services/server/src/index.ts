@@ -11,6 +11,7 @@ import { createIsolationGate } from "./isolation/gate.js";
 import { listRuntimeClasses } from "./isolation/kubernetes.js";
 import { logger } from "./logger.js";
 import { createSmtpMailer } from "./mail/mailer.js";
+import { createInternalApp } from "./routes/internal.js";
 import { createSandboxApp } from "./routes/sandbox.js";
 import { createSandboxRuntime } from "./sandbox/runtime.js";
 import { providerLiveness, sandboxWireVerifier } from "./sandbox-wire/provider-auth.js";
@@ -124,11 +125,37 @@ const sandboxServer = sandbox
     )
   : undefined;
 // The sandbox wire (KOBE-24) on the sandbox listener only — never on the user-facing app.
-if (sandbox && sandboxServer && deps) {
+const liveness = sandbox && deps ? providerLiveness(sandbox.provider, deps.database.db) : undefined;
+if (sandbox && sandboxServer && deps && liveness) {
   deps.sandboxWire.attach(sandboxServer as Server, {
     verify: sandboxWireVerifier(sandbox.sessionKeys),
-    liveness: providerLiveness(sandbox.provider, deps.database.db),
+    liveness,
   });
+}
+// Internal listener (KOBE-58): the MCP proxy's policy re-check. Its own port, admitted by the
+// release NetworkPolicy from the MCP proxy only, and keyed (routes/internal.ts).
+const internalServer =
+  sandbox && deps && liveness && config.mcpProxyInternalKey
+    ? serve(
+        {
+          fetch: createInternalApp({
+            internalKey: config.mcpProxyInternalKey,
+            mcp: deps.mcp,
+            auth: {
+              db: deps.database.db,
+              sessionKey: sandbox.sessionKeys["kobe.mcp-proxy"],
+              liveness,
+            },
+          }).fetch,
+          port: config.internalPort,
+        },
+        (info) => logger.info({ port: info.port }, "internal listener"),
+      )
+    : undefined;
+if (sandbox && deps && !config.mcpProxyInternalKey) {
+  logger.error(
+    "KOBE_MCP_PROXY_INTERNAL_KEY is not set: MCP calls are refused (install with the chart)",
+  );
 }
 // Hibernation and wake (KOBE-25, D14): the router wakes sandboxes it finds disconnected; every
 // replica sweeps for idle ones (the sandboxes row lock keeps replicas from colliding).
@@ -161,6 +188,7 @@ function shutdown(signal: string): void {
   stopReconciler?.();
   stopHibernation?.();
   sandboxServer?.close();
+  internalServer?.close();
   deps?.auditAnchor.stop();
   void egressRelay?.close();
   breakGlassSweeper?.stop();

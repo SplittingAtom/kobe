@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AddressPolicy, validateCidrs } from "./address-policy.js";
+import { AddressPolicy, validateCidrs } from "./index.js";
 
 describe("AddressPolicy", () => {
   const policy = new AddressPolicy();
@@ -73,5 +73,13 @@ describe("AddressPolicy", () => {
     expect(() => validateCidrs(["10.0.0.0/33"])).toThrow(/invalid CIDR/);
     expect(() => validateCidrs(["nope"])).toThrow(/invalid CIDR/);
     expect(() => validateCidrs(["10.0.0.0/8", "fd00::/8"])).not.toThrow();
+  });
+
+  it("refuses the documentation, SRv6 and ORCHIDv2 IPv6 ranges (KOBE-58 review L6)", () => {
+    const policy = new AddressPolicy();
+    for (const ip of ["3fff::1", "3fff:fff:ffff::1", "5f00::1", "2001:20::1", "2001:2f::1"]) {
+      expect(policy.check(ip), ip).toBe("forbidden");
+    }
+    expect(policy.check("2600::1")).toBe("allowed");
   });
 });
