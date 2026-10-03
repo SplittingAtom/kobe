@@ -146,7 +146,8 @@ export class SessionClient {
         const delay =
           error.retryAfterMs ??
           (elapsed < this.#o.fastRetryForMs
-            ? this.#o.fastRetryMs
+            ? // Jittered: many sandboxes woken together (a server restart) don't retry in step.
+              Math.round(this.#o.fastRetryMs * (0.5 + this.#o.random()))
             : backoffDelay(attempt, this.#o.backoff, this.#o.random));
         if (attempt === 0 || attempt % 20 === 0) {
           this.#o.logger.info({ reason: error.message, attempt, delay }, "sandbox session retry");

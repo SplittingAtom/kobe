@@ -98,14 +98,16 @@ export async function lockIfIdle(
   idleMinutes: number,
   force: boolean,
 ): Promise<LockedSandbox | undefined> {
-  const res = await tx.execute<{
-    sandbox_id: string | null;
-    idle: boolean;
-    busy: boolean;
-    commands: boolean;
-  }>(sql`
-    SELECT s.sandbox_id,
-           GREATEST(s.last_active_at, (
+  // Lock first; the checks below run as a separate statement, so under READ COMMITTED they see
+  // everything committed before the lock was granted (a run or command that raced the lock).
+  const locked = await tx.execute<{ sandbox_id: string | null }>(sql`
+    SELECT sandbox_id FROM sandboxes
+     WHERE team_id = ${target.teamId} AND user_id = ${target.userId} AND state = 'running'
+     FOR UPDATE SKIP LOCKED`);
+  const row = locked.rows[0];
+  if (!row) return undefined;
+  const res = await tx.execute<{ idle: boolean; busy: boolean; commands: boolean }>(sql`
+    SELECT GREATEST(s.last_active_at, (
              SELECT max(r.ended_at) FROM runs r
                JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
               WHERE r.team_id = ${target.teamId} AND t.team_id = ${target.teamId}
@@ -124,11 +126,21 @@ export async function lockIfIdle(
                 AND c.status IN ('pending', 'delivered')
            ) AS commands
       FROM sandboxes s
-     WHERE s.team_id = ${target.teamId} AND s.user_id = ${target.userId} AND s.state = 'running'
-     FOR UPDATE OF s SKIP LOCKED`);
-  const row = res.rows[0];
-  if (!row || row.busy || row.commands || !(force || row.idle)) return undefined;
+     WHERE s.team_id = ${target.teamId} AND s.user_id = ${target.userId}`);
+  const check = res.rows[0];
+  if (!check || check.busy || check.commands || !(force || check.idle)) return undefined;
   return { sandboxId: row.sandbox_id };
+}
+
+/** The recorded claim no longer exists: clear it (until the next wake records the current one). */
+export async function forgetSandboxIdentity(
+  tx: KobeTx,
+  target: SandboxTarget,
+  sandboxId: string,
+): Promise<void> {
+  await tx.execute(sql`
+    UPDATE sandboxes SET sandbox_id = NULL, pvc = NULL
+     WHERE team_id = ${target.teamId} AND user_id = ${target.userId} AND sandbox_id = ${sandboxId}`);
 }
 
 /**

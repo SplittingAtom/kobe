@@ -452,19 +452,34 @@ fi
 contains "the agent can write its workspace and /tmp" '^written$' \
   "$(in_sandbox 'echo kobe-25 > /workspace/kobe-25-marker && echo tmp > /tmp/kobe-25-marker && echo written')"
 
-# Gate 1 (D14: hibernated → first token p50 ≤ 3 s, p95 ≤ 8 s over 20 trials). Until the model
-# gateway lands (KOBE-40/41) the harness measures hibernated → Pi ready (agent connected, Pi
-# answering on a thread); see docs/ledger/KOBE-25.md for the gap.
+# Cold start. Gate 1 (D14) is hibernated → FIRST TOKEN p50 ≤ 3 s, p95 ≤ 8 s over 20 trials; with
+# no model gateway yet (KOBE-30/40/41) the harness measures hibernated → Pi ready (agent
+# reconnected, Pi answering on a thread), a lower bound of first token. Same budgets, honestly
+# labelled; docs/ledger/KOBE-25.md records the numbers and the gap. A dedicated user gets its own
+# sandbox (first wake: warm pool), so the harness never touches the e2e user's.
+COLD_USER_ID=9b4c3d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e
+psql_kobe "INSERT INTO users (id, name, email, email_verified) VALUES ('$COLD_USER_ID', 'E2E cold-start user', 'cold-start@e2e.test', true) ON CONFLICT DO NOTHING;
+  INSERT INTO team_members (team_id, user_id, role) VALUES ('$E2E_TEAM_ID', '$COLD_USER_ID', 'member') ON CONFLICT DO NOTHING;" >/dev/null
+cold_start() { # label trials spacing-ms → harness output (one JSON line per trial + summary)
+  $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node dist/cli/cold-start.js \
+    --team-id "$E2E_TEAM_ID" --user-id "$COLD_USER_ID" --probe pi --label "$1" --trials "$2" \
+    --spacing-ms "$3" --p95-max-ms "${KOBE_COLD_START_P95_MS:-8000}" \
+    --p50-max-ms "${KOBE_COLD_START_P50_MS:-3000}" 2>&1 || true
+}
 trials="${KOBE_COLD_START_TRIALS:-20}"
-cold=$($KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node dist/cli/cold-start.js \
-  --team-id "$E2E_TEAM_ID" --user-id "$E2E_USER_ID" --trials "$trials" --probe pi \
-  --p95-max-ms "${KOBE_COLD_START_P95_MS:-8000}" --p50-max-ms "${KOBE_COLD_START_P50_MS:-3000}" 2>&1 || true)
+cold=$(cold_start back-to-back "$trials" 0)
 printf '%s\n' "$cold" | sed 's/^/     cold-start: /'
 summary=$(printf '%s\n' "$cold" | grep '"summary":true' || true)
-contains "cold-start harness ran $trials hibernate → wake trials through the server's wake path" "\"trials\":$trials" "$summary"
-contains "hibernated → Pi ready within the Gate 1 budget (p50 ≤ ${KOBE_COLD_START_P50_MS:-3000} ms, p95 ≤ ${KOBE_COLD_START_P95_MS:-8000} ms)" '"pass":true' "$summary"
-contains "the /workspace volume survived $trials hibernations" '^kobe-25$' "$(in_sandbox 'cat /workspace/kobe-25-marker')"
-contains "/tmp was wiped by hibernation" '^gone$' "$(in_sandbox 'test -e /tmp/kobe-25-marker && echo kept || echo gone')"
+contains "cold-start harness ran $trials back-to-back hibernate → wake trials through the server's wake path" "\"trials\":$trials" "$summary"
+contains "hibernated → Pi ready (not first token) p50 ≤ ${KOBE_COLD_START_P50_MS:-3000} ms, p95 ≤ ${KOBE_COLD_START_P95_MS:-8000} ms (back-to-back)" '"pass":true' "$summary"
+# Spaced trials: each wake starts after the sandbox sat fully down for a while (nothing of the
+# previous pod's start is still in flight on the node).
+spaced=$(cold_start spaced "${KOBE_COLD_START_SPACED_TRIALS:-5}" "${KOBE_COLD_START_SPACING_MS:-30000}")
+printf '%s\n' "$spaced" | sed 's/^/     cold-start: /'
+spaced_summary=$(printf '%s\n' "$spaced" | grep '"summary":true' || true)
+contains "hibernated → Pi ready (not first token) within budget with spaced trials" '"pass":true' "$spaced_summary"
+contains "the harness cleaned up its thread" '^0$' \
+  "$(psql_kobe "SELECT count(*) FROM threads WHERE team_id = '$E2E_TEAM_ID' AND owner_user_id = '$COLD_USER_ID'")"
 
 contains "an idle sandbox can be hibernated" '"hibernated":true' "$(lifecycle hibernate)"
 contains "hibernation suspends the agent-sandbox Sandbox" '^Suspended$' \
@@ -479,8 +494,9 @@ if wait_for 120 pod_running; then ok "waking starts a new pod"; else fail "wakin
 contains "the woken pod runs under gVisor" '^gvisor$' \
   "$($KUBECTL -n "$TEAM_NS" get pod "$(sandbox_pod_name)" -o jsonpath='{.spec.runtimeClassName}' 2>&1)"
 if wait_for 120 wire_open; then ok "the woken sandbox reconnects"; else fail "the woken sandbox reconnects"; fi
-contains "its workspace is still there" '^kobe-25$' "$(in_sandbox 'cat /workspace/kobe-25-marker')"
-audit_counts=$(psql_kobe "SELECT (SELECT count(*) FROM audit_log WHERE team_id = '$E2E_TEAM_ID' AND action = 'sandbox.hibernated') >= $((trials + 1)) AND (SELECT count(*) FROM audit_log WHERE team_id = '$E2E_TEAM_ID' AND action = 'sandbox.woken') >= $((trials + 1))")
+contains "its /workspace survived hibernation" '^kobe-25$' "$(in_sandbox 'cat /workspace/kobe-25-marker')"
+contains "its /tmp was wiped by hibernation" '^gone$' "$(in_sandbox 'test -e /tmp/kobe-25-marker && echo kept || echo gone')"
+audit_counts=$(psql_kobe "SELECT (SELECT count(*) FROM audit_log WHERE team_id = '$E2E_TEAM_ID' AND action = 'sandbox.hibernated' AND target->>'trigger' = 'operator') >= $((trials + 1)) AND (SELECT count(*) FROM audit_log WHERE team_id = '$E2E_TEAM_ID' AND action = 'sandbox.woken') >= $((trials + 1))")
 contains "every hibernation and wake is audited" '^t$' "$audit_counts"
 
 exit "$failed"

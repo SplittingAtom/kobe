@@ -26,7 +26,7 @@ const json = (status: number, body: unknown, headers: Record<string, string> = {
     headers: { "content-type": "application/json", ...headers },
   });
 
-function harness(steps: Step[], opts: { file?: () => string } = {}) {
+function harness(steps: Step[], opts: { file?: () => string; random?: () => number } = {}) {
   let clock = 1_000_000;
   const sleeps: number[] = [];
   const requests: { url: string; auth: string | null; timeout: boolean }[] = [];
@@ -51,7 +51,7 @@ function harness(steps: Step[], opts: { file?: () => string } = {}) {
       sleeps.push(ms);
       clock += ms;
     },
-    random: () => 0.5,
+    random: opts.random ?? (() => 0.5),
     logger: {
       info: (o: unknown) => void logs.push(o),
       warn: (o: unknown) => void logs.push(o),
@@ -98,6 +98,20 @@ describe("SessionClient (bootstrap → session tokens)", () => {
     ]);
     await h.client.wireToken();
     expect(h.sleeps).toEqual([200, 200]);
+  });
+
+  it("jitters the fast retries (100–300 ms)", async () => {
+    const randoms = [0, 0.999];
+    const h = harness(
+      [
+        new TypeError("fetch failed"),
+        new TypeError("fetch failed"),
+        json(200, grantBody(1_000_000 + 900_000)),
+      ],
+      { random: () => randoms.shift() ?? 0.5 },
+    );
+    await h.client.wireToken();
+    expect(h.sleeps).toEqual([100, 300]);
   });
 
   it("backs off with jitter once the fast-retry window has passed", async () => {

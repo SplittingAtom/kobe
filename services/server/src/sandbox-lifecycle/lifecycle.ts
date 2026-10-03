@@ -11,6 +11,7 @@ import { SandboxWakeError, type SandboxTarget, type SandboxWaker } from "../sand
 import { resolveIdleMinutes, TEAM_IDLE_MINUTES } from "./idle.js";
 import {
   beginWake,
+  forgetSandboxIdentity,
   idleCandidates,
   lockIfIdle,
   markHibernated,
@@ -127,22 +128,10 @@ export function createSandboxLifecycle(options: LifecycleOptions): SandboxLifecy
       throw err;
     }
     const { handle, resumed } = result;
-    await withTeam(db, target.teamId, async (tx) => {
-      await recordSandboxIdentity(
-        tx,
-        target,
-        handle.sandboxId,
-        workspacePvcName(handle.sandboxName),
-      );
-      if (resumed) {
-        await recordAudit(tx, {
-          action: "sandbox.woken",
-          actor: currentAuditContext()?.actor ?? SYSTEM_ACTOR,
-          teamId: target.teamId,
-          target: { sandboxId: handle.sandboxId, userId: target.userId },
-        });
-      }
-    });
+    // sandbox.woken is recorded by the provider when its resume patch is committed.
+    await withTeam(db, target.teamId, (tx) =>
+      recordSandboxIdentity(tx, target, handle.sandboxId, workspacePvcName(handle.sandboxName)),
+    );
     const ms = Date.now() - started;
     if (resumed) {
       metrics.woken += 1;
@@ -185,15 +174,30 @@ export function createSandboxLifecycle(options: LifecycleOptions): SandboxLifecy
       const sandboxId = locked.sandboxId;
       // Kubernetes first, under the lock: a rollback (commit failure) leaves the row `running`
       // and the next command finds no connection and resumes the sandbox.
-      await provider.hibernateSandbox(team, target.userId, sandboxId);
+      const outcome = await provider.hibernateSandbox(team, target.userId, sandboxId);
+      if (outcome === "not_found") {
+        // The claim is gone or was recreated (offboarding, isolation enforcement): nothing was
+        // suspended. Forget the stale id; the next wake records the current sandbox.
+        await forgetSandboxIdentity(tx, target, sandboxId);
+        log.warn({ team_id: target.teamId, sandbox_id: sandboxId }, "hibernate: no such sandbox");
+        return false;
+      }
       const connection = await markHibernated(tx, target);
       if (connection) await notifyHintInTx(tx, { kind: "hib", id: connection });
-      await recordAudit(tx, {
-        action: "sandbox.hibernated",
-        actor: SYSTEM_ACTOR,
-        teamId: target.teamId,
-        target: { sandboxId, userId: target.userId, idleMinutes: force ? 0 : idleMinutes },
-      });
+      // `already_suspended`: a previous hibernation whose commit failed; record the state only.
+      if (outcome === "suspended") {
+        await recordAudit(tx, {
+          action: "sandbox.hibernated",
+          actor: currentAuditContext()?.actor ?? SYSTEM_ACTOR,
+          teamId: target.teamId,
+          target: {
+            sandboxId,
+            userId: target.userId,
+            idleMinutes,
+            trigger: force ? "operator" : "idle",
+          },
+        });
+      }
       return true;
     });
     if (done) {

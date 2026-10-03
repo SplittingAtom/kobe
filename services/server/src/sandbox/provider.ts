@@ -144,6 +144,11 @@ export type SandboxAuditEvent =
       readonly target: { readonly sandboxId: string; readonly userId: string };
     }
   | {
+      readonly action: "sandbox.woken";
+      readonly teamId: string;
+      readonly target: { readonly sandboxId: string; readonly userId: string };
+    }
+  | {
       readonly action: "sandbox.destroyed";
       readonly teamId: string;
       readonly target: {
@@ -517,11 +522,22 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
         const suspended = str(sandbox, "spec", "operatingMode") === "Suspended";
         if (suspended && wake) {
           // The stored template is replaced wholesale (built with `verified`), then re-checked.
-          if (await resume(namespace, sandbox, verified)) resumed = true;
-          else if (now() >= deadline) {
+          if (await resume(namespace, sandbox, verified)) {
+            resumed = true;
+            // Audited when the resume is committed, whether or not its pod then verifies.
+            await emit({ action: "sandbox.woken", teamId: team.id, target: { sandboxId, userId } });
+          } else if (now() >= deadline) {
             throw new SandboxProvisioningError(`Sandbox ${namespace}/${name} could not be resumed`);
           } else await sleep(Math.min(100 * 2 ** attempt, 1000));
           continue;
+        }
+        if (suspended) {
+          // Nothing runs while suspended, so a stale template is no isolation risk: never delete
+          // (the claim owns the volume). A wake replaces the template before anything starts.
+          return {
+            handle: { sandboxId, namespace, claimName: name, sandboxName, state: "suspended" },
+            resumed,
+          };
         }
         const templateClass = str(sandbox, "spec", "podTemplate", "spec", "runtimeClassName");
         if (templateClass !== verified.runtimeClassName) {
@@ -531,12 +547,6 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
             name,
             `its template uses "${templateClass ?? "none"}"`,
           );
-        }
-        if (suspended) {
-          return {
-            handle: { sandboxId, namespace, claimName: name, sandboxName, state: "suspended" },
-            resumed,
-          };
         }
         const podName = sandbox.metadata.annotations?.[POD_NAME_ANNOTATION] ?? sandboxName;
         const pod = await kube.get(POD(namespace, podName));

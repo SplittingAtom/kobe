@@ -72,6 +72,13 @@ export interface WireTuning {
   readonly maxIngestFailures: number;
   /** Deadline of the wire's own commands (`get_entries`, `session.restore` parts). */
   readonly internalCommandTimeoutMs: number;
+  /**
+   * Transient wake failures (KOBE-25) are retried with jittered exponential backoff from
+   * `wakeRetryBaseMs` while the command waits, for at most `wakeRetryBudgetMs` (and never past
+   * the command's deadline); then the command fails `sandbox_unavailable`.
+   */
+  readonly wakeRetryBaseMs: number;
+  readonly wakeRetryBudgetMs: number;
   /** Results are polled this often while waiting (hints may be lost). */
   readonly resultPollMs: number;
   /** Listener reconnect backoff bounds. */
@@ -112,6 +119,8 @@ export const WIRE_DEFAULTS: WireTuning = {
   deniedEventsPerMinute: 30,
   maxIngestFailures: 5,
   resultPollMs: 2_000,
+  wakeRetryBaseMs: 1_000,
+  wakeRetryBudgetMs: 90_000,
   internalCommandTimeoutMs: 60_000,
   reconnectMinMs: 250,
   reconnectMaxMs: 10_000,

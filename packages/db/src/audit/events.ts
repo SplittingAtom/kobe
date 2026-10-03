@@ -204,6 +204,8 @@ export const AUDIT_EVENTS = {
     sandboxId: id,
     userId: id,
     idleMinutes: z.number().int().min(0).max(1440),
+    /** idle: the D14 policy; operator: forced by an operator tool (idle time skipped). */
+    trigger: z.enum(["idle", "operator"]),
   }),
   /**
    * The server resumed a hibernated sandbox (D14: a command needed it) through the isolation gate,

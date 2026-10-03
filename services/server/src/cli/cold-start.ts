@@ -1,7 +1,6 @@
 import { parseArgs } from "node:util";
-import { sql, threads, withTeam, type KobeDb } from "@kobe/db";
-import { createKubeClient } from "../sandbox/kube.js";
-import type { SandboxProvider } from "../sandbox/provider.js";
+import { and, eq, sql, threads, withTeam, type KobeDb } from "@kobe/db";
+import { createKubeClient, type KubeClient } from "../sandbox/kube.js";
 import {
   runColdStartTrials,
   type ColdStartReport,
@@ -10,18 +9,23 @@ import {
 import type { SandboxRouter, SandboxTarget } from "../sandbox-wire/types.js";
 import { exitSoon, joinAsReplica } from "./replica.js";
 
-// Cold-start harness (KOBE-25, Gate 1), run inside a server pod (its ServiceAccount and env):
+// Cold-start harness (KOBE-25), run inside a server pod (its ServiceAccount and env):
 //   node dist/cli/cold-start.js --team-id <uuid> --user-id <uuid> [--trials 20] [--probe pi]
-//     [--p95-max-ms 8000] [--p50-max-ms 3000]
+//     [--spacing-ms 0] [--label name] [--p95-max-ms MS] [--p50-max-ms MS]
 // Joins the install as one more router replica (no sandbox listener), hibernates the (user, team)
-// sandbox, waits until its pod is gone, then times a command that has to wake it — through the
-// same router → waker → provider path the server uses. Prints one JSON line per trial and a
-// summary line; exits 1 when a given percentile budget is exceeded, 2 when the harness fails.
+// sandbox, waits until it is fully down (Suspended, no pod, no connection) plus `--spacing-ms`,
+// then times a command that has to wake it — through the same router → waker → provider path the
+// server uses. Prints one JSON line per trial and a summary; exits 1 when a given percentile
+// budget is exceeded, 2 when the harness fails.
+//
+// Gate 1 is hibernated → FIRST TOKEN. Probes measure what exists today:
+//   connected — the woken sandbox's agent holds a wire connection again
+//   pi        — Pi answers `get_state` on a thread (agent connected + Pi spawned): "Pi ready"
+// A `first-token` probe (create a run, router.startRun, wait for its first `text.delta` in
+// run_events) needs a model (KOBE-30/40/41): add it to PROBES; nothing else changes.
 const USAGE =
   "usage: cold-start.js --team-id <uuid> --user-id <uuid> [--trials N] [--probe pi|connected] " +
-  "[--p95-max-ms MS] [--p50-max-ms MS]";
-const PROBES = ["pi", "connected"] as const;
-type ProbeName = (typeof PROBES)[number];
+  "[--spacing-ms MS] [--label NAME] [--p95-max-ms MS] [--p50-max-ms MS]";
 /** A woken sandbox must answer within this (pod start + agent + Pi). */
 const PROBE_TIMEOUT_MS = 120_000;
 const HIBERNATED_TIMEOUT_MS = 120_000;
@@ -44,7 +48,7 @@ async function connectedAt(db: KobeDb, target: SandboxTarget): Promise<number | 
   return at ? new Date(at).getTime() : undefined;
 }
 
-async function harnessThread(db: KobeDb, target: SandboxTarget): Promise<string> {
+async function createHarnessThread(db: KobeDb, target: SandboxTarget): Promise<string> {
   return withTeam(db, target.teamId, async (tx) => {
     const [row] = await tx
       .insert(threads)
@@ -55,18 +59,71 @@ async function harnessThread(db: KobeDb, target: SandboxTarget): Promise<string>
   });
 }
 
+async function deleteHarnessThread(db: KobeDb, target: SandboxTarget, id: string): Promise<void> {
+  await withTeam(db, target.teamId, (tx) =>
+    tx.delete(threads).where(and(eq(threads.teamId, target.teamId), eq(threads.id, id))),
+  );
+}
+
 interface Wiring {
   readonly db: KobeDb;
-  readonly provider: SandboxProvider;
   readonly router: SandboxRouter;
   readonly target: SandboxTarget;
-  readonly team: { id: string; slug: string };
+  readonly namespace: string;
   readonly threadId: string;
+  readonly spacingMs: number;
   hibernate(): Promise<boolean>;
 }
 
-function steps(w: Wiring, probe: ProbeName): ColdStartSteps {
+/** The sandbox as Kubernetes has it, read directly (never through ensureSandbox: no writes). */
+async function observe(kube: KubeClient, w: Wiring) {
+  const claim = await kube.get({
+    apiVersion: "extensions.agents.x-k8s.io/v1beta1",
+    kind: "SandboxClaim",
+    name: `u-${w.target.userId}`,
+    namespace: w.namespace,
+  });
+  const name = (claim?.status as { sandbox?: { name?: string } } | undefined)?.sandbox?.name;
+  if (!name) return {};
+  const ref = { name, namespace: w.namespace };
+  const [sandbox, pod] = await Promise.all([
+    kube.get({ apiVersion: "agents.x-k8s.io/v1beta1", kind: "Sandbox", ...ref }),
+    kube.get({ apiVersion: "v1", kind: "Pod", ...ref }),
+  ]);
+  return {
+    mode: (sandbox?.spec as { operatingMode?: string } | undefined)?.operatingMode,
+    pod,
+  };
+}
+
+/** The measured action of a probe: resolves when its end point is reached. */
+type Probe = (w: Wiring, t0: number) => Promise<void>;
+
+const getState = (w: Wiring) =>
+  w.router.piCommand(
+    w.target,
+    { threadId: w.threadId, command: { id: "cold-start", type: "get_state" } },
+    { timeoutMs: PROBE_TIMEOUT_MS },
+  );
+
+const PROBES: Record<string, Probe> = {
+  async pi(w) {
+    const outcome = await getState(w);
+    if (!outcome.ok)
+      throw new Error(`probe failed: ${outcome.error.code} ${outcome.error.message}`);
+  },
+  async connected(w, t0) {
+    void getState(w); // wakes the sandbox; only the connection is timed
+    while ((await connectedAt(w.db, w.target)) === undefined) {
+      if (performance.now() - t0 > PROBE_TIMEOUT_MS) throw new Error("never connected");
+      await sleep(50);
+    }
+  },
+};
+
+function steps(w: Wiring, probeName: string, label: string): ColdStartSteps {
   const kube = createKubeClient();
+  const probe = PROBES[probeName] as Probe;
   return {
     async hibernate() {
       if (!(await w.hibernate())) {
@@ -74,75 +131,42 @@ function steps(w: Wiring, probe: ProbeName): ColdStartSteps {
       }
     },
     async waitHibernated() {
-      const handle = await w.provider.ensureSandbox(w.team, w.target.userId);
       const deadline = Date.now() + HIBERNATED_TIMEOUT_MS;
       for (;;) {
-        const pod = await kube.get({
-          apiVersion: "v1",
-          kind: "Pod",
-          name: handle.sandboxName,
-          namespace: handle.namespace,
-        });
-        if (!pod && (await connectedAt(w.db, w.target)) === undefined) return;
-        if (Date.now() > deadline) throw new Error("the sandbox pod did not go away");
+        const { mode, pod } = await observe(kube, w);
+        if (mode === "Suspended" && !pod && (await connectedAt(w.db, w.target)) === undefined) {
+          break;
+        }
+        if (Date.now() > deadline) throw new Error("the sandbox did not go fully down");
         await sleep(250);
       }
+      if (w.spacingMs > 0) await sleep(w.spacingMs);
     },
     async probe() {
       const t0db = await dbNow(w.db);
       const t0 = performance.now();
-      let totalMs: number;
-      if (probe === "pi") {
-        const outcome = await w.router.piCommand(
-          w.target,
-          { threadId: w.threadId, command: { id: "cold-start", type: "get_state" } },
-          { timeoutMs: PROBE_TIMEOUT_MS },
-        );
-        totalMs = performance.now() - t0;
-        if (!outcome.ok)
-          throw new Error(`probe failed: ${outcome.error.code} ${outcome.error.message}`);
-      } else {
-        // The command wakes the sandbox; we time the connection only.
-        void w.router.piCommand(
-          w.target,
-          { threadId: w.threadId, command: { id: "cold-start", type: "get_state" } },
-          { timeoutMs: PROBE_TIMEOUT_MS },
-        );
-        for (;;) {
-          if ((await connectedAt(w.db, w.target)) !== undefined) break;
-          if (performance.now() - t0 > PROBE_TIMEOUT_MS) throw new Error("never connected");
-          await sleep(50);
-        }
-        totalMs = performance.now() - t0;
-      }
+      await probe(w, t0);
+      const totalMs = Math.round(performance.now() - t0);
       const connected = await connectedAt(w.db, w.target);
-      const handle = await w.provider.ensureSandbox(w.team, w.target.userId);
-      const pod = handle.podName
-        ? await kube.get({
-            apiVersion: "v1",
-            kind: "Pod",
-            name: handle.podName,
-            namespace: handle.namespace,
-          })
-        : undefined;
+      const { pod } = await observe(kube, w);
       // Pod timestamps have 1 s resolution (Kubernetes); good enough to see where time goes.
       const at = (iso: unknown) =>
         typeof iso === "string" ? Math.max(0, Date.parse(iso) - t0db) : undefined;
       const status = pod?.status as
         { containerStatuses?: { state?: { running?: { startedAt?: string } } }[] } | undefined;
       return {
-        totalMs: Math.round(totalMs),
+        totalMs,
         milestones: {
           podCreated: at(pod?.metadata.creationTimestamp),
           containerStarted: at(status?.containerStatuses?.[0]?.state?.running?.startedAt),
           connected: connected === undefined ? undefined : Math.max(0, connected - t0db),
-          ...(probe === "pi" ? { piReady: Math.round(totalMs) } : {}),
+          ...(probeName === "pi" ? { piReady: totalMs } : {}),
         },
       };
     },
     onTrial(trial) {
       console.log(
-        JSON.stringify({ trial: trial.index + 1, ms: trial.totalMs, ...trial.milestones }),
+        JSON.stringify({ label, trial: trial.index + 1, ms: trial.totalMs, ...trial.milestones }),
       );
     },
   };
@@ -155,6 +179,8 @@ async function main(): Promise<number> {
       "user-id": { type: "string" },
       trials: { type: "string", default: "20" },
       probe: { type: "string", default: "pi" },
+      "spacing-ms": { type: "string", default: "0" },
+      label: { type: "string", default: "back-to-back" },
       "p95-max-ms": { type: "string" },
       "p50-max-ms": { type: "string" },
     },
@@ -162,8 +188,18 @@ async function main(): Promise<number> {
   const teamId = values["team-id"];
   const userId = values["user-id"];
   const trials = Number(values.trials);
-  const probe = values.probe as ProbeName;
-  if (!teamId || !userId || !Number.isInteger(trials) || trials < 1 || !PROBES.includes(probe)) {
+  const probe = values.probe ?? "pi";
+  const spacingMs = Number(values["spacing-ms"]);
+  const label = values.label ?? "back-to-back";
+  if (
+    !teamId ||
+    !userId ||
+    !Number.isInteger(trials) ||
+    trials < 1 ||
+    !(probe in PROBES) ||
+    !Number.isInteger(spacingMs) ||
+    spacingMs < 0
+  ) {
     console.error(USAGE);
     return 2;
   }
@@ -172,9 +208,10 @@ async function main(): Promise<number> {
     console.error(replica);
     return 2;
   }
-  const { database, runtime, lifecycle, wire } = replica;
+  const { database, lifecycle, wire } = replica;
   const target = { teamId, userId };
   let report: ColdStartReport;
+  let threadId: string | undefined;
   try {
     const [team] = await database.db
       .execute<{ id: string; slug: string }>(sql`SELECT id, slug FROM teams WHERE id = ${teamId}`)
@@ -182,34 +219,30 @@ async function main(): Promise<number> {
     if (!team) throw new Error("no such team");
     // Awake and connected before the first trial (a first-ever sandbox is not a cold start).
     await lifecycle.waker.wake(target);
-    const threadId = await harnessThread(database.db, target);
+    threadId = await createHarnessThread(database.db, target);
     const warm = await wire.router.piCommand(
       target,
       { threadId, command: { id: "warm-up", type: "get_state" } },
       { timeoutMs: PROBE_TIMEOUT_MS * 2 },
     );
     if (!warm.ok) throw new Error(`warm-up failed: ${warm.error.code} ${warm.error.message}`);
-    report = await runColdStartTrials(
-      probe,
-      trials,
-      steps(
-        {
-          db: database.db,
-          provider: runtime.provider,
-          router: wire.router,
-          target,
-          team,
-          threadId,
-          hibernate: () => lifecycle.hibernate(target, { force: true }),
-        },
-        probe,
-      ),
-    );
+    const wiring: Wiring = {
+      db: database.db,
+      router: wire.router,
+      target,
+      namespace: `kobe-team-${team.slug}`,
+      threadId,
+      spacingMs,
+      hibernate: () => lifecycle.hibernate(target, { force: true }),
+    };
+    report = await runColdStartTrials(probe, trials, steps(wiring, probe, label));
   } catch (err) {
     console.error(`cold-start harness failed: ${err instanceof Error ? err.message : String(err)}`);
+    if (threadId) await deleteHarnessThread(database.db, target, threadId).catch(() => {});
     await replica.close();
     return 2;
   }
+  await deleteHarnessThread(database.db, target, threadId).catch(() => {});
   await replica.close();
   const p95Max = values["p95-max-ms"] ? Number(values["p95-max-ms"]) : undefined;
   const p50Max = values["p50-max-ms"] ? Number(values["p50-max-ms"]) : undefined;
@@ -219,7 +252,9 @@ async function main(): Promise<number> {
   console.log(
     JSON.stringify({
       summary: true,
+      label,
       probe: report.probe,
+      spacingMs,
       trials: report.total.n,
       p50: Math.round(report.total.p50),
       p95: Math.round(report.total.p95),

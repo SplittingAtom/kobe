@@ -105,6 +105,52 @@
    must keep a retained volume's row next to a new sandbox for a returning member, it should move
    retention to its own table or re-key.
 
+## Review round (coordinator, PR #39) — resolution
+
+1. **HIGH Gate 1 honesty.** The harness and e2e measure **hibernated → Pi ready** (`pi.command
+get_state`: agent reconnected + Pi spawned and answering), never labelled Gate 1. The gap to
+   the Gate definition (hibernated → first token): run creation and `run.start` (KOBE-30), the
+   model gateway and token verification (KOBE-40/41), and the model's time to first
+   `text.delta`. Pi-ready is a lower bound. The harness takes a probe registry (`PROBES` in
+   `cli/cold-start.ts`); `first-token` is one more entry once a model exists. Two trial sets run
+   in e2e: 20 back-to-back and 5 spaced (30 s fully down before each wake); numbers below.
+2. **MEDIUM data loss.** `ensureSandbox` on a suspended sandbox returns `suspended` _before_ the
+   template RuntimeClass check (nothing runs; the claim owns the volume); only a wake replaces the
+   template. The harness reads claim/Sandbox/pod directly (no `ensureSandbox`). Test: "never
+   deletes a suspended sandbox for a stale template RuntimeClass".
+3. **MEDIUM audit.** `sandbox.woken` is emitted by the provider as soon as the resume patch is
+   committed (also when the new pod then fails verification and is destroyed — both audited).
+   `hibernateSandbox` → `not_found`: no row change to `hibernated`, no audit; the stale sandbox id
+   is cleared. `already_suspended` (a hibernation whose commit failed earlier): row updated, no
+   second audit.
+4. **MEDIUM transient wake failures.** The router retries a failed wake with jittered exponential
+   backoff (1 s base, 10 s cap) while the command still waits and the sandbox isn't connected,
+   within `wakeRetryBudgetMs` (90 s, never past the command's deadline − 2 s); then the command
+   fails `sandbox_unavailable`. Definitive `SandboxWakeError`s still fail at once.
+
+- L1: `lockIfIdle` locks (`FOR UPDATE SKIP LOCKED`) in one statement and runs the idle/busy/
+  command checks in a second (fresh READ COMMITTED snapshot).
+- L2: a sandbox that connects without a row (created before KOBE-25, or by an operator tool) is
+  adopted at registration (`INSERT … ON CONFLICT DO NOTHING`), so the idle policy covers it.
+- L3: the agent's fast session-exchange retry is jittered (100–300 ms).
+- L4: e2e uses a dedicated cold-start user (own sandbox); the harness deletes its thread;
+  `sandbox.hibernated` records `trigger` (`idle` | `operator`) — operator tools run without a
+  user identity, so the actor stays `system`.
+- Also: a sweep skips a row whose registration holds `FOR SHARE` at that instant (`SKIP LOCKED`);
+  it is picked up on the next sweep.
+
 ## Evidence (acceptance criteria → test or command output)
 
-(filled in below as measurements arrive)
+| AC   | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ac-1 | `sandbox-lifecycle.db.test.ts`: idle time + team setting, out-of-range setting, queued/running/waiting_approval never hibernated, run end counts as activity, command in flight, command touch; `idle.test.ts`                                                                                                                                                                                                          |
+| ac-2 | `provider-lifecycle.test.ts` "suspends the Sandbox: its pod goes, the claim … stays"; db: closes the connection `hibernating`; e2e: Suspended, no pod, PVC Bound, row hibernated, `/tmp` wiped, `/workspace` kept                                                                                                                                                                                                       |
+| ac-3 | `provider-lifecycle.test.ts`: require() before the patch, template re-applied (image, Service IP, stale field dropped), mismatch deleted + audited, terminating pod skipped, isolation missing → nothing patched; db: command wakes and is delivered on hello, fail-fast on missing isolation, non-member not woken, transient failures retried, budget → `sandbox_unavailable`; e2e: woken pod under gVisor reconnects |
+| ac-4 | provider: concurrent wakes, stale-resourceVersion resume re-reads; db: two replicas sweeping hibernate once, wake racing hibernate (command waits for the lock, then wakes; old pod never gets it), hibernated pod's connection refused                                                                                                                                                                                 |
+| ac-5 | provider + db audit assertions (targets validated against `AUDIT_EVENTS`); e2e counts                                                                                                                                                                                                                                                                                                                                   |
+| ac-6 | `cold-start.test.ts` (nearest-rank p50/p95, trial ordering); e2e runs `dist/cli/cold-start.js`                                                                                                                                                                                                                                                                                                                          |
+| ac-7 | Measurements: see below                                                                                                                                                                                                                                                                                                                                                                                                 |
+
+### Measured (CI k3d, self-hosted DinD runners)
+
+Pending the first green e2e run of this branch; filled in from the job log.

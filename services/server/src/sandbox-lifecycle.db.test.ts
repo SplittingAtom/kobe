@@ -1,7 +1,8 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { SANDBOX_CLOSE_CODES } from "@kobe/protocol";
-import { runs, threads, withTeam } from "@kobe/db";
+import { SYSTEM_ACTOR, runs, threads, withTeam } from "@kobe/db";
+import { recordAuditAfter } from "./audit/record.js";
 import { IsolationRuntimeMissingError } from "./isolation/gate.js";
 import {
   createDeferredWaker,
@@ -26,6 +27,10 @@ class FakeProvider implements LifecycleProvider {
   readonly ids = new Map<string, string>();
   hold: Promise<void> | undefined;
   wakeError: Error | undefined;
+  /** Transient failures (e.g. API timeouts) to throw before wakes succeed. */
+  transientFailures = 0;
+  /** The next hibernate finds the claim gone. */
+  claimGone = false;
 
   sandboxIdOf(userId: string): string {
     let id = this.ids.get(userId);
@@ -39,9 +44,22 @@ class FakeProvider implements LifecycleProvider {
   async wakeSandbox(team: { id: string }, userId: string): Promise<WakeResult> {
     this.calls.push(`wake:${userId}`);
     if (this.wakeError) throw this.wakeError;
+    if (this.transientFailures > 0) {
+      this.transientFailures -= 1;
+      throw new Error("Kubernetes API get SandboxClaim timed out after 10000 ms");
+    }
     const resumed = this.state.get(userId) === "suspended";
     this.state.set(userId, "running");
     const sandboxId = this.sandboxIdOf(userId);
+    // Like the real provider: audited once the resume is committed.
+    if (resumed) {
+      await recordAuditAfter(fx.db, {
+        action: "sandbox.woken",
+        actor: SYSTEM_ACTOR,
+        teamId: team.id,
+        target: { sandboxId, userId },
+      });
+    }
     return {
       resumed,
       handle: {
@@ -62,6 +80,10 @@ class FakeProvider implements LifecycleProvider {
   ): Promise<HibernateOutcome> {
     this.calls.push(`hibernate:${userId}`);
     await this.hold;
+    if (this.claimGone) {
+      this.claimGone = false;
+      return "not_found";
+    }
     if (this.ids.get(userId) !== sandboxId) return "not_found";
     this.state.set(userId, "suspended");
     return "suspended";
@@ -80,7 +102,12 @@ beforeAll(async () => {
   await fx.setup([{}, {}], (i) => ({
     sandboxWire: {
       sweep: false,
-      tuning: { resultPollMs: 100, helloTimeoutMs: 1_000 },
+      tuning: {
+        resultPollMs: 100,
+        helloTimeoutMs: 1_000,
+        wakeRetryBaseMs: 50,
+        wakeRetryBudgetMs: 2_000,
+      },
       waker: must(wakers[i], "waker"),
     },
   }));
@@ -102,6 +129,8 @@ beforeEach(() => {
   provider.calls.length = 0;
   provider.hold = undefined;
   provider.wakeError = undefined;
+  provider.transientFailures = 0;
+  provider.claimGone = false;
 });
 
 interface World {
@@ -158,7 +187,10 @@ async function audits(w: World, action: string) {
 /** A sandbox that has been woken once (row + identity) and is connected to replica `holder`. */
 async function awake(w: World, holder = 0): Promise<FakeSandbox> {
   await lifecycle().waker.wake(w.target);
-  return connect(w, holder);
+  const sb = await connect(w, holder);
+  // Registered (its FOR SHARE on the row released): a hibernation would SKIP LOCKED meanwhile.
+  await sb.ready();
+  return sb;
 }
 
 async function connect(w: World, replica = 0): Promise<FakeSandbox> {
@@ -192,7 +224,12 @@ describe("hibernation policy (D14)", () => {
     const [audit] = await audits(w, "sandbox.hibernated");
     expect(audit).toMatchObject({
       actor_kind: "system",
-      target: { sandboxId: provider.sandboxIdOf(w.owner.id), userId: w.owner.id, idleMinutes: 15 },
+      target: {
+        sandboxId: provider.sandboxIdOf(w.owner.id),
+        userId: w.owner.id,
+        idleMinutes: 15,
+        trigger: "idle",
+      },
     });
   });
 
@@ -300,6 +337,45 @@ describe("hibernation policy (D14)", () => {
   });
 });
 
+describe("adoption of sandboxes without a lifecycle row", () => {
+  it("a sandbox that connects without ever being woken gets a row and is then hibernated when idle", async () => {
+    const w = await world();
+    const sb = await connect(w, 1);
+    await sb.ready();
+    expect(await sandboxRow(w)).toMatchObject({
+      state: "running",
+      sandbox_id: provider.sandboxIdOf(w.owner.id),
+    });
+    await idleFor(w, 30);
+    await lifecycle().sweep();
+    expect(await sandboxRow(w)).toMatchObject({ state: "hibernated" });
+  });
+});
+
+describe("hibernation of a sandbox whose claim is gone", () => {
+  it("records nothing as hibernated and forgets the stale sandbox id", async () => {
+    const w = await world();
+    await awake(w);
+    provider.claimGone = true;
+    expect(await lifecycle().hibernate(w.target, { force: true })).toBe(false);
+    expect(await sandboxRow(w)).toMatchObject({ state: "running", sandbox_id: null, pvc: null });
+    expect(await audits(w, "sandbox.hibernated")).toEqual([]);
+    // A later sweep skips it (no claim recorded) until a wake records the current one.
+    await idleFor(w, 60);
+    await lifecycle().sweep();
+    expect(await sandboxRow(w)).toMatchObject({ state: "running" });
+  });
+
+  it("an operator-forced hibernation is audited as such", async () => {
+    const w = await world();
+    await awake(w);
+    expect(await lifecycle().hibernate(w.target, { force: true })).toBe(true);
+    expect((await audits(w, "sandbox.hibernated"))[0]?.target).toMatchObject({
+      trigger: "operator",
+    });
+  });
+});
+
 describe("wake (router → waker → provider)", () => {
   async function hibernated(w: World): Promise<void> {
     const sb = await awake(w);
@@ -383,6 +459,35 @@ describe("wake (router → waker → provider)", () => {
       ok: false,
       error: { code: "isolation_runtime_missing" },
     });
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
+  it("retries a transient wake failure while the command waits, then delivers it", async () => {
+    const w = await world();
+    await hibernated(w);
+    provider.calls.length = 0;
+    provider.transientFailures = 2;
+    const result = getState(w);
+    await expect
+      .poll(() => provider.calls.filter((c) => c === `wake:${w.owner.id}`).length, {
+        timeout: 5_000,
+      })
+      .toBe(3);
+    const sb = await connect(w, 0);
+    await sb.ready();
+    await expect(result).resolves.toMatchObject({ ok: true });
+  });
+
+  it("fails the command `sandbox_unavailable` once the wake retry budget is spent", async () => {
+    const w = await world();
+    await hibernated(w);
+    provider.transientFailures = 1_000;
+    const started = Date.now();
+    await expect(getState(w)).resolves.toMatchObject({
+      ok: false,
+      error: { code: "sandbox_unavailable" },
+    });
+    // Within the 2 s budget (tuned for the test), well before the command's 8 s deadline.
     expect(Date.now() - started).toBeLessThan(5_000);
   });
 

@@ -104,6 +104,32 @@ describe("hibernateSandbox (D14)", () => {
   });
 });
 
+describe("ensureSandbox on a hibernated sandbox (no wake)", () => {
+  it("never deletes a suspended sandbox for a stale template RuntimeClass (its volume would go)", async () => {
+    const { kube, provider } = setup();
+    const handle = await provider.ensureSandbox(TEAM, USER);
+    await provider.hibernateSandbox(TEAM, USER, handle.sandboxId);
+    const sandbox = sandboxOf(kube, handle.sandboxName);
+    kube.seed({
+      ...sandbox,
+      spec: {
+        ...(sandbox.spec as object),
+        podTemplate: {
+          spec: { ...podSpec(kube, handle.sandboxName), runtimeClassName: "old-gvisor" },
+        },
+      },
+    });
+    await expect(provider.ensureSandbox(TEAM, USER)).resolves.toMatchObject({
+      state: "suspended",
+    });
+    expect(kube.all("SandboxClaim")).toHaveLength(1);
+    expect(kube.calls.filter((c) => c.verb === "delete" && c.kind === "SandboxClaim")).toEqual([]);
+    // Waking replaces the stale template with a verified one instead.
+    await expect(provider.wakeSandbox(TEAM, USER)).resolves.toMatchObject({ resumed: true });
+    expect(podSpec(kube, handle.sandboxName).runtimeClassName).toBe("gvisor");
+  });
+});
+
 describe("wakeSandbox (D14, KOBE-9)", () => {
   async function hibernated(opts: Parameters<typeof setup>[0] = {}) {
     const ctx = setup(opts);
@@ -122,8 +148,18 @@ describe("wakeSandbox (D14, KOBE-9)", () => {
     });
     expect(mode(kube, handle.sandboxName)).toBe("Running");
     expect(podOf(kube, handle.sandboxName)?.spec).toMatchObject({ runtimeClassName: "gvisor" });
-    // sandbox.woken is the caller's to record (it knows the trigger); the provider records none.
-    expect(audits.filter((a) => a.action !== "sandbox.created")).toEqual([]);
+    expect(audits.filter((a) => a.action === "sandbox.woken")).toEqual([
+      {
+        action: "sandbox.woken",
+        teamId: TEAM.id,
+        target: { sandboxId: handle.sandboxId, userId: USER },
+      },
+    ]);
+    expect(
+      AUDIT_EVENTS["sandbox.woken"].target.parse(
+        must(audits.find((a) => a.action === "sandbox.woken")).target,
+      ),
+    ).toBeTruthy();
   });
 
   it("calls isolation.require() before the resume patch", async () => {
@@ -215,6 +251,10 @@ describe("wakeSandbox (D14, KOBE-9)", () => {
       IsolationRuntimeMissingError,
     );
     expect(ctx.kube.all("SandboxClaim")).toHaveLength(0);
+    // The resume itself happened (audited), then the unverified pod was destroyed (audited).
+    expect(ctx.audits.map((a) => a.action)).toEqual(
+      expect.arrayContaining(["sandbox.woken", "sandbox.destroyed"]),
+    );
     const destroyed = ctx.audits.find((a) => a.action === "sandbox.destroyed");
     expect(destroyed).toMatchObject({ target: { reason: "isolation_mismatch" } });
     expect(AUDIT_EVENTS["sandbox.destroyed"].target.parse(must(destroyed).target)).toBeTruthy();
