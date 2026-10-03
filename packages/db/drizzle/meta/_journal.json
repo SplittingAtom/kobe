@@ -211,27 +211,6 @@
       "when": 1791036939056,
       "tag": "0029_sandboxes_rls",
       "breakpoints": true
-    },
-    {
-      "idx": 30,
-      "version": "7",
-      "when": 1791049440429,
-      "tag": "0030_legal_hold",
-      "breakpoints": true
-    },
-    {
-      "idx": 31,
-      "version": "7",
-      "when": 1791049440875,
-      "tag": "0031_legal_hold_guard",
-      "breakpoints": true
-    },
-    {
-      "idx": 32,
-      "version": "7",
-      "when": 1791049441328,
-      "tag": "0032_audit_pii_commitments",
-      "breakpoints": true
     }
   ]
 }
