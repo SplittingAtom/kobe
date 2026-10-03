@@ -455,8 +455,8 @@ async function probe() {
 
 // --- interrupted run + Retry ---------------------------------------------------------------
 
-async function signedIn(user) {
-  const c = client(user.ip);
+async function signedIn(user, ip = user.ip) {
+  const c = client(ip);
   const res = await c.signIn(user.email);
   if (res.status !== 200) throw new Error(`sign-in ${user.email}: ${res.status}`);
   await c.useTeam(user.teamId);
@@ -550,7 +550,8 @@ async function interruptRetry() {
  * `pi_rejected`): everything up to the model request, nothing of the model's own latency.
  */
 async function trial() {
-  const c = await signedIn(config.user);
+  // One address per trial: back-to-back trials sign in faster than the per-IP sign-in limit.
+  const c = await signedIn(config.user, `198.51.101.${(config.trial % 250) + 1}`);
   let threadId = config.threadId;
   if (!threadId) {
     threadId = (await c.call("POST", "/v1/threads", { title: "gate1 cold start" })).json.thread_id;
