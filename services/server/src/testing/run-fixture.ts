@@ -157,7 +157,9 @@ export class RunFixture {
   readonly listeners: Awaited<ReturnType<typeof sandboxListener>>[] = [];
   readonly workspaces: FakeWorkspace[] = [];
 
-  async setup(options: { readonly startTimeoutMs?: number } = {}): Promise<void> {
+  async setup(
+    options: { readonly startTimeoutMs?: number; readonly stopGraceMs?: number } = {},
+  ): Promise<void> {
     await this.fx.setup([{}, {}], () => ({
       sandboxWire: {
         sweep: false,
@@ -175,7 +177,12 @@ export class RunFixture {
       },
       runs: {
         sweep: false,
-        tuning: { stopGraceMs: 300, stallMs: 0, startDeadlineMs: 0, stopResendMs: 0 },
+        tuning: {
+          stopGraceMs: options.stopGraceMs ?? 300,
+          stallMs: 0,
+          startDeadlineMs: 0,
+          stopResendMs: 0,
+        },
       },
     }));
     for (let i = 0; i < this.fx.replicas.length; i += 1) {

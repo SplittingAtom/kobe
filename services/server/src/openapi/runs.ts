@@ -23,11 +23,14 @@ const withoutDialect = ({ $schema: _ignored, ...rest }: JsonSchema): JsonSchema 
 
 /**
  * The thread's active run (if any), then its queued runs in start order; and, while the thread is
- * `interrupted`, the interrupted run it waits on (offer Retry for it), else null.
+ * `interrupted`, the interrupted run it waits on (offer Retry for it), else null. `queue_paused`:
+ * the user stopped the active run while messages were queued, so they wait (offer Resume; a new
+ * message also resumes the queue).
  */
 export const threadRunsSchema = z.strictObject({
   runs: z.array(runSnapshotSchema),
   interrupted_run: runSnapshotSchema.nullable(),
+  queue_paused: z.boolean(),
 });
 
 const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
@@ -116,7 +119,7 @@ export function runsOpenApiPaths(): Record<string, Record<string, unknown>> {
           "200": json(
             "ThreadRuns",
             "Active run first, then the queue (`queue_pos` 1 = next); `interrupted_run` while the " +
-              "thread is interrupted.",
+              "thread is interrupted; `queue_paused` after a Stop with messages queued.",
           ),
           "404": json("Error", "`thread_not_found`."),
           ...COMMON,
@@ -126,8 +129,11 @@ export function runsOpenApiPaths(): Record<string, Record<string, unknown>> {
     "/v1/threads/{id}/queue/resume": {
       post: {
         operationId: "resumeThreadQueue",
-        summary: "Continue without retry: an interrupted thread's queued runs resume (D14)",
-        description: "No-op unless the thread is interrupted. Returns the thread's runs.",
+        summary:
+          "Resume the queue: after a Stop, or Continue without retry on an interrupted thread (D14)",
+        description:
+          "Queued runs start in order. No-op unless the thread is interrupted or its queue was " +
+          "paused by a Stop. Returns the thread's runs.",
         parameters: change,
         responses: {
           "200": json("ThreadRuns", "The thread's runs after resuming."),
@@ -177,8 +183,10 @@ export function runsOpenApiPaths(): Record<string, Record<string, unknown>> {
         operationId: "cancelRun",
         summary: "Stop: cancel the active run (Pi aborts), or delete a queued message (D17)",
         description:
-          "The run ends `cancelled` at once with `run.interrupted {reason: cancelled}`; queued " +
-          "messages stay and the next one starts. Idempotent for a cancelled run.",
+          "The run ends `cancelled` at once with `run.interrupted {reason: cancelled}`. Stopping " +
+          "the active run pauses the messages queued behind it (`queue_paused`) until the user " +
+          "resumes the queue or sends a new message; deleting a queued message does not pause. " +
+          "Idempotent for a cancelled run.",
         parameters: change,
         responses: {
           "200": json("Run", "The cancelled run."),
