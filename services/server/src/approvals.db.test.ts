@@ -485,7 +485,9 @@ describe("expiry and run ends", () => {
     const result = await call.result();
     expect(result.decision === "deny" && result.reasons[0]?.code).toBe("budget_exhausted");
     expect(await approvalRow(pending.approval_id)).toMatchObject({ cause: "budget_exhausted" });
-    expect(await runStatus(w.team, w.runId)).toBe("running");
+    // No longer waiting: the step finishes (running), then the run ends budget_stopped as soon as
+    // the sandbox answers the after-step stop (the fake answers at once).
+    expect(["running", "budget_stopped"]).toContain(await runStatus(w.team, w.runId));
   });
 
   it("the sandbox connection closing while pending expires it; the run goes back to running", async () => {
