@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { quoteIdent } from "./roles.js";
-import { appPrivilegesFor } from "./tenancy.js";
+import { appColumnPrivilegesFor, appPrivilegesFor } from "./tenancy.js";
 
 /** Migrations ship next to dist/ and src/ alike (`packages/db/drizzle`). */
 export const DEFAULT_MIGRATIONS_FOLDER = fileURLToPath(new URL("../drizzle", import.meta.url));
@@ -104,6 +104,18 @@ async function grantAppPrivileges(client: pg.ClientBase, appRole: string): Promi
       const privileges = appPrivilegesFor(name);
       if (privileges && privileges.length > 0) {
         await client.query(`GRANT ${privileges.join(", ")} ON ${quoteIdent(name)} TO ${role}`);
+      }
+      // REVOKE ALL above also removed earlier column privileges. Only columns the schema has:
+      // the catalog check pins the exact column privileges.
+      for (const [privilege, columns] of Object.entries(appColumnPrivilegesFor(name) ?? {})) {
+        const { rows: present } = await client.query<{ name: string }>(
+          `SELECT column_name AS name FROM information_schema.columns
+           WHERE table_schema = 'public' AND table_name = $1 AND column_name = ANY($2)`,
+          [name, columns ?? []],
+        );
+        if (present.length === 0) continue;
+        const list = present.map((c) => quoteIdent(c.name)).join(", ");
+        await client.query(`GRANT ${privilege} (${list}) ON ${quoteIdent(name)} TO ${role}`);
       }
     }
     await client.query("COMMIT");

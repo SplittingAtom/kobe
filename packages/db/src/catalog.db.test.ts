@@ -2,6 +2,7 @@ import pg from "pg";
 import { afterAll, describe, expect, inject, it } from "vitest";
 import { BREAK_GLASS_READABLE_TABLES } from "./break-glass/tables.js";
 import {
+  INSTALL_WIDE_COLUMN_GRANTS,
   INSTALL_WIDE_TABLES,
   TEAM_REFERENCING_INSTALL_WIDE,
   TEAM_TABLES,
@@ -238,7 +239,7 @@ describe("app role privileges", () => {
     expect(p).toEqual({ schema_create: false, db_create: false, db_temp: false });
   });
 
-  it("can only append to and read audit_log: no UPDATE, DELETE or TRUNCATE (KOBE-15)", async () => {
+  it("can only append to and read audit_log, and erase its IP and user agent (KOBE-15, KOBE-17)", async () => {
     const [p] = await rows<Record<string, boolean>>(
       `SELECT ${["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"]
         .map((p) => `has_table_privilege($1, 'public.audit_log', '${p}') AS "${p}"`)
@@ -260,9 +261,50 @@ describe("app role privileges", () => {
     );
     expect(triggers).toEqual([
       { name: "audit_log_append", enabled: "O" },
+      { name: "audit_log_erase_pii", enabled: "O" },
+      { name: "audit_log_refuse_delete", enabled: "O" },
       { name: "audit_log_refuse_truncate", enabled: "O" },
-      { name: "audit_log_refuse_update_delete", enabled: "O" },
     ]);
+    const [erasable] = await rows<Record<string, boolean>>(
+      `SELECT ${["ip", "user_agent", "pii_salt", "pii_commitment", "hash", "target", "at"]
+        .map((c) => `has_column_privilege($1, 'public.audit_log', '${c}', 'UPDATE') AS "${c}"`)
+        .join(", ")}`,
+      [appRole],
+    );
+    expect(erasable).toEqual({
+      ip: true,
+      user_agent: true,
+      pii_salt: true,
+      pii_commitment: false,
+      hash: false,
+      target: false,
+      at: false,
+    });
+  });
+
+  it("holds exactly the column privileges in the registry", async () => {
+    const columnGrants = await rows<{ table: string; column: string; privilege: string }>(
+      `SELECT c.relname AS table, a.attname AS column, p.privilege_type AS privilege
+       FROM pg_attribute a
+       JOIN pg_class c ON c.oid = a.attrelid
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       CROSS JOIN LATERAL aclexplode(a.attacl) p
+       WHERE n.nspname = 'public' AND p.grantee = (SELECT oid FROM pg_roles WHERE rolname = $1)
+       ORDER BY 1, 3, 2`,
+      [appRole],
+    );
+    const expected = Object.entries(INSTALL_WIDE_COLUMN_GRANTS)
+      .flatMap(([table, grants]) =>
+        Object.entries(grants ?? {}).flatMap(([privilege, columns]) =>
+          (columns ?? []).map((column) => ({ table, column, privilege })),
+        ),
+      )
+      .sort((a, b) =>
+        `${a.table}|${a.privilege}|${a.column}`.localeCompare(
+          `${b.table}|${b.privilege}|${b.column}`,
+        ),
+      );
+    expect(columnGrants).toEqual(expected);
   });
 
   it("holds exactly the privileges in the grants matrix on every table", async () => {

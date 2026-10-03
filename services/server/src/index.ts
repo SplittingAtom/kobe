@@ -3,6 +3,7 @@ import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { approvalKeyring } from "./approvals/index.js";
 import { isolationAuditor } from "./audit/isolation.js";
+import { AuditPiiSweeper } from "./audit/pii-sweeper.js";
 import { BreakGlassSweeper } from "./break-glass/sweeper.js";
 import { loadConfig } from "./config.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
@@ -87,6 +88,9 @@ deps?.auditAnchor.start();
 // Break-glass grants end at expires_at on their own; this records the end and notifies (KOBE-16).
 const breakGlassSweeper = deps ? new BreakGlassSweeper(deps) : undefined;
 breakGlassSweeper?.start();
+// Audit rows lose their client IP and user agent after the retention period (KOBE-17).
+const auditPiiSweeper = deps ? new AuditPiiSweeper(deps.database.db) : undefined;
+auditPiiSweeper?.start();
 // Pending approvals past their 1 h TTL whose waiting replica is gone (D29, KOBE-37).
 deps?.approvals.start();
 isolation.start().catch((err: unknown) => logger.error({ err }, "isolation check failed"));
@@ -217,6 +221,7 @@ function shutdown(signal: string): void {
   deps?.auditAnchor.stop();
   void egressRelay?.close();
   breakGlassSweeper?.stop();
+  auditPiiSweeper?.stop();
   deps?.approvals.stop();
   // End event streams first so browsers reconnect (with Last-Event-ID) to another replica.
   void deps?.eventStream.hub.close();
