@@ -24,6 +24,13 @@ import {
   type ServerRunOrchestrator,
 } from "./runs/index.js";
 import { UserLifecycle } from "./users/lifecycle.js";
+import type { McpApprovalVerifier } from "./mcp/approvals.js";
+import { createDbMcpCatalog } from "./mcp/catalog.js";
+import { createMcpService, type McpService } from "./mcp/service.js";
+import { createPolicyEngine } from "./policy/engine.js";
+import { createToolRegistry } from "./policy/registry.js";
+import { createDbRuleSource, createDbSettingsSource } from "./policy/rule-store.js";
+import { logger } from "./logger.js";
 
 export interface ServerDepsOptions {
   readonly databaseUrl: string;
@@ -49,6 +56,8 @@ export interface ServerDepsOptions {
   readonly sandboxWire?: Partial<Omit<SandboxWireOptions, "db" | "databaseUrl">>;
   /** Run orchestrator seams and tuning (KOBE-30): agent resolution, budgets, timings. */
   readonly runs?: Partial<Omit<RunOrchestratorOptions, "db" | "router">>;
+  /** MCP proxy re-check seams (KOBE-58): the signed-approval verifier (KOBE-37). */
+  readonly mcp?: { readonly approvals?: McpApprovalVerifier; readonly now?: () => Date };
 }
 
 /** Limits on publishing agent versions (KOBE-46 review M3). */
@@ -100,6 +109,11 @@ export interface ServerDeps {
    * `sandboxWire.router`; the wire calls back when it ends a run.
    */
   readonly runs: ServerRunOrchestrator;
+  /**
+   * The MCP proxy's policy re-check (KOBE-58): exposed tools and a decision per call, served on
+   * the internal listener only (`routes/internal.ts`).
+   */
+  readonly mcp: McpService;
   /** Creates an email+password user (and optional install role) atomically, without sign-up. */
   createUserWithPassword(
     input: NewUser,
@@ -142,10 +156,24 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   // orchestrator through this late binding.
   const late: { runs?: ServerRunOrchestrator } = {};
   const extraHooks = options.sandboxWire?.hooks;
+  // One policy engine for both enforcement points (D29): the sandbox's policy.check and the MCP
+  // proxy's re-check. MCP tools resolve from the pinned connector snapshots (KOBE-58 catalog).
+  const mcpCatalog = createDbMcpCatalog(database.db);
+  const toolRegistry = createToolRegistry(mcpCatalog);
+  const policyEngine = createPolicyEngine({
+    rules: createDbRuleSource(database.db),
+    settings: createDbSettingsSource(database.db),
+    registry: toolRegistry,
+    connectors: mcpCatalog,
+    onError: (err) => logger.error({ err }, "policy engine error (denied)"),
+  });
+  const runContext = options.sandboxWire?.runContext ?? createDbRunContextSource();
   const sandboxWire = createSandboxWire({
+    tools: toolRegistry,
+    engine: policyEngine,
     ...options.sandboxWire,
     background,
-    runContext: options.sandboxWire?.runContext ?? createDbRunContextSource(),
+    runContext,
     hooks: {
       async onRunEnded(event) {
         try {
@@ -165,6 +193,13 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     router: sandboxWire.router,
   });
   late.runs = runs;
+  const mcp = createMcpService({
+    db: database.db,
+    engine: policyEngine,
+    runContext,
+    ...(options.mcp?.approvals ? { approvals: options.mcp.approvals } : {}),
+    ...(options.mcp?.now ? { now: options.mcp.now } : {}),
+  });
   const lifecycle = new UserLifecycle();
   // A deactivated user's sandboxes lose their connections on every replica at once (KOBE-13).
   lifecycle.on("deactivated", {
@@ -185,6 +220,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     lifecycle,
     sandboxWire,
     runs,
+    mcp,
     async createUserWithPassword({ email, name, password }, { installRole, recordSetup } = {}) {
       const ctx = await auth.$context;
       const hash = await ctx.password.hash(password);

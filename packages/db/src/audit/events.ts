@@ -2,6 +2,7 @@ import { z } from "zod";
 import { DOMAIN_PATTERN_SQL } from "../schema/egress.js";
 import { BREAK_GLASS_MAX_MINUTES, BREAK_GLASS_NOTIFICATION_EVENTS } from "../schema/break-glass.js";
 import { teamRole } from "../schema/team-members.js";
+import { PI_TOOL_NAME_PATTERN } from "../connectors/snapshot.js";
 
 /**
  * The audit event taxonomy (KOBE-15, spec D31). Every audited action is one entry: its dotted name,
@@ -87,6 +88,21 @@ export const SANDBOX_LIMITS = [
   "run_events",
   "run_bytes",
   "thread_entries",
+] as const;
+
+/** Why a signed approval did not authorise an MCP call (`@kobe/protocol/node` VerifyFailure + 2). */
+export const MCP_APPROVAL_FAILURES = [
+  "no_approval",
+  "unavailable",
+  "malformed",
+  "unknown_key",
+  "binding_mismatch",
+  "expired",
+  "bad_mac",
+  "not_allowed",
+  "record_mismatch",
+  "run_inactive",
+  "not_consumable",
 ] as const;
 
 const event = <const S extends AuditScope, T extends z.ZodRawShape>(scope: S, shape: T) => ({
@@ -282,6 +298,33 @@ export const AUDIT_EVENTS = {
     bytesDown: count,
     from: z.iso.datetime(),
     to: z.iso.datetime(),
+  }),
+
+  // ── mcp: tool calls through the MCP proxy (KOBE-58, D27, D29); metadata only, never inputs ──
+  /**
+   * The server decided an MCP `tools/call` the proxy asked about (actor: the sandbox's user). Every
+   * allowed call is recorded before the proxy forwards it; denied calls are throttled per sandbox.
+   * `reason` is the deciding policy reason code (`approval_granted` when a signed approval was
+   * verified and consumed); `approvalFailure` says why an approval did not authorise the call.
+   */
+  "mcp.tool_call": event("team", {
+    sandboxId: id,
+    userId: id,
+    connectorId: id,
+    /** Pi tool name (`mcp__<server>__<tool>`), policy metadata. */
+    tool: z.string().max(256).regex(PI_TOOL_NAME_PATTERN),
+    runId: id.optional(),
+    threadId: id.optional(),
+    /** Only when the client sent one in `_meta` and it is a plain id. */
+    toolCallId: z
+      .string()
+      .regex(/^[A-Za-z0-9_.:/-]{1,128}$/)
+      .optional(),
+    decision: z.enum(["allowed", "denied"]),
+    reason: reasonCode,
+    risk: z.enum(["read", "write", "destructive"]).optional(),
+    approvalId: id.optional(),
+    approvalFailure: z.enum(MCP_APPROVAL_FAILURES).optional(),
   }),
 
   // ── thread: lifecycle metadata only, never titles or content (KOBE-34, D18, D23) ──

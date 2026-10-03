@@ -211,6 +211,20 @@
       "when": 1791036939056,
       "tag": "0029_sandboxes_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1791045978470,
+      "tag": "0030_connectors",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1791045978948,
+      "tag": "0031_connectors_rls",
+      "breakpoints": true
     }
   ]
 }

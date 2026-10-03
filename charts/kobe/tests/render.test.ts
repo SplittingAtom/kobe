@@ -581,6 +581,7 @@ describe("auth (KOBE-12)", () => {
     const ms = render({
       "auth.existingSecret": "my-auth",
       "sandbox.sessionKeysSecret": "my-keys",
+      "mcpProxy.internalKeySecret": "my-mcp-key",
       "global.allowGeneratedSecretsOffline": "false",
     });
     expect(find(ms, "Secret", "kobe-auth")).toBeUndefined();
@@ -595,6 +596,7 @@ describe("auth (KOBE-12)", () => {
       renderError({
         "global.allowGeneratedSecretsOffline": "false",
         "sandbox.sessionKeysSecret": "my-keys",
+        "mcpProxy.internalKeySecret": "my-mcp-key",
       }),
     ).toMatch(/auth\.existingSecret/);
     expect(
@@ -602,6 +604,7 @@ describe("auth (KOBE-12)", () => {
         "global.allowGeneratedSecretsOffline": "false",
         "auth.existingSecret": "my-auth",
         "sandbox.sessionKeysSecret": "my-keys",
+        "mcpProxy.internalKeySecret": "my-mcp-key",
         "postgres.mode": "cnpg",
       }),
     ).toMatch(/postgres\.cnpg\.existingAppSecret/);
@@ -609,8 +612,16 @@ describe("auth (KOBE-12)", () => {
       renderError({
         "global.allowGeneratedSecretsOffline": "false",
         "auth.existingSecret": "my-auth",
+        "mcpProxy.internalKeySecret": "my-mcp-key",
       }),
     ).toMatch(/sandbox\.sessionKeysSecret/);
+    expect(
+      renderError({
+        "global.allowGeneratedSecretsOffline": "false",
+        "auth.existingSecret": "my-auth",
+        "sandbox.sessionKeysSecret": "my-keys",
+      }),
+    ).toMatch(/mcpProxy\.internalKeySecret/);
   });
 });
 

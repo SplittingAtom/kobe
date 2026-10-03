@@ -28,7 +28,8 @@ spec:
     {{- end }}
 ---
 # Sandboxes (team namespaces) must not reach the user-facing web app, the server's user API or the
-# scheduler: only the server's sandbox port 8081. The team namespace's own egress policy says the
+# scheduler: only the server's sandbox port 8081. The server's internal port 8082 admits only the
+# MCP proxy's pods; everything else outside team namespaces gets the app ports (8080, 8081). The team namespace's own egress policy says the
 # same; this is the receiving side, so it holds even where a CNI applies egress selectors loosely.
 # Everything that is not a team namespace (ingress controller, other Kobe pods, operators) is
 # unaffected; traffic from the node itself (kubelet probes) is not subject to NetworkPolicy here.
@@ -54,6 +55,11 @@ spec:
             matchExpressions:
               - key: kobe.splittingatom.io/team-namespace
                 operator: DoesNotExist
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8081
     - from:
         - namespaceSelector:
             matchLabels:
@@ -61,6 +67,14 @@ spec:
       ports:
         - protocol: TCP
           port: 8081
+    # The server's internal listener (MCP proxy policy re-check, KOBE-58): the MCP proxy only.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "kobe.selectorLabels" (dict "root" . "component" "mcp-proxy") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ include "kobe.serverInternalPort" . }}
 {{- if .Values.clamav.enabled }}
 ---
 apiVersion: networking.k8s.io/v1

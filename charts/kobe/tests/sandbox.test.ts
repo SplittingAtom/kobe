@@ -186,7 +186,7 @@ describe("server sandbox configuration", () => {
     });
   });
 
-  it("gives all session keys to the server, and the egress proxy only its own", () => {
+  it("gives all session keys to the server, and each proxy only its own", () => {
     const names = (d: string) =>
       envOf(ms, d)
         .map((e) => e.name)
@@ -197,10 +197,11 @@ describe("server sandbox configuration", () => {
       "KOBE_SESSION_KEY_MODEL_GATEWAY",
       "KOBE_SESSION_KEY_SANDBOX_WIRE",
     ]);
-    for (const d of ["kobe-scheduler", "kobe-web", "kobe-mcp-proxy"]) {
+    for (const d of ["kobe-scheduler", "kobe-web"]) {
       expect(names(d), d).toEqual([]);
     }
     expect(names("kobe-egress-proxy")).toEqual(["KOBE_SESSION_KEY_EGRESS_PROXY"]);
+    expect(names("kobe-mcp-proxy")).toEqual(["KOBE_SESSION_KEY_MCP_PROXY"]);
   });
 });
 
@@ -225,6 +226,10 @@ describe("release-side NetworkPolicy", () => {
             },
           },
         ],
+        ports: [
+          { protocol: "TCP", port: 8080 },
+          { protocol: "TCP", port: 8081 },
+        ],
       },
       {
         from: [
@@ -233,6 +238,21 @@ describe("release-side NetworkPolicy", () => {
           },
         ],
         ports: [{ protocol: "TCP", port: 8081 }],
+      },
+      // The internal listener (KOBE-58): MCP proxy pods only.
+      {
+        from: [
+          {
+            podSelector: {
+              matchLabels: {
+                "app.kubernetes.io/name": "kobe",
+                "app.kubernetes.io/instance": "kobe",
+                "app.kubernetes.io/component": "mcp-proxy",
+              },
+            },
+          },
+        ],
+        ports: [{ protocol: "TCP", port: 8082 }],
       },
     ]);
   });
