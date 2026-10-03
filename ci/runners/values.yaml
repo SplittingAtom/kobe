@@ -37,7 +37,17 @@ template:
       - name: dind
         image: docker:29-dind
         restartPolicy: Always # native sidecar: starts before the runner, stops after it
-        args: ["dockerd", "--host=unix:///var/run/docker.sock", "--group=$(DOCKER_GROUP_GID)"]
+        # The image's own entrypoint and process chain (docker-init as PID 1 forwarding SIGTERM to
+        # dockerd), plus a copy of the daemon log on the shared work volume so a failing job can
+        # print it (scripts/ci-docker-diagnostics.sh). tee ignores SIGTERM and ends at EOF.
+        command: ["sh", "-c"]
+        args:
+          - >-
+            mkdir -p /home/runner/_work/_dind && rm -f /tmp/dockerd-log.fifo &&
+            mkfifo /tmp/dockerd-log.fifo &&
+            { (trap "" TERM INT; exec tee -a /home/runner/_work/_dind/dockerd.log) </tmp/dockerd-log.fifo & } &&
+            exec dockerd-entrypoint.sh dockerd --host=unix:///var/run/docker.sock
+            --group=$(DOCKER_GROUP_GID) >/tmp/dockerd-log.fifo 2>&1
         env:
           - name: DOCKER_GROUP_GID
             value: "123"

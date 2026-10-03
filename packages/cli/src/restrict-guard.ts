@@ -12,6 +12,8 @@ const isCommentOrBlank = (line: string): boolean => line.trim() === "" || line.s
 export class RestrictGuard {
   private held: Buffer[] = [];
   private heldBytes = 0;
+  /** Bytes after the last newline seen: the start of a line not yet scanned. */
+  private partial: Buffer[] = [];
   private key: string | null = null;
   private tail = "";
 
@@ -21,10 +23,7 @@ export class RestrictGuard {
     if (this.key !== null) return [chunk];
     this.held.push(chunk);
     this.heldBytes += chunk.length;
-    const text = Buffer.concat(this.held).toString("utf8");
-    const lines = text.split("\n");
-    lines.pop(); // the last element is an incomplete line (or "")
-    const first = lines.find((l) => !isCommentOrBlank(l));
+    const first = this.firstCommandIn(chunk);
     if (first === undefined) {
       if (this.heldBytes > MAX_HEAD_BYTES) throw notRestricted();
       return [];
@@ -35,6 +34,26 @@ export class RestrictGuard {
     const out = this.held;
     this.held = [];
     return out;
+  }
+
+  /**
+   * The first complete line in `chunk` (with the unscanned start of its first line) that is not a
+   * comment or blank. Only new lines are scanned: everything before was comments or blank, so the
+   * head check stays linear in the bytes held. A newline byte never occurs inside a UTF-8
+   * sequence, so splitting on it before decoding is safe.
+   */
+  private firstCommandIn(chunk: Buffer): string | undefined {
+    const end = chunk.lastIndexOf(0x0a);
+    if (end === -1) {
+      this.partial.push(chunk);
+      return undefined;
+    }
+    const complete = Buffer.concat([...this.partial, chunk.subarray(0, end)]);
+    this.partial = [chunk.subarray(end + 1)];
+    return complete
+      .toString("utf8")
+      .split("\n")
+      .find((l) => !isCommentOrBlank(l));
   }
 
   /** Call at end of stream; throws unless the script ended with `\unrestrict <same key>`. */

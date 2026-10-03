@@ -38,9 +38,10 @@ jobs:
       - run: pnpm build
       - run: pnpm typecheck
       - run: pnpm lint
-      # Node sees the node's CPUs, not the runner's limit; cap parallel suites so per-test
-      # timeouts don't trip on self-hosted runners (ci/runners).
-      - run: pnpm test --concurrency=2
+      # Node sees the node's CPUs, not the runner's limit (6 CPUs, ci/runners); cap parallel
+      # suites and each suite's vitest workers (2 × 3) so per-test timeouts and worker start-up
+      # don't trip on self-hosted runners. Every package's test script is `vitest run`.
+      - run: pnpm test --concurrency=2 -- --maxWorkers=3
       - run: pnpm license:check
 
   db:

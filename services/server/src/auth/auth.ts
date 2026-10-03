@@ -17,12 +17,12 @@ import {
 import type { AuthAttemptAudit } from "../audit/attempts.js";
 import { auditPlugin } from "../audit/auth-plugin.js";
 import { recordAuditAfter } from "../audit/record.js";
-import { logger } from "../logger.js";
+import type { BackgroundTasks } from "../background.js";
 import type { Mailer } from "../mail/mailer.js";
 import { passwordResetMessage } from "../mail/messages.js";
 import { isDeactivated } from "../users/deactivation.js";
 import { invitationPlugin, PASSWORD_MAX, PASSWORD_MIN } from "./invitation-plugin.js";
-import { recentResetLinkPending, recordResetLinkSent, revokeResetLinks } from "./reset-links.js";
+import { claimResetLinkSend, releaseResetLinkClaim, revokeResetLinks } from "./reset-links.js";
 import { isUserVerified } from "./webauthn-flags.js";
 
 export interface AuthOptions {
@@ -40,6 +40,8 @@ export interface AuthOptions {
   readonly mailer: Mailer;
   /** Audit of unauthenticated attempts, aggregated per window (KOBE-15). */
   readonly attempts: AuthAttemptAudit;
+  /** Runs the reset email and its audit off the request path. */
+  readonly background: BackgroundTasks;
 }
 
 /** Password-reset links work once, for 30 minutes. */
@@ -68,6 +70,7 @@ export function createAuth({
   trustedProxies,
   mailer,
   attempts,
+  background,
 }: AuthOptions) {
   const origin = new URL(publicUrl);
 
@@ -79,20 +82,26 @@ export function createAuth({
    */
   async function mailResetLink(user: { id: string; email: string }, token: string) {
     if (await isDeactivated(db, user.id)) return;
-    // Not awaited: the email must not wait on the audit write (it never throws). Aggregated:
-    // anyone can request resets for an address in any number.
-    void attempts.record({ action: "auth.password.reset_requested", userId: user.id });
-    // A recent link is still usable: don't send another (soft; never blocks a later request).
-    if (await recentResetLinkPending(db, user.id)) return;
-    await mailer.send(
-      passwordResetMessage({
-        to: user.email,
-        link: `${origin.origin}/reset-password#token=${token}`,
-        expiresInMinutes: RESET_TOKEN_TTL_SECONDS / 60,
-      }),
+    // Not awaited: the email must not wait on the audit write. Aggregated: anyone can request
+    // resets for an address in any number.
+    background.run("password reset audit failed", () =>
+      attempts.record({ action: "auth.password.reset_requested", userId: user.id }),
     );
-    // Only a delivered email counts.
-    await recordResetLinkSent(db, user.id, token);
+    // A recent link is still usable: don't send another (soft; never blocks a later request).
+    if (!(await claimResetLinkSend(db, user.id, token))) return;
+    try {
+      await mailer.send(
+        passwordResetMessage({
+          to: user.email,
+          link: `${origin.origin}/reset-password#token=${token}`,
+          expiresInMinutes: RESET_TOKEN_TTL_SECONDS / 60,
+        }),
+      );
+    } catch (err) {
+      // Only a delivered email counts.
+      await releaseResetLinkClaim(db, user.id, token);
+      throw err;
+    }
   }
 
   return betterAuth({
@@ -132,9 +141,9 @@ export function createAuth({
         });
       },
       sendResetPassword: async ({ user, token }) => {
-        void mailResetLink(user, token).catch((err: unknown) =>
-          logger.error({ err, userId: user.id }, "password reset email failed"),
-        );
+        background.run("password reset email failed", () => mailResetLink(user, token), {
+          userId: user.id,
+        });
       },
     },
     // Reset tokens, 2FA and passkey challenges are stored as SHA-256 hashes, never in plain text.
