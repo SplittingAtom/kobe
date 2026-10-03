@@ -1462,10 +1462,10 @@ out("code", code);
 out("error_message", errorMessage);
 out("text", text);
 JS
-    chat() { # content timeout-ms → the CHAT_JS output
+    chat_run() { # content timeout-ms → the CHAT_JS output (not `chat`: KOBE-40's helper above)
       $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$CHAT_JS" "$E2E_TEAM_ID" "$1" "$2" 2>&1 | tail -12
     }
-    chat_out=$(chat "hello-pi-$RANDOM" 300000)
+    chat_out=$(chat_run "hello-pi-$RANDOM" 300000)
     printf '     chat: %s\n' "$(printf '%s' "$chat_out" | grep -v '^text=' | tr '\n' ' ')"
     chat_run=$(printf '%s\n' "$chat_out" | sed -n 's/^run=//p')
     contains "a message starts a run (201)" '^message=201$' "$chat_out"
@@ -1481,7 +1481,7 @@ JS
     else fail "no session token (JWT) reached the upstream"; fi
     # A clear failure when the team has no model: the run fails with the server's message, nothing hangs.
     expect "the team disables its models" '^200 ' "$(as_owner "PUT /v1/team/models/fast {\"enabled\":false}")"
-    no_model=$(chat "no-model-$RANDOM" 180000)
+    no_model=$(chat_run "no-model-$RANDOM" 180000)
     printf '     chat (no model): %s\n' "$(printf '%s' "$no_model" | grep -v '^text=' | tr '\n' ' ')"
     contains "without a team model the run fails model_not_configured" '^terminal=run.failed$' "$no_model"
     contains "with the server's own message" '^code=model_not_configured$' "$no_model"
