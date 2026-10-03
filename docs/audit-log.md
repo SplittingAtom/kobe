@@ -56,7 +56,7 @@ can map them one to one:
 | `ip`                | inet / null | Client address of the request (X-Forwarded-For via the trusted proxies, as for rate limits); erased after the retention period |
 | `user_agent`        | text / null | Client user agent, control characters removed, ≤ 256 characters; erased with `ip`                                              |
 | `prev_hash`, `hash` | hex text    | The hash chain                                                                                                                 |
-| `hash_version`      | 1 / 2       | 1: chained before the v2 upgrade (hash covers the raw IP and user agent); 2: hash covers `pii_commitment`                      |
+| `hash_version`      | null / 2    | null: chained before the v2 upgrade (hash covers the raw IP and user agent); 2: hash covers `pii_commitment`                   |
 | `pii_salt`          | hex / null  | Random salt of the commitment; erased with `ip` and `user_agent` (not returned by the read APIs)                               |
 | `pii_commitment`    | hex / null  | `sha256` over the salt, the row id, the IP and the user agent; null when the row had neither (kept forever)                    |
 
@@ -145,8 +145,8 @@ install for personal and gallery agents.
 | `governance.legal_hold.release_denied`       | install | `holdId`                                                                                                                            | Another install admin turned the release down                                                                                                    |
 | `governance.legal_hold.release_withdrawn`    | install | `holdId`                                                                                                                            | The release requester withdrew it                                                                                                                |
 | `governance.legal_hold.released`             | install | as requested, plus `selfApproved`                                                                                                   | A second install admin approved the release (single-admin install: flagged): purges may resume                                                   |
-| `audit.pii_erased`                           | install | `rows`, `held`, `olderThanHours`                                                                                                    | The sweep erased the IP and user agent of rows past the retention period; `held`: rows kept by a legal hold (system; counts only)                |
-| `audit.chain.upgraded`                       | install | `throughSeq`, `rows`, `seal`                                                                                                        | Written once by the chain v2 migration on an install that had audit rows: the seal over every v1 row (system)                                    |
+| `audit.pii_erased`                           | install | `rows`, `olderThanHours`                                                                                                            | The sweep erased the IP and user agent of rows past the retention period (system; counts only, nothing about holds)                              |
+| `audit.chain.upgraded`                       | install | `throughSeq`, `rows`, `seal`                                                                                                        | Written once by the server after the chain v2 upgrade, on an install that had audit rows: the seal over every v1 row (system)                    |
 | `agent.created`                              | any     | `agentId`, `scope`, `slug`, `source` (json, import, fork), `forkedFrom?`                                                            | Agent created, imported from a file, or forked                                                                                                   |
 | `agent.updated`                              | any     | `agentId`, `scope`, `slug`, `revision`, `source` (json, import)                                                                     | Draft replaced                                                                                                                                   |
 | `agent.deleted`                              | any     | `agentId`, `scope`, `slug`                                                                                                          | Never-published agent deleted (a published one is archived)                                                                                      |
@@ -289,11 +289,10 @@ to page oldest first, as an export does. Unknown parameters return 400.
 Each event records the request's client address and user agent. They are kept for a configurable
 period, **12 hours by default** (install setting `auditPiiRetentionHours`, 1-8760 hours, in the
 install console's Settings or `PUT /v1/install/settings`; every change is recorded as
-`install.settings.updated`). After that a background job on every server replica (every 10
-minutes, batches of 1000) sets `ip`, `user_agent` and `pii_salt` to NULL and records
-`audit.pii_erased` with counts only. The rows themselves are kept forever, and the chain still
-verifies. Data under an active [legal hold](#legal-hold) keeps its values until the hold is
-released.
+`install.settings.updated`). After that a background job sets `ip`, `user_agent` and `pii_salt` to
+NULL and records `audit.pii_erased` with counts only. The rows themselves are kept forever, and
+the chain still verifies. Data under an active [legal hold](#legal-hold) keeps its values until
+the hold is released.
 
 **How the chain survives erasure (chain v2, KOBE-17).** The row hash no longer covers the values:
 
@@ -307,42 +306,70 @@ The salt is 64 hex characters (244 random bits), assigned by the database with t
 both are null when a row has neither value. While the values are present, the verifier checks them
 against the commitment, so an edited address is still detected. Erasure removes the values and
 the salt together; the commitment stays and, without the salt, reveals nothing about them. An
-unsalted hash of an address would not do: IPv4 is small enough to search.
+unsalted hash of an address would not do: IPv4 is small enough to search. Only host addresses are
+stored (constraint `audit_log_ip_host`), so `host(ip)` loses nothing.
 
 **Who may erase.** Only the `audit_log_erase_pii` trigger's single allowed change gets through, for
 every role including the owner: `ip`, `user_agent` and `pii_salt` set to NULL together, nothing else
-changed, on a row older than the setting (read by the database, clamped to 1-8760 hours) and not
-under legal hold (SQLSTATE `KH001`). The app role holds `UPDATE` on those three columns only. A
-superuser can still erase early; that loses information but can't change any other field
-undetected.
+changed, on a row older than the setting (read by the database, clamped to 1-8760 hours), not under
+legal hold (SQLSTATE `KH001`), and for a v1 row only 24 hours after the seal (below). The app role
+holds `UPDATE` on those three columns only. A superuser can still erase early; that loses
+information but can't change any other field undetected.
 
-**Rows chained before the upgrade (v1).** Their stored hashes cover the raw values. The v2
-migration leaves those hashes untouched, so every head anchored before the upgrade (server log,
-SIEM, signed backup manifests, `--expect-audit-head`) stays valid. It first verifies the existing
-chain (and refuses to upgrade a broken one: investigate with `/v1/install/audit/integrity`), marks
-the rows `hash_version = 1`, gives those with an address a salt and commitment, then appends
+**The job.** Every server replica runs it every 10 minutes; a try-lock lets one work at a time.
+It walks the log by `seq` from a stored position (`install_settings['audit.pii_sweep_seq']`) in
+pages of 5000 rows (at most 100 pages a run), erases the due rows, moves past held rows, and stops
+at the first row still inside the period: each row is read about once, and held rows are not
+re-read every run. Releasing a hold resets the position (the `legal_holds_guard` trigger), so the
+rows it kept are erased on the next run. **After `kobe restore`** the job is paused for 24 hours
+(`audit.pii_sweep_resume_at`): holds are as of the backup, so re-place any placed since then
+within that time (the CLI says so).
+
+**Rows chained before the upgrade (v1, `hash_version` NULL).** Their stored hashes cover the raw
+values, and stay untouched, so every head anchored before the upgrade (server log, SIEM, signed
+backup manifests, `--expect-audit-head`) stays valid. The migration changes no row (see the time
+budget below). After it, the server verifies the v1 rows strictly and appends
 `audit.chain.upgraded { throughSeq, rows, seal }` with a running seal over all of them:
-`seal_n = sha256("kobe.audit.seal.v1" \n seal_{n-1} \n hash_n \n sha256(v2 form of row n))`. Once a
-v1 row's values are erased its v1 hash can no longer be recomputed; the verifier then checks it
-through the seal (every field but the raw values, and its stored hash) and its `prev_hash` link.
-A fresh install has no v1 rows, no seal and no event. Verifying from a later seq (incremental
-checks) can't recompute the seal: erased v1 rows are then checked by their links only; the full
-check (`/integrity`, restore) starts at seq 1.
+`seal_n = sha256("kobe.audit.seal.v1" \n seal_{n-1} \n hash_n \n sha256(v2 form of row n))`. A v1
+row may be erased only once that event is **24 hours old**: by then replicas of the previous
+release, whose verifier recomputes v1 hashes, are gone, so no false integrity alert. Once a v1
+row's values are erased its v1 hash can no longer be recomputed; the verifier then accepts it only
+under a valid seal (which covers every field but the raw values, and its stored hash) and checks
+its `prev_hash` link. A fresh install has no v1 rows, no seal and no event. Verifying from a later
+seq (incremental checks) can't recompute the seal; the full check (`/integrity`, restore) starts at
+seq 1.
+
+**Migration time budget.** Postgres runs all pending migrations in one transaction, holding
+`audit_log`'s ACCESS EXCLUSIVE lock from the first `ALTER TABLE` to COMMIT, and the previous
+release keeps serving meanwhile. The KOBE-17 migrations therefore do no work proportional to the
+log: the new columns are nullable without defaults (catalog-only), the constraints are `NOT VALID`
+(no scan; existing rows satisfy them by construction, new and changed rows are checked), no index
+is built, and nothing is verified or sealed. Measured: 128 ms for all three migrations on a
+100,000-row log; the test `audit-upgrade.db.test.ts` asserts that no row version, table file or
+index changes.
+
+**If the chain is broken.** The upgrade isn't blocked by it (the migration doesn't read rows). The
+seal is never written over a broken v1 chain: the server logs `audit chain verification failed …
+not sealed` at error level (retried daily), `GET /v1/install/audit/integrity` names the first bad
+row, and those v1 rows keep their IP addresses. Runbook: treat it as an integrity incident; compare
+with the heads anchored off the box (server log, SIEM) to find when it happened; restore from a
+backup taken before it if the log must be whole, or record the finding (ticket, incident report)
+and keep the log as evidence. There is no switch to seal a broken chain: sealing it would make the
+break undetectable once its rows are erased.
 
 **Rolling upgrade.** `audit_log_canonical(row)` returns the v1 or v2 form by `hash_version`, so a
 previous release's replicas, which hash its output, keep verifying new rows during the rollout.
+**Rolling back** to a release before KOBE-17 after v1 rows were erased is not supported: its
+verifier reports them as tampered. Roll forward instead.
 
 **Copies outside the live rows.** An erased value stays in dead row versions until autovacuum
 reclaims them, and in WAL, WAL archives and replicas for as long as those are kept. Size WAL
-archive retention like backups.
-
-**Rolling back the release** after the first sweep is not supported: the previous release's
-verifier can't check erased v1 rows and reports them as tampered. Roll forward instead.
+archive retention like backups. Erasure updates rows, so it adds index churn proportional to the
+rows erased (autovacuum handles it).
 
 **Backups.** A backup holds the values that were present when it was taken, salts included.
-Keep backups no longer than the privacy period requires. A restore loads rows verbatim, verifies
-the chain with `audit_log_chain_problem()` (the SQL twin of `verifyAuditChain`) and the next sweep
-erases rows past the period.
+Keep backups no longer than the privacy period requires. A restore loads rows verbatim and
+verifies the chain with `audit_log_chain_problem()` (the SQL twin of `verifyAuditChain`).
 
 ## Legal hold
 

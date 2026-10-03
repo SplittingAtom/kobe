@@ -4,6 +4,7 @@ import pg from "pg";
 import { afterAll, afterEach, beforeAll, describe, expect, inject, it } from "vitest";
 import {
   AUDIT_PII_RETENTION_KEY,
+  AUDIT_PII_SWEEP_SEQ_KEY,
   SYSTEM_ACTOR,
   audit,
   eraseExpiredAuditPii,
@@ -279,21 +280,84 @@ describe("erasure (ac-4)", () => {
 });
 
 describe("eraseExpiredAuditPii (the sweep's step)", () => {
-  it("erases due rows in batches, skips young and held ones and counts the held", async () => {
-    // Settle earlier tests' leftovers first.
-    while ((await app.db.transaction((tx) => eraseExpiredAuditPii(tx, 1000))).rows > 0);
-    const due = [await recordedAgo(13), await recordedAgo(14), await recordedAgo(15)];
+  const sweep = (page: number) => app.db.transaction((tx) => eraseExpiredAuditPii(tx, page));
+  const position = async () =>
+    Number(
+      (
+        await admin.query<{ value: string }>(`SELECT value FROM install_settings WHERE key = $1`, [
+          AUDIT_PII_SWEEP_SEQ_KEY,
+        ])
+      ).rows[0]?.value,
+    );
+
+  it("walks from its position, erases due rows, skips held ones without re-reading them", async () => {
+    const due = [await recordedAgo(15), await recordedAgo(14), await recordedAgo(13)];
     const heldRow = await recordedAgo(13, { actorId: randomUUID(), teamId: teamA });
     const young = await recordedAgo(1);
-    await hold(teamA, null);
-    const first = await app.db.transaction((tx) => eraseExpiredAuditPii(tx, 2));
-    expect(first).toEqual({ rows: 2, held: 1, olderThanHours: 12 });
-    const second = await app.db.transaction((tx) => eraseExpiredAuditPii(tx, 2));
-    expect(second).toEqual({ rows: 1, held: 1, olderThanHours: 12 });
+    await admin.query(
+      `INSERT INTO install_settings (key, value) VALUES ($1, $2)
+       ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+      [AUDIT_PII_SWEEP_SEQ_KEY, String(due[0])],
+    );
+    const holdId = await hold(teamA, null);
+    expect(await sweep(2)).toEqual({ rows: 2, olderThanHours: 12, more: true });
+    expect(await sweep(2)).toEqual({ rows: 1, olderThanHours: 12, more: true });
+    // Stops at the first row still inside the period; the held row is behind it now.
+    expect(await sweep(2)).toEqual({ rows: 0, olderThanHours: 12, more: false });
+    expect(await position()).toBe(young);
     for (const seq of due) expect((await row(seq)).ip).toBeNull();
     expect((await row(heldRow)).ip).toBe(IP);
     expect((await row(young)).ip).toBe(IP);
     await bothOk();
+
+    // Releasing the hold restarts the walk (trigger), and the row it kept goes.
+    holds.splice(holds.indexOf(holdId), 1);
+    await app.pool.query(
+      `UPDATE legal_holds SET release_requested_by = $2, release_requested_at = now(), release_reason = 'done' WHERE id = $1`,
+      [holdId, requester],
+    );
+    await app.pool.query(
+      `UPDATE legal_holds SET status = 'released', released_by = $2 WHERE id = $1`,
+      [holdId, approver],
+    );
+    expect(await position()).toBe(0);
+    await sweep(100_000);
+    expect((await row(heldRow)).ip).toBeNull();
+    expect((await row(young)).ip).toBe(IP);
+  });
+
+  it("pauses after a restore until the time kobe restore set", async () => {
+    const seq = await recordedAgo(40);
+    await admin.query(
+      `INSERT INTO install_settings (key, value) VALUES ('audit.pii_sweep_resume_at', $1)`,
+      [new Date(Date.now() + 3_600_000).toISOString()],
+    );
+    expect(await sweep(100_000)).toEqual({ rows: 0, olderThanHours: 12, more: false });
+    expect((await row(seq)).ip).toBe(IP);
+    await admin.query(
+      `UPDATE install_settings SET value = $1 WHERE key = 'audit.pii_sweep_resume_at'`,
+      [new Date(Date.now() - 1000).toISOString()],
+    );
+    await admin.query(`UPDATE install_settings SET value = '0' WHERE key = $1`, [
+      AUDIT_PII_SWEEP_SEQ_KEY,
+    ]);
+    await sweep(100_000);
+    expect((await row(seq)).ip).toBeNull();
+  });
+
+  it("runs on one replica at a time", async () => {
+    const other = await app.pool.connect();
+    try {
+      await other.query("BEGIN");
+      await other.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended('kobe.audit.pii_sweep', 0))`,
+      );
+      expect(await sweep(10)).toBeNull();
+    } finally {
+      await other.query("ROLLBACK");
+      other.release();
+    }
+    expect(await sweep(10)).not.toBeNull();
   });
 
   it("reads the setting through the database, clamped to its bounds", async () => {

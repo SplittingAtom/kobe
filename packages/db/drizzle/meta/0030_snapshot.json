@@ -1,5 +1,5 @@
 {
-  "id": "40f0c226-e3a3-4bf3-81d9-37a74a323db1",
+  "id": "f7026e9c-0b60-4584-ae7c-e4154a1e15c7",
   "prevId": "a68ec61b-3d0e-4f40-a1dd-2ad9625c5dd4",
   "version": "7",
   "dialect": "postgresql",
@@ -3462,8 +3462,7 @@
           "name": "hash_version",
           "type": "smallint",
           "primaryKey": false,
-          "notNull": true,
-          "default": 2
+          "notNull": false
         },
         "pii_salt": {
           "name": "pii_salt",
@@ -3575,22 +3574,6 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "audit_log_pii_pending_idx": {
-          "name": "audit_log_pii_pending_idx",
-          "columns": [
-            {
-              "expression": "at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"audit_log\".\"pii_salt\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}

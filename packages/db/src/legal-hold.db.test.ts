@@ -404,6 +404,46 @@ describe("held data survives purges (ac-1)", () => {
     expect((await admin.query(`SELECT 1 FROM threads WHERE id = $1`, [held])).rowCount).toBe(0);
   });
 
+  it("refuses to move a held thread to another owner, then delete it (review M2)", async () => {
+    const t = await team();
+    const a = await thread(t, alice, 1);
+    const hold = await active({ teamId: t, userId: alice });
+    const code = await errorCode(
+      withTeam(app.db, t, (tx) =>
+        tx.execute(
+          sql.raw(
+            `UPDATE threads SET owner_user_id = '${bob}' WHERE team_id = '${t}' AND id = '${a}'`,
+          ),
+        ),
+      ),
+    );
+    expect(code).toBe(LEGAL_HOLD_SQLSTATE);
+    // Other updates (title, Trash) stay allowed.
+    await withTeam(app.db, t, (tx) =>
+      tx.execute(sql.raw(`UPDATE threads SET title = 'x' WHERE team_id = '${t}' AND id = '${a}'`)),
+    );
+    await releaseHold(hold);
+  });
+
+  it("refuses TRUNCATE of threads and entries while any hold is active (owner too)", async () => {
+    const owner = new pg.Client({ connectionString: inject("ownerUrl") });
+    await owner.connect();
+    try {
+      const hold = await active();
+      for (const table of ["thread_entries", "threads"]) {
+        // Inside a rolled-back transaction: the guard must fire before anything is truncated.
+        await owner.query("BEGIN");
+        expect(await errorCode(owner.query(`TRUNCATE ${table} CASCADE`)), table).toBe(
+          LEGAL_HOLD_SQLSTATE,
+        );
+        await owner.query("ROLLBACK");
+      }
+      await releaseHold(hold);
+    } finally {
+      await owner.end();
+    }
+  });
+
   it("holds a whole team, Trash included", async () => {
     const t = await team();
     const a = await thread(t, alice);

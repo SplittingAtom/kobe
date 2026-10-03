@@ -16,7 +16,8 @@ SHA-256 hash chain; `verifyAuditChain()`). Read with `listAuditEvents()` (instal
 Design, field allowlist, taxonomy and the events later tickets must add:
 [docs/audit-log.md](../../docs/audit-log.md). The client IP and user agent are erased after the
 install's retention period (default 12 h, KOBE-17): the hash covers a salted commitment to them
-(chain v2), and `eraseExpiredAuditPii(tx, limit)` is the server sweep's step.
+(chain v2), `eraseExpiredAuditPii(tx, pageSize)` is the server sweep's step and `sealAuditV1(db)`
+seals the rows chained before the upgrade.
 
 ## Legal hold (KOBE-17)
 
@@ -34,9 +35,10 @@ volumes, and any later one) must:**
 4. record the purge's audit event **last**, after the deletes: lock order is legal-hold lock, then
    the audit chain lock (an approval takes them in that order); the reverse order can deadlock.
 
-Backstop: deleting a held `threads` row or `thread_entries` rows fails with `KH001`
-(`threads_legal_hold`, `thread_entries_legal_hold` triggers). Moving a thread to Trash is an
-update and stays allowed. Add the same guard to any new table a purge deletes from.
+Backstop: deleting a held `threads` row or `thread_entries` rows, moving a held thread to another
+owner or team, and truncating either table while any hold is active fail with `KH001`
+(`threads_legal_hold*`, `thread_entries_legal_hold*` triggers). Moving a thread to Trash is an
+update and stays allowed. Add the same guards to any new table a purge deletes from.
 
 ## Break-glass and the explicit team filter (KOBE-16)
 

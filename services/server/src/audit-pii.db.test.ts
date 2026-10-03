@@ -84,7 +84,7 @@ describe("the retention setting", () => {
 });
 
 describe("the erasure sweep (ac-4)", () => {
-  it("erases rows past the period, keeps held and recent ones, records counts only", async () => {
+  it("erases rows past the period, keeps held and recent ones, records counts only (no held count: holds are confidential)", async () => {
     await sweepAuditPii(h.deps.database.db);
     const before = (await events("audit.pii_erased")).length;
     const old = await appendBackdatedAuditRow(h.admin, { hours: 13, actorId: ids.alice });
@@ -104,17 +104,17 @@ describe("the erasure sweep (ac-4)", () => {
     expect((await as.owner.post(`/v1/install/legal-hold/${holdId}/approve`)).status).toBe(200);
 
     const result = await sweepAuditPii(h.deps.database.db);
-    expect(result).toEqual({ erased: 1, held: 1 });
+    expect(result).toEqual({ erased: 1, ran: true });
     expect(await ipOf(old)).toBeNull();
     expect(await ipOf(held)).not.toBeNull();
     expect(await ipOf(recent)).not.toBeNull();
 
     const recorded = (await events("audit.pii_erased")).slice(before);
     expect(recorded).toEqual([
-      { actor_kind: "system", target: { rows: 1, held: 1, olderThanHours: 12 }, ip: null },
+      { actor_kind: "system", target: { rows: 1, olderThanHours: 12 }, ip: null },
     ]);
     // Nothing to do: nothing recorded.
-    expect(await sweepAuditPii(h.deps.database.db)).toEqual({ erased: 0, held: 1 });
+    expect(await sweepAuditPii(h.deps.database.db)).toEqual({ erased: 0, ran: true });
     expect((await events("audit.pii_erased")).length).toBe(before + 1);
 
     // Released: the held row goes in the next run.
@@ -122,7 +122,7 @@ describe("the erasure sweep (ac-4)", () => {
       reason: "Matter closed now",
     });
     await as.owner.post(`/v1/install/legal-hold/${holdId}/release/approve`);
-    expect(await sweepAuditPii(h.deps.database.db)).toEqual({ erased: 1, held: 0 });
+    expect(await sweepAuditPii(h.deps.database.db)).toEqual({ erased: 1, ran: true });
     expect(await ipOf(held)).toBeNull();
   });
 
@@ -136,12 +136,12 @@ describe("the erasure sweep (ac-4)", () => {
     expect(page.json.events[0]).toMatchObject({ seq, ip: null, userAgent: null });
   });
 
-  it("works through batches", async () => {
+  it("erases many rows in one run", async () => {
     const seqs = [];
     for (let i = 0; i < 5; i++) {
       seqs.push(await appendBackdatedAuditRow(h.admin, { hours: 20, actorId: ids.alice }));
     }
-    expect(await sweepAuditPii(h.deps.database.db, 2)).toMatchObject({ erased: 5 });
+    expect(await sweepAuditPii(h.deps.database.db)).toMatchObject({ erased: 5 });
     for (const seq of seqs) expect(await ipOf(seq)).toBeNull();
   });
 });

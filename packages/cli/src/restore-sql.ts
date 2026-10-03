@@ -197,6 +197,9 @@ export function restorePostlude(plan: RestorePlan): string {
     ...plan.userTriggers.map(enable),
     ...plan.forcedRls.map((t) => `ALTER TABLE ${table(t)} FORCE ROW LEVEL SECURITY;`),
     plan.audit ? auditRestore(plan.audit) : "",
+    // KOBE-17: legal holds are as of the backup; pause the audit IP erasure for 24 h so install
+    // admins can re-place holds placed after it before any value they would keep is erased.
+    "INSERT INTO public.install_settings (key, value) VALUES ('audit.pii_sweep_resume_at', to_char((now() + interval '24 hours') AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')) ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = now();",
     "COMMIT;",
     "",
   ].join("\n");

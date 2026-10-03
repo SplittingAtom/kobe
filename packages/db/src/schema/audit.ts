@@ -63,11 +63,12 @@ export const auditLog = pgTable(
     /** Hex SHA-256 over `prev_hash` and this row's canonical form (`audit_log_canonical`). */
     hash: text().notNull().default(""),
     /**
-     * Which canonical form `hash` covers (KOBE-17). 1: rows chained before the upgrade, whose hash
-     * covers the raw IP and user agent (sealed by `audit.chain.upgraded`). 2: the hash covers
-     * `pii_commitment` instead, so the IP and user agent can be erased. Assigned by the database.
+     * Which canonical form `hash` covers (KOBE-17). NULL: v1, rows chained before the upgrade, whose
+     * hash covers the raw IP and user agent (sealed later by `audit.chain.upgraded`). 2: the hash
+     * covers `pii_commitment` instead, so the IP and user agent can be erased. Assigned by the
+     * database. Nullable without a default so that adding it rewrites no row (KOBE-17 review H1).
      */
-    hashVersion: smallint().notNull().default(2),
+    hashVersion: smallint(),
     /**
      * Random salt (64 hex chars) of `pii_commitment`, assigned by the database; erased together with
      * `ip` and `user_agent`, after which the commitment reveals nothing about them.
@@ -84,10 +85,6 @@ export const auditLog = pgTable(
     index("audit_log_action_seq_idx").on(t.action, t.seq),
     index("audit_log_category_seq_idx").on(t.category, t.seq),
     index("audit_log_at_idx").on(t.at),
-    // Rows whose IP and user agent are still present: the erasure sweep's work list (KOBE-17).
-    index("audit_log_pii_pending_idx")
-      .on(t.at)
-      .where(sql`${t.piiSalt} IS NOT NULL`),
     check("audit_log_action_format", sql`${t.action} ~ '^[a-z][a-z_]*(\\.[a-z][a-z_]*){1,3}$'`),
     check("audit_log_action_length", sql`char_length(${t.action}) <= 64`),
     check("audit_log_target_object", sql`jsonb_typeof(${t.target}) = 'object'`),

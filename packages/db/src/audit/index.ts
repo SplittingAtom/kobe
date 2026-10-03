@@ -24,6 +24,7 @@ export {
   AUDIT_CHAIN_UPGRADED,
   AUDIT_GENESIS_HASH,
   auditSealStep,
+  type AuditChainRow,
   verifyAuditChain,
   type AuditChainProblem,
   type AuditChainReport,
@@ -43,8 +44,10 @@ export {
   type AuditRecordRef,
   type AuditRequestContext,
 } from "./write.js";
+export { sealAuditV1, type AuditSealResult } from "./seal.js";
 export {
   AUDIT_PII_RETENTION_DEFAULT_HOURS,
+  AUDIT_PII_SWEEP_SEQ_KEY,
   AUDIT_PII_RETENTION_KEY,
   AUDIT_PII_RETENTION_MAX_HOURS,
   AUDIT_PII_RETENTION_MIN_HOURS,

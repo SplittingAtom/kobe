@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { verifyAuditChain } from "./audit/index.js";
+import { sealAuditV1, verifyAuditChain } from "./audit/index.js";
 import { createDb, type KobeDb } from "./client.js";
 import { DEFAULT_MIGRATIONS_FOLDER, runMigrations } from "./migrate.js";
 import * as schema from "./schema/index.js";
@@ -114,7 +114,7 @@ async function seedV1(i: Install): Promise<void> {
 interface Row {
   seq: number;
   hash: string;
-  hash_version: number;
+  hash_version: number | null;
   ip: string | null;
   pii_salt: string | null;
   pii_commitment: string | null;
@@ -173,6 +173,83 @@ afterAll(async () => {
   rmSync(oldMigrations, { recursive: true, force: true });
 });
 
+interface Physical {
+  relfilenode: string;
+  indexes: string[];
+  xmins: string[];
+}
+
+/** What a rewrite, an index build or a row update would change. */
+const physical = (url: string) =>
+  withClient(url, async (c): Promise<Physical> => {
+    const rel = await c.query<{ relfilenode: string; indexes: string[] }>(
+      `SELECT c.relfilenode::text,
+              ARRAY(SELECT indexrelid::regclass::text || ':' || ic.relfilenode
+                    FROM pg_index i JOIN pg_class ic ON ic.oid = i.indexrelid
+                    WHERE i.indrelid = c.oid ORDER BY 1) AS indexes
+       FROM pg_class c WHERE c.oid = 'public.audit_log'::regclass`,
+    );
+    const xmins = await c.query<{ xmin: string }>(
+      `SELECT xmin::text AS xmin FROM audit_log ORDER BY seq`,
+    );
+    return {
+      relfilenode: rel.rows[0]?.relfilenode ?? "",
+      indexes: rel.rows[0]?.indexes ?? [],
+      xmins: xmins.rows.map((r) => r.xmin),
+    };
+  });
+
+const sealer = async (url: string) => {
+  const db = createDb(url, { max: 1 });
+  try {
+    return await sealAuditV1(db.db, 2);
+  } finally {
+    await db.close();
+  }
+};
+
+describe("the v2 migration takes a constant lock window (review H1)", () => {
+  it("rewrites no row, builds no index and validates no constraint on a large log", async () => {
+    const big = await install(oldMigrations);
+    // 100k rows written like KOBE-15 rows (chain not needed: the migration no longer reads them).
+    await withClient(big.adminUrl, (c) =>
+      c.query(`BEGIN; SET LOCAL session_replication_role = replica;
+        INSERT INTO audit_log (seq, actor_kind, action, target, ip, user_agent, prev_hash, hash)
+        SELECT g, 'system', 'auth.sign_out', '{}', '203.0.113.1', 'UA', repeat('0', 64), md5(g::text)
+        FROM generate_series(1, 100000) g; COMMIT`),
+    );
+    const before = await physical(big.ownerUrl);
+    const started = Date.now();
+    await runMigrations({ databaseUrl: big.ownerUrl, appRole: big.appRole });
+    const ms = Date.now() - started;
+    const after = await physical(big.ownerUrl);
+    expect(after.relfilenode).toBe(before.relfilenode);
+    expect(after.indexes).toEqual(before.indexes);
+    expect(after.xmins).toEqual(before.xmins);
+    const constraints = await withClient(big.ownerUrl, (c) =>
+      c.query<{ name: string; validated: boolean }>(
+        `SELECT conname AS name, convalidated AS validated FROM pg_constraint
+         WHERE conrelid = 'public.audit_log'::regclass AND contype = 'c' AND NOT convalidated`,
+      ),
+    );
+    expect(constraints.rows.map((r) => r.name).sort()).toEqual([
+      "audit_log_hash_version",
+      "audit_log_ip_host",
+      "audit_log_pii_commitment_format",
+      "audit_log_pii_committed",
+      "audit_log_pii_salt_format",
+      "audit_log_pii_salted",
+      "audit_log_v1_uncommitted",
+    ]);
+    // Nothing appended: the seal comes later, from the server.
+    const count = await withClient(big.ownerUrl, (c) =>
+      c.query<{ n: number }>(`SELECT count(*)::int AS n FROM audit_log`),
+    );
+    expect(count.rows[0]?.n).toBe(100_000);
+    console.info(`chain v2 migration over 100k audit rows: ${ms} ms (all KOBE-17 migrations)`);
+  }, 120_000);
+});
+
 describe("chain v2 upgrade of a KOBE-15 audit log", () => {
   let up: Install;
   let before: { seq: number; hash: string }[];
@@ -189,32 +266,38 @@ describe("chain v2 upgrade of a KOBE-15 audit log", () => {
     await runMigrations({ databaseUrl: up.ownerUrl, appRole: up.appRole });
   });
 
-  it("keeps every stored hash, marks the rows v1 and seals them in audit.chain.upgraded", async () => {
+  it("keeps every stored hash and still verifies the v1 rows as they are", async () => {
     const after = await rows(up.ownerUrl);
-    expect(after.slice(0, 5).map((r) => [r.seq, r.hash, r.hash_version])).toEqual(
-      before.map((r) => [r.seq, r.hash, 1]),
+    expect(after.map((r) => [r.seq, r.hash, r.hash_version, r.pii_salt])).toEqual(
+      before.map((r) => [r.seq, r.hash, null, null]),
     );
-    // Rows with an IP or user agent were given a salt and commitment; the others none.
-    expect(after.slice(0, 5).map((r) => r.pii_salt !== null)).toEqual([
-      true,
-      false,
-      true,
-      true,
-      false,
-    ]);
-    expect(
-      after.slice(0, 5).every((r) => (r.pii_salt === null) === (r.pii_commitment === null)),
-    ).toBe(true);
-    const event = after[5];
-    expect(event).toMatchObject({ seq: 6, hash_version: 2, action: "audit.chain.upgraded" });
-    expect(event?.target).toMatchObject({ throughSeq: 5, rows: 5 });
-    expect(event?.target.seal).toMatch(/^[0-9a-f]{64}$/);
     const report = await verify(up.appUrl);
-    expect(report.node).toMatchObject({ ok: true, checked: 6 });
+    expect(report.node).toMatchObject({ ok: true, checked: 5 });
     expect(report.sql).toEqual({ problem_seq: null, problem: null });
   });
 
-  it("chains new rows as v2 after the seal", async () => {
+  it("refuses to erase v1 rows before the seal", async () => {
+    await withClient(up.adminUrl, (c) =>
+      c.query(
+        `INSERT INTO install_settings (key, value) VALUES ('audit.pii_retention_hours', '1')`,
+      ),
+    );
+    const erased = await withClient(up.adminUrl, (c) =>
+      c.query(`SELECT audit_log_v1_erasable() AS ok`),
+    );
+    expect(erased.rows[0]?.ok).toBe(false);
+  });
+
+  it("is sealed once by the server: audit.chain.upgraded over the v1 rows", async () => {
+    expect(await sealer(up.appUrl)).toEqual({ status: "sealed", throughSeq: 5, rows: 5 });
+    expect(await sealer(up.appUrl)).toEqual({ status: "already_sealed" });
+    const event = (await rows(up.ownerUrl))[5];
+    expect(event).toMatchObject({ seq: 6, hash_version: 2, action: "audit.chain.upgraded" });
+    expect(event?.target).toMatchObject({ throughSeq: 5, rows: 5 });
+    expect((await verify(up.appUrl)).node).toMatchObject({ ok: true, checked: 6 });
+  });
+
+  it("chains new rows as v2", async () => {
     await withClient(up.appUrl, (c) =>
       c.query(
         `INSERT INTO audit_log (actor_kind, action, target, ip) VALUES ('system', 'auth.sign_out', '{}', '198.51.100.4')`,
@@ -222,25 +305,24 @@ describe("chain v2 upgrade of a KOBE-15 audit log", () => {
     );
     const last = (await rows(up.ownerUrl)).at(-1);
     expect(last).toMatchObject({ seq: 7, hash_version: 2, ip: "198.51.100.4" });
+    expect(last?.pii_salt).toMatch(/^[0-9a-f]{64}$/);
     expect((await verify(up.appUrl)).node).toMatchObject({ ok: true, checked: 7 });
   });
 
   it("still verifies once the v1 rows' IP and user agent are erased", async () => {
-    // As the sweep would once they are past the period (the trigger's age check is tested elsewhere).
+    // As the sweep would 24 h after the seal (the trigger's own checks are tested elsewhere).
     await withClient(up.adminUrl, (c) =>
       c.query(`BEGIN; SET LOCAL session_replication_role = replica;
-               UPDATE audit_log SET ip = NULL, user_agent = NULL, pii_salt = NULL
-               WHERE hash_version = 1; COMMIT`),
+               UPDATE audit_log SET ip = NULL, user_agent = NULL WHERE hash_version IS NULL; COMMIT`),
     );
     const report = await verify(up.appUrl);
     expect(report.node).toMatchObject({ ok: true, checked: 7 });
     expect(report.sql).toEqual({ problem_seq: null, problem: null });
-    // The heads anchored before the upgrade are still in the chain.
     const head = before.at(-1);
     expect((await rows(up.ownerUrl)).find((r) => r.seq === head?.seq)?.hash).toBe(head?.hash);
   });
 
-  it("detects an edited erased v1 row through the seal, and an edited intact one by its hash", async () => {
+  it("detects an edited erased v1 row through the seal, and other tampering", async () => {
     const node = async (tamper: string) =>
       withClient(up.adminUrl, async (c) => {
         await c.query("BEGIN");
@@ -253,44 +335,73 @@ describe("chain v2 upgrade of a KOBE-15 audit log", () => {
           await c.query("ROLLBACK");
         }
       });
-    const erased = `UPDATE audit_log SET target = '{"forged":true}' WHERE seq = 1`;
-    expect((await node(erased)).problem).toEqual({ seq: 6, kind: "seal_mismatch" });
-    expect(await verifyTampered(up.adminUrl, erased)).toEqual({
-      problem_seq: 6,
-      problem: "seal_mismatch",
+    const both = async (tamper: string) => ({
+      node: (await node(tamper)).problem,
+      sql: await verifyTampered(up.adminUrl, tamper),
     });
-    // Faking an erasure on a row that never had an IP doesn't skip its check either.
-    const faked = `UPDATE audit_log SET pii_commitment = repeat('a', 64), target = '{"x":1}' WHERE seq = 2`;
-    expect((await node(faked)).problem).toEqual({ seq: 6, kind: "seal_mismatch" });
-    // A v1 row after the seal is refused.
+    // Edited after erasure (or a "fake erasure" of a row that never had an IP): the seal catches it.
+    for (const seq of [1, 2]) {
+      expect(
+        await both(`UPDATE audit_log SET target = '{"forged":true}' WHERE seq = ${seq}`),
+      ).toEqual({
+        node: { seq: 6, kind: "seal_mismatch" },
+        sql: { problem_seq: 6, problem: "seal_mismatch" },
+      });
+    }
+    // A salt on a v1 row, a v1 row after v2 rows, a seal with a string throughSeq.
     expect(
-      await verifyTampered(up.adminUrl, `UPDATE audit_log SET hash_version = 1 WHERE seq = 7`),
-    ).toEqual({ problem_seq: 7, problem: "hash_mismatch" });
+      await both(
+        `ALTER TABLE audit_log DROP CONSTRAINT audit_log_v1_uncommitted;
+         UPDATE audit_log SET pii_salt = repeat('a', 64), pii_commitment = repeat('b', 64) WHERE seq = 3`,
+      ),
+    ).toEqual({
+      node: { seq: 3, kind: "pii_mismatch" },
+      sql: { problem_seq: 3, problem: "pii_mismatch" },
+    });
+    expect(
+      await both(`ALTER TABLE audit_log DROP CONSTRAINT audit_log_v1_uncommitted;
+         UPDATE audit_log SET hash_version = NULL WHERE seq = 7`),
+    ).toEqual({
+      node: { seq: 7, kind: "hash_mismatch" },
+      sql: { problem_seq: 7, problem: "hash_mismatch" },
+    });
   });
 });
 
-describe("chain v2 migration edge cases", () => {
-  it("adds nothing to an empty log (a fresh install stays empty for a restore)", async () => {
+describe("chain v2 edge cases", () => {
+  it("adds nothing to an empty log and has nothing to seal", async () => {
     const fresh = await install(DEFAULT_MIGRATIONS_FOLDER);
+    expect(await sealer(fresh.appUrl)).toEqual({ status: "not_needed" });
     expect(await rows(fresh.ownerUrl)).toEqual([]);
   });
 
-  it("refuses to upgrade a broken chain instead of sealing it", async () => {
+  it("upgrades a broken chain (the release isn't blocked) but never seals it", async () => {
     const broken = await install(oldMigrations);
     await seedV1(broken);
     await withClient(broken.adminUrl, (c) =>
       c.query(`BEGIN; SET LOCAL session_replication_role = replica;
                UPDATE audit_log SET target = '{"forged":true}' WHERE seq = 3; COMMIT`),
     );
-    const err = await runMigrations({ databaseUrl: broken.ownerUrl, appRole: broken.appRole }).then(
-      () => null,
-      (e: unknown) => e as { message?: string; cause?: { message?: string } },
+    await runMigrations({ databaseUrl: broken.ownerUrl, appRole: broken.appRole });
+    expect(await sealer(broken.appUrl)).toEqual({
+      status: "broken",
+      seq: 3,
+      kind: "hash_mismatch",
+    });
+    expect((await rows(broken.ownerUrl)).length).toBe(5);
+    expect((await verify(broken.appUrl)).node.problem).toEqual({ seq: 3, kind: "hash_mismatch" });
+  });
+
+  it("refuses an erased v1 row without a seal", async () => {
+    const unsealed = await install(oldMigrations);
+    await seedV1(unsealed);
+    await runMigrations({ databaseUrl: unsealed.ownerUrl, appRole: unsealed.appRole });
+    await withClient(unsealed.adminUrl, (c) =>
+      c.query(`BEGIN; SET LOCAL session_replication_role = replica;
+               UPDATE audit_log SET ip = NULL, user_agent = NULL WHERE seq = 1; COMMIT`),
     );
-    expect(err?.cause?.message ?? err?.message).toMatch(/broken at seq 3/);
-    // Nothing of the release was applied (the pending migrations run in one transaction).
-    const left = await withClient(broken.ownerUrl, (c) =>
-      c.query<{ missing: boolean }>(`SELECT to_regclass('public.legal_holds') IS NULL AS missing`),
-    );
-    expect(left.rows[0]?.missing).toBe(true);
+    const report = await verify(unsealed.appUrl);
+    expect(report.node.problem).toEqual({ seq: 1, kind: "hash_mismatch" });
+    expect(report.sql).toEqual({ problem_seq: 1, problem: "hash_mismatch" });
   });
 });

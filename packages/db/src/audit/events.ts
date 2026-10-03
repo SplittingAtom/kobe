@@ -365,11 +365,9 @@ export const AUDIT_EVENTS = {
   /** The IP and user agent of rows past the retention period were erased (counts only). */
   "audit.pii_erased": event("install", {
     rows: count,
-    /** Rows past the period kept because of an active legal hold. */
-    held: count,
     olderThanHours: z.number().int().positive(),
   }),
-  /** Written once by the chain v2 migration: the seal over every v1 row (hex SHA-256). */
+  /** Written once after the chain v2 upgrade (server): the seal over every v1 row (hex SHA-256). */
   "audit.chain.upgraded": event("install", {
     throughSeq: z.number().int().positive(),
     rows: z.number().int().positive(),

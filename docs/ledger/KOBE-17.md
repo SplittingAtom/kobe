@@ -1,6 +1,6 @@
 # KOBE-17: Legal hold (plus audit IP and user-agent erasure)
 
-- **Status:** in review
+- **Status:** in review (PR #49), round 2
 - **Branch / worktree:** `kobe-17-legal-hold` in `../Kobe-wt17`
 - **Depends on:** KOBE-16, KOBE-15, KOBE-20, KOBE-11 (all merged)
 
@@ -30,8 +30,9 @@ placed_by, approved_by, released_at?)`), plus `status` (`pending`, `active`, `de
 - **Scope:** `team_id` is required (spec). A team hold has no `user_id`; a user hold covers that
   user's data in that team. The user need not be a member any more (offboarding, KOBE-28, keeps
   a removed member's volume 30 days; a hold must be placeable on it).
-- **Two-person rule in Postgres** (`legal_holds_guard`, SECURITY INVOKER, same rules and admin-set
-  lock as `break_glass_grants_guard`): inserts start `pending` from an active install admin, the
+- **Two-person rule in Postgres, over the ids written** (`legal_holds_guard`, SECURITY INVOKER,
+  same rules and admin-set lock as `break_glass_grants_guard`; the approver ids are asserted by the
+  writer, not authenticated: the server binds them to the session, see review round 2, L3): inserts start `pending` from an active install admin, the
   subject is not the requester; the request is immutable; `pending → active` by an active install
   admin who is not the subject, and the requester only when no other active install admin exists
   (`self_approved`); `pending → denied` (another admin) or `withdrawn` (the requester);
@@ -89,33 +90,34 @@ target, pii_commitment])`: it covers the commitment, never the values or the sal
   actor in that team, or when its actor is the subject of any active user hold (IP and user agent
   are the actor's personal data, so a user hold keeps the person's install-level rows such as
   sign-ins too).
-- **Existing (v1) rows: migration with a seal.** The migration (owner, one transaction, table
-  locked by the ALTERs) verifies the v1 chain (raises if broken: an integrity incident must be
-  investigated before upgrading), marks the rows `hash_version = 1`, adds salt and commitment to
-  those with PII (their stored hash is untouched, so every anchor already shipped off the box
-  stays valid), then computes a running **seal** over all v1 rows,
-  `s_n = sha256('kobe.audit.seal.v1' \n s_{n-1} \n hash_n \n sha256(v2 view of row n))`, and
-  appends `audit.chain.upgraded { throughSeq, rows, seal }` (system) as the first v2 row. A v1 row
-  whose PII was erased can't have its v1 hash recomputed; the verifier then checks it through the
-  seal (which covers every field but the raw PII, and its stored hash) and the `prev_hash` links.
-  A fresh install has no v1 rows: no seal, no event (an install about to be restored stays empty).
-- **Rolling upgrade:** `audit_log_canonical(r)` becomes version-aware (v1 text for v1 rows, v2
-  text for v2 rows), so the previous release's anchor logger, which hashes
-  `audit_log_canonical(a)`, keeps verifying new rows during the rollout.
+- **Existing (v1) rows: sealed by the server, not the migration** (review round 2, H1). The
+  migrations change no row: `hash_version` is nullable without a default, so every existing row
+  reads NULL (= v1) at no cost. After the upgrade the server (`sealAuditV1`, in the sweeper)
+  verifies the v1 rows strictly and appends `audit.chain.upgraded { throughSeq, rows, seal }`,
+  `s_n = sha256('kobe.audit.seal.v1' \n s_{n-1} \n hash_n \n sha256(v2 view of row n))`. Stored
+  v1 hashes are untouched, so every anchor already shipped off the box stays valid. A v1 row may be
+  erased only 24 h after the seal (trigger, `audit_log_v1_erasable()`): previous-release replicas,
+  which recompute v1 hashes, are gone by then (review M3). An erased v1 row (v1 hash no longer
+  recomputable, values gone) passes only under a valid seal. A broken v1 chain is never sealed;
+  the release isn't blocked (review M4; runbook in docs/audit-log.md). A fresh install has no v1
+  rows: no seal, no event.
+- **Rolling upgrade:** `audit_log_canonical(r)` is version-aware (v1 text when `hash_version` is
+  NULL, v2 text for 2), so the previous release's anchor logger keeps verifying new rows.
 - **Verification** (`verifyAuditChain`, Node hashing; restore uses the SQL twin
-  `audit_log_chain_problem()`): per row the version's hash (skipped only for an erased v1 row),
-  the commitment when the salt is present, no PII without a salt, v1 only before the upgrade
-  event, and from seq 1 the seal against the event. New problems: `pii_mismatch`,
-  `seal_mismatch`.
+  `audit_log_chain_problem()`, same rules): v1 rows only before any v2 row, no salt/commitment,
+  v1 hash matches or (values gone) the seal vouches; v2 hash, commitment when salted, no values
+  without a salt; every `audit.chain.upgraded` matches the running seal (numeric `throughSeq`).
+  New problems: `pii_mismatch`, `seal_mismatch`.
 - **Backup and restore (KOBE-11):** rows are backed up and restored verbatim (salts included); the
-  restore's in-transaction verification calls `audit_log_chain_problem()`; the sweep erases rows
-  past the period after a restore. A backup taken before an erasure still holds those values:
-  keep backups no longer than the privacy period requires (documented). Restoring a pre-upgrade
-  backup needs the pre-upgrade release, as before (the migration journal must match).
-- **Job:** `AuditPiiSweeper` on every replica every 10 minutes: batches of 1000 rows chosen with
-  `FOR UPDATE SKIP LOCKED` behind the shared hold lock, erased, and `audit.pii_erased { rows,
-held, olderThanHours }` (system, counts only) appended in the same transaction. Nothing is
-  recorded when nothing was erased.
+  restore's in-transaction verification calls `audit_log_chain_problem()`, and the restore pauses
+  the erasure for 24 h (`audit.pii_sweep_resume_at`) because holds are as of the backup (review L7;
+  the CLI prints a warning). Backups taken before an erasure still hold those values (documented).
+- **Job:** `AuditPiiSweeper` on every replica every 10 minutes; a transaction try-lock lets one
+  replica sweep at a time. It seals once, then walks the log by `seq` from a stored position in
+  pages of 5000 (≤ 100 a run), erases due rows, moves past held rows (no re-reads), and stops at
+  the first row inside the period. A hold release (trigger) and v1 rows becoming erasable restart
+  the walk once. `audit.pii_erased { rows, olderThanHours }` (system, counts only) per page that
+  erased something.
 - **Setting:** `install_settings['audit.pii_retention_hours']`, integer 1-8760 (zod at the API,
   clamped again in SQL), default 12; `PUT /v1/install/settings { auditPiiRetentionHours }`
   records `install.settings.updated` (`setting: audit_pii_retention_hours`).
@@ -131,8 +133,8 @@ app role.
    the commitment binds the row id. ✔
 3. **Hiding after erasure:** the salt goes with the values; brute force over IPv4 needs the salt.
    A commitment without salt (unsalted hash) was rejected for exactly that reason. ✔
-4. **Fake erasure to skip a v1 hash check** (set commitment, null salt on a v1 row, then edit its
-   target): the seal covers each v1 row's v2 view (target and commitment included). ✔
+4. **Fake erasure to skip a v1 hash check** (null the values of a v1 row, or pretend one never had
+   any, then edit its target): the seal covers each v1 row's v2 view (target and commitment included). ✔
 5. **Swap versions:** flipping `hash_version` changes which canonical text is hashed → mismatch;
    a v1 row after the upgrade event is flagged. ✔
 6. **Early or targeted erasure by the app role:** the trigger refuses rows younger than the
@@ -188,9 +190,9 @@ app role.
   reasons as a keyed chain).
 - **Retention bounds 1-8760 h** (zod at the API, clamped again in SQL), default 12 h. A PUT records
   `install.settings.updated` for each setting it carries, as the route already did for 2FA.
-- **The v2 migration refuses a broken v1 chain** rather than sealing it (sealing would make the
-  break undetectable once rows are erased). Pending migrations run in one transaction, so a refused
-  upgrade leaves the install untouched (test).
+- **A broken v1 chain is never sealed** (sealing would make the break undetectable once rows are
+  erased). Round 1 made the migration refuse to upgrade; round 2 moved the check to the server so
+  a broken chain can't block a release (the v1 rows then keep their IP addresses; runbook).
 - **Column grants in the tenancy registry** (`columnGrants`), applied by the migration runner and
   pinned exactly by the catalog check. `has_table_privilege(app, 'audit_log', 'UPDATE')` stays
   false.
@@ -222,6 +224,45 @@ app role.
   can still act on it (D18 doesn't exclude them); `host(ip)` drops a netmask (Kobe stores host
   addresses only).
 
+## Review round 2 (coordinator's independent DB review; chain design confirmed sound)
+
+- **H1 lock window:** confirmed in drizzle (`pg-core/dialect.js` `migrate()`: one transaction for
+  all pending migrations), so 0030's ADD COLUMN lock lasts to COMMIT. Now nothing in 0030-0032 is
+  proportional to the log: nullable columns without defaults (v1 = NULL), `NOT VALID` constraints,
+  no index (the sweep walks the primary key from a stored position instead of a partial index), no
+  verification, no backfill, no seal (moved to the server). The redundant `LOCK TABLE` is gone.
+  Test `audit-upgrade.db.test.ts` › "constant lock window": on a 100k-row log, no row version
+  (`xmin`), table file (`relfilenode`) or index file changes and the seven constraints stay
+  unvalidated; measured 128 ms for all three migrations.
+- **H2 sweep cost:** no `held` count; held rows are passed once and not re-read (stored position);
+  one replica at a time (`pg_try_advisory_xact_lock('kobe.audit.pii_sweep')`), tested.
+- **M1:** `held` dropped from `audit.pii_erased`.
+- **M2:** `threads_legal_hold_owner` (BEFORE UPDATE OF team_id, owner_user_id) refuses re-owning
+  a held thread (KH001); tested (title updates and Trash still work).
+- **M3:** v1 rows erasable only 24 h after the seal (trigger + sweep).
+- **M4:** the migration no longer reads rows, so a broken chain can't block a release; the seal is
+  refused and logged; runbook in docs/audit-log.md ("If the chain is broken"). No switch to seal a
+  broken chain (it would hide the break once rows are erased).
+- **L5:** BEFORE TRUNCATE guards on `threads` and `thread_entries` while any hold is active
+  (owner included; the app role has no TRUNCATE); tested.
+- **L7:** restore pauses the erasure 24 h and the CLI prints a warning to re-place holds placed
+  after the backup; tested (restore-sql unit test, CLI db test).
+- **L4:** constraint `audit_log_ip_host`: only host addresses (full mask) are stored, so
+  `host(ip)` in the commitment loses nothing (`normalizeIp` already stored bare addresses).
+- **Known risks, recorded (not changed):**
+  - **L1 index churn:** erasure updates each row once (`ip`, `user_agent`, `pii_salt`); the
+    indexed columns don't change, but non-HOT updates still add index entries; autovacuum cleans
+    up. Documented.
+  - **L2:** the app role can shorten retention (to ≥ 1 h; the setting change is audited) and a
+    pending hold doesn't pause erasure (only an approved one does).
+  - **L3:** the trigger checks the ids it is given (distinct, active admins), not who the caller
+    is: a compromised app role could write another admin as approver (same as break-glass). The
+    server binds the ids to the authenticated session. Wording in 0031 and this ledger corrected.
+  - **L6 lock ordering:** approvals take the legal-hold lock then the audit chain lock; purges must
+    do the same (audit last), documented in `packages/db/README.md`; Postgres resolves a deadlock by
+    aborting one side. A long purge transaction delays approvals (30 s lock timeout), hence short
+    purge transactions.
+
 ## Open questions (for Chris or the coordinator)
 
 - **Pending holds** protect nothing until approved (erasure and purges continue meanwhile). Should a
@@ -249,11 +290,11 @@ guard to any new table you purge (`files`, `artifacts`, `memory_docs`, …).
 
 ## Evidence (acceptance criteria → test or command output)
 
-| AC   | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ac-1 | db `legal-hold.db.test.ts` › held data survives purges: held user's thread and entries can't be deleted (KH001) while others' go; whole-team hold; Trash still allowed; released → purge works; an approval waits for a purge holding the shared lock and later purges see it. server `legal-hold.db.test.ts` › "refuses to delete the held team's threads until the hold is released"; consumer API tests (`isUnderLegalHold`, `legalHoldsForTeam`, `legal_hold_covers`)                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ac-2 | db guard tests: pending start, self-approval refused while another admin exists, plain user / held user can't approve, single-admin self-approval (place and release) flagged, release only through a request approved by another admin, cancel keeps the hold, deny/withdraw rules, immutable request, no DELETE. server: same flows through `/v1/install/legal-hold` incl. 403 for non-admins, validation, invisibility to the held admin                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ac-3 | server: every step's audit row (actor, install scope, `holdId`/`teamId`/`scope`/`selfApproved`, IP), no subject id or reason in any target; none in the team audit view                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ac-4 | db `audit-pii.db.test.ts` (12): salted commitments, caller-supplied values refused, erasure allowed only past the period / not held / all three columns, owner bound too, both verifiers OK after erasure and detecting a changed or restored IP, an edit next to an erasure, a swapped commitment; `eraseExpiredAuditPii` batches and counts; setting clamped. db `audit-upgrade.db.test.ts` (6): v1 install upgraded with hashes unchanged and sealed, new rows v2, verifies after erasing v1 rows, edited erased row → `seal_mismatch`, fake erasure caught, broken chain refuses the upgrade and leaves nothing applied, fresh install stays empty. server `audit-pii.db.test.ts` (4): setting bounds and audit, sweep erases/keeps held/records counts only, release lets it go, integrity OK and API shows no IP, batches. cli: fixture now has an erased row; restore test expects `hash_mismatch` (runs in CI: needs `pg_dump`) |
-| UI   | web `legal-hold-page.test.tsx` (4): request with user and reason, place + flagged self-approval shown, ask to release with reason, approve another's release, retention setting saved; `registry.test.ts` (READY ⇔ page)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| all  | `build`, `typecheck`, `lint` (except the pre-existing Helm 4 `@kobe/chart#lint`), `format:check`, `license:check` green; `pnpm test --concurrency=2` green; `test:db` db 425, server (see PR); `db:check` clean after commit; `scripts/check-public-hygiene.sh` ok                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| AC   | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ac-1 | db `legal-hold.db.test.ts` › held data survives purges: held user's thread and entries can't be deleted (KH001) while others' go; whole-team hold; Trash still allowed; released → purge works; an approval waits for a purge holding the shared lock and later purges see it. server `legal-hold.db.test.ts` › "refuses to delete the held team's threads until the hold is released"; consumer API tests (`isUnderLegalHold`, `legalHoldsForTeam`, `legal_hold_covers`); owner/team change of a held thread refused (M2); TRUNCATE refused while a hold is active (L5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ac-2 | db guard tests: pending start, self-approval refused while another admin exists, plain user / held user can't approve, single-admin self-approval (place and release) flagged, release only through a request approved by another admin, cancel keeps the hold, deny/withdraw rules, immutable request, no DELETE. server: same flows through `/v1/install/legal-hold` incl. 403 for non-admins, validation, invisibility to the held admin                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ac-3 | server: every step's audit row (actor, install scope, `holdId`/`teamId`/`scope`/`selfApproved`, IP), no subject id or reason in any target; none in the team audit view                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ac-4 | db `audit-pii.db.test.ts` (14): salted commitments, caller-supplied values refused, erasure only past the period / not held / all three columns, owner bound too, both verifiers OK after erasure and detecting a changed or restored IP, an edit next to an erasure, a swapped commitment; sweep walks from its position, skips held rows without re-reading, restarts on release, one replica at a time, paused after a restore; setting clamped. db `audit-upgrade.db.test.ts` (10): constant lock window on 100k rows (no xmin/relfilenode/index change, constraints NOT VALID, 128 ms), v1 hashes unchanged and verifying, v1 not erasable before the seal, sealed once by the server, new rows v2, verifies after v1 erasure, edited/fake-erased v1 row → `seal_mismatch`, salted v1 row → `pii_mismatch`, v1 after v2 → `hash_mismatch`, broken chain upgrades but is never sealed, erased v1 row without seal refused, fresh install stays empty. server `audit-pii.db.test.ts` (4): setting bounds and audit, sweep erases / keeps held / counts only, release lets it go, integrity OK and API shows no IP. cli: restore pauses the erasure 24 h (unit + db), fixture has an erased row (db job in CI) |
+| UI   | web `legal-hold-page.test.tsx` (4): request with user and reason, place + flagged self-approval shown, ask to release with reason, approve another's release, retention setting saved; `registry.test.ts` (READY ⇔ page)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| all  | `build`, `typecheck`, `lint` (except the pre-existing Helm 4 `@kobe/chart#lint`), `format:check`, `license:check` green; `pnpm test --concurrency=2` green; `test:db` db 434, server 490; `db:check` clean; `scripts/check-public-hygiene.sh` ok; PR #49 CI green                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |

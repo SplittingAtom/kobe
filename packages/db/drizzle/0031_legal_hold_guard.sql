@@ -1,7 +1,11 @@
--- Legal hold in Postgres (spec D18, KOBE-17): the two-person rule and the allowed transitions hold
--- for every writer, purges are ordered against approvals by an advisory lock, and deleting held
--- threads or thread entries fails (a backstop for purge jobs that forget to check). Everything is
--- SECURITY INVOKER (the default; the catalog check forbids DEFINER).
+-- Legal hold in Postgres (spec D18, KOBE-17): the allowed transitions, and the two-person rule over
+-- the user ids written (placed_by, approved_by, release_requested_by, released_by must be distinct
+-- active install admins, unless only one exists), are checked for every writer. Those ids are
+-- asserted by the writer, not authenticated: the app role could name another admin (as for
+-- break-glass approvers); the session-bound server is what authenticates them. Purges are ordered
+-- against approvals by an advisory lock, and deleting, re-owning or truncating held threads fails
+-- (a backstop for purge jobs that forget to check). Everything is SECURITY INVOKER (the default;
+-- the catalog check forbids DEFINER).
 
 -- Purges take this lock shared before they check for holds; an approval takes it exclusively. A
 -- purge that started before an approval finishes first; one that starts after sees the hold.
@@ -172,6 +176,9 @@ BEGIN
       NEW.release_self_approved := false;
     END IF;
     NEW.released_at := now();
+    -- The audit IP erasure sweep moved past the rows this hold kept: start it over (KOBE-17).
+    INSERT INTO "public"."install_settings" (key, value) VALUES ('audit.pii_sweep_seq', '0')
+      ON CONFLICT (key) DO UPDATE SET value = '0', updated_at = now();
     RETURN NEW;
   END IF;
 
@@ -219,3 +226,42 @@ $$;--> statement-breakpoint
 CREATE TRIGGER "thread_entries_legal_hold" AFTER DELETE ON "thread_entries"
   REFERENCING OLD TABLE AS gone
   FOR EACH STATEMENT EXECUTE FUNCTION "public"."thread_entries_legal_hold_guard"();
+--> statement-breakpoint
+
+-- Moving a held thread to another owner (or team) would let a purge delete it afterwards: refused
+-- while the hold covers it (KOBE-17 review M2).
+CREATE FUNCTION "public"."threads_legal_hold_keep_owner"() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
+BEGIN
+  IF (NEW.team_id, NEW.owner_user_id) IS DISTINCT FROM (OLD.team_id, OLD.owner_user_id) THEN
+    PERFORM "public"."legal_hold_lock_shared"();
+    IF "public"."legal_hold_covers"(OLD.team_id, OLD.owner_user_id) THEN
+      RAISE EXCEPTION 'thread % is under legal hold; its owner and team cannot change', OLD.id
+        USING ERRCODE = 'KH001';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;--> statement-breakpoint
+
+CREATE TRIGGER "threads_legal_hold_owner" BEFORE UPDATE OF "team_id", "owner_user_id" ON "threads"
+  FOR EACH ROW EXECUTE FUNCTION "public"."threads_legal_hold_keep_owner"();--> statement-breakpoint
+
+-- TRUNCATE skips row triggers: refused on held tables while any hold is active (the app role has
+-- no TRUNCATE privilege; this binds the owner too).
+CREATE FUNCTION "public"."legal_hold_refuse_truncate"() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
+BEGIN
+  PERFORM "public"."legal_hold_lock_shared"();
+  IF EXISTS (SELECT 1 FROM "public"."legal_holds" h WHERE h.status = 'active') THEN
+    RAISE EXCEPTION '% cannot be truncated while a legal hold is active', TG_TABLE_NAME
+      USING ERRCODE = 'KH001';
+  END IF;
+  RETURN NULL;
+END;
+$$;--> statement-breakpoint
+
+CREATE TRIGGER "threads_legal_hold_truncate" BEFORE TRUNCATE ON "threads"
+  FOR EACH STATEMENT EXECUTE FUNCTION "public"."legal_hold_refuse_truncate"();--> statement-breakpoint
+CREATE TRIGGER "thread_entries_legal_hold_truncate" BEFORE TRUNCATE ON "thread_entries"
+  FOR EACH STATEMENT EXECUTE FUNCTION "public"."legal_hold_refuse_truncate"();

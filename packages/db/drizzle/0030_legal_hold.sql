@@ -28,7 +28,7 @@ CREATE TABLE "legal_holds" (
 	CONSTRAINT "legal_holds_release_request_shape" CHECK (("legal_holds"."release_requested_by" IS NULL) = ("legal_holds"."release_requested_at" IS NULL) AND ("legal_holds"."release_requested_by" IS NULL) = ("legal_holds"."release_reason" IS NULL) AND ("legal_holds"."release_requested_by" IS NULL OR "legal_holds"."status" IN ('active', 'released')))
 );
 --> statement-breakpoint
-ALTER TABLE "audit_log" ADD COLUMN "hash_version" smallint DEFAULT 2 NOT NULL;--> statement-breakpoint
+ALTER TABLE "audit_log" ADD COLUMN "hash_version" smallint;--> statement-breakpoint
 ALTER TABLE "audit_log" ADD COLUMN "pii_salt" text;--> statement-breakpoint
 ALTER TABLE "audit_log" ADD COLUMN "pii_commitment" text;--> statement-breakpoint
 ALTER TABLE "legal_holds" ADD CONSTRAINT "legal_holds_team_id_teams_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."teams"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
@@ -40,5 +40,4 @@ ALTER TABLE "legal_holds" ADD CONSTRAINT "legal_holds_release_requested_by_users
 ALTER TABLE "legal_holds" ADD CONSTRAINT "legal_holds_released_by_users_id_fk" FOREIGN KEY ("released_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "legal_holds_team_idx" ON "legal_holds" USING btree ("team_id","requested_at" DESC NULLS LAST);--> statement-breakpoint
 CREATE INDEX "legal_holds_active_idx" ON "legal_holds" USING btree ("team_id","user_id") WHERE "legal_holds"."status" = 'active';--> statement-breakpoint
-CREATE INDEX "legal_holds_active_user_idx" ON "legal_holds" USING btree ("user_id") WHERE "legal_holds"."status" = 'active' AND "legal_holds"."user_id" IS NOT NULL;--> statement-breakpoint
-CREATE INDEX "audit_log_pii_pending_idx" ON "audit_log" USING btree ("at") WHERE "audit_log"."pii_salt" IS NOT NULL;
+CREATE INDEX "legal_holds_active_user_idx" ON "legal_holds" USING btree ("user_id") WHERE "legal_holds"."status" = 'active' AND "legal_holds"."user_id" IS NOT NULL;
