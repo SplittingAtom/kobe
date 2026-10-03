@@ -13,8 +13,11 @@ import type { McpPrincipal } from "./decide.js";
  * the wire's `policy.check` builds it, and the caller evaluates the call under all of them.
  */
 
-/** Active runs one sandbox may hold at once; beyond it the call is denied (fail closed). */
-export const MAX_ACTIVE_RUNS_PER_SANDBOX = 32;
+/**
+ * Active runs one sandbox may hold at once; beyond it the call is denied (fail closed). One user's
+ * threads run concurrently in one sandbox (D13); 16 is well above interactive use plus schedules.
+ */
+export const MAX_ACTIVE_RUNS_PER_SANDBOX = 16;
 
 export interface ActiveRunContext {
   readonly runId: string;

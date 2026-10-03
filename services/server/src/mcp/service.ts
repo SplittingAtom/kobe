@@ -1,9 +1,9 @@
-import type { PolicyEngine } from "@kobe/protocol";
 import type { KobeDb, PinnedTool } from "@kobe/db";
 import { createRateLimiter } from "../sandbox/rate-limit.js";
 import type { RunPolicyContextSource } from "../sandbox-wire/types.js";
 import { DENY_UNVERIFIED_APPROVALS, type McpApprovalVerifier } from "./approvals.js";
 import { exposedTools, loadTeamConnector } from "./catalog.js";
+import type { PolicySources } from "./fan-out.js";
 import {
   decideMcpCall,
   type McpCallDecision,
@@ -26,8 +26,8 @@ export interface McpService {
 
 export interface McpServiceOptions {
   readonly db: KobeDb;
-  /** The server's policy engine, built with the MCP catalog (registry + connector state). */
-  readonly engine: PolicyEngine;
+  /** The policy engine's inputs (rules, settings, registry with the MCP catalog, connector state). */
+  readonly policy: PolicySources;
   readonly runContext: RunPolicyContextSource;
   /** KOBE-37 seam; deny-by-default until approvals are wired. */
   readonly approvals?: McpApprovalVerifier;
@@ -38,7 +38,7 @@ export function createMcpService(options: McpServiceOptions): McpService {
   const deniedAudits = createRateLimiter(DENIED_AUDIT_RATE);
   const deps = {
     db: options.db,
-    engine: options.engine,
+    policy: options.policy,
     runContext: options.runContext,
     approvals: options.approvals ?? DENY_UNVERIFIED_APPROVALS,
     mayAuditDenied: (sandboxId: string) => deniedAudits.take(sandboxId) === 0,

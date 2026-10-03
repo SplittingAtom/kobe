@@ -177,10 +177,11 @@ where `run_id` and `tool_call_id` come from, and prove Gate 2 with the real prox
 
 - **M1 (the sandbox chose which run's policy applied) — fixed with option (b), refined.** The
   `Kobe-Thread-Id` claim no longer selects a policy. The server loads **every** active run of the
-  token's user leased to the token's sandbox (`mcp/run-context.ts`, at most 32, else deny), builds
+  token's user leased to the token's sandbox (`mcp/run-context.ts`, at most 16, else deny), builds
   each run's own policy input (clamped mode, trigger, agent lists, project) and lets the engine
   decide the call under each. `combineDecisions` (`mcp/decide.ts`):
-  the named run denies → deny; the named run **and every sibling** allow → allow; otherwise the
+  the named run denies → deny; the named run **and every sibling** allow → allow (siblings are
+  decided once per distinct context, see the re-review below); otherwise the
   user's signed approval of exactly this input **in the named run** is required (verified and
   consumed as before), else deny. So a prompt-injected thread A naming sibling B (a scheduled run,
   forced `auto`; an `auto` run with a team allow-list; a broader agent allow list) gets A's
@@ -218,6 +219,29 @@ where `run_id` and `tool_call_id` come from, and prove Gate 2 with the real prox
   re-export it from their `address-policy.ts`, and it adds `3fff::/20`, `5f00::/16` and
   `2001:20::/28`.
 
+## Re-review of the M1 fix — resolutions
+
+- **MEDIUM (fan-out could starve the pool): fixed** in `mcp/fan-out.ts`:
+  - one decision per **distinct** policy context (mode, trigger, sorted agent allow/deny, project);
+    siblings with the named run's context are skipped. Strictness is monotone in the context, so
+    nothing is lost;
+  - a **per-call engine over memoised sources**: rules, settings, tool resolution and connector
+    state load once per call, however many contexts are decided;
+  - at most **3 decisions at a time** (`DECISION_CONCURRENCY`);
+  - `MAX_ACTIVE_RUNS_PER_SANDBOX` lowered from 32 to **16**. Run contexts load in one transaction
+    (one connection).
+
+  Tests: `mcp.db.test.ts` "bounded fan-out" (16 runs, 3 distinct contexts → exactly one load of
+  each shared input; the active-run cap fails closed); `mcp/fan-out.test.ts` (dedupe, concurrency
+  peak 3).
+
+- **Residual LOW (accepted until KOBE-62):** without per-session credentials, a process in the
+  sandbox with **no** active run of its own (or a stale one) is decided under the sandbox's
+  active runs' combined policy. That policy is still the strictest of them, plus an approval for
+  exactly the input in the named run. **KOBE-62 should send `_meta["kobe.dev/tool_call_id"]`**
+  (and the server should record allowed `policy.check`s), so each MCP call binds to the recorded
+  decision of its own tool call (option (a) of review M1).
+
 ## For other tickets
 
 - **KOBE-37 (approvals):** done, see "Gate 2 wiring". Keep `approvals.input_canonical`,
@@ -238,7 +262,8 @@ where `run_id` and `tool_call_id` come from, and prove Gate 2 with the real prox
   should fetch decrypted credentials from the server, add an internal route next to
   `routes/internal.ts` (same key + sandbox token). Upstream `auth_required` (401/403) is reported
   as "reconnect". MCP 2026-07-28 OAuth rules (PRM discovery, CIMD, PKCE, RFC 8707/9207) are yours.
-- **KOBE-62 (Pi MCP wiring):** configure each exposed connector in Pi as a Streamable HTTP server
+- **KOBE-62 (Pi MCP wiring):** please attach `params._meta["kobe.dev/tool_call_id"]` per call
+  (residual LOW above). Configure each exposed connector in Pi as a Streamable HTTP server
   at `<KOBE_MCP_PROXY_URL>/v1/mcp/<connector_id>` (`KOBE_MCP_PROXY_URL` is already in the sandbox
   env: `http://mcp-proxy.kobe.internal:80`) with headers `Authorization: Bearer <kobe.mcp-proxy
 token>` and `Kobe-Thread-Id: <thread_id>`; server name = connector name (Pi tool names then

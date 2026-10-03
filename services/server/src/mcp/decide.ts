@@ -4,7 +4,6 @@ import {
   toolInputSchema,
   type JsonObject,
   type PolicyDecision,
-  type PolicyEngine,
   type PolicyInput,
   type PolicyReason,
   type PolicyReasonCode,
@@ -17,6 +16,13 @@ import { logger } from "../logger.js";
 import type { RunPolicyContextSource } from "../sandbox-wire/types.js";
 import type { McpApprovalFailure, McpApprovalVerifier } from "./approvals.js";
 import { describePinnedTool, loadTeamConnector, type TeamConnector } from "./catalog.js";
+import {
+  DECISION_CONCURRENCY,
+  distinctSiblings,
+  engineForCall,
+  mapLimited,
+  type PolicySources,
+} from "./fan-out.js";
 import { loadActiveRuns, type ActiveRunContext } from "./run-context.js";
 
 /**
@@ -81,7 +87,8 @@ export type McpCallDecision =
 
 export interface McpDecideDeps {
   readonly db: KobeDb;
-  readonly engine: PolicyEngine;
+  /** The engine's inputs; each call decides with its own memoising engine (fan-out.ts). */
+  readonly policy: PolicySources;
   readonly runContext: RunPolicyContextSource;
   readonly approvals: McpApprovalVerifier;
   readonly now?: () => Date;
@@ -297,14 +304,17 @@ export async function decideMcpCall(
     facts = { ...facts, runId: named.runId };
 
     const toolCallId = request.toolCallId ?? `mcp-proxy-${randomUUID()}`;
+    const engine = engineForCall(deps.policy);
     const decide = (run: ActiveRunContext) =>
-      deps.engine.decide(
-        policyInputFor(principal, run, descriptor, toolCallId, input.data, connector),
-      );
+      engine.decide(policyInputFor(principal, run, descriptor, toolCallId, input.data, connector));
     // The sandbox's claim picks the named run, but cannot pick its policy: the call is decided
-    // under every active run it could belong to (review M1). See `combineDecisions`.
+    // under every distinct policy context of its active runs (review M1), bounded (fan-out.ts).
     const namedDecision = await decide(named);
-    const siblings = await Promise.all(loaded.runs.filter((r) => r !== named).map(decide));
+    const siblings = await mapLimited(
+      distinctSiblings(named, loaded.runs),
+      DECISION_CONCURRENCY,
+      decide,
+    );
     const combined = combineDecisions(namedDecision, siblings);
     if (combined.effect === "deny") {
       return await denied(combined.reason.code, combined.reason.message);

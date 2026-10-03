@@ -4,10 +4,10 @@ import { canonicalJson, type JsonObject } from "@kobe/protocol";
 import { approvalKeyring } from "./approvals/index.js";
 import { DENY_UNVERIFIED_APPROVALS } from "./mcp/approvals.js";
 import { createDbMcpCatalog } from "./mcp/catalog.js";
+import { MAX_ACTIVE_RUNS_PER_SANDBOX } from "./mcp/run-context.js";
 import { createMcpService } from "./mcp/service.js";
-import { createPolicyEngine } from "./policy/engine.js";
 import { createToolRegistry } from "./policy/registry.js";
-import { createDbRuleSource } from "./policy/rule-store.js";
+import { createDbRuleSource, createDbSettingsSource } from "./policy/rule-store.js";
 import { createDbRunContextSource } from "./sandbox-wire/index.js";
 import { createInternalApp } from "./routes/internal.js";
 import { createRateLimiter } from "./sandbox/rate-limit.js";
@@ -508,11 +508,12 @@ describe("Gate 2: an MCP write runs only with a valid signed approval", () => {
     const stub = internalApp(
       createMcpService({
         db: fx.db,
-        engine: createPolicyEngine({
+        policy: {
           rules: createDbRuleSource(fx.db),
+          settings: createDbSettingsSource(fx.db),
           registry: createToolRegistry(catalog),
           connectors: catalog,
-        }),
+        },
         runContext: createDbRunContextSource(),
         approvals: DENY_UNVERIFIED_APPROVALS,
       }),
@@ -566,6 +567,54 @@ describe("review M1: the thread claim never selects a laxer policy", () => {
     const runId = await fx.run(w.team, w.owner);
     await leaseRun(fx.admin, w.team, runId, w.owner.id, w.sandboxId);
     expect((await callTool(w, { tool: "get_issue" })).json).toMatchObject({ decision: "allow" });
+  });
+});
+
+describe("bounded fan-out (re-review)", () => {
+  it("loads the shared policy inputs once per call and decides once per distinct context", async () => {
+    const w = await world();
+    // 15 sibling runs in the same sandbox, all with the same context as the named run but three.
+    for (let i = 0; i < 15; i++) {
+      const runId = await fx.run(w.team, w.owner);
+      await leaseRun(fx.admin, w.team, runId, w.owner.id, w.sandboxId);
+      if (i < 3)
+        await fx.admin.query(`UPDATE runs SET approval_mode = 'auto' WHERE id = $1`, [runId]);
+      if (i === 3)
+        await fx.admin.query(`UPDATE runs SET trigger = 'schedule' WHERE id = $1`, [runId]);
+    }
+    const catalog = createDbMcpCatalog(fx.db);
+    const counts = { rules: 0, settings: 0, resolve: 0, connector: 0 };
+    const rules = createDbRuleSource(fx.db);
+    const settings = createDbSettingsSource(fx.db);
+    const registry = createToolRegistry(catalog);
+    const counted = internalApp(
+      createMcpService({
+        db: fx.db,
+        policy: {
+          rules: { load: (...a) => (counts.rules++, rules.load(...a)) },
+          settings: { get: () => (counts.settings++, settings.get()) },
+          registry: { resolve: (...a) => (counts.resolve++, registry.resolve(...a)) },
+          connectors: { get: (...a) => (counts.connector++, catalog.get(...a)) },
+        },
+        runContext: createDbRunContextSource(),
+      }),
+    );
+    const res = await callTool(w, { tool: "get_issue" }, w.token, counted);
+    expect(res.json).toMatchObject({ decision: "allow" });
+    // One load of each shared input for 16 runs (3 distinct contexts: interactive ask-on-write, interactive auto, scheduled).
+    expect(counts).toEqual({ rules: 1, settings: 1, resolve: 1, connector: 1 });
+  });
+
+  it("caps active runs per sandbox (fail closed beyond it)", async () => {
+    const w = await world();
+    for (let i = 0; i < MAX_ACTIVE_RUNS_PER_SANDBOX; i++) {
+      const runId = await fx.run(w.team, w.owner);
+      await leaseRun(fx.admin, w.team, runId, w.owner.id, w.sandboxId);
+    }
+    expect((await callTool(w, { tool: "get_issue" })).json).toMatchObject({
+      decision: "deny",
+      code: "run_not_active",
+    });
   });
 });
 

@@ -185,13 +185,14 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   // proxy's re-check. MCP tools resolve from the pinned connector snapshots (KOBE-58 catalog).
   const mcpCatalog = createDbMcpCatalog(database.db);
   const toolRegistry = createToolRegistry(mcpCatalog);
-  const policyEngine = createPolicyEngine({
+  const policySources = {
     rules: createDbRuleSource(database.db),
     settings: createDbSettingsSource(database.db),
     registry: toolRegistry,
     connectors: mcpCatalog,
-    onError: (err) => logger.error({ err }, "policy engine error (denied)"),
-  });
+    onError: (err: unknown) => logger.error({ err }, "policy engine error (denied)"),
+  };
+  const policyEngine = createPolicyEngine(policySources);
   const runContext = options.sandboxWire?.runContext ?? createDbRunContextSource();
   const sandboxWire = createSandboxWire({
     tools: toolRegistry,
@@ -225,7 +226,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   });
   const mcp = createMcpService({
     db: database.db,
-    engine: policyEngine,
+    policy: policySources,
     runContext,
     // Gate 2: KOBE-37's verifier (finds, verifies and consumes the signed approval).
     approvals: approvalVerifierForMcp(database.db, approvals.verifier),
