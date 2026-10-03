@@ -163,8 +163,9 @@ contains "server and scheduler verified the gVisor RuntimeClass in process" '^ve
 gateway_state() { psql_kobe "SELECT 'in_sync=' || (synced_version >= desired_version) || ' error=' || coalesce(last_error, '-') FROM model_gateway_state"; }
 wait_endpoints "$NS" kobe-bifrost
 bifrost=$(wait_for 90 '^in_sync=true error=-$' gateway_state)
-contains "the server's gateway sync reached Bifrost (in sync, no error)" '^in_sync=true error=-$' "$bifrost restarts=$($KUBECTL \
-  -n "$NS" get pods -l app.kubernetes.io/component=bifrost -o jsonpath='{.items[*].status.containerStatuses[*].restartCount}' 2>/dev/null)"
+contains "the server's gateway sync reached Bifrost (in sync, no error)" '^in_sync=true error=-$' "$bifrost"
+contains "Bifrost has not restarted" '^0$' "$($KUBECTL -n "$NS" get pods -l app.kubernetes.io/component=bifrost \
+  -o jsonpath='{.items[*].status.containerStatuses[*].restartCount}' 2>/dev/null)"
 # Once the control answers, the probe pod is in the policy ipsets: BLOCKED below is the policy.
 np=$(probe default "$(gated http://kobe-web.$NS/api/healthz bifrost http://kobe-bifrost.$NS:8080/health)")
 contains "probe from another namespace can reach unrestricted services (control)" '^control=REACHED$' "$np"
