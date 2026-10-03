@@ -1,11 +1,13 @@
 import { virtualKeyContext, type GatewayPrincipal, type SecretBox } from "@kobe/db";
+import { TtlCache } from "./cache.js";
 
 /**
  * Who may call a model (KOBE-40): a verified `kobe.model-gateway` token is not enough on its own.
  * Its (team, user) must still be an active membership and its sandbox not revoked (destroyed,
  * hibernated or replaced, per the KOBE-25 `sandboxes` row), and the member must have a virtual key
- * (written by the server's gateway sync). Answers are cached for `ttlMs` (the revocation latency
- * bound) and dropped on `keys:<team>` hints.
+ * (written by the server's gateway sync). The answer also carries the team's enabled models, which
+ * the shim enforces itself. Answers are cached for `ttlMs` (the revocation latency bound), loaded
+ * once for concurrent callers, and dropped on `keys:<team>` hints.
  */
 export interface PrincipalStore {
   load(teamId: string, userId: string, sandboxId: string): Promise<GatewayPrincipal>;
@@ -14,7 +16,12 @@ export interface PrincipalStore {
 }
 
 export type Resolution =
-  | { readonly ok: true; readonly virtualKey: string }
+  | {
+      readonly ok: true;
+      readonly virtualKey: string;
+      /** `<gateway provider>/<model>` ids the team enabled. */
+      readonly enabledModels: ReadonlySet<string>;
+    }
   | {
       readonly ok: false;
       readonly reason: "not_member" | "sandbox_revoked" | "no_key" | "key_unreadable";
@@ -31,13 +38,8 @@ export interface PrincipalCacheOptions {
   readonly now?: () => number;
 }
 
-interface Entry {
-  readonly at: number;
-  readonly resolution: Resolution;
-}
-
 export class PrincipalCache {
-  private readonly entries = new Map<string, Entry>();
+  private readonly cache: TtlCache<Resolution>;
   /** Last key request per member: at most one NOTIFY per member per `keyRequestEveryMs`. */
   private readonly requested = new Map<string, number>();
   private readonly now: () => number;
@@ -48,27 +50,26 @@ export class PrincipalCache {
     private readonly options: PrincipalCacheOptions,
   ) {
     this.now = options.now ?? Date.now;
+    this.cache = new TtlCache<Resolution>({
+      ttlMs: options.ttlMs,
+      ...(options.maxEntries !== undefined ? { maxEntries: options.maxEntries } : {}),
+      now: this.now,
+      // A missing key is not cached: the next call asks again.
+      keep: (r) => r.ok || r.reason !== "no_key",
+    });
   }
 
-  async resolve(
-    teamId: string,
-    userId: string,
-    sandboxId: string,
-    fresh = false,
-  ): Promise<Resolution> {
-    const key = `${teamId}:${userId}:${sandboxId}`;
-    const hit = this.entries.get(key);
-    if (!fresh && hit && this.now() - hit.at < this.options.ttlMs) return hit.resolution;
-    let resolution = await this.load(teamId, userId, sandboxId);
-    if (!resolution.ok && resolution.reason === "no_key") {
-      resolution = await this.waitForKey(teamId, userId, sandboxId);
-    }
-    if (this.entries.size >= (this.options.maxEntries ?? 10_000)) this.entries.clear();
-    // A missing key is not cached: the next call asks again.
-    if (resolution.ok || resolution.reason !== "no_key") {
-      this.entries.set(key, { at: this.now(), resolution });
-    }
-    return resolution;
+  resolve(teamId: string, userId: string, sandboxId: string, fresh = false): Promise<Resolution> {
+    return this.cache.get(
+      `${teamId}:${userId}:${sandboxId}`,
+      async () => {
+        const first = await this.load(teamId, userId, sandboxId);
+        return !first.ok && first.reason === "no_key"
+          ? this.waitForKey(teamId, userId, sandboxId)
+          : first;
+      },
+      fresh,
+    );
   }
 
   private async load(teamId: string, userId: string, sandboxId: string): Promise<Resolution> {
@@ -80,6 +81,7 @@ export class PrincipalCache {
       return {
         ok: true,
         virtualKey: this.box.open(p.virtualKey.valueEnc, virtualKeyContext(teamId, userId)),
+        enabledModels: new Set(p.enabledModels),
       };
     } catch {
       return { ok: false, reason: "key_unreadable" };
@@ -108,12 +110,10 @@ export class PrincipalCache {
   }
 
   invalidateTeam(teamId: string): void {
-    for (const key of this.entries.keys()) {
-      if (key.startsWith(`${teamId}:`)) this.entries.delete(key);
-    }
+    this.cache.deleteWhere((key) => key.startsWith(`${teamId}:`));
   }
 
   invalidateAll(): void {
-    this.entries.clear();
+    this.cache.clear();
   }
 }

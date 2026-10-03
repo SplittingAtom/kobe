@@ -7,7 +7,7 @@ import {
   MODELS_CHANNEL,
   MODELS_CONFIG_CHANGED,
   bumpModelsConfig,
-  isRunLeasedTo,
+  isActiveRunLeasedTo,
   loadGatewayPrincipal,
 } from "./models/index.js";
 import {
@@ -193,6 +193,8 @@ describe("gateway principal", () => {
       member: true,
       sandbox: "live",
       virtualKey: { id: "vk-1", valueEnc: "v1.sealed" },
+      // The team's enabled models as the gateway names them (custom provider kobe-<id>).
+      enabledModels: [`kobe-${providerId}/qwen/qwen3-8b`],
     });
   });
 
@@ -218,6 +220,7 @@ describe("gateway principal", () => {
       member: false,
       sandbox: "unrecorded",
       virtualKey: undefined,
+      enabledModels: [],
     });
   });
 
@@ -232,7 +235,7 @@ describe("gateway principal", () => {
     expect((await loadGatewayPrincipal(app.db, teamA, other, sandboxId)).member).toBe(false);
   });
 
-  it("run attribution: only runs leased to this sandbox", async () => {
+  it("run attribution: only active runs leased to this sandbox", async () => {
     const runId = await withTeam(app.db, teamA, async (tx) => {
       const [thread] = await tx
         .insert(threads)
@@ -255,8 +258,14 @@ describe("gateway principal", () => {
         .values({ teamId: teamA, runId: run.id, userId, threadId: thread.id, sandboxId });
       return run.id;
     });
-    expect(await isRunLeasedTo(app.db, teamA, runId, sandboxId)).toBe(true);
-    expect(await isRunLeasedTo(app.db, teamA, runId, randomUUID())).toBe(false);
-    expect(await isRunLeasedTo(app.db, teamB, runId, sandboxId)).toBe(false);
+    expect(await isActiveRunLeasedTo(app.db, teamA, runId, sandboxId)).toBe(true);
+    expect(await isActiveRunLeasedTo(app.db, teamA, runId, randomUUID())).toBe(false);
+    expect(await isActiveRunLeasedTo(app.db, teamB, runId, sandboxId)).toBe(false);
+    await withTeam(app.db, teamA, (tx) =>
+      tx.execute(
+        sql`UPDATE runs SET status = 'completed', ended_at = now() WHERE team_id = ${teamA} AND id = ${runId}`,
+      ),
+    );
+    expect(await isActiveRunLeasedTo(app.db, teamA, runId, sandboxId)).toBe(false);
   });
 });

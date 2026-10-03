@@ -34,6 +34,21 @@ async function body<T>(c: Context, schema: z.ZodType<T>) {
 
 const err = (c: Context, status: 404 | 409 | 503, code: string, message: string) =>
   c.json({ code, message }, status);
+/** Endpoint rules (admin-store.ts `endpointProblem`). */
+const endpointError = (c: Context, problem: "vendor_endpoint_fixed" | "insecure_endpoint") =>
+  c.json(
+    problem === "vendor_endpoint_fixed"
+      ? {
+          code: "vendor_endpoint_fixed",
+          message:
+            "OpenAI, Anthropic and Gemini providers use their vendor's endpoint (no base_url).",
+        }
+      : {
+          code: "insecure_endpoint",
+          message: "A provider with an API key needs an https:// base_url.",
+        },
+    400,
+  );
 const providerNotFound = (c: Context) =>
   err(c, 404, "provider_not_found", "That provider is not configured.");
 const aliasNotFound = (c: Context) =>
@@ -64,11 +79,21 @@ export function installModelsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVar
     }
     const parsed = await body(c, addProviderSchema);
     if (!parsed.ok) return parsed.response;
-    const result = await addProvider(db, deps.models.providerKeys, parsed.value, c.get("user").id);
+    const result = await addProvider(
+      db,
+      deps.models.providerKeys,
+      parsed.value,
+      c.get("user").id,
+      deps.models,
+    );
     if (result.ok) return c.json({ provider: result.provider }, 201);
-    return result.error === "exists"
-      ? err(c, 409, "provider_exists", "That provider is already configured.")
-      : err(c, 409, "too_many_providers", "The install has reached its provider limit.");
+    if (result.error === "exists") {
+      return err(c, 409, "provider_exists", "That provider is already configured.");
+    }
+    if (result.error === "too_many") {
+      return err(c, 409, "too_many_providers", "The install has reached its provider limit.");
+    }
+    return endpointError(c, result.error);
   });
 
   app.patch("/providers/:id", async (c) => {
@@ -79,12 +104,34 @@ export function installModelsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVar
     if (!id.success) return providerNotFound(c);
     const parsed = await body(c, updateProviderSchema);
     if (!parsed.ok) return parsed.response;
-    const result = await updateProvider(db, deps.models.providerKeys, id.data, parsed.value);
+    const result = await updateProvider(
+      db,
+      deps.models.providerKeys,
+      id.data,
+      parsed.value,
+      deps.models,
+    );
     if (result.ok) return c.json({ provider: result.provider });
     if (result.error === "not_found") return providerNotFound(c);
-    return result.error === "key_required"
-      ? invalidRequest(c, "This provider needs an API key; replace it instead of removing it.")
-      : invalidRequest(c, "This provider needs a base_url.");
+    if (result.error === "key_required") {
+      return invalidRequest(
+        c,
+        "This provider needs an API key; replace it instead of removing it.",
+      );
+    }
+    if (result.error === "base_url_required") {
+      return invalidRequest(c, "This provider needs a base_url.");
+    }
+    if (result.error === "key_required_for_new_endpoint") {
+      return c.json(
+        {
+          code: "key_required_for_new_endpoint",
+          message: "Changing the endpoint needs the API key again (send api_key with base_url).",
+        },
+        400,
+      );
+    }
+    return endpointError(c, result.error);
   });
 
   app.delete("/providers/:id", async (c) => {

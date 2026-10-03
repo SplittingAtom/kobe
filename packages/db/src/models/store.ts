@@ -1,10 +1,15 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { KobeDb, KobeTx } from "../client.js";
 import {
+  ACTIVE_RUN_STATUSES,
+  modelCatalog,
   modelGatewayKeys,
+  modelProviders,
+  runs,
   sandboxRunLeases,
   sandboxes,
   teamMembers,
+  teamModels,
   users,
   type ModelProviderKind,
 } from "../schema/index.js";
@@ -30,7 +35,11 @@ export const MODELS_KEYS_PREFIX = "keys:";
 /** HKDF purposes of the two sealing secrets (secret-box.ts). */
 export const PROVIDER_KEY_PURPOSE = "model-provider-key";
 export const VIRTUAL_KEY_PURPOSE = "model-gateway-virtual-key";
-export const providerKeyContext = (providerId: string) => `provider:${providerId}`;
+/** A provider key's AAD names its revision: a sealed value never opens as another revision's. */
+export const providerKeyContext = (providerId: string, revision: number) =>
+  `provider:${providerId}:r${revision}`;
+/** HKDF purpose of the key-fingerprint secret (derived from the provider-key secret). */
+export const KEY_FINGERPRINT_PURPOSE = "model-key-fingerprint";
 export const virtualKeyContext = (teamId: string, userId: string) => `vk:${teamId}:${userId}`;
 
 /**
@@ -65,11 +74,19 @@ export interface GatewayPrincipal {
   readonly member: boolean;
   /**
    * The `sandboxes` row (KOBE-25) for (team, user): `revoked` when it is destroyed, hibernated or
-   * names another sandbox; `unrecorded` when there is no row or no sandbox id yet (tokens are only
-   * minted for live claims, KOBE-22); `live` when it names this sandbox and it is running.
+   * names another sandbox; `live` when it names this sandbox and it is running; `unrecorded` when
+   * there is no row or no sandbox id yet. Unrecorded is accepted: tokens are only minted for live
+   * claims (KOBE-22) and KOBE-25 writes the row on wake, so a running sandbox may not have one
+   * yet. Offboarding (KOBE-28) must therefore mark the row `destroyed` (not delete it) or remove
+   * the membership, or the sandbox's last tokens stay usable until they expire (≤ 15 min).
    */
   readonly sandbox: SandboxLiveness;
   readonly virtualKey: { readonly id: string; readonly valueEnc: string } | undefined;
+  /**
+   * The team's enabled models as the gateway names them (`<gateway provider>/<model>`): the shim
+   * refuses anything else itself, so a disable holds even if a push to Bifrost failed.
+   */
+  readonly enabledModels: readonly string[];
 }
 
 /** Everything the model-gateway shim checks for a verified token, in one team transaction. */
@@ -100,6 +117,19 @@ export async function loadGatewayPrincipal(
       .select({ id: modelGatewayKeys.vkId, valueEnc: modelGatewayKeys.vkValueEnc })
       .from(modelGatewayKeys)
       .where(and(eq(modelGatewayKeys.teamId, teamId), eq(modelGatewayKeys.userId, userId)));
+    const enabled = await tx
+      .select({
+        providerId: modelProviders.id,
+        kind: modelProviders.kind,
+        model: modelCatalog.model,
+      })
+      .from(teamModels)
+      .innerJoin(modelCatalog, eq(modelCatalog.alias, teamModels.alias))
+      .innerJoin(modelProviders, eq(modelProviders.id, modelCatalog.providerId))
+      .where(eq(teamModels.teamId, teamId));
+    const enabledModels = [
+      ...new Set(enabled.map((e) => `${gatewayProviderName(e.providerId, e.kind)}/${e.model}`)),
+    ].sort();
     let sandbox: SandboxLiveness = "unrecorded";
     if (box?.sandboxId) {
       sandbox =
@@ -107,12 +137,15 @@ export async function loadGatewayPrincipal(
     } else if (box && box.state !== "running") {
       sandbox = "revoked";
     }
-    return { member: member.length > 0, sandbox, virtualKey: vk };
+    return { member: member.length > 0, sandbox, virtualKey: vk, enabledModels };
   });
 }
 
-/** Whether `runId` is leased to this sandbox (KOBE-24): the shim's run attribution check. */
-export async function isRunLeasedTo(
+/**
+ * Whether `runId` is an **active** run (running or waiting for approval) leased to this sandbox
+ * (KOBE-24 leases): the shim's run attribution check. Ended runs no longer attribute.
+ */
+export async function isActiveRunLeasedTo(
   db: KobeDb,
   teamId: string,
   runId: string,
@@ -122,11 +155,16 @@ export async function isRunLeasedTo(
     const rows = await tx
       .select({ runId: sandboxRunLeases.runId })
       .from(sandboxRunLeases)
+      .innerJoin(
+        runs,
+        and(eq(runs.teamId, sandboxRunLeases.teamId), eq(runs.id, sandboxRunLeases.runId)),
+      )
       .where(
         and(
           eq(sandboxRunLeases.teamId, teamId),
           eq(sandboxRunLeases.runId, runId),
           eq(sandboxRunLeases.sandboxId, sandboxId),
+          inArray(runs.status, [...ACTIVE_RUN_STATUSES]),
         ),
       )
       .limit(1);

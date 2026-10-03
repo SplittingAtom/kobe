@@ -74,6 +74,12 @@ const providerId = z.string().max(32).regex(new RegExp(PROVIDER_ID_PATTERN));
 const providerKind = z.enum(MODEL_PROVIDER_KINDS);
 const modelAlias = z.string().max(64).regex(new RegExp(MODEL_ALIAS_PATTERN));
 const providerModel = z.string().max(200).regex(new RegExp(PROVIDER_MODEL_PATTERN));
+/** A provider endpoint's host (name or IP literal, no path or credentials); null: vendor default. */
+const endpointHost = z
+  .string()
+  .max(255)
+  .regex(/^[A-Za-z0-9.:[\]-]+$/)
+  .nullable();
 
 /** A break-glass grant (KOBE-16) by its scope; never the free-text reason. */
 const breakGlassScope = {
@@ -333,6 +339,7 @@ export const AUDIT_EVENTS = {
     kind: providerKind,
     keySet: z.boolean(),
     privateNetwork: z.boolean(),
+    endpointHost,
   }),
   "models.provider.changed": event("install", {
     providerId,
@@ -340,6 +347,8 @@ export const AUDIT_EVENTS = {
     keyChanged: z.boolean(),
     baseUrlChanged: z.boolean(),
     privateNetwork: z.boolean(),
+    /** The endpoint's host after the change (where the stored key is sent). */
+    endpointHost,
   }),
   "models.provider.removed": event("install", { providerId, kind: providerKind }),
   /** A catalog alias was added, re-pointed or removed (removal also disables it for every team). */

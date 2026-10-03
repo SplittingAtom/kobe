@@ -152,11 +152,15 @@ const providerBody = (spec: ProviderSpec): Json => ({
     : {}),
 });
 
+/** A virtual key with no allowed model is deactivated: never rely on how Bifrost reads `[]`. */
+export const vkActive = (spec: Pick<VirtualKeySpec, "models">): boolean =>
+  Object.values(spec.models).some((m) => m.length > 0);
+
 /** Every provider config of a VK may use all of its provider's keys (Kobe has one per provider). */
 const vkBody = (spec: VirtualKeySpec): Json => ({
   name: spec.name,
   team_id: spec.teamId,
-  is_active: true,
+  is_active: vkActive(spec),
   provider_configs: Object.entries(spec.models).map(([provider, models]) => ({
     provider,
     allowed_models: [...models],

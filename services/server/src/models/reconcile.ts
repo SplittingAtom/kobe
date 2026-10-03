@@ -1,6 +1,7 @@
 import type { Logger } from "pino";
 import {
   BifrostAdminError,
+  vkActive,
   type BifrostAdmin,
   type ObservedProvider,
   type ObservedVirtualKey,
@@ -46,7 +47,7 @@ const providerDiffers = (want: DesiredProvider, have: ObservedProvider) =>
   (want.custom && want.keyless !== have.keyless);
 
 const vkDiffers = (want: DesiredVirtualKey, teamId: string, have: ObservedVirtualKey) =>
-  !have.isActive ||
+  have.isActive !== vkActive(want) ||
   have.teamId !== teamId ||
   !have.allKeys ||
   !sameModels(want.models, have.models) ||

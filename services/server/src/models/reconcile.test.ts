@@ -169,6 +169,23 @@ describe("reconcile", () => {
     expect(second.virtualKeys.get(name)).toEqual(first.virtualKeys.get(name));
   });
 
+  it("deactivates a virtual key whose team has no model enabled (fails closed)", async () => {
+    await reconcile(desired(), bifrost, logger);
+    const vk = () =>
+      [...bifrost.virtualKeys.values()].find((v) => v.name === virtualKeyName(teamA, alice));
+    expect(vk()?.isActive).toBe(true);
+    const none = teams.map((t) => (t.teamId === teamA ? { ...t, aliases: [] } : t));
+    await reconcile(desired({ teams: none }), bifrost, logger);
+    expect(vk()).toMatchObject({ isActive: false, models: {} });
+    // Team B never had a model: its key was created inactive.
+    const b = [...bifrost.virtualKeys.values()].find(
+      (v) => v.name === virtualKeyName(teamB, alice),
+    );
+    expect(b?.isActive).toBe(false);
+    await reconcile(desired(), bifrost, logger);
+    expect(vk()?.isActive).toBe(true);
+  });
+
   it("removes what is no longer desired: a removed member's key, a team, a provider", async () => {
     await reconcile(desired(), bifrost, logger);
     const smaller = {

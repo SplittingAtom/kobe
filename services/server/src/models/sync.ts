@@ -271,11 +271,14 @@ export class ModelGatewaySync {
         .from(modelCatalog),
     ]);
     let unreadable = false;
+    const reseal: { id: string; revision: number; apiKey: string }[] = [];
     const providers = providerRows.map((p): ProviderInput => {
       let apiKey: string | undefined;
       if (p.apiKeyEnc !== null) {
         try {
-          apiKey = providerKeys.open(p.apiKeyEnc, providerKeyContext(p.id));
+          apiKey = providerKeys.open(p.apiKeyEnc, providerKeyContext(p.id, p.keyRevision));
+          if (!providerKeys.isCurrent(p.apiKeyEnc))
+            reseal.push({ id: p.id, revision: p.keyRevision, apiKey });
         } catch {
           // A rotated or wrong secret: the provider is pushed without its key (calls fail).
           unreadable = true;
@@ -290,6 +293,14 @@ export class ModelGatewaySync {
         apiKey,
       };
     });
+    // Keys sealed with a previous secret (rotation): re-seal with the current one.
+    for (const r of reseal) {
+      await db
+        .update(modelProviders)
+        .set({ apiKeyEnc: providerKeys.seal(r.apiKey, providerKeyContext(r.id, r.revision)) })
+        .where(and(eq(modelProviders.id, r.id), eq(modelProviders.keyRevision, r.revision)));
+      logger.info({ provider: r.id }, "provider API key re-sealed with the current secret");
+    }
     const teams = await scanTeams(db, "model gateway sync", async (tx, team) => {
       const members = await tx
         .select({ userId: teamMembers.userId })
@@ -371,10 +382,13 @@ export class ModelGatewaySync {
     return written;
   }
 
+  /** The stored value opens to `value` with the current secret (else it is re-sealed). */
   private opens(current: CurrentKey, teamId: string, userId: string, value: string): boolean {
+    const box = this.options.virtualKeys;
     try {
       return (
-        this.options.virtualKeys.open(current.valueEnc, virtualKeyContext(teamId, userId)) === value
+        box.isCurrent(current.valueEnc) &&
+        box.open(current.valueEnc, virtualKeyContext(teamId, userId)) === value
       );
     } catch {
       return false;

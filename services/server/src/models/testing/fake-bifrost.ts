@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   BifrostAdminError,
+  vkActive,
   type BifrostAdmin,
   type KeySpec,
   type ObservedCustomer,
@@ -155,7 +156,7 @@ export class FakeBifrost implements BifrostAdmin {
       id,
       name: spec.name,
       value,
-      isActive: true,
+      isActive: vkActive(spec),
       teamId: spec.teamId,
       models: Object.fromEntries(Object.entries(spec.models).map(([p, m]) => [p, [...m].sort()])),
       allKeys: true,

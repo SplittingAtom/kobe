@@ -118,17 +118,51 @@ export async function gatewayStatus(db: KobeDb): Promise<GatewayStatusView> {
   };
 }
 
+/**
+ * Where a provider's key may be sent (KOBE-40 review): a stored key is write-only, so moving it to
+ * another endpoint must not be possible without re-entering it, vendor providers keep their
+ * vendor's endpoint, and a key never travels over plain http. The operator switch
+ * (`allowUnsafeEndpoints`, Helm only) lifts the last two for test installs.
+ */
+export interface EndpointPolicy {
+  readonly allowUnsafeEndpoints: boolean;
+}
+
+export type EndpointProblem = "vendor_endpoint_fixed" | "insecure_endpoint";
+
+const VENDOR_KINDS: readonly ModelProviderKind[] = ["openai", "anthropic", "gemini"];
+
+export function endpointProblem(
+  kind: ModelProviderKind,
+  baseUrl: string | null,
+  hasKey: boolean,
+  policy: EndpointPolicy,
+): EndpointProblem | undefined {
+  if (policy.allowUnsafeEndpoints || baseUrl === null) return undefined;
+  if (VENDOR_KINDS.includes(kind)) return "vendor_endpoint_fixed";
+  if (hasKey && baseUrl.startsWith("http://")) return "insecure_endpoint";
+  return undefined;
+}
+
+/** The host a provider's requests (and key) go to, for the audit log; null: the vendor default. */
+export const endpointHost = (baseUrl: string | null): string | null =>
+  baseUrl === null ? null : new URL(baseUrl).host;
+
 export type AddProviderResult =
   | { readonly ok: true; readonly provider: ProviderView }
-  | { readonly ok: false; readonly error: "exists" | "too_many" };
+  | { readonly ok: false; readonly error: "exists" | "too_many" | EndpointProblem };
 
 export async function addProvider(
   db: KobeDb,
   box: SecretBox,
   input: AddProviderInput,
   userId: string,
+  policy: EndpointPolicy,
 ): Promise<AddProviderResult> {
   const id = input.kind === "openai_compatible" ? (input.id ?? "") : input.kind;
+  const baseUrl = input.base_url ?? null;
+  const problem = endpointProblem(input.kind, baseUrl, input.api_key !== undefined, policy);
+  if (problem) return { ok: false, error: problem };
   return db.transaction(async (tx) => {
     // Serializes concurrent adds so the cap holds (install-wide table, small).
     await tx.execute(sql`LOCK TABLE ${modelProviders} IN SHARE ROW EXCLUSIVE MODE`);
@@ -136,16 +170,17 @@ export async function addProvider(
     if (existing) return { ok: false, error: "exists" };
     const [{ n } = { n: 0 }] = await tx.select({ n: count() }).from(modelProviders);
     if (n >= MAX_PROVIDERS) return { ok: false, error: "too_many" };
+    const revision = input.api_key ? 1 : 0;
     const [row] = await tx
       .insert(modelProviders)
       .values({
         id,
         kind: input.kind,
         name: input.name,
-        baseUrl: input.base_url ?? null,
+        baseUrl,
         allowPrivateNetwork: input.allow_private_network,
-        apiKeyEnc: input.api_key ? box.seal(input.api_key, providerKeyContext(id)) : null,
-        keyRevision: input.api_key ? 1 : 0,
+        apiKeyEnc: input.api_key ? box.seal(input.api_key, providerKeyContext(id, revision)) : null,
+        keyRevision: revision,
         createdBy: userId,
       })
       .returning();
@@ -157,6 +192,7 @@ export async function addProvider(
         kind: input.kind,
         keySet: input.api_key !== undefined,
         privateNetwork: input.allow_private_network,
+        endpointHost: endpointHost(baseUrl),
       },
     });
     return { ok: true, provider: providerView(must(row)) };
@@ -165,13 +201,22 @@ export async function addProvider(
 
 export type UpdateProviderResult =
   | { readonly ok: true; readonly provider: ProviderView }
-  | { readonly ok: false; readonly error: "not_found" | "key_required" | "base_url_required" };
+  | {
+      readonly ok: false;
+      readonly error:
+        | "not_found"
+        | "key_required"
+        | "base_url_required"
+        | "key_required_for_new_endpoint"
+        | EndpointProblem;
+    };
 
 export async function updateProvider(
   db: KobeDb,
   box: SecretBox,
   id: string,
   input: UpdateProviderInput,
+  policy: EndpointPolicy,
 ): Promise<UpdateProviderResult> {
   return db.transaction(async (tx) => {
     const [before] = await tx
@@ -180,14 +225,24 @@ export async function updateProvider(
       .where(eq(modelProviders.id, id))
       .for("update");
     if (!before) return { ok: false, error: "not_found" };
-    const keyedKind = ["openai", "anthropic", "gemini"].includes(before.kind);
-    if (input.api_key === null && keyedKind) return { ok: false, error: "key_required" };
+    if (input.api_key === null && VENDOR_KINDS.includes(before.kind)) {
+      return { ok: false, error: "key_required" };
+    }
     if (input.base_url === null && ["ollama", "openai_compatible"].includes(before.kind)) {
       return { ok: false, error: "base_url_required" };
     }
     const keyChanged = input.api_key !== undefined;
     const baseUrl = input.base_url === undefined ? before.baseUrl : input.base_url;
+    const baseUrlChanged = baseUrl !== before.baseUrl;
+    const hasKey = keyChanged ? input.api_key !== null : before.apiKeyEnc !== null;
+    // A stored key never follows an endpoint change: whoever moves the endpoint re-enters the key.
+    if (baseUrlChanged && hasKey && !keyChanged) {
+      return { ok: false, error: "key_required_for_new_endpoint" };
+    }
+    const problem = endpointProblem(before.kind, baseUrl, hasKey, policy);
+    if (problem && (baseUrlChanged || keyChanged)) return { ok: false, error: problem };
     const privateNetwork = input.allow_private_network ?? before.allowPrivateNetwork;
+    const revision = keyChanged ? before.keyRevision + 1 : before.keyRevision;
     const [row] = await tx
       .update(modelProviders)
       .set({
@@ -196,8 +251,10 @@ export async function updateProvider(
         allowPrivateNetwork: privateNetwork,
         ...(keyChanged
           ? {
-              apiKeyEnc: input.api_key ? box.seal(input.api_key, providerKeyContext(id)) : null,
-              keyRevision: before.keyRevision + 1,
+              apiKeyEnc: input.api_key
+                ? box.seal(input.api_key, providerKeyContext(id, revision))
+                : null,
+              keyRevision: revision,
             }
           : {}),
         updatedAt: new Date(),
@@ -211,8 +268,9 @@ export async function updateProvider(
         providerId: id,
         kind: before.kind,
         keyChanged,
-        baseUrlChanged: baseUrl !== before.baseUrl,
+        baseUrlChanged,
         privateNetwork,
+        endpointHost: endpointHost(baseUrl),
       },
     });
     return { ok: true, provider: providerView(must(row)) };

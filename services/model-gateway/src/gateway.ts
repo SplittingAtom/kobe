@@ -12,9 +12,10 @@ import { SessionTokenError } from "@kobe/session-token";
 import type { Logger } from "pino";
 import { extractCredential } from "./credentials.js";
 import { forwardRequestHeaders, forwardResponseHeaders } from "./headers.js";
-import type { CallLimiter } from "./limits.js";
+import { topLevelModel } from "./body-model.js";
+import type { ByteBudget, CallLimiter, RequestRate } from "./limits.js";
 import type { PrincipalCache, Resolution } from "./principals.js";
-import { classify, forwardedQuery, type Route, type RouteKind } from "./routes.js";
+import { classify, forwardedQuery, type RouteKind } from "./routes.js";
 import type { CallContext, CallGate, UsageSink } from "./seams.js";
 
 /**
@@ -34,10 +35,14 @@ import type { CallContext, CallGate, UsageSink } from "./seams.js";
 export interface GatewayOptions {
   readonly verify: (token: string) => SessionTokenClaims;
   readonly principals: PrincipalCache;
-  /** Whether `runId` is leased to `sandboxId` in `teamId` (KOBE-24 leases). */
+  /** Whether `runId` is an active run leased to `sandboxId` in `teamId` (cached by the caller). */
   readonly isRunLeased: (teamId: string, runId: string, sandboxId: string) => Promise<boolean>;
   readonly bifrostUrl: string;
   readonly limiter: CallLimiter;
+  /** Request bytes held in memory, per sandbox and in total. */
+  readonly bytes: ByteBudget;
+  /** Requests per sandbox per second (before anything touches the database). */
+  readonly rate: RequestRate;
   readonly gate: CallGate;
   readonly sink: UsageSink;
   /** Bifrost refused a virtual key Kobe holds: ask the sync to re-push (NOTIFY `resync`). */
@@ -88,32 +93,53 @@ function sendError(
   res.end(payload);
 }
 
-/** The model a request names: body `model` (OpenAI, Anthropic) or Gemini's path. */
-function requestedModel(route: Route, body: Buffer): string | undefined {
-  if (route.pathModel) return route.pathModel;
-  const head = body.subarray(0, 65_536).toString("utf8");
-  return /"model"\s*:\s*"([^"\\]{1,200})"/.exec(head)?.[1];
-}
 
-function readBody(req: IncomingMessage, max: number): Promise<Buffer | "too_large"> {
+type BodyResult = Buffer | "too_large" | "busy";
+
+/**
+ * Reads a request body of at most `max` bytes, taking its bytes from the budget first (the declared
+ * length up front, or chunk by chunk when there is none). `taken` reports what to give back.
+ */
+function readBody(
+  req: IncomingMessage,
+  max: number,
+  take: (bytes: number) => boolean,
+  taken: (bytes: number) => void,
+): Promise<BodyResult> {
   return new Promise((resolve, reject) => {
-    const declared = Number(req.headers["content-length"] ?? 0);
-    if (declared > max) {
+    const header = req.headers["content-length"];
+    const declared = header === undefined ? undefined : Number(header);
+    if (declared !== undefined && (!Number.isSafeInteger(declared) || declared > max)) {
       resolve("too_large");
       return;
     }
+    if (declared !== undefined) {
+      if (!take(declared)) {
+        resolve("busy");
+        return;
+      }
+      taken(declared);
+    }
     const chunks: Buffer[] = [];
     let size = 0;
+    let done = false;
+    const finish = (r: BodyResult) => {
+      if (done) return;
+      done = true;
+      if (typeof r === "string") req.pause();
+      resolve(r);
+    };
     req.on("data", (chunk: Buffer) => {
+      if (done) return;
       size += chunk.length;
-      if (size > max) {
-        req.pause();
-        resolve("too_large");
-        return;
+      if (size > max) return finish("too_large");
+      if (declared === undefined) {
+        if (!take(chunk.length)) return finish("busy");
+        taken(chunk.length);
       }
       chunks.push(chunk);
     });
-    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("end", () => finish(Buffer.concat(chunks)));
     req.on("error", reject);
   });
 }
@@ -180,37 +206,11 @@ export function createModelGateway(options: GatewayOptions): Server {
     }
     const identity = { teamId: claims.team_id, userId: claims.user_id, sandboxId: claims.sub };
 
-    // 3. Liveness and the member's virtual key.
-    let resolution = await options.principals.resolve(
-      identity.teamId,
-      identity.userId,
-      identity.sandboxId,
-    );
-    if (!resolution.ok) {
-      const [status, code, message] = REASONS[resolution.reason];
-      if (status === 401) {
-        logger.info({ ...identity, reason: resolution.reason }, "refused a revoked session token");
-      }
-      sendError(res, kind, status, code, message, status === 503 ? 5 : undefined);
+    // 3. Per-sandbox request rate and concurrent calls, before anything touches the database.
+    if (!options.rate.allow(identity.sandboxId)) {
+      sendError(res, kind, 429, "rate_limited", "Too many model requests; slow down.", 1);
       return;
     }
-
-    // 4. Run attribution (optional header; when sent, it must be this sandbox's run).
-    const runHeader = req.headers["x-kobe-run-id"];
-    let runId: string | undefined;
-    if (runHeader !== undefined) {
-      if (typeof runHeader !== "string" || !UUID.test(runHeader)) {
-        sendError(res, kind, 400, "invalid_run_id", "x-kobe-run-id must be a run id.");
-        return;
-      }
-      runId = runHeader.toLowerCase();
-      if (!(await options.isRunLeased(identity.teamId, runId, identity.sandboxId))) {
-        sendError(res, kind, 403, "run_not_leased", "That run does not belong to this sandbox.");
-        return;
-      }
-    }
-
-    // 5. Limits, then the body (bounded), then the gate.
     const release = options.limiter.acquire(identity.sandboxId);
     if (!release) {
       sendError(res, kind, 429, "too_many_concurrent_calls", "Too many concurrent model calls.", 1);
@@ -219,26 +219,98 @@ export function createModelGateway(options: GatewayOptions): Server {
     const started = Date.now();
     let bytesIn = 0;
     let bytesOut = 0;
+    let bytesHeld = 0;
     let status = 0;
     let errorType: string | undefined;
     let aborted = false;
     let call: CallContext | undefined;
     try {
-      const body = await readBody(req, settings.maxBodyBytes);
-      if (body === "too_large") {
+      // 4. Liveness, the member's virtual key and the team's enabled models.
+      let resolution = await options.principals.resolve(
+        identity.teamId,
+        identity.userId,
+        identity.sandboxId,
+      );
+      if (!resolution.ok) {
+        const [code, errCode, message] = REASONS[resolution.reason];
+        status = code;
+        if (code === 401) {
+          logger.info(
+            { ...identity, reason: resolution.reason },
+            "refused a revoked session token",
+          );
+        }
+        sendError(res, kind, code, errCode, message, code === 503 ? 5 : undefined);
+        return;
+      }
+
+      // 5. Run attribution (optional header; when sent, an active run leased to this sandbox).
+      const runHeader = req.headers["x-kobe-run-id"];
+      let runId: string | undefined;
+      if (runHeader !== undefined) {
+        if (typeof runHeader !== "string" || !UUID.test(runHeader)) {
+          status = 400;
+          sendError(res, kind, 400, "invalid_run_id", "x-kobe-run-id must be a run id.");
+          return;
+        }
+        runId = runHeader.toLowerCase();
+        if (!(await options.isRunLeased(identity.teamId, runId, identity.sandboxId))) {
+          status = 403;
+          sendError(res, kind, 403, "run_not_leased", "That run is not active on this sandbox.");
+          return;
+        }
+      }
+
+      // 6. The body (bounded, within the byte budget), its model, the team's enablement.
+      const body = await readBody(
+        req,
+        settings.maxBodyBytes,
+        (n) => options.bytes.tryTake(identity.sandboxId, n),
+        (n) => {
+          bytesHeld += n;
+        },
+      );
+      if (body === "too_large" || body === "busy") {
         res.setHeader("connection", "close");
-        sendError(res, kind, 413, "request_too_large", "The request body is too large.");
-        status = 413;
+        status = body === "too_large" ? 413 : 429;
+        if (body === "too_large") {
+          sendError(res, kind, 413, "request_too_large", "The request body is too large.");
+        } else {
+          sendError(res, kind, 429, "too_many_bytes_in_flight", "The gateway is busy; retry.", 1);
+        }
         return;
       }
       bytesIn = body.length;
-      call = {
-        ...identity,
-        runId,
-        route: route.kind,
-        path: route.path,
-        model: requestedModel(route, body),
-      };
+      let model = route.pathModel;
+      if (req.method === "POST" && !route.pathModel) {
+        const scanned = topLevelModel(body);
+        if (!scanned.ok) {
+          status = 400;
+          sendError(
+            res,
+            kind,
+            400,
+            "invalid_request",
+            "The body must be a JSON object with one string model.",
+          );
+          return;
+        }
+        model = scanned.model;
+      }
+      call = { ...identity, runId, route: route.kind, path: route.path, model };
+      // Every model call names a model the team enabled (checked here too, so a disable holds even
+      // when a push to Bifrost failed). Listing models (GET) names none.
+      if (req.method === "POST" && (!model || !resolution.enabledModels.has(model))) {
+        status = 403;
+        sendError(
+          res,
+          kind,
+          403,
+          "model_not_enabled",
+          "That model is not enabled for this team (use a model from the team's catalog).",
+        );
+        return;
+      }
       const decision = await options.gate.admit(call);
       if (!decision.ok) {
         status = decision.status;
@@ -286,6 +358,7 @@ export function createModelGateway(options: GatewayOptions): Server {
       }
     } finally {
       release();
+      options.bytes.give(identity.sandboxId, bytesHeld);
       if (call) {
         options.sink.record({
           ...call,

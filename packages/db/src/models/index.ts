@@ -1,5 +1,6 @@
-export { MIN_SECRET_LENGTH, SecretBox, SecretBoxError } from "./secret-box.js";
+export { MIN_SECRET_LENGTH, SecretBox, SecretBoxError, deriveKey } from "./secret-box.js";
 export {
+  KEY_FINGERPRINT_PURPOSE,
   MODELS_CHANNEL,
   MODELS_CONFIG_CHANGED,
   MODELS_ENSURE_PREFIX,
@@ -9,7 +10,7 @@ export {
   VIRTUAL_KEY_PURPOSE,
   bumpModelsConfig,
   gatewayProviderName,
-  isRunLeasedTo,
+  isActiveRunLeasedTo,
   loadGatewayPrincipal,
   notifyModels,
   providerKeyContext,

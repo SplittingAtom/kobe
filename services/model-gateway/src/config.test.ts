@@ -13,7 +13,11 @@ describe("loadConfig", () => {
     expect(loadConfig(env)).toMatchObject({
       port: 8080,
       bifrostUrl: "http://kobe-bifrost:8080",
-      maxBodyBytes: 32 * 1024 * 1024,
+      maxBodyBytes: 8 * 1024 * 1024,
+      inflightBytes: 128 * 1024 * 1024,
+      inflightBytesPerSandbox: 32 * 1024 * 1024,
+      rateBurst: 60,
+      ratePerSecond: 10,
       maxCallsPerSandbox: 16,
       cacheTtlMs: 5_000,
     });
@@ -27,5 +31,8 @@ describe("loadConfig", () => {
     expect(() => loadConfig(weak)).toThrow(/at least 32/);
     expect(() => loadConfig(weak)).not.toThrow(/weak-secret-value/);
     expect(() => loadConfig({ ...env, KOBE_BIFROST_URL: "ftp://x" })).toThrow(/KOBE_BIFROST_URL/);
+    expect(() =>
+      loadConfig({ ...env, KOBE_MODEL_GATEWAY_INFLIGHT_BYTES_PER_SANDBOX: "1048576" }),
+    ).toThrow(/max body/);
   });
 });

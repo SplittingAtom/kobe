@@ -7,10 +7,13 @@ import {
   createDb,
   eq,
   and,
-  isRunLeasedTo,
+  isActiveRunLeasedTo,
   loadGatewayPrincipal,
+  modelCatalog,
   modelGatewayKeys,
+  modelProviders,
   sandboxes,
+  teamModels,
   teamMembers,
   teams,
   users,
@@ -22,7 +25,7 @@ import { signSessionToken, verifySessionToken } from "@kobe/session-token";
 import pino from "pino";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createModelGateway } from "./gateway.js";
-import { CallLimiter } from "./limits.js";
+import { ByteBudget, CallLimiter, RequestRate } from "./limits.js";
 import { PrincipalCache } from "./principals.js";
 import { OPEN_GATE } from "./seams.js";
 
@@ -77,9 +80,22 @@ beforeAll(async () => {
   await owner.close();
   app = createDb(inject("appUrl"));
   await app.db.insert(users).values({ id: user, name: "G", email: `${user}@g.test` });
+  await app.db
+    .insert(modelProviders)
+    .values({ id: "openai", kind: "openai", name: "OpenAI", apiKeyEnc: "v2.x", createdBy: user })
+    .onConflictDoNothing();
+  await app.db.insert(modelCatalog).values({
+    alias: `fast-${team.slice(0, 8)}`,
+    providerId: "openai",
+    model: "gpt-x",
+    createdBy: user,
+  });
   await withTeam(app.db, team, async (tx) => {
     await tx.insert(teamMembers).values({ teamId: team, userId: user, role: "member" });
     await tx.insert(sandboxes).values({ teamId: team, userId: user, sandboxId, state: "running" });
+    await tx
+      .insert(teamModels)
+      .values({ teamId: team, alias: `fast-${team.slice(0, 8)}`, enabledBy: user });
     await tx.insert(modelGatewayKeys).values({
       teamId: team,
       userId: user,
@@ -104,9 +120,11 @@ beforeAll(async () => {
       box,
       { ttlMs: 0, keyWaitMs: 100, keyPollMs: 20 },
     ),
-    isRunLeased: (t, r, s) => isRunLeasedTo(db, t, r, s),
+    isRunLeased: (t, r, s) => isActiveRunLeasedTo(db, t, r, s),
     bifrostUrl: `http://127.0.0.1:${(bifrost.address() as AddressInfo).port}`,
     limiter: new CallLimiter({ perSandbox: 4, total: 16 }),
+    bytes: new ByteBudget({ perSandbox: 65_536, total: 65_536 }),
+    rate: new RequestRate({ burst: 100, perSecond: 100 }),
     gate: OPEN_GATE,
     sink: { record: () => undefined },
     onBifrostForgotKey: () => undefined,
@@ -130,6 +148,18 @@ describe("model gateway with its Postgres principal store", () => {
     expect(seenVks).toEqual([VK]);
   });
 
+  it("a model the team disabled is refused by the shim itself (even if Bifrost lags)", async () => {
+    await withTeam(app.db, team, (tx) => tx.delete(teamModels).where(eq(teamModels.teamId, team)));
+    expect(await chat(token())).toBe(403);
+    await withTeam(app.db, team, (tx) =>
+      tx
+        .insert(teamModels)
+        .values({ teamId: team, alias: `fast-${team.slice(0, 8)}`, enabledBy: user }),
+    );
+    expect(await chat(token())).toBe(200);
+    expect(seenVks).toEqual([VK, VK]);
+  });
+
   it("a token naming another team (where the user is no member) is refused", async () => {
     expect(await chat(token(other))).toBe(401);
   });
@@ -151,6 +181,6 @@ describe("model gateway with its Postgres principal store", () => {
       tx.delete(teamMembers).where(and(eq(teamMembers.teamId, team), eq(teamMembers.userId, user))),
     );
     expect(await chat(t)).toBe(401);
-    expect(seenVks).toHaveLength(2);
+    expect(seenVks).toHaveLength(3);
   });
 });

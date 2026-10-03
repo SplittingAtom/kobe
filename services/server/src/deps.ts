@@ -62,8 +62,14 @@ export interface ServerDepsOptions {
   readonly sandboxWire?: Partial<Omit<SandboxWireOptions, "db" | "databaseUrl">>;
   /** Run orchestrator seams and tuning (KOBE-30): agent resolution, budgets, timings. */
   readonly runs?: Partial<Omit<RunOrchestratorOptions, "db" | "router">>;
-  /** Model gateway (KOBE-40): the secret sealing provider API keys; unset = not configured. */
-  readonly models?: { readonly providerKeySecret: string };
+  /**
+   * Model gateway (KOBE-40): the secrets sealing provider API keys (current first) and the
+   * operator's unsafe-endpoints switch; unset = not configured.
+   */
+  readonly models?: {
+    readonly providerKeySecrets: readonly string[];
+    readonly allowUnsafeEndpoints?: boolean;
+  };
   /**
    * The install's approval HMAC key (KOBE-37, config `KOBE_APPROVAL_KEY`); without it, tool calls
    * that need approval are denied.
@@ -123,7 +129,8 @@ export interface ServerDeps {
    */
   readonly runs: ServerRunOrchestrator;
   /** Model gateway admin (KOBE-40): seals provider API keys; undefined when not configured. */
-  readonly models: { readonly providerKeys: SecretBox } | undefined;
+  readonly models:
+    { readonly providerKeys: SecretBox; readonly allowUnsafeEndpoints: boolean } | undefined;
   /**
    * Approvals (KOBE-37, D29): the wire's broker, `POST /v1/approvals/{id}`, the TTL sweep, and the
    * signed-approval verifier the MCP proxy (KOBE-58) calls.
@@ -217,7 +224,10 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   return {
     database,
     models: options.models
-      ? { providerKeys: new SecretBox(options.models.providerKeySecret, PROVIDER_KEY_PURPOSE) }
+      ? {
+          providerKeys: new SecretBox(options.models.providerKeySecrets, PROVIDER_KEY_PURPOSE),
+          allowUnsafeEndpoints: options.models.allowUnsafeEndpoints ?? false,
+        }
       : undefined,
     auth,
     publicUrl: new URL(options.publicUrl).origin,

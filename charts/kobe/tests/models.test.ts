@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseAllDocuments } from "yaml";
@@ -70,6 +71,21 @@ describe("Bifrost", () => {
     expect(() => helm({ "bifrost.replicas": "2" })).toThrow(/maximum|replicas/);
   });
 
+  it("pins the same image Dependabot tracks (images/bifrost/Dockerfile)", () => {
+    const tracked = readFileSync(
+      fileURLToPath(new URL("../../../images/bifrost/Dockerfile", import.meta.url)),
+      "utf8",
+    );
+    const from = /^FROM (\S+)$/m.exec(tracked)?.[1];
+    expect(spec?.containers[0].image).toBe(from);
+    const defaults = readFileSync(
+      fileURLToPath(new URL("../templates/_models.tpl", import.meta.url)),
+      "utf8",
+    );
+    const [, repo, tag, digest] = /^(.+):([^:@]+)@(sha256:[0-9a-f]{64})$/.exec(from ?? "") ?? [];
+    expect(defaults).toContain(`"repository" "${repo}" "tag" "${tag}" "digest" "${digest}"`);
+  });
+
   it("keeps its store on a volume and reads a secret-free config.json", () => {
     expect(find(ms, "PersistentVolumeClaim", "kobe-bifrost")).toBeDefined();
     const config = JSON.parse(find(ms, "ConfigMap", "kobe-bifrost")?.data["config.json"]);
@@ -122,8 +138,13 @@ describe("who holds which secret", () => {
     expect(secretKeys(vars).filter((k) => k.startsWith("kobe-model-keys/"))).toEqual([
       "kobe-model-keys/bifrost-admin-password",
       "kobe-model-keys/provider-keys",
+      "kobe-model-keys/provider-keys-previous",
       "kobe-model-keys/virtual-keys",
+      "kobe-model-keys/virtual-keys-previous",
     ]);
+    const previous = vars.filter((v) => v.name.endsWith("_PREVIOUS"));
+    expect(previous.every((v) => v.valueFrom.secretKeyRef.optional === true)).toBe(true);
+    expect(vars).toContainEqual({ name: "KOBE_MODELS_ALLOW_UNSAFE_ENDPOINTS", value: "false" });
     expect(loadModelsConfig(resolved(vars))).toMatchObject({
       bifrostUrl: "http://kobe-bifrost:8080",
       adminUsername: "kobe",
@@ -139,15 +160,46 @@ describe("who holds which secret", () => {
     expect(secretKeys(vars)).toEqual([
       "kobe-db/app-url",
       "kobe-model-keys/virtual-keys",
+      "kobe-model-keys/virtual-keys-previous",
       "kobe-sandbox-session-keys/model-gateway",
     ]);
-    expect(loadShimConfig(resolved(vars))).toMatchObject({
+    const shimEnv = resolved(vars.filter((v) => !v.name.endsWith("_PREVIOUS")));
+    expect(loadShimConfig(shimEnv)).toMatchObject({
       bifrostUrl: "http://kobe-bifrost:8080",
       maxCallsPerSandbox: 16,
+      maxBodyBytes: 8 * 1024 * 1024,
+      inflightBytes: 128 * 1024 * 1024,
+      rateBurst: 60,
       cacheTtlMs: 5_000,
     });
+    expect(find(ms, "Deployment", "kobe-model-gateway")?.spec.replicas).toBe(2);
     const init = pod(ms, "kobe-model-gateway")?.initContainers as { name: string }[];
     expect(init.map((c) => c.name)).toEqual(["wait-for-migrations"]);
+  });
+});
+
+describe("shim sizing", () => {
+  it("refuses a memory limit below the in-flight byte budget + 256Mi (no OOM by uploads)", () => {
+    expect(() => helm({ "modelGateway.resources.limits.memory": "256Mi" })).toThrow(
+      /must be at least modelGateway.limits.inflightBytes/,
+    );
+    expect(() =>
+      helm({
+        "modelGateway.resources.limits.memory": "1Gi",
+        "modelGateway.limits.inflightBytes": "536870912",
+      }),
+    ).not.toThrow();
+  });
+
+  it("the operator switch for unsafe endpoints reaches the server only", () => {
+    const ms = render({ "bifrost.allowUnsafeProviderEndpoints": "true" });
+    expect(env(ms, "kobe-server")).toContainEqual({
+      name: "KOBE_MODELS_ALLOW_UNSAFE_ENDPOINTS",
+      value: "true",
+    });
+    expect(env(ms, "kobe-model-gateway").map((v) => v.name)).not.toContain(
+      "KOBE_MODELS_ALLOW_UNSAFE_ENDPOINTS",
+    );
   });
 });
 

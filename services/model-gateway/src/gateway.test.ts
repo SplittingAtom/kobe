@@ -7,7 +7,7 @@ import { signSessionToken, verifySessionToken } from "@kobe/session-token";
 import pino from "pino";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createModelGateway } from "./gateway.js";
-import { CallLimiter } from "./limits.js";
+import { ByteBudget, CallLimiter, RequestRate } from "./limits.js";
 import { PrincipalCache } from "./principals.js";
 import { OPEN_GATE, type CallGate, type CallRecord } from "./seams.js";
 
@@ -106,7 +106,7 @@ let leased = new Set<string>();
 let records: CallRecord[] = [];
 let forgot = 0;
 let gate: CallGate = OPEN_GATE;
-let shim: Server;
+let shim: Server = createServer();
 let base = "";
 const cacheTtl = 0;
 /** After the first load, the store returns this (the sync stored a new key meanwhile). */
@@ -123,22 +123,27 @@ function setVk(value: string | undefined) {
   };
 }
 
-beforeEach(async () => {
-  hits.length = 0;
-  records = [];
-  forgot = 0;
-  keyRequests = 0;
-  leased = new Set();
-  gate = OPEN_GATE;
-  knownVks.clear();
-  principal = { member: true, sandbox: "live", virtualKey: undefined };
-  afterFirstLoad = undefined;
-  loads = 0;
-  setVk(`sk-bf-${randomUUID()}`);
-  knownVks.add(vkValue);
+const ENABLED = ["openai/m", "x", "blocked", "gemini/gemini-2.5-pro", "gemini/g"];
+let leaseChecks = 0;
+let loadDelayMs = 0;
+
+interface ShimOptions {
+  readonly perSandboxCalls?: number;
+  readonly bytes?: { perSandbox: number; total: number };
+  readonly rate?: { burst: number; perSecond: number };
+}
+
+async function start(over: ShimOptions = {}): Promise<void> {
+  if (shim.listening) {
+    shim.closeAllConnections();
+    await new Promise<void>((r) => shim.close(() => r()));
+  }
   const cache = new PrincipalCache(
     {
-      load: async () => (loads++ > 0 && afterFirstLoad ? afterFirstLoad : principal),
+      load: async () => {
+        if (loadDelayMs) await new Promise((r) => setTimeout(r, loadDelayMs));
+        return loads++ > 0 && afterFirstLoad ? afterFirstLoad : principal;
+      },
       requestKey: async () => {
         keyRequests++;
       },
@@ -149,9 +154,14 @@ beforeEach(async () => {
   shim = createModelGateway({
     verify: (t) => verifySessionToken(t, "kobe.model-gateway", KEY),
     principals: cache,
-    isRunLeased: async (_t, runId) => leased.has(runId),
+    isRunLeased: async (_t, runId) => {
+      leaseChecks++;
+      return leased.has(runId);
+    },
     bifrostUrl,
-    limiter: new CallLimiter({ perSandbox: 1, total: 10 }),
+    limiter: new CallLimiter({ perSandbox: over.perSandboxCalls ?? 1, total: 10 }),
+    bytes: new ByteBudget(over.bytes ?? { perSandbox: 8192, total: 16384 }),
+    rate: new RequestRate(over.rate ?? { burst: 1000, perSecond: 1000 }),
     gate: { admit: (c) => gate.admit(c) },
     sink: { record: (r) => records.push(r) },
     onBifrostForgotKey: () => {
@@ -163,6 +173,24 @@ beforeEach(async () => {
   });
   await new Promise<void>((r) => shim.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${(shim.address() as AddressInfo).port}`;
+}
+
+beforeEach(async () => {
+  hits.length = 0;
+  records = [];
+  forgot = 0;
+  keyRequests = 0;
+  leaseChecks = 0;
+  loadDelayMs = 0;
+  leased = new Set();
+  gate = OPEN_GATE;
+  knownVks.clear();
+  principal = { member: true, sandbox: "live", virtualKey: undefined, enabledModels: ENABLED };
+  afterFirstLoad = undefined;
+  loads = 0;
+  setVk(`sk-bf-${randomUUID()}`);
+  knownVks.add(vkValue);
+  await start();
 });
 afterEach(async () => {
   shim.closeAllConnections();
@@ -411,6 +439,95 @@ describe("calls", () => {
       (await call("/v1/chat/completions", { headers: { ...bearer(), "x-kobe-run-id": "nope" } }))
         .status,
     ).toBe(400);
+  });
+});
+
+describe("review hardening (KOBE-40)", () => {
+  it("refuses a model the team has not enabled before Bifrost sees it", async () => {
+    const r = await call("/v1/chat/completions", {
+      headers: bearer(),
+      body: { model: "openai/big" },
+    });
+    expect(r.status).toBe(403);
+    expect(JSON.parse(r.text).error.code).toBe("model_not_enabled");
+    const gem = await call("/genai/v1beta/models/gemini/other:generateContent", {
+      headers: bearer(),
+      body: { contents: [] },
+    });
+    expect(gem.status).toBe(403);
+    expect(hits).toEqual([]);
+  });
+
+  it("reads the top-level model only: a decoy earlier in the body does not count", async () => {
+    const decoy = {
+      messages: [{ role: "user", content: '"model": "openai/m"' }],
+      metadata: { model: "openai/m" },
+      model: "openai/not-enabled",
+    };
+    expect((await call("/v1/chat/completions", { headers: bearer(), body: decoy })).status).toBe(
+      403,
+    );
+    const dup = await fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: { ...bearer(), "content-type": "application/json" },
+      body: '{"model":"openai/m","model":"openai/big"}',
+    });
+    expect(dup.status).toBe(400);
+    expect(hits).toEqual([]);
+  });
+
+  it("refuses a body when the sandbox's in-flight bytes are used up (memory bound)", async () => {
+    await start({ perSandboxCalls: 4, bytes: { perSandbox: 6000, total: 16384 } });
+    // A slow upload holds 4000 bytes of the sandbox's 6000.
+    const slow = request(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: { ...bearer(), "content-type": "application/json", "content-length": "4000" },
+    });
+    slow.on("error", () => undefined);
+    slow.write('{"model":"openai/m","pad":"');
+    await new Promise((r) => setTimeout(r, 100));
+    const second = await call("/v1/chat/completions", {
+      headers: bearer(),
+      body: { model: "openai/m", pad: "y".repeat(3000) },
+    });
+    expect(second.status).toBe(429);
+    expect(JSON.parse(second.text).error.code).toBe("too_many_bytes_in_flight");
+    slow.destroy();
+    await new Promise((r) => setTimeout(r, 100));
+    // Released when the slow request ended: the same body fits again.
+    expect(
+      (
+        await call("/v1/chat/completions", {
+          headers: bearer(),
+          body: { model: "openai/m", pad: "y".repeat(3000) },
+        })
+      ).status,
+    ).toBe(200);
+  });
+
+  it("rate-limits a sandbox before any database lookup (random run ids cost nothing)", async () => {
+    await start({ rate: { burst: 3, perSecond: 1 } });
+    const statuses: number[] = [];
+    for (let i = 0; i < 10; i++) {
+      const r = await call("/v1/chat/completions", {
+        headers: { ...bearer(), "x-kobe-run-id": randomUUID() },
+      });
+      statuses.push(r.status);
+    }
+    expect(statuses.slice(0, 3)).toEqual([403, 403, 403]);
+    expect(statuses.slice(3).every((s) => s === 429)).toBe(true);
+    expect(leaseChecks).toBe(3);
+    expect(loads).toBe(3);
+  });
+
+  it("loads a principal once for concurrent calls (single flight)", async () => {
+    await start({ perSandboxCalls: 10 });
+    loadDelayMs = 50;
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () => call("/v1/chat/completions", { headers: bearer() })),
+    );
+    expect(results.map((r) => r.status)).toEqual([200, 200, 200, 200, 200]);
+    expect(loads).toBe(1);
   });
 });
 

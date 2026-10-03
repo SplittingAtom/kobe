@@ -18,7 +18,13 @@ import { createSandboxApp } from "./routes/sandbox.js";
 import { createSandboxRuntime } from "./sandbox/runtime.js";
 import { providerLiveness, sandboxWireVerifier } from "./sandbox-wire/provider-auth.js";
 import { createDeferredWaker, createSandboxLifecycle } from "./sandbox-lifecycle/index.js";
-import { PROVIDER_KEY_PURPOSE, SecretBox, VIRTUAL_KEY_PURPOSE } from "@kobe/db";
+import {
+  KEY_FINGERPRINT_PURPOSE,
+  PROVIDER_KEY_PURPOSE,
+  SecretBox,
+  VIRTUAL_KEY_PURPOSE,
+  deriveKey,
+} from "@kobe/db";
 
 /** Open streams (SSE) get this long to finish before being cut; stays under k8s' 30 s grace period. */
 const DRAIN_TIMEOUT_MS = 10_000;
@@ -38,7 +44,14 @@ if (config.auth && config.smtp) {
     mailer: createSmtpMailer(config.smtp),
     sandboxWire: { waker },
     agents: { maxVersions: config.agentMaxVersions },
-    ...(modelsConfig ? { models: { providerKeySecret: modelsConfig.providerKeySecret } } : {}),
+    ...(modelsConfig
+      ? {
+          models: {
+            providerKeySecrets: modelsConfig.providerKeySecrets,
+            allowUnsafeEndpoints: modelsConfig.allowUnsafeEndpoints,
+          },
+        }
+      : {}),
   });
   if (config.smtp.security === "none") {
     logger.warn(
@@ -109,9 +122,13 @@ const modelSync =
           username: modelsConfig.adminUsername,
           password: modelsConfig.adminPassword,
         }),
-        providerKeys: new SecretBox(modelsConfig.providerKeySecret, PROVIDER_KEY_PURPOSE),
-        virtualKeys: new SecretBox(modelsConfig.virtualKeySecret, VIRTUAL_KEY_PURPOSE),
-        fingerprintSecret: modelsConfig.providerKeySecret,
+        providerKeys: new SecretBox(modelsConfig.providerKeySecrets, PROVIDER_KEY_PURPOSE),
+        virtualKeys: new SecretBox(modelsConfig.virtualKeySecrets, VIRTUAL_KEY_PURPOSE),
+        // Own HKDF purpose: the fingerprint secret never equals a sealing key.
+        fingerprintSecret: deriveKey(
+          modelsConfig.providerKeySecrets[0] ?? "",
+          KEY_FINGERPRINT_PURPOSE,
+        ).toString("hex"),
         intervalMs: modelsConfig.syncIntervalMs,
         logger,
       })

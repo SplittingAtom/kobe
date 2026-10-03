@@ -4,14 +4,15 @@ import {
   SecretBox,
   VIRTUAL_KEY_PURPOSE,
   createDb,
-  isRunLeasedTo,
+  isActiveRunLeasedTo,
   loadGatewayPrincipal,
   notifyModels,
 } from "@kobe/db";
 import { verifySessionToken } from "@kobe/session-token";
 import { loadConfig } from "./config.js";
 import { createModelGateway } from "./gateway.js";
-import { CallLimiter } from "./limits.js";
+import { TtlCache } from "./cache.js";
+import { ByteBudget, CallLimiter, RequestRate } from "./limits.js";
 import { ModelsListener } from "./listener.js";
 import { logger } from "./logger.js";
 import { PrincipalCache } from "./principals.js";
@@ -41,14 +42,25 @@ const listener = new ModelsListener({
 });
 listener.start();
 
+/** Run lease answers, positive and negative, cached like principals (single-flight). */
+const leases = new TtlCache<boolean>({ ttlMs: Math.max(config.cacheTtlMs, 1_000) });
+
 let lastResync = 0;
 let draining = false;
 const server = createModelGateway({
   verify: (token) => verifySessionToken(token, "kobe.model-gateway", config.sessionKey),
   principals,
-  isRunLeased: (teamId, runId, sandboxId) => isRunLeasedTo(db, teamId, runId, sandboxId),
+  isRunLeased: (teamId, runId, sandboxId) =>
+    leases.get(`${teamId}:${runId}:${sandboxId}`, () =>
+      isActiveRunLeasedTo(db, teamId, runId, sandboxId),
+    ),
   bifrostUrl: config.bifrostUrl,
   limiter: new CallLimiter({ perSandbox: config.maxCallsPerSandbox, total: config.maxCalls }),
+  bytes: new ByteBudget({
+    perSandbox: config.inflightBytesPerSandbox,
+    total: config.inflightBytes,
+  }),
+  rate: new RequestRate({ burst: config.rateBurst, perSecond: config.ratePerSecond }),
   gate: OPEN_GATE,
   sink: logSink(logger),
   onBifrostForgotKey: () => {

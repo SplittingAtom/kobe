@@ -36,9 +36,25 @@ const configSchema = z.object({
   KOBE_MODEL_GATEWAY_MAX_BODY_BYTES: int(
     "KOBE_MODEL_GATEWAY_MAX_BODY_BYTES",
     1024,
-    256 * 1024 * 1024,
+    64 * 1024 * 1024,
+    8 * 1024 * 1024,
+  ),
+  /** Request bytes held in memory at once, in total and per sandbox (memory bound). */
+  KOBE_MODEL_GATEWAY_INFLIGHT_BYTES: int(
+    "KOBE_MODEL_GATEWAY_INFLIGHT_BYTES",
+    1024,
+    4 * 1024 * 1024 * 1024,
+    128 * 1024 * 1024,
+  ),
+  KOBE_MODEL_GATEWAY_INFLIGHT_BYTES_PER_SANDBOX: int(
+    "KOBE_MODEL_GATEWAY_INFLIGHT_BYTES_PER_SANDBOX",
+    1024,
+    4 * 1024 * 1024 * 1024,
     32 * 1024 * 1024,
   ),
+  /** Requests per sandbox: burst, then per second. */
+  KOBE_MODEL_GATEWAY_RATE_BURST: int("KOBE_MODEL_GATEWAY_RATE_BURST", 1, 10_000, 60),
+  KOBE_MODEL_GATEWAY_RATE_PER_SECOND: int("KOBE_MODEL_GATEWAY_RATE_PER_SECOND", 1, 10_000, 10),
   /** Concurrent model calls per sandbox and per shim replica. */
   KOBE_MODEL_GATEWAY_MAX_CALLS_PER_SANDBOX: int(
     "KOBE_MODEL_GATEWAY_MAX_CALLS_PER_SANDBOX",
@@ -65,6 +81,10 @@ export interface Config {
   readonly virtualKeySecret: string;
   readonly bifrostUrl: string;
   readonly maxBodyBytes: number;
+  readonly inflightBytes: number;
+  readonly inflightBytesPerSandbox: number;
+  readonly rateBurst: number;
+  readonly ratePerSecond: number;
   readonly maxCallsPerSandbox: number;
   readonly maxCalls: number;
   readonly idleTimeoutMs: number;
@@ -78,6 +98,14 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     throw new Error(`Invalid configuration: ${issues}`);
   }
   const c = parsed.data;
+  if (
+    c.KOBE_MODEL_GATEWAY_INFLIGHT_BYTES_PER_SANDBOX < c.KOBE_MODEL_GATEWAY_MAX_BODY_BYTES ||
+    c.KOBE_MODEL_GATEWAY_INFLIGHT_BYTES < c.KOBE_MODEL_GATEWAY_INFLIGHT_BYTES_PER_SANDBOX
+  ) {
+    throw new Error(
+      "Invalid configuration: need max body ≤ in-flight bytes per sandbox ≤ in-flight bytes",
+    );
+  }
   return {
     port: c.PORT,
     databaseUrl: c.KOBE_DATABASE_URL,
@@ -85,6 +113,10 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     virtualKeySecret: c.KOBE_MODELS_VIRTUAL_KEY_SECRET,
     bifrostUrl: c.KOBE_BIFROST_URL.replace(/\/+$/, ""),
     maxBodyBytes: c.KOBE_MODEL_GATEWAY_MAX_BODY_BYTES,
+    inflightBytes: c.KOBE_MODEL_GATEWAY_INFLIGHT_BYTES,
+    inflightBytesPerSandbox: c.KOBE_MODEL_GATEWAY_INFLIGHT_BYTES_PER_SANDBOX,
+    rateBurst: c.KOBE_MODEL_GATEWAY_RATE_BURST,
+    ratePerSecond: c.KOBE_MODEL_GATEWAY_RATE_PER_SECOND,
     maxCallsPerSandbox: c.KOBE_MODEL_GATEWAY_MAX_CALLS_PER_SANDBOX,
     maxCalls: c.KOBE_MODEL_GATEWAY_MAX_CALLS,
     idleTimeoutMs: c.KOBE_MODEL_GATEWAY_IDLE_TIMEOUT_MS,

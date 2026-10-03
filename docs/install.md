@@ -176,6 +176,11 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
   Bifrost holds one customer (the install), one team per Kobe team and one virtual key per member
   of each team, allowed exactly the team's enabled models. Kobe owns this Bifrost: anything else
   configured in it (by hand, through its UI) is removed by the next sync.
+- **Provider endpoints.** OpenAI, Anthropic and Gemini providers always use their vendor's
+  endpoint; other providers' keys go only over `https://`; changing a keyed provider's endpoint
+  requires entering the key again (a stored key is never sent somewhere new), and the audit log
+  records the endpoint host. `bifrost.allowUnsafeProviderEndpoints` (Helm only, never the admin
+  API) lifts the first two rules for test installs (the e2e suite's fake provider).
 - **Sandboxes call the shim** (`model-gateway.kobe.internal`) with their short-lived
   `kobe.model-gateway` session token as the API key (`Authorization: Bearer`, `x-api-key`,
   `x-goog-api-key` or `?key=`). The shim verifies it, checks that the user is still an active member
@@ -184,7 +189,11 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
   `/v1/responses`, `/v1/models`, `/anthropic/v1/messages[/count_tokens]`,
   `/genai/v1beta/models/<provider>/<model>:generateContent|streamGenerateContent|countTokens`) to
   Bifrost with the member's virtual key. Models are named `<gateway provider>/<model>` (the catalog
-  API returns `gateway_model`).
+  API returns `gateway_model`); the shim refuses a model the team has not enabled itself, so a
+  disable holds even while a push to Bifrost is failing. Limits per replica
+  (`modelGateway.limits`): bodies up to 8 MiB, request bytes in memory 128 MiB in total and
+  32 MiB per sandbox, 16 concurrent calls and 60 requests (then 10/s) per sandbox; beyond them 429. The shim's memory limit must cover `inflightBytes` + 256 Mi (checked at render time). Two
+  replicas by default.
 - **Network:** Bifrost admits only the shim and the server; its own egress is DNS and public
   addresses on `bifrost.networkPolicy.allowedPorts` (443). The shim admits only team namespaces and
   reaches only DNS, Bifrost and Postgres.
@@ -195,9 +204,15 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
   counters) in its own SQLite store on `bifrost.persistence` (1 Gi PVC; `Recreate` updates). Without
   persistence a restart loses them; the sync rebuilds everything within seconds (new virtual keys)
   but budget counters start over.
+- **Server → Bifrost is plain HTTP inside the cluster** (Bifrost's admin password and provider
+  keys cross the pod network unencrypted); NetworkPolicies limit who can connect, not who can
+  observe node traffic. Use a CNI with encryption (e.g. WireGuard) if that matters to you.
 - **Secrets:** `bifrost.keysSecret` (or a generated, kept `<release>-model-keys`) holds Bifrost's
   admin password and encryption key, and Kobe's two sealing secrets (`provider-keys`: server only;
   `virtual-keys`: server and shim). Losing `provider-keys` means re-entering provider keys.
+  **Rotating** `provider-keys` or `virtual-keys`: copy the old value to `provider-keys-previous` /
+  `virtual-keys-previous`, put a new one in place, restart the server and shim; the sync re-seals
+  stored values with the new secret within a minute; then remove the `-previous` key.
 - **Bifrost logs no prompts** (`enable_logging: false`); usage is recorded by Kobe from the agent
   (`run_usage`, KOBE-43).
 

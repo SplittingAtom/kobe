@@ -53,13 +53,13 @@ sandbox ──(kobe.model-gateway token)──▶ model-gateway shim ──(x-bf
   inference-path allowlist (else 404) → principal: active member, sandbox not
   destroyed/hibernated/replaced, member's VK (cached `cacheTtlSeconds`, 5 s; `keys:<team>` drops
   entries) → optional `x-kobe-run-id` must be leased to this sandbox → per-sandbox/total
-  concurrency → `CallGate` → body ≤ 32 MiB → forwarded with an **allowlist** of headers plus
+  concurrency → `CallGate` → body ≤ 8 MiB → forwarded with an **allowlist** of headers plus
   `x-bf-vk` (credentials, cookies, every `x-bf-*` stripped; only `alt=sse` query kept) → response
   streamed unbuffered, `x-bf-*`/cookies dropped; a client that disconnects cancels the upstream.
   If Bifrost answers 401 `access_not_found` (it lost its store), the shim NOTIFYs `resync`, reloads
   the key and retries once, else 503 `model_gateway_resyncing` with `Retry-After`. Errors use each
   SDK's error shape (OpenAI / Anthropic / Gemini).
-- **Data** (`packages/db`, migrations `0030_models`, `0031_models_rls`): `model_providers` †
+- **Data** (`packages/db`, migrations `0032_models`, `0033_models_rls`): `model_providers` †
   (kind openai | anthropic | gemini | ollama | openai_compatible; vendor kinds once, id = kind;
   `api_key_enc` sealed with the **provider-key secret**, AAD `provider:<id>`; `key_revision`),
   `model_catalog` † (alias → provider + model; provider delete RESTRICTed; alias delete cascades
@@ -112,6 +112,68 @@ sandbox ──(kobe.model-gateway token)──▶ model-gateway shim ──(x-bf
   holds the area. Never the key (only `keySet` / `keyChanged`).
 - **Admin UI not built** (KOBE-44); the API is complete for it.
 
+## Security review of PR #51 (coordinator) — resolutions
+
+- **HIGH 1 (shim OOM):** bodies are still buffered (needed for the retry-once and the model
+  check) but only within a **byte budget**: `ByteBudget` (per replica 128 MiB, per sandbox 32 MiB)
+  taken before reading (declared length) or per chunk (chunked), released when the call ends;
+  beyond it 429 `too_many_bytes_in_flight`. Body cap 32 → **8 MiB**. The model is found by a
+  structural scanner (`body-model.ts`), not `JSON.parse`, so memory per request ≈ its body. Chart:
+  shim memory request 256 Mi, limit 512 Mi, and the render **fails** if `limits.memory` <
+  `inflightBytes` + 256 Mi; **2 replicas** by default. Tests: `gateway.test.ts` "refuses a body when
+  the sandbox's in-flight bytes are used up", `limits` via chart test "refuses a memory limit
+  below…".
+- **HIGH 2 (key exfiltration via base_url):** `endpointProblem` (admin-store.ts): vendor kinds
+  (openai, anthropic, gemini) refuse `base_url`; a keyed provider needs `https://`; **changing a
+  keyed provider's endpoint requires `api_key` in the same request** (`key_required_for_new_endpoint`);
+  the audit records `endpointHost` (where the key goes) on add and change. The operator-only switch
+  `bifrost.allowUnsafeProviderEndpoints` (Helm → `KOBE_MODELS_ALLOW_UNSAFE_ENDPOINTS`, never the
+  admin API) lifts the vendor and https rules for test installs (the e2e fake provider); the
+  re-entry rule always holds. Tests: server `models.db.test.ts` "provider endpoints" suite.
+- **MEDIUM 3 (DB amplification):** order is now token → route → **per-sandbox request rate**
+  (`RequestRate`, burst 60, 10/s) → concurrency slot → principal → run lease → body; principals and
+  run-lease answers are cached (`TtlCache`, positive and negative) with **single-flight** loads.
+  Tests: "rate-limits a sandbox before any database lookup (random run ids cost nothing)", "loads a
+  principal once for concurrent calls".
+- **MEDIUM 4 (empty allowlist):** a virtual key with no allowed model is **deactivated**
+  (`is_active: false`); re-enabled when a model is enabled again. Proven against the real Bifrost
+  (`bifrost.int.test.ts`: 403 for every provider, idempotent, re-enable works) and in e2e (the team
+  disables all models → Bifrost refuses the member's key, called directly from a server pod).
+- **MEDIUM 5 (stale access after a failed push):** the shim loads the team's enabled models with
+  the principal (`enabledModels`, same cache) and refuses any other model itself
+  (`model_not_enabled`, 403) before Bifrost. Tests: shim db test "a model the team disabled is
+  refused by the shim itself", e2e "the shim refuses the disabled model too".
+- **MEDIUM 6:** `x-kobe-run-id` must name an **active** run (running / waiting_approval) leased to
+  this sandbox (`isActiveRunLeasedTo`); without the header a call is attributed to (team, user,
+  sandbox) only (`runId` undefined in the `UsageSink` record). The model is the body's top-level
+  `model` (structural scan; decoys inside messages or nested objects ignored; duplicate `model`
+  → 400) or Gemini's path. Tests: `body-model.test.ts`, gateway "reads the top-level model only",
+  packages/db "only active runs leased to this sandbox".
+- **LOW 7:** `SecretBox` is a keyring (`v2.<kid>.…`: current secret first, previous ones open),
+  `isCurrent` drives re-sealing (the sync re-seals provider keys and virtual keys); Helm keys
+  `provider-keys-previous` / `virtual-keys-previous` (optional). The provider key's AAD includes its
+  revision (`provider:<id>:r<rev>`). The key-fingerprint secret is HKDF-derived with its own purpose
+  (`model-key-fingerprint`). Tests: `secret-box.test.ts` "rotates…", server db "rotates: a sync with
+  new secrets … re-seals".
+- **LOW 8 (no TLS server/shim → Bifrost):** known risk, see Risks.
+- **LOW 9 (missing `sandboxes` row counts as live):** kept (tokens are minted only for live
+  claims; KOBE-25 writes the row on wake), documented in `loadGatewayPrincipal`: **KOBE-28 must mark
+  an offboarded sandbox's row `destroyed` (not delete it) or remove the membership.**
+- **LOW 10:** Dependabot tracks the image via `images/bifrost/Dockerfile` (never built); a chart
+  test fails unless values/defaults pin the same tag and digest. License verified for the paths
+  Kobe uses (`docs/licensing.md`).
+- Found in e2e: the team API needs `x-kobe-team` on writes; with no models enabled Bifrost already
+  answered `provider_blocked` (403) — now also covered by the deactivated key.
+
+## Risks
+
+- **No TLS between the server/shim and Bifrost** (in-cluster HTTP): the Bifrost admin password,
+  provider keys (on push) and virtual keys cross the pod network in clear. NetworkPolicies limit
+  who may connect, not who can observe node traffic; an encrypting CNI mitigates. Bifrost has no
+  simple server-side TLS option for its listener that Kobe configures today.
+- The shim holds app-role DB credentials (as the egress proxy).
+- Limits and budgets are per shim replica (2 by default).
+
 ## Open questions (for Chris or the coordinator)
 
 1. Bifrost image digest pins the multi-arch index of `v2.2.5`; upgrades bump tag and digest
@@ -133,7 +195,9 @@ provider>/<model>:generateContent|streamGenerateContent?alt=sse`). The model id 
   `gateway_model` (`<gateway provider>/<model>`, e.g. `anthropic/claude-sonnet-4-5`,
   `kobe-vllm/qwen3`); aliases and the team default come from `GET /v1/team/models` (server-side;
   the sandbox has no user session). Send `x-kobe-run-id: <run id>` per run if Pi can set headers
-  (verified against the run lease; enables run attribution). Errors: 401 `invalid_session_token`
+  (must be an **active** run leased to this sandbox, else 403 `run_not_leased`; without it the
+  call is attributed to the sandbox only — KOBE-42 needs the header for per-run attribution).
+  Only models the team enabled are accepted (403 `model_not_enabled`), by `gateway_model`. Errors: 401 `invalid_session_token`
   (re-trade), 401 `session_revoked`, 403 from Bifrost for a model the team has not enabled, 429
   `too_many_concurrent_calls`, 503 `model_access_pending`/`model_gateway_resyncing` with
   `Retry-After`.

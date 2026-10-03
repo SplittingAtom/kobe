@@ -159,13 +159,11 @@ for pod in $($KUBECTL -n "$NS" get pods -l "$gated_pods" --field-selector=status
 done
 contains "server and scheduler verified the gVisor RuntimeClass in process" '^verified verified verified $' "$iso"
 # KOBE-40: Bifrost admits only the server (config sync) and the model-gateway shim.
-bifrost_health() {
-  $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node -e \
-    "fetch('http://kobe-bifrost:8080/health').then(r => r.text()).then(console.log, e => console.log('ERR', e.message))" 2>&1 | tail -1
-}
+# The sync's own record says whether it reached Bifrost (a pass lists and writes through its admin API).
+gateway_state() { psql_kobe "SELECT 'in_sync=' || (synced_version >= desired_version) || ' error=' || coalesce(last_error, '-') FROM model_gateway_state"; }
 wait_endpoints "$NS" kobe-bifrost
-bifrost=$(wait_for 60 '"status":"ok"' bifrost_health)
-contains "Bifrost answers the server (its config sync)" '"status":"ok"' "$bifrost restarts=$($KUBECTL \
+bifrost=$(wait_for 90 '^in_sync=true error=-$' gateway_state)
+contains "the server's gateway sync reached Bifrost (in sync, no error)" '^in_sync=true error=-$' "$bifrost restarts=$($KUBECTL \
   -n "$NS" get pods -l app.kubernetes.io/component=bifrost -o jsonpath='{.items[*].status.containerStatuses[*].restartCount}' 2>/dev/null)"
 # Once the control answers, the probe pod is in the policy ipsets: BLOCKED below is the policy.
 np=$(probe default "$(gated http://kobe-web.$NS/api/healthz bifrost http://kobe-bifrost.$NS:8080/health)")
@@ -1194,7 +1192,8 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
   # Bifrost may reach the fake provider (a private address): explicit egress rule, like a LAN Ollama.
   llm_rule=$(printf '[{"to":[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"%s"}}}],"ports":[{"protocol":"TCP","port":8080}]}]' "$LLM_NS")
   if out=$($HELM upgrade kobe charts/kobe -n "$NS" --reuse-values --wait --timeout 5m \
-      --set-json "bifrost.networkPolicy.extraEgress=$llm_rule" 2>&1); then ok "Bifrost may reach the fake model provider"
+      --set-json "bifrost.networkPolicy.extraEgress=$llm_rule" --set bifrost.allowUnsafeProviderEndpoints=true 2>&1); then
+    ok "Bifrost may reach the fake model provider (test-only unsafe endpoints switch on)"
   else fail "Bifrost may reach the fake model provider: $out"; fi
 
   # A member of the e2e team with no sandbox row yet (tokens are minted for live claims only), and
@@ -1210,9 +1209,15 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
   as_owner() {
     $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "
       const base = 'http://127.0.0.1:8080', origin = process.env.KOBE_PUBLIC_URL;
-      const h = { origin, 'content-type': 'application/json' };
-      const login = await fetch(base + '/api/auth/sign-in/email', { method: 'POST', headers: h,
-        body: JSON.stringify({ email: 'owner@e2e.test', password: 'e2e owner password' }) });
+      const h = { origin, 'content-type': 'application/json', 'x-kobe-team': '$E2E_TEAM_ID' };
+      // Sign-in is rate limited (3 per 10 s per address): wait out a 429 instead of failing.
+      let login;
+      for (let i = 0; i < 4; i++) {
+        login = await fetch(base + '/api/auth/sign-in/email', { method: 'POST', headers: h,
+          body: JSON.stringify({ email: 'owner@e2e.test', password: 'e2e owner password' }) });
+        if (login.status !== 429) break;
+        await new Promise((r) => setTimeout(r, 11000));
+      }
       const cookie = login.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
       await fetch(base + '/v1/me/teams/active', { method: 'PUT', headers: { ...h, cookie },
         body: JSON.stringify({ teamId: '$E2E_TEAM_ID' }) });
@@ -1246,7 +1251,6 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
   else ok "provider keys are never returned"; fi
   contains "provider key changes are audited without the key" '^5$' \
     "$(psql_kobe "SELECT count(*) FROM audit_log WHERE action = 'models.provider.added' AND target::text NOT LIKE '%e2e-provider-key%'")"
-  gateway_state() { psql_kobe "SELECT 'in_sync=' || (synced_version >= desired_version) || ' error=' || coalesce(last_error, '-') FROM model_gateway_state"; }
   t0=$SECONDS
   synced=$(wait_for 60 '^in_sync=true' gateway_state)
   contains "Bifrost reflects the configuration (gateway in sync)" '^in_sync=true error=-$' "$synced"
@@ -1302,7 +1306,7 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
     contains "a forged token is refused (401)" '^code=401$' "$(chat openai/gpt-fake forged.token.value-xxxxxxxxxx)"
     contains "another audience's token (egress proxy) is refused (401)" '^code=401$' \
       "$(chat openai/gpt-fake "$egress_aud_token")"
-    contains "a model outside the team's enabled models is refused by Bifrost (403)" '^code=403$' \
+    contains "a model outside the team's enabled models is refused (403)" '^code=403$' \
       "$(chat openai/gpt-not-enabled "$model_token")"
     contains "Bifrost's admin API is not reachable through the shim (404)" '^code=404$' \
       "$(in_client "curl -s -m 10 -H 'Authorization: Bearer $model_token' $MG/api/providers -w '\ncode=%{http_code}\n'")"
@@ -1318,9 +1322,33 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
     if printf '%s' "$seen" | grep -Eq 'sk-bf-|e2e-[0-9]|eyJ'; then fail "no sandbox credential or virtual key reached the provider"
     else ok "no sandbox credential or virtual key reached the provider"; fi
 
-    # ac-1: a team admin change reaches Bifrost within 10 s (LISTEN/NOTIFY → sync).
-    contains "the team disables a model through the team API" '^200 ' "$(as_owner "PUT /v1/team/models/qwen {\"enabled\":false}")"
-    t0=$SECONDS
+    # Bifrost itself, bypassing the shim (which also refuses disabled models on its own): from a
+    # server pod, with the model user's virtual key as the sync stored it → "code=<status>".
+    bifrost_direct() { # model
+      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "
+        const db = await import('/app/node_modules/@kobe/db/dist/index.js');
+        const d = db.createDb(process.env.KOBE_DATABASE_URL);
+        try {
+          const rows = await db.withTeam(d.db, '$E2E_TEAM_ID', (tx) => tx.select().from(db.modelGatewayKeys)
+            .where(db.eq(db.modelGatewayKeys.userId, '$MODEL_USER_ID')));
+          const box = new db.SecretBox([process.env.KOBE_MODELS_VIRTUAL_KEY_SECRET], db.VIRTUAL_KEY_PURPOSE);
+          const vk = box.open(rows[0].vkValueEnc, db.virtualKeyContext('$E2E_TEAM_ID', '$MODEL_USER_ID'));
+          const r = await fetch('http://kobe-bifrost:8080/v1/chat/completions', { method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-bf-vk': vk }, signal: AbortSignal.timeout(15000),
+            body: JSON.stringify({ model: process.argv[1], messages: [{ role: 'user', content: 'hi' }] }) });
+          console.log('code=' + r.status);
+        } catch (e) { console.log('error=' + e.message); } finally { await d.close(); }
+      " "$1" 2>&1 | tail -1
+    }
+    until_bifrost() { # expected-code model [seconds]
+      local out="" end=$((SECONDS + ${3:-20}))
+      while :; do
+        out=$(bifrost_direct "$2")
+        if [[ "$out" == "code=$1" ]] || ((SECONDS >= end)); then break; fi
+        sleep 1
+      done
+      printf '%s\n' "$out"
+    }
     until_code() { # expected-code model token [seconds]
       local out="" end=$((SECONDS + ${4:-20}))
       while :; do
@@ -1330,11 +1358,27 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
       done
       printf '%s\n' "$out"
     }
-    disabled=$(until_code 403 kobe-vllm/qwen-fake "$model_token")
+    contains "control: Bifrost answers the member's virtual key for an enabled model" '^code=200$' \
+      "$(until_bifrost 200 kobe-vllm/qwen-fake)"
+    # ac-1: a team admin change reaches Bifrost within 10 s (LISTEN/NOTIFY → sync → admin API).
+    contains "the team disables a model through the team API" '^200 ' "$(as_owner "PUT /v1/team/models/qwen {\"enabled\":false}")"
+    t0=$SECONDS
+    disabled=$(until_bifrost 403 kobe-vllm/qwen-fake)
     elapsed=$((SECONDS - t0))
-    contains "a disabled model is refused after the change propagates" '^code=403$' "$disabled"
+    contains "Bifrost refuses the disabled model (pushed by the sync)" '^code=403$' "$disabled"
     if ((elapsed <= 10)); then ok "the change reached Bifrost within 10 s (${elapsed}s)"
     else fail "the change reached Bifrost within 10 s (took ${elapsed}s)"; fi
+    contains "the shim refuses the disabled model too (its own enablement check)" '^code=403$' \
+      "$(chat kobe-vllm/qwen-fake "$model_token")"
+    # Fail closed: the team's last model disabled → Bifrost refuses everything for the key.
+    expect "the team disables its remaining models" '^200 ' "$(as_owner \
+      "PUT /v1/team/models/fast {\"enabled\":false}" "PUT /v1/team/models/smart {\"enabled\":false}" \
+      "PUT /v1/team/models/gem {\"enabled\":false}" "PUT /v1/team/models/local {\"enabled\":false}")"
+    contains "with nothing enabled, Bifrost refuses a previously enabled model (key deactivated)" '^code=403$' \
+      "$(until_bifrost 403 openai/gpt-fake)"
+    as_owner "PUT /v1/team/models/fast {\"enabled\":true}" >/dev/null
+    contains "re-enabling a model restores access through the shim" 'fake-openai: hello-e2e' \
+      "$(until_code 200 openai/gpt-fake "$model_token" 30)"
 
     # ac-2: a revoked session token cannot call Bifrost (the member left the team; token unexpired).
     psql_kobe "DELETE FROM team_members WHERE team_id = '$E2E_TEAM_ID' AND user_id = '$MODEL_USER_ID';" >/dev/null

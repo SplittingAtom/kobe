@@ -31,6 +31,7 @@
       "migrations" true "annotations" $dbAnnotations
       "env" (include "kobe.egressProxyEnv" .)) }}
 ---
+{{- include "kobe.checkModelGatewayMemory" . }}
 {{/* Model gateway shim (KOBE-40): sandboxes' only way to a model. Reads principals and virtual keys
   as the app role; holds only its own session key and the virtual-key secret. */}}
 {{ include "kobe.nodeService" (dict "root" . "component" "model-gateway" "image" "model-gateway"

@@ -76,7 +76,7 @@ async function until<T>(fn: () => Promise<T> | T, ok: (v: T) => boolean, ms = 10
 }
 
 beforeAll(async () => {
-  h = await openHarness({ models: { providerKeySecret: PROVIDER_SECRET } });
+  h = await openHarness({ models: { providerKeySecrets: [PROVIDER_SECRET] } });
   ids.owner = await h.createUser("owner@models.test", "owner");
   ids.installAdmin = await h.createUser("admin@models.test", "admin");
   ids.alice = await h.createUser("alice@models.test");
@@ -145,7 +145,7 @@ describe("install providers", () => {
       "SELECT api_key_enc FROM model_providers WHERE id = 'anthropic'",
     );
     expect(rows[0]?.api_key_enc).not.toContain("sk-ant");
-    expect(providerBox.open(rows[0]?.api_key_enc ?? "", providerKeyContext("anthropic"))).toBe(
+    expect(providerBox.open(rows[0]?.api_key_enc ?? "", providerKeyContext("anthropic", 1))).toBe(
       "sk-ant-secret-0001",
     );
     const listed = await as.installAdmin.get(MODELS);
@@ -154,7 +154,13 @@ describe("install providers", () => {
     expect(events.at(-1)).toMatchObject({
       action: "models.provider.added",
       team_id: null,
-      target: { providerId: "anthropic", kind: "anthropic", keySet: true, privateNetwork: false },
+      target: {
+        providerId: "anthropic",
+        kind: "anthropic",
+        keySet: true,
+        privateNetwork: false,
+        endpointHost: null,
+      },
     });
     expect(JSON.stringify(events)).not.toContain("sk-ant-secret");
   });
@@ -226,6 +232,58 @@ describe("install providers", () => {
     expect((await as.installAdmin.patch(`${MODELS}/providers/nope`, { name: "x" })).status).toBe(
       404,
     );
+  });
+});
+
+describe("provider endpoints: a stored key never moves without being re-entered", () => {
+  it("vendor providers keep their vendor's endpoint", async () => {
+    const r = await as.installAdmin.patch(`${MODELS}/providers/openai`, {
+      base_url: "https://evil.example.com",
+      api_key: "sk-openai-0002",
+    });
+    expect(r.status).toBe(400);
+    expect(r.json.code).toBe("vendor_endpoint_fixed");
+  });
+
+  it("an endpoint change on a keyed provider needs the key again; never over plain http", async () => {
+    const add = await as.installAdmin.post(`${MODELS}/providers`, {
+      kind: "openai_compatible",
+      id: "together",
+      name: "Together",
+      base_url: "https://api.together.example",
+      api_key: "tg-key-0001",
+    });
+    expect(add.status, JSON.stringify(add.json)).toBe(201);
+    const moved = await as.installAdmin.patch(`${MODELS}/providers/together`, {
+      base_url: "https://attacker.example",
+    });
+    expect(moved.status).toBe(400);
+    expect(moved.json.code).toBe("key_required_for_new_endpoint");
+    const plain = await as.installAdmin.patch(`${MODELS}/providers/together`, {
+      base_url: "http://api2.together.example",
+      api_key: "tg-key-0002",
+    });
+    expect(plain.json.code).toBe("insecure_endpoint");
+    const ok = await as.installAdmin.patch(`${MODELS}/providers/together`, {
+      base_url: "https://api2.together.example",
+      api_key: "tg-key-0002",
+    });
+    expect(ok.status, JSON.stringify(ok.json)).toBe(200);
+    expect((await audit("models.provider.changed")).at(-1)?.target).toMatchObject({
+      providerId: "together",
+      keyChanged: true,
+      baseUrlChanged: true,
+      endpointHost: "api2.together.example",
+    });
+    const insecureAdd = await as.installAdmin.post(`${MODELS}/providers`, {
+      kind: "openai_compatible",
+      id: "plainhttp",
+      name: "x",
+      base_url: "http://plain.example",
+      api_key: "k-0001",
+    });
+    expect(insecureAdd.json.code).toBe("insecure_endpoint");
+    expect((await as.installAdmin.delete(`${MODELS}/providers/together`)).status).toBe(204);
   });
 });
 
@@ -419,5 +477,37 @@ describe("gateway sync", () => {
     expect((await sync.runOnce()).ok).toBe(true);
     const up = await as.installAdmin.get(MODELS);
     expect(up.json.gateway).toMatchObject({ in_sync: true, last_error: null });
+  });
+
+  // Last: re-seals everything with new secrets (earlier tests use the old boxes).
+  it("rotates: a sync with new secrets (old ones previous) re-seals provider and virtual keys", async () => {
+    const NEW_P = "q".repeat(40);
+    const NEW_V = "w".repeat(40);
+    const newProviders = new SecretBox([NEW_P, PROVIDER_SECRET], PROVIDER_KEY_PURPOSE);
+    const newVks = new SecretBox([NEW_V, VK_SECRET], VIRTUAL_KEY_PURPOSE);
+    const bifrost = new FakeBifrost();
+    const sync = new ModelGatewaySync({
+      db: h.deps.database.db,
+      connectionString: h.appUrl,
+      admin: bifrost,
+      providerKeys: newProviders,
+      virtualKeys: newVks,
+      fingerprintSecret: PROVIDER_SECRET,
+      logger,
+      intervalMs: 3_600_000,
+    });
+    const result = await sync.runOnce();
+    expect(result.errors).toEqual([]);
+    expect(bifrost.keyValue("anthropic")).toBe("sk-ant-secret-0001");
+    const { rows } = await h.admin.query<{ api_key_enc: string }>(
+      "SELECT api_key_enc FROM model_providers WHERE api_key_enc IS NOT NULL",
+    );
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => newProviders.isCurrent(r.api_key_enc))).toBe(true);
+    const keys = await withTeam(h.deps.database.db, finance, (tx) =>
+      tx.select().from(modelGatewayKeys),
+    );
+    expect(keys.length).toBeGreaterThan(0);
+    expect(keys.every((k) => newVks.isCurrent(k.vkValueEnc))).toBe(true);
   });
 });

@@ -223,6 +223,19 @@ describe.skipIf(!BIN)("against a real Bifrost", () => {
     expect((await reconcile(narrowed, admin, logger)).errors).toEqual([]);
     expect((await chat("kobe-vllm/qwen-x", vkHeader)).status).toBe(403);
     expect((await chat("openai/gpt-x", vkHeader)).status).toBe(200);
+    // The team's last model disabled: the key is deactivated, nothing is allowed (fails closed).
+    const empty = buildDesiredState(
+      { providers, catalog, teams: [{ teamId, members: [userId], aliases: [] }] },
+      "f".repeat(40),
+    );
+    expect((await reconcile(empty, admin, logger)).errors).toEqual([]);
+    expect((await reconcile(empty, admin, logger)).changes).toBe(0);
+    for (const model of ["openai/gpt-x", "ollama/llama-x", "kobe-vllm/qwen-x"]) {
+      expect((await chat(model, vkHeader)).status, model).toBe(403);
+    }
+    // Enabled again: the same key works again.
+    expect((await reconcile(narrowed, admin, logger)).errors).toEqual([]);
+    expect((await chat("openai/gpt-x", vkHeader)).status).toBe(200);
     const removed = buildDesiredState(
       { providers, catalog, teams: [{ teamId, members: [], aliases: [] }] },
       "f".repeat(40),

@@ -18,6 +18,7 @@ describe("applyModelsHint", () => {
             member: true,
             sandbox: "live",
             virtualKey: { id: "v", valueEnc: box.seal("sk-bf-1", virtualKeyContext(team, user)) },
+            enabledModels: [],
           };
         },
         requestKey: async () => undefined,

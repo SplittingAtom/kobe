@@ -6,6 +6,7 @@ updates:
     directories:
       [
         "/images/sandbox",
+        "/images/bifrost",
         "/services/server",
         "/services/mcp-proxy",
         "/services/egress-proxy",
