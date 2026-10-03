@@ -287,6 +287,27 @@ export async function isQueuePaused(
   return res.rows[0]?.paused === true;
 }
 
+/**
+ * A run of the thread that already ended but whose abort Pi has not confirmed yet (`stop_mode`
+ * still set, KOBE-30 durable stop), requested less than `holdMs` ago. The sandbox agent refuses
+ * a `run.start` on a thread whose Pi is still busy (`pi_rejected`), so the next start waits for
+ * the abort — at most `holdMs` (the Stop grace), after which the queue moves anyway.
+ */
+export async function abortPending(
+  tx: KobeTx,
+  teamId: string,
+  threadId: string,
+  holdMs: number,
+): Promise<boolean> {
+  const res = await tx.execute(sql`
+    SELECT 1 FROM runs
+     WHERE team_id = ${teamId} AND thread_id = ${threadId} AND stop_mode = 'abort'
+       AND status NOT IN ('queued', 'running', 'waiting_approval')
+       AND stop_requested_at > now() - make_interval(secs => ${holdMs / 1000})
+     LIMIT 1`);
+  return res.rows.length > 0;
+}
+
 export async function queuedCount(tx: KobeTx, teamId: string, threadId: string): Promise<number> {
   const res = await tx.execute<{ n: string | number }>(sql`
     SELECT count(*) AS n FROM runs

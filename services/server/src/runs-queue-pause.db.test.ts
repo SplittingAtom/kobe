@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { must } from "./testing/event-stream-fixture.js";
 import { threadRunsSchema } from "./openapi/runs.js";
+import type { ActorContext } from "@kobe/protocol";
 import { RunFixture, type FakeWorkspace, type RunWorld } from "./testing/run-fixture.js";
 
 /**
@@ -9,8 +11,11 @@ import { RunFixture, type FakeWorkspace, type RunWorld } from "./testing/run-fix
  */
 const f = new RunFixture();
 
+// A long grace, so the abort window is observable: the queue waits for Pi's abort (or the grace).
+const STOP_GRACE_MS = 3_000;
+
 beforeAll(async () => {
-  await f.setup();
+  await f.setup({ stopGraceMs: STOP_GRACE_MS });
 });
 
 afterAll(async () => {
@@ -19,7 +24,6 @@ afterAll(async () => {
 
 /** Lets every background promotion, grace timer and sweep run, so nothing starts later. */
 async function settle(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 400)); // > stopGraceMs (300) in the fixture
   for (let i = 0; i < 2; i += 1) {
     await f.fx.replica(i).deps.runs.idle();
     await f.fx.replica(i).deps.runs.sweep();
@@ -155,5 +159,91 @@ describe("Stop pauses the queue", () => {
     await f.on(0, w.owner).post(`/v1/threads/${threadId}/queue/resume`);
     ws.reply(await ws.started(q1), "one");
     await f.until(w.team, q1, "completed");
+  });
+
+  it("a start after Stop waits for Pi's abort, so it never reaches a Pi still aborting", async () => {
+    const w = await f.world();
+    const ws = await f.connect(w, 0);
+    // Pi takes its time to abort: run.stop is not answered until the test says so.
+    const answer = ws.sb.respond;
+    const stops: { command_id: string }[] = [];
+    ws.sb.respond = (frame) => {
+      if (frame.type === "run.stop") {
+        stops.push(frame);
+        return null;
+      }
+      return answer?.(frame);
+    };
+    const { threadId, active, waiting } = await busyThread(w, ws, 1);
+    const [q1] = waiting as [string];
+    await f.on(0, w.owner).post(`/v1/runs/${active}/cancel`);
+    await ws.sb.until(() => stops.length > 0);
+    // Resume and a new message inside the abort window start nothing yet.
+    expect((await f.on(1, w.owner).post(`/v1/threads/${threadId}/queue/resume`)).status).toBe(200);
+    const next = await f.message(w.owner, threadId, "right after", 1);
+    expect(await f.status(w.team, q1)).toBe("queued");
+    expect(await f.status(w.team, next)).toBe("queued");
+    expect(ws.starts().map((s) => s.run_id)).toEqual([active]);
+    // Pi confirms the abort: the queue moves on, in order.
+    ws.sb.result(must(stops[0], "run.stop").command_id, true);
+    ws.reply(await ws.started(q1), "one");
+    await f.until(w.team, q1, "completed");
+    ws.reply(await ws.started(next), "two");
+    await f.until(w.team, next, "completed");
+  });
+
+  it("the hold ends with the grace when Pi never confirms the abort", async () => {
+    const w = await f.world();
+    const ws = await f.connect(w, 0);
+    const answer = ws.sb.respond;
+    ws.sb.respond = (frame) => (frame.type === "run.stop" ? null : answer?.(frame));
+    const { threadId, active, waiting } = await busyThread(w, ws, 1);
+    const [q1] = waiting as [string];
+    const stoppedAt = Date.now();
+    await f.on(0, w.owner).post(`/v1/runs/${active}/cancel`);
+    await f.on(0, w.owner).post(`/v1/threads/${threadId}/queue/resume`);
+    await ws.started(q1, STOP_GRACE_MS + 10_000);
+    expect(Date.now() - stoppedAt).toBeGreaterThanOrEqual(STOP_GRACE_MS - 100);
+  });
+
+  it("a scheduled message queues behind a paused queue without releasing it", async () => {
+    const w = await f.world();
+    const ws = await f.connect(w, 0);
+    const { threadId, active, waiting } = await busyThread(w, ws, 1);
+    const [q1] = waiting as [string];
+    await f.on(0, w.owner).post(`/v1/runs/${active}/cancel`);
+    await settle();
+    const actor: ActorContext = {
+      user_id: w.owner.id,
+      team_id: w.team,
+      install_role: "user",
+      team_role: "member",
+    };
+    const scheduled = await f.fx.replica(0).deps.runs.submitMessage(actor, {
+      thread_id: threadId,
+      content: "weekly summary",
+      trigger: "schedule",
+    });
+    expect(scheduled.queued).toBe(true);
+    await settle();
+    expect(await f.status(w.team, q1)).toBe("queued");
+    expect(await f.status(w.team, scheduled.run_id)).toBe("queued");
+    expect((await threadRuns(w, threadId)).queue_paused).toBe(true);
+    expect(ws.starts().map((s) => s.run_id)).toEqual([active]);
+  });
+
+  it("cancelling the last queued message clears the pause", async () => {
+    const w = await f.world();
+    const ws = await f.connect(w, 0);
+    const { threadId, active, waiting } = await busyThread(w, ws, 1);
+    const [q1] = waiting as [string];
+    await f.on(0, w.owner).post(`/v1/runs/${active}/cancel`);
+    await settle();
+    await f.on(0, w.owner).post(`/v1/runs/${q1}/cancel`);
+    const { rows } = await f.fx.admin.query<{ paused: boolean }>(
+      `SELECT queue_paused_at IS NOT NULL AS paused FROM threads WHERE team_id = $1 AND id = $2`,
+      [w.team, threadId],
+    );
+    expect(rows[0]?.paused).toBe(false);
   });
 });

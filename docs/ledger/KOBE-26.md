@@ -81,7 +81,7 @@ Before: after Stop, the next queued message started once Pi acknowledged the abo
   skips paused threads.
 - **Resume**: `POST /v1/threads/{id}/queue/resume` (existing) clears the pause and starts the
   queue in order; it still does "Continue without retry" on an interrupted thread.
-- **A new message releases the queue** (decision): it joins the end and the queue resumes in
+- **A new user message releases the queue** (decision; scheduled runs don't): it joins the end and the queue resumes in
   order, so the earlier queued messages run first (`queued: true`). Reading: the user typing again
   means "carry on"; letting the new message jump the queue would reorder what they wrote.
 - **Not paused**: Stop with nothing queued (the next message starts at once), deleting a queued
@@ -97,6 +97,23 @@ Before: after Stop, the next queued message started once Pi acknowledged the abo
 - Tests: `runs-queue-pause.db.test.ts` (4; three red before the change), KOBE-30's Stop test
   updated (queue paused, Resume starts the next), the Stop/new-message race resumes a queue the
   race paused, the EXPLAIN guard covers the new queries.
+
+## Coordinator review (PR #43, no CRITICAL/HIGH) — resolution
+
+1. **MEDIUM start during Pi's abort.** Verified not guaranteed: the wire delivers `run.stop` and
+   the next `run.start` as independent command rows, the agent answers `run.stop` only once Pi
+   has settled, and `ThreadManager` refuses a `run.start` on a thread with an active run
+   (`pi_rejected` → the new run fails). Now `promoteInTx` holds while a stopped run of the thread
+   still has `stop_mode = 'abort'` (cleared when the sandbox answers the stop), for at most the
+   Stop grace (`stopGraceMs`, 10 s) since the stop was requested; the dispatcher's
+   stop-then-advance (or the sweep) promotes once the abort is confirmed or the grace is over.
+   Tests: "a start after Stop waits for Pi's abort…" (resume and a new message inside the window
+   start nothing; confirming the abort starts them in order), "the hold ends with the grace…".
+2. **MEDIUM triggers.** Only a `user` message releases a paused queue; scheduled runs queue behind
+   it. Test: "a scheduled message queues behind a paused queue without releasing it".
+3. **LOW** Cancelling the last queued message clears `queue_paused_at`. Test.
+4. **LOW** e2e: the scripted-agent section says it mints tokens and is for throwaway clusters.
+5. Protocol doc for Stop (queue pauses) goes into the contracts PR #42.
 
 ## Decisions
 

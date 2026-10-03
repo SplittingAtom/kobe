@@ -537,6 +537,7 @@ contains "Stop deletes the queued message (or stops it once it started)" '^cance
 contains "the event stream records the start and the stop, then ends" '^events=run.started,run.interrupted$' "$runs_out"
 contains "a cancelled run cannot be retried (interrupted runs only)" '^retry=invalid_transition$' "$runs_out"
 
+# Throwaway clusters only: this section mints sandbox-wire tokens with the install's real keys.
 # KOBE-26 (Gate 1: "killing a sandbox mid-run yields interrupted + Retry and history survives").
 # No model answers in e2e yet (KOBE-40/41), so real Pi cannot be mid-run: a scripted agent holds
 # the owner's sandbox identity (a live claim + a wire token minted with the real keys) from a
