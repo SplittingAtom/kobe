@@ -20,6 +20,8 @@ import { ensureSessionDir } from "../pi/session-files.js";
  */
 export const DIALOG_METHODS = new Set(["select", "confirm", "input", "editor"]);
 export const MAX_PENDING_DIALOGS = 64;
+/** Pi startup (extension loading, jiti) up to kobe-policy's `channel.ready`. */
+export const POLICY_READY_TIMEOUT_MS = 30_000;
 
 export interface ThreadHooks {
   readonly runStarted: (runId: string, threadId: string) => void;
@@ -38,6 +40,8 @@ export interface ThreadHooks {
     check: PolicyChannelCheck,
     reply: (message: PolicyChannelReply) => void,
   ) => void;
+  /** kobe-policy stopped waiting for one of its checks (timeout, Stop): free its slot. */
+  readonly policyCancel?: (threadId: string, requestId: string) => void;
   /** The thread's policy channel is unusable: every pending check of the thread is denied. */
   readonly policyChannelClosed: (threadId: string, reason: string) => void;
   readonly diagnostic: (threadId: string, message: string) => void;
@@ -46,8 +50,12 @@ export interface ThreadHooks {
 export interface ThreadEnv {
   readonly bin: string;
   readonly agentDir: string;
-  /** Root-owned extension paths loaded with `-e` (KOBE-36: kobe-policy). */
+  /** The kobe-policy extension (root-owned file), loaded last into every Pi (KOBE-36). */
+  readonly policyExtension: string;
+  /** Other root-owned extension paths loaded with `-e`, before kobe-policy. */
   readonly extensions?: readonly string[];
+  /** How long a new Pi may take to report kobe-policy ready (default {@link POLICY_READY_TIMEOUT_MS}). */
+  readonly policyReadyTimeoutMs?: number;
   readonly workspaceDir: string;
   readonly sessionDir: string;
   readonly home: string;
@@ -66,6 +74,7 @@ export class Thread {
   readonly #env: ThreadEnv;
   readonly #hooks: ThreadHooks;
   #pi: PiProcess | undefined;
+  #policy: PolicyChannel | undefined;
   #launchKey: string | undefined;
   #closing = new Set<PiProcess>();
   #run: ActiveRun | undefined;
@@ -90,6 +99,11 @@ export class Thread {
 
   get hasProcess(): boolean {
     return this.#pi !== undefined;
+  }
+
+  /** kobe-policy in the current Pi reported ready and its channel is still open. */
+  get policyUsable(): boolean {
+    return this.#policy?.ready === true && !this.#policy.closed;
   }
 
   get launchKey(): string | undefined {
@@ -150,17 +164,32 @@ export class Thread {
       onDiagnostic: (message) => this.#hooks.diagnostic(this.id, message),
     });
     const control = pi.control;
+    let channel: PolicyChannel | undefined;
     if (control !== undefined) {
-      const channel = new PolicyChannel(control, {
+      const opened: PolicyChannel = new PolicyChannel(control, {
         onCheck: (check) =>
-          this.#hooks.policyCheck(this.id, this.#run?.runId, check, (m) => channel.reply(m)),
+          this.#hooks.policyCheck(this.id, this.#run?.runId, check, (m) => opened.reply(m)),
+        onCancel: (requestId) => this.#hooks.policyCancel?.(this.id, requestId),
         onClosed: (reason) => this.#hooks.policyChannelClosed(this.id, reason),
         onDiagnostic: (message) => this.#hooks.diagnostic(this.id, message),
       });
+      channel = opened;
     }
     this.#pi = pi;
+    this.#policy = channel;
     this.#launchKey = launch.key;
     this.lastUsed = Date.now();
+  }
+
+  /**
+   * Wait until kobe-policy in the current Pi reported `channel.ready` (call inside the lock, right
+   * after {@link spawn}). No prompt reaches a Pi whose policy extension did not load and self-check:
+   * without it Pi would run tools unchecked.
+   */
+  async waitPolicyReady(): Promise<void> {
+    const channel = this.#policy;
+    if (channel === undefined) throw new Error("Pi has no policy channel");
+    await channel.waitReady(this.#env.policyReadyTimeoutMs ?? POLICY_READY_TIMEOUT_MS);
   }
 
   /** Stop the Pi process (call inside the lock). Ends the active run, if any. */
@@ -305,6 +334,7 @@ export class Thread {
   #detach(pi: PiProcess): void {
     if (pi !== this.#pi) return;
     this.#pi = undefined;
+    this.#policy = undefined;
     this.#launchKey = undefined;
     this.#streaming = false;
     this.#dialogs.clear();

@@ -63,14 +63,22 @@ COPY --from=agent /out/dist /opt/kobe/sandbox-agent/dist
 COPY --from=agent /out/node_modules /opt/kobe/sandbox-agent/node_modules
 COPY --from=agent /out/package.json /opt/kobe/sandbox-agent/package.json
 COPY images/sandbox/entrypoint.sh /opt/kobe/entrypoint.sh
+# kobe-policy (KOBE-36): the Pi extension that asks the server about every tool call. Loaded by the
+# agent with --extension, last; root-owned and read-only so sandbox code cannot replace it. Only the
+# compiled .js files (it imports nothing but node builtins and its own files).
+COPY --from=agent /out/dist/kobe-policy/*.js /opt/kobe/pi-extensions/kobe-policy/
 
 # Non-root user; /workspace is the persistent volume, /opt/kobe/skills holds gallery skills (A6,
-# root-owned / mounted read-only). Strip setuid/setgid bits so sandbox code has no local
-# privilege-escalation helpers even if a pod spec forgets allowPrivilegeEscalation=false.
+# root-owned / mounted read-only), /opt/kobe/pi-extensions the root-owned Pi extensions. Strip
+# setuid/setgid bits so sandbox code has no local privilege-escalation helpers even if a pod spec
+# forgets allowPrivilegeEscalation=false.
 RUN groupadd --gid 1000 kobe \
  && useradd --uid 1000 --gid 1000 --create-home --home-dir /home/kobe --shell /bin/bash kobe \
  && mkdir -p /workspace /opt/kobe/skills /opt/kobe/pi-agent \
  && chmod 0555 /opt/kobe/pi-agent /opt/kobe/entrypoint.sh \
+ && chown -R 0:0 /opt/kobe/pi-extensions \
+ && chmod 0444 /opt/kobe/pi-extensions/kobe-policy/*.js \
+ && chmod 0555 /opt/kobe/pi-extensions /opt/kobe/pi-extensions/kobe-policy \
  && chown kobe:kobe /workspace \
  && find / -xdev -perm /6000 -type f -exec chmod a-s {} + \
  && chmod 0644 /etc/passwd /etc/group && chmod 0640 /etc/shadow

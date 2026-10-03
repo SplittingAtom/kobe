@@ -2,21 +2,26 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { RUN, RUN_2, THREAD, runStart, startHarness, type Harness } from "./testing/harness.js";
+import {
+  RUN,
+  RUN_2,
+  THREAD,
+  runStart,
+  startHarness as startHarnessWith,
+  type Harness,
+} from "./testing/harness.js";
+import { PI_AVAILABLE, PI_BIN, REAL_POLICY_EXTENSION } from "./testing/real-pi.js";
 
 /**
  * Integration with the REAL pinned Pi (`@earendil-works/pi-coding-agent` 1.0.0 from
  * images/sandbox/pi) in RPC mode. No model credentials exist (or may exist) in a sandbox, so these
  * tests use commands that never call a model, plus a prompt that Pi must refuse for lack of a key.
- * CI installs Pi with `npm ci --prefix images/sandbox/pi --omit=dev --ignore-scripts`; locally the
- * suite is skipped when Pi is not installed (or set KOBE_TEST_PI_BIN).
+ * Every Pi loads the real kobe-policy (KOBE-36), so each test also proves it loads and reports
+ * ready. See testing/real-pi.ts for how Pi is found.
  */
-const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-const PI_BIN =
-  process.env.KOBE_TEST_PI_BIN ?? path.join(REPO, "images/sandbox/pi/node_modules/.bin/pi");
-const available = existsSync(PI_BIN);
+const startHarness = (options: { piBin: string }) =>
+  startHarnessWith({ ...options, env: { KOBE_POLICY_EXTENSION: REAL_POLICY_EXTENSION } });
 
 let h: Harness | undefined;
 afterEach(async () => {
@@ -61,7 +66,7 @@ const assistant = (id: string, parentId: string, text: string) => ({
   },
 });
 
-describe.skipIf(!available)("real Pi 1.0.0 in RPC mode (no model credentials)", () => {
+describe.skipIf(!PI_AVAILABLE)("real Pi 1.0.0 in RPC mode (no model credentials)", () => {
   async function piCommand(command: Record<string, unknown>) {
     if (h === undefined) throw new Error("harness not started");
     return h.server.command(

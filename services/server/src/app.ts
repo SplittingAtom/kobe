@@ -29,6 +29,7 @@ import { teamBreakGlassRoutes } from "./routes/team-break-glass.js";
 import { teamInvitesRoutes } from "./routes/team-invites.js";
 import { teamPolicyRoutes } from "./routes/team-policy.js";
 import { teamRoutes } from "./routes/team.js";
+import { threadPendingRoutes } from "./routes/thread-pending.js";
 import { threadRoutes } from "./routes/threads.js";
 
 const SERVICE = "server";
@@ -97,6 +98,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/runs", runEventsRoutes(deps));
   api.route("/runs", runRoutes(deps));
   api.route("/threads", threadRunRoutes(deps));
+  api.route("/threads", threadPendingRoutes(deps));
   api.route("/threads", threadRoutes(deps));
   api.route("/agents", agentRoutes(deps));
   api.route("/install/settings", installSettingsRoutes(deps));

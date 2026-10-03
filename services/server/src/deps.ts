@@ -144,6 +144,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   const extraHooks = options.sandboxWire?.hooks;
   const sandboxWire = createSandboxWire({
     ...options.sandboxWire,
+    background,
     runContext: options.sandboxWire?.runContext ?? createDbRunContextSource(),
     hooks: {
       async onRunEnded(event) {

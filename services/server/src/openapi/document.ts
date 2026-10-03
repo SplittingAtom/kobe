@@ -1,3 +1,4 @@
+import { pendingOpenApiPaths, pendingOpenApiSchemas } from "./pending.js";
 import { runsOpenApiPaths, runsOpenApiSchemas } from "./runs.js";
 import { threadsOpenApiPaths, threadsOpenApiSchemas } from "./threads.js";
 
@@ -15,9 +16,13 @@ export function openApiDocument(): Record<string, unknown> {
         "Team-scoped routes act on the session's active team (spec D9); send X-Kobe-Team on " +
         "changes. Errors are `{code, message}`. Authentication is the Better Auth session cookie.",
     },
-    paths: { ...threadsOpenApiPaths(), ...runsOpenApiPaths() },
+    paths: { ...threadsOpenApiPaths(), ...runsOpenApiPaths(), ...pendingOpenApiPaths() },
     components: {
-      schemas: { ...threadsOpenApiSchemas(), ...runsOpenApiSchemas() },
+      schemas: {
+        ...threadsOpenApiSchemas(),
+        ...runsOpenApiSchemas(),
+        ...pendingOpenApiSchemas(),
+      },
       securitySchemes: {
         session: { type: "apiKey", in: "cookie", name: "better-auth.session_token" },
       },
