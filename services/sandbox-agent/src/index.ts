@@ -4,6 +4,7 @@ import { loadConfig } from "./config.js";
 import { hardenProcess } from "./harden.js";
 import { logger } from "./logger.js";
 import { buildPiLaunch } from "./pi/pi-launch.js";
+import { checkPolicyExtensionFile } from "./policy/extension-file.js";
 import { SessionClient } from "./session/exchange.js";
 import { piVersion as readPiVersion, readAgentVersion } from "./version.js";
 
@@ -16,11 +17,18 @@ const SHUTDOWN_DEADLINE_MS = 10_000;
 async function main(): Promise<void> {
   hardenProcess(process);
   const loaded = loadConfig(process.env);
+  // Fail fast: without kobe-policy no thread could start (KOBE-36), so say why at startup. Pi gets
+  // the resolved path.
+  const checked = {
+    ...loaded,
+    policyExtension: await checkPolicyExtensionFile(loaded.policyExtension),
+  };
   const home = process.env.HOME ?? "/home/kobe";
   const piEnv = buildPiLaunch({
     sessionFile: "-",
     home,
-    agentDir: loaded.piAgentDir,
+    agentDir: checked.piAgentDir,
+    policyExtension: checked.policyExtension,
     parentEnv: process.env,
   }).env;
   // Kobe's pods carry a bootstrap token only: trade it for the sandbox id and session tokens
@@ -39,7 +47,7 @@ async function main(): Promise<void> {
     readPiVersion(loaded.piBin, piEnv),
     session?.grant(),
   ]);
-  const config = grant ? { ...loaded, sandboxId: grant.sandboxId } : loaded;
+  const config = grant ? { ...checked, sandboxId: grant.sandboxId } : checked;
   logger.info(
     { server: config.connectUrl, sandbox_id: config.sandboxId, agentVersion, piVersion },
     "sandbox-agent starting",

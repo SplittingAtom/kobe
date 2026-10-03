@@ -368,13 +368,18 @@ export class ThreadManager {
       sessionFile: this.#sessionFile(thread.id),
       home: this.#options.home,
       agentDir: this.#options.agentDir,
+      policyExtension: this.#options.policyExtension,
       ...(this.#options.extensions === undefined ? {} : { extensions: this.#options.extensions }),
       parentEnv: this.#options.parentEnv,
       config: frame?.config,
     });
     if (thread.hasProcess) {
       const changed = frame?.config !== undefined && launch.key !== thread.launchKey;
-      if (!changed || thread.runId !== undefined || thread.streaming) return undefined;
+      // A Pi whose policy channel closed blocks every tool call for good: start a fresh one (not
+      // while it is busy — its calls are blocked anyway, and Stop must still reach it).
+      const broken = !thread.policyUsable;
+      if (!changed && !broken) return undefined;
+      if (thread.runId !== undefined || thread.streaming) return undefined;
       await thread.stopProcess();
     }
     if (!(await this.#reserveSlot(thread))) {
@@ -382,11 +387,19 @@ export class ThreadManager {
     }
     try {
       await thread.spawn(launch);
-      return undefined;
     } catch (error) {
       return fail("pi_unavailable", `cannot start Pi: ${(error as Error).message}`);
     } finally {
+      // From here on the process counts through `thread.hasProcess`.
       this.#pendingSpawns -= 1;
+    }
+    try {
+      await thread.waitPolicyReady();
+      return undefined;
+    } catch (error) {
+      // Fail closed: a Pi whose kobe-policy did not load would run tools unchecked.
+      await thread.stopProcess();
+      return fail("pi_unavailable", `kobe-policy did not start: ${(error as Error).message}`);
     }
   }
 

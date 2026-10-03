@@ -153,6 +153,16 @@ get_state`: agent reconnected + Pi spawned and answering), never labelled Gate 1
 - KOBE-30's e2e run-stop check accepts the optional `sandbox.waking` between `run.started` and
   `run.interrupted` (the owner's first run now really starts a sandbox).
 
+## After merging KOBE-36 (#32, kobe-policy)
+
+- `services/sandbox-agent/src/index.ts`: both kept — the policy extension file is checked at
+  startup (fail fast) and passed to Pi; the bootstrap exchange and version-from-package run in
+  parallel after it.
+- The `pi` probe now includes kobe-policy's ready gate: `pi.command` → `#ensureProcess` spawns Pi
+  and waits for `channel.ready` (extension loaded and self-checked) before the command reaches
+  Pi, so "Pi ready" = Pi started **with its policy extension ready**. Numbers re-measured below
+  (run 4).
+
 ## Evidence (acceptance criteria → test or command output)
 
 | AC   | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                |
