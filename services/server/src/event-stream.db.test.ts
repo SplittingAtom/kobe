@@ -183,7 +183,9 @@ describe("append (ac-1)", () => {
       await new Promise((r) => setTimeout(r, 100));
       expect(heard).toEqual([]);
       await appendRunEvents(fx.db, finance, run, [delta("a"), delta("b")]);
-      await new Promise((r) => setTimeout(r, 100));
+      // Notifications arrive in commit order, so once the committed one is here, the rolled-back
+      // one would have arrived before it: exactly one means it never did.
+      await expect.poll(() => heard.length).toBeGreaterThan(0);
       expect(heard).toEqual([`${run}:2`]);
       expect(await fx.seqsInDb(finance, run)).toEqual([1, 2]);
     } finally {

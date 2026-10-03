@@ -60,6 +60,58 @@ with repository permission **Administration: read and write** (needed to registe
 runners) and nothing else. Rotate its private key by generating a new one in the App settings and
 replacing the Secret.
 
+## Disk I/O
+
+Longhorn keeps its volumes, including every runner's Docker data, on the nodes' 5400 rpm HDDs
+(`/var/lib/longhorn`). With several builds at once, small-file work (`pnpm deploy`, layer export,
+`k3d image import`) is I/O-bound: e2e runs take 15–20 min when quiet and up to ~40 min at peak.
+Moving the `longhorn-ci-scratch` volumes to SSD, or running fewer runners, would fix it.
+
+## Docker Hub cache
+
+Ephemeral runners start with empty image stores and all pull from one public address, so
+anonymous Docker Hub pulls hit its rate limit (`429 Too Many Requests`).
+[dockerhub-mirror.yaml](dockerhub-mirror.yaml) runs a pull-through cache (CNCF Distribution
+`registry:3`, pulled from `mirror.gcr.io`) in `kobe-ci-runners`. Its data sits on a 40 Gi
+replicated `longhorn` volume that outlives the runners. Content is dropped a week after it was
+first cached (cache hits don't renew it) and fetched again on the next pull.
+
+- **dind:** `values.yaml` starts dockerd with `--registry-mirror` (plain HTTP, hence
+  `--insecure-registry`). Builds, `docker run` and service containers use it, and dockerd falls
+  back to Docker Hub if the cache is down.
+- **k3d clusters (e2e):** the workflow sets `KOBE_DOCKERHUB_MIRROR`. `scripts/dev-cluster.sh`
+  resolves the Service name on the runner and gives the k3s nodes a `docker.io` mirror by address,
+  because the nodes' own cluster DNS can't resolve the outer Service. Unset (local dev) or
+  unresolvable (GitHub-hosted runners), nothing changes.
+- **Access:** no auth; a NetworkPolicy admits only this scale set's runner pods on port 5000.
+- **Not cached:** ghcr.io (our images and k3d's tools) showed no rate limiting.
+
+```bash
+kubectl apply -f dockerhub-mirror.yaml       # with the helm upgrade above when values.yaml changes
+kubectl -n kobe-ci-runners logs deploy/dockerhub-mirror --tail=50
+```
+
+**Monitor and resize.** Check usage now and then, and before it nears 40 Gi. Longhorn expands the
+volume online, since `longhorn` allows expansion. Change the size in `dockerhub-mirror.yaml` as
+well, so the repository matches:
+
+```bash
+kubectl -n kobe-ci-runners exec deploy/dockerhub-mirror -- df -h /var/lib/registry
+kubectl -n kobe-ci-runners patch pvc dockerhub-mirror -p '{"spec":{"resources":{"requests":{"storage":"80Gi"}}}}'
+```
+
+**If anonymous limits recur** (`429` in the cache's log), give the cache a Docker Hub account.
+Use a read-only access token. The cache authenticates to Docker Hub with it and never forwards it
+to clients, which keep pulling without credentials:
+
+```bash
+kubectl -n kobe-ci-runners create secret generic dockerhub-mirror-credentials \
+  --from-literal=username=<user> --from-literal=token=<read-only access token>
+```
+
+Then uncomment `REGISTRY_PROXY_USERNAME`/`REGISTRY_PROXY_PASSWORD` in `dockerhub-mirror.yaml` and
+apply it.
+
 ## Security
 
 Runner pods execute repository code with a **privileged** Docker daemon, which is root-equivalent
