@@ -19,6 +19,7 @@
     "test:db": "vitest run -c vitest.db.config.ts"
   },
   "dependencies": {
+    "@kobe/address-policy": "workspace:*",
     "@kobe/db": "workspace:*",
     "@kobe/protocol": "workspace:*",
     "@kobe/session-token": "workspace:*",

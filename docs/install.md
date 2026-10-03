@@ -181,6 +181,31 @@ equal the CONNECT host. It never decrypts traffic. Plain HTTP and other ports ar
   user, sandbox, host and outcome every `egressProxy.auditFlushSeconds`) and logged individually as
   JSON on the proxy's stdout. Blocked attempts are shown on the user's active run (`egress.blocked`).
 
+## MCP connectors
+
+Sandboxes reach remote MCP servers only through the **MCP proxy** (spec D27): Streamable HTTP
+servers only (no stdio), registered by install admins, enabled per team with an exposure
+(read-only, all, custom). The proxy holds no database credentials and no connector credentials of
+its own. For every request it checks the sandbox's `kobe.mcp-proxy` session token, then asks the
+server on its **internal port 8082** (reachable only from the proxy's pods, and keyed with the
+chart-generated `<release>-mcp-proxy-internal` Secret, or `mcpProxy.internalKeySecret` for offline
+renders). The server lists only the team's exposed, pinned tools, and decides every `tools/call`
+with the same policy engine as the sandbox (D29): a call that needs approval runs only with a
+valid signed approval for exactly that run, tool and input, used once. Every allowed call is
+written to the audit log (`mcp.tool_call`) before the proxy forwards it.
+
+The proxy connects to MCP servers **directly**, not through the egress proxy: the egress proxy
+enforces the teams' sandbox allowlists, while connectors are governed by the install registry, and
+the MCP proxy is not a sandbox. Its own NetworkPolicy allows DNS, the server's internal port, and
+public addresses on `mcpProxy.allowedPorts` (default 443). It resolves each connector's host itself
+and refuses private, loopback, link-local (cloud metadata) and reserved addresses unless listed in
+`mcpProxy.allowedInternalCidrs` (an on-premises MCP server; add a matching
+`mcpProxy.networkPolicy.extraEgress` peer for in-cluster targets). Connector URLs must be HTTPS
+(`mcpProxy.allowInsecureHttp` exists for development and CI only); redirects are not followed.
+Limits per proxy replica: `mcpProxy.limits.callsPerSandbox` (8 concurrent), `requestBurst` /
+`requestsPerSecond` (60, then 10/s), `maxRequestBytes` (1 MiB), `maxResponseBytes` (4 MiB),
+`upstreamTimeoutSeconds` (55).
+
 ## Install
 
 Create the Secrets the chart references, then install:

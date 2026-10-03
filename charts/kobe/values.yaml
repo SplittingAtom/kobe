@@ -138,11 +138,42 @@ scheduler:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { cpu: 500m, memory: 512Mi }
 
+# MCP proxy (spec D27): sandboxes reach remote MCP servers (Streamable HTTP) only through it. The
+# server decides every call (policy re-check, signed approvals, audit) on its internal port 8082.
 mcpProxy:
   replicas: 1
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { cpu: "1", memory: 512Mi }
+  # Plain-http connector URLs. Development and CI only: user credentials would travel unencrypted.
+  allowInsecureHttp: false
+  # Upstream ports connectors may use.
+  allowedPorts: [443]
+  # Internal targets (CIDRs) connectors may resolve to, e.g. an on-premises MCP server. Private,
+  # loopback, link-local (cloud metadata) and reserved addresses are refused unless listed here.
+  allowedInternalCidrs: []
+  # More ranges to refuse (your cluster's pod/Service CIDRs if they are not private addresses).
+  deniedCidrs: []
+  # Secret with key "key" (>= 32 chars) the proxy presents to the server. Empty: generated, kept.
+  internalKeySecret: ""
+  limits:
+    # Largest request from a sandbox and largest upstream answer.
+    maxRequestBytes: 1048576
+    maxResponseBytes: 4194304
+    # A whole upstream call; stays under Pi's 60 s MCP request timeout.
+    upstreamTimeoutSeconds: 55
+    # Concurrent calls per sandbox and per proxy replica.
+    callsPerSandbox: 8
+    concurrentCalls: 256
+    # Requests per sandbox: a burst, then this many per second (per replica).
+    requestBurst: 60
+    requestsPerSecond: 10
+  networkPolicy:
+    # Restrict the proxy's own egress to DNS, the server's internal port and public addresses on
+    # allowedPorts (plus allowedInternalCidrs).
+    restrictEgress: true
+    # Extra raw NetworkPolicy egress rules for the proxy.
+    extraEgress: []
 
 # Default-deny egress proxy (spec D28): sandboxes reach the internet only through it, HTTPS only,
 # to domains their team enabled within the install's egress ceiling (admin consoles).

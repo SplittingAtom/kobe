@@ -260,6 +260,20 @@
       "when": 1791064636310,
       "tag": "0036_workspace_sync_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1791068065487,
+      "tag": "0037_connectors",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1791068065850,
+      "tag": "0038_connectors_rls",
+      "breakpoints": true
     }
   ]
 }

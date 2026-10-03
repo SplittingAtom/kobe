@@ -171,6 +171,7 @@ install for personal and gallery agents.
 | `sandbox.destroyed`                          | team    | `sandboxId?`, `userId?`, `pod?`, `reason` (isolation_mismatch, isolation_lost)                                                                                             | The server deleted a sandbox or pod not running under the verified isolation runtime (KOBE-22)                                                                                                                                                       |
 | `sandbox.hibernated`                         | team    | `sandboxId`, `userId`, `idleMinutes`, `trigger` (idle, operator)                                                                                                           | A sandbox was hibernated: the D14 idle policy, or forced by an operator tool (system actor) (KOBE-25)                                                                                                                                                |
 | `sandbox.woken`                              | team    | `sandboxId`, `userId`                                                                                                                                                      | A hibernated sandbox's resume was committed (isolation gate passed; recorded before its pod verifies) (KOBE-25)                                                                                                                                      |
+| `mcp.tool_call`                              | team    | `sandboxId`, `userId`, `connectorId`, `tool`, `runId?`, `threadId?`, `toolCallId?`, `decision` (allowed, denied), `reason`, `risk?`, `approvalId?`, `approvalFailure?`     | The server decided an MCP `tools/call` for the MCP proxy (actor: the sandbox's user); every allowed call before it is forwarded, denials throttled per sandbox                                                                                       |
 | `thread.trashed`                             | team    | `threadId`                                                                                                                                                                 | Thread moved to Trash (D18 soft delete)                                                                                                                                                                                                              |
 | `thread.restored`                            | team    | `threadId`                                                                                                                                                                 | Thread restored from Trash                                                                                                                                                                                                                           |
 | `thread.sharing_changed`                     | team    | `threadId`, `projectId`, `shared`                                                                                                                                          | Thread shared to or unshared from its project (D23)                                                                                                                                                                                                  |
@@ -212,6 +213,16 @@ the proxy. Each connection is also logged individually (JSON on stdout) for SIEM
 Each sandbox may add a limited number of distinct hosts per window (burst 32, then one every 2 s);
 beyond that its connections are counted in one row with `aggregated: true` and no `domain`, so
 a flood of random host names cannot flood the audit chain.
+
+**MCP tool calls (KOBE-58).** The MCP proxy asks the server about every `tools/call`; the server
+records the decision as `mcp.tool_call` (actor: the sandbox's user) before the proxy forwards an
+allowed call, and refuses the call if the row cannot be written. `reason` is the deciding policy
+reason code (`approval_granted` when a signed approval was verified and consumed; `approvalId`
+names it, and KOBE-37's `approval.consumed` is written with the consume); `approvalFailure`
+(`no_approval`, `bad_mac`, `expired`, `not_consumable`, …) says why an approval did not authorise
+a call that needed one. Tool inputs and results are never recorded. Denied calls are recorded at
+most a burst of 20, then one per 3 s, per sandbox (the rest are logged by the server), so a looping
+agent cannot flood the chain.
 
 **Personal data recorded:** user ids, team and agent names, and each request's client address and
 user agent. The address and user agent are erased after a configurable period (default 12 hours;
