@@ -8,7 +8,7 @@
 /**
  * Values under these keys are documents, not API fields, so their keys stay as sent: agent
  * frontmatter, policy arg patterns keyed by JSON pointers, and Pi session entries (thread entry
- * `payload`, KOBE-34), whose tool-call arguments must reach the UI exactly as the agent wrote them.
+ * `payload`, KOBE-34; break-glass reads, KOBE-16), whose tool-call arguments must reach the UI exactly as the agent wrote them.
  */
 const OPAQUE_KEYS: ReadonlySet<string> = new Set(["frontmatter", "argPattern", "payload"]);
 

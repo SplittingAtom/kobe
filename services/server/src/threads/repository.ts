@@ -185,6 +185,8 @@ export async function listThreads(
     .from(threads)
     .where(
       and(
+        // Explicit, not only in `scope` and RLS: see the KOBE-16 note in packages/db/README.md.
+        eq(threads.teamId, viewer.teamId),
         scope,
         sql`${threads.deletedAt} IS NULL`,
         options.cursor ? after(threads.lastActivityAt, options.cursor) : undefined,
