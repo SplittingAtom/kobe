@@ -17,3 +17,4 @@ export {
   type RunBudgetGate,
 } from "./seams.js";
 export type { RunSweepResult } from "./sweeper.js";
+export { PINNED_AGENTS } from "./agents.js";

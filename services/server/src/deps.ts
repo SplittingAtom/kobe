@@ -19,6 +19,7 @@ import {
 } from "./sandbox-wire/index.js";
 import {
   DbRunOrchestrator,
+  PINNED_AGENTS,
   type RunOrchestratorOptions,
   type ServerRunOrchestrator,
 } from "./runs/index.js";
@@ -158,6 +159,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   });
   const runs: ServerRunOrchestrator = new DbRunOrchestrator({
     ...options.runs,
+    agents: options.runs?.agents ?? PINNED_AGENTS,
     db: database.db,
     router: sandboxWire.router,
   });

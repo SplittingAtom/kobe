@@ -18,6 +18,7 @@ describe("orchestrator events", () => {
           ownerUserId: "u",
           status: "running",
           leafEntryId: "abc",
+          agentScope: null,
           agentId: null,
           agentVersion: null,
           deletedAt: null,

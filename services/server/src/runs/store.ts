@@ -10,7 +10,7 @@ import {
   type RunTrigger,
   type ThreadStatus,
 } from "@kobe/protocol";
-import { sql, type KobeTx } from "@kobe/db";
+import { sql, type AgentScope, type KobeTx } from "@kobe/db";
 import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js";
 import { THREAD_LOCK_TIMEOUT } from "../threads/repository.js";
 import { RunError } from "./errors.js";
@@ -179,6 +179,7 @@ export interface ThreadRow {
   readonly ownerUserId: string;
   readonly status: ThreadStatus;
   readonly leafEntryId: string | null;
+  readonly agentScope: AgentScope | null;
   readonly agentId: string | null;
   readonly agentVersion: number | null;
   readonly deletedAt: Date | null;
@@ -204,11 +205,13 @@ export async function lockThreadRow(
     owner_user_id: string;
     status: ThreadStatus;
     leaf_entry_id: string | null;
+    agent_scope: AgentScope | null;
     agent_id: string | null;
     agent_version: number | null;
     deleted_at: Date | string | null;
   }>(sql`
-    SELECT id, owner_user_id, status, leaf_entry_id, agent_id, agent_version, deleted_at
+    SELECT id, owner_user_id, status, leaf_entry_id, agent_scope, agent_id, agent_version,
+           deleted_at
       FROM threads WHERE team_id = ${teamId} AND id = ${threadId} FOR UPDATE`);
   const r = res.rows[0];
   return r
@@ -217,6 +220,7 @@ export async function lockThreadRow(
         ownerUserId: r.owner_user_id,
         status: r.status,
         leafEntryId: r.leaf_entry_id,
+        agentScope: r.agent_scope,
         agentId: r.agent_id,
         agentVersion: r.agent_version,
         deletedAt: asDate(r.deleted_at),

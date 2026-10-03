@@ -435,3 +435,39 @@ describe("forced interleavings and edges (L7)", () => {
     }
   });
 });
+
+describe("pinned agent at run start (KOBE-46)", () => {
+  it("starts with the thread's exact pinned version and fails visibly when it is unavailable", async () => {
+    const w = await f.world();
+    const ws = await f.connect(w);
+    const b = f.on(0, w.owner);
+    const created = await b.post("/v1/agents", {
+      scope: "team",
+      frontmatter: { name: "Pinned" },
+      prompt: "v1",
+    });
+    expect(created.status, JSON.stringify(created.json)).toBe(201);
+    const agentId = created.json.agent.id as string;
+    expect(
+      (await b.request("POST", `/v1/agents/${agentId}/publish`, {}, { "if-match": "*" })).status,
+    ).toBe(201);
+    const thread = await b.post("/v1/threads", { agent_id: agentId });
+    expect(thread.status, JSON.stringify(thread.json)).toBe(201);
+    const threadId = thread.json.thread_id as string;
+    const run = await f.message(w.owner, threadId, "hi");
+    const start = await ws.started(run);
+    expect(start.config?.agent).toEqual({ agent_id: agentId, version: 1 });
+    expect(await f.events(w.team, run)).toMatchObject([
+      { type: "run.started", payload: { agent_id: agentId, agent_version: 1 } },
+    ]);
+    ws.reply(start, "ok");
+    await f.until(w.team, run, "completed");
+    // Never a fallback: a suspended agent fails the thread's next run.
+    await f.fx.admin.query(`UPDATE team_agents SET status = 'suspended' WHERE id = $1`, [agentId]);
+    const next = await f.message(w.owner, threadId, "again");
+    expect(await f.status(w.team, next)).toBe("failed");
+    expect((await f.events(w.team, next)).at(-1)?.payload).toMatchObject({
+      error: { code: "agent_unavailable" },
+    });
+  });
+});

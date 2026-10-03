@@ -247,6 +247,20 @@ Tests in `runs-review.db.test.ts` (14), written against the reported sequences f
 Refactor: sandbox-facing work moved to `runs/dispatch.ts` (start, durable stops, budget stops,
 recovery) and thread access to `runs/access.ts`; `sweeper.ts` only finds work.
 
+## KOBE-46 merged (#35) — run-start pin resolution
+
+`runs/agents.ts` `PINNED_AGENTS` is now the production resolver (wired in `createServerDeps`; tests
+may override `runs.agents`): inside the run-start transaction, under the thread lock, it calls
+`resolvePinnedAgent(tx, {team, owner}, {agentScope, agentId, agentVersion})` — never a fallback; an
+error fails the run `agent_unavailable` — and makes the mode only stricter:
+`strictestApprovalMode(run mode, effectiveApprovalMode(version.toolManifest, readApprovalFloor))`.
+Unpinned threads still get KOBE-46's install floor. **Both floor keys now apply** (KOBE-24's
+`policy.approval_mode_floor` + team floor at creation, KOBE-46's `policy.approval_floor` at start);
+which key survives is still the coordinator's call. Left to KOBE-47/41: Pi config from the version
+(model alias, prompt, skills, connectors) and per-call `versionAllowsCall` in
+`RunPolicyContextSource`. Test: "starts with the thread's exact pinned version and fails visibly
+when it is unavailable". Migration regenerated as `0021_run_orchestrator` (`db:rebase`).
+
 ## Evidence (acceptance criteria → test or command output)
 
 `services/server/src/runs.db.test.ts` (20 tests), `runs-concurrency.db.test.ts` (5),

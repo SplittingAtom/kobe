@@ -161,6 +161,7 @@ async function resolveForStart(
       threadId: thread.id,
       runId: run.id,
       trigger: run.trigger,
+      agentScope: thread.agentScope,
       agentId: thread.agentId,
       agentVersion: thread.agentVersion,
       approvalMode: run.approvalMode,

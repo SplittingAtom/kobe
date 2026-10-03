@@ -1,5 +1,5 @@
 import type { ApprovalMode, ErrorInfo, PiThreadConfig, RunTrigger } from "@kobe/protocol";
-import type { KobeTx } from "@kobe/db";
+import type { AgentScope, KobeTx } from "@kobe/db";
 
 /**
  * Seams the orchestrator calls on the run-start path, filled in by later tickets. Each runs inside
@@ -13,7 +13,8 @@ export interface AgentResolutionInput {
   readonly threadId: string;
   readonly runId: string;
   readonly trigger: RunTrigger;
-  /** The thread's pin (D19); both null = the install default agent. */
+  /** The thread's pin (D19); all null = the install default agent. */
+  readonly agentScope: AgentScope | null;
   readonly agentId: string | null;
   readonly agentVersion: number | null;
   /** The run's mode as fixed at creation (already clamped to the install/team floor). */
