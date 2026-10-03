@@ -22,6 +22,7 @@ if (config.auth && config.smtp) {
     databaseUrl: config.databaseUrl,
     ...config.auth,
     mailer: createSmtpMailer(config.smtp),
+    agents: { maxVersions: config.agentMaxVersions },
   });
   if (config.smtp.security === "none") {
     logger.warn(

@@ -32,7 +32,11 @@ export const entryIdSchema = idSchema;
 export const titleSchema = z.string().trim().min(1).max(TITLE_MAX).regex(NO_CONTROL_CHARS);
 
 export const createThreadBodySchema = z.strictObject({
-  /** Agent to pin (D19). Null or absent = the install default agent until agents exist. */
+  /**
+   * Agent to start with (D19): a team agent of the active team, one of the caller's personal
+   * agents, or a gallery agent. The thread pins its current published version. Null or absent =
+   * the install default agent.
+   */
   agent_id: uuidSchema.nullable().optional(),
   /** Project the thread belongs to (D23); private to its author until shared. */
   project_id: uuidSchema.nullable().optional(),
@@ -53,6 +57,14 @@ export const updateThreadBodySchema = z
 export type UpdateThreadBody = z.infer<typeof updateThreadBodySchema>;
 
 export const setLeafBodySchema = z.strictObject({ entry_id: entryIdSchema });
+
+/**
+ * `POST /v1/threads/{id}/agent-version` (D19 one-click switch): pin another published version of
+ * the thread's agent; absent = its current version ("v3 available").
+ */
+export const switchAgentVersionBodySchema = z.strictObject({
+  version: z.number().int().min(1).max(2_147_483_647).optional(),
+});
 
 const limitParam = (max: number, fallback: number) =>
   z
@@ -154,6 +166,11 @@ export const threadSearchPageSchema = z.object({
 });
 
 export const threadDetailSchema = threadSummarySchema.extend({
+  /**
+   * The newest published version of the pinned agent (D19 "v3 available" when it is greater than
+   * `agent_version`); null without an agent or when the agent is no longer available.
+   */
+  agent_current_version: z.number().int().nullable(),
   entries: z.array(threadEntrySchema),
   /** Pass as `after` to `GET /v1/threads/{id}/entries` for more; null when all were returned. */
   next_entries_after: z.number().int().nullable(),

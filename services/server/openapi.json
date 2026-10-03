@@ -156,6 +156,7 @@
             }
           }
         },
+        "description": "With `agent_id`, the thread pins the agent's current published version (D19). Suspended, archived and never-published agents answer 409 `agent_unavailable`.",
         "responses": {
           "201": {
             "description": "The new thread.",
@@ -208,7 +209,7 @@
             }
           },
           "409": {
-            "description": "`no_active_team` or `team_mismatch` (stale tab), or a thread conflict.",
+            "description": "`agent_unavailable`, `no_active_team` or `team_mismatch` (stale tab).",
             "content": {
               "application/json": {
                 "schema": {
@@ -795,6 +796,106 @@
           },
           "409": {
             "description": "`no_active_team` or `team_mismatch` (stale tab), or a thread conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/threads/{id}/agent-version": {
+      "post": {
+        "operationId": "switchThreadAgentVersion",
+        "summary": "Pin another published version of the thread's agent (owner only)",
+        "description": "D19 one-click switch (\"v3 available\"): without `version`, the agent's current version. Refused while a run is active (`thread_busy`).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": true,
+            "description": "The team the client believes is active. Required on changes; must match.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchAgentVersionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The thread with its new pin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Thread"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`, `invalid_cursor` or `team_header_required`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, `forbidden` (team role) or `read_only`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`thread_not_found`, `agent_not_found` or `version_not_found`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_agent`, `agent_unavailable`, `thread_busy`, `thread_in_trash`, or a team conflict.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1553,6 +1654,18 @@
               }
             ]
           },
+          "agent_current_version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "entries": {
             "type": "array",
             "items": {
@@ -1640,6 +1753,7 @@
           "created_at",
           "deleted_at",
           "purge_after",
+          "agent_current_version",
           "entries",
           "next_entries_after"
         ],
@@ -1793,6 +1907,17 @@
           }
         },
         "required": ["entry_id"],
+        "additionalProperties": false
+      },
+      "SwitchAgentVersionBody": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          }
+        },
         "additionalProperties": false
       },
       "CreatedThread": {

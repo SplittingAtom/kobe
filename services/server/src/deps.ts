@@ -8,7 +8,9 @@ import { createAuth, type KobeAuth } from "./auth/auth.js";
 import { createRunEventHub, type HubOptions, type RunEventHub } from "./event-stream/hub.js";
 import { createStreamReader, type StreamReader } from "./event-stream/read.js";
 import { STREAM_DEFAULTS, type StreamTimings } from "./event-stream/stream.js";
+import { DEFAULT_VERSION_LIMITS } from "./agents/versions.js";
 import type { Mailer } from "./mail/mailer.js";
+import type { RateLimitRule } from "./rate-limit.js";
 import {
   createDbRunContextSource,
   createSandboxWire,
@@ -33,11 +35,26 @@ export interface ServerDepsOptions {
   };
   /** Outgoing email (invitations, password resets, notifications). */
   readonly mailer: Mailer;
+  /** Agent version limits (KOBE-46); defaults in `AGENT_LIMIT_DEFAULTS`. */
+  readonly agents?: Partial<AgentLimits>;
   /** Off-request-path work; tests pass their own to wait on it (default: a new tracker). */
   readonly background?: BackgroundTasks;
   /** Sandbox wire seams and tuning (KOBE-24): approvals, UI, run hooks, wake, policy context. */
   readonly sandboxWire?: Partial<Omit<SandboxWireOptions, "db" | "databaseUrl">>;
 }
+
+/** Limits on publishing agent versions (KOBE-46 review M3). */
+export interface AgentLimits {
+  /** Versions per agent (config `KOBE_AGENT_MAX_VERSIONS`). */
+  readonly maxVersions: number;
+  /** Publishes + rollbacks per user, across agents. */
+  readonly publishRate: RateLimitRule;
+}
+
+export const AGENT_LIMIT_DEFAULTS: AgentLimits = {
+  maxVersions: DEFAULT_VERSION_LIMITS.maxVersions,
+  publishRate: { windowMs: 10 * 60_000, max: 30 },
+};
 
 export interface NewUser {
   readonly email: string;
@@ -56,6 +73,7 @@ export interface ServerDeps {
     readonly timings: StreamTimings;
   };
   readonly mailer: Mailer;
+  readonly agentLimits: AgentLimits;
   /** Off-request-path work (emails, attempt audit); drained by close(). */
   readonly background: BackgroundTasks;
   /** Logs and attests the audit chain head (started by index.ts, not in tests). */
@@ -126,6 +144,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     publicUrl: new URL(options.publicUrl).origin,
     eventStream: { hub, reader, timings: { ...STREAM_DEFAULTS, ...options.eventStream?.timings } },
     mailer: options.mailer,
+    agentLimits: { ...AGENT_LIMIT_DEFAULTS, ...options.agents },
     background,
     authAttempts,
     auditAnchor: new AuditAnchorLogger(database.db, options.authSecret),

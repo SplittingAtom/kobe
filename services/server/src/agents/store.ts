@@ -4,6 +4,7 @@ import {
   and,
   eq,
   installAgents,
+  isNull,
   sql,
   teamAgents,
   withTeam,
@@ -19,7 +20,8 @@ import type { AgentScope } from "./access.js";
  * Agent definitions in Postgres (spec D19). Team agents live in the team table `team_agents` and
  * are always read and written inside `withTeam`; personal and gallery agents live in the
  * install-wide `install_agents`, where every query is pinned to its scope (and, for personal
- * agents, to the owner). A row is the agent's editable draft; published versions are KOBE-46.
+ * agents, to the owner). A row is the agent's editable draft; published versions, archive and
+ * thread pins are `versions.ts` (KOBE-46).
  */
 
 export interface AgentRecord {
@@ -32,6 +34,8 @@ export interface AgentRecord {
   readonly prompt: string;
   readonly revision: number;
   readonly currentVersion: number | null;
+  /** Set once an agent with versions is retired (KOBE-46): read-only, no new threads. */
+  readonly archivedAt: Date | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
@@ -42,7 +46,7 @@ export type AgentLocation =
   | { readonly scope: "personal"; readonly ownerUserId: string }
   | { readonly scope: "gallery" };
 
-/** Per-location caps: keeps lists bounded without pagination. */
+/** Per-location caps on live (not archived) agents: keeps lists bounded without pagination. */
 export const AGENT_CAPS: Readonly<Record<AgentScope, number>> = {
   team: 500,
   personal: 100,
@@ -50,7 +54,7 @@ export const AGENT_CAPS: Readonly<Record<AgentScope, number>> = {
 };
 
 export type CreateError = "slug_taken" | "limit_reached";
-export type UpdateError = "not_found" | "revision_mismatch";
+export type UpdateError = "not_found" | "revision_mismatch" | "archived";
 export type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
 
 const columnsOf = (t: typeof teamAgents | typeof installAgents) => ({
@@ -62,15 +66,18 @@ const columnsOf = (t: typeof teamAgents | typeof installAgents) => ({
   prompt: t.prompt,
   revision: t.revision,
   currentVersion: t.currentVersion,
+  archivedAt: t.archivedAt,
   createdAt: t.createdAt,
   updatedAt: t.updatedAt,
 });
-const TEAM = columnsOf(teamAgents);
-const INSTALL = columnsOf(installAgents);
+export const TEAM = columnsOf(teamAgents);
+export const INSTALL = columnsOf(installAgents);
 
-type Row = Omit<AgentRecord, "scope" | "frontmatter"> & { frontmatter: Record<string, unknown> };
+export type Row = Omit<AgentRecord, "scope" | "frontmatter"> & {
+  frontmatter: Record<string, unknown>;
+};
 
-const toRecord = (scope: AgentScope, row: Row): AgentRecord => ({
+export const toRecord = (scope: AgentScope, row: Row): AgentRecord => ({
   ...row,
   scope,
   // Written only after validation by @kobe/agent-file.
@@ -83,7 +90,7 @@ const OWNER_ID = z.uuid();
  * The only wall between users' personal agents: install_agents has no RLS (install-wide, D6), so
  * every install_agents query goes through here and a personal location must name a valid owner.
  */
-function installWhere(location: Exclude<AgentLocation, { scope: "team" }>) {
+export function installWhere(location: Exclude<AgentLocation, { scope: "team" }>) {
   if (location.scope === "gallery") return eq(installAgents.scope, "gallery");
   if (!OWNER_ID.safeParse(location.ownerUserId).success) {
     throw new Error("store: personal agents need an owner (a user id)");
@@ -98,10 +105,11 @@ function installWhere(location: Exclude<AgentLocation, { scope: "team" }>) {
 export type AgentSource = "json" | "import" | "fork";
 
 /** The team an agent's audit events belong to: team agents only (D6); others are install-level. */
-const auditTeam = (location: AgentLocation) => (location.scope === "team" ? location.teamId : null);
+export const auditTeam = (location: AgentLocation) =>
+  location.scope === "team" ? location.teamId : null;
 
 /** Runs `fn` in the right transaction: team-scoped (RLS) for team agents, plain otherwise. */
-function inLocation<T>(db: KobeDb, location: AgentLocation, fn: (tx: KobeTx) => Promise<T>) {
+export function inLocation<T>(db: KobeDb, location: AgentLocation, fn: (tx: KobeTx) => Promise<T>) {
   return location.scope === "team"
     ? withTeam(db, location.teamId, fn)
     : db.transaction((tx) => fn(tx));
@@ -188,8 +196,11 @@ export async function createAgent(
       await tx.execute(
         sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey(location)}, 0))`,
       );
-      const taken = new Set(await takenSlugs(tx, location));
-      if (taken.size >= AGENT_CAPS[location.scope]) return { ok: false, error: "limit_reached" };
+      const existing = await takenSlugs(tx, location);
+      const taken = new Set(existing.map((r) => r.slug));
+      // Archived agents keep their slug (exports and history name it) but not a slot (KOBE-46).
+      const live = existing.filter((r) => r.archivedAt === null).length;
+      if (live >= AGENT_CAPS[location.scope]) return { ok: false, error: "limit_reached" };
       const slug = input.slug ?? pickSlug(taken, input.baseSlug);
       if (slug === null || taken.has(slug)) return { ok: false, error: "slug_taken" };
       const values = {
@@ -243,15 +254,16 @@ function requireOwner(input: NewAgent): string {
   return input.ownerUserId;
 }
 
-async function takenSlugs(tx: KobeTx, location: AgentLocation): Promise<string[]> {
-  const rows =
-    location.scope === "team"
-      ? await tx.select({ slug: teamAgents.slug }).from(teamAgents)
-      : await tx
-          .select({ slug: installAgents.slug })
-          .from(installAgents)
-          .where(installWhere(location));
-  return rows.map((r) => r.slug);
+async function takenSlugs(
+  tx: KobeTx,
+  location: AgentLocation,
+): Promise<{ slug: string; archivedAt: Date | null }[]> {
+  return location.scope === "team"
+    ? tx.select({ slug: teamAgents.slug, archivedAt: teamAgents.archivedAt }).from(teamAgents)
+    : tx
+        .select({ slug: installAgents.slug, archivedAt: installAgents.archivedAt })
+        .from(installAgents)
+        .where(installWhere(location));
 }
 
 /**
@@ -280,6 +292,7 @@ export async function updateAgent(
             .where(
               and(
                 eq(teamAgents.id, id),
+                isNull(teamAgents.archivedAt),
                 expectedRevision === undefined
                   ? undefined
                   : eq(teamAgents.revision, expectedRevision),
@@ -293,6 +306,7 @@ export async function updateAgent(
               and(
                 installWhere(location),
                 eq(installAgents.id, id),
+                isNull(installAgents.archivedAt),
                 expectedRevision === undefined
                   ? undefined
                   : eq(installAgents.revision, expectedRevision),
@@ -313,47 +327,30 @@ export async function updateAgent(
       });
       return { ok: true, value: toRecord(location.scope, row) };
     }
-    const exists = await existsIn(tx, location, id);
-    return { ok: false, error: exists ? "revision_mismatch" : "not_found" };
+    const current = await lockAgent(tx, location, id);
+    if (!current) return { ok: false, error: "not_found" };
+    return { ok: false, error: current.archivedAt ? "archived" : "revision_mismatch" };
   });
 }
 
-async function existsIn(tx: KobeTx, location: AgentLocation, id: string): Promise<boolean> {
-  const rows =
-    location.scope === "team"
-      ? await tx.select({ id: teamAgents.id }).from(teamAgents).where(eq(teamAgents.id, id))
-      : await tx
-          .select({ id: installAgents.id })
-          .from(installAgents)
-          .where(and(installWhere(location), eq(installAgents.id, id)));
-  return rows.length > 0;
-}
-
-/** Deletes a draft-only agent; false when it doesn't exist in `location`. */
-export async function deleteAgent(
-  db: KobeDb,
+/**
+ * The agent row, locked (`FOR UPDATE`) for the rest of `tx`: publishes, rollbacks, archive and
+ * delete of one agent serialize on it. Null when it doesn't exist in `location`.
+ */
+export async function lockAgent(
+  tx: KobeTx,
   location: AgentLocation,
   id: string,
-): Promise<boolean> {
-  return inLocation(db, location, async (tx) => {
-    const [row] =
-      location.scope === "team"
-        ? await tx
-            .delete(teamAgents)
-            .where(eq(teamAgents.id, id))
-            .returning({ slug: teamAgents.slug })
-        : await tx
-            .delete(installAgents)
-            .where(and(installWhere(location), eq(installAgents.id, id)))
-            .returning({ slug: installAgents.slug });
-    if (!row) return false;
-    await recordAudit(tx, {
-      action: "agent.deleted",
-      teamId: auditTeam(location),
-      target: { agentId: id, scope: location.scope, slug: row.slug },
-    });
-    return true;
-  });
+): Promise<AgentRecord | null> {
+  const [row]: Row[] =
+    location.scope === "team"
+      ? await tx.select(TEAM).from(teamAgents).where(eq(teamAgents.id, id)).for("update")
+      : await tx
+          .select(INSTALL)
+          .from(installAgents)
+          .where(and(installWhere(location), eq(installAgents.id, id)))
+          .for("update");
+  return row ? toRecord(location.scope, row) : null;
 }
 
 /** Suspends or reactivates an agent (inventory, D19); null when it doesn't exist. */

@@ -31,6 +31,13 @@ const configSchema = z.object({
         .optional(),
     )
     .optional(),
+  // Published versions per agent (KOBE-46): versions are immutable and never deleted by the app.
+  KOBE_AGENT_MAX_VERSIONS: z.coerce
+    .number({ error: "KOBE_AGENT_MAX_VERSIONS must be a number" })
+    .int("KOBE_AGENT_MAX_VERSIONS must be an integer")
+    .min(1, "KOBE_AGENT_MAX_VERSIONS must be between 1 and 100000")
+    .max(100_000, "KOBE_AGENT_MAX_VERSIONS must be between 1 and 100000")
+    .default(1000),
 });
 
 /** Auth settings: required by the API server only (the scheduler never sees these secrets). */
@@ -71,6 +78,8 @@ export interface Config {
   readonly databaseUrl: string;
   /** Sandbox RuntimeClass; undefined means agents stay disabled. */
   readonly runtimeClassName: string | undefined;
+  /** Published versions per agent (KOBE-46). */
+  readonly agentMaxVersions: number;
   /** Present for the API server only. */
   readonly auth?: AuthConfig;
   /** Present for the API server only (invites, password resets, notifications). */
@@ -91,6 +100,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     process: base.data.KOBE_PROCESS,
     databaseUrl: base.data.KOBE_DATABASE_URL,
     runtimeClassName: base.data.KOBE_RUNTIME_CLASS,
+    agentMaxVersions: base.data.KOBE_AGENT_MAX_VERSIONS,
   };
   if (config.process !== "server") return config;
   const auth = authSchema.safeParse(env);
