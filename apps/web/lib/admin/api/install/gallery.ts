@@ -1,6 +1,6 @@
 /** Install console: gallery agents (`/v1/install`, install.gallery.manage). Responses arrive camelized. */
 import { apiRequest, type ApiResult } from "../../../api/client";
-import type { AgentSaved, AgentSummary } from "../agents";
+import { revisionTag, type AgentSaved, type AgentSummary } from "../agents";
 
 const enc = encodeURIComponent;
 
@@ -18,8 +18,23 @@ export function setGalleryAgentStatus(
   return apiRequest(`${GALLERY_PATH}/${enc(id)}/status`, { method: "PUT", json: { status } });
 }
 
-export function deleteGalleryAgent(id: string): Promise<ApiResult<void>> {
+/** Deletes a never-published agent (204, no body) or archives a published one (200, the agent). */
+export function deleteGalleryAgent(id: string): Promise<ApiResult<AgentSaved | undefined>> {
   return apiRequest(`${GALLERY_PATH}/${enc(id)}`, { method: "DELETE" });
+}
+
+/** Publishes the draft the console showed as the next version (KOBE-46; 412 if it changed). */
+export function publishGalleryAgent(
+  agent: Pick<AgentSummary, "id" | "revision">,
+): Promise<ApiResult<AgentSaved>> {
+  return apiRequest(`${GALLERY_PATH}/${enc(agent.id)}/publish`, {
+    method: "POST",
+    ifMatch: revisionTag(agent),
+  });
+}
+
+export function unarchiveGalleryAgent(id: string): Promise<ApiResult<AgentSaved>> {
+  return apiRequest(`${GALLERY_PATH}/${enc(id)}/unarchive`, { method: "POST" });
 }
 
 /** Imports an agent markdown file (§6.3) into the gallery. */

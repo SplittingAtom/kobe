@@ -8,13 +8,21 @@ import { createAuth, type KobeAuth } from "./auth/auth.js";
 import { createRunEventHub, type HubOptions, type RunEventHub } from "./event-stream/hub.js";
 import { createStreamReader, type StreamReader } from "./event-stream/read.js";
 import { STREAM_DEFAULTS, type StreamTimings } from "./event-stream/stream.js";
+import { DEFAULT_VERSION_LIMITS } from "./agents/versions.js";
 import type { Mailer } from "./mail/mailer.js";
+import type { RateLimitRule } from "./rate-limit.js";
 import {
   createDbRunContextSource,
   createSandboxWire,
   type SandboxWire,
   type SandboxWireOptions,
 } from "./sandbox-wire/index.js";
+import {
+  DbRunOrchestrator,
+  PINNED_AGENTS,
+  type RunOrchestratorOptions,
+  type ServerRunOrchestrator,
+} from "./runs/index.js";
 import { UserLifecycle } from "./users/lifecycle.js";
 
 export interface ServerDepsOptions {
@@ -33,11 +41,28 @@ export interface ServerDepsOptions {
   };
   /** Outgoing email (invitations, password resets, notifications). */
   readonly mailer: Mailer;
+  /** Agent version limits (KOBE-46); defaults in `AGENT_LIMIT_DEFAULTS`. */
+  readonly agents?: Partial<AgentLimits>;
   /** Off-request-path work; tests pass their own to wait on it (default: a new tracker). */
   readonly background?: BackgroundTasks;
   /** Sandbox wire seams and tuning (KOBE-24): approvals, UI, run hooks, wake, policy context. */
   readonly sandboxWire?: Partial<Omit<SandboxWireOptions, "db" | "databaseUrl">>;
+  /** Run orchestrator seams and tuning (KOBE-30): agent resolution, budgets, timings. */
+  readonly runs?: Partial<Omit<RunOrchestratorOptions, "db" | "router">>;
 }
+
+/** Limits on publishing agent versions (KOBE-46 review M3). */
+export interface AgentLimits {
+  /** Versions per agent (config `KOBE_AGENT_MAX_VERSIONS`). */
+  readonly maxVersions: number;
+  /** Publishes + rollbacks per user, across agents. */
+  readonly publishRate: RateLimitRule;
+}
+
+export const AGENT_LIMIT_DEFAULTS: AgentLimits = {
+  maxVersions: DEFAULT_VERSION_LIMITS.maxVersions,
+  publishRate: { windowMs: 10 * 60_000, max: 30 },
+};
 
 export interface NewUser {
   readonly email: string;
@@ -56,6 +81,7 @@ export interface ServerDeps {
     readonly timings: StreamTimings;
   };
   readonly mailer: Mailer;
+  readonly agentLimits: AgentLimits;
   /** Off-request-path work (emails, attempt audit); drained by close(). */
   readonly background: BackgroundTasks;
   /** Logs and attests the audit chain head (started by index.ts, not in tests). */
@@ -69,6 +95,11 @@ export interface ServerDeps {
    * sandbox from any replica; `attach` serves the WebSocket on the sandbox listener only.
    */
   readonly sandboxWire: SandboxWire;
+  /**
+   * Run orchestrator (KOBE-30): messages, queue, steer, stop, retry. Reaches sandboxes through
+   * `sandboxWire.router`; the wire calls back when it ends a run.
+   */
+  readonly runs: ServerRunOrchestrator;
   /** Creates an email+password user (and optional install role) atomically, without sign-up. */
   createUserWithPassword(
     input: NewUser,
@@ -107,13 +138,33 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     ...(options.eventStream?.poolMax ? { max: options.eventStream.poolMax } : {}),
   });
 
+  // The wire is created first (the orchestrator needs its router); its run-ended hook reaches the
+  // orchestrator through this late binding.
+  const late: { runs?: ServerRunOrchestrator } = {};
+  const extraHooks = options.sandboxWire?.hooks;
   const sandboxWire = createSandboxWire({
     ...options.sandboxWire,
     background,
     runContext: options.sandboxWire?.runContext ?? createDbRunContextSource(),
+    hooks: {
+      async onRunEnded(event) {
+        try {
+          await extraHooks?.onRunEnded?.(event);
+        } finally {
+          await late.runs?.onRunEnded(event);
+        }
+      },
+    },
     db: database.db,
     databaseUrl: options.databaseUrl,
   });
+  const runs: ServerRunOrchestrator = new DbRunOrchestrator({
+    ...options.runs,
+    agents: options.runs?.agents ?? PINNED_AGENTS,
+    db: database.db,
+    router: sandboxWire.router,
+  });
+  late.runs = runs;
   const lifecycle = new UserLifecycle();
   // A deactivated user's sandboxes lose their connections on every replica at once (KOBE-13).
   lifecycle.on("deactivated", {
@@ -127,11 +178,13 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     publicUrl: new URL(options.publicUrl).origin,
     eventStream: { hub, reader, timings: { ...STREAM_DEFAULTS, ...options.eventStream?.timings } },
     mailer: options.mailer,
+    agentLimits: { ...AGENT_LIMIT_DEFAULTS, ...options.agents },
     background,
     authAttempts,
     auditAnchor: new AuditAnchorLogger(database.db, options.authSecret),
     lifecycle,
     sandboxWire,
+    runs,
     async createUserWithPassword({ email, name, password }, { installRole, recordSetup } = {}) {
       const ctx = await auth.$context;
       const hash = await ctx.password.hash(password);
@@ -168,6 +221,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
       return typeof candidate === "string" && timingSafeEqual(digest(candidate), setupDigest);
     },
     async close() {
+      runs.close();
       await sandboxWire.close();
       // In-flight emails and audit writes finish before the mailer and database go away.
       await background.idle();

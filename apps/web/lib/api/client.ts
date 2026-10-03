@@ -26,6 +26,8 @@ export interface RequestOptions {
   readonly raw?: { readonly body: string; readonly contentType: string } | undefined;
   /** The active team this request acts on (`X-Kobe-Team`, the server's stale-tab guard). */
   readonly teamId?: string | undefined;
+  /** `If-Match` (an ETag such as `"3"`): agent edits and publishes (KOBE-45/46). */
+  readonly ifMatch?: string | undefined;
   readonly fetchFn?: typeof fetch | undefined;
 }
 
@@ -96,7 +98,7 @@ export async function apiRequest<T>(
   options: RequestOptions = {},
 ): Promise<ApiResult<T>> {
   assertApiPath(path);
-  const { method = "GET", json, raw, teamId, fetchFn = fetch } = options;
+  const { method = "GET", json, raw, teamId, ifMatch, fetchFn = fetch } = options;
   const headers = new Headers({ accept: "application/json" });
   let body: string | null = null;
   if (json !== undefined) {
@@ -107,6 +109,7 @@ export async function apiRequest<T>(
     body = raw.body;
   }
   if (teamId !== undefined) headers.set(TEAM_HEADER, teamId);
+  if (ifMatch !== undefined) headers.set("if-match", ifMatch);
 
   let res: Response;
   try {
