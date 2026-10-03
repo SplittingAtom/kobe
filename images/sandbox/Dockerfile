@@ -1,7 +1,9 @@
-# syntax=docker/dockerfile:1
 # Kobe sandbox image (spec D12, KOBE-21): the one image every agent sandbox runs under gVisor.
 # Build from the repository root: docker build -f images/sandbox/Dockerfile .
 # Every input is pinned (base digests, npm, Pi lockfile, hashed pip lock); bump deliberately.
+# No `# syntax=` directive: dockerd's built-in frontend parses this file, so builds don't start
+# the external docker/dockerfile frontend container (it crashed intermittently on CI runners:
+# "frontend grpc server closed unexpectedly").
 ARG NODE_IMAGE=node:22-trixie-slim@sha256:b26b04c123d9ff8ab646ceb18b9d75a1173acf64b9a401094b906d27b29338d4
 ARG PYTHON_IMAGE=python:3.12-slim-trixie@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
 ARG PNPM_VERSION=12.8.1
