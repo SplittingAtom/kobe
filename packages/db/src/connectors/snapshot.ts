@@ -41,7 +41,12 @@ export const pinnedToolSchema = z.object({
 });
 export type PinnedTool = z.infer<typeof pinnedToolSchema>;
 
-/** The tools of a stored snapshot that parse; anything else is dropped (fail closed). */
+/**
+ * The tools of a stored snapshot that parse; anything else is dropped (fail closed). Tools whose
+ * `pi_name` or upstream `name` is not unique in the snapshot are dropped too, all of them: Pi maps
+ * `get-x`, `get_x` and `get.x` to the same `mcp__s__get_x`, so policy, approvals and audit could not
+ * tell which one runs (KOBE-58 review L2; KOBE-59 should refuse such snapshots when pinning).
+ */
 export function parseToolsSnapshot(value: unknown): PinnedTool[] {
   if (!Array.isArray(value)) return [];
   const tools: PinnedTool[] = [];
@@ -49,5 +54,12 @@ export function parseToolsSnapshot(value: unknown): PinnedTool[] {
     const parsed = pinnedToolSchema.safeParse(entry);
     if (parsed.success) tools.push(parsed.data);
   }
-  return tools;
+  const count = (key: (t: PinnedTool) => string) => {
+    const seen = new Map<string, number>();
+    for (const t of tools) seen.set(key(t), (seen.get(key(t)) ?? 0) + 1);
+    return seen;
+  };
+  const piNames = count((t) => t.pi_name);
+  const names = count((t) => t.name);
+  return tools.filter((t) => piNames.get(t.pi_name) === 1 && names.get(t.name) === 1);
 }

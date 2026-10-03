@@ -52,12 +52,18 @@ export interface UpstreamCall {
 
 export interface UpstreamClient {
   callTool(call: UpstreamCall): Promise<UpstreamResult>;
+  /** Session DELETEs still in flight (bounded by `maxPendingDeletes`). */
+  readonly pendingDeletes: number;
   close(): Promise<void>;
 }
 
 export interface UpstreamOptions {
   readonly policy: UpstreamPolicy;
   readonly maxResponseBytes: number;
+  /** Sockets per upstream origin (default 32). */
+  readonly connectionsPerOrigin?: number;
+  /** Best-effort session DELETEs in flight at once; beyond it they are skipped (default 64). */
+  readonly maxPendingDeletes?: number;
   /** DNS resolution (tests resolve names to loopback). */
   readonly resolve?: (host: string) => Promise<LookupAddress[]>;
 }
@@ -154,6 +160,8 @@ export function createUpstreamClient(options: UpstreamOptions): UpstreamClient {
       },
     },
     connectTimeout: 10_000,
+    // Per origin (one MCP server): the proxy's own concurrency limits bound the rest.
+    connections: options.connectionsPerOrigin ?? 32,
   });
 
   async function readLimited(body: ReadableStream<Uint8Array> | null): Promise<string> {
@@ -269,8 +277,14 @@ export function createUpstreamClient(options: UpstreamOptions): UpstreamClient {
     return response;
   }
 
+  // Session DELETEs are best effort and fire after the call's slot is released: bounded separately
+  // so a slow upstream cannot pile them up (review L5).
+  let pendingDeletes = 0;
+  const maxPendingDeletes = options.maxPendingDeletes ?? 64;
+
   function endSession(url: URL, call: UpstreamCall, session: Session): void {
-    if (session.id === undefined) return;
+    if (session.id === undefined || pendingDeletes >= maxPendingDeletes) return;
+    pendingDeletes += 1;
     void undiciFetch(url, {
       method: "DELETE",
       dispatcher,
@@ -283,7 +297,10 @@ export function createUpstreamClient(options: UpstreamOptions): UpstreamClient {
       },
     })
       .then((res) => res.body?.cancel())
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        pendingDeletes -= 1;
+      });
   }
 
   async function callTool(call: UpstreamCall): Promise<UpstreamResult> {
@@ -341,6 +358,9 @@ export function createUpstreamClient(options: UpstreamOptions): UpstreamClient {
 
   return {
     callTool,
+    get pendingDeletes() {
+      return pendingDeletes;
+    },
     close: () => dispatcher.close(),
   };
 }

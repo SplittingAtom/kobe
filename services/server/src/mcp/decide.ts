@@ -1,22 +1,23 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
-  APPROVAL_MODES,
   canonicalJson,
   toolInputSchema,
   type JsonObject,
   type PolicyDecision,
   type PolicyEngine,
   type PolicyInput,
+  type PolicyReason,
   type PolicyReasonCode,
   type RiskClass,
+  type ToolDescriptor,
 } from "@kobe/protocol";
-import { sql, withTeam, type ConnectorAuthKind, type KobeDb, type PinnedTool } from "@kobe/db";
+import { withTeam, type ConnectorAuthKind, type KobeDb, type PinnedTool } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { logger } from "../logger.js";
-import { clampApprovalMode } from "../sandbox-wire/policy-check.js";
 import type { RunPolicyContextSource } from "../sandbox-wire/types.js";
 import type { McpApprovalFailure, McpApprovalVerifier } from "./approvals.js";
 import { describePinnedTool, loadTeamConnector, type TeamConnector } from "./catalog.js";
+import { loadActiveRuns, type ActiveRunContext } from "./run-context.js";
 
 /**
  * The MCP proxy's policy re-check (D27, D29 "MCP calls are enforced a second time at the MCP
@@ -28,9 +29,11 @@ import { describePinnedTool, loadTeamConnector, type TeamConnector } from "./cat
  *    snapshot (`unknown_tool` otherwise; drift and exposure are the engine's gates);
  * 2. the thread must be the token user's, with an active run leased to the token's sandbox;
  * 3. the policy engine (KOBE-35) decides with `enforcement_point: "mcp_proxy"` and the team's
- *    exposure, the run's clamped approval mode, its trigger and agent tool lists;
- * 4. `require_approval` → a signed approval for exactly this run, tool and input must verify and
- *    be consumed ({@link McpApprovalVerifier}); anything else is a deny;
+ *    exposure under **every** active run of the user leased to that sandbox (each with its own
+ *    clamped mode, trigger and agent tool lists), combined by `combineDecisions`: the sandbox's
+ *    thread claim selects whose approval may authorise, never which policy applies (review M1);
+ * 4. needing approval → a signed approval for exactly the named run, tool and input must verify
+ *    and be consumed ({@link McpApprovalVerifier}); anything else is a deny;
  * 5. the decision is audited (`mcp.tool_call`); an allowed call whose audit row cannot be written
  *    is refused. Every error is a deny.
  */
@@ -106,84 +109,6 @@ function deny(
   };
 }
 
-interface ActiveRun {
-  readonly runId: string;
-  readonly threadId: string;
-  readonly trigger: "user" | "schedule";
-  readonly agentId: string | null;
-  readonly agentVersion: number | null;
-  readonly projectId: string | null;
-}
-
-/** The thread's active run, owned by the token's user and leased to the token's sandbox. */
-async function loadActiveRun(
-  deps: McpDecideDeps,
-  principal: McpPrincipal,
-  threadId: string,
-): Promise<
-  | {
-      run: ActiveRun;
-      mode: PolicyInput["run"]["approval_mode"];
-      toolsAllow: string[];
-      toolsDeny: string[];
-      projectId?: string;
-    }
-  | undefined
-> {
-  return withTeam(deps.db, principal.teamId, async (tx) => {
-    const res = await tx.execute<{
-      run_id: string;
-      thread_id: string;
-      trigger: "user" | "schedule";
-      agent_id: string | null;
-      agent_version: number | null;
-      project_id: string | null;
-    }>(sql`
-      SELECT r.id AS run_id, t.id AS thread_id, r.trigger, t.agent_id, t.agent_version, t.project_id
-        FROM runs r
-        JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
-        JOIN sandbox_run_leases l ON l.team_id = r.team_id AND l.run_id = r.id
-       WHERE r.team_id = ${principal.teamId} AND t.team_id = ${principal.teamId}
-         AND r.thread_id = ${threadId}
-         AND r.status IN ('running', 'waiting_approval')
-         AND t.owner_user_id = ${principal.userId}
-         AND l.user_id = ${principal.userId} AND l.sandbox_id = ${principal.sandboxId}
-       ORDER BY r.created_at DESC
-       LIMIT 1`);
-    const row = res.rows[0];
-    if (!row) return undefined;
-    const run: ActiveRun = {
-      runId: row.run_id,
-      threadId: row.thread_id,
-      trigger: row.trigger,
-      agentId: row.agent_id,
-      agentVersion: row.agent_version,
-      projectId: row.project_id,
-    };
-    const context = await deps.runContext.load(tx, {
-      teamId: principal.teamId,
-      runId: run.runId,
-      threadId: run.threadId,
-    });
-    if (!APPROVAL_MODES.includes(context.floor)) throw new Error("approval floor unavailable");
-    // As the wire's policy.check: scheduled runs are auto (D32), everything clamped to the floor.
-    const requested =
-      run.trigger === "schedule" ? "auto" : (context.approvalMode ?? "ask-on-write");
-    const mode = clampApprovalMode(
-      APPROVAL_MODES.includes(requested) ? requested : "ask-on-write",
-      context.floor,
-    );
-    const projectId = context.projectId ?? run.projectId ?? undefined;
-    return {
-      run,
-      mode,
-      toolsAllow: [...(context.toolsAllow ?? [])],
-      toolsDeny: [...(context.toolsDeny ?? [])],
-      ...(projectId === undefined ? {} : { projectId }),
-    };
-  });
-}
-
 interface AuditFacts {
   readonly connectorId: string;
   readonly piName: string;
@@ -234,6 +159,69 @@ async function audit(
 function fallbackPiName(connector: TeamConnector, tool: string): string {
   const segment = (s: string) => s.replace(/[^A-Za-z0-9_]/g, "_");
   return `mcp__${segment(connector.name)}__${segment(tool) || "_"}`.slice(0, 256);
+}
+
+function policyInputFor(
+  principal: McpPrincipal,
+  run: ActiveRunContext,
+  tool: ToolDescriptor,
+  toolCallId: string,
+  input: JsonObject,
+  connector: TeamConnector,
+): PolicyInput {
+  return {
+    actor: { user_id: principal.userId, kind: run.trigger },
+    team_id: principal.teamId,
+    agent: {
+      agent_id: run.agentId,
+      version: run.agentVersion,
+      tools_allow: run.toolsAllow,
+      tools_deny: run.toolsDeny,
+    },
+    run: { run_id: run.runId, thread_id: run.threadId, approval_mode: run.mode },
+    tool,
+    tool_call_id: toolCallId,
+    input,
+    context: {
+      enforcement_point: "mcp_proxy",
+      connector_exposure: connector.exposure,
+      ...(run.projectId === undefined ? {} : { project_id: run.projectId }),
+    },
+  };
+}
+
+type Combined =
+  | { readonly effect: "allow" | "require_approval"; readonly reason: PolicyReason }
+  | { readonly effect: "deny"; readonly reason: PolicyReason };
+
+const POLICY_ERROR: PolicyReason = {
+  code: "policy_error",
+  stage: "install_deny",
+  message: "Policy could not be evaluated, so the call was denied.",
+};
+
+/**
+ * One decision for a call that may come from any of the sandbox's active runs (review M1):
+ * - the named run denies → deny (its own policy forbids it, approval or not);
+ * - every run allows → allow (no run's policy asks for more);
+ * - otherwise (the named run asks, or a sibling run asks or denies) → the user's signed approval
+ *   of exactly this input in the named run is required. That approval is the user's consent to
+ *   this exact call, whichever of their processes runs it; without one, a laxer sibling (a
+ *   scheduled `auto` run, a broader allow list) can never stand in for the run that asks.
+ */
+export function combineDecisions(
+  named: PolicyDecision,
+  siblings: readonly PolicyDecision[],
+): Combined {
+  const first = (d: PolicyDecision) => d.reasons[0] ?? POLICY_ERROR;
+  if (named.effect === "deny") return { effect: "deny", reason: first(named) };
+  const strict = siblings.find((d) => d.effect !== "allow");
+  if (named.effect === "allow" && strict === undefined)
+    return { effect: "allow", reason: first(named) };
+  return {
+    effect: "require_approval",
+    reason: named.effect === "require_approval" ? first(named) : first(strict ?? named),
+  };
 }
 
 /** Decides one call; never throws (every failure is a deny). */
@@ -297,44 +285,38 @@ export async function decideMcpCall(
     if (request.threadId === undefined) {
       return await denied("run_not_active", "The call names no thread, so it was denied.");
     }
-    const active = await loadActiveRun(deps, principal, request.threadId);
-    if (!active) {
+    const loaded = await loadActiveRuns(deps.db, deps.runContext, principal);
+    if (!loaded.ok) {
+      return await denied("run_not_active", "Too many active runs in this sandbox; try again.");
+    }
+    // The run whose thread the sandbox named: its approvals are the ones that can authorise.
+    const named = loaded.runs.find((r) => r.threadId === request.threadId);
+    if (!named) {
       return await denied("run_not_active", "No active run of this thread runs in this sandbox.");
     }
-    facts = { ...facts, runId: active.run.runId };
+    facts = { ...facts, runId: named.runId };
 
-    const policyInput: PolicyInput = {
-      actor: { user_id: principal.userId, kind: active.run.trigger },
-      team_id: principal.teamId,
-      agent: {
-        agent_id: active.run.agentId,
-        version: active.run.agentVersion,
-        tools_allow: active.toolsAllow,
-        tools_deny: active.toolsDeny,
-      },
-      run: { run_id: active.run.runId, thread_id: active.run.threadId, approval_mode: active.mode },
-      tool: descriptor,
-      tool_call_id: request.toolCallId ?? `mcp-proxy-${randomUUID()}`,
-      input: input.data,
-      context: {
-        enforcement_point: "mcp_proxy",
-        connector_exposure: connector.exposure,
-        ...(active.projectId === undefined ? {} : { project_id: active.projectId }),
-      },
-    };
-    const decision: PolicyDecision = await deps.engine.decide(policyInput);
-    const first = decision.reasons[0];
-    if (decision.effect === "deny") {
-      return await denied(first?.code ?? "policy_error", first?.message ?? "Denied by policy.");
+    const toolCallId = request.toolCallId ?? `mcp-proxy-${randomUUID()}`;
+    const decide = (run: ActiveRunContext) =>
+      deps.engine.decide(
+        policyInputFor(principal, run, descriptor, toolCallId, input.data, connector),
+      );
+    // The sandbox's claim picks the named run, but cannot pick its policy: the call is decided
+    // under every active run it could belong to (review M1). See `combineDecisions`.
+    const namedDecision = await decide(named);
+    const siblings = await Promise.all(loaded.runs.filter((r) => r !== named).map(decide));
+    const combined = combineDecisions(namedDecision, siblings);
+    if (combined.effect === "deny") {
+      return await denied(combined.reason.code, combined.reason.message);
     }
 
-    let reason: PolicyReasonCode = first?.code ?? "default_prompt";
+    let reason: PolicyReasonCode = combined.reason.code;
     let approvalId: string | undefined;
-    if (decision.effect === "require_approval") {
+    if (combined.effect === "require_approval") {
       const approved = await deps.approvals.authorize({
         teamId: principal.teamId,
         userId: principal.userId,
-        runId: active.run.runId,
+        runId: named.runId,
         tool: pinned.pi_name,
         ...(request.toolCallId === undefined ? {} : { toolCallId: request.toolCallId }),
         input: input.data,

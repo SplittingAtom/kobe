@@ -6,6 +6,7 @@ import { idSchema, uuidSchema } from "@kobe/protocol";
 import { logger } from "../logger.js";
 import { authenticateSandbox, type McpAuthDeps } from "../mcp/principal.js";
 import type { McpService } from "../mcp/service.js";
+import { createRateLimiter, type RateLimiter } from "../sandbox/rate-limit.js";
 
 /**
  * The server's internal listener (port 8082): the MCP proxy's policy re-check (KOBE-58). Not on the
@@ -20,11 +21,17 @@ import type { McpService } from "../mcp/service.js";
  *      → 200 `{decision: "allow", connector, tool, input_sha256, reason, approval_id?}`
  *      | 200 `{decision: "deny", code, message, approval_failure?}`
  * 401 `unauthorized` (internal key), 401 `sandbox_unauthorized` (token, liveness, membership),
+ * 429 `rate_limited` (per sandbox, `DECIDE_RATE`),
  * 404 `connector_not_available`, 400 `invalid_request`.
  */
 export const INTERNAL_KEY_MIN_LENGTH = 32;
 /** Tool inputs are at most 1 MiB at the proxy; the envelope adds a little. */
 export const INTERNAL_BODY_LIMIT = 1_200_000;
+/**
+ * Decisions per sandbox, across all proxy replicas of this server replica (review L5): a backstop
+ * behind the proxy's own per-replica rate limit (burst 60, then 10/s).
+ */
+export const DECIDE_RATE = { capacity: 120, refillPerSecond: 20 } as const;
 
 const FORWARDED_HEADERS = ["x-forwarded-for", "x-forwarded-host", "x-real-ip", "forwarded"];
 
@@ -33,6 +40,7 @@ export interface InternalAppDeps {
   readonly internalKey: string;
   readonly mcp: McpService;
   readonly auth: McpAuthDeps;
+  readonly decideLimiter?: RateLimiter;
 }
 
 const callBodySchema = z.strictObject({
@@ -49,6 +57,7 @@ export function createInternalApp(deps: InternalAppDeps): Hono {
     throw new Error(`the internal key must be at least ${INTERNAL_KEY_MIN_LENGTH} characters`);
   }
   const keyDigest = digest(`Bearer ${deps.internalKey}`);
+  const decideLimiter = deps.decideLimiter ?? createRateLimiter(DECIDE_RATE);
   const app = new Hono();
   app.get("/healthz", (c) => c.json({ status: "ok", service: "server-internal" }));
 
@@ -99,6 +108,11 @@ export function createInternalApp(deps: InternalAppDeps): Hono {
     if (!body.success) return c.json({ code: "invalid_request", message: "Invalid call." }, 400);
     const auth = await principalOf(c.req.header("kobe-sandbox-token"));
     if (!auth.ok) return c.json({ code: "sandbox_unauthorized", message: auth.code }, 401);
+    const wait = decideLimiter.take(auth.principal.sandboxId);
+    if (wait > 0) {
+      c.header("Retry-After", String(Math.ceil(wait / 1000)));
+      return c.json({ code: "rate_limited", message: "Too many calls." }, 429);
+    }
     const decision = await deps.mcp.decide(auth.principal, {
       connectorId: id.data,
       tool: body.data.tool,

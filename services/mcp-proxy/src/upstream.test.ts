@@ -74,6 +74,20 @@ describe("upstream MCP client (Streamable HTTP)", () => {
     await expect.poll(() => fake.deletes).toEqual(["sess-1"]);
   });
 
+  it("bounds best-effort session DELETEs (review L5)", async () => {
+    fake.options = { session: true };
+    const bounded = createUpstreamClient({
+      policy,
+      maxResponseBytes: 64 * 1024,
+      maxPendingDeletes: 0,
+    });
+    expect((await bounded.callTool({ ...base(), url: fake.url })).ok).toBe(true);
+    expect(bounded.pendingDeletes).toBe(0);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(fake.deletes).toEqual([]);
+    await bounded.close();
+  });
+
   it("sends credential headers given to it (and only those)", async () => {
     await call({ headers: { authorization: "Bearer upstream-token" } });
     expect(fake.received.every((r) => r.headers.authorization === "Bearer upstream-token")).toBe(

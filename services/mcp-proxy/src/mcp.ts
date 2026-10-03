@@ -277,13 +277,19 @@ async function callTool(ctx: CallContext, id: JsonRpcId, params: unknown): Promi
       connector: decision.connector,
     });
     if (!credentials.ok) {
-      log({ outcome: "refused", reason: credentials.code });
+      log({ outcome: "refused", reason: credentials.code, approvalId: decision.approval_id });
+      const why =
+        credentials.code === "not_connected"
+          ? `Connect your account for ${decision.connector.name} in Kobe settings first.`
+          : "Your connector credentials are unavailable right now. Try again.";
+      // The server consumed the approval when it allowed the call (review L3: credentials are
+      // resolved here, after the decision). Say so, so the model asks again instead of retrying.
       return [
         toolError(
           id,
-          credentials.code === "not_connected"
-            ? `Connect your account for ${decision.connector.name} in Kobe settings first.`
-            : "Your connector credentials are unavailable right now. Try again.",
+          decision.approval_id === undefined
+            ? why
+            : `${why} The call did not run, and the approval for it has been used: ask for approval again.`,
         ),
       ];
     }

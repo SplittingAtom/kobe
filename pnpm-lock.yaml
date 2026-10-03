@@ -255,6 +255,8 @@ importers:
         specifier: ^2.9.1
         version: 2.9.1
 
+  packages/address-policy: {}
+
   packages/agent-file:
     dependencies:
       '@kobe/protocol':
@@ -325,6 +327,9 @@ importers:
 
   services/egress-proxy:
     dependencies:
+      '@kobe/address-policy':
+        specifier: workspace:*
+        version: link:../../packages/address-policy
       '@kobe/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -353,6 +358,9 @@ importers:
       '@hono/node-server':
         specifier: ^2.1.3
         version: 2.1.3(hono@4.13.12)
+      '@kobe/address-policy':
+        specifier: workspace:*
+        version: link:../../packages/address-policy
       '@kobe/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol

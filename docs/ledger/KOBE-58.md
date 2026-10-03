@@ -37,7 +37,8 @@ sandbox (Pi MCP client) ──POST /v1/mcp/<connector_id>──▶ mcp-proxy ─
   405); `auth.ts` (token pre-check with the proxy's own key); `jsonrpc.ts` (`parseJsonStrict`, no
   batches); `server-client.ts` (internal API client, fail closed); `upstream.ts` (MCP client:
   `initialize` → `notifications/initialized` → `tools/call` → `DELETE`, JSON or SSE answers,
-  `undici` Agent with a checked `lookup`); `address-policy.ts` (copy of the egress proxy's ranges);
+  `undici` Agent with a checked `lookup`); `address-policy.ts` (re-exports `@kobe/address-policy`,
+  shared with the egress proxy);
   `credentials.ts` (KOBE-61 seam, `NO_GRANTS`); `limits.ts`; `config.ts` (zod).
 - **Server** `services/server/src/mcp/`: `catalog.ts` (`loadTeamConnector`, `exposedTools`,
   `createDbMcpCatalog` = the engine's `McpToolCatalog` + `ConnectorStateSource`), `decide.ts`
@@ -151,7 +152,9 @@ where `run_id` and `tool_call_id` come from, and prove Gate 2 with the real prox
     process per thread); the server takes that thread's active run only if the thread belongs to
     the token's user and the run is leased to the token's sandbox (`sandbox_run_leases`, written
     by the server when it delivered `run.start`). Another user's or sandbox's thread yields no run
-    and the call is denied `run_not_active`; another team's is invisible under RLS;
+    and the call is denied `run_not_active`; another team's is invisible under RLS. The named run
+    only selects **whose approval** may authorise; the policy is decided under every active run of
+    the sandbox (review M1, below);
   - tool_call_id: `_meta["kobe.dev/tool_call_id"]` when the client sends one (a selector **inside
     the server-derived run**, MAC-bound), otherwise derived server-side: the run's `allowed`,
     unconsumed approval of this user for this Pi tool whose `input_canonical` equals the call's
@@ -170,12 +173,58 @@ where `run_id` and `tool_call_id` come from, and prove Gate 2 with the real prox
   same-team peer's approval. e2e signs an approval in the server pod with the chart's key: the
   direct write is refused without it, runs once with it, and the replay is refused.
 
+## Security review of PR #47 — resolutions
+
+- **M1 (the sandbox chose which run's policy applied) — fixed with option (b), refined.** The
+  `Kobe-Thread-Id` claim no longer selects a policy. The server loads **every** active run of the
+  token's user leased to the token's sandbox (`mcp/run-context.ts`, at most 32, else deny), builds
+  each run's own policy input (clamped mode, trigger, agent lists, project) and lets the engine
+  decide the call under each. `combineDecisions` (`mcp/decide.ts`):
+  the named run denies → deny; the named run **and every sibling** allow → allow; otherwise the
+  user's signed approval of exactly this input **in the named run** is required (verified and
+  consumed as before), else deny. So a prompt-injected thread A naming sibling B (a scheduled run,
+  forced `auto`; an `auto` run with a team allow-list; a broader agent allow list) gets A's
+  stricter answer, and without an approval the write is refused.
+  _Why not (a), binding each call to a recorded `policy.check`:_ Pi's MCP client cannot send a
+  tool call id (KOBE-62), so (a) would refuse every legitimate call. Allowed `policy.check`s are
+  not recorded server-side, and recording them would add a write per tool call. (a) remains the
+  better binding once KOBE-62 can attach `_meta` ids.
+  _Why the named run's approval is enough:_ it is the user's consent to exactly this tool and
+  canonical input, once. Whichever of that user's processes in this sandbox executes it, the
+  effect is the approved call.
+  _Cost:_ while a laxer run (e.g. a scheduled `auto` run) is active next to an interactive one,
+  its allow-listed writes need an approval too (fail closed; noted for KOBE-62/64).
+  Tests: `mcp-proxy-gate2.db.test.ts` "a sibling run's laxer policy cannot stand in" (auto run
+  with a team allow-list + a scheduled run in the same sandbox; thread A's write is refused naming
+  either, and runs once with A's approval); `mcp.db.test.ts` "review M1" (refused while thread A
+  is active, allowed once A ends); `mcp/decide.test.ts` (combination table).
+- **L2:** `parseToolsSnapshot` drops every tool whose `pi_name` or upstream `name` is not unique
+  (`get-x`, `get_x`, `get.x` → one Pi name), so neither is listed nor callable. **KOBE-59 must
+  refuse such snapshots when pinning** (and show the collision to the admin).
+- **L3:** credentials are resolved in the proxy after the server's decision, and the server
+  consumes the approval as part of that decision. Moving consumption after credential resolution
+  would need a second round trip and a two-phase consume. Instead, when credentials fail after an
+  approval-backed allow, the tool error says the call did not run and the approval was used
+  ("ask for approval again"). Documented here. Revisit with KOBE-61: if credentials move
+  server-side, resolve them before `authorize`.
+- **L4 (accepted risk):** the proxy holds the HS256 `kobe.mcp-proxy` session key (it could mint
+  MCP-audience tokens) and the internal key. A compromised proxy could therefore ask the server
+  about any user's sandbox. It still cannot mint approvals: the approval key is server-only. The
+  follow-up is asymmetric session tokens (server signs, services verify with a public key).
+- **L5:** session DELETEs are bounded (`maxPendingDeletes`, default 64, skipped beyond).
+  The undici Agent caps sockets per origin (`connections: 32`). The server's decide endpoint has
+  a per-sandbox rate limit (`DECIDE_RATE`, burst 120, 20/s; 429).
+- **L6:** the address ranges now live in one package, `@kobe/address-policy`. Both proxies
+  re-export it from their `address-policy.ts`, and it adds `3fff::/20`, `5f00::/16` and
+  `2001:20::/28`.
+
 ## For other tickets
 
 - **KOBE-37 (approvals):** done, see "Gate 2 wiring". Keep `approvals.input_canonical`,
   `user_id`, `tool`, `status`, `consumed_at` and `decided_at` as they are, or update
   `findApprovedToolCallId` in `services/server/src/mcp/approvals.ts`.
-- **KOBE-59 (registry, pinning, drift):** owns writes to `connectors` (admin API, `tools/list`
+- **KOBE-59 (registry, pinning, drift):** refuse snapshots whose tools collide on `pi_name` or
+  `name` (they are dropped on read, review L2). Owns writes to `connectors` (admin API, `tools/list`
   snapshot, SHA-256 per tool, `tools_hash`, `status: drifted` + re-approval). Snapshot entry shape:
   `packages/db/src/connectors/snapshot.ts` (`name`, `pi_name` incl. any Pi collision suffix,
   `description`, `input_schema`, `output_schema?`, `annotations`, `sha256`, `status`). Register only
@@ -211,12 +260,12 @@ token>` and `Kobe-Thread-Id: <thread_id>`; server name = connector name (Pi tool
 
 ## Risks
 
+- **L4 accepted:** the proxy's HS256 session key and internal key (see the review resolutions).
 - **Pi interop not yet exercised end to end** (KOBE-62): the proxy follows Streamable HTTP
   2025-11-25 in stateless mode (no session id, JSON answers only, GET 405); Pi's client must accept
   that (spec-compliant). Tested with our own client and a fake server, and in e2e with curl.
 - The internal listener is guarded by NetworkPolicy + key; a release-namespace pod that obtains the
   key and a sandbox's token could ask for decisions (it still cannot mint approvals or tokens).
-- Address checks are a copy of the egress proxy's list: keep both in sync (shared package later).
 - One upstream session per call adds latency (two round trips) for chatty MCP use.
 - An allowed call whose audit write fails is refused after its approval was consumed: the user must
   approve again (fail closed by design).

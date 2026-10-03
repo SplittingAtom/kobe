@@ -420,6 +420,25 @@ describe("tools/call", () => {
     });
     const res = await rpc("tools/call", { name: "get_issue", arguments: {} });
     expect(res.json?.result.content[0].text).toMatch(/Connect your account for jira/);
+    expect(res.json?.result.content[0].text).not.toMatch(/approval/);
+    expect(fake.received).toEqual([]);
+  });
+
+  it("says when an approval was spent on a call that could not run (review L3)", async () => {
+    server.next = (q) => ({
+      ok: true,
+      value: {
+        decision: "allow",
+        connector: { id: q.connectorId, name: "jira", url: fake.url, auth_kind: "api_key" },
+        tool: { name: q.tool, pi_name: "mcp__jira__create_issue" },
+        input_sha256: sha(q.arguments),
+        reason: "approval_granted",
+        approval_id: randomUUID(),
+      },
+    });
+    const res = await rpc("tools/call", { name: "create_issue", arguments: {} });
+    expect(res.json?.result.isError).toBe(true);
+    expect(res.json?.result.content[0].text).toMatch(/approval for it has been used/);
     expect(fake.received).toEqual([]);
   });
 

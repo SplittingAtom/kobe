@@ -42,4 +42,16 @@ describe("parseToolsSnapshot", () => {
     const [parsed] = parseToolsSnapshot([{ ...tool, annotations: { readOnlyHint: true, x: 1 } }]);
     expect(parsed?.annotations).toEqual({ readOnlyHint: true });
   });
+
+  it("drops every tool whose Pi name or upstream name is not unique (review L2)", () => {
+    const tools = parseToolsSnapshot([
+      tool,
+      { ...tool, name: "get-x", pi_name: "mcp__jira__get_x" },
+      { ...tool, name: "get_x", pi_name: "mcp__jira__get_x" },
+      { ...tool, name: "get.x", pi_name: "mcp__jira__get_x" },
+      { ...tool, name: "dup", pi_name: "mcp__jira__dup_a" },
+      { ...tool, name: "dup", pi_name: "mcp__jira__dup_b" },
+    ]);
+    expect(tools.map((t) => t.name)).toEqual(["create_issue"]);
+  });
 });

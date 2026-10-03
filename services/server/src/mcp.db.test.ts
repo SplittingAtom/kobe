@@ -10,6 +10,7 @@ import { createToolRegistry } from "./policy/registry.js";
 import { createDbRuleSource } from "./policy/rule-store.js";
 import { createDbRunContextSource } from "./sandbox-wire/index.js";
 import { createInternalApp } from "./routes/internal.js";
+import { createRateLimiter } from "./sandbox/rate-limit.js";
 import { EventStreamFixture, type Person } from "./testing/event-stream-fixture.js";
 import {
   INTERNAL_KEY,
@@ -531,6 +532,63 @@ describe("Gate 2: an MCP write runs only with a valid signed approval", () => {
     expect((await callTool(w, { tool: "get_issue" }, w.token, stub)).json).toMatchObject({
       decision: "allow",
     });
+  });
+});
+
+describe("review M1: the thread claim never selects a laxer policy", () => {
+  it("decides under every active run of the sandbox: an auto sibling cannot allow thread A's write", async () => {
+    const w = await world();
+    const sibling = await fx.run(w.team, w.owner);
+    const siblingThread = await leaseRun(fx.admin, w.team, sibling, w.owner.id, w.sandboxId);
+    await fx.admin.query(`UPDATE runs SET approval_mode = 'auto' WHERE id = $1`, [sibling]);
+    await fx.admin.query(
+      `INSERT INTO tool_rules (team_id, scope, effect, tool_glob, created_by)
+       VALUES ($1, 'team', 'allow', $3, $2)`,
+      [w.team, w.owner.id, piName(w.connector.name, "create_issue")],
+    );
+    // Alone, the auto run would allow it (team allow-list for auto); with thread A active, approval is needed.
+    expect(
+      (await callTool(w, { tool: "create_issue", thread_id: siblingThread })).json,
+    ).toMatchObject({
+      decision: "deny",
+      approval_failure: "no_approval",
+    });
+    await fx.complete(w.team, w.runId);
+    expect(
+      (await callTool(w, { tool: "create_issue", thread_id: siblingThread })).json,
+    ).toMatchObject({
+      decision: "allow",
+    });
+  });
+
+  it("still allows a call every active run allows (a read with a sibling run)", async () => {
+    const w = await world();
+    const runId = await fx.run(w.team, w.owner);
+    await leaseRun(fx.admin, w.team, runId, w.owner.id, w.sandboxId);
+    expect((await callTool(w, { tool: "get_issue" })).json).toMatchObject({ decision: "allow" });
+  });
+});
+
+describe("internal listener limits (review L5)", () => {
+  it("rate-limits decisions per sandbox (429), independently of other sandboxes", async () => {
+    const limited = createInternalApp({
+      internalKey: INTERNAL_KEY,
+      mcp: fx.replica(0).deps.mcp,
+      auth: {
+        db: fx.db,
+        sessionKey: MCP_SESSION_KEY,
+        liveness: { isLive: ({ sandboxId }) => Promise.resolve(live.has(sandboxId)) },
+      },
+      decideLimiter: createRateLimiter({ capacity: 2, refillPerSecond: 0.001 }),
+    });
+    const w = await world();
+    const other = await world();
+    const statuses = [];
+    for (let i = 0; i < 3; i++) {
+      statuses.push((await callTool(w, { tool: "get_issue" }, w.token, limited)).status);
+    }
+    expect(statuses).toEqual([200, 200, 429]);
+    expect((await callTool(other, { tool: "get_issue" }, other.token, limited)).status).toBe(200);
   });
 });
 

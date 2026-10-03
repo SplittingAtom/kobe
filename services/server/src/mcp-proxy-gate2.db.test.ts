@@ -308,6 +308,43 @@ describe("Gate 2 through the real MCP proxy, kobe-policy bypassed", () => {
     expect(writes()).toHaveLength(1);
   });
 
+  it("a sibling run's laxer policy cannot stand in (review M1): auto and scheduled siblings", async () => {
+    const s = await sandbox();
+    // Thread B in the same sandbox: an auto run for which the team allow-listed the write (D32 auto allow-list), and a
+    // scheduled run (always auto, D32). Thread A (s.threadId) is ask-on-write.
+    const autoRun = await fx.run(s.team, s.owner);
+    const autoThread = await leaseRun(fx.admin, s.team, autoRun, s.owner.id, s.sandboxId);
+    await fx.admin.query(`UPDATE runs SET approval_mode = 'auto' WHERE id = $1`, [autoRun]);
+    const schedRun = await fx.run(s.team, s.owner);
+    const schedThread = await leaseRun(fx.admin, s.team, schedRun, s.owner.id, s.sandboxId);
+    await fx.admin.query(`UPDATE runs SET trigger = 'schedule' WHERE id = $1`, [schedRun]);
+    await fx.admin.query(
+      `INSERT INTO tool_rules (team_id, scope, effect, tool_glob, created_by)
+       VALUES ($1, 'team', 'allow', $3, $2)`,
+      [s.team, s.owner.id, s.tool],
+    );
+    // The injected thread A names B's thread (or the scheduled one) to borrow its policy.
+    for (const threadId of [autoThread, schedThread]) {
+      const out = await callDirect(s, "create_issue", input, { threadId });
+      expect(out.result?.isError, threadId).toBe(true);
+    }
+    expect((await callDirect(s, "create_issue", input)).result?.isError).toBe(true);
+    expect(writes()).toEqual([]);
+
+    // With the user's approval in thread A, the write runs (once) even while siblings are active.
+    await allowApproval(fx.admin, {
+      teamId: s.team,
+      runId: s.runId,
+      threadId: s.threadId,
+      userId: s.owner.id,
+      tool: s.tool,
+      input,
+      key: KEYRING.current,
+    });
+    expect((await callDirect(s, "create_issue", input)).result?.isError).toBeUndefined();
+    expect(writes()).toHaveLength(1);
+  });
+
   it("lets a read-only tool through without any approval", async () => {
     const s = await sandbox();
     const out = await callDirect(s, "get_issue", { id: "OPS-1" });
