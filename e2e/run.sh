@@ -1475,12 +1475,10 @@ JS
     contains "the woken sandbox produced a first token" '^first_token_ms=[0-9]+$' "$chat_out"
     contains "the shim attributed the model call to the run (x-kobe-run-id from Pi)" "\"runId\":\"$chat_run\"" \
       "$($KUBECTL -n "$NS" logs deploy/kobe-model-gateway --since=15m 2>/dev/null | grep -F "\"runId\":\"${chat_run:-none}\"" | head -1)"
-    contains "the upstream saw the provider key, never the sandbox's session token" '^ok$' \
-      "$(in_client "curl -s -m 10 $LLM/_seen" | node -e '
-        let b = ""; process.stdin.on("data", (d) => (b += d)).on("end", () => {
-          const r = JSON.parse(b).requests; const last = r.at(-1) || { credentials: {} };
-          const creds = Object.values(last.credentials).join(" ");
-          console.log(r.length > 0 && /e2e-provider-key/.test(creds) && !/eyJ/.test(creds) ? "ok" : "bad " + creds); });')"
+    seen_now=$(probe "$NS" "$(answers "$LLM/_seen")")
+    contains "the upstream saw the provider key (attached by Bifrost, outside the sandbox)" 'e2e-provider-key' "$seen_now"
+    if [[ -n "$seen_now" ]] && ! printf '%s' "$seen_now" | grep -q 'eyJ'; then ok "no session token (JWT) reached the upstream"
+    else fail "no session token (JWT) reached the upstream"; fi
     # A clear failure when the team has no model: the run fails with the server's message, nothing hangs.
     expect "the team disables its models" '^200 ' "$(as_owner "PUT /v1/team/models/fast {\"enabled\":false}")"
     no_model=$(chat "no-model-$RANDOM" 180000)
