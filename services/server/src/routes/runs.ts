@@ -51,11 +51,15 @@ async function answer(c: Context, fn: () => Promise<Response>): Promise<Response
 export const IDEMPOTENCY_HEADER = "idempotency-key";
 export const idempotencyKeySchema = z.string().regex(/^[\x21-\x7e]{1,128}$/);
 
-/** The thread's runs plus the interrupted run it waits on, so Retry survives a reload. */
+/**
+ * The thread's runs plus what holds its queue, so Retry and Resume survive a reload: the
+ * interrupted run it waits on (D14), and whether a Stop paused it (KOBE-26).
+ */
 async function threadRuns(deps: ServerDeps, actor: ActorContext, threadId: string) {
   return {
     runs: await deps.runs.listThreadRuns(actor, threadId),
     interrupted_run: await deps.runs.latestInterruptedRun(actor, threadId),
+    queue_paused: await deps.runs.queuePaused(actor, threadId),
   };
 }
 

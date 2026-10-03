@@ -10,6 +10,8 @@ import type { NewRunEvent } from "../event-stream/append.js";
 import { clampApprovalMode } from "../sandbox-wire/policy-check.js";
 import {
   applyTransition,
+  abortPending,
+  isQueuePaused,
   lockThreadRow,
   principalActive,
   threadRunRows,
@@ -81,11 +83,12 @@ export function budgetStoppedEvent(scope: "install" | "team" | "user"): NewRunEv
 const MAX_PROMOTION_STEPS = 64;
 
 /**
- * Starts the thread's next run if it may start now (D14, D17): no active run, not in Trash, and the
- * queue may advance (`queueMayAdvance`) — except a retry, which starts ahead of the queue even on
+ * Starts the thread's next run if it may start now (D14, D17): no active run, not in Trash, the
+ * queue may advance (`queueMayAdvance`) and is not paused by a Stop (KOBE-26) — except a retry, which starts ahead of the queue even on
  * an interrupted thread. The run moves `queued → running` with `run.started`, its branch point
  * fixed (requested parent, else the thread's leaf), its agent version resolved and its mode
- * tightened by the resolver (KOBE-46/47). A run that can't start (owner deactivated or removed,
+ * tightened by the resolver (KOBE-46/47). Nothing starts while Pi is still aborting a stopped run
+ * of the thread (`abortHoldMs`, the Stop grace). A run that can't start (owner deactivated or removed,
  * agent unavailable) fails visibly and the next one is tried. Locks the thread first.
  */
 export async function promoteInTx(
@@ -93,10 +96,16 @@ export async function promoteInTx(
   agents: RunAgentResolver,
   teamId: string,
   threadId: string,
+  options: { readonly abortHoldMs?: number } = {},
 ): Promise<Promotion> {
   const transitions: AppliedTransition[] = [];
   let thread = await lockThreadRow(tx, teamId, threadId);
   if (!thread || thread.deletedAt !== null) return { transitions };
+  // Pi is still aborting a stopped run of this thread: the next start would be refused (KOBE-26).
+  const hold = options.abortHoldMs ?? 0;
+  if (hold > 0 && (await abortPending(tx, teamId, threadId, hold))) return { transitions };
+  // Stop paused the queue (KOBE-26): it waits for Resume or a new message.
+  const paused = await isQueuePaused(tx, teamId, threadId);
   const fail = async (t: ThreadRow, run: RunRow, code: string): Promise<ThreadRow> => {
     const applied = await applyTransition(tx, t, run, "failed", "error", failedEvent(code));
     transitions.push(applied.transition);
@@ -107,7 +116,9 @@ export async function promoteInTx(
     if (rows.some((r) => isActiveRunStatus(r.status))) return { transitions };
     const next = rows.find((r) => r.status === "queued");
     if (!next) return { transitions };
-    if (next.retryOfRunId === null && !queueMayAdvance(thread.status)) return { transitions };
+    if (next.retryOfRunId === null && (paused || !queueMayAdvance(thread.status))) {
+      return { transitions };
+    }
     if (!(await principalActive(tx, teamId, thread.ownerUserId))) {
       // The owner can't run anything (KOBE-13): their queued messages fail visibly.
       for (const queued of rows.filter((r) => r.status === "queued")) {

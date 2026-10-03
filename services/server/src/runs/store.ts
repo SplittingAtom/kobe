@@ -258,6 +258,56 @@ export async function entryExists(
   return res.rows.length > 0;
 }
 
+/**
+ * Stop pauses the queue (KOBE-26): stopping the active run while messages wait behind it leaves
+ * them queued until the user resumes the queue or sends a new message. Thread row locked by the
+ * caller.
+ */
+export async function setQueuePaused(
+  tx: KobeTx,
+  teamId: string,
+  threadId: string,
+  paused: boolean,
+): Promise<void> {
+  await tx.execute(sql`
+    UPDATE threads SET queue_paused_at = CASE WHEN ${paused} THEN now() END
+     WHERE team_id = ${teamId} AND id = ${threadId}
+       AND (queue_paused_at IS NULL) = ${paused}`);
+}
+
+/** Whether the thread's queue is paused by a Stop (see `setQueuePaused`). */
+export async function isQueuePaused(
+  tx: KobeTx,
+  teamId: string,
+  threadId: string,
+): Promise<boolean> {
+  const res = await tx.execute<{ paused: boolean }>(sql`
+    SELECT queue_paused_at IS NOT NULL AS paused
+      FROM threads WHERE team_id = ${teamId} AND id = ${threadId}`);
+  return res.rows[0]?.paused === true;
+}
+
+/**
+ * A run of the thread that already ended but whose abort Pi has not confirmed yet (`stop_mode`
+ * still set, KOBE-30 durable stop), requested less than `holdMs` ago. The sandbox agent refuses
+ * a `run.start` on a thread whose Pi is still busy (`pi_rejected`), so the next start waits for
+ * the abort — at most `holdMs` (the Stop grace), after which the queue moves anyway.
+ */
+export async function abortPending(
+  tx: KobeTx,
+  teamId: string,
+  threadId: string,
+  holdMs: number,
+): Promise<boolean> {
+  const res = await tx.execute(sql`
+    SELECT 1 FROM runs
+     WHERE team_id = ${teamId} AND thread_id = ${threadId} AND stop_mode = 'abort'
+       AND status NOT IN ('queued', 'running', 'waiting_approval')
+       AND stop_requested_at > now() - make_interval(secs => ${holdMs / 1000})
+     LIMIT 1`);
+  return res.rows.length > 0;
+}
+
 export async function queuedCount(tx: KobeTx, teamId: string, threadId: string): Promise<number> {
   const res = await tx.execute<{ n: string | number }>(sql`
     SELECT count(*) AS n FROM runs
@@ -380,6 +430,30 @@ export async function bindUserEntry(tx: KobeTx, teamId: string, runId: string): 
          AND te.type = 'message' AND te.payload -> 'message' ->> 'role' = 'user'
        ORDER BY e.seq LIMIT 1)
      WHERE r.team_id = ${teamId} AND r.id = ${runId} AND r.user_entry_id IS NULL`);
+}
+
+/**
+ * Where a Retry branches (D14): the original's branch point, so the retry is a sibling of the
+ * interrupted prompt. A run that started on an empty thread has none recorded (Pi continued from
+ * its leaf), and reusing that would continue after the interrupted partial answer instead; its
+ * branch point is the parent of its prompt entry (Pi 1.0 writes a settings entry at the root
+ * first). Null when the prompt was never mirrored or sits at the root (`run.start` cannot branch
+ * at the root): the retry then continues from the leaf.
+ */
+export async function retryBranchPoint(
+  tx: KobeTx,
+  teamId: string,
+  run: { readonly id: string; readonly threadId: string; readonly parentEntryId: string | null },
+): Promise<string | null> {
+  if (run.parentEntryId !== null) return run.parentEntryId;
+  await bindUserEntry(tx, teamId, run.id);
+  const res = await tx.execute<{ parent_id: string | null }>(sql`
+    SELECT te.parent_id
+      FROM runs r
+      JOIN thread_entries te
+        ON te.team_id = ${teamId} AND te.thread_id = ${run.threadId} AND te.entry_id = r.user_entry_id
+     WHERE r.team_id = ${teamId} AND r.id = ${run.id} AND r.thread_id = ${run.threadId}`);
+  return res.rows[0]?.parent_id ?? null;
 }
 
 /** The run a client-supplied idempotency key already created on this thread. */

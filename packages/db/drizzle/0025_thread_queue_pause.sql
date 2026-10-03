@@ -1,0 +1,1 @@
+ALTER TABLE "threads" ADD COLUMN "queue_paused_at" timestamp with time zone;

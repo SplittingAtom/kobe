@@ -47,6 +47,9 @@ import {
   existingRetry,
   latestInterruptedRow,
   requestStop,
+  setQueuePaused,
+  isQueuePaused,
+  retryBranchPoint,
   runByClientKey,
   getRunRow,
   insertQueuedRun,
@@ -125,6 +128,8 @@ export interface ServerRunOrchestrator extends RunOrchestrator {
   ): Promise<SubmitMessageResult>;
   /** The run an `interrupted` thread waits on (Retry), or null. */
   latestInterruptedRun(actor: ActorContext, threadId: string): Promise<RunSnapshot | null>;
+  /** Messages wait behind a Stop until the user resumes the queue or sends one (KOBE-26). */
+  queuePaused(actor: ActorContext, threadId: string): Promise<boolean>;
   /** KOBE-24 `RunLifecycleHooks.onRunEnded`: the wire ended a run; advance its thread's queue. */
   onRunEnded(event: { teamId: string; runId: string; threadId: string }): Promise<void>;
   /** Refuse new runs while the isolation runtime is missing (D4); set by index.ts. */
@@ -194,6 +199,11 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     if (options.sweep !== false) this.#scheduleSweep();
   }
 
+  /** Promotion waits for Pi's abort of a stopped run, at most the Stop grace (KOBE-26). */
+  get #hold(): { readonly abortHoldMs: number } {
+    return { abortHoldMs: this.#tuning.stopGraceMs };
+  }
+
   // ------------------------------------------------------------------------- user operations
 
   async submitMessage(
@@ -234,6 +244,9 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         clientKey,
       });
       await touchThread(tx, teamId, thread.id);
+      // A user's new message releases a queue paused by Stop: it joins the end, earlier ones go
+      // first. Scheduled runs (KOBE-64) queue behind a paused queue without releasing it.
+      if (command.trigger === "user") await setQueuePaused(tx, teamId, thread.id, false);
       const { promotion, queued } = await this.#promoteOrQueue(tx, teamId, thread.id, id);
       return { result: { run_id: id, queued }, promotion };
     });
@@ -298,11 +311,17 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       );
       // Durable: if this replica dies before Pi is told, the sweep sends the abort.
       if (wasActive) await requestStop(tx, teamId, runId, "abort");
+      // Stop pauses the queue behind the run (KOBE-26); deleting a queued message does not.
+      const left = await queuedCount(tx, teamId, thread.id);
+      const queuePaused = wasActive && left > 0;
+      if (queuePaused) await setQueuePaused(tx, teamId, thread.id, true);
+      // Deleting the last queued message leaves nothing to pause.
+      if (!wasActive && left === 0) await setQueuePaused(tx, teamId, thread.id, false);
       await recordAudit(tx, {
         action: "run.cancelled",
         actor: userActor(actor),
         teamId,
-        target: { runId, threadId: thread.id, wasActive },
+        target: { runId, threadId: thread.id, wasActive, ...(queuePaused ? { queuePaused } : {}) },
       });
       return { wasActive, transition: applied.transition, threadId: thread.id };
     });
@@ -370,7 +389,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         approvalMode: clampApprovalMode(run.approvalMode, await readApprovalFloor(tx)),
         input: run.input,
         // Same branch point as the original: the retry is a sibling branch; history stays intact.
-        parentEntryId: run.parentEntryId,
+        parentEntryId: await retryBranchPoint(tx, teamId, run),
         retryOfRunId: runId,
         clientKey: null,
       });
@@ -391,14 +410,16 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
   async resumeQueue(actor: ActorContext, threadId: string): Promise<void> {
     const promotion = await this.#threadTx(actor, async (tx, viewer) => {
       const thread = await lockOwnedThread(tx, viewer, threadId, "thread_not_found");
-      if (thread.status !== "interrupted") return undefined;
+      const paused = await isQueuePaused(tx, actor.team_id, thread.id);
+      if (thread.status !== "interrupted" && !paused) return undefined;
+      if (paused) await setQueuePaused(tx, actor.team_id, thread.id, false);
       await setThreadStatus(
         tx,
         actor.team_id,
         thread.id,
         nextThreadStatus(thread.status, { kind: "queue_resumed" }),
       );
-      return promoteInTx(tx, this.#agents, actor.team_id, thread.id);
+      return promoteInTx(tx, this.#agents, actor.team_id, thread.id, this.#hold);
     });
     if (promotion) this.#afterCommit(actor.team_id, promotion);
   }
@@ -432,6 +453,16 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       return latestInterruptedRow(tx, actor.team_id, threadId);
     });
     return row ? toSnapshot(row) : null;
+  }
+
+  async queuePaused(actor: ActorContext, threadId: string): Promise<boolean> {
+    return this.#readTx(actor, async (tx, viewer) => {
+      if (!(await findThread(tx, viewer, threadId))) throw new RunError("thread_not_found");
+      return (
+        (await isQueuePaused(tx, actor.team_id, threadId)) &&
+        (await queuedCount(tx, actor.team_id, threadId)) > 0
+      );
+    });
   }
 
   // ------------------------------------------------------------------------- internal entry points
@@ -653,7 +684,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     threadId: string,
     runId: string,
   ): Promise<{ promotion: Promotion; queued: boolean }> {
-    const promotion = await promoteInTx(tx, this.#agents, teamId, threadId);
+    const promotion = await promoteInTx(tx, this.#agents, teamId, threadId, this.#hold);
     // Queued only if it really waits (a run can also fail in the same transaction).
     let queued = false;
     if (promotion.plan?.runId !== runId) {
@@ -712,7 +743,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       try {
         const promotion = await withTeam(this.#db, teamId, async (tx) => {
           await setThreadLockTimeout(tx);
-          return promoteInTx(tx, this.#agents, teamId, threadId);
+          return promoteInTx(tx, this.#agents, teamId, threadId, this.#hold);
         });
         this.#afterCommit(teamId, promotion);
         return;

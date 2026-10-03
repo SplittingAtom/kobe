@@ -90,7 +90,7 @@ async function stalledThreads(tx: KobeTx, teamId: string, stallMs: number) {
     SELECT DISTINCT q.thread_id FROM runs q
       JOIN threads t ON t.team_id = q.team_id AND t.id = q.thread_id
      WHERE q.team_id = ${teamId} AND q.status = 'queued' AND t.deleted_at IS NULL
-       AND (t.status = 'idle' OR q.retry_of_run_id IS NOT NULL)
+       AND ((t.status = 'idle' AND t.queue_paused_at IS NULL) OR q.retry_of_run_id IS NOT NULL)
        AND q.created_at < now() - make_interval(secs => ${secs(stallMs)})
        AND NOT EXISTS (SELECT 1 FROM runs a
                         WHERE a.team_id = q.team_id AND a.thread_id = q.thread_id

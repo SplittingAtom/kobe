@@ -328,8 +328,16 @@ export const AUDIT_EVENTS = {
     threadId: id,
     cause: z.enum(["sandbox_gone", "not_resumed", "pi_exited"]),
   }),
-  /** The thread owner stopped a run, or deleted a queued message (D17; KOBE-30). */
-  "run.cancelled": event("team", { runId: id, threadId: id, wasActive: z.boolean() }),
+  /**
+   * The thread owner stopped a run, or deleted a queued message (D17; KOBE-30). `queuePaused`: the
+   * Stop paused the messages queued behind the run (KOBE-26).
+   */
+  "run.cancelled": event("team", {
+    runId: id,
+    threadId: id,
+    wasActive: z.boolean(),
+    queuePaused: z.literal(true).optional(),
+  }),
   /** The thread owner retried an interrupted run; `runId` is the new run (D14; KOBE-30). */
   "run.retried": event("team", { runId: id, threadId: id, retryOfRunId: id }),
   /** A run ended because a budget is used up, after its current step (D30; system). */
