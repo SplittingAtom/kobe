@@ -8,6 +8,7 @@ import {
   RUN_2,
   THREAD,
   THREAD_2,
+  FAKE_POLICY_EXTENSION,
   runStart,
   startHarness,
   until,
@@ -69,6 +70,8 @@ describe("run.start → Pi prompt → pi.event stream", () => {
       "--no-skills",
       "--no-prompt-templates",
       "--no-themes",
+      "--extension",
+      FAKE_POLICY_EXTENSION,
     ]);
     expect(launch?.env).toContain("PI_CODING_AGENT_DIR");
     expect(launch?.env).not.toContain("SECRET_IN_AGENT_ENV");
@@ -381,6 +384,63 @@ describe("kobe-policy channel (fd 3)", () => {
     expect((decision as PiEvent).event).toMatchObject({ decision: "allow" });
   });
 
+  it("starts no run when kobe-policy refuses to start (fail closed)", async () => {
+    h = await startHarness({
+      env: { KOBE_POLICY_EXTENSION: "/opt/kobe/pi-extensions/refuse/index.js" },
+    });
+    const result = await h.server.command(runStart("say:hi"));
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "pi_unavailable",
+        message: "kobe-policy did not start: kobe-policy refused to start: fake refusal",
+      },
+    });
+    const prompts = (await h.commandsLog()).filter((c) => c.type === "prompt");
+    expect(prompts).toEqual([]);
+  });
+
+  it("starts no run when kobe-policy never reports ready (fail closed)", async () => {
+    h = await startHarness({
+      env: { KOBE_POLICY_EXTENSION: "/opt/kobe/pi-extensions/silent/index.js" },
+      policyReadyTimeoutMs: 200,
+    });
+    const result = await h.server.command(runStart("say:hi"));
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "pi_unavailable", message: expect.stringMatching(/did not report ready/) },
+    });
+    expect((await h.commandsLog()).filter((c) => c.type === "prompt")).toEqual([]);
+  });
+
+  it("restarts a Pi whose policy channel closed instead of reusing it", async () => {
+    h = await startHarness();
+    await h.server.command(runStart("drop-policy"));
+    await h.server.waitFor((f) => f.type === "pi.event" && f.event.type === "agent_settled");
+    const harness = h;
+    const launches = async () => (await harness.commandsLog()).filter((c) => "argv" in c).length;
+    expect(await launches()).toBe(1);
+    const second = await h.server.command(runStart("say:hi", { run_id: RUN_2 }));
+    expect(second).toMatchObject({ ok: true });
+    expect(await launches()).toBe(2);
+  });
+
+  it("gates pi.command on kobe-policy being ready", async () => {
+    h = await startHarness({
+      env: { KOBE_POLICY_EXTENSION: "/opt/kobe/pi-extensions/refuse/index.js" },
+    });
+    const result = await h.server.command({
+      type: "pi.command",
+      thread_id: THREAD,
+      command: { id: "srv", type: "get_state" },
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "pi_unavailable", message: expect.stringMatching(/kobe-policy/) },
+    });
+    expect((await h.commandsLog()).filter((c) => c.type === "get_state")).toEqual([]);
+  });
+
   it("denies pending checks when the connection drops (fail closed)", async () => {
     h = await startHarness();
     await h.server.command(runStart("tool:mcp__jira__create_issue"));
@@ -422,10 +482,14 @@ describe("what a tool started by Pi can reach", () => {
     );
     expect((control as PiEvent).event).toMatchObject({ sameChannel: true, fd3Write: true });
     await h.server.waitFor(settled());
-    // The forged line had no nonce: the channel is closed, so later checks fail closed in Pi.
+    // The forged line had no nonce: the channel closed. That Pi is not reused: the next run gets a
+    // fresh Pi with a fresh channel (and nonce).
+    const harness = h;
+    const launches = async () => (await harness.commandsLog()).filter((c) => "argv" in c).length;
+    expect(await launches()).toBe(1);
     await h.server.command({ ...runStart("tool:bash"), run_id: RUN_2 });
-    await new Promise((r) => setTimeout(r, 300));
-    expect(h.server.frames("policy.check")).toEqual([]);
+    expect(await launches()).toBe(2);
+    await h.server.waitFor((f) => f.type === "policy.check");
   });
 
   it.skipIf(!existsSync("/proc/self/stat"))(
@@ -528,6 +592,27 @@ describe("session.restore and branching (D13, D15)", () => {
     final,
     entries,
     ...extra,
+  });
+
+  it("gates the Pi started after a restore on kobe-policy being ready", async () => {
+    h = await startHarness({
+      env: { KOBE_POLICY_EXTENSION: "/opt/kobe/pi-extensions/refuse/index.js" },
+    });
+    // The restore itself only writes the session file (no Pi) ...
+    expect(await h.server.command(restore(0, true, [entry("a1", null)], { header }))).toMatchObject(
+      { ok: true },
+    );
+    // ... and the Pi that reads it is refused when its kobe-policy does not start.
+    const result = await h.server.command({
+      type: "pi.command",
+      thread_id: THREAD,
+      command: { id: "srv", type: "get_entries" },
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "pi_unavailable", message: expect.stringMatching(/kobe-policy/) },
+    });
+    expect((await h.commandsLog()).filter((c) => c.type === "get_entries")).toEqual([]);
   });
 
   it("rebuilds the session file from parts and Pi reads it", async () => {
