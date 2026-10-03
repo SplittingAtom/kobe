@@ -86,11 +86,11 @@ describe("server sandbox configuration", () => {
     });
   });
 
-  it("points sandboxes at the release's server, Bifrost, MCP proxy and egress proxy", () => {
+  it("points sandboxes at the release's server, model-gateway shim, MCP proxy and egress proxy", () => {
     const { endpoints } = sandboxConfig(ms);
     for (const [key, component] of [
       ["server", "server"],
-      ["modelGateway", "bifrost"],
+      ["modelGateway", "model-gateway"],
       ["mcpProxy", "mcp-proxy"],
       ["egressProxy", "egress-proxy"],
     ] as const) {
@@ -120,11 +120,11 @@ describe("server sandbox configuration", () => {
     }
   });
 
-  it("keeps the model gateway closed to sandboxes by default", () => {
-    expect(sandboxConfig(ms).modelGatewayAccess).toBe(false);
-    expect(sandboxConfig(render({ "sandbox.modelGatewayAccess": "true" })).modelGatewayAccess).toBe(
-      true,
-    );
+  it("lets sandboxes reach models through the token-verifying shim by default (KOBE-40)", () => {
+    expect(sandboxConfig(ms).modelGatewayAccess).toBe(true);
+    expect(
+      sandboxConfig(render({ "sandbox.modelGatewayAccess": "false" })).modelGatewayAccess,
+    ).toBe(false);
   });
 
   it("caps limits, pods, volumes and ephemeral storage per team, not only requests", () => {
@@ -337,7 +337,7 @@ describe("sandbox RBAC (least privilege; D11)", () => {
         apiGroups: [""],
         resources: ["services"],
         verbs: ["get"],
-        resourceNames: ["kobe-server", "kobe-bifrost", "kobe-mcp-proxy", "kobe-egress-proxy"],
+        resourceNames: ["kobe-server", "kobe-model-gateway", "kobe-mcp-proxy", "kobe-egress-proxy"],
       },
       { apiGroups: [""], resources: ["secrets"], verbs: ["get"], resourceNames: ["ghcr-pull"] },
     ]);

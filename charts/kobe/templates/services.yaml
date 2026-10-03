@@ -16,7 +16,7 @@
       "annotations" $dbAnnotations
       "extraPorts" "- name: sandbox\n  containerPort: 8081"
       "extraServicePorts" "- name: sandbox\n  port: 8081\n  targetPort: sandbox"
-      "env" (printf "- name: KOBE_PROCESS\n  value: server\n%s\n%s\n%s\n%s\n%s" $runtime $common (include "kobe.authEnv" .) (include "kobe.smtpEnv" .) (include "kobe.sandboxEnv" .))) }}
+      "env" (printf "- name: KOBE_PROCESS\n  value: server\n%s\n%s\n%s\n%s\n%s\n%s" $runtime $common (include "kobe.authEnv" .) (include "kobe.smtpEnv" .) (include "kobe.sandboxEnv" .) (include "kobe.serverModelsEnv" .))) }}
 ---
 {{ include "kobe.nodeService" (dict "root" . "component" "scheduler" "image" "server" "values" .Values.scheduler
       "serviceAccount" (printf "%s-server" $fullname) "automountToken" true "preflight" true "migrations" true
@@ -30,6 +30,13 @@
 {{ include "kobe.nodeService" (dict "root" . "component" "egress-proxy" "image" "egress-proxy" "values" .Values.egressProxy
       "migrations" true "annotations" $dbAnnotations
       "env" (include "kobe.egressProxyEnv" .)) }}
+---
+{{/* Model gateway shim (KOBE-40): sandboxes' only way to a model. Reads principals and virtual keys
+  as the app role; holds only its own session key and the virtual-key secret. */}}
+{{ include "kobe.nodeService" (dict "root" . "component" "model-gateway" "image" "model-gateway"
+      "values" (include "kobe.modelGatewayValues" . | fromJson)
+      "migrations" true "annotations" $dbAnnotations "readyPath" "/healthz"
+      "env" (include "kobe.modelGatewayEnv" .)) }}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget

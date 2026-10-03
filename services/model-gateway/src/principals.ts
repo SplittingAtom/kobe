@@ -25,6 +25,8 @@ export interface PrincipalCacheOptions {
   /** How long a first call waits for the sync to create a missing virtual key. */
   readonly keyWaitMs?: number;
   readonly keyPollMs?: number;
+  /** Minimum time between two key requests for the same member. */
+  readonly keyRequestEveryMs?: number;
   readonly maxEntries?: number;
   readonly now?: () => number;
 }
@@ -36,6 +38,8 @@ interface Entry {
 
 export class PrincipalCache {
   private readonly entries = new Map<string, Entry>();
+  /** Last key request per member: at most one NOTIFY per member per `keyRequestEveryMs`. */
+  private readonly requested = new Map<string, number>();
   private readonly now: () => number;
 
   constructor(
@@ -83,7 +87,16 @@ export class PrincipalCache {
   }
 
   private async waitForKey(teamId: string, userId: string, sandboxId: string): Promise<Resolution> {
-    await this.store.requestKey(teamId, userId);
+    const member = `${teamId}:${userId}`;
+    const requestedAt = this.requested.get(member);
+    if (
+      requestedAt === undefined ||
+      this.now() - requestedAt >= (this.options.keyRequestEveryMs ?? 5_000)
+    ) {
+      if (this.requested.size >= (this.options.maxEntries ?? 10_000)) this.requested.clear();
+      this.requested.set(member, this.now());
+      await this.store.requestKey(teamId, userId);
+    }
     const end = this.now() + (this.options.keyWaitMs ?? 10_000);
     let last: Resolution = { ok: false, reason: "no_key" };
     while (this.now() < end) {

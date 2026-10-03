@@ -17,5 +17,7 @@ Not covered by the automated check, and why that is acceptable:
   as `libgfortran` (GPL with the GCC Runtime Library Exception, which permits redistribution in
   non-GPL programs) and OpenBLAS (BSD-3-Clause).
 - **Base images** (`node`, `python` official images) and third-party service images (Bifrost:
-  Apache-2.0; CloudNativePG: Apache-2.0; ClamAV, optional and off by default: GPL-2.0, run as a
-  separate service).
+  Apache-2.0, `docker.io/maximhq/bifrost` v2.2.5 pinned by digest — the open-source build of
+  `github.com/maximhq/bifrost`, whose repository LICENSE is Apache-2.0; Kobe uses none of its
+  enterprise features; CloudNativePG: Apache-2.0; ClamAV, optional and off by default: GPL-2.0,
+  run as a separate service).

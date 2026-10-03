@@ -53,7 +53,7 @@ PODS=()
 cleanup() {
   for p in "${PODS[@]+"${PODS[@]}"}"; do $KUBECTL delete pod $p --ignore-not-found --wait=false >/dev/null 2>&1 || true; done
   $KUBECTL delete namespace "$SANDBOX_NS" --ignore-not-found --wait=false >/dev/null 2>&1 || true
-  $KUBECTL delete namespace "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  $KUBECTL delete namespace "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" kobe-e2e-llm --ignore-not-found --wait=false >/dev/null 2>&1 || true
   $KUBECTL delete runtimeclass kobe-e2e-runc --ignore-not-found >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -113,8 +113,8 @@ $KUBECTL get crd sandboxes.agents.x-k8s.io >/dev/null 2>&1 \
 
 echo "==> clean state"
 $HELM uninstall kobe -n "$NS" --wait >/dev/null 2>&1 || true
-$KUBECTL delete namespace "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" --ignore-not-found --wait=false >/dev/null
-for ns in "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS"; do
+$KUBECTL delete namespace "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" kobe-e2e-llm --ignore-not-found --wait=false >/dev/null
+for ns in "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" kobe-e2e-llm; do
   $KUBECTL wait --for=delete "namespace/$ns" --timeout=180s >/dev/null 2>&1 || true
 done
 
@@ -129,7 +129,7 @@ $HELM upgrade --install kobe charts/kobe -n "$NS" -f dev/values.yaml \
 echo "==> checks"
 psql_kobe() { $KUBECTL -n kobe-deps exec deploy/pg -- psql -U postgres -d kobe -tAc "$1" 2>&1; }
 
-for d in web server scheduler mcp-proxy egress-proxy bifrost; do
+for d in web server scheduler mcp-proxy egress-proxy model-gateway bifrost; do
   if $KUBECTL -n "$NS" rollout status "deploy/kobe-$d" --timeout=60s >/dev/null 2>&1; then ok "deployment kobe-$d is available"
   else fail "deployment kobe-$d is available"; fi
 done
@@ -158,13 +158,22 @@ for pod in $($KUBECTL -n "$NS" get pods -l "$gated_pods" --field-selector=status
   else iso+="$pod:unverified "; fi
 done
 contains "server and scheduler verified the gVisor RuntimeClass in process" '^verified verified verified $' "$iso"
-bifrost=$(reachable "$NS" "$NS" kobe-bifrost http://kobe-bifrost:8080/health)
-contains "Bifrost is reachable from the release namespace" '"status":"ok"' "$bifrost restarts=$($KUBECTL \
+# KOBE-40: Bifrost admits only the server (config sync) and the model-gateway shim.
+bifrost_health() {
+  $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node -e \
+    "fetch('http://kobe-bifrost:8080/health').then(r => r.text()).then(console.log, e => console.log('ERR', e.message))" 2>&1 | tail -1
+}
+wait_endpoints "$NS" kobe-bifrost
+bifrost=$(wait_for 60 '"status":"ok"' bifrost_health)
+contains "Bifrost answers the server (its config sync)" '"status":"ok"' "$bifrost restarts=$($KUBECTL \
   -n "$NS" get pods -l app.kubernetes.io/component=bifrost -o jsonpath='{.items[*].status.containerStatuses[*].restartCount}' 2>/dev/null)"
 # Once the control answers, the probe pod is in the policy ipsets: BLOCKED below is the policy.
 np=$(probe default "$(gated http://kobe-web.$NS/api/healthz bifrost http://kobe-bifrost.$NS:8080/health)")
 contains "probe from another namespace can reach unrestricted services (control)" '^control=REACHED$' "$np"
 contains "Bifrost is not reachable from other namespaces" '^bifrost=BLOCKED$' "$np"
+np=$(probe "$NS" "$(gated http://kobe-web/api/healthz bifrost http://kobe-bifrost:8080/health)")
+contains "control: a release-namespace probe reaches the web app" '^control=REACHED$' "$np"
+contains "Bifrost refuses other pods of the release namespace (only server and shim)" '^bifrost=BLOCKED$' "$np"
 # First-run setup through the ingress (KOBE-12): needs the install's setup token.
 setup_token=$($KUBECTL -n "$NS" get secret kobe-auth -o jsonpath='{.data.setup-token}' | base64 -d)
 ingress() { # method path [json]: full response (status line + body) via the Traefik ingress
@@ -356,6 +365,7 @@ other_ip=$($KUBECTL -n "$TEAM2_NS" get pod "$other_listener" -o jsonpath='{.stat
 
 svc_ip() { $KUBECTL -n "$NS" get svc "$1" -o jsonpath='{.spec.clusterIP}'; }
 server_ip=$(svc_ip kobe-server || true); web_ip=$(svc_ip kobe-web || true); bifrost_ip=$(svc_ip kobe-bifrost || true)
+mg_ip=$(svc_ip kobe-model-gateway || true)
 dns_ip=$($KUBECTL -n kube-system get svc kube-dns -o jsonpath='{.spec.clusterIP}' || true)
 api_ip=$($KUBECTL -n default get svc kubernetes -o jsonpath='{.spec.clusterIP}' || true)
 node_ip=$($KUBECTL get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' || true)
@@ -373,7 +383,7 @@ diag_ip=$($KUBECTL -n "$NS" get pod diag-listener -o jsonpath='{.status.podIP}' 
 web_pod_ip=$($KUBECTL -n "$NS" get pods -l app.kubernetes.io/component=web -o jsonpath='{.items[0].status.podIP}' 2>/dev/null || true)
 # Controls first: the destinations the sandbox must not reach are up and reachable from the
 # release namespace, so BLOCKED below is the sandbox policy, not a dead target.
-wait_endpoints "$NS" kobe-server kobe-web kobe-bifrost
+wait_endpoints "$NS" kobe-server kobe-web kobe-bifrost kobe-model-gateway
 controls=$(probe "$NS" "$(retry "$(answers http://$server_ip/healthz)"); \
   $(retry "nc -w 3 $api_ip 443 </dev/null"); $(retry "nc -w 3 $node_ip 10250 </dev/null"); \
   $(tcp api "$api_ip" 443) $(tcp kubelet "$node_ip" 10250) \
@@ -397,6 +407,7 @@ egress=$(team_probe "$(sandbox_port_gate egress) \
   wget -qO- -T 5 http://$server_ip:8081/healthz >/dev/null 2>&1 && echo sandbox-port=REACHED || echo sandbox-port=BLOCKED; \
   wget -qO- -T 5 http://$server_ip/healthz >/dev/null 2>&1 && echo user-api=REACHED || echo user-api=BLOCKED; \
   wget -qO- -T 5 http://$bifrost_ip:8080/health >/dev/null 2>&1 && echo bifrost=REACHED || echo bifrost=BLOCKED; \
+  wget -qO- -T 5 http://${mg_ip:-0.0.0.0}/healthz >/dev/null 2>&1 && echo model-gateway=REACHED || echo model-gateway=BLOCKED; \
   wget -qO- -T 5 http://$web_ip/api/healthz >/dev/null 2>&1 && echo web=REACHED || echo web=BLOCKED; \
   wget -qO- -T 5 http://${other_ip:-0.0.0.0}:8080/ >/dev/null 2>&1 && echo other-team=REACHED || echo other-team=BLOCKED; \
   wget -qO- -T 5 http://169.254.169.254/ >/dev/null 2>&1 && echo metadata=REACHED || echo metadata=BLOCKED; \
@@ -411,7 +422,8 @@ printf '     egress from a sandbox: %s\n' "$(printf '%s' "$egress" | tr '\n' ' '
 contains "sandboxes reach the server's sandbox port" '^sandbox-port=REACHED$' "$egress"
 contains "sandboxes cannot reach the web pod directly" '^web-pod=BLOCKED$' "$egress"
 contains "sandboxes cannot reach the server's user API port" '^user-api=BLOCKED$' "$egress"
-contains "sandboxes cannot reach Bifrost while it does not verify tokens (modelGatewayAccess off)" '^bifrost=BLOCKED$' "$egress"
+contains "sandboxes reach the model-gateway shim (KOBE-40)" '^model-gateway=REACHED$' "$egress"
+contains "sandboxes cannot reach Bifrost directly (only through the token-verifying shim)" '^bifrost=BLOCKED$' "$egress"
 contains "sandboxes cannot reach other Kobe services (web)" '^web=BLOCKED$' "$egress"
 contains "sandboxes cannot reach another team's pods" '^other-team=BLOCKED$' "$egress"
 contains "sandboxes cannot reach the Kubernetes API Service" '^api=BLOCKED$' "$egress"
@@ -1006,6 +1018,181 @@ elif [[ "${CI:-}" == "true" ]]; then
   fail "egress checks need KOBE_SANDBOX_IMAGE and a sandbox pod"
 else
   echo "SKIP egress checks (KOBE_SANDBOX_IMAGE not set)"
+fi
+
+
+# KOBE-40: models through Bifrost. A fake OpenAI/Anthropic/Gemini upstream stands in for the
+# providers (CI has no provider keys). The Owner configures providers (with keys), the catalog and
+# the team's models through the admin API; the gateway sync pushes them to Bifrost; a sandbox-like
+# client calls each provider kind through the model-gateway shim with its model-gateway session
+# token, and is refused without it, with another audience's token, and after revocation.
+echo "==> model gateway (KOBE-40)"
+LLM_NS=kobe-e2e-llm
+if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
+  $KUBECTL create namespace "$LLM_NS" --dry-run=client -o yaml | $KUBECTL apply -f - >/dev/null
+  $KUBECTL -n "$LLM_NS" run llm --restart=Never --image="ghcr.io/splittingatom/kobe-model-gateway:$TAG" \
+    --image-pull-policy=IfNotPresent --labels=app=llm --command -- node dist/testing/fake-llm-main.js >/dev/null
+  $KUBECTL -n "$LLM_NS" expose pod llm --port=80 --target-port=8080 --name=llm >/dev/null
+  $KUBECTL -n "$LLM_NS" wait --for=condition=Ready pod/llm --timeout=180s >/dev/null 2>&1 || true
+  wait_endpoints "$LLM_NS" llm
+  LLM="http://llm.$LLM_NS.svc.cluster.local"
+  # Bifrost may reach the fake provider (a private address): explicit egress rule, like a LAN Ollama.
+  llm_rule=$(printf '[{"to":[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"%s"}}}],"ports":[{"protocol":"TCP","port":8080}]}]' "$LLM_NS")
+  if out=$($HELM upgrade kobe charts/kobe -n "$NS" --reuse-values --wait --timeout 5m \
+      --set-json "bifrost.networkPolicy.extraEgress=$llm_rule" 2>&1); then ok "Bifrost may reach the fake model provider"
+  else fail "Bifrost may reach the fake model provider: $out"; fi
+
+  # A member of the e2e team with no sandbox row yet (tokens are minted for live claims only), and
+  # the Owner as that team's admin (to choose the team's models through the team API).
+  MODEL_USER_ID=8b3f3c4d-2e5f-4a7b-8c1d-2e3f4a5b6c7d
+  psql_kobe "INSERT INTO users (id, name, email, email_verified) VALUES ('$MODEL_USER_ID', 'E2E models', 'models@e2e.test', true) ON CONFLICT DO NOTHING;
+    INSERT INTO teams (id, slug, name) VALUES ('$E2E_TEAM_ID', 'e2e', 'E2E') ON CONFLICT DO NOTHING;
+    INSERT INTO team_members (team_id, user_id, role) VALUES ('$E2E_TEAM_ID', '$MODEL_USER_ID', 'member') ON CONFLICT DO NOTHING;
+    INSERT INTO team_members (team_id, user_id, role) SELECT '$E2E_TEAM_ID', id, 'team_admin' FROM users WHERE email = 'owner@e2e.test'
+      ON CONFLICT (team_id, user_id) DO UPDATE SET role = 'team_admin';" >/dev/null
+  # The admin API as the Owner, from inside a server pod: signs in once, then sends each request
+  # (one per argument: "METHOD /path [json]") and prints "<status> <body>" per request.
+  as_owner() {
+    $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "
+      const base = 'http://127.0.0.1:8080', origin = process.env.KOBE_PUBLIC_URL;
+      const h = { origin, 'content-type': 'application/json' };
+      const login = await fetch(base + '/api/auth/sign-in/email', { method: 'POST', headers: h,
+        body: JSON.stringify({ email: 'owner@e2e.test', password: 'e2e owner password' }) });
+      const cookie = login.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
+      await fetch(base + '/v1/me/teams/active', { method: 'PUT', headers: { ...h, cookie },
+        body: JSON.stringify({ teamId: '$E2E_TEAM_ID' }) });
+      for (const req of process.argv.slice(1)) {
+        const [method, path, ...rest] = req.split(' ');
+        const body = rest.join(' ');
+        const res = await fetch(base + path, { method, headers: { ...h, cookie }, ...(body ? { body } : {}) });
+        console.log(res.status + ' ' + (await res.text()).slice(0, 400));
+      }
+    " "$@" 2>&1
+  }
+  setup_models=$(as_owner \
+    "POST /v1/install/models/providers {\"kind\":\"openai\",\"name\":\"Fake OpenAI\",\"api_key\":\"e2e-provider-key-openai\",\"base_url\":\"$LLM\",\"allow_private_network\":true}" \
+    "POST /v1/install/models/providers {\"kind\":\"anthropic\",\"name\":\"Fake Anthropic\",\"api_key\":\"e2e-provider-key-anthropic\",\"base_url\":\"$LLM\",\"allow_private_network\":true}" \
+    "POST /v1/install/models/providers {\"kind\":\"gemini\",\"name\":\"Fake Gemini\",\"api_key\":\"e2e-provider-key-gemini\",\"base_url\":\"$LLM/v1beta\",\"allow_private_network\":true}" \
+    "POST /v1/install/models/providers {\"kind\":\"ollama\",\"name\":\"Fake Ollama\",\"base_url\":\"$LLM\",\"allow_private_network\":true}" \
+    "POST /v1/install/models/providers {\"kind\":\"openai_compatible\",\"id\":\"vllm\",\"name\":\"Fake vLLM\",\"base_url\":\"$LLM\",\"allow_private_network\":true}" \
+    "POST /v1/install/models/catalog {\"alias\":\"fast\",\"provider_id\":\"openai\",\"model\":\"gpt-fake\"}" \
+    "POST /v1/install/models/catalog {\"alias\":\"smart\",\"provider_id\":\"anthropic\",\"model\":\"claude-fake\"}" \
+    "POST /v1/install/models/catalog {\"alias\":\"gem\",\"provider_id\":\"gemini\",\"model\":\"gemini-fake\"}" \
+    "POST /v1/install/models/catalog {\"alias\":\"local\",\"provider_id\":\"ollama\",\"model\":\"llama-fake\"}" \
+    "POST /v1/install/models/catalog {\"alias\":\"qwen\",\"provider_id\":\"vllm\",\"model\":\"qwen-fake\"}" \
+    "PUT /v1/team/models/fast {\"enabled\":true,\"is_default\":true}" \
+    "PUT /v1/team/models/smart {\"enabled\":true}" \
+    "PUT /v1/team/models/gem {\"enabled\":true}" \
+    "PUT /v1/team/models/local {\"enabled\":true}" \
+    "PUT /v1/team/models/qwen {\"enabled\":true}")
+  printf '     model admin: %s\n' "$(printf '%s' "$setup_models" | cut -c1-60 | tr '\n' '|')"
+  expect "the Owner configures providers, the catalog and the team's models (admin API)" '^(200|201) ' "$setup_models"
+  if printf '%s' "$setup_models" | grep -q 'e2e-provider-key'; then fail "provider keys are never returned"
+  else ok "provider keys are never returned"; fi
+  contains "provider key changes are audited without the key" '^5$' \
+    "$(psql_kobe "SELECT count(*) FROM audit_log WHERE action = 'models.provider.added' AND target::text NOT LIKE '%e2e-provider-key%'")"
+  gateway_state() { psql_kobe "SELECT 'in_sync=' || (synced_version >= desired_version) || ' error=' || coalesce(last_error, '-') FROM model_gateway_state"; }
+  t0=$SECONDS
+  synced=$(wait_for 60 '^in_sync=true' gateway_state)
+  contains "Bifrost reflects the configuration (gateway in sync)" '^in_sync=true error=-$' "$synced"
+  printf '     gateway in sync after %ss\n' "$((SECONDS - t0))"
+
+  # The sandbox-like client: team namespace (team NetworkPolicy), gVisor, no DNS, the shim at
+  # model-gateway.kobe.internal as in real sandboxes; a model-gateway token for the model user.
+  MODEL_CLIENT="model-client-$RANDOM"
+  PODS+=("-n $TEAM_NS $MODEL_CLIENT")
+  $KUBECTL -n "$TEAM_NS" run "$MODEL_CLIENT" --restart=Never --image="$KOBE_SANDBOX_IMAGE" --overrides="{\"spec\":{
+    \"runtimeClassName\":\"gvisor\",\"automountServiceAccountToken\":false,\"serviceAccountName\":\"kobe-sandbox\",$SEC_POD,
+    \"dnsPolicy\":\"None\",\"dnsConfig\":{\"nameservers\":[\"127.0.0.1\"]},
+    \"hostAliases\":[{\"ip\":\"${mg_ip:-0.0.0.0}\",\"hostnames\":[\"model-gateway.kobe.internal\"]}],
+    \"containers\":[{\"name\":\"client\",\"image\":\"$KOBE_SANDBOX_IMAGE\",\"command\":[\"sleep\",\"3600\"],$SEC_CTR,
+      \"resources\":{\"requests\":{\"cpu\":\"50m\",\"memory\":\"64Mi\"},\"limits\":{\"cpu\":\"500m\",\"memory\":\"256Mi\"}},
+      \"volumeMounts\":[{\"name\":\"tmp\",\"mountPath\":\"/tmp\"}]}],
+    \"volumes\":[{\"name\":\"tmp\",\"emptyDir\":{}}]}}" >/dev/null 2>&1 || true
+  if $KUBECTL -n "$TEAM_NS" wait --for=condition=Ready "pod/$MODEL_CLIENT" --timeout=240s >/dev/null 2>&1; then
+    ok "the model client pod (sandbox image, gVisor) is ready"
+    in_client() { $KUBECTL -n "$TEAM_NS" exec "$MODEL_CLIENT" -c client -- sh -c "$1" 2>&1 || true; }
+    MODEL_SANDBOX=5c4d3e2f-1a0b-4c9d-8e7f-6a5b4c3d2e1f
+    model_token=$(mint kobe.model-gateway "$MODEL_SANDBOX" "$MODEL_USER_ID")
+    egress_aud_token=$(mint kobe.egress-proxy "$MODEL_SANDBOX" "$MODEL_USER_ID")
+    MG=http://model-gateway.kobe.internal:80
+    # → the body, then "code=<status>".
+    model_call() { # path json [header…]
+      local path="$1" body="$2"
+      shift 2
+      local hdrs="" hh
+      for hh in "$@"; do hdrs="$hdrs -H '$hh'"; done
+      in_client "curl -s -m 30 -X POST $MG$path -H 'content-type: application/json' $hdrs -d '$body' -w '\ncode=%{http_code}\n'"
+    }
+    chat() { model_call /v1/chat/completions "{\"model\":\"$1\",\"messages\":[{\"role\":\"user\",\"content\":\"hello-e2e\"}]${3:-}}" "Authorization: Bearer $2"; }
+    # Positive control and CNI warm-up: wait until the shim answers this pod at all.
+    up=$(in_client "if $(retry "curl -s -o /dev/null -m 5 $MG/healthz" 120); then echo shim=ANSWERS; else echo shim=SILENT; fi")
+    contains "control: the model-gateway shim answers the sandbox-like client" '^shim=ANSWERS$' "$up"
+    contains "OpenAI: a sandbox calls a model through the shim with its token" 'fake-openai: hello-e2e' \
+      "$(chat openai/gpt-fake "$model_token")"
+    contains "OpenAI: streaming responses stream through" '^data: \[DONE\]' \
+      "$(chat openai/gpt-fake "$model_token" ',"stream":true')"
+    contains "Anthropic native (x-api-key): answered by the Anthropic upstream" 'fake-anthropic: hello-e2e' \
+      "$(model_call /anthropic/v1/messages '{"model":"anthropic/claude-fake","max_tokens":16,"messages":[{"role":"user","content":"hello-e2e"}]}' \
+        "x-api-key: $model_token" 'anthropic-version: 2023-06-01')"
+    contains "Gemini (x-goog-api-key): answered by the Gemini upstream" 'fake-gemini: hello-e2e' \
+      "$(model_call /genai/v1beta/models/gemini/gemini-fake:generateContent '{"contents":[{"role":"user","parts":[{"text":"hello-e2e"}]}]}' \
+        "x-goog-api-key: $model_token")"
+    contains "Ollama: answered through Bifrost's Ollama provider" 'fake-openai: hello-e2e' \
+      "$(chat ollama/llama-fake "$model_token")"
+    contains "OpenAI-compatible (vLLM): answered through a custom provider" 'fake-openai: hello-e2e' \
+      "$(chat kobe-vllm/qwen-fake "$model_token")"
+    contains "a call without a token is refused (401)" '^code=401$' \
+      "$(model_call /v1/chat/completions '{"model":"openai/gpt-fake","messages":[]}')"
+    contains "a forged token is refused (401)" '^code=401$' "$(chat openai/gpt-fake forged.token.value-xxxxxxxxxx)"
+    contains "another audience's token (egress proxy) is refused (401)" '^code=401$' \
+      "$(chat openai/gpt-fake "$egress_aud_token")"
+    contains "a model outside the team's enabled models is refused by Bifrost (403)" '^code=403$' \
+      "$(chat openai/gpt-not-enabled "$model_token")"
+    contains "Bifrost's admin API is not reachable through the shim (404)" '^code=404$' \
+      "$(in_client "curl -s -m 10 -H 'Authorization: Bearer $model_token' $MG/api/providers -w '\ncode=%{http_code}\n'")"
+    # Direct to Bifrost (bypassing the shim) is blocked; checked only after the shim answered.
+    if [[ "$up" == *shim=ANSWERS* ]]; then
+      direct=$(in_client "curl -s -m 8 -o /dev/null http://${bifrost_ip:-0.0.0.0}:8080/health && echo bifrost=REACHED || echo bifrost=BLOCKED")
+    else
+      direct="bifrost=UNTESTED"
+    fi
+    contains "the sandbox-like client cannot reach Bifrost directly" '^bifrost=BLOCKED$' "$direct"
+    seen=$(probe "$NS" "$(answers "$LLM/_seen")")
+    contains "provider keys reached the upstream (attached outside the sandbox)" 'e2e-provider-key-anthropic' "$seen"
+    if printf '%s' "$seen" | grep -Eq 'sk-bf-|e2e-[0-9]|eyJ'; then fail "no sandbox credential or virtual key reached the provider"
+    else ok "no sandbox credential or virtual key reached the provider"; fi
+
+    # ac-1: a team admin change reaches Bifrost within 10 s (LISTEN/NOTIFY → sync).
+    contains "the team disables a model through the team API" '^200 ' "$(as_owner "PUT /v1/team/models/qwen {\"enabled\":false}")"
+    t0=$SECONDS
+    until_code() { # expected-code model token [seconds]
+      local out="" end=$((SECONDS + ${4:-20}))
+      while :; do
+        out=$(chat "$2" "$3")
+        if printf '%s\n' "$out" | grep -q "^code=$1$" || ((SECONDS >= end)); then break; fi
+        sleep 1
+      done
+      printf '%s\n' "$out"
+    }
+    disabled=$(until_code 403 kobe-vllm/qwen-fake "$model_token")
+    elapsed=$((SECONDS - t0))
+    contains "a disabled model is refused after the change propagates" '^code=403$' "$disabled"
+    if ((elapsed <= 10)); then ok "the change reached Bifrost within 10 s (${elapsed}s)"
+    else fail "the change reached Bifrost within 10 s (took ${elapsed}s)"; fi
+
+    # ac-2: a revoked session token cannot call Bifrost (the member left the team; token unexpired).
+    psql_kobe "DELETE FROM team_members WHERE team_id = '$E2E_TEAM_ID' AND user_id = '$MODEL_USER_ID';" >/dev/null
+    contains "a revoked session token (member removed) is refused (401)" '^code=401$' \
+      "$(until_code 401 openai/gpt-fake "$model_token")"
+  else
+    fail "the model client pod (sandbox image, gVisor) is ready: $($KUBECTL -n "$TEAM_NS" get pod "$MODEL_CLIENT" \
+      -o jsonpath='{.status.phase} {.status.containerStatuses[0].state}' 2>&1)"
+  fi
+elif [[ "${CI:-}" == "true" ]]; then
+  fail "model gateway checks need KOBE_SANDBOX_IMAGE"
+else
+  echo "SKIP model gateway checks (KOBE_SANDBOX_IMAGE not set)"
 fi
 
 exit "$failed"

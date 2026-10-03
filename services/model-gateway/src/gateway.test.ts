@@ -426,12 +426,14 @@ describe("virtual keys", () => {
     expect(hits[0]?.headers["x-bf-vk"]).toBe(fresh);
   });
 
-  it("answers 503 with Retry-After when no key appears", async () => {
+  it("answers 503 with Retry-After when no key appears, asking the sync at most once", async () => {
     setVk(undefined);
     const r = await call("/v1/chat/completions", { headers: bearer() });
     expect(r.status).toBe(503);
     expect(r.headers.get("retry-after")).toBe("5");
-  });
+    expect((await call("/v1/chat/completions", { headers: bearer() })).status).toBe(503);
+    expect(keyRequests).toBe(1);
+  }, 10_000);
 
   it("when Bifrost forgot the key: requests a resync and retries once with the new key", async () => {
     const old = vkValue;

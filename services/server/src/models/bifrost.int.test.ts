@@ -213,9 +213,16 @@ describe.skipIf(!BIN)("against a real Bifrost", () => {
     expect(seen.some((s) => s.includes("up-gemini"))).toBe(true);
     expect(seen.some((s) => s.includes("sk-bf-"))).toBe(false);
 
-    // Refusals: no key, another team's model, a removed member.
+    // Refusals: no key, a model or a whole provider the team has not enabled, a removed member.
     expect((await chat("openai/gpt-x", {})).status).toBe(401);
     expect((await chat("openai/not-enabled", vkHeader)).status).toBe(403);
+    const narrowed = buildDesiredState(
+      { providers, catalog, teams: [{ teamId, members: [userId], aliases: ["fast"] }] },
+      "f".repeat(40),
+    );
+    expect((await reconcile(narrowed, admin, logger)).errors).toEqual([]);
+    expect((await chat("kobe-vllm/qwen-x", vkHeader)).status).toBe(403);
+    expect((await chat("openai/gpt-x", vkHeader)).status).toBe(200);
     const removed = buildDesiredState(
       { providers, catalog, teams: [{ teamId, members: [], aliases: [] }] },
       "f".repeat(40),
