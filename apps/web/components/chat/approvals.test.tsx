@@ -165,6 +165,43 @@ describe("ApprovalCard", () => {
     expect(screen.queryByRole("button")).toBeNull();
   });
 
+  it("keeps Allow off until the exact input is loaded, and while it can't be", async () => {
+    let answer: (v: unknown) => void = () => undefined;
+    const slow = {
+      decideApproval: vi.fn(),
+      getApproval: vi
+        .fn()
+        .mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)))
+        .mockImplementationOnce(() =>
+          Promise.resolve({
+            ok: true as const,
+            status: 200,
+            data: { input: { from: "server" } } as never,
+          }),
+        ),
+    };
+    render(<ApprovalCard requested={asked({ input: {} })} resolved={undefined} api={slow} />);
+    expect(screen.getByText("Loading the exact input…")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Allow" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect((screen.getByRole("button", { name: "Deny" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+    answer({ ok: false, error: { status: 0, code: "network_error", message: "down" } });
+    await screen.findByText(/could not be loaded/);
+    expect((screen.getByRole("button", { name: "Allow" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    await userEvent.setup().click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Input to approve").textContent).toContain('"from": "server"'),
+    );
+    expect((screen.getByRole("button", { name: "Allow" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+
   it("reads the exact input back when a resumed stream dropped it", async () => {
     render(<ApprovalCard requested={asked({ input: {} })} resolved={undefined} api={api} />);
     await waitFor(() =>

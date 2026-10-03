@@ -79,21 +79,35 @@ export function ApprovalCard({
   const [sent, setSent] = useState<"allow" | "deny" | null>(null);
   const [remember, setRemember] = useState(false);
   const [choice, setChoice] = useState(0);
-  const [input, setInput] = useState<unknown>(requested.input);
   const approvalId = requested.approval_id;
-
-  // A resumed run keeps no inputs in its resume point: read the exact input back.
+  // A resumed run keeps no inputs in its resume point: read the exact input back. Until it is
+  // here, Allow stays off — the card must never approve an input it isn't showing.
   const inputMissing = Object.keys(requested.input).length === 0;
+  const [input, setInput] = useState<unknown>(requested.input);
+  const [inputState, setInputState] = useState<"ready" | "loading" | "failed">(
+    inputMissing ? "loading" : "ready",
+  );
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!inputMissing || resolved || !api) return;
     let live = true;
-    void api.getApproval(approvalId).then((res) => {
-      if (live && res.ok) setInput(res.data.input);
-    });
+    setInputState("loading");
+    api
+      .getApproval(approvalId)
+      .then((res) => {
+        if (!live) return;
+        if (res.ok) {
+          setInput(res.data.input);
+          setInputState("ready");
+        } else setInputState("failed");
+      })
+      .catch(() => {
+        if (live) setInputState("failed");
+      });
     return () => {
       live = false;
     };
-  }, [api, approvalId, inputMissing, resolved]);
+  }, [api, approvalId, inputMissing, resolved, attempt]);
 
   if (resolved) {
     return (
@@ -137,9 +151,22 @@ export function ApprovalCard({
         ))}
       </ul>
       <p className={styles.who}>Exactly this input runs if you allow it:</p>
-      <pre className={styles.toolPre} aria-label="Input to approve">
-        {pretty(input)}
-      </pre>
+      {inputState === "ready" ? (
+        <pre className={styles.toolPre} aria-label="Input to approve">
+          {pretty(input)}
+        </pre>
+      ) : inputState === "loading" ? (
+        <p className={styles.hint} role="status">
+          Loading the exact input…
+        </p>
+      ) : (
+        <p className={styles.errorText} role="alert">
+          The input could not be loaded, so it can&apos;t be approved yet.{" "}
+          <button type="button" onClick={() => setAttempt((n) => n + 1)}>
+            Try again
+          </button>
+        </p>
+      )}
       {expired ? (
         <p className={styles.denied} role="note">
           This approval request expired. The tool did not run.
@@ -174,7 +201,11 @@ export function ApprovalCard({
             </select>
           </div>
           <div className={styles.approvalActions}>
-            <button type="button" onClick={() => void decide("allow")} disabled={busy || !api}>
+            <button
+              type="button"
+              onClick={() => void decide("allow")}
+              disabled={busy || !api || inputState !== "ready"}
+            >
               Allow
             </button>
             <button type="button" onClick={() => void decide("deny")} disabled={busy || !api}>

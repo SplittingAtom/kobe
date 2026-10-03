@@ -50,7 +50,10 @@ export async function expireByTtl(
     let ended: EndedRun | undefined;
     if (isActiveRunStatus(run.status)) {
       // applyTransition expires the run's other pending approvals (cause ttl) and audits them.
-      await applyTransition(tx, thread, run, "failed", "approval_expired", {
+      // `approval_expired` leaves `waiting_approval`; a run found `running` (state repaired by
+      // hand, or resumed) still ends, as an error, so the expiry can never be stuck.
+      const cause = run.status === "waiting_approval" ? "approval_expired" : "error";
+      await applyTransition(tx, thread, run, "failed", cause, {
         type: "run.failed",
         payload: { error: { code: "approval_expired", message: APPROVAL_EXPIRED_MESSAGE } },
       });
