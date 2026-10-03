@@ -187,6 +187,10 @@ async function buildInput(
     context: {
       enforcement_point: "sandbox",
       ...(projectId === undefined ? {} : { project_id: projectId }),
+      // Required for MCP tools (protocol policy.ts). The engine applies the stricter of this and
+      // the team's real exposure from its ConnectorStateSource, so the server's own state decides
+      // (KOBE-37: without it every MCP call was `invalid_input`; KOBE-58/59 may narrow it here).
+      ...(tool.source === "mcp" ? { connector_exposure: "all" as const } : {}),
     },
   } as PolicyInput;
 }
@@ -227,7 +231,7 @@ async function recordDenied(
  */
 export async function decidePolicyCheck(
   deps: PolicyCheckDeps,
-  target: SandboxTarget,
+  target: SandboxTarget & { readonly connectionId: string },
   frame: PolicyCheckFrame,
   signal: AbortSignal,
   onPending: (pending: { approvalId: string; expiresAt: string }) => void,
@@ -267,6 +271,7 @@ export async function decidePolicyCheck(
       {
         teamId: target.teamId,
         userId: target.userId,
+        connectionId: target.connectionId,
         runId: frame.run_id,
         threadId: frame.thread_id,
         toolCallId: frame.tool_call_id,

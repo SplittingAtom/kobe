@@ -32,6 +32,11 @@ describe("camelizeKeys", () => {
     });
   });
 
+  it("keeps an approval's tool input exactly as it will run (KOBE-37)", () => {
+    const input = { issue_type: "Bug", nested_key: { a_b: 1 } };
+    expect(camelizeKeys({ approval_id: "a", input })).toEqual({ approvalId: "a", input });
+  });
+
   it("keeps opaque documents (agent frontmatter) exactly as the server sent them", () => {
     const frontmatter = { approval_mode: "ask-all", tools: { allow: ["x"] } };
     expect(camelizeKeys({ agent: { current_version: 1, frontmatter } })).toEqual({

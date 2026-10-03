@@ -243,6 +243,11 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
   `auto` is named in a notice (`kobe: dropped team approval floor <mode> of team <id>`): such a
   team is looser after the upgrade. Restore its strictness with team ask rules (an `ask` rule on
   `*` asks for every tool, like `ask-all`).
+- **Approval key (KOBE-37).** Tool-call approvals are signed with `KOBE_APPROVAL_KEY`, which the
+  chart generates as `approval-hmac` in the sandbox session-keys Secret. If you pre-create that
+  Secret (`sandbox.sessionKeysSecret`), add an `approval-hmac` key (at least 32 random characters).
+  Without it the server starts, logs `KOBE_APPROVAL_KEY is not set`, and denies every tool call
+  that needs approval. See [approvals](approvals.md).
 
 ## Backup and restore
 

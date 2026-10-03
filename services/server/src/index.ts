@@ -1,6 +1,7 @@
 import type { Server } from "node:http";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
+import { approvalKeyring } from "./approvals/index.js";
 import { isolationAuditor } from "./audit/isolation.js";
 import { BreakGlassSweeper } from "./break-glass/sweeper.js";
 import { loadConfig } from "./config.js";
@@ -23,9 +24,11 @@ const config = loadConfig(process.env);
 const waker = createDeferredWaker();
 let deps: ServerDeps | undefined;
 if (config.auth && config.smtp) {
+  const { approvalKey, ...auth } = config.auth;
   deps = createServerDeps({
     databaseUrl: config.databaseUrl,
-    ...config.auth,
+    ...auth,
+    ...(approvalKey ? { approvalKeys: approvalKeyring(approvalKey) } : {}),
     mailer: createSmtpMailer(config.smtp),
     sandboxWire: { waker },
     agents: { maxVersions: config.agentMaxVersions },
@@ -77,6 +80,8 @@ deps?.auditAnchor.start();
 // Break-glass grants end at expires_at on their own; this records the end and notifies (KOBE-16).
 const breakGlassSweeper = deps ? new BreakGlassSweeper(deps) : undefined;
 breakGlassSweeper?.start();
+// Pending approvals past their 1 h TTL whose waiting replica is gone (D29, KOBE-37).
+deps?.approvals.start();
 isolation.start().catch((err: unknown) => logger.error({ err }, "isolation check failed"));
 
 // Blocked egress attempts → `egress.blocked` run events (KOBE-38); every server replica listens.
@@ -159,6 +164,7 @@ function shutdown(signal: string): void {
   deps?.auditAnchor.stop();
   void egressRelay?.close();
   breakGlassSweeper?.stop();
+  deps?.approvals.stop();
   // End event streams first so browsers reconnect (with Last-Event-ID) to another replica.
   void deps?.eventStream.hub.close();
   server.close((err) => {
