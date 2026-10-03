@@ -4,7 +4,12 @@ import { chmod, lstat, mkdir, open, opendir, rename, rm, unlink, utimes } from "
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Transform, type Readable } from "node:stream";
-import { isExcludedPath, isServerOwnedPath, workspacePathIssue } from "@kobe/protocol";
+import {
+  WORKSPACE_SEGMENT_MAX_BYTES,
+  isExcludedPath,
+  isServerOwnedPath,
+  workspacePathIssue,
+} from "@kobe/protocol";
 
 /**
  * Filesystem side of workspace sync (KOBE-27). Paths are workspace-relative POSIX paths (protocol
@@ -87,6 +92,12 @@ export async function scanWorkspace(
 /**
  * Whether every parent of `rel` is a real directory (no symlink on the way): reads, removals and
  * uploads never act on something outside the workspace through a linked parent.
+ *
+ * Accepted scope (TOCTOU): model-run code runs as the same uid, so it can swap a parent for a
+ * link between this check and the following open/unlink/rename. That gains it nothing it lacks
+ * already — it can read, write and delete everything this uid can, directly — so the check
+ * protects against accidents (a link left in the workspace), not against an adversary on the
+ * same uid. Writes are additionally `O_EXCL | O_NOFOLLOW` (see `writeFileAtomic`).
  */
 export async function parentsAreDirs(root: string, rel: string): Promise<boolean> {
   const parts = rel.split("/").slice(0, -1);
@@ -238,12 +249,28 @@ export async function removeFile(root: string, rel: string): Promise<void> {
   await unlink(abs).catch(() => {});
 }
 
-/** `dir/name.ext` → `dir/name.conflict-20261003T120000Z.ext` (a free name). */
+const utf8Bytes = (s: string): number => Buffer.byteLength(s, "utf8");
+
+/** The longest prefix of `s` within `max` UTF-8 bytes, never splitting a character. */
+export function truncateUtf8(s: string, max: number): string {
+  if (utf8Bytes(s) <= max) return s;
+  let out = "";
+  for (const ch of s) {
+    if (utf8Bytes(out + ch) > max) break;
+    out += ch;
+  }
+  return out;
+}
+
+/** `dir/name.ext` → `dir/name.conflict-20261003T120000Z.ext` (a free name, ≤ 255 bytes). */
 export async function conflictCopyName(root: string, rel: string, now: Date): Promise<string> {
   const dir = path.posix.dirname(rel);
   const base = path.posix.basename(rel);
   const dot = base.lastIndexOf(".");
-  const [stem, ext] = dot > 0 ? [base.slice(0, dot), base.slice(dot)] : [base, ""];
+  const [fullStem, fullExt] = dot > 0 ? [base.slice(0, dot), base.slice(dot)] : [base, ""];
+  // The name must stay a valid segment (≤ 255 bytes): shorten the extension, then the stem.
+  const ext = truncateUtf8(fullExt, 32);
+  const stem = truncateUtf8(fullStem, WORKSPACE_SEGMENT_MAX_BYTES - 64 - utf8Bytes(ext));
   const stamp = now
     .toISOString()
     .replace(/[-:]/g, "")
@@ -257,7 +284,11 @@ export async function conflictCopyName(root: string, rel: string, now: Date): Pr
   }
 }
 
+/** Renames inside the workspace; refuses when either side's parents go through a link. */
 export async function renameWithin(root: string, from: string, to: string): Promise<void> {
+  if (!(await parentsAreDirs(root, from)) || !(await parentsAreDirs(root, to))) {
+    throw new Error("a parent directory is a link");
+  }
   await rename(path.join(root, from), path.join(root, to));
 }
 
@@ -267,6 +298,8 @@ export async function renameWithin(root: string, from: string, to: string): Prom
  * reverts local changes on its next sync.)
  */
 export async function lockServerOwned(root: string, areas: readonly string[]): Promise<void> {
+  // Directory entries never follow links; the area roots are checked the same way (a symlinked
+  // `uploads` would otherwise chmod whatever it points at).
   const lock = async (rel: string): Promise<void> => {
     let dir;
     try {
@@ -281,5 +314,9 @@ export async function lockServerOwned(root: string, areas: readonly string[]): P
     }
     await chmod(path.join(root, rel), 0o555).catch(() => {});
   };
-  for (const area of areas) await lock(area.replace(/\/$/, ""));
+  for (const area of areas) {
+    const rel = area.replace(/\/$/, "");
+    const stat = await lstat(path.join(root, rel)).catch(() => undefined);
+    if (stat?.isDirectory()) await lock(rel);
+  }
 }

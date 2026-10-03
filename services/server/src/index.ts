@@ -127,6 +127,16 @@ const workspaceSync =
 if (sandbox && syncSettings?.enabled && !s3) {
   logger.warn("object storage is not configured (s3.bucket): workspace sync is off");
 }
+/** Workspace sync's caller checks; revocations (deactivation, removal) clear its cache. */
+function workspaceAuth(d: ServerDeps, s: NonNullable<typeof sandbox>) {
+  const authenticate = createSandboxAuthenticator({
+    db: d.database.db,
+    verify: sandboxWireVerifier(s.sessionKeys),
+    liveness: providerLiveness(s.provider, d.database.db),
+  });
+  d.sandboxWire.onUserRevalidate((userId) => authenticate.forget(userId));
+  return authenticate;
+}
 const stopCollector = workspaceSync?.startCollector((syncSettings?.collectSeconds ?? 3600) * 1000);
 
 // The scheduler serves health endpoints only (its jobs arrive in KOBE-64).
@@ -148,13 +158,7 @@ const sandboxServer = sandbox
           ...sandbox,
           ...(workspaceSync && deps
             ? {
-                workspace: workspaceSync.routes(
-                  createSandboxAuthenticator({
-                    db: deps.database.db,
-                    verify: sandboxWireVerifier(sandbox.sessionKeys),
-                    liveness: providerLiveness(sandbox.provider, deps.database.db),
-                  }),
-                ),
+                workspace: workspaceSync.routes(workspaceAuth(deps, sandbox)),
               }
             : {}),
         }).fetch,

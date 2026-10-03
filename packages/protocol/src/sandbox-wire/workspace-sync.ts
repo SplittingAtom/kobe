@@ -52,17 +52,20 @@ const ENCODER = new TextEncoder();
 const utf8Bytes = (s: string): number => ENCODER.encode(s).length;
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f]/u;
+const FORMAT = /\p{Cf}/u;
 
 /**
  * A workspace path: relative to `/workspace`, POSIX separators, NFC-agnostic bytes as written by
- * the sandbox. No leading `/`, no empty, `.` or `..` segments, no control characters or
- * backslashes, at most {@link WORKSPACE_PATH_MAX_BYTES} UTF-8 bytes and
+ * the sandbox. No leading `/`, no empty, `.` or `..` segments, no control or format characters
+ * (bidi overrides, zero-width) or backslashes, at most {@link WORKSPACE_PATH_MAX_BYTES} UTF-8 bytes and
  * {@link WORKSPACE_SEGMENT_MAX_BYTES} per segment. Never an object key (keys are derived from hashes).
  */
 export function workspacePathIssue(path: string): string | undefined {
   if (path.length === 0) return "empty";
   if (utf8Bytes(path) > WORKSPACE_PATH_MAX_BYTES) return "too long";
   if (CONTROL.test(path) || path.includes("\\")) return "control character or backslash";
+  // Format characters (bidi overrides, zero-width joiners…) make a name display as another.
+  if (FORMAT.test(path)) return "invisible format character";
   if (path.startsWith("/")) return "absolute";
   for (const segment of path.split("/")) {
     if (segment === "" || segment === "." || segment === "..") return "empty, . or .. segment";

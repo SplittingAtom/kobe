@@ -258,9 +258,10 @@ describe("push and pull", () => {
       },
     ]);
     expect(c.results[0]).toMatchObject({ status: "rejected", code: "missing_blob" });
-    await expect
-      .poll(() => auditCount(b.teamId, "sandbox.limit_exceeded", ["limit", "workspace_integrity"]))
-      .toBe(1);
+    await expect.poll(() => auditCount(b.teamId, "workspace.integrity_failed")).toBe(1);
+    // A second mismatch within the minute is counted into the next row, not dropped.
+    await call(b, "PUT", `/blobs/${claimed}`, undefined, Buffer.from("something else!!"));
+    expect(await auditCount(b.teamId, "workspace.integrity_failed")).toBe(1);
   });
 
   it("pages incremental pulls and keeps tombstones", async () => {
@@ -297,7 +298,7 @@ describe("consistency", () => {
     // The server writes the same path meanwhile (e.g. a file-browser upload, KOBE-54).
     const serverHash = await upload(b, "from the browser");
     await withTeam(fx.db, b.teamId, (tx) =>
-      putServerFile(tx, owner, {
+      sync.putServerFile(tx, owner, {
         path: "notes.md",
         sha256: serverHash,
         size: 16,
@@ -367,15 +368,34 @@ describe("consistency", () => {
     const b = await box();
     const owner = { teamId: b.teamId, userId: b.person.id };
     const before = await manifest(b);
-    objects.objects.set("teams/uploads/obj-1", Buffer.from("a,b\n1,2\n"));
+    const uploadKey = `teams/${b.teamId}/uploads/obj-1`;
+    objects.objects.set(uploadKey, Buffer.from("a,b\n1,2\n"));
     await withTeam(fx.db, b.teamId, (tx) =>
-      putServerFile(tx, owner, {
+      sync.putServerFile(tx, owner, {
         path: "uploads/thread-1/sales.csv",
         sha256: sha("a,b\n1,2\n"),
         size: 8,
-        blobKey: "teams/uploads/obj-1",
+        blobKey: uploadKey,
       }),
     );
+    // A server write can only point at this team's tree, and in users/ at this user's.
+    for (const blobKey of [
+      `teams/${randomUUID()}/uploads/obj-1`,
+      `teams/${b.teamId}/users/${randomUUID()}/workspace/${"a".repeat(64)}`,
+      `teams/${b.teamId}/../x`,
+      "elsewhere/obj",
+    ]) {
+      await expect(
+        withTeam(fx.db, b.teamId, (tx) =>
+          putServerFile(
+            tx,
+            owner,
+            { path: "uploads/x.csv", sha256: "a".repeat(64), size: 1, blobKey },
+            { prefix: "" },
+          ),
+        ),
+      ).rejects.toThrow(/blobKey/);
+    }
     const after = await manifest(b, before.body.head_rev);
     expect(after.body.entries).toEqual([
       expect.objectContaining({ path: "uploads/thread-1/sales.csv", origin: "server", size: 8 }),

@@ -282,6 +282,16 @@ describe("workspace sync (agent)", () => {
     expect(server.content("kobe-moved/projects/mine/plan.md")).toBe("written before sync existed");
   });
 
+  it("ignores server entries in its own area or with invalid names, whatever the server says", async () => {
+    const root = await volume();
+    const sync = await started(root);
+    server.serverWrite(".kobe/sessions/t.jsonl", '{"forged":true}\n');
+    server.serverWrite("ok.txt", "fine");
+    await sync.pull();
+    expect(await exists(root, ".kobe/sessions/t.jsonl")).toBe(false);
+    expect(await text(root, "ok.txt")).toBe("fine");
+  });
+
   it("turns itself off when the server has no workspace sync", async () => {
     server.failWith = 404;
     const root = await volume();

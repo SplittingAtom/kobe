@@ -14,6 +14,23 @@ export interface WorkspaceLimits {
   readonly maxWorkspaceBytes: number;
   /** Live files per workspace. */
   readonly maxFiles: number;
+  /** Manifest rows (live + tombstones) per workspace; default 2 × maxFiles. */
+  readonly maxRows?: number;
+  /** Uncommitted distinct contents a workspace may hold beyond its live files; default 10 000. */
+  readonly maxUncommittedBlobs?: number;
+  /** Bytes of held content (committed or not) + uploads in flight; default 2 × maxWorkspaceBytes. */
+  readonly maxBlobBytes?: number;
+}
+
+export type ResolvedLimits = Required<WorkspaceLimits>;
+
+export function resolveLimits(l: WorkspaceLimits): ResolvedLimits {
+  return {
+    ...l,
+    maxRows: l.maxRows ?? 2 * l.maxFiles,
+    maxUncommittedBlobs: l.maxUncommittedBlobs ?? 10_000,
+    maxBlobBytes: l.maxBlobBytes ?? 2 * l.maxWorkspaceBytes,
+  };
 }
 
 export interface QuotaRequest {

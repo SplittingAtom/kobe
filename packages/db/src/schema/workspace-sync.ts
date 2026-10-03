@@ -37,6 +37,16 @@ export const workspaceSync = pgTable(
     horizonRev: bigint({ mode: "number" }).notNull().default(0),
     liveFiles: integer().notNull().default(0),
     liveBytes: bigint({ mode: "number" }).notNull().default(0),
+    /** Tombstone rows: live + tombstones is capped per workspace (rows, not just files). */
+    tombstones: integer().notNull().default(0),
+    /** Rows and bytes in `workspace_blobs` (committed or not): caps uncommitted uploads. */
+    blobCount: integer().notNull().default(0),
+    blobBytes: bigint({ mode: "number" }).notNull().default(0),
+    /** Uploads in flight, reserved before their bytes are accepted (quota without a race). */
+    pendingBlobs: integer().notNull().default(0),
+    pendingBytes: bigint({ mode: "number" }).notNull().default(0),
+    /** When the oldest outstanding reservation was taken (stale ones are cleared by collection). */
+    pendingSince: timestamp({ withTimezone: true }),
     lastPushAt: timestamp({ withTimezone: true }),
     lastRestoreAt: timestamp({ withTimezone: true }),
     lastRestoreMs: integer(),
@@ -44,7 +54,10 @@ export const workspaceSync = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.userId] }),
-    check("workspace_sync_counts", sql`${t.liveFiles} >= 0 AND ${t.liveBytes} >= 0`),
+    check(
+      "workspace_sync_counts",
+      sql`${t.liveFiles} >= 0 AND ${t.liveBytes} >= 0 AND ${t.tombstones} >= 0 AND ${t.blobCount} >= 0 AND ${t.blobBytes} >= 0 AND ${t.pendingBlobs} >= 0 AND ${t.pendingBytes} >= 0`,
+    ),
     check("workspace_sync_horizon", sql`${t.horizonRev} BETWEEN 0 AND ${t.headRev}`),
   ],
 );
@@ -112,6 +125,8 @@ export const workspaceBlobs = pgTable(
      */
     deleting: boolean().notNull().default(false),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    /** Last time a manifest row stopped pointing at this content: collection grace runs from it. */
+    releasedAt: timestamp({ withTimezone: true }),
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.userId, t.sha256] }),

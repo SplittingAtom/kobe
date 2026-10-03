@@ -1,5 +1,5 @@
 {
-  "id": "9287532e-c83b-4a2d-be8b-5bfc95095267",
+  "id": "1fa482af-19a2-4c5c-84c1-e270bb013dc2",
   "prevId": "a68ec61b-3d0e-4f40-a1dd-2ad9625c5dd4",
   "version": "7",
   "dialect": "postgresql",
@@ -4836,6 +4836,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "released_at": {
+          "name": "released_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},
@@ -5129,6 +5135,47 @@
           "notNull": true,
           "default": 0
         },
+        "tombstones": {
+          "name": "tombstones",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "blob_count": {
+          "name": "blob_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "blob_bytes": {
+          "name": "blob_bytes",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "pending_blobs": {
+          "name": "pending_blobs",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "pending_bytes": {
+          "name": "pending_bytes",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "pending_since": {
+          "name": "pending_since",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "last_push_at": {
           "name": "last_push_at",
           "type": "timestamp with time zone",
@@ -5198,7 +5245,7 @@
       "checkConstraints": {
         "workspace_sync_counts": {
           "name": "workspace_sync_counts",
-          "value": "\"workspace_sync\".\"live_files\" >= 0 AND \"workspace_sync\".\"live_bytes\" >= 0"
+          "value": "\"workspace_sync\".\"live_files\" >= 0 AND \"workspace_sync\".\"live_bytes\" >= 0 AND \"workspace_sync\".\"tombstones\" >= 0 AND \"workspace_sync\".\"blob_count\" >= 0 AND \"workspace_sync\".\"blob_bytes\" >= 0 AND \"workspace_sync\".\"pending_blobs\" >= 0 AND \"workspace_sync\".\"pending_bytes\" >= 0"
         },
         "workspace_sync_horizon": {
           "name": "workspace_sync_horizon",

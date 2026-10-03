@@ -6,6 +6,7 @@ CREATE TABLE "workspace_blobs" (
 	"size" bigint NOT NULL,
 	"deleting" boolean DEFAULT false NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"released_at" timestamp with time zone,
 	CONSTRAINT "workspace_blobs_team_id_user_id_sha256_pk" PRIMARY KEY("team_id","user_id","sha256"),
 	CONSTRAINT "workspace_blobs_sha" CHECK ("workspace_blobs"."sha256" ~ '^[0-9a-f]{64}$'),
 	CONSTRAINT "workspace_blobs_size" CHECK ("workspace_blobs"."size" >= 0)
@@ -37,12 +38,18 @@ CREATE TABLE "workspace_sync" (
 	"horizon_rev" bigint DEFAULT 0 NOT NULL,
 	"live_files" integer DEFAULT 0 NOT NULL,
 	"live_bytes" bigint DEFAULT 0 NOT NULL,
+	"tombstones" integer DEFAULT 0 NOT NULL,
+	"blob_count" integer DEFAULT 0 NOT NULL,
+	"blob_bytes" bigint DEFAULT 0 NOT NULL,
+	"pending_blobs" integer DEFAULT 0 NOT NULL,
+	"pending_bytes" bigint DEFAULT 0 NOT NULL,
+	"pending_since" timestamp with time zone,
 	"last_push_at" timestamp with time zone,
 	"last_restore_at" timestamp with time zone,
 	"last_restore_ms" integer,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "workspace_sync_team_id_user_id_pk" PRIMARY KEY("team_id","user_id"),
-	CONSTRAINT "workspace_sync_counts" CHECK ("workspace_sync"."live_files" >= 0 AND "workspace_sync"."live_bytes" >= 0),
+	CONSTRAINT "workspace_sync_counts" CHECK ("workspace_sync"."live_files" >= 0 AND "workspace_sync"."live_bytes" >= 0 AND "workspace_sync"."tombstones" >= 0 AND "workspace_sync"."blob_count" >= 0 AND "workspace_sync"."blob_bytes" >= 0 AND "workspace_sync"."pending_blobs" >= 0 AND "workspace_sync"."pending_bytes" >= 0),
 	CONSTRAINT "workspace_sync_horizon" CHECK ("workspace_sync"."horizon_rev" BETWEEN 0 AND "workspace_sync"."head_rev")
 );
 --> statement-breakpoint

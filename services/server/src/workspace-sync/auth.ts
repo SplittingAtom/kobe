@@ -19,9 +19,17 @@ export type AuthResult =
   | { readonly ok: true; readonly caller: SandboxCaller }
   | { readonly ok: false; readonly reason: "no_token" | "invalid" | "not_live" | "not_allowed" };
 
-export type SandboxAuthenticator = (authorization: string | undefined) => Promise<AuthResult>;
+export interface SandboxAuthenticator {
+  (authorization: string | undefined): Promise<AuthResult>;
+  /**
+   * Drops a user's cached answers at once: called on deactivation and team removal through the
+   * sandbox bus's `user:<id>` hint, which reaches every replica (KOBE-24).
+   */
+  forget(userId: string): void;
+}
 
-export const AUTH_CACHE_MS = 20_000;
+/** Positive answers are reused this briefly; revocation hints clear them sooner. */
+export const AUTH_CACHE_MS = 5_000;
 
 export function createSandboxAuthenticator(options: {
   readonly db: KobeDb;
@@ -49,7 +57,7 @@ export function createSandboxAuthenticator(options: {
     return true;
   };
 
-  return async (authorization) => {
+  const authenticate = async (authorization: string | undefined): Promise<AuthResult> => {
     const match = /^Bearer ([A-Za-z0-9._~+/=-]{1,4096})$/.exec(authorization ?? "");
     if (!match?.[1]) return { ok: false, reason: "no_token" };
     let claims: SessionTokenClaims;
@@ -63,4 +71,9 @@ export function createSandboxAuthenticator(options: {
     if (!(await principalAllowed(caller))) return { ok: false, reason: "not_allowed" };
     return { ok: true, caller };
   };
+  return Object.assign(authenticate, {
+    forget(userId: string) {
+      for (const key of allowed.keys()) if (key.split(":")[1] === userId) allowed.delete(key);
+    },
+  });
 }

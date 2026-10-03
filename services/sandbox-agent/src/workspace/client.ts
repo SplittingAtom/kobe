@@ -41,6 +41,16 @@ export interface SyncClientOptions {
 }
 
 const MAX_JSON_RESPONSE = 8 * 1024 * 1024;
+const BUSY_RETRIES = 5;
+
+interface SendOptions {
+  readonly json?: unknown;
+  readonly body?: ReadableStream;
+  readonly headers?: Record<string, string>;
+  /** A transfer: the timeout covers only the wait for the response to start. */
+  readonly transfer?: boolean;
+  readonly timeoutMs?: number;
+}
 
 export function syncBaseUrl(serverUrl: string): string {
   const url = new URL(serverUrl);
@@ -94,7 +104,7 @@ export class SyncClient {
 
   /** The current content of a live path, or undefined when it is gone. */
   async download(path: string): Promise<{ entry: WorkspaceEntry; body: Readable } | undefined> {
-    const res = await this.#send("GET", `/file?path=${encodeURIComponent(path)}`, {
+    const res = await this.#retrying("GET", `/file?path=${encodeURIComponent(path)}`, {
       transfer: true,
     });
     if (res.status === 404) {
@@ -111,7 +121,7 @@ export class SyncClient {
   }
 
   async restoreReport(report: WorkspaceRestoreReport): Promise<void> {
-    const res = await this.#send("POST", "/restore-report", { json: report });
+    const res = await this.#retrying("POST", "/restore-report", { json: report });
     await this.#check(res);
     await res.body?.cancel();
   }
@@ -122,7 +132,7 @@ export class SyncClient {
     path: string,
     json?: unknown,
   ): Promise<z.infer<S>> {
-    const res = await this.#send(method, path, json === undefined ? {} : { json });
+    const res = await this.#retrying(method, path, json === undefined ? {} : { json });
     await this.#check(res);
     const text = await readText(res, MAX_JSON_RESPONSE);
     const parsed = schema.safeParse(JSON.parse(text));
@@ -153,18 +163,23 @@ export class SyncClient {
     );
   }
 
-  async #send(
-    method: string,
-    path: string,
-    options: {
-      readonly json?: unknown;
-      readonly body?: ReadableStream;
-      readonly headers?: Record<string, string>;
-      /** A transfer: the timeout covers only the wait for the response to start. */
-      readonly transfer?: boolean;
-      readonly timeoutMs?: number;
-    },
-  ): Promise<Response> {
+  /**
+   * `#send` for requests without a streamed body, retried a few times when the server says it is
+   * busy (429/503: its per-sandbox and per-replica limits), honouring Retry-After. Uploads are not
+   * retried here (their body is a stream): they wait for the next push.
+   */
+  async #retrying(method: string, path: string, options: SendOptions) {
+    for (let attempt = 0; ; attempt++) {
+      const res = await this.#send(method, path, options);
+      if ((res.status !== 429 && res.status !== 503) || attempt >= BUSY_RETRIES) return res;
+      const after = Number(res.headers.get("retry-after"));
+      await res.body?.cancel();
+      const base = Number.isFinite(after) && after > 0 ? after * 1000 : 200 * 2 ** attempt;
+      await new Promise((r) => setTimeout(r, Math.min(base, 5_000) * (0.5 + Math.random())));
+    }
+  }
+
+  async #send(method: string, path: string, options: SendOptions): Promise<Response> {
     const token = await this.#options.readToken();
     const abort = new AbortController();
     const timer = setTimeout(

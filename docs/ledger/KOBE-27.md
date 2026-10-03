@@ -108,8 +108,8 @@ parallel with the wire and Pi:
   pointing at a deleted object; tombstones after 7 days (horizon moves; older `since` resyncs).
 - **Audit:** `workspace.restored` (full restore onto an empty volume; counts reported by the
   sandbox, throttled), `workspace.file_shared`, `workspace.purged` (counts), plus four new
-  `sandbox.limit_exceeded` values (`workspace_bytes`, `workspace_files`, `workspace_file_size`,
-  `workspace_integrity`). New audit category `workspace`. Periodic pushes are not audited (one
+  `sandbox.limit_exceeded` values (`workspace_bytes`, `workspace_files`, `workspace_file_size`)
+  and `workspace.integrity_failed` (see the security review below). New audit category `workspace`. Periodic pushes are not audited (one
   per sandbox per minute; content, not a security-relevant state change).
 - **Rate and size bounds per sandbox:** 2000-request burst, 500/s; 16 concurrent transfers per
   replica; JSON bodies ≤ 1 MiB; ≤ 1000 entries per call.
@@ -125,8 +125,11 @@ parallel with the wire and Pi:
 Server-side, from `services/server/src/workspace-sync/index.ts`, all inside your own
 `withTeam(db, teamId, tx => …)` transaction (record your audit event last in it):
 
-- `putServerFile(tx, {teamId, userId}, {path, sha256, size, blobKey, mtimeMs?, executable?})` —
-  writes a path into a user's workspace with origin `server`; the sandbox pulls it before its
+- `workspaceSync.putServerFile(tx, {teamId, userId}, {path, sha256, size, blobKey, mtimeMs?,
+executable?})` (and `.deleteServerFile`) — writes a path into a user's workspace with origin
+  `server`. `blobKey` must be under `teams/<team>/` (e.g. `teams/<team>/uploads/<id>`,
+  `teams/<team>/projects/<id>/…`), and under `teams/<team>/users/` only that user's — anything
+  else throws; the sandbox pulls it before its
   next run (and periodically / on wake). You own the object at `blobKey` (e.g. KOBE-53 stores the
   upload at its own key; the manifest just points at it). Workspace collection never deletes
   it (it only deletes content sandboxes uploaded, `workspace_blobs`).
@@ -200,6 +203,71 @@ within the caller's own workspace).
   freshly dereferenced blob can be collected at once (self-healing: the agent re-uploads on
   `missing_blob`); tombstone count per workspace is bounded only by the rate limits and the
   7-day purge.
+
+## Security review (coordinator, PR #50, on hold) — resolution
+
+Isolation was confirmed; the findings were availability (one compromised sandbox degrading every
+tenant). Tests: `services/server/src/workspace-sync-limits.db.test.ts` (new) unless noted.
+
+1. **HIGH DB pool exhaustion.** Every DB-backed endpoint now goes through one gate: per sandbox
+   at most **1 commit** and **4 other short transactions** in flight (beyond: 429 at once, no
+   connection taken), per replica at most **4** workspace transactions in total (beyond: 503 +
+   `Retry-After`), so the server's 10-connection pool always has room for the user API. Each
+   transaction sets `lock_timeout` 5 s and `statement_timeout` 30 s (`set_config(…, true)`); a
+   timeout answers 503 `retry_later`. Restore reports no longer take the workspace row lock.
+   Agent: bounded retries (5, honouring `Retry-After`) for busy answers on non-streamed calls;
+   download concurrency 4. Tests: "lets one sandbox hold one commit at a time and never wait long
+   on its row lock" (a held row lock: one commit times out at 300 ms → 503, five refused → 429),
+   "caps database work across sandboxes per replica".
+2. **HIGH unbounded uncommitted blobs.** `workspace_sync` keeps `blob_count`/`blob_bytes` and
+   upload reservations (`pending_blobs`/`pending_bytes`). An upload reserves before accepting a
+   byte, atomically: held + pending bytes ≤ `maxBlobBytes` (2× workspace size) **and** distinct
+   blobs ≤ live files + `maxUncommittedBlobs` (10 000). Collection loops in batches until the
+   workspace is drained or a 20 s budget per workspace is spent, then recomputes the counters from
+   the rows. Tests: "caps the number of uncommitted blobs, and committing them frees room",
+   "collection drains a flood of uncommitted blobs in one run".
+3. **HIGH unbounded tombstones.** Rows (live + tombstones) are capped per workspace (`maxRows`,
+   default 2× `maxFiles`, tracked in `workspace_sync.tombstones`). A new path at the cap first
+   compacts the oldest 1000 tombstones in the same transaction (the horizon moves; older pullers
+   resync); only an all-live workspace refuses (`too_many_files`). Test: "compacts tombstones at
+   the cap instead of growing, and refuses only when all rows are live".
+4. **MEDIUM upload quota race.** Bytes are reserved at check time (item 2) and released or moved
+   into the totals when the upload ends (also on failure; crashed reservations are cleared by
+   collection after 2 h, longer than any upload can run). Test: "never lets concurrent uploads
+   overshoot the byte budget" (8 × 1 MiB at once against 3 MiB: exactly 3 stored).
+5. **MEDIUM GC grace.** `workspace_blobs.released_at` is set whenever a path stops pointing at
+   content; grace runs from `GREATEST(created_at, released_at)`, so a download or `shareFile` that
+   resolved an entry just before an overwrite still finds the object. Test: "keeps content that
+   just stopped being referenced, even if it was uploaded long ago".
+6. **MEDIUM auth cache.** TTL 20 s → 5 s, and the cache is dropped on every replica on the sandbox
+   bus's `user:<id>` hint (`SandboxWire.onUserRevalidate`), which deactivation and team removal
+   already send. Test: "a removed member's sandbox loses access at once".
+7. **MEDIUM putServerFile keys.** `assertOwnedKey`: the object must be under
+   `<prefix>teams/<team>/`, and under `teams/<team>/users/` only this user's; no empty, `.` or
+   `..` segments. Callers use `workspaceSync.putServerFile` (passes the prefix and row cap). Test
+   (`workspace-sync.db.test.ts`): other team, other user, `..`, foreign prefix all refused.
+8. **LOW** `lockServerOwned` lstat's the area roots (a symlinked `uploads` is left alone; entries
+   never follow links); `renameWithin` (and so conflict copies, evictions) refuses parents that go
+   through a link. Tests: `workspace/fs.test.ts`.
+9. **LOW** TOCTOU scope of `parentsAreDirs` → open/unlink/rename documented as accepted in
+   `fs.ts`: same uid, so a swap gains model code nothing it can't do directly.
+10. **LOW** conflict-copy names are truncated (UTF-8 safe) to stay ≤ 255 bytes; one commit
+    result that fails locally no longer abandons the rest (`#applyResult` per result, the path's
+    known state dropped and recomputed). Test: "keeps conflict-copy names within one path
+    segment".
+11. **LOW** paths with Unicode format characters (`\p{Cf}`: bidi overrides, zero-width) are
+    invalid (protocol test). Integrity failures have their own action `workspace.integrity_failed`
+    with a `failures` count (one row per minute per sandbox; suppressed mismatches are counted into
+    the next row, not dropped). The agent ignores server entries with an invalid path or in its
+    excluded area (test "ignores server entries in its own area…").
+    **For KOBE-28:** `workspace_sync`/`workspace_files`/`workspace_blobs.user_id` reference
+    `users` with `ON DELETE no action` (like `sandboxes`): deleting a user requires purging their
+    workspace rows (and S3 prefix) first.
+
+- Concurrency: "commits racing collection never leave a manifest row pointing at a deleted
+  object" (12 rounds of upload + commit concurrently with collections), and the parallel-uploads
+  quota test above.
+- Migration 0030 regenerated (unmerged): new `workspace_sync` counters, `workspace_blobs.released_at`.
 
 ## Measurements
 

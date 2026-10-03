@@ -28,6 +28,8 @@ describe("workspace sync contract", () => {
       "a\\b",
       "a\u0000b",
       "a\nb",
+      "invoice\u202Efdp.exe", // right-to-left override
+      "a\u200Bb", // zero-width space
       "x".repeat(256),
       `${"a/".repeat(600)}b`,
     ]) {

@@ -68,6 +68,7 @@ export interface SyncState {
   readonly horizonRev: number;
   readonly liveFiles: number;
   readonly liveBytes: number;
+  readonly tombstones: number;
 }
 
 /** The workspace's `workspace_sync` row, created if missing, locked for this transaction. */
@@ -80,8 +81,9 @@ export async function lockWorkspace(tx: KobeTx, owner: WorkspaceOwner): Promise<
     horizon_rev: string;
     live_files: number;
     live_bytes: string;
+    tombstones: number;
   }>(sql`
-    SELECT head_rev, horizon_rev, live_files, live_bytes FROM workspace_sync
+    SELECT head_rev, horizon_rev, live_files, live_bytes, tombstones FROM workspace_sync
      WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId} FOR UPDATE`);
   const row = res.rows[0];
   if (!row) throw new Error("workspace_sync row vanished");
@@ -90,6 +92,7 @@ export async function lockWorkspace(tx: KobeTx, owner: WorkspaceOwner): Promise<
     horizonRev: Number(row.horizon_rev),
     liveFiles: row.live_files,
     liveBytes: Number(row.live_bytes),
+    tombstones: row.tombstones,
   };
 }
 
@@ -97,7 +100,7 @@ async function saveState(tx: KobeTx, owner: WorkspaceOwner, s: SyncState, push: 
   await tx.execute(sql`
     UPDATE workspace_sync
        SET head_rev = ${s.headRev}, horizon_rev = ${s.horizonRev}, live_files = ${s.liveFiles},
-           live_bytes = ${s.liveBytes}, updated_at = now()
+           live_bytes = ${s.liveBytes}, tombstones = ${s.tombstones}, updated_at = now()
            ${push ? sql`, last_push_at = now()` : sql``}
      WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId}`);
 }
@@ -176,28 +179,75 @@ export async function blobState(
   return row.deleting ? "deleting" : "held";
 }
 
-/** Bytes held in the workspace's blob prefix (committed or not): bounds uncommitted uploads. */
-export async function heldBlobBytes(tx: KobeTx, owner: WorkspaceOwner): Promise<number> {
-  const res = await tx.execute<{ bytes: string }>(sql`
-    SELECT coalesce(sum(size), 0)::int8 AS bytes FROM workspace_blobs
-     WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId}`);
-  return Number(res.rows[0]?.bytes ?? 0);
+export interface UploadLimits {
+  /** Bytes held in the workspace's blob prefix, committed or not, plus uploads in flight. */
+  readonly maxBlobBytes: number;
+  /** Distinct uncommitted contents (beyond one per live file) a workspace may hold. */
+  readonly maxUncommittedBlobs: number;
 }
 
-/** After a verified upload. Returns false when a collection of that content is in progress. */
+/**
+ * Reserves room for an upload before its bytes are accepted (one atomic update of the
+ * workspace's counters): concurrent uploads can't overshoot the byte cap, and the number of
+ * distinct blobs stays within live files + `maxUncommittedBlobs`. Pair with {@link finishUpload}.
+ */
+export async function reserveUpload(
+  tx: KobeTx,
+  owner: WorkspaceOwner,
+  size: number,
+  limits: UploadLimits,
+): Promise<boolean> {
+  await tx.execute(sql`
+    INSERT INTO workspace_sync (team_id, user_id) VALUES (${owner.teamId}, ${owner.userId})
+    ON CONFLICT (team_id, user_id) DO NOTHING`);
+  const res = await tx.execute(sql`
+    UPDATE workspace_sync
+       SET pending_blobs = pending_blobs + 1, pending_bytes = pending_bytes + ${size},
+           pending_since = COALESCE(pending_since, now())
+     WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId}
+       AND blob_bytes + pending_bytes + ${size} <= ${limits.maxBlobBytes}
+       AND blob_count + pending_blobs + 1 <= live_files + ${limits.maxUncommittedBlobs}
+    RETURNING 1`);
+  return res.rows.length > 0;
+}
+
+/**
+ * Ends a reservation; when the upload was recorded as new content, its size moves into the
+ * workspace's blob totals. Runs whether the upload succeeded or not.
+ */
+export async function finishUpload(
+  tx: KobeTx,
+  owner: WorkspaceOwner,
+  size: number,
+  added: boolean,
+): Promise<void> {
+  await tx.execute(sql`
+    UPDATE workspace_sync
+       SET pending_blobs = GREATEST(pending_blobs - 1, 0),
+           pending_bytes = GREATEST(pending_bytes - ${size}, 0),
+           pending_since = CASE WHEN pending_blobs <= 1 THEN NULL ELSE pending_since END,
+           blob_count = blob_count + ${added ? 1 : 0},
+           blob_bytes = blob_bytes + ${added ? size : 0}
+     WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId}`);
+}
+
+/**
+ * After a verified upload: `added` (new content), `exists` (another upload of it won), or
+ * `deleting` (a collection of that content is in progress: upload again later).
+ */
 export async function recordBlob(
   tx: KobeTx,
   owner: WorkspaceOwner,
   sha256: string,
   size: number,
-): Promise<boolean> {
-  const res = await tx.execute<{ deleting: boolean }>(sql`
+): Promise<"added" | "exists" | "deleting"> {
+  const inserted = await tx.execute(sql`
     INSERT INTO workspace_blobs (team_id, user_id, sha256, size)
     VALUES (${owner.teamId}, ${owner.userId}, ${sha256}, ${size})
-    ON CONFLICT (team_id, user_id, sha256) DO UPDATE SET size = EXCLUDED.size
-      WHERE NOT workspace_blobs.deleting
-    RETURNING deleting`);
-  return res.rows.length > 0;
+    ON CONFLICT (team_id, user_id, sha256) DO NOTHING
+    RETURNING 1`);
+  if (inserted.rows.length > 0) return "added";
+  return (await blobState(tx, owner, sha256)) === "deleting" ? "deleting" : "exists";
 }
 
 async function blobSize(tx: KobeTx, owner: WorkspaceOwner, sha256: string) {
@@ -224,8 +274,16 @@ async function writeRow(
   rev: number,
   origin: "sandbox" | "server",
   fields: WriteFields | { readonly deletedSize: number; readonly deletedMtimeMs: number },
+  previous: StoredEntry | undefined,
 ): Promise<StoredEntry> {
   const live = "sha256" in fields;
+  // The content this path stops pointing at: collection's grace period starts now.
+  if (previous?.sha256 !== undefined && (!live || previous.sha256 !== fields.sha256)) {
+    await tx.execute(sql`
+      UPDATE workspace_blobs SET released_at = now()
+       WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId}
+         AND sha256 = ${previous.sha256}`);
+  }
   const res = await tx.execute<FileRow>(sql`
     INSERT INTO workspace_files
       (team_id, user_id, path, rev, deleted, sha256, blob_key, size, mtime_ms, executable, origin,
@@ -248,6 +306,49 @@ export interface CommitContext {
   /** Object key prefix (KOBE_S3_PREFIX). */
   readonly prefix: string;
   readonly quota: QuotaCheck;
+  /** Rows (live + tombstones) per workspace. */
+  readonly maxRows: number;
+}
+
+/** Tombstones purged at once when a workspace reaches its row cap (amortised). */
+const COMPACT_BATCH = 1000;
+
+/**
+ * Purges the oldest tombstones now (the row cap was reached), moving the horizon past them:
+ * pullers whose `since` is older resync from 0. Under the workspace lock.
+ */
+async function compactTombstones(
+  tx: KobeTx,
+  owner: WorkspaceOwner,
+  state: SyncState,
+  count: number,
+): Promise<SyncState> {
+  if (state.tombstones === 0) return state;
+  const purged = await tx.execute<{ rev: string }>(sql`
+    DELETE FROM workspace_files
+     WHERE (team_id, user_id, path) IN (
+       SELECT team_id, user_id, path FROM workspace_files
+        WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId} AND deleted
+        ORDER BY rev LIMIT ${count})
+    RETURNING rev`);
+  const maxRev = purged.rows.reduce((m, r) => Math.max(m, Number(r.rev)), state.horizonRev);
+  return {
+    ...state,
+    horizonRev: maxRev,
+    tombstones: Math.max(0, state.tombstones - purged.rows.length),
+  };
+}
+
+/** Room for one more row, compacting tombstones if needed. Undefined: the cap is all live files. */
+async function roomForRow(
+  tx: KobeTx,
+  owner: WorkspaceOwner,
+  state: SyncState,
+  maxRows: number,
+): Promise<SyncState | undefined> {
+  if (state.liveFiles + state.tombstones < maxRows) return state;
+  const compacted = await compactTombstones(tx, owner, state, COMPACT_BATCH);
+  return compacted.liveFiles + compacted.tombstones < maxRows ? compacted : undefined;
 }
 
 /**
@@ -286,15 +387,21 @@ export async function commitChanges(
         continue;
       }
       const rev = state.headRev + 1;
-      const entry = await writeRow(tx, owner, path, rev, "sandbox", {
-        deletedSize: current.size,
-        deletedMtimeMs: current.mtime_ms,
-      });
+      const entry = await writeRow(
+        tx,
+        owner,
+        path,
+        rev,
+        "sandbox",
+        { deletedSize: current.size, deletedMtimeMs: current.mtime_ms },
+        current,
+      );
       state = {
         ...state,
         headRev: rev,
         liveFiles: state.liveFiles - 1,
         liveBytes: state.liveBytes - current.size,
+        tombstones: state.tombstones + 1,
       };
       results.push({ status: "applied", path, entry: publicEntry(entry) });
       continue;
@@ -314,8 +421,19 @@ export async function commitChanges(
       results.push({ status: "rejected", path, code: "size_mismatch" });
       continue;
     }
+    if (current === undefined) {
+      // A new row: live files + tombstones are capped (churn can't grow the manifest forever).
+      const room = await roomForRow(tx, owner, state, ctx.maxRows);
+      if (room === undefined) {
+        results.push({ status: "rejected", path, code: "too_many_files" });
+        refused.push("workspace_files");
+        continue;
+      }
+      state = room;
+    }
     const liveFiles = state.liveFiles + (live ? 0 : 1);
     const liveBytes = state.liveBytes - (live ? current.size : 0) + change.size;
+    const tombstones = state.tombstones - (current?.deleted === true ? 1 : 0);
     const decision = await ctx.quota(tx, {
       owner,
       fileBytes: change.size,
@@ -328,18 +446,41 @@ export async function commitChanges(
       continue;
     }
     const rev = state.headRev + 1;
-    const entry = await writeRow(tx, owner, path, rev, "sandbox", {
-      sha256: change.sha256,
-      blobKey: workspaceBlobKey(ctx.prefix, owner, change.sha256),
-      size: change.size,
-      mtimeMs: change.mtime_ms,
-      executable: change.executable,
-    });
-    state = { ...state, headRev: rev, liveFiles, liveBytes };
+    const entry = await writeRow(
+      tx,
+      owner,
+      path,
+      rev,
+      "sandbox",
+      {
+        sha256: change.sha256,
+        blobKey: workspaceBlobKey(ctx.prefix, owner, change.sha256),
+        size: change.size,
+        mtimeMs: change.mtime_ms,
+        executable: change.executable,
+      },
+      current,
+    );
+    state = { ...state, headRev: rev, liveFiles, liveBytes, tombstones };
     results.push({ status: "applied", path, entry: publicEntry(entry) });
   }
   await saveState(tx, owner, state, true);
   return { headRev: state.headRev, results, refused };
+}
+
+/**
+ * Object keys a server write may point at: under this team's tree (`teams/<team>/…`, e.g. an
+ * upload or a project file) and, inside `users/`, only this user's — never another tenant's.
+ */
+export function assertOwnedKey(prefix: string, owner: WorkspaceOwner, key: string): void {
+  const team = `${prefix}teams/${owner.teamId}/`;
+  const ok =
+    key.startsWith(team) &&
+    key.length > team.length &&
+    key.length <= 1024 &&
+    !key.split("/").some((part) => part === "" || part === "." || part === "..") &&
+    (!key.startsWith(`${team}users/`) || key.startsWith(`${team}users/${owner.userId}/`));
+  if (!ok) throw new Error("putServerFile: blobKey is not under this team's (and user's) prefix");
 }
 
 export interface ServerFile {
@@ -362,23 +503,37 @@ export async function putServerFile(
   tx: KobeTx,
   owner: WorkspaceOwner,
   file: ServerFile,
+  options: { readonly prefix: string; readonly maxRows?: number },
 ): Promise<StoredEntry> {
   const issue = workspacePathIssue(file.path);
   if (issue !== undefined || isExcludedPath(file.path)) {
     throw new Error(`putServerFile: invalid workspace path (${issue ?? "excluded area"})`);
   }
   if (!/^[0-9a-f]{64}$/.test(file.sha256)) throw new Error("putServerFile: sha256 must be hex");
-  const state = await lockWorkspace(tx, owner);
+  assertOwnedKey(options.prefix, owner, file.blobKey);
+  let state = await lockWorkspace(tx, owner);
   const current = await currentEntry(tx, owner, file.path);
   const live = current !== undefined && !current.deleted;
+  if (current === undefined && options.maxRows !== undefined) {
+    // Server writes are the caller's to limit; only make room by compacting tombstones.
+    state = (await roomForRow(tx, owner, state, options.maxRows)) ?? state;
+  }
   const rev = state.headRev + 1;
-  const entry = await writeRow(tx, owner, file.path, rev, "server", {
-    sha256: file.sha256,
-    blobKey: file.blobKey,
-    size: file.size,
-    mtimeMs: file.mtimeMs ?? Date.now(),
-    executable: file.executable ?? false,
-  });
+  const entry = await writeRow(
+    tx,
+    owner,
+    file.path,
+    rev,
+    "server",
+    {
+      sha256: file.sha256,
+      blobKey: file.blobKey,
+      size: file.size,
+      mtimeMs: file.mtimeMs ?? Date.now(),
+      executable: file.executable ?? false,
+    },
+    current,
+  );
   await saveState(
     tx,
     owner,
@@ -387,6 +542,7 @@ export async function putServerFile(
       headRev: rev,
       liveFiles: state.liveFiles + (live ? 0 : 1),
       liveBytes: state.liveBytes - (live ? current.size : 0) + file.size,
+      tombstones: state.tombstones - (current?.deleted === true ? 1 : 0),
     },
     false,
   );
@@ -403,10 +559,15 @@ export async function deleteServerFile(
   const current = await currentEntry(tx, owner, path);
   if (current === undefined || current.deleted) return undefined;
   const rev = state.headRev + 1;
-  const entry = await writeRow(tx, owner, path, rev, "server", {
-    deletedSize: current.size,
-    deletedMtimeMs: current.mtime_ms,
-  });
+  const entry = await writeRow(
+    tx,
+    owner,
+    path,
+    rev,
+    "server",
+    { deletedSize: current.size, deletedMtimeMs: current.mtime_ms },
+    current,
+  );
   await saveState(
     tx,
     owner,
@@ -415,6 +576,7 @@ export async function deleteServerFile(
       headRev: rev,
       liveFiles: state.liveFiles - 1,
       liveBytes: state.liveBytes - current.size,
+      tombstones: state.tombstones + 1,
     },
     false,
   );
@@ -442,7 +604,10 @@ export async function recordRestore(
   owner: WorkspaceOwner,
   durationMs: number,
 ): Promise<void> {
-  await lockWorkspace(tx, owner);
+  // A plain row update: never waits behind a commit's lock for long (lock_timeout).
+  await tx.execute(sql`
+    INSERT INTO workspace_sync (team_id, user_id) VALUES (${owner.teamId}, ${owner.userId})
+    ON CONFLICT (team_id, user_id) DO NOTHING`);
   await tx.execute(sql`
     UPDATE workspace_sync SET last_restore_at = now(), last_restore_ms = ${Math.min(durationMs, 2_147_483_647)}
      WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId}`);

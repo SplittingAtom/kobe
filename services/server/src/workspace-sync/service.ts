@@ -5,9 +5,15 @@ import type { SandboxAuthenticator } from "./auth.js";
 import { collectAll, type CollectOptions, type CollectResult } from "./gc.js";
 import { sharedKey, type WorkspaceOwner } from "./keys.js";
 import type { ObjectStore } from "./object-store.js";
-import { limitsQuota, type QuotaCheck, type WorkspaceLimits } from "./quota.js";
-import { workspaceRoutes } from "./routes.js";
-import { currentEntry } from "./store.js";
+import { limitsQuota, resolveLimits, type QuotaCheck, type WorkspaceLimits } from "./quota.js";
+import { workspaceRoutes, type WorkspaceRoutesDeps } from "./routes.js";
+import {
+  currentEntry,
+  deleteServerFile,
+  putServerFile,
+  type ServerFile,
+  type StoredEntry,
+} from "./store.js";
 
 export interface WorkspaceSyncOptions {
   readonly db: KobeDb;
@@ -19,12 +25,15 @@ export interface WorkspaceSyncOptions {
   readonly quota?: QuotaCheck;
   readonly collect?: Partial<Omit<CollectOptions, "prefix">>;
   readonly log: Pick<Logger, "error" | "warn" | "info">;
+  /** Overrides of the routes' database caps and timeouts (tests). */
+  readonly dbLimits?: WorkspaceRoutesDeps["dbLimits"];
 }
 
 export const COLLECT_DEFAULTS = {
   blobGraceMs: 60 * 60_000,
   tombstoneTtlMs: 7 * 24 * 60 * 60_000,
   batch: 500,
+  budgetMs: 20_000,
 } as const;
 
 export interface SharedFile {
@@ -53,6 +62,17 @@ export interface WorkspaceSync {
     path: string,
     actor?: AuditActor,
   ): Promise<SharedFile | undefined>;
+  /**
+   * A server write into a workspace (KOBE-53/54/57): `store.putServerFile` with this install's
+   * key prefix (the object must be under the team's tree, and inside `users/` the user's own)
+   * and row cap. In the caller's team transaction.
+   */
+  putServerFile(tx: KobeTx, owner: WorkspaceOwner, file: ServerFile): Promise<StoredEntry>;
+  deleteServerFile(
+    tx: KobeTx,
+    owner: WorkspaceOwner,
+    path: string,
+  ): Promise<StoredEntry | undefined>;
   readonly objects: ObjectStore;
   readonly prefix: string;
 }
@@ -62,11 +82,23 @@ export function createWorkspaceSync(options: WorkspaceSyncOptions): WorkspaceSyn
   const quota = options.quota ?? limitsQuota(limits);
   const collectOptions: CollectOptions = { ...COLLECT_DEFAULTS, ...options.collect, prefix };
   const collect = () => collectAll(db, objects, collectOptions, log);
+  const maxRows = resolveLimits(limits).maxRows;
   return {
     objects,
     prefix,
+    putServerFile: (tx, owner, file) => putServerFile(tx, owner, file, { prefix, maxRows }),
+    deleteServerFile: (tx, owner, path) => deleteServerFile(tx, owner, path),
     routes: (authenticate) =>
-      workspaceRoutes({ db, objects, authenticate, prefix, limits, quota, log }),
+      workspaceRoutes({
+        db,
+        objects,
+        authenticate,
+        prefix,
+        limits,
+        quota,
+        log,
+        ...(options.dbLimits ? { dbLimits: options.dbLimits } : {}),
+      }),
     collect,
     startCollector(everyMs) {
       let timer: NodeJS.Timeout | undefined;

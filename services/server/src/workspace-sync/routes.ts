@@ -1,5 +1,5 @@
 import { Readable } from "node:stream";
-import { SYSTEM_ACTOR, withTeam, type KobeDb } from "@kobe/db";
+import { SYSTEM_ACTOR, sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import {
   WORKSPACE_ENTRY_HEADER,
   WORKSPACE_MAX_BATCH,
@@ -17,33 +17,87 @@ import { createRateLimiter, type RateLimiter } from "../sandbox/rate-limit.js";
 import type { SandboxAuthenticator, SandboxCaller } from "./auth.js";
 import { workspaceBlobKey } from "./keys.js";
 import { IntegrityError, verifyingStream, type ObjectStore } from "./object-store.js";
-import type { QuotaCheck, WorkspaceLimits } from "./quota.js";
+import { resolveLimits, type QuotaCheck, type WorkspaceLimits } from "./quota.js";
 import {
   blobState,
   commitChanges,
   currentEntry,
-  heldBlobBytes,
+  finishUpload,
   manifestPage,
   missingBlobs,
   publicEntry,
   recordBlob,
   recordRestore,
+  reserveUpload,
 } from "./store.js";
 
 /** Requests per sandbox: a burst big enough for a restore's downloads, then a steady rate. */
 export const WORKSPACE_RATE = { capacity: 2000, refillPerSecond: 500 } as const;
-/**
- * Manifest, commit and report calls per sandbox (each can cost up to ~3000 queries under the
- * workspace lock): a much smaller bucket on top of {@link WORKSPACE_RATE}.
- */
+/** Manifest, commit and report calls per sandbox: a much smaller bucket on top. */
 export const WORKSPACE_META_RATE = { capacity: 120, refillPerSecond: 20 } as const;
 /** Restore reports write a row: at most one per sandbox per minute (audit throttled apart). */
 const REPORT_EVERY_MS = 60_000;
 /** Concurrent uploads/downloads per sandbox per replica. */
 export const WORKSPACE_MAX_TRANSFERS = 16;
+/**
+ * Database work in flight, per sandbox and per replica. Every workspace endpoint shares the
+ * server's connection pool with the user API: one sandbox may hold at most one commit and a few
+ * short transactions, and all sandboxes together at most `dbInFlight` connections (beyond: 503,
+ * retried), so a compromised sandbox can't starve the API or other tenants.
+ */
+export interface WorkspaceDbLimits {
+  readonly commitsPerSandbox: number;
+  readonly othersPerSandbox: number;
+  readonly dbInFlight: number;
+  readonly lockTimeoutMs: number;
+  readonly statementTimeoutMs: number;
+}
+export const WORKSPACE_DB_LIMITS: WorkspaceDbLimits = {
+  commitsPerSandbox: 1,
+  othersPerSandbox: 4,
+  dbInFlight: 4,
+  /** Waiting for the workspace row lock (a long commit, a collection) gives up after this. */
+  lockTimeoutMs: 5_000,
+  statementTimeoutMs: 30_000,
+};
 /** Throttle for audit rows a looping sandbox could otherwise repeat. */
 const AUDIT_EVERY_MS = 5 * 60_000;
+const INTEGRITY_AUDIT_EVERY_MS = 60_000;
 const MAX_JSON_BYTES = 1024 * 1024;
+
+/** Thrown when an in-flight cap is reached: answered 503/429 with Retry-After. */
+class Busy extends Error {
+  constructor(readonly status: 429 | 503) {
+    super("busy");
+  }
+}
+
+/** Counted slots per key with a ceiling; `take` returns an idempotent release or undefined. */
+class Slots {
+  readonly #used = new Map<string, number>();
+  take(key: string, max: number): (() => void) | undefined {
+    const n = this.#used.get(key) ?? 0;
+    if (n >= max) return undefined;
+    this.#used.set(key, n + 1);
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      const left = (this.#used.get(key) ?? 1) - 1;
+      if (left <= 0) this.#used.delete(key);
+      else this.#used.set(key, left);
+    };
+  }
+}
+
+/** Postgres lock_not_available / query_canceled (our own timeouts), possibly wrapped by Drizzle. */
+function isTimeout(err: unknown): boolean {
+  for (let e: unknown = err, i = 0; e && i < 4; e = (e as { cause?: unknown }).cause, i++) {
+    const code = (e as { code?: unknown }).code;
+    if (code === "55P03" || code === "57014") return true;
+  }
+  return false;
+}
 
 export interface WorkspaceRoutesDeps {
   readonly db: KobeDb;
@@ -54,6 +108,8 @@ export interface WorkspaceRoutesDeps {
   readonly quota: QuotaCheck;
   readonly log: Pick<Logger, "error" | "warn" | "info">;
   readonly limiter?: RateLimiter;
+  /** Overrides of {@link WORKSPACE_DB_LIMITS} (tests). */
+  readonly dbLimits?: Partial<WorkspaceDbLimits>;
 }
 
 type Vars = { Variables: { caller: SandboxCaller } };
@@ -67,26 +123,34 @@ const error = (c: Context, status: number, code: string, message: string) =>
  * the caller's verified (team, user); object keys never come from the request.
  */
 export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
-  const { db, objects, prefix, limits, quota, log } = deps;
+  const { db, objects, prefix, quota, log } = deps;
+  const limits = resolveLimits(deps.limits);
+  const dbLimits = { ...WORKSPACE_DB_LIMITS, ...deps.dbLimits };
   const limiter = deps.limiter ?? createRateLimiter(WORKSPACE_RATE);
   const metaLimiter = createRateLimiter(WORKSPACE_META_RATE);
   const reported = new Map<string, number>();
-  const transfers = new Map<string, number>();
+  const transfers = new Slots();
+  const commits = new Slots();
+  const others = new Slots();
+  const replica = new Slots();
   const audited = new Map<string, number>();
+  const integrity = new Map<string, { failures: number; at: number }>();
   const app = new Hono<Vars>();
 
+  const audit = (teamId: string, event: ServerAuditEvent) =>
+    void withTeam(db, teamId, (tx) => recordAudit(tx, event)).catch((err: unknown) =>
+      log.error({ err, action: event.action }, "could not record a workspace audit event"),
+    );
   const throttledAudit = (key: string, teamId: string, event: ServerAuditEvent) => {
     const last = audited.get(key) ?? 0;
     if (Date.now() - last < AUDIT_EVERY_MS) return;
     if (audited.size > 10_000) audited.clear();
     audited.set(key, Date.now());
-    void withTeam(db, teamId, (tx) => recordAudit(tx, event)).catch((err: unknown) =>
-      log.error({ err, action: event.action }, "could not record a workspace audit event"),
-    );
+    audit(teamId, event);
   };
   const auditLimit = (
     caller: SandboxCaller,
-    limit: "workspace_bytes" | "workspace_files" | "workspace_file_size" | "workspace_integrity",
+    limit: "workspace_bytes" | "workspace_files" | "workspace_file_size",
   ) =>
     throttledAudit(`${caller.sandboxId}:${limit}`, caller.teamId, {
       action: "sandbox.limit_exceeded",
@@ -94,37 +158,60 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
       teamId: caller.teamId,
       target: { sandboxId: caller.sandboxId, userId: caller.userId, limit },
     });
+  /** Every mismatch counts; a row at most once a minute carries the count since the last one. */
+  const auditIntegrity = (caller: SandboxCaller) => {
+    const seen = integrity.get(caller.sandboxId) ?? { failures: 0, at: 0 };
+    const failures = seen.failures + 1;
+    if (Date.now() - seen.at < INTEGRITY_AUDIT_EVERY_MS) {
+      integrity.set(caller.sandboxId, { failures, at: seen.at });
+      return;
+    }
+    if (integrity.size > 10_000) integrity.clear();
+    integrity.set(caller.sandboxId, { failures: 0, at: Date.now() });
+    audit(caller.teamId, {
+      action: "workspace.integrity_failed",
+      actor: SYSTEM_ACTOR,
+      teamId: caller.teamId,
+      target: { sandboxId: caller.sandboxId, userId: caller.userId, failures },
+    });
+  };
 
   /**
-   * Takes one of the sandbox's transfer slots; the returned release (idempotent) frees it. A
-   * download releases when its body stream closes, not when the response object is returned.
+   * One bounded team transaction for a sandbox: per-sandbox and per-replica in-flight caps
+   * (throws {@link Busy}), and lock/statement timeouts so a queue on one workspace's row lock
+   * can't pin pool connections.
    */
-  const acquire = (caller: SandboxCaller): (() => void) | undefined => {
-    const n = transfers.get(caller.sandboxId) ?? 0;
-    if (n >= WORKSPACE_MAX_TRANSFERS) return undefined;
-    transfers.set(caller.sandboxId, n + 1);
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      const left = (transfers.get(caller.sandboxId) ?? 1) - 1;
-      if (left <= 0) transfers.delete(caller.sandboxId);
-      else transfers.set(caller.sandboxId, left);
-    };
-  };
-  const busy = (c: Context) => {
-    c.header("Retry-After", "1");
-    return error(c, 429, "rate_limited", "Too many transfers at once.");
-  };
-  /** Runs an upload under the per-sandbox concurrency cap. */
-  const transfer = async (caller: SandboxCaller, c: Context, fn: () => Promise<Response>) => {
-    const release = acquire(caller);
-    if (!release) return busy(c);
-    try {
-      return await fn();
-    } finally {
-      release();
+  const tx = async <T>(
+    caller: SandboxCaller,
+    kind: "commit" | "other",
+    fn: (tx: KobeTx) => Promise<T>,
+  ): Promise<T> => {
+    const mine =
+      kind === "commit"
+        ? commits.take(caller.sandboxId, dbLimits.commitsPerSandbox)
+        : others.take(caller.sandboxId, dbLimits.othersPerSandbox);
+    if (!mine) throw new Busy(429);
+    const pool = replica.take("db", dbLimits.dbInFlight);
+    if (!pool) {
+      mine();
+      throw new Busy(503);
     }
+    try {
+      return await withTeam(db, caller.teamId, async (t) => {
+        await t.execute(sql`
+          SELECT set_config('lock_timeout', ${String(dbLimits.lockTimeoutMs)}, true),
+                 set_config('statement_timeout', ${String(dbLimits.statementTimeoutMs)}, true)`);
+        return fn(t);
+      });
+    } finally {
+      pool();
+      mine();
+    }
+  };
+
+  const busy = (c: Context, status: 429 | 503, message: string) => {
+    c.header("Retry-After", "1");
+    return error(c, status, status === 429 ? "rate_limited" : "busy", message);
   };
   const metaAllowed = (caller: SandboxCaller, c: Context): Response | undefined => {
     const wait = metaLimiter.take(caller.sandboxId);
@@ -168,8 +255,8 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
     if (!Number.isSafeInteger(since) || since < 0 || !Number.isInteger(limit) || limit < 1) {
       return error(c, 400, "invalid_request", "since and limit must be non-negative integers.");
     }
-    const page = await withTeam(db, caller.teamId, (tx) =>
-      manifestPage(tx, caller, since, Math.min(limit, WORKSPACE_MAX_BATCH)),
+    const page = await tx(caller, "other", (t) =>
+      manifestPage(t, caller, since, Math.min(limit, WORKSPACE_MAX_BATCH)),
     );
     if (page.kind === "resync_required") {
       return error(c, 409, "resync_required", "Pull the manifest again from revision 0.");
@@ -187,9 +274,7 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
     if (limited) return limited;
     const body = workspaceBlobsMissingRequestSchema.safeParse(await readJson(c));
     if (!body.success) return error(c, 400, "invalid_request", "Expected {sha256: [...]}.");
-    const missing = await withTeam(db, caller.teamId, (tx) =>
-      missingBlobs(tx, caller, body.data.sha256),
-    );
+    const missing = await tx(caller, "other", (t) => missingBlobs(t, caller, body.data.sha256));
     return c.json({ missing });
   });
 
@@ -203,59 +288,73 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
     }
     if (size > limits.maxFileBytes) {
       auditLimit(caller, "workspace_file_size");
-      return error(
-        c,
-        413,
-        "file_too_large",
-        `Files over ${limits.maxFileBytes} bytes are not synced.`,
-      );
+      const max = limits.maxFileBytes;
+      return error(c, 413, "file_too_large", `Files over ${max} bytes are not synced.`);
     }
-    const state = await withTeam(db, caller.teamId, async (tx) => {
-      const s = await blobState(tx, caller, sha.data);
-      if (s !== "absent") return s;
-      // Uncommitted uploads are bounded too: held blobs may not exceed twice the workspace limit.
-      return (await heldBlobBytes(tx, caller)) + size > 2 * limits.maxWorkspaceBytes
-        ? "over_quota"
-        : "absent";
-    });
-    if (state === "held") return c.json({ sha256: sha.data, size }, 200);
-    if (state === "deleting") {
-      c.header("Retry-After", "5");
-      return error(
-        c,
-        409,
-        "retry_later",
-        "This content is being collected; upload it again shortly.",
-      );
-    }
-    if (state === "over_quota") {
-      auditLimit(caller, "workspace_bytes");
-      return error(c, 507, "quota_exceeded", "The workspace holds too much unsynced content.");
-    }
-    return transfer(caller, c, async () => {
-      const raw = c.req.raw.body;
-      const source = raw ? Readable.fromWeb(raw as never) : Readable.from([]);
-      const verified = source.pipe(verifyingStream(sha.data, size));
-      source.once("error", (err) => verified.destroy(err));
-      try {
-        await objects.put(workspaceBlobKey(prefix, caller, sha.data), verified, size);
-      } catch (err) {
-        if (err instanceof IntegrityError || verified.errored instanceof IntegrityError) {
-          auditLimit(caller, "workspace_integrity");
-          return error(c, 422, "hash_mismatch", "The bytes did not match their SHA-256 and size.");
-        }
-        log.error({ err, sandbox_id: caller.sandboxId }, "workspace blob upload failed");
-        return error(c, 502, "storage_unavailable", "Object storage is unavailable; retry.");
+    const release = transfers.take(caller.sandboxId, WORKSPACE_MAX_TRANSFERS);
+    if (!release) return busy(c, 429, "Too many transfers at once.");
+    try {
+      // Reserve the bytes (and one blob) before accepting any: concurrent uploads can't overshoot.
+      const state = await tx(caller, "other", async (t) => {
+        const held = await blobState(t, caller, sha.data);
+        if (held !== "absent") return held;
+        return (await reserveUpload(t, caller, size, limits)) ? "reserved" : "over_quota";
+      });
+      if (state === "held") return c.json({ sha256: sha.data, size }, 200);
+      if (state === "deleting") {
+        c.header("Retry-After", "5");
+        return error(c, 409, "retry_later", "This content is being collected; upload it later.");
       }
-      const recorded = await withTeam(db, caller.teamId, (tx) =>
-        recordBlob(tx, caller, sha.data, size),
-      );
-      if (!recorded) {
+      if (state === "over_quota") {
+        auditLimit(caller, "workspace_bytes");
+        return error(c, 507, "quota_exceeded", "The workspace holds too much unsynced content.");
+      }
+      // Recording and ending the reservation are short and bounded by the transfer slots: they
+      // take no in-flight slot (an upload that finished must never be left unrecorded).
+      let outcome: "added" | "exists" | "deleting" | "failed" = "failed";
+      let finished = false;
+      try {
+        const raw = c.req.raw.body;
+        const source = raw ? Readable.fromWeb(raw as never) : Readable.from([]);
+        const verified = source.pipe(verifyingStream(sha.data, size));
+        source.once("error", (err) => verified.destroy(err));
+        try {
+          await objects.put(workspaceBlobKey(prefix, caller, sha.data), verified, size);
+        } catch (err) {
+          if (err instanceof IntegrityError || verified.errored instanceof IntegrityError) {
+            auditIntegrity(caller);
+            return error(
+              c,
+              422,
+              "hash_mismatch",
+              "The bytes did not match their SHA-256 and size.",
+            );
+          }
+          log.error({ err, sandbox_id: caller.sandboxId }, "workspace blob upload failed");
+          return error(c, 502, "storage_unavailable", "Object storage is unavailable; retry.");
+        }
+        outcome = await withTeam(db, caller.teamId, async (t) => {
+          const recorded = await recordBlob(t, caller, sha.data, size);
+          await finishUpload(t, caller, size, recorded === "added");
+          return recorded;
+        });
+        finished = true;
+      } finally {
+        // A failed upload still ends its reservation (a crash leaves it to collection).
+        if (!finished) {
+          await withTeam(db, caller.teamId, (t) => finishUpload(t, caller, size, false)).catch(
+            (err: unknown) => log.error({ err }, "could not end an upload reservation"),
+          );
+        }
+      }
+      if (outcome === "deleting") {
         c.header("Retry-After", "5");
         return error(c, 409, "retry_later", "This content is being collected; upload it again.");
       }
-      return c.json({ sha256: sha.data, size }, 201);
-    });
+      return c.json({ sha256: sha.data, size }, outcome === "added" ? 201 : 200);
+    } finally {
+      release();
+    }
   });
 
   app.post("/commit", async (c) => {
@@ -264,8 +363,8 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
     if (limited) return limited;
     const body = workspaceCommitRequestSchema.safeParse(await readJson(c));
     if (!body.success) return error(c, 400, "invalid_request", "Expected {changes: [...]}.");
-    const out = await withTeam(db, caller.teamId, (tx) =>
-      commitChanges(tx, caller, body.data.changes, { prefix, quota }),
+    const out = await tx(caller, "commit", (t) =>
+      commitChanges(t, caller, body.data.changes, { prefix, quota, maxRows: limits.maxRows }),
     );
     for (const limit of new Set(out.refused)) {
       auditLimit(caller, limit as "workspace_bytes" | "workspace_files" | "workspace_file_size");
@@ -277,16 +376,17 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
     const caller = c.get("caller");
     const path = workspacePathSchema.safeParse(c.req.query("path"));
     if (!path.success) return error(c, 400, "invalid_request", "A workspace path is required.");
-    const entry = await withTeam(db, caller.teamId, (tx) => currentEntry(tx, caller, path.data));
-    if (!entry || entry.deleted || entry.blobKey === null) {
-      return error(c, 404, "not_found", "No such file in the workspace.");
-    }
-    const key = entry.blobKey;
-    const release = acquire(caller);
-    if (!release) return busy(c);
+    const release = transfers.take(caller.sandboxId, WORKSPACE_MAX_TRANSFERS);
+    if (!release) return busy(c, 429, "Too many transfers at once.");
     let object;
+    let entry;
     try {
-      object = await objects.get(key);
+      entry = await tx(caller, "other", (t) => currentEntry(t, caller, path.data));
+      if (!entry || entry.deleted || entry.blobKey === null) {
+        release();
+        return error(c, 404, "not_found", "No such file in the workspace.");
+      }
+      object = await objects.get(entry.blobKey);
     } catch (err) {
       release();
       throw err;
@@ -296,6 +396,7 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
       log.error({ sandbox_id: caller.sandboxId, rev: entry.rev }, "workspace object missing");
       return error(c, 502, "storage_unavailable", "The file's content is missing in storage.");
     }
+    // The slot is held until the body has been read out of storage (backpressure-bound).
     object.body.once("close", release);
     return new Response(Readable.toWeb(object.body) as ReadableStream, {
       status: 200,
@@ -316,17 +417,17 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
     if (!body.success) return error(c, 400, "invalid_request", "Invalid restore report.");
     const report = body.data;
     const full = report.mode === "full" && report.files > 0;
-    const audit =
+    const auditIt =
       full && Date.now() - (audited.get(`${caller.sandboxId}:restored`) ?? 0) > AUDIT_EVERY_MS;
-    if (audit) audited.set(`${caller.sandboxId}:restored`, Date.now());
-    const write = audit || Date.now() - (reported.get(caller.sandboxId) ?? 0) > REPORT_EVERY_MS;
+    if (auditIt) audited.set(`${caller.sandboxId}:restored`, Date.now());
+    const write = auditIt || Date.now() - (reported.get(caller.sandboxId) ?? 0) > REPORT_EVERY_MS;
     if (reported.size > 10_000) reported.clear();
     if (write) reported.set(caller.sandboxId, Date.now());
-    if (write)
-      await withTeam(db, caller.teamId, async (tx) => {
-        await recordRestore(tx, caller, report.duration_ms);
-        if (audit) {
-          await recordAudit(tx, {
+    if (write) {
+      await tx(caller, "other", async (t) => {
+        await recordRestore(t, caller, report.duration_ms);
+        if (auditIt) {
+          await recordAudit(t, {
             action: "workspace.restored",
             actor: SYSTEM_ACTOR,
             teamId: caller.teamId,
@@ -340,6 +441,7 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
           });
         }
       });
+    }
     log.info(
       { sandbox_id: caller.sandboxId, ...report },
       report.mode === "full" ? "workspace restored onto an empty volume" : "workspace restore",
@@ -348,6 +450,11 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
   });
 
   app.onError((err, c) => {
+    if (err instanceof Busy) return busy(c, err.status, "Too much workspace work in flight.");
+    if (isTimeout(err)) {
+      c.header("Retry-After", "2");
+      return error(c, 503, "retry_later", "The workspace is busy; retry.");
+    }
     log.error({ err }, "workspace sync request failed");
     return error(c, 500, "internal", "Workspace sync failed; retry.");
   });

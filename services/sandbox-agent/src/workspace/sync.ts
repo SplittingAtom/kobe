@@ -2,8 +2,10 @@ import {
   WORKSPACE_SERVER_OWNED_PREFIXES,
   isExcludedPath,
   isServerOwnedPath,
+  workspacePathIssue,
   type RunStartFrame,
   type WorkspaceChange,
+  type WorkspaceChangeResult,
   type WorkspaceEntry,
 } from "@kobe/protocol";
 import type { WireLogger } from "../wire/client.js";
@@ -171,7 +173,8 @@ export class WorkspaceSync {
 
   constructor(options: WorkspaceSyncOptions) {
     this.#o = {
-      concurrency: 8,
+      // Matches the server's per-sandbox limits (a few short transactions at a time).
+      concurrency: 4,
       maxFiles: 200_000,
       restoreWaitMs: 60_000,
       now: () => new Date(),
@@ -336,7 +339,13 @@ export class WorkspaceSync {
         }
         throw error;
       }
-      entries.push(...page.entries);
+      // Re-checked here: a path the agent must never write (its own area, an invalid name) is
+      // ignored whatever the server says.
+      entries.push(
+        ...page.entries.filter(
+          (e) => workspacePathIssue(e.path) === undefined && !isExcludedPath(e.path),
+        ),
+      );
       if (!page.more || page.entries.length === 0) return { head: page.head_rev, entries };
       cursor = page.entries[page.entries.length - 1]?.rev ?? page.head_rev;
     }
@@ -624,24 +633,44 @@ export class WorkspaceSync {
       for (const [j, result] of out.results.entries()) {
         const change = batch[j];
         if (!change) continue;
-        if (result.status === "applied") {
-          this.#known.set(result.path, known(result.entry));
-          this.#refused.delete(result.path);
-        } else if (result.status === "noop") {
-          this.#known.delete(result.path);
-        } else if (result.status === "conflict") {
-          conflicts += 1;
-          await this.#resolveConflict(change, result.current);
-        } else {
-          rejected += 1;
-          if (result.code !== "missing_blob" && change.local) {
-            this.#refused.set(result.path, change.local);
-          }
-          this.#o.logger.warn({ code: result.code }, "workspace change refused by the server");
+        // One path's local trouble (a name, a link) never abandons the other results.
+        try {
+          await this.#applyResult(
+            change,
+            result,
+            () => (conflicts += 1),
+            () => (rejected += 1),
+          );
+        } catch (error) {
+          this.#known.delete(change.path); // recomputed from scratch on the next push
+          this.#warn("could not apply a commit result for one file", error);
         }
       }
     }
     return { conflicts, rejected };
+  }
+
+  async #applyResult(
+    change: PlannedChange,
+    result: WorkspaceChangeResult,
+    conflict: () => void,
+    reject: () => void,
+  ): Promise<void> {
+    if (result.status === "applied") {
+      this.#known.set(result.path, known(result.entry));
+      this.#refused.delete(result.path);
+    } else if (result.status === "noop") {
+      this.#known.delete(result.path);
+    } else if (result.status === "conflict") {
+      conflict();
+      await this.#resolveConflict(change, result.current);
+    } else {
+      reject();
+      if (result.code !== "missing_blob" && change.local) {
+        this.#refused.set(result.path, change.local);
+      }
+      this.#o.logger.warn({ code: result.code }, "workspace change refused by the server");
+    }
   }
 
   /** The server's newer version keeps the path; the local edit becomes a conflict copy. */
