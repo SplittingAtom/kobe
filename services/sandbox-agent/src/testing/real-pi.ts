@@ -32,6 +32,10 @@ if (process.env.CI !== undefined && !existsSync(REAL_POLICY_EXTENSION)) {
 /** Test-only Pi extensions (scripted model, an input-mutating handler). */
 export const FAUX_MODEL_EXTENSION = path.join(HERE, "pi-extensions/faux-model.mjs");
 export const MUTATE_INPUT_EXTENSION = path.join(HERE, "pi-extensions/mutate-input.mjs");
+export const SHORT_TIMEOUT_POLICY_EXTENSION = path.join(
+  HERE,
+  "pi-extensions/kobe-policy-short-timeout.ts",
+);
 
 /** A run.start message for the faux model: the steps it plays, one assistant message each. */
 export function fauxScript(steps: readonly Record<string, unknown>[]): string {

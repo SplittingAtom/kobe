@@ -79,6 +79,7 @@ async function decide(
     ...(parentToolCallId === undefined ? {} : { parentToolCallId }),
     tool: toolName,
     input: decided,
+    inputJson: fingerprint,
     signal: ctx.signal,
   });
   if (!verdict.allow) return block(verdict.reason);

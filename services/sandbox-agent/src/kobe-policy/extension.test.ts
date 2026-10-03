@@ -171,29 +171,15 @@ describe("kobe-policy extension load", () => {
   });
 });
 
-describe("kobe-policy reply timeout override", () => {
-  it("shortens the first-reply wait and is removed from the environment", async () => {
+describe("kobe-policy configuration", () => {
+  it("takes its timeouts from clientOptions only (no environment knob)", async () => {
     const t = setup({ env: { KOBE_POLICY_REPLY_TIMEOUT_MS: "50" } });
     t.agent.send({ type: "channel.hello", nonce: "N" });
     const { pi, handlers } = fakePi();
     await registerKobePolicy(pi, t.checker);
-    expect(t.env).not.toHaveProperty("KOBE_POLICY_REPLY_TIMEOUT_MS");
-    const started = Date.now();
-    expect(await (handlers[0] as Handler)(call, {})).toMatchObject({
-      reason: expect.stringMatching(/timed out/),
-    });
-    expect(Date.now() - started).toBeLessThan(5000);
-  });
-
-  it.each(["0", "999999999", "-5", "soon"])("ignores %s (never lengthens the wait)", async (v) => {
-    const t = setup({ env: { KOBE_POLICY_REPLY_TIMEOUT_MS: v } });
-    t.agent.send({ type: "channel.hello", nonce: "N" });
-    const { pi, handlers } = fakePi();
-    await registerKobePolicy(pi, t.checker);
-    expect(t.env).not.toHaveProperty("KOBE_POLICY_REPLY_TIMEOUT_MS");
     let settled = false;
     void (handlers[0] as Handler)(call, {}).then(() => (settled = true));
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 300));
     expect(settled).toBe(false);
   });
 });

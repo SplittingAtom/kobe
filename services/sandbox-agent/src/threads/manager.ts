@@ -375,7 +375,11 @@ export class ThreadManager {
     });
     if (thread.hasProcess) {
       const changed = frame?.config !== undefined && launch.key !== thread.launchKey;
-      if (!changed || thread.runId !== undefined || thread.streaming) return undefined;
+      // A Pi whose policy channel closed blocks every tool call for good: start a fresh one (not
+      // while it is busy — its calls are blocked anyway, and Stop must still reach it).
+      const broken = !thread.policyUsable;
+      if (!changed && !broken) return undefined;
+      if (thread.runId !== undefined || thread.streaming) return undefined;
       await thread.stopProcess();
     }
     if (!(await this.#reserveSlot(thread))) {

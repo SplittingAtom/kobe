@@ -9,6 +9,8 @@ import {
   MAX_PENDING_WAIT_MS,
   MAX_REPLY_LINE_BYTES,
   MAX_REQUEST_LINE_BYTES,
+  MAX_TRACKED_TOOL_CALL_IDS,
+  MSG_CANCEL,
   MSG_CHECK,
   MSG_HELLO,
   MSG_PENDING,
@@ -16,8 +18,8 @@ import {
   MSG_REFUSED,
   MSG_RESULT,
   PENDING_GRACE_MS,
-  type CheckMessage,
 } from "./protocol.js";
+import { stableJson } from "./plain-json.js";
 
 /**
  * The extension's end of the fd-3 policy channel. Fail closed throughout: every outcome other than
@@ -34,6 +36,8 @@ export interface CheckRequest {
   readonly parentToolCallId?: string | undefined;
   readonly tool: string;
   readonly input: Record<string, unknown>;
+  /** `stableJson(input)` when the caller already has it (the handler's fingerprint). */
+  readonly inputJson?: string;
   readonly signal?: AbortSignal | undefined;
 }
 
@@ -61,6 +65,8 @@ export class PolicyClient {
   readonly #stream: Duplex;
   readonly #options: PolicyClientOptions;
   readonly #pending = new Map<string, Pending>();
+  /** Every tool call id asked about in this Pi process: each call is checked at most once. */
+  readonly #seenToolCallIds = new Set<string>();
   #state: ClientState = "connecting";
   #nonce: string | undefined;
   #closeReason = "policy channel closed";
@@ -130,28 +136,24 @@ export class PolicyClient {
 
   check(request: CheckRequest): Promise<Verdict> {
     if (this.#state !== "ready") return Promise.resolve(deny(this.#unavailableReason()));
+    if (this.#seenToolCallIds.has(request.toolCallId)) {
+      return Promise.resolve(deny("this tool call id was already checked in this session"));
+    }
+    if (this.#seenToolCallIds.size >= MAX_TRACKED_TOOL_CALL_IDS) {
+      return Promise.resolve(deny("too many tool calls in this Pi process"));
+    }
+    this.#seenToolCallIds.add(request.toolCallId);
     if (request.signal?.aborted === true) return Promise.resolve(deny("the run was stopped"));
     if (this.#pending.size >= MAX_PENDING_CHECKS) {
       return Promise.resolve(deny("too many policy checks in flight"));
     }
     const requestId = `kp_${this.#next++}`;
-    const message: CheckMessage = {
-      type: MSG_CHECK,
-      nonce: this.#nonce as string,
-      request_id: requestId,
-      tool_call_id: request.toolCallId,
-      ...(request.parentToolCallId === undefined
-        ? {}
-        : { parent_tool_call_id: request.parentToolCallId }),
-      tool: request.tool,
-      input: request.input,
-    };
-    const line = `${JSON.stringify(message)}\n`;
+    const line = this.#checkLine(requestId, request);
     if (Buffer.byteLength(line) > MAX_REQUEST_LINE_BYTES) {
       return Promise.resolve(deny("tool input too large for a policy check"));
     }
     return new Promise<Verdict>((resolve) => {
-      const onAbort = (): void => this.#settle(requestId, deny("the run was stopped"));
+      const onAbort = (): void => this.#giveUp(requestId, "the run was stopped");
       const pending: Pending = {
         toolCallId: request.toolCallId,
         settle: (verdict) => {
@@ -166,6 +168,33 @@ export class PolicyClient {
       request.signal?.addEventListener("abort", onAbort, { once: true });
       this.#stream.write(line);
     });
+  }
+
+  /**
+   * The request line, built by hand from own data: `JSON.stringify` of an object would consult
+   * `toJSON` (also an inherited one), so what the agent receives could differ from what runs.
+   */
+  #checkLine(requestId: string, request: CheckRequest): string {
+    const str = (value: string): string => JSON.stringify(value);
+    const parent =
+      request.parentToolCallId === undefined
+        ? ""
+        : `,"parent_tool_call_id":${str(request.parentToolCallId)}`;
+    const input = request.inputJson ?? stableJson(request.input);
+    return (
+      `{"type":${str(MSG_CHECK)},"nonce":${str(this.#nonce as string)},` +
+      `"request_id":${str(requestId)},"tool_call_id":${str(request.toolCallId)}${parent},` +
+      `"tool":${str(request.tool)},"input":${input}}\n`
+    );
+  }
+
+  /** Stop waiting (timeout, Stop): block, and tell the agent so it frees its pending slot. */
+  #giveUp(requestId: string, reason: string): void {
+    if (!this.#pending.has(requestId)) return;
+    this.#settle(requestId, deny(reason));
+    if (this.#state === "ready") {
+      this.#write({ type: MSG_CANCEL, nonce: this.#nonce, request_id: requestId });
+    }
   }
 
   close(reason: string): void {
@@ -186,7 +215,7 @@ export class PolicyClient {
   #timer(requestId: string, ms: number): NodeJS.Timeout {
     return setTimeout(() => {
       const reason = this.#pending.get(requestId)?.timeoutReason ?? "policy check timed out";
-      this.#settle(requestId, deny(reason));
+      this.#giveUp(requestId, reason);
     }, ms);
   }
 

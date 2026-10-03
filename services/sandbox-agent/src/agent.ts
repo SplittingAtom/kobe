@@ -101,6 +101,9 @@ export class Agent {
         piExited: (threadId, runId, exit) => this.#reportExit(threadId, runId, exit),
         policyCheck: (threadId, runId, check, reply) =>
           this.#broker.check(threadId, runId, check, reply),
+        policyCancel: (threadId, requestId) => {
+          this.#broker.cancel(threadId, requestId);
+        },
         policyChannelClosed: (threadId, reason) => {
           logger.debug({ thread_id: threadId, reason }, "policy channel closed");
           this.#broker.failThread(threadId, reason);

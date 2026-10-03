@@ -15,9 +15,13 @@ const SHUTDOWN_DEADLINE_MS = 10_000;
 
 async function main(): Promise<void> {
   hardenProcess(process);
-  const config = loadConfig(process.env);
-  // Fail fast: without kobe-policy no thread could start (KOBE-36), so say why at startup.
-  await checkPolicyExtensionFile(config.policyExtension);
+  const loaded = loadConfig(process.env);
+  // Fail fast: without kobe-policy no thread could start (KOBE-36), so say why at startup. Pi gets
+  // the resolved path.
+  const config = {
+    ...loaded,
+    policyExtension: await checkPolicyExtensionFile(loaded.policyExtension),
+  };
   const home = process.env.HOME ?? "/home/kobe";
   const piEnv = buildPiLaunch({
     sessionFile: "-",

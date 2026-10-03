@@ -6,9 +6,10 @@ import path from "node:path";
  * file and every directory above it owned by uid 0 and not group/world-writable — as baked into the
  * image (`/opt/kobe/pi-extensions/kobe-policy`, 0444 in 0555 directories). Model-run code runs as
  * the sandbox user, so it must not be able to replace or edit the extension Pi loads. Throws with
- * the reason; the agent then exits non-zero (fail fast).
+ * the reason; the agent then exits non-zero (fail fast). Returns the resolved path: the agent hands
+ * that to Pi, so no symlink along the configured path is followed again later.
  */
-export async function checkPolicyExtensionFile(file: string): Promise<void> {
+export async function checkPolicyExtensionFile(file: string): Promise<string> {
   const resolved = await realpath(file).catch(() => {
     throw new Error(`kobe-policy extension not found: ${file}`);
   });
@@ -19,6 +20,6 @@ export async function checkPolicyExtensionFile(file: string): Promise<void> {
     if (entry.uid !== 0 || (entry.mode & 0o022) !== 0) {
       throw new Error(`kobe-policy extension must be root-owned and read-only: ${current}`);
     }
-    if (path.dirname(current) === current) return;
+    if (path.dirname(current) === current) return resolved;
   }
 }

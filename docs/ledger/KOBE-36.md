@@ -52,6 +52,7 @@ agent → ext   {"type":"channel.hello","nonce"}
 ext → agent   {"type":"channel.ready","nonce","extension":"kobe-policy","version":1}
               | {"type":"channel.refused","nonce","reason"}
 ext → agent   {"type":"policy.check","nonce","request_id","tool_call_id","parent_tool_call_id"?,"tool","input"}
+ext → agent   {"type":"policy.cancel","nonce","request_id"}      gave up (timeout / Stop): agent frees the slot
 agent → ext   policy.pending {request_id, tool_call_id, approval_id, expires_at, …}
               policy.result  {request_id, tool_call_id, decision, reasons, message?}   (no approval token)
 ```
@@ -63,7 +64,10 @@ return nothing (allow). Everything else returns `{block: true, reason: "policy.d
 
 Timeouts: hello 10 s; first answer 60 s; after `policy.pending` until `expires_at` + 60 s, capped at
 1 h + 60 s (D29 TTL); the run's abort signal (`ctx.signal`) blocks at once. In-flight cap 128 (the
-agent's per-thread cap); request line cap 4 MiB (the wire frame cap); reply line cap 1 MiB.
+agent's per-thread cap); request line cap 1 MiB − 4 KiB and the broker denies (without sending) a
+`policy.check` frame over 1 MiB — the server closes the whole sandbox connection on a larger one
+(KOBE-24); reply line cap 1 MiB. Each `tool_call_id` is checked at most once per Pi process
+(in flight or decided; 100 000 ids remembered, then everything is blocked until Pi restarts).
 
 ## Pi 1.0.0 facts verified (package source in `images/sandbox/pi`, and real-Pi tests)
 
@@ -130,12 +134,20 @@ agent's per-thread cap); request line cap 4 MiB (the wire frame cap); reply line
   Node has no `dup`/`fcntl`, so "dup+close fd 3" is not possible from the extension; tools do not
   inherit fd 3 anyway (libuv passes only requested stdio; real-Pi test), and the nonce check
   covers a tool that is handed it.
-- `KOBE_POLICY_REPLY_TIMEOUT_MS` (tests): can only shorten the 60 s first-answer wait; read once and
-  deleted; never in the agent's allow-listed Pi environment.
+- Timeouts are constants; tests inject shorter ones through `clientOptions`
+  (`testing/pi-extensions/kobe-policy-short-timeout.ts`). No environment knob.
+- The request line is built from own data (`stableJson`, never `JSON.stringify` of an object, which
+  would consult an inherited `toJSON`); the handler's fingerprint is reused. The post-decision
+  fingerprint compare stays as defence in depth next to the freeze.
 
 ## For other tickets
 
-- **KOBE-24 (server, `policy.check`):** per KOBE-35, verify the actor is still a team member and
+- **KOBE-24 (merged, #33; checked against `sandbox-wire/policy-check.ts`):** echoes `tool_call_id`
+  on allow and deny, appends `policy.denied`, clamps the mode, verifies membership — all as needed
+  below. Its 1 MiB `policy.check` frame cap (connection closed above it, not a contract value) is now
+  respected on the sandbox side (see Design). Duplicate `tool_call_id`s are blocked per Pi process
+  here; uniqueness across Pi restarts of a run is the server's (approvals key on (run, tool_call_id)).
+  Original notes: per KOBE-35, verify the actor is still a team member and
   clamp `run.approval_mode` to the install floor / team settings before `decide` (outside any
   `withTeam`); derive risk from the registry (the frame carries only tool name + input). Answer every
   check exactly once; an **allow must echo the check's `tool_call_id`** (the extension blocks
@@ -169,7 +181,10 @@ agent's per-thread cap); request line cap 4 MiB (the wire frame cap); reply line
 3. `approval.ts` says kobe-policy "passes [the approval token] on where a downstream verifier (MCP
    proxy) needs it"; KOBE-23 strips it on fd 3 and the MCP proxy finds approvals by
    (run, tool_call_id) — align the wording (KOBE-58).
-4. The fd-3 channel stays sandbox-internal (`kobe-policy/protocol.ts`); no move to
+4. The server's 1 MiB `policy.check` frame cap (KOBE-24) is not in the contract
+   (`connection.ts` states only the 4 MiB frame cap); state it there, since exceeding it closes the
+   connection.
+5. The fd-3 channel stays sandbox-internal (`kobe-policy/protocol.ts`); no move to
    `packages/protocol` proposed.
 
 ## Open risks
@@ -199,9 +214,30 @@ agent's per-thread cap); request line cap 4 MiB (the wire frame cap); reply line
 8. Repeated `policy.pending` could extend the wait indefinitely: the first pending fixes a deadline
    (`MAX_PENDING_WAIT_MS`) no later one can move (test "cannot be kept waiting forever").
 
+## Coordinator security review (APPROVE, 1 MEDIUM + LOW) — resolution
+
+1. MEDIUM duplicate `tool_call_id` never rejected: `PolicyClient` remembers every id it asked about
+   (in flight or decided, also when refused locally); a repeat is blocked without asking. Tests:
+   `client.test.ts` (in flight, decided, refused-then-reused); real Pi: top-level `cm1/1` colliding
+   with codemode's nested `cm1/1`, and a provider repeating `dup` — blocked, no `policy.check`.
+2. LOW-1 fd 3 on Linux: real-Pi test "a tool's process does not hold Pi's policy socket (Linux
+   /proc)" (runs in CI's Linux `checks` job, skipped on macOS) and `test-image.sh` "tools Pi runs do
+   not inherit the policy socket (fd 3)" (bash runs `ls -l /proc/$$/fd/` under the image; Pi's
+   `socket:[n]` must not appear).
+3. LOW-2 the agent passes the realpath of the checked extension file to Pi
+   (`checkPolicyExtensionFile` returns it). LOW-3 a Pi whose policy channel is closed or not ready
+   is restarted on the next command instead of reused (test "restarts a Pi whose policy channel
+   closed…"; the forged-line control now shows a fresh Pi). LOW-4 `policy.cancel` frees the broker
+   slot on the extension's timeout/Stop (late answer dropped; no rate tokens spent). LOW-6
+   `KOBE_POLICY_REPLY_TIMEOUT_MS` removed. LOW-5 own-key serialisation (above).
+4. Ready-gate tests for `pi.command` and for the Pi started after `session.restore` (restore itself
+   starts no Pi).
+5. Found while re-checking KOBE-24: the server's 1 MiB `policy.check` limit vs. the 4 MiB the
+   sandbox allowed — a large `write` would have closed the sandbox connection. Fixed (Design).
+
 ## Evidence (acceptance criteria → test or command output)
 
-`pnpm --filter @kobe/sandbox-agent test`: 228 passed, 1 skipped (root-only case) (real-Pi suites run when
+`pnpm --filter @kobe/sandbox-agent test`: 240 passed, 2 skipped (root-only case; Linux-only /proc case on macOS) (real-Pi suites run when
 `images/sandbox/pi` is installed, as in CI; CI runs them against the compiled `dist/kobe-policy`).
 
 | AC   | Evidence                                                                                                                                                                                 |
@@ -214,4 +250,4 @@ agent's per-thread cap); request line cap 4 MiB (the wire frame cap); reply line
 | 5    | `test-image.sh`: extension root-owned/0444/0555, agent accepts the file, Pi loads it and answers `channel.ready`; real Pi: forged `>&3` write fails, `KOBE_POLICY_FD` unset for tools    |
 | 6    | `client.test.ts`, `handler.test.ts`, `extension.test.ts`, `self-check.test.ts`, `channel.test.ts`, `extension-file.test.ts`, `pi-launch.test.ts`, both real-Pi suites                    |
 
-Image: built on the remote amd64 Docker host, `images/sandbox/test-image.sh` all `ok` (26 checks).
+Image: built on the remote amd64 Docker host, `images/sandbox/test-image.sh` all `ok` (27 checks).

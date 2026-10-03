@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readlink, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Duplex } from "node:stream";
@@ -13,6 +13,7 @@ import {
   PI_AVAILABLE,
   PI_BIN,
   REAL_POLICY_EXTENSION,
+  SHORT_TIMEOUT_POLICY_EXTENSION,
   fauxScript,
 } from "./testing/real-pi.js";
 
@@ -255,6 +256,44 @@ describe.skipIf(!PI_AVAILABLE)("kobe-policy in real Pi, through kobe-sandbox-age
     await settled(t);
   }, 60_000);
 
+  it("checks a tool call id once: a repeat (e.g. colliding with a codemode nested id) is blocked", async () => {
+    const t = await start(["builtin:codemode"]);
+    const code =
+      'const r = await tools.bash({ command: "echo nested > nested.txt" }); text(r.output);';
+    await run(t, [
+      { tool: "codemode", id: "cm1", args: { code } },
+      bash("cm1/1", "echo collide > collide.txt"),
+      bash("dup", "echo first > first.txt"),
+      bash("dup", "echo second > second.txt"),
+    ]);
+    answer(t, await nextCheck(t, 0), "allow"); // cm1
+    answer(t, await nextCheck(t, 1), "allow"); // cm1/1 (nested)
+    expect(await toolEnd(t, "cm1")).toMatchObject({ isError: false });
+    // The top-level "cm1/1" is blocked without asking; then the first "dup" is asked.
+    const third = await nextCheck(t, 2);
+    expect(third).toMatchObject({
+      tool_call_id: "dup",
+      input: { command: "echo first > first.txt" },
+    });
+    answer(t, third, "allow");
+    await settled(t);
+    expect(checks(t).map((c) => c.tool_call_id)).toEqual(["cm1", "cm1/1", "dup"]);
+    expect(existsSync(path.join(t.workspace, "nested.txt"))).toBe(true);
+    expect(existsSync(path.join(t.workspace, "collide.txt"))).toBe(false);
+    expect(existsSync(path.join(t.workspace, "first.txt"))).toBe(true);
+    expect(existsSync(path.join(t.workspace, "second.txt"))).toBe(false);
+    const ends = piEvents(t).filter((e) => e.type === "tool_execution_end") as {
+      toolCallId: string;
+      isError: boolean;
+      result: { content: { text: string }[] };
+    }[];
+    const blocked = ends.filter((e) => e.isError).map((e) => e.result.content[0]?.text);
+    expect(blocked).toEqual([
+      "policy.denied: this tool call id was already checked in this session",
+      "policy.denied: this tool call id was already checked in this session",
+    ]);
+  }, 60_000);
+
   it("checks each call of a multi-call message independently", async () => {
     const t = await start();
     await run(t, [{ calls: [bash("a", "echo a > a.txt"), bash("b", "echo b > b.txt")] }]);
@@ -344,6 +383,12 @@ class DirectPi {
     collectLines(this.control, this.channel);
   }
 
+  allow(check: Record<string, unknown>): void {
+    this.control.write(
+      `${JSON.stringify({ type: "policy.result", request_id: check.request_id, tool_call_id: check.tool_call_id, decision: "allow", reasons: [] })}\n`,
+    );
+  }
+
   hello(): void {
     this.control.write(`${JSON.stringify({ type: "channel.hello", nonce: "test-nonce" })}\n`);
   }
@@ -417,9 +462,7 @@ describe.skipIf(!PI_AVAILABLE)("kobe-policy in real Pi, against a fake channel p
   };
 
   it("blocks when no answer arrives in time", async () => {
-    const p = await launch([FAUX_MODEL_EXTENSION, REAL_POLICY_EXTENSION], {
-      KOBE_POLICY_REPLY_TIMEOUT_MS: "500",
-    });
+    const p = await launch([FAUX_MODEL_EXTENSION, SHORT_TIMEOUT_POLICY_EXTENSION]);
     expect(await ready(p)).toEqual({
       type: "channel.ready",
       nonce: "test-nonce",
@@ -437,7 +480,33 @@ describe.skipIf(!PI_AVAILABLE)("kobe-policy in real Pi, against a fake channel p
       text: "policy.denied: policy check timed out",
     });
     expect(existsSync(path.join(dir ?? "", "workspace/late.txt"))).toBe(false);
+    // It tells the agent it gave up, so the agent frees that check's slot.
+    const check = p.channel.find((m) => m.type === "policy.check") as Record<string, unknown>;
+    await until(() => p.channel.some((m) => m.type === "policy.cancel"), 5000);
+    expect(p.channel.find((m) => m.type === "policy.cancel")).toEqual({
+      type: "policy.cancel",
+      nonce: "test-nonce",
+      request_id: check.request_id,
+    });
   }, 60_000);
+
+  it.skipIf(process.platform !== "linux")(
+    "a tool's process does not hold Pi's policy socket (Linux /proc)",
+    async () => {
+      const p = await launch([FAUX_MODEL_EXTENSION, REAL_POLICY_EXTENSION]);
+      await ready(p);
+      const piSocket = await readlink(`/proc/${p.child.pid}/fd/3`);
+      expect(piSocket).toMatch(/^socket:\[\d+\]$/);
+      p.prompt([bash("fd1", "ls -l /proc/$$/fd/")]);
+      await until(() => p.channel.some((m) => m.type === "policy.check"), 30_000);
+      p.allow(p.channel.find((m) => m.type === "policy.check") as Record<string, unknown>);
+      const end = await p.toolEnd("fd1");
+      expect(end.isError).toBe(false);
+      expect(end.text).toMatch(/-> /); // the listing ran
+      expect(end.text).not.toContain(piSocket);
+    },
+    60_000,
+  );
 
   it("blocks pending and later calls once the channel closes", async () => {
     const p = await launch([FAUX_MODEL_EXTENSION, REAL_POLICY_EXTENSION]);

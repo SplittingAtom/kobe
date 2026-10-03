@@ -64,6 +64,46 @@ const p = spawn("pi", ["--mode", "rpc", "--no-session", "--no-extensions", "--no
 p.stdio[3].write(JSON.stringify({ type: "channel.hello", nonce: "image-test" }) + "\n");
 p.stdio[3].on("data", (d) => { process.stdout.write(d); p.kill("SIGKILL"); process.exit(0); });
 setTimeout(() => { console.log("no answer from kobe-policy"); p.kill("SIGKILL"); process.exit(1); }, 30000);'
+# A tool Pi runs must not hold Pi's policy socket (fd 3). A scripted model (pi-ai faux provider, in
+# /tmp) makes Pi run `ls -l /proc/$$/fd/` through bash; kobe-policy asks, this script allows, and
+# the listing must not show the socket Pi has on fd 3. (Pi needs a writable config dir to use any
+# provider, hence /tmp/pi-agent here.)
+check "tools Pi runs do not inherit the policy socket (fd 3)" '^ok socket:\[[0-9]+\]$' run_ws node -e '
+const fs = require("node:fs");
+const { spawn } = require("node:child_process");
+fs.mkdirSync("/tmp/pi-agent", { recursive: true });
+fs.writeFileSync("/tmp/faux.mjs", `import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
+export default function (pi) {
+  const f = fauxProvider({ provider: "kobe-faux", models: [{ id: "scripted" }] });
+  f.setResponses([
+    fauxAssistantMessage(fauxToolCall("bash", { command: "ls -l /proc/$$/fd/" }, { id: "fd1" }), { stopReason: "toolUse" }),
+    fauxAssistantMessage("done"),
+  ]);
+  pi.registerProvider(f.provider);
+  const select = async (_e, ctx) => { if (ctx.model?.provider !== "kobe-faux") await pi.setModel(f.getModel()); };
+  pi.on("session_start", select);
+  pi.on("input", select);
+}`);
+const p = spawn("pi", ["--mode", "rpc", "--no-session", "--no-extensions", "--no-approve", "--no-context-files",
+  "--extension", "/tmp/faux.mjs", "--extension", "/opt/kobe/pi-extensions/kobe-policy/index.js"], { cwd: "/workspace",
+  env: { PATH: process.env.PATH, HOME: "/home/kobe", PI_CODING_AGENT_DIR: "/tmp/pi-agent",
+    PI_OFFLINE: "1", PI_TELEMETRY: "0", PI_SKIP_VERSION_CHECK: "1", KOBE_POLICY_FD: "3" },
+  stdio: ["pipe", "pipe", "inherit", "pipe"] });
+const done = (msg, code) => { console.log(msg); p.kill("SIGKILL"); process.exit(code); };
+setTimeout(() => done("timeout", 1), 60000);
+const sock = fs.readlinkSync("/proc/" + p.pid + "/fd/3");
+const lines = (stream, onLine) => { let b = ""; stream.on("data", (d) => { b += d; let i; while ((i = b.indexOf("\n")) >= 0) { onLine(JSON.parse(b.slice(0, i))); b = b.slice(i + 1); } }); };
+lines(p.stdio[3], (m) => {
+  if (m.type === "channel.ready") p.stdin.write(JSON.stringify({ type: "prompt", id: "p", message: "go" }) + "\n");
+  if (m.type === "policy.check") p.stdio[3].write(JSON.stringify({ type: "policy.result", request_id: m.request_id, tool_call_id: m.tool_call_id, decision: "allow", reasons: [] }) + "\n");
+});
+p.stdio[3].write(JSON.stringify({ type: "channel.hello", nonce: "image-test" }) + "\n");
+lines(p.stdout, (m) => {
+  if (m.type !== "tool_execution_end" || m.toolCallId !== "fd1") return;
+  const text = m.result.content.map((c) => c.text).join("");
+  if (m.isError || !text.includes("->")) done("tool failed: " + text, 1);
+  done((text.includes(sock) ? "LEAKED " : "ok ") + sock, text.includes(sock) ? 1 : 0);
+});'
 check "skills directory exists, root-owned" '^0:0$' run stat -c '%u:%g' /opt/kobe/skills
 check "/workspace in the image is owned by uid 1000" '^1000:1000$' run stat -c '%u:%g' /workspace
 check "workspace (volume) is writable" '^ok$' run_ws sh -c 'touch /workspace/x && echo ok'

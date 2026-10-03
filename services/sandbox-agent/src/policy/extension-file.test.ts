@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -7,7 +7,14 @@ import { checkPolicyExtensionFile } from "./extension-file.js";
 describe("checkPolicyExtensionFile", () => {
   it("accepts a root-owned file in root-owned, non-writable directories", async () => {
     // A file every test host has, owned by root along its whole path.
-    await expect(checkPolicyExtensionFile("/bin/sh")).resolves.toBeUndefined();
+    await expect(checkPolicyExtensionFile("/bin/sh")).resolves.toBe(await realpath("/bin/sh"));
+  });
+
+  it("returns the resolved path, so a symlink re-pointed later cannot change what Pi loads", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "kp-link-"));
+    const link = path.join(dir, "index.js");
+    await symlink("/bin/sh", link);
+    await expect(checkPolicyExtensionFile(link)).resolves.toBe(await realpath("/bin/sh"));
   });
 
   it("refuses a missing file", async () => {

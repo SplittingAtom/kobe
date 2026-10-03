@@ -27,7 +27,13 @@ describe("kobe-policy tool_call handler", () => {
     const handler = createToolCallHandler(policy);
     expect(await handler(event(), {})).toBeUndefined();
     expect(requests).toEqual([
-      { toolCallId: "call_1", tool: "bash", input: { command: "ls" }, signal: undefined },
+      {
+        toolCallId: "call_1",
+        tool: "bash",
+        input: { command: "ls" },
+        inputJson: '{"command":"ls"}',
+        signal: undefined,
+      },
     ]);
   });
 

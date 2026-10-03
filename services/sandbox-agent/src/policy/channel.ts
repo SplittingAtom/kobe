@@ -6,6 +6,7 @@ import { LineSplitter, encodeJsonl } from "../jsonl.js";
 import {
   CHANNEL_VERSION,
   EXTENSION_NAME,
+  MSG_CANCEL,
   MSG_CHECK,
   MSG_HELLO,
   MSG_READY,
@@ -75,6 +76,8 @@ export function localDeny(requestId: string, message: string): PolicyChannelRepl
 
 export interface PolicyChannelHandlers {
   readonly onCheck: (check: PolicyChannelCheck) => void;
+  /** The extension stopped waiting for this request (its timeout, or Stop). */
+  readonly onCancel?: (requestId: string) => void;
   /** The channel is unusable (bad nonce, unread replies, closed): deny everything pending. */
   readonly onClosed: (reason: string) => void;
   readonly onDiagnostic?: (message: string) => void;
@@ -214,6 +217,11 @@ export class PolicyChannel {
       return;
     }
     const requestId = extractRequestId(value);
+    if (type === MSG_CANCEL) {
+      // Frees a slot rather than taking one, so it spends no rate tokens.
+      if (this.#ready && requestId !== undefined) this.#handlers.onCancel?.(requestId);
+      return;
+    }
     if (!this.#ready) {
       if (requestId !== undefined) this.reply(localDeny(requestId, "kobe-policy is not ready"));
       return;

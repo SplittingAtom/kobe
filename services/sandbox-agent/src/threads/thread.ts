@@ -40,6 +40,8 @@ export interface ThreadHooks {
     check: PolicyChannelCheck,
     reply: (message: PolicyChannelReply) => void,
   ) => void;
+  /** kobe-policy stopped waiting for one of its checks (timeout, Stop): free its slot. */
+  readonly policyCancel?: (threadId: string, requestId: string) => void;
   /** The thread's policy channel is unusable: every pending check of the thread is denied. */
   readonly policyChannelClosed: (threadId: string, reason: string) => void;
   readonly diagnostic: (threadId: string, message: string) => void;
@@ -97,6 +99,11 @@ export class Thread {
 
   get hasProcess(): boolean {
     return this.#pi !== undefined;
+  }
+
+  /** kobe-policy in the current Pi reported ready and its channel is still open. */
+  get policyUsable(): boolean {
+    return this.#policy?.ready === true && !this.#policy.closed;
   }
 
   get launchKey(): string | undefined {
@@ -162,6 +169,7 @@ export class Thread {
       const opened: PolicyChannel = new PolicyChannel(control, {
         onCheck: (check) =>
           this.#hooks.policyCheck(this.id, this.#run?.runId, check, (m) => opened.reply(m)),
+        onCancel: (requestId) => this.#hooks.policyCancel?.(this.id, requestId),
         onClosed: (reason) => this.#hooks.policyChannelClosed(this.id, reason),
         onDiagnostic: (message) => this.#hooks.diagnostic(this.id, message),
       });

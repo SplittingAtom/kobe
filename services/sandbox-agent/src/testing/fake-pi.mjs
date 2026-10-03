@@ -14,6 +14,7 @@
 //   "grandchild"   spawn a tool the way Pi's bash tool does and report what it can see of fd 3
 //   "orphan"       spawn a detached long-running tool (its own process group), report its pid, hang
 //   "handled"      answer the prompt with disposition "handled"
+//   "drop-policy"  close its end of the policy channel (as a broken kobe-policy would), then settle
 // Every command received is appended to <session file>.commands.jsonl for assertions.
 // It also plays kobe-policy's side of the fd-3 handshake: on channel.hello it answers channel.ready,
 // unless the last --extension path contains "refuse" (channel.refused) or "silent" (no answer).
@@ -175,6 +176,10 @@ function runPrompt(message) {
     start();
     const child = spawn("sleep", ["300"], { stdio: "ignore", detached: true });
     out({ type: "kobe_test_orphan", pid: child.pid });
+  } else if (message === "drop-policy") {
+    start();
+    policySocket?.destroy();
+    setTimeout(settle, 50);
   } else if (message === "crash") {
     process.stderr.write("fatal: something broke\n");
     process.exit(3);

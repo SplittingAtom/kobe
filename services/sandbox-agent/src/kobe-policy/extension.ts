@@ -9,7 +9,7 @@ import {
   type ToolCallContextLike,
   type ToolCallEventLike,
 } from "./handler.js";
-import { FIRST_REPLY_TIMEOUT_MS, POLICY_FD_ENV, REPLY_TIMEOUT_ENV } from "./protocol.js";
+import { POLICY_FD_ENV } from "./protocol.js";
 import { findLaunchProblem } from "./self-check.js";
 
 /** The slice of Pi's `ExtensionAPI` kobe-policy uses (structural, so no Pi package dependency). */
@@ -51,7 +51,6 @@ export interface PolicyConnection {
 export async function connectPolicy(deps: KobePolicyDeps): Promise<PolicyConnection> {
   const raw = deps.env[POLICY_FD_ENV];
   Reflect.deleteProperty(deps.env, POLICY_FD_ENV);
-  const timeout = replyTimeoutOverride(deps.env);
   if (raw === undefined || !/^[0-9]{1,4}$/.test(raw) || Number(raw) < 3) {
     return unavailable(deps, `no policy channel (${POLICY_FD_ENV} not set)`);
   }
@@ -61,10 +60,7 @@ export async function connectPolicy(deps: KobePolicyDeps): Promise<PolicyConnect
   } catch (error) {
     return unavailable(deps, `cannot open the policy channel: ${(error as Error).message}`);
   }
-  const client = new PolicyClient(stream, {
-    ...deps.clientOptions,
-    ...timeout,
-  });
+  const client = new PolicyClient(stream, deps.clientOptions);
   try {
     await client.handshake();
   } catch (error) {
@@ -92,14 +88,6 @@ export async function registerKobePolicy(
   const { checker, announce } = await connection;
   pi.on("tool_call", createToolCallHandler(checker));
   announce();
-}
-
-/** {@link REPLY_TIMEOUT_ENV}: read once, removed, and only ever shortens the default. */
-function replyTimeoutOverride(env: Record<string, string | undefined>): PolicyClientOptions {
-  const raw = env[REPLY_TIMEOUT_ENV];
-  Reflect.deleteProperty(env, REPLY_TIMEOUT_ENV);
-  const ms = raw !== undefined && /^[0-9]{1,9}$/.test(raw) ? Number(raw) : Number.NaN;
-  return ms >= 1 && ms < FIRST_REPLY_TIMEOUT_MS ? { firstReplyTimeoutMs: ms } : {};
 }
 
 function unavailable(deps: KobePolicyDeps, reason: string): PolicyConnection {

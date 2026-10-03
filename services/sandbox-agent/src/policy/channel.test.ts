@@ -23,9 +23,11 @@ function setup(now: () => number = Date.now) {
   });
   fromAgent.on("data", (c: Buffer) => splitter.push(c));
   const checks: PolicyChannelCheck[] = [];
+  const cancels: string[] = [];
   const closed: string[] = [];
   const channel = new PolicyChannel(stream, {
     onCheck: (c) => checks.push(c),
+    onCancel: (id) => cancels.push(id),
     onClosed: (r) => closed.push(r),
     now,
   });
@@ -43,7 +45,7 @@ function setup(now: () => number = Date.now) {
   const tick = () => new Promise((r) => setImmediate(r));
   const ready = () =>
     send({ type: "channel.ready", nonce: nonce(), extension: "kobe-policy", version: 1 });
-  return { channel, received, checks, closed, send, check, nonce, tick, ready, fromAgent };
+  return { channel, received, checks, cancels, closed, send, check, nonce, tick, ready, fromAgent };
 }
 
 /** A channel whose extension has completed the handshake (`channel.ready`). */
@@ -196,5 +198,24 @@ describe("PolicyChannel", () => {
     t.send({ type: "channel.ready", nonce: "forged", extension: "kobe-policy", version: 1 });
     await t.tick();
     expect(t.closed).toEqual(["policy request without the channel nonce"]);
+  });
+
+  it("passes policy.cancel on, without spending rate tokens", async () => {
+    const t = await readySetup(() => 1000);
+    for (let i = 0; i < 100; i += 1) {
+      t.send({ type: "policy.cancel", nonce: t.nonce(), request_id: `r${i}` });
+    }
+    t.send(t.check("after"));
+    await t.tick();
+    expect(t.cancels).toHaveLength(100);
+    expect(t.checks.map((c) => c.request_id)).toEqual(["after"]);
+  });
+
+  it("closes on a policy.cancel without the nonce", async () => {
+    const t = await readySetup();
+    t.send({ type: "policy.cancel", nonce: "forged", request_id: "r1" });
+    await t.tick();
+    expect(t.cancels).toEqual([]);
+    expect(t.channel.closed).toBe(true);
   });
 });

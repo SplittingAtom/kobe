@@ -7,6 +7,7 @@
  *   extension → agent   {"type":"channel.refused","nonce","reason"}              self-check failed
  *   extension → agent   {"type":"policy.check","nonce","request_id","tool_call_id",
  *                         "parent_tool_call_id"?,"tool","input"}
+ *   extension → agent   {"type":"policy.cancel","nonce","request_id"}   gave up (timeout / Stop)
  *   agent → extension   {"type":"policy.pending","request_id",…}   a human decides; keep waiting
  *   agent → extension   {"type":"policy.result","request_id","decision","reasons","message"?,…}
  *
@@ -20,6 +21,7 @@ export const MSG_HELLO = "channel.hello";
 export const MSG_READY = "channel.ready";
 export const MSG_REFUSED = "channel.refused";
 export const MSG_CHECK = "policy.check";
+export const MSG_CANCEL = "policy.cancel";
 export const MSG_PENDING = "policy.pending";
 export const MSG_RESULT = "policy.result";
 
@@ -27,17 +29,19 @@ export const MSG_RESULT = "policy.result";
 export const POLICY_FD_ENV = "KOBE_POLICY_FD";
 
 /**
- * Optional, shortens the wait for a first answer (tests). Never lengthens it, and the agent's
- * allow-listed Pi environment never passes it, so in a sandbox the default always applies.
+ * One request line. The Kobe server closes a sandbox connection on a `policy.check` frame over
+ * 1 MiB (KOBE-24), so the line stays below that with room for the agent's wire fields.
  */
-export const REPLY_TIMEOUT_ENV = "KOBE_POLICY_REPLY_TIMEOUT_MS";
-
-/** One request line, as the agent accepts it (= the wire frame cap). */
-export const MAX_REQUEST_LINE_BYTES = 4 * 1024 * 1024;
+export const MAX_REQUEST_LINE_BYTES = 1024 * 1024 - 4096;
 /** One reply line from the agent; anything longer closes the channel (fail closed). */
 export const MAX_REPLY_LINE_BYTES = 1024 * 1024;
 /** Checks in flight per Pi process (the agent's per-thread cap). */
 export const MAX_PENDING_CHECKS = 128;
+/**
+ * Tool call ids remembered per Pi process (each is checked at most once; approvals are keyed on
+ * (run, tool_call_id)). Beyond this every further call is blocked until Pi restarts.
+ */
+export const MAX_TRACKED_TOOL_CALL_IDS = 100_000;
 
 /** Wait for `channel.hello` at load. */
 export const HELLO_TIMEOUT_MS = 10_000;

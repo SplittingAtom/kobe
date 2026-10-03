@@ -1,7 +1,12 @@
 import { duplexPair, type Duplex } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PolicyClient, type CheckRequest } from "./client.js";
-import { FIRST_REPLY_TIMEOUT_MS, MAX_PENDING_CHECKS, MAX_REPLY_LINE_BYTES } from "./protocol.js";
+import {
+  FIRST_REPLY_TIMEOUT_MS,
+  MAX_PENDING_CHECKS,
+  MAX_REPLY_LINE_BYTES,
+  MAX_REQUEST_LINE_BYTES,
+} from "./protocol.js";
 
 const NONCE = "n".repeat(32);
 
@@ -439,5 +444,99 @@ describe("PolicyClient checks", () => {
     expect(verdict).toMatchObject({ allow: false, reason: expect.stringMatching(/too large/) });
     await flush();
     expect(agent.checks()).toHaveLength(0);
+  });
+
+  it("keeps request lines within the server's 1 MiB policy.check frame limit", () => {
+    expect(MAX_REQUEST_LINE_BYTES).toBeLessThanOrEqual(1024 * 1024 - 2048);
+  });
+
+  it("blocks a second check with a tool call id already in flight", async () => {
+    const { client, agent } = await connected();
+    client.ready();
+    void client.check(request({ toolCallId: "same" }));
+    expect(await client.check(request({ toolCallId: "same" }))).toMatchObject({
+      allow: false,
+      reason: expect.stringMatching(/already/),
+    });
+    await flush();
+    expect(agent.checks()).toHaveLength(1);
+  });
+
+  it("blocks a check with a tool call id decided before (allowed or not)", async () => {
+    const { client, agent } = await connected();
+    client.ready();
+    const first = client.check(request({ toolCallId: "cm1/1" }));
+    const check = await sent(agent);
+    agent.send({
+      type: "policy.result",
+      request_id: check.request_id,
+      tool_call_id: "cm1/1",
+      decision: "allow",
+    });
+    expect(await first).toEqual({ allow: true });
+    // e.g. a top-level call whose provider id collides with a codemode nested id
+    expect(await client.check(request({ toolCallId: "cm1/1" }))).toMatchObject({ allow: false });
+    await flush();
+    expect(agent.checks()).toHaveLength(1);
+  });
+
+  it("does not let a locally refused call free its id for reuse", async () => {
+    const { client } = await connected();
+    client.ready();
+    const abort = new AbortController();
+    abort.abort();
+    expect(await client.check(request({ toolCallId: "x", signal: abort.signal }))).toMatchObject({
+      allow: false,
+    });
+    expect(await client.check(request({ toolCallId: "x" }))).toMatchObject({
+      allow: false,
+      reason: expect.stringMatching(/already/),
+    });
+  });
+
+  it("tells the agent to drop a check it gave up on (timeout)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const { client, agent } = await connected();
+    client.ready();
+    const verdict = client.check(request());
+    const check = await sent(agent);
+    await vi.advanceTimersByTimeAsync(FIRST_REPLY_TIMEOUT_MS + 1);
+    await verdict;
+    await vi.advanceTimersByTimeAsync(1);
+    expect(agent.received.at(-1)).toEqual({
+      type: "policy.cancel",
+      nonce: NONCE,
+      request_id: check.request_id,
+    });
+  });
+
+  it("tells the agent to drop a check it gave up on (run stopped)", async () => {
+    const { client, agent } = await connected();
+    client.ready();
+    const abort = new AbortController();
+    const verdict = client.check(request({ signal: abort.signal }));
+    const check = await sent(agent);
+    abort.abort();
+    await verdict;
+    await flush();
+    expect(agent.received.at(-1)).toMatchObject({
+      type: "policy.cancel",
+      request_id: check.request_id,
+    });
+  });
+
+  it("serialises the request without toJSON (what is sent is the own data)", async () => {
+    const { client, agent } = await connected();
+    client.ready();
+    const proto = Object.prototype as { toJSON?: () => unknown };
+    proto.toJSON = () => ({ command: "harmless" });
+    try {
+      void client.check(request({ input: { command: "rm -rf /" } }));
+      const check = await sent(agent);
+      expect(check.input).toEqual({ command: "rm -rf /" });
+      expect(check.tool).toBe("bash");
+    } finally {
+      delete proto.toJSON;
+    }
   });
 });
