@@ -36,6 +36,17 @@ describe("sandbox-agent loadConfig", () => {
     );
   });
 
+  it("in bootstrap mode (Kobe's pods) takes the sandbox id from the server instead", () => {
+    const config = loadConfig({
+      KOBE_SERVER_URL: "ws://server.kobe.internal:8081",
+      KOBE_BOOTSTRAP_TOKEN_FILE: "/var/run/secrets/kobe/bootstrap-token",
+    });
+    expect(config.bootstrapTokenFile).toBe("/var/run/secrets/kobe/bootstrap-token");
+    expect(() =>
+      loadConfig({ KOBE_SERVER_URL: "ws://kobe", KOBE_BOOTSTRAP_TOKEN_FILE: "relative/path" }),
+    ).toThrow(/KOBE_BOOTSTRAP_TOKEN_FILE/);
+  });
+
   it("requires a lowercase uuid sandbox id", () => {
     expect(() => loadConfig({ KOBE_SERVER_URL: "wss://kobe" })).toThrow(/KOBE_SANDBOX_ID/);
     expect(() =>

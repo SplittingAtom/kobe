@@ -4,6 +4,7 @@ import { loadConfig } from "./config.js";
 import { hardenProcess } from "./harden.js";
 import { logger } from "./logger.js";
 import { buildPiLaunch } from "./pi/pi-launch.js";
+import { SessionClient } from "./session/exchange.js";
 import { detectPiVersion, readAgentVersion } from "./version.js";
 
 /**
@@ -14,18 +15,31 @@ const SHUTDOWN_DEADLINE_MS = 10_000;
 
 async function main(): Promise<void> {
   hardenProcess(process);
-  const config = loadConfig(process.env);
+  const loaded = loadConfig(process.env);
   const home = process.env.HOME ?? "/home/kobe";
   const piEnv = buildPiLaunch({
     sessionFile: "-",
     home,
-    agentDir: config.piAgentDir,
+    agentDir: loaded.piAgentDir,
     parentEnv: process.env,
   }).env;
-  const [agentVersion, piVersion] = await Promise.all([
+  // Kobe's pods carry a bootstrap token only: trade it for the sandbox id and session tokens
+  // (retried until the server assigns this pod) before dialling the wire. In parallel with the
+  // version probes: both sit on the cold-start path (D14).
+  const session =
+    loaded.bootstrapTokenFile === undefined
+      ? undefined
+      : new SessionClient({
+          serverUrl: loaded.serverUrl,
+          bootstrapTokenFile: loaded.bootstrapTokenFile,
+          logger,
+        });
+  const [agentVersion, piVersion, grant] = await Promise.all([
     readAgentVersion(new URL("../package.json", import.meta.url)),
-    detectPiVersion(config.piBin, piEnv),
+    detectPiVersion(loaded.piBin, piEnv),
+    session?.grant(),
   ]);
+  const config = grant ? { ...loaded, sandboxId: grant.sandboxId } : loaded;
   logger.info(
     { server: config.connectUrl, sandbox_id: config.sandboxId, agentVersion, piVersion },
     "sandbox-agent starting",
@@ -34,11 +48,13 @@ async function main(): Promise<void> {
   const agent = new Agent({
     config,
     logger,
-    readToken: async () => {
-      const token = (await readFile(config.tokenFile, "utf8")).trim();
-      if (token === "") throw new Error("sandbox token file is empty");
-      return token;
-    },
+    readToken: session
+      ? () => session.wireToken()
+      : async () => {
+          const token = (await readFile(config.tokenFile, "utf8")).trim();
+          if (token === "") throw new Error("sandbox token file is empty");
+          return token;
+        },
     agentVersion,
     piVersion,
     home,
