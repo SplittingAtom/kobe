@@ -126,6 +126,15 @@ export const runs = pgTable(
      * even when Pi then settles normally.
      */
     budgetStopScope: text().$type<BudgetStopScope>(),
+    /**
+     * A stop the sandbox still has to receive (KOBE-30): set in the transaction that ends (or
+     * budget-stops) a run that may be running in Pi, cleared once a `run.stop` was answered. The
+     * orchestrator's sweep re-sends it, so a replica crash after commit can't leave Pi running.
+     */
+    stopMode: text().$type<"abort" | "after_step">(),
+    stopRequestedAt: timestamp({ withTimezone: true }),
+    /** Client-supplied idempotency key of the message (KOBE-30), unique per thread. */
+    clientKey: text(),
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.id] }),
@@ -141,6 +150,13 @@ export const runs = pgTable(
       foreignColumns: [t.teamId, t.id],
     }),
     // At most one retry per run (KOBE-26 contract); a second retry returns the first.
+    uniqueIndex("runs_client_key_unique")
+      .on(t.teamId, t.threadId, t.clientKey)
+      .where(sql`${t.clientKey} IS NOT NULL`),
+    // Pending stops the sweep re-sends (few rows at any time).
+    index("runs_stop_pending_idx")
+      .on(t.teamId, t.stopRequestedAt)
+      .where(sql`${t.stopMode} IS NOT NULL`),
     uniqueIndex("runs_retry_of_unique")
       .on(t.teamId, t.retryOfRunId)
       .where(sql`${t.retryOfRunId} IS NOT NULL`),
@@ -176,6 +192,14 @@ export const runs = pgTable(
     check(
       "runs_entry_ids",
       sql`(${t.parentEntryId} IS NULL OR char_length(${t.parentEntryId}) BETWEEN 1 AND 128) AND (${t.userEntryId} IS NULL OR char_length(${t.userEntryId}) BETWEEN 1 AND 128)`,
+    ),
+    check(
+      "runs_stop_mode",
+      sql`(${t.stopMode} IS NULL) = (${t.stopRequestedAt} IS NULL) AND (${t.stopMode} IS NULL OR ${t.stopMode} IN ('abort', 'after_step'))`,
+    ),
+    check(
+      "runs_client_key",
+      sql`${t.clientKey} IS NULL OR char_length(${t.clientKey}) BETWEEN 1 AND 128`,
     ),
     check("runs_retry_not_self", sql`${t.retryOfRunId} IS NULL OR ${t.retryOfRunId} <> ${t.id}`),
     check(

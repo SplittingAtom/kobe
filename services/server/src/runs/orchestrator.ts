@@ -15,7 +15,7 @@ import {
   type SubmitMessageResult,
   type UpdateQueuedBody,
 } from "@kobe/protocol";
-import { SYSTEM_ACTOR, sql, withTeam, type AuditActor, type KobeDb, type KobeTx } from "@kobe/db";
+import { sql, withTeam, type AuditActor, type KobeDb, type KobeTx } from "@kobe/db";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit/record.js";
 import {
@@ -31,14 +31,7 @@ import type { SandboxRouter, SandboxTarget } from "../sandbox-wire/types.js";
 import { viewerProjectIds } from "../threads/references.js";
 import { findThread, isLockTimeout, type Viewer } from "../threads/repository.js";
 import { RunError } from "./errors.js";
-import {
-  budgetStoppedEvent,
-  cancelledEvent,
-  failedEvent,
-  promoteInTx,
-  type Promotion,
-  type StartPlan,
-} from "./lifecycle.js";
+import { budgetStoppedEvent, cancelledEvent, promoteInTx, type Promotion } from "./lifecycle.js";
 import {
   NO_BUDGETS,
   PASS_THROUGH_AGENTS,
@@ -50,6 +43,10 @@ import {
   applyTransition,
   bindUserEntry,
   entryExists,
+  existingRetry,
+  latestInterruptedRow,
+  requestStop,
+  runByClientKey,
   getRunRow,
   insertQueuedRun,
   lockRunRow,
@@ -64,8 +61,9 @@ import {
   touchThread,
   type AppliedTransition,
   type RunRow,
-  type ThreadRow,
 } from "./store.js";
+import { lockOwnedThread, ownedRun } from "./access.js";
+import { RunDispatcher } from "./dispatch.js";
 import { sweepRuns, type RunSweepResult } from "./sweeper.js";
 
 /** Timings and limits (tests shorten them). */
@@ -85,6 +83,12 @@ export interface RunTuning {
   readonly sweepMs: number;
   /** Promotion retries when the thread row is busy (lock timeout). */
   readonly advanceAttempts: number;
+  /** A lost start younger than this is re-sent; older ones fail `start_lost`. */
+  readonly restartWindowMs: number;
+  /** A pending stop with no `run.stop` in flight this long is sent again. */
+  readonly stopResendMs: number;
+  /** A stop still unanswered after this long is given up. */
+  readonly stopGiveUpMs: number;
 }
 
 export const RUN_DEFAULTS: RunTuning = {
@@ -94,6 +98,9 @@ export const RUN_DEFAULTS: RunTuning = {
   stallMs: 30_000,
   sweepMs: 15_000,
   advanceAttempts: 4,
+  restartWindowMs: 15 * 60_000,
+  stopResendMs: 60_000,
+  stopGiveUpMs: 60 * 60_000,
 };
 
 export interface RunOrchestratorOptions {
@@ -109,6 +116,14 @@ export interface RunOrchestratorOptions {
 
 /** The orchestrator plus what the server wires around it (wire hooks, sweeps, isolation). */
 export interface ServerRunOrchestrator extends RunOrchestrator {
+  /** `submitMessage` with a client idempotency key (unique per thread). */
+  submitMessage(
+    actor: ActorContext,
+    command: SubmitMessageCommand,
+    options?: { readonly clientKey?: string },
+  ): Promise<SubmitMessageResult>;
+  /** The run an `interrupted` thread waits on (Retry), or null. */
+  latestInterruptedRun(actor: ActorContext, threadId: string): Promise<RunSnapshot | null>;
   /** KOBE-24 `RunLifecycleHooks.onRunEnded`: the wire ended a run; advance its thread's queue. */
   onRunEnded(event: { teamId: string; runId: string; threadId: string }): Promise<void>;
   /** Refuse new runs while the isolation runtime is missing (D4); set by index.ts. */
@@ -126,6 +141,12 @@ const delay = (ms: number) =>
 
 /** Steering content shown in `steer.applied` (the event payload cap is 256 KiB). */
 const STEER_EVENT_MAX_CHARS = 50_000;
+
+const WIRE_END_CAUSES = {
+  completed: "settled",
+  interrupted: "sandbox_lost",
+  budget_stopped: "budget_exhausted",
+} as const;
 
 const userActor = (actor: ActorContext): AuditActor => ({ kind: "user", id: actor.user_id });
 
@@ -149,6 +170,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
   #isolation: IsolationProbe = () => "available";
   #sweepTimer: NodeJS.Timeout | undefined;
   #closed = false;
+  readonly #dispatch: RunDispatcher;
 
   constructor(options: RunOrchestratorOptions) {
     this.#db = options.db;
@@ -157,6 +179,17 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     this.#budget = options.budget ?? NO_BUDGETS;
     this.#tuning = { ...RUN_DEFAULTS, ...options.tuning };
     this.#log = options.log ?? rootLogger.child({ component: "runs" });
+    this.#dispatch = new RunDispatcher({
+      db: this.#db,
+      router: this.#router,
+      agents: this.#agents,
+      tuning: this.#tuning,
+      log: this.#log,
+      closed: () => this.#closed,
+      emit: (teamId, transitions) => this.#emit(teamId, transitions),
+      advance: (teamId, threadId) => this.#advance(teamId, threadId),
+      track: (task) => this.#track(task),
+    });
     if (options.sweep !== false) this.#scheduleSweep();
   }
 
@@ -165,12 +198,19 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
   async submitMessage(
     actor: ActorContext,
     command: SubmitMessageCommand,
+    options: { readonly clientKey?: string } = {},
   ): Promise<SubmitMessageResult> {
     if (this.#isolation() === "missing") throw new RunError("isolation_unavailable");
     if ((command.file_ids?.length ?? 0) > 0) throw new RunError("attachments_unavailable");
     const teamId = actor.team_id;
-    const { runId, promotion } = await this.#threadTx(actor, async (tx, viewer) => {
-      const thread = await this.#lockOwnedThread(tx, viewer, command.thread_id, "thread_not_found");
+    const clientKey = options.clientKey ?? null;
+    const out = await this.#threadTx(actor, async (tx, viewer) => {
+      const thread = await lockOwnedThread(tx, viewer, command.thread_id, "thread_not_found");
+      if (clientKey !== null) {
+        // A repeated submission (same key, same thread) answers with the run it created.
+        const seen = await runByClientKey(tx, teamId, thread.id, clientKey);
+        if (seen) return { result: { run_id: seen.id, queued: seen.status === "queued" } };
+      }
       await this.#assertMayRun(tx, actor);
       const parent = command.parent_entry_id ?? null;
       if (parent !== null && !(await entryExists(tx, teamId, thread.id, parent))) {
@@ -190,17 +230,19 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         input: command.content,
         parentEntryId: parent,
         retryOfRunId: null,
+        clientKey,
       });
       await touchThread(tx, teamId, thread.id);
-      return { runId: id, promotion: await this.#promoteOrQueue(tx, teamId, thread.id, id) };
+      const { promotion, queued } = await this.#promoteOrQueue(tx, teamId, thread.id, id);
+      return { result: { run_id: id, queued }, promotion };
     });
-    this.#afterCommit(teamId, promotion);
-    return { run_id: runId, queued: promotion.plan?.runId !== runId };
+    if (out.promotion) this.#afterCommit(teamId, out.promotion);
+    return out.result;
   }
 
   async steer(actor: ActorContext, runId: string, body: SteerBody): Promise<RunSnapshot> {
     const run = await this.#threadTx(actor, async (tx, viewer) => {
-      const found = await this.#ownedRun(tx, viewer, runId, false);
+      const found = await ownedRun(tx, viewer, runId, false);
       await this.#assertMayRun(tx, actor, false);
       return found.run;
     });
@@ -239,7 +281,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
   async cancel(actor: ActorContext, runId: string): Promise<RunSnapshot> {
     const teamId = actor.team_id;
     const result = await this.#threadTx(actor, async (tx, viewer) => {
-      const { thread, run } = await this.#ownedRun(tx, viewer, runId, true);
+      const { thread, run } = await ownedRun(tx, viewer, runId, true);
       if (run.status === "cancelled") return { wasActive: false, transition: undefined };
       if (isTerminalRunStatus(run.status)) {
         throw new RunError("invalid_transition", `The run has already ended (${run.status}).`);
@@ -253,6 +295,8 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         "user_cancelled",
         cancelledEvent(thread),
       );
+      // Durable: if this replica dies before Pi is told, the sweep sends the abort.
+      if (wasActive) await requestStop(tx, teamId, runId, "abort");
       await recordAudit(tx, {
         action: "run.cancelled",
         actor: userActor(actor),
@@ -263,8 +307,15 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     });
     if (result.transition) this.#emit(teamId, [result.transition]);
     if (result.wasActive && result.threadId !== undefined) {
-      const threadId = result.threadId;
-      this.#track(this.#stopThenAdvance(actor, runId, threadId));
+      // Only the owner can Stop, and the sandbox is the owner's (D11).
+      this.#track(
+        this.#dispatch.stopThenAdvance({
+          teamId,
+          ownerUserId: actor.user_id,
+          runId,
+          threadId: result.threadId,
+        }),
+      );
     }
     return this.getRun(actor, runId);
   }
@@ -275,7 +326,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     body: UpdateQueuedBody,
   ): Promise<RunSnapshot> {
     await this.#threadTx(actor, async (tx, viewer) => {
-      const { run } = await this.#ownedRun(tx, viewer, runId, true);
+      const { run } = await ownedRun(tx, viewer, runId, true);
       if (run.status !== "queued") {
         throw new RunError("invalid_transition", "Only queued messages can be edited.");
       }
@@ -290,16 +341,12 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     if (this.#isolation() === "missing") throw new RunError("isolation_unavailable");
     const teamId = actor.team_id;
     const out = await this.#threadTx(actor, async (tx, viewer) => {
-      const { thread, run } = await this.#ownedRun(tx, viewer, runId, true);
+      const { thread, run } = await ownedRun(tx, viewer, runId, true);
       if (thread.deletedAt !== null) throw new RunError("thread_in_trash");
       await this.#assertMayRun(tx, actor);
       const check = checkRetry(await retryCandidates(tx, teamId, thread.id), runId);
       if (check === "already_retried") {
-        const existing = await tx.execute<{ id: string; status: string }>(sql`
-          SELECT id, status FROM runs WHERE team_id = ${teamId} AND retry_of_run_id = ${runId}`);
-        const row = existing.rows[0];
-        if (!row) throw new RunError("run_not_found");
-        return { runId: row.id, queued: row.status === "queued", promotion: undefined };
+        return { ...(await existingRetry(tx, teamId, runId)), promotion: undefined };
       }
       if (check === "not_interrupted") {
         throw new RunError("invalid_transition", "Only interrupted runs can be retried.");
@@ -307,25 +354,34 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       if (check === "not_latest") {
         throw new RunError("invalid_transition", "Only the thread's latest run can be retried.");
       }
+      // Retry resolves the interrupted state (D14); after "Continue without retry" it is gone.
+      if (thread.status !== "interrupted") {
+        throw new RunError(
+          "invalid_transition",
+          "Retry is only offered while the thread is interrupted.",
+        );
+      }
       const id = await insertQueuedRun(tx, {
         teamId,
         threadId: thread.id,
         trigger: run.trigger,
-        approvalMode: run.approvalMode,
+        // Re-clamped: a floor raised since the original run applies to its retry.
+        approvalMode: clampApprovalMode(run.approvalMode, await readApprovalModeFloor(tx, teamId)),
         input: run.input,
         // Same branch point as the original: the retry is a sibling branch; history stays intact.
         parentEntryId: run.parentEntryId,
         retryOfRunId: runId,
+        clientKey: null,
       });
       await touchThread(tx, teamId, thread.id);
-      const promotion = await this.#promoteOrQueue(tx, teamId, thread.id, id);
+      const { promotion, queued } = await this.#promoteOrQueue(tx, teamId, thread.id, id);
       await recordAudit(tx, {
         action: "run.retried",
         actor: userActor(actor),
         teamId,
         target: { runId: id, threadId: thread.id, retryOfRunId: runId },
       });
-      return { runId: id, queued: promotion.plan?.runId !== id, promotion };
+      return { runId: id, queued, promotion };
     });
     if (out.promotion) this.#afterCommit(teamId, out.promotion);
     return { run_id: out.runId, queued: out.queued };
@@ -333,7 +389,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
 
   async resumeQueue(actor: ActorContext, threadId: string): Promise<void> {
     const promotion = await this.#threadTx(actor, async (tx, viewer) => {
-      const thread = await this.#lockOwnedThread(tx, viewer, threadId, "thread_not_found");
+      const thread = await lockOwnedThread(tx, viewer, threadId, "thread_not_found");
       if (thread.status !== "interrupted") return undefined;
       await setThreadStatus(
         tx,
@@ -363,6 +419,18 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     });
     if (!rows) throw new RunError("thread_not_found");
     return rows.map(toSnapshot);
+  }
+
+  /**
+   * The interrupted run an `interrupted` thread waits on (Retry or Continue, D14), so a client that
+   * reloads can still offer Retry; null otherwise.
+   */
+  async latestInterruptedRun(actor: ActorContext, threadId: string): Promise<RunSnapshot | null> {
+    const row = await this.#readTx(actor, async (tx, viewer) => {
+      if (!(await findThread(tx, viewer, threadId))) throw new RunError("thread_not_found");
+      return latestInterruptedRow(tx, actor.team_id, threadId);
+    });
+    return row ? toSnapshot(row) : null;
   }
 
   // ------------------------------------------------------------------------- internal entry points
@@ -403,6 +471,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
           await tx.execute(sql`
           UPDATE runs SET budget_stop_scope = ${command.scope}
            WHERE team_id = ${teamId} AND id = ${run.id}`);
+          await requestStop(tx, teamId, run.id, "after_step");
           return { transition: undefined, active: true };
         }),
       ).catch((err: unknown) => {
@@ -415,7 +484,12 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       affected.push(c.id);
       if (outcome.transition) this.#emit(teamId, [outcome.transition]);
       if (outcome.active) {
-        this.#track(this.#budgetStopActive(teamId, c.id, c.thread_id, c.owner_user_id, command));
+        this.#track(
+          this.#dispatch.budgetStopActive(
+            { teamId, runId: c.id, threadId: c.thread_id, ownerUserId: c.owner_user_id },
+            command.scope,
+          ),
+        );
       }
     }
     if (failures > 0) {
@@ -474,26 +548,14 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     );
     if (!row || !isTerminalRunStatus(row.status)) return;
     // The wire ended an active run; it reports neither the prior state nor the cause.
-    const causes = {
-      completed: "settled",
-      interrupted: "sandbox_lost",
-      budget_stopped: "budget_exhausted",
-    } as const;
+    const cause = WIRE_END_CAUSES[row.status as keyof typeof WIRE_END_CAUSES] ?? "error";
     this.#notify(row, {
       runId: row.id,
       threadId: row.threadId,
       from: "running",
       to: row.status,
-      cause: row.status in causes ? causes[row.status as keyof typeof causes] : "error",
+      cause,
     });
-  }
-
-  async #safeAdvance(teamId: string, threadId: string): Promise<void> {
-    try {
-      await this.#advance(teamId, threadId);
-    } catch (err) {
-      this.#log.error({ err, thread_id: threadId }, "queue promotion failed");
-    }
   }
 
   useIsolation(probe: IsolationProbe): void {
@@ -502,13 +564,24 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
 
   async sweep(): Promise<RunSweepResult> {
     const result = await sweepRuns(this.#db, this.#tuning, this.#log);
-    for (const stuck of result.failedStarts) this.#emit(stuck.teamId, [stuck.transition]);
-    const threads = [
-      ...result.failedStarts.map((s) => ({ teamId: s.teamId, threadId: s.transition.threadId })),
-      ...result.stalledThreads,
-    ];
-    // One failing thread never blocks the others.
-    for (const t of threads) await this.#safeAdvance(t.teamId, t.threadId);
+    // Each finding is handled on its own: one failure never blocks the others.
+    const each = async (what: string, id: string, fn: () => Promise<void>) => {
+      try {
+        await fn();
+      } catch (err) {
+        this.#log.error({ err, id }, `run sweep: ${what} failed`);
+      }
+    };
+    for (const lost of result.lostStarts) {
+      await each("lost start", lost.runId, () => this.#dispatch.recoverStart(lost));
+    }
+    for (const stop of result.pendingStops) {
+      // In the background: a stop waits for the sandbox's answer.
+      this.#track(each("pending stop", stop.runId, () => this.#dispatch.recoverStop(stop)));
+    }
+    for (const t of result.stalledThreads) {
+      await each("stalled queue", t.threadId, () => this.#advance(t.teamId, t.threadId));
+    }
     return result;
   }
 
@@ -559,46 +632,6 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     };
   }
 
-  /**
-   * Locks a thread the actor owns (KOBE-34 visibility: readers of a shared thread get `read_only`,
-   * everyone else the same 404) and refuses Trash. The thread row is the first lock taken.
-   */
-  async #lockOwnedThread(
-    tx: KobeTx,
-    viewer: Viewer,
-    threadId: string,
-    notFound: "thread_not_found" | "run_not_found",
-  ): Promise<ThreadRow> {
-    const found = await findThread(tx, viewer, threadId, { lock: true });
-    if (!found) throw new RunError(notFound);
-    if (found.access !== "owner") throw new RunError("read_only");
-    const thread = await lockThreadRow(tx, viewer.teamId, threadId);
-    if (!thread) throw new RunError(notFound);
-    if (thread.deletedAt !== null) throw new RunError("thread_in_trash");
-    return thread;
-  }
-
-  /** The run and its thread for a change by the thread's owner (thread locked, then the run). */
-  async #ownedRun(
-    tx: KobeTx,
-    viewer: Viewer,
-    runId: string,
-    lock: boolean,
-  ): Promise<{ thread: ThreadRow; run: RunRow }> {
-    const head = await getRunRow(tx, viewer.teamId, runId);
-    if (!head) throw new RunError("run_not_found");
-    if (!lock) {
-      const found = await findThread(tx, viewer, head.threadId);
-      if (!found) throw new RunError("run_not_found");
-      if (found.access !== "owner") throw new RunError("read_only");
-      return { thread: found.thread, run: head };
-    }
-    const thread = await this.#lockOwnedThread(tx, viewer, head.threadId, "run_not_found");
-    const run = await lockRunRow(tx, viewer.teamId, runId);
-    if (!run) throw new RunError("run_not_found");
-    return { thread, run };
-  }
-
   /** KOBE-13: deactivated or removed users can't start or steer runs (budget gate: KOBE-42). */
   async #assertMayRun(tx: KobeTx, actor: ActorContext, checkBudget = true): Promise<void> {
     if (!(await principalActive(tx, actor.team_id, actor.user_id))) {
@@ -618,10 +651,13 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     teamId: string,
     threadId: string,
     runId: string,
-  ): Promise<Promotion> {
+  ): Promise<{ promotion: Promotion; queued: boolean }> {
     const promotion = await promoteInTx(tx, this.#agents, teamId, threadId);
+    // Queued only if it really waits (a run can also fail in the same transaction).
+    let queued = false;
     if (promotion.plan?.runId !== runId) {
       const row = await getRunRow(tx, teamId, runId);
+      queued = row?.status === "queued";
       if (row?.status === "queued" && row.queueRank !== null) {
         await appendRunEventsInTx(tx, teamId, runId, [
           {
@@ -631,12 +667,12 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         ]);
       }
     }
-    return promotion;
+    return { promotion, queued };
   }
 
   #afterCommit(teamId: string, promotion: Promotion): void {
     this.#emit(teamId, promotion.transitions);
-    if (promotion.plan) this.#track(this.#start(promotion.plan));
+    if (promotion.plan) this.#track(this.#dispatch.start(promotion.plan));
   }
 
   #emit(teamId: string, transitions: readonly AppliedTransition[]): void {
@@ -666,114 +702,6 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         this.#log.warn({ err }, "run transition listener failed");
       }
     }
-  }
-
-  /** Sends `run.start`; a start that no sandbox took fails the run here (KOBE-24 contract). */
-  async #start(plan: StartPlan): Promise<void> {
-    const outcome = await this.#router.startRun(this.#target(plan.teamId, plan.ownerUserId), {
-      runId: plan.runId,
-      threadId: plan.threadId,
-      message: plan.input,
-      ...(plan.parentEntryId !== null ? { parentEntryId: plan.parentEntryId } : {}),
-      config: {
-        ...plan.config,
-        agent:
-          plan.agent === null
-            ? null
-            : { agent_id: plan.agent.agentId, version: plan.agent.version },
-        approval_mode: plan.approvalMode,
-      },
-    });
-    if (outcome.ok || this.#closed) return;
-    this.#log.warn({ run_id: plan.runId, code: outcome.error.code }, "run.start failed");
-    await this.#startFailed(plan, outcome.error.code);
-  }
-
-  /**
-   * The wire already ended runs whose `run.start` the sandbox rejected. Without a lease nobody else
-   * will end the run (the sweep only watches leased runs), so it fails here; with a lease the wire
-   * owns it (a reconnect resumes it, the sweep interrupts it) — except after a timeout, when the
-   * sandbox holds the run but does not answer: fail it and ask the sandbox to abort.
-   */
-  async #startFailed(plan: StartPlan, code: string): Promise<void> {
-    const ended = await withAppendTx(this.#db, plan.teamId, async (tx) => {
-      const thread = await lockThreadRow(tx, plan.teamId, plan.threadId);
-      const run = await lockRunRow(tx, plan.teamId, plan.runId);
-      if (!thread || !run || !isActiveRunStatus(run.status)) return undefined;
-      const lease = await tx.execute(sql`
-        SELECT 1 FROM sandbox_run_leases WHERE team_id = ${plan.teamId} AND run_id = ${plan.runId}`);
-      const leased = lease.rows.length > 0;
-      if (leased && code !== "timeout") return undefined;
-      const applied = await applyTransition(tx, thread, run, "failed", "error", failedEvent(code));
-      return { transition: applied.transition, leased };
-    });
-    if (!ended) return;
-    this.#emit(plan.teamId, [ended.transition]);
-    if (ended.leased) {
-      this.#track(
-        this.#router.stopRun(this.#target(plan.teamId, plan.ownerUserId), {
-          runId: plan.runId,
-          threadId: plan.threadId,
-          mode: "abort",
-          reason: "user_cancelled",
-        }),
-      );
-    }
-    await this.#advance(plan.teamId, plan.threadId);
-  }
-
-  /** Stop (D17): abort in the sandbox, then start the next queued run (after Pi's abort or a grace). */
-  async #stopThenAdvance(actor: ActorContext, runId: string, threadId: string): Promise<void> {
-    // Only the owner can Stop, and the sandbox is the owner's (D11).
-    const stop = this.#router.stopRun(this.#target(actor.team_id, actor.user_id), {
-      runId,
-      threadId,
-      mode: "abort",
-      reason: "user_cancelled",
-    });
-    this.#track(stop);
-    await Promise.race([stop, delay(this.#tuning.stopGraceMs)]);
-    await this.#advance(actor.team_id, threadId);
-  }
-
-  /** D30: let the current step finish, then end the run `budget_stopped` if Pi didn't settle it. */
-  async #budgetStopActive(
-    teamId: string,
-    runId: string,
-    threadId: string,
-    ownerUserId: string,
-    command: BudgetStopCommand,
-  ): Promise<void> {
-    await this.#router.stopRun(this.#target(teamId, ownerUserId), {
-      runId,
-      threadId,
-      mode: "after_step",
-      reason: "budget_exhausted",
-    });
-    if (this.#closed) return;
-    const ended = await withAppendTx(this.#db, teamId, async (tx) => {
-      const thread = await lockThreadRow(tx, teamId, threadId);
-      const run = await lockRunRow(tx, teamId, runId);
-      if (!thread || !run || !isActiveRunStatus(run.status)) return undefined;
-      const applied = await applyTransition(
-        tx,
-        thread,
-        run,
-        "budget_stopped",
-        "budget_exhausted",
-        budgetStoppedEvent(command.scope),
-      );
-      await recordAudit(tx, {
-        action: "run.budget_stopped",
-        actor: SYSTEM_ACTOR,
-        teamId,
-        target: { runId, threadId, scope: command.scope },
-      });
-      return applied.transition;
-    });
-    if (!ended) return;
-    this.#emit(teamId, [ended]);
-    await this.#advance(teamId, threadId);
   }
 
   /** Starts the thread's next run if it may start; retried while the thread row is busy. */

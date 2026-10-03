@@ -32,14 +32,16 @@
 
 `services/server/src/runs/` (built in `createServerDeps` as `deps.runs`):
 
-| Module            | Role                                                                                                                                                                     |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `orchestrator.ts` | `DbRunOrchestrator implements RunOrchestrator` (+ `onRunEnded`, `sweep`, `useIsolation`, `idle`, `close`)                                                                |
-| `lifecycle.ts`    | `promoteInTx` (the only place a run becomes `running`), terminal event builders                                                                                          |
-| `store.ts`        | run rows, computed queue rank, thread lock, `applyTransition` (run status + thread status + event in one tx), `bindUserEntry`                                            |
-| `sweeper.ts`      | per-team recovery: `running` runs with no lease and no pending start past `startDeadlineMs` → `failed (start_lost)`; queues with nothing active past `stallMs` → promote |
-| `seams.ts`        | `RunAgentResolver` (KOBE-46/47), `RunBudgetGate` (KOBE-42), `IsolationProbe` (D4)                                                                                        |
-| `errors.ts`       | `RunError` (contract `RUN_ERROR_CODES` + server codes) → HTTP status                                                                                                     |
+| Module            | Role                                                                                                                                          |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `orchestrator.ts` | `DbRunOrchestrator implements RunOrchestrator` (+ `onRunEnded`, `sweep`, `useIsolation`, `idle`, `close`)                                     |
+| `lifecycle.ts`    | `promoteInTx` (the only place a run becomes `running`), terminal event builders                                                               |
+| `store.ts`        | run rows, computed queue rank, thread lock, `applyTransition` (run status + thread status + event in one tx), `bindUserEntry`                 |
+| `dispatch.ts`     | sandbox-facing work after commit: `run.start`, durable stops (`runs.stop_mode`), budget stops, recovery of lost starts/stops                  |
+| `access.ts`       | owner/visibility checks with the thread lock (KOBE-34 rules)                                                                                  |
+| `sweeper.ts`      | finds lost starts, pending stops and stalled queues per team (read-only); the orchestrator acts on each with a re-check under the thread lock |
+| `seams.ts`        | `RunAgentResolver` (KOBE-46/47), `RunBudgetGate` (KOBE-42), `IsolationProbe` (D4)                                                             |
+| `errors.ts`       | `RunError` (contract `RUN_ERROR_CODES` + server codes) → HTTP status                                                                          |
 
 Routes `routes/runs.ts` (two routers, mounted with one line each in `app.ts`): `POST
 /v1/threads/{id}/messages`, `GET /v1/threads/{id}/runs`, `POST /v1/threads/{id}/queue/resume`,
@@ -104,7 +106,8 @@ and calls `onRunEnded` → bind the prompt entry → promote the next run.
    `agent_unavailable` (resolver error); the next one is tried.
 10. **Recovery sweep** (every replica, jittered 15 s): `running` runs with no lease and no
     pending/delivered `run.start` command for `startDeadlineMs` (150 s, above the wire's 120 s
-    start deadline) → `failed (start_lost)`; threads with queued runs, nothing active and no run
+    start deadline) → re-sent (or `failed (start_lost)` past 15 min, see L3); pending stops →
+    re-sent (item 3); threads with queued runs, nothing active and no run
     ended within `stallMs` (30 s) → promote. Re-checked under the thread lock.
 11. **Audit:** `run.cancelled` (user; `wasActive`), `run.retried` (user), `run.budget_stopped`
     (system). **Run starts are not audited**: one per message, and every audit write serializes on
@@ -183,6 +186,66 @@ runs, then reports the failures; (3) `onRunEnded` always advances the queue (lis
 throwing extra hook are isolated). MEDIUM kept as a risk: after Stop, a message sent (or a sweep
 promotion) within the abort window starts its run before Pi acknowledged the abort; the grace only
 applies to the queue's own advance. See open risks.
+
+## Coordinator review (PR #40, CHANGES REQUESTED, no CRITICAL/HIGH) — resolution
+
+Tests in `runs-review.db.test.ts` (14), written against the reported sequences first.
+
+1. **Retry after a deleted/failed queued message.** `retryCandidates` leaves out runs that ended
+   without ever starting (`started_at IS NULL`, queued runs kept for the "already retried" check),
+   so a cancelled queued message no longer hides the interrupted run (`not_latest`). **Contracts
+   note:** `checkRetry`'s doc says "latest ended run"; it should say "latest run that ran" (for the
+   next contracts PR; the contract is unchanged here).
+2. **Interrupted run after a reload.** `GET /v1/threads/{id}/runs` (and `…/queue/resume`) now
+   answer `{runs, interrupted_run}`: while the thread is `interrupted`, the run it waits on (else
+   null). In OpenAPI (`ThreadRuns`). KOBE-26/32: offer Retry for `interrupted_run` after a reload.
+3. **Durable stops.** Every transaction that ends or budget-stops a run Pi may still run (Stop of an
+   active run, a timed-out leased start, a budget stop) also writes `runs.stop_mode`
+   (`abort`/`after_step`) + `stop_requested_at`; the marker is cleared only when the sandbox answered
+   the `run.stop` (or isn't connected: its next `hello` doesn't list ended runs and the agent aborts
+   them, so it is never woken for a stop). The sweep re-sends pending stops with no `run.stop` in
+   flight after `stopResendMs` (60 s; an after_step stop then ends the run `budget_stopped` if Pi
+   didn't), and gives up after `stopGiveUpMs` (1 h). Chosen over enqueuing the wire's command row
+   in the same transaction: `sandbox_commands` rows are owned by the router's request/response
+   cycle (requester waits, takes and deletes the row), so a row without a waiting requester would
+   be orphaned by design. Tests: crash between commit and send (abort sent by the sweep, marker
+   cleared, late frames still refused); budget stop finished by the sweep; disconnected sandbox not
+   woken.
+4. **Retry requires `thread.status = interrupted`** (not after Continue), checked after the
+   idempotent "already retried" answer; the retry's mode is the original's re-clamped to today's
+   floors (test raises the team floor between the interruption and Retry).
+
+- **L1** A repeated Retry returns the existing retry while it is queued, running or completed; if
+  the retry failed, was stopped or budget-stopped → 409 "already retried once, and the retry …;
+  send the message again"; if it was itself interrupted → 409 pointing at the retry run (retry
+  that one). One Retry per run (D14 "manual retry", KOBE-26 unique index) stays.
+- **L2** `queued` is true only when the run really waits (a run failed in the same transaction by
+  the resolver answers `queued: false`, status `failed`).
+- **L3** A `running` run with no lease and no `run.start` in flight (its starter died) is re-sent
+  by the sweep while it started less than `restartWindowMs` (15 min) ago — safe because no lease
+  means no sandbox ever received it (the lease is written in the delivering transaction); older →
+  `failed (start_lost)`. The agent version is resolved again; branch point and mode are the ones
+  fixed at start.
+- **L4** `run.start` delivery locks the run row `FOR SHARE` before checking it is active and
+  recording the lease, so a concurrent Stop is either seen (refused) or finds the lease (its
+  `run.stop` follows on the same connection).
+- **L5** Not audited, on purpose: `resumeQueue` (the user's own queue, no security effect),
+  `steer` (message-level, like sends), failed promotions (system state, visible as `run.failed`
+  in the run's events). Audited: Stop, Retry, budget stops, interruptions.
+- **L6** `Idempotency-Key` header on `POST /v1/threads/{id}/messages` (1–128 visible ASCII,
+  `runs.client_key`, unique per thread, checked under the thread lock): a repeat answers with the
+  first run. **D17 team concurrency quota** (parallel runs in different threads count against the
+  team's quota) belongs in `promoteInTx` (count the team's active runs before `queued → running`,
+  leave the run queued and let the sweep/next end retry) — KOBE-42/44 owns the quota value.
+- **L7** Forced interleavings with a second connection holding the thread row: lock timeout → 409
+  `thread_busy`; Stop and the wire's settle queued behind the same lock → exactly one terminal
+  event; promotion backoff (waiting → timeout → waiting again → promoted); two `onRunEnded` on two
+  replicas → one run started. Reader → `read_only` is tested at the access layer
+  (`lockOwnedThread` with a project viewer) because projects don't exist yet (KOBE-57 must add the
+  HTTP test). Deactivated user steer → `forbidden`, nothing sent.
+
+Refactor: sandbox-facing work moved to `runs/dispatch.ts` (start, durable stops, budget stops,
+recovery) and thread access to `runs/access.ts`; `sweeper.ts` only finds work.
 
 ## Evidence (acceptance criteria → test or command output)
 

@@ -536,7 +536,7 @@ describe("failed starts and recovery", () => {
       [w.team, threadId],
     );
     const result = await f.fx.replica(1).deps.runs.sweep();
-    expect(result.failedStarts.map((x) => x.transition.runId)).toContain(lost);
+    expect(result.lostStarts.map((x) => x.runId)).toContain(lost);
     expect((await f.events(w.team, lost)).at(-1)).toMatchObject({
       type: "run.failed",
       payload: { error: { code: "start_lost" } },

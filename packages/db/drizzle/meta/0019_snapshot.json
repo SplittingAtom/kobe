@@ -1,5 +1,5 @@
 {
-  "id": "16109006-688f-4e00-971b-3870c07373f4",
+  "id": "bb20dd47-9fdc-478c-886e-00d5438c2390",
   "prevId": "9d5ff887-e48c-4fa1-9389-06d3525ff6f0",
   "version": "7",
   "dialect": "postgresql",
@@ -1641,6 +1641,24 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "stop_mode": {
+          "name": "stop_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stop_requested_at": {
+          "name": "stop_requested_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "client_key": {
+          "name": "client_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -1667,6 +1685,56 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "runs_client_key_unique": {
+          "name": "runs_client_key_unique",
+          "columns": [
+            {
+              "expression": "team_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "thread_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "client_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"runs\".\"client_key\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "runs_stop_pending_idx": {
+          "name": "runs_stop_pending_idx",
+          "columns": [
+            {
+              "expression": "team_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "stop_requested_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"runs\".\"stop_mode\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -1858,6 +1926,14 @@
         "runs_entry_ids": {
           "name": "runs_entry_ids",
           "value": "(\"runs\".\"parent_entry_id\" IS NULL OR char_length(\"runs\".\"parent_entry_id\") BETWEEN 1 AND 128) AND (\"runs\".\"user_entry_id\" IS NULL OR char_length(\"runs\".\"user_entry_id\") BETWEEN 1 AND 128)"
+        },
+        "runs_stop_mode": {
+          "name": "runs_stop_mode",
+          "value": "(\"runs\".\"stop_mode\" IS NULL) = (\"runs\".\"stop_requested_at\" IS NULL) AND (\"runs\".\"stop_mode\" IS NULL OR \"runs\".\"stop_mode\" IN ('abort', 'after_step'))"
+        },
+        "runs_client_key": {
+          "name": "runs_client_key",
+          "value": "\"runs\".\"client_key\" IS NULL OR char_length(\"runs\".\"client_key\") BETWEEN 1 AND 128"
         },
         "runs_retry_not_self": {
           "name": "runs_retry_not_self",

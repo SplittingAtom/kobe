@@ -21,8 +21,14 @@ const output = (schema: z.ZodType): JsonSchema =>
   z.toJSONSchema(schema, { io: "output", target: "draft-2020-12" }) as JsonSchema;
 const withoutDialect = ({ $schema: _ignored, ...rest }: JsonSchema): JsonSchema => rest;
 
-/** The thread's active run (if any), then its queued runs in start order. */
-export const threadRunsSchema = z.strictObject({ runs: z.array(runSnapshotSchema) });
+/**
+ * The thread's active run (if any), then its queued runs in start order; and, while the thread is
+ * `interrupted`, the interrupted run it waits on (offer Retry for it), else null.
+ */
+export const threadRunsSchema = z.strictObject({
+  runs: z.array(runSnapshotSchema),
+  interrupted_run: runSnapshotSchema.nullable(),
+});
 
 const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
 const json = (schemaName: string, description: string) => ({
@@ -77,7 +83,18 @@ export function runsOpenApiPaths(): Record<string, Record<string, unknown>> {
           "thread is not interrupted; otherwise `queued` is true and it starts in order (Retry " +
           "runs first). Follow it with `GET /v1/runs/{id}/events`. `parent_entry_id` branches " +
           "from an entry (edit-and-regenerate); absent = the thread's leaf when the run starts.",
-        parameters: change,
+        parameters: [
+          ...change,
+          {
+            name: "Idempotency-Key",
+            in: "header",
+            required: false,
+            description:
+              "Client-chosen key (1–128 visible ASCII characters), unique per thread: repeating " +
+              "the request with the same key answers with the run the first one created.",
+            schema: { type: "string", minLength: 1, maxLength: 128 },
+          },
+        ],
         requestBody: body("SubmitMessageBody"),
         responses: {
           "201": json("SubmitMessageResult", "The run, and whether it waits in the queue."),
@@ -96,7 +113,11 @@ export function runsOpenApiPaths(): Record<string, Record<string, unknown>> {
         summary: "The thread's active run and its queued runs, in start order",
         parameters: read,
         responses: {
-          "200": json("ThreadRuns", "Active run first, then the queue (`queue_pos` 1 = next)."),
+          "200": json(
+            "ThreadRuns",
+            "Active run first, then the queue (`queue_pos` 1 = next); `interrupted_run` while the " +
+              "thread is interrupted.",
+          ),
           "404": json("Error", "`thread_not_found`."),
           ...COMMON,
         },

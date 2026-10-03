@@ -156,10 +156,13 @@ export async function retryCandidates(
   teamId: string,
   threadId: string,
 ): Promise<{ run_id: string; status: RunStatus; retry_of_run_id?: string }[]> {
+  // Runs that ended without ever starting (a deleted or failed queued message) are not "ended
+  // runs" for Retry: they never ran, so they can't hide an interrupted run from it.
   const res = await tx.execute<{ id: string; status: RunStatus; retry_of_run_id: string | null }>(
     sql`
     SELECT id, status, retry_of_run_id FROM runs
      WHERE team_id = ${teamId} AND thread_id = ${threadId}
+       AND (started_at IS NOT NULL OR status = 'queued')
      ORDER BY created_at, id`,
   );
   return res.rows.map((r) => ({
@@ -271,17 +274,19 @@ export interface NewRun {
   readonly input: string;
   readonly parentEntryId: string | null;
   readonly retryOfRunId: string | null;
+  readonly clientKey: string | null;
 }
 
 /** Inserts a queued run at the end of the thread's queue (thread lock held). */
 export async function insertQueuedRun(tx: KobeTx, run: NewRun): Promise<string> {
   const res = await tx.execute<{ id: string }>(sql`
     INSERT INTO runs (team_id, thread_id, trigger, status, queue_pos, approval_mode, input,
-                      parent_entry_id, retry_of_run_id)
+                      parent_entry_id, retry_of_run_id, client_key)
     VALUES (${run.teamId}, ${run.threadId}, ${run.trigger}, 'queued',
             (SELECT coalesce(max(queue_pos), 0) + 1 FROM runs
               WHERE team_id = ${run.teamId} AND thread_id = ${run.threadId} AND status = 'queued'),
-            ${run.approvalMode}, ${run.input}, ${run.parentEntryId}, ${run.retryOfRunId})
+            ${run.approvalMode}, ${run.input}, ${run.parentEntryId}, ${run.retryOfRunId},
+            ${run.clientKey})
     RETURNING id`);
   const id = res.rows[0]?.id;
   if (id === undefined) throw new Error("run insert returned no row");
@@ -371,4 +376,82 @@ export async function bindUserEntry(tx: KobeTx, teamId: string, runId: string): 
          AND te.type = 'message' AND te.payload -> 'message' ->> 'role' = 'user'
        ORDER BY e.seq LIMIT 1)
      WHERE r.team_id = ${teamId} AND r.id = ${runId} AND r.user_entry_id IS NULL`);
+}
+
+/** The run a client-supplied idempotency key already created on this thread. */
+export async function runByClientKey(
+  tx: KobeTx,
+  teamId: string,
+  threadId: string,
+  clientKey: string,
+): Promise<{ id: string; status: RunStatus } | undefined> {
+  const res = await tx.execute<{ id: string; status: RunStatus }>(sql`
+    SELECT id, status FROM runs
+     WHERE team_id = ${teamId} AND thread_id = ${threadId} AND client_key = ${clientKey}`);
+  return res.rows[0];
+}
+
+/**
+ * A repeated Retry (D14, at most one retry per run): the existing retry run while it is pending or
+ * succeeded (idempotent); a clear refusal when it failed, was stopped or was itself interrupted
+ * (the one Retry was used; retry the retry, or send the message again).
+ */
+export async function existingRetry(
+  tx: KobeTx,
+  teamId: string,
+  runId: string,
+): Promise<{ runId: string; queued: boolean }> {
+  const res = await tx.execute<{ id: string; status: RunStatus }>(sql`
+    SELECT id, status FROM runs WHERE team_id = ${teamId} AND retry_of_run_id = ${runId}`);
+  const row = res.rows[0];
+  if (!row) throw new RunError("run_not_found");
+  if (["queued", "running", "waiting_approval", "completed"].includes(row.status)) {
+    return { runId: row.id, queued: row.status === "queued" };
+  }
+  const next =
+    row.status === "interrupted"
+      ? `Retry the retry run (${row.id}) instead.`
+      : "Send the message again.";
+  throw new RunError(
+    "invalid_transition",
+    `This run was already retried once, and the retry ${row.status === "budget_stopped" ? "was budget-stopped" : row.status}. ${next}`,
+  );
+}
+
+/** The interrupted run an `interrupted` thread is waiting on (Retry or Continue, D14). */
+export async function latestInterruptedRow(
+  tx: KobeTx,
+  teamId: string,
+  threadId: string,
+): Promise<RunRow | undefined> {
+  const res = await tx.execute<RawRun>(sql`${RUN_SELECT}
+     WHERE r.team_id = ${teamId} AND r.thread_id = ${threadId} AND r.status = 'interrupted'
+       AND EXISTS (SELECT 1 FROM threads t
+                    WHERE t.team_id = r.team_id AND t.id = r.thread_id AND t.status = 'interrupted')
+     ORDER BY r.ended_at DESC, r.created_at DESC LIMIT 1`);
+  const row = res.rows[0];
+  return row ? fromRaw(row) : undefined;
+}
+
+/** Records a stop the sandbox must still receive (cleared by `clearStop` once answered). */
+export async function requestStop(
+  tx: KobeTx,
+  teamId: string,
+  runId: string,
+  mode: "abort" | "after_step",
+): Promise<void> {
+  await tx.execute(sql`
+    UPDATE runs SET stop_mode = ${mode}, stop_requested_at = now()
+     WHERE team_id = ${teamId} AND id = ${runId}`);
+}
+
+export async function clearStop(
+  tx: KobeTx,
+  teamId: string,
+  runId: string,
+  mode: "abort" | "after_step",
+): Promise<void> {
+  await tx.execute(sql`
+    UPDATE runs SET stop_mode = NULL, stop_requested_at = NULL
+     WHERE team_id = ${teamId} AND id = ${runId} AND stop_mode = ${mode}`);
 }

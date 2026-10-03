@@ -339,6 +339,11 @@ export class CommandDelivery {
          FOR SHARE`);
       if (current.rowCount !== 1) return "replaced" as const;
       if (row.kind === "run.start") {
+        // Holds off a concurrent Stop (KOBE-30) until the lease is recorded: a Stop that commits
+        // first is seen here (not active → refused); one that commits later finds the lease and
+        // its run.stop follows this run.start on the same connection.
+        await tx.execute(sql`
+          SELECT 1 FROM runs WHERE team_id = ${teamId} AND id = ${row.runId ?? null} FOR SHARE`);
         const run = await loadRun(tx, teamId, row.runId ?? "");
         if (
           !run ||

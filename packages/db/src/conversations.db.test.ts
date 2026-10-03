@@ -460,6 +460,19 @@ describe("runs: orchestrator columns (KOBE-30)", () => {
       await sqlState(insert(thread, { approvalMode: "ask-all", input: "hi", parentEntryId: "e1" })),
     ).toBeUndefined();
   });
+
+  it("pairs stop_mode with stop_requested_at and keeps client keys unique per thread", async () => {
+    const thread = await newThread(teamA);
+    expect(await sqlState(insert(thread, { stopMode: "abort" }))).toBe("23514");
+    expect(
+      await sqlState(
+        insert(thread, { stopMode: "abort", stopRequestedAt: new Date(), queuePos: 2 }),
+      ),
+    ).toBeUndefined();
+    expect(await sqlState(insert(thread, { clientKey: "k", queuePos: 3 }))).toBeUndefined();
+    expect(await sqlState(insert(thread, { clientKey: "k", queuePos: 4 }))).toBe("23505");
+    expect(await sqlState(insert(await newThread(teamA), { clientKey: "k" }))).toBeUndefined();
+  });
 });
 
 describe("events", () => {

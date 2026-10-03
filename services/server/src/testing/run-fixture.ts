@@ -175,7 +175,7 @@ export class RunFixture {
       },
       runs: {
         sweep: false,
-        tuning: { stopGraceMs: 300, stallMs: 0, startDeadlineMs: 0 },
+        tuning: { stopGraceMs: 300, stallMs: 0, startDeadlineMs: 0, stopResendMs: 0 },
       },
     }));
     for (let i = 0; i < this.fx.replicas.length; i += 1) {

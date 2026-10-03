@@ -17,7 +17,7 @@ import {
   type RunRow,
   type ThreadRow,
 } from "./store.js";
-import type { RunAgentResolver } from "./seams.js";
+import type { AgentResolution, RunAgentResolver } from "./seams.js";
 
 /** Everything a replica needs to send `run.start` for a run it just moved to `running`. */
 export interface StartPlan {
@@ -115,25 +115,12 @@ export async function promoteInTx(
       }
       return { transitions };
     }
-    // A resolver that throws must not poison the queue: the run fails like any resolution error.
-    const resolved = await agents
-      .resolve(tx, {
-        teamId,
-        ownerUserId: thread.ownerUserId,
-        threadId,
-        runId: next.id,
-        trigger: next.trigger,
-        agentId: thread.agentId,
-        agentVersion: thread.agentVersion,
-        approvalMode: next.approvalMode,
-      })
-      .catch(() => ({ ok: false as const, error: { code: "agent_unavailable", message: "" } }));
+    const resolved = await resolveForStart(tx, agents, thread, next);
     if (!resolved.ok) {
       thread = await fail(thread, next, "agent_unavailable");
       continue;
     }
-    // The resolver may only tighten the mode fixed at creation.
-    const approvalMode = clampApprovalMode(resolved.approvalMode, next.approvalMode);
+    const approvalMode = resolved.approvalMode;
     const parentEntryId = next.parentEntryId ?? thread.leafEntryId;
     const started: NewRunEvent = {
       type: "run.started",
@@ -151,18 +138,64 @@ export async function promoteInTx(
     transitions.push(applied.transition);
     return {
       transitions,
-      plan: {
-        teamId,
-        runId: next.id,
-        threadId,
-        ownerUserId: thread.ownerUserId,
-        input: next.input,
-        parentEntryId,
-        approvalMode,
-        agent: resolved.agent,
-        ...(resolved.config !== undefined ? { config: resolved.config } : {}),
-      },
+      plan: planOf(thread, { ...next, parentEntryId, approvalMode }, resolved),
     };
   }
   return { transitions };
+}
+
+type Resolved = Extract<AgentResolution, { ok: true }>;
+
+/** The thread's agent version for a start; the resolver may only tighten the run's mode. */
+async function resolveForStart(
+  tx: KobeTx,
+  agents: RunAgentResolver,
+  thread: ThreadRow,
+  run: RunRow,
+): Promise<AgentResolution> {
+  // A resolver that throws must not poison the queue: the run fails like any resolution error.
+  const resolved = await agents
+    .resolve(tx, {
+      teamId: run.teamId,
+      ownerUserId: thread.ownerUserId,
+      threadId: thread.id,
+      runId: run.id,
+      trigger: run.trigger,
+      agentId: thread.agentId,
+      agentVersion: thread.agentVersion,
+      approvalMode: run.approvalMode,
+    })
+    .catch(() => ({ ok: false as const, error: { code: "agent_unavailable", message: "" } }));
+  return resolved.ok
+    ? { ...resolved, approvalMode: clampApprovalMode(resolved.approvalMode, run.approvalMode) }
+    : resolved;
+}
+
+function planOf(thread: ThreadRow, run: RunRow, resolved: Resolved): StartPlan {
+  return {
+    teamId: run.teamId,
+    runId: run.id,
+    threadId: thread.id,
+    ownerUserId: thread.ownerUserId,
+    input: run.input,
+    parentEntryId: run.parentEntryId,
+    approvalMode: resolved.approvalMode,
+    agent: resolved.agent,
+    ...(resolved.config !== undefined ? { config: resolved.config } : {}),
+  };
+}
+
+/**
+ * The start plan of a `running` run whose `run.start` was lost (recovery): its branch point and
+ * mode were fixed when it started; the agent version is resolved again. Undefined when it can't
+ * resolve (the caller fails the run).
+ */
+export async function restartPlanInTx(
+  tx: KobeTx,
+  agents: RunAgentResolver,
+  thread: ThreadRow,
+  run: RunRow,
+): Promise<StartPlan | undefined> {
+  const resolved = await resolveForStart(tx, agents, thread, run);
+  return resolved.ok ? planOf(thread, run, resolved) : undefined;
 }

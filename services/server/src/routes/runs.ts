@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
-import type { z } from "zod";
+import { z } from "zod";
 import {
   steerBodySchema,
   submitMessageBodySchema,
@@ -47,6 +47,18 @@ async function answer(c: Context, fn: () => Promise<Response>): Promise<Response
   }
 }
 
+/** Client-supplied key making `POST …/messages` safe to repeat (unique per thread). */
+export const IDEMPOTENCY_HEADER = "idempotency-key";
+export const idempotencyKeySchema = z.string().regex(/^[\x21-\x7e]{1,128}$/);
+
+/** The thread's runs plus the interrupted run it waits on, so Retry survives a reload. */
+async function threadRuns(deps: ServerDeps, actor: ActorContext, threadId: string) {
+  return {
+    runs: await deps.runs.listThreadRuns(actor, threadId),
+    interrupted_run: await deps.runs.latestInterruptedRun(actor, threadId),
+  };
+}
+
 function scoped(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();
   app.use(requireTeam(deps));
@@ -66,9 +78,19 @@ export function threadRunRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariabl
     const id = idParam(c);
     const parsed = await body(c, submitMessageBodySchema);
     if (!id || !parsed) return invalidRequest(c, "Give content (and parent_entry_id, file_ids).");
+    const rawKey = c.req.header(IDEMPOTENCY_HEADER);
+    const key = rawKey === undefined ? undefined : idempotencyKeySchema.safeParse(rawKey);
+    if (key && !key.success) {
+      return invalidRequest(c, "Idempotency-Key must be 1–128 visible ASCII characters.");
+    }
+    const options = key?.success ? { clientKey: key.data } : {};
     return answer(c, async () =>
       c.json(
-        await deps.runs.submitMessage(actorOf(c), { ...parsed, thread_id: id, trigger: "user" }),
+        await deps.runs.submitMessage(
+          actorOf(c),
+          { ...parsed, thread_id: id, trigger: "user" },
+          options,
+        ),
         201,
       ),
     );
@@ -77,7 +99,7 @@ export function threadRunRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariabl
   app.get("/:id/runs", async (c) => {
     const id = idParam(c);
     if (!id) return invalidRequest(c);
-    return answer(c, async () => c.json({ runs: await deps.runs.listThreadRuns(actorOf(c), id) }));
+    return answer(c, async () => c.json(await threadRuns(deps, actorOf(c), id)));
   });
 
   app.post("/:id/queue/resume", async (c) => {
@@ -85,7 +107,7 @@ export function threadRunRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariabl
     if (!id) return invalidRequest(c);
     return answer(c, async () => {
       await deps.runs.resumeQueue(actorOf(c), id);
-      return c.json({ runs: await deps.runs.listThreadRuns(actorOf(c), id) });
+      return c.json(await threadRuns(deps, actorOf(c), id));
     });
   });
 
