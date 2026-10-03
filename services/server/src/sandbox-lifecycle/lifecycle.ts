@@ -1,7 +1,17 @@
-import { SYSTEM_ACTOR, eq, getMembership, teams, users, withTeam, type KobeDb } from "@kobe/db";
+import {
+  SYSTEM_ACTOR,
+  eq,
+  getMembership,
+  sql,
+  teams,
+  users,
+  withTeam,
+  type KobeDb,
+} from "@kobe/db";
 import type { Logger } from "pino";
 import { currentAuditContext } from "../audit/context.js";
 import { recordAudit } from "../audit/record.js";
+import { appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
 import { IsolationRuntimeMissingError } from "../isolation/gate.js";
 import { logger as rootLogger } from "../logger.js";
 import type { TeamRef } from "../sandbox/manifests.js";
@@ -75,12 +85,22 @@ export interface SandboxLifecycle {
 
 const WAKE_SAMPLES = 64;
 
+type WakingReason = "hibernated" | "first_start";
+
+interface InflightWake {
+  readonly runs: Set<string>;
+  /** undefined: not known yet; null: nothing to announce. */
+  reason: WakingReason | null | undefined;
+  promise: Promise<void>;
+}
+
 export function createSandboxLifecycle(options: LifecycleOptions): SandboxLifecycle {
   const { db, provider } = options;
   const log = options.log ?? rootLogger.child({ component: "sandbox-lifecycle" });
   const batch = options.batchPerTeam ?? 20;
   const metrics: LifecycleMetrics = { hibernated: 0, woken: 0, wakeFailures: 0, wakeMs: [] };
-  const inflight = new Map<string, Promise<void>>();
+  /** One wake per sandbox per process; runs that joined it get its `sandbox.waking` too. */
+  const inflight = new Map<string, InflightWake>();
 
   const teamRef = async (teamId: string): Promise<TeamRef & { settings: unknown }> => {
     const [team] = await db
@@ -107,13 +127,45 @@ export function createSandboxLifecycle(options: LifecycleOptions): SandboxLifecy
     }
   };
 
-  const wakeOnce = async (target: SandboxTarget): Promise<void> => {
+  /**
+   * `sandbox.waking` on a run that waits for this wake (D14: the UI shows "Waking your
+   * workspace…" at once). Only while the run is `running`; never fails the wake.
+   */
+  const announce = async (
+    target: SandboxTarget,
+    runId: string,
+    reason: WakingReason,
+  ): Promise<void> => {
+    try {
+      await withAppendTx(db, target.teamId, async (tx) => {
+        const run = await tx.execute<{ status: string }>(sql`
+          SELECT status FROM runs WHERE team_id = ${target.teamId} AND id = ${runId}`);
+        if (run.rows[0]?.status !== "running") return;
+        await appendRunEventsInTx(tx, target.teamId, runId, [
+          { type: "sandbox.waking", payload: { reason } },
+        ]);
+      });
+    } catch (err) {
+      log.warn({ err, run_id: runId }, "could not append sandbox.waking");
+    }
+  };
+
+  const wakeOnce = async (target: SandboxTarget, entry: InflightWake): Promise<void> => {
     const started = Date.now();
     await assertAllowed(target);
     const team = await teamRef(target.teamId);
     const previous = await beginWake(db, target);
     if (previous === "destroyed") {
       throw new SandboxWakeError("sandbox_unavailable", "this sandbox was offboarded");
+    }
+    // No row: never started through Kobe; hibernated: a resume. A `running` row whose sandbox is
+    // merely disconnected (pod restarting) is not announced. (`rebuild`, a lost volume, is the
+    // wire's: KOBE-24 restores the session.)
+    entry.reason =
+      previous === undefined ? "first_start" : previous === "hibernated" ? "hibernated" : null;
+    if (entry.reason) {
+      const reason = entry.reason;
+      await Promise.all([...entry.runs].map((runId) => announce(target, runId, reason)));
     }
     let result;
     try {
@@ -145,18 +197,30 @@ export function createSandboxLifecycle(options: LifecycleOptions): SandboxLifecy
   };
 
   const waker: SandboxWaker = {
-    wake(target) {
+    wake(target, context) {
       const key = `${target.teamId}:${target.userId}`;
       const running = inflight.get(key);
-      if (running) return running;
-      const p = wakeOnce(target)
+      if (running) {
+        // Joined a wake in progress: announce to this run too (now, or once the reason is known).
+        if (context?.runId && !running.runs.has(context.runId)) {
+          running.runs.add(context.runId);
+          if (running.reason) void announce(target, context.runId, running.reason);
+        }
+        return running.promise;
+      }
+      const entry: InflightWake = {
+        runs: new Set(context?.runId ? [context.runId] : []),
+        reason: undefined,
+        promise: Promise.resolve(),
+      };
+      entry.promise = wakeOnce(target, entry)
         .catch((err: unknown) => {
           metrics.wakeFailures += 1;
           throw err;
         })
         .finally(() => inflight.delete(key));
-      inflight.set(key, p);
-      return p;
+      inflight.set(key, entry);
+      return entry.promise;
     },
   };
 
@@ -277,7 +341,7 @@ export function createDeferredWaker(): SandboxWaker & { set(waker: SandboxWaker)
     set(waker) {
       target = waker;
     },
-    wake(t) {
+    wake(t, context) {
       if (!target) {
         return Promise.reject(
           new SandboxWakeError(
@@ -286,7 +350,7 @@ export function createDeferredWaker(): SandboxWaker & { set(waker: SandboxWaker)
           ),
         );
       }
-      return target.wake(t);
+      return target.wake(t, context);
     },
   };
 }

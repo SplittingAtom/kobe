@@ -40,7 +40,12 @@ export interface SandboxLiveness {
  * help); any other rejection is logged and the command waits for its deadline.
  */
 export interface SandboxWaker {
-  wake(target: SandboxTarget): Promise<void>;
+  /** `context.runId`: the run whose `run.start` needs the sandbox (it is told `sandbox.waking`). */
+  wake(target: SandboxTarget, context?: WakeContext): Promise<void>;
+}
+
+export interface WakeContext {
+  readonly runId?: string;
 }
 
 /** A wake that cannot succeed by waiting: no verified isolation runtime, an offboarded sandbox. */

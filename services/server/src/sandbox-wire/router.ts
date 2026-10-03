@@ -164,7 +164,7 @@ export class CommandRouter implements SandboxRouter {
       };
     }
     if (!queued.live) {
-      void this.#wakeFor(target, queued.id, timeoutMs);
+      void this.#wakeFor(target, queued.id, timeoutMs, kind === "run.start" ? runId : undefined);
     } else if (queued.live.replicaId === this.#replicaId) {
       this.#registry.get(queued.live.connectionId)?.pokeCommands();
     }
@@ -178,12 +178,17 @@ export class CommandRouter implements SandboxRouter {
    * not connected, within a budget that ends before the command's deadline; then the command
    * fails `sandbox_unavailable` instead of timing out silently.
    */
-  async #wakeFor(target: SandboxTarget, id: string, timeoutMs: number): Promise<void> {
+  async #wakeFor(
+    target: SandboxTarget,
+    id: string,
+    timeoutMs: number,
+    runId: string | undefined,
+  ): Promise<void> {
     const budget = Math.min(this.#tuning.wakeRetryBudgetMs, Math.max(0, timeoutMs - 2_000));
     const started = Date.now();
     for (let attempt = 0; ; attempt++) {
       try {
-        await this.#waker.wake(target);
+        await this.#waker.wake(target, runId === undefined ? undefined : { runId });
         return;
       } catch (err) {
         if (err instanceof SandboxWakeError) {

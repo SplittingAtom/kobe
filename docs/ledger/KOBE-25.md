@@ -139,6 +139,20 @@ get_state`: agent reconnected + Pi spawned and answering), never labelled Gate 1
 - Also: a sweep skips a row whose registration holds `FOR SHARE` at that instant (`SKIP LOCKED`);
   it is picked up on the next sweep.
 
+## After merging main (KOBE-30 #40, KOBE-46 #35, CI stability #38)
+
+- Migrations regenerated with `db:rebase`: `0022_sandboxes`, `0023_sandboxes_rls`.
+- **`sandbox.waking` (KOBE-30 asked KOBE-25 to emit it).** `SandboxWaker.wake(target, {runId})`:
+  the router passes the run of a `run.start` that found no live connection. Right after the wake
+  decision (before any Kubernetes call) the lifecycle appends `sandbox.waking {reason}` to that
+  run if it is still `running`: `hibernated` (row was hibernated), `first_start` (no row: first
+  sandbox through Kobe). A `running` row whose sandbox is only disconnected (pod restart) is not
+  announced; `rebuild` (volume lost) stays with the wire's `session.restore` (KOBE-24). Runs that
+  join a wake already in flight are announced too. Tests: "tells the run whose start woke a
+  hibernated sandbox", "first-ever … first_start; a finished run is told nothing".
+- KOBE-30's e2e run-stop check accepts the optional `sandbox.waking` between `run.started` and
+  `run.interrupted` (the owner's first run now really starts a sandbox).
+
 ## Evidence (acceptance criteria → test or command output)
 
 | AC   | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                |

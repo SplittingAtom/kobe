@@ -444,6 +444,53 @@ describe("wake (router → waker → provider)", () => {
     await expect(command).resolves.toMatchObject({ ok: true });
   });
 
+  async function wakingEvents(w: World, runId: string) {
+    const { rows } = await fx.admin.query<{ payload: { reason: string } }>(
+      `SELECT payload FROM run_events WHERE team_id = $1 AND run_id = $2 AND type = 'sandbox.waking'`,
+      [w.team, runId],
+    );
+    return rows.map((r) => r.payload);
+  }
+
+  const startRun = (w: World, runId: string, threadId: string) =>
+    router(1).startRun(w.target, { runId, threadId, message: "hi" }, { timeoutMs: 1_500 });
+
+  it("tells the run whose start woke a hibernated sandbox: sandbox.waking {hibernated}", async () => {
+    const w = await world();
+    await hibernated(w);
+    const runId = await fx.run(w.team, w.owner);
+    const { rows } = await fx.admin.query<{ thread_id: string }>(
+      `SELECT thread_id FROM runs WHERE team_id = $1 AND id = $2`,
+      [w.team, runId],
+    );
+    void startRun(w, runId, must(rows[0], "run").thread_id);
+    await expect
+      .poll(() => wakingEvents(w, runId), { timeout: 5_000 })
+      .toEqual([{ reason: "hibernated" }]);
+  });
+
+  it("a first-ever sandbox is announced as first_start; a finished run is told nothing", async () => {
+    const w = await world();
+    const runId = await fx.run(w.team, w.owner);
+    const { rows } = await fx.admin.query<{ thread_id: string }>(
+      `SELECT thread_id FROM runs WHERE team_id = $1 AND id = $2`,
+      [w.team, runId],
+    );
+    void startRun(w, runId, must(rows[0], "run").thread_id);
+    await expect
+      .poll(() => wakingEvents(w, runId), { timeout: 5_000 })
+      .toEqual([{ reason: "first_start" }]);
+
+    const w2 = await world();
+    await hibernated(w2);
+    const done = await fx.run(w2.team, w2.owner);
+    await fx.complete(w2.team, done);
+    provider.calls.length = 0;
+    await lifecycle().waker.wake(w2.target, { runId: done });
+    expect(provider.calls).toEqual([`wake:${w2.owner.id}`]);
+    expect(await wakingEvents(w2, done)).toEqual([]);
+  });
+
   it("concurrent wakes of one sandbox in one process call the provider once", async () => {
     const w = await world();
     await Promise.all([1, 2, 3].map(() => lifecycle().waker.wake(w.target)));
