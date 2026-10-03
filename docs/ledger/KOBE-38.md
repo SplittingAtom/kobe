@@ -32,7 +32,7 @@ console pages.
   `sandbox/session-token.ts` re-exports them (no API change for KOBE-24/58).
 - **DB** (`packages/db`): `egress_domains` † (`domain` PK = pattern, `preset`, `in_ceiling`,
   `note`, `created_by`), `team_egress` (team table, RLS; FK → `egress_domains` ON DELETE CASCADE,
-  `enabled_by`, `enabled_at`). Migrations `0016_egress` (generated) and `0017_egress_rls` (RLS +
+  `enabled_by`, `enabled_at`). Migrations `0019_egress` (generated) and `0020_egress_rls` (RLS +
   preset seed). Pattern grammar in `egress/domain.ts` and the same regex as a CHECK constraint.
   `egress/store.ts`: loaders, `isActiveTeamMember`, `notifyEgressChanged`, channel constants.
 - **Server**: `/v1/install/egress-ceiling` (GET, POST, PUT `/:domain`, PUT `/presets/:preset`,
@@ -128,6 +128,21 @@ request_access}` to the user's active runs in that team (one sandbox per (user, 
 - **e2e:** CI sets `KOBE_SANDBOX_IMAGE`, so the egress section runs there; added an SNI-mismatch
   probe (`openssl s_client -proxy … -servername evil.example.com`, with a matching control) and
   the open-tunnel revocation probe.
+
+## e2e: sandbox agent crash loop (coordinator, after the review round)
+
+The k3d run's `container not found ("agent")` failures came from the sandbox pod's agent container
+crash-looping (exit 1, `CrashLoopBackOff`), not from the egress proxy: the merged agent (KOBE-23)
+requires `KOBE_SANDBOX_ID` and a wire-token file, while KOBE-22's pods get only the projected
+bootstrap token, so the agent fails config validation at start. It is the same on main (earlier
+e2e never exec'd into the agent); PR #39 (KOBE-25) adds the agent's bootstrap exchange. The
+egress checks no longer depend on the agent: they run from a sandbox-like client pod in the team
+namespace (sandbox image, gVisor, `kobe-sandbox` SA, no DNS, `egress-proxy.kobe.internal` host
+alias, same team NetworkPolicy) with an egress token minted in the server pod (the KOBE-24
+`mint` helper). They wait for that pod to be Ready (240 s) and print its status, last state and
+logs on timeout. The direct-egress BLOCKED checks run only after the proxy answered the same pod
+(positive control), and the release-namespace check only after that probe reached the server.
+"sandbox has Pi 1.0.x" (KOBE-7's hand-built Sandbox) is a log-timing flake outside this ticket.
 
 ## Open questions (for Chris or the coordinator)
 
