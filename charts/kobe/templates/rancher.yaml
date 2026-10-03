@@ -1,0 +1,33 @@
+{{- if .Values.rancher.enabled -}}
+{{- $name := include "kobe.clusterName" (dict "root" . "suffix" "rancher-updatepsa") -}}
+# Rancher-managed clusters only (rancher.enabled). Rancher's namespace webhook
+# (rancher.cattle.io.namespaces) refuses namespaces carrying Pod Security labels unless the caller
+# may `updatepsa` on Rancher projects; the server creates every kobe-team-* namespace with them.
+# This grants that one verb and nothing else: what the server may do to namespaces is still
+# confined by the server-scope admission policy (sandbox-admission.yaml).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["management.cattle.io"]
+    resources: ["projects"]
+    verbs: ["updatepsa"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kobe.serverServiceAccount" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

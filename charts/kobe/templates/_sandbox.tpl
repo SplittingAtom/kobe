@@ -5,7 +5,7 @@ predates the `sandbox` key still renders. Keep in sync with values.yaml.
 {{- define "kobe.sandboxValues" -}}
 {{- $defaults := dict
   "resources" (dict "requests" (dict "cpu" "500m" "memory" "1Gi") "limits" (dict "cpu" "2" "memory" "4Gi"))
-  "workspace" (dict "size" "10Gi" "storageClass" "")
+  "workspace" (dict "size" "10Gi" "storageClass" "" "longhornStrictLocal" (dict "enabled" false))
   "tmpSize" "2Gi"
   "homeSize" "1Gi"
   "ephemeralStorage" (dict "request" "1Gi" "limit" "4Gi")
@@ -15,6 +15,22 @@ predates the `sandbox` key still renders. Keep in sync with values.yaml.
   "hibernation" (dict "enabled" true "idleMinutes" 15 "sweepSeconds" 60)
   "sessionKeysSecret" "" -}}
 {{- mustMergeOverwrite $defaults (deepCopy (.Values.sandbox | default dict)) | toJson -}}
+{{- end -}}
+
+{{/*
+StorageClass of sandbox workspaces: the chart's Longhorn strict-local class when enabled, else
+sandbox.workspace.storageClass ("" = the cluster default). Setting both is refused.
+*/}}
+{{- define "kobe.workspaceStorageClass" -}}
+{{- $s := include "kobe.sandboxValues" . | fromJson -}}
+{{- if $s.workspace.longhornStrictLocal.enabled -}}
+{{- if $s.workspace.storageClass -}}
+{{- fail "sandbox.workspace: set either storageClass or longhornStrictLocal.enabled, not both" -}}
+{{- end -}}
+{{- include "kobe.clusterName" (dict "root" . "suffix" "workspace-strict-local") -}}
+{{- else -}}
+{{- $s.workspace.storageClass -}}
+{{- end -}}
 {{- end -}}
 
 {{/* Names shared by RBAC, admission policies and the server's sandbox config. */}}
@@ -75,7 +91,7 @@ pod labels and port for the team NetworkPolicy).
     "limits" (dict "cpu" (toString $s.resources.limits.cpu) "memory" (toString $s.resources.limits.memory)))
   "ephemeralStorage" (dict "request" (toString $s.ephemeralStorage.request) "limit" (toString $s.ephemeralStorage.limit))
   "modelGatewayAccess" $s.modelGatewayAccess
-  "workspace" (dict "size" (toString $s.workspace.size) "storageClass" $s.workspace.storageClass)
+  "workspace" (dict "size" (toString $s.workspace.size) "storageClass" (include "kobe.workspaceStorageClass" .))
   "tmpSize" (toString $s.tmpSize)
   "homeSize" (toString $s.homeSize)
   "teamQuota" $quota

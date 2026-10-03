@@ -49,7 +49,7 @@ export interface FakeKube extends KubeClient {
   peek(ref: ObjectRef): KubeObject | undefined;
   all(kind?: string): KubeObject[];
   /** The next matching call throws KubeApiError(status). */
-  failNext(verb: Verb, kind: string, status: number, times?: number): void;
+  failNext(verb: Verb, kind: string, status: number, times?: number, message?: string): void;
   /** Called after every apply/create (e.g. to simulate a controller). */
   afterWrite?: (object: KubeObject, fake: FakeKube) => void;
   /** Answers a dry-run create (default: the admission policy denies out-of-prefix namespaces). */
@@ -62,7 +62,13 @@ export interface FakeKube extends KubeClient {
 
 export function createFakeKube(): FakeKube {
   const store = new Map<string, KubeObject>();
-  const failures: { verb: Verb; kind: string; status: number; times: number }[] = [];
+  const failures: {
+    verb: Verb;
+    kind: string;
+    status: number;
+    times: number;
+    message?: string;
+  }[] = [];
   /** Seconds since the epoch for creationTimestamps: strictly increasing in creation order. */
   let fakeClock = 1_790_000_000;
   /** resourceVersion: bumped on every write, like the API server's. */
@@ -72,7 +78,7 @@ export function createFakeKube(): FakeKube {
     const f = failures.find((x) => x.verb === verb && x.kind === kind && x.times > 0);
     if (f) {
       f.times--;
-      throw new KubeApiError(f.status, `injected ${f.status} on ${verb} ${kind}`);
+      throw new KubeApiError(f.status, f.message ?? `injected ${f.status} on ${verb} ${kind}`);
     }
   };
 
@@ -109,8 +115,8 @@ export function createFakeKube(): FakeKube {
       return obj && clone(obj);
     },
     all: (kind) => [...store.values()].filter((o) => !kind || o.kind === kind).map(clone),
-    failNext(verb, kind, status, times = 1) {
-      failures.push({ verb, kind, status, times });
+    failNext(verb, kind, status, times = 1, message) {
+      failures.push({ verb, kind, status, times, ...(message === undefined ? {} : { message }) });
     },
     async apply(object) {
       fake.calls.push({ verb: "apply", kind: object.kind, ...object.metadata });

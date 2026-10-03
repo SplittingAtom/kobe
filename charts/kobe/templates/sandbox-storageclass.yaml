@@ -1,0 +1,23 @@
+{{- $s := include "kobe.sandboxValues" . | fromJson -}}
+{{- if $s.workspace.longhornStrictLocal.enabled -}}
+# Sandbox workspaces on Longhorn with one replica on the sandbox's own node
+# (sandbox.workspace.longhornStrictLocal). Waking a hibernated sandbox then attaches a local
+# replica instead of a networked one. A lost node loses the volumes on it: workspaces are rebuilt
+# from the S3 workspace sync (KOBE-27); see docs/install.md. WaitForFirstConsumer puts the replica
+# on the node where the sandbox first runs.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ include "kobe.workspaceStorageClass" . }}
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+provisioner: driver.longhorn.io
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+parameters:
+  numberOfReplicas: "1"
+  dataLocality: strict-local
+  staleReplicaTimeout: "30"
+  fsType: ext4
+{{- end }}
