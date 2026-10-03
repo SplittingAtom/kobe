@@ -285,7 +285,7 @@ tenant). Tests: `services/server/src/workspace-sync-limits.db.test.ts` (new) unl
   clamp at 0 and collection recomputes them); released content within its grace still counts
   against the upload budget (a workspace churning large files can see 507 for up to the grace
   period, 15 min, before the kicked collection frees it).
-- Migration 0030 regenerated (unmerged): new `workspace_sync` counters, `workspace_blobs.released_at`.
+- Migrations regenerated with db:rebase after KOBE-37 (#48): 0032_workspace_sync, 0033_workspace_sync_rls: new `workspace_sync` counters, `workspace_blobs.released_at`.
 
 ## Re-review (coordinator, a43b472) — resolution
 
