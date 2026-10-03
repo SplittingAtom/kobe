@@ -113,20 +113,6 @@
       "when": 1790960500579,
       "tag": "0015_audit_log_append_only",
       "breakpoints": true
-    },
-    {
-      "idx": 16,
-      "version": "7",
-      "when": 1790970191874,
-      "tag": "0016_egress",
-      "breakpoints": true
-    },
-    {
-      "idx": 17,
-      "version": "7",
-      "when": 1790970192341,
-      "tag": "0017_egress_rls",
-      "breakpoints": true
     }
   ]
 }
