@@ -5,6 +5,7 @@ import {
   sandboxCommands,
   sandboxConnections,
   sandboxRunLeases,
+  sandboxes,
   threads,
   users,
 } from "../../schema/index.js";
@@ -65,5 +66,11 @@ export const sandboxFixtures: Record<(typeof sandbox.team)[number], ProbeFixture
     await tx
       .insert(sandboxRunLeases)
       .values({ teamId, runId, userId, threadId, sandboxId: randomUUID() });
+  },
+  sandboxes: async (tx, teamId) => {
+    const { userId } = await insertRun(tx, teamId);
+    await tx
+      .insert(sandboxes)
+      .values({ teamId, userId, sandboxId: randomUUID(), state: "hibernated" });
   },
 };
