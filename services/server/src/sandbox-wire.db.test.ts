@@ -541,6 +541,7 @@ describe("late frames for ended runs", () => {
       sb.frames("policy.result").find((r) => r.request_id === "r1"),
     );
     expect(result.decision).toBe("deny");
+    expect(result.reasons.map((r) => r.code)).toEqual(["run_not_active"]);
     expect(sb.closed).toBeUndefined();
   });
 });
@@ -754,7 +755,7 @@ describe("policy.check", () => {
     expect(sb.frames("policy.result").filter((r) => r.request_id === "dup")).toHaveLength(1);
   });
 
-  it("applies the install and team approval-mode floors and denies when a floor is invalid", async () => {
+  it("applies the install approval floor (no team floor, D6) and fails closed on an invalid one", async () => {
     const w = await world();
     const sb = await started(w);
     const decide = async (id: string) => {
@@ -762,28 +763,29 @@ describe("policy.check", () => {
       return sb.until(() => sb.frames("policy.result").find((r) => r.request_id === id));
     };
     expect((await decide("f0")).decision).toBe("allow");
-    // Team floor ask-all: even a read needs approval (denied by the default broker).
+    // Teams have no approval floor (spec D6): a leftover team setting changes nothing.
     await fx.admin.query(
       `UPDATE teams SET settings = settings || '{"approval_mode_floor":"ask-all"}' WHERE id = $1`,
       [w.team],
     );
-    const team = await decide("f1");
-    expect(team.decision === "deny" && team.message).toMatch(/approval/);
-    // An unreadable floor: fail closed.
-    await fx.admin.query(
-      `UPDATE teams SET settings = settings || '{"approval_mode_floor":"yolo"}' WHERE id = $1`,
-      [w.team],
-    );
-    expect((await decide("f2")).decision).toBe("deny");
+    expect((await decide("f1")).decision).toBe("allow");
     await fx.admin.query(`UPDATE teams SET settings = '{}' WHERE id = $1`, [w.team]);
-    // Install floor ask-all applies to every team.
-    await fx.admin.query(
-      `INSERT INTO install_settings (key, value) VALUES ('policy.approval_mode_floor', 'ask-all')`,
-    );
+    const setFloor = (value: string) =>
+      fx.admin.query(
+        `INSERT INTO install_settings (key, value) VALUES ('policy.approval_floor', $1)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        [value],
+      );
     try {
+      // Install floor ask-all: even a read needs approval (denied by the default broker).
+      await setFloor("ask-all");
+      const install = await decide("f2");
+      expect(install.decision === "deny" && install.message).toMatch(/approval/);
+      // An unreadable floor is the strictest mode: fail closed.
+      await setFloor("yolo");
       expect((await decide("f3")).decision).toBe("deny");
     } finally {
-      await fx.admin.query(`DELETE FROM install_settings WHERE key = 'policy.approval_mode_floor'`);
+      await fx.admin.query(`DELETE FROM install_settings WHERE key = 'policy.approval_floor'`);
     }
     expect((await decide("f4")).decision).toBe("allow");
   });
@@ -798,6 +800,7 @@ describe("policy.check", () => {
     sb.send(check(w, "m", "read", { path: "a" }));
     const r = await sb.until(() => sb.frames("policy.result").find((x) => x.request_id === "m"));
     expect(r.decision).toBe("deny");
+    expect(r.reasons.map((x) => x.code)).toEqual(["not_a_member"]);
   });
 });
 

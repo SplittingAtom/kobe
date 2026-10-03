@@ -113,8 +113,16 @@ export function isActiveRunStatus(status: RunStatus): boolean {
  *   The user resolves it with Retry (the retry run starts at once, ahead of the queue; the queue
  *   resumes after it ends) or with "Continue without retry" (`resumeQueue`, thread → idle, queue
  *   resumes). New messages on an interrupted thread queue.
- * - After `completed`, `failed`, `cancelled` the next queued run starts (Stop leaves queued messages
- *   in place, D17). Budget stops end queued runs too (`budget_stopped`).
+ * - After `completed` or `failed` the next queued run starts. Budget stops end queued runs too
+ *   (`budget_stopped`).
+ * - **Stop pauses the queue** (decided by Chris; behaviour lands in #43): stopping the active run
+ *   while messages are queued leaves them queued (D17) but sets `threads.queue_paused_at`, so none
+ *   starts. The pause is released by the user only: `resumeQueue` (`POST
+ *   /v1/threads/{id}/queue/resume`, which also resumes a paused queue, not only "Continue without
+ *   retry"), or a new message from the user, which joins the end of the queue and the queue
+ *   resumes in order. Scheduled and other non-user triggers do not release it. Deleting a queued
+ *   message does not pause; cancelling the last queued message clears the pause. The pause is a
+ *   column, not a {@link ThreadStatus}: a paused thread is `idle`.
  */
 export const THREAD_STATUSES = ["idle", "running", "interrupted"] as const;
 export const threadStatusSchema = z.enum(THREAD_STATUSES);
@@ -136,15 +144,21 @@ export function nextThreadStatus(current: ThreadStatus, event: ThreadStatusEvent
   return event.to === "interrupted" ? "interrupted" : "idle";
 }
 
-/** Whether the orchestrator may start the thread's next queued run now. */
+/**
+ * Whether the thread's status lets the orchestrator start its next queued run now. The
+ * orchestrator also requires the queue not to be paused by a Stop (`threads.queue_paused_at`
+ * null, #43); this function does not see that column.
+ */
 export function queueMayAdvance(status: ThreadStatus): boolean {
   return status === "idle";
 }
 
 /**
- * Retry rules (D14, KOBE-26): only the thread's latest ended run, only if `interrupted`, at most
- * once (KOBE-26 adds `runs.retry_of_run_id` with a unique index). A repeated retry of the same run
- * returns the existing retry run (idempotent) instead of creating another.
+ * Retry rules (D14, KOBE-26): only the thread's **latest run that ran** (ended, and
+ * `started_at` not null), only if `interrupted`, at most once (`runs.retry_of_run_id`, unique
+ * index). Runs that ended without ever starting (a deleted or failed queued message) are skipped:
+ * they never ran, so they cannot hide an interrupted run from Retry. A repeated retry of the same
+ * run returns the existing retry run (idempotent) instead of creating another.
  */
 export type RetryCheck = "ok" | "already_retried" | "not_interrupted" | "not_latest";
 
@@ -152,6 +166,11 @@ export interface RetryCandidate {
   readonly run_id: string;
   readonly status: RunStatus;
   readonly retry_of_run_id?: string | undefined;
+  /**
+   * `runs.started_at`; `null` = never started (skipped by the "latest" rule). Omitted = unknown,
+   * treated as started (callers that pre-filter never-started runs, as before this field).
+   */
+  readonly started_at?: string | null | undefined;
 }
 
 /** `runs` is the thread's runs in creation order. */
@@ -159,6 +178,8 @@ export function checkRetry(runs: readonly RetryCandidate[], runId: string): Retr
   if (runs.some((r) => r.retry_of_run_id === runId)) return "already_retried";
   const target = runs.find((r) => r.run_id === runId);
   if (target?.status !== "interrupted") return "not_interrupted";
-  const latestEnded = runs.filter((r) => isTerminalRunStatus(r.status)).at(-1);
+  const latestEnded = runs
+    .filter((r) => isTerminalRunStatus(r.status) && r.started_at !== null)
+    .at(-1);
   return latestEnded?.run_id === runId ? "ok" : "not_latest";
 }

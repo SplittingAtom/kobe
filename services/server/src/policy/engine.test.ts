@@ -117,6 +117,7 @@ describe("createPolicyEngine", () => {
     });
     const decision = await e.decide(policyInput(builtin("read")));
     expect(decision.effect).toBe("deny");
+    expect(decision.reasons[0]?.code).toBe("policy_error");
     expect(onError).toHaveBeenCalledOnce();
   });
 
