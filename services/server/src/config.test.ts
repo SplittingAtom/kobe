@@ -27,6 +27,14 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ ...REQUIRED, KOBE_PROCESS: "worker" })).toThrow(/KOBE_PROCESS/);
   });
 
+  it("caps agent versions at 1000 by default, configurable within 1–100000 (KOBE-46)", () => {
+    expect(loadConfig(REQUIRED).agentMaxVersions).toBe(1000);
+    expect(loadConfig({ ...REQUIRED, KOBE_AGENT_MAX_VERSIONS: "50" }).agentMaxVersions).toBe(50);
+    expect(() => loadConfig({ ...REQUIRED, KOBE_AGENT_MAX_VERSIONS: "0" })).toThrow(
+      /KOBE_AGENT_MAX_VERSIONS/,
+    );
+  });
+
   it("requires a postgres database URL", () => {
     const { KOBE_DATABASE_URL: _, ...rest } = REQUIRED;
     expect(() => loadConfig(rest)).toThrow(/KOBE_DATABASE_URL/);

@@ -47,6 +47,19 @@ export const TERMINAL_RUN_STATUSES = [
 const statusList = (statuses: readonly RunStatus[]) =>
   sql.raw(statuses.map((s) => `'${s}'`).join(", "));
 
+/** Thread approval modes (D29; `@kobe/protocol` `APPROVAL_MODES`). There is no bypass mode. */
+export const RUN_APPROVAL_MODES = ["ask-on-write", "ask-all", "auto"] as const;
+export type RunApprovalMode = (typeof RUN_APPROVAL_MODES)[number];
+
+/** Who a budget stop applies to (D30; `@kobe/protocol` `BudgetStopCommand.scope`). */
+export const BUDGET_STOP_SCOPES = ["install", "team", "user"] as const;
+export type BudgetStopScope = (typeof BUDGET_STOP_SCOPES)[number];
+
+/** Longest message a run carries (`@kobe/protocol` `submitMessageBodySchema.content`). */
+export const RUN_INPUT_MAX_CHARS = 200_000;
+
+const textList = (values: readonly string[]) => sql.raw(values.map((v) => `'${v}'`).join(", "));
+
 /**
  * One agent turn on a thread (D16, D17). Queued runs wait in `queue_pos` order; one active run per
  * thread is enforced here as well as by the orchestrator's advisory lock.
@@ -86,6 +99,42 @@ export const runs = pgTable(
      * database without bound.
      */
     sandboxBytes: bigint({ mode: "number" }).notNull().default(0),
+    /**
+     * The effective approval mode fixed when the run is created (KOBE-30; `@kobe/protocol`
+     * `RunSnapshot.approval_mode`): the requested mode clamped to the install and team floors, so a
+     * later change can't loosen a run. Scheduled runs are `auto` (D32). The policy check clamps it
+     * to the floor again at call time (floors only tighten).
+     */
+    approvalMode: text().$type<RunApprovalMode>().notNull().default("ask-on-write"),
+    /**
+     * The message the run sends to Pi (KOBE-30): kept while queued (editable, D17) and for Retry
+     * (D14), which re-sends it. Purged with the thread (D18).
+     */
+    input: text().notNull().default(""),
+    /**
+     * Branch point (Pi entry id) the run continues from (KOBE-30): the submitted
+     * `parent_entry_id` (edit-and-regenerate), else the thread's leaf when the run started. A retry
+     * reuses its original's, so it becomes a sibling branch and the interrupted one stays intact.
+     */
+    parentEntryId: text(),
+    /** The Pi entry id of the prompt this run answered, once mirrored (KOBE-30). */
+    userEntryId: text(),
+    /** The interrupted run this run retries (D14; at most one retry per run, KOBE-26 contract). */
+    retryOfRunId: uuid(),
+    /**
+     * A budget stop is pending (D30, KOBE-42): the run ends `budget_stopped` after its current step,
+     * even when Pi then settles normally.
+     */
+    budgetStopScope: text().$type<BudgetStopScope>(),
+    /**
+     * A stop the sandbox still has to receive (KOBE-30): set in the transaction that ends (or
+     * budget-stops) a run that may be running in Pi, cleared once a `run.stop` was answered. The
+     * orchestrator's sweep re-sends it, so a replica crash after commit can't leave Pi running.
+     */
+    stopMode: text().$type<"abort" | "after_step">(),
+    stopRequestedAt: timestamp({ withTimezone: true }),
+    /** Client-supplied idempotency key of the message (KOBE-30), unique per thread. */
+    clientKey: text(),
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.id] }),
@@ -95,6 +144,22 @@ export const runs = pgTable(
       foreignColumns: [threads.teamId, threads.id],
     }).onDelete("cascade"),
     index("runs_thread_idx").on(t.teamId, t.threadId, t.createdAt),
+    foreignKey({
+      name: "runs_retry_of_fk",
+      columns: [t.teamId, t.retryOfRunId],
+      foreignColumns: [t.teamId, t.id],
+    }),
+    // At most one retry per run (KOBE-26 contract); a second retry returns the first.
+    uniqueIndex("runs_client_key_unique")
+      .on(t.teamId, t.threadId, t.clientKey)
+      .where(sql`${t.clientKey} IS NOT NULL`),
+    // Pending stops the sweep re-sends (few rows at any time).
+    index("runs_stop_pending_idx")
+      .on(t.teamId, t.stopRequestedAt)
+      .where(sql`${t.stopMode} IS NOT NULL`),
+    uniqueIndex("runs_retry_of_unique")
+      .on(t.teamId, t.retryOfRunId)
+      .where(sql`${t.retryOfRunId} IS NOT NULL`),
     uniqueIndex("runs_one_active_per_thread")
       .on(t.teamId, t.threadId)
       .where(sql`${t.status} IN (${statusList(ACTIVE_RUN_STATUSES)})`),
@@ -119,6 +184,28 @@ export const runs = pgTable(
     check("runs_last_seq", sql`${t.lastSeq} >= 0`),
     check("runs_sandbox_seq", sql`${t.sandboxSeq} >= 0`),
     check("runs_sandbox_bytes", sql`${t.sandboxBytes} >= 0`),
+    check("runs_approval_mode", sql`${t.approvalMode} IN (${textList(RUN_APPROVAL_MODES)})`),
+    check(
+      "runs_input_length",
+      sql`char_length(${t.input}) <= ${sql.raw(String(RUN_INPUT_MAX_CHARS))}`,
+    ),
+    check(
+      "runs_entry_ids",
+      sql`(${t.parentEntryId} IS NULL OR char_length(${t.parentEntryId}) BETWEEN 1 AND 128) AND (${t.userEntryId} IS NULL OR char_length(${t.userEntryId}) BETWEEN 1 AND 128)`,
+    ),
+    check(
+      "runs_stop_mode",
+      sql`(${t.stopMode} IS NULL) = (${t.stopRequestedAt} IS NULL) AND (${t.stopMode} IS NULL OR ${t.stopMode} IN ('abort', 'after_step'))`,
+    ),
+    check(
+      "runs_client_key",
+      sql`${t.clientKey} IS NULL OR char_length(${t.clientKey}) BETWEEN 1 AND 128`,
+    ),
+    check("runs_retry_not_self", sql`${t.retryOfRunId} IS NULL OR ${t.retryOfRunId} <> ${t.id}`),
+    check(
+      "runs_budget_stop_scope",
+      sql`${t.budgetStopScope} IS NULL OR ${t.budgetStopScope} IN (${textList(BUDGET_STOP_SCOPES)})`,
+    ),
     check(
       "runs_events_compacted_at",
       sql`${t.eventsCompactedAt} IS NULL OR ${t.endedAt} IS NOT NULL`,

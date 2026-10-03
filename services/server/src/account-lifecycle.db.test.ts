@@ -122,6 +122,22 @@ describe("password reset (ac-3)", () => {
     expect(h.mailer.to("tess@life.test").length - sentBefore).toBe(1);
   });
 
+  it("sends one email while the first is still on its way to the SMTP server", async () => {
+    await h.createUser("sam@life.test");
+    let deliver = () => {};
+    h.mailer.hold = new Promise<void>((resolve) => {
+      deliver = resolve;
+    });
+    try {
+      for (let i = 0; i < 5; i++) expect((await requestReset("sam@life.test")).status).toBe(200);
+    } finally {
+      deliver();
+      h.mailer.hold = undefined;
+    }
+    await h.mailer.settle();
+    expect(h.mailer.to("sam@life.test")).toHaveLength(1);
+  });
+
   it("never lets an attacker's requests block a real request later in the hour", async () => {
     // The attacker kept requesting; the owner of the account asks ten minutes later.
     await ageResetMail(ids.tess, 10);

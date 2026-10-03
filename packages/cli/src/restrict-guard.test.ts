@@ -21,6 +21,15 @@ describe("RestrictGuard", () => {
     expect(run(script.match(/.{1,7}/gs) ?? [])).toBe(script);
   });
 
+  it("finds the head across byte-sized chunks, including split multi-byte characters", () => {
+    const script = "-- Dump of café ☕\n" + HEAD + BODY + TAIL;
+    const bytes = Buffer.from(script);
+    const guard = new RestrictGuard();
+    const out = [...bytes].flatMap((b) => guard.push(Buffer.from([b])));
+    out.push(...guard.finish());
+    expect(Buffer.concat(out).toString()).toBe(script);
+  });
+
   it("holds output back until the head is verified", () => {
     const guard = new RestrictGuard();
     expect(guard.push(Buffer.from("--\n-- PostgreSQL database dump\n--\n\n\\restr"))).toEqual([]);

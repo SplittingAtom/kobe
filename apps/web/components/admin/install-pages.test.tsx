@@ -460,6 +460,45 @@ describe("Gallery agents", () => {
     expect(summary(calls)).toContain("DELETE /v1/install/gallery/agents/a-1");
   });
 
+  it("publishes the draft it shows (If-Match) and archives a published agent", async () => {
+    const published = { ...AGENTS.agents[0], currentVersion: 1, revision: 3 };
+    const calls = stubApi({
+      "GET /v1/install/gallery/agents": [200, { agents: [published] }],
+      "POST /v1/install/gallery/agents/a-1/publish": [
+        201,
+        { agent: { ...published, currentVersion: 2 }, version: { version: 2 } },
+      ],
+      "DELETE /v1/install/gallery/agents/a-1": [
+        200,
+        { agent: { ...published, archivedAt: "2026-10-02T10:00:00Z" } },
+      ],
+    });
+    renderInstall(<GalleryPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Publish Assistant" }));
+    await screen.findByText("Published Assistant v2.");
+    const post = must(calls.find((c) => c.method === "POST"));
+    expect(post.headers.get("if-match")).toBe('"3"');
+    await userEvent.click(screen.getByRole("button", { name: "Archive Assistant" }));
+    await screen.findByText("Archived Assistant.");
+  });
+
+  it("shows archived agents with Unarchive instead of Publish", async () => {
+    const archived = { ...AGENTS.agents[0], currentVersion: 1, archivedAt: "2026-10-02T10:00:00Z" };
+    const calls = stubApi({
+      "GET /v1/install/gallery/agents": [200, { agents: [archived] }],
+      "POST /v1/install/gallery/agents/a-1/unarchive": [
+        200,
+        { agent: { ...archived, archivedAt: null } },
+      ],
+    });
+    renderInstall(<GalleryPage />);
+    expect(await screen.findByText("Archived")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Publish Assistant" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Unarchive Assistant" }));
+    await screen.findByText("Assistant is no longer archived.");
+    expect(summary(calls)).toContain("POST /v1/install/gallery/agents/a-1/unarchive");
+  });
+
   it("imports an agent file as markdown", async () => {
     const calls = stubApi({
       "GET /v1/install/gallery/agents": [200, { agents: [] }],
