@@ -1,4 +1,6 @@
 import {
+  EVENT_PAYLOAD_MAX_BYTES,
+  EventPayloadTooLargeError,
   isKobeEventType,
   isTerminalEventType,
   parseEventPayload,
@@ -16,11 +18,10 @@ import { encodeHint, RUN_EVENTS_CHANNEL } from "./notify.js";
 export const MAX_APPEND_BATCH = 64;
 
 /**
- * Largest stored payload per event (UTF-8 JSON). Tool-result previews are capped at 64 KB by the
- * protocol; tool inputs and entry payloads are not, so the stream bounds them here. Larger content
- * belongs in S3 by `blob_ref` (D15).
+ * Largest stored payload per event (UTF-8 JSON): the protocol bound (`EVENT_PAYLOAD_MAX_BYTES`,
+ * checked by `parseEventPayload`). Larger content belongs in S3 by `blob_ref` (D15).
  */
-export const MAX_EVENT_PAYLOAD_BYTES = 256 * 1024;
+export const MAX_EVENT_PAYLOAD_BYTES = EVENT_PAYLOAD_MAX_BYTES;
 
 /** Lock wait for appends that own their transaction: a stuck status writer surfaces as an error. */
 export const APPEND_LOCK_TIMEOUT = "5s";
@@ -69,15 +70,15 @@ function validate(events: readonly NewRunEvent[]): ValidEvent[] {
     try {
       payload = parseEventPayload(event.type, event.payload) as Record<string, unknown>;
     } catch (err) {
+      if (err instanceof EventPayloadTooLargeError) {
+        throw new AppendError(
+          "payload_too_large",
+          `event ${i} (${event.type}): payload over ${MAX_EVENT_PAYLOAD_BYTES} bytes`,
+        );
+      }
       throw new AppendError("invalid_event", `event ${i} (${event.type}): ${String(err)}`);
     }
     const json = JSON.stringify(payload);
-    if (Buffer.byteLength(json, "utf8") > MAX_EVENT_PAYLOAD_BYTES) {
-      throw new AppendError(
-        "payload_too_large",
-        `event ${i} (${event.type}): payload over ${MAX_EVENT_PAYLOAD_BYTES} bytes`,
-      );
-    }
     // jsonb cannot store U+0000; refuse with a clear error instead of a driver failure mid-batch.
     if (json.includes("\\u0000")) {
       throw new AppendError("invalid_event", `event ${i} (${event.type}): contains U+0000`);

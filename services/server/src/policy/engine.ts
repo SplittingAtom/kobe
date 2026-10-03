@@ -54,8 +54,8 @@ function deny(risk: RiskClass, reason: PolicyReason): PolicyDecision {
 }
 
 const INTERNAL_ERROR: PolicyReason = {
-  // The contract has no dedicated code for this; reported at the first stage (see ledger).
-  code: "install_deny_rule",
+  // Before the pipeline (or instead of it): reported at the first stage (protocol policy.ts).
+  code: "policy_error",
   stage: "install_deny",
   message: "Policy could not be evaluated, so the call was denied. Try again.",
 };

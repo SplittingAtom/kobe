@@ -235,15 +235,19 @@ describe("pi.command", () => {
     expect(sent?.id).not.toBe("server-chosen");
   });
 
-  it("refuses fork (it would move Pi off the thread's session file)", async () => {
+  it("refuses fork (not in the contract: it would move Pi off the thread's session file)", async () => {
     h = await startHarness();
-    expect(
-      await h.server.command({
+    h.server.sendRaw(
+      JSON.stringify({
+        v: 1,
         type: "pi.command",
+        command_id: "fork-1",
         thread_id: THREAD,
         command: { id: "x", type: "fork", entryId: "a1" },
       }),
-    ).toMatchObject({ ok: false, error: { code: "pi_rejected" } });
+    );
+    await h.server.waitFor((f) => f.type === "error" && f.code === "malformed_frame");
+    expect(h.server.frames("command.result").some((r) => r.command_id === "fork-1")).toBe(false);
   });
 
   it("answers frame_too_large when Pi's data does not fit in one frame", async () => {
@@ -378,6 +382,30 @@ describe("kobe-policy channel (fd 3)", () => {
       (f) => f.type === "pi.event" && f.event.type === "kobe_test_policy_decision",
     );
     expect((decision as PiEvent).event).toMatchObject({ decision: "allow" });
+  });
+
+  it("delivers a decision whose reason code and stage it does not know (newer server)", async () => {
+    h = await startHarness();
+    await h.server.command(runStart("tool:bash"));
+    const check = await h.server.waitFor((f) => f.type === "policy.check");
+    h.server.sendRaw(
+      JSON.stringify({
+        v: 1,
+        type: "policy.result",
+        request_id: (check as { request_id: string }).request_id,
+        run_id: RUN,
+        tool_call_id: "call_1",
+        decision: "allow",
+        reasons: [
+          { code: "a_code_from_the_future", stage: "a_future_stage", message: "new", extra: 1 },
+        ],
+      }),
+    );
+    const decision = await h.server.waitFor(
+      (f) => f.type === "pi.event" && f.event.type === "kobe_test_policy_decision",
+    );
+    expect((decision as PiEvent).event).toMatchObject({ decision: "allow" });
+    expect(h.server.frames("error")).toEqual([]);
   });
 
   it("starts no run when kobe-policy refuses to start (fail closed)", async () => {

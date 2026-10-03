@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   BUILTIN_TOOLS,
   POLICY_EVALUATION_ORDER,
+  POLICY_REASON_CODES,
   acceptsAudience,
   approvalResolutionBodySchema,
   builtinToolDescriptor,
@@ -252,5 +253,25 @@ describe("fake policy engine", () => {
     });
     expect([auto.effect, scheduled.effect]).toEqual(["deny", "deny"]);
     expect(policyDecisionSchema.parse(auto)).toEqual(auto);
+  });
+});
+
+describe("contracts cleanup: reason codes and primary args", () => {
+  it("has codes for server- and sandbox-side denials and team allow-listing", () => {
+    for (const code of [
+      "policy_error",
+      "team_allow_rule",
+      "not_available",
+      "run_not_active",
+      "not_a_member",
+      "sandbox_policy_unavailable",
+    ]) {
+      expect(POLICY_REASON_CODES).toContain(code);
+    }
+  });
+
+  it("matches grep and find shorthands against where they search (/path)", () => {
+    expect(BUILTIN_TOOLS.grep?.primary_arg).toBe("/path");
+    expect(BUILTIN_TOOLS.find?.primary_arg).toBe("/path");
   });
 });

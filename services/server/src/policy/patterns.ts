@@ -95,17 +95,10 @@ export function splitAgentToolEntry(entry: string): { tool: string; arg: string 
   return { tool: entry, arg: undefined };
 }
 
-/**
- * Server-side corrections to the protocol's `primary_arg` (review KOBE-35 LOW 8): grep and find
- * search a `path`; their `pattern` is a regex/glob, not where they read. Reported as a contract
- * issue; the protocol table is not changed in this PR.
- */
-const PRIMARY_ARG_OVERRIDES: Readonly<Record<string, string>> = { grep: "/path", find: "/path" };
-
 /** The input pointer an agent-file shorthand matches against (built-ins only). */
 function primaryArgPointer(tool: ToolDescriptor): string | undefined {
   if (tool.source === "mcp" || !Object.hasOwn(BUILTIN_TOOLS, tool.name)) return undefined;
-  return PRIMARY_ARG_OVERRIDES[tool.name] ?? BUILTIN_TOOLS[tool.name]?.primary_arg;
+  return BUILTIN_TOOLS[tool.name]?.primary_arg;
 }
 
 /**

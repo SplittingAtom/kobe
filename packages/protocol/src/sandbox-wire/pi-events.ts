@@ -5,7 +5,8 @@ import { piSessionEntrySchema } from "./pi-rpc.js";
  * Narrow schemas for the Pi 1.0.0 session events the server TRANSLATES into Kobe events (verified
  * against docs/json.md in the 1.0.0 tarball). The server validates a bridged `pi.event` with
  * `parseTranslatedPiEvent` before reading any field: a known type that fails its schema is an
- * `error` `malformed_frame` (the frame is dropped, the run keeps going); unknown types are ignored.
+ * `error` `malformed_frame` (the frame is dropped, the run keeps going); unknown types are ignored
+ * (including the agent's {@link KOBE_EVENT_DROPPED_TYPE} placeholder).
  * Objects stay loose (a Pi 1.0.x patch may add fields); the fields Kobe reads are required.
  */
 
@@ -103,6 +104,23 @@ export function parseTranslatedPiEvent(event: { readonly type: string }): Transl
     ? { kind: "translated", event: parsed.data }
     : { kind: "invalid", message: parsed.error.issues[0]?.message ?? "invalid Pi event" };
 }
+
+/**
+ * Placeholder kobe-sandbox-agent sends **in place of** a Pi event it cannot put on the wire (the
+ * frame would exceed the frame cap or fail the server's decoder: too deep, not serialisable). It
+ * keeps the event's outbound `seq`, so seqs stay gapless and the server never loops on `resend`
+ * for an event that can never arrive. Not a Pi type (the `kobe.` prefix cannot collide with one)
+ * and not translated: the server accepts it, advances the cursor and produces no Kobe event.
+ * `reason` is the encoder's code (`frame_too_large` | `malformed_frame`).
+ */
+export const KOBE_EVENT_DROPPED_TYPE = "kobe.event_dropped";
+export const kobeEventDroppedSchema = z.strictObject({
+  type: z.literal(KOBE_EVENT_DROPPED_TYPE),
+  /** The dropped Pi event's `type`, truncated to 64 chars. */
+  original_type: z.string().max(64),
+  reason: z.enum(["frame_too_large", "malformed_frame"]),
+});
+export type KobeEventDropped = z.infer<typeof kobeEventDroppedSchema>;
 
 /**
  * `data` of a successful `get_entries` response, validated before mirroring into `thread_entries`

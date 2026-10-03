@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  KOBE_EVENT_DROPPED_TYPE,
+  SANDBOX_FRAME_MAX_BYTES_BY_TYPE,
   SANDBOX_MAX_FRAME_BYTES,
+  SANDBOX_SMALL_FRAME_MAX_BYTES,
   decodeSandboxFrame,
   decodeServerFrame,
   encodeFrame,
+  kobeEventDroppedSchema,
   parseTranslatedPiEvent,
   piGetEntriesDataSchema,
   type ApprovalToken,
@@ -463,5 +467,123 @@ describe("translated Pi events", () => {
       piGetEntriesDataSchema.safeParse({ entries: [{ ...entry, id: "" }], leafId: null }).success,
     ).toBe(false);
     expect(piGetEntriesDataSchema.safeParse({ entries: [entry] }).success).toBe(false);
+  });
+});
+
+describe("contracts cleanup (agent-reported gaps)", () => {
+  it("does not admit fork in pi.command (it moves Pi off the thread's session file)", () => {
+    const frame = {
+      v: 1,
+      type: "pi.command",
+      command_id: "c1",
+      thread_id: THREAD,
+      command: { id: "x", type: "fork", entryId: "a1" },
+    };
+    expect(decodeServerFrame(JSON.stringify(frame))).toMatchObject({ ok: false });
+    expect(
+      decodeServerFrame(
+        JSON.stringify({ ...frame, command: { id: "x", type: "get_fork_messages" } }),
+      ),
+    ).toMatchObject({ ok: true });
+  });
+
+  it("describes the kobe.event_dropped placeholder, which the translator ignores", () => {
+    const placeholder = {
+      type: KOBE_EVENT_DROPPED_TYPE,
+      original_type: "message_update",
+      reason: "frame_too_large",
+    };
+    expect(kobeEventDroppedSchema.parse(placeholder)).toEqual(placeholder);
+    expect(parseTranslatedPiEvent(placeholder)).toEqual({ kind: "ignored" });
+    expect(
+      decodeSandboxFrame(
+        JSON.stringify({
+          v: 1,
+          type: "pi.event",
+          run_id: RUN,
+          thread_id: THREAD,
+          seq: 1,
+          event: placeholder,
+        }),
+      ),
+    ).toMatchObject({ ok: true });
+  });
+
+  it("states the per-type frame caps (only pi.event, command.result and policy.check are large)", () => {
+    expect(SANDBOX_SMALL_FRAME_MAX_BYTES).toBe(256 * 1024);
+    expect(SANDBOX_FRAME_MAX_BYTES_BY_TYPE).toEqual({
+      "pi.event": SANDBOX_MAX_FRAME_BYTES,
+      "command.result": SANDBOX_MAX_FRAME_BYTES,
+      "policy.check": 1024 * 1024,
+    });
+  });
+});
+
+describe("forward compatibility (server → sandbox)", () => {
+  const result = (extra: Record<string, unknown>) =>
+    JSON.stringify({
+      v: 1,
+      type: "policy.result",
+      request_id: "r1",
+      run_id: RUN,
+      tool_call_id: "tc_1",
+      decision: "allow",
+      reasons: [{ code: "a_code_from_the_future", stage: "a_future_stage", message: "m" }],
+      ...extra,
+    });
+
+  it("decodes informational enums it does not know (reason codes and stages, extra reason keys)", () => {
+    const decoded = decodeServerFrame(result({}));
+    expect(decoded).toMatchObject({ ok: true, frame: { decision: "allow" } });
+    expect(
+      decodeServerFrame(
+        result({ reasons: [{ code: "new_code", stage: "risk_class", message: "m", hint: "x" }] }),
+      ),
+    ).toMatchObject({ ok: true });
+    for (const frame of [
+      { v: 1, type: "error", code: "a_new_error", message: "m" },
+      { v: 1, type: "shutdown", reason: "a_new_reason", deadline_ms: 0 },
+      {
+        v: 1,
+        type: "run.stop",
+        command_id: "c",
+        run_id: RUN,
+        thread_id: THREAD,
+        mode: "abort",
+        reason: "a_new_reason",
+      },
+    ]) {
+      expect(decodeServerFrame(JSON.stringify(frame)), frame.type).toMatchObject({ ok: true });
+    }
+  });
+
+  it("keeps decisions, modes and code shapes closed", () => {
+    expect(decodeServerFrame(result({ decision: "maybe" }))).toMatchObject({ ok: false });
+    expect(
+      decodeServerFrame(
+        result({ reasons: [{ code: "Not A Code!", stage: "risk_class", message: "m" }] }),
+      ),
+    ).toMatchObject({ ok: false });
+    expect(
+      decodeServerFrame(
+        JSON.stringify({
+          v: 1,
+          type: "run.stop",
+          command_id: "c",
+          run_id: RUN,
+          thread_id: THREAD,
+          mode: "later",
+          reason: "user_cancelled",
+        }),
+      ),
+    ).toMatchObject({ ok: false });
+  });
+
+  it("keeps sandbox → server frames strict (the server is never older than its sandboxes' contract)", () => {
+    expect(
+      decodeSandboxFrame(
+        JSON.stringify({ v: 1, type: "error", code: "a_new_error", message: "m" }),
+      ),
+    ).toMatchObject({ ok: false });
   });
 });
