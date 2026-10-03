@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { PiThreadConfig } from "@kobe/protocol";
 
 /**
@@ -46,8 +47,14 @@ export interface PiLaunchInput {
   /** Root-owned, read-only Pi config directory (`PI_CODING_AGENT_DIR`). */
   readonly agentDir: string;
   /**
-   * Extensions to load with `-e` (KOBE-36 adds kobe-policy here). Must be root-owned paths
-   * outside anything the sandbox user can write, or `builtin:<name>`.
+   * The kobe-policy extension (KOBE-36): a root-owned, read-only file. Always loaded, always the
+   * **last** `-e`: Pi runs `tool_call` handlers in extension load order (verified Pi 1.0.0), so the
+   * last one sees the final, possibly mutated input, and nobody can change it after the check.
+   */
+  readonly policyExtension: string;
+  /**
+   * Other extensions to load with `-e`, before kobe-policy (e.g. `builtin:mcp`, KOBE-62). Must be
+   * root-owned paths outside anything the sandbox user can write, or `builtin:<name>`.
    */
   readonly extensions?: readonly string[];
   readonly parentEnv: Readonly<Record<string, string | undefined>>;
@@ -56,7 +63,14 @@ export interface PiLaunchInput {
 
 export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
   const args = ["--mode", "rpc", "--session", input.sessionFile, ...PI_LOCKDOWN_ARGS];
-  for (const extension of input.extensions ?? []) args.push("--extension", extension);
+  const policy = path.resolve(input.policyExtension);
+  for (const extension of input.extensions ?? []) {
+    // kobe-policy only once, last: a second copy would find the channel taken and block everything.
+    if (extension.startsWith("builtin:") || path.resolve(extension) !== policy) {
+      args.push("--extension", extension);
+    }
+  }
+  args.push("--extension", input.policyExtension);
   const config = input.config;
   if (config?.thinking_level !== undefined) args.push("--thinking", config.thinking_level);
   // Seams (not wired here): model alias → KOBE-41, mcp_servers → KOBE-62, skills/agent/system

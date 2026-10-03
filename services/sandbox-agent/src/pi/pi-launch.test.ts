@@ -10,7 +10,13 @@ const parentEnv = {
   AWS_SECRET_ACCESS_KEY: "nope",
   NODE_OPTIONS: "--inspect=0.0.0.0:9229",
 };
-const base = { sessionFile: "/s/t.jsonl", home: "/home/kobe", agentDir: "/opt/kobe/pi-agent" };
+const POLICY = "/opt/kobe/pi-extensions/kobe-policy/index.js";
+const base = {
+  sessionFile: "/s/t.jsonl",
+  home: "/home/kobe",
+  agentDir: "/opt/kobe/pi-agent",
+  policyExtension: POLICY,
+};
 
 describe("buildPiLaunch", () => {
   it("runs Pi in RPC mode on the thread's session file, locked down", () => {
@@ -26,20 +32,28 @@ describe("buildPiLaunch", () => {
       "--no-skills",
       "--no-prompt-templates",
       "--no-themes",
+      "--extension",
+      POLICY,
     ]);
     expect(PI_LOCKDOWN_ARGS).toContain("--no-extensions");
   });
 
-  it("loads only explicitly given extensions (the KOBE-36 hook)", () => {
+  it("always loads kobe-policy, as the last extension (KOBE-36)", () => {
     const launch = buildPiLaunch({
       ...base,
       parentEnv,
-      extensions: ["/opt/kobe/pi-extensions/kobe-policy.js"],
+      extensions: [
+        "builtin:mcp",
+        POLICY,
+        "/opt/kobe/pi-extensions/other.js",
+        "/opt/kobe/pi-extensions/./kobe-policy/index.js",
+      ],
+      config: { thinking_level: "high" },
     });
-    expect(launch.args.slice(-2)).toEqual([
-      "--extension",
-      "/opt/kobe/pi-extensions/kobe-policy.js",
-    ]);
+    const extensions = launch.args.flatMap((a, i) =>
+      a === "--extension" ? [launch.args[i + 1]] : [],
+    );
+    expect(extensions).toEqual(["builtin:mcp", "/opt/kobe/pi-extensions/other.js", POLICY]);
   });
 
   it("builds Pi's environment from an allow-list: no agent config, tokens, keys or inspector", () => {
