@@ -1,3 +1,4 @@
+import type { Server } from "node:http";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { isolationAuditor } from "./audit/isolation.js";
@@ -10,6 +11,7 @@ import { logger } from "./logger.js";
 import { createSmtpMailer } from "./mail/mailer.js";
 import { createSandboxApp } from "./routes/sandbox.js";
 import { createSandboxRuntime } from "./sandbox/runtime.js";
+import { providerLiveness, sandboxWireVerifier } from "./sandbox-wire/provider-auth.js";
 
 /** Open streams (SSE) get this long to finish before being cut; stays under k8s' 30 s grace period. */
 const DRAIN_TIMEOUT_MS = 10_000;
@@ -97,6 +99,13 @@ const sandboxServer = sandbox
       (info) => logger.info({ port: info.port }, "sandbox listener"),
     )
   : undefined;
+// The sandbox wire (KOBE-24) on the sandbox listener only — never on the user-facing app.
+if (sandbox && sandboxServer && deps) {
+  deps.sandboxWire.attach(sandboxServer as Server, {
+    verify: sandboxWireVerifier(sandbox.sessionKeys),
+    liveness: providerLiveness(sandbox.provider, deps.database.db),
+  });
+}
 // Deletes sandbox pods found outside the verified isolation runtime (startup + every minute).
 const stopReconciler = sandbox?.startReconciler((result) => {
   if (result.deleted.length > 0) {

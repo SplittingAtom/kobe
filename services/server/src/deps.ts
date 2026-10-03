@@ -8,6 +8,12 @@ import { createRunEventHub, type HubOptions, type RunEventHub } from "./event-st
 import { createStreamReader, type StreamReader } from "./event-stream/read.js";
 import { STREAM_DEFAULTS, type StreamTimings } from "./event-stream/stream.js";
 import type { Mailer } from "./mail/mailer.js";
+import {
+  createDbRunContextSource,
+  createSandboxWire,
+  type SandboxWire,
+  type SandboxWireOptions,
+} from "./sandbox-wire/index.js";
 import { UserLifecycle } from "./users/lifecycle.js";
 
 export interface ServerDepsOptions {
@@ -26,6 +32,8 @@ export interface ServerDepsOptions {
   };
   /** Outgoing email (invitations, password resets, notifications). */
   readonly mailer: Mailer;
+  /** Sandbox wire seams and tuning (KOBE-24): approvals, UI, run hooks, wake, policy context. */
+  readonly sandboxWire?: Partial<Omit<SandboxWireOptions, "db" | "databaseUrl">>;
 }
 
 export interface NewUser {
@@ -51,6 +59,11 @@ export interface ServerDeps {
   readonly authAttempts: AuthAttemptAudit;
   /** Downstream steps of deactivation/reactivation (sandboxes, grants, schedules, audit). */
   readonly lifecycle: UserLifecycle;
+  /**
+   * Sandbox connection registry and routing (KOBE-24): `router` sends commands to any (user, team)
+   * sandbox from any replica; `attach` serves the WebSocket on the sandbox listener only.
+   */
+  readonly sandboxWire: SandboxWire;
   /** Creates an email+password user (and optional install role) atomically, without sign-up. */
   createUserWithPassword(
     input: NewUser,
@@ -87,6 +100,19 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     ...(options.eventStream?.poolMax ? { max: options.eventStream.poolMax } : {}),
   });
 
+  const sandboxWire = createSandboxWire({
+    ...options.sandboxWire,
+    runContext: options.sandboxWire?.runContext ?? createDbRunContextSource(),
+    db: database.db,
+    databaseUrl: options.databaseUrl,
+  });
+  const lifecycle = new UserLifecycle();
+  // A deactivated user's sandboxes lose their connections on every replica at once (KOBE-13).
+  lifecycle.on("deactivated", {
+    name: "sandbox-wire",
+    run: (userId) => sandboxWire.revalidateUser(userId),
+  });
+
   return {
     database,
     auth,
@@ -95,7 +121,8 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     mailer: options.mailer,
     authAttempts,
     auditAnchor: new AuditAnchorLogger(database.db, options.authSecret),
-    lifecycle: new UserLifecycle(),
+    lifecycle,
+    sandboxWire,
     async createUserWithPassword({ email, name, password }, { installRole, recordSetup } = {}) {
       const ctx = await auth.$context;
       const hash = await ctx.password.hash(password);
@@ -132,6 +159,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
       return typeof candidate === "string" && timingSafeEqual(digest(candidate), setupDigest);
     },
     async close() {
+      await sandboxWire.close();
       await hub.close();
       await reader.close();
       options.mailer.close();
