@@ -35,7 +35,7 @@
   team-referencing reason. Columns per §5.4 plus `status`, `duration_minutes`, `self_approved`,
   `request_expires_at`, `decided_at/by`, `ended_at`. Check constraints: one narrowing at most,
   subject ≠ requester, `(approver = requester) = self_approved`, window ≤ 24 h.
-- **Guard trigger `break_glass_grants_guard` (migration 0017, SECURITY INVOKER):** inserts start
+- **Guard trigger `break_glass_grants_guard` (migration `*_break_glass_guard.sql`, 0022 after the latest rebase; SECURITY INVOKER):** inserts start
   `pending` from an active install admin, with DB-stamped times; the request (team, scope, reason,
   duration, legal hold) is immutable; transitions pending→approved|denied|revoked|expired and
   approved→revoked|expired only. On approval: approver is an active install admin and not the

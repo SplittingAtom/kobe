@@ -82,6 +82,7 @@ export interface BreakGlassThread {
   readonly status: "idle" | "running" | "interrupted";
   readonly ownerUserId: string;
   readonly projectId: string | null;
+  readonly agentScope: (typeof threads.$inferSelect)["agentScope"];
   readonly agentId: string | null;
   readonly agentVersion: number | null;
   readonly sharedToProject: boolean;
@@ -172,6 +173,7 @@ const threadColumns = {
   status: threads.status,
   ownerUserId: threads.ownerUserId,
   projectId: threads.projectId,
+  agentScope: threads.agentScope,
   agentId: threads.agentId,
   agentVersion: threads.agentVersion,
   sharedToProject: threads.sharedToProject,
