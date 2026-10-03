@@ -821,7 +821,8 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_pod:-}" ]]; then
   contains "an egress-proxy session token for the sandbox was minted" '^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$' "$egress_token"
   # → "connect=<CONNECT status> code=<origin status>" then the body; waits out a new proxy pod's
   # CNI warm-up (until the proxy answers the CONNECT at all) instead of failing on it.
-  proxy_url="http://kobe:$egress_token@egress-proxy.kobe.internal"
+  # The port is explicit: curl assumes 1080 for a proxy URL without one.
+  proxy_url="http://kobe:$egress_token@egress-proxy.kobe.internal:80"
   # One answer from the proxy for this pod (any CONNECT status but 000) = positive control; it
   # also waits out a new proxy pod's CNI warm-up (receiving-side policy) before the checks.
   proxy_up=$(in_sandbox "if $(retry "curl -s -o /dev/null -m 5 -w %{http_connect} -x $proxy_url https://$UPSTREAM_HOST/ | grep -q '[1-9]'" 120); \
@@ -847,7 +848,7 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_pod:-}" ]]; then
   fresh=$(via_proxy "https://$UPSTREAM_HOST/")
   contains "fresh install: a sandbox reaches nothing through the proxy (not in the ceiling)" '^connect=403 ' "$fresh"
   contains "fresh install: package registries are in the ceiling but not enabled for teams" '^connect=403 ' "$(via_proxy https://pypi.org/)"
-  contains "the proxy refuses requests without the sandbox's token (407)" '^connect=407 ' "$(via_proxy "https://$UPSTREAM_HOST/" 'http://kobe:forged@egress-proxy.kobe.internal')"
+  contains "the proxy refuses requests without the sandbox's token (407)" '^connect=407 ' "$(via_proxy "https://$UPSTREAM_HOST/" 'http://kobe:forged@egress-proxy.kobe.internal:80')"
   contains "the proxy refuses plain HTTP (HTTPS only)" '^connect=000 code=403' "$(via_proxy "http://$UPSTREAM_HOST/")"
   # Negative checks only after a positive control from the same pod: the proxy answered it above.
   if [[ "$proxy_up" == *proxy=ANSWERS* ]]; then
@@ -870,11 +871,13 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_pod:-}" ]]; then
   contains "an enabled domain that resolves to an internal address is refused" '^connect=403 ' "$(via_proxy "https://$INTERNAL_HOST/")"
   contains "a not-enabled domain is still blocked" '^connect=403 ' "$(via_proxy https://registry.npmjs.org/)"
   # SNI must equal the CONNECT host: the same tunnel with another TLS server name is cut.
+  # "New, TLSv1.x, Cipher is …" only after a completed handshake ("New, (NONE)" otherwise; the
+  # "SSL handshake has read" line is printed either way).
   s_client="openssl s_client -proxy egress-proxy.kobe.internal:80 -proxy_user kobe -proxy_pass 'pass:$egress_token' -connect $UPSTREAM_HOST:443"
   contains "control: a TLS handshake with the matching server name completes through the proxy" '^1$' \
-    "$(in_sandbox "echo | $s_client -servername $UPSTREAM_HOST 2>&1 | grep -c 'SSL handshake has read'")"
+    "$(in_sandbox "echo | $s_client -servername $UPSTREAM_HOST 2>&1 | grep -c '^New, TLS'")"
   contains "a TLS server name that differs from the CONNECT host is cut (SNI mismatch)" '^0$' \
-    "$(in_sandbox "echo | $s_client -servername evil.example.com 2>&1 | grep -c 'SSL handshake has read'")"
+    "$(in_sandbox "echo | $s_client -servername evil.example.com 2>&1 | grep -c '^New, TLS'")"
 
   # Revocation reaches open tunnels: keep one open, disable the domain, the proxy closes it.
   in_sandbox "rm -f /tmp/kobe-e2e-tunnel.log; setsid nohup sh -c \"sleep 120 | ($s_client -servername $UPSTREAM_HOST -quiet \

@@ -144,6 +144,20 @@ logs on timeout. The direct-egress BLOCKED checks run only after the proxy answe
 (positive control), and the release-namespace check only after that probe reached the server.
 "sandbox has Pi 1.0.x" (KOBE-7's hand-built Sandbox) is a log-timing flake outside this ticket.
 
+## e2e: "the egress proxy answers the sandbox-like client: proxy=SILENT" (k3d run 37126703133)
+
+Root cause: curl treats a proxy URL without a port as port **1080**, not 80. The client's
+`-x http://kobe:<token>@egress-proxy.kobe.internal` therefore dialled :1080 (curl exit 7, nothing
+listens there and the team policy allows only the proxy pod's 8080 behind Service port 80), while
+`openssl s_client -proxy egress-proxy.kobe.internal:80` (explicit port) got through. The same bug
+was in the sandbox pod env from KOBE-22: `HTTP(S)_PROXY`/`KOBE_EGRESS_PROXY_URL` were
+`http://egress-proxy.kobe.internal` (default port omitted), so curl and git in real sandboxes
+would have missed the proxy too. Fixed: proxy URLs always carry the port
+(`http://egress-proxy.kobe.internal:80`; `manifests.test.ts` asserts it), and the e2e uses it.
+Not runner-specific and not NetworkPolicy/DNS/readiness. Also fixed the SNI probe's success
+marker: `SSL handshake has read` is printed on failed handshakes too; the probe now counts
+`^New, TLS` (a completed handshake; a cut one prints `New, (NONE)`), verified against OpenSSL 3.5.
+
 ## Open questions (for Chris or the coordinator)
 
 1. **Header injection (KOBE-39) needs a design decision.** D28 per-team header injection cannot
@@ -158,7 +172,7 @@ logs on timeout. The direct-egress BLOCKED checks run only after the proxy answe
    env cannot carry the token (no secrets in pod specs; it is minted after start and expires in
    15 min). Suggested: the agent writes the current egress token to a file it rotates (e.g.
    `/tmp/kobe/egress-token`) and Pi gets `BASH_ENV=<root-owned script>` exporting
-   `HTTPS_PROXY=http://<thread_id>:$(cat token)@egress-proxy.kobe.internal` (+ lowercase,
+   `HTTPS_PROXY=http://<thread_id>:$(cat token)@egress-proxy.kobe.internal:80` (+ lowercase,
    `NO_PROXY`), so each shell picks up a fresh token and carries the thread hint. The agent has no
    listener (no local forwarding proxy). Until then, only the e2e (and anyone using the token by
    hand) exercises the proxy from a sandbox.
