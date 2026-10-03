@@ -151,6 +151,12 @@ export interface SandboxProvider {
   ensureTeam(team: TeamRef, isolation: VerifiedIsolation): Promise<string>;
   /** The (user, team) sandbox, created from the warm pool if it does not exist yet. */
   ensureSandbox(team: TeamRef, userId: string): Promise<SandboxHandle>;
+  /**
+   * Whether `sandboxId` is still the live sandbox of (team, user): its claim `u-<user>` exists in
+   * the team namespace with that UID, is not being deleted, and is annotated for that team and
+   * user. The sandbox wire (KOBE-24) checks it at connect and while connected. API errors throw.
+   */
+  isLive(team: TeamRef, userId: string, sandboxId: string): Promise<boolean>;
   /** Verifies a sandbox pod's bootstrap token (TokenReview) and resolves who it is. */
   identifyBootstrapToken(token: string): Promise<BootstrapIdentity>;
   /**
@@ -639,5 +645,16 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     };
   };
 
-  return { ensureTeam, ensureSandbox, identifyBootstrapToken, reconcileIsolation };
+  const isLive = async (team: TeamRef, userId: string, sandboxId: string): Promise<boolean> => {
+    if (!isUuid(userId) || !isUuid(sandboxId)) return false;
+    const claim = await kube.get(CLAIM(teamNamespaceName(team), claimName(userId)));
+    if (!claim || claim.metadata.uid !== sandboxId || claim.metadata.deletionTimestamp)
+      return false;
+    const annotations = claim.metadata.annotations ?? {};
+    return (
+      annotations[ANNOTATION_TEAM_ID] === team.id && annotations[ANNOTATION_USER_ID] === userId
+    );
+  };
+
+  return { ensureTeam, ensureSandbox, identifyBootstrapToken, reconcileIsolation, isLive };
 }
