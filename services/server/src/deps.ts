@@ -3,6 +3,7 @@ import { accounts, createDb, installRoles, users, type KobeDatabase } from "@kob
 import { AuditAnchorLogger } from "./audit/anchor.js";
 import { AuthAttemptAudit } from "./audit/attempts.js";
 import { recordAudit } from "./audit/record.js";
+import { BackgroundTasks } from "./background.js";
 import { createAuth, type KobeAuth } from "./auth/auth.js";
 import { createRunEventHub, type HubOptions, type RunEventHub } from "./event-stream/hub.js";
 import { createStreamReader, type StreamReader } from "./event-stream/read.js";
@@ -37,6 +38,8 @@ export interface ServerDepsOptions {
   };
   /** Outgoing email (invitations, password resets, notifications). */
   readonly mailer: Mailer;
+  /** Off-request-path work; tests pass their own to wait on it (default: a new tracker). */
+  readonly background?: BackgroundTasks;
   /** Sandbox wire seams and tuning (KOBE-24): approvals, UI, run hooks, wake, policy context. */
   readonly sandboxWire?: Partial<Omit<SandboxWireOptions, "db" | "databaseUrl">>;
   /** Run orchestrator seams and tuning (KOBE-30): agent resolution, budgets, timings. */
@@ -60,6 +63,8 @@ export interface ServerDeps {
     readonly timings: StreamTimings;
   };
   readonly mailer: Mailer;
+  /** Off-request-path work (emails, attempt audit); drained by close(). */
+  readonly background: BackgroundTasks;
   /** Logs and attests the audit chain head (started by index.ts, not in tests). */
   readonly auditAnchor: AuditAnchorLogger;
   /** Aggregated audit of unauthenticated auth attempts (flushed on close). */
@@ -94,8 +99,10 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   const database = createDb(options.databaseUrl);
   const authAttempts = new AuthAttemptAudit(database.db);
   authAttempts.start();
+  const background = options.background ?? new BackgroundTasks();
   const auth = createAuth({
     attempts: authAttempts,
+    background,
     db: database.db,
     publicUrl: options.publicUrl,
     secret: options.authSecret,
@@ -150,6 +157,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     publicUrl: new URL(options.publicUrl).origin,
     eventStream: { hub, reader, timings: { ...STREAM_DEFAULTS, ...options.eventStream?.timings } },
     mailer: options.mailer,
+    background,
     authAttempts,
     auditAnchor: new AuditAnchorLogger(database.db, options.authSecret),
     lifecycle,
@@ -193,6 +201,8 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     async close() {
       runs.close();
       await sandboxWire.close();
+      // In-flight emails and audit writes finish before the mailer and database go away.
+      await background.idle();
       await hub.close();
       await reader.close();
       options.mailer.close();
