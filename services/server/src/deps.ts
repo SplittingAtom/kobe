@@ -109,6 +109,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
 
   const sandboxWire = createSandboxWire({
     ...options.sandboxWire,
+    background,
     runContext: options.sandboxWire?.runContext ?? createDbRunContextSource(),
     db: database.db,
     databaseUrl: options.databaseUrl,
