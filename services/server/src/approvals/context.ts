@@ -2,6 +2,7 @@ import type { KobeDb } from "@kobe/db";
 import type { Logger } from "pino";
 import type { SandboxRouter } from "../sandbox-wire/types.js";
 import type { ApprovalKeyring } from "./keys.js";
+import type { AuditThrottle } from "./throttle.js";
 
 /** Late-bound run seams: the wire's router and the orchestrator's queue hook (created after us). */
 export interface ApprovalRunHooks {
@@ -22,6 +23,10 @@ export interface ApprovalContext {
   readonly now: () => Date;
   readonly log: Logger;
   readonly hooks: ApprovalRunHooks;
+  /** The wire's run event cap (`WireTuning.runMaxEvents`): no new approval past it. */
+  readonly runMaxEvents: number;
+  /** Throttles server-side `approval.rejected` rows. */
+  readonly throttle: AuditThrottle;
 }
 
 /** An API-facing failure with its HTTP status and stable code. */
@@ -35,7 +40,8 @@ export class ApprovalError extends Error {
       | "invalid_remember"
       | "glob_too_broad"
       | "too_many_rules"
-      | "approvals_unavailable",
+      | "approvals_unavailable"
+      | "approval_unavailable",
     readonly status: 400 | 404 | 409 | 503,
     message: string,
   ) {

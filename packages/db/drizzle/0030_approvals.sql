@@ -4,6 +4,7 @@ CREATE TABLE "approvals" (
 	"id" uuid DEFAULT gen_random_uuid() NOT NULL,
 	"run_id" uuid NOT NULL,
 	"thread_id" uuid NOT NULL,
+	"connection_id" uuid NOT NULL,
 	"user_id" uuid NOT NULL,
 	"tool_call_id" text NOT NULL,
 	"tool" text NOT NULL,

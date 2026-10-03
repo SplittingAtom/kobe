@@ -152,6 +152,38 @@ describe("ApprovalCard", () => {
     ),
   };
 
+  it("shows bidi overrides and zero-width characters as visible escapes (RLO payload)", () => {
+    // Renders as "invoice_exe.txt" on screen if the U+202E is passed through.
+    const path = "invoice_\u202etxt.exe\u200b";
+    render(<ApprovalCard requested={asked({ input: { path } })} resolved={undefined} api={api} />);
+    const shown = must(screen.getByLabelText("Input to approve").textContent);
+    expect(shown).toContain("invoice_\\u202etxt.exe\\u200b");
+    expect(shown).not.toMatch(/[\u202e\u200b]/);
+  });
+
+  it("flags and escapes a tool name with non-ASCII characters (homoglyphs)", () => {
+    // Cyrillic "е" in "creatе_issue".
+    render(
+      <ApprovalCard
+        requested={asked({ tool: "mcp__jira__creat\u0435_issue" })}
+        resolved={undefined}
+        api={api}
+      />,
+    );
+    expect(screen.getByText(/contains non-ASCII characters/)).toBeTruthy();
+    const title = must(screen.getByRole("group").textContent);
+    expect(title).toContain("mcp__jira__creat\\u0435_issue");
+    expect(title).not.toContain("\u0435");
+  });
+
+  it("does not offer 'Always allow' for destructive tools", () => {
+    render(
+      <ApprovalCard requested={asked({ risk: "destructive" })} resolved={undefined} api={api} />,
+    );
+    expect(screen.queryByRole("checkbox", { name: /Always allow/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Allow" })).toBeTruthy();
+  });
+
   it("offers no buttons once the request is past its expiry", () => {
     render(
       <ApprovalCard

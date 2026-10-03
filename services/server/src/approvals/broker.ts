@@ -5,7 +5,7 @@ import {
   type JsonObject,
   type PolicyReason,
 } from "@kobe/protocol";
-import { SYSTEM_ACTOR, withTeam } from "@kobe/db";
+import { SYSTEM_ACTOR, sql, withTeam, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { appendRunEventsInTx, withAppendTx, type NewRunEvent } from "../event-stream/append.js";
 import { applyTransition, lockRunRow, lockThreadRow } from "../runs/store.js";
@@ -26,6 +26,14 @@ import { insertPendingApproval, loadApproval, tokenOf, type ApprovalRow } from "
 
 /** Largest canonical input put on an approval card (the event payload cap is 256 KiB). */
 export const APPROVAL_INPUT_SHOWN_MAX_BYTES = 192 * 1024;
+
+/**
+ * Approvals one run may ask for, in total (KOBE-37 review: a compromised sandbox looping
+ * policy.checks with large inputs must not grow rows, events and audit without bound). A person
+ * answers each one, so 100 is far above real use; past it the run's further calls that need
+ * approval are denied (audited `approval.rejected` `too_many_approvals`).
+ */
+export const APPROVALS_MAX_PER_RUN = 100;
 
 export interface BrokerTuning {
   /** Re-read a pending approval this often even without a hint (default 2 s). */
@@ -126,15 +134,24 @@ export class ApprovalBrokerImpl implements ApprovalBroker {
     }
     const created = await this.#create(req, canonical);
     if (created.kind !== "created") {
-      return deny(
-        created.kind === "replay"
-          ? "this tool call id already asked for approval in this run."
-          : "the run is no longer active.",
-      );
+      const why: Record<typeof created.kind, string> = {
+        replay: "this tool call id already asked for approval in this run.",
+        inactive: "the run is no longer active.",
+        too_many: `the run already asked for ${APPROVALS_MAX_PER_RUN} approvals.`,
+        event_cap: "the run has reached its event limit.",
+      };
+      return deny(why[created.kind]);
     }
     onPending({ approvalId: created.id, expiresAt: created.expiresAt.toISOString() });
     const row = await this.#wait(req.teamId, created.id, created.expiresAt, req.signal);
     if (row === "aborted" || row === undefined) return deny("the run's connection closed.");
+    if (row.status === "allowed" && req.signal.aborted) {
+      // Decided as the connection closed: the allow can't be delivered, so it must not stay usable.
+      await expireAborted(this.#ctx, req.teamId, created.id).catch((err: unknown) =>
+        this.#ctx.log.warn({ err, approval_id: created.id }, "could not void an undelivered allow"),
+      );
+      return deny("the run's connection closed.");
+    }
     if (row.status === "allowed") {
       // The signed token stays server-side (approval.ts: "neither the key nor the token ever
       // enters a sandbox"); the MCP proxy finds it by (run, tool_call_id). For built-in and kobe
@@ -157,7 +174,7 @@ export class ApprovalBrokerImpl implements ApprovalBroker {
     canonical: string,
   ): Promise<
     | { readonly kind: "created"; readonly id: string; readonly expiresAt: Date }
-    | { readonly kind: "inactive" | "replay" }
+    | { readonly kind: "inactive" | "replay" | "too_many" | "event_cap" }
   > {
     const { teamId } = req;
     const expiresAt = new Date(this.#ctx.now().getTime() + this.#ctx.ttlMs);
@@ -173,11 +190,27 @@ export class ApprovalBrokerImpl implements ApprovalBroker {
       ) {
         return { kind: "inactive" as const };
       }
+      const limits = await tx.execute<{ last_seq: number; approvals: number }>(sql`
+        SELECT r.last_seq,
+               (SELECT count(*)::int FROM approvals a
+                 WHERE a.team_id = r.team_id AND a.run_id = r.id) AS approvals
+          FROM runs r WHERE r.team_id = ${teamId} AND r.id = ${run.id}`);
+      const limit = limits.rows[0];
+      // Room for this request, its resolution and the run's terminal event (as the ingest keeps).
+      if (!limit || limit.last_seq + 3 > this.#ctx.runMaxEvents) {
+        await this.#reject(tx, req, "run_event_cap");
+        return { kind: "event_cap" as const };
+      }
+      if (limit.approvals >= APPROVALS_MAX_PER_RUN) {
+        await this.#reject(tx, req, "too_many_approvals");
+        return { kind: "too_many" as const };
+      }
       const id = await insertPendingApproval(tx, {
         teamId,
         runId: run.id,
         threadId: thread.id,
         userId: req.userId,
+        connectionId: req.connectionId,
         toolCallId: req.toolCallId,
         tool: req.tool,
         inputCanonical: canonical,
@@ -185,7 +218,11 @@ export class ApprovalBrokerImpl implements ApprovalBroker {
         reasons: req.decision.reasons,
         expiresAt,
       });
-      if (id === undefined) return { kind: "replay" as const };
+      if (id === undefined) {
+        // A tampering signal: Pi never reuses a tool call id within a run (KOBE-36 blocks repeats).
+        await this.#reject(tx, req, "replayed_tool_call_id");
+        return { kind: "replay" as const };
+      }
       const event: NewRunEvent = {
         type: "approval.requested",
         payload: {
@@ -218,6 +255,29 @@ export class ApprovalBrokerImpl implements ApprovalBroker {
         },
       });
       return { kind: "created" as const, id, expiresAt };
+    });
+  }
+
+  /** `approval.rejected` (server), throttled per tool call and reason; last write of `tx`. */
+  async #reject(
+    tx: KobeTx,
+    req: ApprovalRequest,
+    reason: "replayed_tool_call_id" | "too_many_approvals" | "run_event_cap",
+  ): Promise<void> {
+    const taken = this.#ctx.throttle.take(`${req.teamId}:${req.runId}:${req.toolCallId}:${reason}`);
+    if (!taken.record) return;
+    await recordAudit(tx, {
+      action: "approval.rejected",
+      actor: SYSTEM_ACTOR,
+      teamId: req.teamId,
+      target: {
+        runId: req.runId,
+        toolCallId: req.toolCallId,
+        tool: req.tool,
+        reason,
+        enforcementPoint: "server",
+        ...(taken.suppressed > 0 ? { suppressed: taken.suppressed } : {}),
+      },
     });
   }
 

@@ -4,6 +4,7 @@ import { SYSTEM_ACTOR, withTeam, type KobeDb } from "@kobe/db";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit/record.js";
 import type { ApprovalKeyring } from "./keys.js";
+import { AuditThrottle } from "./throttle.js";
 import { consumeApprovalInTx, loadApprovalForCall, loadApprovalRecord, tokenOf } from "./store.js";
 
 /**
@@ -18,7 +19,8 @@ import { consumeApprovalInTx, loadApprovalForCall, loadApprovalRecord, tokenOf }
  * 2. stateful: the row is `allowed`, its MAC equals the token's, the run is active, and the
  *    approval is consumed exactly once (one conditional UPDATE), audited `approval.consumed`.
  *
- * Any failure is a refusal, audited `approval.rejected` (throttled per run and reason). A tampered
+ * Any failure is a refusal, audited `approval.rejected` (throttled per tool call and reason, repeats
+ * counted as `suppressed`). A tampered
  * kobe-policy can skip the server's check, change the input after approval, reuse a tool call id,
  * borrow another run's approval or wait out the token — each lands here as a refusal.
  */
@@ -44,8 +46,6 @@ export interface ApprovalVerifier {
   authorize(call: ApprovedCall): Promise<ApprovalCheck>;
 }
 
-const REJECT_AUDIT_EVERY_MS = 5 * 60_000;
-
 export function createApprovalVerifier(options: {
   readonly db: KobeDb;
   readonly keys: ApprovalKeyring | undefined;
@@ -54,17 +54,17 @@ export function createApprovalVerifier(options: {
 }): ApprovalVerifier {
   const { db } = options;
   const now = options.now ?? (() => new Date());
-  const audited = new Map<string, number>();
+  // Per tool call and reason (KOBE-37 review): varied forged attempts each leave a row; repeats of
+  // one are counted into its next row.
+  const throttle = new AuditThrottle();
 
   const reject = async (
     call: ApprovedCall,
     reason: VerifyFailure | "no_approval",
     approvalId?: string,
   ): Promise<ApprovalCheck> => {
-    const key = `${call.teamId}:${call.runId}:${reason}`;
-    if (Date.now() - (audited.get(key) ?? 0) >= REJECT_AUDIT_EVERY_MS) {
-      if (audited.size > 10_000) audited.clear();
-      audited.set(key, Date.now());
+    const taken = throttle.take(`${call.teamId}:${call.runId}:${call.toolCallId}:${reason}`);
+    if (taken.record) {
       try {
         await withTeam(db, call.teamId, (tx) =>
           recordAudit(tx, {
@@ -78,6 +78,7 @@ export function createApprovalVerifier(options: {
               reason,
               enforcementPoint: "mcp_proxy",
               ...(approvalId === undefined ? {} : { approvalId }),
+              ...(taken.suppressed > 0 ? { suppressed: taken.suppressed } : {}),
             },
           }),
         );

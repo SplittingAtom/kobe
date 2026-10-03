@@ -58,6 +58,12 @@ export const approvals = pgTable(
     id: uuid().notNull().defaultRandom(),
     runId: uuid().notNull(),
     threadId: uuid().notNull(),
+    /**
+     * The sandbox wire connection that asked (`sandbox_connections.connection_id`): a decision is
+     * only accepted while it is still the sandbox's open connection, the only one that can deliver
+     * the result (no waiter-less approval can be allowed).
+     */
+    connectionId: uuid().notNull(),
     /** The run's user: the only person who may decide it (KOBE-37 decision, D8/D29). */
     userId: uuid()
       .notNull()

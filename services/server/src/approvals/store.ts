@@ -22,6 +22,7 @@ export interface ApprovalRow {
   readonly runId: string;
   readonly threadId: string;
   readonly userId: string;
+  readonly connectionId: string;
   readonly toolCallId: string;
   readonly tool: string;
   readonly inputCanonical: string;
@@ -46,6 +47,7 @@ type Raw = {
   run_id: string;
   thread_id: string;
   user_id: string;
+  connection_id: string;
   tool_call_id: string;
   tool: string;
   input_canonical: string;
@@ -74,6 +76,7 @@ function fromRaw(r: Raw): ApprovalRow {
     runId: r.run_id,
     threadId: r.thread_id,
     userId: r.user_id,
+    connectionId: r.connection_id,
     toolCallId: r.tool_call_id,
     tool: r.tool,
     inputCanonical: r.input_canonical,
@@ -94,7 +97,7 @@ function fromRaw(r: Raw): ApprovalRow {
 }
 
 const SELECT = sql`
-  SELECT id, team_id, run_id, thread_id, user_id, tool_call_id, tool, input_canonical, risk,
+  SELECT id, team_id, run_id, thread_id, user_id, connection_id, tool_call_id, tool, input_canonical, risk,
          reasons, status, cause, decided_by, decided_at, expires_at, created_at, token_kid,
          token_expires_at, input_hmac, consumed_at, remembered
     FROM approvals`;
@@ -145,6 +148,7 @@ export interface NewApproval {
   readonly runId: string;
   readonly threadId: string;
   readonly userId: string;
+  readonly connectionId: string;
   readonly toolCallId: string;
   readonly tool: string;
   readonly inputCanonical: string;
@@ -159,9 +163,10 @@ export async function insertPendingApproval(
   a: NewApproval,
 ): Promise<string | undefined> {
   const res = await tx.execute<{ id: string }>(sql`
-    INSERT INTO approvals (team_id, run_id, thread_id, user_id, tool_call_id, tool,
+    INSERT INTO approvals (team_id, run_id, thread_id, user_id, connection_id, tool_call_id, tool,
                            input_canonical, risk, reasons, expires_at)
-    VALUES (${a.teamId}, ${a.runId}, ${a.threadId}, ${a.userId}, ${a.toolCallId}, ${a.tool},
+    VALUES (${a.teamId}, ${a.runId}, ${a.threadId}, ${a.userId}, ${a.connectionId},
+            ${a.toolCallId}, ${a.tool},
             ${a.inputCanonical}, ${a.risk}, ${JSON.stringify(a.reasons)}::jsonb,
             ${a.expiresAt.toISOString()})
     ON CONFLICT ON CONSTRAINT approvals_tool_call_key DO NOTHING

@@ -114,6 +114,10 @@ export const APPROVAL_REJECT_REASONS = [
   "record_mismatch",
   "run_inactive",
   "not_consumable",
+  // Server-side, before an approval exists (KOBE-37 review).
+  "replayed_tool_call_id",
+  "too_many_approvals",
+  "run_event_cap",
 ] as const;
 
 const event = <const S extends AuditScope, T extends z.ZodRawShape>(scope: S, shape: T) => ({
@@ -431,16 +435,19 @@ export const AUDIT_EVENTS = {
     enforcementPoint: z.enum(["mcp_proxy"]),
   }),
   /**
-   * An enforcement point refused a call that needed a signed approval (missing, tampered input,
-   * replayed, other run, expired, used). Throttled per run and reason (system).
+   * A call needing approval was refused before it could be used: at the MCP proxy (missing,
+   * tampered input, replayed, other run, expired, used) or at the server (a tool call id replayed
+   * in its run, the run's approval or event cap). Throttled per tool call and reason; `suppressed`
+   * counts the repeats since the previous row of that key (system).
    */
   "approval.rejected": event("team", {
     runId: id,
     toolCallId,
     tool: toolName,
     reason: z.enum(APPROVAL_REJECT_REASONS),
-    enforcementPoint: z.enum(["mcp_proxy"]),
+    enforcementPoint: z.enum(["mcp_proxy", "server"]),
     approvalId: id.optional(),
+    suppressed: count.optional(),
   }),
 
   // ── sandbox: the sandbox wire (KOBE-24, D13); throttled per sandbox and violation ──

@@ -41,13 +41,31 @@ export function resolvedText(resolved: Resolved): string {
   return EXPIRED_TEXT[resolved.cause === "user" ? "run_interrupted" : resolved.cause];
 }
 
-function pretty(input: unknown): string {
+/**
+ * Characters that make shown text differ from what runs: controls, format characters (bidi
+ * overrides/isolates U+202A–202E, U+2066–2069, zero-width U+200B–200F, U+FEFF, …), line and
+ * paragraph separators, surrogates, private-use and unusual spaces. Shown as visible `\uXXXX`.
+ */
+const INVISIBLE = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Zl}\p{Zp}\u00a0\u2000-\u200a\u202f\u205f\u3000]/gu;
+
+/** `text` with every invisible or reordering character as a visible `\uXXXX` escape. */
+export function visible(text: string, keep: RegExp = /\n/): string {
+  return text.replace(INVISIBLE, (ch) =>
+    keep.test(ch) ? ch : `\\u${(ch.codePointAt(0) ?? 0).toString(16).padStart(4, "0")}`,
+  );
+}
+
+/** Pretty JSON of the input, with invisible characters escaped (the newlines are formatting). */
+export function pretty(input: unknown): string {
   try {
-    return JSON.stringify(input, null, 2);
+    return visible(JSON.stringify(input, null, 2) ?? "");
   } catch {
     return "";
   }
 }
+
+/** Anything outside printable ASCII in a tool name (lookalike letters, hidden characters). */
+const NON_ASCII = /[^\x20-\x7e]/;
 
 function timeOf(iso: string): string {
   const d = new Date(iso);
@@ -117,6 +135,13 @@ export function ApprovalCard({
     );
   }
   const expired = Date.parse(requested.expires_at) <= now();
+  // Every unicode-escaped character of the name, so lookalikes can't pass for another tool.
+  const toolShown = visible(requested.tool).replace(
+    /[^\x20-\x7e]/gu,
+    (ch) => `\\u${(ch.codePointAt(0) ?? 0).toString(16).padStart(4, "0")}`,
+  );
+  // A remember-rule allows every future input of the tool: not offered for destructive ones.
+  const canRemember = requested.risk !== "destructive";
   const decide = async (decision: "allow" | "deny") => {
     if (!api) return;
     setBusy(true);
@@ -124,7 +149,7 @@ export function ApprovalCard({
     const pick = REMEMBER_CHOICES[choice] ?? REMEMBER_CHOICES[0];
     const res = await api.decideApproval(approvalId, {
       decision,
-      ...(decision === "allow" && remember
+      ...(decision === "allow" && remember && canRemember
         ? { remember: { toolGlob: requested.tool, expiresIn: pick.seconds } }
         : {}),
     });
@@ -141,10 +166,15 @@ export function ApprovalCard({
       aria-describedby={`${ids}-why`}
     >
       <p id={`${ids}-title`} className={styles.approvalTitle}>
-        <strong>Approval needed</strong> to run{" "}
-        <span className={styles.toolName}>{requested.tool}</span>{" "}
+        <strong>Approval needed</strong> to run <span className={styles.toolName}>{toolShown}</span>{" "}
         <span className={styles.badge}>{RISK_LABEL[requested.risk]}</span>
       </p>
+      {NON_ASCII.test(requested.tool) && (
+        <p className={styles.denied} role="note">
+          This tool name contains non-ASCII characters (shown escaped). It may imitate another
+          tool&apos;s name.
+        </p>
+      )}
       <ul id={`${ids}-why`} className={styles.approvalReasons}>
         {requested.reasons.map((r) => (
           <li key={`${r.stage}:${r.code}:${r.rule_id ?? ""}`}>{r.message}</li>
@@ -177,29 +207,31 @@ export function ApprovalCard({
         </p>
       ) : (
         <>
-          <div className={styles.approvalRemember}>
-            <label>
-              <input
-                type="checkbox"
-                checked={remember}
-                onChange={(e) => setRemember(e.target.checked)}
-                disabled={busy}
-              />{" "}
-              Always allow <span className={styles.toolName}>{requested.tool}</span>
-            </label>{" "}
-            <select
-              aria-label="Remember for"
-              value={choice}
-              onChange={(e) => setChoice(Number(e.target.value))}
-              disabled={busy || !remember}
-            >
-              {REMEMBER_CHOICES.map((c, i) => (
-                <option key={c.label} value={i}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          {canRemember && (
+            <div className={styles.approvalRemember}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={remember}
+                  onChange={(e) => setRemember(e.target.checked)}
+                  disabled={busy}
+                />{" "}
+                Always allow <span className={styles.toolName}>{toolShown}</span>
+              </label>{" "}
+              <select
+                aria-label="Remember for"
+                value={choice}
+                onChange={(e) => setChoice(Number(e.target.value))}
+                disabled={busy || !remember}
+              >
+                {REMEMBER_CHOICES.map((c, i) => (
+                  <option key={c.label} value={i}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className={styles.approvalActions}>
             <button
               type="button"

@@ -156,6 +156,9 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   });
 
   const approvals = new ApprovalService({
+    ...(options.sandboxWire?.tuning?.runMaxEvents === undefined
+      ? {}
+      : { runMaxEvents: options.sandboxWire.tuning.runMaxEvents }),
     ...options.approvals,
     db: database.db,
     ...(options.approvalKeys ? { keys: options.approvalKeys } : {}),

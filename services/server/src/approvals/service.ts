@@ -1,11 +1,14 @@
 import { APPROVAL_TTL_MS, type ActorContext, type ApprovalResolutionBody } from "@kobe/protocol";
 import type { KobeDb } from "@kobe/db";
 import { logger as rootLogger } from "../logger.js";
+import { WIRE_DEFAULTS } from "../sandbox-wire/constants.js";
 import { ApprovalBrokerImpl } from "./broker.js";
 import type { ApprovalContext, ApprovalRunHooks } from "./context.js";
 import { decideApproval, getApproval, listMyApprovals } from "./decide.js";
 import { sweepExpired } from "./expiry.js";
+import { expireAborted } from "./expiry.js";
 import type { ApprovalKeyring } from "./keys.js";
+import { AuditThrottle } from "./throttle.js";
 import { createApprovalVerifier, type ApprovalVerifier } from "./verify.js";
 import type { ApprovalView } from "./view.js";
 
@@ -20,6 +23,8 @@ export interface ApprovalServiceOptions {
   /** Expiry sweep interval for approvals no broker waits on (default 30 s). */
   readonly sweepMs?: number;
   readonly now?: () => Date;
+  /** The wire's run event cap (default `WIRE_DEFAULTS.runMaxEvents`). */
+  readonly runMaxEvents?: number;
 }
 
 /**
@@ -44,6 +49,8 @@ export class ApprovalService {
       now: options.now ?? (() => new Date()),
       log,
       hooks: this.#hooks,
+      runMaxEvents: options.runMaxEvents ?? WIRE_DEFAULTS.runMaxEvents,
+      throttle: new AuditThrottle(),
     };
     this.#sweepMs = options.sweepMs ?? 30_000;
     this.broker = new ApprovalBrokerImpl(this.#ctx, { pollMs: options.pollMs ?? 2_000 });
@@ -83,6 +90,14 @@ export class ApprovalService {
     filter: { readonly status?: ApprovalView["status"]; readonly runId?: string },
   ): Promise<ApprovalView[]> {
     return listMyApprovals(this.#ctx, actor, filter);
+  }
+
+  /**
+   * The connection that asked for `approvalId` is gone: expire it if pending, void it if allowed
+   * but not delivered (the broker calls this on abort; exposed for operations and tests).
+   */
+  async abandon(teamId: string, approvalId: string): Promise<void> {
+    await expireAborted(this.#ctx, teamId, approvalId);
   }
 
   /** Expires overdue approvals no broker is waiting on; `graceMs` lets the waiter go first. */

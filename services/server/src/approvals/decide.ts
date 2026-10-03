@@ -12,10 +12,15 @@ import { appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
 import { insertUserAllowRule } from "../policy/remember.js";
 import { lockRunRow, lockThreadRow } from "../runs/store.js";
 import { notifyHintInTx } from "../sandbox-wire/bus.js";
+import { WIRE_DEFAULTS } from "../sandbox-wire/constants.js";
 import { ApprovalError, type ApprovalContext } from "./context.js";
 import { resumeIfNoneWaiting } from "./expiry.js";
+import { auditExpiredApprovals, expireRunApprovalsInTx } from "./run-end.js";
 import { listApprovals, loadApproval } from "./store.js";
 import { viewOf, type ApprovalView } from "./view.js";
+
+/** A connection not touched for this long has lost its replica (the wire's `staleConnectionMs`). */
+const STALE_CONNECTION_SECONDS = WIRE_DEFAULTS.staleConnectionMs / 1000;
 
 /**
  * `POST /v1/approvals/{id}` (§6.1, D29): the run's user allows or denies a pending approval.
@@ -56,7 +61,7 @@ export async function decideApproval(
     new ApprovalError("approval_not_found", 404, "No pending approval with that id.");
   const head = await withTeam(ctx.db, teamId, (tx) => loadApproval(tx, teamId, approvalId));
   if (head?.userId !== actor.user_id) throw notFound();
-  return withAppendTx(ctx.db, teamId, async (tx) => {
+  const result = await withAppendTx(ctx.db, teamId, async (tx) => {
     const thread = await lockThreadRow(tx, teamId, head.threadId);
     const run = await lockRunRow(tx, teamId, head.runId);
     const row = await loadApproval(tx, teamId, approvalId, { lock: true });
@@ -70,6 +75,15 @@ export async function decideApproval(
     }
     if (!isActiveRunStatus(run.status)) {
       throw new ApprovalError("run_not_active", 409, "The run has ended.");
+    }
+    // Only the connection that asked can deliver the answer (KOBE-37 review): with it gone, an
+    // allow would sit unused while the sandbox was told "deny". Expire it instead (committed),
+    // then refuse.
+    if (!(await askerConnected(tx, teamId, row.userId, row.connectionId))) {
+      const expired = await expireRunApprovalsInTx(tx, teamId, run.id, "run_interrupted", row.id);
+      await resumeIfNoneWaiting(tx, thread, run, row.id, expired);
+      await auditExpiredApprovals(tx, teamId, expired);
+      return { unavailable: true as const };
     }
     let ruleId: string | undefined;
     if (body.decision === "allow") {
@@ -137,6 +151,28 @@ export async function decideApproval(
     if (!decided) throw notFound();
     return viewOf(decided);
   });
+  if ("unavailable" in result) {
+    throw new ApprovalError(
+      "approval_unavailable",
+      409,
+      "The workspace that asked is no longer connected, so this request expired. The tool did not run.",
+    );
+  }
+  return result;
+}
+
+/** The asking connection is still the sandbox's open, live one (`sandbox_connections`). */
+async function askerConnected(
+  tx: Parameters<typeof insertUserAllowRule>[0],
+  teamId: string,
+  userId: string,
+  connectionId: string,
+): Promise<boolean> {
+  const res = await tx.execute<{ ok: boolean }>(sql`
+    SELECT true AS ok FROM sandbox_connections
+     WHERE team_id = ${teamId} AND user_id = ${userId} AND connection_id = ${connectionId}
+       AND closed_at IS NULL AND last_seen_at > now() - make_interval(secs => ${STALE_CONNECTION_SECONDS})`);
+  return res.rows.length === 1;
 }
 
 async function remember(

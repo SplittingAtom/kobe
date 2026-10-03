@@ -85,6 +85,51 @@ export async function expireRunApprovalsInTx(
   return expired;
 }
 
+/**
+ * The connection that asked closed before an `allow` reached it (KOBE-37 review): the sandbox was
+ * told "deny", so the allowed approval must not stay usable. An allowed row is voided — `expired`
+ * (`run_interrupted`), its token state cleared — unless an MCP approval was already consumed (then
+ * it ran, through the proxy, with exactly the approved input). Appends `approval.resolved` so the
+ * card stops saying "Approved". Built-in approvals (marked used at allow) are voided too: the
+ * sandbox never ran them.
+ */
+export async function voidUndeliveredAllowInTx(
+  tx: KobeTx,
+  teamId: string,
+  approvalId: string,
+): Promise<ExpiredApproval[]> {
+  const res = await tx.execute<{ run_id: string; tool_call_id: string; tool: string }>(sql`
+    UPDATE approvals
+       SET status = 'expired', cause = 'run_interrupted', decided_at = now(), decided_by = NULL,
+           token_kid = NULL, token_expires_at = NULL, input_hmac = NULL, consumed_at = NULL
+     WHERE team_id = ${teamId} AND id = ${approvalId} AND status = 'allowed'
+       AND (consumed_at IS NULL OR tool NOT LIKE 'mcp\_\_%')
+     RETURNING run_id, tool_call_id, tool`);
+  const row = res.rows[0];
+  if (!row) return [];
+  const voided: ExpiredApproval = {
+    approvalId,
+    runId: row.run_id,
+    toolCallId: row.tool_call_id,
+    tool: row.tool,
+    cause: "run_interrupted",
+  };
+  await appendRunEventsInTx(tx, teamId, row.run_id, [
+    {
+      type: "approval.resolved",
+      payload: {
+        approval_id: approvalId,
+        tool_call_id: row.tool_call_id,
+        decision: "expired",
+        cause: "run_interrupted",
+        remembered: false,
+      },
+    },
+  ]);
+  await notifyHintInTx(tx, { kind: "apr", id: approvalId });
+  return [voided];
+}
+
 /** One `approval.expired` audit row per expired approval (system). Call as the last step. */
 export async function auditExpiredApprovals(
   tx: KobeTx,

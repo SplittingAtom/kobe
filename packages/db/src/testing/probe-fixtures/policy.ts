@@ -53,6 +53,7 @@ export const policyFixtures: Record<(typeof policy.team)[number], ProbeFixture> 
       runId: run.id,
       threadId: thread.id,
       userId,
+      connectionId: randomUUID(),
       toolCallId: "probe-call",
       tool: "bash",
       inputCanonical: '{"command":"true"}',

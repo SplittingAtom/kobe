@@ -1,3 +1,4 @@
+import { createHash, createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { approvalSigningString } from "@kobe/protocol";
 import { computeApprovalMac, signApproval, verifyApproval } from "@kobe/protocol/node";
@@ -104,6 +105,14 @@ describe("approval keys", () => {
   it("derives a stable kid from the key and refuses short keys", () => {
     const a = approvalKeyring("x".repeat(48));
     expect(a.current.kid).toMatch(/^a-[0-9a-f]{12}$/);
+    // HMAC(key, "kid"), never a plain hash of the key.
+    const secret = new TextEncoder().encode("x".repeat(48));
+    expect(a.current.kid).toBe(
+      `a-${createHmac("sha256", secret).update("kid").digest("hex").slice(0, 12)}`,
+    );
+    expect(a.current.kid).not.toBe(
+      `a-${createHash("sha256").update(secret).digest("hex").slice(0, 12)}`,
+    );
     expect(approvalKeyring("x".repeat(48)).current.kid).toBe(a.current.kid);
     expect(approvalKeyring("y".repeat(48)).current.kid).not.toBe(a.current.kid);
     expect(a.keyFor(a.current.kid)).toBe(a.current);

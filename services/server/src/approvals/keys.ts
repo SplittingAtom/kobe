@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { APPROVAL_KEY_MIN_BYTES } from "@kobe/protocol";
 import type { ApprovalKey } from "@kobe/protocol/node";
 
@@ -7,8 +7,9 @@ import type { ApprovalKey } from "@kobe/protocol/node";
  * the Helm chart into the sandbox session-keys Secret as `approval-hmac`), held by the server, which
  * signs, and by the MCP proxy (KOBE-58), which verifies. It never enters a sandbox.
  *
- * `kid` is derived from the key (`a-` + 12 hex of SHA-256), so a rotated key gets a new kid and a
- * token signed with the old key fails as `unknown_key` instead of `bad_mac`. Rotating the key
+ * `kid` is derived from the key as `a-` + 12 hex of HMAC-SHA256(key, "kid"), so a rotated key gets a
+ * new kid and a token signed with the old key fails as `unknown_key` instead of `bad_mac`. Keyed,
+ * not a plain hash: a published kid gives no offline check for guessing a weak admin-supplied key. Rotating the key
  * invalidates approvals allowed but not yet used (their tokens live 10 minutes).
  */
 
@@ -24,7 +25,7 @@ export function approvalKeyFromSecret(secret: string): ApprovalKey {
   if (bytes.byteLength < APPROVAL_KEY_MIN_BYTES) {
     throw new Error(`the approval key must be at least ${APPROVAL_KEY_MIN_BYTES} bytes`);
   }
-  const kid = `a-${createHash("sha256").update(bytes).digest("hex").slice(0, 12)}`;
+  const kid = `a-${createHmac("sha256", bytes).update("kid").digest("hex").slice(0, 12)}`;
   return { kid, secret: bytes };
 }
 

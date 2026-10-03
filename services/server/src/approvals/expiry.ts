@@ -10,7 +10,12 @@ import {
   type AppliedTransition,
 } from "../runs/store.js";
 import type { ApprovalContext } from "./context.js";
-import { auditExpiredApprovals, expireRunApprovalsInTx, type ExpiredApproval } from "./run-end.js";
+import {
+  auditExpiredApprovals,
+  expireRunApprovalsInTx,
+  voidUndeliveredAllowInTx,
+  type ExpiredApproval,
+} from "./run-end.js";
 import { loadApproval, otherPendingCount } from "./store.js";
 
 /** What the `run.failed` of a TTL expiry says (D29: "the run ends visibly"). */
@@ -97,10 +102,11 @@ async function stopAndAdvance(ctx: ApprovalContext, run: EndedRun): Promise<void
 }
 
 /**
- * The sandbox connection that asked went away while the approval was pending (the agent denies
- * the waiting call itself). The approval can no longer be used: `expired` (cause
- * `run_interrupted`), and the run goes back to `running` when nothing else waits — it resumes on
- * the sandbox's reconnect, or the wire interrupts it.
+ * The sandbox connection that asked went away before a decision reached it (the agent denies the
+ * waiting call itself). The approval can no longer be used: a pending one is `expired` (cause
+ * `run_interrupted`); one allowed but not delivered is voided the same way
+ * (`voidUndeliveredAllowInTx`). The run goes back to `running` when nothing else waits — it
+ * resumes on the sandbox's reconnect, or the wire interrupts it.
  */
 export async function expireAborted(
   ctx: ApprovalContext,
@@ -108,12 +114,16 @@ export async function expireAborted(
   approvalId: string,
 ): Promise<AppliedTransition | undefined> {
   const head = await withTeam(ctx.db, teamId, (tx) => loadApproval(tx, teamId, approvalId));
-  if (head?.status !== "pending") return undefined;
+  if (head?.status !== "pending" && head?.status !== "allowed") return undefined;
   return withAppendTx(ctx.db, teamId, async (tx) => {
     const thread = await lockThreadRow(tx, teamId, head.threadId);
     const run = await lockRunRow(tx, teamId, head.runId);
     if (!thread || !run) return undefined;
-    const expired = await expireRunApprovalsInTx(tx, teamId, run.id, "run_interrupted", approvalId);
+    // Pending: nobody can deliver a decision any more. Allowed but not delivered: void it.
+    const expired = [
+      ...(await expireRunApprovalsInTx(tx, teamId, run.id, "run_interrupted", approvalId)),
+      ...(await voidUndeliveredAllowInTx(tx, teamId, approvalId)),
+    ];
     const resumed = await resumeIfNoneWaiting(tx, thread, run, approvalId, expired);
     await auditExpiredApprovals(tx, teamId, expired);
     return resumed;

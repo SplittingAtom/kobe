@@ -183,6 +183,11 @@ export interface RunPolicyContextSource {
 export interface ApprovalRequest {
   readonly teamId: string;
   readonly userId: string;
+  /**
+   * The wire connection that asked (KOBE-37): an approval can only be decided while it is still
+   * the sandbox's open connection, since only it can deliver the result.
+   */
+  readonly connectionId: string;
   readonly runId: string;
   readonly threadId: string;
   readonly toolCallId: string;

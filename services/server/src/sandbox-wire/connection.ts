@@ -443,7 +443,7 @@ export class SandboxConnection implements RegisteredConnection {
     this.#ctx.metrics.policyChecks += 1;
     void decidePolicyCheck(
       this.#ctx.policy,
-      this.target,
+      { ...this.target, connectionId: this.id },
       frame,
       abort.signal,
       (pending) =>

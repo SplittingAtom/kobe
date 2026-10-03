@@ -168,21 +168,60 @@ call`, `policy.denied` is appended, the run goes back to `running` (Pi continues
    stays `allowed`, unconsumed, until its 10-minute token or the run ends. Using it needs the exact
    approved input and tool call id, so this is what the user approved.
 
+## Coordinator security review (#48: 0 CRITICAL/HIGH) — resolution
+
+- **M2 undeliverable decisions.** `approvals.connection_id` records the asking wire connection.
+  `decide` refuses (`409 approval_unavailable`) and expires the approval unless that connection is
+  still the sandbox's open, live one (`sandbox_connections`, not stale). On abort, an allowed but
+  undelivered approval is voided (`voidUndeliveredAllowInTx`: `expired`/`run_interrupted`, token
+  cleared, `approval.resolved`, audited), except an MCP approval the proxy already consumed. The
+  broker also voids an allow it read just as the connection closed. Tests: "refuses a decision
+  once the connection that asked is gone…", "voids an allowed MCP approval whose allow never
+  reached the sandbox", "keeps a consumed MCP approval as used".
+- **M3 audit trail.** `AuditThrottle` (`approvals/throttle.ts`) keys rows on team, run, tool call
+  id and reason, counts repeats into the key's next row (`suppressed`), and evicts oldest-first
+  instead of clearing. The server now audits `approval.rejected` (`enforcementPoint: server`) for a
+  replayed `tool_call_id`, `too_many_approvals` and `run_event_cap`. Missing key, non-JSON input and
+  over-192 KiB inputs are not audited (configuration or model size, not tampering). Tests: "audits
+  a replayed tool_call_id…", "audits each forged tool call id at the proxy…", `throttle.test.ts`.
+- **M4 abuse limits.** `APPROVALS_MAX_PER_RUN = 100`, and no new approval within 3 events of the run
+  event cap (`runMaxEvents`). Tests: "caps approvals per run (100)", "stops asking once the run nears
+  its event cap".
+- **M5 card spoofing.** The card shows control, format (bidi U+202A–202E and U+2066–2069,
+  zero-width, U+FEFF), separator, surrogate, private-use and unusual-space characters as visible
+  `\uXXXX` escapes. A tool name with non-ASCII characters is escaped and flagged. Tests: RLO
+  payload, Cyrillic homoglyph tool name.
+- **L7.** "Always allow" is hidden for `destructive` tools. **Remember-rules apply to every
+  argument (unless `arg_pattern` narrows them) and survive connector re-pins under the same tool
+  name; KOBE-59 should tie them to the pinned tool hash.**
+- **L8.** `kid` = `a-` + 12 hex of HMAC-SHA256(key, "kid") (test checks it is not a plain hash).
+- **L10.** Confirmed: the only API response with an object-valued `input` key is the approval view
+  (searched `services/server/src` and `packages/protocol`). Run usage's `input` is a number and run
+  inputs are strings, so camelising never mattered for them. The exception stays global.
+
+**Gate 2 stays open.** The seam and its server-side tests exist, but nothing calls
+`enforceMcpCall` or `verifier.authorize` until KOBE-58 wires the proxy. Gate 2 closes only with
+KOBE-58's integration test: the real MCP proxy with kobe-policy bypassed must refuse an MCP write
+without a signed approval.
+
+**ask-all:** current behaviour kept (still prompts sandbox tools). The coordinator is confirming
+the interpretation with the user.
+
 ## Evidence (acceptance criteria → test or command output)
 
-| AC        | Evidence                                                                                                                                                                                                                                                                                                                         |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ac-1      | `approvals.db.test.ts` "allow: pending → card event → API on another replica → signed allow; run resumes; audited" (two replicas, bus hint), "deny: …"                                                                                                                                                                           |
-| ac-2      | `@kobe/db test:db` 405/405 incl. probe suite with the `approvals` fixture; `0031_approvals_rls.sql`                                                                                                                                                                                                                              |
-| ac-3      | `approvals/signing.test.ts` (known-answer vector; changed value, added arg, NFD, number, replayed id, other run, other tool, expired, rotated key); protocol `approval.test.ts`; db: "a replayed tool_call_id can't ask again"                                                                                                   |
-| ac-4      | "TTL: past 1 h the call is denied and the run fails visibly …" (`run.failed approval_expired`, `run.stop approval_expired`, thread idle, audit, late decision 409); "the sweep expires an approval nobody waits on"                                                                                                              |
-| ac-5      | "approve and remember writes a user allow rule for exactly this tool; the next call runs" (too broad → 400, expiry stored, audit `ruleId`, ask rule still wins)                                                                                                                                                                  |
-| ac-6      | "only the run's user decides; others get 404; a decided approval is 409; bad bodies 400"                                                                                                                                                                                                                                         |
-| ac-7      | `apps/web/components/chat/approvals.test.tsx` (10: card content, Allow + 30-day remember body, Deny, server expiry, server refusal, past-expiry, input read-back, causes); `lib/api/casing.test.ts`                                                                                                                              |
-| ac-8      | "Stop while pending …", "a budget stop expires pending approvals (D30) …", "the sandbox connection closing while pending …"                                                                                                                                                                                                      |
-| ac-9      | audit assertions in the db tests; `packages/db` `events.test.ts` (taxonomy + docs/audit-log.md)                                                                                                                                                                                                                                  |
-| Gate 2    | `approvals.db.test.ts` "Gate 2 …" (6): proxy re-check requires approval; skipped check → `no_approval` (audited); changed input `bad_mac`, NFD, other user `record_mismatch`, pending `not_allowed`; canonical reorder allowed once then `not_consumable`; other id, other run, other tool, expired token, ended run; forged MAC |
-| E2E       | `e2e/run.sh` "approvals (KOBE-37)": ask rule → `policy.pending` → `waiting_approval` → API allow → `policy.result allow` (no token) → second call → API deny → `deny`; 409 on re-decide; events and audit rows (runs in CI's `e2e` job)                                                                                          |
-| user dec. | "defaults (user decision 2026-10-03) › never prompts for sandbox tools unless a policy rule asks"                                                                                                                                                                                                                                |
+| AC                                          | Evidence                                                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ac-1                                        | `approvals.db.test.ts` "allow: pending → card event → API on another replica → signed allow; run resumes; audited" (two replicas, bus hint), "deny: …"                                                                                                                                                                           |
+| ac-2                                        | `@kobe/db test:db` 405/405 incl. probe suite with the `approvals` fixture; `0031_approvals_rls.sql`                                                                                                                                                                                                                              |
+| ac-3                                        | `approvals/signing.test.ts` (known-answer vector; changed value, added arg, NFD, number, replayed id, other run, other tool, expired, rotated key); protocol `approval.test.ts`; db: "a replayed tool_call_id can't ask again"                                                                                                   |
+| ac-4                                        | "TTL: past 1 h the call is denied and the run fails visibly …" (`run.failed approval_expired`, `run.stop approval_expired`, thread idle, audit, late decision 409); "the sweep expires an approval nobody waits on"                                                                                                              |
+| ac-5                                        | "approve and remember writes a user allow rule for exactly this tool; the next call runs" (too broad → 400, expiry stored, audit `ruleId`, ask rule still wins)                                                                                                                                                                  |
+| ac-6                                        | "only the run's user decides; others get 404; a decided approval is 409; bad bodies 400"                                                                                                                                                                                                                                         |
+| ac-7                                        | `apps/web/components/chat/approvals.test.tsx` (10: card content, Allow + 30-day remember body, Deny, server expiry, server refusal, past-expiry, input read-back, causes); `lib/api/casing.test.ts`                                                                                                                              |
+| ac-8                                        | "Stop while pending …", "a budget stop expires pending approvals (D30) …", "the sandbox connection closing while pending …"                                                                                                                                                                                                      |
+| ac-9                                        | audit assertions in the db tests; `packages/db` `events.test.ts` (taxonomy + docs/audit-log.md)                                                                                                                                                                                                                                  |
+| Gate 2 (seam only; gate open until KOBE-58) | `approvals.db.test.ts` "Gate 2 …" (6): proxy re-check requires approval; skipped check → `no_approval` (audited); changed input `bad_mac`, NFD, other user `record_mismatch`, pending `not_allowed`; canonical reorder allowed once then `not_consumable`; other id, other run, other tool, expired token, ended run; forged MAC |
+| E2E                                         | `e2e/run.sh` "approvals (KOBE-37)": ask rule → `policy.pending` → `waiting_approval` → API allow → `policy.result allow` (no token) → second call → API deny → `deny`; 409 on re-decide; events and audit rows (runs in CI's `e2e` job)                                                                                          |
+| user dec.                                   | "defaults (user decision 2026-10-03) › never prompts for sandbox tools unless a policy rule asks"                                                                                                                                                                                                                                |
 
 Commands: see the PR body.

@@ -7,7 +7,7 @@ import {
   type ToolDescriptor,
 } from "@kobe/protocol";
 import { createDb, type KobeDatabase } from "@kobe/db";
-import { approvalKeyring, enforceMcpCall } from "./approvals/index.js";
+import { APPROVALS_MAX_PER_RUN, approvalKeyring, enforceMcpCall } from "./approvals/index.js";
 import { createPolicyEngine } from "./policy/engine.js";
 import { createToolRegistry } from "./policy/registry.js";
 import { createDbRuleSource, createDbSettingsSource } from "./policy/rule-store.js";
@@ -27,6 +27,8 @@ const auth = new FakeSandboxAuth();
 const listeners: Awaited<ReturnType<typeof sandboxListener>>[] = [];
 const sandboxes: FakeSandbox[] = [];
 const extraDbs: KobeDatabase[] = [];
+/** A small run event cap so the cap test reaches it (every other test stays far below). */
+const RUN_MAX_EVENTS = 40;
 const KEY = approvalKeyring("approval-key-for-tests-".padEnd(48, "k"));
 /** Shifts every approval clock (TTL, token expiry) forward in tests. */
 let skewMs = 0;
@@ -68,7 +70,7 @@ beforeAll(async () => {
     extraDbs.push(database);
     return {
       approvalKeys: KEY,
-      approvals: { now, pollMs: 100 },
+      approvals: { now, pollMs: 100, runMaxEvents: RUN_MAX_EVENTS },
       sandboxWire: {
         sweep: false,
         tools: registry,
@@ -400,6 +402,153 @@ describe("a policy rule makes the call wait for its user", () => {
     expect(result.decision === "deny" && result.message).toMatch(/already asked/);
     await decide(w.owner, pending.approval_id, { decision: "deny" });
     await first.result();
+  });
+});
+
+describe("review: abuse limits, replay audit, undeliverable decisions", () => {
+  it("audits a replayed tool_call_id as a tamper signal", async () => {
+    const w = await world();
+    await askRule(w, "bash");
+    const first = check(w, "bash", { command: "ls" }, "dup-id");
+    const pending = await first.pending();
+    await check(w, "bash", { command: "rm -rf /" }, "dup-id").result();
+    expect((await audits(w.team, "approval.rejected"))[0]?.target).toMatchObject({
+      reason: "replayed_tool_call_id",
+      enforcementPoint: "server",
+      toolCallId: "dup-id",
+    });
+    await decide(w.owner, pending.approval_id, { decision: "deny" });
+  });
+
+  it(`caps approvals per run (${APPROVALS_MAX_PER_RUN})`, async () => {
+    const w = await world();
+    await askRule(w, "bash");
+    // Earlier approvals of the run, as if a looping sandbox had asked them.
+    await fx.admin.query(
+      `INSERT INTO approvals (team_id, run_id, thread_id, user_id, connection_id, tool_call_id,
+                              tool, input_canonical, risk, reasons, status, cause, decided_at,
+                              expires_at)
+       SELECT $1, $2, $3, $4, gen_random_uuid(), 'old-' || n, 'bash', '{}', 'write', '[]',
+              'expired', 'run_interrupted', now(), now()
+         FROM generate_series(1, $5::int) n`,
+      [w.team, w.runId, w.threadId, w.owner.id, APPROVALS_MAX_PER_RUN],
+    );
+    const result = await check(w, "bash", { command: "ls" }).result();
+    expect(result.decision === "deny" && result.message).toMatch(/already asked for 100/);
+    expect((await audits(w.team, "approval.rejected"))[0]?.target).toMatchObject({
+      reason: "too_many_approvals",
+    });
+    expect(await runStatus(w.team, w.runId)).toBe("running");
+  });
+
+  it("stops asking once the run nears its event cap", async () => {
+    const w = await world();
+    await askRule(w, "bash");
+    let denied = "";
+    for (let i = 0; i < RUN_MAX_EVENTS; i += 1) {
+      const call = check(w, "bash", { command: `echo ${i}` });
+      const first = await w.sb.until(
+        () =>
+          w.sb.frames("policy.pending").find((f) => f.request_id === call.requestId) ??
+          w.sb.frames("policy.result").find((f) => f.request_id === call.requestId),
+      );
+      if (first.type === "policy.result") {
+        denied = first.decision === "deny" ? first.message : "";
+        break;
+      }
+      await decide(w.owner, first.approval_id, { decision: "deny" });
+      await call.result();
+    }
+    expect(denied).toMatch(/event limit/);
+    expect((await audits(w.team, "approval.rejected")).at(-1)?.target).toMatchObject({
+      reason: "run_event_cap",
+    });
+  });
+
+  it("refuses a decision once the connection that asked is gone, and expires the approval", async () => {
+    const w = await world();
+    await askRule(w, "bash");
+    const call = check(w, "bash", { command: "make deploy" });
+    const pending = await call.pending();
+    // The asking connection is no longer the sandbox's (e.g. its replica died).
+    await fx.admin.query(
+      `UPDATE sandbox_connections SET connection_id = gen_random_uuid() WHERE team_id = $1`,
+      [w.team],
+    );
+    const refused = await decide(w.owner, pending.approval_id, { decision: "allow" });
+    expect(refused).toMatchObject({ status: 409, json: { code: "approval_unavailable" } });
+    expect(await approvalRow(pending.approval_id)).toMatchObject({
+      status: "expired",
+      cause: "run_interrupted",
+      input_hmac: null,
+    });
+    expect(await runStatus(w.team, w.runId)).toBe("running");
+    expect((await call.result()).decision).toBe("deny");
+  });
+
+  it("voids an allowed MCP approval whose allow never reached the sandbox", async () => {
+    const w = await world();
+    const call = check(w, "mcp__jira__create_issue", { project: "OPS" }, "tc-void");
+    const pending = await call.pending();
+    expect((await decide(w.owner, pending.approval_id, { decision: "allow" })).status).toBe(200);
+    await call.result();
+    // As if the connection had closed before the allow was delivered.
+    await fx.replica(0).deps.approvals.abandon(w.team, pending.approval_id);
+    expect(await approvalRow(pending.approval_id)).toMatchObject({
+      status: "expired",
+      cause: "run_interrupted",
+      input_hmac: null,
+    });
+    expect(
+      await fx.replica(1).deps.approvals.verifier.authorize({
+        teamId: w.team,
+        userId: w.owner.id,
+        runId: w.runId,
+        toolCallId: "tc-void",
+        tool: "mcp__jira__create_issue",
+        input: { project: "OPS" },
+      }),
+    ).toEqual({ ok: false, reason: "not_allowed" });
+    const resolved = (await events(w.team, w.runId)).filter((e) => e.type === "approval.resolved");
+    expect(resolved.at(-1)?.payload).toMatchObject({
+      decision: "expired",
+      cause: "run_interrupted",
+    });
+  });
+
+  it("keeps a consumed MCP approval as used (it ran through the proxy)", async () => {
+    const w = await world();
+    const call = check(w, "mcp__jira__create_issue", { project: "OPS" }, "tc-used");
+    const pending = await call.pending();
+    await decide(w.owner, pending.approval_id, { decision: "allow" });
+    await call.result();
+    const base = {
+      teamId: w.team,
+      userId: w.owner.id,
+      runId: w.runId,
+      toolCallId: "tc-used",
+      tool: "mcp__jira__create_issue",
+      input: { project: "OPS" },
+    };
+    expect((await fx.replica(1).deps.approvals.verifier.authorize(base)).ok).toBe(true);
+    await fx.replica(0).deps.approvals.abandon(w.team, pending.approval_id);
+    expect((await approvalRow(pending.approval_id)).status).toBe("allowed");
+  });
+
+  it("audits each forged tool call id at the proxy (not one row per run)", async () => {
+    const w = await world();
+    const verifier = fx.replica(1).deps.approvals.verifier;
+    const base = {
+      teamId: w.team,
+      userId: w.owner.id,
+      runId: w.runId,
+      tool: "mcp__jira__create_issue",
+      input: {},
+    };
+    for (const id of ["f1", "f2", "f3", "f1"])
+      await verifier.authorize({ ...base, toolCallId: id });
+    const rows = await audits(w.team, "approval.rejected");
+    expect(rows.map((r) => r.target.toolCallId)).toEqual(["f1", "f2", "f3"]);
   });
 });
 
