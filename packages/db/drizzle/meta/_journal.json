@@ -113,20 +113,6 @@
       "when": 1790960500579,
       "tag": "0015_audit_log_append_only",
       "breakpoints": true
-    },
-    {
-      "idx": 16,
-      "version": "7",
-      "when": 1790967669897,
-      "tag": "0016_agent_versions",
-      "breakpoints": true
-    },
-    {
-      "idx": 17,
-      "version": "7",
-      "when": 1790967682169,
-      "tag": "0017_agent_versions_rls",
-      "breakpoints": true
     }
   ]
 }
