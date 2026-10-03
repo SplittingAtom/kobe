@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  KOBE_EVENT_DROPPED_TYPE,
+  SANDBOX_FRAME_MAX_BYTES_BY_TYPE,
   SANDBOX_MAX_FRAME_BYTES,
+  SANDBOX_SMALL_FRAME_MAX_BYTES,
   decodeSandboxFrame,
   decodeServerFrame,
   encodeFrame,
+  kobeEventDroppedSchema,
   parseTranslatedPiEvent,
   piGetEntriesDataSchema,
   type ApprovalToken,
@@ -463,5 +467,54 @@ describe("translated Pi events", () => {
       piGetEntriesDataSchema.safeParse({ entries: [{ ...entry, id: "" }], leafId: null }).success,
     ).toBe(false);
     expect(piGetEntriesDataSchema.safeParse({ entries: [entry] }).success).toBe(false);
+  });
+});
+
+describe("contracts cleanup (agent-reported gaps)", () => {
+  it("does not admit fork in pi.command (it moves Pi off the thread's session file)", () => {
+    const frame = {
+      v: 1,
+      type: "pi.command",
+      command_id: "c1",
+      thread_id: THREAD,
+      command: { id: "x", type: "fork", entryId: "a1" },
+    };
+    expect(decodeServerFrame(JSON.stringify(frame))).toMatchObject({ ok: false });
+    expect(
+      decodeServerFrame(
+        JSON.stringify({ ...frame, command: { id: "x", type: "get_fork_messages" } }),
+      ),
+    ).toMatchObject({ ok: true });
+  });
+
+  it("describes the kobe.event_dropped placeholder, which the translator ignores", () => {
+    const placeholder = {
+      type: KOBE_EVENT_DROPPED_TYPE,
+      original_type: "message_update",
+      reason: "frame_too_large",
+    };
+    expect(kobeEventDroppedSchema.parse(placeholder)).toEqual(placeholder);
+    expect(parseTranslatedPiEvent(placeholder)).toEqual({ kind: "ignored" });
+    expect(
+      decodeSandboxFrame(
+        JSON.stringify({
+          v: 1,
+          type: "pi.event",
+          run_id: RUN,
+          thread_id: THREAD,
+          seq: 1,
+          event: placeholder,
+        }),
+      ),
+    ).toMatchObject({ ok: true });
+  });
+
+  it("states the per-type frame caps (only pi.event, command.result and policy.check are large)", () => {
+    expect(SANDBOX_SMALL_FRAME_MAX_BYTES).toBe(256 * 1024);
+    expect(SANDBOX_FRAME_MAX_BYTES_BY_TYPE).toEqual({
+      "pi.event": SANDBOX_MAX_FRAME_BYTES,
+      "command.result": SANDBOX_MAX_FRAME_BYTES,
+      "policy.check": 1024 * 1024,
+    });
   });
 });

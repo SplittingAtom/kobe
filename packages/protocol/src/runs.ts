@@ -142,9 +142,11 @@ export function queueMayAdvance(status: ThreadStatus): boolean {
 }
 
 /**
- * Retry rules (D14, KOBE-26): only the thread's latest ended run, only if `interrupted`, at most
- * once (KOBE-26 adds `runs.retry_of_run_id` with a unique index). A repeated retry of the same run
- * returns the existing retry run (idempotent) instead of creating another.
+ * Retry rules (D14, KOBE-26): only the thread's **latest run that ran** (ended, and
+ * `started_at` not null), only if `interrupted`, at most once (`runs.retry_of_run_id`, unique
+ * index). Runs that ended without ever starting (a deleted or failed queued message) are skipped:
+ * they never ran, so they cannot hide an interrupted run from Retry. A repeated retry of the same
+ * run returns the existing retry run (idempotent) instead of creating another.
  */
 export type RetryCheck = "ok" | "already_retried" | "not_interrupted" | "not_latest";
 
@@ -152,6 +154,11 @@ export interface RetryCandidate {
   readonly run_id: string;
   readonly status: RunStatus;
   readonly retry_of_run_id?: string | undefined;
+  /**
+   * `runs.started_at`; `null` = never started (skipped by the "latest" rule). Omitted = unknown,
+   * treated as started (callers that pre-filter never-started runs, as before this field).
+   */
+  readonly started_at?: string | null | undefined;
 }
 
 /** `runs` is the thread's runs in creation order. */
@@ -159,6 +166,8 @@ export function checkRetry(runs: readonly RetryCandidate[], runId: string): Retr
   if (runs.some((r) => r.retry_of_run_id === runId)) return "already_retried";
   const target = runs.find((r) => r.run_id === runId);
   if (target?.status !== "interrupted") return "not_interrupted";
-  const latestEnded = runs.filter((r) => isTerminalRunStatus(r.status)).at(-1);
+  const latestEnded = runs
+    .filter((r) => isTerminalRunStatus(r.status) && r.started_at !== null)
+    .at(-1);
   return latestEnded?.run_id === runId ? "ok" : "not_latest";
 }

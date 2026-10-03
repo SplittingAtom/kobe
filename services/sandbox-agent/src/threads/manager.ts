@@ -171,12 +171,6 @@ export class ThreadManager {
 
   async #piCommand(thread: Thread, frame: Frame<"pi.command">): Promise<CommandOutcome> {
     const { id: _serverId, ...command } = frame.command;
-    if (command.type === "fork") {
-      return fail(
-        "pi_rejected",
-        "fork moves Pi to a new session file; branch with run.start parent_entry_id",
-      );
-    }
     if (thread.restoring) return fail("pi_rejected", "session restore in progress");
     const prepared = await thread.withLock(() => this.#ensureProcess(thread, undefined));
     if (prepared !== undefined) return prepared;

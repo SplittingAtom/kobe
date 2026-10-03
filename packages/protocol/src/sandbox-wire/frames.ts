@@ -64,7 +64,11 @@ export const piEventFrameSchema = frame("pi.event", {
   event: piSessionEventSchema,
 });
 
-/** An `extension_ui_request` from Pi, forwarded for the server to answer or cancel. */
+/**
+ * An `extension_ui_request` from Pi, forwarded for the server to answer or cancel. Not sequenced:
+ * after a reconnect the agent re-sends every dialog still open, so the server must dedupe by
+ * `(thread_id, request.id)` and answer each dialog once (KOBE-23/24).
+ */
 export const piUiRequestFrameSchema = frame("pi.ui_request", {
   run_id: uuidSchema.optional(),
   thread_id: uuidSchema,
@@ -76,9 +80,13 @@ export const piUiRequestFrameSchema = frame("pi.ui_request", {
  * asks the server about one call. The extension blocks the call until `policy.result` arrives; a
  * lost connection or any error means block (fail closed). Parallel tool calls each get their own
  * `request_id`. `input` is the input as it will execute: kobe-policy must run after every handler
- * that mutates `event.input` (Pi lets `tool_call` handlers mutate input in place), and on allow it
- * replaces `event.input` with `JSON.parse(canonicalJson(input))` so the executed input is exactly
- * the decided one.
+ * that mutates `event.input` (Pi lets `tool_call` handlers mutate input in place). It checks the
+ * executed object as is — plain JSON only, so what it sends is what the tool reads — and
+ * deep-freezes that object before asking, so the executed input is exactly the decided one. It
+ * does not replace `event.input` (a re-parsed copy would be a no-op in Pi 1.0.0; KOBE-36).
+ * Size: at most {@link SANDBOX_FRAME_MAX_BYTES_BY_TYPE}`["policy.check"]` (1 MiB) per frame — it
+ * carries a `write`'s content as executed; a larger check closes the connection, so the agent
+ * blocks such a call locally instead of sending it.
  */
 export const policyCheckFrameSchema = frame("policy.check", {
   request_id: idSchema,
@@ -208,7 +216,10 @@ export const runStopFrameSchema = frame("run.stop", {
   reason: z.enum(["user_cancelled", "budget_exhausted", "approval_expired"]),
 });
 
-/** Allow-listed Pi RPC command (get_entries(since), fork, ...); answered with `command.result`. */
+/**
+ * Allow-listed Pi RPC command (`get_entries(since)`, `get_state`, `compact`, ...; never `fork`, see
+ * pi-rpc.ts); answered with `command.result`.
+ */
 export const piCommandFrameSchema = frame("pi.command", {
   command_id: commandId,
   thread_id: uuidSchema,
@@ -231,8 +242,11 @@ export const policyPendingFrameSchema = frame("policy.pending", {
 
 /**
  * The server's decision. Only `allow` / `deny` reach the sandbox (`require_approval` is resolved
- * server-side first). `approval` is present when the allow came from a human approval; kobe-policy
- * passes it on where a downstream verifier (MCP proxy) needs it. `message` becomes Pi's block reason.
+ * server-side first). `message` becomes Pi's block reason. `approval` (optional, present when the
+ * allow came from a human approval) stops at kobe-sandbox-agent: the agent strips it before the
+ * decision reaches kobe-policy (KOBE-23), so the token never enters Pi or a tool. For Pi built-ins
+ * and kobe tools this frame is itself the authorisation; the MCP proxy finds the approval by
+ * (run_id, tool_call_id) server-side (KOBE-58), not through the sandbox.
  */
 export const policyResultFrameSchema = z.union([
   frame("policy.result", {
@@ -254,8 +268,14 @@ export const policyResultFrameSchema = z.union([
 ]);
 
 /**
- * Rebuild a thread's Pi session JSONL from Postgres (volume lost, D13/D15). Sent in parts; the agent
- * writes the file only after `final: true`, then answers `command.result`. SPECULATIVE chunking.
+ * Rebuild a thread's Pi session JSONL from Postgres (volume lost, D13/D15). Sent in parts, each
+ * its own command with its own `command_id`, and **every part gets its own `command.result`**
+ * (the server sends the next part after the previous one's result). Part 0 starts (or restarts)
+ * the restore and may carry `header` (absent → the agent writes a default one); the agent writes
+ * the file only after `final: true`, and a lost connection voids a partial restore (the server
+ * starts again from part 0). The agent **rewrites `header.cwd`** to its own workspace directory,
+ * whatever the stored header says: Pi 1.0.0 refuses a session whose cwd does not exist.
+ * SPECULATIVE chunking (KOBE-24 sends ≤ 2 MiB parts).
  */
 export const sessionRestoreFrameSchema = frame("session.restore", {
   command_id: commandId,

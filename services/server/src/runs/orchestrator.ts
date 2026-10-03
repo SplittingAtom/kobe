@@ -25,7 +25,8 @@ import {
   withAppendTx,
 } from "../event-stream/append.js";
 import { logger as rootLogger } from "../logger.js";
-import { clampApprovalMode, readApprovalModeFloor } from "../sandbox-wire/policy-check.js";
+import { readApprovalFloor } from "../policy/approval-floor.js";
+import { clampApprovalMode } from "../sandbox-wire/policy-check.js";
 import { endRunInTx } from "../sandbox-wire/run-state.js";
 import type { SandboxRouter, SandboxTarget } from "../sandbox-wire/types.js";
 import { viewerProjectIds } from "../threads/references.js";
@@ -221,7 +222,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       }
       const requested: ApprovalMode =
         command.trigger === "schedule" ? "auto" : (command.approval_mode ?? "ask-on-write");
-      const approvalMode = clampApprovalMode(requested, await readApprovalModeFloor(tx, teamId));
+      const approvalMode = clampApprovalMode(requested, await readApprovalFloor(tx));
       const id = await insertQueuedRun(tx, {
         teamId,
         threadId: thread.id,
@@ -366,7 +367,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         threadId: thread.id,
         trigger: run.trigger,
         // Re-clamped: a floor raised since the original run applies to its retry.
-        approvalMode: clampApprovalMode(run.approvalMode, await readApprovalModeFloor(tx, teamId)),
+        approvalMode: clampApprovalMode(run.approvalMode, await readApprovalFloor(tx)),
         input: run.input,
         // Same branch point as the original: the retry is a sibling branch; history stays intact.
         parentEntryId: run.parentEntryId,

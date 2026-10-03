@@ -232,15 +232,19 @@ describe("pi.command", () => {
     expect(sent?.id).not.toBe("server-chosen");
   });
 
-  it("refuses fork (it would move Pi off the thread's session file)", async () => {
+  it("refuses fork (not in the contract: it would move Pi off the thread's session file)", async () => {
     h = await startHarness();
-    expect(
-      await h.server.command({
+    h.server.sendRaw(
+      JSON.stringify({
+        v: 1,
         type: "pi.command",
+        command_id: "fork-1",
         thread_id: THREAD,
         command: { id: "x", type: "fork", entryId: "a1" },
       }),
-    ).toMatchObject({ ok: false, error: { code: "pi_rejected" } });
+    );
+    await h.server.waitFor((f) => f.type === "error" && f.code === "malformed_frame");
+    expect(h.server.frames("command.result").some((r) => r.command_id === "fork-1")).toBe(false);
   });
 
   it("answers frame_too_large when Pi's data does not fit in one frame", async () => {

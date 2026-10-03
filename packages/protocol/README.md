@@ -54,3 +54,23 @@ Pi shapes in `src/sandbox-wire/pi-rpc.ts`, `pi-events.ts` and the built-in tool 
 `src/tools.ts` were checked against the published `@earendil-works/pi-coding-agent@1.0.0` tarball
 (pinned in `images/sandbox/pi`). The bridge validates envelopes, narrows the events the server
 translates, and passes other Pi payloads through so Pi 1.0.x patches don't break it.
+
+## Contract changes (contracts cleanup PR)
+
+Gaps reported by KOBE-23/24/30/35/36, fixed in one contract PR:
+
+- `pi.command` no longer admits `fork` (it moves Pi to a new session file); branching is
+  `run.start.parent_entry_id`.
+- `session.restore`: one `command.result` per part; the agent rewrites `header.cwd`.
+- `kobe.event_dropped` placeholder (`KOBE_EVENT_DROPPED_TYPE`, `kobeEventDroppedSchema`).
+- `pi.ui_request` is deduped by `(thread_id, request.id)`.
+- kobe-policy checks and freezes the executed object; it does not replace `event.input`.
+- The approval token never enters the sandbox (the agent strips it from `policy.result`).
+- Reason codes `team_allow_rule`, `not_available`, `policy_error`, `run_not_active`,
+  `not_a_member`, `sandbox_policy_unavailable` (stage rules in `policy.ts`).
+- `BUILTIN_TOOLS.grep/find.primary_arg` = `/path`.
+- `checkRetry`: the latest run that **ran** (`started_at` not null).
+- Per-type frame caps (`SANDBOX_FRAME_MAX_BYTES_BY_TYPE`); frames over 256 KiB start with `v`,
+  `type`.
+- Event payload bounds: payload ≤ 256 KiB, `tool.call.input` ≤ 64 KiB, `entry.committed.payload`
+  ≤ 64 KiB (`EVENT_*_MAX_BYTES`, enforced by `parseEventPayload`).

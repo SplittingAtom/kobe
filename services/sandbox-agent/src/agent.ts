@@ -1,8 +1,10 @@
-import type {
-  HelloAckFrame,
-  HelloFrame,
-  SandboxToServerFrame,
-  ServerToSandboxFrame,
+import {
+  KOBE_EVENT_DROPPED_TYPE,
+  type HelloAckFrame,
+  type HelloFrame,
+  type KobeEventDropped,
+  type SandboxToServerFrame,
+  type ServerToSandboxFrame,
 } from "@kobe/protocol";
 import type { Config } from "./config.js";
 import type { PiExit, PiRecord } from "./pi/pi-process.js";
@@ -346,8 +348,9 @@ export class Agent {
 
 /**
  * Build one `pi.event` frame. An event the server's decoder would reject (too large, too deep) is
- * replaced by a `kobe.event_dropped` record (an unknown type, which the server ignores), so the seq
- * stays gapless and the run keeps going.
+ * replaced by a `kobe.event_dropped` record (`kobeEventDroppedSchema` in @kobe/protocol: not a Pi
+ * type, so the server accepts it without translating it), so the seq stays gapless and the run
+ * keeps going.
  */
 export function encodePiEvent(
   runId: string,
@@ -367,10 +370,10 @@ export function encodePiEvent(
   const placeholder = encodeOutbound({
     ...frame,
     event: {
-      type: "kobe.event_dropped",
+      type: KOBE_EVENT_DROPPED_TYPE,
       original_type: event.type.slice(0, 64),
       reason: encoded.code,
-    },
+    } satisfies KobeEventDropped,
   });
   if (!placeholder.ok) throw new Error("cannot encode placeholder pi.event");
   return placeholder.text;

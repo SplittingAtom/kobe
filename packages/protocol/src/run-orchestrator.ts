@@ -136,7 +136,8 @@ export interface RunOrchestrator {
   updateQueued(actor: ActorContext, runId: string, body: UpdateQueuedBody): Promise<RunSnapshot>;
   /**
    * Manual "Retry from last entry" (D14): creates a new run with `retry_of_run_id`, started ahead of
-   * the queue. Rules in `checkRetry` (runs.ts): latest ended run only, `interrupted` only, at most
+   * the queue. Rules in `checkRetry` (runs.ts): the latest run that ran only (ended with
+   * `started_at` set; never-started queued messages don't count), `interrupted` only, at most
    * once — a repeat returns the existing retry run.
    */
   retry(actor: ActorContext, runId: string): Promise<SubmitMessageResult>;
