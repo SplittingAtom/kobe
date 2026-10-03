@@ -139,9 +139,11 @@ function expectHeadCheck(head: ExpectedAuditHead): string {
 }
 
 /**
- * Verifies the restored audit hash chain (KOBE-15) inside the restore transaction and fails the
- * whole restore on any break or unexpected head, then appends `platform.restore.completed`
- * (append trigger assigns seq and hashes) so the chain continues past the restored rows.
+ * Verifies the restored audit hash chain (KOBE-15; v2 with erasable IP and user agent, KOBE-17)
+ * inside the restore transaction with the release's own check, `audit_log_chain_problem()` (the
+ * migration journal matches the backup, so the function is this release's), and fails the whole
+ * restore on any break or unexpected head; then appends `platform.restore.completed` (append
+ * trigger assigns seq and hashes) so the chain continues past the restored rows.
  */
 function auditRestore(audit: RestoreAudit): string {
   if (!OPERATOR.test(audit.operator)) throw new Error("invalid operator name");
@@ -151,29 +153,20 @@ function auditRestore(audit: RestoreAudit): string {
     )}, 'tables', ${Math.trunc(audit.tables)}, 'rows', ${Math.trunc(audit.rows)}, 'operator', ${literal(
       audit.operator,
     )}, 'auditHeadSeq', NULLIF(${headSeq}, 0), 'auditHeadHash', ${headHash}))`;
-  const fail = (what: string) =>
-    `RAISE EXCEPTION 'kobe restore: the audit chain in the backup is broken at seq % (${what}); nothing was restored', want;`;
   return doBlock(
     [
       "DECLARE",
-      "  r record;",
-      "  want bigint := 1;",
-      "  prev text := repeat('0', 64);",
+      "  c record;",
       "  head_seq bigint;",
       "  head_hash text;",
       "BEGIN",
       "  IF to_regclass('public.audit_log') IS NULL THEN RETURN; END IF;",
-      "  FOR r IN SELECT a.seq, a.prev_hash, a.hash,",
-      "      encode(sha256(convert_to(public.audit_log_canonical(a), 'UTF8')), 'hex') AS computed",
-      "    FROM public.audit_log a ORDER BY a.seq LOOP",
-      `    IF r.seq <> want THEN ${fail("a row is missing")} END IF;`,
-      `    IF r.prev_hash <> prev THEN ${fail("prev_hash does not name the previous row")} END IF;`,
-      `    IF r.hash <> r.computed THEN ${fail("the row does not match its hash")} END IF;`,
-      "    prev := r.hash;",
-      "    want := want + 1;",
-      "  END LOOP;",
-      "  head_seq := want - 1;",
-      "  head_hash := CASE WHEN head_seq = 0 THEN NULL ELSE prev END;",
+      "  SELECT * INTO c FROM public.audit_log_chain_problem();",
+      "  IF c.problem IS NOT NULL THEN",
+      "    RAISE EXCEPTION 'kobe restore: the audit chain in the backup is broken at seq % (%); nothing was restored', c.problem_seq, c.problem;",
+      "  END IF;",
+      "  head_seq := c.head_seq;",
+      "  head_hash := c.head_hash;",
       ...audit.expectHeads.map(expectHeadCheck),
       "  INSERT INTO public.audit_log (actor_kind, action, target)",
       `    VALUES ('system', 'platform.restore.completed', ${target("head_seq", "head_hash")});`,

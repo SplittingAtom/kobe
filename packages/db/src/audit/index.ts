@@ -21,7 +21,9 @@ export {
   type TeamAuditPage,
 } from "./read.js";
 export {
+  AUDIT_CHAIN_UPGRADED,
   AUDIT_GENESIS_HASH,
+  auditSealStep,
   verifyAuditChain,
   type AuditChainProblem,
   type AuditChainReport,
@@ -41,3 +43,13 @@ export {
   type AuditRecordRef,
   type AuditRequestContext,
 } from "./write.js";
+export {
+  AUDIT_PII_RETENTION_DEFAULT_HOURS,
+  AUDIT_PII_RETENTION_KEY,
+  AUDIT_PII_RETENTION_MAX_HOURS,
+  AUDIT_PII_RETENTION_MIN_HOURS,
+  auditPiiRetentionHoursSchema,
+  eraseExpiredAuditPii,
+  readAuditPiiRetentionHours,
+  type AuditPiiErasure,
+} from "./pii.js";

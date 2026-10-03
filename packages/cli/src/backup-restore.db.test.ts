@@ -354,7 +354,7 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
           `SELECT tgname, tgenabled FROM pg_trigger WHERE tgrelid = 'audit_log'::regclass
            AND NOT tgisinternal AND tgenabled = 'O'`,
         ),
-      ).toHaveLength(3);
+      ).toHaveLength(4);
       await expect(sql(dst.appUrl, "DELETE FROM audit_log")).rejects.toThrow(/permission denied/);
       expect(await rowsOf(dst.adminUrl, "sessions")).toEqual([]);
       expect(await rowsOf(dst.adminUrl, "verifications")).toEqual([]);
@@ -437,7 +437,7 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
       }
       const dst = await target();
       await expect(restore(dst, tampered)).rejects.toThrow(
-        /audit chain in the backup is broken at seq 1 \(the row does not match its hash\)/,
+        /audit chain in the backup is broken at seq 1 \(hash_mismatch\)/,
       );
       expect(await rowsOf(dst.adminUrl, "users")).toEqual([]);
       expect(await rowsOf(dst.adminUrl, "audit_log")).toEqual([]);

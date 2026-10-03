@@ -2,6 +2,7 @@ import type { Server } from "node:http";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { isolationAuditor } from "./audit/isolation.js";
+import { AuditPiiSweeper } from "./audit/pii-sweeper.js";
 import { BreakGlassSweeper } from "./break-glass/sweeper.js";
 import { loadConfig } from "./config.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
@@ -77,6 +78,9 @@ deps?.auditAnchor.start();
 // Break-glass grants end at expires_at on their own; this records the end and notifies (KOBE-16).
 const breakGlassSweeper = deps ? new BreakGlassSweeper(deps) : undefined;
 breakGlassSweeper?.start();
+// Audit rows lose their client IP and user agent after the retention period (KOBE-17).
+const auditPiiSweeper = deps ? new AuditPiiSweeper(deps.database.db) : undefined;
+auditPiiSweeper?.start();
 isolation.start().catch((err: unknown) => logger.error({ err }, "isolation check failed"));
 
 // Blocked egress attempts → `egress.blocked` run events (KOBE-38); every server replica listens.
@@ -159,6 +163,7 @@ function shutdown(signal: string): void {
   deps?.auditAnchor.stop();
   void egressRelay?.close();
   breakGlassSweeper?.stop();
+  auditPiiSweeper?.stop();
   // End event streams first so browsers reconnect (with Last-Event-ID) to another replica.
   void deps?.eventStream.hub.close();
   server.close((err) => {

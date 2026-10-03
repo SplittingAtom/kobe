@@ -10,9 +10,9 @@ prompts and message text are never recorded.
 | Property                       | How                                                                                                                                                                                                                                                                                                        |
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Action and event agree         | `audit()` takes the transaction that performs the action. Both commit or both roll back. An invalid event (unknown action, a field outside the allowlist, wrong team scope, no actor) throws, so the action fails as well.                                                                                 |
-| Append-only for the app        | The app role holds `INSERT` and `SELECT` on `audit_log`, nothing else (tenancy registry, applied by the migration runner). `UPDATE`, `DELETE` and `TRUNCATE` fail with `permission denied`.                                                                                                                |
-| Append-only for the owner      | Triggers refuse `UPDATE`, `DELETE` and `TRUNCATE` for every role they fire for, including the schema owner.                                                                                                                                                                                                |
-| Tampering is detectable        | Every row carries `seq` (gapless from 1), `prev_hash` and `hash = sha256(audit_log_canonical(row))`, where the canonical text includes `prev_hash`. The `BEFORE INSERT` trigger assigns them under a transaction-scoped advisory lock, so the chain follows commit order.                                  |
+| Append-only for the app        | The app role holds `INSERT` and `SELECT` on `audit_log`, plus `UPDATE` on `ip`, `user_agent` and `pii_salt` only, for their erasure (tenancy registry, applied by the migration runner). `DELETE` and `TRUNCATE` fail with `permission denied`.                                                            |
+| Append-only for the owner      | Triggers refuse `DELETE` and `TRUNCATE` for every role they fire for, including the schema owner, and every `UPDATE` except the erasure of the IP and user agent (see [IP and user agent](#ip-and-user-agent)).                                                                                            |
+| Tampering is detectable        | Every row carries `seq` (gapless from 1), `prev_hash` and `hash = sha256(audit_log_canonical(row))`, where the canonical text includes `prev_hash` and a salted commitment to the IP and user agent (not the values). The `BEFORE INSERT` trigger assigns them under a transaction-scoped advisory lock.   |
 | Team events stay in team       | Inside `withTeam()`, an event can only be recorded for the active team (or for no team). The trigger enforces this.                                                                                                                                                                                        |
 | Heads leave the box            | Every server replica logs the chain head (`seq`, `hash`, and a MAC under a key derived from the auth secret) at startup and every 5 minutes, after verifying the rows appended since its previous head. See [Anchoring the chain](#anchoring-the-chain).                                                   |
 | Bounded unauthenticated writes | Failed sign-ins, 2FA challenges and reset requests are aggregated: per action, method and account (or "no account") and 5-minute window, the first is recorded as itself and the rest become one `auth.attempts.summarized` row. A flood from rotating addresses adds at most two rows per key and window. |
@@ -21,7 +21,8 @@ prompts and message text are never recorded.
 A superuser, or the owner after it drops the triggers, can still change rows. The chain makes that
 visible. `verifyAuditChain()` (or `GET /v1/install/audit/integrity`) recomputes every hash and
 reports the first row that was edited (`hash_mismatch`), removed (`gap`) or re-chained
-(`prev_hash_mismatch`). The chain can't reveal two things on its own: a rewrite of every row from
+(`prev_hash_mismatch`), whose IP or user agent doesn't match its commitment (`pii_mismatch`), or,
+for rows chained before the v2 upgrade, that doesn't match the upgrade seal (`seal_mismatch`). The chain can't reveal two things on its own: a rewrite of every row from
 some point onwards, and the removal of the newest rows. To catch those, compare the reported `head`
 (`seq`, `hash`) with a copy kept outside the database. Audit export and SIEM forwarding (KOBE-19)
 are the intended places to keep that copy. Until KOBE-19 ships, the server log carries it (see
@@ -41,20 +42,23 @@ the chain.
 One row per event. The fields are stable, so export (CSV/JSONL) and SIEM forwarding (syslog/OTLP)
 can map them one to one:
 
-| Field               | Type        | Meaning                                                                                              |
-| ------------------- | ----------- | ---------------------------------------------------------------------------------------------------- |
-| `seq`               | bigint      | Chain position and keyset cursor; gapless, increasing in commit order                                |
-| `id`                | uuid        | Stable event id (for de-duplicating in a SIEM)                                                       |
-| `at`                | timestamptz | Assigned by the database under the chain lock; never decreases along `seq`                           |
-| `team_id`           | uuid / null | The team the event belongs to (team audit view); null for install-level events                       |
-| `actor_kind`        | enum        | `user`, `agent` or `system`                                                                          |
-| `actor_id`          | uuid / null | User or agent id; null for `system` and for unauthenticated attempts (failed sign-in, reset request) |
-| `action`            | text        | Dotted event name from the taxonomy below                                                            |
-| `category`          | text        | First segment of `action` (generated column, indexed with `seq` for category filters)                |
-| `target`            | jsonb       | The action's allowlisted fields (below); ≤ 4 KB                                                      |
-| `ip`                | inet / null | Client address of the request (X-Forwarded-For via the trusted proxies, as for rate limits)          |
-| `user_agent`        | text / null | Client user agent, control characters removed, ≤ 256 characters                                      |
-| `prev_hash`, `hash` | hex text    | The hash chain                                                                                       |
+| Field               | Type        | Meaning                                                                                                                        |
+| ------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `seq`               | bigint      | Chain position and keyset cursor; gapless, increasing in commit order                                                          |
+| `id`                | uuid        | Stable event id (for de-duplicating in a SIEM)                                                                                 |
+| `at`                | timestamptz | Assigned by the database under the chain lock; never decreases along `seq`                                                     |
+| `team_id`           | uuid / null | The team the event belongs to (team audit view); null for install-level events                                                 |
+| `actor_kind`        | enum        | `user`, `agent` or `system`                                                                                                    |
+| `actor_id`          | uuid / null | User or agent id; null for `system` and for unauthenticated attempts (failed sign-in, reset request)                           |
+| `action`            | text        | Dotted event name from the taxonomy below                                                                                      |
+| `category`          | text        | First segment of `action` (generated column, indexed with `seq` for category filters)                                          |
+| `target`            | jsonb       | The action's allowlisted fields (below); ≤ 4 KB                                                                                |
+| `ip`                | inet / null | Client address of the request (X-Forwarded-For via the trusted proxies, as for rate limits); erased after the retention period |
+| `user_agent`        | text / null | Client user agent, control characters removed, ≤ 256 characters; erased with `ip`                                              |
+| `prev_hash`, `hash` | hex text    | The hash chain                                                                                                                 |
+| `hash_version`      | 1 / 2       | 1: chained before the v2 upgrade (hash covers the raw IP and user agent); 2: hash covers `pii_commitment`                      |
+| `pii_salt`          | hex / null  | Random salt of the commitment; erased with `ip` and `user_agent` (not returned by the read APIs)                               |
+| `pii_commitment`    | hex / null  | `sha256` over the salt, the row id, the IP and the user agent; null when the row had neither (kept forever)                    |
 
 The read APIs also return the actor's current name and email when the actor is a user. Users are
 never deleted.
@@ -123,7 +127,7 @@ install for personal and gallery agents.
 | `identity.team_invitation.declined`          | team    | —                                                                                                                                   | Invitee declined (actor: the invitee)                                                                                                            |
 | `identity.member.role_changed`               | team    | `userId`, `from`, `to`                                                                                                              | Team role changed                                                                                                                                |
 | `identity.member.removed`                    | team    | `userId`, `role`                                                                                                                    | Member removed                                                                                                                                   |
-| `install.settings.updated`                   | install | `setting` (require_two_factor), `value`                                                                                             | Install setting changed                                                                                                                          |
+| `install.settings.updated`                   | install | `setting` (require_two_factor, audit_pii_retention_hours), `value`                                                                  | Install setting changed                                                                                                                          |
 | `platform.isolation.changed`                 | install | `from`, `to`, `runtimeClass?`, `handler?`, `replica`                                                                                | A server replica lost or regained isolation, or started without it (system)                                                                      |
 | `platform.restore.completed`                 | install | `backupCreatedAt`, `tables`, `rows`, `operator`, `auditHeadSeq?`, `auditHeadHash?`                                                  | `kobe restore` loaded and verified a backup (system, same transaction)                                                                           |
 | `governance.break_glass.requested`           | team    | `grantId`, `scope` (team, user, thread), `subjectUserId?`, `threadId?`, `legalHold`, `durationMinutes`, `recipients`                | An install admin requested break-glass access to the team (D10; the reason stays in the grant)                                                   |
@@ -133,6 +137,16 @@ install for personal and gallery agents.
 | `governance.break_glass.expired`             | team    | `grantId`, `wasActive`, `recipients`, `teamAdmins?`                                                                                 | The window ended, or the request lapsed undecided after 24 h (system)                                                                            |
 | `governance.break_glass.notification_failed` | team    | `grantId`, `recipientUserId`, `event`, `attempts`                                                                                   | A queued break-glass email gave up after its retries (system)                                                                                    |
 | `governance.break_glass.read`                | team    | `grantId`, `object` (thread_list, thread, thread_entries), `threadId?`                                                              | **Every** read under a grant, in the read's own transaction (actor: the requesting admin). Under legal hold no event names the subject or thread |
+| `governance.legal_hold.requested`            | install | `holdId`, `teamId`, `scope` (team, user)                                                                                            | An install admin asked for a legal hold on a team or on one user's data in it (D18; never the user's id or the reason)                           |
+| `governance.legal_hold.placed`               | install | as requested, plus `selfApproved`                                                                                                   | A second install admin placed it (a single-admin install self-approved, flagged): purges of the data are suspended                               |
+| `governance.legal_hold.denied`               | install | `holdId`                                                                                                                            | Another install admin turned the request down                                                                                                    |
+| `governance.legal_hold.withdrawn`            | install | `holdId`                                                                                                                            | The requester withdrew it while pending                                                                                                          |
+| `governance.legal_hold.release_requested`    | install | `holdId`                                                                                                                            | An install admin asked to release an active hold (it stays in force)                                                                             |
+| `governance.legal_hold.release_denied`       | install | `holdId`                                                                                                                            | Another install admin turned the release down                                                                                                    |
+| `governance.legal_hold.release_withdrawn`    | install | `holdId`                                                                                                                            | The release requester withdrew it                                                                                                                |
+| `governance.legal_hold.released`             | install | as requested, plus `selfApproved`                                                                                                   | A second install admin approved the release (single-admin install: flagged): purges may resume                                                   |
+| `audit.pii_erased`                           | install | `rows`, `held`, `olderThanHours`                                                                                                    | The sweep erased the IP and user agent of rows past the retention period; `held`: rows kept by a legal hold (system; counts only)                |
+| `audit.chain.upgraded`                       | install | `throughSeq`, `rows`, `seal`                                                                                                        | Written once by the chain v2 migration on an install that had audit rows: the seal over every v1 row (system)                                    |
 | `agent.created`                              | any     | `agentId`, `scope`, `slug`, `source` (json, import, fork), `forkedFrom?`                                                            | Agent created, imported from a file, or forked                                                                                                   |
 | `agent.updated`                              | any     | `agentId`, `scope`, `slug`, `revision`, `source` (json, import)                                                                     | Draft replaced                                                                                                                                   |
 | `agent.deleted`                              | any     | `agentId`, `scope`, `slug`                                                                                                          | Never-published agent deleted (a published one is archived)                                                                                      |
@@ -189,9 +203,13 @@ Each sandbox may add a limited number of distinct hosts per window (burst 32, th
 beyond that its connections are counted in one row with `aggregated: true` and no `domain`, so
 a flood of random host names cannot flood the audit chain.
 
-**Personal data still recorded:** user ids, team and agent names, and each request's client
-address and user agent. Whether IP and user agent need a retention period (or pseudonymization)
-in an append-only log is an open question for Chris (see the KOBE-15 ledger).
+**Personal data recorded:** user ids, team and agent names, and each request's client address and
+user agent. The address and user agent are erased after a configurable period (default 12 hours;
+Chris, 2026-10-03): see [IP and user agent](#ip-and-user-agent).
+
+**Legal hold events** are install scope: holds are confidential (the team's admins may be the
+people held), so the team's audit view doesn't show them, and no event names the held user or the
+reason (the hold row keeps both; install admins resolve `holdId` in the console).
 
 **Not recorded on purpose:** reads of the audit log; the normal `checking → verified` isolation
 state at every replica start; and anything before first-run setup, so that an install about to be
@@ -242,8 +260,7 @@ the action, adding its actions to `AUDIT_EVENTS`:
 
 | Ticket                        | Actions to add (suggested names)                                                                                                                                                                                                                                                                                                                                                        |
 | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| KOBE-17 legal hold            | `governance.legal_hold.placed`, `.approved`, `.released` (`holdId`, `userId?`). Purges must check the hold.                                                                                                                                                                                                                                                                             |
-| KOBE-18 retention             | `retention.policy.changed` (team: `period`); `retention.purged` (system, team scope, **counts only**: threads, entries, blobs); `thread.purged` for hard purges past Trash (`thread.trashed` / `thread.restored` exist).                                                                                                                                                                |
+| KOBE-18 retention             | `retention.policy.changed` (team: `period`); `retention.purged` (system, team scope, **counts only**: threads, entries, blobs); `thread.purged` for hard purges past Trash (`thread.trashed` / `thread.restored` exist). Purges skip data under legal hold (KOBE-17: `lockLegalHolds`, `isUnderLegalHold`, `legal_hold_covers`; see `packages/db/README.md`).                           |
 | KOBE-19 export / SIEM         | `audit.exported` (`from`, `to`, `format`, `rows`). Export pages with `listAuditEvents({ after })` (ascending keyset) and forwards `head` from `verifyAuditChain` as the anchor.                                                                                                                                                                                                         |
 | KOBE-23/25/28 sandbox         | `sandbox.created` and `sandbox.destroyed` (isolation enforcement) exist (KOBE-22); `sandbox.hibernated`/`.woken` (KOBE-25). Add offboarding destroy (`reason` value) and `sandbox.volume_purged` (`sandboxId`, `userId`). Never pod logs.                                                                                                                                               |
 | KOBE-30/31 runs               | Done: `run.cancelled`, `run.retried`, `run.budget_stopped`; KOBE-24 records `run.interrupted`. Run starts are not audited: one per message, and every audit write serializes on the chain lock.                                                                                                                                                                                         |
@@ -257,14 +274,75 @@ the action, adding its actions to `AUDIT_EVENTS`:
 
 ## Reading the log
 
-| Endpoint                          | Who                                 | Notes                                                                                                                                                                                |
-| --------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `GET /v1/install/audit`           | Owner, Admin (`install.audit.read`) | Filters: `action`, `category` (agent, auth, governance, identity, install, platform, policy, run, sandbox, thread), `actorId`, `teamId`, `since`, `until` (ISO). `limit` 1–200 (50). |
-| `GET /v1/team/audit`              | Team admin (`team.audit.read`)      | Same filters except `teamId`; only the active team's events; no `ip`, `userAgent`, `prevHash` or `hash`.                                                                             |
-| `GET /v1/install/audit/integrity` | Owner, Admin (3 per minute)         | `{ ok, checked, head: { seq, hash }, problem?, anchor: { seq, hash, at, mac } }`: a full-chain check plus the attested head                                                          |
+| Endpoint                          | Who                                 | Notes                                                                                                                                                                                               |
+| --------------------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /v1/install/audit`           | Owner, Admin (`install.audit.read`) | Filters: `action`, `category` (agent, audit, auth, egress, governance, identity, install, platform, policy, run, sandbox, thread), `actorId`, `teamId`, `since`, `until` (ISO). `limit` 1–200 (50). |
+| `GET /v1/team/audit`              | Team admin (`team.audit.read`)      | Same filters except `teamId`; only the active team's events; no `ip`, `userAgent`, `prevHash` or `hash`.                                                                                            |
+| `GET /v1/install/audit/integrity` | Owner, Admin (3 per minute)         | `{ ok, checked, head: { seq, hash }, problem?, anchor: { seq, hash, at, mac } }`: a full-chain check plus the attested head                                                                         |
 
 Pages are newest first: pass `nextCursor` back as `before`. Pass `after` (for example `after=0`)
 to page oldest first, as an export does. Unknown parameters return 400.
+
+## IP and user agent
+
+Each event records the request's client address and user agent. They are kept for a configurable
+period, **12 hours by default** (install setting `auditPiiRetentionHours`, 1-8760 hours, in the
+install console's Settings or `PUT /v1/install/settings`; every change is recorded as
+`install.settings.updated`). After that a background job on every server replica (every 10
+minutes, batches of 1000) sets `ip`, `user_agent` and `pii_salt` to NULL and records
+`audit.pii_erased` with counts only. The rows themselves are kept forever, and the chain still
+verifies. Data under an active [legal hold](#legal-hold) keeps its values until the hold is
+released.
+
+**How the chain survives erasure (chain v2, KOBE-17).** The row hash no longer covers the values:
+
+```text
+pii_commitment = sha256("kobe.audit.pii.v1" \n pii_salt \n [id, host(ip), user_agent])
+hash           = sha256("kobe.audit.v2" \n prev_hash \n [seq, id, at, team_id, actor_kind,
+                         actor_id, action, target, pii_commitment])
+```
+
+The salt is 64 hex characters (244 random bits), assigned by the database with the commitment;
+both are null when a row has neither value. While the values are present, the verifier checks them
+against the commitment, so an edited address is still detected. Erasure removes the values and
+the salt together; the commitment stays and, without the salt, reveals nothing about them. An
+unsalted hash of an address would not do: IPv4 is small enough to search.
+
+**Who may erase.** Only the `audit_log_erase_pii` trigger's single allowed change gets through, for
+every role including the owner: `ip`, `user_agent` and `pii_salt` set to NULL together, nothing else
+changed, on a row older than the setting (read by the database, clamped to 1-8760 hours) and not
+under legal hold (SQLSTATE `KH001`). The app role holds `UPDATE` on those three columns only. A
+superuser can still erase early; that loses information but can't change any other field
+undetected.
+
+**Rows chained before the upgrade (v1).** Their stored hashes cover the raw values. The v2
+migration leaves those hashes untouched, so every head anchored before the upgrade (server log,
+SIEM, signed backup manifests, `--expect-audit-head`) stays valid. It first verifies the existing
+chain (and refuses to upgrade a broken one: investigate with `/v1/install/audit/integrity`), marks
+the rows `hash_version = 1`, gives those with an address a salt and commitment, then appends
+`audit.chain.upgraded { throughSeq, rows, seal }` with a running seal over all of them:
+`seal_n = sha256("kobe.audit.seal.v1" \n seal_{n-1} \n hash_n \n sha256(v2 form of row n))`. Once a
+v1 row's values are erased its v1 hash can no longer be recomputed; the verifier then checks it
+through the seal (every field but the raw values, and its stored hash) and its `prev_hash` link.
+A fresh install has no v1 rows, no seal and no event. Verifying from a later seq (incremental
+checks) can't recompute the seal: erased v1 rows are then checked by their links only; the full
+check (`/integrity`, restore) starts at seq 1.
+
+**Rolling upgrade.** `audit_log_canonical(row)` returns the v1 or v2 form by `hash_version`, so a
+previous release's replicas, which hash its output, keep verifying new rows during the rollout.
+
+**Backups.** A backup holds the values that were present when it was taken, salts included.
+Keep backups no longer than the privacy period requires. A restore loads rows verbatim, verifies
+the chain with `audit_log_chain_problem()` (the SQL twin of `verifyAuditChain`) and the next sweep
+erases rows past the period.
+
+## Legal hold
+
+A legal hold (spec D18, KOBE-17) suspends every purge of a team's data, or of one user's data in a
+team, and the erasure of IP addresses and user agents. For audit rows a hold covers the rows of the
+held team (`team_id`) and every row whose actor is a held user (their sign-ins too). Install admins
+place and release holds in the console (`/v1/install/legal-hold`); both need a second install
+admin, as for break-glass. The `governance.legal_hold.*` events above record every step.
 
 ## Anchoring the chain
 
@@ -296,10 +374,11 @@ database never sees, gives the same protection for anchored heads at no per-row 
 chain verification failed`. `GET /v1/install/audit/integrity` runs a full check on demand and
   returns the attested head.
 - **Backup:** `audit_log` is backed up like every table, and the restore loads its rows verbatim
-  (`seq` and hashes included) with triggers disabled for the load only. It then appends
-  `platform.restore.completed` in the same transaction, after the triggers are back, so the chain
-  continues. Before that, still inside the transaction, it **verifies the whole restored chain**
-  (gaps, `prev_hash` links, every row's hash), checks that it ends at the head the signed manifest
+  (`seq`, hashes, salts and commitments included) with triggers disabled for the load only. It then
+  appends `platform.restore.completed` in the same transaction, after the triggers are back, so the
+  chain continues. Before that, still inside the transaction, it **verifies the whole restored
+  chain** with `audit_log_chain_problem()` (gaps, `prev_hash` links, every row's hash, commitments,
+  the v1 seal), checks that it ends at the head the signed manifest
   recorded and, with `--expect-audit-head`, that it contains the head you recorded. Any problem
   rolls the whole restore back. The restore event records the operator (`--operator`, default the
   OS user) and the restored head, and the CLI prints the final head: record it. The append-only
@@ -308,6 +387,8 @@ chain verification failed`. `GET /v1/install/audit/integrity` runs a full check 
   Before first-run setup, Kobe records only failed sign-ins (for example a scanner trying
   `/api/auth/sign-in/email`). If the restore reports `audit_log` as non-empty, reinstall the target
   database and scale the server down before anyone can reach it.
-- **Retention:** v1 keeps the audit log forever. Nothing in the app can delete from it. Pruning
-  would be a migration-owner operation, documented with it, and the chain would then be verified
-  from an anchored `(seq, prev_hash)` (`verifyAuditChain({ fromSeq, expectedPrevHash })`).
+- **Retention:** v1 keeps the audit rows forever; only their IP address and user agent are erased
+  after the configured period (see [IP and user agent](#ip-and-user-agent)). Nothing in the app can
+  delete rows. Pruning would be a migration-owner operation, documented with it, and the chain
+  would then be verified from an anchored `(seq, prev_hash)`
+  (`verifyAuditChain({ fromSeq, expectedPrevHash })`).

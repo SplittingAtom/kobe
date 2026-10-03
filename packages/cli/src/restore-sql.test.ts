@@ -119,7 +119,7 @@ describe("restore postlude", () => {
       ],
     };
     const audited = restorePostlude({ ...plan, audit });
-    const verify = audited.indexOf("audit_log_canonical");
+    const verify = audited.indexOf("audit_log_chain_problem()");
     const insert = audited.indexOf("INSERT INTO public.audit_log");
     expect(verify).toBeGreaterThan(audited.indexOf('ENABLE TRIGGER "audit ""x""";'));
     expect(verify).toBeLessThan(insert);

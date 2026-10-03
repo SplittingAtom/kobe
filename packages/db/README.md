@@ -14,7 +14,27 @@ SHA-256 hash chain; `verifyAuditChain()`). Read with `listAuditEvents()` (instal
 `listTeamAuditEvents()` (team view).
 
 Design, field allowlist, taxonomy and the events later tickets must add:
-[docs/audit-log.md](../../docs/audit-log.md).
+[docs/audit-log.md](../../docs/audit-log.md). The client IP and user agent are erased after the
+install's retention period (default 12 h, KOBE-17): the hash covers a salted commitment to them
+(chain v2), and `eraseExpiredAuditPii(tx, limit)` is the server sweep's step.
+
+## Legal hold (KOBE-17)
+
+`legal_holds` (install-wide) holds a team's data, or one user's data in a team, against every
+purge (spec D18). Placing and releasing need a second install admin; the `legal_holds_guard`
+trigger enforces that. **Every purge job (KOBE-18 retention and Trash, KOBE-28 offboarding
+volumes, and any later one) must:**
+
+1. call `lockLegalHolds(tx)` first in each purge transaction (shared advisory lock: an approval
+   waits for purges in flight, later purges see the hold), and keep those transactions short;
+2. skip held data: `isUnderLegalHold(tx, teamId, userId)` per item (without `userId` it is true
+   when **any** hold exists in the team), `legalHoldsForTeam(tx, teamId)` for batches, or
+   `WHERE NOT legal_hold_covers(team_id, owner_user_id)` in SQL;
+3. treat SQLSTATE `KH001` (`LEGAL_HOLD_SQLSTATE`, `isLegalHoldViolation(err)`) as "held, skip".
+
+Backstop: deleting a held `threads` row or `thread_entries` rows fails with `KH001`
+(`threads_legal_hold`, `thread_entries_legal_hold` triggers). Moving a thread to Trash is an
+update and stays allowed. Add the same guard to any new table a purge deletes from.
 
 ## Break-glass and the explicit team filter (KOBE-16)
 

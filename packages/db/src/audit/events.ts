@@ -73,6 +73,13 @@ const breakGlassScope = {
   legalHold: z.boolean(),
 };
 
+/** A legal hold (KOBE-17) by its scope; never the held user's id or the reason. */
+const legalHoldRef = {
+  holdId: id,
+  teamId: id,
+  scope: z.enum(["team", "user"]),
+};
+
 /** How many people a break-glass change queued notifications for (outbox rows), and how many of them are the team's admins. */
 const notified = {
   recipients: z.number().int().nonnegative(),
@@ -164,8 +171,8 @@ export const AUDIT_EVENTS = {
 
   // ── install: install-wide settings ──
   "install.settings.updated": event("install", {
-    setting: z.enum(["require_two_factor"]),
-    value: z.union([z.boolean(), label]),
+    setting: z.enum(["require_two_factor", "audit_pii_retention_hours"]),
+    value: z.union([z.boolean(), z.number().int().nonnegative(), label]),
   }),
 
   // ── platform: isolation runtime, restore (actor: system) ──
@@ -335,6 +342,39 @@ export const AUDIT_EVENTS = {
     grantId: id,
     object: z.enum(["thread_list", "thread", "thread_entries"]),
     threadId: id.optional(),
+  }),
+
+  // ── governance: legal hold (D18, KOBE-17); install scope: holds are confidential, and the team's
+  // admins may be the people held. Never the held user's id or the reason (the hold row keeps them).
+  /** An install admin asked for a hold on a team, or on one user in it. */
+  "governance.legal_hold.requested": event("install", legalHoldRef),
+  /** A second install admin approved (or a single-admin install self-approved, flagged): in force. */
+  "governance.legal_hold.placed": event("install", { ...legalHoldRef, selfApproved: z.boolean() }),
+  "governance.legal_hold.denied": event("install", { holdId: id }),
+  "governance.legal_hold.withdrawn": event("install", { holdId: id }),
+  /** An install admin asked to release an active hold; it stays in force until approved. */
+  "governance.legal_hold.release_requested": event("install", { holdId: id }),
+  "governance.legal_hold.release_denied": event("install", { holdId: id }),
+  "governance.legal_hold.release_withdrawn": event("install", { holdId: id }),
+  /** A second install admin approved the release (single-admin install: flagged): purges resume. */
+  "governance.legal_hold.released": event("install", {
+    ...legalHoldRef,
+    selfApproved: z.boolean(),
+  }),
+
+  // ── audit: the audit log's own maintenance (KOBE-17; actor: system) ──
+  /** The IP and user agent of rows past the retention period were erased (counts only). */
+  "audit.pii_erased": event("install", {
+    rows: count,
+    /** Rows past the period kept because of an active legal hold. */
+    held: count,
+    olderThanHours: z.number().int().positive(),
+  }),
+  /** Written once by the chain v2 migration: the seal over every v1 row (hex SHA-256). */
+  "audit.chain.upgraded": event("install", {
+    throughSeq: z.number().int().positive(),
+    rows: z.number().int().positive(),
+    seal: z.string().regex(/^[0-9a-f]{64}$/),
   }),
 
   // ── run: lifecycle metadata the server decides on its own (KOBE-24; never content) ──
