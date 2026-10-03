@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { ServerDeps } from "../deps.js";
+import { approvalRoutes } from "../routes/approvals.js";
 import { runRoutes, threadRunRoutes } from "../routes/runs.js";
 import { threadPendingRoutes } from "../routes/thread-pending.js";
 import { threadRoutes } from "../routes/threads.js";
@@ -52,6 +53,20 @@ describe("OpenAPI document (KOBE-34 ac-1)", () => {
 
   it("describes exactly the run routes the orchestrator mounts (KOBE-30)", () => {
     expect(documented("/v1/runs")).toEqual(mountedOperations("/v1/runs", runRoutes(fakeDeps)));
+  });
+
+  it("describes exactly the approval routes the server mounts (KOBE-37)", () => {
+    expect(documented("/v1/approvals")).toEqual(
+      mountedOperations("/v1/approvals", approvalRoutes(fakeDeps)),
+    );
+  });
+
+  it("matches §6.1: POST /v1/approvals/{id} takes decision and remember", () => {
+    const schemas = (doc.components as { schemas: Record<string, { properties: object }> }).schemas;
+    expect(Object.keys(schemas.ApprovalDecisionBody?.properties ?? {})).toEqual([
+      "decision",
+      "remember",
+    ]);
   });
 
   it("matches §6.1: messages take content (+ parent_entry_id, file_ids) and answer run_id, queued", () => {

@@ -17,6 +17,7 @@ import {
 } from "@kobe/protocol";
 import { sql, withTeam, type AuditActor, type KobeDb, type KobeTx } from "@kobe/db";
 import type { Logger } from "pino";
+import { auditExpiredApprovals, expireRunApprovalsInTx } from "../approvals/run-end.js";
 import { recordAudit } from "../audit/record.js";
 import {
   AppendError,
@@ -504,7 +505,15 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
           UPDATE runs SET budget_stop_scope = ${command.scope}
            WHERE team_id = ${teamId} AND id = ${run.id}`);
           await requestStop(tx, teamId, run.id, "after_step");
-          return { transition: undefined, active: true };
+          // D30: pending approvals expire, so the waiting call is denied and the step can finish.
+          const expired = await expireRunApprovalsInTx(tx, teamId, run.id, "budget_exhausted");
+          const resumed =
+            expired.length > 0 && run.status === "waiting_approval"
+              ? (await applyTransition(tx, thread, run, "running", "approval_resolved", undefined))
+                  .transition
+              : undefined;
+          await auditExpiredApprovals(tx, teamId, expired);
+          return { transition: resumed, active: true };
         }),
       ).catch((err: unknown) => {
         // Keep stopping the others; the caller learns that some could not be stopped.
