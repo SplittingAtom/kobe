@@ -136,7 +136,12 @@ async function ensureUser(owner, ownerId, user, database) {
   const c = client(user.ip);
   if ((await c.signIn(user.email)).status === 200) return c;
   const { issueInvite } = await import("/app/dist/invitations/install-invites.js");
-  const invite = await issueInvite(database.db, { email: user.email, invitedBy: ownerId });
+  const { runWithAuditContext } = await import("/app/dist/audit/context.js");
+  // Audited as the Owner, like POST /v1/install/invites (which mails the token instead).
+  const invite = await runWithAuditContext(
+    { actor: { kind: "user", id: ownerId }, ip: null, userAgent: "kobe-gate1" },
+    () => issueInvite(database.db, { email: user.email, invitedBy: ownerId }),
+  );
   if (invite === "user_exists") throw new Error(`${user.email} exists but cannot sign in`);
   const accepted = await c.call("POST", "/api/auth/invitation/accept", {
     token: invite.token,
@@ -301,7 +306,7 @@ async function chat() {
   const started = performance.now();
   const results = await Promise.all(users.map((u) => chatOne(u)));
   out("elapsed_ms", Math.round(performance.now() - started));
-  out("users", results.length);
+  out("users", results.filter((r) => r.runId).length);
   // Nobody sees anyone else's run or thread: a teammate's and another team's answer 404.
   let crossChecks = 0;
   let crossLeaks = 0;
@@ -340,7 +345,7 @@ async function chat() {
           .map(([k, v]) => `${k}=${v}`)
           .join(" "),
     );
-    if (r.errorMessage) console.log(`     ${r.key} run.failed: ${r.errorMessage}`);
+    if (r.errorMessage) console.log(`     ${r.key} run.failed: ${r.errorMessage.split("\n")[0]}`);
   }
   console.log(
     `runs=${JSON.stringify(Object.fromEntries(results.map((r) => [r.key, { run: r.runId, thread: r.threadId }])))}`,

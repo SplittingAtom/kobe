@@ -79,12 +79,16 @@ setup_token=$($KUBECTL -n "$NS" get secret "$RELEASE-auth" -o jsonpath='{.data.s
 # shellcheck disable=SC2086
 fx=$(client "$(printf '{"mode":"fixtures","base":"%s","owner":{"email":"%s","password":"%s"},"setupToken":"%s","users":%s,"teams":[{"key":"a","slug":"gate1-a","name":"Gate 1 A"},{"key":"b","slug":"gate1-b","name":"Gate 1 B"}]}' \
   "$BASE" "$OWNER_EMAIL" "$OWNER_PASSWORD" "$setup_token" "$(list_json $KEYS "$COLD_KEY")")")
-printf '%s\n' "$fx" | grep -v '^fixtures=' | sed 's/^/     /'
+printf '%s\n' "$fx" | sed 's/^/     /'
 fixtures=$(field fixtures "$fx")
 json_get() { printf '%s' "$fixtures" | sed -n "s/.*\"$1\":\"\([0-9a-f-]*\)\".*/\1/p"; } # key → uuid
 TEAM_A=$(json_get a)
 TEAM_B=$(json_get b)
-contains "two teams exist" '^[0-9a-f-]{36} [0-9a-f-]{36}$' "$TEAM_A $TEAM_B"
+if [[ ! "$TEAM_A $TEAM_B" =~ ^[0-9a-f-]{36}\ [0-9a-f-]{36}$ ]]; then
+  fail "fixtures: two teams and their users"
+  exit 1
+fi
+ok "fixtures: two teams and their users"
 for k in $KEYS; do contains "user $k is a member of team $(team_of "$k")" "^member_$k=200$" "$fx"; done
 team_id() { if [[ "$(team_of "$1")" == b ]]; then echo "$TEAM_B"; else echo "$TEAM_A"; fi; }
 team_ns() { echo "kobe-team-gate1-$(team_of "$1")"; }
@@ -111,21 +115,22 @@ if [[ "$STEPS" == *" chat-real "* ]]; then
   contains "ten users chatted at once" '^users=10$' "$real"
   for k in $KEYS; do
     contains "$k: the run reached the user's own Pi and ended (pi_rejected until a model exists)" \
-      "^chat user=$k terminal=(run.completed error=-|run.failed error=pi_rejected) .*gapless=true duplicates=false same_as_log=true" "$real"
+      "^chat user=$k terminal=(run.completed error=-|run.failed error=pi_rejected) .*gapless=true duplicates=false same_as_log=true" "$(printf '%s\n' "$real" | grep "^chat user=$k ")"
   done
   contains "nobody can open a teammate's or another team's run or thread (all 404)" '^cross_leaks=0$' "$real"
+  contains "every user tried every other user's run and thread (180 checks)" '^cross_checks=180$' "$real"
   conns=$(connections)
   printf '%s\n' "$conns" | sed 's/^/     /'
   for k in $KEYS; do
-    contains "$k: one live wire connection from the user's own sandbox" "^conn $k open=1 sandbox=[0-9a-f-]{36}:running other_sandbox_open=0$" "$conns"
+    contains "$k: one live wire connection from the user's own sandbox" "^conn $k open=1 sandbox=[0-9a-f-]{36}:running other_sandbox_open=0$" "$(printf '%s\n' "$conns" | grep "^conn $k ")"
   done
   contains "ten distinct sandboxes" '^10$' \
     "$(printf '%s\n' "$conns" | sed -n 's/.*sandbox=\([0-9a-f-]*\):.*/\1/p' | sort -u | grep -c .)"
   for t in a b; do
-    pods=$($KUBECTL -n "kobe-team-gate1-$t" get pods -l kobe.splittingatom.io/user-id \
-      -o jsonpath='{range .items[*]}{.spec.runtimeClassName}/{.status.phase}{"\n"}{end}' 2>&1)
+    pods=$($KUBECTL -n "kobe-team-gate1-$t" get pods -l agents.x-k8s.io/claim-uid \
+      -o jsonpath='{range .items[*]}{.metadata.labels.agents\.x-k8s\.io/claim-uid}/{.spec.runtimeClassName}/{.status.phase}{"\n"}{end}' 2>&1)
     contains "team $t: five user sandboxes run under gVisor in kobe-team-gate1-$t" '^5$' \
-      "$(printf '%s\n' "$pods" | grep -c '^gvisor/Running$')"
+      "$(printf '%s\n' "$pods" | grep -E '/gvisor/Running$' | cut -d/ -f1 | grep -cFf <(printf '%s\n' "$conns" | sed -n 's/.*sandbox=\([0-9a-f-]*\):.*/\1/p'))"
   done
 fi
 
@@ -206,9 +211,10 @@ if [[ "$STEPS" == *" chat-stream "* ]]; then
   contains "ten users chatted at once" '^users=10$' "$stream"
   for k in $KEYS; do
     contains "$k: answer streamed, refreshed mid-run, resumed gapless (log = 1..n, no duplicates), text exact" \
-      "^chat user=$k terminal=run.completed error=- events=[0-9]+ gapless=true duplicates=false same_as_log=true refreshed_at=[0-9]+ text=exact" "$stream"
+      "^chat user=$k terminal=run.completed error=- events=[0-9]+ gapless=true duplicates=false same_as_log=true refreshed_at=[0-9]+ text=exact" "$(printf '%s\n' "$stream" | grep "^chat user=$k ")"
   done
   contains "nobody can open a teammate's or another team's run or thread (all 404)" '^cross_leaks=0$' "$stream"
+  contains "every user tried every other user's run and thread (180 checks)" '^cross_checks=180$' "$stream"
   for t in a b; do $KUBECTL -n "kobe-team-gate1-$t" delete pod gate1-agent --ignore-not-found --wait=false >/dev/null 2>&1 || true; done
 fi
 
