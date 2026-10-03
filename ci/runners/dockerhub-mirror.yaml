@@ -44,12 +44,20 @@ spec:
           image: mirror.gcr.io/library/registry:3@sha256:ddf754342cfc8acc51a56d5d0ab6af06826461864460636d8bd5c546dab2a7b8
           env:
             - { name: REGISTRY_PROXY_REMOTEURL, value: "https://registry-1.docker.io" }
-            # Cached content is dropped after a week unused; tags are re-checked upstream.
+            # Cached content is dropped a week after it was first cached (hits don't renew it), then
+            # fetched again on the next pull; tags are re-checked upstream.
             - { name: REGISTRY_PROXY_TTL, value: "168h" }
             - { name: REGISTRY_STORAGE_DELETE_ENABLED, value: "true" }
             - { name: REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY, value: /var/lib/registry }
             - { name: REGISTRY_HTTP_ADDR, value: ":5000" }
             - { name: OTEL_TRACES_EXPORTER, value: none }
+            # Request lines and errors only (the default, debug, logs every authorization step).
+            - { name: REGISTRY_LOG_LEVEL, value: info }
+            # Optional Docker Hub account (README.md, "Docker Hub cache"): uncomment with the Secret.
+            # - name: REGISTRY_PROXY_USERNAME
+            #   valueFrom: { secretKeyRef: { name: dockerhub-mirror-credentials, key: username } }
+            # - name: REGISTRY_PROXY_PASSWORD
+            #   valueFrom: { secretKeyRef: { name: dockerhub-mirror-credentials, key: token } }
           ports:
             - { name: http, containerPort: 5000 }
           readinessProbe:
