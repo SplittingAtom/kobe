@@ -202,6 +202,18 @@ describe("server sandbox configuration", () => {
     }
     expect(names("kobe-egress-proxy")).toEqual(["KOBE_SESSION_KEY_EGRESS_PROXY"]);
   });
+
+  it("gives the approval key to the server only, optional for pre-created Secrets (KOBE-37)", () => {
+    expect(envOf(ms, "kobe-server")).toContainEqual({
+      name: "KOBE_APPROVAL_KEY",
+      valueFrom: {
+        secretKeyRef: { name: "kobe-sandbox-session-keys", key: "approval-hmac", optional: true },
+      },
+    });
+    for (const d of ["kobe-scheduler", "kobe-web", "kobe-mcp-proxy", "kobe-egress-proxy"]) {
+      expect(JSON.stringify(envOf(ms, d)), d).not.toContain("approval-hmac");
+    }
+  });
 });
 
 describe("release-side NetworkPolicy", () => {
@@ -239,17 +251,18 @@ describe("release-side NetworkPolicy", () => {
 });
 
 describe("session keys Secret", () => {
-  it("generates four distinct keys and keeps the Secret on uninstall", () => {
+  it("generates five distinct keys (four audiences + approvals) and keeps the Secret on uninstall", () => {
     const secret = find(render(), "Secret", "kobe-sandbox-session-keys");
     expect(secret?.metadata.annotations["helm.sh/resource-policy"]).toBe("keep");
     const values = Object.values(secret?.stringData ?? {}) as string[];
     expect(Object.keys(secret?.stringData ?? {}).sort()).toEqual([
+      "approval-hmac",
       "egress-proxy",
       "mcp-proxy",
       "model-gateway",
       "sandbox-wire",
     ]);
-    expect(new Set(values).size).toBe(4);
+    expect(new Set(values).size).toBe(5);
     for (const v of values) expect(v.length).toBeGreaterThanOrEqual(32);
   });
 

@@ -8,6 +8,11 @@ import {
   users,
   type KobeDatabase,
 } from "@kobe/db";
+import {
+  ApprovalService,
+  type ApprovalKeyring,
+  type ApprovalServiceOptions,
+} from "./approvals/index.js";
 import { AuditAnchorLogger } from "./audit/anchor.js";
 import { AuthAttemptAudit } from "./audit/attempts.js";
 import { recordAudit } from "./audit/record.js";
@@ -59,6 +64,13 @@ export interface ServerDepsOptions {
   readonly runs?: Partial<Omit<RunOrchestratorOptions, "db" | "router">>;
   /** Model gateway (KOBE-40): the secret sealing provider API keys; unset = not configured. */
   readonly models?: { readonly providerKeySecret: string };
+  /**
+   * The install's approval HMAC key (KOBE-37, config `KOBE_APPROVAL_KEY`); without it, tool calls
+   * that need approval are denied.
+   */
+  readonly approvalKeys?: ApprovalKeyring;
+  /** Approval tuning (tests shorten the TTL and the poll). */
+  readonly approvals?: Partial<Omit<ApprovalServiceOptions, "db" | "keys">>;
 }
 
 /** Limits on publishing agent versions (KOBE-46 review M3). */
@@ -112,6 +124,11 @@ export interface ServerDeps {
   readonly runs: ServerRunOrchestrator;
   /** Model gateway admin (KOBE-40): seals provider API keys; undefined when not configured. */
   readonly models: { readonly providerKeys: SecretBox } | undefined;
+  /**
+   * Approvals (KOBE-37, D29): the wire's broker, `POST /v1/approvals/{id}`, the TTL sweep, and the
+   * signed-approval verifier the MCP proxy (KOBE-58) calls.
+   */
+  readonly approvals: ApprovalService;
   /** Creates an email+password user (and optional install role) atomically, without sign-up. */
   createUserWithPassword(
     input: NewUser,
@@ -150,12 +167,21 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     ...(options.eventStream?.poolMax ? { max: options.eventStream.poolMax } : {}),
   });
 
+  const approvals = new ApprovalService({
+    ...(options.sandboxWire?.tuning?.runMaxEvents === undefined
+      ? {}
+      : { runMaxEvents: options.sandboxWire.tuning.runMaxEvents }),
+    ...options.approvals,
+    db: database.db,
+    ...(options.approvalKeys ? { keys: options.approvalKeys } : {}),
+  });
   // The wire is created first (the orchestrator needs its router); its run-ended hook reaches the
   // orchestrator through this late binding.
   const late: { runs?: ServerRunOrchestrator } = {};
   const extraHooks = options.sandboxWire?.hooks;
   const sandboxWire = createSandboxWire({
     ...options.sandboxWire,
+    approvals: options.sandboxWire?.approvals ?? approvals.broker,
     background,
     runContext: options.sandboxWire?.runContext ?? createDbRunContextSource(),
     hooks: {
@@ -177,6 +203,10 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     router: sandboxWire.router,
   });
   late.runs = runs;
+  approvals.bind({
+    router: sandboxWire.router,
+    onRunEnded: (event) => runs.onRunEnded(event),
+  });
   const lifecycle = new UserLifecycle();
   // A deactivated user's sandboxes lose their connections on every replica at once (KOBE-13).
   lifecycle.on("deactivated", {
@@ -200,6 +230,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     lifecycle,
     sandboxWire,
     runs,
+    approvals,
     async createUserWithPassword({ email, name, password }, { installRole, recordSetup } = {}) {
       const ctx = await auth.$context;
       const hash = await ctx.password.hash(password);
@@ -236,8 +267,10 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
       return typeof candidate === "string" && timingSafeEqual(digest(candidate), setupDigest);
     },
     async close() {
+      approvals.stop();
       runs.close();
       await sandboxWire.close();
+      await approvals.broker.close();
       // In-flight emails and audit writes finish before the mailer and database go away.
       await background.idle();
       await hub.close();

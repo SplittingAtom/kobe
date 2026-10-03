@@ -87,7 +87,11 @@ pod labels and port for the team NetworkPolicy).
     "sweepSeconds" (int $s.hibernation.sweepSeconds))) -}}
 {{- end -}}
 
-{{/* Server env: sandbox config and the session-token keys (the server holds all four). */}}
+{{/*
+Server env: sandbox config, the session-token keys (the server holds all four) and the approval
+HMAC key (KOBE-37). The approval key is optional so a pre-created Secret without `approval-hmac`
+still starts: the server then denies every tool call that needs approval (fail closed) and logs it.
+*/}}
 {{- define "kobe.sandboxEnv" -}}
 - name: KOBE_SANDBOX_CONFIG
   value: {{ include "kobe.sandboxConfig" . | quote }}
@@ -98,4 +102,10 @@ pod labels and port for the team NetworkPolicy).
       name: {{ include "kobe.sessionKeysSecretName" $ }}
       key: {{ $key }}
 {{- end }}
+- name: KOBE_APPROVAL_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "kobe.sessionKeysSecretName" . }}
+      key: approval-hmac
+      optional: true
 {{- end -}}

@@ -89,6 +89,24 @@ the e2e suite checks enforcement from a sandbox (`e2e/run.sh`) — run it after 
 Limit processes per pod with the kubelet (k3s: `--kubelet-arg=pod-max-pids=4096` on every node);
 Kubernetes has no per-pod setting for it.
 
+**Rancher-managed clusters:** Rancher's namespace webhook
+(`rancher.cattle.io.namespaces.create-non-kubesystem`) refuses namespaces carrying Pod Security
+labels unless the caller may `updatepsa` on Rancher projects, so the server cannot create team
+namespaces (runs fail `start_failed`; the server logs the webhook's `Unauthorized`). Grant the
+server's ServiceAccount that one verb:
+
+```bash
+kubectl create clusterrole kobe-rancher-updatepsa --verb=updatepsa --resource=projects.management.cattle.io
+kubectl create clusterrolebinding kobe-rancher-updatepsa --clusterrole=kobe-rancher-updatepsa \
+  --serviceaccount=<namespace>:<release>-server
+```
+
+**Workspace storage and cold start:** waking a hibernated sandbox attaches its `/workspace`
+volume again, and that attach is on the path to the first token. Measured on a 4-node cluster
+(docs/gates/gate-1.md): Longhorn (3 replicas or 1) adds 5–12 s, so a wake takes about 14 s once the
+volume has fully detached — over the 8 s target; local-path (k3d) adds well under a second. A
+Synology NFSv3 class mounted but was not writable by the sandbox user under gVisor.
+
 Private registries: the names in `global.imagePullSecrets` are copied into each team namespace for
 the kubelet (pods there cannot mount them). Alternatively configure registry credentials on the
 nodes (k3s `registries.yaml`). Kobe assumes one install per cluster (`kobe-team-*` names are
@@ -267,6 +285,11 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
   `auto` is named in a notice (`kobe: dropped team approval floor <mode> of team <id>`): such a
   team is looser after the upgrade. Restore its strictness with team ask rules (an `ask` rule on
   `*` asks for every tool, like `ask-all`).
+- **Approval key (KOBE-37).** Tool-call approvals are signed with `KOBE_APPROVAL_KEY`, which the
+  chart generates as `approval-hmac` in the sandbox session-keys Secret. If you pre-create that
+  Secret (`sandbox.sessionKeysSecret`), add an `approval-hmac` key (at least 32 random characters).
+  Without it the server starts, logs `KOBE_APPROVAL_KEY is not set`, and denies every tool call
+  that needs approval. See [approvals](approvals.md).
 
 - **Model gateway (KOBE-40).** Sandboxes now reach models through the new `model-gateway` shim
   (image `kobe-model-gateway`), and `sandbox.modelGatewayAccess` defaults to `true`. Bifrost moves

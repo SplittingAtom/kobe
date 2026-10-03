@@ -183,6 +183,11 @@ export interface RunPolicyContextSource {
 export interface ApprovalRequest {
   readonly teamId: string;
   readonly userId: string;
+  /**
+   * The wire connection that asked (KOBE-37): an approval can only be decided while it is still
+   * the sandbox's open connection, since only it can deliver the result.
+   */
+  readonly connectionId: string;
   readonly runId: string;
   readonly threadId: string;
   readonly toolCallId: string;
@@ -214,6 +219,10 @@ export interface ApprovalBroker {
     request: ApprovalRequest,
     onPending: (pending: { readonly approvalId: string; readonly expiresAt: string }) => void,
   ): Promise<ApprovalOutcome>;
+  /** Bus hint `apr:<id>`: the approval left `pending` (any replica); re-read it now. */
+  onHint?(approvalId: string): void;
+  /** Hints may have been missed (bus reconnected): re-read every approval being waited on. */
+  onResync?(): void;
 }
 
 /** Pi extension dialogs (`pi.ui_request`). Kobe v1 has no UI for them; the default cancels. */
