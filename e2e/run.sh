@@ -862,6 +862,19 @@ echo "==> approvals (KOBE-37)"
 psql_kobe "DELETE FROM tool_rules WHERE team_id = '$E2E_TEAM_ID' AND scope = 'team';
   INSERT INTO tool_rules (team_id, scope, effect, tool_glob, created_by)
   VALUES ('$E2E_TEAM_ID', 'team', 'ask', 'bash', '$owner_id');" >/dev/null
+# Retry above woke the owner's real sandbox (KOBE-25 waker); its agent would replace the scripted
+# connection (close 4003). Suspend it again and wait until its pod is gone.
+owner_sbx=$($KUBECTL -n "$TEAM_NS" get sandboxclaim "u-$owner_id" -o jsonpath='{.status.sandbox.name}' 2>/dev/null || true)
+if [[ -n "$owner_sbx" ]]; then
+  $KUBECTL -n "$TEAM_NS" patch sandbox "$owner_sbx" --type merge -p '{"spec":{"operatingMode":"Suspended"}}' >/dev/null 2>&1 || true
+fi
+owner_pod_gone() { [[ -z "$($KUBECTL -n "$TEAM_NS" get pods -l "agents.x-k8s.io/claim-uid=${owner_sandbox:-none}" -o name 2>/dev/null)" ]]; }
+owner_wire_closed() { [[ "$(psql_kobe "SELECT count(*) FROM sandbox_connections WHERE team_id = '$E2E_TEAM_ID' AND user_id = '$owner_id' AND closed_at IS NULL")" == 0 ]]; }
+if until_ok 180 owner_pod_gone && until_ok 60 owner_wire_closed; then
+  ok "the owner's real sandbox is down (only the scripted agent holds its identity)"
+else
+  fail "the owner's real sandbox is down (only the scripted agent holds its identity)"
+fi
 approver_token=$(mint kobe.sandbox-wire "${owner_sandbox:-none}" "$owner_id")
 read -r -d '' APPROVER_JS <<'JS' || true
 const { default: WebSocket } = await import("/app/node_modules/ws/wrapper.mjs");
