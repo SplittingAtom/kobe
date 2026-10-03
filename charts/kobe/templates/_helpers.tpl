@@ -270,6 +270,12 @@ spec:
           readinessProbe:
             httpGet: { path: {{ .readyPath | default "/readyz" }}, port: http }
             periodSeconds: 5
+          # Liveness starts only once this passes: a slow start (busy node, first migration wait)
+          # gets up to 3 minutes instead of being restarted after the liveness budget of ~30 s.
+          startupProbe:
+            httpGet: { path: {{ .healthPath | default "/healthz" }}, port: http }
+            periodSeconds: 2
+            failureThreshold: 90
           livenessProbe:
             httpGet: { path: {{ .healthPath | default "/healthz" }}, port: http }
             periodSeconds: 10

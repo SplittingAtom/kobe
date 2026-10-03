@@ -36,7 +36,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Build
-        run: docker build -f images/sandbox/Dockerfile -t kobe-sandbox:ci .
+        run: docker build -f images/sandbox/Dockerfile -t kobe-sandbox:ci . || { scripts/ci-docker-diagnostics.sh; exit 1; }
       - name: Acceptance checks (hardened run, Pi 1.0.x, Python data stack, no setuid/secrets)
         run: images/sandbox/test-image.sh kobe-sandbox:ci
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0

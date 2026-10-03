@@ -50,5 +50,5 @@ export function notifyTeamInvite(
       teamInviteMessage({ to: input.email, ...input, signInUrl: `${deps.publicUrl}/` }),
     );
   };
-  void send().catch((err: unknown) => logger.error({ err }, "team invitation email failed"));
+  deps.background.run("team invitation email failed", send);
 }
