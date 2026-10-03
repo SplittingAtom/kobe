@@ -22,15 +22,16 @@ Only the coordinator edits [`docs/RUN-LEDGER.md`](RUN-LEDGER.md), which is a sho
 
 ## Shared files
 
-| File                                               | Rule                                                                                                                     |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `packages/db/src/tenancy/<area>.ts`                | Add your tables to your spec area's file only. `tenancy.ts` combines the areas; don't edit it to add tables.             |
-| `packages/db/src/testing/probe-fixtures/<area>.ts` | Probe fixtures per area, spread into `index.ts` (one line per area).                                                     |
-| `packages/db/src/schema/`                          | New tables in new files; add one `export *` line to `index.ts`.                                                          |
-| `packages/db/drizzle/`                             | See [Migrations](#migrations).                                                                                           |
-| `services/server/src/routes/`                      | One route module per area, mounted with one line in `app.ts`.                                                            |
-| `packages/protocol`                                | Contracts are agreed before dependants start; change a published contract only in its own PR, never inside a feature PR. |
-| `charts/kobe/values.yaml`                          | Add values under your component's key; don't reorder or reformat other sections.                                         |
+| File                                               | Rule                                                                                                                                                                                  |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/db/src/tenancy/<area>.ts`                | Add your tables to your spec area's file only. `tenancy.ts` combines the areas; don't edit it to add tables.                                                                          |
+| `packages/db/src/testing/probe-fixtures/<area>.ts` | Probe fixtures per area, spread into `index.ts` (one line per area).                                                                                                                  |
+| `packages/db/src/schema/`                          | New tables in new files; add one `export *` line to `index.ts`.                                                                                                                       |
+| `packages/db/drizzle/`                             | See [Migrations](#migrations).                                                                                                                                                        |
+| `services/server/src/routes/`                      | One route module per area, mounted with one line in `app.ts`.                                                                                                                         |
+| `packages/protocol`                                | Contracts are agreed before dependants start; change a published contract only in its own PR, never inside a feature PR.                                                              |
+| Queries on `threads` / `thread_entries`            | Always state `team_id` explicitly, even inside `withTeam()` (break-glass policy; see `packages/db/README.md`). Enforced by `services/server` tests `team-filter` and `threads-plans`. |
+| `charts/kobe/values.yaml`                          | Add values under your component's key; don't reorder or reformat other sections.                                                                                                      |
 
 `schema/index.ts` and `probe-fixtures/index.ts` use git's `union` merge driver
 (`.gitattributes`), so two branches that each append a line merge cleanly when merged locally

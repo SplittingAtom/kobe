@@ -6,7 +6,7 @@
  */
 
 /** Values under these keys are documents, not API fields (agent frontmatter; policy arg patterns keyed by JSON pointers): their keys stay as sent. */
-const OPAQUE_KEYS: ReadonlySet<string> = new Set(["frontmatter", "argPattern"]);
+const OPAQUE_KEYS: ReadonlySet<string> = new Set(["frontmatter", "argPattern", "payload"]);
 
 /** `owner_user_id` → `ownerUserId`; camelCase and leading/double underscores are left alone. */
 export function toCamel(key: string): string {

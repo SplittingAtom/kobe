@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BREAK_GLASS_MAX_MINUTES, BREAK_GLASS_NOTIFICATION_EVENTS } from "../schema/break-glass.js";
 import { teamRole } from "../schema/team-members.js";
 
 /**
@@ -56,6 +57,21 @@ const toolRule = {
   /** How many `arg_pattern` entries the rule has (the patterns themselves are not recorded). */
   argPatternEntries: z.number().int().nonnegative(),
   expiresAt: z.iso.datetime({ offset: true }).nullable(),
+};
+
+/** A break-glass grant (KOBE-16) by its scope; never the free-text reason. */
+const breakGlassScope = {
+  grantId: id,
+  scope: z.enum(["team", "user", "thread"]),
+  subjectUserId: id.optional(),
+  threadId: id.optional(),
+  legalHold: z.boolean(),
+};
+
+/** How many people a break-glass change queued notifications for (outbox rows), and how many of them are the team's admins. */
+const notified = {
+  recipients: z.number().int().nonnegative(),
+  teamAdmins: z.number().int().nonnegative().optional(),
 };
 
 /** Wire and storage limits a sandbox can hit (KOBE-24). */
@@ -226,6 +242,46 @@ export const AUDIT_EVENTS = {
     scope: agentScope,
     fromVersion: version,
     toVersion: version,
+  }),
+
+  // ── governance: break-glass (D10, KOBE-16); team scope, so the team's audit view shows them ──
+  /** An install admin asked for read access to the team (the reason stays in the grant row). */
+  "governance.break_glass.requested": event("team", {
+    ...breakGlassScope,
+    durationMinutes: z.number().int().min(1).max(BREAK_GLASS_MAX_MINUTES),
+    ...notified,
+  }),
+  /** A second install admin approved; `selfApproved` flags a single-admin install (D10). */
+  "governance.break_glass.approved": event("team", {
+    ...breakGlassScope,
+    expiresAt: z.iso.datetime({ offset: true }),
+    selfApproved: z.boolean(),
+    ...notified,
+  }),
+  "governance.break_glass.denied": event("team", { grantId: id, ...notified }),
+  /** Withdrawn while pending (`wasActive` false) or revoked during its window. */
+  "governance.break_glass.revoked": event("team", {
+    grantId: id,
+    wasActive: z.boolean(),
+    ...notified,
+  }),
+  /** The window ended (`wasActive`) or the request lapsed undecided (actor: system). */
+  "governance.break_glass.expired": event("team", {
+    grantId: id,
+    wasActive: z.boolean(),
+    ...notified,
+  }),
+  /** A queued notification gave up after its retries (actor: system). */
+  "governance.break_glass.notification_failed": event("team", {
+    grantId: id,
+    recipientUserId: id,
+    event: z.enum(BREAK_GLASS_NOTIFICATION_EVENTS),
+    attempts: z.number().int().positive(),
+  }),
+  "governance.break_glass.read": event("team", {
+    grantId: id,
+    object: z.enum(["thread_list", "thread", "thread_entries"]),
+    threadId: id.optional(),
   }),
 
   // ── run: lifecycle metadata the server decides on its own (KOBE-24; never content) ──
