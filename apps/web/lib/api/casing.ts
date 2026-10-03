@@ -5,7 +5,11 @@
  * are written in each route's own wire casing by the resource modules (`lib/admin/api/*`).
  */
 
-/** Values under these keys are documents, not API fields (agent frontmatter; policy arg patterns keyed by JSON pointers): their keys stay as sent. */
+/**
+ * Values under these keys are documents, not API fields, so their keys stay as sent: agent
+ * frontmatter, policy arg patterns keyed by JSON pointers, and Pi session entries (thread entry
+ * `payload`, KOBE-34; break-glass reads, KOBE-16), whose tool-call arguments must reach the UI exactly as the agent wrote them.
+ */
 const OPAQUE_KEYS: ReadonlySet<string> = new Set(["frontmatter", "argPattern", "payload"]);
 
 /** `owner_user_id` → `ownerUserId`; camelCase and leading/double underscores are left alone. */
