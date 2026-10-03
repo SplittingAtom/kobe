@@ -48,6 +48,8 @@ export interface ThreadState {
   readonly busy: readonly string[];
   /** Polite status for screen readers ("Message queued", "Run stopped", …). */
   readonly announcement: string;
+  /** Bumped per announcement, so the same text twice is announced twice. */
+  readonly announcementSeq: number;
 }
 
 export function initialThreadState(threadId: string | null): ThreadState {
@@ -62,6 +64,7 @@ export function initialThreadState(threadId: string | null): ThreadState {
     connection: "idle",
     busy: [],
     announcement: "",
+    announcementSeq: 0,
   };
 }
 
@@ -86,7 +89,7 @@ export function mergeCommittedEntries(
 ): readonly ThreadEntry[] {
   const known = new Set(current.map((e) => e.entryId));
   const added: ThreadEntry[] = [];
-  let seq = Math.max(PROVISIONAL_SEQ_BASE, ...current.map((e) => e.seq));
+  let seq = current.reduce((max, e) => Math.max(max, e.seq), PROVISIONAL_SEQ_BASE);
   for (const entry of committed) {
     if (known.has(entry.entryId)) continue;
     known.add(entry.entryId);

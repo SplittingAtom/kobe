@@ -40,5 +40,5 @@ export async function composer() {
 /** The status line screen readers hear (polite live region). */
 export function announcement(): string {
   const live = document.querySelector('[aria-live="polite"]');
-  return live?.textContent ?? "";
+  return (live?.textContent ?? "").replace(/\u00a0/g, "");
 }

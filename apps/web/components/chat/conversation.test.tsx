@@ -402,6 +402,7 @@ describe("branches: switch, edit and regenerate (D15)", () => {
     openApp(fake, t);
     await screen.findByText("new answer");
     const regenerate = screen.getAllByRole("button", { name: "Regenerate" });
+    expect(regenerate).toHaveLength(1); // not on the first answer: nothing to branch from
     await userEvent.setup().click(must(regenerate.at(-1)));
     await waitFor(() =>
       expect(chatRequests(fake, "POST").find((r) => r.path.endsWith("/messages"))?.body).toEqual({

@@ -3,7 +3,7 @@ import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
-import { chatRequests, composer, openApp, streaming } from "./testing";
+import { announcement, chatRequests, composer, openApp, streaming } from "./testing";
 import { must } from "../../lib/testing/must";
 
 let fake: FakeKobe;
@@ -271,11 +271,7 @@ describe("accessibility", () => {
       "m1",
     );
     fake.agent.complete(run.run_id);
-    await waitFor(() =>
-      expect(document.querySelector('[aria-live="polite"]')?.textContent).toBe(
-        "The agent finished.",
-      ),
-    );
+    await waitFor(() => expect(announcement()).toBe("The agent finished."));
     expect(document.querySelector('[aria-busy="true"]')).toBeNull();
   });
 

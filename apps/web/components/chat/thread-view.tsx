@@ -38,6 +38,11 @@ export function ThreadView() {
       {state.phase === "error" && state.loadError && (
         <div className={styles.footerInner}>
           <ErrorNotice error={state.loadError} />
+          {extras.controller && (
+            <button type="button" onClick={extras.controller.retryLoad}>
+              Try again
+            </button>
+          )}
         </div>
       )}
       {state.phase === "loading" && (
@@ -82,6 +87,8 @@ export function ThreadView() {
       </div>
       <p role="status" aria-live="polite" className={styles.visuallyHidden}>
         {state.announcement}
+        {/* A changing no-break space makes a repeated message a change screen readers announce. */}
+        {state.announcementSeq % 2 === 1 ? "\u00a0" : ""}
       </p>
     </ThreadPrimitive.Root>
   );

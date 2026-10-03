@@ -34,9 +34,9 @@ export type PendingMessages = z.infer<typeof pendingMessagesSchema>;
  * `GET /v1/threads/{id}/pending-messages` (KOBE-32): the text of the thread's queued messages and
  * of its active run's prompt, which `GET /v1/threads/{id}/runs` (run snapshots) doesn't carry. The
  * web client needs it to show and edit the queue and to show the prompt of a run in progress after
- * a reload or on another device (U4), before Pi commits it as an entry. Same visibility as the
- * thread's runs (KOBE-34 `findThread`: owner, or a reader of a shared thread); team-scoped under
- * RLS. Reads Postgres only; never wakes a sandbox.
+ * a reload or on another device (U4), before Pi commits it as an entry. Visible like the thread
+ * (KOBE-34 `findThread`); queued messages only to the owner, a reader of a shared thread sees the
+ * active run's prompt only. Team-scoped under RLS. Reads Postgres only; never wakes a sandbox.
  */
 export function threadPendingRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();
@@ -51,11 +51,15 @@ export function threadPendingRoutes(deps: ServerDeps): Hono<{ Variables: TeamVar
     const userId = c.get("user").id;
     const body = await withTeam(deps.database.db, teamId, async (tx) => {
       const viewer = { teamId, userId, projectIds: await viewerProjectIds(tx, userId) };
-      if (!(await findThread(tx, viewer, threadId))) return null;
+      const found = await findThread(tx, viewer, threadId);
+      if (!found) return null;
+      const owner = found.access === "owner";
       const rows = await threadRunRows(tx, teamId, threadId);
       return {
         messages: rows
-          .filter((r) => r.status === "queued" || r.userEntryId === null)
+          // Queued messages are the owner's drafts (editable, maybe deleted): readers of a shared
+          // thread see only the prompt of the run in progress, as they will in its entries.
+          .filter((r) => (r.status === "queued" ? owner : r.userEntryId === null))
           .map((r) => ({
             run_id: r.id,
             status: r.status,

@@ -105,8 +105,9 @@ of a run in progress would vanish on reload or on a second device until Pi commi
 14. **5xx messages shown:** `isolation_unavailable` (runs, D4), `sandbox_unavailable`,
     `search_timeout` join `isolation_runtime_missing` in `lib/api/client.ts`; `isolation_unavailable`
     renders the isolation way out.
-15. **Pending-messages visibility** = the thread's runs (`findThread`: owner, or a reader of a
-    shared thread once KOBE-57 exists); active run listed while its prompt entry isn't bound.
+15. **Pending-messages visibility:** the thread's (`findThread`); queued messages only for the owner
+    (they are drafts), a reader of a shared thread gets the active run's prompt only. The reader
+    case can't be exercised over HTTP until KOBE-57 creates projects (KOBE-57 must add that test).
 16. **Dependency:** `@assistant-ui/react` 0.15.23 (MIT; pulls radix-ui, zustand, assistant-stream,
     safe-content-frame, assistant-cloud client — all MIT/Apache, license check green apart from the
     pre-existing local vitest entry).
@@ -116,6 +117,21 @@ of a run in progress would vanish on reload or on a second device until Pi commi
     Playwright would need browsers on the self-hosted runners and a full stack; the server side of
     Gate 1 is covered by KOBE-30/31's DB suites. `e2e/run.sh` checks the new route and that `/`
     serves the chat.
+
+## Review round (typescript-reviewer agent, before CI) — resolution
+
+No CRITICAL. Fixed: **HIGH** a send that returned after the thread was left opened an EventSource
+on a disposed controller (now `#open`, `#syncStream`, `send`, `load`, `refresh`, `reconnect` stop
+when disposed). **MEDIUM** a refresh read before a branch switch no longer reverts the chosen leaf
+(`#leafVersion`); a leaf that isn't shown falls back to its nearest shown ancestor, never another
+branch; failed entry pages / runs / pending reads are shown (partial history notice) and a failed
+runs read doesn't (re)open streams; a run the server keeps refusing keeps its reopen backoff;
+Regenerate hidden on the first turn (nothing to branch from); queued messages owner-only in the new
+endpoint; repeated announcements re-announced (`announcementSeq`); a second Enter while a send is
+in flight is ignored. **LOW** completed runs drop leftover live text; `load` merges with what the
+stream delivered; refresh coalescing can't lose a call; no `Math.max(...spread)`; "Try again" after
+a failed load. Kept: a seeded controller that is never mounted lives until the session ends; a
+stale `?thread=` after a team switch (switching teams reloads the page).
 
 ## For other tickets
 

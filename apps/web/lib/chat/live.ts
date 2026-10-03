@@ -244,6 +244,8 @@ function applyOne(run: LiveRun, event: KobeEvent): LiveRun {
     case "entry.committed":
       return commit(next, event.payload);
     case "run.completed":
+      // A completed run's messages are all entries now: nothing streamed may linger beside them.
+      return { ...next, terminal: event, waking: undefined, messages: [] };
     case "run.failed":
     case "run.interrupted":
     case "run.budget_stopped":

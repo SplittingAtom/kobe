@@ -306,10 +306,31 @@ export function projectThread(
     }
   }
 
-  const leafNode = leafEntryId === null ? undefined : nodeOfEntry.get(leafEntryId);
-  let headId: string | null = leafNode ?? order.at(-1) ?? null;
+  let headId: string | null = headOf(entries, leafEntryId, nodeOfEntry) ?? order.at(-1) ?? null;
   if (live) headId = overlayLive(live, items, indexOf, nodeOfEntry, lastEntryOfNode, headId);
   return { items, headId, nodeOfEntry, lastEntryOfNode };
+}
+
+/**
+ * The message holding the leaf, or, when the leaf isn't shown (a hidden entry at the root) or not
+ * loaded, the nearest shown ancestor that is: never a message of another branch.
+ */
+function headOf(
+  entries: readonly ThreadEntry[],
+  leafEntryId: string | null,
+  nodeOfEntry: ReadonlyMap<string, string>,
+): string | undefined {
+  if (leafEntryId === null) return undefined;
+  const parentOf = new Map(entries.map((e) => [e.entryId, e.parentId] as const));
+  const seen = new Set<string>();
+  let id: string | null | undefined = leafEntryId;
+  while (id !== null && id !== undefined && !seen.has(id)) {
+    const node = nodeOfEntry.get(id);
+    if (node !== undefined) return node;
+    seen.add(id);
+    id = parentOf.get(id);
+  }
+  return undefined;
 }
 
 /** Adds the run's uncommitted prompt and streaming content; returns the run's tail as the head. */

@@ -119,6 +119,18 @@ describe("projectThread", () => {
     expect(p.lastEntryOfNode.get("a1")).toBe("c1");
   });
 
+  it("never puts the head on another branch when the leaf is a hidden entry", () => {
+    const entries = [
+      user("u1", null, "q"),
+      assistant("a1", "u1", text("one")),
+      user("u2", "a1", "branch A"),
+      user("u3", "a1", "branch B"),
+      entry("x", "u2", null, "label"),
+    ];
+    // "x" is hidden and belongs to u2's message; an unknown leaf falls back to the last message.
+    expect(projectThread(entries, "x").headId).toBe("u2");
+  });
+
   it("marks offloaded bodies and model errors", () => {
     const offloaded = { ...assistant("a1", "u1"), payload: {}, payloadOffloaded: true };
     const failed = entry("a2", "a1", {

@@ -35,6 +35,7 @@ export interface ControllerOptions {
 
 const MAX_REOPEN_ATTEMPTS = 5;
 const MAX_ENTRY_PAGES = 40;
+const PARTIAL_HISTORY = "Part of this conversation could not be loaded. Reload to see all of it.";
 
 type Listener = () => void;
 
@@ -56,6 +57,8 @@ export class ThreadController {
   #refreshAgain = false;
   #disposed = false;
   #loadStarted = false;
+  #leafVersion = 0;
+  #lastStreamedRun: string | undefined;
 
   constructor(threadId: string | null, options: ControllerOptions) {
     this.#state = initialThreadState(threadId);
@@ -83,7 +86,7 @@ export class ThreadController {
   }
 
   #announce(announcement: string): void {
-    this.#set((s) => ({ ...s, announcement }));
+    this.#set((s) => ({ ...s, announcement, announcementSeq: s.announcementSeq + 1 }));
   }
 
   #fail(error: ApiError, draft?: string): void {
@@ -122,7 +125,9 @@ export class ThreadController {
     if (threadId === null || this.#loadStarted) return;
     this.#loadStarted = true;
     const detail = await this.#api.getThread(threadId);
+    if (this.#disposed) return;
     if (!detail.ok) {
+      this.#loadStarted = false; // "Try again" may load again
       this.#set((s) => ({ ...s, phase: "error", loadError: detail.error }));
       return;
     }
@@ -133,17 +138,24 @@ export class ThreadController {
       ...summary
     } = detail.data;
     const entries = await this.#readMoreEntries(threadId, firstPage, nextEntriesAfter);
+    if (this.#disposed) return;
     this.#set((s) => ({
       ...s,
       phase: "ready",
       loadError: undefined,
       summary,
-      entries: mergeServerEntries([], entries),
-      serverSeq: maxSeq(entries, 0),
+      entries: mergeServerEntries(s.entries, entries),
+      serverSeq: maxSeq(entries, s.serverSeq),
     }));
-    await this.#readRuns(threadId);
-    this.#syncStream();
+    if (await this.#readRuns(threadId)) this.#syncStream();
   }
+
+  /** "Try again" after the thread could not be read. */
+  readonly retryLoad = (): void => {
+    if (this.#loadStarted || this.#disposed) return;
+    this.#set((s) => ({ ...s, phase: "loading", loadError: undefined }));
+    void this.load();
+  };
 
   async #readMoreEntries(
     threadId: string,
@@ -154,20 +166,29 @@ export class ThreadController {
     let after = nextAfter;
     for (let page = 0; after !== null && page < MAX_ENTRY_PAGES; page++) {
       const res = await this.#api.listEntries(threadId, after);
-      if (!res.ok) break; // what we have is still a valid prefix of the tree
+      if (this.#disposed) break;
+      if (!res.ok) {
+        // What we have is still a valid prefix of the tree; say that the rest is missing.
+        this.#fail({ ...res.error, message: PARTIAL_HISTORY });
+        break;
+      }
       all.push(...res.data.entries);
       after = res.data.nextEntriesAfter;
     }
     return all;
   }
 
-  async #readRuns(threadId: string): Promise<void> {
+  /** Reads runs and pending messages; false (and an error shown) when the runs are unknown. */
+  async #readRuns(threadId: string): Promise<boolean> {
     const [runs, pending] = await Promise.all([
       this.#api.listRuns(threadId),
       this.#api.pendingMessages(threadId),
     ]);
+    if (this.#disposed) return false;
     if (runs.ok) this.#applyRuns(runs.data);
-    if (pending.ok) {
+    else this.#fail(runs.error);
+    if (!pending.ok) this.#fail(pending.error);
+    else {
       const messages = pending.data.messages;
       this.#set((s) => {
         const live = s.live;
@@ -182,6 +203,7 @@ export class ThreadController {
         };
       });
     }
+    return runs.ok;
   }
 
   #applyRuns(data: ThreadRuns): void {
@@ -195,23 +217,26 @@ export class ThreadController {
       return this.#refreshing;
     }
     this.#refreshing = (async () => {
-      do {
-        this.#refreshAgain = false;
-        await this.#refreshOnce();
-      } while (this.#refreshAgain && !this.#disposed);
+      try {
+        do {
+          this.#refreshAgain = false;
+          await this.#refreshOnce();
+        } while (this.#refreshAgain && !this.#disposed);
+      } finally {
+        // Cleared in the same tick the loop ends, so no later call can be lost.
+        this.#refreshing = undefined;
+      }
     })();
-    try {
-      await this.#refreshing;
-    } finally {
-      this.#refreshing = undefined;
-    }
+    return this.#refreshing;
   };
 
   async #refreshOnce(): Promise<void> {
     const threadId = this.#state.threadId;
     if (threadId === null || this.#disposed) return;
     const after = this.#state.serverSeq;
+    const leafVersion = this.#leafVersion;
     const detail = await this.#api.getThread(threadId, after);
+    if (this.#disposed) return;
     if (!detail.ok) {
       this.#fail(detail.error);
       return;
@@ -223,14 +248,18 @@ export class ThreadController {
       ...summary
     } = detail.data;
     const incoming = await this.#readMoreEntries(threadId, firstPage, nextEntriesAfter);
+    if (this.#disposed) return;
     this.#set((s) => ({
       ...s,
-      summary,
+      // A branch chosen while this read was on its way wins over the leaf it read.
+      summary:
+        leafVersion === this.#leafVersion || !s.summary
+          ? summary
+          : { ...summary, leafEntryId: s.summary.leafEntryId },
       entries: mergeServerEntries(s.entries, incoming),
       serverSeq: maxSeq(incoming, s.serverSeq),
     }));
-    await this.#readRuns(threadId);
-    this.#syncStream();
+    if (await this.#readRuns(threadId)) this.#syncStream();
   }
 
   /** Stops streaming (the thread is no longer on screen). */
@@ -260,7 +289,9 @@ export class ThreadController {
     }
     if (this.#stream?.runId === runId) return;
     this.#closeStream();
-    this.#reopenAttempts = 0;
+    // A run the server keeps refusing (reopened from here) keeps its backoff.
+    if (this.#lastStreamedRun !== runId) this.#reopenAttempts = 0;
+    this.#lastStreamedRun = runId;
     this.#set((s) => {
       if (s.live?.runId === runId) return s;
       const prompt = s.pending.find((m) => m.runId === runId);
@@ -276,6 +307,7 @@ export class ThreadController {
   }
 
   #open(runId: string): void {
+    if (this.#disposed) return;
     const after = this.#state.live?.runId === runId ? this.#state.live.lastSeq : 0;
     this.#set((s) => ({ ...s, connection: "connecting" }));
     this.#stream = openRunStream(
@@ -328,6 +360,7 @@ export class ThreadController {
     this.#set((s) => ({
       ...s,
       announcement: message,
+      announcementSeq: s.announcementSeq + 1,
       summary:
         terminal.type === "run.completed" && s.summary
           ? { ...s.summary, leafEntryId: terminal.payload.leaf_entry_id ?? s.summary.leafEntryId }
@@ -385,6 +418,7 @@ export class ThreadController {
     this.#reopenAttempts = 0;
     this.#closeStream();
     void this.refresh().then(() => {
+      if (this.#disposed) return;
       const runId = runToStream(this.#state);
       if (runId !== undefined && this.#stream === undefined) this.#open(runId);
     });
@@ -399,7 +433,8 @@ export class ThreadController {
    */
   readonly send = async (text: string, parentEntryId?: string): Promise<boolean> => {
     const threadId = this.#state.threadId;
-    if (threadId === null) return false;
+    // One message at a time: a second Enter before the server answered is not a second message.
+    if (threadId === null || this.#state.sending !== undefined) return false;
     const key = this.#newKey();
     const queues = currentRunId(this.#state) !== undefined;
     const branchFrom = parentEntryId ?? this.#state.summary?.leafEntryId ?? null;
@@ -411,6 +446,7 @@ export class ThreadController {
     const body = { content: text, parentEntryId };
     let res = await this.#api.sendMessage(threadId, body, key);
     if (!res.ok && res.error.status === 0) res = await this.#api.sendMessage(threadId, body, key);
+    if (this.#disposed) return res.ok;
     if (!res.ok) {
       this.#set((s) => ({ ...s, sending: undefined }));
       this.#fail(res.error, text);
@@ -422,6 +458,7 @@ export class ThreadController {
       // A queued message stays shown as "sending" until the queue read below lists it.
       sending: queued && s.sending ? { ...s.sending, runId } : undefined,
       announcement: queued ? "Message queued. It runs after the current one." : "Message sent.",
+      announcementSeq: s.announcementSeq + 1,
       ...(queued
         ? {}
         : {
@@ -518,6 +555,7 @@ export class ThreadController {
     const summary = this.#state.summary;
     if (threadId === null || !summary || summary.leafEntryId === entryId) return;
     const previous = summary.leafEntryId;
+    this.#leafVersion += 1;
     this.#set((s) => (s.summary ? { ...s, summary: { ...s.summary, leafEntryId: entryId } } : s));
     const res = await this.#busy("leaf", () => this.#api.setLeaf(threadId, entryId));
     if (!res.ok) {

@@ -148,7 +148,8 @@ describe("applyRunEvents", () => {
       ev("text.delta", { message_id: "m2", content_index: 0, delta: "after the end" }),
     ]).run;
     expect(ended.terminal?.type).toBe("run.completed");
-    expect(ended.messages.map((m) => m.messageId)).toEqual(["m1"]);
+    expect(ended.messages).toEqual([]); // completed: the entries are the record
+    expect(ended.lastSeq).toBe(3); // nothing after the terminal event
   });
 
   it("ignores events of another run", () => {

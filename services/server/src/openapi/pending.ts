@@ -30,7 +30,8 @@ export function pendingOpenApiPaths(): Record<string, Record<string, unknown>> {
         description:
           "Messages that are not entries yet: each queued run (in start order, `queue_pos` 1 = " +
           "next; editable with `PATCH /v1/runs/{id}`) and the active run's message until Pi " +
-          "commits it. Same visibility as `GET /v1/threads/{id}/runs`. Reads Postgres only.",
+          "commits it. Visible like the thread; queued messages only to its owner (a reader of a " +
+          "shared thread gets the active prompt only). Reads Postgres only.",
         parameters: [
           {
             name: "id",

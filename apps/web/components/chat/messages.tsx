@@ -10,7 +10,8 @@ import {
   type ReasoningMessagePartProps,
   type TextMessagePartProps,
 } from "@assistant-ui/react";
-import type { KobeMessageMeta } from "../../lib/chat/tree";
+import { messageMeta, type KobeMessageMeta } from "../../lib/chat/tree";
+import { useKobeExtras } from "./kobe-runtime";
 import { ToolCallCard } from "./tool-call";
 import styles from "./chat.module.css";
 
@@ -91,8 +92,18 @@ export function UserMessage() {
   );
 }
 
+/** Regenerate re-sends the question before this answer from that question's parent entry. */
+function useCanRegenerate(): boolean {
+  const parentId = useAuiState((s) => s.message.parentId);
+  const extras = useKobeExtras();
+  const parent = extras?.projection.items.find((i) => i.message.id === parentId);
+  const meta = parent ? messageMeta(parent.message) : undefined;
+  return meta?.kind === "user" && !meta.pending && meta.parentEntryId !== null;
+}
+
 export function AssistantMessage() {
   const running = useAuiState((s) => s.message.status?.type === "running");
+  const canRegenerate = useCanRegenerate();
   return (
     <MessagePrimitive.Root className={styles.message} aria-busy={running}>
       <h3 className={styles.visuallyHidden}>The agent said</h3>
@@ -103,7 +114,7 @@ export function AssistantMessage() {
       <div className={styles.messageFooter}>
         <ActionBarPrimitive.Root hideWhenRunning>
           <ActionBarPrimitive.Copy>Copy</ActionBarPrimitive.Copy>
-          <ActionBarPrimitive.Reload>Regenerate</ActionBarPrimitive.Reload>
+          {canRegenerate && <ActionBarPrimitive.Reload>Regenerate</ActionBarPrimitive.Reload>}
         </ActionBarPrimitive.Root>
         <BranchPicker />
       </div>
