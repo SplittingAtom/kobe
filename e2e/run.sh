@@ -1278,9 +1278,9 @@ JS
   }
   signed=$(approve toolu_e2e_1 '{"title":"x"}')
   IFS='|' read -r a_kid a_exp a_mac a_input <<<"$signed"
-  psql_kobe "INSERT INTO approvals (team_id, id, run_id, thread_id, user_id, tool_call_id, tool, input_canonical,
+  psql_kobe "INSERT INTO approvals (team_id, id, run_id, thread_id, connection_id, user_id, tool_call_id, tool, input_canonical,
       risk, reasons, status, cause, decided_by, decided_at, expires_at, token_kid, token_expires_at, input_hmac)
-    VALUES ('$E2E_TEAM_ID', '6f214253-8d7e-4f90-b1a2-2d3e4f506172', '$MCP_RUN', '$MCP_THREAD', '$E2E_USER_ID',
+    VALUES ('$E2E_TEAM_ID', '6f214253-8d7e-4f90-b1a2-2d3e4f506172', '$MCP_RUN', '$MCP_THREAD', gen_random_uuid(), '$E2E_USER_ID',
       'toolu_e2e_1', 'mcp__e2e_fake__create_thing', '$a_input', 'write', '[]'::jsonb, 'allowed', 'user',
       '$E2E_USER_ID', now(), now() + interval '1 hour', '$a_kid', '$a_exp', '$a_mac') ON CONFLICT DO NOTHING;" >/dev/null
   approved=$(mcp_rpc "$mcp_token" '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"create_thing","arguments":{"title":"x"}}}')

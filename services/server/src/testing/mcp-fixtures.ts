@@ -167,10 +167,10 @@ export async function allowApproval(
     now,
   });
   await admin.query(
-    `INSERT INTO approvals (team_id, id, run_id, thread_id, user_id, tool_call_id, tool,
+    `INSERT INTO approvals (team_id, id, run_id, thread_id, connection_id, user_id, tool_call_id, tool,
        input_canonical, risk, reasons, status, cause, decided_by, decided_at, expires_at,
        token_kid, token_expires_at, input_hmac)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'write', '[]'::jsonb, 'allowed', 'user', $5, $9,
+     VALUES ($1, $2, $3, $4, $13, $5, $6, $7, $8, 'write', '[]'::jsonb, 'allowed', 'user', $5, $9,
        $9::timestamptz + interval '1 hour', $10, $11, $12)`,
     [
       call.teamId,
@@ -185,6 +185,8 @@ export async function allowApproval(
       token.kid,
       token.expires_at,
       token.mac,
+      // The wire connection that asked (KOBE-37); any id: the MCP proxy does not depend on it.
+      randomUUID(),
     ],
   );
   return { approvalId, toolCallId };
