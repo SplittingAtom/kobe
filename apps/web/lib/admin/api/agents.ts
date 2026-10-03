@@ -1,4 +1,4 @@
-/** Agent summaries as `/v1/agents` and `/v1/install/gallery/agents` return them (KOBE-45). */
+/** Agent summaries as `/v1/agents` and `/v1/install/gallery/agents` return them (KOBE-45/46). */
 
 export interface AgentSummary {
   readonly id: string;
@@ -10,6 +10,8 @@ export interface AgentSummary {
   readonly status: "active" | "suspended";
   readonly ownerUserId: string | null;
   readonly currentVersion: number | null;
+  /** Set when a published agent was deleted: archived, its versions stay pinned (KOBE-46). */
+  readonly archivedAt?: string | null;
   readonly revision: number;
   readonly updatedAt: string;
   readonly canEdit: boolean;
@@ -18,4 +20,13 @@ export interface AgentSummary {
 export interface AgentSaved {
   readonly agent: AgentSummary;
   readonly warnings?: readonly unknown[];
+}
+
+/** The draft revision as an ETag for If-Match: publish exactly what the console showed. */
+export const revisionTag = (agent: Pick<AgentSummary, "revision">): string => `"${agent.revision}"`;
+
+/** Status as shown in consoles: archived wins over active/suspended. */
+export function agentStatusLabel(agent: Pick<AgentSummary, "status" | "archivedAt">): string {
+  if (agent.archivedAt) return "Archived";
+  return agent.status === "active" ? "Active" : "Suspended";
 }

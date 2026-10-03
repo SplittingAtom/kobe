@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BREAK_GLASS_MAX_MINUTES, BREAK_GLASS_NOTIFICATION_EVENTS } from "../schema/break-glass.js";
 import { teamRole } from "../schema/team-members.js";
 
 /**
@@ -43,6 +44,8 @@ export const SIGN_IN_METHODS = [
 const signInMethod = z.enum(SIGN_IN_METHODS);
 const agentScope = z.enum(["team", "personal", "gallery"]);
 const agentRef = { agentId: id, scope: agentScope, slug };
+/** A published agent version number (or a draft revision): a positive integer. */
+const version = z.number().int().positive();
 const isolationState = z.enum(["checking", "verified", "missing"]);
 /** A tool rule (KOBE-35) by its policy metadata; never its free-text note or arg values. */
 const toolRule = {
@@ -54,6 +57,21 @@ const toolRule = {
   /** How many `arg_pattern` entries the rule has (the patterns themselves are not recorded). */
   argPatternEntries: z.number().int().nonnegative(),
   expiresAt: z.iso.datetime({ offset: true }).nullable(),
+};
+
+/** A break-glass grant (KOBE-16) by its scope; never the free-text reason. */
+const breakGlassScope = {
+  grantId: id,
+  scope: z.enum(["team", "user", "thread"]),
+  subjectUserId: id.optional(),
+  threadId: id.optional(),
+  legalHold: z.boolean(),
+};
+
+/** How many people a break-glass change queued notifications for (outbox rows), and how many of them are the team's admins. */
+const notified = {
+  recipients: z.number().int().nonnegative(),
+  teamAdmins: z.number().int().nonnegative().optional(),
 };
 
 /** Wire and storage limits a sandbox can hit (KOBE-24). */
@@ -201,6 +219,54 @@ export const AUDIT_EVENTS = {
   "thread.trashed": event("team", { threadId: id }),
   "thread.restored": event("team", { threadId: id }),
   "thread.sharing_changed": event("team", { threadId: id, projectId: id, shared: z.boolean() }),
+  /** The thread's pinned agent version changed (D19 one-click switch, KOBE-46). */
+  "thread.agent_switched": event("team", {
+    threadId: id,
+    agentId: id,
+    scope: agentScope,
+    fromVersion: version,
+    toVersion: version,
+  }),
+
+  // ── governance: break-glass (D10, KOBE-16); team scope, so the team's audit view shows them ──
+  /** An install admin asked for read access to the team (the reason stays in the grant row). */
+  "governance.break_glass.requested": event("team", {
+    ...breakGlassScope,
+    durationMinutes: z.number().int().min(1).max(BREAK_GLASS_MAX_MINUTES),
+    ...notified,
+  }),
+  /** A second install admin approved; `selfApproved` flags a single-admin install (D10). */
+  "governance.break_glass.approved": event("team", {
+    ...breakGlassScope,
+    expiresAt: z.iso.datetime({ offset: true }),
+    selfApproved: z.boolean(),
+    ...notified,
+  }),
+  "governance.break_glass.denied": event("team", { grantId: id, ...notified }),
+  /** Withdrawn while pending (`wasActive` false) or revoked during its window. */
+  "governance.break_glass.revoked": event("team", {
+    grantId: id,
+    wasActive: z.boolean(),
+    ...notified,
+  }),
+  /** The window ended (`wasActive`) or the request lapsed undecided (actor: system). */
+  "governance.break_glass.expired": event("team", {
+    grantId: id,
+    wasActive: z.boolean(),
+    ...notified,
+  }),
+  /** A queued notification gave up after its retries (actor: system). */
+  "governance.break_glass.notification_failed": event("team", {
+    grantId: id,
+    recipientUserId: id,
+    event: z.enum(BREAK_GLASS_NOTIFICATION_EVENTS),
+    attempts: z.number().int().positive(),
+  }),
+  "governance.break_glass.read": event("team", {
+    grantId: id,
+    object: z.enum(["thread_list", "thread", "thread_entries"]),
+    threadId: id.optional(),
+  }),
 
   // ── run: lifecycle metadata the server decides on its own (KOBE-24; never content) ──
   /** The wire ended an active run as interrupted (D14: sandbox or Pi lost; actor: system). */
@@ -208,6 +274,16 @@ export const AUDIT_EVENTS = {
     runId: id,
     threadId: id,
     cause: z.enum(["sandbox_gone", "not_resumed", "pi_exited"]),
+  }),
+  /** The thread owner stopped a run, or deleted a queued message (D17; KOBE-30). */
+  "run.cancelled": event("team", { runId: id, threadId: id, wasActive: z.boolean() }),
+  /** The thread owner retried an interrupted run; `runId` is the new run (D14; KOBE-30). */
+  "run.retried": event("team", { runId: id, threadId: id, retryOfRunId: id }),
+  /** A run ended because a budget is used up, after its current step (D30; system). */
+  "run.budget_stopped": event("team", {
+    runId: id,
+    threadId: id,
+    scope: z.enum(["install", "team", "user"]),
   }),
 
   // ── sandbox: the sandbox wire (KOBE-24, D13); throttled per sandbox and violation ──
@@ -250,6 +326,12 @@ export const AUDIT_EVENTS = {
   "agent.deleted": event("any", agentRef),
   "agent.status_changed": event("any", { ...agentRef, status: z.enum(["active", "suspended"]) }),
   "agent.exported": event("any", agentRef),
+  // Versions (KOBE-46): publish freezes the draft and its tool manifest; rollback republishes.
+  "agent.published": event("any", { ...agentRef, version, draftRevision: version }),
+  "agent.rolled_back": event("any", { ...agentRef, version, fromVersion: version }),
+  /** An agent with versions retired instead of deleted (pinned threads keep their version). */
+  "agent.archived": event("any", agentRef),
+  "agent.unarchived": event("any", agentRef),
 } as const;
 
 export type AuditAction = keyof typeof AUDIT_EVENTS;

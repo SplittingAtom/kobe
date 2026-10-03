@@ -3,7 +3,7 @@ import { expect } from "vitest";
 import { createTestDatabase, testServerUrl } from "@kobe/db/testing";
 import { createApp } from "../app.js";
 import { BackgroundTasks } from "../background.js";
-import { createServerDeps, type ServerDeps } from "../deps.js";
+import { createServerDeps, type ServerDeps, type ServerDepsOptions } from "../deps.js";
 import { waitForAppSessionsToClose } from "./app-sessions.js";
 import { TestBrowser } from "./browser.js";
 import { MemoryMailer } from "./mailer.js";
@@ -26,7 +26,9 @@ export interface Harness {
   close(): Promise<void>;
 }
 
-export async function openHarness(): Promise<Harness> {
+export async function openHarness(
+  options: Pick<ServerDepsOptions, "agents"> = {},
+): Promise<Harness> {
   const database = await createTestDatabase(testServerUrl());
   // A single client: unlike Pool#end, Client#end resolves only once the connection is closed.
   const admin = new pg.Client({ connectionString: database.adminUrl });
@@ -41,6 +43,7 @@ export async function openHarness(): Promise<Harness> {
     setupToken: "setup-token-for-harness-tests-01",
     trustedProxies: ["127.0.0.1/32"],
     mailer,
+    ...options,
   });
   const app = createApp(deps);
   const browser = () => new TestBrowser(app, PUBLIC_URL);

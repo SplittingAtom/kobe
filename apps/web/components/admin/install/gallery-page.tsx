@@ -1,13 +1,19 @@
 "use client";
 
 import { useRef, type FormEvent } from "react";
-import { type AgentSaved, type AgentSummary } from "../../../lib/admin/api/agents";
+import {
+  agentStatusLabel,
+  type AgentSaved,
+  type AgentSummary,
+} from "../../../lib/admin/api/agents";
 import {
   deleteGalleryAgent,
   galleryExportHref,
   importGalleryAgent,
   listGalleryAgents,
+  publishGalleryAgent,
   setGalleryAgentStatus,
+  unarchiveGalleryAgent,
 } from "../../../lib/admin/api/install/gallery";
 import { MutationStatus } from "../error-notice";
 import { DateTime, ResourceView, confirmed } from "../parts";
@@ -63,11 +69,34 @@ export function GalleryPage() {
     if (done) reload();
   }
 
+  async function publish(agent: AgentSummary) {
+    const next = (agent.currentVersion ?? 0) + 1;
+    if (!confirmed(`Publish ${agent.name} as v${next}? New conversations will use it.`)) return;
+    const done = await mutation.run(
+      () => publishGalleryAgent(agent),
+      () => `Published ${agent.name} v${next}.`,
+    );
+    if (done) reload();
+  }
+
+  /** Never published: deleted. Published: archived (KOBE-46), pinned conversations keep it. */
   async function remove(agent: AgentSummary) {
-    if (!confirmed(`Delete ${agent.name} from the gallery? Teams' forks are kept.`)) return;
+    const question =
+      agent.currentVersion === null
+        ? `Delete ${agent.name} from the gallery? Teams' forks are kept.`
+        : `Archive ${agent.name}? No new conversations can start with it; existing ones keep their version.`;
+    if (!confirmed(question)) return;
     const done = await mutation.run(
       () => deleteGalleryAgent(agent.id),
-      () => `Deleted ${agent.name}.`,
+      (saved) => (saved ? `Archived ${agent.name}.` : `Deleted ${agent.name}.`),
+    );
+    if (done) reload();
+  }
+
+  async function restore(agent: AgentSummary) {
+    const done = await mutation.run(
+      () => unarchiveGalleryAgent(agent.id),
+      () => `${agent.name} is no longer archived.`,
     );
     if (done) reload();
   }
@@ -119,7 +148,7 @@ export function GalleryPage() {
                       <td>
                         <code>{a.slug}</code>
                       </td>
-                      <td>{a.status === "active" ? "Active" : "Suspended"}</td>
+                      <td>{agentStatusLabel(a)}</td>
                       <td>{a.currentVersion === null ? "Draft" : `v${a.currentVersion}`}</td>
                       <td>
                         <DateTime value={a.updatedAt} />
@@ -137,13 +166,33 @@ export function GalleryPage() {
                             {a.status === "active" ? "Suspend" : "Reactivate"}
                             <span className={styles.visuallyHidden}> {a.name}</span>
                           </button>
-                          <button
-                            type="button"
-                            disabled={mutation.pending}
-                            onClick={() => void remove(a)}
-                          >
-                            Delete<span className={styles.visuallyHidden}> {a.name}</span>
-                          </button>
+                          {a.archivedAt ? (
+                            <button
+                              type="button"
+                              disabled={mutation.pending}
+                              onClick={() => void restore(a)}
+                            >
+                              Unarchive<span className={styles.visuallyHidden}> {a.name}</span>
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                disabled={mutation.pending}
+                                onClick={() => void publish(a)}
+                              >
+                                Publish<span className={styles.visuallyHidden}> {a.name}</span>
+                              </button>
+                              <button
+                                type="button"
+                                disabled={mutation.pending}
+                                onClick={() => void remove(a)}
+                              >
+                                {a.currentVersion === null ? "Delete" : "Archive"}
+                                <span className={styles.visuallyHidden}> {a.name}</span>
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>

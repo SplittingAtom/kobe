@@ -7,6 +7,7 @@ import {
   errorSchema,
   listThreadsQuerySchema,
   setLeafBodySchema,
+  switchAgentVersionBodySchema,
   threadDetailSchema,
   threadPageSchema,
   threadSearchPageSchema,
@@ -118,10 +119,17 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         summary: "Create a thread in the active team, owned by the caller",
         parameters: change(),
         requestBody: body("CreateThreadBody"),
+        description:
+          "With `agent_id`, the thread pins the agent's current published version (D19). " +
+          "Suspended, archived and never-published agents answer 409 `agent_unavailable`.",
         responses: {
           "201": json("Thread", "The new thread."),
           "404": json("Error", "`agent_not_found` or `project_not_found`."),
           ...ERROR_RESPONSES,
+          "409": json(
+            "Error",
+            "`agent_unavailable`, `no_active_team` or `team_mismatch` (stale tab).",
+          ),
         },
       },
     },
@@ -193,6 +201,26 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         },
       },
     },
+    "/v1/threads/{id}/agent-version": {
+      post: {
+        operationId: "switchThreadAgentVersion",
+        summary: "Pin another published version of the thread's agent (owner only)",
+        description:
+          'D19 one-click switch ("v3 available"): without `version`, the agent\'s current ' +
+          "version. Refused while a run is active (`thread_busy`).",
+        parameters: change([idParameter]),
+        requestBody: body("SwitchAgentVersionBody"),
+        responses: {
+          "200": json("Thread", "The thread with its new pin."),
+          "404": json("Error", "`thread_not_found`, `agent_not_found` or `version_not_found`."),
+          ...ERROR_RESPONSES,
+          "409": json(
+            "Error",
+            "`no_agent`, `agent_unavailable`, `thread_busy`, `thread_in_trash`, or a team conflict.",
+          ),
+        },
+      },
+    },
     "/v1/threads/{id}/restore": {
       post: {
         operationId: "restoreThread",
@@ -219,6 +247,7 @@ export function threadsOpenApiSchemas(): Record<string, JsonSchema> {
     CreateThreadBody: withoutDialect(input(createThreadBodySchema)),
     UpdateThreadBody: withoutDialect(input(updateThreadBodySchema)),
     SetLeafBody: withoutDialect(input(setLeafBodySchema)),
+    SwitchAgentVersionBody: withoutDialect(input(switchAgentVersionBodySchema)),
     CreatedThread: withoutDialect(output(createdThreadSchema)),
   };
 }

@@ -55,6 +55,17 @@ const CAUSE: Record<RunEnd["status"], RunTransitionCause> = {
   interrupted: "sandbox_lost",
 };
 
+type BudgetScope = "install" | "team" | "user";
+
+/** The terminal event of a budget stop (D30); same text as the orchestrator's. */
+function budgetStoppedEvent(scope: BudgetScope): NewRunEvent {
+  const whose = scope === "user" ? "your" : scope === "team" ? "the team's" : "the install's";
+  return {
+    type: "run.budget_stopped",
+    payload: { scope, message: `The run stopped because ${whose} budget is used up.` },
+  };
+}
+
 function terminalEvent(end: RunEnd, leaf: string | null): NewRunEvent {
   switch (end.status) {
     case "completed":
@@ -92,18 +103,23 @@ export async function endRunInTx(
   const thread = await tx.execute<{ status: ThreadStatus; leaf_entry_id: string | null }>(sql`
     SELECT status, leaf_entry_id FROM threads
      WHERE team_id = ${teamId} AND id = ${threadId} FOR NO KEY UPDATE`);
-  const run = await tx.execute<{ status: RunStatus }>(sql`
-    SELECT status FROM runs WHERE team_id = ${teamId} AND id = ${runId} FOR NO KEY UPDATE`);
+  const run = await tx.execute<{ status: RunStatus; budget_stop_scope: BudgetScope | null }>(sql`
+    SELECT status, budget_stop_scope FROM runs
+     WHERE team_id = ${teamId} AND id = ${runId} FOR NO KEY UPDATE`);
   const from = run.rows[0]?.status;
   const threadRow = thread.rows[0];
   if (from === undefined || threadRow === undefined) return { ended: false };
-  if (!canTransition(from, end.status, CAUSE[end.status])) return { ended: false, threadId };
+  // A budget stop is pending (KOBE-30/42): Pi settling after the step ends the run budget_stopped.
+  const budgetScope = run.rows[0]?.budget_stop_scope ?? null;
+  const to: RunStatus = end.status === "completed" && budgetScope ? "budget_stopped" : end.status;
+  const cause = to === "budget_stopped" ? "budget_exhausted" : CAUSE[end.status];
+  if (!canTransition(from, to, cause)) return { ended: false, threadId };
   await tx.execute(sql`
-    UPDATE runs SET status = ${end.status}, ended_at = now()
+    UPDATE runs SET status = ${to}, ended_at = now()
      WHERE team_id = ${teamId} AND id = ${runId}`);
   const nextStatus = nextThreadStatus(threadRow.status, {
     kind: "run_status",
-    to: end.status,
+    to,
     was_active: true,
   });
   if (nextStatus !== threadRow.status) {
@@ -111,7 +127,19 @@ export async function endRunInTx(
       UPDATE threads SET status = ${nextStatus}, last_activity_at = now()
        WHERE team_id = ${teamId} AND id = ${threadId}`);
   }
-  await appendRunEventsInTx(tx, teamId, runId, [terminalEvent(end, threadRow.leaf_entry_id)]);
+  await appendRunEventsInTx(tx, teamId, runId, [
+    budgetScope && to === "budget_stopped"
+      ? budgetStoppedEvent(budgetScope)
+      : terminalEvent(end, threadRow.leaf_entry_id),
+  ]);
+  if (budgetScope && to === "budget_stopped") {
+    await recordAudit(tx, {
+      action: "run.budget_stopped",
+      actor: SYSTEM_ACTOR,
+      teamId,
+      target: { runId, threadId, scope: budgetScope },
+    });
+  }
   if (end.status === "interrupted") {
     await recordAudit(tx, {
       action: "run.interrupted",
