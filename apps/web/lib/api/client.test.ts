@@ -114,6 +114,33 @@ describe("apiRequest", () => {
   });
 });
 
+describe("apiRequest for runs (KOBE-32)", () => {
+  it("sends Idempotency-Key when given", async () => {
+    const fetchFn = respond(201, { run_id: "r", queued: false });
+    await apiRequest("/v1/threads/t/messages", {
+      method: "POST",
+      json: {},
+      idempotencyKey: "k-1",
+      fetchFn,
+    });
+    const headers = new Headers(must(must(fetchFn.mock.calls[0])[1]).headers);
+    expect(headers.get("idempotency-key")).toBe("k-1");
+  });
+
+  it.each(["isolation_unavailable", "sandbox_unavailable", "search_timeout"])(
+    "shows the server's message for the 503 %s (written for people)",
+    async (code) => {
+      const res = await apiRequest("/v1/x", {
+        fetchFn: respond(503, { code, message: `msg ${code}` }),
+      });
+      expect(res).toMatchObject({
+        ok: false,
+        error: { status: 503, code, message: `msg ${code}` },
+      });
+    },
+  );
+});
+
 describe("errorKind", () => {
   it.each([
     [{ status: 401, code: "unauthenticated" }, "signIn"],
@@ -123,6 +150,7 @@ describe("errorKind", () => {
     [{ status: 409, code: "team_mismatch" }, "reload"],
     [{ status: 404, code: "not_found" }, "notFound"],
     [{ status: 503, code: "isolation_runtime_missing" }, "isolation"],
+    [{ status: 503, code: "isolation_unavailable" }, "isolation"],
     [{ status: 409, code: "slug_taken" }, "other"],
   ] as const)("%j → %s", (error, kind) => {
     expect(errorKind({ ...error, message: "" })).toBe(kind);

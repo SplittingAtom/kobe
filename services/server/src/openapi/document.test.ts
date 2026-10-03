@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { ServerDeps } from "../deps.js";
 import { runRoutes, threadRunRoutes } from "../routes/runs.js";
+import { threadPendingRoutes } from "../routes/thread-pending.js";
 import { threadRoutes } from "../routes/threads.js";
 import { openApiDocument } from "./document.js";
 
@@ -44,6 +45,7 @@ describe("OpenAPI document (KOBE-34 ac-1)", () => {
       [
         ...mountedOperations("/v1/threads", threadRoutes(fakeDeps)),
         ...mountedOperations("/v1/threads", threadRunRoutes(fakeDeps)),
+        ...mountedOperations("/v1/threads", threadPendingRoutes(fakeDeps)),
       ].sort(),
     );
   });

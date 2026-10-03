@@ -28,6 +28,8 @@ export interface RequestOptions {
   readonly teamId?: string | undefined;
   /** `If-Match` (an ETag such as `"3"`): agent edits and publishes (KOBE-45/46). */
   readonly ifMatch?: string | undefined;
+  /** `Idempotency-Key`: makes a create safe to repeat (`POST /v1/threads/{id}/messages`, KOBE-30). */
+  readonly idempotencyKey?: string | undefined;
   readonly fetchFn?: typeof fetch | undefined;
 }
 
@@ -44,7 +46,13 @@ const FALLBACK: Readonly<Record<number, readonly [string, string]>> = {
 };
 
 /** Codes whose server message is safe and useful to show even on a 5xx. */
-const SHOWN_5XX_CODES: ReadonlySet<string> = new Set(["isolation_runtime_missing"]);
+const SHOWN_5XX_CODES: ReadonlySet<string> = new Set([
+  "isolation_runtime_missing",
+  // Run orchestrator (KOBE-30) and search (KOBE-33): fixed server messages written for people.
+  "isolation_unavailable",
+  "sandbox_unavailable",
+  "search_timeout",
+]);
 
 function fallback(status: number): ApiError {
   const known = FALLBACK[status];
@@ -98,7 +106,7 @@ export async function apiRequest<T>(
   options: RequestOptions = {},
 ): Promise<ApiResult<T>> {
   assertApiPath(path);
-  const { method = "GET", json, raw, teamId, ifMatch, fetchFn = fetch } = options;
+  const { method = "GET", json, raw, teamId, ifMatch, idempotencyKey, fetchFn = fetch } = options;
   const headers = new Headers({ accept: "application/json" });
   let body: string | null = null;
   if (json !== undefined) {
@@ -110,6 +118,7 @@ export async function apiRequest<T>(
   }
   if (teamId !== undefined) headers.set(TEAM_HEADER, teamId);
   if (ifMatch !== undefined) headers.set("if-match", ifMatch);
+  if (idempotencyKey !== undefined) headers.set("idempotency-key", idempotencyKey);
 
   let res: Response;
   try {
@@ -129,7 +138,9 @@ export type ErrorKind =
 export function errorKind(error: ApiError): ErrorKind {
   if (error.status === 401) return "signIn";
   if (error.status === 403) return "forbidden";
-  if (error.code === "isolation_runtime_missing") return "isolation";
+  if (error.code === "isolation_runtime_missing" || error.code === "isolation_unavailable") {
+    return "isolation";
+  }
   if (error.code === "no_active_team") return "chooseTeam";
   if (error.code === "team_mismatch") return "reload";
   if (error.status === 404) return "notFound";

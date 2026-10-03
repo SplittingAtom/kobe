@@ -46,6 +46,20 @@ describe("camelizeKeys", () => {
     });
   });
 
+  it("keeps Pi entry payloads verbatim (tool-call arguments must not be renamed)", () => {
+    const payload = {
+      type: "message",
+      parentId: "a1",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", arguments: { file_path: "/x" } }],
+      },
+    };
+    expect(camelizeKeys({ entries: [{ entry_id: "e1", payload }] })).toEqual({
+      entries: [{ entryId: "e1", payload }],
+    });
+  });
+
   it("does not let a key named __proto__ reach the prototype", () => {
     const out = camelizeKeys(JSON.parse('{"__proto__": {"polluted": true}, "a_b": 1}')) as Record<
       string,
