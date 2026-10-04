@@ -27,6 +27,7 @@
     "dist"
   ],
   "devDependencies": {
+    "@kobe/model-gateway": "workspace:*",
     "@types/ws": "^8.18.2"
   }
 }

@@ -16,6 +16,7 @@ import {
 } from "../pi/session-files.js";
 import { fail, ok, type CommandOutcome } from "./outcome.js";
 import { Thread, type ThreadEnv, type ThreadHooks } from "./thread.js";
+import type { RunModel } from "../models/types.js";
 
 type Frame<T extends ServerToSandboxFrame["type"]> = Extract<ServerToSandboxFrame, { type: T }>;
 
@@ -49,12 +50,17 @@ export class ThreadManager {
   #pendingSpawns = 0;
   readonly #evicting = new Set<Thread>();
   readonly #reaper: NodeJS.Timeout;
+  readonly #unsubscribeTokens: (() => void) | undefined;
   #draining = false;
 
   constructor(options: ThreadManagerOptions) {
     this.#options = options;
     this.#reaper = setInterval(() => void this.reapIdle(), Math.min(60_000, options.idleMs));
     this.#reaper.unref();
+    // A rotated model-gateway token reaches every live Pi's model file (KOBE-41).
+    this.#unsubscribeTokens = options.models?.tokens.onChange((token) => {
+      for (const thread of this.#threads.values()) void thread.updateToken(token);
+    });
   }
 
   get draining(): boolean {
@@ -88,6 +94,11 @@ export class ThreadManager {
     if (thread.restoring) return fail("pi_rejected", "session restore in progress");
     const attachmentError = this.#checkAttachments(frame);
     if (attachmentError !== undefined) return fail("pi_rejected", attachmentError);
+    const model = runModelOf(frame);
+    if (this.#options.models !== undefined && model === null) {
+      // The server found no model for the run (no team default): say so before any Pi work.
+      return fail("model_not_configured", "no model is enabled for this team");
+    }
 
     const prepared = await thread.withLock(() => this.#prepareRun(thread, frame));
     if (prepared !== undefined) return prepared;
@@ -95,6 +106,26 @@ export class ThreadManager {
 
     thread.beginRun(frame.run_id);
     try {
+      // The tripwire first (before the run's own write to the model file would hide a rewrite).
+      const tampered = await thread.verifyRuntime();
+      if (tampered !== undefined) {
+        await thread.withLock(() => thread.stopProcess());
+        thread.endRun();
+        return fail("runtime_tampered", tampered);
+      }
+      try {
+        await thread.attachRun(frame.run_id, model);
+      } catch (error) {
+        thread.endRun();
+        return fail("pi_unavailable", `model file not written: ${(error as Error).message}`);
+      }
+      // And once more with the run's file in place: the prompt goes out right after this.
+      const tamperedAfter = await thread.verifyRuntime();
+      if (tamperedAfter !== undefined) {
+        await thread.withLock(() => thread.stopProcess());
+        thread.endRun();
+        return fail("runtime_tampered", tamperedAfter);
+      }
       if (this.#options.beforeRun !== undefined) {
         const timedOut = await withTimeout(
           this.#options.beforeRun(frame),
@@ -259,6 +290,7 @@ export class ThreadManager {
   async shutdown(deadlineMs: number): Promise<void> {
     this.#draining = true;
     clearInterval(this.#reaper);
+    this.#unsubscribeTokens?.();
     const active = [...this.#threads.values()].map((t) => t.runEnded());
     let timer: NodeJS.Timeout | undefined;
     await Promise.race([
@@ -361,7 +393,7 @@ export class ThreadManager {
     const launch = buildPiLaunch({
       sessionFile: this.#sessionFile(thread.id),
       home: this.#options.home,
-      agentDir: this.#options.agentDir,
+      modelsExtension: this.#options.models?.extension,
       policyExtension: this.#options.policyExtension,
       ...(this.#options.extensions === undefined ? {} : { extensions: this.#options.extensions }),
       parentEnv: this.#options.parentEnv,
@@ -380,7 +412,7 @@ export class ThreadManager {
       return fail("pi_unavailable", "too many threads are active in this sandbox");
     }
     try {
-      await thread.spawn(launch);
+      await thread.spawn(launch, runModelOf(frame));
     } catch (error) {
       return fail("pi_unavailable", `cannot start Pi: ${(error as Error).message}`);
     } finally {
@@ -389,12 +421,17 @@ export class ThreadManager {
     }
     try {
       await thread.waitPolicyReady();
-      return undefined;
     } catch (error) {
       // Fail closed: a Pi whose kobe-policy did not load would run tools unchecked.
       await thread.stopProcess();
       return fail("pi_unavailable", `kobe-policy did not start: ${(error as Error).message}`);
     }
+    const tampered = await thread.verifyRuntime();
+    if (tampered !== undefined) {
+      await thread.stopProcess();
+      return fail("runtime_tampered", tampered);
+    }
+    return undefined;
   }
 
   /**
@@ -454,6 +491,14 @@ export class ThreadManager {
       await thread.withLock(() => thread.stopProcess());
     }
   }
+}
+
+/** The run's gateway model from `run.start.config` (both fields, else no model). */
+function runModelOf(frame: RunStartFrame | undefined): RunModel | null {
+  const model = frame?.config?.model;
+  return model?.gateway_model !== undefined && model.api !== undefined
+    ? { gatewayModel: model.gateway_model, api: model.api }
+    : null;
 }
 
 function promptText(frame: RunStartFrame): string {

@@ -5,7 +5,8 @@
 # node containers rather than bind-mounted.
 #   NO_GVISOR=1 creates the cluster without gVisor (to prove the chart refuses to install).
 #   KOBE_DOCKERHUB_MIRROR=http://host:port makes the nodes pull docker.io images through that
-#   pull-through cache (CI: ci/runners/dockerhub-mirror.yaml); unset, they pull from Docker Hub.
+#   pull-through cache (self-hosted CI: ci/runners/dockerhub-mirror.yaml); an https:// URL names a
+#   public mirror (GitHub-hosted CI: https://mirror.gcr.io); unset, they pull from Docker Hub.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -19,14 +20,16 @@ GVISOR_RELEASE="${GVISOR_RELEASE:-20260928.0}"
 K3D="${K3D:-k3d}"
 KUBECTL="${KUBECTL:-kubectl}"
 CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/kobe/gvisor-${GVISOR_RELEASE}"
+# Downloads retry transient failures (a 502 from the release host must not fail a CI run).
+CURL=(curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 20)
 
 fetch_gvisor() { # arch: x86_64 | aarch64 — releases ship as a checksummed tarball
   local arch="$1" dir="$CACHE/$1" base="https://storage.googleapis.com/gvisor/releases/release/${GVISOR_RELEASE}/$1"
   if [[ ! -x "$dir/runsc" || ! -x "$dir/containerd-shim-runsc-v1" || ! -d "$dir/gvisor-bin" ]]; then
     # Explicit `|| return`: errexit does not apply inside command substitution on bash 3.2 (macOS).
     mkdir -p "$dir" || return 1
-    curl -fsSL -o "$dir/gvisor.tar.bz2" "$base/gvisor.tar.bz2" || return 1
-    curl -fsSL -o "$dir/gvisor.tar.bz2.sha512" "$base/gvisor.tar.bz2.sha512" || return 1
+    "${CURL[@]}" -o "$dir/gvisor.tar.bz2" "$base/gvisor.tar.bz2" || return 1
+    "${CURL[@]}" -o "$dir/gvisor.tar.bz2.sha512" "$base/gvisor.tar.bz2.sha512" || return 1
     (cd "$dir" && { sha512sum -c gvisor.tar.bz2.sha512 2>/dev/null || shasum -a 512 -c gvisor.tar.bz2.sha512; } >/dev/null) || return 1
     # runsc needs its gvisor-bin/ sidecars next to it (sentry, gofer, ...).
     tar -xjf "$dir/gvisor.tar.bz2" -C "$dir" || return 1
@@ -47,7 +50,13 @@ fi
 # outer cluster is resolved here and handed to containerd as an address. containerd still falls
 # back to Docker Hub when the mirror fails, so a bad mirror slows pulls but breaks nothing.
 registry_args=()
-if [[ -n "${KOBE_DOCKERHUB_MIRROR:-}" ]]; then
+if [[ "${KOBE_DOCKERHUB_MIRROR:-}" == https://* ]]; then
+  # A public mirror: the nodes resolve it themselves (containerd still tries Docker Hub last).
+  registries=$(mktemp)
+  printf 'mirrors:\n  docker.io:\n    endpoint:\n      - "%s"\n' "${KOBE_DOCKERHUB_MIRROR%/}" >"$registries"
+  registry_args=(--registry-config "$registries")
+  echo "==> docker.io pulls in the cluster try ${KOBE_DOCKERHUB_MIRROR} first"
+elif [[ -n "${KOBE_DOCKERHUB_MIRROR:-}" ]]; then
   mirror="${KOBE_DOCKERHUB_MIRROR#*://}"
   mirror="${mirror%%/*}"
   mirror_ip=$(getent hosts "${mirror%:*}" 2>/dev/null | awk '{ print $1; exit }' || true)

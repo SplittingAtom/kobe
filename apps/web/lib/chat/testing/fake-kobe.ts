@@ -21,7 +21,19 @@ interface FakeThread {
   deleted_at: string | null;
   last_activity_at: string;
   created_at: string;
+  /** The thread's chosen model alias (KOBE-44); null = the team default. */
+  model: string | null;
+  /** The model the thread's agent pins (KOBE-44/47 seam); it wins over `model`. */
+  agent_model?: string | null;
   entries: FakeEntry[];
+}
+
+/** A catalog model as `GET /v1/team/models` answers it (KOBE-40/44). */
+export interface FakeTeamModel {
+  readonly alias: string;
+  readonly label: string | null;
+  enabled: boolean;
+  is_default: boolean;
 }
 
 interface FakeEntry {
@@ -83,6 +95,8 @@ export class FakeKobe {
   readonly runs = new Map<string, FakeRun>();
   /** Requests answered with an error once, keyed "METHOD /path" (e.g. to simulate a 503). */
   readonly failNext = new Map<string, Response>();
+  /** The install catalog with the team's choice (KOBE-44); empty = no models route answers. */
+  readonly teamModels: FakeTeamModel[] = [];
   /** The server holds the queue after Stop (KOBE-26); false = the KOBE-30 behaviour (next starts). */
   pauseOnStop = true;
   #threadN = 0;
@@ -110,6 +124,7 @@ export class FakeKobe {
       deleted_at: null,
       last_activity_at: `2026-10-02T09:${String(this.#threadN).padStart(2, "0")}:00.000Z`,
       created_at: NOW,
+      model: null,
       entries: [],
     });
     return id;
@@ -309,7 +324,7 @@ export class FakeKobe {
   }
 
   #summary(thread: FakeThread): Json {
-    const { entries: _e, ...rest } = thread;
+    const { entries: _e, agent_model: _a, ...rest } = thread;
     return {
       ...rest,
       owner_user_id: uuid(3, 1),
@@ -364,14 +379,33 @@ export class FakeKobe {
       });
     }
     if (url.pathname === "/v1/me/invites") return json(200, { invitations: [] });
+    if (url.pathname === "/v1/team/models" && this.teamModels.length > 0) {
+      if (headers.get("x-kobe-team") !== this.teamId) return error(409, "team_mismatch");
+      const models = this.teamModels.map((m) => ({
+        ...m,
+        provider_id: "ollama",
+        model: m.alias,
+        gateway_model: `ollama/${m.alias}`,
+        created_at: NOW,
+        updated_at: NOW,
+      }));
+      return json(200, {
+        models,
+        default: this.teamModels.find((m) => m.is_default)?.alias ?? null,
+      });
+    }
     const scoped =
       url.pathname.startsWith("/v1/threads") ||
       url.pathname.startsWith("/v1/runs") ||
-      url.pathname.startsWith("/v1/approvals");
+      url.pathname.startsWith("/v1/approvals") ||
+      url.pathname === "/v1/team/retention";
     if (!scoped) return error(404, "not_found");
     if (headers.get("x-kobe-team") !== this.teamId) return error(409, "team_mismatch");
     return this.#route(method, url, body as Json | undefined, headers);
   };
+
+  /** The team's next retention shortening (KOBE-18 banner); null: none. */
+  upcomingRetention: { period: string; effective_at: string } | null = null;
 
   #route(method: string, url: URL, body: Json | undefined, headers: Headers): Response {
     const parts = url.pathname.split("/").filter(Boolean); // v1, threads|runs, id, action
@@ -379,6 +413,16 @@ export class FakeKobe {
     if (area === "threads") return this.#threadRoute(method, id, action, sub, url, body, headers);
     if (area === "runs" && id) return this.#runRoute(method, id, action, body);
     if (area === "approvals" && id) return this.#approvalRoute(method, id, body);
+    if (area === "team" && id === "retention" && method === "GET") {
+      return json(200, {
+        period: "forever",
+        maximum: "forever",
+        effective: "forever",
+        pending: null,
+        upcoming: this.upcomingRetention,
+        allowed: ["30d", "90d", "1y", "forever"],
+      });
+    }
     return error(404, "not_found");
   }
 
@@ -441,7 +485,10 @@ export class FakeKobe {
       return json(200, { threads: trash.map((t) => this.#summary(t)), next_cursor: null });
     }
     if (id === undefined && method === "POST") {
+      const model = (body?.model as string | null | undefined) ?? null;
+      if (model !== null && !this.#modelEnabled(model)) return this.#modelNotEnabled();
       const threadId = this.addThread((body?.title as string | undefined) ?? null);
+      this.#thread(threadId).model = model;
       return json(201, this.#summary(this.#thread(threadId)));
     }
     const thread = id === undefined ? undefined : this.threads.get(id);
@@ -456,6 +503,11 @@ export class FakeKobe {
     if (action === "restore") {
       thread.deleted_at = null;
       return json(200, this.#summary(thread));
+    }
+    if (action === "purge" && method === "POST") {
+      if (thread.deleted_at === null) return error(409, "not_in_trash", "Move it to Trash first.");
+      this.threads.delete(thread.thread_id);
+      return new Response(null, { status: 204 });
     }
     if (action === "messages") return this.#submit(thread, body, headers.get("idempotency-key"));
     if (action === "runs") return json(200, this.#threadRuns(thread.thread_id));
@@ -472,10 +524,22 @@ export class FakeKobe {
   #threadItself(method: string, thread: FakeThread, url: URL, body: Json | undefined): Response {
     if (method === "GET") {
       const page = this.#entryPage(thread, url);
-      return json(200, { ...this.#summary(thread), agent_current_version: null, ...page });
+      return json(200, {
+        ...this.#summary(thread),
+        agent_current_version: null,
+        agent_model: thread.agent_model ?? null,
+        ...page,
+      });
     }
     if (method === "PATCH") {
-      thread.title = (body?.title as string | null | undefined) ?? null;
+      if (body && "model" in body) {
+        const model = (body.model as string | null) ?? null;
+        if (model !== null && model !== thread.model && !this.#modelEnabled(model)) {
+          return this.#modelNotEnabled();
+        }
+        thread.model = model;
+      }
+      if (body && "title" in body) thread.title = (body.title as string | null) ?? null;
       return json(200, this.#summary(thread));
     }
     if (method === "DELETE") {
@@ -485,6 +549,18 @@ export class FakeKobe {
       return json(200, this.#summary(thread));
     }
     return error(405, "method_not_allowed");
+  }
+
+  #modelEnabled(alias: string): boolean {
+    return this.teamModels.some((m) => m.alias === alias && m.enabled);
+  }
+
+  #modelNotEnabled(): Response {
+    return error(
+      409,
+      "model_not_enabled",
+      "That model isn't enabled for your team. Pick one of the team's models, or ask a team admin.",
+    );
   }
 
   #entryPage(thread: FakeThread, url: URL): Json {

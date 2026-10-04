@@ -49,6 +49,13 @@ const configSchema = z.object({
     .string()
     .min(32, "KOBE_MCP_PROXY_INTERNAL_KEY must be at least 32 characters")
     .optional(),
+  // UTC hour the nightly retention pass runs in (KOBE-18, D18).
+  KOBE_RETENTION_HOUR_UTC: z.coerce
+    .number({ error: "KOBE_RETENTION_HOUR_UTC must be a number" })
+    .int("KOBE_RETENTION_HOUR_UTC must be an integer")
+    .min(0, "KOBE_RETENTION_HOUR_UTC must be between 0 and 23")
+    .max(23, "KOBE_RETENTION_HOUR_UTC must be between 0 and 23")
+    .default(3),
 });
 
 /** Auth settings: required by the API server only (the scheduler never sees these secrets). */
@@ -104,6 +111,8 @@ export interface Config {
   readonly internalPort: number;
   /** Shared with the MCP proxy; without it the internal listener is not started. */
   readonly mcpProxyInternalKey: string | undefined;
+  /** UTC hour of the nightly retention pass (KOBE-18). */
+  readonly retentionHourUtc: number;
   /** Present for the API server only. */
   readonly auth?: AuthConfig;
   /** Present for the API server only (invites, password resets, notifications). */
@@ -127,6 +136,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     agentMaxVersions: base.data.KOBE_AGENT_MAX_VERSIONS,
     internalPort: base.data.KOBE_INTERNAL_PORT,
     mcpProxyInternalKey: base.data.KOBE_MCP_PROXY_INTERNAL_KEY,
+    retentionHourUtc: base.data.KOBE_RETENTION_HOUR_UTC,
   };
   if (config.process !== "server") return config;
   const auth = authSchema.safeParse(env);

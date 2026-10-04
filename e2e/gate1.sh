@@ -20,6 +20,9 @@ STEPS=" ${KOBE_GATE1_STEPS:-chat-real chat-stream probe interrupt cold} "
 TRIALS="${KOBE_GATE1_TRIALS:-20}"
 P95_MAX="${KOBE_GATE1_P95_MS:-8000}"
 COLD_KEY="${KOBE_GATE1_COLD_USER:-c1}"
+# Model alias the fixtures make each team's default: CI's fake upstream (`fast`, set up by
+# e2e/run.sh) or a real install's catalog model (KOBE_GATE1_MODEL).
+MODEL_ALIAS="${KOBE_GATE1_MODEL:-fast}"
 OWNER_EMAIL="${KOBE_GATE1_OWNER_EMAIL:-owner@e2e.test}"
 OWNER_PASSWORD="${KOBE_GATE1_OWNER_PASSWORD:-e2e owner password}"
 SERVER="deploy/$RELEASE-server"
@@ -50,6 +53,35 @@ until_ok() { # seconds command... → succeeds as soon as the command does, fail
 
 CLIENT_JS=$(cat e2e/gate1/client.mjs)
 AGENT_JS=$(cat e2e/gate1/agent.mjs)
+# The fake model upstream e2e/run.sh deployed (and removed on exit): the catalog's providers point
+# at llm.kobe-e2e-llm.svc, so recreate it from the installed model-gateway image when it is gone.
+ensure_fake_llm() {
+  local ns=kobe-e2e-llm image phase
+  # e2e/run.sh deletes the namespace on exit (`--wait=false`): it may still be terminating here,
+  # with its Service listed but its pod on the way out. Wait for it to go, then recreate.
+  phase=$($KUBECTL get namespace "$ns" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+  if [[ "$phase" == Terminating ]]; then
+    $KUBECTL wait --for=delete "namespace/$ns" --timeout=240s >/dev/null 2>&1 || true
+    phase=""
+  fi
+  if [[ "$phase" == Active && "$($KUBECTL -n "$ns" get pod llm -o jsonpath='{.status.phase}' 2>/dev/null)" == Running ]]; then
+    return
+  fi
+  image=$($KUBECTL -n "$NS" get "$SERVER" -o jsonpath='{.spec.template.spec.containers[?(@.name=="server")].image}' | sed 's/kobe-server/kobe-model-gateway/')
+  $KUBECTL delete pod llm -n "$ns" --ignore-not-found --wait=true >/dev/null 2>&1 || true
+  $KUBECTL create namespace "$ns" --dry-run=client -o yaml | $KUBECTL apply -f - >/dev/null
+  $KUBECTL -n "$ns" run llm --restart=Never --image="$image" --image-pull-policy=IfNotPresent --labels=app=llm \
+    --command -- node dist/testing/fake-llm-main.js >/dev/null
+  $KUBECTL -n "$ns" get svc llm -o name >/dev/null 2>&1 \
+    || $KUBECTL -n "$ns" expose pod llm --port=80 --target-port=8080 --name=llm >/dev/null
+  $KUBECTL -n "$ns" wait --for=condition=Ready pod/llm --timeout=180s >/dev/null 2>&1 || true
+  PODS+=("-n $ns llm")
+}
+# What the model-gateway shim refused lately (status, error type, run): printed when a chat failed.
+shim_refusals() {
+  $KUBECTL -n "$NS" logs -l app.kubernetes.io/component=model-gateway --tail=-1 --since=15m 2>/dev/null \
+    | grep -E '"status":(4|5)[0-9][0-9]' | sed -E 's/.*"call":(\{[^}]*\}).*/     shim: \1/' | tail -12
+}
 client() { # json config → the harness step's output (inside a server pod, through the Service)
   $KUBECTL -n "$NS" exec "$SERVER" -c server -- node --input-type=module -e "$CLIENT_JS" "$1" 2>&1 || true
 }
@@ -77,8 +109,8 @@ list_json() { # keys... → JSON array of user_json
 echo "==> fixtures: two teams × five users (invited, joined through the API)"
 setup_token=$($KUBECTL -n "$NS" get secret "$RELEASE-auth" -o jsonpath='{.data.setup-token}' 2>/dev/null | base64 -d 2>/dev/null || true)
 # shellcheck disable=SC2086
-fx=$(client "$(printf '{"mode":"fixtures","base":"%s","owner":{"email":"%s","password":"%s"},"setupToken":"%s","users":%s,"teams":[{"key":"a","slug":"gate1-a","name":"Gate 1 A"},{"key":"b","slug":"gate1-b","name":"Gate 1 B"}]}' \
-  "$BASE" "$OWNER_EMAIL" "$OWNER_PASSWORD" "$setup_token" "$(list_json $KEYS "$COLD_KEY")")")
+fx=$(client "$(printf '{"mode":"fixtures","base":"%s","modelAlias":"%s","owner":{"email":"%s","password":"%s"},"setupToken":"%s","users":%s,"teams":[{"key":"a","slug":"gate1-a","name":"Gate 1 A"},{"key":"b","slug":"gate1-b","name":"Gate 1 B"}]}' \
+  "$BASE" "$MODEL_ALIAS" "$OWNER_EMAIL" "$OWNER_PASSWORD" "$setup_token" "$(list_json $KEYS "$COLD_KEY")")")
 printf '%s\n' "$fx" | sed 's/^/     /'
 fixtures=$(field fixtures "$fx")
 json_get() { printf '%s' "$fixtures" | sed -n "s/.*\"$1\":\"\([0-9a-f-]*\)\".*/\1/p"; } # key → uuid
@@ -90,6 +122,17 @@ if [[ ! "$TEAM_A $TEAM_B" =~ ^[0-9a-f-]{36}\ [0-9a-f-]{36}$ ]]; then
 fi
 ok "fixtures: two teams and their users"
 for k in $KEYS; do contains "user $k is a member of team $(team_of "$k")" "^member_$k=200$" "$fx"; done
+# KOBE-41: with a model enabled for both teams (the catalog e2e/run.sh set up against the fake
+# upstream), runs are answered by that model; without one (404: no catalog on this install) the
+# runs end as before a model existed and the cold step measures to Pi's refusal instead.
+if [[ "$(printf '%s\n' "$fx" | grep -c '^models_[ab]=200$')" == 2 ]]; then
+  MODELS=1
+  ok "both teams enabled the install's model ($MODEL_ALIAS) as their default"
+  [[ "$MODEL_ALIAS" == fast ]] && ensure_fake_llm
+else
+  MODELS=0
+  echo "     no model catalog on this install: runs end without a model answer ($(printf '%s\n' "$fx" | grep '^models_' | tr '\n' ' '))"
+fi
 team_id() { if [[ "$(team_of "$1")" == b ]]; then echo "$TEAM_B"; else echo "$TEAM_A"; fi; }
 team_ns() { echo "kobe-team-gate1-$(team_of "$1")"; }
 member_json() { # keys... → chat users JSON (with ids)
@@ -105,17 +148,21 @@ MEMBERS=$(member_json $KEYS)
 connections() { client "$(printf '{"mode":"connections","base":"%s","users":%s}' "$BASE" "$MEMBERS")"; }
 
 # 1. Concurrency on the real path: ten users send a message at once; each run starts that user's
-# own sandbox (gVisor, its team's namespace), the real agent connects, and the prompt reaches the
-# real Pi. No model is reachable from sandboxes yet (KOBE-40/41), so Pi answers with its refusal
-# for lack of a key (`pi_rejected`): proof the prompt got to that user's Pi, not a chat answer.
+# own sandbox (gVisor, its team's namespace), the real agent connects, the prompt reaches the real
+# Pi, and (KOBE-41) Pi answers it with the team's model through the model gateway and Bifrost: a
+# streamed chat answer and `run.completed`. Without a model on the install, Pi's refusal.
 if [[ "$STEPS" == *" chat-real "* ]]; then
   echo "==> concurrency, real sandboxes and Pi: 2 teams × 5 users at once"
   real=$(client "$(printf '{"mode":"chat","kind":"real","base":"%s","nonce":"%s","users":%s,"timeoutMs":300000}' "$BASE" "$NONCE" "$MEMBERS")")
   printf '%s\n' "$real" | grep -v '^runs=' | sed 's/^/     /'
   contains "ten users chatted at once" '^users=10$' "$real"
+  if ((MODELS)); then real_end='run.completed error=- .*text.delta'; else real_end='(run.completed error=-|run.failed error=(pi_rejected|model_not_configured))'; fi
+  if ((MODELS)) && printf '%s\n' "$real" | grep -q "^chat user=.* terminal=run.failed"; then shim_refusals; fi
   for k in $KEYS; do
-    contains "$k: the run reached the user's own Pi and ended (pi_rejected until a model exists)" \
-      "^chat user=$k terminal=(run.completed error=-|run.failed error=pi_rejected) .*gapless=true duplicates=false same_as_log=true" "$(printf '%s\n' "$real" | grep "^chat user=$k ")"
+    contains "$k: the run reached the user's own Pi and ended$( ((MODELS)) && echo " with a streamed model answer")" \
+      "^chat user=$k terminal=$real_end" "$(printf '%s\n' "$real" | grep "^chat user=$k ")"
+    contains "$k: gapless, no duplicates, same as the log" \
+      "^chat user=$k .*gapless=true duplicates=false same_as_log=true" "$(printf '%s\n' "$real" | grep "^chat user=$k ")"
   done
   contains "nobody can open a teammate's or another team's run or thread (all 404)" '^cross_leaks=0$' "$real"
   contains "every user tried every other user's run and thread (180 checks)" '^cross_checks=180$' "$real"
@@ -256,16 +303,19 @@ if [[ "$STEPS" == *" interrupt "* ]]; then
   contains "Retry starts a new run at once" '^retry=201:false$' "$retried"
   contains "Retry is once per run" '^retry_again=same$' "$retried"
   contains "the retry links the interrupted run" '^retry_links=true$' "$retried"
-  contains "the retry reaches the user's real sandbox, woken (pi_rejected until a model exists)" \
-    '^retry_terminal=(run.completed:-|run.failed:pi_rejected)$' "$retried"
+  if ((MODELS)); then retry_end='run.completed:-'; else retry_end='(run.completed:-|run.failed:(pi_rejected|model_not_configured))'; fi
+  contains "the retry reaches the user's real sandbox, woken$( ((MODELS)) && echo ", and the model answers")" \
+    "^retry_terminal=$retry_end\$" "$retried"
   contains "history survives the retry" '^history_after_retry=intact$' "$retried"
 fi
 
-# 5. Cold start: hibernated → the first thing the sandbox produces for a new message, through the
-# real API, orchestrator, router, wake, agent and Pi. Until a model exists that is Pi's refusal
-# of the prompt (the point where Pi would call the model), not a model token.
+# 5. Cold start (Gate 1, D14): hibernated → the first model token for a new message, through the
+# real API, orchestrator, router, wake, agent, Pi, the model gateway, Bifrost and the (fake) model.
+# Without a model on the install it is Pi's refusal of the prompt (the point where Pi would call
+# the model), honestly labelled.
 if [[ "$STEPS" == *" cold "* ]]; then
-  echo "==> cold start: hibernated → first sandbox answer ($TRIALS trials, user $COLD_KEY)"
+  if ((MODELS)); then cold_label="first token"; else cold_label="first sandbox answer (no model)"; fi
+  echo "==> cold start: hibernated → $cold_label ($TRIALS trials, user $COLD_KEY)"
   cold_json=$(member_json "$COLD_KEY" | sed 's/^\[//; s/\]$//')
   cold_id=$(json_get "$COLD_KEY")
   warm=$(client "$(printf '{"mode":"trial","trial":0,"base":"%s","nonce":"%s","user":%s}' "$BASE" "$NONCE" "$cold_json")")
@@ -279,9 +329,12 @@ if [[ "$STEPS" == *" cold "* ]]; then
   echo "     workspace storage class: ${pvc_class:-unknown}"
   values=""
   for i in $(seq 1 "$TRIALS"); do
-    hib=$($KUBECTL -n "$NS" exec "$SERVER" -c server -- node dist/cli/lifecycle.js hibernate \
+    hib=""
+    [[ -z "${KOBE_GATE1_WARM:-}" ]] && hib=$($KUBECTL -n "$NS" exec "$SERVER" -c server -- node dist/cli/lifecycle.js hibernate \
       --team-id "$TEAM_A" --user-id "$cold_id" 2>&1 | grep -E '^\{"hibernated"' || true)
-    if [[ "$hib" != '{"hibernated":true}' ]] || ! until_ok 120 pod_gone; then
+    if [[ -n "${KOBE_GATE1_WARM:-}" ]]; then
+      : # warm trials: the sandbox stays awake
+    elif [[ "$hib" != '{"hibernated":true}' ]] || ! until_ok 120 pod_gone; then
       echo "     trial $i: could not hibernate ($hib)"
       continue
     fi
@@ -290,12 +343,14 @@ if [[ "$STEPS" == *" cold "* ]]; then
     printf '     cold-start: %s\n' "$t"
     ms=$(printf '%s' "$t" | sed -n 's/.*"ms":\([0-9]*\).*/\1/p' | head -1)
     first=$(printf '%s' "$t" | sed -n 's/.*"first":"\([^"]*\)","code":\("[^"]*"\|null\).*/\1:\2/p' | head -1)
-    if [[ -n "$ms" && ( "$first" == text.delta:* || "$first" == 'run.failed:"pi_rejected"' ) ]]; then values+="${values:+,}$ms"
-    else echo "     trial $i: no sandbox answer ($first)"; fi
+    if ((MODELS)); then accepted='text.delta|reasoning.delta'; else accepted='run.failed:"(pi_rejected|model_not_configured)"'; fi
+    if [[ -n "$ms" && ( "$first" == text.delta:* || "$first" == reasoning.delta:* || ( ! ((MODELS)) && "$first" =~ ^run\.failed:\"(pi_rejected|model_not_configured)\"$ ) ) ]]; then values+="${values:+,}$ms"
+    else echo "     trial $i: no $cold_label ($first; accepted: $accepted)"; ((MODELS)) && [[ "$i" == 1 ]] && shim_refusals; fi
   done
-  summary=$(client "$(printf '{"mode":"summary","base":"%s","label":"hibernated-to-first-sandbox-answer","values":[%s],"expected":%s,"p95Max":%s}' "$BASE" "$values" "$TRIALS" "$P95_MAX")")
+  if ((MODELS)); then cold_tag=hibernated-to-first-token; else cold_tag=hibernated-to-first-sandbox-answer; fi
+  summary=$(client "$(printf '{"mode":"summary","base":"%s","label":"%s","values":[%s],"expected":%s,"p95Max":%s}' "$BASE" "$cold_tag" "$values" "$TRIALS" "$P95_MAX")")
   printf '     cold-start: %s\n' "$summary"
-  contains "$TRIALS trials, hibernated → first sandbox answer (Pi's prompt answer; no model yet) p95 ≤ $P95_MAX ms" '"pass":true' "$summary"
+  contains "$TRIALS trials, hibernated → $cold_label p95 ≤ $P95_MAX ms" '"pass":true' "$summary"
 fi
 
 if ((failed)); then

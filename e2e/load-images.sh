@@ -2,6 +2,10 @@
 # Builds the Kobe images for the e2e suite and loads them into the k3d cluster's nodes.
 # Usage: e2e/load-images.sh <cluster> <tag>
 #
+# With KOBE_IMAGE_ARCHIVES=<dir>, nothing is built: every <dir>/*.tar (image archives built once
+# for the whole CI run, .github/workflows/e2e.yml) is imported instead, and the same six images,
+# tagged <tag>, must then be on every node.
+#
 # A failed build prints the Docker daemon's state (scripts/ci-docker-diagnostics.sh). The import
 # streams straight into each node (`--mode direct`): the default tools-node mode can start the
 # import before its tarball exists and still report success, leaving the chart to pull images
@@ -23,14 +27,25 @@ build() {
   fi
 }
 
+archives="${KOBE_IMAGE_ARCHIVES:-}"
 images=()
+sources=()
 for pair in web:apps/web/Dockerfile server:services/server/Dockerfile \
   mcp-proxy:services/mcp-proxy/Dockerfile egress-proxy:services/egress-proxy/Dockerfile \
+  model-gateway:services/model-gateway/Dockerfile \
   sandbox:images/sandbox/Dockerfile; do
   image="${registry}/kobe-${pair%%:*}:${tag}"
-  build "${pair#*:}" "${image}"
+  [ -n "${archives}" ] || build "${pair#*:}" "${image}"
   images+=("${image}")
 done
+if [ -n "${archives}" ]; then
+  for archive in "${archives}"/*.tar; do
+    [ -f "${archive}" ] || { echo "error: no image archives (*.tar) in ${archives}" >&2; exit 1; }
+    sources+=("${archive}")
+  done
+else
+  sources=("${images[@]}")
+fi
 
 nodes=$(k3d node list --no-headers | awk -v c="${cluster}" '$3 == c && ($2 == "server" || $2 == "agent") { print $1 }')
 [ -n "${nodes}" ] || { echo "error: no server or agent nodes in k3d cluster ${cluster}" >&2; exit 1; }
@@ -44,7 +59,7 @@ missing_on() {
 }
 
 for attempt in 1 2; do
-  k3d image import --mode direct -c "${cluster}" "${images[@]}"
+  k3d image import --mode direct -c "${cluster}" "${sources[@]}"
   missing=""
   for node in ${nodes}; do
     m=$(missing_on "${node}")

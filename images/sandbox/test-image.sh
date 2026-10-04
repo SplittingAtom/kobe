@@ -46,8 +46,12 @@ check "node honours --disable-sigusr1" '^undefined$' run node --disable-sigusr1 
 # Through the real entrypoint: tini → launcher → agent, which fails fast without configuration.
 check "agent starts through the entrypoint" 'KOBE_SERVER_URL must be a ws' host sh -c \
   "docker run ${HARDENED[*]} -e NODE_OPTIONS=--inspect=0.0.0.0:9229 \"$IMAGE\" 2>&1; true"
-check "Pi config dir is root-owned, read-only and empty" '^0:0 555 empty$' run sh -c \
-  'd=/opt/kobe/pi-agent; echo "$(stat -c "%u:%g %a" $d) $([ -z "$(ls -A $d)" ] && echo empty)"'
+check "no baked-in Pi config dir (each Pi gets a private one under /tmp, KOBE-41)" '^absent$' run sh -c \
+  '[ -e /opt/kobe/pi-agent ] && echo present || echo absent'
+check "kobe-models extension: root-owned, read-only, .js only" '^0:0 555 ok$' run sh -c \
+  'd=/opt/kobe/pi-extensions/kobe-models; echo "$(stat -c "%u:%g %a" $d) $(for f in $d/*; do case "$f" in *.js) [ "$(stat -c "%u:%g %a" "$f")" = "0:0 444" ] || echo "bad $f";; *) echo "extra $f";; esac; done; [ -f $d/index.js ] && echo ok)"'
+check "agent accepts the baked kobe-models file" '^ok$' run node --input-type=module -e \
+  'import { checkExtensionFile as c } from "/opt/kobe/sandbox-agent/dist/policy/extension-file.js"; await c("/opt/kobe/pi-extensions/kobe-models/index.js", "kobe-models"); console.log("ok")'
 check "kobe-policy extension: root-owned, read-only, .js only" '^0:0 555 0:0 555 ok$' run sh -c \
   'd=/opt/kobe/pi-extensions/kobe-policy; echo "$(stat -c "%u:%g %a" ${d%/*}) $(stat -c "%u:%g %a" $d) $(for f in $d/*; do case "$f" in *.js) [ "$(stat -c "%u:%g %a" "$f")" = "0:0 444" ] || echo "bad $f";; *) echo "extra $f";; esac; done; [ -f $d/index.js ] && echo ok)"'
 check "agent accepts the baked kobe-policy file" '^ok$' run node --input-type=module -e \
@@ -58,7 +62,7 @@ check "kobe-policy loads into Pi and reports ready over fd 3" '"type":"channel.r
 const { spawn } = require("node:child_process");
 const p = spawn("pi", ["--mode", "rpc", "--no-session", "--no-extensions", "--no-approve", "--no-context-files",
   "--no-skills", "--extension", "/opt/kobe/pi-extensions/kobe-policy/index.js"], { cwd: "/workspace",
-  env: { PATH: process.env.PATH, HOME: "/home/kobe", PI_CODING_AGENT_DIR: "/opt/kobe/pi-agent",
+  env: { PATH: process.env.PATH, HOME: "/home/kobe", PI_CODING_AGENT_DIR: "/tmp/pi-agent",
     PI_OFFLINE: "1", PI_TELEMETRY: "0", PI_SKIP_VERSION_CHECK: "1", KOBE_POLICY_FD: "3" },
   stdio: ["pipe", "ignore", "inherit", "pipe"] });
 p.stdio[3].write(JSON.stringify({ type: "channel.hello", nonce: "image-test" }) + "\n");
@@ -103,6 +107,45 @@ lines(p.stdout, (m) => {
   const text = m.result.content.map((c) => c.text).join("");
   if (m.isError || !text.includes("->")) done("tool failed: " + text, 1);
   done((text.includes(sock) ? "LEAKED " : "ok ") + sock, text.includes(sock) ? 1 : 0);
+});'
+# kobe-models (KOBE-41) as the agent starts it: a private writable config dir, the model file with
+# a token and run id, a local fake OpenAI-compatible upstream standing in for the model gateway.
+# Pi must stream the upstream's answer, sending the token as the API key and the run id header.
+check "kobe-models loads into Pi and streams a model answer through the gateway client" '^ok Bearer image-token-0123456789abcdef run=11111111-1111-4111-8111-111111111111 text=hello from upstream$' run_ws node -e '
+const fs = require("node:fs");
+const http = require("node:http");
+const { spawn } = require("node:child_process");
+const srv = http.createServer((req, res) => {
+  let b = ""; req.on("data", (d) => (b += d)); req.on("end", () => {
+    const seen = "Bearer " + (req.headers.authorization || "").replace(/^Bearer /, "") + " run=" + (req.headers["x-kobe-run-id"] || "-");
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    const chunk = (delta, finish) => "data: " + JSON.stringify({ id: "c", object: "chat.completion.chunk", created: 1, model: "m", choices: [{ index: 0, delta, finish_reason: finish }] }) + "\n\n";
+    res.write(chunk({ role: "assistant", content: "" }, null)); res.write(chunk({ content: "hello from upstream" }, null)); res.write(chunk({}, "stop")); res.end("data: [DONE]\n\n");
+    srv.seen = seen;
+  });
+});
+srv.listen(0, "127.0.0.1", () => {
+  const dir = fs.mkdtempSync("/tmp/pi-");
+  fs.mkdirSync(dir + "/agent", { mode: 0o700 });
+  fs.writeFileSync(dir + "/model.json", JSON.stringify({ v: 1, gateway_url: "http://127.0.0.1:" + srv.address().port,
+    model: { gateway_model: "openai/gpt-fake", api: "openai-completions" }, token: "image-token-0123456789abcdef",
+    run_id: "11111111-1111-4111-8111-111111111111" }), { mode: 0o600 });
+  const p = spawn("pi", ["--mode", "rpc", "--no-session", "--no-extensions", "--no-approve", "--no-context-files",
+    "--extension", "/opt/kobe/pi-extensions/kobe-models/index.js", "--extension", "/opt/kobe/pi-extensions/kobe-policy/index.js"], { cwd: "/workspace",
+    env: { PATH: process.env.PATH, HOME: "/home/kobe", PI_CODING_AGENT_DIR: dir + "/agent", KOBE_MODEL_FILE: dir + "/model.json",
+      PI_OFFLINE: "1", PI_TELEMETRY: "0", PI_SKIP_VERSION_CHECK: "1", KOBE_POLICY_FD: "3" },
+    stdio: ["pipe", "pipe", "inherit", "pipe"] });
+  const done = (msg, code) => { console.log(msg); p.kill("SIGKILL"); process.exit(code); };
+  setTimeout(() => done("timeout", 1), 60000);
+  const lines = (stream, onLine) => { let b = ""; stream.on("data", (d) => { b += d; let i; while ((i = b.indexOf("\n")) >= 0) { onLine(JSON.parse(b.slice(0, i))); b = b.slice(i + 1); } }); };
+  lines(p.stdio[3], (m) => { if (m.type === "channel.ready") p.stdin.write(JSON.stringify({ type: "prompt", id: "p", message: "hi" }) + "\n"); });
+  p.stdio[3].write(JSON.stringify({ type: "channel.hello", nonce: "image-test" }) + "\n");
+  let text = "";
+  lines(p.stdout, (m) => {
+    if (m.type === "message_update" && m.assistantMessageEvent.type === "text_delta") text += m.assistantMessageEvent.delta;
+    if (m.type === "message_end" && m.message.role === "assistant" && m.message.stopReason === "error") done("model error: " + m.message.errorMessage, 1);
+    if (m.type === "agent_settled") done("ok " + srv.seen + " text=" + text, 0);
+  });
 });'
 check "skills directory exists, root-owned" '^0:0$' run stat -c '%u:%g' /opt/kobe/skills
 check "/workspace in the image is owned by uid 1000" '^1000:1000$' run stat -c '%u:%g' /workspace

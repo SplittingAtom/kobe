@@ -5,7 +5,7 @@ import {
   type ErrorInfo,
   type PiThreadConfig,
 } from "@kobe/protocol";
-import type { KobeTx } from "@kobe/db";
+import { sql, type KobeTx } from "@kobe/db";
 import type { NewRunEvent } from "../event-stream/append.js";
 import { clampApprovalMode } from "../sandbox-wire/policy-check.js";
 import {
@@ -19,6 +19,13 @@ import {
   type RunRow,
   type ThreadRow,
 } from "./store.js";
+import {
+  FAILURE_MESSAGES,
+  agentModelNotEnabled,
+  failureInfo,
+  threadModelNotEnabled,
+} from "./failure-codes.js";
+import { resolveRunModel, type RunModelConfig } from "./models.js";
 import type { AgentResolution, RunAgentResolver } from "./seams.js";
 
 /** Everything a replica needs to send `run.start` for a run it just moved to `running`. */
@@ -40,26 +47,14 @@ export interface Promotion {
   readonly transitions: readonly AppliedTransition[];
 }
 
-/** Codes of `run.failed` the orchestrator writes itself; anything else becomes `start_failed`. */
-const FAILURE_MESSAGES: Record<string, string> = {
-  account_inactive: "The run could not start: the account is deactivated or no longer in the team.",
-  agent_unavailable: "The run could not start: the thread's agent version is not available.",
-  timeout: "Your workspace did not answer in time, so the run could not start.",
-  thread_not_found: "The run could not start: the thread is not available to the workspace.",
-  start_lost: "The run could not start: the server that started it stopped. Send it again.",
-  start_failed: "The run could not start in your workspace.",
-};
-
 /**
- * A `run.failed` event with a message of the server's own: the sandbox's text is untrusted and is
- * never shown to the user (only logged by the caller).
+ * A `run.failed` event with a message of the server's own (failure-codes.ts): the sandbox's text
+ * is untrusted and is never shown to the user (only logged by the caller).
  */
 export function failedEvent(code: string): NewRunEvent {
-  const message = FAILURE_MESSAGES[code];
-  const error: ErrorInfo =
-    message === undefined
-      ? { code: "start_failed", message: FAILURE_MESSAGES.start_failed ?? "" }
-      : { code, message };
+  // Codes the orchestrator does not know become `start_failed` (as before KOBE-41).
+  const known = Object.hasOwn(FAILURE_MESSAGES, code) ? code : "start_failed";
+  const error: ErrorInfo = failureInfo(known, "start_failed");
   return { type: "run.failed", payload: { error } };
 }
 
@@ -106,8 +101,13 @@ export async function promoteInTx(
   if (hold > 0 && (await abortPending(tx, teamId, threadId, hold))) return { transitions };
   // Stop paused the queue (KOBE-26): it waits for Resume or a new message.
   const paused = await isQueuePaused(tx, teamId, threadId);
-  const fail = async (t: ThreadRow, run: RunRow, code: string): Promise<ThreadRow> => {
-    const applied = await applyTransition(tx, t, run, "failed", "error", failedEvent(code));
+  const fail = async (
+    t: ThreadRow,
+    run: RunRow,
+    code: string,
+    event: NewRunEvent = failedEvent(code),
+  ): Promise<ThreadRow> => {
+    const applied = await applyTransition(tx, t, run, "failed", "error", event);
     transitions.push(applied.transition);
     return { ...t, status: applied.threadStatus };
   };
@@ -131,6 +131,22 @@ export async function promoteInTx(
       thread = await fail(thread, next, "agent_unavailable");
       continue;
     }
+    const requested = requestedModel(thread, resolved);
+    const resolution = await resolveRunModel(tx, teamId, requested.alias);
+    if (!resolution.ok) {
+      // The thread's or agent's model is not enabled for this team: a clear failure, no fallback.
+      thread = await fail(thread, next, resolution.code, {
+        type: "run.failed",
+        payload: {
+          error:
+            requested.source === "thread"
+              ? threadModelNotEnabled(resolution.alias)
+              : agentModelNotEnabled(resolution.alias),
+        },
+      });
+      continue;
+    }
+    const model = resolution.model;
     const approvalMode = resolved.approvalMode;
     const parentEntryId = next.parentEntryId ?? thread.leafEntryId;
     const started: NewRunEvent = {
@@ -139,6 +155,7 @@ export async function promoteInTx(
         thread_id: threadId,
         agent_id: resolved.agent?.agentId ?? null,
         agent_version: resolved.agent?.version ?? null,
+        ...(model === undefined ? {} : { model: model.alias, model_source: requested.source }),
         ...(next.retryOfRunId !== null ? { retry_of_run_id: next.retryOfRunId } : {}),
       },
     };
@@ -149,13 +166,31 @@ export async function promoteInTx(
     transitions.push(applied.transition);
     return {
       transitions,
-      plan: planOf(thread, { ...next, parentEntryId, approvalMode }, resolved),
+      plan: planOf(thread, { ...next, parentEntryId, approvalMode }, resolved, model),
     };
   }
   return { transitions };
 }
 
 type Resolved = Extract<AgentResolution, { ok: true }>;
+
+/** Where a run's model came from (KOBE-44), recorded in `run.started.model_source`. */
+export type ModelSource = "agent" | "thread" | "default";
+
+/**
+ * The run's requested model alias (KOBE-44, D30): the agent's pin (KOBE-47) when it sets one, else
+ * the model the thread's owner chose for the conversation, else none (the team's default). User
+ * decision (2026-10-04): the agent's pinned model wins over the conversation's choice.
+ */
+export function requestedModel(
+  thread: Pick<ThreadRow, "modelAlias">,
+  resolved: Pick<Resolved, "config">,
+): { readonly alias: string | undefined; readonly source: ModelSource } {
+  const pinned = resolved.config?.model?.alias;
+  if (pinned !== undefined) return { alias: pinned, source: "agent" };
+  if (thread.modelAlias !== null) return { alias: thread.modelAlias, source: "thread" };
+  return { alias: undefined, source: "default" };
+}
 
 /** The thread's agent version for a start; the resolver may only tighten the run's mode. */
 async function resolveForStart(
@@ -183,7 +218,19 @@ async function resolveForStart(
     : resolved;
 }
 
-function planOf(thread: ThreadRow, run: RunRow, resolved: Resolved): StartPlan {
+/**
+ * The plan's Pi config: the resolver's, with the run's model as resolved from the catalog (KOBE-41;
+ * the resolver's alias alone names no gateway model). No model → no `config.model`: the sandbox
+ * agent fails the run `model_not_configured`.
+ */
+function planOf(
+  thread: ThreadRow,
+  run: RunRow,
+  resolved: Resolved,
+  model: RunModelConfig | undefined,
+): StartPlan {
+  const { model: _requested, ...rest } = resolved.config ?? {};
+  const config = { ...rest, ...(model === undefined ? {} : { model }) };
   return {
     teamId: run.teamId,
     runId: run.id,
@@ -193,7 +240,7 @@ function planOf(thread: ThreadRow, run: RunRow, resolved: Resolved): StartPlan {
     parentEntryId: run.parentEntryId,
     approvalMode: resolved.approvalMode,
     agent: resolved.agent,
-    ...(resolved.config !== undefined ? { config: resolved.config } : {}),
+    ...(Object.keys(config).length > 0 ? { config } : {}),
   };
 }
 
@@ -209,5 +256,29 @@ export async function restartPlanInTx(
   run: RunRow,
 ): Promise<StartPlan | undefined> {
   const resolved = await resolveForStart(tx, agents, thread, run);
-  return resolved.ok ? planOf(thread, run, resolved) : undefined;
+  if (!resolved.ok) return undefined;
+  // The model the run started with (`run.started.model`), so a re-sent start does not switch
+  // models; the resolver's alias only when the run had none.
+  const started = await startedModelAlias(tx, run.teamId, run.id);
+  const resolution = await resolveRunModel(
+    tx,
+    run.teamId,
+    started ?? requestedModel(thread, resolved).alias,
+  );
+  if (!resolution.ok) return undefined;
+  return planOf(thread, run, resolved, resolution.model);
+}
+
+/** The alias in the run's `run.started` event, if any. */
+export async function startedModelAlias(
+  tx: KobeTx,
+  teamId: string,
+  runId: string,
+): Promise<string | undefined> {
+  const res = await tx.execute<{ model: string | null }>(sql`
+    SELECT payload->>'model' AS model FROM run_events
+     WHERE team_id = ${teamId} AND run_id = ${runId} AND type = 'run.started'
+     ORDER BY seq LIMIT 1`);
+  const model = res.rows[0]?.model;
+  return typeof model === "string" && model !== "" ? model : undefined;
 }

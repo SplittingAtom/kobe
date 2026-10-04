@@ -4,6 +4,7 @@
  * acting on the wrong team. Request bodies use the routes' snake_case (spec §6.1).
  */
 import { apiRequest, type ApiResult } from "../api/client";
+import { listTeamModels, type TeamModels } from "../admin/api/team/models";
 import type {
   ApprovalDecisionBody,
   ApprovalView,
@@ -29,11 +30,21 @@ function query(params: Readonly<Record<string, string | number | undefined>>): s
   return text === "" ? "" : `?${text}`;
 }
 
+/** What the chat shows of the team's retention (`GET /v1/team/retention`, camelized). */
+export interface TeamRetentionNotice {
+  readonly upcoming: { readonly period: string; readonly effectiveAt: string } | null;
+}
+
 export interface ChatApi {
   listThreads(cursor?: string): Promise<ApiResult<ThreadPage>>;
   searchThreads(q: string, cursor?: string): Promise<ApiResult<ThreadSearchPage>>;
   listTrash(cursor?: string): Promise<ApiResult<ThreadPage>>;
-  createThread(title?: string): Promise<ApiResult<ThreadSummary>>;
+  /** A new thread; `model` is an enabled alias, or null/absent for the team default (KOBE-44). */
+  createThread(title?: string, model?: string | null): Promise<ApiResult<ThreadSummary>>;
+  /** Sets the thread's model for its next runs (an enabled alias; null = the team default). */
+  setThreadModel(threadId: string, model: string | null): Promise<ApiResult<ThreadSummary>>;
+  /** The install catalog with the team's enabled models and default (`GET /v1/team/models`). */
+  listModels(): Promise<ApiResult<TeamModels>>;
   /** The thread with its entries after `after` (0 = from the start). */
   getThread(threadId: string, after?: number): Promise<ApiResult<ThreadDetail>>;
   /** The thread without its entries (the thread list's `fetch`). */
@@ -42,6 +53,10 @@ export interface ChatApi {
   renameThread(threadId: string, title: string | null): Promise<ApiResult<ThreadSummary>>;
   trashThread(threadId: string): Promise<ApiResult<ThreadSummary>>;
   restoreThread(threadId: string): Promise<ApiResult<ThreadSummary>>;
+  /** The team's retention period and any upcoming shortening (KOBE-18 banner). */
+  retention(): Promise<ApiResult<TeamRetentionNotice>>;
+  /** "Delete forever" from Trash (D18, KOBE-18): the owner only; 204. */
+  purgeThread(threadId: string): Promise<ApiResult<void>>;
   setLeaf(threadId: string, entryId: string): Promise<ApiResult<ThreadSummary>>;
   sendMessage(
     threadId: string,
@@ -72,7 +87,13 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     listThreads: (cursor) => get(`/v1/threads${query({ cursor })}`),
     searchThreads: (q, cursor) => get(`/v1/threads${query({ q, cursor })}`),
     listTrash: (cursor) => get(`/v1/threads/trash${query({ cursor })}`),
-    createThread: (title) => send("POST", "/v1/threads", title === undefined ? {} : { title }),
+    createThread: (title, model) =>
+      send("POST", "/v1/threads", {
+        ...(title === undefined ? {} : { title }),
+        ...(model === undefined || model === null ? {} : { model }),
+      }),
+    setThreadModel: (id, model) => send("PATCH", `/v1/threads/${enc(id)}`, { model }),
+    listModels: () => listTeamModels(teamId, fetchFn),
     getThread: (id, after = 0) =>
       get(`/v1/threads/${enc(id)}${query({ after: after > 0 ? after : undefined, limit: 500 })}`),
     threadSummary: (id) => get(`/v1/threads/${enc(id)}${query({ limit: 1 })}`),
@@ -81,6 +102,8 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     renameThread: (id, title) => send("PATCH", `/v1/threads/${enc(id)}`, { title }),
     trashThread: (id) => send("DELETE", `/v1/threads/${enc(id)}`),
     restoreThread: (id) => send("POST", `/v1/threads/${enc(id)}/restore`),
+    purgeThread: (id) => send("POST", `/v1/threads/${enc(id)}/purge`),
+    retention: () => get("/v1/team/retention"),
     setLeaf: (id, entryId) => send("POST", `/v1/threads/${enc(id)}/leaf`, { entry_id: entryId }),
     sendMessage: (id, body, idempotencyKey) =>
       apiRequest(`/v1/threads/${enc(id)}/messages`, {
@@ -117,6 +140,15 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
             }),
       }),
   };
+}
+
+/**
+ * The download URL of the user's export of their threads in `teamId` (D18, KOBE-18): a zip of Pi
+ * JSONL sessions and Markdown transcripts. A link can't send `X-Kobe-Team`, so the team goes in
+ * the query and the server checks it against the session's active team.
+ */
+export function threadExportUrl(teamId: string): string {
+  return `/v1/threads/export${query({ team: teamId })}`;
 }
 
 /** The SSE URL of a run's events after `seq` (KOBE-31; the session cookie authenticates it). */

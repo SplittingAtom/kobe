@@ -16,6 +16,7 @@ import { WireClient, type FatalReason, type WireLogger } from "./wire/client.js"
 import { encodeOutbound } from "./wire/encode.js";
 import { Outbox } from "./wire/outbox.js";
 import type { BackoffPolicy } from "./wire/backoff.js";
+import type { ModelWiring } from "./models/types.js";
 
 /**
  * kobe-sandbox-agent: glues the outbound wire (WireClient), per-run delivery (Outbox), the Pi
@@ -39,6 +40,8 @@ export interface AgentDeps {
    * (KOBE-62 adds `builtin:mcp` here).
    */
   readonly extensions?: readonly string[];
+  /** Model gateway wiring (KOBE-41); absent when the sandbox has no model access. */
+  readonly models?: ModelWiring | undefined;
   /** Workspace sync (KOBE-27): restore before runs, push after them and before stopping. */
   readonly workspace?: WorkspaceHooks;
 }
@@ -84,7 +87,8 @@ export class Agent {
     this.#broker = new PolicyBroker({ send: (frame) => this.#wire.send(frame) });
     this.#threads = new ThreadManager({
       bin: config.piBin,
-      agentDir: config.piAgentDir,
+      runtimeDir: config.piRuntimeDir,
+      models: deps.models,
       policyExtension: config.policyExtension,
       ...(deps.extensions === undefined ? {} : { extensions: deps.extensions }),
       ...(deps.policyReadyTimeoutMs === undefined
@@ -131,6 +135,7 @@ export class Agent {
           this.#broker.failThread(threadId, reason);
         },
         diagnostic: (threadId, message) => logger.debug({ thread_id: threadId }, message),
+        warning: (threadId, message) => logger.warn({ thread_id: threadId }, message),
       },
     });
     this.#wire = new WireClient({

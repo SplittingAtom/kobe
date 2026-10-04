@@ -12,11 +12,22 @@ import { createIsolationGate } from "./isolation/gate.js";
 import { listRuntimeClasses } from "./isolation/kubernetes.js";
 import { logger } from "./logger.js";
 import { createSmtpMailer } from "./mail/mailer.js";
+import { createHttpBifrostAdmin } from "./models/bifrost-admin.js";
+import { loadModelsConfig } from "./models/config.js";
+import { ModelGatewaySync } from "./models/sync.js";
+import { RetentionJob } from "./retention/job.js";
 import { createInternalApp } from "./routes/internal.js";
 import { createSandboxApp } from "./routes/sandbox.js";
 import { createSandboxRuntime } from "./sandbox/runtime.js";
 import { providerLiveness, sandboxWireVerifier } from "./sandbox-wire/provider-auth.js";
 import { createDeferredWaker, createSandboxLifecycle } from "./sandbox-lifecycle/index.js";
+import {
+  KEY_FINGERPRINT_PURPOSE,
+  PROVIDER_KEY_PURPOSE,
+  SecretBox,
+  VIRTUAL_KEY_PURPOSE,
+  deriveKey,
+} from "@kobe/db";
 import { quantityBytes } from "./sandbox/config.js";
 import {
   createS3ObjectStore,
@@ -29,6 +40,19 @@ import {
 const DRAIN_TIMEOUT_MS = 10_000;
 
 const config = loadConfig(process.env);
+// Object storage (s3.*): workspace sync (KOBE-27), thread export and retention (KOBE-18).
+const s3 = loadS3Settings(process.env);
+const objectStore = s3 ? createS3ObjectStore(s3) : undefined;
+// Model gateway (KOBE-40): undefined without the chart's Bifrost settings (models off).
+const modelsConfig = config.process === "server" ? loadModelsConfig(process.env) : undefined;
+// One admin client for the config sync and the catalog editor's model listing (KOBE-44).
+const bifrostAdmin = modelsConfig
+  ? createHttpBifrostAdmin({
+      baseUrl: modelsConfig.bifrostUrl,
+      username: modelsConfig.adminUsername,
+      password: modelsConfig.adminPassword,
+    })
+  : undefined;
 // The wire is built before the sandbox provider exists: its waker is set once the provider is.
 const waker = createDeferredWaker();
 let deps: ServerDeps | undefined;
@@ -41,6 +65,16 @@ if (config.auth && config.smtp) {
     mailer: createSmtpMailer(config.smtp),
     sandboxWire: { waker },
     agents: { maxVersions: config.agentMaxVersions },
+    ...(s3 && objectStore ? { blobs: { objects: objectStore, prefix: s3.prefix } } : {}),
+    ...(modelsConfig
+      ? {
+          models: {
+            providerKeySecrets: modelsConfig.providerKeySecrets,
+            allowUnsafeEndpoints: modelsConfig.allowUnsafeEndpoints,
+            ...(bifrostAdmin ? { discovery: bifrostAdmin } : {}),
+          },
+        }
+      : {}),
   });
   if (config.smtp.security === "none") {
     logger.warn(
@@ -92,6 +126,18 @@ breakGlassSweeper?.start();
 // Audit rows lose their client IP and user agent after the retention period (KOBE-17).
 const auditPiiSweeper = deps ? new AuditPiiSweeper(deps.database.db) : undefined;
 auditPiiSweeper?.start();
+// Nightly retention (KOBE-18, D18): Trash and retention purges, run_events compaction, released
+// blobs. Every replica checks; an advisory lock lets one run a pass.
+const retentionJob = deps
+  ? new RetentionJob({
+      db: deps.database.db,
+      pool: deps.database.pool,
+      blobs: deps.blobs,
+      hourUtc: config.retentionHourUtc,
+      logger,
+    })
+  : undefined;
+retentionJob?.start();
 // Pending approvals past their 1 h TTL whose waiting replica is gone (D29, KOBE-37).
 deps?.approvals.start();
 isolation.start().catch((err: unknown) => logger.error({ err }, "isolation check failed"));
@@ -102,6 +148,29 @@ const egressRelay =
     ? new EgressBlockedRelay({ db: deps.database.db, connectionString: config.databaseUrl })
     : undefined;
 egressRelay?.start();
+
+// Bifrost config sync (KOBE-40): every server replica listens; one leads and reconciles.
+const modelSync =
+  deps && modelsConfig && bifrostAdmin
+    ? new ModelGatewaySync({
+        db: deps.database.db,
+        connectionString: config.databaseUrl,
+        admin: bifrostAdmin,
+        providerKeys: new SecretBox(modelsConfig.providerKeySecrets, PROVIDER_KEY_PURPOSE),
+        virtualKeys: new SecretBox(modelsConfig.virtualKeySecrets, VIRTUAL_KEY_PURPOSE),
+        // Own HKDF purpose: the fingerprint secret never equals a sealing key.
+        fingerprintSecret: deriveKey(
+          modelsConfig.providerKeySecrets[0] ?? "",
+          KEY_FINGERPRINT_PURPOSE,
+        ).toString("hex"),
+        intervalMs: modelsConfig.syncIntervalMs,
+        logger,
+      })
+    : undefined;
+modelSync?.start();
+if (config.process === "server" && !modelsConfig) {
+  logger.warn("KOBE_BIFROST_URL is not set: the model gateway is not configured");
+}
 
 // Sandbox provider (KOBE-22); the scheduler starts sandboxes through it from KOBE-64 on.
 const sandbox =
@@ -116,13 +185,12 @@ if (config.process === "server" && !sandbox) {
 
 // Workspace sync (KOBE-27): /workspace ↔ S3, brokered by the server on the sandbox listener so
 // sandboxes never hold object-store credentials. Off without a bucket (s3.bucket) or when disabled.
-const s3 = loadS3Settings(process.env);
 const syncSettings = sandbox?.settings.workspaceSync;
 const workspaceSync =
-  sandbox && deps && s3 && syncSettings?.enabled
+  sandbox && deps && s3 && objectStore && syncSettings?.enabled
     ? createWorkspaceSync({
         db: deps.database.db,
-        objects: createS3ObjectStore(s3),
+        objects: objectStore,
         prefix: s3.prefix,
         limits: {
           maxFileBytes: quantityBytes(syncSettings.maxFileSize),
@@ -248,8 +316,10 @@ function shutdown(signal: string): void {
   internalServer?.close();
   deps?.auditAnchor.stop();
   void egressRelay?.close();
+  void modelSync?.close();
   breakGlassSweeper?.stop();
   auditPiiSweeper?.stop();
+  void retentionJob?.stop();
   deps?.approvals.stop();
   // End event streams first so browsers reconnect (with Last-Event-ID) to another replica.
   void deps?.eventStream.hub.close();

@@ -331,6 +331,63 @@ describe("routing across replicas", () => {
 });
 
 describe("event ingest and the durable cursor", () => {
+  it("fails the run with the server's message when the last model call failed (KOBE-41)", async () => {
+    const w = await world();
+    const sb = await started(w);
+    sb.session = [];
+    const frames = [
+      { type: "agent_start" },
+      assistantStart,
+      {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          stopReason: "error",
+          errorMessage: "kobe.model_error:model_not_enabled: model_not_enabled after 1 attempt",
+        },
+      },
+      { type: "turn_end", message: { role: "assistant" } },
+      { type: "agent_settled" },
+    ];
+    frames.forEach((e, i) => sb.event(w.runId, w.threadId, i + 1, e));
+    await sb.until(() => sb.acked(w.runId) >= frames.length);
+    const evs = await events(w.team, w.runId);
+    expect(evs.map((e) => e.type)).toEqual(["run.failed"]);
+    expect(evs[0]?.payload).toEqual({
+      error: {
+        code: "model_not_enabled",
+        message:
+          "That model is not enabled for your team. Ask a team admin to enable it, or use the team's default model.",
+      },
+    });
+    expect((await runRow(w.team, w.runId)).status).toBe("failed");
+
+    // Any other error text: a generic model error, the sandbox's words never stored.
+    const second = await newRun(w);
+    const sb2 = await connect(0, w);
+    expect(
+      await fx.replica(1).deps.sandboxWire.router.startRun(w.target, {
+        runId: second.runId,
+        threadId: second.threadId,
+        message: "again",
+      }),
+    ).toEqual({ ok: true });
+    const bad = [
+      { type: "agent_start" },
+      {
+        type: "message_end",
+        message: { role: "assistant", stopReason: "error", errorMessage: "<b>evil</b>" },
+      },
+      { type: "agent_settled" },
+    ];
+    bad.forEach((e, i) => sb2.event(second.runId, second.threadId, i + 1, e));
+    await sb2.until(() => sb2.acked(second.runId) >= bad.length);
+    const failed = (await events(w.team, second.runId)).at(-1);
+    expect(failed?.type).toBe("run.failed");
+    expect(JSON.stringify(failed?.payload)).not.toContain("evil");
+    expect(failed?.payload).toMatchObject({ error: { code: "model_error" } });
+  });
+
   it("translates, batches, mirrors entries and completes the run, acking after commit", async () => {
     const w = await world();
     const sb = await started(w);

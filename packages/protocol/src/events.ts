@@ -93,6 +93,11 @@ export const EVENT_PAYLOAD_SCHEMAS = {
     agent_version: z.number().int().positive().nullable(),
     /** Model alias from the team catalog (D30), e.g. `smart`. */
     model: z.string().min(1).max(128).optional(),
+    /**
+     * Where `model` came from (KOBE-44): the agent's pin, the conversation's choice, or the team's
+     * default. The agent's pin wins over the conversation's choice (user decision).
+     */
+    model_source: z.enum(["agent", "thread", "default"]).optional(),
     retry_of_run_id: uuidSchema.optional(),
   }),
   "sandbox.waking": z.strictObject({

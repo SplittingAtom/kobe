@@ -60,8 +60,8 @@ created by hand. Every team namespace gets:
 
 - a **default-deny NetworkPolicy** (`kobe-sandbox-isolation`): no inbound connections at all;
   outbound only to the Kobe server's **sandbox port** (8081, a separate listener with no user API),
-  the MCP proxy and the egress proxy — and to Bifrost only with `sandbox.modelGatewayAccess: true`
-  (off until Bifrost verifies sandbox session tokens). Sandboxes get no DNS: Kobe's services
+  the model-gateway shim (models; `sandbox.modelGatewayAccess`, default on), the MCP proxy and the
+  egress proxy — never Bifrost itself. Sandboxes get no DNS: Kobe's services
   resolve through `/etc/hosts` (`*.kobe.internal` → the Services' ClusterIPs), so DNS cannot be
   used to leak data past the egress proxy;
 - a **ResourceQuota** (`sandbox.teamQuota`: requests and limits for CPU, memory and ephemeral
@@ -180,6 +180,74 @@ equal the CONNECT host. It never decrypts traffic. Plain HTTP and other ports ar
 - **Logging:** every connection is counted in the audit log (`egress.connection`, aggregated per
   user, sandbox, host and outcome every `egressProxy.auditFlushSeconds`) and logged individually as
   JSON on the proxy's stdout. Blocked attempts are shown on the user's active run (`egress.blocked`).
+
+## Models
+
+Sandboxes reach models only through **Bifrost** (Apache-2.0, `bifrost.image`, pinned by digest) and
+only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a sandbox.
+
+- **Configuration lives in Kobe.** Install admins add **providers** (OpenAI, Anthropic, Gemini,
+  Ollama, or any OpenAI-compatible endpoint such as vLLM) with their API keys, and publish the
+  **model catalog** (aliases such as `fast`, `smart`, `local`); team admins enable a subset and a
+  default (install console **Models and providers**, team console **Models**). Keys are stored
+  sealed (AES-256-GCM) in Postgres, are write-only in the API, and are never logged or audited
+  (only "key set/changed").
+- **Which model a run uses.** The agent's pinned model if it has one, else the model the person
+  chose for the conversation (the chat's model picker), else the team's default. A pinned or chosen
+  model the team doesn't enable fails the run with a clear error; it never falls back silently.
+- **Aliases are names, not models.** A conversation (or agent) keeps the alias it chose, so an
+  alias removed from the catalog and **added again** with another provider or model is used again
+  by every conversation that chose it, on the new target, once a team enables it. Re-pointing an
+  alias (Edit) changes its model everywhere at once in the same way.
+- **Model listing.** The catalog editor suggests model ids from Bifrost's list for the provider;
+  "Ask the provider" has Bifrost call the provider's list-models API with the stored key (audited
+  `models.provider.models_refreshed`, 6 per minute per provider). The server itself never calls a
+  provider.
+- **Kobe pushes it to Bifrost.** The server reconciles Bifrost through Bifrost's admin API: on every
+  change (Postgres `LISTEN/NOTIFY`, within seconds) and every 30 s. One server replica leads (a
+  Postgres advisory lock); `GET /v1/install/models` reports `gateway.in_sync` and the last error.
+  Bifrost holds one customer (the install), one team per Kobe team and one virtual key per member
+  of each team, allowed exactly the team's enabled models. Kobe owns this Bifrost: anything else
+  configured in it (by hand, through its UI) is removed by the next sync.
+- **Provider endpoints.** OpenAI, Anthropic and Gemini providers always use their vendor's
+  endpoint; other providers' keys go only over `https://`; changing a keyed provider's endpoint
+  requires entering the key again (a stored key is never sent somewhere new), and the audit log
+  records the endpoint host. `bifrost.allowUnsafeProviderEndpoints` (Helm only, never the admin
+  API) lifts the first two rules for test installs (the e2e suite's fake provider).
+- **Sandboxes call the shim** (`model-gateway.kobe.internal`) with their short-lived
+  `kobe.model-gateway` session token as the API key (`Authorization: Bearer`, `x-api-key`,
+  `x-goog-api-key` or `?key=`). The shim verifies it, checks that the user is still an active member
+  and the sandbox not destroyed, hibernated or replaced (cached `modelGateway.cacheTtlSeconds`, 5 s:
+  revocation takes at most that long), and forwards **inference paths only** (`/v1/chat/completions`,
+  `/v1/responses`, `/v1/models`, `/anthropic/v1/messages[/count_tokens]`,
+  `/genai/v1beta/models/<provider>/<model>:generateContent|streamGenerateContent|countTokens`) to
+  Bifrost with the member's virtual key. Models are named `<gateway provider>/<model>` (the catalog
+  API returns `gateway_model`); the shim refuses a model the team has not enabled itself, so a
+  disable holds even while a push to Bifrost is failing. Limits per replica
+  (`modelGateway.limits`): bodies up to 8 MiB, request bytes in memory 128 MiB in total and
+  32 MiB per sandbox, 16 concurrent calls and 60 requests (then 10/s) per sandbox; beyond them 429. The shim's memory limit must cover `inflightBytes` + 256 Mi (checked at render time). Two
+  replicas by default.
+- **Network:** Bifrost admits only the shim and the server; its own egress is DNS and public
+  addresses on `bifrost.networkPolicy.allowedPorts` (443). The shim admits only team namespaces and
+  reaches only DNS, Bifrost and Postgres.
+- **Local models** (Ollama, vLLM on your network or in the cluster): set `allow_private_network` on
+  the provider and add a peer for that host to `bifrost.networkPolicy.extraEgress`, e.g.
+  `[{to: [{ipBlock: {cidr: 10.20.30.40/32}}], ports: [{protocol: TCP, port: 11434}]}]`.
+- **One Bifrost replica, persistent.** Bifrost keeps virtual keys (and, with budgets, spend
+  counters) in its own SQLite store on `bifrost.persistence` (1 Gi PVC; `Recreate` updates). Without
+  persistence a restart loses them; the sync rebuilds everything within seconds (new virtual keys)
+  but budget counters start over.
+- **Server → Bifrost is plain HTTP inside the cluster** (Bifrost's admin password and provider
+  keys cross the pod network unencrypted); NetworkPolicies limit who can connect, not who can
+  observe node traffic. Use a CNI with encryption (e.g. WireGuard) if that matters to you.
+- **Secrets:** `bifrost.keysSecret` (or a generated, kept `<release>-model-keys`) holds Bifrost's
+  admin password and encryption key, and Kobe's two sealing secrets (`provider-keys`: server only;
+  `virtual-keys`: server and shim). Losing `provider-keys` means re-entering provider keys.
+  **Rotating** `provider-keys` or `virtual-keys`: copy the old value to `provider-keys-previous` /
+  `virtual-keys-previous`, put a new one in place, restart the server and shim; the sync re-seals
+  stored values with the new secret within a minute; then remove the `-previous` key.
+- **Bifrost logs no prompts** (`enable_logging: false`); usage is recorded by Kobe from the agent
+  (`run_usage`, KOBE-43).
 
 ## MCP connectors
 
@@ -305,6 +373,42 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
   Secret (`sandbox.sessionKeysSecret`), add an `approval-hmac` key (at least 32 random characters).
   Without it the server starts, logs `KOBE_APPROVAL_KEY is not set`, and denies every tool call
   that needs approval. See [approvals](approvals.md).
+
+- **Model gateway (KOBE-40).** Sandboxes now reach models through the new `model-gateway` shim
+  (image `kobe-model-gateway`), and `sandbox.modelGatewayAccess` defaults to `true`. Bifrost moves
+  to v2.2.5 (pinned by digest), gets a 1 Gi PVC by default (`bifrost.persistence.enabled`), a
+  `Recreate` strategy, a config file and its admin password; only the shim and the server may reach
+  it. Existing Bifrost state is replaced by Kobe's on the first sync. Sandboxes pick up the shim's
+  address when their pods are next created (hibernate/wake or restart).
+
+- **Retention indexes (KOBE-18, migration `*_retention_rls`).** Two indexes are added with a
+  plain `CREATE INDEX` (migrations run in one transaction), which blocks writes to `threads` and
+  `thread_entries` while it scans them. On a large install, build them first, outside the upgrade,
+  then upgrade (the migration skips existing indexes):
+
+  ```sql
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS threads_retention_idx
+    ON threads (team_id, last_activity_at) WHERE deleted_at IS NULL;
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS thread_entries_blob_ref_idx
+    ON thread_entries (team_id, blob_ref) WHERE blob_ref IS NOT NULL;
+  ```
+
+  A `CONCURRENTLY` build that fails or is cancelled leaves an **INVALID** index behind, and
+  `IF NOT EXISTS` would then skip it, leaving the upgrade without a usable index. Before upgrading,
+  check and drop any such leftover (then build it again, or let the migration build it):
+
+  ```sql
+  SELECT c.relname FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+   WHERE NOT i.indisvalid
+     AND c.relname IN ('threads_retention_idx', 'thread_entries_blob_ref_idx');
+  DROP INDEX CONCURRENTLY IF EXISTS threads_retention_idx;        -- only if listed above
+  DROP INDEX CONCURRENTLY IF EXISTS thread_entries_blob_ref_idx;  -- only if listed above
+  ```
+
+- **Retention job (KOBE-18).** One server replica at a time runs the nightly retention pass under
+  a session-level advisory lock, so the server needs a direct (or session-mode pooled) Postgres
+  connection; transaction-mode poolers break session locks. `KOBE_RETENTION_HOUR_UTC` (0-23,
+  default 3) sets the hour.
 
 ## Backup and restore
 

@@ -240,10 +240,9 @@ export class SandboxConnection implements RegisteredConnection {
         fetchNewEntries: (thread) => this.#delivery.fetchNewEntries(thread),
         runEnded: (run, status) => {
           this.endLease(run);
-          if (status === "completed") {
-            ctx.metrics.runsCompleted += 1;
-            ctx.runEnded({ teamId: this.target.teamId, runId: run, threadId, status });
-          }
+          if (status === undefined) return;
+          if (status === "completed") ctx.metrics.runsCompleted += 1;
+          ctx.runEnded({ teamId: this.target.teamId, runId: run, threadId, status });
         },
         failed: () => this.close("internal", "events could not be stored"),
         needsSync: (thread) => this.#delivery.forgetSession(thread),

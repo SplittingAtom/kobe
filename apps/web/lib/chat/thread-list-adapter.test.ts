@@ -41,7 +41,7 @@ describe("thread list adapter", () => {
     expect(fake.threads.get(second.remoteId)?.title).toBeNull(); // the title is used once
   });
 
-  it("maps rename, Trash and restore; refuses hard delete; reports failures", async () => {
+  it("maps rename, Trash, restore and Delete forever; reports failures", async () => {
     const { fake, adapter, errors } = setup();
     const t = fake.addThread("X");
     await adapter.rename(t, "  Y  ");
@@ -50,11 +50,15 @@ describe("thread list adapter", () => {
     expect(fake.threads.get(t)?.deleted_at).not.toBeNull();
     await adapter.unarchive(t);
     expect(fake.threads.get(t)?.deleted_at).toBeNull();
+    // Only from Trash (the server refuses a live thread).
     await expect(adapter.delete(t)).rejects.toBeInstanceOf(ChatApiError);
+    await adapter.archive(t);
+    await adapter.delete(t);
+    expect(fake.threads.has(t)).toBe(false);
     await expect(adapter.fetch("00000000-0000-4000-8000-00000000ffff")).rejects.toThrow(
       "No thread with that id.",
     );
-    expect(errors.map((e) => e.code)).toEqual(["trash_only", "thread_not_found"]);
+    expect(errors.map((e) => e.code)).toEqual(["not_in_trash", "thread_not_found"]);
   });
 });
 

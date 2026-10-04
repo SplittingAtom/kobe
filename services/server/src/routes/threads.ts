@@ -42,6 +42,7 @@ import {
   type ThreadSummary,
 } from "../threads/schemas.js";
 import { searchThreadList } from "../threads/search.js";
+import { isModelEnabled } from "../models/team-store.js";
 
 type ThreadContext = Context<{ Variables: TeamVariables }>;
 
@@ -54,6 +55,10 @@ const ERRORS = {
     "That agent can't start conversations: it is suspended, archived or not published yet.",
   ],
   version_not_found: [404, "That agent has no such published version."],
+  model_not_enabled: [
+    409,
+    "That model isn't enabled for your team. Pick one of the team's models, or ask a team admin.",
+  ],
   no_agent: [409, "This thread uses the default agent, which has no versions to switch."],
   project_not_found: [404, "No project with that id is available to you."],
   read_only: [403, "This thread is shared with you read-only."],
@@ -168,7 +173,9 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
 
   app.post("/", async (c) => {
     const body = await parseBody(c, createThreadBodySchema);
-    if (!body) return invalidRequest(c, "Give agent_id, project_id and title only, as ids/text.");
+    if (!body) {
+      return invalidRequest(c, "Give agent_id, project_id, title and model only, as ids/text.");
+    }
     const result = await asViewer(c, async (tx, viewer) => {
       const projectId = body.project_id ?? null;
       if (projectId !== null && !(await canCreateInProject(tx, viewer.userId, projectId))) {
@@ -177,12 +184,17 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
       // D19: the thread pins the agent's current published version.
       const pin = await resolveAgentPin(tx, viewer, body.agent_id ?? null);
       if (!pin.ok) return pin.error;
+      const model = body.model ?? null;
+      if (model !== null && !(await isModelEnabled(tx, viewer.teamId, model))) {
+        return "model_not_enabled" as const;
+      }
       return createThread(tx, {
         teamId: viewer.teamId,
         ownerUserId: viewer.userId,
         projectId,
         agent: pin.value,
         title: body.title ?? null,
+        modelAlias: model,
       });
     });
     return typeof result === "string" ? fail(c, result) : c.json(result, 201);
@@ -197,9 +209,19 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
       if (!found) return null;
       const page = await listEntries(tx, viewer, id, query.after, query.limit);
       const latest = await latestPinnedVersion(tx, { teamId: viewer.teamId, ...found.thread });
+      // KOBE-44: the agent's model pin (KOBE-47 seam), which wins over the thread's `model`.
+      const agentModel = await deps.runAgents.pinnedModel?.(tx, {
+        teamId: viewer.teamId,
+        ownerUserId: found.thread.ownerUserId,
+        threadId: found.thread.id,
+        agentScope: found.thread.agentScope,
+        agentId: found.thread.agentId,
+        agentVersion: found.thread.agentVersion,
+      });
       return {
         ...toSummary(found.thread),
         agent_current_version: latest,
+        agent_model: agentModel ?? null,
         entries: page.entries,
         next_entries_after: page.nextAfter,
       };
@@ -223,7 +245,7 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
   app.patch("/:id", async (c) => {
     const id = threadIdParam(c);
     const body = await parseBody(c, updateThreadBodySchema);
-    if (!id || !body) return invalidRequest(c, "Give title and/or shared_to_project.");
+    if (!id || !body) return invalidRequest(c, "Give title, shared_to_project and/or model.");
     return change(c, (tx, viewer) => updateThread(tx, viewer, id, body));
   });
 

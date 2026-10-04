@@ -215,6 +215,19 @@ async function fixtures() {
     const status = await clients.get(user.key).useTeam(teamIds[user.team]);
     out(`member_${user.key}`, status);
   }
+  // KOBE-41: each team's admin enables the install's `fast` model as the team default, so runs
+  // get a real model (e2e/run.sh configured the catalog against the fake upstream). 404: no such
+  // catalog entry on this install (a real cluster's throwaway install): runs have no model.
+  for (const team of config.teams) {
+    const admin = config.users.find((u) => u.team === team.key);
+    const ac = clients.get(admin.key);
+    await ac.useTeam(teamIds[team.key]);
+    const enabled = await ac.call("PUT", `/v1/team/models/${config.modelAlias ?? "fast"}`, {
+      enabled: true,
+      is_default: true,
+    });
+    out(`models_${team.key}`, enabled.status);
+  }
   console.log(
     `fixtures=${JSON.stringify({ teams: teamIds, users: Object.fromEntries(ids), owner: ownerId })}`,
   );
@@ -234,7 +247,8 @@ async function chatOne(user) {
   await c.useTeam(user.teamId);
   const thread = await c.call("POST", "/v1/threads", { title: `gate1 ${user.key}` });
   const threadId = thread.json.thread_id;
-  const prompt = `gate1 ${user.key} ${config.nonce}`;
+  // A real model answers this in one turn; the scripted agent echoes it (expectedReply).
+  const prompt = `gate1 ${user.key} ${config.nonce}: reply with one short sentence, no tools.`;
   const sent = await c.call("POST", `/v1/threads/${threadId}/messages`, { content: prompt });
   const runId = sent.json.run_id;
   if (sent.status !== 201 || !runId) return { key: user.key, error: `message ${sent.text}` };
@@ -272,7 +286,8 @@ async function chatOne(user) {
   }
   const seqs = received.map((e) => e.seq);
   const gapless = seqs.every((s, i) => s === i + 1);
-  const full = await replay(c, runId);
+  // Replay only an ended run: a run still going would keep the replay stream open.
+  const full = terminal === undefined ? { status: 0, events: [] } : await replay(c, runId);
   const sameAsLog =
     full.events.length === received.length &&
     full.events.every((e, i) => e.seq === received[i].seq && e.type === received[i].type);
@@ -472,7 +487,7 @@ async function interruptStart() {
   const thread = await c.call("POST", "/v1/threads", { title: "gate1 interrupted" });
   const threadId = thread.json.thread_id;
   const sent = await c.call("POST", `/v1/threads/${threadId}/messages`, {
-    content: `gate1 long job ${config.nonce}`,
+    content: `gate1 long job ${config.nonce}: reply with one short sentence, no tools.`,
   });
   out("message", `${sent.status}:${sent.json.queued}`);
   out("thread", threadId);
@@ -545,9 +560,10 @@ async function interruptRetry() {
 
 /**
  * One cold-start trial: the sandbox is hibernated (gate1.sh); time from sending a message to the
- * first event the sandbox produced for the run. With a model that is the first `text.delta`; until
- * Pi has one (KOBE-40/41) it is Pi's refusal of the prompt for lack of a key (`run.failed`
- * `pi_rejected`): everything up to the model request, nothing of the model's own latency.
+ * model's first token for the run (the first `text.delta` or `reasoning.delta`). Without a model
+ * (Pi refuses the prompt for lack of a key, `run.failed` `pi_rejected`) it is the first event the
+ * sandbox produced instead: everything up to the model request. With `KOBE_GATE1_WARM` the sandbox
+ * stays awake, which isolates the server, gateway and model share.
  */
 async function trial() {
   // One address per trial: back-to-back trials sign in faster than the per-IP sign-in limit.
@@ -558,12 +574,15 @@ async function trial() {
   }
   const t0 = performance.now();
   const sent = await c.call("POST", `/v1/threads/${threadId}/messages`, {
-    content: `gate1 cold start ${config.nonce}`,
+    content: `gate1 cold start ${config.nonce}: reply with one short sentence, no tools.`,
   });
   const runId = sent.json.run_id;
   const at = {};
   let first;
+  let token;
+  let text;
   let terminal;
+  let failure;
   const res = await c.stream(runId);
   if (res.status === 200) {
     await readEvents(res, (e) => {
@@ -573,19 +592,31 @@ async function trial() {
       if (first === undefined && !SERVER_SIDE.has(e.type)) {
         first = { type: e.type, ms, code: e.data.payload?.error?.code };
       }
-      if (TERMINAL.has(e.type)) terminal = e.type;
+      if (token === undefined && (e.type === "text.delta" || e.type === "reasoning.delta")) {
+        token = { type: e.type, ms };
+      }
+      if (text === undefined && e.type === "text.delta") text = ms;
+      if (TERMINAL.has(e.type)) {
+        terminal = e.type;
+        failure = e.data.payload?.error?.code;
+      }
     });
   }
+  const end = token ?? first;
   console.log(
     JSON.stringify({
       trial: config.trial,
       threadId,
-      ms: first?.ms ?? null,
-      first: first?.type ?? null,
-      code: first?.code ?? null,
+      ms: end?.ms ?? null,
+      first: end?.type ?? null,
+      code: end === first ? (first?.code ?? null) : null,
+      first_event: first?.type ?? null,
+      first_event_ms: first?.ms ?? null,
+      text_ms: text ?? null,
       started: at.started ?? null,
       waking: at.waking ?? null,
       terminal: terminal ?? null,
+      failure: failure ?? null,
       message_status: sent.status,
     }),
   );

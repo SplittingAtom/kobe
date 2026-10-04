@@ -38,6 +38,8 @@ export interface ThreadState {
   readonly pending: readonly PendingMessage[];
   /** The run being streamed, or the last one streamed. */
   readonly live?: LiveRun | undefined;
+  /** The model the thread's agent pins (KOBE-44): the model picker is locked to it. */
+  readonly agentModel?: string | null | undefined;
   /** The live run's message text, until Pi commits it. */
   readonly livePrompt?:
     { readonly text: string; readonly parentEntryId: string | null } | undefined;

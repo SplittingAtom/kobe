@@ -39,7 +39,16 @@ const usage = {
   totalTokens: 2,
   cost: { total: 0 },
 };
-appendFileSync(log, `${JSON.stringify({ argv: args, env: Object.keys(process.env).sort() })}\n`);
+appendFileSync(
+  log,
+  `${JSON.stringify({
+    argv: args,
+    env: Object.keys(process.env).sort(),
+    // KOBE-41: where the agent put this process's config dir and model file (values, test-only).
+    agentDir: process.env.PI_CODING_AGENT_DIR ?? null,
+    modelFile: process.env.KOBE_MODEL_FILE ?? null,
+  })}\n`,
+);
 
 let streaming = false;
 let aborted = false;

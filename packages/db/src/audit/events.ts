@@ -1,6 +1,13 @@
 import { z } from "zod";
 import { DOMAIN_PATTERN_SQL } from "../schema/egress.js";
+import {
+  MODEL_ALIAS_PATTERN,
+  MODEL_PROVIDER_KINDS,
+  PROVIDER_ID_PATTERN,
+  PROVIDER_MODEL_PATTERN,
+} from "../schema/models.js";
 import { BREAK_GLASS_MAX_MINUTES, BREAK_GLASS_NOTIFICATION_EVENTS } from "../schema/break-glass.js";
+import { RETENTION_PERIODS } from "../schema/retention.js";
 import { teamRole } from "../schema/team-members.js";
 import { PI_TOOL_NAME_PATTERN } from "../connectors/snapshot.js";
 
@@ -64,6 +71,17 @@ const toolRule = {
 /** An egress domain pattern or host (the `egress_domains` grammar): never a URL or path. */
 const egressDomain = z.string().max(253).regex(new RegExp(DOMAIN_PATTERN_SQL));
 const count = z.number().int().nonnegative();
+/** Model gateway (KOBE-40): ids and names as the `model_providers` / `model_catalog` grammar. */
+const providerId = z.string().max(32).regex(new RegExp(PROVIDER_ID_PATTERN));
+const providerKind = z.enum(MODEL_PROVIDER_KINDS);
+const modelAlias = z.string().max(64).regex(new RegExp(MODEL_ALIAS_PATTERN));
+const providerModel = z.string().max(200).regex(new RegExp(PROVIDER_MODEL_PATTERN));
+/** A provider endpoint's host (name or IP literal, no path or credentials); null: vendor default. */
+const endpointHost = z
+  .string()
+  .max(255)
+  .regex(/^[A-Za-z0-9.:[\]-]+$/)
+  .nullable();
 
 /** A break-glass grant (KOBE-16) by its scope; never the free-text reason. */
 const breakGlassScope = {
@@ -133,6 +151,12 @@ export const APPROVAL_REJECT_REASONS = [
 
 /** Why a signed approval did not authorise an MCP call at the proxy (KOBE-58). */
 export const MCP_APPROVAL_FAILURES = [...APPROVAL_REJECT_REASONS, "unavailable"] as const;
+
+/** Why the retention job purged a batch (KOBE-18). */
+export const RETENTION_PURGE_REASONS = ["retention", "trash", "offboarding"] as const;
+const retentionPeriod = z.enum(RETENTION_PERIODS);
+/** What a purge deleted (counts only). */
+const purgeCounts = { entries: count, runs: count, events: count, blobs: count };
 
 const event = <const S extends AuditScope, T extends z.ZodRawShape>(scope: S, shape: T) => ({
   scope,
@@ -329,6 +353,49 @@ export const AUDIT_EVENTS = {
     to: z.iso.datetime(),
   }),
 
+  // ── models: providers and catalog (install), team enablement (team; KOBE-40, D6, D30) ──
+  // Never the API key itself: only whether one is set or changed.
+  "models.provider.added": event("install", {
+    providerId,
+    kind: providerKind,
+    keySet: z.boolean(),
+    privateNetwork: z.boolean(),
+    endpointHost,
+  }),
+  "models.provider.changed": event("install", {
+    providerId,
+    kind: providerKind,
+    keyChanged: z.boolean(),
+    baseUrlChanged: z.boolean(),
+    privateNetwork: z.boolean(),
+    /** The endpoint's host after the change (where the stored key is sent). */
+    endpointHost,
+  }),
+  "models.provider.removed": event("install", { providerId, kind: providerKind }),
+  /**
+   * An install admin had the gateway call the provider's list-models API with the stored key
+   * (KOBE-44 model picker). The outcome only: never the provider's answer or the key.
+   */
+  "models.provider.models_refreshed": event("install", {
+    providerId,
+    kind: providerKind,
+    outcome: z.enum(["ok", "failed", "unavailable"]),
+    models: count,
+  }),
+  /** A catalog alias was added, re-pointed or removed (removal also disables it for every team). */
+  "models.catalog.changed": event("install", {
+    alias: modelAlias,
+    change: z.enum(["added", "updated", "removed"]),
+    providerId: providerId.optional(),
+    model: providerModel.optional(),
+  }),
+  /** A team admin enabled or disabled a catalog alias for the team, or changed its default. */
+  "models.team.changed": event("team", {
+    alias: modelAlias,
+    enabled: z.boolean(),
+    isDefault: z.boolean(),
+  }),
+
   // ── mcp: tool calls through the MCP proxy (KOBE-58, D27, D29); metadata only, never inputs ──
   /**
    * The server decided an MCP `tools/call` the proxy asked about (actor: the sandbox's user). Every
@@ -360,6 +427,12 @@ export const AUDIT_EVENTS = {
   "thread.trashed": event("team", { threadId: id }),
   "thread.restored": event("team", { threadId: id }),
   "thread.sharing_changed": event("team", { threadId: id, projectId: id, shared: z.boolean() }),
+  /** The thread's chosen model changed (KOBE-44, D30); null = the team's default. */
+  "thread.model_changed": event("team", {
+    threadId: id,
+    from: modelAlias.nullable(),
+    to: modelAlias.nullable(),
+  }),
   /** The thread's pinned agent version changed (D19 one-click switch, KOBE-46). */
   "thread.agent_switched": event("team", {
     threadId: id,
@@ -368,6 +441,59 @@ export const AUDIT_EVENTS = {
     fromVersion: version,
     toVersion: version,
   }),
+
+  /** The owner asked to delete a thread from Trash for good (D18); purged at once unless held. */
+  "thread.purge_requested": event("team", { threadId: id }),
+  /** One thread hard-deleted (the owner's "Delete forever"); counts of what went with it. */
+  "thread.purged": event("team", { threadId: id, ...purgeCounts }),
+  /** The user downloaded their threads in the team (Pi JSONL + Markdown zip, D18). */
+  "thread.exported": event("team", { threads: count, entries: count }),
+
+  // ── retention: periods, purges and compaction (D18, KOBE-18); counts only, never content ──
+  /** A team admin changed the team's retention period. */
+  "retention.policy.changed": event("team", {
+    period: retentionPeriod,
+    previous: retentionPeriod,
+    /** Set when the change shortens the period: it applies then (7-day grace), not now. */
+    effectiveAt: z.iso.datetime({ offset: true }).optional(),
+  }),
+  /** A team admin cancelled the team's pending shortening during its grace period. */
+  "retention.policy.change_cancelled": event("team", {
+    period: retentionPeriod,
+    kept: retentionPeriod,
+  }),
+  /** An install admin changed the longest period any team may keep threads. */
+  "retention.maximum.changed": event("install", {
+    maximum: retentionPeriod,
+    previous: retentionPeriod,
+    effectiveAt: z.iso.datetime({ offset: true }).optional(),
+  }),
+  /** An install admin cancelled a pending lowering of the maximum. */
+  "retention.maximum.change_cancelled": event("install", {
+    maximum: retentionPeriod,
+    kept: retentionPeriod,
+  }),
+  /** Team admins were emailed about an upcoming shortening (counts only, no titles). */
+  "retention.shortening_notified": event("team", {
+    period: retentionPeriod,
+    effectiveAt: z.iso.datetime({ offset: true }),
+    threads: count,
+    recipients: count,
+  }),
+  /**
+   * A batch of threads purged by the retention job (system): past the team's period, 30 days in
+   * Trash, or a departed member's (offboarding, KOBE-28; `userId`). Held data is never in a batch.
+   */
+  "retention.purged": event("team", {
+    reason: z.enum(RETENTION_PURGE_REASONS),
+    threads: count,
+    ...purgeCounts,
+    userId: id.optional(),
+  }),
+  /** Ended runs' live events folded away 7 days after the run (system; entries keep the content). */
+  "retention.compacted": event("team", { runs: count, events: count }),
+  /** Objects of purged rows deleted from object storage (system); `kept`: still referenced. */
+  "retention.blobs_deleted": event("team", { blobs: count, kept: count }),
 
   // ── governance: break-glass (D10, KOBE-16); team scope, so the team's audit view shows them ──
   /** An install admin asked for read access to the team (the reason stays in the grant row). */
