@@ -148,4 +148,31 @@ describe("run start uses the resolver (KOBE-76)", () => {
     ]);
     expect(res.ok && res.config?.mcp_servers).toBeUndefined();
   });
+
+  it("a pinned agent ignores the thread's chosen model; an unpinned one uses it over the default", async () => {
+    const w = await f.world();
+    await catalog(w.team, w.owner.id, [
+      ["fast", true],
+      ["smart", false],
+    ]);
+    const ws = await f.connect(w, 0);
+    const choose = (thread: string, alias: string) =>
+      f.fx.admin.query(`UPDATE threads SET model_alias = $2 WHERE id = $1`, [thread, alias]);
+
+    const pinned = await pinnedThread(w.owner, { model: "fast" });
+    await choose(pinned, "smart");
+    const run = await f.message(w.owner, pinned, "hello");
+    const start = await ws.started(run);
+    expect(start.config?.model?.alias).toBe("fast");
+    ws.reply(start, "ok");
+    await f.until(w.team, run, "completed");
+
+    const unpinned = await pinnedThread(w.owner, {});
+    await choose(unpinned, "smart");
+    const second = await f.message(w.owner, unpinned, "hello");
+    const start2 = await ws.started(second);
+    expect(start2.config?.model?.alias).toBe("smart");
+    ws.reply(start2, "ok");
+    await f.until(w.team, second, "completed");
+  });
 });

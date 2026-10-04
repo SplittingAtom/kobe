@@ -41,17 +41,20 @@ export function buildResolveInput(args: {
     agent: {
       modelAlias: frontmatter.model ?? null,
       approvalMode: args.versionMode,
-      skills: [],
+      skills: [], // TODO(KOBE-78/80): the version's skills, by name and bundle hash
       exclusiveSkills: agentSkills(frontmatter).exclusive,
       connectors: frontmatter.connectors ?? [],
     },
     team: {
       models: team.models,
       connectors: team.connectors.map((c) => c.name),
-      personalSkillsDisabled: false,
+      personalSkillsDisabled: false, // TODO(KOBE-78/80): the team's switch
     },
-    user: { skills: [], connectedConnectors: [] },
+    user: {
+      skills: [], // TODO(KOBE-78/80): the user's enabled personal skills
+      connectedConnectors: [], // TODO(KOBE-61): the user's connected connectors
+    },
     approvalFloor: args.floor,
-    blockedHashes: [],
+    blockedHashes: [], // TODO(KOBE-81): skill_blocklist hashes
   };
 }

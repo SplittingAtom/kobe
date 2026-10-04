@@ -52,6 +52,8 @@ export const PINNED_AGENTS: RunAgentResolver = {
       const id = ids.get(name);
       return id === undefined ? [] : [{ name, connector_id: id }];
     });
+    // Both this and `resolveRunModel` (lifecycle.ts) exist because the resolver sees aliases only:
+    // `resolveRunModel` adds the gateway id/API style and the thread's choice (no resolver input).
     // Only an agent's own pin is its model; otherwise the thread's choice or the team default
     // is picked by the run start (`requestedModel`).
     const model = frontmatter.model !== undefined && value.model !== undefined;
