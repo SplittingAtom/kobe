@@ -1,0 +1,20 @@
+{
+  "name": "@kobe/skill-scanner",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Static skill bundle scanner: lists scripts, flags network calls, pipes to shell, package installs, obfuscation and secret-shaped strings",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  }
+}
