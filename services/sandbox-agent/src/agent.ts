@@ -115,6 +115,7 @@ export class Agent {
           this.#broker.failThread(threadId, reason);
         },
         diagnostic: (threadId, message) => logger.debug({ thread_id: threadId }, message),
+        warning: (threadId, message) => logger.warn({ thread_id: threadId }, message),
       },
     });
     this.#wire = new WireClient({

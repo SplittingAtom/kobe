@@ -16,6 +16,12 @@ import type { PiLaunch } from "../pi/pi-launch.js";
 import { ensureSessionDir } from "../pi/session-files.js";
 import { MODEL_FILE_ENV } from "../kobe-models/protocol.js";
 import { ModelFile } from "../models/model-file.js";
+import {
+  AGENT_SUBDIR,
+  MODEL_FILE_NAME,
+  RUNTIME_DIR_PREFIX,
+  unexpectedEntries,
+} from "../models/runtime-dir.js";
 import type { ModelWiring, RunModel } from "../models/types.js";
 
 /**
@@ -49,6 +55,8 @@ export interface ThreadHooks {
   /** The thread's policy channel is unusable: every pending check of the thread is denied. */
   readonly policyChannelClosed: (threadId: string, reason: string) => void;
   readonly diagnostic: (threadId: string, message: string) => void;
+  /** Something went wrong that does not end a run but an operator should see (warn level). */
+  readonly warning?: (threadId: string, message: string) => void;
 }
 
 export interface ThreadEnv {
@@ -92,6 +100,8 @@ export class Thread {
   #modelFile: ModelFile | undefined;
   /** Each process's private runtime directory, removed once it has exited. */
   readonly #runtimeDirs = new Map<PiProcess, string>();
+  /** Removal of a runtime directory in progress (awaited by `stopProcess`). */
+  readonly #removals = new Map<PiProcess, Promise<void>>();
   #closing = new Set<PiProcess>();
   #run: ActiveRun | undefined;
   #streaming = false;
@@ -173,16 +183,16 @@ export class Thread {
     await ensureSessionDir(this.#env.sessionDir);
     await mkdir(this.#env.home, { recursive: true }).catch(() => undefined);
     await mkdir(this.#env.runtimeDir, { recursive: true, mode: 0o700 });
-    const runtimeDir = await mkdtemp(path.join(this.#env.runtimeDir, "pi-"));
+    const runtimeDir = await mkdtemp(path.join(this.#env.runtimeDir, RUNTIME_DIR_PREFIX));
     let pi: PiProcess;
     let modelFile: ModelFile | undefined;
     try {
-      const agentDir = path.join(runtimeDir, "agent");
+      const agentDir = path.join(runtimeDir, AGENT_SUBDIR);
       await mkdir(agentDir, { mode: 0o700 });
       const env: Record<string, string> = { ...launch.env, PI_CODING_AGENT_DIR: agentDir };
       const models = this.#env.models;
       if (models !== undefined) {
-        modelFile = new ModelFile(path.join(runtimeDir, "model.json"), {
+        modelFile = new ModelFile(path.join(runtimeDir, MODEL_FILE_NAME), {
           gatewayUrl: models.gatewayUrl,
           model,
           token: await models.tokens.current(),
@@ -224,6 +234,34 @@ export class Thread {
     this.#launchKey = launch.key;
     this.#modelFile = modelFile;
     this.lastUsed = Date.now();
+    // A token rotated while this spawn was in progress reached no file (the listener runs only
+    // against `#modelFile`): take the current token again now that the file is attached.
+    const models = this.#env.models;
+    if (modelFile !== undefined && models !== undefined) {
+      await modelFile.update({ token: await models.tokens.current() });
+    }
+  }
+
+  /**
+   * The tripwire (KOBE-41 review): the private runtime directory may only hold what the agent
+   * and Pi wrote, and the model file must be what the agent last wrote. Another process of the
+   * same user (a sibling thread's tool) writing `agent/settings.json`, `models.json`, `SYSTEM.md`
+   * or a rewritten `model.json` would change that Pi's shell, model endpoint or prompt; until Pi
+   * runs under its own uid, such a Pi is stopped and its run fails `runtime_tampered`. Checked
+   * once Pi is ready and again right before every prompt. Returns the reason, or undefined.
+   */
+  async verifyRuntime(): Promise<string | undefined> {
+    const pi = this.#pi;
+    const runtimeDir = pi === undefined ? undefined : this.#runtimeDirs.get(pi);
+    if (runtimeDir === undefined) return undefined;
+    const unexpected = await unexpectedEntries(runtimeDir);
+    if (unexpected.length > 0) {
+      return `unexpected entries in Pi's runtime directory: ${unexpected.slice(0, 5).join(", ")}`;
+    }
+    if (this.#modelFile !== undefined && !(await this.#modelFile.verify())) {
+      return "the model file is not what the agent wrote";
+    }
+    return undefined;
   }
 
   /**
@@ -240,8 +278,12 @@ export class Thread {
     try {
       await this.#modelFile?.update({ token });
     } catch (error) {
-      this.#hooks.diagnostic(this.id, `model file not updated: ${(error as Error).message}`);
+      this.#warn(`model file not updated with the rotated token: ${(error as Error).message}`);
     }
+  }
+
+  #warn(message: string): void {
+    (this.#hooks.warning ?? this.#hooks.diagnostic)(this.id, message);
   }
 
   /** Where the current Pi's model file is (tests and diagnostics). */
@@ -267,6 +309,8 @@ export class Thread {
     this.#closing.add(pi);
     this.#detach(pi);
     await pi.close();
+    // Its runtime directory (token, config) is gone before anything else starts.
+    await this.#removals.get(pi);
   }
 
   /** Synchronous kill for agent exit. */
@@ -306,7 +350,7 @@ export class Thread {
     this.#modelFile
       ?.update({ runId: null })
       .catch((error: unknown) =>
-        this.#hooks.diagnostic(this.id, `model file not updated: ${(error as Error).message}`),
+        this.#warn(`model file not updated at run end: ${(error as Error).message}`),
       );
     this.#hooks.runEnded(run.runId, this.id);
     run.resolveEnded();
@@ -404,8 +448,14 @@ export class Thread {
     const runtimeDir = this.#runtimeDirs.get(pi);
     this.#runtimeDirs.delete(pi);
     // The process is gone: so is its private directory (auth.json, model file, token).
-    if (runtimeDir !== undefined)
-      void rm(runtimeDir, { recursive: true, force: true }).catch(() => undefined);
+    if (runtimeDir !== undefined) {
+      const removal = rm(runtimeDir, { recursive: true, force: true })
+        .catch((error: unknown) =>
+          this.#warn(`runtime directory not removed: ${(error as Error).message}`),
+        )
+        .finally(() => this.#removals.delete(pi));
+      this.#removals.set(pi, removal);
+    }
     if (!expected) this.#hooks.piExited(this.id, runId, exit);
   }
 

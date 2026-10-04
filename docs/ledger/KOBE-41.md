@@ -45,22 +45,42 @@ read failed` (`auth/resolve.js`). So Pi 1.0.0 cannot use any model with a read-o
 Solution: **a private, writable, per-process config dir**, not a shared one. `Thread.spawn`
 creates `mkdtemp(<KOBE_PI_RUNTIME_DIR>/pi-XXXXXX)` (0700, default `/tmp/kobe-pi`, on the emptyDir
 hibernation wipes) with `agent/` (Pi's `PI_CODING_AGENT_DIR`) and `model.json`, right before the
-process starts, and removes it when the process exits (`Thread#onExit`). Why it does not weaken
-the sandbox:
+process starts, and removes it when the process exits (`Thread#onExit`, awaited by
+`stopProcess`); the agent sweeps leftovers at start-up (`sweepRuntimeDir`).
 
-- The lockdown flags stay (`--no-extensions --no-approve --no-context-files --no-skills
---no-prompt-templates --no-themes`): nothing is discovered from the dir; `settings.json`,
-  `models.json`, `mcp.json` are read at Pi start-up, milliseconds after the dir was created
-  empty, before any model-run code exists for that process.
-- Nothing persists: the dir dies with the process, so a tool that writes into it (same uid, as
-  it can already ptrace the process) affects at most the Pi it runs under, never another thread
-  or a later Pi — the cross-thread persistent prompt injection KOBE-23 locked out stays locked
-  out. `/opt/kobe/pi-agent` is gone from the image (`test-image.sh` checks it is absent).
-- A model-written `auth.json` is ignored: the `kobe` provider's `resolve` never reads Pi's stored
-  credential; it reads the agent's model file.
-- The only secret in the dir is the session token (0600), which the sandbox holds by design
-  (D30); the same uid could read the bootstrap token file before KOBE-41 too (KOBE-23 open risk,
-  "second uid" follow-up).
+**What this does and does not protect (review MEDIUM 1).** Processes of the same uid — a
+sibling thread's tool — can write into any of these directories while a Pi runs; the
+read-only root-owned dir of KOBE-23 ruled that out structurally, this design cannot. What a
+planted file could do, checked against Pi 1.0.0's source under Kobe's launch flags:
+
+| File in `PI_CODING_AGENT_DIR`                                                             | Read?                                                                                                                                                            | Effect if planted                                                                                                                                                    |
+| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `settings.json`                                                                           | yes, at start-up (`SettingsManager`)                                                                                                                             | `shellPath`/`shellCommandPrefix`: every bash tool call runs through a chosen shell or prefix; `defaultTools`, `enabledModels`, `retry`, `compaction`, `defaultModel` |
+| `models.json`                                                                             | yes, at start-up and on every `refresh()` (each provider re-registration, i.e. a model switch)                                                                   | `providers.kobe.baseUrl` redirects the model calls; `apiKey: "!cmd"` runs a command at auth resolution; `modelOverrides`                                             |
+| `SYSTEM.md`, `APPEND_SYSTEM.md`                                                           | yes, unconditionally (`--no-context-files` covers AGENTS.md only)                                                                                                | replaces or extends the system prompt                                                                                                                                |
+| `bin/`                                                                                    | yes (`getBinDir`: preferred `fd`/`rg` binaries for find/grep)                                                                                                    | a planted `rg`/`fd` runs for those tools                                                                                                                             |
+| `auth.json`                                                                               | yes (credential store)                                                                                                                                           | none: the `kobe` provider never reads Pi's stored credential                                                                                                         |
+| `mcp.json`, `extensions/`, `skills/`, `prompts/`, `themes/`, `tools/`, `keybindings.json` | no (`--no-extensions` keeps only `-e` paths; mcp.json needs the builtin mcp extension; `--no-skills/--no-prompt-templates/--no-themes`; `tools/` is a migration) | none                                                                                                                                                                 |
+| `model.json` (the agent's)                                                                | by kobe-models, per request                                                                                                                                      | another token/run id/model/gateway origin for that Pi's calls                                                                                                        |
+
+None of this gives a same-uid process anything it cannot already do directly (threads share
+`/workspace` and the uid; D13), but it would let thread A's tool act _through_ thread B's Pi
+and its run (B's policy context, B's prompt). Mitigation built here, the **tripwire**
+(`Thread.verifyRuntime`): once Pi is ready and again right before every prompt, the runtime
+dir may hold only what the agent wrote (`agent/`, `model.json`, the writer's temp files) and
+`agent/` only what Pi itself writes at boot (verified by listing a fresh dir after boot and after
+a prompt: `auth.json`, its `auth.json.lock`, `models-store.json`), and `model.json` must be byte
+for byte what the agent last wrote. Anything else: that Pi is stopped, its directory removed,
+and the run fails `runtime_tampered` ("Another process in your workspace changed Pi's private
+runtime directory…"). The pre-prompt check also covers `models.json` re-reads on a model switch.
+Residual: a same-uid process can still plant and remove a file between a check and Pi's read
+(a TOCTOU window of milliseconds), or `ptrace` the Pi outright. **Follow-up (not built here):
+run Pi and its tools under a second uid**, which closes this class for good (the KOBE-23
+"sandbox privilege separation" umbrella).
+
+Other properties: the lockdown flags stay; nothing persists across processes or threads; the
+only secret in the dir is the session token (0600), which the sandbox holds by design (D30);
+the same uid could read the bootstrap token file before KOBE-41 too (KOBE-23 open risk).
 
 ### Token rotation (ac-2)
 
@@ -149,15 +169,21 @@ code with a server message (`pi_rejected`, `pi_unavailable` added to the table).
 1. `piThreadConfigSchema.model` gains optional `gateway_model` (`<gateway provider>/<model>`)
    and `api` (`PI_MODEL_APIS`). Still no URLs and no credentials: the agent builds the base URL
    from its environment. The old `{alias}` form stays valid (= no model for the sandbox).
-2. `SANDBOX_ERROR_CODES` gains `model_not_configured` (a `command.result` error on `run.start`).
+2. `SANDBOX_ERROR_CODES` gains `model_not_configured` and `runtime_tampered` (`command.result`
+   errors on `run.start`).
 3. `pi-events.ts`: `KOBE_MODEL_ERROR_PREFIX`, `MODEL_RUN_ERROR_CODES`, `kobeModelErrorMessage`,
    `parseKobeModelError` (the sandbox ↔ server error convention above).
 
 ## For downstream tickets
 
-- **KOBE-42 (budgets):** every model call from Pi carries `x-kobe-run-id` while a run is active
-  (`CallContext.runId`); calls between runs (none today: Pi only calls models inside a run) would
-  carry none. A `CallGate` refusal with `retryAfterSeconds` is waited out by kobe-models within
+- **KOBE-42 (budgets):** `x-kobe-run-id` is **advisory, a reporting hint only** (review
+  MEDIUM 2): it comes from the sandbox's model file, which any same-uid process in the sandbox
+  can rewrite (its own or a sibling thread's run id) or Pi could omit, and the shim accepts calls
+  without it. Per-run hard stops must not rely on it: enforce budgets and rate limits at the
+  sandbox (token), user (virtual key) and team levels, where the gateway's identity is
+  cryptographic, and use `runId` only to attribute. Every model call from Pi carries the header
+  while a run is active (`CallContext.runId`); calls between runs (none today: Pi only calls
+  models inside a run) would carry none. A `CallGate` refusal with `retryAfterSeconds` is waited out by kobe-models within
   its 60 s budget, then becomes `model_unavailable`/`model_throttled`; a 402 or a code of its own
   becomes `model_error` — add the code to `MODEL_RUN_ERROR_CODES` + `errors.ts` + `failure-codes.ts`
   for a budget-specific message. `budget_stopped` (`run.stop after_step`) is unchanged.
@@ -186,8 +212,29 @@ code with a server message (`pi_rejected`, `pi_unavailable` added to the table).
    retried: both are transient now. LOW: the runtime dir is removed when `PiProcess` creation
    itself throws; the model file path is cached at module scope (a reload registers again);
    `Object.hasOwn` for failure codes; `defaultSleep` returns at once on an aborted signal.
-5. LOW (kept, open question 1): a pinned alias the team did not enable falls back to the default;
-   a restart (`restartPlanInTx`) re-resolves the model rather than reusing `run.started.model`.
+5. LOW (kept, open question 1): a pinned alias the team did not enable falls back to the default.
+   A restart (`restartPlanInTx`) now reuses the alias in `run.started.model` (`startedModelAlias`),
+   so a re-sent start cannot switch models (unless that alias was disabled meanwhile).
+
+## Coordinator security review of PR #54 (0 CRITICAL/HIGH, 2 MEDIUM, 5 LOW) — resolution
+
+1. MEDIUM 1 cross-thread planting: tripwire, Pi 1.0.0 file audit and corrected rationale above
+   (the earlier "milliseconds" justification was wrong: the dir lives for the process's life);
+   second uid recorded as the follow-up. Tests: `runtime-dir.test.ts`; `agent.models.test.ts`
+   "stops a Pi whose runtime directory a sibling planted into during its start" (a poller writes
+   `agent/settings.json` between mkdtemp and Pi's start), "…whose model file was rewritten before
+   the next prompt"; the real-Pi suite proves Pi's own boot files pass the check.
+2. MEDIUM 2 advisory run id: KOBE-42 note above.
+3. LOW 3 rotation racing spawn: after the file is attached the thread takes `tokens.current()`
+   again (test "a token rotated while Pi was being spawned reaches the file"); model-file write
+   failures go to the agent's warn log (`ThreadHooks.warning`), and a failed write before a
+   prompt fails the run `pi_unavailable`.
+4. LOW 4 `ModelFile` writes a random temp name with `flag: "wx"` (test: a symlink at the file
+   path is never followed; no temp file left).
+5. LOW 6 mid-stream errors and aborts carry fixed text (tests in `provider.test.ts`).
+6. LOW 7 start-up sweep of `KOBE_PI_RUNTIME_DIR` (`sweepRuntimeDir`, test) and the removal is
+   awaited by `stopProcess`.
+7. LOW 5 as above (open question 1 stays open).
 
 ## Cold start on k3d (D14)
 

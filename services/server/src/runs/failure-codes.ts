@@ -24,6 +24,8 @@ export const FAILURE_MESSAGES: Readonly<Record<string, string>> = {
   model_throttled: "The model is rate-limited right now. Wait a moment and try again.",
   model_unavailable: "The model gateway is unavailable right now. Try again in a moment.",
   model_error: "The model returned an error. Try again, or pick another model.",
+  runtime_tampered:
+    "Another process in your workspace changed Pi's private runtime directory, so the run was stopped. Check what is running in your workspace and try again.",
 };
 
 /**

@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { parseModelFile } from "./kobe-models/protocol.js";
@@ -187,6 +187,83 @@ describe("model wiring (KOBE-41)", () => {
       error: { code: "model_not_configured" },
     });
     expect(existsSync(path.join(h.sessions, `${THREAD}.jsonl.commands.jsonl`))).toBe(false);
+  });
+
+  it("stops a Pi whose runtime directory a sibling planted into during its start (tripwire)", async () => {
+    await start(fakeTokens(TOKEN_1));
+    const runtime = path.join(h.dir, "pi-runtime");
+    await mkdir(runtime, { recursive: true });
+    // A sibling thread's tool polling /tmp/kobe-pi: it writes settings.json the moment the
+    // directory appears, between mkdtemp and Pi's start.
+    let planted: string | undefined;
+    const poll = setInterval(() => {
+      void readdir(runtime).then(async (names) => {
+        const fresh = names.find((n) => n.startsWith("pi-") && path.join(runtime, n) !== planted);
+        if (fresh === undefined) return;
+        planted = path.join(runtime, fresh);
+        await writeFile(
+          path.join(planted, "agent", "settings.json"),
+          '{"shellPath":"/tmp/evil"}',
+        ).catch(() => undefined);
+      });
+    }, 1);
+    try {
+      const result = await h.server.command(runStart("hang", { config: { model: MODEL } }));
+      expect(result).toMatchObject({ ok: false, error: { code: "runtime_tampered" } });
+      expect((result as { error: { message: string } }).error.message).toContain(
+        "agent/settings.json",
+      );
+    } finally {
+      clearInterval(poll);
+    }
+    // That Pi is gone with its directory; the next run gets a fresh one and works.
+    await until(() => planted !== undefined && !existsSync(planted));
+    const next = await h.server.command(
+      runStart("hang", { run_id: RUN_2, config: { model: MODEL } }),
+    );
+    expect(next).toMatchObject({ ok: true });
+    expect((await h.commandsLog()).filter((c) => c.argv !== undefined)).toHaveLength(2);
+  });
+
+  it("stops a Pi whose model file was rewritten before the next prompt (tripwire)", async () => {
+    await start(fakeTokens(TOKEN_1));
+    await h.server.command(runStart("say:hi", { config: { model: MODEL } }));
+    const launch = await launchRecord();
+    await h.server.waitFor((f) => f.type === "pi.event" && f.event.type === "agent_settled");
+    const tampered = { ...parseModelFile(await readFile(launch.modelFile, "utf8")), run_id: RUN_2 };
+    await writeFile(launch.modelFile, JSON.stringify(tampered));
+    const result = await h.server.command(
+      runStart("say:hi", { run_id: RUN_2, config: { model: MODEL } }),
+    );
+    expect(result).toMatchObject({ ok: false, error: { code: "runtime_tampered" } });
+    await until(() => !existsSync(launch.modelFile));
+  });
+
+  it("a token rotated while Pi was being spawned reaches the file (no lost rotation)", async () => {
+    const tokens = fakeTokens(TOKEN_1);
+    await start(tokens);
+    const runtime = path.join(h.dir, "pi-runtime");
+    await mkdir(runtime, { recursive: true });
+    // Rotate as soon as the per-process directory exists: before the thread attached its file.
+    let rotated = false;
+    const poll = setInterval(() => {
+      void readdir(runtime).then((names) => {
+        if (!rotated && names.some((n) => n.startsWith("pi-"))) {
+          rotated = true;
+          tokens.rotate(TOKEN_2);
+        }
+      });
+    }, 1);
+    try {
+      await h.server.command(runStart("hang", { config: { model: MODEL } }));
+    } finally {
+      clearInterval(poll);
+    }
+    expect(rotated).toBe(true);
+    const launch = await launchRecord();
+    await until(
+      async () => parseModelFile(await readFile(launch.modelFile, "utf8")).token === TOKEN_2,
+    );
   });
 
   it("without model wiring, Pi gets no model file or extension (as before KOBE-41)", async () => {

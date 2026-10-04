@@ -106,7 +106,19 @@ export class ThreadManager {
 
     thread.beginRun(frame.run_id);
     try {
-      await thread.attachRun(frame.run_id, model);
+      // The tripwire first (before the run's own write to the model file would hide a rewrite).
+      const tampered = await thread.verifyRuntime();
+      if (tampered !== undefined) {
+        await thread.withLock(() => thread.stopProcess());
+        thread.endRun();
+        return fail("runtime_tampered", tampered);
+      }
+      try {
+        await thread.attachRun(frame.run_id, model);
+      } catch (error) {
+        thread.endRun();
+        return fail("pi_unavailable", `model file not written: ${(error as Error).message}`);
+      }
       if (this.#options.beforeRun !== undefined) {
         const timedOut = await withTimeout(
           this.#options.beforeRun(frame),
@@ -402,12 +414,17 @@ export class ThreadManager {
     }
     try {
       await thread.waitPolicyReady();
-      return undefined;
     } catch (error) {
       // Fail closed: a Pi whose kobe-policy did not load would run tools unchecked.
       await thread.stopProcess();
       return fail("pi_unavailable", `kobe-policy did not start: ${(error as Error).message}`);
     }
+    const tampered = await thread.verifyRuntime();
+    if (tampered !== undefined) {
+      await thread.stopProcess();
+      return fail("runtime_tampered", tampered);
+    }
+    return undefined;
   }
 
   /**

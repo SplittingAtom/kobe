@@ -19,6 +19,7 @@ import {
   type Failure,
 } from "./errors.js";
 import {
+  KOBE_MODEL_ERROR_PREFIX,
   KOBE_PROVIDER_ID,
   gatewayBaseUrl,
   type ModelFileModel,
@@ -42,6 +43,7 @@ export const RETRY_BUDGET_MS = 60_000;
 export const RETRY_BASE_MS = 1_000;
 const MAX_ATTEMPTS = 8;
 const RUN_ID_HEADER = "x-kobe-run-id";
+const ABORTED_MESSAGE = "Request was aborted";
 const NO_FAILURE: Failure = { status: undefined, code: undefined, retryAfterMs: undefined };
 
 /** pi-ai's provider helpers (Pi's copy at runtime; stand-ins in unit tests). */
@@ -104,8 +106,12 @@ function withRunHeader(
   return runId === null ? base : { ...base, [RUN_ID_HEADER]: runId };
 }
 
-function errorResult(message: AssistantMessage, errorMessage: string): AssistantMessage {
-  return { ...message, stopReason: "error", errorMessage };
+function errorResult(
+  message: AssistantMessage,
+  errorMessage: string,
+  stopReason: "error" | "aborted" = "error",
+): AssistantMessage {
+  return { ...message, stopReason, errorMessage };
 }
 
 export function createKobeProvider(deps: KobeProviderDeps): Provider {
@@ -199,7 +205,7 @@ export function createKobeProvider(deps: KobeProviderDeps): Provider {
       let errored: AssistantMessage | undefined;
       let reason = "error";
       for await (const event of inner) {
-        if (event.type === "error" && forwarded === 0) {
+        if (event.type === "error") {
           errored = (event as { error: AssistantMessage }).error;
           reason = (event as { reason: string }).reason;
           break;
@@ -211,9 +217,16 @@ export function createKobeProvider(deps: KobeProviderDeps): Provider {
         out.end(await inner.result());
         return;
       }
+      // Upstream error text never reaches Pi's entries: every error message here is fixed text.
       if (reason === "aborted" || options?.signal?.aborted) {
-        out.push({ type: "error", reason, error: errored });
-        out.end(errored);
+        const aborted = errorResult(errored, ABORTED_MESSAGE, "aborted");
+        out.push({ type: "error", reason: "aborted", error: aborted });
+        out.end(aborted);
+        return;
+      }
+      if (forwarded > 0) {
+        // Something was streamed: never retried (the model may have acted); a fixed error.
+        fail(out, errored, `${KOBE_MODEL_ERROR_PREFIX}model_error: the stream ended with an error`);
         return;
       }
       const failure = classifyFailure(errored.errorMessage, response);
@@ -228,8 +241,9 @@ export function createKobeProvider(deps: KobeProviderDeps): Provider {
       );
       await sleep(next.delayMs, options?.signal);
       if (options?.signal?.aborted) {
-        out.push({ type: "error", reason: "aborted", error: errored });
-        out.end(errored);
+        const aborted = errorResult(errored, ABORTED_MESSAGE, "aborted");
+        out.push({ type: "error", reason: "aborted", error: aborted });
+        out.end(aborted);
         return;
       }
     }

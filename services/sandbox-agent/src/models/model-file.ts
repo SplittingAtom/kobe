@@ -1,12 +1,15 @@
-import { rename, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { MODEL_FILE_VERSION, type ModelFileState } from "../kobe-models/protocol.js";
 import type { RunModel } from "./types.js";
 
 /**
  * The agent's side of the model file (kobe-models/protocol.ts): one per Pi process, in that
- * process's private runtime directory, rewritten atomically (temp file + rename, so Pi never reads
- * a torn file) on token rotation and run start/end. Writes are serialised so the last state asked
- * for is the one on disk.
+ * process's private runtime directory, rewritten atomically (a fresh random temp file opened `wx`
+ * — no symlink or FIFO at the temp path is followed — then renamed, so Pi never reads a torn file)
+ * on token rotation and run start/end. Writes are serialised so the last state asked for is the
+ * one on disk; `verify` tells whether the disk still holds what was last written (the tripwire
+ * against another process of the same user rewriting it, threads/thread.ts).
  */
 export interface ModelFileContent {
   readonly gatewayUrl: string;
@@ -42,6 +45,7 @@ export class ModelFile {
   #content: ModelFileContent;
   /** What the last successful write put on disk (a failed write leaves it behind `#content`). */
   #written: ModelFileContent | undefined;
+  #writtenText: string | undefined;
   #chain: Promise<unknown> = Promise.resolve();
 
   constructor(path: string, initial: ModelFileContent) {
@@ -68,13 +72,30 @@ export class ModelFile {
     return this.#write(next);
   }
 
+  /** True when the file on disk is byte for byte what this writer last wrote. */
+  async verify(): Promise<boolean> {
+    await this.#chain;
+    if (this.#writtenText === undefined) return false;
+    try {
+      return (await readFile(this.path, "utf8")) === this.#writtenText;
+    } catch {
+      return false;
+    }
+  }
+
   #write(content: ModelFileContent): Promise<void> {
     const text = JSON.stringify(modelFileState(content));
-    const temp = `${this.path}.tmp`;
+    const temp = `${this.path}.${randomBytes(8).toString("hex")}.tmp`;
     const next = this.#chain.then(async () => {
-      await writeFile(temp, text, { mode: 0o600 });
-      await rename(temp, this.path);
+      try {
+        await writeFile(temp, text, { mode: 0o600, flag: "wx" });
+        await rename(temp, this.path);
+      } catch (error) {
+        await rm(temp, { force: true }).catch(() => undefined);
+        throw error;
+      }
       this.#written = content;
+      this.#writtenText = text;
     });
     this.#chain = next.catch(() => undefined);
     return next;

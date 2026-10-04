@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { withTeam } from "@kobe/db";
 import { FAILURE_MESSAGES } from "./runs/failure-codes.js";
+import { startedModelAlias } from "./runs/lifecycle.js";
 import { apiForKind, resolveRunModel } from "./runs/models.js";
 import { RunFixture } from "./testing/run-fixture.js";
 
@@ -120,6 +121,9 @@ describe("run model resolution (D30)", () => {
     expect(JSON.stringify(start)).not.toMatch(/https?:|api_key|secret/);
     const [started] = await f.events(w.team, runId);
     expect(started).toMatchObject({ type: "run.started", payload: { model: "smart" } });
+    // A re-sent start (recovery) reuses the alias the run started with.
+    const db = f.fx.replica(0).deps.database.db;
+    expect(await withTeam(db, w.team, (tx) => startedModelAlias(tx, w.team, runId))).toBe("smart");
     ws.reply(start, "hi");
     await f.until(w.team, runId, "completed");
   });

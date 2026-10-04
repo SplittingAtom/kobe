@@ -5,7 +5,7 @@ import {
   type ErrorInfo,
   type PiThreadConfig,
 } from "@kobe/protocol";
-import type { KobeTx } from "@kobe/db";
+import { sql, type KobeTx } from "@kobe/db";
 import type { NewRunEvent } from "../event-stream/append.js";
 import { clampApprovalMode } from "../sandbox-wire/policy-check.js";
 import {
@@ -214,6 +214,23 @@ export async function restartPlanInTx(
 ): Promise<StartPlan | undefined> {
   const resolved = await resolveForStart(tx, agents, thread, run);
   if (!resolved.ok) return undefined;
-  const model = await resolveRunModel(tx, run.teamId, resolved.config?.model?.alias);
+  // The model the run started with (`run.started.model`), so a re-sent start does not switch
+  // models; the resolver's alias only when the run had none.
+  const started = await startedModelAlias(tx, run.teamId, run.id);
+  const model = await resolveRunModel(tx, run.teamId, started ?? resolved.config?.model?.alias);
   return planOf(thread, run, resolved, model);
+}
+
+/** The alias in the run's `run.started` event, if any. */
+export async function startedModelAlias(
+  tx: KobeTx,
+  teamId: string,
+  runId: string,
+): Promise<string | undefined> {
+  const res = await tx.execute<{ model: string | null }>(sql`
+    SELECT payload->>'model' AS model FROM run_events
+     WHERE team_id = ${teamId} AND run_id = ${runId} AND type = 'run.started'
+     ORDER BY seq LIMIT 1`);
+  const model = res.rows[0]?.model;
+  return typeof model === "string" && model !== "" ? model : undefined;
 }

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -57,6 +57,33 @@ describe("ModelFile (agent side)", () => {
     await new Promise((r) => setTimeout(r, 20));
     await file.update({ token: "u".repeat(40) });
     expect((await stat(file.path)).mtimeMs).toBe(before.mtimeMs);
+  });
+
+  it("never follows a symlink at the file path, leaves no temp file, and verifies its own writes", async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "kobe-model-file-"));
+    const victim = path.join(dir, "victim");
+    await writeFile(victim, "untouched");
+    await symlink(victim, path.join(dir, "model.json"));
+    const file = new ModelFile(path.join(dir, "model.json"), {
+      gatewayUrl: "http://gw",
+      model: null,
+      token: "t".repeat(40),
+      runId: null,
+    });
+    expect(await file.verify()).toBe(false);
+    await file.create();
+    expect(await readFile(victim, "utf8")).toBe("untouched");
+    expect((await stat(path.join(dir, "model.json"))).isSymbolicLink()).toBe(false);
+    expect((await readdir(dir)).sort()).toEqual(["model.json", "victim"]);
+    expect(await file.verify()).toBe(true);
+    // Another process rewrote it (even with valid content): the tripwire sees it.
+    await writeFile(
+      path.join(dir, "model.json"),
+      `${await readFile(path.join(dir, "model.json"), "utf8")} `,
+    );
+    expect(await file.verify()).toBe(false);
+    await file.update({ token: "u".repeat(40) });
+    expect(await file.verify()).toBe(true);
   });
 
   it("rewrites after a failed write even for an identical update (nothing stays stale)", async () => {

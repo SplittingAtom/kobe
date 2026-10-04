@@ -258,12 +258,49 @@ describe("kobe provider", () => {
     expect(second.result.errorMessage).toMatch(/^kobe\.model_error:model_session_revoked: /);
   });
 
-  it("never retries once something was streamed, and passes aborts through", async () => {
+  it("never retries once something was streamed, and passes aborts through with fixed text", async () => {
     const aborted = setup([{ aborted: true }, { text: "never" }]);
     const { result, events } = await collect(aborted.provider.stream(aborted.model, {}));
     expect(result.stopReason).toBe("aborted");
+    expect(result.errorMessage).toBe("Request was aborted");
     expect(events).toHaveLength(1);
     expect(aborted.calls).toHaveLength(1);
+  });
+
+  it("replaces an upstream error after streaming began with fixed text (never stored raw)", async () => {
+    const calls: StreamOptions[] = [];
+    const midStream: ApiStreams = {
+      api: "openai-completions",
+      stream: (model) => {
+        const out = new FakeStream();
+        out.push({ type: "text_delta", delta: "partial" } as AssistantMessageEvent);
+        const err = message(model, {
+          stopReason: "error",
+          errorMessage: '503: {"raw":"<upstream text>"}',
+        });
+        out.push({ type: "error", reason: "error", error: err });
+        out.end(err);
+        return out;
+      },
+      streamSimple: () => new FakeStream(),
+    };
+    const provider = createKobeProvider({
+      pi,
+      initial: state(),
+      readState: async () => state(),
+      apis: {
+        "openai-completions": midStream,
+        "anthropic-messages": fakeApi([], calls),
+        "google-generative-ai": fakeApi([], calls),
+      },
+    });
+    const model = provider.getModels()[0] as Model;
+    const { result, events } = await collect(provider.stream(model, {}));
+    expect(events.map((e) => e.type)).toEqual(["text_delta", "error"]);
+    expect(result.errorMessage).toBe(
+      `${KOBE_MODEL_ERROR_PREFIX}model_error: the stream ended with an error`,
+    );
+    expect(JSON.stringify(events)).not.toContain("upstream text");
   });
 
   it("stops retrying when the run is aborted while waiting", async () => {
@@ -282,7 +319,8 @@ describe("kobe provider", () => {
     });
     const model = provider.getModels()[0] as Model;
     const { result } = await collect(provider.stream(model, {}, { signal: controller.signal }));
-    expect(result.stopReason).toBe("error");
+    expect(result.stopReason).toBe("aborted");
+    expect(result.errorMessage).toBe("Request was aborted");
     expect(calls).toHaveLength(1);
   });
 

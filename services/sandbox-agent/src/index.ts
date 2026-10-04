@@ -4,6 +4,7 @@ import { Agent } from "./agent.js";
 import { loadConfig } from "./config.js";
 import { hardenProcess } from "./harden.js";
 import { logger } from "./logger.js";
+import { sweepRuntimeDir } from "./models/runtime-dir.js";
 import { ModelTokenKeeper } from "./models/token-keeper.js";
 import type { ModelWiring } from "./models/types.js";
 import { buildPiLaunch } from "./pi/pi-launch.js";
@@ -27,7 +28,10 @@ async function main(): Promise<void> {
     policyExtension: await checkPolicyExtensionFile(loaded.policyExtension),
   };
   const home = process.env.HOME ?? "/home/kobe";
-  // Pi's private runtime directories live here; the version probe gets one of its own.
+  // Pi's private runtime directories live here: leftovers of an earlier agent (a pod restart)
+  // are swept first, so no stale token outlives its process; the version probe gets its own dir.
+  const swept = await sweepRuntimeDir(checked.piRuntimeDir);
+  if (swept > 0) logger.warn({ removed: swept }, "removed stale Pi runtime directories");
   const probeDir = path.join(checked.piRuntimeDir, "version-probe");
   await mkdir(probeDir, { recursive: true, mode: 0o700 });
   const piEnv = {
