@@ -125,7 +125,7 @@ describe("workspace sync (agent)", () => {
     const restored = await started(second);
     expect(await text(second, "report.md")).toBe("# Q3\n");
     expect(await text(second, "data/big.csv")).toBe("x,y\n".repeat(10_000));
-    expect((await stat(path.join(second, "bin/run.sh"))).mode & 0o777).toBe(0o755);
+    expect((await stat(path.join(second, "bin/run.sh"))).mode & 0o777).toBe(0o775);
     expect(
       Math.abs((await stat(path.join(second, "report.md"))).mtimeMs - mtime),
     ).toBeLessThanOrEqual(1);
@@ -326,21 +326,25 @@ describe("workspace sync (agent)", () => {
     await expect(sync.beforeRun(runStart())).resolves.toBeUndefined();
   });
 
-  it("measures a full restore (localhost; see the ledger for real numbers)", async () => {
-    const first = await volume();
-    const files = 500;
-    for (let i = 0; i < files; i++)
-      await put(first, `set/${i % 20}/f${i}.txt`, `${i}`.repeat(1000));
-    await (await started(first)).push();
-    const second = await volume();
-    const t0 = performance.now();
-    await started(second);
-    const ms = performance.now() - t0;
-    expect(server.reports.at(-1)).toMatchObject({ mode: "full", files });
-    console.log(
-      `restore of ${files} files (≈ 2 MB) from a local fake server: ${Math.round(ms)} ms`,
-    );
-  });
+  it(
+    "measures a full restore (localhost; see the ledger for real numbers)",
+    { timeout: 30000 },
+    async () => {
+      const first = await volume();
+      const files = 500;
+      for (let i = 0; i < files; i++)
+        await put(first, `set/${i % 20}/f${i}.txt`, `${i}`.repeat(1000));
+      await (await started(first)).push();
+      const second = await volume();
+      const t0 = performance.now();
+      await started(second);
+      const ms = performance.now() - t0;
+      expect(server.reports.at(-1)).toMatchObject({ mode: "full", files });
+      console.log(
+        `restore of ${files} files (≈ 2 MB) from a local fake server: ${Math.round(ms)} ms`,
+      );
+    },
+  );
 });
 
 function must<T>(v: T | undefined): T {

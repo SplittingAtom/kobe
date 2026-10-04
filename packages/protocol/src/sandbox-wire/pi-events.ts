@@ -155,6 +155,11 @@ export const MODEL_RUN_ERROR_CODES = [
   "model_not_configured",
   /** Anything else the model call failed with. */
   "model_error",
+  /**
+   * 402 `budget_exhausted` from the shim (or Bifrost's `policy_budget_exceeded`, KOBE-42): a budget
+   * is used up; the server ends a budget-stopped run `budget_stopped`.
+   */
+  "model_budget_exhausted",
 ] as const;
 export type ModelRunErrorCode = (typeof MODEL_RUN_ERROR_CODES)[number];
 

@@ -72,6 +72,13 @@ const configSchema = z.object({
   ),
   /** How long membership, sandbox liveness and virtual keys are cached (revocation latency). */
   KOBE_MODEL_GATEWAY_CACHE_TTL_MS: int("KOBE_MODEL_GATEWAY_CACHE_TTL_MS", 0, 60_000, 5_000),
+  // KOBE-42: how long a member's budget state is reused (spend hints drop it sooner).
+  KOBE_MODEL_GATEWAY_BUDGET_CACHE_TTL_MS: int(
+    "KOBE_MODEL_GATEWAY_BUDGET_CACHE_TTL_MS",
+    0,
+    60_000,
+    1_000,
+  ),
 });
 
 export interface Config {
@@ -89,6 +96,7 @@ export interface Config {
   readonly maxCalls: number;
   readonly idleTimeoutMs: number;
   readonly cacheTtlMs: number;
+  readonly budgetCacheTtlMs: number;
 }
 
 export function loadConfig(env: Readonly<Record<string, string | undefined>>): Config {
@@ -121,5 +129,6 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     maxCalls: c.KOBE_MODEL_GATEWAY_MAX_CALLS,
     idleTimeoutMs: c.KOBE_MODEL_GATEWAY_IDLE_TIMEOUT_MS,
     cacheTtlMs: c.KOBE_MODEL_GATEWAY_CACHE_TTL_MS,
+    budgetCacheTtlMs: c.KOBE_MODEL_GATEWAY_BUDGET_CACHE_TTL_MS,
   };
 }

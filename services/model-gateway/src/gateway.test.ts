@@ -71,6 +71,20 @@ beforeAll(async () => {
         res.end(JSON.stringify({ type: "model_blocked", error: { message: "not allowed" } }));
         return;
       }
+      if (Buffer.concat(chunks).toString().includes('"fail":500')) {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ type: "provider_server_error", error: { message: "boom" } }));
+        return;
+      }
+      if (Buffer.concat(chunks).toString().includes('"slow":true')) {
+        // Answers late: lets a test hang up before Bifrost's response headers.
+        const t = setTimeout(() => {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end("{}");
+        }, 500);
+        res.on("close", () => clearTimeout(t));
+        return;
+      }
       if (
         req.url?.startsWith("/v1/chat/completions") &&
         chunks.join("").includes('"stream":true')
@@ -378,6 +392,80 @@ describe("calls", () => {
     for (let i = 0; i < 50 && records.length === 0; i++)
       await new Promise((r) => setTimeout(r, 20));
     expect(records[0]?.aborted).toBe(true);
+    // KOBE-43: a stream cut short is charged an estimate, never nothing.
+    expect(records[0]?.usage?.source).toBe("estimated");
+    expect(records[0]?.usage?.counts.input).toBeGreaterThan(0);
+  });
+
+  it("KOBE-43: asks for the usage report of a streaming chat call (include_usage forced)", async () => {
+    const res = await fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: { ...bearer(), "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "openai/m",
+        stream: true,
+        stream_options: { include_usage: false },
+      }),
+    });
+    await res.text();
+    expect(hits[0]?.body.endsWith(',"stream_options":{"include_usage":true}}')).toBe(true);
+    // A non-streaming call is forwarded as sent.
+    await call("/v1/chat/completions", { headers: bearer(), body: { model: "openai/m" } });
+    expect(hits[1]?.body).toBe(JSON.stringify({ model: "openai/m" }));
+  });
+
+  it("KOBE-43: charges the input of a call Bifrost got but the sandbox hung up on", async () => {
+    await new Promise<void>((resolve) => {
+      const req = request(`${base}/v1/chat/completions`, {
+        method: "POST",
+        headers: { ...bearer(), "content-type": "application/json" },
+      });
+      req.on("error", () => resolve());
+      req.end(JSON.stringify({ model: "openai/m", slow: true, pad: "p".repeat(400) }));
+      setTimeout(() => {
+        req.destroy();
+        resolve();
+      }, 150);
+    });
+    for (let i = 0; i < 50 && records.length === 0; i++)
+      await new Promise((r) => setTimeout(r, 20));
+    expect(records[0]).toMatchObject({ aborted: true });
+    expect(records[0]?.usage?.source).toBe("estimated");
+    expect(records[0]?.usage?.counts.input).toBeGreaterThan(100);
+    // The output the provider may already have produced: what the request allowed (no cap: 8,192).
+    expect(records[0]?.usage?.counts.output).toBe(8_192);
+  });
+
+  it("KOBE-43 review: a 5xx is charged like a call cut short; a 4xx refusal is free", async () => {
+    const r = await call("/v1/chat/completions", {
+      headers: bearer(),
+      body: { model: "openai/m", fail: 500, max_tokens: 300 },
+    });
+    expect(r.status).toBe(500);
+    expect(records[0]?.usage).toEqual({
+      source: "estimated",
+      counts: { input: expect.any(Number), output: 300, cacheRead: 0, cacheWrite: 0 },
+    });
+  });
+
+  it("KOBE-43 re-review: a count-only endpoint is never charged output", async () => {
+    const r = await call("/anthropic/v1/messages/count_tokens", {
+      headers: bearer(),
+      body: { model: "openai/m", fail: 500, max_tokens: 300 },
+    });
+    expect(r.status).toBe(500);
+    expect(records[0]?.usage?.counts.output).toBe(0);
+  });
+
+  it("KOBE-43 review: refuses background Responses (billed later, out of the ledger's sight)", async () => {
+    const r = await call("/v1/responses", {
+      headers: bearer(),
+      body: { model: "x", background: true },
+    });
+    expect(r.status).toBe(400);
+    expect(JSON.parse(r.text).error.code).toBe("background_not_supported");
+    expect(hits).toEqual([]);
+    expect(records).toEqual([]);
   });
 
   it("limits concurrent calls per sandbox (429)", async () => {
@@ -400,6 +488,10 @@ describe("calls", () => {
     expect(JSON.parse(r.text).type).toBe("model_blocked");
     expect(r.headers.get("x-bf-internal")).toBeNull();
     expect(records[0]).toMatchObject({ status: 403, errorType: "model_blocked" });
+    expect(records[0]?.usage).toEqual({
+      source: "reported",
+      counts: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    });
   });
 
   it("refuses an oversized body (413) and lets the gate refuse before Bifrost", async () => {
@@ -419,6 +511,8 @@ describe("calls", () => {
     const refused = await call("/v1/chat/completions", { headers: bearer() });
     expect(refused.status).toBe(402);
     expect(JSON.parse(refused.text).error.code).toBe("budget_exhausted");
+    // Refused before Bifrost: no usage to record.
+    expect(records.at(-1)?.usage).toBeUndefined();
     expect(hits).toEqual([]);
   });
 

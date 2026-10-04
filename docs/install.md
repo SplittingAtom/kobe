@@ -68,13 +68,19 @@ created by hand. Every team namespace gets:
   storage, pods, PVCs and requested storage) and a LimitRange with per-container defaults;
 - a `SandboxTemplate` and a **warm pool** of `sandbox.warmPool.replicasPerTeam` pre-started
   sandboxes (agent-sandbox warm pools are per namespace; each counts against the team's quota);
-- Pod Security Admission `restricted`.
+- Pod Security Admission `baseline` (see below for why not `restricted`).
 
 The chart installs **ValidatingAdmissionPolicies** that hold whatever creates the pod (server,
 agent-sandbox controller, an operator): in `kobe-team-*` namespaces every pod must use
 `isolation.runtimeClassName` and that RuntimeClass must have a gVisor/Kata handler; pods may not
 mount Secrets, read Secrets into env, mount a Kubernetes API token, use host namespaces or
-`hostPath`; and only the Kobe server may add or change NetworkPolicies there. The server's own
+`hostPath`; they must meet Pod Security `restricted` (non-root, seccomp `RuntimeDefault`/
+`Localhost`, all capabilities dropped, no privileged containers, `restricted` volume types) with
+one exception: sandbox containers add `SETUID` and `SETGID` (nothing else) and allow privilege
+escalation, so the image's `kobe-runas` helper can run each Pi process and its tools under a uid
+of their own, separate from the agent and from other threads (KOBE-71; the capabilities exist
+inside the gVisor/Kata sandbox kernel only). That is why the namespace label says `baseline`; and
+only the Kobe server may add or change NetworkPolicies there. The server's own
 cluster-wide permissions (namespaces, RoleBindings) are confined to `kobe-team-*` by the same
 mechanism. Sandboxes identify themselves to the server with a projected ServiceAccount token
 (audience `kobe.sandbox-bootstrap`, which the Kubernetes API itself rejects) and receive
@@ -273,9 +279,20 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
 - **Configuration lives in Kobe.** Install admins add **providers** (OpenAI, Anthropic, Gemini,
   Ollama, or any OpenAI-compatible endpoint such as vLLM) with their API keys, and publish the
   **model catalog** (aliases such as `fast`, `smart`, `local`); team admins enable a subset and a
-  default (`/v1/install/models`, `/v1/team/models`; the admin console pages are KOBE-44). Keys are
-  stored sealed (AES-256-GCM) in Postgres, are write-only in the API, and are never logged or
-  audited (only "key set/changed").
+  default (install console **Models and providers**, team console **Models**). Keys are stored
+  sealed (AES-256-GCM) in Postgres, are write-only in the API, and are never logged or audited
+  (only "key set/changed").
+- **Which model a run uses.** The agent's pinned model if it has one, else the model the person
+  chose for the conversation (the chat's model picker), else the team's default. A pinned or chosen
+  model the team doesn't enable fails the run with a clear error; it never falls back silently.
+- **Aliases are names, not models.** A conversation (or agent) keeps the alias it chose, so an
+  alias removed from the catalog and **added again** with another provider or model is used again
+  by every conversation that chose it, on the new target, once a team enables it. Re-pointing an
+  alias (Edit) changes its model everywhere at once in the same way.
+- **Model listing.** The catalog editor suggests model ids from Bifrost's list for the provider;
+  "Ask the provider" has Bifrost call the provider's list-models API with the stored key (audited
+  `models.provider.models_refreshed`, 6 per minute per provider). The server itself never calls a
+  provider.
 - **Kobe pushes it to Bifrost.** The server reconciles Bifrost through Bifrost's admin API: on every
   change (Postgres `LISTEN/NOTIFY`, within seconds) and every 30 s. One server replica leads (a
   Postgres advisory lock); `GET /v1/install/models` reports `gateway.in_sync` and the last error.
@@ -319,8 +336,48 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
   **Rotating** `provider-keys` or `virtual-keys`: copy the old value to `provider-keys-previous` /
   `virtual-keys-previous`, put a new one in place, restart the server and shim; the sync re-seals
   stored values with the new secret within a minute; then remove the `-previous` key.
-- **Bifrost logs no prompts** (`enable_logging: false`); usage is recorded by Kobe from the agent
-  (`run_usage`, KOBE-43).
+- **Bifrost logs no prompts** (`enable_logging: false`). Usage is recorded by Kobe's shim
+  (`run_usage`, KOBE-43): one row per model call with input, output and cache tokens taken from the
+  provider's own usage report in the response (the final stream event or the JSON body), the model,
+  latency, and the team, user and sandbox of the session token (plus the run, its thread and agent
+  when Pi names an active run). A response without a usage report (a stream cut short, a request
+  that did not ask for usage) is charged an estimate: request size / 4 input tokens and generated
+  text / 4 output tokens, and at least the output the request allowed
+  (`max_tokens` and kin, 8,192 when unset, capped at 65,536); a 5xx counts the same, a 4xx is
+  free. Background Responses (`background: true`, billed later) are refused. Per-call tool fees
+  (hosted web search, image generation) are not in usage reports and not counted. The ledger is
+  append-only. Rows are written right after each call.
+- **Budgets and rate limits** (KOBE-42, D30): budgets in **dollars** (at catalog prices) and in
+  **tokens** (input + output + cache reads + cache writes, every model; this is what caps models
+  without prices such as Ollama Cloud's), each monthly with an optional daily cap, for the install
+  (`PUT /v1/install/budget`, install admins; also the per-user request rate, default 60/min), each
+  team, a team's **default member budget** (every member without one of their own) and single
+  members (`/v1/team/budgets`, team admins; a team may only lower the rate). Periods are calendar
+  months and days in **UTC**. At 80 % team admins (and the member, for their own budget; install
+  admins for the install's) get an email (at most one per budget and threshold per period; an 80 %
+  warning is skipped once 100 % is reached; at most 20 budget emails per person per day) and
+  members see a banner in the chat; at 100 % the model-gateway shim refuses new model calls (402
+  `budget_exhausted`), new runs are refused (429 `budget_exhausted`), and running ones finish
+  their current step and end `budget_stopped`, pending approvals expire; audited
+  `models.budget.reached`. Calls in flight are never cut; each shim replica reserves what an
+  admitted call may cost until its usage row lands (a member's reservations hold at most a quarter
+  of what is left of a shared budget), so on one replica a budget is exceeded by at most the last admitted call plus estimation
+  error. Replicas do not share reservations: with several, simultaneous calls can overshoot by up
+  to about the budget that was left, per replica (Postgres-backed reservations are a follow-up). Enforcement is at the identities the session token proves, never the advisory run
+  id. The per-user request rate is enforced by each shim replica (so up to replicas × the rate in
+  total) and, install-wide, by Bifrost on each member's virtual key (pushed by the gateway sync).
+  Bifrost's own dollar budgets are not used (it prices calls with its own list). Budget data is
+  guarded in Postgres: spend counters change only through the ledger, alerts only for a budget
+  really crossed in the current period, alert emails only with their alert.
+- **Prices are optional, per catalog model**: `input_usd_per_mtok`, `output_usd_per_mtok` and
+  optionally `cache_read_usd_per_mtok` / `cache_write_usd_per_mtok` (dollars per million tokens;
+  cache prices default to the input price) on `POST/PATCH /v1/install/models/catalog`. Providers
+  such as Ollama publish no prices: without input and output prices calls are counted in tokens
+  with no cost. A call is priced when it is recorded (later price changes do not rewrite history).
+  Dashboards: team console **Usage** (`GET /v1/team/usage`, team admins) and install console
+  **Usage and spend** (`GET /v1/install/usage`, `install.usage.read`), both with `from`/`to` (at
+  most 400 days) and `bucket` (`hour`/`day`); per run and per thread for whoever can read them
+  (`GET /v1/runs/{id}/usage`, `GET /v1/threads/{id}/usage`).
 
 ## MCP connectors
 
@@ -453,6 +510,35 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
   `Recreate` strategy, a config file and its admin password; only the shim and the server may reach
   it. Existing Bifrost state is replaced by Kobe's on the first sync. Sandboxes pick up the shim's
   address when their pods are next created (hibernate/wake or restart).
+
+- **Retention indexes (KOBE-18, migration `*_retention_rls`).** Two indexes are added with a
+  plain `CREATE INDEX` (migrations run in one transaction), which blocks writes to `threads` and
+  `thread_entries` while it scans them. On a large install, build them first, outside the upgrade,
+  then upgrade (the migration skips existing indexes):
+
+  ```sql
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS threads_retention_idx
+    ON threads (team_id, last_activity_at) WHERE deleted_at IS NULL;
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS thread_entries_blob_ref_idx
+    ON thread_entries (team_id, blob_ref) WHERE blob_ref IS NOT NULL;
+  ```
+
+  A `CONCURRENTLY` build that fails or is cancelled leaves an **INVALID** index behind, and
+  `IF NOT EXISTS` would then skip it, leaving the upgrade without a usable index. Before upgrading,
+  check and drop any such leftover (then build it again, or let the migration build it):
+
+  ```sql
+  SELECT c.relname FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+   WHERE NOT i.indisvalid
+     AND c.relname IN ('threads_retention_idx', 'thread_entries_blob_ref_idx');
+  DROP INDEX CONCURRENTLY IF EXISTS threads_retention_idx;        -- only if listed above
+  DROP INDEX CONCURRENTLY IF EXISTS thread_entries_blob_ref_idx;  -- only if listed above
+  ```
+
+- **Retention job (KOBE-18).** One server replica at a time runs the nightly retention pass under
+  a session-level advisory lock, so the server needs a direct (or session-mode pooled) Postgres
+  connection; transaction-mode poolers break session locks. `KOBE_RETENTION_HOUR_UTC` (0-23,
+  default 3) sets the hour.
 
 ## Backup and restore
 

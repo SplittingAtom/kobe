@@ -14,6 +14,7 @@ import { createThreadListAdapter } from "../../lib/chat/thread-list-adapter";
 import { ACTIVE_TEAM_EVENT, fetchMyTeams } from "../../lib/teams";
 import { ConsoleLinks } from "../admin/console-links";
 import { ChatSessionContext, useKobeRuntime } from "./kobe-runtime";
+import { RetentionNotice } from "./retention-notice";
 import { ThreadSidebar } from "./thread-sidebar";
 import { ThreadView } from "./thread-view";
 import styles from "./chat.module.css";
@@ -99,6 +100,7 @@ function ChatWorkspace({ session }: { readonly session: ChatSession }) {
   useEffect(() => session.onThreadCreated(() => void runtime.threads.reload()), [session, runtime]);
   return (
     <AssistantRuntimeProvider runtime={runtime}>
+      <RetentionNotice />
       <div className={styles.body}>
         <ThreadSidebar listError={listError} onOpenThread={setThreadId} />
         <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>

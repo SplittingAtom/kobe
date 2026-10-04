@@ -23,6 +23,16 @@ RUN pnpm install --offline --frozen-lockfile \
  && pnpm turbo run build --filter=@kobe/sandbox-agent... \
  && pnpm --filter=@kobe/sandbox-agent deploy --prod --legacy /out
 
+# kobe-runas (KOBE-71): the one privileged file in the image. Starts each Pi process (and so the
+# tools it runs) under its own uid; static, so the runtime image needs no compiler.
+FROM ${PYTHON_IMAGE} AS runas
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends gcc libc6-dev \
+ && rm -rf /var/lib/apt/lists/*
+COPY images/sandbox/runas/kobe-runas.c /src/kobe-runas.c
+RUN mkdir /out && gcc -std=c11 -O2 -Wall -Wextra -Werror -static-pie -fPIE -D_FORTIFY_SOURCE=2 \
+      -fstack-protector-strong -Wl,-z,relro,-z,now -o /out/kobe-runas /src/kobe-runas.c
+
 # Node runtime with a pinned npm, and Pi 1.0.x from its lockfile (spec D13). Dependency install
 # scripts are not run (Pi works without them; they would run as root at build time).
 FROM ${NODE_IMAGE} AS pi
@@ -45,7 +55,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      ca-certificates git curl jq ripgrep unzip zip file less procps "tini=${TINI_VERSION}" \
+      ca-certificates git curl jq ripgrep unzip zip file less procps libcap2-bin "tini=${TINI_VERSION}" \
  && rm -rf /var/lib/apt/lists/*
 
 # Fully locked with hashes (pip-compile --generate-hashes from requirements.in).
@@ -63,6 +73,8 @@ COPY --from=agent /out/dist /opt/kobe/sandbox-agent/dist
 COPY --from=agent /out/node_modules /opt/kobe/sandbox-agent/node_modules
 COPY --from=agent /out/package.json /opt/kobe/sandbox-agent/package.json
 COPY images/sandbox/entrypoint.sh /opt/kobe/entrypoint.sh
+COPY --from=runas /out/kobe-runas /opt/kobe/bin/kobe-runas
+COPY images/sandbox/runas/kobe-reclaim.sh /opt/kobe/bin/kobe-reclaim
 # kobe-policy (KOBE-36): the Pi extension that asks the server about every tool call. Loaded by the
 # agent with --extension, last; root-owned and read-only so sandbox code cannot replace it. Only the
 # compiled .js files (it imports nothing but node builtins and its own files).
@@ -76,14 +88,27 @@ COPY --from=agent /out/dist/kobe-models/*.js /opt/kobe/pi-extensions/kobe-models
 # tool's shell, so sandbox code must not be able to change it.
 COPY images/sandbox/egress-env.sh /opt/kobe/egress-env.sh
 
-# Non-root user; /workspace is the persistent volume, /opt/kobe/skills holds gallery skills (A6,
-# root-owned / mounted read-only), /opt/kobe/pi-extensions the root-owned Pi extensions. Pi's own
-# config dir is not baked in: the agent creates a private one per Pi process under /tmp (KOBE-41;
-# Pi 1.0.0 must be able to write auth.json there). Strip setuid/setgid bits so sandbox code has no
-# local privilege-escalation helpers even if a pod spec forgets allowPrivilegeEscalation=false.
+# Users (KOBE-71): `kobe` (1000) runs kobe-sandbox-agent; group `kobe` (1000) is also the shared
+# /workspace group (the pod's fsGroup). `kobe-agent` (1001) is a group only the agent has (pod
+# supplementalGroups): it alone may execute kobe-runas. `kobe-pi-<n>` (2000+n, own group each) are
+# the Pi identities: each Pi process and its tools run as one of them (the pod gives the agent
+# their groups too, so it can hand a Pi its private runtime directory).
+# /workspace is the persistent volume, /opt/kobe/skills holds gallery skills (A6, root-owned /
+# mounted read-only), /opt/kobe/pi-extensions the root-owned Pi extensions, /run/kobe-agent the
+# agent-only directory the pod mounts the bootstrap token under, /run/kobe-pi the mount point of
+# the volume the agent creates each Pi's private runtime directory in (KOBE-41/71).
+# Setuid/setgid bits are stripped so sandbox code has no privilege-escalation helpers; the only
+# privileged file is kobe-runas (file capabilities setuid+setgid, executable by `kobe-agent` only).
 RUN groupadd --gid 1000 kobe \
  && useradd --uid 1000 --gid 1000 --create-home --home-dir /home/kobe --shell /bin/bash kobe \
- && mkdir -p /workspace /opt/kobe/skills \
+ && groupadd --gid 1001 kobe-agent \
+ && for n in $(seq 0 63); do \
+      groupadd --gid $((2000 + n)) "kobe-pi-$n" \
+      && useradd --uid $((2000 + n)) --gid $((2000 + n)) --no-create-home --home-dir /home/kobe \
+           --shell /bin/bash "kobe-pi-$n" || exit 1; \
+    done \
+ && mkdir -p /workspace /opt/kobe/skills /run/kobe-agent /run/kobe-pi \
+ && chown 1000:1001 /run/kobe-agent && chmod 0700 /run/kobe-agent \
  && chmod 0555 /opt/kobe/entrypoint.sh \
  && chown 0:0 /opt/kobe/egress-env.sh && chmod 0444 /opt/kobe/egress-env.sh \
  && chown -R 0:0 /opt/kobe/pi-extensions \
@@ -91,6 +116,10 @@ RUN groupadd --gid 1000 kobe \
  && chmod 0555 /opt/kobe/pi-extensions /opt/kobe/pi-extensions/kobe-policy /opt/kobe/pi-extensions/kobe-models \
  && chown kobe:kobe /workspace \
  && find / -xdev -perm /6000 -type f -exec chmod a-s {} + \
+ && chown 0:1001 /opt/kobe/bin/kobe-runas && chmod 0750 /opt/kobe/bin/kobe-runas \
+ && chown 0:0 /opt/kobe/bin/kobe-reclaim && chmod 0555 /opt/kobe/bin/kobe-reclaim \
+ && chmod 0755 /opt/kobe/bin \
+ && setcap cap_setuid,cap_setgid=ep /opt/kobe/bin/kobe-runas \
  && chmod 0644 /etc/passwd /etc/group && chmod 0640 /etc/shadow
 
 USER 1000:1000

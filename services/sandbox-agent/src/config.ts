@@ -72,6 +72,12 @@ const configSchema = z.object({
     .string()
     .startsWith("/")
     .default("/opt/kobe/pi-extensions/kobe-policy/index.js"),
+  /**
+   * KOBE-71: the image's `kobe-runas` helper. Set (by Kobe's pod spec), every Pi process runs as
+   * a Pi identity of its own (the agent's supplementary groups 2000-2063), and the agent refuses
+   * to start when it cannot do that. Unset (development, tests): Pi runs as the agent's uid.
+   */
+  KOBE_PI_RUNAS: z.string().startsWith("/").optional(),
   KOBE_MAX_PI_PROCESSES: positiveInt(8),
   KOBE_PI_IDLE_MS: positiveInt(10 * 60_000),
   /** Un-acked outbound pi.event bytes across all runs before the agent gives up on a run. */
@@ -106,6 +112,8 @@ export interface Config {
   readonly egressEnvScript: string;
   readonly noProxy: string;
   readonly policyExtension: string;
+  /** KOBE-71: the Pi identity helper; undefined = Pi runs as the agent's uid. */
+  readonly piRunAs?: string;
   readonly maxPiProcesses: number;
   readonly piIdleMs: number;
   readonly outboxMaxBytes: number;
@@ -150,6 +158,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     egressEnvScript: c.KOBE_EGRESS_ENV_SCRIPT,
     noProxy: c.NO_PROXY,
     policyExtension: c.KOBE_POLICY_EXTENSION,
+    ...(c.KOBE_PI_RUNAS === undefined ? {} : { piRunAs: c.KOBE_PI_RUNAS }),
     maxPiProcesses: c.KOBE_MAX_PI_PROCESSES,
     piIdleMs: c.KOBE_PI_IDLE_MS,
     outboxMaxBytes: c.KOBE_OUTBOX_MAX_BYTES,

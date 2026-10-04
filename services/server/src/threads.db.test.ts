@@ -825,7 +825,13 @@ describe("search (GET /v1/threads?q=, KOBE-33)", () => {
       (await as.bob.get("/v1/threads?q=budget")).json,
     ).threads;
     const detail = threadDetailSchema.parse((await as.bob.get(`/v1/threads/${id}`)).json);
-    const { entries: _e, next_entries_after: _n, agent_current_version: _v, ...summary } = detail;
+    const {
+      entries: _e,
+      next_entries_after: _n,
+      agent_current_version: _v,
+      agent_model: _am,
+      ...summary
+    } = detail;
     const { matched_entry_id: _m, snippet: _s, score: _sc, ...hitSummary } = hit ?? {};
     expect(hitSummary).toEqual(summary);
   });
@@ -920,8 +926,15 @@ describe("history reads never wake sandboxes (ac-2)", () => {
   it("serves thread reads from Postgres alone", async () => {
     // Deps that expose only the database and the session check: any other dependency (sandbox
     // orchestration, isolation, user management) throws if a read path touches it.
-    // `agentLimits` is static configuration the agent routes read when mounted (KOBE-46).
-    const allowed = new Set<PropertyKey>(["database", "auth", "publicUrl", "agentLimits"]);
+    // `agentLimits` is static configuration the agent routes read when mounted (KOBE-46);
+    // `runAgents.pinnedModel` (KOBE-44) reads the agent's model pin in the read's transaction.
+    const allowed = new Set<PropertyKey>([
+      "database",
+      "auth",
+      "publicUrl",
+      "agentLimits",
+      "runAgents",
+    ]);
     const readOnlyDeps = new Proxy(deps, {
       get(target, prop, receiver) {
         if (!allowed.has(prop)) throw new Error(`thread read touched deps.${String(prop)}`);

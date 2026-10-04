@@ -500,6 +500,12 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
             );
             return { transition: applied.transition, active: false };
           }
+          // Already budget-stopping (the sweep re-sends its stop), or the user's own Stop is
+          // pending (an abort is never downgraded to after-step): nothing to add (KOBE-42 review).
+          if (run.budgetStopScope !== null) return undefined;
+          const pending = await tx.execute<{ stop_mode: string | null }>(sql`
+            SELECT stop_mode FROM runs WHERE team_id = ${teamId} AND id = ${run.id}`);
+          if (pending.rows[0]?.stop_mode === "abort") return undefined;
           // Active: finish the current step (D30). The wire converts the settle into budget_stopped.
           await tx.execute(sql`
           UPDATE runs SET budget_stop_scope = ${command.scope}

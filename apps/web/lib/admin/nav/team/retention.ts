@@ -1,4 +1,4 @@
-import { comingIn, defineTeamSection } from "../types";
+import { READY, defineTeamSection } from "../types";
 
 export default defineTeamSection({
   id: "retention",
@@ -7,5 +7,5 @@ export default defineTeamSection({
   group: "Governance",
   order: 10,
   permission: "team.retention.manage",
-  status: comingIn("KOBE-18"),
+  status: READY,
 });

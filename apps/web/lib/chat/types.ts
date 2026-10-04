@@ -23,6 +23,8 @@ export interface ThreadSummary {
   readonly agentId: string | null;
   readonly agentVersion: number | null;
   readonly sharedToProject: boolean;
+  /** The model chosen for the thread (a catalog alias); null = the team's default (KOBE-44). */
+  readonly model?: string | null;
   readonly leafEntryId: string | null;
   readonly lastActivityAt: string;
   readonly createdAt: string;
@@ -69,6 +71,8 @@ export interface ThreadEntry {
 
 export interface ThreadDetail extends ThreadSummary {
   readonly agentCurrentVersion: number | null;
+  /** The model the thread's agent pins (KOBE-44/47); it wins over `model`. Null: no pin. */
+  readonly agentModel?: string | null;
   readonly entries: readonly ThreadEntry[];
   readonly nextEntriesAfter: number | null;
 }

@@ -1,7 +1,10 @@
 "use client";
 
 import { useAui } from "@assistant-ui/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { BudgetStatus } from "../../lib/admin/api/budgets";
+import type { RunUsage } from "../../lib/admin/api/usage";
+import { formatTokens, formatUsd } from "../../lib/admin/usage-format";
 import { isBusy, type ThreadState } from "../../lib/chat/thread-state";
 import type { ThreadController } from "../../lib/chat/thread-controller";
 import { ErrorNotice } from "../admin/error-notice";
@@ -264,12 +267,107 @@ function ActionError({
   );
 }
 
+/** The gateway writes usage within about a second of a call ending (batched). */
+const USAGE_SETTLE_MS = 1_500;
+
+/**
+ * Run details: tokens and spend of the run that just ended (KOBE-43), as the model gateway
+ * measured them. Fetched once per ended run; nothing is shown when the run made no model call.
+ */
+function RunUsageLine({
+  state,
+  controller,
+}: {
+  readonly state: ThreadState;
+  readonly controller: ThreadController;
+}) {
+  const runId = state.live?.terminal ? state.live.runId : undefined;
+  const [usage, setUsage] = useState<RunUsage | null>(null);
+  useEffect(() => {
+    setUsage(null);
+    if (!runId) return;
+    let current = true;
+    const timer = setTimeout(() => {
+      void controller.runUsage(runId).then((res) => {
+        if (current && res.ok && res.data.calls > 0) setUsage(res.data);
+      });
+    }, USAGE_SETTLE_MS);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [runId, controller]);
+  if (!usage || usage.runId !== runId) return null;
+  const cached = usage.cacheReadTokens + usage.cacheWriteTokens;
+  const parts = [
+    `${formatTokens(usage.inputTokens)} input`,
+    ...(cached > 0 ? [`${formatTokens(cached)} cached`] : []),
+    `${formatTokens(usage.outputTokens)} output tokens`,
+    `${usage.calls} model call${usage.calls === 1 ? "" : "s"}`,
+    ...(usage.unpricedCalls < usage.calls ? [formatUsd(usage.costUsd)] : []),
+  ];
+  return (
+    <p className={styles.who} aria-label="Run usage">
+      {parts.join(" · ")}
+      {usage.estimatedCalls > 0 ? " (partly estimated)" : ""}
+    </p>
+  );
+}
+
+const SCOPE_WORDS = { install: "The install's", team: "Your team's", user: "Your" } as const;
+
+/** The budget banner's sentence for the most used budget (KOBE-42, D30 "warn the user"). */
+export function budgetBannerText(status: BudgetStatus): string | null {
+  const line = [...status.lines]
+    .filter((l) => l.state !== "ok")
+    .sort((a, b) => b.percent - a.percent)[0];
+  if (!line) return null;
+  const which = `${SCOPE_WORDS[line.scope]} ${line.period === "month" ? "monthly" : "daily"} ${line.unit === "tokens" ? "token" : "model"} budget`;
+  return line.state === "exhausted"
+    ? `${which} is used up: new messages can't start a run until it is raised or the ${line.period} ends.`
+    : `${which} is ${line.percent} % used.`;
+}
+
+/** Warns at 80 % and says why runs are refused at 100 % (checked on open and after each run). */
+function BudgetBanner({
+  state,
+  controller,
+}: {
+  readonly state: ThreadState;
+  readonly controller: ThreadController;
+}) {
+  const ended = state.live?.terminal ? state.live.runId : "";
+  const [status, setStatus] = useState<BudgetStatus | null>(null);
+  useEffect(() => {
+    let current = true;
+    void controller.budgetStatus().then((res) => {
+      if (current) setStatus(res.ok ? res.data : null);
+    });
+    return () => {
+      current = false;
+    };
+  }, [ended, controller]);
+  const sentence = status ? budgetBannerText(status) : null;
+  if (!sentence || !status) return null;
+  return (
+    <p
+      className={status.state === "exhausted" ? styles.denied : styles.banner}
+      role={status.state === "exhausted" ? "alert" : "status"}
+      aria-label="Budget"
+    >
+      {sentence}
+    </p>
+  );
+}
+
 export function RunPanel({ extras }: { readonly extras: KobeThreadExtras }) {
   const { controller, state } = extras;
   if (!controller) return null;
   return (
     <>
       <RunStatus state={state} controller={controller} />
+      <RunUsageLine state={state} controller={controller} />
+      <BudgetBanner state={state} controller={controller} />
       <Interrupted state={state} controller={controller} />
       <Queue state={state} controller={controller} />
       <ActionError state={state} controller={controller} />

@@ -25,12 +25,17 @@ import { withTeam } from "../with-team.js";
  * - {@link MODELS_RESYNC}: the shim saw Bifrost refuse a virtual key Kobe holds (Bifrost lost its
  *   state); the sync re-pushes everything.
  * - `keys:<team>`: the sync changed virtual keys of that team; shims drop their cached copies.
+ * - `spend:<team>` / `budgets:<team|*>` (KOBE-42): usage written / budgets changed.
  */
 export const MODELS_CHANNEL = "kobe_models";
 export const MODELS_CONFIG_CHANGED = "config";
 export const MODELS_RESYNC = "resync";
 export const MODELS_ENSURE_PREFIX = "ensure:";
 export const MODELS_KEYS_PREFIX = "keys:";
+/** KOBE-42: `spend:<team>` — new usage rows for the team (budget monitor, shims' budget caches). */
+export const MODELS_SPEND_PREFIX = "spend:";
+/** KOBE-42: `budgets:<team>` or `budgets:*` — budgets or rate limits changed. */
+export const MODELS_BUDGETS_PREFIX = "budgets:";
 
 /** HKDF purposes of the two sealing secrets (secret-box.ts). */
 export const PROVIDER_KEY_PURPOSE = "model-provider-key";

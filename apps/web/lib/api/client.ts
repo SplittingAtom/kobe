@@ -54,6 +54,9 @@ const SHOWN_5XX_CODES: ReadonlySet<string> = new Set([
   "search_timeout",
   // KOBE-39: the install has no header-injection secret.
   "header_injection_unavailable",
+  // Model admin (KOBE-40/44): fixed server messages naming the way out.
+  "models_not_configured",
+  "gateway_unavailable",
 ]);
 
 function fallback(status: number): ApiError {

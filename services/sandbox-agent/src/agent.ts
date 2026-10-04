@@ -18,6 +18,7 @@ import { Outbox } from "./wire/outbox.js";
 import type { BackoffPolicy } from "./wire/backoff.js";
 import type { EgressWiring } from "./egress/egress-wiring.js";
 import type { ModelWiring } from "./models/types.js";
+import type { PiIdentities } from "./pi/identities.js";
 
 /**
  * kobe-sandbox-agent: glues the outbound wire (WireClient), per-run delivery (Outbox), the Pi
@@ -45,6 +46,8 @@ export interface AgentDeps {
   readonly models?: ModelWiring | undefined;
   /** Egress for Pi's tools (KOBE-39); absent outside Kobe's pods. */
   readonly egress?: EgressWiring | undefined;
+  /** Pi identities (KOBE-71); absent: Pi runs as the agent's uid. */
+  readonly identities?: PiIdentities | undefined;
   /** Workspace sync (KOBE-27): restore before runs, push after them and before stopping. */
   readonly workspace?: WorkspaceHooks;
 }
@@ -101,6 +104,7 @@ export class Agent {
       workspaceDir: config.workspaceDir,
       sessionDir: config.sessionDir,
       home: deps.home,
+      identities: deps.identities,
       parentEnv: deps.parentEnv,
       maxProcesses: config.maxPiProcesses,
       idleMs: config.piIdleMs,

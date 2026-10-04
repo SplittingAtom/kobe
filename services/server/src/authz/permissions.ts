@@ -29,6 +29,10 @@ export const INSTALL_PERMISSIONS = {
   "install.retention.manage": "admin",
   "install.legal_hold.manage": "admin",
   "install.audit.read": "admin",
+  // Usage and spend across every team (KOBE-43, D30): counts and costs, never team content.
+  "install.usage.read": "admin",
+  // The install budget and default per-user request rate (KOBE-42, D30).
+  "install.budgets.manage": "admin",
   "install.break_glass.request": "admin",
   // D10: a second Admin or the Owner approves (enforced again by the database trigger).
   "install.break_glass.approve": "admin",

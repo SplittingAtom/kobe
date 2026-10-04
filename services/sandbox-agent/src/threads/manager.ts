@@ -231,11 +231,18 @@ export class ThreadManager {
       if (thread.runId !== undefined) return fail("pi_rejected", "thread has an active run");
       if (frame.part === 0) {
         await thread.stopProcess();
-        await ensureSessionDir(this.#options.sessionDir);
+        await ensureSessionDir(this.#options.sessionDir, {
+          shared: this.#options.identities !== undefined,
+          workspaceDir: this.#options.workspaceDir,
+        });
         await this.#restores.get(thread.id)?.abort();
         this.#restores.set(
           thread.id,
-          new SessionRestore(this.#sessionFile(thread.id), this.#options.restoreMaxBytes),
+          new SessionRestore(
+            this.#sessionFile(thread.id),
+            this.#options.restoreMaxBytes,
+            this.#options.workspaceDir,
+          ),
         );
         thread.restoring = true;
       }
@@ -385,6 +392,8 @@ export class ThreadManager {
         this.#sessionFile(thread.id),
         frame.parent_entry_id,
         frame.run_id,
+        new Date(),
+        this.#options.workspaceDir,
       );
       if (!branch.ok) return fail("pi_rejected", branch.message);
     }

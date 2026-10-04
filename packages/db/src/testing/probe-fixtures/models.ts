@@ -3,6 +3,8 @@ import {
   modelCatalog,
   modelGatewayKeys,
   modelProviders,
+  runUsage,
+  teamBudgets,
   teamModels,
   users,
 } from "../../schema/index.js";
@@ -37,5 +39,42 @@ export const modelsFixtures: Record<(typeof models.team)[number], ProbeFixture> 
     await tx
       .insert(modelGatewayKeys)
       .values({ teamId, userId, vkId: randomUUID(), vkValueEnc: "v1.probe" });
+  },
+  run_usage: async (tx, teamId) => {
+    const userId = randomUUID();
+    await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
+    await tx.insert(runUsage).values({
+      teamId,
+      userId,
+      sandboxId: randomUUID(),
+      route: "openai",
+      model: "probe/probe-model",
+      status: 200,
+      inputTokens: 5,
+      outputTokens: 3,
+      usageSource: "reported",
+      durationMs: 10,
+    });
+  },
+  team_budgets: async (tx, teamId) => {
+    const userId = randomUUID();
+    await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
+    await tx.insert(teamBudgets).values({ teamId, monthlyUsd: 100, updatedBy: userId });
+  },
+  // Kept by the run_usage trigger only (guarded): a usage row makes the counter row.
+  model_spend_daily: async (tx, teamId) => {
+    const userId = randomUUID();
+    await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
+    await tx.insert(runUsage).values({
+      teamId,
+      userId,
+      sandboxId: randomUUID(),
+      route: "openai",
+      model: "probe/probe-model",
+      status: 200,
+      inputTokens: 1,
+      usageSource: "reported",
+      durationMs: 1,
+    });
   },
 };

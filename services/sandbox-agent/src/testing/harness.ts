@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,7 @@ import { loadConfig } from "../config.js";
 import { FakeServer, type FakeServerOptions } from "./fake-server.js";
 import type { EgressWiring } from "../egress/egress-wiring.js";
 import type { ModelWiring } from "../models/types.js";
+import type { PiIdentities } from "../pi/identities.js";
 
 export const FAKE_PI = fileURLToPath(new URL("./fake-pi.mjs", import.meta.url));
 export const TOKEN = "test-wire-token-0123456789";
@@ -46,6 +47,13 @@ export interface HarnessOptions {
   /** Egress wiring for Pi's tools (KOBE-39); absent = none, as before. */
   readonly egress?: EgressWiring;
   readonly workspace?: (workspaceDir: string) => WorkspaceHooks;
+  /**
+   * Pi identities (KOBE-71): Pi runs under them, so the test directories are opened up the way
+   * the pod's volumes are (traversable; the workspace group-writable and setgid), the token file
+   * stays the agent's own, and runtime dirs go to `runtimeDir` if given (another filesystem).
+   */
+  readonly identities?: PiIdentities;
+  readonly runtimeDir?: string;
 }
 
 /** The fake Pi ignores the file; it plays kobe-policy's handshake itself (see fake-pi.mjs). */
@@ -58,7 +66,11 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   const sessions = path.join(workspace, ".kobe", "sessions");
   await mkdir(workspace, { recursive: true });
   const tokenFile = path.join(dir, "token");
-  await writeFile(tokenFile, `${TOKEN}\n`);
+  await writeFile(tokenFile, `${TOKEN}\n`, { mode: 0o600 });
+  if (options.identities !== undefined) {
+    await chmod(dir, 0o755);
+    await chmod(workspace, 0o2775);
+  }
   const config = loadConfig({
     KOBE_SERVER_URL: server.url,
     KOBE_SANDBOX_ID: SANDBOX_ID,
@@ -67,7 +79,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     KOBE_SESSION_DIR: sessions,
     KOBE_PI_BIN: options.piBin ?? FAKE_PI,
     // Each Pi gets a private directory under here (its PI_CODING_AGENT_DIR and model file).
-    KOBE_PI_RUNTIME_DIR: path.join(dir, "pi-runtime"),
+    KOBE_PI_RUNTIME_DIR: options.runtimeDir ?? path.join(dir, "pi-runtime"),
     KOBE_POLICY_EXTENSION: FAKE_POLICY_EXTENSION,
     ...options.env,
   });
@@ -88,6 +100,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     ...(options.extensions === undefined ? {} : { extensions: options.extensions }),
     ...(options.models === undefined ? {} : { models: options.models }),
     ...(options.egress === undefined ? {} : { egress: options.egress }),
+    ...(options.identities === undefined ? {} : { identities: options.identities }),
     ...(options.workspace === undefined ? {} : { workspace: options.workspace(workspace) }),
     ...(options.policyReadyTimeoutMs === undefined
       ? {}

@@ -1,8 +1,9 @@
 import inspector from "node:inspector";
 
 /**
- * The agent holds the wire token and decides what reaches the server, and model-run code in the
- * sandbox runs as the same uid. Node opens an inspector (arbitrary code execution) on SIGUSR1, or
+ * The agent holds the wire token and decides what reaches the server. Model-run code runs under
+ * Pi identities (KOBE-71) and cannot signal the agent at all; without them (development) it runs
+ * as the same uid, and Pi itself is a Node process its own tools can signal. Node opens an inspector (arbitrary code execution) on SIGUSR1, or
  * when started with `--inspect*` (also via NODE_OPTIONS). The image runs `node --disable-sigusr1`;
  * this is the in-process belt to that brace: a SIGUSR1 listener replaces Node's default
  * inspector-activating handler, and the agent refuses to run with an inspector configured.

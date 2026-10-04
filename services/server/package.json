@@ -29,6 +29,7 @@
     "@kubernetes/client-node": "^2.0.0",
     "@simplewebauthn/server": "~13.3.3",
     "better-auth": "1.7.7",
+    "fflate": "^0.8.3",
     "hono": "^4.13.12",
     "nodemailer": "^10.0.13",
     "pg": "^8.23.1",
@@ -38,7 +39,7 @@
   },
   "devDependencies": {
     "@kobe/mcp-proxy": "workspace:*",
-    "@levischuck/tiny-cbor": "^0.2.11",
+    "@levischuck/tiny-cbor": "^0.3.6",
     "@types/pg": "^8.23.1",
     "@types/ws": "^8.18.2"
   }

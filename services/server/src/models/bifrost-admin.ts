@@ -10,6 +10,12 @@
 export interface ObservedKey {
   readonly id: string;
   readonly name: string;
+  /**
+   * Bifrost's model discovery for the key (`success`, `list_models_failed`), with its own
+   * description of a failure (provider text: never shown; see `failureReason`).
+   */
+  readonly status?: string | undefined;
+  readonly description?: string | undefined;
 }
 
 export interface ObservedProvider {
@@ -42,6 +48,8 @@ export interface ObservedVirtualKey {
   readonly models: Readonly<Record<string, readonly string[]>>;
   /** Every provider config may use every key of its provider. */
   readonly allKeys: boolean;
+  /** Its request rate limit per minute (KOBE-42), when it has one. */
+  readonly requestsPerMinute: number | undefined;
 }
 
 /** Budgets and rate limits Bifrost enforces (KOBE-42 fills these; KOBE-40 sends none). */
@@ -92,7 +100,18 @@ export interface BifrostAdmin {
   addVirtualKey(spec: VirtualKeySpec): Promise<{ id: string; value: string }>;
   updateVirtualKey(id: string, spec: VirtualKeySpec): Promise<void>;
   deleteVirtualKey(id: string): Promise<void>;
+  /**
+   * The models Bifrost knows for a provider (KOBE-44 model picker): what its list-models call
+   * found with the provider's key, plus Bifrost's datasheet. Read from Bifrost's cache: no
+   * provider call, and never a key.
+   */
+  listModels(provider: string): Promise<string[]>;
+  /** Asks Bifrost to call the provider's list-models API now (uses the provider's key). */
+  refreshModels(provider: string): Promise<void>;
 }
+
+/** Upper bound on models read per provider (a picker, not an inventory). */
+export const MAX_LISTED_MODELS = 1000;
 
 export class BifrostAdminError extends Error {
   constructor(
@@ -169,6 +188,14 @@ const vkBody = (spec: VirtualKeySpec): Json => ({
   ...limitsBody(spec.limits),
 });
 
+/** A rate limit's requests per minute, or undefined when it has none of that shape. */
+function perMinute(value: unknown): number | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const rl = value as Record<string, unknown>;
+  const max = rl.request_max_limit;
+  return typeof max === "number" && rl.request_reset_duration === "1m" ? max : undefined;
+}
+
 export function createHttpBifrostAdmin(options: HttpBifrostAdminOptions): BifrostAdmin {
   const base = options.baseUrl.replace(/\/+$/, "");
   const auth = `Bearer ${Buffer.from(`${options.username}:${options.password}`).toString("base64")}`;
@@ -222,7 +249,12 @@ export function createHttpBifrostAdmin(options: HttpBifrostAdminOptions): Bifros
     },
     async listKeys(provider) {
       const res = await call("GET", `/api/providers/${enc(provider)}/keys`);
-      return list(res.keys).map((k) => ({ id: str(k.id) ?? "", name: str(k.name) ?? "" }));
+      return list(res.keys).map((k) => ({
+        id: str(k.id) ?? "",
+        name: str(k.name) ?? "",
+        status: str(k.status),
+        description: str(k.description),
+      }));
     },
     async addProvider(spec) {
       await call("POST", "/api/providers", { provider: spec.name, ...providerBody(spec) });
@@ -301,6 +333,7 @@ export function createHttpBifrostAdmin(options: HttpBifrostAdminOptions): Bifros
           teamId: str(v.team_id),
           models,
           allKeys: configs.every((pc) => pc.allow_all_keys === true),
+          requestsPerMinute: perMinute(v.rate_limit),
         };
       });
     },
@@ -314,6 +347,19 @@ export function createHttpBifrostAdmin(options: HttpBifrostAdminOptions): Bifros
     },
     async updateVirtualKey(id, spec) {
       await call("PUT", `/api/governance/virtual-keys/${enc(id)}`, vkBody(spec));
+    },
+    async listModels(provider) {
+      const res = await call(
+        "GET",
+        `/api/models?provider=${enc(provider)}&limit=${MAX_LISTED_MODELS}`,
+      );
+      return list(res.models).flatMap((m) => {
+        const name = str(m.name);
+        return name === undefined ? [] : [name];
+      });
+    },
+    async refreshModels(provider) {
+      await call("POST", `/api/providers/${enc(provider)}/refresh-models`);
     },
     async deleteVirtualKey(id) {
       await call("DELETE", `/api/governance/virtual-keys/${enc(id)}`);

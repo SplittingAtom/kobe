@@ -92,6 +92,12 @@ export class ThreadController {
 
   readonly getState = (): ThreadState => this.#state;
 
+  /** A run's token usage and spend (KOBE-43; run details). */
+  readonly runUsage = (runId: string) => this.#api.runUsage(runId);
+
+  /** The member's budget status (KOBE-42; the chat's warning banner). */
+  readonly budgetStatus = () => this.#api.budgetStatus();
+
   #set(change: (state: ThreadState) => ThreadState): void {
     if (this.#disposed) return;
     const next = change(this.#state);
@@ -150,6 +156,7 @@ export class ThreadController {
       entries: firstPage,
       nextEntriesAfter,
       agentCurrentVersion: _v,
+      agentModel,
       ...summary
     } = detail.data;
     const entries = await this.#readMoreEntries(threadId, firstPage, nextEntriesAfter);
@@ -159,6 +166,7 @@ export class ThreadController {
       phase: "ready",
       loadError: undefined,
       summary,
+      agentModel: agentModel ?? null,
       entries: mergeServerEntries(s.entries, entries),
       serverSeq: maxSeq(entries, s.serverSeq),
     }));
@@ -268,12 +276,14 @@ export class ThreadController {
       entries: firstPage,
       nextEntriesAfter,
       agentCurrentVersion: _v,
+      agentModel,
       ...summary
     } = detail.data;
     const incoming = await this.#readMoreEntries(threadId, firstPage, nextEntriesAfter);
     if (this.#disposed) return;
     this.#set((s) => ({
       ...s,
+      agentModel: agentModel ?? null,
       // A branch chosen while this read was on its way wins over the leaf it read.
       summary:
         leafVersion === this.#leafVersion || !s.summary
@@ -600,6 +610,23 @@ export class ThreadController {
     this.#announce(announcement);
     await this.refresh();
   }
+
+  /**
+   * Chooses the thread's model for its next runs (KOBE-44): an alias the team enabled, or null for
+   * the team's default. The server refuses one the team didn't enable (`model_not_enabled`).
+   */
+  readonly setModel = async (model: string | null): Promise<boolean> => {
+    const threadId = this.#state.threadId;
+    if (threadId === null) return false;
+    const res = await this.#busy("model", () => this.#api.setThreadModel(threadId, model));
+    if (!res.ok) {
+      this.#fail(res.error);
+      return false;
+    }
+    this.#set((s) => ({ ...s, summary: res.data }));
+    this.#announce(model === null ? "The team's default model is used." : "Model changed.");
+    return true;
+  };
 
   /** Shows another branch (assistant-ui's branch picker) and makes it the thread's leaf. */
   readonly switchLeaf = async (entryId: string): Promise<void> => {

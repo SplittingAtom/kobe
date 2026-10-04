@@ -1,10 +1,22 @@
-import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   PI_OWN_FILES,
+  ensureRuntimeRoot,
   piModelsStoreText,
+  removeRuntimeDir,
   sweepRuntimeDir,
   unexpectedEntries,
 } from "./runtime-dir.js";
@@ -134,5 +146,48 @@ describe("runtime directory tripwire", () => {
     // A missing root is created (0700).
     expect(await sweepRuntimeDir(path.join(dir, "fresh"))).toBe(0);
     expect(await readdir(path.join(dir, "fresh"))).toEqual([]);
+  });
+});
+
+describe("runtime root and removal (KOBE-71)", () => {
+  it("is the agent's own directory: 0711 under Pi identities (reach, never list), else 0700", async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "kobe-runtime-"));
+    const root = path.join(dir, "kobe-pi");
+    await ensureRuntimeRoot(root, true);
+    expect((await stat(root)).mode & 0o777).toBe(0o711);
+    await ensureRuntimeRoot(root, false);
+    expect((await stat(root)).mode & 0o777).toBe(0o700);
+  });
+
+  it("refuses a root that is not a real directory (planted link)", async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "kobe-runtime-"));
+    await mkdir(path.join(dir, "elsewhere"));
+    await symlink(path.join(dir, "elsewhere"), path.join(dir, "kobe-pi"));
+    await expect(ensureRuntimeRoot(path.join(dir, "kobe-pi"), true)).rejects.toThrow(
+      /not the agent's own directory/,
+    );
+  });
+
+  it("under Pi identities, refuses a root anyone can rename (a non-sticky shared parent)", async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "kobe-runtime-"));
+    const shared = path.join(dir, "shared");
+    await mkdir(shared);
+    await chmod(shared, 0o777);
+    await expect(ensureRuntimeRoot(path.join(shared, "kobe-pi"), true)).rejects.toThrow(
+      /lets other users rename/,
+    );
+    // Sticky, like /tmp or a memory-backed emptyDir: the agent's entries are its own.
+    await chmod(shared, 0o1777);
+    await expect(ensureRuntimeRoot(path.join(shared, "kobe-pi"), true)).resolves.toBeUndefined();
+    // Without identities only the agent uses it: no such requirement.
+    await chmod(shared, 0o777);
+    await expect(ensureRuntimeRoot(path.join(shared, "kobe-pi"), false)).resolves.toBeUndefined();
+  });
+
+  it("removes a runtime directory with everything in it", async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "kobe-runtime-"));
+    const runtime = await processDir(dir);
+    await removeRuntimeDir(runtime);
+    await expect(lstat(runtime)).rejects.toThrow();
   });
 });

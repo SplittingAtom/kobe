@@ -209,6 +209,16 @@ describe("payload id and input rules", () => {
     expect(parseEventPayload("run.started", payload)).toEqual(payload);
   });
 
+  it("says where run.started's model came from (KOBE-44), from a closed set", () => {
+    const base = { ...EVENT_PAYLOAD_EXAMPLES["run.started"], model: "smart" };
+    for (const model_source of ["agent", "thread", "default"]) {
+      expect(parseEventPayload("run.started", { ...base, model_source })).toMatchObject({
+        model_source,
+      });
+    }
+    expect(() => parseEventPayload("run.started", { ...base, model_source: "user" })).toThrow();
+  });
+
   it("requires uuids for Kobe ids", () => {
     const payload = { ...EVENT_PAYLOAD_EXAMPLES["run.queued"], thread_id: "thr_1" };
     expect(() => parseEventPayload("run.queued", payload)).toThrow();

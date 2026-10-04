@@ -1,0 +1,88 @@
+/* Usage dashboards (KOBE-43): stat tiles and a one-series bar chart in the console's tokens. */
+
+.tiles {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 0.75rem;
+}
+
+.tile {
+  padding: 0.75rem;
+  border: 1px solid var(--admin-border);
+  border-radius: 0.5rem;
+}
+
+.tileValue {
+  display: block;
+  font-size: 1.5rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.tileLabel {
+  color: var(--admin-muted);
+  font-size: 0.85em;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+
+.controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.figure {
+  margin: 1rem 0;
+}
+
+.chart {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.bar {
+  fill: var(--admin-accent);
+}
+
+.hit {
+  fill: transparent;
+}
+
+.hit:hover + .bar {
+  opacity: 0.8;
+}
+
+.axis {
+  stroke: var(--admin-border);
+  stroke-width: 1;
+}
+
+.tick {
+  fill: var(--admin-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.caption {
+  color: var(--admin-muted);
+  font-size: 0.85em;
+}
+
+.num {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.section {
+  margin-top: 1.5rem;
+}

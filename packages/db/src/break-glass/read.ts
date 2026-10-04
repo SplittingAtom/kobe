@@ -86,6 +86,7 @@ export interface BreakGlassThread {
   readonly agentId: string | null;
   readonly agentVersion: number | null;
   readonly sharedToProject: boolean;
+  readonly modelAlias: string | null;
   readonly leafEntryId: string | null;
   readonly lastActivityAt: Date;
   readonly createdAt: Date;
@@ -177,6 +178,7 @@ const threadColumns = {
   agentId: threads.agentId,
   agentVersion: threads.agentVersion,
   sharedToProject: threads.sharedToProject,
+  modelAlias: threads.modelAlias,
   leafEntryId: threads.leafEntryId,
   lastActivityAt: threads.lastActivityAt,
   createdAt: threads.createdAt,

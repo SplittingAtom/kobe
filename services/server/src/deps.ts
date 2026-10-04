@@ -25,6 +25,7 @@ import { STREAM_DEFAULTS, type StreamTimings } from "./event-stream/stream.js";
 import { DEFAULT_VERSION_LIMITS } from "./agents/versions.js";
 import type { Mailer } from "./mail/mailer.js";
 import type { RateLimitRule } from "./rate-limit.js";
+import type { ModelDiscovery } from "./models/discovery.js";
 import {
   createDbRunContextSource,
   createSandboxWire,
@@ -37,6 +38,7 @@ import {
   type RunOrchestratorOptions,
   type ServerRunOrchestrator,
 } from "./runs/index.js";
+import type { RunAgentResolver } from "./runs/seams.js";
 import { UserLifecycle } from "./users/lifecycle.js";
 import { approvalVerifierForMcp } from "./mcp/approvals.js";
 import { createDbMcpCatalog } from "./mcp/catalog.js";
@@ -45,6 +47,9 @@ import { createPolicyEngine } from "./policy/engine.js";
 import { createToolRegistry } from "./policy/registry.js";
 import { createDbRuleSource, createDbSettingsSource } from "./policy/rule-store.js";
 import { logger } from "./logger.js";
+import { BudgetMonitor } from "./budgets/monitor.js";
+import { DB_RUN_BUDGET_GATE } from "./budgets/run-gate.js";
+import type { BlobStore } from "./retention/blobs.js";
 
 export interface ServerDepsOptions {
   readonly databaseUrl: string;
@@ -79,6 +84,8 @@ export interface ServerDepsOptions {
   readonly models?: {
     readonly providerKeySecrets: readonly string[];
     readonly allowUnsafeEndpoints?: boolean;
+    /** Bifrost's model listing for the catalog editor (KOBE-44); unset: no model picker. */
+    readonly discovery?: ModelDiscovery;
   };
   /**
    * The install's approval HMAC key (KOBE-37, config `KOBE_APPROVAL_KEY`); without it, tool calls
@@ -92,6 +99,11 @@ export interface ServerDepsOptions {
    * header values (current first); unset = header injection off.
    */
   readonly egressHeaderSecrets?: readonly string[];
+  /**
+   * Object storage (`s3.*`, KOBE-27) for thread blobs: export reads offloaded entries, retention
+   * deletes released keys (KOBE-18). Unset: nothing is read or deleted from a bucket.
+   */
+  readonly blobs?: BlobStore;
 }
 
 /** Limits on publishing agent versions (KOBE-46 review M3). */
@@ -143,9 +155,16 @@ export interface ServerDeps {
    * `sandboxWire.router`; the wire calls back when it ends a run.
    */
   readonly runs: ServerRunOrchestrator;
+  /** The run orchestrator's agent resolver (KOBE-44: the thread API asks it for the agent's model pin). */
+  readonly runAgents: RunAgentResolver;
   /** Model gateway admin (KOBE-40): seals provider API keys; undefined when not configured. */
   readonly models:
-    { readonly providerKeys: SecretBox; readonly allowUnsafeEndpoints: boolean } | undefined;
+    | {
+        readonly providerKeys: SecretBox;
+        readonly allowUnsafeEndpoints: boolean;
+        readonly discovery: ModelDiscovery | undefined;
+      }
+    | undefined;
   /**
    * The MCP proxy's policy re-check (KOBE-58): exposed tools and a decision per call, served on
    * the internal listener only (`routes/internal.ts`).
@@ -158,6 +177,13 @@ export interface ServerDeps {
   readonly approvals: ApprovalService;
   /** Seals team-injected egress header values (KOBE-39); undefined when not configured. */
   readonly egressHeaders: SecretBox | undefined;
+  /**
+   * Budgets (KOBE-42, D30): watches spend, records and emails warnings, budget-stops runs.
+   * `index.ts` starts it (LISTEN + sweep); tests call `evaluate()` / `sweep()` directly.
+   */
+  readonly budgets: BudgetMonitor;
+  /** Object storage for thread blobs (KOBE-18 export and retention); undefined when not set. */
+  readonly blobs: BlobStore | undefined;
   /** Creates an email+password user (and optional install role) atomically, without sign-up. */
   createUserWithPassword(
     input: NewUser,
@@ -240,9 +266,11 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     db: database.db,
     databaseUrl: options.databaseUrl,
   });
+  const runAgents = options.runs?.agents ?? PINNED_AGENTS;
   const runs: ServerRunOrchestrator = new DbRunOrchestrator({
     ...options.runs,
-    agents: options.runs?.agents ?? PINNED_AGENTS,
+    agents: runAgents,
+    budget: options.runs?.budget ?? DB_RUN_BUDGET_GATE,
     db: database.db,
     router: sandboxWire.router,
   });
@@ -259,6 +287,14 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     approvals: approvalVerifierForMcp(database.db, approvals.verifier),
     ...(options.mcp?.now ? { now: options.mcp.now } : {}),
   });
+  const budgets = new BudgetMonitor({
+    db: database.db,
+    connectionString: options.databaseUrl,
+    runs,
+    mailer: options.mailer,
+    publicUrl: new URL(options.publicUrl).origin,
+    logger: logger.child({ component: "budgets" }),
+  });
   const lifecycle = new UserLifecycle();
   // A deactivated user's sandboxes lose their connections on every replica at once (KOBE-13).
   lifecycle.on("deactivated", {
@@ -272,6 +308,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
       ? {
           providerKeys: new SecretBox(options.models.providerKeySecrets, PROVIDER_KEY_PURPOSE),
           allowUnsafeEndpoints: options.models.allowUnsafeEndpoints ?? false,
+          discovery: options.models.discovery,
         }
       : undefined,
     auth,
@@ -285,9 +322,12 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     lifecycle,
     sandboxWire,
     runs,
+    runAgents,
     mcp,
     approvals,
     egressHeaders: options.egressHeaderSecrets ? headerBox(options.egressHeaderSecrets) : undefined,
+    budgets,
+    blobs: options.blobs,
     async createUserWithPassword({ email, name, password }, { installRole, recordSetup } = {}) {
       const ctx = await auth.$context;
       const hash = await ctx.password.hash(password);
@@ -325,6 +365,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     },
     async close() {
       approvals.stop();
+      await budgets.close();
       runs.close();
       await sandboxWire.close();
       await approvals.broker.close();
