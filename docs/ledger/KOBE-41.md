@@ -1,6 +1,7 @@
 # KOBE-41: Pi model wiring in sandboxes
 
-- **Status:** in progress
+- **Status:** in review (PR #54; CI green: checks, db, images, sandbox-image; k3d e2e run
+  37164920766 green via `workflow_dispatch` — the e2e workflow triggers only for PRs onto `main`)
 - **Branch / worktree:** `kobe-41-pi-models` in `../Kobe-wt41` (based on `kobe-40-bifrost`, PR #51)
 - **Depends on:** KOBE-40 (Bifrost + model gateway shim, PR #51), KOBE-23 (sandbox agent),
   KOBE-24/25/30/32 (merged)
@@ -188,6 +189,24 @@ code with a server message (`pi_rejected`, `pi_unavailable` added to the table).
 5. LOW (kept, open question 1): a pinned alias the team did not enable falls back to the default;
    a restart (`restartPlanInTx`) re-resolves the model rather than reusing `run.started.model`.
 
+## Cold start on k3d (D14)
+
+Gate 1's criterion (p95 ≤ 8 s) passes with ≈ 2.4 s to spare; D14's p50 ≤ 3 s is missed (4.7 s),
+as KOBE-25 predicted: Pi ready alone is ≈ 3.3–3.5 s on CI (pod start + agent + session trade +
+Pi/jiti start), and the model path adds ≈ 1.2 s (kobe-models load, the first `get_entries`,
+the shim's first principal load, Bifrost → upstream). The model is selected without a Pi
+restart, so nothing in KOBE-41 adds a second Pi start. Real-cluster numbers are still due
+(KOBE-25's Longhorn note).
+
+## e2e rounds (k3d, `workflow_dispatch` on the branch)
+
+1. The story's `chat()` helper shadowed KOBE-40's `chat` (the later revoked-token check broke):
+   renamed `chat_run`.
+2. The attribution check read one shim pod's log; the shim has 2 replicas: logs by label.
+3. Gate 1 ran with the fake upstream gone: run.sh deletes `kobe-e2e-llm` on exit (`--wait=false`)
+   and gate1 found the Service in a terminating namespace. `ensure_fake_llm` now waits the
+   namespace out and checks the pod is Running; failed chats print the shim's refusals.
+
 ## Open questions (for Chris or the coordinator)
 
 1. An agent whose pinned alias is not enabled for the team falls back to the team default
@@ -205,6 +224,6 @@ code with a server message (`pi_rejected`, `pi_unavailable` added to the table).
 | ac-4 attribution        | real Pi test: shim `calls[].runId` = the run for every call; `provider.test.ts` header set/cleared; e2e "the shim attributed the model call to the run (x-kobe-run-id from Pi)"                                                                                                                                                                                                 |
 | ac-5 errors             | `errors.test.ts`; `provider.test.ts` (Retry-After waits, budget, 401 re-read, 403 fast fail, abort); real Pi: 403 → `model_not_enabled`, 503 + Retry-After waited out; server `translate.test.ts`, wire ingest "fails the run with the server's message", `runs-model.db.test.ts` (queue advances after a failed model call; `model_not_configured` text); e2e no-model story   |
 | ac-6 tests              | unit: protocol 398, sandbox-agent 304 (+2 skipped), server 656, model-gateway 34; db: db 441, server 518, model-gateway 4; real-Pi suites run locally and in CI (`checks` installs the pinned Pi)                                                                                                                                                                               |
-| ac-7 Gate 1             | `e2e/gate1.sh` cold step: first `text.delta` required when the install has a model (`hibernated-to-first-token`); numbers from the CI k3d job below                                                                                                                                                                                                                             |
+| ac-7 Gate 1             | `e2e/gate1.sh` cold step, k3d run 37164920766: **hibernated → first token p50 4703 ms, p95 5590 ms** (20 trials, min 4266, max 5686; `hibernated-to-first-token`, pass p95 ≤ 8000); chat-real: all 10 users got a streamed model answer; the interrupt retry's woken sandbox got one too. e2e KOBE-41 story: first token 3607–3926 ms from POST on a suspended sandbox          |
 | no secrets in sandboxes | `pi-launch.test.ts` env allow-list; `agent.models.test.ts` (`KOBE_` vars in Pi's env: `KOBE_MODEL_FILE`, `KOBE_POLICY_FD` only); `state-file.test.ts` (file path removed from the env); e2e "no session token (JWT) reached the upstream"                                                                                                                                       |
 | local checks            | `pnpm build typecheck format:check license:check` ok; `pnpm lint` ok except `@kobe/chart` (Helm 4, pre-existing); `pnpm test --concurrency=2` 18/18; `test:db` db/server/model-gateway ok; `db:check` no changes; `scripts/check-public-hygiene.sh` ok                                                                                                                          |
