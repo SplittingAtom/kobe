@@ -42,9 +42,12 @@ No migrations.
 
 ## Open questions (for Chris or the coordinator)
 
-- The `openai-api/<provider id>/<model>` form for OpenAI-compatible endpoints follows Inspect's
-  naming but is untested against a running Orbit; the eval Job (KOBE-92+) will confirm it.
-- Should the endpoint also exist on the install gallery router (needs a team to pick models)?
+- Open point: the `openai-api/<provider id>/<model>` form for OpenAI-compatible endpoints follows
+  Inspect's naming but is untested against a running Orbit. Coordinator: keep it; KOBE-92's eval
+  image will exercise it.
+- Answered: no export on the install gallery router; gallery agents export from a team context.
+- Follow-up: once KOBE-86 (#75) merges, merge origin/main and add `OrbitExportButton` to the
+  inventory rows (same permission check).
 
 ## Evidence (acceptance criteria -> test or command output)
 
