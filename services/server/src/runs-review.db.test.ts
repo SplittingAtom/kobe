@@ -476,7 +476,35 @@ describe("pinned agent at run start (KOBE-46)", () => {
     const next = await f.message(w.owner, threadId, "again");
     expect(await f.status(w.team, next)).toBe("failed");
     expect((await f.events(w.team, next)).at(-1)?.payload).toMatchObject({
-      error: { code: "agent_unavailable" },
+      error: { code: "agent_suspended", message: expect.stringContaining("suspended") },
+    });
+  });
+
+  it("refuses runs of a personal agent the team suspended (KOBE-86)", async () => {
+    const w = await f.world();
+    const ws = await f.connect(w);
+    const b = f.on(0, w.owner);
+    const created = await b.post("/v1/agents", {
+      scope: "personal",
+      frontmatter: { name: "Mine" },
+      prompt: "v1",
+    });
+    const agentId = created.json.agent.id as string;
+    await b.request("POST", `/v1/agents/${agentId}/publish`, {}, { "if-match": "*" });
+    const thread = await b.post("/v1/threads", { agent_id: agentId });
+    const threadId = thread.json.thread_id as string;
+    const first = await f.message(w.owner, threadId, "hi");
+    ws.reply(await ws.started(first), "ok");
+    await f.until(w.team, first, "completed");
+    await f.fx.admin.query(
+      `INSERT INTO team_agent_suspensions (team_id, agent_id, agent_scope, suspended_by)
+       VALUES ($1, $2, 'personal', $3)`,
+      [w.team, agentId, w.owner.id],
+    );
+    const next = await f.message(w.owner, threadId, "again");
+    expect(await f.status(w.team, next)).toBe("failed");
+    expect((await f.events(w.team, next)).at(-1)?.payload).toMatchObject({
+      error: { code: "agent_suspended" },
     });
   });
 });

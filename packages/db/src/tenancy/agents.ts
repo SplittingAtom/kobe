@@ -2,7 +2,13 @@ import { ALL_PRIVILEGES, defineDomain } from "./types.js";
 
 /** Agents, Skills, Gallery & Orbit (KOBE-45–52). */
 export const agents = defineDomain({
-  team: ["team_agents", "team_agent_versions", "team_skills", "team_skill_versions"],
+  team: [
+    "team_agents",
+    "team_agent_versions",
+    "team_skills",
+    "team_skill_versions",
+    "team_agent_suspensions",
+  ],
   installWide: [
     "skill_blocklist",
     "install_agents",

@@ -8,6 +8,8 @@ import type { ErrorInfo } from "@kobe/protocol";
 export const FAILURE_MESSAGES: Readonly<Record<string, string>> = {
   account_inactive: "The run could not start: the account is deactivated or no longer in the team.",
   agent_unavailable: "The run could not start: the thread's agent version is not available.",
+  agent_suspended:
+    "This agent is suspended, so it can't start new runs. Ask your team admin to reactivate it, or start a conversation with another agent.",
   timeout: "Your workspace did not answer in time, so the run could not start.",
   thread_not_found: "The run could not start: the thread is not available to the workspace.",
   start_lost: "The run could not start: the server that started it stopped. Send it again.",

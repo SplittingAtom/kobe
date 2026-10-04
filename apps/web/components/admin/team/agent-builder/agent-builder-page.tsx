@@ -158,6 +158,12 @@ function Builder({
       {agent?.archivedAt && (
         <p className={adminStyles.banner}>This agent is archived, so it can&apos;t be changed.</p>
       )}
+      {agent?.status === "suspended" && (
+        <p className={adminStyles.banner}>
+          This agent is suspended by a team admin, so it can&apos;t start new runs. You can still
+          edit and publish it.
+        </p>
+      )}
       {attempted && problemCount > 0 && (
         <div role="alert" className={adminStyles.error}>
           <p>
