@@ -42,11 +42,25 @@ describe("OmissionNotice (KOBE-77)", () => {
       "not_team_enabled",
       "not_user_connected",
       "no_team_default",
+      "not_approved",
     ] as const;
     for (const kind of ["skill", "connector", "model"] as const) {
       for (const reason of reasons) {
         expect(omissionText({ kind, name: "x", reason }).length).toBeGreaterThan(5);
       }
     }
+  });
+
+  it("renders a reason it does not know generically", () => {
+    const item = { kind: "skill", name: "x", reason: "from_the_future" } as unknown as Parameters<
+      typeof omissionText
+    >[0];
+    expect(omissionText(item)).toBe("Skill x: it was left out of this run");
+  });
+
+  it("explains not_approved", () => {
+    expect(omissionText({ kind: "skill", name: "sql", reason: "not_approved" })).toBe(
+      "Skill sql: it is not available or approved in this team",
+    );
   });
 });

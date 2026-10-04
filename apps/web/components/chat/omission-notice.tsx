@@ -17,11 +17,14 @@ const REASON_TEXT: Readonly<Record<Item["reason"], string>> = {
   not_team_enabled: "it is not enabled for your team",
   not_user_connected: "you have not connected it yet",
   no_team_default: "your team has no default model",
+  not_approved: "it is not available or approved in this team",
 };
+
+const FALLBACK_REASON_TEXT = "it was left out of this run";
 
 /** One sentence for an omitted item, e.g. "Connector github: you have not connected it yet". */
 export function omissionText(item: Item): string {
-  return `${KIND_LABEL[item.kind]} ${item.name}: ${REASON_TEXT[item.reason]}`;
+  return `${KIND_LABEL[item.kind]} ${item.name}: ${(REASON_TEXT as Readonly<Record<string, string | undefined>>)[item.reason] ?? FALLBACK_REASON_TEXT}`;
 }
 
 /**
