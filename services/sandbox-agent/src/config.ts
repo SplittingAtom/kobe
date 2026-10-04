@@ -26,8 +26,28 @@ const configSchema = z.object({
   /** Pi session JSONL per thread; on the workspace volume so it survives hibernation (D13/D15). */
   KOBE_SESSION_DIR: z.string().startsWith("/").default("/workspace/.kobe/sessions"),
   KOBE_PI_BIN: z.string().min(1).default("pi"),
-  /** Pi's config dir (`PI_CODING_AGENT_DIR`): root-owned, read-only, empty in the image. */
-  KOBE_PI_AGENT_DIR: z.string().startsWith("/").default("/opt/kobe/pi-agent"),
+  /**
+   * Where each Pi process gets its private runtime directory (its `PI_CODING_AGENT_DIR`, which Pi
+   * 1.0.0 must be able to write, and its model file): created fresh per process, removed when it
+   * exits. On the emptyDir that hibernation wipes (D12).
+   */
+  KOBE_PI_RUNTIME_DIR: z.string().startsWith("/").default("/tmp/kobe-pi"),
+  /**
+   * The model gateway (KOBE-40 shim) as sandbox pods see it; set by the server's pod spec when
+   * the sandbox may reach models. Without it Pi has no model (runs fail `model_not_configured`).
+   */
+  KOBE_MODEL_GATEWAY_URL: z
+    .url({ protocol: /^https?$/, error: "KOBE_MODEL_GATEWAY_URL must be an http(s) URL" })
+    .refine((url) => {
+      const parsed = new URL(url);
+      return parsed.username === "" && parsed.password === "" && parsed.pathname === "/";
+    }, "KOBE_MODEL_GATEWAY_URL must be a plain origin without credentials")
+    .optional(),
+  /** kobe-models (KOBE-41): root-owned, read-only, loaded before kobe-policy when models are wired. */
+  KOBE_MODELS_EXTENSION: z
+    .string()
+    .startsWith("/")
+    .default("/opt/kobe/pi-extensions/kobe-models/index.js"),
   /** kobe-policy (KOBE-36): root-owned, read-only, loaded last into every Pi. No way to omit it. */
   KOBE_POLICY_EXTENSION: z
     .string()
@@ -58,7 +78,10 @@ export interface Config {
   readonly workspaceDir: string;
   readonly sessionDir: string;
   readonly piBin: string;
-  readonly piAgentDir: string;
+  readonly piRuntimeDir: string;
+  /** The model gateway origin (`http://host[:port]`, no trailing slash), when the pod has one. */
+  readonly modelGatewayUrl?: string;
+  readonly modelsExtension: string;
   readonly policyExtension: string;
   readonly maxPiProcesses: number;
   readonly piIdleMs: number;
@@ -93,7 +116,11 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     workspaceDir: c.KOBE_WORKSPACE_DIR,
     sessionDir: c.KOBE_SESSION_DIR,
     piBin: c.KOBE_PI_BIN,
-    piAgentDir: c.KOBE_PI_AGENT_DIR,
+    piRuntimeDir: c.KOBE_PI_RUNTIME_DIR,
+    ...(c.KOBE_MODEL_GATEWAY_URL === undefined
+      ? {}
+      : { modelGatewayUrl: new URL(c.KOBE_MODEL_GATEWAY_URL).origin }),
+    modelsExtension: c.KOBE_MODELS_EXTENSION,
     policyExtension: c.KOBE_POLICY_EXTENSION,
     maxPiProcesses: c.KOBE_MAX_PI_PROCESSES,
     piIdleMs: c.KOBE_PI_IDLE_MS,

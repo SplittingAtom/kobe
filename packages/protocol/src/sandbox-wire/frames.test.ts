@@ -120,7 +120,11 @@ const serverFrames = {
     message: "Chart this CSV",
     attachments: [{ path: "/workspace/uploads/th1/sales.csv", mime_type: "text/csv" }],
     config: {
-      model: { alias: "smart" },
+      model: {
+        alias: "smart",
+        gateway_model: "anthropic/claude-sonnet-4-5",
+        api: "anthropic-messages",
+      },
       agent: null,
       mcp_servers: [{ name: "jira", connector_id: EXAMPLE_IDS.connector }],
       approval_mode: "ask-on-write",
@@ -354,6 +358,23 @@ describe("server → sandbox frames", () => {
       {
         ...serverFrames["run.start"],
         config: { ...config, model: { alias: "smart", base_url: "https://x" } },
+      },
+    ],
+    [
+      "a gateway model without its gateway provider",
+      {
+        ...serverFrames["run.start"],
+        config: {
+          ...config,
+          model: { alias: "smart", gateway_model: "claude", api: "anthropic-messages" },
+        },
+      },
+    ],
+    [
+      "a model API style Pi does not have",
+      {
+        ...serverFrames["run.start"],
+        config: { ...config, model: { alias: "smart", gateway_model: "x/y", api: "custom" } },
       },
     ],
     [

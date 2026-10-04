@@ -215,6 +215,19 @@ async function fixtures() {
     const status = await clients.get(user.key).useTeam(teamIds[user.team]);
     out(`member_${user.key}`, status);
   }
+  // KOBE-41: each team's admin enables the install's `fast` model as the team default, so runs
+  // get a real model (e2e/run.sh configured the catalog against the fake upstream). 404: no such
+  // catalog entry on this install (a real cluster's throwaway install): runs have no model.
+  for (const team of config.teams) {
+    const admin = config.users.find((u) => u.team === team.key);
+    const ac = clients.get(admin.key);
+    await ac.useTeam(teamIds[team.key]);
+    const enabled = await ac.call("PUT", `/v1/team/models/${config.modelAlias ?? "fast"}`, {
+      enabled: true,
+      is_default: true,
+    });
+    out(`models_${team.key}`, enabled.status);
+  }
   console.log(
     `fixtures=${JSON.stringify({ teams: teamIds, users: Object.fromEntries(ids), owner: ownerId })}`,
   );

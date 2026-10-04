@@ -2,9 +2,11 @@ import {
   EventPayloadTooLargeError,
   jsonByteLength,
   parseEventPayload,
+  parseKobeModelError,
   parseTranslatedPiEvent,
   toolInputSchema,
   type KobeEventType,
+  type ModelRunErrorCode,
   type PiTranslatedEvent,
   type RiskClass,
   type ToolRegistry,
@@ -19,11 +21,13 @@ import { TOOL_INPUT_MAX_BYTES, TOOL_PREVIEW_MAX_CHARS } from "./constants.js";
  * | -------------------------------------------- | --------------------------------------------------- |
  * | `message_start` (assistant)                  | opens stream-local `message_id` = `m<wire seq>`     |
  * | `message_update` `text_delta`/`thinking_delta` | `text.delta` / `reasoning.delta` (batched)        |
- * | `message_end` (assistant)                    | message id queued for `entry.committed` binding     |
+ * | `message_end` (assistant)                    | message id queued for `entry.committed` binding;    |
+ * |                                              | an error stop is remembered (see `failure`)         |
  * | `tool_execution_start`                       | `tool.call` (input as executed, risk from registry) |
  * | `tool_execution_end`                         | `tool.result` (text preview, capped)                |
  * | `turn_end`, `entry_appended`                 | mirror new session entries (`get_entries since`)    |
- * | `agent_settled`                              | mirror entries, then the run completes              |
+ * | `agent_settled`                              | mirror entries, then the run completes — or fails,  |
+ * |                                              | when its last assistant message ended in error      |
  * | anything else (incl. `kobe.event_dropped`)   | accepted, no effect                                 |
  *
  * Session entries are never taken from the event stream: Pi emits `entry_appended` only for
@@ -36,6 +40,13 @@ export interface Translation {
   readonly syncEntries: boolean;
   /** Pi has no more automatic work for this run (`agent_settled`). */
   readonly settled: boolean;
+  /**
+   * With `settled`: the run's last assistant message ended with `stopReason: "error"` (KOBE-41):
+   * the model call failed for good (Pi's own retries included), so the run fails with this code —
+   * kobe-models' (`parseKobeModelError`) or `model_error` for any other error text, which is
+   * untrusted and never shown.
+   */
+  readonly failure?: ModelRunErrorCode;
   /** A known event type failed its schema: answered with `malformed_frame`, otherwise a no-op. */
   readonly invalid?: string;
   /** Produced events that failed their schema and were dropped (logged, never sent). */
@@ -103,6 +114,7 @@ export function createRunTranslator(options: {
 }): RunTranslator {
   let current: string | undefined;
   let lastAssistant: string | undefined;
+  let lastStop: ModelRunErrorCode | undefined;
   const completed: string[] = [];
 
   const checked = (type: KobeEventType, payload: unknown): NewRunEvent | undefined => {
@@ -154,9 +166,16 @@ export function createRunTranslator(options: {
         return { ...NOTHING, events: produced, dropped };
       }
       case "message_end":
-        if (roleOf(event) === "assistant" && current !== undefined) {
-          completed.push(current);
-          current = undefined;
+        if (roleOf(event) === "assistant") {
+          const message = event.message as { stopReason?: unknown; errorMessage?: unknown };
+          lastStop =
+            message.stopReason === "error"
+              ? (parseKobeModelError(message.errorMessage) ?? "model_error")
+              : undefined;
+          if (current !== undefined) {
+            completed.push(current);
+            current = undefined;
+          }
         }
         return NOTHING;
       case "tool_execution_start": {
@@ -186,7 +205,12 @@ export function createRunTranslator(options: {
       case "entry_appended":
         return { ...NOTHING, syncEntries: true };
       case "agent_settled":
-        return { ...NOTHING, syncEntries: true, settled: true };
+        return {
+          ...NOTHING,
+          syncEntries: true,
+          settled: true,
+          ...(lastStop === undefined ? {} : { failure: lastStop }),
+        };
       default:
         return NOTHING;
     }

@@ -160,3 +160,65 @@ describe("events that do not fit the contract", () => {
     expect(JSON.stringify(dropped)).not.toContain("xxxx");
   });
 });
+
+describe("model call failures (KOBE-41)", () => {
+  const assistantEnd = (message: object) => ({
+    type: "message_end",
+    message: { role: "assistant", ...message },
+  });
+
+  it("fails the run at settle when its last assistant message ended in a kobe-models error", async () => {
+    const t = translator();
+    await t.translate(1, { type: "message_start", message: { role: "assistant" } } as never);
+    await t.translate(
+      2,
+      assistantEnd({
+        stopReason: "error",
+        errorMessage: "kobe.model_error:model_not_enabled: model_not_enabled after 1 attempt",
+      }) as never,
+    );
+    const end = await t.translate(3, { type: "agent_settled" } as never);
+    expect(end).toMatchObject({ settled: true, syncEntries: true, failure: "model_not_enabled" });
+  });
+
+  it("maps any other error stop to model_error (the sandbox's text is never trusted)", async () => {
+    const t = translator();
+    await t.translate(
+      1,
+      assistantEnd({
+        stopReason: "error",
+        errorMessage: "403: <script>alert(1)</script>",
+      }) as never,
+    );
+    expect((await t.translate(2, { type: "agent_settled" } as never)).failure).toBe("model_error");
+    const u = translator();
+    await u.translate(1, assistantEnd({ stopReason: "error" }) as never);
+    expect((await u.translate(2, { type: "agent_settled" } as never)).failure).toBe("model_error");
+  });
+
+  it("completes the run when a later assistant message succeeded (Pi retried) or stopped for tools", async () => {
+    const t = translator();
+    await t.translate(1, assistantEnd({ stopReason: "error", errorMessage: "503: x" }) as never);
+    await t.translate(2, assistantEnd({ stopReason: "stop" }) as never);
+    expect((await t.translate(3, { type: "agent_settled" } as never)).failure).toBeUndefined();
+    const u = translator();
+    await u.translate(1, assistantEnd({ stopReason: "toolUse" }) as never);
+    await u.translate(2, {
+      type: "message_end",
+      message: { role: "user", stopReason: "error" },
+    } as never);
+    expect((await u.translate(3, { type: "agent_settled" } as never)).failure).toBeUndefined();
+    expect(
+      (await translator().translate(1, { type: "agent_settled" } as never)).failure,
+    ).toBeUndefined();
+  });
+
+  it("an aborted last message (Stop) is not a failure", async () => {
+    const t = translator();
+    await t.translate(
+      1,
+      assistantEnd({ stopReason: "aborted", errorMessage: "Request was aborted" }) as never,
+    );
+    expect((await t.translate(2, { type: "agent_settled" } as never)).failure).toBeUndefined();
+  });
+});

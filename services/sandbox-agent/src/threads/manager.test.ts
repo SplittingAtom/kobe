@@ -30,7 +30,7 @@ describe("ThreadManager beforeRun seam (KOBE-27)", () => {
     dir = await mkdtemp(path.join(tmpdir(), "kobe-mgr-"));
     manager = new ThreadManager({
       bin: FAKE_PI,
-      agentDir: dir,
+      runtimeDir: path.join(dir, "pi-runtime"),
       policyExtension: FAKE_POLICY_EXTENSION,
       workspaceDir: dir,
       sessionDir: path.join(dir, "sessions"),

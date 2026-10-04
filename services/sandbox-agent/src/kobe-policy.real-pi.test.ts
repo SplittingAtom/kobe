@@ -30,22 +30,18 @@ type PiEventFrame = Extract<SandboxToServerFrame, { type: "pi.event" }>;
 type CheckFrame = Extract<SandboxToServerFrame, { type: "policy.check" }>;
 
 let h: Harness | undefined;
-const agentDirs: string[] = [];
 afterEach(async () => {
   expect(h?.server.violations ?? []).toEqual([]);
   await h?.close();
   h = undefined;
-  for (const dir of agentDirs.splice(0)) await rm(dir, { recursive: true, force: true });
 });
 
 async function start(extensions: readonly string[] = []): Promise<Harness> {
-  // Writable Pi config dir: Pi 1.0.0 opens its credential store there before calling any model
-  // (EACCES in the image's read-only dir — a KOBE-41 concern, not kobe-policy's).
-  const agentDir = await mkdtemp(path.join(tmpdir(), "kobe-pi-agent-"));
-  agentDirs.push(agentDir);
+  // The agent gives every Pi a private, writable config dir (KOBE-41): Pi 1.0.0 opens its
+  // credential store there before calling any model, the faux model included.
   h = await startHarness({
     piBin: PI_BIN,
-    env: { KOBE_POLICY_EXTENSION: REAL_POLICY_EXTENSION, KOBE_PI_AGENT_DIR: agentDir },
+    env: { KOBE_POLICY_EXTENSION: REAL_POLICY_EXTENSION },
     extensions: [FAUX_MODEL_EXTENSION, ...extensions],
   });
   return h;

@@ -420,6 +420,9 @@ importers:
         specifier: ^4.0.0
         version: 4.6.5
     devDependencies:
+      '@kobe/model-gateway':
+        specifier: workspace:*
+        version: link:../model-gateway
       '@types/ws':
         specifier: ^8.18.2
         version: 8.18.2
