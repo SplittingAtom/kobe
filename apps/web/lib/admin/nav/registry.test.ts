@@ -203,10 +203,12 @@ describe("role gating", () => {
     expect(visibleSections(install("user"))).toEqual([]);
   });
 
-  it("opens the team console to team admins only", () => {
+  it("opens the team console to team admins and, for the agent builder, to builders", () => {
     expect(canOpenConsole(team("team_admin", TEAM_ADMIN))).toBe(true);
     expect(visibleSections(team("team_admin", TEAM_ADMIN))).toHaveLength(TEAM_SECTIONS.length);
-    expect(canOpenConsole(team("builder", BUILDER))).toBe(false);
+    // Builders get the agent builder (team.agents.build) and nothing that needs admin rights.
+    expect(canOpenConsole(team("builder", BUILDER))).toBe(true);
+    expect(visibleSections(team("builder", BUILDER)).map((s) => s.id)).toEqual(["agents"]);
     expect(canOpenConsole(team("member", MEMBER))).toBe(false);
   });
 
@@ -277,7 +279,9 @@ describe("mirrors the server's permission matrix", () => {
       ]),
     );
     for (const s of TEAM_SECTIONS) {
-      expect(defined.get(s.permission), `${s.id} → ${s.permission}`).toBe("team_admin");
+      // The agent builder is the one section builders open (KOBE-84); the rest are admin-only.
+      const level = s.id === "agents" ? "builder" : "team_admin";
+      expect(defined.get(s.permission), `${s.id} → ${s.permission}`).toBe(level);
     }
   });
 });

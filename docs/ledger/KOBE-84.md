@@ -36,12 +36,14 @@ UI only, in the team console, on the existing `/v1/agents` routes. No server end
 
 ## Open questions (for Chris or the coordinator)
 
-- The "Team agents" nav entry needs `team.agents.suspend`, so a builder who isn't a team admin has
-  no nav link to the builder (direct URL works; the server decides access). Should the entry's
-  permission widen to `team.agents.build`? That changes the console registry, so left alone here.
-- Skill, connector and model fields are free text (the schema validates format). Pickers from the
-  team's catalog would need KOBE-48's inventory endpoints.
-- Unarchive (`POST /:id/unarchive`) exists but has no UI here.
+Answered by the coordinator on PR #70, now implemented:
+
+- "Team agents" nav entry and the builder open for `team.agents.build` (builders); suspend stays
+  behind `team.agents.suspend`. The console opens for builders and shows them that one section.
+- Model field is a picker of the team's enabled aliases (`GET /v1/team/models`) with "None (use
+  team default)"; a stored alias that is no longer enabled stays selectable; free text if the
+  catalog fails to load. Skills and connectors stay free text (pickers: KOBE-78, KOBE-59).
+- No unarchive UI; team agents only (personal agents are a follow-up).
 
 ## Evidence (acceptance criteria -> test or command output)
 

@@ -13,6 +13,7 @@ import styles from "../admin.module.css";
 export function TeamAgentsPage() {
   const access = useTeamAccess();
   const teamId = access.team.id;
+  const canSuspend = access.permissions.includes("team.agents.suspend");
   const { state, reload } = useResource(() => listTeamAgents(teamId));
   const mutation = useMutation();
 
@@ -83,14 +84,16 @@ export function TeamAgentsPage() {
                           Edit
                           <span className={styles.visuallyHidden}> {a.name}</span>
                         </Link>{" "}
-                        <button
-                          type="button"
-                          disabled={mutation.pending}
-                          onClick={() => void toggle(a)}
-                        >
-                          {a.status === "active" ? "Suspend" : "Reactivate"}
-                          <span className={styles.visuallyHidden}> {a.name}</span>
-                        </button>
+                        {canSuspend && (
+                          <button
+                            type="button"
+                            disabled={mutation.pending}
+                            onClick={() => void toggle(a)}
+                          >
+                            {a.status === "active" ? "Suspend" : "Reactivate"}
+                            <span className={styles.visuallyHidden}> {a.name}</span>
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}

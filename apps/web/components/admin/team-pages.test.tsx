@@ -214,6 +214,14 @@ describe("Team agents", () => {
     expect(put.headers.get("x-kobe-team")).toBe(TEAM.id);
   });
 
+  it("lets a builder open agents but offers no suspend button", async () => {
+    stubApi({ "GET /v1/agents?scope=team&include_archived=true": [200, AGENTS] });
+    renderTeam(<TeamAgentsPage />, { role: "builder", permissions: ["team.agents.build"] });
+    expect(await screen.findByText("v2")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Edit Triage" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Suspend/ })).toBeNull();
+  });
+
   it("shows the server's refusal (403) of a suspension", async () => {
     stubApi({
       "GET /v1/agents?scope=team&include_archived=true": [200, AGENTS],

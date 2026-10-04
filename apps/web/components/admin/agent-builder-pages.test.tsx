@@ -41,7 +41,17 @@ const VERSIONS = {
   ],
   next_before: null,
 };
+const MODELS = {
+  models: ["fast", "smart", "local"].map((alias) => ({
+    alias,
+    label: alias === "smart" ? "Smart" : null,
+    enabled: alias !== "local",
+    is_default: alias === "fast",
+  })),
+  default: "fast",
+};
 const READ = {
+  "GET /v1/team/models": [200, MODELS],
   "GET /v1/agents/a-1": [200, { agent: AGENT }],
   "GET /v1/agents/a-1/versions": [200, VERSIONS],
 } as const;
@@ -62,7 +72,7 @@ afterEach(() => {
 
 describe("Agent builder: create", () => {
   it("refuses an invalid definition with field errors and sends nothing", async () => {
-    const calls = stubApi({});
+    const calls = stubApi(READ);
     renderTeam(<AgentBuilderPage />);
     await userEvent.click(screen.getByRole("button", { name: "Create agent" }));
     expect((await screen.findByRole("alert")).textContent).toMatch(/fix 1 problem/i);
@@ -70,7 +80,7 @@ describe("Agent builder: create", () => {
     expect(name.getAttribute("aria-invalid")).toBe("true");
     const describedBy = must(name.getAttribute("aria-describedby"));
     expect(document.getElementById(describedBy)?.textContent).toMatch(/empty/);
-    expect(calls).toHaveLength(0);
+    expect(calls.some((c) => c.method !== "GET")).toBe(false);
   });
 
   it("creates a team agent from the form and opens it", async () => {
@@ -234,5 +244,43 @@ describe("Agent builder: version history", () => {
     await screen.findByRole("button", { name: "Restore version 1" });
     expect(calls.some((c) => c.url.endsWith("before=2"))).toBe(true);
     expect(screen.queryByRole("button", { name: "Load older versions" })).toBeNull();
+  });
+});
+
+describe("Agent builder: model picker", () => {
+  it("offers the team's enabled models and the team default, and saves the choice", async () => {
+    const calls = stubApi({
+      ...READ,
+      "POST /v1/agents": [201, { agent: { ...AGENT, id: "a-9" } }],
+    });
+    renderTeam(<AgentBuilderPage />);
+    const select = (await screen.findByLabelText("Model")) as HTMLSelectElement;
+    await waitFor(() => expect(select.options.length).toBe(3));
+    expect([...select.options].map((o) => o.text)).toEqual([
+      "None (use team default)",
+      "fast",
+      "Smart",
+    ]);
+    await userEvent.selectOptions(select, "smart");
+    await userEvent.type(screen.getByLabelText("Name"), "Triage");
+    await userEvent.type(screen.getByLabelText("System prompt"), "Hi");
+    await userEvent.click(screen.getByRole("button", { name: "Create agent" }));
+    await waitFor(() => expect(assign).toHaveBeenCalled());
+    const post = must(calls.find((c) => c.method === "POST"));
+    expect(JSON.parse(String(post.body)).frontmatter.model).toBe("smart");
+  });
+
+  it("keeps a stored model that is no longer enabled", async () => {
+    stubApi({
+      ...READ,
+      "GET /v1/agents/a-1": [
+        200,
+        { agent: { ...AGENT, frontmatter: { name: "Triage", model: "local" } } },
+      ],
+    });
+    renderTeam(<AgentBuilderPage agentId="a-1" />);
+    const select = (await screen.findByLabelText("Model")) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe("local"));
+    expect(select.selectedOptions[0]?.text).toBe("local (not enabled)");
   });
 });

@@ -54,13 +54,29 @@ export function renderInstall(
 
 export const TEAM = { id: "t-1", slug: "fin", name: "Finance" };
 
-export function renderTeam(ui: ReactElement) {
+const ADMIN_PERMISSIONS = [
+  "team.members.manage",
+  "team.agents.build",
+  "team.agents.suspend",
+  "team.audit.read",
+];
+
+export function renderTeam(
+  ui: ReactElement,
+  {
+    role = "team_admin",
+    permissions = ADMIN_PERMISSIONS,
+  }: {
+    role?: TeamAccess["role"];
+    permissions?: readonly string[];
+  } = {},
+) {
   const access: TeamAccess = {
     console: "team",
     user: ME,
     team: TEAM,
-    role: "team_admin",
-    permissions: ["team.members.manage", "team.agents.suspend", "team.audit.read"],
+    role,
+    permissions,
   };
   return render(<ConsoleAccessContext.Provider value={access}>{ui}</ConsoleAccessContext.Provider>);
 }

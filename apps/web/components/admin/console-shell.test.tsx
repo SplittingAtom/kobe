@@ -16,6 +16,7 @@ const install = (installRole: InstallAccess["installRole"]) => () =>
   ok<ConsoleAccess>({ console: "install", user, installRole });
 const TEAM_ADMIN = [
   "team.members.manage",
+  "team.agents.build",
   "team.agents.suspend",
   "team.models.manage",
   "team.budgets.manage",
@@ -152,17 +153,36 @@ describe("team console", () => {
     ).toBe("page");
   });
 
-  it.each([
-    ["member", ["team.read", "team.members.read", "team.agents.use"]],
-    ["builder", ["team.read", "team.members.read", "team.agents.use", "team.agents.build"]],
-  ] as const)("refuses a %s", async (role, permissions) => {
+  it.each([["member", ["team.read", "team.members.read", "team.agents.use"]]] as const)(
+    "refuses a %s",
+    async (role, permissions) => {
+      render(
+        <ConsoleShell kind="team" pathname="/admin/team" loadAccess={team(role, [...permissions])}>
+          <Page />
+        </ConsoleShell>,
+      );
+      expect((await screen.findByRole("alert")).textContent).toMatch(/team admins/);
+      expect(pageMounted).not.toHaveBeenCalled();
+    },
+  );
+
+  it("opens for a builder, who gets the agent builder only", async () => {
     render(
-      <ConsoleShell kind="team" pathname="/admin/team" loadAccess={team(role, [...permissions])}>
+      <ConsoleShell
+        kind="team"
+        pathname="/admin/team/agents"
+        loadAccess={team("builder", ["team.read", "team.agents.use", "team.agents.build"])}
+      >
         <Page />
       </ConsoleShell>,
     );
-    expect((await screen.findByRole("alert")).textContent).toMatch(/team admins/);
-    expect(pageMounted).not.toHaveBeenCalled();
+    const nav = await screen.findByRole("navigation");
+    expect(
+      within(nav)
+        .getAllByRole("link")
+        .map((a) => a.textContent),
+    ).toEqual(["Team agents"]);
+    expect(pageMounted).toHaveBeenCalled();
   });
 
   it("asks to choose a team when none is active", async () => {

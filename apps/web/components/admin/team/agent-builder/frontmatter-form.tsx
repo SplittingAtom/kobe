@@ -1,9 +1,10 @@
 import { APPROVAL_MODES } from "@kobe/agent-file";
 import type { FieldErrors, FormState } from "../../../../lib/admin/agent-builder/form-model";
 import { Field } from "./field";
+import { ModelField } from "./model-field";
 import styles from "./agent-builder.module.css";
 
-type TextKey = "name" | "role" | "description" | "icon" | "model";
+type TextKey = "name" | "role" | "description" | "icon";
 type ListKey = "skills" | "connectors" | "toolsAllow" | "toolsDeny" | "starters";
 
 const TEXT_FIELDS: readonly { key: TextKey; label: string; hint?: string; wide?: boolean }[] = [
@@ -11,12 +12,15 @@ const TEXT_FIELDS: readonly { key: TextKey; label: string; hint?: string; wide?:
   { key: "icon", label: "Icon", hint: "An icon name such as bar-chart, or an emoji." },
   { key: "role", label: "Role", hint: "One line on what the agent is for.", wide: true },
   { key: "description", label: "Description", wide: true },
-  { key: "model", label: "Model", hint: "A catalog alias (fast, smart) or a model id. Optional." },
 ];
 
 const LIST_FIELDS: readonly { key: ListKey; label: string; hint: string }[] = [
-  { key: "skills", label: "Skills", hint: "Skill slugs, one per line." },
-  { key: "connectors", label: "Connectors", hint: "Connector names, one per line." },
+  { key: "skills", label: "Skills", hint: "Skill slugs, one per line. Pickers come with KOBE-78." },
+  {
+    key: "connectors",
+    label: "Connectors",
+    hint: "Connector names, one per line. Pickers come with KOBE-59.",
+  },
   { key: "toolsAllow", label: "Allowed tools", hint: "Tool globs that narrow what it may use." },
   { key: "toolsDeny", label: "Denied tools", hint: "Tool globs it must never use." },
   { key: "starters", label: "Conversation starters", hint: "Up to 8, one per line." },
@@ -57,6 +61,12 @@ export function FrontmatterForm({
           )}
         </Field>
       ))}
+      <ModelField
+        form={form}
+        errors={errors}
+        readOnly={readOnly}
+        onChange={(model) => set("model", model)}
+      />
       <Field
         label="Approval mode"
         hint="Never looser than the team's floor."
