@@ -53,11 +53,11 @@ script, fake model server, license exceptions; workflow `orbit-eval-image.yml`.
 
 ## Open questions (for Chris or the coordinator)
 
-- Sign-off on the seven license exceptions (all permissive).
-- Simulated tools take a single free-text `input`; real tool schemas (e.g. bash `command`) are not
-  reproduced. Good enough for canary matching; KOBE-93 could pass the frozen manifest's schemas.
+- (Resolved) Chris approved the seven license exceptions on 2026-10-04.
+- (Accepted for v1) Simulated tools take a single free-text `input`; real tool schemas are not
+  reproduced. Good enough for canary matching.
 - KOBE-93 should mount the YAML at `/input/agent.yaml` and a volume at `/output` (the image defaults),
-  set the two env vars from the team's gateway session, and decide what a non-zero exit means for the gate.
+  set the two env vars from the team's gateway session, ; KOBE-93 defines exit-code semantics.
 - Pack growth (more categories, versions) is a follow-up; `pack.version` is in every result.
 
 ## Evidence (acceptance criteria -> test or command output)
