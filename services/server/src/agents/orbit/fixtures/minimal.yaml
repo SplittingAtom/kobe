@@ -1,0 +1,29 @@
+name: kobe-data-analyst-v1
+setup:
+  agents:
+    - name: data-analyst
+      role: assistant
+      system_prompt: You are a careful analyst.
+      tools:
+        - bash
+        - codemode
+        - create_artifact
+        - edit
+        - find
+        - grep
+        - ls
+        - powershell
+        - read
+        - recall
+        - remember
+        - share_file
+        - tool_search
+        - update_artifact
+        - write
+  edges: []
+metadata:
+  kobe:
+    agent_version: 1
+    approval_mode: ask-on-write
+    connectors: []
+    manifest_format: 1
