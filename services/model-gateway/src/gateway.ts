@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   createServer,
   request as httpRequest,
@@ -242,7 +243,7 @@ export function createModelGateway(options: GatewayOptions): Server {
     let bytesIn = 0;
     let usage: UsageReading | undefined;
     let ttfbMs: number | undefined;
-    let releaseGate: (() => void) | undefined;
+    let releaseGate: ((written: boolean) => void) | undefined;
     let bytesOut = 0;
     let bytesHeld = 0;
     let status = 0;
@@ -346,6 +347,7 @@ export function createModelGateway(options: GatewayOptions): Server {
       }
       call = {
         ...identity,
+        callId: randomUUID(),
         runId,
         route: route.kind,
         path: route.path,
@@ -424,7 +426,9 @@ export function createModelGateway(options: GatewayOptions): Server {
       }
     } finally {
       release();
-      releaseGate?.();
+      // The reservation lasts until the call's ledger row lands (usageRecordOf: forwarded calls
+      // that named a model), so the gate never sees spend that is neither reserved nor recorded.
+      releaseGate?.(usage !== undefined && call?.model !== undefined);
       options.bytes.give(identity.sandboxId, bytesHeld);
       if (call) {
         options.sink.record({

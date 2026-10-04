@@ -259,8 +259,9 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
   `budget_exhausted`), new runs are refused (429 `budget_exhausted`), and running ones finish
   their current step and end `budget_stopped`, pending approvals expire; audited
   `models.budget.reached`. Calls in flight are never cut; each shim replica reserves what an
-  admitted call may cost until it ends, so concurrent calls overshoot a budget by at most one call
-  per replica. Enforcement is at the identities the session token proves, never the advisory run
+  admitted call may cost until its usage row lands (a member's reservations hold at most a quarter
+  of what is left of a shared budget), so a budget is exceeded by at most one call per replica
+  plus estimation error. Enforcement is at the identities the session token proves, never the advisory run
   id. The per-user request rate is enforced by each shim replica (so up to replicas × the rate in
   total) and, install-wide, by Bifrost on each member's virtual key (pushed by the gateway sync).
   Bifrost's own dollar budgets are not used (it prices calls with its own list). Budget data is

@@ -164,7 +164,9 @@ beforeAll(async () => {
   sink = new DbUsageSink({
     write: (records) => recordModelUsage(db, records),
     logger,
-    onWritten: (teamId) => {
+    onWritten: (teamId, callIds) => {
+      gate.invalidateTeam(teamId);
+      gate.settle(callIds);
       void notifyModels(db, `${MODELS_SPEND_PREFIX}${teamId}`);
     },
   });

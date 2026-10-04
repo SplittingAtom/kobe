@@ -65,8 +65,11 @@ const leases = new TtlCache<boolean>({ ttlMs: Math.max(config.cacheTtlMs, 1_000)
 const usage = new DbUsageSink({
   write: (records) => recordModelUsage(db, records),
   logger,
-  onWritten: (teamId) => {
+  onWritten: (teamId, callIds) => {
+    // Drop the cached spend first, then end the calls' reservations: the next check reloads the
+    // spend including these rows.
     budgets.invalidateTeam(teamId);
+    budgets.settle(callIds);
     notifyModels(db, `${MODELS_SPEND_PREFIX}${teamId}`).catch((err: unknown) =>
       logger.warn({ err }, "spend hint failed"),
     );

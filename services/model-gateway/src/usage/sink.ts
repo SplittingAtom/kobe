@@ -18,7 +18,7 @@ export interface DbUsageSinkOptions {
   readonly maxQueue?: number;
   readonly maxAttempts?: number;
   /** After a team's rows are written (KOBE-42: drop budget caches, wake the budget monitor). */
-  readonly onWritten?: (teamId: string) => void;
+  readonly onWritten?: (teamId: string, callIds: readonly string[]) => void;
   /** Delay from a recorded call to its write (calls close together share one batch). */
   readonly soonMs?: number;
 }
@@ -28,6 +28,8 @@ interface Queued {
   readonly attempts: number;
   /** Written on its own after its batch failed, so one bad row cannot sink the others. */
   readonly alone?: boolean;
+  /** The gateway's call id (its in-flight budget reservation ends once the row lands). */
+  readonly callId?: string | undefined;
 }
 
 /** The ledger row for a call, or undefined when it is not a model call that reached Bifrost. */
@@ -76,7 +78,7 @@ export class DbUsageSink implements UsageSink {
     this.options.logger.info({ call }, "model call");
     const record = usageRecordOf(call);
     if (record) {
-      this.enqueue([{ record, attempts: 0 }]);
+      this.enqueue([{ record, attempts: 0, callId: call.callId }]);
       // Budgets judge what the ledger holds: write promptly, not only on the interval.
       this.soon ??= setTimeout(() => {
         this.soon = undefined;
@@ -126,7 +128,10 @@ export class DbUsageSink implements UsageSink {
         try {
           await this.options.write(items.map((q) => q.record));
           const teamId = items[0]?.record.teamId;
-          if (teamId) this.options.onWritten?.(teamId);
+          if (teamId) {
+            const ids = items.map((q) => q.callId).filter((id): id is string => id !== undefined);
+            this.options.onWritten?.(teamId, ids);
+          }
         } catch (err) {
           failed.push(...items);
           this.options.logger.error(
@@ -137,7 +142,7 @@ export class DbUsageSink implements UsageSink {
       }
       if (failed.length > 0) {
         const retry = failed
-          .map((q) => ({ record: q.record, attempts: q.attempts + 1, alone: true }))
+          .map((q) => ({ ...q, attempts: q.attempts + 1, alone: true }))
           .filter((q) => q.attempts < this.maxAttempts);
         if (retry.length < failed.length) {
           this.options.logger.error(

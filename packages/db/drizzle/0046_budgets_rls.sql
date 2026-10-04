@@ -63,6 +63,10 @@ END $$;
 -- the same statements the admin API uses (audited there): see docs/ledger/KOBE-42.md.
 
 -- 1. Spend counters: written only by the run_usage trigger (trigger depth 2) or a team cascade.
+-- The depth tests here (and in kobe_budget_email_guard) are sound only while the app role cannot
+-- run trigger code of its own: migrate.ts revokes CREATE on schema public and CREATE, TEMPORARY
+-- on the database from PUBLIC, and the app role holds no TRIGGER privilege
+-- (app-role-capabilities.db.test.ts).
 CREATE FUNCTION "kobe_spend_guard"() RETURNS trigger LANGUAGE plpgsql
   SET search_path = pg_catalog, public AS $$
 BEGIN

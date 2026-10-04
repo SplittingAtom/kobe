@@ -137,9 +137,8 @@ server: BudgetMonitor (LISTEN + 30 s sweep) ── 80/100 % ─▶ budget_alerts
   - Tests: db "integrity against the app role" (forged alerts, tampered counters, direct emails,
     install limits by a non-admin — all refused; cross-team alert reads hidden).
 - **MEDIUM-2 overshoot:** the gate reserves an admitted call's possible cost (input estimate +
-  the output it allows, dollars at the catalog price) at its install, team and member levels until
-  it ends and refuses when spend + others' reservations reach a budget: overshoot ≤ one call per
-  shim replica. Test: `budget-gate.test.ts` "reserves an admitted call's possible cost".
+  the output it allows, dollars at the catalog price) at its install, team and member levels and
+  refuses when spend + reservations reach a budget (bound as built: re-review below). Test: `budget-gate.test.ts` "reserves an admitted call's possible cost".
 - **MEDIUM-3 one sandbox exhausting a shared budget:** optional default member budget per team
   (`member_default`, no default value). Test: server "the team's default member budget caps a
   member without one of their own".
@@ -156,6 +155,32 @@ server: BudgetMonitor (LISTEN + 30 s sweep) ── 80/100 % ─▶ budget_alerts
   exists, and at most 20 budget emails per recipient per UTC day. UTC is stated in the UI.
 - **Tests:** the Gate 2 e2e is deterministic (the fake model's tool step runs 3 s, so the stop
   reaches Pi during the step); a db test drives the real shim gate (402) through the NOTIFY path.
+
+## Re-review (coordinator) — resolutions
+
+- **HIGH (depth guards spoofable as superuser):** closed by the existing revoke in `migrate.ts`
+  (CREATE on schema public; CREATE, TEMPORARY on the database, from PUBLIC) and the app role's lack
+  of TRIGGER: proven for the real app role by `app-role-capabilities.db.test.ts` (#56; the temp
+  table, pg_temp function and own-trigger steps are refused). The guards say they rely on it.
+  `pg_trigger_depth` guards in the repo: `0005_conversations_rls.sql` (run/thread seq counters),
+  `0020_agent_versions_rls.sql` (published agent versions), `0044_run_usage_rls.sql` (#56),
+  `0046_budgets_rls.sql` (`kobe_spend_guard`, `kobe_budget_email_guard`). None changed beyond the
+  comments; the GUC hardening was skipped (the coordinator's call: revoke + test suffice).
+- **MEDIUM (reservation fairness):** on a shared line (install, team) each member's in-flight
+  reservations count only up to a quarter of what is left (`MEMBER_SHARE`); a member whose own
+  reservations reach that share is refused (429 `too_many_calls_in_flight`), not everyone else.
+  Test: `budget-gate.test.ts` "one member cannot hold a shared budget with reservations".
+- **MEDIUM (release timing):** a call whose ledger row is on its way keeps its reservation until
+  the sink reports the row written (`onWritten` → drop the cached spend, then `settle(callIds)`),
+  or 30 s if the write is lost. Test: "keeps a written call's reservation until its ledger row
+  lands". **The overshoot bound, as built:** a call is admitted only while spend plus the in-flight
+  reservations (each call's input estimate + output allowance, fairly shared) stay under the
+  budget, and both the reservation and the recorded spend cover a call until its row lands. Per
+  shim replica a budget is exceeded by at most the last admitted call's reservation, plus what a
+  call's real usage exceeds its reservation (input underestimated by size / 4, e.g. images;
+  output beyond the 65,536 ceiling, #56 residual). Replicas do not share reservations: with R
+  replicas, up to R such calls.
+- **Install limits:** the updater id is caller-supplied (residual, unchanged; above).
 
 ## Self security review (security-reviewer agent) — resolutions
 

@@ -28,6 +28,11 @@ export interface BudgetStore {
   prices(): Promise<ReadonlyMap<string, ModelPrice>>;
 }
 
+/** Of what is left on a shared (install or team) line, the most one member's calls can hold. */
+export const MEMBER_SHARE = 0.25;
+/** A reservation whose ledger row never lands (lost write) ends after this long. */
+export const SETTLE_TIMEOUT_MS = 30_000;
+
 interface Reserved {
   usd: number;
   tokens: number;
@@ -59,7 +64,10 @@ interface Bucket {
 export class BudgetGate implements CallGate {
   private readonly states: TtlCache<MemberBudgetState>;
   private readonly buckets = new Map<string, Bucket>();
-  private readonly reserved = new Map<string, Reserved>();
+  /** Line key → member (`team:user`) → reserved. */
+  private readonly reserved = new Map<string, Map<string, Reserved>>();
+  /** Calls whose ledger row is on its way: callId → release. */
+  private readonly pending = new Map<string, () => void>();
   private readonly priceCache: TtlCache<ReadonlyMap<string, ModelPrice>>;
   private readonly now: () => number;
 
@@ -84,12 +92,20 @@ export class BudgetGate implements CallGate {
       return { ok: false, status: 402, code: "budget_exhausted", message: budgetMessage(used) };
     }
     const keys = reservationKeys(call.teamId, call.userId);
-    const full = state.lines.find((l) => {
-      const r = this.reserved.get(keys[l.scope]);
-      return r !== undefined && l.spent + r[l.unit] >= l.limit;
-    });
-    if (full) {
-      return { ok: false, status: 402, code: "budget_exhausted", message: budgetMessage(full) };
+    for (const l of state.lines) {
+      const verdict = this.inFlight(l, keys[l.scope], key);
+      if (verdict === "full") {
+        return { ok: false, status: 402, code: "budget_exhausted", message: budgetMessage(l) };
+      }
+      if (verdict === "own_share") {
+        return {
+          ok: false,
+          status: 429,
+          code: "too_many_calls_in_flight",
+          message: "Too many large model calls are in flight for this user; retry shortly.",
+          retryAfterSeconds: 2,
+        };
+      }
     }
     const wait = this.take(key, state.requestsPerMinute);
     if (wait > 0) {
@@ -102,16 +118,39 @@ export class BudgetGate implements CallGate {
       };
     }
     if (state.lines.length === 0) return { ok: true };
-    return { ok: true, release: await this.reserve(call, keys) };
+    return { ok: true, release: await this.reserve(call, keys, key) };
   }
 
-  /** Reserves the call's possible cost at its levels; returns the release. */
+  /**
+   * In-flight reservations against one budget line (KOBE-42 review). On a shared line (install,
+   * team) each member's reservations count only up to their share of what is left
+   * ({@link MEMBER_SHARE}), so one sandbox reserving large calls cannot deny everyone else; that
+   * member alone is refused (429) once its own reservations reach its share.
+   */
+  private inFlight(line: BudgetLine, lineKey: string, member: string): "ok" | "full" | "own_share" {
+    const byMember = this.reserved.get(lineKey);
+    if (!byMember) return "ok";
+    const left = Math.max(0, line.limit - line.spent);
+    const share = line.scope === "user" ? Number.POSITIVE_INFINITY : left * MEMBER_SHARE;
+    let total = 0;
+    for (const r of byMember.values()) total += Math.min(r[line.unit], share);
+    if (line.spent + total >= line.limit) return "full";
+    const own = byMember.get(member)?.[line.unit] ?? 0;
+    return own > 0 && own >= share ? "own_share" : "ok";
+  }
+
+  /**
+   * Reserves the call's possible cost at its levels. The release takes whether the call's ledger
+   * row will be written: then the reservation stays until {@link settle} (the row landed and the
+   * cached spend was dropped, so the next check sees it), or {@link SETTLE_TIMEOUT_MS} at most.
+   */
   private async reserve(
     call: CallContext,
     keys: ReturnType<typeof reservationKeys>,
-  ): Promise<() => void> {
+    member: string,
+  ): Promise<(written: boolean) => void> {
     const input = call.inputEstimate ?? 0;
-    const output = chargedOutput(call.requestedOutput);
+    const output = call.outputAllowance ?? chargedOutput(undefined);
     const prices = await this.priceCache.get("prices", () => this.store.prices());
     const price = call.model ? prices.get(call.model) : undefined;
     const cost: Reserved = {
@@ -119,20 +158,47 @@ export class BudgetGate implements CallGate {
       usd: price ? (input * price.input + output * price.output) / 1_000_000 : 0,
     };
     const all = [keys.install, keys.team, keys.user];
-    for (const k of all) this.add(k, cost, 1);
+    for (const k of all) this.add(k, member, cost, 1);
     let released = false;
-    return () => {
+    const drop = () => {
       if (released) return;
       released = true;
-      for (const k of all) this.add(k, cost, -1);
+      for (const k of all) this.add(k, member, cost, -1);
+    };
+    return (written) => {
+      if (!written || !call.callId) {
+        drop();
+        return;
+      }
+      const timer = setTimeout(() => {
+        this.pending.delete(call.callId ?? "");
+        drop();
+      }, SETTLE_TIMEOUT_MS);
+      timer.unref();
+      this.pending.set(call.callId, () => {
+        clearTimeout(timer);
+        drop();
+      });
     };
   }
 
-  private add(key: string, cost: Reserved, sign: 1 | -1): void {
-    const r = this.reserved.get(key) ?? { usd: 0, tokens: 0 };
+  /** The ledger rows of these calls were written: their reservations end (cache dropped first). */
+  settle(callIds: readonly string[]): void {
+    for (const id of callIds) {
+      const done = this.pending.get(id);
+      this.pending.delete(id);
+      done?.();
+    }
+  }
+
+  private add(lineKey: string, member: string, cost: Reserved, sign: 1 | -1): void {
+    const byMember = this.reserved.get(lineKey) ?? new Map<string, Reserved>();
+    const r = byMember.get(member) ?? { usd: 0, tokens: 0 };
     const next = { usd: r.usd + sign * cost.usd, tokens: r.tokens + sign * cost.tokens };
-    if (next.tokens <= 0 && next.usd <= 1e-12) this.reserved.delete(key);
-    else this.reserved.set(key, next);
+    if (next.tokens <= 0 && next.usd <= 1e-12) byMember.delete(member);
+    else byMember.set(member, next);
+    if (byMember.size === 0) this.reserved.delete(lineKey);
+    else this.reserved.set(lineKey, byMember);
   }
 
   /** Takes one request from the member's bucket; 0 when allowed, else seconds until one is. */

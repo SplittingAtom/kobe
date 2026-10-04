@@ -15,7 +15,8 @@ const call = (userId: string): CallContext => ({
   path: "/v1/chat/completions",
   model: "openai/m",
   inputEstimate: 100,
-  requestedOutput: 100,
+  outputAllowance: 100,
+  callId: randomUUID(),
 });
 
 const line = (over: Partial<BudgetLine>): BudgetLine => ({
@@ -107,23 +108,54 @@ describe("BudgetGate (KOBE-42)", () => {
   });
 
   it("reserves an admitted call's possible cost until it ends (concurrent calls cannot overshoot)", async () => {
-    // $1 per token here: 200 tokens reserved = $200 per call; $500 left of the team's budget.
+    // $1 per token here: 200 tokens reserved = $200 per call; $1,000 left of the team's budget.
     const { g } = gate(() => ({
       lines: [
-        line({ limit: 1_000, spent: 500 }),
-        line({ unit: "tokens", limit: 10_000, spent: 0 }),
+        line({ limit: 10_000, spent: 9_000 }),
+        line({ unit: "tokens", limit: 1e6, spent: 0 }),
       ],
       requestsPerMinute: 1_000,
     }));
+    // Five members, one call each: 5 × 200 reaches the $1,000 left.
+    const admitted = [];
+    for (let i = 0; i < 5; i++) admitted.push(await g.admit(call(randomUUID())));
+    expect(admitted.every((d) => d.ok)).toBe(true);
+    expect(await g.admit(call(randomUUID()))).toMatchObject({
+      ok: false,
+      code: "budget_exhausted",
+    });
+    const first = admitted[0];
+    if (first?.ok) first.release?.(false);
+    expect((await g.admit(call(randomUUID()))).ok).toBe(true);
+  });
+
+  it("one member cannot hold a shared budget with reservations (fair share)", async () => {
+    const { g } = gate(() => ({
+      lines: [line({ limit: 10_000, spent: 9_000 })],
+      requestsPerMinute: 1_000,
+    }));
+    const hog = randomUUID();
+    // The hog's share of the $1,000 left is $250: its second $200 call is refused (429), not
+    // everyone else's.
+    expect((await g.admit(call(hog))).ok).toBe(true);
+    expect((await g.admit(call(hog))).ok).toBe(true);
+    expect(await g.admit(call(hog))).toMatchObject({ ok: false, code: "too_many_calls_in_flight" });
+    expect((await g.admit(call(randomUUID()))).ok).toBe(true);
+  });
+
+  it("keeps a written call's reservation until its ledger row lands (settle)", async () => {
+    const { g } = gate(() => ({
+      lines: [line({ unit: "tokens", scope: "user", limit: 200, spent: 0 })],
+      requestsPerMinute: 1_000,
+    }));
     const user = randomUUID();
-    const first = await g.admit(call(user));
-    const second = await g.admit(call(user));
-    const third = await g.admit(call(randomUUID())); // another member of the same team
-    expect([first.ok, second.ok, third.ok]).toEqual([true, true, true]);
-    // 500 + 3 × 200 ≥ 1,000: nothing more starts while the three are in flight.
+    const c = call(user);
+    const d = await g.admit(c);
+    if (!d.ok) throw new Error("refused");
+    d.release?.(true);
+    // The call ended but its row has not landed: its 200 tokens stay reserved (of 200).
     expect(await g.admit(call(user))).toMatchObject({ ok: false, code: "budget_exhausted" });
-    if (first.ok) first.release?.();
-    if (second.ok) second.release?.();
+    g.settle([c.callId ?? ""]);
     expect((await g.admit(call(user))).ok).toBe(true);
   });
 
