@@ -463,6 +463,22 @@ describe("sandbox admission policies (KOBE-9 binding requirement 3)", () => {
     }
   });
 
+  it("enforces 'restricted' on team pods but for SETUID/SETGID and privilege escalation (KOBE-71)", () => {
+    const e = expressions("-sandbox-pods");
+    for (const fragment of [
+      "exists(d, d == 'ALL')",
+      "all(a, a in ['SETUID', 'SETGID'])",
+      "privileged",
+      "runAsNonRoot",
+      "runAsUser",
+      "in ['RuntimeDefault', 'Localhost']",
+      "has(v.persistentVolumeClaim) || has(v.projected)",
+    ]) {
+      expect(e).toContain(fragment);
+    }
+    expect(expressions("-server-scope")).toContain("in ['baseline', 'restricted']");
+  });
+
   it("confines the server's namespace and RoleBinding writes to labelled kobe-team-* namespaces", () => {
     const p = policy("-server-scope");
     expect(p?.spec.matchConditions).toEqual([

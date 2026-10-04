@@ -125,7 +125,7 @@ describe("workspace sync (agent)", () => {
     const restored = await started(second);
     expect(await text(second, "report.md")).toBe("# Q3\n");
     expect(await text(second, "data/big.csv")).toBe("x,y\n".repeat(10_000));
-    expect((await stat(path.join(second, "bin/run.sh"))).mode & 0o777).toBe(0o755);
+    expect((await stat(path.join(second, "bin/run.sh"))).mode & 0o777).toBe(0o775);
     expect(
       Math.abs((await stat(path.join(second, "report.md"))).mtimeMs - mtime),
     ).toBeLessThanOrEqual(1);

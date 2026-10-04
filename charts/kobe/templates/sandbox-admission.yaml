@@ -12,8 +12,10 @@
 # failurePolicy Fail: if a policy cannot be evaluated, the request is refused.
 #
 # 1. The server's ServiceAccount may write namespaces and RoleBindings only in kobe-team-*:
-#    namespaces labelled as team namespaces under Pod Security "restricted"; RoleBindings granting
-#    the sandbox manager role to the server only.
+#    namespaces labelled as team namespaces under Pod Security "baseline" (KOBE-71: the sandbox
+#    container adds SETUID/SETGID for its Pi identities; policy 2 enforces the rest of
+#    "restricted") or "restricted"; RoleBindings granting the sandbox manager role to the server
+#    only.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -50,8 +52,8 @@ spec:
     - expression: >-
         !variables.isNamespace || request.operation == 'DELETE' ||
         (variables.labels[?'kobe.splittingatom.io/team-namespace'].orValue('') == 'true' &&
-         variables.labels[?'pod-security.kubernetes.io/enforce'].orValue('') == 'restricted')
-      message: "team namespaces must be labelled as such and enforce Pod Security 'restricted'"
+         variables.labels[?'pod-security.kubernetes.io/enforce'].orValue('') in ['baseline', 'restricted'])
+      message: "team namespaces must be labelled as such and enforce Pod Security 'baseline' or 'restricted'"
     - expression: >-
         !variables.isNamespace || request.operation == 'DELETE' ||
         (variables.labels[?'kobe.splittingatom.io/team-id'].orValue('') != '' &&
@@ -79,7 +81,11 @@ spec:
 # 2. Every pod in a kobe-team-* namespace runs under the configured RuntimeClass, whose handler
 #    must be gVisor or Kata (checked against the live RuntimeClass object: the param), and carries
 #    no credentials: no Secret volumes or env, no API token, no host namespaces or hostPath, and
-#    projected ServiceAccount tokens only for the Kobe bootstrap audience.
+#    projected ServiceAccount tokens only for the Kobe bootstrap audience. It also meets Pod
+#    Security "restricted" except for two things the namespace's "baseline" level lets through
+#    (KOBE-71): containers may add SETUID and SETGID (nothing else) and allow privilege escalation,
+#    for the image's kobe-runas helper. Non-root, seccomp, drop ALL, no privileged containers and
+#    the restricted volume types are required here.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -126,6 +132,27 @@ spec:
           (!has(c.envFrom) || c.envFrom.all(e, !has(e.secretRef))) &&
           (!has(c.env) || c.env.all(e, !has(e.valueFrom) || !has(e.valueFrom.secretKeyRef))))
       message: "sandbox pods must not read Secrets into the environment"
+    - expression: >-
+        variables.containers.all(c,
+          c.?securityContext.?capabilities.?drop.orValue([]).exists(d, d == 'ALL') &&
+          c.?securityContext.?capabilities.?add.orValue([]).all(a, a in ['SETUID', 'SETGID']) &&
+          !c.?securityContext.?privileged.orValue(false))
+      message: "sandbox containers must drop ALL capabilities, add at most SETUID and SETGID, and not be privileged"
+    - expression: >-
+        variables.containers.all(c,
+          c.?securityContext.?runAsNonRoot.orValue(object.spec.?securityContext.?runAsNonRoot.orValue(false)) &&
+          c.?securityContext.?runAsUser.orValue(object.spec.?securityContext.?runAsUser.orValue(1)) != 0) &&
+        object.spec.?securityContext.?runAsUser.orValue(1) != 0
+      message: "sandbox pods must run as non-root"
+    - expression: >-
+        variables.containers.all(c,
+          c.?securityContext.?seccompProfile.?type.orValue(
+            object.spec.?securityContext.?seccompProfile.?type.orValue('')) in ['RuntimeDefault', 'Localhost'])
+      message: "sandbox containers must run under the RuntimeDefault or a Localhost seccomp profile"
+    - expression: >-
+        variables.volumes.all(v, has(v.configMap) || has(v.csi) || has(v.downwardAPI) ||
+          has(v.emptyDir) || has(v.ephemeral) || has(v.persistentVolumeClaim) || has(v.projected))
+      message: "sandbox pods may only use the volume types Pod Security 'restricted' allows"
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

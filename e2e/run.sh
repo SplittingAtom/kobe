@@ -271,7 +271,7 @@ contains "ensuring it again returns the same sandbox" "^${sandbox_id:-none}$" \
   "$(json_field sandboxId "$( (ensure_sandbox || true) | tail -1)")"
 contains "team namespace carries its team id" "^${E2E_TEAM_ID}$" \
   "$($KUBECTL get namespace "$TEAM_NS" -o jsonpath='{.metadata.labels.kobe\.splittingatom\.io/team-id}')"
-contains "team namespace enforces Pod Security 'restricted'" '^restricted$' \
+contains "team namespace enforces Pod Security 'baseline' (KOBE-71; the rest of 'restricted' by admission)" '^baseline$' \
   "$($KUBECTL get namespace "$TEAM_NS" -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}')"
 np_spec() { $KUBECTL -n "$TEAM_NS" get networkpolicy kobe-sandbox-isolation -o jsonpath="$1"; }
 contains "team NetworkPolicy selects every pod in the namespace" '^\{\}$' "$(np_spec '{.spec.podSelector}')"
@@ -318,6 +318,12 @@ contains "admission refuses a team pod mounting a Secret" 'must not mount Secret
   "$(admission "{\"spec\":{\"runtimeClassName\":\"gvisor\",\"automountServiceAccountToken\":false,$SEC_POD,\"containers\":[{\"name\":\"c\",\"image\":\"busybox:1.37\",$SEC_CTR}],\"volumes\":[{\"name\":\"s\",\"secret\":{\"secretName\":\"x\"}}]}}")"
 contains "admission refuses a team pod with a Kubernetes API token" 'must not mount a Kubernetes API token' \
   "$(admission "{\"spec\":{\"runtimeClassName\":\"gvisor\",$SEC_POD,\"containers\":[{\"name\":\"c\",\"image\":\"busybox:1.37\",$SEC_CTR}]}}")"
+# KOBE-71: the namespace is Pod Security "baseline" so sandboxes can add SETUID/SETGID for their
+# Pi identities; Kobe's own policy keeps the rest of "restricted".
+contains "admission refuses a team container adding any other capability (KOBE-71)" 'add at most SETUID and SETGID' \
+  "$(admission "{\"spec\":{\"runtimeClassName\":\"gvisor\",\"automountServiceAccountToken\":false,$SEC_POD,\"containers\":[{\"name\":\"c\",\"image\":\"busybox:1.37\",\"securityContext\":{\"capabilities\":{\"drop\":[\"ALL\"],\"add\":[\"SETUID\",\"CHOWN\"]}}}]}}")"
+contains "admission refuses a team pod running as root (KOBE-71)" 'must run as non-root' \
+  "$(admission "{\"spec\":{\"runtimeClassName\":\"gvisor\",\"automountServiceAccountToken\":false,\"securityContext\":{\"runAsUser\":0,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}},\"containers\":[{\"name\":\"c\",\"image\":\"busybox:1.37\",$SEC_CTR}]}}")"
 server_sa="system:serviceaccount:$NS:kobe-server"
 contains "the server's ServiceAccount cannot create namespaces outside kobe-team-*" 'only manage kobe-team-\* namespaces' \
   "$($KUBECTL create namespace kobe-e2e-evil --as="$server_sa" --dry-run=server 2>&1 || true)"
@@ -1540,6 +1546,35 @@ JS
     contains "the upstream saw the provider key (attached by Bifrost, outside the sandbox)" 'e2e-provider-key' "$seen_now"
     if [[ -n "$seen_now" ]] && ! printf '%s' "$seen_now" | grep -q 'eyJ'; then ok "no session token (JWT) reached the upstream"
     else fail "no session token (JWT) reached the upstream"; fi
+    # KOBE-71: the Owner's sandbox just ran Pi for that message, under gVisor. Pi runs under a Pi
+    # identity, not as the agent; another identity can neither write nor read that Pi's runtime
+    # directory, nor read the bootstrap token, nor signal the agent or that Pi. (`kubectl exec`
+    # runs with the agent's uid and groups, so it can use kobe-runas as the agent does; 2015 is an
+    # identity no Pi uses while a single thread runs.)
+    echo "==> sandbox privilege separation (KOBE-71)"
+    read -r -d '' PRIVSEP_SH <<'SH' || true
+R=/opt/kobe/bin/kobe-runas
+agent=$(pgrep -f '^node .*sandbox-agent/dist/index.js' | head -1)
+pi=$(pgrep -f '^node .* --mode rpc' | head -1)
+dir=$(ls -d /run/kobe-pi/pi-* 2>/dev/null | head -1)
+echo "agent=$(stat -c %u /proc/$agent) caps=$(awk '/^CapEff/ {print $2}' /proc/$agent/status)"
+echo "pi_uid=$(stat -c %u /proc/$pi) dir=$(stat -c '%U:%G %a' $dir)"
+echo "plant=$($R 2015 sh -c "echo {} > $dir/agent/settings.json" 2>&1 | grep -c 'Permission denied')"
+echo "read_model=$($R 2015 cat "$dir/model.json" 2>&1 | grep -c 'Permission denied')"
+echo "read_token=$($R 2015 cat /run/kobe-agent/bootstrap/bootstrap-token 2>&1 | grep -c 'Permission denied')"
+echo "signal=$($R 2015 sh -c "kill -0 $agent; kill -0 $pi" 2>&1 | grep -c 'not permitted')"
+SH
+    owner_pod=$($KUBECTL -n "$TEAM_NS" get pods -l "kobe.splittingatom.io/user-id=$owner_id" -o name 2>/dev/null | head -1)
+    privsep=$($KUBECTL -n "$TEAM_NS" exec "${owner_pod:-pod/none}" -c agent -- sh -c "$PRIVSEP_SH" 2>&1 || true)
+    printf '     %s\n' "$privsep"
+    contains "the agent runs as uid 1000 with no capabilities" '^agent=1000 caps=0+$' "$privsep"
+    contains "Pi runs under a Pi identity, its runtime dir the agent's with Pi's group" \
+      '^pi_uid=20[0-9][0-9] dir=kobe:kobe-pi-[0-9]+ 2750$' "$privsep"
+    contains "another identity cannot plant a file in that Pi's runtime dir (EACCES)" '^plant=1$' "$privsep"
+    contains "another identity cannot read that Pi's model file (token, run id)" '^read_model=1$' "$privsep"
+    contains "Pi identities cannot read the agent's bootstrap token" '^read_token=1$' "$privsep"
+    contains "Pi identities cannot signal the agent or another thread's Pi" '^signal=2$' "$privsep"
+
     # A clear failure when the team has no model: the run fails with the server's message, nothing hangs.
     expect "the team disables its models" '^200 ' "$(as_owner "PUT /v1/team/models/fast {\"enabled\":false}")"
     no_model=$(chat_run "no-model-$RANDOM" 180000)

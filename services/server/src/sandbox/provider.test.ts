@@ -58,14 +58,14 @@ const objectAt = (kube: FakeKube, kind: string, name: string, namespace?: string
   kube.all(kind).find((o) => o.metadata.name === name && o.metadata.namespace === namespace);
 
 describe("ensureSandbox: team namespace (D11)", () => {
-  it("creates the team namespace with its team id and Pod Security 'restricted'", async () => {
+  it("creates the team namespace with its team id and Pod Security 'baseline' (KOBE-71)", async () => {
     const { kube, provider } = setup();
     await provider.ensureSandbox(TEAM, USER);
     const ns = objectAt(kube, "Namespace", NS);
     expect(ns?.metadata.labels).toMatchObject({
       [LABEL_TEAM_ID]: TEAM.id,
       [LABEL_TEAM_NAMESPACE]: "true",
-      "pod-security.kubernetes.io/enforce": "restricted",
+      "pod-security.kubernetes.io/enforce": "baseline",
     });
   });
 

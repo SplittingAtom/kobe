@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { EXAMPLE_IDS } from "@kobe/protocol/testing";
@@ -7,6 +7,7 @@ import {
   BRANCH_CUSTOM_TYPE,
   SessionRestore,
   appendBranchMarker,
+  ensureSessionDir,
   readEntryIds,
   sessionFilePath,
 } from "./session-files.js";
@@ -97,7 +98,7 @@ describe("SessionRestore", () => {
     await restore.writePart(1, undefined, [entry("b1", "a1")], () => header);
     expect(await restore.commit()).toBe(2);
     expect((await lines(target)).map((r) => r.id)).toEqual(["s", "a1", "b1"]);
-    expect((await stat(target)).mode & 0o777).toBe(0o600);
+    expect((await stat(target)).mode & 0o777).toBe(0o660);
   });
 
   it("uses an unpredictable temp name that a planted symlink cannot redirect", async () => {
@@ -132,5 +133,27 @@ describe("SessionRestore", () => {
     await expect(restore.writePart(1, undefined, big, () => header)).rejects.toThrow(/too large/);
     await restore.abort();
     expect((await readdir(dir)).filter((f) => f.endsWith(".tmp"))).toEqual([]);
+  });
+});
+
+describe("ensureSessionDir under Pi identities (KOBE-71)", () => {
+  it("opens the session dirs and the agent's session files to the workspace group", async () => {
+    const workspace = path.join(dir, "ws");
+    const sessions = path.join(workspace, ".kobe", "sessions");
+    // As an agent before KOBE-71 left them: 0700 directories, 0600 files.
+    await mkdir(sessions, { recursive: true, mode: 0o700 });
+    await writeFile(path.join(sessions, `${EXAMPLE_IDS.thread}.jsonl`), "{}\n", { mode: 0o600 });
+    await ensureSessionDir(sessions, { shared: true, workspaceDir: workspace });
+    expect((await stat(sessions)).mode & 0o770).toBe(0o770);
+    expect((await stat(path.join(workspace, ".kobe"))).mode & 0o770).toBe(0o770);
+    expect((await stat(path.join(sessions, `${EXAMPLE_IDS.thread}.jsonl`))).mode & 0o777).toBe(
+      0o660,
+    );
+  });
+
+  it("keeps them private without Pi identities", async () => {
+    const sessions = path.join(dir, "private", "sessions");
+    await ensureSessionDir(sessions);
+    expect((await stat(sessions)).mode & 0o777).toBe(0o700);
   });
 });

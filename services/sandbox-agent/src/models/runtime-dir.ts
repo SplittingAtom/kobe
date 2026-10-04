@@ -1,11 +1,15 @@
-import { lstat, mkdir, readFile, readdir, rm } from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, readdir, realpath, rm } from "node:fs/promises";
 import path from "node:path";
+import type { PiIdentities } from "../pi/identities.js";
 
 /**
  * The per-process runtime directories (threads/thread.ts): `<runtimeDir>/pi-XXXXXX/` with `agent/`
- * (Pi's `PI_CODING_AGENT_DIR`) and `model.json`. A sibling process of the same user can write into
- * them while a Pi runs (KOBE-41 review, MEDIUM 1): until Pi runs under its own uid, the agent
- * detects it (`unexpectedEntries`) and sweeps leftovers of earlier agents at start-up.
+ * (Pi's `PI_CODING_AGENT_DIR`) and `model.json`. Under a Pi identity (KOBE-71) the directory
+ * belongs to the agent with the Pi's own group (only that Pi reads it, and it writes only
+ * `agent/`), and the root is one Pi identities cannot rename (`ensureRuntimeRoot`), so another
+ * thread's tools cannot touch it at all. Without one (the agent's own uid, as before KOBE-71) a
+ * sibling process of the same user could write into it, which the tripwire (`unexpectedEntries`)
+ * detects. Either way the agent sweeps leftovers of earlier agents at start-up.
  */
 export const RUNTIME_DIR_PREFIX = "pi-";
 export const AGENT_SUBDIR = "agent";
@@ -115,13 +119,72 @@ function canonical(value: unknown): string {
  * before its Pi exited, or the pod restarted), so no stale token or config outlives its process.
  * Returns the number of directories removed.
  */
-export async function sweepRuntimeDir(runtimeDir: string): Promise<number> {
-  await mkdir(runtimeDir, { recursive: true, mode: 0o700 });
+export async function sweepRuntimeDir(
+  runtimeDir: string,
+  options: { readonly identities?: PiIdentities | undefined } = {},
+): Promise<number> {
+  await ensureRuntimeRoot(runtimeDir, options.identities !== undefined);
   let removed = 0;
   for (const name of await readdir(runtimeDir)) {
     if (!name.startsWith(RUNTIME_DIR_PREFIX)) continue;
-    await rm(path.join(runtimeDir, name), { recursive: true, force: true });
+    await removeRuntimeDir(path.join(runtimeDir, name), options.identities);
     removed += 1;
   }
   return removed;
+}
+
+/**
+ * The parent of every Pi's runtime directory. Without Pi identities: the agent's own, 0700. Under
+ * Pi identities (KOBE-71) every Pi must reach its own directory through it, and no Pi identity
+ * may rename it or anything above it: renaming a directory needs only write access to its parent
+ * (no sticky bit), and a swapped path would hand a thread's Pi config to another thread. So the
+ * root is either the agent's own (0711: reach, never list) or a root-owned sticky directory (a
+ * memory-backed emptyDir, the pod's `/run/kobe-pi`; the sticky bit protects the agent's entries),
+ * and every directory above it is sticky or writable by its owner only. A root that is neither,
+ * or not a real directory, is refused.
+ */
+export async function ensureRuntimeRoot(runtimeDir: string, identities: boolean): Promise<void> {
+  await mkdir(runtimeDir, { recursive: true, mode: 0o700 });
+  const info = await lstat(runtimeDir);
+  const uid = process.getuid?.();
+  const own = uid === undefined || info.uid === uid;
+  const stickyRoot = info.uid === 0 && (info.mode & 0o1000) !== 0;
+  if (!info.isDirectory() || !(own || (identities && stickyRoot))) {
+    throw new Error(`Pi runtime directory ${runtimeDir} is not the agent's own directory`);
+  }
+  if (own) await chmod(runtimeDir, identities ? 0o711 : 0o700);
+  if (!identities) return;
+  // The real path: links on the way (macOS /var) are judged by where they lead.
+  const real = await realpath(runtimeDir);
+  for (let dir = path.dirname(real); ; dir = path.dirname(dir)) {
+    const above = await lstat(dir);
+    const shared = (above.mode & 0o022) !== 0 && (above.mode & 0o1000) === 0;
+    if (!above.isDirectory() || shared) {
+      throw new Error(
+        `Pi runtime directory ${runtimeDir}: ${dir} lets other users rename what is in it ` +
+          "(use a directory on a sticky volume, such as the pod's /run/kobe-pi)",
+      );
+    }
+    if (dir === path.dirname(dir)) break;
+  }
+}
+
+/**
+ * Remove one Pi's runtime directory. Under a Pi identity a tool may have left owner-only
+ * directories in it the agent cannot remove: those go as the identity that owns the directory's
+ * group (the Pi's uid), then the rest as the agent.
+ */
+export async function removeRuntimeDir(dir: string, identities?: PiIdentities): Promise<void> {
+  try {
+    await rm(dir, { recursive: true, force: true });
+    return;
+  } catch (error) {
+    if (identities === undefined) throw error;
+  }
+  const gid = (await lstat(dir)).gid;
+  const identity = identities.byGid(gid);
+  if (identity === undefined)
+    throw new Error(`cannot remove ${dir}: not a Pi identity's directory`);
+  await identities.removeContents(identity, path.join(dir, AGENT_SUBDIR));
+  await rm(dir, { recursive: true, force: true });
 }

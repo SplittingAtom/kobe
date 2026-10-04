@@ -8,6 +8,9 @@ import {
   type WorkspaceChangeResult,
   type WorkspaceEntry,
 } from "@kobe/protocol";
+import { constants as FS } from "node:fs";
+import { access } from "node:fs/promises";
+import { join } from "node:path";
 import type { WireLogger } from "../wire/client.js";
 import { SyncHttpError, type SyncClient } from "./client.js";
 import {
@@ -119,8 +122,9 @@ const known = (e: WorkspaceEntry): Known => ({
 const sameAs = (local: LocalFile, k: { size: number; mtimeMs: number }) =>
   local.size === k.size && Math.abs(local.mtimeMs - k.mtimeMs) <= 1;
 
+/** Group-writable: every thread's Pi identity shares the workspace through its group (KOBE-71). */
 const modeFor = (path: string, executable: boolean) =>
-  isServerOwnedPath(path) ? 0o444 : executable ? 0o755 : 0o644;
+  isServerOwnedPath(path) ? 0o444 : executable ? 0o775 : 0o664;
 
 /** Runs `fn` over `items`, `limit` at a time; waits for all, then rethrows the first failure. */
 async function parallel<T>(items: readonly T[], limit: number, fn: (item: T) => Promise<void>) {
@@ -153,6 +157,8 @@ export class WorkspaceSync {
   readonly #known = new Map<string, Known>();
   /** Local states the server refused (size/quota): not retried until the file changes. */
   readonly #refused = new Map<string, LocalFile>();
+  /** Paths already reported unreadable (bounded). */
+  readonly #unreadable = new Set<string>();
   #seenRev = 0;
   #chain: Promise<unknown> = Promise.resolve();
   /** Settles once the startup restore succeeded, or the server said it has no workspace sync. */
@@ -287,6 +293,24 @@ export class WorkspaceSync {
     const run = this.#chain.then(fn, fn);
     this.#chain = run.catch(() => {});
     return run;
+  }
+
+  /**
+   * A file a tool made owner-only (KOBE-71: tools run under Pi identities, the agent reads the
+   * workspace through its group) cannot be pushed: say so once per path, never treat it as gone.
+   */
+  async #noteUnreadable(path: string): Promise<void> {
+    if (this.#unreadable.has(path)) return;
+    try {
+      await access(join(this.#o.root, path), FS.R_OK);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EACCES") return;
+      if (this.#unreadable.size < 1000) this.#unreadable.add(path);
+      this.#warn(
+        `workspace file not synced: ${path} is not readable by the agent (owner-only mode)`,
+        error,
+      );
+    }
   }
 
   #warn(message: string, error: unknown): void {
@@ -612,7 +636,11 @@ export class WorkspaceSync {
       const refused = this.#refused.get(path);
       if (refused && sameAs(file, refused)) continue;
       const hashed = await hashFile(this.#o.root, path);
-      if (!hashed || hashed.size !== file.size) continue; // changing right now: next time
+      if (!hashed) {
+        await this.#noteUnreadable(path);
+        continue; // changing right now, or unreadable: next time
+      }
+      if (hashed.size !== file.size) continue; // changing right now: next time
       changes.push({
         op: "put",
         path,

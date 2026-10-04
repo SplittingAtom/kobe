@@ -1,21 +1,24 @@
 import { createHash, randomBytes } from "node:crypto";
 import { constants as FS } from "node:fs";
-import { chmod, lstat, mkdir, open, opendir, rename, rm, unlink, utimes } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, opendir, rename, rm, unlink } from "node:fs/promises";
 import path from "node:path";
-import { pipeline } from "node:stream/promises";
-import { Transform, type Readable } from "node:stream";
+import type { Readable } from "node:stream";
 import {
   WORKSPACE_SEGMENT_MAX_BYTES,
   isExcludedPath,
   isServerOwnedPath,
   workspacePathIssue,
 } from "@kobe/protocol";
+import { assertOnVolume, openOnVolume } from "./volume.js";
 
 /**
  * Filesystem side of workspace sync (KOBE-27). Paths are workspace-relative POSIX paths (protocol
- * `workspacePathIssue` rules). Model-run code shares this uid and filesystem, so nothing here
- * follows a symlink out of the workspace: parents are checked component by component, writes go
- * to an exclusive temp file renamed into place, symlinks are never synced.
+ * `workspacePathIssue` rules). Model-run code can change this filesystem under the agent, so
+ * nothing here follows a symlink out of the workspace: parents are checked component by component,
+ * every file is opened and checked to be on the workspace volume (volume.ts), writes go to an
+ * exclusive temp file renamed into place, symlinks are never synced. Files and directories are
+ * group-writable (0664/0775): under Pi identities (KOBE-71) every thread's tools reach the shared
+ * workspace through its group (D13).
  */
 export interface LocalFile {
   readonly size: number;
@@ -93,11 +96,15 @@ export async function scanWorkspace(
  * Whether every parent of `rel` is a real directory (no symlink on the way): reads, removals and
  * uploads never act on something outside the workspace through a linked parent.
  *
- * Accepted scope (TOCTOU): model-run code runs as the same uid, so it can swap a parent for a
- * link between this check and the following open/unlink/rename. That gains it nothing it lacks
- * already — it can read, write and delete everything this uid can, directly — so the check
- * protects against accidents (a link left in the workspace), not against an adversary on the
- * same uid. Writes are additionally `O_EXCL | O_NOFOLLOW` (see `writeFileAtomic`).
+ * Accepted scope (TOCTOU): model-run code can swap a parent for a link between this check and the
+ * following open/unlink/rename (every thread's tools can rename in the shared workspace). Under Pi
+ * identities (KOBE-71) the agent can reach files those tools cannot (other Pis' runtime
+ * directories, the bootstrap token), so every file the agent reads or writes is opened first and
+ * checked to be on the workspace volume (workspace/volume.ts); this check protects against
+ * accidents (a link left in the workspace). Writes are additionally `O_EXCL | O_NOFOLLOW` (see
+ * `writeFileAtomic`). What stays possible through a swapped parent is removing, renaming or
+ * chmod-ing an entry elsewhere that the agent owns, by name: a denial of service against the
+ * user's own other threads (their runtime dirs fail the tripwire), never a read or a write.
  */
 export async function parentsAreDirs(root: string, rel: string): Promise<boolean> {
   const parts = rel.split("/").slice(0, -1);
@@ -130,8 +137,9 @@ export async function hashFile(
   const hash = createHash("sha256");
   let size = 0;
   try {
-    const handle = await open(path.join(root, rel), FS.O_RDONLY | FS.O_NOFOLLOW);
+    const handle = await open(path.join(root, rel), FS.O_RDONLY | FS.O_NOFOLLOW | FS.O_NONBLOCK);
     try {
+      await assertOnVolume(handle, root, rel);
       for await (const chunk of handle.createReadStream({ autoClose: false })) {
         hash.update(chunk as Buffer);
         size += (chunk as Buffer).length;
@@ -148,7 +156,7 @@ export async function hashFile(
 /** A read stream of the file, opened without following a final symlink (closed at its end). */
 export async function openForUpload(root: string, rel: string): Promise<Readable> {
   if (!(await parentsAreDirs(root, rel))) throw new Error("a parent directory is a link");
-  const handle = await open(path.join(root, rel), FS.O_RDONLY | FS.O_NOFOLLOW);
+  const handle = await openOnVolume(root, path.join(root, rel), FS.O_RDONLY | FS.O_NONBLOCK);
   return handle.createReadStream();
 }
 
@@ -170,7 +178,7 @@ export async function ensureParents(root: string, rel: string): Promise<void> {
       stat = await lstat(abs);
     } catch {
       // Parallel downloads may create the same directory: EEXIST is fine if it is one.
-      await mkdir(abs, { mode: 0o755 }).catch(async (error: unknown) => {
+      await mkdir(abs, { mode: 0o775 }).catch(async (error: unknown) => {
         if (!(await lstat(abs).catch(() => undefined))?.isDirectory()) throw error;
       });
       continue;
@@ -181,7 +189,7 @@ export async function ensureParents(root: string, rel: string): Promise<void> {
     }
     if (!owned) throw new Error(`a file or link is in the way of directory ${current}`);
     await rm(abs, { force: true });
-    await mkdir(abs, { mode: 0o755 });
+    await mkdir(abs, { mode: 0o775 });
   }
 }
 
@@ -215,20 +223,23 @@ export async function writeFileAtomic(
   const hash = createHash("sha256");
   let size = 0;
   try {
-    const counter = new Transform({
-      transform(chunk: Buffer, _e, done) {
-        hash.update(chunk);
-        size += chunk.length;
-        done(null, chunk);
-      },
-    });
-    // The write stream closes the handle when it finishes (or fails).
-    await pipeline(body, counter, handle.createWriteStream());
+    // Written, chmod-ed and timed through the handle, and only on the workspace volume: a
+    // replaced parent never makes the agent write elsewhere (workspace/volume.ts).
+    await assertOnVolume(handle, root, temp);
+    for await (const piece of body) {
+      const chunk = Buffer.isBuffer(piece) ? piece : Buffer.from(piece as Uint8Array);
+      hash.update(chunk);
+      size += chunk.length;
+      for (let offset = 0; offset < chunk.length;) {
+        offset += (await handle.write(chunk, offset)).bytesWritten;
+      }
+    }
     if (size !== expect.size || hash.digest("hex") !== expect.sha256)
       throw new ContentMismatchError();
-    await chmod(temp, expect.mode);
+    await handle.chmod(expect.mode);
     const seconds = expect.mtimeMs / 1000;
-    await utimes(temp, seconds, seconds);
+    await handle.utimes(seconds, seconds);
+    await handle.close();
     const existing = await lstat(target).catch(() => undefined);
     if (existing?.isDirectory()) throw new Error(`a directory is in the way of ${rel}`);
     await rename(temp, target);

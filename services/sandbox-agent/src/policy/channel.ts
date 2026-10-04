@@ -21,8 +21,9 @@ import {
  * socket pair the agent created when it spawned Pi. Nothing listens. Pi spawns its tools with
  * explicit stdio pipes, and Node/libuv does not pass fd 3 on to them (verified on Linux with Node
  * 22 and on macOS, `agent.runs.test.ts` "grandchild"); a socket cannot be re-opened through
- * `/proc/<pi>/fd/3` either. That is an observation about Pi's spawn path, not a boundary: model-run
- * code has the same uid as Pi (see the ledger's residual risks). JSONL, LF-split.
+ * `/proc/<pi>/fd/3` either. That is an observation about Pi's spawn path, not a boundary: a tool
+ * has its Pi's uid (each Pi its own, KOBE-71), so the nonce below still matters; it cannot ptrace
+ * its Pi (an ancestor; Yama scope 1, gVisor included) nor reach another thread's. JSONL, LF-split.
  *
  * Handshake: the agent's first line is `{"type":"channel.hello","nonce"}` (random per spawn);
  * kobe-policy reads it at load, before any tool can run, and puts `nonce` in every request. A request
