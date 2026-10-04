@@ -91,3 +91,21 @@ See [docs/gates/gate-1.md](../gates/gate-1.md). Summary:
 
 Open: a provisioning refusal takes the router's full 90 s wake-retry budget before the run fails
 (it is not a definitive `SandboxWakeError`); a follow-up could make it definitive.
+
+## First token (branch `kobe-1-first-token`, after KOBE-40/41)
+
+- Gate install upgraded to `main` `296c275` (local images: ghcr still private), user values kept
+  (public host + TLS set by the coordinator), `--reset-values` because `--reuse-values` had kept
+  the pre-KOBE-40 defaults (no model-gateway access). SeaweedFS added to `kobe-gate1-deps` as the
+  install's S3 (workspace sync is on by default since KOBE-27).
+- Models via `/v1/install/models`: provider kind `ollama` (native) works against the cloud
+  endpoint; catalog `kimi-k2.7-code`, `glm-5.3`; every team enabled, default `kimi-k2.7-code`.
+  The provider key went from the node file through stdin only.
+- Harness: `KOBE_GATE1_MODEL` (the alias fixtures make each team's default; CI keeps `fast`),
+  first token = first `text.delta` or `reasoning.delta`, `KOBE_GATE1_WARM=1` for awake trials,
+  short "one sentence, no tools" prompts (a real model otherwise ran a 20-minute agentic loop),
+  no replay of a run that has not ended.
+- Numbers: cold p50 15.2 s / p95 17.5 s; spaced p95 16.6 s; awake p50 1.5 s / p95 1.8 s
+  (gate-1.md). Real-cluster miss accepted by Chris.
+- No model picker in the chat UI: runs use the team default (team admins change it with
+  `PUT /v1/team/models/:alias`); the admin console's Models pages are not built (KOBE-44).
