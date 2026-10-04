@@ -17,7 +17,7 @@ const REASON_TEXT: Readonly<Record<Item["reason"], string>> = {
   not_team_enabled: "it is not enabled for your team",
   not_user_connected: "you have not connected it yet",
   no_team_default: "your team has no default model",
-  not_approved: "it is not approved for your team",
+  not_approved: "it is not available or approved in this team",
 };
 
 const FALLBACK_REASON_TEXT = "it was left out of this run";
