@@ -103,8 +103,6 @@ export class Thread {
   readonly #runtimeDirs = new Map<PiProcess, string>();
   /** Removal of a runtime directory in progress (awaited by `stopProcess`). */
   readonly #removals = new Map<PiProcess, Promise<void>>();
-  /** Pi's `models-store.json` as it was once Pi was ready (`sealRuntime`); null = absent. */
-  #storeAtBoot: string | null | undefined;
   #closing = new Set<PiProcess>();
   #run: ActiveRun | undefined;
   #streaming = false;
@@ -252,16 +250,6 @@ export class Thread {
   }
 
   /**
-   * Once Pi is ready: remember what Pi's own catalog store holds, so `verifyRuntime` can require
-   * it unchanged (Pi reads it back on every refresh). Call inside the lock, before any prompt.
-   */
-  async sealRuntime(): Promise<void> {
-    const pi = this.#pi;
-    const runtimeDir = pi === undefined ? undefined : this.#runtimeDirs.get(pi);
-    this.#storeAtBoot = runtimeDir === undefined ? undefined : await piModelsStoreText(runtimeDir);
-  }
-
-  /**
    * The tripwire (KOBE-41 review): the private runtime directory may only hold what the agent
    * and Pi wrote, and the model file must be what the agent last wrote. Another process of the
    * same user (a sibling thread's tool) writing `agent/settings.json`, `models.json`, `SYSTEM.md`
@@ -273,17 +261,18 @@ export class Thread {
     const pi = this.#pi;
     const runtimeDir = pi === undefined ? undefined : this.#runtimeDirs.get(pi);
     if (runtimeDir === undefined) return undefined;
+    // The agent's own pending writes first (temp file + rename), then the listing.
+    if (this.#modelFile !== undefined && !(await this.#modelFile.verify())) {
+      return "the model file is not what the agent wrote";
+    }
     const unexpected = await unexpectedEntries(runtimeDir);
     if (unexpected.length > 0) {
       return `unexpected entries in Pi's runtime directory: ${unexpected.slice(0, 5).join(", ")}`;
     }
-    if (this.#modelFile !== undefined && !(await this.#modelFile.verify())) {
-      return "the model file is not what the agent wrote";
-    }
-    if (this.#storeAtBoot !== undefined) {
-      const store = await piModelsStoreText(runtimeDir);
-      if (store !== this.#storeAtBoot) return "Pi's models-store.json changed since Pi started";
-    }
+    // Pi reads its catalog store back on every refresh; an offline Pi with no dynamic provider
+    // never persists an entry (the file is absent or `{}`), so any entry was planted.
+    const store = await piModelsStoreText(runtimeDir);
+    if (store !== null && store !== "{}") return "Pi's models-store.json holds catalog entries";
     return undefined;
   }
 
@@ -488,7 +477,6 @@ export class Thread {
     this.#policy = undefined;
     this.#launchKey = undefined;
     this.#modelFile = undefined;
-    this.#storeAtBoot = undefined;
     this.#streaming = false;
     this.#dialogs.clear();
     this.endRun();

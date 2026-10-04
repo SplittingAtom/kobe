@@ -43,8 +43,9 @@ async function kindOf(file: string): Promise<Kind> {
 /**
  * Entries in the runtime dir and its `agent/` that neither the agent nor Pi wrote, or that are
  * not what they should be (the tripwire): everything is checked with `lstat`, so a symlink, a
- * FIFO or a directory where a regular file belongs is reported too. Only Pi's lock may be a
- * directory; `agent` itself must be a real directory.
+ * FIFO or a directory where a regular file belongs is reported too. Only Pi's locks may be
+ * directories; `agent` itself must be a real directory. An expected entry that vanished between
+ * `readdir` and `lstat` (the agent's temp file renamed into place, a lock Pi released) is fine.
  */
 export async function unexpectedEntries(runtimeDir: string): Promise<string[]> {
   const found: string[] = [];
@@ -55,7 +56,7 @@ export async function unexpectedEntries(runtimeDir: string): Promise<string[]> {
     if (name === AGENT_SUBDIR) {
       if (kind !== "dir") found.push(`${name} (${kind})`);
     } else if (name === MODEL_FILE_NAME || isModelTemp(name)) {
-      if (kind !== "file") found.push(`${name} (${kind})`);
+      if (kind !== "file" && kind !== "missing") found.push(`${name} (${kind})`);
     } else {
       found.push(name);
     }
@@ -70,7 +71,9 @@ export async function unexpectedEntries(runtimeDir: string): Promise<string[]> {
         ? "file"
         : undefined;
     if (expected === undefined) found.push(`${AGENT_SUBDIR}/${name}`);
-    else if (kind !== expected) found.push(`${AGENT_SUBDIR}/${name} (${kind})`);
+    else if (kind !== expected && kind !== "missing") {
+      found.push(`${AGENT_SUBDIR}/${name} (${kind})`);
+    }
   }
   return found;
 }

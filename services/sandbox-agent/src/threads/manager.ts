@@ -426,7 +426,6 @@ export class ThreadManager {
       await thread.stopProcess();
       return fail("pi_unavailable", `kobe-policy did not start: ${(error as Error).message}`);
     }
-    await thread.sealRuntime();
     const tampered = await thread.verifyRuntime();
     if (tampered !== undefined) {
       await thread.stopProcess();

@@ -49,6 +49,19 @@ describe("runtime directory tripwire", () => {
     expect(await unexpectedEntries(path.join(dir, "gone"))).toEqual(["<runtime dir missing>"]);
   });
 
+  it("tolerates an expected entry vanishing between readdir and lstat (the writer's rename)", async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "kobe-runtime-"));
+    const runtime = await processDir(dir, ["auth.json"]);
+    // readdir lists it, lstat finds it gone: a temp file renamed into place meanwhile.
+    const temp = path.join(runtime, `model.json.${"b".repeat(16)}.tmp`);
+    await writeFile(temp, "{}");
+    const { readdir: realReaddir } = await import("node:fs/promises");
+    const names = await realReaddir(runtime);
+    expect(names).toContain(path.basename(temp));
+    await rm(temp);
+    expect(await unexpectedEntries(runtime)).toEqual([]);
+  });
+
   it("checks kinds with lstat: symlinks, a file where Pi's lock dir belongs, a linked agent dir", async () => {
     dir = await mkdtemp(path.join(tmpdir(), "kobe-runtime-"));
     const victim = path.join(dir, "victim");

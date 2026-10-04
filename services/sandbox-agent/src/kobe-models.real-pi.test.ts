@@ -132,7 +132,7 @@ async function run(harness: Harness, runId: string, message: string, model: RunM
     runStart(message, { run_id: runId, config: { model } }),
     60_000,
   );
-  expect(result).toMatchObject({ ok: true });
+  expect(result, JSON.stringify(result)).toMatchObject({ ok: true });
   await harness.server.waitFor(settled(runId), 60_000);
   return runEvents(harness, runId);
 }

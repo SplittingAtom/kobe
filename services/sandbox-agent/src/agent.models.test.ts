@@ -230,6 +230,10 @@ describe("model wiring (KOBE-41)", () => {
     await h.server.command(runStart("say:hi", { config: { model: MODEL } }));
     const launch = await launchRecord();
     await h.server.waitFor((f) => f.type === "pi.event" && f.event.type === "agent_settled");
+    // After the agent's own end-of-run write landed (else the writer would replace the tampering).
+    await until(
+      async () => parseModelFile(await readFile(launch.modelFile, "utf8")).run_id === null,
+    );
     const tampered = { ...parseModelFile(await readFile(launch.modelFile, "utf8")), run_id: RUN_2 };
     await writeFile(launch.modelFile, JSON.stringify(tampered));
     const result = await h.server.command(
@@ -239,15 +243,25 @@ describe("model wiring (KOBE-41)", () => {
     await until(() => !existsSync(launch.modelFile));
   });
 
-  it("stops a Pi whose models-store.json changed since it booted (tripwire)", async () => {
+  it("stops a Pi whose models-store.json holds catalog entries (tripwire)", async () => {
     await start(fakeTokens(TOKEN_1));
     await h.server.command(runStart("say:hi", { config: { model: MODEL } }));
     const launch = await launchRecord();
     await h.server.waitFor((f) => f.type === "pi.event" && f.event.type === "agent_settled");
-    // The fake Pi writes no store; one appearing after boot is not Pi's doing.
+    // An offline Pi never persists catalog entries: `{}` is Pi's, an entry is planted.
+    await writeFile(path.join(launch.agentDir, "models-store.json"), "{}");
+    expect(
+      await h.server.command(runStart("say:hi", { run_id: RUN_2, config: { model: MODEL } })),
+    ).toMatchObject({ ok: true });
+    await h.server.waitFor(
+      (f) => f.type === "pi.event" && f.run_id === RUN_2 && f.event.type === "agent_settled",
+    );
     await writeFile(path.join(launch.agentDir, "models-store.json"), '{"kobe":{"models":[]}}');
     const result = await h.server.command(
-      runStart("say:hi", { run_id: RUN_2, config: { model: MODEL } }),
+      runStart("say:hi", {
+        run_id: "4f5a6b7c-8d9e-4fa0-9b2c-3d4e5f607183",
+        config: { model: MODEL },
+      }),
     );
     expect(result).toMatchObject({ ok: false, error: { code: "runtime_tampered" } });
     expect((result as { error: { message: string } }).error.message).toContain("models-store.json");
