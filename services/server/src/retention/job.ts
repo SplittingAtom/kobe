@@ -5,7 +5,6 @@ import {
   gt,
   installSettings,
   teams,
-  withTeam,
   type KobeDb,
   type KobeTx,
 } from "@kobe/db";
@@ -14,7 +13,6 @@ import type { Logger } from "pino";
 import { recordAudit } from "../audit/record.js";
 import { deleteReleasedBlobs, type BlobDeletionCounts, type BlobStore } from "./blobs.js";
 import { compactRunEvents, type CompactionCounts } from "./compaction.js";
-import { PERIOD_DAYS, effectiveAt } from "./periods.js";
 import {
   NO_PURGE,
   purgeThreads,
@@ -23,7 +21,6 @@ import {
   type PurgeOutcome,
   type PurgeSelection,
 } from "./purge.js";
-import { readMaximumLayer, readTeamLayer } from "./settings.js";
 
 /**
  * The nightly retention job (spec D18, KOBE-18). For every team, in short batches:
@@ -150,17 +147,11 @@ async function teamPass(
   };
 
   const trash = await step("trash", NO_PURGE, () => run({ kind: "trash" }, "trash"));
-  // The period in force now: a shortening still in its 7-day grace doesn't apply yet.
-  const effective = await step("period", "forever" as const, () =>
-    withTeam(db, teamId, async (tx) =>
-      effectiveAt(await readTeamLayer(tx, teamId), await readMaximumLayer(tx), new Date()),
-    ),
-  );
-  const days = PERIOD_DAYS[effective];
-  const retention =
-    days === null || stop()
-      ? NO_PURGE
-      : await step("retention", NO_PURGE, () => run({ kind: "retention", days }, "retention"));
+  // The period in force is read in every batch (a shortening still in its grace doesn't apply; a
+  // lengthening mid-pass applies to the next batch).
+  const retention = stop()
+    ? NO_PURGE
+    : await step("retention", NO_PURGE, () => run({ kind: "retention" }, "retention"));
   const compacted = stop()
     ? { runs: 0, events: 0 }
     : await step("compaction", { runs: 0, events: 0 }, () =>

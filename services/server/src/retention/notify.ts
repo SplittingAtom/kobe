@@ -50,7 +50,8 @@ export function shorteningMessage(input: {
       `The ${team} team on Kobe will keep conversations for ${label} after their last activity,`,
       `starting ${when}. From then on, older conversations are deleted for good every night.`,
       "",
-      `Today, ${input.threads} conversation${input.threads === 1 ? "" : "s"} in the team would be deleted on that date.`,
+      `Today, ${input.threads} conversation${input.threads === 1 ? "" : "s"} in the team would be deleted on that date`,
+      "(not counting conversations in Trash, which are deleted 30 days after being trashed anyway).",
       "",
       "Members can export their own conversations before then (Export my conversations in Kobe):",
       input.appUrl,
@@ -82,7 +83,7 @@ export async function notifyShortening(
     if (!upcoming || days === null) return null;
     const counted = await tx.execute<{ n: string }>(sql`
       SELECT count(*) AS n FROM threads t
-       WHERE t.team_id = ${teamId}
+       WHERE t.team_id = ${teamId} AND t.deleted_at IS NULL
          AND t.last_activity_at < ${upcoming.effectiveAt.toISOString()}::timestamptz
                                   - make_interval(days => ${days})`);
     const admins = await tx

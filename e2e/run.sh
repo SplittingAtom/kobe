@@ -1360,6 +1360,35 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
   printf '     gateway in sync after %ss\n' "$((SECONDS - t0))"
   if [[ "$SHARD" == gate1-prep ]]; then exit "$failed"; fi
 
+  # KOBE-44: the catalog's model listing asks the real Bifrost to call a provider with its key. A
+  # provider on a private address WITHOUT allow_private_network must not be reached that way.
+  priv_add=$(as_owner "POST /v1/install/models/providers {\"kind\":\"openai_compatible\",\"id\":\"e2epriv\",\"name\":\"Private, not allowed\",\"api_key\":\"e2e-private-key\",\"base_url\":\"$LLM\",\"allow_private_network\":false}")
+  expect "a keyed provider on a private address is added with private network off" '^201 ' "$priv_add"
+  # Wait until Bifrost has the provider (the listing answers 200, not 409 provider_not_synced).
+  priv_listed() { as_owner "GET /v1/install/models/providers/e2epriv/models" | head -1; }
+  priv_ready=$(wait_for 45 '^200 ' priv_listed)
+  printf '     private provider in the gateway: %s | %s\n' "$(printf '%s' "$priv_ready" | cut -c1-120)" "$(gateway_state)"
+  priv_refresh=$(as_owner "POST /v1/install/models/providers/e2epriv/models/refresh")
+  printf '     private refresh: %s\n' "$(printf '%s' "$priv_refresh" | cut -c1-200)"
+  # Bifrost v2.2.5 refuses such a provider when the sync pushes it (gateway error bifrost_rejected,
+  # observed in CI), so it never gets as far as a list-models call; a Bifrost that accepted it must
+  # still not list its models. Either way no model list comes back.
+  if printf '%s' "$priv_refresh" | grep -q '"discovery":"ok"'; then
+    fail "listing models of a private-address provider (private network off) is refused: $(printf '%s' "$priv_refresh" | cut -c1-200)"
+  elif printf '%s' "$priv_refresh" | grep -q '^200 ' || \
+      { printf '%s' "$priv_refresh" | grep -q 'provider_not_synced' && [[ "$(gateway_state)" == *bifrost_rejected* ]]; }; then
+    ok "listing models of a private-address provider (private network off) is refused"
+  else fail "listing models of a private-address provider (private network off) is refused: $(printf '%s' "$priv_refresh" | cut -c1-200)"; fi
+  priv_seen=$(probe "$NS" "$(answers "$LLM/_seen")")
+  if [[ -n "$priv_seen" ]] && ! printf '%s' "$priv_seen" | grep -q 'e2e-private-key'; then
+    ok "Bifrost never sent that provider's key to the private address"
+  else fail "Bifrost never sent that provider's key to the private address"; fi
+  contains "the refresh is audited without the key" '^1$' \
+    "$(psql_kobe "SELECT count(*) FROM audit_log WHERE action = 'models.provider.models_refreshed' AND target->>'providerId' = 'e2epriv' AND target::text NOT LIKE '%e2e-private-key%'")"
+  as_owner "DELETE /v1/install/models/providers/e2epriv" >/dev/null
+  contains "the gateway is in sync again once that provider is removed" '^in_sync=true error=-$' \
+    "$(wait_for 60 '^in_sync=true' gateway_state)"
+
   # The sandbox-like client: team namespace (team NetworkPolicy), gVisor, no DNS, the shim at
   # model-gateway.kobe.internal as in real sandboxes; a model-gateway token for the model user.
   MODEL_CLIENT="model-client-$RANDOM"
@@ -1498,7 +1527,7 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
     if until_ok 180 owner_closed; then ok "no scripted agent holds the Owner's sandbox identity any more"
     else fail "no scripted agent holds the Owner's sandbox identity any more"; fi
     read -r -d '' CHAT_JS <<'JS' || true
-const [team, content, timeoutMs] = process.argv.slice(1);
+const [team, content, timeoutMs, model] = process.argv.slice(1);
 const base = "http://127.0.0.1:" + process.env.PORT;
 const origin = new URL(process.env.KOBE_PUBLIC_URL).origin;
 const jar = new Map();
@@ -1520,7 +1549,9 @@ for (let i = 0; i < 4; i++) {
 }
 out("signin", login.status);
 await call("PUT", "/v1/me/teams/active", { teamId: team });
-const thread = await call("POST", "/v1/threads", { title: "kobe-41" });
+// KOBE-44: an optional model chosen for the thread (an alias the team enabled).
+const thread = await call("POST", "/v1/threads", { title: "kobe-41", ...(model ? { model } : {}) });
+out("thread", thread.status + ":" + (thread.json.model ?? "default"));
 const t0 = Date.now();
 const sent = await call("POST", "/v1/threads/" + thread.json.thread_id + "/messages", { content });
 out("message", sent.status);
@@ -1529,7 +1560,7 @@ out("run", runId);
 // Follow the run's event stream until a terminal event (the sandbox may have to wake first).
 const controller = new AbortController();
 const timer = setTimeout(() => controller.abort(), Number(timeoutMs));
-let text = "", terminal = "none", code = "-", errorMessage = "-", first = null, waking = "-";
+let text = "", terminal = "none", code = "-", errorMessage = "-", first = null, waking = "-", startedModel = "-";
 try {
   const res = await fetch(base + "/v1/runs/" + runId + "/events", { headers: { ...headers(), accept: "text/event-stream" }, signal: controller.signal });
   out("stream", res.status);
@@ -1548,6 +1579,7 @@ try {
       if (!type) continue;
       let payload = {}; try { payload = JSON.parse(data).payload ?? {}; } catch {}
       if (type === "sandbox.waking") waking = payload.reason;
+      if (type === "run.started") startedModel = payload.model ?? "-";
       if (type === "text.delta") { if (first === null) first = Date.now() - t0; text += payload.delta ?? ""; }
       if (type === "run.completed" || type === "run.failed" || type === "run.interrupted" || type === "run.budget_stopped") {
         terminal = type;
@@ -1559,14 +1591,15 @@ try {
 } catch (e) { out("stream_error", e.name); }
 clearTimeout(timer);
 out("waking", waking);
+out("started_model", startedModel);
 out("first_token_ms", first ?? "-");
 out("terminal", terminal);
 out("code", code);
 out("error_message", errorMessage);
 out("text", text);
 JS
-    chat_run() { # content timeout-ms → the CHAT_JS output (not `chat`: KOBE-40's helper above)
-      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$CHAT_JS" "$E2E_TEAM_ID" "$1" "$2" 2>&1 | tail -12
+    chat_run() { # content timeout-ms [model] → the CHAT_JS output (not `chat`: KOBE-40's helper above)
+      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$CHAT_JS" "$E2E_TEAM_ID" "$1" "$2" "${3:-}" 2>&1 | tail -14
     }
     chat_out=$(chat_run "hello-pi-$RANDOM" 300000)
     printf '     chat: %s\n' "$(printf '%s' "$chat_out" | grep -v '^text=' | tr '\n' ' ')"
@@ -1633,6 +1666,20 @@ SH
     contains "gVisor enforces an identity's process limit (1500 tried, at most 1024 run)" '^nproc=(10[0-2][0-9]|9[5-9][0-9])$' "$privsep"
     contains "--kill-all clears an identity at its process limit" '^nproc_kill=0$' "$privsep"
     contains "nothing of it is left" '^nproc_left=0$' "$privsep"
+
+    # KOBE-44: a model chosen for the thread is the run's model (here the vLLM-style custom
+    # provider, `qwen`, not the team default); once the team disables it, the run fails clearly.
+    # (KOBE-40's checks above left qwen disabled: enable it for the team first.)
+    expect "the team enables qwen" '^200 ' "$(as_owner "PUT /v1/team/models/qwen {\"enabled\":true}")"
+    chosen_out=$(chat_run "hello-qwen-$RANDOM" 300000 qwen)
+    printf '     chat (thread model): %s\n' "$(printf '%s' "$chosen_out" | grep -v '^text=' | tr '\n' ' ')"
+    contains "a thread created with a chosen model stores it (KOBE-44)" '^thread=201:qwen$' "$chosen_out"
+    contains "the run started on the thread's model, not the team default" '^started_model=qwen$' "$chosen_out"
+    contains "and was answered through that model's provider" '^terminal=run.completed$' "$chosen_out"
+    expect "the team disables the thread's model" '^200 ' "$(as_owner "PUT /v1/team/models/qwen {\"enabled\":false}")"
+    gone_out=$(chat_run "gone-$RANDOM" 120000 qwen)
+    contains "a thread can't choose a model the team disabled (409)" '^thread=409:default$' "$gone_out"
+    as_owner "PUT /v1/team/models/qwen {\"enabled\":true}" >/dev/null
 
     # A clear failure when the team has no model: the run fails with the server's message, nothing hangs.
     expect "the team disables its models" '^200 ' "$(as_owner "PUT /v1/team/models/fast {\"enabled\":false}")"

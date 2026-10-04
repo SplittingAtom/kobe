@@ -1,0 +1,2 @@
+ALTER TABLE "threads" ADD COLUMN "model_alias" text;--> statement-breakpoint
+ALTER TABLE "threads" ADD CONSTRAINT "threads_model_alias" CHECK ("threads"."model_alias" IS NULL OR "threads"."model_alias" ~ '^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$');
