@@ -344,87 +344,90 @@ function AddProviderForm({
   }
 
   return (
-    <form onSubmit={onSubmit} className={styles.form} aria-label="Add a provider">
-      <label>
-        Kind
-        <select value={kind} onChange={(e) => chooseKind(e.target.value as ProviderKind)}>
-          {PROVIDER_KINDS.map((k) => (
-            <option key={k} value={k} disabled={KINDS[k].single && taken.has(k)}>
-              {KINDS[k].label}
-              {KINDS[k].single && taken.has(k) ? " (added)" : ""}
-            </option>
-          ))}
-        </select>
-      </label>
-      {kind === "openai_compatible" && (
+    <>
+      <h3>Add a provider</h3>
+      <form onSubmit={onSubmit} className={styles.form} aria-label="Add a provider">
         <label>
-          ID
-          <input
-            required
-            maxLength={32}
-            pattern={PROVIDER_ID_PATTERN}
-            placeholder="vllm"
-            title="Lowercase letters, digits and dashes"
-            value={providerId}
-            onChange={(e) => setProviderId(e.target.value)}
-          />
+          Kind
+          <select value={kind} onChange={(e) => chooseKind(e.target.value as ProviderKind)}>
+            {PROVIDER_KINDS.map((k) => (
+              <option key={k} value={k} disabled={KINDS[k].single && taken.has(k)}>
+                {KINDS[k].label}
+                {KINDS[k].single && taken.has(k) ? " (added)" : ""}
+              </option>
+            ))}
+          </select>
         </label>
-      )}
-      <label>
-        Name
-        <input required maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />
-      </label>
-      {info.endpoint === "required" && (
-        <label>
-          Base URL
-          <input
-            required
-            type="url"
-            maxLength={2048}
-            placeholder={info.urlPlaceholder}
-            value={baseUrl}
-            onChange={(e) => setBaseUrl(e.target.value)}
-          />
-        </label>
-      )}
-      <label>
-        {info.key === "required" ? "API key" : "API key (optional)"}
-        <input
-          type="password"
-          autoComplete="off"
-          spellCheck={false}
-          maxLength={4096}
-          required={info.key === "required"}
-          value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
-        />
-      </label>
-      {info.endpoint === "required" && (
-        <label>
-          <span>
+        {kind === "openai_compatible" && (
+          <label>
+            ID
             <input
-              type="checkbox"
-              checked={privateNetwork}
-              onChange={(e) => setPrivateNetwork(e.target.checked)}
-            />{" "}
-            Allow private network addresses
-          </span>
+              required
+              maxLength={32}
+              pattern={PROVIDER_ID_PATTERN}
+              placeholder="vllm"
+              title="Lowercase letters, digits and dashes"
+              value={providerId}
+              onChange={(e) => setProviderId(e.target.value)}
+            />
+          </label>
+        )}
+        <label>
+          Name
+          <input required maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />
         </label>
-      )}
-      <button type="submit" disabled={mutation.pending}>
-        Add provider
-      </button>
-      <p id={`${id}-hint`} className={styles.hint}>
-        {info.hint}
-        {info.endpoint === "required" &&
-          " Private addresses (a server in your cluster or LAN) also need an egress rule for the gateway in the chart (bifrost.networkPolicy.extraEgress)."}
-      </p>
-      {insecure && (
-        <p role="alert" className={styles.banner}>
-          The server sends API keys over https:// only (unless the operator allowed unsafe endpoints
-          for a test install). Use an https:// URL, or leave the key empty.
+        {info.endpoint === "required" && (
+          <label>
+            Base URL
+            <input
+              required
+              type="url"
+              maxLength={2048}
+              placeholder={info.urlPlaceholder}
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+            />
+          </label>
+        )}
+        <label>
+          {info.key === "required" ? "API key" : "API key (optional)"}
+          <input
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            maxLength={4096}
+            required={info.key === "required"}
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+          />
+        </label>
+        {info.endpoint === "required" && (
+          <label>
+            <span>
+              <input
+                type="checkbox"
+                checked={privateNetwork}
+                onChange={(e) => setPrivateNetwork(e.target.checked)}
+              />{" "}
+              Allow private network addresses
+            </span>
+          </label>
+        )}
+        <button type="submit" disabled={mutation.pending}>
+          Add provider
+        </button>
+        <p id={`${id}-hint`} className={styles.hint}>
+          {info.hint}
+          {info.endpoint === "required" &&
+            " Private addresses (a server in your cluster or LAN) also need an egress rule for the gateway in the chart (bifrost.networkPolicy.extraEgress)."}
         </p>
-      )}
-    </form>
+        {insecure && (
+          <p role="alert" className={styles.banner}>
+            The server sends API keys over https:// only (unless the operator allowed unsafe
+            endpoints for a test install). Use an https:// URL, or leave the key empty.
+          </p>
+        )}
+      </form>
+    </>
   );
 }

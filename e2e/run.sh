@@ -1456,7 +1456,7 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
     if until_ok 180 owner_closed; then ok "no scripted agent holds the Owner's sandbox identity any more"
     else fail "no scripted agent holds the Owner's sandbox identity any more"; fi
     read -r -d '' CHAT_JS <<'JS' || true
-const [team, content, timeoutMs] = process.argv.slice(1);
+const [team, content, timeoutMs, model] = process.argv.slice(1);
 const base = "http://127.0.0.1:" + process.env.PORT;
 const origin = new URL(process.env.KOBE_PUBLIC_URL).origin;
 const jar = new Map();
@@ -1478,7 +1478,9 @@ for (let i = 0; i < 4; i++) {
 }
 out("signin", login.status);
 await call("PUT", "/v1/me/teams/active", { teamId: team });
-const thread = await call("POST", "/v1/threads", { title: "kobe-41" });
+// KOBE-44: an optional model chosen for the thread (an alias the team enabled).
+const thread = await call("POST", "/v1/threads", { title: "kobe-41", ...(model ? { model } : {}) });
+out("thread", thread.status + ":" + (thread.json.model ?? "default"));
 const t0 = Date.now();
 const sent = await call("POST", "/v1/threads/" + thread.json.thread_id + "/messages", { content });
 out("message", sent.status);
@@ -1487,7 +1489,7 @@ out("run", runId);
 // Follow the run's event stream until a terminal event (the sandbox may have to wake first).
 const controller = new AbortController();
 const timer = setTimeout(() => controller.abort(), Number(timeoutMs));
-let text = "", terminal = "none", code = "-", errorMessage = "-", first = null, waking = "-";
+let text = "", terminal = "none", code = "-", errorMessage = "-", first = null, waking = "-", startedModel = "-";
 try {
   const res = await fetch(base + "/v1/runs/" + runId + "/events", { headers: { ...headers(), accept: "text/event-stream" }, signal: controller.signal });
   out("stream", res.status);
@@ -1506,6 +1508,7 @@ try {
       if (!type) continue;
       let payload = {}; try { payload = JSON.parse(data).payload ?? {}; } catch {}
       if (type === "sandbox.waking") waking = payload.reason;
+      if (type === "run.started") startedModel = payload.model ?? "-";
       if (type === "text.delta") { if (first === null) first = Date.now() - t0; text += payload.delta ?? ""; }
       if (type === "run.completed" || type === "run.failed" || type === "run.interrupted" || type === "run.budget_stopped") {
         terminal = type;
@@ -1517,14 +1520,15 @@ try {
 } catch (e) { out("stream_error", e.name); }
 clearTimeout(timer);
 out("waking", waking);
+out("started_model", startedModel);
 out("first_token_ms", first ?? "-");
 out("terminal", terminal);
 out("code", code);
 out("error_message", errorMessage);
 out("text", text);
 JS
-    chat_run() { # content timeout-ms → the CHAT_JS output (not `chat`: KOBE-40's helper above)
-      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$CHAT_JS" "$E2E_TEAM_ID" "$1" "$2" 2>&1 | tail -12
+    chat_run() { # content timeout-ms [model] → the CHAT_JS output (not `chat`: KOBE-40's helper above)
+      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$CHAT_JS" "$E2E_TEAM_ID" "$1" "$2" "${3:-}" 2>&1 | tail -14
     }
     chat_out=$(chat_run "hello-pi-$RANDOM" 300000)
     printf '     chat: %s\n' "$(printf '%s' "$chat_out" | grep -v '^text=' | tr '\n' ' ')"
@@ -1540,6 +1544,18 @@ JS
     contains "the upstream saw the provider key (attached by Bifrost, outside the sandbox)" 'e2e-provider-key' "$seen_now"
     if [[ -n "$seen_now" ]] && ! printf '%s' "$seen_now" | grep -q 'eyJ'; then ok "no session token (JWT) reached the upstream"
     else fail "no session token (JWT) reached the upstream"; fi
+    # KOBE-44: a model chosen for the thread is the run's model (here the vLLM-style custom
+    # provider, `qwen`, not the team default); once the team disables it, the run fails clearly.
+    chosen_out=$(chat_run "hello-qwen-$RANDOM" 300000 qwen)
+    printf '     chat (thread model): %s\n' "$(printf '%s' "$chosen_out" | grep -v '^text=' | tr '\n' ' ')"
+    contains "a thread created with a chosen model stores it (KOBE-44)" '^thread=201:qwen$' "$chosen_out"
+    contains "the run started on the thread's model, not the team default" '^started_model=qwen$' "$chosen_out"
+    contains "and was answered through that model's provider" '^terminal=run.completed$' "$chosen_out"
+    expect "the team disables the thread's model" '^200 ' "$(as_owner "PUT /v1/team/models/qwen {\"enabled\":false}")"
+    gone_out=$(chat_run "gone-$RANDOM" 120000 qwen)
+    contains "a thread can't choose a model the team disabled (409)" '^thread=409:default$' "$gone_out"
+    as_owner "PUT /v1/team/models/qwen {\"enabled\":true}" >/dev/null
+
     # A clear failure when the team has no model: the run fails with the server's message, nothing hangs.
     expect "the team disables its models" '^200 ' "$(as_owner "PUT /v1/team/models/fast {\"enabled\":false}")"
     no_model=$(chat_run "no-model-$RANDOM" 180000)

@@ -257,30 +257,33 @@ function AddCatalogForm({
   }
 
   return (
-    <form onSubmit={onSubmit} className={styles.form} aria-label="Add a catalog model">
-      <label>
-        Alias
-        <input
-          required
-          maxLength={64}
-          pattern={ALIAS_PATTERN}
-          placeholder="kimi"
-          aria-describedby={`${id}-alias`}
-          value={alias}
-          onChange={(e) => setAlias(e.target.value)}
-        />
-      </label>
-      <LabelField value={label} onChange={setLabel} />
-      <ProviderField providers={providers} value={providerId} onChange={setProviderId} />
-      <ModelIdField providerId={providerId} value={model} onChange={setModel} />
-      <button type="submit" disabled={mutation.pending || providerId === ""}>
-        Add to catalog
-      </button>
-      <p id={`${id}-alias`} className={styles.hint}>
-        Alias: lowercase letters, digits, dots, dashes and underscores, such as <code>fast</code>,{" "}
-        <code>smart</code> or <code>kimi-k2.7-code</code>. It can&apos;t be renamed later.
-      </p>
-    </form>
+    <>
+      <h3>Add a model to the catalog</h3>
+      <form onSubmit={onSubmit} className={styles.form} aria-label="Add a catalog model">
+        <label>
+          Alias
+          <input
+            required
+            maxLength={64}
+            pattern={ALIAS_PATTERN}
+            placeholder="kimi"
+            aria-describedby={`${id}-alias`}
+            value={alias}
+            onChange={(e) => setAlias(e.target.value)}
+          />
+        </label>
+        <LabelField value={label} onChange={setLabel} />
+        <ProviderField providers={providers} value={providerId} onChange={setProviderId} />
+        <ModelIdField providerId={providerId} value={model} onChange={setModel} />
+        <button type="submit" disabled={mutation.pending || providerId === ""}>
+          Add to catalog
+        </button>
+        <p id={`${id}-alias`} className={styles.hint}>
+          Alias: lowercase letters, digits, dots, dashes and underscores, such as <code>fast</code>,{" "}
+          <code>smart</code> or <code>kimi-k2.7-code</code>. It can&apos;t be renamed later.
+        </p>
+      </form>
+    </>
   );
 }
 
