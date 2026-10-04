@@ -2,13 +2,9 @@ import { Readable } from "node:stream";
 import { Zip, ZipDeflate, strToU8 } from "fflate";
 import { sql, withTeam, type KobeDb } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
-import { ownedKey, type BlobStore } from "./blobs.js";
-import {
-  activeBranch,
-  entryMarkdown,
-  threadHeader,
-  type ThreadHeading,
-} from "./export-markdown.js";
+import { threadKey, type BlobStore } from "./blobs.js";
+import { logger } from "../logger.js";
+import { entryMarkdown, threadHeader, type ThreadHeading } from "./export-markdown.js";
 import { TRASH_RETENTION_DAYS } from "./periods.js";
 
 /**
@@ -20,13 +16,16 @@ import { TRASH_RETENTION_DAYS } from "./periods.js";
  * Only threads the user owns in this team (Trash included while restorable) — never threads
  * shared with them, never another user's or team's data: every query names the team and the
  * owner. The zip is streamed: threads and entries are read page by page in short transactions, so
- * memory stays bounded whatever the size.
+ * memory stays bounded whatever the size: one entry (offloaded bodies capped at 8 MiB) and the
+ * active branch's ids per thread.
  */
 
 const THREAD_PAGE = 100;
-const ENTRY_PAGE = 200;
-/** Largest offloaded entry body read back from object storage. */
-const MAX_OFFLOADED_BYTES = 64 * 1024 * 1024;
+const ENTRY_PAGE = 50;
+/** Largest offloaded entry body read back from object storage (counted as it is read). */
+const MAX_OFFLOADED_BYTES = 8 * 1024 * 1024;
+/** Longest active branch followed for the Markdown transcript. */
+const MAX_BRANCH_DEPTH = 100_000;
 const TRASH_INTERVAL = sql.raw(`interval '${TRASH_RETENTION_DAYS} days'`);
 
 /** Raw queries return timestamps as text (or Date, depending on the driver's parsers). */
@@ -138,36 +137,74 @@ async function* entries(db: KobeDb, viewer: ExportViewer, threadId: string) {
   }
 }
 
-async function parentsOf(db: KobeDb, viewer: ExportViewer, threadId: string) {
+/** The entry ids on the active branch (leaf to root), walked in Postgres. */
+async function activeBranchIds(
+  db: KobeDb,
+  viewer: ExportViewer,
+  threadId: string,
+  leaf: string | null,
+): Promise<Set<string>> {
+  if (leaf === null) return new Set();
   return withTeam(db, viewer.teamId, async (tx) => {
-    const res = await tx.execute<{ entry_id: string; parent_id: string | null }>(sql`
-      SELECT e.entry_id, e.parent_id FROM thread_entries e
-       WHERE e.team_id = ${viewer.teamId} AND e.thread_id = ${threadId}`);
-    return new Map(res.rows.map((r) => [r.entry_id, r.parent_id]));
+    const res = await tx.execute<{ entry_id: string }>(sql`
+      WITH RECURSIVE b (entry_id, parent_id, depth) AS (
+        SELECT e.entry_id, e.parent_id, 1 FROM thread_entries e
+         WHERE e.team_id = ${viewer.teamId} AND e.thread_id = ${threadId} AND e.entry_id = ${leaf}
+        UNION ALL
+        SELECT p.entry_id, p.parent_id, b.depth + 1 FROM b
+          JOIN thread_entries p ON p.team_id = ${viewer.teamId} AND p.thread_id = ${threadId}
+                               AND p.entry_id = b.parent_id
+         WHERE b.depth < ${MAX_BRANCH_DEPTH})
+      SELECT entry_id FROM b`);
+    return new Set(res.rows.map((r) => r.entry_id));
   });
 }
 
-/** An offloaded entry body (D15), only from the viewer's own keys; undefined if unavailable. */
+/**
+ * An offloaded entry body (D15), only from the thread's own object tree (`threadKey`), read with a
+ * byte cap; undefined when unavailable (logged).
+ */
 async function offloaded(
   blobs: BlobStore | undefined,
   viewer: ExportViewer,
+  threadId: string,
   key: string,
 ): Promise<unknown> {
-  if (!blobs || !ownedKey(blobs.prefix, viewer.teamId, viewer.userId, key)) return undefined;
-  const object = await blobs.objects.get(key).catch(() => null);
-  if (!object || object.size > MAX_OFFLOADED_BYTES) return undefined;
-  const chunks: Buffer[] = [];
-  for await (const chunk of object.body) chunks.push(Buffer.from(chunk as Uint8Array));
+  if (!blobs || !threadKey(blobs.prefix, viewer.teamId, threadId, key)) return undefined;
   try {
+    const object = await blobs.objects.get(key);
+    if (!object) return undefined;
+    if (object.size > MAX_OFFLOADED_BYTES) {
+      object.body.destroy();
+      return undefined;
+    }
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    for await (const chunk of object.body) {
+      const b = Buffer.from(chunk as Uint8Array);
+      bytes += b.length;
+      if (bytes > MAX_OFFLOADED_BYTES) {
+        object.body.destroy();
+        return undefined;
+      }
+      chunks.push(b);
+    }
     return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
-  } catch {
+  } catch (err) {
+    logger.warn({ err, teamId: viewer.teamId, threadId }, "export: offloaded entry unreadable");
     return undefined;
   }
 }
 
 /** The stored Pi entry, or a stub that keeps the tree intact when its body is unavailable. */
-async function piEntry(row: EntryRow, blobs: BlobStore | undefined, viewer: ExportViewer) {
-  const body = row.blob_ref === null ? row.payload : await offloaded(blobs, viewer, row.blob_ref);
+async function piEntry(
+  row: EntryRow,
+  blobs: BlobStore | undefined,
+  viewer: ExportViewer,
+  threadId: string,
+) {
+  const body =
+    row.blob_ref === null ? row.payload : await offloaded(blobs, viewer, threadId, row.blob_ref);
   const entry = body !== null && typeof body === "object" && !Array.isArray(body) ? body : {};
   return {
     ...entry,
@@ -242,10 +279,12 @@ export async function* exportZip(
         ),
       );
       for await (const rows of entries(db, viewer, thread.id)) {
-        const lines: string[] = [];
-        for (const row of rows) lines.push(JSON.stringify(await piEntry(row, blobs, viewer)));
-        if (lines.length > 0) jsonl.push(strToU8(`${lines.join("\n")}\n`));
-        yield* drain();
+        // One entry at a time: at most one (capped) body is in memory.
+        for (const row of rows) {
+          const entry = await piEntry(row, blobs, viewer, thread.id);
+          jsonl.push(strToU8(`${JSON.stringify(entry)}\n`));
+          yield* drain();
+        }
       }
       jsonl.push(new Uint8Array(0), true);
 
@@ -258,16 +297,14 @@ export async function* exportZip(
       };
       const md = file(transcript);
       md.push(strToU8(threadHeader(heading)));
-      const branch = activeBranch(await parentsOf(db, viewer, thread.id), thread.leaf_entry_id);
+      const branch = await activeBranchIds(db, viewer, thread.id, thread.leaf_entry_id);
       for await (const rows of entries(db, viewer, thread.id)) {
-        const blocks: string[] = [];
         for (const row of rows) {
           if (!branch.has(row.entry_id)) continue;
-          const block = entryMarkdown(await piEntry(row, blobs, viewer));
-          if (block !== null) blocks.push(block);
+          const block = entryMarkdown(await piEntry(row, blobs, viewer, thread.id));
+          if (block !== null) md.push(strToU8(`\n${block}\n`));
+          yield* drain();
         }
-        if (blocks.length > 0) md.push(strToU8(`\n${blocks.join("\n\n")}\n`));
-        yield* drain();
       }
       md.push(new Uint8Array(0), true);
       index.push({

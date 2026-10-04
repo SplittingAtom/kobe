@@ -1,6 +1,7 @@
 CREATE TABLE "retention_blob_deletions" (
 	"team_id" uuid NOT NULL,
 	"key" text NOT NULL,
+	"thread_id" uuid NOT NULL,
 	"owner_user_id" uuid NOT NULL,
 	"enqueued_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"attempts" integer DEFAULT 0 NOT NULL,

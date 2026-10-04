@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeBranch, entryMarkdown, inline, threadHeader } from "./export-markdown.js";
+import { entryMarkdown, inline, threadHeader } from "./export-markdown.js";
 
 const message = (role: string, content: unknown, extra: Record<string, unknown> = {}) => ({
   type: "message",
@@ -66,21 +66,5 @@ describe("export Markdown", () => {
         inTrash: false,
       }),
     ).toContain("# Untitled conversation");
-  });
-
-  it("follows the active branch from the leaf, and survives cycles", () => {
-    const parents = new Map<string, string | null>([
-      ["a", null],
-      ["b", "a"],
-      ["c", "a"],
-      ["d", "c"],
-    ]);
-    expect([...activeBranch(parents, "d")].sort()).toEqual(["a", "c", "d"]);
-    expect(activeBranch(parents, null).size).toBe(0);
-    const loop = new Map<string, string | null>([
-      ["x", "y"],
-      ["y", "x"],
-    ]);
-    expect(activeBranch(loop, "x").size).toBe(2);
   });
 });

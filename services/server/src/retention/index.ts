@@ -3,7 +3,7 @@ import { deleteReleasedBlobs, type BlobDeletionCounts, type BlobStore } from "./
 import { blobRecorder, purgeRecorder } from "./job.js";
 import { purgeThreads, type PurgeOutcome } from "./purge.js";
 
-export { deletableKey, deleteReleasedBlobs, type BlobStore } from "./blobs.js";
+export { deleteReleasedBlobs, threadKey, type BlobStore } from "./blobs.js";
 export { compactRunEvents } from "./compaction.js";
 export { deleteForever } from "./delete-forever.js";
 export { exportResponseBody, recordExport } from "./export.js";

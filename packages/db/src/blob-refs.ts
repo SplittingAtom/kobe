@@ -5,7 +5,9 @@ export interface BlobRefColumn {
   /**
    * The table's rows belong to a thread (`team_id`, `thread_id` → threads, ON DELETE CASCADE) and
    * are purged with it (D18, KOBE-18): before deleting threads, the purge queues this column's keys
-   * for deletion from the object store. Set it for uploads, artifacts and other thread-owned blobs.
+   * for deletion from the object store. Set it for uploads, artifacts and other thread-owned blobs,
+   * and store their objects under the thread's own tree, `<prefix>teams/<team>/threads/<thread>/`:
+   * export reads and retention deletes nothing else for a thread.
    */
   readonly thread?: true;
 }

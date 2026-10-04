@@ -23,8 +23,9 @@ export async function compactBatchInTx(
   limit: number,
   record: (tx: KobeTx, counts: CompactionCounts) => Promise<void>,
 ): Promise<CompactionCounts & { readonly more: boolean }> {
-  await lockLegalHolds(tx);
+  // Before the hold lock: a pending hold approval must not make a purge wait without bound.
   await tx.execute(sql.raw(`SET LOCAL lock_timeout = '5s'`));
+  await lockLegalHolds(tx);
   const res = await tx.execute<{ runs: string; events: string; picked: string }>(sql`
     WITH c AS (
       SELECT r.id FROM runs r

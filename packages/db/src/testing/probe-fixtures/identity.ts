@@ -38,6 +38,11 @@ export const identityFixtures: Record<(typeof identity.team)[number], ProbeFixtu
     const ownerUserId = await insertUser(tx);
     await tx
       .insert(retentionBlobDeletions)
-      .values({ teamId, key: `teams/${teamId}/uploads/${randomUUID()}`, ownerUserId });
+      .values({
+        teamId,
+        key: `teams/${teamId}/threads/${randomUUID()}/x`,
+        threadId: randomUUID(),
+        ownerUserId,
+      });
   },
 };

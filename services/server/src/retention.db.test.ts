@@ -64,6 +64,12 @@ interface ThreadSpec {
 async function thread(spec: ThreadSpec): Promise<string> {
   const teamId = spec.teamId ?? team;
   const id = randomUUID();
+  const keys = (spec.blobKeys ?? []).map((k) => {
+    if (!k.startsWith("@")) return k;
+    const real = `${PREFIX}teams/${teamId}/threads/${id}/${k.slice(1)}`;
+    resolved.set(k.slice(1), real);
+    return real;
+  });
   await h.admin.query(
     `INSERT INTO threads (team_id, id, owner_user_id, title) VALUES ($1, $2, $3, $4)`,
     [teamId, id, spec.owner, spec.title ?? `t-${id.slice(0, 4)}`],
@@ -84,7 +90,7 @@ async function thread(spec: ThreadSpec): Promise<string> {
       timestamp: new Date().toISOString(),
       message: { role, content },
     };
-    const blobKey = spec.blobKeys?.[i - 1] ?? null;
+    const blobKey = keys[i - 1] ?? null;
     await h.admin.query(
       `INSERT INTO thread_entries (team_id, thread_id, entry_id, parent_id, type, payload, blob_ref)
        VALUES ($1, $2, $3, $4, 'message', $5, $6)`,
@@ -93,7 +99,7 @@ async function thread(spec: ThreadSpec): Promise<string> {
     if (blobKey !== null) objects.objects.set(blobKey, Buffer.from(JSON.stringify(payload)));
     parent = entryId;
   }
-  for (const key of spec.blobKeys?.slice(n) ?? []) objects.objects.set(key, Buffer.from("x"));
+  for (const k of keys.slice(n)) objects.objects.set(k, Buffer.from("x"));
   await h.admin.query(
     `UPDATE threads SET leaf_entry_id = $3, last_activity_at = $4, deleted_at = $5
       WHERE team_id = $1 AND id = $2`,
@@ -119,7 +125,14 @@ async function endedRun(threadId: string, endedDaysAgo: number, events = 3, team
   return runId;
 }
 
-const key = (name: string, teamId = team) => `${PREFIX}teams/${teamId}/uploads/${name}`;
+/** `@name`: a key in the thread's own tree, resolved by `thread()`; `named(name)` reads it back. */
+const key = (name: string) => `@${name}`;
+const resolved = new Map<string, string>();
+const named = (name: string): string => {
+  const k = resolved.get(name);
+  if (k === undefined) throw new Error(`no blob named ${name}`);
+  return k;
+};
 
 async function threadIds(teamId = team): Promise<string[]> {
   const { rows } = await h.admin.query<{ id: string }>(
@@ -304,7 +317,7 @@ describe("the nightly pass (D18)", () => {
     await h.admin.query(
       `INSERT INTO workspace_files (team_id, user_id, path, rev, sha256, blob_key, size, mtime_ms, origin)
        VALUES ($1, $2, 'uploads/report.csv', 1, $3, $4, 1, 0, 'server')`,
-      [team, ids.bob, "a".repeat(64), key("shared")],
+      [team, ids.bob, "a".repeat(64), named("shared")],
     );
     // Another team: forever (default), same age: untouched.
     const elsewhere = await thread({ teamId: other, owner: ids.bob, activity: ago(400) });
@@ -313,8 +326,8 @@ describe("the nightly pass (D18)", () => {
 
     expect(await threadIds()).toEqual([fresh, trashedRecently, busy].sort());
     expect(await threadIds(other)).toEqual([elsewhere]);
-    expect(objects.deleted.sort()).toEqual([key("old-1"), key("trash-1")].sort());
-    expect(objects.keys().sort()).toEqual([key("fresh"), key("shared")].sort());
+    expect(objects.deleted.sort()).toEqual([named("old-1"), named("trash-1")].sort());
+    expect(objects.keys().sort()).toEqual([named("fresh"), named("shared")].sort());
     const mine = result.teams.find((t) => t.teamId === team);
     expect(mine).toMatchObject({
       trash: { threads: 1, entries: 2, blobs: 1 },
@@ -337,16 +350,31 @@ describe("the nightly pass (D18)", () => {
     expect((await audits("retention.purged")).length).toBe(before);
   });
 
-  it("deletes only keys in the team's own key space, never workspace blobs or another team's", async () => {
+  it("deletes only keys in the purged thread's own tree, never anything a crafted reference names", async () => {
     await setPeriod(team, "30d");
+    const victim = await thread({ owner: ids.carol, blobKeys: [key("victim")] });
     const foreign = `${PREFIX}teams/${other}/uploads/x`;
     const workspace = `${PREFIX}teams/${team}/users/${ids.bob}/workspace/${"b".repeat(64)}`;
+    const upload = `${PREFIX}teams/${team}/uploads/carols-file`;
     const outside = `elsewhere/${team}/x`;
-    await thread({ owner: ids.bob, activity: ago(40), blobKeys: [foreign, workspace, outside] });
+    const crafted = [foreign, workspace, upload, outside];
+    for (const k of crafted) objects.objects.set(k, Buffer.from("x"));
+    // Bob's thread points at Carol's thread's object and at objects outside any thread tree.
+    await thread({
+      owner: ids.bob,
+      activity: ago(40),
+      blobKeys: [named("victim"), ...crafted],
+      entries: 5,
+    });
+    await h.admin.query(
+      `UPDATE thread_entries SET blob_ref = NULL WHERE team_id = $1 AND thread_id = $2`,
+      [team, victim],
+    );
     await pass();
     expect(objects.deleted).toEqual([]);
-    expect(objects.keys().sort()).toEqual([foreign, outside, workspace].sort());
-    expect(await threadIds()).toEqual([]);
+    expect(objects.keys().sort()).toEqual([...crafted, named("victim")].sort());
+    // Bob's thread went; Carol's stays (recent activity).
+    expect(await threadIds()).toEqual([victim]);
   });
 
   it("compacts run events 7 days after the run ended, keeping the entries", async () => {
@@ -391,7 +419,7 @@ describe("legal hold suspends every purge (KOBE-17 contract)", () => {
 
     await pass();
     expect(await threadIds()).toEqual([held, heldTrash].sort());
-    expect(objects.keys()).toEqual([key("held")]);
+    expect(objects.keys()).toEqual([named("held")]);
     expect(
       (
         await h.admin.query(`SELECT 1 FROM run_events WHERE team_id = $1 AND run_id = $2`, [
@@ -426,7 +454,7 @@ describe("legal hold suspends every purge (KOBE-17 contract)", () => {
     expect(await threadIds()).toEqual([]);
     const hold = await placeHold(team, ids.bob);
     await pass();
-    expect(objects.keys()).toEqual([key("late")]);
+    expect(objects.keys()).toEqual([named("late")]);
     await releaseHold(hold);
     await pass();
     expect(objects.keys()).toEqual([]);
@@ -484,10 +512,19 @@ describe("Delete forever (D18: the owner only)", () => {
 
 describe("export (D18)", () => {
   it("contains only the user's threads in the active team, as Pi JSONL and Markdown", async () => {
+    const carols = await thread({
+      owner: ids.carol,
+      title: "Carol secret",
+      blobKeys: [key("carol-secret")],
+    });
     const mine = await thread({ owner: ids.bob, title: "Budget 2027", entries: 4 });
     const trashed = await thread({ owner: ids.bob, title: "Old plan", deletedAt: ago(2) });
-    const offloaded = await thread({ owner: ids.bob, title: "Big", blobKeys: [key("big")] });
-    const carols = await thread({ owner: ids.carol, title: "Carol secret" });
+    // Its second entry names Carol's object: never read (not in this thread's tree).
+    const offloaded = await thread({
+      owner: ids.bob,
+      title: "Big",
+      blobKeys: [key("big"), named("carol-secret")],
+    });
     const otherTeam = await thread({ teamId: other, owner: ids.bob, title: "Legal matter" });
     const expired = await thread({ owner: ids.bob, title: "Awaiting purge", deletedAt: ago(31) });
 
@@ -532,6 +569,13 @@ describe("export (D18)", () => {
       .trim()
       .split("\n");
     expect(JSON.parse(big[1] ?? "{}")).toMatchObject({ id: "e1", message: { role: "user" } });
+    expect(JSON.parse(big[2] ?? "{}")).toEqual({
+      type: "message",
+      id: "e2",
+      parentId: "e1",
+      timestamp: expect.any(String),
+      kobe_unavailable: true,
+    });
 
     const transcript = names.find((n) => n.startsWith("transcripts/") && n.includes("budget-2027"));
     const md = strFromU8(files[transcript ?? ""] ?? new Uint8Array());

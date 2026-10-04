@@ -44,8 +44,9 @@ users' Trash (30 days) with "Delete forever"; legal hold suspends every purge; e
 - `blobs.ts`: per batch, under the legal-hold lock: queue rows not held, minus keys any
   `BLOB_REF_COLUMNS` column of the team still references (shared/dedup), minus keys outside the
   owner's key space (`<prefix>teams/<team>/…`, under `users/<u>/` only the owner's, never
-  `users/<u>/workspace/`, which KOBE-27 collects); S3 delete inside the transaction, then the
-  queue rows go; audit `{blobs, kept}`. Failure → `attempts + 1`, retried next pass.
+  `users/<u>/workspace/`, which KOBE-27 collects) — tightened in review round 1 to the purged
+  thread's own tree; S3 delete inside the transaction, then the queue rows go; audit
+  `{blobs, kept}`. Failure → `attempts + 1`, retried next pass.
 - `job.ts` `RetentionJob`: every replica checks every 15 min; a **session-level advisory lock on
   a dedicated pool connection** (`kobe.retention`) admits one replica; due once a day in
   `KOBE_RETENTION_HOUR_UTC` (default 3) or when the last pass is > 48 h old;
@@ -60,7 +61,7 @@ users' Trash (30 days) with "Delete forever"; legal hold suspends every purge; e
   (active branch), `threads.json`, `README.md`. Own threads in the active team only (live and
   restorable Trash), every query names team and owner, ownership re-checked on each entry page;
   page-by-page short transactions, pull-driven stream; one export per user per replica (429).
-  Offloaded entries are read back only from the viewer's own keys. Audited `thread.exported`.
+  Offloaded entries are read back only from their thread's own object tree. Audited `thread.exported`.
 - Routes: `GET/PUT /v1/team/retention` (read: `team.read`; write: `team.retention.manage`; 409
   `exceeds_maximum`), `GET/PUT /v1/install/retention` (`install.retention.manage`).
 - `purgeDepartedMember(db, {teamId, userId}, blobs?)` for KOBE-28 (below).
@@ -120,6 +121,33 @@ while the user is an active member of the team. Workspace volumes and the worksp
 8. **Members can read the team's period** (`team.read`): it tells them how long their threads are
    kept. Only team admins change it.
 
+## Review round 1 (security-review subagent; no CRITICAL)
+
+- **HIGH export memory:** entries are pushed to the zip one at a time (page of 50), offloaded
+  bodies are read with an 8 MiB cap counted while reading (stream destroyed past it), the active
+  branch is walked in Postgres (recursive CTE, depth cap) instead of a Map of every entry, and at
+  most 4 exports stream per replica (plus one per user). Failed reads are logged.
+- **MEDIUM crafted `blob_ref`:** thread-owned objects must live in the thread's own tree,
+  `<prefix>teams/<team>/threads/<thread>/…` (`threadKey`); the queue stores the purged thread's id
+  and deletes only keys in that tree; export reads only keys in the entry's thread's tree. So a
+  sandbox-written reference can't make export read, or a purge delete, another thread's, member's,
+  team's or workspace's object (tests: crafted keys survive a purge; export marks such an entry
+  `kobe_unavailable`). **KOBE-53/55: store uploads and artifacts under the thread tree** (or the
+  thread's copy of them) and register the columns with `thread: true`.
+- **MEDIUM export CSRF:** the GET refuses `Sec-Fetch-Site` other than `same-origin`/`none` and a
+  foreign `Origin` (403 `forbidden_origin`).
+- **MEDIUM hold lock duration:** `lock_timeout` is set before `lockLegalHolds` in every purge
+  transaction; the S3 delete inside the blob transaction has a 30 s timeout (rollback, retried).
+- **MEDIUM team admins can purge by lowering the period:** that is D18 (team admins set the
+  period). Kept as spec'd: audited, confirmed in the UI, applies at the next nightly pass. A grace
+  delay or member notification would be a product decision (open question below).
+- **LOW** Delete forever's purge step hitting a lock timeout now answers 204 (the request is
+  committed; the nightly Trash purge finishes it). Hold inference from a missing `thread.purged`:
+  accepted (decision 4). `retention_blob_deletions.owner_user_id` FK: users are never deleted
+  (Kobe deactivates). Reference-check TOCTOU: only within one thread's own tree now. The job's
+  session advisory lock needs a direct (or session-mode pooled) connection, as KOBE-40's leader
+  lock does.
+
 ## Open risks / follow-ups
 
 - **Pi session files in the sandbox volume** (`/workspace/.kobe/sessions/<thread>.jsonl`, not
@@ -128,6 +156,8 @@ while the user is an active member of the team. Workspace volumes and the worksp
   PR. Flagged, not built.
 - Uploads and artifacts (KOBE-53/55) are purged only once those tickets register their blob
   columns with `thread: true` (and FK their rows to threads with `ON DELETE CASCADE`).
+- **Open question:** should lowering a team's period (or the install maximum) take effect only
+  after a grace period, with members notified? D18 doesn't say; built as immediate (next night).
 - `searchThreads({ activeSince })` is not wired to the retention period yet: threads past the
   period stay searchable until the next nightly pass (at most a day).
 - Purging a thread doesn't notify a sandbox that may still hold it open (its run is never active:

@@ -1,5 +1,5 @@
 {
-  "id": "b1b56e2f-59f9-4a32-9a72-58e9c932a8f6",
+  "id": "0dca95ce-971d-4630-a525-fb87689813d8",
   "prevId": "ded2b162-0fc7-4d1b-bd45-7594b43369bf",
   "version": "7",
   "dialect": "postgresql",
@@ -6650,6 +6650,12 @@
         "key": {
           "name": "key",
           "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "thread_id": {
+          "name": "thread_id",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },

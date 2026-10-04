@@ -21,6 +21,10 @@ const ERRORS = {
 
 /** Users exporting right now on this replica: one export at a time per user. */
 const exporting = new Set<string>();
+/** Exports streaming at once on one replica (each holds a DB connection per page and S3 reads). */
+export const MAX_EXPORTS_PER_REPLICA = 4;
+/** Browsers mark a navigation another site started; a download must come from Kobe's own page. */
+const SAME_SITE_FETCH = new Set(["same-origin", "none"]);
 
 /**
  * The user's own retention actions on threads (spec D18): "Delete forever" from Trash and the
@@ -68,6 +72,16 @@ export function threadRetentionRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
    * page believes is active comes as `?team=` and must match the session's (stale-tab guard).
    */
   app.get("/export", async (c) => {
+    // CSRF: a GET skips the Origin check, so refuse downloads another site starts (each would
+    // write an audit row and stream a whole export).
+    const site = c.req.header("sec-fetch-site");
+    const origin = c.req.header("origin");
+    if (
+      (site !== undefined && !SAME_SITE_FETCH.has(site)) ||
+      (origin !== undefined && origin !== deps.publicUrl)
+    ) {
+      return c.json({ code: "forbidden_origin", message: "Cross-origin request rejected." }, 403);
+    }
     const team = c.get("team");
     const claimed = c.req.query("team");
     if (claimed !== undefined && claimed !== team.id) {
@@ -81,9 +95,12 @@ export function threadRetentionRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
       );
     }
     const userId = c.get("user").id;
-    if (exporting.has(userId)) {
+    if (exporting.has(userId) || exporting.size >= MAX_EXPORTS_PER_REPLICA) {
       return c.json(
-        { code: "export_in_progress", message: "An export is already running. Wait for it." },
+        {
+          code: "export_in_progress",
+          message: "An export is already running. Try again when it has finished.",
+        },
         429,
       );
     }

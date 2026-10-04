@@ -124,17 +124,3 @@ export function threadHeader(thread: ThreadHeading): string {
   if (thread.inTrash) lines.push("- In Trash");
   return `${lines.join("\n")}\n`;
 }
-
-/** The entry ids on the active branch: the leaf and its ancestors. */
-export function activeBranch(
-  parents: ReadonlyMap<string, string | null>,
-  leaf: string | null,
-): Set<string> {
-  const path = new Set<string>();
-  let at = leaf;
-  while (at !== null && !path.has(at) && parents.has(at)) {
-    path.add(at);
-    at = parents.get(at) ?? null;
-  }
-  return path;
-}

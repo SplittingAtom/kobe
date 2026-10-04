@@ -62,6 +62,11 @@ export const retentionBlobDeletions = pgTable(
       .notNull()
       .references(() => teams.id, { onDelete: "cascade" }),
     key: text().notNull(),
+    /**
+     * The purged thread: only keys in its own tree (`<prefix>teams/<team>/threads/<thread>/…`) are
+     * ever deleted, so a crafted reference can't reach another thread's or member's objects.
+     */
+    threadId: uuid().notNull(),
     /** Owner of the purged thread (legal hold is checked again before the bytes go). */
     ownerUserId: uuid()
       .notNull()

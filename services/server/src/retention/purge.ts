@@ -121,8 +121,8 @@ async function queueBlobs(tx: KobeTx, teamId: string, ids: readonly string[]): P
     const table = sql.identifier(ref.table);
     const column = sql.identifier(ref.column);
     const res = await tx.execute(sql`
-      INSERT INTO retention_blob_deletions (team_id, key, owner_user_id)
-      SELECT DISTINCT x.team_id, x.${column}, t.owner_user_id
+      INSERT INTO retention_blob_deletions (team_id, key, thread_id, owner_user_id)
+      SELECT DISTINCT ON (x.${column}) x.team_id, x.${column}, t.id, t.owner_user_id
         FROM ${table} x
         JOIN threads t ON t.team_id = x.team_id AND t.id = x.thread_id
        WHERE x.team_id = ${teamId} AND t.team_id = ${teamId}
@@ -167,8 +167,9 @@ export async function purgeBatchInTx(
   limits: BatchLimits,
   record: (tx: KobeTx, counts: PurgeBatchResult) => Promise<void>,
 ): Promise<PurgeBatchResult> {
-  await lockLegalHolds(tx);
+  // Before the hold lock: a pending hold approval must not make a purge wait without bound.
   await tx.execute(sql.raw(`SET LOCAL lock_timeout = '${LOCK_TIMEOUT}'`));
+  await lockLegalHolds(tx);
   const found = await tx.execute<Candidate>(sql`
     SELECT t.id, t.owner_user_id, t.last_entry_seq FROM threads t
      WHERE t.team_id = ${teamId} AND ${predicate(selection)}

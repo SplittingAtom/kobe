@@ -206,7 +206,7 @@ describe("retention tables", () => {
     );
     await exec(
       t,
-      `INSERT INTO retention_blob_deletions (team_id, key, owner_user_id) VALUES ('${t}', 'teams/${t}/x', '${alice}')`,
+      `INSERT INTO retention_blob_deletions (team_id, key, thread_id, owner_user_id) VALUES ('${t}', 'teams/${t}/x', '${randomUUID()}', '${alice}')`,
     );
     const seen = await withTeam(app.db, other, async (tx) => {
       const a = await tx.execute(sql`SELECT count(*)::int AS n FROM team_retention`);
