@@ -1555,7 +1555,7 @@ JS
     read -r -d '' PRIVSEP_SH <<'SH' || true
 R=/opt/kobe/bin/kobe-runas
 agent=$(pgrep -f '^node .*sandbox-agent/dist/index.js' | head -1)
-pi=$(pgrep -f '^node .* --mode rpc' | head -1)
+pi=$(ps -eo pid=,uid= | awk '$2 >= 2000 && $2 <= 2063 { print $1; exit }')  # Pi sets its own process title
 dir=$(ls -d /run/kobe-pi/pi-* 2>/dev/null | head -1)
 echo "agent=$(stat -c %u /proc/$agent) caps=$(awk '/^CapEff/ {print $2}' /proc/$agent/status)"
 echo "pi_uid=$(stat -c %u /proc/$pi) dir=$(stat -c '%U:%G %a' $dir)"
