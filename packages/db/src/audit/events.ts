@@ -808,6 +808,8 @@ export const AUDIT_EVENTS = {
   "agent.deleted": event("any", agentRef),
   "agent.status_changed": event("any", { ...agentRef, status: z.enum(["active", "suspended"]) }),
   "agent.exported": event("any", agentRef),
+  /** A published version exported as Orbit YAML (KOBE-91). */
+  "agent.orbit_exported": event("any", { ...agentRef, version }),
   // Versions (KOBE-46): publish freezes the draft and its tool manifest; rollback republishes.
   "agent.published": event("any", { ...agentRef, version, draftRevision: version }),
   "agent.rolled_back": event("any", { ...agentRef, version, fromVersion: version }),

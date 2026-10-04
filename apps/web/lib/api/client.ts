@@ -136,6 +136,33 @@ export async function apiRequest<T>(
   return { ok: true, status: res.status, data: camelizeKeys(parsed) as T };
 }
 
+/** A text file answer (e.g. an export), with the filename the server suggested. */
+export interface TextFile {
+  readonly text: string;
+  readonly filename: string | null;
+}
+
+/** GET of a text file: like `apiRequest`, but the success body is returned as text, not JSON. */
+export async function apiTextFile(
+  path: string,
+  options: Pick<RequestOptions, "teamId" | "fetchFn"> = {},
+): Promise<ApiResult<TextFile>> {
+  assertApiPath(path);
+  const { teamId, fetchFn = fetch } = options;
+  const headers = new Headers({ accept: "*/*" });
+  if (teamId !== undefined) headers.set(TEAM_HEADER, teamId);
+  let res: Response;
+  try {
+    res = await fetchFn(path, { method: "GET", headers, credentials: "same-origin" });
+  } catch {
+    return { ok: false, error: fallback(0) };
+  }
+  if (!res.ok) return { ok: false, error: toError(res.status, await readJson(res)) };
+  const disposition = res.headers.get("content-disposition") ?? "";
+  const filename = /filename="([^"\\/]{1,200})"/.exec(disposition)?.[1] ?? null;
+  return { ok: true, status: res.status, data: { text: await res.text(), filename } };
+}
+
 export type ErrorKind =
   "signIn" | "forbidden" | "notFound" | "chooseTeam" | "reload" | "isolation" | "other";
 

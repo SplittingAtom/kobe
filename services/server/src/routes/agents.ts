@@ -39,6 +39,7 @@ import {
   type AgentLocation,
   type AgentRecord,
 } from "../agents/store.js";
+import { mountOrbitExport } from "../agents/orbit/routes.js";
 import { mountVersionRoutes } from "../agents/version-routes.js";
 import { deleteOrArchiveAgent, getVersion } from "../agents/versions.js";
 import { recordAuditAfter } from "../audit/record.js";
@@ -216,20 +217,26 @@ export function agentRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
     return agentResponse(c, updated, access);
   });
 
+  const resolveVersioned = async (raw: Context) => {
+    const c = raw as Ctx;
+    const agent = await visible(c);
+    if (!agent) return null;
+    return {
+      agent,
+      location: locationFor(c, agent.scope),
+      access: agentAccess(actorOf(c), agent),
+    };
+  };
   mountVersionRoutes(app, {
     db,
     limits: deps.agentLimits,
-    resolve: async (raw) => {
-      const c = raw as Ctx;
-      const agent = await visible(c);
-      if (!agent) return null;
-      return {
-        agent,
-        location: locationFor(c, agent.scope),
-        access: agentAccess(actorOf(c), agent),
-      };
-    },
+    resolve: resolveVersioned,
     userId: (c) => (c as Ctx).get("user").id,
+  });
+  mountOrbitExport(app, {
+    db,
+    resolve: resolveVersioned,
+    teamId: (c) => (c as Ctx).get("team").id,
   });
 
   return app;

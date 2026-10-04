@@ -25,6 +25,7 @@ import adminStyles from "../../admin.module.css";
 import styles from "./agent-builder.module.css";
 import { Field } from "./field";
 import { FrontmatterForm } from "./frontmatter-form";
+import { OrbitExportButton } from "./orbit-export-button";
 import { PublishDialog } from "./publish-dialog";
 import { VersionHistory } from "./version-history";
 
@@ -234,6 +235,19 @@ function Builder({
           </div>
         )}
       </form>
+      {agent && agent.currentVersion !== null && (
+        <div className={styles.toolbar}>
+          <OrbitExportButton
+            teamId={teamId}
+            agentId={agent.id}
+            agentSlug={agent.slug}
+            version={agent.currentVersion}
+          />
+          <span className={adminStyles.hint}>
+            Downloads v{agent.currentVersion} as Orbit YAML for safety evaluation.
+          </span>
+        </div>
+      )}
       {publishing && agent && validation.ok && (
         <PublishDialog
           teamId={teamId}
@@ -258,6 +272,7 @@ function Builder({
           teamId={teamId}
           agentId={agent.id}
           currentVersion={agent.currentVersion}
+          agentSlug={agent.slug}
           canRestore={canPublish}
           restoring={mutation.pending}
           onRestore={(v) => void restore(v)}
