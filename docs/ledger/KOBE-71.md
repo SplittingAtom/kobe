@@ -165,6 +165,31 @@ EPERM`) with `false`; a setuid-root copy does not switch at all.
   another's entry: `Operation not permitted`); `/tmp`, `/workspace`, `/run/kobe-pi`, the token
   mount are four different devices.
 
+## Self security review (security-reviewer agent: 0 CRITICAL/HIGH, 5 MEDIUM, 8 LOW) — resolution
+
+1. MEDIUM Yama only measured under gVisor (Kata guest kernels): the agent now refuses identity
+   mode unless `/proc/sys/kernel/yama/ptrace_scope` ≥ 1 (a tool must not ptrace its own Pi, which
+   hosts kobe-policy and fd 3).
+2. MEDIUM device guard incomplete: start-up also requires the bootstrap token's directory to be
+   on another filesystem than /workspace (fail closed). The create-then-check order in
+   `writeFileAtomic`/`SessionRestore` stays (an `O_EXCL` empty file with a random name may land
+   off-volume before the check refuses it: denial of service only, residual risk 4).
+3. MEDIUM identities burnt by a fork storm: reclaim retries `--kill-all` with backoff for about a
+   minute (`killAllPatiently`) before giving the identity up.
+4. MEDIUM ephemeral containers: the pods policy also matches `pods/ephemeralcontainers` UPDATE and
+   checks `ephemeralContainers` (verified: `kubectl debug --profile=baseline` refused on k3s 1.34).
+5. MEDIUM session files writable across threads: added to residual risks (they were writable by
+   every thread before KOBE-71 too; restores come from Postgres, mirrored entries stay untrusted on
+   the server, KOBE-23).
+6. LOW: `--kill-all` reads the real uid from `/proc/<pid>/status` (a non-dumpable process's
+   `/proc` entry is root-owned); the start-up sweep is best effort per entry and removes a planted
+   directory as its owner identity; `models-store.json` is read through `O_NOFOLLOW|O_NONBLOCK`
+   - `fstat`; a failed spawn releases its identity only after its directory is gone; a Kobe pod
+     (bootstrap token) without `KOBE_PI_RUNAS` refuses to start; kobe-runas closes fds ≥ 4 before
+     exec and is built `-static-pie`, full RELRO; a stale comment fixed. The sticky root is a
+     property of the memory emptyDir (gVisor measured 3777); a runtime that does not make it
+     sticky makes the agent refuse to start (fail closed), not run unprotected.
+
 ## Cold start (ac-3)
 
 Baseline (main, merge-queue e2e run 37179221413): hibernated → Pi ready back-to-back p50 4381 /
@@ -235,15 +260,18 @@ true`, `KOBE_PI_RUNAS`, `KOBE_PI_RUNTIME_DIR` and the `pi-runtime` memory volume
    run it), but not prevented. Closing it needs per-thread workspaces/homes, against D13.
 2. **The model-gateway token is readable by each run's own tools** (KOBE-42 above).
 3. **The Pi's own tools can write its `agent/` dir** (KOBE-41 above; tripwire).
-4. **Denial of service among the user's own threads**: a tool can fill the 64 MiB runtime volume,
+4. **Session files** (`/workspace/.kobe/sessions`, group-writable as before): any thread's tools
+   can rewrite another thread's Pi session file (its conversation as Pi resumes it). Same as
+   /workspace (1); the server's record is Postgres, mirrored entries are untrusted.
+5. **Denial of service among the user's own threads**: a tool can fill the 64 MiB runtime volume,
    or make the agent remove/chmod its own entries elsewhere by name through a swapped workspace
    parent; `/tmp` files can be renamed by any identity. Runs fail visibly (`runtime_tampered`,
    `pi_unavailable`), nothing is read or written across threads.
-5. **Capabilities in the pod**: `allowPrivilegeEscalation: true` + `SETUID/SETGID` in the bounding
+6. **Capabilities in the pod**: `allowPrivilegeEscalation: true` + `SETUID/SETGID` in the bounding
    set. Only `kobe-runas` can use them (only file with capabilities, agent-only); a bug in it, or a
    compromised agent, can become any Pi identity (not root: the uid range is compiled in). Inside
    gVisor/Kata only.
-6. **Agent compromise** is unchanged in scope: the agent was already the trust anchor.
+7. **Agent compromise** is unchanged in scope: the agent was already the trust anchor.
 
 ## Shared files touched
 

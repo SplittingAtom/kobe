@@ -129,19 +129,35 @@ async function main(): Promise<void> {
  */
 async function piIdentities(config: Config): Promise<PiIdentities | undefined> {
   if (config.piRunAs === undefined) {
+    // Kobe's pods (bootstrap token) always ask for identities: never run them without.
+    if (config.bootstrapTokenFile !== undefined) {
+      throw new Error(
+        "KOBE_PI_RUNAS is required in a Kobe sandbox pod (KOBE_BOOTSTRAP_TOKEN_FILE set)",
+      );
+    }
     logger.warn("KOBE_PI_RUNAS not set: Pi and its tools run as the agent's own uid");
     return undefined;
   }
+  // A tool shares its Pi's uid: only Yama (scope >= 1) keeps it from ptracing its Pi (and so
+  // kobe-policy and the policy socket). gVisor enforces scope 1; refuse a kernel that does not.
+  const scope = await readFile("/proc/sys/kernel/yama/ptrace_scope", "utf8").catch(() => "");
+  if (!(Number(scope.trim()) >= 1)) {
+    throw new Error("Pi identities need Yama ptrace_scope >= 1 (tools must not ptrace their Pi)");
+  }
   const identities = await loadPiIdentities(config.piRunAs, config.maxPiProcesses);
   await mkdir(config.piRuntimeDir, { recursive: true, mode: 0o700 });
-  const [runtime, workspace] = await Promise.all([
-    stat(config.piRuntimeDir),
-    stat(config.workspaceDir),
-  ]);
-  if (runtime.dev === workspace.dev) {
-    throw new Error(
-      `KOBE_PI_RUNTIME_DIR (${config.piRuntimeDir}) must be on another filesystem than the workspace`,
-    );
+  // The workspace guard (workspace/volume.ts) tells files apart by device: what the agent alone
+  // may reach (Pi runtime dirs, the bootstrap token) must be on other filesystems than /workspace.
+  const workspace = await stat(config.workspaceDir);
+  const private_ = [config.piRuntimeDir];
+  if (config.bootstrapTokenFile !== undefined)
+    private_.push(path.dirname(config.bootstrapTokenFile));
+  for (const dir of private_) {
+    if ((await stat(dir)).dev === workspace.dev) {
+      throw new Error(
+        `${dir} must be on another filesystem than the workspace (${config.workspaceDir})`,
+      );
+    }
   }
   logger.info({ identities: identities.size }, "Pi processes run under their own uids");
   return identities;

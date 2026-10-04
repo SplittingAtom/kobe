@@ -142,6 +142,26 @@ export class PiIdentities {
     if (code !== 0) throw new PiIdentityError(`kill-all as ${identity.uid} failed: ${stderr}`);
   }
 
+  /**
+   * {@link killAll}, retried with backoff (a fork storm or a process in uninterruptible sleep can
+   * outlast one helper run) for about a minute before the identity is given up.
+   */
+  async killAllPatiently(
+    identity: PiIdentity,
+    delaysMs: readonly number[] = [500, 1000, 2000, 4000, 8000, 15_000, 30_000],
+  ): Promise<void> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await this.killAll(identity);
+        return;
+      } catch (error) {
+        const delay = delaysMs[attempt];
+        if (delay === undefined) throw error;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }
+
   /** Synchronous {@link killAll} for the agent's own exit (no event loop left to wait on). */
   killAllSync(identity: PiIdentity): void {
     spawnSync(this.helper, [String(identity.uid), "--kill-all"], {

@@ -445,7 +445,17 @@ describe("sandbox admission policies (KOBE-9 binding requirement 3)", () => {
     }
     expect(policy("-sandbox-pods")?.spec.matchConstraints.resourceRules).toEqual([
       { apiGroups: [""], apiVersions: ["v1"], operations: ["CREATE"], resources: ["pods"] },
+      {
+        apiGroups: [""],
+        apiVersions: ["v1"],
+        operations: ["UPDATE"],
+        resources: ["pods/ephemeralcontainers"],
+      },
     ]);
+    expect(expressions("-sandbox-pods")).toBeDefined();
+    expect(JSON.stringify(policy("-sandbox-pods")?.spec.variables)).toContain(
+      "ephemeralContainers",
+    );
   });
 
   it("keeps credentials out of sandbox pods", () => {

@@ -68,9 +68,9 @@ export interface ThreadEnv {
   /**
    * Parent of the private per-process directories (KOBE-41): each Pi gets a fresh `mkdtemp` dir
    * holding its `PI_CODING_AGENT_DIR` (Pi 1.0.0 writes `auth.json` there on every credential
-   * read) and its model file (and, under a Pi identity, its HOME and TMPDIR); removed when the
-   * process exits. Nothing in it outlives the process, so nothing a tool writes there reaches
-   * another thread or a later Pi.
+   * read) and its model file; removed when the process exits. Nothing in it outlives the
+   * process, so nothing a tool writes there reaches another thread or a later Pi. ($HOME and
+   * /tmp stay shared, see docs/ledger/KOBE-71.md.)
    */
   readonly runtimeDir: string;
   /** Model gateway wiring; absent when this sandbox has no model access. */
@@ -249,9 +249,15 @@ export class Thread {
     } catch (error) {
       // Nothing of a Pi that never started may stay behind (the token included).
       if (runtimeDir !== undefined) {
-        await removeRuntimeDir(runtimeDir, identities).catch(() => undefined);
+        const removed = await removeRuntimeDir(runtimeDir, identities).then(
+          () => true,
+          () => false,
+        );
+        // A directory the next holder of the identity could read: keep the identity out of use.
+        if (removed && identity !== undefined) identities?.release(identity);
+      } else if (identity !== undefined) {
+        identities?.release(identity);
       }
-      if (identity !== undefined) identities?.release(identity);
       throw error;
     }
     this.#runtimeDirs.set(pi, { dir: runtimeDir, identity });
@@ -525,7 +531,7 @@ export class Thread {
     const identity = runtime.identity;
     if (identity !== undefined && identities !== undefined) {
       try {
-        await identities.killAll(identity);
+        await identities.killAllPatiently(identity);
       } catch (error) {
         // Its processes may still run: the identity is never handed out again (fail closed).
         this.#warn(`Pi identity ${identity.uid} not reclaimed: ${(error as Error).message}`);

@@ -115,9 +115,9 @@ static int become(uid_t uid) {
 }
 
 /*
- * Whether a process other than this one, owned by `uid`, is still alive (not a zombie waiting to
- * be reaped: kill() keeps "succeeding" on those). Reads /proc/<pid>/stat for the state and the
- * owner of the /proc entry for the uid.
+ * Whether a process other than this one, running as `uid`, is still alive (not a zombie waiting
+ * to be reaped: kill() keeps "succeeding" on those). Reads the real uid from /proc/<pid>/status
+ * (the owner of /proc/<pid> turns root for a non-dumpable process) and the state from stat.
  */
 static int others_alive(uid_t uid) {
   DIR *proc = opendir("/proc");
@@ -130,9 +130,19 @@ static int others_alive(uid_t uid) {
     const long pid = strtol(entry->d_name, &end, 10);
     if (*entry->d_name == '\0' || *end != '\0' || pid <= 0 || pid == self) continue;
     char path[64];
-    struct stat info;
-    snprintf(path, sizeof path, "/proc/%ld", pid);
-    if (stat(path, &info) != 0 || info.st_uid != uid) continue;
+    char line[256];
+    long real = -1;
+    snprintf(path, sizeof path, "/proc/%ld/status", pid);
+    FILE *status = fopen(path, "r");
+    if (status == NULL) continue;
+    while (fgets(line, sizeof line, status) != NULL) {
+      if (strncmp(line, "Uid:", 4) == 0) {
+        real = strtol(line + 4, NULL, 10);
+        break;
+      }
+    }
+    fclose(status);
+    if (real != (long)uid) continue;
     snprintf(path, sizeof path, "/proc/%ld/stat", pid);
     FILE *file = fopen(path, "r");
     if (file == NULL) continue;
@@ -181,6 +191,10 @@ int main(int argc, char **argv) {
   const int switched = become(uid);
   if (switched != 0) return switched;
   if (kill_mode) return kill_all(uid);
+  /* Only Pi's stdio and its policy socket (fd 3) go on; nothing else the agent might hold. */
+  if (syscall(SYS_close_range, 4U, ~0U, 0U) != 0) {
+    for (int fd = 4; fd < 1024; fd++) close(fd);
+  }
   execvp(argv[2], argv + 2);
   return fail("exec");
 }

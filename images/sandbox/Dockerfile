@@ -30,8 +30,8 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends gcc libc6-dev \
  && rm -rf /var/lib/apt/lists/*
 COPY images/sandbox/runas/kobe-runas.c /src/kobe-runas.c
-RUN mkdir /out && gcc -std=c11 -O2 -Wall -Wextra -Werror -static -D_FORTIFY_SOURCE=2 \
-      -fstack-protector-strong -o /out/kobe-runas /src/kobe-runas.c
+RUN mkdir /out && gcc -std=c11 -O2 -Wall -Wextra -Werror -static-pie -fPIE -D_FORTIFY_SOURCE=2 \
+      -fstack-protector-strong -Wl,-z,relro,-z,now -o /out/kobe-runas /src/kobe-runas.c
 
 # Node runtime with a pinned npm, and Pi 1.0.x from its lockfile (spec D13). Dependency install
 # scripts are not run (Pi works without them; they would run as root at build time).

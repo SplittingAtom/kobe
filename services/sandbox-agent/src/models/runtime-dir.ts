@@ -1,4 +1,5 @@
-import { chmod, lstat, mkdir, readFile, readdir, realpath, rm } from "node:fs/promises";
+import { constants as FS } from "node:fs";
+import { chmod, lstat, mkdir, open, readdir, realpath, rm } from "node:fs/promises";
 import path from "node:path";
 import type { PiIdentities } from "../pi/identities.js";
 
@@ -95,8 +96,18 @@ function isModelTemp(name: string): boolean {
  */
 export async function piModelsStoreText(runtimeDir: string): Promise<string | null> {
   const file = path.join(runtimeDir, AGENT_SUBDIR, PI_MODELS_STORE);
-  if ((await kindOf(file)) !== "file") return null;
-  const text = await readFile(file, "utf8").catch(() => null);
+  // Opened, then checked: the Pi's tools can swap the file for a FIFO or a link at any moment.
+  let text: string | null = null;
+  try {
+    const handle = await open(file, FS.O_RDONLY | FS.O_NOFOLLOW | FS.O_NONBLOCK);
+    try {
+      if ((await handle.stat()).isFile()) text = await handle.readFile("utf8");
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return null;
+  }
   if (text === null) return null;
   try {
     return canonical(JSON.parse(text));
@@ -127,8 +138,13 @@ export async function sweepRuntimeDir(
   let removed = 0;
   for (const name of await readdir(runtimeDir)) {
     if (!name.startsWith(RUNTIME_DIR_PREFIX)) continue;
-    await removeRuntimeDir(path.join(runtimeDir, name), options.identities);
-    removed += 1;
+    // Best effort per entry: a directory planted in a shared (sticky) root must not keep the agent
+    // from starting.
+    const ok = await removeRuntimeDir(path.join(runtimeDir, name), options.identities).then(
+      () => true,
+      () => false,
+    );
+    if (ok) removed += 1;
   }
   return removed;
 }
@@ -181,10 +197,11 @@ export async function removeRuntimeDir(dir: string, identities?: PiIdentities): 
   } catch (error) {
     if (identities === undefined) throw error;
   }
-  const gid = (await lstat(dir)).gid;
-  const identity = identities.byGid(gid);
+  // The Pi's group (the agent's directories), or the owner (a directory a Pi identity made).
+  const info = await lstat(dir);
+  const identity = identities.byGid(info.gid) ?? identities.byGid(info.uid);
   if (identity === undefined)
     throw new Error(`cannot remove ${dir}: not a Pi identity's directory`);
-  await identities.removeContents(identity, path.join(dir, AGENT_SUBDIR));
+  await identities.removeContents(identity, dir);
   await rm(dir, { recursive: true, force: true });
 }

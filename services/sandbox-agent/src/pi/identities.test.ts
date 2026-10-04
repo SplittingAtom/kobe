@@ -45,6 +45,22 @@ describe("PiIdentities (KOBE-71)", () => {
     expect(ids.available).toBe(1);
   });
 
+  it("retries kill-all before giving an identity up", async () => {
+    let calls = 0;
+    const flaky = fakeRunner(() =>
+      ++calls < 3 ? { code: 71, stderr: "busy" } : { code: 0, stderr: "" },
+    );
+    const ids = new PiIdentities("/helper", [2000], flaky.run);
+    await ids.killAllPatiently({ uid: 2000, gid: 2000 }, [1, 1, 1]);
+    expect(calls).toBe(3);
+    const stuck = new PiIdentities(
+      "/helper",
+      [2000],
+      fakeRunner(() => ({ code: 71, stderr: "busy" })).run,
+    );
+    await expect(stuck.killAllPatiently({ uid: 2000, gid: 2000 }, [1, 1])).rejects.toThrow(/busy/);
+  });
+
   it("gives up waiting for an identity after a while", async () => {
     const ids = new PiIdentities("/helper", [2000], okRunner().run);
     const held = await ids.acquire();
