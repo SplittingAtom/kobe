@@ -82,6 +82,7 @@ describe("context.omitted", () => {
       "not_team_enabled",
       "not_user_connected",
       "no_team_default",
+      "not_approved",
     ]) {
       expect(schema.safeParse({ items: [{ ...item, reason }] }).success).toBe(true);
     }

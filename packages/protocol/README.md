@@ -68,10 +68,11 @@ translates, and passes other Pi payloads through so Pi 1.0.x patches don't break
 
 - `context.omitted` (KOBE-77): `{items: [{kind: skill|connector|model, name, reason}]}`, 1..100
   items. The run-start resolver's omissions (reasons: `agent_exclusive`, `team_disabled`,
-  `blocklisted`, `shadowed_by_agent`, `not_team_enabled`, `not_user_connected`, `no_team_default`).
+  `blocklisted`, `shadowed_by_agent`, `not_team_enabled`, `not_user_connected`, `no_team_default`, and since KOBE-99 `not_approved`: a skill version not approved for the
+  team, or a flagged personal skill).
   Emitted once right after `run.started`, only when non-empty; persisted in `run_events` like every
   event, so a reload replays it. Not terminal. Additive: clients that predate it ignore unknown
-  event types.
+  event types; clients that predate a reason render it generically.
 
 ## Contract changes (contracts cleanup PR)
 
