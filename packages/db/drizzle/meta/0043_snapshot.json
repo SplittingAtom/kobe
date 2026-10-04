@@ -1,5 +1,5 @@
 {
-  "id": "79b5dce6-9467-4afc-80fb-50870a26643c",
+  "id": "82c6cae1-693c-477e-9df2-e26ea14f5d41",
   "prevId": "c7dfc729-e5bb-4942-8b0a-9ef947f5ebed",
   "version": "7",
   "dialect": "postgresql",
@@ -7466,6 +7466,30 @@
           "primaryKey": false,
           "notNull": false
         },
+        "member_monthly_usd": {
+          "name": "member_monthly_usd",
+          "type": "numeric(14, 2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "member_daily_usd": {
+          "name": "member_daily_usd",
+          "type": "numeric(14, 2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "member_monthly_tokens": {
+          "name": "member_monthly_tokens",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "member_daily_tokens": {
+          "name": "member_daily_tokens",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
         "user_requests_per_minute": {
           "name": "user_requests_per_minute",
           "type": "integer",
@@ -7586,6 +7610,10 @@
         "team_budgets_rpm": {
           "name": "team_budgets_rpm",
           "value": "(\"team_budgets\".\"user_requests_per_minute\" IS NULL OR \"team_budgets\".\"user_requests_per_minute\" BETWEEN 1 AND 10000)"
+        },
+        "team_budgets_member_defaults": {
+          "name": "team_budgets_member_defaults",
+          "value": "(\"team_budgets\".\"member_monthly_usd\" IS NULL OR \"team_budgets\".\"member_monthly_usd\" BETWEEN 0 AND 1000000000) AND (\"team_budgets\".\"member_daily_usd\" IS NULL OR \"team_budgets\".\"member_daily_usd\" BETWEEN 0 AND 1000000000) AND (\"team_budgets\".\"member_monthly_tokens\" IS NULL OR \"team_budgets\".\"member_monthly_tokens\" BETWEEN 0 AND 1000000000000000) AND (\"team_budgets\".\"member_daily_tokens\" IS NULL OR \"team_budgets\".\"member_daily_tokens\" BETWEEN 0 AND 1000000000000000)\n        AND (\"team_budgets\".\"user_id\" IS NULL OR (\"team_budgets\".\"member_monthly_usd\" IS NULL AND \"team_budgets\".\"member_daily_usd\" IS NULL\n          AND \"team_budgets\".\"member_monthly_tokens\" IS NULL AND \"team_budgets\".\"member_daily_tokens\" IS NULL))"
         },
         "team_budgets_rpm_team_only": {
           "name": "team_budgets_rpm_team_only",

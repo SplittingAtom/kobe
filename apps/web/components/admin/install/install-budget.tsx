@@ -3,16 +3,15 @@
 import { useState, type FormEvent } from "react";
 import {
   getInstallBudget,
-  parseAmount,
   setInstallBudget,
+  type BudgetAmountsInput,
   type InstallLimits,
 } from "../../../lib/admin/api/budgets";
+import { AmountFields, parseAmounts, useAmountTexts } from "../budgets/amount-fields";
 import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
 import styles from "../admin.module.css";
-
-const text = (v: number | null) => (v === null ? "" : String(v));
 
 /**
  * The install budget (spec D30, Bifrost's customer level; `/v1/install/budget`): every team's
@@ -52,30 +51,24 @@ function Form({
   save,
 }: {
   readonly limits: InstallLimits;
-  readonly save: (input: {
-    monthly_usd: number | null;
-    daily_usd: number | null;
-    user_requests_per_minute: number;
-  }) => Promise<void>;
+  readonly save: (
+    input: BudgetAmountsInput & { readonly user_requests_per_minute: number },
+  ) => Promise<void>;
 }) {
-  const [monthly, setMonthly] = useState(text(limits.monthlyUsd));
-  const [daily, setDaily] = useState(text(limits.dailyUsd));
+  const [amounts, setAmounts] = useAmountTexts(limits);
   const [rpm, setRpm] = useState(String(limits.userRequestsPerMinute));
   const [invalid, setInvalid] = useState<string | null>(null);
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    const m = parseAmount(monthly);
-    const d = parseAmount(daily);
+    const parsed = parseAmounts(amounts);
     const r = Number(rpm);
-    if (m === undefined || d === undefined || !Number.isInteger(r) || r < 1 || r > 10_000) {
-      setInvalid(
-        "Budgets are dollar amounts (or empty); the rate is a whole number from 1 to 10000.",
-      );
-      return;
+    if (typeof parsed === "string") return setInvalid(parsed);
+    if (!Number.isInteger(r) || r < 1 || r > 10_000) {
+      return setInvalid("The request rate is a whole number from 1 to 10000.");
     }
     setInvalid(null);
-    void save({ monthly_usd: m, daily_usd: d, user_requests_per_minute: r });
+    void save({ ...parsed, user_requests_per_minute: r });
   }
 
   return (
@@ -85,19 +78,16 @@ function Form({
           {invalid}
         </p>
       )}
-      <label>
-        Monthly budget ($)
-        <input inputMode="decimal" value={monthly} onChange={(e) => setMonthly(e.target.value)} />
-      </label>
-      <label>
-        Daily cap ($)
-        <input inputMode="decimal" value={daily} onChange={(e) => setDaily(e.target.value)} />
-      </label>
+      <AmountFields value={amounts} onChange={setAmounts} prefix="Install " />
       <label>
         Requests per minute per user
         <input inputMode="numeric" value={rpm} onChange={(e) => setRpm(e.target.value)} />
       </label>
       <button type="submit">Save install budget</button>
+      <p className={styles.hint}>
+        Months and days are calendar periods in UTC. Token budgets count input, output and cached
+        tokens and also cap models without prices.
+      </p>
     </form>
   );
 }

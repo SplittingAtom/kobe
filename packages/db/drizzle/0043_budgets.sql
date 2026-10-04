@@ -74,12 +74,19 @@ CREATE TABLE "team_budgets" (
 	"daily_usd" numeric(14, 2),
 	"monthly_tokens" bigint,
 	"daily_tokens" bigint,
+	"member_monthly_usd" numeric(14, 2),
+	"member_daily_usd" numeric(14, 2),
+	"member_monthly_tokens" bigint,
+	"member_daily_tokens" bigint,
 	"user_requests_per_minute" integer,
 	"updated_by" uuid NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "team_budgets_team_id_id_pk" PRIMARY KEY("team_id","id"),
 	CONSTRAINT "team_budgets_amounts" CHECK (("team_budgets"."monthly_usd" IS NULL OR "team_budgets"."monthly_usd" BETWEEN 0 AND 1000000000) AND ("team_budgets"."daily_usd" IS NULL OR "team_budgets"."daily_usd" BETWEEN 0 AND 1000000000) AND ("team_budgets"."monthly_tokens" IS NULL OR "team_budgets"."monthly_tokens" BETWEEN 0 AND 1000000000000000) AND ("team_budgets"."daily_tokens" IS NULL OR "team_budgets"."daily_tokens" BETWEEN 0 AND 1000000000000000)),
 	CONSTRAINT "team_budgets_rpm" CHECK (("team_budgets"."user_requests_per_minute" IS NULL OR "team_budgets"."user_requests_per_minute" BETWEEN 1 AND 10000)),
+	CONSTRAINT "team_budgets_member_defaults" CHECK (("team_budgets"."member_monthly_usd" IS NULL OR "team_budgets"."member_monthly_usd" BETWEEN 0 AND 1000000000) AND ("team_budgets"."member_daily_usd" IS NULL OR "team_budgets"."member_daily_usd" BETWEEN 0 AND 1000000000) AND ("team_budgets"."member_monthly_tokens" IS NULL OR "team_budgets"."member_monthly_tokens" BETWEEN 0 AND 1000000000000000) AND ("team_budgets"."member_daily_tokens" IS NULL OR "team_budgets"."member_daily_tokens" BETWEEN 0 AND 1000000000000000)
+        AND ("team_budgets"."user_id" IS NULL OR ("team_budgets"."member_monthly_usd" IS NULL AND "team_budgets"."member_daily_usd" IS NULL
+          AND "team_budgets"."member_monthly_tokens" IS NULL AND "team_budgets"."member_daily_tokens" IS NULL))),
 	CONSTRAINT "team_budgets_rpm_team_only" CHECK ("team_budgets"."user_requests_per_minute" IS NULL OR "team_budgets"."user_id" IS NULL)
 );
 --> statement-breakpoint

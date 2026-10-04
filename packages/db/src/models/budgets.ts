@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import type { KobeTx } from "../client.js";
+import type { KobeDb, KobeTx } from "../client.js";
 import {
   DEFAULT_REQUESTS_PER_MINUTE,
   type BudgetPeriod,
@@ -132,6 +132,7 @@ async function budgetLines(
   const install = await installPart(tx, starts);
   const budgets = await tx.execute<Row>(sql`
     SELECT b.user_id, b.monthly_usd, b.daily_usd, b.monthly_tokens, b.daily_tokens,
+           b.member_monthly_usd, b.member_daily_usd, b.member_monthly_tokens, b.member_daily_tokens,
            b.user_requests_per_minute, sp.*
       FROM team_budgets b,
            LATERAL (SELECT ${spendColumns(starts)} FROM model_spend_daily s
@@ -141,13 +142,44 @@ async function budgetLines(
        ${member === undefined ? sql`` : sql`AND (b.user_id IS NULL OR b.user_id = ${member}::uuid)`}`);
   const lines = linesOf("install", undefined, install.row, starts);
   let rpm = install.rpm;
+  const own = new Set<string>();
+  let defaults: Row | undefined;
   for (const r of budgets.rows) {
     const userId = (r.user_id as string | null) ?? undefined;
     const teamRpm = num(r.user_requests_per_minute);
     if (userId === undefined && teamRpm !== undefined) rpm = Math.min(rpm, teamRpm);
+    if (userId === undefined) defaults = memberDefaults(r);
+    else own.add(userId);
     lines.push(...linesOf(userId ? "user" : "team", userId, r, starts));
   }
+  if (defaults) {
+    // The team's default member budget: every member without a budget of their own (for the
+    // whole team, those who spent this period; members with no spend are under any budget).
+    const spenders = await tx.execute<Row>(sql`
+      SELECT s.user_id, ${spendColumns(starts)} FROM model_spend_daily s
+       WHERE s.team_id = ${teamId}::uuid AND s.day >= ${starts.month}::date
+         ${member === undefined ? sql`` : sql`AND s.user_id = ${member}::uuid`}
+       GROUP BY s.user_id`);
+    const rows =
+      spenders.rows.length > 0 || member === undefined ? spenders.rows : [{ user_id: member }];
+    for (const r of rows) {
+      const userId = String(r.user_id);
+      if (own.has(userId)) continue;
+      lines.push(...linesOf("user", userId, { ...r, ...defaults }, starts));
+    }
+  }
   return { lines, requestsPerMinute: rpm };
+}
+
+/** The team row's default member budget as a budget row (undefined when it sets none). */
+function memberDefaults(r: Row): Row | undefined {
+  const d = {
+    monthly_usd: r.member_monthly_usd,
+    daily_usd: r.member_daily_usd,
+    monthly_tokens: r.member_monthly_tokens,
+    daily_tokens: r.member_daily_tokens,
+  };
+  return Object.values(d).some((v) => v !== null && v !== undefined) ? d : undefined;
 }
 
 /** The lines that apply to one member: install, team and their own (inside `withTeam`). */
@@ -158,4 +190,30 @@ export async function loadMemberBudgetState(
   now = new Date(),
 ): Promise<MemberBudgetState> {
   return budgetLines(tx, teamId, userId, now);
+}
+
+export interface ModelPrice {
+  /** Dollars per million input / output tokens. */
+  readonly input: number;
+  readonly output: number;
+}
+
+/**
+ * Catalog prices by gateway model (`<gateway provider>/<model>`; the highest of several aliases),
+ * for the model gateway's in-flight budget reservations (KOBE-42 review). Unpriced models are
+ * absent (their calls reserve tokens only).
+ */
+export async function loadGatewayPrices(
+  db: KobeDb | KobeTx,
+): Promise<ReadonlyMap<string, ModelPrice>> {
+  const res = await db.execute<Row>(sql`
+    SELECT (CASE WHEN p.kind = 'openai_compatible' THEN 'kobe-' || p.id ELSE p.kind::text END)
+             || '/' || c.model AS model,
+           max(c.input_usd_per_mtok) AS input, max(c.output_usd_per_mtok) AS output
+      FROM model_catalog c JOIN model_providers p ON p.id = c.provider_id
+     WHERE c.input_usd_per_mtok IS NOT NULL AND c.output_usd_per_mtok IS NOT NULL
+     GROUP BY 1`);
+  return new Map(
+    res.rows.map((r) => [String(r.model), { input: Number(r.input), output: Number(r.output) }]),
+  );
 }

@@ -2,6 +2,7 @@ import {
   MODELS_ENSURE_PREFIX,
   MODELS_RESYNC,
   MODELS_SPEND_PREFIX,
+  loadGatewayPrices,
   loadMemberBudgetState,
   withTeam,
   SecretBox,
@@ -45,6 +46,7 @@ const budgets = new BudgetGate(
   {
     load: (teamId, userId) =>
       withTeam(db, teamId, (tx) => loadMemberBudgetState(tx, teamId, userId)),
+    prices: () => loadGatewayPrices(db),
   },
   { ttlMs: config.budgetCacheTtlMs },
 );

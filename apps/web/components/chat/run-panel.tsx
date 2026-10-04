@@ -322,7 +322,7 @@ export function budgetBannerText(status: BudgetStatus): string | null {
     .filter((l) => l.state !== "ok")
     .sort((a, b) => b.percent - a.percent)[0];
   if (!line) return null;
-  const which = `${SCOPE_WORDS[line.scope]} ${line.period === "month" ? "monthly" : "daily"} model budget`;
+  const which = `${SCOPE_WORDS[line.scope]} ${line.period === "month" ? "monthly" : "daily"} ${line.unit === "tokens" ? "token" : "model"} budget`;
   return line.state === "exhausted"
     ? `${which} is used up: new messages can't start a run until it is raised or the ${line.period} ends.`
     : `${which} is ${line.percent} % used.`;

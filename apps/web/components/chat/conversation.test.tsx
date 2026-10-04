@@ -102,8 +102,9 @@ describe("streaming a run (D16)", () => {
         {
           scope: "team",
           period: "month",
-          limit_usd: 100,
-          spent_usd: 85,
+          unit: "usd",
+          limit: 100,
+          spent: 85,
           percent: 85,
           state: "warning",
         },

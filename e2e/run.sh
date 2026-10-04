@@ -1574,6 +1574,9 @@ JS
       "$(psql_kobe "SELECT payload->>'message' FROM run_events WHERE run_id = $budget_run_sql AND type = 'run.budget_stopped'")"
     contains "Gate 2: the step in flight finished (its model call is in the ledger)" '^1$' \
       "$(psql_kobe "SELECT count(*) FROM run_usage WHERE run_id = $budget_run_sql AND status = 200")"
+    # Deterministic: the fake model's tool step runs 3 s, and the stop reaches Pi meanwhile.
+    contains "Gate 2: the stop reached the run during its step (after_step)" '^after_step$' \
+      "$(psql_kobe "SELECT CASE WHEN EXISTS (SELECT 1 FROM audit_log WHERE action = 'run.budget_stopped' AND target->>'runId' = '${budget_run:-none}') THEN 'after_step' END")"
     contains "Gate 2: no new model call started after the budget was used up" '^1$' \
       "$(psql_kobe "SELECT count(*) FROM run_usage WHERE run_id = $budget_run_sql")"
     contains "Gate 2: the budget reached is audited once" '^1$' \

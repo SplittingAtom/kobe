@@ -26,11 +26,21 @@ export const models = defineDomain({
     // KOBE-42: the install budget and default rate (one row, seeded): read and changed, never added.
     install_model_limits: ["SELECT", "UPDATE"],
     // Spend of all teams per day, kept by the run_usage trigger (invoker's rights: the repo has
-    // no SECURITY DEFINER functions, catalog.db.test.ts): no team ids, never deleted.
+    // no SECURITY DEFINER functions, catalog.db.test.ts). The privileges serve that trigger only:
+    // a guard trigger refuses any write that does not come from it (0044_budgets_rls.sql).
     install_model_spend_daily: ["SELECT", "INSERT", "UPDATE"],
-    // Budget thresholds crossed (once per period) and their email outbox: never deleted.
+    // Budget thresholds crossed (once per period): insert-only, and an insert is verified against
+    // the configured budget and the real spend counters (budget_alerts_verify). RLS: a team's rows
+    // only in its context, install rows everywhere.
     budget_alerts: ["SELECT", "INSERT"],
-    budget_alert_emails: ["SELECT", "INSERT", "UPDATE"],
+    // Its email outbox: rows only from the budget_alerts trigger (guarded); delivery updates the
+    // status columns only (columnGrants). RLS through the alert.
+    budget_alert_emails: ["SELECT", "INSERT"],
+  },
+  columnGrants: {
+    budget_alert_emails: {
+      UPDATE: ["status", "attempts", "next_attempt_at", "last_error", "sent_at"],
+    },
   },
   teamReferencing: {
     budget_alerts:

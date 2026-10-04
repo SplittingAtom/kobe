@@ -84,7 +84,9 @@ export const installModelLimits = pgTable(
 
 /**
  * Team table: the team's budget (`user_id` null) and optional per-member budgets (user-in-team,
- * D30). Only the team row may lower the per-user request rate.
+ * D30). Only the team row may lower the per-user request rate, and only the team row carries the
+ * optional default member budget (`member_*`): every member without a budget of their own gets it,
+ * so one member's sandbox cannot use up the whole team's budget (KOBE-42 review).
  */
 export const teamBudgets = pgTable(
   "team_budgets",
@@ -98,6 +100,10 @@ export const teamBudgets = pgTable(
     dailyUsd: usd(),
     monthlyTokens: tokens(),
     dailyTokens: tokens(),
+    memberMonthlyUsd: usd(),
+    memberDailyUsd: usd(),
+    memberMonthlyTokens: tokens(),
+    memberDailyTokens: tokens(),
     userRequestsPerMinute: integer(),
     updatedBy: uuid()
       .notNull()
@@ -117,6 +123,12 @@ export const teamBudgets = pgTable(
       sql`${amountOk(t.monthlyUsd)} AND ${amountOk(t.dailyUsd)} AND ${tokensOk(t.monthlyTokens)} AND ${tokensOk(t.dailyTokens)}`,
     ),
     check("team_budgets_rpm", rpmOk(t.userRequestsPerMinute)),
+    check(
+      "team_budgets_member_defaults",
+      sql`${amountOk(t.memberMonthlyUsd)} AND ${amountOk(t.memberDailyUsd)} AND ${tokensOk(t.memberMonthlyTokens)} AND ${tokensOk(t.memberDailyTokens)}
+        AND (${t.userId} IS NULL OR (${t.memberMonthlyUsd} IS NULL AND ${t.memberDailyUsd} IS NULL
+          AND ${t.memberMonthlyTokens} IS NULL AND ${t.memberDailyTokens} IS NULL))`,
+    ),
     check(
       "team_budgets_rpm_team_only",
       sql`${t.userRequestsPerMinute} IS NULL OR ${t.userId} IS NULL`,

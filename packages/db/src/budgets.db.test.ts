@@ -10,7 +10,10 @@ import {
   type ModelUsageRecord,
 } from "./models/index.js";
 import {
+  budgetAlertEmails,
+  budgetAlerts,
   installModelLimits,
+  installRoles,
   installModelSpendDaily,
   modelCatalog,
   modelProviders,
@@ -60,10 +63,12 @@ beforeAll(async () => {
   ]);
   await owner.close();
   app = createDb(inject("appUrl"));
+  // Alice is an install admin (install limits are changed by one, KOBE-42 review).
   await app.db.insert(users).values([
     { id: alice, name: "Alice", email: `${alice}@b.test` },
     { id: bob, name: "Bob", email: `${bob}@b.test` },
   ]);
+  await app.db.insert(installRoles).values({ userId: alice, role: "admin" });
   await app.db.insert(modelProviders).values({
     id: provider,
     kind: "openai_compatible",
@@ -125,7 +130,7 @@ describe("budget state", () => {
   it("lists install, team and member budgets with their period's spend; the widest used-up one stops", async () => {
     await app.db
       .update(installModelLimits)
-      .set({ monthlyUsd: 1_000_000, userRequestsPerMinute: 100 })
+      .set({ monthlyUsd: 1_000_000, userRequestsPerMinute: 100, updatedBy: alice })
       .where(eq(installModelLimits.id, 1));
     await withTeam(app.db, teamA, (tx) =>
       tx.insert(teamBudgets).values([
@@ -214,5 +219,112 @@ describe("budget state", () => {
       }),
     ).catch((e: unknown) => e);
     expect(rate).toBeInstanceOf(Error);
+  });
+});
+
+describe("integrity against the app role (KOBE-42 review)", () => {
+  const code = (e: unknown) => (e as { cause?: { code?: string } }).cause?.code;
+  const refused = (p: Promise<unknown>) => p.then(() => undefined, code);
+  const today = new Date().toISOString().slice(0, 10);
+  const month = `${today.slice(0, 8)}01`;
+
+  it("spend counters accept only the run_usage trigger's writes", async () => {
+    expect(
+      await refused(
+        withTeam(app.db, teamA, (tx) =>
+          tx.insert(modelSpendDaily).values({ teamId: teamA, day: today, userId: alice }),
+        ),
+      ),
+    ).toBe("42501");
+    expect(
+      await refused(
+        withTeam(app.db, teamA, (tx) =>
+          tx.update(modelSpendDaily).set({ costUsd: 0 }).where(eq(modelSpendDaily.teamId, teamA)),
+        ),
+      ),
+    ).toBe("42501");
+    expect(
+      await refused(
+        withTeam(app.db, teamA, (tx) =>
+          tx.delete(modelSpendDaily).where(eq(modelSpendDaily.teamId, teamA)),
+        ),
+      ),
+    ).toBe("42501");
+    expect(await refused(app.db.update(installModelSpendDaily).set({ costUsd: 0 }))).toBe("42501");
+    expect(await refused(app.db.delete(installModelSpendDaily))).toBe("42501");
+  });
+
+  it("an alert is recorded only for a configured budget really crossed in the current period", async () => {
+    const team = randomUUID();
+    const owner = createDb(inject("ownerUrl"));
+    await owner.db.insert(teams).values({ id: team, slug: `bi-${team.slice(0, 8)}`, name: "I" });
+    await owner.close();
+    await withTeam(app.db, team, (tx) =>
+      tx.insert(teamBudgets).values({ teamId: team, dailyTokens: 1_000, updatedBy: bob }),
+    );
+    const alert = (over: Partial<typeof budgetAlerts.$inferInsert>) =>
+      withTeam(app.db, team, (tx) =>
+        tx.insert(budgetAlerts).values({
+          teamId: team,
+          scope: "team",
+          unit: "tokens",
+          period: "day",
+          periodStart: today,
+          threshold: 100,
+          limitAmount: 1_000,
+          spentAmount: 1_000_000,
+          ...over,
+        }),
+      );
+    // Not crossed (the counters say 0, whatever the row claims): refused.
+    expect(await refused(alert({}))).toBe("23514");
+    // A limit that is not the configured one, a period that is not the current one: refused.
+    await recordModelUsage(app.db, [usage({ teamId: team, at: new Date(), inputTokens: 1_200 })]);
+    expect(await refused(alert({ limitAmount: 1 }))).toBe("23514");
+    expect(await refused(alert({ periodStart: "2099-01-01" }))).toBe("23514");
+    expect(await refused(alert({ period: "month", periodStart: month }))).toBe("23514");
+    // Another team's context: refused.
+    expect(
+      await refused(
+        withTeam(app.db, teamB, (tx) =>
+          tx.insert(budgetAlerts).values({
+            teamId: team,
+            scope: "team",
+            unit: "tokens",
+            period: "day",
+            periodStart: today,
+            threshold: 100,
+            limitAmount: 1_000,
+            spentAmount: 0,
+          }),
+        ),
+      ),
+    ).toBeDefined();
+    // Really crossed: recorded, with the real spend, and its emails made by the trigger.
+    await alert({ spentAmount: 0 });
+    const [row] = await withTeam(app.db, team, (tx) =>
+      tx.select().from(budgetAlerts).where(eq(budgetAlerts.teamId, team)),
+    );
+    expect(row?.spentAmount).toBe(1_200);
+    // The app cannot queue an email itself.
+    expect(
+      await refused(
+        withTeam(app.db, team, (tx) =>
+          tx.insert(budgetAlertEmails).values({ alertId: row?.id ?? "", recipientId: alice }),
+        ),
+      ),
+    ).toBe("42501");
+    // Another team does not see it.
+    const seenByB = await withTeam(app.db, teamB, (tx) =>
+      tx.select().from(budgetAlerts).where(eq(budgetAlerts.teamId, team)),
+    );
+    expect(seenByB).toEqual([]);
+  });
+
+  it("the install limits are changed by an install admin only", async () => {
+    expect(
+      await refused(app.db.update(installModelLimits).set({ monthlyUsd: null, updatedBy: bob })),
+    ).toBe("42501");
+    await app.db.update(installModelLimits).set({ monthlyUsd: null, updatedBy: alice });
   });
 });

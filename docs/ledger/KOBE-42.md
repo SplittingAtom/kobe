@@ -99,6 +99,64 @@ server: BudgetMonitor (LISTEN + 30 s sweep) ── 80/100 % ─▶ budget_alerts
   (it is in `budget_alerts`).
 - **Order of stops:** the widest used-up scope names the stop (install > team > user).
 
+## User decisions
+
+- **2026-10-04 (via the coordinator): token budgets beside dollar budgets.** Open question 1
+  (unpriced models are free against dollar budgets) is answered with token budgets: per period
+  (monthly, optional daily cap), at install, team, default-member and member levels, enforced by the
+  same call gate, run gate and monitor (80 % warnings, finish-current-step stop, audit, UI).
+  Per-model prices stay optional. **Tokens counted:** input + output + cache reads + cache writes —
+  every token a call processed, the same for every provider; token budgets exist mainly for
+  models without prices, where cached tokens cost the same capacity, and counting them keeps one
+  simple rule. Built: `*_tokens` columns on `install_model_limits` and `team_budgets`,
+  `tokens` on both daily counters (trigger), `unit` on budget lines and alerts. Tests: db "a token
+  budget caps a model without prices", server "a token budget stops a run on a model without
+  prices" (run ends `budget_stopped`, alerts and audit in tokens, status shows both units),
+  model-gateway `budget.db.test.ts` (the real shim refuses with 402 after the ledger shows the
+  token budget used up, through the `spend:` hint; a raised budget through `budgets:`).
+
+## Independent security review (coordinator) — resolutions
+
+- **HIGH-1 forgeable/tamperable budget data** (`0044_budgets_rls.sql`):
+  - spend counters (`model_spend_daily`, `install_model_spend_daily`) accept writes only from the
+    `run_usage` trigger (`kobe_spend_guard`: trigger depth 2) or a team cascade; the ledger itself
+    is append-only (KOBE-43);
+  - `budget_alerts` is insert-only and a `BEFORE INSERT` trigger verifies each row: the current
+    UTC period, the limit as configured now (member default included), the spend recomputed from
+    the counters (the row's own amount is replaced), and a team's row only in its own context;
+    a forged row can only be a true alert;
+  - `budget_alert_emails` rows come only from the `AFTER INSERT` trigger on `budget_alerts`
+    (recipients chosen in SQL; a guard refuses direct inserts); delivery may update the status
+    columns only (column grant);
+  - RLS on both: a team's alerts and emails in its own context only, the install's everywhere;
+    the outbox delivers per context;
+  - `install_model_limits` changes require `updated_by` to be an active install admin (asserted by
+    the server like the legal-hold and break-glass ids) and are audited by the API. **Residual:**
+    the app role can still change budgets through the statements the admin API uses (as it can
+    every install setting); there are no SECURITY DEFINER functions by catalog rule.
+  - Tests: db "integrity against the app role" (forged alerts, tampered counters, direct emails,
+    install limits by a non-admin — all refused; cross-team alert reads hidden).
+- **MEDIUM-2 overshoot:** the gate reserves an admitted call's possible cost (input estimate +
+  the output it allows, dollars at the catalog price) at its install, team and member levels until
+  it ends and refuses when spend + others' reservations reach a budget: overshoot ≤ one call per
+  shim replica. Test: `budget-gate.test.ts` "reserves an admitted call's possible cost".
+- **MEDIUM-3 one sandbox exhausting a shared budget:** optional default member budget per team
+  (`member_default`, no default value). Test: server "the team's default member budget caps a
+  member without one of their own".
+- **MEDIUM-4 per-replica rate:** documented (effective ≤ replicas × rate); Bifrost's virtual-key
+  limit is the install-wide backstop, pushed on every sync pass (a rate change bumps the desired
+  version; verified against the real binary).
+- **MEDIUM-5:** stops run before alerts; each alert is isolated (a failure is logged, the rest go on).
+- **LOW-6a:** team admins see the install budget in percent only (no amounts). **6b:** an active run
+  already budget-stopping is skipped (no repeated `run.stop`), and a pending user abort is never
+  downgraded (tests: Gate 2 "a repeated evaluation neither re-requests nor re-sends the stop").
+  **6c:** only Kobe's `budget_exhausted` or Bifrost's `policy_budget_exceeded` map to
+  `model_budget_exhausted` (a provider's own 402 is `model_error`; the shim's Gemini errors carry
+  the code as an ErrorInfo `reason`). **6d:** an 80 % email is skipped once its 100 % alert
+  exists, and at most 20 budget emails per recipient per UTC day. UTC is stated in the UI.
+- **Tests:** the Gate 2 e2e is deterministic (the fake model's tool step runs 3 s, so the stop
+  reaches Pi during the step); a db test drives the real shim gate (402) through the NOTIFY path.
+
 ## Self security review (security-reviewer agent) — resolutions
 
 - **H1** install-wide tables writable by the app role from any team context: kept as the repo's
@@ -142,8 +200,7 @@ server: BudgetMonitor (LISTEN + 30 s sweep) ── 80/100 % ─▶ budget_alerts
 
 ## Open questions
 
-1. Unpriced models never consume dollar budgets (D30 budgets are dollars). Token budgets or a
-   "price required to enable" rule would close that; neither is in the spec.
+1. ~~Unpriced models and dollar budgets~~ — decided: token budgets (User decisions).
 2. Install time zone for budget periods (UTC today).
 
 ## Evidence

@@ -73,7 +73,12 @@ function openaiToolCall(res: ServerResponse, model: string): void {
             index: 0,
             id: "call_fake_1",
             type: "function",
-            function: { name: "bash", arguments: JSON.stringify({ command: "echo step-done" }) },
+            // The step takes a few seconds, so the budget stop always reaches Pi while the tool
+            // runs (deterministic Gate 2 e2e): Pi ends the run at this step's end.
+            function: {
+              name: "bash",
+              arguments: JSON.stringify({ command: "sleep 3; echo step-done" }),
+            },
           },
         ],
       },

@@ -84,7 +84,21 @@ function sendError(
     kind === "anthropic"
       ? { type: "error", error: { type: code, message } }
       : kind === "gemini"
-        ? { error: { code: status, message, status: GEMINI_STATUS[status] ?? "UNKNOWN" } }
+        ? {
+            error: {
+              code: status,
+              message,
+              status: GEMINI_STATUS[status] ?? "UNKNOWN",
+              // Gemini carries no string code: Kobe's goes in an ErrorInfo detail.
+              details: [
+                {
+                  "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                  reason: code,
+                  domain: "kobe",
+                },
+              ],
+            },
+          }
         : { error: { message, type: code, code } };
   const payload = JSON.stringify(body);
   res.writeHead(status, {
@@ -228,6 +242,7 @@ export function createModelGateway(options: GatewayOptions): Server {
     let bytesIn = 0;
     let usage: UsageReading | undefined;
     let ttfbMs: number | undefined;
+    let releaseGate: (() => void) | undefined;
     let bytesOut = 0;
     let bytesHeld = 0;
     let status = 0;
@@ -350,6 +365,7 @@ export function createModelGateway(options: GatewayOptions): Server {
         return;
       }
       const decision = await options.gate.admit(call);
+      if (decision.ok && decision.release) releaseGate = decision.release;
       if (!decision.ok) {
         status = decision.status;
         sendError(
@@ -406,6 +422,7 @@ export function createModelGateway(options: GatewayOptions): Server {
       }
     } finally {
       release();
+      releaseGate?.();
       options.bytes.give(identity.sandboxId, bytesHeld);
       if (call) {
         options.sink.record({

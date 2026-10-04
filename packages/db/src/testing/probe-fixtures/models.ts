@@ -3,7 +3,6 @@ import {
   modelCatalog,
   modelGatewayKeys,
   modelProviders,
-  modelSpendDaily,
   runUsage,
   teamBudgets,
   teamModels,
@@ -62,9 +61,20 @@ export const modelsFixtures: Record<(typeof models.team)[number], ProbeFixture> 
     await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
     await tx.insert(teamBudgets).values({ teamId, monthlyUsd: 100, updatedBy: userId });
   },
+  // Kept by the run_usage trigger only (guarded): a usage row makes the counter row.
   model_spend_daily: async (tx, teamId) => {
-    await tx
-      .insert(modelSpendDaily)
-      .values({ teamId, day: "2026-10-01", userId: randomUUID(), costUsd: 1, calls: 1 });
+    const userId = randomUUID();
+    await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
+    await tx.insert(runUsage).values({
+      teamId,
+      userId,
+      sandboxId: randomUUID(),
+      route: "openai",
+      model: "probe/probe-model",
+      status: 200,
+      inputTokens: 1,
+      usageSource: "reported",
+      durationMs: 1,
+    });
   },
 };

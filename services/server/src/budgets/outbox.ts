@@ -1,4 +1,13 @@
-import { budgetAlertEmails, eq, sql, teams, users, type KobeDb } from "@kobe/db";
+import {
+  budgetAlertEmails,
+  eq,
+  sql,
+  teams,
+  users,
+  withTeam,
+  type KobeDb,
+  type KobeTx,
+} from "@kobe/db";
 import type { Logger } from "pino";
 import type { Mailer, MailMessage } from "../mail/mailer.js";
 import { oneLine } from "../mail/messages.js";
@@ -26,6 +35,8 @@ type Claimed = {
   unit: "usd" | "tokens";
   limit_amount: string;
   spent_amount: string;
+  superseded: boolean;
+  sent_today: number;
 };
 
 const money = (v: number) => `$${v.toFixed(2)}`;
@@ -73,35 +84,81 @@ export function budgetAlertMessage(input: {
   };
 }
 
-export async function deliverBudgetEmails(options: {
+/** At most this many budget emails per recipient per UTC day (the rest are skipped, logged). */
+export const BUDGET_EMAILS_PER_RECIPIENT_PER_DAY = 20;
+
+interface DeliverOptions {
   readonly db: KobeDb;
   readonly mailer: Mailer;
   readonly publicUrl: string;
   readonly logger: Logger;
-}): Promise<number> {
+}
+
+/**
+ * Delivers due budget emails in every context their alerts are visible in (RLS, KOBE-42 review):
+ * the install's (no team), then each team's. Never throws; returns how many were sent.
+ */
+export async function deliverBudgetEmails(options: DeliverOptions): Promise<number> {
+  let sent = await deliverIn(options, null);
+  try {
+    const all = await options.db.select({ id: teams.id }).from(teams);
+    for (const team of all) sent += await deliverIn(options, team.id);
+  } catch (err) {
+    options.logger.error({ err }, "budget email delivery failed");
+  }
+  return sent;
+}
+
+async function deliverIn(options: DeliverOptions, teamId: string | null): Promise<number> {
   const { db, mailer, logger } = options;
+  const inContext = <T>(fn: (tx: KobeTx) => Promise<T>): Promise<T> =>
+    teamId ? withTeam(db, teamId, fn) : db.transaction(fn);
+  type Settle = Parameters<ReturnType<KobeTx["update"]>["set"]>[0];
+  const settle = (id: string, values: Settle) =>
+    inContext((tx) => tx.update(budgetAlertEmails).set(values).where(eq(budgetAlertEmails.id, id)));
   let sent = 0;
   try {
-    const claimed = await db.execute<Claimed>(sql`
-      UPDATE budget_alert_emails e SET attempts = e.attempts + 1,
-             next_attempt_at = now() + ${LEASE}::interval
-        FROM budget_alerts a
-       WHERE a.id = e.alert_id AND e.id IN (
-             SELECT id FROM budget_alert_emails
-              WHERE status = 'pending' AND next_attempt_at <= now()
-              ORDER BY created_at LIMIT ${BATCH} FOR UPDATE SKIP LOCKED)
-      RETURNING e.id, e.attempts, e.recipient_id, a.team_id, a.scope, a.user_id, a.period,
-                a.threshold, a.unit, a.limit_amount, a.spent_amount`);
+    const claimed = await inContext((tx) =>
+      tx.execute<Claimed>(sql`
+        UPDATE budget_alert_emails e SET attempts = e.attempts + 1,
+               next_attempt_at = now() + ${LEASE}::interval
+          FROM budget_alerts a
+         WHERE a.id = e.alert_id
+           AND a.team_id IS NOT DISTINCT FROM ${teamId}::uuid
+           AND e.id IN (
+               SELECT id FROM budget_alert_emails
+                WHERE status = 'pending' AND next_attempt_at <= now()
+                ORDER BY created_at LIMIT ${BATCH} FOR UPDATE SKIP LOCKED)
+        RETURNING e.id, e.attempts, e.recipient_id, a.team_id, a.scope, a.user_id, a.period,
+                  a.threshold, a.unit, a.limit_amount, a.spent_amount,
+                  (a.threshold < 100 AND EXISTS (
+                     SELECT 1 FROM budget_alerts b
+                      WHERE b.team_id IS NOT DISTINCT FROM a.team_id
+                        AND b.user_id IS NOT DISTINCT FROM a.user_id
+                        AND b.scope = a.scope AND b.unit = a.unit AND b.period = a.period
+                        AND b.period_start = a.period_start AND b.threshold = 100)) AS superseded,
+                  (SELECT count(*) FROM budget_alert_emails x
+                    WHERE x.recipient_id = e.recipient_id AND x.status = 'sent'
+                      AND x.sent_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+                  )::int AS sent_today`),
+    );
     for (const row of claimed.rows) {
       const [to] = await db
         .select({ email: users.email, off: users.deactivatedAt })
         .from(users)
         .where(eq(users.id, row.recipient_id));
       if (!to || to.off !== null) {
-        await db
-          .update(budgetAlertEmails)
-          .set({ status: "skipped", lastError: "recipient_inactive" })
-          .where(eq(budgetAlertEmails.id, row.id));
+        await settle(row.id, { status: "skipped", lastError: "recipient_inactive" });
+        continue;
+      }
+      // An 80 % warning whose budget is already used up says less than the 100 % email.
+      if (row.superseded) {
+        await settle(row.id, { status: "skipped", lastError: "superseded" });
+        continue;
+      }
+      if (row.sent_today >= BUDGET_EMAILS_PER_RECIPIENT_PER_DAY) {
+        logger.warn({ recipient: row.recipient_id }, "budget emails per day reached: skipped");
+        await settle(row.id, { status: "skipped", lastError: "daily_limit" });
         continue;
       }
       const [team] = row.team_id
@@ -123,29 +180,24 @@ export async function deliverBudgetEmails(options: {
             link: `${options.publicUrl}${path}`,
           }),
         );
-        await db
-          .update(budgetAlertEmails)
-          .set({ status: "sent", sentAt: sql`now()`, lastError: null })
-          .where(eq(budgetAlertEmails.id, row.id));
+        await settle(row.id, { status: "sent", sentAt: sql`now()`, lastError: null });
         sent++;
       } catch (err) {
         const giveUp = row.attempts >= BUDGET_EMAIL_MAX_ATTEMPTS;
         logger.warn({ err, emailId: row.id, giveUp }, "budget alert email failed");
-        await db
-          .update(budgetAlertEmails)
-          .set(
-            giveUp
-              ? { status: "failed", lastError: "smtp_error" }
-              : {
-                  lastError: "smtp_error",
-                  nextAttemptAt: sql`now() + make_interval(mins => ${backoffMinutes(row.attempts)})`,
-                },
-          )
-          .where(eq(budgetAlertEmails.id, row.id));
+        await settle(
+          row.id,
+          giveUp
+            ? { status: "failed", lastError: "smtp_error" }
+            : {
+                lastError: "smtp_error",
+                nextAttemptAt: sql`now() + make_interval(mins => ${backoffMinutes(row.attempts)})`,
+              },
+        );
       }
     }
   } catch (err) {
-    logger.error({ err }, "budget email delivery failed");
+    logger.error({ err, teamId }, "budget email delivery failed");
   }
   return sent;
 }

@@ -30,7 +30,11 @@ export interface CallContext {
 }
 
 export type GateDecision =
-  | { readonly ok: true }
+  | {
+      readonly ok: true;
+      /** Called once when the admitted call ends (e.g. to release an in-flight reservation). */
+      readonly release?: () => void;
+    }
   | {
       readonly ok: false;
       readonly status: 402 | 403 | 429 | 503;

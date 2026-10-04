@@ -60,7 +60,9 @@ export interface TeamBudgetsView {
    * The install budget's limits and how much of it is used, in percent only: the install's spend is
    * every team's together, which a team does not see in dollars.
    */
-  readonly install: InstallLimitsView & {
+  readonly install: {
+    readonly user_requests_per_minute: number;
+    /** Null where the install sets no such budget. */
     readonly percent_used: {
       readonly month_usd: number | null;
       readonly day_usd: number | null;
@@ -71,6 +73,8 @@ export interface TeamBudgetsView {
   readonly team: BudgetAmounts & {
     readonly user_requests_per_minute: number | null;
     readonly spent: SpendView;
+    /** The default budget of every member without one of their own (KOBE-42 review). */
+    readonly member_default: BudgetAmounts;
   };
   /** The per-user request rate members get (the install's, or the team's lower one). */
   readonly effective_requests_per_minute: number;
@@ -130,8 +134,8 @@ export async function setInstallLimits(
         scope: "install",
         monthlyUsd: next.monthlyUsd,
         dailyUsd: next.dailyUsd,
-        monthlyTokens: next.monthlyTokens,
-        dailyTokens: next.dailyTokens,
+        monthlyVolume: next.monthlyTokens,
+        dailyVolume: next.dailyTokens,
         requestsPerMinute: next.userRequestsPerMinute,
       },
     });
@@ -189,6 +193,10 @@ export async function teamBudgetsView(
         dailyUsd: teamBudgets.dailyUsd,
         monthlyTokens: teamBudgets.monthlyTokens,
         dailyTokens: teamBudgets.dailyTokens,
+        memberMonthlyUsd: teamBudgets.memberMonthlyUsd,
+        memberDailyUsd: teamBudgets.memberDailyUsd,
+        memberMonthlyTokens: teamBudgets.memberMonthlyTokens,
+        memberDailyTokens: teamBudgets.memberDailyTokens,
         rpm: teamBudgets.userRequestsPerMinute,
         name: users.name,
         email: users.email,
@@ -215,7 +223,7 @@ export async function teamBudgetsView(
     return {
       period: starts,
       install: {
-        ...install,
+        user_requests_per_minute: install.user_requests_per_minute,
         percent_used: {
           month_usd: percentOf(installSpend.month_usd, install.monthly_usd),
           day_usd: percentOf(installSpend.day_usd, install.daily_usd),
@@ -230,6 +238,12 @@ export async function teamBudgetsView(
         daily_tokens: team?.dailyTokens ?? null,
         user_requests_per_minute: teamRpm,
         spent: await spendOf(tx, teamId, undefined, starts),
+        member_default: {
+          monthly_usd: team?.memberMonthlyUsd ?? null,
+          daily_usd: team?.memberDailyUsd ?? null,
+          monthly_tokens: team?.memberMonthlyTokens ?? null,
+          daily_tokens: team?.memberDailyTokens ?? null,
+        },
       },
       effective_requests_per_minute: Math.min(
         install.user_requests_per_minute,
@@ -247,6 +261,9 @@ export interface TeamBudgetInput {
   readonly daily_tokens?: number | null | undefined;
   /** Null: use the install's rate. */
   readonly user_requests_per_minute?: number | null | undefined;
+  /** Every member without a budget of their own (fields left out keep their value). */
+  readonly member_default?:
+    { readonly [K in keyof BudgetAmounts]?: BudgetAmounts[K] | undefined } | undefined;
 }
 
 async function currentRow(tx: KobeTx, teamId: string, userId: string | null) {
@@ -277,6 +294,16 @@ export async function setTeamBudget(
       dailyUsd: pick(input.daily_usd, before?.dailyUsd ?? null),
       monthlyTokens: pick(input.monthly_tokens, before?.monthlyTokens ?? null),
       dailyTokens: pick(input.daily_tokens, before?.dailyTokens ?? null),
+      memberMonthlyUsd: pick(input.member_default?.monthly_usd, before?.memberMonthlyUsd ?? null),
+      memberDailyUsd: pick(input.member_default?.daily_usd, before?.memberDailyUsd ?? null),
+      memberMonthlyTokens: pick(
+        input.member_default?.monthly_tokens,
+        before?.memberMonthlyTokens ?? null,
+      ),
+      memberDailyTokens: pick(
+        input.member_default?.daily_tokens,
+        before?.memberDailyTokens ?? null,
+      ),
       userRequestsPerMinute: pick(
         input.user_requests_per_minute,
         before?.userRequestsPerMinute ?? null,
@@ -301,8 +328,14 @@ export async function setTeamBudget(
         scope: "team",
         monthlyUsd: next.monthlyUsd,
         dailyUsd: next.dailyUsd,
-        monthlyTokens: next.monthlyTokens,
-        dailyTokens: next.dailyTokens,
+        monthlyVolume: next.monthlyTokens,
+        dailyVolume: next.dailyTokens,
+        memberDefault: {
+          monthlyUsd: next.memberMonthlyUsd,
+          dailyUsd: next.memberDailyUsd,
+          monthlyVolume: next.memberMonthlyTokens,
+          dailyVolume: next.memberDailyTokens,
+        },
         requestsPerMinute: next.userRequestsPerMinute,
       },
     });
@@ -358,8 +391,8 @@ export async function setMemberBudget(
         userId,
         monthlyUsd: input?.monthly_usd ?? null,
         dailyUsd: input?.daily_usd ?? null,
-        monthlyTokens: input?.monthly_tokens ?? null,
-        dailyTokens: input?.daily_tokens ?? null,
+        monthlyVolume: input?.monthly_tokens ?? null,
+        dailyVolume: input?.daily_tokens ?? null,
         ...(input === null ? { removed: true as const } : {}),
       },
     });

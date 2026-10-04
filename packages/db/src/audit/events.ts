@@ -400,8 +400,18 @@ export const AUDIT_EVENTS = {
     userId: id.optional(),
     monthlyUsd: usdAmount.nullable(),
     dailyUsd: usdAmount.nullable(),
-    monthlyTokens: tokenAmount.nullable().optional(),
-    dailyTokens: tokenAmount.nullable().optional(),
+    /** Token budgets (named "volume": audit field names never say "token"). */
+    monthlyVolume: tokenAmount.nullable().optional(),
+    dailyVolume: tokenAmount.nullable().optional(),
+    /** The team's default member budget (team scope only). */
+    memberDefault: z
+      .strictObject({
+        monthlyUsd: usdAmount.nullable(),
+        dailyUsd: usdAmount.nullable(),
+        monthlyVolume: tokenAmount.nullable(),
+        dailyVolume: tokenAmount.nullable(),
+      })
+      .optional(),
     /** Per-user requests per minute (install and team levels only); null = the install's. */
     requestsPerMinute: z.number().int().positive().nullable().optional(),
     removed: z.literal(true).optional(),

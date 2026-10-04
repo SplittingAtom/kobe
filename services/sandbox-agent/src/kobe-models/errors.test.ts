@@ -63,7 +63,21 @@ describe("gateway failure classification", () => {
     // KOBE-42: a used-up budget (the shim's 402, Bifrost's own refusal) is never retried.
     expect(code(openai(402, "budget_exhausted"))).toBe("model_budget_exhausted");
     expect(code(anthropic(402, "budget_exhausted"))).toBe("model_budget_exhausted");
-    expect(code(gemini(402, "UNKNOWN"))).toBe("model_budget_exhausted");
+    expect(
+      code(
+        JSON.stringify({
+          error: {
+            code: 402,
+            message: "m",
+            status: "UNKNOWN",
+            details: [{ "@type": "x", reason: "budget_exhausted", domain: "kobe" }],
+          },
+        }),
+      ),
+    ).toBe("model_budget_exhausted");
+    // A provider's own payment-required answer is not a Kobe budget.
+    expect(code(gemini(402, "UNKNOWN"))).toBe("model_error");
+    expect(code(openai(402, "insufficient_quota"))).toBe("model_error");
     expect(code(openai(402, "policy_budget_exceeded"))).toBe("model_budget_exhausted");
     expect(isTransient(classifyFailure(openai(402, "budget_exhausted"), undefined))).toBe(false);
     expect(

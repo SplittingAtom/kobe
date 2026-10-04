@@ -3,25 +3,20 @@ import {
   MODELS_CHANNEL,
   MODELS_SPEND_PREFIX,
   SYSTEM_ACTOR,
-  and,
-  eq,
-  isNull,
   loadTeamBudgetLines,
   percentUsed,
   sql,
-  teamMembers,
   teams,
-  users,
   withTeam,
   type BudgetLine,
   type BudgetThreshold,
   type KobeDb,
+  type KobeTx,
 } from "@kobe/db";
 import type { BudgetStopCommand } from "@kobe/protocol";
 import pg from "pg";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit/record.js";
-import { activeInstallAdmins } from "../break-glass/store.js";
 import type { Mailer } from "../mail/mailer.js";
 import { deliverBudgetEmails } from "./outbox.js";
 
@@ -172,19 +167,8 @@ export class BudgetMonitor {
     const { lines } = await withTeam(db, teamId, (tx) =>
       loadTeamBudgetLines(tx, teamId, this.now()),
     );
-    let alerts = 0;
-    let installReached = false;
-    for (const line of lines) {
-      for (const threshold of BUDGET_THRESHOLDS) {
-        if (percentUsed(line) >= threshold && (await this.alert(teamId, line, threshold))) {
-          alerts++;
-          if (line.scope === "install" && threshold === 100) installReached = true;
-        }
-      }
-    }
-    // The install budget just ran out: stop every team's runs now, not at the next sweep.
-    if (installReached) void this.sweep();
-    // Stop what is used up, widest first; a narrower stop of the same runs is then a no-op.
+    // Stops first (KOBE-42 review): nothing about alerts or email may delay ending runs. Widest
+    // first; a narrower stop of the same runs is then a no-op.
     const stopped: string[] = [];
     const seen = new Set<string>();
     for (const line of lines.filter((l) => l.spent >= l.limit)) {
@@ -206,11 +190,33 @@ export class BudgetMonitor {
         logger.error({ err, teamId, scope: line.scope }, "budget stop failed");
       }
     }
+    let alerts = 0;
+    let installReached = false;
+    for (const line of lines) {
+      for (const threshold of BUDGET_THRESHOLDS) {
+        if (percentUsed(line) < threshold) continue;
+        try {
+          if (await this.alert(teamId, line, threshold)) {
+            alerts++;
+            if (line.scope === "install" && threshold === 100) installReached = true;
+          }
+        } catch (err) {
+          // One alert (e.g. its budget changed meanwhile) never blocks the others.
+          logger.error({ err, teamId, scope: line.scope, threshold }, "budget alert failed");
+        }
+      }
+    }
+    // The install budget just ran out: stop every team's runs now, not at the next sweep.
+    if (installReached) void this.sweep();
     if (alerts > 0) await this.deliver();
     return { alerts, stopped };
   }
 
-  /** Records a crossed threshold once (per budget and period); true when this call recorded it. */
+  /**
+   * Records a crossed threshold once per budget and period; true when this call recorded it. The
+   * database verifies it (current period, configured limit, real spend) and queues its emails
+   * (budget_alerts triggers); a team's alerts are written in its own context (RLS).
+   */
   private async alert(
     teamId: string,
     line: BudgetLine,
@@ -219,31 +225,23 @@ export class BudgetMonitor {
     const { db } = this.options;
     const alertTeam = line.scope === "install" ? null : teamId;
     const alertUser = line.scope === "user" ? (line.userId ?? null) : null;
-    // Already recorded this period (the common case while a budget stays used up): nothing to do.
-    const known = await db.execute(sql`
-      SELECT 1 FROM budget_alerts
-       WHERE team_id IS NOT DISTINCT FROM ${alertTeam}::uuid
-         AND user_id IS NOT DISTINCT FROM ${alertUser}::uuid
-         AND scope = ${line.scope} AND unit = ${line.unit} AND period = ${line.period}
-         AND period_start = ${line.periodStart}::date AND threshold = ${threshold}`);
-    if (known.rows.length > 0) return false;
-    // Recipients are read first (team admins live behind the team's RLS).
-    const recipients = await this.recipients(teamId, line);
-    return db.transaction(async (tx) => {
+    const write = async (tx: KobeTx): Promise<boolean> => {
+      const known = await tx.execute(sql`
+        SELECT 1 FROM budget_alerts
+         WHERE team_id IS NOT DISTINCT FROM ${alertTeam}::uuid
+           AND user_id IS NOT DISTINCT FROM ${alertUser}::uuid
+           AND scope = ${line.scope} AND unit = ${line.unit} AND period = ${line.period}
+           AND period_start = ${line.periodStart}::date AND threshold = ${threshold}`);
+      if (known.rows.length > 0) return false;
       const inserted = await tx.execute<{ id: string }>(sql`
         INSERT INTO budget_alerts (team_id, user_id, scope, unit, period, period_start,
                                    threshold, limit_amount, spent_amount)
         VALUES (${alertTeam}, ${alertUser}, ${line.scope}, ${line.unit}, ${line.period},
                 ${line.periodStart}::date, ${threshold}, ${line.limit}, ${line.spent})
         ON CONFLICT ON CONSTRAINT budget_alerts_once DO NOTHING
-        RETURNING id`);
-      const id = inserted.rows[0]?.id;
-      if (!id) return false;
-      for (const recipient of recipients) {
-        await tx.execute(sql`
-          INSERT INTO budget_alert_emails (alert_id, recipient_id)
-          VALUES (${id}, ${recipient}) ON CONFLICT DO NOTHING`);
-      }
+        RETURNING id, spent_amount`);
+      const row = inserted.rows[0];
+      if (!row) return false;
       if (threshold === 100) {
         await recordAudit(tx, {
           action: "models.budget.reached",
@@ -261,28 +259,7 @@ export class BudgetMonitor {
         });
       }
       return true;
-    });
-  }
-
-  /** Who is told: install admins (install budget); team admins, plus the member for their own. */
-  private async recipients(teamId: string, line: BudgetLine): Promise<string[]> {
-    const { db } = this.options;
-    if (line.scope === "install") return (await activeInstallAdmins(db)).map((a) => a.id);
-    const admins = await withTeam(db, teamId, (tx) =>
-      tx
-        .select({ id: users.id })
-        .from(teamMembers)
-        .innerJoin(users, eq(users.id, teamMembers.userId))
-        .where(
-          and(
-            eq(teamMembers.teamId, teamId),
-            eq(teamMembers.role, "team_admin"),
-            isNull(users.deactivatedAt),
-          ),
-        ),
-    );
-    const ids = new Set(admins.map((a) => a.id));
-    if (line.scope === "user" && line.userId) ids.add(line.userId);
-    return [...ids];
+    };
+    return alertTeam ? withTeam(db, alertTeam, write) : db.transaction(write);
   }
 }

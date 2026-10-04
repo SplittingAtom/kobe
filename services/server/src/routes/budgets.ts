@@ -48,6 +48,14 @@ const teamSchema = z
     ...tokenFields,
     /** Null: the install's rate. */
     user_requests_per_minute: rate.nullable().optional(),
+    /** The default budget of every member without one of their own (KOBE-42 review). */
+    member_default: z
+      .strictObject({
+        monthly_usd: amount.optional(),
+        daily_usd: amount.optional(),
+        ...tokenFields,
+      })
+      .optional(),
   })
   .refine(nonEmpty, "nothing to change");
 const memberSchema = z

@@ -14,6 +14,8 @@ const call = (userId: string): CallContext => ({
   route: "openai",
   path: "/v1/chat/completions",
   model: "openai/m",
+  inputEstimate: 100,
+  requestedOutput: 100,
 });
 
 const line = (over: Partial<BudgetLine>): BudgetLine => ({
@@ -35,6 +37,7 @@ function gate(state: () => MemberBudgetState, now = { t: 0 }) {
         loads++;
         return state();
       },
+      prices: async () => new Map([["openai/m", { input: 1_000_000, output: 1_000_000 }]]),
     },
     { ttlMs: 1_000, now: () => now.t },
   );
@@ -46,7 +49,7 @@ describe("BudgetGate (KOBE-42)", () => {
     let lines: BudgetLine[] = [line({})];
     const { g } = gate(() => ({ lines, requestsPerMinute: 1_000 }));
     const user = randomUUID();
-    expect(await g.admit(call(user))).toEqual({ ok: true });
+    expect(await g.admit(call(user))).toMatchObject({ ok: true });
     lines = [
       line({ scope: "user", userId: user, period: "day", limit: 1, spent: 1 }),
       line({ scope: "install", spent: 10 }),
@@ -101,6 +104,27 @@ describe("BudgetGate (KOBE-42)", () => {
       code: "budget_exhausted",
       message: "Your team's daily token budget is used up.",
     });
+  });
+
+  it("reserves an admitted call's possible cost until it ends (concurrent calls cannot overshoot)", async () => {
+    // $1 per token here: 200 tokens reserved = $200 per call; $500 left of the team's budget.
+    const { g } = gate(() => ({
+      lines: [
+        line({ limit: 1_000, spent: 500 }),
+        line({ unit: "tokens", limit: 10_000, spent: 0 }),
+      ],
+      requestsPerMinute: 1_000,
+    }));
+    const user = randomUUID();
+    const first = await g.admit(call(user));
+    const second = await g.admit(call(user));
+    const third = await g.admit(call(randomUUID())); // another member of the same team
+    expect([first.ok, second.ok, third.ok]).toEqual([true, true, true]);
+    // 500 + 3 × 200 ≥ 1,000: nothing more starts while the three are in flight.
+    expect(await g.admit(call(user))).toMatchObject({ ok: false, code: "budget_exhausted" });
+    if (first.ok) first.release?.();
+    if (second.ok) second.release?.();
+    expect((await g.admit(call(user))).ok).toBe(true);
   });
 
   it("a zero budget allows nothing", async () => {

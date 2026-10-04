@@ -7,14 +7,27 @@ import { apiRequest, type ApiResult } from "../../api/client";
 
 const enc = encodeURIComponent;
 
+/** Dollar and token budgets (token budgets also cap models without prices). */
 export interface BudgetAmounts {
   readonly monthlyUsd: number | null;
   readonly dailyUsd: number | null;
+  readonly monthlyTokens: number | null;
+  readonly dailyTokens: number | null;
 }
 
 export interface Spend {
   readonly monthUsd: number;
   readonly dayUsd: number;
+  readonly monthTokens: number;
+  readonly dayTokens: number;
+}
+
+/** Request body form of {@link BudgetAmounts}. */
+export interface BudgetAmountsInput {
+  readonly monthly_usd: number | null;
+  readonly daily_usd: number | null;
+  readonly monthly_tokens: number | null;
+  readonly daily_tokens: number | null;
 }
 
 export interface InstallLimits extends BudgetAmounts {
@@ -32,12 +45,19 @@ export interface MemberBudget extends BudgetAmounts {
 export interface TeamBudgets {
   readonly period: { readonly month: string; readonly day: string };
   /** The install's spend is every team's together: shown in percent only. */
-  readonly install: InstallLimits & {
-    readonly percentUsed: { readonly month: number | null; readonly day: number | null };
+  readonly install: {
+    readonly userRequestsPerMinute: number;
+    readonly percentUsed: {
+      readonly monthUsd: number | null;
+      readonly dayUsd: number | null;
+      readonly monthTokens: number | null;
+      readonly dayTokens: number | null;
+    };
   };
   readonly team: BudgetAmounts & {
     readonly userRequestsPerMinute: number | null;
     readonly spent: Spend;
+    readonly memberDefault: BudgetAmounts;
   };
   readonly effectiveRequestsPerMinute: number;
   readonly members: readonly MemberBudget[];
@@ -48,9 +68,10 @@ export type BudgetState = "ok" | "warning" | "exhausted";
 export interface BudgetStatusLine {
   readonly scope: "install" | "team" | "user";
   readonly period: "month" | "day";
+  readonly unit: "usd" | "tokens";
   /** Null for the install budget. */
-  readonly limitUsd: number | null;
-  readonly spentUsd: number | null;
+  readonly limit: number | null;
+  readonly spent: number | null;
   readonly percent: number;
   readonly state: BudgetState;
 }
@@ -66,10 +87,9 @@ export function getTeamBudgets(teamId: string): Promise<ApiResult<TeamBudgets>> 
 
 export function setTeamBudget(
   teamId: string,
-  input: {
-    readonly monthly_usd: number | null;
-    readonly daily_usd: number | null;
-    readonly user_requests_per_minute: number | null;
+  input: Partial<BudgetAmountsInput> & {
+    readonly user_requests_per_minute?: number | null;
+    readonly member_default?: BudgetAmountsInput;
   },
 ): Promise<ApiResult<TeamBudgets>> {
   return apiRequest<TeamBudgets>("/v1/team/budgets/team", { method: "PUT", json: input, teamId });
@@ -78,7 +98,7 @@ export function setTeamBudget(
 export function setMemberBudget(
   teamId: string,
   userId: string,
-  input: { readonly monthly_usd: number | null; readonly daily_usd: number | null },
+  input: BudgetAmountsInput,
 ): Promise<ApiResult<TeamBudgets>> {
   return apiRequest<TeamBudgets>(`/v1/team/budgets/members/${enc(userId)}`, {
     method: "PUT",
@@ -105,11 +125,9 @@ export function getInstallBudget(): Promise<ApiResult<InstallLimits>> {
   return apiRequest<InstallLimits>("/v1/install/budget");
 }
 
-export function setInstallBudget(input: {
-  readonly monthly_usd: number | null;
-  readonly daily_usd: number | null;
-  readonly user_requests_per_minute: number;
-}): Promise<ApiResult<InstallLimits>> {
+export function setInstallBudget(
+  input: BudgetAmountsInput & { readonly user_requests_per_minute: number },
+): Promise<ApiResult<InstallLimits>> {
   return apiRequest<InstallLimits>("/v1/install/budget", { method: "PUT", json: input });
 }
 
@@ -120,4 +138,13 @@ export function parseAmount(text: string): number | null | undefined {
   if (!/^\d+(\.\d{1,2})?$/.test(t)) return undefined;
   const n = Number(t);
   return n <= 1_000_000_000 ? n : undefined;
+}
+
+/** "1,500,000" or "1500000" → 1500000, "" → null, anything else → undefined (invalid). */
+export function parseTokens(text: string): number | null | undefined {
+  const t = text.trim().replace(/[,_ ]/g, "");
+  if (t === "") return null;
+  if (!/^\d{1,16}$/.test(t)) return undefined;
+  const n = Number(t);
+  return n <= 1_000_000_000_000_000 ? n : undefined;
 }

@@ -23,10 +23,12 @@ export {
 export { recordModelUsage, type ModelUsageRecord } from "./usage.js";
 export {
   exhaustedLine,
+  loadGatewayPrices,
   loadMemberBudgetState,
   loadTeamBudgetLines,
   percentUsed,
   periodStarts,
   type BudgetLine,
   type MemberBudgetState,
+  type ModelPrice,
 } from "./budgets.js";

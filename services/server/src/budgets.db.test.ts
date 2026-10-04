@@ -108,6 +108,11 @@ describe("team budgets API (D8: team admins)", () => {
       user_requests_per_minute: 30,
     });
     expect(set.json.effective_requests_per_minute).toBe(30);
+    // The install budget is shown to a team in percent only (its spend is every team's).
+    expect(Object.keys(set.json.install).sort()).toEqual([
+      "percent_used",
+      "user_requests_per_minute",
+    ]);
     const member = await admin.put(`/v1/team/budgets/members/${bob.id}`, {
       monthly_usd: 5,
       daily_usd: null,
@@ -193,14 +198,15 @@ describe("Gate 2: a budget stops a run after its current step (D30)", () => {
       ["team", 100, 1],
     ]);
     expect((await monitor.evaluate(w.team)).alerts).toBe(0);
+    // A repeated evaluation neither re-requests nor re-sends the stop (KOBE-42 review).
+    expect(ws.sb.frames("run.stop").filter((s) => s.run_id === run)).toHaveLength(1);
     await monitor.deliver();
     const mail = (f.fx.replica(1).deps.mailer as MemoryMailer).to(w.owner.email);
-    expect(mail.map((m) => m.subject)).toEqual(
-      expect.arrayContaining([
-        expect.stringMatching(/monthly model budget is 80% used$/),
-        expect.stringMatching(/monthly model budget is used up$/),
-      ]),
-    );
+    // Both crossed in one evaluation: the 80 % warning says less than "used up", so only the
+    // 100 % email goes out (the warning is skipped as superseded).
+    expect(mail.map((m) => m.subject)).toEqual([
+      expect.stringMatching(/monthly model budget is used up$/),
+    ]);
     const actions = await f.auditActions(w.team);
     expect(actions).toContain("models.budget.reached");
     expect(actions).toContain("run.budget_stopped");
@@ -348,6 +354,24 @@ describe("Gate 2: a budget stops a run after its current step (D30)", () => {
     expect(audit.map((a) => a.target)).toEqual([
       expect.objectContaining({ scope: "team", unit: "tokens", limit: 1000, spent: 1200 }),
     ]);
+  });
+
+  it("the team's default member budget caps a member without one of their own", async () => {
+    const w = await f.world(1);
+    const bob = w.others[0];
+    if (!bob) throw new Error("no member");
+    const set = await f.on(0, w.owner).put("/v1/team/budgets/team", {
+      member_default: { daily_tokens: 100 },
+    });
+    expect(set.json.team.member_default).toMatchObject({ daily_tokens: 100 });
+    await recordModelUsage(f.fx.db, [{ ...call(w.team, bob.id, 0), inputTokens: 150 }]);
+    expect(await f.fx.replica(0).deps.budgets.evaluate(w.team)).toMatchObject({
+      stopped: [`user:${bob.id}`],
+    });
+    await f.fx.activate(bob, w.team);
+    expect((await f.send(bob, await f.thread(bob), "hi")).status).toBe(429);
+    // The owner has spent nothing: under the same default, still free to run.
+    expect((await f.send(w.owner, await f.thread(w.owner), "hi")).status).toBe(201);
   });
 
   it("a member's own budget stops only that member's runs", async () => {
