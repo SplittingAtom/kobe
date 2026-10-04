@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { withTeam } from "@kobe/db";
 import { FAILURE_MESSAGES } from "./runs/failure-codes.js";
+import { PINNED_AGENTS } from "./runs/agents.js";
 import { startedModelAlias } from "./runs/lifecycle.js";
 import { apiForKind, resolveRunModel } from "./runs/models.js";
 import { RunFixture } from "./testing/run-fixture.js";
@@ -12,9 +13,21 @@ import { RunFixture } from "./testing/run-fixture.js";
  * server's message, and a run whose model call failed ends `run.failed` and lets the queue move.
  */
 const f = new RunFixture();
+/** Threads whose (fake) agent pins a model alias — what KOBE-47's resolver will supply. */
+const pinnedAliases = new Map<string, string>();
 
 beforeAll(async () => {
-  await f.setup();
+  await f.setup({
+    agents: {
+      async resolve(tx, input) {
+        const resolved = await PINNED_AGENTS.resolve(tx, input);
+        const alias = pinnedAliases.get(input.threadId);
+        return resolved.ok && alias !== undefined
+          ? { ...resolved, config: { model: { alias } } }
+          : resolved;
+      },
+    },
+  });
 });
 
 afterAll(async () => {
@@ -69,7 +82,7 @@ async function catalog(
 }
 
 describe("run model resolution (D30)", () => {
-  it("uses the requested alias when the team enabled it, else the team default, else nothing", async () => {
+  it("uses the requested alias when the team enabled it; refuses one the team did not; the default only when none is requested", async () => {
     const w = await f.world();
     await catalog(w.team, w.owner.id, [
       { alias: "fast", isDefault: true },
@@ -81,28 +94,33 @@ describe("run model resolution (D30)", () => {
     const resolve = (alias?: string) =>
       withTeam(db, w.team, (tx) => resolveRunModel(tx, w.team, alias));
     expect(await resolve("smart")).toEqual({
-      alias: "smart",
-      gateway_model: "anthropic/claude-fake",
-      api: "anthropic-messages",
+      ok: true,
+      model: { alias: "smart", gateway_model: "anthropic/claude-fake", api: "anthropic-messages" },
     });
     expect(await resolve("gem")).toMatchObject({
-      gateway_model: "gemini/gemini-fake",
-      api: "google-generative-ai",
+      model: { gateway_model: "gemini/gemini-fake", api: "google-generative-ai" },
     });
     expect(await resolve("qwen")).toMatchObject({
-      gateway_model: "kobe-vllm/qwen-fake",
-      api: "openai-completions",
+      model: { gateway_model: "kobe-vllm/qwen-fake", api: "openai-completions" },
     });
     expect(await resolve(undefined)).toMatchObject({
-      alias: "fast",
-      gateway_model: "openai/gpt-fake",
+      model: { alias: "fast", gateway_model: "openai/gpt-fake" },
     });
-    expect(await resolve("not-in-catalog")).toMatchObject({ alias: "fast" });
-    // Another team enabled nothing: no model, and no leak of this team's choice (RLS).
+    // User decision: a requested alias the team did not enable fails, never falls back.
+    expect(await resolve("not-in-catalog")).toEqual({
+      ok: false,
+      code: "agent_model_not_enabled",
+      alias: "not-in-catalog",
+    });
+    // Another team enabled nothing: no default, no leak of this team's choice (RLS), and its
+    // request for this team's alias is refused too.
     const other = await f.world();
     expect(
+      await withTeam(db, other.team, (tx) => resolveRunModel(tx, other.team, undefined)),
+    ).toEqual({ ok: true, model: undefined });
+    expect(
       await withTeam(db, other.team, (tx) => resolveRunModel(tx, other.team, "fast")),
-    ).toBeUndefined();
+    ).toMatchObject({ ok: false, alias: "fast" });
     expect(apiForKind("ollama")).toBe("openai-completions");
   });
 
@@ -126,6 +144,38 @@ describe("run model resolution (D30)", () => {
     expect(await withTeam(db, w.team, (tx) => startedModelAlias(tx, w.team, runId))).toBe("smart");
     ws.reply(start, "hi");
     await f.until(w.team, runId, "completed");
+  });
+
+  it("an agent pinned to a model the team did not enable fails the run naming the model (user decision)", async () => {
+    const w = await f.world();
+    await catalog(w.team, w.owner.id, [{ alias: "fast", isDefault: true }]);
+    const ws = await f.connect(w, 0);
+    const threadId = await f.thread(w.owner);
+    pinnedAliases.set(threadId, "smart");
+    const runId = await f.message(w.owner, threadId, "hello");
+    await f.until(w.team, runId, "failed");
+    expect(await f.types(w.team, runId)).toEqual(["run.failed"]);
+    expect((await f.events(w.team, runId)).at(-1)?.payload).toEqual({
+      error: {
+        code: "agent_model_not_enabled",
+        message:
+          "This agent's model (smart) isn't enabled for your team. Ask your team admin to enable it.",
+      },
+    });
+    expect(ws.starts().map((s) => s.run_id)).not.toContain(runId); // nothing was woken for it
+    expect(await f.threadStatus(w.team, threadId)).toBe("idle");
+    // Enabling it makes the next message run on exactly that model.
+    await f.fx.admin.query(
+      `INSERT INTO team_models (team_id, alias, is_default, enabled_by) VALUES ($1, 'smart', false, $2)`,
+      [w.team, w.owner.id],
+    );
+    const second = await f.message(w.owner, threadId, "again");
+    const start = await ws.started(second);
+    expect(start.config).toMatchObject({
+      model: { alias: "smart", gateway_model: "anthropic/claude-fake" },
+    });
+    ws.reply(start, "ok");
+    await f.until(w.team, second, "completed");
   });
 
   it("a team without models: run.start carries none, and the agent's refusal fails the run with the server's text", async () => {

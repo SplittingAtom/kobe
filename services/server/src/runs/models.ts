@@ -12,11 +12,12 @@ import {
 
 /**
  * The model of a run (spec D30; KOBE-41), resolved on the server because the sandbox has no user
- * session: the requested alias (the thread's or agent's, from the agent resolver) when the team
- * enabled it, else the team's default. Each comes with the gateway's model id (`<gateway
- * provider>/<model>`, what Bifrost and the shim allow by) and the API style Pi must speak to it.
- * Undefined when the team has nothing usable: the run then fails `model_not_configured` in the
- * sandbox agent (no model to offer Pi), and nothing is woken for it on the server side.
+ * session. A requested alias (the agent's pin, from the agent resolver) must be enabled for the
+ * team, else the run fails `agent_model_not_enabled` (user decision: never fall back silently);
+ * only a run with no requested alias uses the team's default. Each comes with the gateway's model
+ * id (`<gateway provider>/<model>`, what Bifrost and the shim allow by) and the API style Pi must
+ * speak to it. `model: undefined` when the team has nothing usable: the run then fails
+ * `model_not_configured` in the sandbox agent (no model to offer Pi).
  */
 export type RunModelConfig = NonNullable<PiThreadConfig["model"]> & {
   readonly gateway_model: string;
@@ -66,16 +67,28 @@ async function enabledModels(tx: KobeTx, teamId: string): Promise<EnabledModel[]
   }));
 }
 
+export type RunModelResolution =
+  | { readonly ok: true; readonly model: RunModelConfig | undefined }
+  | { readonly ok: false; readonly code: "agent_model_not_enabled"; readonly alias: string };
+
 export async function resolveRunModel(
   tx: KobeTx,
   teamId: string,
   requestedAlias: string | undefined,
-): Promise<RunModelConfig | undefined> {
+): Promise<RunModelResolution> {
   const enabled = await enabledModels(tx, teamId);
   const chosen =
-    (requestedAlias === undefined ? undefined : enabled.find((m) => m.alias === requestedAlias)) ??
-    enabled.find((m) => m.isDefault);
-  return chosen === undefined
-    ? undefined
-    : { alias: chosen.alias, gateway_model: chosen.gatewayModel, api: chosen.api };
+    requestedAlias === undefined
+      ? enabled.find((m) => m.isDefault)
+      : enabled.find((m) => m.alias === requestedAlias);
+  if (requestedAlias !== undefined && chosen === undefined) {
+    return { ok: false, code: "agent_model_not_enabled", alias: requestedAlias };
+  }
+  return {
+    ok: true,
+    model:
+      chosen === undefined
+        ? undefined
+        : { alias: chosen.alias, gateway_model: chosen.gatewayModel, api: chosen.api },
+  };
 }

@@ -19,7 +19,7 @@ import {
   type RunRow,
   type ThreadRow,
 } from "./store.js";
-import { FAILURE_MESSAGES, failureInfo } from "./failure-codes.js";
+import { FAILURE_MESSAGES, agentModelNotEnabled, failureInfo } from "./failure-codes.js";
 import { resolveRunModel, type RunModelConfig } from "./models.js";
 import type { AgentResolution, RunAgentResolver } from "./seams.js";
 
@@ -96,8 +96,13 @@ export async function promoteInTx(
   if (hold > 0 && (await abortPending(tx, teamId, threadId, hold))) return { transitions };
   // Stop paused the queue (KOBE-26): it waits for Resume or a new message.
   const paused = await isQueuePaused(tx, teamId, threadId);
-  const fail = async (t: ThreadRow, run: RunRow, code: string): Promise<ThreadRow> => {
-    const applied = await applyTransition(tx, t, run, "failed", "error", failedEvent(code));
+  const fail = async (
+    t: ThreadRow,
+    run: RunRow,
+    code: string,
+    event: NewRunEvent = failedEvent(code),
+  ): Promise<ThreadRow> => {
+    const applied = await applyTransition(tx, t, run, "failed", "error", event);
     transitions.push(applied.transition);
     return { ...t, status: applied.threadStatus };
   };
@@ -121,9 +126,18 @@ export async function promoteInTx(
       thread = await fail(thread, next, "agent_unavailable");
       continue;
     }
+    const resolution = await resolveRunModel(tx, teamId, resolved.config?.model?.alias);
+    if (!resolution.ok) {
+      // The agent's pinned model is not enabled for this team: a clear failure, no fallback.
+      thread = await fail(thread, next, resolution.code, {
+        type: "run.failed",
+        payload: { error: agentModelNotEnabled(resolution.alias) },
+      });
+      continue;
+    }
+    const model = resolution.model;
     const approvalMode = resolved.approvalMode;
     const parentEntryId = next.parentEntryId ?? thread.leafEntryId;
-    const model = await resolveRunModel(tx, teamId, resolved.config?.model?.alias);
     const started: NewRunEvent = {
       type: "run.started",
       payload: {
@@ -217,8 +231,13 @@ export async function restartPlanInTx(
   // The model the run started with (`run.started.model`), so a re-sent start does not switch
   // models; the resolver's alias only when the run had none.
   const started = await startedModelAlias(tx, run.teamId, run.id);
-  const model = await resolveRunModel(tx, run.teamId, started ?? resolved.config?.model?.alias);
-  return planOf(thread, run, resolved, model);
+  const resolution = await resolveRunModel(
+    tx,
+    run.teamId,
+    started ?? resolved.config?.model?.alias,
+  );
+  if (!resolution.ok) return undefined;
+  return planOf(thread, run, resolved, resolution.model);
 }
 
 /** The alias in the run's `run.started` event, if any. */

@@ -14,6 +14,10 @@ export const FAILURE_MESSAGES: Readonly<Record<string, string>> = {
   start_failed: "The run could not start in your workspace.",
   pi_rejected: "Your workspace refused the message (Pi could not take the prompt).",
   pi_unavailable: "Your workspace could not start Pi.",
+  // KOBE-41: the agent's pinned model is not enabled for the team (user decision: fail, never
+  // fall back); `agentModelNotEnabled(alias)` names the alias.
+  agent_model_not_enabled:
+    "This agent's model isn't enabled for your team. Ask your team admin to enable it.",
   // KOBE-41: the model gateway's answers, as kobe-models reports them (`parseKobeModelError`).
   model_not_configured:
     "No model is enabled for your team yet. Ask a team admin to enable one in the team's model settings.",
@@ -27,6 +31,14 @@ export const FAILURE_MESSAGES: Readonly<Record<string, string>> = {
   runtime_tampered:
     "Another process in your workspace changed Pi's private runtime directory, so the run was stopped. Check what is running in your workspace and try again.",
 };
+
+/** The `agent_model_not_enabled` error naming the alias (catalog-validated; capped anyway). */
+export function agentModelNotEnabled(alias: string): ErrorInfo {
+  return {
+    code: "agent_model_not_enabled",
+    message: `This agent's model (${alias.slice(0, 128)}) isn't enabled for your team. Ask your team admin to enable it.`,
+  };
+}
 
 /**
  * The `run.failed` error for a code, with the server's text; a code without a message of its own

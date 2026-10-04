@@ -97,7 +97,8 @@ carries the new token. A 401 mid-rotation re-reads the file once and retries.
 
 `runs/models.ts` `resolveRunModel(tx, team, requestedAlias)`: inside the run-start transaction
 (RLS) — the requested alias (the agent resolver's `config.model.alias`, KOBE-47) if the team
-enabled it, else the team default; with the catalog's `gateway_model` and the API style for the
+enabled it, else the run **fails `agent_model_not_enabled`** (nothing is woken for it); only a run with no
+requested alias uses the team default — user decision (2026-10-04), recorded below; with the catalog's `gateway_model` and the API style for the
 provider kind (`apiForKind`: openai/ollama/openai_compatible → `openai-completions`, anthropic →
 `anthropic-messages`, gemini → `google-generative-ai`). `run.start.config.model` carries
 `{alias, gateway_model, api}` and `run.started.model` the alias. No model → no `config.model`
@@ -131,14 +132,15 @@ stop reason; at `agent_settled` a run whose last message ended in error fails wi
 (`ingest.ts` → `endRunInTx` failed, server message from `runs/failure-codes.ts`), the queue
 advances, and the chat shows "The run failed: …" (KOBE-32 renders `run.failed`).
 
-| Gateway answer                                       | Run error               |
-| ---------------------------------------------------- | ----------------------- |
-| 403 `model_not_enabled` / Bifrost `provider_blocked` | `model_not_enabled`     |
-| 401 after a fresh token / `session_revoked`          | `model_session_revoked` |
-| 429 after the waits                                  | `model_throttled`       |
-| 502/503/504 after the waits                          | `model_unavailable`     |
-| no `config.model`                                    | `model_not_configured`  |
-| anything else (incl. non-kobe error text)            | `model_error`           |
+| Gateway answer                                       | Run error                 |
+| ---------------------------------------------------- | ------------------------- |
+| 403 `model_not_enabled` / Bifrost `provider_blocked` | `model_not_enabled`       |
+| 401 after a fresh token / `session_revoked`          | `model_session_revoked`   |
+| 429 after the waits                                  | `model_throttled`         |
+| 502/503/504 after the waits                          | `model_unavailable`       |
+| no `config.model`                                    | `model_not_configured`    |
+| pinned alias not enabled for the team (server side)  | `agent_model_not_enabled` |
+| anything else (incl. non-kobe error text)            | `model_error`             |
 
 Found on the way: a rejected `run.start` (`delivery.ts`) stored the sandbox's own error text in
 `run.failed` (the lifecycle rule says sandbox text is never shown); it now keeps the sandbox's
@@ -191,8 +193,8 @@ code with a server message (`pi_rejected`, `pi_unavailable` added to the table).
   gateway's `UsageSink` now has `runId` for reconciliation. Pi's `usage.cost` is 0 for the `kobe`
   provider (no prices in the catalog): cost comes from Bifrost/KOBE-43, not from Pi.
 - **KOBE-47 (agent resolution):** put the agent's alias in `AgentResolution.config.model.alias`;
-  `resolveRunModel` turns it into the gateway model if the team enabled it, else the default
-  (silently — decide whether an agent pinned to a disabled model should fail instead).
+  `resolveRunModel` turns it into the gateway model if the team enabled it, else the run fails
+  `agent_model_not_enabled` naming the alias (user decision; no fallback).
 - **KOBE-44 (admin UI):** nothing new; consider catalog capability flags (reasoning, context).
 
 ## Self-review round (code-reviewer agent: 0 CRITICAL/HIGH, 4 MEDIUM, 4 LOW) — resolution
@@ -254,11 +256,18 @@ restart, so nothing in KOBE-41 adds a second Pi start. Real-cluster numbers are 
    and gate1 found the Service in a terminating namespace. `ensure_fake_llm` now waits the
    namespace out and checks the pod is Running; failed chats print the shim's refusals.
 
+## User decisions
+
+- **2026-10-04 (via the coordinator):** an agent whose pinned model alias is not enabled for the
+  team must FAIL the run with a clear error rather than fall back; only runs with no pinned or
+  requested alias use the team default. Built as `agent_model_not_enabled` (server message names
+  the alias; test "an agent pinned to a model the team did not enable fails the run naming the
+  model"). A recovery re-send of such a run (`restartPlanInTx`) yields no plan and fails
+  `start_lost`.
+
 ## Open questions (for Chris or the coordinator)
 
-1. An agent whose pinned alias is not enabled for the team falls back to the team default
-   (recorded in `run.started.model`). Failing the run instead is a one-line change.
-2. Thread-level model choice (D30 "teams choose a subset and a default" says nothing about
+1. Thread-level model choice (D30 "teams choose a subset and a default" says nothing about
    per-thread models): not built; `run.start.config.model` is where it would go.
 
 ## Evidence (acceptance criteria → test or command output)

@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import type { RunAgentResolver } from "../runs/seams.js";
 import { expect } from "vitest";
 import type { ServerToSandboxFrame } from "@kobe/protocol";
 import { WIRE_DEFAULTS } from "../sandbox-wire/constants.js";
@@ -158,7 +159,12 @@ export class RunFixture {
   readonly workspaces: FakeWorkspace[] = [];
 
   async setup(
-    options: { readonly startTimeoutMs?: number; readonly stopGraceMs?: number } = {},
+    options: {
+      readonly startTimeoutMs?: number;
+      readonly stopGraceMs?: number;
+      /** The run-start agent resolver (KOBE-46/47 seam); default `PINNED_AGENTS`. */
+      readonly agents?: RunAgentResolver;
+    } = {},
   ): Promise<void> {
     await this.fx.setup([{}, {}], () => ({
       sandboxWire: {
@@ -177,6 +183,7 @@ export class RunFixture {
       },
       runs: {
         sweep: false,
+        ...(options.agents === undefined ? {} : { agents: options.agents }),
         tuning: {
           stopGraceMs: options.stopGraceMs ?? 300,
           stallMs: 0,
