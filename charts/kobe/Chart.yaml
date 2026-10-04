@@ -4,7 +4,6 @@ description: Kobe — self-hosted conversational agent platform (umbrella chart)
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
-license: Apache-2.0
 home: https://github.com/SplittingAtom/kobe
 sources:
   - https://github.com/SplittingAtom/kobe

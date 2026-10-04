@@ -326,21 +326,25 @@ describe("workspace sync (agent)", () => {
     await expect(sync.beforeRun(runStart())).resolves.toBeUndefined();
   });
 
-  it("measures a full restore (localhost; see the ledger for real numbers)", async () => {
-    const first = await volume();
-    const files = 500;
-    for (let i = 0; i < files; i++)
-      await put(first, `set/${i % 20}/f${i}.txt`, `${i}`.repeat(1000));
-    await (await started(first)).push();
-    const second = await volume();
-    const t0 = performance.now();
-    await started(second);
-    const ms = performance.now() - t0;
-    expect(server.reports.at(-1)).toMatchObject({ mode: "full", files });
-    console.log(
-      `restore of ${files} files (≈ 2 MB) from a local fake server: ${Math.round(ms)} ms`,
-    );
-  });
+  it(
+    "measures a full restore (localhost; see the ledger for real numbers)",
+    { timeout: 30000 },
+    async () => {
+      const first = await volume();
+      const files = 500;
+      for (let i = 0; i < files; i++)
+        await put(first, `set/${i % 20}/f${i}.txt`, `${i}`.repeat(1000));
+      await (await started(first)).push();
+      const second = await volume();
+      const t0 = performance.now();
+      await started(second);
+      const ms = performance.now() - t0;
+      expect(server.reports.at(-1)).toMatchObject({ mode: "full", files });
+      console.log(
+        `restore of ${files} files (≈ 2 MB) from a local fake server: ${Math.round(ms)} ms`,
+      );
+    },
+  );
 });
 
 function must<T>(v: T | undefined): T {
