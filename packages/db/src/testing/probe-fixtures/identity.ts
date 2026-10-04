@@ -36,13 +36,11 @@ export const identityFixtures: Record<(typeof identity.team)[number], ProbeFixtu
   },
   retention_blob_deletions: async (tx, teamId) => {
     const ownerUserId = await insertUser(tx);
-    await tx
-      .insert(retentionBlobDeletions)
-      .values({
-        teamId,
-        key: `teams/${teamId}/threads/${randomUUID()}/x`,
-        threadId: randomUUID(),
-        ownerUserId,
-      });
+    await tx.insert(retentionBlobDeletions).values({
+      teamId,
+      key: `teams/${teamId}/threads/${randomUUID()}/x`,
+      threadId: randomUUID(),
+      ownerUserId,
+    });
   },
 };
