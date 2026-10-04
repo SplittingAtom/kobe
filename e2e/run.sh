@@ -1536,6 +1536,11 @@ JS
     contains "the woken sandbox produced a first token" '^first_token_ms=[0-9]+$' "$chat_out"
     contains "the shim attributed the model call to the run (x-kobe-run-id from Pi)" "\"runId\":\"$chat_run\"" \
       "$($KUBECTL -n "$NS" logs -l app.kubernetes.io/component=model-gateway --tail=-1 --since=15m 2>/dev/null | grep -F "\"runId\":\"${chat_run:-none}\"" | head -1)"
+    # KOBE-43: the shim wrote the call to the run_usage ledger from the upstream's usage report.
+    usage_row() { psql_kobe "SELECT status || '|' || usage_source || '|' || input_tokens || '|' || output_tokens FROM run_usage WHERE team_id = '$E2E_TEAM_ID' AND run_id = '${chat_run:-00000000-0000-4000-8000-000000000000}' ORDER BY at LIMIT 1"; }
+    contains "the model call is in the run_usage ledger with the provider's reported tokens" \
+      '^200\|reported\|[1-9][0-9]*\|[1-9][0-9]*$' "$(wait_for 30 '^200\|' usage_row)"
+    contains "the team usage dashboard counts it" '^200 .*"calls":[1-9]' "$(as_owner "GET /v1/team/usage")"
     seen_now=$(probe "$NS" "$(answers "$LLM/_seen")")
     contains "the upstream saw the provider key (attached by Bifrost, outside the sandbox)" 'e2e-provider-key' "$seen_now"
     if [[ -n "$seen_now" ]] && ! printf '%s' "$seen_now" | grep -q 'eyJ'; then ok "no session token (JWT) reached the upstream"

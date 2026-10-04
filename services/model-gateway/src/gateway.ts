@@ -17,6 +17,7 @@ import type { ByteBudget, CallLimiter, RequestRate } from "./limits.js";
 import type { PrincipalCache, Resolution } from "./principals.js";
 import { classify, forwardedQuery, type RouteKind } from "./routes.js";
 import type { CallContext, CallGate, UsageSink } from "./seams.js";
+import { UsageMeter, type UsageReading } from "./usage/meter.js";
 
 /**
  * The model gateway shim (KOBE-40, spec D30; principle 2 "secrets never enter the sandbox"). The
@@ -224,6 +225,8 @@ export function createModelGateway(options: GatewayOptions): Server {
     }
     const started = Date.now();
     let bytesIn = 0;
+    let usage: UsageReading | undefined;
+    let ttfbMs: number | undefined;
     let bytesOut = 0;
     let bytesHeld = 0;
     let status = 0;
@@ -334,11 +337,16 @@ export function createModelGateway(options: GatewayOptions): Server {
       // 6.–7. Forward; retry once if Bifrost no longer knows the virtual key (restarted, resynced).
       const path = `${route.path}${forwardedQuery(url.searchParams)}`;
       for (let attempt = 0; ; attempt++) {
-        const outcome = await forward(req, res, path, body, resolution.virtualKey, attempt === 0);
+        const outcome = await forward(req, res, path, body, resolution.virtualKey, attempt === 0, {
+          kind: route.kind,
+          started,
+        });
         status = outcome.status;
         errorType = outcome.errorType;
         bytesOut = outcome.bytesOut;
         aborted = outcome.aborted;
+        usage = outcome.usage;
+        ttfbMs = outcome.ttfbMs;
         if (outcome.kind !== "key_unknown") return;
         options.onBifrostForgotKey();
         const fresh = await options.principals.resolve(
@@ -369,7 +377,10 @@ export function createModelGateway(options: GatewayOptions): Server {
         options.sink.record({
           ...call,
           status,
+          startedAt: new Date(started),
           durationMs: Date.now() - started,
+          ttfbMs,
+          usage,
           bytesIn,
           bytesOut,
           errorType,
@@ -385,6 +396,14 @@ export function createModelGateway(options: GatewayOptions): Server {
     readonly errorType: string | undefined;
     readonly bytesOut: number;
     readonly aborted: boolean;
+    /** Tokens this attempt used (zero for an error answer); undefined when nothing came back. */
+    readonly usage: UsageReading | undefined;
+    readonly ttfbMs: number | undefined;
+  };
+
+  const NO_TOKENS: UsageReading = {
+    source: "reported",
+    counts: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   };
 
   function forward(
@@ -394,14 +413,24 @@ export function createModelGateway(options: GatewayOptions): Server {
     body: Buffer,
     virtualKey: string,
     mayRetry: boolean,
+    call: { readonly kind: RouteKind; readonly started: number },
   ): Promise<Outcome> {
     return new Promise((resolve) => {
       let bytesOut = 0;
       let settled = false;
-      const done = (o: Omit<Outcome, "bytesOut">) => {
+      let meter: UsageMeter | undefined;
+      let ttfbMs: number | undefined;
+      let errorAnswer = false;
+      const done = (o: Omit<Outcome, "bytesOut" | "usage" | "ttfbMs">) => {
         if (settled) return;
         settled = true;
-        resolve({ ...o, bytesOut });
+        // Usage counts what the upstream produced: a stream cut short still cost its tokens.
+        const usage = meter
+          ? meter.finish(!o.aborted, body.length)
+          : errorAnswer
+            ? NO_TOKENS
+            : undefined;
+        resolve({ ...o, bytesOut, usage, ttfbMs });
       };
       const upstream = send(
         {
@@ -414,7 +443,9 @@ export function createModelGateway(options: GatewayOptions): Server {
           headers: forwardRequestHeaders(req.headers, virtualKey, body.length),
         },
         (up) => {
+          ttfbMs = Date.now() - call.started;
           const upStatus = up.statusCode ?? 502;
+          errorAnswer = upStatus >= 400;
           const small = upStatus >= 400 && Number(up.headers["content-length"] ?? 0) <= 65_536;
           if (upStatus >= 400 && small) {
             // Buffer error bodies (small): read Bifrost's error type; spot a forgotten key.
@@ -450,8 +481,16 @@ export function createModelGateway(options: GatewayOptions): Server {
           }
           res.writeHead(upStatus, forwardResponseHeaders(up.headers));
           res.flushHeaders();
+          if (!errorAnswer) {
+            meter = new UsageMeter({
+              kind: call.kind,
+              contentType: up.headers["content-type"],
+              contentEncoding: up.headers["content-encoding"],
+            });
+          }
           up.on("data", (chunk: Buffer) => {
             bytesOut += chunk.length;
+            meter?.write(chunk);
             if (!res.write(chunk)) up.pause();
           });
           res.on("drain", () => up.resume());

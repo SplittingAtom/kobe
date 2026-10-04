@@ -235,8 +235,22 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
   **Rotating** `provider-keys` or `virtual-keys`: copy the old value to `provider-keys-previous` /
   `virtual-keys-previous`, put a new one in place, restart the server and shim; the sync re-seals
   stored values with the new secret within a minute; then remove the `-previous` key.
-- **Bifrost logs no prompts** (`enable_logging: false`); usage is recorded by Kobe from the agent
-  (`run_usage`, KOBE-43).
+- **Bifrost logs no prompts** (`enable_logging: false`). Usage is recorded by Kobe's shim
+  (`run_usage`, KOBE-43): one row per model call with input, output and cache tokens taken from the
+  provider's own usage report in the response (the final stream event or the JSON body), the model,
+  latency, and the team, user and sandbox of the session token (plus the run, its thread and agent
+  when Pi names an active run). A response without a usage report (a stream cut short, a request
+  that did not ask for usage) is charged an estimate: request size / 4 input tokens and generated
+  text / 4 output tokens. Rows are written in batches about once a second.
+- **Prices are optional, per catalog model**: `input_usd_per_mtok`, `output_usd_per_mtok` and
+  optionally `cache_read_usd_per_mtok` / `cache_write_usd_per_mtok` (dollars per million tokens;
+  cache prices default to the input price) on `POST/PATCH /v1/install/models/catalog`. Providers
+  such as Ollama publish no prices: without input and output prices calls are counted in tokens
+  with no cost. A call is priced when it is recorded (later price changes do not rewrite history).
+  Dashboards: team console **Usage** (`GET /v1/team/usage`, team admins) and install console
+  **Usage and spend** (`GET /v1/install/usage`, `install.usage.read`), both with `from`/`to` (at
+  most 400 days) and `bucket` (`hour`/`day`); per run and per thread for whoever can read them
+  (`GET /v1/runs/{id}/usage`, `GET /v1/threads/{id}/usage`).
 
 ## MCP connectors
 

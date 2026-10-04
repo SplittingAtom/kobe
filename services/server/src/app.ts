@@ -35,6 +35,12 @@ import { teamPolicyRoutes } from "./routes/team-policy.js";
 import { teamRoutes } from "./routes/team.js";
 import { threadPendingRoutes } from "./routes/thread-pending.js";
 import { threadRoutes } from "./routes/threads.js";
+import {
+  installUsageRoutes,
+  runUsageRoutes,
+  teamUsageRoutes,
+  threadUsageRoutes,
+} from "./routes/usage.js";
 
 const SERVICE = "server";
 
@@ -98,12 +104,15 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/team/audit", teamAuditRoutes(deps));
   api.route("/team/egress", teamEgressRoutes(deps));
   api.route("/team/models", teamModelsRoutes(deps));
+  api.route("/team/usage", teamUsageRoutes(deps));
   api.route("/team/break-glass", teamBreakGlassRoutes(deps));
   api.route("/team", teamRoutes(deps));
   api.route("/runs", runEventsRoutes(deps));
   api.route("/runs", runRoutes(deps));
+  api.route("/runs", runUsageRoutes(deps));
   api.route("/threads", threadRunRoutes(deps));
   api.route("/threads", threadPendingRoutes(deps));
+  api.route("/threads", threadUsageRoutes(deps));
   api.route("/threads", threadRoutes(deps));
   api.route("/agents", agentRoutes(deps));
   api.route("/approvals", approvalRoutes(deps));
@@ -117,6 +126,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/install/audit", installAuditRoutes(deps));
   api.route("/install/egress-ceiling", installEgressRoutes(deps));
   api.route("/install/models", installModelsRoutes(deps));
+  api.route("/install/usage", installUsageRoutes(deps));
   api.route("/install/break-glass", installBreakGlassRoutes(deps));
   api.route("/install/legal-hold", installLegalHoldRoutes(deps));
   if (isolation) api.route("/install/isolation", installIsolationRoutes(isolation));

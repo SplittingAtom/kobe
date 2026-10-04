@@ -52,6 +52,11 @@ export interface CatalogView {
   readonly label: string | null;
   /** The model id to send to the gateway (`<gateway provider>/<model>`). */
   readonly gateway_model: string;
+  /** Dollars per million tokens (KOBE-43); null: not set (cache prices then use the input's). */
+  readonly input_usd_per_mtok: number | null;
+  readonly output_usd_per_mtok: number | null;
+  readonly cache_read_usd_per_mtok: number | null;
+  readonly cache_write_usd_per_mtok: number | null;
   readonly created_at: string;
   readonly updated_at: string;
 }
@@ -88,6 +93,10 @@ export const catalogView = (r: CatalogRow, kind: ModelProviderKind): CatalogView
   model: r.model,
   label: r.label,
   gateway_model: `${gatewayProviderName(r.providerId, kind)}/${r.model}`,
+  input_usd_per_mtok: r.inputUsdPerMtok,
+  output_usd_per_mtok: r.outputUsdPerMtok,
+  cache_read_usd_per_mtok: r.cacheReadUsdPerMtok,
+  cache_write_usd_per_mtok: r.cacheWriteUsdPerMtok,
   created_at: r.createdAt.toISOString(),
   updated_at: r.updatedAt.toISOString(),
 });
@@ -333,6 +342,10 @@ export async function addCatalogEntry(
         providerId: input.provider_id,
         model: input.model,
         label: input.label ?? null,
+        inputUsdPerMtok: input.input_usd_per_mtok ?? null,
+        outputUsdPerMtok: input.output_usd_per_mtok ?? null,
+        cacheReadUsdPerMtok: input.cache_read_usd_per_mtok ?? null,
+        cacheWriteUsdPerMtok: input.cache_write_usd_per_mtok ?? null,
         createdBy: userId,
       })
       .returning();
@@ -344,6 +357,7 @@ export async function addCatalogEntry(
         change: "added",
         providerId: input.provider_id,
         model: input.model,
+        pricesChanged: PRICE_KEYS.some((k) => input[k] !== undefined && input[k] !== null),
       },
     });
     return { ok: true, entry: catalogView(must(row), provider.kind) };
@@ -379,6 +393,10 @@ export async function updateCatalogEntry(
         providerId,
         model: input.model ?? before.model,
         label: input.label === undefined ? before.label : input.label,
+        inputUsdPerMtok: keep(input.input_usd_per_mtok, before.inputUsdPerMtok),
+        outputUsdPerMtok: keep(input.output_usd_per_mtok, before.outputUsdPerMtok),
+        cacheReadUsdPerMtok: keep(input.cache_read_usd_per_mtok, before.cacheReadUsdPerMtok),
+        cacheWriteUsdPerMtok: keep(input.cache_write_usd_per_mtok, before.cacheWriteUsdPerMtok),
         updatedAt: new Date(),
       })
       .where(eq(modelCatalog.alias, alias))
@@ -387,7 +405,17 @@ export async function updateCatalogEntry(
     await bumpModelsConfig(tx);
     await recordAudit(tx, {
       action: "models.catalog.changed",
-      target: { alias, change: "updated", providerId, model: entry.model },
+      target: {
+        alias,
+        change: "updated",
+        providerId,
+        model: entry.model,
+        pricesChanged:
+          entry.inputUsdPerMtok !== before.inputUsdPerMtok ||
+          entry.outputUsdPerMtok !== before.outputUsdPerMtok ||
+          entry.cacheReadUsdPerMtok !== before.cacheReadUsdPerMtok ||
+          entry.cacheWriteUsdPerMtok !== before.cacheWriteUsdPerMtok,
+      },
     });
     return { ok: true, entry: catalogView(entry, provider.kind) };
   });
@@ -414,6 +442,17 @@ export async function deleteCatalogEntry(db: KobeDb, alias: string): Promise<boo
     return true;
   });
 }
+
+const PRICE_KEYS = [
+  "input_usd_per_mtok",
+  "output_usd_per_mtok",
+  "cache_read_usd_per_mtok",
+  "cache_write_usd_per_mtok",
+] as const;
+
+/** An optional update field: undefined keeps the old value, null clears it. */
+const keep = <T>(next: T | null | undefined, before: T | null): T | null =>
+  next === undefined ? before : next;
 
 function must<T>(value: T | undefined): T {
   if (value === undefined) throw new Error("model admin write returned no row");

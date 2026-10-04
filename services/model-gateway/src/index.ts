@@ -7,6 +7,7 @@ import {
   isActiveRunLeasedTo,
   loadGatewayPrincipal,
   notifyModels,
+  recordModelUsage,
 } from "@kobe/db";
 import { verifySessionToken } from "@kobe/session-token";
 import { loadConfig } from "./config.js";
@@ -16,7 +17,8 @@ import { ByteBudget, CallLimiter, RequestRate } from "./limits.js";
 import { ModelsListener } from "./listener.js";
 import { logger } from "./logger.js";
 import { PrincipalCache } from "./principals.js";
-import { OPEN_GATE, logSink } from "./seams.js";
+import { OPEN_GATE } from "./seams.js";
+import { DbUsageSink } from "./usage/sink.js";
 
 /** Open calls get this long to finish on shutdown; stays under k8s' 30 s grace period. */
 const DRAIN_TIMEOUT_MS = 20_000;
@@ -45,6 +47,9 @@ listener.start();
 /** Run lease answers, positive and negative, cached like principals (single-flight). */
 const leases = new TtlCache<boolean>({ ttlMs: Math.max(config.cacheTtlMs, 1_000) });
 
+/** The run_usage ledger (KOBE-43): one row per forwarded model call, written in batches. */
+const usage = new DbUsageSink({ write: (records) => recordModelUsage(db, records), logger });
+
 let lastResync = 0;
 let draining = false;
 const server = createModelGateway({
@@ -62,7 +67,7 @@ const server = createModelGateway({
   }),
   rate: new RequestRate({ burst: config.rateBurst, perSecond: config.ratePerSecond }),
   gate: OPEN_GATE,
-  sink: logSink(logger),
+  sink: usage,
   onBifrostForgotKey: () => {
     if (Date.now() - lastResync < RESYNC_EVERY_MS) return;
     lastResync = Date.now();
@@ -89,6 +94,7 @@ async function shutdown(signal: string): Promise<void> {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   clearTimeout(force);
   await listener.close();
+  await usage.close();
   await database.close();
   process.exit(0);
 }

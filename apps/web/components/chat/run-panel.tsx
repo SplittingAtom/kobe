@@ -1,7 +1,9 @@
 "use client";
 
 import { useAui } from "@assistant-ui/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { RunUsage } from "../../lib/admin/api/usage";
+import { formatTokens, formatUsd } from "../../lib/admin/usage-format";
 import { isBusy, type ThreadState } from "../../lib/chat/thread-state";
 import type { ThreadController } from "../../lib/chat/thread-controller";
 import { ErrorNotice } from "../admin/error-notice";
@@ -264,12 +266,60 @@ function ActionError({
   );
 }
 
+/** The gateway writes usage within about a second of a call ending (batched). */
+const USAGE_SETTLE_MS = 1_500;
+
+/**
+ * Run details: tokens and spend of the run that just ended (KOBE-43), as the model gateway
+ * measured them. Fetched once per ended run; nothing is shown when the run made no model call.
+ */
+function RunUsageLine({
+  state,
+  controller,
+}: {
+  readonly state: ThreadState;
+  readonly controller: ThreadController;
+}) {
+  const runId = state.live?.terminal ? state.live.runId : undefined;
+  const [usage, setUsage] = useState<RunUsage | null>(null);
+  useEffect(() => {
+    setUsage(null);
+    if (!runId) return;
+    let current = true;
+    const timer = setTimeout(() => {
+      void controller.runUsage(runId).then((res) => {
+        if (current && res.ok && res.data.calls > 0) setUsage(res.data);
+      });
+    }, USAGE_SETTLE_MS);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [runId, controller]);
+  if (!usage || usage.runId !== runId) return null;
+  const cached = usage.cacheReadTokens + usage.cacheWriteTokens;
+  const parts = [
+    `${formatTokens(usage.inputTokens)} input`,
+    ...(cached > 0 ? [`${formatTokens(cached)} cached`] : []),
+    `${formatTokens(usage.outputTokens)} output tokens`,
+    `${usage.calls} model call${usage.calls === 1 ? "" : "s"}`,
+    ...(usage.unpricedCalls < usage.calls ? [formatUsd(usage.costUsd)] : []),
+  ];
+  return (
+    <p className={styles.who} aria-label="Run usage">
+      {parts.join(" · ")}
+      {usage.estimatedCalls > 0 ? " (partly estimated)" : ""}
+    </p>
+  );
+}
+
 export function RunPanel({ extras }: { readonly extras: KobeThreadExtras }) {
   const { controller, state } = extras;
   if (!controller) return null;
   return (
     <>
       <RunStatus state={state} controller={controller} />
+      <RunUsageLine state={state} controller={controller} />
       <Interrupted state={state} controller={controller} />
       <Queue state={state} controller={controller} />
       <ActionError state={state} controller={controller} />

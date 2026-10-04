@@ -92,6 +92,9 @@ export class ThreadController {
 
   readonly getState = (): ThreadState => this.#state;
 
+  /** A run's token usage and spend (KOBE-43; run details). */
+  readonly runUsage = (runId: string) => this.#api.runUsage(runId);
+
   #set(change: (state: ThreadState) => ThreadState): void {
     if (this.#disposed) return;
     const next = change(this.#state);

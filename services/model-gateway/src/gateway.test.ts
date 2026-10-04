@@ -378,6 +378,9 @@ describe("calls", () => {
     for (let i = 0; i < 50 && records.length === 0; i++)
       await new Promise((r) => setTimeout(r, 20));
     expect(records[0]?.aborted).toBe(true);
+    // KOBE-43: a stream cut short is charged an estimate, never nothing.
+    expect(records[0]?.usage?.source).toBe("estimated");
+    expect(records[0]?.usage?.counts.input).toBeGreaterThan(0);
   });
 
   it("limits concurrent calls per sandbox (429)", async () => {
@@ -400,6 +403,10 @@ describe("calls", () => {
     expect(JSON.parse(r.text).type).toBe("model_blocked");
     expect(r.headers.get("x-bf-internal")).toBeNull();
     expect(records[0]).toMatchObject({ status: 403, errorType: "model_blocked" });
+    expect(records[0]?.usage).toEqual({
+      source: "reported",
+      counts: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    });
   });
 
   it("refuses an oversized body (413) and lets the gate refuse before Bifrost", async () => {
@@ -419,6 +426,8 @@ describe("calls", () => {
     const refused = await call("/v1/chat/completions", { headers: bearer() });
     expect(refused.status).toBe(402);
     expect(JSON.parse(refused.text).error.code).toBe("budget_exhausted");
+    // Refused before Bifrost: no usage to record.
+    expect(records.at(-1)?.usage).toBeUndefined();
     expect(hits).toEqual([]);
   });
 
