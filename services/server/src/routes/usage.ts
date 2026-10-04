@@ -104,6 +104,7 @@ const EMPTY: UsageTotals = {
   cache_read_tokens: 0,
   cache_write_tokens: 0,
   cost_usd: 0,
+  cost_usd_exact: "0.0000000000",
   unpriced_calls: 0,
   estimated_calls: 0,
 };

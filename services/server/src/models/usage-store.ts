@@ -1,3 +1,4 @@
+import { addCosts, costForDisplay, costToUnits } from "./usage-cost.js";
 import { scanTeams, sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 
 /**
@@ -21,8 +22,10 @@ export interface UsageTotals {
   readonly output_tokens: number;
   readonly cache_read_tokens: number;
   readonly cache_write_tokens: number;
-  /** Dollars of the priced calls. */
+  /** Dollars of the priced calls, for display (a float parsed from `cost_usd_exact`). */
   readonly cost_usd: number;
+  /** The same sum as exact numeric text (10 decimals); what budgets and sums must use. */
+  readonly cost_usd_exact: string;
   /** Calls whose model had no catalog price (tokens counted, cost unknown). */
   readonly unpriced_calls: number;
   /** Calls whose tokens the gateway estimated (no usage report from the provider). */
@@ -72,6 +75,8 @@ export interface InstallUsageReport extends TeamUsageReport {
 /** Longest list returned per breakdown (largest cost first, then tokens). */
 export const BREAKDOWN_LIMIT = 50;
 
+const ZERO_COST = "0.0000000000";
+
 const EMPTY: UsageTotals = {
   calls: 0,
   input_tokens: 0,
@@ -79,6 +84,7 @@ const EMPTY: UsageTotals = {
   cache_read_tokens: 0,
   cache_write_tokens: 0,
   cost_usd: 0,
+  cost_usd_exact: ZERO_COST,
   unpriced_calls: 0,
   estimated_calls: 0,
 };
@@ -89,7 +95,7 @@ const TOTALS = sql.raw(`count(*)::bigint AS calls,
   COALESCE(sum(u.output_tokens), 0)::bigint AS output_tokens,
   COALESCE(sum(u.cache_read_tokens), 0)::bigint AS cache_read_tokens,
   COALESCE(sum(u.cache_write_tokens), 0)::bigint AS cache_write_tokens,
-  COALESCE(sum(u.cost_usd), 0)::float8 AS cost_usd,
+  COALESCE(sum(u.cost_usd), 0)::numeric(30,10)::text AS cost_usd,
   count(*) FILTER (WHERE u.cost_usd IS NULL)::bigint AS unpriced_calls,
   count(*) FILTER (WHERE u.usage_source = 'estimated')::bigint AS estimated_calls`);
 const ORDER = sql.raw(
@@ -100,30 +106,43 @@ type Row = Record<string, unknown>;
 
 function totalsOf(r: Row | undefined): UsageTotals {
   if (!r) return EMPTY;
+  const exact = unitsToCostText(r.cost_usd);
   return {
     calls: Number(r.calls ?? 0),
     input_tokens: Number(r.input_tokens ?? 0),
     output_tokens: Number(r.output_tokens ?? 0),
     cache_read_tokens: Number(r.cache_read_tokens ?? 0),
     cache_write_tokens: Number(r.cache_write_tokens ?? 0),
-    cost_usd: Number(r.cost_usd ?? 0),
+    cost_usd: costForDisplay(exact),
+    cost_usd_exact: exact,
     unpriced_calls: Number(r.unpriced_calls ?? 0),
     estimated_calls: Number(r.estimated_calls ?? 0),
   };
 }
 
 export function addTotals(a: UsageTotals, b: UsageTotals): UsageTotals {
+  const exact = addCosts(a.cost_usd_exact, b.cost_usd_exact);
   return {
     calls: a.calls + b.calls,
     input_tokens: a.input_tokens + b.input_tokens,
     output_tokens: a.output_tokens + b.output_tokens,
     cache_read_tokens: a.cache_read_tokens + b.cache_read_tokens,
     cache_write_tokens: a.cache_write_tokens + b.cache_write_tokens,
-    cost_usd: a.cost_usd + b.cost_usd,
+    cost_usd: costForDisplay(exact),
+    cost_usd_exact: exact,
     unpriced_calls: a.unpriced_calls + b.unpriced_calls,
     estimated_calls: a.estimated_calls + b.estimated_calls,
   };
 }
+
+/** The query's numeric text (or nothing) as a normalised exact cost. */
+const unitsToCostText = (v: unknown): string =>
+  addCosts(ZERO_COST, v == null ? ZERO_COST : String(v));
+
+const compareCost = (a: UsageTotals, b: UsageTotals): number => {
+  const d = costToUnits(b.cost_usd_exact) - costToUnits(a.cost_usd_exact);
+  return d > 0n ? 1 : d < 0n ? -1 : 0;
+};
 
 const iso = (v: unknown) =>
   v instanceof Date ? v.toISOString() : new Date(String(v)).toISOString();
@@ -133,7 +152,10 @@ async function teamReport(
   tx: KobeTx,
   teamId: string,
   range: UsageRange,
+  limit: number | null = BREAKDOWN_LIMIT,
 ): Promise<Omit<TeamUsageReport, "range">> {
+  // The install view merges teams first and limits after, so it reads every group.
+  const LIMIT = limit === null ? sql`` : sql`LIMIT ${limit}`;
   const where = sql`u.team_id = ${teamId}::uuid AND u.at >= ${range.from.toISOString()}::timestamptz
     AND u.at < ${range.to.toISOString()}::timestamptz`;
   const bucket = sql.raw(`'${range.bucket}'`);
@@ -145,10 +167,10 @@ async function teamReport(
   const users = await tx.execute<Row>(sql`
     SELECT u.user_id, max(us.name) AS name, max(us.email) AS email, ${TOTALS}
       FROM run_usage u LEFT JOIN users us ON us.id = u.user_id
-     WHERE ${where} GROUP BY u.user_id ${ORDER} LIMIT ${BREAKDOWN_LIMIT}`);
+     WHERE ${where} GROUP BY u.user_id ${ORDER} ${LIMIT}`);
   const models = await tx.execute<Row>(sql`
     SELECT u.model, ${TOTALS} FROM run_usage u WHERE ${where}
-     GROUP BY u.model ${ORDER} LIMIT ${BREAKDOWN_LIMIT}`);
+     GROUP BY u.model ${ORDER} ${LIMIT}`);
   const agents = await tx.execute<Row>(sql`
     SELECT u.agent_id,
            COALESCE(max(ta.slug), max(ia.slug)) AS slug,
@@ -157,7 +179,7 @@ async function teamReport(
       FROM run_usage u
       LEFT JOIN team_agents ta ON ta.team_id = u.team_id AND ta.id = u.agent_id
       LEFT JOIN install_agents ia ON ia.id = u.agent_id
-     WHERE ${where} GROUP BY u.agent_id ${ORDER} LIMIT ${BREAKDOWN_LIMIT}`);
+     WHERE ${where} GROUP BY u.agent_id ${ORDER} ${LIMIT}`);
   return {
     totals: totalsOf(totals.rows[0]),
     series: series.rows.map((r) => ({ t: iso(r.t), ...totalsOf(r) })),
@@ -208,8 +230,7 @@ function mergeBy<T extends UsageTotals>(
   return [...merged.values()]
     .sort(
       (a, b) =>
-        b.cost_usd - a.cost_usd ||
-        b.input_tokens + b.output_tokens - (a.input_tokens + a.output_tokens),
+        compareCost(a, b) || b.input_tokens + b.output_tokens - (a.input_tokens + a.output_tokens),
     )
     .slice(0, limit);
 }
@@ -221,7 +242,7 @@ function mergeBy<T extends UsageTotals>(
 export async function installUsage(db: KobeDb, range: UsageRange): Promise<InstallUsageReport> {
   const teams = await scanTeams(db, "installUsage", async (tx, team) => ({
     team,
-    report: await teamReport(tx, team.id, range),
+    report: await teamReport(tx, team.id, range, null),
   }));
   const totals = teams.reduce((acc, t) => addTotals(acc, t.report.totals), EMPTY);
   return {
@@ -252,7 +273,7 @@ export async function installUsage(db: KobeDb, range: UsageRange): Promise<Insta
         ...t.report.totals,
       }))
       .filter((t) => t.calls > 0)
-      .sort((a, b) => b.cost_usd - a.cost_usd || b.calls - a.calls),
+      .sort((a, b) => compareCost(a, b) || b.calls - a.calls),
   };
 }
 

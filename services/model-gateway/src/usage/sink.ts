@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { ModelUsageRecord } from "@kobe/db";
 import type { Logger } from "pino";
 import type { CallRecord, UsageSink } from "../seams.js";
@@ -31,6 +32,7 @@ export function usageRecordOf(call: CallRecord): ModelUsageRecord | undefined {
   if (!call.usage || !call.model) return undefined;
   const { counts, source } = call.usage;
   return {
+    id: randomUUID(),
     teamId: call.teamId,
     userId: call.userId,
     sandboxId: call.sandboxId,
@@ -140,5 +142,13 @@ export class DbUsageSink implements UsageSink {
   async close(): Promise<void> {
     clearInterval(this.timer);
     await this.flush();
+    // A failed batch stops the flush: try once more before giving up on what is left.
+    if (this.queue.length > 0) await this.flush();
+    if (this.queue.length > 0) {
+      this.options.logger.error(
+        { pending: this.queue.length },
+        "model usage records still unwritten at shutdown",
+      );
+    }
   }
 }
