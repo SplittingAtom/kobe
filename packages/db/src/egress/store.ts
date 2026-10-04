@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import type { KobeDb, KobeTx } from "../client.js";
 import { egressDomains, teamEgress, teamMembers, users } from "../schema/index.js";
 import { withTeam } from "../with-team.js";
@@ -50,6 +50,26 @@ export async function loadTeamEgress(db: KobeDb, teamId: string): Promise<string
     tx.select({ domain: teamEgress.domain }).from(teamEgress).where(eq(teamEgress.teamId, teamId)),
   );
   return rows.map((r) => r.domain);
+}
+
+/** A team's sealed header list for one enabled pattern (opened only by the egress proxy). */
+export interface SealedTeamHeaders {
+  readonly domain: string;
+  readonly sealed: string;
+}
+
+/** The team's enabled patterns that have injected headers (KOBE-39), sealed. */
+export async function loadTeamEgressHeaders(
+  db: KobeDb,
+  teamId: string,
+): Promise<SealedTeamHeaders[]> {
+  const rows = await withTeam(db, teamId, (tx) =>
+    tx
+      .select({ domain: teamEgress.domain, sealed: teamEgress.headersSealed })
+      .from(teamEgress)
+      .where(and(eq(teamEgress.teamId, teamId), isNotNull(teamEgress.headersSealed))),
+  );
+  return rows.flatMap((r) => (r.sealed === null ? [] : [{ domain: r.domain, sealed: r.sealed }]));
 }
 
 /**

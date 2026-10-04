@@ -1,11 +1,12 @@
 import { constants as FS } from "node:fs";
 import { chmod, lstat, mkdir, open, readdir, realpath, rm } from "node:fs/promises";
 import path from "node:path";
+import { EGRESS_TOKEN_FILE_NAME, isEgressTemp } from "../egress/egress-wiring.js";
 import type { PiIdentities } from "../pi/identities.js";
 
 /**
  * The per-process runtime directories (threads/thread.ts): `<runtimeDir>/pi-XXXXXX/` with `agent/`
- * (Pi's `PI_CODING_AGENT_DIR`) and `model.json`. Under a Pi identity (KOBE-71) the directory
+ * (Pi's `PI_CODING_AGENT_DIR`), `model.json` and (KOBE-39) `egress-token`. Under a Pi identity (KOBE-71) the directory
  * belongs to the agent with the Pi's own group (only that Pi reads it, and it writes only
  * `agent/`), and the root is one Pi identities cannot rename (`ensureRuntimeRoot`), so another
  * thread's tools cannot touch it at all. Without one (the agent's own uid, as before KOBE-71) a
@@ -60,7 +61,12 @@ export async function unexpectedEntries(runtimeDir: string): Promise<string[]> {
     const kind = await kindOf(path.join(runtimeDir, name));
     if (name === AGENT_SUBDIR) {
       if (kind !== "dir") found.push(`${name} (${kind})`);
-    } else if (name === MODEL_FILE_NAME || isModelTemp(name)) {
+    } else if (
+      name === MODEL_FILE_NAME ||
+      isModelTemp(name) ||
+      name === EGRESS_TOKEN_FILE_NAME ||
+      isEgressTemp(name)
+    ) {
       if (kind !== "file" && kind !== "missing") found.push(`${name} (${kind})`);
     } else {
       found.push(name);

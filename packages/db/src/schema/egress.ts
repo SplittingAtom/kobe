@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { boolean, check, pgTable, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { MAX_INJECTED_HEADERS } from "../egress/header-rules.js";
 import { users } from "./auth.js";
 import { teams } from "./teams.js";
 
@@ -51,7 +52,12 @@ export const egressDomains = pgTable(
 /**
  * Team table: the ceiling domains a team enabled for its sandboxes. Only effective while the
  * domain is `in_ceiling`; rows survive a preset leaving the ceiling (so re-adding it restores the
- * team's choice) and go away with a deleted custom domain. KOBE-39 adds per-team header injection.
+ * team's choice) and go away with a deleted custom domain.
+ *
+ * Header injection (KOBE-39, D28): `headers_sealed` holds the team's headers for the domain (names
+ * and values as JSON, sealed with the `egress-headers` secret, the team and domain as context);
+ * `header_names` repeats the names in clear for the consoles. Values are write-only: no API returns
+ * them, only the egress proxy opens them, and they go away with the row (disabling the domain).
  */
 export const teamEgress = pgTable(
   "team_egress",
@@ -66,6 +72,19 @@ export const teamEgress = pgTable(
       .notNull()
       .references(() => users.id),
     enabledAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    headerNames: text()
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    headersSealed: text(),
+    headersUpdatedBy: uuid().references(() => users.id),
+    headersUpdatedAt: timestamp({ withTimezone: true }),
   },
-  (t) => [primaryKey({ columns: [t.teamId, t.domain] })],
+  (t) => [
+    primaryKey({ columns: [t.teamId, t.domain] }),
+    check(
+      "team_egress_headers",
+      sql`cardinality(${t.headerNames}) <= ${sql.raw(String(MAX_INJECTED_HEADERS))} AND (${t.headersSealed} IS NULL) = (cardinality(${t.headerNames}) = 0) AND (${t.headersSealed} IS NULL OR char_length(${t.headersSealed}) <= 65536)`,
+    ),
+  ],
 );

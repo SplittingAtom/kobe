@@ -6,6 +6,7 @@ import { hardenProcess } from "./harden.js";
 import { logger } from "./logger.js";
 import { sweepRuntimeDir } from "./models/runtime-dir.js";
 import { ModelTokenKeeper } from "./models/token-keeper.js";
+import type { EgressWiring } from "./egress/egress-wiring.js";
 import type { ModelWiring } from "./models/types.js";
 import { loadPiIdentities, type PiIdentities } from "./pi/identities.js";
 import { buildPiLaunch } from "./pi/pi-launch.js";
@@ -64,11 +65,12 @@ async function main(): Promise<void> {
           bootstrapTokenFile: loaded.bootstrapTokenFile,
           logger,
         });
-  const [agentVersion, piVersion, grant, models] = await Promise.all([
+  const [agentVersion, piVersion, grant, models, egress] = await Promise.all([
     readAgentVersion(new URL("../package.json", import.meta.url)),
     readPiVersion(loaded.piBin, piEnv),
     session?.grant(),
     modelWiring(checked, session),
+    egressWiring(checked, session),
   ]);
   const config = grant ? { ...checked, sandboxId: grant.sandboxId } : checked;
   logger.info(
@@ -78,6 +80,7 @@ async function main(): Promise<void> {
       agentVersion,
       piVersion,
       models: models === undefined ? "off" : models.gatewayUrl,
+      egress: egress === undefined ? "off" : egress.proxyUrl,
     },
     "sandbox-agent starting",
   );
@@ -111,6 +114,7 @@ async function main(): Promise<void> {
     identities,
     parentEnv: process.env,
     models,
+    egress,
     onExit: (code) => process.exit(code),
   });
   process.on("exit", () => agent.killAll());
@@ -182,6 +186,26 @@ async function modelWiring(
   });
   await keeper.start();
   return { gatewayUrl: config.modelGatewayUrl, extension, tokens: keeper };
+}
+
+/**
+ * Egress for Pi's tools (KOBE-39): only with the egress proxy URL and a session to trade tokens
+ * with (Kobe's pods). The BASH_ENV script gets the same root-owned check as the extensions: a
+ * script the sandbox user could edit would run in every tool's shell.
+ */
+async function egressWiring(
+  config: ReturnType<typeof loadConfig>,
+  session: SessionClient | undefined,
+): Promise<EgressWiring | undefined> {
+  if (config.egressProxyUrl === undefined || session === undefined) return undefined;
+  const envScript = await checkExtensionFile(config.egressEnvScript, "egress-env");
+  const keeper = new ModelTokenKeeper({
+    grant: () => session.egressProxyGrant(),
+    refreshMarginMs: session.refreshMarginMs,
+    logger,
+  });
+  await keeper.start();
+  return { proxyUrl: config.egressProxyUrl, noProxy: config.noProxy, envScript, tokens: keeper };
 }
 
 main().catch((error: unknown) => {

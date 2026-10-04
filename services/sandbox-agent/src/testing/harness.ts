@@ -6,6 +6,7 @@ import { EXAMPLE_IDS } from "@kobe/protocol/testing";
 import { Agent, type WorkspaceHooks } from "../agent.js";
 import { loadConfig } from "../config.js";
 import { FakeServer, type FakeServerOptions } from "./fake-server.js";
+import type { EgressWiring } from "../egress/egress-wiring.js";
 import type { ModelWiring } from "../models/types.js";
 import type { PiIdentities } from "../pi/identities.js";
 
@@ -43,6 +44,8 @@ export interface HarnessOptions {
   readonly extensions?: readonly string[];
   /** Model gateway wiring (KOBE-41); absent = no model access, as before. */
   readonly models?: ModelWiring;
+  /** Egress wiring for Pi's tools (KOBE-39); absent = none, as before. */
+  readonly egress?: EgressWiring;
   readonly workspace?: (workspaceDir: string) => WorkspaceHooks;
   /**
    * Pi identities (KOBE-71): Pi runs under them, so the test directories are opened up the way
@@ -96,6 +99,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       : { heartbeatTimeoutMs: options.heartbeatTimeoutMs }),
     ...(options.extensions === undefined ? {} : { extensions: options.extensions }),
     ...(options.models === undefined ? {} : { models: options.models }),
+    ...(options.egress === undefined ? {} : { egress: options.egress }),
     ...(options.identities === undefined ? {} : { identities: options.identities }),
     ...(options.workspace === undefined ? {} : { workspace: options.workspace(workspace) }),
     ...(options.policyReadyTimeoutMs === undefined

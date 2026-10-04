@@ -131,6 +131,12 @@ export class SessionClient {
     return { token: g.tokens["kobe.model-gateway"], expiresAt: g.expiresAt };
   }
 
+  /** The `kobe.egress-proxy` token and its expiry (KOBE-39: tools' proxy credentials). */
+  async egressProxyGrant(): Promise<{ token: string; expiresAt: number }> {
+    const g = await this.grant();
+    return { token: g.tokens["kobe.egress-proxy"], expiresAt: g.expiresAt };
+  }
+
   get refreshMarginMs(): number {
     return this.#o.refreshMarginMs;
   }

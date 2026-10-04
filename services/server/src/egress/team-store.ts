@@ -11,6 +11,7 @@ import {
   type KobeDb,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
+import { lockPattern, settlePending } from "./request-store.js";
 
 /**
  * Team egress enablement (spec D6, D28; `/v1/team/egress`): team admins enable domains within the
@@ -26,6 +27,9 @@ export interface TeamEgressEntry {
   readonly enabled: boolean;
   readonly enabled_by: string | null;
   readonly enabled_at: string | null;
+  /** Injected header names (KOBE-39); values are write-only and never returned. */
+  readonly header_names: readonly string[];
+  readonly headers_updated_at: string | null;
 }
 
 /**
@@ -35,7 +39,19 @@ export interface TeamEgressEntry {
 export async function listTeamEgress(db: KobeDb, teamId: string): Promise<TeamEgressEntry[]> {
   const [ceiling, enabled] = await Promise.all([
     db.select().from(egressDomains).orderBy(asc(egressDomains.domain)),
-    withTeam(db, teamId, (tx) => tx.select().from(teamEgress).where(eq(teamEgress.teamId, teamId))),
+    // Never the sealed header values: they leave the database only to the egress proxy.
+    withTeam(db, teamId, (tx) =>
+      tx
+        .select({
+          domain: teamEgress.domain,
+          enabledBy: teamEgress.enabledBy,
+          enabledAt: teamEgress.enabledAt,
+          headerNames: teamEgress.headerNames,
+          headersUpdatedAt: teamEgress.headersUpdatedAt,
+        })
+        .from(teamEgress)
+        .where(eq(teamEgress.teamId, teamId)),
+    ),
   ]);
   const byDomain = new Map(enabled.map((r) => [r.domain, r]));
   return ceiling
@@ -50,36 +66,58 @@ export async function listTeamEgress(db: KobeDb, teamId: string): Promise<TeamEg
         enabled: e !== undefined,
         enabled_by: e?.enabledBy ?? null,
         enabled_at: e?.enabledAt.toISOString() ?? null,
+        header_names: e?.headerNames ?? [],
+        headers_updated_at: e?.headersUpdatedAt?.toISOString() ?? null,
       };
     });
 }
 
 export type EnableResult = "enabled" | "already_enabled" | "not_in_ceiling";
 
-/** Enables a ceiling domain for the team (no user self-allow: team admins only, at the route). */
+/**
+ * Enables a ceiling domain for the team (no user self-allow: team admins only, at the route).
+ * Pending access requests for the pattern are approved with it and their requesters told
+ * (KOBE-39); `settled` counts them.
+ */
 export async function enableTeamDomain(
   db: KobeDb,
   teamId: string,
   domain: string,
   userId: string,
-): Promise<EnableResult> {
+): Promise<{ readonly result: EnableResult; readonly settled: number }> {
   return withTeam(db, teamId, async (tx) => {
+    await lockPattern(tx, teamId, domain);
     // FOR SHARE: the ceiling row can't be taken out (or deleted) until this commits.
     const [ceiling] = await tx
       .select({ inCeiling: egressDomains.inCeiling })
       .from(egressDomains)
       .where(eq(egressDomains.domain, domain))
       .for("share");
-    if (!ceiling?.inCeiling) return "not_in_ceiling";
+    if (!ceiling?.inCeiling) return { result: "not_in_ceiling", settled: 0 };
     const inserted = await tx
       .insert(teamEgress)
       .values({ teamId, domain, enabledBy: userId })
       .onConflictDoNothing()
       .returning({ domain: teamEgress.domain });
-    if (inserted.length === 0) return "already_enabled";
+    if (inserted.length === 0) return { result: "already_enabled", settled: 0 };
     await notifyEgressChanged(tx, teamId);
+    const settled = await settlePending(tx, teamId, domain, "approved", userId);
     await recordAudit(tx, { action: "egress.domain.enabled", teamId, target: { domain } });
-    return "enabled";
+    const first = settled[0];
+    if (first) {
+      await recordAudit(tx, {
+        action: "egress.request.decided",
+        teamId,
+        target: {
+          requestId: first.id,
+          pattern: domain,
+          decision: "approved",
+          requests: settled.length,
+          enabled: true,
+        },
+      });
+    }
+    return { result: "enabled", settled: settled.length };
   });
 }
 
@@ -93,10 +131,15 @@ export async function disableTeamDomain(
     const deleted = await tx
       .delete(teamEgress)
       .where(and(eq(teamEgress.teamId, teamId), eq(teamEgress.domain, domain)))
-      .returning({ domain: teamEgress.domain });
+      .returning({ domain: teamEgress.domain, sealed: teamEgress.headersSealed });
     if (deleted.length === 0) return false;
     await notifyEgressChanged(tx, teamId);
-    await recordAudit(tx, { action: "egress.domain.disabled", teamId, target: { domain } });
+    const headersRemoved = deleted.some((d) => d.sealed !== null);
+    await recordAudit(tx, {
+      action: "egress.domain.disabled",
+      teamId,
+      target: { domain, ...(headersRemoved ? { headersRemoved: true as const } : {}) },
+    });
     return true;
   });
 }

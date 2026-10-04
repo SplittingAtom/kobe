@@ -29,6 +29,12 @@ import {
   unexpectedEntries,
 } from "../models/runtime-dir.js";
 import type { ModelWiring, RunModel } from "../models/types.js";
+import {
+  EGRESS_TOKEN_FILE_NAME,
+  EgressTokenFile,
+  egressEnv,
+  type EgressWiring,
+} from "../egress/egress-wiring.js";
 
 /**
  * One Kobe thread's Pi process and its active run. All lifecycle changes (spawn, restart, stop,
@@ -79,6 +85,8 @@ export interface ThreadEnv {
   readonly runtimeDir: string;
   /** Model gateway wiring; absent when this sandbox has no model access. */
   readonly models?: ModelWiring | undefined;
+  /** Egress for Pi's tools (KOBE-39): token file + BASH_ENV; absent outside Kobe's pods. */
+  readonly egress?: EgressWiring | undefined;
   /** The kobe-policy extension (root-owned file), loaded last into every Pi (KOBE-36). */
   readonly policyExtension: string;
   /** Other root-owned extension paths loaded with `-e`, before kobe-policy. */
@@ -119,6 +127,8 @@ export class Thread {
   #launchKey: string | undefined;
   /** The current Pi's model file (undefined without model wiring). */
   #modelFile: ModelFile | undefined;
+  /** The current Pi's egress token file (undefined without egress wiring). */
+  #egressFile: EgressTokenFile | undefined;
   /** Each process's private runtime directory (and identity), removed once it has exited. */
   readonly #runtimeDirs = new Map<PiProcess, RuntimeOf>();
   /** Removal of a runtime directory in progress (awaited by `stopProcess`). */
@@ -214,6 +224,7 @@ export class Thread {
     let runtimeDir: string | undefined;
     let pi: PiProcess;
     let modelFile: ModelFile | undefined;
+    let egressFile: EgressTokenFile | undefined;
     try {
       runtimeDir = await mkdtemp(path.join(this.#env.runtimeDir, RUNTIME_DIR_PREFIX));
       const env: Record<string, string> = { ...launch.env };
@@ -240,6 +251,15 @@ export class Thread {
         env[MODEL_FILE_ENV] = modelFile.path;
       }
       const command = await piCommand(this.#env.bin, launch.env.PATH);
+      const egress = this.#env.egress;
+      if (egress !== undefined) {
+        egressFile = new EgressTokenFile(
+          path.join(runtimeDir, EGRESS_TOKEN_FILE_NAME),
+          identity === undefined ? 0o600 : 0o640,
+        );
+        await egressFile.write(await egress.tokens.current());
+        Object.assign(env, egressEnv(egress, egressFile.path, this.id));
+      }
       pi = new PiProcess({
         bin: command.bin,
         args: [...command.prefix, ...launch.args],
@@ -284,6 +304,7 @@ export class Thread {
     this.#policy = channel;
     this.#launchKey = launch.key;
     this.#modelFile = modelFile;
+    this.#egressFile = egressFile;
     this.lastUsed = Date.now();
     // A token rotated while this spawn was in progress reached no file (the listener runs only
     // against `#modelFile`): take the current token again now that the file is attached.
@@ -296,6 +317,20 @@ export class Thread {
         await this.stopProcess();
         throw error;
       }
+    }
+    // Same for the egress token (a failed write only warns: the old token is still valid a while).
+    const egress = this.#env.egress;
+    if (egressFile !== undefined && egress !== undefined) {
+      await this.updateEgressToken(await egress.tokens.current());
+    }
+  }
+
+  /** A rotated egress token: the next bash tool call's shell reads it (KOBE-39). */
+  async updateEgressToken(token: string): Promise<void> {
+    try {
+      await this.#egressFile?.write(token);
+    } catch (error) {
+      this.#warn(`egress token file not updated: ${(error as Error).message}`);
     }
   }
 
@@ -329,6 +364,9 @@ export class Thread {
     // The agent's own pending writes first (temp file + rename), then the listing.
     if (this.#modelFile !== undefined && !(await this.#modelFile.verify())) {
       return "the model file is not what the agent wrote";
+    }
+    if (this.#egressFile !== undefined && !(await this.#egressFile.verify())) {
+      return "the egress token file is not what the agent wrote";
     }
     const unexpected = await unexpectedEntries(runtimeDir);
     if (unexpected.length > 0) {
@@ -572,6 +610,7 @@ export class Thread {
     this.#policy = undefined;
     this.#launchKey = undefined;
     this.#modelFile = undefined;
+    this.#egressFile = undefined;
     this.#streaming = false;
     this.#dialogs.clear();
     this.endRun();

@@ -7,6 +7,10 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
  * protocol it came through (`fake-openai: …`) and echoes the last user text, so a test can tell
  * which upstream answered. `GET /_seen` lists the credentials each request carried (e2e asserts
  * that provider keys arrive and sandbox credentials never do).
+ *
+ * Tool use (OpenAI chat API only, KOBE-39 e2e): a last user message `bash: <command>` is answered
+ * with a `bash` tool call running `<command>`; once the tool's result comes back (a last message
+ * with role `tool`) the reply is `fake-openai: tool said: <the result's text, one line>`.
  */
 export interface SeenRequest {
   readonly method: string;
@@ -31,6 +35,82 @@ function lastUserText(body: unknown): string {
       .join("");
   }
   return "";
+}
+
+const BASH_PREFIX = "bash: ";
+const TOOL_ECHO_MAX = 600;
+
+/** The last message's text when it is a tool result (OpenAI `role: "tool"`), else undefined. */
+export function lastToolResult(body: unknown): string | undefined {
+  const messages = ((body ?? {}) as Record<string, unknown>).messages;
+  if (!Array.isArray(messages)) return undefined;
+  const last = (messages.at(-1) ?? {}) as Record<string, unknown>;
+  if (last.role !== "tool") return undefined;
+  const content = last.content;
+  const text =
+    typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content
+            .map((p) => ((p as Record<string, unknown>).text as string | undefined) ?? "")
+            .join("")
+        : "";
+  return text.replace(/\s+/g, " ").trim().slice(0, TOOL_ECHO_MAX);
+}
+
+function openaiBashCall(
+  res: ServerResponse,
+  command: string,
+  stream: boolean,
+  model: string,
+): void {
+  const call = {
+    id: "call_fake_bash",
+    type: "function",
+    function: { name: "bash", arguments: JSON.stringify({ command }) },
+  };
+  const usage = { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 };
+  if (!stream) {
+    json(res, 200, {
+      id: "chatcmpl-fake",
+      object: "chat.completion",
+      created: 1,
+      model,
+      choices: [
+        {
+          index: 0,
+          message: { role: "assistant", content: null, tool_calls: [call] },
+          finish_reason: "tool_calls",
+        },
+      ],
+      usage,
+    });
+    return;
+  }
+  const chunk = (delta: unknown, finish: string | null, extra?: unknown) =>
+    `data: ${JSON.stringify({
+      id: "chatcmpl-fake",
+      object: "chat.completion.chunk",
+      created: 1,
+      model,
+      choices: [{ index: 0, delta, finish_reason: finish }],
+      ...(extra ? { usage: extra } : {}),
+    })}\n\n`;
+  sse(res, [
+    chunk(
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          { index: 0, id: call.id, type: "function", function: { name: "bash", arguments: "" } },
+        ],
+      },
+      null,
+    ),
+    chunk({ tool_calls: [{ index: 0, function: { arguments: call.function.arguments } }] }, null),
+    chunk({}, "tool_calls", usage),
+    "data: [DONE]\n\n",
+  ]);
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {
@@ -228,14 +308,16 @@ export function createFakeLlm(seen: SeenRequest[] = []): Server {
         : [];
       const toolStep = JSON.stringify(messages).includes(TOOL_STEP_MARKER);
       const toolDone = messages.some((m) => m.role === "tool");
+      const toolResult = lastToolResult(body);
       if (toolStep && !toolDone && stream) openaiToolCall(res, model);
-      else
-        openai(
-          res,
-          toolStep ? "fake-openai: tool step done" : `fake-openai: ${text}`,
-          stream,
-          model,
-        );
+      else if (toolStep) openai(res, "fake-openai: tool step done", stream, model);
+      else if (toolResult !== undefined) {
+        openai(res, `fake-openai: tool said: ${toolResult}`, stream, model);
+      } else if (text.startsWith(BASH_PREFIX)) {
+        openaiBashCall(res, text.slice(BASH_PREFIX.length), stream, model);
+      } else {
+        openai(res, `fake-openai: ${text}`, stream, model);
+      }
     } else if (p.endsWith("/v1/messages")) {
       anthropic(res, `fake-anthropic: ${text}`, stream, model);
     } else if (/:(stream)?generateContent$/i.test(p)) {

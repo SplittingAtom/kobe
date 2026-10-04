@@ -323,7 +323,40 @@ export const AUDIT_EVENTS = {
   /** A custom domain was deleted; every team's enablement of it went with it. */
   "egress.ceiling.removed": event("install", { domain: egressDomain }),
   "egress.domain.enabled": event("team", { domain: egressDomain }),
-  "egress.domain.disabled": event("team", { domain: egressDomain }),
+  /** `headersRemoved`: the domain's injected headers (KOBE-39) were deleted with it. */
+  "egress.domain.disabled": event("team", {
+    domain: egressDomain,
+    headersRemoved: z.literal(true).optional(),
+  }),
+  /**
+   * Request access (KOBE-39, D28): a member asked the team's admins to enable `pattern` after a
+   * blocked request to `domain` (thread metadata only: the thread id; never a URL or prompt).
+   */
+  "egress.request.created": event("team", {
+    requestId: id,
+    domain: egressDomain,
+    pattern: egressDomain,
+    threadId: id.optional(),
+    notified: count,
+  }),
+  /** A team admin approved (enabled the pattern) or denied it; `requests` pending ones settled. */
+  "egress.request.decided": event("team", {
+    requestId: id,
+    pattern: egressDomain,
+    decision: z.enum(["approved", "denied"]),
+    requests: z.number().int().positive(),
+    /** Approved and the pattern was not enabled yet (an `egress.domain.enabled` row goes with it). */
+    enabled: z.boolean(),
+  }),
+  /** Header injection (KOBE-39) set or replaced for an enabled domain: names only, never values. */
+  "egress.header.set": event("team", {
+    domain: egressDomain,
+    headerNames: z
+      .array(z.string().regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,64}$/))
+      .min(1)
+      .max(8),
+  }),
+  "egress.header.cleared": event("team", { domain: egressDomain }),
   /**
    * Sandbox connections through the egress proxy (actor: system), aggregated per (user, sandbox,
    * host, outcome, reason) over a short window: high volume, so one row per key and window, every
@@ -350,8 +383,16 @@ export const AUDIT_EVENTS = {
         "upstream_unreachable",
         "policy_unavailable",
         "inactive_member",
+        // KOBE-39 header injection (plain HTTP upgraded to verified HTTPS by the proxy).
+        "headers_required",
+        "upstream_tls",
+        "upstream_timeout",
+        "request_too_large",
+        "response_too_large",
       ])
       .optional(),
+    /** Plain HTTP the proxy upgraded to HTTPS with the team's injected headers (KOBE-39). */
+    upgraded: z.literal(true).optional(),
     /**
      * Set when the row collapses hosts beyond the sandbox's rate of distinct hosts (random-name
      * floods): `domain` is then absent and `connections` counts them all.

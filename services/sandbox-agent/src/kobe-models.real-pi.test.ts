@@ -152,6 +152,33 @@ describe.skipIf(!PI_AVAILABLE)("kobe-models in real Pi, through the real model g
     expect(gateway.seen.every((s) => Object.keys(s.credentials).join() === "x-bf-vk")).toBe(true);
   }, 90_000);
 
+  it("runs a tool the fake model asks for and streams its answer about the result (KOBE-39 e2e path)", async () => {
+    const { h } = await start();
+    const result = await h.server.command(
+      runStart("bash: printf tool-ran", { run_id: RUN, config: { model: OPENAI } }),
+      60_000,
+    );
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true });
+    const check = (await h.server.waitFor((f) => f.type === "policy.check", 60_000)) as Extract<
+      SandboxToServerFrame,
+      { type: "policy.check" }
+    >;
+    expect(check.tool).toBe("bash");
+    expect(check.input).toEqual({ command: "printf tool-ran" });
+    h.server.send({
+      v: 1,
+      type: "policy.result",
+      request_id: check.request_id,
+      run_id: check.run_id,
+      tool_call_id: check.tool_call_id,
+      decision: "allow",
+      reasons: [{ code: "user_allow_rule", stage: "user_allow", message: "allowed" }],
+    } as never);
+    await h.server.waitFor(settled(RUN), 60_000);
+    // (textOf also collects the tool call's argument deltas, streamed first.)
+    expect(textOf(runEvents(h, RUN)).endsWith("fake-openai: tool said: tool-ran")).toBe(true);
+  }, 90_000);
+
   it("switches models between runs without restarting Pi: Anthropic native and Gemini too", async () => {
     const { h, gateway } = await start();
     expect(textOf(await run(h, RUN, "one", OPENAI))).toBe("fake-openai: one");

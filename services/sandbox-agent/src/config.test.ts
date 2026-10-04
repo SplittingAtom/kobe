@@ -79,4 +79,24 @@ describe("sandbox-agent loadConfig", () => {
     );
     expect(() => loadConfig({ ...url, KOBE_PI_RUNAS: "kobe-runas" })).toThrow(/KOBE_PI_RUNAS/);
   });
+
+  it("reads the egress proxy for tools (KOBE-39): port always written, no credentials", () => {
+    const url = { ...base, KOBE_SERVER_URL: "ws://kobe-server:8080" };
+    expect(loadConfig(url).egressProxyUrl).toBeUndefined();
+    expect(loadConfig(url).egressEnvScript).toBe("/opt/kobe/egress-env.sh");
+    expect(
+      loadConfig({ ...url, KOBE_EGRESS_PROXY_URL: "http://egress-proxy.kobe.internal" })
+        .egressProxyUrl,
+    ).toBe("http://egress-proxy.kobe.internal:80");
+    expect(
+      loadConfig({ ...url, KOBE_EGRESS_PROXY_URL: "http://egress-proxy.kobe.internal:8080/" })
+        .egressProxyUrl,
+    ).toBe("http://egress-proxy.kobe.internal:8080");
+    for (const bad of ["http://u:p@egress-proxy:80", "https://egress-proxy", "http://e/x"]) {
+      expect(() => loadConfig({ ...url, KOBE_EGRESS_PROXY_URL: bad }), bad).toThrow(
+        /KOBE_EGRESS_PROXY_URL/,
+      );
+    }
+    expect(() => loadConfig({ ...url, NO_PROXY: "a;rm -rf /" })).toThrow(/NO_PROXY/);
+  });
 });

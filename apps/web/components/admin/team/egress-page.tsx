@@ -11,9 +11,14 @@ import { SharedHostingNote } from "../install/egress-ceiling-page";
 import { MutationStatus } from "../error-notice";
 import { DateTime, ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
+import { DomainHeaders } from "./egress-headers";
+import { EgressRequests } from "./egress-requests";
 import styles from "../admin.module.css";
 
-/** Team egress enablement (spec D6/D28; `/v1/team/egress`, KOBE-38). */
+/**
+ * Team egress (spec D6/D28; `/v1/team/egress`): enablement (KOBE-38), access requests and injected
+ * headers (KOBE-39).
+ */
 export function TeamEgressPage() {
   const teamId = useTeamAccess().team.id;
   const { state, reload } = useResource(() => listTeamEgress(teamId));
@@ -36,9 +41,11 @@ export function TeamEgressPage() {
       <p className={styles.hint}>
         Your team&apos;s sandboxes reach nothing on the internet until you enable a domain here, and
         only domains in the install&apos;s egress ceiling can be enabled. Connections are HTTPS only
-        and logged to the audit view. Members can&apos;t enable domains themselves; access requests
-        from threads arrive with KOBE-39.
+        and logged to the audit view. Members can&apos;t enable domains themselves: when their
+        sandbox is blocked they can request access, and you approve or deny it here.
       </p>
+      <EgressRequests onDecided={reload} />
+      <h2>Domains</h2>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="egress domains">
         {(domains) =>
@@ -54,6 +61,7 @@ export function TeamEgressPage() {
                     <th scope="col">Status</th>
                     <th scope="col">Enabled</th>
                     <th scope="col">Since</th>
+                    <th scope="col">Injected headers</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -93,6 +101,18 @@ export function TeamEgressPage() {
                       </td>
                       <td>
                         <DateTime value={d.enabledAt} />
+                      </td>
+                      <td>
+                        {d.enabled && !d.domain.startsWith("*.") ? (
+                          <DomainHeaders
+                            teamId={teamId}
+                            domain={d}
+                            mutation={mutation}
+                            onChanged={reload}
+                          />
+                        ) : (
+                          <span className={styles.hint}>—</span>
+                        )}
                       </td>
                     </tr>
                   ))}

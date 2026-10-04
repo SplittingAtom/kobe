@@ -152,3 +152,16 @@ export interface ApprovalDecisionBody {
   /** "Always allow this tool": a remember-rule for exactly this tool, optionally expiring. */
   readonly remember?: { readonly toolGlob: string; readonly expiresIn?: number | undefined };
 }
+
+/** A member's request to enable a blocked egress domain (KOBE-39, `/v1/egress/requests`). */
+export interface EgressRequest {
+  readonly id: string;
+  /** The host that was blocked. */
+  readonly domain: string;
+  /** The ceiling pattern approving it enables. */
+  readonly pattern: string;
+  readonly status: "pending" | "approved" | "denied";
+  readonly threadId: string | null;
+  readonly createdAt: string;
+  readonly decidedAt: string | null;
+}

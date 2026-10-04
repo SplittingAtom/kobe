@@ -16,6 +16,7 @@ import { WireClient, type FatalReason, type WireLogger } from "./wire/client.js"
 import { encodeOutbound } from "./wire/encode.js";
 import { Outbox } from "./wire/outbox.js";
 import type { BackoffPolicy } from "./wire/backoff.js";
+import type { EgressWiring } from "./egress/egress-wiring.js";
 import type { ModelWiring } from "./models/types.js";
 import type { PiIdentities } from "./pi/identities.js";
 
@@ -43,6 +44,8 @@ export interface AgentDeps {
   readonly extensions?: readonly string[];
   /** Model gateway wiring (KOBE-41); absent when the sandbox has no model access. */
   readonly models?: ModelWiring | undefined;
+  /** Egress for Pi's tools (KOBE-39); absent outside Kobe's pods. */
+  readonly egress?: EgressWiring | undefined;
   /** Pi identities (KOBE-71); absent: Pi runs as the agent's uid. */
   readonly identities?: PiIdentities | undefined;
   /** Workspace sync (KOBE-27): restore before runs, push after them and before stopping. */
@@ -92,6 +95,7 @@ export class Agent {
       bin: config.piBin,
       runtimeDir: config.piRuntimeDir,
       models: deps.models,
+      egress: deps.egress,
       policyExtension: config.policyExtension,
       ...(deps.extensions === undefined ? {} : { extensions: deps.extensions }),
       ...(deps.policyReadyTimeoutMs === undefined

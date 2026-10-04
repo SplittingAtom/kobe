@@ -17,6 +17,7 @@ import { useContext } from "react";
 import type { KobeEventPayload } from "@kobe/protocol";
 import type { RunNotice, ToolActivity } from "../../lib/chat/live";
 import { ApprovalCard } from "./approval-card";
+import { ConnectedEgressNotice } from "./egress-notice";
 import { ChatSessionContext } from "./kobe-runtime";
 import styles from "./chat.module.css";
 
@@ -82,19 +83,11 @@ export function NoticeSlot({ notice }: { readonly notice: RunNotice }) {
   }
 }
 
-/** U12: a blocked domain is a clear notice; "Request access" arrives with KOBE-39. */
+/** U12: a blocked domain is a clear notice with Request access (KOBE-39, egress-notice.tsx). */
 export function EgressBlocked({
   payload,
 }: {
   readonly payload: KobeEventPayload<"egress.blocked">;
 }) {
-  return (
-    <p className={styles.denied} role="note">
-      Internet access to <strong>{payload.domain}</strong> was blocked by your team&apos;s egress
-      policy.
-      {payload.request_access
-        ? " A team admin can allow it."
-        : " It is outside what this install allows."}
-    </p>
-  );
+  return <ConnectedEgressNotice payload={payload} />;
 }

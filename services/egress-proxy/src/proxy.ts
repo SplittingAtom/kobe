@@ -14,6 +14,12 @@ import type { PreAuthGate } from "./preauth-gate.js";
 import { RateBuckets } from "./rate-buckets.js";
 import type { TunnelRegistry } from "./tunnel-registry.js";
 import { runTunnel } from "./tunnel.js";
+import {
+  handlePlainHttp,
+  type HeaderOpener,
+  type UpgradeContext,
+  type UpgradeSettings,
+} from "./upgrade.js";
 
 /**
  * The egress proxy (spec D28): default deny, HTTPS only, per-team allowlists within the install
@@ -30,7 +36,10 @@ import { runTunnel } from "./tunnel.js";
  *    another name or another protocol tears the tunnel down);
  * 6. relays bytes without decrypting them, under per-sandbox connection, bandwidth and idle limits.
  *
- * Plain-HTTP proxy requests are refused (HTTPS only). Every authenticated attempt is counted in the
+ * Plain-HTTP proxy requests are refused, except for domains whose team configured injected headers
+ * (KOBE-39): those are upgraded to verified HTTPS by the proxy itself (upgrade.ts), and a CONNECT
+ * to such a domain is refused with a pointer to `http://` (a tunnel could not carry the headers).
+ * Every authenticated attempt is counted in the
  * aggregated `egress.connection` audit; refusals of a named host also record an `egress.blocked`
  * event for the run (blocked-reporter.ts).
  */
@@ -49,6 +58,8 @@ export interface ProxySettings {
 export interface ProxyPolicy {
   decide(teamId: string, host: string): Promise<EgressDecision>;
   isActiveMember(teamId: string, userId: string): Promise<boolean>;
+  /** The team's sealed injected headers for an enabled pattern (KOBE-39), if any. */
+  sealedHeaders?(teamId: string, pattern: string): Promise<string | undefined>;
 }
 
 export type ConnectUpstream = (address: string, port: number, timeoutMs: number) => Promise<Socket>;
@@ -71,6 +82,12 @@ export interface ProxyDeps {
   readonly tunnels?: TunnelRegistry;
   /** Health endpoint state (readyz turns 503 while draining). */
   readonly ready?: () => boolean;
+  /** Opens the teams' sealed injected headers (KOBE-39); absent: header injection off. */
+  readonly headers?: HeaderOpener;
+  /** Limits of upgraded plain-HTTP requests (KOBE-39); absent: header injection off. */
+  readonly upgrade?: UpgradeSettings;
+  /** Extra CAs trusted for upgraded requests (tests); production uses the system store only. */
+  readonly upstreamCa?: string | Buffer | readonly (string | Buffer)[];
 }
 
 const SERVICE = "egress-proxy";
@@ -161,9 +178,11 @@ export function createEgressProxy(deps: ProxyDeps): Server {
     outcome: ConnectionRecord["outcome"],
     reason: ConnectionReason | undefined,
     bytes: { bytesUp: number; bytesDown: number } = { bytesUp: 0, bytesDown: 0 },
+    upgraded = false,
   ) => {
     const { identity } = a;
     deps.audit.record({
+      ...(upgraded ? { upgraded: true } : {}),
       teamId: identity.teamId,
       userId: identity.userId,
       sandboxId: identity.sandboxId,
@@ -184,6 +203,7 @@ export function createEgressProxy(deps: ProxyDeps): Server {
         reason,
         bytesUp: bytes.bytesUp,
         bytesDown: bytes.bytesDown,
+        ...(upgraded ? { upgraded: true } : {}),
         ms: Date.now() - a.started,
       },
       "egress connection",
@@ -346,6 +366,35 @@ export function createEgressProxy(deps: ProxyDeps): Server {
       return;
     }
 
+    // Header injection (KOBE-39): a tunnel can't carry the team's headers; say how to get them.
+    let injected: string | undefined;
+    try {
+      injected = deps.headers
+        ? await deps.policy.sealedHeaders?.(identity.teamId, decision.pattern)
+        : undefined;
+    } catch (err) {
+      logger.error({ err, team: identity.teamId }, "egress header rules unavailable");
+      finish(attempt, "failed", "policy_unavailable");
+      reply(
+        socket,
+        503,
+        "Kobe egress: allowlist unavailable",
+        "Kobe egress: the allowlist could not be read; try again shortly.",
+      );
+      return;
+    }
+    if (injected !== undefined) {
+      finish(attempt, "blocked", "headers_required");
+      reply(
+        socket,
+        403,
+        `Kobe egress blocked: use http://${host} (team credentials are injected)`,
+        `Kobe egress: your team injects credentials for ${host}. Use http://${host}/... instead of ` +
+          "https:// — the proxy adds them and connects over verified HTTPS for you.",
+      );
+      return;
+    }
+
     const detach = deps.bandwidth.attach(identity.sandboxId);
     let upstream: Socket | undefined;
     try {
@@ -450,7 +499,11 @@ export function createEgressProxy(deps: ProxyDeps): Server {
 
   const server = createServer({
     maxHeaderSize: 8192,
-    requestTimeout: settings.preAuthTimeoutMs,
+    // Request heads must arrive within the pre-auth bound (headersTimeout below); an upgraded
+    // plain-HTTP request's body is bounded by its own deadline (upgrade.ts), not this.
+    requestTimeout: deps.upgrade
+      ? deps.upgrade.timeoutMs + settings.connectTimeoutMs + settings.handshakeTimeoutMs
+      : settings.preAuthTimeoutMs,
     // How often Node enforces headersTimeout/requestTimeout (default 30 s): slow-loris bound.
     connectionsCheckingInterval: Math.min(1_000, settings.preAuthTimeoutMs),
   });
@@ -465,9 +518,41 @@ export function createEgressProxy(deps: ProxyDeps): Server {
       socket.destroy();
     });
   });
-  server.on("request", (req: IncomingMessage, res: ServerResponse) =>
-    handleRequest(req, res, deps),
-  );
+  const upgradeContext: UpgradeContext = {
+    deps: { ...deps, connectUpstream },
+    finish: (a, outcome, reason, bytes, upgraded) => {
+      finish(a, outcome, reason, bytes, upgraded);
+    },
+    report: (a, reason, requestAccess) => {
+      if (a.host === undefined) return;
+      deps.blocked.report({
+        teamId: a.identity.teamId,
+        userId: a.identity.userId,
+        sandboxId: a.identity.sandboxId,
+        domain: a.host,
+        port: a.port ?? 80,
+        reason,
+        requestAccess,
+        threadHint: a.identity.threadHint,
+      });
+    },
+    authRefused: (source, reason) => {
+      if (authLogs.take(source))
+        logger.info({ reason, remote: source }, "egress proxy auth refused");
+    },
+  };
+  server.on("request", (req: IncomingMessage, res: ServerResponse) => {
+    const url = req.url ?? "";
+    if (url.startsWith("/")) {
+      handleRequest(req, res, deps);
+      return;
+    }
+    // Absolute-form: a plain-HTTP proxy request (KOBE-39 upgrade path, refused otherwise).
+    handlePlainHttp(req, res, upgradeContext).catch((err: unknown) => {
+      logger.error({ err }, "egress proxy plain-HTTP handler failed");
+      res.destroy();
+    });
+  });
   server.on("clientError", (err: NodeJS.ErrnoException, socket: Socket) => {
     if (!socket.writable) {
       socket.destroy();
@@ -481,10 +566,11 @@ export function createEgressProxy(deps: ProxyDeps): Server {
   return server;
 }
 
-/** Health endpoints; any absolute-form (plain HTTP proxy) request is refused: HTTPS only. */
+/** Health endpoints (origin-form requests); absolute-form ones go to upgrade.ts. */
 function handleRequest(req: IncomingMessage, res: ServerResponse, deps: ProxyDeps): void {
   const json = (status: number, body: unknown) => {
-    res.writeHead(status, { "content-type": "application/json" });
+    // Close after answering: an unauthenticated socket must not linger (pre-auth budget).
+    res.writeHead(status, { "content-type": "application/json", connection: "close" });
     res.end(JSON.stringify(body));
   };
   const url = req.url ?? "";
@@ -496,14 +582,7 @@ function handleRequest(req: IncomingMessage, res: ServerResponse, deps: ProxyDep
     }
     return json(404, { status: "not_found", service: SERVICE });
   }
-  // Absolute-form: someone used the proxy for plain HTTP. Not counted per team: there is no
-  // token check on this path, so nothing is attributed to anyone.
-  deps.logger.info({ method: req.method }, "egress refused: plain HTTP proxy request");
-  res.writeHead(403, "Kobe egress blocked: plain HTTP is not allowed", {
-    "content-type": "text/plain; charset=utf-8",
-    connection: "close",
-  });
-  res.end("Kobe egress: only HTTPS (CONNECT) is allowed; use an https:// URL.\n");
+  json(405, { status: "method_not_allowed", service: SERVICE });
 }
 
 /**

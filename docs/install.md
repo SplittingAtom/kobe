@@ -156,7 +156,7 @@ refuses it if **any** address is private, loopback, link-local (cloud metadata),
 or reserved, or in `egressProxy.deniedCidrs` (add your pod/Service CIDRs if they are not private
 ranges; IPv4 entries are also excluded in the proxy's NetworkPolicy). It connects to the address it checked and requires the TLS ClientHello's server name to
 equal the CONNECT host. It never decrypts traffic. Plain HTTP and other ports are refused
-(`egressProxy.allowedPorts`, default 443).
+(`egressProxy.allowedPorts`, default 443), except for domains with injected headers (below).
 
 - **Internal targets** (e.g. a package mirror inside your network) must be allowed explicitly:
   add their addresses to `egressProxy.allowedInternalCidrs` and, because the proxy's own
@@ -186,6 +186,90 @@ equal the CONNECT host. It never decrypts traffic. Plain HTTP and other ports ar
 - **Logging:** every connection is counted in the audit log (`egress.connection`, aggregated per
   user, sandbox, host and outcome every `egressProxy.auditFlushSeconds`) and logged individually as
   JSON on the proxy's stdout. Blocked attempts are shown on the user's active run (`egress.blocked`).
+- **Proxy credentials for tools:** Pi's environment is built from an allow-list, so the pod's
+  `HTTPS_PROXY` (which has no credentials) does not reach the tools Pi runs. Instead
+  kobe-sandbox-agent keeps the sandbox's rotating egress token in a private file per Pi process
+  (0600), and Pi gets `BASH_ENV=/opt/kobe/egress-env.sh` (root-owned, in the sandbox image):
+  every bash tool call sources it and exports
+  `HTTPS_PROXY=http://<thread id>:<token>@egress-proxy.kobe.internal:80` (and the lowercase and
+  `HTTP_` variants), so curl, pip, npm, git and Python use the proxy with a fresh token, and a
+  blocked request shows in the thread that made it. The token is never in a pod spec, Pi's
+  environment or an argv, and the script pauses `bash -x` tracing while it handles it. It is in the
+  tool shell's environment, though: a tool that prints its environment or proxy URL (`env`,
+  `curl -v`) shows it in the tool result. That token is the sandbox's own, valid 15 minutes and only
+  for the egress proxy. Processes
+  started earlier keep the token they started with (15 minutes).
+
+### Request access
+
+When the proxy blocks a domain that is in the ceiling, the chat shows the notice with **Request
+access** (D28: no user self-allow). It notifies the team's admins by email (the requester's name,
+the blocked host, the ceiling pattern that would allow it, and the thread id; never a URL or the
+conversation) and lists the request in Team console → Egress → Access requests. **Approve** enables
+that pattern for the team (still only within the ceiling; if it left the ceiling the approval is
+refused and the request stays open) and settles everyone's pending requests for it; **Deny**
+settles them too. Requesters are emailed the decision and the chat notice shows it. A member may
+have 20 open requests and make 10 per hour. Everything is audited (`egress.request.created`,
+`egress.request.decided`, `egress.domain.enabled`). Domains outside the ceiling offer no request:
+only an install admin can add them.
+
+### Header injection
+
+Team admins can configure up to 8 **injected headers** per enabled domain (Team console → Egress,
+e.g. `Authorization` for a private package index). Values are sealed in Postgres with a dedicated
+secret (`<release>-egress-headers`, key `secret`, generated and kept; or
+`egressProxy.headerSecret` naming your own), held only by the server and the egress proxy. To
+rotate it, move the old value to `secret-previous`, set a new `secret` and restart: the server
+re-seals stored values at start-up, after which `secret-previous` can go. They are
+**write-only**: the API and console list header names (to team admins only), never values; the audit log records names
+only (`egress.header.set`, `egress.header.cleared`); disabling the domain deletes them.
+
+Headers can't be added to an opaque HTTPS tunnel, and Kobe does not intercept TLS (there is no
+Kobe CA). So for a domain with injected headers the sandbox uses **plain `http://` URLs**, and the
+proxy upgrades them:
+
+1. The tool sends `GET http://pkgs.example.com/simple/` to the proxy (its `HTTP_PROXY`), with the
+   egress token. The proxy checks the token, membership and allowlist exactly as for CONNECT.
+2. It requires injected headers for the matched pattern: plain HTTP to any other domain is still
+   refused. It removes `Proxy-*`, hop-by-hop headers and any client header named like an injected
+   one, sets `Host`, and adds the team's headers.
+3. It resolves the name once, refuses internal addresses, connects to the checked address on 443
+   and does TLS itself, with SNI = the domain and the certificate verified against it (system CAs).
+4. It relays the response. A redirect to the same domain's `https://` URL is rewritten to `http://`
+   (so the next request comes back and gets the headers); a redirect to another host is passed
+   through and checked as its own request (headers are only ever sent to their own domain). A
+   response header that echoes an injected value is dropped.
+
+Headers need an **exact** domain: a wildcard (`*.example.com`) is refused, since the sandbox could
+send them to any subdomain whose certificate it controls. Only GET, HEAD, POST, PUT, PATCH, DELETE
+and OPTIONS are relayed (TRACE would reflect the headers). Limits: `egressProxy.upgrade.maxRequestBytes` (100 MiB), `maxResponseBytes` (2 GiB),
+`timeoutSeconds` (600), plus the per-sandbox connection and bandwidth limits. A `CONNECT` to a
+domain with injected headers is refused with a message pointing at `http://`. Pointing tools at
+`http://` (the least surprising option: the URL says what happens, and nothing in the sandbox is
+rewritten behind the user's back):
+
+```bash
+pip install --index-url http://pkgs.example.com/simple/ --trusted-host pkgs.example.com mypkg
+npm install --registry http://npm.example.com/ mypkg
+git -c url."http://git.example.com/".insteadOf="https://git.example.com/" clone https://git.example.com/org/repo.git
+curl http://api.example.com/v1/items
+```
+
+**Limitation: absolute `https://` links in responses.** The proxy never rewrites bodies. A registry
+that answers with absolute `https://<same domain>/…` URLs (some PEP 503 simple indexes link
+files that way, npm metadata's `dist.tarball`, git LFS batch responses) makes the tool open a
+CONNECT to that domain for the next step, which is refused (`headers_required`). Workarounds: use
+an index that emits relative links (pip's simple index from most servers, e.g. devpi, pypiserver,
+Artifactory's "relative" mode) so the files are fetched over `http://` too; for npm point the
+registry's tarball base URL at `http://` (or set its "relative tarball URL" option); for git LFS
+set `lfs.url` to the `http://` endpoint. If the files are served from another host (a CDN), enable
+that host without injected headers and they are fetched over HTTPS normally.
+
+pip needs `--trusted-host` (or `PIP_TRUSTED_HOST`) for an `http://` index; the hop from the proxy to
+the domain is still verified HTTPS. Put these in the agent's instructions or the project's config
+(`pip.conf`, `.npmrc`, `git config`) for the domains your team configured. Trust boundary: the
+upstream sees the headers and its responses reach the sandbox, so configure headers only for
+domains you trust with that credential; a body that echoes the credential is not filtered.
 
 ## Models
 

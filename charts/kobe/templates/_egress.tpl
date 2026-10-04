@@ -8,9 +8,32 @@ predates these keys still renders. Keep in sync with values.yaml.
   "allowedInternalCidrs" (list)
   "deniedCidrs" (list)
   "auditFlushSeconds" 60
+  "headerSecret" ""
+  "upgrade" (dict "maxRequestBytes" 104857600 "maxResponseBytes" 2147483648 "timeoutSeconds" 600)
   "limits" (dict "connectionsPerSandbox" 64 "connections" 4096 "bandwidthBytesPerSecond" 20971520 "idleTimeoutSeconds" 300 "maxTunnelSeconds" 3600 "unauthenticatedPerSource" 16 "unauthenticated" 1024)
   "networkPolicy" (dict "restrictEgress" true "databasePeers" (list) "databasePort" 5432 "extraEgress" (list)) -}}
 {{- mustMergeOverwrite $defaults (deepCopy (.Values.egressProxy | default dict)) | toJson -}}
+{{- end -}}
+
+{{/* Secret sealing the teams' injected egress header values (KOBE-39): server and proxy only. */}}
+{{- define "kobe.egressHeaderSecretName" -}}
+{{- $e := include "kobe.egressProxyValues" . | fromJson -}}
+{{- default (printf "%s-egress-headers" (include "kobe.fullname" .)) $e.headerSecret -}}
+{{- end -}}
+
+{{/* The header secret (current, and previous when the Secret holds one) as env, for server and proxy. */}}
+{{- define "kobe.egressHeaderEnv" -}}
+- name: KOBE_EGRESS_HEADER_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "kobe.egressHeaderSecretName" . }}
+      key: secret
+- name: KOBE_EGRESS_HEADER_SECRET_PREVIOUS
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "kobe.egressHeaderSecretName" . }}
+      key: secret-previous
+      optional: true
 {{- end -}}
 
 {{/* Address ranges the proxy's own NetworkPolicy never sends to (internet rule `except`). */}}
@@ -20,7 +43,7 @@ predates these keys still renders. Keep in sync with values.yaml.
 
 {{/*
 Egress proxy env (services/egress-proxy/src/config.ts): the database (app role), its own session
-key only (never the other audiences' keys), and limits.
+key only (never the other audiences' keys), the header-injection secret (KOBE-39), and limits.
 */}}
 {{- define "kobe.egressProxyEnv" -}}
 {{- $e := include "kobe.egressProxyValues" . | fromJson -}}
@@ -52,4 +75,11 @@ key only (never the other audiences' keys), and limits.
   value: {{ int $e.limits.unauthenticated | quote }}
 - name: KOBE_EGRESS_AUDIT_FLUSH_MS
   value: {{ mul (int $e.auditFlushSeconds) 1000 | quote }}
+{{ include "kobe.egressHeaderEnv" . }}
+- name: KOBE_EGRESS_UPGRADE_MAX_REQUEST_BYTES
+  value: {{ int64 $e.upgrade.maxRequestBytes | quote }}
+- name: KOBE_EGRESS_UPGRADE_MAX_RESPONSE_BYTES
+  value: {{ int64 $e.upgrade.maxResponseBytes | quote }}
+- name: KOBE_EGRESS_UPGRADE_TIMEOUT_MS
+  value: {{ mul (int $e.upgrade.timeoutSeconds) 1000 | quote }}
 {{- end -}}

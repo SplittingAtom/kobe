@@ -1,4 +1,12 @@
-import { createDb, isActiveTeamMember, loadEgressCeiling, loadTeamEgress } from "@kobe/db";
+import {
+  createDb,
+  headerBox,
+  isActiveTeamMember,
+  loadEgressCeiling,
+  loadTeamEgress,
+  loadTeamEgressHeaders,
+  openHeaders,
+} from "@kobe/db";
 import { AddressPolicy } from "./address-policy.js";
 import { AllowlistCache } from "./allowlist.js";
 import { egressTokenVerifier } from "./auth.js";
@@ -25,6 +33,7 @@ const cache = new AllowlistCache(
     loadCeiling: () => loadEgressCeiling(db),
     loadTeam: (teamId) => loadTeamEgress(db, teamId),
     isActiveMember: (teamId, userId) => isActiveTeamMember(db, teamId, userId),
+    loadTeamHeaders: (teamId) => loadTeamEgressHeaders(db, teamId),
   },
   { ttlMs: config.cacheTtlMs, degradedTtlMs: 5_000, memberTtlMs: 30_000, maxEntries: 10_000 },
 );
@@ -45,6 +54,8 @@ const audit = new ConnectionAudit({
 });
 audit.start();
 const blocked = new BlockedReporter({ sink: dbBlockedSink(db), logger });
+// Header injection (KOBE-39): only with the header secret; plain HTTP is refused otherwise.
+const box = config.headerSecrets ? headerBox(config.headerSecrets) : undefined;
 
 let draining = false;
 const preauth = new PreAuthGate({ perSource: config.preAuthPerSource, total: config.preAuthTotal });
@@ -80,6 +91,15 @@ const server = createEgressProxy({
   preauth,
   tunnels,
   ready: () => !draining,
+  ...(box
+    ? {
+        headers: {
+          open: (teamId: string, pattern: string, sealed: string) =>
+            openHeaders(box, teamId, pattern, sealed),
+        },
+        upgrade: config.upgrade,
+      }
+    : {}),
 });
 // Tunnels and unauthenticated sockets have separate budgets (the gate enforces the latter), so a
 // flood of unauthenticated sockets never takes capacity from other sandboxes' tunnels.
@@ -90,6 +110,7 @@ server.listen(config.port, () => {
       port: config.port,
       allowedPorts: config.allowedPorts,
       internalTargets: config.allowedInternalCidrs.length,
+      headerInjection: box !== undefined,
     },
     "egress proxy listening",
   );
