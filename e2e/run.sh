@@ -1605,7 +1605,7 @@ u=$(stat -c %u /proc/$pi)
 $R $u --probe-ptrace >/dev/null 2>&1; echo "probe=$?"
 $R $u sh -c "kill -USR1 $pi"; sleep 1
 echo "inspector=$(node -e 'require("net").connect(9229,"127.0.0.1").on("connect",()=>{console.log("open");process.exit(0)}).on("error",()=>console.log("closed"))')"
-echo "stdio=$($R $u sh -c "for n in 0 1; do : > /proc/$pi/fd/\$n; done" 2>&1 | grep -cE 'No such device or address|Permission denied')"
+echo "stdio=$($R $u sh -c "for n in 0 1; do ( : > /proc/$pi/fd/\$n ); done" 2>&1 | grep -cE 'No such device or address|Permission denied')"
 echo "pi_alive=$(kill -0 $pi 2>/dev/null; [ -d /proc/$pi ] && echo yes || echo no)"
 SH
     # The Owner's sandbox pod: the one whose claim-uid label is the Owner's claim (u-<user id>).
