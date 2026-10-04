@@ -70,7 +70,7 @@ export function MyAgentsShell({
       <header className={styles.header}>
         <div className={styles.brandRow}>
           <p className={styles.brand}>
-            <Link href="/">Kobe</Link> <span aria-hidden="true">/</span> My agents
+            <Link href="/">Kobe</Link> <span aria-hidden="true">/</span> My area
           </p>
           <TeamSwitcher />
         </div>

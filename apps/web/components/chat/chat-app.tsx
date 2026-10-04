@@ -200,7 +200,7 @@ export function ChatApp({ fetchFn, eventSource, newKey, reopenDelayMs }: ChatApp
         <h1 className={styles.brand}>Kobe</h1>
         <TeamSwitcher />
         <nav aria-label="My area">
-          <Link href="/me/agents">My agents</Link>
+          <Link href="/me/agents">My agents</Link> <Link href="/me/skills">My skills</Link>
         </nav>
         <ConsoleLinks />
       </header>

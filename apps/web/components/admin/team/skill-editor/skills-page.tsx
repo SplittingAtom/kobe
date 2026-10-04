@@ -3,23 +3,30 @@
 import Link from "next/link";
 import { listSkills } from "../../../../lib/admin/api/team/skills";
 import { useTeamAccess } from "../../console-context";
+import { skillPaths, type SkillArea } from "./area";
 import { DateTime, ResourceView } from "../../parts";
 import { useResource } from "../../use-resource";
 import styles from "../../admin.module.css";
 
-/** Skills the caller can see (team and personal); each one opens in the editor (KOBE-83). */
-export function SkillsPage() {
+/**
+ * Skills the caller can see; each one opens in the editor (KOBE-83). In the member's own area
+ * (`area="my"`, KOBE-98) it lists personal skills only.
+ */
+export function SkillsPage({ area = "team" }: { readonly area?: SkillArea }) {
   const teamId = useTeamAccess().team.id;
-  const { state } = useResource(() => listSkills(teamId));
+  const paths = skillPaths(area);
+  const { state } = useResource(() => listSkills(teamId, paths.listScope));
   return (
     <>
-      <h1>Skills</h1>
+      <h1>{paths.listTitle}</h1>
       <p className={styles.hint}>
-        Saving a skill creates a new immutable version. Team skills are shared with the team;
-        personal skills are only yours.
+        Saving a skill creates a new immutable version.{" "}
+        {area === "my"
+          ? "Personal skills are only yours."
+          : "Team skills are shared with the team; personal skills are only yours."}
       </p>
       <p>
-        <Link href="/admin/team/skills/new">New skill</Link>
+        <Link href={`${paths.base}/new`}>New skill</Link>
       </p>
       <ResourceView state={state} label="skills">
         {(skills) =>
@@ -28,11 +35,11 @@ export function SkillsPage() {
           ) : (
             <div className={styles.tableWrap}>
               <table className={styles.table}>
-                <caption>Skills</caption>
+                <caption>{paths.listTitle}</caption>
                 <thead>
                   <tr>
                     <th scope="col">Skill</th>
-                    <th scope="col">Scope</th>
+                    {area === "team" && <th scope="col">Scope</th>}
                     <th scope="col">Latest version</th>
                     <th scope="col">Updated</th>
                   </tr>
@@ -41,10 +48,10 @@ export function SkillsPage() {
                   {skills.map((s) => (
                     <tr key={s.id}>
                       <th scope="row">
-                        <Link href={`/admin/team/skills/${s.id}`}>{s.slug}</Link>
+                        <Link href={`${paths.base}/${s.id}`}>{s.slug}</Link>
                         <div className={styles.hint}>{s.description}</div>
                       </th>
-                      <td>{s.scope === "team" ? "Team" : "Personal"}</td>
+                      {area === "team" && <td>{s.scope === "team" ? "Team" : "Personal"}</td>}
                       <td>v{s.latestVersion}</td>
                       <td>
                         <DateTime value={s.updatedAt} />
