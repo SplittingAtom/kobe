@@ -32,6 +32,16 @@ const zipOf = (name: string, extra: Record<string, string> = {}) =>
   });
 const asZip = (bytes: Uint8Array) => new RawBody(bytes, "application/zip");
 const asMd = (text: string) => new RawBody(text, "text/markdown");
+/** The object key a stored version names (the API never exposes it). */
+async function keyOf(contentHash: string): Promise<string> {
+  const { rows } = await h.admin.query<{ storage_key: string }>(
+    `SELECT storage_key FROM team_skill_versions WHERE content_hash = $1
+     UNION ALL SELECT storage_key FROM install_skill_versions WHERE content_hash = $1`,
+    [contentHash],
+  );
+  expect(rows.length).toBeGreaterThan(0);
+  return rows[0]?.storage_key as string;
+}
 const upload = (who: Person, scope: string, body: RawBody) =>
   as[who].post(`/v1/skills?scope=${scope}`, body);
 
@@ -94,7 +104,8 @@ describe("uploading", () => {
       uploadedBy: ids.bob,
     });
     expect(res.json.version.storageKey).toBeUndefined();
-    const key = `${PREFIX}skills/teams/${finance}/${hash}`;
+    const key = await keyOf(hash);
+    expect(key).toMatch(new RegExp(`^${PREFIX}skills/teams/${finance}/${hash}/[0-9a-f-]{36}$`));
     expect(objects.objects.get(key)?.equals(Buffer.from(canonical))).toBe(true);
     const { rows } = await h.admin.query<{ team_id: string; target: Record<string, unknown> }>(
       `SELECT team_id, target FROM audit_log WHERE action = 'skill.uploaded' AND target->>'skillId' = $1`,
@@ -143,8 +154,7 @@ describe("uploading", () => {
     const res = await upload("bob", "team", asMd(skillMd("plain-md")));
     expect(res.status, JSON.stringify(res.json)).toBe(201);
     expect(res.json.version).toMatchObject({ source: "skill_md", fileCount: 1 });
-    const key = `${PREFIX}skills/teams/${finance}/${res.json.version.contentHash}`;
-    expect(objects.objects.has(key)).toBe(true);
+    expect(objects.objects.has(await keyOf(res.json.version.contentHash))).toBe(true);
   });
 
   it("applies the role rules: builders upload team skills, members only personal ones", async () => {
@@ -185,9 +195,7 @@ describe("wrapper directories", () => {
   it("strips one top-level directory and hashes the stored (normalized) bytes", async () => {
     const res = await upload("bob", "team", asZip(wrapped));
     expect(res.status, JSON.stringify(res.json)).toBe(201);
-    const stored = objects.objects.get(
-      `${PREFIX}skills/teams/${finance}/${res.json.version.contentHash}`,
-    );
+    const stored = objects.objects.get(await keyOf(res.json.version.contentHash));
     expect(stored && sha256Hex(stored)).toBe(res.json.version.contentHash);
     expect(res.json.version.contentHash).not.toBe(sha256Hex(wrapped));
     // The same files without a wrapper are the same bundle: nothing new to upload.
@@ -225,18 +233,30 @@ describe("failed uploads and limits", () => {
     const res = await upload("bob", "team", asZip(bytes));
     const maxedZip = validateZipBundle(bytes);
     expect(res).toMatchObject({ status: 409, json: { code: "version_limit" } });
-    expect(
-      objects.objects.has(
-        `${PREFIX}skills/teams/${finance}/${sha256Hex(maxedZip.ok ? maxedZip.value.zip : bytes)}`,
-      ),
-    ).toBe(false);
+    const maxedHash = maxedZip.ok ? sha256Hex(maxedZip.value.zip) : "";
+    expect(objects.keys(`${PREFIX}skills/teams/${finance}/${maxedHash}/`)).toEqual([]);
 
     const ok = await upload("bob", "team", asZip(zipOf("kept-blob")));
     const again = await upload("bob", "team", asZip(zipOf("kept-blob")));
     expect(again.json.code).toBe("unchanged");
-    expect(
-      objects.objects.has(`${PREFIX}skills/teams/${finance}/${ok.json.version.contentHash}`),
-    ).toBe(true);
+    const hash = ok.json.version.contentHash;
+    expect(objects.objects.has(await keyOf(hash))).toBe(true);
+    // The refused attempt cleaned up only its own object.
+    expect(objects.keys(`${PREFIX}skills/teams/${finance}/${hash}/`)).toHaveLength(1);
+  });
+
+  it("two concurrent identical uploads: one wins, the loser's cleanup leaves the winner's blob", async () => {
+    const bytes = zipOf("racing", { "x.md": "same" });
+    const [a, b] = await Promise.all([
+      upload("bob", "team", asZip(bytes)),
+      upload("bob", "team", asZip(bytes)),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([201, 409]);
+    const winner = a.status === 201 ? a : b;
+    const hash = winner.json.version.contentHash;
+    const key = await keyOf(hash);
+    expect(objects.objects.has(key)).toBe(true);
+    expect(objects.keys(`${PREFIX}skills/teams/${finance}/${hash}/`)).toEqual([key]);
   });
 
   it("rate-limits uploads per user", async () => {

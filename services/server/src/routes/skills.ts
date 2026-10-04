@@ -13,7 +13,7 @@ import {
 import { hitRateLimit } from "../rate-limit.js";
 import { SKILL_LIMITS, SKILL_UPLOAD_RATE } from "../skills/limits.js";
 import {
-  discardUnreferencedBundle,
+  discardAttemptBundle,
   putSkillBundle,
   sha256Hex,
   skillBundleKey,
@@ -157,7 +157,7 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
       const storageKey = skillBundleKey(deps.blobs.prefix, location, contentHash);
       await putSkillBundle(deps.blobs, storageKey, zip);
       const blobs = deps.blobs;
-      const discard = () => discardUnreferencedBundle(db, blobs, location, storageKey);
+      const discard = () => discardAttemptBundle(blobs, storageKey);
       const result = await uploadSkillVersion(db, location, {
         slug: bundle.name,
         description: bundle.description,

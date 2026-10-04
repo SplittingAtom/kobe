@@ -349,32 +349,3 @@ async function versionOf(
           );
   return row ? toVersion(row) : null;
 }
-
-/** Whether any version of this location's skills names `storageKey` (before deleting a blob). */
-export function isBundleReferenced(
-  db: KobeDb,
-  location: SkillLocation,
-  storageKey: string,
-): Promise<boolean> {
-  return inLocation(db, location, async (tx) => {
-    const rows =
-      location.scope === "team"
-        ? await tx
-            .select({ v: teamSkillVersions.version })
-            .from(teamSkillVersions)
-            .where(eq(teamSkillVersions.storageKey, storageKey))
-            .limit(1)
-        : await tx
-            .select({ v: installSkillVersions.version })
-            .from(installSkillVersions)
-            .innerJoin(installSkills, eq(installSkills.id, installSkillVersions.skillId))
-            .where(
-              and(
-                eq(installSkillVersions.storageKey, storageKey),
-                eq(installSkills.ownerUserId, location.ownerUserId),
-              ),
-            )
-            .limit(1);
-    return rows.length > 0;
-  });
-}

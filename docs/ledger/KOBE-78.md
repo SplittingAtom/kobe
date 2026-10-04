@@ -30,13 +30,14 @@ tests written first.
 - **Bundle bytes and hash (for KOBE-81/82):** the uploader's zip is never stored. After validation
   it is repacked into a **canonical zip**: regular files only (no directory entries), paths
   NFC-normalized and sorted, stored without compression (so bytes never depend on a deflate
-  implementation), fixed timestamp, no extra fields, comments or attributes. `content_hash` is the
+  implementation), fixed timestamp (built from local fields, so timezone-independent), no extra fields, comments or attributes. `content_hash` is the
   SHA-256 of exactly those bytes, which are what S3 holds at
-  `<prefix>skills/teams/<team>/<sha256>` or `<prefix>skills/users/<user>/<sha256>` (derived
+  `<prefix>skills/teams/<team>/<sha256>/<attempt-uuid>` (or `users/<user>`) (derived
   server-side, `skills/storage.ts`). Recompressing, reordering, commenting, junk-prefixing,
   wrapping in one top-level folder or NFD paths do not change the hash. A bare SKILL.md is wrapped
-  the same way. On any failure after the write the blob is deleted best-effort unless a version
-  already names its key; a failed delete logs the key. Uploads: 30 per user per 10 minutes
+  the same way. On any failure after the write the attempt's own object is deleted best-effort
+  (keys are unique per attempt, not content-addressed, so cleanup can't touch a committed
+  version's blob or a concurrent identical upload's); a failed delete logs the key. Uploads: 30 per user per 10 minutes
   (`hitRateLimit`, 429).
 - **Validation** (`skills/bundle.ts`, own strict central-directory reader `skills/zip-entries.ts`,
   limits in `skills/limits.ts`): upload at most 5 MiB, 200 files, 25 MiB uncompressed in total,
@@ -47,7 +48,7 @@ tests written first.
   bounds: entries are inflated in 16 KiB steps and aborted the moment the declared size or the
   bundle-wide budget is crossed; a compressed size above declared+0.1%+64 is refused. Any mode
   type other than regular file or directory is refused whatever OS the archive claims;
-  duplicates are judged after NFC + lowercase. Frontmatter is capped at 16 KiB (half the DB check,
+  duplicates are judged after NFC + lowercase; a `__proto__` path segment is refused. Frontmatter is capped at 16 KiB (half the DB check,
   since jsonb text grows up to 1.5x). SKILL.md must sit at the zip root, or every entry must sit under one single top-level
   directory (stripped before lookup; two top-level dirs or a file beside it are refused), with YAML frontmatter `name`
   and `description` (core schema, few aliases).
@@ -62,8 +63,7 @@ tests written first.
 
 ## Open questions (for Chris or the coordinator)
 
-- Delete-after-failure can race a concurrent identical upload (tiny window); a sweep in KOBE-81/82
-  would close it if wanted.
+- A failed delete leaves an orphan object (logged by key); a sweep is optional.
 
 ## Evidence (acceptance criteria -> test or command output)
 

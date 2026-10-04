@@ -40,7 +40,13 @@ const fail = (code: BundleErrorCode, message: string): Result<never> => ({
 
 const SKILL_MD_PATH = "SKILL.md";
 /** Fixed timestamp so wrapping the same SKILL.md always gives the same bytes (and hash). */
-const FIXED_MTIME = Date.UTC(2020, 0, 1);
+/**
+ * fflate encodes the timestamp from the Date's *local* fields, so a UTC instant would change the
+ * bytes with the server's timezone. Built from local fields, it encodes the same DOS date and
+ * time (2020-01-01 12:00:00) in every timezone. A function, so the timezone in force at call time
+ * is the one used.
+ */
+const fixedMtime = (): Date => new Date(2020, 0, 1, 12, 0, 0);
 
 /**
  * Validates an uploaded skill zip without extracting it to disk (KOBE-78): size, file-count and
@@ -74,14 +80,14 @@ export function validateZipBundle(
   const sizeProblem = checkSizes(files, limits);
   if (sizeProblem) return sizeProblem;
 
-  const contents: Record<string, Uint8Array> = {};
+  const contents = new Map<string, Uint8Array>();
   const budget = { remaining: limits.maxUncompressedBytes };
   for (const file of files) {
     const data = inflateEntry(bytes, file, budget);
     if (!data) return fail("invalid_zip", `${file.name} is corrupt or larger than it declares.`);
-    contents[file.name] = data;
+    contents.set(file.name, data);
   }
-  const skillMd = contents[SKILL_MD_PATH];
+  const skillMd = contents.get(SKILL_MD_PATH);
   if (!skillMd)
     return fail(
       "skill_md_missing",
@@ -124,16 +130,14 @@ function unwrap(entry: ZipEntry, prefix: string): ZipEntry[] {
  * bytes never depend on a deflate implementation), fixed timestamp, no extra fields, comments or
  * attributes, no directory entries. Whatever the uploader's tool added is gone.
  */
-function repack(contents: Record<string, Uint8Array>): Uint8Array {
-  const sorted = Object.keys(contents).sort();
-  return zipSync(
-    Object.fromEntries(
-      sorted.map((name) => [
-        name,
-        [contents[name] as Uint8Array, { mtime: FIXED_MTIME, level: 0 }],
-      ]),
-    ),
-  );
+function repack(contents: ReadonlyMap<string, Uint8Array>): Uint8Array {
+  const sorted = [...contents.keys()].sort();
+  // fflate takes an object: build it without a prototype, and `isSafePath` refuses `__proto__`
+  // segments, so no file can be dropped or alias an inherited key.
+  const files: Record<string, [Uint8Array, { mtime: Date; level: 0 }]> = Object.create(null);
+  for (const name of sorted)
+    files[name] = [contents.get(name) as Uint8Array, { mtime: fixedMtime(), level: 0 }];
+  return zipSync(files);
 }
 
 /** Wraps a bare SKILL.md upload into a one-file zip, so every stored bundle is a zip. */
@@ -145,7 +149,7 @@ export function bundleFromSkillMd(
     return fail("file_too_large", `SKILL.md may be at most ${limits.maxSkillMdBytes} bytes.`);
   const parsed = parseSkillMd(bytes);
   if (typeof parsed === "string") return fail("invalid_skill_md", parsed);
-  const zip = repack({ [SKILL_MD_PATH]: bytes });
+  const zip = repack(new Map([[SKILL_MD_PATH, bytes]]));
   return { ok: true, value: { ...parsed, fileCount: 1, uncompressedBytes: bytes.length, zip } };
 }
 
@@ -185,7 +189,7 @@ function isSafePath(name: string, limits: SkillLimits): boolean {
   if (/[\u0000-\u001f\u007f\\]/.test(name) || name.startsWith("/") || /^[a-zA-Z]:/.test(name))
     return false;
   const segments = name.replace(/\/$/, "").split("/");
-  return segments.every((s) => s !== "" && s !== "." && s !== "..");
+  return segments.every((s) => s !== "" && s !== "." && s !== ".." && s !== "__proto__");
 }
 
 function checkSizes(files: readonly ZipEntry[], limits: SkillLimits): Result<never> | null {

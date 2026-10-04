@@ -330,3 +330,47 @@ describe("hostile archives", () => {
     expect(failure(zip({ "SKILL.md": strToU8(md(9000)) }))).toBe("invalid_skill_md");
   });
 });
+
+describe("canonical bytes do not depend on the server", () => {
+  it("hashes the same under any timezone", () => {
+    const original = process.env.TZ;
+    try {
+      const hashes = ["UTC", "America/Los_Angeles", "Pacific/Auckland", "Asia/Kolkata"].map(
+        (tz) => {
+          process.env.TZ = tz;
+          return hashOf(zipSync(FILES));
+        },
+      );
+      expect(new Set(hashes).size).toBe(1);
+    } finally {
+      if (original === undefined) delete process.env.TZ;
+      else process.env.TZ = original;
+    }
+  });
+
+  it("never silently drops a file named __proto__ (it is refused)", () => {
+    // fflate can't write that name itself: write a same-length placeholder, then rename it.
+    const rename = (bytes: Uint8Array, from: string, to: string) => {
+      const out = new Uint8Array(bytes);
+      const buf = Buffer.from(out.buffer);
+      for (let at = buf.indexOf(from); at >= 0; at = buf.indexOf(from, at + 1)) buf.write(to, at);
+      return out;
+    };
+    const placeholder = zipSync({ "SKILL.md": FILES["SKILL.md"], __protoXX: strToU8("x") });
+    expect(failure(rename(placeholder, "__protoXX", "__proto__"))).toBe("unsafe_path");
+    const nested = zipSync({ "SKILL.md": FILES["SKILL.md"], "a/__protoXX/b": strToU8("x") });
+    expect(failure(rename(nested, "__protoXX", "__proto__"))).toBe("unsafe_path");
+  });
+
+  it("keeps names like constructor and toString as ordinary files", () => {
+    const result = validateZipBundle(
+      zipSync({
+        ...FILES,
+        constructor: strToU8("1"),
+        toString: strToU8("2"),
+        hasOwnProperty: strToU8("3"),
+      }),
+    );
+    expect(result.ok && result.value.fileCount).toBe(5);
+  });
+});
