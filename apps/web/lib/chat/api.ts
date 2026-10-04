@@ -7,6 +7,7 @@ import { apiRequest, type ApiResult } from "../api/client";
 import type {
   ApprovalDecisionBody,
   ApprovalView,
+  EgressRequest,
   EntryPage,
   PendingMessages,
   RunSnapshot,
@@ -60,6 +61,18 @@ export interface ChatApi {
   getApproval(approvalId: string): Promise<ApiResult<ApprovalView>>;
   /** `POST /v1/approvals/{id}` (§6.1): allow or deny, optionally remembering an allow. */
   decideApproval(approvalId: string, body: ApprovalDecisionBody): Promise<ApiResult<ApprovalView>>;
+  /**
+   * Request access (KOBE-39): ask the team's admins to enable a blocked domain (`POST
+   * /v1/egress/requests`); 201 new, 200 already pending, 409 `already_enabled`/`not_in_ceiling`.
+   */
+  requestEgressAccess(
+    domain: string,
+    threadId: string | undefined,
+  ): Promise<ApiResult<{ readonly request: EgressRequest }>>;
+  /** Your own requests for one domain, newest first. */
+  egressRequests(
+    domain: string,
+  ): Promise<ApiResult<{ readonly requests: readonly EgressRequest[] }>>;
 }
 
 /** The chat API for one team; `teamId` goes in `X-Kobe-Team` on every request. */
@@ -102,6 +115,12 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     cancel: (runId) => send("POST", `/v1/runs/${enc(runId)}/cancel`),
     retry: (runId) => send("POST", `/v1/runs/${enc(runId)}/retry`),
     getApproval: (id) => get(`/v1/approvals/${enc(id)}`),
+    requestEgressAccess: (domain, threadId) =>
+      send("POST", "/v1/egress/requests", {
+        domain,
+        ...(threadId === undefined ? {} : { thread_id: threadId }),
+      }),
+    egressRequests: (domain) => get(`/v1/egress/requests${query({ domain })}`),
     decideApproval: (id, body) =>
       send("POST", `/v1/approvals/${enc(id)}`, {
         decision: body.decision,

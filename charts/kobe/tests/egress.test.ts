@@ -184,3 +184,67 @@ describe("sandbox side", () => {
     });
   });
 });
+
+describe("header injection secret (KOBE-39)", () => {
+  const ms = render();
+  const envOf = (kind: string, name: string): { name: string; valueFrom?: any }[] =>
+    (find(ms, kind, name)?.spec.template.spec.containers[0].env ?? []) as {
+      name: string;
+      valueFrom?: any;
+    }[];
+  const headerVars = (env: { name: string; valueFrom?: any }[]) =>
+    env.filter((e) => e.name.startsWith("KOBE_EGRESS_HEADER_SECRET"));
+
+  it("is generated, kept, and given to the server and the egress proxy only", () => {
+    const secret = find(ms, "Secret", "kobe-egress-headers");
+    expect(secret?.metadata).toMatchObject({ annotations: { "helm.sh/resource-policy": "keep" } });
+    expect((secret?.stringData as Record<string, string>).secret).toMatch(/^[A-Za-z0-9]{48}$/);
+    const expected = [
+      {
+        name: "KOBE_EGRESS_HEADER_SECRET",
+        valueFrom: { secretKeyRef: { name: "kobe-egress-headers", key: "secret" } },
+      },
+      {
+        name: "KOBE_EGRESS_HEADER_SECRET_PREVIOUS",
+        valueFrom: {
+          secretKeyRef: { name: "kobe-egress-headers", key: "secret-previous", optional: true },
+        },
+      },
+    ];
+    expect(headerVars(envOf("Deployment", "kobe-egress-proxy"))).toEqual(expected);
+    expect(headerVars(envOf("Deployment", "kobe-server"))).toEqual(expected);
+    for (const other of ["kobe-scheduler", "kobe-mcp-proxy", "kobe-model-gateway", "kobe-web"]) {
+      expect(headerVars(envOf("Deployment", other)), other).toEqual([]);
+    }
+    // Sandboxes never get it: the sandbox settings the server renders pods from hold no secret refs.
+    expect(JSON.stringify(ms.filter((m) => m.kind === "ConfigMap"))).not.toContain(
+      "kobe-egress-headers",
+    );
+  });
+
+  it("uses an existing Secret instead when named", () => {
+    const named = render({ "egressProxy.headerSecret": "my-egress-headers" });
+    expect(find(named, "Secret", "kobe-egress-headers")).toBeUndefined();
+    expect(headerVars(proxyEnv(named))[0]?.valueFrom.secretKeyRef.name).toBe("my-egress-headers");
+  });
+
+  it("renders upgrade limits the proxy's config accepts", () => {
+    const vars = Object.fromEntries(
+      proxyEnv(ms)
+        .filter((e) => e.value !== undefined)
+        .map((e) => [e.name, e.value]),
+    );
+    const config = loadConfig({
+      ...vars,
+      KOBE_DATABASE_URL: "postgres://x",
+      KOBE_SESSION_KEY_EGRESS_PROXY: "k".repeat(48),
+      KOBE_EGRESS_HEADER_SECRET: "h".repeat(48),
+    });
+    expect(config.headerSecrets).toEqual(["h".repeat(48)]);
+    expect(config.upgrade).toEqual({
+      maxRequestBytes: 104_857_600,
+      maxResponseBytes: 2_147_483_648,
+      timeoutMs: 600_000,
+    });
+  });
+});

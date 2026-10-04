@@ -43,6 +43,25 @@ const configSchema = z.object({
       return parsed.username === "" && parsed.password === "" && parsed.pathname === "/";
     }, "KOBE_MODEL_GATEWAY_URL must be a plain origin without credentials")
     .optional(),
+  /**
+   * The egress proxy as sandbox pods see it (KOBE-38; set by the server's pod spec, with the port).
+   * With a bootstrap session, Pi's tools get it through the BASH_ENV script (KOBE-39).
+   */
+  KOBE_EGRESS_PROXY_URL: z
+    .url({ protocol: /^http$/, error: "KOBE_EGRESS_PROXY_URL must be an http:// URL" })
+    .refine((url) => {
+      const parsed = new URL(url);
+      return parsed.username === "" && parsed.password === "" && parsed.pathname === "/";
+    }, "KOBE_EGRESS_PROXY_URL must be a plain origin without credentials")
+    .optional(),
+  /** The root-owned BASH_ENV script that exports the proxy variables from the token file. */
+  KOBE_EGRESS_ENV_SCRIPT: z.string().startsWith("/").default("/opt/kobe/egress-env.sh"),
+  /** Hosts tools reach without the proxy (the pod's NO_PROXY); passed to Pi with the proxy. */
+  NO_PROXY: z
+    .string()
+    .max(2048)
+    .regex(/^[A-Za-z0-9.,:*_-]*$/, "NO_PROXY must be a list of host names")
+    .default("localhost,127.0.0.1"),
   /** kobe-models (KOBE-41): root-owned, read-only, loaded before kobe-policy when models are wired. */
   KOBE_MODELS_EXTENSION: z
     .string()
@@ -82,6 +101,10 @@ export interface Config {
   /** The model gateway origin (`http://host[:port]`, no trailing slash), when the pod has one. */
   readonly modelGatewayUrl?: string;
   readonly modelsExtension: string;
+  /** The egress proxy origin with its port (`http://host:port`), when the pod has one. */
+  readonly egressProxyUrl?: string;
+  readonly egressEnvScript: string;
+  readonly noProxy: string;
   readonly policyExtension: string;
   readonly maxPiProcesses: number;
   readonly piIdleMs: number;
@@ -121,6 +144,11 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
       ? {}
       : { modelGatewayUrl: new URL(c.KOBE_MODEL_GATEWAY_URL).origin }),
     modelsExtension: c.KOBE_MODELS_EXTENSION,
+    ...(c.KOBE_EGRESS_PROXY_URL === undefined
+      ? {}
+      : { egressProxyUrl: egressOrigin(c.KOBE_EGRESS_PROXY_URL) }),
+    egressEnvScript: c.KOBE_EGRESS_ENV_SCRIPT,
+    noProxy: c.NO_PROXY,
     policyExtension: c.KOBE_POLICY_EXTENSION,
     maxPiProcesses: c.KOBE_MAX_PI_PROCESSES,
     piIdleMs: c.KOBE_PI_IDLE_MS,
@@ -128,4 +156,10 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     restoreMaxBytes: c.KOBE_RESTORE_MAX_BYTES,
     workspaceSyncIntervalMs: c.KOBE_WORKSPACE_SYNC_INTERVAL_MS,
   };
+}
+
+/** `http://host:port` with the port always written (curl assumes 1080 for a proxy without one). */
+function egressOrigin(raw: string): string {
+  const url = new URL(raw);
+  return `http://${url.hostname}:${url.port === "" ? "80" : url.port}`;
 }

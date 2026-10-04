@@ -52,6 +52,8 @@ const SHOWN_5XX_CODES: ReadonlySet<string> = new Set([
   "isolation_unavailable",
   "sandbox_unavailable",
   "search_timeout",
+  // KOBE-39: the install has no header-injection secret.
+  "header_injection_unavailable",
 ]);
 
 function fallback(status: number): ApiError {

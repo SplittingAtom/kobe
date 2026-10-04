@@ -536,6 +536,30 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 3600
+        },
+        "headerSecret": {
+          "type": "string",
+          "description": "Existing Secret (key `secret`, optional `secret-previous`) sealing teams' injected egress headers (KOBE-39); empty: generated and kept."
+        },
+        "upgrade": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Plain-HTTP requests to header-injected domains, upgraded to verified HTTPS by the proxy (KOBE-39).",
+          "properties": {
+            "maxRequestBytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "maxResponseBytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 86400
+            }
+          }
         }
       }
     },

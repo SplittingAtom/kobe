@@ -149,10 +149,14 @@ describe("Team egress", () => {
     enabled,
     enabled_by: enabled ? "u" : null,
     enabled_at: enabled ? "2026-10-01T10:00:00Z" : null,
+    header_names: [] as string[],
+    headers_updated_at: null,
   });
+  const NO_REQUESTS = { "GET /v1/team/egress/requests": [200, { requests: [] }] } as const;
 
   it("enables a ceiling domain with the team header, and shows suspended entries", async () => {
     const calls = stubApi({
+      ...NO_REQUESTS,
       "GET /v1/team/egress": [
         200,
         {
@@ -180,6 +184,7 @@ describe("Team egress", () => {
 
   it("shows the server's refusal", async () => {
     stubApi({
+      ...NO_REQUESTS,
       "GET /v1/team/egress": [200, { domains: [team("pypi.org", true, false)] }],
       "PUT /v1/team/egress/domains/pypi.org": [
         409,
@@ -189,5 +194,82 @@ describe("Team egress", () => {
     renderTeam(<TeamEgressPage />);
     await userEvent.click(await screen.findByRole("checkbox", { name: "pypi.org enabled" }));
     expect((await screen.findByRole("alert")).textContent).toMatch(/not in the install/);
+  });
+
+  it("approves an access request (KOBE-39) and reloads the domains", async () => {
+    const calls = stubApi({
+      "GET /v1/team/egress/requests": [
+        [
+          200,
+          {
+            requests: [
+              {
+                id: "r-1",
+                domain: "files.example.com",
+                pattern: "*.example.com",
+                status: "pending",
+                thread_id: "9a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+                requested_by: { id: "u-2", name: "Bob" },
+                decided_by: null,
+                created_at: "2026-10-04T09:00:00Z",
+                decided_at: null,
+              },
+            ],
+          },
+        ],
+        [200, { requests: [] }],
+      ],
+      "GET /v1/team/egress": [200, { domains: [team("*.example.com", true, false)] }],
+      "POST /v1/team/egress/requests/r-1": [
+        200,
+        { request: { id: "r-1", status: "approved" }, settled: 1, enabled: true },
+      ],
+    });
+    renderTeam(<TeamEgressPage />);
+    const pending = await screen.findByRole("table", { name: /Pending requests/ });
+    expect(pending.textContent).toMatch(
+      /files\.example\.com.*\*\.example\.com.*Bob.*thread 9a1b2c3d/,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Approve files.example.com" }));
+    await screen.findByText(/Approved: \*\.example\.com is enabled.*Bob was told/);
+    const post = must(calls.find((c) => c.method === "POST"));
+    expect(JSON.parse(String(post.body))).toEqual({ decision: "approve" });
+    await screen.findByText("No pending requests.");
+    expect(summary(calls).filter((c) => c === "GET /v1/team/egress").length).toBeGreaterThan(1);
+  });
+
+  it("sets injected headers write-only: names listed, values sent once and never shown", async () => {
+    const enabled = { ...team("pkgs.example.com", true, true), header_names: ["Authorization"] };
+    const calls = stubApi({
+      ...NO_REQUESTS,
+      "GET /v1/team/egress": [200, { domains: [enabled] }],
+      "PUT /v1/team/egress/domains/pkgs.example.com/headers": [
+        200,
+        { domain: "pkgs.example.com", header_names: ["X-Api-Key"] },
+      ],
+      "DELETE /v1/team/egress/domains/pkgs.example.com/headers": [204],
+    });
+    renderTeam(<TeamEgressPage />);
+    const table = await screen.findByRole("table", { name: /Domains/ });
+    expect(table.textContent).toContain("Authorization");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Replace headers for pkgs.example.com" }),
+    );
+    const form = screen.getByRole("form", { name: "Headers for pkgs.example.com" });
+    await userEvent.type(within(form).getByLabelText("Header name"), "X-Api-Key");
+    const value = within(form).getByLabelText("Value");
+    expect(value.getAttribute("type")).toBe("password");
+    await userEvent.type(value, "s3cr3t");
+    await userEvent.click(within(form).getByRole("button", { name: "Save headers" }));
+    await screen.findByText(/Saved 1 header\(s\) for pkgs.example.com/);
+    const put = must(calls.find((c) => c.method === "PUT"));
+    expect(JSON.parse(String(put.body))).toEqual({
+      headers: [{ name: "X-Api-Key", value: "s3cr3t" }],
+    });
+    expect(document.body.textContent).not.toContain("s3cr3t");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove headers for pkgs.example.com" }),
+    );
+    await screen.findByText("Removed the injected headers for pkgs.example.com.");
   });
 });

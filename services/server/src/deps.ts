@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import {
   PROVIDER_KEY_PURPOSE,
   SecretBox,
+  headerBox,
   accounts,
   createDb,
   installRoles,
@@ -86,6 +87,11 @@ export interface ServerDepsOptions {
   readonly approvalKeys?: ApprovalKeyring;
   /** Approval tuning (tests shorten the TTL and the poll). */
   readonly approvals?: Partial<Omit<ApprovalServiceOptions, "db" | "keys">>;
+  /**
+   * Header injection (KOBE-39, config `KOBE_EGRESS_HEADER_SECRET`): the secrets sealing injected
+   * header values (current first); unset = header injection off.
+   */
+  readonly egressHeaderSecrets?: readonly string[];
 }
 
 /** Limits on publishing agent versions (KOBE-46 review M3). */
@@ -150,6 +156,8 @@ export interface ServerDeps {
    * signed-approval verifier the MCP proxy (KOBE-58) calls.
    */
   readonly approvals: ApprovalService;
+  /** Seals team-injected egress header values (KOBE-39); undefined when not configured. */
+  readonly egressHeaders: SecretBox | undefined;
   /** Creates an email+password user (and optional install role) atomically, without sign-up. */
   createUserWithPassword(
     input: NewUser,
@@ -279,6 +287,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     runs,
     mcp,
     approvals,
+    egressHeaders: options.egressHeaderSecrets ? headerBox(options.egressHeaderSecrets) : undefined,
     async createUserWithPassword({ email, name, password }, { installRole, recordSetup } = {}) {
       const ctx = await auth.$context;
       const hash = await ctx.password.hash(password);

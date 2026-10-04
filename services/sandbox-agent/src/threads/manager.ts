@@ -51,6 +51,7 @@ export class ThreadManager {
   readonly #evicting = new Set<Thread>();
   readonly #reaper: NodeJS.Timeout;
   readonly #unsubscribeTokens: (() => void) | undefined;
+  readonly #unsubscribeEgress: (() => void) | undefined;
   #draining = false;
 
   constructor(options: ThreadManagerOptions) {
@@ -60,6 +61,10 @@ export class ThreadManager {
     // A rotated model-gateway token reaches every live Pi's model file (KOBE-41).
     this.#unsubscribeTokens = options.models?.tokens.onChange((token) => {
       for (const thread of this.#threads.values()) void thread.updateToken(token);
+    });
+    // A rotated egress token reaches every live Pi's egress token file (KOBE-39).
+    this.#unsubscribeEgress = options.egress?.tokens.onChange((token) => {
+      for (const thread of this.#threads.values()) void thread.updateEgressToken(token);
     });
   }
 
@@ -291,6 +296,7 @@ export class ThreadManager {
     this.#draining = true;
     clearInterval(this.#reaper);
     this.#unsubscribeTokens?.();
+    this.#unsubscribeEgress?.();
     const active = [...this.#threads.values()].map((t) => t.runEnded());
     let timer: NodeJS.Timeout | undefined;
     await Promise.race([

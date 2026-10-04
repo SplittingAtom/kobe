@@ -47,6 +47,11 @@ appendFileSync(
     // KOBE-41: where the agent put this process's config dir and model file (values, test-only).
     agentDir: process.env.PI_CODING_AGENT_DIR ?? null,
     modelFile: process.env.KOBE_MODEL_FILE ?? null,
+    // KOBE-39: the egress wiring Pi's bash tool calls see (no token among these).
+    egressTokenFile: process.env.KOBE_EGRESS_TOKEN_FILE ?? null,
+    bashEnv: process.env.BASH_ENV ?? null,
+    egressProxy: process.env.KOBE_EGRESS_PROXY ?? null,
+    threadId: process.env.KOBE_THREAD_ID ?? null,
   })}\n`,
 );
 

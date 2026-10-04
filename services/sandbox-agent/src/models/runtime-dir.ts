@@ -1,9 +1,10 @@
 import { lstat, mkdir, readFile, readdir, rm } from "node:fs/promises";
 import path from "node:path";
+import { EGRESS_TOKEN_FILE_NAME, isEgressTemp } from "../egress/egress-wiring.js";
 
 /**
  * The per-process runtime directories (threads/thread.ts): `<runtimeDir>/pi-XXXXXX/` with `agent/`
- * (Pi's `PI_CODING_AGENT_DIR`) and `model.json`. A sibling process of the same user can write into
+ * (Pi's `PI_CODING_AGENT_DIR`), `model.json` and (KOBE-39) `egress-token`. A sibling process of the same user can write into
  * them while a Pi runs (KOBE-41 review, MEDIUM 1): until Pi runs under its own uid, the agent
  * detects it (`unexpectedEntries`) and sweeps leftovers of earlier agents at start-up.
  */
@@ -55,7 +56,12 @@ export async function unexpectedEntries(runtimeDir: string): Promise<string[]> {
     const kind = await kindOf(path.join(runtimeDir, name));
     if (name === AGENT_SUBDIR) {
       if (kind !== "dir") found.push(`${name} (${kind})`);
-    } else if (name === MODEL_FILE_NAME || isModelTemp(name)) {
+    } else if (
+      name === MODEL_FILE_NAME ||
+      isModelTemp(name) ||
+      name === EGRESS_TOKEN_FILE_NAME ||
+      isEgressTemp(name)
+    ) {
       if (kind !== "file" && kind !== "missing") found.push(`${name} (${kind})`);
     } else {
       found.push(name);

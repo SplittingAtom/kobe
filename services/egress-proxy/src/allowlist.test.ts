@@ -124,3 +124,35 @@ describe("AllowlistCache.isActiveMember", () => {
     expect(await cache.isActiveMember(TEAM, "u1")).toBe(false);
   });
 });
+
+describe("AllowlistCache.sealedHeaders (KOBE-39)", () => {
+  it("caches a team's sealed headers per pattern and drops them on the team's hint", async () => {
+    const sealed: Record<string, { domain: string; sealed: string }[]> = {
+      [TEAM]: [{ domain: "pkgs.example.com", sealed: "v2.a" }],
+    };
+    const loadTeamHeaders = vi.fn(async (t: string) => [...(sealed[t] ?? [])]);
+    const cache = new AllowlistCache(
+      {
+        loadCeiling: async () => [],
+        loadTeam: async () => [],
+        isActiveMember: async () => true,
+        loadTeamHeaders,
+      },
+      { ttlMs: 60_000, degradedTtlMs: 5_000, memberTtlMs: 30_000, maxEntries: 100 },
+    );
+    cache.setListening(true);
+    expect(await cache.sealedHeaders(TEAM, "pkgs.example.com")).toBe("v2.a");
+    expect(await cache.sealedHeaders(TEAM, "pypi.org")).toBeUndefined();
+    expect(await cache.sealedHeaders(OTHER, "pkgs.example.com")).toBeUndefined();
+    expect(loadTeamHeaders).toHaveBeenCalledTimes(2);
+    sealed[TEAM] = [{ domain: "pkgs.example.com", sealed: "v2.b" }];
+    expect(await cache.sealedHeaders(TEAM, "pkgs.example.com")).toBe("v2.a");
+    cache.invalidateTeam(TEAM);
+    expect(await cache.sealedHeaders(TEAM, "pkgs.example.com")).toBe("v2.b");
+  });
+
+  it("has none without a header source", async () => {
+    const { cache } = setup({ ceiling: [], teams: {} });
+    expect(await cache.sealedHeaders(TEAM, "pkgs.example.com")).toBeUndefined();
+  });
+});

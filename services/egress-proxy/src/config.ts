@@ -15,6 +15,15 @@ const int = (name: string, min: number, max: number, fallback: number) =>
     .max(max, `${name} must be between ${min} and ${max}`)
     .default(fallback);
 
+const optionalSecret = (name: string) =>
+  z
+    .string()
+    .default("")
+    .refine(
+      (v) => v === "" || v.length >= MIN_KEY_LENGTH,
+      `${name} must be at least ${MIN_KEY_LENGTH} characters`,
+    );
+
 const list = z
   .string()
   .default("")
@@ -72,6 +81,25 @@ const configSchema = z.object({
   KOBE_EGRESS_DNS_TIMEOUT_MS: int("KOBE_EGRESS_DNS_TIMEOUT_MS", 100, 60_000, 3_000),
   KOBE_EGRESS_CACHE_TTL_MS: int("KOBE_EGRESS_CACHE_TTL_MS", 1_000, 3_600_000, 60_000),
   KOBE_EGRESS_AUDIT_FLUSH_MS: int("KOBE_EGRESS_AUDIT_FLUSH_MS", 1_000, 3_600_000, 60_000),
+  /**
+   * Header injection (KOBE-39): opens the teams' sealed header values (same secret as the server).
+   * Unset: plain HTTP is refused for every domain and CONNECT works as before.
+   */
+  KOBE_EGRESS_HEADER_SECRET: optionalSecret("KOBE_EGRESS_HEADER_SECRET"),
+  KOBE_EGRESS_HEADER_SECRET_PREVIOUS: optionalSecret("KOBE_EGRESS_HEADER_SECRET_PREVIOUS"),
+  KOBE_EGRESS_UPGRADE_MAX_REQUEST_BYTES: int(
+    "KOBE_EGRESS_UPGRADE_MAX_REQUEST_BYTES",
+    0,
+    10_000_000_000,
+    100 * 1024 * 1024,
+  ),
+  KOBE_EGRESS_UPGRADE_MAX_RESPONSE_BYTES: int(
+    "KOBE_EGRESS_UPGRADE_MAX_RESPONSE_BYTES",
+    0,
+    100_000_000_000,
+    2 * 1024 * 1024 * 1024,
+  ),
+  KOBE_EGRESS_UPGRADE_TIMEOUT_MS: int("KOBE_EGRESS_UPGRADE_TIMEOUT_MS", 1_000, 86_400_000, 600_000),
 });
 
 export interface Config {
@@ -95,6 +123,13 @@ export interface Config {
   readonly dnsTimeoutMs: number;
   readonly cacheTtlMs: number;
   readonly auditFlushMs: number;
+  /** Header injection secrets (current first), or undefined when off (KOBE-39). */
+  readonly headerSecrets: readonly string[] | undefined;
+  readonly upgrade: {
+    readonly maxRequestBytes: number;
+    readonly maxResponseBytes: number;
+    readonly timeoutMs: number;
+  };
 }
 
 export function loadConfig(env: Readonly<Record<string, string | undefined>>): Config {
@@ -123,6 +158,15 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
       throw new Error(`Invalid configuration: ${name}: ${(err as Error).message}`, { cause: err });
     }
   }
+  if (c.KOBE_EGRESS_HEADER_SECRET === "" && c.KOBE_EGRESS_HEADER_SECRET_PREVIOUS !== "") {
+    throw new Error(
+      "Invalid configuration: KOBE_EGRESS_HEADER_SECRET_PREVIOUS needs KOBE_EGRESS_HEADER_SECRET",
+    );
+  }
+  const headerSecrets =
+    c.KOBE_EGRESS_HEADER_SECRET === ""
+      ? undefined
+      : [c.KOBE_EGRESS_HEADER_SECRET, c.KOBE_EGRESS_HEADER_SECRET_PREVIOUS].filter((v) => v !== "");
   return {
     port: c.PORT,
     databaseUrl: c.KOBE_DATABASE_URL,
@@ -144,5 +188,11 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     dnsTimeoutMs: c.KOBE_EGRESS_DNS_TIMEOUT_MS,
     cacheTtlMs: c.KOBE_EGRESS_CACHE_TTL_MS,
     auditFlushMs: c.KOBE_EGRESS_AUDIT_FLUSH_MS,
+    headerSecrets,
+    upgrade: {
+      maxRequestBytes: c.KOBE_EGRESS_UPGRADE_MAX_REQUEST_BYTES,
+      maxResponseBytes: c.KOBE_EGRESS_UPGRADE_MAX_RESPONSE_BYTES,
+      timeoutMs: c.KOBE_EGRESS_UPGRADE_TIMEOUT_MS,
+    },
   };
 }

@@ -8,6 +8,8 @@ import { BreakGlassSweeper } from "./break-glass/sweeper.js";
 import { loadConfig } from "./config.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
 import { EgressBlockedRelay } from "./egress/blocked-relay.js";
+import { loadEgressHeaderSecrets } from "./egress/config.js";
+import { EgressRequestSweeper } from "./egress/request-notify.js";
 import { createIsolationGate } from "./isolation/gate.js";
 import { listRuntimeClasses } from "./isolation/kubernetes.js";
 import { logger } from "./logger.js";
@@ -41,6 +43,9 @@ const DRAIN_TIMEOUT_MS = 10_000;
 const config = loadConfig(process.env);
 // Model gateway (KOBE-40): undefined without the chart's Bifrost settings (models off).
 const modelsConfig = config.process === "server" ? loadModelsConfig(process.env) : undefined;
+// Header injection (KOBE-39): undefined without the chart's header secret (off).
+const egressHeaderSecrets =
+  config.process === "server" ? loadEgressHeaderSecrets(process.env) : undefined;
 // The wire is built before the sandbox provider exists: its waker is set once the provider is.
 const waker = createDeferredWaker();
 let deps: ServerDeps | undefined;
@@ -53,6 +58,7 @@ if (config.auth && config.smtp) {
     mailer: createSmtpMailer(config.smtp),
     sandboxWire: { waker },
     agents: { maxVersions: config.agentMaxVersions },
+    ...(egressHeaderSecrets ? { egressHeaderSecrets } : {}),
     ...(modelsConfig
       ? {
           models: {
@@ -122,6 +128,10 @@ const egressRelay =
     ? new EgressBlockedRelay({ db: deps.database.db, connectionString: config.databaseUrl })
     : undefined;
 egressRelay?.start();
+// Request-access emails (KOBE-39): retries and anything a crashed replica left queued.
+const egressRequestSweeper =
+  deps && config.process === "server" ? new EgressRequestSweeper(deps) : undefined;
+egressRequestSweeper?.start();
 
 // Bifrost config sync (KOBE-40): every server replica listens; one leads and reconciles.
 const modelSync =
@@ -146,6 +156,9 @@ const modelSync =
       })
     : undefined;
 modelSync?.start();
+if (config.process === "server" && !egressHeaderSecrets) {
+  logger.warn("KOBE_EGRESS_HEADER_SECRET is not set: egress header injection is off");
+}
 if (config.process === "server" && !modelsConfig) {
   logger.warn("KOBE_BIFROST_URL is not set: the model gateway is not configured");
 }
@@ -295,6 +308,7 @@ function shutdown(signal: string): void {
   internalServer?.close();
   deps?.auditAnchor.stop();
   void egressRelay?.close();
+  egressRequestSweeper?.stop();
   void modelSync?.close();
   breakGlassSweeper?.stop();
   auditPiiSweeper?.stop();

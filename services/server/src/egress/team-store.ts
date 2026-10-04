@@ -26,6 +26,9 @@ export interface TeamEgressEntry {
   readonly enabled: boolean;
   readonly enabled_by: string | null;
   readonly enabled_at: string | null;
+  /** Injected header names (KOBE-39); values are write-only and never returned. */
+  readonly header_names: readonly string[];
+  readonly headers_updated_at: string | null;
 }
 
 /**
@@ -35,7 +38,19 @@ export interface TeamEgressEntry {
 export async function listTeamEgress(db: KobeDb, teamId: string): Promise<TeamEgressEntry[]> {
   const [ceiling, enabled] = await Promise.all([
     db.select().from(egressDomains).orderBy(asc(egressDomains.domain)),
-    withTeam(db, teamId, (tx) => tx.select().from(teamEgress).where(eq(teamEgress.teamId, teamId))),
+    // Never the sealed header values: they leave the database only to the egress proxy.
+    withTeam(db, teamId, (tx) =>
+      tx
+        .select({
+          domain: teamEgress.domain,
+          enabledBy: teamEgress.enabledBy,
+          enabledAt: teamEgress.enabledAt,
+          headerNames: teamEgress.headerNames,
+          headersUpdatedAt: teamEgress.headersUpdatedAt,
+        })
+        .from(teamEgress)
+        .where(eq(teamEgress.teamId, teamId)),
+    ),
   ]);
   const byDomain = new Map(enabled.map((r) => [r.domain, r]));
   return ceiling
@@ -50,6 +65,8 @@ export async function listTeamEgress(db: KobeDb, teamId: string): Promise<TeamEg
         enabled: e !== undefined,
         enabled_by: e?.enabledBy ?? null,
         enabled_at: e?.enabledAt.toISOString() ?? null,
+        header_names: e?.headerNames ?? [],
+        headers_updated_at: e?.headersUpdatedAt?.toISOString() ?? null,
       };
     });
 }

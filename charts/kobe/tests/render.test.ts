@@ -559,6 +559,7 @@ describe("auth (KOBE-12)", () => {
       "sandbox.sessionKeysSecret": "my-keys",
       "bifrost.keysSecret": "my-model-keys",
       "mcpProxy.internalKeySecret": "my-mcp-key",
+      "egressProxy.headerSecret": "my-egress-headers",
       "global.allowGeneratedSecretsOffline": "false",
     });
     expect(find(ms, "Secret", "kobe-auth")).toBeUndefined();
@@ -575,6 +576,7 @@ describe("auth (KOBE-12)", () => {
         "sandbox.sessionKeysSecret": "my-keys",
         "bifrost.keysSecret": "my-model-keys",
         "mcpProxy.internalKeySecret": "my-mcp-key",
+        "egressProxy.headerSecret": "my-egress-headers",
       }),
     ).toMatch(/auth\.existingSecret/);
     expect(
@@ -584,6 +586,7 @@ describe("auth (KOBE-12)", () => {
         "sandbox.sessionKeysSecret": "my-keys",
         "bifrost.keysSecret": "my-model-keys",
         "mcpProxy.internalKeySecret": "my-mcp-key",
+        "egressProxy.headerSecret": "my-egress-headers",
         "postgres.mode": "cnpg",
       }),
     ).toMatch(/postgres\.cnpg\.existingAppSecret/);
@@ -593,6 +596,7 @@ describe("auth (KOBE-12)", () => {
         "auth.existingSecret": "my-auth",
         "bifrost.keysSecret": "my-model-keys",
         "mcpProxy.internalKeySecret": "my-mcp-key",
+        "egressProxy.headerSecret": "my-egress-headers",
       }),
     ).toMatch(/sandbox\.sessionKeysSecret/);
     expect(
@@ -601,6 +605,7 @@ describe("auth (KOBE-12)", () => {
         "auth.existingSecret": "my-auth",
         "sandbox.sessionKeysSecret": "my-keys",
         "mcpProxy.internalKeySecret": "my-mcp-key",
+        "egressProxy.headerSecret": "my-egress-headers",
       }),
     ).toMatch(/bifrost\.keysSecret/);
     expect(
@@ -609,8 +614,18 @@ describe("auth (KOBE-12)", () => {
         "auth.existingSecret": "my-auth",
         "sandbox.sessionKeysSecret": "my-keys",
         "bifrost.keysSecret": "my-model-keys",
+        "egressProxy.headerSecret": "my-egress-headers",
       }),
     ).toMatch(/mcpProxy\.internalKeySecret/);
+    expect(
+      renderError({
+        "global.allowGeneratedSecretsOffline": "false",
+        "auth.existingSecret": "my-auth",
+        "sandbox.sessionKeysSecret": "my-keys",
+        "bifrost.keysSecret": "my-model-keys",
+        "mcpProxy.internalKeySecret": "my-mcp-key",
+      }),
+    ).toMatch(/egressProxy\.headerSecret/);
   });
 });
 

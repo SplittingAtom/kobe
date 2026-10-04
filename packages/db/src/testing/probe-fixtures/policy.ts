@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import {
   approvals,
   egressDomains,
+  egressRequestNotifications,
+  egressRequests,
   runs,
   teamEgress,
   teamMembers,
@@ -60,6 +62,31 @@ export const policyFixtures: Record<(typeof policy.team)[number], ProbeFixture> 
       risk: "write",
       reasons: [],
       expiresAt: new Date(Date.now() + 3_600_000),
+    });
+  },
+  egress_requests: async (tx, teamId) => {
+    const userId = randomUUID();
+    await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
+    await tx.insert(egressRequests).values({
+      teamId,
+      domain: "pypi.org",
+      pattern: "pypi.org",
+      requestedBy: userId,
+    });
+  },
+  egress_request_notifications: async (tx, teamId) => {
+    const userId = randomUUID();
+    await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
+    const [request] = await tx
+      .insert(egressRequests)
+      .values({ teamId, domain: "pypi.org", pattern: "pypi.org", requestedBy: userId })
+      .returning({ id: egressRequests.id });
+    if (!request) throw new Error("probe: egress request insert returned nothing");
+    await tx.insert(egressRequestNotifications).values({
+      teamId,
+      requestId: request.id,
+      event: "requested",
+      recipientId: userId,
     });
   },
 };

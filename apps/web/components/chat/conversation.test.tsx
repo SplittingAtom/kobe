@@ -127,6 +127,28 @@ describe("streaming a run (D16)", () => {
       expect.stringContaining("pypi.org"),
       expect.stringContaining("example.com"),
     ]);
+    // KOBE-39: only the domain inside the install's ceiling offers Request access.
+    const ask = screen.getAllByRole("button", { name: /Request access/ });
+    expect(ask).toHaveLength(1);
+    expect(ask[0]?.textContent).toContain("pypi.org");
+  });
+
+  it("Request access asks the team's admins with the thread's id, then shows it is pending (KOBE-39)", async () => {
+    const { t } = threadWithHistory();
+    openApp(fake, t);
+    const { runId } = await sendAndStart("install pandas", t);
+    fake.emit(runId, "egress.blocked", { domain: "pypi.org", request_access: true });
+    const ask = await screen.findByRole("button", { name: /Request access to pypi.org/ });
+    await userEvent.setup().click(ask);
+    expect(
+      await screen.findByText(/Access requested: your team admins were notified/),
+    ).toBeTruthy();
+    const posted = fake.requests.find(
+      (r) => r.method === "POST" && r.path === "/v1/egress/requests",
+    );
+    expect(posted?.body).toEqual({ domain: "pypi.org", thread_id: t });
+    expect(posted?.team).toBe(fake.teamId);
+    expect(screen.queryByRole("button", { name: /Request access/ })).toBeNull();
   });
 
   it("Gate 1: a refresh mid-run resumes from the event log with no gaps or duplicates", async () => {

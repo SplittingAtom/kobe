@@ -6,6 +6,19 @@ export {
   patternMatches,
   type PatternResult,
 } from "./domain.js";
+export {
+  EGRESS_HEADER_PURPOSE,
+  MAX_HEADER_VALUE_LENGTH,
+  MAX_INJECTED_HEADERS,
+  headerBox,
+  headerContext,
+  headerNameProblem,
+  injectedHeaderSchema,
+  injectedHeadersSchema,
+  openHeaders,
+  sealHeaders,
+  type InjectedHeader,
+} from "./header-rules.js";
 export { isPublicSuffix, isSharedHosting, publicSuffixProblem } from "./public-suffix.js";
 export {
   CEILING_CHANGED,
@@ -16,6 +29,8 @@ export {
   isActiveTeamMember,
   loadEgressCeiling,
   loadTeamEgress,
+  loadTeamEgressHeaders,
   notifyEgressChanged,
   notifyEgressUserChanged,
+  type SealedTeamHeaders,
 } from "./store.js";

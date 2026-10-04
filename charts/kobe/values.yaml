@@ -192,6 +192,14 @@ egressProxy:
   deniedCidrs: []
   # Connections are written to the audit log aggregated per user, host and outcome over this window.
   auditFlushSeconds: 60
+  # Header injection (KOBE-39): an existing Secret (key `secret`, optional `secret-previous`) that
+  # seals the headers team admins inject for egress domains. Empty: generated and kept.
+  headerSecret: ""
+  # Plain-HTTP requests to header-injected domains, upgraded to verified HTTPS by the proxy.
+  upgrade:
+    maxRequestBytes: 104857600
+    maxResponseBytes: 2147483648
+    timeoutSeconds: 600
   limits:
     # Concurrent tunnels per sandbox and in total (per proxy replica).
     connectionsPerSandbox: 64

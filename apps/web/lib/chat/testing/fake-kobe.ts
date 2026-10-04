@@ -96,6 +96,10 @@ export class FakeKobe {
     { runId: string; payload: KobeEventPayload<"approval.requested">; status: string }
   >();
 
+  /** Request-access requests (KOBE-39), newest last; `enabled`: domains already enabled. */
+  readonly egressRequests: Json[] = [];
+  readonly enabledDomains = new Set<string>();
+
   // --- setup ----------------------------------------------------------------------------------
 
   addThread(title: string | null = null): string {
@@ -367,7 +371,8 @@ export class FakeKobe {
     const scoped =
       url.pathname.startsWith("/v1/threads") ||
       url.pathname.startsWith("/v1/runs") ||
-      url.pathname.startsWith("/v1/approvals");
+      url.pathname.startsWith("/v1/approvals") ||
+      url.pathname.startsWith("/v1/egress/requests");
     if (!scoped) return error(404, "not_found");
     if (headers.get("x-kobe-team") !== this.teamId) return error(409, "team_mismatch");
     return this.#route(method, url, body as Json | undefined, headers);
@@ -379,7 +384,43 @@ export class FakeKobe {
     if (area === "threads") return this.#threadRoute(method, id, action, sub, url, body, headers);
     if (area === "runs" && id) return this.#runRoute(method, id, action, body);
     if (area === "approvals" && id) return this.#approvalRoute(method, id, body);
+    if (area === "egress" && id === "requests") return this.#egressRoute(method, url, body);
     return error(404, "not_found");
+  }
+
+  /** `/v1/egress/requests` (KOBE-39): the member's own requests; one pending per domain. */
+  #egressRoute(method: string, url: URL, body: Json | undefined): Response {
+    if (method === "GET") {
+      const domain = url.searchParams.get("domain");
+      return json(200, {
+        requests: this.egressRequests
+          .filter((r) => domain === null || r.domain === domain)
+          .reverse(),
+      });
+    }
+    const domain = String(body?.domain ?? "");
+    if (this.enabledDomains.has(domain)) {
+      return error(
+        409,
+        "already_enabled",
+        `${domain} is already enabled for your team. Try again.`,
+      );
+    }
+    const pending = this.egressRequests.find((r) => r.domain === domain && r.status === "pending");
+    if (pending) return json(200, { request: pending });
+    const request: Json = {
+      id: uuid(9, this.egressRequests.length + 1),
+      domain,
+      pattern: domain,
+      status: "pending",
+      thread_id: body?.thread_id ?? null,
+      requested_by: { id: uuid(8, 1), name: "Member" },
+      decided_by: null,
+      created_at: NOW,
+      decided_at: null,
+    };
+    this.egressRequests.push(request);
+    return json(201, { request });
   }
 
   /** `GET`/`POST /v1/approvals/{id}`: a decision resolves the card through the stream. */

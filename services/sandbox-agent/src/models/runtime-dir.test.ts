@@ -33,6 +33,17 @@ describe("runtime directory tripwire", () => {
     expect(await unexpectedEntries(runtime)).toEqual([]);
   });
 
+  it("accepts the egress token file and its writer's temp file (KOBE-39), as files only", async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "kobe-runtime-"));
+    const runtime = await processDir(dir);
+    await writeFile(path.join(runtime, "egress-token"), "t\n", { mode: 0o600 });
+    await writeFile(path.join(runtime, `egress-token.${"b".repeat(16)}.tmp`), "t\n");
+    expect(await unexpectedEntries(runtime)).toEqual([]);
+    await rm(path.join(runtime, "egress-token"));
+    await mkdir(path.join(runtime, "egress-token"));
+    expect(await unexpectedEntries(runtime)).toEqual(["egress-token (dir)"]);
+  });
+
   it("reports anything else: Pi config a sibling could plant, or a stray top-level file", async () => {
     dir = await mkdtemp(path.join(tmpdir(), "kobe-runtime-"));
     const runtime = await processDir(dir, ["auth.json"]);

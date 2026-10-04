@@ -9,6 +9,7 @@ import {
   isActiveTeamMember,
   loadEgressCeiling,
   loadTeamEgress,
+  loadTeamEgressHeaders,
   notifyEgressChanged,
 } from "./egress/index.js";
 import { egressDomains, teamEgress, teamMembers, teams, users } from "./schema/index.js";
@@ -147,5 +148,33 @@ describe("liveness and change hints", () => {
     await new Promise((r) => setTimeout(r, 200));
     await listener.end();
     expect(heard).toEqual([CEILING_CHANGED, teamB]);
+  });
+});
+
+describe("injected headers (KOBE-39)", () => {
+  it("loads only the team's sealed lists, under its RLS; the check keeps names and seal together", async () => {
+    const d = `hdr-${teamA.slice(0, 8)}.example.com`;
+    await app.db.insert(egressDomains).values({ domain: d, inCeiling: true });
+    await withTeam(app.db, teamA, (tx) =>
+      tx.insert(teamEgress).values({
+        teamId: teamA,
+        domain: d,
+        enabledBy: userId,
+        headerNames: ["Authorization"],
+        headersSealed: "v2.kid.n.c.t",
+      }),
+    );
+    expect(await loadTeamEgressHeaders(app.db, teamA)).toEqual([
+      { domain: d, sealed: "v2.kid.n.c.t" },
+    ]);
+    expect(await loadTeamEgressHeaders(app.db, teamB)).toEqual([]);
+    // Names without a sealed list (or the reverse) are refused.
+    await expect(
+      withTeam(app.db, teamA, (tx) =>
+        tx.execute(
+          sql`UPDATE team_egress SET headers_sealed = NULL WHERE team_id = ${teamA} AND domain = ${d}`,
+        ),
+      ),
+    ).rejects.toSatisfy((err: unknown) => pgCode(err) === "23514");
   });
 });

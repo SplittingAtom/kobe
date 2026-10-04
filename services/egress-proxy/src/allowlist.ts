@@ -11,6 +11,8 @@ export interface EgressPolicySource {
   loadCeiling(): Promise<readonly string[]>;
   loadTeam(teamId: string): Promise<readonly string[]>;
   isActiveMember(teamId: string, userId: string): Promise<boolean>;
+  /** The team's sealed injected headers per enabled pattern (KOBE-39); absent: none. */
+  loadTeamHeaders?(teamId: string): Promise<readonly { domain: string; sealed: string }[]>;
 }
 
 export type EgressDecision =
@@ -34,6 +36,7 @@ interface Entry<T> {
 export class AllowlistCache {
   private ceiling: Entry<ReadonlySet<string>> | undefined;
   private readonly teams = new Map<string, Entry<ReadonlySet<string>>>();
+  private readonly headerSets = new Map<string, Entry<ReadonlyMap<string, string>>>();
   private readonly members = new Map<string, Entry<boolean>>();
   private readonly inflight = new Map<string, { gen: number; promise: Promise<unknown> }>();
   /** Bumped by invalidateAll (every entry); the ceiling also has its own counter. */
@@ -60,6 +63,7 @@ export class AllowlistCache {
     this.allGen += 1;
     this.ceiling = undefined;
     this.teams.clear();
+    this.headerSets.clear();
     this.members.clear();
   }
 
@@ -72,6 +76,7 @@ export class AllowlistCache {
   invalidateTeam(teamId: string): void {
     this.teamGen.set(teamId, (this.teamGen.get(teamId) ?? 0) + 1);
     this.teams.delete(teamId);
+    this.headerSets.delete(teamId);
     for (const key of this.members.keys())
       if (key.startsWith(`${teamId}:`)) this.members.delete(key);
   }
@@ -91,6 +96,24 @@ export class AllowlistCache {
       allowed: false,
       reason: findMatchingPattern(ceiling, host) === undefined ? "not_in_ceiling" : "not_enabled",
     };
+  }
+
+  /**
+   * The sealed header list the team set for an enabled pattern (KOBE-39), or undefined. Cached
+   * with the team's allowlist and invalidated by the same team hint.
+   */
+  async sealedHeaders(teamId: string, pattern: string): Promise<string | undefined> {
+    const load = this.source.loadTeamHeaders;
+    if (!load) return undefined;
+    const sets = await this.cached(
+      `headers:${teamId}`,
+      () => this.headerSets.get(teamId),
+      (e) => this.store(this.headerSets, teamId, e),
+      async () => new Map((await load.call(this.source, teamId)).map((r) => [r.domain, r.sealed])),
+      this.generation(teamId),
+      this.ttl(),
+    );
+    return sets.get(pattern);
   }
 
   isActiveMember(teamId: string, userId: string): Promise<boolean> {
@@ -186,6 +209,7 @@ export class AllowlistCache {
   private currentGen(key: string): number {
     if (key === "ceiling") return this.ceilingGeneration();
     if (key.startsWith("team:")) return this.generation(key.slice(5));
+    if (key.startsWith("headers:")) return this.generation(key.slice(8));
     const [teamId = "", userId = ""] = key.split(":");
     return this.memberGeneration(teamId, userId);
   }

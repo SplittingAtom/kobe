@@ -7,6 +7,7 @@ import { logger } from "./logger.js";
 import type { IsolationGate } from "./isolation/gate.js";
 import { agentRoutes } from "./routes/agents.js";
 import { approvalRoutes } from "./routes/approvals.js";
+import { egressRequestRoutes } from "./routes/egress-requests.js";
 import { installAuditRoutes } from "./routes/install-audit.js";
 import { installEgressRoutes } from "./routes/install-egress.js";
 import { installBreakGlassRoutes } from "./routes/install-break-glass.js";
@@ -107,6 +108,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/threads", threadRoutes(deps));
   api.route("/agents", agentRoutes(deps));
   api.route("/approvals", approvalRoutes(deps));
+  api.route("/egress/requests", egressRequestRoutes(deps));
   api.route("/install/settings", installSettingsRoutes(deps));
   api.route("/install/teams", installTeamsRoutes(deps));
   api.route("/install/roles", installRolesRoutes(deps));

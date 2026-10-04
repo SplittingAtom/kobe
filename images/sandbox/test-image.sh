@@ -147,6 +147,12 @@ srv.listen(0, "127.0.0.1", () => {
     if (m.type === "agent_settled") done("ok " + srv.seen + " text=" + text, 0);
   });
 });'
+check "egress BASH_ENV script: root-owned, read-only (KOBE-39)" '^0:0 444$' run stat -c '%u:%g %a' /opt/kobe/egress-env.sh
+check "agent accepts the baked egress script" '^ok$' run node --input-type=module -e \
+  'import { checkExtensionFile as c } from "/opt/kobe/sandbox-agent/dist/policy/extension-file.js"; await c("/opt/kobe/egress-env.sh", "egress-env"); console.log("ok")'
+check "a tool shell gets HTTPS_PROXY from the token file through BASH_ENV (KOBE-39)" \
+  '^http://9a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d:image.token-1@egress-proxy.kobe.internal:80$' run sh -c \
+  'printf "image.token-1\n" > /tmp/egress-token && env -i PATH=/usr/bin:/bin BASH_ENV=/opt/kobe/egress-env.sh KOBE_EGRESS_TOKEN_FILE=/tmp/egress-token KOBE_EGRESS_PROXY=http://egress-proxy.kobe.internal:80 KOBE_THREAD_ID=9a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d bash -c '"'"'printf "%s\n" "$HTTPS_PROXY"'"'"' < /dev/null'
 check "skills directory exists, root-owned" '^0:0$' run stat -c '%u:%g' /opt/kobe/skills
 check "/workspace in the image is owned by uid 1000" '^1000:1000$' run stat -c '%u:%g' /workspace
 check "workspace (volume) is writable" '^ok$' run_ws sh -c 'touch /workspace/x && echo ok'

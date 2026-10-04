@@ -22,7 +22,13 @@ export type ConnectionReason =
   | "dns_failure"
   | "upstream_unreachable"
   | "policy_unavailable"
-  | "inactive_member";
+  | "inactive_member"
+  // KOBE-39 header injection (plain HTTP the proxy upgrades to verified HTTPS).
+  | "headers_required"
+  | "upstream_tls"
+  | "upstream_timeout"
+  | "request_too_large"
+  | "response_too_large";
 
 export interface ConnectionRecord {
   readonly teamId: string;
@@ -34,6 +40,8 @@ export interface ConnectionRecord {
   readonly reason: ConnectionReason | undefined;
   readonly bytesUp: number;
   readonly bytesDown: number;
+  /** A plain-HTTP request the proxy upgraded to HTTPS with injected headers (KOBE-39). */
+  readonly upgraded?: boolean;
 }
 
 interface Aggregate {
@@ -87,6 +95,7 @@ const keyOf = (r: ConnectionRecord, aggregated: boolean): string =>
         r.port ?? "",
         r.outcome,
         r.reason ?? "",
+        r.upgraded ? "upgraded" : "",
       ].join("|");
 
 export class ConnectionAudit {
@@ -206,6 +215,7 @@ function toEvent(agg: Aggregate): AuditEvent {
       outcome: r.outcome,
       ...(agg.aggregated || r.reason === undefined ? {} : { reason: r.reason }),
       ...(agg.aggregated ? { aggregated: true as const } : {}),
+      ...(!agg.aggregated && r.upgraded ? { upgraded: true as const } : {}),
       connections: agg.connections,
       bytesUp: agg.bytesUp,
       bytesDown: agg.bytesDown,
