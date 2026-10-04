@@ -36,7 +36,13 @@ export function stubApi(routes: Record<string, Reply | readonly Reply[]>): Recor
       const n = served.get(key) ?? 0;
       served.set(key, n + 1);
       const [status, body] = replies[Math.min(n, replies.length - 1)] ?? [500];
-      return new Response(body === undefined ? null : JSON.stringify(body), { status });
+      const payload =
+        body === undefined
+          ? null
+          : body instanceof Uint8Array
+            ? (body as Uint8Array<ArrayBuffer>)
+            : JSON.stringify(body);
+      return new Response(payload, { status });
     }),
   );
   return calls;
