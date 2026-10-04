@@ -1,0 +1,81 @@
+{{- $fullname := include "kobe.fullname" . -}}
+{{- $m := include "kobe.mcpProxyValues" . | fromJson -}}
+# MCP proxy (spec D27). Ingress: only sandboxes (team namespaces), only the proxy port — the
+# receiving side holds regardless of how the CNI applies the team policy's egress selectors
+# (KOBE-22 kube-router finding). Egress: DNS, the server's internal listener (policy re-check), and
+# remote MCP servers directly (public addresses on the allowed ports; internal ones only when
+# listed), not through the egress proxy: that proxy enforces the teams' sandbox allowlists (D28),
+# while connectors are the install registry's ceiling (D27) and the MCP proxy is not a sandbox.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-mcp-proxy
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kobe.selectorLabels" (dict "root" . "component" "mcp-proxy") | nindent 6 }}
+  policyTypes:
+    - Ingress
+    {{- if $m.networkPolicy.restrictEgress }}
+    - Egress
+    {{- end }}
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kobe.splittingatom.io/team-namespace: "true"
+      ports:
+        - protocol: TCP
+          port: 8080
+  {{- if $m.networkPolicy.restrictEgress }}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "kobe.selectorLabels" (dict "root" . "component" "server") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ include "kobe.serverInternalPort" . }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              {{- toYaml (include "kobe.egressPrivateRanges" . | fromJsonArray) | nindent 14 }}
+              {{- range $m.deniedCidrs }}
+              {{- if not (contains ":" .) }}
+              - {{ . }}
+              {{- end }}
+              {{- end }}
+      ports:
+        {{- range $m.allowedPorts }}
+        - protocol: TCP
+          port: {{ int . }}
+        {{- end }}
+    {{- range $m.allowedInternalCidrs }}
+    - to:
+        - ipBlock:
+            cidr: {{ . }}
+      ports:
+        {{- range $m.allowedPorts }}
+        - protocol: TCP
+          port: {{ int . }}
+        {{- end }}
+    {{- end }}
+    {{- with $m.networkPolicy.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}

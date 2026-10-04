@@ -10,13 +10,13 @@ branch's harness (`e2e/gate1.sh`, `e2e/gate1/`), which changes no product code.
 
 ## Verdict
 
-| Criterion                                  | k3d (CI)                                                                  | Real k3s cluster (4 nodes, Longhorn)                                                                |
-| ------------------------------------------ | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Two teams × five users chat concurrently   | **Proven up to the model** (see the scope note)                           | **Proven up to the model**                                                                          |
-| Cross-team probe returns zero rows         | **Proven** (CI probe suite: 143 tests; live probe: 0 rows)                | **Proven** (live probe on the install's data: 0 rows)                                               |
-| Refresh mid-run resumes with no gaps       | **Proven** (10 concurrent users, scripted sandbox side)                   | **Proven** (same)                                                                                   |
-| Kill a sandbox mid-run → interrupted+Retry | **Proven** (Retry reaches the real, woken sandbox)                        | **Proven** (same)                                                                                   |
-| Hibernated → first token p95 ≤ 8 s (20)    | **Not provable yet** — no model (KOBE-40/41). Proxy passes: p95 **5.0 s** | **Fails** on Longhorn: proxy p95 **17.2 s**; Pi-ready alone p95 14.9 s once the volume has detached |
+| Criterion                                  | k3d (CI)                                                                  | Real k3s cluster (4 nodes, Longhorn)                                                                                                                                 |
+| ------------------------------------------ | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Two teams × five users chat concurrently   | **Proven up to the model** (see the scope note)                           | **Proven up to the model**                                                                                                                                           |
+| Cross-team probe returns zero rows         | **Proven** (CI probe suite: 143 tests; live probe: 0 rows)                | **Proven** (live probe on the install's data: 0 rows)                                                                                                                |
+| Refresh mid-run resumes with no gaps       | **Proven** (10 concurrent users, scripted sandbox side)                   | **Proven** (same)                                                                                                                                                    |
+| Kill a sandbox mid-run → interrupted+Retry | **Proven** (Retry reaches the real, woken sandbox)                        | **Proven** (same)                                                                                                                                                    |
+| Hibernated → first token p95 ≤ 8 s (20)    | **Not provable yet** — no model (KOBE-40/41). Proxy passes: p95 **5.0 s** | **Fails** on Longhorn: proxy p95 **17.2 s**; Pi-ready alone p95 14.9 s once the volume has detached. Strict-local: proxy p95 18.0 s (spaced 15.2 s), Pi ready 14.0 s |
 
 Gate 1 is therefore **not closed**: the first-token criterion is blocked on KOBE-40 (Bifrost
 verifies sandbox tokens) and KOBE-41 (Pi's model wiring), and on the real cluster the wake path
@@ -184,21 +184,67 @@ two Pi-ready sets because the harness waits for the pod to disappear and then a 
 `kubectl exec` and sign-in pass before the wake, so the volume is mid-detach. Ten Suspended
 Longhorn sandboxes woken at once all answered within 17.9 s.
 
-Options to get under 8 s on a multi-node cluster (none tried — they need a decision): a
-node-local class (local-path pins a sandbox to its node; KOBE-25 noted this), Longhorn with
-`dataLocality: strict-local`, keeping recently idle sandboxes' volumes attached longer, or a longer
-idle timeout before hibernation.
+### Longhorn strict-local (decided follow-up)
+
+The chart option `sandbox.workspace.longhornStrictLocal.enabled` (one replica,
+`dataLocality: strict-local`, `WaitForFirstConsumer`) was enabled on the gate install
+(images `local-c94c126bec61`, the follow-up branch) and measured with a fresh user whose workspace
+was provisioned on the class (`c5`):
+
+| Probe                                  | Set          | n   | p50    | p95        | max    | Container started p50 / p95 | Pass ≤ 8 s |
+| -------------------------------------- | ------------ | --- | ------ | ---------- | ------ | --------------------------- | ---------- |
+| Pi ready (KOBE-25 harness)             | back-to-back | 20  | 8.9 s  | 10.3 s     | 10.7 s | 6.0 / 7.4 s                 | no         |
+| Pi ready (KOBE-25 harness)             | spaced 30 s  | 10  | 13.8 s | **14.0 s** | 14.0 s | 11.1 / 11.7 s               | no         |
+| First sandbox answer (`gate1.sh` cold) | back-to-back | 20  | 15.0 s | **18.0 s** | 24.0 s | —                           | no         |
+| First sandbox answer (`gate1.sh` cold) | spaced 30 s  | 10  | 14.8 s | **15.2 s** | 15.2 s | —                           | no         |
+
+**Strict-local does not help**: the numbers match 3-replica Longhorn. Every woken pod landed on the
+replica's node (the same node, 30/30), so locality was in effect; the cost is not the network
+path to a replica but Longhorn bringing an engine up at all. Breakdown of one spaced wake, sampled
+every 0.3 s (pod phase, the CSI VolumeAttachment, the Longhorn volume's state), typical of three:
+
+| From → to                                 | Time      | What happens                                                      |
+| ----------------------------------------- | --------- | ----------------------------------------------------------------- |
+| Pod created → Longhorn `attaching`        | ≈ 0 s     | attach requested at once                                          |
+| `attaching` → `attached`                  | ≈ 3 s     | Longhorn starts the engine and replica processes on the node      |
+| `attached` → `healthy`                    | ≈ 4.5–5 s | Longhorn verifies the (single) replica before reporting it usable |
+| `healthy` → VolumeAttachment `attached`   | ≈ 1–2 s   | CSI ControllerPublish completes                                   |
+| VolumeAttachment → container running      | ≈ 1.5–2 s | NodeStage/NodePublish (ext4 mount), gVisor sandbox start          |
+| Container running → agent connected       | ≈ 1–1.5 s | Node boot under gVisor, session trade                             |
+| Connected → Pi ready / Pi's prompt answer | ≈ 1 s     | Pi spawn with kobe-policy                                         |
+
+So ≈ 10–11 s of the ≈ 14 s is volume attach on Longhorn (strict-local or not), and ≈ 3 s is the
+sandbox itself — the k3d figure. After a hibernation the volume detaches within ≈ 5 s, so every
+realistic wake pays the full attach. No other option was tried (as instructed); the remaining
+levers are listed under "Blockers" below.
+
+## Blockers for the first-token criterion
+
+1. **A model** (KOBE-40 Bifrost token verification, KOBE-41 Pi model wiring). Until then only the
+   proxies above exist.
+2. **Volume attach on the real cluster** (≈ 10–11 s per wake on Longhorn, strict-local or not).
+   Not fixable by a Longhorn class parameter. Candidate levers, none tried (each needs a decision):
+   node-local volumes (`local-path`) with the sandbox pinned to its node (the server would have to
+   schedule woken pods onto the volume's node; a lost node then needs the S3 restore); keeping the
+   volume attached while hibernated (e.g. a tiny holder pod per hibernated sandbox, which keeps the
+   attachment but not the memory); a longer idle timeout; or waking a hibernated sandbox when the
+   user opens its thread, before the message is sent, which hides most of the wake.
+3. **KOBE-27 (S3 workspace sync, PR #50, not merged) adds to the wake path**: the agent's
+   `beforeRun` waits for the workspace restore and a pull before the prompt reaches Pi. Not
+   measured here; once it merges, re-run `e2e/gate1.sh` (its cold step times exactly this path).
 
 ## Findings and fixes
 
 1. **Rancher webhook blocks team namespaces (real cluster).** Rancher's
    `rancher.cattle.io.namespaces.create-non-kubesystem` webhook refused the server's namespace
    apply (`Unauthorized`): creating a namespace with Pod Security labels needs `updatepsa` on
-   `projects.management.cattle.io`. Every first run failed `start_failed`. Fixed for this install
-   with a ClusterRole/Binding granting the server's ServiceAccount that verb; documented in
-   `docs/install.md` (Sandboxes). Follow-up: let the chart create it (e.g. `rancher.enabled`), or
-   detect the webhook and say so in the server's error.
-2. **Cold start on Longhorn misses 8 s** (storage section). Needs a decision on sandbox storage.
+   `projects.management.cattle.io`. Every first run failed `start_failed`. Now a chart option,
+   `rancher.enabled` (off by default), used by the gate install; the server's error names the
+   webhook and the option (verified on the real cluster with the option off: a new team's first
+   run fails and the server logs "Rancher's namespace webhook … Set the chart value
+   rancher.enabled=true"). That run took 83 s to fail: the router retries a failed wake for its
+   90 s budget, and a provisioning refusal is not treated as definitive.
+2. **Cold start on Longhorn misses 8 s, strict-local included** (storage section).
 3. **NFS class unusable for workspaces under gVisor** (storage section). Not investigated further
    (NFS squash vs. the gVisor gofer).
 4. **ghcr packages are private** (Images above).

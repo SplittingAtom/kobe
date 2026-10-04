@@ -35,6 +35,23 @@ describe("loadConfig", () => {
     );
   });
 
+  it("reads the internal listener settings for the MCP proxy (KOBE-58)", () => {
+    expect(loadConfig(REQUIRED)).toMatchObject({
+      internalPort: 8082,
+      mcpProxyInternalKey: undefined,
+    });
+    expect(
+      loadConfig({
+        ...REQUIRED,
+        KOBE_INTERNAL_PORT: "9000",
+        KOBE_MCP_PROXY_INTERNAL_KEY: "k".repeat(32),
+      }),
+    ).toMatchObject({ internalPort: 9000, mcpProxyInternalKey: "k".repeat(32) });
+    expect(() => loadConfig({ ...REQUIRED, KOBE_MCP_PROXY_INTERNAL_KEY: "short" })).toThrow(
+      /KOBE_MCP_PROXY_INTERNAL_KEY/,
+    );
+  });
+
   it("requires a postgres database URL", () => {
     const { KOBE_DATABASE_URL: _, ...rest } = REQUIRED;
     expect(() => loadConfig(rest)).toThrow(/KOBE_DATABASE_URL/);

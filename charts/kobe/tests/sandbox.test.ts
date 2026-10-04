@@ -178,15 +178,43 @@ describe("server sandbox configuration", () => {
     expect(renderError({ "sandbox.hibernation.idleMinutes": "90" })).toMatch(/idleMinutes|maximum/);
   });
 
+  it("syncs workspaces to object storage by default (KOBE-27), with limits", () => {
+    expect(sandboxConfig(ms).workspaceSync).toEqual({
+      enabled: true,
+      pushIntervalSeconds: 60,
+      maxFileSize: "1Gi",
+      maxFiles: 100000,
+      collectSeconds: 3600,
+    });
+    expect(
+      sandboxConfig(
+        render({
+          "sandbox.workspaceSync.maxWorkspaceSize": "20Gi",
+          "sandbox.workspaceSync.pushIntervalSeconds": "15",
+        }),
+      ).workspaceSync,
+    ).toMatchObject({ maxWorkspaceSize: "20Gi", pushIntervalSeconds: 15 });
+    expect(renderError({ "sandbox.workspaceSync.pushIntervalSeconds": "1" })).toMatch(
+      /pushIntervalSeconds|minimum/,
+    );
+    expect(renderError({ "sandbox.workspaceSync.maxFileSize": "lots" })).toMatch(
+      /maxFileSize|pattern/,
+    );
+  });
+
   it("defaults the sandbox key so `helm upgrade --reuse-values` keeps working", () => {
     expect(sandboxConfig(render({ sandbox: "null" })).warmPool).toEqual({ replicasPerTeam: 1 });
     expect(sandboxConfig(render({ sandbox: "null" })).hibernation).toMatchObject({
       enabled: true,
       idleMinutes: 15,
     });
+    expect(sandboxConfig(render({ sandbox: "null" })).workspaceSync).toMatchObject({
+      enabled: true,
+      pushIntervalSeconds: 60,
+    });
   });
 
-  it("gives all session keys to the server, and the egress proxy only its own", () => {
+  it("gives all session keys to the server, and each proxy only its own", () => {
     const names = (d: string) =>
       envOf(ms, d)
         .map((e) => e.name)
@@ -197,10 +225,11 @@ describe("server sandbox configuration", () => {
       "KOBE_SESSION_KEY_MODEL_GATEWAY",
       "KOBE_SESSION_KEY_SANDBOX_WIRE",
     ]);
-    for (const d of ["kobe-scheduler", "kobe-web", "kobe-mcp-proxy"]) {
+    for (const d of ["kobe-scheduler", "kobe-web"]) {
       expect(names(d), d).toEqual([]);
     }
     expect(names("kobe-egress-proxy")).toEqual(["KOBE_SESSION_KEY_EGRESS_PROXY"]);
+    expect(names("kobe-mcp-proxy")).toEqual(["KOBE_SESSION_KEY_MCP_PROXY"]);
   });
 
   it("gives the approval key to the server only, optional for pre-created Secrets (KOBE-37)", () => {
@@ -237,6 +266,10 @@ describe("release-side NetworkPolicy", () => {
             },
           },
         ],
+        ports: [
+          { protocol: "TCP", port: 8080 },
+          { protocol: "TCP", port: 8081 },
+        ],
       },
       {
         from: [
@@ -245,6 +278,21 @@ describe("release-side NetworkPolicy", () => {
           },
         ],
         ports: [{ protocol: "TCP", port: 8081 }],
+      },
+      // The internal listener (KOBE-58): MCP proxy pods only.
+      {
+        from: [
+          {
+            podSelector: {
+              matchLabels: {
+                "app.kubernetes.io/name": "kobe",
+                "app.kubernetes.io/instance": "kobe",
+                "app.kubernetes.io/component": "mcp-proxy",
+              },
+            },
+          },
+        ],
+        ports: [{ protocol: "TCP", port: 8082 }],
       },
     ]);
   });
@@ -444,5 +492,69 @@ describe("values.schema.json: sandbox", () => {
       /replicasPerTeam|maximum/,
     );
     expect(renderError({ "sandbox.tmpSize": "lots" })).toMatch(/tmpSize|pattern|oneOf/i);
+  });
+});
+
+describe("workspace storage: Longhorn strict-local (sandbox.workspace.longhornStrictLocal)", () => {
+  it("is off by default: no StorageClass, workspaces on storageClass (cluster default)", () => {
+    const ms = render();
+    expect(byKind(ms, "StorageClass")).toHaveLength(0);
+    expect(sandboxConfig(ms).workspace.storageClass).toBe("");
+    expect(
+      sandboxConfig(render({ "sandbox.workspace.storageClass": "fast" })).workspace.storageClass,
+    ).toBe("fast");
+  });
+
+  it("creates a one-replica strict-local Longhorn class and points workspaces at it", () => {
+    const ms = render({ "sandbox.workspace.longhornStrictLocal.enabled": "true" });
+    const [sc] = byKind(ms, "StorageClass");
+    expect(sc).toMatchObject({
+      provisioner: "driver.longhorn.io",
+      volumeBindingMode: "WaitForFirstConsumer",
+      reclaimPolicy: "Delete",
+      parameters: { numberOfReplicas: "1", dataLocality: "strict-local" },
+    });
+    expect(sc?.metadata.name).toMatch(/^kobe-[0-9a-f]{10}-workspace-strict-local$/);
+    expect(sandboxConfig(ms).workspace.storageClass).toBe(sc?.metadata.name);
+  });
+
+  it("refuses a storageClass together with the strict-local class", () => {
+    expect(
+      renderError({
+        "sandbox.workspace.longhornStrictLocal.enabled": "true",
+        "sandbox.workspace.storageClass": "fast",
+      }),
+    ).toMatch(/either storageClass or longhornStrictLocal/);
+  });
+});
+
+describe("Rancher (rancher.enabled)", () => {
+  const rancherRoles = (ms: Manifest[]) =>
+    ms.filter(
+      (m) =>
+        (m.kind === "ClusterRole" || m.kind === "ClusterRoleBinding") &&
+        m.metadata.name.endsWith("-rancher-updatepsa"),
+    );
+
+  it("grants nothing by default", () => {
+    expect(rancherRoles(render())).toHaveLength(0);
+  });
+
+  it("grants the server's ServiceAccount updatepsa on Rancher projects, and nothing else", () => {
+    const ms = render({ "rancher.enabled": "true" });
+    const [role, binding] = rancherRoles(ms);
+    expect(role?.kind).toBe("ClusterRole");
+    expect(role?.rules).toEqual([
+      { apiGroups: ["management.cattle.io"], resources: ["projects"], verbs: ["updatepsa"] },
+    ]);
+    expect(binding?.kind).toBe("ClusterRoleBinding");
+    expect(binding?.roleRef).toMatchObject({ kind: "ClusterRole", name: role?.metadata.name });
+    expect(binding?.subjects).toEqual([
+      { kind: "ServiceAccount", name: "kobe-server", namespace: "kobe" },
+    ]);
+  });
+
+  it("rejects unknown keys", () => {
+    expect(renderError({ "rancher.project": "x" })).toMatch(/project|additional/i);
   });
 });

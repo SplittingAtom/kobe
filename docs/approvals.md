@@ -178,6 +178,14 @@ with its reason (`no_approval`, `bad_mac`, `binding_mismatch`, `expired`, `not_c
 `@kobe/protocol/node` `authorizeApprovedCall` plus the SQL in `approvals/store.ts` into the proxy.
 The proxy needs `KOBE_APPROVAL_KEY`, which is the same Secret key as above.
 
+**How KOBE-58 calls it.** The MCP proxy's re-check runs in the server (internal listener), so the
+verifier is called in process and the approval key never leaves the server. The run is never taken
+from the sandbox: the proxy forwards the sandbox's thread (`Kobe-Thread-Id`), and the server uses
+that thread's active run only if it belongs to the token's user and is leased to the token's
+sandbox. The tool call id is `_meta["kobe.dev/tool_call_id"]` when sent, otherwise the server finds
+the run's allowed, unconsumed approval of that user for that tool whose `input_canonical` equals
+the call's canonical input (Pi's MCP client has no per-call id). See `docs/ledger/KOBE-58.md`.
+
 ## Audit
 
 | Action               | When                                                 |

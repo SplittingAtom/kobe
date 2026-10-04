@@ -141,6 +141,15 @@
             },
             "storageClass": {
               "type": "string"
+            },
+            "longhornStrictLocal": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                }
+              }
             }
           }
         },
@@ -251,6 +260,38 @@
               "maximum": 3600
             }
           }
+        },
+        "workspaceSync": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "pushIntervalSeconds": {
+              "type": "integer",
+              "minimum": 5,
+              "maximum": 3600
+            },
+            "maxFileSize": {
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]+)?(m|k|M|G|T|Ki|Mi|Gi|Ti)?$"
+            },
+            "maxWorkspaceSize": {
+              "type": "string",
+              "pattern": "^([0-9]+(\\.[0-9]+)?(m|k|M|G|T|Ki|Mi|Gi|Ti)?)?$"
+            },
+            "maxFiles": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000
+            },
+            "collectSeconds": {
+              "type": "integer",
+              "minimum": 60,
+              "maximum": 86400
+            }
+          }
         }
       }
     },
@@ -303,6 +344,91 @@
         },
         "resources": {
           "$ref": "#/$defs/resources"
+        },
+        "allowInsecureHttp": {
+          "type": "boolean"
+        },
+        "allowedPorts": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "minItems": 1
+        },
+        "allowedInternalCidrs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F:.]+(/[0-9]{1,3})?$"
+          }
+        },
+        "deniedCidrs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F:.]+(/[0-9]{1,3})?$"
+          }
+        },
+        "internalKeySecret": {
+          "type": "string"
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxRequestBytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 16777216
+            },
+            "maxResponseBytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 67108864
+            },
+            "upstreamTimeoutSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "callsPerSandbox": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "concurrentCalls": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000
+            },
+            "requestBurst": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            "requestsPerSecond": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            }
+          }
+        },
+        "networkPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "restrictEgress": {
+              "type": "boolean"
+            },
+            "extraEgress": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          }
         }
       }
     },
@@ -840,6 +966,15 @@
             "maxLength": 0,
             "description": "smtp.security=none would send SMTP credentials unencrypted"
           }
+        }
+      }
+    },
+    "rancher": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
         }
       }
     }

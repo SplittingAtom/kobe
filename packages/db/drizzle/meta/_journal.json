@@ -225,6 +225,55 @@
       "when": 1791051578466,
       "tag": "0031_approvals_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1791060236862,
+      "tag": "0032_legal_hold",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1791060237200,
+      "tag": "0033_legal_hold_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1791060237532,
+      "tag": "0034_audit_pii_commitments",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1791064635912,
+      "tag": "0035_workspace_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1791064636310,
+      "tag": "0036_workspace_sync_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1791068065487,
+      "tag": "0037_connectors",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1791068065850,
+      "tag": "0038_connectors_rls",
+      "breakpoints": true
     }
   ]
 }

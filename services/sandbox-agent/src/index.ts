@@ -7,6 +7,8 @@ import { buildPiLaunch } from "./pi/pi-launch.js";
 import { checkPolicyExtensionFile } from "./policy/extension-file.js";
 import { SessionClient } from "./session/exchange.js";
 import { piVersion as readPiVersion, readAgentVersion } from "./version.js";
+import { SyncClient } from "./workspace/client.js";
+import { WorkspaceSync } from "./workspace/sync.js";
 
 /**
  * kobe-sandbox-agent entry point: the sandbox's main process (D13). Dials out to the server; opens
@@ -53,16 +55,29 @@ async function main(): Promise<void> {
     "sandbox-agent starting",
   );
 
+  const readToken = session
+    ? () => session.wireToken()
+    : async () => {
+        const token = (await readFile(config.tokenFile, "utf8")).trim();
+        if (token === "") throw new Error("sandbox token file is empty");
+        return token;
+      };
+  // KOBE-27: /workspace ↔ S3 through the server (no storage credentials in the sandbox). The
+  // restore starts now, in parallel with the wire and Pi; runs wait for it.
+  const workspace =
+    config.workspaceSyncIntervalMs > 0
+      ? new WorkspaceSync({
+          root: config.workspaceDir,
+          client: new SyncClient({ serverUrl: config.serverUrl, readToken }),
+          logger,
+          intervalMs: config.workspaceSyncIntervalMs,
+        })
+      : undefined;
   const agent = new Agent({
     config,
     logger,
-    readToken: session
-      ? () => session.wireToken()
-      : async () => {
-          const token = (await readFile(config.tokenFile, "utf8")).trim();
-          if (token === "") throw new Error("sandbox token file is empty");
-          return token;
-        },
+    readToken,
+    ...(workspace === undefined ? {} : { workspace }),
     agentVersion,
     piVersion,
     home,
@@ -74,6 +89,7 @@ async function main(): Promise<void> {
     process.once(signal, () => void agent.stop(SHUTDOWN_DEADLINE_MS, 0));
   }
   agent.start();
+  workspace?.start();
 }
 
 main().catch((error: unknown) => {
