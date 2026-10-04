@@ -14,6 +14,7 @@ import { installGalleryRoutes } from "./routes/install-gallery.js";
 import { installInvitesRoutes } from "./routes/install-invites.js";
 import { installIsolationRoutes } from "./routes/install-isolation.js";
 import { installModelsRoutes } from "./routes/install-models.js";
+import { installLegalHoldRoutes } from "./routes/install-legal-hold.js";
 import { installPolicyRoutes } from "./routes/install-policy.js";
 import { installRolesRoutes } from "./routes/install-roles.js";
 import { installSettingsRoutes } from "./routes/install-settings.js";
@@ -117,6 +118,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/install/egress-ceiling", installEgressRoutes(deps));
   api.route("/install/models", installModelsRoutes(deps));
   api.route("/install/break-glass", installBreakGlassRoutes(deps));
+  api.route("/install/legal-hold", installLegalHoldRoutes(deps));
   if (isolation) api.route("/install/isolation", installIsolationRoutes(isolation));
   app.route("/v1", api);
   return app;

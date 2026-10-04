@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { EXAMPLE_IDS } from "@kobe/protocol/testing";
-import { Agent } from "../agent.js";
+import { Agent, type WorkspaceHooks } from "../agent.js";
 import { loadConfig } from "../config.js";
 import { FakeServer, type FakeServerOptions } from "./fake-server.js";
 import type { ModelWiring } from "../models/types.js";
@@ -42,6 +42,7 @@ export interface HarnessOptions {
   readonly extensions?: readonly string[];
   /** Model gateway wiring (KOBE-41); absent = no model access, as before. */
   readonly models?: ModelWiring;
+  readonly workspace?: (workspaceDir: string) => WorkspaceHooks;
 }
 
 /** The fake Pi ignores the file; it plays kobe-policy's handshake itself (see fake-pi.mjs). */
@@ -83,6 +84,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       : { heartbeatTimeoutMs: options.heartbeatTimeoutMs }),
     ...(options.extensions === undefined ? {} : { extensions: options.extensions }),
     ...(options.models === undefined ? {} : { models: options.models }),
+    ...(options.workspace === undefined ? {} : { workspace: options.workspace(workspace) }),
     ...(options.policyReadyTimeoutMs === undefined
       ? {}
       : { policyReadyTimeoutMs: options.policyReadyTimeoutMs }),

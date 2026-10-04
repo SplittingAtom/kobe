@@ -73,6 +73,13 @@ export const SETTINGS: SandboxSettings = {
   },
   warmPool: { replicasPerTeam: 1 },
   hibernation: { enabled: true, idleMinutes: 15, sweepSeconds: 60 },
+  workspaceSync: {
+    enabled: true,
+    pushIntervalSeconds: 60,
+    maxFileSize: "1Gi",
+    maxFiles: 100_000,
+    collectSeconds: 3600,
+  },
 };
 
 export const KEYS: SessionKeys = {

@@ -5,7 +5,7 @@ predates the `sandbox` key still renders. Keep in sync with values.yaml.
 {{- define "kobe.sandboxValues" -}}
 {{- $defaults := dict
   "resources" (dict "requests" (dict "cpu" "500m" "memory" "1Gi") "limits" (dict "cpu" "2" "memory" "4Gi"))
-  "workspace" (dict "size" "10Gi" "storageClass" "")
+  "workspace" (dict "size" "10Gi" "storageClass" "" "longhornStrictLocal" (dict "enabled" false))
   "tmpSize" "2Gi"
   "homeSize" "1Gi"
   "ephemeralStorage" (dict "request" "1Gi" "limit" "4Gi")
@@ -13,8 +13,25 @@ predates the `sandbox` key still renders. Keep in sync with values.yaml.
   "teamQuota" (dict "requests.cpu" "20" "requests.memory" "40Gi" "limits.cpu" "40" "limits.memory" "80Gi" "requests.ephemeral-storage" "40Gi" "limits.ephemeral-storage" "160Gi" "requests.storage" "500Gi" "persistentvolumeclaims" "50" "pods" "50")
   "warmPool" (dict "replicasPerTeam" 1)
   "hibernation" (dict "enabled" true "idleMinutes" 15 "sweepSeconds" 60)
+  "workspaceSync" (dict "enabled" true "pushIntervalSeconds" 60 "maxFileSize" "1Gi" "maxWorkspaceSize" "" "maxFiles" 100000 "collectSeconds" 3600)
   "sessionKeysSecret" "" -}}
 {{- mustMergeOverwrite $defaults (deepCopy (.Values.sandbox | default dict)) | toJson -}}
+{{- end -}}
+
+{{/*
+StorageClass of sandbox workspaces: the chart's Longhorn strict-local class when enabled, else
+sandbox.workspace.storageClass ("" = the cluster default). Setting both is refused.
+*/}}
+{{- define "kobe.workspaceStorageClass" -}}
+{{- $s := include "kobe.sandboxValues" . | fromJson -}}
+{{- if $s.workspace.longhornStrictLocal.enabled -}}
+{{- if $s.workspace.storageClass -}}
+{{- fail "sandbox.workspace: set either storageClass or longhornStrictLocal.enabled, not both" -}}
+{{- end -}}
+{{- include "kobe.clusterName" (dict "root" . "suffix" "workspace-strict-local") -}}
+{{- else -}}
+{{- $s.workspace.storageClass -}}
+{{- end -}}
 {{- end -}}
 
 {{/* Names shared by RBAC, admission policies and the server's sandbox config. */}}
@@ -76,7 +93,7 @@ pod labels and port for the team NetworkPolicy).
     "limits" (dict "cpu" (toString $s.resources.limits.cpu) "memory" (toString $s.resources.limits.memory)))
   "ephemeralStorage" (dict "request" (toString $s.ephemeralStorage.request) "limit" (toString $s.ephemeralStorage.limit))
   "modelGatewayAccess" $s.modelGatewayAccess
-  "workspace" (dict "size" (toString $s.workspace.size) "storageClass" $s.workspace.storageClass)
+  "workspace" (dict "size" (toString $s.workspace.size) "storageClass" (include "kobe.workspaceStorageClass" .))
   "tmpSize" (toString $s.tmpSize)
   "homeSize" (toString $s.homeSize)
   "teamQuota" $quota
@@ -84,7 +101,23 @@ pod labels and port for the team NetworkPolicy).
   "hibernation" (dict
     "enabled" $s.hibernation.enabled
     "idleMinutes" (int $s.hibernation.idleMinutes)
-    "sweepSeconds" (int $s.hibernation.sweepSeconds))) -}}
+    "sweepSeconds" (int $s.hibernation.sweepSeconds))
+  "workspaceSync" (include "kobe.workspaceSyncConfig" $s | fromJson)) -}}
+{{- end -}}
+
+{{/* KOBE-27 workspace sync settings; maxWorkspaceSize is omitted when empty (the volume size). */}}
+{{- define "kobe.workspaceSyncConfig" -}}
+{{- $w := .workspaceSync -}}
+{{- $out := dict
+  "enabled" $w.enabled
+  "pushIntervalSeconds" (int $w.pushIntervalSeconds)
+  "maxFileSize" (toString $w.maxFileSize)
+  "maxFiles" (int $w.maxFiles)
+  "collectSeconds" (int $w.collectSeconds) -}}
+{{- if $w.maxWorkspaceSize -}}
+{{- $_ := set $out "maxWorkspaceSize" (toString $w.maxWorkspaceSize) -}}
+{{- end -}}
+{{- toJson $out -}}
 {{- end -}}
 
 {{/*

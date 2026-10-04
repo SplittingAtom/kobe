@@ -3,6 +3,7 @@ import {
   type HelloAckFrame,
   type HelloFrame,
   type KobeEventDropped,
+  type RunStartFrame,
   type SandboxToServerFrame,
   type ServerToSandboxFrame,
 } from "@kobe/protocol";
@@ -41,7 +42,19 @@ export interface AgentDeps {
   readonly extensions?: readonly string[];
   /** Model gateway wiring (KOBE-41); absent when the sandbox has no model access. */
   readonly models?: ModelWiring | undefined;
+  /** Workspace sync (KOBE-27): restore before runs, push after them and before stopping. */
+  readonly workspace?: WorkspaceHooks;
 }
+
+/** What the agent needs of workspace sync (`workspace/sync.ts`). */
+export interface WorkspaceHooks {
+  beforeRun(frame: RunStartFrame): Promise<void>;
+  runEnded(): void;
+  flush(deadlineMs: number): Promise<unknown>;
+}
+
+/** The final workspace push before the process exits (inside the pod's 30 s grace period). */
+export const WORKSPACE_FLUSH_MS = 15_000;
 
 const MAX_REMEMBERED_COMMANDS = 4096;
 const MAX_QUEUED_EXITS = 64;
@@ -88,12 +101,19 @@ export class Agent {
       maxProcesses: config.maxPiProcesses,
       idleMs: config.piIdleMs,
       restoreMaxBytes: config.restoreMaxBytes,
+      ...(deps.workspace === undefined
+        ? {}
+        : {
+            beforeRun: (frame: RunStartFrame) =>
+              deps.workspace?.beforeRun(frame) ?? Promise.resolve(),
+          }),
       hooks: {
         runStarted: (runId, threadId) => this.#outbox.open(runId, threadId),
         piEvent: (runId, threadId, event) => this.#emitPiEvent(runId, threadId, event),
         runEnded: (runId) => {
           this.#outbox.finish(runId);
           this.#broker.failRun(runId, "run ended");
+          deps.workspace?.runEnded();
         },
         uiRequest: (threadId, runId, request) => {
           this.#wire.send({
@@ -146,6 +166,8 @@ export class Agent {
     if (this.#stopping) return;
     this.#stopping = true;
     await this.#threads.shutdown(deadlineMs);
+    // Pi is gone, so the workspace is settled: push what changed since the last sync.
+    await this.#deps.workspace?.flush(WORKSPACE_FLUSH_MS);
     await this.#wire.stop(1000, "agent stopping");
     this.#deps.onExit(code);
   }

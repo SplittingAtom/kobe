@@ -35,6 +35,29 @@ describe("topLevelModel", () => {
     expect(scan('{"mod\\u0065l":"a\\/b"}')).toEqual({ ok: true, model: "a/b" });
   });
 
+  it("treats any key that decodes to model case-insensitively as the model (as Go does)", () => {
+    // Go's encoding/json (and sonic) match keys case-insensitively and take the last match.
+    for (const body of [
+      '{"model":"a/ok","MODEL":"b/evil"}',
+      '{"model":"a/ok","Model":"b/evil"}',
+      '{"MoDeL":"b/evil","model":"a/ok"}',
+      '{"model":"a/ok","\\u006d\\u006f\\u0064\\u0065\\u006c":"b/evil"}',
+      '{"model":"a/ok","\\u004D\\u004f\\u0044\\u0045\\u004c":"b/evil"}',
+    ]) {
+      expect(scan(body), body).toEqual({ ok: false, reason: "duplicate_model" });
+    }
+    expect(scan('{"MODEL":"b/x"}')).toEqual({ ok: true, model: "b/x" });
+    expect(scan('{"\\u006d\\u006f\\u0064\\u0065\\u006c":"c/y"}')).toEqual({
+      ok: true,
+      model: "c/y",
+    });
+    // Longer keys are not the model, even if they contain it.
+    expect(scan('{"model_name":"x","models":"y","model":"a/b"}')).toEqual({
+      ok: true,
+      model: "a/b",
+    });
+  });
+
   it("refuses duplicates, non-string models and non-objects", () => {
     expect(scan('{"model":"a/b","model":"c/d"}')).toEqual({ ok: false, reason: "duplicate_model" });
     expect(scan({ model: 3 })).toEqual({ ok: false, reason: "bad_model" });

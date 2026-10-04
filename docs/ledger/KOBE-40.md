@@ -59,7 +59,7 @@ sandbox ──(kobe.model-gateway token)──▶ model-gateway shim ──(x-bf
   If Bifrost answers 401 `access_not_found` (it lost its store), the shim NOTIFYs `resync`, reloads
   the key and retries once, else 503 `model_gateway_resyncing` with `Retry-After`. Errors use each
   SDK's error shape (OpenAI / Anthropic / Gemini).
-- **Data** (`packages/db`, migrations `0032_models`, `0033_models_rls`): `model_providers` †
+- **Data** (`packages/db`, migrations `0039_models`, `0040_models_rls`): `model_providers` †
   (kind openai | anthropic | gemini | ollama | openai_compatible; vendor kinds once, id = kind;
   `api_key_enc` sealed with the **provider-key secret**, AAD `provider:<id>`; `key_revision`),
   `model_catalog` † (alias → provider + model; provider delete RESTRICTed; alias delete cascades
@@ -164,6 +164,21 @@ sandbox ──(kobe.model-gateway token)──▶ model-gateway shim ──(x-bf
   Kobe uses (`docs/licensing.md`).
 - Found in e2e: the team API needs `x-kobe-team` on writes; with no models enabled Bifrost already
   answered `provider_blocked` (403) — now also covered by the deactivated key.
+
+### Re-review (coordinator) — resolutions
+
+- **MEDIUM (model key case):** Bifrost's Go decoder matches JSON keys case-insensitively and takes
+  the last match, so `{"model":"a/ok","MODEL":"b/evil"}` would have run `b/evil`. `topLevelModel`
+  now decodes every key (raw-length prefilter ≤ 30 bytes: 5 characters × `\uXXXX`) and treats any
+  key that decodes to `model` in any case as the model key; more than one → 400
+  (`duplicate_model`). Tests: `body-model.test.ts` "treats any key that decodes to model
+  case-insensitively…" (`MODEL`, `Model`, mixed case, fully escaped), gateway "reads the top-level
+  model only" (`MODEL` duplicate → 400).
+- **LOW (chunked bodies ≈2× in memory):** a declared-length body is copied into one buffer as it
+  arrives (≈1×); a chunked body is joined at the end, so it is charged **twice** its size in the
+  byte budget. Test: gateway "charges chunked bodies twice their size".
+- Main merged (KOBE-17, KOBE-27, KOBE-58): migrations regenerated as `0039_models`,
+  `0040_models_rls`.
 
 ## Risks
 

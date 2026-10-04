@@ -1,6 +1,6 @@
 {
-  "id": "aeb14763-100a-4522-8f4a-235d79f1381a",
-  "prevId": "1b29c8c9-c62b-440b-8477-6085df5abfcb",
+  "id": "6cbbabcd-7cef-47e4-a09d-72c786f26297",
+  "prevId": "3e4e5d34-beeb-4967-9a40-b61ae5cfdcf6",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3457,6 +3457,24 @@
           "primaryKey": false,
           "notNull": true,
           "default": "''"
+        },
+        "hash_version": {
+          "name": "hash_version",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pii_salt": {
+          "name": "pii_salt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pii_commitment": {
+          "name": "pii_commitment",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -4795,107 +4813,17 @@
       },
       "isRLSEnabled": false
     },
-    "public.model_catalog": {
-      "name": "model_catalog",
+    "public.legal_holds": {
+      "name": "legal_holds",
       "schema": "",
       "columns": {
-        "alias": {
-          "name": "alias",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "provider_id": {
-          "name": "provider_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "model": {
-          "name": "model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "label": {
-          "name": "label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by": {
-          "name": "created_by",
+        "id": {
+          "name": "id",
           "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
+          "primaryKey": true,
           "notNull": true,
-          "default": "now()"
+          "default": "gen_random_uuid()"
         },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "model_catalog_provider_id_model_providers_id_fk": {
-          "name": "model_catalog_provider_id_model_providers_id_fk",
-          "tableFrom": "model_catalog",
-          "columnsFrom": [
-            "provider_id"
-          ],
-          "tableTo": "model_providers",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
-        },
-        "model_catalog_created_by_users_id_fk": {
-          "name": "model_catalog_created_by_users_id_fk",
-          "tableFrom": "model_catalog",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "model_catalog_alias": {
-          "name": "model_catalog_alias",
-          "value": "\"model_catalog\".\"alias\" ~ '^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$'"
-        },
-        "model_catalog_model": {
-          "name": "model_catalog_model",
-          "value": "\"model_catalog\".\"model\" ~ '^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$'"
-        },
-        "model_catalog_label": {
-          "name": "model_catalog_label",
-          "value": "\"model_catalog\".\"label\" IS NULL OR char_length(\"model_catalog\".\"label\") BETWEEN 1 AND 200"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.model_gateway_keys": {
-      "name": "model_gateway_keys",
-      "schema": "",
-      "columns": {
         "team_id": {
           "name": "team_id",
           "type": "uuid",
@@ -4906,313 +4834,169 @@
           "name": "user_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": true
-        },
-        "vk_id": {
-          "name": "vk_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "vk_value_enc": {
-          "name": "vk_value_enc",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "model_gateway_keys_team_id_teams_id_fk": {
-          "name": "model_gateway_keys_team_id_teams_id_fk",
-          "tableFrom": "model_gateway_keys",
-          "columnsFrom": [
-            "team_id"
-          ],
-          "tableTo": "teams",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        },
-        "model_gateway_keys_user_id_users_id_fk": {
-          "name": "model_gateway_keys_user_id_users_id_fk",
-          "tableFrom": "model_gateway_keys",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
-        }
-      },
-      "compositePrimaryKeys": {
-        "model_gateway_keys_team_id_user_id_pk": {
-          "name": "model_gateway_keys_team_id_user_id_pk",
-          "columns": [
-            "team_id",
-            "user_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "model_gateway_keys_vk_id": {
-          "name": "model_gateway_keys_vk_id",
-          "value": "char_length(\"model_gateway_keys\".\"vk_id\") BETWEEN 1 AND 128"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.model_gateway_state": {
-      "name": "model_gateway_state",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "smallint",
-          "primaryKey": true,
-          "notNull": true,
-          "default": 1
-        },
-        "desired_version": {
-          "name": "desired_version",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 1
-        },
-        "synced_version": {
-          "name": "synced_version",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "last_attempt_at": {
-          "name": "last_attempt_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
           "notNull": false
         },
-        "last_synced_at": {
-          "name": "last_synced_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_error": {
-          "name": "last_error",
+        "reason": {
+          "name": "reason",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "model_gateway_state_singleton": {
-          "name": "model_gateway_state_singleton",
-          "value": "\"model_gateway_state\".\"id\" = 1"
-        },
-        "model_gateway_state_error": {
-          "name": "model_gateway_state_error",
-          "value": "\"model_gateway_state\".\"last_error\" IS NULL OR \"model_gateway_state\".\"last_error\" ~ '^[a-z0-9_]{1,64}$'"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.model_providers": {
-      "name": "model_providers",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
           "notNull": true
         },
-        "kind": {
-          "name": "kind",
-          "type": "model_provider_kind",
+        "status": {
+          "name": "status",
+          "type": "legal_hold_status",
           "typeSchema": "public",
           "primaryKey": false,
-          "notNull": true
+          "notNull": true,
+          "default": "'pending'"
         },
-        "name": {
-          "name": "name",
-          "type": "text",
+        "placed_by": {
+          "name": "placed_by",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
-        "base_url": {
-          "name": "base_url",
-          "type": "text",
+        "requested_at": {
+          "name": "requested_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "approved_by": {
+          "name": "approved_by",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": false
         },
-        "allow_private_network": {
-          "name": "allow_private_network",
+        "approved_at": {
+          "name": "approved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "self_approved": {
+          "name": "self_approved",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
           "default": false
         },
-        "api_key_enc": {
-          "name": "api_key_enc",
+        "closed_by": {
+          "name": "closed_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "closed_at": {
+          "name": "closed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "release_requested_by": {
+          "name": "release_requested_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "release_requested_at": {
+          "name": "release_requested_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "release_reason": {
+          "name": "release_reason",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "key_revision": {
-          "name": "key_revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "created_by": {
-          "name": "created_by",
+        "released_by": {
+          "name": "released_by",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
-        "created_at": {
-          "name": "created_at",
+        "released_at": {
+          "name": "released_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
+          "notNull": false
         },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "model_providers_created_by_users_id_fk": {
-          "name": "model_providers_created_by_users_id_fk",
-          "tableFrom": "model_providers",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "tableTo": "users",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "model_providers_id": {
-          "name": "model_providers_id",
-          "value": "\"model_providers\".\"id\" ~ '^[a-z][a-z0-9-]{0,30}[a-z0-9]$'"
-        },
-        "model_providers_vendor_id": {
-          "name": "model_providers_vendor_id",
-          "value": "\"model_providers\".\"kind\" = 'openai_compatible' OR \"model_providers\".\"id\" = \"model_providers\".\"kind\"::text"
-        },
-        "model_providers_base_url": {
-          "name": "model_providers_base_url",
-          "value": "CASE WHEN \"model_providers\".\"base_url\" IS NULL THEN \"model_providers\".\"kind\" NOT IN ('ollama', 'openai_compatible')\n        ELSE \"model_providers\".\"base_url\" ~ '^https?://' AND char_length(\"model_providers\".\"base_url\") <= 2048 END"
-        },
-        "model_providers_key": {
-          "name": "model_providers_key",
-          "value": "\"model_providers\".\"kind\" IN ('ollama', 'openai_compatible') OR \"model_providers\".\"api_key_enc\" IS NOT NULL"
-        },
-        "model_providers_name": {
-          "name": "model_providers_name",
-          "value": "char_length(\"model_providers\".\"name\") BETWEEN 1 AND 100"
-        },
-        "model_providers_key_revision": {
-          "name": "model_providers_key_revision",
-          "value": "\"model_providers\".\"key_revision\" >= 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.team_models": {
-      "name": "team_models",
-      "schema": "",
-      "columns": {
-        "team_id": {
-          "name": "team_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "alias": {
-          "name": "alias",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "is_default": {
-          "name": "is_default",
+        "release_self_approved": {
+          "name": "release_self_approved",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
           "default": false
-        },
-        "enabled_by": {
-          "name": "enabled_by",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "enabled_at": {
-          "name": "enabled_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
         }
       },
       "indexes": {
-        "team_models_default_idx": {
-          "name": "team_models_default_idx",
+        "legal_holds_team_idx": {
+          "name": "legal_holds_team_idx",
           "columns": [
             {
               "expression": "team_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
+            },
+            {
+              "expression": "requested_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
             }
           ],
-          "isUnique": true,
+          "isUnique": false,
           "with": {},
           "method": "btree",
-          "where": "\"team_models\".\"is_default\"",
+          "concurrently": false
+        },
+        "legal_holds_active_idx": {
+          "name": "legal_holds_active_idx",
+          "columns": [
+            {
+              "expression": "team_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "where": "\"legal_holds\".\"status\" = 'active'",
+          "concurrently": false
+        },
+        "legal_holds_active_user_idx": {
+          "name": "legal_holds_active_user_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "where": "\"legal_holds\".\"status\" = 'active' AND \"legal_holds\".\"user_id\" IS NOT NULL",
           "concurrently": false
         }
       },
       "foreignKeys": {
-        "team_models_team_id_teams_id_fk": {
-          "name": "team_models_team_id_teams_id_fk",
-          "tableFrom": "team_models",
+        "legal_holds_team_id_teams_id_fk": {
+          "name": "legal_holds_team_id_teams_id_fk",
+          "tableFrom": "legal_holds",
           "columnsFrom": [
             "team_id"
           ],
@@ -5221,26 +5005,78 @@
             "id"
           ],
           "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "no action"
         },
-        "team_models_alias_model_catalog_alias_fk": {
-          "name": "team_models_alias_model_catalog_alias_fk",
-          "tableFrom": "team_models",
+        "legal_holds_user_id_users_id_fk": {
+          "name": "legal_holds_user_id_users_id_fk",
+          "tableFrom": "legal_holds",
           "columnsFrom": [
-            "alias"
+            "user_id"
           ],
-          "tableTo": "model_catalog",
+          "tableTo": "users",
           "columnsTo": [
-            "alias"
+            "id"
           ],
           "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "no action"
         },
-        "team_models_enabled_by_users_id_fk": {
-          "name": "team_models_enabled_by_users_id_fk",
-          "tableFrom": "team_models",
+        "legal_holds_placed_by_users_id_fk": {
+          "name": "legal_holds_placed_by_users_id_fk",
+          "tableFrom": "legal_holds",
           "columnsFrom": [
-            "enabled_by"
+            "placed_by"
+          ],
+          "tableTo": "users",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "legal_holds_approved_by_users_id_fk": {
+          "name": "legal_holds_approved_by_users_id_fk",
+          "tableFrom": "legal_holds",
+          "columnsFrom": [
+            "approved_by"
+          ],
+          "tableTo": "users",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "legal_holds_closed_by_users_id_fk": {
+          "name": "legal_holds_closed_by_users_id_fk",
+          "tableFrom": "legal_holds",
+          "columnsFrom": [
+            "closed_by"
+          ],
+          "tableTo": "users",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "legal_holds_release_requested_by_users_id_fk": {
+          "name": "legal_holds_release_requested_by_users_id_fk",
+          "tableFrom": "legal_holds",
+          "columnsFrom": [
+            "release_requested_by"
+          ],
+          "tableTo": "users",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "legal_holds_released_by_users_id_fk": {
+          "name": "legal_holds_released_by_users_id_fk",
+          "tableFrom": "legal_holds",
+          "columnsFrom": [
+            "released_by"
           ],
           "tableTo": "users",
           "columnsTo": [
@@ -5250,18 +5086,43 @@
           "onDelete": "no action"
         }
       },
-      "compositePrimaryKeys": {
-        "team_models_team_id_alias_pk": {
-          "name": "team_models_team_id_alias_pk",
-          "columns": [
-            "team_id",
-            "alias"
-          ]
-        }
-      },
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "legal_holds_reason": {
+          "name": "legal_holds_reason",
+          "value": "char_length(btrim(\"legal_holds\".\"reason\")) BETWEEN 1 AND 2000"
+        },
+        "legal_holds_release_reason": {
+          "name": "legal_holds_release_reason",
+          "value": "\"legal_holds\".\"release_reason\" IS NULL OR char_length(btrim(\"legal_holds\".\"release_reason\")) BETWEEN 1 AND 2000"
+        },
+        "legal_holds_subject_not_requester": {
+          "name": "legal_holds_subject_not_requester",
+          "value": "\"legal_holds\".\"user_id\" IS DISTINCT FROM \"legal_holds\".\"placed_by\""
+        },
+        "legal_holds_two_person": {
+          "name": "legal_holds_two_person",
+          "value": "\"legal_holds\".\"approved_by\" IS NULL OR (\"legal_holds\".\"approved_by\" = \"legal_holds\".\"placed_by\") = \"legal_holds\".\"self_approved\""
+        },
+        "legal_holds_release_two_person": {
+          "name": "legal_holds_release_two_person",
+          "value": "\"legal_holds\".\"released_by\" IS NULL OR (\"legal_holds\".\"released_by\" = \"legal_holds\".\"release_requested_by\") = \"legal_holds\".\"release_self_approved\""
+        },
+        "legal_holds_active_shape": {
+          "name": "legal_holds_active_shape",
+          "value": "\"legal_holds\".\"status\" NOT IN ('active', 'released') OR (\"legal_holds\".\"approved_by\" IS NOT NULL AND \"legal_holds\".\"approved_at\" IS NOT NULL)"
+        },
+        "legal_holds_released_shape": {
+          "name": "legal_holds_released_shape",
+          "value": "(\"legal_holds\".\"status\" = 'released') = (\"legal_holds\".\"released_by\" IS NOT NULL AND \"legal_holds\".\"released_at\" IS NOT NULL)"
+        },
+        "legal_holds_release_request_shape": {
+          "name": "legal_holds_release_request_shape",
+          "value": "(\"legal_holds\".\"release_requested_by\" IS NULL) = (\"legal_holds\".\"release_requested_at\" IS NULL) AND (\"legal_holds\".\"release_requested_by\" IS NULL) = (\"legal_holds\".\"release_reason\" IS NULL) AND (\"legal_holds\".\"release_requested_by\" IS NULL OR \"legal_holds\".\"status\" IN ('active', 'released'))"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.approvals": {
@@ -5748,15 +5609,15 @@
         "destroyed"
       ]
     },
-    "public.model_provider_kind": {
-      "name": "model_provider_kind",
+    "public.legal_hold_status": {
+      "name": "legal_hold_status",
       "schema": "public",
       "values": [
-        "openai",
-        "anthropic",
-        "gemini",
-        "ollama",
-        "openai_compatible"
+        "pending",
+        "active",
+        "denied",
+        "withdrawn",
+        "released"
       ]
     },
     "public.approval_status": {

@@ -248,6 +248,11 @@ function sandboxEnv(s: SandboxSettings): { name: string; value: string }[] {
     { name: "NO_PROXY", value: noProxy },
     { name: "no_proxy", value: noProxy },
     { name: "HOME", value: "/home/kobe" },
+    // KOBE-27: how often the agent pushes /workspace changes (through the server); 0 = sync off.
+    {
+      name: "KOBE_WORKSPACE_SYNC_INTERVAL_MS",
+      value: String(s.workspaceSync.enabled ? s.workspaceSync.pushIntervalSeconds * 1000 : 0),
+    },
   ];
 }
 

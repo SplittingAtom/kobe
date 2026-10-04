@@ -58,6 +58,11 @@ const configSchema = z.object({
   /** Un-acked outbound pi.event bytes across all runs before the agent gives up on a run. */
   KOBE_OUTBOX_MAX_BYTES: positiveInt(64 * 1024 * 1024),
   KOBE_RESTORE_MAX_BYTES: positiveInt(512 * 1024 * 1024),
+  /**
+   * KOBE-27: push /workspace changes to the server this often (and restore at start, pull before
+   * runs). Set by the server's pod spec; 0 (the default outside Kobe pods) turns sync off.
+   */
+  KOBE_WORKSPACE_SYNC_INTERVAL_MS: z.coerce.number().int().min(0).max(3_600_000).default(0),
 });
 
 export interface Config {
@@ -82,6 +87,8 @@ export interface Config {
   readonly piIdleMs: number;
   readonly outboxMaxBytes: number;
   readonly restoreMaxBytes: number;
+  /** 0 = workspace sync off. */
+  readonly workspaceSyncIntervalMs: number;
 }
 
 export function loadConfig(env: Readonly<Record<string, string | undefined>>): Config {
@@ -119,5 +126,6 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     piIdleMs: c.KOBE_PI_IDLE_MS,
     outboxMaxBytes: c.KOBE_OUTBOX_MAX_BYTES,
     restoreMaxBytes: c.KOBE_RESTORE_MAX_BYTES,
+    workspaceSyncIntervalMs: c.KOBE_WORKSPACE_SYNC_INTERVAL_MS,
   };
 }

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { readFile, readdir } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseTranslatedPiEvent, type SandboxToServerFrame } from "@kobe/protocol";
 import { afterEach, describe, expect, it } from "vitest";
@@ -142,6 +142,54 @@ describe("run.start → Pi prompt → pi.event stream", () => {
     );
     const prompt = (await h.commandsLog()).find((c) => c.type === "prompt");
     expect(prompt?.message).toBe(`say:x\n\nAttached files:\n- ${file} (text/csv)`);
+  });
+});
+
+describe("workspace sync hooks (KOBE-27)", () => {
+  it("restores the workspace before the prompt reaches Pi, and pushes after the run and on stop", async () => {
+    const calls: string[] = [];
+    h = await startHarness({
+      workspace: (dir) => ({
+        async beforeRun(frame) {
+          calls.push(`beforeRun:${frame.run_id}`);
+          await mkdir(path.join(dir, "uploads"), { recursive: true });
+          await writeFile(path.join(dir, "uploads", "sales.csv"), "a,b\n");
+        },
+        runEnded: () => void calls.push("runEnded"),
+        flush: (ms) => Promise.resolve(void calls.push(`flush:${ms}`)),
+      }),
+    });
+    const file = path.join(h.workspace, "uploads", "sales.csv");
+    const result = await h.server.command(
+      runStart("say:x", { attachments: [{ path: file, mime_type: "text/csv" }] }),
+    );
+    expect(result).toMatchObject({ ok: true });
+    // Pi saw the prompt only after the hook had put the upload in place.
+    const prompt = (await h.commandsLog()).find((c) => c.type === "prompt");
+    expect(prompt).toBeDefined();
+    expect(readFileSync(file, "utf8")).toBe("a,b\n");
+    await h.server.waitFor(settled());
+    await until(() => calls.includes("runEnded"));
+    expect(calls[0]).toBe(`beforeRun:${RUN}`);
+    await h.agent.stop(500);
+    expect(calls.at(-1)).toBe("flush:15000");
+  });
+
+  it("fails the run when the workspace cannot be prepared, before Pi sees the prompt", async () => {
+    h = await startHarness({
+      workspace: () => ({
+        beforeRun: () =>
+          Promise.reject(new Error("attachment uploads/x.csv is not in the workspace")),
+        runEnded: () => undefined,
+        flush: () => Promise.resolve(),
+      }),
+    });
+    const result = await h.server.command(runStart("say:x"));
+    expect(result).toMatchObject({ ok: false });
+    const log = existsSync(path.join(h.sessions, `${THREAD}.jsonl.commands.jsonl`))
+      ? await h.commandsLog()
+      : [];
+    expect(log.find((c) => c.type === "prompt")).toBeUndefined();
   });
 });
 

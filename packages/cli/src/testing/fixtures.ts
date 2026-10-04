@@ -134,10 +134,15 @@ export async function seed(db: TestDatabase): Promise<void> {
        ($1, '${THREAD}', 'e2', 'e1', 'message', '{}', 'teams/a2/artifacts/chart.html');
      UPDATE threads SET leaf_entry_id = 'e2' WHERE team_id = $1 AND id = '${THREAD}';
      -- Audit events (KOBE-15): the trigger chains them; the restore must keep the chain intact.
-     INSERT INTO audit_log (actor_kind, actor_id, team_id, action, target) VALUES
-       ('user', $3, NULL, 'auth.sign_in.succeeded', '{"method":"password"}'),
+     -- Both carry a client address (salted commitment, KOBE-17); the first one's IP and user agent
+     -- were erased since, as the retention sweep does (here directly, bypassing its age check).
+     INSERT INTO audit_log (actor_kind, actor_id, team_id, action, target, ip, user_agent) VALUES
+       ('user', $3, NULL, 'auth.sign_in.succeeded', '{"method":"password"}', '203.0.113.5', 'UA'),
        ('user', $3, $1, 'identity.member.role_changed',
-        jsonb_build_object('userId', $4, 'from', 'builder', 'to', 'member'));`.replaceAll(
+        jsonb_build_object('userId', $4, 'from', 'builder', 'to', 'member'), '203.0.113.6', 'UA');
+     SET session_replication_role = replica;
+     UPDATE audit_log SET ip = NULL, user_agent = NULL, pii_salt = NULL WHERE seq = 1;
+     SET session_replication_role = origin;`.replaceAll(
       /\$(\d)/g,
       (_, n: string) => `'${[T1, T2, U1, U2, U3][Number(n) - 1]}'`,
     ),

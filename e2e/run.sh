@@ -15,6 +15,7 @@ SANDBOX_NS=kobe-e2e-sandbox
 TEAM_NS=kobe-team-e2e # KOBE-22: created by the server, not by this script
 TEAM2_NS=kobe-team-e2e2
 UPSTREAM_NS=kobe-e2e-upstream # KOBE-38: an in-cluster HTTPS server standing in for the internet
+MCP_NS=kobe-e2e-mcp # KOBE-58: a fake remote MCP server
 failed=0
 
 context=$($KUBECTL config current-context)
@@ -53,7 +54,7 @@ PODS=()
 cleanup() {
   for p in "${PODS[@]+"${PODS[@]}"}"; do $KUBECTL delete pod $p --ignore-not-found --wait=false >/dev/null 2>&1 || true; done
   $KUBECTL delete namespace "$SANDBOX_NS" --ignore-not-found --wait=false >/dev/null 2>&1 || true
-  $KUBECTL delete namespace "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" kobe-e2e-llm --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  $KUBECTL delete namespace "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" "$MCP_NS" kobe-e2e-llm --ignore-not-found --wait=false >/dev/null 2>&1 || true
   $KUBECTL delete runtimeclass kobe-e2e-runc --ignore-not-found >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -113,8 +114,8 @@ $KUBECTL get crd sandboxes.agents.x-k8s.io >/dev/null 2>&1 \
 
 echo "==> clean state"
 $HELM uninstall kobe -n "$NS" --wait >/dev/null 2>&1 || true
-$KUBECTL delete namespace "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" kobe-e2e-llm --ignore-not-found --wait=false >/dev/null
-for ns in "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" kobe-e2e-llm; do
+$KUBECTL delete namespace "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" "$MCP_NS" kobe-e2e-llm --ignore-not-found --wait=false >/dev/null
+for ns in "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" "$MCP_NS" kobe-e2e-llm; do
   $KUBECTL wait --for=delete "namespace/$ns" --timeout=180s >/dev/null 2>&1 || true
 done
 
@@ -123,6 +124,8 @@ $KUBECTL apply -f dev/postgres.yaml >/dev/null
 $KUBECTL -n kobe-deps rollout status deploy/pg --timeout=180s >/dev/null
 $KUBECTL apply -f dev/mailpit.yaml >/dev/null
 $KUBECTL -n kobe-deps rollout status deploy/mailpit --timeout=180s >/dev/null
+$KUBECTL apply -f dev/s3.yaml >/dev/null # KOBE-27: S3-compatible test fixture (SeaweedFS, Apache-2.0)
+$KUBECTL -n kobe-deps rollout status deploy/s3 --timeout=300s >/dev/null
 $HELM upgrade --install kobe charts/kobe -n "$NS" -f dev/values.yaml \
   --set global.imageTag="$TAG" --set global.imagePullPolicy=IfNotPresent --wait --timeout 10m
 
@@ -580,6 +583,64 @@ contains "its /workspace survived hibernation" '^kobe-25$' "$(in_sandbox 'cat /w
 contains "its /tmp was wiped by hibernation" '^gone$' "$(in_sandbox 'test -e /tmp/kobe-25-marker && echo kept || echo gone')"
 audit_counts=$(psql_kobe "SELECT (SELECT count(*) FROM audit_log WHERE team_id = '$E2E_TEAM_ID' AND action = 'sandbox.hibernated' AND target->>'trigger' = 'operator') >= $((trials + 1)) AND (SELECT count(*) FROM audit_log WHERE team_id = '$E2E_TEAM_ID' AND action = 'sandbox.woken') >= $((trials + 1))")
 contains "every hibernation and wake is audited" '^t$' "$audit_counts"
+
+# KOBE-27: /workspace ↔ S3 (dev/s3.yaml: SeaweedFS, a test-only fixture). A dedicated user, so
+# destroying its volume never disturbs the sandboxes later sections use. Write a file, hibernate
+# (the agent's final push), destroy the PVC, wake: the file must be back on the new, empty volume.
+echo "==> workspace sync (KOBE-27)"
+SYNC_USER_ID=5c6d7e8f-9a0b-4c1d-8e2f-3a4b5c6d7e8f
+psql_kobe "INSERT INTO users (id, name, email, email_verified) VALUES ('$SYNC_USER_ID', 'E2E workspace sync user', 'workspace-sync@e2e.test', true) ON CONFLICT DO NOTHING;
+  INSERT INTO team_members (team_id, user_id, role) VALUES ('$E2E_TEAM_ID', '$SYNC_USER_ID', 'member') ON CONFLICT DO NOTHING;" >/dev/null
+sync_lifecycle() { # hibernate|wake → the CLI's answer
+  $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node dist/cli/lifecycle.js "$1" \
+    --team-id "$E2E_TEAM_ID" --user-id "$SYNC_USER_ID" 2>&1 | grep -E '^\{"(hibernated|woken)"' || true
+}
+sync_uid() { $KUBECTL -n "$TEAM_NS" get sandboxclaim "u-$SYNC_USER_ID" -o jsonpath='{.metadata.uid}' 2>/dev/null || true; }
+sync_pod() {
+  $KUBECTL -n "$TEAM_NS" get pods -l "agents.x-k8s.io/claim-uid=$(sync_uid)" \
+    -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{"\n"}{end}' 2>/dev/null | head -1
+}
+sync_pod_gone() { [[ -z "$($KUBECTL -n "$TEAM_NS" get pods -l "agents.x-k8s.io/claim-uid=$(sync_uid)" -o name 2>/dev/null)" ]]; }
+in_sync_sandbox() { $KUBECTL -n "$TEAM_NS" exec "$(sync_pod)" -c agent -- sh -c "$1" 2>&1 || true; }
+sync_wire_open() { [[ "$(psql_kobe "SELECT count(*) FROM sandbox_connections WHERE team_id = '$E2E_TEAM_ID' AND user_id = '$SYNC_USER_ID' AND closed_at IS NULL")" == 1 ]]; }
+sync_row() { psql_kobe "SELECT sha256 FROM workspace_files WHERE team_id = '$E2E_TEAM_ID' AND user_id = '$SYNC_USER_ID' AND path = 'reports/q3.md' AND NOT deleted"; }
+sync_row_present() { [[ "$(sync_row)" =~ ^[0-9a-f]{64}$ ]]; }
+SYNC_CONTENT="kobe-27 $(date +%s) $RANDOM"
+sync_restored() { [[ "$(in_sync_sandbox 'cat /workspace/reports/q3.md')" == "$SYNC_CONTENT" ]]; }
+ensure_sandbox "$E2E_TEAM_ID" e2e "$SYNC_USER_ID" >/dev/null || true
+if until_ok 240 sync_wire_open; then ok "the workspace-sync user's sandbox connects"
+else fail "the workspace-sync user's sandbox connects"; fi
+contains "the sandbox holds no object-storage credentials or endpoint (env)" '^0$' \
+  "$(in_sync_sandbox 'env | grep -ciE "s3|aws|secret.?access|access.?key" || true')"
+contains "the agent can write a report into its workspace" '^written$' \
+  "$(in_sync_sandbox "mkdir -p /workspace/reports && printf '%s' '$SYNC_CONTENT' > /workspace/reports/q3.md && echo written")"
+contains "the idle sandbox hibernates" '"hibernated":true' "$(sync_lifecycle hibernate)"
+if until_ok 120 sync_pod_gone; then ok "its pod is gone"; else fail "its pod is gone"; fi
+# Pushed by the agent's final flush on the way down (the periodic push is 60 s; this is sooner).
+if until_ok 60 sync_row_present; then ok "hibernation pushed the file to the durable copy (manifest row)"
+else fail "hibernation pushed the file to the durable copy (manifest row): got [$(sync_row)]"; fi
+sync_sha=$(sync_row)
+contains "its content is in S3 under the team/user prefix, named by its hash" "$sync_sha" \
+  "$($KUBECTL -n kobe-deps exec deploy/s3 -- sh -c "echo 'fs.ls /buckets/kobe/teams/$E2E_TEAM_ID/users/$SYNC_USER_ID/workspace/' | weed shell -master=localhost:9333" 2>&1 || true)"
+sync_claim=$($KUBECTL -n "$TEAM_NS" get sandboxclaim "u-$SYNC_USER_ID" -o jsonpath='{.status.sandbox.name}' 2>/dev/null || true)
+old_pvc=$($KUBECTL -n "$TEAM_NS" get pvc "workspace-${sync_claim:-none}" -o jsonpath='{.metadata.uid}' 2>/dev/null || true)
+$KUBECTL -n "$TEAM_NS" delete pvc "workspace-${sync_claim:-none}" --wait=true --timeout=120s >/dev/null 2>&1 || true
+new_pvc=$($KUBECTL -n "$TEAM_NS" get pvc "workspace-${sync_claim:-none}" -o jsonpath='{.metadata.uid}' 2>/dev/null || true)
+if [[ -n "$old_pvc" && "$new_pvc" != "$old_pvc" ]]; then ok "the sandbox's /workspace volume is destroyed"
+else fail "the sandbox's /workspace volume is destroyed (uid ${old_pvc:-none} → ${new_pvc:-none})"; fi
+sync_wake_at=$SECONDS
+contains "the sandbox is woken onto a new, empty volume" '"woken":true' "$(sync_lifecycle wake)"
+if until_ok 240 sync_restored; then ok "the file is back after the volume was lost ($((SECONDS - sync_wake_at)) s after the wake)"
+else
+  fail "the file is back after the volume was lost: got [$(in_sync_sandbox 'cat /workspace/reports/q3.md' | tail -1)]"
+  $KUBECTL -n "$TEAM_NS" logs "$(sync_pod)" -c agent --tail=30 2>&1 | sed 's/^/     agent: /' || true
+fi
+contains "a full restore onto an empty volume is audited" '^[1-9][0-9]*$' \
+  "$(psql_kobe "SELECT count(*) FROM audit_log WHERE team_id = '$E2E_TEAM_ID' AND action = 'workspace.restored' AND target->>'userId' = '$SYNC_USER_ID'")"
+# Restore timing as the agent measured it (scan + manifest + downloads), for the ledger.
+$KUBECTL -n "$TEAM_NS" logs "$(sync_pod)" -c agent 2>/dev/null | grep -E '"msg":"workspace restored"' | head -2 | sed 's/^/     agent: /' || true
+# And on a plain wake (volume kept): the cold-start user's last pod (incremental check only).
+$KUBECTL -n "$TEAM_NS" logs "${cold_pod:-none}" -c agent 2>/dev/null | grep -E '"msg":"workspace restored"' | head -1 | sed 's/^/     cold-start agent: /' || true
 
 # KOBE-30: messages and runs through the server API against the in-cluster Postgres. No model or
 # agent answers yet, so the run is stopped while its start waits for the (unwoken) sandbox.
@@ -1500,6 +1561,149 @@ elif [[ "${CI:-}" == "true" ]]; then
   fail "model gateway checks need KOBE_SANDBOX_IMAGE"
 else
   echo "SKIP model gateway checks (KOBE_SANDBOX_IMAGE not set)"
+fi
+
+# KOBE-58: MCP calls go only through the MCP proxy, which asks the server about every call. Gate 2:
+# a sandbox with a tampered kobe-policy (here: a client calling the proxy directly, never asking
+# policy.check) still cannot execute an MCP write without a signed approval. Runs from the same
+# sandbox-like client pod as the egress checks, against a fake remote MCP server in the cluster.
+echo "==> MCP proxy (KOBE-58)"
+if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_id:-}" && "${client_ready:-0}" == 1 ]]; then
+  read -r -d '' FAKE_MCP_JS <<'JS' || true
+const http = require("http");
+http.createServer((req, res) => {
+  if (req.method !== "POST") { res.writeHead(405).end(); return; }
+  let body = "";
+  req.on("data", (c) => (body += c));
+  req.on("end", () => {
+    const m = JSON.parse(body);
+    if (req.headers.authorization) console.log("AUTH-HEADER-PRESENT");
+    if (!("id" in m)) { res.writeHead(202).end(); return; }
+    const reply = (x) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: m.id, ...x }));
+    };
+    if (m.method === "initialize") {
+      reply({ result: { protocolVersion: m.params.protocolVersion, capabilities: { tools: {} },
+        serverInfo: { name: "e2e-fake", version: "1" } } });
+    } else if (m.method === "tools/call") {
+      console.log("CALL " + m.params.name + " " + JSON.stringify(m.params.arguments));
+      reply({ result: { content: [{ type: "text", text: "fake:" + m.params.name }] } });
+    } else {
+      reply({ error: { code: -32601, message: "not here" } });
+    }
+  });
+}).listen(8080);
+JS
+  $KUBECTL create namespace "$MCP_NS" --dry-run=client -o yaml | $KUBECTL apply -f - >/dev/null
+  $KUBECTL -n "$MCP_NS" run fake-mcp --restart=Never --image="$KOBE_SANDBOX_IMAGE" --labels=app=fake-mcp \
+    --command -- node -e "$FAKE_MCP_JS" >/dev/null
+  $KUBECTL -n "$MCP_NS" expose pod fake-mcp --port=80 --target-port=8080 --name=fake-mcp >/dev/null
+  $KUBECTL -n "$MCP_NS" wait --for=condition=Ready pod/fake-mcp --timeout=180s >/dev/null 2>&1 || true
+  wait_endpoints "$MCP_NS" fake-mcp
+  fake_mcp_ip=$($KUBECTL -n "$MCP_NS" get svc fake-mcp -o jsonpath='{.spec.clusterIP}')
+  # Allow exactly that Service IP (proxy check), plain http on port 80 (CI only), and its pods
+  # (proxy NetworkPolicy, which matches the pod port after Service translation).
+  mcp_rule=$(printf '[{"to":[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"%s"}}}]}]' "$MCP_NS")
+  if out=$($HELM upgrade kobe charts/kobe -n "$NS" --reuse-values --wait --timeout 5m \
+      --set mcpProxy.allowInsecureHttp=true --set-json 'mcpProxy.allowedPorts=[80]' \
+      --set-json "mcpProxy.allowedInternalCidrs=[\"$fake_mcp_ip/32\"]" \
+      --set-json "mcpProxy.networkPolicy.extraEgress=$mcp_rule" 2>&1); then ok "MCP proxy reconfigured with the fake MCP server"
+  else fail "MCP proxy reconfigured with the fake MCP server: $out"; fi
+
+  # The registry (KOBE-59's admin API later): one connector, two pinned tools, enabled for the team
+  # with exposure "all". A thread with an active run leased to the e2e sandbox (as run.start does).
+  MCP_CONNECTOR=3c9e1f20-5a4b-4c6d-8e7f-9a0b1c2d3e4f
+  MCP_THREAD=4d0f2031-6b5c-4d7e-9f80-0b1c2d3e4f50
+  MCP_RUN=5e103142-7c6d-4e8f-a091-1c2d3e4f5061
+  pinned() { # name read-only? → one snapshot entry
+    printf '{"name":"%s","pi_name":"mcp__e2e_fake__%s","description":"%s (pinned)","input_schema":{"type":"object"},"annotations":%s,"sha256":"%064d","status":"pinned"}' \
+      "$1" "$1" "$1" "$2" 0
+  }
+  snapshot="[$(pinned get_thing '{"readOnlyHint":true}'),$(pinned create_thing '{"destructiveHint":false}')]"
+  psql_kobe "INSERT INTO connectors (id, name, url, tools_snapshot) VALUES ('$MCP_CONNECTOR', 'e2e-fake', 'http://$fake_mcp_ip/mcp', '$snapshot'::jsonb)
+      ON CONFLICT (id) DO UPDATE SET url = EXCLUDED.url, tools_snapshot = EXCLUDED.tools_snapshot;
+    INSERT INTO team_connectors (team_id, connector_id, exposure, enabled_by) VALUES ('$E2E_TEAM_ID', '$MCP_CONNECTOR', 'all', '$E2E_USER_ID') ON CONFLICT DO NOTHING;
+    INSERT INTO threads (team_id, id, owner_user_id, status) VALUES ('$E2E_TEAM_ID', '$MCP_THREAD', '$E2E_USER_ID', 'running') ON CONFLICT DO NOTHING;
+    INSERT INTO runs (team_id, id, thread_id, trigger, status, started_at) VALUES ('$E2E_TEAM_ID', '$MCP_RUN', '$MCP_THREAD', 'user', 'running', now()) ON CONFLICT DO NOTHING;
+    INSERT INTO sandbox_run_leases (team_id, run_id, user_id, thread_id, sandbox_id) VALUES ('$E2E_TEAM_ID', '$MCP_RUN', '$E2E_USER_ID', '$MCP_THREAD', '$sandbox_id') ON CONFLICT DO NOTHING;" >/dev/null
+  mcp_token=$(mint kobe.mcp-proxy)
+  contains "an mcp-proxy session token for the sandbox was minted" '^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$' "$mcp_token"
+  mcp_proxy_ip=$(svc_ip kobe-mcp-proxy || true)
+  mcp_rpc() { # token json-body → the answer body, then "status=<http status>"
+    in_sandbox "curl -s -m 30 -w '\nstatus=%{http_code}\n' -H 'authorization: Bearer $1' -H 'content-type: application/json' \
+      -H 'accept: application/json, text/event-stream' -H 'kobe-thread-id: $MCP_THREAD' --data-raw '$2' \
+      http://$mcp_proxy_ip:80/v1/mcp/$MCP_CONNECTOR"
+  }
+  # Positive control: the (restarted) proxy answers this pod at all (receiving-side CNI warm-up).
+  mcp_up=$(in_sandbox "if $(retry "curl -s -o /dev/null -m 5 -w %{http_code} -X POST http://$mcp_proxy_ip:80/v1/mcp/$MCP_CONNECTOR | grep -q 401" 120); \
+    then echo mcp=ANSWERS; else echo mcp=SILENT; fi")
+  contains "control: the MCP proxy answers the sandbox-like client" '^mcp=ANSWERS$' "$mcp_up"
+  contains "the MCP proxy refuses a forged session token (401)" '^status=401$' \
+    "$(mcp_rpc forged.token.value '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')"
+  listed=$(mcp_rpc "$mcp_token" '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
+  contains "tools/list serves the connector's pinned tools (exposure all)" '"name":"get_thing".*"name":"create_thing"' "$listed"
+  read_call=$(mcp_rpc "$mcp_token" '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_thing","arguments":{"id":"7"}}}')
+  contains "a read-only tool call goes through the proxy to the remote MCP server" 'fake:get_thing' "$read_call"
+  write_call=$(mcp_rpc "$mcp_token" '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"create_thing","arguments":{"title":"x"}}}')
+  printf '     MCP write without approval: %s\n' "$(printf '%s' "$write_call" | tr '\n' ' ' | cut -c1-200)"
+  contains "Gate 2: an MCP write without a signed approval is refused at the proxy" '"isError":true' "$write_call"
+  contains "Gate 2: the refusal is the server's policy decision" 'Kobe denied this call' "$write_call"
+  fake_log=$($KUBECTL -n "$MCP_NS" logs fake-mcp 2>&1 || true)
+  contains "the remote server received the read call (exact input)" '^CALL get_thing \{"id":"7"\}$' "$fake_log"
+  expect "Gate 2: the remote server never received the unapproved write" '^(CALL get_thing .*)?$' "$(printf '%s\n' "$fake_log" | grep '^CALL' || true)"
+  contains "the sandbox's session token never reaches the remote server" '^0$' "$(printf '%s\n' "$fake_log" | grep -c AUTH-HEADER-PRESENT || true)"
+  contains "every MCP decision is in the audit log (mcp.tool_call: allowed and denied)" '^allowed,denied$' \
+    "$(psql_kobe "SELECT string_agg(DISTINCT target->>'decision', ',' ORDER BY target->>'decision') FROM audit_log
+      WHERE team_id = '$E2E_TEAM_ID' AND action = 'mcp.tool_call'")"
+  contains "the denied write is audited with why its approval was missing" '^risk_write\|no_approval$' \
+    "$(psql_kobe "SELECT (target->>'reason') || '|' || (target->>'approvalFailure') FROM audit_log
+      WHERE team_id = '$E2E_TEAM_ID' AND action = 'mcp.tool_call' AND target->>'decision' = 'denied' ORDER BY seq DESC LIMIT 1")"
+  # The user approves the write (KOBE-37 stores and signs it with the install key in the server;
+  # here the same row is written directly, signed in the server pod with the real key). The same
+  # direct call then runs exactly once.
+  approve() { # tool-call-id input-json → kid|expires_at|mac|canonical input
+    $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "
+      const { approvalKeyring } = await import('/app/dist/approvals/keys.js');
+      const { signApproval } = await import('/app/node_modules/@kobe/protocol/dist/node/index.js');
+      const { canonicalJson } = await import('/app/node_modules/@kobe/protocol/dist/index.js');
+      const [tcid, raw] = process.argv.slice(1);
+      const input = JSON.parse(raw);
+      const t = signApproval({ key: approvalKeyring(process.env.KOBE_APPROVAL_KEY).current,
+        approval_id: '6f214253-8d7e-4f90-b1a2-2d3e4f506172', team_id: '$E2E_TEAM_ID', run_id: '$MCP_RUN',
+        tool_call_id: tcid, tool: 'mcp__e2e_fake__create_thing', input, now: new Date() });
+      console.log([t.kid, t.expires_at, t.mac, canonicalJson(input)].join('|'));
+    " "$1" "$2" 2>&1 | tail -1
+  }
+  signed=$(approve toolu_e2e_1 '{"title":"x"}')
+  IFS='|' read -r a_kid a_exp a_mac a_input <<<"$signed"
+  psql_kobe "INSERT INTO approvals (team_id, id, run_id, thread_id, connection_id, user_id, tool_call_id, tool, input_canonical,
+      risk, reasons, status, cause, decided_by, decided_at, expires_at, token_kid, token_expires_at, input_hmac)
+    VALUES ('$E2E_TEAM_ID', '6f214253-8d7e-4f90-b1a2-2d3e4f506172', '$MCP_RUN', '$MCP_THREAD', gen_random_uuid(), '$E2E_USER_ID',
+      'toolu_e2e_1', 'mcp__e2e_fake__create_thing', '$a_input', 'write', '[]'::jsonb, 'allowed', 'user',
+      '$E2E_USER_ID', now(), now() + interval '1 hour', '$a_kid', '$a_exp', '$a_mac') ON CONFLICT DO NOTHING;" >/dev/null
+  approved=$(mcp_rpc "$mcp_token" '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"create_thing","arguments":{"title":"x"}}}')
+  contains "Gate 2: with a valid signed approval the same write runs" 'fake:create_thing' "$approved"
+  replayed=$(mcp_rpc "$mcp_token" '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"create_thing","arguments":{"title":"x"}}}')
+  contains "Gate 2: the approval is used once (a replay is refused)" '"isError":true' "$replayed"
+  contains "Gate 2: the remote server received the approved write exactly once" '^1$' \
+    "$($KUBECTL -n "$MCP_NS" logs fake-mcp 2>&1 | grep -c '^CALL create_thing ' || true)"
+  contains "the approval was consumed and audited (approval.consumed)" '^[1-9][0-9]*$' \
+    "$(psql_kobe "SELECT count(*) FROM audit_log WHERE team_id = '$E2E_TEAM_ID' AND action = 'approval.consumed'")"
+  # Sandboxes cannot skip the proxy and ask the server's internal port themselves.
+  internal=$(in_sandbox "curl -s -o /dev/null -m 5 http://$server_ip:8081/healthz && echo control=REACHED || echo control=BLOCKED; \
+    curl -s -o /dev/null -m 5 http://$server_ip:8082/healthz && echo internal=REACHED || echo internal=BLOCKED")
+  contains "control: the sandbox-like client reaches the server's sandbox port" '^control=REACHED$' "$internal"
+  contains "sandboxes cannot reach the server's internal port (MCP re-check)" '^internal=BLOCKED$' "$internal"
+  # Receiving side: only team namespaces may connect to the proxy (release namespace is refused).
+  wait_endpoints "$NS" kobe-server kobe-mcp-proxy
+  mcp_recv=$(probe "$NS" "$(gated http://kobe-server/healthz mcp http://kobe-mcp-proxy/healthz)")
+  contains "control: the release-namespace probe reaches the server" '^control=REACHED$' "$mcp_recv"
+  contains "the MCP proxy admits nothing but sandboxes (probe from the release namespace)" '^mcp=BLOCKED$' "$mcp_recv"
+elif [[ "${CI:-}" == "true" ]]; then
+  fail "MCP proxy checks need KOBE_SANDBOX_IMAGE, the e2e sandbox and the egress client pod"
+else
+  echo "SKIP MCP proxy checks (KOBE_SANDBOX_IMAGE not set)"
 fi
 
 exit "$failed"

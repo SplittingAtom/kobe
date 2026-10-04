@@ -1,6 +1,6 @@
 # KOBE-1: Gate 1 — Spine verification
 
-- **Status:** in review (PR pending); gate **not closed** — first token blocked (KOBE-40/41) and
+- **Status:** #52 merged; follow-up `kobe-1-storage-rancher` in review; gate **not closed** — first token blocked (KOBE-40/41) and
   the real cluster misses 8 s on Longhorn. Evidence: [docs/gates/gate-1.md](../gates/gate-1.md).
 - **Branch / worktree:** `kobe-1-gate1` in `../Kobe-wt1`
 - **Depends on:** KOBE-5, 6, 7, 8, 9, 12, 13, 14, 21, 22, 23, 24, 25, 26, 29, 30, 31, 32, 34 (all
@@ -52,8 +52,9 @@
 - `c2`'s workspace is an NFS volume (reclaim `Retain`: its directory stays on the share after
   teardown).
 - Teardown: `helm -n kobe-gate1 uninstall kobe`, then delete the team namespaces (their finalizers
-  release claims and PVCs), `kobe-gate1`, `kobe-gate1-deps`, and the ClusterRole/Binding
-  `kobe-gate1-rancher-updatepsa`; remove the retained NFS PV afterwards.
+  release claims and PVCs), `kobe-gate1`, `kobe-gate1-deps`; remove the retained NFS PV
+  afterwards. (The Rancher grant and the strict-local StorageClass are chart objects now and go
+  with the uninstall; the hand-made `kobe-gate1-rancher-updatepsa` objects were deleted.)
 
 ## Evidence (acceptance criteria → test or command output)
 
@@ -66,3 +67,27 @@ See [docs/gates/gate-1.md](../gates/gate-1.md). Summary:
 | Refresh mid-run gapless                    | ok ×10                                             | ok ×10                                                    |
 | Kill → interrupted + Retry, history intact | ok (31.1 s)                                        | ok (28.0 s)                                               |
 | Hibernated → first token p95 ≤ 8 s         | blocked (KOBE-40/41); proxy p95 5.0 s              | blocked; proxy p95 17.2 s, Pi ready p95 14.9 s (Longhorn) |
+
+## Follow-up (branch `kobe-1-storage-rancher`, decisions by Chris)
+
+1. **Storage: Longhorn strict-local.** Chart option `sandbox.workspace.longhornStrictLocal.enabled`
+   (off by default) creates a cluster-scoped StorageClass `<release>-<hash>-workspace-strict-local`
+   (Longhorn, 1 replica, `strict-local`, `WaitForFirstConsumer`) and points workspaces at it;
+   setting `storageClass` too is refused. Chosen over "document a class and set storageClass"
+   because the chart owns the name and the parameters that matter. Recovery from a lost node is
+   KOBE-27's S3 restore (PR #50, not merged yet), documented in install.md (delete the PVC, the
+   next wake restores). **Measured: no faster than 3-replica Longhorn** (Pi ready spaced p95 14.0 s;
+   first sandbox answer back-to-back p95 18.0 s, spaced 15.2 s). Breakdown in gate-1.md: ≈ 8 s is
+   Longhorn's engine start + replica health check, ≈ 3 s CSI publish + mount, ≈ 3 s the sandbox.
+   Not switched to another option (as instructed).
+2. **Rancher: `rancher.enabled`** (off by default) → ClusterRole/Binding granting `updatepsa` on
+   `projects.management.cattle.io` to the server SA; chart tests; the provider turns the webhook's
+   refusal into a `SandboxProvisioningError` naming the webhook and the flag (unit test + verified
+   on the real cluster). The gate install uses the flag; hand-made objects deleted.
+3. **Images:** ghcr packages still private at the time of the measurements (anonymous token
+   refused); the gate install runs `local-c94c126bec61` (this branch built on the build host and
+   imported into each node). `publish.yml`/install.md pull-secret wording unchanged until the
+   packages are public.
+
+Open: a provisioning refusal takes the router's full 90 s wake-retry budget before the run fails
+(it is not a definitive `SandboxWakeError`); a follow-up could make it definitive.
