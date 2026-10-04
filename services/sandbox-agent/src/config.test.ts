@@ -23,6 +23,15 @@ describe("sandbox-agent loadConfig", () => {
     );
   });
 
+  it("takes the skills directory (KOBE-82) from KOBE_SKILLS_DIR, absolute, unset = unsupported", () => {
+    const env = { ...base, KOBE_SERVER_URL: "wss://kobe" };
+    expect(loadConfig(env).skillsDir).toBeUndefined();
+    expect(loadConfig({ ...env, KOBE_SKILLS_DIR: "/run/kobe-skills" }).skillsDir).toBe(
+      "/run/kobe-skills",
+    );
+    expect(() => loadConfig({ ...env, KOBE_SKILLS_DIR: "skills" })).toThrow(/KOBE_SKILLS_DIR/);
+  });
+
   it("rejects a missing or non-WebSocket server URL", () => {
     expect(() => loadConfig({})).toThrow(/KOBE_SERVER_URL must be a ws/);
     expect(() => loadConfig({ ...base, KOBE_SERVER_URL: "https://kobe" })).toThrow(

@@ -15,6 +15,7 @@ import {
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { MAX_LIVE_SKILLS, MAX_SKILL_VERSIONS } from "./limits.js";
+import { isBlocked } from "./blocklist.js";
 import { recordPendingReview, recordPersonalScan } from "./review.js";
 
 /**
@@ -69,7 +70,7 @@ export interface NewSkillVersion {
   readonly scan: ScanResult;
 }
 
-export type UploadError = "unchanged" | "skill_limit" | "version_limit";
+export type UploadError = "unchanged" | "skill_limit" | "version_limit" | "blocklisted";
 export type UploadResult =
   | { readonly ok: true; readonly skill: SkillRecord; readonly version: SkillVersionRecord }
   | { readonly ok: false; readonly error: UploadError };
@@ -107,6 +108,7 @@ export function uploadSkillVersion(
 ): Promise<UploadResult> {
   return inLocation(db, location, async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey(location)}, 0))`);
+    if (await isBlocked(tx, input.contentHash)) return { ok: false, error: "blocklisted" };
     const existing = await findBySlug(tx, location, input.slug);
     if (existing) {
       const latest = await versionOf(tx, location, existing.id, existing.latestVersion);

@@ -103,6 +103,7 @@ describe("sandbox pod spec (D12, D13; secrets never enter sandboxes)", () => {
       KOBE_BOOTSTRAP_TOKEN_FILE: "/run/kobe-agent/bootstrap/bootstrap-token",
       KOBE_PI_RUNAS: "/opt/kobe/bin/kobe-runas",
       KOBE_PI_RUNTIME_DIR: "/run/kobe-pi",
+      KOBE_SKILLS_DIR: "/run/kobe-skills",
     });
   });
 
@@ -169,6 +170,15 @@ describe("sandbox pod spec (D12, D13; secrets never enter sandboxes)", () => {
     expect(must(spec.containers[0]).volumeMounts).toContainEqual({
       name: "pi-runtime",
       mountPath: "/run/kobe-pi",
+    });
+    // Effective skills (KOBE-82) on a sticky memory volume of their own, the agent's to write.
+    expect(spec.volumes).toContainEqual({
+      name: "pi-skills",
+      emptyDir: { medium: "Memory", sizeLimit: "128Mi" },
+    });
+    expect(must(spec.containers[0]).volumeMounts).toContainEqual({
+      name: "pi-skills",
+      mountPath: "/run/kobe-skills",
     });
   });
 });

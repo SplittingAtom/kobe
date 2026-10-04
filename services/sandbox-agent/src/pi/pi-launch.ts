@@ -21,8 +21,11 @@ import type { PiThreadConfig } from "@kobe/protocol";
  * root-owned paths); `--no-approve` ignores project-local
  * `.pi/` files; `--no-context-files` stops `AGENTS.md`/`CLAUDE.md` discovery (Kobe's instructions
  * come from agent files, D19; a model-written AGENTS.md would otherwise be a persistent prompt
- * injection across threads); `--no-skills` / `--no-prompt-templates` / `--no-themes` stop discovery
- * (gallery skills are passed explicitly by KOBE-49).
+ * injection across threads); `--no-skills` / `--no-prompt-templates` / `--no-themes` stop discovery.
+ * Skills (KOBE-82) are registered the one way Pi 1.0.0 documents for explicit paths: one repeatable
+ * `--skill <dir>` per effective skill (explicit paths still load under `--no-skills`, like `-e`
+ * under `--no-extensions`); the directories are the agent's read-only skills store, never anything
+ * under `$HOME` or `/workspace`.
  */
 export const POLICY_CHANNEL_FD = 3;
 
@@ -64,6 +67,11 @@ export interface PiLaunchInput {
    * root-owned paths outside anything the sandbox user can write, or `builtin:<name>`.
    */
   readonly extensions?: readonly string[];
+  /**
+   * Skill directories to register, one `--skill` each (KOBE-82): the run's effective skills as
+   * materialized by the skills store. Exactly these, in this order.
+   */
+  readonly skillDirs?: readonly string[];
   readonly parentEnv: Readonly<Record<string, string | undefined>>;
   readonly config?: PiThreadConfig | undefined;
 }
@@ -81,10 +89,11 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
   }
   if (input.modelsExtension !== undefined) args.push("--extension", input.modelsExtension);
   args.push("--extension", input.policyExtension);
+  for (const dir of input.skillDirs ?? []) args.push("--skill", path.resolve(dir));
   const config = input.config;
   if (config?.thinking_level !== undefined) args.push("--thinking", config.thinking_level);
-  // Seams (not wired here): model alias → KOBE-41, mcp_servers → KOBE-62, skills/agent/system
-  // prompt → KOBE-47/49. They change `key`, so a thread restarts Pi when its config changes.
+  // Seams (not wired here): model alias → KOBE-41, mcp_servers → KOBE-62, agent/system prompt →
+  // KOBE-47. They change `key`, so a thread restarts Pi when its config changes.
 
   const env: Record<string, string> = {};
   for (const name of INHERITED_ENV) {
@@ -107,6 +116,7 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
     agent: config?.agent ?? null,
     system_prompt: config?.system_prompt ?? null,
     skills: config?.skills ?? null,
+    skill_bundles: config?.skill_bundles ?? null,
     mcp_servers: config?.mcp_servers ?? null,
   });
   return { args, env, key };

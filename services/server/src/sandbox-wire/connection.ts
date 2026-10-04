@@ -91,6 +91,8 @@ export class SandboxConnection implements RegisteredConnection {
   #tokensAt = Date.now();
   #timers: NodeJS.Timeout[] = [];
   #registered = false;
+  /** `hello.capabilities` of the agent on this connection (none from older agents). */
+  #capabilities: ReadonlySet<string> = new Set();
   readonly #tokenExpiresAt: number;
 
   constructor(
@@ -182,6 +184,10 @@ export class SandboxConnection implements RegisteredConnection {
 
   hasLease(runId: string): boolean {
     return this.#leases.has(runId);
+  }
+
+  hasCapability(name: string): boolean {
+    return this.#capabilities.has(name);
   }
 
   leaseThread(threadId: string): void {
@@ -594,6 +600,7 @@ export class SandboxConnection implements RegisteredConnection {
       this.close("unsupported_version", `Pi ${hello.pi_version.slice(0, 32)} is not supported`);
       return;
     }
+    this.#capabilities = new Set(hello.capabilities ?? []);
     const current = await this.#registry.register(this);
     this.#registered = true;
     if ((this.#state as State) === "closed") {

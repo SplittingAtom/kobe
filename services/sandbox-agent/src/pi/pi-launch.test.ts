@@ -71,6 +71,30 @@ describe("buildPiLaunch", () => {
     expect(launch.args.join(" ")).not.toContain("--model");
   });
 
+  it("registers exactly the given skill directories, one --skill each (KOBE-82)", () => {
+    const launch = buildPiLaunch({
+      ...base,
+      parentEnv,
+      skillDirs: ["/run/kobe-skills/sk-aa", "/run/kobe-skills/sk-bb"],
+    });
+    const skills = launch.args.flatMap((a, i) => (a === "--skill" ? [launch.args[i + 1]] : []));
+    expect(skills).toEqual(["/run/kobe-skills/sk-aa", "/run/kobe-skills/sk-bb"]);
+    // Explicit paths only: discovery stays off.
+    expect(launch.args).toContain("--no-skills");
+    expect(buildPiLaunch({ ...base, parentEnv }).args).not.toContain("--skill");
+  });
+
+  it("restarts Pi when a skill's bundle changes, not only its name (KOBE-82)", () => {
+    const key = (sha256: string) =>
+      buildPiLaunch({
+        ...base,
+        parentEnv,
+        config: { skills: ["demo"], skill_bundles: [{ name: "demo", sha256, size: 10 }] },
+      }).key;
+    expect(key("a".repeat(64))).not.toBe(key("b".repeat(64)));
+    expect(key("a".repeat(64))).toBe(key("a".repeat(64)));
+  });
+
   it("builds Pi's environment from an allow-list: no agent config, tokens, keys or inspector", () => {
     const { env } = buildPiLaunch({ ...base, parentEnv });
     expect(env).toEqual({

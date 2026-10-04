@@ -1,4 +1,4 @@
-import { comingIn, defineInstallSection } from "../types";
+import { READY, defineInstallSection } from "../types";
 
 export default defineInstallSection({
   id: "skill-blocklist",
@@ -7,5 +7,5 @@ export default defineInstallSection({
   group: "Safety",
   order: 30,
   minRole: "admin",
-  status: comingIn("KOBE-49"),
+  status: READY,
 });

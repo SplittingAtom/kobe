@@ -30,6 +30,8 @@ export interface SkillReview {
   readonly scripts: readonly string[];
   readonly skipped: readonly string[];
   readonly scannedAt: string;
+  /** The bundle hash is on the install blocklist: approving is refused. */
+  readonly blocked: boolean;
   readonly reviewedBy: string | null;
   readonly reviewedAt: string | null;
   readonly reviewNote: string | null;

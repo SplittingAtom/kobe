@@ -13,6 +13,7 @@ import {
 } from "../skills/bundle.js";
 import { hitRateLimit } from "../rate-limit.js";
 import { SKILL_LIMITS, SKILL_UPLOAD_RATE } from "../skills/limits.js";
+import { isBlocked } from "../skills/blocklist.js";
 import { reviewsOfSkill, scanCanonicalZip } from "../skills/review.js";
 import {
   discardAttemptBundle,
@@ -47,15 +48,17 @@ const versionSchema = z.coerce.number().int().positive().max(2147483647);
 
 const error = (
   c: Ctx,
-  status: 400 | 403 | 404 | 409 | 413 | 415 | 503,
+  status: 400 | 403 | 404 | 409 | 413 | 415 | 422 | 503,
   code: string,
   message: string,
 ) => c.json({ code, message }, status);
 
-const UPLOAD_ERRORS: Record<UploadError, string> = {
+const UPLOAD_ERRORS: Record<UploadError | "blocklisted_download", string> = {
+  blocklisted_download: "This skill version is on the install's blocklist and can't be opened.",
   unchanged: "That bundle is identical to the current version.",
   skill_limit: "This location has reached its limit of skills.",
   version_limit: "This skill has reached its limit of versions.",
+  blocklisted: "This skill bundle is on the install's blocklist and can't be uploaded.",
 };
 
 const skillJson = (s: SkillRecord) => ({
@@ -193,7 +196,9 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
       });
       if (!result.ok) {
         await discard();
-        return error(c, 409, result.error, UPLOAD_ERRORS[result.error]);
+        return result.error === "blocklisted"
+          ? error(c, 422, "skill_blocklisted", UPLOAD_ERRORS.blocklisted)
+          : error(c, 409, result.error, UPLOAD_ERRORS[result.error]);
       }
       const review =
         scope.data === "team" ? { status: "pending", flagged: scan.findings.length > 0 } : null;
@@ -240,6 +245,8 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
     if (!found || !n.success) return error(c, 404, "not_found", "No such skill version.");
     const version = await getSkillVersion(db, found.location, found.skill.id, n.data);
     if (!version) return error(c, 404, "not_found", "No such skill version.");
+    if (await db.transaction((tx) => isBlocked(tx, version.contentHash)))
+      return error(c, 422, "skill_blocklisted", UPLOAD_ERRORS.blocklisted_download);
     if (!deps.blobs) return error(c, 503, "skills_unavailable", "Skill storage is not configured.");
     const object = await deps.blobs.objects.get(version.storageKey);
     if (!object) return error(c, 404, "not_found", "That version's bundle is not available.");

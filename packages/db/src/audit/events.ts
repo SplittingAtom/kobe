@@ -842,6 +842,10 @@ export const AUDIT_EVENTS = {
   }),
   /** A team admin switched the team's personal skills off or on (KOBE-80, D22). */
   "skill.personal_switch.changed": event("team", { disabled: z.boolean() }),
+  /** An install admin put a bundle hash on the install blocklist (KOBE-81); hash only, no reason. */
+  "skill.blocklist.added": event("install", { bundleHash: z.string().regex(/^[0-9a-f]{64}$/) }),
+  /** An install admin took a bundle hash off the blocklist (KOBE-81). */
+  "skill.blocklist.removed": event("install", { bundleHash: z.string().regex(/^[0-9a-f]{64}$/) }),
 } as const;
 
 export type AuditAction = keyof typeof AUDIT_EVENTS;

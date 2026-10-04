@@ -269,6 +269,7 @@ async function skillsOfRun(w: Awaited<ReturnType<typeof f.world>>, thread: strin
   const omitted = (await f.events(w.team, run)).find((e) => e.type === "context.omitted");
   return {
     skills: start.config?.skills ?? [],
+    bundleNames: (start.config?.skill_bundles ?? []).map((b: { name: string }) => b.name),
     omitted: (omitted?.payload as { items: unknown[] } | undefined)?.items ?? [],
   };
 }
@@ -286,8 +287,10 @@ describe("run start resolves skills (KOBE-80)", () => {
     const thread = await pinnedThread(w.owner, {
       skills: ["approved-one", "pending-one", "rejected-one", "no-review", "kept-old"],
     });
-    const { skills, omitted } = await skillsOfRun(w, thread);
+    const { skills, omitted, bundleNames } = await skillsOfRun(w, thread);
     expect([...skills].sort()).toEqual(["approved-one", "kept-old"]);
+    // Omitted skills are never materialized (no bundle).
+    expect([...bundleNames].sort()).toEqual(["approved-one", "kept-old"]);
     // KOBE-99: the dropped ones are named in the notice.
     expect(
       [...(omitted as { name: string; reason: string }[])].sort((a, b) =>

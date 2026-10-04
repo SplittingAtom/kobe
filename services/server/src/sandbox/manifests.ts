@@ -20,6 +20,8 @@ import {
   PI_RUNAS_HELPER,
   PI_RUNTIME_DIR,
   PI_RUNTIME_SIZE,
+  SKILLS_DIR,
+  SKILLS_SIZE,
   POD_SECURITY_LEVEL,
   SANDBOX_AGENT_GID,
   SANDBOX_CAPABILITIES,
@@ -258,6 +260,7 @@ function sandboxEnv(s: SandboxSettings): { name: string; value: string }[] {
     // to start when it cannot do that.
     { name: "KOBE_PI_RUNAS", value: PI_RUNAS_HELPER },
     { name: "KOBE_PI_RUNTIME_DIR", value: PI_RUNTIME_DIR },
+    { name: "KOBE_SKILLS_DIR", value: SKILLS_DIR },
     { name: "HTTP_PROXY", value: egress },
     { name: "HTTPS_PROXY", value: egress },
     { name: "http_proxy", value: egress },
@@ -337,6 +340,7 @@ export function sandboxPodSpec(
           { name: "workspace", mountPath: "/workspace" },
           { name: "tmp", mountPath: "/tmp" },
           { name: "pi-runtime", mountPath: PI_RUNTIME_DIR },
+          { name: "pi-skills", mountPath: SKILLS_DIR },
           { name: "home", mountPath: "/home/kobe" },
           { name: "kobe-bootstrap", mountPath: BOOTSTRAP_TOKEN_DIR, readOnly: true },
         ],
@@ -348,6 +352,8 @@ export function sandboxPodSpec(
       { name: "home", emptyDir: { sizeLimit: s.homeSize } },
       // KOBE-71: Pi's private runtime directories (sticky root, see PI_RUNTIME_DIR).
       { name: "pi-runtime", emptyDir: { medium: "Memory", sizeLimit: PI_RUNTIME_SIZE } },
+      // KOBE-82: the run's skills, written by the agent only (sticky root, see SKILLS_DIR).
+      { name: "pi-skills", emptyDir: { medium: "Memory", sizeLimit: SKILLS_SIZE } },
       {
         name: "kobe-bootstrap",
         projected: {

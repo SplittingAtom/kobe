@@ -1,5 +1,5 @@
 import { getConnInfo } from "@hono/node-server/conninfo";
-import { WORKSPACE_SYNC_PATH } from "@kobe/protocol";
+import { SKILL_BUNDLE_PATH, WORKSPACE_SYNC_PATH } from "@kobe/protocol";
 import { Hono, type Context } from "hono";
 import { IsolationRuntimeMissingError } from "../isolation/gate.js";
 import { logger } from "../logger.js";
@@ -30,6 +30,8 @@ export interface SandboxRoutesDeps {
   readonly sourceOf?: (c: Context) => string;
   /** Workspace sync endpoints (KOBE-27); absent when object storage is not configured. */
   readonly workspace?: ReturnType<WorkspaceSync["routes"]>;
+  /** Skill bundle downloads (KOBE-82); absent when object storage is not configured. */
+  readonly skills?: Hono;
 }
 
 function peerAddress(c: Context): string {
@@ -56,6 +58,7 @@ export function createSandboxApp(deps: SandboxRoutesDeps): Hono {
     await next();
   });
   if (deps.workspace) app.route(WORKSPACE_SYNC_PATH, deps.workspace);
+  if (deps.skills) app.route(SKILL_BUNDLE_PATH, deps.skills);
   app.route("/v1/sandbox", sandboxRoutes(deps));
   return app;
 }

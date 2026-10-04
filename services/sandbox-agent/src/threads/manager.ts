@@ -14,6 +14,7 @@ import {
   ensureSessionDir,
   sessionFilePath,
 } from "../pi/session-files.js";
+import { SkillError, type SkillStore } from "../skills/store.js";
 import { fail, ok, type CommandOutcome } from "./outcome.js";
 import { Thread, type ThreadEnv, type ThreadHooks } from "./thread.js";
 import type { RunModel } from "../models/types.js";
@@ -29,6 +30,11 @@ export interface ThreadManagerOptions extends ThreadEnv {
   /** Seam for KOBE-27 (S3 ↔ /workspace sync): runs before a prompt reaches Pi. */
   readonly beforeRun?: (frame: RunStartFrame) => Promise<void>;
   readonly beforeRunTimeoutMs?: number;
+  /**
+   * The skills store (KOBE-82). Absent (development, tests): a run that lists skills fails, one
+   * that lists none starts as before.
+   */
+  readonly skills?: Pick<SkillStore, "prepare" | "release">;
 }
 
 export const PI_REQUEST_TIMEOUT_MS = 60_000;
@@ -333,6 +339,7 @@ export class ThreadManager {
         // Re-checked under the lock: a command may have claimed the thread meanwhile.
         if (thread.busy || Date.now() - thread.lastUsed < this.#options.idleMs) return;
         await thread.stopProcess();
+        this.#options.skills?.release(thread.id);
         if (!thread.busy && this.#threads.get(thread.id) === thread) {
           this.#threads.delete(thread.id);
         }
@@ -405,8 +412,27 @@ export class ThreadManager {
     thread: Thread,
     frame: RunStartFrame | undefined,
   ): Promise<CommandOutcome | undefined> {
+    let skillDirs: readonly string[] = [];
+    if (frame !== undefined) {
+      const refs = frame.config?.skill_bundles ?? [];
+      // The skills come before the process: Pi is started with exactly the run's effective skills,
+      // and a store that fails (hash mismatch, unsafe bundle) fails the run instead of starting
+      // Pi with skills nobody vouched for.
+      if (this.#options.skills === undefined && refs.length > 0)
+        return fail("pi_unavailable", "skills: this sandbox cannot materialize skills");
+      const unlisted = (frame.config?.skills ?? []).filter((n) => !refs.some((r) => r.name === n));
+      if (unlisted.length > 0)
+        return fail("pi_rejected", `skills: no bundle for ${unlisted.join(", ")}`);
+      try {
+        skillDirs = (await this.#options.skills?.prepare(thread.id, refs)) ?? [];
+      } catch (error) {
+        const message = error instanceof SkillError ? error.message : (error as Error).message;
+        return fail("pi_unavailable", `skills: ${message}`);
+      }
+    }
     const launch = buildPiLaunch({
       sessionFile: this.#sessionFile(thread.id),
+      skillDirs,
       home: this.#options.home,
       modelsExtension: this.#options.models?.extension,
       policyExtension: this.#options.policyExtension,
@@ -470,7 +496,9 @@ export class ThreadManager {
       this.#evicting.add(idle);
       try {
         await idle.withLock(async () => {
-          if (!idle.busy) await idle.stopProcess(); // claimed meanwhile: leave it
+          if (idle.busy) return; // claimed meanwhile: leave it
+          await idle.stopProcess();
+          this.#options.skills?.release(idle.id);
         });
       } finally {
         this.#evicting.delete(idle);

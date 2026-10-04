@@ -6,6 +6,7 @@ import {
   asc,
   desc,
   eq,
+  getTableColumns,
   inArray,
   sql,
   installSkillScans,
@@ -22,6 +23,7 @@ import {
 import { recordAudit } from "../audit/record.js";
 import { logger } from "../logger.js";
 import type { BlobStore } from "../retention/blobs.js";
+import { isBlocked } from "./blocklist.js";
 
 /**
  * Scan results and team-admin review of team skill versions (KOBE-80, spec D22). Every new team
@@ -81,6 +83,8 @@ export interface ReviewRecord {
   readonly reviewedBy: string | null;
   readonly reviewedAt: Date | null;
   readonly reviewNote: string | null;
+  /** The bundle hash is on the install blocklist (KOBE-81): it can't be approved. */
+  readonly blocked: boolean;
 }
 
 const QUEUE_LIMIT = 200;
@@ -177,7 +181,10 @@ export function listReviews(
         : null;
     if (pageKeys.length === 0) return { reviews: [], nextCursor };
     const rows = await tx
-      .select()
+      .select({
+        ...getTableColumns(teamSkillReviews),
+        blocked: sql<boolean>`EXISTS (SELECT 1 FROM skill_blocklist b WHERE b.content_hash = "team_skill_reviews"."content_hash")`,
+      })
       .from(teamSkillReviews)
       .where(
         and(
@@ -214,7 +221,7 @@ export function reviewsOfSkill(
 
 export type DecideResult =
   | { readonly ok: true; readonly review: ReviewRecord }
-  | { readonly ok: false; readonly error: "not_found" | "unchanged" };
+  | { readonly ok: false; readonly error: "not_found" | "unchanged" | "blocklisted" };
 
 /** Approves or rejects a version; an earlier decision can be reversed. Audited. */
 export function decideReview(
@@ -232,6 +239,9 @@ export function decideReview(
     const [current] = await tx.select().from(teamSkillReviews).where(key).for("update");
     if (!current) return { ok: false, error: "not_found" };
     if (current.status === decision.status) return { ok: false, error: "unchanged" };
+    // A blocklisted bundle can still be rejected, never approved (KOBE-81).
+    const blocked = await isBlocked(tx, current.contentHash);
+    if (decision.status === "approved" && blocked) return { ok: false, error: "blocklisted" };
     const reviewedAt = new Date();
     await tx
       .update(teamSkillReviews)
@@ -260,6 +270,7 @@ export function decideReview(
       reviewedBy: decision.reviewerId,
       reviewedAt,
       reviewNote: decision.note,
+      blocked,
     };
     return { ok: true, review };
   });

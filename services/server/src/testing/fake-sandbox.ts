@@ -211,6 +211,7 @@ export class FakeSandbox {
     sandboxId: string,
     runs: { run_id: string; thread_id: string; last_seq: number }[] = [],
     pi = "1.0.0",
+    capabilities?: readonly string[],
   ): void {
     this.send({
       v: 1,
@@ -219,6 +220,7 @@ export class FakeSandbox {
       agent_version: "test",
       pi_version: pi,
       runs,
+      ...(capabilities === undefined ? {} : { capabilities }),
     });
   }
 

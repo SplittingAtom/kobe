@@ -2,6 +2,7 @@ import { resolvePinnedAgent } from "../agents/versions.js";
 import { readApprovalFloor, strictestApprovalMode } from "../policy/approval-floor.js";
 import { resolveEffective } from "../resolver/resolve.js";
 import { agentSkills } from "@kobe/agent-file";
+import { bundleRefsFor } from "../skills/materialize.js";
 import { buildResolveInput, loadSkillFacts, loadTeamFacts } from "./resolver-input.js";
 import type { RunAgentResolver } from "./seams.js";
 
@@ -65,10 +66,20 @@ export const PINNED_AGENTS: RunAgentResolver = {
     // Only an agent's own pin is its model; otherwise the thread's choice or the team default
     // is picked by the run start (`requestedModel`).
     const model = frontmatter.model !== undefined && value.model !== undefined;
+    // Materialization list (KOBE-82), in this same transaction: the blocklist is read once more, so
+    // a hash listed since the facts were loaded never reaches a sandbox. These refs are the only
+    // skills the sandbox makes present; `skills` (names) always equals their names.
+    const skillBundles = await bundleRefsFor(
+      tx,
+      { teamId: input.teamId, userId: input.ownerUserId },
+      value.skills,
+    );
     const config = {
       ...(model ? { model: { alias: value.model as string } } : {}),
       ...(mcpServers.length > 0 ? { mcp_servers: mcpServers } : {}),
-      ...(value.skills.length > 0 ? { skills: value.skills.map((s) => s.name) } : {}),
+      ...(skillBundles.length > 0
+        ? { skills: skillBundles.map((s) => s.name), skill_bundles: skillBundles }
+        : {}),
     };
     return {
       ok: true,
