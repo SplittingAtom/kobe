@@ -24,7 +24,7 @@ sandbox ── Pi ──▶ model-gateway shim ──▶ Bifrost ──▶ provi
                                                   /v1/runs/:id/usage, /v1/threads/:id/usage
 ```
 
-- **Ledger** (`packages/db` `schema/usage.ts`, migrations `0041_run_usage`, `0042_run_usage_rls`):
+- **Ledger** (`packages/db` `schema/usage.ts`, migrations `0043_run_usage`, `0044_run_usage_rls`):
   `run_usage(team_id, id, at, user_id, sandbox_id, run_id?, thread_id?, agent_id?, route, model,
 status, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, usage_source,
 cost_usd?, duration_ms, ttfb_ms?, aborted)`. `input_tokens` excludes cache reads/writes (each
