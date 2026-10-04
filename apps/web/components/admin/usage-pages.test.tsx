@@ -31,6 +31,15 @@ function stubUsage(body: unknown) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, init: RequestInit = {}) => {
+      if (url === "/v1/install/budget") {
+        const limits = {
+          monthly_usd: null,
+          daily_usd: null,
+          user_requests_per_minute: 60,
+          updated_at: "2026-10-01T00:00:00Z",
+        };
+        return new Response(JSON.stringify(limits), { status: 200 });
+      }
       urls.push({ url, team: new Headers(init.headers).get("x-kobe-team") });
       return new Response(JSON.stringify(body), { status: 200 });
     }),
@@ -70,6 +79,8 @@ describe("usage pages (KOBE-43)", () => {
     renderInstall(<InstallUsagePage />);
     const byTeam = await screen.findByRole("table", { name: "By team" });
     expect(within(byTeam).getByText("Finance")).toBeTruthy();
+    // KOBE-42: the install budget form sits on the same page.
+    expect(await screen.findByRole("button", { name: "Save install budget" })).toBeTruthy();
   });
 
   it("an empty range says so instead of drawing a chart", async () => {

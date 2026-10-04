@@ -20,4 +20,5 @@ export * from "./workspace-sync.js";
 export * from "./legal-holds.js";
 export * from "./approvals.js";
 export * from "./usage.js";
+export * from "./budgets.js";
 export * from "./retention.js";

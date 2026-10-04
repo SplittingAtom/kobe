@@ -7,6 +7,8 @@
 export const SEEDED_TABLES: Readonly<Record<string, string>> = {
   egress_domains:
     "egress presets seeded by migration 0027_egress_rls (KOBE-38); the backup carries the install's own ceiling",
+  install_model_limits:
+    "the install budget and default request rate seeded by migration 0046_budgets_rls (KOBE-42); the backup carries the install's own",
   model_gateway_state:
     "the gateway sync's progress row seeded by migration 0040_models_rls (KOBE-40); the backup carries the install's own",
 };

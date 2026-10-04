@@ -111,9 +111,14 @@ export async function endRunInTx(
   const from = run.rows[0]?.status;
   const threadRow = thread.rows[0];
   if (from === undefined || threadRow === undefined) return { ended: false };
-  // A budget stop is pending (KOBE-30/42): Pi settling after the step ends the run budget_stopped.
+  // A budget stop is pending (KOBE-30/42): Pi settling after the step ends the run budget_stopped,
+  // and so does a run whose next model call the gateway's budget gate refused before the stop
+  // reached Pi (`model_budget_exhausted`). Any other failure keeps its own code.
   const budgetScope = run.rows[0]?.budget_stop_scope ?? null;
-  const to: RunStatus = end.status === "completed" && budgetScope ? "budget_stopped" : end.status;
+  const budgetEnded =
+    end.status === "completed" ||
+    (end.status === "failed" && end.error.code === "model_budget_exhausted");
+  const to: RunStatus = budgetScope && budgetEnded ? "budget_stopped" : end.status;
   const cause = to === "budget_stopped" ? "budget_exhausted" : CAUSE[end.status];
   const settledWhileWaiting = from === "waiting_approval" && to === "completed";
   if (!canTransition(settledWhileWaiting ? "running" : from, to, cause)) {

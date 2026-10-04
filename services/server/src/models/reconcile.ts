@@ -46,12 +46,19 @@ const providerDiffers = (want: DesiredProvider, have: ObservedProvider) =>
   want.custom !== have.custom ||
   (want.custom && want.keyless !== have.keyless);
 
+/** The desired per-minute request limit of a virtual key (KOBE-42), if any. */
+const wantedPerMinute = (want: DesiredVirtualKey): number | undefined => {
+  const max = want.limits?.rate_limit?.request_max_limit;
+  return typeof max === "number" ? max : undefined;
+};
+
 const vkDiffers = (want: DesiredVirtualKey, teamId: string, have: ObservedVirtualKey) =>
   have.isActive !== vkActive(want) ||
   have.teamId !== teamId ||
   !have.allKeys ||
   !sameModels(want.models, have.models) ||
-  want.limits !== undefined;
+  (wantedPerMinute(want) !== undefined && wantedPerMinute(want) !== have.requestsPerMinute) ||
+  (want.limits?.budgets !== undefined && want.limits.budgets.length > 0);
 
 export async function reconcile(
   desired: DesiredState,

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   createServer,
   request as httpRequest,
@@ -84,7 +85,21 @@ function sendError(
     kind === "anthropic"
       ? { type: "error", error: { type: code, message } }
       : kind === "gemini"
-        ? { error: { code: status, message, status: GEMINI_STATUS[status] ?? "UNKNOWN" } }
+        ? {
+            error: {
+              code: status,
+              message,
+              status: GEMINI_STATUS[status] ?? "UNKNOWN",
+              // Gemini carries no string code: Kobe's goes in an ErrorInfo detail.
+              details: [
+                {
+                  "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                  reason: code,
+                  domain: "kobe",
+                },
+              ],
+            },
+          }
         : { error: { message, type: code, code } };
   const payload = JSON.stringify(body);
   res.writeHead(status, {
@@ -228,6 +243,7 @@ export function createModelGateway(options: GatewayOptions): Server {
     let bytesIn = 0;
     let usage: UsageReading | undefined;
     let ttfbMs: number | undefined;
+    let releaseGate: ((written: boolean) => void) | undefined;
     let bytesOut = 0;
     let bytesHeld = 0;
     let status = 0;
@@ -331,6 +347,7 @@ export function createModelGateway(options: GatewayOptions): Server {
       }
       call = {
         ...identity,
+        callId: randomUUID(),
         runId,
         route: route.kind,
         path: route.path,
@@ -352,6 +369,7 @@ export function createModelGateway(options: GatewayOptions): Server {
         return;
       }
       const decision = await options.gate.admit(call);
+      if (decision.ok && decision.release) releaseGate = decision.release;
       if (!decision.ok) {
         status = decision.status;
         sendError(
@@ -408,6 +426,9 @@ export function createModelGateway(options: GatewayOptions): Server {
       }
     } finally {
       release();
+      // The reservation lasts until the call's ledger row lands (usageRecordOf: forwarded calls
+      // that named a model), so the gate never sees spend that is neither reserved nor recorded.
+      releaseGate?.(usage !== undefined && call?.model !== undefined);
       options.bytes.give(identity.sandboxId, bytesHeld);
       if (call) {
         options.sink.record({

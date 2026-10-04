@@ -6,6 +6,13 @@ import {
   PROVIDER_ID_PATTERN,
   PROVIDER_MODEL_PATTERN,
 } from "../schema/models.js";
+import {
+  BUDGET_PERIODS,
+  BUDGET_SCOPES,
+  BUDGET_UNITS,
+  MAX_BUDGET_TOKENS,
+  MAX_BUDGET_USD,
+} from "../schema/budgets.js";
 import { BREAK_GLASS_MAX_MINUTES, BREAK_GLASS_NOTIFICATION_EVENTS } from "../schema/break-glass.js";
 import { RETENTION_PERIODS } from "../schema/retention.js";
 import { teamRole } from "../schema/team-members.js";
@@ -71,6 +78,10 @@ const toolRule = {
 /** An egress domain pattern or host (the `egress_domains` grammar): never a URL or path. */
 const egressDomain = z.string().max(253).regex(new RegExp(DOMAIN_PATTERN_SQL));
 const count = z.number().int().nonnegative();
+/** A budget amount in dollars (KOBE-42). */
+const usdAmount = z.number().nonnegative().max(MAX_BUDGET_USD);
+/** A token budget (KOBE-42, user decision: token budgets beside dollar budgets). */
+const tokenAmount = z.number().int().nonnegative().max(MAX_BUDGET_TOKENS);
 /** Model gateway (KOBE-40): ids and names as the `model_providers` / `model_catalog` grammar. */
 const providerId = z.string().max(32).regex(new RegExp(PROVIDER_ID_PATTERN));
 const providerKind = z.enum(MODEL_PROVIDER_KINDS);
@@ -396,6 +407,45 @@ export const AUDIT_EVENTS = {
     alias: modelAlias,
     enabled: z.boolean(),
     isDefault: z.boolean(),
+  }),
+  /**
+   * A budget or rate limit was set, changed or removed (KOBE-42, D30): the install's (install
+   * admins; no team), the team's or one member's (team admins). Amounts in dollars; null = none.
+   */
+  "models.budget.changed": event("any", {
+    scope: z.enum(BUDGET_SCOPES),
+    userId: id.optional(),
+    monthlyUsd: usdAmount.nullable(),
+    dailyUsd: usdAmount.nullable(),
+    /** Token budgets (named "volume": audit field names never say "token"). */
+    monthlyVolume: tokenAmount.nullable().optional(),
+    dailyVolume: tokenAmount.nullable().optional(),
+    /** The team's default member budget (team scope only). */
+    memberDefault: z
+      .strictObject({
+        monthlyUsd: usdAmount.nullable(),
+        dailyUsd: usdAmount.nullable(),
+        monthlyVolume: tokenAmount.nullable(),
+        dailyVolume: tokenAmount.nullable(),
+      })
+      .optional(),
+    /** Per-user requests per minute (install and team levels only); null = the install's. */
+    requestsPerMinute: z.number().int().positive().nullable().optional(),
+    removed: z.literal(true).optional(),
+  }),
+  /**
+   * A budget was used up (actor: system): from now on new model calls and new runs are refused at
+   * its level and active runs end after their current step (D30). Once per budget and period.
+   */
+  "models.budget.reached": event("any", {
+    scope: z.enum(BUDGET_SCOPES),
+    userId: id.optional(),
+    period: z.enum(BUDGET_PERIODS),
+    periodStart: z.iso.date(),
+    /** Dollars or tokens. */
+    unit: z.enum(BUDGET_UNITS),
+    limit: z.number().nonnegative().max(MAX_BUDGET_TOKENS),
+    spent: z.number().nonnegative(),
   }),
 
   // ── mcp: tool calls through the MCP proxy (KOBE-58, D27, D29); metadata only, never inputs ──

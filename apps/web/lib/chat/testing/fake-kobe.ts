@@ -95,6 +95,8 @@ export class FakeKobe {
   readonly runs = new Map<string, FakeRun>();
   /** `GET /v1/runs/{id}/usage` answers (KOBE-43); absent: a run without model calls. */
   readonly usage = new Map<string, Json>();
+  /** `GET /v1/team/budgets/status` (KOBE-42). */
+  budgetStatus: Json = { state: "ok", lines: [] };
   /** Requests answered with an error once, keyed "METHOD /path" (e.g. to simulate a 503). */
   readonly failNext = new Map<string, Response>();
   /** The install catalog with the team's choice (KOBE-44); empty = no models route answers. */
@@ -397,6 +399,7 @@ export class FakeKobe {
       });
     }
     const scoped =
+      url.pathname === "/v1/team/budgets/status" ||
       url.pathname.startsWith("/v1/threads") ||
       url.pathname.startsWith("/v1/runs") ||
       url.pathname.startsWith("/v1/approvals") ||
@@ -410,6 +413,9 @@ export class FakeKobe {
   upcomingRetention: { period: string; effective_at: string } | null = null;
 
   #route(method: string, url: URL, body: Json | undefined, headers: Headers): Response {
+    if (url.pathname === "/v1/team/budgets/status" && method === "GET") {
+      return json(200, this.budgetStatus);
+    }
     const parts = url.pathname.split("/").filter(Boolean); // v1, threads|runs, id, action
     const [, area, id, action, sub] = parts;
     if (area === "threads") return this.#threadRoute(method, id, action, sub, url, body, headers);

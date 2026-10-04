@@ -1699,6 +1699,36 @@ SH
     contains "that tells the user what to do" '^error_message=No model is enabled for your team yet' "$no_model"
     as_owner "PUT /v1/team/models/fast {\"enabled\":true,\"is_default\":true}" >/dev/null
 
+    # KOBE-42 / Gate 2: a budget stops a run after its current step. The fake model answers the
+    # first call with a bash tool call; that call alone ($0.08 at these prices) uses up the team's
+    # $0.01 budget, so the run's next model call never starts and the run ends budget_stopped.
+    budget_setup=$(as_owner \
+      "PATCH /v1/install/models/catalog/fast {\"input_usd_per_mtok\":10000,\"output_usd_per_mtok\":10000}" \
+      "PUT /v1/team/budgets/team {\"monthly_usd\":0.01}")
+    expect "the catalog model is priced and the team budget set" '^200 ' "$budget_setup"
+    budget_out=$(chat_run "kobe-tool-step budget-$RANDOM" 300000)
+    printf '     chat (budget): %s\n' "$(printf '%s' "$budget_out" | grep -v '^text=' | tr '\n' ' ')"
+    budget_run=$(printf '%s\n' "$budget_out" | sed -n 's/^run=//p')
+    budget_run_sql="'${budget_run:-00000000-0000-4000-8000-000000000000}'"
+    contains "Gate 2: the run ends budget_stopped" '^terminal=run.budget_stopped$' "$budget_out"
+    contains "Gate 2: with the budget's message" 'used up' \
+      "$(psql_kobe "SELECT payload->>'message' FROM run_events WHERE run_id = $budget_run_sql AND type = 'run.budget_stopped'")"
+    contains "Gate 2: the step in flight finished (its model call is in the ledger)" '^1$' \
+      "$(psql_kobe "SELECT count(*) FROM run_usage WHERE run_id = $budget_run_sql AND status = 200")"
+    # Deterministic: the fake model's tool step runs 3 s, and the stop reaches Pi meanwhile.
+    contains "Gate 2: the stop reached the run during its step (after_step)" '^after_step$' \
+      "$(psql_kobe "SELECT CASE WHEN EXISTS (SELECT 1 FROM audit_log WHERE action = 'run.budget_stopped' AND target->>'runId' = '${budget_run:-none}') THEN 'after_step' END")"
+    contains "Gate 2: no new model call started after the budget was used up" '^1$' \
+      "$(psql_kobe "SELECT count(*) FROM run_usage WHERE run_id = $budget_run_sql")"
+    contains "Gate 2: the budget reached is audited once" '^1$' \
+      "$(psql_kobe "SELECT count(*) FROM audit_log WHERE team_id = '$E2E_TEAM_ID' AND action = 'models.budget.reached'")"
+    contains "Gate 2: new runs are refused while the budget is used up" '^message=429$' \
+      "$(chat_run "refused-$RANDOM" 60000)"
+    restore=$(as_owner \
+      "PUT /v1/team/budgets/team {\"monthly_usd\":null}" \
+      "PATCH /v1/install/models/catalog/fast {\"input_usd_per_mtok\":null,\"output_usd_per_mtok\":null}")
+    expect "the budget and prices are removed again" '^200 ' "$restore"
+
     # ac-2: a revoked session token cannot call Bifrost (the member left the team; token unexpired).
     psql_kobe "DELETE FROM team_members WHERE team_id = '$E2E_TEAM_ID' AND user_id = '$MODEL_USER_ID';" >/dev/null
     contains "a revoked session token (member removed) is refused (401)" '^code=401$' \

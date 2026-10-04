@@ -1,6 +1,8 @@
 import {
+  MODELS_BUDGETS_PREFIX,
   MODELS_CHANNEL,
   MODELS_KEYS_PREFIX,
+  MODELS_SPEND_PREFIX,
   and,
   eq,
   isNull,
@@ -153,8 +155,16 @@ export class ModelGatewaySync {
     client.on("end", () => this.lost(client));
     client.on("notification", (n) => {
       if (n.channel !== MODELS_CHANNEL) return;
-      // `keys:<team>` is the sync's own output for the shims.
-      if (n.payload?.startsWith(MODELS_KEYS_PREFIX)) return;
+      // `keys:<team>` is the sync's own output for the shims; spend and budget hints are for the
+      // budget monitor and the shims' caches (a rate-limit change bumps the desired version).
+      const payload = n.payload ?? "";
+      if (
+        payload.startsWith(MODELS_KEYS_PREFIX) ||
+        payload.startsWith(MODELS_SPEND_PREFIX) ||
+        payload.startsWith(MODELS_BUDGETS_PREFIX)
+      ) {
+        return;
+      }
       this.request();
     });
     try {
@@ -311,6 +321,13 @@ export class ModelGatewaySync {
         .select({ alias: teamModels.alias })
         .from(teamModels)
         .where(eq(teamModels.teamId, team.id));
+      // KOBE-42: the members' request rate (the install's, or the team's lower one).
+      const rate = await tx.execute<{ rpm: number }>(sql`
+        SELECT LEAST(l.user_requests_per_minute,
+                     COALESCE(b.user_requests_per_minute, l.user_requests_per_minute)) AS rpm
+          FROM install_model_limits l
+          LEFT JOIN team_budgets b ON b.team_id = ${team.id}::uuid AND b.user_id IS NULL
+         WHERE l.id = 1`);
       const keys = await tx
         .select({
           userId: modelGatewayKeys.userId,
@@ -323,6 +340,7 @@ export class ModelGatewaySync {
         teamId: team.id,
         members: members.map((m) => m.userId).sort(),
         aliases: aliases.map((a) => a.alias),
+        ...(rate.rows[0] ? { requestsPerMinute: Number(rate.rows[0].rpm) } : {}),
         keys: new Map(keys.map((k) => [k.userId, { vkId: k.vkId, valueEnc: k.valueEnc }])),
       };
     });

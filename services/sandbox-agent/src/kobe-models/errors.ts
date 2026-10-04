@@ -32,6 +32,8 @@ const TRANSPORT_FAILURE =
 /** Codes meaning the run's model is not allowed for this team (the shim's or Bifrost's). */
 const NOT_ENABLED_CODES = new Set(["model_not_enabled", "model_blocked", "provider_blocked"]);
 const REVOKED_CODES = new Set(["session_revoked", "invalid_session_token"]);
+/** A used-up budget (KOBE-42): the shim's 402, or Bifrost's own budget refusal. */
+const BUDGET_CODES = new Set(["budget_exhausted", "policy_budget_exceeded"]);
 
 export const MAX_RETRY_AFTER_MS = 30_000;
 
@@ -53,7 +55,8 @@ function codeInBody(text: string): string | undefined {
     }
     seen.add(value);
     const record = value as Record<string, unknown>;
-    for (const key of ["code", "type"]) {
+    // Gemini errors carry Kobe's code as an ErrorInfo `reason` (the shim's sendError).
+    for (const key of ["code", "type", "reason"]) {
       const candidate = record[key];
       if (typeof candidate === "string" && /^[a-z][a-z0-9_]{2,63}$/.test(candidate)) {
         if (candidate !== "error") return candidate;
@@ -111,6 +114,10 @@ export function isUnauthorized(failure: Failure): boolean {
 
 /** The run error code for a failure that is not retried (any more). */
 export function runErrorCode(failure: Failure): ModelRunErrorCode {
+  // Only Kobe's own refusal or Bifrost's budget: a provider's own 402 (its billing) is an error.
+  if (failure.code !== undefined && BUDGET_CODES.has(failure.code)) {
+    return "model_budget_exhausted";
+  }
   if (failure.code !== undefined && NOT_ENABLED_CODES.has(failure.code)) return "model_not_enabled";
   if (failure.status === 403 && failure.code === undefined) return "model_not_enabled";
   if (isUnauthorized(failure)) return "model_session_revoked";

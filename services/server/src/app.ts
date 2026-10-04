@@ -6,6 +6,7 @@ import type { ServerDeps } from "./deps.js";
 import { logger } from "./logger.js";
 import type { IsolationGate } from "./isolation/gate.js";
 import { agentRoutes } from "./routes/agents.js";
+import { installBudgetRoutes, teamBudgetsRoutes } from "./routes/budgets.js";
 import { approvalRoutes } from "./routes/approvals.js";
 import { installAuditRoutes } from "./routes/install-audit.js";
 import { installEgressRoutes } from "./routes/install-egress.js";
@@ -108,6 +109,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/team/egress", teamEgressRoutes(deps));
   api.route("/team/models", teamModelsRoutes(deps));
   api.route("/team/usage", teamUsageRoutes(deps));
+  api.route("/team/budgets", teamBudgetsRoutes(deps));
   api.route("/team/break-glass", teamBreakGlassRoutes(deps));
   api.route("/team/retention", teamRetentionRoutes(deps));
   api.route("/team", teamRoutes(deps));
@@ -132,6 +134,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/install/egress-ceiling", installEgressRoutes(deps));
   api.route("/install/models", installModelsRoutes(deps));
   api.route("/install/usage", installUsageRoutes(deps));
+  api.route("/install/budget", installBudgetRoutes(deps));
   api.route("/install/break-glass", installBreakGlassRoutes(deps));
   api.route("/install/legal-hold", installLegalHoldRoutes(deps));
   api.route("/install/retention", installRetentionRoutes(deps));

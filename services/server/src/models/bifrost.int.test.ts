@@ -243,4 +243,43 @@ describe.skipIf(!BIN)("against a real Bifrost", () => {
     expect((await reconcile(removed, admin, logger)).errors).toEqual([]);
     expect((await chat("openai/gpt-x", vkHeader)).status).toBe(401);
   }, 60_000);
+
+  it("KOBE-42: enforces a member's request rate on the virtual key with logging off", async () => {
+    const admin = createHttpBifrostAdmin({ baseUrl: base, username: "kobe", password: PASSWORD });
+    const teamId = randomUUID();
+    const userId = randomUUID();
+    const providers: ProviderInput[] = [
+      { id: "openai", kind: "openai", baseUrl: up, allowPrivateNetwork: true, apiKey: "up-openai" },
+    ];
+    const catalog = [{ alias: "fast", providerId: "openai", model: "gpt-x" }];
+    const desired = (requestsPerMinute: number) =>
+      buildDesiredState(
+        {
+          providers,
+          catalog,
+          teams: [{ teamId, members: [userId], aliases: ["fast"], requestsPerMinute }],
+        },
+        "f".repeat(40),
+      );
+    const first = await reconcile(desired(2), admin, logger);
+    expect(first.errors).toEqual([]);
+    // The observed limit matches: nothing to change on the next pass.
+    expect((await reconcile(desired(2), admin, logger)).changes).toBe(0);
+    const vk = first.virtualKeys.get(virtualKeyName(teamId, userId))?.value ?? "";
+    const chat = () =>
+      fetch(`${base}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-bf-vk": vk },
+        body: JSON.stringify({ model: "openai/gpt-x", messages: [{ role: "user", content: "x" }] }),
+      }).then(async (r) => ({ status: r.status, text: await r.text() }));
+    expect((await chat()).status).toBe(200);
+    expect((await chat()).status).toBe(200);
+    const third = await chat();
+    expect(third.status).toBe(429);
+    expect(third.text).toContain("rate");
+    // A higher rate is pushed (a changed limit is an update) and admits calls again.
+    const raised = await reconcile(desired(100), admin, logger);
+    expect(raised.errors).toEqual([]);
+    expect(raised.changes).toBeGreaterThan(0);
+  }, 60_000);
 });

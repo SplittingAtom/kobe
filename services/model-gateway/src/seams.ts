@@ -23,6 +23,8 @@ export interface CallContext {
   readonly path: string;
   /** The model the request names (body `model`, or Gemini's path), when it does. */
   readonly model: string | undefined;
+  /** This call, for matching its ledger row (the usage sink's `onWritten`). */
+  readonly callId?: string;
   /** Input tokens the request may cost (its size / 4; 0 for a GET). */
   readonly inputEstimate?: number;
   /** Output tokens the call may produce as charged (usage/charge.ts `chargedOutput`). */
@@ -30,7 +32,14 @@ export interface CallContext {
 }
 
 export type GateDecision =
-  | { readonly ok: true }
+  | {
+      readonly ok: true;
+      /**
+       * Called once when the admitted call ends (e.g. to release an in-flight reservation);
+       * `written`: the call's usage row is on its way to the ledger.
+       */
+      readonly release?: (written: boolean) => void;
+    }
   | {
       readonly ok: false;
       readonly status: 402 | 403 | 429 | 503;

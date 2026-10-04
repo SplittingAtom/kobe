@@ -174,6 +174,11 @@ export class FakeBifrost implements BifrostAdmin {
       teamId: spec.teamId,
       models: Object.fromEntries(Object.entries(spec.models).map(([p, m]) => [p, [...m].sort()])),
       allKeys: true,
+      requestsPerMinute:
+        typeof spec.limits?.rate_limit?.request_max_limit === "number" &&
+        spec.limits.rate_limit.request_reset_duration === "1m"
+          ? spec.limits.rate_limit.request_max_limit
+          : undefined,
     };
   }
   async addVirtualKey(spec: VirtualKeySpec) {

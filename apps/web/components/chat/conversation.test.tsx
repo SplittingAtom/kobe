@@ -94,6 +94,28 @@ describe("streaming a run (D16)", () => {
     expect(fake.openStreams).toHaveLength(0);
   });
 
+  it("warns about a budget at 80 % and says why runs are refused at 100 % (KOBE-42)", async () => {
+    const { t } = threadWithHistory();
+    fake.budgetStatus = {
+      state: "warning",
+      lines: [
+        {
+          scope: "team",
+          period: "month",
+          unit: "usd",
+          limit: 100,
+          spent: 85,
+          percent: 85,
+          state: "warning",
+        },
+      ],
+    };
+    openApp(fake, t);
+    expect((await screen.findByLabelText("Budget")).textContent).toBe(
+      "Your team's monthly model budget is 85 % used.",
+    );
+  });
+
   it("shows the ended run's tokens and spend in its details (KOBE-43)", async () => {
     const { t } = threadWithHistory();
     openApp(fake, t);

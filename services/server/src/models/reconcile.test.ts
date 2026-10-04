@@ -169,6 +169,18 @@ describe("reconcile", () => {
     expect(second.virtualKeys.get(name)).toEqual(first.virtualKeys.get(name));
   });
 
+  it("KOBE-42: pushes each member's request rate as a virtual-key rate limit, only when it changed", async () => {
+    const rated = (rpm: number) => teams.map((t) => ({ ...t, requestsPerMinute: rpm }));
+    await reconcile(desired({ teams: rated(60) }), bifrost, logger);
+    const name = virtualKeyName(teamA, bob);
+    const vk = () => [...bifrost.virtualKeys.values()].find((v) => v.name === name);
+    expect(vk()?.requestsPerMinute).toBe(60);
+    expect((await reconcile(desired({ teams: rated(60) }), bifrost, logger)).changes).toBe(0);
+    const lowered = await reconcile(desired({ teams: rated(10) }), bifrost, logger);
+    expect(lowered.changes).toBe(3); // three virtual keys
+    expect(vk()?.requestsPerMinute).toBe(10);
+  });
+
   it("deactivates a virtual key whose team has no model enabled (fails closed)", async () => {
     await reconcile(desired(), bifrost, logger);
     const vk = () =>

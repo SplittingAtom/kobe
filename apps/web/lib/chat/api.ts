@@ -4,6 +4,7 @@
  * acting on the wrong team. Request bodies use the routes' snake_case (spec §6.1).
  */
 import { apiRequest, type ApiResult } from "../api/client";
+import type { BudgetStatus } from "../admin/api/budgets";
 import type { RunUsage } from "../admin/api/usage";
 import { listTeamModels, type TeamModels } from "../admin/api/team/models";
 import type {
@@ -74,6 +75,8 @@ export interface ChatApi {
   retry(runId: string): Promise<ApiResult<SubmitResult>>;
   /** Tokens and spend of one run (KOBE-43), as the model gateway measured them. */
   runUsage(runId: string): Promise<ApiResult<RunUsage>>;
+  /** The member's budgets and how much is used (KOBE-42: the 80 % warning, the 100 % stop). */
+  budgetStatus(): Promise<ApiResult<BudgetStatus>>;
   /** One of your approvals with its full input (KOBE-37). */
   getApproval(approvalId: string): Promise<ApiResult<ApprovalView>>;
   /** `POST /v1/approvals/{id}` (§6.1): allow or deny, optionally remembering an allow. */
@@ -128,6 +131,7 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     cancel: (runId) => send("POST", `/v1/runs/${enc(runId)}/cancel`),
     retry: (runId) => send("POST", `/v1/runs/${enc(runId)}/retry`),
     runUsage: (runId) => get(`/v1/runs/${enc(runId)}/usage`),
+    budgetStatus: () => get("/v1/team/budgets/status"),
     getApproval: (id) => get(`/v1/approvals/${enc(id)}`),
     decideApproval: (id, body) =>
       send("POST", `/v1/approvals/${enc(id)}`, {

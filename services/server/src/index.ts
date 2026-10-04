@@ -140,6 +140,8 @@ const retentionJob = deps
 retentionJob?.start();
 // Pending approvals past their 1 h TTL whose waiting replica is gone (D29, KOBE-37).
 deps?.approvals.start();
+// Budgets: spend hints from the model gateway and a sweep over every team (KOBE-42).
+deps?.budgets.start();
 isolation.start().catch((err: unknown) => logger.error({ err }, "isolation check failed"));
 
 // Blocked egress attempts → `egress.blocked` run events (KOBE-38); every server replica listens.
