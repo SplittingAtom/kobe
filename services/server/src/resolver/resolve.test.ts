@@ -15,7 +15,7 @@ const base: ResolveInput = {
       { alias: "smart", isDefault: false },
     ],
     connectors: [],
-    disabledPersonalSkills: [],
+    personalSkillsDisabled: false,
   },
   user: { skills: [], connectedConnectors: [] },
   approvalFloor: "auto",
@@ -117,17 +117,18 @@ describe("skills", () => {
     ]);
   });
 
-  it("team-disabled personal skill is omitted; agent skill of that name is not", () => {
+  it("team switch drops every personal skill, agent skills stay", () => {
     const r = resolveEffective(
       with_({
         agent: { skills: [sk("x")] },
-        user: { skills: [sk("x", "hx2"), sk("y")] },
-        team: { disabledPersonalSkills: ["x"] },
+        user: { skills: [sk("u1"), sk("u2")] },
+        team: { personalSkillsDisabled: true },
       }),
     );
-    expect(r.ok && r.value.skills).toEqual([sk("x"), sk("y")]);
+    expect(r.ok && r.value.skills).toEqual([sk("x")]);
     expect(r.ok && r.value.omissions).toEqual([
-      { kind: "skill", name: "x", reason: "team_disabled" },
+      { kind: "skill", name: "u1", reason: "team_disabled" },
+      { kind: "skill", name: "u2", reason: "team_disabled" },
     ]);
   });
 
@@ -158,12 +159,22 @@ describe("skills", () => {
 });
 
 describe("connectors", () => {
+  const omit = (name: string, reason: string) => ({ kind: "connector", name, reason });
   it.each([
-    ["agent list intersect team", ["a", "b"], ["b", "c"], [], ["b"], ["a"]],
-    ["none enabled", ["a"], [], [], [], ["a"]],
-    ["user-connected is added then filtered by team", [], ["u"], ["u", "v"], ["u"], ["v"]],
-    ["empty everywhere", [], [], [], [], []],
-  ])("%s", (_n, agent, team, user, want, omitted) => {
+    ["all three agree", ["a", "b"], ["a", "b"], ["a", "b"], ["a", "b"], []],
+    ["team filter", ["a", "b"], ["b"], ["a", "b"], ["b"], [omit("a", "not_team_enabled")]],
+    ["user filter", ["a", "b"], ["a", "b"], ["a"], ["a"], [omit("b", "not_user_connected")]],
+    [
+      "never added from the user's connections or the team list",
+      ["a"],
+      ["a", "t"],
+      ["a", "u"],
+      ["a"],
+      [],
+    ],
+    ["both filters name the team first", ["a"], [], [], [], [omit("a", "not_team_enabled")]],
+    ["empty", [], ["t"], ["u"], [], []],
+  ])("%s", (_n, agent, team, user, want, omissions) => {
     const r = resolveEffective(
       with_({
         agent: { connectors: agent },
@@ -172,9 +183,7 @@ describe("connectors", () => {
       }),
     );
     expect(r.ok && r.value.connectors).toEqual(want);
-    expect(r.ok && r.value.omissions).toEqual(
-      omitted.map((name) => ({ kind: "connector", name, reason: "not_team_enabled" })),
-    );
+    expect(r.ok && r.value.omissions).toEqual(omissions);
   });
 });
 

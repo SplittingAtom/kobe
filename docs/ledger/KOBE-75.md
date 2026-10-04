@@ -16,19 +16,18 @@ in `resolve.test.ts`.
   undefined plus a `no_team_default` omission.
 - Approval mode = strictest of install floor, agent request (default `ask-on-write`) and optional user
   pref, via `strictestApprovalMode`. The floor is install-wide (D6); there is no team floor.
-- Skills: agent skills, plus user skills unless the agent is exclusive; minus team-disabled personal
-  skills (by name, user skills only) and blocklisted hashes (both). A user skill with an agent skill's
+- Skills: agent skills, plus user skills unless the agent is exclusive; minus all personal skills when the
+  team switch `personalSkillsDisabled` is set (KOBE-80) and blocklisted hashes (both, by hash). A user skill with an agent skill's
   name is dropped (`shadowed_by_agent`; agent wins).
-- Connectors: (agent list + user-connected) filtered by team-enabled; user-connected is empty until
-  KOBE-61 (user decision 2026-10-04).
+- Connectors: agent list ∩ team-enabled ∩ user-connected (coordinator, spec); never added from the
+  user's or team's lists. Omissions: not_team_enabled, not_user_connected. KOBE-76 chooses the
+  user-connected input until KOBE-61.
 - Omission reasons: agent_exclusive, team_disabled, blocklisted, shadowed_by_agent, not_team_enabled,
   no_team_default. Mode tightening is not an omission.
 
 ## Open questions (for Chris or the coordinator)
 
-- Error text: reused the existing KOBE-41 message ("... Ask your team admin to enable it.") rather
-  than the brief's shorter wording, so run-start errors stay consistent.
-- Skill identity for team-disabled is by name; KOBE-76 may prefer ids.
+- Error text kept as KOBE-41's (coordinator confirmed).
 
 ## Evidence (acceptance criteria -> test or command output)
 

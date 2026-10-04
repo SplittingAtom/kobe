@@ -31,15 +31,15 @@ export interface ResolveInput {
   readonly team: {
     readonly models: readonly { readonly alias: string; readonly isDefault: boolean }[];
     readonly connectors: readonly string[];
-    /** Names of personal skills the team has disabled. */
-    readonly disabledPersonalSkills: readonly string[];
+    /** Team-level switch (KOBE-80): when true, no user-enabled personal skill is used. */
+    readonly personalSkillsDisabled: boolean;
   };
   readonly user: {
     /** The user's enabled personal skills. */
     readonly skills: readonly SkillRef[];
     /** A mode the user prefers; can only tighten. */
     readonly approvalMode?: ApprovalMode | null;
-    /** Connectors the user has connected themselves (empty until KOBE-61). */
+    /** Connectors the user has connected (KOBE-76 decides what to pass until KOBE-61). */
     readonly connectedConnectors: readonly string[];
   };
   readonly approvalFloor: ApprovalMode;
@@ -52,6 +52,7 @@ export type OmissionReason =
   | "blocklisted"
   | "shadowed_by_agent"
   | "not_team_enabled"
+  | "not_user_connected"
   | "no_team_default";
 
 export interface Omission {
@@ -78,7 +79,6 @@ function resolveSkills(input: ResolveInput): {
   omissions: Omission[];
 } {
   const blocked = new Set(input.blockedHashes);
-  const disabled = new Set(input.team.disabledPersonalSkills);
   const skills: SkillRef[] = [];
   const omissions: Omission[] = [];
   const omit = (s: SkillRef, reason: OmissionReason) =>
@@ -91,7 +91,7 @@ function resolveSkills(input: ResolveInput): {
   const agentNames = new Set(input.agent.skills.map((s) => s.name));
   for (const s of input.user.skills) {
     if (input.agent.exclusiveSkills) omit(s, "agent_exclusive");
-    else if (disabled.has(s.name)) omit(s, "team_disabled");
+    else if (input.team.personalSkillsDisabled) omit(s, "team_disabled");
     else if (blocked.has(s.hash)) omit(s, "blocklisted");
     else if (agentNames.has(s.name)) omit(s, "shadowed_by_agent");
     else skills.push(s);
@@ -99,15 +99,19 @@ function resolveSkills(input: ResolveInput): {
   return { skills, omissions };
 }
 
+/** Agent list, team-enabled and user-connected: a connector must pass all three. */
 function resolveConnectors(input: ResolveInput): { connectors: string[]; omissions: Omission[] } {
   const enabled = new Set(input.team.connectors);
-  const wanted = [...new Set([...input.agent.connectors, ...input.user.connectedConnectors])];
-  return {
-    connectors: wanted.filter((c) => enabled.has(c)),
-    omissions: wanted
-      .filter((c) => !enabled.has(c))
-      .map((name) => ({ kind: "connector", name, reason: "not_team_enabled" })),
-  };
+  const connected = new Set(input.user.connectedConnectors);
+  const connectors: string[] = [];
+  const omissions: Omission[] = [];
+  for (const name of new Set(input.agent.connectors)) {
+    if (!enabled.has(name)) omissions.push({ kind: "connector", name, reason: "not_team_enabled" });
+    else if (!connected.has(name)) {
+      omissions.push({ kind: "connector", name, reason: "not_user_connected" });
+    } else connectors.push(name);
+  }
+  return { connectors, omissions };
 }
 
 export function resolveEffective(input: ResolveInput): ResolveResult {
