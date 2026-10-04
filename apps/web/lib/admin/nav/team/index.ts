@@ -13,3 +13,4 @@ export { default as policy } from "./policy";
 export { default as retention } from "./retention";
 export { default as audit } from "./audit";
 export { default as breakGlass } from "./break-glass";
+export { default as skills } from "./skills";

@@ -7,6 +7,8 @@ export interface TestResponse {
   readonly json: any;
   readonly headers: Headers;
   readonly text: string;
+  /** The body as received (binary downloads). */
+  readonly bytes: Uint8Array;
 }
 
 /** A request body sent as-is with its own content type (e.g. a markdown file upload). */
@@ -61,7 +63,8 @@ export class TestBrowser {
       if (value === "" || /max-age=0/i.test(c)) this.cookies.delete(name);
       else this.cookies.set(name, value);
     }
-    const text = await res.text();
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const text = new TextDecoder().decode(bytes);
     let json: unknown = null;
     if (text) {
       try {
@@ -70,7 +73,7 @@ export class TestBrowser {
         json = text;
       }
     }
-    return { status: res.status, json, headers: res.headers, text };
+    return { status: res.status, json, headers: res.headers, text, bytes };
   }
 
   get = (path: string, headers?: Record<string, string>) =>

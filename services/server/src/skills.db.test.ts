@@ -303,6 +303,41 @@ describe("reading and walls", () => {
   });
 });
 
+describe("bundle download", () => {
+  it("streams the stored canonical zip to team members and the personal owner", async () => {
+    const up = await upload("bob", "team", asZip(zipOf("dl-team", { "a.txt": "hi" })));
+    const hash = up.json.version.contentHash as string;
+    const key = await keyOf(hash);
+    for (const who of ["bob", "carol"] as const) {
+      const res = await as[who].get(`/v1/skills/${up.json.skill.id}/versions/1/bundle`);
+      expect(res.status).toBe(200);
+      expect(Buffer.from(res.bytes).equals(objects.objects.get(key) as Buffer)).toBe(true);
+      expect(sha256Hex(res.bytes)).toBe(hash);
+      expect(res.headers.get("content-type")).toBe("application/zip");
+      expect(res.headers.get("content-disposition")).toMatch(
+        /^attachment; filename="dl-team-v1\.zip"$/,
+      );
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(res.headers.get("cache-control")).toBe("private, no-store");
+    }
+    const mine = await upload("bob", "personal", asMd(skillMd("dl-mine")));
+    const own = await as.bob.get(`/v1/skills/${mine.json.skill.id}/versions/1/bundle`);
+    expect(own.status).toBe(200);
+  });
+
+  it("answers 404 to other teams, other users' personal skills and missing versions", async () => {
+    const team = await upload("bob", "team", asMd(skillMd("dl-wall")));
+    const mine = await upload("bob", "personal", asMd(skillMd("dl-wall-mine")));
+    const t = team.json.skill.id;
+    const p = mine.json.skill.id;
+    expect((await as.dave.get(`/v1/skills/${t}/versions/1/bundle`)).status).toBe(404);
+    expect((await as.carol.get(`/v1/skills/${p}/versions/1/bundle`)).status).toBe(404);
+    expect((await as.bob.get(`/v1/skills/${t}/versions/9/bundle`)).status).toBe(404);
+    expect((await as.bob.get(`/v1/skills/${t}/versions/0/bundle`)).status).toBe(404);
+    expect((await as.bob.get(`/v1/skills/nope/versions/1/bundle`)).status).toBe(404);
+  });
+});
+
 describe("storage", () => {
   it("answers 503 when no object store is configured", async () => {
     const bare = await openHarness();

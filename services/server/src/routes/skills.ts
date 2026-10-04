@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
@@ -201,6 +202,28 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
     const version = await getSkillVersion(db, found.location, found.skill.id, n.data);
     if (!version) return error(c, 404, "not_found", "No such skill version.");
     return c.json({ skill: skillJson(found.skill), version: versionJson(version) });
+  });
+
+  /** The stored canonical zip of one version, for the browser editor (KOBE-83). Reads are not audited. */
+  app.get("/:id/versions/:version/bundle", async (c) => {
+    const found = await visible(c);
+    const n = versionSchema.safeParse(c.req.param("version"));
+    if (!found || !n.success) return error(c, 404, "not_found", "No such skill version.");
+    const version = await getSkillVersion(db, found.location, found.skill.id, n.data);
+    if (!version) return error(c, 404, "not_found", "No such skill version.");
+    if (!deps.blobs) return error(c, 503, "skills_unavailable", "Skill storage is not configured.");
+    const object = await deps.blobs.objects.get(version.storageKey);
+    if (!object) return error(c, 404, "not_found", "That version's bundle is not available.");
+    return new Response(Readable.toWeb(object.body) as ReadableStream, {
+      status: 200,
+      headers: {
+        "content-type": "application/zip",
+        "content-length": String(object.size),
+        "content-disposition": `attachment; filename="${found.skill.slug}-v${version.version}.zip"`,
+        "x-content-type-options": "nosniff",
+        "cache-control": "private, no-store",
+      },
+    });
   });
 
   return app;
