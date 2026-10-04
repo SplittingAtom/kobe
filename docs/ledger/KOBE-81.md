@@ -45,8 +45,11 @@ Status: PR open (branch `kobe-81-skill-blocklist`). Migration `0057_easy_jack_po
 - `apps/web/components/admin/skill-blocklist-page.test.tsx`: list + paging, block (lowercased),
   remove, server error shown.
 
-## Open questions
+- **Review queue badge** (coordinator): `listReviews` computes `blocked` with an EXISTS subquery in
+  the same row query; the page shows "Blocklisted". Tested in the db and web suites.
+- **Bundle download** `GET /v1/skills/:id/versions/:n/bundle` returns 422 `skill_blocklisted` for a
+  blocked hash (the KOBE-83 editor shows the message in its error alert; web test).
 
-- Should the team review queue also show a "blocklisted" badge on affected rows? Not done: the
-  approve error already names the cause.
-- Fall back to an older approved version when the newest is blocked? Chosen: no (see above).
+## Decided
+
+- No fallback to an older approved version when the newest is blocked: omit and notify (fail closed).

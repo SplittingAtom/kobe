@@ -6,6 +6,7 @@ import {
   asc,
   desc,
   eq,
+  getTableColumns,
   inArray,
   sql,
   installSkillScans,
@@ -82,6 +83,8 @@ export interface ReviewRecord {
   readonly reviewedBy: string | null;
   readonly reviewedAt: Date | null;
   readonly reviewNote: string | null;
+  /** The bundle hash is on the install blocklist (KOBE-81): it can't be approved. */
+  readonly blocked: boolean;
 }
 
 const QUEUE_LIMIT = 200;
@@ -178,7 +181,10 @@ export function listReviews(
         : null;
     if (pageKeys.length === 0) return { reviews: [], nextCursor };
     const rows = await tx
-      .select()
+      .select({
+        ...getTableColumns(teamSkillReviews),
+        blocked: sql<boolean>`EXISTS (SELECT 1 FROM skill_blocklist b WHERE b.content_hash = "team_skill_reviews"."content_hash")`,
+      })
       .from(teamSkillReviews)
       .where(
         and(
@@ -234,8 +240,8 @@ export function decideReview(
     if (!current) return { ok: false, error: "not_found" };
     if (current.status === decision.status) return { ok: false, error: "unchanged" };
     // A blocklisted bundle can still be rejected, never approved (KOBE-81).
-    if (decision.status === "approved" && (await isBlocked(tx, current.contentHash)))
-      return { ok: false, error: "blocklisted" };
+    const blocked = await isBlocked(tx, current.contentHash);
+    if (decision.status === "approved" && blocked) return { ok: false, error: "blocklisted" };
     const reviewedAt = new Date();
     await tx
       .update(teamSkillReviews)
@@ -264,6 +270,7 @@ export function decideReview(
       reviewedBy: decision.reviewerId,
       reviewedAt,
       reviewNote: decision.note,
+      blocked,
     };
     return { ok: true, review };
   });

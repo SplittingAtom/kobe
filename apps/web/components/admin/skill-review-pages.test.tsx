@@ -15,6 +15,7 @@ const review = (over: Record<string, unknown> = {}) => ({
   unscanned: false,
   status: "pending",
   flagged: false,
+  blocked: false,
   findings: [],
   scripts: [],
   skipped: [],
@@ -65,6 +66,16 @@ describe("Skill review (KOBE-80)", () => {
     expect(JSON.parse(String(post.body))).toEqual({ decision: "approved" });
     expect(post.headers.get("x-kobe-team")).toBe(TEAM.id);
     expect(await screen.findByText("No pending skill versions.")).toBeTruthy();
+  });
+
+  it("shows a Blocklisted badge on a blocklisted version", async () => {
+    stubApi({
+      [`GET ${SETTINGS}`]: [200, { personalSkillsDisabled: false }],
+      [`GET ${QUEUE}`]: [200, { reviews: [review({ blocked: true })] }],
+    });
+    renderTeam(<SkillReviewPage />);
+    const item = await screen.findByRole("article", { name: "report-writer version 2" });
+    expect(within(item).getByText("Blocklisted")).toBeTruthy();
   });
 
   it("shows the findings of a flagged version and asks before approving it", async () => {

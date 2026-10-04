@@ -41,6 +41,7 @@ const reviewJson = (r: ReviewRecord) => ({
   scripts: r.scripts,
   skipped: r.skipped,
   scannedAt: r.scannedAt,
+  blocked: r.blocked,
   reviewedBy: r.reviewedBy,
   reviewedAt: r.reviewedAt,
   reviewNote: r.reviewNote,

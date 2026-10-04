@@ -72,6 +72,7 @@ export {
   count,
   desc,
   eq,
+  getTableColumns,
   gt,
   inArray,
   isNotNull,

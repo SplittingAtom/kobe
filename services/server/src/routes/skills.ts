@@ -13,6 +13,7 @@ import {
 } from "../skills/bundle.js";
 import { hitRateLimit } from "../rate-limit.js";
 import { SKILL_LIMITS, SKILL_UPLOAD_RATE } from "../skills/limits.js";
+import { isBlocked } from "../skills/blocklist.js";
 import { reviewsOfSkill, scanCanonicalZip } from "../skills/review.js";
 import {
   discardAttemptBundle,
@@ -52,7 +53,8 @@ const error = (
   message: string,
 ) => c.json({ code, message }, status);
 
-const UPLOAD_ERRORS: Record<UploadError, string> = {
+const UPLOAD_ERRORS: Record<UploadError | "blocklisted_download", string> = {
+  blocklisted_download: "This skill version is on the install's blocklist and can't be opened.",
   unchanged: "That bundle is identical to the current version.",
   skill_limit: "This location has reached its limit of skills.",
   version_limit: "This skill has reached its limit of versions.",
@@ -243,6 +245,8 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
     if (!found || !n.success) return error(c, 404, "not_found", "No such skill version.");
     const version = await getSkillVersion(db, found.location, found.skill.id, n.data);
     if (!version) return error(c, 404, "not_found", "No such skill version.");
+    if (await db.transaction((tx) => isBlocked(tx, version.contentHash)))
+      return error(c, 422, "skill_blocklisted", UPLOAD_ERRORS.blocklisted_download);
     if (!deps.blobs) return error(c, 503, "skills_unavailable", "Skill storage is not configured.");
     const object = await deps.blobs.objects.get(version.storageKey);
     if (!object) return error(c, 404, "not_found", "That version's bundle is not available.");

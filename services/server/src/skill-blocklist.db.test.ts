@@ -153,6 +153,35 @@ describe("review queue", () => {
   });
 });
 
+describe("review queue badge", () => {
+  it("marks blocklisted rows in the same listing", async () => {
+    const bad = await upload("bob", "team", "badge-bad");
+    const good = await upload("bob", "team", "badge-good");
+    expect((await block(bad.hash)).status).toBe(201);
+    const res = await as("alice").get("/v1/team/skill-review?status=pending");
+    const blocked = new Map(
+      res.json.reviews.map((r: { slug: string; blocked: boolean }) => [r.slug, r.blocked]),
+    );
+    expect(blocked.get("badge-bad")).toBe(true);
+    expect(blocked.get("badge-good")).toBe(false);
+    expect(good.hash).not.toBe(bad.hash);
+  });
+});
+
+describe("bundle download", () => {
+  it("serves a bundle until its hash is blocklisted, then 422", async () => {
+    const s = await upload("bob", "team", "dl-skill");
+    const url = `/v1/skills/${s.skillId}/versions/1/bundle`;
+    expect((await as("bob").get(url)).status).toBe(200);
+    expect((await block(s.hash)).status).toBe(201);
+    const res = await as("bob").get(url);
+    expect(res.status).toBe(422);
+    expect(res.json.code).toBe("skill_blocklisted");
+    expect((await as("root").delete(`${BASE}/${s.hash}`)).status).toBe(204);
+    expect((await as("bob").get(url)).status).toBe(200);
+  });
+});
+
 describe("run start", () => {
   it("drops an approved team skill the moment its hash is listed, in every team, and restores it on removal", async () => {
     // Approved in both teams (same bytes: same hash).
