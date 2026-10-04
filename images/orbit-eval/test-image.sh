@@ -56,6 +56,9 @@ expect "orbit 1.0.3 and inspect-ai importable" '^1\.0\.3 0\.3\.' "$(raw python -
   'import importlib.metadata as m, orbit, inspect_ai; print(m.version("orbit"), m.version("inspect-ai"))')"
 expect "no setuid or setgid files" '^none$' "$(raw sh -c 'find / -xdev -perm /6000 -type f 2>/dev/null | head -3 | grep . || echo none')"
 expect "pip is not shipped" '^absent$' "$(raw sh -c 'python -c "import pip" 2>/dev/null && echo present || echo absent')"
+expect "apt and dpkg are not shipped" '^absent$' "$(raw sh -c \
+  'ls /usr/bin/apt* /usr/bin/dpkg* /usr/sbin/dpkg* /usr/lib/apt /var/cache/apt /var/lib/apt >/dev/null 2>&1 && echo present || echo absent')"
+expect "dpkg status database kept for vulnerability scanners" '^kept$' "$(raw sh -c '[ -s /var/lib/dpkg/status ] && echo kept || echo missing')"
 expect "app files are root-owned and read-only" '^0:0 ok$' "$(raw sh -c \
   'echo "$(stat -c %u:%g /opt/kobe/orbit-eval/scenarios/default-pack.yaml) $(find /opt/kobe -writable | head -1 | grep . || echo ok)"')"
 expect "output directory is owned by uid 1000" '^1000$' "$(raw stat -c %u /output)"

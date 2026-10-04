@@ -39,7 +39,10 @@ RUN groupadd --gid 1000 kobe \
  && chown -R 0:0 /opt/kobe \
  && chmod -R a-w,a+rX /opt/kobe \
  && python -m compileall -q /opt/kobe/orbit-eval \
- && find / -xdev -perm /6000 -type f -exec chmod a-s {} +
+ && find / -xdev -perm /6000 -type f -exec chmod a-s {} + \
+ && rm -rf /usr/bin/apt* /usr/bin/dpkg* /usr/sbin/dpkg* /usr/lib/apt /var/cache/apt /var/lib/apt
+# The package managers are removed (nothing installs at runtime). /var/lib/dpkg/status stays on
+# purpose: Trivy reads it to scan the Debian packages, and deleting it would blind the CVE gate.
 
 USER 1000:1000
 WORKDIR /tmp
