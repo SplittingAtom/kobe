@@ -55,6 +55,8 @@ export interface ThreadSearchHit {
   readonly agentVersion: number | null;
   readonly status: ThreadStatus;
   readonly sharedToProject: boolean;
+  /** The thread's chosen model alias (KOBE-44); null = the team's default. */
+  readonly modelAlias: string | null;
   readonly lastActivityAt: Date;
   readonly createdAt: Date;
   /** The active branch's leaf entry. */
@@ -82,6 +84,7 @@ interface HitRow extends Record<string, unknown> {
   agent_version: number | null;
   status: ThreadStatus;
   shared_to_project: boolean;
+  model_alias: string | null;
   activity_micros: string;
   created_micros: string;
   leaf_entry_id: string | null;
@@ -194,6 +197,7 @@ function toHit(row: HitRow): ThreadSearchHit {
     agentVersion: row.agent_version,
     status: row.status,
     sharedToProject: row.shared_to_project,
+    modelAlias: row.model_alias,
     // Raw execute returns timestamps as text; µs → ms (a Date's precision), as drizzle does.
     lastActivityAt: fromMicros(row.activity_micros),
     createdAt: fromMicros(row.created_micros),
@@ -233,7 +237,7 @@ function searchQuery(
     ),
     visible AS MATERIALIZED (
       SELECT t.team_id, t.id, t.title, t.tsv, t.owner_user_id, t.project_id, t.agent_id,
-             t.agent_version, t.status, t.shared_to_project, t.last_activity_at,
+             t.agent_version, t.status, t.shared_to_project, t.model_alias, t.last_activity_at,
              t.leaf_entry_id, t.created_at
       FROM threads t
       WHERE t.team_id = ${teamId}
@@ -284,7 +288,7 @@ function searchQuery(
     )
     -- Snippets only for the rows returned (not the look-ahead row), from a bounded prefix.
     SELECT r.id, r.title, r.owner_user_id, r.project_id, r.agent_id,
-           r.agent_version, r.status, r.shared_to_project,
+           r.agent_version, r.status, r.shared_to_project, r.model_alias,
            r.activity_micros::text AS activity_micros, r.leaf_entry_id,
            (extract(epoch FROM r.created_at) * 1000000)::bigint::text AS created_micros,
            r.score, r.matched_entry_id,

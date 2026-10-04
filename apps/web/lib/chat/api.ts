@@ -5,6 +5,7 @@
  */
 import { apiRequest, type ApiResult } from "../api/client";
 import type { RunUsage } from "../admin/api/usage";
+import { listTeamModels, type TeamModels } from "../admin/api/team/models";
 import type {
   ApprovalDecisionBody,
   ApprovalView,
@@ -39,7 +40,12 @@ export interface ChatApi {
   listThreads(cursor?: string): Promise<ApiResult<ThreadPage>>;
   searchThreads(q: string, cursor?: string): Promise<ApiResult<ThreadSearchPage>>;
   listTrash(cursor?: string): Promise<ApiResult<ThreadPage>>;
-  createThread(title?: string): Promise<ApiResult<ThreadSummary>>;
+  /** A new thread; `model` is an enabled alias, or null/absent for the team default (KOBE-44). */
+  createThread(title?: string, model?: string | null): Promise<ApiResult<ThreadSummary>>;
+  /** Sets the thread's model for its next runs (an enabled alias; null = the team default). */
+  setThreadModel(threadId: string, model: string | null): Promise<ApiResult<ThreadSummary>>;
+  /** The install catalog with the team's enabled models and default (`GET /v1/team/models`). */
+  listModels(): Promise<ApiResult<TeamModels>>;
   /** The thread with its entries after `after` (0 = from the start). */
   getThread(threadId: string, after?: number): Promise<ApiResult<ThreadDetail>>;
   /** The thread without its entries (the thread list's `fetch`). */
@@ -84,7 +90,13 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     listThreads: (cursor) => get(`/v1/threads${query({ cursor })}`),
     searchThreads: (q, cursor) => get(`/v1/threads${query({ q, cursor })}`),
     listTrash: (cursor) => get(`/v1/threads/trash${query({ cursor })}`),
-    createThread: (title) => send("POST", "/v1/threads", title === undefined ? {} : { title }),
+    createThread: (title, model) =>
+      send("POST", "/v1/threads", {
+        ...(title === undefined ? {} : { title }),
+        ...(model === undefined || model === null ? {} : { model }),
+      }),
+    setThreadModel: (id, model) => send("PATCH", `/v1/threads/${enc(id)}`, { model }),
+    listModels: () => listTeamModels(teamId, fetchFn),
     getThread: (id, after = 0) =>
       get(`/v1/threads/${enc(id)}${query({ after: after > 0 ? after : undefined, limit: 500 })}`),
     threadSummary: (id) => get(`/v1/threads/${enc(id)}${query({ limit: 1 })}`),

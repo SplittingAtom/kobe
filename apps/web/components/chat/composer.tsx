@@ -4,6 +4,7 @@ import { ComposerPrimitive, useAui, useAuiState } from "@assistant-ui/react";
 import type { KeyboardEvent } from "react";
 import { isBusy, isThreadRunning } from "../../lib/chat/thread-state";
 import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
+import { ModelPicker } from "./model-picker";
 import styles from "./chat.module.css";
 
 /**
@@ -72,6 +73,7 @@ export function Composer({ extras }: { readonly extras: KobeThreadExtras }) {
         submitMode="enter"
       />
       <div className={styles.composerActions}>
+        <ModelPicker controller={controller} state={state} isNew={remoteId === undefined} />
         <span id="kobe-composer-hint" className={styles.hint}>
           {running
             ? "Enter queues · Ctrl+Shift+Enter steers · Shift+Enter new line"

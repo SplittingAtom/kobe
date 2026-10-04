@@ -3,6 +3,8 @@
  * A controller lives while a view holds it (`acquire` / `release`); a thread created by the thread
  * list (`seed`) is ready before its view mounts, so the first message goes to the same controller.
  */
+import type { ApiResult } from "../api/client";
+import type { TeamModels } from "../admin/api/team/models";
 import type { ChatApi } from "./api";
 import type { EventSourceFactory } from "./stream";
 import { ThreadController } from "./thread-controller";
@@ -22,6 +24,8 @@ interface Held {
 }
 
 const TITLE_MAX = 80;
+/** How long the team's model list is reused by the chat's model picker. */
+export const MODELS_TTL_MS = 30_000;
 
 /** A thread's first title: the first line of its first message, shortened. */
 export function titleFrom(text: string): string | undefined {
@@ -43,6 +47,9 @@ export class ChatSession {
   /** Title for the thread `initialize` creates next (taken from the message being sent). */
   #nextTitle: string | undefined;
   readonly #createdListeners = new Set<() => void>();
+  /** Model for the thread `initialize` creates next (the new-thread picker; null = default). */
+  #nextModel: string | null = null;
+  #models: { readonly at: number; readonly result: Promise<ApiResult<TeamModels>> } | undefined;
 
   constructor(options: ChatSessionOptions) {
     this.teamId = options.teamId;
@@ -108,6 +115,36 @@ export class ChatSession {
     const title = this.#nextTitle;
     this.#nextTitle = undefined;
     return title;
+  }
+
+  /** The model picked for a conversation not created yet (KOBE-44). */
+  get draftModel(): string | null {
+    return this.#nextModel;
+  }
+
+  setDraftModel(model: string | null): void {
+    this.#nextModel = model;
+  }
+
+  /** The draft's model for the thread being created; the next draft starts from the default. */
+  takeNextModel(): string | null {
+    const model = this.#nextModel;
+    this.#nextModel = null;
+    return model;
+  }
+
+  /**
+   * The team's models for the picker, read at most every `MODELS_TTL_MS` (a team admin's change
+   * shows on the next thread opened after that, or at once after a failed run asks again).
+   */
+  models(options: { readonly fresh?: boolean } = {}): Promise<ApiResult<TeamModels>> {
+    const now = Date.now();
+    if (!options.fresh && this.#models && now - this.#models.at < MODELS_TTL_MS) {
+      return this.#models.result;
+    }
+    const result = this.api.listModels();
+    this.#models = { at: now, result };
+    return result;
   }
 
   /** Called when a new thread got its first message (the thread list reads its title again). */

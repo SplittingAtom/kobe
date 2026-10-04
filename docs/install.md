@@ -189,9 +189,20 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
 - **Configuration lives in Kobe.** Install admins add **providers** (OpenAI, Anthropic, Gemini,
   Ollama, or any OpenAI-compatible endpoint such as vLLM) with their API keys, and publish the
   **model catalog** (aliases such as `fast`, `smart`, `local`); team admins enable a subset and a
-  default (`/v1/install/models`, `/v1/team/models`; the admin console pages are KOBE-44). Keys are
-  stored sealed (AES-256-GCM) in Postgres, are write-only in the API, and are never logged or
-  audited (only "key set/changed").
+  default (install console **Models and providers**, team console **Models**). Keys are stored
+  sealed (AES-256-GCM) in Postgres, are write-only in the API, and are never logged or audited
+  (only "key set/changed").
+- **Which model a run uses.** The agent's pinned model if it has one, else the model the person
+  chose for the conversation (the chat's model picker), else the team's default. A pinned or chosen
+  model the team doesn't enable fails the run with a clear error; it never falls back silently.
+- **Aliases are names, not models.** A conversation (or agent) keeps the alias it chose, so an
+  alias removed from the catalog and **added again** with another provider or model is used again
+  by every conversation that chose it, on the new target, once a team enables it. Re-pointing an
+  alias (Edit) changes its model everywhere at once in the same way.
+- **Model listing.** The catalog editor suggests model ids from Bifrost's list for the provider;
+  "Ask the provider" has Bifrost call the provider's list-models API with the stored key (audited
+  `models.provider.models_refreshed`, 6 per minute per provider). The server itself never calls a
+  provider.
 - **Kobe pushes it to Bifrost.** The server reconciles Bifrost through Bifrost's admin API: on every
   change (Postgres `LISTEN/NOTIFY`, within seconds) and every 30 s. One server replica leads (a
   Postgres advisory lock); `GET /v1/install/models` reports `gateway.in_sync` and the last error.

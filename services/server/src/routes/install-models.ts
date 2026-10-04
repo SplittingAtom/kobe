@@ -23,6 +23,11 @@ import {
   updateProviderSchema,
 } from "../models/schemas.js";
 import { invalidRequest } from "../teams/http.js";
+import {
+  listProviderModels,
+  refreshProviderModels,
+  type DiscoveryResult,
+} from "../models/discovery.js";
 
 /** Parses a JSON body; the 400 names the first problem without echoing input (API keys). */
 async function body<T>(c: Context, schema: z.ZodType<T>) {
@@ -49,6 +54,37 @@ const endpointError = (c: Context, problem: "vendor_endpoint_fixed" | "insecure_
         },
     400,
   );
+/** The model picker's answer (KOBE-44): the list, or why there is none (never provider text). */
+function discoveryResponse(c: Context, result: DiscoveryResult) {
+  if (result.ok) return c.json(result.view);
+  switch (result.error) {
+    case "provider_not_found":
+      return providerNotFound(c);
+    case "provider_not_synced":
+      return err(
+        c,
+        409,
+        "provider_not_synced",
+        "The model gateway hasn't picked up this provider yet. Try again in a few seconds.",
+      );
+    case "refresh_rate_limited":
+      return c.json(
+        {
+          code: "rate_limited",
+          message: "This provider's models were refreshed several times just now. Wait a minute.",
+        },
+        429,
+      );
+    case "gateway_unavailable":
+      return err(
+        c,
+        503,
+        "gateway_unavailable",
+        "The model gateway can't be reached right now, so models can't be listed. Type the model id instead.",
+      );
+  }
+}
+
 const providerNotFound = (c: Context) =>
   err(c, 404, "provider_not_found", "That provider is not configured.");
 const partialPrices = (c: Context) =>
@@ -151,6 +187,31 @@ export function installModelsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVar
     return result === "in_use"
       ? err(c, 409, "provider_in_use", "Remove this provider's catalog models first.")
       : providerNotFound(c);
+  });
+
+  /**
+   * The models a provider serves, for the catalog editor's picker (KOBE-44): read through the
+   * gateway (Bifrost holds the key and reaches the provider), never returning a key.
+   */
+  app.get("/providers/:id/models", async (c) => {
+    const discovery = deps.models?.discovery;
+    if (!discovery) {
+      return err(c, 503, "models_not_configured", "The model gateway is not configured.");
+    }
+    const id = providerIdSchema.safeParse(c.req.param("id"));
+    if (!id.success) return providerNotFound(c);
+    return discoveryResponse(c, await listProviderModels(db, discovery, id.data));
+  });
+
+  /** Has the gateway ask the provider for its models now, with its key (audited, rate-limited). */
+  app.post("/providers/:id/models/refresh", async (c) => {
+    const discovery = deps.models?.discovery;
+    if (!discovery) {
+      return err(c, 503, "models_not_configured", "The model gateway is not configured.");
+    }
+    const id = providerIdSchema.safeParse(c.req.param("id"));
+    if (!id.success) return providerNotFound(c);
+    return discoveryResponse(c, await refreshProviderModels(db, discovery, id.data));
   });
 
   app.post("/catalog", async (c) => {

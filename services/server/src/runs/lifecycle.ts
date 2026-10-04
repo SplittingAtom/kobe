@@ -19,7 +19,12 @@ import {
   type RunRow,
   type ThreadRow,
 } from "./store.js";
-import { FAILURE_MESSAGES, agentModelNotEnabled, failureInfo } from "./failure-codes.js";
+import {
+  FAILURE_MESSAGES,
+  agentModelNotEnabled,
+  failureInfo,
+  threadModelNotEnabled,
+} from "./failure-codes.js";
 import { resolveRunModel, type RunModelConfig } from "./models.js";
 import type { AgentResolution, RunAgentResolver } from "./seams.js";
 
@@ -126,12 +131,18 @@ export async function promoteInTx(
       thread = await fail(thread, next, "agent_unavailable");
       continue;
     }
-    const resolution = await resolveRunModel(tx, teamId, resolved.config?.model?.alias);
+    const requested = requestedModel(thread, resolved);
+    const resolution = await resolveRunModel(tx, teamId, requested.alias);
     if (!resolution.ok) {
-      // The agent's pinned model is not enabled for this team: a clear failure, no fallback.
+      // The thread's or agent's model is not enabled for this team: a clear failure, no fallback.
       thread = await fail(thread, next, resolution.code, {
         type: "run.failed",
-        payload: { error: agentModelNotEnabled(resolution.alias) },
+        payload: {
+          error:
+            requested.source === "thread"
+              ? threadModelNotEnabled(resolution.alias)
+              : agentModelNotEnabled(resolution.alias),
+        },
       });
       continue;
     }
@@ -144,7 +155,7 @@ export async function promoteInTx(
         thread_id: threadId,
         agent_id: resolved.agent?.agentId ?? null,
         agent_version: resolved.agent?.version ?? null,
-        ...(model === undefined ? {} : { model: model.alias }),
+        ...(model === undefined ? {} : { model: model.alias, model_source: requested.source }),
         ...(next.retryOfRunId !== null ? { retry_of_run_id: next.retryOfRunId } : {}),
       },
     };
@@ -162,6 +173,24 @@ export async function promoteInTx(
 }
 
 type Resolved = Extract<AgentResolution, { ok: true }>;
+
+/** Where a run's model came from (KOBE-44), recorded in `run.started.model_source`. */
+export type ModelSource = "agent" | "thread" | "default";
+
+/**
+ * The run's requested model alias (KOBE-44, D30): the agent's pin (KOBE-47) when it sets one, else
+ * the model the thread's owner chose for the conversation, else none (the team's default). User
+ * decision (2026-10-04): the agent's pinned model wins over the conversation's choice.
+ */
+export function requestedModel(
+  thread: Pick<ThreadRow, "modelAlias">,
+  resolved: Pick<Resolved, "config">,
+): { readonly alias: string | undefined; readonly source: ModelSource } {
+  const pinned = resolved.config?.model?.alias;
+  if (pinned !== undefined) return { alias: pinned, source: "agent" };
+  if (thread.modelAlias !== null) return { alias: thread.modelAlias, source: "thread" };
+  return { alias: undefined, source: "default" };
+}
 
 /** The thread's agent version for a start; the resolver may only tighten the run's mode. */
 async function resolveForStart(
@@ -234,7 +263,7 @@ export async function restartPlanInTx(
   const resolution = await resolveRunModel(
     tx,
     run.teamId,
-    started ?? resolved.config?.model?.alias,
+    started ?? requestedModel(thread, resolved).alias,
   );
   if (!resolution.ok) return undefined;
   return planOf(thread, run, resolved, resolution.model);
