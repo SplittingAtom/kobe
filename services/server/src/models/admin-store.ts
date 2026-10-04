@@ -313,7 +313,28 @@ export async function deleteProvider(db: KobeDb, id: string): Promise<DeleteProv
 
 export type AddCatalogResult =
   | { readonly ok: true; readonly entry: CatalogView }
-  | { readonly ok: false; readonly error: "exists" | "provider_not_found" | "too_many" };
+  | {
+      readonly ok: false;
+      readonly error: "exists" | "provider_not_found" | "too_many" | "partial_prices";
+    };
+
+interface Prices {
+  readonly inputUsdPerMtok: number | null;
+  readonly outputUsdPerMtok: number | null;
+  readonly cacheReadUsdPerMtok: number | null;
+  readonly cacheWriteUsdPerMtok: number | null;
+}
+
+/**
+ * KOBE-43 review: prices come as a set: input and output together (one without the other would
+ * leave every call unpriced), cache prices only on top of them. A model without prices is capped
+ * by token budgets instead (KOBE-42).
+ */
+export function partialPrices(p: Prices): boolean {
+  const base = [p.inputUsdPerMtok, p.outputUsdPerMtok].filter((v) => v !== null).length;
+  const cache = p.cacheReadUsdPerMtok !== null || p.cacheWriteUsdPerMtok !== null;
+  return base === 1 || (base === 0 && cache);
+}
 
 export async function addCatalogEntry(
   db: KobeDb,
@@ -335,6 +356,16 @@ export async function addCatalogEntry(
     if (existing) return { ok: false, error: "exists" };
     const [{ n } = { n: 0 }] = await tx.select({ n: count() }).from(modelCatalog);
     if (n >= MAX_CATALOG_ENTRIES) return { ok: false, error: "too_many" };
+    if (
+      partialPrices({
+        inputUsdPerMtok: input.input_usd_per_mtok ?? null,
+        outputUsdPerMtok: input.output_usd_per_mtok ?? null,
+        cacheReadUsdPerMtok: input.cache_read_usd_per_mtok ?? null,
+        cacheWriteUsdPerMtok: input.cache_write_usd_per_mtok ?? null,
+      })
+    ) {
+      return { ok: false, error: "partial_prices" };
+    }
     const [row] = await tx
       .insert(modelCatalog)
       .values({
@@ -366,7 +397,7 @@ export async function addCatalogEntry(
 
 export type UpdateCatalogResult =
   | { readonly ok: true; readonly entry: CatalogView }
-  | { readonly ok: false; readonly error: "not_found" | "provider_not_found" };
+  | { readonly ok: false; readonly error: "not_found" | "provider_not_found" | "partial_prices" };
 
 export async function updateCatalogEntry(
   db: KobeDb,
@@ -387,16 +418,20 @@ export async function updateCatalogEntry(
       .where(eq(modelProviders.id, providerId))
       .for("share");
     if (!provider) return { ok: false, error: "provider_not_found" };
+    const prices = {
+      inputUsdPerMtok: keep(input.input_usd_per_mtok, before.inputUsdPerMtok),
+      outputUsdPerMtok: keep(input.output_usd_per_mtok, before.outputUsdPerMtok),
+      cacheReadUsdPerMtok: keep(input.cache_read_usd_per_mtok, before.cacheReadUsdPerMtok),
+      cacheWriteUsdPerMtok: keep(input.cache_write_usd_per_mtok, before.cacheWriteUsdPerMtok),
+    };
+    if (partialPrices(prices)) return { ok: false, error: "partial_prices" };
     const [row] = await tx
       .update(modelCatalog)
       .set({
         providerId,
         model: input.model ?? before.model,
         label: input.label === undefined ? before.label : input.label,
-        inputUsdPerMtok: keep(input.input_usd_per_mtok, before.inputUsdPerMtok),
-        outputUsdPerMtok: keep(input.output_usd_per_mtok, before.outputUsdPerMtok),
-        cacheReadUsdPerMtok: keep(input.cache_read_usd_per_mtok, before.cacheReadUsdPerMtok),
-        cacheWriteUsdPerMtok: keep(input.cache_write_usd_per_mtok, before.cacheWriteUsdPerMtok),
+        ...prices,
         updatedAt: new Date(),
       })
       .where(eq(modelCatalog.alias, alias))

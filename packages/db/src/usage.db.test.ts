@@ -149,6 +149,19 @@ describe("recordModelUsage", () => {
     expect(seenByB.map((r) => r.sandboxId)).toEqual([sbB]);
   });
 
+  it("is append-only for the app role: rows cannot be changed or removed (KOBE-43 review)", async () => {
+    const sb = randomUUID();
+    await recordModelUsage(app.db, [record({ sandboxId: sb })]);
+    const update = await withTeam(app.db, teamA, (tx) =>
+      tx.update(runUsage).set({ inputTokens: 0 }).where(eq(runUsage.sandboxId, sb)),
+    ).catch((e: unknown) => e);
+    expect((update as { cause?: { code?: string } }).cause?.code).toBe("42501");
+    const del = await withTeam(app.db, teamA, (tx) =>
+      tx.delete(runUsage).where(eq(runUsage.sandboxId, sb)),
+    ).catch((e: unknown) => e);
+    expect((del as { cause?: { code?: string } }).cause?.code).toBe("42501");
+  });
+
   it("clamps absurd counts instead of failing the batch", async () => {
     const sb = randomUUID();
     await recordModelUsage(app.db, [

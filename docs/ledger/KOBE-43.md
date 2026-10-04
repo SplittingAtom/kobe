@@ -43,7 +43,7 @@ cost_usd?, duration_ms, ttfb_ms?, aborted)`. `input_tokens` excludes cache reads
   provider's fields.
 - **Reported vs estimated.** Reported only when the response completed and carried a final usage
   report; otherwise estimated: reported fields kept, missing input = request bytes / 4, output =
-  generated text chars / 4 (response bytes / 4 when unreadable, e.g. content-encoded). So a
+  the larger of generated text chars / 4 and the request's output cap (see the review below). So a
   sandbox cannot make calls cheaper by suppressing usage (omitting `include_usage`, aborting a
   stream). Error answers (≥ 400) record zero tokens.
 - **Writing** (`DbUsageSink`): every forwarded model call (named a model, reached Bifrost) → a
@@ -105,6 +105,38 @@ cost_usd?, duration_ms, ttfb_ms?, aborted)`. `input_tokens` excludes cache reads
   **M6** (install admins see user names/emails and agent slugs per the install usage section's
   "by team, user, agent and model"; never thread titles or content), LOW items (content-encoding
   is never requested: `accept-encoding` is not forwarded).
+
+## Independent security review (coordinator) — resolutions
+
+- **HIGH-1 usage could be hidden:**
+  - (a) Responses `background: true` (Bifrost forwards `background` and `store`) is billed after
+    the call: the shim refuses it (400 `background_not_supported`; top-level key in any case,
+    structural scan). `store` only keeps a response for later retrieval, whose routes the shim
+    does not serve. Test: gateway "refuses background Responses".
+  - (b)–(d) The request's output cap is read structurally (`max_tokens`,
+    `max_output_tokens`, `max_completion_tokens`, Gemini `generationConfig.maxOutputTokens`;
+    the largest). A call without a final usage report — stream cut short, sandbox hung up before
+    the headers, a 5xx, an upstream reset or idle timeout after Bifrost got the request, a response
+    without usage — is charged `max(estimate, min(requested cap, 65,536))`, or 8,192 output tokens
+    when the request set no cap (`usage/charge.ts`); input is the request size / 4 unless reported.
+    Only 4xx refusals are free. Tests: meter "estimates a stream without a usage report…",
+    gateway "charges the input of a call Bifrost got…" (8,192), "a 5xx is charged like a call cut
+    short", `body-model.test.ts` "request facts for charging".
+  - **Outside the ledger:** per-call tool fees a provider bills on top of tokens (hosted
+    web_search, image generation, code interpreter) are not in usage reports and not counted.
+- **MEDIUM-2 partial prices:** the catalog API refuses input without output (or the reverse) and
+  cache prices without both (400 `partial_prices`). Unpriced models are capped by token budgets
+  (KOBE-42, user decision). Test: server `usage.db.test.ts`.
+- **LOW-3:** `run_usage` is append-only: a `BEFORE UPDATE OR DELETE` trigger refuses any change
+  (42501) except a cascade from a deleted team (trigger depth > 1); moving a row to another team
+  stays the RLS error. Test: db "is append-only for the app role". Rows are written only for calls
+  forwarded to Bifrost (a malformed request refused by the shim writes none), and the per-sandbox
+  request rate (10/s) bounds them. **Retention (not built):** rows are small (≈ 200 B); a later
+  ticket should roll rows older than the longest budget period (≥ 13 months for year views) into
+  daily aggregates per (team, user, model, agent) and delete them through a dedicated owner job.
+- **LOW-4:** e2e "the provider was asked for the stream's usage report (include_usage forced)":
+  a streaming chat call sent without `stream_options` through the shim and the real Bifrost
+  reaches the fake upstream with `include_usage: true` (`/_seen` `includeUsage`).
 
 ## Contract changes
 

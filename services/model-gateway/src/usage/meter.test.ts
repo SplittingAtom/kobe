@@ -1,17 +1,25 @@
 import { describe, expect, it } from "vitest";
 import type { RouteKind } from "../routes.js";
 import { JsonUsageScanner } from "./json-scan.js";
+import { DEFAULT_CHARGED_OUTPUT_TOKENS, MAX_CHARGED_OUTPUT_TOKENS } from "./charge.js";
 import { UsageMeter } from "./meter.js";
 
 const SSE = "text/event-stream";
 const JSON_TYPE = "application/json";
 
 /** Feeds `body` in chunks of `size` bytes (splitting lines and UTF-8 sequences). */
-function meter(kind: RouteKind, type: string, body: string, size = 7, complete = true) {
+function meter(
+  kind: RouteKind,
+  type: string,
+  body: string,
+  size = 7,
+  complete = true,
+  requested?: number,
+) {
   const m = new UsageMeter({ kind, contentType: type, contentEncoding: undefined });
   const bytes = Buffer.from(body, "utf8");
   for (let i = 0; i < bytes.length; i += size) m.write(bytes.subarray(i, i + size));
-  return m.finish(complete, 400);
+  return m.finish(complete, 400, requested);
 }
 
 const data = (v: unknown) => `data: ${JSON.stringify(v)}\n\n`;
@@ -98,12 +106,20 @@ describe("UsageMeter: streams (usage in the final events)", () => {
     });
   });
 
-  it("estimates a stream without a usage report (no include_usage): text length / 4", () => {
+  it("estimates a stream without a usage report: the larger of text / 4 and the output cap", () => {
     const body = data({ choices: [{ delta: { content: "x".repeat(400) } }] }) + "data: [DONE]\n\n";
-    expect(meter("openai", SSE, body)).toEqual({
+    // The request asked for at most 50 tokens: the 100 seen count.
+    expect(meter("openai", SSE, body, 7, true, 50)).toEqual({
       source: "estimated",
       counts: { input: 100, output: 100, cacheRead: 0, cacheWrite: 0 },
     });
+    // It asked for 4,000 (hidden reasoning is never streamed): 4,000.
+    expect(meter("openai", SSE, body, 7, true, 4_000).counts.output).toBe(4_000);
+    // No cap in the request: the default; a huge one: the documented maximum.
+    expect(meter("openai", SSE, body).counts.output).toBe(DEFAULT_CHARGED_OUTPUT_TOKENS);
+    expect(meter("openai", SSE, body, 7, true, 10_000_000).counts.output).toBe(
+      MAX_CHARGED_OUTPUT_TOKENS,
+    );
   });
 
   it("estimates a stream cut short, keeping the input side already reported", () => {
@@ -116,7 +132,7 @@ describe("UsageMeter: streams (usage in the final events)", () => {
         type: "content_block_delta",
         delta: { type: "text_delta", text: "y".repeat(80) },
       });
-    expect(meter("anthropic", SSE, body, 9, false)).toEqual({
+    expect(meter("anthropic", SSE, body, 9, false, 16)).toEqual({
       source: "estimated",
       counts: { input: 12, output: 20, cacheRead: 7, cacheWrite: 0 },
     });
@@ -222,7 +238,7 @@ describe("UsageMeter: JSON bodies", () => {
 
   it("estimates a JSON body without usage from its size", () => {
     const body = JSON.stringify({ choices: [{ message: { content: "a".repeat(100) } }] });
-    const reading = meter("openai", JSON_TYPE, body);
+    const reading = meter("openai", JSON_TYPE, body, 7, true, 1);
     expect(reading.source).toBe("estimated");
     expect(reading.counts.output).toBe(Math.ceil(body.length / 4));
   });
@@ -230,7 +246,7 @@ describe("UsageMeter: JSON bodies", () => {
   it("an encoded or unknown body is estimated from its size", () => {
     const m = new UsageMeter({ kind: "openai", contentType: SSE, contentEncoding: "gzip" });
     m.write(Buffer.alloc(40));
-    expect(m.finish(true, 8)).toEqual({
+    expect(m.finish(true, 8, 1)).toEqual({
       source: "estimated",
       counts: { input: 2, output: 10, cacheRead: 0, cacheWrite: 0 },
     });

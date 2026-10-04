@@ -71,6 +71,11 @@ beforeAll(async () => {
         res.end(JSON.stringify({ type: "model_blocked", error: { message: "not allowed" } }));
         return;
       }
+      if (Buffer.concat(chunks).toString().includes('"fail":500')) {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ type: "provider_server_error", error: { message: "boom" } }));
+        return;
+      }
       if (Buffer.concat(chunks).toString().includes('"slow":true')) {
         // Answers late: lets a test hang up before Bifrost's response headers.
         const t = setTimeout(() => {
@@ -427,6 +432,31 @@ describe("calls", () => {
     expect(records[0]).toMatchObject({ aborted: true });
     expect(records[0]?.usage?.source).toBe("estimated");
     expect(records[0]?.usage?.counts.input).toBeGreaterThan(100);
+    // The output the provider may already have produced: what the request allowed (no cap: 8,192).
+    expect(records[0]?.usage?.counts.output).toBe(8_192);
+  });
+
+  it("KOBE-43 review: a 5xx is charged like a call cut short; a 4xx refusal is free", async () => {
+    const r = await call("/v1/chat/completions", {
+      headers: bearer(),
+      body: { model: "openai/m", fail: 500, max_tokens: 300 },
+    });
+    expect(r.status).toBe(500);
+    expect(records[0]?.usage).toEqual({
+      source: "estimated",
+      counts: { input: expect.any(Number), output: 300, cacheRead: 0, cacheWrite: 0 },
+    });
+  });
+
+  it("KOBE-43 review: refuses background Responses (billed later, out of the ledger's sight)", async () => {
+    const r = await call("/v1/responses", {
+      headers: bearer(),
+      body: { model: "x", background: true },
+    });
+    expect(r.status).toBe(400);
+    expect(JSON.parse(r.text).error.code).toBe("background_not_supported");
+    expect(hits).toEqual([]);
+    expect(records).toEqual([]);
   });
 
   it("limits concurrent calls per sandbox (429)", async () => {

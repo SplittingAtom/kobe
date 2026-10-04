@@ -1353,6 +1353,10 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
       "$(chat openai/gpt-fake "$model_token")"
     contains "OpenAI: streaming responses stream through" '^data: \[DONE\]' \
       "$(chat openai/gpt-fake "$model_token" ',"stream":true')"
+    # KOBE-43: the shim forced stream_options.include_usage on that streaming call (it sent none),
+    # and Bifrost passed it on to the provider.
+    contains "the provider was asked for the stream's usage report (include_usage forced)" \
+      '"includeUsage":true' "$(probe "$NS" "$(answers "$LLM/_seen")")"
     contains "Anthropic native (x-api-key): answered by the Anthropic upstream" 'fake-anthropic: hello-e2e' \
       "$(model_call /anthropic/v1/messages '{"model":"anthropic/claude-fake","max_tokens":16,"messages":[{"role":"user","content":"hello-e2e"}]}' \
         "x-api-key: $model_token" 'anthropic-version: 2023-06-01')"

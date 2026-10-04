@@ -1,5 +1,6 @@
 import { StringDecoder } from "node:string_decoder";
 import type { RouteKind } from "../routes.js";
+import { chargedOutput } from "./charge.js";
 import { JsonUsageScanner, type FoundUsage } from "./json-scan.js";
 import { usageOf, type PartialCounts, type TokenCounts } from "./normalize.js";
 
@@ -133,7 +134,7 @@ export class UsageMeter {
   }
 
   /** The reading once the response ended (`complete`) or was cut short. */
-  finish(complete: boolean, requestBytes: number): UsageReading {
+  finish(complete: boolean, requestBytes: number, requestedOutput?: number): UsageReading {
     if (this.mode === "sse") this.sse(`${this.decoder.end()}\n`);
     if (this.mode === "json") {
       for (const found of this.scanner?.values ?? []) {
@@ -159,7 +160,11 @@ export class UsageMeter {
       source: "estimated",
       counts: {
         input: promptKnown ? (m.input ?? 0) : Math.ceil(requestBytes / CHARS_PER_TOKEN),
-        output: Math.max(m.output ?? 0, Math.ceil(generated / CHARS_PER_TOKEN)),
+        output: Math.max(
+          m.output ?? 0,
+          Math.ceil(generated / CHARS_PER_TOKEN),
+          chargedOutput(requestedOutput),
+        ),
         cacheRead: m.cacheRead ?? 0,
         cacheWrite: m.cacheWrite ?? 0,
       },

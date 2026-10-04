@@ -17,6 +17,7 @@ import type { ByteBudget, CallLimiter, RequestRate } from "./limits.js";
 import type { PrincipalCache, Resolution } from "./principals.js";
 import { classify, forwardedQuery, type RouteKind } from "./routes.js";
 import type { CallContext, CallGate, UsageSink } from "./seams.js";
+import { chargedOutput } from "./usage/charge.js";
 import { UsageMeter, type UsageReading } from "./usage/meter.js";
 
 /**
@@ -292,7 +293,8 @@ export function createModelGateway(options: GatewayOptions): Server {
       bytesIn = body.length;
       let forwardBody = body;
       let model = route.pathModel;
-      if (req.method === "POST" && !route.pathModel) {
+      let requestedOutput: number | undefined;
+      if (req.method === "POST") {
         const scanned = topLevelModel(body);
         if (!scanned.ok) {
           status = 400;
@@ -305,13 +307,35 @@ export function createModelGateway(options: GatewayOptions): Server {
           );
           return;
         }
-        model = scanned.model;
+        if (!route.pathModel) model = scanned.model;
+        requestedOutput = scanned.maxOutputTokens;
+        // KOBE-43: deferred (background) Responses are billed after the call ends, out of the
+        // ledger's sight: refused.
+        if (scanned.background) {
+          status = 400;
+          sendError(
+            res,
+            kind,
+            400,
+            "background_not_supported",
+            "Background responses are not supported through the model gateway.",
+          );
+          return;
+        }
         // KOBE-43: a streaming Chat Completions call always asks for its usage report.
         if (scanned.stream && route.path === "/v1/chat/completions") {
           forwardBody = withStreamUsage(body);
         }
       }
-      call = { ...identity, runId, route: route.kind, path: route.path, model };
+      call = {
+        ...identity,
+        runId,
+        route: route.kind,
+        path: route.path,
+        model,
+        inputEstimate: Math.ceil(body.length / 4),
+        requestedOutput,
+      };
       // Every model call names a model the team enabled (checked here too, so a disable holds even
       // when a push to Bifrost failed). Listing models (GET) names none.
       if (req.method === "POST" && (!model || !resolution.enabledModels.has(model))) {
@@ -349,10 +373,7 @@ export function createModelGateway(options: GatewayOptions): Server {
           forwardBody,
           resolution.virtualKey,
           attempt === 0,
-          {
-            kind: route.kind,
-            started,
-          },
+          { kind: route.kind, started, requestedOutput },
         );
         status = outcome.status;
         errorType = outcome.errorType;
@@ -418,9 +439,14 @@ export function createModelGateway(options: GatewayOptions): Server {
     source: "reported",
     counts: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   };
-  const inputOnly = (requestBytes: number): UsageReading => ({
+  const unanswered = (requestBytes: number, requested: number | undefined): UsageReading => ({
     source: "estimated",
-    counts: { input: Math.ceil(requestBytes / 4), output: 0, cacheRead: 0, cacheWrite: 0 },
+    counts: {
+      input: Math.ceil(requestBytes / 4),
+      output: chargedOutput(requested),
+      cacheRead: 0,
+      cacheWrite: 0,
+    },
   });
 
   function forward(
@@ -430,7 +456,11 @@ export function createModelGateway(options: GatewayOptions): Server {
     body: Buffer,
     virtualKey: string,
     mayRetry: boolean,
-    call: { readonly kind: RouteKind; readonly started: number },
+    call: {
+      readonly kind: RouteKind;
+      readonly started: number;
+      readonly requestedOutput: number | undefined;
+    },
   ): Promise<Outcome> {
     return new Promise((resolve) => {
       let bytesOut = 0;
@@ -445,12 +475,16 @@ export function createModelGateway(options: GatewayOptions): Server {
         // Usage counts what the upstream produced: a stream cut short still cost its tokens, and
         // a request Bifrost received but never answered (the sandbox hung up first, a reset) is
         // charged its input: the provider may already have it.
+        // A 4xx is a refusal (nothing consumed); a 5xx or a call that never answered may have
+        // been processed upstream, so it is charged like a call cut short (usage/charge.ts).
         const usage = meter
-          ? meter.finish(!o.aborted, body.length)
+          ? meter.finish(!o.aborted, body.length, call.requestedOutput)
           : errorAnswer
-            ? NO_TOKENS
+            ? o.status >= 500
+              ? unanswered(body.length, call.requestedOutput)
+              : NO_TOKENS
             : requestSent
-              ? inputOnly(body.length)
+              ? unanswered(body.length, call.requestedOutput)
               : undefined;
         resolve({ ...o, bytesOut, usage, ttfbMs });
       };
