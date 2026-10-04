@@ -8,7 +8,8 @@ import {
   type KobeDb,
   type KobeTx,
 } from "@kobe/db";
-import { TRASH_RETENTION_DAYS } from "./periods.js";
+import { PERIOD_DAYS, TRASH_RETENTION_DAYS, effectiveAt } from "./periods.js";
+import { readMaximumLayer, readTeamLayer } from "./settings.js";
 
 /**
  * Hard purge of threads (spec D18, KOBE-18): everything a thread owns goes with it — entries, runs,
@@ -29,8 +30,11 @@ import { TRASH_RETENTION_DAYS } from "./periods.js";
 export type PurgeSelection =
   /** In Trash for more than 30 days (D18 soft delete), or asked to be deleted for good. */
   | { readonly kind: "trash" }
-  /** No activity for `days` (the team's effective retention period). */
-  | { readonly kind: "retention"; readonly days: number }
+  /**
+   * Live threads with no activity for the team's effective retention period, read again in every
+   * batch's transaction (a lengthening mid-pass applies to the next batch; forever: none).
+   */
+  | { readonly kind: "retention" }
   /** Every thread a user owns in the team (offboarding, KOBE-28). */
   | { readonly kind: "user"; readonly userId: string }
   /** One thread of the owner's Trash ("Delete forever"). */
@@ -62,14 +66,14 @@ const LOCK_TIMEOUT = "5s";
 const PENDING_RUN_STATUSES = sql.raw(`'queued', 'running', 'waiting_approval'`);
 const TRASH_INTERVAL = sql.raw(`interval '${TRASH_RETENTION_DAYS} days'`);
 
-function predicate(selection: PurgeSelection) {
+function predicate(selection: PurgeSelection, retentionDays: number) {
   switch (selection.kind) {
     case "trash":
       return sql`t.deleted_at IS NOT NULL AND t.deleted_at <= now() - ${TRASH_INTERVAL}`;
     case "retention":
       // Live threads only: a thread in Trash keeps its full 30 days (the "trash" selection).
       return sql`t.deleted_at IS NULL
-        AND t.last_activity_at < now() - make_interval(days => ${selection.days})`;
+        AND t.last_activity_at < now() - make_interval(days => ${retentionDays})`;
     case "user":
       return sql`t.owner_user_id = ${selection.userId}`;
     case "thread":
@@ -173,9 +177,18 @@ export async function purgeBatchInTx(
   // Before the hold lock: a pending hold approval must not make a purge wait without bound.
   await tx.execute(sql.raw(`SET LOCAL lock_timeout = '${LOCK_TIMEOUT}'`));
   await lockLegalHolds(tx);
+  let retentionDays = 0;
+  if (selection.kind === "retention") {
+    const days =
+      PERIOD_DAYS[
+        effectiveAt(await readTeamLayer(tx, teamId), await readMaximumLayer(tx), new Date())
+      ];
+    if (days === null) return { ...NO_PURGE, threadIds: [], more: false };
+    retentionDays = days;
+  }
   const found = await tx.execute<Candidate>(sql`
     SELECT t.id, t.owner_user_id, t.last_entry_seq FROM threads t
-     WHERE t.team_id = ${teamId} AND ${predicate(selection)}
+     WHERE t.team_id = ${teamId} AND ${predicate(selection, retentionDays)}
        AND NOT public.legal_hold_covers(t.team_id, t.owner_user_id)
        AND NOT EXISTS (
          SELECT 1 FROM runs r

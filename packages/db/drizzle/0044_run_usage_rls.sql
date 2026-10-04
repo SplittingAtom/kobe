@@ -8,6 +8,10 @@ CREATE POLICY "team_isolation" ON "run_usage"
 --> statement-breakpoint
 -- The ledger is append-only (KOBE-43 review): budgets (KOBE-42) sum it, so no app path may change
 -- or remove a row. Only a cascade (a team deleted: trigger depth > 1) may delete rows.
+-- The depth test is sound only while the app role cannot create functions or triggers of its
+-- own: migrate.ts revokes CREATE on schema public and CREATE, TEMPORARY on the database from
+-- PUBLIC (no temp tables or pg_temp functions), and the app role holds no TRIGGER privilege
+-- (app-role-capabilities.db.test.ts).
 CREATE FUNCTION "kobe_run_usage_append_only"() RETURNS trigger LANGUAGE plpgsql
   SET search_path = pg_catalog, public AS $$
 BEGIN

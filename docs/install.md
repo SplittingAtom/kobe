@@ -420,6 +420,18 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
     ON thread_entries (team_id, blob_ref) WHERE blob_ref IS NOT NULL;
   ```
 
+  A `CONCURRENTLY` build that fails or is cancelled leaves an **INVALID** index behind, and
+  `IF NOT EXISTS` would then skip it, leaving the upgrade without a usable index. Before upgrading,
+  check and drop any such leftover (then build it again, or let the migration build it):
+
+  ```sql
+  SELECT c.relname FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+   WHERE NOT i.indisvalid
+     AND c.relname IN ('threads_retention_idx', 'thread_entries_blob_ref_idx');
+  DROP INDEX CONCURRENTLY IF EXISTS threads_retention_idx;        -- only if listed above
+  DROP INDEX CONCURRENTLY IF EXISTS thread_entries_blob_ref_idx;  -- only if listed above
+  ```
+
 - **Retention job (KOBE-18).** One server replica at a time runs the nightly retention pass under
   a session-level advisory lock, so the server needs a direct (or session-mode pooled) Postgres
   connection; transaction-mode poolers break session locks. `KOBE_RETENTION_HOUR_UTC` (0-23,

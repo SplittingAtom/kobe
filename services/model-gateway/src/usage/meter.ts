@@ -134,7 +134,12 @@ export class UsageMeter {
   }
 
   /** The reading once the response ended (`complete`) or was cut short. */
-  finish(complete: boolean, requestBytes: number, requestedOutput?: number): UsageReading {
+  /** `outputAllowance`: the output charged at least when usage is unknown (usage/charge.ts). */
+  finish(
+    complete: boolean,
+    requestBytes: number,
+    outputAllowance: number = chargedOutput(undefined),
+  ): UsageReading {
     if (this.mode === "sse") this.sse(`${this.decoder.end()}\n`);
     if (this.mode === "json") {
       for (const found of this.scanner?.values ?? []) {
@@ -160,11 +165,7 @@ export class UsageMeter {
       source: "estimated",
       counts: {
         input: promptKnown ? (m.input ?? 0) : Math.ceil(requestBytes / CHARS_PER_TOKEN),
-        output: Math.max(
-          m.output ?? 0,
-          Math.ceil(generated / CHARS_PER_TOKEN),
-          chargedOutput(requestedOutput),
-        ),
+        output: Math.max(m.output ?? 0, Math.ceil(generated / CHARS_PER_TOKEN), outputAllowance),
         cacheRead: m.cacheRead ?? 0,
         cacheWrite: m.cacheWrite ?? 0,
       },

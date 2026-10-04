@@ -1,6 +1,6 @@
 {
-  "id": "1d445632-227b-484e-9bb7-43a8710f0278",
-  "prevId": "79175248-0286-4f9a-ae4f-682b5fd7026c",
+  "id": "ca933671-71f0-4ffc-9c27-dc96918d9b08",
+  "prevId": "4a11b82f-4361-4291-bd58-d1b036c8d2e7",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4922,6 +4922,10 @@
         "model_catalog_prices": {
           "name": "model_catalog_prices",
           "value": "(\"model_catalog\".\"input_usd_per_mtok\" IS NULL OR \"model_catalog\".\"input_usd_per_mtok\" BETWEEN 0 AND 10000) AND (\"model_catalog\".\"output_usd_per_mtok\" IS NULL OR \"model_catalog\".\"output_usd_per_mtok\" BETWEEN 0 AND 10000) AND (\"model_catalog\".\"cache_read_usd_per_mtok\" IS NULL OR \"model_catalog\".\"cache_read_usd_per_mtok\" BETWEEN 0 AND 10000) AND (\"model_catalog\".\"cache_write_usd_per_mtok\" IS NULL OR \"model_catalog\".\"cache_write_usd_per_mtok\" BETWEEN 0 AND 10000)"
+        },
+        "model_catalog_price_set": {
+          "name": "model_catalog_price_set",
+          "value": "(\"model_catalog\".\"input_usd_per_mtok\" IS NULL) = (\"model_catalog\".\"output_usd_per_mtok\" IS NULL)\n        AND (\"model_catalog\".\"input_usd_per_mtok\" IS NOT NULL OR (\"model_catalog\".\"cache_read_usd_per_mtok\" IS NULL AND \"model_catalog\".\"cache_write_usd_per_mtok\" IS NULL))"
         },
         "model_catalog_alias": {
           "name": "model_catalog_alias",

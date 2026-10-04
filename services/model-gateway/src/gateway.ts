@@ -308,7 +308,9 @@ export function createModelGateway(options: GatewayOptions): Server {
       bytesIn = body.length;
       let forwardBody = body;
       let model = route.pathModel;
-      let requestedOutput: number | undefined;
+      // Count-only endpoints generate nothing (KOBE-43 review): no output allowance.
+      const countOnly = route.path.endsWith("/count_tokens") || route.path.endsWith(":countTokens");
+      let outputAllowance = chargedOutput(undefined, 1, countOnly);
       if (req.method === "POST") {
         const scanned = topLevelModel(body);
         if (!scanned.ok) {
@@ -323,7 +325,7 @@ export function createModelGateway(options: GatewayOptions): Server {
           return;
         }
         if (!route.pathModel) model = scanned.model;
-        requestedOutput = scanned.maxOutputTokens;
+        outputAllowance = chargedOutput(scanned.maxOutputTokens, scanned.choices, countOnly);
         // KOBE-43: deferred (background) Responses are billed after the call ends, out of the
         // ledger's sight: refused.
         if (scanned.background) {
@@ -349,7 +351,7 @@ export function createModelGateway(options: GatewayOptions): Server {
         path: route.path,
         model,
         inputEstimate: Math.ceil(body.length / 4),
-        requestedOutput,
+        outputAllowance,
       };
       // Every model call names a model the team enabled (checked here too, so a disable holds even
       // when a push to Bifrost failed). Listing models (GET) names none.
@@ -389,7 +391,7 @@ export function createModelGateway(options: GatewayOptions): Server {
           forwardBody,
           resolution.virtualKey,
           attempt === 0,
-          { kind: route.kind, started, requestedOutput },
+          { kind: route.kind, started, outputAllowance },
         );
         status = outcome.status;
         errorType = outcome.errorType;
@@ -456,11 +458,11 @@ export function createModelGateway(options: GatewayOptions): Server {
     source: "reported",
     counts: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   };
-  const unanswered = (requestBytes: number, requested: number | undefined): UsageReading => ({
+  const unanswered = (requestBytes: number, allowance: number): UsageReading => ({
     source: "estimated",
     counts: {
       input: Math.ceil(requestBytes / 4),
-      output: chargedOutput(requested),
+      output: allowance,
       cacheRead: 0,
       cacheWrite: 0,
     },
@@ -476,7 +478,7 @@ export function createModelGateway(options: GatewayOptions): Server {
     call: {
       readonly kind: RouteKind;
       readonly started: number;
-      readonly requestedOutput: number | undefined;
+      readonly outputAllowance: number;
     },
   ): Promise<Outcome> {
     return new Promise((resolve) => {
@@ -495,13 +497,13 @@ export function createModelGateway(options: GatewayOptions): Server {
         // A 4xx is a refusal (nothing consumed); a 5xx or a call that never answered may have
         // been processed upstream, so it is charged like a call cut short (usage/charge.ts).
         const usage = meter
-          ? meter.finish(!o.aborted, body.length, call.requestedOutput)
+          ? meter.finish(!o.aborted, body.length, call.outputAllowance)
           : errorAnswer
             ? o.status >= 500
-              ? unanswered(body.length, call.requestedOutput)
+              ? unanswered(body.length, call.outputAllowance)
               : NO_TOKENS
             : requestSent
-              ? unanswered(body.length, call.requestedOutput)
+              ? unanswered(body.length, call.outputAllowance)
               : undefined;
         resolve({ ...o, bytesOut, usage, ttfbMs });
       };
