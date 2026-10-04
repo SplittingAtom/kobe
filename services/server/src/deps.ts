@@ -44,6 +44,7 @@ import { createPolicyEngine } from "./policy/engine.js";
 import { createToolRegistry } from "./policy/registry.js";
 import { createDbRuleSource, createDbSettingsSource } from "./policy/rule-store.js";
 import { logger } from "./logger.js";
+import type { BlobStore } from "./retention/blobs.js";
 
 export interface ServerDepsOptions {
   readonly databaseUrl: string;
@@ -86,6 +87,11 @@ export interface ServerDepsOptions {
   readonly approvalKeys?: ApprovalKeyring;
   /** Approval tuning (tests shorten the TTL and the poll). */
   readonly approvals?: Partial<Omit<ApprovalServiceOptions, "db" | "keys">>;
+  /**
+   * Object storage (`s3.*`, KOBE-27) for thread blobs: export reads offloaded entries, retention
+   * deletes released keys (KOBE-18). Unset: nothing is read or deleted from a bucket.
+   */
+  readonly blobs?: BlobStore;
 }
 
 /** Limits on publishing agent versions (KOBE-46 review M3). */
@@ -150,6 +156,8 @@ export interface ServerDeps {
    * signed-approval verifier the MCP proxy (KOBE-58) calls.
    */
   readonly approvals: ApprovalService;
+  /** Object storage for thread blobs (KOBE-18 export and retention); undefined when not set. */
+  readonly blobs: BlobStore | undefined;
   /** Creates an email+password user (and optional install role) atomically, without sign-up. */
   createUserWithPassword(
     input: NewUser,
@@ -279,6 +287,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     runs,
     mcp,
     approvals,
+    blobs: options.blobs,
     async createUserWithPassword({ email, name, password }, { installRole, recordSetup } = {}) {
       const ctx = await auth.$context;
       const hash = await ctx.password.hash(password);

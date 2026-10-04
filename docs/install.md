@@ -376,6 +376,23 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
   it. Existing Bifrost state is replaced by Kobe's on the first sync. Sandboxes pick up the shim's
   address when their pods are next created (hibernate/wake or restart).
 
+- **Retention indexes (KOBE-18, migration `*_retention_rls`).** Two indexes are added with a
+  plain `CREATE INDEX` (migrations run in one transaction), which blocks writes to `threads` and
+  `thread_entries` while it scans them. On a large install, build them first, outside the upgrade,
+  then upgrade (the migration skips existing indexes):
+
+  ```sql
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS threads_retention_idx
+    ON threads (team_id, last_activity_at) WHERE deleted_at IS NULL;
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS thread_entries_blob_ref_idx
+    ON thread_entries (team_id, blob_ref) WHERE blob_ref IS NOT NULL;
+  ```
+
+- **Retention job (KOBE-18).** One server replica at a time runs the nightly retention pass under
+  a session-level advisory lock, so the server needs a direct (or session-mode pooled) Postgres
+  connection; transaction-mode poolers break session locks. `KOBE_RETENTION_HOUR_UTC` (0-23,
+  default 3) sets the hour.
+
 ## Backup and restore
 
 `kobe backup` / `kobe restore` cover Postgres and an S3 object manifest; see
