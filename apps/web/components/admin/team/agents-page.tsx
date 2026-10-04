@@ -1,49 +1,31 @@
 "use client";
 
 import Link from "next/link";
-import { listTeamAgents, setTeamAgentStatus } from "../../../lib/admin/api/team/agents";
-import { agentStatusLabel, type AgentSummary } from "../../../lib/admin/api/agents";
+import { listTeamAgents } from "../../../lib/admin/api/team/agents";
+import { agentStatusLabel } from "../../../lib/admin/api/agents";
 import { useTeamAccess } from "../console-context";
-import { MutationStatus } from "../error-notice";
-import { DateTime, ResourceView, confirmed } from "../parts";
-import { useMutation, useResource } from "../use-resource";
+import { DateTime, ResourceView } from "../parts";
+import { useResource } from "../use-resource";
+import { AgentInventory } from "./agent-inventory";
 import styles from "../admin.module.css";
 
-/** Team agents (spec D19; `/v1/agents?scope=team`): team admins suspend and reactivate them. */
+/** Team agents (spec D19; `/v1/agents?scope=team`) and, for team admins, the inventory (KOBE-86). */
 export function TeamAgentsPage() {
   const access = useTeamAccess();
   const teamId = access.team.id;
   const canSuspend = access.permissions.includes("team.agents.suspend");
   const { state, reload } = useResource(() => listTeamAgents(teamId));
-  const mutation = useMutation();
-
-  async function toggle(agent: AgentSummary) {
-    const next = agent.status === "active" ? "suspended" : "active";
-    if (
-      next === "suspended" &&
-      !confirmed(`Suspend ${agent.name}? Nobody in the team can start new conversations with it.`)
-    ) {
-      return;
-    }
-    const done = await mutation.run(
-      () => setTeamAgentStatus(teamId, agent.id, next),
-      () => `${agent.name} is ${next}.`,
-    );
-    if (done) reload();
-  }
-
   return (
     <>
       <h1>Team agents</h1>
       <p className={styles.hint}>
-        Builders create and publish team agents; team admins can suspend any of them. Archived
-        agents were deleted after publishing: conversations pinned to them keep working. The full
-        inventory (usage, schedules) arrives with KOBE-48.
+        Builders create and publish team agents; team admins can suspend any of them in the
+        inventory below. Archived agents were deleted after publishing: conversations pinned to them
+        keep working.
       </p>
       <p>
         <Link href="/admin/team/agents/new">New agent</Link>
       </p>
-      <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="team agents">
         {(agents) =>
           agents.length === 0 ? (
@@ -84,16 +66,6 @@ export function TeamAgentsPage() {
                           Edit
                           <span className={styles.visuallyHidden}> {a.name}</span>
                         </Link>{" "}
-                        {canSuspend && (
-                          <button
-                            type="button"
-                            disabled={mutation.pending}
-                            onClick={() => void toggle(a)}
-                          >
-                            {a.status === "active" ? "Suspend" : "Reactivate"}
-                            <span className={styles.visuallyHidden}> {a.name}</span>
-                          </button>
-                        )}
                       </td>
                     </tr>
                   ))}
@@ -103,6 +75,7 @@ export function TeamAgentsPage() {
           )
         }
       </ResourceView>
+      {canSuspend && <AgentInventory teamId={teamId} canSuspend onChanged={reload} />}
     </>
   );
 }

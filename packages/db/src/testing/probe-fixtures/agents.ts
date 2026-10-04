@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   teamAgents,
+  teamAgentSuspensions,
   teamAgentVersions,
   teamSkills,
   teamSkillVersions,
@@ -51,6 +52,16 @@ export const agentsFixtures: Record<(typeof agents.team)[number], ProbeFixture> 
       toolManifest: {},
       publishedBy: userId,
       draftRevision: 1,
+    });
+  },
+  team_agent_suspensions: async (tx, teamId) => {
+    const userId = randomUUID();
+    await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
+    await tx.insert(teamAgentSuspensions).values({
+      teamId,
+      agentId: randomUUID(),
+      agentScope: "personal",
+      suspendedBy: userId,
     });
   },
   team_skills: async (tx, teamId) => {

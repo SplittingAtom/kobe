@@ -23,7 +23,7 @@ export interface RequestOptions {
   /** JSON body, sent exactly as given: resource modules write each route's wire casing. */
   readonly json?: unknown;
   /** A raw body (e.g. an agent markdown file) with its content type. */
-  readonly raw?: { readonly body: string; readonly contentType: string } | undefined;
+  readonly raw?: { readonly body: string | Uint8Array; readonly contentType: string } | undefined;
   /** The active team this request acts on (`X-Kobe-Team`, the server's stale-tab guard). */
   readonly teamId?: string | undefined;
   /** `If-Match` (an ETag such as `"3"`): agent edits and publishes (KOBE-45/46). */
@@ -113,13 +113,13 @@ export async function apiRequest<T>(
   assertApiPath(path);
   const { method = "GET", json, raw, teamId, ifMatch, idempotencyKey, fetchFn = fetch } = options;
   const headers = new Headers({ accept: "application/json" });
-  let body: string | null = null;
+  let body: string | Uint8Array<ArrayBuffer> | null = null;
   if (json !== undefined) {
     headers.set("content-type", "application/json");
     body = JSON.stringify(json);
   } else if (raw !== undefined) {
     headers.set("content-type", raw.contentType);
-    body = raw.body;
+    body = typeof raw.body === "string" ? raw.body : new Uint8Array(raw.body);
   }
   if (teamId !== undefined) headers.set(TEAM_HEADER, teamId);
   if (ifMatch !== undefined) headers.set("if-match", ifMatch);
@@ -177,4 +177,26 @@ export function errorKind(error: ApiError): ErrorKind {
   if (error.code === "team_mismatch") return "reload";
   if (error.status === 404) return "notFound";
   return "other";
+}
+
+/** GET of a binary body (a skill bundle); errors are the same `ApiError`s as `apiRequest`. */
+export async function apiDownload(
+  path: string,
+  options: {
+    readonly teamId?: string | undefined;
+    readonly fetchFn?: typeof fetch | undefined;
+  } = {},
+): Promise<ApiResult<Uint8Array>> {
+  assertApiPath(path);
+  const { teamId, fetchFn = fetch } = options;
+  const headers = new Headers();
+  if (teamId !== undefined) headers.set(TEAM_HEADER, teamId);
+  let res: Response;
+  try {
+    res = await fetchFn(path, { method: "GET", headers, credentials: "same-origin" });
+  } catch {
+    return { ok: false, error: fallback(0) };
+  }
+  if (!res.ok) return { ok: false, error: toError(res.status, await readJson(res)) };
+  return { ok: true, status: res.status, data: new Uint8Array(await res.arrayBuffer()) };
 }

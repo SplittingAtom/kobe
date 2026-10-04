@@ -89,6 +89,10 @@ export const runUsage = pgTable(
     index("run_usage_thread_idx")
       .on(t.teamId, t.threadId)
       .where(sql`${t.threadId} IS NOT NULL`),
+    // Usage per agent (inventory, KOBE-86).
+    index("run_usage_agent_idx")
+      .on(t.teamId, t.agentId)
+      .where(sql`${t.agentId} IS NOT NULL`),
     check("run_usage_route", sql`${t.route} IN (${list(USAGE_ROUTES)})`),
     check("run_usage_source", sql`${t.usageSource} IN (${list(USAGE_SOURCES)})`),
     check(

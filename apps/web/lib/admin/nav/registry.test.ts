@@ -206,9 +206,12 @@ describe("role gating", () => {
   it("opens the team console to team admins and, for the agent builder, to builders", () => {
     expect(canOpenConsole(team("team_admin", TEAM_ADMIN))).toBe(true);
     expect(visibleSections(team("team_admin", TEAM_ADMIN))).toHaveLength(TEAM_SECTIONS.length);
-    // Builders get the agent builder (team.agents.build) and nothing that needs admin rights.
+    // Builders get the agent builder (team.agents.build), the skill editor and nothing that needs admin rights.
     expect(canOpenConsole(team("builder", BUILDER))).toBe(true);
-    expect(visibleSections(team("builder", BUILDER)).map((s) => s.id)).toEqual(["agents"]);
+    expect(visibleSections(team("builder", BUILDER)).map((s) => s.id)).toEqual([
+      "agents",
+      "skills",
+    ]);
     expect(canOpenConsole(team("member", MEMBER))).toBe(false);
   });
 
@@ -279,8 +282,8 @@ describe("mirrors the server's permission matrix", () => {
       ]),
     );
     for (const s of TEAM_SECTIONS) {
-      // The agent builder is the one section builders open (KOBE-84); the rest are admin-only.
-      const level = s.id === "agents" ? "builder" : "team_admin";
+      // The agent builder and skill editor are the sections builders open (KOBE-84, KOBE-83); the rest are admin-only.
+      const level = s.id === "agents" || s.id === "skills" ? "builder" : "team_admin";
       expect(defined.get(s.permission), `${s.id} → ${s.permission}`).toBe(level);
     }
   });

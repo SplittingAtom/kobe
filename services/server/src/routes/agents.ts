@@ -40,9 +40,11 @@ import {
   type AgentRecord,
 } from "../agents/store.js";
 import { mountOrbitExport } from "../agents/orbit/routes.js";
+import { inventoryQuerySchema, listInventory, setInventoryStatus } from "../agents/inventory.js";
 import { mountVersionRoutes } from "../agents/version-routes.js";
 import { deleteOrArchiveAgent, getVersion } from "../agents/versions.js";
 import { recordAuditAfter } from "../audit/record.js";
+import { teamRoleAllows } from "../authz/permissions.js";
 import { requireTeam, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { parseBody } from "../teams/http.js";
@@ -98,6 +100,35 @@ export function agentRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
       .filter(({ access }) => access.see)
       .map(({ agent, access }) => agentSummary(agent, access));
     return c.json({ agents });
+  });
+
+  // Team admins' inventory (KOBE-86): before "/:id" so "inventory" is not read as an id.
+  app.get("/inventory", async (c) => {
+    if (!teamRoleAllows(c.get("team").role, "team.agents.suspend")) {
+      return forbidden(c, "Only team admins see the agent inventory.");
+    }
+    const query = inventoryQuerySchema.safeParse(c.req.query());
+    if (!query.success) return invalidRequest(c, "Check limit and cursor.");
+    return c.json(await listInventory(db, c.get("team").id, query.data));
+  });
+
+  app.put("/inventory/:id/status", async (c) => {
+    if (!teamRoleAllows(c.get("team").role, "team.agents.suspend")) {
+      return forbidden(c, "Only team admins suspend agents.");
+    }
+    const id = agentIdSchema.safeParse(c.req.param("id"));
+    const body = await parseBody(c, agentStatusSchema);
+    if (!body) return invalidRequest(c, "status must be active or suspended.");
+    if (!id.success) return notFound(c);
+    const result = await setInventoryStatus(
+      db,
+      c.get("team").id,
+      c.get("user").id,
+      id.data,
+      body.status,
+    );
+    if (!result.ok) return notFound(c);
+    return c.json({ id: id.data, scope: result.scope, status: body.status });
   });
 
   app.post("/", agentBodyLimit, async (c) => {
