@@ -32,12 +32,15 @@ export function applyModelsHint(
 ): void {
   if (payload?.startsWith(MODELS_KEYS_PREFIX))
     drop(cache, payload.slice(MODELS_KEYS_PREFIX.length));
-  if (!budgets) return;
-  if (payload?.startsWith(MODELS_SPEND_PREFIX)) {
-    drop(budgets, payload.slice(MODELS_SPEND_PREFIX.length));
-  } else if (payload?.startsWith(MODELS_BUDGETS_PREFIX)) {
-    drop(budgets, payload.slice(MODELS_BUDGETS_PREFIX.length));
-  }
+  if (!budgets || !payload) return;
+  // Budget hints name a team, or `*` (install limits): anything else is ignored, not a flush.
+  const team = payload.startsWith(MODELS_SPEND_PREFIX)
+    ? payload.slice(MODELS_SPEND_PREFIX.length)
+    : payload.startsWith(MODELS_BUDGETS_PREFIX)
+      ? payload.slice(MODELS_BUDGETS_PREFIX.length)
+      : undefined;
+  if (team === "*") budgets.invalidateAll();
+  else if (team !== undefined && UUID.test(team)) budgets.invalidateTeam(team.toLowerCase());
 }
 
 /**

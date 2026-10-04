@@ -16,7 +16,7 @@ const BUDGETS = {
     daily_usd: null,
     user_requests_per_minute: 60,
     updated_at: "2026-10-01T00:00:00Z",
-    spent: spend(120, 4),
+    percent_used: { month: 12, day: null },
   },
   team: { monthly_usd: 100, daily_usd: null, user_requests_per_minute: null, spent: spend(42, 2) },
   effective_requests_per_minute: 60,
@@ -59,6 +59,8 @@ describe("team budgets page (KOBE-42)", () => {
     renderTeam(<TeamBudgetsPage />);
     expect(await screen.findByText("$42.00 of $100.00 (42 %)")).toBeTruthy();
     expect(screen.getByText("$9.00 of $10.00 (90 %)")).toBeTruthy();
+    // The install's spend (every team's) is shown in percent only.
+    expect(screen.getByText("12 % of $1,000.00")).toBeTruthy();
     const daily = screen.getByLabelText("Daily cap ($)");
     await userEvent.type(daily, "5.5");
     await userEvent.type(screen.getByLabelText("Requests per minute (max 60)"), "20");

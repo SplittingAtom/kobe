@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { modelCatalog, modelProviders, recordModelUsage, type ModelUsageRecord } from "@kobe/db";
 import { FAILURE_MESSAGES } from "./runs/failure-codes.js";
 import type { MemoryMailer } from "./testing/mailer.js";
-import { RunFixture } from "./testing/run-fixture.js";
+import { RunFixture, type FakeWorkspace } from "./testing/run-fixture.js";
 
 /**
  * KOBE-42 against a real Postgres, the real sandbox wire and two replicas. Gate 2: "budget stops a
@@ -70,6 +70,15 @@ const call = (
   ttfbMs: 10,
   aborted: false,
 });
+
+/**
+ * The real sandbox agent answers `run.stop` only once the run ended (after the step); the fake
+ * would answer at once and let the dispatcher end the run first. Hold the answer.
+ */
+function holdStops(ws: FakeWorkspace) {
+  const before = ws.sb.respond;
+  ws.sb.respond = (frame) => (frame.type === "run.stop" ? null : before?.(frame));
+}
 
 async function alerts(team: string) {
   const { rows } = await f.fx.admin.query<{ scope: string; threshold: number; emails: string }>(
@@ -205,6 +214,7 @@ describe("Gate 2: a budget stops a run after its current step (D30)", () => {
     await priced(w.owner.id);
     await f.on(0, w.owner).put("/v1/team/budgets/team", { daily_usd: 1 });
     const ws = await f.connect(w);
+    holdStops(ws);
     const threadId = await f.thread(w.owner);
     const run = await f.message(w.owner, threadId, "go");
     const start = await ws.started(run);
@@ -224,6 +234,32 @@ describe("Gate 2: a budget stops a run after its current step (D30)", () => {
     ws.event(start, { type: "turn_end", message: { role: "assistant" } });
     ws.event(start, { type: "agent_settled" });
     await f.until(w.team, run, "budget_stopped");
+  });
+
+  it("another failure while a budget stop is pending keeps its own code", async () => {
+    const w = await f.world();
+    await priced(w.owner.id);
+    await f.on(0, w.owner).put("/v1/team/budgets/team", { daily_usd: 1 });
+    const ws = await f.connect(w);
+    holdStops(ws);
+    const threadId = await f.thread(w.owner);
+    const run = await f.message(w.owner, threadId, "go");
+    const start = await ws.started(run);
+    await recordModelUsage(f.fx.db, [call(w.team, w.owner.id, 1, run)]);
+    await f.fx.replica(0).deps.budgets.evaluate(w.team);
+    await ws.sb.until(() => ws.sb.frames("run.stop").find((s) => s.run_id === run));
+    ws.event(start, { type: "agent_start" });
+    ws.event(start, {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        stopReason: "error",
+        errorMessage: "kobe.model_error:model_unavailable: gave up after 6 attempts",
+      },
+    });
+    ws.event(start, { type: "turn_end", message: { role: "assistant" } });
+    ws.event(start, { type: "agent_settled" });
+    await f.until(w.team, run, "failed");
   });
 
   it("without a pending stop, the gateway's budget refusal fails the run with a clear message", async () => {

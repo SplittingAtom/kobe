@@ -155,6 +155,8 @@ export const budgetAlerts = pgTable(
     check("budget_alerts_scope", sql`${t.scope} IN (${list(BUDGET_SCOPES)})`),
     check("budget_alerts_period", sql`${t.period} IN (${list(BUDGET_PERIODS)})`),
     check("budget_alerts_threshold", sql`${t.threshold} IN (${list(BUDGET_THRESHOLDS)})`),
+    // A threshold is only recorded once crossed (a forged early row could not pre-empt it).
+    check("budget_alerts_crossed", sql`${t.spentUsd} >= ${t.limitUsd} * ${t.threshold} / 100`),
     check(
       "budget_alerts_subject",
       sql`(${t.scope} = 'install' AND ${t.teamId} IS NULL AND ${t.userId} IS NULL)

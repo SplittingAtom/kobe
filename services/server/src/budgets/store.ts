@@ -50,7 +50,13 @@ export interface MemberBudgetView extends BudgetAmounts {
 
 export interface TeamBudgetsView {
   readonly period: { readonly month: string; readonly day: string };
-  readonly install: InstallLimitsView & { readonly spent: SpendView };
+  /**
+   * The install budget's limits and how much of it is used, in percent only: the install's spend is
+   * every team's together, which a team does not see in dollars.
+   */
+  readonly install: InstallLimitsView & {
+    readonly percent_used: { readonly month: number | null; readonly day: number | null };
+  };
   readonly team: BudgetAmounts & {
     readonly user_requests_per_minute: number | null;
     readonly spent: SpendView;
@@ -61,6 +67,9 @@ export interface TeamBudgetsView {
 }
 
 type Row = Record<string, unknown>;
+
+const percentOf = (spent: number, limit: number | null): number | null =>
+  limit === null ? null : limit <= 0 ? 100 : Math.min(100, Math.round((spent / limit) * 100));
 
 export async function getInstallLimits(db: KobeDb | KobeTx): Promise<InstallLimitsView> {
   const [row] = await db.select().from(installModelLimits).where(eq(installModelLimits.id, 1));
@@ -169,9 +178,9 @@ export async function teamBudgetsView(
       period: starts,
       install: {
         ...install,
-        spent: {
-          month_usd: Number(installSpend.rows[0]?.month ?? 0),
-          day_usd: Number(installSpend.rows[0]?.day ?? 0),
+        percent_used: {
+          month: percentOf(Number(installSpend.rows[0]?.month ?? 0), install.monthly_usd),
+          day: percentOf(Number(installSpend.rows[0]?.day ?? 0), install.daily_usd),
         },
       },
       team: {
@@ -308,8 +317,9 @@ export type BudgetState = "ok" | "warning" | "exhausted";
 export interface BudgetStatusLine {
   readonly scope: BudgetLine["scope"];
   readonly period: BudgetLine["period"];
-  readonly limit_usd: number;
-  readonly spent_usd: number;
+  /** Null for the install budget (its spend is every team's together). */
+  readonly limit_usd: number | null;
+  readonly spent_usd: number | null;
   readonly percent: number;
   readonly state: BudgetState;
 }
@@ -332,8 +342,8 @@ export async function memberBudgetStatus(
   const lines = state.lines.map((l) => ({
     scope: l.scope,
     period: l.period,
-    limit_usd: l.limitUsd,
-    spent_usd: Math.round(l.spentUsd * 1e6) / 1e6,
+    limit_usd: l.scope === "install" ? null : l.limitUsd,
+    spent_usd: l.scope === "install" ? null : Math.round(l.spentUsd * 1e6) / 1e6,
     percent: Math.min(100, Math.round(percentUsed(l))),
     state: stateOf(l),
   }));

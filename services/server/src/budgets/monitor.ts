@@ -66,6 +66,7 @@ export class BudgetMonitor {
   private readonly pending = new Map<string, NodeJS.Timeout>();
   private readonly running = new Map<string, Promise<Evaluation>>();
   private closed = false;
+  private sweeping: Promise<void> | undefined;
 
   constructor(private readonly options: BudgetMonitorOptions) {}
 
@@ -130,8 +131,15 @@ export class BudgetMonitor {
     this.pending.set(teamId, t);
   }
 
-  /** Every team, then the email outbox. Never throws. */
-  async sweep(): Promise<void> {
+  /** Every team, then the email outbox. Never throws; a sweep already running is joined. */
+  sweep(): Promise<void> {
+    this.sweeping ??= this.sweepOnce().finally(() => {
+      this.sweeping = undefined;
+    });
+    return this.sweeping;
+  }
+
+  private async sweepOnce(): Promise<void> {
     try {
       const all = await this.options.db.select({ id: teams.id }).from(teams);
       for (const team of all) {
@@ -211,6 +219,14 @@ export class BudgetMonitor {
     const { db } = this.options;
     const alertTeam = line.scope === "install" ? null : teamId;
     const alertUser = line.scope === "user" ? (line.userId ?? null) : null;
+    // Already recorded this period (the common case while a budget stays used up): nothing to do.
+    const known = await db.execute(sql`
+      SELECT 1 FROM budget_alerts
+       WHERE team_id IS NOT DISTINCT FROM ${alertTeam}::uuid
+         AND user_id IS NOT DISTINCT FROM ${alertUser}::uuid
+         AND scope = ${line.scope} AND period = ${line.period}
+         AND period_start = ${line.periodStart}::date AND threshold = ${threshold}`);
+    if (known.rows.length > 0) return false;
     // Recipients are read first (team admins live behind the team's RLS).
     const recipients = await this.recipients(teamId, line);
     return db.transaction(async (tx) => {

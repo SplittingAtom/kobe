@@ -99,6 +99,33 @@ server: BudgetMonitor (LISTEN + 30 s sweep) ── 80/100 % ─▶ budget_alerts
   (it is in `budget_alerts`).
 - **Order of stops:** the widest used-up scope names the stop (install > team > user).
 
+## Self security review (security-reviewer agent) — resolutions
+
+- **H1** install-wide tables writable by the app role from any team context: kept as the repo's
+  model (no `SECURITY DEFINER` functions is a catalog rule; the trigger runs with the invoker's
+  rights, so the app role writes `install_model_spend_daily`; a compromised server path can do
+  far worse). Added `budget_alerts_crossed` (a threshold row can only record a crossed threshold,
+  so an early forged row cannot pre-empt the real alert).
+- **H2** unpriced models are free against dollar budgets: by design (prices optional, brief);
+  open question 1; the budgets page says so.
+- **M1** overshoot: a budget is judged before a call from what the ledger holds; calls in flight
+  (≤ the per-sandbox concurrency, 16) can each finish past it. Documented bound, as D30 asks the
+  current step to finish.
+- **M2** rate-limit buckets evict the least recently used member instead of clearing all; per
+  replica by design, Bifrost's virtual-key limit is the install-wide backstop.
+- **M3** one member can use up the team's budget: per-member budgets exist for that; no default.
+- **M4** install spend leaked to teams in dollars: the team view shows the install budget in
+  percent only; the member status gives no install amounts.
+- **M5** the monitor skips a recorded alert before computing recipients; sweeps don't overlap.
+- **M6** only `completed` or `model_budget_exhausted` failures become `budget_stopped` under a
+  pending stop; other failures keep their code (test "another failure while a budget stop is
+  pending keeps its own code"; the fake sandbox now holds its `run.stop` answer as the real agent
+  does).
+- **L6** malformed budget hints are ignored (no cache flush). Kept: L1 (concurrent first
+  insert of a budget row → one 500, retry works), L2 (`run_usage` is append-only: the app never
+  updates or deletes it), L3 (the 60/min default is in the install guide), L4, L5 (the real
+  Bifrost response shape is covered by `bifrost.int.test.ts`).
+
 ## Contract changes (`packages/protocol`, flagged)
 
 1. `MODEL_RUN_ERROR_CODES` gains `model_budget_exhausted` (and its copy in the sandbox agent's

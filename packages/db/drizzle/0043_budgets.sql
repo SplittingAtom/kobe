@@ -28,6 +28,7 @@ CREATE TABLE "budget_alerts" (
 	CONSTRAINT "budget_alerts_scope" CHECK ("budget_alerts"."scope" IN ('install', 'team', 'user')),
 	CONSTRAINT "budget_alerts_period" CHECK ("budget_alerts"."period" IN ('month', 'day')),
 	CONSTRAINT "budget_alerts_threshold" CHECK ("budget_alerts"."threshold" IN (80, 100)),
+	CONSTRAINT "budget_alerts_crossed" CHECK ("budget_alerts"."spent_usd" >= "budget_alerts"."limit_usd" * "budget_alerts"."threshold" / 100),
 	CONSTRAINT "budget_alerts_subject" CHECK (("budget_alerts"."scope" = 'install' AND "budget_alerts"."team_id" IS NULL AND "budget_alerts"."user_id" IS NULL)
         OR ("budget_alerts"."scope" = 'team' AND "budget_alerts"."team_id" IS NOT NULL AND "budget_alerts"."user_id" IS NULL)
         OR ("budget_alerts"."scope" = 'user' AND "budget_alerts"."team_id" IS NOT NULL AND "budget_alerts"."user_id" IS NOT NULL))

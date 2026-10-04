@@ -31,7 +31,10 @@ export interface MemberBudget extends BudgetAmounts {
 
 export interface TeamBudgets {
   readonly period: { readonly month: string; readonly day: string };
-  readonly install: InstallLimits & { readonly spent: Spend };
+  /** The install's spend is every team's together: shown in percent only. */
+  readonly install: InstallLimits & {
+    readonly percentUsed: { readonly month: number | null; readonly day: number | null };
+  };
   readonly team: BudgetAmounts & {
     readonly userRequestsPerMinute: number | null;
     readonly spent: Spend;
@@ -45,8 +48,9 @@ export type BudgetState = "ok" | "warning" | "exhausted";
 export interface BudgetStatusLine {
   readonly scope: "install" | "team" | "user";
   readonly period: "month" | "day";
-  readonly limitUsd: number;
-  readonly spentUsd: number;
+  /** Null for the install budget. */
+  readonly limitUsd: number | null;
+  readonly spentUsd: number | null;
   readonly percent: number;
   readonly state: BudgetState;
 }

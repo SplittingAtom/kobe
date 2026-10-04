@@ -25,7 +25,8 @@ export const models = defineDomain({
     model_gateway_state: ["SELECT", "UPDATE"],
     // KOBE-42: the install budget and default rate (one row, seeded): read and changed, never added.
     install_model_limits: ["SELECT", "UPDATE"],
-    // Spend of all teams per day, kept by the run_usage trigger: no team ids, never deleted.
+    // Spend of all teams per day, kept by the run_usage trigger (invoker's rights: the repo has
+    // no SECURITY DEFINER functions, catalog.db.test.ts): no team ids, never deleted.
     install_model_spend_daily: ["SELECT", "INSERT", "UPDATE"],
     // Budget thresholds crossed (once per period) and their email outbox: never deleted.
     budget_alerts: ["SELECT", "INSERT"],

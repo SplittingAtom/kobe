@@ -14,7 +14,8 @@ CREATE POLICY "team_isolation" ON "model_spend_daily"
 INSERT INTO "install_model_limits" ("id") VALUES (1) ON CONFLICT ("id") DO NOTHING;--> statement-breakpoint
 -- Spend per (team, UTC day, user) and per UTC day for the install, from each run_usage insert
 -- statement (one aggregate per statement, invoker's rights: the team row passes the team's RLS).
-CREATE FUNCTION "kobe_count_model_spend"() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION "kobe_count_model_spend"() RETURNS trigger LANGUAGE plpgsql
+  SET search_path = pg_catalog, public AS $$
 BEGIN
   INSERT INTO "model_spend_daily" ("team_id", "day", "user_id", "cost_usd", "calls")
   SELECT "team_id", ("at" AT TIME ZONE 'UTC')::date, "user_id", COALESCE(sum("cost_usd"), 0), count(*)

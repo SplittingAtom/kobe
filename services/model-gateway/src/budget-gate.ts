@@ -77,7 +77,12 @@ export class BudgetGate implements CallGate {
     const refill = perMinute / 60_000;
     const b = this.buckets.get(key) ?? { tokens: perMinute, at: t };
     const tokens = Math.min(perMinute, b.tokens + (t - b.at) * refill);
-    if (this.buckets.size > 10_000) this.buckets.clear();
+    // Bounded: drop the least recently used member (re-inserting keeps Map order = recency).
+    this.buckets.delete(key);
+    if (this.buckets.size >= 10_000) {
+      const oldest = this.buckets.keys().next().value;
+      if (oldest !== undefined) this.buckets.delete(oldest);
+    }
     if (tokens < 1) {
       this.buckets.set(key, { tokens, at: t });
       return Math.max(1, Math.ceil((1 - tokens) / refill / 1000));

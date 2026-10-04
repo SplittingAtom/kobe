@@ -1,6 +1,6 @@
 {
-  "id": "9cbe34f8-bbe6-400e-b096-1a3e6f7088b5",
-  "prevId": "f4f831bc-9bb0-4e1e-aae9-8aac0b8b7c15",
+  "id": "864d594f-727a-48f6-a503-5f6acc156f01",
+  "prevId": "e944db71-6cea-4add-ad98-810e0c17c377",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -7197,6 +7197,10 @@
         "budget_alerts_threshold": {
           "name": "budget_alerts_threshold",
           "value": "\"budget_alerts\".\"threshold\" IN (80, 100)"
+        },
+        "budget_alerts_crossed": {
+          "name": "budget_alerts_crossed",
+          "value": "\"budget_alerts\".\"spent_usd\" >= \"budget_alerts\".\"limit_usd\" * \"budget_alerts\".\"threshold\" / 100"
         },
         "budget_alerts_subject": {
           "name": "budget_alerts_subject",

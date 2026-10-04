@@ -41,6 +41,11 @@ export function spentOf(spent: number, limit: number | null): string {
   return `${formatUsd(spent)} of ${formatUsd(limit)} (${pct} %)`;
 }
 
+/** The install budget, in percent only ("42 % of $1,000.00"). */
+export function usedOf(percent: number | null, limit: number | null): string {
+  return limit === null || percent === null ? "No budget" : `${percent} % of ${formatUsd(limit)}`;
+}
+
 function SpendCells({
   amounts,
   spent,
@@ -268,9 +273,9 @@ function Body({
         <p className={styles.hint}>Set by install admins; every team's spend counts against it.</p>
         <dl className={styles.dl}>
           <dt>This month</dt>
-          <dd>{spentOf(budgets.install.spent.monthUsd, budgets.install.monthlyUsd)}</dd>
+          <dd>{usedOf(budgets.install.percentUsed.month, budgets.install.monthlyUsd)}</dd>
           <dt>Today</dt>
-          <dd>{spentOf(budgets.install.spent.dayUsd, budgets.install.dailyUsd)}</dd>
+          <dd>{usedOf(budgets.install.percentUsed.day, budgets.install.dailyUsd)}</dd>
         </dl>
       </section>
     </>
