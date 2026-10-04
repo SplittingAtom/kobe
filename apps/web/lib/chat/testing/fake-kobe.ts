@@ -93,6 +93,8 @@ export class FakeKobe {
   readonly requests: RecordedRequest[] = [];
   readonly threads = new Map<string, FakeThread>();
   readonly runs = new Map<string, FakeRun>();
+  /** `GET /v1/runs/{id}/usage` answers (KOBE-43); absent: a run without model calls. */
+  readonly usage = new Map<string, Json>();
   /** Requests answered with an error once, keyed "METHOD /path" (e.g. to simulate a 503). */
   readonly failNext = new Map<string, Response>();
   /** The install catalog with the team's choice (KOBE-44); empty = no models route answers. */
@@ -635,6 +637,23 @@ export class FakeKobe {
     const run = this.runs.get(id);
     if (!run) return error(404, "run_not_found", "No run with that id.");
     if (action === undefined && method === "GET") return json(200, this.#snapshot(run));
+    if (action === "usage" && method === "GET") {
+      return json(
+        200,
+        this.usage.get(id) ?? {
+          run_id: id,
+          models: [],
+          calls: 0,
+          input_tokens: 0,
+          output_tokens: 0,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          cost_usd: 0,
+          unpriced_calls: 0,
+          estimated_calls: 0,
+        },
+      );
+    }
     if (action === undefined && method === "PATCH") {
       if (run.status !== "queued") return error(409, "invalid_transition");
       run.input = String(body?.content);

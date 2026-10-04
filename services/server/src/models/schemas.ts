@@ -1,4 +1,5 @@
 import {
+  MAX_USD_PER_MTOK,
   MODEL_ALIAS_PATTERN,
   MODEL_PROVIDER_KINDS,
   PROVIDER_ID_PATTERN,
@@ -89,11 +90,27 @@ export const updateProviderSchema = z
   .refine((v) => Object.keys(v).length > 0, "nothing to change");
 export type UpdateProviderInput = z.infer<typeof updateProviderSchema>;
 
+/** Dollars per million tokens (KOBE-43); null clears it. Stored to six decimals. */
+const priceSchema = z
+  .number({ error: "prices are numbers (dollars per million tokens)" })
+  .min(0, "prices cannot be negative")
+  .max(MAX_USD_PER_MTOK, `prices are at most ${MAX_USD_PER_MTOK} dollars per million tokens`)
+  .nullable();
+
+/** Optional catalog prices; without input and output prices calls have no cost (D30 budgets). */
+const priceFields = {
+  input_usd_per_mtok: priceSchema.optional(),
+  output_usd_per_mtok: priceSchema.optional(),
+  cache_read_usd_per_mtok: priceSchema.optional(),
+  cache_write_usd_per_mtok: priceSchema.optional(),
+};
+
 export const addCatalogSchema = z.strictObject({
   alias: aliasSchema,
   provider_id: providerIdSchema,
   model: modelSchema,
   label: labelSchema.optional(),
+  ...priceFields,
 });
 export type AddCatalogInput = z.infer<typeof addCatalogSchema>;
 
@@ -102,6 +119,7 @@ export const updateCatalogSchema = z
     provider_id: providerIdSchema.optional(),
     model: modelSchema.optional(),
     label: labelSchema.nullable().optional(),
+    ...priceFields,
   })
   .refine((v) => Object.keys(v).length > 0, "nothing to change");
 export type UpdateCatalogInput = z.infer<typeof updateCatalogSchema>;

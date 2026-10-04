@@ -4,6 +4,7 @@ import {
   boolean,
   check,
   integer,
+  numeric,
   pgEnum,
   pgTable,
   primaryKey,
@@ -54,6 +55,14 @@ export const MODEL_ALIAS_PATTERN = "^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$";
 export const PROVIDER_MODEL_PATTERN = "^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$";
 
 const ts = () => timestamp({ withTimezone: true }).notNull().defaultNow();
+
+/**
+ * Highest price per million tokens an admin may set (KOBE-43): far above any real model, low
+ * enough that a slip of the keyboard cannot overflow the ledger's cost column.
+ */
+export const MAX_USD_PER_MTOK = 10_000;
+/** A catalog price: dollars per million tokens, up to six decimals. */
+const price = () => numeric({ precision: 14, scale: 6, mode: "number" });
 
 /**
  * Install-wide (†): model providers and their API keys. The key is sealed with the server's
@@ -114,6 +123,15 @@ export const modelCatalog = pgTable(
       .references(() => modelProviders.id, { onDelete: "restrict" }),
     model: text().notNull(),
     label: text(),
+    /**
+     * Optional prices in dollars per million tokens (KOBE-43; D30 dollar budgets). Providers such
+     * as Ollama publish none, so an admin sets them; without input and output prices a call has
+     * no cost (tokens are still counted). Cache reads and writes default to the input price.
+     */
+    inputUsdPerMtok: price(),
+    outputUsdPerMtok: price(),
+    cacheReadUsdPerMtok: price(),
+    cacheWriteUsdPerMtok: price(),
     createdBy: uuid()
       .notNull()
       .references(() => users.id),
@@ -121,6 +139,21 @@ export const modelCatalog = pgTable(
     updatedAt: ts(),
   },
   (t) => [
+    check(
+      "model_catalog_prices",
+      sql`${sql.join(
+        [t.inputUsdPerMtok, t.outputUsdPerMtok, t.cacheReadUsdPerMtok, t.cacheWriteUsdPerMtok].map(
+          (c) => sql`(${c} IS NULL OR ${c} BETWEEN 0 AND ${sql.raw(String(MAX_USD_PER_MTOK))})`,
+        ),
+        sql` AND `,
+      )}`,
+    ),
+    // KOBE-43 review: prices come as a set (input and output together; cache only with them).
+    check(
+      "model_catalog_price_set",
+      sql`(${t.inputUsdPerMtok} IS NULL) = (${t.outputUsdPerMtok} IS NULL)
+        AND (${t.inputUsdPerMtok} IS NOT NULL OR (${t.cacheReadUsdPerMtok} IS NULL AND ${t.cacheWriteUsdPerMtok} IS NULL))`,
+    ),
     check("model_catalog_alias", sql`${t.alias} ~ ${sql.raw(`'${MODEL_ALIAS_PATTERN}'`)}`),
     check("model_catalog_model", sql`${t.model} ~ ${sql.raw(`'${PROVIDER_MODEL_PATTERN}'`)}`),
     check(

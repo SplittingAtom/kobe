@@ -12,11 +12,13 @@ import { SessionTokenError } from "@kobe/session-token";
 import type { Logger } from "pino";
 import { extractCredential } from "./credentials.js";
 import { forwardRequestHeaders, forwardResponseHeaders } from "./headers.js";
-import { topLevelModel } from "./body-model.js";
+import { topLevelModel, withStreamUsage } from "./body-model.js";
 import type { ByteBudget, CallLimiter, RequestRate } from "./limits.js";
 import type { PrincipalCache, Resolution } from "./principals.js";
 import { classify, forwardedQuery, type RouteKind } from "./routes.js";
 import type { CallContext, CallGate, UsageSink } from "./seams.js";
+import { chargedOutput } from "./usage/charge.js";
+import { UsageMeter, type UsageReading } from "./usage/meter.js";
 
 /**
  * The model gateway shim (KOBE-40, spec D30; principle 2 "secrets never enter the sandbox"). The
@@ -224,6 +226,8 @@ export function createModelGateway(options: GatewayOptions): Server {
     }
     const started = Date.now();
     let bytesIn = 0;
+    let usage: UsageReading | undefined;
+    let ttfbMs: number | undefined;
     let bytesOut = 0;
     let bytesHeld = 0;
     let status = 0;
@@ -287,8 +291,12 @@ export function createModelGateway(options: GatewayOptions): Server {
         return;
       }
       bytesIn = body.length;
+      let forwardBody = body;
       let model = route.pathModel;
-      if (req.method === "POST" && !route.pathModel) {
+      // Count-only endpoints generate nothing (KOBE-43 review): no output allowance.
+      const countOnly = route.path.endsWith("/count_tokens") || route.path.endsWith(":countTokens");
+      let outputAllowance = chargedOutput(undefined, 1, countOnly);
+      if (req.method === "POST") {
         const scanned = topLevelModel(body);
         if (!scanned.ok) {
           status = 400;
@@ -301,9 +309,35 @@ export function createModelGateway(options: GatewayOptions): Server {
           );
           return;
         }
-        model = scanned.model;
+        if (!route.pathModel) model = scanned.model;
+        outputAllowance = chargedOutput(scanned.maxOutputTokens, scanned.choices, countOnly);
+        // KOBE-43: deferred (background) Responses are billed after the call ends, out of the
+        // ledger's sight: refused.
+        if (scanned.background) {
+          status = 400;
+          sendError(
+            res,
+            kind,
+            400,
+            "background_not_supported",
+            "Background responses are not supported through the model gateway.",
+          );
+          return;
+        }
+        // KOBE-43: a streaming Chat Completions call always asks for its usage report.
+        if (scanned.stream && route.path === "/v1/chat/completions") {
+          forwardBody = withStreamUsage(body);
+        }
       }
-      call = { ...identity, runId, route: route.kind, path: route.path, model };
+      call = {
+        ...identity,
+        runId,
+        route: route.kind,
+        path: route.path,
+        model,
+        inputEstimate: Math.ceil(body.length / 4),
+        outputAllowance,
+      };
       // Every model call names a model the team enabled (checked here too, so a disable holds even
       // when a push to Bifrost failed). Listing models (GET) names none.
       if (req.method === "POST" && (!model || !resolution.enabledModels.has(model))) {
@@ -334,11 +368,21 @@ export function createModelGateway(options: GatewayOptions): Server {
       // 6.–7. Forward; retry once if Bifrost no longer knows the virtual key (restarted, resynced).
       const path = `${route.path}${forwardedQuery(url.searchParams)}`;
       for (let attempt = 0; ; attempt++) {
-        const outcome = await forward(req, res, path, body, resolution.virtualKey, attempt === 0);
+        const outcome = await forward(
+          req,
+          res,
+          path,
+          forwardBody,
+          resolution.virtualKey,
+          attempt === 0,
+          { kind: route.kind, started, outputAllowance },
+        );
         status = outcome.status;
         errorType = outcome.errorType;
         bytesOut = outcome.bytesOut;
         aborted = outcome.aborted;
+        usage = outcome.usage;
+        ttfbMs = outcome.ttfbMs;
         if (outcome.kind !== "key_unknown") return;
         options.onBifrostForgotKey();
         const fresh = await options.principals.resolve(
@@ -369,7 +413,10 @@ export function createModelGateway(options: GatewayOptions): Server {
         options.sink.record({
           ...call,
           status,
+          startedAt: new Date(started),
           durationMs: Date.now() - started,
+          ttfbMs,
+          usage,
           bytesIn,
           bytesOut,
           errorType,
@@ -385,7 +432,24 @@ export function createModelGateway(options: GatewayOptions): Server {
     readonly errorType: string | undefined;
     readonly bytesOut: number;
     readonly aborted: boolean;
+    /** Tokens this attempt used (zero for an error answer); undefined when nothing came back. */
+    readonly usage: UsageReading | undefined;
+    readonly ttfbMs: number | undefined;
   };
+
+  const NO_TOKENS: UsageReading = {
+    source: "reported",
+    counts: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  };
+  const unanswered = (requestBytes: number, allowance: number): UsageReading => ({
+    source: "estimated",
+    counts: {
+      input: Math.ceil(requestBytes / 4),
+      output: allowance,
+      cacheRead: 0,
+      cacheWrite: 0,
+    },
+  });
 
   function forward(
     req: IncomingMessage,
@@ -394,14 +458,37 @@ export function createModelGateway(options: GatewayOptions): Server {
     body: Buffer,
     virtualKey: string,
     mayRetry: boolean,
+    call: {
+      readonly kind: RouteKind;
+      readonly started: number;
+      readonly outputAllowance: number;
+    },
   ): Promise<Outcome> {
     return new Promise((resolve) => {
       let bytesOut = 0;
       let settled = false;
-      const done = (o: Omit<Outcome, "bytesOut">) => {
+      let meter: UsageMeter | undefined;
+      let ttfbMs: number | undefined;
+      let errorAnswer = false;
+      let requestSent = false;
+      const done = (o: Omit<Outcome, "bytesOut" | "usage" | "ttfbMs">) => {
         if (settled) return;
         settled = true;
-        resolve({ ...o, bytesOut });
+        // Usage counts what the upstream produced: a stream cut short still cost its tokens, and
+        // a request Bifrost received but never answered (the sandbox hung up first, a reset) is
+        // charged its input: the provider may already have it.
+        // A 4xx is a refusal (nothing consumed); a 5xx or a call that never answered may have
+        // been processed upstream, so it is charged like a call cut short (usage/charge.ts).
+        const usage = meter
+          ? meter.finish(!o.aborted, body.length, call.outputAllowance)
+          : errorAnswer
+            ? o.status >= 500
+              ? unanswered(body.length, call.outputAllowance)
+              : NO_TOKENS
+            : requestSent
+              ? unanswered(body.length, call.outputAllowance)
+              : undefined;
+        resolve({ ...o, bytesOut, usage, ttfbMs });
       };
       const upstream = send(
         {
@@ -414,7 +501,9 @@ export function createModelGateway(options: GatewayOptions): Server {
           headers: forwardRequestHeaders(req.headers, virtualKey, body.length),
         },
         (up) => {
+          ttfbMs = Date.now() - call.started;
           const upStatus = up.statusCode ?? 502;
+          errorAnswer = upStatus >= 400;
           const small = upStatus >= 400 && Number(up.headers["content-length"] ?? 0) <= 65_536;
           if (upStatus >= 400 && small) {
             // Buffer error bodies (small): read Bifrost's error type; spot a forgotten key.
@@ -450,8 +539,16 @@ export function createModelGateway(options: GatewayOptions): Server {
           }
           res.writeHead(upStatus, forwardResponseHeaders(up.headers));
           res.flushHeaders();
+          if (!errorAnswer) {
+            meter = new UsageMeter({
+              kind: call.kind,
+              contentType: up.headers["content-type"],
+              contentEncoding: up.headers["content-encoding"],
+            });
+          }
           up.on("data", (chunk: Buffer) => {
             bytesOut += chunk.length;
+            meter?.write(chunk);
             if (!res.write(chunk)) up.pause();
           });
           res.on("drain", () => up.resume());
@@ -465,6 +562,9 @@ export function createModelGateway(options: GatewayOptions): Server {
           });
         },
       );
+      upstream.on("finish", () => {
+        requestSent = true;
+      });
       upstream.setTimeout(settings.idleTimeoutMs, () => upstream.destroy(new Error("idle")));
       upstream.on("error", (err) => {
         if (settled) return;

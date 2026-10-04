@@ -3,7 +3,8 @@ import { ALL_PRIVILEGES, defineDomain } from "./types.js";
 /** Models & Budgets (KOBE-40–44). */
 export const models = defineDomain({
   // Team model enablement and each member's gateway virtual key (KOBE-40).
-  team: ["team_models", "model_gateway_keys"],
+  // The model usage ledger (KOBE-43), written by the model-gateway shim.
+  team: ["team_models", "model_gateway_keys", "run_usage"],
   installWide: ["model_providers", "model_catalog", "model_gateway_state"],
   grants: {
     // Providers and their sealed keys (KOBE-40): no team data; catalog entries RESTRICT deletes.

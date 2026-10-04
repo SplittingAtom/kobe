@@ -19,4 +19,5 @@ export * from "./connectors.js";
 export * from "./workspace-sync.js";
 export * from "./legal-holds.js";
 export * from "./approvals.js";
+export * from "./usage.js";
 export * from "./retention.js";

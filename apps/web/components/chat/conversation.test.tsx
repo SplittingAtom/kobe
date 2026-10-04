@@ -94,6 +94,31 @@ describe("streaming a run (D16)", () => {
     expect(fake.openStreams).toHaveLength(0);
   });
 
+  it("shows the ended run's tokens and spend in its details (KOBE-43)", async () => {
+    const { t } = threadWithHistory();
+    openApp(fake, t);
+    expect(await screen.findByText("a1")).toBeTruthy();
+    const { runId } = await sendAndStart("hello", t);
+    fake.usage.set(runId, {
+      run_id: runId,
+      models: ["openai/m"],
+      calls: 2,
+      input_tokens: 12_345,
+      output_tokens: 678,
+      cache_read_tokens: 1_000,
+      cache_write_tokens: 0,
+      cost_usd: 0.0123,
+      unpriced_calls: 0,
+      estimated_calls: 0,
+    });
+    fake.agent.commitPrompt(runId);
+    fake.agent.complete(runId);
+    const line = await screen.findByLabelText("Run usage", {}, { timeout: 4_000 });
+    expect(line.textContent).toBe(
+      "12.3k input · 1k cached · 678 output tokens · 2 model calls · $0.01",
+    );
+  });
+
   it("shows a policy denial and a blocked domain clearly on the tool card", async () => {
     const { t } = threadWithHistory();
     openApp(fake, t);

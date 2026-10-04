@@ -87,6 +87,15 @@ function discoveryResponse(c: Context, result: DiscoveryResult) {
 
 const providerNotFound = (c: Context) =>
   err(c, 404, "provider_not_found", "That provider is not configured.");
+const partialPrices = (c: Context) =>
+  c.json(
+    {
+      code: "partial_prices",
+      message:
+        "Set the input and output prices together (cache prices only with them), or none: a model without prices is limited by token budgets.",
+    },
+    400,
+  );
 const aliasNotFound = (c: Context) =>
   err(c, 404, "model_not_found", "That model is not in the catalog.");
 
@@ -211,6 +220,7 @@ export function installModelsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVar
     const result = await addCatalogEntry(db, parsed.value, c.get("user").id);
     if (result.ok) return c.json({ model: result.entry }, 201);
     if (result.error === "provider_not_found") return providerNotFound(c);
+    if (result.error === "partial_prices") return partialPrices(c);
     return result.error === "exists"
       ? err(c, 409, "model_exists", "That alias is already in the catalog.")
       : err(c, 409, "too_many_models", "The catalog has reached its size limit.");
@@ -223,6 +233,7 @@ export function installModelsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVar
     if (!parsed.ok) return parsed.response;
     const result = await updateCatalogEntry(db, alias.data, parsed.value);
     if (result.ok) return c.json({ model: result.entry });
+    if (result.error === "partial_prices") return partialPrices(c);
     return result.error === "not_found" ? aliasNotFound(c) : providerNotFound(c);
   });
 

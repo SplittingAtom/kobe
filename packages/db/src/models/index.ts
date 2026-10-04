@@ -18,3 +18,4 @@ export {
   type GatewayPrincipal,
   type SandboxLiveness,
 } from "./store.js";
+export { recordModelUsage, type ModelUsageRecord } from "./usage.js";

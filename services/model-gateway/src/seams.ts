@@ -1,5 +1,6 @@
 import type { Logger } from "pino";
 import type { RouteKind } from "./routes.js";
+import type { UsageReading } from "./usage/meter.js";
 
 /**
  * Seams for the tickets that build on the gateway (KOBE-40 leaves them open):
@@ -22,6 +23,10 @@ export interface CallContext {
   readonly path: string;
   /** The model the request names (body `model`, or Gemini's path), when it does. */
   readonly model: string | undefined;
+  /** Input tokens the request may cost (its size / 4; 0 for a GET). */
+  readonly inputEstimate?: number;
+  /** Output tokens the call may produce as charged (usage/charge.ts `chargedOutput`). */
+  readonly outputAllowance?: number;
 }
 
 export type GateDecision =
@@ -42,7 +47,15 @@ export const OPEN_GATE: CallGate = { admit: async () => ({ ok: true }) };
 
 export interface CallRecord extends CallContext {
   readonly status: number;
+  readonly startedAt: Date;
   readonly durationMs: number;
+  /** Time to the upstream's response headers; undefined when it never answered. */
+  readonly ttfbMs: number | undefined;
+  /**
+   * Tokens the call used, measured from the upstream response (KOBE-43): zero for an error answer,
+   * undefined when the call was refused before reaching Bifrost or Bifrost never answered.
+   */
+  readonly usage: UsageReading | undefined;
   readonly bytesIn: number;
   readonly bytesOut: number;
   /** Bifrost's error `type` for refused calls (e.g. budget or rate-limit errors), if any. */
