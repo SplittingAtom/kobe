@@ -1,6 +1,6 @@
 # KOBE-44: Model catalog and team model admin UI
 
-- **Status:** in review
+- **Status:** in review (PR #58)
 - **Branch / worktree:** `kobe-44-model-admin-ui` in `../Kobe-wt44`
 - **Depends on:** KOBE-40 (model admin API, Bifrost sync), KOBE-41 (run model resolution),
   KOBE-20 (consoles, nav registry), KOBE-32 (web chat) — all merged
