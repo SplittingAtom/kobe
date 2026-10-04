@@ -20,6 +20,9 @@ STEPS=" ${KOBE_GATE1_STEPS:-chat-real chat-stream probe interrupt cold} "
 TRIALS="${KOBE_GATE1_TRIALS:-20}"
 P95_MAX="${KOBE_GATE1_P95_MS:-8000}"
 COLD_KEY="${KOBE_GATE1_COLD_USER:-c1}"
+# Model alias the fixtures make each team's default: CI's fake upstream (`fast`, set up by
+# e2e/run.sh) or a real install's catalog model (KOBE_GATE1_MODEL).
+MODEL_ALIAS="${KOBE_GATE1_MODEL:-fast}"
 OWNER_EMAIL="${KOBE_GATE1_OWNER_EMAIL:-owner@e2e.test}"
 OWNER_PASSWORD="${KOBE_GATE1_OWNER_PASSWORD:-e2e owner password}"
 SERVER="deploy/$RELEASE-server"
@@ -106,8 +109,8 @@ list_json() { # keys... → JSON array of user_json
 echo "==> fixtures: two teams × five users (invited, joined through the API)"
 setup_token=$($KUBECTL -n "$NS" get secret "$RELEASE-auth" -o jsonpath='{.data.setup-token}' 2>/dev/null | base64 -d 2>/dev/null || true)
 # shellcheck disable=SC2086
-fx=$(client "$(printf '{"mode":"fixtures","base":"%s","owner":{"email":"%s","password":"%s"},"setupToken":"%s","users":%s,"teams":[{"key":"a","slug":"gate1-a","name":"Gate 1 A"},{"key":"b","slug":"gate1-b","name":"Gate 1 B"}]}' \
-  "$BASE" "$OWNER_EMAIL" "$OWNER_PASSWORD" "$setup_token" "$(list_json $KEYS "$COLD_KEY")")")
+fx=$(client "$(printf '{"mode":"fixtures","base":"%s","modelAlias":"%s","owner":{"email":"%s","password":"%s"},"setupToken":"%s","users":%s,"teams":[{"key":"a","slug":"gate1-a","name":"Gate 1 A"},{"key":"b","slug":"gate1-b","name":"Gate 1 B"}]}' \
+  "$BASE" "$MODEL_ALIAS" "$OWNER_EMAIL" "$OWNER_PASSWORD" "$setup_token" "$(list_json $KEYS "$COLD_KEY")")")
 printf '%s\n' "$fx" | sed 's/^/     /'
 fixtures=$(field fixtures "$fx")
 json_get() { printf '%s' "$fixtures" | sed -n "s/.*\"$1\":\"\([0-9a-f-]*\)\".*/\1/p"; } # key → uuid
@@ -124,8 +127,8 @@ for k in $KEYS; do contains "user $k is a member of team $(team_of "$k")" "^memb
 # runs end as before a model existed and the cold step measures to Pi's refusal instead.
 if [[ "$(printf '%s\n' "$fx" | grep -c '^models_[ab]=200$')" == 2 ]]; then
   MODELS=1
-  ok "both teams enabled the install's model (fake upstream) as their default"
-  ensure_fake_llm
+  ok "both teams enabled the install's model ($MODEL_ALIAS) as their default"
+  [[ "$MODEL_ALIAS" == fast ]] && ensure_fake_llm
 else
   MODELS=0
   echo "     no model catalog on this install: runs end without a model answer ($(printf '%s\n' "$fx" | grep '^models_' | tr '\n' ' '))"
@@ -326,9 +329,12 @@ if [[ "$STEPS" == *" cold "* ]]; then
   echo "     workspace storage class: ${pvc_class:-unknown}"
   values=""
   for i in $(seq 1 "$TRIALS"); do
-    hib=$($KUBECTL -n "$NS" exec "$SERVER" -c server -- node dist/cli/lifecycle.js hibernate \
+    hib=""
+    [[ -z "${KOBE_GATE1_WARM:-}" ]] && hib=$($KUBECTL -n "$NS" exec "$SERVER" -c server -- node dist/cli/lifecycle.js hibernate \
       --team-id "$TEAM_A" --user-id "$cold_id" 2>&1 | grep -E '^\{"hibernated"' || true)
-    if [[ "$hib" != '{"hibernated":true}' ]] || ! until_ok 120 pod_gone; then
+    if [[ -n "${KOBE_GATE1_WARM:-}" ]]; then
+      : # warm trials: the sandbox stays awake
+    elif [[ "$hib" != '{"hibernated":true}' ]] || ! until_ok 120 pod_gone; then
       echo "     trial $i: could not hibernate ($hib)"
       continue
     fi
@@ -337,8 +343,8 @@ if [[ "$STEPS" == *" cold "* ]]; then
     printf '     cold-start: %s\n' "$t"
     ms=$(printf '%s' "$t" | sed -n 's/.*"ms":\([0-9]*\).*/\1/p' | head -1)
     first=$(printf '%s' "$t" | sed -n 's/.*"first":"\([^"]*\)","code":\("[^"]*"\|null\).*/\1:\2/p' | head -1)
-    if ((MODELS)); then accepted='text.delta:*'; else accepted='run.failed:"(pi_rejected|model_not_configured)"'; fi
-    if [[ -n "$ms" && ( "$first" == text.delta:* || ( ! ((MODELS)) && "$first" =~ ^run\.failed:\"(pi_rejected|model_not_configured)\"$ ) ) ]]; then values+="${values:+,}$ms"
+    if ((MODELS)); then accepted='text.delta|reasoning.delta'; else accepted='run.failed:"(pi_rejected|model_not_configured)"'; fi
+    if [[ -n "$ms" && ( "$first" == text.delta:* || "$first" == reasoning.delta:* || ( ! ((MODELS)) && "$first" =~ ^run\.failed:\"(pi_rejected|model_not_configured)\"$ ) ) ]]; then values+="${values:+,}$ms"
     else echo "     trial $i: no $cold_label ($first; accepted: $accepted)"; ((MODELS)) && [[ "$i" == 1 ]] && shim_refusals; fi
   done
   if ((MODELS)); then cold_tag=hibernated-to-first-token; else cold_tag=hibernated-to-first-sandbox-answer; fi
