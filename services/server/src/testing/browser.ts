@@ -12,7 +12,7 @@ export interface TestResponse {
 /** A request body sent as-is with its own content type (e.g. a markdown file upload). */
 export class RawBody {
   constructor(
-    readonly content: string,
+    readonly content: string | Uint8Array,
     readonly contentType: string,
   ) {}
 }

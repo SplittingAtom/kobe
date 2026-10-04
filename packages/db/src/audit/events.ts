@@ -814,6 +814,19 @@ export const AUDIT_EVENTS = {
   /** An agent with versions retired instead of deleted (pinned threads keep their version). */
   "agent.archived": event("any", agentRef),
   "agent.unarchived": event("any", agentRef),
+
+  // ── skill: uploaded bundles (KOBE-78); team skills in the team view, personal install-only ──
+  /** A skill bundle was uploaded as a new immutable version (never the bundle's contents). */
+  "skill.uploaded": event("any", {
+    skillId: id,
+    scope: z.enum(["team", "personal"]),
+    slug,
+    version,
+    bundleHash: z.string().regex(/^[0-9a-f]{64}$/),
+    bytes: count,
+    files: count,
+    source: z.enum(["zip", "skill_md"]),
+  }),
 } as const;
 
 export type AuditAction = keyof typeof AUDIT_EVENTS;
