@@ -1,6 +1,6 @@
 # KOBE-71: Sandbox privilege separation (Pi and tool code under their own uids)
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #62; CI green: ci incl. the real-helper suite, sandbox-image, e2e)
 - **Branch / worktree:** `kobe-71-privilege-separation` in `../Kobe-wt71`
 - **Depends on:** KOBE-21/22/23/25/27/36/41 (merged)
 
@@ -196,10 +196,16 @@ Baseline (main, merge-queue e2e run 37179221413): hibernated → Pi ready back-t
 p95 4652 ms, spaced p50 3373 / p95 4309 ms; hibernated → first token p50 4778 / p95 5518 ms.
 What KOBE-71 adds on that path: one helper exec at agent start (the `/bin/true` probe), and per Pi
 start a `chown`/`chmod` of its runtime dir and an exec of the helper before Pi (plus `env` when
-`TMPDIR` is set). Measured on this PR (e2e run 37182721393, k3d + gVisor): back-to-back p50
-4316 / p95 4544 ms (main 4381 / 4652: −1.5% / −2.3%), spaced p50 3767 / p95 4143 ms (main 3373 /
-4309: +11.7% / −3.9%; 5 trials, its p50 swings by that much between runs on main too). Within
-10% on both p95s and the 20-trial p50; milestone "connected → Pi ready" ≈ 1.9 s in both.
+`TMPDIR` is set). Measured on this PR (k3d + gVisor), against main's 4381 / 4652 back-to-back:
+
+| e2e run          | back-to-back p50 / p95 | spaced p50 / p95 | first token p50 / p95 |
+| ---------------- | ---------------------- | ---------------- | --------------------- |
+| main 37179221413 | 4381 / 4652            | 3373 / 4309      | 4778 / 5518           |
+| PR 37182721393   | 4316 / 4544            | 3767 / 4143      | —                     |
+| PR 37184712821   | 4101 / 4352            | 3089 / 4260      | 4397 / 5403           |
+
+No regression: every 20-trial figure is at or below main's; the 5-trial spaced p50 moves ±12%
+between runs either way.
 
 ## For KOBE-41 (which guarantees now hold)
 
