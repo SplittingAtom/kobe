@@ -14,7 +14,6 @@ on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
-    paths-ignore: ["docs/**", "**/*.md"]
   merge_group:
   schedule:
     - cron: "41 5 * * *"
@@ -35,9 +34,32 @@ env:
   CURL_RETRY: --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20
 
 jobs:
+  # Docs-only pull requests skip the images and shards, but `k3d` must still report (it is a
+  # required check), so the filter lives here rather than in `paths-ignore`.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "${EVENT}" != pull_request ]; then echo "code=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          files="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR}/files" --jq '.[].filename')"
+          if printf '%s\n' "${files}" | grep -qvE '^docs/|\.md$'; then code=true; else code=false; fi
+          echo "code=${code}" | tee -a "$GITHUB_OUTPUT"
+
   images:
     name: image (${{ matrix.name }})
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-latest') || vars.KOBE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     strategy:
@@ -185,7 +207,7 @@ jobs:
   # The required check (branch protection and the merge-queue ruleset name it): passes only when
   # every image built and every shard passed. Skipped for draft PRs, as the suite is.
   k3d:
-    needs: [images, e2e]
+    needs: [changes, images, e2e]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -194,6 +216,8 @@ jobs:
         env:
           IMAGES: ${{ needs.images.result }}
           SHARDS: ${{ needs.e2e.result }}
+          CODE: ${{ needs.changes.outputs.code }}
         run: |
-          echo "images: ${IMAGES}, shards: ${SHARDS}"
+          echo "code changed: ${CODE}, images: ${IMAGES}, shards: ${SHARDS}"
+          if [ "${CODE}" = false ]; then echo "docs-only change: nothing to test"; exit 0; fi
           [ "${IMAGES}" = success ] && [ "${SHARDS}" = success ]
