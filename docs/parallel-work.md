@@ -19,6 +19,15 @@ Never work in another ticket's worktree or push to its branch. Remove the worktr
 Each ticket keeps its working notes in `docs/ledger/KOBE-<N>.md` (start from
 [`docs/ledger/TEMPLATE.md`](ledger/TEMPLATE.md)): status, decisions, open questions, evidence.
 Only the coordinator edits [`docs/RUN-LEDGER.md`](RUN-LEDGER.md), which is a short index.
+Keep a ticket ledger under ~150 lines: decisions and links to evidence, not pasted logs.
+
+## Handoff and token budget
+
+The coordinator starts each ticket agent with a generated `BRIEF.md` in the worktree
+(`scripts/hadron.sh brief <N>`) and the prompt in [agent-prompt.md](agent-prompt.md), which also
+sets the model per job and the review level per diff. Ticket agents read the brief instead of the
+whole spec and other ledgers, run `pnpm verify` before pushing, wait for CI with one background
+`gh pr checks <n> --watch` instead of polling, and end with a report of at most 150 words.
 
 ## Shared files
 

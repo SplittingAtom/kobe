@@ -10,7 +10,8 @@ in `CLAUDE.local.md`). Decisions there are
 final — do not re-litigate them. Kobe inherits nothing from Catalyst Agents/Foundry.
 
 Work is tracked in Hadron (project `kobe`, tickets KOBE-1..65, four phases each closed by a gate ticket).
-Start each session by reading `docs/RUN-LEDGER.md` and running Hadron ignite; keep the ledger current.
+Start each session by reading `docs/RUN-LEDGER.md` and running `scripts/hadron.sh ignite`; keep the ledger current.
+Hand tickets to agents as in `docs/agent-prompt.md` (brief, model per job, short reports).
 Several agents work in parallel: follow `docs/parallel-work.md` (worktree per ticket, per-ticket
 ledger in `docs/ledger/`, tables in your area's `packages/db/src/tenancy/<area>.ts`, `db:rebase` for
 migration conflicts).
