@@ -4,6 +4,7 @@ import { strToU8, zipSync } from "fflate";
 import { RawBody, type TestBrowser } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 import { MemoryObjects } from "./testing/memory-objects.js";
+import { validateZipBundle } from "./skills/bundle.js";
 import { sha256Hex } from "./skills/storage.js";
 
 /**
@@ -72,7 +73,12 @@ describe("uploading", () => {
     const bytes = zipOf("report-writer", { "scripts/run.py": "print(1)" });
     const res = await upload("bob", "team", asZip(bytes));
     expect(res.status, JSON.stringify(res.json)).toBe(201);
-    const hash = sha256Hex(bytes);
+    // The stored and hashed bytes are the canonical repack, not the upload.
+    const checked = validateZipBundle(bytes);
+    if (!checked.ok) throw new Error(checked.error.code);
+    const canonical = checked.value.zip;
+    const hash = sha256Hex(canonical);
+    expect(hash).not.toBe(sha256Hex(bytes));
     expect(res.json.skill).toMatchObject({
       scope: "team",
       slug: "report-writer",
@@ -83,13 +89,13 @@ describe("uploading", () => {
       version: 1,
       source: "zip",
       contentHash: hash,
-      sizeBytes: bytes.length,
+      sizeBytes: canonical.length,
       fileCount: 2,
       uploadedBy: ids.bob,
     });
     expect(res.json.version.storageKey).toBeUndefined();
     const key = `${PREFIX}skills/teams/${finance}/${hash}`;
-    expect(objects.objects.get(key)?.equals(Buffer.from(bytes))).toBe(true);
+    expect(objects.objects.get(key)?.equals(Buffer.from(canonical))).toBe(true);
     const { rows } = await h.admin.query<{ team_id: string; target: Record<string, unknown> }>(
       `SELECT team_id, target FROM audit_log WHERE action = 'skill.uploaded' AND target->>'skillId' = $1`,
       [res.json.skill.id],
@@ -103,7 +109,7 @@ describe("uploading", () => {
           slug: "report-writer",
           version: 1,
           bundleHash: hash,
-          bytes: bytes.length,
+          bytes: canonical.length,
           files: 2,
           source: "zip",
         },
@@ -170,6 +176,79 @@ describe("uploading", () => {
   });
 });
 
+describe("wrapper directories", () => {
+  const files = { "SKILL.md": strToU8(skillMd("wrapped")), "ref/a.md": strToU8("a") };
+  const wrapped = zipSync(
+    Object.fromEntries(Object.entries(files).map(([k, v]) => [`top/${k}`, v])),
+  );
+
+  it("strips one top-level directory and hashes the stored (normalized) bytes", async () => {
+    const res = await upload("bob", "team", asZip(wrapped));
+    expect(res.status, JSON.stringify(res.json)).toBe(201);
+    const stored = objects.objects.get(
+      `${PREFIX}skills/teams/${finance}/${res.json.version.contentHash}`,
+    );
+    expect(stored && sha256Hex(stored)).toBe(res.json.version.contentHash);
+    expect(res.json.version.contentHash).not.toBe(sha256Hex(wrapped));
+    // The same files without a wrapper are the same bundle: nothing new to upload.
+    const plain = await upload("bob", "team", asZip(zipSync(files)));
+    expect(plain).toMatchObject({ status: 409, json: { code: "unchanged" } });
+  });
+
+  it("stores dense frontmatter the database check accepts (no 500)", async () => {
+    const dense = Array.from({ length: 8000 }, () => "1").join(",");
+    const md = `---\nname: dense\ndescription: d\nlist: [${dense}]\n---\nx`;
+    expect((await upload("bob", "team", asMd(md))).status).toBe(201);
+  });
+
+  it("rejects two top-level directories", async () => {
+    const two = zipSync({ "a/SKILL.md": strToU8(skillMd("two")), "b/x.md": strToU8("x") });
+    expect((await upload("bob", "team", asZip(two))).json.code).toBe("skill_md_missing");
+  });
+});
+
+describe("failed uploads and limits", () => {
+  it("deletes the blob of a refused upload, but never one a version still names", async () => {
+    const uid = ids.bob;
+    const maxed = await h.admin.query<{ id: string }>(
+      `INSERT INTO team_skills (team_id, owner_user_id, slug, description, latest_version)
+       VALUES ($1, $2, 'maxed', 'd', 500) RETURNING id`,
+      [finance, uid],
+    );
+    await h.admin.query(
+      `INSERT INTO team_skill_versions (team_id, skill_id, version, frontmatter, source, content_hash,
+         storage_key, size_bytes, file_count, uncompressed_bytes, uploaded_by)
+       VALUES ($1, $2, 500, '{}', 'zip', $3, 'k', 1, 1, 1, $4)`,
+      [finance, maxed.rows[0]?.id, "e".repeat(64), uid],
+    );
+    const bytes = zipOf("maxed", { "x.md": "new" });
+    const res = await upload("bob", "team", asZip(bytes));
+    const maxedZip = validateZipBundle(bytes);
+    expect(res).toMatchObject({ status: 409, json: { code: "version_limit" } });
+    expect(
+      objects.objects.has(
+        `${PREFIX}skills/teams/${finance}/${sha256Hex(maxedZip.ok ? maxedZip.value.zip : bytes)}`,
+      ),
+    ).toBe(false);
+
+    const ok = await upload("bob", "team", asZip(zipOf("kept-blob")));
+    const again = await upload("bob", "team", asZip(zipOf("kept-blob")));
+    expect(again.json.code).toBe("unchanged");
+    expect(
+      objects.objects.has(`${PREFIX}skills/teams/${finance}/${ok.json.version.contentHash}`),
+    ).toBe(true);
+  });
+
+  it("rate-limits uploads per user", async () => {
+    let last = 0;
+    for (let i = 0; i < 31; i++) {
+      last = (await upload("alice", "personal", asMd(skillMd(`rate-${i}`)))).status;
+    }
+    expect(last).toBe(429);
+    expect((await upload("dave", "personal", asMd(skillMd("other-user")))).status).toBe(201);
+  });
+});
+
 describe("reading and walls", () => {
   it("lists team and personal skills, and hides them from other teams and users", async () => {
     const team = await upload("bob", "team", asMd(skillMd("finance-only")));
@@ -185,7 +264,11 @@ describe("reading and walls", () => {
       expect((await wrong.get(`/v1/skills/${id}/versions`)).status).toBe(404);
       expect((await wrong.get(`/v1/skills/${id}/versions/1`)).status).toBe(404);
     }
-    expect((await as.dave.get("/v1/skills")).json.skills).toEqual([]);
+    const daves = (await as.dave.get("/v1/skills")).json.skills.map(
+      (x: { slug: string }) => x.slug,
+    );
+    expect(daves).not.toContain("finance-only");
+    expect(daves).not.toContain("bobs-private");
     expect((await as.carol.get(`/v1/skills/${team.json.skill.id}`)).status).toBe(200);
   });
 

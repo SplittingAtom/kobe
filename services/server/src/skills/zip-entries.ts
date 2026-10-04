@@ -10,13 +10,12 @@ const LOCAL_SIG = 0x04034b50;
 const EOCD_MIN = 22;
 const MAX_COMMENT = 0xffff;
 const S_IFMT = 0o170000;
-const S_IFLNK = 0o120000;
-const UNIX = 3;
+const S_IFREG = 0o100000;
+const S_IFDIR = 0o040000;
 
 export interface ZipEntry {
   readonly name: string;
   readonly isDirectory: boolean;
-  readonly isSymlink: boolean;
   readonly method: 0 | 8;
   readonly compressedSize: number;
   readonly size: number;
@@ -53,13 +52,15 @@ export function readZipEntries(zip: Uint8Array, maxEntries: number): ZipEntry[] 
   )
     throw new ZipFormatError("unsupported_zip");
   if (count > maxEntries) throw new ZipFormatError("too_many_files");
-  if (cdOffset + cdSize > eocd) bad();
+  // Bytes before the archive (a self-extractor stub, junk) shift every offset: honor the shift
+  // like unzip does; the canonical repack drops those bytes.
+  const shift = eocd - cdOffset - cdSize;
+  if (shift < 0) bad();
 
   const entries: ZipEntry[] = [];
-  let at = cdOffset;
+  let at = cdOffset + shift;
   for (let i = 0; i < count; i++) {
     if (at + 46 > eocd || view.getUint32(at, true) !== CENTRAL_SIG) bad();
-    const madeBy = view.getUint16(at + 4, true);
     const flags = view.getUint16(at + 8, true);
     const method = view.getUint16(at + 10, true);
     const compressedSize = view.getUint32(at + 20, true);
@@ -77,16 +78,17 @@ export function readZipEntries(zip: Uint8Array, maxEntries: number): ZipEntry[] 
       throw new ZipFormatError("unsupported_zip");
     if (method === 0 && compressedSize !== size) bad();
     const name = decodeName(zip.subarray(at + 46, at + 46 + nameLen));
-    const isSymlink = madeBy >> 8 === UNIX && ((externalAttrs >>> 16) & S_IFMT) === S_IFLNK;
-    if (isSymlink) throw new ZipFormatError("symlink");
+    // Whatever OS the archive claims: a file type in the mode bits that isn't a regular file or a
+    // directory (symlink, device, fifo, socket) is refused. Zero means "no type given".
+    const type = (externalAttrs >>> 16) & S_IFMT;
+    if (type !== 0 && type !== S_IFREG && type !== S_IFDIR) throw new ZipFormatError("symlink");
     entries.push({
       name,
       isDirectory: name.endsWith("/"),
-      isSymlink,
       method,
       compressedSize,
       size,
-      dataOffset: dataOffsetOf(zip, view, localOffset, compressedSize),
+      dataOffset: dataOffsetOf(zip, view, localOffset + shift, compressedSize),
     });
     at = next;
   }

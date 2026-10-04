@@ -4,9 +4,20 @@ import { z } from "zod";
 import { requireTeam, type TeamVariables } from "../authz/middleware.js";
 import { teamRoleAllows } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
-import { bundleFromSkillMd, validateZipBundle, type BundleError } from "../skills/bundle.js";
-import { SKILL_LIMITS } from "../skills/limits.js";
-import { putSkillBundle, sha256Hex, skillBundleKey } from "../skills/storage.js";
+import {
+  bundleFromSkillMd,
+  validateZipBundle,
+  type BundleError,
+  type ValidBundle,
+} from "../skills/bundle.js";
+import { hitRateLimit } from "../rate-limit.js";
+import { SKILL_LIMITS, SKILL_UPLOAD_RATE } from "../skills/limits.js";
+import {
+  discardUnreferencedBundle,
+  putSkillBundle,
+  sha256Hex,
+  skillBundleKey,
+} from "../skills/storage.js";
 import {
   findSkill,
   getSkillVersion,
@@ -123,6 +134,11 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
       if (!allowed) return error(c, 403, "forbidden", "Your team role doesn't allow that upload.");
       if (!deps.blobs)
         return error(c, 503, "skills_unavailable", "Skill storage is not configured.");
+      if (!(await hitRateLimit(db, `skill-upload:${c.get("user").id}`, SKILL_UPLOAD_RATE)))
+        return c.json(
+          { code: "rate_limited", message: "Too many uploads. Wait a few minutes and try again." },
+          429,
+        );
       const type = (c.req.header("content-type") ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
       const bytes = new Uint8Array(await c.req.arrayBuffer());
       const prepared = ZIP_TYPES.has(type)
@@ -133,12 +149,15 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
       if (!prepared)
         return error(c, 415, "unsupported_media_type", "Send application/zip or text/markdown.");
       if (!prepared.ok) return bundleError(c, prepared.error);
-      const { zip, bundle, source } = prepared;
+      const { bundle, source } = prepared;
+      const zip = bundle.zip;
 
       const location = locationFor(c, scope.data);
       const contentHash = sha256Hex(zip);
       const storageKey = skillBundleKey(deps.blobs.prefix, location, contentHash);
       await putSkillBundle(deps.blobs, storageKey, zip);
+      const blobs = deps.blobs;
+      const discard = () => discardUnreferencedBundle(db, blobs, location, storageKey);
       const result = await uploadSkillVersion(db, location, {
         slug: bundle.name,
         description: bundle.description,
@@ -150,8 +169,14 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
         fileCount: bundle.fileCount,
         uncompressedBytes: bundle.uncompressedBytes,
         uploadedBy: c.get("user").id,
+      }).catch(async (err: unknown) => {
+        await discard();
+        throw err;
       });
-      if (!result.ok) return error(c, 409, result.error, UPLOAD_ERRORS[result.error]);
+      if (!result.ok) {
+        await discard();
+        return error(c, 409, result.error, UPLOAD_ERRORS[result.error]);
+      }
       return c.json({ skill: skillJson(result.skill), version: versionJson(result.version) }, 201);
     },
   );
@@ -184,29 +209,22 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
 type Prepared =
   | {
       ok: true;
-      zip: Uint8Array;
       source: "zip" | "skill_md";
-      bundle: {
-        name: string;
-        description: string;
-        frontmatter: Record<string, unknown>;
-        fileCount: number;
-        uncompressedBytes: number;
-      };
+      bundle: ValidBundle;
     }
   | { ok: false; error: BundleError };
 
 function prepareZip(bytes: Uint8Array): Prepared {
   const result = validateZipBundle(bytes);
   return result.ok
-    ? { ok: true, zip: bytes, source: "zip", bundle: result.value }
+    ? { ok: true, source: "zip", bundle: result.value }
     : { ok: false, error: result.error };
 }
 
 function prepareMarkdown(bytes: Uint8Array): Prepared {
   const result = bundleFromSkillMd(bytes);
   return result.ok
-    ? { ok: true, zip: result.value.zip, source: "skill_md", bundle: result.value }
+    ? { ok: true, source: "skill_md", bundle: result.value }
     : { ok: false, error: result.error };
 }
 

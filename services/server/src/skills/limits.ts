@@ -30,3 +30,6 @@ export const SKILL_LIMITS: SkillLimits = {
 export const MAX_SKILL_VERSIONS = 500;
 /** Live (not archived) skills per team or personal owner. */
 export const MAX_LIVE_SKILLS = 500;
+
+/** Uploads per user across all skills (zip and SKILL.md, both scopes); over it: 429. */
+export const SKILL_UPLOAD_RATE = { windowMs: 10 * 60_000, max: 30 } as const;

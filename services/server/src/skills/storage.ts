@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
+import { logger } from "../logger.js";
 import type { BlobStore } from "../retention/blobs.js";
-import type { SkillLocation } from "./store.js";
+import { isBundleReferenced, type SkillLocation } from "./store.js";
+import type { KobeDb } from "@kobe/db";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -29,4 +31,23 @@ export function skillBundleKey(prefix: string, location: SkillLocation, sha256: 
 /** Stores the bundle bytes; rejects (storing nothing) if the object store fails. */
 export function putSkillBundle(blobs: BlobStore, key: string, zip: Uint8Array): Promise<void> {
   return blobs.objects.put(key, Readable.from([Buffer.from(zip)]), zip.length);
+}
+
+/**
+ * Best-effort removal of a bundle written for an upload that then failed. Content-addressed keys
+ * are shared by identical uploads, so a blob some version already names is kept. Never throws:
+ * a failure logs the key (a hash and owner id, no content) for a later sweep.
+ */
+export async function discardUnreferencedBundle(
+  db: KobeDb,
+  blobs: BlobStore,
+  location: SkillLocation,
+  key: string,
+): Promise<void> {
+  try {
+    if (await isBundleReferenced(db, location, key)) return;
+    await blobs.objects.delete([key]);
+  } catch (err) {
+    logger.error({ err, key }, "skills: could not delete an unreferenced bundle");
+  }
 }

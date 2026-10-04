@@ -3,7 +3,11 @@ import { parse } from "yaml";
 /** The skill's name is its slug: lowercase words joined by hyphens, at most 64 characters. */
 export const SKILL_NAME = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/;
 export const SKILL_DESCRIPTION_MAX = 1024;
-const FRONTMATTER_MAX_BYTES = 32 * 1024;
+/**
+ * Half the database check (32 KiB of jsonb text): jsonb's text form adds a space after every `:`
+ * and `,`, which grows dense JSON by at most 1.5x, so valid input never trips the check.
+ */
+const FRONTMATTER_MAX_BYTES = 16 * 1024;
 const FENCE = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
 
 export interface SkillMd {
