@@ -6,9 +6,11 @@ updates:
     directories:
       [
         "/images/sandbox",
+        "/images/bifrost",
         "/services/server",
         "/services/mcp-proxy",
         "/services/egress-proxy",
+        "/services/model-gateway",
         "/apps/web",
       ]
     schedule: { interval: weekly }

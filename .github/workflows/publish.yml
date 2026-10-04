@@ -33,6 +33,7 @@ jobs:
           - { name: server, dockerfile: services/server/Dockerfile }
           - { name: mcp-proxy, dockerfile: services/mcp-proxy/Dockerfile }
           - { name: egress-proxy, dockerfile: services/egress-proxy/Dockerfile }
+          - { name: model-gateway, dockerfile: services/model-gateway/Dockerfile }
           - { name: sandbox, dockerfile: images/sandbox/Dockerfile }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -116,7 +117,7 @@ jobs:
       - name: Point :main at this commit for every image
         if: steps.head.outputs.current == 'true'
         run: |
-          for name in web server mcp-proxy egress-proxy sandbox; do
+          for name in web server mcp-proxy egress-proxy model-gateway sandbox; do
             docker buildx imagetools create -t "ghcr.io/splittingatom/kobe-${name}:main" \
               "ghcr.io/splittingatom/kobe-${name}:sha-${GITHUB_SHA::12}"
           done

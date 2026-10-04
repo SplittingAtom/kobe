@@ -36,6 +36,7 @@ MANIFESTS = [
     "services/sandbox-agent/package.json",
     "services/mcp-proxy/package.json",
     "services/egress-proxy/package.json",
+    "services/model-gateway/package.json",
     "tools/license-check/package.json",
     "charts/kobe/package.json",
 ]
@@ -54,6 +55,7 @@ kobe_image("web", "apps/web/Dockerfile", ["apps/web"])
 kobe_image("server", "services/server/Dockerfile", ["services/server"])
 kobe_image("mcp-proxy", "services/mcp-proxy/Dockerfile", ["services/mcp-proxy"])
 kobe_image("egress-proxy", "services/egress-proxy/Dockerfile", ["services/egress-proxy"])
+kobe_image("model-gateway", "services/model-gateway/Dockerfile", ["services/model-gateway"])
 
 if local:
     # Throwaway Postgres with public dev credentials: k3d only.
@@ -77,7 +79,7 @@ else:
 
 k8s_yaml(helm("charts/kobe", name="kobe", namespace=NAMESPACE, values=values))
 
-for name in ["web", "server", "scheduler", "mcp-proxy", "egress-proxy", "bifrost"]:
+for name in ["web", "server", "scheduler", "mcp-proxy", "egress-proxy", "model-gateway", "bifrost"]:
     k8s_resource(workload="kobe-" + name, labels=["kobe"], resource_deps=deps if name in ["server", "scheduler"] else [])
 k8s_resource(workload="kobe-migrate", labels=["kobe"], resource_deps=deps)
 k8s_resource(workload="kobe-isolation-preflight", labels=["kobe"])

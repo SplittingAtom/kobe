@@ -40,6 +40,7 @@ describe("audit event taxonomy", () => {
       "identity",
       "install",
       "mcp",
+      "models",
       "platform",
       "policy",
       "run",
