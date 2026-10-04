@@ -53,30 +53,41 @@ sibling thread's tool — can write into any of these directories while a Pi run
 read-only root-owned dir of KOBE-23 ruled that out structurally, this design cannot. What a
 planted file could do, checked against Pi 1.0.0's source under Kobe's launch flags:
 
-| File in `PI_CODING_AGENT_DIR`                                                             | Read?                                                                                                                                                            | Effect if planted                                                                                                                                                    |
-| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `settings.json`                                                                           | yes, at start-up (`SettingsManager`)                                                                                                                             | `shellPath`/`shellCommandPrefix`: every bash tool call runs through a chosen shell or prefix; `defaultTools`, `enabledModels`, `retry`, `compaction`, `defaultModel` |
-| `models.json`                                                                             | yes, at start-up and on every `refresh()` (each provider re-registration, i.e. a model switch)                                                                   | `providers.kobe.baseUrl` redirects the model calls; `apiKey: "!cmd"` runs a command at auth resolution; `modelOverrides`                                             |
-| `SYSTEM.md`, `APPEND_SYSTEM.md`                                                           | yes, unconditionally (`--no-context-files` covers AGENTS.md only)                                                                                                | replaces or extends the system prompt                                                                                                                                |
-| `bin/`                                                                                    | yes (`getBinDir`: preferred `fd`/`rg` binaries for find/grep)                                                                                                    | a planted `rg`/`fd` runs for those tools                                                                                                                             |
-| `auth.json`                                                                               | yes (credential store)                                                                                                                                           | none: the `kobe` provider never reads Pi's stored credential                                                                                                         |
-| `mcp.json`, `extensions/`, `skills/`, `prompts/`, `themes/`, `tools/`, `keybindings.json` | no (`--no-extensions` keeps only `-e` paths; mcp.json needs the builtin mcp extension; `--no-skills/--no-prompt-templates/--no-themes`; `tools/` is a migration) | none                                                                                                                                                                 |
-| `model.json` (the agent's)                                                                | by kobe-models, per request                                                                                                                                      | another token/run id/model/gateway origin for that Pi's calls                                                                                                        |
+| File in `PI_CODING_AGENT_DIR`                                                             | Read?                                                                                                                                                            | Effect if planted                                                                                                                                                                     |
+| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `settings.json`                                                                           | yes, at start-up (`SettingsManager`)                                                                                                                             | `shellPath`/`shellCommandPrefix`: every bash tool call runs through a chosen shell or prefix; `defaultTools`, `enabledModels`, `retry`, `compaction`, `defaultModel`                  |
+| `models.json`                                                                             | yes, at start-up and on every `refresh()` (each provider re-registration, i.e. a model switch)                                                                   | `providers.kobe.baseUrl` redirects the model calls; `apiKey: "!cmd"` runs a command at auth resolution; `modelOverrides`                                                              |
+| `SYSTEM.md`, `APPEND_SYSTEM.md`                                                           | yes, unconditionally (`--no-context-files` covers AGENTS.md only)                                                                                                | replaces or extends the system prompt                                                                                                                                                 |
+| `bin/`                                                                                    | yes (`getBinDir`: preferred `fd`/`rg` binaries for find/grep)                                                                                                    | a planted `rg`/`fd` runs for those tools                                                                                                                                              |
+| `auth.json`                                                                               | yes (credential store)                                                                                                                                           | none: the `kobe` provider never reads Pi's stored credential                                                                                                                          |
+| `models-store.json`                                                                       | yes, read back on every refresh phase (`ModelsStore.read`)                                                                                                       | only providers created with `fetchModels` (dynamic catalogs) restore models from it; the `kobe` provider has none, so it cannot feed it models — required unchanged since boot anyway |
+| `mcp.json`, `extensions/`, `skills/`, `prompts/`, `themes/`, `tools/`, `keybindings.json` | no (`--no-extensions` keeps only `-e` paths; mcp.json needs the builtin mcp extension; `--no-skills/--no-prompt-templates/--no-themes`; `tools/` is a migration) | none                                                                                                                                                                                  |
+| `model.json` (the agent's)                                                                | by kobe-models, per request                                                                                                                                      | another token/run id/model/gateway origin for that Pi's calls                                                                                                                         |
 
 None of this gives a same-uid process anything it cannot already do directly (threads share
 `/workspace` and the uid; D13), but it would let thread A's tool act _through_ thread B's Pi
-and its run (B's policy context, B's prompt). Mitigation built here, the **tripwire**
-(`Thread.verifyRuntime`): once Pi is ready and again right before every prompt, the runtime
-dir may hold only what the agent wrote (`agent/`, `model.json`, the writer's temp files) and
-`agent/` only what Pi itself writes at boot (verified by listing a fresh dir after boot and after
-a prompt: `auth.json`, its `auth.json.lock`, `models-store.json`), and `model.json` must be byte
-for byte what the agent last wrote. Anything else: that Pi is stopped, its directory removed,
-and the run fails `runtime_tampered` ("Another process in your workspace changed Pi's private
-runtime directory…"). The pre-prompt check also covers `models.json` re-reads on a model switch.
-Residual: a same-uid process can still plant and remove a file between a check and Pi's read
-(a TOCTOU window of milliseconds), or `ptrace` the Pi outright. **Follow-up (not built here):
-run Pi and its tools under a second uid**, which closes this class for good (the KOBE-23
-"sandbox privilege separation" umbrella).
+and its run (B's policy context, B's prompt). Mitigation built here, the **tripwire** (`Thread.verifyRuntime`): once Pi is ready, before every
+prompt and again right after the run's own write to the model file, the runtime dir may hold
+only what the agent wrote (`agent/`, `model.json`, the writer's temp files) and `agent/` only
+what Pi itself writes at boot (verified by listing a fresh dir after boot and after a prompt:
+`auth.json`, `models-store.json`, and the two `.lock` directories proper-lockfile takes next to
+them), every entry checked with `lstat` (regular files only, the locks directories, `agent` a real
+directory, never a symlink), `model.json` byte for byte what the agent last wrote, and Pi's
+`models-store.json` unchanged in content since Pi became ready (compared canonicalised: Pi's own
+start-up refresh may rewrite it with the same data).
+Anything else: that Pi is stopped, its directory removed, and the run fails `runtime_tampered`
+("Another process in your workspace changed Pi's private runtime directory…"). The run's model is
+written into the file before Pi starts whenever a `run.start` spawns the Pi, so the first prompt
+needs no provider re-registration (and no `models.json` re-read); a model switch between runs
+still re-registers.
+
+**The tripwire is a detector, not a boundary.** An informed process of the same uid can defeat it
+deterministically: plant `agent/settings.json` while Pi boots and delete it before the post-ready
+check (Pi has read it by then); plant `models.json` right around a model switch (Pi re-reads it
+on the provider re-registration, after the pre-prompt check) and remove it again; or `ptrace` the
+Pi outright. **The real fix is running Pi and its tools under a separate uid** from the agent
+(the coordinator is filing it as its own ticket; the KOBE-23 "sandbox privilege separation"
+umbrella).
 
 Other properties: the lockdown flags stay; nothing persists across processes or threads; the
 only secret in the dir is the session token (0600), which the sandbox holds by design (D30);
@@ -221,8 +232,10 @@ code with a server message (`pi_rejected`, `pi_unavailable` added to the table).
 ## Coordinator security review of PR #54 (0 CRITICAL/HIGH, 2 MEDIUM, 5 LOW) — resolution
 
 1. MEDIUM 1 cross-thread planting: tripwire, Pi 1.0.0 file audit and corrected rationale above
-   (the earlier "milliseconds" justification was wrong: the dir lives for the process's life);
-   second uid recorded as the follow-up. Tests: `runtime-dir.test.ts`; `agent.models.test.ts`
+   (the earlier justification — that Pi reads its config before any tool could exist — was wrong: the dir lives for the process's whole life);
+   second uid recorded as the follow-up. Re-review: `lstat` kinds, `models-store.json` audited
+   and pinned since boot, re-verify after the run's write, spawn stops its Pi when the final
+   model-file write fails. Tests: `runtime-dir.test.ts`; `agent.models.test.ts`
    "stops a Pi whose runtime directory a sibling planted into during its start" (a poller writes
    `agent/settings.json` between mkdtemp and Pi's start), "…whose model file was rewritten before
    the next prompt"; the real-Pi suite proves Pi's own boot files pass the check.

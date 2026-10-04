@@ -239,6 +239,43 @@ describe("model wiring (KOBE-41)", () => {
     await until(() => !existsSync(launch.modelFile));
   });
 
+  it("stops a Pi whose models-store.json changed since it booted (tripwire)", async () => {
+    await start(fakeTokens(TOKEN_1));
+    await h.server.command(runStart("say:hi", { config: { model: MODEL } }));
+    const launch = await launchRecord();
+    await h.server.waitFor((f) => f.type === "pi.event" && f.event.type === "agent_settled");
+    // The fake Pi writes no store; one appearing after boot is not Pi's doing.
+    await writeFile(path.join(launch.agentDir, "models-store.json"), '{"kobe":{"models":[]}}');
+    const result = await h.server.command(
+      runStart("say:hi", { run_id: RUN_2, config: { model: MODEL } }),
+    );
+    expect(result).toMatchObject({ ok: false, error: { code: "runtime_tampered" } });
+    expect((result as { error: { message: string } }).error.message).toContain("models-store.json");
+  });
+
+  it("stops the Pi it just started when the model file cannot be finished (no leaked process)", async () => {
+    let calls = 0;
+    const tokens: ModelTokenSource = {
+      current: async () => {
+        calls += 1;
+        if (calls === 2) throw new Error("disk full");
+        return TOKEN_1;
+      },
+      onChange: () => () => undefined,
+    };
+    await start(tokens);
+    const result = await h.server.command(runStart("hang", { config: { model: MODEL } }));
+    expect(result).toMatchObject({ ok: false, error: { code: "pi_unavailable" } });
+    expect((result as { error: { message: string } }).error.message).toContain("disk full");
+    const launch = await launchRecord();
+    await until(() => !existsSync(path.dirname(launch.agentDir)));
+    // The next run starts a fresh Pi (the first one is gone, not reused).
+    expect(
+      await h.server.command(runStart("hang", { run_id: RUN_2, config: { model: MODEL } })),
+    ).toMatchObject({ ok: true });
+    expect((await h.commandsLog()).filter((c) => c.argv !== undefined)).toHaveLength(2);
+  });
+
   it("a token rotated while Pi was being spawned reaches the file (no lost rotation)", async () => {
     const tokens = fakeTokens(TOKEN_1);
     await start(tokens);

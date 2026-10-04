@@ -20,6 +20,7 @@ import {
   AGENT_SUBDIR,
   MODEL_FILE_NAME,
   RUNTIME_DIR_PREFIX,
+  piModelsStoreText,
   unexpectedEntries,
 } from "../models/runtime-dir.js";
 import type { ModelWiring, RunModel } from "../models/types.js";
@@ -102,6 +103,8 @@ export class Thread {
   readonly #runtimeDirs = new Map<PiProcess, string>();
   /** Removal of a runtime directory in progress (awaited by `stopProcess`). */
   readonly #removals = new Map<PiProcess, Promise<void>>();
+  /** Pi's `models-store.json` as it was once Pi was ready (`sealRuntime`); null = absent. */
+  #storeAtBoot: string | null | undefined;
   #closing = new Set<PiProcess>();
   #run: ActiveRun | undefined;
   #streaming = false;
@@ -238,8 +241,24 @@ export class Thread {
     // against `#modelFile`): take the current token again now that the file is attached.
     const models = this.#env.models;
     if (modelFile !== undefined && models !== undefined) {
-      await modelFile.update({ token: await models.tokens.current() });
+      try {
+        await modelFile.update({ token: await models.tokens.current() });
+      } catch (error) {
+        // No Pi stays attached without a trustworthy model file: stop it, its dir goes with it.
+        await this.stopProcess();
+        throw error;
+      }
     }
+  }
+
+  /**
+   * Once Pi is ready: remember what Pi's own catalog store holds, so `verifyRuntime` can require
+   * it unchanged (Pi reads it back on every refresh). Call inside the lock, before any prompt.
+   */
+  async sealRuntime(): Promise<void> {
+    const pi = this.#pi;
+    const runtimeDir = pi === undefined ? undefined : this.#runtimeDirs.get(pi);
+    this.#storeAtBoot = runtimeDir === undefined ? undefined : await piModelsStoreText(runtimeDir);
   }
 
   /**
@@ -260,6 +279,10 @@ export class Thread {
     }
     if (this.#modelFile !== undefined && !(await this.#modelFile.verify())) {
       return "the model file is not what the agent wrote";
+    }
+    if (this.#storeAtBoot !== undefined) {
+      const store = await piModelsStoreText(runtimeDir);
+      if (store !== this.#storeAtBoot) return "Pi's models-store.json changed since Pi started";
     }
     return undefined;
   }
@@ -465,6 +488,7 @@ export class Thread {
     this.#policy = undefined;
     this.#launchKey = undefined;
     this.#modelFile = undefined;
+    this.#storeAtBoot = undefined;
     this.#streaming = false;
     this.#dialogs.clear();
     this.endRun();

@@ -119,6 +119,13 @@ export class ThreadManager {
         thread.endRun();
         return fail("pi_unavailable", `model file not written: ${(error as Error).message}`);
       }
+      // And once more with the run's file in place: the prompt goes out right after this.
+      const tamperedAfter = await thread.verifyRuntime();
+      if (tamperedAfter !== undefined) {
+        await thread.withLock(() => thread.stopProcess());
+        thread.endRun();
+        return fail("runtime_tampered", tamperedAfter);
+      }
       if (this.#options.beforeRun !== undefined) {
         const timedOut = await withTimeout(
           this.#options.beforeRun(frame),
@@ -419,6 +426,7 @@ export class ThreadManager {
       await thread.stopProcess();
       return fail("pi_unavailable", `kobe-policy did not start: ${(error as Error).message}`);
     }
+    await thread.sealRuntime();
     const tampered = await thread.verifyRuntime();
     if (tampered !== undefined) {
       await thread.stopProcess();
