@@ -31,7 +31,7 @@ chat composer ── POST/PATCH /v1/threads {model} ──▶ threads.model_alia
                                                                              (thread > agent pin > team default)
 ```
 
-- **Storage:** `threads.model_alias text NULL` (migration `0041_thread_model`, check = the catalog
+- **Storage:** `threads.model_alias text NULL` (migration `0043_thread_model`, check = the catalog
   alias pattern). No foreign key on purpose: an alias the team disables or the install removes
   stays chosen and the run fails `agent_model_not_enabled` (user decision: never fall back
   silently). Threads are already a team table (RLS, team_id); every query keeps its explicit
