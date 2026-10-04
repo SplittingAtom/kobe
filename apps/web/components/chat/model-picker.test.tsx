@@ -136,6 +136,20 @@ describe("model picker", () => {
     expect(fake.threads.get(t)?.model).toBeNull();
   });
 
+  it("is locked to the agent's pinned model, which wins over the conversation's choice", async () => {
+    const t = fake.addThread("Pinned");
+    const thread = must(fake.threads.get(t));
+    thread.model = "glm";
+    thread.agent_model = "kimi";
+    openApp(fake, t);
+    const select = await picker();
+    await waitFor(() => expect(select.value).toBe("kimi"));
+    expect(select.disabled).toBe(true);
+    expect(optionNames(select)).toEqual(["Kimi K2.7 Code"]);
+    expect(screen.getByText("This agent always uses Kimi K2.7 Code.")).toBeTruthy();
+    expect(chatRequests(fake, "PATCH")).toHaveLength(0);
+  });
+
   it("stays out of the way when the team's models can't be read", async () => {
     fake.teamModels.length = 0; // the fake answers 404
     openApp(fake);

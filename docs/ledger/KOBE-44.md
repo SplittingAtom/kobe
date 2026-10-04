@@ -40,8 +40,10 @@ chat composer ── POST/PATCH /v1/threads {model} ──▶ threads.model_alia
   (owner only, like every change); the alias must be enabled for the team when it is chosen
   (409 `model_not_enabled`), null = the team default. Summaries (`GET`, list, search, break-glass
   reads) carry `model`. Queued runs use the model current when they start.
-- **Run resolution (`runs/lifecycle.ts requestedModel`):** the thread's choice, else the agent's
-  pin (KOBE-47), else none → KOBE-41's `resolveRunModel` (team default). A thread choice the team no
+- **Run resolution (`runs/lifecycle.ts requestedModel`):** the agent's pin (KOBE-47) when it sets
+  one, else the thread's choice, else none → KOBE-41's `resolveRunModel` (team default). **User
+  decision (2026-10-04): the agent's pinned model wins over the conversation's choice.** Which one
+  won is recorded on the run: `run.started.model_source` = `agent` | `thread` | `default`. A thread choice the team no
   longer enables fails the run `agent_model_not_enabled` with a thread-worded message
   (`threadModelNotEnabled`); nothing is woken. A recovery re-send keeps `run.started.model`.
 - **Model listing (`models/discovery.ts`):** `GET /v1/install/models/providers/{id}/models` reads
@@ -74,9 +76,14 @@ model)`, `setThreadModel`, `listModels`; `ChatSession` draft model + 30 s model-
    there is no new SSRF or key-exfiltration path from the server. A plain list read uses Bifrost's
    cache (no provider call, not audited); only a refresh makes a provider call with the key
    (audited, rate-limited).
-2. **Thread choice beats the agent's pin** (thread > agent > team default): the person picked the
-   model for this conversation. Both fail the same way when the team doesn't enable the alias.
-   Flagged for KOBE-47.
+2. **The agent's pin beats the thread's choice** (agent > thread > team default) — **user
+   decision 2026-10-04** (my first version had thread > agent). Both fail the same way when the
+   team doesn't enable the alias (`agentModelNotEnabled` vs `threadModelNotEnabled` wording). The
+   chat picker is locked to the agent's model ("This agent always uses X") when the thread read
+   returns `agent_model`, which comes from the new `RunAgentResolver.pinnedModel` seam — the same
+   resolver that sets `config.model.alias` for runs. Today's `PINNED_AGENTS` implements neither
+   (agents carry no model until KOBE-47), so `agent_model` is null and the picker is free.
+   `PATCH {model}` is still accepted while an agent pins one (stored, unused until the pin goes).
 3. **Same error code for a disabled thread choice** (`agent_model_not_enabled`, as the brief asks
    for "the existing clear error"), with its own message naming the conversation's model. The
    picker re-reads the team's models when a run fails with that code.
@@ -97,8 +104,10 @@ model)`, `setThreadModel`, `listModels`; `ChatSession` draft model + 30 s model-
 ## For downstream tickets
 
 - **KOBE-47 (agent resolution):** put the agent's alias in `AgentResolution.config.model.alias`
-  as before; a thread's own `model_alias` wins over it (`requestedModel` in `runs/lifecycle.ts`).
-  If agents should be able to forbid a thread override, that's the place.
+  **and** implement `RunAgentResolver.pinnedModel` (`runs/seams.ts`) from the same source, so the
+  chat shows the lock the runs enforce. **User decision (2026-10-04): the agent's pinned model
+  wins over the conversation's choice** (`requestedModel` in `runs/lifecycle.ts`; recorded as
+  `run.started.model_source`).
 - **KOBE-42 (budgets):** nothing new; per-thread model choice changes which model a run is charged
   to, not who pays.
 - **KOBE-57 (projects):** readers of a shared thread get 403 `read_only` on `PATCH {model}` like
@@ -107,7 +116,7 @@ model)`, `setThreadModel`, `listModels`; `ChatSession` draft model + 30 s model-
 
 ## Open questions (for Chris or the coordinator)
 
-1. Thread choice vs agent pin precedence (decision 2): chosen as thread > agent.
+1. ~~Thread choice vs agent pin precedence~~ — answered by Chris: the agent's pin wins.
 2. Should a refresh also be offered automatically right after a provider is added? Today the
    catalog form reads Bifrost's cache, which Bifrost fills on its own discovery; "Ask the provider"
    is one click.
@@ -117,9 +126,31 @@ model)`, `setThreadModel`, `listModels`; `ChatSession` draft model + 30 s model-
 - MEDIUM provider error text could carry key fragments past a length-based scrubber → replaced by
   fixed reasons (`failureReason`, test "turns provider error text into fixed reasons").
 - LOW thread model change not audited → `thread.model_changed` (test in `thread-model.db.test.ts`).
-- LOW kept: no limit on the cached list read (above); the shared `hitRateLimit` advances its window
-  on refused hits (pre-existing helper); `truncated` means "may have been cut"; rate-limited
-  refreshes are not audited (no provider call happens).
+- LOW kept: no limit on the cached list read (above); `truncated` means "may have been cut";
+  rate-limited refreshes are not audited (no provider call happens). (The reviewer's note that
+  `hitRateLimit` extends its window on refused hits is wrong: the window is fixed — it restarts only
+  once `windowMs` has passed since the window began, refused hits don't move it.)
+
+## Coordinator review of PR #58 — resolutions
+
+1. Agent pin wins (user decision): `requestedModel` (also used by `restartPlanInTx`), picker lock,
+   `run.started.model_source`. Tests: `thread-model.db.test.ts` "is the run's model unless the agent
+   pins one" (thread → `thread`, pin → `agent` and `agent_model` on the read, neither →
+   `default`); web `model-picker.test.tsx` "is locked to the agent's pinned model…"; protocol
+   `events.test.ts` "says where run.started's model came from".
+2. Ledger wording on `hitRateLimit` corrected (above).
+3. `docs/install.md` Models: a catalog alias deleted and added again is picked up by the threads that
+   chose it, on the new target.
+4. e2e against the real Bifrost: a keyed OpenAI-compatible provider on the fake upstream's private
+   address with `allow_private_network: false` — refresh doesn't report `ok`, the upstream never saw
+   its key (`/_seen`), the refresh is audited without it. (A keyed provider rather than a keyless
+   one: Bifrost's refresh runs list-models per key, and the key in `/_seen` is the proof.)
+
+## Contract change (flagged)
+
+- `packages/protocol` `run.started` gains optional `model_source` (`agent` | `thread` |
+  `default`), additive, written by the server only when the run has a model. Asked for by the
+  coordinator's review; flagged here because it is a contract change inside a feature PR.
 
 ## Risks
 
@@ -135,6 +166,6 @@ model)`, `setThreadModel`, `listModels`; `ChatSession` draft model + 30 s model-
 | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ac-1    | `apps/web/components/admin/models-pages.test.tsx` (install: only `key_set`/revision shown, no team header; failing sync with last error; add Ollama Cloud with endpoint + password-typed key (exact POST body); OpenAI-compatible id + private network, vendor kinds offered once; endpoint change on a keyed provider disables Save with the explanation until the key is re-entered (exact PATCH body); server refusal `key_required_for_new_endpoint` shown; catalog add with the picker (cached list → "Ask the provider" → datalist → POST body); provider refusal explained; edit/remove catalog; gateway not configured). Server `models-discovery.db.test.ts` (install admins only, 409 before sync, read never calls out, refresh lists Ollama Cloud models with prefix dropped/invalid skipped, key never in responses or audit, refused key scrubbed, audit outcomes, rate limit, 503, 404); `models/bifrost-admin.test.ts` (admin client calls) |
 | ac-2    | `models-pages.test.tsx` team suite (enable/disable/make default, exact PUT bodies, `X-Kobe-Team` on every call, no "Make default" for a disabled model, warning before disabling the default, "No default" banner)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ac-3    | Server `thread-model.db.test.ts` (stored and shown in GET/list/search; only enabled aliases, 409 otherwise, 400 malformed; owner only, other team 404; run.start/run.started carry the thread's model ahead of the agent pin and default; disabled later → run fails `agent_model_not_enabled` with the thread message, nothing woken, picking another works). Web `components/chat/model-picker.test.tsx` (team default + enabled only; new conversation created with the choice; PATCH on an open thread and back to default; disabled choice shown "(unavailable)" with the way out; re-read after a run fails for the model; server refusal shown; hidden when the list can't be read)                                                                                                                                                                                                                                                                  |
+| ac-3    | Server `thread-model.db.test.ts` (stored and shown in GET/list/search; only enabled aliases, 409 otherwise, 400 malformed; owner only, other team 404; run.start/run.started carry the agent pin, else the thread's model, else the default, with `model_source`; disabled later → run fails `agent_model_not_enabled` with the thread message, nothing woken, picking another works). Web `components/chat/model-picker.test.tsx` (team default + enabled only; new conversation created with the choice; PATCH on an open thread and back to default; disabled choice shown "(unavailable)" with the way out; re-read after a run fails for the model; server refusal shown; hidden when the list can't be read)                                                                                                                                                                                                                                          |
 | ac-4    | `lib/admin/api/models.test.ts`; e2e `run.sh` KOBE-44 checks (thread created with `qwen` stores it, `run.started.model=qwen`, completed through that provider; a disabled alias can't be chosen, 409)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | screens | Screenshots of each screen (production build against a mock API) attached to the report                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |

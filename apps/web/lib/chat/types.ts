@@ -71,6 +71,8 @@ export interface ThreadEntry {
 
 export interface ThreadDetail extends ThreadSummary {
   readonly agentCurrentVersion: number | null;
+  /** The model the thread's agent pins (KOBE-44/47); it wins over `model`. Null: no pin. */
+  readonly agentModel?: string | null;
   readonly entries: readonly ThreadEntry[];
   readonly nextEntriesAfter: number | null;
 }

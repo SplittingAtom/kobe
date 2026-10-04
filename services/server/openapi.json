@@ -2831,6 +2831,9 @@
               }
             ]
           },
+          "agent_model": {
+            "type": ["string", "null"]
+          },
           "entries": {
             "type": "array",
             "items": {
@@ -2920,6 +2923,7 @@
           "deleted_at",
           "purge_after",
           "agent_current_version",
+          "agent_model",
           "entries",
           "next_entries_after"
         ],

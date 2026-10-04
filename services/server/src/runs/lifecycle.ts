@@ -155,7 +155,7 @@ export async function promoteInTx(
         thread_id: threadId,
         agent_id: resolved.agent?.agentId ?? null,
         agent_version: resolved.agent?.version ?? null,
-        ...(model === undefined ? {} : { model: model.alias }),
+        ...(model === undefined ? {} : { model: model.alias, model_source: requested.source }),
         ...(next.retryOfRunId !== null ? { retry_of_run_id: next.retryOfRunId } : {}),
       },
     };
@@ -174,20 +174,22 @@ export async function promoteInTx(
 
 type Resolved = Extract<AgentResolution, { ok: true }>;
 
+/** Where a run's model came from (KOBE-44), recorded in `run.started.model_source`. */
+export type ModelSource = "agent" | "thread" | "default";
+
 /**
- * The run's requested model alias (KOBE-44, D30): the model the thread's owner chose for the
- * thread, else the agent's pin (KOBE-47), else none (the team's default). An explicit choice in
- * the thread wins over the agent's pin: the person chose it for this conversation.
+ * The run's requested model alias (KOBE-44, D30): the agent's pin (KOBE-47) when it sets one, else
+ * the model the thread's owner chose for the conversation, else none (the team's default). User
+ * decision (2026-10-04): the agent's pinned model wins over the conversation's choice.
  */
-function requestedModel(
-  thread: ThreadRow,
-  resolved: Resolved,
-): { readonly alias: string | undefined; readonly source: "thread" | "agent" | "default" } {
-  if (thread.modelAlias !== null) return { alias: thread.modelAlias, source: "thread" };
+export function requestedModel(
+  thread: Pick<ThreadRow, "modelAlias">,
+  resolved: Pick<Resolved, "config">,
+): { readonly alias: string | undefined; readonly source: ModelSource } {
   const pinned = resolved.config?.model?.alias;
-  return pinned === undefined
-    ? { alias: undefined, source: "default" }
-    : { alias: pinned, source: "agent" };
+  if (pinned !== undefined) return { alias: pinned, source: "agent" };
+  if (thread.modelAlias !== null) return { alias: thread.modelAlias, source: "thread" };
+  return { alias: undefined, source: "default" };
 }
 
 /** The thread's agent version for a start; the resolver may only tighten the run's mode. */

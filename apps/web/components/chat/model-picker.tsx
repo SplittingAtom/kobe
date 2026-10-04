@@ -89,6 +89,27 @@ export function ModelPicker({
     void controller?.setModel(model);
   };
 
+  // The agent's pinned model wins over the conversation's choice (user decision, KOBE-44): the
+  // picker shows it, locked. The pin comes from the server's agent resolver (KOBE-47 seam).
+  const agentModel = isNew ? null : (state.agentModel ?? null);
+  if (agentModel !== null) {
+    const pinned = models.find((m) => m.alias === agentModel);
+    const name = pinned ? modelName(pinned) : agentModel;
+    return (
+      <>
+        <label className={styles.modelPicker}>
+          <span className={styles.visuallyHidden}>Model for this conversation</span>
+          <select value={agentModel} disabled aria-describedby={`${id}-pinned`}>
+            <option value={agentModel}>{name}</option>
+          </select>
+        </label>
+        <span id={`${id}-pinned`} className={styles.hint}>
+          This agent always uses {name}.
+        </span>
+      </>
+    );
+  }
+
   if (enabled.length === 0 && chosen === null) {
     return (
       <span className={styles.hint} id={`${id}-none`}>

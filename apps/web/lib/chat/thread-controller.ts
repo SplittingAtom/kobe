@@ -150,6 +150,7 @@ export class ThreadController {
       entries: firstPage,
       nextEntriesAfter,
       agentCurrentVersion: _v,
+      agentModel,
       ...summary
     } = detail.data;
     const entries = await this.#readMoreEntries(threadId, firstPage, nextEntriesAfter);
@@ -159,6 +160,7 @@ export class ThreadController {
       phase: "ready",
       loadError: undefined,
       summary,
+      agentModel: agentModel ?? null,
       entries: mergeServerEntries(s.entries, entries),
       serverSeq: maxSeq(entries, s.serverSeq),
     }));
@@ -268,12 +270,14 @@ export class ThreadController {
       entries: firstPage,
       nextEntriesAfter,
       agentCurrentVersion: _v,
+      agentModel,
       ...summary
     } = detail.data;
     const incoming = await this.#readMoreEntries(threadId, firstPage, nextEntriesAfter);
     if (this.#disposed) return;
     this.#set((s) => ({
       ...s,
+      agentModel: agentModel ?? null,
       // A branch chosen while this read was on its way wins over the leaf it read.
       summary:
         leafVersion === this.#leafVersion || !s.summary

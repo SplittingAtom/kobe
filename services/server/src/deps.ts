@@ -37,6 +37,7 @@ import {
   type RunOrchestratorOptions,
   type ServerRunOrchestrator,
 } from "./runs/index.js";
+import type { RunAgentResolver } from "./runs/seams.js";
 import { UserLifecycle } from "./users/lifecycle.js";
 import { approvalVerifierForMcp } from "./mcp/approvals.js";
 import { createDbMcpCatalog } from "./mcp/catalog.js";
@@ -140,6 +141,8 @@ export interface ServerDeps {
    * `sandboxWire.router`; the wire calls back when it ends a run.
    */
   readonly runs: ServerRunOrchestrator;
+  /** The run orchestrator's agent resolver (KOBE-44: the thread API asks it for the agent's model pin). */
+  readonly runAgents: RunAgentResolver;
   /** Model gateway admin (KOBE-40): seals provider API keys; undefined when not configured. */
   readonly models:
     | {
@@ -240,9 +243,10 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     db: database.db,
     databaseUrl: options.databaseUrl,
   });
+  const runAgents = options.runs?.agents ?? PINNED_AGENTS;
   const runs: ServerRunOrchestrator = new DbRunOrchestrator({
     ...options.runs,
-    agents: options.runs?.agents ?? PINNED_AGENTS,
+    agents: runAgents,
     db: database.db,
     router: sandboxWire.router,
   });
@@ -286,6 +290,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     lifecycle,
     sandboxWire,
     runs,
+    runAgents,
     mcp,
     approvals,
     async createUserWithPassword({ email, name, password }, { installRole, recordSetup } = {}) {

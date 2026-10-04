@@ -22,6 +22,7 @@ beforeAll(async () => {
           ? { ...resolved, config: { model: { alias } } }
           : resolved;
       },
+      pinnedModel: (_tx, input) => Promise.resolve(pinnedAliases.get(input.threadId)),
     },
   });
 });
@@ -128,32 +129,38 @@ describe("thread model choice (D30)", () => {
     expect(theirs.status).toBe(409);
   });
 
-  it("is the run's model: run.start carries it, ahead of the agent's pin and the team default", async () => {
+  it("is the run's model unless the agent pins one (user decision: the agent's pin wins)", async () => {
     const w = await f.world();
     await catalog(w.team, w.owner.id, ["fast", "smart"]);
     const ws = await f.connect(w, 0);
+    const owner = f.on(0, w.owner);
     const id = await f.thread(w.owner);
+    await owner.patch(`/v1/threads/${id}`, { model: "smart" });
+    const run = async (content: string, alias: string, source: string) => {
+      const runId = await f.message(w.owner, id, content);
+      const start = await ws.started(runId);
+      expect(start.config).toMatchObject({ model: { alias } });
+      expect((await f.events(w.team, runId))[0]).toMatchObject({
+        type: "run.started",
+        payload: { model: alias, model_source: source },
+      });
+      ws.reply(start, "ok");
+      await f.until(w.team, runId, "completed");
+    };
+    // The conversation's choice, ahead of the team default.
+    expect((await owner.get(`/v1/threads/${id}`)).json.agent_model).toBeNull();
+    await run("one", "smart", "thread");
+    // The agent pins `fast`: it wins, and the thread read says so (the picker locks).
     pinnedAliases.set(id, "fast");
-    await f.on(0, w.owner).patch(`/v1/threads/${id}`, { model: "smart" });
-    const runId = await f.message(w.owner, id, "hello");
-    const start = await ws.started(runId);
-    expect(start.config).toMatchObject({
-      model: { alias: "smart", gateway_model: "anthropic/claude-fake", api: "anthropic-messages" },
+    expect((await owner.get(`/v1/threads/${id}`)).json).toMatchObject({
+      model: "smart",
+      agent_model: "fast",
     });
-    expect((await f.events(w.team, runId))[0]).toMatchObject({
-      type: "run.started",
-      payload: { model: "smart" },
-    });
-    ws.reply(start, "hi");
-    await f.until(w.team, runId, "completed");
-
-    // Cleared: the agent's pin applies again.
-    await f.on(0, w.owner).patch(`/v1/threads/${id}`, { model: null });
-    const second = await f.message(w.owner, id, "again");
-    const next = await ws.started(second);
-    expect(next.config).toMatchObject({ model: { alias: "fast" } });
-    ws.reply(next, "ok");
-    await f.until(w.team, second, "completed");
+    await run("two", "fast", "agent");
+    // No pin and no choice: the team default.
+    pinnedAliases.delete(id);
+    await owner.patch(`/v1/threads/${id}`, { model: null });
+    await run("three", "fast", "default");
   });
 
   it("a model the team disabled after it was chosen fails the run clearly, waking nothing", async () => {

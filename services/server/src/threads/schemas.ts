@@ -184,6 +184,11 @@ export const threadDetailSchema = threadSummarySchema.extend({
    * `agent_version`); null without an agent or when the agent is no longer available.
    */
   agent_current_version: z.number().int().nullable(),
+  /**
+   * The model alias the thread's agent pins (KOBE-44; resolved by the run's agent resolver,
+   * KOBE-47). When set it wins over `model`: runs use it whatever the conversation chose.
+   */
+  agent_model: z.string().nullable(),
   entries: z.array(threadEntrySchema),
   /** Pass as `after` to `GET /v1/threads/{id}/entries` for more; null when all were returned. */
   next_entries_after: z.number().int().nullable(),

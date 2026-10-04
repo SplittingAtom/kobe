@@ -1318,6 +1318,24 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
   contains "Bifrost reflects the configuration (gateway in sync)" '^in_sync=true error=-$' "$synced"
   printf '     gateway in sync after %ss\n' "$((SECONDS - t0))"
 
+  # KOBE-44: the catalog's model listing asks the real Bifrost to call a provider with its key. A
+  # provider on a private address WITHOUT allow_private_network must not be reached that way.
+  priv_add=$(as_owner "POST /v1/install/models/providers {\"kind\":\"openai_compatible\",\"id\":\"e2epriv\",\"name\":\"Private, not allowed\",\"api_key\":\"e2e-private-key\",\"base_url\":\"$LLM\",\"allow_private_network\":false}")
+  expect "a keyed provider on a private address is added with private network off" '^201 ' "$priv_add"
+  wait_for 60 '^in_sync=true' gateway_state >/dev/null
+  priv_refresh=$(as_owner "POST /v1/install/models/providers/e2epriv/models/refresh")
+  printf '     private refresh: %s\n' "$(printf '%s' "$priv_refresh" | cut -c1-200)"
+  if printf '%s' "$priv_refresh" | grep -q '"discovery":"ok"'; then
+    fail "listing models of a private-address provider (private network off) is refused"
+  else ok "listing models of a private-address provider (private network off) is refused"; fi
+  priv_seen=$(probe "$NS" "$(answers "$LLM/_seen")")
+  if [[ -n "$priv_seen" ]] && ! printf '%s' "$priv_seen" | grep -q 'e2e-private-key'; then
+    ok "Bifrost never sent that provider's key to the private address"
+  else fail "Bifrost never sent that provider's key to the private address"; fi
+  contains "the refresh is audited without the key" '^1$' \
+    "$(psql_kobe "SELECT count(*) FROM audit_log WHERE action = 'models.provider.models_refreshed' AND target->>'providerId' = 'e2epriv' AND target::text NOT LIKE '%e2e-private-key%'")"
+  as_owner "DELETE /v1/install/models/providers/e2epriv" >/dev/null
+
   # The sandbox-like client: team namespace (team NetworkPolicy), gVisor, no DNS, the shim at
   # model-gateway.kobe.internal as in real sandboxes; a model-gateway token for the model user.
   MODEL_CLIENT="model-client-$RANDOM"

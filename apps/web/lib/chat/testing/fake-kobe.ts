@@ -23,6 +23,8 @@ interface FakeThread {
   created_at: string;
   /** The thread's chosen model alias (KOBE-44); null = the team default. */
   model: string | null;
+  /** The model the thread's agent pins (KOBE-44/47 seam); it wins over `model`. */
+  agent_model?: string | null;
   entries: FakeEntry[];
 }
 
@@ -322,7 +324,7 @@ export class FakeKobe {
   }
 
   #summary(thread: FakeThread): Json {
-    const { entries: _e, ...rest } = thread;
+    const { entries: _e, agent_model: _a, ...rest } = thread;
     return {
       ...rest,
       owner_user_id: uuid(3, 1),
@@ -503,7 +505,12 @@ export class FakeKobe {
   #threadItself(method: string, thread: FakeThread, url: URL, body: Json | undefined): Response {
     if (method === "GET") {
       const page = this.#entryPage(thread, url);
-      return json(200, { ...this.#summary(thread), agent_current_version: null, ...page });
+      return json(200, {
+        ...this.#summary(thread),
+        agent_current_version: null,
+        agent_model: thread.agent_model ?? null,
+        ...page,
+      });
     }
     if (method === "PATCH") {
       if (body && "model" in body) {

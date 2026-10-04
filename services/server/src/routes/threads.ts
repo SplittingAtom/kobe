@@ -209,9 +209,19 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
       if (!found) return null;
       const page = await listEntries(tx, viewer, id, query.after, query.limit);
       const latest = await latestPinnedVersion(tx, { teamId: viewer.teamId, ...found.thread });
+      // KOBE-44: the agent's model pin (KOBE-47 seam), which wins over the thread's `model`.
+      const agentModel = await deps.runAgents.pinnedModel?.(tx, {
+        teamId: viewer.teamId,
+        ownerUserId: found.thread.ownerUserId,
+        threadId: found.thread.id,
+        agentScope: found.thread.agentScope,
+        agentId: found.thread.agentId,
+        agentVersion: found.thread.agentVersion,
+      });
       return {
         ...toSummary(found.thread),
         agent_current_version: latest,
+        agent_model: agentModel ?? null,
         entries: page.entries,
         next_entries_after: page.nextAfter,
       };
