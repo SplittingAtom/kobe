@@ -60,6 +60,19 @@ describe("gateway failure classification", () => {
     expect(code(openai(400, "invalid_request"))).toBe("model_error");
     expect(code("Unknown: UnknownError")).toBe("model_error");
     expect(code(openai(403, "run_not_leased"))).toBe("model_error");
+    // KOBE-42: a used-up budget (the shim's 402, Bifrost's own refusal) is never retried.
+    expect(code(openai(402, "budget_exhausted"))).toBe("model_budget_exhausted");
+    expect(code(anthropic(402, "budget_exhausted"))).toBe("model_budget_exhausted");
+    expect(code(gemini(402, "UNKNOWN"))).toBe("model_budget_exhausted");
+    expect(code(openai(402, "policy_budget_exceeded"))).toBe("model_budget_exhausted");
+    expect(isTransient(classifyFailure(openai(402, "budget_exhausted"), undefined))).toBe(false);
+    expect(
+      kobeErrorMessage(
+        "model_budget_exhausted",
+        classifyFailure(openai(402, "budget_exhausted"), undefined),
+        1,
+      ),
+    ).toBe(`${KOBE_MODEL_ERROR_PREFIX}model_budget_exhausted: gave up after 1 attempt`);
   });
 
   it("knows what is worth retrying and what needs a fresh token", () => {

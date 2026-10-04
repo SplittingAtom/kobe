@@ -31,6 +31,7 @@ export const MODEL_RUN_ERROR_CODES = [
   "model_unavailable",
   "model_not_configured",
   "model_error",
+  "model_budget_exhausted",
 ] as const;
 export type ModelRunErrorCode = (typeof MODEL_RUN_ERROR_CODES)[number];
 

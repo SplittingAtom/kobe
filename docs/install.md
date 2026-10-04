@@ -242,6 +242,20 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
   when Pi names an active run). A response without a usage report (a stream cut short, a request
   that did not ask for usage) is charged an estimate: request size / 4 input tokens and generated
   text / 4 output tokens. Rows are written in batches about once a second.
+- **Budgets and rate limits** (KOBE-42, D30): dollar budgets, monthly with an optional daily cap,
+  for the install (`PUT /v1/install/budget`, install admins; also the per-user request rate, default
+  60/min), each team and single members (`/v1/team/budgets`, team admins; a team may only lower
+  the rate). Spend is the `run_usage` ledger at catalog prices (unpriced models cost nothing);
+  periods are calendar months and days in UTC. At 80 % team admins (and the member, for their own
+  budget; install admins for the install's) get an email and members see a banner in the chat; at
+  100 % the model-gateway shim refuses new model calls (402 `budget_exhausted`), new runs are
+  refused (429 `budget_exhausted`), and running ones finish their current step and end
+  `budget_stopped` ("Team budget reached"), pending approvals expire; audited
+  `models.budget.reached`. Calls in flight are never cut. Enforcement is at the identities the
+  session token proves (install, team, user, sandbox), never the advisory run id. The per-user
+  request rate is enforced by each shim replica and, install-wide, by Bifrost on each member's
+  virtual key. Bifrost's own dollar budgets are not used: Bifrost prices calls with its own price
+  list (zero for models it does not know, such as Ollama Cloud's), not the catalog's.
 - **Prices are optional, per catalog model**: `input_usd_per_mtok`, `output_usd_per_mtok` and
   optionally `cache_read_usd_per_mtok` / `cache_write_usd_per_mtok` (dollars per million tokens;
   cache prices default to the input price) on `POST/PATCH /v1/install/models/catalog`. Providers

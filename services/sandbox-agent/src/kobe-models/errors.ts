@@ -32,6 +32,8 @@ const TRANSPORT_FAILURE =
 /** Codes meaning the run's model is not allowed for this team (the shim's or Bifrost's). */
 const NOT_ENABLED_CODES = new Set(["model_not_enabled", "model_blocked", "provider_blocked"]);
 const REVOKED_CODES = new Set(["session_revoked", "invalid_session_token"]);
+/** A used-up budget (KOBE-42): the shim's 402, or Bifrost's own budget refusal. */
+const BUDGET_CODES = new Set(["budget_exhausted", "policy_budget_exceeded"]);
 
 export const MAX_RETRY_AFTER_MS = 30_000;
 
@@ -111,6 +113,9 @@ export function isUnauthorized(failure: Failure): boolean {
 
 /** The run error code for a failure that is not retried (any more). */
 export function runErrorCode(failure: Failure): ModelRunErrorCode {
+  if (failure.status === 402 || (failure.code !== undefined && BUDGET_CODES.has(failure.code))) {
+    return "model_budget_exhausted";
+  }
   if (failure.code !== undefined && NOT_ENABLED_CODES.has(failure.code)) return "model_not_enabled";
   if (failure.status === 403 && failure.code === undefined) return "model_not_enabled";
   if (isUnauthorized(failure)) return "model_session_revoked";

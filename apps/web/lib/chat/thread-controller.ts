@@ -95,6 +95,9 @@ export class ThreadController {
   /** A run's token usage and spend (KOBE-43; run details). */
   readonly runUsage = (runId: string) => this.#api.runUsage(runId);
 
+  /** The member's budget status (KOBE-42; the chat's warning banner). */
+  readonly budgetStatus = () => this.#api.budgetStatus();
+
   #set(change: (state: ThreadState) => ThreadState): void {
     if (this.#disposed) return;
     const next = change(this.#state);

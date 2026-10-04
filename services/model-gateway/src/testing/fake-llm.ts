@@ -46,6 +46,42 @@ function sse(res: ServerResponse, events: readonly string[]): void {
   res.end();
 }
 
+/**
+ * A prompt containing this asks the OpenAI-style fake for one tool step (KOBE-42 Gate 2): the
+ * first answer is a `bash` tool call; once the conversation holds its result, a text answer.
+ */
+export const TOOL_STEP_MARKER = "kobe-tool-step";
+
+function openaiToolCall(res: ServerResponse, model: string): void {
+  const chunk = (delta: unknown, finish: string | null, usage?: unknown) =>
+    `data: ${JSON.stringify({
+      id: "chatcmpl-fake-tool",
+      object: "chat.completion.chunk",
+      created: 1,
+      model,
+      choices: [{ index: 0, delta, finish_reason: finish }],
+      ...(usage ? { usage } : {}),
+    })}\n\n`;
+  sse(res, [
+    chunk({ role: "assistant", content: null }, null),
+    chunk(
+      {
+        tool_calls: [
+          {
+            index: 0,
+            id: "call_fake_1",
+            type: "function",
+            function: { name: "bash", arguments: JSON.stringify({ command: "echo step-done" }) },
+          },
+        ],
+      },
+      null,
+    ),
+    chunk({}, "tool_calls", { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 }),
+    "data: [DONE]\n\n",
+  ]);
+}
+
 function openai(res: ServerResponse, reply: string, stream: boolean, model: string): void {
   if (!stream) {
     json(res, 200, {
@@ -171,7 +207,19 @@ export function createFakeLlm(seen: SeenRequest[] = []): Server {
         data: [{ id: "fake-model", object: "model", owned_by: "fake" }],
       });
     } else if (p.endsWith("/chat/completions")) {
-      openai(res, `fake-openai: ${text}`, stream, model);
+      const messages = Array.isArray(body.messages)
+        ? (body.messages as Record<string, unknown>[])
+        : [];
+      const toolStep = JSON.stringify(messages).includes(TOOL_STEP_MARKER);
+      const toolDone = messages.some((m) => m.role === "tool");
+      if (toolStep && !toolDone && stream) openaiToolCall(res, model);
+      else
+        openai(
+          res,
+          toolStep ? "fake-openai: tool step done" : `fake-openai: ${text}`,
+          stream,
+          model,
+        );
     } else if (p.endsWith("/v1/messages")) {
       anthropic(res, `fake-anthropic: ${text}`, stream, model);
     } else if (/:(stream)?generateContent$/i.test(p)) {

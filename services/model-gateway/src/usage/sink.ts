@@ -17,6 +17,10 @@ export interface DbUsageSinkOptions {
   readonly maxBatch?: number;
   readonly maxQueue?: number;
   readonly maxAttempts?: number;
+  /** After a team's rows are written (KOBE-42: drop budget caches, wake the budget monitor). */
+  readonly onWritten?: (teamId: string) => void;
+  /** Delay from a recorded call to its write (calls close together share one batch). */
+  readonly soonMs?: number;
 }
 
 interface Queued {
@@ -54,6 +58,7 @@ export class DbUsageSink implements UsageSink {
   private queue: Queued[] = [];
   private readonly timer: NodeJS.Timeout;
   private flushing: Promise<void> | undefined;
+  private soon: NodeJS.Timeout | undefined;
   private readonly maxBatch: number;
   private readonly maxQueue: number;
   private readonly maxAttempts: number;
@@ -70,7 +75,15 @@ export class DbUsageSink implements UsageSink {
     // Metadata only, never content (KOBE-40's log line, now with the token counts).
     this.options.logger.info({ call }, "model call");
     const record = usageRecordOf(call);
-    if (record) this.enqueue([{ record, attempts: 0 }]);
+    if (record) {
+      this.enqueue([{ record, attempts: 0 }]);
+      // Budgets judge what the ledger holds: write promptly, not only on the interval.
+      this.soon ??= setTimeout(() => {
+        this.soon = undefined;
+        void this.flush();
+      }, this.options.soonMs ?? 0);
+      this.soon.unref();
+    }
   }
 
   get pending(): number {
@@ -112,6 +125,8 @@ export class DbUsageSink implements UsageSink {
       for (const items of groups.values()) {
         try {
           await this.options.write(items.map((q) => q.record));
+          const teamId = items[0]?.record.teamId;
+          if (teamId) this.options.onWritten?.(teamId);
         } catch (err) {
           failed.push(...items);
           this.options.logger.error(
@@ -139,6 +154,7 @@ export class DbUsageSink implements UsageSink {
   /** Stops the timer and writes what is left (shutdown). */
   async close(): Promise<void> {
     clearInterval(this.timer);
+    if (this.soon) clearTimeout(this.soon);
     await this.flush();
   }
 }

@@ -1,16 +1,43 @@
-import { MODELS_CHANNEL, MODELS_KEYS_PREFIX } from "@kobe/db";
+import {
+  MODELS_BUDGETS_PREFIX,
+  MODELS_CHANNEL,
+  MODELS_KEYS_PREFIX,
+  MODELS_SPEND_PREFIX,
+} from "@kobe/db";
 import pg from "pg";
 import type { Logger } from "pino";
 import type { PrincipalCache } from "./principals.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Applies one `kobe_models` hint to the cache: `keys:<team>` drops that team's entries. */
-export function applyModelsHint(cache: PrincipalCache, payload: string | undefined): void {
-  if (!payload?.startsWith(MODELS_KEYS_PREFIX)) return;
-  const teamId = payload.slice(MODELS_KEYS_PREFIX.length);
+/** A cache keyed by team that hints can drop. */
+export interface TeamCache {
+  invalidateTeam(teamId: string): void;
+  invalidateAll(): void;
+}
+
+function drop(cache: TeamCache, teamId: string): void {
   if (UUID.test(teamId)) cache.invalidateTeam(teamId.toLowerCase());
   else cache.invalidateAll();
+}
+
+/**
+ * Applies one `kobe_models` hint: `keys:<team>` drops that team's principals; `spend:<team>` and
+ * `budgets:<team|*>` (KOBE-42) drop its budget states.
+ */
+export function applyModelsHint(
+  cache: PrincipalCache,
+  payload: string | undefined,
+  budgets?: TeamCache,
+): void {
+  if (payload?.startsWith(MODELS_KEYS_PREFIX))
+    drop(cache, payload.slice(MODELS_KEYS_PREFIX.length));
+  if (!budgets) return;
+  if (payload?.startsWith(MODELS_SPEND_PREFIX)) {
+    drop(budgets, payload.slice(MODELS_SPEND_PREFIX.length));
+  } else if (payload?.startsWith(MODELS_BUDGETS_PREFIX)) {
+    drop(budgets, payload.slice(MODELS_BUDGETS_PREFIX.length));
+  }
 }
 
 /**
@@ -29,6 +56,8 @@ export class ModelsListener {
     private readonly options: {
       readonly connectionString: string;
       readonly cache: PrincipalCache;
+      /** Budget states (KOBE-42), dropped on spend and budget hints. */
+      readonly budgets?: TeamCache;
       readonly logger: Logger;
     },
   ) {}
@@ -50,7 +79,7 @@ export class ModelsListener {
     });
     client.on("end", () => this.lost(client));
     client.on("notification", (n) => {
-      if (n.channel === MODELS_CHANNEL) applyModelsHint(cache, n.payload);
+      if (n.channel === MODELS_CHANNEL) applyModelsHint(cache, n.payload, this.options.budgets);
     });
     try {
       await client.connect();
@@ -62,6 +91,7 @@ export class ModelsListener {
       this.client = client;
       this.attempt = 0;
       cache.invalidateAll();
+      this.options.budgets?.invalidateAll();
       this.ping = setInterval(() => {
         client.query("SELECT 1").catch(() => this.lost(client));
       }, 30_000);
@@ -78,6 +108,7 @@ export class ModelsListener {
     this.client = undefined;
     if (this.ping) clearInterval(this.ping);
     this.options.cache.invalidateAll();
+    this.options.budgets?.invalidateAll();
     client.end().catch(() => undefined);
     if (this.closed) return;
     const delay = Math.min(10_000, 250 * 2 ** this.attempt++) * (0.5 + Math.random() / 2);

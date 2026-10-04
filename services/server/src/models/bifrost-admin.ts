@@ -42,6 +42,8 @@ export interface ObservedVirtualKey {
   readonly models: Readonly<Record<string, readonly string[]>>;
   /** Every provider config may use every key of its provider. */
   readonly allKeys: boolean;
+  /** Its request rate limit per minute (KOBE-42), when it has one. */
+  readonly requestsPerMinute: number | undefined;
 }
 
 /** Budgets and rate limits Bifrost enforces (KOBE-42 fills these; KOBE-40 sends none). */
@@ -168,6 +170,14 @@ const vkBody = (spec: VirtualKeySpec): Json => ({
   })),
   ...limitsBody(spec.limits),
 });
+
+/** A rate limit's requests per minute, or undefined when it has none of that shape. */
+function perMinute(value: unknown): number | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const rl = value as Record<string, unknown>;
+  const max = rl.request_max_limit;
+  return typeof max === "number" && rl.request_reset_duration === "1m" ? max : undefined;
+}
 
 export function createHttpBifrostAdmin(options: HttpBifrostAdminOptions): BifrostAdmin {
   const base = options.baseUrl.replace(/\/+$/, "");
@@ -301,6 +311,7 @@ export function createHttpBifrostAdmin(options: HttpBifrostAdminOptions): Bifros
           teamId: str(v.team_id),
           models,
           allKeys: configs.every((pc) => pc.allow_all_keys === true),
+          requestsPerMinute: perMinute(v.rate_limit),
         };
       });
     },

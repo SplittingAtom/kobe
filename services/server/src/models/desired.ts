@@ -36,11 +36,22 @@ export interface TeamInput {
   readonly members: readonly string[];
   /** Enabled catalog aliases. */
   readonly aliases: readonly string[];
+  /**
+   * Per-member requests per minute (KOBE-42: the install's, or the team's lower one); pushed as
+   * each member's virtual-key rate limit, Bifrost's install-wide backstop for the shim's limiter.
+   */
+  readonly requestsPerMinute?: number;
 }
 
+/** The virtual-key rate limit for a per-minute request rate. */
+export const vkRateLimit = (requestsPerMinute: number): GatewayLimits => ({
+  rate_limit: { request_max_limit: requestsPerMinute, request_reset_duration: "1m" },
+});
+
 /**
- * Budgets and rate limits per hierarchy level (KOBE-42 implements this; KOBE-40 sets none). The
- * sync passes them to Bifrost when it creates or updates the entity.
+ * Budgets and rate limits per hierarchy level; the sync passes them to Bifrost when it creates or
+ * updates the entity. KOBE-42 pushes only the members' request rates (`TeamInput`): dollar
+ * budgets are Kobe's (Bifrost prices calls with its own price list, not the catalog's).
  */
 export interface GovernanceLimitsSource {
   customer?(): GatewayLimits | undefined;
@@ -146,7 +157,9 @@ export function buildDesiredState(
         teamId: team.teamId,
         userId,
         models: sorted,
-        limits: limits.virtualKey?.(team.teamId, userId),
+        limits:
+          limits.virtualKey?.(team.teamId, userId) ??
+          (team.requestsPerMinute === undefined ? undefined : vkRateLimit(team.requestsPerMinute)),
       });
     }
   }

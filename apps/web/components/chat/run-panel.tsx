@@ -2,6 +2,7 @@
 
 import { useAui } from "@assistant-ui/react";
 import { useEffect, useState } from "react";
+import type { BudgetStatus } from "../../lib/admin/api/budgets";
 import type { RunUsage } from "../../lib/admin/api/usage";
 import { formatTokens, formatUsd } from "../../lib/admin/usage-format";
 import { isBusy, type ThreadState } from "../../lib/chat/thread-state";
@@ -313,6 +314,52 @@ function RunUsageLine({
   );
 }
 
+const SCOPE_WORDS = { install: "The install's", team: "Your team's", user: "Your" } as const;
+
+/** The budget banner's sentence for the most used budget (KOBE-42, D30 "warn the user"). */
+export function budgetBannerText(status: BudgetStatus): string | null {
+  const line = [...status.lines]
+    .filter((l) => l.state !== "ok")
+    .sort((a, b) => b.percent - a.percent)[0];
+  if (!line) return null;
+  const which = `${SCOPE_WORDS[line.scope]} ${line.period === "month" ? "monthly" : "daily"} model budget`;
+  return line.state === "exhausted"
+    ? `${which} is used up: new messages can't start a run until it is raised or the ${line.period} ends.`
+    : `${which} is ${line.percent} % used.`;
+}
+
+/** Warns at 80 % and says why runs are refused at 100 % (checked on open and after each run). */
+function BudgetBanner({
+  state,
+  controller,
+}: {
+  readonly state: ThreadState;
+  readonly controller: ThreadController;
+}) {
+  const ended = state.live?.terminal ? state.live.runId : "";
+  const [status, setStatus] = useState<BudgetStatus | null>(null);
+  useEffect(() => {
+    let current = true;
+    void controller.budgetStatus().then((res) => {
+      if (current) setStatus(res.ok ? res.data : null);
+    });
+    return () => {
+      current = false;
+    };
+  }, [ended, controller]);
+  const sentence = status ? budgetBannerText(status) : null;
+  if (!sentence || !status) return null;
+  return (
+    <p
+      className={status.state === "exhausted" ? styles.denied : styles.banner}
+      role={status.state === "exhausted" ? "alert" : "status"}
+      aria-label="Budget"
+    >
+      {sentence}
+    </p>
+  );
+}
+
 export function RunPanel({ extras }: { readonly extras: KobeThreadExtras }) {
   const { controller, state } = extras;
   if (!controller) return null;
@@ -320,6 +367,7 @@ export function RunPanel({ extras }: { readonly extras: KobeThreadExtras }) {
     <>
       <RunStatus state={state} controller={controller} />
       <RunUsageLine state={state} controller={controller} />
+      <BudgetBanner state={state} controller={controller} />
       <Interrupted state={state} controller={controller} />
       <Queue state={state} controller={controller} />
       <ActionError state={state} controller={controller} />

@@ -44,6 +44,8 @@ import { createPolicyEngine } from "./policy/engine.js";
 import { createToolRegistry } from "./policy/registry.js";
 import { createDbRuleSource, createDbSettingsSource } from "./policy/rule-store.js";
 import { logger } from "./logger.js";
+import { BudgetMonitor } from "./budgets/monitor.js";
+import { DB_RUN_BUDGET_GATE } from "./budgets/run-gate.js";
 
 export interface ServerDepsOptions {
   readonly databaseUrl: string;
@@ -150,6 +152,11 @@ export interface ServerDeps {
    * signed-approval verifier the MCP proxy (KOBE-58) calls.
    */
   readonly approvals: ApprovalService;
+  /**
+   * Budgets (KOBE-42, D30): watches spend, records and emails warnings, budget-stops runs.
+   * `index.ts` starts it (LISTEN + sweep); tests call `evaluate()` / `sweep()` directly.
+   */
+  readonly budgets: BudgetMonitor;
   /** Creates an email+password user (and optional install role) atomically, without sign-up. */
   createUserWithPassword(
     input: NewUser,
@@ -235,6 +242,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   const runs: ServerRunOrchestrator = new DbRunOrchestrator({
     ...options.runs,
     agents: options.runs?.agents ?? PINNED_AGENTS,
+    budget: options.runs?.budget ?? DB_RUN_BUDGET_GATE,
     db: database.db,
     router: sandboxWire.router,
   });
@@ -250,6 +258,14 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     // Gate 2: KOBE-37's verifier (finds, verifies and consumes the signed approval).
     approvals: approvalVerifierForMcp(database.db, approvals.verifier),
     ...(options.mcp?.now ? { now: options.mcp.now } : {}),
+  });
+  const budgets = new BudgetMonitor({
+    db: database.db,
+    connectionString: options.databaseUrl,
+    runs,
+    mailer: options.mailer,
+    publicUrl: new URL(options.publicUrl).origin,
+    logger: logger.child({ component: "budgets" }),
   });
   const lifecycle = new UserLifecycle();
   // A deactivated user's sandboxes lose their connections on every replica at once (KOBE-13).
@@ -279,6 +295,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     runs,
     mcp,
     approvals,
+    budgets,
     async createUserWithPassword({ email, name, password }, { installRole, recordSetup } = {}) {
       const ctx = await auth.$context;
       const hash = await ctx.password.hash(password);
@@ -316,6 +333,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     },
     async close() {
       approvals.stop();
+      await budgets.close();
       runs.close();
       await sandboxWire.close();
       await approvals.broker.close();

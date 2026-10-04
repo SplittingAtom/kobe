@@ -3,7 +3,9 @@ import {
   modelCatalog,
   modelGatewayKeys,
   modelProviders,
+  modelSpendDaily,
   runUsage,
+  teamBudgets,
   teamModels,
   users,
 } from "../../schema/index.js";
@@ -54,5 +56,15 @@ export const modelsFixtures: Record<(typeof models.team)[number], ProbeFixture> 
       usageSource: "reported",
       durationMs: 10,
     });
+  },
+  team_budgets: async (tx, teamId) => {
+    const userId = randomUUID();
+    await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
+    await tx.insert(teamBudgets).values({ teamId, monthlyUsd: 100, updatedBy: userId });
+  },
+  model_spend_daily: async (tx, teamId) => {
+    await tx
+      .insert(modelSpendDaily)
+      .values({ teamId, day: "2026-10-01", userId: randomUUID(), costUsd: 1, calls: 1 });
   },
 };

@@ -1,0 +1,134 @@
+# KOBE-42: Budgets, warnings, finish-current-step stop, rate limits
+
+- **Status:** in review
+- **Branch / worktree:** `kobe-42-budgets` in `../Kobe-wt42` (based on `kobe-43-run-usage`, PR #56)
+- **Depends on:** KOBE-40 (shim seams), KOBE-30 (`stopForBudget`), KOBE-37 (approval expiry),
+  KOBE-43 (`run_usage`)
+
+## Brief and spec (D30, D6, D8)
+
+Dollar budgets, monthly with an optional daily cap, at install, team and user-in-team levels. At
+80 % warn the user and team admin; at 100 % the in-flight run finishes its current model step,
+then ends ("Team budget reached"), new runs are blocked, pending approvals expire. Per-user
+request rate limits at the gateway. Enforce per sandbox/user/team in `CallGate` (the run id is
+advisory, KOBE-41), Bifrost limits as a backstop if they work with logging off. Audit
+`models.budget.changed`, `models.budget.reached`. UI in the team and install consoles. Gate 2:
+"budget stops a run after its current step" in a db test and in `e2e/run.sh`.
+
+## Design
+
+```
+shim: call ─▶ CallGate (BudgetGate) ─▶ Bifrost ─▶ provider
+              │ 402 budget_exhausted / 429 rate_limited        │ usage → run_usage (KOBE-43)
+              │ state: loadMemberBudgetState (cached 1 s,      │   trigger → model_spend_daily (team)
+              │ dropped on spend:/budgets: hints)              │           + install_model_spend_daily
+              ▼                                                ▼ NOTIFY spend:<team>
+server: BudgetMonitor (LISTEN + 30 s sweep) ── 80/100 % ─▶ budget_alerts (once per period)
+              │                                             ├─ budget_alert_emails (outbox)
+              │                                             └─ audit models.budget.reached (100 %)
+              └─ used up ─▶ orchestrator.stopForBudget ─▶ queued runs end, running: run.stop after_step
+        run start: RunBudgetGate (same numbers) ─▶ 429 budget_exhausted
+```
+
+- **Data** (`packages/db` `schema/budgets.ts`, migrations `0043_budgets`, `0044_budgets_rls`):
+  `install_model_limits` † (one row: monthly/daily USD, per-user requests per minute, default 60),
+  `team_budgets` (team, RLS: the team row with an optional lower rate, and member rows),
+  `model_spend_daily` (team, RLS: cost and calls per UTC day and user) and
+  `install_model_spend_daily` † (per day), both kept by a statement-level `AFTER INSERT` trigger on
+  `run_usage` (transition table; invoker's rights, so the team row passes RLS; the migration
+  backfills existing ledger rows team by team), `budget_alerts` † (scope, team, user, period,
+  threshold; `UNIQUE NULLS NOT DISTINCT`: once per budget and period across replicas) and
+  `budget_alert_emails` † (outbox). Shared reads in `@kobe/db` `models/budgets.ts`
+  (`loadTeamBudgetLines`, `loadMemberBudgetState`, `exhaustedLine`, `percentUsed`): one source of
+  numbers for the shim, the run gate and the monitor. A budget check reads ≤ 31 small rows.
+- **Shim** (`services/model-gateway/src/budget-gate.ts`): `BudgetGate` implements `CallGate`.
+  Used-up budget at any level (widest named) → 402 `budget_exhausted` "Your team's monthly model
+  budget is used up."; per-member token bucket at the effective rate → 429 `rate_limited` with
+  Retry-After. The ledger writer flushes right after each call and then NOTIFYs `spend:<team>`;
+  shims drop that team's cached states (`ModelsListener`), the server's monitor evaluates.
+- **Server** (`services/server/src/budgets/`): `BudgetMonitor` (every replica; evaluations are
+  idempotent: alerts unique, `stopForBudget` idempotent) records thresholds, queues emails
+  (team admins; plus the member for their own budget; install admins for the install budget),
+  audits `models.budget.reached` at 100 %, and calls `stopForBudget` for every used-up level
+  (install: every team, at once when it is first reached). `DB_RUN_BUDGET_GATE` is the
+  orchestrator's `RunBudgetGate`. `outbox.ts` delivers emails at least once (lease, backoff,
+  `failed` after 8 attempts, inactive recipients `skipped`).
+- **Finish-current-step:** unchanged KOBE-30 machinery (`after_step` stop at Pi's `turn_end`,
+  queued runs end at once, approvals expire). New in `run-state.ts`: a run with a pending budget
+  stop that **fails** (its next model call refused by the shim before the stop reached Pi) also
+  ends `budget_stopped`. Without a pending stop, the refusal fails the run with its own clear
+  message (`model_budget_exhausted`).
+- **Rate limits:** the per-user rate (install's, or the team's lower one) is enforced per shim
+  replica and pushed by the gateway sync as each member's virtual-key `rate_limit`
+  (`request_max_limit`, `1m`): Bifrost enforces it install-wide (one Bifrost replica). The
+  reconciler compares the observed limit (`vkDiffers`), so an unchanged rate writes nothing.
+- **API:** `GET /v1/team/budgets`, `PUT /v1/team/budgets/team`, `PUT|DELETE
+/v1/team/budgets/members/:userId` (`team.budgets.manage`), `GET /v1/team/budgets/status` (every
+  member: their applicable budgets and state), `GET|PUT /v1/install/budget` (new
+  `install.budgets.manage`, Admin).
+- **Web:** team console **Budgets** (team budget, rate, member budgets with spend), install console
+  **Usage and spend** gains the install budget form, chat banner at 80 % / 100 %.
+
+## Bifrost with `enable_logging: false` (brief: verify)
+
+- Read in Bifrost v2.2.5's source (`plugins/governance/main.go` `PostLLMHook` → `postHookWorker` →
+  `UsageTracker`): governance accounting (budgets and rate limits) runs in the governance plugin
+  itself and does not depend on the logging plugin; the "batch accounting sweeper not wired"
+  warning concerns batch APIs only.
+- **Rate limits: verified against the real binary** (`bifrost.int.test.ts` "KOBE-42: enforces a
+  member's request rate on the virtual key with logging off", run locally with
+  `KOBE_TEST_BIFROST_BIN`: 2/min → third call 429; an unchanged limit is not rewritten).
+- **Dollar budgets: not pushed to Bifrost.** Bifrost prices calls with its own model price list
+  (`modelCatalog.CalculateCost`), which has no entries for models it does not know (Ollama Cloud,
+  self-hosted) and differs from the admin-set catalog prices, so its budgets would trip at other
+  amounts than Kobe shows, or never. Kobe's ledger and gate are the dollar enforcement.
+
+## Decisions
+
+- **Periods are UTC** calendar months/days (no install time zone setting exists).
+- **Unpriced models cost nothing** against dollar budgets (tokens are still counted, KOBE-43); a
+  `$0` budget allows nothing. Open question 1.
+- **Who is warned by email:** team admins (team and member budgets), the member (own budget),
+  install admins (install budget). In-app: every member sees the chat banner for the budgets that
+  apply to them (install, team, own), and team admins the console. D7 lists SMTP for
+  notifications; D30 says "warn the user and team admin".
+- **Rate limit semantics:** per user and team (bucket key team:user), not per sandbox; the
+  KOBE-40 per-sandbox request rate (10/s) remains the abuse bound.
+- **Audit:** `models.budget.changed` (scope any: install without team, team/user with team) and
+  `models.budget.reached` (system, once per budget and period). The 80 % warning is not audited
+  (it is in `budget_alerts`).
+- **Order of stops:** the widest used-up scope names the stop (install > team > user).
+
+## Contract changes (`packages/protocol`, flagged)
+
+1. `MODEL_RUN_ERROR_CODES` gains `model_budget_exhausted` (and its copy in the sandbox agent's
+   `kobe-models/protocol.ts`): kobe-models maps the shim's 402 `budget_exhausted` and Bifrost's
+   `policy_budget_exceeded` to it (never retried); the server shows its own message.
+
+## For downstream tickets
+
+- **KOBE-44 (admin UI):** catalog prices are editable through the catalog API (KOBE-43); budgets
+  have their own pages now.
+- **KOBE-64 (schedules):** scheduled runs go through the same run gate (blocked at 100 %).
+- **KOBE-71 (Pi on its own uid):** per-run budgets become possible once the run id is
+  trustworthy; today budgets are install/team/user only.
+
+## Open questions
+
+1. Unpriced models never consume dollar budgets (D30 budgets are dollars). Token budgets or a
+   "price required to enable" rule would close that; neither is in the spec.
+2. Install time zone for budget periods (UTC today).
+
+## Evidence
+
+| Item                 | Evidence                                                                                                                                                                                                                                                                                             |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gate 2 (db)          | server `budgets.db.test.ts` "finishes the step in flight, ends the run budget_stopped, warns, emails and refuses new runs" (two replicas, real wire: queued run ends, `run.stop after_step`, Pi's step completes and its text is kept, `run.budget_stopped` with the team message, 429 for new runs) |
+| Gate 2 (e2e)         | `e2e/run.sh` KOBE-42 block: real Pi + fake model tool step through shim and Bifrost; run ends `run.budget_stopped`, one model call in the ledger, `models.budget.reached` once, next message 429                                                                                                     |
+| Refused next call    | server "a step whose next model call the gateway refused still ends budget_stopped"; "without a pending stop … fails the run with a clear message"                                                                                                                                                   |
+| Member budgets       | server "a member's own budget stops only that member's runs"; API test (team admin only, validation, audit, member status sees own only)                                                                                                                                                             |
+| Counters, state, RLS | db `budgets.db.test.ts` (trigger per day/user and install day, UTC day boundary, RLS, team/member lines, widest exhausted, uniqueness); probe fixtures `team_budgets`, `model_spend_daily`                                                                                                           |
+| Call gate            | model-gateway `budget-gate.test.ts` (402 widest scope, cache + invalidation, per-member rate 429 + Retry-After, zero budget)                                                                                                                                                                         |
+| Bifrost backstop     | `reconcile.test.ts` "pushes each member's request rate…"; `bifrost.int.test.ts` real binary (local)                                                                                                                                                                                                  |
+| kobe-models mapping  | sandbox-agent `errors.test.ts` (402 / `budget_exhausted` / `policy_budget_exceeded` → `model_budget_exhausted`, not transient)                                                                                                                                                                       |
+| UI                   | web `budgets-pages.test.tsx` (team page, member budgets, install budget, banner text), `conversation.test.tsx` banner, `usage-pages.test.tsx`                                                                                                                                                        |
