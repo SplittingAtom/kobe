@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   PiIdentities,
   PiIdentityError,
+  RECLAIM_TIMEOUT_MS,
   checkHelperFile,
   identityUids,
   loadPiIdentities,
@@ -59,6 +60,56 @@ describe("PiIdentities (KOBE-71)", () => {
       fakeRunner(() => ({ code: 71, stderr: "busy" })).run,
     );
     await expect(stuck.killAllPatiently({ uid: 2000, gid: 2000 }, [1, 1])).rejects.toThrow(/busy/);
+  });
+
+  it("gives a slow reclaim its own timeout and retries it (real process runner)", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "kobe-reclaim-"));
+    try {
+      // A "helper" whose first run hangs (a huge workspace), the next finishes.
+      const helper = path.join(dir, "slow-helper");
+      const marker = path.join(dir, "ran-once");
+      await writeFile(
+        helper,
+        `#!/bin/sh\nif [ -e ${marker} ]; then exit 0; fi\n: > ${marker}\nexec sleep 30\n`,
+        { mode: 0o755 },
+      );
+      const ids = new PiIdentities(helper, [2000], undefined, "/reclaim");
+      const started = Date.now();
+      await ids.reclaimFiles({ uid: 2000, gid: 2000 }, 1000, ["/w"], {
+        timeoutMs: 300,
+        delaysMs: [10],
+      });
+      expect(Date.now() - started).toBeGreaterThanOrEqual(300);
+      // Every attempt times out: the identity is given up with a clear reason.
+      await rm(marker);
+      const hung = path.join(dir, "always-slow");
+      await writeFile(hung, "#!/bin/sh\nexec sleep 30\n", { mode: 0o755 });
+      const stuck = new PiIdentities(hung, [2000], undefined, "/reclaim");
+      await expect(
+        stuck.reclaimFiles({ uid: 2000, gid: 2000 }, 1000, ["/w"], {
+          timeoutMs: 100,
+          delaysMs: [10],
+        }),
+      ).rejects.toThrow(/reclaim as 2000 failed \(timed out\)/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("runs the reclaim with its long timeout, not the helper's default", async () => {
+    const seen: (number | undefined)[] = [];
+    const ids = new PiIdentities(
+      "/helper",
+      [2000],
+      async (_helper, _args, timeoutMs) => {
+        seen.push(timeoutMs);
+        return { code: 0, stderr: "" };
+      },
+      "/opt/kobe/bin/kobe-reclaim",
+    );
+    await ids.reclaimFiles({ uid: 2000, gid: 2000 }, 1000, ["/workspace", "/tmp"]);
+    expect(seen).toEqual([RECLAIM_TIMEOUT_MS]);
+    expect(RECLAIM_TIMEOUT_MS).toBeGreaterThanOrEqual(60_000);
   });
 
   it("gives up waiting for an identity after a while", async () => {

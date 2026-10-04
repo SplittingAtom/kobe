@@ -34,16 +34,24 @@ export interface PiIdentity {
 export type HelperRunner = (
   helper: string,
   args: readonly string[],
+  timeoutMs?: number,
 ) => Promise<{ code: number | null; stderr: string }>;
 
-const runHelper: HelperRunner = (helper, args) =>
+/**
+ * The reclaim walks the shared trees (a large /workspace, node_modules, venvs) and may take
+ * minutes under gVisor; it is retried a few times before the identity is given up.
+ */
+export const RECLAIM_TIMEOUT_MS = 5 * 60_000;
+export const RECLAIM_RETRY_DELAYS_MS = [5_000, 30_000] as const;
+
+const runHelper: HelperRunner = (helper, args, timeoutMs = HELPER_TIMEOUT_MS) =>
   new Promise((resolve) => {
     let child;
     try {
       child = spawn(helper, [...args], {
         stdio: ["ignore", "ignore", "pipe"],
         env: { PATH: "/usr/local/bin:/usr/bin:/bin" },
-        timeout: HELPER_TIMEOUT_MS,
+        timeout: timeoutMs,
         killSignal: "SIGKILL",
       });
     } catch (error) {
@@ -169,14 +177,28 @@ export class PiIdentities {
    * After {@link killAll}: as the identity, hand what it still owns under `dirs` to the workspace
    * group `gid` and remove its System V IPC objects (`kobe-reclaim`, next to the helper).
    */
-  async reclaimFiles(identity: PiIdentity, gid: number, dirs: readonly string[]): Promise<void> {
-    const { code, stderr } = await this.#run(this.helper, [
-      String(identity.uid),
-      this.reclaimScript,
-      String(gid),
-      ...dirs,
-    ]);
-    if (code !== 0) throw new PiIdentityError(`reclaim as ${identity.uid} failed: ${stderr}`);
+  async reclaimFiles(
+    identity: PiIdentity,
+    gid: number,
+    dirs: readonly string[],
+    options: { readonly timeoutMs?: number; readonly delaysMs?: readonly number[] } = {},
+  ): Promise<void> {
+    const delays = options.delaysMs ?? RECLAIM_RETRY_DELAYS_MS;
+    for (let attempt = 0; ; attempt++) {
+      const { code, stderr } = await this.#run(
+        this.helper,
+        [String(identity.uid), this.reclaimScript, String(gid), ...dirs],
+        options.timeoutMs ?? RECLAIM_TIMEOUT_MS,
+      );
+      if (code === 0) return;
+      const delay = delays[attempt];
+      if (delay === undefined) {
+        throw new PiIdentityError(
+          `reclaim as ${identity.uid} failed${code === null ? " (timed out)" : ""}: ${stderr}`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
   }
 
   /** The reclaim script: `kobe-reclaim` in the helper's directory (root-owned, image). */

@@ -1607,6 +1607,12 @@ $R $u sh -c "kill -USR1 $pi"; sleep 1
 echo "inspector=$(node -e 'require("net").connect(9229,"127.0.0.1").on("connect",()=>{console.log("open");process.exit(0)}).on("error",()=>console.log("closed"))')"
 echo "stdio=$($R $u sh -c "for n in 0 1; do ( : > /proc/$pi/fd/\$n ); done" 2>&1 | grep -cE 'No such device or address|Permission denied')"
 echo "pi_alive=$(kill -0 $pi 2>/dev/null; [ -d /proc/$pi ] && echo yes || echo no)"
+# RLIMIT_NPROC (1024 per identity) under gVisor: an identity no thread uses tries 1500 processes;
+# it must stop at the limit, and --kill-all (no fork needed) must still clear it.
+$R 2014 sh -c 'i=0; while [ $i -lt 1500 ]; do sleep 120 & i=$((i+1)); done' >/dev/null 2>&1
+echo "nproc=$(ps -eo uid= | awk '$1 == 2014' | wc -l)"
+$R 2014 --kill-all; echo "nproc_kill=$?"
+sleep 1; echo "nproc_left=$(ps -eo uid=,stat= | awk '$1 == 2014 && $2 !~ /^Z/' | wc -l)"
 SH
     # The Owner's sandbox pod: the one whose claim-uid label is the Owner's claim (u-<user id>).
     owner_claim=$($KUBECTL -n "$TEAM_NS" get sandboxclaim "u-$owner_id" -o jsonpath='{.metadata.uid}' 2>/dev/null || true)
@@ -1624,6 +1630,9 @@ SH
     contains "SIGUSR1 from a tool opens no inspector in Pi (node --disable-sigusr1)" '^inspector=closed$' "$privsep"
     contains "a tool cannot reopen its Pi's stdin/stdout through /proc (gVisor: EACCES; Linux: ENXIO)" '^stdio=2$' "$privsep"
     contains "Pi survives the SIGUSR1" '^pi_alive=yes$' "$privsep"
+    contains "gVisor enforces an identity's process limit (1500 tried, at most 1024 run)" '^nproc=(10[0-2][0-9]|9[5-9][0-9])$' "$privsep"
+    contains "--kill-all clears an identity at its process limit" '^nproc_kill=0$' "$privsep"
+    contains "nothing of it is left" '^nproc_left=0$' "$privsep"
 
     # A clear failure when the team has no model: the run fails with the server's message, nothing hangs.
     expect "the team disables its models" '^200 ' "$(as_owner "PUT /v1/team/models/fast {\"enabled\":false}")"

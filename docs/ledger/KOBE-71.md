@@ -289,6 +289,31 @@ tools) must read" above. In short: the Pi's runtime dir, owned by the agent with
 - `test-identities.sh` now cleans up on exit: helper, script, group, leftover processes and files
   of uids 2000–2003. It checks those uids are unused before it starts.
 
+## Third review round — resolution
+
+- **A. Reclaim timeout.** `kobe-reclaim` used to share the helper's 10 s timeout. A slow walk of a
+  large workspace under gVisor would quarantine identities until no Pi could start.
+  - The reclaim now has its own timeout (5 min, `RECLAIM_TIMEOUT_MS`) and retries after 5 s and
+    30 s before the identity is given up.
+  - It walks each tree once:
+    `find -xdev -user U \( ! -group G -o ! -perm -g=rw -o \( -type d ! -perm -g=x \) \)`, with
+    one `-exec` that changes the group (`-h`) and runs `chmod g+rwX` on everything but links.
+  - Tests:
+    - A real slow "helper" (a process that hangs on its first run) times out and the retry
+      succeeds.
+    - One that always hangs is given up with "timed out".
+    - The reclaim is run with the long timeout.
+    - Real-helper and test-image reclaim tests still pass.
+- **B. RLIMIT_NPROC under gVisor.** Measured on the cluster's runsc and asserted in e2e:
+  - An identity trying 1500 sleepers runs exactly 1024 processes; the limit is enforced.
+  - `--kill-all` (which never forks) clears it at the limit, and nothing is left.
+  - The agent forks the helper under its own uid, which has no limit. The uid switch is not an
+    exec, so it is not checked against the identity's count. The reclaim script is exec'd only
+    after kill-all. So the agent keeps its headroom, and no chart pids limit is needed beyond the
+    kubelet's node-wide one (KOBE-22).
+- **LOW.** `--probe-ptrace` also tries `pidfd_open` + `pidfd_getfd` on the parent (taking Pi's
+  policy socket). `ENOSYS` counts as refused. It still passes under gVisor and on Linux.
+
 ## Cold start (ac-3)
 
 Baseline (main, merge-queue e2e run 37179221413): hibernated → Pi ready back-to-back p50 4381 /

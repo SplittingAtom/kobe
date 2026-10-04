@@ -3,8 +3,9 @@
  *
  *   kobe-runas <uid> <program> [args...]   exec <program> as <uid>
  *   kobe-runas <uid> --kill-all            SIGKILL every process of <uid> (slot reclaim)
- *   kobe-runas <uid> --probe-ptrace        as <uid>, a child tries to ptrace its parent and read
- *                                          its memory: exit 0 only if both are refused (Yama)
+ *   kobe-runas <uid> --probe-ptrace        as <uid>, a child tries to ptrace its parent, read its
+ *                                          memory and take one of its fds (pidfd_getfd): exit 0
+ *                                          only if all are refused (Yama)
  *
  * kobe-sandbox-agent runs as KOBE_AGENT_UID; every Pi process and the tools it runs get their own
  * uid from [KOBE_SLOT_UID_MIN, KOBE_SLOT_UID_MAX] (gid = uid, the one supplementary group the
@@ -215,7 +216,19 @@ static int probe_ptrace(void) {
       readable = fseek(mem, (long)(uintptr_t)&path, SEEK_SET) == 0 && fread(&byte, 1, 1, mem) == 1;
       fclose(mem);
     }
-    _exit(attached || readable ? 1 : 0);
+    /* pidfd_getfd needs the same ptrace access: stealing Pi's policy socket must fail too
+     * (ENOSYS where the kernel lacks it counts as refused). */
+    int stolen = 0;
+    const long pidfd = syscall(SYS_pidfd_open, parent, 0);
+    if (pidfd >= 0) {
+      const long fd = syscall(SYS_pidfd_getfd, (int)pidfd, 0, 0);
+      if (fd >= 0) {
+        stolen = 1;
+        close((int)fd);
+      }
+      close((int)pidfd);
+    }
+    _exit(attached || readable || stolen ? 1 : 0);
   }
   int status = 0;
   if (waitpid(child, &status, 0) != child) return fail("waitpid");
