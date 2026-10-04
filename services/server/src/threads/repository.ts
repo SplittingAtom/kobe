@@ -21,6 +21,7 @@ import {
 } from "./schemas.js";
 import { recordAudit } from "../audit/record.js";
 import { resolveSwitchPin, type AgentPin, type PinError } from "../agents/versions.js";
+import { isModelEnabled } from "../models/team-store.js";
 
 /**
  * Thread data access (spec D9, D15, D18, D23, §6.1). Every function runs inside the caller's
@@ -52,6 +53,7 @@ export type ThreadError =
   | "not_in_project"
   | "entry_not_found"
   | "no_agent"
+  | "model_not_enabled"
   | PinError;
 
 export type ThreadResult = { ok: true; thread: ThreadSummary } | { ok: false; error: ThreadError };
@@ -88,6 +90,7 @@ const summaryColumns = {
   agentId: threads.agentId,
   agentVersion: threads.agentVersion,
   sharedToProject: threads.sharedToProject,
+  modelAlias: threads.modelAlias,
   leafEntryId: threads.leafEntryId,
   lastActivityAt: threads.lastActivityAt,
   createdAt: threads.createdAt,
@@ -104,6 +107,7 @@ type SummaryRow = {
   agentId: string | null;
   agentVersion: number | null;
   sharedToProject: boolean;
+  modelAlias: string | null;
   leafEntryId: string | null;
   lastActivityAt: Date;
   createdAt: Date;
@@ -120,6 +124,7 @@ export function toSummary(row: SummaryRow): ThreadSummary {
     agent_id: row.agentId,
     agent_version: row.agentVersion,
     shared_to_project: row.sharedToProject,
+    model: row.modelAlias,
     leaf_entry_id: row.leafEntryId,
     last_activity_at: row.lastActivityAt.toISOString(),
     created_at: row.createdAt.toISOString(),
@@ -228,13 +233,16 @@ export async function createThread(
     /** The published agent version the thread pins (D19); null = the install default agent. */
     agent: AgentPin | null;
     title: string | null;
+    /** The thread's model alias (KOBE-44); the caller checked the team enabled it. */
+    modelAlias?: string | null;
   },
 ): Promise<ThreadSummary> {
-  const { agent, ...rest } = input;
+  const { agent, modelAlias, ...rest } = input;
   const [row] = await tx
     .insert(threads)
     .values({
       ...rest,
+      modelAlias: modelAlias ?? null,
       agentScope: agent?.agentScope ?? null,
       agentId: agent?.agentId ?? null,
       agentVersion: agent?.agentVersion ?? null,
@@ -311,11 +319,17 @@ export async function updateThread(
   if (body.shared_to_project !== undefined && locked.thread.projectId === null) {
     return { ok: false, error: "not_in_project" };
   }
+  // A newly chosen model must be one the team enabled; keeping the current one is always fine.
+  const modelChanged = body.model !== undefined && body.model !== locked.thread.modelAlias;
+  if (modelChanged && body.model && !(await isModelEnabled(tx, viewer.teamId, body.model))) {
+    return { ok: false, error: "model_not_enabled" };
+  }
   const [row] = await tx
     .update(threads)
     .set({
       ...(body.title !== undefined ? { title: body.title } : {}),
       ...(body.shared_to_project !== undefined ? { sharedToProject: body.shared_to_project } : {}),
+      ...(modelChanged ? { modelAlias: body.model ?? null } : {}),
     })
     .where(and(eq(threads.teamId, viewer.teamId), eq(threads.id, id)))
     .returning(summaryColumns);

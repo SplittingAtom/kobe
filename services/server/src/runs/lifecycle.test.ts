@@ -22,6 +22,7 @@ describe("orchestrator events", () => {
           agentId: null,
           agentVersion: null,
           deletedAt: null,
+          modelAlias: null,
         }),
       ),
     ).toEqual({ reason: "cancelled", last_entry_id: "abc", retryable: false });

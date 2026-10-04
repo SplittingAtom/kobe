@@ -47,3 +47,14 @@ export function agentModelNotEnabled(alias: string): ErrorInfo {
 export function failureInfo(code: string, fallback: "start_failed" | "model_error"): ErrorInfo {
   return { code, message: FAILURE_MESSAGES[code] ?? FAILURE_MESSAGES[fallback] ?? "" };
 }
+
+/**
+ * `agent_model_not_enabled` for a model chosen in the thread (KOBE-44): the same code as an
+ * agent's pin (the client and the runbook know it), worded for the person who chose it.
+ */
+export function threadModelNotEnabled(alias: string): ErrorInfo {
+  return {
+    code: "agent_model_not_enabled",
+    message: `The model chosen for this conversation (${alias.slice(0, 128)}) isn't enabled for your team any more. Pick another model, or ask your team admin to enable it.`,
+  };
+}

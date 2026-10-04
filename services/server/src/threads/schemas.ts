@@ -1,3 +1,4 @@
+import { MODEL_ALIAS_PATTERN } from "@kobe/db";
 import { z } from "zod";
 import {
   idSchema,
@@ -30,6 +31,8 @@ export const uuidSchema = z.uuid().transform((s) => s.toLowerCase());
 /** Pi entry id (`@kobe/protocol` idSchema: 1–128 chars, no control characters). */
 export const entryIdSchema = idSchema;
 export const titleSchema = z.string().trim().min(1).max(TITLE_MAX).regex(NO_CONTROL_CHARS);
+/** A model catalog alias (KOBE-44): must be enabled for the team when it is chosen. */
+export const modelAliasSchema = z.string().max(64).regex(new RegExp(MODEL_ALIAS_PATTERN));
 
 export const createThreadBodySchema = z.strictObject({
   /**
@@ -41,6 +44,8 @@ export const createThreadBodySchema = z.strictObject({
   /** Project the thread belongs to (D23); private to its author until shared. */
   project_id: uuidSchema.nullable().optional(),
   title: titleSchema.optional(),
+  /** The thread's model (KOBE-44, D30): an alias the team enabled; null or absent = team default. */
+  model: modelAliasSchema.nullable().optional(),
 });
 export type CreateThreadBody = z.infer<typeof createThreadBodySchema>;
 
@@ -50,10 +55,16 @@ export const updateThreadBodySchema = z
     title: titleSchema.nullable().optional(),
     /** Share to (or unshare from) the thread's project, read-only for its members (D23). */
     shared_to_project: z.boolean().optional(),
+    /**
+     * The model for the thread's next runs (KOBE-44): an alias the team enabled, or null for the
+     * team's default. Runs already started keep theirs; queued runs use it when they start.
+     */
+    model: modelAliasSchema.nullable().optional(),
   })
-  .refine((b) => b.title !== undefined || b.shared_to_project !== undefined, {
-    message: "give title or shared_to_project",
-  });
+  .refine(
+    (b) => b.title !== undefined || b.shared_to_project !== undefined || b.model !== undefined,
+    { message: "give title, shared_to_project or model" },
+  );
 export type UpdateThreadBody = z.infer<typeof updateThreadBodySchema>;
 
 export const setLeafBodySchema = z.strictObject({ entry_id: entryIdSchema });
@@ -117,6 +128,8 @@ export const threadSummarySchema = z.object({
   agent_id: wireUuidSchema.nullable(),
   agent_version: z.number().int().nullable(),
   shared_to_project: z.boolean(),
+  /** The model chosen for the thread (a catalog alias); null = the team's default (KOBE-44). */
+  model: z.string().nullable(),
   leaf_entry_id: idSchema.nullable(),
   last_activity_at: timestamp,
   created_at: timestamp,

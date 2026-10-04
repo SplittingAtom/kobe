@@ -24,6 +24,7 @@ import { STREAM_DEFAULTS, type StreamTimings } from "./event-stream/stream.js";
 import { DEFAULT_VERSION_LIMITS } from "./agents/versions.js";
 import type { Mailer } from "./mail/mailer.js";
 import type { RateLimitRule } from "./rate-limit.js";
+import type { ModelDiscovery } from "./models/discovery.js";
 import {
   createDbRunContextSource,
   createSandboxWire,
@@ -78,6 +79,8 @@ export interface ServerDepsOptions {
   readonly models?: {
     readonly providerKeySecrets: readonly string[];
     readonly allowUnsafeEndpoints?: boolean;
+    /** Bifrost's model listing for the catalog editor (KOBE-44); unset: no model picker. */
+    readonly discovery?: ModelDiscovery;
   };
   /**
    * The install's approval HMAC key (KOBE-37, config `KOBE_APPROVAL_KEY`); without it, tool calls
@@ -139,7 +142,12 @@ export interface ServerDeps {
   readonly runs: ServerRunOrchestrator;
   /** Model gateway admin (KOBE-40): seals provider API keys; undefined when not configured. */
   readonly models:
-    { readonly providerKeys: SecretBox; readonly allowUnsafeEndpoints: boolean } | undefined;
+    | {
+        readonly providerKeys: SecretBox;
+        readonly allowUnsafeEndpoints: boolean;
+        readonly discovery: ModelDiscovery | undefined;
+      }
+    | undefined;
   /**
    * The MCP proxy's policy re-check (KOBE-58): exposed tools and a decision per call, served on
    * the internal listener only (`routes/internal.ts`).
@@ -264,6 +272,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
       ? {
           providerKeys: new SecretBox(options.models.providerKeySecrets, PROVIDER_KEY_PURPOSE),
           allowUnsafeEndpoints: options.models.allowUnsafeEndpoints ?? false,
+          discovery: options.models.discovery,
         }
       : undefined,
     auth,

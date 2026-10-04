@@ -188,6 +188,8 @@ export interface ThreadRow {
   readonly agentId: string | null;
   readonly agentVersion: number | null;
   readonly deletedAt: Date | null;
+  /** The thread's chosen model alias (KOBE-44): the run's requested model; null = none chosen. */
+  readonly modelAlias: string | null;
 }
 
 /** Fail fast instead of queueing behind a long-held thread row (KOBE-29/34: status writers). */
@@ -214,9 +216,10 @@ export async function lockThreadRow(
     agent_id: string | null;
     agent_version: number | null;
     deleted_at: Date | string | null;
+    model_alias: string | null;
   }>(sql`
     SELECT id, owner_user_id, status, leaf_entry_id, agent_scope, agent_id, agent_version,
-           deleted_at
+           deleted_at, model_alias
       FROM threads WHERE team_id = ${teamId} AND id = ${threadId} FOR UPDATE`);
   const r = res.rows[0];
   return r
@@ -229,6 +232,7 @@ export async function lockThreadRow(
         agentId: r.agent_id,
         agentVersion: r.agent_version,
         deletedAt: asDate(r.deleted_at),
+        modelAlias: r.model_alias,
       }
     : undefined;
 }

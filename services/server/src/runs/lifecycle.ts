@@ -19,7 +19,12 @@ import {
   type RunRow,
   type ThreadRow,
 } from "./store.js";
-import { FAILURE_MESSAGES, agentModelNotEnabled, failureInfo } from "./failure-codes.js";
+import {
+  FAILURE_MESSAGES,
+  agentModelNotEnabled,
+  failureInfo,
+  threadModelNotEnabled,
+} from "./failure-codes.js";
 import { resolveRunModel, type RunModelConfig } from "./models.js";
 import type { AgentResolution, RunAgentResolver } from "./seams.js";
 
@@ -126,12 +131,18 @@ export async function promoteInTx(
       thread = await fail(thread, next, "agent_unavailable");
       continue;
     }
-    const resolution = await resolveRunModel(tx, teamId, resolved.config?.model?.alias);
+    const requested = requestedModel(thread, resolved);
+    const resolution = await resolveRunModel(tx, teamId, requested.alias);
     if (!resolution.ok) {
-      // The agent's pinned model is not enabled for this team: a clear failure, no fallback.
+      // The thread's or agent's model is not enabled for this team: a clear failure, no fallback.
       thread = await fail(thread, next, resolution.code, {
         type: "run.failed",
-        payload: { error: agentModelNotEnabled(resolution.alias) },
+        payload: {
+          error:
+            requested.source === "thread"
+              ? threadModelNotEnabled(resolution.alias)
+              : agentModelNotEnabled(resolution.alias),
+        },
       });
       continue;
     }
@@ -162,6 +173,22 @@ export async function promoteInTx(
 }
 
 type Resolved = Extract<AgentResolution, { ok: true }>;
+
+/**
+ * The run's requested model alias (KOBE-44, D30): the model the thread's owner chose for the
+ * thread, else the agent's pin (KOBE-47), else none (the team's default). An explicit choice in
+ * the thread wins over the agent's pin: the person chose it for this conversation.
+ */
+function requestedModel(
+  thread: ThreadRow,
+  resolved: Resolved,
+): { readonly alias: string | undefined; readonly source: "thread" | "agent" | "default" } {
+  if (thread.modelAlias !== null) return { alias: thread.modelAlias, source: "thread" };
+  const pinned = resolved.config?.model?.alias;
+  return pinned === undefined
+    ? { alias: undefined, source: "default" }
+    : { alias: pinned, source: "agent" };
+}
 
 /** The thread's agent version for a start; the resolver may only tighten the run's mode. */
 async function resolveForStart(
@@ -234,7 +261,7 @@ export async function restartPlanInTx(
   const resolution = await resolveRunModel(
     tx,
     run.teamId,
-    started ?? resolved.config?.model?.alias,
+    started ?? requestedModel(thread, resolved).alias,
   );
   if (!resolution.ok) return undefined;
   return planOf(thread, run, resolved, resolution.model);

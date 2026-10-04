@@ -41,6 +41,14 @@ const DRAIN_TIMEOUT_MS = 10_000;
 const config = loadConfig(process.env);
 // Model gateway (KOBE-40): undefined without the chart's Bifrost settings (models off).
 const modelsConfig = config.process === "server" ? loadModelsConfig(process.env) : undefined;
+// One admin client for the config sync and the catalog editor's model listing (KOBE-44).
+const bifrostAdmin = modelsConfig
+  ? createHttpBifrostAdmin({
+      baseUrl: modelsConfig.bifrostUrl,
+      username: modelsConfig.adminUsername,
+      password: modelsConfig.adminPassword,
+    })
+  : undefined;
 // The wire is built before the sandbox provider exists: its waker is set once the provider is.
 const waker = createDeferredWaker();
 let deps: ServerDeps | undefined;
@@ -58,6 +66,7 @@ if (config.auth && config.smtp) {
           models: {
             providerKeySecrets: modelsConfig.providerKeySecrets,
             allowUnsafeEndpoints: modelsConfig.allowUnsafeEndpoints,
+            ...(bifrostAdmin ? { discovery: bifrostAdmin } : {}),
           },
         }
       : {}),
@@ -125,15 +134,11 @@ egressRelay?.start();
 
 // Bifrost config sync (KOBE-40): every server replica listens; one leads and reconciles.
 const modelSync =
-  deps && modelsConfig
+  deps && modelsConfig && bifrostAdmin
     ? new ModelGatewaySync({
         db: deps.database.db,
         connectionString: config.databaseUrl,
-        admin: createHttpBifrostAdmin({
-          baseUrl: modelsConfig.bifrostUrl,
-          username: modelsConfig.adminUsername,
-          password: modelsConfig.adminPassword,
-        }),
+        admin: bifrostAdmin,
         providerKeys: new SecretBox(modelsConfig.providerKeySecrets, PROVIDER_KEY_PURPOSE),
         virtualKeys: new SecretBox(modelsConfig.virtualKeySecrets, VIRTUAL_KEY_PURPOSE),
         // Own HKDF purpose: the fingerprint secret never equals a sealing key.
