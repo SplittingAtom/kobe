@@ -196,7 +196,10 @@ Baseline (main, merge-queue e2e run 37179221413): hibernated → Pi ready back-t
 p95 4652 ms, spaced p50 3373 / p95 4309 ms; hibernated → first token p50 4778 / p95 5518 ms.
 What KOBE-71 adds on that path: one helper exec at agent start (the `/bin/true` probe), and per Pi
 start a `chown`/`chmod` of its runtime dir and an exec of the helper before Pi (plus `env` when
-`TMPDIR` is set). Measured on this PR's e2e run: _pending (filled in from CI)_.
+`TMPDIR` is set). Measured on this PR (e2e run 37182721393, k3d + gVisor): back-to-back p50
+4316 / p95 4544 ms (main 4381 / 4652: −1.5% / −2.3%), spaced p50 3767 / p95 4143 ms (main 3373 /
+4309: +11.7% / −3.9%; 5 trials, its p50 swings by that much between runs on main too). Within
+10% on both p95s and the 20-trial p50; milestone "connected → Pi ready" ≈ 1.9 s in both.
 
 ## For KOBE-41 (which guarantees now hold)
 

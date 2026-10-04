@@ -1564,7 +1564,9 @@ echo "read_model=$($R 2015 cat "$dir/model.json" 2>&1 | grep -c 'Permission deni
 echo "read_token=$($R 2015 cat /run/kobe-agent/bootstrap/bootstrap-token 2>&1 | grep -c 'Permission denied')"
 echo "signal=$($R 2015 sh -c "kill -0 $agent; kill -0 $pi" 2>&1 | grep -c 'not permitted')"
 SH
-    owner_pod=$($KUBECTL -n "$TEAM_NS" get pods -l "kobe.splittingatom.io/user-id=$owner_id" -o name 2>/dev/null | head -1)
+    # The Owner's sandbox pod: the one whose claim-uid label is the Owner's claim (u-<user id>).
+    owner_claim=$($KUBECTL -n "$TEAM_NS" get sandboxclaim "u-$owner_id" -o jsonpath='{.metadata.uid}' 2>/dev/null || true)
+    owner_pod=$($KUBECTL -n "$TEAM_NS" get pods -l "agents.x-k8s.io/claim-uid=${owner_claim:-none}" -o name 2>/dev/null | head -1)
     privsep=$($KUBECTL -n "$TEAM_NS" exec "${owner_pod:-pod/none}" -c agent -- sh -c "$PRIVSEP_SH" 2>&1 || true)
     printf '     %s\n' "$privsep"
     contains "the agent runs as uid 1000 with no capabilities" '^agent=1000 caps=0+$' "$privsep"
