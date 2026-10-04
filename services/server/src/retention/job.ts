@@ -2,6 +2,7 @@ import {
   SYSTEM_ACTOR,
   asc,
   eq,
+  gt,
   installSettings,
   teams,
   withTeam,
@@ -13,7 +14,7 @@ import type { Logger } from "pino";
 import { recordAudit } from "../audit/record.js";
 import { deleteReleasedBlobs, type BlobDeletionCounts, type BlobStore } from "./blobs.js";
 import { compactRunEvents, type CompactionCounts } from "./compaction.js";
-import { PERIOD_DAYS, shorterPeriod } from "./periods.js";
+import { PERIOD_DAYS, effectiveAt } from "./periods.js";
 import {
   NO_PURGE,
   purgeThreads,
@@ -22,7 +23,7 @@ import {
   type PurgeOutcome,
   type PurgeSelection,
 } from "./purge.js";
-import { readMaximum, readTeamPeriod } from "./settings.js";
+import { readMaximumLayer, readTeamLayer } from "./settings.js";
 
 /**
  * The nightly retention job (spec D18, KOBE-18). For every team, in short batches:
@@ -34,9 +35,12 @@ import { readMaximum, readTeamPeriod } from "./settings.js";
  * Every step skips data under legal hold and is audited with counts only (system actor).
  *
  * Every server replica runs the timer; a session-level advisory lock on a dedicated connection
- * lets exactly one replica run a pass (the lock goes with the connection if the replica dies),
- * and `install_settings['retention.last_pass_at']` makes it once a day, in the configured UTC hour
- * (or at once when the last pass is more than two days old, e.g. after downtime).
+ * lets exactly one replica run (the lock goes with the connection if the replica dies; an error on
+ * that connection stops the pass at once). A new pass starts once a day in the configured UTC hour
+ * (or at once when the last completed pass is more than two days old); a pass that stopped early
+ * (budget, lost lock, crash) stays open in `install_settings['retention.cursor']` and the next
+ * check resumes it after the last team done, so late teams aren't starved. The period applied is
+ * the one in force: a shortening still in its 7-day grace period doesn't count yet.
  */
 
 export const RETENTION_LOCK = "kobe.retention";
@@ -59,6 +63,8 @@ export interface TeamPassResult {
 
 export interface PassResult {
   readonly teams: readonly TeamPassResult[];
+  /** Every team was visited (false: stopped early; the next check resumes). */
+  readonly complete: boolean;
 }
 
 export interface PassDeps {
@@ -119,7 +125,11 @@ function logHeld(deps: PassDeps, teamId: string, step: string, outcome: PurgeOut
     deps.logger.warn({ teamId, step }, "retention purge skipped: held");
 }
 
-async function teamPass(deps: PassDeps, teamId: string, deadline: number): Promise<TeamPassResult> {
+async function teamPass(
+  deps: PassDeps,
+  teamId: string,
+  stop: () => boolean,
+): Promise<TeamPassResult> {
   const { db, logger } = deps;
   let failed = false;
   const step = async <T>(name: string, fallback: T, fn: () => Promise<T>): Promise<T> => {
@@ -133,55 +143,77 @@ async function teamPass(deps: PassDeps, teamId: string, deadline: number): Promi
   };
   const run = async (selection: PurgeSelection, reason: Reason) => {
     const outcome = await purgeThreads(db, teamId, selection, purgeRecorder(teamId, reason), {
-      deadline,
+      stop,
     });
     logHeld(deps, teamId, reason, outcome);
     return outcome.counts;
   };
 
   const trash = await step("trash", NO_PURGE, () => run({ kind: "trash" }, "trash"));
+  // The period in force now: a shortening still in its 7-day grace doesn't apply yet.
   const effective = await step("period", "forever" as const, () =>
     withTeam(db, teamId, async (tx) =>
-      shorterPeriod(await readTeamPeriod(tx, teamId), await readMaximum(tx)),
+      effectiveAt(await readTeamLayer(tx, teamId), await readMaximumLayer(tx), new Date()),
     ),
   );
   const days = PERIOD_DAYS[effective];
   const retention =
-    days === null
+    days === null || stop()
       ? NO_PURGE
       : await step("retention", NO_PURGE, () => run({ kind: "retention", days }, "retention"));
-  const compacted = await step("compaction", { runs: 0, events: 0 }, () =>
-    compactRunEvents(db, teamId, compactionRecorder(teamId), { deadline }),
-  );
-  const blobs = deps.blobs
-    ? await step("blobs", { blobs: 0, kept: 0 }, () =>
-        deleteReleasedBlobs(db, teamId, deps.blobs as BlobStore, blobRecorder(teamId), {
-          deadline,
-        }),
-      )
-    : { blobs: 0, kept: 0 };
+  const compacted = stop()
+    ? { runs: 0, events: 0 }
+    : await step("compaction", { runs: 0, events: 0 }, () =>
+        compactRunEvents(db, teamId, compactionRecorder(teamId), { stop }),
+      );
+  const blobs =
+    deps.blobs && !stop()
+      ? await step("blobs", { blobs: 0, kept: 0 }, () =>
+          deleteReleasedBlobs(db, teamId, deps.blobs as BlobStore, blobRecorder(teamId), {
+            stop,
+          }),
+        )
+      : { blobs: 0, kept: 0 };
   return { teamId, trash, retention, compacted, blobs, failed };
 }
 
-/** One full pass over every team (the caller holds the job lock). Also called by tests. */
-export async function runRetentionPass(
-  deps: PassDeps,
-  options: { readonly budgetMs?: number } = {},
-): Promise<PassResult> {
-  const deadline = Date.now() + (options.budgetMs ?? PASS_BUDGET_MS);
-  const all = await deps.db.select({ id: teams.id }).from(teams).orderBy(asc(teams.id));
-  const results: TeamPassResult[] = [];
-  for (const { id } of all) {
-    if (Date.now() >= deadline) {
-      deps.logger.warn("retention pass budget spent; the next pass continues");
-      break;
-    }
-    results.push(await teamPass(deps, id, deadline));
-  }
-  return { teams: results };
+export interface PassOptions {
+  readonly budgetMs?: number;
+  /** Stop early (e.g. the job's lock connection was lost). */
+  readonly abort?: () => boolean;
+  /** Resume after this team id (teams are visited in id order). */
+  readonly after?: string | null;
+  /** Called once a team is done (the job records its position, so a new pass resumes there). */
+  readonly onTeamDone?: (teamId: string) => Promise<void>;
 }
 
-/** Whether a pass is due at `now` given the last pass start (see the module comment). */
+/** One pass over the teams (the caller holds the job lock). Also called by tests. */
+export async function runRetentionPass(
+  deps: PassDeps,
+  options: PassOptions = {},
+): Promise<PassResult> {
+  const deadline = Date.now() + (options.budgetMs ?? PASS_BUDGET_MS);
+  const stop = () => Date.now() >= deadline || options.abort?.() === true;
+  const after = options.after ?? null;
+  const all = await deps.db
+    .select({ id: teams.id })
+    .from(teams)
+    .where(after === null ? undefined : gt(teams.id, after))
+    .orderBy(asc(teams.id));
+  const results: TeamPassResult[] = [];
+  for (const { id } of all) {
+    if (stop()) {
+      deps.logger.warn("retention pass stopped early; the next check resumes it");
+      return { teams: results, complete: false };
+    }
+    results.push(await teamPass(deps, id, stop));
+    if (stop()) return { teams: results, complete: false };
+    await options.onTeamDone?.(id);
+  }
+  return { teams: results, complete: true };
+}
+
+/** Whether a new pass is due at `now` given the last completed pass (see the module comment). */
 export function passDue(last: Date | null, now: Date, hourUtc: number): boolean {
   if (last === null) return true;
   const since = now.getTime() - last.getTime();
@@ -189,32 +221,42 @@ export function passDue(last: Date | null, now: Date, hourUtc: number): boolean 
   return since >= 20 * HOUR_MS && now.getUTCHours() === hourUtc;
 }
 
-async function readLastPass(db: KobeDb): Promise<Date | null> {
+async function readSetting(db: KobeDb, key: string): Promise<string | undefined> {
   const [row] = await db
     .select({ value: installSettings.value })
     .from(installSettings)
-    .where(eq(installSettings.key, LAST_PASS_KEY));
-  const at = row ? new Date(row.value) : null;
-  return at && !Number.isNaN(at.getTime()) ? at : null;
+    .where(eq(installSettings.key, key));
+  return row?.value;
 }
 
-async function writeLastPass(db: KobeDb, at: Date): Promise<void> {
-  const value = at.toISOString();
+async function writeSetting(db: KobeDb, key: string, value: string): Promise<void> {
   await db
     .insert(installSettings)
-    .values({ key: LAST_PASS_KEY, value })
+    .values({ key, value })
     .onConflictDoUpdate({ target: installSettings.key, set: { value, updatedAt: new Date() } });
 }
 
+function parseDate(value: string | undefined): Date | null {
+  const at = value ? new Date(value) : null;
+  return at && !Number.isNaN(at.getTime()) ? at : null;
+}
+
+/** `""`: no pass open; `"start"`: open, no team done yet; a team id: open, resume after it. */
+export const CURSOR_KEY = "retention.cursor";
+/** When the open pass started (becomes `LAST_PASS_KEY` once it completes). */
+export const STARTED_KEY = "retention.pass_started_at";
+
 export interface RetentionJobOptions extends PassDeps {
   /** For the job's lock connection (session-level advisory lock). */
-  readonly pool: pg.Pool;
+  readonly pool: Pick<pg.Pool, "connect">;
   /** UTC hour the nightly pass runs in (0–23). */
   readonly hourUtc: number;
   readonly now?: () => Date;
+  readonly budgetMs?: number;
 }
 
-export type TickResult = "ran" | "busy" | "not_due";
+/** `lost`: the lock connection failed mid-pass; the pass stopped and resumes on the next check. */
+export type TickResult = "ran" | "busy" | "not_due" | "lost";
 
 export class RetentionJob {
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -223,10 +265,22 @@ export class RetentionJob {
 
   constructor(private readonly options: RetentionJobOptions) {}
 
-  /** Takes the job lock, runs a pass when due, records its start. */
+  /**
+   * Takes the job lock and, when a pass is open (an earlier one stopped or crashed) or a new one is
+   * due, runs it from where it stands. The lock is held by a session on a dedicated connection; if
+   * that connection fails, the pass stops at once (another replica may take the lock).
+   */
   async tick(force = false): Promise<TickResult> {
     const { pool, db, logger } = this.options;
     const client = await pool.connect();
+    let lost = false;
+    // A checked-out client without a listener would crash the process on a failover or an idle
+    // kill (unhandled 'error').
+    const onError = (err: Error) => {
+      lost = true;
+      logger.warn({ err }, "retention lock connection lost; stopping the pass");
+    };
+    client.on("error", onError);
     let locked = false;
     try {
       const res = await client.query<{ ok: boolean }>(
@@ -236,9 +290,29 @@ export class RetentionJob {
       locked = res.rows[0]?.ok === true;
       if (!locked) return "busy";
       const now = this.options.now?.() ?? new Date();
-      if (!force && !passDue(await readLastPass(db), now, this.options.hourUtc)) return "not_due";
-      const result = await runRetentionPass(this.options);
-      await writeLastPass(db, now);
+      const cursor = (await readSetting(db, CURSOR_KEY)) ?? "";
+      const open = cursor !== "";
+      if (!open) {
+        const last = parseDate(await readSetting(db, LAST_PASS_KEY));
+        if (!force && !passDue(last, now, this.options.hourUtc)) return "not_due";
+        await writeSetting(db, STARTED_KEY, now.toISOString());
+        await writeSetting(db, CURSOR_KEY, "start");
+      }
+      const result = await runRetentionPass(this.options, {
+        ...(this.options.budgetMs === undefined ? {} : { budgetMs: this.options.budgetMs }),
+        abort: () => lost,
+        after: open && cursor !== "start" ? cursor : null,
+        onTeamDone: (id) => writeSetting(db, CURSOR_KEY, id),
+      });
+      if (lost) return "lost";
+      if (result.complete) {
+        await writeSetting(
+          db,
+          LAST_PASS_KEY,
+          (await readSetting(db, STARTED_KEY)) ?? now.toISOString(),
+        );
+        await writeSetting(db, CURSOR_KEY, "");
+      }
       const total = result.teams.reduce(
         (sum, t) => ({
           threads: sum.threads + t.trash.threads + t.retention.threads,
@@ -248,11 +322,14 @@ export class RetentionJob {
         }),
         { threads: 0, runs: 0, blobs: 0, failed: 0 },
       );
-      logger.info({ teams: result.teams.length, ...total }, "retention pass finished");
+      logger.info(
+        { teams: result.teams.length, complete: result.complete, ...total },
+        "retention pass finished",
+      );
       return "ran";
     } finally {
-      let broken = false;
-      if (locked) {
+      let broken = lost;
+      if (locked && !lost) {
         try {
           await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [
             RETENTION_LOCK,
@@ -264,6 +341,7 @@ export class RetentionJob {
           logger.warn({ err }, "retention lock release failed; closing its connection");
         }
       }
+      client.off("error", onError);
       client.release(broken);
     }
   }

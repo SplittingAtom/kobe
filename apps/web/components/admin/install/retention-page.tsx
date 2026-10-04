@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import {
+  cancelRetentionMaximumChange,
   getRetentionMaximum,
   putRetentionMaximum,
   type RetentionMaximum,
@@ -12,7 +13,7 @@ import {
   type RetentionPeriod,
 } from "../../../lib/admin/api/team/retention";
 import { MutationStatus } from "../error-notice";
-import { ResourceView, confirmed } from "../parts";
+import { DateTime, ResourceView, confirmed } from "../parts";
 import { useMutation, useResource } from "../use-resource";
 import styles from "../admin.module.css";
 
@@ -47,24 +48,45 @@ function MaximumForm({
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const lowering =
-      RETENTION_PERIODS.indexOf(maximum) < RETENTION_PERIODS.indexOf(current.maximum);
+      RETENTION_PERIODS.indexOf(maximum) < RETENTION_PERIODS.indexOf(current.applied);
     if (
       lowering &&
       !confirmed(
-        `Cap every team at ${PERIOD_LABELS[maximum].toLowerCase()}? Older conversations are deleted for good at the next nightly run.`,
+        `Cap every team at ${PERIOD_LABELS[maximum].toLowerCase()}? In 7 days, older conversations start being deleted for good every night.`,
       )
     ) {
       return;
     }
     const done = await mutation.run(
       () => putRetentionMaximum(maximum),
-      (saved) => `Retention maximum: ${PERIOD_LABELS[saved.maximum].toLowerCase()}.`,
+      (saved) =>
+        saved.pending
+          ? `Scheduled: from ${new Date(saved.pending.effectiveAt).toUTCString()}, the maximum is ${PERIOD_LABELS[saved.pending.maximum].toLowerCase()}. You can cancel until then.`
+          : `Retention maximum: ${PERIOD_LABELS[saved.maximum].toLowerCase()}.`,
+    );
+    if (done) onSaved();
+  }
+
+  async function cancel() {
+    const done = await mutation.run(
+      () => cancelRetentionMaximumChange(),
+      (kept) => `Cancelled: the maximum stays ${PERIOD_LABELS[kept.maximum].toLowerCase()}.`,
     );
     if (done) onSaved();
   }
 
   return (
     <form onSubmit={onSubmit} aria-label="Retention maximum">
+      {current.pending && (
+        <p className={styles.banner} role="status">
+          Pending change: {PERIOD_LABELS[current.pending.maximum]}, from{" "}
+          <DateTime value={current.pending.effectiveAt} /> (in force until then:{" "}
+          {PERIOD_LABELS[current.applied].toLowerCase()}).{" "}
+          <button type="button" onClick={() => void cancel()} disabled={mutation.pending}>
+            Cancel change
+          </button>
+        </p>
+      )}
       <fieldset>
         <legend>Teams may keep conversations at most</legend>
         {RETENTION_PERIODS.map((p) => (

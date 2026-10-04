@@ -1,3 +1,4 @@
+import { auditTimeout } from "./locks.js";
 import {
   BLOB_REF_COLUMNS,
   isLegalHoldViolation,
@@ -66,7 +67,9 @@ function predicate(selection: PurgeSelection) {
     case "trash":
       return sql`t.deleted_at IS NOT NULL AND t.deleted_at <= now() - ${TRASH_INTERVAL}`;
     case "retention":
-      return sql`t.last_activity_at < now() - make_interval(days => ${selection.days})`;
+      // Live threads only: a thread in Trash keeps its full 30 days (the "trash" selection).
+      return sql`t.deleted_at IS NULL
+        AND t.last_activity_at < now() - make_interval(days => ${selection.days})`;
     case "user":
       return sql`t.owner_user_id = ${selection.userId}`;
     case "thread":
@@ -198,6 +201,7 @@ export async function purgeBatchInTx(
     threadIds: ids,
     more,
   };
+  await auditTimeout(tx);
   await record(tx, result);
   return result;
 }
@@ -213,8 +217,8 @@ export interface PurgeLoopOptions {
   readonly limits?: BatchLimits;
   /** Batches before stopping (the next pass continues). */
   readonly maxBatches?: number;
-  /** Stop starting batches after this instant (ms epoch). */
-  readonly deadline?: number;
+  /** Stop starting batches once this says so (pass budget spent, job lock lost). */
+  readonly stop?: () => boolean;
 }
 
 function add(a: PurgeCounts, b: PurgeCounts): PurgeCounts {
@@ -242,7 +246,7 @@ export async function purgeThreads(
   const maxBatches = options.maxBatches ?? 1000;
   let counts = NO_PURGE;
   for (let batch = 0; batch < maxBatches; batch++) {
-    if (options.deadline !== undefined && Date.now() >= options.deadline) {
+    if (options.stop?.()) {
       return { status: "budget", counts };
     }
     let result: PurgeBatchResult;

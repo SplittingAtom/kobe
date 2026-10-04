@@ -1,3 +1,4 @@
+import { auditTimeout } from "./locks.js";
 import {
   BLOB_REF_COLUMNS,
   lockLegalHolds,
@@ -66,7 +67,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-/** Keys among `keys` that a registered column of the team still references. */
+/** Keys among `keys` that a thread-owned column of the team still references (another thread). */
 async function stillReferenced(
   tx: KobeTx,
   teamId: string,
@@ -77,7 +78,9 @@ async function stillReferenced(
     keys.map((k) => sql`${k}`),
     sql`, `,
   )}]::text[]`;
-  for (const ref of BLOB_REF_COLUMNS) {
+  // Only thread-owned columns can hold keys in a thread's tree (the only keys deleted here); they
+  // are indexed on (team_id, column). Workspace keys never live under `…/threads/<thread>/`.
+  for (const ref of BLOB_REF_COLUMNS.filter((r) => r.thread)) {
     const column = sql.identifier(ref.column);
     const res = await tx.execute<{ key: string }>(sql`
       SELECT DISTINCT x.${column} AS key FROM ${sql.identifier(ref.table)} x
@@ -119,6 +122,7 @@ export async function deleteBlobBatchInTx(
        sql`, `,
      )}]::text[])`);
   const counts = { blobs: doomed.length, kept: keys.length - doomed.length };
+  await auditTimeout(tx);
   await record(tx, counts);
   return { ...counts, more: keys.length >= limit };
 }
@@ -146,13 +150,13 @@ export async function deleteReleasedBlobs(
   options: {
     readonly limit?: number;
     readonly maxBatches?: number;
-    readonly deadline?: number;
+    readonly stop?: () => boolean;
   } = {},
 ): Promise<BlobDeletionCounts> {
   const limit = options.limit ?? 100;
   let total = { blobs: 0, kept: 0 };
   for (let batch = 0; batch < (options.maxBatches ?? 1000); batch++) {
-    if (options.deadline !== undefined && Date.now() >= options.deadline) break;
+    if (options.stop?.()) break;
     let result: BlobDeletionCounts & { more: boolean };
     try {
       result = await withTeam(db, teamId, (tx) =>

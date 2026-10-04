@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { strFromU8, unzipSync } from "fflate";
+import type { PoolClient } from "pg";
 import pino from "pino";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { runWithAuditContext } from "./audit/context.js";
@@ -241,49 +242,133 @@ beforeEach(async () => {
   await h.admin.query(`DELETE FROM install_settings WHERE key LIKE 'retention.%'`);
   objects.objects.clear();
   objects.deleted.length = 0;
+  h.mailer.sent.length = 0;
 });
 
-describe("retention settings (D6, D8)", () => {
+describe("retention settings (D6, D8; 7-day grace: user decision 2026-10-04)", () => {
   it("defaults to forever; members read it, only team admins change it, within the install maximum", async () => {
     const read = await as.bob.get("/v1/team/retention");
     expect(read.json).toEqual({
       period: "forever",
       maximum: "forever",
       effective: "forever",
+      pending: null,
+      upcoming: null,
       allowed: ["30d", "90d", "1y", "forever"],
     });
     expect((await as.bob.put("/v1/team/retention", { period: "30d" })).status).toBe(403);
+    expect((await as.bob.delete("/v1/team/retention/pending")).status).toBe(403);
     expect((await as.alice.put("/v1/team/retention", { period: "7d" })).status).toBe(400);
+    expect((await as.alice.put("/v1/install/retention", { maximum: "90d" })).status).toBe(403);
+  });
 
+  it("schedules a shortening 7 days out: banner for members, email to admins (count only), cancellable", async () => {
+    await thread({ owner: ids.bob, title: "Secret plan", activity: ago(400) });
+    await thread({ owner: ids.carol, title: "Other secret", activity: ago(380) });
+    await thread({ owner: ids.carol, title: "Recent", activity: ago(5) });
+    h.mailer.sent.length = 0;
+    const before = Date.now();
     const set = await as.alice.put("/v1/team/retention", { period: "1y" });
     expect(set.status).toBe(200);
-    expect(set.json).toMatchObject({ period: "1y", effective: "1y" });
+    const effectiveAt = new Date(String(set.json.pending?.effectiveAt)).getTime();
+    expect(effectiveAt - before).toBeGreaterThanOrEqual(7 * DAY - 1000);
+    expect(effectiveAt - before).toBeLessThanOrEqual(7 * DAY + 60_000);
+    // Not in force yet: the job still keeps everything.
+    expect(set.json).toMatchObject({ period: "1y", effective: "forever" });
+    const banner = (await as.bob.get("/v1/team/retention")).json;
+    expect(banner.upcoming).toEqual({ period: "1y", effectiveAt: set.json.pending.effectiveAt });
+    await pass();
+    expect(await threadIds()).toHaveLength(3);
+
     expect((await audits("retention.policy.changed")).at(-1)).toMatchObject({
-      actor_kind: "user",
       actor_id: ids.alice,
-      target: { period: "1y", previous: "forever" },
+      target: { period: "1y", previous: "forever", effectiveAt: set.json.pending.effectiveAt },
+    });
+    await h.mailer.settle();
+    const [mail, ...more] = h.mailer.to("alice@ret.test");
+    expect(more).toEqual([]);
+    expect(mail?.subject).toMatch(/conversations older than 1 year will be deleted/);
+    expect(mail?.text).toContain("Today, 2 conversations in the team would be deleted");
+    expect(mail?.text).not.toMatch(/Secret plan|Other secret|Recent/);
+    expect(h.mailer.to("bob@ret.test")).toEqual([]);
+    expect((await audits("retention.shortening_notified")).at(-1)?.target).toMatchObject({
+      period: "1y",
+      threads: 2,
+      recipients: 1,
     });
 
-    // Install maximum: install admins only; lowering it caps the team without rewriting it.
-    expect((await as.alice.put("/v1/install/retention", { maximum: "90d" })).status).toBe(403);
+    // Cancel during the grace period: reverts to what applies, audited.
+    const cancelled = await as.alice.delete("/v1/team/retention/pending");
+    expect(cancelled.json).toMatchObject({ period: "forever", pending: null, upcoming: null });
+    expect((await audits("retention.policy.change_cancelled")).at(-1)).toMatchObject({
+      actor_id: ids.alice,
+      target: { period: "1y", kept: "forever" },
+    });
+    expect((await as.alice.delete("/v1/team/retention/pending")).status).toBe(404);
+  });
+
+  it("applies the shortening once its date has come; lengthening applies at once", async () => {
+    const old = await thread({ owner: ids.bob, activity: ago(40) });
+    await as.alice.put("/v1/team/retention", { period: "30d" });
+    // The grace period ends (as if 7 days passed).
+    await h.admin.query(`UPDATE team_retention SET pending_at = now() - interval '1 minute'`);
+    expect((await as.bob.get("/v1/team/retention")).json).toMatchObject({
+      period: "30d",
+      effective: "30d",
+      pending: null,
+    });
+    await pass();
+    expect(await threadIds()).not.toContain(old);
+    // Longer: no grace, no email.
+    h.mailer.sent.length = 0;
+    const longer = await as.alice.put("/v1/team/retention", { period: "1y" });
+    expect(longer.json).toMatchObject({ period: "1y", effective: "1y", pending: null });
+    await h.mailer.settle();
+    expect(h.mailer.sent).toEqual([]);
+    expect((await audits("retention.policy.changed")).at(-1)?.target).toEqual({
+      period: "1y",
+      previous: "30d",
+    });
+  });
+
+  it("lowers the install maximum after the grace period, emailing the teams it shortens; cancellable", async () => {
+    await setPeriod(other, "30d");
+    h.mailer.sent.length = 0;
     const max = await as.owner.put("/v1/install/retention", { maximum: "90d" });
-    expect(max.json).toEqual({ maximum: "90d" });
-    expect((await audits("retention.maximum.changed", null)).at(-1)?.target).toEqual({
+    expect(max.json).toMatchObject({
+      maximum: "90d",
+      applied: "forever",
+      pending: { maximum: "90d" },
+    });
+    expect((await audits("retention.maximum.changed", null)).at(-1)?.target).toMatchObject({
       maximum: "90d",
       previous: "forever",
+      effectiveAt: max.json.pending.effectiveAt,
     });
-    expect((await as.bob.get("/v1/team/retention")).json).toMatchObject({
-      period: "1y",
+    // Finance (forever) is shortened, so its admin is told; Legal (30 days) is not affected.
+    const view = (await as.bob.get("/v1/team/retention")).json;
+    expect(view).toMatchObject({
+      period: "forever",
       maximum: "90d",
-      effective: "90d",
+      effective: "forever",
+      upcoming: { period: "90d", effectiveAt: max.json.pending.effectiveAt },
       allowed: ["30d", "90d"],
     });
-    const over = await as.alice.put("/v1/team/retention", { period: "forever" });
+    await h.mailer.settle();
+    expect(h.mailer.to("alice@ret.test")).toHaveLength(1);
+    expect((await audits("retention.shortening_notified", other)).length).toBe(0);
+    // A team can't choose above the coming maximum.
+    const over = await as.alice.put("/v1/team/retention", { period: "1y" });
     expect(over.status).toBe(409);
     expect(over.json.code).toBe("exceeds_maximum");
-    expect((await as.alice.put("/v1/team/retention", { period: "30d" })).json.effective).toBe(
-      "30d",
-    );
+
+    const cancelled = await as.owner.delete("/v1/install/retention/pending");
+    expect(cancelled.json).toEqual({ maximum: "forever", applied: "forever", pending: null });
+    expect((await audits("retention.maximum.change_cancelled", null)).at(-1)?.target).toEqual({
+      maximum: "90d",
+      kept: "forever",
+    });
+    expect((await as.bob.get("/v1/team/retention")).json.upcoming).toBeNull();
   });
 });
 
@@ -295,7 +380,12 @@ describe("the nightly pass (D18)", () => {
       activity: ago(100),
       blobKeys: [key("old-1"), key("shared")],
     });
-    const fresh = await thread({ owner: ids.bob, activity: ago(10), blobKeys: [key("fresh")] });
+    // A fork of the old thread shares its object (dedup): the object must survive the purge.
+    const fresh = await thread({
+      owner: ids.bob,
+      activity: ago(10),
+      blobKeys: [key("fresh"), named("shared")],
+    });
     await thread({
       owner: ids.carol,
       activity: ago(40),
@@ -312,12 +402,6 @@ describe("the nightly pass (D18)", () => {
     await h.admin.query(
       `INSERT INTO runs (team_id, thread_id, trigger, status, queue_pos) VALUES ($1, $2, 'user', 'queued', 1)`,
       [team, busy],
-    );
-    // The same object also backs a workspace file (an upload copied into /workspace, KOBE-27).
-    await h.admin.query(
-      `INSERT INTO workspace_files (team_id, user_id, path, rev, sha256, blob_key, size, mtime_ms, origin)
-       VALUES ($1, $2, 'uploads/report.csv', 1, $3, $4, 1, 0, 'server')`,
-      [team, ids.bob, "a".repeat(64), named("shared")],
     );
     // Another team: forever (default), same age: untouched.
     const elsewhere = await thread({ teamId: other, owner: ids.bob, activity: ago(400) });
@@ -336,7 +420,7 @@ describe("the nightly pass (D18)", () => {
       failed: false,
     });
     // Audited as counts only, by the system.
-    const purged = await audits("retention.purged");
+    const purged = (await audits("retention.purged")).slice(-2);
     expect(purged.map((a) => a.target)).toEqual([
       { reason: "trash", threads: 1, entries: 2, runs: 0, events: 0, blobs: 1 },
       { reason: "retention", threads: 1, entries: 2, runs: 0, events: 0, blobs: 2 },
@@ -375,6 +459,23 @@ describe("the nightly pass (D18)", () => {
     expect(objects.keys().sort()).toEqual([...crafted, named("victim")].sort());
     // Bob's thread went; Carol's stays (recent activity).
     expect(await threadIds()).toEqual([victim]);
+  });
+
+  it("keeps Trash its full 30 days and restarts the period on restore (review H1)", async () => {
+    await setPeriod(team, "30d");
+    // Idle 25 days when trashed, 6 days ago: past the period now, but Trash keeps it 30 days.
+    const trashed = await thread({ owner: ids.bob, activity: ago(31), deletedAt: ago(6) });
+    // Idle 29 days and in Trash: restored, it must not be purged at the next pass.
+    const restored = await thread({ owner: ids.bob, activity: ago(29), deletedAt: ago(1) });
+    expect((await as.bob.post(`/v1/threads/${restored}/restore`)).status).toBe(200);
+    // Simulate the next nights: two days later the restored thread is still well inside 30 days.
+    await h.admin.query(
+      `UPDATE threads SET last_activity_at = last_activity_at - interval '2 days'
+        WHERE team_id = $1 AND id = $2`,
+      [team, restored],
+    );
+    await pass();
+    expect(await threadIds()).toEqual([trashed, restored].sort());
   });
 
   it("compacts run events 7 days after the run ended, keeping the entries", async () => {
@@ -632,6 +733,76 @@ describe("one replica at a time, once a day", () => {
     // Two concurrent ticks: exactly one runs.
     const both = await Promise.all([job().tick(true), job().tick(true)]);
     expect(both.sort()).toEqual(["busy", "ran"]);
+  });
+});
+
+describe("pass interruptions (review M3, L2, L6)", () => {
+  const job = (pool: { connect: () => Promise<PoolClient> }, now?: Date) =>
+    new RetentionJob({
+      db: h.deps.database.db,
+      pool,
+      blobs,
+      hourUtc: 3,
+      logger: log,
+      ...(now ? { now: () => now } : {}),
+    });
+
+  it("stops the pass when the lock connection fails, without crashing, and resumes on the next check", async () => {
+    await setPeriod(team, "30d");
+    const old = await thread({ owner: ids.bob, activity: ago(40) });
+    let lockClient: PoolClient | undefined;
+    const failing = {
+      connect: async () => {
+        const client = await h.deps.database.pool.connect();
+        lockClient = client;
+        // The connection drops right after the lock is taken (failover, idle kill).
+        const query = client.query.bind(client) as (...args: unknown[]) => Promise<unknown>;
+        (client as unknown as { query: unknown }).query = async (...args: unknown[]) => {
+          const result = await query(...args);
+          if (String(args[0]).includes("pg_try_advisory_lock")) {
+            client.emit("error", new Error("terminating connection due to administrator command"));
+          }
+          return result;
+        };
+        return client;
+      },
+    };
+    expect(await job(failing).tick(true)).toBe("lost");
+    expect(lockClient).toBeDefined();
+    // Nothing was purged and the pass stays open: the next check resumes it, even outside the hour.
+    expect(await threadIds()).toEqual([old]);
+    const cursor = await h.admin.query<{ value: string }>(
+      `SELECT value FROM install_settings WHERE key = 'retention.cursor'`,
+    );
+    expect(cursor.rows[0]?.value).toBe("start");
+    expect(await job(h.deps.database.pool, new Date("2026-10-05T12:00:00Z")).tick()).toBe("ran");
+    expect(await threadIds()).toEqual([]);
+  });
+
+  it("resumes an unfinished pass after the last team done, not from the start", async () => {
+    await setPeriod(team, "30d");
+    await setPeriod(other, "30d");
+    const first = team < other ? team : other;
+    const second = team < other ? other : team;
+    const a = await thread({ teamId: first, owner: ids.bob, activity: ago(40) });
+    const b = await thread({ teamId: second, owner: ids.bob, activity: ago(40) });
+    // A pass crashed after finishing `first` (whose thread then came back, e.g. a restore).
+    await h.admin.query(
+      `INSERT INTO install_settings (key, value) VALUES ('retention.cursor', $1)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [first],
+    );
+    expect(await job(h.deps.database.pool, new Date("2026-10-05T12:00:00Z")).tick()).toBe("ran");
+    expect(await threadIds(first)).toEqual([a]);
+    expect(await threadIds(second)).toEqual([]);
+    expect(b).toBeTruthy();
+    const settings = await h.admin.query<{ key: string; value: string }>(
+      `SELECT key, value FROM install_settings WHERE key IN ('retention.cursor', 'retention.last_pass_at')`,
+    );
+    expect(Object.fromEntries(settings.rows.map((r) => [r.key, r.value]))).toMatchObject({
+      "retention.cursor": "",
+      "retention.last_pass_at": expect.any(String),
+    });
   });
 });
 

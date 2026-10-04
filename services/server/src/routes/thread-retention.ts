@@ -104,9 +104,15 @@ export function threadRetentionRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
         429,
       );
     }
-    const viewer = { teamId: team.id, userId };
-    await recordExport(db, viewer);
+    // Claimed before any await, so concurrent requests can't both pass the checks above.
     exporting.add(userId);
+    const viewer = { teamId: team.id, userId };
+    try {
+      await recordExport(db, viewer);
+    } catch (err) {
+      exporting.delete(userId);
+      throw err;
+    }
     const body = exportResponseBody(db, viewer, deps.blobs);
     // Released when the stream ends, fails or the client goes away.
     const done = () => exporting.delete(userId);

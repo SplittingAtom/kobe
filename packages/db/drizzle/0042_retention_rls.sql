@@ -63,3 +63,17 @@ CREATE TRIGGER "runs_legal_hold_truncate" BEFORE TRUNCATE ON "runs"
   FOR EACH STATEMENT EXECUTE FUNCTION "public"."legal_hold_refuse_truncate"();--> statement-breakpoint
 CREATE TRIGGER "run_events_legal_hold_truncate" BEFORE TRUNCATE ON "run_events"
   FOR EACH STATEMENT EXECUTE FUNCTION "public"."legal_hold_refuse_truncate"();
+--> statement-breakpoint
+
+-- Indexes for the retention job (KOBE-18). SQL-only, like thread_entries_search_idx. Drizzle runs
+-- migrations in one transaction, so they can't be built CONCURRENTLY here: a plain build holds a
+-- SHARE lock (writes wait) while it scans the table. On a large install, build them beforehand
+-- with the same definitions and CREATE INDEX CONCURRENTLY; IF NOT EXISTS then skips them here
+-- (docs/install.md, "Upgrading").
+--
+-- The retention selection: live threads by last activity, per team.
+CREATE INDEX IF NOT EXISTS "threads_retention_idx" ON "threads" USING btree ("team_id", "last_activity_at")
+  WHERE "deleted_at" IS NULL;--> statement-breakpoint
+-- Whether a key a purge released is still referenced by another thread's entries.
+CREATE INDEX IF NOT EXISTS "thread_entries_blob_ref_idx" ON "thread_entries" USING btree ("team_id", "blob_ref")
+  WHERE "blob_ref" IS NOT NULL;

@@ -435,11 +435,34 @@ export const AUDIT_EVENTS = {
 
   // ── retention: periods, purges and compaction (D18, KOBE-18); counts only, never content ──
   /** A team admin changed the team's retention period. */
-  "retention.policy.changed": event("team", { period: retentionPeriod, previous: retentionPeriod }),
+  "retention.policy.changed": event("team", {
+    period: retentionPeriod,
+    previous: retentionPeriod,
+    /** Set when the change shortens the period: it applies then (7-day grace), not now. */
+    effectiveAt: z.iso.datetime({ offset: true }).optional(),
+  }),
+  /** A team admin cancelled the team's pending shortening during its grace period. */
+  "retention.policy.change_cancelled": event("team", {
+    period: retentionPeriod,
+    kept: retentionPeriod,
+  }),
   /** An install admin changed the longest period any team may keep threads. */
   "retention.maximum.changed": event("install", {
     maximum: retentionPeriod,
     previous: retentionPeriod,
+    effectiveAt: z.iso.datetime({ offset: true }).optional(),
+  }),
+  /** An install admin cancelled a pending lowering of the maximum. */
+  "retention.maximum.change_cancelled": event("install", {
+    maximum: retentionPeriod,
+    kept: retentionPeriod,
+  }),
+  /** Team admins were emailed about an upcoming shortening (counts only, no titles). */
+  "retention.shortening_notified": event("team", {
+    period: retentionPeriod,
+    effectiveAt: z.iso.datetime({ offset: true }),
+    threads: count,
+    recipients: count,
   }),
   /**
    * A batch of threads purged by the retention job (system): past the team's period, 30 days in

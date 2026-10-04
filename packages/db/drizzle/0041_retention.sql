@@ -15,13 +15,17 @@ CREATE TABLE "team_retention" (
 	"period" text NOT NULL,
 	"updated_by" uuid NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"pending_period" text,
+	"pending_at" timestamp with time zone,
+	"pending_by" uuid,
 	CONSTRAINT "team_retention_team_id_pk" PRIMARY KEY("team_id"),
-	CONSTRAINT "team_retention_period" CHECK ("team_retention"."period" IN ('30d', '90d', '1y', 'forever'))
+	CONSTRAINT "team_retention_period" CHECK ("team_retention"."period" IN ('30d', '90d', '1y', 'forever')),
+	CONSTRAINT "team_retention_pending" CHECK (("team_retention"."pending_period" IS NULL) = ("team_retention"."pending_at" IS NULL) AND ("team_retention"."pending_period" IS NULL) = ("team_retention"."pending_by" IS NULL) AND ("team_retention"."pending_period" IS NULL OR "team_retention"."pending_period" IN ('30d', '90d', '1y', 'forever')))
 );
 --> statement-breakpoint
 ALTER TABLE "retention_blob_deletions" ADD CONSTRAINT "retention_blob_deletions_team_id_teams_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."teams"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "retention_blob_deletions" ADD CONSTRAINT "retention_blob_deletions_owner_user_id_users_id_fk" FOREIGN KEY ("owner_user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "team_retention" ADD CONSTRAINT "team_retention_team_id_teams_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."teams"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "team_retention" ADD CONSTRAINT "team_retention_updated_by_users_id_fk" FOREIGN KEY ("updated_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "retention_blob_deletions_queue_idx" ON "retention_blob_deletions" USING btree ("team_id","enqueued_at");--> statement-breakpoint
-CREATE INDEX "thread_entries_blob_ref_idx" ON "thread_entries" USING btree ("team_id","blob_ref") WHERE "thread_entries"."blob_ref" IS NOT NULL;
+ALTER TABLE "team_retention" ADD CONSTRAINT "team_retention_pending_by_users_id_fk" FOREIGN KEY ("pending_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "retention_blob_deletions_queue_idx" ON "retention_blob_deletions" USING btree ("team_id","enqueued_at");

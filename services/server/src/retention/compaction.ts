@@ -1,3 +1,4 @@
+import { auditTimeout } from "./locks.js";
 import { lockLegalHolds, sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import { COMPACTION_DAYS } from "./periods.js";
 
@@ -50,7 +51,10 @@ export async function compactBatchInTx(
            (SELECT count(*) FROM c) AS picked`);
   const row = res.rows[0];
   const counts = { runs: Number(row?.runs ?? 0), events: Number(row?.events ?? 0) };
-  if (counts.runs > 0) await record(tx, counts);
+  if (counts.runs > 0) {
+    await auditTimeout(tx);
+    await record(tx, counts);
+  }
   return { ...counts, more: Number(row?.picked ?? 0) >= limit };
 }
 
@@ -62,13 +66,13 @@ export async function compactRunEvents(
   options: {
     readonly limit?: number;
     readonly maxBatches?: number;
-    readonly deadline?: number;
+    readonly stop?: () => boolean;
   } = {},
 ): Promise<CompactionCounts> {
   const limit = options.limit ?? 200;
   let total = { runs: 0, events: 0 };
   for (let batch = 0; batch < (options.maxBatches ?? 1000); batch++) {
-    if (options.deadline !== undefined && Date.now() >= options.deadline) break;
+    if (options.stop?.()) break;
     const result = await withTeam(db, teamId, (tx) => compactBatchInTx(tx, teamId, limit, record));
     total = { runs: total.runs + result.runs, events: total.events + result.events };
     if (!result.more) break;

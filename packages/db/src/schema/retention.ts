@@ -26,9 +26,17 @@ const periodList = sql.raw(RETENTION_PERIODS.map((p) => `'${p}'`).join(", "));
 /** Install setting (`install_settings`) holding the install maximum; absent = `forever`. */
 export const RETENTION_MAXIMUM_KEY = "retention.maximum";
 
+/** Install setting holding a scheduled lowering of the maximum: `<period>@<ISO time>`. */
+export const RETENTION_MAXIMUM_PENDING_KEY = "retention.maximum.pending";
+
+/** Days a shortening waits before it applies (user decision 2026-10-04, KOBE-18). */
+export const RETENTION_GRACE_DAYS = 7;
+
 /**
- * A team's retention period (D6: team-scoped, team admins). No row = `forever`. The effective
- * period is the shorter of this and the install maximum (`effectiveRetention`), so lowering the
+ * A team's retention period (D6: team-scoped, team admins). No row = `forever`. `period` is the
+ * period in force; a shortening is first recorded as `pending_period`, applied at `pending_at`
+ * (7 days later) unless cancelled; a lengthening applies at once. The period the job uses is the
+ * shorter of the team's and the install maximum's (each with its own grace), so lowering the
  * maximum caps every team without rewriting their choice.
  */
 export const teamRetention = pgTable(
@@ -42,10 +50,18 @@ export const teamRetention = pgTable(
       .notNull()
       .references(() => users.id),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    /** A shorter period waiting out its grace period (null: none). */
+    pendingPeriod: text().$type<RetentionPeriod>(),
+    pendingAt: timestamp({ withTimezone: true }),
+    pendingBy: uuid().references(() => users.id),
   },
   (t) => [
     primaryKey({ columns: [t.teamId] }),
     check("team_retention_period", sql`${t.period} IN (${periodList})`),
+    check(
+      "team_retention_pending",
+      sql`(${t.pendingPeriod} IS NULL) = (${t.pendingAt} IS NULL) AND (${t.pendingPeriod} IS NULL) = (${t.pendingBy} IS NULL) AND (${t.pendingPeriod} IS NULL OR ${t.pendingPeriod} IN (${periodList}))`,
+    ),
   ],
 );
 

@@ -125,6 +125,14 @@ describe("thread list (RemoteThreadListAdapter)", () => {
     expect(link.hasAttribute("download")).toBe(true);
   });
 
+  it("tells members about an upcoming retention shortening, with the export link (KOBE-18)", async () => {
+    fake.upcomingRetention = { period: "90d", effective_at: "2026-10-11T03:00:00.000Z" };
+    openApp(fake);
+    const notice = await screen.findByText(/older than 90 days will be deleted from/);
+    const link = within(notice).getByRole("link", { name: "Export your conversations" });
+    expect(link.getAttribute("href")).toBe(`/v1/threads/export?team=${fake.teamId}`);
+  });
+
   it("shows the server's refusal to Trash a busy thread", async () => {
     const t = fake.addThread("Busy");
     openApp(fake, t);

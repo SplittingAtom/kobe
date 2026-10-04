@@ -12,13 +12,24 @@ export const PERIOD_LABELS: Readonly<Record<RetentionPeriod, string>> = {
   forever: "Forever",
 };
 
-export interface TeamRetention {
-  /** What the team admins chose. */
+/** A shortening waiting out its 7-day grace period (user decision 2026-10-04). */
+export interface PendingRetention {
   readonly period: RetentionPeriod;
-  /** The install maximum. */
+  /** ISO time it applies. */
+  readonly effectiveAt: string;
+}
+
+export interface TeamRetention {
+  /** What the team admins chose (in force, or pending). */
+  readonly period: RetentionPeriod;
+  /** The install maximum as chosen. */
   readonly maximum: RetentionPeriod;
-  /** What the nightly job applies: the shorter of the two. */
+  /** What the nightly job applies now. */
   readonly effective: RetentionPeriod;
+  /** The team's own pending shortening (team admins can cancel it). */
+  readonly pending: PendingRetention | null;
+  /** The next shortening of what applies, from the team or the install (the banner). */
+  readonly upcoming: PendingRetention | null;
   /** Periods the team may choose under the maximum. */
   readonly allowed: readonly RetentionPeriod[];
 }
@@ -34,4 +45,14 @@ export function putTeamRetention(
   period: RetentionPeriod,
 ): Promise<ApiResult<TeamRetention>> {
   return apiRequest(BASE, { method: "PUT", json: { period }, teamId });
+}
+
+/** Cancels the team's pending shortening during its grace period. */
+export function cancelTeamRetentionChange(teamId: string): Promise<ApiResult<TeamRetention>> {
+  return apiRequest(`${BASE}/pending`, { method: "DELETE", teamId });
+}
+
+/** "30 days", "1 year", … in running text. */
+export function periodText(period: RetentionPeriod): string {
+  return PERIOD_LABELS[period].toLowerCase();
 }

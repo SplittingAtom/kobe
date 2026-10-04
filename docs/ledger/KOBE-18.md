@@ -1,6 +1,6 @@
 # KOBE-18: Retention, soft delete and export
 
-- **Status:** in review
+- **Status:** in review (PR #59)
 - **Branch / worktree:** `kobe-18-retention` in `../Kobe-wt18`
 - **Depends on:** KOBE-29, KOBE-17 (merged); uses KOBE-11 (blob-ref registry), KOBE-27 (object
   store), KOBE-15 (audit), KOBE-31 (410 `events_compacted`)
@@ -93,6 +93,55 @@ while the user is an active member of the team. Workspace volumes and the worksp
 (`workspace_*`, `teams/<t>/users/<u>/workspace/`) stay KOBE-28's own step, behind the same
 `lockLegalHolds` / `isUnderLegalHold(tx, teamId, userId)` contract.
 
+## User decision (2026-10-04): 7-day grace for shortenings
+
+When a team's effective period gets **shorter** (a team admin lowers it, or the install maximum is
+lowered), it takes effect after **7 days**; lengthening applies at once.
+
+- **Model:** two layers, each with its own grace: `team_retention.period` (in force) +
+  `pending_period`/`pending_at`/`pending_by`; `install_settings['retention.maximum']` +
+  `['retention.maximum.pending']` (`<period>@<ISO>`). A shortening is recorded as pending, due 7
+  days later; reads settle a due pending change (`settle`), so the job never depends on a write on
+  time. Effective = shorter of both layers **as of now**; the banner/email use
+  `upcomingShortening` (the next instant the effective period shrinks; a team lowering that the
+  maximum already covers announces nothing).
+- **Banner:** `GET /v1/team/retention` returns `pending` (the team's own, cancellable) and
+  `upcoming` (from either layer). The chat shows "Conversations older than X will be deleted from
+  <date>. Export your conversations" to every member; the team console shows it plus the pending
+  change with **Cancel change**; the install console shows a pending maximum with Cancel.
+- **Email:** after commit (background, best effort, logged on failure; the banner is the durable
+  signal), team admins get the period, date and a **count** of conversations that would go (no
+  titles, no owners). For a lowered maximum, every team whose effective period shrinks is emailed.
+  Audited `retention.shortening_notified` (counts).
+- **Cancel:** `DELETE /v1/team/retention/pending` (team admins), `DELETE
+/v1/install/retention/pending` (install admins); audited `retention.policy.change_cancelled`,
+  `retention.maximum.change_cancelled`. `retention.policy.changed` / `.maximum.changed` carry
+  `effectiveAt` when scheduled.
+- A team can't choose above the maximum **as chosen** (pending included).
+
+## DB review (coordinator's independent review) — resolution
+
+- **H1** Trash purged early / restored threads purged at once: the retention selection now takes
+  live threads only (`deleted_at IS NULL`; Trash expiry is the Trash selection's), and restoring
+  a thread sets `last_activity_at = now()` (`threads/repository.ts`). Test "keeps Trash its full
+  30 days and restarts the period on restore" (fails without the fix, verified).
+- **M1** index `threads_retention_idx (team_id, last_activity_at) WHERE deleted_at IS NULL`.
+- **M2** the reference check reads only thread-owned columns (`thread: true`, indexed); keys in a
+  thread tree can't be workspace keys. The shared-object test now uses a forked thread's entry.
+- **M3** the lock client has an `error` listener: the pass stops (`stop()` checked between
+  batches and steps), the tick returns `lost`, the connection is destroyed, and the open pass
+  resumes on the next check. Test with an injected connection error.
+- **M4** drizzle runs migrations in one transaction, so no CONCURRENTLY: both indexes moved to the
+  custom migration as SQL-only `CREATE INDEX IF NOT EXISTS`, and `docs/install.md` (Upgrade notes)
+  says to pre-build them `CONCURRENTLY` on large installs.
+- **L1** compaction already filters held threads in SQL before `LIMIT` (`NOT legal_hold_covers`).
+- **L2/L6** pass cursor (`retention.cursor`): a stopped or crashed pass resumes after the last team
+  done, at the next check, even the same night. Test "resumes an unfinished pass".
+- **L3** export slot claimed before any await.
+- **L4** export requires `team.chat` like every thread route: confirmed intended (members only).
+- **L5** `lock_timeout` is reset to 0 before the audit write, so the audit's own wait applies.
+- **L7** noted.
+
 ## Decisions
 
 1. **"Older than the period" = last activity** (`threads.last_activity_at`), not creation: a
@@ -138,9 +187,8 @@ while the user is an active member of the team. Workspace volumes and the worksp
   foreign `Origin` (403 `forbidden_origin`).
 - **MEDIUM hold lock duration:** `lock_timeout` is set before `lockLegalHolds` in every purge
   transaction; the S3 delete inside the blob transaction has a 30 s timeout (rollback, retried).
-- **MEDIUM team admins can purge by lowering the period:** that is D18 (team admins set the
-  period). Kept as spec'd: audited, confirmed in the UI, applies at the next nightly pass. A grace
-  delay or member notification would be a product decision (open question below).
+- **MEDIUM team admins can purge by lowering the period:** resolved by the user decision
+  (7-day grace, banner, email, cancel; see above).
 - **LOW** Delete forever's purge step hitting a lock timeout now answers 204 (the request is
   committed; the nightly Trash purge finishes it). Hold inference from a missing `thread.purged`:
   accepted (decision 4). `retention_blob_deletions.owner_user_id` FK: users are never deleted
@@ -156,8 +204,6 @@ while the user is an active member of the team. Workspace volumes and the worksp
   PR. Flagged, not built.
 - Uploads and artifacts (KOBE-53/55) are purged only once those tickets register their blob
   columns with `thread: true` (and FK their rows to threads with `ON DELETE CASCADE`).
-- **Open question:** should lowering a team's period (or the install maximum) take effect only
-  after a grace period, with members notified? D18 doesn't say; built as immediate (next night).
 - `searchThreads({ activeSince })` is not wired to the retention period yet: threads past the
   period stay searchable until the next nightly pass (at most a day).
 - Purging a thread doesn't notify a sandbox that may still hold it open (its run is never active:

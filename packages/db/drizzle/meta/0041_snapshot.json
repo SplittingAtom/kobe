@@ -1,5 +1,5 @@
 {
-  "id": "0dca95ce-971d-4630-a525-fb87689813d8",
+  "id": "5891d8e1-c383-4e15-a3ed-61ac8487114a",
   "prevId": "ded2b162-0fc7-4d1b-bd45-7594b43369bf",
   "version": "7",
   "dialect": "postgresql",
@@ -1069,28 +1069,6 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "thread_entries_blob_ref_idx": {
-          "name": "thread_entries_blob_ref_idx",
-          "columns": [
-            {
-              "expression": "team_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "blob_ref",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"thread_entries\".\"blob_ref\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -6782,6 +6760,24 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "pending_period": {
+          "name": "pending_period",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pending_at": {
+          "name": "pending_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pending_by": {
+          "name": "pending_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},
@@ -6811,6 +6807,19 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "team_retention_pending_by_users_id_fk": {
+          "name": "team_retention_pending_by_users_id_fk",
+          "tableFrom": "team_retention",
+          "tableTo": "users",
+          "columnsFrom": [
+            "pending_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -6827,6 +6836,10 @@
         "team_retention_period": {
           "name": "team_retention_period",
           "value": "\"team_retention\".\"period\" IN ('30d', '90d', '1y', 'forever')"
+        },
+        "team_retention_pending": {
+          "name": "team_retention_pending",
+          "value": "(\"team_retention\".\"pending_period\" IS NULL) = (\"team_retention\".\"pending_at\" IS NULL) AND (\"team_retention\".\"pending_period\" IS NULL) = (\"team_retention\".\"pending_by\" IS NULL) AND (\"team_retention\".\"pending_period\" IS NULL OR \"team_retention\".\"pending_period\" IN ('30d', '90d', '1y', 'forever'))"
         }
       },
       "isRLSEnabled": false

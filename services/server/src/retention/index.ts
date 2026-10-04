@@ -10,7 +10,15 @@ export { exportResponseBody, recordExport } from "./export.js";
 export { RetentionJob, runRetentionPass, type PassResult } from "./job.js";
 export * from "./periods.js";
 export { purgeThreads, type PurgeCounts, type PurgeOutcome, type PurgeSelection } from "./purge.js";
-export { readMaximum, readRetention, setMaximum, setTeamPeriod } from "./settings.js";
+export { notifyAllTeams, notifyShortening } from "./notify.js";
+export {
+  cancelMaximumPending,
+  cancelTeamPending,
+  readMaximum,
+  readRetention,
+  setMaximum,
+  setTeamPeriod,
+} from "./settings.js";
 
 export class StillAMemberError extends Error {
   constructor() {
