@@ -39,6 +39,7 @@ import {
   type AgentLocation,
   type AgentRecord,
 } from "../agents/store.js";
+import { mountOrbitExport } from "../agents/orbit/routes.js";
 import { inventoryQuerySchema, listInventory, setInventoryStatus } from "../agents/inventory.js";
 import { mountVersionRoutes } from "../agents/version-routes.js";
 import { deleteOrArchiveAgent, getVersion } from "../agents/versions.js";
@@ -108,7 +109,17 @@ export function agentRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
     }
     const query = inventoryQuerySchema.safeParse(c.req.query());
     if (!query.success) return invalidRequest(c, "Check limit and cursor.");
-    return c.json(await listInventory(db, c.get("team").id, query.data));
+    const page = await listInventory(db, c.get("team").id, query.data);
+    const actor = actorOf(c);
+    return c.json({
+      ...page,
+      // Per row: exporting needs the right to read that agent's definition (KOBE-91).
+      agents: page.agents.map((a) => ({
+        ...a,
+        canExport: agentAccess(actor, { scope: a.scope, ownerUserId: a.ownerUserId })
+          .readDefinition,
+      })),
+    });
   });
 
   app.put("/inventory/:id/status", async (c) => {
@@ -247,20 +258,26 @@ export function agentRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
     return agentResponse(c, updated, access);
   });
 
+  const resolveVersioned = async (raw: Context) => {
+    const c = raw as Ctx;
+    const agent = await visible(c);
+    if (!agent) return null;
+    return {
+      agent,
+      location: locationFor(c, agent.scope),
+      access: agentAccess(actorOf(c), agent),
+    };
+  };
   mountVersionRoutes(app, {
     db,
     limits: deps.agentLimits,
-    resolve: async (raw) => {
-      const c = raw as Ctx;
-      const agent = await visible(c);
-      if (!agent) return null;
-      return {
-        agent,
-        location: locationFor(c, agent.scope),
-        access: agentAccess(actorOf(c), agent),
-      };
-    },
+    resolve: resolveVersioned,
     userId: (c) => (c as Ctx).get("user").id,
+  });
+  mountOrbitExport(app, {
+    db,
+    resolve: resolveVersioned,
+    teamId: (c) => (c as Ctx).get("team").id,
   });
 
   return app;

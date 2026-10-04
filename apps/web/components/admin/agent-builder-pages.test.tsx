@@ -18,6 +18,7 @@ const AGENT = {
   updatedAt: "2026-10-01T10:00:00Z",
   canEdit: true,
   canPublish: true,
+  canExport: true,
   starters: [],
   frontmatter: { name: "Triage", approval_mode: "ask-on-write" },
   prompt: "Be helpful.",
@@ -306,5 +307,116 @@ describe("Agent builder: model picker", () => {
     const select = (await screen.findByLabelText("Model")) as HTMLSelectElement;
     await waitFor(() => expect(select.value).toBe("local"));
     expect(select.selectedOptions[0]?.text).toBe("local (not enabled)");
+  });
+});
+
+describe("Agent builder: Export to Orbit (KOBE-91)", () => {
+  const YAML = "# Note: MCP tools are not included\nname: kobe-triage-v2\n";
+  const ORBIT_URL = "/v1/agents/a-1/versions/2/orbit";
+
+  /** Routes the orbit URL to a raw YAML answer and everything else to `stubApi`. */
+  function stubOrbit(reply: Response) {
+    const calls = stubApi(READ);
+    const api = globalThis.fetch;
+    const fetchOrbit = vi.fn(async (url: string, init?: RequestInit) =>
+      url === ORBIT_URL ? reply.clone() : api(url, init),
+    );
+    vi.stubGlobal("fetch", fetchOrbit);
+    return { calls, fetchOrbit };
+  }
+
+  function stubDownload() {
+    const create = vi.fn((_blob: Blob) => "blob:orbit");
+    const revoke = vi.fn();
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: create, revokeObjectURL: revoke }));
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    return { create, click };
+  }
+
+  it("downloads the current version as YAML from the toolbar", async () => {
+    const { fetchOrbit } = stubOrbit(
+      new Response(YAML, { status: 200, headers: { "content-type": "application/yaml" } }),
+    );
+    const { create, click } = stubDownload();
+    renderTeam(<AgentBuilderPage agentId="a-1" />);
+    await userEvent.click(await screen.findByRole("button", { name: "Export to Orbit" }));
+    await waitFor(() => expect(click).toHaveBeenCalledOnce());
+    expect(fetchOrbit.mock.calls.some(([url]) => url === ORBIT_URL)).toBe(true);
+    expect(await must(create.mock.calls[0])[0].text()).toBe(YAML);
+  });
+
+  it("exports an older version from the history", async () => {
+    const { fetchOrbit } = stubOrbit(new Response(YAML, { status: 200 }));
+    stubDownload();
+    renderTeam(<AgentBuilderPage agentId="a-1" />);
+    const history = await screen.findByRole("region", { name: "Version history" });
+    await userEvent.click(
+      await within(history).findByRole("button", { name: "Export version 1 to Orbit" }),
+    );
+    await waitFor(() =>
+      expect(fetchOrbit.mock.calls.some(([url]) => url === "/v1/agents/a-1/versions/1/orbit")).toBe(
+        true,
+      ),
+    );
+  });
+
+  it("shows the server's reason and downloads nothing when the model can't be resolved", async () => {
+    stubOrbit(
+      new Response(
+        JSON.stringify({ code: "model_not_resolvable", message: "Model smart is not enabled." }),
+        { status: 409 },
+      ),
+    );
+    const { click } = stubDownload();
+    renderTeam(<AgentBuilderPage agentId="a-1" />);
+    await userEvent.click(await screen.findByRole("button", { name: "Export to Orbit" }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/not enabled/);
+    expect(click).not.toHaveBeenCalled();
+  });
+
+  it("shows the toolbar button and a button per version only when canExport allows it", async () => {
+    stubApi(READ);
+    renderTeam(<AgentBuilderPage agentId="a-1" />);
+    const history = await screen.findByRole("region", { name: "Version history" });
+    expect(await screen.findByRole("button", { name: "Export to Orbit" })).toBeTruthy();
+    expect(
+      await within(history).findAllByRole("button", { name: /^Export version \d to Orbit$/ }),
+    ).toHaveLength(2);
+  });
+
+  it("hides every export button without canExport, even for an editor and publisher", async () => {
+    stubApi({
+      ...READ,
+      "GET /v1/agents/a-1": [200, { agent: { ...AGENT, canExport: false } }],
+    });
+    renderTeam(<AgentBuilderPage agentId="a-1" />);
+    const history = await screen.findByRole("region", { name: "Version history" });
+    await within(history).findAllByRole("row");
+    expect(screen.queryByRole("button", { name: /Orbit/ })).toBeNull();
+    // The other actions are unaffected by the export flag.
+    expect(within(history).getByRole("button", { name: "Restore version 1" })).toBeTruthy();
+  });
+
+  it("hides export when the server sends no canExport flag at all", async () => {
+    const { canExport: _omit, ...legacy } = AGENT;
+    stubApi({ ...READ, "GET /v1/agents/a-1": [200, { agent: legacy }] });
+    renderTeam(<AgentBuilderPage agentId="a-1" />);
+    const history = await screen.findByRole("region", { name: "Version history" });
+    await within(history).findAllByRole("row");
+    expect(screen.queryByRole("button", { name: /Orbit/ })).toBeNull();
+  });
+
+  it("offers no export for an agent that was never published", async () => {
+    stubApi({
+      ...READ,
+      "GET /v1/agents/a-1": [200, { agent: { ...AGENT, currentVersion: null } }],
+      "GET /v1/agents/a-1/versions": [
+        200,
+        { current_version: null, versions: [], next_before: null },
+      ],
+    });
+    renderTeam(<AgentBuilderPage agentId="a-1" />);
+    await screen.findByText("Never published.");
+    expect(screen.queryByRole("button", { name: /Export .*Orbit/ })).toBeNull();
   });
 });

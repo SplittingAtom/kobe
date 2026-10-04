@@ -1,5 +1,5 @@
 /** Team console: the agent builder's calls (`/v1/agents`, drafts and versions, KOBE-45/46). */
-import { apiRequest, type ApiResult } from "../../../api/client";
+import { apiRequest, apiTextFile, type ApiResult, type TextFile } from "../../../api/client";
 import { revisionTag, type AgentSaved, type AgentSummary } from "../agents";
 
 const enc = encodeURIComponent;
@@ -87,3 +87,11 @@ export const rollbackTeamAgent = (
   version: number,
 ): Promise<ApiResult<PublishedAgent>> =>
   apiRequest(`/v1/agents/${enc(id)}/rollback`, { method: "POST", json: { version }, teamId });
+
+/** A published version as Orbit YAML (`GET /v1/agents/{id}/versions/{n}/orbit`, KOBE-91). */
+export const exportTeamAgentToOrbit = (
+  teamId: string,
+  id: string,
+  version: number,
+): Promise<ApiResult<TextFile>> =>
+  apiTextFile(`/v1/agents/${enc(id)}/versions/${version}/orbit`, { teamId });

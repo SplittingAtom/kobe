@@ -215,6 +215,7 @@ const item = (over: Record<string, unknown>) => ({
   tokens: 1234,
   schedules: null,
   orbitScore: null,
+  canExport: true,
   ...over,
 });
 const INVENTORY_1 = {
@@ -271,6 +272,43 @@ describe("Agent inventory", () => {
     expect(JSON.parse(String(put.body))).toEqual({ status: "suspended" });
     expect(put.headers.get("x-kobe-team")).toBe(TEAM.id);
     expect(screen.getByRole("button", { name: "Reactivate Mine" })).toBeTruthy();
+  });
+
+  it("offers Export to Orbit only for published agents the caller may export", async () => {
+    const calls = stubApi({
+      [LIST]: [200, AGENTS],
+      "GET /v1/agents/inventory": [
+        200,
+        {
+          nextCursor: null,
+          agents: [
+            item({}),
+            item({ id: "d-1", slug: "draft", name: "Draft", currentVersion: null }),
+            item({ id: "p-1", scope: "personal", slug: "mine", name: "Mine", canExport: false }),
+            item({ id: "o-1", slug: "old", name: "Old", ownerName: "Zoe" }),
+          ],
+        },
+      ],
+    });
+    const downloads = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    vi.stubGlobal(
+      "URL",
+      Object.assign(URL, { createObjectURL: () => "blob:x", revokeObjectURL: () => {} }),
+    );
+    const api = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) =>
+        url === "/v1/agents/a-1/versions/2/orbit" ? new Response("name: x\n") : api(url, init),
+      ),
+    );
+    renderTeam(<TeamAgentsPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Export Triage to Orbit" }));
+    await waitFor(() => expect(downloads).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("button", { name: "Export Draft to Orbit" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Export Mine to Orbit" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Export Old to Orbit" })).toBeTruthy();
+    expect(summary(calls)).not.toContain("GET /v1/agents/d-1/versions/null/orbit");
   });
 
   it("is not requested without the suspend permission", async () => {

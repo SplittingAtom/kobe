@@ -39,7 +39,7 @@ import { agentWarnings } from "@kobe/agent-file";
  * Runs `fn`; a stored version whose manifest doesn't parse answers 500 `version_unreadable` (fail
  * closed, logged with the agent and version for operators) instead of a bare 500.
  */
-async function guardUnreadable(c: Context, fn: () => Promise<Response>): Promise<Response> {
+export async function guardUnreadable(c: Context, fn: () => Promise<Response>): Promise<Response> {
   try {
     return await fn();
   } catch (err) {

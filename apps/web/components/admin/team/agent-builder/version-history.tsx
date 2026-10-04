@@ -6,20 +6,25 @@ import {
 import { DateTime, ResourceView } from "../../parts";
 import { useMutation, useResource } from "../../use-resource";
 import { ErrorNotice } from "../../error-notice";
+import { OrbitExportButton } from "./orbit-export-button";
 import styles from "../../admin.module.css";
 
 /** Published versions, newest first; restoring one republishes it as the newest (D19). */
 export function VersionHistory({
   teamId,
   agentId,
+  agentSlug,
   currentVersion,
+  canExport,
   canRestore,
   restoring,
   onRestore,
 }: {
   readonly teamId: string;
   readonly agentId: string;
+  readonly agentSlug: string;
   readonly currentVersion: number | null;
+  readonly canExport: boolean;
   readonly canRestore: boolean;
   readonly restoring: boolean;
   readonly onRestore: (version: number) => void;
@@ -70,6 +75,15 @@ export function VersionHistory({
                           <DateTime value={v.publishedAt} />
                         </td>
                         <td>
+                          {canExport && (
+                            <OrbitExportButton
+                              teamId={teamId}
+                              agentId={agentId}
+                              agentSlug={agentSlug}
+                              version={v.version}
+                              label={`Export version ${v.version} to Orbit`}
+                            />
+                          )}{" "}
                           {canRestore && v.version !== currentVersion && (
                             <button
                               type="button"

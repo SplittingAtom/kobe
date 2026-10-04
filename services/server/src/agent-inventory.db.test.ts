@@ -172,6 +172,7 @@ describe("agent inventory (KOBE-86)", () => {
       currentVersion: 1,
       versionCount: 1,
       runCount: 2,
+      canExport: true,
       schedules: null,
       orbitScore: null,
     });
@@ -179,6 +180,8 @@ describe("agent inventory (KOBE-86)", () => {
       scope: "personal",
       ownerName: "carol",
       runCount: 0,
+      // Someone else's personal agent is not the admin's to read, so not theirs to export.
+      canExport: false,
     });
     expect(byId(items, bobUnused)).toBeUndefined();
     expect(byId(items, marketingAgent)).toBeUndefined();

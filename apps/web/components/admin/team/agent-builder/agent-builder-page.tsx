@@ -25,6 +25,7 @@ import adminStyles from "../../admin.module.css";
 import styles from "./agent-builder.module.css";
 import { Field } from "./field";
 import { FrontmatterForm } from "./frontmatter-form";
+import { OrbitExportButton } from "./orbit-export-button";
 import { PublishDialog } from "./publish-dialog";
 import { VersionHistory } from "./version-history";
 
@@ -151,6 +152,8 @@ function Builder({
 
   // Publishing is its own right (the server checks `access.publish`), separate from editing.
   const canPublish = agent !== null && !readOnly && agent.canPublish === true;
+  // Exporting needs the right to read the definition, not edit rights (archived agents export too).
+  const canExport = agent !== null && agent.canExport === true;
 
   return (
     <>
@@ -240,6 +243,19 @@ function Builder({
           </div>
         )}
       </form>
+      {agent && canExport && agent.currentVersion !== null && (
+        <div className={styles.toolbar}>
+          <OrbitExportButton
+            teamId={teamId}
+            agentId={agent.id}
+            agentSlug={agent.slug}
+            version={agent.currentVersion}
+          />
+          <span className={adminStyles.hint}>
+            Downloads v{agent.currentVersion} as Orbit YAML for safety evaluation.
+          </span>
+        </div>
+      )}
       {publishing && agent && validation.ok && (
         <PublishDialog
           teamId={teamId}
@@ -264,6 +280,8 @@ function Builder({
           teamId={teamId}
           agentId={agent.id}
           currentVersion={agent.currentVersion}
+          agentSlug={agent.slug}
+          canExport={canExport}
           canRestore={canPublish}
           restoring={mutation.pending}
           onRestore={(v) => void restore(v)}
