@@ -316,6 +316,20 @@
       "when": 1791116732844,
       "tag": "0044_run_usage_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1791116765510,
+      "tag": "0045_budgets",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1791116765895,
+      "tag": "0046_budgets_rls",
+      "breakpoints": true
     }
   ]
 }
