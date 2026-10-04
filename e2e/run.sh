@@ -1546,6 +1546,8 @@ JS
     else fail "no session token (JWT) reached the upstream"; fi
     # KOBE-44: a model chosen for the thread is the run's model (here the vLLM-style custom
     # provider, `qwen`, not the team default); once the team disables it, the run fails clearly.
+    # (KOBE-40's checks above left qwen disabled: enable it for the team first.)
+    expect "the team enables qwen" '^200 ' "$(as_owner "PUT /v1/team/models/qwen {\"enabled\":true}")"
     chosen_out=$(chat_run "hello-qwen-$RANDOM" 300000 qwen)
     printf '     chat (thread model): %s\n' "$(printf '%s' "$chosen_out" | grep -v '^text=' | tr '\n' ' ')"
     contains "a thread created with a chosen model stores it (KOBE-44)" '^thread=201:qwen$' "$chosen_out"
