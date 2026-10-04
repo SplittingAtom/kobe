@@ -40,6 +40,20 @@ owner or team, and truncating either table while any hold is active fail with `K
 (`threads_legal_hold*`, `thread_entries_legal_hold*` triggers). Moving a thread to Trash is an
 update and stays allowed. Add the same guards to any new table a purge deletes from.
 
+## Retention (KOBE-18)
+
+`team_retention` (team period, `30d|90d|1y|forever`, no row = forever) and
+`install_settings['retention.maximum']` (install maximum): the nightly job applies the shorter.
+Purges queue the object keys of thread-owned blob columns (`BLOB_REF_COLUMNS` entries with
+`thread: true`) in `retention_blob_deletions` inside the purge transaction; the bytes go later,
+only when no registered column of the team references the key and no hold covers its owner. **A
+table whose rows belong to a thread and hold object keys** (uploads, artifacts): reference the
+thread as `(team_id, thread_id) → threads ON DELETE CASCADE`, register the column with
+`thread: true`, and keep the objects in the thread's own tree `<prefix>teams/<team>/threads/<thread>/`:
+retention deletes and export reads nothing else for a thread. `runs` and `run_events` have the same delete and TRUNCATE guards as threads and
+entries (KH001 under hold). The jobs and the offboarding entry point (`purgeDepartedMember`, for
+KOBE-28) are in `services/server/src/retention/`; design in `docs/ledger/KOBE-18.md`.
+
 ## Break-glass and the explicit team filter (KOBE-16)
 
 `threads` and `thread_entries` have two RLS policies: the canonical `team_isolation` (all

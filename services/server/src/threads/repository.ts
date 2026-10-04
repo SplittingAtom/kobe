@@ -448,8 +448,10 @@ export async function restoreThread(tx: KobeTx, viewer: Viewer, id: string): Pro
   if (!locked.ok) return locked;
   if (!locked.thread.deletedAt) return { ok: false, error: "not_in_trash" };
   const [row] = await tx
+    // Restoring counts as activity: the retention period runs again from now (KOBE-18 review H1),
+    // so a thread restored near the end of its period isn't purged the next night.
     .update(threads)
-    .set({ deletedAt: null })
+    .set({ deletedAt: null, lastActivityAt: sql`now()` })
     .where(
       and(
         eq(threads.teamId, viewer.teamId),
