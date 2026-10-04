@@ -60,7 +60,7 @@ describe("OmissionNotice (KOBE-77)", () => {
 
   it("explains not_approved", () => {
     expect(omissionText({ kind: "skill", name: "sql", reason: "not_approved" })).toBe(
-      "Skill sql: it is not approved for your team",
+      "Skill sql: it is not available or approved in this team",
     );
   });
 });

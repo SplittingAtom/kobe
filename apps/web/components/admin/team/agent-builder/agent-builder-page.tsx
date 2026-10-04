@@ -29,28 +29,55 @@ import { OrbitExportButton } from "./orbit-export-button";
 import { PublishDialog } from "./publish-dialog";
 import { VersionHistory } from "./version-history";
 
-/** Create, edit and publish a team agent from one page (spec D19; `/v1/agents`, KOBE-84). */
-export function AgentBuilderPage({ agentId }: { readonly agentId?: string }) {
+export type BuilderScope = "team" | "personal";
+
+/** Where each scope's builder lives: the admin console for team agents, "My agents" otherwise. */
+const HOME: Readonly<Record<BuilderScope, { base: string; back: string; title: string }>> = {
+  team: { base: "/admin/team/agents", back: "All team agents", title: "New team agent" },
+  personal: { base: "/me/agents", back: "My agents", title: "New personal agent" },
+};
+
+/**
+ * Create, edit and publish an agent from one page (spec D19; `/v1/agents`, KOBE-84). The same
+ * builder serves personal agents in the member's own area (KOBE-97); the server decides who may
+ * edit and publish and reports it as `canEdit` / `canPublish`.
+ */
+export function AgentBuilderPage({
+  agentId,
+  scope = "team",
+}: {
+  readonly agentId?: string;
+  readonly scope?: BuilderScope;
+}) {
   const teamId = useTeamAccess().team.id;
+  const home = HOME[scope];
   return (
     <>
       <p>
-        <Link href="/admin/team/agents">All team agents</Link>
+        <Link href={home.base}>{home.back}</Link>
       </p>
       {agentId ? (
-        <ExistingAgent teamId={teamId} agentId={agentId} />
+        <ExistingAgent teamId={teamId} agentId={agentId} scope={scope} />
       ) : (
-        <Builder teamId={teamId} initial={null} />
+        <Builder teamId={teamId} initial={null} scope={scope} />
       )}
     </>
   );
 }
 
-function ExistingAgent({ teamId, agentId }: { readonly teamId: string; readonly agentId: string }) {
+function ExistingAgent({
+  teamId,
+  agentId,
+  scope,
+}: {
+  readonly teamId: string;
+  readonly agentId: string;
+  readonly scope: BuilderScope;
+}) {
   const { state } = useResource(() => getTeamAgent(teamId, agentId));
   return (
     <ResourceView state={state} label="agent">
-      {(data) => <Builder teamId={teamId} initial={data.agent} />}
+      {(data) => <Builder teamId={teamId} initial={data.agent} scope={scope} />}
     </ResourceView>
   );
 }
@@ -68,10 +95,13 @@ const baselineOf = (agent: AgentDetail | null): Baseline =>
 function Builder({
   teamId,
   initial,
+  scope,
 }: {
   readonly teamId: string;
   readonly initial: AgentDetail | null;
+  readonly scope: BuilderScope;
 }) {
+  const home = HOME[scope];
   const [agent, setAgent] = useState(initial);
   const [baseline, setBaseline] = useState(() => baselineOf(initial));
   const [form, setForm] = useState(baseline.form);
@@ -122,9 +152,9 @@ function Builder({
       async () => {
         const res = agent
           ? await saveTeamAgent(teamId, agent, body)
-          : await createTeamAgent(teamId, { ...body, slug: slug || undefined });
+          : await createTeamAgent(teamId, { ...body, slug: slug || undefined }, scope);
         if (res.ok && agent) apply(res.data.agent);
-        if (res.ok && !agent) window.location.assign(`/admin/team/agents/${res.data.agent.id}`);
+        if (res.ok && !agent) window.location.assign(`${home.base}/${res.data.agent.id}`);
         return res;
       },
       () => (agent ? "Draft saved." : "Agent created."),
@@ -157,7 +187,7 @@ function Builder({
 
   return (
     <>
-      <h1>{agent ? agent.name : "New team agent"}</h1>
+      <h1>{agent ? agent.name : home.title}</h1>
       {agent?.archivedAt && (
         <p className={adminStyles.banner}>This agent is archived, so it can&apos;t be changed.</p>
       )}

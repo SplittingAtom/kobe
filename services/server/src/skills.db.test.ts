@@ -299,6 +299,20 @@ describe("reading and walls", () => {
     expect((await upload("dave", "personal", asMd(skillMd("shared-name")))).status).toBe(201);
   });
 
+  it("never lets another member write to or list a personal skill, even by name", async () => {
+    const mine = await upload("bob", "personal", asMd(skillMd("bobs-notes")));
+    const other = await upload("carol", "personal", asMd(skillMd("bobs-notes", "Carol's take")));
+    expect(other.status).toBe(201);
+    expect(other.json.skill.id).not.toBe(mine.json.skill.id);
+    expect(other.json.skill.ownerUserId).toBe(ids.carol);
+    const bob = await as.bob.get(`/v1/skills/${mine.json.skill.id}`);
+    expect(bob.json.skill.latestVersion).toBe(1);
+    const carols = (await as.carol.get("/v1/skills?scope=personal")).json.skills;
+    const carolIds = carols.map((s: { id: string }) => s.id);
+    expect(carolIds).toContain(other.json.skill.id);
+    expect(carolIds).not.toContain(mine.json.skill.id);
+  });
+
   it("answers 404 for malformed ids", async () => {
     expect((await as.bob.get("/v1/skills/not-a-uuid")).status).toBe(404);
   });

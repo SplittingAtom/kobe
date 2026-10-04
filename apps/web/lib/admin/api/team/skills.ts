@@ -29,8 +29,15 @@ export interface SkillSaved {
   readonly version: SkillVersionInfo;
 }
 
-export async function listSkills(teamId: string): Promise<ApiResult<readonly SkillSummary[]>> {
-  const res = await apiRequest<{ skills: SkillSummary[] }>("/v1/skills", { teamId });
+/** Team and personal skills the caller can see, or only one scope. */
+export async function listSkills(
+  teamId: string,
+  scope?: SkillScope,
+): Promise<ApiResult<readonly SkillSummary[]>> {
+  const res = await apiRequest<{ skills: SkillSummary[] }>(
+    scope ? `/v1/skills?scope=${scope}` : "/v1/skills",
+    { teamId },
+  );
   return res.ok ? { ...res, data: res.data.skills } : res;
 }
 
