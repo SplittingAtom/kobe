@@ -64,6 +64,15 @@ Pi shapes in `src/sandbox-wire/pi-rpc.ts`, `pi-events.ts` and the built-in tool 
 (pinned in `images/sandbox/pi`). The bridge validates envelopes, narrows the events the server
 translates, and passes other Pi payloads through so Pi 1.0.x patches don't break it.
 
+## Event additions
+
+- `context.omitted` (KOBE-77): `{items: [{kind: skill|connector|model, name, reason}]}`, 1..100
+  items. The run-start resolver's omissions (reasons: `agent_exclusive`, `team_disabled`,
+  `blocklisted`, `shadowed_by_agent`, `not_team_enabled`, `not_user_connected`, `no_team_default`).
+  Emitted once right after `run.started`, only when non-empty; persisted in `run_events` like every
+  event, so a reload replays it. Not terminal. Additive: clients that predate it ignore unknown
+  event types.
+
 ## Contract changes (contracts cleanup PR)
 
 Gaps reported by KOBE-23/24/30/35/36, fixed in one contract PR:

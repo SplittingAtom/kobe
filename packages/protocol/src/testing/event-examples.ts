@@ -60,6 +60,12 @@ export const EVENT_PAYLOAD_EXAMPLES: { readonly [T in KobeEventType]: KobeEventP
     tool: "bash",
     reasons: [{ ...reason, code: "team_deny_rule", stage: "team_deny" }],
   },
+  "context.omitted": {
+    items: [
+      { kind: "connector", name: "github", reason: "not_user_connected" },
+      { kind: "skill", name: "sql-helper", reason: "blocklisted" },
+    ],
+  },
   "egress.blocked": { domain: "pypi.org", request_access: true },
   "steer.applied": { entry_id: "e5f6a7b8", content: "Use a bar chart instead" },
   "memory.updated": {

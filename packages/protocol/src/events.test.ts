@@ -25,6 +25,7 @@ describe("Kobe Event Stream types", () => {
       "run.queued",
       "run.started",
       "sandbox.waking",
+      "context.omitted",
       "text.delta",
       "reasoning.delta",
       "tool.call",
@@ -64,6 +65,37 @@ describe("Kobe Event Stream types", () => {
       "run.budget_stopped",
     ]);
     expect(isTerminalEventType("run.started")).toBe(false);
+  });
+});
+
+describe("context.omitted", () => {
+  const schema = EVENT_PAYLOAD_SCHEMAS["context.omitted"];
+  const item = { kind: "connector", name: "github", reason: "not_user_connected" };
+
+  it("accepts one or more omitted items and every reason", () => {
+    expect(schema.safeParse({ items: [item] }).success).toBe(true);
+    for (const reason of [
+      "agent_exclusive",
+      "team_disabled",
+      "blocklisted",
+      "shadowed_by_agent",
+      "not_team_enabled",
+      "not_user_connected",
+      "no_team_default",
+    ]) {
+      expect(schema.safeParse({ items: [{ ...item, reason }] }).success).toBe(true);
+    }
+  });
+
+  it("rejects an empty list, unknown kinds and reasons, and extra keys", () => {
+    expect(schema.safeParse({ items: [] }).success).toBe(false);
+    expect(schema.safeParse({ items: [{ ...item, kind: "tool" }] }).success).toBe(false);
+    expect(schema.safeParse({ items: [{ ...item, reason: "other" }] }).success).toBe(false);
+    expect(schema.safeParse({ items: [{ ...item, extra: 1 }] }).success).toBe(false);
+  });
+
+  it("is not terminal", () => {
+    expect(isTerminalEventType("context.omitted")).toBe(false);
   });
 });
 
