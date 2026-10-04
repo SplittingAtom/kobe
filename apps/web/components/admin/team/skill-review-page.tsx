@@ -166,6 +166,7 @@ function ReviewItem({
       <h3>
         {review.slug} v{review.version} {review.scope === "personal" && <em>(personal skill)</em>}{" "}
         {review.flagged && <strong>Flagged: {review.findings.length}</strong>}
+        {review.blocked && <strong>Blocklisted</strong>}{" "}
         {review.unscanned && <strong>Not scanned yet</strong>}
       </h3>
       <p className={styles.hint}>

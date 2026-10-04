@@ -41,6 +41,7 @@ const reviewJson = (r: ReviewRecord) => ({
   scripts: r.scripts,
   skipped: r.skipped,
   scannedAt: r.scannedAt,
+  blocked: r.blocked,
   reviewedBy: r.reviewedBy,
   reviewedAt: r.reviewedAt,
   reviewNote: r.reviewNote,
@@ -93,12 +94,20 @@ export function teamSkillReviewRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
         { status: body.decision, note: body.note || null, reviewerId: c.get("user").id },
       );
       if (!result.ok) {
-        return result.error === "not_found"
-          ? c.json({ code: "not_found", message: "No such skill version." }, 404)
-          : c.json(
-              { code: "unchanged", message: `That version is already ${body.decision}.` },
-              409,
-            );
+        if (result.error === "not_found")
+          return c.json({ code: "not_found", message: "No such skill version." }, 404);
+        if (result.error === "blocklisted")
+          return c.json(
+            {
+              code: "skill_blocklisted",
+              message: "This bundle is on the install's blocklist and can't be approved.",
+            },
+            409,
+          );
+        return c.json(
+          { code: "unchanged", message: `That version is already ${body.decision}.` },
+          409,
+        );
       }
       return c.json({ review: reviewJson(result.review) });
     },

@@ -2,17 +2,18 @@ import { agentSkills, type AgentFrontmatter } from "@kobe/agent-file";
 import type { ApprovalMode } from "@kobe/protocol";
 import { and, connectors, eq, teamConnectors, teamModels, type KobeTx } from "@kobe/db";
 import type { ResolveInput, SkillRef } from "../resolver/resolve.js";
+import { blockedAmong } from "../skills/blocklist.js";
 import { approvedTeamSkills, usablePersonalSkills } from "../skills/review.js";
 import { readPersonalSkillsDisabled } from "../skills/settings.js";
 
 /**
  * Run-start inputs of the effective-config resolver (KOBE-76, 47b), gathered inside `withTeam()`.
- * Until the tickets that own them land, some inputs are fixed: no user-connected connectors
- * (KOBE-61, user decision: an agent's connectors are left out with `not_user_connected`) and an
- * empty blocklist (KOBE-81). Skills (KOBE-78/80): the agent's named team skills resolve to their
+ * Until KOBE-61 lands, no connector is user-connected (user decision: an agent's connectors are
+ * left out with `not_user_connected`). Skills (KOBE-78/80): the agent's named team skills resolve to their
  * newest team-admin-approved version (an unreviewed, pending or rejected one is unusable and
  * dropped), the user's personal skills to their latest versions (a flagged or unscanned one only once this team approved it), and the team's switch
- * `personalSkillsDisabled` is read here.
+ * `personalSkillsDisabled` is read here. Blocklisted hashes (KOBE-81) are read from the table at
+ * every run start, never cached; the resolver then omits those skills with reason `blocklisted`.
  */
 export interface TeamResolverFacts {
   readonly models: ResolveInput["team"]["models"];
@@ -25,6 +26,8 @@ export interface TeamResolverFacts {
 export interface SkillFacts {
   readonly agent: readonly SkillRef[];
   readonly user: readonly SkillRef[];
+  /** Hashes among the two lists that the install blocklist holds (read at this run start, KOBE-81). */
+  readonly blockedHashes: readonly string[];
 }
 
 /** The team's enabled models and connectors (RLS: inside `withTeam`). */
@@ -68,7 +71,12 @@ export async function loadSkillFacts(
       ensureRows: !args.personalSkillsDisabled,
     }),
   ]);
-  return { agent, user };
+  // Read in the run-start transaction itself, so a hash blocked a moment ago is already dropped.
+  const blockedHashes = await blockedAmong(
+    tx,
+    [...agent, ...user].map((s) => s.hash),
+  );
+  return { agent, user, blockedHashes };
 }
 
 export function buildResolveInput(args: {
@@ -98,6 +106,6 @@ export function buildResolveInput(args: {
       connectedConnectors: [], // TODO(KOBE-61): the user's connected connectors
     },
     approvalFloor: args.floor,
-    blockedHashes: [], // TODO(KOBE-81): skill_blocklist hashes
+    blockedHashes: args.skills.blockedHashes,
   };
 }

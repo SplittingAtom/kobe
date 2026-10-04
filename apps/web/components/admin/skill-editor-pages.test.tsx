@@ -51,6 +51,24 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("Blocklisted skill version (KOBE-81)", () => {
+  it("shows the server's message when the bundle is refused", async () => {
+    stubApi({
+      "GET /v1/skills/s-1": [200, { skill: SKILL }],
+      "GET /v1/skills/s-1/versions/2/bundle": [
+        422,
+        {
+          code: "skill_blocklisted",
+          message: "This skill version is on the install's blocklist and can't be opened.",
+        },
+      ],
+    });
+    renderTeam(<SkillEditorPage skillId="s-1" />);
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("on the install's blocklist");
+  });
+});
+
 describe("Skills list", () => {
   it("lists skills with a link to edit each", async () => {
     stubApi({ "GET /v1/skills": [200, { skills: [SKILL] }] });
