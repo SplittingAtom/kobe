@@ -9,6 +9,7 @@ import {
 } from "../common.js";
 import { connectorNameSchema } from "../tools.js";
 import { SANDBOX_ERROR_CODES, SANDBOX_WIRE_VERSION } from "./connection.js";
+import { SKILL_BUNDLES_MAX, skillBundleRefSchema } from "./skill-bundles.js";
 import {
   piBridgeCommandSchema,
   piExtensionUiRequestSchema,
@@ -77,6 +78,15 @@ export const helloFrameSchema = frame("hello", {
       last_seq: z.number().int().nonnegative(),
     }),
   ),
+  /**
+   * Optional features this agent supports (KOBE-82), e.g. `skill_bundles`. Absent = none (older
+   * agents). The server sends a feature's fields only to agents that list it. An agent that sends
+   * this field needs a server that knows it: roll the server out first.
+   */
+  capabilities: z
+    .array(z.string().regex(/^[a-z][a-z0-9_]{0,63}$/))
+    .max(32)
+    .optional(),
 });
 
 /** One raw Pi session event, bridged unchanged (the server translates to Kobe events). */
@@ -202,7 +212,11 @@ export const gatewayModelSchema = z
   .max(256)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._:/-]*$/);
 
-export const piThreadConfigSchema = z.strictObject({
+/**
+ * Unknown keys are ignored (stripped), not rejected, since KOBE-82: a future additive field must not
+ * break an older agent. Known fields stay strictly validated; the frame itself is still strict.
+ */
+export const piThreadConfigSchema = z.object({
   /**
    * The run's model (D30): the catalog alias plus, resolved by the server from the catalog
    * (KOBE-41), the gateway's model id and API style. Without `gateway_model` the sandbox has no
@@ -221,11 +235,16 @@ export const piThreadConfigSchema = z.strictObject({
     .nullable()
     .optional(),
   system_prompt: z.string().max(100_000).optional(),
-  /** Skill directory names under /opt/kobe/skills or the user's skills dir (D22). */
+  /** Names of the run's effective skills (D22); the bytes are `skill_bundles`. */
   skills: z
     .array(z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/))
     .max(64)
     .optional(),
+  /**
+   * The bytes behind `skills` (KOBE-82, skill-bundles.ts): the canonical zip's hash and size per
+   * effective skill. The sandbox materializes exactly these and nothing else. Absent = none.
+   */
+  skill_bundles: z.array(skillBundleRefSchema).max(SKILL_BUNDLES_MAX).optional(),
   /** Connectors to expose; Pi tool names become `mcp__<name>__<tool>` (verified Pi 1.0.0). */
   mcp_servers: z
     .array(z.strictObject({ name: connectorNameSchema, connector_id: uuidSchema }))

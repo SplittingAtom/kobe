@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import {
+  CAPABILITY_SKILL_BUNDLES,
   serverToSandboxFrameSchema,
   type PiGetEntriesData,
+  type RunStartFrame,
   type ServerToSandboxFrame,
 } from "@kobe/protocol";
 import { sql, withTeam, type SandboxCommandKind } from "@kobe/db";
@@ -30,6 +32,8 @@ export interface DeliveryHost {
   hasLiveLease(runId: string): boolean;
   /** The run was leased to this connection (it may have ended since). */
   hasLease(runId: string): boolean;
+  /** The agent advertised this optional feature in `hello.capabilities` (KOBE-82). */
+  hasCapability(name: string): boolean;
   leaseRun(runId: string, threadId: string, cursor: number): void;
   leaseThread(threadId: string): void;
   endLease(runId: string): void;
@@ -319,6 +323,22 @@ export class CommandDelivery {
       (row.kind === "run.stop" && !this.#host.hasLease(row.runId ?? ""))
     ) {
       await this.#fail(row, failure("run_not_active", "the run is not active on this sandbox"));
+      return;
+    }
+    if (
+      row.kind === "run.start" &&
+      (frame as RunStartFrame).config?.skill_bundles?.length &&
+      !this.#host.hasCapability(CAPABILITY_SKILL_BUNDLES)
+    ) {
+      // Never start a run without the skills it was resolved with, and never send fields the agent
+      // doesn't know: an agent that can't materialize skills fails the run visibly.
+      await this.#failRunStart(
+        row,
+        failure(
+          COMMAND_FAILURES.skillsUnsupported,
+          "this sandbox's agent is too old to load skills; it must be upgraded",
+        ),
+      );
       return;
     }
     if (row.kind === "run.start") {

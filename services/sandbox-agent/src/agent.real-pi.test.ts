@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -11,7 +12,10 @@ import {
   startHarness as startHarnessWith,
   type Harness,
 } from "./testing/harness.js";
+import { buildPiLaunch } from "./pi/pi-launch.js";
+import { SkillStore } from "./skills/store.js";
 import { PI_AVAILABLE, PI_BIN, REAL_POLICY_EXTENSION } from "./testing/real-pi.js";
+import { goodBundle, sha256 } from "./testing/zip.js";
 
 /**
  * Integration with the REAL pinned Pi (`@earendil-works/pi-coding-agent` 1.0.0 from
@@ -170,5 +174,58 @@ describe.skipIf(!PI_AVAILABLE)("real Pi 1.0.0 in RPC mode (no model credentials)
     const state = await piCommand({ type: "get_state" });
     expect(state).toMatchObject({ ok: true, data: { messageCount: 2 } });
     expect(RUN).not.toBe(RUN_2);
+  }, 60_000);
+
+  it("registers exactly the materialized skills through --skill (KOBE-82), none otherwise", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "kobe-real-skills-"));
+    try {
+      const zip = goodBundle();
+      const ref = { name: "demo", sha256: sha256(zip), size: zip.length };
+      const store = new SkillStore({
+        root: path.join(dir, "skills"),
+        identities: false,
+        fetch: () => Promise.resolve(zip),
+      });
+      const [skillDir] = await store.prepare("t1", [ref]);
+
+      // The launch the agent builds, minus kobe-policy (it needs the agent's policy channel).
+      const commands = async (skillDirs: readonly string[]) => {
+        const launch = buildPiLaunch({
+          sessionFile: path.join(dir, "s.jsonl"),
+          home: path.join(dir, "home"),
+          policyExtension: REAL_POLICY_EXTENSION,
+          parentEnv: { PATH: process.env.PATH },
+          skillDirs,
+        });
+        const args = launch.args.filter(
+          (a, i, all) => a !== "--extension" && all[i - 1] !== "--extension",
+        );
+        await mkdir(path.join(dir, "agent"), { recursive: true });
+        await mkdir(path.join(dir, "home"), { recursive: true });
+        const child = spawn(PI_BIN, args, {
+          cwd: dir,
+          env: { ...launch.env, PI_CODING_AGENT_DIR: path.join(dir, "agent") },
+          stdio: ["pipe", "pipe", "ignore"],
+        });
+        child.stdin.write('{"id":"1","type":"get_commands"}\n');
+        const names = await new Promise<string[]>((resolve) => {
+          let text = "";
+          child.stdout.on("data", (d: Buffer) => {
+            text += d.toString();
+            const line = text.split("\n").find((l) => l.includes('"get_commands"'));
+            if (line === undefined) return;
+            const parsed = JSON.parse(line) as { data: { commands: { name: string }[] } };
+            resolve(parsed.data.commands.map((c) => c.name));
+          });
+        });
+        child.stdin.end();
+        await new Promise((resolve) => child.on("exit", resolve));
+        return names;
+      };
+      expect(await commands([skillDir ?? ""])).toContain("skill:demo");
+      expect(await commands([])).not.toContain("skill:demo");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   }, 60_000);
 });

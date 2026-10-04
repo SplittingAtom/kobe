@@ -378,10 +378,6 @@ describe("server → sandbox frames", () => {
       },
     ],
     [
-      "unknown config keys",
-      { ...serverFrames["run.start"], config: { ...config, env: { KEY: "v" } } },
-    ],
-    [
       "an oversize system prompt",
       { ...serverFrames["run.start"], config: { ...config, system_prompt: "x".repeat(100_001) } },
     ],
@@ -395,6 +391,43 @@ describe("server → sandbox frames", () => {
     [
       "a path-like skill name",
       { ...serverFrames["run.start"], config: { ...config, skills: ["../etc"] } },
+    ],
+    [
+      "a skill bundle with a path-like name",
+      {
+        ...serverFrames["run.start"],
+        config: {
+          ...config,
+          skill_bundles: [{ name: "../etc", sha256: "a".repeat(64), size: 10 }],
+        },
+      },
+    ],
+    [
+      "a skill bundle with an uppercase or short hash",
+      {
+        ...serverFrames["run.start"],
+        config: { ...config, skill_bundles: [{ name: "docx", sha256: "A".repeat(64), size: 10 }] },
+      },
+    ],
+    [
+      "a skill bundle over the size cap",
+      {
+        ...serverFrames["run.start"],
+        config: {
+          ...config,
+          skill_bundles: [{ name: "docx", sha256: "a".repeat(64), size: 33 * 1024 * 1024 }],
+        },
+      },
+    ],
+    [
+      "a skill bundle with an extra key",
+      {
+        ...serverFrames["run.start"],
+        config: {
+          ...config,
+          skill_bundles: [{ name: "docx", sha256: "a".repeat(64), size: 10, url: "https://x" }],
+        },
+      },
     ],
   ])("rejects %s", (_name, frame) => {
     expect(decodeServerFrame(JSON.stringify(frame))).toMatchObject({
@@ -605,6 +638,52 @@ describe("forward compatibility (server → sandbox)", () => {
       decodeSandboxFrame(
         JSON.stringify({ v: 1, type: "error", code: "a_new_error", message: "m" }),
       ),
+    ).toMatchObject({ ok: false });
+  });
+});
+
+describe("run.start skill bundles (KOBE-82)", () => {
+  it("accepts bundle refs next to the skill names", () => {
+    const frame = {
+      ...serverFrames["run.start"],
+      config: {
+        skills: ["docx"],
+        skill_bundles: [{ name: "docx", sha256: "a".repeat(64), size: 1234 }],
+      },
+    };
+    expect(decodeServerFrame(JSON.stringify(frame))).toMatchObject({ ok: true });
+  });
+
+  it("still accepts a config without bundles (older servers)", () => {
+    const frame = { ...serverFrames["run.start"], config: { skills: ["docx"] } };
+    expect(decodeServerFrame(JSON.stringify(frame))).toMatchObject({ ok: true });
+  });
+});
+
+describe("run.start config forward compatibility (KOBE-82)", () => {
+  it("ignores unknown config keys instead of rejecting the frame", () => {
+    const frame = {
+      ...serverFrames["run.start"],
+      config: { skills: ["docx"], some_future_field: { x: 1 } },
+    };
+    const decoded = decodeServerFrame(JSON.stringify(frame));
+    expect(decoded).toMatchObject({ ok: true });
+    expect(JSON.stringify(decoded)).not.toContain("some_future_field");
+  });
+
+  it("accepts a hello with or without capabilities, rejecting malformed ones", () => {
+    const hello = {
+      v: 1,
+      type: "hello",
+      sandbox_id: EXAMPLE_IDS.sandbox,
+      agent_version: "1",
+      pi_version: "1.0.0",
+      runs: [],
+    };
+    for (const body of [hello, { ...hello, capabilities: ["skill_bundles"] }])
+      expect(decodeSandboxFrame(JSON.stringify(body))).toMatchObject({ ok: true });
+    expect(
+      decodeSandboxFrame(JSON.stringify({ ...hello, capabilities: ["Bad Cap"] })),
     ).toMatchObject({ ok: false });
   });
 });

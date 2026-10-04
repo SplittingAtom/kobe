@@ -33,6 +33,12 @@ const configSchema = z.object({
    */
   KOBE_PI_RUNTIME_DIR: z.string().startsWith("/").default("/tmp/kobe-pi"),
   /**
+   * Where the run's effective skills are materialized (KOBE-82): a directory only the agent
+   * writes, readable by the Pi uids. Kobe's pod spec mounts a memory-backed volume (sticky root,
+   * like the Pi runtime directories). Unset: this sandbox cannot materialize skills.
+   */
+  KOBE_SKILLS_DIR: z.string().startsWith("/").optional(),
+  /**
    * The model gateway (KOBE-40 shim) as sandbox pods see it; set by the server's pod spec when
    * the sandbox may reach models. Without it Pi has no model (runs fail `model_not_configured`).
    */
@@ -104,6 +110,8 @@ export interface Config {
   readonly sessionDir: string;
   readonly piBin: string;
   readonly piRuntimeDir: string;
+  /** Where effective skills are materialized (KOBE-82); undefined = not supported here. */
+  readonly skillsDir?: string;
   /** The model gateway origin (`http://host[:port]`, no trailing slash), when the pod has one. */
   readonly modelGatewayUrl?: string;
   readonly modelsExtension: string;
@@ -148,6 +156,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     sessionDir: c.KOBE_SESSION_DIR,
     piBin: c.KOBE_PI_BIN,
     piRuntimeDir: c.KOBE_PI_RUNTIME_DIR,
+    ...(c.KOBE_SKILLS_DIR === undefined ? {} : { skillsDir: c.KOBE_SKILLS_DIR }),
     ...(c.KOBE_MODEL_GATEWAY_URL === undefined
       ? {}
       : { modelGatewayUrl: new URL(c.KOBE_MODEL_GATEWAY_URL).origin }),
