@@ -25,8 +25,8 @@ export interface CallContext {
   readonly model: string | undefined;
   /** Input tokens the request may cost (its size / 4; 0 for a GET). */
   readonly inputEstimate?: number;
-  /** The output cap the request asks for (`max_tokens` and kin), when it sets one. */
-  readonly requestedOutput?: number | undefined;
+  /** Output tokens the call may produce as charged (usage/charge.ts `chargedOutput`). */
+  readonly outputAllowance?: number;
 }
 
 export type GateDecision =

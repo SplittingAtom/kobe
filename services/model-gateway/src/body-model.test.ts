@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { topLevelModel, withStreamUsage } from "./body-model.js";
+import { MAX_CHOICES, topLevelModel, withStreamUsage } from "./body-model.js";
 
 const scan = (v: unknown) =>
   topLevelModel(Buffer.from(typeof v === "string" ? v : JSON.stringify(v)));
@@ -120,10 +120,27 @@ describe("request facts for charging (KOBE-43 review)", () => {
     expect(
       facts({ contents: [], generationConfig: { temperature: 1, maxOutputTokens: 512 } }),
     ).toMatchObject({ maxOutputTokens: 512 });
-    // Nested elsewhere, or not a whole number: ignored.
-    expect(facts({ model: "m", messages: [{ max_tokens: 5 }], max_tokens: "9" })).toMatchObject({
+    // Nested elsewhere: ignored. Null: unset.
+    expect(facts({ model: "m", messages: [{ max_tokens: 5 }], max_tokens: null })).toMatchObject({
       maxOutputTokens: undefined,
     });
+  });
+
+  it("reads a cap it cannot parse plainly as unbounded (no dodging the charge)", () => {
+    for (const raw of ['"9"', "1e5", "65536.0", "-1", "true", "{}"]) {
+      expect(topLevelModel(Buffer.from(`{"model":"m","max_tokens":${raw}}`)), raw).toMatchObject({
+        maxOutputTokens: Number.POSITIVE_INFINITY,
+      });
+    }
+    expect(
+      facts({ contents: [], generation_config: { max_output_tokens: 300, candidate_count: 3 } }),
+    ).toMatchObject({ maxOutputTokens: 300, choices: 3 });
+    expect(facts({ model: "m", n: 4 })).toMatchObject({ choices: 4 });
+    expect(facts({ model: "m", n: "4" })).toMatchObject({ choices: MAX_CHOICES });
+    expect(facts({ contents: [], generationConfig: { candidateCount: 1000 } })).toMatchObject({
+      choices: MAX_CHOICES,
+    });
+    expect(facts({ model: "m" })).toMatchObject({ choices: 1 });
   });
 
   it("sees a top-level background: true only", () => {

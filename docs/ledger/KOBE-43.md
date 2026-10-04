@@ -138,6 +138,28 @@ cost_usd?, duration_ms, ttfb_ms?, aborted)`. `input_tokens` excludes cache reads
   a streaming chat call sent without `stream_options` through the shim and the real Bifrost
   reaches the fake upstream with `include_usage: true` (`/_seen` `includeUsage`).
 
+## Re-review (coordinator) — resolutions
+
+- **HIGH (depth guards spoofable as superuser):** the attack needs trigger code of the caller's
+  own; `migrate.ts` already revokes CREATE on schema public and CREATE, TEMPORARY on the database
+  from PUBLIC, and the app role holds no TRIGGER privilege. New `app-role-capabilities.db.test.ts`
+  proves it for the real app role (no TEMP/CREATE through any membership, no TRIGGER on any
+  table) and that the temp-table / pg_temp-function / own-trigger steps are refused (42501). The
+  run_usage guard says it relies on that revoke. Other `pg_trigger_depth` guards in the repo,
+  protected by the same revoke (unchanged): `0005_conversations_rls.sql` (run and thread seq
+  counters), `0020_agent_versions_rls.sql` (published versions, cascade delete); KOBE-42's spend
+  and email guards (#61).
+- **MEDIUM (cap parse dodges):** a cap key whose value is not a plain whole number (`1e5`,
+  `65536.0`, a string, a negative) counts as unbounded (charged at the ceiling); Gemini's
+  snake_case `generation_config.max_output_tokens` is read; the output allowance is multiplied by
+  the answers asked for (`n`, `candidateCount` / `candidate_count`; unreadable → 16, capped at 16).
+  **Residual:** the ceiling (65,536 output tokens per answer) is install-wide, not per model;
+  hidden reasoning beyond it on a call whose usage report is lost is not charged.
+- **LOW:** count-only endpoints (`count_tokens`, `countTokens`) are never charged output; a DB
+  CHECK (`model_catalog_price_set`) backs the API's price-set rule.
+- Tests: `body-model.test.ts` "reads a cap it cannot parse plainly as unbounded", meter
+  "chargedOutput", gateway "a count-only endpoint is never charged output".
+
 ## Contract changes
 
 None in `packages/protocol`. `@kobe/model-gateway` `CallRecord` gains `startedAt`, `ttfbMs` and

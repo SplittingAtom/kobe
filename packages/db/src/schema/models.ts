@@ -148,6 +148,12 @@ export const modelCatalog = pgTable(
         sql` AND `,
       )}`,
     ),
+    // KOBE-43 review: prices come as a set (input and output together; cache only with them).
+    check(
+      "model_catalog_price_set",
+      sql`(${t.inputUsdPerMtok} IS NULL) = (${t.outputUsdPerMtok} IS NULL)
+        AND (${t.inputUsdPerMtok} IS NOT NULL OR (${t.cacheReadUsdPerMtok} IS NULL AND ${t.cacheWriteUsdPerMtok} IS NULL))`,
+    ),
     check("model_catalog_alias", sql`${t.alias} ~ ${sql.raw(`'${MODEL_ALIAS_PATTERN}'`)}`),
     check("model_catalog_model", sql`${t.model} ~ ${sql.raw(`'${PROVIDER_MODEL_PATTERN}'`)}`),
     check(

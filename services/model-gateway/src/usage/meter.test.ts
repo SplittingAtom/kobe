@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { RouteKind } from "../routes.js";
 import { JsonUsageScanner } from "./json-scan.js";
-import { DEFAULT_CHARGED_OUTPUT_TOKENS, MAX_CHARGED_OUTPUT_TOKENS } from "./charge.js";
+import {
+  DEFAULT_CHARGED_OUTPUT_TOKENS,
+  MAX_CHARGED_OUTPUT_TOKENS,
+  chargedOutput,
+} from "./charge.js";
 import { UsageMeter } from "./meter.js";
 
 const SSE = "text/event-stream";
@@ -117,7 +121,7 @@ describe("UsageMeter: streams (usage in the final events)", () => {
     expect(meter("openai", SSE, body, 7, true, 4_000).counts.output).toBe(4_000);
     // No cap in the request: the default; a huge one: the documented maximum.
     expect(meter("openai", SSE, body).counts.output).toBe(DEFAULT_CHARGED_OUTPUT_TOKENS);
-    expect(meter("openai", SSE, body, 7, true, 10_000_000).counts.output).toBe(
+    expect(meter("openai", SSE, body, 7, true, chargedOutput(10_000_000)).counts.output).toBe(
       MAX_CHARGED_OUTPUT_TOKENS,
     );
   });
@@ -280,5 +284,14 @@ describe("JsonUsageScanner", () => {
 
   it("drops a value larger than its cap", () => {
     expect(scan(`{"usage":{"t":"${"q".repeat(100)}"}}`)).toEqual([]);
+  });
+});
+
+describe("chargedOutput (KOBE-43 re-review)", () => {
+  it("charges unreadable caps at the ceiling, times the answers asked for; count-only nothing", () => {
+    expect(chargedOutput(Number.POSITIVE_INFINITY)).toBe(MAX_CHARGED_OUTPUT_TOKENS);
+    expect(chargedOutput(100, 4)).toBe(400);
+    expect(chargedOutput(undefined, 2)).toBe(2 * DEFAULT_CHARGED_OUTPUT_TOKENS);
+    expect(chargedOutput(100, 4, true)).toBe(0);
   });
 });

@@ -448,6 +448,15 @@ describe("calls", () => {
     });
   });
 
+  it("KOBE-43 re-review: a count-only endpoint is never charged output", async () => {
+    const r = await call("/anthropic/v1/messages/count_tokens", {
+      headers: bearer(),
+      body: { model: "openai/m", fail: 500, max_tokens: 300 },
+    });
+    expect(r.status).toBe(500);
+    expect(records[0]?.usage?.counts.output).toBe(0);
+  });
+
   it("KOBE-43 review: refuses background Responses (billed later, out of the ledger's sight)", async () => {
     const r = await call("/v1/responses", {
       headers: bearer(),

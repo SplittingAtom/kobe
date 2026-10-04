@@ -18,9 +18,14 @@ export type BodyModel =
       readonly background: boolean;
       /**
        * The output cap the request asks for: top-level `max_tokens`, `max_output_tokens` or
-       * `max_completion_tokens`, or Gemini's `generationConfig.maxOutputTokens` (the largest).
+       * `max_completion_tokens`, or Gemini's `generationConfig.maxOutputTokens` (also
+       * `generation_config.max_output_tokens`); the largest. A value that is not a plain whole
+       * number (`1e5`, `65536.0`, a string) counts as unbounded (`Infinity`): what the upstream
+       * may read differently is charged at the ceiling.
        */
       readonly maxOutputTokens: number | undefined;
+      /** How many answers the request asks for (`n`, Gemini's `candidateCount`); at least 1. */
+      readonly choices: number;
     }
   | { readonly ok: false; readonly reason: "not_json_object" | "duplicate_model" | "bad_model" };
 
@@ -34,6 +39,11 @@ const MAX_FACT_KEY_RAW = 180;
 const TRUE = Buffer.from("true");
 const MAX_OUTPUT_KEYS = new Set(["max_tokens", "max_output_tokens", "max_completion_tokens"]);
 const NUMBER = /^[0-9]{1,12}$/;
+/** Answers charged for a request whose `n` / `candidateCount` cannot be read plainly. */
+export const MAX_CHOICES = 16;
+const CONFIG_KEYS = new Set(["generationconfig", "generation_config"]);
+const NESTED_MAX_KEYS = new Set(["maxoutputtokens", "max_output_tokens"]);
+const CHOICE_KEYS = new Set(["candidatecount", "candidate_count"]);
 
 class Malformed extends Error {}
 
@@ -104,21 +114,26 @@ export function topLevelModel(body: Buffer): BodyModel {
   /** A key's name in lower case (Go's case-insensitive match), or "" when too long to matter. */
   const keyName = (start: number, end: number): string =>
     end - start <= MAX_FACT_KEY_RAW ? decode(start, end).toUpperCase().toLowerCase() : "";
-  /** A value's raw text when it is a literal (number, true, false, null), else undefined. */
-  const literal = (): string | undefined => {
+  /** A value's raw text (any JSON value; strings keep their quotes). */
+  const raw = (): string => {
     const vs = i;
-    const c = body[i];
     value();
-    return c === QUOTE || c === 0x7b || c === 0x5b
-      ? undefined
-      : body.subarray(vs, i).toString("latin1");
+    return body.subarray(vs, i).toString("latin1");
   };
+  /** A plain whole number, `null` (unset) or anything else (read as unbounded). */
+  const whole = (text: string): number | null =>
+    text === "null" ? null : NUMBER.test(text) ? Number(text) : Number.POSITIVE_INFINITY;
   let maxOutput: number | undefined;
-  const noteMax = (raw: string | undefined) => {
-    if (raw === undefined || !NUMBER.test(raw)) return;
-    maxOutput = Math.max(maxOutput ?? 0, Number(raw));
+  let choices = 1;
+  const noteMax = (text: string) => {
+    const n = whole(text);
+    if (n !== null) maxOutput = Math.max(maxOutput ?? 0, n);
   };
-  /** Gemini's `generationConfig` object: only its `maxOutputTokens` matters. */
+  const noteChoices = (text: string) => {
+    const n = whole(text);
+    if (n !== null) choices = Math.max(choices, Math.min(n, MAX_CHOICES));
+  };
+  /** Gemini's generation config: only its output cap and candidate count matter. */
   const generationConfig = () => {
     if (body[i] !== 0x7b) {
       value();
@@ -137,7 +152,8 @@ export function topLevelModel(body: Buffer): BodyModel {
       ws();
       expect(0x3a);
       ws();
-      if (name === "maxoutputtokens") noteMax(literal());
+      if (NESTED_MAX_KEYS.has(name)) noteMax(raw());
+      else if (CHOICE_KEYS.has(name)) noteChoices(raw());
       else value();
       ws();
       if (body[i] === 0x2c) {
@@ -186,8 +202,10 @@ export function topLevelModel(body: Buffer): BodyModel {
           if (name === "stream") stream = isTrue;
           else background = isTrue;
         } else if (MAX_OUTPUT_KEYS.has(name)) {
-          noteMax(literal());
-        } else if (name === "generationconfig") {
+          noteMax(raw());
+        } else if (name === "n") {
+          noteChoices(raw());
+        } else if (CONFIG_KEYS.has(name)) {
           generationConfig();
         } else {
           value();
@@ -203,7 +221,7 @@ export function topLevelModel(body: Buffer): BodyModel {
     }
     ws();
     if (i !== n) throw new Malformed();
-    return { ok: true, model, stream, background, maxOutputTokens: maxOutput };
+    return { ok: true, model, stream, background, maxOutputTokens: maxOutput, choices };
   } catch (err) {
     if (err instanceof Malformed || err instanceof SyntaxError) {
       return { ok: false, reason: "not_json_object" };
