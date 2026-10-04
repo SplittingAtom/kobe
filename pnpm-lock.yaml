@@ -488,6 +488,9 @@ importers:
       '@kobe/session-token':
         specifier: workspace:*
         version: link:../../packages/session-token
+      '@kobe/skill-scanner':
+        specifier: workspace:*
+        version: link:../../packages/skill-scanner
       '@kubernetes/client-node':
         specifier: ^2.0.0
         version: 2.0.0
