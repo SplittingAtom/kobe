@@ -36,6 +36,17 @@ describe("sandbox-agent loadConfig", () => {
     );
   });
 
+  it("in bootstrap mode (Kobe's pods) takes the sandbox id from the server instead", () => {
+    const config = loadConfig({
+      KOBE_SERVER_URL: "ws://server.kobe.internal:8081",
+      KOBE_BOOTSTRAP_TOKEN_FILE: "/var/run/secrets/kobe/bootstrap-token",
+    });
+    expect(config.bootstrapTokenFile).toBe("/var/run/secrets/kobe/bootstrap-token");
+    expect(() =>
+      loadConfig({ KOBE_SERVER_URL: "ws://kobe", KOBE_BOOTSTRAP_TOKEN_FILE: "relative/path" }),
+    ).toThrow(/KOBE_BOOTSTRAP_TOKEN_FILE/);
+  });
+
   it("requires a lowercase uuid sandbox id", () => {
     expect(() => loadConfig({ KOBE_SERVER_URL: "wss://kobe" })).toThrow(/KOBE_SANDBOX_ID/);
     expect(() =>
@@ -58,5 +69,14 @@ describe("sandbox-agent loadConfig", () => {
     expect(() =>
       loadConfig({ ...base, KOBE_SERVER_URL: "wss://kobe", KOBE_SESSION_DIR: "sessions" }),
     ).toThrow(/KOBE_SESSION_DIR/);
+  });
+
+  it("takes the Pi identity helper (KOBE-71) as an absolute path, off by default", () => {
+    const url = { ...base, KOBE_SERVER_URL: "ws://kobe-server:8080" };
+    expect(loadConfig(url).piRunAs).toBeUndefined();
+    expect(loadConfig({ ...url, KOBE_PI_RUNAS: "/opt/kobe/bin/kobe-runas" }).piRunAs).toBe(
+      "/opt/kobe/bin/kobe-runas",
+    );
+    expect(() => loadConfig({ ...url, KOBE_PI_RUNAS: "kobe-runas" })).toThrow(/KOBE_PI_RUNAS/);
   });
 });

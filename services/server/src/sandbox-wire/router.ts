@@ -1,15 +1,22 @@
 import { withTeam, type KobeDb, type SandboxCommandKind } from "@kobe/db";
 import type { Logger } from "pino";
 import type { SandboxBus } from "./bus.js";
-import { enqueueCommand, expireCommand, liveConnection, takeResult } from "./commands.js";
+import {
+  completeCommand,
+  enqueueCommand,
+  expireCommand,
+  liveConnection,
+  takeResult,
+} from "./commands.js";
 import type { WireTuning } from "./constants.js";
 import type { ConnectionRegistry } from "./registry.js";
-import type {
-  CommandOutcome,
-  SandboxRouter,
-  SandboxTarget,
-  SandboxWaker,
-  SendOptions,
+import {
+  SandboxWakeError,
+  type CommandOutcome,
+  type SandboxRouter,
+  type SandboxTarget,
+  type SandboxWaker,
+  type SendOptions,
 } from "./types.js";
 
 interface Waiter {
@@ -157,13 +164,65 @@ export class CommandRouter implements SandboxRouter {
       };
     }
     if (!queued.live) {
-      this.#waker
-        .wake(target)
-        .catch((err: unknown) => this.#log.warn({ err }, "sandbox wake failed"));
+      void this.#wakeFor(target, queued.id, timeoutMs, kind === "run.start" ? runId : undefined);
     } else if (queued.live.replicaId === this.#replicaId) {
       this.#registry.get(queued.live.connectionId)?.pokeCommands();
     }
     return this.#await(target.teamId, queued.id, timeoutMs);
+  }
+
+  /**
+   * Wakes the sandbox for a waiting command. A definitive failure (no isolation runtime,
+   * offboarded, not a member) fails the command at once; a transient one (API timeout, a pod slow
+   * to appear) is retried with jittered backoff while the command still waits and the sandbox is
+   * not connected, within a budget that ends before the command's deadline; then the command
+   * fails `sandbox_unavailable` instead of timing out silently.
+   */
+  async #wakeFor(
+    target: SandboxTarget,
+    id: string,
+    timeoutMs: number,
+    runId: string | undefined,
+  ): Promise<void> {
+    const budget = Math.min(this.#tuning.wakeRetryBudgetMs, Math.max(0, timeoutMs - 2_000));
+    const started = Date.now();
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await this.#waker.wake(target, runId === undefined ? undefined : { runId });
+        return;
+      } catch (err) {
+        if (err instanceof SandboxWakeError) {
+          this.#log.warn({ err }, "sandbox wake refused");
+          this.#fail(target.teamId, id, err);
+          return;
+        }
+        this.#log.warn({ err, attempt }, "sandbox wake failed");
+        const delay = Math.random() * Math.min(10_000, this.#tuning.wakeRetryBaseMs * 2 ** attempt);
+        if (this.#closed || !this.#waiters.has(id)) return;
+        if (Date.now() + delay - started >= budget) {
+          this.#fail(
+            target.teamId,
+            id,
+            new SandboxWakeError("sandbox_unavailable", "the sandbox could not be started"),
+          );
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, delay).unref());
+        if (this.#closed || !this.#waiters.has(id)) return;
+        if (await this.isConnected(target).catch(() => false)) return;
+      }
+    }
+  }
+
+  #fail(teamId: string, id: string, err: SandboxWakeError): void {
+    withTeam(this.#db, teamId, (tx) =>
+      completeCommand(tx, this.#bus, teamId, id, {
+        ok: false,
+        error: { code: err.code, message: err.message },
+      }),
+    )
+      .then(() => this.onResult(id))
+      .catch((e: unknown) => this.#log.warn({ err: e }, "could not fail a command"));
   }
 
   #await(teamId: string, id: string, timeoutMs: number): Promise<CommandOutcome> {

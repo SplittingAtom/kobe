@@ -240,10 +240,9 @@ export class SandboxConnection implements RegisteredConnection {
         fetchNewEntries: (thread) => this.#delivery.fetchNewEntries(thread),
         runEnded: (run, status) => {
           this.endLease(run);
-          if (status === "completed") {
-            ctx.metrics.runsCompleted += 1;
-            ctx.runEnded({ teamId: this.target.teamId, runId: run, threadId, status });
-          }
+          if (status === undefined) return;
+          if (status === "completed") ctx.metrics.runsCompleted += 1;
+          ctx.runEnded({ teamId: this.target.teamId, runId: run, threadId, status });
         },
         failed: () => this.close("internal", "events could not be stored"),
         needsSync: (thread) => this.#delivery.forgetSession(thread),
@@ -443,7 +442,7 @@ export class SandboxConnection implements RegisteredConnection {
     this.#ctx.metrics.policyChecks += 1;
     void decidePolicyCheck(
       this.#ctx.policy,
-      this.target,
+      { ...this.target, connectionId: this.id },
       frame,
       abort.signal,
       (pending) =>
@@ -602,7 +601,11 @@ export class SandboxConnection implements RegisteredConnection {
       await this.#registry.unregister(this);
       return;
     }
-    if (!current) {
+    if (current === "hibernating") {
+      this.close("hibernating", "sandbox is hibernated");
+      return;
+    }
+    if (current === "replaced") {
       this.close("replaced", "a newer connection of this sandbox registered first");
       return;
     }

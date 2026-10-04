@@ -33,6 +33,7 @@ type Pod = {
     env: { name: string; value?: string; valueFrom?: unknown }[];
     envFrom?: unknown;
     securityContext: Record<string, unknown>;
+    volumeMounts: Record<string, unknown>[];
   }[];
   volumes: Record<string, unknown>[];
   securityContext: Record<string, unknown>;
@@ -99,8 +100,23 @@ describe("sandbox pod spec (D12, D13; secrets never enter sandboxes)", () => {
       https_proxy: "http://egress-proxy.kobe.internal:80",
       http_proxy: "http://egress-proxy.kobe.internal:80",
       KOBE_EGRESS_PROXY_URL: "http://egress-proxy.kobe.internal:80",
-      KOBE_BOOTSTRAP_TOKEN_FILE: "/var/run/secrets/kobe/bootstrap-token",
+      KOBE_BOOTSTRAP_TOKEN_FILE: "/run/kobe-agent/bootstrap/bootstrap-token",
+      KOBE_PI_RUNAS: "/opt/kobe/bin/kobe-runas",
+      KOBE_PI_RUNTIME_DIR: "/run/kobe-pi",
     });
+  });
+
+  it("tells the agent how often to push its workspace (KOBE-27), 0 when sync is off", async () => {
+    const isolation = await verified();
+    const envOf = (settings: typeof SETTINGS) =>
+      (sandboxPodSpec(isolation, settings, ADDRESSES) as unknown as Pod).containers[0]?.env;
+    expect(envOf(SETTINGS)).toContainEqual({
+      name: "KOBE_WORKSPACE_SYNC_INTERVAL_MS",
+      value: "60000",
+    });
+    expect(
+      envOf({ ...SETTINGS, workspaceSync: { ...SETTINGS.workspaceSync, enabled: false } }),
+    ).toContainEqual({ name: "KOBE_WORKSPACE_SYNC_INTERVAL_MS", value: "0" });
   });
 
   it("never overrides the image's command (tini + hardened launcher, KOBE-23) or args", async () => {
@@ -116,25 +132,44 @@ describe("sandbox pod spec (D12, D13; secrets never enter sandboxes)", () => {
     expect(JSON.stringify(template)).not.toMatch(/"command"|"args"/);
   });
 
-  it("meets Pod Security 'restricted' and the D12 sizing", async () => {
+  it("is 'restricted' but for SETUID/SETGID for Pi identities (KOBE-71), with the D12 sizing", async () => {
     const spec = sandboxPodSpec(await verified(), SETTINGS, ADDRESSES) as unknown as Pod & {
       containers: { resources: unknown }[];
     };
-    expect(spec.securityContext).toMatchObject({
+    expect(spec.securityContext).toEqual({
       runAsNonRoot: true,
       runAsUser: 1000,
+      runAsGroup: 1000,
+      fsGroup: 1000,
+      // kobe-agent, then the 16 Pi identities' groups (2000-2015).
+      supplementalGroups: [1001, ...Array.from({ length: 16 }, (_, i) => 2000 + i)],
       seccompProfile: { type: "RuntimeDefault" },
     });
     expect(must(spec.containers[0]).securityContext).toEqual({
-      allowPrivilegeEscalation: false,
+      allowPrivilegeEscalation: true,
       readOnlyRootFilesystem: true,
-      capabilities: { drop: ["ALL"] },
+      capabilities: { drop: ["ALL"], add: ["SETUID", "SETGID"] },
+    });
+    // The bootstrap token sits under the image's agent-only directory.
+    expect(must(spec.containers[0]).volumeMounts).toContainEqual({
+      name: "kobe-bootstrap",
+      mountPath: "/run/kobe-agent/bootstrap",
+      readOnly: true,
     });
     expect(must(spec.containers[0]).resources).toEqual({
       requests: { cpu: "500m", memory: "1Gi", "ephemeral-storage": "1Gi" },
       limits: { cpu: "2", memory: "4Gi", "ephemeral-storage": "4Gi" },
     });
     expect(spec.volumes).toContainEqual({ name: "tmp", emptyDir: { sizeLimit: "2Gi" } });
+    // Pi runtime dirs on a sticky (memory-backed) volume no Pi identity can rename in (KOBE-71).
+    expect(spec.volumes).toContainEqual({
+      name: "pi-runtime",
+      emptyDir: { medium: "Memory", sizeLimit: "64Mi" },
+    });
+    expect(must(spec.containers[0]).volumeMounts).toContainEqual({
+      name: "pi-runtime",
+      mountPath: "/run/kobe-pi",
+    });
   });
 });
 

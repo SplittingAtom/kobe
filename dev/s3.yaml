@@ -1,0 +1,83 @@
+# Dev/e2e only, k3d only (Tilt and e2e/run.sh refuse other contexts): an S3-compatible object store
+# standing in for "external S3" (spec D4), for workspace sync (KOBE-27) and later uploads and
+# artifacts. SeaweedFS (Apache-2.0) — not MinIO, which is AGPL. Never part of the chart. Data is
+# an emptyDir: thrown away with the pod. Applied after dev/postgres.yaml (kobe-deps namespace; the
+# kobe-dev-s3 Secret there holds the matching dev credentials).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: s3-config
+  namespace: kobe-deps
+data:
+  # Throwaway dev credentials (dev/postgres.yaml: kobe-dev-s3).
+  s3.json: |
+    {"identities":[{"name":"kobe","credentials":[{"accessKey":"dev","secretKey":"dev"}],
+      "actions":["Admin","Read","Write","List","Tagging"]}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: s3
+  namespace: kobe-deps
+spec:
+  selector:
+    matchLabels: { app: s3 }
+  template:
+    metadata:
+      labels: { app: s3 }
+    spec:
+      containers:
+        - name: s3
+          image: chrislusf/seaweedfs:4.48
+          # The image's entrypoint drops to its own user. The bucket is created once the master
+          # answers; readiness waits for it.
+          command:
+            - sh
+            - -c
+            - |
+              /entrypoint.sh server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/kobe-s3/s3.json &
+              server=$!
+              until echo "s3.bucket.create -name kobe" | weed shell -master=localhost:9333 2>&1 \
+                | grep -q "created bucket"; do sleep 1; done
+              touch /tmp/bucket-ready
+              wait "$server"
+          ports:
+            - containerPort: 8333
+          readinessProbe:
+            exec: { command: [test, -f, /tmp/bucket-ready] }
+            periodSeconds: 2
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: config, mountPath: /etc/kobe-s3 }
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: config
+          configMap: { name: s3-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: s3
+  namespace: kobe-deps
+spec:
+  selector: { app: s3 }
+  ports:
+    - port: 8333
+---
+# Only the dev release namespace may reach it (its credentials are public). Sandboxes never do:
+# the server brokers every workspace transfer.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: s3
+  namespace: kobe-deps
+spec:
+  podSelector:
+    matchLabels: { app: s3 }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kobe-dev }
+        - podSelector: {}

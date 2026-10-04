@@ -15,7 +15,14 @@ import {
   LIMIT_RANGE,
   MANAGED_BY,
   NETWORK_POLICY,
+  PI_IDENTITIES,
+  PI_IDENTITY_BASE,
+  PI_RUNAS_HELPER,
+  PI_RUNTIME_DIR,
+  PI_RUNTIME_SIZE,
   POD_SECURITY_LEVEL,
+  SANDBOX_AGENT_GID,
+  SANDBOX_CAPABILITIES,
   RESOURCE_QUOTA,
   SANDBOX_CONTAINER,
   SANDBOX_HOSTS,
@@ -38,6 +45,8 @@ export interface KubeMetadata {
   readonly name: string;
   readonly namespace?: string;
   readonly uid?: string;
+  /** Optimistic concurrency token (a merge patch carrying it fails with 409 if it changed). */
+  readonly resourceVersion?: string;
   readonly labels?: Readonly<Record<string, string>>;
   readonly annotations?: Readonly<Record<string, string>>;
   readonly creationTimestamp?: string;
@@ -106,6 +115,12 @@ export function namespaceManifest(team: TeamRef): KubeObject {
         // Pod Security Admission: sandboxes are non-root, no privilege escalation, no capabilities.
         "pod-security.kubernetes.io/enforce": POD_SECURITY_LEVEL,
         "pod-security.kubernetes.io/enforce-version": "latest",
+        // KOBE-71: enforced "baseline" (SETUID/SETGID for Pi identities); everything beyond that is
+        // still reported against "restricted" (and Kobe's admission policy enforces the rest).
+        "pod-security.kubernetes.io/warn": "restricted",
+        "pod-security.kubernetes.io/warn-version": "latest",
+        "pod-security.kubernetes.io/audit": "restricted",
+        "pod-security.kubernetes.io/audit-version": "latest",
       },
     },
   };
@@ -128,7 +143,7 @@ export function serverRoleBindingManifest(namespace: string, s: SandboxSettings)
   };
 }
 
-/** Kobe services sandboxes may open connections to (the model gateway only once it verifies tokens). */
+/** Kobe services sandboxes may open connections to (the model gateway only with modelGatewayAccess). */
 export const sandboxEgressEndpoints = (s: SandboxSettings): KobeEndpoint[] =>
   KOBE_ENDPOINTS.filter((e) => e !== "modelGateway" || s.modelGatewayAccess);
 
@@ -239,6 +254,10 @@ function sandboxEnv(s: SandboxSettings): { name: string; value: string }[] {
     { name: "KOBE_MCP_PROXY_URL", value: url("http", SANDBOX_HOSTS.mcpProxy, e.mcpProxy.port, 80) },
     { name: "KOBE_EGRESS_PROXY_URL", value: egress },
     { name: "KOBE_BOOTSTRAP_TOKEN_FILE", value: BOOTSTRAP_TOKEN_FILE },
+    // KOBE-71: every Pi process (and the tools it runs) under a uid of its own; the agent refuses
+    // to start when it cannot do that.
+    { name: "KOBE_PI_RUNAS", value: PI_RUNAS_HELPER },
+    { name: "KOBE_PI_RUNTIME_DIR", value: PI_RUNTIME_DIR },
     { name: "HTTP_PROXY", value: egress },
     { name: "HTTPS_PROXY", value: egress },
     { name: "http_proxy", value: egress },
@@ -246,6 +265,11 @@ function sandboxEnv(s: SandboxSettings): { name: string; value: string }[] {
     { name: "NO_PROXY", value: noProxy },
     { name: "no_proxy", value: noProxy },
     { name: "HOME", value: "/home/kobe" },
+    // KOBE-27: how often the agent pushes /workspace changes (through the server); 0 = sync off.
+    {
+      name: "KOBE_WORKSPACE_SYNC_INTERVAL_MS",
+      value: String(s.workspaceSync.enabled ? s.workspaceSync.pushIntervalSeconds * 1000 : 0),
+    },
   ];
 }
 
@@ -282,6 +306,12 @@ export function sandboxPodSpec(
       runAsUser: SANDBOX_UID,
       runAsGroup: SANDBOX_UID,
       fsGroup: SANDBOX_UID,
+      // KOBE-71: `kobe-agent` (may run kobe-runas) and the Pi identities' groups, so the agent
+      // can hand each Pi a runtime directory only that Pi's group reads.
+      supplementalGroups: [
+        SANDBOX_AGENT_GID,
+        ...Array.from({ length: PI_IDENTITIES }, (_, i) => PI_IDENTITY_BASE + i),
+      ],
       seccompProfile: { type: "RuntimeDefault" },
     },
     containers: [
@@ -294,14 +324,19 @@ export function sandboxPodSpec(
           requests: { ...s.resources.requests, "ephemeral-storage": s.ephemeralStorage.request },
           limits: { ...s.resources.limits, "ephemeral-storage": s.ephemeralStorage.limit },
         },
+        // KOBE-71: SETUID/SETGID and privilege escalation only so the agent can start Pi through
+        // kobe-runas (file capabilities, executable by the agent's group only); Pi and everything
+        // it starts run with no capabilities and no_new_privs. Under gVisor these capabilities
+        // exist in the sandbox kernel only, never on the host.
         securityContext: {
-          allowPrivilegeEscalation: false,
+          allowPrivilegeEscalation: true,
           readOnlyRootFilesystem: true,
-          capabilities: { drop: ["ALL"] },
+          capabilities: { drop: ["ALL"], add: [...SANDBOX_CAPABILITIES] },
         },
         volumeMounts: [
           { name: "workspace", mountPath: "/workspace" },
           { name: "tmp", mountPath: "/tmp" },
+          { name: "pi-runtime", mountPath: PI_RUNTIME_DIR },
           { name: "home", mountPath: "/home/kobe" },
           { name: "kobe-bootstrap", mountPath: BOOTSTRAP_TOKEN_DIR, readOnly: true },
         ],
@@ -311,6 +346,8 @@ export function sandboxPodSpec(
       // /tmp is wiped on hibernate (D12); so is $HOME (Pi state is rebuilt from Postgres, D13).
       { name: "tmp", emptyDir: { sizeLimit: s.tmpSize } },
       { name: "home", emptyDir: { sizeLimit: s.homeSize } },
+      // KOBE-71: Pi's private runtime directories (sticky root, see PI_RUNTIME_DIR).
+      { name: "pi-runtime", emptyDir: { medium: "Memory", sizeLimit: PI_RUNTIME_SIZE } },
       {
         name: "kobe-bootstrap",
         projected: {

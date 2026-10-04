@@ -17,7 +17,8 @@
     "license:check": "turbo run license:check",
     "images:check": "scripts/check-images.sh",
     "test:db": "turbo run test:db",
-    "db:check": "pnpm --filter @kobe/db run db:check"
+    "db:check": "pnpm --filter @kobe/db run db:check",
+    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm format:check && pnpm license:check && scripts/check-public-hygiene.sh"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

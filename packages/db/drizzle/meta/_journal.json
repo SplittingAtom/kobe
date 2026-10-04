@@ -197,6 +197,146 @@
       "when": 1791034202129,
       "tag": "0027_egress_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1791036938752,
+      "tag": "0028_sandboxes",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1791036939056,
+      "tag": "0029_sandboxes_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1791051577892,
+      "tag": "0030_approvals",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1791051578466,
+      "tag": "0031_approvals_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1791060236862,
+      "tag": "0032_legal_hold",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1791060237200,
+      "tag": "0033_legal_hold_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1791060237532,
+      "tag": "0034_audit_pii_commitments",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1791064635912,
+      "tag": "0035_workspace_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1791064636310,
+      "tag": "0036_workspace_sync_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1791068065487,
+      "tag": "0037_connectors",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1791068065850,
+      "tag": "0038_connectors_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1791073643905,
+      "tag": "0039_models",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1791073644280,
+      "tag": "0040_models_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1791111448511,
+      "tag": "0041_retention",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1791111449043,
+      "tag": "0042_retention_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1791114653074,
+      "tag": "0043_thread_model",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1791119466619,
+      "tag": "0044_run_usage",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1791119467033,
+      "tag": "0045_run_usage_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1791122417095,
+      "tag": "0046_budgets",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1791122417474,
+      "tag": "0047_budgets_rls",
+      "breakpoints": true
     }
   ]
 }

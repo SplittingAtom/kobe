@@ -1,7 +1,7 @@
 /**
  * assistant-ui `RemoteThreadListAdapter` over the Thread API (D16, KOBE-34). Trash is the list's
  * "archived" state: archive = move to Trash (`DELETE`, restorable for 30 days), unarchive =
- * restore. There is no hard delete from the UI (the purge is KOBE-18's). Titles are the first line
+ * restore; delete = "Delete forever" from Trash (KOBE-18, the owner only). Titles are the first line
  * of the first message, set when the thread is created; there is no model-generated title.
  */
 import type { RemoteThreadListAdapter } from "@assistant-ui/react";
@@ -77,18 +77,14 @@ export function createThreadListAdapter(
       await unwrap(api.restoreThread(remoteId));
     },
 
-    async delete() {
-      const error: ApiError = {
-        status: 409,
-        code: "trash_only",
-        message: "Threads go to Trash and are removed for good after 30 days.",
-      };
-      onError(error);
-      throw new ChatApiError(error);
+    async delete(remoteId) {
+      await unwrap(api.purgeThread(remoteId));
     },
 
     async initialize() {
-      const created = await unwrap(api.createThread(session.takeNextTitle()));
+      const created = await unwrap(
+        api.createThread(session.takeNextTitle(), session.takeNextModel()),
+      );
       session.seed(created);
       return { remoteId: created.threadId, externalId: undefined };
     },

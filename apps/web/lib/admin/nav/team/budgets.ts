@@ -1,4 +1,4 @@
-import { comingIn, defineTeamSection } from "../types";
+import { READY, defineTeamSection } from "../types";
 
 export default defineTeamSection({
   id: "budgets",
@@ -6,6 +6,7 @@ export default defineTeamSection({
   description: "Monthly and daily dollar budgets for the team and its members.",
   group: "Models and spend",
   order: 20,
+  // GET /v1/team/budgets (KOBE-42).
   permission: "team.budgets.manage",
-  status: comingIn("KOBE-42"),
+  status: READY,
 });

@@ -18,6 +18,8 @@ export interface Harness {
   readonly mailer: MemoryMailer;
   /** Superuser connection for assertions and test-only setup (bypasses RLS). */
   readonly admin: pg.Client;
+  /** App-role URL of the test database (LISTEN connections). */
+  readonly appUrl: string;
   browser(): TestBrowser;
   /** Creates a user with PASSWORD (and an optional install role) and returns its id. */
   createUser(email: string, installRole?: "owner" | "admin"): Promise<string>;
@@ -27,7 +29,7 @@ export interface Harness {
 }
 
 export async function openHarness(
-  options: Pick<ServerDepsOptions, "agents"> = {},
+  options: Pick<ServerDepsOptions, "agents" | "models" | "blobs"> = {},
 ): Promise<Harness> {
   const database = await createTestDatabase(testServerUrl());
   // A single client: unlike Pool#end, Client#end resolves only once the connection is closed.
@@ -52,6 +54,7 @@ export async function openHarness(
     app,
     mailer,
     admin,
+    appUrl: database.appUrl,
     browser,
     async createUser(email, installRole) {
       const user = await deps.createUserWithPassword(

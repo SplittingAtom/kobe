@@ -2,8 +2,8 @@ import { ALL_PRIVILEGES, defineDomain } from "./types.js";
 
 /** Policy, Approvals & Egress (KOBE-35–39). */
 export const policy = defineDomain({
-  // Team and user tool rules (KOBE-35); team egress enablement (KOBE-38).
-  team: ["tool_rules", "team_egress"],
+  // Team and user tool rules (KOBE-35); team egress enablement (KOBE-38); approvals (KOBE-37).
+  team: ["tool_rules", "team_egress", "approvals"],
   installWide: ["egress_domains", "install_tool_rules"],
   grants: {
     // The install policy floor (KOBE-35): rules only, no team data, no cascades into teams.

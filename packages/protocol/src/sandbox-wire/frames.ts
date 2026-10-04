@@ -182,9 +182,39 @@ export const helloAckFrameSchema = frame("hello.ack", {
  * (Helm), and the agent builds `<KOBE_MCP_PROXY_URL>/v1/mcp/<connector_id>` itself, so a server bug
  * or a forged frame cannot point Pi at an arbitrary endpoint.
  */
+/**
+ * API styles Pi 1.0.x speaks to the model gateway (KOBE-41), by the catalog provider's kind:
+ * OpenAI, Ollama and OpenAI-compatible endpoints → `openai-completions` (`<gateway>/v1`),
+ * Anthropic → `anthropic-messages` (`<gateway>/anthropic`), Gemini → `google-generative-ai`
+ * (`<gateway>/genai/v1beta`). The agent builds the base URL from its own environment.
+ */
+export const PI_MODEL_APIS = [
+  "openai-completions",
+  "anthropic-messages",
+  "google-generative-ai",
+] as const;
+export const piModelApiSchema = z.enum(PI_MODEL_APIS);
+export type PiModelApi = z.infer<typeof piModelApiSchema>;
+
+/** `<gateway provider>/<model>` as the model gateway names models (KOBE-40 `gateway_model`). */
+export const gatewayModelSchema = z
+  .string()
+  .max(256)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._:/-]*$/);
+
 export const piThreadConfigSchema = z.strictObject({
-  /** Model alias from the team catalog, served by the Bifrost gateway (D30). */
-  model: z.strictObject({ alias: z.string().min(1).max(128) }).optional(),
+  /**
+   * The run's model (D30): the catalog alias plus, resolved by the server from the catalog
+   * (KOBE-41), the gateway's model id and API style. Without `gateway_model` the sandbox has no
+   * model to offer Pi (the run fails `model_not_configured`).
+   */
+  model: z
+    .strictObject({
+      alias: z.string().min(1).max(128),
+      gateway_model: gatewayModelSchema.optional(),
+      api: piModelApiSchema.optional(),
+    })
+    .optional(),
   thinking_level: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
   agent: z
     .strictObject({ agent_id: uuidSchema, version: z.number().int().positive() })

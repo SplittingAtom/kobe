@@ -22,7 +22,7 @@ describe("console overview", () => {
       "/admin/install/users",
     );
     const models = screen.getByRole("region", { name: "Models and connectors" });
-    expect(models.textContent).toMatch(/Coming in KOBE-44/);
+    expect(models.textContent).toMatch(/Coming in KOBE-59/);
   });
 
   it("lists only the team sections the role covers", () => {
@@ -40,9 +40,9 @@ describe("console overview", () => {
 
 describe("section placeholder", () => {
   it("names the ticket that builds it", () => {
-    render(<SectionPlaceholder section={must(findSection("install", "legal-hold"))} />);
-    expect(screen.getByRole("heading", { name: "Legal hold" })).toBeTruthy();
-    expect(screen.getByRole("note").textContent).toBe("Coming in KOBE-17.");
+    render(<SectionPlaceholder section={must(findSection("install", "connectors"))} />);
+    expect(screen.getByRole("heading", { name: "Connector registry" })).toBeTruthy();
+    expect(screen.getByRole("note").textContent).toBe("Coming in KOBE-59.");
   });
 });
 

@@ -86,7 +86,7 @@ const podSpecs = (ms: Manifest[]) =>
 describe("workloads", () => {
   const ms = render();
 
-  it("deploys web, server, mcp-proxy, egress-proxy, scheduler and Bifrost", () => {
+  it("deploys web, server, mcp-proxy, egress-proxy, model-gateway, scheduler and Bifrost", () => {
     expect(
       byKind(ms, "Deployment")
         .map((d) => d.metadata.name)
@@ -96,6 +96,7 @@ describe("workloads", () => {
         "kobe-bifrost",
         "kobe-egress-proxy",
         "kobe-mcp-proxy",
+        "kobe-model-gateway",
         "kobe-scheduler",
         "kobe-server",
         "kobe-web",
@@ -443,34 +444,9 @@ describe("network policies", () => {
   const ms = render({ "postgres.mode": "cnpg", "clamav.enabled": "true" });
   const policy = (name: string) => find(ms, "NetworkPolicy", name);
 
-  it("lets only pods in the release namespace reach Bifrost (provider keys) and ClamAV", () => {
-    for (const name of ["kobe-bifrost", "kobe-clamav"]) {
-      expect(policy(name)?.spec.policyTypes, name).toEqual(["Ingress"]);
-      expect(policy(name)?.spec.ingress[0], name).toEqual({ from: [{ podSelector: {} }] });
-    }
-    expect(policy("kobe-clamav")?.spec.ingress).toHaveLength(1);
-  });
-
-  it("admits sandboxes to Bifrost only with sandbox.modelGatewayAccess (KOBE-22/40)", () => {
-    expect(policy("kobe-bifrost")?.spec.ingress).toEqual([{ from: [{ podSelector: {} }] }]);
-    const open = find(
-      render({ "sandbox.modelGatewayAccess": "true" }),
-      "NetworkPolicy",
-      "kobe-bifrost",
-    );
-    expect(open?.spec.ingress).toEqual([
-      { from: [{ podSelector: {} }] },
-      {
-        from: [
-          {
-            namespaceSelector: {
-              matchLabels: { "kobe.splittingatom.io/team-namespace": "true" },
-            },
-          },
-        ],
-        ports: [{ protocol: "TCP", port: 8080 }],
-      },
-    ]);
+  it("lets only pods in the release namespace reach ClamAV (Bifrost: tests/models.test.ts)", () => {
+    expect(policy("kobe-clamav")?.spec.policyTypes).toEqual(["Ingress"]);
+    expect(policy("kobe-clamav")?.spec.ingress).toEqual([{ from: [{ podSelector: {} }] }]);
   });
 
   it("lets only the release namespace and the CloudNativePG operator reach Postgres", () => {
@@ -581,6 +557,8 @@ describe("auth (KOBE-12)", () => {
     const ms = render({
       "auth.existingSecret": "my-auth",
       "sandbox.sessionKeysSecret": "my-keys",
+      "bifrost.keysSecret": "my-model-keys",
+      "mcpProxy.internalKeySecret": "my-mcp-key",
       "global.allowGeneratedSecretsOffline": "false",
     });
     expect(find(ms, "Secret", "kobe-auth")).toBeUndefined();
@@ -595,6 +573,8 @@ describe("auth (KOBE-12)", () => {
       renderError({
         "global.allowGeneratedSecretsOffline": "false",
         "sandbox.sessionKeysSecret": "my-keys",
+        "bifrost.keysSecret": "my-model-keys",
+        "mcpProxy.internalKeySecret": "my-mcp-key",
       }),
     ).toMatch(/auth\.existingSecret/);
     expect(
@@ -602,6 +582,8 @@ describe("auth (KOBE-12)", () => {
         "global.allowGeneratedSecretsOffline": "false",
         "auth.existingSecret": "my-auth",
         "sandbox.sessionKeysSecret": "my-keys",
+        "bifrost.keysSecret": "my-model-keys",
+        "mcpProxy.internalKeySecret": "my-mcp-key",
         "postgres.mode": "cnpg",
       }),
     ).toMatch(/postgres\.cnpg\.existingAppSecret/);
@@ -609,8 +591,26 @@ describe("auth (KOBE-12)", () => {
       renderError({
         "global.allowGeneratedSecretsOffline": "false",
         "auth.existingSecret": "my-auth",
+        "bifrost.keysSecret": "my-model-keys",
+        "mcpProxy.internalKeySecret": "my-mcp-key",
       }),
     ).toMatch(/sandbox\.sessionKeysSecret/);
+    expect(
+      renderError({
+        "global.allowGeneratedSecretsOffline": "false",
+        "auth.existingSecret": "my-auth",
+        "sandbox.sessionKeysSecret": "my-keys",
+        "mcpProxy.internalKeySecret": "my-mcp-key",
+      }),
+    ).toMatch(/bifrost\.keysSecret/);
+    expect(
+      renderError({
+        "global.allowGeneratedSecretsOffline": "false",
+        "auth.existingSecret": "my-auth",
+        "sandbox.sessionKeysSecret": "my-keys",
+        "bifrost.keysSecret": "my-model-keys",
+      }),
+    ).toMatch(/mcpProxy\.internalKeySecret/);
   });
 });
 

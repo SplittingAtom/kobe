@@ -9,6 +9,7 @@ import {
 import { LineSplitter, encodeJsonl } from "../jsonl.js";
 import { parsePiRecord, sanitizeString } from "../sanitize.js";
 import { descendantPids, killPids } from "./descendants.js";
+import type { PiIdentities, PiIdentity } from "./identities.js";
 
 /**
  * One `pi --mode rpc` child process (verified Pi 1.0.0 RPC semantics, packages/protocol pi-rpc.ts):
@@ -17,7 +18,9 @@ import { descendantPids, killPids } from "./descendants.js";
  * extension (see policy/channel.ts for what tools can and cannot reach); nothing listens anywhere.
  *
  * The child runs in its own process group. Pi starts its tools in their own groups too, so a stop
- * also kills Pi's descendants found through /proc (best effort, see descendants.ts).
+ * also kills Pi's descendants: under a Pi identity (KOBE-71) every process of its uid (exact:
+ * nothing else runs as that uid), otherwise those found through /proc (best effort, see
+ * descendants.ts).
  */
 export const STDERR_TAIL_CHARS = 8192;
 export const PI_MAX_LINE_BYTES = 32 * 1024 * 1024;
@@ -41,6 +44,11 @@ export interface PiProcessOptions {
   readonly onExit: (exit: PiExit) => void;
   readonly onDiagnostic?: (message: string) => void;
   readonly maxLineBytes?: number;
+  /**
+   * Start Pi as this identity through the helper (KOBE-71). The agent cannot signal a process of
+   * another uid, so stopping goes through the helper too.
+   */
+  readonly runAs?: { readonly identities: PiIdentities; readonly identity: PiIdentity };
 }
 
 interface Pending {
@@ -69,7 +77,15 @@ export class PiProcess {
 
   constructor(options: PiProcessOptions) {
     this.#options = options;
-    this.#child = spawn(options.bin, [...options.args], {
+    const runAs = options.runAs;
+    const [file, args] =
+      runAs === undefined
+        ? [options.bin, [...options.args]]
+        : [
+            runAs.identities.helper,
+            [...runAs.identities.command(runAs.identity, options.bin, options.args, options.env)],
+          ];
+    this.#child = spawn(file, args, {
       cwd: options.cwd,
       env: { ...options.env },
       stdio: ["pipe", "pipe", "pipe", "pipe"],
@@ -150,6 +166,8 @@ export class PiProcess {
    */
   async close(graceMs = 3000): Promise<PiExit> {
     if (this.#exit !== undefined) return this.#exit;
+    const runAs = this.#options.runAs;
+    if (runAs !== undefined) return this.#closeAs(runAs.identities, runAs.identity, graceMs);
     // Tools Pi started in their own process groups escape the group signal: note them while Pi is
     // alive (afterwards they are re-parented and unattributable) and kill whatever is left.
     const tools = new Set(this.#descendants());
@@ -165,9 +183,35 @@ export class PiProcess {
     return exit;
   }
 
+  /**
+   * Under a Pi identity: close stdin, SIGTERM Pi's group, then SIGKILL every process of the uid
+   * (Pi and all its tools, whatever group they moved to).
+   */
+  async #closeAs(identities: PiIdentities, identity: PiIdentity, graceMs: number): Promise<PiExit> {
+    this.#child.stdin?.end();
+    const pid = this.#child.pid;
+    if (!(await this.#waitExit(graceMs)) && pid !== undefined) {
+      await identities.signalGroup(identity, pid, "TERM");
+      await this.#waitExit(2000);
+    }
+    await identities.killAll(identity).catch((error: unknown) => {
+      this.#options.onDiagnostic?.(`stopping Pi: ${(error as Error).message}`);
+    });
+    if (await this.#waitExit(5000)) return this.#exited;
+    // The helper could not stop it: report it gone from the agent's side; its identity stays in
+    // use (never handed to another thread) because the exit handler that reclaims it never runs.
+    this.#options.onDiagnostic?.("Pi did not exit after kill-all; its identity stays reserved");
+    return { exitCode: null, signal: null, stderrTail: this.#stderrTail };
+  }
+
   /** Synchronous last resort (agent exit). */
   kill(): void {
     if (this.#exit !== undefined) return;
+    const runAs = this.#options.runAs;
+    if (runAs !== undefined) {
+      runAs.identities.killAllSync(runAs.identity);
+      return;
+    }
     const tools = this.#descendants();
     this.#signalGroup("SIGKILL");
     killPids(tools);

@@ -13,7 +13,7 @@ import type { KubeMetadata, KubeObject } from "../sandbox/manifests.js";
  * and an optional agent-sandbox controller simulation (claims → Sandbox → Pod).
  */
 
-type Verb = "apply" | "create" | "get" | "list" | "delete";
+type Verb = "apply" | "create" | "get" | "list" | "delete" | "patch";
 export interface Call {
   readonly verb: Verb;
   readonly kind: string;
@@ -26,6 +26,21 @@ const key = (r: { apiVersion: string; kind: string; name: string; namespace?: st
 
 const clone = <T>(v: T): T => structuredClone(v);
 
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** RFC 7386 JSON merge patch: objects merge recursively, null removes, anything else replaces. */
+export function applyMergePatch(target: unknown, patch: unknown): unknown {
+  if (!isPlainObject(patch)) return clone(patch);
+  const base: Record<string, unknown> = isPlainObject(target) ? clone(target) : {};
+  const removed = new Set(Object.keys(patch).filter((k) => patch[k] === null));
+  const kept = Object.entries(base).filter(([k]) => !removed.has(k));
+  const merged = Object.entries(patch)
+    .filter(([, v]) => v !== null)
+    .map(([k, v]) => [k, applyMergePatch(base[k], v)] as const);
+  return Object.fromEntries([...kept, ...merged]);
+}
+
 export interface FakeKube extends KubeClient {
   readonly calls: Call[];
   readonly tokens: Map<string, TokenReviewResult>;
@@ -34,26 +49,36 @@ export interface FakeKube extends KubeClient {
   peek(ref: ObjectRef): KubeObject | undefined;
   all(kind?: string): KubeObject[];
   /** The next matching call throws KubeApiError(status). */
-  failNext(verb: Verb, kind: string, status: number, times?: number): void;
+  failNext(verb: Verb, kind: string, status: number, times?: number, message?: string): void;
   /** Called after every apply/create (e.g. to simulate a controller). */
   afterWrite?: (object: KubeObject, fake: FakeKube) => void;
   /** Answers a dry-run create (default: the admission policy denies out-of-prefix namespaces). */
   dryRun?: (object: KubeObject) => KubeObject;
+  /** Set by simulateAgentSandbox: ends the grace period of terminating pods. */
+  finishTermination?: () => void;
   /** Called on every get (e.g. to make a controller act lazily). */
   beforeGet?: (ref: ObjectRef, fake: FakeKube) => void;
 }
 
 export function createFakeKube(): FakeKube {
   const store = new Map<string, KubeObject>();
-  const failures: { verb: Verb; kind: string; status: number; times: number }[] = [];
+  const failures: {
+    verb: Verb;
+    kind: string;
+    status: number;
+    times: number;
+    message?: string;
+  }[] = [];
   /** Seconds since the epoch for creationTimestamps: strictly increasing in creation order. */
   let fakeClock = 1_790_000_000;
+  /** resourceVersion: bumped on every write, like the API server's. */
+  let revision = 1;
 
   const maybeFail = (verb: Verb, kind: string) => {
     const f = failures.find((x) => x.verb === verb && x.kind === kind && x.times > 0);
     if (f) {
       f.times--;
-      throw new KubeApiError(f.status, `injected ${f.status} on ${verb} ${kind}`);
+      throw new KubeApiError(f.status, f.message ?? `injected ${f.status} on ${verb} ${kind}`);
     }
   };
 
@@ -65,6 +90,7 @@ export function createFakeKube(): FakeKube {
         existing?.metadata.creationTimestamp ??
         object.metadata.creationTimestamp ??
         new Date(fakeClock++ * 1000).toISOString(),
+      resourceVersion: String(revision++),
     };
     const stored = clone({ ...object, metadata });
     store.set(key({ ...object, ...object.metadata }), stored);
@@ -89,8 +115,8 @@ export function createFakeKube(): FakeKube {
       return obj && clone(obj);
     },
     all: (kind) => [...store.values()].filter((o) => !kind || o.kind === kind).map(clone),
-    failNext(verb, kind, status, times = 1) {
-      failures.push({ verb, kind, status, times });
+    failNext(verb, kind, status, times = 1, message) {
+      failures.push({ verb, kind, status, times, ...(message === undefined ? {} : { message }) });
     },
     async apply(object) {
       fake.calls.push({ verb: "apply", kind: object.kind, ...object.metadata });
@@ -142,6 +168,22 @@ export function createFakeKube(): FakeKube {
         )
         .map(clone);
     },
+    async patch(r, body, options) {
+      fake.calls.push({ verb: "patch", ...r });
+      maybeFail("patch", r.kind);
+      const existing = store.get(key(r));
+      if (!existing) throw new KubeApiError(404, `${r.kind} ${r.name} not found`);
+      if (
+        options?.resourceVersion !== undefined &&
+        options.resourceVersion !== existing.metadata.resourceVersion
+      ) {
+        throw new KubeApiError(409, `${r.kind} ${r.name}: the object has been modified`);
+      }
+      const merged = applyMergePatch(existing, body) as KubeObject;
+      const result = put({ ...merged, metadata: existing.metadata }, existing);
+      fake.afterWrite?.(result, fake);
+      return result;
+    },
     async delete(r) {
       fake.calls.push({ verb: "delete", ...r });
       maybeFail("delete", r.kind);
@@ -164,6 +206,8 @@ export interface ControllerOptions {
   readonly delayGets?: number;
   /** Never creates pods (capacity/quota exhaustion). */
   readonly noPods?: boolean;
+  /** Suspending leaves the pod terminating until `fake.finishTermination()` (grace period). */
+  readonly slowPodTermination?: boolean;
 }
 
 /**
@@ -201,8 +245,15 @@ export function simulateAgentSandbox(fake: FakeKube, options: ControllerOptions 
       spec: { podTemplate: clone(tspec.podTemplate), operatingMode: "Running" },
     });
     fake.seed({ ...claim, status: { sandbox: { name: sandbox.metadata.name } } });
+    startPod(sandbox, claim);
+  };
+  /** The Sandbox controller: a pod from the Sandbox's own podTemplate (named after it). */
+  const startPod = (sandbox: KubeObject, claim: KubeObject) => {
     if (options.noPods) return;
-    const templateClass = tspec.podTemplate.spec.runtimeClassName as string | undefined;
+    const ns = sandbox.metadata.namespace as string;
+    const podSpec = (sandbox.spec as { podTemplate: { spec: Record<string, unknown> } }).podTemplate
+      .spec;
+    const templateClass = podSpec.runtimeClassName as string | undefined;
     const runtimeClassName = options.podRuntimeClass
       ? options.podRuntimeClass(templateClass)
       : templateClass;
@@ -227,10 +278,59 @@ export function simulateAgentSandbox(fake: FakeKube, options: ControllerOptions 
           },
         ],
       },
-      spec: { ...tspec.podTemplate.spec, runtimeClassName },
+      spec: { ...podSpec, runtimeClassName },
     });
   };
+  /** operatingMode: Suspended deletes the owned pod, Running starts one if there is none. */
+  const reconcileSandbox = (sandbox: KubeObject) => {
+    const ns = sandbox.metadata.namespace as string;
+    const podRef = { apiVersion: "v1", kind: "Pod", name: sandbox.metadata.name, namespace: ns };
+    const pod = fake.peek(podRef);
+    const owned = pod?.metadata.ownerReferences?.some((o) => o.uid === sandbox.metadata.uid);
+    const mode = (sandbox.spec as { operatingMode?: string }).operatingMode;
+    if (mode === "Suspended") {
+      if (pod && owned) {
+        if (options.slowPodTermination) {
+          fake.seed({
+            ...pod,
+            metadata: { ...pod.metadata, deletionTimestamp: new Date().toISOString() },
+          });
+        } else void fake.delete(podRef);
+      }
+      return;
+    }
+    if (pod) return;
+    const owner = sandbox.metadata.ownerReferences?.find((o) => o.kind === "SandboxClaim");
+    const claim = owner
+      ? fake.peek({
+          apiVersion: "extensions.agents.x-k8s.io/v1beta1",
+          kind: "SandboxClaim",
+          name: owner.name,
+          namespace: ns,
+        })
+      : undefined;
+    if (claim) startPod(sandbox, claim);
+  };
+  /** Finishes terminating pods (slowPodTermination): the controller then starts a new one. */
+  fake.finishTermination = () => {
+    for (const pod of fake.all("Pod")) {
+      if (!pod.metadata.deletionTimestamp) continue;
+      const ns = pod.metadata.namespace as string;
+      void fake.delete({ apiVersion: "v1", kind: "Pod", name: pod.metadata.name, namespace: ns });
+      const sandbox = fake.peek({
+        apiVersion: "agents.x-k8s.io/v1beta1",
+        kind: "Sandbox",
+        name: pod.metadata.name,
+        namespace: ns,
+      });
+      if (sandbox) reconcileSandbox(sandbox);
+    }
+  };
   fake.afterWrite = (object) => {
+    if (object.kind === "Sandbox") {
+      reconcileSandbox(object);
+      return;
+    }
     if (object.kind !== "SandboxClaim") return;
     if (options.delayGets) pendingGets.set(object.metadata.uid as string, options.delayGets);
     else reconcile(object);

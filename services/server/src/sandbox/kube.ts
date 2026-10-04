@@ -40,6 +40,15 @@ export interface KubeClient {
     namespace?: string,
     labelSelector?: string,
   ): Promise<KubeObject[]>;
+  /**
+   * JSON merge patch (RFC 7386) of an existing object. With `resourceVersion` the API server
+   * refuses the patch (KubeApiError 409) if the object changed since it was read.
+   */
+  patch(
+    ref: ObjectRef,
+    patch: Readonly<Record<string, unknown>>,
+    options?: { readonly resourceVersion?: string },
+  ): Promise<KubeObject>;
   /** Deletes with background propagation; a missing object is not an error. */
   delete(ref: ObjectRef): Promise<void>;
   reviewToken(token: string, audiences: readonly string[]): Promise<TokenReviewResult>;
@@ -179,6 +188,29 @@ export function createKubeClient(timeoutMs = KUBE_API_TIMEOUT_MS): KubeClient {
       );
       return result.items.map(plain);
     },
+    patch: async (ref, body, options) =>
+      plain(
+        await call(`patch ${describe(ref)}`, () => {
+          const head = header(ref);
+          const object = {
+            ...body,
+            apiVersion: head.apiVersion,
+            kind: head.kind,
+            metadata: {
+              ...head.metadata,
+              ...(options?.resourceVersion ? { resourceVersion: options.resourceVersion } : {}),
+            },
+          };
+          return objects.patch(
+            object as unknown as KubernetesObject,
+            undefined,
+            undefined,
+            FIELD_MANAGER,
+            undefined,
+            PatchStrategy.MergePatch,
+          );
+        }),
+      ),
     async delete(ref) {
       try {
         await call(`delete ${describe(ref)}`, () =>

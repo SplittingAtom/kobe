@@ -62,6 +62,8 @@ describe("install permission matrix (spec D8)", () => {
     ["install.users.manage", false, true, true],
     ["install.teams.manage", false, true, true],
     ["install.audit.read", false, true, true],
+    ["install.usage.read", false, true, true],
+    ["install.budgets.manage", false, true, true],
     ["install.break_glass.request", false, true, true],
     ["install.roles.manage", false, false, true],
     ["install.ownership.transfer", false, false, true],

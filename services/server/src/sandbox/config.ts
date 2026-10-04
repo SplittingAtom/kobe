@@ -8,6 +8,10 @@ import { KOBE_ENDPOINTS, type KobeEndpoint } from "./constants.js";
  * KOBE_SESSION_KEY_* (from the generated Secret). Validated at startup; invalid config fails fast.
  */
 
+/** D14: idle time before hibernation, team range 5–60 minutes. */
+export const IDLE_MINUTES_MIN = 5;
+export const IDLE_MINUTES_MAX = 60;
+
 const quantity = z
   .string()
   .regex(/^\d+(\.\d+)?(m|k|M|G|T|Ki|Mi|Gi|Ti)?$/, "must be a Kubernetes quantity (e.g. 500m, 4Gi)");
@@ -63,8 +67,8 @@ export const sandboxSettingsSchema = z.strictObject({
   /** Container ephemeral storage (logs, writable layers, /tmp and $HOME emptyDirs). */
   ephemeralStorage: z.strictObject({ request: quantity, limit: quantity }),
   /**
-   * Whether sandboxes may reach the model gateway. Off until the gateway verifies session tokens
-   * (KOBE-40/41): until then, reachable Bifrost would let any agent spend model credit.
+   * Whether sandboxes may reach the model gateway: the model-gateway shim (KOBE-40), which verifies
+   * their session tokens and forwards inference only to Bifrost. The chart's default is on.
    */
   modelGatewayAccess: z.boolean(),
   workspace: z.strictObject({ size: quantity, storageClass: z.string().max(253) }),
@@ -72,8 +76,62 @@ export const sandboxSettingsSchema = z.strictObject({
   homeSize: quantity,
   teamQuota: z.record(z.string().regex(/^[a-z][a-z.-]*$/), quantity),
   warmPool: z.strictObject({ replicasPerTeam: z.number().int().min(0).max(20) }),
+  /**
+   * D14: an awake sandbox hibernates `idleMinutes` after its last activity (teams may set
+   * `teams.settings.sandbox_idle_minutes` within 5–60). Every server replica sweeps every
+   * `sweepSeconds` (jittered); the sandbox row lock keeps them from colliding.
+   */
+  hibernation: z
+    .strictObject({
+      enabled: z.boolean(),
+      idleMinutes: z.number().int().min(IDLE_MINUTES_MIN).max(IDLE_MINUTES_MAX),
+      sweepSeconds: z.number().int().min(10).max(3600),
+    })
+    .default({ enabled: true, idleMinutes: 15, sweepSeconds: 60 }),
+  /**
+   * KOBE-27: /workspace ↔ S3 through the server. Sandboxes push changes every
+   * `pushIntervalSeconds` (and after each run, and when stopping for hibernation) and restore
+   * before their first run. Limits per workspace; `maxWorkspaceSize` defaults to the volume size.
+   * Needs object storage (`s3.*`); without it the endpoints are off and sandboxes skip sync.
+   */
+  workspaceSync: z
+    .strictObject({
+      enabled: z.boolean(),
+      pushIntervalSeconds: z.number().int().min(5).max(3600),
+      maxFileSize: quantity,
+      maxWorkspaceSize: quantity.optional(),
+      maxFiles: z.number().int().min(1).max(1_000_000),
+      collectSeconds: z.number().int().min(60).max(86_400),
+    })
+    .default({
+      enabled: true,
+      pushIntervalSeconds: 60,
+      maxFileSize: "1Gi",
+      maxFiles: 100_000,
+      collectSeconds: 3600,
+    }),
 });
 export type SandboxSettings = z.infer<typeof sandboxSettingsSchema>;
+
+const QUANTITY_FACTORS: Readonly<Record<string, number>> = {
+  "": 1,
+  m: 0.001,
+  k: 1e3,
+  M: 1e6,
+  G: 1e9,
+  T: 1e12,
+  Ki: 2 ** 10,
+  Mi: 2 ** 20,
+  Gi: 2 ** 30,
+  Ti: 2 ** 40,
+};
+
+/** A Kubernetes quantity (as validated by the schema) in bytes, rounded down. */
+export function quantityBytes(q: string): number {
+  const m = /^(\d+(?:\.\d+)?)(m|k|M|G|T|Ki|Mi|Gi|Ti)?$/.exec(q);
+  if (!m?.[1]) throw new Error(`not a quantity: ${q}`);
+  return Math.floor(Number(m[1]) * (QUANTITY_FACTORS[m[2] ?? ""] ?? 1));
+}
 
 /** KOBE_SESSION_KEY_<AUDIENCE>: one HMAC key per audience (≥ 32 chars). */
 export const sessionKeyEnvName = (audience: SessionTokenAudience): string =>

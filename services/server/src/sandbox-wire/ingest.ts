@@ -8,6 +8,7 @@ import {
 } from "../event-stream/append.js";
 import type { WireTuning } from "./constants.js";
 import { entryCommittedEvents, mirrorEntriesInTx } from "./entries.js";
+import { failureInfo } from "../runs/failure-codes.js";
 import { endRunInTx } from "./run-state.js";
 import type { RunTranslator } from "./translate.js";
 
@@ -19,7 +20,7 @@ export interface IngestHost {
   /** New session entries of the thread (`get_entries since`), or undefined when unavailable. */
   fetchNewEntries(threadId: string): Promise<PiGetEntriesData | undefined>;
   /** The run ended (committed). `status` is what this ingest wrote, undefined if someone else ended it. */
-  runEnded(runId: string, status: "completed" | undefined): void;
+  runEnded(runId: string, status: "completed" | "failed" | undefined): void;
   /** A storage cap was hit: fail and stop the run (it has not been ended yet). */
   limitExceeded(runId: string, limit: "run_events" | "run_bytes" | "thread_entries"): void;
   /** Entries could not be mirrored at run end: sync the thread before its next run. */
@@ -252,7 +253,7 @@ export class RunIngest {
           events.length >= 2 * MAX_APPEND_BATCH ||
           t.events.some((e) => !DELTAS.has(e.type));
         if (prompt) {
-          await this.#flush(frames, events, t.syncEntries || t.settled, t.settled);
+          await this.#flush(frames, events, t.syncEntries || t.settled, t.settled, t.failure);
           frames = [];
           events = [];
         }
@@ -272,7 +273,13 @@ export class RunIngest {
     }
   }
 
-  async #flush(frames: number[], events: NewRunEvent[], sync: boolean, settled: boolean) {
+  async #flush(
+    frames: number[],
+    events: NewRunEvent[],
+    sync: boolean,
+    settled: boolean,
+    failure?: string,
+  ) {
     const { db, teamId, runId, threadId, host } = this.#o;
     const translator = this.#translator;
     const first = frames[0];
@@ -332,7 +339,12 @@ export class RunIngest {
           await appendRunEventsInTx(tx, teamId, runId, all.slice(i, i + MAX_APPEND_BATCH));
         }
         if (settled) {
-          return (await endRunInTx(tx, teamId, runId, { status: "completed" })).ended;
+          // The last model call failed (KOBE-41): the run fails with the server's own message.
+          const end =
+            failure === undefined
+              ? ({ status: "completed" } as const)
+              : ({ status: "failed", error: failureInfo(failure, "model_error") } as const);
+          return (await endRunInTx(tx, teamId, runId, end)).ended;
         }
         return false;
       });
@@ -342,7 +354,7 @@ export class RunIngest {
       host.sendAck(runId, last);
       if (settled) {
         this.#ended = true;
-        host.runEnded(runId, ended ? "completed" : undefined);
+        host.runEnded(runId, ended ? (failure === undefined ? "completed" : "failed") : undefined);
       }
     } catch (err) {
       this.#recover(err, last);

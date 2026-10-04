@@ -19,6 +19,7 @@
     "test:db": "vitest run -c vitest.db.config.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1144.0",
     "@better-auth/passkey": "1.7.7",
     "@hono/node-server": "^2.1.3",
     "@kobe/agent-file": "workspace:*",
@@ -28,6 +29,7 @@
     "@kubernetes/client-node": "^2.0.0",
     "@simplewebauthn/server": "~14.0.3",
     "better-auth": "1.7.7",
+    "fflate": "^0.8.3",
     "hono": "^4.13.12",
     "nodemailer": "^10.0.13",
     "pg": "^8.23.1",
@@ -36,7 +38,8 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
-    "@levischuck/tiny-cbor": "^0.2.11",
+    "@kobe/mcp-proxy": "workspace:*",
+    "@levischuck/tiny-cbor": "^0.3.6",
     "@types/pg": "^8.23.1",
     "@types/ws": "^8.18.2"
   }

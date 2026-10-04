@@ -4,7 +4,15 @@
  * except entry `payload`s (Pi documents, kept verbatim). Run events keep the `@kobe/protocol`
  * snake_case types: they arrive over SSE, not through `apiRequest`.
  */
-import type { RunStatus, ThreadStatus } from "@kobe/protocol";
+import type {
+  ApprovalResolutionCause,
+  ApprovalStatus,
+  JsonObject,
+  PolicyReason,
+  RiskClass,
+  RunStatus,
+  ThreadStatus,
+} from "@kobe/protocol";
 
 export interface ThreadSummary {
   readonly threadId: string;
@@ -15,6 +23,8 @@ export interface ThreadSummary {
   readonly agentId: string | null;
   readonly agentVersion: number | null;
   readonly sharedToProject: boolean;
+  /** The model chosen for the thread (a catalog alias); null = the team's default (KOBE-44). */
+  readonly model?: string | null;
   readonly leafEntryId: string | null;
   readonly lastActivityAt: string;
   readonly createdAt: string;
@@ -61,6 +71,8 @@ export interface ThreadEntry {
 
 export interface ThreadDetail extends ThreadSummary {
   readonly agentCurrentVersion: number | null;
+  /** The model the thread's agent pins (KOBE-44/47); it wins over `model`. Null: no pin. */
+  readonly agentModel?: string | null;
   readonly entries: readonly ThreadEntry[];
   readonly nextEntriesAfter: number | null;
 }
@@ -113,4 +125,30 @@ export interface PendingMessages {
 export interface SubmitResult {
   readonly runId: string;
   readonly queued: boolean;
+}
+
+/** An approval as `GET`/`POST /v1/approvals/{id}` answer it (KOBE-37), camelized. */
+export interface ApprovalView {
+  readonly approvalId: string;
+  readonly runId: string;
+  readonly threadId: string;
+  readonly toolCallId: string;
+  readonly tool: string;
+  /** The checked input (keys camelized by the client: show `input` from the event when present). */
+  readonly input: JsonObject;
+  readonly risk: RiskClass;
+  readonly reasons: readonly PolicyReason[];
+  readonly status: ApprovalStatus;
+  readonly cause: ApprovalResolutionCause | null;
+  readonly decidedBy: string | null;
+  readonly decidedAt: string | null;
+  readonly expiresAt: string;
+  readonly createdAt: string;
+  readonly remembered: boolean;
+}
+
+export interface ApprovalDecisionBody {
+  readonly decision: "allow" | "deny";
+  /** "Always allow this tool": a remember-rule for exactly this tool, optionally expiring. */
+  readonly remember?: { readonly toolGlob: string; readonly expiresIn?: number | undefined };
 }

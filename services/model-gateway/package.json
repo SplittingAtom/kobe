@@ -1,0 +1,36 @@
+{
+  "name": "@kobe/model-gateway",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "Model gateway shim (spec D30): verifies sandbox session tokens and forwards inference to Bifrost with the member's virtual key",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test:db": "vitest run -c vitest.db.config.ts"
+  },
+  "dependencies": {
+    "@kobe/db": "workspace:*",
+    "@kobe/protocol": "workspace:*",
+    "@kobe/session-token": "workspace:*",
+    "pg": "^8.23.1",
+    "pino": "^10.3.1",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1"
+  }
+}

@@ -17,6 +17,7 @@ import {
 } from "@kobe/protocol";
 import { sql, withTeam, type AuditActor, type KobeDb, type KobeTx } from "@kobe/db";
 import type { Logger } from "pino";
+import { auditExpiredApprovals, expireRunApprovalsInTx } from "../approvals/run-end.js";
 import { recordAudit } from "../audit/record.js";
 import {
   AppendError,
@@ -499,12 +500,26 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
             );
             return { transition: applied.transition, active: false };
           }
+          // Already budget-stopping (the sweep re-sends its stop), or the user's own Stop is
+          // pending (an abort is never downgraded to after-step): nothing to add (KOBE-42 review).
+          if (run.budgetStopScope !== null) return undefined;
+          const pending = await tx.execute<{ stop_mode: string | null }>(sql`
+            SELECT stop_mode FROM runs WHERE team_id = ${teamId} AND id = ${run.id}`);
+          if (pending.rows[0]?.stop_mode === "abort") return undefined;
           // Active: finish the current step (D30). The wire converts the settle into budget_stopped.
           await tx.execute(sql`
           UPDATE runs SET budget_stop_scope = ${command.scope}
            WHERE team_id = ${teamId} AND id = ${run.id}`);
           await requestStop(tx, teamId, run.id, "after_step");
-          return { transition: undefined, active: true };
+          // D30: pending approvals expire, so the waiting call is denied and the step can finish.
+          const expired = await expireRunApprovalsInTx(tx, teamId, run.id, "budget_exhausted");
+          const resumed =
+            expired.length > 0 && run.status === "waiting_approval"
+              ? (await applyTransition(tx, thread, run, "running", "approval_resolved", undefined))
+                  .transition
+              : undefined;
+          await auditExpiredApprovals(tx, teamId, expired);
+          return { transition: resumed, active: true };
         }),
       ).catch((err: unknown) => {
         // Keep stopping the others; the caller learns that some could not be stopped.

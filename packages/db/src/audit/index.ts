@@ -2,6 +2,7 @@ export {
   AUDIT_ACTIONS,
   AUDIT_CATEGORIES,
   AUDIT_EVENTS,
+  RETENTION_PURGE_REASONS,
   SIGN_IN_METHODS,
   isAuditAction,
   type AuditAction,
@@ -21,7 +22,10 @@ export {
   type TeamAuditPage,
 } from "./read.js";
 export {
+  AUDIT_CHAIN_UPGRADED,
   AUDIT_GENESIS_HASH,
+  auditSealStep,
+  type AuditChainRow,
   verifyAuditChain,
   type AuditChainProblem,
   type AuditChainReport,
@@ -41,3 +45,16 @@ export {
   type AuditRecordRef,
   type AuditRequestContext,
 } from "./write.js";
+export { sealAuditV1, type AuditSealResult } from "./seal.js";
+export {
+  AUDIT_PII_RETENTION_DEFAULT_HOURS,
+  AUDIT_PII_SWEEP_SEQ_KEY,
+  AUDIT_PII_RETENTION_KEY,
+  AUDIT_PII_RETENTION_MAX_HOURS,
+  AUDIT_PII_RETENTION_MIN_HOURS,
+  auditPiiRetentionHoursSchema,
+  eraseExpiredAuditPii,
+  pausedUntil,
+  readAuditPiiRetentionHours,
+  type AuditPiiErasure,
+} from "./pii.js";

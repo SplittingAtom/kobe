@@ -75,6 +75,12 @@ export async function enqueueCommand(
       SELECT owner_user_id FROM threads WHERE team_id = ${target.teamId} AND id = ${input.threadId}`);
     if (owner.rows[0]?.owner_user_id !== target.userId)
       return { error: "thread_not_found" as const };
+    // Activity (D14, KOBE-25): a routed command keeps an awake sandbox awake. Takes the
+    // `sandboxes` row lock: a hibernation deciding right now finishes first, and then this
+    // command finds no live connection below and wakes the sandbox.
+    await tx.execute(sql`
+      UPDATE sandboxes SET last_active_at = now()
+       WHERE team_id = ${target.teamId} AND user_id = ${target.userId} AND state = 'running'`);
     const id = randomUUID();
     await tx.execute(sql`
       INSERT INTO sandbox_commands

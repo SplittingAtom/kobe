@@ -32,16 +32,22 @@ describe("audit event taxonomy", () => {
   it("has the categories the read API filters on", () => {
     expect(AUDIT_CATEGORIES.sort()).toEqual([
       "agent",
+      "approval",
+      "audit",
       "auth",
       "egress",
       "governance",
       "identity",
       "install",
+      "mcp",
+      "models",
       "platform",
       "policy",
+      "retention",
       "run",
       "sandbox",
       "thread",
+      "workspace",
     ]);
   });
 

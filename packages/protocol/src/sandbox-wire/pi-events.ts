@@ -132,3 +132,53 @@ export const piGetEntriesDataSchema = z.strictObject({
   leafId: z.string().min(1).max(128).nullable(),
 });
 export type PiGetEntriesData = z.infer<typeof piGetEntriesDataSchema>;
+
+/**
+ * How the kobe-models Pi extension (KOBE-41) reports a model-gateway failure: the assistant
+ * message's `errorMessage` (Pi `message_end`, `stopReason: "error"`) starts with this prefix and
+ * one of {@link MODEL_RUN_ERROR_CODES}, then `: ` and a detail the server never shows (sandbox
+ * text is untrusted; the server has its own message per code). A run whose last assistant message
+ * ended that way fails with that code instead of completing silently.
+ */
+export const KOBE_MODEL_ERROR_PREFIX = "kobe.model_error:";
+
+export const MODEL_RUN_ERROR_CODES = [
+  /** 403 `model_not_enabled` (the shim or Bifrost): not in the team's enabled models. */
+  "model_not_enabled",
+  /** 401 after a fresh token: the sandbox's session is revoked. */
+  "model_session_revoked",
+  /** 429 after the gateway's Retry-After waits. */
+  "model_throttled",
+  /** 502/503 after the Retry-After waits (gateway, Bifrost or provider unavailable). */
+  "model_unavailable",
+  /** No gateway model for the run (no team default, no team catalog). */
+  "model_not_configured",
+  /** Anything else the model call failed with. */
+  "model_error",
+  /**
+   * 402 `budget_exhausted` from the shim (or Bifrost's `policy_budget_exceeded`, KOBE-42): a budget
+   * is used up; the server ends a budget-stopped run `budget_stopped`.
+   */
+  "model_budget_exhausted",
+] as const;
+export type ModelRunErrorCode = (typeof MODEL_RUN_ERROR_CODES)[number];
+
+const MODEL_ERROR_RE = new RegExp(
+  `^${KOBE_MODEL_ERROR_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([a-z_]+)(?::|$)`,
+);
+const MODEL_ERROR_CODE_SET: ReadonlySet<string> = new Set(MODEL_RUN_ERROR_CODES);
+
+/** The message kobe-models puts in `errorMessage` (`detail` is for logs, never for users). */
+export function kobeModelErrorMessage(code: ModelRunErrorCode, detail: string): string {
+  return `${KOBE_MODEL_ERROR_PREFIX}${code}: ${detail}`;
+}
+
+/** The code in a kobe-models error message; undefined for any other (untrusted) text. */
+export function parseKobeModelError(errorMessage: unknown): ModelRunErrorCode | undefined {
+  if (typeof errorMessage !== "string") return undefined;
+  const match = MODEL_ERROR_RE.exec(errorMessage);
+  const code = match?.[1];
+  return code !== undefined && MODEL_ERROR_CODE_SET.has(code)
+    ? (code as ModelRunErrorCode)
+    : undefined;
+}

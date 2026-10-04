@@ -1,5 +1,7 @@
 export * from "./audit/index.js";
+export * from "./connectors/index.js";
 export * from "./egress/index.js";
+export * from "./models/index.js";
 export {
   BREAK_GLASS_ENTRIES_MAX,
   BREAK_GLASS_THREADS_MAX,
@@ -16,6 +18,14 @@ export {
   type BreakGlassThreadCursor,
 } from "./break-glass/read.js";
 export { BREAK_GLASS_READABLE_TABLES, type BreakGlassReadableTable } from "./break-glass/tables.js";
+export {
+  LEGAL_HOLD_SQLSTATE,
+  isLegalHoldViolation,
+  isUnderLegalHold,
+  legalHoldsForTeam,
+  lockLegalHolds,
+  type TeamLegalHolds,
+} from "./legal-hold/index.js";
 export { BLOB_REF_COLUMNS, type BlobRefColumn } from "./blob-refs.js";
 export {
   createDb,

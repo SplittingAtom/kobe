@@ -38,6 +38,24 @@ const configSchema = z.object({
     .min(1, "KOBE_AGENT_MAX_VERSIONS must be between 1 and 100000")
     .max(100_000, "KOBE_AGENT_MAX_VERSIONS must be between 1 and 100000")
     .default(1000),
+  // Internal listener (KOBE-58): the MCP proxy's policy re-check. Only with the proxy's key.
+  KOBE_INTERNAL_PORT: z.coerce
+    .number({ error: "KOBE_INTERNAL_PORT must be a number" })
+    .int("KOBE_INTERNAL_PORT must be an integer")
+    .min(1, "KOBE_INTERNAL_PORT must be between 1 and 65535")
+    .max(65535, "KOBE_INTERNAL_PORT must be between 1 and 65535")
+    .default(8082),
+  KOBE_MCP_PROXY_INTERNAL_KEY: z
+    .string()
+    .min(32, "KOBE_MCP_PROXY_INTERNAL_KEY must be at least 32 characters")
+    .optional(),
+  // UTC hour the nightly retention pass runs in (KOBE-18, D18).
+  KOBE_RETENTION_HOUR_UTC: z.coerce
+    .number({ error: "KOBE_RETENTION_HOUR_UTC must be a number" })
+    .int("KOBE_RETENTION_HOUR_UTC must be an integer")
+    .min(0, "KOBE_RETENTION_HOUR_UTC must be between 0 and 23")
+    .max(23, "KOBE_RETENTION_HOUR_UTC must be between 0 and 23")
+    .default(3),
 });
 
 /** Auth settings: required by the API server only (the scheduler never sees these secrets). */
@@ -63,6 +81,13 @@ const authSchema = z.object({
         .filter((s) => s.length > 0),
     )
     .pipe(z.array(z.cidrv4().or(z.cidrv6()), { error: "KOBE_TRUSTED_PROXIES must be CIDRs" })),
+  // Approval HMAC key (D29, KOBE-37): signs approvals; the MCP proxy verifies with it. Unset keeps
+  // the server up, but every tool call that needs approval is denied (fail closed).
+  KOBE_APPROVAL_KEY: z
+    .string()
+    .transform((v) => (v === "" ? undefined : v))
+    .pipe(z.string().min(32, "KOBE_APPROVAL_KEY must be at least 32 characters").optional())
+    .optional(),
 });
 
 export interface AuthConfig {
@@ -70,6 +95,8 @@ export interface AuthConfig {
   readonly authSecret: string;
   readonly setupToken: string;
   readonly trustedProxies: readonly string[];
+  /** Approval HMAC key; undefined denies every approval request. */
+  readonly approvalKey?: string;
 }
 
 export interface Config {
@@ -80,6 +107,12 @@ export interface Config {
   readonly runtimeClassName: string | undefined;
   /** Published versions per agent (KOBE-46). */
   readonly agentMaxVersions: number;
+  /** Internal listener port (MCP proxy re-check, KOBE-58). */
+  readonly internalPort: number;
+  /** Shared with the MCP proxy; without it the internal listener is not started. */
+  readonly mcpProxyInternalKey: string | undefined;
+  /** UTC hour of the nightly retention pass (KOBE-18). */
+  readonly retentionHourUtc: number;
   /** Present for the API server only. */
   readonly auth?: AuthConfig;
   /** Present for the API server only (invites, password resets, notifications). */
@@ -101,6 +134,9 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     databaseUrl: base.data.KOBE_DATABASE_URL,
     runtimeClassName: base.data.KOBE_RUNTIME_CLASS,
     agentMaxVersions: base.data.KOBE_AGENT_MAX_VERSIONS,
+    internalPort: base.data.KOBE_INTERNAL_PORT,
+    mcpProxyInternalKey: base.data.KOBE_MCP_PROXY_INTERNAL_KEY,
+    retentionHourUtc: base.data.KOBE_RETENTION_HOUR_UTC,
   };
   if (config.process !== "server") return config;
   const auth = authSchema.safeParse(env);
@@ -114,6 +150,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
       authSecret: auth.data.KOBE_AUTH_SECRET,
       setupToken: auth.data.KOBE_SETUP_TOKEN,
       trustedProxies: auth.data.KOBE_TRUSTED_PROXIES,
+      ...(auth.data.KOBE_APPROVAL_KEY ? { approvalKey: auth.data.KOBE_APPROVAL_KEY } : {}),
     },
     smtp: smtp.data,
   };

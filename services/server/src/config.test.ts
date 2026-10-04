@@ -35,6 +35,23 @@ describe("loadConfig", () => {
     );
   });
 
+  it("reads the internal listener settings for the MCP proxy (KOBE-58)", () => {
+    expect(loadConfig(REQUIRED)).toMatchObject({
+      internalPort: 8082,
+      mcpProxyInternalKey: undefined,
+    });
+    expect(
+      loadConfig({
+        ...REQUIRED,
+        KOBE_INTERNAL_PORT: "9000",
+        KOBE_MCP_PROXY_INTERNAL_KEY: "k".repeat(32),
+      }),
+    ).toMatchObject({ internalPort: 9000, mcpProxyInternalKey: "k".repeat(32) });
+    expect(() => loadConfig({ ...REQUIRED, KOBE_MCP_PROXY_INTERNAL_KEY: "short" })).toThrow(
+      /KOBE_MCP_PROXY_INTERNAL_KEY/,
+    );
+  });
+
   it("requires a postgres database URL", () => {
     const { KOBE_DATABASE_URL: _, ...rest } = REQUIRED;
     expect(() => loadConfig(rest)).toThrow(/KOBE_DATABASE_URL/);
@@ -63,6 +80,19 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ ...REQUIRED, KOBE_SETUP_TOKEN: "short" })).toThrow(
       /KOBE_SETUP_TOKEN/,
     );
+  });
+
+  it("reads an optional approval key of at least 32 characters (KOBE-37), never for the scheduler", () => {
+    expect(loadConfig(REQUIRED).auth?.approvalKey).toBeUndefined();
+    expect(loadConfig({ ...REQUIRED, KOBE_APPROVAL_KEY: "" }).auth?.approvalKey).toBeUndefined();
+    const key = "a".repeat(48);
+    expect(loadConfig({ ...REQUIRED, KOBE_APPROVAL_KEY: key }).auth?.approvalKey).toBe(key);
+    expect(() => loadConfig({ ...REQUIRED, KOBE_APPROVAL_KEY: "short" })).toThrow(
+      /KOBE_APPROVAL_KEY must be at least 32/,
+    );
+    expect(
+      loadConfig({ ...REQUIRED, KOBE_PROCESS: "scheduler", KOBE_APPROVAL_KEY: key }).auth,
+    ).toBeUndefined();
   });
 
   it("parses trusted proxy CIDRs", () => {

@@ -15,6 +15,8 @@
 //   "orphan"       spawn a detached long-running tool (its own process group), report its pid, hang
 //   "handled"      answer the prompt with disposition "handled"
 //   "drop-policy"  close its end of the policy channel (as a broken kobe-policy would), then settle
+//   "sh:<command>" run `/bin/sh -c <command>` the way Pi's bash tool does (detached) and report its
+//                  exit code, stdout and stderr as a kobe_test_shell event (KOBE-71 identity tests)
 // Every command received is appended to <session file>.commands.jsonl for assertions.
 // It also plays kobe-policy's side of the fd-3 handshake: on channel.hello it answers channel.ready,
 // unless the last --extension path contains "refuse" (channel.refused) or "silent" (no answer).
@@ -39,7 +41,23 @@ const usage = {
   totalTokens: 2,
   cost: { total: 0 },
 };
-appendFileSync(log, `${JSON.stringify({ argv: args, env: Object.keys(process.env).sort() })}\n`);
+appendFileSync(
+  log,
+  `${JSON.stringify({
+    argv: args,
+    env: Object.keys(process.env).sort(),
+    // KOBE-41: where the agent put this process's config dir and model file (values, test-only).
+    agentDir: process.env.PI_CODING_AGENT_DIR ?? null,
+    modelFile: process.env.KOBE_MODEL_FILE ?? null,
+    // KOBE-71: who this Pi runs as, and its HOME/TMPDIR.
+    pid: process.pid,
+    uid: process.getuid?.() ?? null,
+    gid: process.getgid?.() ?? null,
+    groups: process.getgroups?.() ?? null,
+    home: process.env.HOME ?? null,
+    tmpdir: process.env.TMPDIR ?? null,
+  })}\n`,
+);
 
 let streaming = false;
 let aborted = false;
@@ -170,6 +188,20 @@ function runPrompt(message) {
     child.on("exit", () => {
       const probed = JSON.parse(text);
       out({ type: "kobe_test_grandchild", sameChannel: probed.fd3Ino === policyFdIno, ...probed });
+      settle();
+    });
+  } else if (message.startsWith("sh:")) {
+    start();
+    const child = spawn("/bin/sh", ["-c", message.slice(3)], {
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d) => (stdout += d));
+    child.stderr.on("data", (d) => (stderr += d));
+    child.on("close", (code) => {
+      out({ type: "kobe_test_shell", code, stdout, stderr });
       settle();
     });
   } else if (message === "orphan") {

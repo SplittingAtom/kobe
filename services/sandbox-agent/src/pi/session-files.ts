@@ -1,9 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { constants, createReadStream } from "node:fs";
-import { mkdir, open, rename, rm, stat, type FileHandle } from "node:fs/promises";
+import { mkdir, open, readdir, rename, rm, stat, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import { uuidSchema, type PiSessionEntry, type PiSessionHeader } from "@kobe/protocol";
 import { LineSplitter, encodeJsonl } from "../jsonl.js";
+import { assertOnVolume, shareOnVolume } from "../workspace/volume.js";
 import { PI_MAX_LINE_BYTES } from "./pi-process.js";
 
 /**
@@ -17,8 +18,36 @@ export function sessionFilePath(sessionDir: string, threadId: string): string {
   return path.join(sessionDir, `${threadId}.jsonl`);
 }
 
-export async function ensureSessionDir(sessionDir: string): Promise<void> {
-  await mkdir(sessionDir, { recursive: true, mode: 0o700 });
+export interface SessionDirOptions {
+  /**
+   * Pi identities (KOBE-71): Pi runs under other uids, which reach the session files through the
+   * workspace group. The directories become 2770 and the files the agent owns 0660 (agents before
+   * KOBE-71 made them 0700/0600) — once per process.
+   */
+  readonly shared?: boolean;
+  /** The workspace volume root the session dir lives on (shared mode checks against it). */
+  readonly workspaceDir?: string;
+}
+
+const sharedDone = new Set<string>();
+
+export async function ensureSessionDir(
+  sessionDir: string,
+  options: SessionDirOptions = {},
+): Promise<void> {
+  const shared = options.shared === true;
+  await mkdir(sessionDir, { recursive: true, mode: shared ? 0o770 : 0o700 });
+  if (!shared) return;
+  const root = options.workspaceDir ?? path.dirname(sessionDir);
+  // Every time (the agent's umask is 077, and a tool may have removed and recreated them).
+  for (let dir = sessionDir; dir.startsWith(`${root}/`); dir = path.dirname(dir)) {
+    await shareOnVolume(root, dir, 0o2770);
+  }
+  if (sharedDone.has(sessionDir)) return;
+  for (const name of await readdir(sessionDir).catch(() => [] as string[])) {
+    if (name.endsWith(".jsonl")) await shareOnVolume(root, path.join(sessionDir, name), 0o660);
+  }
+  sharedDone.add(sessionDir);
 }
 
 async function fileExists(file: string): Promise<boolean> {
@@ -66,6 +95,8 @@ export async function appendBranchMarker(
   parentEntryId: string,
   runId: string,
   now: Date = new Date(),
+  /** The workspace volume root the file must be on (KOBE-71); unchecked when absent. */
+  volume?: string,
 ): Promise<BranchResult> {
   if (!(await fileExists(file))) return { ok: false, message: "thread has no session file" };
   const ids = await readEntryIds(file);
@@ -81,9 +112,14 @@ export async function appendBranchMarker(
     customType: BRANCH_CUSTOM_TYPE,
     data: { run_id: runId },
   };
-  // O_NOFOLLOW: model-run code can write the sessions dir; never append through a symlink.
-  const handle = await open(file, constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW);
+  // O_NOFOLLOW: model-run code can write the sessions dir; never append through a symlink, nor
+  // to a file off the session dir's volume (a replaced parent, KOBE-71).
+  const handle = await open(
+    file,
+    constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  );
   try {
+    if (volume !== undefined) await assertOnVolume(handle, volume, file);
     await handle.write(encodeJsonl(marker));
   } finally {
     await handle.close();
@@ -99,13 +135,16 @@ export class SessionRestore {
   readonly #target: string;
   readonly #temp: string;
   readonly #maxBytes: number;
+  readonly #volume: string | undefined;
   #handle: FileHandle | undefined;
   #nextPart = 0;
   #bytes = 0;
   #entries = 0;
 
-  constructor(target: string, maxBytes: number) {
+  /** `volume`: the workspace volume root the file must be on (KOBE-71); unchecked when absent. */
+  constructor(target: string, maxBytes: number, volume?: string) {
     this.#target = target;
+    this.#volume = volume;
     // Unpredictable name, created exclusively and never through a symlink (O_EXCL | O_NOFOLLOW).
     this.#temp = `${target}.restore-${randomBytes(8).toString("hex")}.tmp`;
     this.#maxBytes = maxBytes;
@@ -126,7 +165,12 @@ export class SessionRestore {
     if (part === 0) {
       const flags =
         constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
-      this.#handle = await open(this.#temp, flags, 0o600);
+      // 0660: under Pi identities (KOBE-71) the thread's Pi appends to it through the workspace
+      // group; the session dir itself is the agent's and the group's only.
+      const handle = await open(this.#temp, flags, 0o660);
+      this.#handle = handle;
+      if (this.#volume !== undefined) await assertOnVolume(handle, this.#volume, this.#temp);
+      await handle.chmod(0o660);
     }
     const records: readonly unknown[] =
       part === 0 ? [header ?? fallbackHeader(), ...entries] : entries;

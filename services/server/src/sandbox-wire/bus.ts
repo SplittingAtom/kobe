@@ -19,9 +19,13 @@ export type BusHint =
   /** This connection was replaced by a newer one of the same sandbox: its holder closes it. */
   | { readonly kind: "kick"; readonly id: string }
   /** This user was deactivated or left a team: every replica re-checks their connections. */
-  | { readonly kind: "user"; readonly id: string };
+  | { readonly kind: "user"; readonly id: string }
+  /** This connection's sandbox was hibernated (KOBE-25): its holder closes it `hibernating`. */
+  | { readonly kind: "hib"; readonly id: string }
+  /** This approval left `pending` (KOBE-37): the broker waiting on it re-reads the row. */
+  | { readonly kind: "apr"; readonly id: string };
 
-const KINDS = new Set(["cmd", "res", "kick", "user"]);
+const KINDS = new Set(["cmd", "res", "kick", "user", "hib", "apr"]);
 const uuid = z.uuid();
 
 export function encodeBusHint(hint: BusHint): string {
@@ -36,6 +40,11 @@ export function decodeBusHint(payload: string | undefined): BusHint | undefined 
   const id = payload.slice(sep + 1);
   if (sep < 0 || !KINDS.has(kind) || !uuid.safeParse(id).success) return undefined;
   return { kind, id: id.toLowerCase() } as BusHint;
+}
+
+/** Queues a hint inside `tx` (delivered on commit) without a bus instance (any process). */
+export async function notifyHintInTx(tx: KobeTx, hint: BusHint): Promise<void> {
+  await tx.execute(sql`SELECT pg_notify(${SANDBOX_CHANNEL}, ${encodeBusHint(hint)})`);
 }
 
 export type BusState = "idle" | "connecting" | "listening" | "down" | "closed";
@@ -183,7 +192,7 @@ export function createSandboxBus(options: BusOptions): SandboxBus {
       void connect();
     },
     async notifyInTx(tx, hint) {
-      await tx.execute(sql`SELECT pg_notify(${SANDBOX_CHANNEL}, ${encodeBusHint(hint)})`);
+      await notifyHintInTx(tx, hint);
     },
     async notify(db, hint) {
       await db.execute(sql`SELECT pg_notify(${SANDBOX_CHANNEL}, ${encodeBusHint(hint)})`);

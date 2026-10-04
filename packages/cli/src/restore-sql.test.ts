@@ -106,6 +106,14 @@ describe("restore postlude", () => {
     expect(sql.indexOf("count(*)")).toBeLessThan(sql.indexOf("FORCE ROW LEVEL SECURITY"));
   });
 
+  it("pauses the audit IP erasure for 24 h, inside the transaction (KOBE-17)", () => {
+    const post = restorePostlude(plan);
+    const pause = post.indexOf("'audit.pii_sweep_resume_at'");
+    expect(pause).toBeGreaterThan(-1);
+    expect(post).toContain("now() + interval '24 hours'");
+    expect(pause).toBeLessThan(post.indexOf("COMMIT;"));
+  });
+
   it("records the restore in the audit log after the triggers are back (KOBE-15)", () => {
     expect(sql).not.toContain("audit_log");
     const audit = {
@@ -119,7 +127,7 @@ describe("restore postlude", () => {
       ],
     };
     const audited = restorePostlude({ ...plan, audit });
-    const verify = audited.indexOf("audit_log_canonical");
+    const verify = audited.indexOf("audit_log_chain_problem()");
     const insert = audited.indexOf("INSERT INTO public.audit_log");
     expect(verify).toBeGreaterThan(audited.indexOf('ENABLE TRIGGER "audit ""x""";'));
     expect(verify).toBeLessThan(insert);

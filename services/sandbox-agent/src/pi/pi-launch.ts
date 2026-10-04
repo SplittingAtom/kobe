@@ -11,11 +11,14 @@ import type { PiThreadConfig } from "@kobe/protocol";
  * variables or flags.
  *
  * Lockdown (verified against Pi 1.0.0 `--help` and a real-Pi test): model-run code can write
- * `$HOME` and `/workspace`, so Pi must not load anything from there. Pi's config directory is
- * `PI_CODING_AGENT_DIR`, a root-owned, read-only, empty directory baked into the image (Pi reads
- * user extensions, `settings.json` incl. `defaultProjectTrust`, `mcp.json`, `AGENTS.md` from it);
- * `--no-extensions` stops extension discovery and built-ins (explicit `-e` paths still load: that is
- * how kobe-policy, KOBE-36, is added, from a root-owned path); `--no-approve` ignores project-local
+ * `$HOME` and `/workspace`, so Pi must not load anything from there. Pi's config directory
+ * (`PI_CODING_AGENT_DIR`, where Pi reads user extensions, `settings.json` incl.
+ * `defaultProjectTrust`, `mcp.json`, `AGENTS.md`, and writes `auth.json`) is a private directory
+ * created fresh for each Pi process right before it starts and removed when it exits
+ * (threads/thread.ts; Pi 1.0.0 writes `auth.json` and a lock there on every credential read, so it
+ * cannot be read-only). `--no-extensions` stops extension discovery and built-ins (explicit `-e`
+ * paths still load: that is how kobe-policy, KOBE-36, and kobe-models, KOBE-41, are added, from
+ * root-owned paths); `--no-approve` ignores project-local
  * `.pi/` files; `--no-context-files` stops `AGENTS.md`/`CLAUDE.md` discovery (Kobe's instructions
  * come from agent files, D19; a model-written AGENTS.md would otherwise be a persistent prompt
  * injection across threads); `--no-skills` / `--no-prompt-templates` / `--no-themes` stop discovery
@@ -44,8 +47,12 @@ export interface PiLaunch {
 export interface PiLaunchInput {
   readonly sessionFile: string;
   readonly home: string;
-  /** Root-owned, read-only Pi config directory (`PI_CODING_AGENT_DIR`). */
-  readonly agentDir: string;
+  /**
+   * kobe-models (KOBE-41): a root-owned, read-only file, loaded right before kobe-policy when the
+   * sandbox has model gateway access. The model itself is not a launch argument: it travels in the
+   * per-process model file, so a model change between runs never restarts Pi.
+   */
+  readonly modelsExtension?: string | undefined;
   /**
    * The kobe-policy extension (KOBE-36): a root-owned, read-only file. Always loaded, always the
    * **last** `-e`: Pi runs `tool_call` handlers in extension load order (verified Pi 1.0.0), so the
@@ -64,12 +71,15 @@ export interface PiLaunchInput {
 export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
   const args = ["--mode", "rpc", "--session", input.sessionFile, ...PI_LOCKDOWN_ARGS];
   const policy = path.resolve(input.policyExtension);
+  const models =
+    input.modelsExtension === undefined ? undefined : path.resolve(input.modelsExtension);
   for (const extension of input.extensions ?? []) {
     // kobe-policy only once, last: a second copy would find the channel taken and block everything.
-    if (extension.startsWith("builtin:") || path.resolve(extension) !== policy) {
-      args.push("--extension", extension);
-    }
+    const resolved = extension.startsWith("builtin:") ? undefined : path.resolve(extension);
+    if (resolved !== undefined && (resolved === policy || resolved === models)) continue;
+    args.push("--extension", extension);
   }
+  if (input.modelsExtension !== undefined) args.push("--extension", input.modelsExtension);
   args.push("--extension", input.policyExtension);
   const config = input.config;
   if (config?.thinking_level !== undefined) args.push("--thinking", config.thinking_level);
@@ -83,7 +93,7 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
   }
   env.PATH ??= "/usr/local/bin:/usr/bin:/bin";
   env.HOME = input.home;
-  env.PI_CODING_AGENT_DIR = input.agentDir;
+  // PI_CODING_AGENT_DIR and KOBE_MODEL_FILE name per-process paths: the thread adds them at spawn.
   env.PI_SKIP_VERSION_CHECK = "1";
   env.PI_TELEMETRY = "0";
   env.PI_OFFLINE = "1";
@@ -91,9 +101,9 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
   env.NODE_OPTIONS = "--disable-sigusr1";
   env.KOBE_POLICY_FD = String(POLICY_CHANNEL_FD);
 
+  // The model is deliberately not part of the key (see `modelsExtension`).
   const key = JSON.stringify({
     args,
-    model: config?.model ?? null,
     agent: config?.agent ?? null,
     system_prompt: config?.system_prompt ?? null,
     skills: config?.skills ?? null,

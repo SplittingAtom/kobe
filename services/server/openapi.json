@@ -1880,6 +1880,271 @@
           }
         }
       }
+    },
+    "/v1/approvals": {
+      "get": {
+        "operationId": "listApprovals",
+        "summary": "Your approvals in the active team, newest first (at most 100)",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["pending", "allowed", "denied", "expired"]
+            }
+          },
+          {
+            "name": "run_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Only approvals of runs you own.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`: unknown filter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member` or `forbidden`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/approvals/{id}": {
+      "get": {
+        "operationId": "getApproval",
+        "summary": "One of your approvals, with the exact input it is signed over",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The approval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Approval"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`: the id is not a uuid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member` or `forbidden`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`approval_not_found`: unknown id, or another user's or team's.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "decideApproval",
+        "summary": "Allow or deny a pending approval (only the run's user)",
+        "description": "Allow signs HMAC(team, run, tool_call_id, tool, token expiry, canonical input) so exactly the approved input runs, once. `remember` (allow only) writes a user allow rule for exactly this tool (optional arg pattern and expiry); it never lifts an ask or deny rule. Pending approvals expire after 1 hour; the run then ends.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalDecisionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The decided approval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Approval"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`, `invalid_remember` (remember with deny, bad rule) or `glob_too_broad`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member` or `forbidden`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`approval_not_found`: unknown id, or another user's or team's.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`approval_resolved`, `approval_expired`, `run_not_active` or `too_many_rules`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`approvals_unavailable`: no approval key is configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1980,6 +2245,9 @@
           "shared_to_project": {
             "type": "boolean"
           },
+          "model": {
+            "type": ["string", "null"]
+          },
           "leaf_entry_id": {
             "anyOf": [
               {
@@ -2037,6 +2305,7 @@
           "agent_id",
           "agent_version",
           "shared_to_project",
+          "model",
           "leaf_entry_id",
           "last_activity_at",
           "created_at",
@@ -2133,6 +2402,9 @@
                 "shared_to_project": {
                   "type": "boolean"
                 },
+                "model": {
+                  "type": ["string", "null"]
+                },
                 "leaf_entry_id": {
                   "anyOf": [
                     {
@@ -2190,6 +2462,7 @@
                 "agent_id",
                 "agent_version",
                 "shared_to_project",
+                "model",
                 "leaf_entry_id",
                 "last_activity_at",
                 "created_at",
@@ -2294,6 +2567,9 @@
                 "shared_to_project": {
                   "type": "boolean"
                 },
+                "model": {
+                  "type": ["string", "null"]
+                },
                 "leaf_entry_id": {
                   "anyOf": [
                     {
@@ -2390,6 +2666,7 @@
                 "agent_id",
                 "agent_version",
                 "shared_to_project",
+                "model",
                 "leaf_entry_id",
                 "last_activity_at",
                 "created_at",
@@ -2492,6 +2769,9 @@
           "shared_to_project": {
             "type": "boolean"
           },
+          "model": {
+            "type": ["string", "null"]
+          },
           "leaf_entry_id": {
             "anyOf": [
               {
@@ -2550,6 +2830,9 @@
                 "type": "null"
               }
             ]
+          },
+          "agent_model": {
+            "type": ["string", "null"]
           },
           "entries": {
             "type": "array",
@@ -2633,12 +2916,14 @@
           "agent_id",
           "agent_version",
           "shared_to_project",
+          "model",
           "leaf_entry_id",
           "last_activity_at",
           "created_at",
           "deleted_at",
           "purge_after",
           "agent_current_version",
+          "agent_model",
           "entries",
           "next_entries_after"
         ],
@@ -2755,6 +3040,18 @@
             "minLength": 1,
             "maxLength": 200,
             "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -2777,6 +3074,18 @@
           },
           "shared_to_project": {
             "type": "boolean"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -2888,6 +3197,9 @@
           "shared_to_project": {
             "type": "boolean"
           },
+          "model": {
+            "type": ["string", "null"]
+          },
           "leaf_entry_id": {
             "anyOf": [
               {
@@ -2945,6 +3257,7 @@
           "agent_id",
           "agent_version",
           "shared_to_project",
+          "model",
           "leaf_entry_id",
           "last_activity_at",
           "created_at",
@@ -3397,6 +3710,477 @@
           }
         },
         "required": ["messages"],
+        "additionalProperties": false
+      },
+      "Approval": {
+        "type": "object",
+        "properties": {
+          "approval_id": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "pattern": "^[0-9a-f-]+$"
+              }
+            ]
+          },
+          "run_id": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "pattern": "^[0-9a-f-]+$"
+              }
+            ]
+          },
+          "thread_id": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "pattern": "^[0-9a-f-]+$"
+              }
+            ]
+          },
+          "tool_call_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "input": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "risk": {
+            "type": "string",
+            "enum": ["read", "write", "destructive"]
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "unknown_tool",
+                    "invalid_input",
+                    "install_deny_rule",
+                    "team_deny_rule",
+                    "agent_tool_deny",
+                    "connector_not_enabled",
+                    "connector_exposure",
+                    "tool_drifted",
+                    "install_ask_rule",
+                    "team_ask_rule",
+                    "risk_read",
+                    "risk_write",
+                    "risk_destructive",
+                    "mode_ask_all",
+                    "mode_ask_on_write",
+                    "mode_auto_not_allowlisted",
+                    "scheduled_run_no_prompt",
+                    "user_allow_rule",
+                    "approval_granted",
+                    "budget_exhausted",
+                    "default_prompt",
+                    "team_allow_rule",
+                    "not_available",
+                    "policy_error",
+                    "run_not_active",
+                    "not_a_member",
+                    "sandbox_policy_unavailable"
+                  ]
+                },
+                "stage": {
+                  "type": "string",
+                  "enum": [
+                    "install_deny",
+                    "team_deny",
+                    "ask_rule",
+                    "risk_class",
+                    "approval_mode",
+                    "user_allow",
+                    "prompt"
+                  ]
+                },
+                "message": {
+                  "type": "string",
+                  "maxLength": 1000
+                },
+                "rule_id": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f-]+$"
+                    }
+                  ]
+                }
+              },
+              "required": ["code", "stage", "message"],
+              "additionalProperties": false
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "allowed", "denied", "expired"]
+          },
+          "cause": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "user",
+                  "ttl",
+                  "run_cancelled",
+                  "run_interrupted",
+                  "budget_exhausted",
+                  "run_failed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decided_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "allOf": [
+                  {
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  {
+                    "pattern": "^[0-9a-f-]+$"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "remembered": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "approval_id",
+          "run_id",
+          "thread_id",
+          "tool_call_id",
+          "tool",
+          "input",
+          "risk",
+          "reasons",
+          "status",
+          "cause",
+          "decided_by",
+          "decided_at",
+          "expires_at",
+          "created_at",
+          "remembered"
+        ],
+        "additionalProperties": false
+      },
+      "ApprovalList": {
+        "type": "object",
+        "properties": {
+          "approvals": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "approval_id": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f-]+$"
+                    }
+                  ]
+                },
+                "run_id": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f-]+$"
+                    }
+                  ]
+                },
+                "thread_id": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f-]+$"
+                    }
+                  ]
+                },
+                "tool_call_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "tool": {
+                  "type": "string"
+                },
+                "input": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                },
+                "risk": {
+                  "type": "string",
+                  "enum": ["read", "write", "destructive"]
+                },
+                "reasons": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "code": {
+                        "type": "string",
+                        "enum": [
+                          "unknown_tool",
+                          "invalid_input",
+                          "install_deny_rule",
+                          "team_deny_rule",
+                          "agent_tool_deny",
+                          "connector_not_enabled",
+                          "connector_exposure",
+                          "tool_drifted",
+                          "install_ask_rule",
+                          "team_ask_rule",
+                          "risk_read",
+                          "risk_write",
+                          "risk_destructive",
+                          "mode_ask_all",
+                          "mode_ask_on_write",
+                          "mode_auto_not_allowlisted",
+                          "scheduled_run_no_prompt",
+                          "user_allow_rule",
+                          "approval_granted",
+                          "budget_exhausted",
+                          "default_prompt",
+                          "team_allow_rule",
+                          "not_available",
+                          "policy_error",
+                          "run_not_active",
+                          "not_a_member",
+                          "sandbox_policy_unavailable"
+                        ]
+                      },
+                      "stage": {
+                        "type": "string",
+                        "enum": [
+                          "install_deny",
+                          "team_deny",
+                          "ask_rule",
+                          "risk_class",
+                          "approval_mode",
+                          "user_allow",
+                          "prompt"
+                        ]
+                      },
+                      "message": {
+                        "type": "string",
+                        "maxLength": 1000
+                      },
+                      "rule_id": {
+                        "type": "string",
+                        "allOf": [
+                          {
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          {
+                            "pattern": "^[0-9a-f-]+$"
+                          }
+                        ]
+                      }
+                    },
+                    "required": ["code", "stage", "message"],
+                    "additionalProperties": false
+                  }
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["pending", "allowed", "denied", "expired"]
+                },
+                "cause": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "user",
+                        "ttl",
+                        "run_cancelled",
+                        "run_interrupted",
+                        "budget_exhausted",
+                        "run_failed"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "decided_by": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "allOf": [
+                        {
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        {
+                          "pattern": "^[0-9a-f-]+$"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "decided_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "expires_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                },
+                "remembered": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "approval_id",
+                "run_id",
+                "thread_id",
+                "tool_call_id",
+                "tool",
+                "input",
+                "risk",
+                "reasons",
+                "status",
+                "cause",
+                "decided_by",
+                "decided_at",
+                "expires_at",
+                "created_at",
+                "remembered"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["approvals"],
+        "additionalProperties": false
+      },
+      "ApprovalDecisionBody": {
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": ["allow", "deny"]
+          },
+          "remember": {
+            "type": "object",
+            "properties": {
+              "tool_glob": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "arg_pattern": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "maxLength": 512,
+                  "pattern": "^(\\/([^~/]|~[01])*)+$"
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "expires_in": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 31622400
+              }
+            },
+            "required": ["tool_glob"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["decision"],
         "additionalProperties": false
       }
     },

@@ -7,7 +7,7 @@ export interface RegisteredConnection {
   readonly id: string;
   readonly target: SandboxTarget;
   readonly sandboxId: string;
-  close(reason: "replaced" | "unauthorized" | "internal", message: string): void;
+  close(reason: "replaced" | "unauthorized" | "hibernating" | "internal", message: string): void;
   /** Re-check liveness, account and membership now (closes when no longer allowed). */
   revalidate(): void;
   /** Deliver pending commands now (a hint or a resync arrived). */
@@ -53,13 +53,25 @@ export class ConnectionRegistry {
   }
 
   /**
-   * Makes `conn` the sandbox's live connection (after a valid `hello`). Returns false when a newer
-   * connection of the same sandbox registered meanwhile (the caller closes itself as replaced).
-   * The row lock orders concurrent registrations; whoever registers later wins everywhere.
+   * Makes `conn` the sandbox's live connection (after a valid `hello`). Returns "replaced" when a
+   * newer connection of the same sandbox registered meanwhile (the caller closes itself as
+   * replaced), "hibernating" when the sandbox was hibernated (KOBE-25: a pod on its way out must
+   * not take commands; the hibernator holds the `sandboxes` row lock while deciding, so this read
+   * is ordered against it). The row lock orders concurrent registrations; whoever registers later
+   * wins everywhere.
    */
-  async register(conn: RegisteredConnection): Promise<boolean> {
+  async register(conn: RegisteredConnection): Promise<"registered" | "replaced" | "hibernating"> {
     const { teamId, userId } = conn.target;
-    const { previous, generation } = await withTeam(this.#db, teamId, async (tx) => {
+    const outcome = await withTeam(this.#db, teamId, async (tx) => {
+      // A live sandbox the lifecycle has no row for yet (created before KOBE-25, or by an
+      // operator tool) is adopted here, so the idle policy covers it from its first connection.
+      await tx.execute(sql`
+        INSERT INTO sandboxes (team_id, user_id, sandbox_id, state)
+        VALUES (${teamId}, ${userId}, ${conn.sandboxId}, 'running')
+        ON CONFLICT (team_id, user_id) DO NOTHING`);
+      const lifecycle = await tx.execute<{ state: string }>(sql`
+        SELECT state FROM sandboxes WHERE team_id = ${teamId} AND user_id = ${userId} FOR SHARE`);
+      if (lifecycle.rows[0]?.state === "hibernated") return "hibernating" as const;
       // Insert first: a concurrent first registration waits on the key, then sees the row below.
       const inserted = await tx.execute(sql`
         INSERT INTO sandbox_connections
@@ -85,8 +97,10 @@ export class ConnectionRegistry {
       }
       return { previous: undefined, generation: gen };
     });
+    if (outcome === "hibernating") return outcome;
+    const { previous, generation } = outcome;
     const local = this.#bySandbox.get(key(conn.target));
-    if (local && local.generation > generation) return false; // a later registration won
+    if (local && local.generation > generation) return "replaced"; // a later registration won
     this.#byId.set(conn.id, { conn, generation });
     this.#bySandbox.set(key(conn.target), { conn, generation });
     if (local && local.conn !== conn)
@@ -94,7 +108,7 @@ export class ConnectionRegistry {
     if (previous && previous !== local?.conn.id) {
       this.#byId.get(previous)?.conn.close("replaced", "replaced");
     }
-    return true;
+    return "registered";
   }
 
   /** Forgets `conn` here and marks its row closed (if it is still the sandbox's connection). */

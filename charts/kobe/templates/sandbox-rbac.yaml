@@ -95,7 +95,7 @@ rules:
     resources: ["services"]
     verbs: ["get"]
     resourceNames:
-      {{- range list "server" "bifrost" "mcp-proxy" "egress-proxy" }}
+      {{- range list "server" "model-gateway" "mcp-proxy" "egress-proxy" }}
       - {{ printf "%s-%s" $fullname . | quote }}
       {{- end }}
   {{- with .Values.global.imagePullSecrets }}

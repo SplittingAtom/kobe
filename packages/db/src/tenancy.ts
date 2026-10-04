@@ -17,10 +17,10 @@ import { platform } from "./tenancy/platform.js";
 import { policy } from "./tenancy/policy.js";
 import { sandbox } from "./tenancy/sandbox.js";
 import { schedules } from "./tenancy/schedules.js";
-import { TEAM_TABLE_PRIVILEGES, type Privilege } from "./tenancy/types.js";
+import { TEAM_TABLE_PRIVILEGES, type ColumnGrants, type Privilege } from "./tenancy/types.js";
 import { workspace } from "./tenancy/workspace.js";
 
-export type { Privilege } from "./tenancy/types.js";
+export type { ColumnGrants, Privilege } from "./tenancy/types.js";
 
 /** Every spec area's slice; exported for the registry tests. */
 export const TENANCY_DOMAINS = [
@@ -77,4 +77,16 @@ export const TEAM_REFERENCING_INSTALL_WIDE: Readonly<Partial<Record<InstallWideT
 export function appPrivilegesFor(table: string): readonly Privilege[] | undefined {
   if (isTeamTable(table)) return TEAM_TABLE_PRIVILEGES;
   return INSTALL_WIDE_GRANTS[table as InstallWideTable];
+}
+
+/** Column-level privileges on install-wide tables, on top of INSTALL_WIDE_GRANTS. */
+export const INSTALL_WIDE_COLUMN_GRANTS: Readonly<Partial<Record<InstallWideTable, ColumnGrants>>> =
+  Object.assign({}, ...TENANCY_DOMAINS.map((d) => d.columnGrants ?? {})) as Partial<
+    Record<InstallWideTable, ColumnGrants>
+  >;
+
+/** Column privileges the migration runner grants the app role on `table` (undefined: none). */
+export function appColumnPrivilegesFor(table: string): ColumnGrants | undefined {
+  if (isTeamTable(table)) return undefined;
+  return INSTALL_WIDE_COLUMN_GRANTS[table as InstallWideTable];
 }

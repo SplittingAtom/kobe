@@ -1,7 +1,9 @@
 {{- $fullname := include "kobe.fullname" . -}}
+{{- $b := include "kobe.bifrostValues" . | fromJson -}}
 # Components holding secrets or data are reachable only from pods in the release namespace.
-# Sandboxes (team namespaces, KOBE-22) are admitted to Bifrost only with sandbox.modelGatewayAccess
-# (off until Bifrost verifies their session tokens); their own namespace's policy limits egress.
+# Bifrost (KOBE-40) is narrower: only the model-gateway shim (inference, with a member's virtual key)
+# and the server (its admin API, for the config sync). Sandboxes reach models only through the shim,
+# never Bifrost itself (receiving side, so it holds wherever the CNI applies egress selectors loosely).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -12,23 +14,57 @@ spec:
   podSelector:
     matchLabels:
       {{- include "kobe.selectorLabels" (dict "root" . "component" "bifrost") | nindent 6 }}
-  policyTypes: ["Ingress"]
+  policyTypes:
+    - Ingress
+    {{- if $b.networkPolicy.restrictEgress }}
+    - Egress
+    {{- end }}
   ingress:
     - from:
-        - podSelector: {}
-    {{- if (include "kobe.sandboxValues" . | fromJson).modelGatewayAccess }}
-    # Only once Bifrost verifies sandbox session tokens (sandbox.modelGatewayAccess, KOBE-40/41).
-    - from:
-        - namespaceSelector:
+        - podSelector:
             matchLabels:
-              kobe.splittingatom.io/team-namespace: "true"
+              {{- include "kobe.selectorLabels" (dict "root" . "component" "model-gateway") | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              {{- include "kobe.selectorLabels" (dict "root" . "component" "server") | nindent 14 }}
       ports:
         - protocol: TCP
           port: 8080
+  {{- if $b.networkPolicy.restrictEgress }}
+  # Bifrost's own egress: DNS and model providers on public IPv4 addresses (allowedPorts). Local
+  # model servers (Ollama, vLLM) on private addresses need a rule in bifrost.networkPolicy.extraEgress
+  # and allow_private_network on their provider.
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              {{- toYaml (include "kobe.egressPrivateRanges" . | fromJsonArray) | nindent 14 }}
+      ports:
+        {{- range $b.networkPolicy.allowedPorts }}
+        - protocol: TCP
+          port: {{ int . }}
+        {{- end }}
+    {{- with $b.networkPolicy.extraEgress }}
+    {{- toYaml . | nindent 4 }}
     {{- end }}
+  {{- end }}
 ---
 # Sandboxes (team namespaces) must not reach the user-facing web app, the server's user API or the
-# scheduler: only the server's sandbox port 8081. The team namespace's own egress policy says the
+# scheduler: only the server's sandbox port 8081. The server's internal port 8082 admits only the
+# MCP proxy's pods; everything else outside team namespaces gets the app ports (8080, 8081). The team namespace's own egress policy says the
 # same; this is the receiving side, so it holds even where a CNI applies egress selectors loosely.
 # Everything that is not a team namespace (ingress controller, other Kobe pods, operators) is
 # unaffected; traffic from the node itself (kubelet probes) is not subject to NetworkPolicy here.
@@ -54,6 +90,11 @@ spec:
             matchExpressions:
               - key: kobe.splittingatom.io/team-namespace
                 operator: DoesNotExist
+      ports:
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8081
     - from:
         - namespaceSelector:
             matchLabels:
@@ -61,6 +102,14 @@ spec:
       ports:
         - protocol: TCP
           port: 8081
+    # The server's internal listener (MCP proxy policy re-check, KOBE-58): the MCP proxy only.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "kobe.selectorLabels" (dict "root" . "component" "mcp-proxy") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ include "kobe.serverInternalPort" . }}
 {{- if .Values.clamav.enabled }}
 ---
 apiVersion: networking.k8s.io/v1

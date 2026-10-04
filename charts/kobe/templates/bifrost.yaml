@@ -1,7 +1,21 @@
 {{- $fullname := include "kobe.fullname" . -}}
 {{- $sel := dict "root" . "component" "bifrost" -}}
-{{- $b := .Values.bifrost -}}
-# Bifrost model gateway (spec D30); configured by the server's config sync (KOBE-40).
+{{- $b := include "kobe.bifrostValues" . | fromJson -}}
+# Bifrost model gateway (spec D4, D30): provider keys, catalog models, the customer/team/virtual-key
+# hierarchy. Kobe is the source of truth: the server pushes everything (KOBE-40), so Bifrost's own
+# store is a cache that persistence only keeps across restarts (virtual keys, budget counters).
+# Sandboxes never reach it directly: only the model-gateway shim and the server may (its
+# NetworkPolicy in networkpolicies.yaml).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullname }}-bifrost
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+data:
+  config.json: |
+    {{- include "kobe.bifrostConfig" . | nindent 4 }}
+---
 {{- if $b.persistence.enabled }}
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -27,11 +41,11 @@ metadata:
     {{- include "kobe.labels" . | nindent 4 }}
     app.kubernetes.io/component: bifrost
 spec:
+  # One replica (values schema): virtual keys and budget counters live in this pod's store.
   replicas: {{ $b.replicas }}
-  {{- if $b.persistence.enabled }}
+  # Never two at once (a rolling update would briefly run a second, empty store).
   strategy:
     type: Recreate
-  {{- end }}
   selector:
     matchLabels:
       {{- include "kobe.selectorLabels" $sel | nindent 6 }}
@@ -39,6 +53,8 @@ spec:
     metadata:
       labels:
         {{- include "kobe.selectorLabels" $sel | nindent 8 }}
+      annotations:
+        checksum/config: {{ include "kobe.bifrostConfig" . | sha256sum }}
     spec:
       {{- include "kobe.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: {{ $fullname }}-workload
@@ -46,9 +62,16 @@ spec:
       {{- include "kobe.podSecurityContext" . | nindent 6 }}
       containers:
         - name: bifrost
-          image: "{{ $b.image.repository }}:{{ $b.image.tag }}"
+          image: {{ include "kobe.bifrostImage" . | quote }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           {{- include "kobe.containerSecurityContext" . | nindent 10 }}
+          env:
+            - name: BIFROST_ADMIN_USERNAME
+              value: kobe
+            - name: BIFROST_ADMIN_PASSWORD
+              {{- include "kobe.modelKeyRef" (dict "root" . "key" "bifrost-admin-password") | nindent 14 }}
+            - name: BIFROST_ENCRYPTION_KEY
+              {{- include "kobe.modelKeyRef" (dict "root" . "key" "bifrost-encryption-key") | nindent 14 }}
           ports:
             - name: http
               containerPort: 8080
@@ -68,6 +91,11 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /app/data
+            # Read-only config (no secrets in it) inside the writable data directory.
+            - name: config
+              mountPath: /app/data/config.json
+              subPath: config.json
+              readOnly: true
             - name: tmp
               mountPath: /tmp
       volumes:
@@ -78,6 +106,9 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        - name: config
+          configMap:
+            name: {{ $fullname }}-bifrost
         - name: tmp
           emptyDir: {}
 ---
