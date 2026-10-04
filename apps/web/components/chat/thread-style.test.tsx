@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
@@ -61,5 +61,26 @@ describe("assistant-ui thread styling", () => {
       expect(button.querySelector("svg")).toBeTruthy();
     }
     expect(screen.getByRole("button", { name: "Send" }).querySelector("svg")).toBeTruthy();
+  });
+
+  it("renders icon-button tooltips inside the chat shell so they get the shadcn tokens", async () => {
+    const t = fake.addThread("Sales");
+    const u1 = fake.addEntry(t, null, { role: "user", content: "q1" });
+    const a1 = fake.addEntry(t, u1, {
+      role: "assistant",
+      content: [{ type: "text", text: "a1" }],
+    });
+    fake.addEntry(t, a1, { role: "user", content: "q2" });
+    openApp(fake, t);
+    await screen.findByText("a1");
+    const answer = screen.getByText("a1").closest('[data-role="assistant"]') as HTMLElement;
+    const user = userEvent.setup();
+    await user.hover(within(answer).getByRole("button", { name: "Copy" }));
+    const tip = await waitFor(() => {
+      const el = document.querySelector('[data-slot="tooltip-content"]');
+      if (!el) throw new Error("tooltip not shown");
+      return el;
+    });
+    expect(tip.closest("[data-kobe-chat]")).toBeTruthy();
   });
 });

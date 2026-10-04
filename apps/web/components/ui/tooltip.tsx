@@ -25,6 +25,14 @@ function TooltipTrigger({ ...props }: React.ComponentProps<typeof TooltipPrimiti
   return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
 }
 
+/**
+ * The shadcn tokens are scoped to the chat shell, so the tooltip portals into it rather than
+ * under <body> (where its colors would resolve to undefined variables).
+ */
+function chatPortalContainer(): HTMLElement | undefined {
+  return document.querySelector<HTMLElement>("[data-kobe-chat]") ?? undefined;
+}
+
 function TooltipContent({
   className,
   sideOffset = 0,
@@ -32,7 +40,7 @@ function TooltipContent({
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Content>) {
   return (
-    <TooltipPrimitive.Portal>
+    <TooltipPrimitive.Portal container={chatPortalContainer()}>
       <TooltipPrimitive.Content
         data-slot="tooltip-content"
         sideOffset={sideOffset}
