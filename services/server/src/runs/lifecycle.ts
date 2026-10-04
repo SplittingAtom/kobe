@@ -6,7 +6,8 @@ import {
   type PiThreadConfig,
 } from "@kobe/protocol";
 import { sql, type KobeTx } from "@kobe/db";
-import type { NewRunEvent } from "../event-stream/append.js";
+import { omittedItems } from "./omitted-event.js";
+import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js";
 import { clampApprovalMode } from "../sandbox-wire/policy-check.js";
 import {
   applyTransition,
@@ -174,6 +175,13 @@ export async function promoteInTx(
       approvalMode,
     });
     transitions.push(applied.transition);
+    // KOBE-77: what the resolver left out, right after `run.started` (never on a recovery restart).
+    const items = omittedItems(resolved.omissions ?? []);
+    if (items !== undefined) {
+      await appendRunEventsInTx(tx, teamId, next.id, [
+        { type: "context.omitted", payload: { items } },
+      ]);
+    }
     return {
       transitions,
       plan: planOf(thread, { ...next, parentEntryId, approvalMode }, resolved, model),

@@ -19,6 +19,23 @@ function apply(run: LiveRun, events: KobeEvent[]) {
   return applyRunEvents(run, events);
 }
 
+describe("context.omitted (KOBE-77)", () => {
+  it("is a run notice, and replaying the stream from 0 rebuilds it once", () => {
+    seq = 0;
+    const events = [
+      ev("run.started", { thread_id: THREAD, agent_id: null, agent_version: null }),
+      ev("context.omitted", {
+        items: [{ kind: "skill", name: "sql-helper", reason: "blocklisted" }],
+      }),
+    ];
+    const first = applyRunEvents(newLiveRun(RUN), events).run;
+    expect(first.notices.map((n) => n.type)).toEqual(["context.omitted"]);
+    const replayed = applyRunEvents(first, events).run;
+    expect(replayed.notices).toHaveLength(1);
+    expect(applyRunEvents(newLiveRun(RUN), events).run.notices).toEqual(first.notices);
+  });
+});
+
 describe("applyRunEvents", () => {
   it("assembles deltas per message and content index, then drops them when the entry commits", () => {
     seq = 0;

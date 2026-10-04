@@ -17,6 +17,7 @@ export const KOBE_EVENT_TYPES = [
   "run.queued",
   "run.started",
   "sandbox.waking",
+  "context.omitted",
   "text.delta",
   "reasoning.delta",
   "tool.call",
@@ -77,6 +78,25 @@ function withinBytes<T extends z.ZodType>(schema: T, max: number): T {
     message: `over ${max} bytes as JSON`,
   }) as unknown as T;
 }
+
+/** `context.omitted` carries at most this many items (producers truncate). */
+export const CONTEXT_OMITTED_MAX_ITEMS = 100;
+
+const contextOmissionSchema = z.strictObject({
+  kind: z.enum(["skill", "connector", "model"]),
+  name: z.string().min(1).max(256),
+  reason: z.enum([
+    "agent_exclusive",
+    "team_disabled",
+    "blocklisted",
+    "shadowed_by_agent",
+    "not_team_enabled",
+    "not_user_connected",
+    "no_team_default",
+  ]),
+});
+
+export type ContextOmission = z.infer<typeof contextOmissionSchema>;
 
 /** Payload schema per event type. Unknown keys are rejected so producers can't drift silently. */
 export const EVENT_PAYLOAD_SCHEMAS = {
@@ -154,6 +174,15 @@ export const EVENT_PAYLOAD_SCHEMAS = {
     tool_call_id: idSchema,
     tool: z.string().min(1).max(256),
     reasons: z.array(policyReasonSchema).min(1),
+  }),
+  "context.omitted": z.strictObject({
+    /**
+     * What the run-start resolver left out of this run's effective set (KOBE-77), so the chat can
+     * say so. Emitted once, right after `run.started`, only when something was omitted. Names are
+     * the agent's own or the owner's personal items; never another team's. Additive: clients that
+     * predate it ignore the event.
+     */
+    items: z.array(contextOmissionSchema).min(1).max(CONTEXT_OMITTED_MAX_ITEMS),
   }),
   "egress.blocked": z.strictObject({
     domain: z.string().min(1).max(253),

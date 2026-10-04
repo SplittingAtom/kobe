@@ -321,6 +321,17 @@ describe("queue, Steer and Stop (D17)", () => {
     expect(await screen.findByText("answer to the edit")).toBeTruthy();
   });
 
+  it("shows what the resolver left out as a notice (KOBE-77)", async () => {
+    const { t } = threadWithHistory();
+    openApp(fake, t);
+    const { runId } = await sendAndStart("use github", t);
+    fake.emit(runId, "context.omitted", {
+      items: [{ kind: "connector", name: "github", reason: "not_user_connected" }],
+    });
+    const note = (await screen.findByText(/left out of this run/)).closest('[role="note"]');
+    expect(note?.textContent).toContain("Connector github");
+  });
+
   it("Steer now injects into the running agent (button and Ctrl+Shift+Enter)", async () => {
     const { t } = threadWithHistory();
     openApp(fake, t);
