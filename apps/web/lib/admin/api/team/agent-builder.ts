@@ -47,8 +47,9 @@ export const getTeamAgent = (teamId: string, id: string): Promise<ApiResult<Agen
 export const createTeamAgent = (
   teamId: string,
   body: DefinitionBody & { readonly slug?: string | undefined },
+  scope: "team" | "personal" = "team",
 ): Promise<ApiResult<AgentDetailSaved>> =>
-  apiRequest("/v1/agents", { method: "POST", json: { scope: "team", ...body }, teamId });
+  apiRequest("/v1/agents", { method: "POST", json: { scope, ...body }, teamId });
 
 export const saveTeamAgent = (
   teamId: string,

@@ -2,11 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
-import { TeamSwitcher } from "../../app/team-switcher";
 import { fetchTeamAccess } from "../../lib/admin/api/access";
-import type { TeamAccess } from "../../lib/admin/nav/types";
 import type { ApiError, ApiResult } from "../../lib/api/client";
-import { MY_SECTIONS, mySectionForPath } from "../../lib/my/nav";
+import type { TeamAccess } from "../../lib/admin/nav/types";
+import { TeamSwitcher } from "../../app/team-switcher";
 import { ACTIVE_TEAM_EVENT } from "../../lib/teams";
 import { ConsoleAccessContext } from "../admin/console-context";
 import { ErrorNotice } from "../admin/error-notice";
@@ -18,22 +17,21 @@ type State =
   | { readonly status: "ready"; readonly access: TeamAccess };
 
 /**
- * Shell of the member's own area. Unlike the consoles it asks for no admin permission: any team
- * member gets in, and the pages' APIs check what they need (personal items are owner-only).
- * It provides the same team access context the team console pages read.
+ * Frame for the member's own area (KOBE-97). Any member of the active team may open it: no admin
+ * permission is checked here, and every API call checks ownership again. It reuses the team
+ * access context so the admin builder components work unchanged.
  */
-export function MyShell({
-  pathname,
+export function MyAgentsShell({
   children,
   loadAccess = () => fetchTeamAccess(),
 }: {
-  readonly pathname: string;
   readonly children: ReactNode;
   readonly loadAccess?: () => Promise<ApiResult<TeamAccess>>;
 }) {
   const [state, setState] = useState<State>({ status: "loading" });
   const [attempt, setAttempt] = useState(0);
 
+  // A fresh session has no active team until the switcher picks one: ask again when it does.
   useEffect(() => {
     const retry = () => {
       setState({ status: "loading" });
@@ -53,25 +51,22 @@ export function MyShell({
         );
       },
       () => {
-        if (current)
+        if (current) {
           setState({
             status: "error",
             error: { status: 0, code: "client_error", message: "Could not check your access." },
           });
+        }
       },
     );
     return () => {
       current = false;
     };
-    // loadAccess is a stable default or a test stub; `attempt` drives reloads.
+    // `loadAccess` is a stable default or a test stub; `attempt` drives the re-check.
   }, [attempt]);
 
-  const current = mySectionForPath(pathname);
   return (
     <div className={styles.shell} data-kobe-console="">
-      <a href="#console-main" className={styles.skipLink}>
-        Skip to content
-      </a>
       <header className={styles.header}>
         <div className={styles.brandRow}>
           <p className={styles.brand}>
@@ -81,22 +76,7 @@ export function MyShell({
         </div>
         {state.status === "ready" && <p className={styles.who}>{state.access.user.name}</p>}
       </header>
-      <div className={styles.body}>
-        <nav aria-label="My area sections" className={styles.nav}>
-          <ul>
-            {MY_SECTIONS.map((s) => (
-              <li key={s.id}>
-                <Link
-                  href={s.href}
-                  className={styles.navLink}
-                  aria-current={current?.id === s.id ? "page" : undefined}
-                >
-                  {s.label}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </nav>
+      <div className={`${styles.body} ${styles.bodySingle}`}>
         <main id="console-main" className={styles.main}>
           {state.status === "loading" && <p role="status">Checking your access…</p>}
           {state.status === "error" && <ErrorNotice error={state.error} />}

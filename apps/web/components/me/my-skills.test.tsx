@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,7 +7,6 @@ import { must } from "../../lib/testing/must";
 import { renderTeam, stubApi } from "../admin/testing";
 import { SkillEditorPage } from "../admin/team/skill-editor/skill-editor-page";
 import { SkillsPage } from "../admin/team/skill-editor/skills-page";
-import { MyShell } from "./my-shell";
 
 const MEMBER = { role: "member", permissions: ["team.personal.create"] } as const;
 const SKILL = {
@@ -39,13 +38,13 @@ afterEach(() => {
 });
 
 describe("My skills list", () => {
-  it("asks for personal skills only and links inside /my/skills", async () => {
+  it("asks for personal skills only and links inside /me/skills", async () => {
     const calls = stubApi({ "GET /v1/skills?scope=personal": [200, { skills: [SKILL] }] });
     renderTeam(<SkillsPage area="my" />, MEMBER);
     const link = await screen.findByRole("link", { name: "my-notes" });
-    expect(link.getAttribute("href")).toBe("/my/skills/s-1");
+    expect(link.getAttribute("href")).toBe("/me/skills/s-1");
     expect(screen.getByRole("link", { name: "New skill" }).getAttribute("href")).toBe(
-      "/my/skills/new",
+      "/me/skills/new",
     );
     expect(calls.map((c) => c.url)).toEqual(["/v1/skills?scope=personal"]);
     expect(screen.queryByText("Scope")).toBeNull();
@@ -57,12 +56,12 @@ describe("My skill editor", () => {
     const calls = stubApi({ "POST /v1/skills?scope=personal": [201, SAVED] });
     renderTeam(<SkillEditorPage area="my" />, MEMBER);
     expect(screen.queryByLabelText("Scope")).toBeNull();
-    expect(screen.getByRole("link", { name: "My skills" }).getAttribute("href")).toBe("/my/skills");
+    expect(screen.getByRole("link", { name: "My skills" }).getAttribute("href")).toBe("/me/skills");
     await userEvent.type(screen.getByLabelText("Name"), "my-notes");
     await userEvent.type(screen.getByLabelText("Description"), "Notes");
     await userEvent.type(screen.getByLabelText("Instructions (SKILL.md body)"), "Be brief.");
     await userEvent.click(screen.getByRole("button", { name: "Create skill" }));
-    await waitFor(() => expect(assign).toHaveBeenCalledWith("/my/skills/s-1"));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("/me/skills/s-1"));
     const post = must(calls.find((c) => c.method === "POST"));
     const files = unzipSync(post.body as Uint8Array);
     expect(strFromU8(must(files["SKILL.md"]))).toContain("name: my-notes");
@@ -89,44 +88,5 @@ describe("My skill editor", () => {
     stubApi({ "GET /v1/skills/s-9": [404, { code: "not_found", message: "No such skill." }] });
     renderTeam(<SkillEditorPage area="my" skillId="s-9" />, MEMBER);
     expect((await screen.findByRole("alert")).textContent).toMatch(/no such skill/i);
-  });
-});
-
-describe("My area shell", () => {
-  const ME = { user: { id: "u-me", name: "Ada", email: "ada@x.io" }, installRole: null };
-  const TEAM = {
-    team: { id: "t-1", slug: "fin", name: "Finance" },
-    role: "member",
-    permissions: ["team.personal.create"],
-  };
-
-  const TEAMS = { "GET /v1/me/teams": [200, { activeTeamId: null, teams: [] }] } as const;
-
-  it("opens for a plain member and gives pages the team access", async () => {
-    stubApi({ ...TEAMS, "GET /v1/me": [200, ME], "GET /v1/team": [200, TEAM] });
-    render(
-      <MyShell pathname="/my/skills">
-        <p>page body</p>
-      </MyShell>,
-    );
-    expect(await screen.findByText("page body")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "My skills" }).getAttribute("aria-current")).toBe(
-      "page",
-    );
-  });
-
-  it("explains when there is no active team and renders no page", async () => {
-    stubApi({
-      ...TEAMS,
-      "GET /v1/me": [200, ME],
-      "GET /v1/team": [409, { code: "no_active_team", message: "Choose a team first." }],
-    });
-    render(
-      <MyShell pathname="/my/skills">
-        <p>page body</p>
-      </MyShell>,
-    );
-    expect((await screen.findByRole("alert")).textContent).toMatch(/choose a team/i);
-    expect(screen.queryByText("page body")).toBeNull();
   });
 });

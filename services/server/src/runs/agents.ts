@@ -1,7 +1,8 @@
 import { resolvePinnedAgent } from "../agents/versions.js";
 import { readApprovalFloor, strictestApprovalMode } from "../policy/approval-floor.js";
 import { resolveEffective } from "../resolver/resolve.js";
-import { buildResolveInput, loadTeamFacts } from "./resolver-input.js";
+import { agentSkills } from "@kobe/agent-file";
+import { buildResolveInput, loadSkillFacts, loadTeamFacts } from "./resolver-input.js";
 import type { RunAgentResolver } from "./seams.js";
 
 /**
@@ -37,12 +38,19 @@ export const PINNED_AGENTS: RunAgentResolver = {
     }
     const { frontmatter } = pinned.version.definition;
     const team = await loadTeamFacts(tx, input.teamId);
+    const skills = await loadSkillFacts(tx, {
+      teamId: input.teamId,
+      userId: input.ownerUserId,
+      agentSkillNames: agentSkills(frontmatter).names,
+      personalSkillsDisabled: team.personalSkillsDisabled,
+    });
     const resolved = resolveEffective(
       buildResolveInput({
         frontmatter,
         versionMode: pinned.version.toolManifest.approval_mode.effective,
         floor,
         team,
+        skills,
       }),
     );
     if (!resolved.ok) return { ok: false, error: resolved.error };

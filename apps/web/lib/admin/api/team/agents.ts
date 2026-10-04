@@ -12,6 +12,17 @@ export async function listTeamAgents(teamId: string): Promise<ApiResult<readonly
   return res.ok ? { ...res, data: res.data.agents } : res;
 }
 
+/** The caller's own personal agents (the server lists nobody else's, KOBE-45/97). */
+export async function listPersonalAgents(
+  teamId: string,
+): Promise<ApiResult<readonly AgentSummary[]>> {
+  const res = await apiRequest<{ agents: AgentSummary[] }>(
+    "/v1/agents?scope=personal&include_archived=true",
+    { teamId },
+  );
+  return res.ok ? { ...res, data: res.data.agents } : res;
+}
+
 export function setTeamAgentStatus(
   teamId: string,
   id: string,

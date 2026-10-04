@@ -1,3 +1,4 @@
+import type { ScanResult } from "@kobe/skill-scanner";
 import {
   and,
   desc,
@@ -14,6 +15,7 @@ import {
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { MAX_LIVE_SKILLS, MAX_SKILL_VERSIONS } from "./limits.js";
+import { recordPendingReview, recordPersonalScan } from "./review.js";
 
 /**
  * Skill bundles in the database (KOBE-78). Team skills live in RLS tables and are always touched
@@ -63,6 +65,8 @@ export interface NewSkillVersion {
   readonly fileCount: number;
   readonly uncompressedBytes: number;
   readonly uploadedBy: string;
+  /** Scanner result for these exact bytes (KOBE-80). */
+  readonly scan: ScanResult;
 }
 
 export type UploadError = "unchanged" | "skill_limit" | "version_limit";
@@ -117,6 +121,21 @@ export function uploadSkillVersion(
       : await insertSkill(tx, location, input);
     const number = skill.latestVersion;
     const version = await insertVersion(tx, location, skill.id, number, input);
+    if (location.scope === "team") {
+      await recordPendingReview(
+        tx,
+        {
+          teamId: location.teamId,
+          skillId: skill.id,
+          version: number,
+          slug: skill.slug,
+          contentHash: input.contentHash,
+        },
+        input.scan,
+      );
+    } else {
+      await recordPersonalScan(tx, { skillId: skill.id, version: number }, input.scan);
+    }
     await recordAudit(tx, {
       action: "skill.uploaded",
       teamId: location.scope === "team" ? location.teamId : null,
@@ -129,6 +148,7 @@ export function uploadSkillVersion(
         bytes: input.sizeBytes,
         files: input.fileCount,
         source: input.source,
+        findings: input.scan.findings.length,
       },
     });
     return { ok: true, skill, version };

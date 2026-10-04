@@ -22,7 +22,7 @@ const PATHS: Readonly<Record<SkillArea, SkillPaths>> = {
     newScope: "team",
   },
   my: {
-    base: "/my/skills",
+    base: "/me/skills",
     listTitle: "My skills",
     backLabel: "My skills",
     listScope: "personal",
