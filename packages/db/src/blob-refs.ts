@@ -14,10 +14,12 @@ export interface BlobRefColumn {
 
 /**
  * Every column that stores an object key. `kobe backup` checks, in its Postgres snapshot, that each
- * referenced key is in the bucket listing it records, and refuses otherwise. The retention job
- * (KOBE-18) deletes a released key only when no column listed here still references it in the
- * team, so shared and deduplicated objects survive. Every listed table is a team table with
- * `team_id`; index (`team_id`, column) or keep the table small, since the job looks keys up by it.
+ * referenced key is in the bucket listing it records, and refuses otherwise. Every listed table is
+ * a team table with `team_id`. The retention job (KOBE-18) deletes only keys in a purged thread's
+ * own tree (`<prefix>teams/<team>/threads/<thread>/`), and only when no `thread: true` column of
+ * the team still references them (another thread's rows, e.g. a fork), so shared and deduplicated
+ * thread objects survive; it never looks at the other columns (their keys can't be in a thread
+ * tree). Index `thread: true` columns on (`team_id`, column): the job looks keys up by them.
  * When your table stores object keys, add its column here (one line per column, in the PR that
  * adds the column).
  */
