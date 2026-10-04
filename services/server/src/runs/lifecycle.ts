@@ -1,5 +1,4 @@
 import {
-  CONTEXT_OMITTED_MAX_ITEMS,
   isActiveRunStatus,
   queueMayAdvance,
   type ApprovalMode,
@@ -7,6 +6,7 @@ import {
   type PiThreadConfig,
 } from "@kobe/protocol";
 import { sql, type KobeTx } from "@kobe/db";
+import { omittedItems } from "./omitted-event.js";
 import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js";
 import { clampApprovalMode } from "../sandbox-wire/policy-check.js";
 import {
@@ -176,8 +176,8 @@ export async function promoteInTx(
     });
     transitions.push(applied.transition);
     // KOBE-77: what the resolver left out, right after `run.started` (never on a recovery restart).
-    if (resolved.omissions !== undefined && resolved.omissions.length > 0) {
-      const items = resolved.omissions.slice(0, CONTEXT_OMITTED_MAX_ITEMS);
+    const items = omittedItems(resolved.omissions ?? []);
+    if (items !== undefined) {
       await appendRunEventsInTx(tx, teamId, next.id, [
         { type: "context.omitted", payload: { items } },
       ]);
