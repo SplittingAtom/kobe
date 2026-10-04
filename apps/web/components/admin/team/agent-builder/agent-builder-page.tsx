@@ -152,6 +152,8 @@ function Builder({
 
   // Publishing is its own right (the server checks `access.publish`), separate from editing.
   const canPublish = agent !== null && !readOnly && agent.canPublish === true;
+  // Exporting needs the right to read the definition, not edit rights (archived agents export too).
+  const canExport = agent !== null && agent.canExport === true;
 
   return (
     <>
@@ -235,7 +237,7 @@ function Builder({
           </div>
         )}
       </form>
-      {agent && agent.currentVersion !== null && (
+      {agent && canExport && agent.currentVersion !== null && (
         <div className={styles.toolbar}>
           <OrbitExportButton
             teamId={teamId}
@@ -273,6 +275,7 @@ function Builder({
           agentId={agent.id}
           currentVersion={agent.currentVersion}
           agentSlug={agent.slug}
+          canExport={canExport}
           canRestore={canPublish}
           restoring={mutation.pending}
           onRestore={(v) => void restore(v)}

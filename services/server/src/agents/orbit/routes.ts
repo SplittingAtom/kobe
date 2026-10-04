@@ -82,6 +82,8 @@ export function mountOrbitExport<E extends { Variables: object }>(
         "content-type": "application/yaml; charset=utf-8",
         "content-disposition": `attachment; filename="${found.agent.slug}-v${record.version}.orbit.yaml"`,
         "x-content-type-options": "nosniff",
+        // A definition export is sensitive and tied to the caller: never cached.
+        "cache-control": "no-store",
       });
     });
   });

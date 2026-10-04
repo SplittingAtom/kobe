@@ -18,6 +18,7 @@ const AGENT = {
   updatedAt: "2026-10-01T10:00:00Z",
   canEdit: true,
   canPublish: true,
+  canExport: true,
   starters: [],
   frontmatter: { name: "Triage", approval_mode: "ask-on-write" },
   prompt: "Be helpful.",
@@ -362,6 +363,38 @@ describe("Agent builder: Export to Orbit (KOBE-91)", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Export to Orbit" }));
     expect((await screen.findByRole("alert")).textContent).toMatch(/not enabled/);
     expect(click).not.toHaveBeenCalled();
+  });
+
+  it("shows the toolbar button and a button per version only when canExport allows it", async () => {
+    stubApi(READ);
+    renderTeam(<AgentBuilderPage agentId="a-1" />);
+    const history = await screen.findByRole("region", { name: "Version history" });
+    expect(await screen.findByRole("button", { name: "Export to Orbit" })).toBeTruthy();
+    expect(
+      await within(history).findAllByRole("button", { name: /^Export version \d to Orbit$/ }),
+    ).toHaveLength(2);
+  });
+
+  it("hides every export button without canExport, even for an editor and publisher", async () => {
+    stubApi({
+      ...READ,
+      "GET /v1/agents/a-1": [200, { agent: { ...AGENT, canExport: false } }],
+    });
+    renderTeam(<AgentBuilderPage agentId="a-1" />);
+    const history = await screen.findByRole("region", { name: "Version history" });
+    await within(history).findAllByRole("row");
+    expect(screen.queryByRole("button", { name: /Orbit/ })).toBeNull();
+    // The other actions are unaffected by the export flag.
+    expect(within(history).getByRole("button", { name: "Restore version 1" })).toBeTruthy();
+  });
+
+  it("hides export when the server sends no canExport flag at all", async () => {
+    const { canExport: _omit, ...legacy } = AGENT;
+    stubApi({ ...READ, "GET /v1/agents/a-1": [200, { agent: legacy }] });
+    renderTeam(<AgentBuilderPage agentId="a-1" />);
+    const history = await screen.findByRole("region", { name: "Version history" });
+    await within(history).findAllByRole("row");
+    expect(screen.queryByRole("button", { name: /Orbit/ })).toBeNull();
   });
 
   it("offers no export for an agent that was never published", async () => {

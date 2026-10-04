@@ -54,6 +54,12 @@ describe("agentSummary rights", () => {
     setStatus: false,
   });
 
+  it("reports whether the definition (and so an export) may be read", () => {
+    const member: AgentAccess = { ...access(false, false), readDefinition: false };
+    expect(agentSummary(agent, member)).toMatchObject({ canExport: false });
+    expect(agentSummary(agent, access(false, false))).toMatchObject({ canExport: true });
+  });
+
   it("reports edit and publish separately", () => {
     expect(agentSummary(agent, access(true, false))).toMatchObject({
       canEdit: true,

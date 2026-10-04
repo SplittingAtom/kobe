@@ -138,6 +138,8 @@ export function agentSummary(agent: AgentRecord, access: AgentAccess) {
     canEdit: access.edit,
     /** Publish and rollback need their own right (D8): editing a draft doesn't imply it. */
     canPublish: access.publish,
+    /** Reading the definition is what exporting a version needs (Orbit export, KOBE-91). */
+    canExport: access.readDefinition,
   };
 }
 

@@ -37,6 +37,10 @@ No migrations.
   as a download; a refusal shows the server's reason in the page and saves nothing (a plain link
   would download the JSON error). Shown under the form for the current version (also when the form
   is read-only) and per row in the version history.
+- **Review fixes:** export answers `Cache-Control: no-store`; only published versions exist, so a
+  draft or unpublished number is 404 `version_not_found` (tested, and v1 never shows later draft
+  text). Agent summaries gain `canExport` (= `access.readDefinition`, the server's own check); both
+  the toolbar and per-version buttons need it (tested on, off and absent).
 - **Inventory (ac-1):** KOBE-86 had not landed on main when this was written, so the action is in
   the builder only. The inventory can reuse `OrbitExportButton` unchanged.
 

@@ -104,6 +104,7 @@ describe("GET /v1/agents/:id/versions/:version/orbit (KOBE-91)", () => {
       /^attachment; filename="exporter-.*-v1\.orbit\.yaml"$/,
     );
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("cache-control")).toBe("no-store");
     expect(res.text).toMatch(/^# Note: MCP tools are not included/);
     const config = orbitExperimentSchema.parse(parse(res.text));
     expect(config.setup.agents[0]?.model).toBe("anthropic/claude-fast");
@@ -132,6 +133,32 @@ describe("GET /v1/agents/:id/versions/:version/orbit (KOBE-91)", () => {
     const id = await published("bob");
     expect((await orbit("bob", id, 9)).status).toBe(404);
     expect((await orbit("bob", id, 0)).status).toBe(400);
+  });
+
+  it("exports only published versions: a never-published agent and an unpublished draft give 404", async () => {
+    const draftOnly = await as.bob.post("/v1/agents", {
+      scope: "team",
+      frontmatter: { name: "Draft only" },
+      prompt: "Never published.",
+    });
+    const draftId = draftOnly.json.agent.id as string;
+    expect((await orbit("bob", draftId)).status).toBe(404);
+
+    const id = await published("bob");
+    const edited = await as.bob.put(
+      `/v1/agents/${id}`,
+      { frontmatter: { name: "Edited" }, prompt: "Unpublished draft text." },
+      ANY,
+    );
+    expect(edited.status).toBe(200);
+    const next = await orbit("bob", id, 2);
+    expect(next.status).toBe(404);
+    expect(next.json.code).toBe("version_not_found");
+    // v1 still exports as published, never the newer draft.
+    const v1 = await orbit("bob", id, 1);
+    expect(v1.status).toBe(200);
+    expect(v1.text).toContain("You export.");
+    expect(v1.text).not.toContain("Unpublished draft text.");
   });
 
   it("refuses members (403) and other teams (404)", async () => {

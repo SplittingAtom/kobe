@@ -15,6 +15,7 @@ export function VersionHistory({
   agentId,
   agentSlug,
   currentVersion,
+  canExport,
   canRestore,
   restoring,
   onRestore,
@@ -23,6 +24,7 @@ export function VersionHistory({
   readonly agentId: string;
   readonly agentSlug: string;
   readonly currentVersion: number | null;
+  readonly canExport: boolean;
   readonly canRestore: boolean;
   readonly restoring: boolean;
   readonly onRestore: (version: number) => void;
@@ -73,13 +75,15 @@ export function VersionHistory({
                           <DateTime value={v.publishedAt} />
                         </td>
                         <td>
-                          <OrbitExportButton
-                            teamId={teamId}
-                            agentId={agentId}
-                            agentSlug={agentSlug}
-                            version={v.version}
-                            label={`Export version ${v.version} to Orbit`}
-                          />{" "}
+                          {canExport && (
+                            <OrbitExportButton
+                              teamId={teamId}
+                              agentId={agentId}
+                              agentSlug={agentSlug}
+                              version={v.version}
+                              label={`Export version ${v.version} to Orbit`}
+                            />
+                          )}{" "}
                           {canRestore && v.version !== currentVersion && (
                             <button
                               type="button"

@@ -17,6 +17,8 @@ export interface AgentSummary {
   readonly canEdit: boolean;
   /** Publish and rollback (a separate right from editing the draft). */
   readonly canPublish?: boolean;
+  /** The caller may read the definition, which exporting a version needs (KOBE-91). */
+  readonly canExport?: boolean;
 }
 
 export interface AgentSaved {
