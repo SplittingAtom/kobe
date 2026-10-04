@@ -52,6 +52,9 @@ const SHOWN_5XX_CODES: ReadonlySet<string> = new Set([
   "isolation_unavailable",
   "sandbox_unavailable",
   "search_timeout",
+  // Model admin (KOBE-40/44): fixed server messages naming the way out.
+  "models_not_configured",
+  "gateway_unavailable",
 ]);
 
 function fallback(status: number): ApiError {

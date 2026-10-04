@@ -453,6 +453,30 @@
   flex: 1;
 }
 
+/* Model picker (KOBE-44): a native select at the start of the composer's action bar. */
+.modelPicker select {
+  max-width: 16rem;
+  padding: 0.3rem 0.5rem;
+  color: inherit;
+  background: var(--admin-bg);
+  border: 1px solid var(--admin-border);
+  border-radius: 0.375rem;
+  font: inherit;
+}
+
+.modelPicker select[aria-invalid="true"] {
+  border-color: var(--admin-danger);
+}
+
+.modelWarning {
+  flex-basis: 100%;
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  color: var(--admin-danger);
+  background: var(--admin-danger-bg);
+  border-radius: 0.375rem;
+}
+
 .banner {
   margin: 0;
   padding: 0.5rem 0.75rem;

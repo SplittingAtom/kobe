@@ -2245,6 +2245,9 @@
           "shared_to_project": {
             "type": "boolean"
           },
+          "model": {
+            "type": ["string", "null"]
+          },
           "leaf_entry_id": {
             "anyOf": [
               {
@@ -2302,6 +2305,7 @@
           "agent_id",
           "agent_version",
           "shared_to_project",
+          "model",
           "leaf_entry_id",
           "last_activity_at",
           "created_at",
@@ -2398,6 +2402,9 @@
                 "shared_to_project": {
                   "type": "boolean"
                 },
+                "model": {
+                  "type": ["string", "null"]
+                },
                 "leaf_entry_id": {
                   "anyOf": [
                     {
@@ -2455,6 +2462,7 @@
                 "agent_id",
                 "agent_version",
                 "shared_to_project",
+                "model",
                 "leaf_entry_id",
                 "last_activity_at",
                 "created_at",
@@ -2559,6 +2567,9 @@
                 "shared_to_project": {
                   "type": "boolean"
                 },
+                "model": {
+                  "type": ["string", "null"]
+                },
                 "leaf_entry_id": {
                   "anyOf": [
                     {
@@ -2655,6 +2666,7 @@
                 "agent_id",
                 "agent_version",
                 "shared_to_project",
+                "model",
                 "leaf_entry_id",
                 "last_activity_at",
                 "created_at",
@@ -2757,6 +2769,9 @@
           "shared_to_project": {
             "type": "boolean"
           },
+          "model": {
+            "type": ["string", "null"]
+          },
           "leaf_entry_id": {
             "anyOf": [
               {
@@ -2815,6 +2830,9 @@
                 "type": "null"
               }
             ]
+          },
+          "agent_model": {
+            "type": ["string", "null"]
           },
           "entries": {
             "type": "array",
@@ -2898,12 +2916,14 @@
           "agent_id",
           "agent_version",
           "shared_to_project",
+          "model",
           "leaf_entry_id",
           "last_activity_at",
           "created_at",
           "deleted_at",
           "purge_after",
           "agent_current_version",
+          "agent_model",
           "entries",
           "next_entries_after"
         ],
@@ -3020,6 +3040,18 @@
             "minLength": 1,
             "maxLength": 200,
             "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -3042,6 +3074,18 @@
           },
           "shared_to_project": {
             "type": "boolean"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -3153,6 +3197,9 @@
           "shared_to_project": {
             "type": "boolean"
           },
+          "model": {
+            "type": ["string", "null"]
+          },
           "leaf_entry_id": {
             "anyOf": [
               {
@@ -3210,6 +3257,7 @@
           "agent_id",
           "agent_version",
           "shared_to_project",
+          "model",
           "leaf_entry_id",
           "last_activity_at",
           "created_at",

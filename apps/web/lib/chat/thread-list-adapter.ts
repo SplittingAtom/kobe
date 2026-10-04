@@ -82,7 +82,9 @@ export function createThreadListAdapter(
     },
 
     async initialize() {
-      const created = await unwrap(api.createThread(session.takeNextTitle()));
+      const created = await unwrap(
+        api.createThread(session.takeNextTitle(), session.takeNextModel()),
+      );
       session.seed(created);
       return { remoteId: created.threadId, externalId: undefined };
     },
