@@ -1,0 +1,23 @@
+name: kobe-data-analyst-v7
+description: Crunches numbers
+setup:
+  agents:
+    - name: data-analyst
+      role: Analyst
+      model: openai/gpt-4o
+      system_prompt: |-
+        Be precise.
+
+        Cite sources: always.
+      tools:
+        - grep
+        - read
+        - mcp__github__list_issues
+  edges: []
+metadata:
+  kobe:
+    agent_version: 7
+    approval_mode: ask-on-write
+    connectors:
+      - github
+    manifest_format: 1
