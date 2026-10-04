@@ -8,7 +8,7 @@ export const SEEDED_TABLES: Readonly<Record<string, string>> = {
   egress_domains:
     "egress presets seeded by migration 0027_egress_rls (KOBE-38); the backup carries the install's own ceiling",
   model_gateway_state:
-    "the gateway sync's progress row seeded by migration 0033_models_rls (KOBE-40); the backup carries the install's own",
+    "the gateway sync's progress row seeded by migration 0040_models_rls (KOBE-40); the backup carries the install's own",
 };
 
 export function isSeeded(table: string): boolean {

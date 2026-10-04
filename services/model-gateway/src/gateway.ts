@@ -96,8 +96,10 @@ function sendError(
 type BodyResult = Buffer | "too_large" | "busy";
 
 /**
- * Reads a request body of at most `max` bytes, taking its bytes from the budget first (the declared
- * length up front, or chunk by chunk when there is none). `taken` reports what to give back.
+ * Reads a request body of at most `max` bytes, taking its bytes from the budget first. With a
+ * declared length the body is copied into one buffer of that size as it arrives (≈1× in memory);
+ * without one (chunked) the chunks are joined at the end, briefly ≈2×, so chunked bodies are
+ * charged twice their size. `taken` reports what to give back.
  */
 function readBody(
   req: IncomingMessage,
@@ -119,6 +121,7 @@ function readBody(
       }
       taken(declared);
     }
+    const fixed = declared !== undefined ? Buffer.allocUnsafe(declared) : undefined;
     const chunks: Buffer[] = [];
     let size = 0;
     let done = false;
@@ -130,15 +133,19 @@ function readBody(
     };
     req.on("data", (chunk: Buffer) => {
       if (done) return;
-      size += chunk.length;
-      if (size > max) return finish("too_large");
-      if (declared === undefined) {
-        if (!take(chunk.length)) return finish("busy");
-        taken(chunk.length);
+      if (size + chunk.length > max || (fixed && size + chunk.length > fixed.length)) {
+        return finish("too_large");
       }
-      chunks.push(chunk);
+      if (fixed) {
+        chunk.copy(fixed, size);
+      } else {
+        if (!take(2 * chunk.length)) return finish("busy");
+        taken(2 * chunk.length);
+        chunks.push(chunk);
+      }
+      size += chunk.length;
     });
-    req.on("end", () => finish(Buffer.concat(chunks)));
+    req.on("end", () => finish(fixed ? fixed.subarray(0, size) : Buffer.concat(chunks)));
     req.on("error", reject);
   });
 }

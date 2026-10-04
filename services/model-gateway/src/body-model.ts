@@ -2,7 +2,8 @@
  * The top-level `"model"` of a JSON request body (KOBE-40 review): scanned structurally (strings,
  * escapes and nesting tracked) so a `"model"` inside a message or a nested object never counts,
  * and without building the whole object (bodies may be megabytes of images). The body must be a
- * JSON object; a duplicated top-level `model` is refused (JSON parsers disagree on which wins).
+ * JSON object; more than one top-level key that decodes to `model` in any letter case is refused
+ * (Bifrost's Go decoder matches keys case-insensitively and takes the last; others take the first).
  */
 export type BodyModel =
   | { readonly ok: true; readonly model: string | undefined }
@@ -12,6 +13,7 @@ const WS = new Set([0x20, 0x09, 0x0a, 0x0d]);
 const QUOTE = 0x22;
 const BACKSLASH = 0x5c;
 const MAX_MODEL = 200;
+const MAX_MODEL_KEY_RAW = 30;
 
 class Malformed extends Error {}
 
@@ -72,6 +74,13 @@ export function topLevelModel(body: Buffer): BodyModel {
   };
   const decode = (start: number, end: number): string =>
     JSON.parse(body.subarray(start - 1, end + 1).toString("utf8")) as string;
+  /**
+   * Go's JSON decoding (Bifrost) matches keys case-insensitively and takes the last match, so
+   * every key that decodes to "model" in any case counts. "model" is 5 characters, at most 6 raw
+   * bytes each (`\uXXXX`): longer raw keys cannot be it and are not decoded.
+   */
+  const isModelKey = (start: number, end: number): boolean =>
+    end - start <= MAX_MODEL_KEY_RAW && decode(start, end).toUpperCase().toLowerCase() === "model";
 
   try {
     ws();
@@ -85,7 +94,7 @@ export function topLevelModel(body: Buffer): BodyModel {
       for (;;) {
         ws();
         const [ks, ke] = string();
-        const isModel = ke - ks <= 16 && decode(ks, ke) === "model";
+        const isModel = isModelKey(ks, ke);
         ws();
         expect(0x3a);
         ws();

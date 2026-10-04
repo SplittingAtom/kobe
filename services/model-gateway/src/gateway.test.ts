@@ -473,6 +473,13 @@ describe("review hardening (KOBE-40)", () => {
       body: '{"model":"openai/m","model":"openai/big"}',
     });
     expect(dup.status).toBe(400);
+    // Bifrost (Go) would read MODEL too: a case variant is a second model key.
+    const upper = await fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: { ...bearer(), "content-type": "application/json" },
+      body: '{"model":"openai/m","MODEL":"openai/big"}',
+    });
+    expect(upper.status).toBe(400);
     expect(hits).toEqual([]);
   });
 
@@ -503,6 +510,28 @@ describe("review hardening (KOBE-40)", () => {
         })
       ).status,
     ).toBe(200);
+  });
+
+  it("charges chunked bodies twice their size (they are joined at the end)", async () => {
+    await start({ perSandboxCalls: 4, bytes: { perSandbox: 6000, total: 16384 } });
+    const send = (size: number) =>
+      new Promise<number>((resolve, reject) => {
+        const req = request(`${base}/v1/chat/completions`, {
+          method: "POST",
+          headers: { ...bearer(), "content-type": "application/json" },
+        });
+        req.on("response", (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        });
+        req.on("error", reject);
+        // No content-length: Node sends it chunked.
+        req.write('{"model":"openai/m","pad":"');
+        req.write("y".repeat(size));
+        req.end('"}');
+      });
+    expect(await send(1000)).toBe(200);
+    expect(await send(3500)).toBe(429);
   });
 
   it("rate-limits a sandbox before any database lookup (random run ids cost nothing)", async () => {
