@@ -70,4 +70,13 @@ describe("sandbox-agent loadConfig", () => {
       loadConfig({ ...base, KOBE_SERVER_URL: "wss://kobe", KOBE_SESSION_DIR: "sessions" }),
     ).toThrow(/KOBE_SESSION_DIR/);
   });
+
+  it("takes the Pi identity helper (KOBE-71) as an absolute path, off by default", () => {
+    const url = { ...base, KOBE_SERVER_URL: "ws://kobe-server:8080" };
+    expect(loadConfig(url).piRunAs).toBeUndefined();
+    expect(loadConfig({ ...url, KOBE_PI_RUNAS: "/opt/kobe/bin/kobe-runas" }).piRunAs).toBe(
+      "/opt/kobe/bin/kobe-runas",
+    );
+    expect(() => loadConfig({ ...url, KOBE_PI_RUNAS: "kobe-runas" })).toThrow(/KOBE_PI_RUNAS/);
+  });
 });

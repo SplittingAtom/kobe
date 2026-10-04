@@ -445,7 +445,17 @@ describe("sandbox admission policies (KOBE-9 binding requirement 3)", () => {
     }
     expect(policy("-sandbox-pods")?.spec.matchConstraints.resourceRules).toEqual([
       { apiGroups: [""], apiVersions: ["v1"], operations: ["CREATE"], resources: ["pods"] },
+      {
+        apiGroups: [""],
+        apiVersions: ["v1"],
+        operations: ["UPDATE"],
+        resources: ["pods/ephemeralcontainers"],
+      },
     ]);
+    expect(expressions("-sandbox-pods")).toBeDefined();
+    expect(JSON.stringify(policy("-sandbox-pods")?.spec.variables)).toContain(
+      "ephemeralContainers",
+    );
   });
 
   it("keeps credentials out of sandbox pods", () => {
@@ -461,6 +471,25 @@ describe("sandbox admission policies (KOBE-9 binding requirement 3)", () => {
     ]) {
       expect(e).toContain(fragment);
     }
+  });
+
+  it("enforces 'restricted' on team pods but for SETUID/SETGID and privilege escalation (KOBE-71)", () => {
+    const e = expressions("-sandbox-pods");
+    for (const fragment of [
+      "exists(d, d == 'ALL')",
+      "c.name == 'agent' ?",
+      "all(a, a in ['SETUID', 'SETGID'])",
+      "allowPrivilegeEscalation.orValue(true) == false",
+      "ephemeralContainers",
+      "privileged",
+      "runAsNonRoot",
+      "runAsUser",
+      "in ['RuntimeDefault', 'Localhost']",
+      "has(v.persistentVolumeClaim) || has(v.projected)",
+    ]) {
+      expect(e).toContain(fragment);
+    }
+    expect(expressions("-server-scope")).toContain("in ['baseline', 'restricted']");
   });
 
   it("confines the server's namespace and RoleBinding writes to labelled kobe-team-* namespaces", () => {

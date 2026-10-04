@@ -68,13 +68,19 @@ created by hand. Every team namespace gets:
   storage, pods, PVCs and requested storage) and a LimitRange with per-container defaults;
 - a `SandboxTemplate` and a **warm pool** of `sandbox.warmPool.replicasPerTeam` pre-started
   sandboxes (agent-sandbox warm pools are per namespace; each counts against the team's quota);
-- Pod Security Admission `restricted`.
+- Pod Security Admission `baseline` (see below for why not `restricted`).
 
 The chart installs **ValidatingAdmissionPolicies** that hold whatever creates the pod (server,
 agent-sandbox controller, an operator): in `kobe-team-*` namespaces every pod must use
 `isolation.runtimeClassName` and that RuntimeClass must have a gVisor/Kata handler; pods may not
 mount Secrets, read Secrets into env, mount a Kubernetes API token, use host namespaces or
-`hostPath`; and only the Kobe server may add or change NetworkPolicies there. The server's own
+`hostPath`; they must meet Pod Security `restricted` (non-root, seccomp `RuntimeDefault`/
+`Localhost`, all capabilities dropped, no privileged containers, `restricted` volume types) with
+one exception: sandbox containers add `SETUID` and `SETGID` (nothing else) and allow privilege
+escalation, so the image's `kobe-runas` helper can run each Pi process and its tools under a uid
+of their own, separate from the agent and from other threads (KOBE-71; the capabilities exist
+inside the gVisor/Kata sandbox kernel only). That is why the namespace label says `baseline`; and
+only the Kobe server may add or change NetworkPolicies there. The server's own
 cluster-wide permissions (namespaces, RoleBindings) are confined to `kobe-team-*` by the same
 mechanism. Sandboxes identify themselves to the server with a projected ServiceAccount token
 (audience `kobe.sandbox-bootstrap`, which the Kubernetes API itself rejects) and receive

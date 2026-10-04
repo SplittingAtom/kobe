@@ -296,7 +296,7 @@ contains "ensuring it again returns the same sandbox" "^${sandbox_id:-none}$" \
   "$(json_field sandboxId "$( (ensure_sandbox || true) | tail -1)")"
 contains "team namespace carries its team id" "^${E2E_TEAM_ID}$" \
   "$($KUBECTL get namespace "$TEAM_NS" -o jsonpath='{.metadata.labels.kobe\.splittingatom\.io/team-id}')"
-contains "team namespace enforces Pod Security 'restricted'" '^restricted$' \
+contains "team namespace enforces Pod Security 'baseline' (KOBE-71; the rest of 'restricted' by admission)" '^baseline$' \
   "$($KUBECTL get namespace "$TEAM_NS" -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}')"
 np_spec() { $KUBECTL -n "$TEAM_NS" get networkpolicy kobe-sandbox-isolation -o jsonpath="$1"; }
 contains "team NetworkPolicy selects every pod in the namespace" '^\{\}$' "$(np_spec '{.spec.podSelector}')"
@@ -343,6 +343,16 @@ contains "admission refuses a team pod mounting a Secret" 'must not mount Secret
   "$(admission "{\"spec\":{\"runtimeClassName\":\"gvisor\",\"automountServiceAccountToken\":false,$SEC_POD,\"containers\":[{\"name\":\"c\",\"image\":\"busybox:1.37\",$SEC_CTR}],\"volumes\":[{\"name\":\"s\",\"secret\":{\"secretName\":\"x\"}}]}}")"
 contains "admission refuses a team pod with a Kubernetes API token" 'must not mount a Kubernetes API token' \
   "$(admission "{\"spec\":{\"runtimeClassName\":\"gvisor\",$SEC_POD,\"containers\":[{\"name\":\"c\",\"image\":\"busybox:1.37\",$SEC_CTR}]}}")"
+# KOBE-71: the namespace is Pod Security "baseline" so sandboxes can add SETUID/SETGID for their
+# Pi identities; Kobe's own policy keeps the rest of "restricted".
+contains "admission refuses a team container adding any other capability (KOBE-71)" "only the sandbox container 'agent'" \
+  "$(admission "{\"spec\":{\"runtimeClassName\":\"gvisor\",\"automountServiceAccountToken\":false,$SEC_POD,\"containers\":[{\"name\":\"c\",\"image\":\"busybox:1.37\",\"securityContext\":{\"capabilities\":{\"drop\":[\"ALL\"],\"add\":[\"SETUID\",\"CHOWN\"]}}}]}}")"
+contains "admission refuses a team pod running as root (KOBE-71)" 'must run as non-root' \
+  "$(admission "{\"spec\":{\"runtimeClassName\":\"gvisor\",\"automountServiceAccountToken\":false,\"securityContext\":{\"runAsUser\":0,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}},\"containers\":[{\"name\":\"c\",\"image\":\"busybox:1.37\",$SEC_CTR}]}}")"
+contains "admission refuses SETUID on any container but the sandbox's own (KOBE-71)" "only the sandbox container 'agent'" \
+  "$(admission "{\"spec\":{\"runtimeClassName\":\"gvisor\",\"automountServiceAccountToken\":false,$SEC_POD,\"containers\":[{\"name\":\"c\",\"image\":\"busybox:1.37\",\"securityContext\":{\"allowPrivilegeEscalation\":false,\"capabilities\":{\"drop\":[\"ALL\"],\"add\":[\"SETUID\"]}}}]}}")"
+contains "admission refuses privilege escalation on any container but the sandbox's own (KOBE-71)" "only the sandbox container 'agent'" \
+  "$(admission "{\"spec\":{\"runtimeClassName\":\"gvisor\",\"automountServiceAccountToken\":false,$SEC_POD,\"containers\":[{\"name\":\"c\",\"image\":\"busybox:1.37\",\"securityContext\":{\"allowPrivilegeEscalation\":true,\"capabilities\":{\"drop\":[\"ALL\"]}}}]}}")"
 server_sa="system:serviceaccount:$NS:kobe-server"
 contains "the server's ServiceAccount cannot create namespaces outside kobe-team-*" 'only manage kobe-team-\* namespaces' \
   "$($KUBECTL create namespace kobe-e2e-evil --as="$server_sa" --dry-run=server 2>&1 || true)"
@@ -1614,6 +1624,58 @@ JS
     contains "the upstream saw the provider key (attached by Bifrost, outside the sandbox)" 'e2e-provider-key' "$seen_now"
     if [[ -n "$seen_now" ]] && ! printf '%s' "$seen_now" | grep -q 'eyJ'; then ok "no session token (JWT) reached the upstream"
     else fail "no session token (JWT) reached the upstream"; fi
+    # KOBE-71: the Owner's sandbox just ran Pi for that message, under gVisor. Pi runs under a Pi
+    # identity, not as the agent; another identity can neither write nor read that Pi's runtime
+    # directory, nor read the bootstrap token, nor signal the agent or that Pi. (`kubectl exec`
+    # runs with the agent's uid and groups, so it can use kobe-runas as the agent does; 2015 is an
+    # identity no Pi uses while a single thread runs.)
+    echo "==> sandbox privilege separation (KOBE-71)"
+    read -r -d '' PRIVSEP_SH <<'SH' || true
+R=/opt/kobe/bin/kobe-runas
+agent=$(pgrep -f '^node .*sandbox-agent/dist/index.js' | head -1)
+pi=$(ps -eo pid=,uid= | awk '$2 >= 2000 && $2 <= 2063 { print $1; exit }')  # Pi sets its own process title
+dir=$(ls -d /run/kobe-pi/pi-* 2>/dev/null | head -1)
+echo "agent=$(stat -c %u /proc/$agent) caps=$(awk '/^CapEff/ {print $2}' /proc/$agent/status)"
+echo "pi_uid=$(stat -c %u /proc/$pi) dir=$(stat -c '%U:%G %a' $dir)"
+echo "plant=$($R 2015 sh -c "echo {} > $dir/agent/settings.json" 2>&1 | grep -c 'Permission denied')"
+echo "read_model=$($R 2015 cat "$dir/model.json" 2>&1 | grep -c 'Permission denied')"
+echo "read_token=$($R 2015 cat /run/kobe-agent/bootstrap/bootstrap-token 2>&1 | grep -c 'Permission denied')"
+echo "signal=$($R 2015 sh -c "kill -0 $agent; kill -0 $pi" 2>&1 | grep -c 'not permitted')"
+# As a tool of that Pi (its own uid): no ptrace/memory of an ancestor, no inspector through
+# SIGUSR1, no way back into Pi's stdin/stdout (sockets: /proc/<pi>/fd/N cannot be reopened).
+u=$(stat -c %u /proc/$pi)
+$R $u --probe-ptrace >/dev/null 2>&1; echo "probe=$?"
+$R $u sh -c "kill -USR1 $pi"; sleep 1
+echo "inspector=$(node -e 'require("net").connect(9229,"127.0.0.1").on("connect",()=>{console.log("open");process.exit(0)}).on("error",()=>console.log("closed"))')"
+echo "stdio=$($R $u sh -c "for n in 0 1; do ( : > /proc/$pi/fd/\$n ); done" 2>&1 | grep -cE 'No such device or address|Permission denied')"
+echo "pi_alive=$(kill -0 $pi 2>/dev/null; [ -d /proc/$pi ] && echo yes || echo no)"
+# RLIMIT_NPROC (1024 per identity) under gVisor: an identity no thread uses tries 1500 processes;
+# it must stop at the limit, and --kill-all (no fork needed) must still clear it.
+$R 2014 sh -c 'i=0; while [ $i -lt 1500 ]; do sleep 120 & i=$((i+1)); done' >/dev/null 2>&1
+echo "nproc=$(ps -eo uid= | awk '$1 == 2014' | wc -l)"
+$R 2014 --kill-all; echo "nproc_kill=$?"
+sleep 1; echo "nproc_left=$(ps -eo uid=,stat= | awk '$1 == 2014 && $2 !~ /^Z/' | wc -l)"
+SH
+    # The Owner's sandbox pod: the one whose claim-uid label is the Owner's claim (u-<user id>).
+    owner_claim=$($KUBECTL -n "$TEAM_NS" get sandboxclaim "u-$owner_id" -o jsonpath='{.metadata.uid}' 2>/dev/null || true)
+    owner_pod=$($KUBECTL -n "$TEAM_NS" get pods -l "agents.x-k8s.io/claim-uid=${owner_claim:-none}" -o name 2>/dev/null | head -1)
+    privsep=$($KUBECTL -n "$TEAM_NS" exec "${owner_pod:-pod/none}" -c agent -- sh -c "$PRIVSEP_SH" 2>&1 || true)
+    printf '     %s\n' "$privsep"
+    contains "the agent runs as uid 1000 with no capabilities" '^agent=1000 caps=0+$' "$privsep"
+    contains "Pi runs under a Pi identity, its runtime dir the agent's with Pi's group" \
+      '^pi_uid=20[0-9][0-9] dir=kobe:kobe-pi-[0-9]+ 2750$' "$privsep"
+    contains "another identity cannot plant a file in that Pi's runtime dir (EACCES)" '^plant=1$' "$privsep"
+    contains "another identity cannot read that Pi's model file (token, run id)" '^read_model=1$' "$privsep"
+    contains "Pi identities cannot read the agent's bootstrap token" '^read_token=1$' "$privsep"
+    contains "Pi identities cannot signal the agent or another thread's Pi" '^signal=2$' "$privsep"
+    contains "a tool cannot ptrace or read the memory of its Pi (behavioural probe under gVisor)" '^probe=0$' "$privsep"
+    contains "SIGUSR1 from a tool opens no inspector in Pi (node --disable-sigusr1)" '^inspector=closed$' "$privsep"
+    contains "a tool cannot reopen its Pi's stdin/stdout through /proc (gVisor: EACCES; Linux: ENXIO)" '^stdio=2$' "$privsep"
+    contains "Pi survives the SIGUSR1" '^pi_alive=yes$' "$privsep"
+    contains "gVisor enforces an identity's process limit (1500 tried, at most 1024 run)" '^nproc=(10[0-2][0-9]|9[5-9][0-9])$' "$privsep"
+    contains "--kill-all clears an identity at its process limit" '^nproc_kill=0$' "$privsep"
+    contains "nothing of it is left" '^nproc_left=0$' "$privsep"
+
     # KOBE-44: a model chosen for the thread is the run's model (here the vLLM-style custom
     # provider, `qwen`, not the team default); once the team disables it, the run fails clearly.
     # (KOBE-40's checks above left qwen disabled: enable it for the team first.)

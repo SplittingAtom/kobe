@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { chmod, chown, mkdir, mkdtemp, stat } from "node:fs/promises";
 import path from "node:path";
 import {
   piExtensionUiRequestSchema,
@@ -12,7 +12,10 @@ import {
   type PolicyChannelReply,
 } from "../policy/channel.js";
 import { PiProcess, PiProcessError, type PiExit, type PiRecord } from "../pi/pi-process.js";
+import type { PiIdentities, PiIdentity } from "../pi/identities.js";
 import type { PiLaunch } from "../pi/pi-launch.js";
+import { piCommand } from "../pi/pi-command.js";
+import { shareOnVolume } from "../workspace/volume.js";
 import { ensureSessionDir } from "../pi/session-files.js";
 import { MODEL_FILE_ENV } from "../kobe-models/protocol.js";
 import { ModelFile } from "../models/model-file.js";
@@ -20,7 +23,9 @@ import {
   AGENT_SUBDIR,
   MODEL_FILE_NAME,
   RUNTIME_DIR_PREFIX,
+  ensureRuntimeRoot,
   piModelsStoreText,
+  removeRuntimeDir,
   unexpectedEntries,
 } from "../models/runtime-dir.js";
 import type { ModelWiring, RunModel } from "../models/types.js";
@@ -31,6 +36,8 @@ import type { ModelWiring, RunModel } from "../models/types.js";
  */
 export const DIALOG_METHODS = new Set(["select", "confirm", "input", "editor"]);
 export const MAX_PENDING_DIALOGS = 64;
+/** Scratch trees every identity can write besides /workspace and $HOME (reclaimed per uid). */
+export const SHARED_SCRATCH_DIRS = ["/tmp", "/dev/shm"] as const;
 /** Pi startup (extension loading, jiti) up to kobe-policy's `channel.ready`. */
 export const POLICY_READY_TIMEOUT_MS = 30_000;
 
@@ -64,9 +71,10 @@ export interface ThreadEnv {
   readonly bin: string;
   /**
    * Parent of the private per-process directories (KOBE-41): each Pi gets a fresh `mkdtemp` dir
-   * (0700) holding its `PI_CODING_AGENT_DIR` (Pi 1.0.0 writes `auth.json` there on every
-   * credential read) and its model file; removed when the process exits. Nothing in it outlives
-   * the process, so nothing a tool writes there reaches another thread or a later Pi.
+   * holding its `PI_CODING_AGENT_DIR` (Pi 1.0.0 writes `auth.json` there on every credential
+   * read) and its model file; removed when the process exits. Nothing in it outlives the
+   * process, so nothing a tool writes there reaches another thread or a later Pi. ($HOME and
+   * /tmp stay shared, see docs/ledger/KOBE-71.md.)
    */
   readonly runtimeDir: string;
   /** Model gateway wiring; absent when this sandbox has no model access. */
@@ -80,6 +88,18 @@ export interface ThreadEnv {
   readonly workspaceDir: string;
   readonly sessionDir: string;
   readonly home: string;
+  /**
+   * Pi identities (KOBE-71): each Pi process runs as one of them, with a runtime directory, HOME
+   * and TMPDIR of its own that no other thread's process can reach. Absent: Pi runs as the
+   * agent's own uid (development, tests outside the image).
+   */
+  readonly identities?: PiIdentities | undefined;
+}
+
+/** A Pi process's private directory and the identity it runs as (if any). */
+interface RuntimeOf {
+  readonly dir: string;
+  readonly identity: PiIdentity | undefined;
 }
 
 interface ActiveRun {
@@ -99,8 +119,8 @@ export class Thread {
   #launchKey: string | undefined;
   /** The current Pi's model file (undefined without model wiring). */
   #modelFile: ModelFile | undefined;
-  /** Each process's private runtime directory, removed once it has exited. */
-  readonly #runtimeDirs = new Map<PiProcess, string>();
+  /** Each process's private runtime directory (and identity), removed once it has exited. */
+  readonly #runtimeDirs = new Map<PiProcess, RuntimeOf>();
   /** Removal of a runtime directory in progress (awaited by `stopProcess`). */
   readonly #removals = new Map<PiProcess, Promise<void>>();
   #closing = new Set<PiProcess>();
@@ -181,43 +201,73 @@ export class Thread {
    * (a `run.start`); a Pi started for a `pi.command` gets none until its first run.
    */
   async spawn(launch: PiLaunch, model: RunModel | null = null): Promise<void> {
-    await ensureSessionDir(this.#env.sessionDir);
+    const identities = this.#env.identities;
+    await ensureSessionDir(this.#env.sessionDir, {
+      shared: identities !== undefined,
+      workspaceDir: this.#env.workspaceDir,
+    });
     await mkdir(this.#env.home, { recursive: true }).catch(() => undefined);
-    await mkdir(this.#env.runtimeDir, { recursive: true, mode: 0o700 });
-    const runtimeDir = await mkdtemp(path.join(this.#env.runtimeDir, RUNTIME_DIR_PREFIX));
+    // Shared by every thread (the pod's home volume is; one the agent made itself must be too).
+    if (identities !== undefined) await shareOnVolume(this.#env.home, this.#env.home, 0o2770);
+    await ensureRuntimeRoot(this.#env.runtimeDir, identities !== undefined);
+    const identity = await identities?.acquire();
+    let runtimeDir: string | undefined;
     let pi: PiProcess;
     let modelFile: ModelFile | undefined;
     try {
+      runtimeDir = await mkdtemp(path.join(this.#env.runtimeDir, RUNTIME_DIR_PREFIX));
+      const env: Record<string, string> = { ...launch.env };
       const agentDir = path.join(runtimeDir, AGENT_SUBDIR);
-      await mkdir(agentDir, { mode: 0o700 });
-      const env: Record<string, string> = { ...launch.env, PI_CODING_AGENT_DIR: agentDir };
+      if (identity === undefined) {
+        await mkdir(agentDir, { mode: 0o700 });
+      } else {
+        await this.#prepareIdentityDirs(runtimeDir, identity);
+      }
+      env.PI_CODING_AGENT_DIR = agentDir;
       const models = this.#env.models;
       if (models !== undefined) {
-        modelFile = new ModelFile(path.join(runtimeDir, MODEL_FILE_NAME), {
-          gatewayUrl: models.gatewayUrl,
-          model,
-          token: await models.tokens.current(),
-          runId: null,
-        });
+        modelFile = new ModelFile(
+          path.join(runtimeDir, MODEL_FILE_NAME),
+          {
+            gatewayUrl: models.gatewayUrl,
+            model,
+            token: await models.tokens.current(),
+            runId: null,
+          },
+          identity === undefined ? 0o600 : 0o640,
+        );
         await modelFile.create();
         env[MODEL_FILE_ENV] = modelFile.path;
       }
+      const command = await piCommand(this.#env.bin, launch.env.PATH);
       pi = new PiProcess({
-        bin: this.#env.bin,
-        args: launch.args,
+        bin: command.bin,
+        args: [...command.prefix, ...launch.args],
         cwd: this.#env.workspaceDir,
         env,
         onEvent: (event) => this.#onEvent(pi, event),
         onUiRequest: (request) => this.#onUiRequest(pi, request),
         onExit: (exit) => this.#onExit(pi, exit),
         onDiagnostic: (message) => this.#hooks.diagnostic(this.id, message),
+        ...(identity === undefined || identities === undefined
+          ? {}
+          : { runAs: { identities, identity } }),
       });
     } catch (error) {
       // Nothing of a Pi that never started may stay behind (the token included).
-      await rm(runtimeDir, { recursive: true, force: true }).catch(() => undefined);
+      if (runtimeDir !== undefined) {
+        const removed = await removeRuntimeDir(runtimeDir, identities).then(
+          () => true,
+          () => false,
+        );
+        // A directory the next holder of the identity could read: keep the identity out of use.
+        if (removed && identity !== undefined) identities?.release(identity);
+      } else if (identity !== undefined) {
+        identities?.release(identity);
+      }
       throw error;
     }
-    this.#runtimeDirs.set(pi, runtimeDir);
+    this.#runtimeDirs.set(pi, { dir: runtimeDir, identity });
     const control = pi.control;
     let channel: PolicyChannel | undefined;
     if (control !== undefined) {
@@ -250,16 +300,31 @@ export class Thread {
   }
 
   /**
+   * Under a Pi identity: the runtime directory becomes the agent's with the Pi's own group
+   * (setgid, 2750: the Pi reads it, nobody else gets in), with `agent/` the only place that Pi
+   * may write (2770; Pi 1.0.0 writes its credential and catalog stores there).
+   */
+  async #prepareIdentityDirs(runtimeDir: string, identity: PiIdentity): Promise<void> {
+    await chown(runtimeDir, -1, identity.gid);
+    await chmod(runtimeDir, 0o2750);
+    const agentDir = path.join(runtimeDir, AGENT_SUBDIR);
+    await mkdir(agentDir);
+    await chmod(agentDir, 0o2770);
+  }
+
+  /**
    * The tripwire (KOBE-41 review): the private runtime directory may only hold what the agent
-   * and Pi wrote, and the model file must be what the agent last wrote. Another process of the
-   * same user (a sibling thread's tool) writing `agent/settings.json`, `models.json`, `SYSTEM.md`
-   * or a rewritten `model.json` would change that Pi's shell, model endpoint or prompt; until Pi
-   * runs under its own uid, such a Pi is stopped and its run fails `runtime_tampered`. Checked
-   * once Pi is ready and again right before every prompt. Returns the reason, or undefined.
+   * and Pi wrote, and the model file must be what the agent last wrote. Under Pi identities
+   * (KOBE-71) no other thread can write it at all and nobody but the agent can write the model
+   * file; what remains is this Pi's own tools writing its `agent/` dir (`settings.json`,
+   * `models.json`, `SYSTEM.md`, which Pi 1.0.0 must be able to write into). Without identities a
+   * sibling thread's tool could do the same. Either way such a Pi is stopped and its run fails
+   * `runtime_tampered`. Checked once Pi is ready and again right before every prompt. Returns the
+   * reason, or undefined. A detector, not a boundary: see docs/ledger/KOBE-71.md.
    */
   async verifyRuntime(): Promise<string | undefined> {
     const pi = this.#pi;
-    const runtimeDir = pi === undefined ? undefined : this.#runtimeDirs.get(pi);
+    const runtimeDir = pi === undefined ? undefined : this.#runtimeDirs.get(pi)?.dir;
     if (runtimeDir === undefined) return undefined;
     // The agent's own pending writes first (temp file + rename), then the listing.
     if (this.#modelFile !== undefined && !(await this.#modelFile.verify())) {
@@ -457,18 +522,48 @@ export class Thread {
     const expected = this.#closing.delete(pi);
     const runId = pi === this.#pi ? this.#run?.runId : undefined;
     if (pi === this.#pi) this.#detach(pi);
-    const runtimeDir = this.#runtimeDirs.get(pi);
+    const runtime = this.#runtimeDirs.get(pi);
     this.#runtimeDirs.delete(pi);
-    // The process is gone: so is its private directory (auth.json, model file, token).
-    if (runtimeDir !== undefined) {
-      const removal = rm(runtimeDir, { recursive: true, force: true })
-        .catch((error: unknown) =>
-          this.#warn(`runtime directory not removed: ${(error as Error).message}`),
-        )
-        .finally(() => this.#removals.delete(pi));
+    // The process is gone: so is its private directory (auth.json, model file, token), and under
+    // a Pi identity every process of its uid, before the identity can go to another thread.
+    if (runtime !== undefined) {
+      const removal = this.#reclaim(runtime).finally(() => this.#removals.delete(pi));
       this.#removals.set(pi, removal);
     }
     if (!expected) this.#hooks.piExited(this.id, runId, exit);
+  }
+
+  async #reclaim(runtime: RuntimeOf): Promise<void> {
+    const identities = this.#env.identities;
+    const identity = runtime.identity;
+    if (identity !== undefined && identities !== undefined) {
+      try {
+        await identities.killAllPatiently(identity);
+        // What the uid still owns in the shared trees becomes the workspace group's (nothing
+        // stays private to it for the next thread that gets the uid), its IPC objects go.
+        const gid = (await stat(this.#env.workspaceDir)).gid;
+        await identities.reclaimFiles(
+          identity,
+          gid,
+          [this.#env.workspaceDir, this.#env.home, ...SHARED_SCRATCH_DIRS],
+          // The runtime root is a small sticky tmpfs shared by all Pis: what the uid left at its
+          // top level (owner-only files, a filled disk) must not reach the next holder.
+          { purgeDirs: [this.#env.runtimeDir] },
+        );
+      } catch (error) {
+        // Its processes or private files may remain: the identity is never handed out again.
+        this.#warn(`Pi identity ${identity.uid} not reclaimed: ${(error as Error).message}`);
+        return;
+      }
+    }
+    try {
+      await removeRuntimeDir(runtime.dir, identities);
+    } catch (error) {
+      this.#warn(`runtime directory not removed: ${(error as Error).message}`);
+      // A directory the next holder of the identity could read: keep the identity out of use.
+      if (identity !== undefined) return;
+    }
+    if (identity !== undefined) identities?.release(identity);
   }
 
   #detach(pi: PiProcess): void {

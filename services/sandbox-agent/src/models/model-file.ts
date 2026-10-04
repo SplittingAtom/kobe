@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { MODEL_FILE_VERSION, type ModelFileState } from "../kobe-models/protocol.js";
 import type { RunModel } from "./types.js";
 
@@ -8,8 +8,8 @@ import type { RunModel } from "./types.js";
  * process's private runtime directory, rewritten atomically (a fresh random temp file opened `wx`
  * — no symlink or FIFO at the temp path is followed — then renamed, so Pi never reads a torn file)
  * on token rotation and run start/end. Writes are serialised so the last state asked for is the
- * one on disk; `verify` tells whether the disk still holds what was last written (the tripwire
- * against another process of the same user rewriting it, threads/thread.ts).
+ * one on disk; `verify` tells whether the disk still holds what was last written (the tripwire,
+ * threads/thread.ts; under a Pi identity, KOBE-71, nobody but the agent can write it anyway).
  */
 export interface ModelFileContent {
   readonly gatewayUrl: string;
@@ -48,9 +48,17 @@ export class ModelFile {
   #writtenText: string | undefined;
   #chain: Promise<unknown> = Promise.resolve();
 
-  constructor(path: string, initial: ModelFileContent) {
+  readonly #mode: number;
+
+  /**
+   * `mode`: 0600 when Pi runs as the agent's uid; 0640 under a Pi identity (KOBE-71), where the
+   * file's group is that Pi's own (the runtime directory is setgid), so only that Pi reads it and
+   * nothing but the agent writes it.
+   */
+  constructor(path: string, initial: ModelFileContent, mode = 0o600) {
     this.path = path;
     this.#content = initial;
+    this.#mode = mode;
   }
 
   get content(): ModelFileContent {
@@ -88,7 +96,9 @@ export class ModelFile {
     const temp = `${this.path}.${randomBytes(8).toString("hex")}.tmp`;
     const next = this.#chain.then(async () => {
       try {
-        await writeFile(temp, text, { mode: 0o600, flag: "wx" });
+        await writeFile(temp, text, { mode: this.#mode, flag: "wx" });
+        // writeFile's mode is filtered by the umask: set it exactly.
+        await chmod(temp, this.#mode);
         await rename(temp, this.path);
       } catch (error) {
         await rm(temp, { force: true }).catch(() => undefined);

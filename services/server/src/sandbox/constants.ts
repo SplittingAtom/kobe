@@ -37,7 +37,12 @@ export const SANDBOX_CONTAINER = "agent";
  * tokens. The Kubernetes API rejects tokens with this audience, so it grants no API access.
  */
 export const BOOTSTRAP_TOKEN_AUDIENCE = "kobe.sandbox-bootstrap";
-export const BOOTSTRAP_TOKEN_DIR = "/var/run/secrets/kobe";
+/**
+ * Under the image's agent-only directory (`/run/kobe-agent`, 0700, KOBE-71): the projected file
+ * itself is group-readable by the pod's fsGroup, which every Pi identity shares (the workspace
+ * group), so only the parent keeps sandbox code out.
+ */
+export const BOOTSTRAP_TOKEN_DIR = "/run/kobe-agent/bootstrap";
 export const BOOTSTRAP_TOKEN_FILE = `${BOOTSTRAP_TOKEN_DIR}/bootstrap-token`;
 /** Kubelet refreshes the projected token at 80% of this lifetime. */
 export const BOOTSTRAP_TOKEN_SECONDS = 3600;
@@ -56,7 +61,34 @@ export const SANDBOX_HOSTS = {
 export type KobeEndpoint = keyof typeof SANDBOX_HOSTS;
 export const KOBE_ENDPOINTS = Object.keys(SANDBOX_HOSTS) as KobeEndpoint[];
 
-/** Pod Security Admission level enforced on team namespaces. */
-export const POD_SECURITY_LEVEL = "restricted";
-/** UID/GID of the `kobe` user in images/sandbox/Dockerfile. */
+/**
+ * Pod Security Admission level enforced on team namespaces. "baseline", not "restricted", for
+ * one reason only (KOBE-71): the sandbox container adds the SETUID and SETGID capabilities and
+ * allows privilege escalation, so the image's kobe-runas helper can start each Pi process under
+ * its own uid. Everything else "restricted" demands (non-root, seccomp, drop ALL, volume types)
+ * is enforced by Kobe's own admission policy for team pods (chart: sandbox-admission.yaml).
+ */
+export const POD_SECURITY_LEVEL = "baseline";
+/** UID/GID of the `kobe` user in images/sandbox/Dockerfile (the agent; the workspace group). */
 export const SANDBOX_UID = 1000;
+/** Group `kobe-agent` in the image: the only group allowed to execute kobe-runas (KOBE-71). */
+export const SANDBOX_AGENT_GID = 1001;
+/** First Pi identity (`kobe-pi-0`, uid = gid) in the image; kobe-runas accepts 2000-2063. */
+export const PI_IDENTITY_BASE = 2000;
+/**
+ * Pi identities per sandbox: more than the agent's Pi process cap (8 by default) so a new Pi need
+ * not wait while an exited one's identity is being reclaimed.
+ */
+export const PI_IDENTITIES = 16;
+/**
+ * Where each Pi process gets its private runtime directory (KOBE-71): a memory-backed emptyDir,
+ * because its root is sticky (3777) and a mount point, so no Pi identity can rename the agent's
+ * directories in it (on the disk-backed /tmp, 2777, any of them could). Small: Pi keeps only its
+ * credential and catalog stores and the model file there.
+ */
+export const PI_RUNTIME_DIR = "/run/kobe-pi";
+export const PI_RUNTIME_SIZE = "64Mi";
+/** The helper that starts Pi under its identity (images/sandbox/runas). */
+export const PI_RUNAS_HELPER = "/opt/kobe/bin/kobe-runas";
+/** The only capabilities a sandbox container adds (after dropping ALL), for kobe-runas. */
+export const SANDBOX_CAPABILITIES = ["SETUID", "SETGID"] as const;

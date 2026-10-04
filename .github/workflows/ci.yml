@@ -45,6 +45,10 @@ jobs:
       # suites and each suite's vitest workers (2 × 3) so per-test timeouts and worker start-up
       # don't trip on self-hosted runners. Every package's test script is `vitest run`.
       - run: pnpm test --concurrency=2 -- --maxWorkers=3
+      # KOBE-71: Pi identities with the real kobe-runas helper (needs sudo to install it with
+      # file capabilities and to give the test its supplementary groups).
+      - name: Sandbox privilege separation (real helper)
+        run: services/sandbox-agent/scripts/test-identities.sh
       - run: pnpm license:check
 
   db:
