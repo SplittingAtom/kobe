@@ -16,6 +16,18 @@ TEAM_NS=kobe-team-e2e # KOBE-22: created by the server, not by this script
 TEAM2_NS=kobe-team-e2e2
 UPSTREAM_NS=kobe-e2e-upstream # KOBE-38: an in-cluster HTTPS server standing in for the internet
 MCP_NS=kobe-e2e-mcp # KOBE-58: a fake remote MCP server
+LLM_NS=kobe-e2e-llm # KOBE-40: a fake model provider
+# CI runs the suite as parallel shards, each on its own cluster (.github/workflows/e2e.yml).
+# Every shard installs from clean state and runs the checks section; then:
+#   all (default)  every section, in order
+#   suite          every section except the KOBE-25 cold-start trials
+#   cold-start     the sections up to and including KOBE-25 hibernate and wake, with its trials
+#   gate1-prep     only the KOBE-40 model setup e2e/gate1.sh needs; keeps the fake provider running
+SHARD="${KOBE_E2E_SHARD:-all}"
+case "$SHARD" in
+  all | suite | cold-start | gate1-prep) ;;
+  *) echo "unknown KOBE_E2E_SHARD '$SHARD' (all, suite, cold-start, gate1-prep)" >&2; exit 2 ;;
+esac
 failed=0
 
 context=$($KUBECTL config current-context)
@@ -54,7 +66,11 @@ PODS=()
 cleanup() {
   for p in "${PODS[@]+"${PODS[@]}"}"; do $KUBECTL delete pod $p --ignore-not-found --wait=false >/dev/null 2>&1 || true; done
   $KUBECTL delete namespace "$SANDBOX_NS" --ignore-not-found --wait=false >/dev/null 2>&1 || true
-  $KUBECTL delete namespace "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" "$MCP_NS" kobe-e2e-llm --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  $KUBECTL delete namespace "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" "$MCP_NS" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  # gate1-prep leaves the fake model provider to e2e/gate1.sh, which runs next.
+  if [[ "$SHARD" != gate1-prep ]]; then
+    $KUBECTL delete namespace "$LLM_NS" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  fi
   $KUBECTL delete runtimeclass kobe-e2e-runc --ignore-not-found >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -114,8 +130,8 @@ $KUBECTL get crd sandboxes.agents.x-k8s.io >/dev/null 2>&1 \
 
 echo "==> clean state"
 $HELM uninstall kobe -n "$NS" --wait >/dev/null 2>&1 || true
-$KUBECTL delete namespace "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" "$MCP_NS" kobe-e2e-llm --ignore-not-found --wait=false >/dev/null
-for ns in "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" "$MCP_NS" kobe-e2e-llm; do
+$KUBECTL delete namespace "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" "$MCP_NS" "$LLM_NS" --ignore-not-found --wait=false >/dev/null
+for ns in "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" "$MCP_NS" "$LLM_NS"; do
   $KUBECTL wait --for=delete "namespace/$ns" --timeout=180s >/dev/null 2>&1 || true
 done
 
@@ -250,11 +266,15 @@ else
 fi
 
 
+E2E_TEAM_ID=6f1d1a2b-0c3d-4e5f-8a9b-0c1d2e3f4a5b
+E2E_USER_ID=7a2e2b3c-1d4e-4f6a-9b0c-1d2e3f4a5b6c
+
+# gate1-prep skips from here to the KOBE-40 model setup (the end of this `if` is marked).
+if [[ "$SHARD" != gate1-prep ]]; then
+
 # KOBE-22: the server's sandbox provider creates a team namespace (default-deny NetworkPolicy,
 # quota, warm pool) and a (user, team) sandbox under gVisor; admission policies pin isolation.
 echo "==> sandbox provider (KOBE-22)"
-E2E_TEAM_ID=6f1d1a2b-0c3d-4e5f-8a9b-0c1d2e3f4a5b
-E2E_USER_ID=7a2e2b3c-1d4e-4f6a-9b0c-1d2e3f4a5b6c
 ensure_sandbox() { # [team-id slug user-id]: defaults to the e2e team and sandbox user
   $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node dist/cli/sandbox.js ensure \
     --team-id "${1:-$E2E_TEAM_ID}" --team-slug "${2:-e2e}" --user-id "${3:-$E2E_USER_ID}" 2>&1
@@ -535,6 +555,9 @@ contains "the agent can write its workspace and /tmp" '^written$' \
 # reconnected, Pi answering on a thread), a lower bound of first token. Same budgets, honestly
 # labelled; docs/ledger/KOBE-25.md records the numbers and the gap. A dedicated user gets its own
 # sandbox (first wake: warm pool), so the harness never touches the e2e user's.
+# The suite shard leaves these trials to the cold-start shard (the audit check below still runs).
+trials=0
+if [[ "$SHARD" != suite ]]; then
 COLD_USER_ID=9b4c3d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e
 psql_kobe "INSERT INTO users (id, name, email, email_verified) VALUES ('$COLD_USER_ID', 'E2E cold-start user', 'cold-start@e2e.test', true) ON CONFLICT DO NOTHING;
   INSERT INTO team_members (team_id, user_id, role) VALUES ('$E2E_TEAM_ID', '$COLD_USER_ID', 'member') ON CONFLICT DO NOTHING;" >/dev/null
@@ -565,6 +588,7 @@ $KUBECTL -n "$TEAM_NS" logs "$cold_pod" -c agent 2>/dev/null \
   | grep -E 'sandbox-agent starting|sandbox session (acquired|retry)|sandbox wire ready' | head -6 | sed 's/^/     agent: /' || true
 contains "the harness cleaned up its thread" '^0$' \
   "$(psql_kobe "SELECT count(*) FROM threads WHERE team_id = '$E2E_TEAM_ID' AND owner_user_id = '$COLD_USER_ID'")"
+fi # cold-start trials
 
 contains "an idle sandbox can be hibernated" '"hibernated":true' "$(lifecycle hibernate)"
 contains "hibernation suspends the agent-sandbox Sandbox" '^Suspended$' \
@@ -583,6 +607,7 @@ contains "its /workspace survived hibernation" '^kobe-25$' "$(in_sandbox 'cat /w
 contains "its /tmp was wiped by hibernation" '^gone$' "$(in_sandbox 'test -e /tmp/kobe-25-marker && echo kept || echo gone')"
 audit_counts=$(psql_kobe "SELECT (SELECT count(*) FROM audit_log WHERE team_id = '$E2E_TEAM_ID' AND action = 'sandbox.hibernated' AND target->>'trigger' = 'operator') >= $((trials + 1)) AND (SELECT count(*) FROM audit_log WHERE team_id = '$E2E_TEAM_ID' AND action = 'sandbox.woken') >= $((trials + 1))")
 contains "every hibernation and wake is audited" '^t$' "$audit_counts"
+if [[ "$SHARD" == cold-start ]]; then exit "$failed"; fi
 
 # KOBE-27: /workspace ↔ S3 (dev/s3.yaml: SeaweedFS, a test-only fixture). A dedicated user, so
 # destroying its volume never disturbs the sandboxes later sections use. Write a file, hibernate
@@ -1236,13 +1261,14 @@ else
 fi
 
 
+fi # gate1-prep skips the sections above
+
 # KOBE-40: models through Bifrost. A fake OpenAI/Anthropic/Gemini upstream stands in for the
 # providers (CI has no provider keys). The Owner configures providers (with keys), the catalog and
 # the team's models through the admin API; the gateway sync pushes them to Bifrost; a sandbox-like
 # client calls each provider kind through the model-gateway shim with its model-gateway session
 # token, and is refused without it, with another audience's token, and after revocation.
 echo "==> model gateway (KOBE-40)"
-LLM_NS=kobe-e2e-llm
 if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
   $KUBECTL create namespace "$LLM_NS" --dry-run=client -o yaml | $KUBECTL apply -f - >/dev/null
   $KUBECTL -n "$LLM_NS" run llm --restart=Never --image="ghcr.io/splittingatom/kobe-model-gateway:$TAG" \
@@ -1317,6 +1343,7 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
   synced=$(wait_for 60 '^in_sync=true' gateway_state)
   contains "Bifrost reflects the configuration (gateway in sync)" '^in_sync=true error=-$' "$synced"
   printf '     gateway in sync after %ss\n' "$((SECONDS - t0))"
+  if [[ "$SHARD" == gate1-prep ]]; then exit "$failed"; fi
 
   # The sandbox-like client: team namespace (team NetworkPolicy), gVisor, no DNS, the shim at
   # model-gateway.kobe.internal as in real sandboxes; a model-gateway token for the model user.

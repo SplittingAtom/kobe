@@ -1,6 +1,13 @@
-# k3d end-to-end suite (KOBE-7): a k3s cluster with gVisor and agent-sandbox, the chart installed
-# from locally built images, then e2e/run.sh. Private-repo minutes are metered (spec D3), so this
-# runs on pull requests to main, nightly, and on demand — not on every push.
+# k3d end-to-end suite (KOBE-7): k3s clusters with gVisor and agent-sandbox, the chart installed
+# from images built for this commit, then e2e/run.sh and the Gate 1 suite (e2e/gate1.sh). Runs on
+# pull requests to main, in the merge queue, nightly, and on demand — not on every push.
+#
+# The images are built once (one job per image, Docker layers from the GitHub Actions cache that
+# publish.yml fills on main) and shared as artifacts. The suite then runs as parallel shards, each
+# on its own fresh cluster: `suite` (every e2e/run.sh section but the KOBE-25 cold-start trials),
+# `cold-start` (the sections up to KOBE-25, with its trials) and `gate1` (the install plus the
+# KOBE-40 model setup, then e2e/gate1.sh). Branch protection and the merge queue require the check
+# named `k3d`: the last job, which passes only when every image build and every shard passed.
 name: e2e
 
 on:
@@ -24,14 +31,70 @@ env:
   K3D_VERSION: v5.9.0
   K3D_SHA256: 06d8f25bc3a971c4eb29e0ff08429b180402db0f4dec838c9eac427e296800a0
   KOBE_IMAGE_TAG: e2e-${{ github.sha }}
+  # Downloads retry transient failures (a GitHub 502 on the k3d release must not fail the run).
+  CURL_RETRY: --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 20
 
 jobs:
-  k3d:
+  images:
+    name: image (${{ matrix.name }})
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-latest') || vars.KOBE_RUNNER || 'ubuntu-latest' }}
-    # Healthy runs take 15-20 min; under peak load the self-hosted runners' Docker data (Longhorn on
-    # the nodes' HDDs) slows image export/import to ~40 min (ci/runners/README.md).
-    timeout-minutes: 60
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { name: web, dockerfile: apps/web/Dockerfile }
+          - { name: server, dockerfile: services/server/Dockerfile }
+          - { name: mcp-proxy, dockerfile: services/mcp-proxy/Dockerfile }
+          - { name: egress-proxy, dockerfile: services/egress-proxy/Dockerfile }
+          - { name: model-gateway, dockerfile: services/model-gateway/Dockerfile }
+          - { name: sandbox, dockerfile: images/sandbox/Dockerfile }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          # Base images through Google's public Docker Hub mirror (anonymous Docker Hub pulls are
+          # rate limited per IP); BuildKit falls back to Docker Hub for anything it lacks.
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
+      - name: Build ${{ matrix.name }} into an image archive
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          provenance: false
+          sbom: false
+          tags: ghcr.io/splittingatom/kobe-${{ matrix.name }}:${{ env.KOBE_IMAGE_TAG }}
+          outputs: type=docker,dest=${{ runner.temp }}/e2e-image-${{ matrix.name }}.tar
+          # Read-only: publish.yml writes these scopes on every push to main, which every pull
+          # request and merge-queue run may read; PR runs don't spend the repository's cache quota.
+          cache-from: type=gha,scope=${{ matrix.name }}
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          # archive: false uploads the file as is (its layers are compressed already); the
+          # artifact is named after it.
+          path: ${{ runner.temp }}/e2e-image-${{ matrix.name }}.tar
+          archive: false
+          retention-days: 1
+          overwrite: true
+          if-no-files-found: error
+
+  e2e:
+    name: e2e (${{ matrix.shard }})
+    needs: images
+    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-latest') || vars.KOBE_RUNNER || 'ubuntu-latest' }}
+    # Healthy shards take about 10 min; under peak load the self-hosted runners' Docker data
+    # (Longhorn on the nodes' HDDs) is far slower (ci/runners/README.md).
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [suite, cold-start, gate1]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -47,13 +110,22 @@ jobs:
         run: command -v bzip2 >/dev/null || { sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends bzip2; }
       - name: Install k3d (checksum-verified)
         run: |
-          curl -fsSL -o /tmp/k3d "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64"
+          # shellcheck disable=SC2086 # CURL_RETRY is a list of options
+          curl -fsSL ${CURL_RETRY} -o /tmp/k3d "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64"
           echo "${K3D_SHA256}  /tmp/k3d" | sha256sum -c -
           sudo install -m 0755 /tmp/k3d /usr/local/bin/k3d
-      - name: Free runner disk (images are built, then copied into the k3d node)
+      - name: Docker Hub pulls through a mirror (GitHub-hosted runners)
+        # The host's pulls (k3s, the k3d registry) try Google's public Docker Hub mirror first; the
+        # daemon falls back to Docker Hub for anything it lacks. Self-hosted runners have their own
+        # cache (ci/runners/dockerhub-mirror.yaml).
+        if: runner.environment == 'github-hosted'
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          docker system prune -af >/dev/null
+          conf=/etc/docker/daemon.json
+          { sudo cat "$conf" 2>/dev/null || echo '{}'; } \
+            | jq '. + {"registry-mirrors": ["https://mirror.gcr.io"]}' | sudo tee "$conf.new" >/dev/null
+          sudo mv "$conf.new" "$conf"
+          sudo systemctl restart docker
+          docker info --format 'mirrors: {{.RegistryConfig.Mirrors}}'
           df -h /
       - name: Raise inotify limits (k3s nodes need them)
         # Self-hosted runner nodes set these persistently (ci/runners/README.md); the runner
@@ -66,25 +138,36 @@ jobs:
           fi
       - name: Create k3d cluster with gVisor and agent-sandbox
         env:
-          # The self-hosted runners' Docker Hub cache (ci/runners/dockerhub-mirror.yaml); elsewhere
-          # it does not resolve and the cluster pulls from Docker Hub directly.
-          KOBE_DOCKERHUB_MIRROR: http://dockerhub-mirror.kobe-ci-runners.svc.cluster.local:5000
+          # The nodes' docker.io pulls: the self-hosted runners' cache (it does not resolve
+          # elsewhere), or Google's public mirror on GitHub-hosted runners.
+          KOBE_DOCKERHUB_MIRROR: ${{ runner.environment == 'github-hosted' && 'https://mirror.gcr.io' || 'http://dockerhub-mirror.kobe-ci-runners.svc.cluster.local:5000' }}
         run: scripts/dev-cluster.sh
-      - name: Build images and load them into k3d
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: e2e-image-*
+          path: ${{ runner.temp }}/e2e-images
+          merge-multiple: true
+      - name: Load the images into k3d
+        env:
+          KOBE_IMAGE_ARCHIVES: ${{ runner.temp }}/e2e-images
         run: |
+          ls -lh "${KOBE_IMAGE_ARCHIVES}"
           e2e/load-images.sh kobe "${KOBE_IMAGE_TAG}"
-          # The node now has its own copies; drop the host's to stay clear of disk-pressure eviction.
-          docker rmi ghcr.io/splittingatom/kobe-{web,server,mcp-proxy,egress-proxy,model-gateway,sandbox}:"${KOBE_IMAGE_TAG}" >/dev/null
-          docker builder prune -af >/dev/null
-          df -h /
-      - name: Run e2e suite
+          # The node now has its own copies.
+          rm -rf "${KOBE_IMAGE_ARCHIVES}"
+      - name: Run the ${{ matrix.shard }} shard
         env:
           KOBE_SANDBOX_IMAGE: ghcr.io/splittingatom/kobe-sandbox:${{ env.KOBE_IMAGE_TAG }}
-        run: e2e/run.sh
-      - name: Gate 1 suite (KOBE-1)
-        # Against the install e2e/run.sh left running: two teams × five users, refresh mid-run,
-        # live cross-team probe, kill mid-run + Retry, 20 cold-start trials (docs/gates/gate-1.md).
-        run: e2e/gate1.sh
+          SHARD: ${{ matrix.shard }}
+        run: |
+          case "${SHARD}" in
+            suite | cold-start) KOBE_E2E_SHARD="${SHARD}" e2e/run.sh ;;
+            # Gate 1 (KOBE-1) against a fresh install with the model setup it needs: two teams ×
+            # five users, refresh mid-run, live cross-team probe, kill mid-run + Retry, 20
+            # cold-start trials (docs/gates/gate-1.md).
+            gate1) KOBE_E2E_SHARD=gate1-prep e2e/run.sh && e2e/gate1.sh ;;
+            *) echo "unknown shard ${SHARD}" >&2; exit 2 ;;
+          esac
       - name: Diagnostics
         if: failure()
         run: |
@@ -97,3 +180,19 @@ jobs:
           for t in a b; do kubectl -n kobe-team-gate1-$t describe pods | tail -60 || true; done
           df -h /
           scripts/ci-docker-diagnostics.sh
+
+  # The required check (branch protection and the merge-queue ruleset name it): passes only when
+  # every image built and every shard passed. Skipped for draft PRs, as the suite is.
+  k3d:
+    needs: [images, e2e]
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every image build and e2e shard passed
+        env:
+          IMAGES: ${{ needs.images.result }}
+          SHARDS: ${{ needs.e2e.result }}
+        run: |
+          echo "images: ${IMAGES}, shards: ${SHARDS}"
+          [ "${IMAGES}" = success ] && [ "${SHARDS}" = success ]

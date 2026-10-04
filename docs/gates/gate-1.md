@@ -252,7 +252,8 @@ levers are listed under "Blockers" below.
 ## Reproduce
 
 ```bash
-# CI: the e2e workflow runs e2e/run.sh, then e2e/gate1.sh (k3d contexts only).
+# CI: the e2e workflow's gate1 shard runs KOBE_E2E_SHARD=gate1-prep e2e/run.sh, then e2e/gate1.sh
+# (k3d contexts only).
 # Any install you own (throwaway: it signs sandbox wire tokens with the install's keys):
 KOBE_GATE1_CONTEXT=<context> KOBE_GATE1_NS=<release namespace> KOBE_GATE1_RELEASE=<release> \
   KOBE_GATE1_OWNER_EMAIL=<owner> KOBE_GATE1_OWNER_PASSWORD=<password> e2e/gate1.sh
