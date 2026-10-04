@@ -12,7 +12,7 @@ import { SessionTokenError } from "@kobe/session-token";
 import type { Logger } from "pino";
 import { extractCredential } from "./credentials.js";
 import { forwardRequestHeaders, forwardResponseHeaders } from "./headers.js";
-import { topLevelModel } from "./body-model.js";
+import { topLevelModel, withStreamUsage } from "./body-model.js";
 import type { ByteBudget, CallLimiter, RequestRate } from "./limits.js";
 import type { PrincipalCache, Resolution } from "./principals.js";
 import { classify, forwardedQuery, type RouteKind } from "./routes.js";
@@ -290,6 +290,7 @@ export function createModelGateway(options: GatewayOptions): Server {
         return;
       }
       bytesIn = body.length;
+      let forwardBody = body;
       let model = route.pathModel;
       if (req.method === "POST" && !route.pathModel) {
         const scanned = topLevelModel(body);
@@ -305,6 +306,10 @@ export function createModelGateway(options: GatewayOptions): Server {
           return;
         }
         model = scanned.model;
+        // KOBE-43: a streaming Chat Completions call always asks for its usage report.
+        if (scanned.stream && route.path === "/v1/chat/completions") {
+          forwardBody = withStreamUsage(body);
+        }
       }
       call = { ...identity, runId, route: route.kind, path: route.path, model };
       // Every model call names a model the team enabled (checked here too, so a disable holds even
@@ -337,10 +342,18 @@ export function createModelGateway(options: GatewayOptions): Server {
       // 6.–7. Forward; retry once if Bifrost no longer knows the virtual key (restarted, resynced).
       const path = `${route.path}${forwardedQuery(url.searchParams)}`;
       for (let attempt = 0; ; attempt++) {
-        const outcome = await forward(req, res, path, body, resolution.virtualKey, attempt === 0, {
-          kind: route.kind,
-          started,
-        });
+        const outcome = await forward(
+          req,
+          res,
+          path,
+          forwardBody,
+          resolution.virtualKey,
+          attempt === 0,
+          {
+            kind: route.kind,
+            started,
+          },
+        );
         status = outcome.status;
         errorType = outcome.errorType;
         bytesOut = outcome.bytesOut;
@@ -405,6 +418,10 @@ export function createModelGateway(options: GatewayOptions): Server {
     source: "reported",
     counts: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   };
+  const inputOnly = (requestBytes: number): UsageReading => ({
+    source: "estimated",
+    counts: { input: Math.ceil(requestBytes / 4), output: 0, cacheRead: 0, cacheWrite: 0 },
+  });
 
   function forward(
     req: IncomingMessage,
@@ -421,15 +438,20 @@ export function createModelGateway(options: GatewayOptions): Server {
       let meter: UsageMeter | undefined;
       let ttfbMs: number | undefined;
       let errorAnswer = false;
+      let requestSent = false;
       const done = (o: Omit<Outcome, "bytesOut" | "usage" | "ttfbMs">) => {
         if (settled) return;
         settled = true;
-        // Usage counts what the upstream produced: a stream cut short still cost its tokens.
+        // Usage counts what the upstream produced: a stream cut short still cost its tokens, and
+        // a request Bifrost received but never answered (the sandbox hung up first, a reset) is
+        // charged its input: the provider may already have it.
         const usage = meter
           ? meter.finish(!o.aborted, body.length)
           : errorAnswer
             ? NO_TOKENS
-            : undefined;
+            : requestSent
+              ? inputOnly(body.length)
+              : undefined;
         resolve({ ...o, bytesOut, usage, ttfbMs });
       };
       const upstream = send(
@@ -504,6 +526,9 @@ export function createModelGateway(options: GatewayOptions): Server {
           });
         },
       );
+      upstream.on("finish", () => {
+        requestSent = true;
+      });
       upstream.setTimeout(settings.idleTimeoutMs, () => upstream.destroy(new Error("idle")));
       upstream.on("error", (err) => {
         if (settled) return;

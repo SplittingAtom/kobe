@@ -1,6 +1,6 @@
 import { StringDecoder } from "node:string_decoder";
 import type { RouteKind } from "../routes.js";
-import { JsonUsageScanner } from "./json-scan.js";
+import { JsonUsageScanner, type FoundUsage } from "./json-scan.js";
 import { usageOf, type PartialCounts, type TokenCounts } from "./normalize.js";
 
 /**
@@ -61,6 +61,36 @@ function textChars(value: unknown, depth = 0): number {
   return total;
 }
 
+const promptOf = (c: PartialCounts) => (c.input ?? 0) + (c.cacheRead ?? 0) + (c.cacheWrite ?? 0);
+
+/**
+ * Merges a later usage report into what a response reported so far. Provider counters only grow
+ * within a response, so a report never lowers them: output keeps the larger count, and the prompt
+ * side (input and its cache split) is replaced only by a report whose prompt total is not
+ * smaller (Gemini adds the cache split in a later chunk; a translated Anthropic `message_delta`
+ * may carry `input_tokens: 0`).
+ */
+export function mergeCounts(before: PartialCounts, report: PartialCounts): PartialCounts {
+  const next: PartialCounts = { ...before };
+  const prompt: PartialCounts = {};
+  if (report.input !== undefined) prompt.input = report.input;
+  if (report.cacheRead !== undefined) prompt.cacheRead = report.cacheRead;
+  if (report.cacheWrite !== undefined) prompt.cacheWrite = report.cacheWrite;
+  if (Object.keys(prompt).length > 0 && promptOf({ ...before, ...prompt }) >= promptOf(before)) {
+    Object.assign(next, prompt);
+  }
+  if (report.output !== undefined) next.output = Math.max(before.output ?? 0, report.output);
+  return next;
+}
+
+/** A captured usage value back in the shape its event had (for {@link usageOf}). */
+function eventOf(found: FoundUsage): unknown {
+  const member = { [found.key]: found.value };
+  if (found.parent === "response") return { response: member };
+  if (found.parent === "message") return { type: "message_start", message: member };
+  return member;
+}
+
 export interface MeterOptions {
   readonly kind: RouteKind;
   readonly contentType: string | undefined;
@@ -74,6 +104,8 @@ export class UsageMeter {
   private readonly maxLine: number;
   private line = "";
   private skippingLine = false;
+  /** Scans a line too long to decode for its usage member (never drops a usage report). */
+  private longLine: JsonUsageScanner | undefined;
   private readonly scanner: JsonUsageScanner | undefined;
   private merged: PartialCounts = {};
   private sawFinal = false;
@@ -104,8 +136,8 @@ export class UsageMeter {
   finish(complete: boolean, requestBytes: number): UsageReading {
     if (this.mode === "sse") this.sse(`${this.decoder.end()}\n`);
     if (this.mode === "json") {
-      for (const value of this.scanner?.values ?? []) {
-        this.take(usageOf(this.options.kind, { usage: value, usageMetadata: value }));
+      for (const found of this.scanner?.values ?? []) {
+        this.take(usageOf(this.options.kind, eventOf(found)));
       }
     }
     const m = this.merged;
@@ -136,7 +168,7 @@ export class UsageMeter {
 
   private take(found: ReturnType<typeof usageOf>): void {
     if (!found) return;
-    this.merged = { ...this.merged, ...found.counts };
+    this.merged = mergeCounts(this.merged, found.counts);
     if (found.final) this.sawFinal = true;
   }
 
@@ -150,6 +182,7 @@ export class UsageMeter {
       }
       this.append(text.slice(start, nl));
       if (!this.skippingLine) this.event(this.line);
+      else this.endLongLine();
       this.line = "";
       this.skippingLine = false;
       start = nl + 1;
@@ -159,16 +192,27 @@ export class UsageMeter {
   private append(part: string): void {
     if (this.skippingLine) {
       this.chars += part.length;
+      this.longLine?.write(Buffer.from(part, "utf8"));
       return;
     }
     if (this.line.length + part.length > this.maxLine) {
-      // Too long to decode: count it as generated text and drop it.
-      this.chars += this.line.length + part.length;
+      // Too long to decode whole: count it as generated text and scan it for its usage member.
+      const head = this.line + part;
+      this.chars += head.length;
       this.line = "";
       this.skippingLine = true;
+      this.longLine = head.startsWith("data:") ? new JsonUsageScanner() : undefined;
+      this.longLine?.write(Buffer.from(head.slice(5), "utf8"));
       return;
     }
     this.line += part;
+  }
+
+  private endLongLine(): void {
+    for (const found of this.longLine?.values ?? []) {
+      this.take(usageOf(this.options.kind, eventOf(found)));
+    }
+    this.longLine = undefined;
   }
 
   private event(raw: string): void {

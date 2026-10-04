@@ -1,10 +1,12 @@
 /**
- * Finds the usage object of a JSON response body as it streams past (KOBE-43), without keeping
- * the body: a structural scan (strings, escapes and nesting tracked) that captures only the value
- * of a `usage` / `usageMetadata` member of the top-level object, or of an object directly inside a
- * top-level array (Gemini's non-SSE `streamGenerateContent` answers an array of chunks). A key of
- * that name inside model output (a string) or deeper in the structure never counts. Memory is
- * bounded by `maxValueBytes` per captured value.
+ * Finds the usage object of a JSON value as it streams past (KOBE-43), without keeping it: a
+ * structural scan (strings, escapes and nesting tracked) that captures only the value of a
+ * `usage` / `usageMetadata` member of the top-level object, of an object directly inside a
+ * top-level array (Gemini's non-SSE `streamGenerateContent` answers an array of chunks), or of a
+ * top-level `response` / `message` object (OpenAI Responses' `response.completed`, Anthropic's
+ * `message_start`; used for stream events too long to decode whole). A key of that name inside
+ * model output (a string) or anywhere else never counts. Memory is bounded by `maxValueBytes`
+ * per captured value.
  */
 const QUOTE = 0x22;
 const BACKSLASH = 0x5c;
@@ -17,10 +19,29 @@ const CLOSE_ARR = 0x5d;
 const WS = new Set([0x20, 0x09, 0x0a, 0x0d]);
 const USAGE_KEYS = new Set(["usage", "usageMetadata"]);
 const MAX_KEY = 16;
+/** Top-level members whose object may carry the usage one level down. */
+const USAGE_PARENTS = new Set(["response", "message"]);
+
+export interface FoundUsage {
+  /** The top-level member holding it (`response`, `message`), or undefined. */
+  readonly parent: string | undefined;
+  readonly key: string;
+  readonly value: unknown;
+}
+
+interface Container {
+  readonly object: boolean;
+  /** The member key this container is the value of ("" for array elements and the root). */
+  readonly key: string;
+}
 
 export class JsonUsageScanner {
-  /** Container kinds from the root down: true = object. */
-  private readonly stack: boolean[] = [];
+  /** Containers from the root down. */
+  private readonly stack: Container[] = [];
+  /** The key of the member whose value comes next (after its colon). */
+  private memberKey = "";
+  private captureKey = "";
+  private captureParent: string | undefined;
   private inString = false;
   private escaped = false;
   /** In an object, the next string is a key. */
@@ -32,12 +53,12 @@ export class JsonUsageScanner {
   private capture: number[] | undefined;
   private captureDepth = 0;
   private overflow = false;
-  private readonly found: unknown[] = [];
+  private readonly found: FoundUsage[] = [];
 
   constructor(private readonly maxValueBytes = 64 * 1024) {}
 
   /** Usage values seen so far, in order. */
-  get values(): readonly unknown[] {
+  get values(): readonly FoundUsage[] {
     return this.found;
   }
 
@@ -45,10 +66,21 @@ export class JsonUsageScanner {
     for (const c of chunk) this.byte(c);
   }
 
-  private memberDepth(): boolean {
+  /** Whether the current object's members may be usage; returns its parent key. */
+  private usageLevel(): { readonly ok: boolean; readonly parent: string | undefined } {
+    const [root, inner] = this.stack;
     const d = this.stack.length;
-    if (d === 1) return this.stack[0] === true;
-    return d === 2 && this.stack[0] === false && this.stack[1] === true;
+    if (d === 1) return { ok: root?.object === true, parent: undefined };
+    if (d !== 2 || inner?.object !== true) return { ok: false, parent: undefined };
+    if (root?.object === false) return { ok: true, parent: undefined };
+    return USAGE_PARENTS.has(inner.key)
+      ? { ok: true, parent: inner.key }
+      : { ok: false, parent: undefined };
+  }
+
+  private memberDepth(): boolean {
+    const top = this.stack.at(-1);
+    return top?.object === true && this.stack.length <= 2;
   }
 
   private byte(c: number): void {
@@ -83,17 +115,26 @@ export class JsonUsageScanner {
         this.key = this.expectKey && this.memberDepth() ? [] : undefined;
         this.expectKey = false;
         return;
-      case COLON:
-        if (this.memberDepth() && USAGE_KEYS.has(this.lastKey)) this.armed = true;
+      case COLON: {
+        const level = this.usageLevel();
+        if (level.ok && USAGE_KEYS.has(this.lastKey)) {
+          this.armed = true;
+          this.captureKey = this.lastKey;
+          this.captureParent = level.parent;
+        }
+        this.memberKey = this.lastKey;
         this.lastKey = "";
         return;
+      }
       case COMMA:
-        this.expectKey = this.stack.at(-1) === true;
+        this.memberKey = "";
+        this.expectKey = this.stack.at(-1)?.object === true;
         this.endPrimitiveCapture();
         return;
       case OPEN_OBJ:
       case OPEN_ARR:
-        this.stack.push(c === OPEN_OBJ);
+        this.stack.push({ object: c === OPEN_OBJ, key: this.memberKey });
+        this.memberKey = "";
         this.expectKey = c === OPEN_OBJ;
         return;
       case CLOSE_OBJ:
@@ -126,7 +167,11 @@ export class JsonUsageScanner {
     this.capture = undefined;
     if (!bytes || this.overflow) return;
     try {
-      this.found.push(JSON.parse(Buffer.from(bytes).toString("utf8")));
+      this.found.push({
+        parent: this.captureParent,
+        key: this.captureKey,
+        value: JSON.parse(Buffer.from(bytes).toString("utf8")) as unknown,
+      });
     } catch {
       // Not valid JSON on its own (should not happen for a well-formed body): ignore.
     }

@@ -22,6 +22,8 @@ export interface DbUsageSinkOptions {
 interface Queued {
   readonly record: ModelUsageRecord;
   readonly attempts: number;
+  /** Written on its own after its batch failed, so one bad row cannot sink the others. */
+  readonly alone?: boolean;
 }
 
 /** The ledger row for a call, or undefined when it is not a model call that reached Bifrost. */
@@ -100,25 +102,27 @@ export class DbUsageSink implements UsageSink {
       const batch = this.queue.slice(0, this.maxBatch);
       this.queue = this.queue.slice(batch.length);
       // One write (one transaction) per team: a failure retries only that team's rows, so a
-      // retry never writes another team's rows twice.
-      const byTeam = new Map<string, Queued[]>();
-      for (const q of batch)
-        byTeam.set(q.record.teamId, [...(byTeam.get(q.record.teamId) ?? []), q]);
+      // retry never writes another team's rows twice. Rows of a failed batch retry one by one.
+      const groups = new Map<string, Queued[]>();
+      for (const [i, q] of batch.entries()) {
+        const key = q.alone ? `alone:${i}` : q.record.teamId;
+        groups.set(key, [...(groups.get(key) ?? []), q]);
+      }
       const failed: Queued[] = [];
-      for (const [teamId, items] of byTeam) {
+      for (const items of groups.values()) {
         try {
           await this.options.write(items.map((q) => q.record));
         } catch (err) {
           failed.push(...items);
           this.options.logger.error(
-            { err, teamId, records: items.length },
+            { err, teamId: items[0]?.record.teamId, records: items.length },
             "writing model usage failed",
           );
         }
       }
       if (failed.length > 0) {
         const retry = failed
-          .map((q) => ({ record: q.record, attempts: q.attempts + 1 }))
+          .map((q) => ({ record: q.record, attempts: q.attempts + 1, alone: true }))
           .filter((q) => q.attempts < this.maxAttempts);
         if (retry.length < failed.length) {
           this.options.logger.error(

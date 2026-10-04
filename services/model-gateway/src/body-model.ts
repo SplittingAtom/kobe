@@ -6,7 +6,15 @@
  * (Bifrost's Go decoder matches keys case-insensitively and takes the last; others take the first).
  */
 export type BodyModel =
-  | { readonly ok: true; readonly model: string | undefined }
+  | {
+      readonly ok: true;
+      readonly model: string | undefined;
+      /**
+       * Whether the request streams: the last top-level key that decodes to `stream` in any case
+       * (Go's rule, as for `model`) has the literal value `true` (KOBE-43 usage reporting).
+       */
+      readonly stream: boolean;
+    }
   | { readonly ok: false; readonly reason: "not_json_object" | "duplicate_model" | "bad_model" };
 
 const WS = new Set([0x20, 0x09, 0x0a, 0x0d]);
@@ -14,6 +22,9 @@ const QUOTE = 0x22;
 const BACKSLASH = 0x5c;
 const MAX_MODEL = 200;
 const MAX_MODEL_KEY_RAW = 30;
+/** "stream" is 6 characters, at most 6 raw bytes each. */
+const MAX_STREAM_KEY_RAW = 36;
+const TRUE = Buffer.from("true");
 
 class Malformed extends Error {}
 
@@ -81,6 +92,9 @@ export function topLevelModel(body: Buffer): BodyModel {
    */
   const isModelKey = (start: number, end: number): boolean =>
     end - start <= MAX_MODEL_KEY_RAW && decode(start, end).toUpperCase().toLowerCase() === "model";
+  const isStreamKey = (start: number, end: number): boolean =>
+    end - start <= MAX_STREAM_KEY_RAW &&
+    decode(start, end).toUpperCase().toLowerCase() === "stream";
 
   try {
     ws();
@@ -88,6 +102,7 @@ export function topLevelModel(body: Buffer): BodyModel {
     ws();
     let model: string | undefined;
     let seen = false;
+    let stream = false;
     if (body[i] === 0x7d) {
       i++;
     } else {
@@ -109,6 +124,10 @@ export function topLevelModel(body: Buffer): BodyModel {
           model = decode(vs, ve);
           if (model.length === 0 || model.length > MAX_MODEL)
             return { ok: false, reason: "bad_model" };
+        } else if (isStreamKey(ks, ke)) {
+          const vs = i;
+          value();
+          stream = body.subarray(vs, i).equals(TRUE);
         } else {
           value();
         }
@@ -123,11 +142,30 @@ export function topLevelModel(body: Buffer): BodyModel {
     }
     ws();
     if (i !== n) throw new Malformed();
-    return { ok: true, model };
+    return { ok: true, model, stream };
   } catch (err) {
     if (err instanceof Malformed || err instanceof SyntaxError) {
       return { ok: false, reason: "not_json_object" };
     }
     throw err;
   }
+}
+
+/**
+ * A Chat Completions body that streams, with `stream_options.include_usage` forced on (KOBE-43):
+ * appended as the object's last member, which Go's decoder (Bifrost) takes over any earlier
+ * `stream_options` in any letter case. Without it OpenAI-style streams carry no usage report.
+ * `body` must be a JSON object already accepted by {@link topLevelModel}.
+ */
+export function withStreamUsage(body: Buffer): Buffer {
+  let end = body.length - 1;
+  while (end >= 0 && WS.has(body[end] as number)) end--;
+  if (body[end] !== 0x7d) return body;
+  let start = end - 1;
+  while (start >= 0 && WS.has(body[start] as number)) start--;
+  const empty = body[start] === 0x7b;
+  return Buffer.concat([
+    body.subarray(0, end),
+    Buffer.from(`${empty ? "" : ","}"stream_options":{"include_usage":true}}`),
+  ]);
 }

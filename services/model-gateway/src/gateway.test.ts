@@ -71,6 +71,15 @@ beforeAll(async () => {
         res.end(JSON.stringify({ type: "model_blocked", error: { message: "not allowed" } }));
         return;
       }
+      if (Buffer.concat(chunks).toString().includes('"slow":true')) {
+        // Answers late: lets a test hang up before Bifrost's response headers.
+        const t = setTimeout(() => {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end("{}");
+        }, 500);
+        res.on("close", () => clearTimeout(t));
+        return;
+      }
       if (
         req.url?.startsWith("/v1/chat/completions") &&
         chunks.join("").includes('"stream":true')
@@ -381,6 +390,43 @@ describe("calls", () => {
     // KOBE-43: a stream cut short is charged an estimate, never nothing.
     expect(records[0]?.usage?.source).toBe("estimated");
     expect(records[0]?.usage?.counts.input).toBeGreaterThan(0);
+  });
+
+  it("KOBE-43: asks for the usage report of a streaming chat call (include_usage forced)", async () => {
+    const res = await fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: { ...bearer(), "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "openai/m",
+        stream: true,
+        stream_options: { include_usage: false },
+      }),
+    });
+    await res.text();
+    expect(hits[0]?.body.endsWith(',"stream_options":{"include_usage":true}}')).toBe(true);
+    // A non-streaming call is forwarded as sent.
+    await call("/v1/chat/completions", { headers: bearer(), body: { model: "openai/m" } });
+    expect(hits[1]?.body).toBe(JSON.stringify({ model: "openai/m" }));
+  });
+
+  it("KOBE-43: charges the input of a call Bifrost got but the sandbox hung up on", async () => {
+    await new Promise<void>((resolve) => {
+      const req = request(`${base}/v1/chat/completions`, {
+        method: "POST",
+        headers: { ...bearer(), "content-type": "application/json" },
+      });
+      req.on("error", () => resolve());
+      req.end(JSON.stringify({ model: "openai/m", slow: true, pad: "p".repeat(400) }));
+      setTimeout(() => {
+        req.destroy();
+        resolve();
+      }, 150);
+    });
+    for (let i = 0; i < 50 && records.length === 0; i++)
+      await new Promise((r) => setTimeout(r, 20));
+    expect(records[0]).toMatchObject({ aborted: true });
+    expect(records[0]?.usage?.source).toBe("estimated");
+    expect(records[0]?.usage?.counts.input).toBeGreaterThan(100);
   });
 
   it("limits concurrent calls per sandbox (429)", async () => {

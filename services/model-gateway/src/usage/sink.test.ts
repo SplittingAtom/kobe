@@ -63,6 +63,31 @@ describe("DbUsageSink", () => {
     ]);
   });
 
+  it("retries a failed batch row by row, so one bad row does not sink its team's others", async () => {
+    const writes: ModelUsageRecord[][] = [];
+    const team = randomUUID();
+    const bad = randomUUID();
+    const sink = new DbUsageSink({
+      logger,
+      flushMs: 60_000,
+      maxAttempts: 2,
+      write: async (records) => {
+        if (records.some((r) => r.userId === bad)) throw new Error("foreign key");
+        writes.push([...records]);
+        return records.length;
+      },
+    });
+    sink.record(call({ teamId: team }));
+    sink.record(call({ teamId: team, userId: bad }));
+    await sink.flush();
+    expect(writes).toEqual([]);
+    await sink.flush();
+    expect(writes.map((w) => w.length)).toEqual([1]);
+    await sink.flush();
+    expect(sink.pending).toBe(0);
+    await sink.close();
+  });
+
   it("gives up on a record after its attempts and bounds the queue", async () => {
     const sink = new DbUsageSink({
       logger,

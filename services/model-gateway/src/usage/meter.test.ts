@@ -122,6 +122,49 @@ describe("UsageMeter: streams (usage in the final events)", () => {
     });
   });
 
+  it("reads the usage of an event too long to decode whole (never drops the report)", () => {
+    const long = "w".repeat(200);
+    const body =
+      event("response.completed", {
+        type: "response.completed",
+        response: {
+          output: [{ content: [{ text: long }] }],
+          usage: { input_tokens: 7, output_tokens: 70_000 },
+        },
+      }) +
+      data({
+        candidates: [{ content: { parts: [{ text: long }] } }],
+        usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 2 },
+      });
+    const openai = new UsageMeter({
+      kind: "openai",
+      contentType: SSE,
+      contentEncoding: undefined,
+      maxLineBytes: 64,
+    });
+    openai.write(Buffer.from(body));
+    expect(openai.finish(true, 0)).toEqual({
+      source: "reported",
+      counts: { input: 7, output: 70_000, cacheRead: 0, cacheWrite: 0 },
+    });
+  });
+
+  it("merges reports field by field, keeping the larger count", () => {
+    const body =
+      event("message_start", {
+        type: "message_start",
+        message: { usage: { input_tokens: 12, output_tokens: 1 } },
+      }) +
+      event("message_delta", {
+        type: "message_delta",
+        usage: { input_tokens: 0, output_tokens: 42 },
+      });
+    expect(meter("anthropic", SSE, body)).toEqual({
+      source: "reported",
+      counts: { input: 12, output: 42, cacheRead: 0, cacheWrite: 0 },
+    });
+  });
+
   it("a usage report from a stream that did not complete is still an estimate", () => {
     const body = data({ choices: [], usage: { prompt_tokens: 3, completion_tokens: 2 } });
     expect(meter("openai", SSE, body, 100, false).source).toBe("estimated");
@@ -198,7 +241,7 @@ describe("JsonUsageScanner", () => {
   const scan = (text: string) => {
     const s = new JsonUsageScanner(64);
     s.write(Buffer.from(text));
-    return s.values;
+    return s.values.map((f) => f.value);
   };
 
   it("captures object and primitive values at member depth only", () => {
@@ -207,6 +250,16 @@ describe("JsonUsageScanner", () => {
     ]);
     expect(scan('{"usage":null,"x":1}')).toEqual([null]);
     expect(scan('{"x":"\\"usage\\":{}","usage":7}')).toEqual([7]);
+  });
+
+  it("captures usage one level down in a top-level response or message object only", () => {
+    const s = new JsonUsageScanner();
+    s.write(
+      Buffer.from(
+        '{"type":"x","response":{"output":[{"usage":1}],"usage":{"input_tokens":3}},"other":{"usage":9}}',
+      ),
+    );
+    expect(s.values).toEqual([{ parent: "response", key: "usage", value: { input_tokens: 3 } }]);
   });
 
   it("drops a value larger than its cap", () => {

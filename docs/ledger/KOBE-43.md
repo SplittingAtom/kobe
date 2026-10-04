@@ -80,6 +80,32 @@ cost_usd?, duration_ms, ttfb_ms?, aborted)`. `input_tokens` excludes cache reads
   the per-sandbox request rate (10/s) bounds rows a sandbox can cause.
 - **Audit:** `models.catalog.changed` gains `pricesChanged?` (never the amounts).
 
+## Self security review (security-reviewer agent) — resolutions
+
+- **H1** a sandbox hanging up before Bifrost's headers left no row: a request Bifrost received
+  (fully written) but never answered is charged its input as an estimate. Test: gateway "charges
+  the input of a call Bifrost got but the sandbox hung up on".
+- **H2** over-long SSE lines were dropped unparsed (a padded `response.completed` would lose its
+  usage): such a line is now scanned with the structural scanner, which also captures `usage`
+  one level down in a top-level `response` / `message` object. Test: meter "reads the usage of an
+  event too long to decode whole".
+- **H3** Chat Completions streams report usage only when asked: the shim forces
+  `stream_options.include_usage` (appended as the body's last member, which Bifrost's Go decoder
+  takes over any earlier one) on every streaming chat call (top-level `stream: true`, detected
+  structurally like `model`). Tests: `body-model.test.ts` "streaming requests", gateway "asks for
+  the usage report of a streaming chat call".
+- **M2** reports merge monotonically (output keeps the larger count; the prompt side is replaced
+  only by a report with a prompt total that is not smaller). Test: meter "merges reports…".
+- **M4** a failed team batch retries row by row, so one bad row cannot sink the others. Test:
+  sink "retries a failed batch row by row…".
+- Kept: **M1** (bytes still in buffers when a sandbox aborts a back-pressured stream are not
+  counted; Bifrost cancels the provider call at once, so this is bounded by socket buffers),
+  **M3** (no cache-write field on the OpenAI route), **M5** (unpriced models cost nothing: prices
+  are optional by design; tokens are always counted; KOBE-42 budgets key on team/user only),
+  **M6** (install admins see user names/emails and agent slugs per the install usage section's
+  "by team, user, agent and model"; never thread titles or content), LOW items (content-encoding
+  is never requested: `accept-encoding` is not forwarded).
+
 ## Contract changes
 
 None in `packages/protocol`. `@kobe/model-gateway` `CallRecord` gains `startedAt`, `ttfbMs` and
