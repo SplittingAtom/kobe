@@ -12,7 +12,7 @@ export interface ObservedKey {
   readonly name: string;
   /**
    * Bifrost's model discovery for the key (`success`, `list_models_failed`), with its own
-   * description of a failure (provider text: shown only after `scrubDetail`).
+   * description of a failure (provider text: never shown; see `failureReason`).
    */
   readonly status?: string | undefined;
   readonly description?: string | undefined;

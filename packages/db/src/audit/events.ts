@@ -420,6 +420,12 @@ export const AUDIT_EVENTS = {
   "thread.trashed": event("team", { threadId: id }),
   "thread.restored": event("team", { threadId: id }),
   "thread.sharing_changed": event("team", { threadId: id, projectId: id, shared: z.boolean() }),
+  /** The thread's chosen model changed (KOBE-44, D30); null = the team's default. */
+  "thread.model_changed": event("team", {
+    threadId: id,
+    from: modelAlias.nullable(),
+    to: modelAlias.nullable(),
+  }),
   /** The thread's pinned agent version changed (D19 one-click switch, KOBE-46). */
   "thread.agent_switched": event("team", {
     threadId: id,

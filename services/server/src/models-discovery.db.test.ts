@@ -1,7 +1,7 @@
 import pino from "pino";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PROVIDER_KEY_PURPOSE, SecretBox, VIRTUAL_KEY_PURPOSE } from "@kobe/db";
-import { catalogModelIds, scrubDetail } from "./models/discovery.js";
+import { catalogModelIds, failureReason } from "./models/discovery.js";
 import { ModelGatewaySync } from "./models/sync.js";
 import { FakeBifrost } from "./models/testing/fake-bifrost.js";
 import type { TestBrowser } from "./testing/browser.js";
@@ -96,14 +96,14 @@ describe("provider model listing", () => {
     ]);
   });
 
-  it("reports a refused key with the provider's reason, scrubbed of key material", async () => {
+  it("reports a refused key with a fixed reason, never the provider's text", async () => {
     bifrost.upstream.set("ollama", {
       error: `401 unauthorized: invalid api key ${KEY}\u0007 — check the key`,
     });
     const res = await owner.post(`${BASE}/refresh`);
     expect(res.status).toBe(200);
     expect(res.json.discovery).toBe("failed");
-    expect(res.json.detail).toBe("401 unauthorized: invalid api key [redacted] — check the key");
+    expect(res.json.detail).toBe("the provider refused the API key");
     expect(JSON.stringify(res.json)).not.toContain(KEY);
     expect((await refreshAudit()).at(-1)).toEqual({
       providerId: "ollama",
@@ -135,12 +135,20 @@ describe("provider model listing", () => {
 });
 
 describe("helpers", () => {
-  it("scrubs control characters and token-like strings, and bounds the text", () => {
-    expect(scrubDetail(undefined)).toBeNull();
-    expect(scrubDetail("  \u0000 ")).toBeNull();
-    expect(scrubDetail("Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIx")).toBe("Bearer [redacted]");
-    expect(scrubDetail("x".repeat(500))).toBe("[redacted]");
-    expect(scrubDetail("word ".repeat(100))?.length).toBe(200);
+  it("turns provider error text into fixed reasons", () => {
+    expect(failureReason(undefined)).toBe("the provider returned an error");
+    expect(failureReason("Incorrect API key provided: sk-proj-****abcd")).toBe(
+      "the provider refused the API key",
+    );
+    expect(failureReason("HTTP 429 Too Many Requests")).toBe(
+      "the provider is rate-limiting requests",
+    );
+    expect(failureReason("404 page not found")).toMatch(/base URL/);
+    expect(failureReason("dial tcp: lookup ollama.example: no such host")).toBe(
+      "the provider could not be reached",
+    );
+    expect(failureReason("upstream 502")).toBe("the provider could not be reached");
+    expect(failureReason("weird sk-secret-0123")).not.toContain("sk-");
   });
 
   it("caps the list and drops only its own provider's prefix", () => {

@@ -38,9 +38,9 @@ export interface ProviderModelsView {
   readonly models: readonly string[];
   /** Bifrost's last list-models result for the provider's key. */
   readonly discovery: DiscoveryStatus;
-  /** The provider's failure reason, scrubbed of anything that looks like a credential. */
+  /** Why the provider refused, as a fixed sentence (never the provider's own text). */
   readonly detail: string | null;
-  /** True when the list was cut at `MAX_LISTED_MODELS`. */
+  /** True when the list may have been cut at `MAX_LISTED_MODELS`. */
   readonly truncated: boolean;
 }
 
@@ -58,22 +58,29 @@ export type DiscoveryResult =
 /** Refreshes per provider; each one is a provider call with the install's key. */
 export const REFRESH_RATE: RateLimitRule = { windowMs: 60_000, max: 6 };
 
-const DETAIL_MAX = 200;
 const MODEL_RE = new RegExp(PROVIDER_MODEL_PATTERN);
 
 /**
- * A provider's error text as safe to show: no control characters, anything long and token-like
- * (keys, bearer tokens, base64) replaced, bounded. Providers sometimes echo part of the key.
+ * Why a provider refused to list its models, as one of a few fixed sentences. The provider's own
+ * text is never passed on: providers echo parts of the key in their errors ("Incorrect API key
+ * provided: sk-…abcd"), and no redaction is reliable for every key format.
  */
-export function scrubDetail(text: string | undefined): string | null {
-  if (text === undefined) return null;
-  const cleaned = text
-    .replace(/\p{Cc}+/gu, " ")
-    .replace(/[A-Za-z0-9_\-+/=.:]{20,}/g, "[redacted]")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (cleaned === "") return null;
-  return cleaned.length > DETAIL_MAX ? `${cleaned.slice(0, DETAIL_MAX - 1)}…` : cleaned;
+const FAILURE_REASONS: readonly (readonly [RegExp, string])[] = [
+  [
+    /\b(401|403)\b|unauthori[sz]ed|forbidden|api.?key|authenticat|permission/i,
+    "the provider refused the API key",
+  ],
+  [/\b429\b|rate.?limit|too many requests|quota/i, "the provider is rate-limiting requests"],
+  [/\b404\b|not found/i, "the endpoint has no model list (check the base URL)"],
+  [
+    /timeout|timed out|refused|unreachable|no such host|dial|connection|dns|tls|certificate|\b5\d\d\b/i,
+    "the provider could not be reached",
+  ],
+];
+
+export function failureReason(text: string | undefined): string {
+  const found = FAILURE_REASONS.find(([pattern]) => pattern.test(text ?? ""));
+  return found?.[1] ?? "the provider returned an error";
 }
 
 /** Bifrost's names as catalog model ids: own provider's prefix dropped, invalid ids skipped. */
@@ -100,7 +107,7 @@ function statusOf(keys: readonly ObservedKey[]): {
 } {
   if (keys.some((k) => k.status === "success")) return { status: "ok", detail: null };
   const failed = keys.find((k) => k.status === "list_models_failed");
-  if (failed) return { status: "failed", detail: scrubDetail(failed.description) };
+  if (failed) return { status: "failed", detail: failureReason(failed.description) };
   return { status: "unknown", detail: null };
 }
 

@@ -341,6 +341,13 @@ export async function updateThread(
       target: { threadId: id, projectId: row.projectId, shared: row.sharedToProject },
     });
   }
+  if (modelChanged) {
+    await recordAudit(tx, {
+      action: "thread.model_changed",
+      teamId: viewer.teamId,
+      target: { threadId: id, from: locked.thread.modelAlias, to: row.modelAlias },
+    });
+  }
   return { ok: true, thread: toSummary(row) };
 }
 

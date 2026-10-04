@@ -87,6 +87,14 @@ describe("thread model choice (D30)", () => {
     expect(cleared.status).toBe(200);
     expect(cleared.json.model).toBeNull();
     expect((await owner.patch(`/v1/threads/${id}`, { model: "fast" })).json.model).toBe("fast");
+    const changes = await f.fx.admin.query<{ target: Record<string, unknown> }>(
+      `SELECT target FROM audit_log WHERE team_id = $1 AND action = 'thread.model_changed' ORDER BY seq`,
+      [w.team],
+    );
+    expect(changes.rows.map((r) => r.target)).toEqual([
+      { threadId: id, from: "smart", to: null },
+      { threadId: id, from: null, to: "fast" },
+    ]);
 
     // Not in the catalog, or in it but not enabled for the team: refused, nothing changed.
     await disable(w.team, "smart");

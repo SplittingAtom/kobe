@@ -49,8 +49,9 @@ chat composer ── POST/PATCH /v1/threads {model} ──▶ threads.model_alia
   (`GET /api/providers/{p}/keys` → `status`, `description`); `POST …/models/refresh` has Bifrost
   run the provider's list-models call now (`POST /api/providers/{p}/refresh-models`). Install
   `install.models.manage` only (the route's middleware). Model ids are normalized (own gateway
-  prefix dropped, `PROVIDER_MODEL_PATTERN` only, ≤ 1000, sorted). The provider's failure text is
-  scrubbed (control characters out, any 20+ char token-like run → `[redacted]`, ≤ 200 chars).
+  prefix dropped, `PROVIDER_MODEL_PATTERN` only, ≤ 1000, sorted). A provider's failure is reported
+  as one of a few fixed reasons (`failureReason`: refused key, rate limit, no model list at that
+  URL, unreachable, other); its own text is never passed on (providers echo key fragments).
   Errors: 404 unknown provider, 409 `provider_not_synced` (Bifrost doesn't have it yet), 503
   `gateway_unavailable`, 429 refresh limit (6/min per provider, Postgres counter shared by
   replicas). Audit `models.provider.models_refreshed` {providerId, kind, outcome ok|failed|
@@ -79,8 +80,9 @@ model)`, `setThreadModel`, `listModels`; `ChatSession` draft model + 30 s model-
 3. **Same error code for a disabled thread choice** (`agent_model_not_enabled`, as the brief asks
    for "the existing clear error"), with its own message naming the conversation's model. The
    picker re-reads the team's models when a run fails with that code.
-4. **Model choice is not audited** (a per-thread preference, not a security-relevant change);
-   enabling/disabling models stays audited (`models.team.changed`).
+4. **A thread's model change is audited** (`thread.model_changed` {threadId, from, to}, like
+   `thread.agent_switched`); choosing one at creation is part of creating the thread (not audited,
+   like creation itself).
 5. **The picker is a native `<select>`** in the composer action bar (assistant-ui ships no model
    selector component in 0.15; its shadcn registry one is a Select in the same place). Native gives
    keyboard and screen-reader support; arrowing through options does change the model (cheap and
@@ -110,13 +112,22 @@ model)`, `setThreadModel`, `listModels`; `ChatSession` draft model + 30 s model-
    catalog form reads Bifrost's cache, which Bifrost fills on its own discovery; "Ask the provider"
    is one click.
 
+## Self-review (security-reviewer agent: 0 CRITICAL/HIGH, 1 MEDIUM, 6 LOW) — resolution
+
+- MEDIUM provider error text could carry key fragments past a length-based scrubber → replaced by
+  fixed reasons (`failureReason`, test "turns provider error text into fixed reasons").
+- LOW thread model change not audited → `thread.model_changed` (test in `thread-model.db.test.ts`).
+- LOW kept: no limit on the cached list read (above); the shared `hitRateLimit` advances its window
+  on refused hits (pre-existing helper); `truncated` means "may have been cut"; rate-limited
+  refreshes are not audited (no provider call happens).
+
 ## Risks
 
 - Bifrost's `GET /api/models` includes datasheet models for vendor providers (pricing catalog),
   so the picker can suggest a model the key can't use; the field stays free text and the gateway
   refuses an unusable model at run time.
-- The scrubber is heuristic: provider error text that echoes a short key fragment (< 20 chars)
-  would pass. It is shown to install admins only and never stored or audited.
+- `GET …/providers/{id}/models` is not rate-limited (install admins only; reads Bifrost's cache,
+  two admin calls). The refresh is.
 
 ## Evidence (acceptance criteria → test or command output)
 
