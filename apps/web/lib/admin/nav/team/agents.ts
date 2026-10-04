@@ -3,9 +3,9 @@ import { READY, defineTeamSection } from "../types";
 export default defineTeamSection({
   id: "agents",
   label: "Team agents",
-  description: "The team's agents and their status; suspend or reactivate them.",
+  description: "The team's agents: build and publish them; admins can also suspend them.",
   group: "Agents and skills",
   order: 10,
-  permission: "team.agents.suspend",
+  permission: "team.agents.build",
   status: READY,
 });

@@ -136,6 +136,8 @@ export function agentSummary(agent: AgentRecord, access: AgentAccess) {
     createdAt: agent.createdAt.toISOString(),
     updatedAt: agent.updatedAt.toISOString(),
     canEdit: access.edit,
+    /** Publish and rollback need their own right (D8): editing a draft doesn't imply it. */
+    canPublish: access.publish,
   };
 }
 

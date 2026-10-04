@@ -16,6 +16,7 @@
   "dependencies": {
     "@assistant-ui/react": "0.15.23",
     "@better-auth/passkey": "1.7.7",
+    "@kobe/agent-file": "workspace:*",
     "@kobe/protocol": "workspace:*",
     "@tailwindcss/postcss": "4.3.3",
     "better-auth": "1.7.7",

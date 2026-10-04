@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { listTeamAgents, setTeamAgentStatus } from "../../../lib/admin/api/team/agents";
 import { agentStatusLabel, type AgentSummary } from "../../../lib/admin/api/agents";
 import { useTeamAccess } from "../console-context";
@@ -12,6 +13,7 @@ import styles from "../admin.module.css";
 export function TeamAgentsPage() {
   const access = useTeamAccess();
   const teamId = access.team.id;
+  const canSuspend = access.permissions.includes("team.agents.suspend");
   const { state, reload } = useResource(() => listTeamAgents(teamId));
   const mutation = useMutation();
 
@@ -37,6 +39,9 @@ export function TeamAgentsPage() {
         Builders create and publish team agents; team admins can suspend any of them. Archived
         agents were deleted after publishing: conversations pinned to them keep working. The full
         inventory (usage, schedules) arrives with KOBE-48.
+      </p>
+      <p>
+        <Link href="/admin/team/agents/new">New agent</Link>
       </p>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="team agents">
@@ -75,14 +80,20 @@ export function TeamAgentsPage() {
                         <DateTime value={a.updatedAt} />
                       </td>
                       <td>
-                        <button
-                          type="button"
-                          disabled={mutation.pending}
-                          onClick={() => void toggle(a)}
-                        >
-                          {a.status === "active" ? "Suspend" : "Reactivate"}
+                        <Link href={`/admin/team/agents/${a.id}`}>
+                          Edit
                           <span className={styles.visuallyHidden}> {a.name}</span>
-                        </button>
+                        </Link>{" "}
+                        {canSuspend && (
+                          <button
+                            type="button"
+                            disabled={mutation.pending}
+                            onClick={() => void toggle(a)}
+                          >
+                            {a.status === "active" ? "Suspend" : "Reactivate"}
+                            <span className={styles.visuallyHidden}> {a.name}</span>
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}

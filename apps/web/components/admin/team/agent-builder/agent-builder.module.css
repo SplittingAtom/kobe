@@ -1,0 +1,135 @@
+/* Agent builder (KOBE-84): uses the admin console tokens set on the shell (--admin-*). */
+
+.layout {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.fields {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr);
+  margin: 1rem 0;
+}
+
+@media (min-width: 48rem) {
+  .fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .wide {
+    grid-column: 1 / -1;
+  }
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.field label {
+  font-weight: 600;
+}
+
+.field input,
+.field select,
+.field textarea,
+.prompt {
+  font: inherit;
+  color: inherit;
+  background: var(--admin-bg);
+  border: 1px solid var(--admin-border);
+  border-radius: 0.375rem;
+  padding: 0.4rem 0.5rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.field input[aria-invalid="true"],
+.field select[aria-invalid="true"],
+.field textarea[aria-invalid="true"] {
+  border-color: var(--admin-danger);
+}
+
+.field input[readonly],
+.field textarea[readonly] {
+  background: var(--admin-panel);
+}
+
+.checkbox {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-weight: normal;
+}
+
+.checkbox input {
+  width: auto;
+}
+
+.fieldError {
+  margin: 0;
+  color: var(--admin-danger);
+  font-size: 0.9em;
+}
+
+.prompt {
+  min-height: 18rem;
+  font-family: ui-monospace, monospace;
+  resize: vertical;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 1rem 0;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  background: var(--admin-panel);
+  border: 1px solid var(--admin-border);
+  font-size: 0.85em;
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(0 0 0 / 0.5);
+  z-index: 10;
+}
+
+.dialog {
+  max-width: 32rem;
+  width: 100%;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--admin-border);
+  border-radius: 0.5rem;
+  background: var(--admin-bg);
+  color: var(--admin-fg);
+}
+
+.dialog h2 {
+  margin-top: 0;
+}
+
+.warnings {
+  padding: 0.5rem 0.75rem;
+  border-left: 4px solid #b7791f;
+  background: var(--admin-warn-bg);
+}
+
+.warnings ul {
+  margin: 0.25rem 0 0;
+  padding-left: 1.25rem;
+}
