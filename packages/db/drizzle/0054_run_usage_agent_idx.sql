@@ -1,0 +1,1 @@
+CREATE INDEX "run_usage_agent_idx" ON "run_usage" USING btree ("team_id","agent_id") WHERE "run_usage"."agent_id" IS NOT NULL;

@@ -125,7 +125,7 @@ function InventoryTable({
             {agents.map((a) => (
               <tr key={a.id}>
                 <th scope="row">{a.name}</th>
-                <td>{a.ownerName ?? PLACEHOLDER}</td>
+                <td>{a.scope === "gallery" ? "Gallery" : (a.ownerName ?? PLACEHOLDER)}</td>
                 <td>{SCOPE_LABEL[a.scope]}</td>
                 <td>
                   {a.archivedAt !== null

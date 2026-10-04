@@ -130,12 +130,21 @@ describe("agent inventory (KOBE-86)", () => {
   let carolPersonal: string;
   let bobUnused: string;
   let marketingAgent: string;
+  let longSlug: string;
 
   beforeAll(async () => {
     teamAgent = await published("bob", "team", "Ledger Bot");
     carolPersonal = await published("carol", "personal", "Carol Helper");
     bobUnused = await published("bob", "personal", "Bob Private");
     marketingAgent = await published("dave", "team", "Campaign Bot");
+    // A slug at the 48-character maximum sorts first, so it is the cursor of the first page.
+    const long = await as.bob.post("/v1/agents", {
+      scope: "team",
+      slug: "a".repeat(48),
+      ...definition("Long Slug"),
+    });
+    expect(long.status, JSON.stringify(long.json)).toBe(201);
+    longSlug = long.json.agent.id as string;
     const thread = await as.carol.post("/v1/threads", { agent_id: carolPersonal });
     expect(thread.status, JSON.stringify(thread.json)).toBe(201);
     const t = await as.bob.post("/v1/threads", { agent_id: teamAgent });
@@ -188,7 +197,8 @@ describe("agent inventory (KOBE-86)", () => {
       seen.push(...res.json.agents.map((a) => a.id));
       cursor = res.json.nextCursor;
     } while (cursor);
-    expect(seen.sort()).toEqual([carolPersonal, teamAgent].sort());
+    expect(seen[0]).toBe(longSlug);
+    expect(seen.sort()).toEqual([carolPersonal, longSlug, teamAgent].sort());
     expect((await inventory("alice", "?cursor=garbage")).status).toBe(400);
     expect((await inventory("alice", "?limit=0")).status).toBe(400);
   });
@@ -229,5 +239,34 @@ describe("agent inventory (KOBE-86)", () => {
     expect((await as.alice.put(path(bobUnused), { status: "suspended" })).status).toBe(404);
     expect((await as.alice.put(path(marketingAgent), { status: "suspended" })).status).toBe(404);
     expect((await as.alice.put(path(teamAgent), { status: "nope" })).status).toBe(400);
+  });
+});
+
+describe("inventory queries use indexes (KOBE-86)", () => {
+  it("reads threads, runs and usage through their indexes", async () => {
+    const plan = async (text: string) => {
+      const admin = new pg.Client({ connectionString: database.adminUrl });
+      await admin.connect();
+      try {
+        await admin.query("SET enable_seqscan = off");
+        const { rows } = await admin.query<Record<string, string>>(`EXPLAIN ${text}`, [finance]);
+        return rows.map((r) => r["QUERY PLAN"]).join("\n");
+      } finally {
+        await admin.end();
+      }
+    };
+    expect(
+      await plan(`SELECT id FROM threads WHERE team_id = $1 AND team_agent_id = gen_random_uuid()`),
+    ).toMatch(/threads_team_agent_idx/);
+    expect(
+      await plan(
+        `SELECT id FROM threads WHERE team_id = $1 AND install_agent_id = gen_random_uuid()`,
+      ),
+    ).toMatch(/threads_install_agent_idx/);
+    expect(
+      await plan(
+        `SELECT sum(input_tokens) FROM run_usage WHERE team_id = $1 AND agent_id = gen_random_uuid()`,
+      ),
+    ).toMatch(/run_usage_agent_idx/);
   });
 });

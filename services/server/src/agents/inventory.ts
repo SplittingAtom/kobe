@@ -1,4 +1,5 @@
 import { and, eq, sql, teamAgentSuspensions, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
+import { AGENT_SLUG_MAX } from "@kobe/agent-file";
 import { z } from "zod";
 import { recordAudit } from "../audit/record.js";
 import { findAgent, setAgentStatus, type AgentRecord } from "./store.js";
@@ -14,7 +15,9 @@ import { findAgent, setAgentStatus, type AgentRecord } from "./store.js";
 export const INVENTORY_PAGE_DEFAULT = 50;
 export const INVENTORY_PAGE_MAX = 200;
 
-const CURSOR = /^([a-z0-9-]{1,47}):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
+const CURSOR = new RegExp(
+  `^([a-z0-9-]{1,${AGENT_SLUG_MAX}}):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$`,
+);
 
 /** `GET /inventory`: keyset pages ordered by (slug, id); `cursor` is the previous `nextCursor`. */
 export const inventoryQuerySchema = z
@@ -109,9 +112,8 @@ const inventoryRows = (teamId: string) => sql`
     FROM install_agents i
     LEFT JOIN team_agent_suspensions s ON s.team_id = ${teamId} AND s.agent_id = i.id
    WHERE i.id IN (
-     SELECT t.agent_id FROM threads t
-      WHERE t.team_id = ${teamId} AND t.agent_scope IN ('personal', 'gallery')
-        AND t.agent_id IS NOT NULL)`;
+     SELECT t.install_agent_id FROM threads t
+      WHERE t.team_id = ${teamId} AND t.install_agent_id IS NOT NULL AND t.deleted_at IS NULL)`;
 
 export async function listInventory(
   db: KobeDb,
@@ -124,17 +126,28 @@ export async function listInventory(
   const rows = await withTeam(db, teamId, async (tx) => {
     const result = await tx.execute<InventoryRow>(sql`
       WITH inv AS (${inventoryRows(teamId)}),
-      page AS (SELECT inv.* FROM inv ${after} ORDER BY inv.slug, inv.id LIMIT ${limit + 1})
-      SELECT page.*, u.name AS owner_name, runs.run_count, runs.last_run_at, usage.tokens
+      page AS (SELECT inv.* FROM inv ${after} ORDER BY inv.slug, inv.id LIMIT ${limit + 1}),
+      thread_runs AS (
+        SELECT page.id AS agent_id, count(r.id) AS run_count, max(r.created_at) AS last_run_at
+          FROM page
+          JOIN LATERAL (
+            SELECT t.id FROM threads t WHERE t.team_id = ${teamId} AND t.team_agent_id = page.id
+            UNION ALL
+            SELECT t.id FROM threads t WHERE t.team_id = ${teamId} AND t.install_agent_id = page.id
+          ) th ON true
+          JOIN runs r ON r.team_id = ${teamId} AND r.thread_id = th.id
+         GROUP BY page.id),
+      usage AS (
+        SELECT ru.agent_id, sum(ru.input_tokens + ru.output_tokens) AS tokens
+          FROM run_usage ru
+         WHERE ru.team_id = ${teamId} AND ru.agent_id IN (SELECT id FROM page)
+         GROUP BY ru.agent_id)
+      SELECT page.*, u.name AS owner_name, coalesce(tr.run_count, 0) AS run_count,
+             tr.last_run_at, coalesce(usage.tokens, 0) AS tokens
         FROM page
         LEFT JOIN users u ON u.id = page.owner_user_id
-        CROSS JOIN LATERAL (
-          SELECT count(*) AS run_count, max(r.created_at) AS last_run_at
-            FROM threads t JOIN runs r ON r.team_id = t.team_id AND r.thread_id = t.id
-           WHERE t.team_id = ${teamId} AND r.team_id = ${teamId} AND t.agent_id = page.id) runs
-        CROSS JOIN LATERAL (
-          SELECT coalesce(sum(ru.input_tokens + ru.output_tokens), 0) AS tokens
-            FROM run_usage ru WHERE ru.team_id = ${teamId} AND ru.agent_id = page.id) usage
+        LEFT JOIN thread_runs tr ON tr.agent_id = page.id
+        LEFT JOIN usage ON usage.agent_id = page.id
        ORDER BY page.slug, page.id`);
     return result.rows;
   });
@@ -155,8 +168,8 @@ async function usedInstallAgent(
   const result = await tx.execute<{ slug: string; scope: "personal" | "gallery" }>(sql`
     SELECT i.slug, i.scope::text AS scope FROM install_agents i
      WHERE i.id = ${id}::uuid AND EXISTS (
-       SELECT 1 FROM threads t WHERE t.team_id = ${teamId} AND t.agent_id = i.id
-         AND t.agent_scope IN ('personal', 'gallery'))`);
+       SELECT 1 FROM threads t WHERE t.team_id = ${teamId} AND t.install_agent_id = i.id
+         AND t.deleted_at IS NULL)`);
   return result.rows[0] ?? null;
 }
 

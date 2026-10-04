@@ -17,7 +17,7 @@
 
 ## Decisions
 
-- Migrations `0052_agent_suspensions` (table) and `0053_agent_suspensions_rls` (ENABLE/FORCE RLS +
+- Migrations `0052_agent_suspensions` (table), `0054_run_usage_agent_idx`, and `0053_agent_suspensions_rls` (ENABLE/FORCE RLS +
   policy, custom). Tenancy entry in `tenancy/agents.ts`, probe fixture in `probe-fixtures/agents.ts`.
   No foreign key to `install_agents` (install-wide data; a row for a deleted agent is inert).
 - "Used in this team" = a thread of this team pinned to the agent (`threads.agent_id`, scope personal
@@ -54,3 +54,12 @@
   team's agent), "pages", "is for team admins only"; UI in `team-pages.test.tsx` "Agent inventory".
 - Probe suite: `pnpm --filter @kobe/db test:db` (new table covered by the tenancy registry).
 - `pnpm verify`: see PR.
+
+## Review round (DB review of #75)
+
+- Cursor regex built from `AGENT_SLUG_MAX` (48); test pages across a 48-character slug.
+- Inventory page = one query: page ids, then one grouped query for runs/last run (threads via
+  `team_agent_id` / `install_agent_id`, the indexed columns) and one for `run_usage`, not per row.
+  New migration 0054 adds `run_usage (team_id, agent_id)` (partial, agent not null). "Used" ignores
+  soft-deleted threads; run counts still include them. EXPLAIN test: `agent-inventory.db.test.ts`
+  "reads threads, runs and usage through their indexes". Gallery rows show "Gallery" as owner.
