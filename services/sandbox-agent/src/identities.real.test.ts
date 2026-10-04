@@ -405,7 +405,18 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
         mode: 0o755,
       },
     );
-    const retiring = new PiIdentities(
+    // Same pool, but its reclaim retries fast (the real delays would outlast the test's teardown).
+    class QuickRetry extends PiIdentities {
+      override reclaimFiles(
+        identity: Parameters<PiIdentities["reclaimFiles"]>[0],
+        gid: number,
+        dirs: readonly string[],
+        options: Parameters<PiIdentities["reclaimFiles"]>[3] = {},
+      ): Promise<void> {
+        return super.reclaimFiles(identity, gid, dirs, { ...options, delaysMs: [10, 10] });
+      }
+    }
+    const retiring = new QuickRetry(
       HELPER as string,
       [...Array(2).keys()].map((n) => PI_UID_MIN + n),
       undefined,
@@ -425,7 +436,7 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
     ok(await h.server.command(runStart("say:a", { config: { model: MODEL } })));
     await h.server.waitFor((f) => f.type === "pi.event");
     expect(retiring.available).toBe(1);
-    await new Promise((resolve) => setTimeout(resolve, 8_000));
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
     expect(retiring.available).toBe(1);
   }, 60_000);
 });
