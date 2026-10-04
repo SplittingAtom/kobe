@@ -199,19 +199,111 @@ describe("Team invitations", () => {
   });
 });
 
-describe("Team agents", () => {
-  it("lists the team's agents and suspends one", async () => {
+const item = (over: Record<string, unknown>) => ({
+  id: "a-1",
+  scope: "team",
+  slug: "triage",
+  name: "Triage",
+  ownerUserId: "u-bob",
+  ownerName: "Bob",
+  status: "active",
+  archivedAt: null,
+  currentVersion: 2,
+  versionCount: 2,
+  runCount: 7,
+  lastRunAt: "2026-10-02T10:00:00Z",
+  tokens: 1234,
+  schedules: null,
+  orbitScore: null,
+  ...over,
+});
+const INVENTORY_1 = {
+  agents: [item({}), item({ id: "p-1", scope: "personal", slug: "mine", name: "Mine" })],
+  nextCursor: "mine:00000000-0000-0000-0000-000000000001",
+};
+const INVENTORY_2 = {
+  agents: [item({ id: "p-2", scope: "personal", slug: "zed", name: "Zed", ownerName: "Zoe" })],
+  nextCursor: null,
+};
+const LIST = "GET /v1/agents?scope=team&include_archived=true";
+
+describe("Agent inventory", () => {
+  it("shows owner, scope, status, versions, usage and placeholders, and pages", async () => {
     const calls = stubApi({
-      "GET /v1/agents?scope=team&include_archived=true": [200, AGENTS],
-      "PUT /v1/agents/a-1/status": [200, { agent: { ...AGENTS.agents[0], status: "suspended" } }],
+      [LIST]: [200, AGENTS],
+      "GET /v1/agents/inventory": [200, INVENTORY_1],
+      "GET /v1/agents/inventory?cursor=mine%3A00000000-0000-0000-0000-000000000001": [
+        200,
+        INVENTORY_2,
+      ],
     });
     renderTeam(<TeamAgentsPage />);
-    expect(await screen.findByText("v2")).toBeTruthy();
-    await userEvent.click(screen.getByRole("button", { name: "Suspend Triage" }));
-    await screen.findByText("Triage is suspended.");
+    const row = (await screen.findByRole("row", { name: /Mine/ })) as HTMLElement;
+    expect(row.textContent).toMatch(/Bob/);
+    expect(row.textContent).toMatch(/Personal/);
+    expect(row.textContent).toMatch(/Active/);
+    expect(row.textContent).toMatch(/v2/);
+    expect(row.textContent).toMatch(/7/);
+    expect(row.textContent).toMatch(/1,234/);
+    expect(row.textContent?.match(/—/g)?.length).toBe(2);
+    expect(row.textContent).not.toMatch(/\$/);
+    await userEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(await screen.findByRole("row", { name: /Zed/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+    expect(summary(calls)).toContain(
+      "GET /v1/agents/inventory?cursor=mine%3A00000000-0000-0000-0000-000000000001",
+    );
+  });
+
+  it("suspends and reactivates any listed agent, personal ones included", async () => {
+    const calls = stubApi({
+      [LIST]: [200, AGENTS],
+      "GET /v1/agents/inventory": [200, { ...INVENTORY_1, nextCursor: null }],
+      "PUT /v1/agents/inventory/p-1/status": [
+        200,
+        { id: "p-1", scope: "personal", status: "suspended" },
+      ],
+    });
+    renderTeam(<TeamAgentsPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Suspend Mine" }));
+    await screen.findByText("Mine is suspended.");
     const put = must(calls.find((c) => c.method === "PUT"));
     expect(JSON.parse(String(put.body))).toEqual({ status: "suspended" });
     expect(put.headers.get("x-kobe-team")).toBe(TEAM.id);
+    expect(screen.getByRole("button", { name: "Reactivate Mine" })).toBeTruthy();
+  });
+
+  it("is not requested without the suspend permission", async () => {
+    const calls = stubApi({ [LIST]: [200, AGENTS] });
+    renderTeam(<TeamAgentsPage />, { role: "builder", permissions: ["team.agents.build"] });
+    expect(await screen.findByText("v2")).toBeTruthy();
+    expect(summary(calls).some((c) => c.includes("inventory"))).toBe(false);
+  });
+
+  it("shows the server's refusal of a suspension", async () => {
+    stubApi({
+      [LIST]: [200, AGENTS],
+      "GET /v1/agents/inventory": [200, { ...INVENTORY_1, nextCursor: null }],
+      "PUT /v1/agents/inventory/a-1/status": [
+        403,
+        { code: "forbidden", message: "Only team admins suspend agents." },
+      ],
+    });
+    renderTeam(<TeamAgentsPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Suspend Triage" }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/Only team admins suspend/);
+  });
+});
+
+describe("Team agents", () => {
+  it("lists the team's agents with their builder links", async () => {
+    stubApi({
+      [LIST]: [200, AGENTS],
+      "GET /v1/agents/inventory": [200, { agents: [], nextCursor: null }],
+    });
+    renderTeam(<TeamAgentsPage />);
+    expect(await screen.findByText("v2")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Edit Triage" })).toBeTruthy();
   });
 
   it("lets a builder open agents but offers no suspend button", async () => {
@@ -222,21 +314,9 @@ describe("Team agents", () => {
     expect(screen.queryByRole("button", { name: /Suspend/ })).toBeNull();
   });
 
-  it("shows the server's refusal (403) of a suspension", async () => {
-    stubApi({
-      "GET /v1/agents?scope=team&include_archived=true": [200, AGENTS],
-      "PUT /v1/agents/a-1/status": [
-        403,
-        { code: "forbidden", message: "Only team admins suspend team agents." },
-      ],
-    });
-    renderTeam(<TeamAgentsPage />);
-    await userEvent.click(await screen.findByRole("button", { name: "Suspend Triage" }));
-    expect((await screen.findByRole("alert")).textContent).toMatch(/Only team admins suspend/);
-  });
-
   it("explains 503 isolation_runtime_missing and links to the fix", async () => {
     stubApi({
+      "GET /v1/agents/inventory": [200, { agents: [], nextCursor: null }],
       "GET /v1/agents?scope=team&include_archived=true": [
         503,
         {
@@ -256,6 +336,7 @@ describe("Team agents", () => {
 
   it("hides internals of other 5xx answers", async () => {
     stubApi({
+      "GET /v1/agents/inventory": [200, { agents: [], nextCursor: null }],
       "GET /v1/agents?scope=team&include_archived=true": [
         500,
         { code: "boom", message: "relation team_agents does not exist" },

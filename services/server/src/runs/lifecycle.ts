@@ -138,7 +138,11 @@ export async function promoteInTx(
               type: "run.failed",
               payload: { error: resolved.error },
             })
-          : await fail(thread, next, "agent_unavailable");
+          : await fail(
+              thread,
+              next,
+              resolved.error.code === "agent_suspended" ? "agent_suspended" : "agent_unavailable",
+            );
       continue;
     }
     const requested = requestedModel(thread, resolved);

@@ -1,3 +1,4 @@
+import { suspendedInTeam } from "./inventory.js";
 import { validateAgentDefinition, type AgentDefinition } from "@kobe/agent-file";
 import {
   and,
@@ -509,7 +510,11 @@ export async function findPinnableAgent(
     : installQuery);
   if (!own) return null;
   const { scope, ...row } = own;
-  return toRecord(scope, row);
+  const record = toRecord(scope, row);
+  // A team can suspend an install-wide agent for itself (KOBE-86): effective status here.
+  return record.status === "active" && (await suspendedInTeam(tx, viewer.teamId, agentId))
+    ? { ...record, status: "suspended" }
+    : record;
 }
 
 /** Why an agent can't be pinned by a new thread or a switch, if it can't. */
