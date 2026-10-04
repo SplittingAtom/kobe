@@ -62,7 +62,7 @@ function assistantMarkdown(message: Json): string {
     if (p.type === "text" && typeof p.text === "string") out.push(p.text);
     else if (p.type === "toolCall") {
       const name = inline(str(p.name) ?? "tool");
-      let args = "";
+      let args: string;
       try {
         args = JSON.stringify(p.arguments ?? {}, null, 2);
       } catch {

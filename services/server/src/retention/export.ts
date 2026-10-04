@@ -2,7 +2,7 @@ import { Readable } from "node:stream";
 import { Zip, ZipDeflate, strToU8 } from "fflate";
 import { sql, withTeam, type KobeDb } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
-import type { BlobStore } from "./blobs.js";
+import { ownedKey, type BlobStore } from "./blobs.js";
 import {
   activeBranch,
   entryMarkdown,
@@ -147,13 +147,13 @@ async function parentsOf(db: KobeDb, viewer: ExportViewer, threadId: string) {
   });
 }
 
-/** An offloaded entry body (D15), only from the team's own key space; undefined if unavailable. */
+/** An offloaded entry body (D15), only from the viewer's own keys; undefined if unavailable. */
 async function offloaded(
   blobs: BlobStore | undefined,
-  teamId: string,
+  viewer: ExportViewer,
   key: string,
 ): Promise<unknown> {
-  if (!blobs || !key.startsWith(`${blobs.prefix}teams/${teamId}/`)) return undefined;
+  if (!blobs || !ownedKey(blobs.prefix, viewer.teamId, viewer.userId, key)) return undefined;
   const object = await blobs.objects.get(key).catch(() => null);
   if (!object || object.size > MAX_OFFLOADED_BYTES) return undefined;
   const chunks: Buffer[] = [];
@@ -166,8 +166,8 @@ async function offloaded(
 }
 
 /** The stored Pi entry, or a stub that keeps the tree intact when its body is unavailable. */
-async function piEntry(row: EntryRow, blobs: BlobStore | undefined, teamId: string) {
-  const body = row.blob_ref === null ? row.payload : await offloaded(blobs, teamId, row.blob_ref);
+async function piEntry(row: EntryRow, blobs: BlobStore | undefined, viewer: ExportViewer) {
+  const body = row.blob_ref === null ? row.payload : await offloaded(blobs, viewer, row.blob_ref);
   const entry = body !== null && typeof body === "object" && !Array.isArray(body) ? body : {};
   return {
     ...entry,
@@ -243,8 +243,7 @@ export async function* exportZip(
       );
       for await (const rows of entries(db, viewer, thread.id)) {
         const lines: string[] = [];
-        for (const row of rows)
-          lines.push(JSON.stringify(await piEntry(row, blobs, viewer.teamId)));
+        for (const row of rows) lines.push(JSON.stringify(await piEntry(row, blobs, viewer)));
         if (lines.length > 0) jsonl.push(strToU8(`${lines.join("\n")}\n`));
         yield* drain();
       }
@@ -264,7 +263,7 @@ export async function* exportZip(
         const blocks: string[] = [];
         for (const row of rows) {
           if (!branch.has(row.entry_id)) continue;
-          const block = entryMarkdown(await piEntry(row, blobs, viewer.teamId));
+          const block = entryMarkdown(await piEntry(row, blobs, viewer));
           if (block !== null) blocks.push(block);
         }
         if (blocks.length > 0) md.push(strToU8(`\n${blocks.join("\n\n")}\n`));

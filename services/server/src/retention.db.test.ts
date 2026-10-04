@@ -283,7 +283,7 @@ describe("the nightly pass (D18)", () => {
       blobKeys: [key("old-1"), key("shared")],
     });
     const fresh = await thread({ owner: ids.bob, activity: ago(10), blobKeys: [key("fresh")] });
-    const trashedLongAgo = await thread({
+    await thread({
       owner: ids.carol,
       activity: ago(40),
       deletedAt: ago(31),

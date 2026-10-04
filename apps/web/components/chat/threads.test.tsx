@@ -90,6 +90,41 @@ describe("thread list (RemoteThreadListAdapter)", () => {
     expect(chatRequests(fake, "POST").at(-1)?.path).toBe(`/v1/threads/${t}/restore`);
   });
 
+  it("deletes a thread in Trash forever after confirming (KOBE-18)", async () => {
+    const t = fake.addThread("Old plan");
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirm);
+    openApp(fake);
+    const user = userEvent.setup();
+    await user.click(
+      await within(await list()).findByRole("button", { name: "Move Old plan to Trash" }),
+    );
+    await waitFor(() => expect(fake.threads.get(t)?.deleted_at).not.toBeNull());
+    await user.click(screen.getByRole("button", { name: "Trash" }));
+    const trash = within(await screen.findByRole("list", { name: "Trash" }));
+    // Cancelled: nothing is sent.
+    await user.click(await trash.findByRole("button", { name: "Delete Old plan forever" }));
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(fake.threads.has(t)).toBe(true);
+    confirm.mockReturnValue(true);
+    await user.click(trash.getByRole("button", { name: "Delete Old plan forever" }));
+    await waitFor(() => expect(fake.threads.has(t)).toBe(false));
+    expect(chatRequests(fake, "POST").at(-1)).toMatchObject({
+      path: `/v1/threads/${t}/purge`,
+      team: fake.teamId,
+    });
+    await waitFor(() =>
+      expect(trash.queryByRole("button", { name: "Delete Old plan forever" })).toBeNull(),
+    );
+  });
+
+  it("offers the export of the team's conversations as a download (KOBE-18)", async () => {
+    openApp(fake);
+    const link = await screen.findByRole("link", { name: "Export my conversations" });
+    expect(link.getAttribute("href")).toBe(`/v1/threads/export?team=${fake.teamId}`);
+    expect(link.hasAttribute("download")).toBe(true);
+  });
+
   it("shows the server's refusal to Trash a busy thread", async () => {
     const t = fake.addThread("Busy");
     openApp(fake, t);

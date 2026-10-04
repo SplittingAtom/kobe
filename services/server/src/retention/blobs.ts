@@ -17,8 +17,9 @@ import type { ObjectStore } from "../workspace-sync/object-store.js";
  *    keeps the bytes);
  *  - no registered blob column (`BLOB_REF_COLUMNS`) of the team references it any more (shared
  *    and deduplicated objects, e.g. an upload also copied into a workspace, survive);
- *  - it lies in the team's own key space (`<prefix>teams/<team>/`) and outside the workspaces'
- *    content-addressed stores (`…/users/<user>/workspace/`, collected by workspace sync, KOBE-27).
+ *  - it lies in the team's own key space (`<prefix>teams/<team>/`), outside the workspaces'
+ *    content-addressed stores (`…/users/<user>/workspace/`, collected by workspace sync, KOBE-27)
+ *    and, under `…/users/<user>/`, only in the purged thread owner's own keys.
  * Keys failing the last check are dropped from the queue without touching the bucket. The object
  * delete runs inside the transaction, so an approval of a hold waits for it (bounded: one batch).
  */
@@ -36,15 +37,29 @@ export interface BlobDeletionCounts {
   readonly kept: number;
 }
 
-const WORKSPACE_KEY = /^users\/[^/]+\/workspace\//;
-
-/** Whether the retention job may delete `key` for `teamId` (see the module comment). */
-export function deletableKey(prefix: string, teamId: string, key: string): boolean {
+/**
+ * Whether `key` is one of `userId`'s objects in `teamId`'s key space: under `<prefix>teams/<team>/`,
+ * no empty or dot segments, and under `users/<user>/` only that user's own keys. Export reads only
+ * such keys; deletion additionally spares workspace stores (`deletableKey`).
+ */
+export function ownedKey(prefix: string, teamId: string, userId: string, key: string): boolean {
   const teamPrefix = `${prefix}teams/${teamId}/`;
   if (!key.startsWith(teamPrefix)) return false;
-  const rest = key.slice(teamPrefix.length);
-  if (rest === "" || rest.split("/").some((p) => p === "" || p === "." || p === "..")) return false;
-  return !WORKSPACE_KEY.test(rest);
+  const parts = key.slice(teamPrefix.length).split("/");
+  if (parts.some((p) => p === "" || p === "." || p === "..")) return false;
+  return parts[0] !== "users" || parts[1] === userId;
+}
+
+/** Whether the retention job may delete `key`, released by a thread `ownerUserId` owned. */
+export function deletableKey(
+  prefix: string,
+  teamId: string,
+  ownerUserId: string,
+  key: string,
+): boolean {
+  if (!ownedKey(prefix, teamId, ownerUserId, key)) return false;
+  const parts = key.slice(`${prefix}teams/${teamId}/`.length).split("/");
+  return !(parts[0] === "users" && parts[2] === "workspace");
 }
 
 /** Keys among `keys` that a registered column of the team still references. */
@@ -77,8 +92,8 @@ export async function deleteBlobBatchInTx(
   record: (tx: KobeTx, counts: BlobDeletionCounts) => Promise<void>,
 ): Promise<BlobDeletionCounts & { readonly more: boolean }> {
   await lockLegalHolds(tx);
-  const queued = await tx.execute<{ key: string }>(sql`
-    SELECT q.key FROM retention_blob_deletions q
+  const queued = await tx.execute<{ key: string; owner_user_id: string }>(sql`
+    SELECT q.key, q.owner_user_id FROM retention_blob_deletions q
      WHERE q.team_id = ${teamId}
        AND NOT public.legal_hold_covers(q.team_id, q.owner_user_id)
      ORDER BY q.enqueued_at, q.key
@@ -87,7 +102,11 @@ export async function deleteBlobBatchInTx(
   const keys = queued.rows.map((r) => r.key);
   if (keys.length === 0) return { blobs: 0, kept: 0, more: false };
   const referenced = await stillReferenced(tx, teamId, keys);
-  const doomed = keys.filter((k) => !referenced.has(k) && deletableKey(store.prefix, teamId, k));
+  const doomed = queued.rows
+    .filter(
+      (r) => !referenced.has(r.key) && deletableKey(store.prefix, teamId, r.owner_user_id, r.key),
+    )
+    .map((r) => r.key);
   if (doomed.length > 0) await store.objects.delete(doomed);
   await tx.execute(sql`
     DELETE FROM retention_blob_deletions

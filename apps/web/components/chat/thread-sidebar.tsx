@@ -8,6 +8,7 @@ import {
 } from "@assistant-ui/react";
 import { useState, type FormEvent } from "react";
 import type { ApiError } from "../../lib/api/client";
+import { threadExportUrl } from "../../lib/chat/api";
 import type { ThreadSearchHit } from "../../lib/chat/types";
 import { ErrorNotice } from "../admin/error-notice";
 import { useChatSession } from "./kobe-runtime";
@@ -63,12 +64,30 @@ function ThreadItem({ archived }: { readonly archived: boolean }) {
               </button>
             )}
             {archived ? (
-              <ThreadListItemPrimitive.Unarchive
-                className={styles.iconButton}
-                aria-label={`Restore ${title}`}
-              >
-                Restore
-              </ThreadListItemPrimitive.Unarchive>
+              <>
+                <ThreadListItemPrimitive.Unarchive
+                  className={styles.iconButton}
+                  aria-label={`Restore ${title}`}
+                >
+                  Restore
+                </ThreadListItemPrimitive.Unarchive>
+                <button
+                  type="button"
+                  className={styles.iconButton}
+                  aria-label={`Delete ${title} forever`}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Delete “${title}” forever? Its messages, files and history can't be recovered.`,
+                      )
+                    ) {
+                      void aui.threadListItem.delete();
+                    }
+                  }}
+                >
+                  Delete forever
+                </button>
+              </>
             ) : (
               <ThreadListItemPrimitive.Archive
                 className={styles.iconButton}
@@ -249,6 +268,12 @@ export function ThreadSidebar({
               {view === "threads" && hasMore && (
                 <ThreadListPrimitive.LoadMore>Load more</ThreadListPrimitive.LoadMore>
               )}
+              <p className={styles.hint}>
+                <a href={threadExportUrl(session.teamId)} download>
+                  Export my conversations
+                </a>{" "}
+                (this team&apos;s, as Pi sessions and Markdown in a zip)
+              </p>
             </>
           )}
         </ThreadListPrimitive.Root>

@@ -457,6 +457,11 @@ export class FakeKobe {
       thread.deleted_at = null;
       return json(200, this.#summary(thread));
     }
+    if (action === "purge" && method === "POST") {
+      if (thread.deleted_at === null) return error(409, "not_in_trash", "Move it to Trash first.");
+      this.threads.delete(thread.thread_id);
+      return new Response(null, { status: 204 });
+    }
     if (action === "messages") return this.#submit(thread, body, headers.get("idempotency-key"));
     if (action === "runs") return json(200, this.#threadRuns(thread.thread_id));
     if (action === "pending-messages") return json(200, this.#pending(thread.thread_id));
