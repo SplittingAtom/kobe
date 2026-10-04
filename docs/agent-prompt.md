@@ -47,6 +47,7 @@ evidence instead of pasting logs). Before pushing run `pnpm verify`. Open a PR, 
 with one background `gh pr checks <n> --watch` (no polling loops); fix failures. Don't merge, don't
 touch Hadron.
 
+No interim status messages: report once, when CI has finished.
 Final report, at most 150 words: PR number, CI status, criteria met (ac-1 ...), open questions.
 ```
 

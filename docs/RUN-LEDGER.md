@@ -6,30 +6,21 @@ Hadron ignite and re-read the current ticket).
 ## Current
 
 Index only: the coordinator edits this file; each ticket keeps notes in `docs/ledger/KOBE-<N>.md`.
-Parallel-work rules: [parallel-work.md](parallel-work.md).
+Parallel-work rules: [parallel-work.md](parallel-work.md); handoff: [agent-prompt.md](agent-prompt.md);
+Hadron via `scripts/hadron.sh`.
 
-- **Run:** Chris (2026-10-02): "do the setup ticket and start wave 0". Parallel agents, one worktree
-  per ticket, coordinator merges one PR at a time.
-- **Merged this run:** setup (#9), KOBE-9 (#10), KOBE-29 (#11), KOBE-14 (#12), contracts (#13),
-  KOBE-11 (#14), KOBE-45 (#17), KOBE-13 (#19). Wave 0 complete.
-- **Wave 1 open:** KOBE-33 (#15), KOBE-34 (#16), KOBE-31 (#18), KOBE-22 (#20), KOBE-23 (#21),
-  KOBE-35 (#22) — all reviewed or in review; KOBE-15 and KOBE-20 started.
-- **Next:** KOBE-24 after #21; then KOBE-25, 26, 30, 32, 36, 38, 40.
-- **Follow-ups:** contract fixes from KOBE-23 (drop `fork` from pi.command; document session.restore
-  per-part results, `kobe.event_dropped`, ui_request dedupe); route registry so tickets stop
-  conflicting on `app.ts`; KOBE-14 routes to snake_case.
-- **Questions for Chris:** text deltas carry `message_id` (not `entry_id`); Stop emits
-  `run.interrupted{reason:"cancelled"}`; sandbox-scoped tools skip the risk prompt in
-  ask-on-write; queued messages start after Stop.
-- **Binding requirements carried forward:** KOBE-22/30/64 take `VerifiedIsolation` from
-  `require()` right before creating sandboxes (docs/ledger/KOBE-9.md); KOBE-23/24 add a durable
-  per-run sandbox seq cursor; KOBE-26 adds `runs.retry_of_run_id`; KOBE-30/31 follow the
-  thread-before-run lock order and batch deltas (docs/ledger/KOBE-29.md).
-- **Hadron:** not reachable from the coordinator session (MCP configured elsewhere); sync ticket
-  status after merges.
-- **Wave 1 (next, as deps merge):** 15, 20, 22, 23, 31, 33, 34, 35, 45.
-- **Earlier run:** KOBE-6 (PR #3), KOBE-68 (#4), KOBE-21 (#5), KOBE-7 (#6), KOBE-12 (#8) merged.
-  KOBE-69 was listed for that run but is not in the implementation prompt: check Hadron.
+- **Run (2026-10-04):** Chris: finish open work (wave A), then Agents, Skills, Gallery & Orbit
+  (wave B), small tickets and small contexts to save tokens.
+- **Wave A, done:** #64 (token workflow), #30/#31 (deps), KOBE-43 (#56), KOBE-71 (#62), KOBE-42
+  (#61), KOBE-39 (#60), web restyle on assistant-ui (#65). Test install upgraded to `main` a63e726.
+- **Wave B:** KOBE-47..52 split into KOBE-75..94 (label `wave-b`; `migration` label = one at a
+  time; parents close when children are done). Batch 1 in progress: KOBE-75, 79, 90. Then
+  78 (+76, 84) → 86 (+77, 83) → 80 (+91, 92) → 81 → 85 (+82) → 87 (+88) → 93 (+89) → 94.
+- **Decisions (2026-10-04):** resolver's user-connected connectors are empty until KOBE-61;
+  KOBE-89 ships the Document Drafter without artifact output until KOBE-55.
+- **Follow-ups filed:** KOBE-95 (budget reservations across gateway replicas), KOBE-96 (flaky
+  chart `models.test.ts`). Accepted LOWs on KOBE-39: echoing upstreams can reveal injected headers
+  (documented); egress token visible in `env` output.
 
 ## Done
 
