@@ -56,6 +56,7 @@ jobs:
           persist-credentials: false
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
+          cleanup: false # the runner is thrown away; tearing the builder down cost ~15 s
           # Base images through Google's public Docker Hub mirror (anonymous Docker Hub pulls are
           # rate limited per IP); BuildKit falls back to Docker Hub for anything it lacks.
           buildkitd-config-inline: |

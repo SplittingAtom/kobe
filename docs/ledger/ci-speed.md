@@ -64,6 +64,9 @@ load`, no prune), then:
 
 ## Decisions
 
+- The isolation-log check in `e2e/run.sh` became a bounded wait (see Evidence): a harness race,
+  not product code; the assertion is unchanged.
+
 - Three shards, not more: each shard repeats ~3 min of fixed cost (cluster, import, deploy, checks),
   and the three are within ~1 min of each other. More shards would multiply Docker Hub pulls and
   cluster set-up flake exposure for little gain.
@@ -96,4 +99,14 @@ load`, no prune), then:
 
 ## Evidence (acceptance criteria → test or command output)
 
-See the PR description for the before/after run links and wall-clock times.
+- Dispatch run 37179692107 (first version): 12.4 min end to end (images 1.7 min; shards
+  suite 8.5, gate1 9.5, cold-start 10.6 min), against 21–25 min before. suite and gate1 passed;
+  cold-start failed one pre-existing race (below), all of its cold-start trials passed (p95
+  4969 ms back-to-back, 4234 ms spaced).
+- Race found and fixed in `e2e/run.sh` checks: "server and scheduler verified the gVisor
+  RuntimeClass in process" read each pod's log once, right after the install; the server's
+  isolation check is asynchronous and does not gate readiness, so one replica had not logged it
+  yet. It now waits up to 60 s per pod for the line (still fails if it never appears).
+- PR runs: see the PR description.
+- Local: build, typecheck, lint (all but the Helm 4 chart lint), format:check, license:check,
+  `pnpm test --concurrency=2`, server and db `test:db`, `db:check`, public hygiene: all pass.

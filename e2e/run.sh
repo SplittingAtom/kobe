@@ -171,10 +171,15 @@ contains "the web app serves the chat (KOBE-32)" 'data-kobe-chat' \
   "$(reachable "$NS" kube-system traefik "--header 'Host: kobe.localtest.me' http://traefik.kube-system/")"
 contains "server answers" '"service":"server"' "$(reachable "$NS" "$NS" kobe-server http://kobe-server/healthz)"
 # KOBE-9: every server/scheduler process verified isolation itself (not disclosed by /readyz).
+# The check runs asynchronously at startup and does not gate readiness: wait (bounded) for it.
+isolation_verified() { # pod → succeeds once its log records the verification
+  $KUBECTL -n "$NS" logs "$1" 2>/dev/null | grep -q '"msg":"isolation verified: agents enabled"'
+}
 iso=""
 for pod in $($KUBECTL -n "$NS" get pods -l "$gated_pods" --field-selector=status.phase=Running -o name); do
-  if $KUBECTL -n "$NS" logs "$pod" 2>/dev/null | grep -q '"msg":"isolation verified: agents enabled"'; then iso+="verified "
-  else iso+="$pod:unverified "; fi
+  deadline=$((SECONDS + 60))
+  until isolation_verified "$pod" || ((SECONDS >= deadline)); do sleep 2; done
+  if isolation_verified "$pod"; then iso+="verified "; else iso+="$pod:unverified "; fi
 done
 contains "server and scheduler verified the gVisor RuntimeClass in process" '^verified verified verified $' "$iso"
 # KOBE-40: Bifrost admits only the server (config sync) and the model-gateway shim.
