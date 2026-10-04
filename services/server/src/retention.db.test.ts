@@ -8,6 +8,7 @@ import {
   RetentionJob,
   StillAMemberError,
   purgeDepartedMember,
+  purgeThreads,
   runRetentionPass,
   type BlobStore,
 } from "./retention/index.js";
@@ -266,6 +267,8 @@ describe("retention settings (D6, D8; 7-day grace: user decision 2026-10-04)", (
     await thread({ owner: ids.bob, title: "Secret plan", activity: ago(400) });
     await thread({ owner: ids.carol, title: "Other secret", activity: ago(380) });
     await thread({ owner: ids.carol, title: "Recent", activity: ago(5) });
+    // In Trash: not counted (Trash empties itself after 30 days anyway).
+    await thread({ owner: ids.carol, title: "Trashed", activity: ago(390), deletedAt: ago(1) });
     h.mailer.sent.length = 0;
     const before = Date.now();
     const set = await as.alice.put("/v1/team/retention", { period: "1y" });
@@ -278,7 +281,7 @@ describe("retention settings (D6, D8; 7-day grace: user decision 2026-10-04)", (
     const banner = (await as.bob.get("/v1/team/retention")).json;
     expect(banner.upcoming).toEqual({ period: "1y", effectiveAt: set.json.pending.effectiveAt });
     await pass();
-    expect(await threadIds()).toHaveLength(3);
+    expect(await threadIds()).toHaveLength(4);
 
     expect((await audits("retention.policy.changed")).at(-1)).toMatchObject({
       actor_id: ids.alice,
@@ -289,7 +292,8 @@ describe("retention settings (D6, D8; 7-day grace: user decision 2026-10-04)", (
     expect(more).toEqual([]);
     expect(mail?.subject).toMatch(/conversations older than 1 year will be deleted/);
     expect(mail?.text).toContain("Today, 2 conversations in the team would be deleted");
-    expect(mail?.text).not.toMatch(/Secret plan|Other secret|Recent/);
+    expect(mail?.text).toContain("not counting conversations in Trash");
+    expect(mail?.text).not.toMatch(/Secret plan|Other secret|Recent|Trashed/);
     expect(h.mailer.to("bob@ret.test")).toEqual([]);
     expect((await audits("retention.shortening_notified")).at(-1)?.target).toMatchObject({
       period: "1y",
@@ -459,6 +463,25 @@ describe("the nightly pass (D18)", () => {
     expect(objects.keys().sort()).toEqual([...crafted, named("victim")].sort());
     // Bob's thread went; Carol's stays (recent activity).
     expect(await threadIds()).toEqual([victim]);
+  });
+
+  it("re-reads the period in every batch: a lengthening mid-pass stops the purge", async () => {
+    await setPeriod(team, "30d");
+    for (let i = 0; i < 3; i++) await thread({ owner: ids.bob, activity: ago(40 + i) });
+    let batches = 0;
+    const outcome = await purgeThreads(
+      h.deps.database.db,
+      team,
+      { kind: "retention" },
+      async () => {
+        batches += 1;
+        // An admin lengthens the period while the first batch runs (committed before the next).
+        if (batches === 1) await setPeriod(team, "1y");
+      },
+      { limits: { threads: 1, entries: 1000 } },
+    );
+    expect(outcome.counts.threads).toBe(1);
+    expect(await threadIds()).toHaveLength(2);
   });
 
   it("keeps Trash its full 30 days and restarts the period on restore (review H1)", async () => {

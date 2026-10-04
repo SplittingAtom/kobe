@@ -1,6 +1,6 @@
 # KOBE-18: Retention, soft delete and export
 
-- **Status:** in review (PR #59)
+- **Status:** merged (PR #59); follow-up PR for the re-review LOWs
 - **Branch / worktree:** `kobe-18-retention` in `../Kobe-wt18`
 - **Depends on:** KOBE-29, KOBE-17 (merged); uses KOBE-11 (blob-ref registry), KOBE-27 (object
   store), KOBE-15 (audit), KOBE-31 (410 `events_compacted`)
@@ -141,6 +141,15 @@ lowered), it takes effect after **7 days**; lengthening applies at once.
 - **L4** export requires `team.chat` like every thread route: confirmed intended (members only).
 - **L5** `lock_timeout` is reset to 0 before the audit write, so the audit's own wait applies.
 - **L7** noted.
+
+## Follow-up after the re-review (4 LOW, own PR)
+
+1. The retention selection re-reads the effective period in every batch's transaction (a
+   lengthening mid-pass applies to the next batch; test "re-reads the period in every batch").
+2. `docs/install.md`: drop an INVALID index left by a failed `CONCURRENTLY` build before
+   upgrading (`IF NOT EXISTS` would skip it).
+3. `blob-refs.ts` comment: retention checks only `thread: true` columns.
+4. The shortening email's count excludes Trash and says so (test).
 
 ## Decisions
 
