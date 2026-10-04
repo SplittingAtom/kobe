@@ -71,6 +71,7 @@ function toWire(hit: SearchHit): ThreadSearchHit {
     agent_id: hit.agentId,
     agent_version: hit.agentVersion,
     shared_to_project: hit.sharedToProject,
+    model: hit.modelAlias,
     leaf_entry_id: hit.leafEntryId,
     last_activity_at: hit.lastActivityAt.toISOString(),
     created_at: hit.createdAt.toISOString(),

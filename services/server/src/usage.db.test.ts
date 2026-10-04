@@ -33,6 +33,7 @@ const MODELS = "/v1/install/models";
 const GW = "kobe-usage/m1";
 
 const usage = (over: Partial<ModelUsageRecord>): ModelUsageRecord => ({
+  id: randomUUID(),
   teamId: finance,
   userId: ids.bob,
   sandboxId: randomUUID(),
@@ -232,5 +233,46 @@ describe("dashboards", () => {
     expect(thread.json.runs).toHaveLength(1);
     expect((await as.dave.get(`/v1/runs/${bobRun}/usage`)).status).toBe(404);
     expect((await as.dave.get(`/v1/threads/${bobThread}/usage`)).status).toBe(404);
+  });
+});
+
+describe("install breakdowns across teams (KOBE-43 review)", () => {
+  it("merge every team's full groups before limiting, so a model outside each team's top 50 still totals", async () => {
+    const db = h.deps.database.db;
+    const bulk = (teamId: string, userId: string, prefix: string) =>
+      Array.from({ length: 50 }, (_, i) =>
+        usage({
+          teamId,
+          userId,
+          model: `kobe-usage/${prefix}-${i}`,
+          inputTokens: 1_000,
+          outputTokens: 0,
+        }),
+      );
+    const shared = (teamId: string, userId: string) =>
+      usage({
+        teamId,
+        userId,
+        model: "kobe-usage/shared",
+        inputTokens: 600,
+        outputTokens: 0,
+      });
+    await recordModelUsage(db, [
+      ...bulk(finance, ids.bob, "f"),
+      shared(finance, ids.bob),
+      ...bulk(marketing, ids.dave, "g"),
+      shared(marketing, ids.dave),
+    ]);
+    const r = await as.installAdmin.get("/v1/install/usage");
+    expect(r.status).toBe(200);
+    expect(r.json.by_model).toHaveLength(50);
+    const top = r.json.by_model.find((m: { model: string }) => m.model === "kobe-usage/shared");
+    expect(top).toMatchObject({ model: "kobe-usage/shared", calls: 2, input_tokens: 1_200 });
+    expect(typeof top.cost_usd_exact).toBe("string");
+  });
+
+  it("returns costs as exact numeric text", async () => {
+    const r = await as.alice.get("/v1/team/usage");
+    expect(r.json.totals.cost_usd_exact).toMatch(/^\d+\.\d{10}$/);
   });
 });

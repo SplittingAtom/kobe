@@ -16,6 +16,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { agentScope, installAgentVersions, teamAgentVersions } from "./agents.js";
+import { MODEL_ALIAS_PATTERN } from "./models.js";
 import { users } from "./auth.js";
 import { teams } from "./teams.js";
 
@@ -79,6 +80,13 @@ export const threads = pgTable(
      * waits until the user resumes it or sends a new message. Null = the queue moves.
      */
     queuePausedAt: timestamp({ withTimezone: true }),
+    /**
+     * The model the owner chose for this thread (KOBE-44, D30): a catalog alias, passed as the
+     * run's requested alias. Null = the team's default. No foreign key on purpose: an alias the
+     * team disables or the install removes stays chosen, and the run fails
+     * `agent_model_not_enabled` instead of silently switching models.
+     */
+    modelAlias: text(),
   },
   // Annotated: threads and thread_entries reference each other (leaf and thread foreign keys).
   (t): PgTableExtraConfigValue[] => [
@@ -126,6 +134,10 @@ export const threads = pgTable(
       sql`(${t.agentId} IS NULL) = (${t.agentVersion} IS NULL) AND (${t.agentId} IS NULL) = (${t.agentScope} IS NULL) AND (${t.agentVersion} IS NULL OR ${t.agentVersion} > 0)`,
     ),
     check("threads_last_entry_seq", sql`${t.lastEntrySeq} >= 0`),
+    check(
+      "threads_model_alias",
+      sql`${t.modelAlias} IS NULL OR ${t.modelAlias} ~ ${sql.raw(`'${MODEL_ALIAS_PATTERN}'`)}`,
+    ),
   ],
 );
 

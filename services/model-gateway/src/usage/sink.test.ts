@@ -105,4 +105,38 @@ describe("DbUsageSink", () => {
     expect(sink.pending).toBe(0);
     await sink.close();
   });
+
+  it("retries once on close and logs only a count of what stays unwritten", async () => {
+    const errors: unknown[] = [];
+    let attempts = 0;
+    const sink = new DbUsageSink({
+      logger: { info: () => undefined, error: (o: unknown) => errors.push(o) } as never,
+      flushMs: 60_000,
+      write: async () => {
+        attempts++;
+        if (attempts === 1) throw new Error("db down");
+        return 1;
+      },
+    });
+    sink.record(call());
+    await sink.close();
+    expect(sink.pending).toBe(0);
+    const stuck = new DbUsageSink({
+      logger: { info: () => undefined, error: (o: unknown) => errors.push(o) } as never,
+      flushMs: 60_000,
+      write: async () => {
+        throw new Error("db down");
+      },
+    });
+    stuck.record(call());
+    await stuck.close();
+    expect(errors).toContainEqual({ pending: 1 });
+  });
+
+  it("gives each recorded call its own id, kept across retries", () => {
+    const a = usageRecordOf(call());
+    const b = usageRecordOf(call());
+    expect(a?.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(a?.id).not.toBe(b?.id);
+  });
 });

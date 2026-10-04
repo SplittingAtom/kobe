@@ -10,6 +10,12 @@
 export interface ObservedKey {
   readonly id: string;
   readonly name: string;
+  /**
+   * Bifrost's model discovery for the key (`success`, `list_models_failed`), with its own
+   * description of a failure (provider text: never shown; see `failureReason`).
+   */
+  readonly status?: string | undefined;
+  readonly description?: string | undefined;
 }
 
 export interface ObservedProvider {
@@ -94,7 +100,18 @@ export interface BifrostAdmin {
   addVirtualKey(spec: VirtualKeySpec): Promise<{ id: string; value: string }>;
   updateVirtualKey(id: string, spec: VirtualKeySpec): Promise<void>;
   deleteVirtualKey(id: string): Promise<void>;
+  /**
+   * The models Bifrost knows for a provider (KOBE-44 model picker): what its list-models call
+   * found with the provider's key, plus Bifrost's datasheet. Read from Bifrost's cache: no
+   * provider call, and never a key.
+   */
+  listModels(provider: string): Promise<string[]>;
+  /** Asks Bifrost to call the provider's list-models API now (uses the provider's key). */
+  refreshModels(provider: string): Promise<void>;
 }
+
+/** Upper bound on models read per provider (a picker, not an inventory). */
+export const MAX_LISTED_MODELS = 1000;
 
 export class BifrostAdminError extends Error {
   constructor(
@@ -232,7 +249,12 @@ export function createHttpBifrostAdmin(options: HttpBifrostAdminOptions): Bifros
     },
     async listKeys(provider) {
       const res = await call("GET", `/api/providers/${enc(provider)}/keys`);
-      return list(res.keys).map((k) => ({ id: str(k.id) ?? "", name: str(k.name) ?? "" }));
+      return list(res.keys).map((k) => ({
+        id: str(k.id) ?? "",
+        name: str(k.name) ?? "",
+        status: str(k.status),
+        description: str(k.description),
+      }));
     },
     async addProvider(spec) {
       await call("POST", "/api/providers", { provider: spec.name, ...providerBody(spec) });
@@ -325,6 +347,19 @@ export function createHttpBifrostAdmin(options: HttpBifrostAdminOptions): Bifros
     },
     async updateVirtualKey(id, spec) {
       await call("PUT", `/api/governance/virtual-keys/${enc(id)}`, vkBody(spec));
+    },
+    async listModels(provider) {
+      const res = await call(
+        "GET",
+        `/api/models?provider=${enc(provider)}&limit=${MAX_LISTED_MODELS}`,
+      );
+      return list(res.models).flatMap((m) => {
+        const name = str(m.name);
+        return name === undefined ? [] : [name];
+      });
+    },
+    async refreshModels(provider) {
+      await call("POST", `/api/providers/${enc(provider)}/refresh-models`);
     },
     async deleteVirtualKey(id) {
       await call("DELETE", `/api/governance/virtual-keys/${enc(id)}`);

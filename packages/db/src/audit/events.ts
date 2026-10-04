@@ -383,6 +383,16 @@ export const AUDIT_EVENTS = {
     endpointHost,
   }),
   "models.provider.removed": event("install", { providerId, kind: providerKind }),
+  /**
+   * An install admin had the gateway call the provider's list-models API with the stored key
+   * (KOBE-44 model picker). The outcome only: never the provider's answer or the key.
+   */
+  "models.provider.models_refreshed": event("install", {
+    providerId,
+    kind: providerKind,
+    outcome: z.enum(["ok", "failed", "unavailable"]),
+    models: count,
+  }),
   /** A catalog alias was added, re-pointed or removed (removal also disables it for every team). */
   "models.catalog.changed": event("install", {
     alias: modelAlias,
@@ -469,6 +479,12 @@ export const AUDIT_EVENTS = {
   "thread.trashed": event("team", { threadId: id }),
   "thread.restored": event("team", { threadId: id }),
   "thread.sharing_changed": event("team", { threadId: id, projectId: id, shared: z.boolean() }),
+  /** The thread's chosen model changed (KOBE-44, D30); null = the team's default. */
+  "thread.model_changed": event("team", {
+    threadId: id,
+    from: modelAlias.nullable(),
+    to: modelAlias.nullable(),
+  }),
   /** The thread's pinned agent version changed (D19 one-click switch, KOBE-46). */
   "thread.agent_switched": event("team", {
     threadId: id,

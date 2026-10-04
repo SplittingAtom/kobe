@@ -28,6 +28,14 @@ export class FakeBifrost implements BifrostAdmin {
   readonly teams = new Map<string, ObservedTeam>();
   readonly virtualKeys = new Map<string, ObservedVirtualKey>();
   readonly calls: string[] = [];
+  /**
+   * What each provider's list-models API answers (a refresh reads it with the provider's key):
+   * model ids, or an error Bifrost records on the provider's keys.
+   */
+  readonly upstream = new Map<string, readonly string[] | { readonly error: string }>();
+  /** Bifrost's model cache per provider (filled by a refresh, or set by a test). */
+  readonly liveModels = new Map<string, readonly string[]>();
+  private readonly discovery = new Map<string, { status: string; description?: string }>();
   /** Make the next calls fail (unreachable) while true. */
   down = false;
 
@@ -65,7 +73,13 @@ export class FakeBifrost implements BifrostAdmin {
   async listKeys(provider: string) {
     this.check("GET", `/api/providers/${provider}/keys`);
     const p = this.providers.get(provider) ?? this.reject("GET", "/api/providers/keys", 404);
-    return p.keys.map((k) => ({ id: k.id, name: k.name }));
+    const d = this.discovery.get(provider);
+    return p.keys.map((k) => ({
+      id: k.id,
+      name: k.name,
+      status: d?.status,
+      description: d?.description,
+    }));
   }
   async addProvider(spec: ProviderSpec) {
     this.check("POST", "/api/providers");
@@ -180,6 +194,22 @@ export class FakeBifrost implements BifrostAdmin {
     const v = this.virtualKeys.get(id) ?? this.reject("PUT", "/api/governance/virtual-keys", 404);
     this.virtualKeys.set(id, this.stored(spec, id, v.value));
     this.calls.push(`vk.update ${spec.name}`);
+  }
+  async listModels(provider: string) {
+    this.check("GET", "/api/models");
+    return [...(this.liveModels.get(provider) ?? [])];
+  }
+  async refreshModels(provider: string) {
+    this.check("POST", "/api/providers/refresh-models");
+    if (!this.providers.has(provider)) this.reject("POST", "/api/providers/refresh-models", 404);
+    this.calls.push(`models.refresh ${provider}`);
+    const answer = this.upstream.get(provider) ?? [];
+    if ("error" in answer) {
+      this.discovery.set(provider, { status: "list_models_failed", description: answer.error });
+      return;
+    }
+    this.discovery.set(provider, { status: "success" });
+    this.liveModels.set(provider, [...(answer as readonly string[])]);
   }
   async deleteVirtualKey(id: string) {
     this.check("DELETE", "/api/governance/virtual-keys");

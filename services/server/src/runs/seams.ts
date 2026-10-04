@@ -43,6 +43,24 @@ export type AgentResolution =
  */
 export interface RunAgentResolver {
   resolve(tx: KobeTx, input: AgentResolutionInput): Promise<AgentResolution>;
+  /**
+   * KOBE-44 seam for KOBE-47: the model alias the thread's agent pins, if any — the same alias
+   * `resolve` puts in `config.model.alias`. The chat shows it (the picker is locked: the agent's
+   * pin wins over the conversation's choice, user decision 2026-10-04). Absent or undefined: the
+   * agent pins no model (today's resolvers: agents carry no model until KOBE-47). Called on thread
+   * reads: it must only read Postgres through `tx` (history reads never wake a sandbox, D14).
+   */
+  pinnedModel?(tx: KobeTx, input: AgentPinInput): Promise<string | undefined>;
+}
+
+/** The thread's agent pin as `pinnedModel` reads it (no run yet). */
+export interface AgentPinInput {
+  readonly teamId: string;
+  readonly ownerUserId: string;
+  readonly threadId: string;
+  readonly agentScope: AgentScope | null;
+  readonly agentId: string | null;
+  readonly agentVersion: number | null;
 }
 
 /**

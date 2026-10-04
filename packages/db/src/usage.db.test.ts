@@ -68,6 +68,7 @@ beforeAll(async () => {
 afterAll(() => app.close());
 
 const record = (over: Partial<ModelUsageRecord> = {}): ModelUsageRecord => ({
+  id: randomUUID(),
   teamId: teamA,
   userId,
   sandboxId,
@@ -133,6 +134,18 @@ describe("recordModelUsage", () => {
       tx.select().from(runUsage).where(eq(runUsage.sandboxId, sb)),
     );
     expect(row).toMatchObject({ runId, threadId, agentId: null });
+  });
+
+  it("is idempotent per record id: flushing the same record twice writes one row", async () => {
+    const sb = randomUUID();
+    const rec = record({ sandboxId: sb });
+    const first = await recordModelUsage(app.db, [rec]);
+    const second = await recordModelUsage(app.db, [rec]);
+    expect([first, second]).toEqual([1, 0]);
+    const rows = await withTeam(app.db, teamA, (tx) =>
+      tx.select().from(runUsage).where(eq(runUsage.sandboxId, sb)),
+    );
+    expect(rows).toHaveLength(1);
   });
 
   it("writes each team's rows under its own RLS context; another team never sees them", async () => {

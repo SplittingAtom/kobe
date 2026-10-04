@@ -8,6 +8,7 @@ import {
   teamModels,
   withTeam,
   type KobeDb,
+  type KobeTx,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { catalogView, type CatalogView } from "./admin-store.js";
@@ -98,4 +99,16 @@ export async function setTeamModel(
     });
     return "changed";
   });
+}
+
+/**
+ * Whether the team enabled `alias` now (inside the caller's `withTeam` transaction, RLS). A
+ * thread's model choice (KOBE-44) must be one of these when it is made.
+ */
+export async function isModelEnabled(tx: KobeTx, teamId: string, alias: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ alias: teamModels.alias })
+    .from(teamModels)
+    .where(and(eq(teamModels.teamId, teamId), eq(teamModels.alias, alias)));
+  return row !== undefined;
 }
