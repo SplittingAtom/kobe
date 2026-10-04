@@ -47,7 +47,7 @@ const versionSchema = z.coerce.number().int().positive().max(2147483647);
 
 const error = (
   c: Ctx,
-  status: 400 | 403 | 404 | 409 | 413 | 415 | 503,
+  status: 400 | 403 | 404 | 409 | 413 | 415 | 422 | 503,
   code: string,
   message: string,
 ) => c.json({ code, message }, status);
@@ -56,6 +56,7 @@ const UPLOAD_ERRORS: Record<UploadError, string> = {
   unchanged: "That bundle is identical to the current version.",
   skill_limit: "This location has reached its limit of skills.",
   version_limit: "This skill has reached its limit of versions.",
+  blocklisted: "This skill bundle is on the install's blocklist and can't be uploaded.",
 };
 
 const skillJson = (s: SkillRecord) => ({
@@ -193,7 +194,9 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
       });
       if (!result.ok) {
         await discard();
-        return error(c, 409, result.error, UPLOAD_ERRORS[result.error]);
+        return result.error === "blocklisted"
+          ? error(c, 422, "skill_blocklisted", UPLOAD_ERRORS.blocklisted)
+          : error(c, 409, result.error, UPLOAD_ERRORS[result.error]);
       }
       const review =
         scope.data === "team" ? { status: "pending", flagged: scan.findings.length > 0 } : null;

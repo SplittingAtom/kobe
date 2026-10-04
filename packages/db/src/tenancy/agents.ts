@@ -30,6 +30,8 @@ export const agents = defineDomain({
     install_skill_versions: ["SELECT", "INSERT"],
     // Scans of personal versions (KOBE-80): written with the version, read at run start.
     install_skill_scans: ["SELECT", "INSERT"],
+    // The blocklist (KOBE-81): the server lets only install admins add or remove rows (no UPDATE).
+    skill_blocklist: ["SELECT", "INSERT", "DELETE"],
   },
   teamReferencing: {},
 });

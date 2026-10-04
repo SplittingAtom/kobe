@@ -22,6 +22,7 @@ import {
 import { recordAudit } from "../audit/record.js";
 import { logger } from "../logger.js";
 import type { BlobStore } from "../retention/blobs.js";
+import { isBlocked } from "./blocklist.js";
 
 /**
  * Scan results and team-admin review of team skill versions (KOBE-80, spec D22). Every new team
@@ -214,7 +215,7 @@ export function reviewsOfSkill(
 
 export type DecideResult =
   | { readonly ok: true; readonly review: ReviewRecord }
-  | { readonly ok: false; readonly error: "not_found" | "unchanged" };
+  | { readonly ok: false; readonly error: "not_found" | "unchanged" | "blocklisted" };
 
 /** Approves or rejects a version; an earlier decision can be reversed. Audited. */
 export function decideReview(
@@ -232,6 +233,9 @@ export function decideReview(
     const [current] = await tx.select().from(teamSkillReviews).where(key).for("update");
     if (!current) return { ok: false, error: "not_found" };
     if (current.status === decision.status) return { ok: false, error: "unchanged" };
+    // A blocklisted bundle can still be rejected, never approved (KOBE-81).
+    if (decision.status === "approved" && (await isBlocked(tx, current.contentHash)))
+      return { ok: false, error: "blocklisted" };
     const reviewedAt = new Date();
     await tx
       .update(teamSkillReviews)

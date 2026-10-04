@@ -400,6 +400,13 @@
       "when": 1791147807821,
       "tag": "0056_skill_reviews_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1791150239706,
+      "tag": "0057_easy_jack_power",
+      "breakpoints": true
     }
   ]
 }
