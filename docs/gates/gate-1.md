@@ -10,18 +10,21 @@ branch's harness (`e2e/gate1.sh`, `e2e/gate1/`), which changes no product code.
 
 ## Verdict
 
-| Criterion                                  | k3d (CI)                                                                  | Real k3s cluster (4 nodes, Longhorn)                                                                                                                                 |
-| ------------------------------------------ | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Two teams × five users chat concurrently   | **Proven up to the model** (see the scope note)                           | **Proven up to the model**                                                                                                                                           |
-| Cross-team probe returns zero rows         | **Proven** (CI probe suite: 143 tests; live probe: 0 rows)                | **Proven** (live probe on the install's data: 0 rows)                                                                                                                |
-| Refresh mid-run resumes with no gaps       | **Proven** (10 concurrent users, scripted sandbox side)                   | **Proven** (same)                                                                                                                                                    |
-| Kill a sandbox mid-run → interrupted+Retry | **Proven** (Retry reaches the real, woken sandbox)                        | **Proven** (same)                                                                                                                                                    |
-| Hibernated → first token p95 ≤ 8 s (20)    | **Not provable yet** — no model (KOBE-40/41). Proxy passes: p95 **5.0 s** | **Fails** on Longhorn: proxy p95 **17.2 s**; Pi-ready alone p95 14.9 s once the volume has detached. Strict-local: proxy p95 18.0 s (spaced 15.2 s), Pi ready 14.0 s |
+Updated 2026-10-04 with KOBE-40/41 merged (`main` at `296c275`): sandboxes now reach real models
+through the model gateway, so first token is measured, not proxied. See
+[First token with a real model](#first-token-with-a-real-model-2026-10-04).
 
-Gate 1 is therefore **not closed**: the first-token criterion is blocked on KOBE-40 (Bifrost
-verifies sandbox tokens) and KOBE-41 (Pi's model wiring), and on the real cluster the wake path
-already exceeds 8 s before any model time because Longhorn re-attaches the workspace volume on
-every wake (storage section). Everything else is proven on both environments.
+| Criterion                                  | k3d (CI, fake upstream model)                              | Real k3s cluster (4 nodes, Longhorn, real cloud model)                                |
+| ------------------------------------------ | ---------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Two teams × five users chat concurrently   | **Proven** (streamed model answers)                        | **Proven** (10 concurrent real-model answers, 19.3 s for all ten)                     |
+| Cross-team probe returns zero rows         | **Proven** (CI probe suite; live probe: 0 rows)            | **Proven** (live probe: 0 rows)                                                       |
+| Refresh mid-run resumes with no gaps       | **Proven** (10 concurrent users, scripted sandbox side)    | **Proven** (same)                                                                     |
+| Kill a sandbox mid-run → interrupted+Retry | **Proven** (the retry is answered by the model)            | **Proven** (the retry is answered by the real model)                                  |
+| Hibernated → first token p95 ≤ 8 s (20)    | **Passes**: p50 4.8 s, p95 **5.8 s** (e2e run 37173405729) | **Fails**: p50 15.2 s, p95 **17.5 s** (strict-local Longhorn; miss accepted by Chris) |
+
+Gate 1 holds on k3d. On the real cluster every criterion holds except cold start, where ≈ 14 s
+of each wake is Longhorn attaching the workspace volume (storage sections below); the user
+accepted that miss for now and storage stays on Longhorn.
 
 ### Scope note: what "up to the model" means
 
@@ -162,6 +165,41 @@ first with history intact"; `e2e/run.sh` "interrupted runs and Retry (KOBE-26)";
 On k3d the margin for Bifrost + the model's first token is ≈ 3 s at p95. On the real cluster the
 budget is gone before any model time.
 
+## First token with a real model (2026-10-04)
+
+Gate install upgraded to `main` at `296c275` (images built from that commit on the build host
+and imported into each node: the ghcr packages are still private). Models are configured through
+the install admin API (`/v1/install/models`): provider kind **`ollama`** (Bifrost's native Ollama
+provider) against the vendor's cloud endpoint, catalog aliases `kimi-k2.7-code` and `glm-5.3`,
+both enabled for every team with `kimi-k2.7-code` the default. Workspace sync (KOBE-27) runs
+against an in-cluster SeaweedFS, so the wake path includes the workspace restore.
+
+**Chat.** A test user asked kimi-k2.7-code to list `/workspace`: the run woke the sandbox, the
+model called the `bash` tool (`ls -la /workspace`), the result came back, and the answer streamed
+(`reasoning.delta`, `tool.call`, `tool.result`, `text.delta`, `run.completed`). glm-5.3 (a team
+whose default was switched to it for the test, then back) did the same with its own tool call.
+
+**`e2e/gate1.sh` against the real model** (`KOBE_GATE1_MODEL=kimi-k2.7-code`): 82 checks ok, 1
+FAIL (cold start). Ten users chatting at once all got streamed model answers; the retry after
+the kill was answered by the model.
+
+**Cold start** (`cold` step; strict-local Longhorn workspace; first token = the run's first
+`text.delta` or `reasoning.delta`, timed from `POST /messages`):
+
+| Set                                              | n   | p50       | p95        | min / max     |
+| ------------------------------------------------ | --- | --------- | ---------- | ------------- |
+| Hibernated, back-to-back (full suite run)        | 20  | 15.2 s    | **17.5 s** | 4.8 / 17.9 s  |
+| Hibernated, back-to-back (separate run)          | 20  | 15.5 s    | 17.8 s     | 7.5 / 17.8 s  |
+| Hibernated, spaced 30 s (volume fully detached)  | 10  | 15.7 s    | 16.6 s     | 15.3 / 16.6 s |
+| **Awake sandbox** (no wake; `KOBE_GATE1_WARM=1`) | 20  | **1.5 s** | **1.8 s**  | 1.4 / 1.9 s   |
+
+**The model's share.** With the sandbox awake and Pi running, first token takes 1.5 s (p95
+1.8 s): the server, the model-gateway shim, Bifrost and the provider's own time to first token
+together. So of the ≈ 15.5 s cold figure, ≈ 1.5 s is model-side and ≈ 14 s is the wake — the
+Pi-ready figure measured before (strict-local, spaced: p95 14.0 s), dominated by the volume
+attach. The workspace restore (KOBE-27) took 30–50 ms per wake here (small workspaces); it grows
+with workspace size. On k3d with the fake upstream the same step gives p50 4.8 s, p95 5.8 s.
+
 ## Storage measurements (real cluster)
 
 Asked: measure cold start with Longhorn-backed sandbox volumes, compare other existing classes,
@@ -220,8 +258,7 @@ levers are listed under "Blockers" below.
 
 ## Blockers for the first-token criterion
 
-1. **A model** (KOBE-40 Bifrost token verification, KOBE-41 Pi model wiring). Until then only the
-   proxies above exist.
+1. ~~A model~~ (KOBE-40/41): merged; first token is measured above.
 2. **Volume attach on the real cluster** (≈ 10–11 s per wake on Longhorn, strict-local or not).
    Not fixable by a Longhorn class parameter. Candidate levers, none tried (each needs a decision):
    node-local volumes (`local-path`) with the sandbox pinned to its node (the server would have to
@@ -229,9 +266,10 @@ levers are listed under "Blockers" below.
    volume attached while hibernated (e.g. a tiny holder pod per hibernated sandbox, which keeps the
    attachment but not the memory); a longer idle timeout; or waking a hibernated sandbox when the
    user opens its thread, before the message is sent, which hides most of the wake.
-3. **KOBE-27 (S3 workspace sync, PR #50, not merged) adds to the wake path**: the agent's
-   `beforeRun` waits for the workspace restore and a pull before the prompt reaches Pi. Not
-   measured here; once it merges, re-run `e2e/gate1.sh` (its cold step times exactly this path).
+3. **KOBE-27's restore on wake** (merged): measured at 30–50 ms per wake on the gate install's
+   small workspaces; it grows with workspace size.
+
+The miss on the real cluster is accepted for now (Chris, 2026-10-04); storage stays on Longhorn.
 
 ## Findings and fixes
 
@@ -248,6 +286,16 @@ levers are listed under "Blockers" below.
 3. **NFS class unusable for workspaces under gVisor** (storage section). Not investigated further
    (NFS squash vs. the gVisor gofer).
 4. **ghcr packages are private** (Images above).
+5. **`helm upgrade --reuse-values` keeps the old chart's defaults.** Upgrading the gate install to
+   KOBE-40/41 with `--reuse-values` kept `sandbox.modelGatewayAccess: false`, Bifrost `v2.2.4`
+   without persistence, and no `modelGateway` values: sandboxes had no route to the model gateway
+   and every run failed `model_error`. Upgrade with the user-supplied values instead
+   (`helm get values` → `-f`, with `--reset-values`) so new defaults apply.
+6. **Existing team namespaces get the model-gateway egress rule only when the server next
+   converges the team** (on its next sandbox provisioning or wake): right after enabling
+   model access, an already-awake sandbox cannot reach the gateway (`ECONNREFUSED`, run fails
+   `model_error`) until then. A server follow-up could re-converge every team when the sandbox
+   settings change.
 
 ## Reproduce
 
