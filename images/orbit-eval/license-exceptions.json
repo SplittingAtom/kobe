@@ -1,0 +1,37 @@
+{
+  "typing_extensions": {
+    "license": "PSF-2.0",
+    "versions": ["4.16.0"],
+    "reason": "Python Software Foundation license: permissive (BSD-style), not copyleft. Transitive dependency of pydantic/Inspect AI. Same exception as the sandbox image. Pending Chris's sign-off (KOBE-92)."
+  },
+  "aiohappyeyeballs": {
+    "license": "Python-2.0",
+    "versions": ["2.7.1"],
+    "reason": "PSF-2.0 (the PyPI classifier maps to Python-2.0): permissive, not copyleft. aiohttp dependency (Inspect AI). Pending Chris's sign-off (KOBE-92)."
+  },
+  "pathlib_abc": {
+    "license": "Python-2.0",
+    "versions": ["0.5.2"],
+    "reason": "PSF-2.0 license text in the wheel: permissive, not copyleft. universal_pathlib dependency (Inspect AI). Pending Chris's sign-off (KOBE-92)."
+  },
+  "regex": {
+    "license": "Apache-2.0 AND CNRI-Python",
+    "versions": ["2026.7.10"],
+    "reason": "Apache-2.0 with code under the CNRI Python license (BSD-like, permissive, GPL-compatible, not copyleft). tiktoken/Inspect AI dependency. Pending Chris's sign-off (KOBE-92)."
+  },
+  "multidict": {
+    "license": "Apache License 2.0",
+    "versions": ["6.7.1"],
+    "reason": "Apache-2.0 declared as a free-text label (LICENSE file is the Apache 2.0 text). aiohttp dependency. Pending Chris's sign-off (KOBE-92)."
+  },
+  "tiktoken": {
+    "license": "MIT License",
+    "versions": ["0.13.0"],
+    "reason": "MIT, declared with the full license text in the License field instead of an SPDX id. Inspect AI dependency. Pending Chris's sign-off (KOBE-92)."
+  },
+  "agent-client-protocol": {
+    "license": "UNKNOWN",
+    "versions": ["0.12.1"],
+    "reason": "No license metadata, but the wheel ships the Apache License 2.0 text (dist-info/licenses/LICENSE, authors at apache.org). Inspect AI dependency. Pending Chris's sign-off (KOBE-92)."
+  }
+}

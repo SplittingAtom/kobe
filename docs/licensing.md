@@ -7,6 +7,7 @@ anything else needs a documented, version-pinned exception that Chris signs off.
 | ------------------------------------ | ---------------------------------------------------------------------------- | --------------------------------------------- |
 | pnpm workspace (prod + dev)          | `pnpm license:check` (CI `checks`)                                           | `tools/license-check/license-exceptions.json` |
 | Sandbox image: Python + npm packages | `images/sandbox/collect-licenses.sh` + the same checker (CI `sandbox-image`) | `images/sandbox/license-exceptions.json`      |
+| Orbit eval image: Python packages    | the same script and checker (CI `orbit-eval-image`)                          | `images/orbit-eval/license-exceptions.json`   |
 
 Not covered by the automated check, and why that is acceptable:
 
@@ -18,6 +19,10 @@ Not covered by the automated check, and why that is acceptable:
   non-GPL programs) and OpenBLAS (BSD-3-Clause).
 - **Base images** (`node`, `python` official images) and third-party service images (CloudNativePG:
   Apache-2.0; ClamAV, optional and off by default: GPL-2.0, run as a separate service).
+- **Orbit and Inspect AI** (Orbit eval image, KOBE-92): Orbit v1.0.3 is Apache-2.0 (`LICENSE` at the
+  repository root and in the wheel), Inspect AI is MIT; their 88 Python distributions pass the checker
+  with seven documented, version-pinned exceptions for PSF/CNRI-style or mislabelled permissive
+  licenses. Debian packages in the `python:slim` base are not linked into the runner.
 - **Bifrost** (`docker.io/maximhq/bifrost`, pinned by tag and digest in the chart and tracked by
   Dependabot through `images/bifrost/Dockerfile`): Apache-2.0. Checked at v2.2.5
   (`github.com/maximhq/bifrost`, tag `transports/v2.2.5`): the repository has a single `LICENSE`
