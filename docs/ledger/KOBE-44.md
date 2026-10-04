@@ -142,9 +142,14 @@ model)`, `setThreadModel`, `listModels`; `ChatSession` draft model + 30 s model-
 3. `docs/install.md` Models: a catalog alias deleted and added again is picked up by the threads that
    chose it, on the new target.
 4. e2e against the real Bifrost: a keyed OpenAI-compatible provider on the fake upstream's private
-   address with `allow_private_network: false` — refresh doesn't report `ok`, the upstream never saw
-   its key (`/_seen`), the refresh is audited without it. (A keyed provider rather than a keyless
-   one: Bifrost's refresh runs list-models per key, and the key in `/_seen` is the proof.)
+   address with `allow_private_network: false`. **Finding:** Bifrost v2.2.5 refuses that provider
+   when the sync pushes it (gateway `in_sync=false`, `last_error=bifrost_rejected`), so the model
+   listing answers 409 `provider_not_synced` and no list-models call is ever made. The check
+   accepts that or a 200 without `discovery: ok`, and asserts the upstream never saw the key
+   (`/_seen`), the refresh is audited without it, and the gateway is in sync again once the
+   provider is removed. Side effect worth knowing: one provider Bifrost refuses keeps the whole
+   gateway status "not in sync" (the other providers still sync); the install page shows the
+   error.
 
 ## Contract change (flagged)
 

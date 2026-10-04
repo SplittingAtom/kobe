@@ -1356,12 +1356,17 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
   expect "a keyed provider on a private address is added with private network off" '^201 ' "$priv_add"
   # Wait until Bifrost has the provider (the listing answers 200, not 409 provider_not_synced).
   priv_listed() { as_owner "GET /v1/install/models/providers/e2epriv/models" | head -1; }
-  priv_ready=$(wait_for 90 '^200 ' priv_listed)
+  priv_ready=$(wait_for 45 '^200 ' priv_listed)
   printf '     private provider in the gateway: %s | %s\n' "$(printf '%s' "$priv_ready" | cut -c1-120)" "$(gateway_state)"
   priv_refresh=$(as_owner "POST /v1/install/models/providers/e2epriv/models/refresh")
   printf '     private refresh: %s\n' "$(printf '%s' "$priv_refresh" | cut -c1-200)"
-  # The refresh ran (200) and did not list the provider's models: Bifrost refused the private address.
-  if printf '%s' "$priv_refresh" | grep -q '^200 ' && ! printf '%s' "$priv_refresh" | grep -q '"discovery":"ok"'; then
+  # Bifrost v2.2.5 refuses such a provider when the sync pushes it (gateway error bifrost_rejected,
+  # observed in CI), so it never gets as far as a list-models call; a Bifrost that accepted it must
+  # still not list its models. Either way no model list comes back.
+  if printf '%s' "$priv_refresh" | grep -q '"discovery":"ok"'; then
+    fail "listing models of a private-address provider (private network off) is refused: $(printf '%s' "$priv_refresh" | cut -c1-200)"
+  elif printf '%s' "$priv_refresh" | grep -q '^200 ' || \
+      { printf '%s' "$priv_refresh" | grep -q 'provider_not_synced' && [[ "$(gateway_state)" == *bifrost_rejected* ]]; }; then
     ok "listing models of a private-address provider (private network off) is refused"
   else fail "listing models of a private-address provider (private network off) is refused: $(printf '%s' "$priv_refresh" | cut -c1-200)"; fi
   priv_seen=$(probe "$NS" "$(answers "$LLM/_seen")")
@@ -1371,6 +1376,8 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
   contains "the refresh is audited without the key" '^1$' \
     "$(psql_kobe "SELECT count(*) FROM audit_log WHERE action = 'models.provider.models_refreshed' AND target->>'providerId' = 'e2epriv' AND target::text NOT LIKE '%e2e-private-key%'")"
   as_owner "DELETE /v1/install/models/providers/e2epriv" >/dev/null
+  contains "the gateway is in sync again once that provider is removed" '^in_sync=true error=-$' \
+    "$(wait_for 60 '^in_sync=true' gateway_state)"
 
   # The sandbox-like client: team namespace (team NetworkPolicy), gVisor, no DNS, the shim at
   # model-gateway.kobe.internal as in real sandboxes; a model-gateway token for the model user.
