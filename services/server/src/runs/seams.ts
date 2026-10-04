@@ -1,5 +1,6 @@
 import type { ApprovalMode, ErrorInfo, PiThreadConfig, RunTrigger } from "@kobe/protocol";
 import type { AgentScope, KobeTx } from "@kobe/db";
+import type { Omission } from "../resolver/resolve.js";
 
 /**
  * Seams the orchestrator calls on the run-start path, filled in by later tickets. Each runs inside
@@ -33,6 +34,8 @@ export type AgentResolution =
       readonly approvalMode: ApprovalMode;
       /** Pi thread configuration from the version (model alias, prompt, skills; KOBE-41/47). */
       readonly config?: Omit<PiThreadConfig, "agent" | "approval_mode">;
+      /** What the effective-config resolver left out (KOBE-76; KOBE-77 turns it into notices). */
+      readonly omissions?: readonly Omission[];
     }
   | { readonly ok: false; readonly error: ErrorInfo };
 

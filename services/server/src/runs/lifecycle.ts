@@ -25,6 +25,7 @@ import {
   failureInfo,
   threadModelNotEnabled,
 } from "./failure-codes.js";
+import type { Omission } from "../resolver/resolve.js";
 import { resolveRunModel, type RunModelConfig } from "./models.js";
 import type { AgentResolution, RunAgentResolver } from "./seams.js";
 
@@ -40,6 +41,8 @@ export interface StartPlan {
   readonly approvalMode: ApprovalMode;
   readonly agent: { readonly agentId: string; readonly version: number } | null;
   readonly config?: Omit<PiThreadConfig, "agent" | "approval_mode">;
+  /** What the resolver left out of the run's configuration (KOBE-76). */
+  readonly omissions: readonly Omission[];
 }
 
 export interface Promotion {
@@ -128,7 +131,14 @@ export async function promoteInTx(
     }
     const resolved = await resolveForStart(tx, agents, thread, next);
     if (!resolved.ok) {
-      thread = await fail(thread, next, "agent_unavailable");
+      // The agent's pinned model is not enabled for the team: the agreed error, no fallback.
+      thread =
+        resolved.error.code === "agent_model_not_enabled"
+          ? await fail(thread, next, resolved.error.code, {
+              type: "run.failed",
+              payload: { error: resolved.error },
+            })
+          : await fail(thread, next, "agent_unavailable");
       continue;
     }
     const requested = requestedModel(thread, resolved);
@@ -240,6 +250,7 @@ function planOf(
     parentEntryId: run.parentEntryId,
     approvalMode: resolved.approvalMode,
     agent: resolved.agent,
+    omissions: resolved.omissions ?? [],
     ...(Object.keys(config).length > 0 ? { config } : {}),
   };
 }
