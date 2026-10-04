@@ -137,6 +137,19 @@ describe("catalog prices (install admin)", () => {
       output_usd_per_mtok: -1,
     });
     expect(bad.status).toBe(400);
+    // KOBE-43 review: prices come as a set (input and output together; cache only with them).
+    const partial = await as.installAdmin.patch(`${MODELS}/catalog/usage-m1`, {
+      output_usd_per_mtok: null,
+    });
+    expect(partial.status).toBe(400);
+    expect(partial.json.code).toBe("partial_prices");
+    const cacheOnly = await as.installAdmin.post(`${MODELS}/catalog`, {
+      alias: "usage-cache-only",
+      provider_id: "usage",
+      model: "m2",
+      cache_read_usd_per_mtok: 0.1,
+    });
+    expect(cacheOnly.json.code).toBe("partial_prices");
     const cleared = await as.installAdmin.patch(`${MODELS}/catalog/usage-m1`, {
       cache_read_usd_per_mtok: 0.3,
       label: "M1",

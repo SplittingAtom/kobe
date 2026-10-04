@@ -108,3 +108,30 @@ describe("streaming requests (KOBE-43)", () => {
     );
   });
 });
+
+describe("request facts for charging (KOBE-43 review)", () => {
+  const facts = (v: unknown) => topLevelModel(Buffer.from(JSON.stringify(v)));
+
+  it("reads the requested output cap from any SDK's key, the largest winning", () => {
+    expect(facts({ model: "m", max_tokens: 100 })).toMatchObject({ maxOutputTokens: 100 });
+    expect(facts({ model: "m", max_output_tokens: 7, MAX_COMPLETION_TOKENS: 90 })).toMatchObject({
+      maxOutputTokens: 90,
+    });
+    expect(
+      facts({ contents: [], generationConfig: { temperature: 1, maxOutputTokens: 512 } }),
+    ).toMatchObject({ maxOutputTokens: 512 });
+    // Nested elsewhere, or not a whole number: ignored.
+    expect(facts({ model: "m", messages: [{ max_tokens: 5 }], max_tokens: "9" })).toMatchObject({
+      maxOutputTokens: undefined,
+    });
+  });
+
+  it("sees a top-level background: true only", () => {
+    expect(facts({ model: "m", background: true })).toMatchObject({ background: true });
+    expect(facts({ model: "m", Background: true })).toMatchObject({ background: true });
+    expect(facts({ model: "m", background: false })).toMatchObject({ background: false });
+    expect(facts({ model: "m", input: [{ background: true }] })).toMatchObject({
+      background: false,
+    });
+  });
+});

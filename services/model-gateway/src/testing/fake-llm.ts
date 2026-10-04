@@ -13,6 +13,8 @@ export interface SeenRequest {
   readonly path: string;
   /** Header name → value for the credential headers present. */
   readonly credentials: Readonly<Record<string, string>>;
+  /** Chat Completions: whether the request asked for its usage report (KOBE-43 e2e). */
+  readonly includeUsage?: boolean;
 }
 
 const CREDENTIALS = ["authorization", "x-api-key", "x-goog-api-key", "api-key", "x-bf-vk"];
@@ -189,14 +191,23 @@ export function createFakeLlm(seen: SeenRequest[] = []): Server {
       const v = req.headers[name];
       if (typeof v === "string") credentials[name] = v;
     }
-    seen.push({ method: req.method ?? "", path: url.pathname, credentials });
     let body: Record<string, unknown>;
     try {
       body = raw.length > 0 ? (JSON.parse(raw.toString("utf8")) as Record<string, unknown>) : {};
     } catch {
+      seen.push({ method: req.method ?? "", path: url.pathname, credentials });
       json(res, 400, { error: { message: "invalid JSON" } });
       return;
     }
+    const options = body.stream_options as Record<string, unknown> | undefined;
+    seen.push({
+      method: req.method ?? "",
+      path: url.pathname,
+      credentials,
+      ...(url.pathname.endsWith("/chat/completions")
+        ? { includeUsage: options?.include_usage === true }
+        : {}),
+    });
     const text = lastUserText(body);
     const model = typeof body.model === "string" ? body.model : "fake-model";
     const stream = body.stream === true || url.searchParams.get("alt") === "sse";

@@ -14,6 +14,13 @@ export type BodyModel =
        * (Go's rule, as for `model`) has the literal value `true` (KOBE-43 usage reporting).
        */
       readonly stream: boolean;
+      /** Responses' `background: true` (deferred work billed later; KOBE-43 refuses it). */
+      readonly background: boolean;
+      /**
+       * The output cap the request asks for: top-level `max_tokens`, `max_output_tokens` or
+       * `max_completion_tokens`, or Gemini's `generationConfig.maxOutputTokens` (the largest).
+       */
+      readonly maxOutputTokens: number | undefined;
     }
   | { readonly ok: false; readonly reason: "not_json_object" | "duplicate_model" | "bad_model" };
 
@@ -22,9 +29,11 @@ const QUOTE = 0x22;
 const BACKSLASH = 0x5c;
 const MAX_MODEL = 200;
 const MAX_MODEL_KEY_RAW = 30;
-/** "stream" is 6 characters, at most 6 raw bytes each. */
-const MAX_STREAM_KEY_RAW = 36;
+/** Longest raw key decoded for the request facts (a 30-character name, fully `\uXXXX`-escaped). */
+const MAX_FACT_KEY_RAW = 180;
 const TRUE = Buffer.from("true");
+const MAX_OUTPUT_KEYS = new Set(["max_tokens", "max_output_tokens", "max_completion_tokens"]);
+const NUMBER = /^[0-9]{1,12}$/;
 
 class Malformed extends Error {}
 
@@ -92,9 +101,53 @@ export function topLevelModel(body: Buffer): BodyModel {
    */
   const isModelKey = (start: number, end: number): boolean =>
     end - start <= MAX_MODEL_KEY_RAW && decode(start, end).toUpperCase().toLowerCase() === "model";
-  const isStreamKey = (start: number, end: number): boolean =>
-    end - start <= MAX_STREAM_KEY_RAW &&
-    decode(start, end).toUpperCase().toLowerCase() === "stream";
+  /** A key's name in lower case (Go's case-insensitive match), or "" when too long to matter. */
+  const keyName = (start: number, end: number): string =>
+    end - start <= MAX_FACT_KEY_RAW ? decode(start, end).toUpperCase().toLowerCase() : "";
+  /** A value's raw text when it is a literal (number, true, false, null), else undefined. */
+  const literal = (): string | undefined => {
+    const vs = i;
+    const c = body[i];
+    value();
+    return c === QUOTE || c === 0x7b || c === 0x5b
+      ? undefined
+      : body.subarray(vs, i).toString("latin1");
+  };
+  let maxOutput: number | undefined;
+  const noteMax = (raw: string | undefined) => {
+    if (raw === undefined || !NUMBER.test(raw)) return;
+    maxOutput = Math.max(maxOutput ?? 0, Number(raw));
+  };
+  /** Gemini's `generationConfig` object: only its `maxOutputTokens` matters. */
+  const generationConfig = () => {
+    if (body[i] !== 0x7b) {
+      value();
+      return;
+    }
+    expect(0x7b);
+    ws();
+    if (body[i] === 0x7d) {
+      i++;
+      return;
+    }
+    for (;;) {
+      ws();
+      const [ks, ke] = string();
+      const name = keyName(ks, ke);
+      ws();
+      expect(0x3a);
+      ws();
+      if (name === "maxoutputtokens") noteMax(literal());
+      else value();
+      ws();
+      if (body[i] === 0x2c) {
+        i++;
+        continue;
+      }
+      expect(0x7d);
+      return;
+    }
+  };
 
   try {
     ws();
@@ -103,6 +156,7 @@ export function topLevelModel(body: Buffer): BodyModel {
     let model: string | undefined;
     let seen = false;
     let stream = false;
+    let background = false;
     if (body[i] === 0x7d) {
       i++;
     } else {
@@ -110,6 +164,7 @@ export function topLevelModel(body: Buffer): BodyModel {
         ws();
         const [ks, ke] = string();
         const isModel = isModelKey(ks, ke);
+        const name = isModel ? "model" : keyName(ks, ke);
         ws();
         expect(0x3a);
         ws();
@@ -124,10 +179,16 @@ export function topLevelModel(body: Buffer): BodyModel {
           model = decode(vs, ve);
           if (model.length === 0 || model.length > MAX_MODEL)
             return { ok: false, reason: "bad_model" };
-        } else if (isStreamKey(ks, ke)) {
+        } else if (name === "stream" || name === "background") {
           const vs = i;
           value();
-          stream = body.subarray(vs, i).equals(TRUE);
+          const isTrue = body.subarray(vs, i).equals(TRUE);
+          if (name === "stream") stream = isTrue;
+          else background = isTrue;
+        } else if (MAX_OUTPUT_KEYS.has(name)) {
+          noteMax(literal());
+        } else if (name === "generationconfig") {
+          generationConfig();
         } else {
           value();
         }
@@ -142,7 +203,7 @@ export function topLevelModel(body: Buffer): BodyModel {
     }
     ws();
     if (i !== n) throw new Malformed();
-    return { ok: true, model, stream };
+    return { ok: true, model, stream, background, maxOutputTokens: maxOutput };
   } catch (err) {
     if (err instanceof Malformed || err instanceof SyntaxError) {
       return { ok: false, reason: "not_json_object" };

@@ -241,7 +241,11 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
   latency, and the team, user and sandbox of the session token (plus the run, its thread and agent
   when Pi names an active run). A response without a usage report (a stream cut short, a request
   that did not ask for usage) is charged an estimate: request size / 4 input tokens and generated
-  text / 4 output tokens. Rows are written in batches about once a second.
+  text / 4 output tokens, and at least the output the request allowed
+  (`max_tokens` and kin, 8,192 when unset, capped at 65,536); a 5xx counts the same, a 4xx is
+  free. Background Responses (`background: true`, billed later) are refused. Per-call tool fees
+  (hosted web search, image generation) are not in usage reports and not counted. The ledger is
+  append-only. Rows are written right after each call.
 - **Budgets and rate limits** (KOBE-42, D30): dollar budgets, monthly with an optional daily cap,
   for the install (`PUT /v1/install/budget`, install admins; also the per-user request rate, default
   60/min), each team and single members (`/v1/team/budgets`, team admins; a team may only lower
