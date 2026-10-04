@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { teamInvitations, teamMembers, users } from "../../schema/index.js";
+import {
+  retentionBlobDeletions,
+  teamInvitations,
+  teamMembers,
+  teamRetention,
+  users,
+} from "../../schema/index.js";
 import type { identity } from "../../tenancy/identity.js";
 import type { ProbeFixture } from "./types.js";
 
@@ -23,5 +29,15 @@ export const identityFixtures: Record<(typeof identity.team)[number], ProbeFixtu
       invitedBy,
       expiresAt: new Date(Date.now() + 86_400_000),
     });
+  },
+  team_retention: async (tx, teamId) => {
+    const updatedBy = await insertUser(tx);
+    await tx.insert(teamRetention).values({ teamId, period: "90d", updatedBy });
+  },
+  retention_blob_deletions: async (tx, teamId) => {
+    const ownerUserId = await insertUser(tx);
+    await tx
+      .insert(retentionBlobDeletions)
+      .values({ teamId, key: `teams/${teamId}/uploads/${randomUUID()}`, ownerUserId });
   },
 };

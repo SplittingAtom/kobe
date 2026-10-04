@@ -165,6 +165,10 @@ export const threadEntries = pgTable(
     unique("thread_entries_seq_unique").on(t.teamId, t.threadId, t.seq),
     // Children of an entry (branch navigation) and the parent foreign key's delete checks.
     index("thread_entries_parent_idx").on(t.teamId, t.threadId, t.parentId),
+    // Whether a key a purge released is still referenced (D18 blob deletion, KOBE-18).
+    index("thread_entries_blob_ref_idx")
+      .on(t.teamId, t.blobRef)
+      .where(sql`${t.blobRef} IS NOT NULL`),
     check("thread_entries_seq_positive", sql`${t.seq} > 0`),
     check("thread_entries_entry_id_length", sql`char_length(${t.entryId}) BETWEEN 1 AND 128`),
     check("thread_entries_type_nonempty", sql`${t.type} <> ''`),
