@@ -1,4 +1,9 @@
-import { SCRIPT_RULES, SECRET_RULES, plausibleSecret } from "./rules.js";
+import {
+  SCRIPT_RULES,
+  pipesDownloadToInterpreter,
+  SECRET_RULES,
+  plausibleSecret,
+} from "./rules.js";
 import {
   SCAN_LIMITS,
   type Finding,
@@ -77,6 +82,7 @@ function scanLine(line: string, script: boolean): Array<[FindingCategory, string
   const hits = new Map<FindingCategory, string>();
   if (script) {
     if (line.length > SCAN_LIMITS.maxLineLength) hits.set("obfuscation", "long-line");
+    if (pipesDownloadToInterpreter(view)) hits.set("pipe-to-shell", "fetch-pipe-exec");
     for (const rule of SCRIPT_RULES) {
       if (!hits.has(rule.category) && rule.pattern.test(view)) hits.set(rule.category, rule.id);
     }

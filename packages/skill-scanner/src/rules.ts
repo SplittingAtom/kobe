@@ -124,3 +124,20 @@ const PLACEHOLDER = /example|changeme|placeholder|xxxx|your[_-]|dummy|sample/i;
 export function plausibleSecret(value: string): boolean {
   return /[A-Za-z]/.test(value) && /\d/.test(value) && !PLACEHOLDER.test(value);
 }
+
+const STAGE_FETCH = /\b(?:curl|wget)\b/;
+const STAGE_EXEC = /^&?\s*(?:sudo\s+(?:-\S+\s+)*)?(?:(?:ba|z|da|k)?sh|python3?|perl|ruby|node)\b/;
+
+/**
+ * True when a download appears in one pipeline stage and an interpreter reads a later stage.
+ * Linear: one split on single pipes, then one pass over the stages.
+ */
+export function pipesDownloadToInterpreter(line: string): boolean {
+  const stages = line.split(/(?<!\|)\|(?!\|)/);
+  let seenFetch = false;
+  for (const stage of stages) {
+    if (seenFetch && STAGE_EXEC.test(stage)) return true;
+    if (STAGE_FETCH.test(stage)) seenFetch = true;
+  }
+  return false;
+}
