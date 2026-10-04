@@ -397,11 +397,15 @@ export class FakeKobe {
     const scoped =
       url.pathname.startsWith("/v1/threads") ||
       url.pathname.startsWith("/v1/runs") ||
-      url.pathname.startsWith("/v1/approvals");
+      url.pathname.startsWith("/v1/approvals") ||
+      url.pathname === "/v1/team/retention";
     if (!scoped) return error(404, "not_found");
     if (headers.get("x-kobe-team") !== this.teamId) return error(409, "team_mismatch");
     return this.#route(method, url, body as Json | undefined, headers);
   };
+
+  /** The team's next retention shortening (KOBE-18 banner); null: none. */
+  upcomingRetention: { period: string; effective_at: string } | null = null;
 
   #route(method: string, url: URL, body: Json | undefined, headers: Headers): Response {
     const parts = url.pathname.split("/").filter(Boolean); // v1, threads|runs, id, action
@@ -409,6 +413,16 @@ export class FakeKobe {
     if (area === "threads") return this.#threadRoute(method, id, action, sub, url, body, headers);
     if (area === "runs" && id) return this.#runRoute(method, id, action, body);
     if (area === "approvals" && id) return this.#approvalRoute(method, id, body);
+    if (area === "team" && id === "retention" && method === "GET") {
+      return json(200, {
+        period: "forever",
+        maximum: "forever",
+        effective: "forever",
+        pending: null,
+        upcoming: this.upcomingRetention,
+        allowed: ["30d", "90d", "1y", "forever"],
+      });
+    }
     return error(404, "not_found");
   }
 
@@ -489,6 +503,11 @@ export class FakeKobe {
     if (action === "restore") {
       thread.deleted_at = null;
       return json(200, this.#summary(thread));
+    }
+    if (action === "purge" && method === "POST") {
+      if (thread.deleted_at === null) return error(409, "not_in_trash", "Move it to Trash first.");
+      this.threads.delete(thread.thread_id);
+      return new Response(null, { status: 204 });
     }
     if (action === "messages") return this.#submit(thread, body, headers.get("idempotency-key"));
     if (action === "runs") return json(200, this.#threadRuns(thread.thread_id));

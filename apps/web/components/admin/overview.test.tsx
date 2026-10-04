@@ -40,9 +40,9 @@ describe("console overview", () => {
 
 describe("section placeholder", () => {
   it("names the ticket that builds it", () => {
-    render(<SectionPlaceholder section={must(findSection("install", "retention"))} />);
-    expect(screen.getByRole("heading", { name: "Retention maximum" })).toBeTruthy();
-    expect(screen.getByRole("note").textContent).toBe("Coming in KOBE-18.");
+    render(<SectionPlaceholder section={must(findSection("install", "connectors"))} />);
+    expect(screen.getByRole("heading", { name: "Connector registry" })).toBeTruthy();
+    expect(screen.getByRole("note").textContent).toBe("Coming in KOBE-59.");
   });
 });
 

@@ -2,6 +2,7 @@ import { is } from "drizzle-orm";
 import { getTableConfig, PgTable } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 import { BLOB_REF_COLUMNS } from "./blob-refs.js";
+import { isTeamTable } from "./tenancy.js";
 import * as schema from "./schema/index.js";
 
 const tables = (Object.values(schema) as unknown[])
@@ -30,5 +31,14 @@ describe("blob-ref registry", () => {
   it("lists each column once", () => {
     const keys = BLOB_REF_COLUMNS.map((r) => `${r.table}.${r.column}`);
     expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("lists team tables only, and thread-owned columns on tables with thread_id (KOBE-18 purge)", () => {
+    for (const ref of BLOB_REF_COLUMNS) {
+      expect(isTeamTable(ref.table), ref.table).toBe(true);
+      const columns = tables.find((t) => t.name === ref.table)?.columns.map((c) => snake(c.name));
+      expect(columns, ref.table).toContain("team_id");
+      if (ref.thread) expect(columns, ref.table).toContain("thread_id");
+    }
   });
 });

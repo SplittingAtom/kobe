@@ -30,6 +30,11 @@ function query(params: Readonly<Record<string, string | number | undefined>>): s
   return text === "" ? "" : `?${text}`;
 }
 
+/** What the chat shows of the team's retention (`GET /v1/team/retention`, camelized). */
+export interface TeamRetentionNotice {
+  readonly upcoming: { readonly period: string; readonly effectiveAt: string } | null;
+}
+
 export interface ChatApi {
   listThreads(cursor?: string): Promise<ApiResult<ThreadPage>>;
   searchThreads(q: string, cursor?: string): Promise<ApiResult<ThreadSearchPage>>;
@@ -48,6 +53,10 @@ export interface ChatApi {
   renameThread(threadId: string, title: string | null): Promise<ApiResult<ThreadSummary>>;
   trashThread(threadId: string): Promise<ApiResult<ThreadSummary>>;
   restoreThread(threadId: string): Promise<ApiResult<ThreadSummary>>;
+  /** The team's retention period and any upcoming shortening (KOBE-18 banner). */
+  retention(): Promise<ApiResult<TeamRetentionNotice>>;
+  /** "Delete forever" from Trash (D18, KOBE-18): the owner only; 204. */
+  purgeThread(threadId: string): Promise<ApiResult<void>>;
   setLeaf(threadId: string, entryId: string): Promise<ApiResult<ThreadSummary>>;
   sendMessage(
     threadId: string,
@@ -93,6 +102,8 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     renameThread: (id, title) => send("PATCH", `/v1/threads/${enc(id)}`, { title }),
     trashThread: (id) => send("DELETE", `/v1/threads/${enc(id)}`),
     restoreThread: (id) => send("POST", `/v1/threads/${enc(id)}/restore`),
+    purgeThread: (id) => send("POST", `/v1/threads/${enc(id)}/purge`),
+    retention: () => get("/v1/team/retention"),
     setLeaf: (id, entryId) => send("POST", `/v1/threads/${enc(id)}/leaf`, { entry_id: entryId }),
     sendMessage: (id, body, idempotencyKey) =>
       apiRequest(`/v1/threads/${enc(id)}/messages`, {
@@ -129,6 +140,15 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
             }),
       }),
   };
+}
+
+/**
+ * The download URL of the user's export of their threads in `teamId` (D18, KOBE-18): a zip of Pi
+ * JSONL sessions and Markdown transcripts. A link can't send `X-Kobe-Team`, so the team goes in
+ * the query and the server checks it against the session's active team.
+ */
+export function threadExportUrl(teamId: string): string {
+  return `/v1/threads/export${query({ team: teamId })}`;
 }
 
 /** The SSE URL of a run's events after `seq` (KOBE-31; the session cookie authenticates it). */
