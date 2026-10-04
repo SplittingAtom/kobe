@@ -335,6 +335,10 @@ describe("bundle download", () => {
     expect((await as.bob.get(`/v1/skills/${t}/versions/9/bundle`)).status).toBe(404);
     expect((await as.bob.get(`/v1/skills/${t}/versions/0/bundle`)).status).toBe(404);
     expect((await as.bob.get(`/v1/skills/nope/versions/1/bundle`)).status).toBe(404);
+    for (const bad of ["1e30", "99999999999", "1.5", "abc"]) {
+      expect((await as.bob.get(`/v1/skills/${t}/versions/${bad}/bundle`)).status).toBe(404);
+      expect((await as.bob.get(`/v1/skills/${t}/versions/${bad}`)).status).toBe(404);
+    }
   });
 });
 

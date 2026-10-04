@@ -42,7 +42,7 @@ const ZIP_TYPES = new Set([
 const MARKDOWN_TYPES = new Set(["text/markdown", "text/x-markdown", "text/plain"]);
 const scopeSchema = z.enum(["team", "personal"]);
 const idSchema = z.uuid();
-const versionSchema = z.coerce.number().int().positive();
+const versionSchema = z.coerce.number().int().positive().max(2147483647);
 
 const error = (
   c: Ctx,
