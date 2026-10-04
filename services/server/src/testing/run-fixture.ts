@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { RunAgentResolver } from "../runs/seams.js";
+import type { BlobStore } from "../retention/blobs.js";
 import { expect } from "vitest";
 import type { ServerToSandboxFrame } from "@kobe/protocol";
 import { WIRE_DEFAULTS } from "../sandbox-wire/constants.js";
@@ -164,9 +165,12 @@ export class RunFixture {
       readonly stopGraceMs?: number;
       /** The run-start agent resolver (KOBE-46/47 seam); default `PINNED_AGENTS`. */
       readonly agents?: RunAgentResolver;
+      /** Object storage for skill bundles (KOBE-82): both replicas share it. */
+      readonly blobs?: BlobStore;
     } = {},
   ): Promise<void> {
     await this.fx.setup([{}, {}], () => ({
+      ...(options.blobs === undefined ? {} : { blobs: options.blobs }),
       sandboxWire: {
         sweep: false,
         tuning: {

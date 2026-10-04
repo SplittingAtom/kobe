@@ -12,6 +12,8 @@ import { loadPiIdentities, type PiIdentities } from "./pi/identities.js";
 import { buildPiLaunch } from "./pi/pi-launch.js";
 import { checkExtensionFile, checkPolicyExtensionFile } from "./policy/extension-file.js";
 import { SessionClient } from "./session/exchange.js";
+import { createSkillFetcher } from "./skills/client.js";
+import { SkillStore } from "./skills/store.js";
 import { piVersion as readPiVersion, readAgentVersion } from "./version.js";
 import { SyncClient } from "./workspace/client.js";
 import { WorkspaceSync } from "./workspace/sync.js";
@@ -103,8 +105,21 @@ async function main(): Promise<void> {
           intervalMs: config.workspaceSyncIntervalMs,
         })
       : undefined;
+  // KOBE-82: the run's effective skills, fetched from the server (never from object storage) and
+  // materialized read-only for the Pi uids. Emptied now: an earlier agent's skills are stale.
+  const skills =
+    config.skillsDir === undefined
+      ? undefined
+      : new SkillStore({
+          root: config.skillsDir,
+          identities: identities !== undefined,
+          fetch: createSkillFetcher({ serverUrl: config.serverUrl, readToken }),
+          log: logger,
+        });
+  await skills?.init();
   const agent = new Agent({
     config,
+    ...(skills === undefined ? {} : { skills }),
     logger,
     readToken,
     ...(workspace === undefined ? {} : { workspace }),
@@ -150,6 +165,11 @@ async function piIdentities(config: Config): Promise<PiIdentities | undefined> {
   // may reach (Pi runtime dirs, the bootstrap token) must be on other filesystems than /workspace.
   const workspace = await stat(config.workspaceDir);
   const private_ = [config.piRuntimeDir];
+  // Skills (KOBE-82) are the agent's too: Pi uids read them, only the agent may write.
+  if (config.skillsDir !== undefined) {
+    await mkdir(config.skillsDir, { recursive: true, mode: 0o700 });
+    private_.push(config.skillsDir);
+  }
   if (config.bootstrapTokenFile !== undefined)
     private_.push(path.dirname(config.bootstrapTokenFile));
   for (const dir of private_) {

@@ -10,6 +10,7 @@ import {
 import type { Config } from "./config.js";
 import type { PiExit, PiRecord } from "./pi/pi-process.js";
 import { PolicyBroker } from "./policy/broker.js";
+import type { SkillStore } from "./skills/store.js";
 import { ThreadManager } from "./threads/manager.js";
 import { fail, type CommandOutcome } from "./threads/outcome.js";
 import { WireClient, type FatalReason, type WireLogger } from "./wire/client.js";
@@ -50,6 +51,8 @@ export interface AgentDeps {
   readonly identities?: PiIdentities | undefined;
   /** Workspace sync (KOBE-27): restore before runs, push after them and before stopping. */
   readonly workspace?: WorkspaceHooks;
+  /** Skills store (KOBE-82); absent: runs that list skills fail instead of starting without them. */
+  readonly skills?: SkillStore;
 }
 
 /** What the agent needs of workspace sync (`workspace/sync.ts`). */
@@ -106,6 +109,7 @@ export class Agent {
       home: deps.home,
       identities: deps.identities,
       parentEnv: deps.parentEnv,
+      ...(deps.skills === undefined ? {} : { skills: deps.skills }),
       maxProcesses: config.maxPiProcesses,
       idleMs: config.piIdleMs,
       restoreMaxBytes: config.restoreMaxBytes,

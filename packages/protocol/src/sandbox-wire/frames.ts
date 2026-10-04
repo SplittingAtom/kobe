@@ -9,6 +9,7 @@ import {
 } from "../common.js";
 import { connectorNameSchema } from "../tools.js";
 import { SANDBOX_ERROR_CODES, SANDBOX_WIRE_VERSION } from "./connection.js";
+import { SKILL_BUNDLES_MAX, skillBundleRefSchema } from "./skill-bundles.js";
 import {
   piBridgeCommandSchema,
   piExtensionUiRequestSchema,
@@ -221,11 +222,16 @@ export const piThreadConfigSchema = z.strictObject({
     .nullable()
     .optional(),
   system_prompt: z.string().max(100_000).optional(),
-  /** Skill directory names under /opt/kobe/skills or the user's skills dir (D22). */
+  /** Names of the run's effective skills (D22); the bytes are `skill_bundles`. */
   skills: z
     .array(z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/))
     .max(64)
     .optional(),
+  /**
+   * The bytes behind `skills` (KOBE-82, skill-bundles.ts): the canonical zip's hash and size per
+   * effective skill. The sandbox materializes exactly these and nothing else. Absent = none.
+   */
+  skill_bundles: z.array(skillBundleRefSchema).max(SKILL_BUNDLES_MAX).optional(),
   /** Connectors to expose; Pi tool names become `mcp__<name>__<tool>` (verified Pi 1.0.0). */
   mcp_servers: z
     .array(z.strictObject({ name: connectorNameSchema, connector_id: uuidSchema }))

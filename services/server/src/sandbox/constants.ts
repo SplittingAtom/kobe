@@ -88,6 +88,14 @@ export const PI_IDENTITIES = 16;
  */
 export const PI_RUNTIME_DIR = "/run/kobe-pi";
 export const PI_RUNTIME_SIZE = "64Mi";
+/**
+ * Where kobe-sandbox-agent materializes a run's effective skills (KOBE-82): a second memory-backed
+ * emptyDir for the same reason as PI_RUNTIME_DIR (sticky root no Pi identity can rename in), so
+ * the agent's read-only skill directories can't be swapped by a tool. Sized for the agent's cap
+ * (96 MiB across all live threads' skills, services/sandbox-agent skills/store.ts).
+ */
+export const SKILLS_DIR = "/run/kobe-skills";
+export const SKILLS_SIZE = "128Mi";
 /** The helper that starts Pi under its identity (images/sandbox/runas). */
 export const PI_RUNAS_HELPER = "/opt/kobe/bin/kobe-runas";
 /** The only capabilities a sandbox container adds (after dropping ALL), for kobe-runas. */

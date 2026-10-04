@@ -9,6 +9,7 @@ import { FakeServer, type FakeServerOptions } from "./fake-server.js";
 import type { EgressWiring } from "../egress/egress-wiring.js";
 import type { ModelWiring } from "../models/types.js";
 import type { PiIdentities } from "../pi/identities.js";
+import type { SkillStore } from "../skills/store.js";
 
 export const FAKE_PI = fileURLToPath(new URL("./fake-pi.mjs", import.meta.url));
 export const TOKEN = "test-wire-token-0123456789";
@@ -54,6 +55,8 @@ export interface HarnessOptions {
    */
   readonly identities?: PiIdentities;
   readonly runtimeDir?: string;
+  /** Skills store (KOBE-82); absent = this sandbox cannot materialize skills. */
+  readonly skills?: SkillStore;
 }
 
 /** The fake Pi ignores the file; it plays kobe-policy's handshake itself (see fake-pi.mjs). */
@@ -101,6 +104,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     ...(options.models === undefined ? {} : { models: options.models }),
     ...(options.egress === undefined ? {} : { egress: options.egress }),
     ...(options.identities === undefined ? {} : { identities: options.identities }),
+    ...(options.skills === undefined ? {} : { skills: options.skills }),
     ...(options.workspace === undefined ? {} : { workspace: options.workspace(workspace) }),
     ...(options.policyReadyTimeoutMs === undefined
       ? {}

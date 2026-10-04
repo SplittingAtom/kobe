@@ -22,6 +22,7 @@ import { RetentionJob } from "./retention/job.js";
 import { createInternalApp } from "./routes/internal.js";
 import { createSandboxApp } from "./routes/sandbox.js";
 import { createSandboxRuntime } from "./sandbox/runtime.js";
+import { skillSandboxRoutes } from "./skills/sandbox-routes.js";
 import { providerLiveness, sandboxWireVerifier } from "./sandbox-wire/provider-auth.js";
 import { createDeferredWaker, createSandboxLifecycle } from "./sandbox-lifecycle/index.js";
 import {
@@ -242,6 +243,8 @@ function workspaceAuth(d: ServerDeps, s: NonNullable<typeof sandbox>) {
   d.sandboxWire.onUserRevalidate((userId) => authenticate.forget(userId));
   return authenticate;
 }
+// One caller check for every sandbox-listener HTTP endpoint (workspace sync, skill bundles).
+const sandboxAuth = sandbox && deps ? workspaceAuth(deps, sandbox) : undefined;
 const stopCollector = workspaceSync?.startCollector((syncSettings?.collectSeconds ?? 3600) * 1000);
 
 // The scheduler serves health endpoints only (its jobs arrive in KOBE-64).
@@ -261,9 +264,16 @@ const sandboxServer = sandbox
       {
         fetch: createSandboxApp({
           ...sandbox,
-          ...(workspaceSync && deps
+          ...(workspaceSync && sandboxAuth ? { workspace: workspaceSync.routes(sandboxAuth) } : {}),
+          // Skill bundles (KOBE-82): served from the same object store, to live sandboxes only.
+          ...(deps?.blobs && sandboxAuth
             ? {
-                workspace: workspaceSync.routes(workspaceAuth(deps, sandbox)),
+                skills: skillSandboxRoutes({
+                  db: deps.database.db,
+                  blobs: deps.blobs,
+                  authenticate: sandboxAuth,
+                  log: logger,
+                }),
               }
             : {}),
         }).fetch,

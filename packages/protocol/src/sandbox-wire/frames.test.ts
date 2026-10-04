@@ -396,6 +396,43 @@ describe("server → sandbox frames", () => {
       "a path-like skill name",
       { ...serverFrames["run.start"], config: { ...config, skills: ["../etc"] } },
     ],
+    [
+      "a skill bundle with a path-like name",
+      {
+        ...serverFrames["run.start"],
+        config: {
+          ...config,
+          skill_bundles: [{ name: "../etc", sha256: "a".repeat(64), size: 10 }],
+        },
+      },
+    ],
+    [
+      "a skill bundle with an uppercase or short hash",
+      {
+        ...serverFrames["run.start"],
+        config: { ...config, skill_bundles: [{ name: "docx", sha256: "A".repeat(64), size: 10 }] },
+      },
+    ],
+    [
+      "a skill bundle over the size cap",
+      {
+        ...serverFrames["run.start"],
+        config: {
+          ...config,
+          skill_bundles: [{ name: "docx", sha256: "a".repeat(64), size: 33 * 1024 * 1024 }],
+        },
+      },
+    ],
+    [
+      "a skill bundle with an extra key",
+      {
+        ...serverFrames["run.start"],
+        config: {
+          ...config,
+          skill_bundles: [{ name: "docx", sha256: "a".repeat(64), size: 10, url: "https://x" }],
+        },
+      },
+    ],
   ])("rejects %s", (_name, frame) => {
     expect(decodeServerFrame(JSON.stringify(frame))).toMatchObject({
       ok: false,
@@ -606,5 +643,23 @@ describe("forward compatibility (server → sandbox)", () => {
         JSON.stringify({ v: 1, type: "error", code: "a_new_error", message: "m" }),
       ),
     ).toMatchObject({ ok: false });
+  });
+});
+
+describe("run.start skill bundles (KOBE-82)", () => {
+  it("accepts bundle refs next to the skill names", () => {
+    const frame = {
+      ...serverFrames["run.start"],
+      config: {
+        skills: ["docx"],
+        skill_bundles: [{ name: "docx", sha256: "a".repeat(64), size: 1234 }],
+      },
+    };
+    expect(decodeServerFrame(JSON.stringify(frame))).toMatchObject({ ok: true });
+  });
+
+  it("still accepts a config without bundles (older servers)", () => {
+    const frame = { ...serverFrames["run.start"], config: { skills: ["docx"] } };
+    expect(decodeServerFrame(JSON.stringify(frame))).toMatchObject({ ok: true });
   });
 });
