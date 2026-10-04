@@ -110,10 +110,15 @@ export async function disableTeamDomain(
     const deleted = await tx
       .delete(teamEgress)
       .where(and(eq(teamEgress.teamId, teamId), eq(teamEgress.domain, domain)))
-      .returning({ domain: teamEgress.domain });
+      .returning({ domain: teamEgress.domain, sealed: teamEgress.headersSealed });
     if (deleted.length === 0) return false;
     await notifyEgressChanged(tx, teamId);
-    await recordAudit(tx, { action: "egress.domain.disabled", teamId, target: { domain } });
+    const headersRemoved = deleted.some((d) => d.sealed !== null);
+    await recordAudit(tx, {
+      action: "egress.domain.disabled",
+      teamId,
+      target: { domain, ...(headersRemoved ? { headersRemoved: true as const } : {}) },
+    });
     return true;
   });
 }

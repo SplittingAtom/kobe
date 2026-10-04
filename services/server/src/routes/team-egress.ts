@@ -2,6 +2,7 @@ import { injectedHeadersSchema } from "@kobe/db";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
+import { teamRoleAllows } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
 import { clearTeamDomainHeaders, setTeamDomainHeaders } from "../egress/header-store.js";
 import { deliverEgressRequestNotifications } from "../egress/request-notify.js";
@@ -38,12 +39,17 @@ export function teamEgressRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
   const db = deps.database.db;
   app.use(requireTeam(deps));
 
-  app.get("/", requireTeamPermission("team.read"), async (c) =>
-    c.json({
-      domains: await listTeamEgress(db, c.get("team").id),
+  app.get("/", requireTeamPermission("team.read"), async (c) => {
+    const domains = await listTeamEgress(db, c.get("team").id);
+    // Header names (e.g. X-Vault-Token) are for the team's admins only.
+    const manager = teamRoleAllows(c.get("team").role, "team.egress.manage");
+    return c.json({
+      domains: manager
+        ? domains
+        : domains.map((d) => ({ ...d, header_names: [], headers_updated_at: null })),
       header_injection: deps.egressHeaders !== undefined,
-    }),
-  );
+    });
+  });
 
   app.put("/domains/:domain", requireTeamPermission("team.egress.manage"), async (c) => {
     const domain = domainPatternSchema.safeParse(c.req.param("domain"));
@@ -76,6 +82,17 @@ export function teamEgressRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
     }
     const domain = domainPatternSchema.safeParse(c.req.param("domain"));
     if (!domain.success) return notFound(c);
+    if (domain.data.startsWith("*.")) {
+      // Headers go to exactly one host: on a wildcard the sandbox could pick a subdomain it controls.
+      return c.json(
+        {
+          code: "wildcard_not_allowed",
+          message:
+            "Injected headers need an exact domain, not a wildcard. Add the host to the ceiling.",
+        },
+        422,
+      );
+    }
     const body = await parseBody(c, headersBodySchema);
     if (!body) {
       return invalidRequest(

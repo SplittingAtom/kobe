@@ -68,6 +68,18 @@ export interface UpgradeContext {
 }
 
 const UPSTREAM_PORT = 443;
+/** Methods relayed; TRACE (reflects the injected headers), CONNECT and the rest are refused. */
+export const UPGRADE_METHODS: ReadonlySet<string> = new Set([
+  "GET",
+  "HEAD",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "OPTIONS",
+]);
+/** Header names compared the way CGI-style servers see them (`X_Api_Key` = `X-Api-Key`). */
+const headerKey = (name: string) => name.toLowerCase().replace(/_/g, "-");
 const REALM = 'Basic realm="kobe-egress"';
 
 /** Never forwarded upstream (hop-by-hop, proxy credentials, framing the proxy decides). */
@@ -141,7 +153,7 @@ export function upstreamHeaders(
   contentLength: number | undefined,
 ): [string, string][] {
   const out: [string, string][] = [];
-  const injectedNames = new Set(injected.map((h) => h.name.toLowerCase()));
+  const injectedNames = new Set(injected.map((h) => headerKey(h.name)));
   const listed = new Map<string, string[]>();
   for (let i = 0; i + 1 < rawHeaders.length; i += 2) {
     const name = rawHeaders[i] as string;
@@ -153,7 +165,9 @@ export function upstreamHeaders(
   for (let i = 0; i + 1 < rawHeaders.length; i += 2) {
     const name = rawHeaders[i] as string;
     const lower = name.toLowerCase();
-    if (DROP_REQUEST.has(lower) || listed.has(lower) || injectedNames.has(lower)) continue;
+    if (DROP_REQUEST.has(lower) || listed.has(lower) || injectedNames.has(headerKey(name))) {
+      continue;
+    }
     if (lower.startsWith("proxy-")) continue;
     out.push([name, rawHeaders[i + 1] as string]);
   }
@@ -332,6 +346,16 @@ export async function handlePlainHttp(
       );
       return;
     }
+    if (!UPGRADE_METHODS.has(req.method ?? "")) {
+      ctx.finish(attempt, "blocked", "invalid_target");
+      reply(
+        res,
+        405,
+        "Kobe egress: method not allowed",
+        "Kobe egress: only GET, HEAD, POST, PUT, PATCH, DELETE and OPTIONS are relayed.",
+      );
+      return;
+    }
     await upgrade(req, res, ctx, attempt, parsed.target);
   } finally {
     release();
@@ -411,7 +435,10 @@ async function upgrade(
   const { host } = target;
   const decided = await decideFor(ctx, res, attempt, host);
   if (!decided) return;
-  if (decided.sealed === undefined || !deps.headers || !deps.upgrade) {
+  // Headers are bound to exactly one host: a wildcard pattern would let the sandbox send them to
+  // any subdomain it controls (the API refuses them too; this also disarms any older row).
+  const exact = decided.pattern === host;
+  if (decided.sealed === undefined || !exact || !deps.headers || !deps.upgrade) {
     // Plain HTTP exists only to carry a team's injected headers; everything else is HTTPS.
     ctx.finish(attempt, "blocked", "plain_http");
     reply(

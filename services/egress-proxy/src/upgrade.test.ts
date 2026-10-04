@@ -121,12 +121,14 @@ afterAll(() => {
 });
 
 const ENABLED: Record<string, string> = {
+  "evil.wild.example.com": "*.wild.example.com",
   "pkgs.example.com": "pkgs.example.com",
   "plain.example.com": "plain.example.com",
   "mitm.example.com": "mitm.example.com",
   "internal.example.com": "internal.example.com",
 };
 const HEADERS: Record<string, string> = {
+  "*.wild.example.com": "sealed-*",
   "pkgs.example.com": "sealed-pkgs",
   "mitm.example.com": "sealed-mitm",
   "internal.example.com": "sealed-internal",
@@ -429,6 +431,33 @@ describe("upgrade (plain HTTP → verified HTTPS with the team's headers)", () =
     const res = await viaProxy("http://pkgs.example.com/simple/");
     expect(res.status).toBe(503);
     expect(seen).toEqual([]);
+  });
+});
+
+describe("upgrade hardening (security review)", () => {
+  it("never injects headers for a wildcard pattern (the sandbox could pick the subdomain)", async () => {
+    const res = await viaProxy("http://evil.wild.example.com/");
+    expect(res.status).toBe(403);
+    expect(connectCalls).toEqual([]);
+  });
+
+  it("refuses TRACE (it would reflect the injected headers)", async () => {
+    const res = await viaProxy("http://pkgs.example.com/", { method: "TRACE" });
+    expect(res.status).toBe(405);
+    expect(seen).toEqual([]);
+  });
+
+  it("drops client headers that alias an injected name with underscores", () => {
+    const out = upstreamHeaders(
+      ["X_Org", "spoof"],
+      "pkgs.example.com",
+      [{ name: "X-Org", value: "v" }],
+      undefined,
+    );
+    expect(out).toEqual([
+      ["Host", "pkgs.example.com"],
+      ["X-Org", "v"],
+    ]);
   });
 });
 

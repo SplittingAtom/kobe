@@ -305,7 +305,11 @@ export const AUDIT_EVENTS = {
   /** A custom domain was deleted; every team's enablement of it went with it. */
   "egress.ceiling.removed": event("install", { domain: egressDomain }),
   "egress.domain.enabled": event("team", { domain: egressDomain }),
-  "egress.domain.disabled": event("team", { domain: egressDomain }),
+  /** `headersRemoved`: the domain's injected headers (KOBE-39) were deleted with it. */
+  "egress.domain.disabled": event("team", {
+    domain: egressDomain,
+    headersRemoved: z.literal(true).optional(),
+  }),
   /**
    * Request access (KOBE-39, D28): a member asked the team's admins to enable `pattern` after a
    * blocked request to `domain` (thread metadata only: the thread id; never a URL or prompt).

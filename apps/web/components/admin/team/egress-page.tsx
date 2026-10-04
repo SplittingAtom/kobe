@@ -103,7 +103,7 @@ export function TeamEgressPage() {
                         <DateTime value={d.enabledAt} />
                       </td>
                       <td>
-                        {d.enabled ? (
+                        {d.enabled && !d.domain.startsWith("*.") ? (
                           <DomainHeaders
                             teamId={teamId}
                             domain={d}

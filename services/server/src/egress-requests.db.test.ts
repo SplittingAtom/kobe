@@ -347,6 +347,19 @@ describe("header injection", () => {
     expect(anywhere[0].n).toBe(0);
   });
 
+  it("refuses wildcard domains and hides header names from members", async () => {
+    await as.alice.put("/v1/team/egress/domains/*.files.example.com", {});
+    const wild = await as.alice.put(HEADERS("*.files.example.com"), {
+      headers: [{ name: "X-Key", value: "value" }],
+    });
+    expect(wild.status).toBe(422);
+    expect(wild.json.code).toBe("wildcard_not_allowed");
+    const member = await as.bob.get("/v1/team/egress");
+    expect(
+      member.json.domains.find((d: { domain: string }) => d.domain === "pypi.org").header_names,
+    ).toEqual([]);
+  });
+
   it("refuses reserved names, header splitting and too many headers", async () => {
     for (const headers of [
       [{ name: "Host", value: "evil.example.com" }],
@@ -367,6 +380,10 @@ describe("header injection", () => {
         .status,
     ).toBe(200);
     expect((await as.alice.delete("/v1/team/egress/domains/pypi.org")).status).toBe(204);
+    expect((await audit("egress.domain.disabled")).at(-1)?.target).toEqual({
+      domain: "pypi.org",
+      headersRemoved: true,
+    });
     const { rows } = await h.admin.query(
       `SELECT count(*)::int AS n FROM team_egress WHERE team_id = $1 AND domain = 'pypi.org'`,
       [finance],

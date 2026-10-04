@@ -569,7 +569,8 @@ export function createEgressProxy(deps: ProxyDeps): Server {
 /** Health endpoints (origin-form requests); absolute-form ones go to upgrade.ts. */
 function handleRequest(req: IncomingMessage, res: ServerResponse, deps: ProxyDeps): void {
   const json = (status: number, body: unknown) => {
-    res.writeHead(status, { "content-type": "application/json" });
+    // Close after answering: an unauthenticated socket must not linger (pre-auth budget).
+    res.writeHead(status, { "content-type": "application/json", connection: "close" });
     res.end(JSON.stringify(body));
   };
   const url = req.url ?? "";

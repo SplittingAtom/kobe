@@ -188,7 +188,10 @@ equal the CONNECT host. It never decrypts traffic. Plain HTTP and other ports ar
   `HTTPS_PROXY=http://<thread id>:<token>@egress-proxy.kobe.internal:80` (and the lowercase and
   `HTTP_` variants), so curl, pip, npm, git and Python use the proxy with a fresh token, and a
   blocked request shows in the thread that made it. The token is never in a pod spec, Pi's
-  environment or an argv, and the script pauses `bash -x` tracing while it handles it. Processes
+  environment or an argv, and the script pauses `bash -x` tracing while it handles it. It is in the
+  tool shell's environment, though: a tool that prints its environment or proxy URL (`env`,
+  `curl -v`) shows it in the tool result. That token is the sandbox's own, valid 15 minutes and only
+  for the egress proxy. Processes
   started earlier keep the token they started with (15 minutes).
 
 ### Request access
@@ -210,7 +213,7 @@ Team admins can configure up to 8 **injected headers** per enabled domain (Team 
 e.g. `Authorization` for a private package index). Values are sealed in Postgres with a dedicated
 secret (`<release>-egress-headers`, key `secret`, generated and kept; or
 `egressProxy.headerSecret` naming your own), held only by the server and the egress proxy. They are
-**write-only**: the API and console list header names, never values; the audit log records names
+**write-only**: the API and console list header names (to team admins only), never values; the audit log records names
 only (`egress.header.set`, `egress.header.cleared`); disabling the domain deletes them.
 
 Headers can't be added to an opaque HTTPS tunnel, and Kobe does not intercept TLS (there is no
@@ -229,7 +232,9 @@ proxy upgrades them:
    through and checked as its own request (headers are only ever sent to their own domain). A
    response header that echoes an injected value is dropped.
 
-Limits: `egressProxy.upgrade.maxRequestBytes` (100 MiB), `maxResponseBytes` (2 GiB),
+Headers need an **exact** domain: a wildcard (`*.example.com`) is refused, since the sandbox could
+send them to any subdomain whose certificate it controls. Only GET, HEAD, POST, PUT, PATCH, DELETE
+and OPTIONS are relayed (TRACE would reflect the headers). Limits: `egressProxy.upgrade.maxRequestBytes` (100 MiB), `maxResponseBytes` (2 GiB),
 `timeoutSeconds` (600), plus the per-sandbox connection and bandwidth limits. A `CONNECT` to a
 domain with injected headers is refused with a message pointing at `http://`. Pointing tools at
 `http://` (the least surprising option: the URL says what happens, and nothing in the sandbox is
