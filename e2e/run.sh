@@ -1354,12 +1354,16 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
   # provider on a private address WITHOUT allow_private_network must not be reached that way.
   priv_add=$(as_owner "POST /v1/install/models/providers {\"kind\":\"openai_compatible\",\"id\":\"e2epriv\",\"name\":\"Private, not allowed\",\"api_key\":\"e2e-private-key\",\"base_url\":\"$LLM\",\"allow_private_network\":false}")
   expect "a keyed provider on a private address is added with private network off" '^201 ' "$priv_add"
-  wait_for 60 '^in_sync=true' gateway_state >/dev/null
+  # Wait until Bifrost has the provider (the listing answers 200, not 409 provider_not_synced).
+  priv_listed() { as_owner "GET /v1/install/models/providers/e2epriv/models" | head -1; }
+  priv_ready=$(wait_for 90 '^200 ' priv_listed)
+  printf '     private provider in the gateway: %s | %s\n' "$(printf '%s' "$priv_ready" | cut -c1-120)" "$(gateway_state)"
   priv_refresh=$(as_owner "POST /v1/install/models/providers/e2epriv/models/refresh")
   printf '     private refresh: %s\n' "$(printf '%s' "$priv_refresh" | cut -c1-200)"
-  if printf '%s' "$priv_refresh" | grep -q '"discovery":"ok"'; then
-    fail "listing models of a private-address provider (private network off) is refused"
-  else ok "listing models of a private-address provider (private network off) is refused"; fi
+  # The refresh ran (200) and did not list the provider's models: Bifrost refused the private address.
+  if printf '%s' "$priv_refresh" | grep -q '^200 ' && ! printf '%s' "$priv_refresh" | grep -q '"discovery":"ok"'; then
+    ok "listing models of a private-address provider (private network off) is refused"
+  else fail "listing models of a private-address provider (private network off) is refused: $(printf '%s' "$priv_refresh" | cut -c1-200)"; fi
   priv_seen=$(probe "$NS" "$(answers "$LLM/_seen")")
   if [[ -n "$priv_seen" ]] && ! printf '%s' "$priv_seen" | grep -q 'e2e-private-key'; then
     ok "Bifrost never sent that provider's key to the private address"
