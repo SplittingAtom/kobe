@@ -17,6 +17,7 @@ const AGENT = {
   revision: 3,
   updatedAt: "2026-10-01T10:00:00Z",
   canEdit: true,
+  canPublish: true,
   starters: [],
   frontmatter: { name: "Triage", approval_mode: "ask-on-write" },
   prompt: "Be helpful.",
@@ -132,8 +133,8 @@ describe("Agent builder: edit and publish", () => {
       "POST /v1/agents/a-1/publish": [
         201,
         {
-          agent: { ...AGENT, revision: 4, currentVersion: 3 },
-          version: { ...VERSIONS.versions[0], version: 3 },
+          agent: { ...AGENT, revision: 4, currentVersion: 7 },
+          version: { ...VERSIONS.versions[0], version: 7 },
         },
       ],
     });
@@ -149,7 +150,8 @@ describe("Agent builder: edit and publish", () => {
     const dialog = await screen.findByRole("dialog", { name: "Publish Triage as v3" });
     expect(within(dialog).getByText(/auto runs only allow-listed tools/)).toBeTruthy();
     await userEvent.click(within(dialog).getByRole("button", { name: "Publish v3" }));
-    await screen.findByText("Published v3.");
+    // The notice names the version the server assigned, not currentVersion + 1.
+    await screen.findByText("Published v7.");
     expect(screen.queryByRole("dialog")).toBeNull();
     const publish = must(calls.find((c) => c.url.endsWith("/publish")));
     expect(publish.headers.get("if-match")).toBe('"4"');
@@ -172,6 +174,19 @@ describe("Agent builder: edit and publish", () => {
     expect((await within(screen.getByRole("dialog")).findByRole("alert")).textContent).toMatch(
       "Someone else changed this agent.",
     );
+  });
+
+  it("lets an editor without the publish right save, but offers no Publish or Restore", async () => {
+    stubApi({
+      ...READ,
+      "GET /v1/agents/a-1": [200, { agent: { ...AGENT, canPublish: false } }],
+    });
+    renderTeam(<AgentBuilderPage agentId="a-1" />);
+    await screen.findByRole("button", { name: "Save draft" });
+    expect(screen.queryByRole("button", { name: "Publish…" })).toBeNull();
+    await screen.findByRole("region", { name: "Version history" });
+    await screen.findAllByRole("row");
+    expect(screen.queryByRole("button", { name: /Restore version/ })).toBeNull();
   });
 
   it("is read-only when the caller can't edit", async () => {

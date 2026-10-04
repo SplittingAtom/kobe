@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
-import { readIfMatch } from "./http.js";
+import type { AgentAccess } from "./access.js";
+import { agentSummary, readIfMatch } from "./http.js";
+import type { AgentRecord } from "./store.js";
 
 async function ifMatch(header?: string) {
   const app = new Hono();
@@ -27,5 +29,39 @@ describe("readIfMatch", () => {
     for (const bad of ["7", '"x"', '"1", "2"', `"${"9".repeat(12)}"`]) {
       expect(await ifMatch(bad)).toEqual({ kind: "invalid" });
     }
+  });
+});
+
+describe("agentSummary rights", () => {
+  const agent = {
+    id: "a",
+    scope: "team",
+    slug: "x",
+    frontmatter: { name: "X" },
+    status: "active",
+    ownerUserId: null,
+    currentVersion: null,
+    archivedAt: null,
+    revision: 1,
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+  } as unknown as AgentRecord;
+  const access = (edit: boolean, publish: boolean): AgentAccess => ({
+    see: true,
+    readDefinition: true,
+    edit,
+    publish,
+    setStatus: false,
+  });
+
+  it("reports edit and publish separately", () => {
+    expect(agentSummary(agent, access(true, false))).toMatchObject({
+      canEdit: true,
+      canPublish: false,
+    });
+    expect(agentSummary(agent, access(true, true))).toMatchObject({
+      canEdit: true,
+      canPublish: true,
+    });
   });
 });

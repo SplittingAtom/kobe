@@ -34,6 +34,11 @@ UI only, in the team console, on the existing `/v1/agents` routes. No server end
 - Archived agents and agents the caller can't edit open read-only.
 - Team agents only. Personal agents are created from the chat app (not part of the console).
 
+- Review fixes: notices use the version number from the publish/rollback response; history is
+  remounted (re-fetched) after each. Agent summaries gain `canPublish` (= `access.publish`, the
+  check `/publish` and `/rollback` use), so Publish and Restore are hidden without that right.
+  This is the one server change (an additive response field, tested in `agents/http.test.ts`).
+
 ## Open questions (for Chris or the coordinator)
 
 Answered by the coordinator on PR #70, now implemented:

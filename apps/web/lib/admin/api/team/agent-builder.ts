@@ -29,6 +29,11 @@ export interface VersionPage {
   readonly nextBefore: number | null;
 }
 
+/** A publish or rollback answer: the agent as it now stands and the version just created. */
+export interface PublishedAgent extends AgentDetailSaved {
+  readonly version: AgentVersionSummary;
+}
+
 export interface DefinitionBody {
   readonly frontmatter: Record<string, unknown>;
   readonly prompt: string;
@@ -60,7 +65,7 @@ export const saveTeamAgent = (
 export const publishTeamAgent = (
   teamId: string,
   agent: Pick<AgentSummary, "id" | "revision">,
-): Promise<ApiResult<AgentDetailSaved & { readonly version: AgentVersionSummary }>> =>
+): Promise<ApiResult<PublishedAgent>> =>
   apiRequest(`/v1/agents/${enc(agent.id)}/publish`, {
     method: "POST",
     teamId,
@@ -80,5 +85,5 @@ export const rollbackTeamAgent = (
   teamId: string,
   id: string,
   version: number,
-): Promise<ApiResult<AgentDetailSaved & { readonly version: AgentVersionSummary }>> =>
+): Promise<ApiResult<PublishedAgent>> =>
   apiRequest(`/v1/agents/${enc(id)}/rollback`, { method: "POST", json: { version }, teamId });

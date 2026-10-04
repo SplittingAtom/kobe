@@ -15,6 +15,8 @@ export interface AgentSummary {
   readonly revision: number;
   readonly updatedAt: string;
   readonly canEdit: boolean;
+  /** Publish and rollback (a separate right from editing the draft). */
+  readonly canPublish?: boolean;
 }
 
 export interface AgentSaved {

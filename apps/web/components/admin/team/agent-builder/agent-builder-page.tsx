@@ -145,11 +145,12 @@ function Builder({
         }
         return res;
       },
-      (data) => `Restored v${version} as v${data.agent.currentVersion ?? "?"}.`,
+      (data) => `Restored v${version} as v${data.version.version}.`,
     );
   }
 
-  const canPublish = agent !== null && !readOnly;
+  // Publishing is its own right (the server checks `access.publish`), separate from editing.
+  const canPublish = agent !== null && !readOnly && agent.canPublish === true;
 
   return (
     <>
@@ -210,17 +211,17 @@ function Builder({
             <button type="submit" disabled={mutation.pending}>
               {agent ? "Save draft" : "Create agent"}
             </button>
-            {agent && (
+            {canPublish && (
               <button
                 ref={publishButton}
                 type="button"
-                disabled={!canPublish || dirty || mutation.pending}
+                disabled={dirty || mutation.pending}
                 onClick={() => setPublishing(true)}
               >
                 Publish…
               </button>
             )}
-            {agent && dirty && (
+            {canPublish && dirty && (
               <span className={adminStyles.hint}>Save your changes to publish them.</span>
             )}
             {agent && !dirty && (

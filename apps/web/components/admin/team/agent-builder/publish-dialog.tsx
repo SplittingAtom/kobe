@@ -3,6 +3,7 @@ import {
   publishTeamAgent,
   type AgentDetail,
   type AgentDetailSaved,
+  type PublishedAgent,
 } from "../../../../lib/admin/api/team/agent-builder";
 import { ErrorNotice } from "../../error-notice";
 import { useMutation } from "../../use-resource";
@@ -25,6 +26,7 @@ export function PublishDialog({
   readonly agent: AgentDetail;
   readonly warnings: readonly string[];
   readonly onClose: () => void;
+  /** `version` is the number the server assigned. */
   readonly onPublished: (result: AgentDetailSaved, version: number) => void;
 }) {
   const mutation = useMutation();
@@ -56,16 +58,13 @@ export function PublishDialog({
   }
 
   async function publish() {
-    let published: AgentDetailSaved | null = null;
-    const done = await mutation.run(
-      async () => {
-        const res = await publishTeamAgent(teamId, agent);
-        if (res.ok) published = res.data;
-        return res;
+    await mutation.run(
+      () => publishTeamAgent(teamId, agent),
+      (published: PublishedAgent) => {
+        onPublished(published, published.version.version);
+        return null;
       },
-      () => null,
     );
-    if (done && published) onPublished(published, next);
   }
 
   return (
