@@ -29,7 +29,7 @@ export interface Harness {
 }
 
 export async function openHarness(
-  options: Pick<ServerDepsOptions, "agents" | "models"> = {},
+  options: Pick<ServerDepsOptions, "agents" | "models" | "blobs"> = {},
 ): Promise<Harness> {
   const database = await createTestDatabase(testServerUrl());
   // A single client: unlike Pool#end, Client#end resolves only once the connection is closed.

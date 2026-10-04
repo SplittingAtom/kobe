@@ -11,7 +11,7 @@ URL="https://github.com/kubernetes-sigs/agent-sandbox/releases/download/${VERSIO
 manifest=$(mktemp)
 trap 'rm -f "$manifest"' EXIT
 echo "==> installing agent-sandbox ${VERSION}"
-curl -fsSL -o "$manifest" "$URL"
+curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 20 -o "$manifest" "$URL"
 actual=$( (sha256sum "$manifest" 2>/dev/null || shasum -a 256 "$manifest") | cut -d' ' -f1)
 [[ "$actual" == "$SHA256" ]] || { echo "checksum mismatch for $URL: $actual" >&2; exit 1; }
 $KUBECTL apply --server-side -f "$manifest"

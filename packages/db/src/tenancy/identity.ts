@@ -2,7 +2,13 @@ import { ALL_PRIVILEGES, defineDomain } from "./types.js";
 
 /** Identity, Teams & Governance (KOBE-12–20). */
 export const identity = defineDomain({
-  team: ["team_members", "team_invitations"],
+  team: [
+    "team_members",
+    "team_invitations",
+    // Retention and deletion (KOBE-18, D18)
+    "team_retention",
+    "retention_blob_deletions",
+  ],
   installWide: [
     // Better Auth (KOBE-12)
     "users",

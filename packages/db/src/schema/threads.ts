@@ -165,6 +165,8 @@ export const threadEntries = pgTable(
     unique("thread_entries_seq_unique").on(t.teamId, t.threadId, t.seq),
     // Children of an entry (branch navigation) and the parent foreign key's delete checks.
     index("thread_entries_parent_idx").on(t.teamId, t.threadId, t.parentId),
+    // KOBE-18 adds two SQL-only indexes (migration *_retention_rls.sql, IF NOT EXISTS so operators
+    // can build them CONCURRENTLY first): thread_entries_blob_ref_idx and threads_retention_idx.
     check("thread_entries_seq_positive", sql`${t.seq} > 0`),
     check("thread_entries_entry_id_length", sql`char_length(${t.entryId}) BETWEEN 1 AND 128`),
     check("thread_entries_type_nonempty", sql`${t.type} <> ''`),
