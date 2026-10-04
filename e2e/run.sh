@@ -1664,8 +1664,11 @@ JS
   e_request=$(printf '%s\n' "$first" | sed -n 's/^request_id=//p')
   contains "the team admin sees the request (domain + thread metadata)" "\"thread_id\":\"${e_thread:-none}\"" \
     "$(as_owner "GET /v1/team/egress/requests")"
-  contains "the team admin approves: the domain is enabled" '^200 .*"enabled":true' \
+  # (as_owner prints the first 400 characters of each answer.)
+  contains "the team admin approves the request" '^200 \{"request":\{.*"status":"approved"' \
     "$(as_owner "POST /v1/team/egress/requests/${e_request:-none} {\"decision\":\"approve\"}")"
+  contains "the approval enabled the domain for the team" '^1$' \
+    "$(psql_kobe "SELECT count(*) FROM team_egress WHERE team_id = '$E2E_TEAM_ID' AND domain = '$UPSTREAM_HOST'")"
   second=$(egress_chat "$tool" "${e_thread:-}")
   printf '     after approval: %s\n' "$(printf '%s' "$second" | tr '\n' ' ' | cut -c1-400)"
   contains "the same tool succeeds after the approval (Gate 2)" '^text=.*s_server' "$second"
