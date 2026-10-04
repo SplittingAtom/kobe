@@ -1,9 +1,12 @@
 "use client";
 
 import { ComposerPrimitive, useAui, useAuiState } from "@assistant-ui/react";
+import { ArrowUpIcon, SquareIcon } from "lucide-react";
 import type { KeyboardEvent } from "react";
 import { isBusy, isThreadRunning } from "../../lib/chat/thread-state";
 import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
+import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button";
+import { Button } from "../ui/button";
 import { ModelPicker } from "./model-picker";
 import styles from "./chat.module.css";
 
@@ -56,53 +59,85 @@ export function Composer({ extras }: { readonly extras: KobeThreadExtras }) {
 
   return (
     <ComposerPrimitive.Root
-      className={styles.composer}
+      className="relative flex w-full flex-col gap-2"
       onSubmit={() => {
         // A new thread is created by this send: its title is the message's first line.
         if (remoteId === undefined) session.setNextTitle(text);
       }}
     >
-      <label htmlFor="kobe-composer" className={styles.visuallyHidden}>
-        Message
-      </label>
-      <ComposerPrimitive.Input
-        id="kobe-composer"
-        placeholder={running ? "Type to queue a message, or steer the agent" : "Message the agent"}
-        aria-describedby="kobe-composer-hint"
-        onKeyDown={onKeyDown}
-        submitMode="enter"
-      />
-      <div className={styles.composerActions}>
-        <ModelPicker controller={controller} state={state} isNew={remoteId === undefined} />
-        <span id="kobe-composer-hint" className={styles.hint}>
-          {running
-            ? "Enter queues · Ctrl+Shift+Enter steers · Shift+Enter new line"
-            : "Enter sends · Shift+Enter new line"}
-        </span>
-        {running ? (
-          <>
-            <button type="button" onClick={() => void queue()} disabled={empty}>
-              Queue
-            </button>
-            <button
-              type="button"
-              onClick={() => void steer()}
-              disabled={empty || isBusy(state, "steer")}
-            >
-              Steer now
-            </button>
-            <button
-              type="button"
-              onClick={() => void controller?.stop()}
-              disabled={isBusy(state, "stop")}
-            >
-              Stop
-            </button>
-          </>
-        ) : (
-          <ComposerPrimitive.Send>Send</ComposerPrimitive.Send>
-        )}
+      <div className="border-foreground/10 focus-within:border-foreground/25 bg-muted/30 flex w-full cursor-text flex-col gap-2 rounded-2xl border p-2 transition-[border-color]">
+        <label htmlFor="kobe-composer" className="sr-only">
+          Message
+        </label>
+        <ComposerPrimitive.Input
+          id="kobe-composer"
+          placeholder={
+            running ? "Type to queue a message, or steer the agent" : "Message the agent"
+          }
+          aria-describedby="kobe-composer-hint"
+          onKeyDown={onKeyDown}
+          submitMode="enter"
+          rows={1}
+          enterKeyHint="send"
+          className="caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none border-0 bg-transparent px-2.5 py-1 text-base leading-6 outline-none focus-visible:shadow-none"
+        />
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
+          <ModelPicker controller={controller} state={state} isNew={remoteId === undefined} />
+          <span className="flex-1" />
+          {running ? (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 rounded-full px-3"
+                onClick={() => void queue()}
+                disabled={empty}
+              >
+                Queue
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 rounded-full px-3"
+                onClick={() => void steer()}
+                disabled={empty || isBusy(state, "steer")}
+              >
+                Steer now
+              </Button>
+              <TooltipIconButton
+                tooltip="Stop"
+                type="button"
+                variant="default"
+                size="icon"
+                className="size-7 rounded-full"
+                onClick={() => void controller?.stop()}
+                disabled={isBusy(state, "stop")}
+              >
+                <SquareIcon className="size-3.5 fill-current" />
+              </TooltipIconButton>
+            </>
+          ) : (
+            <ComposerPrimitive.Send asChild>
+              <TooltipIconButton
+                tooltip="Send"
+                type="button"
+                variant="default"
+                size="icon"
+                className="size-7 rounded-full"
+              >
+                <ArrowUpIcon className="size-4" />
+              </TooltipIconButton>
+            </ComposerPrimitive.Send>
+          )}
+        </div>
       </div>
+      <p id="kobe-composer-hint" className="text-muted-foreground px-2 text-xs">
+        {running
+          ? "Enter queues · Ctrl+Shift+Enter steers · Shift+Enter new line"
+          : "Enter sends · Shift+Enter new line"}
+      </p>
     </ComposerPrimitive.Root>
   );
 }

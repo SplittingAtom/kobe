@@ -1,7 +1,17 @@
 "use client";
 
 import type { ToolCallMessagePartProps } from "@assistant-ui/react";
+import {
+  BanIcon,
+  CheckIcon,
+  ChevronRightIcon,
+  CircleAlertIcon,
+  ClockIcon,
+  LoaderIcon,
+} from "lucide-react";
+import type { ComponentType } from "react";
 import type { ToolActivity } from "../../lib/chat/live";
+import { cn } from "../../lib/utils";
 import { useKobeExtras } from "./kobe-runtime";
 import { ApprovalSlot, ArtifactSlot, EgressBlocked, FileSlot } from "./slots";
 import styles from "./chat.module.css";
@@ -40,6 +50,14 @@ const OUTCOME_LABEL: Record<Outcome, string> = {
   running: "Running…",
 };
 
+const OUTCOME_ICON: Record<Outcome, ComponentType<{ className?: string }>> = {
+  denied: BanIcon,
+  error: CircleAlertIcon,
+  done: CheckIcon,
+  waiting: ClockIcon,
+  running: LoaderIcon,
+};
+
 /**
  * A tool call and what happened to it (spec §5.3 "tool cards"). A policy denial (`policy.denied`)
  * and blocked internet access (`egress.blocked`) are shown outside the collapsed details so they
@@ -53,50 +71,84 @@ export function ToolCallCard(props: ToolCallMessagePartProps) {
   const truncated = props.result === undefined && activity.result?.truncated === true;
   const label = `${props.toolName}: ${OUTCOME_LABEL[outcome]}`;
 
+  const Icon = OUTCOME_ICON[outcome];
+  const failed = outcome === "denied" || outcome === "error";
+
   return (
-    <section className={styles.tool} aria-label={`Tool call ${props.toolName}`}>
-      <p className={styles.who}>
-        <span className={styles.toolName}>{props.toolName}</span> ·{" "}
-        <span
-          className={outcome === "denied" || outcome === "error" ? styles.errorText : undefined}
-        >
+    <section
+      className="border-border bg-card text-card-foreground my-2 w-full rounded-lg border text-sm whitespace-normal"
+      aria-label={`Tool call ${props.toolName}`}
+    >
+      <p className="flex items-center gap-2 px-4 pt-3 pb-1">
+        <Icon
+          aria-hidden
+          className={cn(
+            "size-4 shrink-0",
+            outcome === "running" && "animate-spin motion-reduce:animate-none",
+            failed ? "text-destructive" : "text-muted-foreground",
+          )}
+        />
+        <span className="font-mono font-medium">{props.toolName}</span>
+        <span className="text-muted-foreground">·</span>
+        <span className={failed ? "text-destructive" : "text-muted-foreground"}>
           {OUTCOME_LABEL[outcome]}
         </span>
       </p>
-      {activity.denied && (
-        <div className={styles.denied} role="note">
-          <strong>Denied by policy.</strong> The tool did not run.
-          <ul>
-            {activity.denied.reasons.map((reason) => (
-              <li key={`${reason.stage}:${reason.code}`}>{reason.message}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {activity.egressBlocked.map((blocked) => (
-        <EgressBlocked key={blocked.domain} payload={blocked} />
-      ))}
-      <ApprovalSlot tool={activity} />
-      <details>
-        <summary>Details of {label}</summary>
-        <p className={styles.who}>Input</p>
-        <pre className={styles.toolPre}>{pretty(props.argsText, props.args)}</pre>
-        {result !== "" && (
-          <>
-            <p className={styles.who}>{outcome === "error" ? "Error" : "Result"}</p>
-            <pre className={`${styles.toolPre} ${outcome === "error" ? styles.errorText : ""}`}>
-              {result}
-              {truncated ? "…" : ""}
-            </pre>
-          </>
+      <div className="px-4 pb-1 empty:hidden">
+        {activity.denied && (
+          <div className={styles.denied} role="note">
+            <strong>Denied by policy.</strong> The tool did not run.
+            <ul>
+              {activity.denied.reasons.map((reason) => (
+                <li key={`${reason.stage}:${reason.code}`}>{reason.message}</li>
+              ))}
+            </ul>
+          </div>
         )}
+        {activity.egressBlocked.map((blocked) => (
+          <EgressBlocked key={blocked.domain} payload={blocked} />
+        ))}
+        <ApprovalSlot tool={activity} />
+      </div>
+      <details className="group border-border mt-1 border-t">
+        <summary className="text-muted-foreground hover:text-foreground flex cursor-pointer list-none items-center gap-1.5 px-4 py-2 select-none [&::-webkit-details-marker]:hidden">
+          <ChevronRightIcon
+            aria-hidden
+            className="size-3.5 transition-transform group-open:rotate-90 motion-reduce:transition-none"
+          />
+          Details of {label}
+        </summary>
+        <div className="px-4 pb-3">
+          <p className="text-muted-foreground text-xs font-medium">Input</p>
+          <pre className="bg-muted/50 my-1 max-h-64 overflow-auto rounded-md p-2 font-mono text-xs break-words whitespace-pre-wrap">
+            {pretty(props.argsText, props.args)}
+          </pre>
+          {result !== "" && (
+            <>
+              <p className="text-muted-foreground text-xs font-medium">
+                {outcome === "error" ? "Error" : "Result"}
+              </p>
+              <pre
+                className={cn(
+                  "bg-muted/50 my-1 max-h-64 overflow-auto rounded-md p-2 font-mono text-xs break-words whitespace-pre-wrap",
+                  outcome === "error" && "text-destructive",
+                )}
+              >
+                {result}
+                {truncated ? "…" : ""}
+              </pre>
+            </>
+          )}
+        </div>
       </details>
-      {activity.artifacts.map((artifact) => (
-        <ArtifactSlot key={`${artifact.artifact_id}:${artifact.version}`} artifact={artifact} />
-      ))}
-      {activity.files.map((file) => (
-        <FileSlot key={file.file_id} file={file} />
-      ))}
+      <div className="px-4 pb-3 empty:hidden">
+        {activity.artifacts.map((artifact) => (
+          <ArtifactSlot key={`${artifact.artifact_id}:${artifact.version}`} artifact={artifact} />
+        ))}
+        {activity.files.map((file) => (
+          <FileSlot key={file.file_id} file={file} />
+        ))}
+      </div>
     </section>
   );
 }
