@@ -542,11 +542,14 @@ export class Thread {
         // What the uid still owns in the shared trees becomes the workspace group's (nothing
         // stays private to it for the next thread that gets the uid), its IPC objects go.
         const gid = (await stat(this.#env.workspaceDir)).gid;
-        await identities.reclaimFiles(identity, gid, [
-          this.#env.workspaceDir,
-          this.#env.home,
-          ...SHARED_SCRATCH_DIRS,
-        ]);
+        await identities.reclaimFiles(
+          identity,
+          gid,
+          [this.#env.workspaceDir, this.#env.home, ...SHARED_SCRATCH_DIRS],
+          // The runtime root is a small sticky tmpfs shared by all Pis: what the uid left at its
+          // top level (owner-only files, a filled disk) must not reach the next holder.
+          { purgeDirs: [this.#env.runtimeDir] },
+        );
       } catch (error) {
         // Its processes or private files may remain: the identity is never handed out again.
         this.#warn(`Pi identity ${identity.uid} not reclaimed: ${(error as Error).message}`);

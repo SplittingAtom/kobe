@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { ModelTokenSource } from "./models/types.js";
-import { loadPiIdentities, PI_UID_MIN, type PiIdentities } from "./pi/identities.js";
+import { loadPiIdentities, PI_UID_MIN, PiIdentities } from "./pi/identities.js";
 import {
   FAKE_PI,
   RUN,
@@ -363,4 +363,69 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
     // Group-writable now, but in the sticky /tmp only its owner may remove it.
     await rm(`/tmp/k71-secret-${pid}`, { force: true }).catch(() => undefined);
   });
+
+  it("reaches files inside an owner-only (000) directory, and clears a uid's leftovers in the runtime root", async () => {
+    await start({ KOBE_PI_IDLE_MS: "200" });
+    const runtimeRoot = path.join(shm, "pi-runtime");
+    const out = await tool(
+      THREAD,
+      RUN,
+      [
+        "umask 077",
+        "mkdir -p k71-deep/inner/innermost",
+        "echo s > k71-deep/inner/innermost/secret; echo s > k71-deep/inner/secret",
+        "chmod 000 k71-deep/inner/innermost k71-deep/inner",
+        `echo s > ${runtimeRoot}/k71-leftover; mkdir ${runtimeRoot}/k71-leftover-dir; echo s > ${runtimeRoot}/k71-leftover-dir/f; chmod 000 ${runtimeRoot}/k71-leftover-dir`,
+        "echo ok",
+      ].join("\n"),
+    );
+    expect(out.code).toBe(0);
+    await until(() => identities.available === identities.size, 15_000);
+    const group = (await stat(h.workspace)).gid;
+    for (const rel of ["k71-deep/inner", "k71-deep/inner/innermost"]) {
+      const info = await stat(path.join(h.workspace, rel));
+      expect(info.gid).toBe(group);
+      expect(info.mode & 0o070).toBe(0o070);
+    }
+    for (const rel of ["k71-deep/inner/secret", "k71-deep/inner/innermost/secret"]) {
+      const file = path.join(h.workspace, rel);
+      expect((await stat(file)).gid).toBe(group);
+      expect(await readFile(file, "utf8")).toBe("s\n");
+    }
+    const entries = await readdir(runtimeRoot);
+    expect(entries.filter((name) => name.startsWith("k71-leftover"))).toEqual([]);
+  });
+
+  it("retires an identity whose reclaim failed: it is never handed out again", async () => {
+    const failing = path.join(scratch, "failing-reclaim");
+    await writeFile(
+      failing,
+      "#!/bin/sh\necho 'kobe-reclaim: could not reclaim: x' >&2\nexit 70\n",
+      {
+        mode: 0o755,
+      },
+    );
+    const retiring = new PiIdentities(
+      HELPER as string,
+      [...Array(2).keys()].map((n) => PI_UID_MIN + n),
+      undefined,
+      failing,
+    );
+    h = await startHarness({
+      piBin,
+      env: { KOBE_PI_IDLE_MS: "200" },
+      identities: retiring,
+      runtimeDir: path.join(shm, "pi-runtime"),
+      models: {
+        gatewayUrl: "http://model-gateway.kobe.internal:80",
+        extension: MODELS_EXTENSION,
+        tokens,
+      },
+    });
+    ok(await h.server.command(runStart("say:a", { config: { model: MODEL } })));
+    await h.server.waitFor((f) => f.type === "pi.event");
+    expect(retiring.available).toBe(1);
+    await new Promise((resolve) => setTimeout(resolve, 8_000));
+    expect(retiring.available).toBe(1);
+  }, 60_000);
 });

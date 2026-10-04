@@ -175,6 +175,17 @@ check "as an identity, a process cannot ptrace or read the memory of its parent 
 check "a Pi identity's processes are capped (RLIMIT_NPROC 1024)" 'Max processes +1024 +1024' run_ps $R 2000 grep 'Max processes' /proc/self/limits
 check "kobe-reclaim gives an identity's private files to the workspace group" '^1000 660$' run_ps sh -c \
   "$R 2000 sh -c 'umask 077; echo s > /tmp/f'; $R 2000 /opt/kobe/bin/kobe-reclaim 1000 /tmp; stat -c '%g %a' /tmp/f"
+check "kobe-reclaim reaches files inside owner-only (000) directories" '^1000 660 1000 770$' run_ps sh -c \
+  "$R 2000 sh -c 'umask 077; mkdir -p /tmp/d/e; echo s > /tmp/d/e/f; echo s > /tmp/d/g; chmod 000 /tmp/d/e /tmp/d';
+   $R 2000 /opt/kobe/bin/kobe-reclaim 1000 /tmp; echo \$(stat -c '%g %a' /tmp/d/e/f) \$(stat -c '%g %a' /tmp/d/e)"
+check "kobe-reclaim deletes what the identity left in the runtime root (a purge dir)" '^left=0 other=kept rc=0$' run_ps sh -c \
+  "mkdir -m 3777 /tmp/rt; echo keep > /tmp/rt/agent-file;
+   $R 2000 sh -c 'umask 077; echo s > /tmp/rt/x; mkdir /tmp/rt/dd; echo s > /tmp/rt/dd/f; chmod 000 /tmp/rt/dd';
+   $R 2000 /opt/kobe/bin/kobe-reclaim 1000 /tmp -- /tmp/rt; rc=\$?;
+   echo left=\$(ls /tmp/rt | grep -vc '^agent-file\$') other=\$(cat /tmp/rt/agent-file >/dev/null && echo kept) rc=\$rc"
+check "kobe-reclaim exits 70 when something the identity owns cannot be reclaimed" '^rc=70$' run_ps sh -c \
+  "mkdir -m 1777 /tmp/p; $R 2000 sh -c 'echo s > /tmp/p/x'; chmod 755 /tmp/p;
+   $R 2000 /opt/kobe/bin/kobe-reclaim 1000 -- /tmp/p 2>/dev/null; echo rc=\$?"
 check "a Pi identity cannot run kobe-runas" 'Permission denied' run_ps sh -c "$R 2000 $R 2001 id 2>&1; true"
 check "kobe-runas refuses anyone but the agent" 'only the sandbox agent' host sh -c \
   "docker run --rm --cap-drop ALL --cap-add SETUID --cap-add SETGID --user 2000:1001 --entrypoint $R \"$IMAGE\" 2001 id 2>&1; true"

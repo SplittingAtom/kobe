@@ -175,19 +175,33 @@ export class PiIdentities {
 
   /**
    * After {@link killAll}: as the identity, hand what it still owns under `dirs` to the workspace
-   * group `gid` and remove its System V IPC objects (`kobe-reclaim`, next to the helper).
+   * group `gid`, delete what it owns in `purgeDirs`, and remove its System V IPC objects
+   * (`kobe-reclaim`, next to the helper). Throws if anything could not be reclaimed (non-zero
+   * exit, after retries): the caller must then keep the identity out of use.
    */
   async reclaimFiles(
     identity: PiIdentity,
     gid: number,
     dirs: readonly string[],
-    options: { readonly timeoutMs?: number; readonly delaysMs?: readonly number[] } = {},
+    options: {
+      readonly timeoutMs?: number;
+      readonly delaysMs?: readonly number[];
+      /** Dirs (the Pi runtime dir) where everything the uid owns at top level is deleted. */
+      readonly purgeDirs?: readonly string[];
+    } = {},
   ): Promise<void> {
+    const purge = options.purgeDirs ?? [];
     const delays = options.delaysMs ?? RECLAIM_RETRY_DELAYS_MS;
     for (let attempt = 0; ; attempt++) {
       const { code, stderr } = await this.#run(
         this.helper,
-        [String(identity.uid), this.reclaimScript, String(gid), ...dirs],
+        [
+          String(identity.uid),
+          this.reclaimScript,
+          String(gid),
+          ...dirs,
+          ...(purge.length > 0 ? ["--", ...purge] : []),
+        ],
         options.timeoutMs ?? RECLAIM_TIMEOUT_MS,
       );
       if (code === 0) return;

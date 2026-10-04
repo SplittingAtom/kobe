@@ -112,6 +112,30 @@ describe("PiIdentities (KOBE-71)", () => {
     expect(RECLAIM_TIMEOUT_MS).toBeGreaterThanOrEqual(60_000);
   });
 
+  it("passes the purge dirs after `--`, and gives the identity up when the reclaim keeps failing", async () => {
+    const runner = fakeRunner(() => ({
+      code: 70,
+      stderr: "kobe-reclaim: could not reclaim: /w/x",
+    }));
+    const ids = new PiIdentities("/helper", [2000], runner.run, "/opt/kobe/bin/kobe-reclaim");
+    await expect(
+      ids.reclaimFiles({ uid: 2000, gid: 2000 }, 1000, ["/workspace", "/tmp"], {
+        delaysMs: [1],
+        purgeDirs: ["/run/kobe-pi"],
+      }),
+    ).rejects.toThrow(/reclaim as 2000 failed: kobe-reclaim: could not reclaim/);
+    const args = [
+      "2000",
+      "/opt/kobe/bin/kobe-reclaim",
+      "1000",
+      "/workspace",
+      "/tmp",
+      "--",
+      "/run/kobe-pi",
+    ];
+    expect(runner.calls).toEqual([args, args]);
+  });
+
   it("gives up waiting for an identity after a while", async () => {
     const ids = new PiIdentities("/helper", [2000], okRunner().run);
     const held = await ids.acquire();
