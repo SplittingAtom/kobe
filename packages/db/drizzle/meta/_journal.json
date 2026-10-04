@@ -288,13 +288,6 @@
       "when": 1791073644280,
       "tag": "0040_models_rls",
       "breakpoints": true
-    },
-    {
-      "idx": 41,
-      "version": "7",
-      "when": 1791090685875,
-      "tag": "0041_thread_model",
-      "breakpoints": true
     }
   ]
 }
