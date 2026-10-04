@@ -119,6 +119,11 @@ BEGIN
       RAISE EXCEPTION 'budget alert: outside its team' USING ERRCODE = '42501';
     END IF;
     IF NEW.scope = 'user' THEN
+      IF NEW.user_id IS NULL OR NOT EXISTS (SELECT 1 FROM "team_members" m
+                                             WHERE m.team_id = NEW.team_id
+                                               AND m.user_id = NEW.user_id) THEN
+        RAISE EXCEPTION 'budget alert: not a member of the team' USING ERRCODE = '23514';
+      END IF;
       SELECT EXISTS (SELECT 1 FROM "team_budgets" b
                       WHERE b.team_id = NEW.team_id AND b.user_id = NEW.user_id) INTO own;
     END IF;

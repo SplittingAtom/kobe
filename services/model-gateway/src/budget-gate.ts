@@ -17,7 +17,10 @@ import type { CallContext, CallGate, GateDecision } from "./seams.js";
  *   input estimate plus the output it allows, `usage/charge.ts`; dollars at the catalog price) at
  *   its install, team and member levels until it ends, and a call is refused when spend plus the
  *   others' reservations reach a budget. Concurrent calls (many sandboxes of one team) therefore
- *   cannot together overshoot a budget by more than one call per shim replica.
+ *   cannot together overshoot a budget on one shim replica by more than the last admitted
+ *   call. Replicas do not share reservations (no Postgres-backed reservations; a follow-up
+ *   ticket), so with R replicas a budget can be exceeded by up to about the budget that was
+ *   left, per replica, in the worst case of simultaneous calls.
  * - More requests than the member's per-minute rate (the install's, or the team's lower one): 429
  *   `rate_limited` with Retry-After. A token bucket per member per shim replica; Bifrost's
  *   virtual-key rate limit is the install-wide backstop.
@@ -87,13 +90,29 @@ export class BudgetGate implements CallGate {
   async admit(call: CallContext): Promise<GateDecision> {
     const key = `${call.teamId}:${call.userId}`;
     const state = await this.states.get(key, () => this.store.load(call.teamId, call.userId));
+    // Everything async happens before the check: from the in-flight check to the reservation
+    // there is no await, so concurrent calls on this replica cannot all pass the same check.
+    const prices =
+      state.lines.length === 0
+        ? new Map<string, ModelPrice>()
+        : await this.priceCache.get("prices", () => this.store.prices());
+    return this.decide(call, key, state, prices);
+  }
+
+  private decide(
+    call: CallContext,
+    key: string,
+    state: MemberBudgetState,
+    prices: ReadonlyMap<string, ModelPrice>,
+  ): GateDecision {
     const used = exhaustedLine(state.lines);
     if (used) {
       return { ok: false, status: 402, code: "budget_exhausted", message: budgetMessage(used) };
     }
     const keys = reservationKeys(call.teamId, call.userId);
+    const cost = this.costOf(call, prices);
     for (const l of state.lines) {
-      const verdict = this.inFlight(l, keys[l.scope], key);
+      const verdict = this.inFlight(l, keys[l.scope], key, cost);
       if (verdict === "full") {
         return { ok: false, status: 402, code: "budget_exhausted", message: budgetMessage(l) };
       }
@@ -118,7 +137,17 @@ export class BudgetGate implements CallGate {
       };
     }
     if (state.lines.length === 0) return { ok: true };
-    return { ok: true, release: await this.reserve(call, keys, key) };
+    return { ok: true, release: this.reserve(call, keys, key, cost) };
+  }
+
+  private costOf(call: CallContext, prices: ReadonlyMap<string, ModelPrice>): Reserved {
+    const input = call.inputEstimate ?? 0;
+    const output = call.outputAllowance ?? chargedOutput(undefined);
+    const price = call.model ? prices.get(call.model) : undefined;
+    return {
+      tokens: input + output,
+      usd: price ? (input * price.input + output * price.output) / 1_000_000 : 0,
+    };
   }
 
   /**
@@ -127,7 +156,12 @@ export class BudgetGate implements CallGate {
    * ({@link MEMBER_SHARE}), so one sandbox reserving large calls cannot deny everyone else; that
    * member alone is refused (429) once its own reservations reach its share.
    */
-  private inFlight(line: BudgetLine, lineKey: string, member: string): "ok" | "full" | "own_share" {
+  private inFlight(
+    line: BudgetLine,
+    lineKey: string,
+    member: string,
+    cost: Reserved,
+  ): "ok" | "full" | "own_share" {
     const byMember = this.reserved.get(lineKey);
     if (!byMember) return "ok";
     const left = Math.max(0, line.limit - line.spent);
@@ -135,8 +169,11 @@ export class BudgetGate implements CallGate {
     let total = 0;
     for (const r of byMember.values()) total += Math.min(r[line.unit], share);
     if (line.spent + total >= line.limit) return "full";
+    // The share caps the member's first call too (own = 0), whenever others hold reservations
+    // (a lone call is always admitted: the line is then not shared in practice).
     const own = byMember.get(member)?.[line.unit] ?? 0;
-    return own > 0 && own >= share ? "own_share" : "ok";
+    const others = [...byMember.keys()].some((m) => m !== member);
+    return (own > 0 || others) && own + cost[line.unit] > share ? "own_share" : "ok";
   }
 
   /**
@@ -144,19 +181,12 @@ export class BudgetGate implements CallGate {
    * row will be written: then the reservation stays until {@link settle} (the row landed and the
    * cached spend was dropped, so the next check sees it), or {@link SETTLE_TIMEOUT_MS} at most.
    */
-  private async reserve(
+  private reserve(
     call: CallContext,
     keys: ReturnType<typeof reservationKeys>,
     member: string,
-  ): Promise<(written: boolean) => void> {
-    const input = call.inputEstimate ?? 0;
-    const output = call.outputAllowance ?? chargedOutput(undefined);
-    const prices = await this.priceCache.get("prices", () => this.store.prices());
-    const price = call.model ? prices.get(call.model) : undefined;
-    const cost: Reserved = {
-      tokens: input + output,
-      usd: price ? (input * price.input + output * price.output) / 1_000_000 : 0,
-    };
+    cost: Reserved,
+  ): (written: boolean) => void {
     const all = [keys.install, keys.team, keys.user];
     for (const k of all) this.add(k, member, cost, 1);
     let released = false;

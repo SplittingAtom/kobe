@@ -71,6 +71,21 @@ const SCOPE_ORDER: Readonly<Record<BudgetScope, number>> = { install: 0, team: 1
 export const percentUsed = (line: BudgetLine): number =>
   line.limit <= 0 ? 100 : (line.spent / line.limit) * 100;
 
+/**
+ * Spend has reached `percent` of the limit, exactly (integer math on the numeric text; a zero
+ * budget counts as used up, like {@link percentUsed}). Never the float percentage.
+ */
+export function thresholdReached(line: BudgetLine, percent: number): boolean {
+  if (line.limit <= 0) return true;
+  if (line.spentExact !== undefined && line.limitExact !== undefined) {
+    return (
+      scaledDecimal(line.spentExact) * 100n >=
+      scaledDecimal(line.limitExact) * BigInt(Math.round(percent))
+    );
+  }
+  return line.spent * 100 >= line.limit * percent;
+}
+
 /** The used-up budget that stops calls and runs (widest scope first), or undefined. */
 export function exhaustedLine(lines: readonly BudgetLine[]): BudgetLine | undefined {
   return [...lines]

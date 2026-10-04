@@ -5,7 +5,7 @@ import {
   SYSTEM_ACTOR,
   loadTeamBudgetLines,
   lineUsedUp,
-  percentUsed,
+  thresholdReached,
   sql,
   teams,
   withTeam,
@@ -195,7 +195,7 @@ export class BudgetMonitor {
     let installReached = false;
     for (const line of lines) {
       for (const threshold of BUDGET_THRESHOLDS) {
-        if (percentUsed(line) < threshold) continue;
+        if (!thresholdReached(line, threshold)) continue;
         try {
           if (await this.alert(teamId, line, threshold)) {
             alerts++;

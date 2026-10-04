@@ -179,7 +179,8 @@ server: BudgetMonitor (LISTEN + 30 s sweep) ── 80/100 % ─▶ budget_alerts
   shim replica a budget is exceeded by at most the last admitted call's reservation, plus what a
   call's real usage exceeds its reservation (input underestimated by size / 4, e.g. images;
   output beyond the 65,536 ceiling, #56 residual). Replicas do not share reservations: with R
-  replicas, up to R such calls.
+  replicas, up to about the budget that was left, per replica (follow-up ticket: Postgres-backed
+  reservations).
 - **Install limits:** the updater id is caller-supplied (residual, unchanged; above).
 
 ## Self security review (security-reviewer agent) — resolutions
@@ -249,3 +250,15 @@ server: BudgetMonitor (LISTEN + 30 s sweep) ── 80/100 % ─▶ budget_alerts
   the run_usage trigger sums in numeric, and the used-up test (`lineUsedUp`, gate, monitor, new-run
   gate) compares the numeric text exactly (`spentExact` vs `limitExact`) and token counts as
   integers. Floats stay for display, percentages and in-flight estimates.
+
+## DB review of #61 — resolutions
+
+- **HIGH 1:** prices load before the check; check + reserve have no await between them. Test:
+  "admits at most what a nearly used-up limit allows under concurrent calls".
+- **HIGH 2:** `TtlCache` generation counter: invalidation clears in-flight loads and a load from an
+  older generation is not cached. Test: `cache.test.ts` "does not cache a load that began before an
+  invalidation".
+- **MEDIUM:** the member share caps a first call too when others hold reservations; overshoot
+  comment corrected (per replica, up to about the budget left; no cross-replica reservations).
+- **MEDIUM:** warning thresholds compare exactly (`thresholdReached`, integer math on numeric text).
+- **MEDIUM:** `kobe_budget_alert_verify` requires a `team_members` row for a user-scope alert.

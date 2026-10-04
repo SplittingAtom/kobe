@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lineUsedUp, scaledDecimal, type BudgetLine } from "./budgets.js";
+import { lineUsedUp, scaledDecimal, thresholdReached, type BudgetLine } from "./budgets.js";
 
 const line = (spent: string, limit: string): BudgetLine => ({
   scope: "team",
@@ -31,5 +31,16 @@ describe("exact budget comparison", () => {
   it("falls back to numbers without exact text", () => {
     const { spentExact: _s, limitExact: _l, ...bare } = line("5", "5");
     expect(lineUsedUp(bare)).toBe(true);
+  });
+});
+
+describe("exact warning thresholds", () => {
+  it("compares percentages without a float", () => {
+    const l = line("7999999999999.9999999999", "10000000000000");
+    expect(l.spent / l.limit >= 0.8).toBe(true);
+    expect(thresholdReached(l, 80)).toBe(false);
+    expect(thresholdReached(line("8000000000000", "10000000000000"), 80)).toBe(true);
+    expect(thresholdReached(line("9999999999999.99", "10000000000000"), 100)).toBe(false);
+    expect(thresholdReached(line("0", "0"), 80)).toBe(true);
   });
 });

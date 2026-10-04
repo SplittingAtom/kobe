@@ -138,9 +138,35 @@ describe("BudgetGate (KOBE-42)", () => {
     // The hog's share of the $1,000 left is $250: its second $200 call is refused (429), not
     // everyone else's.
     expect((await g.admit(call(hog))).ok).toBe(true);
-    expect((await g.admit(call(hog))).ok).toBe(true);
     expect(await g.admit(call(hog))).toMatchObject({ ok: false, code: "too_many_calls_in_flight" });
     expect((await g.admit(call(randomUUID()))).ok).toBe(true);
+  });
+
+  it("the share caps a member's first call too once others hold reservations", async () => {
+    // $150 left: a member's share is $37.5, below one $200 call.
+    const { g } = gate(() => ({
+      lines: [line({ limit: 10_000, spent: 9_850 })],
+      requestsPerMinute: 1_000,
+    }));
+    // Nothing reserved yet: a lone call is admitted.
+    expect((await g.admit(call(randomUUID()))).ok).toBe(true);
+    // A newcomer with no reservation of their own is capped by their share.
+    expect(await g.admit(call(randomUUID()))).toMatchObject({
+      ok: false,
+      code: "too_many_calls_in_flight",
+    });
+  });
+
+  it("admits at most what a nearly used-up limit allows under concurrent calls", async () => {
+    // $1,000 left on a user line (no share cap), $200 per call: five calls fit, no more, even
+    // though all twenty are decided at once (the price load is awaited before the check).
+    const { g } = gate(() => ({
+      lines: [line({ scope: "user", limit: 10_000, spent: 9_000 })],
+      requestsPerMinute: 1_000,
+    }));
+    const user = randomUUID();
+    const decisions = await Promise.all(Array.from({ length: 20 }, () => g.admit(call(user))));
+    expect(decisions.filter((d) => d.ok)).toHaveLength(5);
   });
 
   it("keeps a written call's reservation until its ledger row lands (settle)", async () => {

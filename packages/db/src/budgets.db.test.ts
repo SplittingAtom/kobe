@@ -322,6 +322,37 @@ describe("integrity against the app role (KOBE-42 review)", () => {
     expect(seenByB).toEqual([]);
   });
 
+  it("a user alert needs a team_members row for its user", async () => {
+    const team = randomUUID();
+    const owner = createDb(inject("ownerUrl"));
+    await owner.db.insert(teams).values({ id: team, slug: `bu-${team.slice(0, 8)}`, name: "U" });
+    await owner.close();
+    // A member budget for a user who is not in the team, with real spend over it.
+    await withTeam(app.db, team, (tx) =>
+      tx.insert(teamBudgets).values({ teamId: team, userId: bob, dailyTokens: 10, updatedBy: bob }),
+    );
+    await recordModelUsage(app.db, [
+      usage({ teamId: team, userId: bob, at: new Date(), inputTokens: 100 }),
+    ]);
+    expect(
+      await refused(
+        withTeam(app.db, team, (tx) =>
+          tx.insert(budgetAlerts).values({
+            teamId: team,
+            userId: bob,
+            scope: "user",
+            unit: "tokens",
+            period: "day",
+            periodStart: today,
+            threshold: 100,
+            limitAmount: 10,
+            spentAmount: 100,
+          }),
+        ),
+      ),
+    ).toBe("23514");
+  });
+
   it("the install limits are changed by an install admin only", async () => {
     expect(
       await refused(app.db.update(installModelLimits).set({ monthlyUsd: null, updatedBy: bob })),

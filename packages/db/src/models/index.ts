@@ -25,6 +25,7 @@ export {
   exhaustedLine,
   lineUsedUp,
   scaledDecimal,
+  thresholdReached,
   loadGatewayPrices,
   loadMemberBudgetState,
   loadTeamBudgetLines,
