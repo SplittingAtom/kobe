@@ -201,3 +201,101 @@ describe("run start uses the resolver (KOBE-76)", () => {
     await f.until(w.team, second, "completed");
   });
 });
+
+async function seedTeamSkill(
+  team: string,
+  userId: string,
+  slug: string,
+  versions: readonly ("pending" | "approved" | "rejected" | "none")[],
+) {
+  const admin = f.fx.admin;
+  const { rows } = await admin.query<{ id: string }>(
+    `INSERT INTO team_skills (team_id, owner_user_id, slug, description, latest_version)
+     VALUES ($1, $2, $3, 'd', $4) RETURNING id`,
+    [team, userId, slug, versions.length],
+  );
+  const skillId = rows[0]?.id;
+  for (const [i, status] of versions.entries()) {
+    await admin.query(
+      `INSERT INTO team_skill_versions (team_id, skill_id, version, frontmatter, source, content_hash,
+         storage_key, size_bytes, file_count, uncompressed_bytes, uploaded_by)
+       VALUES ($1, $2, $3, '{}', 'zip', $4, 'k', 1, 1, 1, $5)`,
+      [team, skillId, i + 1, `${slug.length}${i}`.padEnd(64, "a"), userId],
+    );
+    if (status === "none") continue;
+    await admin.query(
+      `INSERT INTO team_skill_reviews (team_id, skill_id, version, status, flagged, findings, scripts,
+         skipped, reviewed_by, reviewed_at)
+       VALUES ($1, $2, $3, $4, false, '[]', '[]', '[]', $5, $6)`,
+      [
+        team,
+        skillId,
+        i + 1,
+        status,
+        status === "pending" ? null : userId,
+        status === "pending" ? null : new Date(),
+      ],
+    );
+  }
+}
+
+async function seedPersonalSkill(userId: string, slug: string) {
+  const { rows } = await f.fx.admin.query<{ id: string }>(
+    `INSERT INTO install_skills (owner_user_id, slug, description) VALUES ($1, $2, 'd') RETURNING id`,
+    [userId, slug],
+  );
+  await f.fx.admin.query(
+    `INSERT INTO install_skill_versions (skill_id, version, frontmatter, source, content_hash,
+       storage_key, size_bytes, file_count, uncompressed_bytes, uploaded_by)
+     VALUES ($1, 1, '{}', 'zip', $2, 'k', 1, 1, 1, $3)`,
+    [rows[0]?.id, "b".repeat(64), userId],
+  );
+}
+
+/** Starts a run on `thread` and returns the skills the sandbox is told to load and omissions. */
+async function skillsOfRun(w: Awaited<ReturnType<typeof f.world>>, thread: string) {
+  const ws = await f.connect(w, 0);
+  const run = await f.message(w.owner, thread, "hello");
+  const start = await ws.started(run);
+  ws.reply(start, "ok");
+  await f.until(w.team, run, "completed");
+  const omitted = (await f.events(w.team, run)).find((e) => e.type === "context.omitted");
+  return {
+    skills: start.config?.skills ?? [],
+    omitted: (omitted?.payload as { items: unknown[] } | undefined)?.items ?? [],
+  };
+}
+
+describe("run start resolves skills (KOBE-80)", () => {
+  it("ac-1: only approved team skill versions resolve; unreviewed and rejected ones don't", async () => {
+    const w = await f.world();
+    await catalog(w.team, w.owner.id, [["fast", true]]);
+    await seedTeamSkill(w.team, w.owner.id, "approved-one", ["approved"]);
+    await seedTeamSkill(w.team, w.owner.id, "pending-one", ["pending"]);
+    await seedTeamSkill(w.team, w.owner.id, "rejected-one", ["rejected"]);
+    await seedTeamSkill(w.team, w.owner.id, "no-review", ["none"]);
+    // Newer pending/rejected versions never hide the older approved one.
+    await seedTeamSkill(w.team, w.owner.id, "kept-old", ["approved", "pending", "rejected"]);
+    const thread = await pinnedThread(w.owner, {
+      skills: ["approved-one", "pending-one", "rejected-one", "no-review", "kept-old"],
+    });
+    const { skills } = await skillsOfRun(w, thread);
+    expect([...skills].sort()).toEqual(["approved-one", "kept-old"]);
+  });
+
+  it("ac-2: disabling personal skills hides them for that team, with a visible notice", async () => {
+    const w = await f.world();
+    await catalog(w.team, w.owner.id, [["fast", true]]);
+    await seedPersonalSkill(w.owner.id, "my-helper");
+    const thread = await pinnedThread(w.owner, {});
+    expect((await skillsOfRun(w, thread)).skills).toEqual(["my-helper"]);
+
+    await f.fx.admin.query(
+      `INSERT INTO team_skill_settings (team_id, personal_skills_disabled, updated_by) VALUES ($1, true, $2)`,
+      [w.team, w.owner.id],
+    );
+    const hidden = await skillsOfRun(w, thread);
+    expect(hidden.skills).toEqual([]);
+    expect(hidden.omitted).toEqual([{ kind: "skill", name: "my-helper", reason: "team_disabled" }]);
+  });
+});

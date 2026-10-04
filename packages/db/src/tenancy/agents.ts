@@ -8,6 +8,8 @@ export const agents = defineDomain({
     "team_skills",
     "team_skill_versions",
     "team_agent_suspensions",
+    "team_skill_reviews",
+    "team_skill_settings",
   ],
   installWide: [
     "skill_blocklist",

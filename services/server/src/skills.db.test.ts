@@ -123,6 +123,7 @@ describe("uploading", () => {
           bytes: canonical.length,
           files: 2,
           source: "zip",
+          findings: 0,
         },
       },
     ]);

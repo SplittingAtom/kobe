@@ -3,6 +3,8 @@ import {
   teamAgents,
   teamAgentSuspensions,
   teamAgentVersions,
+  teamSkillReviews,
+  teamSkillSettings,
   teamSkills,
   teamSkillVersions,
   users,
@@ -82,5 +84,35 @@ export const agentsFixtures: Record<(typeof agents.team)[number], ProbeFixture> 
       uncompressedBytes: 1,
       uploadedBy: userId,
     });
+  },
+  team_skill_reviews: async (tx, teamId) => {
+    const { userId, skillId } = await probeSkill(tx, teamId);
+    await tx.insert(teamSkillVersions).values({
+      teamId,
+      skillId,
+      version: 1,
+      frontmatter: { name: "probe", description: "p" },
+      source: "zip",
+      contentHash: "0".repeat(64),
+      storageKey: "probe",
+      sizeBytes: 1,
+      fileCount: 1,
+      uncompressedBytes: 1,
+      uploadedBy: userId,
+    });
+    await tx.insert(teamSkillReviews).values({
+      teamId,
+      skillId,
+      version: 1,
+      flagged: false,
+      findings: [],
+      scripts: [],
+      skipped: [],
+    });
+  },
+  team_skill_settings: async (tx, teamId) => {
+    const userId = randomUUID();
+    await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
+    await tx.insert(teamSkillSettings).values({ teamId, updatedBy: userId });
   },
 };

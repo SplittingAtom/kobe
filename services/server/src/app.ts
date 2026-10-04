@@ -37,6 +37,7 @@ import { teamInvitesRoutes } from "./routes/team-invites.js";
 import { teamModelsRoutes } from "./routes/team-models.js";
 import { teamPolicyRoutes } from "./routes/team-policy.js";
 import { teamRetentionRoutes } from "./routes/team-retention.js";
+import { teamSkillReviewRoutes } from "./routes/team-skill-review.js";
 import { teamRoutes } from "./routes/team.js";
 import { threadPendingRoutes } from "./routes/thread-pending.js";
 import { threadRetentionRoutes } from "./routes/thread-retention.js";
@@ -114,6 +115,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/team/budgets", teamBudgetsRoutes(deps));
   api.route("/team/break-glass", teamBreakGlassRoutes(deps));
   api.route("/team/retention", teamRetentionRoutes(deps));
+  api.route("/team/skill-review", teamSkillReviewRoutes(deps));
   api.route("/team", teamRoutes(deps));
   api.route("/runs", runEventsRoutes(deps));
   api.route("/runs", runRoutes(deps));

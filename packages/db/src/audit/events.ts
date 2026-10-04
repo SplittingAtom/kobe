@@ -826,7 +826,20 @@ export const AUDIT_EVENTS = {
     bytes: count,
     files: count,
     source: z.enum(["zip", "skill_md"]),
+    /** Scanner findings (KOBE-80); absent on uploads recorded before the scanner ran. */
+    findings: count.optional(),
   }),
+  /** A team admin approved or rejected a team skill version (KOBE-80, D22). */
+  "skill.reviewed": event("team", {
+    skillId: id,
+    slug,
+    version,
+    decision: z.enum(["approved", "rejected"]),
+    previous: z.enum(["pending", "approved", "rejected"]),
+    flagged: z.boolean(),
+  }),
+  /** A team admin switched the team's personal skills off or on (KOBE-80, D22). */
+  "skill.personal_switch.changed": event("team", { disabled: z.boolean() }),
 } as const;
 
 export type AuditAction = keyof typeof AUDIT_EVENTS;
