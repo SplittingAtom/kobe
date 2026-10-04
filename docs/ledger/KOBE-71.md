@@ -211,7 +211,7 @@ The user accepted the "baseline" trade-off.
     - Measured under gVisor: with the flag the port stays closed; the control opens it.
 - (b) Reopening `/proc/<pi>/fd/{0,1}`: **disproved.** libuv gives a child its stdio as Unix
   socketpairs, not pipes (`readlink` shows `socket:[…]` under Linux and under gVisor), and a socket
-  cannot be opened through `/proc/<pid>/fd` (`ENXIO`). The same holds for fd 3, the policy
+  cannot be opened through `/proc/<pid>/fd` (`ENXIO` on Linux). Under gVisor even the same uid gets `EACCES` on `/proc/<pi>/fd/*` (measured: readlink and open both refused). The same holds for fd 3, the policy
   channel.
   - Tests: real helper (`( : > /proc/$PPID/fd/$n )`, ENXIO for both fds); e2e under gVisor as
     the Pi's own identity against the real Pi (`stdio=2`); measured in a gVisor pod.
