@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiResult } from "../../lib/api/client";
 import type { ConsoleAccess, InstallAccess, TeamAccess } from "../../lib/admin/nav/types";
@@ -255,6 +255,8 @@ describe("isolation banner", () => {
 
 describe("re-checking access", () => {
   it("shows the checking state again while it asks after kobe:active-team", async () => {
+    // Every answer here is a promise the test controls, so it flushes them with act() instead of
+    // polling for the DOM against testing-library's 1 s deadline (which a loaded runner can miss).
     let release: (v: ApiResult<ConsoleAccess>) => void = () => undefined;
     let calls = 0;
     const load = () => {
@@ -269,22 +271,29 @@ describe("re-checking access", () => {
         <Page />
       </ConsoleShell>,
     );
-    await screen.findByRole("heading", { name: "The page" });
-    window.dispatchEvent(new Event(ACTIVE_TEAM_EVENT));
-    expect((await screen.findByText("Checking your access…")).getAttribute("role")).toBe("status");
-    expect(screen.queryByRole("heading", { name: "The page" })).toBeNull();
-    release({
-      ok: true,
-      status: 200,
-      data: {
-        console: "team",
-        user,
-        team: { id: "t-2", slug: "ops", name: "Ops" },
-        role: "team_admin",
-        permissions: TEAM_ADMIN,
-      },
+    await act(async () => undefined); // the first answer is already resolved
+    expect(screen.getByRole("heading", { name: "The page" })).toBeTruthy();
+    act(() => {
+      window.dispatchEvent(new Event(ACTIVE_TEAM_EVENT));
     });
-    expect(await screen.findByRole("heading", { name: "The page" })).toBeTruthy();
+    // The event's state change is synchronous: the old answer is gone before the new one arrives.
+    expect(calls).toBe(2);
+    expect(screen.getByText("Checking your access…").getAttribute("role")).toBe("status");
+    expect(screen.queryByRole("heading", { name: "The page" })).toBeNull();
+    await act(async () => {
+      release({
+        ok: true,
+        status: 200,
+        data: {
+          console: "team",
+          user,
+          team: { id: "t-2", slug: "ops", name: "Ops" },
+          role: "team_admin",
+          permissions: TEAM_ADMIN,
+        },
+      });
+    });
+    expect(screen.getByRole("heading", { name: "The page" })).toBeTruthy();
   });
 
   it("never keeps a page's state across teams: pages remount per team", async () => {
