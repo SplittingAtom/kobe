@@ -13,6 +13,7 @@ import type { EventSourceFactory } from "../../lib/chat/stream";
 import { createThreadListAdapter } from "../../lib/chat/thread-list-adapter";
 import { ACTIVE_TEAM_EVENT, fetchMyTeams } from "../../lib/teams";
 import { ConsoleLinks } from "../admin/console-links";
+import { MyLinks } from "../my/my-links";
 import { ChatSessionContext, useKobeRuntime } from "./kobe-runtime";
 import { RetentionNotice } from "./retention-notice";
 import { ThreadSidebar } from "./thread-sidebar";
@@ -199,6 +200,7 @@ export function ChatApp({ fetchFn, eventSource, newKey, reopenDelayMs }: ChatApp
       <header className={styles.header}>
         <h1 className={styles.brand}>Kobe</h1>
         <TeamSwitcher />
+        <MyLinks />
         <ConsoleLinks />
       </header>
       <TeamInvites />

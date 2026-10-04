@@ -30,6 +30,7 @@ import { useMutation, useResource } from "../../use-resource";
 import adminStyles from "../../admin.module.css";
 import agentStyles from "../agent-builder/agent-builder.module.css";
 import { Field } from "../agent-builder/field";
+import { skillPaths, type SkillArea } from "./area";
 import { FilesEditor } from "./files-editor";
 import styles from "./skill-editor.module.css";
 
@@ -42,13 +43,24 @@ interface Loaded {
 }
 
 /** Create a skill, or edit one and save the result as its next version (KOBE-83). */
-export function SkillEditorPage({ skillId }: { readonly skillId?: string }) {
+export function SkillEditorPage({
+  skillId,
+  area = "team",
+}: {
+  readonly skillId?: string;
+  /** `my`: the member's own area, personal skills only (KOBE-98). */
+  readonly area?: SkillArea;
+}) {
   return (
     <>
       <p>
-        <Link href="/admin/team/skills">All skills</Link>
+        <Link href={skillPaths(area).base}>{skillPaths(area).backLabel}</Link>
       </p>
-      {skillId ? <ExistingSkill skillId={skillId} /> : <Editor loaded={null} />}
+      {skillId ? (
+        <ExistingSkill skillId={skillId} area={area} />
+      ) : (
+        <Editor loaded={null} area={area} />
+      )}
     </>
   );
 }
@@ -72,20 +84,21 @@ async function loadSkill(teamId: string, id: string): Promise<ApiResult<Loaded>>
   };
 }
 
-function ExistingSkill({ skillId }: { readonly skillId: string }) {
+function ExistingSkill({ skillId, area }: { readonly skillId: string; readonly area: SkillArea }) {
   const teamId = useTeamAccess().team.id;
   const { state } = useResource(() => loadSkill(teamId, skillId));
   if (state.status === "loading") return <p role="status">Loading skill…</p>;
   if (state.status === "error") return <ErrorNotice error={state.error} />;
-  return <Editor loaded={state.data} />;
+  return <Editor loaded={state.data} area={area} />;
 }
 
-function Editor({ loaded }: { readonly loaded: Loaded | null }) {
+function Editor({ loaded, area }: { readonly loaded: Loaded | null; readonly area: SkillArea }) {
+  const paths = skillPaths(area);
   const teamId = useTeamAccess().team.id;
   const [skill, setSkill] = useState(loaded?.skill ?? null);
   const kept = loaded?.kept ?? [];
   const [draft, setDraft] = useState<SkillDraft>(loaded?.draft ?? EMPTY);
-  const [scope, setScope] = useState<SkillScope>("team");
+  const [scope, setScope] = useState<SkillScope>(paths.newScope);
   const [attempted, setAttempted] = useState(false);
   const [sizeError, setSizeError] = useState<string | null>(null);
   const mutation = useMutation();
@@ -114,7 +127,7 @@ function Editor({ loaded }: { readonly loaded: Loaded | null }) {
     await mutation.run(
       async () => {
         const res = await uploadSkillZip(teamId, target, zip);
-        if (res.ok && !skill) window.location.assign(`/admin/team/skills/${res.data.skill.id}`);
+        if (res.ok && !skill) window.location.assign(`${paths.base}/${res.data.skill.id}`);
         if (res.ok) setSkill(res.data.skill);
         return res;
       },
@@ -143,7 +156,7 @@ function Editor({ loaded }: { readonly loaded: Loaded | null }) {
         }}
       >
         <div className={agentStyles.fields}>
-          {!skill && (
+          {!skill && area === "team" && (
             <Field
               label="Scope"
               hint="Team skills are shared with the team; personal ones are only yours."
