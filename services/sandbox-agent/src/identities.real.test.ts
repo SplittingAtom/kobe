@@ -62,7 +62,10 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
   let piBin: string;
   let h: Harness;
 
+  let umask: number;
   beforeAll(async () => {
+    // As in the image: the agent's own files are private unless it shares them explicitly.
+    umask = process.umask(0o077);
     identities = await loadPiIdentities(HELPER as string, 2);
     // The scripted Pi must be readable by the identities (the checkout may not be).
     scratch = await mkdtemp(path.join(tmpdir(), "kobe-identities-"));
@@ -75,6 +78,7 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
     await chmod(piBin, 0o755);
   });
   afterAll(async () => {
+    process.umask(umask);
     await rm(scratch, { recursive: true, force: true });
     await rm(shm, { recursive: true, force: true });
   });
@@ -281,5 +285,82 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
       }),
     );
     expect(result).toMatchObject({ ok: false, error: { code: "runtime_tampered" } });
+  });
+
+  it("proves at start-up that a process cannot ptrace or read its parent as an identity", async () => {
+    await expect(identities.probe()).resolves.toBeUndefined();
+  });
+
+  it("SIGUSR1 from a tool opens no inspector in its Pi (control: a Node without the flag does)", async () => {
+    await start();
+    const check = `node -e 'require("net").connect(9229,"127.0.0.1").on("connect",()=>{console.log("open");process.exit(0)}).on("error",()=>console.log("closed"))'`;
+    const out = await tool(
+      THREAD,
+      RUN,
+      [
+        "env -u NODE_OPTIONS node -e 'setInterval(()=>{},1000)' & c=$!; sleep 0.5",
+        `kill -USR1 $c; sleep 1; echo control=$(${check}); kill -9 $c; sleep 0.5`,
+        `kill -USR1 $PPID; sleep 1; echo pi=$(${check})`,
+        "kill -0 $PPID && echo pi_alive",
+      ].join("\n"),
+    );
+    expect(out.stdout).toMatch(/control=open/);
+    expect(out.stdout).toMatch(/pi=closed/);
+    expect(out.stdout).toMatch(/pi_alive/);
+  });
+
+  it("a tool cannot reopen its Pi's stdin or stdout through /proc (sockets: ENXIO)", async () => {
+    await start();
+    const out = await tool(
+      THREAD,
+      RUN,
+      "for n in 0 1; do ( : > /proc/$PPID/fd/$n ) 2>&1; ls -l /proc/$PPID/fd/$n; done",
+    );
+    expect(out.stdout.match(/No such device or address/g)).toHaveLength(2);
+    expect(out.stdout).toMatch(/socket:/);
+  });
+
+  it("caps the processes of an identity (RLIMIT_NPROC)", async () => {
+    await start();
+    const out = await tool(THREAD, RUN, "grep 'Max processes' /proc/self/limits");
+    expect(out.stdout).toMatch(/Max processes\s+1024\s+1024/);
+  });
+
+  it("leaves nothing private to a recycled uid: owner-only files go to the workspace group, IPC objects go", async () => {
+    await start({ KOBE_PI_IDLE_MS: "200" });
+    const out = await tool(
+      THREAD,
+      RUN,
+      [
+        "umask 077",
+        'echo s > "$HOME/k71-secret-$$"; echo s > /tmp/k71-secret-$$; echo s > k71-ws-secret-$$',
+        "echo \"pid=$$ uid=$(id -u) shm=$(ipcmk -M 4096 | awk '{print $NF}')\"",
+      ].join("\n"),
+    );
+    const pid = /pid=(\d+)/.exec(out.stdout)?.[1];
+    const shm = /shm=(\d+)/.exec(out.stdout)?.[1];
+    expect(pid).toBeDefined();
+    expect(shm).toBeDefined();
+    const files = [
+      path.join(h.dir, "home", `k71-secret-${pid}`),
+      `/tmp/k71-secret-${pid}`,
+      path.join(h.workspace, `k71-ws-secret-${pid}`),
+    ];
+    for (const file of files) expect((await stat(file)).mode & 0o077).toBe(0);
+    // The run ended: the idle Pi is reaped and its identity reclaimed.
+    await until(() => identities.available === identities.size, 15_000);
+    const group = (await stat(h.workspace)).gid;
+    for (const file of files) {
+      const info = await stat(file);
+      expect(info.gid).toBe(group);
+      expect(info.mode & 0o060).toBe(0o060);
+    }
+    const { execFileSync } = await import("node:child_process");
+    const segments = execFileSync("ipcs", ["-m"], { encoding: "utf8" })
+      .split("\n")
+      .map((line) => line.trim().split(/\s+/)[1]);
+    expect(segments).not.toContain(shm);
+    // Group-writable now, but in the sticky /tmp only its owner may remove it.
+    await rm(`/tmp/k71-secret-${pid}`, { force: true }).catch(() => undefined);
   });
 });

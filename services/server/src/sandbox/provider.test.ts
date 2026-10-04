@@ -66,6 +66,8 @@ describe("ensureSandbox: team namespace (D11)", () => {
       [LABEL_TEAM_ID]: TEAM.id,
       [LABEL_TEAM_NAMESPACE]: "true",
       "pod-security.kubernetes.io/enforce": "baseline",
+      "pod-security.kubernetes.io/warn": "restricted",
+      "pod-security.kubernetes.io/audit": "restricted",
     });
   });
 

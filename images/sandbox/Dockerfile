@@ -74,6 +74,7 @@ COPY --from=agent /out/node_modules /opt/kobe/sandbox-agent/node_modules
 COPY --from=agent /out/package.json /opt/kobe/sandbox-agent/package.json
 COPY images/sandbox/entrypoint.sh /opt/kobe/entrypoint.sh
 COPY --from=runas /out/kobe-runas /opt/kobe/bin/kobe-runas
+COPY images/sandbox/runas/kobe-reclaim.sh /opt/kobe/bin/kobe-reclaim
 # kobe-policy (KOBE-36): the Pi extension that asks the server about every tool call. Loaded by the
 # agent with --extension, last; root-owned and read-only so sandbox code cannot replace it. Only the
 # compiled .js files (it imports nothing but node builtins and its own files).
@@ -111,6 +112,7 @@ RUN groupadd --gid 1000 kobe \
  && chown kobe:kobe /workspace \
  && find / -xdev -perm /6000 -type f -exec chmod a-s {} + \
  && chown 0:1001 /opt/kobe/bin/kobe-runas && chmod 0750 /opt/kobe/bin/kobe-runas \
+ && chown 0:0 /opt/kobe/bin/kobe-reclaim && chmod 0555 /opt/kobe/bin/kobe-reclaim \
  && chmod 0755 /opt/kobe/bin \
  && setcap cap_setuid,cap_setgid=ep /opt/kobe/bin/kobe-runas \
  && chmod 0644 /etc/passwd /etc/group && chmod 0640 /etc/shadow

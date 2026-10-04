@@ -190,6 +190,105 @@ EPERM`) with `false`; a setuid-root copy does not switch at all.
      property of the memory emptyDir (gVisor measured 3777); a runtime that does not make it
      sticky makes the agent refuse to start (fail closed), not run unprotected.
 
+## Second review round (coordinator's security review of #62) — resolution
+
+The user accepted the "baseline" trade-off.
+
+**HIGH 1. A tool against its own Pi.**
+
+- (a) SIGUSR1 inspector. Pi's environment already had `NODE_OPTIONS=--disable-sigusr1`; that
+  worked, but nothing tested it. The agent now also runs Pi's script itself as
+  `node --disable-sigusr1 <cli.js>` (`pi/pi-command.ts`: the `pi` binary on PATH is resolved,
+  and a Node shebang or `.js` script is detected). So the flag no longer depends on the
+  environment, and Node ignores SIGUSR1 rather than dying.
+  - Nothing else can turn the inspector on. Pi's environment is the agent's allow-list (no other
+    `NODE_OPTIONS`), its arguments are the agent's, and `inspector.open()` would need code already
+    running inside Pi.
+  - Tests:
+    - Real helper: a tool sends SIGUSR1 to its Pi, nothing listens on 9229, and Pi lives on.
+      The control is a Node without the flag in the same tool, which opens 9229.
+    - e2e (gVisor, real Pi): the same check, as the Pi's own identity.
+    - Measured under gVisor: with the flag the port stays closed; the control opens it.
+- (b) Reopening `/proc/<pi>/fd/{0,1}`: **disproved.** libuv gives a child its stdio as Unix
+  socketpairs, not pipes (`readlink` shows `socket:[…]` under Linux and under gVisor), and a socket
+  cannot be opened through `/proc/<pid>/fd` (`ENXIO`). The same holds for fd 3, the policy
+  channel.
+  - Tests: real helper (`( : > /proc/$PPID/fd/$n )`, ENXIO for both fds); e2e under gVisor as
+    the Pi's own identity against the real Pi (`stdio=2`); measured in a gVisor pod.
+- Paired tool uid (the structural fix): **proposed as a follow-up, not in this PR.**
+  - Design: each identity gets a partner uid (for example uid + 1000). Pi's `settings.json`
+    (written by the agent before start, read once) sets `shellPath` to a second helper,
+    `kobe-toolrun`. That helper may only switch from Pi uid P to its partner T, and is
+    executable by Pi's group only. Tools then cannot signal Pi, write its `agent/` dir or read
+    `model.json`, which would also make the KOBE-42 run id enforcement-grade.
+  - Blockers:
+    1. Pi itself must exec a file-capability binary, so Pi could no longer run with
+       `no_new_privs`. The helper would have to drop no_new_privs only for Pi, then keep its own
+       spawns contained.
+    2. Pi's in-process tools (read, write, edit, and grep/find through rg/fd) keep Pi's uid.
+       `rg --pre` and its like would need an audit or the same wrapper.
+    3. Pi 1.0.0's `shellPath` semantics, and whether everything Pi spawns goes through it,
+       need checking against its source.
+  - Estimate: a ticket of its own (helper, Pi settings audit, real-Pi tests).
+
+**MEDIUM 2. Files for a Pi** (KOBE-39 merges after this): see "Creating a file a Pi (or its
+tools) must read" above. In short: the Pi's runtime dir, owned by the agent with the Pi's group,
+0640 set explicitly, `O_EXCL` temp file then rename; never 0644, never `/tmp`.
+
+**MEDIUM 3. uid recycling.** Fixed at reclaim.
+
+- After `--kill-all`, the agent runs `kobe-reclaim` (root-owned shell script next to the helper,
+  checked at start) through the helper, as the identity. It covers `/workspace`, `$HOME`, `/tmp`
+  and `/dev/shm`, staying on each filesystem (`find -xdev`). Everything the uid owns there goes
+  to the workspace group and becomes group-rw (dirs g+rwx), and `ipcrm --all` removes its
+  System V IPC objects. POSIX shared memory is files in `/dev/shm`.
+- A failed reclaim keeps the identity out of use.
+- Side effect: a file a tool made owner-only becomes syncable once its Pi has exited (KOBE-27).
+- Tests:
+  - Real helper: 0600 files in `$HOME`, `/tmp` and `/workspace` and a SysV segment, made by a
+    tool. After the reclaim the files are the workspace group's and group-rw, and the segment is
+    gone.
+  - test-image: the script's effect.
+
+**MEDIUM 4. Fork bomb.**
+
+- kobe-runas lowers `RLIMIT_NPROC` to 1024 for the program it execs. The limit is per uid, it
+  only ever lowers, and it leaves headroom for the agent and other threads.
+- `--kill-all` needs no fork, and Linux checks NPROC only at exec, so it still runs when the uid
+  is at its limit.
+- `kill-all` is serialised per identity.
+- The reclaim retries over about a minute.
+- Tests: real helper (`Max processes 1024 1024` in a tool), test-image.
+
+**MEDIUM 5. Behavioural probe.** `kobe-runas <uid> --probe-ptrace` replaces the sysctl read.
+
+- As the identity, and made dumpable like Pi after its exec (the helper's file capabilities would
+  otherwise make it non-dumpable, which hides Yama), it forks a child. The child tries
+  `PTRACE_ATTACH` and a read of `/proc/<parent>/mem`; the probe exits 0 only if both are refused.
+- The agent runs it at start-up instead of `/bin/true`, and refuses to start if it fails.
+- Tests: real helper, test-image, and e2e under gVisor (`probe=0`, as the real Pi's identity).
+
+**LOW 6.**
+
+- The bounding set is left alone. `PR_CAPBSET_DROP` needs `CAP_SETPCAP`, which the container
+  does not grant; adding it would widen the pod's capabilities for no gain, since with
+  `no_new_privs` and no file-capability binary reachable the bounding set grants nothing. This
+  is documented in the helper.
+- The agent's umask is now 077. Workspace dirs (`ensureParents`), session dirs and a `$HOME` the
+  agent creates are shared explicitly, through handles. A directory keeps its setgid bit.
+- The admission policy allows SETUID/SETGID and privilege escalation only for the container named
+  `agent`. Every other container, init container and ephemeral container must add no
+  capabilities and set `allowPrivilegeEscalation: false`.
+  - Verified on k3s 1.34: another container with SETUID, with privilege escalation, or with it
+    unset is refused; an init container with SETUID is refused; `agent` with CHOWN is refused;
+    the sandbox shape and a plain restricted container are allowed.
+  - Covered by e2e cases and chart fragment tests. The chart tests can only assert the CEL text;
+    its behaviour is proven against the real API server in e2e.
+- Team namespaces also carry `pod-security.kubernetes.io/warn` and `audit` set to `restricted`.
+- The Kata/virtiofs device-guard limitation is under residual risks.
+- `test-identities.sh` now cleans up on exit: helper, script, group, leftover processes and files
+  of uids 2000–2003. It checks those uids are unused before it starts.
+
 ## Cold start (ac-3)
 
 Baseline (main, merge-queue e2e run 37179221413): hibernated → Pi ready back-to-back p50 4381 /
@@ -217,8 +316,10 @@ With Pi identities (every Kobe pod):
   plant around a model switch, rewrite the model file) are now impossible, not just detected.
 - **Nobody but the agent can write `model.json`**, including the Pi's own tools (it is the
   agent's file in the agent's directory).
-- **No other process can ptrace or signal a Pi**: other identities by uid; its own tools because
-  Pi is their ancestor (Yama scope 1, enforced by gVisor, measured).
+- **No other thread can ptrace or signal a Pi** (different uid). Its own tools can signal it (same
+  uid: a denial of service against their own thread) but cannot ptrace it or read its memory
+  (Yama, proven by the start-up probe), open its inspector (SIGUSR1 disabled) or reopen its
+  stdin/stdout (sockets).
 - **What remains is the Pi's own tools writing its `agent/` dir** (Pi 1.0.0 must be able to write
   there). The tripwire keeps checking that, and it remains a detector there, not a boundary: an
   informed tool of the same thread can still plant `models.json` around a model switch of its own
@@ -245,6 +346,29 @@ after_step` driven by Pi-reported usage). Making it enforcement-grade needs a cr
   can read, e.g. over an inherited socket like the policy channel. Proposed as a follow-up ticket
   (it changes `run.start` and the gateway, i.e. contracts).
 
+## Creating a file a Pi (or its tools) must read: the rules (KOBE-39, KOBE-62, …)
+
+Anything the agent hands one Pi, such as KOBE-39's egress-token file, follows the `model.json`
+pattern (`models/model-file.ts`):
+
+- **Where**: in that Pi's runtime directory, `<KOBE_PI_RUNTIME_DIR>/pi-XXXXXX/` (the pod's
+  `/run/kobe-pi/…`), next to `model.json`, **never under `/tmp`, `$HOME`, `/workspace` or
+  `/dev/shm`**. Those are shared by every identity and renameable, so another thread could read
+  the file or swap it.
+- **Owner and group**: the agent's uid, and the Pi's own gid. The runtime dir is setgid with that
+  gid, so a file the agent creates there gets it automatically. Never chown to the identity's uid:
+  its owner could rewrite it.
+- **Mode**: **0640**. Set it explicitly with `chmod`/`handle.chmod` after creating the file,
+  because the agent's umask is 077. **Never 0644**: the dir is 2750, but a 0644 file is
+  world-readable to anyone who learns its path. Never group-writable.
+- **How**: write a random temp name with `flag: "wx"` (`O_EXCL`, never through a symlink), chmod
+  it to 0640, then `rename` it over the target. Pi never reads a torn file, and only the agent
+  ever writes there.
+- **Who can read it**: that Pi and every tool it runs (same uid/gid). Treat it like
+  `model.json`: never readable by another thread, but not secret from its own tools.
+- **Lifetime**: it is removed with the runtime dir when that Pi exits. The tripwire only allows
+  entries it knows: add the new name to `unexpectedEntries` (`models/runtime-dir.ts`).
+
 ## For other tickets
 
 - **KOBE-22/25 (pod spec)**: keep `supplementalGroups`, the capability pair, `allowPrivilegeEscalation:
@@ -253,10 +377,10 @@ true`, `KOBE_PI_RUNAS`, `KOBE_PI_RUNTIME_DIR` and the `pi-runtime` memory volume
 - **KOBE-27 (sync)**: the agent reads the workspace through the group: files a tool makes
   owner-only (`chmod 600`, `ssh-keygen` keys) are **not synced**; the agent warns once per path
   and never treats them as deleted. Everything else syncs as before.
-- **KOBE-39/62 (egress, MCP for tools)**: credentials meant for tools (an egress proxy token in
-  `HTTPS_PROXY`) reach a Pi through its allow-listed environment and are readable by that Pi's
-  tools; anything the agent keeps (the wire token) must stay in agent memory or under
-  `/run/kobe-agent`.
+- **KOBE-39/62 (egress, MCP for tools)**: credentials meant for tools (an egress proxy token)
+  reach a Pi through its allow-listed environment, or a file made by the rules above, and are
+  readable by that Pi's tools. Anything the agent keeps (the wire token) must stay in agent memory
+  or under `/run/kobe-agent`.
 - **KOBE-36 (policy channel)**: fd 3 is inherited through the helper unchanged; a tool cannot
   reach another thread's channel, and cannot ptrace its own Pi.
 
@@ -268,7 +392,12 @@ true`, `KOBE_PI_RUNAS`, `KOBE_PI_RUNTIME_DIR` and the `pi-runtime` memory volume
    (write its Pi's `agent/` dir, read its model file). Not deterministic (the other thread has to
    run it), but not prevented. Closing it needs per-thread workspaces/homes, against D13.
 2. **The model-gateway token is readable by each run's own tools** (KOBE-42 above).
-3. **The Pi's own tools can write its `agent/` dir** (KOBE-41 above; tripwire).
+3. **A thread's tools share their Pi's uid** (see "Second review round"): they can write Pi's
+   `agent/` dir (KOBE-41 above; the tripwire detects it) and signal Pi (SIGSTOP/SIGKILL, a denial
+   of service against their own thread). They cannot ptrace Pi or read its memory (the probe
+   proves this at start-up), open its inspector (`--disable-sigusr1`), or reopen its stdin or
+   stdout (sockets). The structural fix, a paired tool uid per thread, is proposed as a follow-up
+   below.
 4. **Session files** (`/workspace/.kobe/sessions`, group-writable as before): any thread's tools
    can rewrite another thread's Pi session file (its conversation as Pi resumes it). Same as
    /workspace (1); the server's record is Postgres, mirrored entries are untrusted.
@@ -281,6 +410,16 @@ true`, `KOBE_PI_RUNAS`, `KOBE_PI_RUNTIME_DIR` and the `pi-runtime` memory volume
    compromised agent, can become any Pi identity (not root: the uid range is compiled in). Inside
    gVisor/Kata only.
 7. **Agent compromise** is unchanged in scope: the agent was already the trust anchor.
+
+8. **The workspace device guard relies on `st_dev`**. gVisor gives every mount its own device,
+   as measured. Under Kata with virtiofs, several volumes could share one `st_dev`, which would
+   blind the guard. The start-up check (runtime dir and token dir must sit on devices other than
+   /workspace's) then refuses identity mode rather than run unguarded. A Kata install should
+   confirm this; the robust replacement is `openat2(RESOLVE_BENEATH)`, which Node lacks.
+9. **Recycled uids own old files**. After reclaim, a uid's files in the shared trees belong to
+   the workspace group and are group-readable and group-writable. The next holder of the uid still
+   owns them, but gains nothing other threads lack. A user's deliberate `chmod 600` there (for
+   example an ssh key) is undone once the Pi that made it exits.
 
 ## Shared files touched
 

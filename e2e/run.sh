@@ -320,10 +320,14 @@ contains "admission refuses a team pod with a Kubernetes API token" 'must not mo
   "$(admission "{\"spec\":{\"runtimeClassName\":\"gvisor\",$SEC_POD,\"containers\":[{\"name\":\"c\",\"image\":\"busybox:1.37\",$SEC_CTR}]}}")"
 # KOBE-71: the namespace is Pod Security "baseline" so sandboxes can add SETUID/SETGID for their
 # Pi identities; Kobe's own policy keeps the rest of "restricted".
-contains "admission refuses a team container adding any other capability (KOBE-71)" 'add at most SETUID and SETGID' \
+contains "admission refuses a team container adding any other capability (KOBE-71)" "only the sandbox container 'agent'" \
   "$(admission "{\"spec\":{\"runtimeClassName\":\"gvisor\",\"automountServiceAccountToken\":false,$SEC_POD,\"containers\":[{\"name\":\"c\",\"image\":\"busybox:1.37\",\"securityContext\":{\"capabilities\":{\"drop\":[\"ALL\"],\"add\":[\"SETUID\",\"CHOWN\"]}}}]}}")"
 contains "admission refuses a team pod running as root (KOBE-71)" 'must run as non-root' \
   "$(admission "{\"spec\":{\"runtimeClassName\":\"gvisor\",\"automountServiceAccountToken\":false,\"securityContext\":{\"runAsUser\":0,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}},\"containers\":[{\"name\":\"c\",\"image\":\"busybox:1.37\",$SEC_CTR}]}}")"
+contains "admission refuses SETUID on any container but the sandbox's own (KOBE-71)" "only the sandbox container 'agent'" \
+  "$(admission "{\"spec\":{\"runtimeClassName\":\"gvisor\",\"automountServiceAccountToken\":false,$SEC_POD,\"containers\":[{\"name\":\"c\",\"image\":\"busybox:1.37\",\"securityContext\":{\"allowPrivilegeEscalation\":false,\"capabilities\":{\"drop\":[\"ALL\"],\"add\":[\"SETUID\"]}}}]}}")"
+contains "admission refuses privilege escalation on any container but the sandbox's own (KOBE-71)" "only the sandbox container 'agent'" \
+  "$(admission "{\"spec\":{\"runtimeClassName\":\"gvisor\",\"automountServiceAccountToken\":false,$SEC_POD,\"containers\":[{\"name\":\"c\",\"image\":\"busybox:1.37\",\"securityContext\":{\"allowPrivilegeEscalation\":true,\"capabilities\":{\"drop\":[\"ALL\"]}}}]}}")"
 server_sa="system:serviceaccount:$NS:kobe-server"
 contains "the server's ServiceAccount cannot create namespaces outside kobe-team-*" 'only manage kobe-team-\* namespaces' \
   "$($KUBECTL create namespace kobe-e2e-evil --as="$server_sa" --dry-run=server 2>&1 || true)"
@@ -1563,6 +1567,14 @@ echo "plant=$($R 2015 sh -c "echo {} > $dir/agent/settings.json" 2>&1 | grep -c 
 echo "read_model=$($R 2015 cat "$dir/model.json" 2>&1 | grep -c 'Permission denied')"
 echo "read_token=$($R 2015 cat /run/kobe-agent/bootstrap/bootstrap-token 2>&1 | grep -c 'Permission denied')"
 echo "signal=$($R 2015 sh -c "kill -0 $agent; kill -0 $pi" 2>&1 | grep -c 'not permitted')"
+# As a tool of that Pi (its own uid): no ptrace/memory of an ancestor, no inspector through
+# SIGUSR1, no way back into Pi's stdin/stdout (sockets: /proc/<pi>/fd/N cannot be reopened).
+u=$(stat -c %u /proc/$pi)
+$R $u --probe-ptrace >/dev/null 2>&1; echo "probe=$?"
+$R $u sh -c "kill -USR1 $pi"; sleep 1
+echo "inspector=$(node -e 'require("net").connect(9229,"127.0.0.1").on("connect",()=>{console.log("open");process.exit(0)}).on("error",()=>console.log("closed"))')"
+echo "stdio=$($R $u sh -c "for n in 0 1; do : > /proc/$pi/fd/\$n; done" 2>&1 | grep -c 'No such device or address')"
+echo "pi_alive=$(kill -0 $pi 2>/dev/null; [ -d /proc/$pi ] && echo yes || echo no)"
 SH
     # The Owner's sandbox pod: the one whose claim-uid label is the Owner's claim (u-<user id>).
     owner_claim=$($KUBECTL -n "$TEAM_NS" get sandboxclaim "u-$owner_id" -o jsonpath='{.metadata.uid}' 2>/dev/null || true)
@@ -1576,6 +1588,10 @@ SH
     contains "another identity cannot read that Pi's model file (token, run id)" '^read_model=1$' "$privsep"
     contains "Pi identities cannot read the agent's bootstrap token" '^read_token=1$' "$privsep"
     contains "Pi identities cannot signal the agent or another thread's Pi" '^signal=2$' "$privsep"
+    contains "a tool cannot ptrace or read the memory of its Pi (behavioural probe under gVisor)" '^probe=0$' "$privsep"
+    contains "SIGUSR1 from a tool opens no inspector in Pi (node --disable-sigusr1)" '^inspector=closed$' "$privsep"
+    contains "a tool cannot reopen its Pi's stdin/stdout through /proc (ENXIO: sockets)" '^stdio=2$' "$privsep"
+    contains "Pi survives the SIGUSR1" '^pi_alive=yes$' "$privsep"
 
     # A clear failure when the team has no model: the run fails with the server's message, nothing hangs.
     expect "the team disables its models" '^200 ' "$(as_owner "PUT /v1/team/models/fast {\"enabled\":false}")"

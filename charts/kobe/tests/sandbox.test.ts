@@ -477,7 +477,10 @@ describe("sandbox admission policies (KOBE-9 binding requirement 3)", () => {
     const e = expressions("-sandbox-pods");
     for (const fragment of [
       "exists(d, d == 'ALL')",
+      "c.name == 'agent' ?",
       "all(a, a in ['SETUID', 'SETGID'])",
+      "allowPrivilegeEscalation.orValue(true) == false",
+      "ephemeralContainers",
       "privileged",
       "runAsNonRoot",
       "runAsUser",

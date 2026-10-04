@@ -169,6 +169,12 @@ check "kobe-runas: the only file with capabilities, setuid+setgid, root:kobe-age
 check "kobe-runas starts a Pi identity: own uid/gid, workspace group, no capabilities, no_new_privs, umask 002" \
   '^uid=2000 gid=2000 groups=1000,2000 caps=0000000000000000/0000000000000000 nnp=1 umask=0002$' run_ps \
   $R 2000 sh -c 'echo "uid=$(id -u) gid=$(id -g) groups=$(id -G | tr " " "\n" | sort -n | paste -sd,) caps=$(awk "/^CapPrm/{p=\$2} /^CapEff/{e=\$2} END{print p \"/\" e}" /proc/self/status) nnp=$(awk "/^NoNewPrivs/{print \$2}" /proc/self/status) umask=$(umask)"'
+check "kobe-reclaim: root-owned, read-only" '^root:root 555$' run stat -c '%U:%G %a' /opt/kobe/bin/kobe-reclaim
+check "as an identity, a process cannot ptrace or read the memory of its parent (--probe-ptrace)" '^probe=0$' run_ps \
+  sh -c "$R 2000 --probe-ptrace; echo probe=\$?"
+check "a Pi identity's processes are capped (RLIMIT_NPROC 1024)" 'Max processes +1024 +1024' run_ps $R 2000 grep 'Max processes' /proc/self/limits
+check "kobe-reclaim gives an identity's private files to the workspace group" '^1000 660$' run_ps sh -c \
+  "$R 2000 sh -c 'umask 077; echo s > /tmp/f'; $R 2000 /opt/kobe/bin/kobe-reclaim 1000 /tmp; stat -c '%g %a' /tmp/f"
 check "a Pi identity cannot run kobe-runas" 'Permission denied' run_ps sh -c "$R 2000 $R 2001 id 2>&1; true"
 check "kobe-runas refuses anyone but the agent" 'only the sandbox agent' host sh -c \
   "docker run --rm --cap-drop ALL --cap-add SETUID --cap-add SETGID --user 2000:1001 --entrypoint $R \"$IMAGE\" 2001 id 2>&1; true"

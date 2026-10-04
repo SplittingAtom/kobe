@@ -1,4 +1,4 @@
-import { chmod, chown, mkdir, mkdtemp } from "node:fs/promises";
+import { chmod, chown, mkdir, mkdtemp, stat } from "node:fs/promises";
 import path from "node:path";
 import {
   piExtensionUiRequestSchema,
@@ -14,6 +14,8 @@ import {
 import { PiProcess, PiProcessError, type PiExit, type PiRecord } from "../pi/pi-process.js";
 import type { PiIdentities, PiIdentity } from "../pi/identities.js";
 import type { PiLaunch } from "../pi/pi-launch.js";
+import { piCommand } from "../pi/pi-command.js";
+import { shareOnVolume } from "../workspace/volume.js";
 import { ensureSessionDir } from "../pi/session-files.js";
 import { MODEL_FILE_ENV } from "../kobe-models/protocol.js";
 import { ModelFile } from "../models/model-file.js";
@@ -34,6 +36,8 @@ import type { ModelWiring, RunModel } from "../models/types.js";
  */
 export const DIALOG_METHODS = new Set(["select", "confirm", "input", "editor"]);
 export const MAX_PENDING_DIALOGS = 64;
+/** Scratch trees every identity can write besides /workspace and $HOME (reclaimed per uid). */
+export const SHARED_SCRATCH_DIRS = ["/tmp", "/dev/shm"] as const;
 /** Pi startup (extension loading, jiti) up to kobe-policy's `channel.ready`. */
 export const POLICY_READY_TIMEOUT_MS = 30_000;
 
@@ -203,6 +207,8 @@ export class Thread {
       workspaceDir: this.#env.workspaceDir,
     });
     await mkdir(this.#env.home, { recursive: true }).catch(() => undefined);
+    // Shared by every thread (the pod's home volume is; one the agent made itself must be too).
+    if (identities !== undefined) await shareOnVolume(this.#env.home, this.#env.home, 0o2770);
     await ensureRuntimeRoot(this.#env.runtimeDir, identities !== undefined);
     const identity = await identities?.acquire();
     let runtimeDir: string | undefined;
@@ -233,9 +239,10 @@ export class Thread {
         await modelFile.create();
         env[MODEL_FILE_ENV] = modelFile.path;
       }
+      const command = await piCommand(this.#env.bin, launch.env.PATH);
       pi = new PiProcess({
-        bin: this.#env.bin,
-        args: launch.args,
+        bin: command.bin,
+        args: [...command.prefix, ...launch.args],
         cwd: this.#env.workspaceDir,
         env,
         onEvent: (event) => this.#onEvent(pi, event),
@@ -532,8 +539,16 @@ export class Thread {
     if (identity !== undefined && identities !== undefined) {
       try {
         await identities.killAllPatiently(identity);
+        // What the uid still owns in the shared trees becomes the workspace group's (nothing
+        // stays private to it for the next thread that gets the uid), its IPC objects go.
+        const gid = (await stat(this.#env.workspaceDir)).gid;
+        await identities.reclaimFiles(identity, gid, [
+          this.#env.workspaceDir,
+          this.#env.home,
+          ...SHARED_SCRATCH_DIRS,
+        ]);
       } catch (error) {
-        // Its processes may still run: the identity is never handed out again (fail closed).
+        // Its processes or private files may remain: the identity is never handed out again.
         this.#warn(`Pi identity ${identity.uid} not reclaimed: ${(error as Error).message}`);
         return;
       }

@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { stat } from "node:fs/promises";
+import path from "node:path";
 
 /**
  * Pi identities (KOBE-71): every Pi process, and so every tool it runs, gets a uid of its own
@@ -11,8 +12,11 @@ import { stat } from "node:fs/promises";
  * The pool is the agent's supplementary groups in [{@link PI_UID_MIN}, {@link PI_UID_MAX}]: the pod
  * spec lists them (KOBE-22 manifests) so the agent can hand each Pi a directory only that Pi's
  * group can read (uid = gid per identity). An identity is handed out again only after every
- * process of its uid is gone (`--kill-all`) and its runtime directory removed, so nothing a tool
- * left running or wrote reaches the next thread that gets the uid.
+ * process of its uid is gone (`--kill-all`), its runtime directory is removed, and `kobe-reclaim`
+ * has given everything the uid still owns in the shared trees (/workspace, $HOME, /tmp, /dev/shm)
+ * to the workspace group and removed its System V IPC objects. Files outlive the uid (the
+ * workspace is shared, D13), but nothing stays private to it: the next thread that gets the uid
+ * can reach exactly what every other thread can.
  */
 export const PI_UID_MIN = 2000;
 export const PI_UID_MAX = 2063;
@@ -64,8 +68,14 @@ export class PiIdentities {
   readonly #free: PiIdentity[];
   readonly #waiting: ((identity: PiIdentity) => void)[] = [];
   readonly #run: HelperRunner;
+  readonly #killing = new Map<number, Promise<void>>();
 
-  constructor(helper: string, uids: readonly number[], run: HelperRunner = runHelper) {
+  constructor(
+    helper: string,
+    uids: readonly number[],
+    run: HelperRunner = runHelper,
+    reclaimScript: string = reclaimScriptFor(helper),
+  ) {
     if (uids.length === 0) throw new PiIdentityError("no Pi identities");
     for (const uid of uids) {
       if (!Number.isInteger(uid) || uid < PI_UID_MIN || uid > PI_UID_MAX) {
@@ -73,6 +83,7 @@ export class PiIdentities {
       }
     }
     this.helper = helper;
+    this.reclaimScript = reclaimScript;
     this.#all = [...new Set(uids)].sort((a, b) => a - b).map((uid) => ({ uid, gid: uid }));
     this.#free = [...this.#all];
     this.#run = run;
@@ -136,11 +147,40 @@ export class PiIdentities {
     return [String(identity.uid), ...tmpdir, bin, ...args];
   }
 
-  /** SIGKILL every process of the identity's uid (Pi and every tool it left behind). */
-  async killAll(identity: PiIdentity): Promise<void> {
-    const { code, stderr } = await this.#run(this.helper, [String(identity.uid), "--kill-all"]);
-    if (code !== 0) throw new PiIdentityError(`kill-all as ${identity.uid} failed: ${stderr}`);
+  /**
+   * SIGKILL every process of the identity's uid (Pi and every tool it left behind). Serialised
+   * per identity: a stop and an exit reclaim never race each other.
+   */
+  killAll(identity: PiIdentity): Promise<void> {
+    const previous = this.#killing.get(identity.uid) ?? Promise.resolve();
+    const next = previous.then(async () => {
+      const { code, stderr } = await this.#run(this.helper, [String(identity.uid), "--kill-all"]);
+      if (code !== 0) throw new PiIdentityError(`kill-all as ${identity.uid} failed: ${stderr}`);
+    });
+    const settled = next.catch(() => undefined);
+    this.#killing.set(identity.uid, settled);
+    void settled.then(() => {
+      if (this.#killing.get(identity.uid) === settled) this.#killing.delete(identity.uid);
+    });
+    return next;
   }
+
+  /**
+   * After {@link killAll}: as the identity, hand what it still owns under `dirs` to the workspace
+   * group `gid` and remove its System V IPC objects (`kobe-reclaim`, next to the helper).
+   */
+  async reclaimFiles(identity: PiIdentity, gid: number, dirs: readonly string[]): Promise<void> {
+    const { code, stderr } = await this.#run(this.helper, [
+      String(identity.uid),
+      this.reclaimScript,
+      String(gid),
+      ...dirs,
+    ]);
+    if (code !== 0) throw new PiIdentityError(`reclaim as ${identity.uid} failed: ${stderr}`);
+  }
+
+  /** The reclaim script: `kobe-reclaim` in the helper's directory (root-owned, image). */
+  readonly reclaimScript: string;
 
   /**
    * {@link killAll}, retried with backoff (a fork storm or a process in uninterruptible sleep can
@@ -199,16 +239,27 @@ export class PiIdentities {
     ]);
   }
 
-  /** Run `/bin/true` as the first identity: proves the helper and its capabilities work. */
+  /**
+   * As the first identity, a child process tries to ptrace its parent and read its memory
+   * (`--probe-ptrace`): proves the helper switches uids, and that a tool (which shares its Pi's
+   * uid) cannot reach into its Pi, where kobe-policy and the policy socket live. Behavioural,
+   * not a sysctl reading: whatever the kernel (gVisor, a Kata guest), both must be refused.
+   */
   async probe(): Promise<void> {
     const first = this.#all[0] as PiIdentity;
-    const { code, stderr } = await this.#run(this.helper, [String(first.uid), "/bin/true"]);
+    const { code, stderr } = await this.#run(this.helper, [String(first.uid), "--probe-ptrace"]);
     if (code !== 0) {
       throw new PiIdentityError(
-        `cannot start processes as a Pi identity (${this.helper}, exit ${String(code)}): ${stderr}`,
+        `cannot start processes as a Pi identity, or a tool could ptrace its Pi (${this.helper}, ` +
+          `exit ${String(code)}): ${stderr}`,
       );
     }
   }
+}
+
+/** `kobe-reclaim`, installed next to the helper. */
+export function reclaimScriptFor(helper: string): string {
+  return path.join(path.dirname(helper), "kobe-reclaim");
 }
 
 /** The Pi identities among the agent's supplementary groups. */
@@ -244,8 +295,10 @@ export async function loadPiIdentities(
   minimum: number,
   groups: readonly number[] = process.getgroups?.() ?? [],
   run?: HelperRunner,
+  reclaimScript: string = reclaimScriptFor(helper),
 ): Promise<PiIdentities> {
   await checkHelperFile(helper);
+  await checkHelperFile(reclaimScript);
   const uids = identityUids(groups);
   if (uids.length < minimum) {
     throw new PiIdentityError(
@@ -253,7 +306,7 @@ export async function loadPiIdentities(
         `${minimum} Pi processes: the pod must list one group per process`,
     );
   }
-  const identities = new PiIdentities(helper, uids, run);
+  const identities = new PiIdentities(helper, uids, run, reclaimScript);
   await identities.probe();
   return identities;
 }

@@ -3,6 +3,8 @@
  *
  *   kobe-runas <uid> <program> [args...]   exec <program> as <uid>
  *   kobe-runas <uid> --kill-all            SIGKILL every process of <uid> (slot reclaim)
+ *   kobe-runas <uid> --probe-ptrace        as <uid>, a child tries to ptrace its parent and read
+ *                                          its memory: exit 0 only if both are refused (Yama)
  *
  * kobe-sandbox-agent runs as KOBE_AGENT_UID; every Pi process and the tools it runs get their own
  * uid from [KOBE_SLOT_UID_MIN, KOBE_SLOT_UID_MAX] (gid = uid, the one supplementary group the
@@ -14,6 +16,10 @@
  * group, and the caller's uid is checked again below). Under gVisor these are capabilities of the
  * sandboxed kernel only. The target runs with no capabilities at all and no_new_privs set, so
  * neither it nor anything it starts can gain privileges again (no file capability, no setuid bit).
+ * The bounding set is left as the pod gave it (SETUID, SETGID): dropping it needs CAP_SETPCAP,
+ * which the container does not have, and with no_new_privs nothing can gain from it.
+ * RLIMIT_NPROC is lowered to KOBE_SLOT_NPROC for the program (counted per uid: one runaway thread
+ * cannot exhaust the sandbox's processes, and --kill-all, which does not fork, always runs).
  *
  * Deliberately tiny: no environment handling (the caller passes Pi's allow-listed environment and
  * the loader runs this file in secure-execution mode anyway), no file descriptor handling (Pi's
@@ -26,11 +32,15 @@
 #include <linux/capability.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/prctl.h>
+#include <sys/ptrace.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -45,6 +55,10 @@
 #endif
 #ifndef KOBE_SLOT_UID_MAX
 #define KOBE_SLOT_UID_MAX 2063
+#endif
+
+#ifndef KOBE_SLOT_NPROC
+#define KOBE_SLOT_NPROC 1024
 #endif
 
 #define EXIT_USAGE 64
@@ -173,6 +187,57 @@ static int kill_all(uid_t uid) {
   return EXIT_FAILED;
 }
 
+/*
+ * A tool runs as its Pi's uid; only Yama (ptrace_scope >= 1) keeps it from ptracing Pi, its
+ * ancestor, or reading Pi's memory (where kobe-policy and its socket live). Checked by doing it:
+ * a child of this process (same uid) tries both against its parent.
+ */
+static int probe_ptrace(void) {
+  /* Like Pi after its exec: dumpable (this file's capabilities made the helper non-dumpable, and
+   * the kernel never lets a non-root process ptrace a non-dumpable one, Yama or not). */
+  if (prctl(PR_SET_DUMPABLE, 1, 0, 0, 0) != 0) return fail("dumpable");
+  const pid_t child = fork();
+  if (child < 0) return fail("fork");
+  if (child == 0) {
+    const pid_t parent = getppid();
+    int attached = 0;
+    if (ptrace(PTRACE_ATTACH, parent, NULL, NULL) == 0) {
+      attached = 1;
+      waitpid(parent, NULL, __WALL);
+      ptrace(PTRACE_DETACH, parent, NULL, NULL);
+    }
+    char path[64];
+    snprintf(path, sizeof path, "/proc/%ld/mem", (long)parent);
+    FILE *mem = fopen(path, "r");
+    int readable = 0;
+    if (mem != NULL) {
+      char byte;
+      readable = fseek(mem, (long)(uintptr_t)&path, SEEK_SET) == 0 && fread(&byte, 1, 1, mem) == 1;
+      fclose(mem);
+    }
+    _exit(attached || readable ? 1 : 0);
+  }
+  int status = 0;
+  if (waitpid(child, &status, 0) != child) return fail("waitpid");
+  if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    fprintf(stderr, "kobe-runas: a process can ptrace or read the memory of its parent\n");
+    return EXIT_FAILED;
+  }
+  return 0;
+}
+
+static int limit_processes(void) {
+  struct rlimit limit;
+  if (getrlimit(RLIMIT_NPROC, &limit) != 0) return fail("getrlimit");
+  const rlim_t wanted = KOBE_SLOT_NPROC;
+  if (limit.rlim_max == RLIM_INFINITY || limit.rlim_max > wanted) limit.rlim_max = wanted;
+  if (limit.rlim_cur == RLIM_INFINITY || limit.rlim_cur > limit.rlim_max) {
+    limit.rlim_cur = limit.rlim_max;
+  }
+  if (setrlimit(RLIMIT_NPROC, &limit) != 0) return fail("setrlimit");
+  return 0;
+}
+
 int main(int argc, char **argv) {
   if (getuid() != KOBE_AGENT_UID || geteuid() != KOBE_AGENT_UID) {
     fprintf(stderr, "kobe-runas: only the sandbox agent may use this\n");
@@ -180,17 +245,22 @@ int main(int argc, char **argv) {
   }
   uid_t uid;
   if (argc < 3 || parse_uid(argv[1], &uid) != 0) {
-    fprintf(stderr, "usage: kobe-runas <uid %d-%d> (<program> [args...] | --kill-all)\n",
+    fprintf(stderr,
+            "usage: kobe-runas <uid %d-%d> (<program> [args...] | --kill-all | --probe-ptrace)\n",
             KOBE_SLOT_UID_MIN, KOBE_SLOT_UID_MAX);
     return EXIT_USAGE;
   }
   const int kill_mode = strcmp(argv[2], "--kill-all") == 0;
-  if (kill_mode && argc != 3) return EXIT_USAGE;
+  const int probe_mode = strcmp(argv[2], "--probe-ptrace") == 0;
+  if ((kill_mode || probe_mode) && argc != 3) return EXIT_USAGE;
   /* /workspace is shared by every thread (D13): files are group-writable by default. */
   umask(S_IWOTH);
   const int switched = become(uid);
   if (switched != 0) return switched;
   if (kill_mode) return kill_all(uid);
+  if (probe_mode) return probe_ptrace();
+  const int limited = limit_processes();
+  if (limited != 0) return limited;
   /* Only Pi's stdio and its policy socket (fd 3) go on; nothing else the agent might hold. */
   if (syscall(SYS_close_range, 4U, ~0U, 0U) != 0) {
     for (int fd = 4; fd < 1024; fd++) close(fd);

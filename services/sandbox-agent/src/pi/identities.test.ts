@@ -126,18 +126,18 @@ describe("loading Pi identities", () => {
   });
 
   it("fails closed: too few identities, or a helper that cannot switch", async () => {
-    await expect(loadPiIdentities("/bin/sh", 8, [2000, 2001], okRunner().run)).rejects.toThrow(
-      /2 Pi identities .* for 8 Pi processes/,
-    );
+    await expect(
+      loadPiIdentities("/bin/sh", 8, [2000, 2001], okRunner().run, "/bin/sh"),
+    ).rejects.toThrow(/2 Pi identities .* for 8 Pi processes/);
     const broken = fakeRunner(() => ({
       code: 71,
       stderr: "kobe-runas: setgroups: Operation not permitted",
     }));
-    await expect(loadPiIdentities("/bin/sh", 1, [2000], broken.run)).rejects.toThrow(
-      /cannot start processes as a Pi identity .*setgroups/,
+    await expect(loadPiIdentities("/bin/sh", 1, [2000], broken.run, "/bin/sh")).rejects.toThrow(
+      /cannot start processes as a Pi identity.*setgroups/,
     );
-    expect(broken.calls).toEqual([["2000", "/bin/true"]]);
-    const ids = await loadPiIdentities("/bin/sh", 2, [1000, 2000, 2001], okRunner().run);
+    expect(broken.calls).toEqual([["2000", "--probe-ptrace"]]);
+    const ids = await loadPiIdentities("/bin/sh", 2, [1000, 2000, 2001], okRunner().run, "/bin/sh");
     expect(ids.size).toBe(2);
   });
 });

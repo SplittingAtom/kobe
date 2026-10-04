@@ -81,7 +81,9 @@ export async function shareOnVolume(root: string, file: string, mode: number): P
     const uid = process.getuid?.();
     if (uid !== undefined && info.uid !== uid) return;
     if (!info.isDirectory() && !info.isFile()) return;
-    if ((info.mode & 0o7777) !== mode) await handle.chmod(mode);
+    // A directory keeps its setgid bit (new entries inherit the workspace group).
+    const wanted = info.isDirectory() ? mode | (info.mode & 0o2000) : mode;
+    if ((info.mode & 0o7777) !== wanted) await handle.chmod(wanted);
   } catch {
     // best effort: the file is still usable by the agent; a Pi identity may not write it
   } finally {

@@ -37,11 +37,13 @@ export async function ensureSessionDir(
 ): Promise<void> {
   const shared = options.shared === true;
   await mkdir(sessionDir, { recursive: true, mode: shared ? 0o770 : 0o700 });
-  if (!shared || sharedDone.has(sessionDir)) return;
+  if (!shared) return;
   const root = options.workspaceDir ?? path.dirname(sessionDir);
+  // Every time (the agent's umask is 077, and a tool may have removed and recreated them).
   for (let dir = sessionDir; dir.startsWith(`${root}/`); dir = path.dirname(dir)) {
     await shareOnVolume(root, dir, 0o2770);
   }
+  if (sharedDone.has(sessionDir)) return;
   for (const name of await readdir(sessionDir).catch(() => [] as string[])) {
     if (name.endsWith(".jsonl")) await shareOnVolume(root, path.join(sessionDir, name), 0o660);
   }

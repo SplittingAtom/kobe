@@ -31,9 +31,9 @@ async function main(): Promise<void> {
     policyExtension: await checkPolicyExtensionFile(loaded.policyExtension),
   };
   const home = process.env.HOME ?? "/home/kobe";
-  // KOBE-71: files the agent creates on the shared workspace are group-writable (Pi identities
-  // reach it through the workspace group); private files are created with explicit modes.
-  process.umask(0o002);
+  // KOBE-71: private by default; what Pi identities must reach (workspace files, session files,
+  // runtime dirs) gets its mode explicitly.
+  process.umask(0o077);
   // Pi identities first: they decide how the runtime directories are laid out, and an agent that
   // was asked for them but cannot provide them must not start Pi under the agent's uid instead.
   const identities = await piIdentities(checked);
@@ -138,12 +138,8 @@ async function piIdentities(config: Config): Promise<PiIdentities | undefined> {
     logger.warn("KOBE_PI_RUNAS not set: Pi and its tools run as the agent's own uid");
     return undefined;
   }
-  // A tool shares its Pi's uid: only Yama (scope >= 1) keeps it from ptracing its Pi (and so
-  // kobe-policy and the policy socket). gVisor enforces scope 1; refuse a kernel that does not.
-  const scope = await readFile("/proc/sys/kernel/yama/ptrace_scope", "utf8").catch(() => "");
-  if (!(Number(scope.trim()) >= 1)) {
-    throw new Error("Pi identities need Yama ptrace_scope >= 1 (tools must not ptrace their Pi)");
-  }
+  // The helper's start-up probe also proves a tool cannot ptrace or read the memory of its Pi
+  // (it shares Pi's uid; kobe-policy and the policy socket live in Pi): refused otherwise.
   const identities = await loadPiIdentities(config.piRunAs, config.maxPiProcesses);
   await mkdir(config.piRuntimeDir, { recursive: true, mode: 0o700 });
   // The workspace guard (workspace/volume.ts) tells files apart by device: what the agent alone

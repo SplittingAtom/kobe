@@ -142,9 +142,23 @@ spec:
     - expression: >-
         variables.containers.all(c,
           c.?securityContext.?capabilities.?drop.orValue([]).exists(d, d == 'ALL') &&
-          c.?securityContext.?capabilities.?add.orValue([]).all(a, a in ['SETUID', 'SETGID']) &&
           !c.?securityContext.?privileged.orValue(false))
-      message: "sandbox containers must drop ALL capabilities, add at most SETUID and SETGID, and not be privileged"
+      message: "sandbox containers must drop ALL capabilities and not be privileged"
+    # The only deviations from "restricted", and only for the sandbox's own container ("agent"):
+    # SETUID/SETGID and privilege escalation, for kobe-runas. Init and ephemeral containers and any
+    # other container get neither.
+    - expression: >-
+        object.spec.containers.all(c, c.name == 'agent' ?
+          c.?securityContext.?capabilities.?add.orValue([]).all(a, a in ['SETUID', 'SETGID']) :
+          (c.?securityContext.?capabilities.?add.orValue([]).size() == 0 &&
+           c.?securityContext.?allowPrivilegeEscalation.orValue(true) == false)) &&
+        (has(object.spec.initContainers) ? object.spec.initContainers : []).all(c,
+          c.?securityContext.?capabilities.?add.orValue([]).size() == 0 &&
+          c.?securityContext.?allowPrivilegeEscalation.orValue(true) == false) &&
+        (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers : []).all(c,
+          c.?securityContext.?capabilities.?add.orValue([]).size() == 0 &&
+          c.?securityContext.?allowPrivilegeEscalation.orValue(true) == false)
+      message: "only the sandbox container 'agent' may add SETUID/SETGID or allow privilege escalation; nothing else may add capabilities"
     - expression: >-
         variables.containers.all(c,
           c.?securityContext.?runAsNonRoot.orValue(object.spec.?securityContext.?runAsNonRoot.orValue(false)) &&

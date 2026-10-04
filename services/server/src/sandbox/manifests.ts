@@ -115,6 +115,12 @@ export function namespaceManifest(team: TeamRef): KubeObject {
         // Pod Security Admission: sandboxes are non-root, no privilege escalation, no capabilities.
         "pod-security.kubernetes.io/enforce": POD_SECURITY_LEVEL,
         "pod-security.kubernetes.io/enforce-version": "latest",
+        // KOBE-71: enforced "baseline" (SETUID/SETGID for Pi identities); everything beyond that is
+        // still reported against "restricted" (and Kobe's admission policy enforces the rest).
+        "pod-security.kubernetes.io/warn": "restricted",
+        "pod-security.kubernetes.io/warn-version": "latest",
+        "pod-security.kubernetes.io/audit": "restricted",
+        "pod-security.kubernetes.io/audit-version": "latest",
       },
     },
   };

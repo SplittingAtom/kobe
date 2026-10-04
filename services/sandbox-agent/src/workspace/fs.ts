@@ -9,7 +9,7 @@ import {
   isServerOwnedPath,
   workspacePathIssue,
 } from "@kobe/protocol";
-import { assertOnVolume, openOnVolume } from "./volume.js";
+import { assertOnVolume, openOnVolume, shareOnVolume } from "./volume.js";
 
 /**
  * Filesystem side of workspace sync (KOBE-27). Paths are workspace-relative POSIX paths (protocol
@@ -181,6 +181,8 @@ export async function ensureParents(root: string, rel: string): Promise<void> {
       await mkdir(abs, { mode: 0o775 }).catch(async (error: unknown) => {
         if (!(await lstat(abs).catch(() => undefined))?.isDirectory()) throw error;
       });
+      // The agent's umask is 077: every thread shares the workspace through its group.
+      await shareOnVolume(root, abs, 0o775);
       continue;
     }
     if (stat.isDirectory()) {
@@ -190,6 +192,7 @@ export async function ensureParents(root: string, rel: string): Promise<void> {
     if (!owned) throw new Error(`a file or link is in the way of directory ${current}`);
     await rm(abs, { force: true });
     await mkdir(abs, { mode: 0o775 });
+    await shareOnVolume(root, abs, 0o775);
   }
 }
 
