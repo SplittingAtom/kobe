@@ -16,6 +16,7 @@ import { installIsolationRoutes } from "./routes/install-isolation.js";
 import { installModelsRoutes } from "./routes/install-models.js";
 import { installLegalHoldRoutes } from "./routes/install-legal-hold.js";
 import { installPolicyRoutes } from "./routes/install-policy.js";
+import { installRetentionRoutes } from "./routes/install-retention.js";
 import { installRolesRoutes } from "./routes/install-roles.js";
 import { installSettingsRoutes } from "./routes/install-settings.js";
 import { installTeamsRoutes } from "./routes/install-teams.js";
@@ -32,8 +33,10 @@ import { teamBreakGlassRoutes } from "./routes/team-break-glass.js";
 import { teamInvitesRoutes } from "./routes/team-invites.js";
 import { teamModelsRoutes } from "./routes/team-models.js";
 import { teamPolicyRoutes } from "./routes/team-policy.js";
+import { teamRetentionRoutes } from "./routes/team-retention.js";
 import { teamRoutes } from "./routes/team.js";
 import { threadPendingRoutes } from "./routes/thread-pending.js";
+import { threadRetentionRoutes } from "./routes/thread-retention.js";
 import { threadRoutes } from "./routes/threads.js";
 import {
   installUsageRoutes,
@@ -106,6 +109,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/team/models", teamModelsRoutes(deps));
   api.route("/team/usage", teamUsageRoutes(deps));
   api.route("/team/break-glass", teamBreakGlassRoutes(deps));
+  api.route("/team/retention", teamRetentionRoutes(deps));
   api.route("/team", teamRoutes(deps));
   api.route("/runs", runEventsRoutes(deps));
   api.route("/runs", runRoutes(deps));
@@ -113,6 +117,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/threads", threadRunRoutes(deps));
   api.route("/threads", threadPendingRoutes(deps));
   api.route("/threads", threadUsageRoutes(deps));
+  api.route("/threads", threadRetentionRoutes(deps));
   api.route("/threads", threadRoutes(deps));
   api.route("/agents", agentRoutes(deps));
   api.route("/approvals", approvalRoutes(deps));
@@ -129,6 +134,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/install/usage", installUsageRoutes(deps));
   api.route("/install/break-glass", installBreakGlassRoutes(deps));
   api.route("/install/legal-hold", installLegalHoldRoutes(deps));
+  api.route("/install/retention", installRetentionRoutes(deps));
   if (isolation) api.route("/install/isolation", installIsolationRoutes(isolation));
   app.route("/v1", api);
   return app;

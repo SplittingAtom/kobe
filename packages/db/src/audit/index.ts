@@ -2,6 +2,7 @@ export {
   AUDIT_ACTIONS,
   AUDIT_CATEGORIES,
   AUDIT_EVENTS,
+  RETENTION_PURGE_REASONS,
   SIGN_IN_METHODS,
   isAuditAction,
   type AuditAction,
