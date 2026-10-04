@@ -27,7 +27,7 @@ export const models = defineDomain({
     install_model_limits: ["SELECT", "UPDATE"],
     // Spend of all teams per day, kept by the run_usage trigger (invoker's rights: the repo has
     // no SECURITY DEFINER functions, catalog.db.test.ts). The privileges serve that trigger only:
-    // a guard trigger refuses any write that does not come from it (0044_budgets_rls.sql).
+    // a guard trigger refuses any write that does not come from it (0046_budgets_rls.sql).
     install_model_spend_daily: ["SELECT", "INSERT", "UPDATE"],
     // Budget thresholds crossed (once per period): insert-only, and an insert is verified against
     // the configured budget and the real spend counters (budget_alerts_verify). RLS: a team's rows

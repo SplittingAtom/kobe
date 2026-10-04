@@ -30,7 +30,7 @@ server: BudgetMonitor (LISTEN + 30 s sweep) ── 80/100 % ─▶ budget_alerts
         run start: RunBudgetGate (same numbers) ─▶ 429 budget_exhausted
 ```
 
-- **Data** (`packages/db` `schema/budgets.ts`, migrations `0043_budgets`, `0044_budgets_rls`):
+- **Data** (`packages/db` `schema/budgets.ts`, migrations `0045_budgets`, `0046_budgets_rls`):
   `install_model_limits` † (one row: monthly/daily USD, per-user requests per minute, default 60),
   `team_budgets` (team, RLS: the team row with an optional lower rate, and member rows),
   `model_spend_daily` (team, RLS: cost and calls per UTC day and user) and
@@ -117,7 +117,7 @@ server: BudgetMonitor (LISTEN + 30 s sweep) ── 80/100 % ─▶ budget_alerts
 
 ## Independent security review (coordinator) — resolutions
 
-- **HIGH-1 forgeable/tamperable budget data** (`0044_budgets_rls.sql`):
+- **HIGH-1 forgeable/tamperable budget data** (`0046_budgets_rls.sql`):
   - spend counters (`model_spend_daily`, `install_model_spend_daily`) accept writes only from the
     `run_usage` trigger (`kobe_spend_guard`: trigger depth 2) or a team cascade; the ledger itself
     is append-only (KOBE-43);
