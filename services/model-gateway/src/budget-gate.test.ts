@@ -21,8 +21,9 @@ const line = (over: Partial<BudgetLine>): BudgetLine => ({
   userId: undefined,
   period: "month",
   periodStart: "2026-10-01",
-  limitUsd: 10,
-  spentUsd: 1,
+  unit: "usd",
+  limit: 10,
+  spent: 1,
   ...over,
 });
 
@@ -47,8 +48,8 @@ describe("BudgetGate (KOBE-42)", () => {
     const user = randomUUID();
     expect(await g.admit(call(user))).toEqual({ ok: true });
     lines = [
-      line({ scope: "user", userId: user, period: "day", limitUsd: 1, spentUsd: 1 }),
-      line({ scope: "install", spentUsd: 10 }),
+      line({ scope: "user", userId: user, period: "day", limit: 1, spent: 1 }),
+      line({ scope: "install", spent: 10 }),
     ];
     g.invalidateTeam(teamId);
     expect(await g.admit(call(user))).toEqual({
@@ -89,9 +90,22 @@ describe("BudgetGate (KOBE-42)", () => {
     expect((await g.admit(call(alice))).ok).toBe(true);
   });
 
+  it("a used-up token budget refuses calls too (models without prices included)", async () => {
+    const { g } = gate(() => ({
+      lines: [line({ unit: "tokens", period: "day", limit: 1_000, spent: 1_200 })],
+      requestsPerMinute: 10,
+    }));
+    expect(await g.admit(call(randomUUID()))).toMatchObject({
+      ok: false,
+      status: 402,
+      code: "budget_exhausted",
+      message: "Your team's daily token budget is used up.",
+    });
+  });
+
   it("a zero budget allows nothing", async () => {
     const { g } = gate(() => ({
-      lines: [line({ limitUsd: 0, spentUsd: 0 })],
+      lines: [line({ limit: 0, spent: 0 })],
       requestsPerMinute: 10,
     }));
     expect((await g.admit(call(randomUUID()))).ok).toBe(false);

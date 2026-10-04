@@ -4,6 +4,7 @@ import {
   DEFAULT_REQUESTS_PER_MINUTE,
   type BudgetPeriod,
   type BudgetScope,
+  type BudgetUnit,
 } from "../schema/budgets.js";
 
 /**
@@ -20,8 +21,10 @@ export interface BudgetLine {
   readonly period: BudgetPeriod;
   /** First day of the period (UTC, `YYYY-MM-DD`). */
   readonly periodStart: string;
-  readonly limitUsd: number;
-  readonly spentUsd: number;
+  /** Dollars at catalog prices, or tokens (input + output + cache reads + cache writes). */
+  readonly unit: BudgetUnit;
+  readonly limit: number;
+  readonly spent: number;
 }
 
 export interface MemberBudgetState {
@@ -41,12 +44,12 @@ const SCOPE_ORDER: Readonly<Record<BudgetScope, number>> = { install: 0, team: 1
 
 /** Percent of the limit spent; a zero budget counts as used up (it allows nothing). */
 export const percentUsed = (line: BudgetLine): number =>
-  line.limitUsd <= 0 ? 100 : (line.spentUsd / line.limitUsd) * 100;
+  line.limit <= 0 ? 100 : (line.spent / line.limit) * 100;
 
 /** The used-up budget that stops calls and runs (widest scope first), or undefined. */
 export function exhaustedLine(lines: readonly BudgetLine[]): BudgetLine | undefined {
   return [...lines]
-    .filter((l) => l.spentUsd >= l.limitUsd)
+    .filter((l) => l.spent >= l.limit)
     .sort((a, b) => SCOPE_ORDER[a.scope] - SCOPE_ORDER[b.scope])[0];
 }
 
@@ -54,60 +57,57 @@ type Row = Record<string, unknown>;
 const num = (v: unknown): number | undefined =>
   v === null || v === undefined ? undefined : Number(v);
 
-interface Limits {
-  readonly monthly: number | undefined;
-  readonly daily: number | undefined;
-}
-
+/** A row's limits and spend: `monthly_usd`, `daily_usd`, `monthly_tokens`, `daily_tokens`, and
+ * `month_usd`, `day_usd`, `month_tokens`, `day_tokens`. */
 function linesOf(
   scope: BudgetScope,
   userId: string | undefined,
-  limits: Limits,
-  spent: { readonly month: number; readonly day: number },
+  r: Row,
   starts: { readonly month: string; readonly day: string },
 ): BudgetLine[] {
   const out: BudgetLine[] = [];
-  if (limits.monthly !== undefined) {
-    out.push({
-      scope,
-      userId,
-      period: "month",
-      periodStart: starts.month,
-      limitUsd: limits.monthly,
-      spentUsd: spent.month,
-    });
-  }
-  if (limits.daily !== undefined) {
-    out.push({
-      scope,
-      userId,
-      period: "day",
-      periodStart: starts.day,
-      limitUsd: limits.daily,
-      spentUsd: spent.day,
-    });
+  for (const unit of ["usd", "tokens"] as const) {
+    for (const [period, limitKey, spentKey] of [
+      ["month", `monthly_${unit}`, `month_${unit}`],
+      ["day", `daily_${unit}`, `day_${unit}`],
+    ] as const) {
+      const limit = num(r[limitKey]);
+      if (limit === undefined) continue;
+      out.push({
+        scope,
+        userId,
+        period,
+        periodStart: period === "month" ? starts.month : starts.day,
+        unit,
+        limit,
+        spent: num(r[spentKey]) ?? 0,
+      });
+    }
   }
   return out;
 }
+
+/** Spend columns over a daily counter table aliased `s` (`filter` narrows it). */
+const spendColumns = (starts: { month: string; day: string }) =>
+  sql`COALESCE(sum(s.cost_usd) FILTER (WHERE s.day >= ${starts.month}::date), 0) AS month_usd,
+      COALESCE(sum(s.cost_usd) FILTER (WHERE s.day = ${starts.day}::date), 0) AS day_usd,
+      COALESCE(sum(s.tokens) FILTER (WHERE s.day >= ${starts.month}::date), 0) AS month_tokens,
+      COALESCE(sum(s.tokens) FILTER (WHERE s.day = ${starts.day}::date), 0) AS day_tokens`;
 
 /** The install limits and the install's spend this month and today (any team context). */
 async function installPart(
   tx: KobeTx,
   starts: { readonly month: string; readonly day: string },
-): Promise<{ limits: Limits; rpm: number; spent: { month: number; day: number } }> {
+): Promise<{ row: Row; rpm: number }> {
   const res = await tx.execute<Row>(sql`
-    SELECT l.monthly_usd, l.daily_usd, l.user_requests_per_minute,
-           (SELECT COALESCE(sum(cost_usd), 0) FROM install_model_spend_daily
-             WHERE day >= ${starts.month}::date) AS month,
-           (SELECT COALESCE(sum(cost_usd), 0) FROM install_model_spend_daily
-             WHERE day = ${starts.day}::date) AS day
-      FROM install_model_limits l WHERE l.id = 1`);
-  const r = res.rows[0] ?? {};
-  return {
-    limits: { monthly: num(r.monthly_usd), daily: num(r.daily_usd) },
-    rpm: num(r.user_requests_per_minute) ?? DEFAULT_REQUESTS_PER_MINUTE,
-    spent: { month: num(r.month) ?? 0, day: num(r.day) ?? 0 },
-  };
+    SELECT l.monthly_usd, l.daily_usd, l.monthly_tokens, l.daily_tokens,
+           l.user_requests_per_minute, sp.*
+      FROM install_model_limits l,
+           LATERAL (SELECT ${spendColumns(starts)} FROM install_model_spend_daily s
+                     WHERE s.day >= ${starts.month}::date) sp
+     WHERE l.id = 1`);
+  const row = res.rows[0] ?? {};
+  return { row, rpm: num(row.user_requests_per_minute) ?? DEFAULT_REQUESTS_PER_MINUTE };
 }
 
 /**
@@ -131,31 +131,21 @@ async function budgetLines(
   const starts = periodStarts(now);
   const install = await installPart(tx, starts);
   const budgets = await tx.execute<Row>(sql`
-    SELECT b.user_id, b.monthly_usd, b.daily_usd, b.user_requests_per_minute,
-           COALESCE((SELECT sum(s.cost_usd) FROM model_spend_daily s
-                      WHERE s.team_id = b.team_id AND s.day >= ${starts.month}::date
-                        AND (b.user_id IS NULL OR s.user_id = b.user_id)), 0) AS month,
-           COALESCE((SELECT sum(s.cost_usd) FROM model_spend_daily s
-                      WHERE s.team_id = b.team_id AND s.day = ${starts.day}::date
-                        AND (b.user_id IS NULL OR s.user_id = b.user_id)), 0) AS day
-      FROM team_budgets b
+    SELECT b.user_id, b.monthly_usd, b.daily_usd, b.monthly_tokens, b.daily_tokens,
+           b.user_requests_per_minute, sp.*
+      FROM team_budgets b,
+           LATERAL (SELECT ${spendColumns(starts)} FROM model_spend_daily s
+                     WHERE s.team_id = b.team_id AND s.day >= ${starts.month}::date
+                       AND (b.user_id IS NULL OR s.user_id = b.user_id)) sp
      WHERE b.team_id = ${teamId}::uuid
        ${member === undefined ? sql`` : sql`AND (b.user_id IS NULL OR b.user_id = ${member}::uuid)`}`);
-  const lines = linesOf("install", undefined, install.limits, install.spent, starts);
+  const lines = linesOf("install", undefined, install.row, starts);
   let rpm = install.rpm;
   for (const r of budgets.rows) {
     const userId = (r.user_id as string | null) ?? undefined;
     const teamRpm = num(r.user_requests_per_minute);
     if (userId === undefined && teamRpm !== undefined) rpm = Math.min(rpm, teamRpm);
-    lines.push(
-      ...linesOf(
-        userId ? "user" : "team",
-        userId,
-        { monthly: num(r.monthly_usd), daily: num(r.daily_usd) },
-        { month: num(r.month) ?? 0, day: num(r.day) ?? 0 },
-        starts,
-      ),
-    );
+    lines.push(...linesOf(userId ? "user" : "team", userId, r, starts));
   }
   return { lines, requestsPerMinute: rpm };
 }

@@ -8,7 +8,8 @@ import type { CallContext, CallGate, GateDecision } from "./seams.js";
  * refused **before** it reaches Bifrost; a call already forwarded is never cut, so the step in
  * flight finishes. The server's budget monitor then ends the runs (`stopForBudget`).
  *
- * - A used-up budget (spend ≥ limit for the month or the day, at any level): 402
+ * - A used-up budget, in dollars or in tokens (spend ≥ limit for the month or the day, at any
+ *   level; token budgets also cap models without catalog prices): 402
  *   `budget_exhausted`. Spend is what the `run_usage` ledger holds (written within about a second
  *   of a call ending); the state is cached for `ttlMs` and dropped on `spend:` / `budgets:` hints.
  * - More requests than the member's per-minute rate (the install's, or the team's lower one): 429
@@ -26,7 +27,8 @@ const SCOPE_NAMES: Readonly<Record<BudgetLine["scope"], string>> = {
 };
 
 export function budgetMessage(line: BudgetLine): string {
-  return `${SCOPE_NAMES[line.scope]} ${line.period === "month" ? "monthly" : "daily"} model budget is used up.`;
+  const kind = line.unit === "tokens" ? "token" : "model";
+  return `${SCOPE_NAMES[line.scope]} ${line.period === "month" ? "monthly" : "daily"} ${kind} budget is used up.`;
 }
 
 interface Bucket {

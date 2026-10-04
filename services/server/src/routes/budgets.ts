@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { MAX_BUDGET_USD, MAX_REQUESTS_PER_MINUTE } from "@kobe/db";
+import { MAX_BUDGET_TOKENS, MAX_BUDGET_USD, MAX_REQUESTS_PER_MINUTE } from "@kobe/db";
 import type { AuthVariables } from "../auth/session.js";
 import {
   requireInstallPermission,
@@ -27,13 +27,17 @@ const amount = z
   .max(MAX_BUDGET_USD)
   .transform((v) => Math.round(v * 100) / 100)
   .nullable();
+/** Tokens (input + output + cache reads + cache writes); null = no token budget. */
+const tokens = z.number().int().min(0).max(MAX_BUDGET_TOKENS).nullable();
 const rate = z.number().int().min(1).max(MAX_REQUESTS_PER_MINUTE);
+const tokenFields = { monthly_tokens: tokens.optional(), daily_tokens: tokens.optional() };
 const nonEmpty = (v: object) => Object.keys(v).length > 0;
 
 const installSchema = z
   .strictObject({
     monthly_usd: amount.optional(),
     daily_usd: amount.optional(),
+    ...tokenFields,
     user_requests_per_minute: rate.optional(),
   })
   .refine(nonEmpty, "nothing to change");
@@ -41,14 +45,22 @@ const teamSchema = z
   .strictObject({
     monthly_usd: amount.optional(),
     daily_usd: amount.optional(),
+    ...tokenFields,
     /** Null: the install's rate. */
     user_requests_per_minute: rate.nullable().optional(),
   })
   .refine(nonEmpty, "nothing to change");
-const memberSchema = z.strictObject({ monthly_usd: amount, daily_usd: amount });
+const memberSchema = z
+  .strictObject({
+    monthly_usd: amount.default(null),
+    daily_usd: amount.default(null),
+    monthly_tokens: tokens.default(null),
+    daily_tokens: tokens.default(null),
+  })
+  .refine((v) => Object.values(v).some((x) => x !== null), "set at least one budget");
 
 const BUDGET_HINT =
-  'Send {"monthly_usd": number|null, "daily_usd": number|null} (dollars, 0–1,000,000,000).';
+  'Send "monthly_usd"/"daily_usd" (dollars, 0–1,000,000,000) and/or "monthly_tokens"/"daily_tokens" (whole tokens), each a number or null.';
 
 /**
  * Team budgets (`/v1/team/budgets`, spec D8: team admins, `team.budgets.manage`): the team's

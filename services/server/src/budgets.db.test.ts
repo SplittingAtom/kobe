@@ -153,6 +153,7 @@ describe("Gate 2: a budget stops a run after its current step (D30)", () => {
     const admin = f.on(0, w.owner);
     expect((await admin.put("/v1/team/budgets/team", { monthly_usd: 1 })).status).toBe(200);
     const ws = await f.connect(w);
+    holdStops(ws);
     const threadId = await f.thread(w.owner);
     const run = await f.message(w.owner, threadId, "summarise the report");
     const queued = await f.message(w.owner, threadId, "and then this");
@@ -288,6 +289,65 @@ describe("Gate 2: a budget stops a run after its current step (D30)", () => {
         },
       },
     });
+  });
+
+  it("a token budget stops a run on a model without prices (user decision 2026-10-04)", async () => {
+    const w = await f.world();
+    const admin = f.on(0, w.owner);
+    const set = await admin.put("/v1/team/budgets/team", {
+      monthly_usd: 100,
+      monthly_tokens: 1_000,
+    });
+    expect(set.json.team).toMatchObject({ monthly_usd: 100, monthly_tokens: 1_000 });
+    const ws = await f.connect(w);
+    holdStops(ws);
+    const threadId = await f.thread(w.owner);
+    const run = await f.message(w.owner, threadId, "local model please");
+    const start = await ws.started(run);
+    // A call to an unpriced model (Ollama Cloud): no cost, 1,200 tokens with its cache reads.
+    await recordModelUsage(f.fx.db, [
+      {
+        ...call(w.team, w.owner.id, 0, run),
+        model: "ollama/llama-unpriced",
+        inputTokens: 300,
+        outputTokens: 400,
+        cacheReadTokens: 500,
+      },
+    ]);
+    expect(await f.fx.replica(0).deps.budgets.evaluate(w.team)).toEqual({
+      alerts: 2,
+      stopped: ["team"],
+    });
+    await ws.sb.until(() => ws.sb.frames("run.stop").find((s) => s.run_id === run));
+    ws.reply(start, "Done with this step.");
+    await f.until(w.team, run, "budget_stopped");
+    expect((await f.send(w.owner, threadId, "more")).status).toBe(429);
+    const { rows } = await f.fx.admin.query<{
+      unit: string;
+      threshold: number;
+      limit_amount: string;
+    }>(
+      `SELECT unit, threshold, limit_amount FROM budget_alerts WHERE team_id = $1 ORDER BY threshold`,
+      [w.team],
+    );
+    expect(rows.map((r) => [r.unit, r.threshold, Number(r.limit_amount)])).toEqual([
+      ["tokens", 80, 1000],
+      ["tokens", 100, 1000],
+    ]);
+    const status = await admin.get("/v1/team/budgets/status");
+    expect(status.json.lines).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ unit: "tokens", limit: 1000, spent: 1200, state: "exhausted" }),
+        expect.objectContaining({ unit: "usd", limit: 100, spent: 0, state: "ok" }),
+      ]),
+    );
+    const { rows: audit } = await f.fx.admin.query<{ target: Record<string, unknown> }>(
+      `SELECT target FROM audit_log WHERE team_id = $1 AND action = 'models.budget.reached'`,
+      [w.team],
+    );
+    expect(audit.map((a) => a.target)).toEqual([
+      expect.objectContaining({ scope: "team", unit: "tokens", limit: 1000, spent: 1200 }),
+    ]);
   });
 
   it("a member's own budget stops only that member's runs", async () => {

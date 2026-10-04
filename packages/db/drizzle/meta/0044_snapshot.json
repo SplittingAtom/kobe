@@ -1,6 +1,6 @@
 {
-  "id": "864d594f-727a-48f6-a503-5f6acc156f01",
-  "prevId": "e944db71-6cea-4add-ad98-810e0c17c377",
+  "id": "57476322-dbba-4f12-b93f-91f2cec91287",
+  "prevId": "79b5dce6-9467-4afc-80fb-50870a26643c",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -7125,15 +7125,21 @@
           "primaryKey": false,
           "notNull": true
         },
-        "limit_usd": {
-          "name": "limit_usd",
-          "type": "numeric(14, 2)",
+        "unit": {
+          "name": "unit",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "spent_usd": {
-          "name": "spent_usd",
-          "type": "numeric(24, 10)",
+        "limit_amount": {
+          "name": "limit_amount",
+          "type": "numeric(24, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "spent_amount": {
+          "name": "spent_amount",
+          "type": "numeric(30, 10)",
           "primaryKey": false,
           "notNull": true
         },
@@ -7177,6 +7183,7 @@
             "team_id",
             "user_id",
             "scope",
+            "unit",
             "period",
             "period_start",
             "threshold"
@@ -7198,9 +7205,13 @@
           "name": "budget_alerts_threshold",
           "value": "\"budget_alerts\".\"threshold\" IN (80, 100)"
         },
+        "budget_alerts_unit": {
+          "name": "budget_alerts_unit",
+          "value": "\"budget_alerts\".\"unit\" IN ('usd', 'tokens')"
+        },
         "budget_alerts_crossed": {
           "name": "budget_alerts_crossed",
-          "value": "\"budget_alerts\".\"spent_usd\" >= \"budget_alerts\".\"limit_usd\" * \"budget_alerts\".\"threshold\" / 100"
+          "value": "\"budget_alerts\".\"spent_amount\" >= \"budget_alerts\".\"limit_amount\" * \"budget_alerts\".\"threshold\" / 100"
         },
         "budget_alerts_subject": {
           "name": "budget_alerts_subject",
@@ -7229,6 +7240,18 @@
         "daily_usd": {
           "name": "daily_usd",
           "type": "numeric(14, 2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "monthly_tokens": {
+          "name": "monthly_tokens",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "daily_tokens": {
+          "name": "daily_tokens",
+          "type": "bigint",
           "primaryKey": false,
           "notNull": false
         },
@@ -7279,7 +7302,7 @@
         },
         "install_model_limits_amounts": {
           "name": "install_model_limits_amounts",
-          "value": "(\"install_model_limits\".\"monthly_usd\" IS NULL OR \"install_model_limits\".\"monthly_usd\" BETWEEN 0 AND 1000000000) AND (\"install_model_limits\".\"daily_usd\" IS NULL OR \"install_model_limits\".\"daily_usd\" BETWEEN 0 AND 1000000000)"
+          "value": "(\"install_model_limits\".\"monthly_usd\" IS NULL OR \"install_model_limits\".\"monthly_usd\" BETWEEN 0 AND 1000000000) AND (\"install_model_limits\".\"daily_usd\" IS NULL OR \"install_model_limits\".\"daily_usd\" BETWEEN 0 AND 1000000000) AND (\"install_model_limits\".\"monthly_tokens\" IS NULL OR \"install_model_limits\".\"monthly_tokens\" BETWEEN 0 AND 1000000000000000) AND (\"install_model_limits\".\"daily_tokens\" IS NULL OR \"install_model_limits\".\"daily_tokens\" BETWEEN 0 AND 1000000000000000)"
         },
         "install_model_limits_rpm": {
           "name": "install_model_limits_rpm",
@@ -7301,6 +7324,13 @@
         "cost_usd": {
           "name": "cost_usd",
           "type": "numeric(24, 10)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "tokens": {
+          "name": "tokens",
+          "type": "bigint",
           "primaryKey": false,
           "notNull": true,
           "default": 0
@@ -7339,6 +7369,13 @@
         "cost_usd": {
           "name": "cost_usd",
           "type": "numeric(24, 10)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "tokens": {
+          "name": "tokens",
+          "type": "bigint",
           "primaryKey": false,
           "notNull": true,
           "default": 0
@@ -7414,6 +7451,18 @@
         "daily_usd": {
           "name": "daily_usd",
           "type": "numeric(14, 2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "monthly_tokens": {
+          "name": "monthly_tokens",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "daily_tokens": {
+          "name": "daily_tokens",
+          "type": "bigint",
           "primaryKey": false,
           "notNull": false
         },
@@ -7532,7 +7581,7 @@
       "checkConstraints": {
         "team_budgets_amounts": {
           "name": "team_budgets_amounts",
-          "value": "(\"team_budgets\".\"monthly_usd\" IS NULL OR \"team_budgets\".\"monthly_usd\" BETWEEN 0 AND 1000000000) AND (\"team_budgets\".\"daily_usd\" IS NULL OR \"team_budgets\".\"daily_usd\" BETWEEN 0 AND 1000000000)"
+          "value": "(\"team_budgets\".\"monthly_usd\" IS NULL OR \"team_budgets\".\"monthly_usd\" BETWEEN 0 AND 1000000000) AND (\"team_budgets\".\"daily_usd\" IS NULL OR \"team_budgets\".\"daily_usd\" BETWEEN 0 AND 1000000000) AND (\"team_budgets\".\"monthly_tokens\" IS NULL OR \"team_budgets\".\"monthly_tokens\" BETWEEN 0 AND 1000000000000000) AND (\"team_budgets\".\"daily_tokens\" IS NULL OR \"team_budgets\".\"daily_tokens\" BETWEEN 0 AND 1000000000000000)"
         },
         "team_budgets_rpm": {
           "name": "team_budgets_rpm",

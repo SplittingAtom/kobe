@@ -26,9 +26,12 @@ import { recordAudit } from "../audit/record.js";
  * the model-gateway shims (`budgets:<team|*>`). A change of the per-user request rate also bumps
  * the gateway's desired version, so the sync pushes the virtual keys' rate limits to Bifrost.
  */
+/** Dollar and token budgets (user decision 2026-10-04: tokens cap models without prices). */
 export interface BudgetAmounts {
   readonly monthly_usd: number | null;
   readonly daily_usd: number | null;
+  readonly monthly_tokens: number | null;
+  readonly daily_tokens: number | null;
 }
 
 export interface InstallLimitsView extends BudgetAmounts {
@@ -39,6 +42,9 @@ export interface InstallLimitsView extends BudgetAmounts {
 export interface SpendView {
   readonly month_usd: number;
   readonly day_usd: number;
+  /** Input + output + cache read + cache write tokens. */
+  readonly month_tokens: number;
+  readonly day_tokens: number;
 }
 
 export interface MemberBudgetView extends BudgetAmounts {
@@ -55,7 +61,12 @@ export interface TeamBudgetsView {
    * every team's together, which a team does not see in dollars.
    */
   readonly install: InstallLimitsView & {
-    readonly percent_used: { readonly month: number | null; readonly day: number | null };
+    readonly percent_used: {
+      readonly month_usd: number | null;
+      readonly day_usd: number | null;
+      readonly month_tokens: number | null;
+      readonly day_tokens: number | null;
+    };
   };
   readonly team: BudgetAmounts & {
     readonly user_requests_per_minute: number | null;
@@ -76,6 +87,8 @@ export async function getInstallLimits(db: KobeDb | KobeTx): Promise<InstallLimi
   return {
     monthly_usd: row?.monthlyUsd ?? null,
     daily_usd: row?.dailyUsd ?? null,
+    monthly_tokens: row?.monthlyTokens ?? null,
+    daily_tokens: row?.dailyTokens ?? null,
     user_requests_per_minute: row?.userRequestsPerMinute ?? 60,
     updated_at: (row?.updatedAt ?? new Date(0)).toISOString(),
   };
@@ -84,6 +97,8 @@ export async function getInstallLimits(db: KobeDb | KobeTx): Promise<InstallLimi
 export interface InstallLimitsInput {
   readonly monthly_usd?: number | null | undefined;
   readonly daily_usd?: number | null | undefined;
+  readonly monthly_tokens?: number | null | undefined;
+  readonly daily_tokens?: number | null | undefined;
   readonly user_requests_per_minute?: number | undefined;
 }
 
@@ -99,6 +114,8 @@ export async function setInstallLimits(
     const next = {
       monthlyUsd: pick(input.monthly_usd, before.monthly_usd),
       dailyUsd: pick(input.daily_usd, before.daily_usd),
+      monthlyTokens: pick(input.monthly_tokens, before.monthly_tokens),
+      dailyTokens: pick(input.daily_tokens, before.daily_tokens),
       userRequestsPerMinute: pick(input.user_requests_per_minute, before.user_requests_per_minute),
     };
     await tx
@@ -113,6 +130,8 @@ export async function setInstallLimits(
         scope: "install",
         monthlyUsd: next.monthlyUsd,
         dailyUsd: next.dailyUsd,
+        monthlyTokens: next.monthlyTokens,
+        dailyTokens: next.dailyTokens,
         requestsPerMinute: next.userRequestsPerMinute,
       },
     });
@@ -128,13 +147,25 @@ async function spendOf(
   starts: { month: string; day: string },
 ): Promise<SpendView> {
   const res = await tx.execute<Row>(sql`
-    SELECT COALESCE(sum(cost_usd) FILTER (WHERE day >= ${starts.month}::date), 0) AS month,
-           COALESCE(sum(cost_usd) FILTER (WHERE day = ${starts.day}::date), 0) AS day
-      FROM model_spend_daily
+    SELECT ${SPEND(starts)} FROM model_spend_daily
      WHERE team_id = ${teamId}::uuid AND day >= ${starts.month}::date
        ${userId === undefined ? sql`` : sql`AND user_id = ${userId}::uuid`}`);
-  return { month_usd: Number(res.rows[0]?.month ?? 0), day_usd: Number(res.rows[0]?.day ?? 0) };
+  return spendView(res.rows[0]);
 }
+
+/** Dollars and tokens this month and today over a daily counter table. */
+const SPEND = (starts: { month: string; day: string }) =>
+  sql`COALESCE(sum(cost_usd) FILTER (WHERE day >= ${starts.month}::date), 0) AS month_usd,
+      COALESCE(sum(cost_usd) FILTER (WHERE day = ${starts.day}::date), 0) AS day_usd,
+      COALESCE(sum(tokens) FILTER (WHERE day >= ${starts.month}::date), 0) AS month_tokens,
+      COALESCE(sum(tokens) FILTER (WHERE day = ${starts.day}::date), 0) AS day_tokens`;
+
+const spendView = (r: Row | undefined): SpendView => ({
+  month_usd: Number(r?.month_usd ?? 0),
+  day_usd: Number(r?.day_usd ?? 0),
+  month_tokens: Number(r?.month_tokens ?? 0),
+  day_tokens: Number(r?.day_tokens ?? 0),
+});
 
 export async function teamBudgetsView(
   db: KobeDb,
@@ -144,15 +175,20 @@ export async function teamBudgetsView(
   const starts = periodStarts(now);
   return withTeam(db, teamId, async (tx) => {
     const install = await getInstallLimits(tx);
-    const installSpend = await tx.execute<Row>(sql`
-      SELECT COALESCE(sum(cost_usd) FILTER (WHERE day >= ${starts.month}::date), 0) AS month,
-             COALESCE(sum(cost_usd) FILTER (WHERE day = ${starts.day}::date), 0) AS day
-        FROM install_model_spend_daily WHERE day >= ${starts.month}::date`);
+    const installSpend = spendView(
+      (
+        await tx.execute<Row>(sql`
+          SELECT ${SPEND(starts)} FROM install_model_spend_daily
+           WHERE day >= ${starts.month}::date`)
+      ).rows[0],
+    );
     const rows = await tx
       .select({
         userId: teamBudgets.userId,
         monthlyUsd: teamBudgets.monthlyUsd,
         dailyUsd: teamBudgets.dailyUsd,
+        monthlyTokens: teamBudgets.monthlyTokens,
+        dailyTokens: teamBudgets.dailyTokens,
         rpm: teamBudgets.userRequestsPerMinute,
         name: users.name,
         email: users.email,
@@ -170,6 +206,8 @@ export async function teamBudgetsView(
         email: r.email,
         monthly_usd: r.monthlyUsd,
         daily_usd: r.dailyUsd,
+        monthly_tokens: r.monthlyTokens,
+        daily_tokens: r.dailyTokens,
         spent: await spendOf(tx, teamId, r.userId, starts),
       });
     }
@@ -179,13 +217,17 @@ export async function teamBudgetsView(
       install: {
         ...install,
         percent_used: {
-          month: percentOf(Number(installSpend.rows[0]?.month ?? 0), install.monthly_usd),
-          day: percentOf(Number(installSpend.rows[0]?.day ?? 0), install.daily_usd),
+          month_usd: percentOf(installSpend.month_usd, install.monthly_usd),
+          day_usd: percentOf(installSpend.day_usd, install.daily_usd),
+          month_tokens: percentOf(installSpend.month_tokens, install.monthly_tokens),
+          day_tokens: percentOf(installSpend.day_tokens, install.daily_tokens),
         },
       },
       team: {
         monthly_usd: team?.monthlyUsd ?? null,
         daily_usd: team?.dailyUsd ?? null,
+        monthly_tokens: team?.monthlyTokens ?? null,
+        daily_tokens: team?.dailyTokens ?? null,
         user_requests_per_minute: teamRpm,
         spent: await spendOf(tx, teamId, undefined, starts),
       },
@@ -201,6 +243,8 @@ export async function teamBudgetsView(
 export interface TeamBudgetInput {
   readonly monthly_usd?: number | null | undefined;
   readonly daily_usd?: number | null | undefined;
+  readonly monthly_tokens?: number | null | undefined;
+  readonly daily_tokens?: number | null | undefined;
   /** Null: use the install's rate. */
   readonly user_requests_per_minute?: number | null | undefined;
 }
@@ -231,6 +275,8 @@ export async function setTeamBudget(
     const next = {
       monthlyUsd: pick(input.monthly_usd, before?.monthlyUsd ?? null),
       dailyUsd: pick(input.daily_usd, before?.dailyUsd ?? null),
+      monthlyTokens: pick(input.monthly_tokens, before?.monthlyTokens ?? null),
+      dailyTokens: pick(input.daily_tokens, before?.dailyTokens ?? null),
       userRequestsPerMinute: pick(
         input.user_requests_per_minute,
         before?.userRequestsPerMinute ?? null,
@@ -255,6 +301,8 @@ export async function setTeamBudget(
         scope: "team",
         monthlyUsd: next.monthlyUsd,
         dailyUsd: next.dailyUsd,
+        monthlyTokens: next.monthlyTokens,
+        dailyTokens: next.dailyTokens,
         requestsPerMinute: next.userRequestsPerMinute,
       },
     });
@@ -286,7 +334,12 @@ export async function setMemberBudget(
         .where(and(eq(teamBudgets.teamId, teamId), eq(teamBudgets.id, before.id)));
     } else {
       if (!(await isMember(tx, teamId, userId))) return "not_member";
-      const values = { monthlyUsd: input.monthly_usd, dailyUsd: input.daily_usd };
+      const values = {
+        monthlyUsd: input.monthly_usd,
+        dailyUsd: input.daily_usd,
+        monthlyTokens: input.monthly_tokens,
+        dailyTokens: input.daily_tokens,
+      };
       if (before) {
         await tx
           .update(teamBudgets)
@@ -305,6 +358,8 @@ export async function setMemberBudget(
         userId,
         monthlyUsd: input?.monthly_usd ?? null,
         dailyUsd: input?.daily_usd ?? null,
+        monthlyTokens: input?.monthly_tokens ?? null,
+        dailyTokens: input?.daily_tokens ?? null,
         ...(input === null ? { removed: true as const } : {}),
       },
     });
@@ -317,9 +372,10 @@ export type BudgetState = "ok" | "warning" | "exhausted";
 export interface BudgetStatusLine {
   readonly scope: BudgetLine["scope"];
   readonly period: BudgetLine["period"];
-  /** Null for the install budget (its spend is every team's together). */
-  readonly limit_usd: number | null;
-  readonly spent_usd: number | null;
+  readonly unit: BudgetLine["unit"];
+  /** In `unit`; null for the install budget (its spend is every team's together). */
+  readonly limit: number | null;
+  readonly spent: number | null;
   readonly percent: number;
   readonly state: BudgetState;
 }
@@ -342,8 +398,9 @@ export async function memberBudgetStatus(
   const lines = state.lines.map((l) => ({
     scope: l.scope,
     period: l.period,
-    limit_usd: l.scope === "install" ? null : l.limitUsd,
-    spent_usd: l.scope === "install" ? null : Math.round(l.spentUsd * 1e6) / 1e6,
+    unit: l.unit,
+    limit: l.scope === "install" ? null : l.limit,
+    spent: l.scope === "install" ? null : Math.round(l.spent * 1e6) / 1e6,
     percent: Math.min(100, Math.round(percentUsed(l))),
     state: stateOf(l),
   }));

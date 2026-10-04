@@ -187,7 +187,7 @@ export class BudgetMonitor {
     // Stop what is used up, widest first; a narrower stop of the same runs is then a no-op.
     const stopped: string[] = [];
     const seen = new Set<string>();
-    for (const line of lines.filter((l) => l.spentUsd >= l.limitUsd)) {
+    for (const line of lines.filter((l) => l.spent >= l.limit)) {
       const key = line.scope === "user" ? `user:${line.userId ?? ""}` : line.scope;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -224,17 +224,17 @@ export class BudgetMonitor {
       SELECT 1 FROM budget_alerts
        WHERE team_id IS NOT DISTINCT FROM ${alertTeam}::uuid
          AND user_id IS NOT DISTINCT FROM ${alertUser}::uuid
-         AND scope = ${line.scope} AND period = ${line.period}
+         AND scope = ${line.scope} AND unit = ${line.unit} AND period = ${line.period}
          AND period_start = ${line.periodStart}::date AND threshold = ${threshold}`);
     if (known.rows.length > 0) return false;
     // Recipients are read first (team admins live behind the team's RLS).
     const recipients = await this.recipients(teamId, line);
     return db.transaction(async (tx) => {
       const inserted = await tx.execute<{ id: string }>(sql`
-        INSERT INTO budget_alerts (team_id, user_id, scope, period, period_start, threshold,
-                                   limit_usd, spent_usd)
-        VALUES (${alertTeam}, ${alertUser}, ${line.scope}, ${line.period},
-                ${line.periodStart}::date, ${threshold}, ${line.limitUsd}, ${line.spentUsd})
+        INSERT INTO budget_alerts (team_id, user_id, scope, unit, period, period_start,
+                                   threshold, limit_amount, spent_amount)
+        VALUES (${alertTeam}, ${alertUser}, ${line.scope}, ${line.unit}, ${line.period},
+                ${line.periodStart}::date, ${threshold}, ${line.limit}, ${line.spent})
         ON CONFLICT ON CONSTRAINT budget_alerts_once DO NOTHING
         RETURNING id`);
       const id = inserted.rows[0]?.id;
@@ -254,8 +254,9 @@ export class BudgetMonitor {
             ...(alertUser ? { userId: alertUser } : {}),
             period: line.period,
             periodStart: line.periodStart,
-            limitUsd: line.limitUsd,
-            spentUsd: Math.round(line.spentUsd * 1e6) / 1e6,
+            unit: line.unit,
+            limit: line.limit,
+            spent: Math.round(line.spent * 1e6) / 1e6,
           },
         });
       }

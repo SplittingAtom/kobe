@@ -99,12 +99,16 @@ describe("daily spend counters (run_usage trigger)", () => {
       tx.select().from(modelSpendDaily).where(eq(modelSpendDaily.teamId, teamA)),
     );
     const byKey = Object.fromEntries(
-      rows.map((r) => [`${r.day}:${r.userId === alice ? "alice" : "bob"}`, [r.costUsd, r.calls]]),
+      rows.map((r) => [
+        `${r.day}:${r.userId === alice ? "alice" : "bob"}`,
+        [r.costUsd, r.tokens, r.calls],
+      ]),
     );
+    // Tokens: input + output + cache reads + cache writes (here 1M input per call).
     expect(byKey).toEqual({
-      "2026-10-15:alice": [2, 2],
-      "2026-10-15:bob": [1, 1],
-      "2026-10-14:alice": [1, 1],
+      "2026-10-15:alice": [2, 2_000_000, 2],
+      "2026-10-15:bob": [1, 1_000_000, 1],
+      "2026-10-14:alice": [1, 1_000_000, 1],
     });
     const [day] = await app.db
       .select()
@@ -125,20 +129,28 @@ describe("budget state", () => {
       .where(eq(installModelLimits.id, 1));
     await withTeam(app.db, teamA, (tx) =>
       tx.insert(teamBudgets).values([
-        { teamId: teamA, monthlyUsd: 10, dailyUsd: 3, userRequestsPerMinute: 20, updatedBy: bob },
+        {
+          teamId: teamA,
+          monthlyUsd: 10,
+          dailyUsd: 3,
+          monthlyTokens: 50_000_000,
+          userRequestsPerMinute: 20,
+          updatedBy: bob,
+        },
         { teamId: teamA, userId: alice, monthlyUsd: 5, updatedBy: bob },
         { teamId: teamA, userId: bob, dailyUsd: 100, updatedBy: bob },
       ]),
     );
     const team = await withTeam(app.db, teamA, (tx) => loadTeamBudgetLines(tx, teamA, now));
     expect(team.requestsPerMinute).toBe(20);
-    const view = team.lines.map((l) => [l.scope, l.period, l.limitUsd, l.spentUsd]);
+    const view = team.lines.map((l) => [l.scope, l.period, l.unit, l.limit, l.spent]);
     expect(view).toEqual(
       expect.arrayContaining([
-        ["team", "month", 10, 4],
-        ["team", "day", 3, 3],
-        ["user", "month", 5, 3],
-        ["user", "day", 100, 1],
+        ["team", "month", "usd", 10, 4],
+        ["team", "day", "usd", 3, 3],
+        ["team", "month", "tokens", 50_000_000, 4_000_000],
+        ["user", "month", "usd", 5, 3],
+        ["user", "day", "usd", 100, 1],
       ]),
     );
     const aliceState = await withTeam(app.db, teamA, (tx) =>
@@ -153,6 +165,39 @@ describe("budget state", () => {
       loadMemberBudgetState(tx, teamA, alice, new Date("2026-10-16T00:00:01Z")),
     );
     expect(exhaustedLine(tomorrow.lines)).toBeUndefined();
+  });
+
+  it("a token budget caps a model without prices (user decision 2026-10-04)", async () => {
+    const team = randomUUID();
+    const owner = createDb(inject("ownerUrl"));
+    await owner.db.insert(teams).values({ id: team, slug: `bt-${team.slice(0, 8)}`, name: "T" });
+    await owner.close();
+    await withTeam(app.db, team, (tx) =>
+      tx
+        .insert(teamBudgets)
+        .values({ teamId: team, monthlyUsd: 100, dailyTokens: 1_500, updatedBy: bob }),
+    );
+    // An unpriced model: no cost, but every token counts (cache reads and writes too).
+    await recordModelUsage(app.db, [
+      usage({
+        teamId: team,
+        model: "kobe-unpriced/m",
+        inputTokens: 500,
+        outputTokens: 400,
+        cacheReadTokens: 500,
+        cacheWriteTokens: 100,
+      }),
+    ]);
+    const state = await withTeam(app.db, team, (tx) => loadMemberBudgetState(tx, team, alice, now));
+    expect(exhaustedLine(state.lines)).toMatchObject({
+      scope: "team",
+      unit: "tokens",
+      period: "day",
+      limit: 1_500,
+      spent: 1_500,
+    });
+    // The dollar budget is untouched by the unpriced model.
+    expect(state.lines.find((l) => l.unit === "usd" && l.scope === "team")?.spent).toBe(0);
   });
 
   it("allows only one team budget and one budget per member; a member budget has no rate", async () => {

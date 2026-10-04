@@ -23,11 +23,14 @@ type Claimed = {
   user_id: string | null;
   period: "month" | "day";
   threshold: number;
-  limit_usd: string;
-  spent_usd: string;
+  unit: "usd" | "tokens";
+  limit_amount: string;
+  spent_amount: string;
 };
 
 const money = (v: number) => `$${v.toFixed(2)}`;
+const amount = (unit: Claimed["unit"], v: number) =>
+  unit === "usd" ? money(v) : `${Math.round(v).toLocaleString("en-US")} tokens`;
 
 export function budgetAlertMessage(input: {
   readonly to: string;
@@ -36,8 +39,9 @@ export function budgetAlertMessage(input: {
   readonly teamName: string | null;
   readonly period: Claimed["period"];
   readonly threshold: number;
-  readonly limitUsd: number;
-  readonly spentUsd: number;
+  readonly unit: Claimed["unit"];
+  readonly limit: number;
+  readonly spent: number;
   readonly link: string;
 }): MailMessage {
   const team = input.teamName ? oneLine(input.teamName) : null;
@@ -51,13 +55,14 @@ export function budgetAlertMessage(input: {
           : `A member's (${team ?? "team"})`;
   const period = input.period === "month" ? "monthly" : "daily";
   const reached = input.threshold >= 100;
+  const kind = input.unit === "tokens" ? "token" : "model";
   return {
     to: input.to,
     subject: reached
-      ? `${whose} ${period} model budget is used up`
-      : `${whose} ${period} model budget is ${input.threshold}% used`,
+      ? `${whose} ${period} ${kind} budget is used up`
+      : `${whose} ${period} ${kind} budget is ${input.threshold}% used`,
     text: [
-      `${whose} ${period} model budget: ${money(input.spentUsd)} of ${money(input.limitUsd)} spent.`,
+      `${whose} ${period} ${kind} budget: ${amount(input.unit, input.spent)} of ${amount(input.unit, input.limit)} used.`,
       "",
       reached
         ? "New model calls and runs are refused until the period ends or the budget is raised; runs in progress stop after their current step."
@@ -86,7 +91,7 @@ export async function deliverBudgetEmails(options: {
               WHERE status = 'pending' AND next_attempt_at <= now()
               ORDER BY created_at LIMIT ${BATCH} FOR UPDATE SKIP LOCKED)
       RETURNING e.id, e.attempts, e.recipient_id, a.team_id, a.scope, a.user_id, a.period,
-                a.threshold, a.limit_usd, a.spent_usd`);
+                a.threshold, a.unit, a.limit_amount, a.spent_amount`);
     for (const row of claimed.rows) {
       const [to] = await db
         .select({ email: users.email, off: users.deactivatedAt })
@@ -112,8 +117,9 @@ export async function deliverBudgetEmails(options: {
             teamName: team?.name ?? null,
             period: row.period,
             threshold: row.threshold,
-            limitUsd: Number(row.limit_usd),
-            spentUsd: Number(row.spent_usd),
+            unit: row.unit,
+            limit: Number(row.limit_amount),
+            spent: Number(row.spent_amount),
             link: `${options.publicUrl}${path}`,
           }),
         );
