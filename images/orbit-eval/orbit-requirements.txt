@@ -1,0 +1,5 @@
+# Orbit v1.0.3 itself (KOBE-90 pin; commit 588b3035f9..., release-manifest.json of the release).
+# The wheel's sha256 is from the release's SHA256SUMS. Its dependencies are the hashed lock in
+# ci/orbit/requirements.txt (shared with the CI loader job), installed first with --no-deps.
+orbit @ https://github.com/wlanderson0/orbit/releases/download/v1.0.3/orbit-1.0.3-py3-none-any.whl \
+    --hash=sha256:4be987cbc9ac3ed068fdf8208b3e20012ee8dd3d325547bf7b07afa9ffe2e642

@@ -1,0 +1,68 @@
+# Builds, tests and scans the Kobe Orbit eval image (KOBE-92). Path-filtered so unrelated PRs skip
+# it; also nightly (new CVEs) and on demand. Mirrors sandbox-image.yml.
+name: orbit-eval-image
+
+on:
+  push:
+    paths:
+      - images/orbit-eval/**
+      - images/sandbox/collect-licenses.sh
+      - ci/orbit/requirements.txt
+      - services/server/src/agents/orbit/fixtures/**
+      - tools/license-check/**
+      - .dockerignore
+      - .github/workflows/orbit-eval-image.yml
+  schedule:
+    - cron: "37 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: orbit-eval-image-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-scan:
+    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-latest') || vars.KOBE_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build
+        run: docker build -f images/orbit-eval/Dockerfile -t kobe-orbit-eval:ci . || { scripts/ci-docker-diagnostics.sh; exit 1; }
+      - name: Acceptance checks (hardened run, scenario pack against a fake model endpoint)
+        run: images/orbit-eval/test-image.sh kobe-orbit-eval:ci
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: License audit of bundled Python packages
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @kobe/license-check build
+          images/sandbox/collect-licenses.sh kobe-orbit-eval:ci > "$RUNNER_TEMP/orbit-eval-licenses.json"
+          LICENSE_REPORT="$RUNNER_TEMP/orbit-eval-licenses.json" \
+          LICENSE_EXCEPTIONS="$PWD/images/orbit-eval/license-exceptions.json" \
+            node tools/license-check/dist/cli.js
+      - name: Vulnerability report (HIGH and CRITICAL with fixes available)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: kobe-orbit-eval:ci
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: table
+          exit-code: "0"
+      - name: Vulnerability gate (fail on any fixable CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: kobe-orbit-eval:ci
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          format: table
+          exit-code: "1"

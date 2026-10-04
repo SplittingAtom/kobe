@@ -1,0 +1,8 @@
+name: invalid
+setup:
+  agents:
+    - name: a
+      role: r
+      tools: []
+  edges: []
+unexpected_key: 1
