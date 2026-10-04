@@ -1,7 +1,7 @@
 "use client";
 
 import "../../lib/security/zod-jitless";
-import { AssistantRuntimeProvider } from "@assistant-ui/react";
+import { AssistantRuntimeProvider, Suggestions, useAui } from "@assistant-ui/react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { TeamInvites } from "../../app/team-invites";
@@ -88,6 +88,25 @@ function useActiveTeam(fetchFn?: typeof fetch): TeamState {
   return state;
 }
 
+/** Starter prompts on an empty conversation; picking one fills the composer. */
+const STARTER_SUGGESTIONS = [
+  {
+    title: "Analyse a spreadsheet",
+    label: "and chart the result",
+    prompt: "Analyse the CSV in my workspace and chart the most important trend.",
+  },
+  {
+    title: "Write a script",
+    label: "and run it in the sandbox",
+    prompt: "Write a Python script that renames the files in my workspace by date, and run it.",
+  },
+  {
+    title: "Summarise my workspace",
+    label: "what is in it?",
+    prompt: "List the files in my workspace and summarise what each one is for.",
+  },
+];
+
 function ChatWorkspace({ session }: { readonly session: ChatSession }) {
   const [threadId, setThreadId] = useThreadUrl();
   const [listError, setListError] = useState<ApiError | null>(null);
@@ -98,8 +117,9 @@ function ChatWorkspace({ session }: { readonly session: ChatSession }) {
   const runtime = useKobeRuntime({ session, adapter, threadId, onThreadIdChange: setThreadId });
   // A thread created by its first message: read the list again for its title.
   useEffect(() => session.onThreadCreated(() => void runtime.threads.reload()), [session, runtime]);
+  const aui = useAui({ suggestions: Suggestions(STARTER_SUGGESTIONS) });
   return (
-    <AssistantRuntimeProvider runtime={runtime}>
+    <AssistantRuntimeProvider aui={aui} runtime={runtime}>
       <RetentionNotice />
       <div className={styles.body}>
         <ThreadSidebar listError={listError} onOpenThread={setThreadId} />

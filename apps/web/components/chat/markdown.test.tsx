@@ -12,19 +12,14 @@ function html(text: string): HTMLElement {
 
 /** Nothing executable or loading: no script/iframe/img/object, no on* or style attributes. */
 function expectInert(root: HTMLElement) {
-  for (const tag of [
-    "script",
-    "iframe",
-    "img",
-    "object",
-    "embed",
-    "style",
-    "form",
-    "svg",
-    "math",
-  ]) {
+  for (const tag of ["script", "iframe", "img", "object", "embed", "style", "form", "math"]) {
     expect(root.querySelector(tag), tag).toBeNull();
   }
+  // Only Kobe's own icons (inside the code block's copy button) may be SVG, never agent text.
+  expect(
+    [...root.querySelectorAll("svg")].filter((svg) => svg.closest("button") === null),
+    "svg",
+  ).toHaveLength(0);
   for (const el of root.querySelectorAll("*")) {
     for (const attr of el.getAttributeNames()) {
       expect(attr.startsWith("on"), `${el.tagName} ${attr}`).toBe(false);
