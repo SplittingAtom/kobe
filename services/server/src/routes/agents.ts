@@ -109,7 +109,17 @@ export function agentRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
     }
     const query = inventoryQuerySchema.safeParse(c.req.query());
     if (!query.success) return invalidRequest(c, "Check limit and cursor.");
-    return c.json(await listInventory(db, c.get("team").id, query.data));
+    const page = await listInventory(db, c.get("team").id, query.data);
+    const actor = actorOf(c);
+    return c.json({
+      ...page,
+      // Per row: exporting needs the right to read that agent's definition (KOBE-91).
+      agents: page.agents.map((a) => ({
+        ...a,
+        canExport: agentAccess(actor, { scope: a.scope, ownerUserId: a.ownerUserId })
+          .readDefinition,
+      })),
+    });
   });
 
   app.put("/inventory/:id/status", async (c) => {

@@ -8,6 +8,7 @@ import {
   type InventoryPage,
 } from "../../../lib/admin/api/team/agents";
 import { MutationStatus } from "../error-notice";
+import { OrbitExportButton } from "./agent-builder/orbit-export-button";
 import { DateTime, ResourceView, confirmed } from "../parts";
 import { useMutation, useResource } from "../use-resource";
 import styles from "../admin.module.css";
@@ -141,6 +142,15 @@ function InventoryTable({
                 <td>{PLACEHOLDER}</td>
                 <td>{PLACEHOLDER}</td>
                 <td>
+                  {a.canExport === true && a.currentVersion !== null && (
+                    <OrbitExportButton
+                      teamId={teamId}
+                      agentId={a.id}
+                      agentSlug={a.slug}
+                      version={a.currentVersion}
+                      label={`Export ${a.name} to Orbit`}
+                    />
+                  )}
                   {canSuspend && (
                     <button
                       type="button"

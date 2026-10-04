@@ -41,8 +41,11 @@ No migrations.
   draft or unpublished number is 404 `version_not_found` (tested, and v1 never shows later draft
   text). Agent summaries gain `canExport` (= `access.readDefinition`, the server's own check); both
   the toolbar and per-version buttons need it (tested on, off and absent).
-- **Inventory (ac-1):** KOBE-86 had not landed on main when this was written, so the action is in
-  the builder only. The inventory can reuse `OrbitExportButton` unchanged.
+- **Inventory (ac-1):** KOBE-86 merged; each inventory row gets `Export <name> to Orbit` (the same
+  `OrbitExportButton`) for published agents only. Inventory items gain `canExport`, computed per
+  row in the route with `agentAccess(...).readDefinition`: a team admin sees other members'
+  personal agents in the inventory but may not read them, so those rows get no button (tested in
+  `agent-inventory.db.test.ts` and `team-pages.test.tsx`).
 
 ## Open questions (for Chris or the coordinator)
 
@@ -50,13 +53,11 @@ No migrations.
   Inspect's naming but is untested against a running Orbit. Coordinator: keep it; KOBE-92's eval
   image will exercise it.
 - Answered: no export on the install gallery router; gallery agents export from a team context.
-- Follow-up: once KOBE-86 (#75) merges, merge origin/main and add `OrbitExportButton` to the
-  inventory rows (same permission check).
 
 ## Evidence (acceptance criteria -> test or command output)
 
-- ac-1 builder: `apps/web/components/admin/agent-builder-pages.test.tsx` ("Export to Orbit"):
-  toolbar, history row, refusal, never published. Inventory: not available yet (see above).
+- ac-1 builder and inventory: `apps/web/components/admin/agent-builder-pages.test.tsx` ("Export to Orbit"):
+  toolbar, history row, refusal, never published. Inventory: `team-pages.test.tsx` ("Export to Orbit only for published agents").
 - ac-2 team-scoped and audited: `services/server/src/orbit-export.db.test.ts` (other team 404, member
   403, audit row with team and version, none on failure); model rules in
   `agents/orbit/model.test.ts`.

@@ -38,6 +38,8 @@ export interface InventoryAgent {
   readonly schedules: null;
   /** Not built yet (KOBE-52): null. */
   readonly orbitScore: null;
+  /** The caller may read this agent's definition, which exporting a version needs (KOBE-91). */
+  readonly canExport?: boolean;
 }
 
 export interface InventoryPage {
