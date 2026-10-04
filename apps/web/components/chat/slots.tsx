@@ -11,13 +11,14 @@
  *   (run notice). KOBE-55 opens assistant-ui's artifact panel.
  * - `FileSlot` (KOBE-54): `file.shared`; KOBE-54 renders the download card.
  * - `NoticeSlot`: run-level notices not tied to a tool call (`egress.blocked`, `steer.applied`,
- *   `memory.updated` (KOBE-56 adds Undo), artifacts and files shared outside a tool call).
+ *   `memory.updated` (KOBE-56 adds Undo), `context.omitted` (KOBE-77), artifacts and files shared outside a tool call).
  */
 import { useContext } from "react";
 import type { KobeEventPayload } from "@kobe/protocol";
 import type { RunNotice, ToolActivity } from "../../lib/chat/live";
 import { ApprovalCard } from "./approval-card";
 import { ConnectedEgressNotice } from "./egress-notice";
+import { OmissionNotice } from "./omission-notice";
 import { ChatSessionContext } from "./kobe-runtime";
 import styles from "./chat.module.css";
 
@@ -67,6 +68,8 @@ export function NoticeSlot({ notice }: { readonly notice: RunNotice }) {
   switch (notice.type) {
     case "egress.blocked":
       return <EgressBlocked payload={notice.payload} />;
+    case "context.omitted":
+      return <OmissionNotice payload={notice.payload} />;
     case "steer.applied":
       return <p className={styles.notice}>Steered: “{notice.payload.content}”</p>;
     case "memory.updated":

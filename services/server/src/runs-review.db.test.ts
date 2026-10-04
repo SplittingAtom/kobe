@@ -463,6 +463,11 @@ describe("pinned agent at run start (KOBE-46)", () => {
     expect(start.config?.agent).toEqual({ agent_id: agentId, version: 1 });
     expect(await f.events(w.team, run)).toMatchObject([
       { type: "run.started", payload: { agent_id: agentId, agent_version: 1 } },
+      // No team default model here: KOBE-77 reports that as an omission.
+      {
+        type: "context.omitted",
+        payload: { items: [{ kind: "model", reason: "no_team_default" }] },
+      },
     ]);
     ws.reply(start, "ok");
     await f.until(w.team, run, "completed");

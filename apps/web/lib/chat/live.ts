@@ -37,6 +37,7 @@ export type RunNotice = Extract<
   KobeEvent,
   {
     type:
+      | "context.omitted"
       | "egress.blocked"
       | "steer.applied"
       | "memory.updated"
@@ -266,6 +267,7 @@ function applyOne(run: LiveRun, event: KobeEvent): LiveRun {
     }
     case "steer.applied":
     case "memory.updated":
+    case "context.omitted":
       return notice(next, event);
     case "entry.committed":
       return commit(next, event.payload);

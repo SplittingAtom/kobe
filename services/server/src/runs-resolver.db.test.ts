@@ -149,6 +149,31 @@ describe("run start uses the resolver (KOBE-76)", () => {
     expect(res.ok && res.config?.mcp_servers).toBeUndefined();
   });
 
+  it("KOBE-77: omissions are a context.omitted event right after run.started; none, no event", async () => {
+    const w = await f.world();
+    await catalog(w.team, w.owner.id, [["fast", true]]);
+    const ws = await f.connect(w, 0);
+    const thread = await pinnedThread(w.owner, { connectors: ["unlisted"] });
+    const run = await f.message(w.owner, thread, "hello");
+    const start = await ws.started(run);
+    ws.reply(start, "ok");
+    await f.until(w.team, run, "completed");
+    const types = (await f.events(w.team, run)).map((e) => e.type);
+    const at = types.indexOf("run.started");
+    expect(types[at + 1]).toBe("context.omitted");
+    expect(types.filter((t) => t === "context.omitted")).toHaveLength(1);
+    const event = (await f.events(w.team, run)).find((e) => e.type === "context.omitted");
+    expect(event?.payload).toEqual({
+      items: [{ kind: "connector", name: "unlisted", reason: "not_team_enabled" }],
+    });
+
+    const plain = await pinnedThread(w.owner, {});
+    const second = await f.message(w.owner, plain, "again");
+    ws.reply(await ws.started(second), "ok");
+    await f.until(w.team, second, "completed");
+    expect((await f.events(w.team, second)).map((e) => e.type)).not.toContain("context.omitted");
+  });
+
   it("a pinned agent ignores the thread's chosen model; an unpinned one uses it over the default", async () => {
     const w = await f.world();
     await catalog(w.team, w.owner.id, [
