@@ -22,7 +22,7 @@ describe("console overview", () => {
       "/admin/install/users",
     );
     const models = screen.getByRole("region", { name: "Models and connectors" });
-    expect(models.textContent).toMatch(/Coming in KOBE-44/);
+    expect(models.textContent).toMatch(/Coming in KOBE-59/);
   });
 
   it("lists only the team sections the role covers", () => {

@@ -601,6 +601,23 @@ export class ThreadController {
     await this.refresh();
   }
 
+  /**
+   * Chooses the thread's model for its next runs (KOBE-44): an alias the team enabled, or null for
+   * the team's default. The server refuses one the team didn't enable (`model_not_enabled`).
+   */
+  readonly setModel = async (model: string | null): Promise<boolean> => {
+    const threadId = this.#state.threadId;
+    if (threadId === null) return false;
+    const res = await this.#busy("model", () => this.#api.setThreadModel(threadId, model));
+    if (!res.ok) {
+      this.#fail(res.error);
+      return false;
+    }
+    this.#set((s) => ({ ...s, summary: res.data }));
+    this.#announce(model === null ? "The team's default model is used." : "Model changed.");
+    return true;
+  };
+
   /** Shows another branch (assistant-ui's branch picker) and makes it the thread's leaf. */
   readonly switchLeaf = async (entryId: string): Promise<void> => {
     const threadId = this.#state.threadId;

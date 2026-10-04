@@ -23,6 +23,8 @@ export interface ThreadSummary {
   readonly agentId: string | null;
   readonly agentVersion: number | null;
   readonly sharedToProject: boolean;
+  /** The model chosen for the thread (a catalog alias); null = the team's default (KOBE-44). */
+  readonly model?: string | null;
   readonly leafEntryId: string | null;
   readonly lastActivityAt: string;
   readonly createdAt: string;
