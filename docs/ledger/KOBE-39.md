@@ -110,12 +110,45 @@
 - **Requests name the ceiling pattern**, so a wildcard `*.example.com` in the ceiling is what gets
   enabled for `a.example.com` — consistent with KOBE-38's "teams enable exactly a ceiling pattern".
 - **Thread metadata = thread id only** in emails and the console (titles are content).
+- **Absolute `https://` links in bodies are not rewritten** (documented limitation with
+  workarounds; no body rewriting).
 - **Response header echo is filtered; body echo is not** (documented trust boundary: configure
   headers only for domains trusted with that credential).
 - **One request per upgraded connection** (`Connection: close`): authenticated sockets leave the
   pre-auth budget, so they must not idle afterwards.
 - The fake model (e2e) gained a scripted `bash` tool call (`bash: <command>`), so the Gate 2 story
   runs a real tool through real Pi in the Owner's real sandbox.
+
+## Coordinator security review of PR #60 (0 CRITICAL/HIGH) — resolution
+
+1. MEDIUM token file mode: `EgressTokenFile(path, mode)` sets the mode exactly (chmod after the
+   umask; 0640 under a KOBE-71 Pi identity) and has `verify()` (regular file, mode, exact token);
+   the tripwire checks it (`runtime_tampered`). `egress-env.sh` prints one stderr line when the
+   token file is missing, unreadable or malformed. Tests: `egress-wiring.test.ts`,
+   `agent.egress.test.ts` "stops a Pi whose egress token file was rewritten".
+2. MEDIUM quota race: `pg_advisory_xact_lock` on (team, user) first, then on (team, pattern).
+   Test: "parallel requests can't pass the hourly quota".
+3. MEDIUM absolute `https://` links in registry bodies: documented with workarounds
+   (`docs/install.md` → Header injection → Limitation); bodies are not rewritten.
+4. LOW echo filter also matches the credential without its scheme (`secretParts`).
+5. LOW decisions on one pattern serialise on its advisory lock (no deadlock). Test: "parallel
+   decisions on one pattern don't deadlock".
+6. LOW enabling a domain directly settles its pending requests (approved, requesters emailed,
+   `egress.request.decided` audited); creation takes the pattern lock, so it can't interleave
+   with a decision or enablement. Test: "enabling a domain directly settles…".
+7. LOW delivery re-checks the recipient is still a member (and a team admin for new requests);
+   otherwise `skipped` / `recipient_not_entitled`.
+8. LOW the request drop list compares normalised names (`Content_Length` = `Content-Length`).
+
+- Edge-case tests added: CL+TE (400), duplicate and underscore copies, `Connection:` naming an
+  injected header, mixed-case and trailing-dot hosts, redirects to another port or to http://,
+  HEAD and 304.
+- 8 (noted): the notification sweep walks every team each minute (one claim query per team); fine
+  for one organisation's teams, revisit with an index-only "teams with due rows" query if it grows.
+- 11 (noted): the thread hint (proxy user part) is self-asserted by the sandbox; it only picks
+  among the same user's runs on the same sandbox (KOBE-38), never another user's.
+- 12 (done, cheap): values sealed with `secret-previous` are re-sealed with the current secret at
+  server start-up (`resealTeamHeaders`). Test: "re-seals values sealed with a previous secret".
 
 ## Open questions (for Chris or the coordinator)
 

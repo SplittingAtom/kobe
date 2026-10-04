@@ -1,10 +1,10 @@
 import { existsSync } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { EgressWiring } from "./egress/egress-wiring.js";
 import type { ModelTokenSource } from "./models/types.js";
-import { THREAD, runStart, startHarness, until, type Harness } from "./testing/harness.js";
+import { RUN_2, THREAD, runStart, startHarness, until, type Harness } from "./testing/harness.js";
 
 /**
  * Egress for Pi's tools through the agent (KOBE-39) with the scripted Pi: each Pi gets its own
@@ -46,7 +46,7 @@ interface Launch {
   readonly threadId: string | null;
 }
 
-async function start(tokens: ModelTokenSource): Promise<Launch> {
+async function start(tokens: ModelTokenSource, message = "hang"): Promise<Launch> {
   const egress: EgressWiring = {
     proxyUrl: "http://egress-proxy.kobe.internal:80",
     noProxy: "server.kobe.internal,localhost",
@@ -54,7 +54,7 @@ async function start(tokens: ModelTokenSource): Promise<Launch> {
     tokens,
   };
   h = await startHarness({ egress });
-  const result = await h.server.command(runStart("hang"));
+  const result = await h.server.command(runStart(message));
   expect(result).toMatchObject({ ok: true });
   const [launch] = await h.commandsLog();
   return launch as unknown as Launch;
@@ -84,5 +84,14 @@ describe("egress for Pi's tools (KOBE-39)", () => {
     await until(async () => (await readFile(file, "utf8")) === `${TOKEN_2}\n`);
     await h.agent.stop(500);
     await until(() => !existsSync(file));
+  });
+
+  it("stops a Pi whose egress token file was rewritten (tripwire)", async () => {
+    const launch = await start(fakeTokens(TOKEN_1), "say:hi");
+    await h.server.waitFor((f) => f.type === "pi.event" && f.event.type === "agent_settled");
+    await writeFile(launch.egressTokenFile ?? "", "planted.token\n");
+    const result = await h.server.command(runStart("say:hi", { run_id: RUN_2 }));
+    expect(result).toMatchObject({ ok: false, error: { code: "runtime_tampered" } });
+    await until(() => !existsSync(launch.egressTokenFile ?? ""));
   });
 });

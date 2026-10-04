@@ -4,6 +4,7 @@ import {
   egressRequestNotifications,
   egressRequests,
   sql,
+  teamMembers,
   teams,
   users,
   withTeam,
@@ -164,6 +165,17 @@ async function detailOf(
   });
 }
 
+async function stillEntitled(db: KobeDb, teamId: string, row: Claimed): Promise<boolean> {
+  return withTeam(db, teamId, async (tx) => {
+    const [member] = await tx
+      .select({ role: teamMembers.role })
+      .from(teamMembers)
+      .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, row.recipient_id)));
+    if (!member) return false;
+    return row.event !== "requested" || member.role === "team_admin";
+  });
+}
+
 /** Sends the team's due notifications. Never throws; returns how many were sent. */
 export async function deliverEgressRequestNotifications(
   deps: Pick<ServerDeps, "database" | "mailer" | "publicUrl">,
@@ -180,6 +192,11 @@ export async function deliverEgressRequestNotifications(
         .where(eq(users.id, row.recipient_id));
       if (!detail || !to || to.off !== null) {
         await settle(db, teamId, row, "skipped", "recipient_inactive");
+        continue;
+      }
+      // Still entitled at delivery: admins for a new request, members for a decision.
+      if (!(await stillEntitled(db, teamId, row))) {
+        await settle(db, teamId, row, "skipped", "recipient_not_entitled");
         continue;
       }
       try {

@@ -297,6 +297,9 @@ export class Thread {
     if (this.#modelFile !== undefined && !(await this.#modelFile.verify())) {
       return "the model file is not what the agent wrote";
     }
+    if (this.#egressFile !== undefined && !(await this.#egressFile.verify())) {
+      return "the egress token file is not what the agent wrote";
+    }
     const unexpected = await unexpectedEntries(runtimeDir);
     if (unexpected.length > 0) {
       return `unexpected entries in Pi's runtime directory: ${unexpected.slice(0, 5).join(", ")}`;

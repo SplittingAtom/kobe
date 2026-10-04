@@ -159,16 +159,15 @@ export function upstreamHeaders(
     const name = rawHeaders[i] as string;
     const lower = name.toLowerCase();
     if (lower === "connection") {
-      for (const token of connectionTokens(rawHeaders[i + 1])) listed.set(token, []);
+      for (const token of connectionTokens(rawHeaders[i + 1])) listed.set(headerKey(token), []);
     }
   }
   for (let i = 0; i + 1 < rawHeaders.length; i += 2) {
     const name = rawHeaders[i] as string;
-    const lower = name.toLowerCase();
-    if (DROP_REQUEST.has(lower) || listed.has(lower) || injectedNames.has(headerKey(name))) {
-      continue;
-    }
-    if (lower.startsWith("proxy-")) continue;
+    // Compared as CGI-style servers see names: `Content_Length` is `Content-Length`.
+    const key = headerKey(name);
+    if (DROP_REQUEST.has(key) || listed.has(key) || injectedNames.has(key)) continue;
+    if (key.startsWith("proxy-")) continue;
     out.push([name, rawHeaders[i + 1] as string]);
   }
   out.unshift(["Host", host]);
@@ -198,8 +197,22 @@ export function rewriteLocation(location: string, host: string): string {
   return location;
 }
 
+/**
+ * The secret parts of an injected value: the whole value and, for `<scheme> <credential>` values
+ * (`Bearer x`, `Basic x`), the credential alone. Parts shorter than 4 characters are not matched.
+ */
+export function secretParts(injected: readonly InjectedHeader[]): string[] {
+  const parts = new Set<string>();
+  for (const h of injected) {
+    parts.add(h.value);
+    const space = h.value.indexOf(" ");
+    if (space > 0) parts.add(h.value.slice(space + 1).trim());
+  }
+  return [...parts].filter((p) => p.length >= 4);
+}
+
 function containsSecret(value: string, injected: readonly InjectedHeader[]): boolean {
-  return injected.some((h) => h.value.length >= 4 && value.includes(h.value));
+  return secretParts(injected).some((p) => value.includes(p));
 }
 
 /** The response headers relayed to the sandbox (multi-valued ones kept as such). */

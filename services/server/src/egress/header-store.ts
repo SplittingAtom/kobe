@@ -1,8 +1,11 @@
 import {
   and,
   eq,
+  isNotNull,
   notifyEgressChanged,
+  openHeaders,
   sealHeaders,
+  teams,
   sql,
   teamEgress,
   withTeam,
@@ -80,4 +83,35 @@ export async function clearTeamDomainHeaders(
     await recordAudit(tx, { action: "egress.header.cleared", teamId, target: { domain } });
     return "cleared";
   });
+}
+
+/**
+ * Re-seals injected header values that a previous `KOBE_EGRESS_HEADER_SECRET` sealed (rotation:
+ * the box holds the current secret first, the previous one after it). Values are opened and sealed
+ * again in place, never logged; once every row uses the current secret the previous one can be
+ * dropped. Returns how many domains were re-sealed.
+ */
+export async function resealTeamHeaders(db: KobeDb, box: SecretBox): Promise<number> {
+  let resealed = 0;
+  for (const { id: teamId } of await db.select({ id: teams.id }).from(teams)) {
+    resealed += await withTeam(db, teamId, async (tx) => {
+      const rows = await tx
+        .select({ domain: teamEgress.domain, sealed: teamEgress.headersSealed })
+        .from(teamEgress)
+        .where(and(eq(teamEgress.teamId, teamId), isNotNull(teamEgress.headersSealed)))
+        .for("update");
+      let n = 0;
+      for (const row of rows) {
+        if (row.sealed === null || box.isCurrent(row.sealed)) continue;
+        const headers = openHeaders(box, teamId, row.domain, row.sealed);
+        await tx
+          .update(teamEgress)
+          .set({ headersSealed: sealHeaders(box, teamId, row.domain, headers) })
+          .where(and(eq(teamEgress.teamId, teamId), eq(teamEgress.domain, row.domain)));
+        n++;
+      }
+      return n;
+    });
+  }
+  return resealed;
 }

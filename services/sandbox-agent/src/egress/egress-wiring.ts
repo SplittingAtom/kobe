@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, readFile, rename, rm, writeFile } from "node:fs/promises";
 import type { ModelTokenSource } from "../models/types.js";
 
 /**
@@ -60,25 +60,34 @@ export function egressEnv(
   };
 }
 
-/** One Pi process's egress token file: written atomically, serialised, never logged. */
+/**
+ * One Pi process's egress token file: written atomically, serialised, never logged. `mode`: 0600
+ * when Pi runs as the agent's uid; 0640 under a Pi identity (KOBE-71), where the setgid runtime
+ * directory gives the file that Pi's group, so its tools can read it and nobody else can.
+ */
 export class EgressTokenFile {
   readonly path: string;
+  readonly #mode: number;
   #written: string | undefined;
   #chain: Promise<unknown> = Promise.resolve();
 
-  constructor(path: string) {
+  constructor(path: string, mode = 0o600) {
     this.path = path;
+    this.#mode = mode;
   }
 
   write(token: string): Promise<void> {
     if (!TOKEN.test(token))
       return Promise.reject(new Error("egress token has unexpected characters"));
     const next = this.#chain.then(async () => {
-      if (this.#written === token) return;
+      // Rewritten when the disk no longer holds it (tampered or removed), not only on rotation.
+      if (this.#written === token && (await this.#onDisk()) === `${token}\n`) return;
       const temp = `${this.path}.${randomBytes(8).toString("hex")}.tmp`;
       try {
         // `wx`: a symlink or FIFO planted at the temp path is never followed.
-        await writeFile(temp, `${token}\n`, { mode: 0o600, flag: "wx" });
+        await writeFile(temp, `${token}\n`, { mode: this.#mode, flag: "wx" });
+        // writeFile's mode is filtered by the umask: set it exactly.
+        await chmod(temp, this.#mode);
         await rename(temp, this.path);
       } catch (error) {
         await rm(temp, { force: true }).catch(() => undefined);
@@ -90,9 +99,29 @@ export class EgressTokenFile {
     return next;
   }
 
-  /** Whether the file holds the token last written (tests and diagnostics). */
+  /**
+   * The tripwire (as the model file's): true when the file is a regular file holding exactly the
+   * token this writer last wrote, with the mode it set.
+   */
+  async verify(): Promise<boolean> {
+    await this.#chain;
+    if (this.#written === undefined) return false;
+    try {
+      const info = await lstat(this.path);
+      if (!info.isFile() || (info.mode & 0o777) !== this.#mode) return false;
+    } catch {
+      return false;
+    }
+    return (await this.#onDisk()) === `${this.#written}\n`;
+  }
+
+  /** Whether the file holds `token` (tests and diagnostics). */
   async holds(token: string): Promise<boolean> {
     await this.#chain;
-    return (await readFile(this.path, "utf8").catch(() => "")) === `${token}\n`;
+    return (await this.#onDisk()) === `${token}\n`;
+  }
+
+  #onDisk(): Promise<string> {
+    return readFile(this.path, "utf8").catch(() => "");
   }
 }

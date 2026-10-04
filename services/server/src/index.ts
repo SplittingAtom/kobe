@@ -9,6 +9,7 @@ import { loadConfig } from "./config.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
 import { EgressBlockedRelay } from "./egress/blocked-relay.js";
 import { loadEgressHeaderSecrets } from "./egress/config.js";
+import { resealTeamHeaders } from "./egress/header-store.js";
 import { EgressRequestSweeper } from "./egress/request-notify.js";
 import { createIsolationGate } from "./isolation/gate.js";
 import { listRuntimeClasses } from "./isolation/kubernetes.js";
@@ -132,6 +133,16 @@ egressRelay?.start();
 const egressRequestSweeper =
   deps && config.process === "server" ? new EgressRequestSweeper(deps) : undefined;
 egressRequestSweeper?.start();
+// Header values sealed with a previous header secret are re-sealed with the current one (rotation).
+if (deps?.egressHeaders && config.process === "server") {
+  const box = deps.egressHeaders;
+  resealTeamHeaders(deps.database.db, box)
+    .then((n) => {
+      if (n > 0)
+        logger.info({ domains: n }, "egress header values re-sealed with the current secret");
+    })
+    .catch((err: unknown) => logger.error({ err }, "egress header re-seal failed"));
+}
 
 // Bifrost config sync (KOBE-40): every server replica listens; one leads and reconciles.
 const modelSync =

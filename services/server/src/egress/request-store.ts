@@ -58,6 +58,20 @@ export type CreateResult =
 
 type Row = typeof egressRequests.$inferSelect;
 
+/**
+ * Transaction-scoped advisory locks. A member's requests serialise on (team, user), so the quota
+ * check and the insert are atomic; everything that settles or creates requests for a pattern
+ * serialises on (team, pattern), so a decision, a direct enablement and a new request never
+ * interleave. Order: user lock, then pattern lock (decisions take only the pattern lock).
+ */
+async function lockKey(tx: KobeTx, key: string): Promise<void> {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
+}
+const lockUser = (tx: KobeTx, teamId: string, userId: string) =>
+  lockKey(tx, `kobe.egress-request.user:${teamId}:${userId}`);
+export const lockPattern = (tx: KobeTx, teamId: string, pattern: string) =>
+  lockKey(tx, `kobe.egress-request.pattern:${teamId}:${pattern}`);
+
 function view(row: Row, name: string): EgressRequestView {
   return {
     id: row.id,
@@ -121,12 +135,16 @@ export async function createEgressRequest(
   if (host === null) return { kind: "invalid_domain" };
   const { teamId, userId } = input;
   return withTeam(db, teamId, async (tx) => {
+    await lockUser(tx, teamId, userId);
     const ceiling = await tx
       .select({ domain: egressDomains.domain })
       .from(egressDomains)
       .where(eq(egressDomains.inCeiling, true));
     const pattern = findMatchingPattern(new Set(ceiling.map((c) => c.domain)), host);
     if (pattern === undefined) return { kind: "not_in_ceiling" };
+    // A decision or enablement for this pattern in flight finishes first (no request is created
+    // just after its pattern was settled and left pending forever).
+    await lockPattern(tx, teamId, pattern);
     const [enabled] = await tx
       .select({ domain: teamEgress.domain })
       .from(teamEgress)
@@ -228,11 +246,15 @@ export async function decideEgressRequest(
 ): Promise<DecideResult> {
   const { teamId, adminId } = input;
   return withTeam(db, teamId, async (tx) => {
-    const [request] = await tx
-      .select()
+    const byId = and(eq(egressRequests.teamId, teamId), eq(egressRequests.id, input.requestId));
+    const [peek] = await tx
+      .select({ pattern: egressRequests.pattern })
       .from(egressRequests)
-      .where(and(eq(egressRequests.teamId, teamId), eq(egressRequests.id, input.requestId)))
-      .for("update");
+      .where(byId);
+    if (!peek) return { kind: "not_found" };
+    // Concurrent decisions on one pattern serialise here (no deadlock on its rows).
+    await lockPattern(tx, teamId, peek.pattern);
+    const [request] = await tx.select().from(egressRequests).where(byId).for("update");
     if (!request) return { kind: "not_found" };
     const name = await userName(tx, request.requestedBy);
     if (request.status !== "pending") {
@@ -256,25 +278,7 @@ export async function decideEgressRequest(
       if (enabled) await notifyEgressChanged(tx, teamId);
     }
     const status = input.decision === "approve" ? "approved" : "denied";
-    const settled = await tx
-      .update(egressRequests)
-      .set({ status, decidedBy: adminId, decidedAt: sql`now()` })
-      .where(
-        and(
-          eq(egressRequests.teamId, teamId),
-          eq(egressRequests.pattern, request.pattern),
-          eq(egressRequests.status, "pending"),
-        ),
-      )
-      .returning();
-    await queue(
-      tx,
-      teamId,
-      settled
-        .filter((r) => r.requestedBy !== adminId)
-        .map((r) => ({ requestId: r.id, recipientId: r.requestedBy })),
-      status,
-    );
+    const settled = await settlePending(tx, teamId, request.pattern, status, adminId);
     if (enabled) {
       await recordAudit(tx, {
         action: "egress.domain.enabled",
@@ -350,4 +354,37 @@ export async function listMyEgressRequests(
       .limit(LIST_LIMIT);
     return rows.map((r) => view(r.request, r.name));
   });
+}
+
+/**
+ * Settles every pending request for `pattern` (call with the pattern lock held) and queues the
+ * requesters' emails (not the deciding admin's own). Returns the settled rows.
+ */
+export async function settlePending(
+  tx: KobeTx,
+  teamId: string,
+  pattern: string,
+  status: "approved" | "denied",
+  adminId: string,
+): Promise<Row[]> {
+  const settled = await tx
+    .update(egressRequests)
+    .set({ status, decidedBy: adminId, decidedAt: sql`now()` })
+    .where(
+      and(
+        eq(egressRequests.teamId, teamId),
+        eq(egressRequests.pattern, pattern),
+        eq(egressRequests.status, "pending"),
+      ),
+    )
+    .returning();
+  await queue(
+    tx,
+    teamId,
+    settled
+      .filter((r) => r.requestedBy !== adminId)
+      .map((r) => ({ requestId: r.id, recipientId: r.requestedBy })),
+    status,
+  );
+  return settled;
 }

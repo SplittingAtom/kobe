@@ -11,6 +11,7 @@ import {
   type KobeDb,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
+import { lockPattern, settlePending } from "./request-store.js";
 
 /**
  * Team egress enablement (spec D6, D28; `/v1/team/egress`): team admins enable domains within the
@@ -73,30 +74,50 @@ export async function listTeamEgress(db: KobeDb, teamId: string): Promise<TeamEg
 
 export type EnableResult = "enabled" | "already_enabled" | "not_in_ceiling";
 
-/** Enables a ceiling domain for the team (no user self-allow: team admins only, at the route). */
+/**
+ * Enables a ceiling domain for the team (no user self-allow: team admins only, at the route).
+ * Pending access requests for the pattern are approved with it and their requesters told
+ * (KOBE-39); `settled` counts them.
+ */
 export async function enableTeamDomain(
   db: KobeDb,
   teamId: string,
   domain: string,
   userId: string,
-): Promise<EnableResult> {
+): Promise<{ readonly result: EnableResult; readonly settled: number }> {
   return withTeam(db, teamId, async (tx) => {
+    await lockPattern(tx, teamId, domain);
     // FOR SHARE: the ceiling row can't be taken out (or deleted) until this commits.
     const [ceiling] = await tx
       .select({ inCeiling: egressDomains.inCeiling })
       .from(egressDomains)
       .where(eq(egressDomains.domain, domain))
       .for("share");
-    if (!ceiling?.inCeiling) return "not_in_ceiling";
+    if (!ceiling?.inCeiling) return { result: "not_in_ceiling", settled: 0 };
     const inserted = await tx
       .insert(teamEgress)
       .values({ teamId, domain, enabledBy: userId })
       .onConflictDoNothing()
       .returning({ domain: teamEgress.domain });
-    if (inserted.length === 0) return "already_enabled";
+    if (inserted.length === 0) return { result: "already_enabled", settled: 0 };
     await notifyEgressChanged(tx, teamId);
+    const settled = await settlePending(tx, teamId, domain, "approved", userId);
     await recordAudit(tx, { action: "egress.domain.enabled", teamId, target: { domain } });
-    return "enabled";
+    const first = settled[0];
+    if (first) {
+      await recordAudit(tx, {
+        action: "egress.request.decided",
+        teamId,
+        target: {
+          requestId: first.id,
+          pattern: domain,
+          decision: "approved",
+          requests: settled.length,
+          enabled: true,
+        },
+      });
+    }
+    return { result: "enabled", settled: settled.length };
   });
 }
 

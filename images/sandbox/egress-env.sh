@@ -10,14 +10,19 @@
 # Only POSIX/bash builtins below: it runs before every command. Tracing (`bash -x`, whose output
 # becomes the tool result) is paused while the token is handled, so it never shows in a trace.
 case "$-" in *x*) __kobe_egress_xtrace=1; set +x ;; *) __kobe_egress_xtrace="" ;; esac
-if [ -n "${KOBE_EGRESS_TOKEN_FILE:-}" ] && [ -n "${KOBE_EGRESS_PROXY:-}" ] && [ -r "$KOBE_EGRESS_TOKEN_FILE" ]; then
+if [ -n "${KOBE_EGRESS_TOKEN_FILE:-}" ] && [ -n "${KOBE_EGRESS_PROXY:-}" ] && [ ! -r "$KOBE_EGRESS_TOKEN_FILE" ]; then
+  # Say why internet access will fail instead of failing silently (one line, on stderr).
+  printf '%s\n' "kobe: the sandbox's egress token is not readable; internet access through the egress proxy is unavailable" >&2
+elif [ -n "${KOBE_EGRESS_TOKEN_FILE:-}" ] && [ -n "${KOBE_EGRESS_PROXY:-}" ]; then
   __kobe_egress_token=""
   IFS= read -r __kobe_egress_token < "$KOBE_EGRESS_TOKEN_FILE" || true
   __kobe_egress_user="${KOBE_THREAD_ID:-kobe}"
   __kobe_egress_host="${KOBE_EGRESS_PROXY#http://}"
   __kobe_egress_host="${__kobe_egress_host%/}"
   case "$__kobe_egress_token$__kobe_egress_user$__kobe_egress_host" in
-    *[!A-Za-z0-9._:-]* | "") ;; # anything unexpected: export nothing (never build a URL from it)
+    *[!A-Za-z0-9._:-]* | "") # anything unexpected: export nothing (never build a URL from it)
+      printf '%s\n' "kobe: the sandbox's egress token file is malformed; internet access through the egress proxy is unavailable" >&2
+      ;;
     *)
       if [ -n "$__kobe_egress_token" ]; then
         __kobe_egress_url="http://${__kobe_egress_user}:${__kobe_egress_token}@${__kobe_egress_host}"

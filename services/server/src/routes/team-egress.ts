@@ -54,9 +54,20 @@ export function teamEgressRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
   app.put("/domains/:domain", requireTeamPermission("team.egress.manage"), async (c) => {
     const domain = domainPatternSchema.safeParse(c.req.param("domain"));
     if (!domain.success) return notInCeiling(c);
-    const result = await enableTeamDomain(db, c.get("team").id, domain.data, c.get("user").id);
+    const teamId = c.get("team").id;
+    const { result, settled } = await enableTeamDomain(db, teamId, domain.data, c.get("user").id);
     if (result === "not_in_ceiling") return notInCeiling(c);
-    return c.json({ domain: domain.data, enabled: true }, result === "enabled" ? 201 : 200);
+    if (settled > 0) {
+      deps.background.run(
+        "egress request notification failed",
+        () => deliverEgressRequestNotifications(deps, teamId),
+        { team: teamId },
+      );
+    }
+    return c.json(
+      { domain: domain.data, enabled: true, settled_requests: settled },
+      result === "enabled" ? 201 : 200,
+    );
   });
 
   app.delete("/domains/:domain", requireTeamPermission("team.egress.manage"), async (c) => {

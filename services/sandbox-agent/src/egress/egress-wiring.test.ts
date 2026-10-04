@@ -31,12 +31,15 @@ afterEach(() => rm(dir, { recursive: true, force: true }));
  * Pi spawns it (bash skips BASH_ENV when stdin is a socket: it then assumes rshd/sshd).
  */
 function toolShell(env: Record<string, string>, command: string): string {
-  const result = spawnSync("/bin/bash", ["-c", command], {
+  return toolShellFull(env, command).stdout;
+}
+
+function toolShellFull(env: Record<string, string>, command: string) {
+  return spawnSync("/bin/bash", ["-c", command], {
     env: { PATH: process.env.PATH ?? "/usr/bin:/bin", ...env },
     stdio: ["ignore", "pipe", "pipe"],
     encoding: "utf8",
   });
-  return result.stdout;
 }
 
 /** Same, traced (`bash -x`): the token must not show in the trace. */
@@ -86,9 +89,16 @@ describe("egress env for Pi's tools", () => {
   it("exports nothing for a missing or malformed token file (no shell injection through it)", async () => {
     const tokenFile = path.join(dir, "egress-token");
     const env = egressEnv(wiring(), tokenFile, THREAD);
-    expect(toolShell(env, 'printf "[%s]" "${HTTPS_PROXY:-}"')).toBe("[]");
+    const missing = toolShellFull(env, 'printf "[%s]" "${HTTPS_PROXY:-}"');
+    expect(missing.stdout).toBe("[]");
+    // Not silent: one line on stderr says why the internet will be unreachable.
+    expect(missing.stderr).toBe(
+      "kobe: the sandbox's egress token is not readable; internet access through the egress proxy is unavailable\n",
+    );
     await writeFile(tokenFile, "abc$(touch pwned)@evil:1\n");
-    expect(toolShell(env, 'printf "[%s]" "${HTTPS_PROXY:-}"')).toBe("[]");
+    const malformed = toolShellFull(env, 'printf "[%s]" "${HTTPS_PROXY:-}"');
+    expect(malformed.stdout).toBe("[]");
+    expect(malformed.stderr).toMatch(/egress token file is malformed/);
     expect(await readdir(dir)).toEqual(["egress-token"]);
   });
 
@@ -107,5 +117,28 @@ describe("egress env for Pi's tools", () => {
     expect(await file.holds("next.token")).toBe(true);
     await expect(readFile(target, "utf8")).resolves.toBe("untouched");
     expect((await readdir(dir)).sort()).toEqual(["egress-token", "elsewhere"]);
+  });
+
+  it("sets the mode exactly (0640 under a Pi identity) and verifies what it wrote", async () => {
+    const old = process.umask(0o077);
+    try {
+      const file = new EgressTokenFile(path.join(dir, "egress-token"), 0o640);
+      expect(await file.verify()).toBe(false);
+      await file.write(TOKEN);
+      expect((await stat(file.path)).mode & 0o777).toBe(0o640);
+      expect(await file.verify()).toBe(true);
+      // Tampering: another token, another mode, or a symlink in its place.
+      await writeFile(file.path, "planted.token\n");
+      expect(await file.verify()).toBe(false);
+      await file.write(TOKEN); // the same token is rewritten when the disk no longer holds it
+      expect(await file.verify()).toBe(true);
+      await (await import("node:fs/promises")).chmod(file.path, 0o644);
+      expect(await file.verify()).toBe(false);
+      await rm(file.path);
+      await symlink(path.join(dir, "elsewhere"), file.path);
+      expect(await file.verify()).toBe(false);
+    } finally {
+      process.umask(old);
+    }
   });
 });

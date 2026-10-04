@@ -212,7 +212,9 @@ only an install admin can add them.
 Team admins can configure up to 8 **injected headers** per enabled domain (Team console → Egress,
 e.g. `Authorization` for a private package index). Values are sealed in Postgres with a dedicated
 secret (`<release>-egress-headers`, key `secret`, generated and kept; or
-`egressProxy.headerSecret` naming your own), held only by the server and the egress proxy. They are
+`egressProxy.headerSecret` naming your own), held only by the server and the egress proxy. To
+rotate it, move the old value to `secret-previous`, set a new `secret` and restart: the server
+re-seals stored values at start-up, after which `secret-previous` can go. They are
 **write-only**: the API and console list header names (to team admins only), never values; the audit log records names
 only (`egress.header.set`, `egress.header.cleared`); disabling the domain deletes them.
 
@@ -246,6 +248,16 @@ npm install --registry http://npm.example.com/ mypkg
 git -c url."http://git.example.com/".insteadOf="https://git.example.com/" clone https://git.example.com/org/repo.git
 curl http://api.example.com/v1/items
 ```
+
+**Limitation: absolute `https://` links in responses.** The proxy never rewrites bodies. A registry
+that answers with absolute `https://<same domain>/…` URLs (some PEP 503 simple indexes link
+files that way, npm metadata's `dist.tarball`, git LFS batch responses) makes the tool open a
+CONNECT to that domain for the next step, which is refused (`headers_required`). Workarounds: use
+an index that emits relative links (pip's simple index from most servers, e.g. devpi, pypiserver,
+Artifactory's "relative" mode) so the files are fetched over `http://` too; for npm point the
+registry's tarball base URL at `http://` (or set its "relative tarball URL" option); for git LFS
+set `lfs.url` to the `http://` endpoint. If the files are served from another host (a CDN), enable
+that host without injected headers and they are fetched over HTTPS normally.
 
 pip needs `--trusted-host` (or `PIP_TRUSTED_HOST`) for an `http://` index; the hop from the proxy to
 the domain is still verified HTTPS. Put these in the agent's instructions or the project's config

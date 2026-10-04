@@ -19,6 +19,7 @@ import {
   downstreamHeaders,
   parsePlainTarget,
   rewriteLocation,
+  secretParts,
   upstreamHeaders,
 } from "./upgrade.js";
 
@@ -90,6 +91,20 @@ async function upstream(cert: { key: string; cert: string }): Promise<number> {
       } else if (req.url === "/stream-big") {
         res.writeHead(200);
         res.end("y".repeat(10_000));
+      } else if (req.url === "/redirect-port") {
+        res.writeHead(301, { location: "https://pkgs.example.com:8443/x" });
+        res.end();
+      } else if (req.url === "/redirect-http") {
+        res.writeHead(301, { location: "http://pkgs.example.com/plain" });
+        res.end();
+      } else if (req.url === "/echo-bare") {
+        res.writeHead(200, {
+          "x-debug": `token=${(req.headers.authorization ?? "").split(" ")[1]}`,
+        });
+        res.end("ok");
+      } else if (req.url === "/not-modified") {
+        res.writeHead(304, { etag: '"v1"' });
+        res.end();
       } else if (req.url === "/hang") {
         // never answers
       } else {
@@ -461,6 +476,89 @@ describe("upgrade hardening (security review)", () => {
   });
 });
 
+describe("upgrade edge cases (review)", () => {
+  /** A raw HTTP/1.1 request through the proxy; resolves with the whole answer. */
+  async function raw(lines: string[]): Promise<string> {
+    const socket = connect(proxyPort, "127.0.0.1");
+    await once(socket, "connect");
+    socket.write(`${lines.join("\r\n")}\r\n\r\n`);
+    let out = "";
+    socket.on("data", (c: Buffer) => (out += c.toString("latin1")));
+    await once(socket, "close");
+    return out;
+  }
+
+  it("refuses a request with both Content-Length and Transfer-Encoding (no smuggling)", async () => {
+    const out = await raw([
+      "POST http://pkgs.example.com/upload HTTP/1.1",
+      "Host: pkgs.example.com",
+      `Proxy-Authorization: ${proxyAuth()}`,
+      "Content-Length: 4",
+      "Transfer-Encoding: chunked",
+      "",
+      "0",
+      "",
+    ]);
+    expect(out.split("\r\n")[0]).toMatch(/^HTTP\/1\.1 400/);
+    expect(seen).toEqual([]);
+  });
+
+  it("drops duplicate and underscore-spelled client copies; Connection can't remove an injected header", async () => {
+    const out = await raw([
+      "GET http://pkgs.example.com/dup HTTP/1.1",
+      "Host: pkgs.example.com",
+      `Proxy-Authorization: ${proxyAuth()}`,
+      "Authorization: Bearer one",
+      "Authorization: Bearer two",
+      "Content_Length: 999",
+      "Transfer_Encoding: chunked",
+      "Connection: close, X-Org, Authorization",
+    ]);
+    expect(out.split("\r\n")[0]).toBe("HTTP/1.1 200 OK");
+    const got = seen[0] as Seen;
+    expect(got.headers.authorization).toBe(SECRET);
+    expect(got.headers["x-org"]).toBe("finance");
+    expect(got.headers.content_length).toBeUndefined();
+    expect(got.headers.transfer_encoding).toBeUndefined();
+  });
+
+  it("normalises mixed-case and trailing-dot hosts to the exact header domain", async () => {
+    for (const url of ["http://PKGS.Example.COM/simple/", "http://pkgs.example.com./simple/"]) {
+      const res = await viaProxy(url);
+      expect(res.status, url).toBe(200);
+    }
+    expect(seen.map((s) => s.servername)).toEqual(["pkgs.example.com", "pkgs.example.com"]);
+    expect(seen.every((s) => s.headers.host === "pkgs.example.com")).toBe(true);
+  });
+
+  it("passes redirects to another port or to http:// unchanged (checked as new requests)", async () => {
+    expect((await viaProxy("http://pkgs.example.com/redirect-port")).headers.location).toBe(
+      "https://pkgs.example.com:8443/x",
+    );
+    expect((await viaProxy("http://pkgs.example.com/redirect-http")).headers.location).toBe(
+      "http://pkgs.example.com/plain",
+    );
+  });
+
+  it("drops a header echoing the credential without its scheme", async () => {
+    const res = await viaProxy("http://pkgs.example.com/echo-bare");
+    expect(res.status).toBe(200);
+    expect(res.headers["x-debug"]).toBeUndefined();
+  });
+
+  it("relays HEAD and 304 without a body", async () => {
+    const head = await viaProxy("http://pkgs.example.com/simple/", { method: "HEAD" });
+    expect(head.status).toBe(200);
+    expect(head.body).toBe("");
+    const cached = await viaProxy("http://pkgs.example.com/not-modified", {
+      headers: { "if-none-match": '"v1"' },
+    });
+    expect(cached.status).toBe(304);
+    expect(cached.headers.etag).toBe('"v1"');
+    expect(seen.at(-1)?.headers["if-none-match"]).toBe('"v1"');
+  });
+});
+
 describe("upgrade helpers", () => {
   it("parses only http:// absolute URLs to host names on the default port", () => {
     expect(parsePlainTarget("http://PKGS.example.com/a?b")).toEqual({
@@ -525,5 +623,13 @@ describe("upgrade helpers", () => {
         { name: "Authorization", value: "Bearer t0k3n" },
       ]),
     ).toEqual([["X-B", "fine"]]);
+  });
+
+  it("matches the credential with and without its scheme", () => {
+    expect(secretParts([{ name: "Authorization", value: "Bearer abc123" }]).sort()).toEqual([
+      "Bearer abc123",
+      "abc123",
+    ]);
+    expect(secretParts([{ name: "X", value: "ab" }])).toEqual([]);
   });
 });

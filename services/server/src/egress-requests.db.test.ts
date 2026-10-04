@@ -9,6 +9,7 @@ import {
   withTeam,
 } from "@kobe/db";
 import { runWithAuditContext } from "./audit/context.js";
+import { resealTeamHeaders } from "./egress/header-store.js";
 import { sweepEgressRequestNotifications } from "./egress/request-notify.js";
 import { MAX_REQUESTS_PER_HOUR } from "./egress/request-store.js";
 import { createTeamWithAdmin } from "./teams/members.js";
@@ -303,6 +304,108 @@ describe("request access", () => {
   });
 });
 
+describe("request access under concurrency (review)", () => {
+  async function member(email: string): Promise<TestBrowser> {
+    const id = await h.createUser(email);
+    await withTeam(h.deps.database.db, finance, (tx) =>
+      tx.insert(teamMembers).values({ teamId: finance, userId: id, role: "member" }),
+    );
+    const b = await h.signIn(email);
+    expect((await b.put("/v1/me/teams/active", { teamId: finance })).status).toBe(200);
+    b.team = finance;
+    return b;
+  }
+
+  it("parallel requests can't pass the hourly quota (one admin email each, at most 10)", async () => {
+    for (let i = 0; i < 15; i++) {
+      await as.owner.post("/v1/install/egress-ceiling", { domain: `q${i}.quota.example.com` });
+    }
+    const erin = await member("erin@req.test");
+    const before = h.mailer.to("alice@req.test").length;
+    const results = await Promise.all(
+      Array.from({ length: 15 }, (_, i) =>
+        erin.post(REQUESTS, { domain: `q${i}.quota.example.com` }),
+      ),
+    );
+    expect(results.filter((r) => r.status === 201)).toHaveLength(MAX_REQUESTS_PER_HOUR);
+    expect(results.filter((r) => r.status === 429)).toHaveLength(15 - MAX_REQUESTS_PER_HOUR);
+    await h.mailer.settle();
+    expect(h.mailer.to("alice@req.test").length - before).toBe(MAX_REQUESTS_PER_HOUR);
+  });
+
+  it("parallel decisions on one pattern don't deadlock; the requests are settled once", async () => {
+    await as.owner.post("/v1/install/egress-ceiling", { domain: "race.example.com" });
+    const [f1, f2, f3] = [
+      await member("f1@req.test"),
+      await member("f2@req.test"),
+      await member("f3@req.test"),
+    ];
+    const ids: string[] = [];
+    for (const b of [f1, f2, f3]) {
+      const r = await (b as TestBrowser).post(REQUESTS, { domain: "race.example.com" });
+      ids.push(r.json.request.id as string);
+    }
+    const answers = await Promise.all(
+      ids.map((id, i) =>
+        as.alice.post(`${TEAM_REQUESTS}/${id}`, { decision: i === 0 ? "approve" : "deny" }),
+      ),
+    );
+    expect(answers.filter((a) => a.status === 200)).toHaveLength(1);
+    expect(answers.filter((a) => a.status === 409)).toHaveLength(2);
+    const { rows } = await h.admin.query(
+      `SELECT DISTINCT status FROM egress_requests WHERE team_id = $1 AND pattern = 'race.example.com'`,
+      [finance],
+    );
+    expect(rows).toHaveLength(1);
+  });
+
+  it("enabling a domain directly settles its pending requests and tells the requesters", async () => {
+    await as.owner.post("/v1/install/egress-ceiling", { domain: "direct.example.com" });
+    const gina = await member("gina@req.test");
+    expect((await gina.post(REQUESTS, { domain: "direct.example.com" })).status).toBe(201);
+    const res = await as.alice.put("/v1/team/egress/domains/direct.example.com", {});
+    expect(res.status).toBe(201);
+    expect(res.json.settled_requests).toBe(1);
+    await h.mailer.settle();
+    expect(h.mailer.to("gina@req.test").at(-1)?.subject).toBe(
+      "direct.example.com is now enabled for the Finance team",
+    );
+    const mine = await gina.get(`${REQUESTS}?domain=direct.example.com`);
+    expect(mine.json.requests[0]).toMatchObject({ status: "approved", decided_by: ids.alice });
+  });
+
+  it("skips an email whose recipient is no longer a team admin when it is delivered", async () => {
+    await as.owner.post("/v1/install/egress-ceiling", { domain: "late.example.com" });
+    const hank = await member("hank@req.test");
+    h.mailer.failNext = new Error("smtp down");
+    const req = await hank.post(REQUESTS, { domain: "late.example.com" });
+    await h.mailer.settle();
+    // Alice stops being an admin before the retry (Carol becomes one so the team keeps one).
+    await h.admin.query(
+      `UPDATE team_members SET role = 'team_admin' WHERE team_id = $1 AND user_id = $2`,
+      [finance, ids.carol],
+    );
+    await h.admin.query(
+      `UPDATE team_members SET role = 'member' WHERE team_id = $1 AND user_id = $2`,
+      [finance, ids.alice],
+    );
+    await h.admin.query(
+      `UPDATE egress_request_notifications SET next_attempt_at = now() WHERE request_id = $1`,
+      [req.json.request.id],
+    );
+    expect(await sweepEgressRequestNotifications(h.deps)).toBe(0);
+    const { rows } = await h.admin.query(
+      `SELECT status, last_error FROM egress_request_notifications WHERE request_id = $1`,
+      [req.json.request.id],
+    );
+    expect(rows[0]).toMatchObject({ status: "skipped", last_error: "recipient_not_entitled" });
+    await h.admin.query(
+      `UPDATE team_members SET role = 'team_admin' WHERE team_id = $1 AND user_id = $2`,
+      [finance, ids.alice],
+    );
+  });
+});
+
 describe("header injection", () => {
   const HEADERS = (d: string) => `/v1/team/egress/domains/${enc(d)}/headers`;
 
@@ -389,5 +492,27 @@ describe("header injection", () => {
       [finance],
     );
     expect(rows[0].n).toBe(0);
+  });
+
+  it("re-seals values sealed with a previous secret (rotation), keeping them", async () => {
+    await as.alice.put("/v1/team/egress/domains/pkgs.example.com", {});
+    expect(
+      (
+        await as.alice.put(HEADERS("pkgs.example.com"), {
+          headers: [{ name: "X-Key", value: "rotate-me-1234" }],
+        })
+      ).status,
+    ).toBe(200);
+    const rotated = headerBox(["n".repeat(40), HEADER_SECRET]);
+    expect(await resealTeamHeaders(h.deps.database.db, rotated)).toBe(1);
+    const { rows } = await h.admin.query(
+      `SELECT headers_sealed FROM team_egress WHERE team_id = $1 AND domain = 'pkgs.example.com'`,
+      [finance],
+    );
+    expect(rotated.isCurrent(rows[0].headers_sealed)).toBe(true);
+    expect(
+      openHeaders(headerBox("n".repeat(40)), finance, "pkgs.example.com", rows[0].headers_sealed),
+    ).toEqual([{ name: "X-Key", value: "rotate-me-1234" }]);
+    expect(await resealTeamHeaders(h.deps.database.db, rotated)).toBe(0);
   });
 });
