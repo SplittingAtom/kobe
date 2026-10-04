@@ -4,6 +4,7 @@ import {
   MODELS_SPEND_PREFIX,
   SYSTEM_ACTOR,
   loadTeamBudgetLines,
+  lineUsedUp,
   percentUsed,
   sql,
   teams,
@@ -171,7 +172,7 @@ export class BudgetMonitor {
     // first; a narrower stop of the same runs is then a no-op.
     const stopped: string[] = [];
     const seen = new Set<string>();
-    for (const line of lines.filter((l) => l.spent >= l.limit)) {
+    for (const line of lines.filter(lineUsedUp)) {
       const key = line.scope === "user" ? `user:${line.userId ?? ""}` : line.scope;
       if (seen.has(key)) continue;
       seen.add(key);

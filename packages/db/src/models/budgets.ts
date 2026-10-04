@@ -25,6 +25,31 @@ export interface BudgetLine {
   readonly unit: BudgetUnit;
   readonly limit: number;
   readonly spent: number;
+  /**
+   * The limit and spend as the numeric text Postgres holds (never through a float). The used-up
+   * test compares these; `limit` and `spent` are for display, percentages and estimates.
+   */
+  readonly limitExact?: string;
+  readonly spentExact?: string;
+}
+
+const EXACT_SCALE = 12;
+
+/** A numeric's text (`12.5`, `0.0000000001`) as an integer count of 1e-12 units. */
+export function scaledDecimal(text: string): bigint {
+  const m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(text.trim());
+  if (!m) throw new Error(`not a plain decimal: ${text}`);
+  const frac = (m[3] ?? "").padEnd(EXACT_SCALE, "0").slice(0, EXACT_SCALE);
+  const units = BigInt(`${m[2]}${frac}`);
+  return m[1] === "-" ? -units : units;
+}
+
+/** Spend has reached the limit, exactly when both are known as numeric text. */
+export function lineUsedUp(line: BudgetLine): boolean {
+  if (line.spentExact !== undefined && line.limitExact !== undefined) {
+    return scaledDecimal(line.spentExact) >= scaledDecimal(line.limitExact);
+  }
+  return line.spent >= line.limit;
 }
 
 export interface MemberBudgetState {
@@ -49,13 +74,21 @@ export const percentUsed = (line: BudgetLine): number =>
 /** The used-up budget that stops calls and runs (widest scope first), or undefined. */
 export function exhaustedLine(lines: readonly BudgetLine[]): BudgetLine | undefined {
   return [...lines]
-    .filter((l) => l.spent >= l.limit)
+    .filter(lineUsedUp)
     .sort((a, b) => SCOPE_ORDER[a.scope] - SCOPE_ORDER[b.scope])[0];
 }
 
 type Row = Record<string, unknown>;
 const num = (v: unknown): number | undefined =>
   v === null || v === undefined ? undefined : Number(v);
+
+/** A numeric column as the text the driver returned (a number is formatted without exponent). */
+const decimalText = (v: unknown): string | undefined => {
+  if (v === null || v === undefined) return undefined;
+  if (typeof v === "string") return v;
+  if (typeof v === "bigint") return v.toString();
+  return Number(v).toFixed(EXACT_SCALE);
+};
 
 /** A row's limits and spend: `monthly_usd`, `daily_usd`, `monthly_tokens`, `daily_tokens`, and
  * `month_usd`, `day_usd`, `month_tokens`, `day_tokens`. */
@@ -81,6 +114,8 @@ function linesOf(
         unit,
         limit,
         spent: num(r[spentKey]) ?? 0,
+        limitExact: decimalText(r[limitKey]) ?? String(limit),
+        spentExact: decimalText(r[spentKey]) ?? "0",
       });
     }
   }

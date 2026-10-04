@@ -35,6 +35,7 @@ const model = `kobe-${provider}/m`;
 const now = new Date("2026-10-15T12:00:00Z");
 
 const usage = (over: Partial<ModelUsageRecord>): ModelUsageRecord => ({
+  id: randomUUID(),
   teamId: teamA,
   userId: alice,
   sandboxId: randomUUID(),

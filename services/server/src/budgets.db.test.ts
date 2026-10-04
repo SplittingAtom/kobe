@@ -53,6 +53,7 @@ const call = (
   dollars: number,
   runId?: string,
 ): ModelUsageRecord => ({
+  id: randomUUID(),
   teamId,
   userId,
   sandboxId: randomUUID(),

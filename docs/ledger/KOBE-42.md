@@ -30,7 +30,7 @@ server: BudgetMonitor (LISTEN + 30 s sweep) ── 80/100 % ─▶ budget_alerts
         run start: RunBudgetGate (same numbers) ─▶ 429 budget_exhausted
 ```
 
-- **Data** (`packages/db` `schema/budgets.ts`, migrations `0045_budgets`, `0046_budgets_rls`):
+- **Data** (`packages/db` `schema/budgets.ts`, migrations `0046_budgets`, `0047_budgets_rls`):
   `install_model_limits` † (one row: monthly/daily USD, per-user requests per minute, default 60),
   `team_budgets` (team, RLS: the team row with an optional lower rate, and member rows),
   `model_spend_daily` (team, RLS: cost and calls per UTC day and user) and
@@ -117,7 +117,7 @@ server: BudgetMonitor (LISTEN + 30 s sweep) ── 80/100 % ─▶ budget_alerts
 
 ## Independent security review (coordinator) — resolutions
 
-- **HIGH-1 forgeable/tamperable budget data** (`0046_budgets_rls.sql`):
+- **HIGH-1 forgeable/tamperable budget data** (`0047_budgets_rls.sql`):
   - spend counters (`model_spend_daily`, `install_model_spend_daily`) accept writes only from the
     `run_usage` trigger (`kobe_spend_guard`: trigger depth 2) or a team cascade; the ledger itself
     is append-only (KOBE-43);
@@ -163,8 +163,8 @@ server: BudgetMonitor (LISTEN + 30 s sweep) ── 80/100 % ─▶ budget_alerts
   of TRIGGER: proven for the real app role by `app-role-capabilities.db.test.ts` (#56; the temp
   table, pg_temp function and own-trigger steps are refused). The guards say they rely on it.
   `pg_trigger_depth` guards in the repo: `0005_conversations_rls.sql` (run/thread seq counters),
-  `0020_agent_versions_rls.sql` (published agent versions), `0044_run_usage_rls.sql` (#56),
-  `0046_budgets_rls.sql` (`kobe_spend_guard`, `kobe_budget_email_guard`). None changed beyond the
+  `0020_agent_versions_rls.sql` (published agent versions), `0045_run_usage_rls.sql` (#56),
+  `0047_budgets_rls.sql` (`kobe_spend_guard`, `kobe_budget_email_guard`). None changed beyond the
   comments; the GUC hardening was skipped (the coordinator's call: revoke + test suffice).
 - **MEDIUM (reservation fairness):** on a shared line (install, team) each member's in-flight
   reservations count only up to a quarter of what is left (`MEMBER_SHARE`); a member whose own
@@ -241,3 +241,11 @@ server: BudgetMonitor (LISTEN + 30 s sweep) ── 80/100 % ─▶ budget_alerts
 | Bifrost backstop     | `reconcile.test.ts` "pushes each member's request rate…"; `bifrost.int.test.ts` real binary (local)                                                                                                                                                                                                  |
 | kobe-models mapping  | sandbox-agent `errors.test.ts` (402 / `budget_exhausted` / `policy_budget_exceeded` → `model_budget_exhausted`, not transient)                                                                                                                                                                       |
 | UI                   | web `budgets-pages.test.tsx` (team page, member budgets, install budget, banner text), `conversation.test.tsx` banner, `usage-pages.test.tsx`                                                                                                                                                        |
+
+## After KOBE-43 merged (#56)
+
+- Took main's run_usage code and migrations (0044/0045); this branch adds only `0046_budgets`,
+  `0047_budgets_rls`. Budgets never read the float `cost_usd`: spend comes from the daily counters
+  the run_usage trigger sums in numeric, and the used-up test (`lineUsedUp`, gate, monitor, new-run
+  gate) compares the numeric text exactly (`spentExact` vs `limitExact`) and token counts as
+  integers. Floats stay for display, percentages and in-flight estimates.
