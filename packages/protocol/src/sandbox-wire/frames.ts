@@ -78,6 +78,15 @@ export const helloFrameSchema = frame("hello", {
       last_seq: z.number().int().nonnegative(),
     }),
   ),
+  /**
+   * Optional features this agent supports (KOBE-82), e.g. `skill_bundles`. Absent = none (older
+   * agents). The server sends a feature's fields only to agents that list it. An agent that sends
+   * this field needs a server that knows it: roll the server out first.
+   */
+  capabilities: z
+    .array(z.string().regex(/^[a-z][a-z0-9_]{0,63}$/))
+    .max(32)
+    .optional(),
 });
 
 /** One raw Pi session event, bridged unchanged (the server translates to Kobe events). */
@@ -203,7 +212,11 @@ export const gatewayModelSchema = z
   .max(256)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._:/-]*$/);
 
-export const piThreadConfigSchema = z.strictObject({
+/**
+ * Unknown keys are ignored (stripped), not rejected, since KOBE-82: a future additive field must not
+ * break an older agent. Known fields stay strictly validated; the frame itself is still strict.
+ */
+export const piThreadConfigSchema = z.object({
   /**
    * The run's model (D30): the catalog alias plus, resolved by the server from the catalog
    * (KOBE-41), the gateway's model id and API style. Without `gateway_model` the sandbox has no

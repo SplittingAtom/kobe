@@ -4,16 +4,14 @@ import {
   eq,
   inArray,
   installSkills,
+  sql,
   installSkillVersions,
-  teamSkillReviews,
   teamSkillVersions,
   type KobeTx,
 } from "@kobe/db";
 import { logger } from "../logger.js";
 import type { SkillRef } from "../resolver/resolve.js";
 import { blockedAmong, isBlocked } from "./blocklist.js";
-import { usablePersonalSkills } from "./review.js";
-import { readPersonalSkillsDisabled } from "./settings.js";
 
 /**
  * Skill materialization, server side (KOBE-82, D22). Two read paths, both inside a transaction and
@@ -22,9 +20,8 @@ import { readPersonalSkillsDisabled } from "./settings.js";
  * - {@link bundleRefsFor}: the run-start list. The resolver's effective skills (approved, not
  *   blocklisted, not team-disabled) become `{name, sha256, size}` refs in `run.start`; nothing else
  *   is ever listed, so nothing else reaches a sandbox.
- * - {@link locateBundle}: what a sandbox may download. Only a hash that is effective for the
- *   calling (team, user) right now: an approved team version, or one of the user's usable personal
- *   versions while the team has not switched personal skills off; never a blocklisted one.
+ * - {@link locateBundle}: what a sandbox may download: only a hash listed in the `run.start` of a
+ *   run active on that sandbox, and never a blocklisted one.
  */
 
 /** Ref list for `run.start` from the resolver's effective skills, blocklist re-checked here. */
@@ -90,37 +87,49 @@ export interface LocatedBundle {
   readonly size: number;
 }
 
-/** The stored bundle behind `hash` if it is effective for this caller now, else null. */
+/** The sandbox the request came from, as the verified token names it. */
+export interface BundleCaller {
+  readonly sandboxId: string;
+  readonly teamId: string;
+  readonly userId: string;
+}
+
+/**
+ * The stored bundle behind `hash`, if this sandbox may fetch it now: the hash is in the
+ * `skill_bundles` of a `run.start` still open (not yet answered) for a run active on this very
+ * sandbox, and it is not blocklisted at this moment. The list was decided at run start (resolver +
+ * blocklist, same transaction), so approval changes or a replaced personal skill afterwards do not
+ * break the run that was started with it, while a blocklist entry stops a fetch even mid-run.
+ */
 export async function locateBundle(
   tx: KobeTx,
-  who: { teamId: string; userId: string },
+  who: BundleCaller,
   hash: string,
 ): Promise<LocatedBundle | null> {
   if (await isBlocked(tx, hash)) return null;
-  const approved = await tx
-    .select({ version: teamSkillReviews.version })
-    .from(teamSkillReviews)
-    .where(
-      and(
-        eq(teamSkillReviews.teamId, who.teamId),
-        eq(teamSkillReviews.scope, "team"),
-        eq(teamSkillReviews.status, "approved"),
-        eq(teamSkillReviews.contentHash, hash),
-      ),
-    )
+  const bound = await tx.execute(sql`
+    SELECT 1
+      FROM sandbox_run_leases l
+      JOIN runs r ON r.team_id = l.team_id AND r.id = l.run_id
+      JOIN sandbox_commands c
+        ON c.team_id = l.team_id AND c.run_id = l.run_id AND c.kind = 'run.start'
+     WHERE l.team_id = ${who.teamId} AND l.user_id = ${who.userId}
+       AND l.sandbox_id = ${who.sandboxId}
+       AND r.status IN ('running', 'waiting_approval')
+       AND c.user_id = ${who.userId} AND c.status IN ('pending', 'delivered')
+       AND c.frame -> 'config' -> 'skill_bundles'
+           @> jsonb_build_array(jsonb_build_object('sha256', ${hash}::text))
+     LIMIT 1`);
+  if (bound.rows.length === 0) return null;
+  // The bytes: this team's version with that hash, else one of the caller's own personal versions
+  // (versions are immutable, so a replaced skill's old bytes are still there).
+  const [team] = await tx
+    .select({ key: teamSkillVersions.storageKey, size: teamSkillVersions.sizeBytes })
+    .from(teamSkillVersions)
+    .where(and(eq(teamSkillVersions.teamId, who.teamId), eq(teamSkillVersions.contentHash, hash)))
     .limit(1);
-  if (approved.length > 0) {
-    const [row] = await tx
-      .select({ key: teamSkillVersions.storageKey, size: teamSkillVersions.sizeBytes })
-      .from(teamSkillVersions)
-      .where(and(eq(teamSkillVersions.teamId, who.teamId), eq(teamSkillVersions.contentHash, hash)))
-      .limit(1);
-    if (row) return { storageKey: row.key, size: row.size };
-  }
-  if (await readPersonalSkillsDisabled(tx, who.teamId)) return null;
-  const usable = await usablePersonalSkills(tx, { ...who, ensureRows: false });
-  if (!usable.some((s) => s.hash === hash)) return null;
-  const [row] = await tx
+  if (team) return { storageKey: team.key, size: team.size };
+  const [own] = await tx
     .select({ key: installSkillVersions.storageKey, size: installSkillVersions.sizeBytes })
     .from(installSkillVersions)
     .innerJoin(installSkills, eq(installSkills.id, installSkillVersions.skillId))
@@ -128,5 +137,5 @@ export async function locateBundle(
       and(eq(installSkills.ownerUserId, who.userId), eq(installSkillVersions.contentHash, hash)),
     )
     .limit(1);
-  return row ? { storageKey: row.key, size: row.size } : null;
+  return own ? { storageKey: own.key, size: own.size } : null;
 }

@@ -12,18 +12,16 @@
   sync, KOBE-27). The sandbox holds no S3 credentials, URL or key. Frames are capped at 4 MiB and a stored
   (uncompressed) canonical zip can reach ~25 MiB, so chunking over the wire would have meant a new multi-part
   command protocol; HTTP streams.
-- **Authorization without a new secret or table.** (team, user) come from the verified token; in one
-  transaction the server serves a hash only if it is effective for that caller now (`skills/materialize.ts`
-  `locateBundle`): an approved team version, or one of the caller's usable personal versions while the team
-  has not switched personal skills off; the blocklist is read again in the same transaction. Anything else
-  (pending, rejected, blocklisted, other team, other user's personal skill, junk) is the same 404. The stream
-  is hash-verified on the way out (`verifyingStream`). Not a per-run signed grant: a compromised sandbox
-  could fetch any skill currently effective for its own user and team, which every member can already
-  download. Per-sandbox rate limit (200 burst, 20/s).
+- **Run-bound authorization (coordinator).** (sandbox, team, user) come from the verified token. In one
+  transaction the server serves a hash only if it is in the `skill_bundles` of a `run.start` still open
+  (`sandbox_commands` pending/delivered) for a run active on that very sandbox (`sandbox_run_leases`), and
+  is not blocklisted right now (`skills/materialize.ts` `locateBundle`). No migration: the run.start frame
+  row already holds the list. Anything else is the same 404. A skill replaced or re-reviewed after run
+  start doesn't break that run (tested); a blocklist entry stops a fetch mid-run. Stream is hash-verified
+  (`verifyingStream`); per-sandbox rate limit.
 - **`run.start.config.skill_bundles: [{name, sha256, size}]`** (additive, optional;
   `packages/protocol/src/sandbox-wire/skill-bundles.ts`, documented there). `skills` (names) stays and always
-  equals the bundle names. A sandbox agent older than this change rejects the strict frame, so server and
-  image roll out together. Built in `PINNED_AGENTS.resolve` from the resolver's output, inside the run-start
+  equals the bundle names. Omitted when empty. Built in `PINNED_AGENTS.resolve` from the resolver's output, inside the run-start
   transaction, with the blocklist (`blockedAmong`) read once more; nothing but these refs is ever listed.
 - **Sandbox side** (`services/sandbox-agent/src/skills/`): `SkillStore.prepare(thread, refs)` fetches each
   bundle, requires exact size and SHA-256 equal to the frame's, then `readBundle` re-applies the safety rules
@@ -32,6 +30,15 @@
   bits refused), safe NFC paths (no `..`, absolute, backslash, control chars, `__proto__`, case-duplicates,
   file-under-file), caps 200 files / 10 MiB per file / 25 MiB total / 100 KiB SKILL.md / 240-byte paths,
   SKILL.md at the root. Extraction: temp dir, `O_EXCL|O_NOFOLLOW`, then atomic rename.
+- **Compatibility (coordinator).** `hello.capabilities` (new optional field; the agent lists
+  `skill_bundles` when it has a skills store). The server sends `skill_bundles` only to agents that list
+  it; a run with skills on an agent that doesn't fails `skills_unsupported` (visible message) instead of
+  starting without them. `run.start.config` now ignores unknown keys (stripped), so future additive
+  fields don't break old agents. Rollout: server first (an old server rejects a hello with `capabilities`).
+- **Store root is the agent's own subdirectory (Opus review).** `/run/kobe-skills` is a sticky
+  world-writable emptyDir, so skills live in `<mount>/store`, created by the agent at boot, 0711, refused
+  if present and not the agent's own plain directory, reused after a container restart. Others can't plant
+  `sk-*`/`.tmp-*`, list or fill it. Memory-volume fill by Pi uids elsewhere on the mount is not prevented.
 - **Where and who:** `KOBE_SKILLS_DIR=/run/kobe-skills`, a second memory-backed emptyDir (128 Mi; the agent
   caps all live skills at 96 MiB) next to `/run/kobe-pi`, so its root is sticky and no Pi uid can rename the
   agent's directories (`ensureRuntimeRoot`, KOBE-71; the agent refuses a root that isn't). Content is
@@ -54,16 +61,14 @@
 
 ## Open questions (for Chris or the coordinator)
 
-- Executable bits are not preserved (the canonical zip drops attributes): scripts run via an interpreter,
-  not `./script.sh`. Needs a canonical-format change in KOBE-78 if wanted.
-- A personal skill replaced by a newer version between run start and fetch gets a 404 and fails that run
-  (strict "effective now"); retrying the run picks the new version.
+- Executable bits are not preserved (hash identity); accepted for v1. The skill editor's Files hint says
+  to run scripts through an interpreter (`bash x.sh`, `python x.py`).
 - No chart or NetworkPolicy change needed (the sandbox listener port is already allowed).
 
 ## Evidence (acceptance criteria -> test or command output)
 
 - ac-1 (only effective skills): `services/server/src/skill-materialization.db.test.ts` (run.start lists only
-  approved ones with hash and size; download serves only effective hashes); sandbox
+  approved ones with hash and size; download serves only the run's listed hashes; old/new agent); sandbox
   `src/agent.skills.test.ts` (exact `--skill` list, removal on the next run) and
   `skills/store.test.ts` (stale removal, read-only modes, hash/size mismatch, unsafe entries).
 - ac-2 (blocklisted/team-disabled never materialize): same server file (blocklist at run start and at

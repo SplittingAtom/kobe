@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { SkillBundleRef } from "@kobe/protocol";
@@ -35,13 +35,14 @@ function offer(name: string, zip: Uint8Array = goodBundle(), claimed?: Partial<S
   return { name, sha256: hash, size: zip.length, ...claimed } satisfies SkillBundleRef;
 }
 const bundleOf = (n: string) => goodBundle([{ name: `note-${n}.md`, data: n }]);
-const dirs = async () => (await readdir(root)).sort();
+const storeDir = () => path.join(root, "store");
+const dirs = async () => (await readdir(storeDir())).sort();
 
 describe("SkillStore.prepare", () => {
   it("extracts a verified bundle and returns its directory", async () => {
     const ref = offer("demo");
     const [dir] = await store().prepare("t1", [ref]);
-    expect(dir).toBe(path.join(root, `sk-${ref.sha256}`));
+    expect(dir).toBe(path.join(storeDir(), `sk-${ref.sha256}`));
     expect(await readFile(path.join(dir ?? "", "SKILL.md"), "utf8")).toContain("name: demo");
     expect(await readFile(path.join(dir ?? "", "scripts/run.sh"), "utf8")).toBe("echo hi\n");
   });
@@ -90,6 +91,7 @@ describe("SkillStore.prepare", () => {
     expect(await dirs()).toEqual([]);
     // Nothing escaped the directory either.
     expect(await readdir(path.dirname(root))).toEqual(["skills"]);
+    expect(await readdir(root)).toEqual(["store"]);
   });
 
   it("writes files the Pi uids can read but not change (agent-owned, no group/other write)", async () => {
@@ -182,10 +184,36 @@ describe("SkillStore.prepare", () => {
 
 describe("SkillStore.init", () => {
   it("empties what an earlier agent left (skills and half-extracted temp directories)", async () => {
-    await mkdir(path.join(root, `sk-${"a".repeat(64)}`), { recursive: true });
-    await mkdir(path.join(root, ".tmp-deadbeef"));
-    await writeFile(path.join(root, "unrelated"), "keep");
+    await mkdir(path.join(storeDir(), `sk-${"a".repeat(64)}`), { recursive: true });
+    await mkdir(path.join(storeDir(), ".tmp-deadbeef"));
+    await writeFile(path.join(storeDir(), "unrelated"), "keep");
     await store().init();
     expect(await dirs()).toEqual(["unrelated"]);
+  });
+
+  it("restarts cleanly on a store the agent itself left behind (container restart)", async () => {
+    const ref = offer("demo");
+    await store().prepare("t1", [ref]);
+    await expect(store().init()).resolves.toBeUndefined();
+    expect(await dirs()).toEqual([]);
+    await expect(store().prepare("t1", [ref])).resolves.toHaveLength(1);
+  });
+
+  it("keeps entries out of reach of other uids: the store is 0711, nobody else can create or list", async () => {
+    await store().prepare("t1", [offer("demo")]);
+    const mode = (await stat(storeDir())).mode & 0o777;
+    expect(mode).toBe(0o711);
+    expect(mode & 0o022).toBe(0); // no group or other write: nothing can be planted
+    expect(mode & 0o044).toBe(0); // and no listing
+    expect((await stat(storeDir())).uid).toBe(process.getuid?.());
+  });
+
+  it("refuses a store that is not the agent's own plain directory", async () => {
+    await mkdir(root, { recursive: true });
+    await symlink(tmpdir(), storeDir());
+    await expect(store().init()).rejects.toThrow(/not the agent's own/);
+    await rm(storeDir());
+    await writeFile(storeDir(), "file");
+    await expect(store().prepare("t1", [])).rejects.toThrow(/not the agent's own/);
   });
 });

@@ -29,10 +29,10 @@ const notFound = () =>
 /**
  * `GET /<sha256>` on the sandbox listener (contract: packages/protocol sandbox-wire/skill-bundles.ts,
  * KOBE-82). The caller is a live sandbox (`kobe.sandbox-wire` token, same checks as workspace sync);
- * (team, user) come from the token. The bundle is served only while that hash is effective for
- * that user in that team (re-checked now, blocklist included, in one transaction), streamed from
- * the object store with its hash verified on the way. Everything else, including a blocklisted or
- * unapproved hash, is the same 404: the sandbox learns nothing about what exists.
+ * (sandbox, team, user) come from the token. The bundle is served only if that hash is in the
+ * `skill_bundles` of a `run.start` still open on that sandbox and not blocklisted now (one
+ * transaction), streamed from the object store with its hash verified on the way. Everything
+ * else is the same 404: the sandbox learns nothing about what exists.
  */
 export function skillSandboxRoutes(deps: SkillSandboxRoutesDeps): Hono {
   const { db, blobs, authenticate, log, limiter = createRateLimiter(SKILL_FETCH_RATE) } = deps;
@@ -51,9 +51,7 @@ export function skillSandboxRoutes(deps: SkillSandboxRoutesDeps): Hono {
     }
     const hash = sha256HexSchema.safeParse(c.req.param("sha256"));
     if (!hash.success) return notFound();
-    const found = await withTeam(db, caller.teamId, (tx) =>
-      locateBundle(tx, { teamId: caller.teamId, userId: caller.userId }, hash.data),
-    );
+    const found = await withTeam(db, caller.teamId, (tx) => locateBundle(tx, caller, hash.data));
     if (!found) return notFound();
     const object = await blobs.objects.get(found.storageKey);
     if (!object || object.size !== found.size) {

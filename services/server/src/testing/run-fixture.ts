@@ -243,12 +243,20 @@ export class RunFixture {
     return res.json.thread_id as string;
   }
 
-  async connect(w: RunWorld, replica = 0): Promise<FakeWorkspace> {
+  /**
+   * A scripted sandbox agent. `capabilities` is what its hello advertises: a current agent
+   * (default) lists `skill_bundles`; `null` sends no capabilities at all, like an older agent.
+   */
+  async connect(
+    w: RunWorld,
+    replica = 0,
+    capabilities: readonly string[] | null = ["skill_bundles"],
+  ): Promise<FakeWorkspace> {
     const token = this.auth.issue({ sandboxId: randomUUID(), teamId: w.team, userId: w.owner.id });
     const sb = await FakeSandbox.connect(must(this.listeners[replica], "listener").url, token);
     if (!isFake(sb)) throw new Error(`upgrade refused: ${sb.status}`);
     const claims = this.auth.verify(token);
-    sb.hello(claims.sub);
+    sb.hello(claims.sub, [], "1.0.0", capabilities ?? undefined);
     await sb.ready();
     const ws = new FakeWorkspace(sb);
     this.workspaces.push(ws);

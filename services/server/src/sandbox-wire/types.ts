@@ -70,6 +70,7 @@ export const COMMAND_FAILURES = {
   connectionLost: "connection_lost", // delivered, then the connection closed before its result
   sandboxLost: "sandbox_lost", // run.start for a run the reconnected sandbox no longer has
   sessionUnavailable: "session_unavailable", // entry sync/restore before run.start failed
+  skillsUnsupported: "skills_unsupported", // run.start lists skills, the agent can't load them
 } as const;
 
 export interface RunStartRequest {

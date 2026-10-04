@@ -27,7 +27,8 @@ export function FilesEditor({
     <section aria-labelledby="skill-files-heading">
       <h2 id="skill-files-heading">Files</h2>
       <p className={adminStyles.hint}>
-        Extra text files saved next to SKILL.md, such as references or scripts.
+        Extra text files saved next to SKILL.md, such as references or scripts. Files are not
+        executable: run scripts through an interpreter (bash script.sh, python script.py).
       </p>
       {files.map((file, i) => (
         <fieldset key={file.key} className={styles.fileCard}>

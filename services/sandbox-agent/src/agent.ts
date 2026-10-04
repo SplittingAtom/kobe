@@ -1,4 +1,5 @@
 import {
+  CAPABILITY_SKILL_BUNDLES,
   KOBE_EVENT_DROPPED_TYPE,
   type HelloAckFrame,
   type HelloFrame,
@@ -205,6 +206,8 @@ export class Agent {
       agent_version: this.#deps.agentVersion,
       pi_version: this.#deps.piVersion,
       runs: this.#outbox.helloRuns(),
+      // Optional features, so the server sends their fields only to agents that can use them.
+      ...(this.#deps.skills === undefined ? {} : { capabilities: [CAPABILITY_SKILL_BUNDLES] }),
     };
   }
 

@@ -86,8 +86,8 @@ describe("skills at run start", () => {
     const [launch] = await launches();
     const dirs = skillArgs(launch?.argv as string[]);
     expect(dirs).toEqual([
-      path.join(skillsRoot, `sk-${a.sha256}`),
-      path.join(skillsRoot, `sk-${b.sha256}`),
+      path.join(skillsRoot, "store", `sk-${a.sha256}`),
+      path.join(skillsRoot, "store", `sk-${b.sha256}`),
     ]);
     for (const dir of dirs) expect(existsSync(path.join(dir ?? "", "SKILL.md"))).toBe(true);
     expect(readFileSync(path.join(dirs[0] ?? "", "note.md"), "utf8")).toBe("a");
@@ -105,10 +105,12 @@ describe("skills at run start", () => {
     expect(await h.server.command(second)).toMatchObject({ ok: true });
     await h.server.waitFor(settled(RUN_2));
 
-    expect(await readdir(skillsRoot)).toEqual([`sk-${b.sha256}`]);
+    expect(await readdir(path.join(skillsRoot, "store"))).toEqual([`sk-${b.sha256}`]);
     const all = await launches();
     expect(all).toHaveLength(2);
-    expect(skillArgs(all[1]?.argv as string[])).toEqual([path.join(skillsRoot, `sk-${b.sha256}`)]);
+    expect(skillArgs(all[1]?.argv as string[])).toEqual([
+      path.join(skillsRoot, "store", `sk-${b.sha256}`),
+    ]);
 
     // And with no skills at all, none stay.
     const third = {
@@ -117,7 +119,7 @@ describe("skills at run start", () => {
     };
     expect(await h.server.command(third)).toMatchObject({ ok: true });
     await h.server.waitFor(settled("4f5a6b7c-8d9e-4f0a-9b2c-3d4e5f607183"));
-    expect(await readdir(skillsRoot)).toEqual([]);
+    expect(await readdir(path.join(skillsRoot, "store"))).toEqual([]);
   });
 
   it("fails the run, starting no Pi, when the bytes do not match the listed SHA-256", async () => {
@@ -128,7 +130,7 @@ describe("skills at run start", () => {
     expect(result).toMatchObject({ ok: false, error: { code: "pi_unavailable" } });
     expect(JSON.stringify(result)).toMatch(/SHA-256/);
     expect(await launches().catch(() => [])).toHaveLength(0);
-    expect(await readdir(skillsRoot)).toEqual([]);
+    expect(await readdir(path.join(skillsRoot, "store"))).toEqual([]);
   });
 
   it("fails the run when the server does not offer the bundle any more", async () => {
@@ -163,5 +165,19 @@ describe("skills at run start", () => {
     await h.server.waitFor(settled(RUN));
     const [launch] = await launches();
     expect(skillArgs(launch?.argv as string[])).toEqual([]);
+  });
+
+  it("advertises skill support in hello only when it has a skills store (older agents send none)", async () => {
+    h = await startHarness({ skills: store() });
+    expect(h.server.frames("hello").at(-1)?.capabilities).toEqual(["skill_bundles"]);
+    await h.close();
+    h = await startHarness();
+    expect(h.server.frames("hello").at(-1)).not.toHaveProperty("capabilities");
+  });
+
+  it("ignores config fields it does not know instead of failing the run", async () => {
+    h = await startHarness();
+    const frame = runStart("say:hi", { config: { approval_mode: "auto", future_field: [1] } });
+    expect(await h.server.command(frame)).toMatchObject({ ok: true });
   });
 });

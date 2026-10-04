@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { lstat, mkdir, readdir, rename, rm } from "node:fs/promises";
+import { chmod, lstat, mkdir, readdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { SKILL_BUNDLE_MAX_BYTES, type SkillBundleRef } from "@kobe/protocol";
 import { ensureRuntimeRoot } from "../models/runtime-dir.js";
@@ -13,7 +13,7 @@ import { extractFiles, SKILL_DIR_MODE } from "./extract.js";
  * can rename (`ensureRuntimeRoot`, the same rule as the Pi runtime directories, KOBE-71), so a
  * tool can never alter a skill for a later session.
  *
- * Layout: `<root>/sk-<sha256>/` is the content of one canonical bundle, extracted once under a
+ * Layout: `<root>/store/sk-<sha256>/` is the content of one canonical bundle, extracted once under a
  * temporary name and renamed into place (a directory with that name is always complete). Pi is
  * pointed at exactly the directories of its run (`--skill`), so what a thread sees is what the
  * server listed; directories no live thread wants any more are removed on every start (nothing
@@ -44,20 +44,47 @@ export interface SkillStoreOptions {
   readonly log?: { warn(obj: object, msg: string): void };
 }
 
+/** The agent's own subdirectory of the skills volume: the only place skills are written. */
+export const STORE_DIR = "store";
+/** Others may reach `sk-*` paths they are given, never list the store or create entries in it. */
+const STORE_MODE = 0o711;
+
 export class SkillStore {
   readonly #o: SkillStoreOptions;
+  readonly #store: string;
   /** Hashes each live thread's current Pi was asked to load. */
   readonly #wanted = new Map<string, ReadonlySet<string>>();
   #queue: Promise<unknown> = Promise.resolve();
 
   constructor(options: SkillStoreOptions) {
     this.#o = options;
+    this.#store = path.join(options.root, STORE_DIR);
   }
 
   /** Boot: checks the root and empties it (an earlier agent's skills are stale by definition). */
   async init(): Promise<void> {
-    await ensureRuntimeRoot(this.#o.root, this.#o.identities);
+    await this.#ensureStore();
     await this.#sweep(() => true);
+  }
+
+  /**
+   * The volume root is a sticky directory every Pi uid can write to (a memory emptyDir), so
+   * nothing is stored in it directly: the agent makes its own subdirectory (0711: no one else can
+   * create, list, rename or delete anything in it; the sticky bit keeps it from being renamed away).
+   * One left by an earlier run of this agent (a container restart keeps the volume) is reused; one
+   * that is not the agent's own, or not a plain directory, is refused, never adopted.
+   */
+  async #ensureStore(): Promise<void> {
+    await ensureRuntimeRoot(this.#o.root, this.#o.identities);
+    let info = await lstat(this.#store).catch(() => undefined);
+    if (info === undefined) {
+      await mkdir(this.#store, { mode: STORE_MODE });
+      info = await lstat(this.#store);
+    }
+    const uid = process.getuid?.();
+    if (!info.isDirectory() || (uid !== undefined && info.uid !== uid))
+      throw new SkillError(`${this.#store} is not the agent's own directory`);
+    await chmod(this.#store, STORE_MODE);
   }
 
   /**
@@ -77,12 +104,12 @@ export class SkillStore {
   }
 
   dirOf(sha256: string): string {
-    return path.join(this.#o.root, `${DIR_PREFIX}${sha256}`);
+    return path.join(this.#store, `${DIR_PREFIX}${sha256}`);
   }
 
   async #prepare(threadId: string, refs: readonly SkillBundleRef[]): Promise<readonly string[]> {
     checkRefs(refs);
-    await ensureRuntimeRoot(this.#o.root, this.#o.identities);
+    await this.#ensureStore();
     const wanted = new Set(refs.map((r) => r.sha256));
     // Everything this start does not need goes first: it makes room and means a failed download
     // below never leaves a skill the server no longer lists.
@@ -112,7 +139,7 @@ export class SkillStore {
         throw new SkillError(`skill ${ref.name} was refused (${error.reason}): ${error.message}`);
       throw error;
     }
-    const temp = path.join(this.#o.root, `${TEMP_PREFIX}${randomBytes(8).toString("hex")}`);
+    const temp = path.join(this.#store, `${TEMP_PREFIX}${randomBytes(8).toString("hex")}`);
     await mkdir(temp, { mode: SKILL_DIR_MODE });
     try {
       await extractFiles(temp, files);
@@ -140,11 +167,11 @@ export class SkillStore {
   }
 
   async #sweep(remove: (name: string) => boolean): Promise<void> {
-    for (const name of await readdir(this.#o.root)) {
+    for (const name of await readdir(this.#store)) {
       if (!name.startsWith(DIR_PREFIX) && !name.startsWith(TEMP_PREFIX)) continue;
       if (!remove(name)) continue;
       try {
-        await rm(path.join(this.#o.root, name), { recursive: true, force: true });
+        await rm(path.join(this.#store, name), { recursive: true, force: true });
       } catch (error) {
         // A stale skill that can't be removed must not be handed to Pi: refuse the start.
         throw new SkillError(

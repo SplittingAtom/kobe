@@ -120,12 +120,50 @@ describe("run.start lists only effective skills", () => {
   });
 });
 
+describe("agents that do not advertise skill support", () => {
+  it("fails the run visibly instead of starting without its skills or sending fields it can't read", async () => {
+    const w = await f.world();
+    const name = `old-${unique()}`;
+    const s = await upload(w.owner, "team", name);
+    await approve(w.owner, s.skillId);
+    const thread = await pinnedThread(w.owner, [name]);
+    const old = await f.connect(w, 0, null);
+    const run = await f.message(w.owner, thread, "hello");
+    await f.until(w.team, run, "failed");
+    expect((await f.events(w.team, run)).at(-1)?.payload).toMatchObject({
+      error: { code: "skills_unsupported" },
+    });
+    expect(old.starts().map((x) => x.run_id)).not.toContain(run);
+    old.kill();
+  });
+
+  it("starts a run without skills on an older agent, with no bundle field at all", async () => {
+    const w = await f.world();
+    const old = await f.connect(w, 0, null);
+    const run = await f.message(w.owner, await pinnedThread(w.owner, []), "hello");
+    const start = await old.started(run);
+    expect(start.config).not.toHaveProperty("skill_bundles");
+    old.reply(start, "ok");
+    await f.until(w.team, run, "completed");
+    old.kill();
+  });
+});
+
 describe("sandbox bundle download", () => {
-  const caller = (w: { team: string }, userId: string): SandboxAuthenticator => {
-    const result: AuthResult = {
-      ok: true,
-      caller: { sandboxId: randomUUID(), teamId: w.team, userId },
-    };
+  /** A run whose run.start the sandbox has not answered yet: the window in which it fetches. */
+  async function heldRun(w: Awaited<ReturnType<RunFixture["world"]>>, skills: string[]) {
+    const ws = await f.connect(w, 0);
+    ws.sb.autoAnswer = false;
+    const run = await f.message(w.owner, await pinnedThread(w.owner, skills), "hello");
+    const start = await ws.started(run);
+    const { rows } = await f.fx.admin.query<{ sandbox_id: string }>(
+      `SELECT sandbox_id FROM sandbox_run_leases WHERE run_id = $1`,
+      [run],
+    );
+    return { ws, run, start, sandboxId: rows[0]?.sandbox_id as string };
+  }
+  const as = (w: { team: string }, userId: string, sandboxId: string): SandboxAuthenticator => {
+    const result: AuthResult = { ok: true, caller: { sandboxId, teamId: w.team, userId } };
     return Object.assign(() => Promise.resolve(result), { forget() {} });
   };
   const routes = (authenticate: SandboxAuthenticator) =>
@@ -136,12 +174,14 @@ describe("sandbox bundle download", () => {
       log: { error() {}, warn() {} },
     });
 
-  it("serves an effective bundle byte for byte, and a blocklisted one stops at once", async () => {
+  it("serves a bundle listed in the run's run.start, byte for byte; a blocklist entry stops it mid-run", async () => {
     const w = await f.world();
-    const s = await upload(w.owner, "team", `dl-${unique()}`);
+    const name = `dl-${unique()}`;
+    const s = await upload(w.owner, "team", name);
     await approve(w.owner, s.skillId);
-    const app = routes(caller(w, w.owner.id));
-    const res = await app.request(`/${s.hash}`, { headers: { authorization: "Bearer x" } });
+    const held = await heldRun(w, [name]);
+    const app = routes(as(w, w.owner.id, held.sandboxId));
+    const res = await app.request(`/${s.hash}`);
     expect(res.status).toBe(200);
     const bytes = Buffer.from(await res.arrayBuffer());
     expect(createHash("sha256").update(bytes).digest("hex")).toBe(s.hash);
@@ -151,34 +191,64 @@ describe("sandbox bundle download", () => {
     expect((await app.request(`/${s.hash}`)).status).toBe(404);
   });
 
-  it("never serves a pending version, another team's skill, another user's personal skill or junk", async () => {
+  it("still serves a personal skill that was replaced after the run started", async () => {
+    const w = await f.world();
+    const name = `swap-${unique()}`;
+    const first = await upload(w.owner, "personal", name);
+    const held = await heldRun(w, []);
+    expect(held.start.config?.skill_bundles?.map((b) => b.sha256)).toEqual([first.hash]);
+    // A new version replaces it for later runs (new hash); this run keeps its own.
+    const next = await f.on(0, w.owner).post("/v1/skills?scope=personal", zipOf(name, "changed"));
+    expect(next.status, JSON.stringify(next.json)).toBe(201);
+    expect(next.json.version.contentHash).not.toBe(first.hash);
+    const app = routes(as(w, w.owner.id, held.sandboxId));
+    expect((await app.request(`/${first.hash}`)).status).toBe(200);
+    // Nor is the new version offered to this run.
+    expect((await app.request(`/${next.json.version.contentHash}`)).status).toBe(404);
+  });
+
+  it("serves nothing that is not in this run's list, to another sandbox, or with no open run.start", async () => {
     const w = await f.world();
     const other = await f.world();
+    const listed = `in-${unique()}`;
+    const a = await upload(w.owner, "team", listed);
+    await approve(w.owner, a.skillId);
+    const unlisted = await upload(w.owner, "team", `out-${unique()}`);
+    await approve(w.owner, unlisted.skillId);
     const pending = await upload(w.owner, "team", `pd-${unique()}`);
-    const approved = await upload(other.owner, "team", `ot-${unique()}`);
-    await approve(other.owner, approved.skillId);
+    const foreign = await upload(other.owner, "team", `ot-${unique()}`);
     const theirs = await upload(other.owner, "personal", `pr-${unique()}`);
-    const app = routes(caller(w, w.owner.id));
+    const held = await heldRun(w, [listed]);
+    const app = routes(as(w, w.owner.id, held.sandboxId));
     for (const hash of [
+      unlisted.hash,
       pending.hash,
-      approved.hash,
+      foreign.hash,
       theirs.hash,
       "f".repeat(64),
       "../etc",
       "A".repeat(64),
     ])
       expect((await app.request(`/${hash}`)).status, hash).toBe(404);
+    // Same user and team, but another sandbox: its run.start is not open on that one.
+    const stranger = routes(as(w, w.owner.id, randomUUID()));
+    expect((await stranger.request(`/${a.hash}`)).status).toBe(404);
+    // Another team's caller.
+    const elsewhere = routes(as(other, other.owner.id, held.sandboxId));
+    expect((await elsewhere.request(`/${a.hash}`)).status).toBe(404);
   });
 
-  it("serves the caller's own personal skill, unless the team switched them off", async () => {
+  it("serves nothing once the run.start was answered", async () => {
     const w = await f.world();
-    const mine = await upload(w.owner, "personal", `own-${unique()}`);
-    const app = routes(caller(w, w.owner.id));
-    expect((await app.request(`/${mine.hash}`)).status).toBe(200);
-    await f.on(0, w.owner).put("/v1/team/skill-review/settings", {
-      personalSkillsDisabled: true,
-    });
-    expect((await app.request(`/${mine.hash}`)).status).toBe(404);
+    const name = `done-${unique()}`;
+    const s = await upload(w.owner, "team", name);
+    await approve(w.owner, s.skillId);
+    const held = await heldRun(w, [name]);
+    await f.fx.admin.query(`UPDATE sandbox_commands SET status = 'done' WHERE run_id = $1`, [
+      held.run,
+    ]);
+    const app = routes(as(w, w.owner.id, held.sandboxId));
+    expect((await app.request(`/${s.hash}`)).status).toBe(404);
   });
 
   it("refuses a caller that is not a live sandbox", async () => {
