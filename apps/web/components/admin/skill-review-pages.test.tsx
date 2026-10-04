@@ -11,6 +11,8 @@ const review = (over: Record<string, unknown> = {}) => ({
   slug: "report-writer",
   version: 2,
   contentHash: "a".repeat(64),
+  scope: "team",
+  unscanned: false,
   status: "pending",
   flagged: false,
   findings: [],

@@ -15,7 +15,7 @@ import {
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { MAX_LIVE_SKILLS, MAX_SKILL_VERSIONS } from "./limits.js";
-import { recordPendingReview } from "./review.js";
+import { recordPendingReview, recordPersonalScan } from "./review.js";
 
 /**
  * Skill bundles in the database (KOBE-78). Team skills live in RLS tables and are always touched
@@ -124,9 +124,17 @@ export function uploadSkillVersion(
     if (location.scope === "team") {
       await recordPendingReview(
         tx,
-        { teamId: location.teamId, skillId: skill.id, version: number },
+        {
+          teamId: location.teamId,
+          skillId: skill.id,
+          version: number,
+          slug: skill.slug,
+          contentHash: input.contentHash,
+        },
         input.scan,
       );
+    } else {
+      await recordPersonalScan(tx, { skillId: skill.id, version: number }, input.scan);
     }
     await recordAudit(tx, {
       action: "skill.uploaded",

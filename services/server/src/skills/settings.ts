@@ -1,13 +1,4 @@
-import {
-  and,
-  eq,
-  installSkills,
-  installSkillVersions,
-  teamSkillSettings,
-  withTeam,
-  type KobeDb,
-  type KobeTx,
-} from "@kobe/db";
+import { eq, teamSkillSettings, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 
 /**
@@ -50,23 +41,4 @@ export function setPersonalSkillsDisabled(
     });
     return disabled;
   });
-}
-
-/** The latest version (name and bundle hash) of each of the user's personal skills. */
-export async function personalSkillRefs(
-  tx: KobeTx,
-  userId: string,
-): Promise<{ name: string; hash: string }[]> {
-  const rows = await tx
-    .select({ name: installSkills.slug, hash: installSkillVersions.contentHash })
-    .from(installSkills)
-    .innerJoin(
-      installSkillVersions,
-      and(
-        eq(installSkillVersions.skillId, installSkills.id),
-        eq(installSkillVersions.version, installSkills.latestVersion),
-      ),
-    )
-    .where(eq(installSkills.ownerUserId, userId));
-  return rows;
 }

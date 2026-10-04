@@ -20,6 +20,10 @@ export interface SkillReview {
   readonly slug: string;
   readonly version: number;
   readonly contentHash: string;
+  /** `personal`: a member's personal skill that needs this team's approval. */
+  readonly scope: "team" | "personal";
+  /** Not scanned yet (older version): findings are filled in when the queue is listed. */
+  readonly unscanned: boolean;
   readonly status: ReviewStatus;
   readonly flagged: boolean;
   readonly findings: readonly SkillFinding[];

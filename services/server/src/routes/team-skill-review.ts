@@ -2,7 +2,13 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
-import { decideReview, listReviews, type ReviewRecord } from "../skills/review.js";
+import {
+  decideReview,
+  decodeCursor,
+  listReviews,
+  scanUnscanned,
+  type ReviewRecord,
+} from "../skills/review.js";
 import { getPersonalSkillsDisabled, setPersonalSkillsDisabled } from "../skills/settings.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 
@@ -19,6 +25,7 @@ const decisionSchema = z.strictObject({
 });
 const settingsSchema = z.strictObject({ personalSkillsDisabled: z.boolean() });
 const idSchema = z.uuid();
+const limitSchema = z.coerce.number().int().min(1).max(200);
 const versionSchema = z.coerce.number().int().positive().max(2147483647);
 
 const reviewJson = (r: ReviewRecord) => ({
@@ -26,6 +33,8 @@ const reviewJson = (r: ReviewRecord) => ({
   slug: r.slug,
   version: r.version,
   contentHash: r.contentHash,
+  scope: r.scope,
+  unscanned: r.unscanned,
   status: r.status,
   flagged: r.flagged,
   findings: r.findings,
@@ -52,8 +61,17 @@ export function teamSkillReviewRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
     const filter = filterSchema.safeParse(c.req.query("status") ?? "pending");
     if (!filter.success)
       return invalidRequest(c, "status must be pending, approved, rejected or all.");
-    const rows = await listReviews(db, c.get("team").id, STATUS_FILTERS[filter.data]);
-    return c.json({ reviews: rows.map(reviewJson) });
+    const limit = limitSchema.safeParse(c.req.query("limit") ?? 200);
+    const cursorText = c.req.query("cursor");
+    const cursor = cursorText === undefined ? undefined : decodeCursor(cursorText);
+    if (!limit.success || (cursorText !== undefined && !cursor))
+      return invalidRequest(c, "limit must be 1 to 200 and cursor one this API returned.");
+    if (deps.blobs) await scanUnscanned(db, deps.blobs, c.get("team").id);
+    const page = await listReviews(db, c.get("team").id, STATUS_FILTERS[filter.data], {
+      limit: limit.data,
+      ...(cursor ? { cursor } : {}),
+    });
+    return c.json({ reviews: page.reviews.map(reviewJson), nextCursor: page.nextCursor });
   });
 
   app.post(

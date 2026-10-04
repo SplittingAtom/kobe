@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { strToU8, zipSync } from "fflate";
 import { RawBody, type TestBrowser } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 import { MemoryObjects } from "./testing/memory-objects.js";
+import { withTeam } from "@kobe/db";
+import { usablePersonalSkills } from "./skills/review.js";
 
 /**
  * Skill scan and team-admin review (KOBE-80, D22): every new team version is scanned at upload and
@@ -199,5 +202,114 @@ describe("personal skills switch", () => {
       [finance],
     );
     expect(rows.map((r) => r.target.disabled)).toEqual([true, false]);
+  });
+});
+
+describe("flagged personal skills (KOBE-80)", () => {
+  async function usable(teamId: string, who: Person) {
+    const db = h.deps.database.db;
+    const names = await withTeam(db, teamId, (tx) =>
+      usablePersonalSkills(tx, { teamId, userId: ids[who], ensureRows: true }),
+    );
+    return names.map((n) => n.name).sort();
+  }
+
+  it("is blocked until each team's admin approves it there; clean ones need no review", async () => {
+    // Erin is a member of both teams.
+    const erin = await h.createUser("erin@review.test");
+    for (const t of [finance, marketing])
+      await h.admin.query(
+        `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'member')`,
+        [t, erin],
+      );
+    ids.carol = erin; // `usable` reads ids[who]
+    const erinB = await h.signIn("erin@review.test");
+    expect((await erinB.put("/v1/me/teams/active", { teamId: finance })).status).toBe(200);
+    erinB.team = finance;
+    const up = await erinB.post("/v1/skills?scope=personal", zipOf("risky", FLAGGED));
+    expect(up.status, JSON.stringify(up.json)).toBe(201);
+    expect((await erinB.post("/v1/skills?scope=personal", zipOf("tidy"))).status).toBe(201);
+
+    expect(await usable(finance, "carol")).toEqual(["tidy"]);
+    expect(await usable(marketing, "carol")).toEqual(["tidy"]);
+    const pending = (await queue("alice")).find((r) => r.slug === "risky");
+    expect(pending).toMatchObject({ status: "pending", flagged: true });
+    expect((await queue("dave")).find((r) => r.slug === "risky")?.status).toBe("pending");
+
+    const row = pending as unknown as { skillId: string; version: number };
+    expect((await decide("alice", row.skillId, row.version, { decision: "approved" })).status).toBe(
+      200,
+    );
+    expect(await usable(finance, "carol")).toEqual(["risky", "tidy"]);
+    expect(await usable(marketing, "carol")).toEqual(["tidy"]);
+    // Rejected in team B stays blocked.
+    expect((await decide("dave", row.skillId, row.version, { decision: "rejected" })).status).toBe(
+      200,
+    );
+    expect(await usable(marketing, "carol")).toEqual(["tidy"]);
+  });
+});
+
+describe("backfill and late scanning", () => {
+  it("backfills pending unscanned rows idempotently and scans them when listed", async () => {
+    const t = await team("bob", "legacy", FLAGGED);
+    await h.admin.query(`DELETE FROM team_skill_reviews WHERE skill_id = $1`, [t.skillId]);
+    const sql = readFileSync(
+      new URL("../../../packages/db/drizzle/0056_skill_reviews_rls.sql", import.meta.url),
+      "utf8",
+    ).split("--> statement-breakpoint")[0] as string;
+    await h.admin.query(sql);
+    await h.admin.query(sql);
+    const { rows } = await h.admin.query(
+      `SELECT status, unscanned, flagged, slug, scope FROM team_skill_reviews WHERE skill_id = $1`,
+      [t.skillId],
+    );
+    expect(rows).toEqual([
+      { status: "pending", unscanned: true, flagged: false, slug: "legacy", scope: "team" },
+    ]);
+    const listed = (await queue("alice")).find((r) => r.slug === "legacy");
+    expect(listed).toMatchObject({ flagged: true, unscanned: false });
+    expect(listed?.findings.map((f) => f.category)).toContain("pipe-to-shell");
+  });
+});
+
+describe("queue paging", () => {
+  it("sorts and pages in SQL: flagged first, oldest first, over more than 200 rows", async () => {
+    const s = await team("bob", "paged");
+    const base = await h.admin.query(
+      `SELECT content_hash, storage_key FROM team_skill_versions WHERE skill_id = $1`,
+      [s.skillId],
+    );
+    // 230 more rows across statuses; every 10th flagged; scan times strictly increasing.
+    await h.admin.query(
+      `INSERT INTO team_skill_reviews (team_id, skill_id, version, scope, slug, content_hash, status,
+         flagged, findings, scripts, skipped, scanned_at, reviewed_by, reviewed_at)
+       SELECT $1, $2, 1000 + g, 'team', 'paged', $3,
+         (CASE WHEN g % 3 = 0 THEN 'approved' ELSE 'pending' END)::skill_review_status,
+         g % 10 = 0, '[]', '[]', '[]', now() - interval '1 day' + g * interval '1 second',
+         CASE WHEN g % 3 = 0 THEN $4::uuid END, CASE WHEN g % 3 = 0 THEN now() END
+       FROM generate_series(1, 230) g`,
+      [finance, s.skillId, base.rows[0].content_hash, ids.alice],
+    );
+    const pendingTotal = 230 - 76 + 1; // 76 multiples of 3 up to 230, plus the real version
+    const seen: { version: number; flagged: boolean }[] = [];
+    let cursor = "";
+    for (let pages = 0; pages < 10; pages++) {
+      const res = await as.alice.get(
+        `/v1/team/skill-review?status=pending&limit=60${cursor ? `&cursor=${cursor}` : ""}`,
+      );
+      expect(res.status, JSON.stringify(res.json)).toBe(200);
+      seen.push(...res.json.reviews);
+      if (!res.json.nextCursor) break;
+      cursor = res.json.nextCursor;
+    }
+    const mine = seen.filter((r) => (r as unknown as { slug: string }).slug === "paged");
+    expect(mine.length).toBe(pendingTotal);
+    const flaggedFlags = seen.map((r) => r.flagged);
+    expect(flaggedFlags).toEqual([...flaggedFlags].sort((a, b) => Number(b) - Number(a)));
+    const all = await as.alice.get("/v1/team/skill-review?status=all");
+    expect(all.json.reviews).toHaveLength(200);
+    expect(all.json.nextCursor).toBeTruthy();
+    expect((await as.alice.get("/v1/team/skill-review?cursor=junk")).status).toBe(400);
   });
 });

@@ -17,6 +17,7 @@ export const agents = defineDomain({
     "install_agent_versions",
     "install_skills",
     "install_skill_versions",
+    "install_skill_scans",
   ],
   grants: {
     // Personal and gallery agents (KOBE-45): the server confines personal rows to their owner and
@@ -27,6 +28,8 @@ export const agents = defineDomain({
     // Personal skills (KOBE-78): the server confines rows to their owner. Versions are immutable.
     install_skills: ALL_PRIVILEGES,
     install_skill_versions: ["SELECT", "INSERT"],
+    // Scans of personal versions (KOBE-80): written with the version, read at run start.
+    install_skill_scans: ["SELECT", "INSERT"],
   },
   teamReferencing: {},
 });

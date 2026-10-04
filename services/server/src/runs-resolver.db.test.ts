@@ -224,9 +224,9 @@ async function seedTeamSkill(
     );
     if (status === "none") continue;
     await admin.query(
-      `INSERT INTO team_skill_reviews (team_id, skill_id, version, status, flagged, findings, scripts,
-         skipped, reviewed_by, reviewed_at)
-       VALUES ($1, $2, $3, $4, false, '[]', '[]', '[]', $5, $6)`,
+      `INSERT INTO team_skill_reviews (team_id, skill_id, version, scope, slug, content_hash, status,
+         flagged, findings, scripts, skipped, reviewed_by, reviewed_at)
+       VALUES ($1, $2, $3, 'team', $7, $8, $4, false, '[]', '[]', '[]', $5, $6)`,
       [
         team,
         skillId,
@@ -234,12 +234,14 @@ async function seedTeamSkill(
         status,
         status === "pending" ? null : userId,
         status === "pending" ? null : new Date(),
+        slug,
+        `${slug.length}${i}`.padEnd(64, "a"),
       ],
     );
   }
 }
 
-async function seedPersonalSkill(userId: string, slug: string) {
+async function seedPersonalSkill(userId: string, slug: string, flagged = false) {
   const { rows } = await f.fx.admin.query<{ id: string }>(
     `INSERT INTO install_skills (owner_user_id, slug, description) VALUES ($1, $2, 'd') RETURNING id`,
     [userId, slug],
@@ -249,6 +251,11 @@ async function seedPersonalSkill(userId: string, slug: string) {
        storage_key, size_bytes, file_count, uncompressed_bytes, uploaded_by)
      VALUES ($1, 1, '{}', 'zip', $2, 'k', 1, 1, 1, $3)`,
     [rows[0]?.id, "b".repeat(64), userId],
+  );
+  await f.fx.admin.query(
+    `INSERT INTO install_skill_scans (skill_id, version, flagged, findings, scripts, skipped)
+     VALUES ($1, 1, $2, '[]', '[]', '[]')`,
+    [rows[0]?.id, flagged],
   );
 }
 
@@ -297,5 +304,30 @@ describe("run start resolves skills (KOBE-80)", () => {
     const hidden = await skillsOfRun(w, thread);
     expect(hidden.skills).toEqual([]);
     expect(hidden.omitted).toEqual([{ kind: "skill", name: "my-helper", reason: "team_disabled" }]);
+  });
+
+  it("a flagged personal skill is unusable in the team until its admin approves it there", async () => {
+    const w = await f.world();
+    await catalog(w.team, w.owner.id, [["fast", true]]);
+    await seedPersonalSkill(w.owner.id, "clean-helper");
+    await seedPersonalSkill(w.owner.id, "risky-helper", true);
+    const thread = await pinnedThread(w.owner, {});
+    expect((await skillsOfRun(w, thread)).skills).toEqual(["clean-helper"]);
+    // The blocked version is now in this team's queue, pending.
+    const { rows } = await f.fx.admin.query(
+      `SELECT slug, scope, status, flagged FROM team_skill_reviews WHERE team_id = $1`,
+      [w.team],
+    );
+    expect(rows).toEqual([
+      { slug: "risky-helper", scope: "personal", status: "pending", flagged: true },
+    ]);
+    await f.fx.admin.query(
+      `UPDATE team_skill_reviews SET status = 'approved', reviewed_by = $2, reviewed_at = now() WHERE team_id = $1`,
+      [w.team, w.owner.id],
+    );
+    expect([...(await skillsOfRun(w, thread)).skills].sort()).toEqual([
+      "clean-helper",
+      "risky-helper",
+    ]);
   });
 });

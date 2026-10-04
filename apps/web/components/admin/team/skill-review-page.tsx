@@ -164,8 +164,9 @@ function ReviewItem({
   return (
     <article aria-label={`${review.slug} version ${review.version}`}>
       <h3>
-        {review.slug} v{review.version}{" "}
+        {review.slug} v{review.version} {review.scope === "personal" && <em>(personal skill)</em>}{" "}
         {review.flagged && <strong>Flagged: {review.findings.length}</strong>}
+        {review.unscanned && <strong>Not scanned yet</strong>}
       </h3>
       <p className={styles.hint}>
         Scanned <DateTime value={review.scannedAt} />. {review.scripts.length} script

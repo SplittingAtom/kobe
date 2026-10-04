@@ -2,8 +2,8 @@ import { agentSkills, type AgentFrontmatter } from "@kobe/agent-file";
 import type { ApprovalMode } from "@kobe/protocol";
 import { and, connectors, eq, teamConnectors, teamModels, type KobeTx } from "@kobe/db";
 import type { ResolveInput, SkillRef } from "../resolver/resolve.js";
-import { approvedTeamSkills } from "../skills/review.js";
-import { personalSkillRefs, readPersonalSkillsDisabled } from "../skills/settings.js";
+import { approvedTeamSkills, usablePersonalSkills } from "../skills/review.js";
+import { readPersonalSkillsDisabled } from "../skills/settings.js";
 
 /**
  * Run-start inputs of the effective-config resolver (KOBE-76, 47b), gathered inside `withTeam()`.
@@ -11,7 +11,7 @@ import { personalSkillRefs, readPersonalSkillsDisabled } from "../skills/setting
  * (KOBE-61, user decision: an agent's connectors are left out with `not_user_connected`) and an
  * empty blocklist (KOBE-81). Skills (KOBE-78/80): the agent's named team skills resolve to their
  * newest team-admin-approved version (an unreviewed, pending or rejected one is unusable and
- * dropped), the user's personal skills to their latest versions, and the team's switch
+ * dropped), the user's personal skills to their latest versions (a flagged or unscanned one only once this team approved it), and the team's switch
  * `personalSkillsDisabled` is read here.
  */
 export interface TeamResolverFacts {
@@ -52,11 +52,21 @@ export async function loadTeamFacts(tx: KobeTx, teamId: string): Promise<TeamRes
  */
 export async function loadSkillFacts(
   tx: KobeTx,
-  args: { teamId: string; userId: string; agentSkillNames: readonly string[] },
+  args: {
+    teamId: string;
+    userId: string;
+    agentSkillNames: readonly string[];
+    /** The team switch: personal skills are then not even queued for review. */
+    personalSkillsDisabled: boolean;
+  },
 ): Promise<SkillFacts> {
   const [agent, user] = await Promise.all([
     approvedTeamSkills(tx, args.teamId, args.agentSkillNames),
-    personalSkillRefs(tx, args.userId),
+    usablePersonalSkills(tx, {
+      teamId: args.teamId,
+      userId: args.userId,
+      ensureRows: !args.personalSkillsDisabled,
+    }),
   ]);
   return { agent, user };
 }

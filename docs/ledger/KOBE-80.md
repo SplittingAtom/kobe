@@ -39,17 +39,26 @@ Scan on upload, store results in their own tables, review queue and team switch 
   `team_skill_settings`; `user.skills` = the owner's personal skills at their latest version (there
   is no per-skill "enabled" state yet), which the resolver omits with `team_disabled` when the
   switch is on. The blocklist stays a stub for KOBE-81.
-- **Personal skills are not reviewed**: they are install-wide, run only for their owner, and no team
-  owns them. They are scanned (findings counted in the upload audit) but not stored.
+- **Personal skills fail closed** (coordinator): their scan is stored install-wide
+  (`install_skill_scans`, SELECT+INSERT). A flagged or unscanned personal version is unusable in a
+  team until that team's admin approves it there: when a member's run first meets it (and the team
+  switch is off) a pending `team_skill_reviews` row (`scope = personal`) is created, so it shows in
+  that team's queue. Approval in team A does not apply in team B. Unflagged ones need no review.
+- **Review rows are self-contained** (slug and hash copied, no FK to versions) so one table serves
+  team and personal versions. Queue: sorted and keyset-paged in SQL (`limit` <= 200, `nextCursor`),
+  index `team_skill_reviews_queue_idx (team, status, flagged desc, scanned_at)`, findings read only
+  for the page.
+- **Backfill** (start of 0056, before RLS is enabled, `ON CONFLICT DO NOTHING`): existing team
+  versions get pending `unscanned` rows; the queue scans up to 20 of them per listing from the
+  stored bundles (`scanUnscanned`). Personal versions without a scan row are treated as unscanned
+  the same way (blocked until approved).
 - **Web:** `/admin/team/skill-review` (nav entry now READY): switch checkbox, status filter, findings,
   Approve/Reject (confirm when approving a flagged version). Server stays the authority.
 
 ## Open questions (for Chris or the coordinator)
 
-- Should personal skills with findings be blocked or shown to the owner? Today only team skills
-  need review (spec text says "team skills require team-admin review").
-- Add a team setting for the "open" alternative (no review for unflagged skills)? Not built.
-- Reviewers can approve their own uploads; two-person review would need a rule from the spec.
+- Decided by the coordinator: "open" review mode not built; self-approval allowed (audited).
+- The owner is not told when their personal skill is blocked in a team (no omission reason).
 - Dropped (unapproved) agent skills give the user no omission notice; needs a new reason in
   `@kobe/protocol` (its own PR).
 

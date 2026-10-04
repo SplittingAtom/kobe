@@ -42,6 +42,7 @@ export const PINNED_AGENTS: RunAgentResolver = {
       teamId: input.teamId,
       userId: input.ownerUserId,
       agentSkillNames: agentSkills(frontmatter).names,
+      personalSkillsDisabled: team.personalSkillsDisabled,
     });
     const resolved = resolveEffective(
       buildResolveInput({

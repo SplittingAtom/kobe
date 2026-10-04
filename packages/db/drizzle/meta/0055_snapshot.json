@@ -1,5 +1,5 @@
 {
-  "id": "f4e6a6b2-3b2b-4b58-b1c9-6af16baad0c7",
+  "id": "53f5af6f-6fce-4db7-b027-af01cff70995",
   "prevId": "89f6eeb7-fd75-4f0e-8a8b-c42e31c44dd1",
   "version": "7",
   "dialect": "postgresql",
@@ -8896,6 +8896,86 @@
       },
       "isRLSEnabled": false
     },
+    "public.install_skill_scans": {
+      "name": "install_skill_scans",
+      "schema": "",
+      "columns": {
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "flagged": {
+          "name": "flagged",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "findings": {
+          "name": "findings",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scripts": {
+          "name": "scripts",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skipped": {
+          "name": "skipped",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scanned_at": {
+          "name": "scanned_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "install_skill_scans_version_fk": {
+          "name": "install_skill_scans_version_fk",
+          "tableFrom": "install_skill_scans",
+          "tableTo": "install_skill_versions",
+          "columnsFrom": [
+            "skill_id",
+            "version"
+          ],
+          "columnsTo": [
+            "skill_id",
+            "version"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "install_skill_scans_skill_id_version_pk": {
+          "name": "install_skill_scans_skill_id_version_pk",
+          "columns": [
+            "skill_id",
+            "version"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.team_skill_reviews": {
       "name": "team_skill_reviews",
       "schema": "",
@@ -8918,6 +8998,24 @@
           "primaryKey": false,
           "notNull": true
         },
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "slug": {
+          "name": "slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "status": {
           "name": "status",
           "type": "skill_review_status",
@@ -8925,6 +9023,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'pending'"
+        },
+        "unscanned": {
+          "name": "unscanned",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "flagged": {
           "name": "flagged",
@@ -8976,7 +9081,41 @@
           "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "team_skill_reviews_queue_idx": {
+          "name": "team_skill_reviews_queue_idx",
+          "columns": [
+            {
+              "expression": "team_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "flagged",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            },
+            {
+              "expression": "scanned_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "team_skill_reviews_team_id_teams_id_fk": {
           "name": "team_skill_reviews_team_id_teams_id_fk",
@@ -9003,23 +9142,6 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
-        },
-        "team_skill_reviews_version_fk": {
-          "name": "team_skill_reviews_version_fk",
-          "tableFrom": "team_skill_reviews",
-          "tableTo": "team_skill_versions",
-          "columnsFrom": [
-            "team_id",
-            "skill_id",
-            "version"
-          ],
-          "columnsTo": [
-            "team_id",
-            "skill_id",
-            "version"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -9035,6 +9157,10 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
+        "team_skill_reviews_scope": {
+          "name": "team_skill_reviews_scope",
+          "value": "\"team_skill_reviews\".\"scope\" IN ('team', 'personal')"
+        },
         "team_skill_reviews_decided": {
           "name": "team_skill_reviews_decided",
           "value": "(\"team_skill_reviews\".\"status\" = 'pending') = (\"team_skill_reviews\".\"reviewed_by\" IS NULL AND \"team_skill_reviews\".\"reviewed_at\" IS NULL)"
