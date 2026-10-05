@@ -1563,7 +1563,7 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
     if until_ok 180 owner_closed; then ok "no scripted agent holds the Owner's sandbox identity any more"
     else fail "no scripted agent holds the Owner's sandbox identity any more"; fi
     read -r -d '' CHAT_JS <<'JS' || true
-const [team, content, timeoutMs, model, agentId] = process.argv.slice(1);
+const [team, content, timeoutMs, model, agentId, reuseThread] = process.argv.slice(1);
 const base = "http://127.0.0.1:" + process.env.PORT;
 const origin = new URL(process.env.KOBE_PUBLIC_URL).origin;
 const jar = new Map();
@@ -1587,7 +1587,8 @@ out("signin", login.status);
 await call("PUT", "/v1/me/teams/active", { teamId: team });
 // KOBE-44: an optional model chosen for the thread (an alias the team enabled).
 // KOBE-89: an optional agent (a gallery agent's id) to chat with.
-const thread = await call("POST", "/v1/threads", { title: "kobe-41", ...(model ? { model } : {}), ...(agentId ? { agent_id: agentId } : {}) });
+// KOBE-131: an optional existing thread to continue (an artifact update must stay in its thread).
+const thread = reuseThread ? { status: 200, json: { thread_id: reuseThread } } : await call("POST", "/v1/threads", { title: "kobe-41", ...(model ? { model } : {}), ...(agentId ? { agent_id: agentId } : {}) });
 out("thread", thread.status + ":" + (thread.json.model ?? "default"));
 out("thread_id", thread.json.thread_id ?? "-");
 const t0 = Date.now();
@@ -1598,6 +1599,7 @@ out("run", runId);
 // Follow the run's event stream until a terminal event (the sandbox may have to wake first).
 const controller = new AbortController();
 const timer = setTimeout(() => controller.abort(), Number(timeoutMs));
+const artifactEvents = [];
 let text = "", terminal = "none", code = "-", errorMessage = "-", first = null, waking = "-", startedModel = "-";
 try {
   const res = await fetch(base + "/v1/runs/" + runId + "/events", { headers: { ...headers(), accept: "text/event-stream" }, signal: controller.signal });
@@ -1618,6 +1620,7 @@ try {
       let payload = {}; try { payload = JSON.parse(data).payload ?? {}; } catch {}
       if (type === "sandbox.waking") waking = payload.reason;
       if (type === "run.started") startedModel = payload.model ?? "-";
+      if (type === "artifact.created" || type === "artifact.updated") artifactEvents.push(type + ":" + payload.artifact_id + ":v" + (payload.version ?? "?"));
       if (type === "text.delta") { if (first === null) first = Date.now() - t0; text += payload.delta ?? ""; }
       if (type === "run.completed" || type === "run.failed" || type === "run.interrupted" || type === "run.budget_stopped") {
         terminal = type;
@@ -1631,13 +1634,14 @@ clearTimeout(timer);
 out("waking", waking);
 out("started_model", startedModel);
 out("first_token_ms", first ?? "-");
+out("artifact_events", artifactEvents.join(",") || "-");
 out("terminal", terminal);
 out("code", code);
 out("error_message", errorMessage);
 out("text", text);
 JS
-    chat_run() { # content timeout-ms [model] [agent-id] → the CHAT_JS output (not `chat`: KOBE-40's helper above)
-      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$CHAT_JS" "$E2E_TEAM_ID" "$1" "$2" "${3:-}" "${4:-}" 2>&1 | tail -15
+    chat_run() { # content timeout-ms [model] [agent-id] [thread-id] → the CHAT_JS output (not `chat`: KOBE-40's helper above)
+      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$CHAT_JS" "$E2E_TEAM_ID" "$1" "$2" "${3:-}" "${4:-}" "${5:-}" 2>&1 | tail -16
     }
     chat_out=$(chat_run "hello-pi-$RANDOM" 300000)
     printf '     chat: %s\n' "$(printf '%s' "$chat_out" | grep -v '^text=' | tr '\n' ' ')"
@@ -1816,6 +1820,57 @@ SH
     g_out=$(gallery_run code-helper "bash: $gal_dir && python \$SK/code-review/scripts/scan.py \$SK/code-review/scripts/sample.py | grep -o '[0-9]* finding' | head -1")
     printf '     gallery code helper: %s\n' "$(printf '%s' "$g_out" | tr '\n' ' ' | cut -c1-400)"
     contains "Code Helper: the code-review skill scanned the sample" '^text=fake-openai: tool said: 4 finding$' "$g_out"
+
+    # KOBE-131 (KOBE-55): a run's fake model calls create_artifact with an HTML page holding an inline
+    # script ("tool: <name> <json>"); the artifact is stored, listed, readable and framed under the
+    # D-6 headers; update_artifact in the same thread makes version 2.
+    echo "==> artifacts (KOBE-131)"
+    art_html='<!doctype html><html><body><h1 id=t>Sales</h1><script>document.getElementById("t").textContent="Sales chart"</script></body></html>'
+    art_new="${art_html/Sales chart/Sales chart v2}"
+    art_out=$(chat_run "tool: create_artifact {\"kind\":\"html\",\"title\":\"Sales chart\",\"content\":\"${art_html//\"/\\\"}\"}" 300000 "" "$(gallery_id data-analyst)")
+    printf '     artifact create: %s\n' "$(printf '%s' "$art_out" | tr '\n' ' ' | cut -c1-500)"
+    art_thread=$(printf '%s\n' "$art_out" | sed -n 's/^thread_id=//p')
+    contains "artifacts: the run completed" '^terminal=run.completed$' "$art_out"
+    contains "artifacts: the event stream carried artifact.created (version 1)" \
+      '^artifact_events=artifact.created:[0-9a-f-]{36}:v1$' "$art_out"
+    art_id=$(printf '%s\n' "$art_out" | sed -n 's/^artifact_events=artifact.created:\([0-9a-f-]*\):v1$/\1/p')
+    art_list=$(as_owner "GET /v1/artifacts?thread_id=$art_thread")
+    contains "artifacts: GET /v1/artifacts?thread_id= lists it" "^200 .*\"id\":\"${art_id:-none}\".*\"Sales chart\"" "$art_list"
+    # as_owner prints the status and the first 400 bytes only; the header and content checks use a
+    # dedicated fetch through the server pod.
+    art_fetch() { # path → status, then the headers and body (JSON lines) of an owner-authenticated GET
+      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "
+        const base = 'http://127.0.0.1:8080', origin = process.env.KOBE_PUBLIC_URL;
+        const h = { origin, 'content-type': 'application/json', 'x-kobe-team': '$E2E_TEAM_ID' };
+        const login = await fetch(base + '/api/auth/sign-in/email', { method: 'POST', headers: h,
+          body: JSON.stringify({ email: 'owner@e2e.test', password: 'e2e owner password' }) });
+        const cookie = login.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
+        await fetch(base + '/v1/me/teams/active', { method: 'PUT', headers: { ...h, cookie }, body: JSON.stringify({ teamId: '$E2E_TEAM_ID' }) });
+        const res = await fetch(base + process.argv[1], { headers: { ...h, cookie } });
+        console.log('status=' + res.status);
+        for (const [k, v] of res.headers) console.log('h:' + k + '=' + v);
+        console.log('body=' + (await res.text()).replace(/\\n/g, ' '));
+      " "$1" 2>&1
+    }
+    art_content=$(art_fetch "/v1/artifacts/$art_id/versions/1/content")
+    contains "artifacts: the content endpoint returns the bytes (inline script included)" \
+      'body=<!doctype html>.*<script>document.getElementById\("t"\).textContent="Sales chart"</script>' "$art_content"
+    art_frame=$(art_fetch "/v1/artifacts/$art_id/versions/1/frame?team=$E2E_TEAM_ID")
+    contains "artifacts: the frame is served (200)" '^status=200$' "$art_frame"
+    contains "artifacts: the frame CSP sandboxes scripts without same-origin (D-6)" \
+      '^h:content-security-policy=sandbox allow-scripts allow-forms;' "$art_frame"
+    contains "artifacts: the frame CSP forbids network access from the page (connect-src none)" \
+      "^h:content-security-policy=.*connect-src 'none'" "$art_frame"
+    contains "artifacts: the frame sends X-Frame-Options SAMEORIGIN" '^h:x-frame-options=SAMEORIGIN$' "$art_frame"
+    art_out=$(chat_run "tool: update_artifact {\"artifact_id\":\"$art_id\",\"content\":\"${art_new//\"/\\\"}\"}" 300000 "" "" "$art_thread")
+    printf '     artifact update: %s\n' "$(printf '%s' "$art_out" | tr '\n' ' ' | cut -c1-500)"
+    contains "artifacts: the update run completed" '^terminal=run.completed$' "$art_out"
+    contains "artifacts: the event stream carried artifact.updated (version 2)" \
+      "^artifact_events=artifact.updated:$art_id:v2\$" "$art_out"
+    contains "artifacts: GET /v1/artifacts/:id shows two versions" '^2$' \
+      "$(art_fetch "/v1/artifacts/$art_id" | sed -n 's/^body=//p' | grep -o '"version":[0-9]*' | sort -u | wc -l | tr -d ' ')"
+    contains "artifacts: version 2 holds the revised content" 'Sales chart v2' \
+      "$(art_fetch "/v1/artifacts/$art_id/versions/2/content")"
 
     # ac-2: a revoked session token cannot call Bifrost (the member left the team; token unexpired).
     psql_kobe "DELETE FROM team_members WHERE team_id = '$E2E_TEAM_ID' AND user_id = '$MODEL_USER_ID';" >/dev/null
