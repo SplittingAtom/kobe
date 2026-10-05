@@ -19,6 +19,8 @@ export interface AgentSummary {
   readonly canPublish?: boolean;
   /** The caller may read the definition, which exporting a version needs (KOBE-91). */
   readonly canExport?: boolean;
+  /** Where a fork was copied from (KOBE-87); null for agents written from scratch. */
+  readonly forkedFrom?: { readonly agentId: string; readonly version: number | null } | null;
 }
 
 export interface AgentSaved {

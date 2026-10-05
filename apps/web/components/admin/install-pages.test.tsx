@@ -439,99 +439,18 @@ describe("Gallery agents", () => {
     ],
   };
 
-  it("lists, exports, suspends and deletes", async () => {
-    const calls = stubApi({
-      "GET /v1/install/gallery/agents": [200, AGENTS],
-      "PUT /v1/install/gallery/agents/a-1/status": [
-        200,
-        { agent: { ...AGENTS.agents[0], status: "suspended" } },
-      ],
-      "DELETE /v1/install/gallery/agents/a-1": [204],
-    });
+  it("lists and exports, with no way to change a gallery agent", async () => {
+    stubApi({ "GET /v1/install/gallery/agents": [200, AGENTS] });
     renderInstall(<GalleryPage />);
     const exportLink = await screen.findByRole("link", { name: "Export Assistant" });
     expect(exportLink.getAttribute("href")).toBe("/v1/install/gallery/agents/a-1/export");
-    await userEvent.click(screen.getByRole("button", { name: "Suspend Assistant" }));
-    await screen.findByText("Assistant is suspended.");
-    await userEvent.click(screen.getByRole("button", { name: "Delete Assistant" }));
-    await screen.findByText("Deleted Assistant.");
-    const put = must(calls.find((c) => c.method === "PUT"));
-    expect(JSON.parse(String(put.body))).toEqual({ status: "suspended" });
-    expect(summary(calls)).toContain("DELETE /v1/install/gallery/agents/a-1");
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByLabelText("Agent file (.md)")).toBeNull();
   });
 
-  it("publishes the draft it shows (If-Match) and archives a published agent", async () => {
-    const published = { ...AGENTS.agents[0], currentVersion: 1, revision: 3 };
-    const calls = stubApi({
-      "GET /v1/install/gallery/agents": [200, { agents: [published] }],
-      "POST /v1/install/gallery/agents/a-1/publish": [
-        201,
-        { agent: { ...published, currentVersion: 2 }, version: { version: 2 } },
-      ],
-      "DELETE /v1/install/gallery/agents/a-1": [
-        200,
-        { agent: { ...published, archivedAt: "2026-10-02T10:00:00Z" } },
-      ],
-    });
-    renderInstall(<GalleryPage />);
-    await userEvent.click(await screen.findByRole("button", { name: "Publish Assistant" }));
-    await screen.findByText("Published Assistant v2.");
-    const post = must(calls.find((c) => c.method === "POST"));
-    expect(post.headers.get("if-match")).toBe('"3"');
-    await userEvent.click(screen.getByRole("button", { name: "Archive Assistant" }));
-    await screen.findByText("Archived Assistant.");
-  });
-
-  it("shows archived agents with Unarchive instead of Publish", async () => {
-    const archived = { ...AGENTS.agents[0], currentVersion: 1, archivedAt: "2026-10-02T10:00:00Z" };
-    const calls = stubApi({
-      "GET /v1/install/gallery/agents": [200, { agents: [archived] }],
-      "POST /v1/install/gallery/agents/a-1/unarchive": [
-        200,
-        { agent: { ...archived, archivedAt: null } },
-      ],
-    });
-    renderInstall(<GalleryPage />);
-    expect(await screen.findByText("Archived")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Publish Assistant" })).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: "Unarchive Assistant" }));
-    await screen.findByText("Assistant is no longer archived.");
-    expect(summary(calls)).toContain("POST /v1/install/gallery/agents/a-1/unarchive");
-  });
-
-  it("imports an agent file as markdown", async () => {
-    const calls = stubApi({
-      "GET /v1/install/gallery/agents": [200, { agents: [] }],
-      "POST /v1/install/gallery/agents": [
-        201,
-        { agent: { ...AGENTS.agents[0], name: "Helper" }, warnings: [{ code: "auto" }] },
-      ],
-    });
+  it("says when the gallery is empty", async () => {
+    stubApi({ "GET /v1/install/gallery/agents": [200, { agents: [] }] });
     renderInstall(<GalleryPage />);
     await screen.findByText("The gallery is empty.");
-    const file = new File(["---\nname: Helper\n---\nBe helpful.\n"], "helper.md", {
-      type: "text/markdown",
-    });
-    await userEvent.upload(screen.getByLabelText("Agent file (.md)"), file);
-    await userEvent.click(screen.getByRole("button", { name: "Import" }));
-    await screen.findByText(/Imported Helper with 1 warning/);
-    const post = must(calls.find((c) => c.method === "POST"));
-    expect(post.headers.get("content-type")).toMatch(/^text\/markdown/);
-    expect(post.body).toBe("---\nname: Helper\n---\nBe helpful.\n");
-  });
-
-  it("shows the server's validation error", async () => {
-    stubApi({
-      "GET /v1/install/gallery/agents": [200, { agents: [] }],
-      "POST /v1/install/gallery/agents": [
-        400,
-        { code: "invalid_agent", message: "frontmatter.name is required" },
-      ],
-    });
-    renderInstall(<GalleryPage />);
-    await screen.findByText("The gallery is empty.");
-    await userEvent.upload(screen.getByLabelText("Agent file (.md)"), new File(["nope"], "x.md"));
-    await userEvent.click(screen.getByRole("button", { name: "Import" }));
-    expect((await screen.findByRole("alert")).textContent).toMatch(/name is required/);
   });
 });

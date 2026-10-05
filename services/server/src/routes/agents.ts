@@ -250,6 +250,7 @@ export function agentRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
       ownerUserId: c.get("user").id,
       source: "fork",
       forkedFrom: source.id,
+      forkedFromVersion: published?.version ?? null,
     });
     if (!result.ok) return createError(c, result.error);
     return agentResponse(c, result.value, agentAccess(actorOf(c), result.value), 201);
