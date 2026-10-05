@@ -39,6 +39,15 @@ export interface FakeTeamModel {
   is_default: boolean;
 }
 
+/** An agent as `GET /v1/agents/runnable` lists it (KOBE-122). */
+export interface FakeRunnableAgent {
+  readonly id: string;
+  readonly scope: "team" | "personal" | "gallery";
+  readonly name: string;
+  readonly description?: string;
+  readonly model: string | null;
+}
+
 interface FakeEntry {
   entry_id: string;
   parent_id: string | null;
@@ -104,6 +113,9 @@ export class FakeKobe {
   readonly failNext = new Map<string, Response>();
   /** The install catalog with the team's choice (KOBE-44); empty = no models route answers. */
   readonly teamModels: FakeTeamModel[] = [];
+  /** `GET /v1/agents/runnable` (KOBE-122), in this order; `runnablePageSize` pages it. */
+  readonly runnableAgents: FakeRunnableAgent[] = [];
+  runnablePageSize = 200;
   /** The server holds the queue after Stop (KOBE-26); false = the KOBE-30 behaviour (next starts). */
   pauseOnStop = true;
   #threadN = 0;
@@ -406,6 +418,20 @@ export class FakeKobe {
         default: this.teamModels.find((m) => m.is_default)?.alias ?? null,
       });
     }
+    if (url.pathname === "/v1/agents/runnable") {
+      if (headers.get("x-kobe-team") !== this.teamId) return error(409, "team_mismatch");
+      const start = Number(url.searchParams.get("cursor") ?? 0);
+      const page = this.runnableAgents.slice(start, start + this.runnablePageSize);
+      const next = start + page.length;
+      return json(200, {
+        agents: page.map((a) => ({
+          slug: a.name.toLowerCase().replace(/\W+/g, "-"),
+          current_version: 1,
+          ...a,
+        })),
+        next_cursor: next < this.runnableAgents.length ? String(next) : null,
+      });
+    }
     const scoped =
       url.pathname === "/v1/team/budgets/status" ||
       url.pathname.startsWith("/v1/threads") ||
@@ -553,6 +579,10 @@ export class FakeKobe {
       this.#thread(threadId).model = model;
       if (body?.test === true) {
         Object.assign(this.#thread(threadId), { is_test: true, agent_id: body.agent_id ?? null });
+      } else if (typeof body?.agent_id === "string") {
+        const agent = this.runnableAgents.find((a) => a.id === body.agent_id);
+        if (!agent) return error(404, "agent_not_found", "No agent with that id.");
+        Object.assign(this.#thread(threadId), { agent_id: agent.id, agent_model: agent.model });
       }
       return json(201, this.#summary(this.#thread(threadId)));
     }

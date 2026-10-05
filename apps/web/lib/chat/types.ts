@@ -36,6 +36,16 @@ export interface ThreadSummary {
   readonly purgeAfter: string | null;
 }
 
+/** An agent the user can start a chat with (`GET /v1/agents/runnable`, KOBE-122). */
+export interface RunnableAgent {
+  readonly id: string;
+  readonly scope: "team" | "personal" | "gallery";
+  readonly name: string;
+  readonly description?: string;
+  /** The model the agent's current version pins (alias or id); null = not pinned. */
+  readonly model: string | null;
+}
+
 export interface ThreadPage {
   readonly threads: readonly ThreadSummary[];
   readonly nextCursor: string | null;

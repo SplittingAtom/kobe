@@ -41,6 +41,7 @@ import {
 } from "../agents/store.js";
 import { mountOrbitExport } from "../agents/orbit/routes.js";
 import { inventoryQuerySchema, listInventory, setInventoryStatus } from "../agents/inventory.js";
+import { listRunnableAgents, runnableQuerySchema } from "../agents/runnable.js";
 import { mountVersionRoutes } from "../agents/version-routes.js";
 import { deleteOrArchiveAgent, getVersion } from "../agents/versions.js";
 import { recordAuditAfter } from "../audit/record.js";
@@ -100,6 +101,14 @@ export function agentRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
       .filter(({ access }) => access.see)
       .map(({ agent, access }) => agentSummary(agent, access));
     return c.json({ agents });
+  });
+
+  // Agents the caller can start a chat with (KOBE-122): before "/:id".
+  app.get("/runnable", async (c) => {
+    const query = runnableQuerySchema.safeParse(c.req.query());
+    if (!query.success) return invalidRequest(c, "Check limit and cursor.");
+    const viewer = { teamId: c.get("team").id, userId: c.get("user").id };
+    return c.json(await listRunnableAgents(db, viewer, query.data));
   });
 
   // Team admins' inventory (KOBE-86): before "/:id" so "inventory" is not read as an id.
