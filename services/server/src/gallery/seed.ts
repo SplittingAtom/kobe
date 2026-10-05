@@ -24,7 +24,7 @@ const GALLERY = { scope: "gallery" } as const;
 export interface SeedResult {
   readonly key: string;
   readonly agentId: string;
-  readonly action: "created" | "updated" | "unchanged" | "skipped_archived" | "failed";
+  readonly action: "created" | "updated" | "unchanged" | "restored" | "skipped_archived" | "failed";
 }
 
 const pgCode = (err: unknown): string | undefined => {
@@ -43,7 +43,11 @@ async function ensureDraft(
 ): Promise<{ agentId: string; action: SeedResult["action"]; publish: boolean }> {
   return db.transaction(async (tx) => {
     const [found] = await tx
-      .select({ ...INSTALL, galleryGeneration: installAgents.galleryGeneration })
+      .select({
+        ...INSTALL,
+        galleryGeneration: installAgents.galleryGeneration,
+        archivedBy: installAgents.archivedBy,
+      })
       .from(installAgents)
       .where(and(installWhere(GALLERY), eq(installAgents.galleryKey, key)))
       .for("update");
@@ -109,8 +113,24 @@ async function ensureDraft(
       );
       return { agentId: row.id, action: "created", publish: true };
     }
+    let restored = false;
     if (found.archivedAt !== null) {
-      return { agentId: found.id, action: "skipped_archived", publish: false };
+      // Archived by a person: never revived. Archived because its definition left the repo (an
+      // older release, a rollback): back again, so it comes back.
+      if (found.archivedBy !== "seed") {
+        return { agentId: found.id, action: "skipped_archived", publish: false };
+      }
+      await tx
+        .update(installAgents)
+        .set({ archivedAt: null, archivedBy: null, updatedAt: new Date() })
+        .where(eq(installAgents.id, found.id));
+      await recordAudit(tx, {
+        actor: SYSTEM_ACTOR,
+        action: "agent.unarchived",
+        teamId: null,
+        target: target(found.id, found.slug),
+      });
+      restored = true;
     }
     // Same or newer generation already seeded: an older replica (rollout, rollback) changes nothing.
     if (
@@ -118,7 +138,7 @@ async function ensureDraft(
       found.galleryGeneration !== null &&
       found.galleryGeneration >= generation
     ) {
-      return { agentId: found.id, action: "unchanged", publish: false };
+      return { agentId: found.id, action: restored ? "restored" : "unchanged", publish: false };
     }
     const [row] = await tx
       .update(installAgents)
@@ -182,7 +202,7 @@ async function retireRemoved(db: KobeDb, keys: readonly string[]): Promise<strin
       ),
     );
   const removed = gone.filter((g) => g.key !== null && !keys.includes(g.key));
-  for (const { id } of removed) await deleteOrArchiveAgent(db, GALLERY, id, SYSTEM_ACTOR);
+  for (const { id } of removed) await deleteOrArchiveAgent(db, GALLERY, id, SYSTEM_ACTOR, "seed");
   return removed.map((g) => g.key ?? "");
 }
 

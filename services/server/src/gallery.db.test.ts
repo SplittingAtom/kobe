@@ -410,7 +410,40 @@ describe("retiring removed definitions", () => {
     expect(archived).toMatchObject([{ actor_kind: "system", team_id: null }]);
     await seed(FIXTURE_NEXT, RACE, keep);
     expect(await audited("agent.archived", id)).toHaveLength(1);
-    // Back in the repo: an archived agent is not revived behind anyone's back.
-    expect((await seed(FIXTURE_NEXT, RACE, keep, gone))[3]?.action).toBe("skipped_archived");
+    // Back in the repo (a rollback ended, a release re-added it): restored, no version flip.
+    const before = await versions(id);
+    expect((await seed(FIXTURE_NEXT, RACE, keep, gone))[3]).toMatchObject({
+      agentId: id,
+      action: "restored",
+    });
+    expect(await versions(id)).toEqual(before);
+    expect((await as.carol.post("/v1/threads", { agent_id: id })).status).toBe(201);
+    expect(
+      (await as.carol.get("/v1/agents?scope=gallery")).json.agents.map(
+        (a: { slug: string }) => a.slug,
+      ),
+    ).toContain("fixture-gone");
+    expect(await audited("agent.unarchived", id)).toMatchObject([{ actor_kind: "system" }]);
+  });
+
+  it("restores a retired agent and publishes only a newer generation", async () => {
+    const def = { key: "fixture-gen", generation: 1, file: file("Fixture Gen", "One.") };
+    const [, , first] = await seed(FIXTURE_NEXT, RACE, def);
+    const id = first?.agentId ?? "";
+    await seed(FIXTURE_NEXT, RACE);
+    const newer = { ...def, generation: 2, file: file("Fixture Gen", "Two.") };
+    expect((await seed(FIXTURE_NEXT, RACE, newer))[2]?.action).toBe("updated");
+    expect((await versions(id)).map((v) => v.version)).toEqual([1, 2]);
+  });
+
+  it("never restores an agent an admin archived", async () => {
+    const def = { key: "fixture-admin", generation: 1, file: file("Fixture Admin", "A.") };
+    const [, , first] = await seed(FIXTURE_NEXT, RACE, def);
+    await h.admin.query(`UPDATE install_agents SET archived_at = now() WHERE id = $1`, [
+      first?.agentId,
+    ]);
+    expect((await seed(FIXTURE_NEXT, RACE, def))[2]?.action).toBe("skipped_archived");
+    expect((await seed(FIXTURE_NEXT, RACE))[0]?.action).toBe("unchanged");
+    expect((await seed(FIXTURE_NEXT, RACE, def))[2]?.action).toBe("skipped_archived");
   });
 });

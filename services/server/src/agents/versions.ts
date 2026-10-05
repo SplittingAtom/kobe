@@ -402,6 +402,7 @@ export async function deleteOrArchiveAgent(
   location: AgentLocation,
   id: string,
   actor?: AuditActor,
+  archivedBy: "seed" | null = null,
 ): Promise<Removed | null> {
   return inLocation(db, location, async (tx) => {
     const agent = await lockAgent(tx, location, id);
@@ -421,7 +422,7 @@ export async function deleteOrArchiveAgent(
       return { kind: "deleted" };
     }
     if (agent.archivedAt) return { kind: "archived", agent };
-    const archived = await setArchived(tx, location, id, new Date());
+    const archived = await setArchived(tx, location, id, new Date(), archivedBy);
     await recordAudit(tx, {
       ...(actor ? { actor } : {}),
       action: "agent.archived",
@@ -457,6 +458,7 @@ async function setArchived(
   location: AgentLocation,
   id: string,
   archivedAt: Date | null,
+  archivedBy: "seed" | null = null,
 ): Promise<AgentRecord> {
   const set = { archivedAt, updatedAt: new Date() };
   const [row]: Row[] =
@@ -464,7 +466,7 @@ async function setArchived(
       ? await tx.update(teamAgents).set(set).where(eq(teamAgents.id, id)).returning(TEAM)
       : await tx
           .update(installAgents)
-          .set(set)
+          .set({ ...set, archivedBy })
           .where(and(installWhere(location), eq(installAgents.id, id)))
           .returning(INSTALL);
   if (!row) throw new Error("agent archive update returned no row");

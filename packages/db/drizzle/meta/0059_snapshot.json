@@ -1,5 +1,5 @@
 {
-  "id": "e0d6e2b7-3714-4295-9427-19ea32a39fa2",
+  "id": "70a2eef5-91a6-4f95-bf3e-1e005d6b60c3",
   "prevId": "773eddba-ebb9-44f8-a70b-74ba5cdb948e",
   "version": "7",
   "dialect": "postgresql",
@@ -2916,6 +2916,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "archived_by": {
+          "name": "archived_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "slug": {
           "name": "slug",
           "type": "text",
@@ -3082,6 +3088,10 @@
         "install_agents_gallery_generation": {
           "name": "install_agents_gallery_generation",
           "value": "\"install_agents\".\"gallery_generation\" IS NULL OR \"install_agents\".\"gallery_generation\" > 0"
+        },
+        "install_agents_archived_by": {
+          "name": "install_agents_archived_by",
+          "value": "\"install_agents\".\"archived_by\" IS NULL OR (\"install_agents\".\"archived_by\" = 'seed' AND \"install_agents\".\"archived_at\" IS NOT NULL)"
         },
         "install_agents_gallery_key_scope": {
           "name": "install_agents_gallery_key_scope",

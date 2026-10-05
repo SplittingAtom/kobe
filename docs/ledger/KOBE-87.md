@@ -30,14 +30,10 @@
   is logged (`failed`) and the rest still seed; a seed error never stops server start.
 - **Retire on removal:** a seeded agent whose key left `GALLERY_DEFINITIONS` is archived (system
   actor, `agent.archived`): hidden from the gallery, no new threads, existing threads and forks
-  untouched; idempotent. Risk: an old replica in a rollback would archive an agent only the newer
-  release knows (it does not know the key); re-seeding by the newer release skips archived rows.
-- **Read-only.** `/v1/install/gallery/agents` keeps GET list/one/export (`install.gallery.manage`);
-  every POST/PUT/PATCH/DELETE under it answers 405 `gallery_read_only` for install admins (others
-  keep 403 from the permission check). `GALLERY_ADMIN_ACCESS` is now all-false for edit/publish/
-  setStatus. `/v1/agents` already gave teams `edit/publish/setStatus = false`; the tests pin every
-  write route. Install-wide suspend of a gallery agent is gone with the console writes: teams
-  suspend per team (KOBE-86 inventory); an install-wide stop is a release that removes the agent.
+  untouched; idempotent. `install_agents.archived_by = 'seed'` records why. When the key
+  returns (rollback ended, re-added) a seed-retired agent is restored (`agent.unarchived`, system),
+  and republished only if the generation is newer, so no version flip. Archives by people leave
+  `archived_by` NULL and are never undone by seeding.
 - **Fork** reuses `POST /v1/agents/:id/fork {scope:"team"}` (needs `team.agents.build`, per
   `canForkAgent`). It copies the **published** version, creates the team agent with its first
   draft (`currentVersion` null, revision 1), records provenance and audits.
@@ -55,7 +51,6 @@
 
 ## Open questions
 
-- See the rollback risk under retire-on-removal; a release marker would fix it.
 - The chat agent picker is a separate ticket.
 - A fork copies the version published at fork time; "update from gallery" for forks is out of
   scope.

@@ -137,6 +137,11 @@ export const installAgents = pgTable(
      */
     galleryKey: text(),
     galleryGeneration: integer(),
+    /**
+     * Why the agent is archived: "seed" when its definition left the repo (restored if it comes
+     * back); null for archives by people, which seeding never undoes.
+     */
+    archivedBy: text(),
     ...definitionColumns(),
   },
   (t): PgTableExtraConfigValue[] => [
@@ -157,6 +162,10 @@ export const installAgents = pgTable(
     check(
       "install_agents_gallery_generation",
       sql`${t.galleryGeneration} IS NULL OR ${t.galleryGeneration} > 0`,
+    ),
+    check(
+      "install_agents_archived_by",
+      sql`${t.archivedBy} IS NULL OR (${t.archivedBy} = 'seed' AND ${t.archivedAt} IS NOT NULL)`,
     ),
     check(
       "install_agents_gallery_key_scope",
