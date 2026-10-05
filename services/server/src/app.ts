@@ -5,7 +5,9 @@ import { requireSession, type AuthVariables } from "./auth/session.js";
 import type { ServerDeps } from "./deps.js";
 import { logger } from "./logger.js";
 import type { IsolationGate } from "./isolation/gate.js";
+import type { EvalRunner } from "./agents/eval/service.js";
 import { agentRoutes } from "./routes/agents.js";
+import { teamEvalSettingsRoutes } from "./routes/team-eval-settings.js";
 import { installBudgetRoutes, teamBudgetsRoutes } from "./routes/budgets.js";
 import { approvalRoutes } from "./routes/approvals.js";
 import { egressRequestRoutes } from "./routes/egress-requests.js";
@@ -55,6 +57,8 @@ const SERVICE = "server";
 export interface AppOptions {
   /** Isolation gate (spec D4): its state is shown in the install admin console only. */
   readonly isolation?: IsolationGate;
+  /** Runs the pre-publish Orbit evals (KOBE-93); unset, an enabled gate blocks publishing. */
+  readonly evals?: EvalRunner;
 }
 
 /** Health endpoints always; auth and the /v1 API when dependencies are provided. */
@@ -116,6 +120,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/team/budgets", teamBudgetsRoutes(deps));
   api.route("/team/break-glass", teamBreakGlassRoutes(deps));
   api.route("/team/retention", teamRetentionRoutes(deps));
+  api.route("/team/eval-settings", teamEvalSettingsRoutes(deps));
   api.route("/team/skill-review", teamSkillReviewRoutes(deps));
   api.route("/team", teamRoutes(deps));
   api.route("/runs", runEventsRoutes(deps));
@@ -126,7 +131,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/threads", threadUsageRoutes(deps));
   api.route("/threads", threadRetentionRoutes(deps));
   api.route("/threads", threadRoutes(deps));
-  api.route("/agents", agentRoutes(deps));
+  api.route("/agents", agentRoutes(deps, options.evals ? { runner: options.evals } : {}));
   api.route("/skills", skillRoutes(deps));
   api.route("/approvals", approvalRoutes(deps));
   api.route("/egress/requests", egressRequestRoutes(deps));

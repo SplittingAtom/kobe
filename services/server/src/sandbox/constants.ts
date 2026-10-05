@@ -15,6 +15,8 @@ export const LABEL_TEAM_ID = `${DOMAIN}/team-id`;
 export const LABEL_USER_ID = `${DOMAIN}/user-id`;
 export const ANNOTATION_TEAM_ID = LABEL_TEAM_ID;
 export const ANNOTATION_USER_ID = LABEL_USER_ID;
+/** On the pods (and Job, ConfigMap) of an Orbit eval (KOBE-93); the value is the eval id. */
+export const LABEL_ORBIT_EVAL = `${DOMAIN}/orbit-eval`;
 export const LABEL_MANAGED_BY = "app.kubernetes.io/managed-by";
 export const MANAGED_BY = "kobe-server";
 
@@ -26,6 +28,8 @@ export const SANDBOX_SERVICE_ACCOUNT = "kobe-sandbox";
 export const SANDBOX_TEMPLATE = "kobe-sandbox";
 export const SANDBOX_WARM_POOL = "kobe-sandbox";
 export const NETWORK_POLICY = "kobe-sandbox-isolation";
+/** Egress policy for eval pods only (the namespace-wide policy leaves them out). */
+export const EVAL_NETWORK_POLICY = "kobe-orbit-eval-isolation";
 export const RESOURCE_QUOTA = "kobe-team-quota";
 export const LIMIT_RANGE = "kobe-sandbox-defaults";
 export const SERVER_ROLE_BINDING = "kobe-server";

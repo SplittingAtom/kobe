@@ -1,7 +1,7 @@
 import pg from "pg";
 import { expect } from "vitest";
 import { createTestDatabase, testServerUrl } from "@kobe/db/testing";
-import { createApp } from "../app.js";
+import { createApp, type AppOptions } from "../app.js";
 import { BackgroundTasks } from "../background.js";
 import { createServerDeps, type ServerDeps, type ServerDepsOptions } from "../deps.js";
 import { waitForAppSessionsToClose } from "./app-sessions.js";
@@ -30,6 +30,8 @@ export interface Harness {
 
 export async function openHarness(
   options: Pick<ServerDepsOptions, "agents" | "models" | "blobs" | "egressHeaderSecrets"> = {},
+  /** App options that need the deps (e.g. the Orbit eval runner, KOBE-93). */
+  appOptions?: (deps: ServerDeps) => AppOptions,
 ): Promise<Harness> {
   const database = await createTestDatabase(testServerUrl());
   // A single client: unlike Pool#end, Client#end resolves only once the connection is closed.
@@ -47,7 +49,7 @@ export async function openHarness(
     mailer,
     ...options,
   });
-  const app = createApp(deps);
+  const app = createApp(deps, appOptions?.(deps));
   const browser = () => new TestBrowser(app, PUBLIC_URL);
   return {
     deps,

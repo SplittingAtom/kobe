@@ -3,7 +3,7 @@ import { currentAuditContext } from "../audit/context.js";
 import { recordAuditAfter, type ServerAuditEvent } from "../audit/record.js";
 import type { IsolationGate } from "../isolation/gate.js";
 import { loadSandboxConfig, type SandboxSettings, type SessionKeys } from "./config.js";
-import { createKubeClient } from "./kube.js";
+import { createKubeClient, type KubeClient } from "./kube.js";
 import { logger } from "../logger.js";
 import { createSandboxProvider, type ReconcileResult, type SandboxProvider } from "./provider.js";
 
@@ -13,6 +13,8 @@ export interface SandboxRuntime {
   /** Runs the isolation reconciler now and every minute; returns a stop function. */
   startReconciler(onResult: (result: ReconcileResult) => void): () => void;
   readonly provider: SandboxProvider;
+  /** The Kubernetes client the provider uses (Orbit evals create Jobs through it, KOBE-93). */
+  readonly kube: KubeClient;
   readonly sessionKeys: SessionKeys;
   readonly settings: SandboxSettings;
 }
@@ -30,8 +32,9 @@ export function createSandboxRuntime(
   const config = loadSandboxConfig(env);
   if (!config) return undefined;
   const runtimeClassName = env.KOBE_RUNTIME_CLASS?.trim();
+  const kube = createKubeClient();
   const provider = createSandboxProvider({
-    kube: createKubeClient(),
+    kube,
     isolation,
     settings: config.settings,
     ...(runtimeClassName ? { runtimeClassName } : {}),
@@ -49,6 +52,7 @@ export function createSandboxRuntime(
   });
   return {
     provider,
+    kube,
     startReconciler(onResult) {
       let running = false;
       const run = () => {

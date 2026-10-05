@@ -29,7 +29,13 @@ import {
   UnreadableVersionError,
   type Published,
 } from "./versions.js";
+import type { BackgroundTasks } from "../background.js";
 import type { AgentLimits } from "../deps.js";
+import type { TeamRef } from "../sandbox/manifests.js";
+import { evalView } from "./eval/routes.js";
+import { gatePublish } from "./eval/gate.js";
+import type { EvalRunner } from "./eval/service.js";
+import { versionScores } from "./eval/store.js";
 import { logger } from "../logger.js";
 import { hitRateLimit } from "../rate-limit.js";
 import { parseBody } from "../teams/http.js";
@@ -66,6 +72,15 @@ export interface VersionRouteOptions {
   readonly resolve: (c: Context) => Promise<ResolvedAgent | null>;
   /** The signed-in user publishing (recorded on the version). */
   readonly userId: (c: Context) => string;
+  /**
+   * The pre-publish eval gate (KOBE-93), on the team router only: Publish asks it first, and
+   * version summaries carry the score each version earned. Unset (the gallery): never gated.
+   */
+  readonly evals?: {
+    readonly runner: EvalRunner | undefined;
+    readonly background: BackgroundTasks;
+    readonly team: (c: Context) => TeamRef;
+  };
 }
 
 /** Gallery versions: curators' user ids are for install admins only (review L3). */
@@ -119,9 +134,25 @@ export function mountVersionRoutes<E extends { Variables: object }>(
     });
     if (!versions) return notFound(c);
     const page = versions.slice(0, limit);
+    const scores = options.evals
+      ? await versionScores(db, options.evals.team(c).id, found.agent.id)
+      : new Map();
     return c.json({
       currentVersion: found.agent.currentVersion,
-      versions: page.map((v) => redact(found, versionSummary(v))),
+      versions: page.map((v) => {
+        const score = scores.get(v.version);
+        return {
+          ...redact(found, versionSummary(v)),
+          // The attack success rate the version earned in the eval gate (KOBE-93); null if none.
+          score: score
+            ? {
+                attackSuccessRate: score.attackSuccessRate,
+                threshold: score.threshold,
+                evalId: score.evalId,
+              }
+            : null,
+        };
+      }),
       nextBefore: versions.length > limit ? (page.at(-1)?.version ?? null) : null,
     });
   });
@@ -148,6 +179,33 @@ export function mountVersionRoutes<E extends { Variables: object }>(
     const ifMatch = ifMatchRevision(c);
     if (!ifMatch.ok) return ifMatch.response;
     if (!(await withinRate(c))) return rateLimited(c);
+    if (options.evals) {
+      const team = options.evals.team(c);
+      const gate = await gatePublish({
+        db,
+        runner: options.evals.runner,
+        background: options.evals.background,
+        team,
+        userId: options.userId(c),
+        agent: found.agent,
+        location: found.location,
+        expectedRevision: ifMatch.revision,
+      });
+      if (gate.kind === "started") {
+        return c.json(
+          {
+            eval: evalView(gate.eval),
+            message:
+              "Evaluating: the agent is published when its Orbit eval passes the team's threshold.",
+          },
+          202,
+        );
+      }
+      if (gate.kind === "publish_error") return publishError(c, gate.error);
+      if (gate.kind === "refused") {
+        return c.json({ code: gate.code, message: gate.message }, gate.status);
+      }
+    }
     const result = await publishAgent(db, found.location, found.agent.id, {
       publishedBy: options.userId(c),
       expectedRevision: ifMatch.revision,

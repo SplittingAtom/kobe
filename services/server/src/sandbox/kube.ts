@@ -1,6 +1,7 @@
 import {
   ApiException,
   AuthenticationV1Api,
+  CoreV1Api,
   KubeConfig,
   KubernetesObjectApi,
   PatchStrategy,
@@ -52,6 +53,14 @@ export interface KubeClient {
   /** Deletes with background propagation; a missing object is not an error. */
   delete(ref: ObjectRef): Promise<void>;
   reviewToken(token: string, audiences: readonly string[]): Promise<TokenReviewResult>;
+  /**
+   * The (first `limitBytes` of the) log of a pod's container, stdout and stderr together; undefined
+   * when the pod does not exist. Used to collect an Orbit eval's result (KOBE-93).
+   */
+  logs(
+    ref: ObjectRef,
+    options: { readonly container: string; readonly limitBytes: number },
+  ): Promise<string | undefined>;
 }
 
 export class KubeApiError extends Error {
@@ -131,6 +140,7 @@ export function createKubeClient(timeoutMs = KUBE_API_TIMEOUT_MS): KubeClient {
   kc.loadFromDefault();
   const objects = KubernetesObjectApi.makeApiClient(kc);
   const auth = kc.makeApiClient(AuthenticationV1Api);
+  const core = kc.makeApiClient(CoreV1Api);
 
   const call = async <T>(what: string, fn: () => Promise<T>): Promise<T> => {
     try {
@@ -218,6 +228,21 @@ export function createKubeClient(timeoutMs = KUBE_API_TIMEOUT_MS): KubeClient {
         );
       } catch (err) {
         if (!isKubeStatus(err, 404)) throw err;
+      }
+    },
+    async logs(ref, options) {
+      try {
+        return await call(`read log of ${describe(ref)}`, () =>
+          core.readNamespacedPodLog({
+            name: ref.name,
+            namespace: ref.namespace ?? "default",
+            container: options.container,
+            limitBytes: options.limitBytes,
+          }),
+        );
+      } catch (err) {
+        if (isKubeStatus(err, 404)) return undefined;
+        throw err;
       }
     },
     async reviewToken(token, audiences) {

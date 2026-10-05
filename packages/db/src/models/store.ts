@@ -7,6 +7,7 @@ import {
   modelProviders,
   runs,
   sandboxRunLeases,
+  orbitEvals,
   sandboxes,
   teamMembers,
   teamModels,
@@ -135,8 +136,21 @@ export async function loadGatewayPrincipal(
     const enabledModels = [
       ...new Set(enabled.map((e) => `${gatewayProviderName(e.providerId, e.kind)}/${e.model}`)),
     ].sort();
+    // An Orbit eval Job (KOBE-93) presents its eval id as the sandbox: live while the eval runs.
+    const [evalRun] = await tx
+      .select({ status: orbitEvals.status })
+      .from(orbitEvals)
+      .where(
+        and(
+          eq(orbitEvals.teamId, teamId),
+          eq(orbitEvals.id, sandboxId),
+          eq(orbitEvals.requestedBy, userId),
+        ),
+      );
     let sandbox: SandboxLiveness = "unrecorded";
-    if (box?.sandboxId) {
+    if (evalRun) {
+      sandbox = evalRun.status === "running" ? "live" : "revoked";
+    } else if (box?.sandboxId) {
       sandbox =
         box.sandboxId === sandboxId && box.state === "running" ? "live" : ("revoked" as const);
     } else if (box && box.state !== "running") {

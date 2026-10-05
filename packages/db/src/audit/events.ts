@@ -815,6 +815,19 @@ export const AUDIT_EVENTS = {
   // Versions (KOBE-46): publish freezes the draft and its tool manifest; rollback republishes.
   "agent.published": event("any", { ...agentRef, version, draftRevision: version }),
   "agent.rolled_back": event("any", { ...agentRef, version, fromVersion: version }),
+  // The pre-publish Orbit eval gate (KOBE-93): requested at Publish, finished with a verdict.
+  "agent.eval.requested": event("team", { ...agentRef, evalId: id, draftRevision: version }),
+  "agent.eval.finished": event("team", {
+    ...agentRef,
+    evalId: id,
+    status: z.enum(["passed", "blocked", "errored"]),
+    attackSuccessRate: z.number().min(0).max(1).nullable(),
+  }),
+  /** A team admin changed the eval gate switch or its attack-success-rate ceiling (KOBE-93). */
+  "agent.eval.settings_changed": event("team", {
+    enabled: z.boolean(),
+    maxAttackSuccessRate: z.number().min(0).max(1),
+  }),
   /** An agent with versions retired instead of deleted (pinned threads keep their version). */
   "agent.archived": event("any", agentRef),
   "agent.unarchived": event("any", agentRef),

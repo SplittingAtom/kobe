@@ -203,7 +203,7 @@ interface NewVersion {
 }
 
 /** Content that makes two versions the same: definition and frozen manifest. */
-const contentKey = (definition: AgentDefinition, manifest: ToolManifest): string =>
+export const contentKey = (definition: AgentDefinition, manifest: ToolManifest): string =>
   canonicalJson({ frontmatter: definition.frontmatter, prompt: definition.prompt, manifest });
 
 /** Whether `definition` + `manifest` equal the agent's current version (an unreadable one never does). */
@@ -341,6 +341,49 @@ export async function publishAgent(
       },
     });
     return { ok: true, value: published };
+  });
+}
+
+/**
+ * Publishes a draft snapshot that has already been evaluated (KOBE-93): the eval gate froze the
+ * definition when Publish was asked for, so what is published is exactly what was scored, even if
+ * the draft changed since. Same locking, limits and audit as `publishAgent`.
+ */
+export async function publishEvaluated(
+  db: KobeDb,
+  location: AgentLocation,
+  id: string,
+  input: {
+    readonly definition: AgentDefinition;
+    readonly draftRevision: number;
+    readonly publishedBy: string;
+    readonly limits?: VersionLimits;
+  },
+): Promise<Result<Published, PublishError>> {
+  return inLocation(db, location, async (tx) => {
+    const agent = await lockAgent(tx, location, id);
+    if (!agent) return { ok: false, error: "not_found" };
+    if (agent.archivedAt) return { ok: false, error: "archived" };
+    const draft = validateAgentDefinition(input.definition);
+    if (!draft.ok) return { ok: false, error: "invalid_draft" };
+    const inserted = await insertVersion(tx, location, agent, {
+      limits: input.limits ?? DEFAULT_VERSION_LIMITS,
+      definition: draft.definition,
+      publishedBy: input.publishedBy,
+      draftRevision: input.draftRevision,
+      republishedFrom: null,
+    });
+    if (!inserted.ok) return inserted;
+    await recordAudit(tx, {
+      action: "agent.published",
+      teamId: auditTeam(location),
+      target: {
+        ...ref(location, agent),
+        version: inserted.value.version.version,
+        draftRevision: input.draftRevision,
+      },
+    });
+    return inserted;
   });
 }
 

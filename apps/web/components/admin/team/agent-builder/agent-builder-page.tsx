@@ -9,6 +9,7 @@ import {
   rollbackTeamAgent,
   saveTeamAgent,
   type AgentDetail,
+  type AgentEval,
 } from "../../../../lib/admin/api/team/agent-builder";
 import {
   EMPTY_FORM,
@@ -24,6 +25,7 @@ import { useMutation, useResource } from "../../use-resource";
 import adminStyles from "../../admin.module.css";
 import styles from "./agent-builder.module.css";
 import { Field } from "./field";
+import { EvalStatus } from "./eval-status";
 import { FrontmatterForm } from "./frontmatter-form";
 import { OrbitExportButton } from "./orbit-export-button";
 import { PublishDialog } from "./publish-dialog";
@@ -113,6 +115,9 @@ function Builder({
   const [published, setPublished] = useState<string | null>(null);
   const [historyKey, setHistoryKey] = useState(0);
   const [testing, setTesting] = useState(false);
+  // KOBE-93: the Orbit eval a Publish started (the draft is "evaluating" until it ends).
+  const [evalStarted, setEvalStarted] = useState<AgentEval | null>(null);
+  const [evaluating, setEvaluating] = useState(false);
   const mutation = useMutation();
   const publishButton = useRef<HTMLButtonElement>(null);
 
@@ -180,6 +185,17 @@ function Builder({
       },
       (data) => `Restored v${version} as v${data.version.version}.`,
     );
+  }
+
+  /** An eval ended: a pass published a version, so take the server's agent and history. */
+  async function evalFinished(finished: AgentEval) {
+    if (finished.status !== "passed" || !agent) return;
+    const res = await getTeamAgent(teamId, agent.id);
+    if (res.ok) {
+      apply(res.data.agent);
+      setHistoryKey((k) => k + 1);
+      if (finished.version !== null) setPublished(`Published v${finished.version}.`);
+    }
   }
 
   // Publishing is its own right (the server checks `access.publish`), separate from editing.
@@ -256,10 +272,10 @@ function Builder({
               <button
                 ref={publishButton}
                 type="button"
-                disabled={dirty || mutation.pending}
+                disabled={dirty || mutation.pending || evaluating}
                 onClick={() => setPublishing(true)}
               >
-                Publish…
+                {evaluating ? "Evaluating…" : "Publish…"}
               </button>
             )}
             {canPublish && dirty && (
@@ -309,12 +325,28 @@ function Builder({
           </span>
         </div>
       )}
+      {agent && !agent.archivedAt && (
+        <EvalStatus
+          teamId={teamId}
+          agentId={agent.id}
+          started={evalStarted}
+          canRetry={canPublish && !dirty}
+          onActiveChange={setEvaluating}
+          onFinished={(finished) => void evalFinished(finished)}
+          onRetry={() => setPublishing(true)}
+        />
+      )}
       {publishing && agent && validation.ok && (
         <PublishDialog
           teamId={teamId}
           agent={agent}
           warnings={validation.warnings}
           onClose={() => {
+            setPublishing(false);
+            publishButton.current?.focus();
+          }}
+          onEvaluating={(started) => {
+            setEvalStarted(started);
             setPublishing(false);
             publishButton.current?.focus();
           }}
