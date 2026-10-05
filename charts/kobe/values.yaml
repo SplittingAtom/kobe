@@ -187,6 +187,12 @@ mcpProxy:
     # Extra raw NetworkPolicy egress rules for the proxy.
     extraEgress: []
 
+# Envelope encryption (KOBE-107): the install key-encryption key for per-record secrets such as
+# connector credentials. Existing Secret (key `key`, optional `key-previous`), or empty to generate
+# one and keep it across upgrades. Only the API server gets it; mcp-proxy never decrypts.
+envelope:
+  keySecret: ""
+
 # Default-deny egress proxy (spec D28): sandboxes reach the internet only through it, HTTPS only,
 # to domains their team enabled within the install's egress ceiling (admin consoles).
 egressProxy:

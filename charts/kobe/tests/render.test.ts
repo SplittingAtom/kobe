@@ -571,6 +571,7 @@ describe("auth (KOBE-12)", () => {
       "bifrost.keysSecret": "my-model-keys",
       "mcpProxy.internalKeySecret": "my-mcp-key",
       "egressProxy.headerSecret": "my-egress-headers",
+      "envelope.keySecret": "my-envelope",
       "global.allowGeneratedSecretsOffline": "false",
     });
     expect(find(ms, "Secret", "kobe-auth")).toBeUndefined();
@@ -588,6 +589,7 @@ describe("auth (KOBE-12)", () => {
         "bifrost.keysSecret": "my-model-keys",
         "mcpProxy.internalKeySecret": "my-mcp-key",
         "egressProxy.headerSecret": "my-egress-headers",
+        "envelope.keySecret": "my-envelope",
       }),
     ).toMatch(/auth\.existingSecret/);
     expect(
@@ -598,6 +600,7 @@ describe("auth (KOBE-12)", () => {
         "bifrost.keysSecret": "my-model-keys",
         "mcpProxy.internalKeySecret": "my-mcp-key",
         "egressProxy.headerSecret": "my-egress-headers",
+        "envelope.keySecret": "my-envelope",
         "postgres.mode": "cnpg",
       }),
     ).toMatch(/postgres\.cnpg\.existingAppSecret/);
@@ -608,6 +611,7 @@ describe("auth (KOBE-12)", () => {
         "bifrost.keysSecret": "my-model-keys",
         "mcpProxy.internalKeySecret": "my-mcp-key",
         "egressProxy.headerSecret": "my-egress-headers",
+        "envelope.keySecret": "my-envelope",
       }),
     ).toMatch(/sandbox\.sessionKeysSecret/);
     expect(
@@ -617,6 +621,7 @@ describe("auth (KOBE-12)", () => {
         "sandbox.sessionKeysSecret": "my-keys",
         "mcpProxy.internalKeySecret": "my-mcp-key",
         "egressProxy.headerSecret": "my-egress-headers",
+        "envelope.keySecret": "my-envelope",
       }),
     ).toMatch(/bifrost\.keysSecret/);
     expect(
@@ -626,6 +631,7 @@ describe("auth (KOBE-12)", () => {
         "sandbox.sessionKeysSecret": "my-keys",
         "bifrost.keysSecret": "my-model-keys",
         "egressProxy.headerSecret": "my-egress-headers",
+        "envelope.keySecret": "my-envelope",
       }),
     ).toMatch(/mcpProxy\.internalKeySecret/);
     expect(
@@ -635,8 +641,19 @@ describe("auth (KOBE-12)", () => {
         "sandbox.sessionKeysSecret": "my-keys",
         "bifrost.keysSecret": "my-model-keys",
         "mcpProxy.internalKeySecret": "my-mcp-key",
+        "envelope.keySecret": "my-envelope",
       }),
     ).toMatch(/egressProxy\.headerSecret/);
+    expect(
+      renderError({
+        "global.allowGeneratedSecretsOffline": "false",
+        "auth.existingSecret": "my-auth",
+        "sandbox.sessionKeysSecret": "my-keys",
+        "bifrost.keysSecret": "my-model-keys",
+        "mcpProxy.internalKeySecret": "my-mcp-key",
+        "egressProxy.headerSecret": "my-egress-headers",
+      }),
+    ).toMatch(/envelope\.keySecret/);
   });
 });
 

@@ -34,6 +34,7 @@ import {
   SecretBox,
   VIRTUAL_KEY_PURPOSE,
   deriveKey,
+  loadEnvelope,
 } from "@kobe/db";
 import { quantityBytes } from "./sandbox/config.js";
 import {
@@ -56,6 +57,9 @@ const modelsConfig = config.process === "server" ? loadModelsConfig(process.env)
 // Header injection (KOBE-39): undefined without the chart's header secret (off).
 const egressHeaderSecrets =
   config.process === "server" ? loadEgressHeaderSecrets(process.env) : undefined;
+// Install envelope key (KOBE-107): seals per-record secrets (connector credentials, KOBE-108).
+// Fails fast when malformed; the key itself is never logged.
+const envelope = config.process === "server" ? loadEnvelope(process.env, logger) : undefined;
 // One admin client for the config sync and the catalog editor's model listing (KOBE-44).
 const bifrostAdmin = modelsConfig
   ? createHttpBifrostAdmin({
@@ -77,6 +81,7 @@ if (config.auth && config.smtp) {
     sandboxWire: { waker },
     agents: { maxVersions: config.agentMaxVersions },
     ...(egressHeaderSecrets ? { egressHeaderSecrets } : {}),
+    ...(envelope ? { envelope } : {}),
     ...(s3 && objectStore ? { blobs: { objects: objectStore, prefix: s3.prefix } } : {}),
     ...(modelsConfig
       ? {
@@ -206,6 +211,9 @@ const modelSync =
 modelSync?.start();
 if (config.process === "server" && !egressHeaderSecrets) {
   logger.warn("KOBE_EGRESS_HEADER_SECRET is not set: egress header injection is off");
+}
+if (config.process === "server" && !envelope) {
+  logger.warn("KOBE_ENVELOPE_KEY is not set: connector credentials cannot be stored");
 }
 if (config.process === "server" && !modelsConfig) {
   logger.warn("KOBE_BIFROST_URL is not set: the model gateway is not configured");
