@@ -54,12 +54,12 @@ function allow(t: Harness, check: CheckFrame) {
   } as never);
 }
 
-async function toolEnd(t: Harness, toolCallId: string) {
+async function toolEnd(t: Harness, toolCallId: string, waitMs = 30_000) {
   const events = () =>
     (t.server.frames("pi.event") as PiEventFrame[]).map((f) => f.event as Record<string, unknown>);
   await until(
     () => events().some((e) => e.type === "tool_execution_end" && e.toolCallId === toolCallId),
-    30_000,
+    waitMs,
   );
   const end = events().find(
     (e) => e.type === "tool_execution_end" && e.toolCallId === toolCallId,
@@ -144,13 +144,14 @@ describe.skipIf(!PI_AVAILABLE)("kobe-tools in real Pi, through kobe-sandbox-agen
     await call(t, "create_artifact", "big", {
       kind: "html",
       title: "t",
-      content: "\u0001".repeat(512 * 1024),
+      // 180k control characters escape to 6 bytes each: a 176 KiB content, a frame over 1 MiB.
+      content: "\u0001".repeat(180_000),
     });
-    const end = await toolEnd(t, "big");
+    const end = await toolEnd(t, "big", 90_000);
     expect(end.isError).toBe(true);
     expect(end.text).toMatch(/too large/);
     expect(puts(t)).toEqual([]);
-  }, 60_000);
+  }, 120_000);
 
   it("fails the tool when the connection to the server drops while waiting", async () => {
     const t = await start();

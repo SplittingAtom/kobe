@@ -104,7 +104,7 @@ lines(p.stdio[4], (m) => {
 lines(p.stdout, (m) => {
   if (m.type !== "tool_execution_end" || m.toolCallId !== "ca1") return;
   const text = m.result.content.map((c) => c.text).join("");
-  done((m.isError ? "error " : "ok ") + text, m.isError ? 1 : 0);
+  done((m.isError ? "error " : "ok ") + text, m.isError === !withFd4 ? 0 : 1);
 });'
 check "kobe-tools: create_artifact goes through kobe-policy, then fd 4; the result carries artifact_id and version" \
   '^ok \{"artifact_id":"7d8e9f0a-1b2c-4d3e-8f4a-5b6c7d8e9f0a","version":1\}$' run_ws node -e "$KOBE_TOOLS_PROBE" fd4
