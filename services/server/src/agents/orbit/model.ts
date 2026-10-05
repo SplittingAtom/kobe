@@ -1,4 +1,11 @@
-import { eq, modelCatalog, modelProviders, teamModels, withTeam } from "@kobe/db";
+import {
+  eq,
+  gatewayProviderName,
+  modelCatalog,
+  modelProviders,
+  teamModels,
+  withTeam,
+} from "@kobe/db";
 import type { KobeDb, ModelProviderKind } from "@kobe/db";
 
 /**
@@ -25,14 +32,25 @@ export type OrbitModelResult =
   | { readonly ok: true; readonly model: string }
   | { readonly ok: false; readonly code: "model_not_resolvable"; readonly message: string };
 
+/** The id the model gateway knows the model by: `<gateway provider>/<model>` (KOBE-93 evals). */
+export const gatewayModelId = (o: OrbitModelOption): string =>
+  `${gatewayProviderName(o.providerId, o.kind)}/${o.model}`;
+
+/** The enabled model an agent runs on: its pin, else the team default; undefined when neither. */
+export function pickOrbitModel(
+  pinned: string | undefined,
+  options: readonly OrbitModelOption[],
+): OrbitModelOption | undefined {
+  return pinned === undefined
+    ? options.find((o) => o.isDefault)
+    : options.find((o) => o.alias === pinned);
+}
+
 export function resolveOrbitModel(
   pinned: string | undefined,
   options: readonly OrbitModelOption[],
 ): OrbitModelResult {
-  const chosen =
-    pinned === undefined
-      ? options.find((o) => o.isDefault)
-      : options.find((o) => o.alias === pinned);
+  const chosen = pickOrbitModel(pinned, options);
   if (chosen) return { ok: true, model: orbitModelId(chosen) };
   return {
     ok: false,

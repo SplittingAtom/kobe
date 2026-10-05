@@ -174,7 +174,7 @@ describe("agent inventory (KOBE-86)", () => {
       runCount: 2,
       canExport: true,
       schedules: null,
-      orbitScore: null,
+      orbitScore: { status: "none", attackSuccessRate: null, at: null },
     });
     expect(byId(items, carolPersonal)).toMatchObject({
       scope: "personal",

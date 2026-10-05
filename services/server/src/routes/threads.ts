@@ -10,7 +10,13 @@ import {
   encodeActivityCursor,
   type ActivityCursor,
 } from "../threads/cursor.js";
-import { latestPinnedVersion, resolveAgentPin, resolveDraftPin } from "../agents/versions.js";
+import {
+  agentStatusOf,
+  findPinnableAgent,
+  latestPinnedVersion,
+  resolveAgentPin,
+  resolveDraftPin,
+} from "../agents/versions.js";
 import { canCreateInProject, viewerProjectIds } from "../threads/references.js";
 import {
   clearTestThreads,
@@ -240,8 +246,20 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
         agentId: found.thread.agentId,
         agentVersion: found.thread.agentVersion,
       });
+      const pinned = found.thread.agentId
+        ? await findPinnableAgent(
+            tx,
+            {
+              teamId: viewer.teamId,
+              userId: found.thread.ownerUserId,
+            },
+            found.thread.agentId,
+          )
+        : null;
       return {
         ...toSummary(found.thread),
+        agent_name: pinned?.frontmatter.name ?? null,
+        agent_status: pinned === null ? null : agentStatusOf(pinned),
         agent_current_version: latest,
         agent_model: agentModel ?? null,
         entries: page.entries,

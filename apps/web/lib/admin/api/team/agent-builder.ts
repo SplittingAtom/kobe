@@ -15,8 +15,17 @@ export interface AgentDetailSaved {
   readonly warnings?: readonly unknown[];
 }
 
+/** What an eval of a version earned in the team's pre-publish gate (KOBE-93). */
+export interface VersionScore {
+  readonly attackSuccessRate: number;
+  readonly threshold: number;
+  readonly evalId: string;
+}
+
 export interface AgentVersionSummary {
   readonly version: number;
+  /** Absent on responses from routes without the gate (rollback, gallery). */
+  readonly score?: VersionScore | null;
   readonly publishedBy: string | null;
   readonly publishedAt: string;
   readonly draftRevision: number;
@@ -32,6 +41,38 @@ export interface VersionPage {
 /** A publish or rollback answer: the agent as it now stands and the version just created. */
 export interface PublishedAgent extends AgentDetailSaved {
   readonly version: AgentVersionSummary;
+}
+
+export type EvalStatus = "pending" | "running" | "passed" | "blocked" | "errored";
+
+/** One pre-publish Orbit eval of a draft (`/v1/agents/{id}/evals`, KOBE-93). */
+export interface AgentEval {
+  readonly id: string;
+  readonly status: EvalStatus;
+  readonly draftRevision: number;
+  /** The team's ceiling when the eval was requested (0 to 1). */
+  readonly threshold: number;
+  readonly attackSuccessRate: number | null;
+  readonly attempts: number | null;
+  readonly attackSuccesses: number | null;
+  readonly error: string | null;
+  /** The version published when it passed. */
+  readonly version: number | null;
+  readonly createdAt: string;
+  readonly startedAt: string | null;
+  readonly finishedAt: string | null;
+}
+
+/** Publish with the gate on answers 202: an eval started, the version comes if it passes. */
+export interface EvalStarted {
+  readonly eval: AgentEval;
+  readonly message: string;
+}
+
+export interface EvalList {
+  readonly evals: readonly AgentEval[];
+  /** The unfinished eval, if any. */
+  readonly active: AgentEval | null;
 }
 
 export interface DefinitionBody {
@@ -66,7 +107,7 @@ export const saveTeamAgent = (
 export const publishTeamAgent = (
   teamId: string,
   agent: Pick<AgentSummary, "id" | "revision">,
-): Promise<ApiResult<PublishedAgent>> =>
+): Promise<ApiResult<PublishedAgent | EvalStarted>> =>
   apiRequest(`/v1/agents/${enc(agent.id)}/publish`, {
     method: "POST",
     teamId,
@@ -96,3 +137,22 @@ export const exportTeamAgentToOrbit = (
   version: number,
 ): Promise<ApiResult<TextFile>> =>
   apiTextFile(`/v1/agents/${enc(id)}/versions/${version}/orbit`, { teamId });
+
+export const listTeamAgentEvals = (teamId: string, id: string): Promise<ApiResult<EvalList>> =>
+  apiRequest(`/v1/agents/${enc(id)}/evals`, { teamId });
+
+/** True for the 202 answer of a gated Publish. */
+export const isEvalStarted = (answer: PublishedAgent | EvalStarted): answer is EvalStarted =>
+  "eval" in answer;
+
+/** An eval with the image's full report (`GET /v1/agents/{id}/evals/{evalId}`); the report is untrusted JSON. */
+export interface AgentEvalDetail extends AgentEval {
+  readonly report?: unknown;
+}
+
+export const getTeamAgentEval = (
+  teamId: string,
+  id: string,
+  evalId: string,
+): Promise<ApiResult<{ eval: AgentEvalDetail }>> =>
+  apiRequest(`/v1/agents/${enc(id)}/evals/${enc(evalId)}`, { teamId });

@@ -7,6 +7,7 @@ import {
   type InventoryAgent,
   type InventoryPage,
 } from "../../../lib/admin/api/team/agents";
+import { scoreLabel } from "../../../lib/admin/orbit-score";
 import { MutationStatus } from "../error-notice";
 import { OrbitExportButton } from "./agent-builder/orbit-export-button";
 import { DateTime, ResourceView, confirmed } from "../parts";
@@ -18,8 +19,8 @@ const PLACEHOLDER = "—";
 
 /**
  * Inventory for team admins (KOBE-86, D19): team agents plus members' personal agents used in
- * this team, with owner, scope, status, versions and usage counts. Schedules (KOBE-64) and the
- * Orbit score (KOBE-52) are placeholders. Suspending a personal agent affects this team only.
+ * this team, with owner, scope, status, versions, usage counts and the latest Orbit score
+ * (KOBE-94). Schedules (KOBE-64) are a placeholder. Suspending a personal agent affects this team only.
  */
 export function AgentInventory({
   teamId,
@@ -140,7 +141,20 @@ function InventoryTable({
                 <td>{a.lastRunAt === null ? PLACEHOLDER : <DateTime value={a.lastRunAt} />}</td>
                 <td>{a.tokens.toLocaleString("en-US")}</td>
                 <td>{PLACEHOLDER}</td>
-                <td>{PLACEHOLDER}</td>
+                <td>
+                  {a.orbitScore.status === "none" ? (
+                    PLACEHOLDER
+                  ) : (
+                    <>
+                      {scoreLabel(a.orbitScore)}
+                      {a.orbitScore.at !== null && a.orbitScore.status !== "evaluating" && (
+                        <div className={styles.hint}>
+                          <DateTime value={a.orbitScore.at} />
+                        </div>
+                      )}
+                    </>
+                  )}
+                </td>
                 <td>
                   {a.canExport === true && a.currentVersion !== null && (
                     <OrbitExportButton

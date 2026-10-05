@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
+  orbitEvals,
   teamAgents,
+  teamEvalSettings,
   teamAgentSuspensions,
   teamAgentVersions,
   teamSkillReviews,
@@ -117,5 +119,25 @@ export const agentsFixtures: Record<(typeof agents.team)[number], ProbeFixture> 
     const userId = randomUUID();
     await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
     await tx.insert(teamSkillSettings).values({ teamId, updatedBy: userId });
+  },
+  team_eval_settings: async (tx, teamId) => {
+    const userId = randomUUID();
+    await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
+    await tx.insert(teamEvalSettings).values({ teamId, updatedBy: userId });
+  },
+  orbit_evals: async (tx, teamId) => {
+    const userId = randomUUID();
+    await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
+    await tx.insert(orbitEvals).values({
+      teamId,
+      agentId: randomUUID(),
+      agentScope: "team",
+      agentSlug: "probe",
+      requestedBy: userId,
+      draftRevision: 1,
+      definition: { frontmatter: { name: "Probe" }, prompt: "" },
+      model: "probe/model",
+      threshold: 0.2,
+    });
   },
 };

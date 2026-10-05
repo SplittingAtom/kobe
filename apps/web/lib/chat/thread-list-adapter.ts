@@ -83,11 +83,18 @@ export function createThreadListAdapter(
 
     async initialize() {
       const test = session.testAgentId;
+      const model = session.takeNextModel();
+      const agent = session.takeNextAgent();
       const created = await unwrap(
         api.createThread(
           session.takeNextTitle(),
-          session.takeNextModel(),
-          test === undefined ? undefined : { agentId: test },
+          // A pinned agent's model wins (2026-10-04): the draft's choice is not sent.
+          agent?.model != null ? null : model,
+          test !== undefined
+            ? { agentId: test, test: true }
+            : agent === null
+              ? undefined
+              : { agentId: agent.id, test: false },
         ),
       );
       session.seed(created);

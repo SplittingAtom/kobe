@@ -22,6 +22,9 @@ export interface ThreadSummary {
   readonly projectId: string | null;
   readonly agentId: string | null;
   readonly agentVersion: number | null;
+  /** The pinned agent's name and its state in this team (KOBE-122); null without an agent. */
+  readonly agentName?: string | null;
+  readonly agentStatus?: "active" | "suspended" | "archived" | null;
   readonly sharedToProject: boolean;
   /** A builder test thread (KOBE-85); never in the lists the chat shows. */
   readonly isTest?: boolean;
@@ -34,6 +37,18 @@ export interface ThreadSummary {
   readonly deletedAt: string | null;
   /** When the Trash purge may remove it (deleted + 30 days). */
   readonly purgeAfter: string | null;
+}
+
+/** An agent the user can start a chat with (`GET /v1/agents/runnable`, KOBE-122). */
+export interface RunnableAgent {
+  readonly id: string;
+  readonly scope: "team" | "personal" | "gallery";
+  /** Stable key of a gallery agent (e.g. "assistant"); absent for team and personal agents. */
+  readonly galleryKey?: string;
+  readonly name: string;
+  readonly description?: string;
+  /** The model the agent's current version pins (alias or id); null = not pinned. */
+  readonly model: string | null;
 }
 
 export interface ThreadPage {

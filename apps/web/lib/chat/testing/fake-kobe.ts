@@ -28,6 +28,9 @@ interface FakeThread {
   /** A builder test thread (KOBE-85): the draft's agent, no version, out of the lists. */
   is_test?: boolean;
   agent_id?: string | null;
+  /** What the thread detail says of the pinned agent (KOBE-122). */
+  agent_name?: string | null;
+  agent_status?: "active" | "suspended" | "archived" | null;
   entries: FakeEntry[];
 }
 
@@ -37,6 +40,16 @@ export interface FakeTeamModel {
   readonly label: string | null;
   enabled: boolean;
   is_default: boolean;
+}
+
+/** An agent as `GET /v1/agents/runnable` lists it (KOBE-122). */
+export interface FakeRunnableAgent {
+  readonly id: string;
+  readonly scope: "team" | "personal" | "gallery";
+  readonly galleryKey?: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly model: string | null;
 }
 
 interface FakeEntry {
@@ -104,6 +117,9 @@ export class FakeKobe {
   readonly failNext = new Map<string, Response>();
   /** The install catalog with the team's choice (KOBE-44); empty = no models route answers. */
   readonly teamModels: FakeTeamModel[] = [];
+  /** `GET /v1/agents/runnable` (KOBE-122), in this order; `runnablePageSize` pages it. */
+  readonly runnableAgents: FakeRunnableAgent[] = [];
+  runnablePageSize = 200;
   /** The server holds the queue after Stop (KOBE-26); false = the KOBE-30 behaviour (next starts). */
   pauseOnStop = true;
   #threadN = 0;
@@ -335,7 +351,7 @@ export class FakeKobe {
   }
 
   #summary(thread: FakeThread): Json {
-    const { entries: _e, agent_model: _a, ...rest } = thread;
+    const { entries: _e, agent_model: _a, agent_name: _n, agent_status: _s, ...rest } = thread;
     return {
       ...rest,
       owner_user_id: uuid(3, 1),
@@ -404,6 +420,20 @@ export class FakeKobe {
       return json(200, {
         models,
         default: this.teamModels.find((m) => m.is_default)?.alias ?? null,
+      });
+    }
+    if (url.pathname === "/v1/agents/runnable") {
+      if (headers.get("x-kobe-team") !== this.teamId) return error(409, "team_mismatch");
+      const start = Number(url.searchParams.get("cursor") ?? 0);
+      const page = this.runnableAgents.slice(start, start + this.runnablePageSize);
+      const next = start + page.length;
+      return json(200, {
+        agents: page.map((a) => ({
+          slug: a.name.toLowerCase().replace(/\W+/g, "-"),
+          current_version: 1,
+          ...a,
+        })),
+        next_cursor: next < this.runnableAgents.length ? String(next) : null,
       });
     }
     const scoped =
@@ -553,6 +583,15 @@ export class FakeKobe {
       this.#thread(threadId).model = model;
       if (body?.test === true) {
         Object.assign(this.#thread(threadId), { is_test: true, agent_id: body.agent_id ?? null });
+      } else if (typeof body?.agent_id === "string") {
+        const agent = this.runnableAgents.find((a) => a.id === body.agent_id);
+        if (!agent) return error(404, "agent_not_found", "No agent with that id.");
+        Object.assign(this.#thread(threadId), {
+          agent_id: agent.id,
+          agent_model: agent.model,
+          agent_name: agent.name,
+          agent_status: "active",
+        });
       }
       return json(201, this.#summary(this.#thread(threadId)));
     }
@@ -593,6 +632,8 @@ export class FakeKobe {
         ...this.#summary(thread),
         agent_current_version: null,
         agent_model: thread.agent_model ?? null,
+        agent_name: thread.agent_name ?? null,
+        agent_status: thread.agent_status ?? null,
         ...page,
       });
     }

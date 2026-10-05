@@ -36,3 +36,15 @@ export function agentStatusLabel(agent: Pick<AgentSummary, "status" | "archivedA
   if (agent.archivedAt) return "Archived";
   return agent.status === "active" ? "Active" : "Suspended";
 }
+
+/** A gallery agent version's published Orbit score (`gallery-scores`, KOBE-94); install-level. */
+export interface GalleryScore {
+  readonly agentId: string;
+  readonly version: number;
+  readonly status: "passed" | "blocked";
+  /** 0 to 1. */
+  readonly attackSuccessRate: number;
+  readonly attempts: number;
+  readonly threshold: number;
+  readonly evaluatedAt: string;
+}

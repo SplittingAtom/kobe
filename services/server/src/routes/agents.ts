@@ -39,8 +39,12 @@ import {
   type AgentLocation,
   type AgentRecord,
 } from "../agents/store.js";
+import { mountEvalRoutes } from "../agents/eval/routes.js";
+import { currentGalleryScores, galleryScoreView } from "../agents/eval/gallery-scores.js";
+import type { EvalRunner } from "../agents/eval/service.js";
 import { mountOrbitExport } from "../agents/orbit/routes.js";
 import { inventoryQuerySchema, listInventory, setInventoryStatus } from "../agents/inventory.js";
+import { listRunnableAgents, runnableQuerySchema } from "../agents/runnable.js";
 import { mountVersionRoutes } from "../agents/version-routes.js";
 import { deleteOrArchiveAgent, getVersion } from "../agents/versions.js";
 import { recordAuditAfter } from "../audit/record.js";
@@ -67,7 +71,10 @@ function locationFor(c: Ctx, scope: AgentScope): AgentLocation {
  * publish, rollback and unarchive (KOBE-46) are `agents/version-routes.ts`. Gallery curation is
  * `/v1/install/gallery/agents`.
  */
-export function agentRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
+export function agentRoutes(
+  deps: ServerDeps,
+  evalOptions: { readonly runner?: EvalRunner } = {},
+): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();
   const db = deps.database.db;
   app.use(requireTeam(deps));
@@ -100,6 +107,20 @@ export function agentRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
       .filter(({ access }) => access.see)
       .map(({ agent, access }) => agentSummary(agent, access));
     return c.json({ agents });
+  });
+
+  // Agents the caller can start a chat with (KOBE-122): before "/:id".
+  app.get("/runnable", async (c) => {
+    const query = runnableQuerySchema.safeParse(c.req.query());
+    if (!query.success) return invalidRequest(c, "Check limit and cursor.");
+    const viewer = { teamId: c.get("team").id, userId: c.get("user").id };
+    return c.json(await listRunnableAgents(db, viewer, query.data));
+  });
+
+  // Published Orbit scores of gallery agents (KOBE-94): before "/:id".
+  app.get("/gallery-scores", async (c) => {
+    const scores = await currentGalleryScores(db);
+    return c.json({ scores: scores.map(galleryScoreView) });
   });
 
   // Team admins' inventory (KOBE-86): before "/:id" so "inventory" is not read as an id.
@@ -274,6 +295,19 @@ export function agentRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
     limits: deps.agentLimits,
     resolve: resolveVersioned,
     userId: (c) => (c as Ctx).get("user").id,
+    evals: {
+      runner: evalOptions.runner,
+      // A getter: read-only requests never touch deps.background (threads.db.test.ts checks).
+      get background() {
+        return deps.background;
+      },
+      team: (c) => ({ id: (c as Ctx).get("team").id, slug: (c as Ctx).get("team").slug }),
+    },
+  });
+  mountEvalRoutes(app, {
+    db,
+    resolve: resolveVersioned,
+    teamId: (c) => (c as Ctx).get("team").id,
   });
   mountOrbitExport(app, {
     db,

@@ -70,7 +70,9 @@ export type PublishError =
   | "already_current"
   | "invalid_draft"
   | "unchanged"
-  | "version_limit";
+  | "version_limit"
+  /** The tool manifest changed since the eval scored it (KOBE-93): evaluate again. */
+  | "eval_stale";
 
 /** Limits on versions (review M3): versions are immutable and never deleted by the app. */
 export interface VersionLimits {
@@ -200,10 +202,12 @@ interface NewVersion {
   readonly publishedBy: string | null;
   readonly draftRevision: number | null;
   readonly republishedFrom: number | null;
+  /** The manifest an eval scored; a different one now (the floor changed) refuses the publish. */
+  readonly expectedManifest?: ToolManifest;
 }
 
 /** Content that makes two versions the same: definition and frozen manifest. */
-const contentKey = (definition: AgentDefinition, manifest: ToolManifest): string =>
+export const contentKey = (definition: AgentDefinition, manifest: ToolManifest): string =>
   canonicalJson({ frontmatter: definition.frontmatter, prompt: definition.prompt, manifest });
 
 /** Whether `definition` + `manifest` equal the agent's current version (an unreadable one never does). */
@@ -237,10 +241,13 @@ async function insertVersion(
   location: AgentLocation,
   agent: AgentRecord,
   input: NewVersion,
-): Promise<Result<Published, "unchanged" | "version_limit">> {
+): Promise<Result<Published, "unchanged" | "version_limit" | "eval_stale">> {
   const now = new Date();
   const floor = await readPublishFloor(tx, location.scope === "team" ? "team" : "install");
   const manifest = computeToolManifest(input.definition.frontmatter, floor, now);
+  if (input.expectedManifest && canonicalJson(input.expectedManifest) !== canonicalJson(manifest)) {
+    return { ok: false, error: "eval_stale" };
+  }
   if (await sameAsCurrent(tx, location, agent, input.definition, manifest)) {
     return { ok: false, error: "unchanged" };
   }
@@ -345,6 +352,51 @@ export async function publishAgent(
 }
 
 /**
+ * Publishes a draft snapshot that has already been evaluated (KOBE-93): the eval gate froze the
+ * definition when Publish was asked for, so what is published is exactly what was scored, even if
+ * the draft changed since. Same locking, limits and audit as `publishAgent`.
+ */
+export async function publishEvaluated(
+  db: KobeDb,
+  location: AgentLocation,
+  id: string,
+  input: {
+    readonly definition: AgentDefinition;
+    readonly draftRevision: number;
+    readonly publishedBy: string;
+    readonly limits?: VersionLimits;
+    readonly expectedManifest?: ToolManifest;
+  },
+): Promise<Result<Published, PublishError>> {
+  return inLocation(db, location, async (tx) => {
+    const agent = await lockAgent(tx, location, id);
+    if (!agent) return { ok: false, error: "not_found" };
+    if (agent.archivedAt) return { ok: false, error: "archived" };
+    const draft = validateAgentDefinition(input.definition);
+    if (!draft.ok) return { ok: false, error: "invalid_draft" };
+    const inserted = await insertVersion(tx, location, agent, {
+      limits: input.limits ?? DEFAULT_VERSION_LIMITS,
+      definition: draft.definition,
+      publishedBy: input.publishedBy,
+      draftRevision: input.draftRevision,
+      republishedFrom: null,
+      ...(input.expectedManifest ? { expectedManifest: input.expectedManifest } : {}),
+    });
+    if (!inserted.ok) return inserted;
+    await recordAudit(tx, {
+      action: "agent.published",
+      teamId: auditTeam(location),
+      target: {
+        ...ref(location, agent),
+        version: inserted.value.version.version,
+        draftRevision: input.draftRevision,
+      },
+    });
+    return inserted;
+  });
+}
+
+/**
  * Rolls back (D19 "rollback republishes an older version"): `fromVersion`'s content becomes a new
  * version, with its manifest recomputed against today's floor. The draft is left alone (it may
  * hold the fix in progress). Threads keep their pins; new threads get the new version.
@@ -357,6 +409,7 @@ export async function rollbackAgent(
     readonly publishedBy: string;
     readonly fromVersion: number;
     readonly limits?: VersionLimits;
+    readonly expectedManifest?: ToolManifest;
   },
 ): Promise<Result<Published, PublishError>> {
   return inLocation(db, location, async (tx) => {
@@ -372,6 +425,7 @@ export async function rollbackAgent(
       publishedBy: input.publishedBy,
       draftRevision: null,
       republishedFrom: source.version,
+      ...(input.expectedManifest ? { expectedManifest: input.expectedManifest } : {}),
     });
     if (!inserted.ok) return inserted;
     const published = inserted.value;
@@ -519,12 +573,7 @@ export async function findPinnableAgent(
   const installQuery = tx
     .select({ ...INSTALL, scope: installAgents.scope })
     .from(installAgents)
-    .where(
-      and(
-        eq(installAgents.id, agentId),
-        sql`(${installAgents.scope} = 'gallery' OR (${installAgents.scope} = 'personal' AND ${installAgents.ownerUserId} = ${viewer.userId}::uuid))`,
-      ),
-    );
+    .where(and(eq(installAgents.id, agentId), installVisibleTo(viewer.userId)));
   const [own]: (Row & { scope: "personal" | "gallery" })[] = await (options.lock
     ? installQuery.for("share")
     : installQuery);
@@ -537,10 +586,23 @@ export async function findPinnableAgent(
     : record;
 }
 
+/** An agent's effective state in the viewer's team, for display (KOBE-122). */
+export function agentStatusOf(agent: AgentRecord): "active" | "suspended" | "archived" {
+  if (agent.archivedAt !== null) return "archived";
+  return agent.status === "suspended" ? "suspended" : "active";
+}
+
+/** Install-wide agents a user sees: the gallery and their own personal agents. */
+export const installVisibleTo = (userId: string) =>
+  sql`(${installAgents.scope} = 'gallery' OR (${installAgents.scope} = 'personal' AND ${installAgents.ownerUserId} = ${userId}::uuid))`;
+
 /** Why an agent can't be pinned by a new thread or a switch, if it can't. */
 function unavailable(agent: AgentRecord): boolean {
   return agent.status !== "active" || agent.archivedAt !== null || agent.currentVersion === null;
 }
+
+/** Whether a new thread may pin this agent (`status` already the team's effective one). */
+export const canPinAgent = (agent: AgentRecord): boolean => !unavailable(agent);
 
 /**
  * The pin a new thread takes for `agentId` (`POST /v1/threads`): the agent's current published

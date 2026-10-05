@@ -29,6 +29,17 @@ rules:
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
     verbs: ["create", "patch"]
+  # Orbit eval Jobs (KOBE-93): the exported YAML as a ConfigMap, the Job (its pod is admitted like
+  # a sandbox pod), and its result read from the pod's log. No Secrets, no exec.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
   - apiGroups: ["extensions.agents.x-k8s.io"]
     resources: ["sandboxtemplates", "sandboxwarmpools"]
     verbs: ["create", "patch"]

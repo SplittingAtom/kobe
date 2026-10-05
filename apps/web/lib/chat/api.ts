@@ -13,6 +13,7 @@ import type {
   EgressRequest,
   EntryPage,
   PendingMessages,
+  RunnableAgent,
   RunSnapshot,
   SubmitResult,
   ThreadDetail,
@@ -38,6 +39,15 @@ export interface TeamRetentionNotice {
   readonly upcoming: { readonly period: string; readonly effectiveAt: string } | null;
 }
 
+const RUNNABLE_PAGE_SIZE = 200;
+/** A guard, not a limit anyone reaches: 10 pages of 200. */
+const RUNNABLE_MAX_PAGES = 10;
+
+interface RunnablePage {
+  readonly agents: readonly RunnableAgent[];
+  readonly nextCursor: string | null;
+}
+
 export interface ChatApi {
   listThreads(cursor?: string): Promise<ApiResult<ThreadPage>>;
   searchThreads(q: string, cursor?: string): Promise<ApiResult<ThreadSearchPage>>;
@@ -46,8 +56,10 @@ export interface ChatApi {
   createThread(
     title?: string,
     model?: string | null,
-    test?: { readonly agentId: string },
+    agent?: { readonly agentId: string; readonly test: boolean },
   ): Promise<ApiResult<ThreadSummary>>;
+  /** Agents the user can start a chat with in this team, every page (KOBE-122). */
+  runnableAgents(): Promise<ApiResult<readonly RunnableAgent[]>>;
   /** Clears the caller's builder test threads of one agent (KOBE-85); they go to Trash, hidden. */
   clearTestThreads(agentId: string): Promise<ApiResult<{ readonly cleared: number }>>;
   /** Sets the thread's model for its next runs (an enabled alias; null = the team default). */
@@ -112,12 +124,28 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     listThreads: (cursor) => get(`/v1/threads${query({ cursor })}`),
     searchThreads: (q, cursor) => get(`/v1/threads${query({ q, cursor })}`),
     listTrash: (cursor) => get(`/v1/threads/trash${query({ cursor })}`),
-    createThread: (title, model, test) =>
+    createThread: (title, model, agent) =>
       send("POST", "/v1/threads", {
         ...(title === undefined ? {} : { title }),
         ...(model === undefined || model === null ? {} : { model }),
-        ...(test === undefined ? {} : { agent_id: test.agentId, test: true }),
+        ...(agent === undefined
+          ? {}
+          : { agent_id: agent.agentId, ...(agent.test ? { test: true } : {}) }),
       }),
+    runnableAgents: async () => {
+      const agents: RunnableAgent[] = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < RUNNABLE_MAX_PAGES; page += 1) {
+        const res = await get<RunnablePage>(
+          `/v1/agents/runnable${query({ limit: RUNNABLE_PAGE_SIZE, cursor })}`,
+        );
+        if (!res.ok) return { ok: false, error: res.error };
+        agents.push(...res.data.agents);
+        if (res.data.nextCursor === null) break;
+        cursor = res.data.nextCursor;
+      }
+      return { ok: true, status: 200, data: agents };
+    },
     clearTestThreads: (agentId) =>
       send("DELETE", `/v1/threads/test${query({ agent_id: agentId })}`),
     setThreadModel: (id, model) => send("PATCH", `/v1/threads/${enc(id)}`, { model }),

@@ -44,6 +44,8 @@ export function applyMergePatch(target: unknown, patch: unknown): unknown {
 export interface FakeKube extends KubeClient {
   readonly calls: Call[];
   readonly tokens: Map<string, TokenReviewResult>;
+  /** Pod logs by `<namespace>/<pod>`, as `kubectl logs` would print them. */
+  readonly podLogs: Map<string, string>;
   /** Puts an object as if something else created it (assigns a uid if missing). */
   seed(object: KubeObject): KubeObject;
   peek(ref: ObjectRef): KubeObject | undefined;
@@ -109,6 +111,7 @@ export function createFakeKube(): FakeKube {
   const fake: FakeKube = {
     calls: [],
     tokens: new Map(),
+    podLogs: new Map(),
     seed: (object) => put(object, undefined),
     peek: (r) => {
       const obj = store.get(key(r));
@@ -191,6 +194,17 @@ export function createFakeKube(): FakeKube {
       if (!obj) return;
       store.delete(key(r));
       if (obj.metadata.uid) cascade(obj.metadata.uid);
+    },
+    async logs(r, options) {
+      fake.calls.push({
+        verb: "get",
+        kind: "PodLog",
+        ...(r.namespace ? { namespace: r.namespace } : {}),
+        name: r.name,
+      });
+      maybeFail("get", "PodLog");
+      const text = fake.podLogs.get(`${r.namespace ?? ""}/${r.name}`);
+      return text === undefined ? undefined : text.slice(0, options.limitBytes);
     },
     async reviewToken(token) {
       return fake.tokens.get(token) ?? { authenticated: false, audiences: [], extra: {} };

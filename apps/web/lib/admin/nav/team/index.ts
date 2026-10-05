@@ -3,6 +3,7 @@ export { default as members } from "./members";
 export { default as invites } from "./invites";
 export { default as agents } from "./agents";
 export { default as inventory } from "./inventory";
+export { default as agentEvaluation } from "./agent-evaluation";
 export { default as skillReview } from "./skill-review";
 export { default as models } from "./models";
 export { default as budgets } from "./budgets";

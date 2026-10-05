@@ -195,6 +195,9 @@ export const threadDetailSchema = threadSummarySchema.extend({
    * The newest published version of the pinned agent (D19 "v3 available" when it is greater than
    * `agent_version`); null without an agent or when the agent is no longer available.
    */
+  /** The pinned agent's name and effective status in this team (KOBE-122); null without one. */
+  agent_name: z.string().nullable(),
+  agent_status: z.enum(["active", "suspended", "archived"]).nullable(),
   agent_current_version: z.number().int().nullable(),
   /**
    * The model alias the thread's agent pins (KOBE-44; resolved by the run's agent resolver,

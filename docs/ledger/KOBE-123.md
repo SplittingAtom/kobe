@@ -41,12 +41,6 @@
 - `identities.real.test.ts` (CI only, needs the helper): file is agent-owned 0640 and a tool running as
   the Pi uid cannot append, move or remove it.
 - `system-prompt.real-pi.test.ts`: real Pi 1.0.0 gives the model the appended prompt after its own.
-- e2e (`e2e/run.sh`, not run here: needs the cluster): a team agent whose prompt carries
-  `KOBE-PROMPT-MARKER:<token>`, a draft test thread; the model-gateway fake LLM echoes
-  `[system-marker: <token>]`; the run's reply must contain it. KOBE-89 can reuse the marker echo
-  (`systemMarker` in `services/model-gateway/src/testing/fake-llm.ts`) for the Researcher's notice.
-
-## Open questions
-
-- e2e uses a team agent draft, not a gallery agent: `GALLERY_DEFINITIONS` is empty until KOBE-89, and
-  a fork copies the gallery prompt verbatim, so the path is the same.
+- e2e (`e2e/run.sh`, gallery section; uses KOBE-89's `system?` echo): the Researcher gallery agent's
+  "Web search is not available" notice must reach the model through Pi's system prompt; the Assistant's
+  must not contain it.

@@ -299,11 +299,17 @@ contains "team namespace carries its team id" "^${E2E_TEAM_ID}$" \
 contains "team namespace enforces Pod Security 'baseline' (KOBE-71; the rest of 'restricted' by admission)" '^baseline$' \
   "$($KUBECTL get namespace "$TEAM_NS" -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}')"
 np_spec() { $KUBECTL -n "$TEAM_NS" get networkpolicy kobe-sandbox-isolation -o jsonpath="$1"; }
-contains "team NetworkPolicy selects every pod in the namespace" '^\{\}$' "$(np_spec '{.spec.podSelector}')"
+contains "team NetworkPolicy selects every pod but Orbit eval pods (KOBE-93)" \
+  '^\{"matchExpressions":\[\{"key":"kobe\.splittingatom\.io/orbit-eval","operator":"DoesNotExist"\}\]\}$' "$(np_spec '{.spec.podSelector}')"
+contains "eval NetworkPolicy selects only Orbit eval pods and allows no ingress (KOBE-93)" \
+  '^\{"matchExpressions":\[\{"key":"kobe\.splittingatom\.io/orbit-eval","operator":"Exists"\}\]\} (\[\])?$' \
+  "$($KUBECTL -n "$TEAM_NS" get networkpolicy kobe-orbit-eval-isolation -o jsonpath='{.spec.podSelector} {.spec.ingress}')"
+contains "eval NetworkPolicy allows egress to the model gateway only" '^model-gateway$' \
+  "$($KUBECTL -n "$TEAM_NS" get networkpolicy kobe-orbit-eval-isolation -o jsonpath='{.spec.egress[*].to[*].podSelector.matchLabels.app\.kubernetes\.io/component}')"
 contains "team NetworkPolicy governs ingress and egress" '^\["Ingress","Egress"\]$' "$(np_spec '{.spec.policyTypes}')"
 contains "team NetworkPolicy allows no ingress at all" '^(\[\])?$' "$(np_spec '{.spec.ingress}')"
-contains "team namespace has the only NetworkPolicy in it (controller policy unmanaged)" '^kobe-sandbox-isolation$' \
-  "$($KUBECTL -n "$TEAM_NS" get networkpolicy -o name | sed 's|.*/||')"
+contains "team namespace has only Kobe's two NetworkPolicies (controller policy unmanaged)" '^kobe-orbit-eval-isolation kobe-sandbox-isolation $' \
+  "$($KUBECTL -n "$TEAM_NS" get networkpolicy -o name | sed 's|.*/||' | sort | tr '\n' ' ')"
 contains "team ResourceQuota is in place" '^20$' \
   "$($KUBECTL -n "$TEAM_NS" get resourcequota kobe-team-quota -o jsonpath='{.spec.hard.requests\.cpu}')"
 contains "team warm pool exists" '^1$' \
@@ -1531,7 +1537,7 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
     if until_ok 180 owner_closed; then ok "no scripted agent holds the Owner's sandbox identity any more"
     else fail "no scripted agent holds the Owner's sandbox identity any more"; fi
     read -r -d '' CHAT_JS <<'JS' || true
-const [team, content, timeoutMs, model, promptMarker] = process.argv.slice(1);
+const [team, content, timeoutMs, model, agentId] = process.argv.slice(1);
 const base = "http://127.0.0.1:" + process.env.PORT;
 const origin = new URL(process.env.KOBE_PUBLIC_URL).origin;
 const jar = new Map();
@@ -1553,19 +1559,11 @@ for (let i = 0; i < 4; i++) {
 }
 out("signin", login.status);
 await call("PUT", "/v1/me/teams/active", { teamId: team });
-// KOBE-123: an optional agent whose prompt carries a marker the fake model echoes (a draft test
-// thread, so no publish is needed): the reply proves the prompt reached the model.
-let agentId;
-if (promptMarker) {
-  const agent = await call("POST", "/v1/agents", { scope: "team", frontmatter: { name: "e2e prompt marker" },
-    prompt: "You are the e2e marker agent. KOBE-PROMPT-MARKER:" + promptMarker });
-  out("agent", agent.status);
-  agentId = agent.json.id ?? agent.json.agent?.id;
-}
 // KOBE-44: an optional model chosen for the thread (an alias the team enabled).
-const thread = await call("POST", "/v1/threads", { title: "kobe-41", ...(model ? { model } : {}),
-  ...(agentId ? { agent_id: agentId, test: true } : {}) });
+// KOBE-89: an optional agent (a gallery agent's id) to chat with.
+const thread = await call("POST", "/v1/threads", { title: "kobe-41", ...(model ? { model } : {}), ...(agentId ? { agent_id: agentId } : {}) });
 out("thread", thread.status + ":" + (thread.json.model ?? "default"));
+out("thread_id", thread.json.thread_id ?? "-");
 const t0 = Date.now();
 const sent = await call("POST", "/v1/threads/" + thread.json.thread_id + "/messages", { content });
 out("message", sent.status);
@@ -1612,7 +1610,7 @@ out("code", code);
 out("error_message", errorMessage);
 out("text", text);
 JS
-    chat_run() { # content timeout-ms [model] [prompt-marker] → the CHAT_JS output (not `chat`: KOBE-40's helper above)
+    chat_run() { # content timeout-ms [model] [agent-id] → the CHAT_JS output (not `chat`: KOBE-40's helper above)
       $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$CHAT_JS" "$E2E_TEAM_ID" "$1" "$2" "${3:-}" "${4:-}" 2>&1 | tail -15
     }
     chat_out=$(chat_run "hello-pi-$RANDOM" 300000)
@@ -1622,13 +1620,6 @@ JS
     contains "the run completed with the fake model's streamed answer (Pi → shim → Bifrost → upstream)" \
       '^text=fake-openai: hello-pi-[0-9]+$' "$chat_out"
     contains "the run ended run.completed" '^terminal=run.completed$' "$chat_out"
-    # KOBE-123: the agent's system prompt reaches the model (Pi --append-system-prompt <file>); the
-    # fake model echoes the marker it finds in the system message.
-    marker_tok="m$RANDOM$RANDOM"
-    marker_out=$(chat_run "hello-marker" 300000 "" "$marker_tok")
-    printf '     prompt marker: %s\n' "$(printf '%s' "$marker_out" | grep -v '^text=' | tr '\n' ' ')"
-    contains "an agent's system prompt reaches the model (marker echoed by the fake model)" \
-      "^text=fake-openai: hello-marker \\[system-marker: $marker_tok\\]$" "$marker_out"
     contains "the woken sandbox produced a first token" '^first_token_ms=[0-9]+$' "$chat_out"
     contains "the shim attributed the model call to the run (x-kobe-run-id from Pi)" "\"runId\":\"$chat_run\"" \
       "$($KUBECTL -n "$NS" logs -l app.kubernetes.io/component=model-gateway --tail=-1 --since=15m 2>/dev/null | grep -F "\"runId\":\"${chat_run:-none}\"" | head -1)"
@@ -1745,6 +1736,60 @@ SH
       "PUT /v1/team/budgets/team {\"monthly_usd\":null}" \
       "PATCH /v1/install/models/catalog/fast {\"input_usd_per_mtok\":null,\"output_usd_per_mtok\":null}")
     expect "the budget and prices are removed again" '^200 ' "$restore"
+
+    # KOBE-89: the five gallery agents each complete a short sample task in the Owner's real sandbox
+    # (gVisor, the image's baked built-in skills, no network), through the fake model: it answers
+    # "bash: <command>" with a bash tool call. No
+    # model is pinned by any gallery agent, so the runs use the team default. The server seeded the
+    # agents at start. Sandbox tools run without approval unless a rule asks (KOBE-37 left one).
+    echo "==> gallery agents (KOBE-89)"
+    psql_kobe "DELETE FROM tool_rules WHERE team_id = '$E2E_TEAM_ID' AND scope = 'team';" >/dev/null
+    gallery_id() { psql_kobe "SELECT id FROM install_agents WHERE scope = 'gallery' AND gallery_key = '$1' AND archived_at IS NULL"; }
+    gallery_run() { # key content [timeout-ms] → CHAT_JS output for a thread with that gallery agent
+      local id
+      id=$(gallery_id "$1")
+      if [[ -z "$id" ]]; then echo "gallery_agent=missing:$1"; return; fi
+      chat_run "$2" "${3:-300000}" "" "$id"
+    }
+    gal_dir='cd "${TMPDIR:-/tmp}" && rm -rf g89 && mkdir g89 && cd g89 && SK=/opt/kobe/skills'
+    for gkey in assistant data-analyst researcher document-drafter code-helper; do
+      contains "gallery agent $gkey is seeded and not archived" '^[0-9a-f-]{36}$' "$(gallery_id "$gkey")"
+    done
+    g_out=$(gallery_run assistant "hello-assistant-$RANDOM")
+    printf '     gallery assistant: %s\n' "$(printf '%s' "$g_out" | grep -v '^text=' | tr '\n' ' ')"
+    contains "Assistant: a thread with it starts (201, team default model)" '^thread=201:default$' "$g_out"
+    contains "Assistant: the run completed with the expected text" '^text=fake-openai: hello-assistant-[0-9]+$' "$g_out"
+    contains "Assistant: the thread is pinned to the gallery agent" '^gallery$' \
+      "$(psql_kobe "SELECT agent_scope FROM threads WHERE id = '$(printf '%s\n' "$g_out" | sed -n 's/^thread_id=//p')'")"
+    g_out=$(gallery_run data-analyst "bash: $gal_dir && python \$SK/data-analysis/scripts/describe.py \$SK/data-analysis/scripts/sample.csv | grep -c 'rows: 6' && python \$SK/charts/scripts/chart.py \$SK/charts/scripts/sample.csv --kind bar --x region --y amount --agg sum --title t --out c.png >/dev/null && echo chart-bytes \$(wc -c < c.png)")
+    printf '     gallery data analyst: %s\n' "$(printf '%s' "$g_out" | tr '\n' ' ' | cut -c1-400)"
+    contains "Data Analyst: the run completed" '^terminal=run.completed$' "$g_out"
+    contains "Data Analyst: the data-analysis skill profiled the data and the charts skill produced a PNG" \
+      '^text=fake-openai: tool said: 1 chart-bytes [0-9]{4,}$' "$g_out"
+    # KOBE-123: the agent's prompt reaches Pi (--append-system-prompt) and so the model: the fake
+    # model answers "system?" with the system messages it received.
+    g_out=$(gallery_run researcher "system?")
+    contains "Researcher: the run completes with no web search configured" '^terminal=run.completed$' "$g_out"
+    contains "Researcher: the web-search-unavailable notice reaches the model through Pi's system prompt" \
+      '^text=fake-openai: system said: .*Web search is not available here, so I can only work from the material you give me\.' "$g_out"
+    g_out=$(gallery_run assistant "system?")
+    contains "Assistant: its own prompt (not the Researcher's) reaches the model" \
+      '^text=fake-openai: system said: ' "$g_out"
+    contains "Assistant: the Researcher's notice is absent from its system prompt" '^0$' \
+      "$(printf '%s\n' "$g_out" | grep -c 'Web search is not available here' || true)"
+    contains "Researcher: its published prompt has it say plainly that web search is unavailable" \
+      'Web search is not available here, so I can only work from the material you give me\.' \
+      "$(psql_kobe "SELECT v.prompt FROM install_agent_versions v JOIN install_agents a ON a.id = v.agent_id AND v.version = a.current_version WHERE a.gallery_key = 'researcher'")"
+    g_out=$(gallery_run researcher "bash: $gal_dir && python \$SK/docx/scripts/md_to_docx.py \$SK/docx/scripts/sample.md in.docx --title T >/dev/null && python \$SK/docx/scripts/docx_text.py in.docx | grep -c 'south | 310.35'")
+    contains "Researcher: it reads provided material with its skills offline (docx text extracted)" \
+      '^text=fake-openai: tool said: 1$' "$g_out"
+    g_out=$(gallery_run document-drafter "bash: $gal_dir && python \$SK/docx/scripts/md_to_docx.py \$SK/docx/scripts/sample.md out.docx --title T >/dev/null && python \$SK/docx/scripts/docx_text.py out.docx | grep -c 'south | 310.35' && python \$SK/pdf/scripts/md_to_pdf.py \$SK/pdf/scripts/sample.md out.pdf --title T >/dev/null && test -s out.pdf && echo docx-and-pdf-produced")
+    printf '     gallery document drafter: %s\n' "$(printf '%s' "$g_out" | tr '\n' ' ' | cut -c1-400)"
+    contains "Document Drafter: the docx and pdf skills produced the files" \
+      '^text=fake-openai: tool said: 1 docx-and-pdf-produced$' "$g_out"
+    g_out=$(gallery_run code-helper "bash: $gal_dir && python \$SK/code-review/scripts/scan.py \$SK/code-review/scripts/sample.py | grep -o '[0-9]* finding' | head -1")
+    printf '     gallery code helper: %s\n' "$(printf '%s' "$g_out" | tr '\n' ' ' | cut -c1-400)"
+    contains "Code Helper: the code-review skill scanned the sample" '^text=fake-openai: tool said: 4 finding$' "$g_out"
 
     # ac-2: a revoked session token cannot call Bifrost (the member left the team; token unexpired).
     psql_kobe "DELETE FROM team_members WHERE team_id = '$E2E_TEAM_ID' AND user_id = '$MODEL_USER_ID';" >/dev/null

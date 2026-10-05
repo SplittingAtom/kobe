@@ -1,8 +1,10 @@
+import Link from "next/link";
 import { useState } from "react";
 import {
   listTeamAgentVersions,
   type AgentVersionSummary,
 } from "../../../../lib/admin/api/team/agent-builder";
+import { percent } from "../../../../lib/admin/orbit-score";
 import { DateTime, ResourceView } from "../../parts";
 import { useMutation, useResource } from "../../use-resource";
 import { ErrorNotice } from "../../error-notice";
@@ -51,6 +53,7 @@ export function VersionHistory({
                     <tr>
                       <th scope="col">Version</th>
                       <th scope="col">Published</th>
+                      <th scope="col">Safety score</th>
                       <th scope="col">
                         <span className={styles.visuallyHidden}>Actions</span>
                       </th>
@@ -73,6 +76,24 @@ export function VersionHistory({
                         </th>
                         <td>
                           <DateTime value={v.publishedAt} />
+                        </td>
+                        <td>
+                          {v.score ? (
+                            <>
+                              {`${percent(v.score.attackSuccessRate)} attacks succeeded (limit ${percent(v.score.threshold)})`}{" "}
+                              <Link
+                                href={`/admin/team/agents/${encodeURIComponent(agentId)}/evals/${encodeURIComponent(v.score.evalId)}`}
+                              >
+                                Report
+                                <span className={styles.visuallyHidden}>
+                                  {" "}
+                                  for version {v.version}
+                                </span>
+                              </Link>
+                            </>
+                          ) : (
+                            "Not evaluated"
+                          )}
                         </td>
                         <td>
                           {canExport && (

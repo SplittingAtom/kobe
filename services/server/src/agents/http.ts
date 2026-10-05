@@ -246,6 +246,11 @@ const PUBLISH_ERRORS = {
     "version_limit_reached",
     "This agent has reached its version limit. Fork it to keep publishing.",
   ],
+  eval_stale: [
+    409,
+    "eval_stale",
+    "The team's tool policy changed while the agent was being evaluated, so the result no longer applies. Publish again to re-run the evaluation.",
+  ],
   invalid_draft: [
     409,
     "invalid_draft",

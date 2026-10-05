@@ -86,6 +86,27 @@ describe("server sandbox configuration", () => {
     });
   });
 
+  it("configures the Orbit eval Job: the chart's orbit-eval image, a deadline and limits (KOBE-93)", () => {
+    expect(sandboxConfig(ms).orbitEval).toEqual({
+      image: "ghcr.io/splittingatom/kobe-orbit-eval:0.1.0",
+      deadlineSeconds: 900,
+      resources: {
+        requests: { cpu: "250m", memory: "512Mi" },
+        limits: { cpu: "1", memory: "2Gi" },
+      },
+    });
+    const tuned = sandboxConfig(
+      render({
+        "sandbox.orbitEval.deadlineSeconds": "300",
+        "sandbox.orbitEval.resources.limits.memory": "3Gi",
+      }),
+    );
+    expect(tuned.orbitEval).toMatchObject({
+      deadlineSeconds: 300,
+      resources: { limits: { memory: "3Gi" } },
+    });
+  });
+
   it("points sandboxes at the release's server, model-gateway shim, MCP proxy and egress proxy", () => {
     const { endpoints } = sandboxConfig(ms);
     for (const [key, component] of [
@@ -365,6 +386,21 @@ describe("sandbox RBAC (least privilege; D11)", () => {
         );
       }
     }
+  });
+
+  it("lets the server run Orbit eval Jobs and read their result, and nothing more (KOBE-93)", () => {
+    const all = rules("ClusterRole", manager);
+    expect(all).toContainEqual({
+      apiGroups: ["batch"],
+      resources: ["jobs"],
+      verbs: ["get", "list", "create", "delete"],
+    });
+    expect(all).toContainEqual({
+      apiGroups: [""],
+      resources: ["configmaps"],
+      verbs: ["create", "patch", "delete"],
+    });
+    expect(all).toContainEqual({ apiGroups: [""], resources: ["pods/log"], verbs: ["get"] });
   });
 
   it("lets the server bind only the manager role, and never delete namespaces", () => {
