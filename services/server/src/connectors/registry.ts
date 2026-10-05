@@ -233,14 +233,18 @@ export async function countTeamsUsing(db: KobeDb, connectorId: string): Promise<
 
 export interface RemovalResult {
   readonly removed: true;
-  /** True when teams still use it: kept as a disabled, hidden row. */
-  readonly soft: boolean;
+  /** Always true: the API never hard-deletes (a hard delete would cascade into team rows). */
+  readonly soft: true;
+  /** Teams that had it enabled when it was removed (informational; may lag a concurrent enable). */
   readonly teams: number;
 }
 
+/**
+ * Removes a connector from the registry by soft delete only: `status=disabled` + `deleted_at`. A
+ * hard delete would cascade into `team_connectors`, and a team enabling the connector concurrently
+ * (KOBE-104) could lose its row. The row is locked, so concurrent removals serialize.
+ */
 export async function removeConnector(db: KobeDb, id: string): Promise<RemovalResult | undefined> {
-  const found = await getConnector(db, id);
-  if (!found) return undefined;
   const usedBy = await countTeamsUsing(db, id);
   return db.transaction(async (tx) => {
     const [row] = await tx
@@ -249,19 +253,14 @@ export async function removeConnector(db: KobeDb, id: string): Promise<RemovalRe
       .where(and(eq(connectors.id, id), live))
       .for("update");
     if (!row) return undefined;
-    const soft = usedBy > 0;
-    if (soft) {
-      await tx
-        .update(connectors)
-        .set({ status: "disabled", deletedAt: sql`now()`, updatedAt: sql`now()` })
-        .where(eq(connectors.id, id));
-    } else {
-      await tx.delete(connectors).where(eq(connectors.id, id));
-    }
+    await tx
+      .update(connectors)
+      .set({ status: "disabled", deletedAt: sql`now()`, updatedAt: sql`now()` })
+      .where(eq(connectors.id, id));
     await recordAudit(tx, {
       action: "mcp.connector.removed",
-      target: { connectorId: id, name: row.name, soft, teams: usedBy },
+      target: { connectorId: id, name: row.name, soft: true, teams: usedBy },
     });
-    return { removed: true as const, soft, teams: usedBy };
+    return { removed: true as const, soft: true as const, teams: usedBy };
   });
 }

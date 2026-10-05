@@ -83,9 +83,10 @@ export function installConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: Aut
     const id = idSchema.safeParse(c.req.param("id"));
     const result = id.success ? await removeConnector(db, id.data) : undefined;
     if (!result) return notFound(c);
-    const message = result.soft
-      ? `Removed from the registry. ${result.teams} team${result.teams === 1 ? "" : "s"} had it enabled, so it is kept disabled: it is offered to no team and its calls are refused.`
-      : "Removed from the registry. No team had it enabled.";
+    const message =
+      result.teams > 0
+        ? `Removed from the registry. ${result.teams} team${result.teams === 1 ? "" : "s"} had it enabled, so it is kept disabled: it is offered to no team and its calls are refused.`
+        : "Removed from the registry. It is kept disabled and its name stays reserved.";
     return c.json({ ...result, message });
   });
 

@@ -191,14 +191,26 @@ describe("edit", () => {
 });
 
 describe("delete", () => {
-  it("removes an unused connector for good", async () => {
+  it("soft-deletes an unused connector too: never a hard delete", async () => {
     const id = (await create({ name: "unused", url: "https://u.example/mcp" })).json.connector.id;
     const res = await root.delete(`${BASE}/${id}`);
     expect(res.status).toBe(200);
-    expect(res.json).toMatchObject({ removed: true, soft: false, teams: 0 });
-    const { rows } = await h.admin.query(`SELECT 1 FROM connectors WHERE id = $1`, [id]);
-    expect(rows).toHaveLength(0);
+    expect(res.json).toMatchObject({ removed: true, soft: true, teams: 0 });
+    const { rows } = await h.admin.query(`SELECT deleted_at FROM connectors WHERE id = $1`, [id]);
+    expect(rows[0].deleted_at).not.toBeNull();
     expect((await root.delete(`${BASE}/${id}`)).status).toBe(404);
+  });
+
+  it("never loses a team's enablement made while the connector is being removed", async () => {
+    const id = (await create({ name: "racy", url: "https://r.example/mcp" })).json.connector.id;
+    const enable = h.admin.query(
+      `INSERT INTO team_connectors (team_id, connector_id, enabled_by) VALUES ($1, $2, $3)`,
+      [teamId, id, aliceId],
+    );
+    const [removal] = await Promise.all([root.delete(`${BASE}/${id}`), enable]);
+    expect(removal.status).toBe(200);
+    const kept = await h.admin.query(`SELECT 1 FROM team_connectors WHERE connector_id = $1`, [id]);
+    expect(kept.rows).toHaveLength(1);
   });
 
   it("keeps a connector teams use as a disabled, hidden row with a clear message", async () => {

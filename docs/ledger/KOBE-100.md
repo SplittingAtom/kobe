@@ -23,13 +23,12 @@ Status: PR open (branch `kobe-100-connector-registry`). Migration `0065_connecto
 - **Edit:** changing the URL clears `tools_snapshot` / `tools_hash` (a different server's tools were
   never reviewed; fail closed until KOBE-101 re-pins). Name uniqueness is checked also across `-`/`_`
   (existing unique indexes back it up).
-- **Delete:** unused connector: row deleted (200 `{removed, soft:false, teams:0, message}`). Used by
-  at least one team: soft delete (`status=disabled`, `deleted_at`), hidden from list/get/patch,
-  `team_connectors` rows kept, message says how many teams had it and that calls are refused
-  (existing `status != active` check in `mcp/catalog.ts`). Its name stays reserved (409
-  `name_removed`). Usage is counted by walking teams with `withTeam` (RLS gives no cross-team read).
-  Race: a team enabling it between the count and the delete is removed by the FK cascade; accepted
-  (KOBE-104 can tighten, e.g. FOR SHARE in enablement).
+- **Delete:** always a soft delete (`status=disabled`, `deleted_at`), never a hard delete: a hard
+  delete cascades into `team_connectors`, and a concurrent team enablement (KOBE-104) would lose its
+  row (Opus review of #98). Hidden from list/get/patch; `team_connectors` rows kept; the message
+  names how many teams had it (counted per team with `withTeam`, informational) and that calls are
+  refused (existing `status != active` check in `mcp/catalog.ts`). The name stays reserved (409
+  `name_removed`). Race test in `connectors.db.test.ts`.
 - **Audit** (install scope, `docs/audit-log.md`): `mcp.connector.registered` (id, name, authKind),
   `.updated` (id, name, changed field names), `.removed` (id, name, soft, teams). Never URL or icon
   (a URL may carry a key in its query), never credentials.
