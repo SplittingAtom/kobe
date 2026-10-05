@@ -156,7 +156,7 @@
             }
           }
         },
-        "description": "With `agent_id`, the thread pins the agent's current published version (D19). Suspended, archived and never-published agents answer 409 `agent_unavailable`.",
+        "description": "With `agent_id`, the thread pins the agent's current published version (D19). Suspended, archived and never-published agents answer 409 `agent_unavailable`. With `test: true` (needs `agent_id`, no project) it is a builder test thread (KOBE-85): it runs the agent's unpublished draft, needs the right to edit the agent (else 404 `agent_not_found`), and stays out of lists, search and Trash.",
         "responses": {
           "201": {
             "description": "The new thread.",
@@ -210,6 +210,94 @@
           },
           "409": {
             "description": "`agent_unavailable`, `no_active_team` or `team_mismatch` (stale tab).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/threads/test": {
+      "delete": {
+        "operationId": "clearTestThreads",
+        "summary": "Clear the caller's builder test threads (KOBE-85), all or one agent's",
+        "description": "Moves them to Trash (hidden from every list); threads with an active or queued run are skipped. Their runs and usage stay for budgets.",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active. Required on changes; must match.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "How many test threads were cleared.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["cleared"],
+                  "properties": {
+                    "cleared": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`, `invalid_cursor` or `team_header_required`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, `forbidden` (team role) or `read_only`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_active_team` or `team_mismatch` (stale tab), or a thread conflict.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2245,6 +2333,9 @@
           "shared_to_project": {
             "type": "boolean"
           },
+          "is_test": {
+            "type": "boolean"
+          },
           "model": {
             "type": ["string", "null"]
           },
@@ -2305,6 +2396,7 @@
           "agent_id",
           "agent_version",
           "shared_to_project",
+          "is_test",
           "model",
           "leaf_entry_id",
           "last_activity_at",
@@ -2402,6 +2494,9 @@
                 "shared_to_project": {
                   "type": "boolean"
                 },
+                "is_test": {
+                  "type": "boolean"
+                },
                 "model": {
                   "type": ["string", "null"]
                 },
@@ -2462,6 +2557,7 @@
                 "agent_id",
                 "agent_version",
                 "shared_to_project",
+                "is_test",
                 "model",
                 "leaf_entry_id",
                 "last_activity_at",
@@ -2567,6 +2663,9 @@
                 "shared_to_project": {
                   "type": "boolean"
                 },
+                "is_test": {
+                  "type": "boolean"
+                },
                 "model": {
                   "type": ["string", "null"]
                 },
@@ -2666,6 +2765,7 @@
                 "agent_id",
                 "agent_version",
                 "shared_to_project",
+                "is_test",
                 "model",
                 "leaf_entry_id",
                 "last_activity_at",
@@ -2767,6 +2867,9 @@
             ]
           },
           "shared_to_project": {
+            "type": "boolean"
+          },
+          "is_test": {
             "type": "boolean"
           },
           "model": {
@@ -2916,6 +3019,7 @@
           "agent_id",
           "agent_version",
           "shared_to_project",
+          "is_test",
           "model",
           "leaf_entry_id",
           "last_activity_at",
@@ -3052,6 +3156,9 @@
                 "type": "null"
               }
             ]
+          },
+          "test": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -3197,6 +3304,9 @@
           "shared_to_project": {
             "type": "boolean"
           },
+          "is_test": {
+            "type": "boolean"
+          },
           "model": {
             "type": ["string", "null"]
           },
@@ -3257,6 +3367,7 @@
           "agent_id",
           "agent_version",
           "shared_to_project",
+          "is_test",
           "model",
           "leaf_entry_id",
           "last_activity_at",

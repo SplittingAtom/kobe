@@ -87,6 +87,12 @@ export const threads = pgTable(
      * `agent_model_not_enabled` instead of silently switching models.
      */
     modelAlias: text(),
+    /**
+     * Builder test pane thread (KOBE-85): chats with the agent's unpublished draft, so
+     * `agent_version` stays null while `agent_id` is set (see `threads_agent_pin`). Kept out of
+     * thread lists, search, Trash, sharing and the inventory's "used" counts; its runs still bill.
+     */
+    isTest: boolean().notNull().default(false),
   },
   // Annotated: threads and thread_entries reference each other (leaf and thread foreign keys).
   (t): PgTableExtraConfigValue[] => [
@@ -131,7 +137,12 @@ export const threads = pgTable(
       .where(sql`${t.installAgentId} IS NOT NULL`),
     check(
       "threads_agent_pin",
-      sql`(${t.agentId} IS NULL) = (${t.agentVersion} IS NULL) AND (${t.agentId} IS NULL) = (${t.agentScope} IS NULL) AND (${t.agentVersion} IS NULL OR ${t.agentVersion} > 0)`,
+      sql`(${t.agentId} IS NULL) = (${t.agentScope} IS NULL) AND ((${t.agentId} IS NULL) = (${t.agentVersion} IS NULL) OR (${t.isTest} AND ${t.agentId} IS NOT NULL AND ${t.agentVersion} IS NULL)) AND (${t.agentVersion} IS NULL OR ${t.agentVersion} > 0)`,
+    ),
+    // A test thread follows a draft, so it is never shared or in a project (KOBE-85).
+    check(
+      "threads_test_private",
+      sql`NOT ${t.isTest} OR (${t.projectId} IS NULL AND NOT ${t.sharedToProject})`,
     ),
     check("threads_last_entry_seq", sql`${t.lastEntrySeq} >= 0`),
     check(

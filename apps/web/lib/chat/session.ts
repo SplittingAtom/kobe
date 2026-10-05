@@ -16,6 +16,8 @@ export interface ChatSessionOptions {
   readonly eventSource?: EventSourceFactory | undefined;
   readonly newKey?: (() => string) | undefined;
   readonly reopenDelayMs?: ((attempt: number) => number) | undefined;
+  /** Builder test pane (KOBE-85): new threads are test threads on this agent's draft. */
+  readonly testAgentId?: string | undefined;
 }
 
 interface Held {
@@ -42,6 +44,10 @@ export function titleFrom(text: string): string | undefined {
 export class ChatSession {
   readonly teamId: string;
   readonly api: ChatApi;
+  /** Set for the builder's test pane: threads it creates run this agent's unpublished draft. */
+  get testAgentId(): string | undefined {
+    return this.#options.testAgentId;
+  }
   readonly #options: ChatSessionOptions;
   readonly #held = new Map<string, Held>();
   /** Title for the thread `initialize` creates next (taken from the message being sent). */

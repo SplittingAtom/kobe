@@ -10,9 +10,10 @@ import {
   encodeActivityCursor,
   type ActivityCursor,
 } from "../threads/cursor.js";
-import { latestPinnedVersion, resolveAgentPin } from "../agents/versions.js";
+import { latestPinnedVersion, resolveAgentPin, resolveDraftPin } from "../agents/versions.js";
 import { canCreateInProject, viewerProjectIds } from "../threads/references.js";
 import {
+  clearTestThreads,
   createThread,
   findThread,
   isLockTimeout,
@@ -31,6 +32,7 @@ import {
   type Viewer,
 } from "../threads/repository.js";
 import {
+  clearTestThreadsQuerySchema,
   createThreadBodySchema,
   entriesQuerySchema,
   listThreadsQuerySchema,
@@ -171,18 +173,37 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     return c.json(pageBody(page));
   });
 
+  // Before `/:id`: clears the caller's own builder test threads (KOBE-85).
+  app.delete("/test", async (c) => {
+    const query = parseQuery(c, clearTestThreadsQuerySchema);
+    if (!query) return invalidRequest(c, "agent_id must be an agent id.");
+    const cleared = await asViewer(c, (tx, viewer) =>
+      clearTestThreads(tx, viewer, { agentId: query.agent_id }),
+    );
+    return c.json({ cleared });
+  });
+
   app.post("/", async (c) => {
     const body = await parseBody(c, createThreadBodySchema);
     if (!body) {
-      return invalidRequest(c, "Give agent_id, project_id, title and model only, as ids/text.");
+      return invalidRequest(c, "Give agent_id, project_id, title, model and test only.");
     }
+    const test = body.test === true;
+    if (test && (!body.agent_id || body.project_id)) {
+      return invalidRequest(c, "A test thread needs an agent_id and has no project.");
+    }
+    const actor = { userId: c.get("user").id, role: c.get("team").role };
     const result = await asViewer(c, async (tx, viewer) => {
       const projectId = body.project_id ?? null;
       if (projectId !== null && !(await canCreateInProject(tx, viewer.userId, projectId))) {
         return "project_not_found" as const;
       }
       // D19: the thread pins the agent's current published version.
-      const pin = await resolveAgentPin(tx, viewer, body.agent_id ?? null);
+      // A test thread (KOBE-85) pins the agent's draft instead: only for those who can edit it.
+      const pin =
+        test && body.agent_id
+          ? await resolveDraftPin(tx, viewer, actor, body.agent_id)
+          : await resolveAgentPin(tx, viewer, body.agent_id ?? null);
       if (!pin.ok) return pin.error;
       const model = body.model ?? null;
       if (model !== null && !(await isModelEnabled(tx, viewer.teamId, model))) {
@@ -193,6 +214,7 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
         ownerUserId: viewer.userId,
         projectId,
         agent: pin.value,
+        isTest: test,
         title: body.title ?? null,
         modelAlias: model,
       });

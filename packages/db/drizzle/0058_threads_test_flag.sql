@@ -1,0 +1,4 @@
+ALTER TABLE "threads" DROP CONSTRAINT "threads_agent_pin";--> statement-breakpoint
+ALTER TABLE "threads" ADD COLUMN "is_test" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "threads" ADD CONSTRAINT "threads_test_private" CHECK (NOT "threads"."is_test" OR ("threads"."project_id" IS NULL AND NOT "threads"."shared_to_project"));--> statement-breakpoint
+ALTER TABLE "threads" ADD CONSTRAINT "threads_agent_pin" CHECK (("threads"."agent_id" IS NULL) = ("threads"."agent_scope" IS NULL) AND (("threads"."agent_id" IS NULL) = ("threads"."agent_version" IS NULL) OR ("threads"."is_test" AND "threads"."agent_id" IS NOT NULL AND "threads"."agent_version" IS NULL)) AND ("threads"."agent_version" IS NULL OR "threads"."agent_version" > 0));

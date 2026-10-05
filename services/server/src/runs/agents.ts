@@ -1,10 +1,29 @@
-import { resolvePinnedAgent } from "../agents/versions.js";
+import { resolveDraftAgent, resolvePinnedAgent } from "../agents/versions.js";
 import { readApprovalFloor, strictestApprovalMode } from "../policy/approval-floor.js";
 import { resolveEffective } from "../resolver/resolve.js";
 import { agentSkills } from "@kobe/agent-file";
 import { bundleRefsFor } from "../skills/materialize.js";
 import { buildResolveInput, loadSkillFacts, loadTeamFacts } from "./resolver-input.js";
+import type { AgentScope, KobeTx } from "@kobe/db";
 import type { RunAgentResolver } from "./seams.js";
+
+/**
+ * A test thread (KOBE-85: agent set, version null; the database allows that only for `is_test`)
+ * runs the agent's draft; every other thread its exact pinned version.
+ */
+function resolveRunAgent(
+  tx: KobeTx,
+  owner: { teamId: string; userId: string },
+  {
+    agentScope,
+    agentId,
+    agentVersion,
+  }: { agentScope: AgentScope; agentId: string; agentVersion: number | null },
+) {
+  return agentVersion === null
+    ? resolveDraftAgent(tx, owner, { agentScope, agentId })
+    : resolvePinnedAgent(tx, owner, { agentScope, agentId, agentVersion });
+}
 
 /**
  * Run-start agent resolution (KOBE-46 seam, D19), inside the run-start transaction under the
@@ -19,18 +38,16 @@ import type { RunAgentResolver } from "./seams.js";
 export const PINNED_AGENTS: RunAgentResolver = {
   async resolve(tx, input) {
     const floor = await readApprovalFloor(tx);
-    if (input.agentId === null || input.agentVersion === null || input.agentScope === null) {
+    if (input.agentId === null || input.agentScope === null) {
       return {
         ok: true,
         agent: null,
         approvalMode: strictestApprovalMode(input.approvalMode, floor),
       };
     }
-    const pinned = await resolvePinnedAgent(
-      tx,
-      { teamId: input.teamId, userId: input.ownerUserId },
-      { agentScope: input.agentScope, agentId: input.agentId, agentVersion: input.agentVersion },
-    );
+    const owner = { teamId: input.teamId, userId: input.ownerUserId };
+    const { agentScope, agentId, agentVersion } = input;
+    const pinned = await resolveRunAgent(tx, owner, { agentScope, agentId, agentVersion });
     if (!pinned.ok) {
       return {
         ok: false,
@@ -75,6 +92,9 @@ export const PINNED_AGENTS: RunAgentResolver = {
       value.skills,
     );
     const config = {
+      ...(pinned.version.definition.prompt.trim() === ""
+        ? {}
+        : { system_prompt: pinned.version.definition.prompt }),
       ...(model ? { model: { alias: value.model as string } } : {}),
       ...(mcpServers.length > 0 ? { mcp_servers: mcpServers } : {}),
       ...(skillBundles.length > 0
@@ -83,7 +103,13 @@ export const PINNED_AGENTS: RunAgentResolver = {
     };
     return {
       ok: true,
-      agent: { agentId: pinned.agent.id, version: pinned.version.version },
+      agent: {
+        agentId: pinned.agent.id,
+        version: pinned.version.version,
+        ...(pinned.version.version === null && pinned.version.draftRevision !== null
+          ? { draftRevision: pinned.version.draftRevision }
+          : {}),
+      },
       approvalMode: strictestApprovalMode(input.approvalMode, value.approvalMode),
       omissions: value.omissions,
       ...(Object.keys(config).length > 0 ? { config } : {}),

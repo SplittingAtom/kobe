@@ -46,6 +46,11 @@ export const createThreadBodySchema = z.strictObject({
   title: titleSchema.optional(),
   /** The thread's model (KOBE-44, D30): an alias the team enabled; null or absent = team default. */
   model: modelAliasSchema.nullable().optional(),
+  /**
+   * A builder test thread (KOBE-85): chats with the agent's unpublished draft (needs `agent_id`
+   * and the right to edit that agent), private to its creator, kept out of lists and search.
+   */
+  test: z.boolean().optional(),
 });
 export type CreateThreadBody = z.infer<typeof createThreadBodySchema>;
 
@@ -103,6 +108,11 @@ export const trashQuerySchema = z.strictObject({
   limit: limitParam(THREAD_PAGE_MAX, THREAD_PAGE_DEFAULT),
 });
 
+export const clearTestThreadsQuerySchema = z.strictObject({
+  /** Only the test threads of this agent; absent = all the caller's test threads. */
+  agent_id: uuidSchema.optional(),
+});
+
 export const entriesQuerySchema = z.strictObject({
   /** Return entries with `seq` greater than this (the previous page's `next_entries_after`). */
   after: z
@@ -128,6 +138,8 @@ export const threadSummarySchema = z.object({
   agent_id: wireUuidSchema.nullable(),
   agent_version: z.number().int().nullable(),
   shared_to_project: z.boolean(),
+  /** A builder test thread (KOBE-85): runs the agent's draft, `agent_version` is null. */
+  is_test: z.boolean(),
   /** The model chosen for the thread (a catalog alias); null = the team's default (KOBE-44). */
   model: z.string().nullable(),
   leaf_entry_id: idSchema.nullable(),

@@ -13,6 +13,7 @@ import {
   threadSearchPageSchema,
   threadSummarySchema,
   trashQuerySchema,
+  clearTestThreadsQuerySchema,
   updateThreadBodySchema,
 } from "../threads/schemas.js";
 
@@ -121,7 +122,10 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         requestBody: body("CreateThreadBody"),
         description:
           "With `agent_id`, the thread pins the agent's current published version (D19). " +
-          "Suspended, archived and never-published agents answer 409 `agent_unavailable`.",
+          "Suspended, archived and never-published agents answer 409 `agent_unavailable`. " +
+          "With `test: true` (needs `agent_id`, no project) it is a builder test thread " +
+          "(KOBE-85): it runs the agent's unpublished draft, needs the right to edit the agent " +
+          "(else 404 `agent_not_found`), and stays out of lists, search and Trash.",
         responses: {
           "201": json("Thread", "The new thread."),
           "404": json("Error", "`agent_not_found` or `project_not_found`."),
@@ -130,6 +134,31 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
             "Error",
             "`agent_unavailable`, `no_active_team` or `team_mismatch` (stale tab).",
           ),
+        },
+      },
+    },
+    "/v1/threads/test": {
+      delete: {
+        operationId: "clearTestThreads",
+        summary: "Clear the caller's builder test threads (KOBE-85), all or one agent's",
+        description:
+          "Moves them to Trash (hidden from every list); threads with an active or queued run " +
+          "are skipped. Their runs and usage stay for budgets.",
+        parameters: [...queryParameters(clearTestThreadsQuerySchema), teamHeader],
+        responses: {
+          "200": {
+            description: "How many test threads were cleared.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["cleared"],
+                  properties: { cleared: { type: "integer", minimum: 0 } },
+                },
+              },
+            },
+          },
+          ...ERROR_RESPONSES,
         },
       },
     },

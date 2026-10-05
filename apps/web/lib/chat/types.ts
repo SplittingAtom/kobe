@@ -23,6 +23,8 @@ export interface ThreadSummary {
   readonly agentId: string | null;
   readonly agentVersion: number | null;
   readonly sharedToProject: boolean;
+  /** A builder test thread (KOBE-85); never in the lists the chat shows. */
+  readonly isTest?: boolean;
   /** The model chosen for the thread (a catalog alias); null = the team's default (KOBE-44). */
   readonly model?: string | null;
   readonly leafEntryId: string | null;

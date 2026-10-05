@@ -4,7 +4,9 @@ import {
   approvalModeSchema,
   errorInfoSchema,
   idSchema,
+  SYSTEM_PROMPT_MAX_BYTES,
   timestampSchema,
+  utf8ByteLength,
   uuidSchema,
 } from "../common.js";
 import { connectorNameSchema } from "../tools.js";
@@ -234,7 +236,13 @@ export const piThreadConfigSchema = z.object({
     .strictObject({ agent_id: uuidSchema, version: z.number().int().positive() })
     .nullable()
     .optional(),
-  system_prompt: z.string().max(100_000).optional(),
+  /** At most `SYSTEM_PROMPT_MAX_BYTES` UTF-8 bytes: the same limit as the agent file's prompt. */
+  system_prompt: z
+    .string()
+    .refine((s) => utf8ByteLength(s) <= SYSTEM_PROMPT_MAX_BYTES, {
+      message: `system_prompt is over ${SYSTEM_PROMPT_MAX_BYTES} bytes`,
+    })
+    .optional(),
   /** Names of the run's effective skills (D22); the bytes are `skill_bundles`. */
   skills: z
     .array(z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/))

@@ -1,4 +1,9 @@
-import { approvalModeSchema, connectorNameSchema, globSchema } from "@kobe/protocol";
+import {
+  approvalModeSchema,
+  connectorNameSchema,
+  globSchema,
+  SYSTEM_PROMPT_MAX_BYTES,
+} from "@kobe/protocol";
 import { z } from "zod";
 
 export { APPROVAL_MODES, type ApprovalMode } from "@kobe/protocol";
@@ -13,7 +18,7 @@ export const AGENT_FILE_LIMITS = {
   /** YAML frontmatter, as uploaded and in canonical form. */
   frontmatterBytes: 16 * 1024,
   /** Body (the system prompt). */
-  promptBytes: 100 * 1024,
+  promptBytes: SYSTEM_PROMPT_MAX_BYTES,
   name: 80,
   role: 300,
   description: 1000,

@@ -77,7 +77,7 @@ export class RunDispatcher {
         config: {
           ...plan.config,
           agent:
-            plan.agent === null
+            plan.agent === null || plan.agent.version === null
               ? null
               : { agent_id: plan.agent.agentId, version: plan.agent.version },
           approval_mode: plan.approvalMode,

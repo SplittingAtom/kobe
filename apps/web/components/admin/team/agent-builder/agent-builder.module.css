@@ -133,3 +133,18 @@
   margin: 0.25rem 0 0;
   padding-left: 1.25rem;
 }
+
+/* Test pane (KOBE-85): the chat on the draft, in a fixed-height frame inside the builder. */
+.testPane {
+  margin: 1.5rem 0;
+}
+
+.testChat {
+  display: flex;
+  flex-direction: column;
+  height: 34rem;
+  max-height: 80vh;
+  border: 1px solid var(--admin-border, #ccc);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
