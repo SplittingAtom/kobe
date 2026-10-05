@@ -61,7 +61,32 @@ describe("prepareInput", () => {
       view: { path: "/workspace/out/x.csv" },
     });
     expect(prepareInput(builtin("share_file"), { path: "~/x" }).ok).toBe(false);
-    expect(prepareInput(builtin("create_artifact"), { anything: 1 }).ok).toBe(true);
+    expect(prepareInput(builtin("remember"), { anything: 1 }).ok).toBe(true);
+  });
+
+  it("checks the artifact tools against the published strict schemas (KOBE-127)", () => {
+    const create = builtin("create_artifact");
+    expect(prepareInput(create, { kind: "svg", title: "T", content: "<svg/>" }).ok).toBe(true);
+    expect(prepareInput(create, { anything: 1 }).ok).toBe(false);
+    expect(prepareInput(create, { kind: "tsx", title: "T", content: "x" }).ok).toBe(false);
+    expect(prepareInput(create, { kind: "markdown", title: "T", content: "x", extra: 1 }).ok).toBe(
+      false,
+    );
+    expect(
+      prepareInput(create, { kind: "markdown", title: "T", content: "x", language: "python" }).ok,
+    ).toBe(false);
+    expect(
+      prepareInput(create, { kind: "code", title: "T", content: "x", language: "python" }).ok,
+    ).toBe(true);
+    expect(
+      prepareInput(create, { kind: "csv", title: "T", content: "a".repeat(512 * 1024 + 1) }).ok,
+    ).toBe(false);
+    const update = builtin("update_artifact");
+    expect(prepareInput(update, { artifact_id: "nope", content: "x" }).ok).toBe(false);
+    expect(
+      prepareInput(update, { artifact_id: "5b1c0f52-8f6e-4a34-9d57-3a6e0c1f2b44", content: "x" })
+        .ok,
+    ).toBe(true);
   });
 
   it("leaves MCP inputs to the MCP proxy's pinned schema", () => {

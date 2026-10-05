@@ -54,11 +54,15 @@ export interface WireTuning {
   readonly byteRatePerSec: number;
   readonly byteBurst: number;
   /** Largest frame, by type, accepted for decoding (checked on the raw bytes first). */
+  /** Concurrent `artifact.put` per connection; more are answered `storage_failed` (busy). */
+  readonly maxPendingArtifactPuts: number;
   readonly frameMaxBytes: {
     /** `pi.event`, `command.result`: up to the protocol cap (4 MiB). */
     readonly bulk: number;
     /** `policy.check`: carries a tool input as executed (a `write` can be large). */
     readonly policyCheck: number;
+    /** `artifact.put` (KOBE-129): an artifact's content, at most 512 KiB plus JSON escaping. */
+    readonly artifactPut: number;
     /** Everything else (`hello`, `ping`, `pi.ui_request`, …). */
     readonly small: number;
   };
@@ -122,9 +126,12 @@ export const WIRE_DEFAULTS: WireTuning = {
   frameMaxBytes: {
     bulk: SANDBOX_MAX_FRAME_BYTES,
     policyCheck: SANDBOX_FRAME_MAX_BYTES_BY_TYPE["policy.check"],
+    artifactPut: SANDBOX_FRAME_MAX_BYTES_BY_TYPE["artifact.put"],
     small: SANDBOX_SMALL_FRAME_MAX_BYTES,
   },
   maxPendingPolicyChecks: 16,
+  /** `artifact.put` frames being stored at once per connection (each holds up to 512 KiB). */
+  maxPendingArtifactPuts: 4,
   runMaxEvents: 100_000,
   runMaxBytes: 256 * 1024 * 1024,
   threadMaxEntries: 50_000,

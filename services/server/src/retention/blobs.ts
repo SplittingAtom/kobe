@@ -21,6 +21,10 @@ import type { ObjectStore } from "../workspace-sync/object-store.js";
  *  - it lies in the purged thread's own tree (`<prefix>teams/<team>/threads/<thread>/`,
  *    `threadKey`); anything else (another thread's, a member's or a workspace's objects) is never
  *    deleted here.
+ * Rows enqueued with a future `enqueued_at` are not due yet: artifact uploads (KOBE-129) are
+ * queued that way before their bytes are written and cleared when their rows commit, so a
+ * crash in between leaves a leftover this pass deletes once it is due, while an upload in
+ * flight is never deleted under the writer.
  * Keys failing the last check are dropped from the queue without touching the bucket. The object
  * delete runs inside the transaction, so an approval of a hold waits for it (bounded: one batch).
  */
@@ -103,6 +107,7 @@ export async function deleteBlobBatchInTx(
   const queued = await tx.execute<{ key: string; thread_id: string }>(sql`
     SELECT q.key, q.thread_id FROM retention_blob_deletions q
      WHERE q.team_id = ${teamId}
+       AND q.enqueued_at <= now()
        AND NOT public.legal_hold_covers(q.team_id, q.owner_user_id)
      ORDER BY q.enqueued_at, q.key
      LIMIT ${limit}

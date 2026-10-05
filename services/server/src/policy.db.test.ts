@@ -22,7 +22,7 @@ import {
 import { TestBrowser, type TestResponse } from "./testing/browser.js";
 import { MemoryMailer } from "./testing/mailer.js";
 import { runWithAuditContext } from "./audit/context.js";
-import { policyInput, type InputOptions } from "./testing/policy-fixtures.js";
+import { SAMPLE_INPUTS, policyInput, type InputOptions } from "./testing/policy-fixtures.js";
 
 const PUBLIC_URL = "http://kobe.test";
 const PASSWORD = "a long enough password";
@@ -88,7 +88,9 @@ function decide(
 ): Promise<PolicyDecision> {
   const descriptor = builtinToolDescriptor(tool);
   if (!descriptor) throw new Error(tool);
-  const base = policyInput(descriptor, input as never, options);
+  // An empty input means "a valid call of this tool" (artifact tools validate their inputs).
+  const effective = Object.keys(input).length === 0 ? (SAMPLE_INPUTS[tool] ?? {}) : input;
+  const base = policyInput(descriptor, effective as never, options);
   return engine.decide({ ...base, team_id: teamId, actor: { ...base.actor, user_id: ids[who] } });
 }
 

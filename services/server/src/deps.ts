@@ -268,6 +268,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     approvals: options.sandboxWire?.approvals ?? approvals.broker,
     background,
     runContext,
+    ...(options.blobs ? { blobs: options.blobs } : {}),
     hooks: {
       async onRunEnded(event) {
         try {

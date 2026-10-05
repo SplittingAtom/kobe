@@ -353,7 +353,7 @@ describe("a policy rule makes the call wait for its user", () => {
 
   it("approve and remember writes a user allow rule for exactly this tool; the next call runs", async () => {
     const w = await world();
-    const first = check(w, "create_artifact", { title: "Q3" });
+    const first = check(w, "create_artifact", { kind: "markdown", title: "Q3", content: "x" });
     const pending = await first.pending();
     expect(
       (
@@ -383,13 +383,19 @@ describe("a policy rule makes the call wait for its user", () => {
     ]);
     expect(must(rows[0], "rule").expires_at).not.toBeNull();
     // Remembered: the next create_artifact runs without asking.
-    expect((await check(w, "create_artifact", { title: "Q4" }).result()).decision).toBe("allow");
+    expect(
+      (await check(w, "create_artifact", { kind: "markdown", title: "Q4", content: "x" }).result())
+        .decision,
+    ).toBe("allow");
     const decidedAudit = (await audits(w.team, "approval.decided"))[0]?.target;
     expect(decidedAudit).toMatchObject({ remember: true, ruleId: expect.any(String) });
     expect((await audits(w.team, "policy.rule.created")).length).toBe(1);
     // A remember-rule never lifts an ask rule.
     await askRule(w, "create_artifact");
-    expect((await check(w, "create_artifact", { title: "Q5" }).pending()).approval_id).toBeTruthy();
+    expect(
+      (await check(w, "create_artifact", { kind: "markdown", title: "Q5", content: "x" }).pending())
+        .approval_id,
+    ).toBeTruthy();
   });
 
   it("a replayed tool_call_id can't ask again in the same run", async () => {

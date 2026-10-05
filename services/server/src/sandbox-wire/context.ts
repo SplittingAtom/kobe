@@ -1,8 +1,9 @@
 import type { ToolRegistry } from "@kobe/protocol";
-import type { KobeDb } from "@kobe/db";
+import type { ARTIFACT_PUT_REFUSALS, KobeDb } from "@kobe/db";
 import type { Logger } from "pino";
 import type { SandboxBus } from "./bus.js";
 import type { WireTuning } from "./constants.js";
+import type { ArtifactPutDeps } from "../artifacts/put.js";
 import type { PolicyCheckDeps } from "./policy-check.js";
 import type { RunLifecycleHooks, SandboxLiveness, SandboxTarget, UiBroker } from "./types.js";
 
@@ -61,6 +62,8 @@ export interface WireContext {
   readonly replicaId: string;
   readonly tools: ToolRegistry;
   readonly policy: PolicyCheckDeps;
+  /** Storage for `artifact.put` (KOBE-129). */
+  readonly artifacts: ArtifactPutDeps;
   readonly ui: UiBroker;
   readonly hooks: RunLifecycleHooks;
   readonly liveness: SandboxLiveness;
@@ -72,6 +75,17 @@ export interface WireContext {
     sandboxId: string,
     violation: LeaseViolation,
     frameType: string,
+  ): void;
+  /** Records `sandbox.artifact_refused` (throttled per user and reason); never carries content. */
+  auditArtifactRefused(
+    target: SandboxTarget,
+    sandboxId: string,
+    refusal: {
+      reason: (typeof ARTIFACT_PUT_REFUSALS)[number];
+      tool: "create_artifact" | "update_artifact";
+      runId: string;
+      toolCallId: string;
+    },
   ): void;
   /** Records `sandbox.token_rejected` (throttled): a signed token refused after verification. */
   auditTokenRejected(

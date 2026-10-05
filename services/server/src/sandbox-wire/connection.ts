@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import {
+  CAPABILITY_ARTIFACTS,
   PI_PINNED_VERSION,
   SANDBOX_CLOSE_CODES,
   decodeSandboxFrame,
+  type ArtifactPutFrame,
   type CommandResultFrame,
   type HelloFrame,
   type PiEventFrame,
@@ -20,6 +22,8 @@ import { UI_DEDUPE_MAX } from "./constants.js";
 import type { LeaseViolation, SandboxLimit, WireContext } from "./context.js";
 import { CommandDelivery, type IssuedCommand } from "./delivery.js";
 import { RunIngest } from "./ingest.js";
+import { AllowedArtifactCalls } from "../artifacts/allowed.js";
+import { putArtifact } from "../artifacts/put.js";
 import { decidePolicyCheck, denyFrame } from "./policy-check.js";
 import type { ConnectionRegistry, RegisteredConnection } from "./registry.js";
 import { activeLeasedRuns, endRunInTx, type InterruptCause } from "./run-state.js";
@@ -82,6 +86,9 @@ export class SandboxConnection implements RegisteredConnection {
   readonly #uiSeen = new Set<string>();
   readonly #policyPending = new Map<string, AbortController>();
   readonly #policyAnswered = new Set<string>();
+  /** Artifact tool calls this connection's policy checks allowed (D-3 of KOBE-55). */
+  readonly #allowedArtifacts = new AllowedArtifactCalls();
+  #artifactPuts = 0;
   readonly #deniedBuckets = new Map<string, { tokens: number; at: number }>();
   readonly #delivery: CommandDelivery;
   #state: State = "hello";
@@ -286,6 +293,7 @@ export class SandboxConnection implements RegisteredConnection {
     const type = FRAME_PREFIX.exec(raw.subarray(0, 64).toString("latin1"))?.[1];
     if (type === "pi.event" || type === "command.result") return raw.length <= max.bulk;
     if (type === "policy.check") return raw.length <= max.policyCheck;
+    if (type === "artifact.put") return raw.length <= max.artifactPut;
     return false;
   }
 
@@ -356,6 +364,9 @@ export class SandboxConnection implements RegisteredConnection {
         return;
       case "policy.check":
         this.#onPolicyCheck(frame);
+        return;
+      case "artifact.put":
+        this.#onArtifactPut(frame);
         return;
       case "command.result":
         this.#onCommandResult(frame);
@@ -467,6 +478,10 @@ export class SandboxConnection implements RegisteredConnection {
       remember(this.#policyAnswered, key, POLICY_ANSWERED_MAX);
       // A run that ended while we decided gets a deny, whatever the decision was.
       const lease = this.#leases.get(frame.run_id);
+      if (result.decision === "allow" && lease && !lease.ended) {
+        // D-3: the artifact input the server allowed, by hash, before the call reaches the sandbox.
+        this.#allowedArtifacts.record(frame.run_id, frame.tool_call_id, frame.tool, frame.input);
+      }
       this.send(
         lease?.ended && result.decision === "allow"
           ? denyFrame(
@@ -478,6 +493,116 @@ export class SandboxConnection implements RegisteredConnection {
           : result,
       );
     });
+  }
+
+  /**
+   * `artifact.put` (KOBE-129, D-3 of KOBE-55). Accepted only if this connection announced the
+   * capability, the run is leased here and active, and this tool call was allowed here for this
+   * tool with the same canonical input hash; the rest (same team and thread, idempotency) is in
+   * `putArtifact`. Every refusal is audited (no content) and answered with `artifact.result`.
+   */
+  #onArtifactPut(frame: ArtifactPutFrame): void {
+    const refuse = (
+      reason: Parameters<WireContext["auditArtifactRefused"]>[2]["reason"],
+      code: "not_allowed" | "not_found",
+      message: string,
+    ) => {
+      this.#ctx.auditArtifactRefused(this.target, this.sandboxId, {
+        reason,
+        tool: frame.tool,
+        runId: frame.run_id,
+        toolCallId: frame.tool_call_id,
+      });
+      this.send({
+        v: 1,
+        type: "artifact.result",
+        request_id: frame.request_id,
+        ok: false,
+        error: { code, message },
+      });
+    };
+    if (!this.hasCapability(CAPABILITY_ARTIFACTS)) {
+      refuse(
+        "capability_missing",
+        "not_allowed",
+        "This sandbox did not announce artifact support.",
+      );
+      return;
+    }
+    const check = this.#checkRun(frame.run_id, frame.thread_id, "artifact.put");
+    if (check === "violation") return;
+    if (check === "ended") {
+      refuse("run_not_active", "not_allowed", "The run has ended, so the artifact was not stored.");
+      return;
+    }
+    const verdict = this.#allowedArtifacts.check(
+      frame.run_id,
+      frame.tool_call_id,
+      frame.tool,
+      frame.input,
+    );
+    if (verdict !== "ok") {
+      refuse(
+        verdict,
+        "not_allowed",
+        verdict === "input_mismatch"
+          ? "The artifact differs from the call that was allowed."
+          : "This tool call was not allowed for this tool.",
+      );
+      return;
+    }
+    if (this.#artifactPuts >= this.#ctx.tuning.maxPendingArtifactPuts) {
+      this.send({
+        v: 1,
+        type: "artifact.result",
+        request_id: frame.request_id,
+        ok: false,
+        error: {
+          code: "storage_failed",
+          message: "Too many artifacts are being stored. Try again.",
+        },
+      });
+      return;
+    }
+    this.#artifactPuts += 1;
+    void putArtifact(this.#ctx.artifacts, this.target, frame)
+      .catch((err: unknown) => {
+        this.log.error({ err }, "artifact.put failed");
+        return {
+          ok: false,
+          code: "storage_failed",
+          message: "The artifact could not be stored. Try again.",
+        } as const;
+      })
+      .then((result) => {
+        this.#artifactPuts -= 1;
+        if (result.ok) {
+          this.send({
+            v: 1,
+            type: "artifact.result",
+            request_id: frame.request_id,
+            ok: true,
+            artifact_id: result.artifactId,
+            version: result.version,
+          });
+          return;
+        }
+        if ("refusal" in result && result.refusal) {
+          this.#ctx.auditArtifactRefused(this.target, this.sandboxId, {
+            reason: result.refusal,
+            tool: frame.tool,
+            runId: frame.run_id,
+            toolCallId: frame.tool_call_id,
+          });
+        }
+        this.send({
+          v: 1,
+          type: "artifact.result",
+          request_id: frame.request_id,
+          ok: false,
+          error: { code: result.code, message: result.message },
+        });
+      });
   }
 
   #onCommandResult(frame: CommandResultFrame): void {

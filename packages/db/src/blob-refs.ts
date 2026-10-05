@@ -25,5 +25,6 @@ export interface BlobRefColumn {
  */
 export const BLOB_REF_COLUMNS: readonly BlobRefColumn[] = [
   { table: "thread_entries", column: "blob_ref", thread: true }, // Pi entry payloads over 64 KB (D15)
+  { table: "artifact_versions", column: "blob_ref", thread: true }, // artifact content (KOBE-129)
   { table: "workspace_files", column: "blob_key" }, // /workspace durable copy (KOBE-27)
 ];

@@ -5,6 +5,7 @@ import { SYSTEM_ACTOR, eq, getMembership, users, withTeam, type KobeDb } from "@
 import { logger as rootLogger } from "../logger.js";
 import { recordAudit, type ServerAuditEvent } from "../audit/record.js";
 import { BackgroundTasks } from "../background.js";
+import type { BlobStore } from "../retention/blobs.js";
 import { createPolicyEngine } from "../policy/engine.js";
 import { createToolRegistry } from "../policy/registry.js";
 import { createDbRuleSource, createDbSettingsSource } from "../policy/rule-store.js";
@@ -41,6 +42,8 @@ export interface SandboxWireOptions {
   /** Run policy inputs incl. the approval-mode floor (`createDbRunContextSource()` in production). */
   readonly runContext: RunPolicyContextSource;
   readonly waker?: SandboxWaker;
+  /** Object storage for `artifact.put` (KOBE-129); unset: artifacts answer `storage_failed`. */
+  readonly blobs?: BlobStore;
   readonly tuning?: Partial<WireTuning>;
   /** Connections one replica accepts. */
   readonly maxConnections?: number;
@@ -209,6 +212,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       runContext: options.runContext,
       runMaxEvents: tuning.runMaxEvents,
     },
+    artifacts: { db, blobs: options.blobs, runMaxEvents: tuning.runMaxEvents },
     ui: options.ui ?? CANCEL_DIALOGS,
     hooks,
     get liveness() {
@@ -231,6 +235,25 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
         teamId: target.teamId,
         target: { sandboxId, userId: target.userId, limit, ...(runId ? { runId } : {}) },
       });
+    },
+    auditArtifactRefused(target, sandboxId, refusal) {
+      throttledAudit(
+        `${target.teamId}:${target.userId}:artifact:${refusal.reason}`,
+        target.teamId,
+        {
+          action: "sandbox.artifact_refused",
+          actor: SYSTEM_ACTOR,
+          teamId: target.teamId,
+          target: {
+            sandboxId,
+            userId: target.userId,
+            reason: refusal.reason,
+            tool: refusal.tool,
+            runId: refusal.runId,
+            toolCallId: refusal.toolCallId,
+          },
+        },
+      );
     },
     auditTokenRejected,
     localResult: (id) => router.onResult(id),

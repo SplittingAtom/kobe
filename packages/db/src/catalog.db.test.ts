@@ -20,6 +20,12 @@ const squash = (text: string | null): string | null =>
 const GRANT = "( SELECT g.%s FROM break_glass_active_grant() g(team_id, user_id, thread_id))";
 const g = (column: string) => GRANT.replace("%s", column);
 
+/** Same shape as thread_entries' for a table keyed by (team_id, thread_id). */
+const threadBound = (table: string) =>
+  `((team_id = ${g("team_id")}) AND (thread_id = COALESCE(${g("thread_id")}, thread_id)) ` +
+  `AND ((${g("user_id")} IS NULL) OR (EXISTS ( SELECT 1 FROM threads t WHERE ((t.team_id = ${table}.team_id) ` +
+  `AND (t.id = ${table}.thread_id) AND (t.owner_user_id = ${g("user_id")}))))))`;
+
 /** The exact `break_glass_read` USING clause per readable table (D10, KOBE-16). */
 const BREAK_GLASS_QUALS: Record<string, string> = {
   threads:
@@ -29,6 +35,8 @@ const BREAK_GLASS_QUALS: Record<string, string> = {
     `((team_id = ${g("team_id")}) AND (thread_id = COALESCE(${g("thread_id")}, thread_id)) ` +
     `AND ((${g("user_id")} IS NULL) OR (EXISTS ( SELECT 1 FROM threads t WHERE ((t.team_id = thread_entries.team_id) ` +
     `AND (t.id = thread_entries.thread_id) AND (t.owner_user_id = ${g("user_id")}))))))`,
+  artifacts: threadBound("artifacts"),
+  artifact_versions: threadBound("artifact_versions"),
 };
 
 /** Schemas Kobe never creates objects in; everything else is scanned. */

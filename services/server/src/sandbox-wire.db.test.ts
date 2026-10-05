@@ -788,7 +788,7 @@ describe("policy.check", () => {
     const sb = await started(w);
     sb.send(check(w, "a", "read", { path: "notes.md" }));
     sb.send(check(w, "b", "rm_everything", {}));
-    sb.send(check(w, "c", "create_artifact", { title: "x" }));
+    sb.send(check(w, "c", "create_artifact", { kind: "markdown", title: "x", content: "x" }));
     const res = (id: string) =>
       sb.until(() => sb.frames("policy.result").find((r) => r.request_id === id));
     expect((await res("a")).decision).toBe("allow");
