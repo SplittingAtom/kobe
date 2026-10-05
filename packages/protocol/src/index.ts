@@ -10,4 +10,5 @@ export * from "./sse.js";
 export * from "./runs.js";
 export * from "./run-orchestrator.js";
 export * from "./session-token.js";
+export * from "./run-token.js";
 export * from "./sandbox-wire/index.js";
