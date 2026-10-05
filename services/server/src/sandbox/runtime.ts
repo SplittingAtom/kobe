@@ -5,6 +5,8 @@ import type { IsolationGate } from "../isolation/gate.js";
 import { loadSandboxConfig, type SandboxSettings, type SessionKeys } from "./config.js";
 import { createKubeClient, type KubeClient } from "./kube.js";
 import { logger } from "../logger.js";
+import type { ReconcileLock } from "./reconcile-lock.js";
+import type { TeamReconcileSummary } from "./team-reconcile.js";
 import { createSandboxProvider, type ReconcileResult, type SandboxProvider } from "./provider.js";
 
 export const RECONCILE_INTERVAL_MS = 60_000;
@@ -12,6 +14,15 @@ export const RECONCILE_INTERVAL_MS = 60_000;
 export interface SandboxRuntime {
   /** Runs the isolation reconciler now and every minute; returns a stop function. */
   startReconciler(onResult: (result: ReconcileResult) => void): () => void;
+  /**
+   * Reconciles every team namespace now and every `intervalMs` (0: only now); one replica at a
+   * time under `lock`. Returns a stop function.
+   */
+  startTeamReconciler(options: {
+    readonly lock: ReconcileLock;
+    readonly intervalMs: number;
+    readonly onSummary?: (summary: TeamReconcileSummary) => void;
+  }): () => void;
   readonly provider: SandboxProvider;
   /** The Kubernetes client the provider uses (Orbit evals create Jobs through it, KOBE-93). */
   readonly kube: KubeClient;
@@ -70,6 +81,28 @@ export function createSandboxRuntime(
       run();
       const timer = setInterval(run, RECONCILE_INTERVAL_MS);
       timer.unref();
+      return () => clearInterval(timer);
+    },
+    startTeamReconciler({ lock, intervalMs, onSummary }) {
+      let running = false;
+      const run = () => {
+        if (running) return;
+        running = true;
+        lock
+          .runExclusive(() => provider.reconcileTeams())
+          .then((outcome) => {
+            if (!outcome.ran)
+              return logger.debug("team namespace reconcile: another replica runs it");
+            onSummary?.(outcome.value);
+          })
+          .catch((err: unknown) => logger.warn({ err }, "team namespace reconcile failed"))
+          .finally(() => {
+            running = false;
+          });
+      };
+      run();
+      const timer = intervalMs > 0 ? setInterval(run, intervalMs) : undefined;
+      timer?.unref();
       return () => clearInterval(timer);
     },
     sessionKeys: config.sessionKeys,
