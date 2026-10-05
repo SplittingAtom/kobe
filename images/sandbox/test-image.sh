@@ -235,6 +235,8 @@ check "the agent refuses to start when it cannot run Pi under its own uid" 'cann
      -e KOBE_SERVER_URL=ws://127.0.0.1:9 -e KOBE_SANDBOX_ID=11111111-1111-4111-8111-111111111111 \
      -e KOBE_PI_RUNAS=$R \"$IMAGE\" 2>&1; true"
 
+check "built-in skills: no compiled .pyc or __pycache__ baked in" '^none$' run sh -c \
+  'f=$(find '$SK' \( -name "*.pyc" -o -name __pycache__ \) | head -3); [ -z "$f" ] && echo none || echo "$f"'
 check "built-in skills: a Pi identity can read but not write them" '^read-ok write-denied$' run_ps sh -c \
   "$R 2000 cat $SK/charts/SKILL.md >/dev/null && printf 'read-ok '; $R 2000 sh -c 'echo x > $SK/charts/x' 2>/dev/null || echo write-denied"
 
