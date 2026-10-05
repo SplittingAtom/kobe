@@ -157,8 +157,8 @@ check "skills directory exists, root-owned" '^0:0$' run stat -c '%u:%g' /opt/kob
 # KOBE-88: built-in gallery skills. Baked read-only (root-owned, no write bit anywhere, so neither
 # the agent, Pi nor a tool uid can change them) and every sample script works with no network.
 SK=/opt/kobe/skills
-check "built-in skills: the six bundles with a matching SKILL.md name" '^ok$' run sh -c \
-  'for n in data-analysis charts docx pdf xlsx code-review; do grep -q "^name: $n\$" '$SK'/$n/SKILL.md || { echo "bad $n"; exit 1; }; done; echo ok'
+check "built-in skills: the seven bundles with a matching SKILL.md name" '^ok$' run sh -c \
+  'for n in data-analysis charts docx pdf xlsx code-review skill-creator; do grep -q "^name: $n\$" '$SK'/$n/SKILL.md || { echo "bad $n"; exit 1; }; done; echo ok'
 check "built-in skills: root-owned, no write bit, nothing writable by uid 1000" '^none$' run sh -c \
   'f=$(find '$SK' \( -not -user 0 -o -not -group 0 -o -perm /222 -o -writable \) | head -3); [ -z "$f" ] && echo none || echo "$f"'
 offline() { docker run "${HARDENED[@]}" --network none --workdir /tmp --entrypoint "$1" "$IMAGE" "${@:2}"; }
@@ -173,6 +173,10 @@ python $S/docx/scripts/docx_text.py s.docx | grep -q "^| south | 310.35 |"
 python $S/pdf/scripts/md_to_pdf.py $S/pdf/scripts/sample.md s.pdf --title T >/dev/null
 python $S/pdf/scripts/pdf_text.py s.pdf | grep -q "Sample report"
 python $S/pdf/scripts/pdf_pages.py m.pdf s.pdf s.pdf:1 | grep -q "2 pages"
+python $S/skill-creator/scripts/init_skill.py demo --dir /tmp/sk --scripts | grep -q "created /tmp/sk/demo/SKILL.md"
+python $S/skill-creator/scripts/validate.py /tmp/sk/demo | grep -q "0 errors"
+python $S/skill-creator/scripts/package.py /tmp/sk/demo --out d.zip | grep -q "Name:         demo"
+python -c "import zipfile; assert zipfile.ZipFile(\"d.zip\").namelist() == [\"SKILL.md\"]"
 python $S/xlsx/scripts/csv_to_xlsx.py $S/xlsx/scripts/sample.csv s.xlsx --total-row >/dev/null
 python $S/xlsx/scripts/xlsx_dump.py s.xlsx --formulas | grep -q "=SUM(D2:D7)"
 python $S/code-review/scripts/scan.py $S/code-review/scripts/sample.py | grep -q "4 finding"

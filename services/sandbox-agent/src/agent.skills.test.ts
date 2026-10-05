@@ -189,8 +189,16 @@ describe("built-in skills", () => {
   const builtinEnv = { KOBE_BUILTIN_SKILLS_DIR: imageSkills };
   const builtin = (names: string[]) => runStart("say:hi", { config: { builtin_skills: names } });
 
-  it("ships the six gallery skills, each a SKILL.md bundle named like its directory", () => {
-    for (const name of ["data-analysis", "charts", "docx", "pdf", "xlsx", "code-review"]) {
+  it("ships the seven gallery skills, each a SKILL.md bundle named like its directory", () => {
+    for (const name of [
+      "data-analysis",
+      "charts",
+      "docx",
+      "pdf",
+      "xlsx",
+      "code-review",
+      "skill-creator",
+    ]) {
       const md = readFileSync(path.join(imageSkills, name, "SKILL.md"), "utf8");
       expect(md).toMatch(new RegExp(`^---\\nname: ${name}\\ndescription: "`));
     }

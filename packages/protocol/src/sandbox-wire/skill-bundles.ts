@@ -65,6 +65,7 @@ export const BUILTIN_SKILL_NAMES = [
   "pdf",
   "xlsx",
   "code-review",
+  "skill-creator",
 ] as const;
 export type BuiltinSkillName = (typeof BUILTIN_SKILL_NAMES)[number];
 
