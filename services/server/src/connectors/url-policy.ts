@@ -31,6 +31,7 @@ export type ConnectorUrlFailure =
   | "invalid_url"
   | "https_required"
   | "credentials_in_url"
+  | "query_in_url"
   | "port_not_allowed"
   | "address_not_allowed"
   | "host_unresolvable";
@@ -57,6 +58,12 @@ export async function checkConnectorUrl(
     return refuse("invalid_url", "That is not a valid URL.");
   }
   if (url.hash !== "") return refuse("invalid_url", "Remove the #fragment from the URL.");
+  if (url.search !== "" || raw.includes("?")) {
+    return refuse(
+      "query_in_url",
+      "Remove the ?query from the URL: credentials belong in per-user grants, not in the registry.",
+    );
+  }
   const https = url.protocol === "https:";
   if (!https && !(url.protocol === "http:" && policy.allowHttp)) {
     return refuse("https_required", "Connector URLs must use https.");

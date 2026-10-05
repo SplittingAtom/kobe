@@ -117,11 +117,13 @@ describe("URL policy", () => {
     ["https://169.254.169.254/latest", "address_not_allowed"],
     ["https://10.0.0.8/mcp", "address_not_allowed"],
     ["https://u:p@mcp.example/mcp", "credentials_in_url"],
+    ["https://mcp.example/mcp?key=sekret", "query_in_url"],
   ])("refuses %s", async (url, code) => {
     const res = await create({ name: `p-${randomUUID().slice(0, 6)}`, url });
     expect(res.status).toBe(422);
     expect(res.json.code).toBe(code);
     expect(JSON.stringify(res.json)).not.toContain("u:p");
+    expect(JSON.stringify(res.json)).not.toContain("sekret");
   });
 
   it("refuses a name that resolves to a private address, on create and on edit", async () => {

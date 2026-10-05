@@ -16,8 +16,8 @@ const policy = (over: Partial<ConnectorUrlPolicy> = {}): ConnectorUrlPolicy => (
 
 describe("checkConnectorUrl", () => {
   it("accepts a public https URL and normalizes it", async () => {
-    const r = await checkConnectorUrl("https://MCP.Example.com/mcp?x=1", policy());
-    expect(r).toEqual({ ok: true, url: "https://mcp.example.com/mcp?x=1" });
+    const r = await checkConnectorUrl("https://MCP.Example.com/mcp", policy());
+    expect(r).toEqual({ ok: true, url: "https://mcp.example.com/mcp" });
   });
 
   it.each([
@@ -26,6 +26,8 @@ describe("checkConnectorUrl", () => {
     ["not a url", "invalid_url"],
     ["https://user:pw@mcp.example.com/mcp", "credentials_in_url"],
     ["https://mcp.example.com/mcp#frag", "invalid_url"],
+    ["https://mcp.example.com/mcp?key=abc", "query_in_url"],
+    ["https://mcp.example.com/mcp?", "query_in_url"],
     ["https://mcp.example.com:8443/mcp", "port_not_allowed"],
   ])("refuses %s", async (url, code) => {
     const r = await checkConnectorUrl(url, policy());

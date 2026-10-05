@@ -13,7 +13,7 @@ Status: PR open (branch `kobe-100-connector-registry`). Migration `0065_connecto
   (partial: name, url, iconUrl, authKind, status), `DELETE /:id`. Strict bodies; unknown keys are 400,
   so `toolsSnapshot` and `toolsHash` cannot be set here (KOBE-101 owns them).
 - **URL policy** (`connectors/url-policy.ts`): https only unless `KOBE_MCP_ALLOW_INSECURE_HTTP=true`
-  (the proxy's dev flag); no userinfo, no fragment; port in `KOBE_MCP_ALLOWED_PORTS` (default 443);
+  (the proxy's dev flag); no userinfo, query or fragment; port in `KOBE_MCP_ALLOWED_PORTS` (default 443);
   literal IPs, and every address a name resolves to, must pass `@kobe/address-policy` with the
   operator's `KOBE_MCP_ALLOWED_INTERNAL_CIDRS` / `KOBE_MCP_DENIED_CIDRS` (private, loopback,
   link-local, metadata, CGNAT and the rest of the shared list are refused). 422 with a code
@@ -51,4 +51,4 @@ Status: PR open (branch `kobe-100-connector-registry`). Migration `0065_connecto
 
 - Small-image upload for icons (spec says "validated URL or uploaded image"): needs an asset store;
   propose a follow-up once an upload pattern exists.
-- Should a URL query string be refused outright (keys in URLs)? Currently allowed, never audited.
+- Query strings and fragments are refused (coordinator, #98); KOBE-108 places API keys as query parameters from per-user grants.
