@@ -12,6 +12,7 @@ import {
   teamAgentVersions,
   teamMembers,
   type AgentScope,
+  type AuditActor,
   type KobeDb,
   type KobeTx,
 } from "@kobe/db";
@@ -46,7 +47,8 @@ import {
 
 export interface AgentVersionSummary {
   readonly version: number;
-  readonly publishedBy: string;
+  /** Null for gallery versions the server published from the repo's definitions (KOBE-87). */
+  readonly publishedBy: string | null;
   readonly publishedAt: Date;
   /** The draft revision published; null for a rollback. */
   readonly draftRevision: number | null;
@@ -195,7 +197,7 @@ async function readVersion(
 interface NewVersion {
   readonly limits: VersionLimits;
   readonly definition: AgentDefinition;
-  readonly publishedBy: string;
+  readonly publishedBy: string | null;
   readonly draftRevision: number | null;
   readonly republishedFrom: number | null;
 }
@@ -259,9 +261,10 @@ async function insertVersion(
   let row: FullRow | undefined;
   let updated: Row | undefined;
   if (location.scope === "team") {
+    if (values.publishedBy === null) throw new Error("team agent versions need a publisher");
     [row] = await tx
       .insert(teamAgentVersions)
-      .values({ ...values, teamId: location.teamId })
+      .values({ ...values, publishedBy: values.publishedBy, teamId: location.teamId })
       .returning(FULL_COLUMNS(teamAgentVersions));
     [updated] = await tx
       .update(teamAgents)
@@ -299,7 +302,9 @@ export async function publishAgent(
   location: AgentLocation,
   id: string,
   input: {
-    readonly publishedBy: string;
+    readonly publishedBy: string | null;
+    /** Audit actor when there is no signed-in request (the gallery seeder, KOBE-87). */
+    readonly actor?: AuditActor;
     readonly expectedRevision: number | undefined;
     readonly limits?: VersionLimits;
   },
@@ -326,6 +331,7 @@ export async function publishAgent(
     if (!inserted.ok) return inserted;
     const published = inserted.value;
     await recordAudit(tx, {
+      ...(input.actor ? { actor: input.actor } : {}),
       action: "agent.published",
       teamId: auditTeam(location),
       target: {

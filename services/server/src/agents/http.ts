@@ -140,6 +140,11 @@ export function agentSummary(agent: AgentRecord, access: AgentAccess) {
     canPublish: access.publish,
     /** Reading the definition is what exporting a version needs (Orbit export, KOBE-91). */
     canExport: access.readDefinition,
+    /** Where a fork came from (KOBE-87); null for agents written from scratch. */
+    forkedFrom:
+      agent.forkedFromAgentId === null
+        ? null
+        : { agentId: agent.forkedFromAgentId, version: agent.forkedFromVersion },
   };
 }
 

@@ -36,6 +36,9 @@ export interface AgentRecord {
   readonly currentVersion: number | null;
   /** Set once an agent with versions is retired (KOBE-46): read-only, no new threads. */
   readonly archivedAt: Date | null;
+  /** Provenance of a fork (KOBE-87): the source agent and the published version copied. */
+  readonly forkedFromAgentId: string | null;
+  readonly forkedFromVersion: number | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
@@ -67,6 +70,8 @@ const columnsOf = (t: typeof teamAgents | typeof installAgents) => ({
   revision: t.revision,
   currentVersion: t.currentVersion,
   archivedAt: t.archivedAt,
+  forkedFromAgentId: t.forkedFromAgentId,
+  forkedFromVersion: t.forkedFromVersion,
   createdAt: t.createdAt,
   updatedAt: t.updatedAt,
 });
@@ -183,6 +188,8 @@ export interface NewAgent {
   /** Audit: how the definition arrived, and the agent it was forked from. */
   readonly source?: AgentSource;
   readonly forkedFrom?: string;
+  /** The published version of `forkedFrom` that was copied (null: it had none). */
+  readonly forkedFromVersion?: number | null;
 }
 
 export async function createAgent(
@@ -207,6 +214,8 @@ export async function createAgent(
         slug,
         frontmatter: input.definition.frontmatter,
         prompt: input.definition.prompt,
+        forkedFromAgentId: input.forkedFrom ?? null,
+        forkedFromVersion: input.forkedFromVersion ?? null,
       };
       const [row] =
         location.scope === "team"
@@ -232,6 +241,7 @@ export async function createAgent(
           slug: row.slug,
           source: input.source ?? "json",
           ...(input.forkedFrom ? { forkedFrom: input.forkedFrom } : {}),
+          ...(input.forkedFromVersion ? { forkedFromVersion: input.forkedFromVersion } : {}),
         },
       });
       return { ok: true, value: toRecord(location.scope, row) };

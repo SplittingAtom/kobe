@@ -1,6 +1,7 @@
 import type { Server } from "node:http";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
+import { seedGalleryAgents } from "./gallery/seed.js";
 import { approvalKeyring } from "./approvals/index.js";
 import { isolationAuditor } from "./audit/isolation.js";
 import { AuditPiiSweeper } from "./audit/pii-sweeper.js";
@@ -101,6 +102,11 @@ if (config.auth && config.smtp) {
     );
   }
 }
+
+// Gallery agents come from definitions in the repo (KOBE-87): seeded at every start, so install and
+// upgrade alike. Idempotent; a broken definition or database fails the start rather than serving a
+// half-seeded gallery.
+if (deps && config.process === "server") await seedGalleryAgents(deps.database.db);
 
 // Spec D4: the process's own isolation check (startup + periodic). Agent work must go through
 // isolation.require(); without a verified gVisor/Kata RuntimeClass the server keeps serving.

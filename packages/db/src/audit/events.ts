@@ -797,13 +797,15 @@ export const AUDIT_EVENTS = {
   // ── agent: definitions (D19); team agents in the team view, personal and gallery install-only ──
   "agent.created": event("any", {
     ...agentRef,
-    source: z.enum(["json", "import", "fork"]),
+    // "seed": a gallery agent created from the repo's definitions at install or upgrade (KOBE-87).
+    source: z.enum(["json", "import", "fork", "seed"]),
     forkedFrom: id.optional(),
+    forkedFromVersion: version.optional(),
   }),
   "agent.updated": event("any", {
     ...agentRef,
     revision: z.number().int().positive(),
-    source: z.enum(["json", "import"]),
+    source: z.enum(["json", "import", "seed"]),
   }),
   "agent.deleted": event("any", agentRef),
   "agent.status_changed": event("any", { ...agentRef, status: z.enum(["active", "suspended"]) }),

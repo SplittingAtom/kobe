@@ -62,6 +62,12 @@ const definitionColumns = () => ({
   archivedAt: timestamp({ withTimezone: true }),
   createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  /**
+   * Provenance of a fork (KOBE-87): the agent and published version this one was copied from.
+   * No foreign key: the source may be a personal agent its owner later deletes. Null otherwise.
+   */
+  forkedFromAgentId: uuid(),
+  forkedFromVersion: integer(),
 });
 
 /** Team table: agents published to a team by its Builders and Team admins (D8, D19). */
@@ -101,6 +107,10 @@ export const teamAgents = pgTable(
       "team_agents_frontmatter_object",
       sql`jsonb_typeof(${t.frontmatter}) = 'object' AND octet_length(${t.frontmatter}::text) <= ${sql.raw(String(FRONTMATTER_MAX_BYTES))}`,
     ),
+    check(
+      "team_agents_fork_version",
+      sql`${t.forkedFromVersion} IS NULL OR (${t.forkedFromAgentId} IS NOT NULL AND ${t.forkedFromVersion} > 0)`,
+    ),
     check("team_agents_revision_positive", sql`${t.revision} > 0`),
     check(
       "team_agents_current_version_positive",
@@ -120,6 +130,12 @@ export const installAgents = pgTable(
     id: uuid().primaryKey().defaultRandom(),
     scope: installAgentScope().notNull(),
     ownerUserId: uuid().references(() => users.id),
+    /**
+     * Gallery agents seeded from the repo (KOBE-87): the definition's key and the hash of what was
+     * last published from it, so a restart seeds nothing and an upgrade publishes one new version.
+     */
+    galleryKey: text(),
+    galleryHash: text(),
     ...definitionColumns(),
   },
   (t): PgTableExtraConfigValue[] => [
@@ -134,6 +150,17 @@ export const installAgents = pgTable(
     uniqueIndex("install_agents_gallery_slug_unique")
       .on(t.slug)
       .where(sql`${t.scope} = 'gallery'`),
+    uniqueIndex("install_agents_gallery_key_unique")
+      .on(t.galleryKey)
+      .where(sql`${t.galleryKey} IS NOT NULL`),
+    check(
+      "install_agents_gallery_key_scope",
+      sql`${t.galleryKey} IS NULL OR ${t.scope} = 'gallery'`,
+    ),
+    check(
+      "install_agents_fork_version",
+      sql`${t.forkedFromVersion} IS NULL OR (${t.forkedFromAgentId} IS NOT NULL AND ${t.forkedFromVersion} > 0)`,
+    ),
     check(
       "install_agents_owner_by_scope",
       sql`(${t.scope} = 'personal') = (${t.ownerUserId} IS NOT NULL)`,
@@ -238,6 +265,8 @@ export const installAgentVersions = pgTable(
   {
     agentId: uuid().notNull(),
     ...versionColumns(),
+    // Null for gallery versions the server published from the repo's definitions (KOBE-87).
+    publishedBy: uuid().references(() => users.id),
   },
   (t): PgTableExtraConfigValue[] => [
     primaryKey({ columns: [t.agentId, t.version] }),

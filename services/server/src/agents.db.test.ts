@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parseAgentFile, serializeAgentFile } from "@kobe/agent-file";
 import { createTestDatabase, testServerUrl, type TestDatabase } from "@kobe/db/testing";
 import { createApp } from "./app.js";
+import { seedGalleryAgents } from "./gallery/seed.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
 import { waitForAppSessionsToClose } from "./testing/app-sessions.js";
 import { RawBody, TestBrowser } from "./testing/browser.js";
@@ -464,20 +465,22 @@ describe("team walls and personal agents (D5, D6, D9)", () => {
 describe("gallery (D19, D21)", () => {
   let galleryId = "";
 
-  it("is curated by install admins only", async () => {
+  it("is seeded from the repo and curated by nobody through the API", async () => {
+    const [seeded] = await seedGalleryAgents(deps.database.db, [
+      { key: "release-notes-writer", file: SPEC_EXAMPLE },
+    ]);
+    galleryId = seeded?.agentId ?? "";
     const plain = await as.bob.post("/v1/install/gallery/agents", definition("Rogue"));
     expect(plain.status).toBe(403);
     const res = await as.installAdmin.post("/v1/install/gallery/agents", markdown(SPEC_EXAMPLE));
-    expect(res.status, JSON.stringify(res.json)).toBe(201);
-    expect(res.json.agent).toMatchObject({ scope: "gallery", ownerUserId: null });
-    galleryId = res.json.agent.id;
+    expect(res.status).toBe(405);
     const list = await as.owner.get("/v1/install/gallery/agents");
     expect(list.json.agents.map((a: { id: string }) => a.id)).toContain(galleryId);
     const exported = await as.installAdmin.get(`/v1/install/gallery/agents/${galleryId}/export`);
     expect(exported.text).toMatch(/^---\nname: Release Notes Writer\n/);
   });
 
-  it("refuses gallery edits, deletes and status changes to non-admins", async () => {
+  it("refuses gallery reads and writes to non-admins on the install route", async () => {
     const base = `/v1/install/gallery/agents/${galleryId}`;
     for (const who of ["alice", "bob", "carol"] as const) {
       expect((await as[who].put(base, definition("X"), ANY)).status).toBe(403);
@@ -522,17 +525,5 @@ describe("gallery (D19, D21)", () => {
       scope: "personal",
     });
     expect(res.status).toBe(403);
-  });
-
-  it("lets install admins suspend, edit and delete gallery agents", async () => {
-    const base = `/v1/install/gallery/agents/${galleryId}`;
-    const suspended = await as.installAdmin.put(`${base}/status`, { status: "suspended" });
-    expect(suspended.json.agent.status).toBe("suspended");
-    const listed = await as.carol.get(`/v1/agents/${galleryId}`);
-    expect(listed.json.agent.status).toBe("suspended");
-    const edited = await as.installAdmin.put(base, definition("Curated"), ANY);
-    expect(edited.json.agent).toMatchObject({ name: "Curated", revision: 2 });
-    expect((await as.installAdmin.delete(base)).status).toBe(204);
-    expect((await as.carol.get(`/v1/agents/${galleryId}`)).status).toBe(404);
   });
 });
