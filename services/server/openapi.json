@@ -2922,6 +2922,20 @@
               }
             ]
           },
+          "agent_name": {
+            "type": ["string", "null"]
+          },
+          "agent_status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["active", "suspended", "archived"]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "agent_current_version": {
             "anyOf": [
               {
@@ -3026,6 +3040,8 @@
           "created_at",
           "deleted_at",
           "purge_after",
+          "agent_name",
+          "agent_status",
           "agent_current_version",
           "agent_model",
           "entries",
