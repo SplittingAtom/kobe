@@ -11,6 +11,10 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
  * Tool use (OpenAI chat API only, KOBE-39 e2e): a last user message `bash: <command>` is answered
  * with a `bash` tool call running `<command>`; once the tool's result comes back (a last message
  * with role `tool`) the reply is `fake-openai: tool said: <the result's text, one line>`.
+ *
+ * System prompt echo (OpenAI chat API only, KOBE-89 e2e): a last user message `system?` is answered
+ * with `fake-openai: system said: <the system/developer messages, one line>`, so a test can see
+ * what agent prompt reached the model.
  */
 export interface SeenRequest {
   readonly method: string;
@@ -38,7 +42,28 @@ function lastUserText(body: unknown): string {
 }
 
 const BASH_PREFIX = "bash: ";
+const SYSTEM_ECHO = "system?";
+const SYSTEM_ECHO_MAX = 40_000;
 const TOOL_ECHO_MAX = 600;
+
+/** The system and developer messages of a chat request as one line (the agent's prompt, KOBE-89). */
+export function systemText(body: unknown): string {
+  const messages = ((body ?? {}) as Record<string, unknown>).messages;
+  if (!Array.isArray(messages)) return "";
+  return messages
+    .filter((m) => m?.role === "system" || m?.role === "developer")
+    .map((m) => {
+      const c = (m as Record<string, unknown>).content;
+      if (typeof c === "string") return c;
+      return Array.isArray(c)
+        ? c.map((p) => ((p as Record<string, unknown>).text as string | undefined) ?? "").join("")
+        : "";
+    })
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, SYSTEM_ECHO_MAX);
+}
 
 /** The last message's text when it is a tool result (OpenAI `role: "tool"`), else undefined. */
 export function lastToolResult(body: unknown): string | undefined {
@@ -313,6 +338,8 @@ export function createFakeLlm(seen: SeenRequest[] = []): Server {
       else if (toolStep) openai(res, "fake-openai: tool step done", stream, model);
       else if (toolResult !== undefined) {
         openai(res, `fake-openai: tool said: ${toolResult}`, stream, model);
+      } else if (text === SYSTEM_ECHO) {
+        openai(res, `fake-openai: system said: ${systemText(body)}`, stream, model);
       } else if (text.startsWith(BASH_PREFIX)) {
         openaiBashCall(res, text.slice(BASH_PREFIX.length), stream, model);
       } else {
