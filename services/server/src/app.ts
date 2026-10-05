@@ -141,7 +141,10 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/install/policy", installPolicyRoutes(deps));
   api.route("/install/users", installUsersRoutes(deps));
   api.route("/install/invites", installInvitesRoutes(deps));
-  api.route("/install/gallery/agents", installGalleryRoutes(deps));
+  api.route(
+    "/install/gallery/agents",
+    installGalleryRoutes(deps, options.evals ? { runner: options.evals } : {}),
+  );
   api.route("/install/audit", installAuditRoutes(deps));
   api.route("/install/egress-ceiling", installEgressRoutes(deps));
   api.route("/install/models", installModelsRoutes(deps));

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, screen, waitFor } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
@@ -214,7 +214,7 @@ const item = (over: Record<string, unknown>) => ({
   lastRunAt: "2026-10-02T10:00:00Z",
   tokens: 1234,
   schedules: null,
-  orbitScore: null,
+  orbitScore: { status: "none", attackSuccessRate: null, at: null },
   canExport: true,
   ...over,
 });
@@ -354,6 +354,87 @@ describe("Agent inventory", () => {
     renderTeam(<TeamAgentsPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Suspend Triage" }));
     expect((await screen.findByRole("alert")).textContent).toMatch(/Only team admins suspend/);
+  });
+});
+
+describe("Orbit scores in the inventory and gallery (KOBE-94)", () => {
+  const scored = (id: string, name: string, orbitScore: Record<string, unknown>) =>
+    item({ id, slug: id, name, orbitScore });
+
+  it("shows each agent's latest score and status", async () => {
+    stubApi({
+      [GALLERY_LIST]: NO_GALLERY,
+      [LIST]: [200, AGENTS],
+      "GET /v1/agents/inventory": [
+        200,
+        {
+          agents: [
+            scored("a-ok", "Okay", {
+              status: "passed",
+              attackSuccessRate: 0.1,
+              at: "2026-10-03T10:00:00Z",
+            }),
+            scored("a-bad", "Bad", {
+              status: "blocked",
+              attackSuccessRate: 0.6,
+              at: "2026-10-03T10:00:00Z",
+            }),
+            scored("a-err", "Broken", {
+              status: "errored",
+              attackSuccessRate: null,
+              at: "2026-10-03T10:00:00Z",
+            }),
+            scored("a-run", "Busy", { status: "evaluating", attackSuccessRate: null, at: null }),
+            scored("a-none", "Fresh", { status: "none", attackSuccessRate: null, at: null }),
+          ],
+          nextCursor: null,
+        },
+      ],
+    });
+    renderTeam(<TeamAgentsPage />);
+    const row = async (name: string) =>
+      (await screen.findByRole("rowheader", { name })).closest("tr") as HTMLElement;
+    expect((await row("Okay")).textContent).toContain("10% (passed)");
+    expect((await row("Bad")).textContent).toContain("60% (blocked)");
+    expect((await row("Broken")).textContent).toContain("Errored");
+    expect((await row("Busy")).textContent).toContain("Evaluating…");
+    expect((await row("Fresh")).textContent).not.toMatch(/passed|blocked|Errored|Evaluating/);
+  });
+
+  it("shows a gallery agent's published score and date, or that it is not evaluated", async () => {
+    const second = { ...GALLERY.agents[0], id: "g-2", slug: "writer", name: "Writer" };
+    stubApi({
+      [GALLERY_LIST]: [200, { agents: [GALLERY.agents[0], second] }],
+      [LIST]: [200, AGENTS],
+      "GET /v1/agents/gallery-scores": [
+        200,
+        {
+          scores: [
+            {
+              agentId: "g-1",
+              version: 1,
+              status: "passed",
+              attackSuccessRate: 0.04,
+              attempts: 25,
+              threshold: 0.2,
+              evaluatedAt: "2026-10-04T09:30:00Z",
+            },
+          ],
+        },
+      ],
+    });
+    renderTeam(<TeamAgentsPage />, { role: "member", permissions: ["team.agents.use"] });
+    const analyst = (await screen.findByRole("rowheader", { name: /Analyst/ })).closest("tr");
+    expect(
+      await within(analyst as HTMLElement).findByText("4% attacks succeeded (passed)"),
+    ).toBeTruthy();
+    expect(
+      within(analyst as HTMLElement)
+        .getByText(/v1,/)
+        .querySelector("time"),
+    ).toBeTruthy();
+    const writer = (await screen.findByRole("rowheader", { name: /Writer/ })).closest("tr");
+    expect(within(writer as HTMLElement).getByText("Not evaluated")).toBeTruthy();
   });
 });
 

@@ -43,7 +43,7 @@ export interface EvalRecord {
   readonly id: string;
   readonly teamId: string;
   readonly agentId: string;
-  readonly agentScope: "team" | "personal";
+  readonly agentScope: "team" | "personal" | "gallery";
   readonly agentSlug: string;
   readonly requestedBy: string;
   readonly draftRevision: number;
@@ -151,7 +151,7 @@ export function setEvalSettings(
 export interface NewEval {
   readonly teamId: string;
   readonly agentId: string;
-  readonly agentScope: "team" | "personal";
+  readonly agentScope: "team" | "personal" | "gallery";
   readonly agentSlug: string;
   readonly requestedBy: string;
   readonly draftRevision: number;

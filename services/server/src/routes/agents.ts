@@ -40,6 +40,7 @@ import {
   type AgentRecord,
 } from "../agents/store.js";
 import { mountEvalRoutes } from "../agents/eval/routes.js";
+import { currentGalleryScores, galleryScoreView } from "../agents/eval/gallery-scores.js";
 import type { EvalRunner } from "../agents/eval/service.js";
 import { mountOrbitExport } from "../agents/orbit/routes.js";
 import { inventoryQuerySchema, listInventory, setInventoryStatus } from "../agents/inventory.js";
@@ -114,6 +115,12 @@ export function agentRoutes(
     if (!query.success) return invalidRequest(c, "Check limit and cursor.");
     const viewer = { teamId: c.get("team").id, userId: c.get("user").id };
     return c.json(await listRunnableAgents(db, viewer, query.data));
+  });
+
+  // Published Orbit scores of gallery agents (KOBE-94): before "/:id".
+  app.get("/gallery-scores", async (c) => {
+    const scores = await currentGalleryScores(db);
+    return c.json({ scores: scores.map(galleryScoreView) });
   });
 
   // Team admins' inventory (KOBE-86): before "/:id" so "inventory" is not read as an id.

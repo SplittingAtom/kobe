@@ -20,6 +20,7 @@ export const agents = defineDomain({
     "install_skills",
     "install_skill_versions",
     "install_skill_scans",
+    "gallery_agent_scores",
   ],
   grants: {
     // Personal and gallery agents (KOBE-45): the server confines personal rows to their owner and
@@ -32,6 +33,8 @@ export const agents = defineDomain({
     install_skill_versions: ["SELECT", "INSERT"],
     // Scans of personal versions (KOBE-80): written with the version, read at run start.
     install_skill_scans: ["SELECT", "INSERT"],
+    // Published gallery scores (KOBE-94): append and read only.
+    gallery_agent_scores: ["SELECT", "INSERT"],
     // The blocklist (KOBE-81): the server lets only install admins add or remove rows (no UPDATE).
     skill_blocklist: ["SELECT", "INSERT", "DELETE"],
   },

@@ -3,7 +3,12 @@
 import Link from "next/link";
 import { useState } from "react";
 import type { AgentSummary } from "../../../lib/admin/api/agents";
-import { forkGalleryAgent, listGalleryAgents } from "../../../lib/admin/api/team/agents";
+import {
+  forkGalleryAgent,
+  listGalleryAgents,
+  listGalleryScores,
+} from "../../../lib/admin/api/team/agents";
+import { GalleryScoreCell } from "../gallery-score";
 import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
@@ -23,6 +28,8 @@ export function GalleryAgents({
   readonly onForked: () => void;
 }) {
   const { state } = useResource(() => listGalleryAgents(teamId));
+  // Scores are secondary: if they can't load, the cards still show.
+  const scores = useResource(() => listGalleryScores(teamId)).state;
   const mutation = useMutation();
   const [forked, setForked] = useState<AgentSummary | null>(null);
 
@@ -64,6 +71,7 @@ export function GalleryAgents({
                   <tr>
                     <th scope="col">Agent</th>
                     <th scope="col">Version</th>
+                    <th scope="col">Orbit score</th>
                     <th scope="col">
                       <span className={styles.visuallyHidden}>Actions</span>
                     </th>
@@ -77,6 +85,9 @@ export function GalleryAgents({
                         {a.description && <div className={styles.hint}>{a.description}</div>}
                       </th>
                       <td>{a.currentVersion === null ? "Draft" : `v${a.currentVersion}`}</td>
+                      <td>
+                        <GalleryScoreCell agentId={a.id} state={scores} />
+                      </td>
                       <td>
                         {canFork && (
                           <button
