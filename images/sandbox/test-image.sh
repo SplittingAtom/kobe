@@ -56,6 +56,60 @@ check "kobe-policy extension: root-owned, read-only, .js only" '^0:0 555 0:0 555
   'd=/opt/kobe/pi-extensions/kobe-policy; echo "$(stat -c "%u:%g %a" ${d%/*}) $(stat -c "%u:%g %a" $d) $(for f in $d/*; do case "$f" in *.js) [ "$(stat -c "%u:%g %a" "$f")" = "0:0 444" ] || echo "bad $f";; *) echo "extra $f";; esac; done; [ -f $d/index.js ] && echo ok)"'
 check "agent accepts the baked kobe-policy file" '^ok$' run node --input-type=module -e \
   'import { checkPolicyExtensionFile as c } from "/opt/kobe/sandbox-agent/dist/policy/extension-file.js"; await c("/opt/kobe/pi-extensions/kobe-policy/index.js"); console.log("ok")'
+check "kobe-tools extension: root-owned, read-only, .js only" '^0:0 555 0:0 555 ok$' run sh -c \
+  'd=/opt/kobe/pi-extensions/kobe-tools; echo "$(stat -c "%u:%g %a" ${d%/*}) $(stat -c "%u:%g %a" $d) $(for f in $d/*; do case "$f" in *.js) [ "$(stat -c "%u:%g %a" "$f")" = "0:0 444" ] || echo "bad $f";; *) echo "extra $f";; esac; done; [ -f $d/index.js ] && echo ok)"'
+check "agent accepts the baked kobe-tools file" '^ok$' run node --input-type=module -e \
+  'import { checkExtensionFile as c } from "/opt/kobe/sandbox-agent/dist/policy/extension-file.js"; await c("/opt/kobe/pi-extensions/kobe-tools/index.js", "kobe-tools"); console.log("ok")'
+check "the image turns kobe-tools on (KOBE_TOOLS_EXTENSION names the baked file)" '^/opt/kobe/pi-extensions/kobe-tools/index.js$' run sh -c 'echo $KOBE_TOOLS_EXTENSION'
+# kobe-tools (KOBE-128) as the agent starts it: fd 3 the policy socket, fd 4 the kobe-tools socket.
+# A scripted model (pi-ai faux provider, in /tmp) calls create_artifact; this script plays kobe-policy
+# (allows) and the agent's end of fd 4 (answers artifact.put), and the tool result must carry the
+# artifact id and version. Without fd 4 (KOBE_TOOLS_FD unset) the tool must not exist.
+KOBE_TOOLS_PROBE='
+const fs = require("node:fs");
+const { spawn } = require("node:child_process");
+const withFd4 = process.argv[1] === "fd4";
+fs.mkdirSync("/tmp/pi-agent", { recursive: true });
+fs.writeFileSync("/tmp/faux.mjs", `import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
+export default function (pi) {
+  const f = fauxProvider({ provider: "kobe-faux", models: [{ id: "scripted" }] });
+  f.setResponses([
+    fauxAssistantMessage(fauxToolCall("create_artifact", { kind: "markdown", title: "T", content: "# hi" }, { id: "ca1" }), { stopReason: "toolUse" }),
+    fauxAssistantMessage("done"),
+  ]);
+  pi.registerProvider(f.provider);
+  const select = async (_e, ctx) => { if (ctx.model?.provider !== "kobe-faux") await pi.setModel(f.getModel()); };
+  pi.on("session_start", select);
+  pi.on("input", select);
+}`);
+const env = { PATH: process.env.PATH, HOME: "/home/kobe", PI_CODING_AGENT_DIR: "/tmp/pi-agent",
+  PI_OFFLINE: "1", PI_TELEMETRY: "0", PI_SKIP_VERSION_CHECK: "1", KOBE_POLICY_FD: "3" };
+if (withFd4) env.KOBE_TOOLS_FD = "4";
+const p = spawn("pi", ["--mode", "rpc", "--no-session", "--no-extensions", "--no-approve", "--no-context-files",
+  "--extension", "/tmp/faux.mjs", "--extension", "/opt/kobe/pi-extensions/kobe-tools/index.js",
+  "--extension", "/opt/kobe/pi-extensions/kobe-policy/index.js"], { cwd: "/workspace", env,
+  stdio: ["pipe", "pipe", "inherit", "pipe", "pipe"] });
+const done = (msg, code) => { console.log(msg); p.kill("SIGKILL"); process.exit(code); };
+setTimeout(() => done("timeout", 1), 60000);
+const lines = (stream, onLine) => { let b = ""; stream.on("data", (d) => { b += d; let i; while ((i = b.indexOf("\n")) >= 0) { onLine(JSON.parse(b.slice(0, i))); b = b.slice(i + 1); } }); };
+lines(p.stdio[3], (m) => {
+  if (m.type === "channel.ready") p.stdin.write(JSON.stringify({ type: "prompt", id: "p", message: "go" }) + "\n");
+  if (m.type === "policy.check") p.stdio[3].write(JSON.stringify({ type: "policy.result", request_id: m.request_id, tool_call_id: m.tool_call_id, decision: "allow", reasons: [] }) + "\n");
+});
+p.stdio[3].write(JSON.stringify({ type: "channel.hello", nonce: "image-test" }) + "\n");
+lines(p.stdio[4], (m) => {
+  if (m.op === "artifact.put" && m.tool === "create_artifact" && m.tool_call_id === "ca1")
+    p.stdio[4].write(JSON.stringify({ id: m.id, ok: true, artifact_id: "7d8e9f0a-1b2c-4d3e-8f4a-5b6c7d8e9f0a", version: 1 }) + "\n");
+});
+lines(p.stdout, (m) => {
+  if (m.type !== "tool_execution_end" || m.toolCallId !== "ca1") return;
+  const text = m.result.content.map((c) => c.text).join("");
+  done((m.isError ? "error " : "ok ") + text, m.isError ? 1 : 0);
+});'
+check "kobe-tools: create_artifact goes through kobe-policy, then fd 4; the result carries artifact_id and version" \
+  '^ok \{"artifact_id":"7d8e9f0a-1b2c-4d3e-8f4a-5b6c7d8e9f0a","version":1\}$' run_ws node -e "$KOBE_TOOLS_PROBE" fd4
+# Fail closed: a Pi without the channel (an agent that does not offer artifacts) has no such tool.
+check "kobe-tools: without fd 4 no artifact tool is registered" '^error ' run_ws node -e "$KOBE_TOOLS_PROBE" nofd4
 # Pi as the agent starts it (lockdown flags, read-only config dir), fd 3 a socket pair: kobe-policy
 # must load, read channel.hello and answer channel.ready with the nonce.
 check "kobe-policy loads into Pi and reports ready over fd 3" '"type":"channel.ready","nonce":"image-test","extension":"kobe-policy"' run_ws node -e '
@@ -202,6 +256,8 @@ check "kobe-runas: the only file with capabilities, setuid+setgid, root:kobe-age
 check "kobe-runas starts a Pi identity: own uid/gid, workspace group, no capabilities, no_new_privs, umask 002" \
   '^uid=2000 gid=2000 groups=1000,2000 caps=0000000000000000/0000000000000000 nnp=1 umask=0002$' run_ps \
   $R 2000 sh -c 'echo "uid=$(id -u) gid=$(id -g) groups=$(id -G | tr " " "\n" | sort -n | paste -sd,) caps=$(awk "/^CapPrm/{p=\$2} /^CapEff/{e=\$2} END{print p \"/\" e}" /proc/self/status) nnp=$(awk "/^NoNewPrivs/{print \$2}" /proc/self/status) umask=$(umask)"'
+check "kobe-runas hands Pi fd 3 (policy) and fd 4 (kobe-tools) and closes everything above" '^open3 open4 closed5 closed6$' run_ps sh -c \
+  "exec 3<>/dev/null 4<>/dev/null 5<>/dev/null 6<>/dev/null; $R 2000 sh -c 'for n in 3 4 5 6; do if [ -e /proc/self/fd/\$n ]; then printf \"open%s \" \$n; else printf \"closed%s \" \$n; fi; done' | sed 's/ \$//'"
 check "kobe-reclaim: root-owned, read-only" '^root:root 555$' run stat -c '%U:%G %a' /opt/kobe/bin/kobe-reclaim
 check "as an identity, a process cannot ptrace or read the memory of its parent (--probe-ptrace)" '^probe=0$' run_ps \
   sh -c "$R 2000 --probe-ptrace; echo probe=\$?"

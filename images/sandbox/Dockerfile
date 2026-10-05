@@ -83,6 +83,11 @@ COPY --from=agent /out/dist/kobe-policy/*.js /opt/kobe/pi-extensions/kobe-policy
 # gateway with the sandbox's session token. Loaded right before kobe-policy; root-owned and
 # read-only; imports node builtins, Pi's own pi-ai and its own files only.
 COPY --from=agent /out/dist/kobe-models/*.js /opt/kobe/pi-extensions/kobe-models/
+# kobe-tools (KOBE-128): the Pi extension that registers create_artifact / update_artifact and talks
+# to the agent over fd 4. Loaded before kobe-policy; root-owned and read-only like it; node builtins
+# and its own files only. The env var turns it on (and the `artifacts` capability with it).
+COPY --from=agent /out/dist/kobe-tools/*.js /opt/kobe/pi-extensions/kobe-tools/
+ENV KOBE_TOOLS_EXTENSION=/opt/kobe/pi-extensions/kobe-tools/index.js
 # Egress for Pi's tools (KOBE-39): the BASH_ENV script that turns the agent's rotating egress
 # token file into HTTPS_PROXY for each bash tool call. Root-owned and read-only: it runs in every
 # tool's shell, so sandbox code must not be able to change it.
@@ -120,8 +125,8 @@ RUN groupadd --gid 1000 kobe \
  && chown -R 0:0 /opt/kobe/pi-extensions /opt/kobe/skills \
  && find /opt/kobe/skills -type d -exec chmod 0555 {} + \
  && find /opt/kobe/skills -type f -exec chmod 0444 {} + \
- && chmod 0444 /opt/kobe/pi-extensions/kobe-policy/*.js /opt/kobe/pi-extensions/kobe-models/*.js \
- && chmod 0555 /opt/kobe/pi-extensions /opt/kobe/pi-extensions/kobe-policy /opt/kobe/pi-extensions/kobe-models \
+ && chmod 0444 /opt/kobe/pi-extensions/kobe-policy/*.js /opt/kobe/pi-extensions/kobe-models/*.js /opt/kobe/pi-extensions/kobe-tools/*.js \
+ && chmod 0555 /opt/kobe/pi-extensions /opt/kobe/pi-extensions/kobe-policy /opt/kobe/pi-extensions/kobe-models /opt/kobe/pi-extensions/kobe-tools \
  && chown kobe:kobe /workspace \
  && find / -xdev -perm /6000 -type f -exec chmod a-s {} + \
  && chown 0:1001 /opt/kobe/bin/kobe-runas && chmod 0750 /opt/kobe/bin/kobe-runas \

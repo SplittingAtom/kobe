@@ -1,4 +1,5 @@
 import {
+  CAPABILITY_ARTIFACTS,
   CAPABILITY_BUILTIN_SKILLS,
   CAPABILITY_SKILL_BUNDLES,
   KOBE_EVENT_DROPPED_TYPE,
@@ -12,6 +13,7 @@ import {
 import type { Config } from "./config.js";
 import type { PiExit, PiRecord } from "./pi/pi-process.js";
 import { PolicyBroker } from "./policy/broker.js";
+import { ArtifactBroker } from "./tools/broker.js";
 import type { SkillStore } from "./skills/store.js";
 import { ThreadManager } from "./threads/manager.js";
 import { fail, type CommandOutcome } from "./threads/outcome.js";
@@ -53,6 +55,11 @@ export interface AgentDeps {
   readonly identities?: PiIdentities | undefined;
   /** Workspace sync (KOBE-27): restore before runs, push after them and before stopping. */
   readonly workspace?: WorkspaceHooks;
+  /**
+   * kobe-tools (KOBE-128): the root-owned extension file, as checked at startup. Present: Pi gets
+   * the fd-4 channel and the agent announces the `artifacts` capability.
+   */
+  readonly toolsExtension?: string | undefined;
   /** Skills store (KOBE-82); absent: runs that list skills fail instead of starting without them. */
   readonly skills?: SkillStore;
 }
@@ -86,6 +93,7 @@ export class Agent {
   readonly #wire: WireClient;
   readonly #threads: ThreadManager;
   readonly #broker: PolicyBroker;
+  readonly #artifacts: ArtifactBroker;
   /** Command ids seen on the current connection (ids are not portable across reconnects). */
   #seenCommands = new Set<string>();
   #queuedExits: { runId: string; frame: PiExitedFrameT }[] = [];
@@ -96,12 +104,14 @@ export class Agent {
     const { config, logger } = deps;
     this.#outbox = new Outbox(config.outboxMaxBytes);
     this.#broker = new PolicyBroker({ send: (frame) => this.#wire.send(frame) });
+    this.#artifacts = new ArtifactBroker({ send: (frame) => this.#wire.send(frame) });
     this.#threads = new ThreadManager({
       bin: config.piBin,
       runtimeDir: config.piRuntimeDir,
       models: deps.models,
       egress: deps.egress,
       policyExtension: config.policyExtension,
+      toolsExtension: deps.toolsExtension,
       ...(deps.extensions === undefined ? {} : { extensions: deps.extensions }),
       ...(deps.policyReadyTimeoutMs === undefined
         ? {}
@@ -130,6 +140,7 @@ export class Agent {
         runEnded: (runId) => {
           this.#outbox.finish(runId);
           this.#broker.failRun(runId, "run ended");
+          this.#artifacts.failRun(runId, "run ended");
           deps.workspace?.runEnded();
         },
         uiRequest: (threadId, runId, request) => {
@@ -151,6 +162,12 @@ export class Agent {
           logger.debug({ thread_id: threadId, reason }, "policy channel closed");
           this.#broker.failThread(threadId, reason);
         },
+        toolsRequest: (threadId, runId, request, reply) =>
+          this.#artifacts.put(threadId, runId, request, reply),
+        toolsChannelClosed: (threadId, reason) => {
+          logger.debug({ thread_id: threadId, reason }, "tools channel closed");
+          this.#artifacts.failThread(threadId, reason);
+        },
         diagnostic: (threadId, message) => logger.debug({ thread_id: threadId }, message),
         warning: (threadId, message) => logger.warn({ thread_id: threadId }, message),
       },
@@ -163,6 +180,7 @@ export class Agent {
       onFrame: (frame) => this.#onFrame(frame),
       onDisconnected: () => {
         this.#broker.failAll("connection to Kobe server lost");
+        this.#artifacts.failAll("connection to Kobe server lost");
         void this.#threads.abortRestores();
       },
       onFatal: (reason) => void this.#onFatal(reason),
@@ -206,6 +224,7 @@ export class Agent {
     const capabilities = [
       ...(this.#deps.skills === undefined ? [] : [CAPABILITY_SKILL_BUNDLES]),
       ...(this.#deps.config.builtinSkillsDir === undefined ? [] : [CAPABILITY_BUILTIN_SKILLS]),
+      ...(this.#deps.toolsExtension === undefined ? [] : [CAPABILITY_ARTIFACTS]),
     ];
     return {
       v: 1,
@@ -270,6 +289,9 @@ export class Agent {
         return;
       case "policy.result":
         this.#broker.onResult(frame);
+        return;
+      case "artifact.result":
+        this.#artifacts.onResult(frame);
         return;
       case "ack":
         this.#outbox.ack(frame.run_id, frame.seq);

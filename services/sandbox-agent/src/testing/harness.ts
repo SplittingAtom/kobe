@@ -55,6 +55,8 @@ export interface HarnessOptions {
    */
   readonly identities?: PiIdentities;
   readonly runtimeDir?: string;
+  /** kobe-tools (KOBE-128): the extension file; absent = no fd 4 and no `artifacts` capability. */
+  readonly toolsExtension?: string;
   /** Skills store (KOBE-82); absent = this sandbox cannot materialize skills. */
   readonly skills?: SkillStore;
 }
@@ -104,6 +106,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     ...(options.models === undefined ? {} : { models: options.models }),
     ...(options.egress === undefined ? {} : { egress: options.egress }),
     ...(options.identities === undefined ? {} : { identities: options.identities }),
+    ...(options.toolsExtension === undefined ? {} : { toolsExtension: options.toolsExtension }),
     ...(options.skills === undefined ? {} : { skills: options.skills }),
     ...(options.workspace === undefined ? {} : { workspace: options.workspace(workspace) }),
     ...(options.policyReadyTimeoutMs === undefined

@@ -32,6 +32,10 @@ async function main(): Promise<void> {
   const checked = {
     ...loaded,
     policyExtension: await checkPolicyExtensionFile(loaded.policyExtension),
+    // Set (the image does) means wanted: a file the sandbox user could edit fails startup.
+    ...(loaded.toolsExtension === undefined
+      ? {}
+      : { toolsExtension: await checkExtensionFile(loaded.toolsExtension, "kobe-tools") }),
   };
   const home = process.env.HOME ?? "/home/kobe";
   // KOBE-71: private by default; what Pi identities must reach (workspace files, session files,
@@ -130,6 +134,7 @@ async function main(): Promise<void> {
     parentEnv: process.env,
     models,
     egress,
+    toolsExtension: checked.toolsExtension,
     onExit: (code) => process.exit(code),
   });
   process.on("exit", () => agent.killAll());

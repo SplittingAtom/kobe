@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { PI_LOCKDOWN_ARGS, POLICY_CHANNEL_FD, buildPiLaunch } from "./pi-launch.js";
+import {
+  PI_LOCKDOWN_ARGS,
+  POLICY_CHANNEL_FD,
+  TOOLS_CHANNEL_FD,
+  buildPiLaunch,
+} from "./pi-launch.js";
 
 const parentEnv = {
   PATH: "/usr/bin",
@@ -12,11 +17,43 @@ const parentEnv = {
 };
 const POLICY = "/opt/kobe/pi-extensions/kobe-policy/index.js";
 const MODELS = "/opt/kobe/pi-extensions/kobe-models/index.js";
+const TOOLS = "/opt/kobe/pi-extensions/kobe-tools/index.js";
 const base = {
   sessionFile: "/s/t.jsonl",
   home: "/home/kobe",
   policyExtension: POLICY,
 };
+
+describe("buildPiLaunch kobe-tools (KOBE-128)", () => {
+  const extensionsOf = (args: readonly string[]) =>
+    args.flatMap((a, i) => (a === "--extension" ? [args[i + 1]] : []));
+
+  it("loads kobe-tools right after kobe-models and before kobe-policy, once, with fd 4", () => {
+    const launch = buildPiLaunch({
+      ...base,
+      parentEnv,
+      modelsExtension: MODELS,
+      toolsExtension: TOOLS,
+      extensions: ["builtin:mcp", TOOLS],
+    });
+    expect(extensionsOf(launch.args)).toEqual(["builtin:mcp", MODELS, TOOLS, POLICY]);
+    expect(TOOLS_CHANNEL_FD).toBe(4);
+    expect(launch.env.KOBE_TOOLS_FD).toBe("4");
+    expect(launch.toolsChannel).toBe(true);
+  });
+
+  it("without it there is no fd 4 and no variable", () => {
+    const launch = buildPiLaunch({ ...base, parentEnv });
+    expect(extensionsOf(launch.args)).toEqual([POLICY]);
+    expect(launch.env.KOBE_TOOLS_FD).toBeUndefined();
+    expect(launch.toolsChannel).toBe(false);
+  });
+
+  it("changes the launch key (a Pi without the tools restarts when they are added)", () => {
+    const without = buildPiLaunch({ ...base, parentEnv }).key;
+    expect(buildPiLaunch({ ...base, parentEnv, toolsExtension: TOOLS }).key).not.toBe(without);
+  });
+});
 
 describe("buildPiLaunch", () => {
   it("runs Pi in RPC mode on the thread's session file, locked down", () => {

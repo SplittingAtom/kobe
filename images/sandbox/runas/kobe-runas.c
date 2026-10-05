@@ -274,9 +274,10 @@ int main(int argc, char **argv) {
   if (probe_mode) return probe_ptrace();
   const int limited = limit_processes();
   if (limited != 0) return limited;
-  /* Only Pi's stdio and its policy socket (fd 3) go on; nothing else the agent might hold. */
-  if (syscall(SYS_close_range, 4U, ~0U, 0U) != 0) {
-    for (int fd = 4; fd < 1024; fd++) close(fd);
+  /* Only Pi's stdio, its policy socket (fd 3) and its kobe-tools socket (fd 4, KOBE-128) go on;
+   * nothing else the agent might hold. */
+  if (syscall(SYS_close_range, 5U, ~0U, 0U) != 0) {
+    for (int fd = 5; fd < 1024; fd++) close(fd);
   }
   execvp(argv[2], argv + 2);
   return fail("exec");

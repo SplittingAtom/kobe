@@ -23,6 +23,16 @@ describe("sandbox-agent loadConfig", () => {
     );
   });
 
+  it("takes the kobe-tools extension (KOBE-128) from KOBE_TOOLS_EXTENSION, absolute, unset = none", () => {
+    const env = { ...base, KOBE_SERVER_URL: "wss://kobe" };
+    expect(loadConfig(env).toolsExtension).toBeUndefined();
+    expect(
+      loadConfig({ ...env, KOBE_TOOLS_EXTENSION: "/opt/kobe/pi-extensions/kobe-tools/index.js" })
+        .toolsExtension,
+    ).toBe("/opt/kobe/pi-extensions/kobe-tools/index.js");
+    expect(() => loadConfig({ ...env, KOBE_TOOLS_EXTENSION: "relative.js" })).toThrow();
+  });
+
   it("takes the skills directory (KOBE-82) from KOBE_SKILLS_DIR, absolute, unset = unsupported", () => {
     const env = { ...base, KOBE_SERVER_URL: "wss://kobe" };
     expect(loadConfig(env).skillsDir).toBeUndefined();
