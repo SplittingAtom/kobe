@@ -6,7 +6,7 @@ import {
   NETWORK_POLICY,
   TEAM_NAMESPACE_PREFIX,
 } from "./constants.js";
-import type { KubeObject, TeamRef } from "./manifests.js";
+import { assertTeamRef, type KubeObject, type TeamRef } from "./manifests.js";
 
 /** Team namespaces converged at once: bounded so a large install does not flood the API server. */
 export const TEAM_RECONCILE_CONCURRENCY = 4;
@@ -54,7 +54,13 @@ export function teamOfNamespace(ns: KubeObject): TeamRef | undefined {
   const id = ns.metadata.labels?.[LABEL_TEAM_ID];
   const name = ns.metadata.name;
   if (!id || !name.startsWith(TEAM_NAMESPACE_PREFIX)) return undefined;
-  return { id, slug: name.slice(TEAM_NAMESPACE_PREFIX.length) };
+  const team = { id, slug: name.slice(TEAM_NAMESPACE_PREFIX.length) };
+  try {
+    assertTeamRef(team);
+  } catch {
+    return undefined; // not a namespace this server created
+  }
+  return team;
 }
 
 /**
@@ -87,8 +93,8 @@ export async function reconcileTeamNamespaces(
       if (before !== after) policyChanged.push(ns.metadata.name);
       converged++;
     } catch (err) {
-      // A namespace deleted mid-run or an invalid team is not a failure worth retrying hard.
-      if (isKubeStatus(err, 404) || err instanceof TypeError) skipped++;
+      // Only a namespace deleted mid-run is skipped; every other error is a failure.
+      if (isKubeStatus(err, 404)) skipped++;
       else {
         failed++;
         options.onFailure?.(ns.metadata.name, err);

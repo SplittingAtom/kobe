@@ -9,6 +9,7 @@ import {
   seedCluster,
 } from "../testing/sandbox-fixtures.js";
 import { EVAL_NETWORK_POLICY, NETWORK_POLICY } from "./constants.js";
+import { reconcileTeamNamespaces } from "./team-reconcile.js";
 import { createSandboxProvider } from "./provider.js";
 import { createPgReconcileLock } from "./reconcile-lock.js";
 
@@ -88,6 +89,24 @@ describe("reconcileTeams (KOBE-115)", () => {
     const ns = must(kube.peek({ apiVersion: "v1", kind: "Namespace", name: NS }));
     kube.seed({ ...ns, metadata: { ...ns.metadata, deletionTimestamp: "2026-10-05T00:00:00Z" } });
     expect(await provider.reconcileTeams()).toMatchObject({ converged: 1, skipped: 1 });
+  });
+
+  it("skips only namespaces that fail validation; a bug is a failure and is logged", async () => {
+    const { kube } = await setup();
+    kube.seed({
+      apiVersion: "v1",
+      kind: "Namespace",
+      metadata: {
+        name: "kobe-team-Bad_Slug",
+        labels: { "kobe.splittingatom.io/team-namespace": "true" },
+      },
+    });
+    const converge = vi.fn(() => Promise.reject(new TypeError("real bug")));
+    const onFailure = vi.fn();
+    const summary = await reconcileTeamNamespaces({ kube, converge, onFailure });
+    expect(summary).toMatchObject({ namespaces: 3, converged: 0, skipped: 1, failed: 2 });
+    expect(onFailure).toHaveBeenCalledTimes(2);
+    expect(onFailure).toHaveBeenCalledWith(NS, expect.any(TypeError));
   });
 
   it("does not run without verified isolation", async () => {

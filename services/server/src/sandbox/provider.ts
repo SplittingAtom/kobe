@@ -41,6 +41,7 @@ import {
   type KubeObject,
   type TeamRef,
 } from "./manifests.js";
+import { logger } from "../logger.js";
 import { reconcileTeamNamespaces, type TeamReconcileSummary } from "./team-reconcile.js";
 import type { SandboxPrincipal } from "./session-token.js";
 
@@ -837,7 +838,12 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
 
   const reconcileTeams = async (): Promise<TeamReconcileSummary> => {
     const verified = await isolation.require();
-    return reconcileTeamNamespaces({ kube, converge: (team) => convergeTeam(team, verified) });
+    return reconcileTeamNamespaces({
+      kube,
+      converge: (team) => convergeTeam(team, verified),
+      onFailure: (namespace, err) =>
+        logger.warn({ namespace, err }, "team namespace reconcile failed"),
+    });
   };
 
   return {
