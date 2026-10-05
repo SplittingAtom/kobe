@@ -17,7 +17,7 @@ the run notice, the tool card and a per-thread artifact list. Built against the 
 - **Frame:** `<iframe src=/v1/artifacts/:id/versions/:n/frame?team=…
 sandbox="allow-scripts allow-forms">`, no `srcdoc`, never `allow-same-origin` (D-7). Page CSP and
   `proxy.ts` untouched (`/v1` is routed to the server by the ingress, so `proxy.ts` never sees it);
-  only a comment in `csp.ts` changed.
+  only a comment in `csp.ts` changed (the "page CSP" test just pins buildCsp; it is not evidence for the criteria).
 - **Mermaid** (`mermaid` ^11, MIT; `pnpm license:check` passes, no exception needed) is loaded on
   demand, rendered with `securityLevel: "strict"` and `htmlLabels: false`, and shown as a `data:`
   image. Reason: the page CSP has no `style-src 'unsafe-inline'`, so an inline `<svg><style>` in the
@@ -51,5 +51,7 @@ sandbox="allow-scripts allow-forms">`, no `srcdoc`, never `allow-same-origin` (D
   "shows html in a sandboxed frame…" (sandbox attrs, src, no srcdoc, CSP of the frame route has
   `script-src 'unsafe-inline'`, `connect-src 'none'`, `default-src 'none'`) and "the page CSP" test.
 - ac-2 (versions and download): "versions and download".
+- Review fixes: panel closes on thread/team change and the list resets; a failed refresh keeps the
+  last good artifact; Mermaid uses a fresh id per run and removes its leftover element on error.
 - ac-3 (reopen from an old thread): "reopening artifacts" and "opening from the run".
 - `pnpm verify`: passes locally (lint, typecheck, test, format, license, hygiene).

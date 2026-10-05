@@ -8,7 +8,8 @@
  * The API and event stream are same-origin (`connect-src 'self'`). Never framed.
  *
  * Not set: `upgrade-insecure-requests` (a plain-HTTP install would break its own requests).
- * KOBE-55 (artifacts in `srcdoc` iframes) revisits `frame-src`.
+ * Artifacts (KOBE-55) are framed from `/v1/artifacts/…/frame` (same origin, its own CSP), so
+ * `frame-src 'self'` is enough; only this comment changed for them.
  */
 export interface CspOptions {
   readonly dev: boolean;

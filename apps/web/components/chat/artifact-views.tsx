@@ -8,7 +8,7 @@
  * route (own CSP, opaque origin). The iframe never gets `allow-same-origin` and never uses `srcdoc`
  * (a `srcdoc` document would inherit the page CSP, which blocks inline scripts).
  */
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   ARTIFACT_FRAME_SANDBOX,
   artifactFrameUrl,
@@ -89,14 +89,17 @@ function CsvTable({ text }: { readonly text: string }) {
 
 /** Mermaid, loaded on demand (it is large); `strict` stops it from running anything in a diagram. */
 function MermaidView({ text, title }: { readonly text: string; readonly title: string }) {
-  const id = `m${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
+  const base = `m${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   const [state, setState] = useState<
     | { readonly status: "loading" }
     | { readonly status: "error" }
     | { readonly status: "ready"; readonly src: string }
   >({ status: "loading" });
+  const runs = useRef(0);
   useEffect(() => {
     let current = true;
+    runs.current += 1;
+    const id = `${base}r${runs.current}`; // fresh per run: mermaid keeps elements by id
     void (async () => {
       try {
         const { default: mermaid } = await import("mermaid");
@@ -113,13 +116,16 @@ function MermaidView({ text, title }: { readonly text: string; readonly title: s
           });
         }
       } catch {
+        // mermaid.render leaves its scratch element in <body> when it fails.
+        document.getElementById(id)?.remove();
+        document.getElementById(`d${id}`)?.remove();
         if (current) setState({ status: "error" });
       }
     })();
     return () => {
       current = false;
     };
-  }, [id, text]);
+  }, [base, text]);
   if (state.status === "loading") return <p role="status">Rendering the diagram…</p>;
   if (state.status === "error") {
     return (

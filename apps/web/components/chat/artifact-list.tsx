@@ -15,10 +15,8 @@ export function ArtifactList({ threadId }: { readonly threadId: string | null })
   const events = useArtifactEventCount();
   const [artifacts, setArtifacts] = useState<readonly ArtifactSummaryView[]>([]);
   useEffect(() => {
-    if (threadId === null) {
-      setArtifacts([]);
-      return;
-    }
+    setArtifacts([]); // never show another thread's artifacts while this one loads
+    if (threadId === null) return;
     let current = true;
     void session.api.listArtifacts(threadId).then((res) => {
       // A failed list only means no shortcuts; the notice and tool card still open artifacts.

@@ -122,7 +122,7 @@ function ChatWorkspace({ session }: { readonly session: ChatSession }) {
   return (
     <AssistantRuntimeProvider aui={aui} runtime={runtime}>
       <RetentionNotice />
-      <ArtifactPanelProvider>
+      <ArtifactPanelProvider scope={`${session.teamId}:${threadId ?? ""}`}>
         <div className={styles.body}>
           <ThreadSidebar listError={listError} onOpenThread={setThreadId} />
           <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>

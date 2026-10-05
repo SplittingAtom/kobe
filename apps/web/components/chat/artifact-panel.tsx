@@ -47,8 +47,23 @@ export function useArtifactPanel(): ArtifactPanelApi | null {
   return useContext(ArtifactPanelContext);
 }
 
-export function ArtifactPanelProvider({ children }: { readonly children: ReactNode }) {
+/**
+ * `scope` identifies what is on screen (team and thread): when it changes the open artifact belongs
+ * to something else, so the panel closes.
+ */
+export function ArtifactPanelProvider({
+  scope,
+  children,
+}: {
+  readonly scope: string;
+  readonly children: ReactNode;
+}) {
   const [request, setRequest] = useState<OpenRequest | null>(null);
+  const [seenScope, setSeenScope] = useState(scope);
+  if (seenScope !== scope) {
+    setSeenScope(scope);
+    setRequest(null);
+  }
   const opener = useRef<Element | null>(null);
   const seq = useRef(0);
   const openArtifact = useCallback((id: string, version?: number) => {
@@ -86,21 +101,25 @@ export function useArtifactEventCount(): number {
   return onTools + notices;
 }
 
-type Detail =
-  | { readonly status: "loading" }
-  | { readonly status: "error"; readonly error: ApiError }
-  | { readonly status: "ready"; readonly artifact: ArtifactDetailView };
+interface Detail {
+  readonly artifact: ArtifactDetailView | null;
+  /** The last load failed: fatal without an artifact, a small notice with one. */
+  readonly error: ApiError | null;
+}
 
 function useArtifactDetail(id: string): Detail {
   const session = useChatSession();
   const events = useArtifactEventCount();
-  const [state, setState] = useState<Detail>({ status: "loading" });
+  const [state, setState] = useState<Detail>({ artifact: null, error: null });
   useEffect(() => {
     let current = true;
     void session.api.getArtifact(id).then((res) => {
       if (!current) return;
-      setState(
-        res.ok ? { status: "ready", artifact: res.data } : { status: "error", error: res.error },
+      // A failed refresh keeps the last good artifact on screen.
+      setState((prev) =>
+        res.ok
+          ? { artifact: res.data, error: null }
+          : { artifact: prev.artifact, error: res.error },
       );
     });
     return () => {
@@ -160,7 +179,7 @@ function PanelContent({
   const panel = useArtifactPanel();
   const detail = useArtifactDetail(id);
   const [pinned, setPinned] = useState<number | null>(initialVersion ?? null);
-  const artifact = detail.status === "ready" ? detail.artifact : null;
+  const artifact = detail.artifact;
   const versions = artifact?.versions.map((v) => v.version) ?? [];
   const latest = artifact?.currentVersion ?? 1;
   const version = pinned !== null && versions.includes(pinned) ? pinned : latest;
@@ -199,8 +218,13 @@ function PanelContent({
         </button>
       </header>
       <div className="min-h-0 flex-1 overflow-auto p-3">
-        {detail.status === "loading" && <p role="status">Loading the artifact…</p>}
-        {detail.status === "error" && <ErrorNotice error={detail.error} />}
+        {!artifact && !detail.error && <p role="status">Loading the artifact…</p>}
+        {detail.error && !artifact && <ErrorNotice error={detail.error} />}
+        {detail.error && artifact && (
+          <p role="alert" className="text-destructive mb-2 text-xs">
+            Could not refresh this artifact; showing the last version loaded.
+          </p>
+        )}
         {artifact && (
           <ArtifactBody key={`${artifact.id}:${version}`} artifact={artifact} version={version} />
         )}

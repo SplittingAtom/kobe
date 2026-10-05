@@ -256,6 +256,53 @@ describe("opening from the run", () => {
   });
 });
 
+describe("switching threads", () => {
+  it("closes the panel and drops the old thread's artifact list at once", async () => {
+    const { t } = threadWith({ kind: "markdown", title: "Plan", versions: ["x"] });
+    const other = fake.addThread("Other");
+    fake.addEntry(other, null, { role: "user", content: "hi" });
+    openApp(fake, t);
+    await openFromList("Plan");
+    window.history.pushState(null, "", `/?thread=${other}`);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Plan" })).toBeNull());
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("navigation", { name: "Artifacts in this conversation" }),
+      ).toBeNull(),
+    );
+  });
+});
+
+describe("a failed refresh", () => {
+  it("keeps the artifact on screen and says the refresh failed", async () => {
+    const t = fake.addThread("Live");
+    const u = fake.addEntry(t, null, { role: "user", content: "q" });
+    fake.addEntry(t, u, { role: "assistant", content: [{ type: "text", text: "a" }] });
+    openApp(fake, t);
+    const user = userEvent.setup();
+    await user.type(await composer(), "go{Enter}");
+    await waitFor(() => expect(fake.activeRun(t)).toBeDefined());
+    const runId = must(fake.activeRun(t)).run_id;
+    await streaming(fake, runId);
+    const id = fake.addArtifact(t, { kind: "markdown", title: "Notes", versions: ["v-one"] });
+    fake.emit(runId, "artifact.created", {
+      artifact_id: id,
+      kind: "markdown",
+      title: "Notes",
+      version: 1,
+    });
+    await user.click(await screen.findByRole("button", { name: "Open artifact: Notes" }));
+    const panel = await screen.findByRole("region", { name: "Notes" });
+    expect(await within(panel).findByText("v-one")).toBeTruthy();
+
+    fake.failNext.set(`GET /v1/artifacts/${id}`, new Response(null, { status: 503 }));
+    fake.emit(runId, "artifact.updated", { artifact_id: id, version: 2 });
+    expect(await within(panel).findByRole("alert")).toBeTruthy();
+    expect(within(panel).getByText("v-one")).toBeTruthy();
+  });
+});
+
 describe("the page CSP", () => {
   it("is not loosened for artifacts: frames from this origin only, no inline scripts", () => {
     const csp = buildCsp("n0nce", { dev: false });
