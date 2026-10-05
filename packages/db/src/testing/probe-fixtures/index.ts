@@ -7,6 +7,7 @@ import { modelsFixtures } from "./models.js";
 import { policyFixtures } from "./policy.js";
 import { sandboxFixtures } from "./sandbox.js";
 import type { ProbeFixture } from "./types.js";
+import { workspaceFixtures } from "./workspace.js";
 
 /**
  * One row-inserting fixture per team table, used by the cross-team probe suite. Typed as a
@@ -21,4 +22,5 @@ export const PROBE_FIXTURES: Readonly<Record<TeamTable, ProbeFixture>> = {
   ...sandboxFixtures,
   ...modelsFixtures,
   ...connectorsFixtures,
+  ...workspaceFixtures,
 };

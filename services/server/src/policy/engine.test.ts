@@ -46,8 +46,8 @@ describe("createPolicyEngine", () => {
   });
 
   it("re-derives the descriptor from the registry, ignoring risk and scope in the input", async () => {
-    // A caller claiming create_artifact is a read-only sandbox tool still gets prompted.
-    const lie: ToolDescriptor = { ...builtin("create_artifact"), risk: "read", scope: "sandbox" };
+    // A caller claiming remember is a read-only sandbox tool still gets prompted.
+    const lie: ToolDescriptor = { ...builtin("remember"), risk: "read", scope: "sandbox" };
     const decision = await createPolicyEngine({ rules: rulesOf([]), now: () => NOW }).decide(
       policyInput(lie),
     );

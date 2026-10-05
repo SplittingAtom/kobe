@@ -6,12 +6,14 @@ import { threadKey, type BlobStore } from "./blobs.js";
 import { logger } from "../logger.js";
 import { entryMarkdown, threadHeader, type ThreadHeading } from "./export-markdown.js";
 import { TRASH_RETENTION_DAYS } from "./periods.js";
+import { artifactExtension, readArtifactBytes } from "../artifacts/serve.js";
 
 /**
  * The user's export of their threads in the active team (spec D18): one zip with
  *  - `sessions/<thread_id>.jsonl`: Pi session format v3 (header line, then every entry in append
  *    order), so Pi can open it as a session file;
  *  - `transcripts/<date>-<title>-<id>.md`: the active branch as Markdown;
+ *  - `artifacts/<artifact id>/v<n>.<ext>`: every version of the thread's artifacts (KOBE-129);
  *  - `threads.json` (index) and `README.md`.
  * Only threads the user owns in this team (Trash included while restorable) — never threads
  * shared with them, never another user's or team's data: every query names the team and the
@@ -219,6 +221,41 @@ async function piEntry(
   };
 }
 
+const ARTIFACT_PAGE = 50;
+
+type ArtifactVersionRow = {
+  readonly artifact_id: string;
+  readonly version: number;
+  readonly blob_ref: string;
+  readonly kind: string;
+  readonly language: string | null;
+};
+
+/** One page of the thread's artifact versions in (artifact, version) order, owner re-checked. */
+async function artifactVersionPage(
+  db: KobeDb,
+  viewer: ExportViewer,
+  threadId: string,
+  after: { artifactId: string; version: number } | null,
+) {
+  const cursor =
+    after === null
+      ? sql.raw("")
+      : sql`AND (v.artifact_id, v.version) > (${after.artifactId}::uuid, ${after.version}::int)`;
+  return withTeam(db, viewer.teamId, async (tx) => {
+    const res = await tx.execute<ArtifactVersionRow>(sql`
+      SELECT v.artifact_id, v.version, v.blob_ref, a.kind, a.language
+        FROM artifact_versions v
+        JOIN artifacts a ON a.team_id = v.team_id AND a.id = v.artifact_id
+        JOIN threads t ON t.team_id = v.team_id AND t.id = v.thread_id
+       WHERE v.team_id = ${viewer.teamId} AND v.thread_id = ${threadId}
+         AND a.team_id = ${viewer.teamId} AND t.team_id = ${viewer.teamId}
+         AND ${OWN_THREADS(viewer)} ${cursor}
+       ORDER BY v.artifact_id, v.version LIMIT ${ARTIFACT_PAGE}`);
+    return res.rows;
+  });
+}
+
 const README = `# Your Kobe conversations
 
 This archive holds the conversations you own in one Kobe team.
@@ -226,6 +263,7 @@ This archive holds the conversations you own in one Kobe team.
 - \`sessions/<thread id>.jsonl\`: each conversation as a Pi session file (session format v3: a
   header line, then every entry, including other branches, in the order they were written).
 - \`transcripts/\`: each conversation's active branch as Markdown.
+- \`artifacts/<artifact id>/v<n>.<ext>\`: every version of the artifacts the assistant made.
 - \`threads.json\`: an index (id, title, dates, file names).
 
 Entries marked \`kobe_unavailable\` had a large body Kobe could not read back from storage.
@@ -307,6 +345,31 @@ export async function* exportZip(
         }
       }
       md.push(new Uint8Array(0), true);
+      let afterVersion: { artifactId: string; version: number } | null = null;
+      for (;;) {
+        const versions = await artifactVersionPage(db, viewer, thread.id, afterVersion);
+        for (const v of versions) {
+          const bytes = blobs
+            ? await readArtifactBytes(blobs, viewer.teamId, thread.id, v.blob_ref).catch(
+                (err: unknown) => {
+                  logger.warn(
+                    { err, teamId: viewer.teamId, threadId: thread.id },
+                    "export: artifact unreadable",
+                  );
+                  return undefined;
+                },
+              )
+            : undefined;
+          const name = `artifacts/${v.artifact_id}/v${v.version}.${artifactExtension(v.kind, v.language)}`;
+          // A missing body is left out of the archive (as an unreadable offloaded entry is marked).
+          if (bytes) file(name).push(new Uint8Array(bytes), true);
+          yield* drain();
+        }
+        if (versions.length < ARTIFACT_PAGE) break;
+        const last = versions.at(-1);
+        afterVersion = last ? { artifactId: last.artifact_id, version: last.version } : null;
+        if (!afterVersion) break;
+      }
       index.push({
         id: thread.id,
         title: thread.title,

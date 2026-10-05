@@ -9,6 +9,8 @@ import type { TeamTable } from "../tenancy.js";
 export const BREAK_GLASS_READABLE_TABLES = [
   "threads",
   "thread_entries",
+  "artifacts",
+  "artifact_versions",
 ] as const satisfies readonly TeamTable[];
 
 export type BreakGlassReadableTable = (typeof BREAK_GLASS_READABLE_TABLES)[number];

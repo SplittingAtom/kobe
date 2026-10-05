@@ -129,6 +129,15 @@ export const SANDBOX_LIMITS = [
   "workspace_file_size",
 ] as const;
 
+/** Why the server refused an `artifact.put` (audit `sandbox.artifact_refused`). */
+export const ARTIFACT_PUT_REFUSALS = [
+  "capability_missing",
+  "run_not_active",
+  "not_allowed",
+  "input_mismatch",
+  "artifact_not_found",
+] as const;
+
 /** A Pi tool call id (`idSchema` in @kobe/protocol): no control characters, ≤ 128. */
 const toolCallId = z
   .string()
@@ -765,6 +774,21 @@ export const AUDIT_EVENTS = {
     userId: id,
     limit: z.enum(SANDBOX_LIMITS),
     runId: id.optional(),
+  }),
+
+  /**
+   * The server refused an `artifact.put` (KOBE-129, D3 of KOBE-55): a connection without the
+   * capability, a run not active here, a tool call it did not allow (or with another input), or an
+   * update of an artifact outside the call's team and thread. Never records content (system;
+   * at most one per 5 minutes per reason and user).
+   */
+  "sandbox.artifact_refused": event("team", {
+    sandboxId: id,
+    userId: id,
+    reason: z.enum(ARTIFACT_PUT_REFUSALS),
+    tool: z.enum(["create_artifact", "update_artifact"]),
+    runId: id.optional(),
+    toolCallId: toolCallId.optional(),
   }),
 
   // ── workspace: the durable S3 copy of each sandbox's /workspace (KOBE-27, D12, D15, D26) ──

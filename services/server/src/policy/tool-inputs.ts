@@ -1,6 +1,6 @@
 import { posix } from "node:path";
 import { z } from "zod";
-import type { JsonObject, ToolDescriptor } from "@kobe/protocol";
+import { artifactToolInputSchema, type JsonObject, type ToolDescriptor } from "@kobe/protocol";
 
 /**
  * Input checks for built-in tools before any rule is evaluated (review KOBE-35 HIGH 1).
@@ -16,8 +16,10 @@ import type { JsonObject, ToolDescriptor } from "@kobe/protocol";
  *    Rules match the canonical path; the call itself runs with the original input (the signed
  *    one). Omitted optional paths (ls, grep, find) match as the cwd.
  *
- * kobe-tools (`create_artifact`, `share_file`, `remember`, …) have no published schema yet
- * (KOBE-55/56): any JSON object passes, except that a string `path` is canonicalised too.
+ * kobe-tools: `create_artifact` / `update_artifact` use the published strict schemas
+ * (`artifactToolInputSchema`, KOBE-127: kinds, title and 512 KiB content caps, `language` only for
+ * code). The others (`share_file`, `remember`, …) have no published schema yet (KOBE-54/56): any
+ * JSON object passes, except that a string `path` is canonicalised too.
  * MCP tools are validated by the MCP proxy against their pinned schema (KOBE-58/59).
  */
 
@@ -49,6 +51,8 @@ export const BUILTIN_INPUT_SCHEMAS: Readonly<Record<string, z.ZodType<unknown>>>
   find: z.strictObject({ pattern: str, path: str.optional(), limit: num.optional() }),
   codemode: z.strictObject({ code: str }),
   tool_search: z.strictObject({ query: str, limit: num.optional() }),
+  create_artifact: artifactToolInputSchema.create_artifact,
+  update_artifact: artifactToolInputSchema.update_artifact,
 };
 
 /** Built-ins whose `path` is a filesystem path, and whether an omitted path means the cwd. */
