@@ -216,9 +216,11 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
     const out = await tool(
       THREAD,
       "4f5a6b7c-8d9e-4f0a-9b1c-2d3e4f5a6b7c",
-      `echo x >> ${file} || mv ${file} ${file}.x || rm -f ${file}`,
+      `echo x >> ${file}; echo append=$?; mv ${file} ${file}.x; echo move=$?; rm -f ${file}; echo remove=$?`,
     );
-    expect(out.code).not.toBe(0);
+    expect(out.stdout).toMatch(/append=[1-9]/);
+    expect(out.stdout).toMatch(/move=[1-9]/);
+    expect(out.stdout).toMatch(/remove=[1-9]/);
     expect(await readFile(file, "utf8")).toBe("P1");
   });
 
