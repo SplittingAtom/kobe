@@ -483,7 +483,7 @@ describe("Agent builder: Orbit eval gate (KOBE-93)", () => {
     await screen.findByText(/Evaluating draft revision 3/);
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(
-      (screen.getByRole("button", { name: "Evaluating…" }) as HTMLButtonElement).disabled,
+      ((await screen.findByRole("button", { name: "Evaluating…" })) as HTMLButtonElement).disabled,
     ).toBe(true);
     // Polls every few seconds: running, then passed.
     for (let i = 0; i < 4 && !screen.queryByText(/Passed: /); i++) {
@@ -559,7 +559,7 @@ describe("Agent builder: Orbit eval gate (KOBE-93)", () => {
     renderTeam(<AgentBuilderPage agentId="a-1" />);
     await screen.findByText(/Evaluating draft revision 3/);
     expect(
-      (screen.getByRole("button", { name: "Evaluating…" }) as HTMLButtonElement).disabled,
+      ((await screen.findByRole("button", { name: "Evaluating…" })) as HTMLButtonElement).disabled,
     ).toBe(true);
   });
 
