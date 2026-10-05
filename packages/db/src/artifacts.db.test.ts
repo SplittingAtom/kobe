@@ -145,6 +145,18 @@ describe("artifact tables", () => {
     expect(other.artifactId).not.toBe(a.artifactId);
   });
 
+  it("keep a version's thread equal to its artifact's, and are immutable", async () => {
+    const t = await team();
+    const a = await artifact(t);
+    const b = await artifact(t);
+    expect(await errorCode(version(t, a.artifactId, b.threadId, a.runId, 2, "x"))).toBe("23503");
+    expect(
+      await errorCode(
+        admin.query(`UPDATE artifact_versions SET blob_ref = 'z' WHERE team_id = $1`, [t]),
+      ),
+    ).toBe("55000");
+  });
+
   it("go with their thread (cascade) and never reach another team", async () => {
     const t = await team();
     const u = await team();

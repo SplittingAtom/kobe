@@ -29,6 +29,7 @@ CREATE TABLE "artifacts" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "artifacts_team_id_id_pk" PRIMARY KEY("team_id","id"),
+	CONSTRAINT "artifacts_team_id_thread" UNIQUE("team_id","id","thread_id"),
 	CONSTRAINT "artifacts_kind" CHECK ("artifacts"."kind" IN ('html', 'svg', 'markdown', 'mermaid', 'code', 'csv')),
 	CONSTRAINT "artifacts_title_length" CHECK (char_length("artifacts"."title") BETWEEN 1 AND 200),
 	CONSTRAINT "artifacts_language" CHECK ("artifacts"."language" IS NULL OR ("artifacts"."kind" = 'code' AND "artifacts"."language" ~ '^[a-z0-9][a-z0-9+#.-]{0,31}$')),
@@ -36,7 +37,7 @@ CREATE TABLE "artifacts" (
 );
 --> statement-breakpoint
 ALTER TABLE "artifact_versions" ADD CONSTRAINT "artifact_versions_team_id_teams_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."teams"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "artifact_versions" ADD CONSTRAINT "artifact_versions_artifact_fk" FOREIGN KEY ("team_id","artifact_id") REFERENCES "public"."artifacts"("team_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "artifact_versions" ADD CONSTRAINT "artifact_versions_artifact_fk" FOREIGN KEY ("team_id","artifact_id","thread_id") REFERENCES "public"."artifacts"("team_id","id","thread_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "artifact_versions" ADD CONSTRAINT "artifact_versions_thread_fk" FOREIGN KEY ("team_id","thread_id") REFERENCES "public"."threads"("team_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "artifact_versions" ADD CONSTRAINT "artifact_versions_run_fk" FOREIGN KEY ("team_id","run_id") REFERENCES "public"."runs"("team_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "artifacts" ADD CONSTRAINT "artifacts_team_id_teams_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."teams"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint

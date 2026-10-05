@@ -1,6 +1,6 @@
 {
-  "id": "9344e745-b7cb-43cb-a6f9-e5e90db3b34f",
-  "prevId": "5df56012-1716-46ea-b0bd-3378677658ae",
+  "id": "365e62c9-3d0c-474e-9915-21f53b45f6ea",
+  "prevId": "6897530e-c27a-4042-a6c3-290d285667fb",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -10078,12 +10078,14 @@
           "tableFrom": "artifact_versions",
           "columnsFrom": [
             "team_id",
-            "artifact_id"
+            "artifact_id",
+            "thread_id"
           ],
           "tableTo": "artifacts",
           "columnsTo": [
             "team_id",
-            "id"
+            "id",
+            "thread_id"
           ],
           "onUpdate": "no action",
           "onDelete": "cascade"
@@ -10314,7 +10316,17 @@
           ]
         }
       },
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "artifacts_team_id_thread": {
+          "name": "artifacts_team_id_thread",
+          "columns": [
+            "team_id",
+            "id",
+            "thread_id"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
       "policies": {},
       "checkConstraints": {
         "artifacts_kind": {

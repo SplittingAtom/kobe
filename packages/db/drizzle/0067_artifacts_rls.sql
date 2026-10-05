@@ -68,3 +68,15 @@ CREATE TRIGGER "artifact_versions_legal_hold" AFTER DELETE ON "artifact_versions
   FOR EACH STATEMENT EXECUTE FUNCTION "public"."artifact_versions_legal_hold_guard"();--> statement-breakpoint
 CREATE TRIGGER "artifact_versions_legal_hold_truncate" BEFORE TRUNCATE ON "artifact_versions"
   FOR EACH STATEMENT EXECUTE FUNCTION "public"."legal_hold_refuse_truncate"();
+--> statement-breakpoint
+
+-- Versions are immutable (KOBE-129 review): content, hash and thread never change after the write
+-- (team_id is left to RLS and the foreign keys, as for every team table).
+CREATE FUNCTION "public"."artifact_versions_immutable"() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
+BEGIN
+  RAISE EXCEPTION 'artifact versions are immutable' USING ERRCODE = '55000';
+END;
+$$;--> statement-breakpoint
+CREATE TRIGGER "artifact_versions_immutable" BEFORE UPDATE OF "artifact_id", "version", "thread_id", "blob_ref", "size_bytes", "sha256", "run_id", "tool_call_id", "created_at" ON "artifact_versions"
+  FOR EACH ROW EXECUTE FUNCTION "public"."artifact_versions_immutable"();

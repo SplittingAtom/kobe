@@ -30,11 +30,12 @@ import { artifactBlobKey } from "./keys.js";
  *
  * Order: read-only checks, upload the bytes (key derived here), then one transaction that writes
  * the rows and appends `artifact.created` / `artifact.updated` to the run's stream. An upload
- * orphaned by a refusal or a lost race is deleted again (best effort; retention deletes the
- * thread's whole tree anyway).
+ * orphaned by a refusal or a lost race is deleted again (best effort). The key is queued in
+ * `retention_blob_deletions` (due in an hour) before the upload and cleared in the row-writing
+ * transaction, so bytes left by a crash or a failed discard are deleted by the retention pass.
  */
 
-export type PutRefusal = "run_not_active" | "artifact_not_found";
+export type PutRefusal = "run_not_active" | "artifact_not_found" | "not_allowed";
 
 export type PutResult =
   | { readonly ok: true; readonly artifactId: string; readonly version: number }
@@ -70,6 +71,11 @@ const RUN_ENDED = fail(
   "The run has ended, so the artifact was not stored.",
   "run_not_active",
 );
+const OTHER_RUN = fail(
+  "not_allowed",
+  "This tool call id was already used by another run.",
+  "not_allowed",
+);
 const NOT_FOUND = fail("not_found", "No such artifact in this conversation.", "artifact_not_found");
 
 class RunEndedError extends Error {}
@@ -95,7 +101,11 @@ async function runActive(tx: KobeTx, target: PutTarget, frame: ArtifactPutFrame)
 
 async function existingResult(tx: KobeTx, teamId: string, toolCallId: string) {
   const [row] = await tx
-    .select({ artifactId: artifactVersions.artifactId, version: artifactVersions.version })
+    .select({
+      artifactId: artifactVersions.artifactId,
+      version: artifactVersions.version,
+      runId: artifactVersions.runId,
+    })
     .from(artifactVersions)
     .where(and(eq(artifactVersions.teamId, teamId), eq(artifactVersions.toolCallId, toolCallId)));
   return row;
@@ -185,6 +195,8 @@ async function writeRows(
     runId: frame.run_id,
     toolCallId: frame.tool_call_id,
   });
+  await tx.execute(sql`
+    DELETE FROM retention_blob_deletions WHERE team_id = ${teamId} AND key = ${stored.blobRef}`);
   await appendEvent(tx, deps, teamId, frame, call, stored.artifactId, version, title);
   return { artifactId: stored.artifactId, version };
 }
@@ -243,6 +255,32 @@ async function discard(blobs: BlobStore, key: string): Promise<void> {
   }
 }
 
+/** The first result of an applied call, only to the run that made it. */
+function replay(
+  prior: { artifactId: string; version: number; runId: string },
+  frame: ArtifactPutFrame,
+): PutResult {
+  if (prior.runId !== frame.run_id) return OTHER_RUN;
+  return { ok: true, artifactId: prior.artifactId, version: prior.version };
+}
+
+/** Queues the key for deletion, not due for an hour: removed again when its rows commit. */
+const PENDING_GRACE = sql.raw(`interval '1 hour'`);
+
+async function markPending(
+  deps: ArtifactPutDeps,
+  target: PutTarget,
+  threadId: string,
+  key: string,
+): Promise<void> {
+  await withTeam(deps.db, target.teamId, (tx) =>
+    tx.execute(sql`
+      INSERT INTO retention_blob_deletions (team_id, key, thread_id, owner_user_id, enqueued_at)
+      VALUES (${target.teamId}, ${key}, ${threadId}, ${target.userId}, now() + ${PENDING_GRACE})
+      ON CONFLICT (team_id, key) DO NOTHING`),
+  );
+}
+
 export async function putArtifact(
   deps: ArtifactPutDeps,
   target: PutTarget,
@@ -267,7 +305,7 @@ export async function putArtifact(
     }
     return {} as const;
   });
-  if ("prior" in pre && pre.prior) return { ok: true, ...pre.prior };
+  if ("prior" in pre && pre.prior) return replay(pre.prior, frame);
   if ("refused" in pre && pre.refused) return pre.refused;
 
   // 2. Upload under a server-derived key.
@@ -278,6 +316,8 @@ export async function putArtifact(
     return fail("storage_failed", "Artifact storage is not available.");
   }
   try {
+    // Before the bytes exist: a crash anywhere after this leaves a queued key for retention.
+    await markPending(deps, target, frame.thread_id, key);
     await blobs.objects.put(key, Readable.from([bytes]), bytes.length);
   } catch (err) {
     logger.error({ err, team_id: teamId }, "artifact upload failed");
@@ -297,7 +337,15 @@ export async function putArtifact(
     );
     return { ok: true, ...written };
   } catch (err) {
-    await discard(blobs, key);
+    // Only an error raised inside the transaction is a definite rollback. Anything else (a
+    // failed or ambiguous COMMIT) may have committed the row: keep the object, and leave the
+    // queued key to retention, which keeps it while a row references it.
+    const rolledBack =
+      err instanceof RunEndedError ||
+      err instanceof ArtifactMissingError ||
+      (err instanceof AppendError && err.code === "run_finished") ||
+      pgCode(err) === "23505";
+    if (rolledBack) await discard(blobs, key);
     if (
       err instanceof RunEndedError ||
       (err instanceof AppendError && err.code === "run_finished")
@@ -310,7 +358,7 @@ export async function putArtifact(
       const prior = await withTeam(deps.db, teamId, (tx) =>
         existingResult(tx, teamId, frame.tool_call_id),
       );
-      if (prior) return { ok: true, ...prior };
+      if (prior) return replay(prior, frame);
     }
     logger.error({ err, team_id: teamId }, "artifact write failed");
     return fail("storage_failed", "The artifact could not be stored. Try again.");

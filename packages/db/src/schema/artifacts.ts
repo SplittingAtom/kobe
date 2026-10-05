@@ -48,6 +48,8 @@ export const artifacts = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.id] }),
+    // Target of the versions' composite foreign key: keeps their thread equal to the artifact's.
+    unique("artifacts_team_id_thread").on(t.teamId, t.id, t.threadId),
     foreignKey({
       name: "artifacts_thread_fk",
       columns: [t.teamId, t.threadId],
@@ -94,8 +96,8 @@ export const artifactVersions = pgTable(
     unique("artifact_versions_tool_call").on(t.teamId, t.toolCallId),
     foreignKey({
       name: "artifact_versions_artifact_fk",
-      columns: [t.teamId, t.artifactId],
-      foreignColumns: [artifacts.teamId, artifacts.id],
+      columns: [t.teamId, t.artifactId, t.threadId],
+      foreignColumns: [artifacts.teamId, artifacts.id, artifacts.threadId],
     }).onDelete("cascade"),
     foreignKey({
       name: "artifact_versions_thread_fk",

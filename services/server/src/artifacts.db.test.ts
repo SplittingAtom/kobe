@@ -372,6 +372,74 @@ describe("artifact.put refusals (D-3), each audited without content", () => {
   });
 });
 
+describe("orphans and replay identity (review)", () => {
+  const queued = (team: string) =>
+    rows<{ key: string; due: boolean }>(
+      `SELECT key, enqueued_at <= now() AS due FROM retention_blob_deletions WHERE team_id = $1`,
+      [team],
+    );
+
+  it("clears the queued key when the rows commit", async () => {
+    const w = await world();
+    const sb = await started(w);
+    expect(await allowedPut(sb, w, "call-1", "create_artifact", create())).toMatchObject({
+      ok: true,
+    });
+    expect(await queued(w.team)).toEqual([]);
+  });
+
+  it("leaves a not-yet-due queued key after a crash between upload and commit; retention deletes it once due", async () => {
+    const w = await world();
+    const sb = await started(w);
+    const real = objects.put.bind(objects);
+    objects.put = async (key, body, size) => {
+      await real(key, body, size);
+      throw new Error("connection lost after upload");
+    };
+    try {
+      const res = await allowedPut(sb, w, "call-1", "create_artifact", create());
+      expect(res).toMatchObject({ ok: false, error: { code: "storage_failed" } });
+    } finally {
+      objects.put = real;
+    }
+    const [row] = await queued(w.team);
+    expect(row?.due).toBe(false);
+    const key = must(row, "queued key").key;
+    expect(objects.objects.has(key)).toBe(true);
+    const db = fx.db;
+    // An upload in flight is never deleted under its writer.
+    await deleteReleasedBlobs(db, w.team, blobs, blobRecorder(w.team), { maxBatches: 5 });
+    expect(objects.objects.has(key)).toBe(true);
+    await fx.admin.query(
+      `UPDATE retention_blob_deletions SET enqueued_at = now() - interval '1 minute' WHERE team_id = $1`,
+      [w.team],
+    );
+    await deleteReleasedBlobs(db, w.team, blobs, blobRecorder(w.team), { maxBatches: 5 });
+    expect(objects.objects.has(key)).toBe(false);
+    expect(await versionCount(w.team)).toBe(0);
+  });
+
+  it("does not replay a tool call id another run already used", async () => {
+    const w = await world();
+    const sb = await started(w);
+    await allowedPut(sb, w, "call-1", "create_artifact", create());
+    const run2 = await fx.run(w.team, w.owner);
+    const sandboxId = randomUUID();
+    const w2: World = {
+      ...w,
+      runId: run2,
+      threadId: await threadOf(w.team, run2),
+      sandboxId,
+      token: auth.issue({ sandboxId, teamId: w.team, userId: w.owner.id }),
+    };
+    const sb2 = await started(w2);
+    const res = await allowedPut(sb2, w2, "call-1", "create_artifact", create());
+    expect(res).toMatchObject({ ok: false, error: { code: "not_allowed" } });
+    expect(await versionCount(w.team)).toBe(1);
+    expect((await refusals(w.team)).map((r) => r.reason)).toEqual(["not_allowed"]);
+  });
+});
+
 describe("/v1/artifacts", () => {
   async function seeded(kind: "html" | "svg" | "markdown", content: string) {
     const w = await world();
