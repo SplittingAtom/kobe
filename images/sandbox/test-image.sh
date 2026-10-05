@@ -68,13 +68,15 @@ check "the image turns kobe-tools on (KOBE_TOOLS_EXTENSION names the baked file)
 KOBE_TOOLS_PROBE='
 const fs = require("node:fs");
 const { spawn } = require("node:child_process");
-const withFd4 = process.argv[1] === "fd4";
+const mode = process.argv[1];
+const withFd4 = mode !== "nofd4";
+const leak = mode === "leak";
 fs.mkdirSync("/tmp/pi-agent", { recursive: true });
 fs.writeFileSync("/tmp/faux.mjs", `import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 export default function (pi) {
   const f = fauxProvider({ provider: "kobe-faux", models: [{ id: "scripted" }] });
   f.setResponses([
-    fauxAssistantMessage(fauxToolCall("create_artifact", { kind: "markdown", title: "T", content: "# hi" }, { id: "ca1" }), { stopReason: "toolUse" }),
+    fauxAssistantMessage(${leak ? `fauxToolCall("bash", { command: "ls -l /proc/$$/fd/" }, { id: "ca1" })` : `fauxToolCall("create_artifact", { kind: "markdown", title: "T", content: "# hi" }, { id: "ca1" })`}, { stopReason: "toolUse" }),
     fauxAssistantMessage("done"),
   ]);
   pi.registerProvider(f.provider);
@@ -91,6 +93,7 @@ const p = spawn("pi", ["--mode", "rpc", "--no-session", "--no-extensions", "--no
   stdio: ["pipe", "pipe", "inherit", "pipe", "pipe"] });
 const done = (msg, code) => { console.log(msg); p.kill("SIGKILL"); process.exit(code); };
 setTimeout(() => done("timeout", 1), 60000);
+const sock = (n) => withFd4 ? fs.readlinkSync("/proc/" + p.pid + "/fd/" + n) : "";
 const lines = (stream, onLine) => { let b = ""; stream.on("data", (d) => { b += d; let i; while ((i = b.indexOf("\n")) >= 0) { onLine(JSON.parse(b.slice(0, i))); b = b.slice(i + 1); } }); };
 lines(p.stdio[3], (m) => {
   if (m.type === "channel.ready") p.stdin.write(JSON.stringify({ type: "prompt", id: "p", message: "go" }) + "\n");
@@ -104,12 +107,18 @@ lines(p.stdio[4], (m) => {
 lines(p.stdout, (m) => {
   if (m.type !== "tool_execution_end" || m.toolCallId !== "ca1") return;
   const text = m.result.content.map((c) => c.text).join("");
+  if (leak) {
+    // The tool lists its own fds: neither of Pi'"'"'s sockets (fd 3 policy, fd 4 kobe-tools) may show.
+    const leaked = !text.includes("->") || text.includes(sock(3)) || text.includes(sock(4));
+    done(leaked ? "LEAKED " + text : "ok no pi sockets", leaked ? 1 : 0);
+  }
   done((m.isError ? "error " : "ok ") + text, m.isError === !withFd4 ? 0 : 1);
 });'
 check "kobe-tools: create_artifact goes through kobe-policy, then fd 4; the result carries artifact_id and version" \
   '^ok \{"artifact_id":"7d8e9f0a-1b2c-4d3e-8f4a-5b6c7d8e9f0a","version":1\}$' run_ws node -e "$KOBE_TOOLS_PROBE" fd4
 # Fail closed: a Pi without the channel (an agent that does not offer artifacts) has no such tool.
-check "kobe-tools: without fd 4 no artifact tool is registered" '^error ' run_ws node -e "$KOBE_TOOLS_PROBE" nofd4
+check "kobe-tools: without fd 4 no artifact tool is registered" '^error Tool create_artifact not found$' run_ws node -e "$KOBE_TOOLS_PROBE" nofd4
+check "tools Pi runs do not inherit the kobe-tools socket (fd 4) or the policy socket" '^ok no pi sockets$' run_ws node -e "$KOBE_TOOLS_PROBE" leak
 # Pi as the agent starts it (lockdown flags, read-only config dir), fd 3 a socket pair: kobe-policy
 # must load, read channel.hello and answer channel.ready with the nonce.
 check "kobe-policy loads into Pi and reports ready over fd 3" '"type":"channel.ready","nonce":"image-test","extension":"kobe-policy"' run_ws node -e '

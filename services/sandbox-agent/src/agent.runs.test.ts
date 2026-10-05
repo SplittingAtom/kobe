@@ -571,6 +571,21 @@ describe("what a tool started by Pi can reach", () => {
     await h.server.waitFor((f) => f.type === "policy.check");
   });
 
+  it("does not inherit the kobe-tools channel (fd 4) either (KOBE-128)", async () => {
+    h = await startHarness({ toolsExtension: "/opt/kobe/pi-extensions/kobe-tools/index.js" });
+    await h.server.command(runStart("grandchild"));
+    const probe = await h.server.waitFor(
+      (f) => f.type === "pi.event" && f.event.type === "kobe_test_grandchild",
+    );
+    expect((probe as PiEvent).event).toMatchObject({
+      sameToolsChannel: false,
+      fd4Write: false,
+      procOpen4: false,
+      env: ["KOBE_POLICY_FD", "KOBE_TOOLS_FD"],
+    });
+    await h.server.waitFor(settled());
+  });
+
   it("control: a tool handed fd 3 sees the channel, and its forged request closes it", async () => {
     h = await startHarness();
     await h.server.command(runStart("grandchild-inherit"));
