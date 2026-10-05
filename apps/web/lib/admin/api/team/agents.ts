@@ -1,6 +1,6 @@
 /** Team console: team agents (`/v1/agents?scope=team`, KOBE-45/46). Every call names the team. */
 import { apiRequest, type ApiResult } from "../../../api/client";
-import type { AgentSaved, AgentSummary } from "../agents";
+import type { AgentSaved, AgentSummary, GalleryScore } from "../agents";
 
 const enc = encodeURIComponent;
 
@@ -48,6 +48,13 @@ export function setTeamAgentStatus(
   return apiRequest(`/v1/agents/${enc(id)}/status`, { method: "PUT", json: { status }, teamId });
 }
 
+/** The agent's latest Orbit result; `attackSuccessRate` is 0 to 1, null unless scored. */
+export interface InventoryScore {
+  readonly status: "none" | "evaluating" | "passed" | "blocked" | "errored";
+  readonly attackSuccessRate: number | null;
+  readonly at: string | null;
+}
+
 /** One row of the team admin inventory (`GET /v1/agents/inventory`, KOBE-86). */
 export interface InventoryAgent {
   readonly id: string;
@@ -64,8 +71,8 @@ export interface InventoryAgent {
   readonly tokens: number;
   /** Not built yet (KOBE-64): null. */
   readonly schedules: null;
-  /** Not built yet (KOBE-52): null. */
-  readonly orbitScore: null;
+  /** The latest Orbit result (KOBE-94). */
+  readonly orbitScore: InventoryScore;
   /** The caller may read this agent's definition, which exporting a version needs (KOBE-91). */
   readonly canExport?: boolean;
 }
@@ -94,4 +101,12 @@ export function setInventoryAgentStatus(
     json: { status },
     teamId,
   });
+}
+
+/** Published Orbit scores of the gallery agents' current versions (KOBE-94). */
+export async function listGalleryScores(
+  teamId: string,
+): Promise<ApiResult<readonly GalleryScore[]>> {
+  const res = await apiRequest<{ scores: GalleryScore[] }>("/v1/agents/gallery-scores", { teamId });
+  return res.ok ? { ...res, data: res.data.scores } : res;
 }

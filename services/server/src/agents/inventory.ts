@@ -52,8 +52,20 @@ export interface InventoryItem {
   readonly tokens: number;
   /** KOBE-64 (schedules) is not built: always null. */
   readonly schedules: null;
-  /** Orbit scores arrive with KOBE-52: always null. */
-  readonly orbitScore: null;
+  /** The latest Orbit score (KOBE-94). */
+  readonly orbitScore: InventoryScore;
+}
+
+/**
+ * Latest Orbit result of an agent. Team and personal agents: this team's newest eval (`evaluating`
+ * while one runs, `errored` when it could not finish, so no rate); a personal agent evaluated in
+ * another team shows `none` here. Gallery agents: the install-level score of the current version.
+ */
+export interface InventoryScore {
+  readonly status: "none" | "evaluating" | "passed" | "blocked" | "errored";
+  readonly attackSuccessRate: number | null;
+  /** When the result came in (the eval's start while evaluating); null for none. */
+  readonly at: string | null;
 }
 
 export interface InventoryPage {
@@ -74,6 +86,17 @@ type InventoryRow = {
   run_count: string;
   last_run_at: Date | string | null;
   tokens: string;
+  score_status: string | null;
+  score_rate: number | null;
+  score_at: Date | string | null;
+};
+
+const SCORE_STATUS: Readonly<Record<string, InventoryScore["status"]>> = {
+  pending: "evaluating",
+  running: "evaluating",
+  passed: "passed",
+  blocked: "blocked",
+  errored: "errored",
 };
 
 /** Raw SQL returns timestamps as the driver parses them (Date or text). */
@@ -96,7 +119,11 @@ export function toInventoryItem(r: InventoryRow): InventoryItem {
     lastRunAt: iso(r.last_run_at),
     tokens: Number(r.tokens),
     schedules: null,
-    orbitScore: null,
+    orbitScore: {
+      status: (r.score_status && SCORE_STATUS[r.score_status]) || "none",
+      attackSuccessRate: r.score_rate,
+      at: iso(r.score_at),
+    },
   };
 }
 
@@ -142,13 +169,31 @@ export async function listInventory(
         SELECT ru.agent_id, sum(ru.input_tokens + ru.output_tokens) AS tokens
           FROM run_usage ru
          WHERE ru.team_id = ${teamId} AND ru.agent_id IN (SELECT id FROM page)
-         GROUP BY ru.agent_id)
+         GROUP BY ru.agent_id),
+      team_score AS (
+        SELECT DISTINCT ON (e.agent_id) e.agent_id, e.status, e.attack_success_rate AS rate,
+               coalesce(e.finished_at, e.started_at, e.created_at) AS at
+          FROM orbit_evals e
+         WHERE e.team_id = ${teamId} AND e.agent_scope <> 'gallery'
+           AND e.agent_id IN (SELECT id FROM page WHERE scope <> 'gallery')
+         ORDER BY e.agent_id, e.created_at DESC),
+      gallery_score AS (
+        SELECT DISTINCT ON (g.agent_id) g.agent_id, g.status, g.attack_success_rate AS rate,
+               g.evaluated_at AS at
+          FROM gallery_agent_scores g
+          JOIN page ON page.id = g.agent_id AND page.scope = 'gallery'
+                   AND page.current_version = g.version
+         ORDER BY g.agent_id, g.evaluated_at DESC)
       SELECT page.*, u.name AS owner_name, coalesce(tr.run_count, 0) AS run_count,
-             tr.last_run_at, coalesce(usage.tokens, 0) AS tokens
+             tr.last_run_at, coalesce(usage.tokens, 0) AS tokens,
+             coalesce(ts.status, gs.status) AS score_status,
+             coalesce(ts.rate, gs.rate) AS score_rate, coalesce(ts.at, gs.at) AS score_at
         FROM page
         LEFT JOIN users u ON u.id = page.owner_user_id
         LEFT JOIN thread_runs tr ON tr.agent_id = page.id
         LEFT JOIN usage ON usage.agent_id = page.id
+        LEFT JOIN team_score ts ON ts.agent_id = page.id
+        LEFT JOIN gallery_score gs ON gs.agent_id = page.id
        ORDER BY page.slug, page.id`);
     return result.rows;
   });

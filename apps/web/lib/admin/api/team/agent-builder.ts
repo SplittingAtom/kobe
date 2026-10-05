@@ -144,3 +144,15 @@ export const listTeamAgentEvals = (teamId: string, id: string): Promise<ApiResul
 /** True for the 202 answer of a gated Publish. */
 export const isEvalStarted = (answer: PublishedAgent | EvalStarted): answer is EvalStarted =>
   "eval" in answer;
+
+/** An eval with the image's full report (`GET /v1/agents/{id}/evals/{evalId}`); the report is untrusted JSON. */
+export interface AgentEvalDetail extends AgentEval {
+  readonly report?: unknown;
+}
+
+export const getTeamAgentEval = (
+  teamId: string,
+  id: string,
+  evalId: string,
+): Promise<ApiResult<{ eval: AgentEvalDetail }>> =>
+  apiRequest(`/v1/agents/${enc(id)}/evals/${enc(evalId)}`, { teamId });

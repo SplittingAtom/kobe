@@ -3,6 +3,7 @@ import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
+import { EvalReportPage } from "./team/agent-builder/eval-report";
 import { AgentBuilderPage } from "./team/agent-builder/agent-builder-page";
 import { TEAM, renderTeam, stubApi } from "./testing";
 
@@ -583,5 +584,86 @@ describe("Agent builder: Orbit eval gate (KOBE-93)", () => {
     renderTeam(<AgentBuilderPage agentId="a-1" />);
     await screen.findByText("20% attacks succeeded (limit 40%)");
     expect(screen.getByText("Not evaluated")).toBeTruthy();
+    // The score links to its report.
+    expect(screen.getByRole("link", { name: "Report for version 2" }).getAttribute("href")).toBe(
+      "/admin/team/agents/a-1/evals/e-2",
+    );
+    expect(screen.queryByRole("link", { name: "Report for version 1" })).toBeNull();
+  });
+
+  it("renders an eval report as text, never as HTML", async () => {
+    stubApi({
+      "GET /v1/agents/a-1/evals/e-2": [
+        200,
+        {
+          eval: {
+            id: "e-2",
+            status: "passed",
+            draftRevision: 2,
+            threshold: 0.2,
+            attack_success_rate: 0.2,
+            attempts: 5,
+            attack_successes: 1,
+            error: null,
+            version: 2,
+            created_at: "2026-10-02T09:00:00Z",
+            started_at: "2026-10-02T09:00:05Z",
+            finished_at: "2026-10-02T09:05:00Z",
+            report: {
+              schema_version: 1,
+              pack: { id: "kobe-default", version: 1 },
+              scenarios: [
+                {
+                  id: "<img src=x onerror=alert(1)>",
+                  category: "<b>exfiltration</b>",
+                  attempts: 5,
+                  successes: 1,
+                  errors: 0,
+                  attack_success_rate: 0.2,
+                },
+                "not a scenario",
+              ],
+            },
+          },
+        },
+      ],
+    });
+    const { container } = renderTeam(<EvalReportPage agentId="a-1" evalId="e-2" />);
+    await screen.findByText("<img src=x onerror=alert(1)>");
+    expect(screen.getByText("<b>exfiltration</b>")).toBeTruthy();
+    expect(container.querySelector("img, b")).toBeNull();
+    expect(screen.getByText("20% (1 of 5); limit 20%")).toBeTruthy();
+    expect(screen.getByText(/kobe-default v1/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Back to the agent" }).getAttribute("href")).toBe(
+      "/admin/team/agents/a-1",
+    );
+  });
+
+  it("says so when a report has no scenarios", async () => {
+    stubApi({
+      "GET /v1/agents/a-1/evals/e-9": [
+        200,
+        {
+          eval: {
+            id: "e-9",
+            status: "errored",
+            draftRevision: 1,
+            threshold: 0.2,
+            attackSuccessRate: null,
+            attempts: null,
+            attackSuccesses: null,
+            error: "The Job failed.",
+            version: null,
+            createdAt: "2026-10-02T09:00:00Z",
+            startedAt: null,
+            finishedAt: "2026-10-02T09:05:00Z",
+            report: null,
+          },
+        },
+      ],
+    });
+    renderTeam(<EvalReportPage agentId="a-1" evalId="e-9" />);
+    await screen.findByText("This evaluation has no scenario results.");
+    expect(screen.getByText("The Job failed.")).toBeTruthy();
   });
 });

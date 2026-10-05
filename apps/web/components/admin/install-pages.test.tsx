@@ -439,13 +439,51 @@ describe("Gallery agents", () => {
     ],
   };
 
-  it("lists and exports, with no way to change a gallery agent", async () => {
+  const SCORES = {
+    scores: [
+      {
+        agentId: "a-1",
+        version: 1,
+        status: "blocked",
+        attackSuccessRate: 0.6,
+        attempts: 5,
+        threshold: 0.2,
+        evaluatedAt: "2026-10-04T09:30:00Z",
+      },
+    ],
+  };
+  const MY_TEAMS = {
+    activeTeamId: null,
+    teams: [
+      { id: "t-1", slug: "finance", name: "Finance", role: "team_admin" },
+      { id: "t-2", slug: "ops", name: "Ops", role: "member" },
+    ],
+  };
+
+  it("lists and exports, with no way to edit a gallery agent", async () => {
     stubApi({ "GET /v1/install/gallery/agents": [200, AGENTS] });
     renderInstall(<GalleryPage />);
     const exportLink = await screen.findByRole("link", { name: "Export Assistant" });
     expect(exportLink.getAttribute("href")).toBe("/v1/install/gallery/agents/a-1/export");
-    expect(screen.queryByRole("button")).toBeNull();
     expect(screen.queryByLabelText("Agent file (.md)")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Delete|Edit|Save/ })).toBeNull();
+  });
+
+  it("shows the published score and starts an eval in the chosen team", async () => {
+    const published = { agents: [{ ...AGENTS.agents[0], currentVersion: 1 }] };
+    const calls = stubApi({
+      "GET /v1/install/gallery/agents": [200, published],
+      "GET /v1/install/gallery/agents/scores": [200, SCORES],
+      "GET /v1/me/teams": [200, MY_TEAMS],
+      "POST /v1/install/gallery/agents/a-1/eval": [202, { message: "Evaluating" }],
+    });
+    renderInstall(<GalleryPage />);
+    expect(await screen.findByText("60% attacks succeeded (blocked)")).toBeTruthy();
+    await userEvent.selectOptions(await screen.findByLabelText("Run evals in team"), "t-2");
+    await userEvent.click(screen.getByRole("button", { name: "Run eval for Assistant" }));
+    await screen.findByText("Evaluating Assistant. The score appears here when it finishes.");
+    const post = must(calls.find((c) => c.method === "POST"));
+    expect(JSON.parse(String(post.body))).toEqual({ teamId: "t-2" });
   });
 
   it("says when the gallery is empty", async () => {

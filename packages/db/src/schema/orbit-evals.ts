@@ -49,7 +49,8 @@ export type OrbitEvalStatus = (typeof ORBIT_EVAL_STATUSES)[number];
 /** Statuses of an eval that has not finished (at most one per agent). */
 export const ACTIVE_EVAL_STATUSES = ["pending", "running"] as const;
 
-export const ORBIT_EVAL_AGENT_SCOPES = ["team", "personal"] as const;
+/** `gallery`: a gallery agent evaluated in a host team for its published score (KOBE-94). */
+export const ORBIT_EVAL_AGENT_SCOPES = ["team", "personal", "gallery"] as const;
 
 /**
  * One eval of an agent draft, run as a Kubernetes Job in the team namespace. It holds a snapshot
@@ -110,7 +111,7 @@ export const orbitEvals = pgTable(
     index("orbit_evals_version_idx")
       .on(t.teamId, t.agentId, t.version)
       .where(sql`${t.version} IS NOT NULL`),
-    check("orbit_evals_scope", sql`${t.agentScope} IN ('team', 'personal')`),
+    check("orbit_evals_scope", sql`${t.agentScope} IN ('team', 'personal', 'gallery')`),
     check(
       "orbit_evals_status",
       sql`${t.status} IN ('pending', 'running', 'passed', 'blocked', 'errored')`,

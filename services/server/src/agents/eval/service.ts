@@ -270,6 +270,8 @@ export class EvalRunner {
     const log = await this.readLog(team, record.id);
     const verdict: Verdict = judge({ outcome, log, threshold: record.threshold });
     const finished = await finishEval(this.options.db, team.id, record.id, verdict);
+    // A gallery eval publishes nothing: `finishEval` stored its score in the same transaction.
+    if (finished?.agentScope === "gallery") return;
     if (finished?.status === "passed") await this.publish(finished);
   }
 
