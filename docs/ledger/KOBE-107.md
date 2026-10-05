@@ -43,8 +43,8 @@ Pure library plus chart wiring; no migrations, no routes, nothing stored yet.
 
 ## Open questions (for Chris or the coordinator)
 
-1. Losing the Secret makes every sealed credential unreadable (kept on uninstall like the auth
-   secret); install docs should say to back it up. Not added here (docs ticket?).
+1. (Resolved) Backup guidance is in `docs/backup-restore.md` and `docs/install.md`. `kobe backup`
+   cannot include the Secret (Postgres and S3 only; bundling the key with its ciphertext defeats it).
 2. If the KEK might later live in a KMS/Vault, `Envelope` is the seam; not needed in v1.
 
 ## Evidence
