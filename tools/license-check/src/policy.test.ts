@@ -106,4 +106,10 @@ describe("findStaleExceptions", () => {
     };
     expect(findStaleExceptions(report, exceptions)).toEqual(["gone-lib", "caniuse-old"]);
   });
+
+  it("does not compare the license: stores differ in where they read it from", () => {
+    const report = { MIT: [{ name: "khroma", versions: ["2.1.0"] }] };
+    const exceptions = { khroma: { license: "Unknown", versions: ["2.1.0"], reason: "no field" } };
+    expect(findStaleExceptions(report, exceptions)).toEqual([]);
+  });
 });

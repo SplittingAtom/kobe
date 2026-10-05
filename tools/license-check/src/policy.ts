@@ -93,7 +93,13 @@ export function findViolations(report: LicenseReport, exceptions: LicenseExcepti
   );
 }
 
-/** Exceptions that no longer match an installed package at a named version and license. */
+/**
+ * Exceptions that no longer match an installed package at a named version. The license is not
+ * compared here: where a package's license is read from differs between pnpm stores (a package
+ * without a `license` field is `Unknown` on a fresh CI store, `MIT` from cached registry metadata
+ * locally), and `findViolations` already rejects a package whose reported license differs from
+ * the excepted one.
+ */
 export function findStaleExceptions(
   report: LicenseReport,
   exceptions: LicenseExceptions,
@@ -101,9 +107,11 @@ export function findStaleExceptions(
   return Object.entries(exceptions)
     .filter(
       ([name, exception]) =>
-        !(report[exception.license] ?? []).some(
-          (pkg) => pkg.name === name && pkg.versions.some((v) => exception.versions.includes(v)),
-        ),
+        !Object.values(report)
+          .flat()
+          .some(
+            (pkg) => pkg.name === name && pkg.versions.some((v) => exception.versions.includes(v)),
+          ),
     )
     .map(([name]) => name);
 }

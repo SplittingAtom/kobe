@@ -23,6 +23,9 @@ sandbox="allow-scripts allow-forms">`, no `srcdoc`, never `allow-same-origin` (D
   image. Reason: the page CSP has no `style-src 'unsafe-inline'`, so an inline `<svg><style>` in the
   page DOM would lose its styling, and an `<img>` is inert (no script, no network). Failure falls
   back to the source text.
+- **License:** mermaid pulls `khroma@2.1.0` (MIT, but no `license` field: CI's fresh store reports
+  `Unknown`, local pnpm says MIT). Added a documented exception and made the stale-exception check
+  ignore the license (violations still compare it), so it passes in both.
 - **Content** for markdown/code/csv/mermaid is fetched with `X-Kobe-Team` (`apiTextFile`); download
   is a link to the content URL with `?team=` (like `threadExportUrl`).
 - **Reopen:** `GET /v1/artifacts?thread_id=` fills a nav of buttons under the thread title; an old
