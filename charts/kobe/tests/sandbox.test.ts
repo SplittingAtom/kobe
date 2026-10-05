@@ -403,6 +403,14 @@ describe("sandbox RBAC (least privilege; D11)", () => {
     expect(all).toContainEqual({ apiGroups: [""], resources: ["pods/log"], verbs: ["get"] });
   });
 
+  it("lets the team-namespace reconcile read back its NetworkPolicies (KOBE-115)", () => {
+    expect(rules("ClusterRole", manager)).toContainEqual({
+      apiGroups: ["networking.k8s.io"],
+      resources: ["networkpolicies"],
+      verbs: ["get", "create", "patch"],
+    });
+  });
+
   it("lets the server bind only the manager role, and never delete namespaces", () => {
     const bind = rules("ClusterRole", orchestrator).find((r) => r.verbs.includes("bind"));
     expect(bind).toEqual({
