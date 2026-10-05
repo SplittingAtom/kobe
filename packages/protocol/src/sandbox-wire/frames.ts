@@ -10,6 +10,7 @@ import {
   uuidSchema,
 } from "../common.js";
 import { connectorNameSchema } from "../tools.js";
+import { runTokenGrantSchema } from "../run-token.js";
 import { SANDBOX_ERROR_CODES, SANDBOX_WIRE_VERSION } from "./connection.js";
 import { BUILTIN_SKILL_NAMES, SKILL_BUNDLES_MAX, skillBundleRefSchema } from "./skill-bundles.js";
 import {
@@ -280,6 +281,13 @@ export const runStartFrameSchema = frame("run.start", {
   /** Branch point for edit-and-regenerate; absent = continue from the thread's leaf. */
   parent_entry_id: idSchema.optional(),
   config: piThreadConfigSchema.optional(),
+  /**
+   * Run-bound model-gateway token (KOBE-117, run-token.ts): bound to this run, delivered to this
+   * thread's Pi only (the agent must not write it to disk or env, nor expose it to tools), sent
+   * as `x-kobe-run-token`. Sent only to agents whose `hello.capabilities` lists
+   * `CAPABILITY_RUN_TOKEN`; absent = legacy (session token + advisory `x-kobe-run-id`).
+   */
+  run_token: runTokenGrantSchema.optional(),
 });
 
 /** Pi `steer`: delivered after the current turn's tool calls, before the next model call. */

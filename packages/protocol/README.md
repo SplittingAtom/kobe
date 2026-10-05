@@ -14,6 +14,7 @@ settle it in its contract PR.
 | --------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
 | Sandbox ↔ server wire | `src/sandbox-wire/` (`connection.ts`, `frames.ts`, `pi-rpc.ts`, `pi-events.ts`, `codec.ts`)           | frame schemas, `decodeSandboxFrame`, `decodeServerFrame`, `parseTranslatedPiEvent`, `piGetEntriesDataSchema`, `SANDBOX_CLOSE_CODES`                           | KOBE-23, KOBE-24, KOBE-36, KOBE-41, KOBE-62 |
 | Session tokens        | `src/session-token.ts`                                                                                | `SESSION_TOKEN_AUDIENCES`, `sessionTokenClaimsSchema`, `acceptsAudience`                                                                                      | KOBE-22, KOBE-24, KOBE-38, KOBE-40, KOBE-58 |
+| Run tokens            | `src/run-token.ts`, `src/node/run-token.ts`                                                           | `CAPABILITY_RUN_TOKEN`, `RUN_TOKEN_HEADER`, `runTokenClaimsSchema`, `runTokenGrantSchema`, `deriveRunTokenKey`, `signRunToken`, `verifyRunToken`              | KOBE-117, KOBE-118                          |
 | Kobe Event Stream     | `src/events.ts`, `src/sse.ts`                                                                         | `KOBE_EVENT_TYPES`, `EVENT_PAYLOAD_SCHEMAS`, `kobeEventSchema`, `formatSseEvent`, `resolveResumeCursor`, `decideStreamOpen`                                   | KOBE-31, KOBE-32, KOBE-55, KOBE-30          |
 | Run orchestrator      | `src/runs.ts`, `src/run-orchestrator.ts`                                                              | `RUN_STATUSES`, `RUN_TRANSITIONS`, `canTransition`, `ThreadStatus`, `nextThreadStatus`, `queueMayAdvance`, `checkRetry`, `RunOrchestrator`                    | KOBE-30, KOBE-26, KOBE-42, KOBE-64, KOBE-10 |
 | Policy decision       | `src/policy.ts`, `src/tools.ts`, `src/glob.ts`                                                        | `policyInputSchema`, `policyDecisionSchema`, `PolicyEngine`, `BUILTIN_TOOLS`, `ToolRegistry`, `matchGlob`, `argPatternSchema`, `matchesArgPattern`            | KOBE-35, KOBE-36, KOBE-37, KOBE-58, KOBE-65 |
@@ -96,3 +97,13 @@ Gaps reported by KOBE-23/24/30/35/36, fixed in one contract PR:
 - Stop pauses the queue (`threads.queue_paused_at`; docs in `runs.ts` / `run-orchestrator.ts`,
   behaviour in #43): queued messages wait for `resumeQueue` or the user's next message.
 - `encodeFrame` writes `v` and `type` first.
+
+## Run-bound gateway tokens (KOBE-117)
+
+`run.start.run_token` (`{ token, expires_at }`, optional) carries a server-minted token bound to one
+run, for the model gateway. Sent only to agents whose `hello.capabilities` lists `run_token`; the
+agent keeps it in Pi's memory only and sends it as `x-kobe-run-token` next to the session bearer.
+Format `krt1.<base64url claims>.<base64url HMAC-SHA256>`, key derived by HKDF with info
+`kobe/run-token/v1`; claims `run_id`, `team_id`, `sandbox_id`, `iat`, `exp`, `jti`. Gateway rollout:
+header present must verify (no fallback); absent keeps the legacy advisory `x-kobe-run-id` until
+enforcement is switched on (KOBE-118). Details in `src/run-token.ts`.
