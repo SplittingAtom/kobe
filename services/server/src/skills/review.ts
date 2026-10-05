@@ -315,6 +315,14 @@ export async function usablePersonalSkills(
   tx: KobeTx,
   args: { teamId: string; userId: string; ensureRows: boolean },
 ): Promise<{ name: string; hash: string }[]> {
+  return (await personalSkillUsage(tx, args)).usable;
+}
+
+/** Like `usablePersonalSkills`, plus the names blocked for lack of this team's approval. */
+export async function personalSkillUsage(
+  tx: KobeTx,
+  args: { teamId: string; userId: string; ensureRows: boolean },
+): Promise<{ usable: { name: string; hash: string }[]; blocked: string[] }> {
   const rows = await tx
     .select({
       skillId: installSkills.id,
@@ -345,7 +353,9 @@ export async function usablePersonalSkills(
     )
     .where(eq(installSkills.ownerUserId, args.userId));
   const needsApproval = rows.filter((r) => r.scan === null || r.scan.flagged);
-  if (needsApproval.length === 0) return rows.map(({ name, hash }) => ({ name, hash }));
+  if (needsApproval.length === 0) {
+    return { usable: rows.map(({ name, hash }) => ({ name, hash })), blocked: [] };
+  }
   const decided = await tx
     .select({
       skillId: teamSkillReviews.skillId,
@@ -386,12 +396,14 @@ export async function usablePersonalSkills(
         .onConflictDoNothing();
     }
   }
-  return rows
-    .filter((r) => {
-      const needs = r.scan === null || r.scan.flagged;
-      return !needs || status.get(`${r.skillId}:${r.version}`) === "approved";
-    })
-    .map(({ name, hash }) => ({ name, hash }));
+  const isUsable = (r: (typeof rows)[number]) => {
+    const needs = r.scan === null || r.scan.flagged;
+    return !needs || status.get(`${r.skillId}:${r.version}`) === "approved";
+  };
+  return {
+    usable: rows.filter(isUsable).map(({ name, hash }) => ({ name, hash })),
+    blocked: rows.filter((r) => !isUsable(r)).map((r) => r.name),
+  };
 }
 
 async function readBytes(blobs: BlobStore, key: string): Promise<Uint8Array | null> {

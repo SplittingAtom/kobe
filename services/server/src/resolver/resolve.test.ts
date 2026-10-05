@@ -132,6 +132,32 @@ describe("skills", () => {
     ]);
   });
 
+  it("KOBE-99: skills without approval are omitted as not_approved, agent's and user's", () => {
+    const r = resolveEffective(
+      with_({
+        agent: { skills: [sk("a")], unapprovedSkills: ["pending-one"] },
+        user: { skills: [sk("u")], unapprovedSkills: ["risky"] },
+      }),
+    );
+    expect(r.ok && r.value.skills.map((s) => s.name)).toEqual(["a", "u"]);
+    expect(r.ok && r.value.omissions).toEqual([
+      { kind: "skill", name: "pending-one", reason: "not_approved" },
+      { kind: "skill", name: "risky", reason: "not_approved" },
+    ]);
+  });
+
+  it("KOBE-99: an exclusive agent or the team switch explains personal skills first", () => {
+    const user = { skills: [], unapprovedSkills: ["risky"] };
+    const exclusive = resolveEffective(with_({ agent: { exclusiveSkills: true }, user }));
+    expect(exclusive.ok && exclusive.value.omissions).toEqual([
+      { kind: "skill", name: "risky", reason: "agent_exclusive" },
+    ]);
+    const off = resolveEffective(with_({ team: { personalSkillsDisabled: true }, user }));
+    expect(off.ok && off.value.omissions).toEqual([
+      { kind: "skill", name: "risky", reason: "team_disabled" },
+    ]);
+  });
+
   it("blocklisted hash is omitted from agent and user skills", () => {
     const r = resolveEffective(
       with_({

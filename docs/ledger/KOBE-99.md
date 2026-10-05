@@ -23,3 +23,14 @@
 ## Evidence
 
 - ac-2: PR A touches protocol, its README and the web notice only; no migrations.
+
+## PR B (resolver, stacked on PR A's branch)
+
+- Resolver stays pure: `agent.unapprovedSkills` / `user.unapprovedSkills` (names) are new optional
+  inputs; `loadSkillFacts` computes them (agent names minus approved ones; personal blocked set from
+  the new `personalSkillUsage`, which `usablePersonalSkills` wraps).
+- An agent skill name with no team skill at all also gets `not_approved` (it lacks an approved
+  version either way).
+- Personal blocked skills get `agent_exclusive` / `team_disabled` when those apply (existing
+  precedence), else `not_approved`. Per-team: blocked state is read per team's review rows.
+- Evidence: `resolve.test.ts` (unit), `runs-resolver.db.test.ts` (ac-1 end to end, flagged personal).

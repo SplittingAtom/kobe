@@ -269,6 +269,7 @@ async function skillsOfRun(w: Awaited<ReturnType<typeof f.world>>, thread: strin
   const omitted = (await f.events(w.team, run)).find((e) => e.type === "context.omitted");
   return {
     skills: start.config?.skills ?? [],
+    bundleNames: (start.config?.skill_bundles ?? []).map((b: { name: string }) => b.name),
     omitted: (omitted?.payload as { items: unknown[] } | undefined)?.items ?? [],
   };
 }
@@ -286,8 +287,22 @@ describe("run start resolves skills (KOBE-80)", () => {
     const thread = await pinnedThread(w.owner, {
       skills: ["approved-one", "pending-one", "rejected-one", "no-review", "kept-old"],
     });
-    const { skills } = await skillsOfRun(w, thread);
+    const { skills, omitted, bundleNames } = await skillsOfRun(w, thread);
     expect([...skills].sort()).toEqual(["approved-one", "kept-old"]);
+    // Omitted skills are never materialized (no bundle).
+    expect([...bundleNames].sort()).toEqual(["approved-one", "kept-old"]);
+    // KOBE-99: the dropped ones are named in the notice.
+    expect(
+      [...(omitted as { name: string; reason: string }[])].sort((a, b) =>
+        a.name.localeCompare(b.name),
+      ),
+    ).toEqual(
+      ["no-review", "pending-one", "rejected-one"].map((name) => ({
+        kind: "skill",
+        name,
+        reason: "not_approved",
+      })),
+    );
   });
 
   it("ac-2: disabling personal skills hides them for that team, with a visible notice", async () => {
@@ -312,7 +327,11 @@ describe("run start resolves skills (KOBE-80)", () => {
     await seedPersonalSkill(w.owner.id, "clean-helper");
     await seedPersonalSkill(w.owner.id, "risky-helper", true);
     const thread = await pinnedThread(w.owner, {});
-    expect((await skillsOfRun(w, thread)).skills).toEqual(["clean-helper"]);
+    const first = await skillsOfRun(w, thread);
+    expect(first.skills).toEqual(["clean-helper"]);
+    expect(first.omitted).toEqual([
+      { kind: "skill", name: "risky-helper", reason: "not_approved" },
+    ]);
     // The blocked version is now in this team's queue, pending.
     const { rows } = await f.fx.admin.query(
       `SELECT slug, scope, status, flagged FROM team_skill_reviews WHERE team_id = $1`,
@@ -325,9 +344,8 @@ describe("run start resolves skills (KOBE-80)", () => {
       `UPDATE team_skill_reviews SET status = 'approved', reviewed_by = $2, reviewed_at = now() WHERE team_id = $1`,
       [w.team, w.owner.id],
     );
-    expect([...(await skillsOfRun(w, thread)).skills].sort()).toEqual([
-      "clean-helper",
-      "risky-helper",
-    ]);
+    const approved = await skillsOfRun(w, thread);
+    expect([...approved.skills].sort()).toEqual(["clean-helper", "risky-helper"]);
+    expect(approved.omitted).toEqual([]);
   });
 });

@@ -3,7 +3,7 @@ import type { ApprovalMode } from "@kobe/protocol";
 import { and, connectors, eq, teamConnectors, teamModels, type KobeTx } from "@kobe/db";
 import type { ResolveInput, SkillRef } from "../resolver/resolve.js";
 import { blockedAmong } from "../skills/blocklist.js";
-import { approvedTeamSkills, usablePersonalSkills } from "../skills/review.js";
+import { approvedTeamSkills, personalSkillUsage } from "../skills/review.js";
 import { readPersonalSkillsDisabled } from "../skills/settings.js";
 
 /**
@@ -26,6 +26,10 @@ export interface TeamResolverFacts {
 export interface SkillFacts {
   readonly agent: readonly SkillRef[];
   readonly user: readonly SkillRef[];
+  /** Agent skill names with no approved team version (KOBE-99). */
+  readonly agentUnapproved: readonly string[];
+  /** Personal skills blocked for lack of this team's approval (KOBE-99). */
+  readonly userUnapproved: readonly string[];
   /** Hashes among the two lists that the install blocklist holds (read at this run start, KOBE-81). */
   readonly blockedHashes: readonly string[];
 }
@@ -65,18 +69,25 @@ export async function loadSkillFacts(
 ): Promise<SkillFacts> {
   const [agent, user] = await Promise.all([
     approvedTeamSkills(tx, args.teamId, args.agentSkillNames),
-    usablePersonalSkills(tx, {
+    personalSkillUsage(tx, {
       teamId: args.teamId,
       userId: args.userId,
       ensureRows: !args.personalSkillsDisabled,
     }),
   ]);
+  const approved = new Set(agent.map((s) => s.name));
   // Read in the run-start transaction itself, so a hash blocked a moment ago is already dropped.
   const blockedHashes = await blockedAmong(
     tx,
-    [...agent, ...user].map((s) => s.hash),
+    [...agent, ...user.usable].map((s) => s.hash),
   );
-  return { agent, user, blockedHashes };
+  return {
+    agent,
+    user: user.usable,
+    blockedHashes,
+    agentUnapproved: [...new Set(args.agentSkillNames)].filter((n) => !approved.has(n)),
+    userUnapproved: user.blocked,
+  };
 }
 
 export function buildResolveInput(args: {
@@ -93,6 +104,7 @@ export function buildResolveInput(args: {
       modelAlias: frontmatter.model ?? null,
       approvalMode: args.versionMode,
       skills: args.skills.agent,
+      unapprovedSkills: args.skills.agentUnapproved,
       exclusiveSkills: agentSkills(frontmatter).exclusive,
       connectors: frontmatter.connectors ?? [],
     },
@@ -103,6 +115,7 @@ export function buildResolveInput(args: {
     },
     user: {
       skills: args.skills.user,
+      unapprovedSkills: args.skills.userUnapproved,
       connectedConnectors: [], // TODO(KOBE-61): the user's connected connectors
     },
     approvalFloor: args.floor,
