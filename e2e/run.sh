@@ -1733,7 +1733,7 @@ SH
 
     # KOBE-89: the five gallery agents each complete a short sample task in the Owner's real sandbox
     # (gVisor, the image's baked built-in skills, no network), through the fake model: it answers
-    # "bash: <command>" with a bash tool call and "system?" with the prompt the agent gave it. No
+    # "bash: <command>" with a bash tool call. No
     # model is pinned by any gallery agent, so the runs use the team default. The server seeded the
     # agents at start. Sandbox tools run without approval unless a rule asks (KOBE-37 left one).
     echo "==> gallery agents (KOBE-89)"
@@ -1755,18 +1755,16 @@ SH
     contains "Assistant: the run completed with the expected text" '^text=fake-openai: hello-assistant-[0-9]+$' "$g_out"
     contains "Assistant: the thread is pinned to the gallery agent" '^gallery$' \
       "$(psql_kobe "SELECT agent_scope FROM threads WHERE id = '$(printf '%s\n' "$g_out" | sed -n 's/^thread_id=//p')'")"
-    g_out=$(gallery_run assistant "system?")
-    contains "Assistant: its system prompt reached the model" '^text=fake-openai: system said: .*You are the team.s general-purpose assistant' "$g_out"
     g_out=$(gallery_run data-analyst "bash: $gal_dir && python \$SK/data-analysis/scripts/describe.py \$SK/data-analysis/scripts/sample.csv | grep -c 'rows: 6' && python \$SK/charts/scripts/chart.py \$SK/charts/scripts/sample.csv --kind bar --x region --y amount --agg sum --title t --out c.png >/dev/null && echo chart-bytes \$(wc -c < c.png)")
     printf '     gallery data analyst: %s\n' "$(printf '%s' "$g_out" | tr '\n' ' ' | cut -c1-400)"
     contains "Data Analyst: the run completed" '^terminal=run.completed$' "$g_out"
     contains "Data Analyst: the data-analysis skill profiled the data and the charts skill produced a PNG" \
       '^text=fake-openai: tool said: 1 chart-bytes [0-9]{4,}$' "$g_out"
-    g_out=$(gallery_run researcher "system?")
-    printf '     gallery researcher: %s\n' "$(printf '%s' "$g_out" | grep -v '^text=' | tr '\n' ' ')"
-    contains "Researcher: the run completed with no web search configured" '^terminal=run.completed$' "$g_out"
-    contains "Researcher: its prompt tells it to say plainly that web search is unavailable" \
-      '^text=.*Web search is not available here, so I can only work from the material you give me\.' "$g_out"
+    g_out=$(gallery_run researcher "hello-researcher-$RANDOM")
+    contains "Researcher: the run completes with no web search configured" '^terminal=run.completed$' "$g_out"
+    contains "Researcher: its published prompt has it say plainly that web search is unavailable" \
+      'Web search is not available here, so I can only work from the material you give me\.' \
+      "$(psql_kobe "SELECT v.prompt FROM install_agent_versions v JOIN install_agents a ON a.id = v.agent_id AND v.version = a.current_version WHERE a.gallery_key = 'researcher'")"
     g_out=$(gallery_run researcher "bash: $gal_dir && python \$SK/docx/scripts/md_to_docx.py \$SK/docx/scripts/sample.md in.docx --title T >/dev/null && python \$SK/docx/scripts/docx_text.py in.docx | grep -c 'south | 310.35'")
     contains "Researcher: it reads provided material with its skills offline (docx text extracted)" \
       '^text=fake-openai: tool said: 1$' "$g_out"

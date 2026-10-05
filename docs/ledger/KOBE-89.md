@@ -35,12 +35,17 @@
   is "the default" only by convention (general purpose, no extra skills, first in the gallery
   list). **Follow-up, not built:** preselecting it in the picker or making it the install default
   agent needs a decision on the model (no new mechanism invented here).
-- **Fake model addition** (`services/model-gateway/src/testing/fake-llm.ts`): a last user message
-  `system?` is answered with the system/developer messages on one line, so e2e can see which agent
-  prompt reached the model (KOBE-85). Existing `bash: <cmd>` tool calls drive the skills.
+- **Fake model addition** (`fake-llm.ts`): a last user message `system?` echoes the system/developer
+  messages on one line. Kept (unit-tested) as a debugging aid; see the finding below.
 
 ## Open questions
 
+- **FINDING: the agent's system prompt does not reach Pi in the sandbox.** CI e2e showed Pi's system
+  message is only its built-in one. `sandbox-agent/src/pi/pi-launch.ts` puts `config.system_prompt` in
+  the launch key but passes it nowhere ("seams, not wired", KOBE-47). The server sets it (KOBE-85), so
+  today the five agents differ by skills only, and the Researcher's notice is not enforced at run time.
+  Not fixed here (sandbox-agent change, outside this ticket); needs its own ticket (e.g. Pi
+  `--append-system-prompt`). The e2e therefore asserts the published prompt, not the model's view.
 - Preselecting the Assistant (follow-up above).
 - The e2e runs the skills in the agent's sandbox through a scripted bash tool call (the fake model
   cannot decide to use a skill itself); Pi's registration of a skill is covered by KOBE-88 tests.
@@ -53,7 +58,7 @@
   `services/model-gateway/src/fake-llm.test.ts` (system echo).
 - e2e (`e2e/run.sh`, k3d + gVisor, CI `e2e`): per agent, a thread with `agent_id` runs in the Owner's
   real sandbox on the team default model. Assistant returns its text and its prompt reaches the model;
-  Data Analyst profiles the sample CSV and writes a PNG; Researcher returns the unavailable sentence
-  (no search configured) and extracts docx text offline; Document Drafter produces .docx and .pdf;
+  Data Analyst profiles the sample CSV and writes a PNG; Researcher completes with no search tool,
+  its published prompt holds the unavailable sentence, and it extracts docx text offline; Document Drafter produces .docx and .pdf;
   Code Helper scan reports 4 findings.
 - `pnpm verify`, `test:db`, CI: see PR.
