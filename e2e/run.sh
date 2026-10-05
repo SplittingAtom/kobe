@@ -1848,8 +1848,13 @@ SH
       $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "
         const base = 'http://127.0.0.1:8080', origin = process.env.KOBE_PUBLIC_URL;
         const h = { origin, 'content-type': 'application/json', 'x-kobe-team': '$E2E_TEAM_ID' };
-        const login = await fetch(base + '/api/auth/sign-in/email', { method: 'POST', headers: h,
-          body: JSON.stringify({ email: 'owner@e2e.test', password: 'e2e owner password' }) });
+        let login;
+        for (let i = 0; i < 4; i++) { // sign-in is rate limited (3 per 10 s): wait out a 429
+          login = await fetch(base + '/api/auth/sign-in/email', { method: 'POST', headers: h,
+            body: JSON.stringify({ email: 'owner@e2e.test', password: 'e2e owner password' }) });
+          if (login.status !== 429) break;
+          await new Promise((r) => setTimeout(r, 11000));
+        }
         const cookie = login.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
         await fetch(base + '/v1/me/teams/active', { method: 'PUT', headers: { ...h, cookie }, body: JSON.stringify({ teamId: '$E2E_TEAM_ID' }) });
         const res = await fetch(base + process.argv[1], { headers: { ...h, cookie } });
