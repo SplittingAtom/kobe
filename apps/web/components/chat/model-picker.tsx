@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, useSyncExternalStore } from "react";
 import { modelName, type TeamModels } from "../../lib/admin/api/team/models";
 import type { ThreadController } from "../../lib/chat/thread-controller";
 import { isBusy, type ThreadState } from "../../lib/chat/thread-state";
@@ -35,6 +35,11 @@ export function ModelPicker({
   const id = useId();
   const session = useChatSession();
   const [loaded, setLoaded] = useState<Loaded>({ status: "loading" });
+  const draftAgent = useSyncExternalStore(
+    session.subscribeDraftAgent,
+    () => session.draftAgent,
+    () => null,
+  );
   const [draft, setDraft] = useState<string | null>(() => session.draftModel);
 
   // Read again for each conversation opened (cached briefly by the session).
@@ -91,7 +96,7 @@ export function ModelPicker({
 
   // The agent's pinned model wins over the conversation's choice (user decision, KOBE-44): the
   // picker shows it, locked. The pin comes from the server's agent resolver (KOBE-47 seam).
-  const agentModel = isNew ? null : (state.agentModel ?? null);
+  const agentModel = isNew ? (draftAgent?.model ?? null) : (state.agentModel ?? null);
   if (agentModel !== null) {
     const pinned = models.find((m) => m.alias === agentModel);
     const name = pinned ? modelName(pinned) : agentModel;

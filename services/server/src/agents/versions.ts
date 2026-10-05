@@ -519,12 +519,7 @@ export async function findPinnableAgent(
   const installQuery = tx
     .select({ ...INSTALL, scope: installAgents.scope })
     .from(installAgents)
-    .where(
-      and(
-        eq(installAgents.id, agentId),
-        sql`(${installAgents.scope} = 'gallery' OR (${installAgents.scope} = 'personal' AND ${installAgents.ownerUserId} = ${viewer.userId}::uuid))`,
-      ),
-    );
+    .where(and(eq(installAgents.id, agentId), installVisibleTo(viewer.userId)));
   const [own]: (Row & { scope: "personal" | "gallery" })[] = await (options.lock
     ? installQuery.for("share")
     : installQuery);
@@ -537,10 +532,23 @@ export async function findPinnableAgent(
     : record;
 }
 
+/** An agent's effective state in the viewer's team, for display (KOBE-122). */
+export function agentStatusOf(agent: AgentRecord): "active" | "suspended" | "archived" {
+  if (agent.archivedAt !== null) return "archived";
+  return agent.status === "suspended" ? "suspended" : "active";
+}
+
+/** Install-wide agents a user sees: the gallery and their own personal agents. */
+export const installVisibleTo = (userId: string) =>
+  sql`(${installAgents.scope} = 'gallery' OR (${installAgents.scope} = 'personal' AND ${installAgents.ownerUserId} = ${userId}::uuid))`;
+
 /** Why an agent can't be pinned by a new thread or a switch, if it can't. */
 function unavailable(agent: AgentRecord): boolean {
   return agent.status !== "active" || agent.archivedAt !== null || agent.currentVersion === null;
 }
+
+/** Whether a new thread may pin this agent (`status` already the team's effective one). */
+export const canPinAgent = (agent: AgentRecord): boolean => !unavailable(agent);
 
 /**
  * The pin a new thread takes for `agentId` (`POST /v1/threads`): the agent's current published

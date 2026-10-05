@@ -8,7 +8,7 @@ import type { TeamModels } from "../admin/api/team/models";
 import type { ChatApi } from "./api";
 import type { EventSourceFactory } from "./stream";
 import { ThreadController } from "./thread-controller";
-import type { ThreadSummary } from "./types";
+import type { RunnableAgent, ThreadSummary } from "./types";
 
 export interface ChatSessionOptions {
   readonly teamId: string;
@@ -41,12 +41,19 @@ export function titleFrom(text: string): string | undefined {
   return line.length > TITLE_MAX ? `${line.slice(0, TITLE_MAX - 1).trimEnd()}…` : line;
 }
 
+/** How long the agent list is reused by the picker and the header. */
+export const AGENTS_TTL_MS = 30_000;
+
 export class ChatSession {
   readonly teamId: string;
   readonly api: ChatApi;
   /** Set for the builder's test pane: threads it creates run this agent's unpublished draft. */
   get testAgentId(): string | undefined {
     return this.#options.testAgentId;
+  }
+  /** The agent picker is for the chat; the builder's test pane is fixed on its draft agent. */
+  get canChooseAgent(): boolean {
+    return this.#options.testAgentId === undefined;
   }
   readonly #options: ChatSessionOptions;
   readonly #held = new Map<string, Held>();
@@ -55,6 +62,12 @@ export class ChatSession {
   readonly #createdListeners = new Set<() => void>();
   /** Model for the thread `initialize` creates next (the new-thread picker; null = default). */
   #nextModel: string | null = null;
+  /** Agent for the thread `initialize` creates next (null = plain chat; KOBE-122). */
+  #nextAgent: RunnableAgent | null = null;
+  readonly #agentListeners = new Set<() => void>();
+  #agents:
+    | { readonly at: number; readonly result: Promise<ApiResult<readonly RunnableAgent[]>> }
+    | undefined;
   #models: { readonly at: number; readonly result: Promise<ApiResult<TeamModels>> } | undefined;
 
   constructor(options: ChatSessionOptions) {
@@ -130,6 +143,38 @@ export class ChatSession {
 
   setDraftModel(model: string | null): void {
     this.#nextModel = model;
+  }
+
+  /** The agent picked for a conversation not created yet (KOBE-122); null = plain chat. */
+  get draftAgent(): RunnableAgent | null {
+    return this.#nextAgent;
+  }
+
+  setDraftAgent(agent: RunnableAgent | null): void {
+    this.#nextAgent = agent;
+    for (const listener of this.#agentListeners) listener();
+  }
+
+  /** `useSyncExternalStore` subscription to `draftAgent`. */
+  subscribeDraftAgent = (listener: () => void): (() => void) => {
+    this.#agentListeners.add(listener);
+    return () => this.#agentListeners.delete(listener);
+  };
+
+  /** The draft's agent for the thread being created; the next draft starts as a plain chat. */
+  takeNextAgent(): RunnableAgent | null {
+    const agent = this.#nextAgent;
+    this.setDraftAgent(null);
+    return agent;
+  }
+
+  /** Agents the user can run in this team, reused for `AGENTS_TTL_MS`. */
+  agents(): Promise<ApiResult<readonly RunnableAgent[]>> {
+    const now = Date.now();
+    if (this.#agents && now - this.#agents.at < AGENTS_TTL_MS) return this.#agents.result;
+    const result = this.api.runnableAgents();
+    this.#agents = { at: now, result };
+    return result;
   }
 
   /** The draft's model for the thread being created; the next draft starts from the default. */
