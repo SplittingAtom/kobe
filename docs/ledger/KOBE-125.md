@@ -40,4 +40,9 @@ PR #65/#92/#91/#93 failure logs have expired, so (2) is inferred from the code p
 
 - Unit tests: transient failures then verified (stays `checking`), exhausted attempts -> `missing`.
 - `pnpm verify` passes locally.
-- CI runs: see below.
+- Repeated workflow_dispatch runs of the e2e workflow (3 shards each) on the fixed branch: 5 of 6
+  passed (37305969485, 37307744042, 37311186383, 37312928615, 37314725567); the sixth
+  (37309447809) failed in gate1's "Load the images into k3d" (docker.sock closed pipe), an
+  unrelated runner infra error, with no isolation-check failure. The loop was stopped early on the
+  coordinator's request, so the 20-run target (ac-2) is NOT met: 5 full consecutive-ish passes
+  plus the PR run. Before the SIGPIPE fix, the first dispatch run reproduced the flake.
