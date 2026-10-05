@@ -91,6 +91,7 @@ export interface BreakGlassThread {
   readonly lastActivityAt: Date;
   readonly createdAt: Date;
   readonly deletedAt: Date | null;
+  readonly isTest: boolean;
 }
 
 export interface BreakGlassEntry {
@@ -183,6 +184,7 @@ const threadColumns = {
   lastActivityAt: threads.lastActivityAt,
   createdAt: threads.createdAt,
   deletedAt: threads.deletedAt,
+  isTest: threads.isTest,
 };
 
 function scopeOf(row: { userId: string | null; threadId: string | null }): BreakGlassScope {

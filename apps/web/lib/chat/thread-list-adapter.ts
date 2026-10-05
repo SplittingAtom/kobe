@@ -82,8 +82,13 @@ export function createThreadListAdapter(
     },
 
     async initialize() {
+      const test = session.testAgentId;
       const created = await unwrap(
-        api.createThread(session.takeNextTitle(), session.takeNextModel()),
+        api.createThread(
+          session.takeNextTitle(),
+          session.takeNextModel(),
+          test === undefined ? undefined : { agentId: test },
+        ),
       );
       session.seed(created);
       return { remoteId: created.threadId, externalId: undefined };

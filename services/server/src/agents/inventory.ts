@@ -113,7 +113,8 @@ const inventoryRows = (teamId: string) => sql`
     LEFT JOIN team_agent_suspensions s ON s.team_id = ${teamId} AND s.agent_id = i.id
    WHERE i.id IN (
      SELECT t.install_agent_id FROM threads t
-      WHERE t.team_id = ${teamId} AND t.install_agent_id IS NOT NULL AND t.deleted_at IS NULL)`;
+      WHERE t.team_id = ${teamId} AND t.install_agent_id IS NOT NULL AND t.deleted_at IS NULL
+        AND NOT t.is_test)`;
 
 export async function listInventory(
   db: KobeDb,
@@ -131,9 +132,9 @@ export async function listInventory(
         SELECT page.id AS agent_id, count(r.id) AS run_count, max(r.created_at) AS last_run_at
           FROM page
           JOIN LATERAL (
-            SELECT t.id FROM threads t WHERE t.team_id = ${teamId} AND t.team_agent_id = page.id
+            SELECT t.id FROM threads t WHERE t.team_id = ${teamId} AND t.team_agent_id = page.id AND NOT t.is_test
             UNION ALL
-            SELECT t.id FROM threads t WHERE t.team_id = ${teamId} AND t.install_agent_id = page.id
+            SELECT t.id FROM threads t WHERE t.team_id = ${teamId} AND t.install_agent_id = page.id AND NOT t.is_test
           ) th ON true
           JOIN runs r ON r.team_id = ${teamId} AND r.thread_id = th.id
          GROUP BY page.id),
@@ -169,7 +170,7 @@ async function usedInstallAgent(
     SELECT i.slug, i.scope::text AS scope FROM install_agents i
      WHERE i.id = ${id}::uuid AND EXISTS (
        SELECT 1 FROM threads t WHERE t.team_id = ${teamId} AND t.install_agent_id = i.id
-         AND t.deleted_at IS NULL)`);
+         AND t.deleted_at IS NULL AND NOT t.is_test)`);
   return result.rows[0] ?? null;
 }
 

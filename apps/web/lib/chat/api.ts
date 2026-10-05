@@ -43,7 +43,13 @@ export interface ChatApi {
   searchThreads(q: string, cursor?: string): Promise<ApiResult<ThreadSearchPage>>;
   listTrash(cursor?: string): Promise<ApiResult<ThreadPage>>;
   /** A new thread; `model` is an enabled alias, or null/absent for the team default (KOBE-44). */
-  createThread(title?: string, model?: string | null): Promise<ApiResult<ThreadSummary>>;
+  createThread(
+    title?: string,
+    model?: string | null,
+    test?: { readonly agentId: string },
+  ): Promise<ApiResult<ThreadSummary>>;
+  /** Clears the caller's builder test threads of one agent (KOBE-85); they go to Trash, hidden. */
+  clearTestThreads(agentId: string): Promise<ApiResult<{ readonly cleared: number }>>;
   /** Sets the thread's model for its next runs (an enabled alias; null = the team default). */
   setThreadModel(threadId: string, model: string | null): Promise<ApiResult<ThreadSummary>>;
   /** The install catalog with the team's enabled models and default (`GET /v1/team/models`). */
@@ -106,11 +112,14 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     listThreads: (cursor) => get(`/v1/threads${query({ cursor })}`),
     searchThreads: (q, cursor) => get(`/v1/threads${query({ q, cursor })}`),
     listTrash: (cursor) => get(`/v1/threads/trash${query({ cursor })}`),
-    createThread: (title, model) =>
+    createThread: (title, model, test) =>
       send("POST", "/v1/threads", {
         ...(title === undefined ? {} : { title }),
         ...(model === undefined || model === null ? {} : { model }),
+        ...(test === undefined ? {} : { agent_id: test.agentId, test: true }),
       }),
+    clearTestThreads: (agentId) =>
+      send("DELETE", `/v1/threads/test${query({ agent_id: agentId })}`),
     setThreadModel: (id, model) => send("PATCH", `/v1/threads/${enc(id)}`, { model }),
     listModels: () => listTeamModels(teamId, fetchFn),
     getThread: (id, after = 0) =>

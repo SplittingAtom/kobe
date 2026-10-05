@@ -27,6 +27,7 @@ import { Field } from "./field";
 import { FrontmatterForm } from "./frontmatter-form";
 import { OrbitExportButton } from "./orbit-export-button";
 import { PublishDialog } from "./publish-dialog";
+import { AgentTestPane } from "./test-pane";
 import { VersionHistory } from "./version-history";
 
 export type BuilderScope = "team" | "personal";
@@ -111,6 +112,7 @@ function Builder({
   const [publishing, setPublishing] = useState(false);
   const [published, setPublished] = useState<string | null>(null);
   const [historyKey, setHistoryKey] = useState(0);
+  const [testing, setTesting] = useState(false);
   const mutation = useMutation();
   const publishButton = useRef<HTMLButtonElement>(null);
 
@@ -273,6 +275,27 @@ function Builder({
           </div>
         )}
       </form>
+      {agent && !readOnly && (
+        <section aria-labelledby="test-chat-heading">
+          <h2 id="test-chat-heading">Test chat</h2>
+          <p className={adminStyles.hint}>
+            Chat with the unpublished draft as last saved{dirty ? " (save your edits first)" : ""}.
+            It runs with the same policy, approvals and budgets as a published agent.
+          </p>
+          {testing ? (
+            <>
+              <AgentTestPane key={agent.id} teamId={teamId} agentId={agent.id} />
+              <button type="button" onClick={() => setTesting(false)}>
+                Close test chat
+              </button>
+            </>
+          ) : (
+            <button type="button" onClick={() => setTesting(true)}>
+              Test chat
+            </button>
+          )}
+        </section>
+      )}
       {agent && canExport && agent.currentVersion !== null && (
         <div className={styles.toolbar}>
           <OrbitExportButton

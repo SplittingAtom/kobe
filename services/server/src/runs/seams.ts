@@ -25,8 +25,11 @@ export interface AgentResolutionInput {
 export type AgentResolution =
   | {
       readonly ok: true;
-      /** The exact version the run uses; null = the install default agent. */
-      readonly agent: { readonly agentId: string; readonly version: number } | null;
+      /**
+       * The exact version the run uses; null = the install default agent. `version` null = the
+       * agent's draft (a builder test thread, KOBE-85).
+       */
+      readonly agent: { readonly agentId: string; readonly version: number | null } | null;
       /**
        * The run's effective mode: the input's, made stricter by the pinned version's manifest
        * (KOBE-46 `effectiveApprovalMode`). Never looser than the input.

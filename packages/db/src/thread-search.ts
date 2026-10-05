@@ -242,6 +242,7 @@ function searchQuery(
       FROM threads t
       WHERE t.team_id = ${teamId}
         AND t.deleted_at IS NULL
+        AND NOT t.is_test
         AND (t.owner_user_id = ${p.viewerUserId}
              OR (t.shared_to_project AND t.project_id = ANY(${sql.param(p.projectIds)}::uuid[])))
         ${projectFilter}

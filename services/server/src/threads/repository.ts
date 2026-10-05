@@ -20,7 +20,12 @@ import {
   type UpdateThreadBody,
 } from "./schemas.js";
 import { recordAudit } from "../audit/record.js";
-import { resolveSwitchPin, type AgentPin, type PinError } from "../agents/versions.js";
+import {
+  resolveSwitchPin,
+  type AgentPin,
+  type DraftPin,
+  type PinError,
+} from "../agents/versions.js";
 import { isModelEnabled } from "../models/team-store.js";
 
 /**
@@ -95,6 +100,7 @@ const summaryColumns = {
   lastActivityAt: threads.lastActivityAt,
   createdAt: threads.createdAt,
   deletedAt: threads.deletedAt,
+  isTest: threads.isTest,
 };
 
 type SummaryRow = {
@@ -112,6 +118,7 @@ type SummaryRow = {
   lastActivityAt: Date;
   createdAt: Date;
   deletedAt: Date | null;
+  isTest: boolean;
 };
 
 export function toSummary(row: SummaryRow): ThreadSummary {
@@ -128,6 +135,7 @@ export function toSummary(row: SummaryRow): ThreadSummary {
     leaf_entry_id: row.leafEntryId,
     last_activity_at: row.lastActivityAt.toISOString(),
     created_at: row.createdAt.toISOString(),
+    is_test: row.isTest,
     deleted_at: row.deletedAt?.toISOString() ?? null,
     purge_after: row.deletedAt
       ? new Date(row.deletedAt.getTime() + TRASH_RETENTION_DAYS * DAY_MS).toISOString()
@@ -193,7 +201,7 @@ export async function listThreads(
         // Explicit, not only in `scope` and RLS: see the KOBE-16 note in packages/db/README.md.
         eq(threads.teamId, viewer.teamId),
         scope,
-        sql`${threads.deletedAt} IS NULL`,
+        sql`${threads.deletedAt} IS NULL AND NOT ${threads.isTest}`,
         options.cursor ? after(threads.lastActivityAt, options.cursor) : undefined,
       ),
     )
@@ -215,7 +223,7 @@ export async function listTrash(
       and(
         eq(threads.teamId, viewer.teamId),
         eq(threads.ownerUserId, viewer.userId),
-        sql`${threads.deletedAt} > now() - ${TRASH_INTERVAL}`,
+        sql`${threads.deletedAt} > now() - ${TRASH_INTERVAL} AND NOT ${threads.isTest}`,
         options.cursor ? after(threads.deletedAt, options.cursor) : undefined,
       ),
     )
@@ -230,19 +238,24 @@ export async function createThread(
     teamId: string;
     ownerUserId: string;
     projectId: string | null;
-    /** The published agent version the thread pins (D19); null = the install default agent. */
-    agent: AgentPin | null;
+    /**
+     * The published agent version the thread pins (D19); null = the install default agent. A
+     * `DraftPin` (no version) makes it a builder test thread (KOBE-85): pass `isTest`.
+     */
+    agent: AgentPin | DraftPin | null;
+    isTest?: boolean;
     title: string | null;
     /** The thread's model alias (KOBE-44); the caller checked the team enabled it. */
     modelAlias?: string | null;
   },
 ): Promise<ThreadSummary> {
-  const { agent, modelAlias, ...rest } = input;
+  const { agent, modelAlias, isTest, ...rest } = input;
   const [row] = await tx
     .insert(threads)
     .values({
       ...rest,
       modelAlias: modelAlias ?? null,
+      isTest: isTest ?? false,
       agentScope: agent?.agentScope ?? null,
       agentId: agent?.agentId ?? null,
       agentVersion: agent?.agentVersion ?? null,
@@ -532,4 +545,34 @@ export async function listEntries(
     })),
     nextAfter: rows.length > limit ? (page.at(-1)?.seq ?? null) : null,
   };
+}
+
+/**
+ * Clears the viewer's own test threads (KOBE-85), all or those of one agent: moves them to Trash
+ * (soft delete, so their runs and `run_usage` stay for budgets; Trash lists never show them and
+ * the retention purge removes them later). Threads with an active or queued run are skipped
+ * (stop them first). Not audited: they are throwaway, and nothing is shared. Returns the count.
+ */
+export async function clearTestThreads(
+  tx: KobeTx,
+  viewer: Viewer,
+  options: { agentId?: string | undefined },
+): Promise<number> {
+  const busy = sql`EXISTS (SELECT 1 FROM ${runs} r WHERE r.team_id = ${threads.teamId}
+    AND r.thread_id = ${threads.id} AND r.status IN ('queued', 'running', 'waiting_approval'))`;
+  const rows = await tx
+    .update(threads)
+    .set({ deletedAt: sql`now()` })
+    .where(
+      and(
+        eq(threads.teamId, viewer.teamId),
+        eq(threads.ownerUserId, viewer.userId),
+        eq(threads.isTest, true),
+        sql`${threads.deletedAt} IS NULL`,
+        options.agentId === undefined ? undefined : eq(threads.agentId, options.agentId),
+        sql`NOT ${busy}`,
+      ),
+    )
+    .returning({ id: threads.id });
+  return rows.length;
 }

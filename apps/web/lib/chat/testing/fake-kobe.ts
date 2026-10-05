@@ -25,6 +25,9 @@ interface FakeThread {
   model: string | null;
   /** The model the thread's agent pins (KOBE-44/47 seam); it wins over `model`. */
   agent_model?: string | null;
+  /** A builder test thread (KOBE-85): the draft's agent, no version, out of the lists. */
+  is_test?: boolean;
+  agent_id?: string | null;
   entries: FakeEntry[];
 }
 
@@ -337,8 +340,9 @@ export class FakeKobe {
       ...rest,
       owner_user_id: uuid(3, 1),
       project_id: null,
-      agent_id: null,
+      agent_id: thread.agent_id ?? null,
       agent_version: null,
+      is_test: thread.is_test ?? false,
       shared_to_project: false,
       purge_after: thread.deleted_at === null ? null : "2026-11-01T10:00:00.000Z",
     };
@@ -514,7 +518,7 @@ export class FakeKobe {
     if (id === undefined && method === "GET") {
       const q = url.searchParams.get("q");
       const list = [...this.threads.values()]
-        .filter((t) => t.deleted_at === null)
+        .filter((t) => t.deleted_at === null && t.is_test !== true)
         .filter((t) => q === null || (t.title ?? "").toLowerCase().includes(q.toLowerCase()))
         .sort((a, b) => b.last_activity_at.localeCompare(a.last_activity_at));
       const threads = list.map((t) =>
@@ -533,11 +537,23 @@ export class FakeKobe {
       const trash = [...this.threads.values()].filter((t) => t.deleted_at !== null);
       return json(200, { threads: trash.map((t) => this.#summary(t)), next_cursor: null });
     }
+    if (id === "test" && method === "DELETE") {
+      const agent = url.searchParams.get("agent_id");
+      const mine = [...this.threads.values()].filter(
+        (t) =>
+          t.is_test === true && t.deleted_at === null && (agent === null || t.agent_id === agent),
+      );
+      for (const t of mine) t.deleted_at = NOW;
+      return json(200, { cleared: mine.length });
+    }
     if (id === undefined && method === "POST") {
       const model = (body?.model as string | null | undefined) ?? null;
       if (model !== null && !this.#modelEnabled(model)) return this.#modelNotEnabled();
       const threadId = this.addThread((body?.title as string | undefined) ?? null);
       this.#thread(threadId).model = model;
+      if (body?.test === true) {
+        Object.assign(this.#thread(threadId), { is_test: true, agent_id: body.agent_id ?? null });
+      }
       return json(201, this.#summary(this.#thread(threadId)));
     }
     const thread = id === undefined ? undefined : this.threads.get(id);

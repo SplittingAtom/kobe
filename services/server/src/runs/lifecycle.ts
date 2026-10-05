@@ -40,7 +40,7 @@ export interface StartPlan {
   readonly input: string;
   readonly parentEntryId: string | null;
   readonly approvalMode: ApprovalMode;
-  readonly agent: { readonly agentId: string; readonly version: number } | null;
+  readonly agent: { readonly agentId: string; readonly version: number | null } | null;
   readonly config?: Omit<PiThreadConfig, "agent" | "approval_mode">;
   /** What the resolver left out of the run's configuration (KOBE-76). */
   readonly omissions: readonly Omission[];

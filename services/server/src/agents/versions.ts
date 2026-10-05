@@ -16,6 +16,7 @@ import {
 } from "@kobe/db";
 import { canonicalJson } from "@kobe/protocol";
 import { recordAudit } from "../audit/record.js";
+import { agentAccess, type AgentActor } from "./access.js";
 import { readPublishFloor } from "./floor.js";
 import { computeToolManifest, toolManifestSchema, type ToolManifest } from "./manifest.js";
 import {
@@ -469,6 +470,13 @@ export interface AgentPin {
   readonly agentVersion: number;
 }
 
+/** A test thread's pin (KOBE-85): the agent, with no version: it runs the draft as it is. */
+export interface DraftPin {
+  readonly agentScope: AgentScope;
+  readonly agentId: string;
+  readonly agentVersion: null;
+}
+
 /** Who is asking, inside the thread's `withTeam` transaction. */
 export interface PinViewer {
   readonly teamId: string;
@@ -545,6 +553,25 @@ export async function resolveAgentPin(
 }
 
 /**
+ * The pin of a builder test thread (KOBE-85): the agent's draft, never a version. Only someone who
+ * may edit the agent can test it (anything else is "not found"); suspended and archived agents
+ * can't, like for any thread. A draft that was never published is fine.
+ */
+export async function resolveDraftPin(
+  tx: KobeTx,
+  viewer: PinViewer,
+  actor: AgentActor,
+  agentId: string,
+): Promise<Result<DraftPin, PinError>> {
+  const agent = await findPinnableAgent(tx, viewer, agentId, { lock: true });
+  if (!agent || !agentAccess(actor, agent).edit) return { ok: false, error: "agent_not_found" };
+  if (agent.status !== "active" || agent.archivedAt !== null) {
+    return { ok: false, error: "agent_unavailable" };
+  }
+  return { ok: true, value: { agentScope: agent.scope, agentId: agent.id, agentVersion: null } };
+}
+
+/**
  * The pin for switching an existing thread (one-click switch, D19): `version` (default: the
  * agent's current version) of the agent the thread is already pinned to, in the same scope.
  */
@@ -587,7 +614,8 @@ export type PinnedAgent =
   | {
       readonly ok: true;
       readonly agent: AgentRecord;
-      readonly version: AgentVersionRecord;
+      /** `version.version` is null for a test thread's draft (KOBE-85). */
+      readonly version: Omit<AgentVersionRecord, "version"> & { readonly version: number | null };
     }
   | {
       readonly ok: false;
@@ -620,4 +648,38 @@ export async function resolvePinnedAgent(
     if (err instanceof UnreadableVersionError) return { ok: false, error: "version_unreadable" };
     throw err;
   }
+}
+
+/**
+ * The builder test pane's counterpart of `resolvePinnedAgent` (KOBE-85): the agent's draft as it
+ * is at this run start, shaped like a version so everything after it (resolver, approval floor,
+ * budgets, policy) is the same path as a published run. The manifest is computed exactly as at
+ * publish, against today's floor. An invalid draft is `version_unreadable` (the run fails).
+ */
+export async function resolveDraftAgent(
+  tx: KobeTx,
+  owner: PinViewer,
+  pin: Pick<DraftPin, "agentScope" | "agentId">,
+): Promise<PinnedAgent> {
+  const agent = await findPinnableAgent(tx, owner, pin.agentId);
+  if (!agent || agent.scope !== pin.agentScope) return { ok: false, error: "agent_not_found" };
+  if (agent.status === "suspended") return { ok: false, error: "agent_suspended" };
+  const draft = validateAgentDefinition({ frontmatter: agent.frontmatter, prompt: agent.prompt });
+  if (!draft.ok) return { ok: false, error: "version_unreadable" };
+  const now = new Date();
+  const floor = await readPublishFloor(tx, agent.scope === "team" ? "team" : "install");
+  return {
+    ok: true,
+    agent,
+    version: {
+      version: null,
+      agentId: agent.id,
+      publishedBy: owner.userId,
+      publishedAt: now,
+      draftRevision: agent.revision,
+      republishedFrom: null,
+      definition: draft.definition,
+      toolManifest: computeToolManifest(draft.definition.frontmatter, floor, now),
+    },
+  };
 }
