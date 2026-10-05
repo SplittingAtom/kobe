@@ -1563,7 +1563,7 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
     if until_ok 180 owner_closed; then ok "no scripted agent holds the Owner's sandbox identity any more"
     else fail "no scripted agent holds the Owner's sandbox identity any more"; fi
     read -r -d '' CHAT_JS <<'JS' || true
-const [team, content, timeoutMs, model, agentId, reuseThread] = process.argv.slice(1);
+const [team, content, timeoutMs, model, agentId, reuseThread, approveAll] = process.argv.slice(1);
 const base = "http://127.0.0.1:" + process.env.PORT;
 const origin = new URL(process.env.KOBE_PUBLIC_URL).origin;
 const jar = new Map();
@@ -1596,6 +1596,11 @@ const sent = await call("POST", "/v1/threads/" + thread.json.thread_id + "/messa
 out("message", sent.status);
 const runId = sent.json.run_id;
 out("run", runId);
+// KOBE-131: artifact writes are approval-gated in ask-on-write (D23/D29): allow what the run asks.
+const approvals = approveAll ? setInterval(async () => {
+  const list = await call("GET", "/v1/approvals?status=pending&run_id=" + runId);
+  for (const a of list.json.approvals || []) await call("POST", "/v1/approvals/" + a.approval_id, { decision: "allow" });
+}, 1000) : undefined;
 // Follow the run's event stream until a terminal event (the sandbox may have to wake first).
 const controller = new AbortController();
 const timer = setTimeout(() => controller.abort(), Number(timeoutMs));
@@ -1631,6 +1636,7 @@ try {
   }
 } catch (e) { out("stream_error", e.name); }
 clearTimeout(timer);
+if (approvals) clearInterval(approvals);
 out("waking", waking);
 out("started_model", startedModel);
 out("first_token_ms", first ?? "-");
@@ -1640,8 +1646,8 @@ out("code", code);
 out("error_message", errorMessage);
 out("text", text);
 JS
-    chat_run() { # content timeout-ms [model] [agent-id] [thread-id] → the CHAT_JS output (not `chat`: KOBE-40's helper above)
-      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$CHAT_JS" "$E2E_TEAM_ID" "$1" "$2" "${3:-}" "${4:-}" "${5:-}" 2>&1 | tail -16
+    chat_run() { # content timeout-ms [model] [agent-id] [thread-id] [approve-all] → the CHAT_JS output (not `chat`: KOBE-40's helper above)
+      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$CHAT_JS" "$E2E_TEAM_ID" "$1" "$2" "${3:-}" "${4:-}" "${5:-}" "${6:-}" 2>&1 | tail -16
     }
     chat_out=$(chat_run "hello-pi-$RANDOM" 300000)
     printf '     chat: %s\n' "$(printf '%s' "$chat_out" | grep -v '^text=' | tr '\n' ' ')"
@@ -1827,7 +1833,7 @@ SH
     echo "==> artifacts (KOBE-131)"
     art_html='<!doctype html><html><body><h1 id=t>Sales</h1><script>document.getElementById("t").textContent="Sales chart"</script></body></html>'
     art_new="${art_html/Sales chart/Sales chart v2}"
-    art_out=$(chat_run "tool: create_artifact {\"kind\":\"html\",\"title\":\"Sales chart\",\"content\":\"${art_html//\"/\\\"}\"}" 300000 "" "$(gallery_id data-analyst)")
+    art_out=$(chat_run "tool: create_artifact {\"kind\":\"html\",\"title\":\"Sales chart\",\"content\":\"${art_html//\"/\\\"}\"}" 300000 "" "$(gallery_id data-analyst)" "" 1)
     printf '     artifact create: %s\n' "$(printf '%s' "$art_out" | tr '\n' ' ' | cut -c1-500)"
     art_thread=$(printf '%s\n' "$art_out" | sed -n 's/^thread_id=//p')
     contains "artifacts: the run completed" '^terminal=run.completed$' "$art_out"
@@ -1862,7 +1868,7 @@ SH
     contains "artifacts: the frame CSP forbids network access from the page (connect-src none)" \
       "^h:content-security-policy=.*connect-src 'none'" "$art_frame"
     contains "artifacts: the frame sends X-Frame-Options SAMEORIGIN" '^h:x-frame-options=SAMEORIGIN$' "$art_frame"
-    art_out=$(chat_run "tool: update_artifact {\"artifact_id\":\"$art_id\",\"content\":\"${art_new//\"/\\\"}\"}" 300000 "" "" "$art_thread")
+    art_out=$(chat_run "tool: update_artifact {\"artifact_id\":\"$art_id\",\"content\":\"${art_new//\"/\\\"}\"}" 300000 "" "" "$art_thread" 1)
     printf '     artifact update: %s\n' "$(printf '%s' "$art_out" | tr '\n' ' ' | cut -c1-500)"
     contains "artifacts: the update run completed" '^terminal=run.completed$' "$art_out"
     contains "artifacts: the event stream carried artifact.updated (version 2)" \

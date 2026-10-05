@@ -27,7 +27,7 @@ calling `create_artifact` / `update_artifact`; KOBE-55 evidence.
   `artifact.created/updated` events it saw. The section creates an HTML artifact with an inline script
   through the Data Analyst, then checks the event, the list, the content bytes, the `/frame` headers
   (CSP `sandbox allow-scripts allow-forms`, `connect-src 'none'`, `X-Frame-Options: SAMEORIGIN`), then
-  updates it to version 2 and checks the detail lists two versions. Not run locally (CI's e2e job).
+  updates it to version 2 (artifact writes are approval-gated in ask-on-write, `riskClassPrompts`, so `CHAT_JS` takes an approve-all flag and allows pending approvals; the first CI run hung on that) and checks the detail lists two versions. Not run locally (CI's e2e job).
 
 ## Open questions (for Chris or the coordinator)
 
