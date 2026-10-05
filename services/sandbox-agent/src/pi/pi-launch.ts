@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { PiThreadConfig } from "@kobe/protocol";
+import { KOBE_TOOLS_FD, type PiThreadConfig } from "@kobe/protocol";
 
 /**
  * How a thread's `pi --mode rpc` process is started.
@@ -28,6 +28,8 @@ import type { PiThreadConfig } from "@kobe/protocol";
  * under `$HOME` or `/workspace`.
  */
 export const POLICY_CHANNEL_FD = 3;
+/** The kobe-tools channel (KOBE-128, artifacts.ts): fd 4, only when the extension is loaded. */
+export const TOOLS_CHANNEL_FD = KOBE_TOOLS_FD;
 
 export const PI_LOCKDOWN_ARGS = [
   "--no-extensions",
@@ -45,6 +47,8 @@ export interface PiLaunch {
   readonly env: Readonly<Record<string, string>>;
   /** Identity of the launch: a running process with a different key is restarted when idle. */
   readonly key: string;
+  /** Pi gets the kobe-tools channel as its fd 4 (the process is spawned with a fifth pipe). */
+  readonly toolsChannel: boolean;
   /**
    * The agent's system prompt (KOBE-123), when the run has a non-empty one. Never an argument: the
    * thread writes it to a file in Pi's runtime directory at spawn and adds
@@ -63,6 +67,12 @@ export interface PiLaunchInput {
    * per-process model file, so a model change between runs never restarts Pi.
    */
   readonly modelsExtension?: string | undefined;
+  /**
+   * kobe-tools (KOBE-128): a root-owned, read-only file that registers Kobe's own tools, loaded
+   * right before kobe-policy (which therefore checks its calls) and given the channel on fd 4.
+   * Absent: no fd 4, no tools (the agent then does not announce the `artifacts` capability).
+   */
+  readonly toolsExtension?: string | undefined;
   /**
    * The kobe-policy extension (KOBE-36): a root-owned, read-only file. Always loaded, always the
    * **last** `-e`: Pi runs `tool_call` handlers in extension load order (verified Pi 1.0.0), so the
@@ -88,13 +98,19 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
   const policy = path.resolve(input.policyExtension);
   const models =
     input.modelsExtension === undefined ? undefined : path.resolve(input.modelsExtension);
+  const tools = input.toolsExtension === undefined ? undefined : path.resolve(input.toolsExtension);
   for (const extension of input.extensions ?? []) {
     // kobe-policy only once, last: a second copy would find the channel taken and block everything.
     const resolved = extension.startsWith("builtin:") ? undefined : path.resolve(extension);
-    if (resolved !== undefined && (resolved === policy || resolved === models)) continue;
+    if (
+      resolved !== undefined &&
+      (resolved === policy || resolved === models || resolved === tools)
+    )
+      continue;
     args.push("--extension", extension);
   }
   if (input.modelsExtension !== undefined) args.push("--extension", input.modelsExtension);
+  if (input.toolsExtension !== undefined) args.push("--extension", input.toolsExtension);
   args.push("--extension", input.policyExtension);
   for (const dir of input.skillDirs ?? []) args.push("--skill", path.resolve(dir));
   const config = input.config;
@@ -117,6 +133,7 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
   // Pi is a Node process the tools it runs can signal: SIGUSR1 must not open an inspector in it.
   env.NODE_OPTIONS = "--disable-sigusr1";
   env.KOBE_POLICY_FD = String(POLICY_CHANNEL_FD);
+  if (input.toolsExtension !== undefined) env.KOBE_TOOLS_FD = String(TOOLS_CHANNEL_FD);
 
   // The model is deliberately not part of the key (see `modelsExtension`).
   const key = JSON.stringify({
@@ -133,6 +150,7 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
     args,
     env,
     key,
+    toolsChannel: input.toolsExtension !== undefined,
     ...(systemPrompt === undefined || systemPrompt === "" ? {} : { systemPrompt }),
   };
 }

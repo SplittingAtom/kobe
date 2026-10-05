@@ -11,6 +11,8 @@ import {
   type PolicyChannelCheck,
   type PolicyChannelReply,
 } from "../policy/channel.js";
+import { ToolsChannel } from "../tools/channel.js";
+import type { KobeToolsRequest, KobeToolsResponse } from "@kobe/protocol";
 import { PiProcess, PiProcessError, type PiExit, type PiRecord } from "../pi/pi-process.js";
 import type { PiIdentities, PiIdentity } from "../pi/identities.js";
 import type { PiLaunch } from "../pi/pi-launch.js";
@@ -73,6 +75,15 @@ export interface ThreadHooks {
   readonly policyCancel?: (threadId: string, requestId: string) => void;
   /** The thread's policy channel is unusable: every pending check of the thread is denied. */
   readonly policyChannelClosed: (threadId: string, reason: string) => void;
+  /** kobe-tools asked for an artifact (KOBE-128); absent: no tools channel is served. */
+  readonly toolsRequest?: (
+    threadId: string,
+    runId: string | undefined,
+    request: KobeToolsRequest,
+    reply: (response: KobeToolsResponse) => void,
+  ) => void;
+  /** The thread's tools channel is unusable: every pending request of the thread fails. */
+  readonly toolsChannelClosed?: (threadId: string, reason: string) => void;
   readonly diagnostic: (threadId: string, message: string) => void;
   /** Something went wrong that does not end a run but an operator should see (warn level). */
   readonly warning?: (threadId: string, message: string) => void;
@@ -94,6 +105,8 @@ export interface ThreadEnv {
   readonly egress?: EgressWiring | undefined;
   /** The kobe-policy extension (root-owned file), loaded last into every Pi (KOBE-36). */
   readonly policyExtension: string;
+  /** The kobe-tools extension (root-owned file, KOBE-128); absent: no tools, no fd 4. */
+  readonly toolsExtension?: string | undefined;
   /** Other root-owned extension paths loaded with `-e`, before kobe-policy. */
   readonly extensions?: readonly string[];
   /** How long a new Pi may take to report kobe-policy ready (default {@link POLICY_READY_TIMEOUT_MS}). */
@@ -288,6 +301,7 @@ export class Thread {
         onUiRequest: (request) => this.#onUiRequest(pi, request),
         onExit: (exit) => this.#onExit(pi, exit),
         onDiagnostic: (message) => this.#hooks.diagnostic(this.id, message),
+        ...(launch.toolsChannel ? { toolsChannel: true } : {}),
         ...(identity === undefined || identities === undefined
           ? {}
           : { runAs: { identities, identity } }),
@@ -318,6 +332,16 @@ export class Thread {
         onDiagnostic: (message) => this.#hooks.diagnostic(this.id, message),
       });
       channel = opened;
+    }
+    const toolsControl = pi.toolsControl;
+    if (toolsControl !== undefined) {
+      const opened: ToolsChannel = new ToolsChannel(toolsControl, {
+        onRequest: (request, reply) =>
+          this.#hooks.toolsRequest?.(this.id, this.#run?.runId, request, reply),
+        onClosed: (reason) => this.#hooks.toolsChannelClosed?.(this.id, reason),
+        onDiagnostic: (message) => this.#hooks.diagnostic(this.id, message),
+      });
+      void opened;
     }
     this.#pi = pi;
     this.#policy = channel;

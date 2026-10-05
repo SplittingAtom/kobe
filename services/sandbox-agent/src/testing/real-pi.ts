@@ -29,6 +29,14 @@ if (process.env.CI !== undefined && !existsSync(REAL_POLICY_EXTENSION)) {
   throw new Error(`kobe-policy is not built: ${REAL_POLICY_EXTENSION} (run pnpm build first)`);
 }
 
+/** kobe-tools (KOBE-128), same rule as kobe-policy. */
+export const REAL_TOOLS_EXTENSION =
+  process.env.KOBE_TEST_TOOLS_EXTENSION ??
+  path.join(
+    PACKAGE,
+    process.env.CI === undefined ? "src/kobe-tools/index.ts" : "dist/kobe-tools/index.js",
+  );
+
 /** Test-only Pi extensions (scripted model, an input-mutating handler). */
 export const FAUX_MODEL_EXTENSION = path.join(HERE, "pi-extensions/faux-model.mjs");
 export const MUTATE_INPUT_EXTENSION = path.join(HERE, "pi-extensions/mutate-input.mjs");

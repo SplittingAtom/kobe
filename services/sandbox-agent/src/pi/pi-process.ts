@@ -49,6 +49,8 @@ export interface PiProcessOptions {
    * another uid, so stopping goes through the helper too.
    */
   readonly runAs?: { readonly identities: PiIdentities; readonly identity: PiIdentity };
+  /** Also give Pi a fifth pipe as fd 4: the kobe-tools channel (KOBE-128). */
+  readonly toolsChannel?: boolean;
 }
 
 interface Pending {
@@ -88,7 +90,10 @@ export class PiProcess {
     this.#child = spawn(file, args, {
       cwd: options.cwd,
       env: { ...options.env },
-      stdio: ["pipe", "pipe", "pipe", "pipe"],
+      stdio:
+        options.toolsChannel === true
+          ? ["pipe", "pipe", "pipe", "pipe", "pipe"]
+          : ["pipe", "pipe", "pipe", "pipe"],
       detached: true,
       windowsHide: true,
     });
@@ -104,6 +109,7 @@ export class PiProcess {
     // EPIPE after the child died surfaces here; the exit handler reports it.
     this.#child.stdin?.on("error", () => undefined);
     this.control?.on("error", () => undefined);
+    this.toolsControl?.on("error", () => undefined);
 
     this.#exited = new Promise((resolve) => {
       const finish = (exitCode: number | null, signal: string | null) => {
@@ -111,6 +117,7 @@ export class PiProcess {
         this.#exit = { exitCode, signal, stderrTail: this.#stderrTail };
         this.#failPending(new PiProcessError("Pi process exited", "pi_unavailable"));
         this.control?.destroy();
+        this.toolsControl?.destroy();
         resolve(this.#exit);
         options.onExit(this.#exit);
       };
@@ -133,6 +140,11 @@ export class PiProcess {
   /** fd 3 of the child: the kobe-policy channel. */
   get control(): Duplex | undefined {
     return (this.#child.stdio[3] as Duplex | null | undefined) ?? undefined;
+  }
+
+  /** fd 4 of the child: the kobe-tools channel (only with `toolsChannel`). */
+  get toolsControl(): Duplex | undefined {
+    return (this.#child.stdio[4] as Duplex | null | undefined) ?? undefined;
   }
 
   whenExited(): Promise<PiExit> {

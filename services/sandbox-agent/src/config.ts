@@ -78,6 +78,11 @@ const configSchema = z.object({
     .string()
     .startsWith("/")
     .default("/opt/kobe/pi-extensions/kobe-models/index.js"),
+  /**
+   * kobe-tools (KOBE-128): root-owned, read-only, loaded before kobe-policy. Optional: unset, Pi
+   * gets no fd 4 and the agent does not announce the `artifacts` capability (the image sets it).
+   */
+  KOBE_TOOLS_EXTENSION: z.string().startsWith("/").optional(),
   /** kobe-policy (KOBE-36): root-owned, read-only, loaded last into every Pi. No way to omit it. */
   KOBE_POLICY_EXTENSION: z
     .string()
@@ -127,6 +132,8 @@ export interface Config {
   readonly egressEnvScript: string;
   readonly noProxy: string;
   readonly policyExtension: string;
+  /** kobe-tools (KOBE-128); undefined = no artifact tools. */
+  readonly toolsExtension?: string;
   /** KOBE-71: the Pi identity helper; undefined = Pi runs as the agent's uid. */
   readonly piRunAs?: string;
   readonly maxPiProcesses: number;
@@ -177,6 +184,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     egressEnvScript: c.KOBE_EGRESS_ENV_SCRIPT,
     noProxy: c.NO_PROXY,
     policyExtension: c.KOBE_POLICY_EXTENSION,
+    ...(c.KOBE_TOOLS_EXTENSION === undefined ? {} : { toolsExtension: c.KOBE_TOOLS_EXTENSION }),
     ...(c.KOBE_PI_RUNAS === undefined ? {} : { piRunAs: c.KOBE_PI_RUNAS }),
     maxPiProcesses: c.KOBE_MAX_PI_PROCESSES,
     piIdleMs: c.KOBE_PI_IDLE_MS,

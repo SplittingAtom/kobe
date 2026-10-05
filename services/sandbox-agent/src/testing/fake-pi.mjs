@@ -11,7 +11,7 @@
 //   "big"          emit one event larger than the wire frame cap
 //   "dirty"        emit an event with U+0000 and a __proto__ key
 //   "reject"       answer the prompt with success:false
-//   "grandchild"   spawn a tool the way Pi's bash tool does and report what it can see of fd 3
+//   "grandchild"   spawn a tool the way Pi's bash tool does and report what it can see of fds 3 and 4
 //   "orphan"       spawn a detached long-running tool (its own process group), report its pid, hang
 //   "handled"      answer the prompt with disposition "handled"
 //   "drop-policy"  close its end of the policy channel (as a broken kobe-policy would), then settle
@@ -84,6 +84,12 @@ const policy = new Map();
 let policySocket;
 let policyNonce;
 let nextPolicy = 1;
+
+// KOBE-128: the kobe-tools socket (fd 4) when the agent passed one; a tool must not inherit it.
+let toolsFdIno = null;
+if (process.env.KOBE_TOOLS_FD) {
+  toolsFdIno = (await import("node:fs")).fstatSync(Number(process.env.KOBE_TOOLS_FD)).ino;
+}
 
 let policyFdIno = null;
 if (process.env.KOBE_POLICY_FD) {
@@ -195,6 +201,9 @@ function runPrompt(message) {
       try { r.fd3Ino = fs.fstatSync(3).ino; } catch { r.fd3Ino = null; }
       try { fs.writeSync(3, '{"type":"policy.check","request_id":"forged"}\\n'); r.fd3Write = true; } catch { r.fd3Write = false; }
       try { fs.closeSync(fs.openSync("/proc/" + process.ppid + "/fd/3", "r+")); r.procOpen = true; } catch { r.procOpen = false; }
+      try { r.fd4Ino = fs.fstatSync(4).ino; } catch { r.fd4Ino = null; }
+      try { fs.writeSync(4, '{"id":"forged","op":"artifact.put"}\\n'); r.fd4Write = true; } catch { r.fd4Write = false; }
+      try { fs.closeSync(fs.openSync("/proc/" + process.ppid + "/fd/4", "r+")); r.procOpen4 = true; } catch { r.procOpen4 = false; }
       r.env = Object.keys(process.env).filter((k) => k.startsWith("KOBE_")).sort();
       process.stdout.write(JSON.stringify(r));`;
     // Control: "grandchild-inherit" hands fd 3 over explicitly, proving the probe detects it.
@@ -204,7 +213,12 @@ function runPrompt(message) {
     child.stdout.on("data", (d) => (text += d));
     child.on("exit", () => {
       const probed = JSON.parse(text);
-      out({ type: "kobe_test_grandchild", sameChannel: probed.fd3Ino === policyFdIno, ...probed });
+      out({
+        type: "kobe_test_grandchild",
+        sameChannel: probed.fd3Ino === policyFdIno,
+        sameToolsChannel: toolsFdIno !== null && probed.fd4Ino === toolsFdIno,
+        ...probed,
+      });
       settle();
     });
   } else if (message.startsWith("sh:")) {
