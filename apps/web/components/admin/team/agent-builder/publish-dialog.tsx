@@ -1,9 +1,12 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
 import {
+  isEvalStarted,
   publishTeamAgent,
   type AgentDetail,
   type AgentDetailSaved,
+  type AgentEval,
   type PublishedAgent,
+  type EvalStarted,
 } from "../../../../lib/admin/api/team/agent-builder";
 import { ErrorNotice } from "../../error-notice";
 import { useMutation } from "../../use-resource";
@@ -21,6 +24,7 @@ export function PublishDialog({
   warnings,
   onClose,
   onPublished,
+  onEvaluating,
 }: {
   readonly teamId: string;
   readonly agent: AgentDetail;
@@ -28,6 +32,8 @@ export function PublishDialog({
   readonly onClose: () => void;
   /** `version` is the number the server assigned. */
   readonly onPublished: (result: AgentDetailSaved, version: number) => void;
+  /** The team requires an Orbit eval first: it started, and publishing follows if it passes. */
+  readonly onEvaluating: (evaluation: AgentEval) => void;
 }) {
   const mutation = useMutation();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -60,8 +66,9 @@ export function PublishDialog({
   async function publish() {
     await mutation.run(
       () => publishTeamAgent(teamId, agent),
-      (published: PublishedAgent) => {
-        onPublished(published, published.version.version);
+      (answer: PublishedAgent | EvalStarted) => {
+        if (isEvalStarted(answer)) onEvaluating(answer.eval);
+        else onPublished(answer, answer.version.version);
         return null;
       },
     );
@@ -83,7 +90,8 @@ export function PublishDialog({
           <p>
             This publishes draft revision {agent.revision}. New conversations use v{next}; existing
             ones stay on the version they started with. The tools the agent may use are frozen into
-            the version.
+            the version. If your team requires an Orbit safety evaluation first, it runs now and the
+            agent is published when it passes.
           </p>
           {warnings.length > 0 && (
             <div className={styles.warnings}>

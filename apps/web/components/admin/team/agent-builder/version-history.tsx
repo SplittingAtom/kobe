@@ -51,6 +51,7 @@ export function VersionHistory({
                     <tr>
                       <th scope="col">Version</th>
                       <th scope="col">Published</th>
+                      <th scope="col">Safety score</th>
                       <th scope="col">
                         <span className={styles.visuallyHidden}>Actions</span>
                       </th>
@@ -73,6 +74,11 @@ export function VersionHistory({
                         </th>
                         <td>
                           <DateTime value={v.publishedAt} />
+                        </td>
+                        <td>
+                          {v.score
+                            ? `${Math.round(v.score.attackSuccessRate * 1000) / 10}% attacks succeeded (limit ${Math.round(v.score.threshold * 1000) / 10}%)`
+                            : "Not evaluated"}
                         </td>
                         <td>
                           {canExport && (

@@ -48,6 +48,15 @@ const resourcesSchema = z.strictObject({
   limits: z.strictObject({ cpu: quantity, memory: quantity }),
 });
 
+/** The Orbit eval Job (KOBE-93): image from the chart, never from a request. */
+export const orbitEvalSettingsSchema = z.strictObject({
+  image: z.string().min(1).max(512),
+  /** activeDeadlineSeconds of the Job: the longest an eval may run before it is errored. */
+  deadlineSeconds: z.number().int().min(60).max(3600),
+  resources: resourcesSchema,
+});
+export type OrbitEvalSettings = z.infer<typeof orbitEvalSettingsSchema>;
+
 export const sandboxSettingsSchema = z.strictObject({
   image: z.string().min(1).max(512),
   imagePullPolicy: z.enum(["Always", "IfNotPresent", "Never"]),
@@ -110,6 +119,8 @@ export const sandboxSettingsSchema = z.strictObject({
       maxFiles: 100_000,
       collectSeconds: 3600,
     }),
+  /** Pre-publish eval gate (KOBE-93). Unset: publishing under an enabled gate fails closed. */
+  orbitEval: orbitEvalSettingsSchema.optional(),
 });
 export type SandboxSettings = z.infer<typeof sandboxSettingsSchema>;
 

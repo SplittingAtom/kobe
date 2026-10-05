@@ -39,6 +39,8 @@ import {
   type AgentLocation,
   type AgentRecord,
 } from "../agents/store.js";
+import { mountEvalRoutes } from "../agents/eval/routes.js";
+import type { EvalRunner } from "../agents/eval/service.js";
 import { mountOrbitExport } from "../agents/orbit/routes.js";
 import { inventoryQuerySchema, listInventory, setInventoryStatus } from "../agents/inventory.js";
 import { listRunnableAgents, runnableQuerySchema } from "../agents/runnable.js";
@@ -68,7 +70,10 @@ function locationFor(c: Ctx, scope: AgentScope): AgentLocation {
  * publish, rollback and unarchive (KOBE-46) are `agents/version-routes.ts`. Gallery curation is
  * `/v1/install/gallery/agents`.
  */
-export function agentRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
+export function agentRoutes(
+  deps: ServerDeps,
+  evalOptions: { readonly runner?: EvalRunner } = {},
+): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();
   const db = deps.database.db;
   app.use(requireTeam(deps));
@@ -283,6 +288,19 @@ export function agentRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
     limits: deps.agentLimits,
     resolve: resolveVersioned,
     userId: (c) => (c as Ctx).get("user").id,
+    evals: {
+      runner: evalOptions.runner,
+      // A getter: read-only requests never touch deps.background (threads.db.test.ts checks).
+      get background() {
+        return deps.background;
+      },
+      team: (c) => ({ id: (c as Ctx).get("team").id, slug: (c as Ctx).get("team").slug }),
+    },
+  });
+  mountEvalRoutes(app, {
+    db,
+    resolve: resolveVersioned,
+    teamId: (c) => (c as Ctx).get("team").id,
   });
   mountOrbitExport(app, {
     db,

@@ -8,7 +8,9 @@ import {
   BOOTSTRAP_TOKEN_FILE,
   BOOTSTRAP_TOKEN_SECONDS,
   KOBE_ENDPOINTS,
+  EVAL_NETWORK_POLICY,
   LABEL_MANAGED_BY,
+  LABEL_ORBIT_EVAL,
   LABEL_TEAM_ID,
   LABEL_TEAM_NAMESPACE,
   LABEL_USER_ID,
@@ -160,7 +162,8 @@ export function networkPolicyManifest(namespace: string, s: SandboxSettings): Ku
     kind: "NetworkPolicy",
     metadata: { name: NETWORK_POLICY, namespace, labels: managedLabels },
     spec: {
-      podSelector: {},
+      // Not eval pods (KOBE-93): policies are additive, so they get their own, narrower one.
+      podSelector: { matchExpressions: [{ key: LABEL_ORBIT_EVAL, operator: "DoesNotExist" }] },
       policyTypes: ["Ingress", "Egress"],
       ingress: [],
       egress: sandboxEgressEndpoints(s).map((e) => ({
@@ -174,6 +177,38 @@ export function networkPolicyManifest(namespace: string, s: SandboxSettings): Ku
         ],
         ports: [{ protocol: "TCP", port: s.endpoints[e].targetPort }],
       })),
+    },
+  };
+}
+
+/**
+ * Orbit eval pods (KOBE-93) may reach the model gateway and nothing else: no ingress, no DNS, no
+ * server, MCP proxy or egress proxy. Selected by the eval label, which the namespace-wide policy
+ * excludes, so this is the only policy that applies to them.
+ */
+export function evalNetworkPolicyManifest(namespace: string, s: SandboxSettings): KubeObject {
+  const gateway = s.endpoints.modelGateway;
+  return {
+    apiVersion: "networking.k8s.io/v1",
+    kind: "NetworkPolicy",
+    metadata: { name: EVAL_NETWORK_POLICY, namespace, labels: managedLabels },
+    spec: {
+      podSelector: { matchExpressions: [{ key: LABEL_ORBIT_EVAL, operator: "Exists" }] },
+      policyTypes: ["Ingress", "Egress"],
+      ingress: [],
+      egress: [
+        {
+          to: [
+            {
+              namespaceSelector: {
+                matchLabels: { "kubernetes.io/metadata.name": s.releaseNamespace },
+              },
+              podSelector: { matchLabels: { ...gateway.podLabels } },
+            },
+          ],
+          ports: [{ protocol: "TCP", port: gateway.targetPort }],
+        },
+      ],
     },
   };
 }

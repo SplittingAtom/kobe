@@ -420,3 +420,168 @@ describe("Agent builder: Export to Orbit (KOBE-91)", () => {
     expect(screen.queryByRole("button", { name: /Export .*Orbit/ })).toBeNull();
   });
 });
+
+describe("Agent builder: Orbit eval gate (KOBE-93)", () => {
+  const EVAL = {
+    id: "e-1",
+    status: "pending",
+    draftRevision: 3,
+    threshold: 0.2,
+    attackSuccessRate: null,
+    attempts: null,
+    attackSuccesses: null,
+    error: null,
+    version: null,
+    createdAt: "2026-10-05T10:00:00Z",
+    startedAt: null,
+    finishedAt: null,
+  };
+  const FINISHED = {
+    ...EVAL,
+    attackSuccessRate: 0,
+    attempts: 5,
+    attackSuccesses: 0,
+    finishedAt: "2026-10-05T10:05:00Z",
+  };
+  const started = {
+    "POST /v1/agents/a-1/publish": [
+      202,
+      { eval: EVAL, message: "Evaluating: the agent is published when it passes." },
+    ],
+  } as const;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function startPublish() {
+    const user = userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) });
+    await user.click(await screen.findByRole("button", { name: "Publish…" }));
+    await user.click(screen.getByRole("button", { name: "Publish v3" }));
+    return user;
+  }
+
+  it("shows the draft as evaluating, then publishes when the eval passes", async () => {
+    stubApi({
+      ...READ,
+      ...started,
+      "GET /v1/agents/a-1/evals": [
+        [200, { evals: [], active: null }],
+        [200, { evals: [{ ...EVAL, status: "running" }], active: { ...EVAL, status: "running" } }],
+        [200, { evals: [{ ...FINISHED, status: "passed", version: 3 }], active: null }],
+      ],
+      "GET /v1/agents/a-1": [
+        [200, { agent: AGENT }],
+        [200, { agent: { ...AGENT, currentVersion: 3 } }],
+      ],
+    });
+    renderTeam(<AgentBuilderPage agentId="a-1" />);
+    await startPublish();
+    await screen.findByText(/Evaluating draft revision 3/);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(
+      ((await screen.findByRole("button", { name: "Evaluating…" })) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    // Polls every few seconds: running, then passed.
+    for (let i = 0; i < 4 && !screen.queryByText(/Passed: /); i++) {
+      await vi.advanceTimersByTimeAsync(3100);
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    await screen.findByText(
+      /Passed: 0% of attacks succeeded \(0 of 5\); the team's limit is 20%\./,
+    );
+    await screen.findByText(/Published as v3\./);
+    await screen.findByText("Current version: v3.");
+  });
+
+  it("explains a block above the threshold and publishes nothing", async () => {
+    stubApi({
+      ...READ,
+      ...started,
+      "GET /v1/agents/a-1/evals": [
+        [200, { evals: [], active: null }],
+        [
+          200,
+          {
+            evals: [{ ...FINISHED, status: "blocked", attackSuccessRate: 0.6, attackSuccesses: 3 }],
+            active: null,
+          },
+        ],
+      ],
+    });
+    renderTeam(<AgentBuilderPage agentId="a-1" />);
+    await startPublish();
+    await vi.advanceTimersByTimeAsync(3100);
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(
+      /Blocked: 60% of attacks succeeded \(3 of 5\); the team's limit is 20%\. Nothing was published\./,
+    );
+    expect(screen.getByText("Current version: v2.")).toBeTruthy();
+  });
+
+  it("shows an errored eval with its reason and lets the person retry", async () => {
+    stubApi({
+      ...READ,
+      "GET /v1/agents/a-1/evals": [
+        200,
+        {
+          evals: [
+            {
+              ...EVAL,
+              status: "errored",
+              error: "The eval Job failed (DeadlineExceeded). Nothing was published.",
+              finishedAt: "2026-10-05T10:15:00Z",
+            },
+          ],
+          active: null,
+        },
+      ],
+    });
+    renderTeam(<AgentBuilderPage agentId="a-1" />);
+    const user = userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) });
+    const alert = await screen.findByText(/The evaluation could not complete/);
+    expect(alert.textContent).toMatch(/DeadlineExceeded/);
+    await user.click(screen.getByRole("button", { name: "Retry publish" }));
+    expect(await screen.findByRole("dialog", { name: "Publish Triage as v3" })).toBeTruthy();
+  });
+
+  it("picks up an eval already running when the page opens", async () => {
+    stubApi({
+      ...READ,
+      "GET /v1/agents/a-1/evals": [
+        200,
+        { evals: [{ ...EVAL, status: "running" }], active: { ...EVAL, status: "running" } },
+      ],
+    });
+    renderTeam(<AgentBuilderPage agentId="a-1" />);
+    await screen.findByText(/Evaluating draft revision 3/);
+    expect(
+      ((await screen.findByRole("button", { name: "Evaluating…" })) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("shows each version's score in the history", async () => {
+    stubApi({
+      ...READ,
+      "GET /v1/agents/a-1/versions": [
+        200,
+        {
+          ...VERSIONS,
+          versions: [
+            {
+              ...VERSIONS.versions[0],
+              score: { attackSuccessRate: 0.2, threshold: 0.4, evalId: "e-2" },
+            },
+            { ...VERSIONS.versions[1], score: null },
+          ],
+        },
+      ],
+    });
+    renderTeam(<AgentBuilderPage agentId="a-1" />);
+    await screen.findByText("20% attacks succeeded (limit 40%)");
+    expect(screen.getByText("Not evaluated")).toBeTruthy();
+  });
+});

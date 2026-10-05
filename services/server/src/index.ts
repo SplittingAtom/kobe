@@ -12,6 +12,7 @@ import { EgressBlockedRelay } from "./egress/blocked-relay.js";
 import { loadEgressHeaderSecrets } from "./egress/config.js";
 import { resealTeamHeaders } from "./egress/header-store.js";
 import { EgressRequestSweeper } from "./egress/request-notify.js";
+import { EvalRunner } from "./agents/eval/service.js";
 import { createIsolationGate } from "./isolation/gate.js";
 import { listRuntimeClasses } from "./isolation/kubernetes.js";
 import { logger } from "./logger.js";
@@ -42,6 +43,7 @@ import {
 } from "./workspace-sync/index.js";
 
 /** Open streams (SSE) get this long to finish before being cut; stays under k8s' 30 s grace period. */
+const EVAL_SWEEP_MS = 60_000;
 const DRAIN_TIMEOUT_MS = 10_000;
 
 const config = loadConfig(process.env);
@@ -256,10 +258,24 @@ function workspaceAuth(d: ServerDeps, s: NonNullable<typeof sandbox>) {
 const sandboxAuth = sandbox && deps ? workspaceAuth(deps, sandbox) : undefined;
 const stopCollector = workspaceSync?.startCollector((syncSettings?.collectSeconds ?? 3600) * 1000);
 
+// Pre-publish Orbit evals (KOBE-93): Jobs in team namespaces, through the sandbox provider.
+const evalRunner =
+  sandbox && deps
+    ? new EvalRunner({
+        db: deps.database.db,
+        kube: sandbox.kube,
+        provider: sandbox.provider,
+        isolation,
+        settings: sandbox.settings,
+        sessionKeys: sandbox.sessionKeys,
+        limits: { maxVersions: deps.agentLimits.maxVersions },
+      })
+    : undefined;
+
 // The scheduler serves health endpoints only (its jobs arrive in KOBE-64).
 const server = serve(
   {
-    fetch: createApp(deps, { isolation }).fetch,
+    fetch: createApp(deps, { isolation, ...(evalRunner ? { evals: evalRunner } : {}) }).fetch,
     port: config.port,
   },
   (info) => {
@@ -351,10 +367,19 @@ const stopReconciler = sandbox?.startReconciler((result) => {
   }
 });
 
+// Evals whose driver died with a server (restart mid-eval) are finished or errored by any replica.
+const evalSweep = evalRunner
+  ? setInterval(() => {
+      evalRunner.sweep().catch((err: unknown) => logger.warn({ err }, "orbit eval sweep failed"));
+    }, EVAL_SWEEP_MS)
+  : undefined;
+evalSweep?.unref();
+
 function shutdown(signal: string): void {
   logger.info({ signal }, "shutting down");
   isolation.stop();
   stopReconciler?.();
+  if (evalSweep) clearInterval(evalSweep);
   stopHibernation?.();
   stopCollector?.();
   sandboxServer?.close();

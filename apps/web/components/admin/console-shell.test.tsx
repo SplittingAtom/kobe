@@ -25,6 +25,7 @@ const TEAM_ADMIN = [
   "team.policy.manage",
   "team.skills.review",
   "team.retention.manage",
+  "team.eval.manage",
   "team.audit.read",
 ];
 const team = (role: TeamAccess["role"], permissions: string[]) => () =>

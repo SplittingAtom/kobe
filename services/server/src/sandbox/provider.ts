@@ -26,6 +26,7 @@ import {
   isUuid,
   limitRangeManifest,
   namespaceManifest,
+  evalNetworkPolicyManifest,
   networkPolicyManifest,
   pullSecretManifest,
   resourceQuotaManifest,
@@ -366,6 +367,7 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     await kube.apply(serverRoleBindingManifest(namespace, settings));
     // The NetworkPolicy goes first: no pod may ever run here without default deny.
     await applyWithRbacRetry(networkPolicyManifest(namespace, settings));
+    await applyWithRbacRetry(evalNetworkPolicyManifest(namespace, settings));
     await kube.apply(resourceQuotaManifest(namespace, settings));
     await kube.apply(limitRangeManifest(namespace, settings));
     await kube.apply(sandboxServiceAccountManifest(namespace));

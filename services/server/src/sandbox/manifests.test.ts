@@ -194,7 +194,10 @@ describe("team NetworkPolicy (D11, D28)", () => {
   };
 
   it("denies all ingress to every pod in the namespace", () => {
-    expect(np.spec.podSelector).toEqual({});
+    // Every pod but Orbit eval pods, which have their own narrower policy (KOBE-93).
+    expect(np.spec.podSelector).toEqual({
+      matchExpressions: [{ key: "kobe.splittingatom.io/orbit-eval", operator: "DoesNotExist" }],
+    });
     expect(np.spec.policyTypes).toEqual(["Ingress", "Egress"]);
     expect(np.spec.ingress).toEqual([]);
   });
