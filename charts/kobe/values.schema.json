@@ -446,6 +446,15 @@
         }
       }
     },
+    "envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "keySecret": {
+          "type": "string"
+        }
+      }
+    },
     "egressProxy": {
       "type": "object",
       "additionalProperties": false,

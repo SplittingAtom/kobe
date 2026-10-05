@@ -114,8 +114,23 @@ copies of the following in your secret store:
 
 - The auth Secret (`<release>-auth`, key `secret`). Without the same value, every enrolled TOTP
   factor is unusable after a restore. Rotating it is not supported (see `auth.existingSecret`).
-- The backup key, the S3 credentials, the database credentials, and (later) the install
-  encryption key.
+- The envelope key Secret (`<release>-envelope-key`, key `key`, and `key-previous` during a
+  rotation; KOBE-107). It is the key-encryption key for stored credentials (connector grants and
+  other per-record secrets). **Back it up together with every database backup**: without the same
+  value every stored credential is unreadable, and a database restored under a different key fails
+  closed (each decrypt is refused; nothing is returned or guessed), so users must reconnect.
+  Export it to your secret store, never to a file in shell history or the backup bucket:
+
+  ```bash
+  umask 077
+  kubectl -n kobe get secret kobe-envelope-key -o jsonpath='{.data.key}' | base64 -d \
+    > /secure/kobe-envelope-key   # also key-previous, if the Secret has it
+  ```
+
+  `kobe backup` cannot include it: the CLI talks to Postgres and S3 only, and bundling the key with
+  the ciphertext it protects would defeat the separation.
+
+- The backup key, the S3 credentials and the database credentials.
 
 ### Object storage
 
@@ -204,16 +219,18 @@ a target whose applied migrations differ or that already has data, and it never 
 except rows a migration seeds into every fresh install (the egress presets in `egress_domains`,
 listed in `packages/cli/src/seeded.ts`), which the backup's rows replace in the same transaction.
 
-1. Recreate the Secrets from your secret store. Give the auth Secret a new name so that Helm
-   does not have to adopt it:
+1. Recreate the Secrets from your secret store. Give the auth and envelope Secrets new names so
+   that Helm does not have to adopt them (the envelope key must be the backed-up value):
 
    ```bash
    kubectl -n kobe create secret generic kobe-auth-restored \
      --from-file=secret=/secure/kobe-auth-secret --from-literal=setup-token="$(openssl rand -hex 16)"
+   kubectl -n kobe create secret generic kobe-envelope-key-restored \
+     --from-file=key=/secure/kobe-envelope-key
    ```
 
 2. Install the Kobe version the backup was taken with (see [install.md](install.md)), and:
-   - add `--set auth.existingSecret=kobe-auth-restored`;
+   - add `--set auth.existingSecret=kobe-auth-restored --set envelope.keySecret=kobe-envelope-key-restored`;
    - use the same S3 bucket, or one that holds a copy of its objects;
    - use the same public URL, because passkeys are bound to it.
 

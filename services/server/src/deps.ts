@@ -3,6 +3,7 @@ import {
   PROVIDER_KEY_PURPOSE,
   SecretBox,
   headerBox,
+  type Envelope,
   accounts,
   createDb,
   installRoles,
@@ -99,6 +100,8 @@ export interface ServerDepsOptions {
    * header values (current first); unset = header injection off.
    */
   readonly egressHeaderSecrets?: readonly string[];
+  /** Install envelope (KOBE-107, `KOBE_ENVELOPE_KEY`) for per-record secrets; unset = off. */
+  readonly envelope?: Envelope;
   /**
    * Object storage (`s3.*`, KOBE-27) for thread blobs: export reads offloaded entries, retention
    * deletes released keys (KOBE-18). Unset: nothing is read or deleted from a bucket.
@@ -177,6 +180,8 @@ export interface ServerDeps {
   readonly approvals: ApprovalService;
   /** Seals team-injected egress header values (KOBE-39); undefined when not configured. */
   readonly egressHeaders: SecretBox | undefined;
+  /** Envelope encryption for connector credentials and other per-record secrets (KOBE-107). */
+  readonly envelope: Envelope | undefined;
   /**
    * Budgets (KOBE-42, D30): watches spend, records and emails warnings, budget-stops runs.
    * `index.ts` starts it (LISTEN + sweep); tests call `evaluate()` / `sweep()` directly.
@@ -325,6 +330,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     runAgents,
     mcp,
     approvals,
+    envelope: options.envelope,
     egressHeaders: options.egressHeaderSecrets ? headerBox(options.egressHeaderSecrets) : undefined,
     budgets,
     blobs: options.blobs,

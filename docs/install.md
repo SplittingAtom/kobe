@@ -544,7 +544,8 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
 
 `kobe backup` / `kobe restore` cover Postgres and an S3 object manifest; see
 [backup-restore.md](backup-restore.md). Keep copies of the Secrets you create above (and the
-generated `<release>-auth` Secret) in your secret store: backups never contain them.
+generated `<release>-auth` and `<release>-envelope-key` Secrets) in your secret store: backups never
+contain them. Losing the envelope key makes every stored credential unreadable.
 
 ## Local development cluster
 
