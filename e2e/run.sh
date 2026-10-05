@@ -177,7 +177,11 @@ contains "server answers" '"service":"server"' "$(reachable "$NS" "$NS" kobe-ser
 # asynchronously: wait (bounded, 90 s per component) for it. The check itself is unchanged: the pod's own
 # log must say its in-process RuntimeClass handler check passed.
 isolation_verified() { # pod → succeeds once its log records the verification
-  $KUBECTL -n "$NS" logs "$1" 2>/dev/null | grep -q '"msg":"isolation verified: agents enabled"'
+  # Read the whole log first: `kubectl logs | grep -q` makes grep exit at the first match, kubectl
+  # then dies of SIGPIPE and, under pipefail, a verified pod reads as unverified (KOBE-125).
+  local log
+  log=$($KUBECTL -n "$NS" logs "$1" 2>/dev/null) || return 1
+  grep -q '"msg":"isolation verified: agents enabled"' <<<"$log"
 }
 current_pods() { # component → names of the live pods of the deployment's current ReplicaSet
   local rs

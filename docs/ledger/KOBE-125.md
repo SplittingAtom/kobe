@@ -16,7 +16,16 @@ pod's log for `isolation verified: agents enabled`. Two gaps:
 Only the first failing run (37179692107, before the 60 s wait) is still in the Actions logs; the
 PR #65/#92/#91/#93 failure logs have expired, so (2) is inferred from the code path, not from a log.
 
+3. THE ACTUAL FLAKE, reproduced on this PR's first dispatch run (37303727271, cold-start): the pod's
+   log did contain the verified line (printed in the failure tail) yet the check reported
+   `unverified`. `isolation_verified` was `kubectl logs | grep -q`; grep -q exits at the first
+   match, kubectl dies of SIGPIPE (141) while the log is still being written, and under
+   `set -o pipefail` the pipeline fails. Whether that happens depends on log size/timing, so it is
+   intermittent and a rerun passes. Items 1-2 are real gaps but were not what failed here.
+
 ## Fix
+
+- `isolation_verified` captures the full log, then greps it (no pipe, no SIGPIPE).
 
 - `createIsolationGate` gets `startupAttempts` / `startupRetryDelayMs`; `start()` retries a
   non-verified result and stays `checking` meanwhile, so /readyz is 503 until verified or the
@@ -32,4 +41,3 @@ PR #65/#92/#91/#93 failure logs have expired, so (2) is inferred from the code p
 - Unit tests: transient failures then verified (stays `checking`), exhausted attempts -> `missing`.
 - `pnpm verify` passes locally.
 - CI runs: see below.
-
