@@ -102,6 +102,13 @@ export interface IsolationGateOptions {
   readonly now?: () => Date;
   readonly recheckIntervalMs?: number;
   readonly apiTimeoutMs?: number;
+  /**
+   * start() tries this many times (default 1) before publishing "missing", staying "checking"
+   * (so /readyz is not ready) in between: a transient Kubernetes API failure at boot must not
+   * leave a serving pod unverified for a whole recheck interval.
+   */
+  readonly startupAttempts?: number;
+  readonly startupRetryDelayMs?: number;
 }
 
 export interface IsolationGate {
@@ -143,6 +150,8 @@ export function createIsolationGate(options: IsolationGateOptions): IsolationGat
     now = () => new Date(),
     recheckIntervalMs = ISOLATION_RECHECK_INTERVAL_MS,
     apiTimeoutMs = ISOLATION_API_TIMEOUT_MS,
+    startupAttempts = 1,
+    startupRetryDelayMs = 2_000,
   } = options;
 
   let current: IsolationStatus =
@@ -189,23 +198,35 @@ export function createIsolationGate(options: IsolationGateOptions): IsolationGat
         };
   };
 
-  /** Never rejects: any failure is published as "missing" (fail closed). */
-  const runCheck = async (name: string): Promise<IsolationStatus> => {
-    const generation = ++started;
+  /** Never rejects: any failure becomes "missing" (fail closed). Does not publish. */
+  const evaluateSafe = async (name: string): Promise<IsolationStatus> => {
     try {
-      return publish(await evaluate(name), generation);
+      return await evaluate(name);
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      return publish(
-        {
-          state: "missing",
-          runtimeClassName: name,
-          message: `Isolation check failed (${reason}). ${ISOLATION_REMEDIATION}`,
-          checkedAt: new Date(),
-        },
-        generation,
-      );
+      return {
+        state: "missing",
+        runtimeClassName: name,
+        message: `Isolation check failed (${reason}). ${ISOLATION_REMEDIATION}`,
+        checkedAt: new Date(),
+      };
     }
+  };
+
+  const runCheck = async (name: string): Promise<IsolationStatus> => {
+    const generation = ++started;
+    return publish(await evaluateSafe(name), generation);
+  };
+
+  /** Startup: retry a not-verified result (still "checking") before settling on it. */
+  const startupCheck = async (name: string): Promise<IsolationStatus> => {
+    const generation = ++started;
+    let status = await evaluateSafe(name);
+    for (let attempt = 1; attempt < startupAttempts && status.state !== "verified"; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, startupRetryDelayMs));
+      status = await evaluateSafe(name);
+    }
+    return publish(status, generation);
   };
 
   const unset = (): IsolationStatus =>
@@ -224,7 +245,11 @@ export function createIsolationGate(options: IsolationGateOptions): IsolationGat
       // Scheduled before the first check, so re-checks happen whatever that check does.
       timer ??= setInterval(() => void check(), recheckIntervalMs); // check() never rejects
       timer.unref();
-      return check();
+      if (runtimeClassName === undefined || startupAttempts <= 1) return check();
+      inFlight ??= startupCheck(runtimeClassName).finally(() => {
+        inFlight = undefined;
+      });
+      return inFlight;
     },
     stop() {
       if (timer) clearInterval(timer);

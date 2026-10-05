@@ -171,15 +171,37 @@ contains "the web app serves the chat (KOBE-32)" 'data-kobe-chat' \
   "$(reachable "$NS" kube-system traefik "--header 'Host: kobe.localtest.me' http://traefik.kube-system/")"
 contains "server answers" '"service":"server"' "$(reachable "$NS" "$NS" kobe-server http://kobe-server/healthz)"
 # KOBE-9: every server/scheduler process verified isolation itself (not disclosed by /readyz).
-# The check runs asynchronously at startup and does not gate readiness: wait (bounded) for it.
+# KOBE-125: judge only the CURRENT pods: those owned by the deployment's newest ReplicaSet and not
+# terminating (a rollout leaves old-ReplicaSet and terminating pods that never need to verify).
+# The server retries its startup check before turning ready, but the log line is still read
+# asynchronously: wait (bounded, 90 s per component) for it. The check itself is unchanged: the pod's own
+# log must say its in-process RuntimeClass handler check passed.
 isolation_verified() { # pod → succeeds once its log records the verification
   $KUBECTL -n "$NS" logs "$1" 2>/dev/null | grep -q '"msg":"isolation verified: agents enabled"'
 }
+current_pods() { # component → names of the live pods of the deployment's current ReplicaSet
+  local rs
+  rs=$($KUBECTL -n "$NS" get rs -l "app.kubernetes.io/component=$1" \
+    -o jsonpath='{range .items[*]}{.metadata.annotations.deployment\.kubernetes\.io/revision}{" "}{.metadata.name}{"\n"}{end}' |
+    sort -n | tail -n 1 | cut -d' ' -f2)
+  [ -n "$rs" ] || return 0
+  $KUBECTL -n "$NS" get pods -l "app.kubernetes.io/component=$1" \
+    -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.metadata.ownerReferences[0].name}{" "}{.metadata.deletionTimestamp}{"\n"}{end}' |
+    awk -v rs="$rs" 'NF == 2 && $2 == rs { print $1 }'
+}
 iso=""
-for pod in $($KUBECTL -n "$NS" get pods -l "$gated_pods" --field-selector=status.phase=Running -o name); do
-  deadline=$((SECONDS + 60))
-  until isolation_verified "$pod" || ((SECONDS >= deadline)); do sleep 2; done
-  if isolation_verified "$pod"; then iso+="verified "; else iso+="$pod:unverified "; fi
+for component in server scheduler; do
+  current=""
+  deadline=$((SECONDS + 90))
+  until current=$(current_pods "$component") && [ -n "$current" ] || ((SECONDS >= deadline)); do sleep 2; done
+  [ -n "$current" ] || iso+="$component:no-current-pods "
+  for pod in $current; do
+    until isolation_verified "$pod" || ((SECONDS >= deadline)); do sleep 2; done
+    if isolation_verified "$pod"; then iso+="verified "; else
+      iso+="$pod:unverified "
+      echo "     $pod isolation log tail: $($KUBECTL -n "$NS" logs "$pod" 2>&1 | grep -i isolation | tail -n 3)"
+    fi
+  done
 done
 contains "server and scheduler verified the gVisor RuntimeClass in process" '^verified verified verified $' "$iso"
 # KOBE-40: Bifrost admits only the server (config sync) and the model-gateway shim.
