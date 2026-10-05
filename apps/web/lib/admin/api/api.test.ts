@@ -136,24 +136,6 @@ describe("install resources call the right routes", () => {
       "GET /v1/install/gallery/agents",
       { agents: [] },
     ],
-    [
-      "suspend",
-      () => gallery.setGalleryAgentStatus("a1", "suspended"),
-      "PUT /v1/install/gallery/agents/a1/status",
-      {},
-    ],
-    [
-      "delete",
-      () => gallery.deleteGalleryAgent("a1"),
-      "DELETE /v1/install/gallery/agents/a1",
-      undefined,
-    ],
-    [
-      "import",
-      () => gallery.importGalleryAgent("---\nname: X\n---\nhi\n"),
-      "POST /v1/install/gallery/agents",
-      {},
-    ],
   ] as const)("%s", async (_name, call, route, body) => {
     const calls = stubApi({ [route]: [200, body] });
     const res = await call();
@@ -168,18 +150,15 @@ describe("install resources call the right routes", () => {
     const calls = stubApi({
       "POST /v1/install/teams": [201, { team: { id: "t", slug: "fin", name: "Finance" } }],
       "PUT /v1/install/roles/u2": [200, {}],
-      "POST /v1/install/gallery/agents": [201, {}],
     });
     await teams.createTeam({ slug: "fin", name: "Finance", adminUserId: "u2" });
     await roles.setInstallRole("u2", "user");
-    await gallery.importGalleryAgent("---\nname: X\n---\n");
     expect(JSON.parse(String(must(calls[0]).body))).toEqual({
       slug: "fin",
       name: "Finance",
       adminUserId: "u2",
     });
     expect(JSON.parse(String(must(calls[1]).body))).toEqual({ role: "user" });
-    expect(must(calls[2]).headers.get("content-type")).toMatch(/^text\/markdown/);
   });
 
   it("unwraps list envelopes", async () => {

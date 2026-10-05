@@ -7,6 +7,7 @@ import { useTeamAccess } from "../console-context";
 import { DateTime, ResourceView } from "../parts";
 import { useResource } from "../use-resource";
 import { AgentInventory } from "./agent-inventory";
+import { GalleryAgents } from "./gallery-agents";
 import styles from "../admin.module.css";
 
 /** Team agents (spec D19; `/v1/agents?scope=team`) and, for team admins, the inventory (KOBE-86). */
@@ -14,6 +15,7 @@ export function TeamAgentsPage() {
   const access = useTeamAccess();
   const teamId = access.team.id;
   const canSuspend = access.permissions.includes("team.agents.suspend");
+  const canFork = access.permissions.includes("team.agents.build");
   const { state, reload } = useResource(() => listTeamAgents(teamId));
   return (
     <>
@@ -75,6 +77,7 @@ export function TeamAgentsPage() {
           )
         }
       </ResourceView>
+      <GalleryAgents teamId={teamId} canFork={canFork} onForked={reload} />
       {canSuspend && <AgentInventory teamId={teamId} canSuspend onChanged={reload} />}
     </>
   );

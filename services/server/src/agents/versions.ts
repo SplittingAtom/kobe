@@ -12,6 +12,7 @@ import {
   teamAgentVersions,
   teamMembers,
   type AgentScope,
+  type AuditActor,
   type KobeDb,
   type KobeTx,
 } from "@kobe/db";
@@ -46,7 +47,8 @@ import {
 
 export interface AgentVersionSummary {
   readonly version: number;
-  readonly publishedBy: string;
+  /** Null for gallery versions the server published from the repo's definitions (KOBE-87). */
+  readonly publishedBy: string | null;
   readonly publishedAt: Date;
   /** The draft revision published; null for a rollback. */
   readonly draftRevision: number | null;
@@ -195,7 +197,7 @@ async function readVersion(
 interface NewVersion {
   readonly limits: VersionLimits;
   readonly definition: AgentDefinition;
-  readonly publishedBy: string;
+  readonly publishedBy: string | null;
   readonly draftRevision: number | null;
   readonly republishedFrom: number | null;
 }
@@ -259,9 +261,10 @@ async function insertVersion(
   let row: FullRow | undefined;
   let updated: Row | undefined;
   if (location.scope === "team") {
+    if (values.publishedBy === null) throw new Error("team agent versions need a publisher");
     [row] = await tx
       .insert(teamAgentVersions)
-      .values({ ...values, teamId: location.teamId })
+      .values({ ...values, publishedBy: values.publishedBy, teamId: location.teamId })
       .returning(FULL_COLUMNS(teamAgentVersions));
     [updated] = await tx
       .update(teamAgents)
@@ -299,7 +302,9 @@ export async function publishAgent(
   location: AgentLocation,
   id: string,
   input: {
-    readonly publishedBy: string;
+    readonly publishedBy: string | null;
+    /** Audit actor when there is no signed-in request (the gallery seeder, KOBE-87). */
+    readonly actor?: AuditActor;
     readonly expectedRevision: number | undefined;
     readonly limits?: VersionLimits;
   },
@@ -326,6 +331,7 @@ export async function publishAgent(
     if (!inserted.ok) return inserted;
     const published = inserted.value;
     await recordAudit(tx, {
+      ...(input.actor ? { actor: input.actor } : {}),
       action: "agent.published",
       teamId: auditTeam(location),
       target: {
@@ -395,6 +401,8 @@ export async function deleteOrArchiveAgent(
   db: KobeDb,
   location: AgentLocation,
   id: string,
+  actor?: AuditActor,
+  archivedBy: "seed" | null = null,
 ): Promise<Removed | null> {
   return inLocation(db, location, async (tx) => {
     const agent = await lockAgent(tx, location, id);
@@ -406,6 +414,7 @@ export async function deleteOrArchiveAgent(
         await tx.delete(installAgents).where(and(installWhere(location), eq(installAgents.id, id)));
       }
       await recordAudit(tx, {
+        ...(actor ? { actor } : {}),
         action: "agent.deleted",
         teamId: auditTeam(location),
         target: ref(location, agent),
@@ -413,8 +422,9 @@ export async function deleteOrArchiveAgent(
       return { kind: "deleted" };
     }
     if (agent.archivedAt) return { kind: "archived", agent };
-    const archived = await setArchived(tx, location, id, new Date());
+    const archived = await setArchived(tx, location, id, new Date(), archivedBy);
     await recordAudit(tx, {
+      ...(actor ? { actor } : {}),
       action: "agent.archived",
       teamId: auditTeam(location),
       target: ref(location, agent),
@@ -448,6 +458,7 @@ async function setArchived(
   location: AgentLocation,
   id: string,
   archivedAt: Date | null,
+  archivedBy: "seed" | null = null,
 ): Promise<AgentRecord> {
   const set = { archivedAt, updatedAt: new Date() };
   const [row]: Row[] =
@@ -455,7 +466,7 @@ async function setArchived(
       ? await tx.update(teamAgents).set(set).where(eq(teamAgents.id, id)).returning(TEAM)
       : await tx
           .update(installAgents)
-          .set(set)
+          .set({ ...set, archivedBy })
           .where(and(installWhere(location), eq(installAgents.id, id)))
           .returning(INSTALL);
   if (!row) throw new Error("agent archive update returned no row");

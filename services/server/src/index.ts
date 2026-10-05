@@ -1,6 +1,7 @@
 import type { Server } from "node:http";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
+import { seedGalleryAgents } from "./gallery/seed.js";
 import { approvalKeyring } from "./approvals/index.js";
 import { isolationAuditor } from "./audit/isolation.js";
 import { AuditPiiSweeper } from "./audit/pii-sweeper.js";
@@ -100,6 +101,14 @@ if (config.auth && config.smtp) {
       "KOBE_PUBLIC_URL is plain http: session cookies are not Secure and passkeys need https",
     );
   }
+}
+
+// Gallery agents come from definitions in the repo (KOBE-87): seeded at every start, so install and
+// upgrade alike. Idempotent; a failure is logged and never stops the server from starting.
+if (deps && config.process === "server") {
+  await seedGalleryAgents(deps.database.db).catch((err: unknown) =>
+    logger.error({ err }, "gallery agents could not be seeded"),
+  );
 }
 
 // Spec D4: the process's own isolation check (startup + periodic). Agent work must go through

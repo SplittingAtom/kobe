@@ -84,11 +84,14 @@ export function canForkAgent(actor: AgentActor, source: AgentRef, target: Creata
   return agentAccess(actor, source).readDefinition && canCreateAgent(actor.role, target);
 }
 
-/** Install admins curating the gallery (install.gallery.manage) hold every right on it. */
+/**
+ * Install admins (install.gallery.manage) see the gallery but change nothing through the API:
+ * gallery agents come from definitions in the repo, seeded at install and upgrade (KOBE-87).
+ */
 export const GALLERY_ADMIN_ACCESS: AgentAccess = {
   see: true,
   readDefinition: true,
-  edit: true,
-  publish: true,
-  setStatus: true,
+  edit: false,
+  publish: false,
+  setStatus: false,
 };

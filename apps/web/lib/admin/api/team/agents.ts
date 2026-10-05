@@ -23,6 +23,23 @@ export async function listPersonalAgents(
   return res.ok ? { ...res, data: res.data.agents } : res;
 }
 
+/** The read-only gallery, available to every team (KOBE-87). */
+export async function listGalleryAgents(
+  teamId: string,
+): Promise<ApiResult<readonly AgentSummary[]>> {
+  const res = await apiRequest<{ agents: AgentSummary[] }>("/v1/agents?scope=gallery", { teamId });
+  return res.ok ? { ...res, data: res.data.agents } : res;
+}
+
+/** Copies a gallery agent into this team as an editable draft (needs team.agents.build). */
+export function forkGalleryAgent(teamId: string, id: string): Promise<ApiResult<AgentSaved>> {
+  return apiRequest(`/v1/agents/${enc(id)}/fork`, {
+    method: "POST",
+    json: { scope: "team" },
+    teamId,
+  });
+}
+
 export function setTeamAgentStatus(
   teamId: string,
   id: string,

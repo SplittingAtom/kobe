@@ -227,10 +227,31 @@ const INVENTORY_2 = {
   nextCursor: null,
 };
 const LIST = "GET /v1/agents?scope=team&include_archived=true";
+const GALLERY_LIST = "GET /v1/agents?scope=gallery";
+const NO_GALLERY: [number, unknown] = [200, { agents: [] }];
+const GALLERY = {
+  agents: [
+    {
+      id: "g-1",
+      scope: "gallery",
+      slug: "analyst",
+      name: "Analyst",
+      description: "Reads spreadsheets",
+      status: "active",
+      ownerUserId: null,
+      currentVersion: 1,
+      revision: 1,
+      updatedAt: "2026-10-01T10:00:00Z",
+      canEdit: false,
+      starters: [],
+    },
+  ],
+};
 
 describe("Agent inventory", () => {
   it("shows owner, scope, status, versions, usage and placeholders, and pages", async () => {
     const calls = stubApi({
+      [GALLERY_LIST]: NO_GALLERY,
       [LIST]: [200, AGENTS],
       "GET /v1/agents/inventory": [200, INVENTORY_1],
       "GET /v1/agents/inventory?cursor=mine%3A00000000-0000-0000-0000-000000000001": [
@@ -258,6 +279,7 @@ describe("Agent inventory", () => {
 
   it("suspends and reactivates any listed agent, personal ones included", async () => {
     const calls = stubApi({
+      [GALLERY_LIST]: NO_GALLERY,
       [LIST]: [200, AGENTS],
       "GET /v1/agents/inventory": [200, { ...INVENTORY_1, nextCursor: null }],
       "PUT /v1/agents/inventory/p-1/status": [
@@ -276,6 +298,7 @@ describe("Agent inventory", () => {
 
   it("offers Export to Orbit only for published agents the caller may export", async () => {
     const calls = stubApi({
+      [GALLERY_LIST]: NO_GALLERY,
       [LIST]: [200, AGENTS],
       "GET /v1/agents/inventory": [
         200,
@@ -320,6 +343,7 @@ describe("Agent inventory", () => {
 
   it("shows the server's refusal of a suspension", async () => {
     stubApi({
+      [GALLERY_LIST]: NO_GALLERY,
       [LIST]: [200, AGENTS],
       "GET /v1/agents/inventory": [200, { ...INVENTORY_1, nextCursor: null }],
       "PUT /v1/agents/inventory/a-1/status": [
@@ -336,6 +360,7 @@ describe("Agent inventory", () => {
 describe("Team agents", () => {
   it("lists the team's agents with their builder links", async () => {
     stubApi({
+      [GALLERY_LIST]: NO_GALLERY,
       [LIST]: [200, AGENTS],
       "GET /v1/agents/inventory": [200, { agents: [], nextCursor: null }],
     });
@@ -345,7 +370,10 @@ describe("Team agents", () => {
   });
 
   it("lets a builder open agents but offers no suspend button", async () => {
-    stubApi({ "GET /v1/agents?scope=team&include_archived=true": [200, AGENTS] });
+    stubApi({
+      [GALLERY_LIST]: NO_GALLERY,
+      "GET /v1/agents?scope=team&include_archived=true": [200, AGENTS],
+    });
     renderTeam(<TeamAgentsPage />, { role: "builder", permissions: ["team.agents.build"] });
     expect(await screen.findByText("v2")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Edit Triage" })).toBeTruthy();
@@ -354,6 +382,7 @@ describe("Team agents", () => {
 
   it("explains 503 isolation_runtime_missing and links to the fix", async () => {
     stubApi({
+      [GALLERY_LIST]: NO_GALLERY,
       "GET /v1/agents/inventory": [200, { agents: [], nextCursor: null }],
       "GET /v1/agents?scope=team&include_archived=true": [
         503,
@@ -374,6 +403,7 @@ describe("Team agents", () => {
 
   it("hides internals of other 5xx answers", async () => {
     stubApi({
+      [GALLERY_LIST]: NO_GALLERY,
       "GET /v1/agents/inventory": [200, { agents: [], nextCursor: null }],
       "GET /v1/agents?scope=team&include_archived=true": [
         500,
@@ -384,5 +414,50 @@ describe("Team agents", () => {
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toMatch(/HTTP 500/);
     expect(alert.textContent).not.toMatch(/relation/);
+  });
+});
+
+describe("Gallery agents on the team page (KOBE-87)", () => {
+  it("lists the gallery and forks into the team for builders", async () => {
+    const forked = { ...GALLERY.agents[0], id: "f-1", scope: "team", canEdit: true };
+    const calls = stubApi({
+      [GALLERY_LIST]: [200, GALLERY],
+      [LIST]: [200, AGENTS],
+      "POST /v1/agents/g-1/fork": [201, { agent: forked }],
+    });
+    renderTeam(<TeamAgentsPage />, { role: "builder", permissions: ["team.agents.build"] });
+    await userEvent.click(await screen.findByRole("button", { name: "Fork to team Analyst" }));
+    await screen.findByText("Forked Analyst into your team's agents.");
+    expect(screen.getByRole("link", { name: "Open Analyst" }).getAttribute("href")).toBe(
+      "/admin/team/agents/f-1",
+    );
+    const post = must(calls.find((c) => c.method === "POST"));
+    expect(JSON.parse(String(post.body))).toEqual({ scope: "team" });
+    expect(post.headers.get("x-kobe-team")).toBe(TEAM.id);
+    // The team list is reloaded to show the new agent.
+    expect(
+      calls.filter((c) => c.url === "/v1/agents?scope=team&include_archived=true"),
+    ).toHaveLength(2);
+  });
+
+  it("shows the gallery without Fork to members", async () => {
+    stubApi({ [GALLERY_LIST]: [200, GALLERY], [LIST]: [200, AGENTS] });
+    renderTeam(<TeamAgentsPage />, { role: "member", permissions: ["team.agents.use"] });
+    expect(await screen.findByText("Reads spreadsheets")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Fork to team/ })).toBeNull();
+  });
+
+  it("explains a refused fork", async () => {
+    stubApi({
+      [GALLERY_LIST]: [200, GALLERY],
+      [LIST]: [200, AGENTS],
+      "POST /v1/agents/g-1/fork": [
+        403,
+        { code: "forbidden", message: "You can't copy this agent there." },
+      ],
+    });
+    renderTeam(<TeamAgentsPage />, { role: "builder", permissions: ["team.agents.build"] });
+    await userEvent.click(await screen.findByRole("button", { name: "Fork to team Analyst" }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/can't copy/);
   });
 });

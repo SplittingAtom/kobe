@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { withTeam } from "@kobe/db";
+import { seedGalleryAgents } from "./gallery/seed.js";
 import { resolveAgentPin, resolvePinnedAgent } from "./agents/versions.js";
 import { toolManifestSchema } from "./agents/manifest.js";
 import type { TestBrowser, TestResponse } from "./testing/browser.js";
@@ -161,14 +162,15 @@ describe("publish (D19, D8)", () => {
     expect((await publish("dave", id)).status).toBe(404);
   });
 
-  it("publishes gallery agents only through the install console", async () => {
-    const res = await as.admin.post("/v1/install/gallery/agents", definition("Gallery Helper"));
-    expect(res.status, json(res)).toBe(201);
-    const id = res.json.agent.id as string;
+  it("publishes gallery agents only by seeding them from the repo", async () => {
+    const [seeded] = await seedGalleryAgents(h.deps.database.db, [
+      { key: "gallery-helper", generation: 1, file: "---\nname: Gallery Helper\n---\nHelp.\n" },
+    ]);
+    const id = seeded?.agentId ?? "";
     expect((await publish("alice", id)).status).toBe(403);
-    expect((await publish("carol", id, ANY, "/v1/install/gallery/agents")).status).toBe(403);
-    const done = await published("admin", id, "/v1/install/gallery/agents");
-    expect(done.agent.currentVersion).toBe(1);
+    expect((await publish("admin", id, ANY, "/v1/install/gallery/agents")).status).toBe(405);
+    const one = await as.carol.get(`/v1/agents/${id}`);
+    expect(one.json.agent.currentVersion).toBe(1);
   });
 
   it("serializes concurrent publishes and rollbacks: distinct consecutive versions", async () => {
@@ -329,13 +331,12 @@ describe("archive instead of delete (KOBE-45 decision 6)", () => {
     expect((await publish("bob", id)).status).toBe(201);
   });
 
-  it("archives published gallery agents too", async () => {
-    const res = await as.admin.post("/v1/install/gallery/agents", definition("Old Gallery"));
-    const id = res.json.agent.id as string;
-    await published("admin", id, "/v1/install/gallery/agents");
-    const del = await as.admin.delete(`/v1/install/gallery/agents/${id}`);
-    expect(del.status).toBe(200);
-    expect(del.json.agent.archivedAt).not.toBeNull();
+  it("refuses new threads with an archived gallery agent", async () => {
+    const [seeded] = await seedGalleryAgents(h.deps.database.db, [
+      { key: "old-gallery", generation: 1, file: "---\nname: Old Gallery\n---\nOld.\n" },
+    ]);
+    const id = seeded?.agentId ?? "";
+    await h.admin.query(`UPDATE install_agents SET archived_at = now() WHERE id = $1`, [id]);
     expect((await as.carol.post("/v1/threads", { agent_id: id })).status).toBe(409);
   });
 });
@@ -480,11 +481,18 @@ describe("threads pin the version they started on (D19, U8, Gate 3)", () => {
       await activate("carol", finance);
     }
 
-    const gallery = await as.admin.post("/v1/install/gallery/agents", definition("Shared"));
-    const gid = gallery.json.agent.id as string;
-    expect((await as.carol.post("/v1/threads", { agent_id: gid })).status).toBe(409);
-    await published("admin", gid, "/v1/install/gallery/agents");
-    expect((await newThread("carol", gid)).agent_version).toBe(1);
+    // A gallery row nobody published (only by hand in the database) can't start threads.
+    const unpublished = await h.admin.query<{ id: string }>(
+      `INSERT INTO install_agents (scope, slug, frontmatter, prompt)
+       VALUES ('gallery', 'unpublished', '{"name":"Unpublished"}', 'x') RETURNING id`,
+    );
+    expect((await as.carol.post("/v1/threads", { agent_id: unpublished.rows[0]?.id })).status).toBe(
+      409,
+    );
+    const [seeded] = await seedGalleryAgents(h.deps.database.db, [
+      { key: "shared", generation: 1, file: "---\nname: Shared\n---\nShared.\n" },
+    ]);
+    expect((await newThread("carol", seeded?.agentId ?? "")).agent_version).toBe(1);
   });
 });
 
@@ -574,18 +582,14 @@ describe("a version whose manifest can't be read (fail closed)", () => {
 
 describe("forks of gallery agents", () => {
   it("copy the published version, not the curators' draft in progress", async () => {
-    const res = await as.admin.post(
-      "/v1/install/gallery/agents",
-      definition("Curated", "Published prompt."),
-    );
-    const id = res.json.agent.id as string;
-    await published("admin", id, "/v1/install/gallery/agents");
-    const wip = await as.admin.put(
-      `/v1/install/gallery/agents/${id}`,
-      definition("Curated", "Work in progress."),
-      ANY,
-    );
-    expect(wip.status).toBe(200);
+    const [seeded] = await seedGalleryAgents(h.deps.database.db, [
+      { key: "curated", generation: 1, file: "---\nname: Curated\n---\nPublished prompt.\n" },
+    ]);
+    const id = seeded?.agentId ?? "";
+    // A draft in progress (set by hand: nothing in the API edits gallery drafts any more).
+    await h.admin.query(`UPDATE install_agents SET prompt = 'Work in progress.' WHERE id = $1`, [
+      id,
+    ]);
     const fork = await as.carol.post(`/v1/agents/${id}/fork`, { scope: "personal" });
     expect(fork.status, json(fork)).toBe(201);
     expect(fork.json.agent.prompt).toBe("Published prompt.");
