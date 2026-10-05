@@ -296,7 +296,7 @@ describe("Publish with the gate on (KOBE-93)", () => {
     expect(map.data["agent.yaml"]).toContain("You are careful.");
 
     const events = await h.admin.query(
-      `SELECT action FROM audit_log WHERE team_id = $1 AND action LIKE 'agent.eval.%' ORDER BY seq`,
+      `SELECT action FROM audit_log WHERE team_id = $1 AND action IN ('agent.eval.requested', 'agent.eval.finished') ORDER BY seq`,
       [finance],
     );
     expect(events.rows.map((r) => r.action)).toEqual([

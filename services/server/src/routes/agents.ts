@@ -281,7 +281,10 @@ export function agentRoutes(
     userId: (c) => (c as Ctx).get("user").id,
     evals: {
       runner: evalOptions.runner,
-      background: deps.background,
+      // A getter: read-only requests never touch deps.background (threads.db.test.ts checks).
+      get background() {
+        return deps.background;
+      },
       team: (c) => ({ id: (c as Ctx).get("team").id, slug: (c as Ctx).get("team").slug }),
     },
   });
