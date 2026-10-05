@@ -6,6 +6,7 @@ export * from "./approval.js";
 export * from "./tools.js";
 export * from "./policy.js";
 export * from "./events.js";
+export * from "./artifacts.js";
 export * from "./sse.js";
 export * from "./runs.js";
 export * from "./run-orchestrator.js";

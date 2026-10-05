@@ -592,6 +592,7 @@ describe("contracts cleanup (agent-reported gaps)", () => {
       "pi.event": SANDBOX_MAX_FRAME_BYTES,
       "command.result": SANDBOX_MAX_FRAME_BYTES,
       "policy.check": 1024 * 1024,
+      "artifact.put": 1024 * 1024,
     });
   });
 });

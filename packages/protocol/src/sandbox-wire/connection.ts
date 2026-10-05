@@ -17,7 +17,8 @@
  *   oversize frame is never buffered whole; `decode*Frame` re-checks.
  * - Per-type caps, sandbox → server ({@link SANDBOX_FRAME_MAX_BYTES_BY_TYPE}): only `pi.event` and
  *   `command.result` may use the full 4 MiB, `policy.check` at most 1 MiB (it carries a `write`'s
- *   content as executed), every other frame at most {@link SANDBOX_SMALL_FRAME_MAX_BYTES}. The
+ *   content as executed), `artifact.put` at most 1 MiB (artifacts.ts), every other frame at most
+ *   {@link SANDBOX_SMALL_FRAME_MAX_BYTES}. The
  *   server reads the type from the raw frame before decoding, so **a frame larger than
  *   {@link SANDBOX_SMALL_FRAME_MAX_BYTES} must start with `v` then `type`** — `{"v":1,"type":"…"`,
  *   those two keys first, within the first 64 bytes (insignificant whitespace allowed). A frame
@@ -25,6 +26,10 @@
  *   with `protocol_error`.
  * - Inbound frames are parsed strictly (json-safety.ts): duplicate keys, U+0000 and `__proto__`
  *   keys make a frame malformed. kobe-sandbox-agent replaces U+0000 in Pi output with U+FFFD.
+ *
+ * Capabilities: `hello.capabilities` may list `artifacts` ({@link CAPABILITY_ARTIFACTS}, artifacts.ts):
+ *   the agent then sends `artifact.put` and the server answers `artifact.result`. The server refuses
+ *   `artifact.put` from a connection that did not announce it.
  *
  * Leasing (normative)
  * - The server leases each run and thread to exactly one authenticated connection: the one whose
@@ -76,6 +81,7 @@ export const SANDBOX_FRAME_MAX_BYTES_BY_TYPE = {
   "pi.event": SANDBOX_MAX_FRAME_BYTES,
   "command.result": SANDBOX_MAX_FRAME_BYTES,
   "policy.check": 1024 * 1024,
+  "artifact.put": 1024 * 1024, // KOBE-127: up to 512 KiB of content plus JSON escaping
 } as const;
 export const SANDBOX_HELLO_TIMEOUT_MS = 10_000;
 export const SANDBOX_HEARTBEAT_INTERVAL_MS = 15_000;
