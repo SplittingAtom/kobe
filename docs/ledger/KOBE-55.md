@@ -79,8 +79,8 @@ reading the thread.
   in the panel's iframe. A frame can't send `X-Kobe-Team`, so the team goes in the query, checked like
   `threadExportUrl`. Headers: `Content-Type: text/html; charset=utf-8`;
   `Content-Security-Policy: sandbox allow-scripts allow-forms; default-src 'none'; script-src
-  'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data:
-  blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'`;
+'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data:
+blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'`;
   `X-Frame-Options: SAMEORIGIN` (this route only); `Referrer-Policy: no-referrer`;
   `Cache-Control: private, no-store`; nosniff. SVG is wrapped in a minimal HTML document.
 
