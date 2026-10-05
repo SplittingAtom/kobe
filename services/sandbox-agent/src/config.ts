@@ -39,6 +39,11 @@ const configSchema = z.object({
    */
   KOBE_SKILLS_DIR: z.string().startsWith("/").optional(),
   /**
+   * Where the image's built-in gallery skills live (KOBE-88), root-owned and read-only; set by the
+   * image (`/opt/kobe/skills`). Unset: this sandbox cannot register built-in skills.
+   */
+  KOBE_BUILTIN_SKILLS_DIR: z.string().startsWith("/").optional(),
+  /**
    * The model gateway (KOBE-40 shim) as sandbox pods see it; set by the server's pod spec when
    * the sandbox may reach models. Without it Pi has no model (runs fail `model_not_configured`).
    */
@@ -112,6 +117,8 @@ export interface Config {
   readonly piRuntimeDir: string;
   /** Where effective skills are materialized (KOBE-82); undefined = not supported here. */
   readonly skillsDir?: string;
+  /** Where the image's built-in skills live (KOBE-88); undefined = not supported here. */
+  readonly builtinSkillsDir?: string;
   /** The model gateway origin (`http://host[:port]`, no trailing slash), when the pod has one. */
   readonly modelGatewayUrl?: string;
   readonly modelsExtension: string;
@@ -157,6 +164,9 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     piBin: c.KOBE_PI_BIN,
     piRuntimeDir: c.KOBE_PI_RUNTIME_DIR,
     ...(c.KOBE_SKILLS_DIR === undefined ? {} : { skillsDir: c.KOBE_SKILLS_DIR }),
+    ...(c.KOBE_BUILTIN_SKILLS_DIR === undefined
+      ? {}
+      : { builtinSkillsDir: c.KOBE_BUILTIN_SKILLS_DIR }),
     ...(c.KOBE_MODEL_GATEWAY_URL === undefined
       ? {}
       : { modelGatewayUrl: new URL(c.KOBE_MODEL_GATEWAY_URL).origin }),

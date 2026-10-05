@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  CAPABILITY_BUILTIN_SKILLS,
   CAPABILITY_SKILL_BUNDLES,
   serverToSandboxFrameSchema,
   type PiGetEntriesData,
@@ -337,6 +338,21 @@ export class CommandDelivery {
         failure(
           COMMAND_FAILURES.skillsUnsupported,
           "this sandbox's agent is too old to load skills; it must be upgraded",
+        ),
+      );
+      return;
+    }
+    if (
+      row.kind === "run.start" &&
+      (frame as RunStartFrame).config?.builtin_skills?.length &&
+      !this.#host.hasCapability(CAPABILITY_BUILTIN_SKILLS)
+    ) {
+      // Same rule as bundles: never start without the built-in skills the run was resolved with.
+      await this.#failRunStart(
+        row,
+        failure(
+          COMMAND_FAILURES.skillsUnsupported,
+          "this sandbox's agent is too old to load built-in skills; it must be upgraded",
         ),
       );
       return;

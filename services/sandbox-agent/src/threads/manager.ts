@@ -14,6 +14,7 @@ import {
   ensureSessionDir,
   sessionFilePath,
 } from "../pi/session-files.js";
+import { builtinSkillDirs } from "../skills/builtin.js";
 import { SkillError, type SkillStore } from "../skills/store.js";
 import { fail, ok, type CommandOutcome } from "./outcome.js";
 import { Thread, type ThreadEnv, type ThreadHooks } from "./thread.js";
@@ -35,6 +36,8 @@ export interface ThreadManagerOptions extends ThreadEnv {
    * that lists none starts as before.
    */
   readonly skills?: Pick<SkillStore, "prepare" | "release">;
+  /** Where the image's built-in skills live (KOBE-88); absent: runs that list built-ins fail. */
+  readonly builtinSkillsDir?: string;
 }
 
 export const PI_REQUEST_TIMEOUT_MS = 60_000;
@@ -423,8 +426,17 @@ export class ThreadManager {
       const unlisted = (frame.config?.skills ?? []).filter((n) => !refs.some((r) => r.name === n));
       if (unlisted.length > 0)
         return fail("pi_rejected", `skills: no bundle for ${unlisted.join(", ")}`);
+      const builtin = frame.config?.builtin_skills ?? [];
+      if (this.#options.builtinSkillsDir === undefined && builtin.length > 0)
+        return fail("pi_unavailable", "skills: this sandbox has no built-in skills");
       try {
         skillDirs = (await this.#options.skills?.prepare(thread.id, refs)) ?? [];
+        if (this.#options.builtinSkillsDir !== undefined && builtin.length > 0) {
+          skillDirs = [
+            ...(await builtinSkillDirs(this.#options.builtinSkillsDir, builtin)),
+            ...skillDirs,
+          ];
+        }
       } catch (error) {
         const message = error instanceof SkillError ? error.message : (error as Error).message;
         return fail("pi_unavailable", `skills: ${message}`);

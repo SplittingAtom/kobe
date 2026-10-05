@@ -1,0 +1,7 @@
+region,product,units,amount
+north,widget,10,100.5
+north,gadget,4,80.0
+south,widget,7,70.35
+south,gadget,12,240.0
+east,widget,3,30.15
+east,gadget,,55.0

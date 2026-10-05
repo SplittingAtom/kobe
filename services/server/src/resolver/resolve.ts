@@ -24,6 +24,12 @@ export interface ResolveInput {
     /** Requested approval mode, null for the default. */
     readonly approvalMode: ApprovalMode | null;
     readonly skills: readonly SkillRef[];
+    /**
+     * Built-in skills the agent lists (KOBE-88): install-provided, baked into the sandbox image, so
+     * they have no hash (not blocklistable, no review) and always resolve. A personal skill of the
+     * same name is shadowed. Naming one in an exclusive agent keeps it; there is no other exclusion.
+     */
+    readonly builtinSkills?: readonly string[];
     /** Named skills with no approved version for the team (KOBE-99): omitted as `not_approved`. */
     readonly unapprovedSkills?: readonly string[];
     /** Exclusive agents ignore the user's skills. */
@@ -71,6 +77,8 @@ export interface ResolvedConfig {
   readonly model: string | undefined;
   readonly approvalMode: ApprovalMode;
   readonly skills: readonly SkillRef[];
+  /** Built-in skill names to register from the sandbox image (KOBE-88), deduplicated, in order. */
+  readonly builtinSkills: readonly string[];
   readonly connectors: readonly string[];
   readonly omissions: readonly Omission[];
 }
@@ -96,7 +104,10 @@ function resolveSkills(input: ResolveInput): {
   for (const name of input.agent.unapprovedSkills ?? []) {
     omissions.push({ kind: "skill", name, reason: "not_approved" });
   }
-  const agentNames = new Set(input.agent.skills.map((s) => s.name));
+  const agentNames = new Set([
+    ...input.agent.skills.map((s) => s.name),
+    ...(input.agent.builtinSkills ?? []),
+  ]);
   for (const s of input.user.skills) {
     if (input.agent.exclusiveSkills) omit(s, "agent_exclusive");
     else if (input.team.personalSkillsDisabled) omit(s, "team_disabled");
@@ -160,6 +171,7 @@ export function resolveEffective(input: ResolveInput): ResolveResult {
         input.user.approvalMode ?? "auto",
       ),
       skills: skills.skills,
+      builtinSkills: [...new Set(input.agent.builtinSkills ?? [])],
       connectors: connectors.connectors,
       omissions: [...omissions, ...skills.omissions, ...connectors.omissions],
     },

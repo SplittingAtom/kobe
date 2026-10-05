@@ -107,6 +107,43 @@ describe("skills", () => {
     expect(r.ok && r.value.omissions).toEqual([]);
   });
 
+  it("built-in skills resolve from the agent's list, deduplicated, with no hash or omission (KOBE-88)", () => {
+    const r = resolveEffective(
+      with_({
+        agent: { builtinSkills: ["charts", "docx", "charts"] },
+        blockedHashes: ["h-charts"],
+      }),
+    );
+    expect(r.ok && r.value.builtinSkills).toEqual(["charts", "docx"]);
+    expect(r.ok && r.value.skills).toEqual([]);
+    expect(r.ok && r.value.omissions).toEqual([]);
+  });
+
+  it("no built-ins unless the agent lists them, and an exclusive agent keeps its built-ins", () => {
+    const none = resolveEffective(with_({ user: { skills: [sk("charts")] } }));
+    expect(none.ok && none.value.builtinSkills).toEqual([]);
+    const excl = resolveEffective(
+      with_({
+        agent: { builtinSkills: ["pdf"], exclusiveSkills: true },
+        user: { skills: [sk("u")] },
+      }),
+    );
+    expect(excl.ok && excl.value.builtinSkills).toEqual(["pdf"]);
+    expect(excl.ok && excl.value.omissions).toEqual([
+      { kind: "skill", name: "u", reason: "agent_exclusive" },
+    ]);
+  });
+
+  it("a personal skill named like a listed built-in is shadowed by it", () => {
+    const r = resolveEffective(
+      with_({ agent: { builtinSkills: ["xlsx"] }, user: { skills: [sk("xlsx"), sk("mine")] } }),
+    );
+    expect(r.ok && r.value.skills.map((s) => s.name)).toEqual(["mine"]);
+    expect(r.ok && r.value.omissions).toEqual([
+      { kind: "skill", name: "xlsx", reason: "shadowed_by_agent" },
+    ]);
+  });
+
   it("exclusive agent drops user skills with omissions", () => {
     const r = resolveEffective(
       with_({ agent: { skills: [sk("a")], exclusiveSkills: true }, user: { skills: [sk("u")] } }),
