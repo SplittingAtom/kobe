@@ -28,6 +28,9 @@ interface FakeThread {
   /** A builder test thread (KOBE-85): the draft's agent, no version, out of the lists. */
   is_test?: boolean;
   agent_id?: string | null;
+  /** What the thread detail says of the pinned agent (KOBE-122). */
+  agent_name?: string | null;
+  agent_status?: "active" | "suspended" | "archived" | null;
   entries: FakeEntry[];
 }
 
@@ -347,7 +350,7 @@ export class FakeKobe {
   }
 
   #summary(thread: FakeThread): Json {
-    const { entries: _e, agent_model: _a, ...rest } = thread;
+    const { entries: _e, agent_model: _a, agent_name: _n, agent_status: _s, ...rest } = thread;
     return {
       ...rest,
       owner_user_id: uuid(3, 1),
@@ -582,7 +585,12 @@ export class FakeKobe {
       } else if (typeof body?.agent_id === "string") {
         const agent = this.runnableAgents.find((a) => a.id === body.agent_id);
         if (!agent) return error(404, "agent_not_found", "No agent with that id.");
-        Object.assign(this.#thread(threadId), { agent_id: agent.id, agent_model: agent.model });
+        Object.assign(this.#thread(threadId), {
+          agent_id: agent.id,
+          agent_model: agent.model,
+          agent_name: agent.name,
+          agent_status: "active",
+        });
       }
       return json(201, this.#summary(this.#thread(threadId)));
     }
@@ -623,6 +631,8 @@ export class FakeKobe {
         ...this.#summary(thread),
         agent_current_version: null,
         agent_model: thread.agent_model ?? null,
+        agent_name: thread.agent_name ?? null,
+        agent_status: thread.agent_status ?? null,
         ...page,
       });
     }

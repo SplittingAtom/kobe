@@ -5,10 +5,7 @@ import {
   inArray,
   installAgents,
   installAgentVersions,
-  isNull,
-  isNotNull,
   or,
-  sql,
   teamAgents,
   teamAgentSuspensions,
   teamAgentVersions,
@@ -17,6 +14,7 @@ import {
   type KobeDb,
 } from "@kobe/db";
 import { z } from "zod";
+import { canPinAgent, installVisibleTo } from "./versions.js";
 import { INSTALL, TEAM, toRecord, type AgentRecord } from "./store.js";
 
 /**
@@ -77,8 +75,11 @@ const afterCursor = ({ agent }: Published, cursor: string | undefined): boolean 
   return agent.slug > slug || (agent.slug === slug && agent.id > id);
 };
 
+/** Agents a new thread may pin (the shared rule in `versions.ts`), with their version. */
 const published = (agent: AgentRecord): Published[] =>
-  agent.currentVersion === null ? [] : [{ agent, version: agent.currentVersion }];
+  canPinAgent(agent) && agent.currentVersion !== null
+    ? [{ agent, version: agent.currentVersion }]
+    : [];
 
 export async function listRunnableAgents(
   db: KobeDb,
@@ -87,25 +88,25 @@ export async function listRunnableAgents(
 ): Promise<RunnablePage> {
   const limit = query.limit ?? RUNNABLE_PAGE_DEFAULT;
   return withTeam(db, viewer.teamId, async (tx) => {
-    const live = (t: typeof teamAgents | typeof installAgents) =>
-      and(eq(t.status, "active"), isNull(t.archivedAt), isNotNull(t.currentVersion));
-    const team = await tx
-      .select(TEAM)
-      .from(teamAgents)
-      .where(and(eq(teamAgents.teamId, viewer.teamId), live(teamAgents)));
+    const team = await tx.select(TEAM).from(teamAgents).where(eq(teamAgents.teamId, viewer.teamId));
     const install = await tx
       .select({ ...INSTALL, scope: installAgents.scope })
       .from(installAgents)
-      .where(
-        and(
-          live(installAgents),
-          sql`(${installAgents.scope} = 'gallery' OR (${installAgents.scope} = 'personal' AND ${installAgents.ownerUserId} = ${viewer.userId}::uuid))`,
-          sql`NOT EXISTS (SELECT 1 FROM ${teamAgentSuspensions} s WHERE s.team_id = ${viewer.teamId}::uuid AND s.agent_id = ${installAgents.id})`,
-        ),
-      );
+      .where(installVisibleTo(viewer.userId));
+    const suspended = new Set(
+      (
+        await tx
+          .select({ id: teamAgentSuspensions.agentId })
+          .from(teamAgentSuspensions)
+          .where(eq(teamAgentSuspensions.teamId, viewer.teamId))
+      ).map((r) => r.id),
+    );
+    // The team's suspension is part of the effective status, as in `findPinnableAgent`.
+    const effective = (a: AgentRecord): AgentRecord =>
+      suspended.has(a.id) ? { ...a, status: "suspended" } : a;
     const records = [
-      ...team.flatMap((r) => published(toRecord("team", r))),
-      ...install.flatMap(({ scope, ...r }) => published(toRecord(scope, r))),
+      ...team.flatMap((r) => published(effective(toRecord("team", r)))),
+      ...install.flatMap(({ scope, ...r }) => published(effective(toRecord(scope, r)))),
     ]
       .filter((p) => afterCursor(p, query.cursor))
       .sort((a, b) =>

@@ -144,12 +144,34 @@ describe("agent picker", () => {
     expect(screen.queryByRole("radiogroup")).toBeNull();
   });
 
-  it("names the agent in the header of an existing conversation", async () => {
+  it("names the agent in the header of an existing conversation, even one no longer listed", async () => {
     const t = fake.addThread("With agent");
-    Object.assign(must(fake.threads.get(t)), { agent_id: "a-ledger" });
+    Object.assign(must(fake.threads.get(t)), {
+      agent_id: "gone",
+      agent_name: "Retired Bot",
+      agent_status: "archived",
+    });
+    openApp(fake, t);
+    expect(await screen.findByText("Agent: Retired Bot")).toBeTruthy();
+    expect(screen.getByText("Archived")).toBeTruthy();
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+  });
+
+  it("marks a suspended agent in the header, and shows no badge for an active one", async () => {
+    const t = fake.addThread("Paused");
+    Object.assign(must(fake.threads.get(t)), {
+      agent_id: "a-ledger",
+      agent_name: "Ledger Bot",
+      agent_status: "suspended",
+    });
     openApp(fake, t);
     expect(await screen.findByText("Agent: Ledger Bot")).toBeTruthy();
-    expect(screen.queryByRole("radiogroup")).toBeNull();
+    expect(screen.getByText("Suspended")).toBeTruthy();
+    cleanup();
+    must(fake.threads.get(t)).agent_status = "active";
+    openApp(fake, t);
+    expect(await screen.findByText("Agent: Ledger Bot")).toBeTruthy();
+    expect(screen.queryByText("Suspended")).toBeNull();
   });
 
   it("does not offer the picker in the builder's test pane", async () => {

@@ -7,7 +7,7 @@ import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button";
 import { Skeleton } from "../ui/skeleton";
 import { isThreadRunning, type ThreadState } from "../../lib/chat/thread-state";
 import { ErrorNotice } from "../admin/error-notice";
-import { AgentPicker, useAgentName } from "./agent-picker";
+import { AgentPicker, useDraftAgentName } from "./agent-picker";
 import { Composer } from "./composer";
 import { useChatSession, useKobeExtras } from "./kobe-runtime";
 import { AssistantMessage, EditComposer, UserMessage } from "./messages";
@@ -100,7 +100,10 @@ function LoadingSkeleton() {
 export function ThreadView() {
   const extras = useKobeExtras();
   const session = useChatSession();
-  const agentName = useAgentName(extras?.state.summary?.agentId ?? null);
+  const summary = extras?.state.summary;
+  const draftName = useDraftAgentName();
+  const agentName = summary?.agentName ?? (summary?.agentId == null ? draftName : null);
+  const agentStatus = summary?.agentStatus;
   const title = useAuiState((s) => s.threadListItem.title);
   const isEmpty = useAuiState((s) => s.thread.messages.length === 0);
   if (!extras) return null;
@@ -122,6 +125,11 @@ export function ThreadView() {
         {agentName && (
           <span className="text-muted-foreground rounded-full border px-2 text-xs">
             {`Agent: ${agentName}`}
+          </span>
+        )}
+        {agentName && (agentStatus === "suspended" || agentStatus === "archived") && (
+          <span className="text-destructive border-destructive/40 rounded-full border px-2 text-xs">
+            {agentStatus === "suspended" ? "Suspended" : "Archived"}
           </span>
         )}
         {label && (

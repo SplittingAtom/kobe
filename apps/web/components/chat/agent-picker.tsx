@@ -27,17 +27,15 @@ function useAgents(): Agents {
   return agents;
 }
 
-/** The name of an agent for a header (null until known, or when it can't be listed any more). */
-export function useAgentName(agentId: string | null | undefined): string | null {
+/** The name of the agent picked for a conversation not created yet (null: plain chat). */
+export function useDraftAgentName(): string | null {
   const session = useChatSession();
-  const agents = useAgents();
   const draft = useSyncExternalStore(
     session.subscribeDraftAgent,
     () => session.draftAgent,
     () => null,
   );
-  if (agentId == null) return draft?.name ?? null;
-  return agents.find((a) => a.id === agentId)?.name ?? null;
+  return draft?.name ?? null;
 }
 
 const OPTION =

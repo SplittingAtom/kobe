@@ -26,14 +26,11 @@ New-chat picker of the agents the user can run in the current team; selected age
 - Web: `AgentPicker` is a native radio group ("Chat with"; No agent default), shown only for a
   conversation not created yet and not in the builder test pane. The draft agent lives in
   `ChatSession` like the draft model. A pinned agent's model is not sent on create (server wins).
-- Header chip "Agent: name" resolved from the same list (cached 30 s, all pages).
+- Header chip "Agent: name" plus Suspended/Archived badge come from the thread detail (`agent_name`, `agent_status`, effective in the team); a new chat shows the draft agent's name.
 - Chat reads the list with limit 200 and follows `next_cursor` (at most 10 pages).
 
 ## Open questions (for Chris or the coordinator)
 
-- The header name comes from the runnable list, so an existing thread whose agent was later
-  suspended or archived shows no name. Adding the name to the thread detail response would fix it
-  (a server change in the thread routes, left out of this ticket).
 - Gallery is empty on main until KOBE-87 seeds it; the picker then shows only team/personal agents.
 
 ## Evidence (acceptance criteria → test or command output)
@@ -44,3 +41,6 @@ New-chat picker of the agents the user can run in the current team; selected age
 - ac-2 (suspended/archived hidden, pinned disables model picker): db test (team and personal
   suspended, gallery suspended per team and reactivated, archived, unpublished, other team);
   web test "disables the model picker ... sends no model".
+- Runnable and pin rules are shared: `canPinAgent` and `installVisibleTo` in `agents/versions.ts`
+  are used by both `findPinnableAgent` and `listRunnableAgents`.
+- Thread detail test: `agents-runnable.db.test.ts` "thread detail names the pinned agent".

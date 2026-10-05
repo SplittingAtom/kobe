@@ -830,6 +830,8 @@ describe("search (GET /v1/threads?q=, KOBE-33)", () => {
       next_entries_after: _n,
       agent_current_version: _v,
       agent_model: _am,
+      agent_name: _an,
+      agent_status: _as,
       ...summary
     } = detail;
     const { matched_entry_id: _m, snippet: _s, score: _sc, ...hitSummary } = hit ?? {};

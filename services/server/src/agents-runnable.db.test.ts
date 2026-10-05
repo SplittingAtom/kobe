@@ -251,3 +251,29 @@ describe("GET /v1/agents/runnable (KOBE-122)", () => {
     expect((await anon.get("/v1/agents/runnable")).status).toBe(401);
   });
 });
+
+describe("thread detail names the pinned agent (KOBE-122)", () => {
+  it("returns the agent's name and its effective status, including after it is paused or archived", async () => {
+    const agent = await published("bob", "team", "Detail Bot");
+    const t = await as.bob.post("/v1/threads", { agent_id: agent });
+    const id = t.json.thread_id as string;
+    const status = async () => (await as.bob.get(`/v1/threads/${id}`)).json;
+    expect(await status()).toMatchObject({ agent_name: "Detail Bot", agent_status: "active" });
+    const off = await as.alice.put(`/v1/agents/inventory/${agent}/status`, { status: "suspended" });
+    expect(off.status).toBe(200);
+    expect(await status()).toMatchObject({ agent_name: "Detail Bot", agent_status: "suspended" });
+    await as.alice.put(`/v1/agents/inventory/${agent}/status`, { status: "active" });
+    expect((await as.bob.request("DELETE", `/v1/agents/${agent}`)).status).toBeLessThan(300);
+    expect(await status()).toMatchObject({ agent_name: "Detail Bot", agent_status: "archived" });
+    const plain = await as.bob.post("/v1/threads", {});
+    expect((await as.bob.get(`/v1/threads/${plain.json.thread_id}`)).json).toMatchObject({
+      agent_name: null,
+      agent_status: null,
+    });
+  });
+
+  it("does not show another member's thread", async () => {
+    const t = await as.bob.post("/v1/threads", {});
+    expect((await as.carol.get(`/v1/threads/${t.json.thread_id}`)).status).toBe(404);
+  });
+});
