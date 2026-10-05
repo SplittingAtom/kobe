@@ -27,11 +27,18 @@ describe("the five gallery agents (KOBE-89)", () => {
   };
   const skillsOf = (key: string) => agentSkills(def(key).frontmatter).names;
 
-  it("ships exactly the five, generation 1", () => {
+  it("ships exactly the five", () => {
     expect([...byKey.keys()].sort()).toEqual(
       ["assistant", "code-helper", "data-analyst", "document-drafter", "researcher"].sort(),
     );
-    expect(parsed.every((p) => p.generation === 1)).toBe(true);
+    // The Assistant gained the skill-creator skill in generation 2.
+    expect(Object.fromEntries(parsed.map((p) => [p.key, p.generation]))).toEqual({
+      assistant: 2,
+      "data-analyst": 1,
+      researcher: 1,
+      "document-drafter": 1,
+      "code-helper": 1,
+    });
   });
 
   it("pins no model and lists only built-in skills", () => {
@@ -50,7 +57,7 @@ describe("the five gallery agents (KOBE-89)", () => {
     expect(skillsOf("document-drafter")).toEqual(["docx", "pdf"]);
     expect(skillsOf("code-helper")).toEqual(["code-review"]);
     expect(skillsOf("researcher")).toEqual(["pdf", "docx", "xlsx"]);
-    expect(skillsOf("assistant")).toEqual([]);
+    expect(skillsOf("assistant")).toEqual(["skill-creator"]);
   });
 
   it("the Researcher tells the person plainly when it has no web search", () => {

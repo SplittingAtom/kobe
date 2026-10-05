@@ -27,7 +27,7 @@ export interface GalleryDefinition {
  * generation with every change to its file.
  */
 export const GALLERY_DEFINITIONS: readonly GalleryDefinition[] = [
-  { key: "assistant", generation: 1, file: ASSISTANT_FILE },
+  { key: "assistant", generation: 2, file: ASSISTANT_FILE },
   { key: "data-analyst", generation: 1, file: DATA_ANALYST_FILE },
   { key: "researcher", generation: 1, file: RESEARCHER_FILE },
   { key: "document-drafter", generation: 1, file: DOCUMENT_DRAFTER_FILE },
