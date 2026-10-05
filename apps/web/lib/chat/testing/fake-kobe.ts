@@ -46,6 +46,7 @@ export interface FakeTeamModel {
 export interface FakeRunnableAgent {
   readonly id: string;
   readonly scope: "team" | "personal" | "gallery";
+  readonly galleryKey?: string;
   readonly name: string;
   readonly description?: string;
   readonly model: string | null;

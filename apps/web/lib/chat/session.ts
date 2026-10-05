@@ -43,6 +43,8 @@ export function titleFrom(text: string): string | undefined {
 
 /** How long the agent list is reused by the picker and the header. */
 export const AGENTS_TTL_MS = 30_000;
+/** Stable gallery key of the Assistant (KOBE-89), preselected for new chats (KOBE-124). */
+export const DEFAULT_AGENT_GALLERY_KEY = "assistant";
 
 export class ChatSession {
   readonly teamId: string;
@@ -64,6 +66,10 @@ export class ChatSession {
   #nextModel: string | null = null;
   /** Agent for the thread `initialize` creates next (null = plain chat; KOBE-122). */
   #nextAgent: RunnableAgent | null = null;
+  /** The runnable Assistant (null when missing, suspended or archived), preselected untouched. */
+  #defaultAgent: RunnableAgent | null = null;
+  /** The user picked (or cleared) the agent for this draft: the default no longer applies. */
+  #agentTouched = false;
   readonly #agentListeners = new Set<() => void>();
   #agents:
     | { readonly at: number; readonly result: Promise<ApiResult<readonly RunnableAgent[]>> }
@@ -151,6 +157,11 @@ export class ChatSession {
   }
 
   setDraftAgent(agent: RunnableAgent | null): void {
+    this.#agentTouched = true;
+    this.#setAgent(agent);
+  }
+
+  #setAgent(agent: RunnableAgent | null): void {
     this.#nextAgent = agent;
     for (const listener of this.#agentListeners) listener();
   }
@@ -164,15 +175,27 @@ export class ChatSession {
   /** The draft's agent for the thread being created; the next draft starts as a plain chat. */
   takeNextAgent(): RunnableAgent | null {
     const agent = this.#nextAgent;
-    this.setDraftAgent(null);
+    this.#agentTouched = false;
+    this.#setAgent(this.#defaultAgent);
     return agent;
+  }
+
+  /** New chats start with the gallery Assistant when it is runnable here, else No agent. */
+  #applyDefaultAgent(agents: readonly RunnableAgent[]): void {
+    this.#defaultAgent =
+      agents.find((a) => a.scope === "gallery" && a.galleryKey === DEFAULT_AGENT_GALLERY_KEY) ??
+      null;
+    if (!this.#agentTouched) this.#setAgent(this.#defaultAgent);
   }
 
   /** Agents the user can run in this team, reused for `AGENTS_TTL_MS`. */
   agents(): Promise<ApiResult<readonly RunnableAgent[]>> {
     const now = Date.now();
     if (this.#agents && now - this.#agents.at < AGENTS_TTL_MS) return this.#agents.result;
-    const result = this.api.runnableAgents();
+    const result = this.api.runnableAgents().then((res) => {
+      if (res.ok) this.#applyDefaultAgent(res.data);
+      return res;
+    });
     this.#agents = { at: now, result };
     return result;
   }

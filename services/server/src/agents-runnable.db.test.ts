@@ -186,6 +186,8 @@ describe("GET /v1/agents/runnable (KOBE-122)", () => {
       model: null,
     });
     expect(items.find((a) => a.id === gallery)?.scope).toBe("gallery");
+    expect(items.find((a) => a.id === gallery)).toMatchObject({ galleryKey: "gallery-bot" });
+    expect(items.find((a) => a.id === teamAgent)).not.toHaveProperty("galleryKey");
     expect(res.json.nextCursor).toBeNull();
   });
 

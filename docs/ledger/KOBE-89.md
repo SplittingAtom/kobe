@@ -62,3 +62,7 @@
   its published prompt holds the unavailable sentence, and it extracts docx text offline; Document Drafter produces .docx and .pdf;
   Code Helper scan reports 4 findings.
 - `pnpm verify`, `test:db`, CI: see PR.
+
+## Follow-up done
+
+- Preselecting the Assistant: KOBE-124 (`docs/ledger/KOBE-124.md`).
