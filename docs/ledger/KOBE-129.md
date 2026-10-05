@@ -48,6 +48,11 @@
   a body that can't be read is left out and logged.
 - Not changed: protocol (KOBE-127), the web, the sandbox agent.
 
+- **Review fixes:** the key is queued in `retention_blob_deletions` (due in 1 h; the pass skips not-yet-due rows)
+  before upload and cleared in the row-writing transaction; discard only after a definite rollback. Replay
+  requires the same run (else audited `not_allowed`). Versions' FK is `(team_id, artifact_id, thread_id)` via
+  `UNIQUE(team_id, id, thread_id)`; an UPDATE trigger makes versions immutable. Migrations 0066/0067 regenerated.
+
 ## Open questions (for Chris or the coordinator)
 
 - Break-glass read API for artifacts (policies exist; no endpoint) if D10 reviewers should see them.
