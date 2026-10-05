@@ -12,6 +12,8 @@ import {
 import type { ComponentType } from "react";
 import type { ToolActivity } from "../../lib/chat/live";
 import { cn } from "../../lib/utils";
+import { ARTIFACT_TOOL_NAMES, artifactIdFromToolResult } from "../../lib/chat/artifacts";
+import { OpenArtifactButton } from "./artifact-panel";
 import { useKobeExtras } from "./kobe-runtime";
 import { ApprovalSlot, ArtifactSlot, EgressBlocked, FileSlot } from "./slots";
 import styles from "./chat.module.css";
@@ -57,6 +59,18 @@ const OUTCOME_ICON: Record<Outcome, ComponentType<{ className?: string }>> = {
   waiting: ClockIcon,
   running: LoaderIcon,
 };
+
+/** A finished artifact call in an old thread: no live event, so the id comes from the result. */
+function ReopenArtifact({ result }: { readonly result: unknown }) {
+  const id = artifactIdFromToolResult(result);
+  if (id === undefined) return null;
+  return (
+    <p className={styles.notice}>
+      Artifact
+      <OpenArtifactButton id={id} title="from this tool call" />
+    </p>
+  );
+}
 
 /**
  * A tool call and what happened to it (spec §5.3 "tool cards"). A policy denial (`policy.denied`)
@@ -145,6 +159,9 @@ export function ToolCallCard(props: ToolCallMessagePartProps) {
         {activity.artifacts.map((artifact) => (
           <ArtifactSlot key={`${artifact.artifact_id}:${artifact.version}`} artifact={artifact} />
         ))}
+        {activity.artifacts.length === 0 && ARTIFACT_TOOL_NAMES.has(props.toolName) && (
+          <ReopenArtifact result={props.result ?? activity.result?.preview} />
+        )}
         {activity.files.map((file) => (
           <FileSlot key={file.file_id} file={file} />
         ))}

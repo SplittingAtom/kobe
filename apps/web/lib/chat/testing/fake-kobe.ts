@@ -104,6 +104,20 @@ function error(status: number, code: string, message = code): Response {
   return json(status, { code, message });
 }
 
+/** An artifact (KOBE-55 D-6): `versions[0]` is version 1. */
+export interface FakeArtifact {
+  id: string;
+  thread_id: string;
+  kind: string;
+  title: string;
+  language: string | null;
+  versions: string[];
+}
+
+/** The frame route's CSP, as D-6 specifies it (the server, KOBE-129, sets it). */
+export const FAKE_FRAME_CSP =
+  "sandbox allow-scripts allow-forms; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
+
 export class FakeKobe {
   readonly teamId = uuid(1, 1);
   readonly requests: RecordedRequest[] = [];
@@ -137,7 +151,34 @@ export class FakeKobe {
   readonly egressRequests: Json[] = [];
   readonly enabledDomains = new Set<string>();
 
+  /** Artifacts of `GET /v1/artifacts*` (KOBE-55 D-6), by id. */
+  readonly artifacts = new Map<string, FakeArtifact>();
+  #artifactN = 0;
+
   // --- setup ----------------------------------------------------------------------------------
+
+  /** An artifact that exists before the test; `versions` are the contents of v1, v2, ... */
+  addArtifact(
+    threadId: string,
+    a: {
+      readonly kind: string;
+      readonly title: string;
+      readonly versions: readonly string[];
+      readonly language?: string;
+    },
+  ): string {
+    this.#artifactN += 1;
+    const id = uuid(7, this.#artifactN);
+    this.artifacts.set(id, {
+      id,
+      thread_id: threadId,
+      kind: a.kind,
+      title: a.title,
+      language: a.language ?? null,
+      versions: [...a.versions],
+    });
+    return id;
+  }
 
   addThread(title: string | null = null): string {
     this.#threadN += 1;
@@ -436,6 +477,7 @@ export class FakeKobe {
         next_cursor: next < this.runnableAgents.length ? String(next) : null,
       });
     }
+    if (url.pathname.startsWith("/v1/artifacts")) return this.#artifactRoute(url, headers);
     const scoped =
       url.pathname === "/v1/team/budgets/status" ||
       url.pathname.startsWith("/v1/threads") ||
@@ -447,6 +489,64 @@ export class FakeKobe {
     if (headers.get("x-kobe-team") !== this.teamId) return error(409, "team_mismatch");
     return this.#route(method, url, body as Json | undefined, headers);
   };
+
+  #artifactRoute(url: URL, headers: Headers): Response {
+    const [, , id, , n, leaf] = url.pathname.split("/").filter(Boolean); // v1 artifacts id versions n leaf
+    const isFrame = leaf === "frame";
+    const team = isFrame ? url.searchParams.get("team") : headers.get("x-kobe-team");
+    // Downloads (content with ?team=) also carry the team in the query.
+    const teamOk = team === this.teamId || url.searchParams.get("team") === this.teamId;
+    if (!teamOk) return error(409, "team_mismatch");
+    const summary = (a: FakeArtifact) => ({
+      id: a.id,
+      thread_id: a.thread_id,
+      kind: a.kind,
+      title: a.title,
+      language: a.language,
+      current_version: a.versions.length,
+      created_at: NOW,
+      updated_at: NOW,
+    });
+    if (id === undefined) {
+      const threadId = url.searchParams.get("thread_id");
+      const list = [...this.artifacts.values()].filter((a) => a.thread_id === threadId);
+      return json(200, { artifacts: list.map(summary) });
+    }
+    const artifact = this.artifacts.get(id);
+    if (!artifact) return error(404, "not_found");
+    if (n === undefined) {
+      const versions = artifact.versions.map((c, i) => ({
+        version: i + 1,
+        size_bytes: new TextEncoder().encode(c).length,
+        created_at: NOW,
+      }));
+      return json(200, { ...summary(artifact), versions });
+    }
+    const content = artifact.versions[Number(n) - 1];
+    if (content === undefined) return error(404, "not_found");
+    if (isFrame) {
+      if (artifact.kind !== "html" && artifact.kind !== "svg") return error(404, "not_found");
+      return new Response(content, {
+        status: 200,
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "content-security-policy": FAKE_FRAME_CSP,
+          "x-frame-options": "SAMEORIGIN",
+          "referrer-policy": "no-referrer",
+          "cache-control": "private, no-store",
+          "x-content-type-options": "nosniff",
+        },
+      });
+    }
+    return new Response(content, {
+      status: 200,
+      headers: {
+        "content-type": "text/plain; charset=utf-8",
+        "x-content-type-options": "nosniff",
+        "content-disposition": `attachment; filename="${artifact.title}-v${n}.txt"`,
+      },
+    });
+  }
 
   /** The team's next retention shortening (KOBE-18 banner); null: none. */
   upcomingRetention: { period: string; effective_at: string } | null = null;

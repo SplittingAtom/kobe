@@ -3,7 +3,8 @@
  * sends `X-Kobe-Team`, reads included, so a tab left on another team gets `team_mismatch` instead of
  * acting on the wrong team. Request bodies use the routes' snake_case (spec §6.1).
  */
-import { apiRequest, type ApiResult } from "../api/client";
+import { apiRequest, apiTextFile, type ApiResult, type TextFile } from "../api/client";
+import type { ArtifactDetailView, ArtifactSummaryView } from "./artifacts";
 import type { BudgetStatus } from "../admin/api/budgets";
 import type { RunUsage } from "../admin/api/usage";
 import { listTeamModels, type TeamModels } from "../admin/api/team/models";
@@ -108,6 +109,14 @@ export interface ChatApi {
     domain: string,
     threadId: string | undefined,
   ): Promise<ApiResult<{ readonly request: EgressRequest }>>;
+  /** The artifacts of a thread (`GET /v1/artifacts?thread_id=`, KOBE-55), to reopen them. */
+  listArtifacts(
+    threadId: string,
+  ): Promise<ApiResult<{ readonly artifacts: readonly ArtifactSummaryView[] }>>;
+  /** One artifact with its versions. */
+  getArtifact(artifactId: string): Promise<ApiResult<ArtifactDetailView>>;
+  /** The bytes of one version as text, for the panel's renderers. */
+  artifactContent(artifactId: string, version: number): Promise<ApiResult<TextFile>>;
   /** Your own requests for one domain, newest first. */
   egressRequests(
     domain: string,
@@ -188,6 +197,10 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
         domain,
         ...(threadId === undefined ? {} : { thread_id: threadId }),
       }),
+    listArtifacts: (threadId) => get(`/v1/artifacts${query({ thread_id: threadId })}`),
+    getArtifact: (id) => get(`/v1/artifacts/${enc(id)}`),
+    artifactContent: (id, version) =>
+      apiTextFile(`/v1/artifacts/${enc(id)}/versions/${version}/content`, { teamId, fetchFn }),
     egressRequests: (domain) => get(`/v1/egress/requests${query({ domain })}`),
     decideApproval: (id, body) =>
       send("POST", `/v1/approvals/${enc(id)}`, {

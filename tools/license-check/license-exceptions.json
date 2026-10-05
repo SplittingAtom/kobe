@@ -8,5 +8,10 @@
     "license": "Python-2.0",
     "versions": ["2.0.1"],
     "reason": "Pulled in by js-yaml (via @kubernetes/client-node). PSF-2.0 is a permissive BSD-style license, not copyleft or source-available. Pending Chris's sign-off (KOBE-6)."
+  },
+  "khroma": {
+    "license": "Unknown",
+    "versions": ["2.1.0"],
+    "reason": "CSS colour helpers pulled in by mermaid (KOBE-130). The MIT license is in the repository and its npm metadata, but package.json has no license field, so a fresh pnpm store reports Unknown."
   }
 }

@@ -7,6 +7,7 @@ import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button";
 import { Skeleton } from "../ui/skeleton";
 import { isThreadRunning, type ThreadState } from "../../lib/chat/thread-state";
 import { ErrorNotice } from "../admin/error-notice";
+import { ArtifactList } from "./artifact-list";
 import { AgentPicker, useDraftAgentName } from "./agent-picker";
 import { Composer } from "./composer";
 import { useChatSession, useKobeExtras } from "./kobe-runtime";
@@ -136,6 +137,7 @@ export function ThreadView() {
           <span className="text-muted-foreground rounded-full border px-2 text-xs">{label}</span>
         )}
       </header>
+      <ArtifactList threadId={state.threadId} />
       {state.phase === "error" && state.loadError && (
         <div className="mx-auto flex w-full max-w-(--thread-max-width) flex-col gap-2 px-4">
           <ErrorNotice error={state.loadError} />
