@@ -201,7 +201,12 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
     ok(
       await h.server.command(runStart("say:a", { config: { model: MODEL, system_prompt: "P1" } })),
     );
-    await until(async () => (await h.commandsLog()).length > 0);
+    await h.server.waitFor(
+      (f) =>
+        f.type === "pi.event" &&
+        f.run_id === RUN &&
+        (f.event as { type?: string }).type === "agent_settled",
+    );
     const a = await launch(THREAD);
     const file = (a as unknown as { appendSystemPromptFile: string }).appendSystemPromptFile;
     expect((a as unknown as { appendSystemPromptText: string }).appendSystemPromptText).toBe("P1");
