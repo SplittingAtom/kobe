@@ -35,13 +35,11 @@
 - Break-glass reads still see test threads (incident reads show everything); `BreakGlassThread` gained `isTest`.
 - The agent's prompt was never passed to Pi on any run (nothing set `config.system_prompt`), so the
   resolver now sets it from the version (or draft) prompt for every pinned run. Needed for "chats
-  with the draft" to mean anything; flagged below.
+  with the draft" to mean anything. **Behaviour change for published agents** (coordinator confirmed).
 - No protocol package change.
 
 ## Open questions
 
-- `system_prompt` wiring touches published runs too (see above): confirm that is wanted here and not
-  owed to another ticket.
 - `switchAgentVersion` on a test thread answers `no_agent` (it has no version); fine, the UI never offers it.
 - Test threads of a deleted-then-purged agent: the draft pin has no version FK; the run fails
   `agent_unavailable` like a missing agent.
