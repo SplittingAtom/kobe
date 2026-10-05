@@ -3,7 +3,8 @@
 - **Status:** in review (PR in the final report)
 - **Branch / worktree:** `kobe-94-orbit-scores` in `../Kobe-wt94`
 - **Depends on:** KOBE-93 (`orbit_evals`), KOBE-86 (inventory), KOBE-84 (builder), KOBE-87/89 (gallery)
-- **Migrations:** `0063_gallery_agent_scores` (generated; table + relaxes the `orbit_evals_scope` check).
+- **Migrations:** `0063_gallery_agent_scores` (generated: table), `0064_orbit_evals_scope_gallery` (custom: scope
+  CHECK re-added NOT VALID, then VALIDATE).
 
 ## What it does
 
@@ -30,6 +31,7 @@
   The gallery stays read-only otherwise (the 405 catch-all is unchanged).
 - Threshold = install default `DEFAULT_EVAL_MAX_ASR` (20 %); the status is relative to it.
 - `EvalRunner.conclude` for scope `gallery`: passed/blocked write the score and **publish nothing**;
+  the score is inserted in `finishEval`'s transaction (a failed insert rolls the verdict back; tested);
   errored stores no score (the host team's eval row keeps the error). The version scored is kept in
   `orbit_evals.definition.galleryVersion` (the `version` column is reserved for published passes).
 - **Scores are per version:** reads join on `install_agents.current_version`, so after a release changes

@@ -206,6 +206,32 @@ describe("gallery scores (install level)", () => {
     ).toEqual(["errored"]);
   });
 
+  it("rolls the verdict back when the score can't be stored: no passed eval without a score", async () => {
+    await h.admin.query(`CREATE FUNCTION fail_score() RETURNS trigger LANGUAGE plpgsql AS
+      $$ BEGIN RAISE EXCEPTION 'score insert failed'; END $$`);
+    await h.admin.query(`CREATE TRIGGER fail_score BEFORE INSERT ON gallery_agent_scores
+      FOR EACH ROW EXECUTE FUNCTION fail_score()`);
+    try {
+      const id = await galleryId("assistant");
+      expect((await runEval(id)).status).toBe(202);
+      await h.deps.background.idle();
+      expect((await h.admin.query(`SELECT 1 FROM gallery_agent_scores`)).rows).toEqual([]);
+      const rows = (await h.admin.query(`SELECT id, status FROM orbit_evals`)).rows;
+      expect(rows.map((r) => r.status)).toEqual(["errored"]);
+      expect(
+        (
+          await h.admin.query(
+            `SELECT 1 FROM audit_log WHERE action = 'agent.eval.finished' AND target->>'evalId' = $1 AND target->>'status' = 'passed'`,
+            [rows[0]?.id],
+          )
+        ).rows,
+      ).toEqual([]);
+    } finally {
+      await h.admin.query(`DROP TRIGGER fail_score ON gallery_agent_scores`);
+      await h.admin.query(`DROP FUNCTION fail_score()`);
+    }
+  });
+
   it("scores the current version only: a newer version has none until it is evaluated", async () => {
     const id = await galleryId("assistant");
     expect((await runEval(id)).status).toBe(202);

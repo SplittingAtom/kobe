@@ -1,4 +1,13 @@
-import { and, desc, eq, galleryAgentScores, installAgents, sql, type KobeDb } from "@kobe/db";
+import {
+  and,
+  desc,
+  eq,
+  galleryAgentScores,
+  installAgents,
+  sql,
+  type KobeDb,
+  type KobeTx,
+} from "@kobe/db";
 import type { EvalRecord } from "./store.js";
 
 /**
@@ -23,8 +32,11 @@ export function galleryVersionOf(record: Pick<EvalRecord, "definition">): number
   return typeof v === "number" && Number.isInteger(v) && v > 0 ? v : null;
 }
 
-/** Copies a finished gallery eval's verdict (passed or blocked) to the install-level score. */
-export async function recordGalleryScore(db: KobeDb, record: EvalRecord): Promise<void> {
+/**
+ * Copies a finished gallery eval's verdict (passed or blocked) to the install-level score. Runs in
+ * `finishEval`'s transaction: if it fails, the verdict rolls back and the sweeper retries.
+ */
+export async function recordGalleryScore(db: KobeDb | KobeTx, record: EvalRecord): Promise<void> {
   const version = galleryVersionOf(record);
   if (
     version === null ||

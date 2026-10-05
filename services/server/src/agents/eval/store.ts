@@ -15,6 +15,7 @@ import {
   type OrbitEvalStatus,
 } from "@kobe/db";
 import { recordAudit } from "../../audit/record.js";
+import { recordGalleryScore } from "./gallery-scores.js";
 import type { Verdict } from "./judge.js";
 
 /**
@@ -233,6 +234,8 @@ export function finishEval(
       .where(and(eq(orbitEvals.id, id), inArray(orbitEvals.status, ACTIVE)))
       .returning(COLUMNS);
     if (!row) return null;
+    // A gallery eval's verdict becomes the install-level score in the same transaction (KOBE-94).
+    if (row.agentScope === "gallery") await recordGalleryScore(tx, row);
     await recordAudit(tx, {
       actor: SYSTEM_ACTOR,
       action: "agent.eval.finished",

@@ -19,7 +19,6 @@ import {
   evalJobManifest,
   evalJobName,
 } from "./job.js";
-import { recordGalleryScore } from "./gallery-scores.js";
 import { judge, type JobOutcome, type Verdict } from "./judge.js";
 import {
   finishEval,
@@ -271,13 +270,8 @@ export class EvalRunner {
     const log = await this.readLog(team, record.id);
     const verdict: Verdict = judge({ outcome, log, threshold: record.threshold });
     const finished = await finishEval(this.options.db, team.id, record.id, verdict);
-    if (finished?.agentScope === "gallery") {
-      // A gallery agent's eval publishes nothing: its verdict becomes the install-level score.
-      if (finished.status === "passed" || finished.status === "blocked") {
-        await recordGalleryScore(this.options.db, finished);
-      }
-      return;
-    }
+    // A gallery eval publishes nothing: `finishEval` stored its score in the same transaction.
+    if (finished?.agentScope === "gallery") return;
     if (finished?.status === "passed") await this.publish(finished);
   }
 
