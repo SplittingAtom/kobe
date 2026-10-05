@@ -108,9 +108,14 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
   }
 
   /** Run a shell command as a tool of `threadId`'s Pi (a new run on that thread). */
-  async function tool(threadId: string, runId: string, command: string) {
+  async function tool(
+    threadId: string,
+    runId: string,
+    command: string,
+    config: Record<string, unknown> = { model: MODEL },
+  ) {
     const result = await h.server.command({
-      ...runStart(`sh:${command}`, { config: { model: MODEL } }),
+      ...runStart(`sh:${command}`, { config }),
       thread_id: threadId,
       run_id: runId,
     });
@@ -217,6 +222,8 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
       THREAD,
       "4f5a6b7c-8d9e-4f0a-9b1c-2d3e4f5a6b7c",
       `echo x >> ${file}; echo append=$?; mv ${file} ${file}.x; echo move=$?; rm -f ${file}; echo remove=$?`,
+      // The same config as the first run: a different one would restart Pi with a fresh directory.
+      { model: MODEL, system_prompt: "P1" },
     );
     expect(out.stdout).toMatch(/append=[1-9]/);
     expect(out.stdout).toMatch(/move=[1-9]/);
