@@ -26,9 +26,11 @@ rules:
   - apiGroups: [""]
     resources: ["serviceaccounts", "resourcequotas", "limitranges", "secrets"]
     verbs: ["create", "patch"]
+  # get: the team-namespace reconcile (KOBE-115) reads the policies back to tell whether a
+  # convergence changed them.
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
-    verbs: ["create", "patch"]
+    verbs: ["get", "create", "patch"]
   # Orbit eval Jobs (KOBE-93): the exported YAML as a ConfigMap, the Job (its pod is admitted like
   # a sandbox pod), and its result read from the pod's log. No Secrets, no exec.
   - apiGroups: [""]
