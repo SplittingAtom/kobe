@@ -21,6 +21,7 @@ import { installModelsRoutes } from "./routes/install-models.js";
 import { installLegalHoldRoutes } from "./routes/install-legal-hold.js";
 import { installPolicyRoutes } from "./routes/install-policy.js";
 import { installRetentionRoutes } from "./routes/install-retention.js";
+import { installConnectorsRoutes } from "./routes/install-connectors.js";
 import { installSkillBlocklistRoutes } from "./routes/install-skill-blocklist.js";
 import { installRolesRoutes } from "./routes/install-roles.js";
 import { installSettingsRoutes } from "./routes/install-settings.js";
@@ -153,6 +154,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/install/break-glass", installBreakGlassRoutes(deps));
   api.route("/install/legal-hold", installLegalHoldRoutes(deps));
   api.route("/install/retention", installRetentionRoutes(deps));
+  api.route("/install/connectors", installConnectorsRoutes(deps));
   api.route("/install/skill-blocklist", installSkillBlocklistRoutes(deps));
   if (isolation) api.route("/install/isolation", installIsolationRoutes(isolation));
   app.route("/v1", api);

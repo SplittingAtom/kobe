@@ -43,6 +43,11 @@ import type { RunAgentResolver } from "./runs/seams.js";
 import { UserLifecycle } from "./users/lifecycle.js";
 import { approvalVerifierForMcp } from "./mcp/approvals.js";
 import { createDbMcpCatalog } from "./mcp/catalog.js";
+import {
+  DEFAULT_ALLOWED_PORTS,
+  resolveAll,
+  type ConnectorUrlPolicy,
+} from "./connectors/url-policy.js";
 import { createMcpService, type McpService } from "./mcp/service.js";
 import { createPolicyEngine } from "./policy/engine.js";
 import { createToolRegistry } from "./policy/registry.js";
@@ -76,6 +81,8 @@ export interface ServerDepsOptions {
   readonly sandboxWire?: Partial<Omit<SandboxWireOptions, "db" | "databaseUrl">>;
   /** Run orchestrator seams and tuning (KOBE-30): agent resolution, budgets, timings. */
   readonly runs?: Partial<Omit<RunOrchestratorOptions, "db" | "router">>;
+  /** Where registered connectors may point (KOBE-100); default: https, port 443, public addresses. */
+  readonly connectors?: Partial<ConnectorUrlPolicy>;
   /** MCP proxy re-check seams (KOBE-58). */
   readonly mcp?: { readonly now?: () => Date };
   /**
@@ -173,6 +180,8 @@ export interface ServerDeps {
    * the internal listener only (`routes/internal.ts`).
    */
   readonly mcp: McpService;
+  /** The address policy registered connector URLs must pass (KOBE-100). */
+  readonly connectorUrlPolicy: ConnectorUrlPolicy;
   /**
    * Approvals (KOBE-37, D29): the wire's broker, `POST /v1/approvals/{id}`, the TTL sweep, and the
    * signed-approval verifier the MCP proxy (KOBE-58) calls.
@@ -329,6 +338,14 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     runs,
     runAgents,
     mcp,
+    connectorUrlPolicy: {
+      allowHttp: false,
+      allowedPorts: DEFAULT_ALLOWED_PORTS,
+      allowedInternalCidrs: [],
+      deniedCidrs: [],
+      resolve: resolveAll,
+      ...options.connectors,
+    },
     approvals,
     envelope: options.envelope,
     egressHeaders: options.egressHeaderSecrets ? headerBox(options.egressHeaderSecrets) : undefined,

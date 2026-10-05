@@ -165,6 +165,12 @@ describe("MCP proxy NetworkPolicy", () => {
       KOBE_MCP_ALLOWED_INTERNAL_CIDRS: "10.0.5.0/24",
       KOBE_MCP_ALLOWED_PORTS: "443,8443",
     });
+    // The server validates registered connector URLs against the same policy (KOBE-100).
+    expect(plain(envOf(ms, "kobe-server"))).toMatchObject({
+      KOBE_MCP_ALLOWED_INTERNAL_CIDRS: "10.0.5.0/24",
+      KOBE_MCP_ALLOWED_PORTS: "443,8443",
+      KOBE_MCP_ALLOW_INSECURE_HTTP: "false",
+    });
     expect(policy(ms)?.egress).toContainEqual({
       to: [{ ipBlock: { cidr: "10.0.5.0/24" } }],
       ports: [

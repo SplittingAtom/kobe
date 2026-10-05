@@ -1,11 +1,11 @@
-import { comingIn, defineInstallSection } from "../types";
+import { READY, defineInstallSection } from "../types";
 
 export default defineInstallSection({
   id: "connectors",
   label: "Connector registry",
-  description: "Register MCP servers, review pinned tools and re-approve drifted ones.",
+  description: "Register the MCP servers teams may enable. Tool review follows with KOBE-101.",
   group: "Models and connectors",
   order: 20,
   minRole: "admin",
-  status: comingIn("KOBE-59"),
+  status: READY,
 });

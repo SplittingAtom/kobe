@@ -7,6 +7,7 @@ import { isolationAuditor } from "./audit/isolation.js";
 import { AuditPiiSweeper } from "./audit/pii-sweeper.js";
 import { BreakGlassSweeper } from "./break-glass/sweeper.js";
 import { loadConfig } from "./config.js";
+import { loadConnectorUrlPolicy } from "./connectors/config.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
 import { EgressBlockedRelay } from "./egress/blocked-relay.js";
 import { loadEgressHeaderSecrets } from "./egress/config.js";
@@ -78,6 +79,7 @@ if (config.auth && config.smtp) {
     ...(approvalKey ? { approvalKeys: approvalKeyring(approvalKey) } : {}),
     mailer: createSmtpMailer(config.smtp),
     sandboxWire: { waker },
+    connectors: loadConnectorUrlPolicy(process.env),
     agents: { maxVersions: config.agentMaxVersions },
     ...(egressHeaderSecrets ? { egressHeaderSecrets } : {}),
     ...(envelope ? { envelope } : {}),

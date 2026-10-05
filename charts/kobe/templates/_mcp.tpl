@@ -23,8 +23,20 @@ predates these keys still renders. Keep in sync with values.yaml.
 {{/* The server's internal listener port (MCP proxy policy re-check). */}}
 {{- define "kobe.serverInternalPort" -}}8082{{- end -}}
 
-{{/* Server env: the internal listener and the key the MCP proxy must present. */}}
+{{/*
+Server env: the internal listener and the key the MCP proxy must present, and the connector URL
+policy (the proxy's own values, so the registry accepts only what the proxy will connect to).
+*/}}
 {{- define "kobe.serverInternalEnv" -}}
+{{- $m := include "kobe.mcpProxyValues" . | fromJson -}}
+- name: KOBE_MCP_ALLOW_INSECURE_HTTP
+  value: {{ ternary "true" "false" $m.allowInsecureHttp | quote }}
+- name: KOBE_MCP_ALLOWED_PORTS
+  value: {{ join "," $m.allowedPorts | quote }}
+- name: KOBE_MCP_ALLOWED_INTERNAL_CIDRS
+  value: {{ join "," $m.allowedInternalCidrs | quote }}
+- name: KOBE_MCP_DENIED_CIDRS
+  value: {{ join "," $m.deniedCidrs | quote }}
 - name: KOBE_INTERNAL_PORT
   value: {{ include "kobe.serverInternalPort" . | quote }}
 - name: KOBE_MCP_PROXY_INTERNAL_KEY

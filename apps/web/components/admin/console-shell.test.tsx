@@ -82,9 +82,7 @@ describe("install console", () => {
     const current = within(nav).getByRole("link", { name: "Users" });
     expect(current.getAttribute("aria-current")).toBe("page");
     expect(current.getAttribute("href")).toBe("/admin/install/users");
-    expect(
-      within(nav).getByRole("link", { name: /Connector registry.*coming in KOBE-59/ }),
-    ).toBeTruthy();
+    expect(within(nav).getByRole("link", { name: /Web search.*coming in KOBE-63/ })).toBeTruthy();
     expect(within(nav).getByRole("list", { name: "People" })).toBeTruthy();
   });
 
