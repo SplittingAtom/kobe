@@ -12,6 +12,7 @@ import {
 import { connectorNameSchema } from "../tools.js";
 import { runTokenGrantSchema } from "../run-token.js";
 import { SANDBOX_ERROR_CODES, SANDBOX_WIRE_VERSION } from "./connection.js";
+import { artifactCallShape, artifactFailFields, artifactOkFields } from "../artifacts.js";
 import { BUILTIN_SKILL_NAMES, SKILL_BUNDLES_MAX, skillBundleRefSchema } from "./skill-bundles.js";
 import {
   piBridgeCommandSchema,
@@ -140,6 +141,24 @@ export const policyCheckFrameSchema = frame("policy.check", {
   input: z.record(z.string(), z.json()),
 });
 
+/**
+ * Sandbox -> server (KOBE-127, artifacts.ts), behind hello capability `artifacts`: the
+ * `create_artifact` / `update_artifact` call kobe-policy let through. The server answers with
+ * `artifact.result` for the same `request_id`. At most 1 MiB (own entry in
+ * {@link SANDBOX_FRAME_MAX_BYTES_BY_TYPE}); the server refuses it from a connection that did not
+ * announce the capability and checks it against what it allowed for `tool_call_id` (KOBE-129).
+ */
+const artifactPutFields = {
+  request_id: idSchema,
+  run_id: uuidSchema,
+  thread_id: uuidSchema,
+  tool_call_id: idSchema,
+};
+export const artifactPutFrameSchema = z.union([
+  frame("artifact.put", { ...artifactPutFields, ...artifactCallShape.create }),
+  frame("artifact.put", { ...artifactPutFields, ...artifactCallShape.update }),
+]);
+
 /** Exactly one per server command. `data` is the Pi response `data` for `pi.command`. */
 export const commandResultFrameSchema = z.union([
   frame("command.result", {
@@ -165,6 +184,7 @@ export const sandboxToServerFrameSchema = z.union([
   piUiRequestFrameSchema,
   policyCheckFrameSchema,
   commandResultFrameSchema,
+  artifactPutFrameSchema,
   piExitedFrameSchema,
   pingFrame,
   pongFrame,
@@ -363,6 +383,15 @@ export const policyResultFrameSchema = z.union([
 ]);
 
 /**
+ * Server -> sandbox answer to `artifact.put` (KOBE-127). `error.code` is open (known:
+ * `ARTIFACT_ERROR_CODES`); the tool result handed to the model is this answer.
+ */
+export const artifactResultFrameSchema = z.union([
+  frame("artifact.result", { request_id: idSchema, ...artifactOkFields }),
+  frame("artifact.result", { request_id: idSchema, ...artifactFailFields }),
+]);
+
+/**
  * Rebuild a thread's Pi session JSONL from Postgres (volume lost, D13/D15). Sent in parts, each
  * its own command with its own `command_id`, and **every part gets its own `command.result`**
  * (the server sends the next part after the previous one's result). Part 0 starts (or restarts)
@@ -403,6 +432,7 @@ export const serverToSandboxFrameSchema = z.union([
   piUiResponseFrameSchema,
   policyPendingFrameSchema,
   policyResultFrameSchema,
+  artifactResultFrameSchema,
   sessionRestoreFrameSchema,
   ackFrameSchema,
   resendFrameSchema,
@@ -417,6 +447,8 @@ export type HelloFrame = z.infer<typeof helloFrameSchema>;
 export type HelloAckFrame = z.infer<typeof helloAckFrameSchema>;
 export type PiEventFrame = z.infer<typeof piEventFrameSchema>;
 export type PolicyCheckFrame = z.infer<typeof policyCheckFrameSchema>;
+export type ArtifactPutFrame = z.infer<typeof artifactPutFrameSchema>;
+export type ArtifactResultFrame = z.infer<typeof artifactResultFrameSchema>;
 export type PolicyResultFrame = z.infer<typeof policyResultFrameSchema>;
 export type RunStartFrame = z.infer<typeof runStartFrameSchema>;
 export type RunStopFrame = z.infer<typeof runStopFrameSchema>;
