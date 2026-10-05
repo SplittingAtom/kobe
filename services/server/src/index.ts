@@ -20,6 +20,7 @@ import { createSmtpMailer } from "./mail/mailer.js";
 import { createHttpBifrostAdmin } from "./models/bifrost-admin.js";
 import { loadModelsConfig } from "./models/config.js";
 import { ModelGatewaySync } from "./models/sync.js";
+import { createPgReconcileLock } from "./sandbox/reconcile-lock.js";
 import { RetentionJob } from "./retention/job.js";
 import { createInternalApp } from "./routes/internal.js";
 import { createSandboxApp } from "./routes/sandbox.js";
@@ -353,6 +354,30 @@ const lifecycle =
       })
     : undefined;
 if (lifecycle) waker.set(lifecycle.waker);
+// Team namespaces follow the server version (KOBE-115): reconciled at start and on an interval,
+// one replica at a time. Awake sandboxes under changed NetworkPolicies are flagged, not killed.
+const stopTeamReconciler =
+  sandbox && deps
+    ? sandbox.startTeamReconciler({
+        lock: createPgReconcileLock(deps.database.pool, (err) =>
+          logger.warn({ err }, "team reconcile lock connection problem"),
+        ),
+        intervalMs: config.teamReconcileSeconds * 1000,
+        onSummary: (s) => {
+          const { policyChanged, ...counts } = s;
+          logger.info(
+            { ...counts, policyChanged: policyChanged.length },
+            "team namespaces reconciled",
+          );
+          if (policyChanged.length > 0) {
+            logger.warn(
+              { namespaces: policyChanged },
+              "team namespace NetworkPolicies changed: sandboxes already running there keep their pods but now run under the new rules",
+            );
+          }
+        },
+      })
+    : undefined;
 const stopHibernation =
   lifecycle && sandbox?.settings.hibernation.enabled
     ? lifecycle.start(sandbox.settings.hibernation.sweepSeconds * 1000)
@@ -379,6 +404,7 @@ function shutdown(signal: string): void {
   logger.info({ signal }, "shutting down");
   isolation.stop();
   stopReconciler?.();
+  stopTeamReconciler?.();
   if (evalSweep) clearInterval(evalSweep);
   stopHibernation?.();
   stopCollector?.();

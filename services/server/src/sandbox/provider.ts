@@ -41,6 +41,7 @@ import {
   type KubeObject,
   type TeamRef,
 } from "./manifests.js";
+import { reconcileTeamNamespaces, type TeamReconcileSummary } from "./team-reconcile.js";
 import type { SandboxPrincipal } from "./session-token.js";
 
 /**
@@ -211,6 +212,12 @@ export interface SandboxProvider {
    * isolating) every team pod is deleted; claims and volumes are kept. API errors change nothing.
    */
   reconcileIsolation(): Promise<ReconcileResult>;
+  /**
+   * Converges every existing team namespace to the current server version with the same function
+   * `ensureTeam` uses (KOBE-115): after an upgrade, awake teams get new NetworkPolicies without
+   * waiting for their next sandbox setup. Requires verified isolation like any create path.
+   */
+  reconcileTeams(): Promise<TeamReconcileSummary>;
 }
 
 const ref = (apiVersion: string, kind: string, name: string, namespace?: string): ObjectRef => ({
@@ -828,8 +835,14 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     );
   };
 
+  const reconcileTeams = async (): Promise<TeamReconcileSummary> => {
+    const verified = await isolation.require();
+    return reconcileTeamNamespaces({ kube, converge: (team) => convergeTeam(team, verified) });
+  };
+
   return {
     ensureTeam,
+    reconcileTeams,
     ensureSandbox,
     wakeSandbox,
     hibernateSandbox,
