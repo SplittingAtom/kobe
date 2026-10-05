@@ -109,6 +109,17 @@ describe("workloads", () => {
     expect(renderError({ "server.replicas": "1" })).toMatch(/replicas/);
   });
 
+  it("passes the team-namespace reconcile interval to the server only (KOBE-115)", () => {
+    const envOf = (ms2: Manifest[], name: string): { name: string; value?: string }[] =>
+      find(ms2, "Deployment", name)?.spec.template.spec.containers[0].env ?? [];
+    const value = (ms2: Manifest[], name: string) =>
+      envOf(ms2, name).find((e) => e.name === "KOBE_TEAM_RECONCILE_SECONDS")?.value;
+    expect(value(ms, "kobe-server")).toBe("300");
+    expect(value(ms, "kobe-scheduler")).toBeUndefined();
+    expect(value(render({ "server.teamReconcileSeconds": "0" }), "kobe-server")).toBe("0");
+    expect(renderError({ "server.teamReconcileSeconds": "-1" })).toMatch(/teamReconcileSeconds/);
+  });
+
   it("runs the scheduler as the server image in scheduler mode", () => {
     const c = find(ms, "Deployment", "kobe-scheduler")?.spec.template.spec.containers[0];
     expect(c.image).toBe("ghcr.io/splittingatom/kobe-server:0.1.0");

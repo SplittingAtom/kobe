@@ -31,19 +31,18 @@ setup. Converge all of them at start and every N minutes.
    restarted (their pods keep running; NetworkPolicies apply to live pods immediately, so the
    flag only says "rules changed here"). Restarting is left as an optional follow-up.
 7. **Config:** `KOBE_TEAM_RECONCILE_SECONDS` (default 300; `0` = only at start; else 30..86400).
-   Not in the chart: the default applies. No migrations, no Redis.
+   Chart value `server.teamReconcileSeconds` (default 300, schema min 0), chart test in `charts/kobe/tests/render.test.ts`. No migrations, no Redis.
 8. **Log per run:** `team namespaces reconciled` with namespaces, converged, skipped, failed,
    policyChanged (count), durationMs.
 
 ## Open questions
 
-- Chart value for `KOBE_TEAM_RECONCILE_SECONDS`? Left out to keep the PR small.
-- Optional: restart awake sandboxes of changed namespaces (not done).
+- None. Coordinator decided: awake sandboxes are flagged only, never restarted.
 
 ## Evidence
 
 - ac-1 (updated within one interval): `sandbox/team-reconcile.test.ts` "adds a missing rule",
   "updates a changed rule"; scheduling in `SandboxRuntime.startTeamReconciler`, called at start.
 - ac-2 (idempotent, logged): "is idempotent", log line in `index.ts`.
-- Lock: "a second replica does no work while the first holds the lock" (fake pool).
+- Lock: fake-pool unit test and `sandbox/reconcile-lock.db.test.ts` against real Postgres (`test:db`).
 - Real e2e: KOBE-116.

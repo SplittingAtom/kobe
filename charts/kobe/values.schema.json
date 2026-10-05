@@ -332,6 +332,10 @@
         },
         "resources": {
           "$ref": "#/$defs/resources"
+        },
+        "teamReconcileSeconds": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     },

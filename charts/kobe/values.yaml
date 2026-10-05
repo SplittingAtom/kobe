@@ -140,6 +140,9 @@ server:
   resources:
     requests: { cpu: 200m, memory: 256Mi }
     limits: { cpu: "2", memory: 1Gi }
+  # Seconds between reconciles of every team namespace's NetworkPolicies, quota and other managed
+  # objects (KOBE-115); also run at server start. 0 = only at start; otherwise 30..86400.
+  teamReconcileSeconds: 300
 
 scheduler:
   replicas: 1
