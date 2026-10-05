@@ -111,7 +111,9 @@ export async function listRunnableAgents(
       suspended.has(a.id) ? { ...a, status: "suspended" } : a;
     const records = [
       ...team.flatMap((r) => published(effective(toRecord("team", r)))),
-      ...install.flatMap(({ scope, galleryKey: _key, ...r }) => published(effective(toRecord(scope, r)))),
+      ...install.flatMap(({ scope, galleryKey: _key, ...r }) =>
+        published(effective(toRecord(scope, r))),
+      ),
     ]
       .filter((p) => afterCursor(p, query.cursor))
       .sort((a, b) =>
@@ -127,7 +129,9 @@ export async function listRunnableAgents(
     const last = page.at(-1);
     const models = await pinnedModels(tx, page);
     return {
-      agents: page.map((p) => toRunnable(p, models.get(p.agent.id) ?? null, galleryKeys.get(p.agent.id))),
+      agents: page.map((p) =>
+        toRunnable(p, models.get(p.agent.id) ?? null, galleryKeys.get(p.agent.id)),
+      ),
       nextCursor: records.length > limit && last ? `${last.agent.slug}:${last.agent.id}` : null,
     };
   });
