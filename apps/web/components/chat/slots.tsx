@@ -8,7 +8,7 @@
  *   approval card (`approval-card.tsx`: tool, input, risk, Allow/Deny, remember), which posts
  *   `POST /v1/approvals/{id}`.
  * - `ArtifactSlot` (KOBE-55): `artifact.created` / `artifact.updated`, on a tool call or on its own
- *   (run notice). KOBE-55 opens assistant-ui's artifact panel.
+ *   (run notice). The notice has an Open button for the artifact panel (KOBE-130).
  * - `FileSlot` (KOBE-54): `file.shared`; KOBE-54 renders the download card.
  * - `NoticeSlot`: run-level notices not tied to a tool call (`egress.blocked`, `steer.applied`,
  *   `memory.updated` (KOBE-56 adds Undo), `context.omitted` (KOBE-77), artifacts and files shared outside a tool call).
@@ -17,6 +17,7 @@ import { useContext } from "react";
 import type { KobeEventPayload } from "@kobe/protocol";
 import type { RunNotice, ToolActivity } from "../../lib/chat/live";
 import { ApprovalCard } from "./approval-card";
+import { OpenArtifactButton } from "./artifact-panel";
 import { ConnectedEgressNotice } from "./egress-notice";
 import { OmissionNotice } from "./omission-notice";
 import { ChatSessionContext } from "./kobe-runtime";
@@ -46,6 +47,7 @@ export function ArtifactSlot({ artifact }: { readonly artifact: ArtifactPayload 
         ? "Artifact created"
         : `Artifact updated (version ${artifact.version})`}
       : {title}
+      <OpenArtifactButton id={artifact.artifact_id} title={title} />
     </p>
   );
 }

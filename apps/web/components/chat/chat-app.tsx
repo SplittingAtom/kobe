@@ -13,6 +13,7 @@ import type { EventSourceFactory } from "../../lib/chat/stream";
 import { createThreadListAdapter } from "../../lib/chat/thread-list-adapter";
 import { ACTIVE_TEAM_EVENT, fetchMyTeams } from "../../lib/teams";
 import { ConsoleLinks } from "../admin/console-links";
+import { ArtifactPanel, ArtifactPanelProvider } from "./artifact-panel";
 import { ChatSessionContext, useKobeRuntime } from "./kobe-runtime";
 import { RetentionNotice } from "./retention-notice";
 import { ThreadSidebar } from "./thread-sidebar";
@@ -121,12 +122,15 @@ function ChatWorkspace({ session }: { readonly session: ChatSession }) {
   return (
     <AssistantRuntimeProvider aui={aui} runtime={runtime}>
       <RetentionNotice />
-      <div className={styles.body}>
-        <ThreadSidebar listError={listError} onOpenThread={setThreadId} />
-        <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
-          <ThreadView />
-        </main>
-      </div>
+      <ArtifactPanelProvider>
+        <div className={styles.body}>
+          <ThreadSidebar listError={listError} onOpenThread={setThreadId} />
+          <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
+            <ThreadView />
+          </main>
+          <ArtifactPanel className={styles.artifactPanel} />
+        </div>
+      </ArtifactPanelProvider>
     </AssistantRuntimeProvider>
   );
 }

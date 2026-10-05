@@ -79,6 +79,22 @@
   }
 }
 
+/* The artifact panel (KOBE-130) is a third column beside the thread on wide screens, and below it
+   on narrow ones. */
+.artifactPanel {
+  border-top: 1px solid var(--admin-border);
+}
+
+@media (min-width: 48rem) {
+  .body:has(.artifactPanel) {
+    grid-template-columns: 17rem minmax(0, 1fr) minmax(20rem, 32rem);
+  }
+
+  .artifactPanel {
+    border-top: 0;
+  }
+}
+
 /* --- sidebar ------------------------------------------------------------------------------- */
 
 .sidebar {
