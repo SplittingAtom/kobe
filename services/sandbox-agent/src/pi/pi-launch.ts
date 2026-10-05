@@ -117,6 +117,7 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
     system_prompt: config?.system_prompt ?? null,
     skills: config?.skills ?? null,
     skill_bundles: config?.skill_bundles ?? null,
+    builtin_skills: config?.builtin_skills ?? null,
     mcp_servers: config?.mcp_servers ?? null,
   });
   return { args, env, key };

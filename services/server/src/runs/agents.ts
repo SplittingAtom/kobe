@@ -1,6 +1,7 @@
 import { resolveDraftAgent, resolvePinnedAgent } from "../agents/versions.js";
 import { readApprovalFloor, strictestApprovalMode } from "../policy/approval-floor.js";
 import { resolveEffective } from "../resolver/resolve.js";
+import { isBuiltinSkillName } from "@kobe/protocol";
 import { agentSkills } from "@kobe/agent-file";
 import { bundleRefsFor } from "../skills/materialize.js";
 import { buildResolveInput, loadSkillFacts, loadTeamFacts } from "./resolver-input.js";
@@ -99,6 +100,10 @@ export const PINNED_AGENTS: RunAgentResolver = {
       ...(mcpServers.length > 0 ? { mcp_servers: mcpServers } : {}),
       ...(skillBundles.length > 0
         ? { skills: skillBundles.map((s) => s.name), skill_bundles: skillBundles }
+        : {}),
+      // Built-ins (KOBE-88) come from the sandbox image: no bundle, nothing to fetch or block.
+      ...(value.builtinSkills.length > 0
+        ? { builtin_skills: value.builtinSkills.filter(isBuiltinSkillName) }
         : {}),
     };
     return {

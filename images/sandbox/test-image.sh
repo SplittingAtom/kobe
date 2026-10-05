@@ -29,7 +29,7 @@ check "pi is 1.0.x" '(^|[^0-9])1\.0\.[0-9]+' run pi --version
 check "node is 22.x (>= 22.19)" '^v22\.(19|[2-9][0-9])\.' run node --version
 check "python is 3.12" '^Python 3\.12\.' run python3 --version
 check "python data stack imports" '^ok$' run python3 -c \
-  'import pandas, numpy, duckdb, pyarrow, matplotlib, openpyxl, docx, reportlab; matplotlib.use("Agg"); import matplotlib.pyplot as plt; plt.figure(); print("ok")'
+  'import pandas, numpy, duckdb, pyarrow, matplotlib, openpyxl, docx, reportlab, pypdf; matplotlib.use("Agg"); import matplotlib.pyplot as plt; plt.figure(); print("ok")'
 check "duckdb queries" '^42$' run python3 -c 'import duckdb; print(duckdb.sql("select 42").fetchone()[0])'
 check "git and CLIs present" '^ok$' run sh -c 'for b in git curl jq rg unzip zip file; do command -v $b >/dev/null || { echo "missing $b"; exit 1; }; done; echo ok'
 # The agent must start and refuse to run without its server URL (exits non-zero by design).
@@ -154,6 +154,29 @@ check "a tool shell gets HTTPS_PROXY from the token file through BASH_ENV (KOBE-
   '^http://9a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d:image.token-1@egress-proxy.kobe.internal:80$' run sh -c \
   'printf "image.token-1\n" > /tmp/egress-token && env -i PATH=/usr/bin:/bin BASH_ENV=/opt/kobe/egress-env.sh KOBE_EGRESS_TOKEN_FILE=/tmp/egress-token KOBE_EGRESS_PROXY=http://egress-proxy.kobe.internal:80 KOBE_THREAD_ID=9a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d bash -c '"'"'printf "%s\n" "$HTTPS_PROXY"'"'"' < /dev/null'
 check "skills directory exists, root-owned" '^0:0$' run stat -c '%u:%g' /opt/kobe/skills
+# KOBE-88: built-in gallery skills. Baked read-only (root-owned, no write bit anywhere, so neither
+# the agent, Pi nor a tool uid can change them) and every sample script works with no network.
+SK=/opt/kobe/skills
+check "built-in skills: the six bundles with a matching SKILL.md name" '^ok$' run sh -c \
+  'for n in data-analysis charts docx pdf xlsx code-review; do grep -q "^name: $n\$" '$SK'/$n/SKILL.md || { echo "bad $n"; exit 1; }; done; echo ok'
+check "built-in skills: root-owned, no write bit, nothing writable by uid 1000" '^none$' run sh -c \
+  'f=$(find '$SK' \( -not -user 0 -o -not -group 0 -o -perm /222 -o -writable \) | head -3); [ -z "$f" ] && echo none || echo "$f"'
+offline() { docker run "${HARDENED[@]}" --network none --workdir /tmp --entrypoint "$1" "$IMAGE" "${@:2}"; }
+check "built-in skills: no skill script needs the network or a writable skills dir (--network none)" '^ok$' offline sh -c '
+set -e; S='$SK'; cd /tmp; export PYTHONDONTWRITEBYTECODE=1
+python $S/data-analysis/scripts/describe.py $S/data-analysis/scripts/sample.csv | grep -q "rows: 6"
+python $S/data-analysis/scripts/sql.py "select region, sum(amount) a from s group by 1 order by 1" --table s=$S/data-analysis/scripts/sample.csv --out r.csv | grep -q "310.35"
+python $S/charts/scripts/chart.py $S/charts/scripts/sample.csv --kind bar --x region --y amount --agg sum --title t --out c.png >/dev/null
+[ "$(head -c 8 c.png | od -An -tx1 | tr -d " \n")" = 89504e470d0a1a0a ] && [ "$(wc -c < c.png)" -gt 5000 ]
+python $S/docx/scripts/md_to_docx.py $S/docx/scripts/sample.md s.docx --title T >/dev/null
+python $S/docx/scripts/docx_text.py s.docx | grep -q "^| south | 310.35 |"
+python $S/pdf/scripts/md_to_pdf.py $S/pdf/scripts/sample.md s.pdf --title T >/dev/null
+python $S/pdf/scripts/pdf_text.py s.pdf | grep -q "Sample report"
+python $S/pdf/scripts/pdf_pages.py m.pdf s.pdf s.pdf:1 | grep -q "2 pages"
+python $S/xlsx/scripts/csv_to_xlsx.py $S/xlsx/scripts/sample.csv s.xlsx --total-row >/dev/null
+python $S/xlsx/scripts/xlsx_dump.py s.xlsx --formulas | grep -q "=SUM(D2:D7)"
+python $S/code-review/scripts/scan.py $S/code-review/scripts/sample.py | grep -q "4 finding"
+echo ok'
 check "/workspace in the image is owned by uid 1000" '^1000:1000$' run stat -c '%u:%g' /workspace
 check "workspace (volume) is writable" '^ok$' run_ws sh -c 'touch /workspace/x && echo ok'
 check "no setuid/setgid binaries" '^none$' run sh -c 'f=$(find / -xdev -perm /6000 -type f 2>/dev/null); [ -z "$f" ] && echo none || echo "$f"'
@@ -211,5 +234,10 @@ check "the agent refuses to start when it cannot run Pi under its own uid" 'cann
      --group-add 2004 --group-add 2005 --group-add 2006 --group-add 2007 \
      -e KOBE_SERVER_URL=ws://127.0.0.1:9 -e KOBE_SANDBOX_ID=11111111-1111-4111-8111-111111111111 \
      -e KOBE_PI_RUNAS=$R \"$IMAGE\" 2>&1; true"
+
+check "built-in skills: no compiled .pyc or __pycache__ baked in" '^none$' run sh -c \
+  'f=$(find '$SK' \( -name "*.pyc" -o -name __pycache__ \) | head -3); [ -z "$f" ] && echo none || echo "$f"'
+check "built-in skills: a Pi identity can read but not write them" '^read-ok write-denied$' run_ps sh -c \
+  "$R 2000 cat $SK/charts/SKILL.md >/dev/null && printf 'read-ok '; $R 2000 sh -c 'echo x > $SK/charts/x' 2>/dev/null || echo write-denied"
 
 exit "$failed"

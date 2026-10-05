@@ -1,4 +1,5 @@
 import {
+  CAPABILITY_BUILTIN_SKILLS,
   CAPABILITY_SKILL_BUNDLES,
   KOBE_EVENT_DROPPED_TYPE,
   type HelloAckFrame,
@@ -111,6 +112,9 @@ export class Agent {
       identities: deps.identities,
       parentEnv: deps.parentEnv,
       ...(deps.skills === undefined ? {} : { skills: deps.skills }),
+      ...(config.builtinSkillsDir === undefined
+        ? {}
+        : { builtinSkillsDir: config.builtinSkillsDir }),
       maxProcesses: config.maxPiProcesses,
       idleMs: config.piIdleMs,
       restoreMaxBytes: config.restoreMaxBytes,
@@ -199,6 +203,10 @@ export class Agent {
   }
 
   #hello(): HelloFrame {
+    const capabilities = [
+      ...(this.#deps.skills === undefined ? [] : [CAPABILITY_SKILL_BUNDLES]),
+      ...(this.#deps.config.builtinSkillsDir === undefined ? [] : [CAPABILITY_BUILTIN_SKILLS]),
+    ];
     return {
       v: 1,
       type: "hello",
@@ -207,7 +215,7 @@ export class Agent {
       pi_version: this.#deps.piVersion,
       runs: this.#outbox.helloRuns(),
       // Optional features, so the server sends their fields only to agents that can use them.
-      ...(this.#deps.skills === undefined ? {} : { capabilities: [CAPABILITY_SKILL_BUNDLES] }),
+      ...(capabilities.length === 0 ? {} : { capabilities }),
     };
   }
 

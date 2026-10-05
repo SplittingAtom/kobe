@@ -19,3 +19,6 @@ CLAUDE.local.md
 BRIEF.md
 # Local Claude Code settings
 .claude/settings.local.json
+
+__pycache__/
+*.pyc

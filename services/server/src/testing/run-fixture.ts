@@ -245,12 +245,12 @@ export class RunFixture {
 
   /**
    * A scripted sandbox agent. `capabilities` is what its hello advertises: a current agent
-   * (default) lists `skill_bundles`; `null` sends no capabilities at all, like an older agent.
+   * (default) lists `skill_bundles` and `builtin_skills`; `null` sends no capabilities at all, like an older agent.
    */
   async connect(
     w: RunWorld,
     replica = 0,
-    capabilities: readonly string[] | null = ["skill_bundles"],
+    capabilities: readonly string[] | null = ["skill_bundles", "builtin_skills"],
   ): Promise<FakeWorkspace> {
     const token = this.auth.issue({ sandboxId: randomUUID(), teamId: w.team, userId: w.owner.id });
     const sb = await FakeSandbox.connect(must(this.listeners[replica], "listener").url, token);

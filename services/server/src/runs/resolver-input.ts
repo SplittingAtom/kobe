@@ -1,5 +1,5 @@
 import { agentSkills, type AgentFrontmatter } from "@kobe/agent-file";
-import type { ApprovalMode } from "@kobe/protocol";
+import { isBuiltinSkillName, type ApprovalMode } from "@kobe/protocol";
 import { and, connectors, eq, teamConnectors, teamModels, type KobeTx } from "@kobe/db";
 import type { ResolveInput, SkillRef } from "../resolver/resolve.js";
 import { blockedAmong } from "../skills/blocklist.js";
@@ -25,6 +25,8 @@ export interface TeamResolverFacts {
 /** The skills of a run: the agent's approved team skills and the user's personal ones. */
 export interface SkillFacts {
   readonly agent: readonly SkillRef[];
+  /** Built-in names the agent lists (KOBE-88): install-provided, never looked up or reviewed. */
+  readonly agentBuiltin: readonly string[];
   readonly user: readonly SkillRef[];
   /** Agent skill names with no approved team version (KOBE-99). */
   readonly agentUnapproved: readonly string[];
@@ -67,8 +69,12 @@ export async function loadSkillFacts(
     personalSkillsDisabled: boolean;
   },
 ): Promise<SkillFacts> {
+  // Built-in names are reserved (KOBE-88): they come from the image, not from a team skill of that
+  // name, so they are neither looked up nor reported as unapproved.
+  const agentBuiltin = [...new Set(args.agentSkillNames.filter(isBuiltinSkillName))];
+  const teamNames = args.agentSkillNames.filter((n) => !isBuiltinSkillName(n));
   const [agent, user] = await Promise.all([
-    approvedTeamSkills(tx, args.teamId, args.agentSkillNames),
+    approvedTeamSkills(tx, args.teamId, teamNames),
     personalSkillUsage(tx, {
       teamId: args.teamId,
       userId: args.userId,
@@ -83,9 +89,10 @@ export async function loadSkillFacts(
   );
   return {
     agent,
+    agentBuiltin,
     user: user.usable,
     blockedHashes,
-    agentUnapproved: [...new Set(args.agentSkillNames)].filter((n) => !approved.has(n)),
+    agentUnapproved: [...new Set(teamNames)].filter((n) => !approved.has(n)),
     userUnapproved: user.blocked,
   };
 }
@@ -104,6 +111,7 @@ export function buildResolveInput(args: {
       modelAlias: frontmatter.model ?? null,
       approvalMode: args.versionMode,
       skills: args.skills.agent,
+      builtinSkills: args.skills.agentBuiltin,
       unapprovedSkills: args.skills.agentUnapproved,
       exclusiveSkills: agentSkills(frontmatter).exclusive,
       connectors: frontmatter.connectors ?? [],
