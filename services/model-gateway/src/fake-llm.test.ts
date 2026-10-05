@@ -60,3 +60,16 @@ describe("fake LLM tool use", () => {
     expect(res.choices[0]?.message.content).toBe("fake-openai: hello");
   });
 });
+
+describe("fake LLM system prompt echo (KOBE-89)", () => {
+  it("answers 'system?' with the system and developer messages on one line", async () => {
+    const res = await chat([
+      { role: "system", content: "Be  brief.\nBe kind." },
+      { role: "developer", content: [{ type: "text", text: "Extra." }] },
+      { role: "user", content: "system?" },
+    ]);
+    expect(res.choices[0]?.message.content).toBe(
+      "fake-openai: system said: Be brief. Be kind. Extra.",
+    );
+  });
+});

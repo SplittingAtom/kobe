@@ -1531,7 +1531,7 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
     if until_ok 180 owner_closed; then ok "no scripted agent holds the Owner's sandbox identity any more"
     else fail "no scripted agent holds the Owner's sandbox identity any more"; fi
     read -r -d '' CHAT_JS <<'JS' || true
-const [team, content, timeoutMs, model] = process.argv.slice(1);
+const [team, content, timeoutMs, model, agentId] = process.argv.slice(1);
 const base = "http://127.0.0.1:" + process.env.PORT;
 const origin = new URL(process.env.KOBE_PUBLIC_URL).origin;
 const jar = new Map();
@@ -1554,8 +1554,10 @@ for (let i = 0; i < 4; i++) {
 out("signin", login.status);
 await call("PUT", "/v1/me/teams/active", { teamId: team });
 // KOBE-44: an optional model chosen for the thread (an alias the team enabled).
-const thread = await call("POST", "/v1/threads", { title: "kobe-41", ...(model ? { model } : {}) });
+// KOBE-89: an optional agent (a gallery agent's id) to chat with.
+const thread = await call("POST", "/v1/threads", { title: "kobe-41", ...(model ? { model } : {}), ...(agentId ? { agent_id: agentId } : {}) });
 out("thread", thread.status + ":" + (thread.json.model ?? "default"));
+out("thread_id", thread.json.thread_id ?? "-");
 const t0 = Date.now();
 const sent = await call("POST", "/v1/threads/" + thread.json.thread_id + "/messages", { content });
 out("message", sent.status);
@@ -1602,8 +1604,8 @@ out("code", code);
 out("error_message", errorMessage);
 out("text", text);
 JS
-    chat_run() { # content timeout-ms [model] → the CHAT_JS output (not `chat`: KOBE-40's helper above)
-      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$CHAT_JS" "$E2E_TEAM_ID" "$1" "$2" "${3:-}" 2>&1 | tail -14
+    chat_run() { # content timeout-ms [model] [agent-id] → the CHAT_JS output (not `chat`: KOBE-40's helper above)
+      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$CHAT_JS" "$E2E_TEAM_ID" "$1" "$2" "${3:-}" "${4:-}" 2>&1 | tail -15
     }
     chat_out=$(chat_run "hello-pi-$RANDOM" 300000)
     printf '     chat: %s\n' "$(printf '%s' "$chat_out" | grep -v '^text=' | tr '\n' ' ')"
@@ -1728,6 +1730,51 @@ SH
       "PUT /v1/team/budgets/team {\"monthly_usd\":null}" \
       "PATCH /v1/install/models/catalog/fast {\"input_usd_per_mtok\":null,\"output_usd_per_mtok\":null}")
     expect "the budget and prices are removed again" '^200 ' "$restore"
+
+    # KOBE-89: the five gallery agents each complete a short sample task in the Owner's real sandbox
+    # (gVisor, the image's baked built-in skills, no network), through the fake model: it answers
+    # "bash: <command>" with a bash tool call. No
+    # model is pinned by any gallery agent, so the runs use the team default. The server seeded the
+    # agents at start. Sandbox tools run without approval unless a rule asks (KOBE-37 left one).
+    echo "==> gallery agents (KOBE-89)"
+    psql_kobe "DELETE FROM tool_rules WHERE team_id = '$E2E_TEAM_ID' AND scope = 'team';" >/dev/null
+    gallery_id() { psql_kobe "SELECT id FROM install_agents WHERE scope = 'gallery' AND gallery_key = '$1' AND archived_at IS NULL"; }
+    gallery_run() { # key content [timeout-ms] → CHAT_JS output for a thread with that gallery agent
+      local id
+      id=$(gallery_id "$1")
+      if [[ -z "$id" ]]; then echo "gallery_agent=missing:$1"; return; fi
+      chat_run "$2" "${3:-300000}" "" "$id"
+    }
+    gal_dir='cd "${TMPDIR:-/tmp}" && rm -rf g89 && mkdir g89 && cd g89 && SK=/opt/kobe/skills'
+    for gkey in assistant data-analyst researcher document-drafter code-helper; do
+      contains "gallery agent $gkey is seeded and not archived" '^[0-9a-f-]{36}$' "$(gallery_id "$gkey")"
+    done
+    g_out=$(gallery_run assistant "hello-assistant-$RANDOM")
+    printf '     gallery assistant: %s\n' "$(printf '%s' "$g_out" | grep -v '^text=' | tr '\n' ' ')"
+    contains "Assistant: a thread with it starts (201, team default model)" '^thread=201:default$' "$g_out"
+    contains "Assistant: the run completed with the expected text" '^text=fake-openai: hello-assistant-[0-9]+$' "$g_out"
+    contains "Assistant: the thread is pinned to the gallery agent" '^gallery$' \
+      "$(psql_kobe "SELECT agent_scope FROM threads WHERE id = '$(printf '%s\n' "$g_out" | sed -n 's/^thread_id=//p')'")"
+    g_out=$(gallery_run data-analyst "bash: $gal_dir && python \$SK/data-analysis/scripts/describe.py \$SK/data-analysis/scripts/sample.csv | grep -c 'rows: 6' && python \$SK/charts/scripts/chart.py \$SK/charts/scripts/sample.csv --kind bar --x region --y amount --agg sum --title t --out c.png >/dev/null && echo chart-bytes \$(wc -c < c.png)")
+    printf '     gallery data analyst: %s\n' "$(printf '%s' "$g_out" | tr '\n' ' ' | cut -c1-400)"
+    contains "Data Analyst: the run completed" '^terminal=run.completed$' "$g_out"
+    contains "Data Analyst: the data-analysis skill profiled the data and the charts skill produced a PNG" \
+      '^text=fake-openai: tool said: 1 chart-bytes [0-9]{4,}$' "$g_out"
+    g_out=$(gallery_run researcher "hello-researcher-$RANDOM")
+    contains "Researcher: the run completes with no web search configured" '^terminal=run.completed$' "$g_out"
+    contains "Researcher: its published prompt has it say plainly that web search is unavailable" \
+      'Web search is not available here, so I can only work from the material you give me\.' \
+      "$(psql_kobe "SELECT v.prompt FROM install_agent_versions v JOIN install_agents a ON a.id = v.agent_id AND v.version = a.current_version WHERE a.gallery_key = 'researcher'")"
+    g_out=$(gallery_run researcher "bash: $gal_dir && python \$SK/docx/scripts/md_to_docx.py \$SK/docx/scripts/sample.md in.docx --title T >/dev/null && python \$SK/docx/scripts/docx_text.py in.docx | grep -c 'south | 310.35'")
+    contains "Researcher: it reads provided material with its skills offline (docx text extracted)" \
+      '^text=fake-openai: tool said: 1$' "$g_out"
+    g_out=$(gallery_run document-drafter "bash: $gal_dir && python \$SK/docx/scripts/md_to_docx.py \$SK/docx/scripts/sample.md out.docx --title T >/dev/null && python \$SK/docx/scripts/docx_text.py out.docx | grep -c 'south | 310.35' && python \$SK/pdf/scripts/md_to_pdf.py \$SK/pdf/scripts/sample.md out.pdf --title T >/dev/null && test -s out.pdf && echo docx-and-pdf-produced")
+    printf '     gallery document drafter: %s\n' "$(printf '%s' "$g_out" | tr '\n' ' ' | cut -c1-400)"
+    contains "Document Drafter: the docx and pdf skills produced the files" \
+      '^text=fake-openai: tool said: 1 docx-and-pdf-produced$' "$g_out"
+    g_out=$(gallery_run code-helper "bash: $gal_dir && python \$SK/code-review/scripts/scan.py \$SK/code-review/scripts/sample.py | grep -o '[0-9]* finding' | head -1")
+    printf '     gallery code helper: %s\n' "$(printf '%s' "$g_out" | tr '\n' ' ' | cut -c1-400)"
+    contains "Code Helper: the code-review skill scanned the sample" '^text=fake-openai: tool said: 4 finding$' "$g_out"
 
     # ac-2: a revoked session token cannot call Bifrost (the member left the team; token unexpired).
     psql_kobe "DELETE FROM team_members WHERE team_id = '$E2E_TEAM_ID' AND user_id = '$MODEL_USER_ID';" >/dev/null
