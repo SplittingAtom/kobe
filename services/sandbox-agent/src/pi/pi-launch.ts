@@ -45,6 +45,13 @@ export interface PiLaunch {
   readonly env: Readonly<Record<string, string>>;
   /** Identity of the launch: a running process with a different key is restarted when idle. */
   readonly key: string;
+  /**
+   * The agent's system prompt (KOBE-123), when the run has a non-empty one. Never an argument: the
+   * thread writes it to a file in Pi's runtime directory at spawn and adds
+   * `--append-system-prompt <file>` (pi/system-prompt-file.ts), so it is neither in `ps` nor bound
+   * by the argument size limit.
+   */
+  readonly systemPrompt?: string;
 }
 
 export interface PiLaunchInput {
@@ -92,8 +99,9 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
   for (const dir of input.skillDirs ?? []) args.push("--skill", path.resolve(dir));
   const config = input.config;
   if (config?.thinking_level !== undefined) args.push("--thinking", config.thinking_level);
-  // Seams (not wired here): model alias → KOBE-41, mcp_servers → KOBE-62, agent/system prompt →
-  // KOBE-47. They change `key`, so a thread restarts Pi when its config changes.
+  // Seams (not wired here): model alias → KOBE-41, mcp_servers → KOBE-62. The system prompt is
+  // wired at spawn (see `PiLaunch.systemPrompt`). All change `key`, so a thread restarts Pi when
+  // its config changes.
 
   const env: Record<string, string> = {};
   for (const name of INHERITED_ENV) {
@@ -120,5 +128,11 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
     builtin_skills: config?.builtin_skills ?? null,
     mcp_servers: config?.mcp_servers ?? null,
   });
-  return { args, env, key };
+  const systemPrompt = config?.system_prompt;
+  return {
+    args,
+    env,
+    key,
+    ...(systemPrompt === undefined || systemPrompt === "" ? {} : { systemPrompt }),
+  };
 }

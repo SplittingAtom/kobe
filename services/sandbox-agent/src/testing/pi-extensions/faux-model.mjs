@@ -29,6 +29,14 @@ function step(context) {
   const steps = JSON.parse(textOf(messages[userIndex]).slice("faux:".length));
   const played = messages.slice(userIndex + 1).filter((m) => m.role === "assistant").length;
   const next = steps[played] ?? { text: "done" };
+  // KOBE-123: reply with the system prompt the model was given.
+  if (next.echoSystemPrompt) {
+    // Pi 1.0.0 carries the prompt as system messages: `content` plus named, ordered `sections`
+    // (Pi's own, then `addendum` for --append-system-prompt).
+    const system = messages.filter((m) => m.role === "system" || m.role === "developer");
+    const rendered = system.map((m) => [textOf(m), ...Object.values(m.sections ?? {})].join("\n"));
+    return fauxAssistantMessage(`SYSTEM:${rendered.join("\n")}`);
+  }
   const calls = next.calls ?? (next.tool === undefined ? [] : [next]);
   if (calls.length === 0) return fauxAssistantMessage(next.text ?? "done");
   return fauxAssistantMessage(

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseTranslatedPiEvent, type SandboxToServerFrame } from "@kobe/protocol";
 import { afterEach, describe, expect, it } from "vitest";
@@ -53,6 +53,31 @@ describe("run.start → Pi prompt → pi.event stream", () => {
     );
     expect(deltas.join("")).toBe("Hello");
     expect(stream.every((f: PiEvent) => f.thread_id === THREAD)).toBe(true);
+  });
+
+  it("passes the agent's system prompt to Pi as an appended, agent-owned file (KOBE-123)", async () => {
+    const prompt = 'You are the marker agent. KOBE-PROMPT-MARKER:abc \u00e9 `$(rm -rf /)` "quoted"';
+    h = await startHarness();
+    await h.server.command(runStart("say:hi", { config: { system_prompt: prompt } }));
+    const [launch] = await h.commandsLog();
+    const argv = launch?.argv as string[];
+    const at = argv.indexOf("--append-system-prompt");
+    expect(at).toBeGreaterThan(-1);
+    expect(argv).not.toContain("--system-prompt"); // append: Pi's tool and skill prompt stays
+    const file = argv[at + 1] as string;
+    expect(argv.join("\n")).not.toContain("KOBE-PROMPT-MARKER");
+    expect(path.basename(file)).toBe("system-prompt.md");
+    expect(launch?.appendSystemPromptText).toBe(prompt);
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    await h.close();
+    await expect(stat(file)).rejects.toThrow(); // removed with the process's runtime directory
+  });
+
+  it("starts Pi without the flag when the run has no system prompt (KOBE-123)", async () => {
+    h = await startHarness();
+    await h.server.command(runStart("say:hi", { config: { system_prompt: "" } }));
+    const [launch] = await h.commandsLog();
+    expect(launch?.argv).not.toContain("--append-system-prompt");
   });
 
   it("runs Pi in RPC mode with an allow-listed environment (no agent secrets)", async () => {

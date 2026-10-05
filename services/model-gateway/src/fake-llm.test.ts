@@ -1,7 +1,7 @@
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createFakeLlm, lastToolResult } from "./testing/fake-llm.js";
+import { createFakeLlm, lastToolResult, systemMarker } from "./testing/fake-llm.js";
 
 /** The fake provider's scripted tool call (KOBE-39 e2e: a bash tool call through real Pi). */
 const server = createFakeLlm();
@@ -58,5 +58,23 @@ describe("fake LLM tool use", () => {
   it("still echoes plain prompts", async () => {
     const res = await chat([{ role: "user", content: "hello" }]);
     expect(res.choices[0]?.message.content).toBe("fake-openai: hello");
+  });
+
+  it("echoes the marker found in the system prompt (KOBE-123)", async () => {
+    const res = await chat([
+      { role: "system", content: "You are x. KOBE-PROMPT-MARKER:tok_1-a and more" },
+      { role: "user", content: "hello" },
+    ]);
+    expect(res.choices[0]?.message.content).toBe("fake-openai: hello [system-marker: tok_1-a]");
+    expect(systemMarker({ messages: [{ role: "user", content: "KOBE-PROMPT-MARKER:no" }] })).toBe(
+      undefined,
+    );
+    expect(
+      systemMarker({
+        messages: [
+          { role: "developer", content: [{ type: "text", text: "KOBE-PROMPT-MARKER:d1" }] },
+        ],
+      }),
+    ).toBe("d1");
   });
 });

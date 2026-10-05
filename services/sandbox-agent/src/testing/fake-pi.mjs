@@ -33,6 +33,15 @@ const sessionFile = args[args.indexOf("--session") + 1];
 const log = `${sessionFile}.commands.jsonl`;
 const out = (record) => process.stdout.write(`${JSON.stringify(record)}\n`);
 const respond = (cmd, extra) => out({ id: cmd.id, type: "response", command: cmd.type, ...extra });
+const appendAt = args.indexOf("--append-system-prompt");
+const appendFile = appendAt === -1 ? undefined : args[appendAt + 1];
+function readPromptFile(file) {
+  try {
+    return readFileSync(file, "utf8");
+  } catch (error) {
+    return `unreadable: ${error.code}`;
+  }
+}
 const usage = {
   input: 1,
   output: 1,
@@ -45,6 +54,9 @@ appendFileSync(
   log,
   `${JSON.stringify({
     argv: args,
+    // KOBE-123: the file named by `--append-system-prompt`, as read at launch.
+    appendSystemPromptFile: appendFile ?? null,
+    appendSystemPromptText: appendFile === undefined ? null : readPromptFile(appendFile),
     env: Object.keys(process.env).sort(),
     // KOBE-41: where the agent put this process's config dir and model file (values, test-only).
     agentDir: process.env.PI_CODING_AGENT_DIR ?? null,

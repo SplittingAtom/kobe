@@ -11,6 +11,9 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
  * Tool use (OpenAI chat API only, KOBE-39 e2e): a last user message `bash: <command>` is answered
  * with a `bash` tool call running `<command>`; once the tool's result comes back (a last message
  * with role `tool`) the reply is `fake-openai: tool said: <the result's text, one line>`.
+ *
+ * System prompt (KOBE-123): when a system or developer message contains
+ * `KOBE-PROMPT-MARKER:<token>`, a plain reply ends with ` [system-marker: <token>]`.
  */
 export interface SeenRequest {
   readonly method: string;
@@ -38,6 +41,22 @@ function lastUserText(body: unknown): string {
 }
 
 const BASH_PREFIX = "bash: ";
+const SYSTEM_MARKER = /KOBE-PROMPT-MARKER:([A-Za-z0-9_-]{1,64})/;
+
+/**
+ * KOBE-123 e2e: the marker token (`KOBE-PROMPT-MARKER:<token>`) found in the request's system or
+ * developer messages (Chat Completions), proving an agent's prompt reached the model.
+ */
+export function systemMarker(body: unknown): string | undefined {
+  const messages = ((body ?? {}) as Record<string, unknown>).messages;
+  if (!Array.isArray(messages)) return undefined;
+  for (const m of messages as Record<string, unknown>[]) {
+    if (m.role !== "system" && m.role !== "developer") continue;
+    const found = SYSTEM_MARKER.exec(JSON.stringify(m.content ?? ""));
+    if (found !== null) return found[1];
+  }
+  return undefined;
+}
 const TOOL_ECHO_MAX = 600;
 
 /** The last message's text when it is a tool result (OpenAI `role: "tool"`), else undefined. */
@@ -316,7 +335,13 @@ export function createFakeLlm(seen: SeenRequest[] = []): Server {
       } else if (text.startsWith(BASH_PREFIX)) {
         openaiBashCall(res, text.slice(BASH_PREFIX.length), stream, model);
       } else {
-        openai(res, `fake-openai: ${text}`, stream, model);
+        const marker = systemMarker(body);
+        openai(
+          res,
+          `fake-openai: ${text}${marker === undefined ? "" : ` [system-marker: ${marker}]`}`,
+          stream,
+          model,
+        );
       }
     } else if (p.endsWith("/v1/messages")) {
       anthropic(res, `fake-anthropic: ${text}`, stream, model);

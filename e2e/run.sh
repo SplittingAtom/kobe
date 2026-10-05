@@ -1531,7 +1531,7 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
     if until_ok 180 owner_closed; then ok "no scripted agent holds the Owner's sandbox identity any more"
     else fail "no scripted agent holds the Owner's sandbox identity any more"; fi
     read -r -d '' CHAT_JS <<'JS' || true
-const [team, content, timeoutMs, model] = process.argv.slice(1);
+const [team, content, timeoutMs, model, promptMarker] = process.argv.slice(1);
 const base = "http://127.0.0.1:" + process.env.PORT;
 const origin = new URL(process.env.KOBE_PUBLIC_URL).origin;
 const jar = new Map();
@@ -1553,8 +1553,18 @@ for (let i = 0; i < 4; i++) {
 }
 out("signin", login.status);
 await call("PUT", "/v1/me/teams/active", { teamId: team });
+// KOBE-123: an optional agent whose prompt carries a marker the fake model echoes (a draft test
+// thread, so no publish is needed): the reply proves the prompt reached the model.
+let agentId;
+if (promptMarker) {
+  const agent = await call("POST", "/v1/agents", { scope: "team", frontmatter: { name: "e2e prompt marker" },
+    prompt: "You are the e2e marker agent. KOBE-PROMPT-MARKER:" + promptMarker });
+  out("agent", agent.status);
+  agentId = agent.json.id ?? agent.json.agent?.id;
+}
 // KOBE-44: an optional model chosen for the thread (an alias the team enabled).
-const thread = await call("POST", "/v1/threads", { title: "kobe-41", ...(model ? { model } : {}) });
+const thread = await call("POST", "/v1/threads", { title: "kobe-41", ...(model ? { model } : {}),
+  ...(agentId ? { agent_id: agentId, test: true } : {}) });
 out("thread", thread.status + ":" + (thread.json.model ?? "default"));
 const t0 = Date.now();
 const sent = await call("POST", "/v1/threads/" + thread.json.thread_id + "/messages", { content });
@@ -1602,8 +1612,8 @@ out("code", code);
 out("error_message", errorMessage);
 out("text", text);
 JS
-    chat_run() { # content timeout-ms [model] → the CHAT_JS output (not `chat`: KOBE-40's helper above)
-      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$CHAT_JS" "$E2E_TEAM_ID" "$1" "$2" "${3:-}" 2>&1 | tail -14
+    chat_run() { # content timeout-ms [model] [prompt-marker] → the CHAT_JS output (not `chat`: KOBE-40's helper above)
+      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$CHAT_JS" "$E2E_TEAM_ID" "$1" "$2" "${3:-}" "${4:-}" 2>&1 | tail -15
     }
     chat_out=$(chat_run "hello-pi-$RANDOM" 300000)
     printf '     chat: %s\n' "$(printf '%s' "$chat_out" | grep -v '^text=' | tr '\n' ' ')"
@@ -1612,6 +1622,13 @@ JS
     contains "the run completed with the fake model's streamed answer (Pi → shim → Bifrost → upstream)" \
       '^text=fake-openai: hello-pi-[0-9]+$' "$chat_out"
     contains "the run ended run.completed" '^terminal=run.completed$' "$chat_out"
+    # KOBE-123: the agent's system prompt reaches the model (Pi --append-system-prompt <file>); the
+    # fake model echoes the marker it finds in the system message.
+    marker_tok="m$RANDOM$RANDOM"
+    marker_out=$(chat_run "hello-marker" 300000 "" "$marker_tok")
+    printf '     prompt marker: %s\n' "$(printf '%s' "$marker_out" | grep -v '^text=' | tr '\n' ' ')"
+    contains "an agent's system prompt reaches the model (marker echoed by the fake model)" \
+      "^text=fake-openai: hello-marker \\[system-marker: $marker_tok\\]$" "$marker_out"
     contains "the woken sandbox produced a first token" '^first_token_ms=[0-9]+$' "$chat_out"
     contains "the shim attributed the model call to the run (x-kobe-run-id from Pi)" "\"runId\":\"$chat_run\"" \
       "$($KUBECTL -n "$NS" logs -l app.kubernetes.io/component=model-gateway --tail=-1 --since=15m 2>/dev/null | grep -F "\"runId\":\"${chat_run:-none}\"" | head -1)"

@@ -196,6 +196,27 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
     expect(JSON.parse(await readFile(a.modelFile, "utf8"))).toMatchObject({ v: 1 });
   });
 
+  it("the system prompt file is agent-owned and read-only to the Pi uid (KOBE-123)", async () => {
+    await start();
+    ok(
+      await h.server.command(runStart("say:a", { config: { model: MODEL, system_prompt: "P1" } })),
+    );
+    await until(async () => (await h.commandsLog()).length > 0);
+    const a = await launch(THREAD);
+    const file = (a as unknown as { appendSystemPromptFile: string }).appendSystemPromptFile;
+    expect((a as unknown as { appendSystemPromptText: string }).appendSystemPromptText).toBe("P1");
+    const info = await stat(file);
+    expect(info.uid).toBe(process.getuid?.());
+    expect(info.mode & 0o777).toBe(0o640);
+    const out = await tool(
+      THREAD,
+      "4f5a6b7c-8d9e-4f0a-9b1c-2d3e4f5a6b7c",
+      `echo x >> ${file} || mv ${file} ${file}.x || rm -f ${file}`,
+    );
+    expect(out.code).not.toBe(0);
+    expect(await readFile(file, "utf8")).toBe("P1");
+  });
+
   it("a tool cannot read the agent's token file", async () => {
     await twoThreads();
     const tokenFile = path.join(h.dir, "token");
