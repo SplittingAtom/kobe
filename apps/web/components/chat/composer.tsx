@@ -1,8 +1,9 @@
 "use client";
 
 import { ComposerPrimitive, useAui, useAuiState } from "@assistant-ui/react";
-import { ArrowUpIcon, SquareIcon } from "lucide-react";
+import { ArrowUpIcon, MicIcon, SquareIcon } from "lucide-react";
 import type { KeyboardEvent } from "react";
+import { useDictation } from "../../lib/chat/dictation";
 import { isBusy, isThreadRunning } from "../../lib/chat/thread-state";
 import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button";
@@ -14,7 +15,8 @@ import styles from "./chat.module.css";
  * The composer (D17). Idle: Enter sends. While a run holds the thread: Enter **queues** the message
  * (it runs next, in order), "Steer now" (Ctrl/Cmd+Shift+Enter) injects it into the running agent
  * at its next safe point, and Stop cancels the run (queued messages stay). The text is cleared only
- * once the server accepted it.
+ * once the server accepted it. The mic button dictates into the prompt (`lib/chat/dictation.ts`);
+ * sending stops dictation.
  */
 export function Composer({ extras }: { readonly extras: KobeThreadExtras }) {
   const aui = useAui();
@@ -25,13 +27,16 @@ export function Composer({ extras }: { readonly extras: KobeThreadExtras }) {
   const running = isThreadRunning(state);
   const inTrash = state.summary?.deletedAt != null;
   const empty = text.trim() === "";
+  const dictation = useDictation((t) => aui.composer.setText(t));
 
   const queue = async () => {
     if (!controller || empty) return;
+    dictation.stop();
     if (await controller.send(text.trim())) aui.composer.setText("");
   };
   const steer = async () => {
     if (!controller || empty) return;
+    dictation.stop();
     if (await controller.steer(text.trim())) aui.composer.setText("");
   };
 
@@ -61,6 +66,7 @@ export function Composer({ extras }: { readonly extras: KobeThreadExtras }) {
     <ComposerPrimitive.Root
       className="relative flex w-full flex-col gap-2"
       onSubmit={() => {
+        dictation.stop();
         // A new thread is created by this send: its title is the message's first line.
         if (remoteId === undefined) session.setNextTitle(text);
       }}
@@ -84,6 +90,19 @@ export function Composer({ extras }: { readonly extras: KobeThreadExtras }) {
         <div className="flex flex-wrap items-center justify-end gap-1.5">
           <ModelPicker controller={controller} state={state} isNew={remoteId === undefined} />
           <span className="flex-1" />
+          {dictation.supported && (
+            <TooltipIconButton
+              tooltip={dictation.listening ? "Stop dictation" : "Dictate"}
+              type="button"
+              variant={dictation.listening ? "destructive" : "ghost"}
+              size="icon"
+              className="size-7 rounded-full"
+              aria-pressed={dictation.listening}
+              onClick={() => (dictation.listening ? dictation.stop() : dictation.start(text))}
+            >
+              <MicIcon className={dictation.listening ? "size-4 animate-pulse" : "size-4"} />
+            </TooltipIconButton>
+          )}
           {running ? (
             <>
               <Button
@@ -134,9 +153,15 @@ export function Composer({ extras }: { readonly extras: KobeThreadExtras }) {
         </div>
       </div>
       <p id="kobe-composer-hint" className="text-muted-foreground px-2 text-xs">
-        {running
-          ? "Enter queues · Ctrl+Shift+Enter steers · Shift+Enter new line"
-          : "Enter sends · Shift+Enter new line"}
+        {dictation.error ? (
+          <span role="alert">{dictation.error}</span>
+        ) : dictation.listening ? (
+          "Listening… speak your prompt, then press the mic again to stop"
+        ) : running ? (
+          "Enter queues · Ctrl+Shift+Enter steers · Shift+Enter new line"
+        ) : (
+          "Enter sends · Shift+Enter new line"
+        )}
       </p>
     </ComposerPrimitive.Root>
   );

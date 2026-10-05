@@ -66,4 +66,10 @@ describe("Content Security Policy", () => {
       "Referrer-Policy": "strict-origin-when-cross-origin",
     });
   });
+
+  it("lets this origin use the microphone (composer dictation) and nothing else", async () => {
+    const rules = (await nextConfig.headers?.()) ?? [];
+    const policy = rules[0]?.headers.find((h) => h.key === "Permissions-Policy")?.value;
+    expect(policy).toBe("camera=(), microphone=(self), geolocation=(), payment=()");
+  });
 });
