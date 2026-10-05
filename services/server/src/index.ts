@@ -127,6 +127,8 @@ const auditIsolation = deps ? isolationAuditor(deps.database.db) : undefined;
 const isolation = createIsolationGate({
   runtimeClassName: config.runtimeClassName,
   listRuntimeClasses,
+  // A transient API failure at boot is retried before the pod can turn ready (KOBE-125).
+  startupAttempts: 5,
   onChange: (status) => {
     void auditIsolation?.(status);
     if (status.state === "verified") {

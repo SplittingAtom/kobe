@@ -107,6 +107,46 @@ describe("isolation gate: startup check", () => {
   });
 });
 
+describe("isolation gate: startup retry (KOBE-125)", () => {
+  it("stays 'checking' through transient failures and publishes verified", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const { g } = gate({
+      startupAttempts: 3,
+      startupRetryDelayMs: 100,
+      listRuntimeClasses: async () => {
+        if (++calls < 3) throw new Error("connection reset");
+        return GVISOR;
+      },
+    });
+    const pending = g.start();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(g.status().state).toBe("checking");
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(pending).resolves.toMatchObject({ state: "verified" });
+    expect(calls).toBe(3);
+    g.stop();
+  });
+
+  it("publishes missing once the attempts are exhausted", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const { g } = gate({
+      startupAttempts: 2,
+      startupRetryDelayMs: 100,
+      listRuntimeClasses: async () => {
+        calls++;
+        return [];
+      },
+    });
+    const pending = g.start();
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(pending).resolves.toMatchObject({ state: "missing" });
+    expect(calls).toBe(2);
+    g.stop();
+  });
+});
+
 describe("isolation gate: require() before agent work", () => {
   it("returns the verified RuntimeClass sandboxes must use", async () => {
     const { g } = gate();
