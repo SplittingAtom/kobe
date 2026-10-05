@@ -1,6 +1,8 @@
+import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   CAPABILITY_RUN_TOKEN,
+  MAX_RUN_TOKEN_TTL_SECONDS,
   RUN_TOKEN_HEADER,
   RUN_TOKEN_SKEW_SECONDS,
   decodeSandboxFrame,
@@ -119,5 +121,25 @@ describe("run.start run_token on the wire", () => {
     expect(
       decodeSandboxFrame(JSON.stringify({ ...hello, capabilities: [CAPABILITY_RUN_TOKEN] })),
     ).toMatchObject({ ok: true });
+  });
+});
+
+describe("run token lifetime bounds", () => {
+  it("requires exp > iat and a bounded lifetime in schema, sign and verify", () => {
+    const long = { ...CLAIMS, exp: CLAIMS.iat + MAX_RUN_TOKEN_TTL_SECONDS + 1 };
+    const inverted = { ...CLAIMS, exp: CLAIMS.iat };
+    const max = { ...CLAIMS, exp: CLAIMS.iat + MAX_RUN_TOKEN_TTL_SECONDS };
+    expect(runTokenClaimsSchema.safeParse(long).success).toBe(false);
+    expect(runTokenClaimsSchema.safeParse(inverted).success).toBe(false);
+    expect(runTokenClaimsSchema.safeParse(max).success).toBe(true);
+    expect(() => signRunToken(KEY, long)).toThrow();
+    // A token signed with the right key but out-of-bounds claims must still fail verification.
+    const payload = Buffer.from(JSON.stringify(long)).toString("base64url");
+    const signed = `krt1.${payload}`;
+    const mac = createHmac("sha256", KEY).update(signed).digest("base64url");
+    expect(verifyRunToken(KEY, `${signed}.${mac}`, NOW)).toEqual({
+      ok: false,
+      reason: "malformed",
+    });
   });
 });

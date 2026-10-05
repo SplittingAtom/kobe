@@ -47,19 +47,26 @@ export const RUN_TOKEN_MASTER_MIN_BYTES = 32;
 export const RUN_TOKEN_MAX_CHARS = 1024;
 /** Tolerated clock skew for `iat`, seconds. */
 export const RUN_TOKEN_SKEW_SECONDS = 60;
+/** Upper bound on `exp - iat` (24 h); KOBE-118 picks the real TTL under it. */
+export const MAX_RUN_TOKEN_TTL_SECONDS = 24 * 60 * 60;
 
-export const runTokenClaimsSchema = z.strictObject({
-  iss: z.literal("kobe-server"),
-  aud: z.literal("kobe.model-gateway"),
-  run_id: uuidSchema,
-  team_id: uuidSchema,
-  sandbox_id: uuidSchema,
-  /** Seconds since the epoch. */
-  iat: z.number().int().positive(),
-  exp: z.number().int().positive(),
-  /** Unique token id (audit, revocation record). */
-  jti: z.string().min(16).max(128),
-});
+export const runTokenClaimsSchema = z
+  .strictObject({
+    iss: z.literal("kobe-server"),
+    aud: z.literal("kobe.model-gateway"),
+    run_id: uuidSchema,
+    team_id: uuidSchema,
+    sandbox_id: uuidSchema,
+    /** Seconds since the epoch. */
+    iat: z.number().int().positive(),
+    exp: z.number().int().positive(),
+    /** Unique token id (audit, revocation record). */
+    jti: z.string().min(16).max(128),
+  })
+  .refine((c) => c.exp > c.iat && c.exp - c.iat <= MAX_RUN_TOKEN_TTL_SECONDS, {
+    message: "exp must be after iat and within MAX_RUN_TOKEN_TTL_SECONDS",
+    path: ["exp"],
+  });
 export type RunTokenClaims = z.infer<typeof runTokenClaimsSchema>;
 
 /** The `run.start.run_token` field: the opaque token plus its expiry (informational for the agent). */
