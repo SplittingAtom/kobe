@@ -15,7 +15,7 @@ the run notice, the tool card and a per-thread artifact list. Built against the 
   pattern is a context that holds the open artifact plus a panel, so `artifact-panel.tsx` is that
   (provider, `useArtifactPanel`, panel region) and `artifact-views.tsx` holds the renderers.
 - **Frame:** `<iframe src=/v1/artifacts/:id/versions/:n/frame?team=…
-  sandbox="allow-scripts allow-forms">`, no `srcdoc`, never `allow-same-origin` (D-7). Page CSP and
+sandbox="allow-scripts allow-forms">`, no `srcdoc`, never `allow-same-origin` (D-7). Page CSP and
   `proxy.ts` untouched (`/v1` is routed to the server by the ingress, so `proxy.ts` never sees it);
   only a comment in `csp.ts` changed.
 - **Mermaid** (`mermaid` ^11, MIT; `pnpm license:check` passes, no exception needed) is loaded on
