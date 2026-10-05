@@ -39,6 +39,9 @@ export type ConnectorExposureKind = (typeof connectorExposure.enumValues)[number
  */
 export const CONNECTOR_NAME_PATTERN = "^[a-z0-9]+([-_][a-z0-9]+)*$";
 
+/** Longest connector URL / icon URL the registry stores. */
+export const CONNECTOR_URL_MAX = 2048;
+
 /** Install-wide (†): the connector registry (install admins, D6). */
 export const connectors = pgTable(
   "connectors",
@@ -50,6 +53,15 @@ export const connectors = pgTable(
     url: text().notNull(),
     authKind: connectorAuthKind().notNull().default("none"),
     status: connectorStatus().notNull().default("active"),
+    /** Optional https icon URL (KOBE-100); the admin UI renders it as an image. */
+    iconUrl: text(),
+    /** The install admin who registered it (KOBE-100); null for rows older than that. */
+    createdBy: uuid().references(() => users.id),
+    /**
+     * Soft delete (KOBE-100): a removed connector that teams still reference stays as a disabled
+     * row (their `team_connectors` rows are kept for the later wiring) and leaves the registry list.
+     */
+    deletedAt: timestamp({ withTimezone: true }),
     /** Pinned `tools/list` snapshot: an array of {@link PinnedTool} (validated on read). */
     toolsSnapshot: jsonb().$type<PinnedTool[]>().notNull().default([]),
     /** SHA-256 over the whole snapshot (KOBE-59 drift detection), when pinned. */
@@ -68,6 +80,10 @@ export const connectors = pgTable(
     check(
       "connectors_url",
       sql`char_length(${t.url}) <= 2048 AND ${t.url} ~ '^https?://[^[:space:]]+$'`,
+    ),
+    check(
+      "connectors_icon_url",
+      sql`${t.iconUrl} IS NULL OR (char_length(${t.iconUrl}) <= 2048 AND ${t.iconUrl} ~ '^https://[^[:space:]]+$')`,
     ),
     check("connectors_tools_snapshot", sql`jsonb_typeof(${t.toolsSnapshot}) = 'array'`),
     check(

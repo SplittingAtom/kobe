@@ -861,6 +861,27 @@ export const AUDIT_EVENTS = {
   "skill.blocklist.added": event("install", { bundleHash: z.string().regex(/^[0-9a-f]{64}$/) }),
   /** An install admin took a bundle hash off the blocklist (KOBE-81). */
   "skill.blocklist.removed": event("install", { bundleHash: z.string().regex(/^[0-9a-f]{64}$/) }),
+
+  // ── connectors: the install registry (KOBE-100); ids, names and field names, never URLs or credentials ──
+  /** An install admin registered an MCP server. */
+  "mcp.connector.registered": event("install", {
+    connectorId: id,
+    name: z.string().max(64),
+    authKind: z.enum(["none", "api_key", "oauth"]),
+  }),
+  /** An install admin edited a connector; `changed` names the fields, values are not recorded. */
+  "mcp.connector.updated": event("install", {
+    connectorId: id,
+    name: z.string().max(64),
+    changed: z.array(z.enum(["name", "url", "iconUrl", "authKind", "status"])).max(5),
+  }),
+  /** An install admin removed a connector; `soft` when teams still used it (kept disabled). */
+  "mcp.connector.removed": event("install", {
+    connectorId: id,
+    name: z.string().max(64),
+    soft: z.boolean(),
+    teams: z.number().int().nonnegative(),
+  }),
 } as const;
 
 export type AuditAction = keyof typeof AUDIT_EVENTS;

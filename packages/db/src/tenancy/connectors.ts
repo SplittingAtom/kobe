@@ -8,7 +8,7 @@ export const connectors = defineDomain({
   grants: {
     // The connector registry (install admins, KOBE-59): server URL, auth kind, pinned tools; no
     // team data. Deleting a connector cascades into every team's `team_connectors` row for it
-    // (intended: it left the registry; KOBE-59 audits it). The only cascade from this table.
+    // (intended). The registry API (KOBE-100) soft-deletes a connector teams still use instead.
     connectors: ALL_PRIVILEGES,
   },
   teamReferencing: {},

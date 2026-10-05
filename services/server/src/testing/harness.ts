@@ -29,7 +29,10 @@ export interface Harness {
 }
 
 export async function openHarness(
-  options: Pick<ServerDepsOptions, "agents" | "models" | "blobs" | "egressHeaderSecrets"> = {},
+  options: Pick<
+    ServerDepsOptions,
+    "agents" | "models" | "blobs" | "egressHeaderSecrets" | "connectors"
+  > = {},
   /** App options that need the deps (e.g. the Orbit eval runner, KOBE-93). */
   appOptions?: (deps: ServerDeps) => AppOptions,
 ): Promise<Harness> {
