@@ -138,7 +138,7 @@ export async function loadGatewayPrincipal(
     ].sort();
     // An Orbit eval Job (KOBE-93) presents its eval id as the sandbox: live while the eval runs.
     const [evalRun] = await tx
-      .select({ status: orbitEvals.status })
+      .select({ status: orbitEvals.status, model: orbitEvals.model })
       .from(orbitEvals)
       .where(
         and(
@@ -156,7 +156,9 @@ export async function loadGatewayPrincipal(
     } else if (box && box.state !== "running") {
       sandbox = "revoked";
     }
-    return { member: member.length > 0, sandbox, virtualKey: vk, enabledModels };
+    // An eval token may call only the model its eval was started with.
+    const allowed = evalRun ? enabledModels.filter((m) => m === evalRun.model) : enabledModels;
+    return { member: member.length > 0, sandbox, virtualKey: vk, enabledModels: allowed };
   });
 }
 

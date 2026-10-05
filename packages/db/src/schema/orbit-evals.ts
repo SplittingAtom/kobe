@@ -92,6 +92,10 @@ export const orbitEvals = pgTable(
     error: text(),
     /** The version published when it passed. */
     version: integer(),
+    /** The version restored when this eval (of a rollback) passes. */
+    rollbackFrom: integer(),
+    /** The tool manifest evaluated; publishing is refused if the floor changed it meanwhile. */
+    toolManifest: jsonb().$type<Record<string, unknown>>(),
     jobName: text(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     startedAt: timestamp({ withTimezone: true }),

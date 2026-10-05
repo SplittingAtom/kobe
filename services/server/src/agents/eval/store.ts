@@ -57,6 +57,9 @@ export interface EvalRecord {
   readonly report: Record<string, unknown> | null;
   readonly error: string | null;
   readonly version: number | null;
+  /** Set when the eval gates a rollback: the version restored if it passes. */
+  readonly rollbackFrom: number | null;
+  readonly toolManifest: Record<string, unknown> | null;
   readonly jobName: string | null;
   readonly createdAt: Date;
   readonly startedAt: Date | null;
@@ -81,6 +84,8 @@ const COLUMNS = {
   report: orbitEvals.report,
   error: orbitEvals.error,
   version: orbitEvals.version,
+  rollbackFrom: orbitEvals.rollbackFrom,
+  toolManifest: orbitEvals.toolManifest,
   jobName: orbitEvals.jobName,
   createdAt: orbitEvals.createdAt,
   startedAt: orbitEvals.startedAt,
@@ -153,6 +158,8 @@ export interface NewEval {
   readonly definition: Record<string, unknown>;
   readonly model: string;
   readonly threshold: number;
+  readonly rollbackFrom?: number;
+  readonly toolManifest?: Record<string, unknown>;
 }
 
 /** A new `pending` eval; `eval_in_progress` when the agent has an unfinished one. */

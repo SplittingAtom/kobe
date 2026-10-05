@@ -67,10 +67,20 @@ Gallery agents and rollbacks are not gated.
   sweeper) on the fake cluster; web tests for the settings page, eval progress/results, version scores;
   chart tests (config, RBAC). Probe suite covers both new team tables.
 
+## Review follow-ups
+
+- **Rollback is gated:** with the gate on, rolling back needs a passing eval of that version under the CURRENT
+  threshold (its score, from `orbit_evals`); otherwise an eval of the source version runs (`rollback_from`)
+  and a pass republishes it via `rollbackAgent`. Migration `0062_orbit_evals_rollback` (also `tool_manifest`).
+- **Stale manifest:** the evaluated manifest is stored; publish (and rollback) refuse with `eval_stale` if the
+  recomputed one differs; the passed eval keeps a note to publish again.
+- **Result checks:** pack id/version must equal `pack.ts` (tested against the YAML) and attempts + errors must
+  equal scenarios x epochs, else errored. Result still comes from pod logs (no image change).
+- **Token scope:** `loadGatewayPrincipal` limits an eval token to the eval's own model.
+
 ## Open questions (for Chris or the coordinator)
 
 - Default threshold 20 % (one of five default scenarios may succeed) is my choice; 0 % is stricter.
-- Rollback is not gated (republishes content that was gated when first published). Gate it too?
 - A personal agent's score lives in the team where it was published (evals are team rows), so another team's
   version history shows "Not evaluated" for it.
 - The eval runs the image's built-in pack; a team-supplied pack is not offered.

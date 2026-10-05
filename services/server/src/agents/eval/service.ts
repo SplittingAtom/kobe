@@ -10,7 +10,8 @@ import { KubeApiError, type KubeClient, type ObjectRef } from "../../sandbox/kub
 import { teamNamespaceName, type KubeObject, type TeamRef } from "../../sandbox/manifests.js";
 import type { SandboxProvider } from "../../sandbox/provider.js";
 import type { VersionLimits } from "../versions.js";
-import { publishEvaluated } from "../versions.js";
+import type { ToolManifest } from "../manifest.js";
+import { publishEvaluated, rollbackAgent } from "../versions.js";
 import {
   EVAL_CONTAINER,
   EVAL_TOKEN_GRACE_SECONDS,
@@ -278,12 +279,24 @@ export class EvalRunner {
       passed.agentScope === "team"
         ? ({ scope: "team", teamId: passed.teamId } as const)
         : ({ scope: "personal", ownerUserId: passed.requestedBy } as const);
-    const result = await publishEvaluated(db, location, passed.agentId, {
-      definition: passed.definition as unknown as AgentDefinition,
-      draftRevision: passed.draftRevision,
-      publishedBy: passed.requestedBy,
-      ...(limits ? { limits } : {}),
-    });
+    const expected = passed.toolManifest
+      ? { expectedManifest: passed.toolManifest as unknown as ToolManifest }
+      : {};
+    const result =
+      passed.rollbackFrom === null
+        ? await publishEvaluated(db, location, passed.agentId, {
+            definition: passed.definition as unknown as AgentDefinition,
+            draftRevision: passed.draftRevision,
+            publishedBy: passed.requestedBy,
+            ...(limits ? { limits } : {}),
+            ...expected,
+          })
+        : await rollbackAgent(db, location, passed.agentId, {
+            publishedBy: passed.requestedBy,
+            fromVersion: passed.rollbackFrom,
+            ...(limits ? { limits } : {}),
+            ...expected,
+          });
     await recordPublication(
       db,
       passed.teamId,
@@ -332,4 +345,5 @@ const PUBLISH_FAILURES = {
   invalid_draft: "the draft is no longer valid.",
   unchanged: "it equals the current version.",
   version_limit: "the agent is at its version limit.",
+  eval_stale: "the tool policy changed during the evaluation; publish again to re-run it.",
 } as const;

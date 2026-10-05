@@ -1,4 +1,4 @@
-import { validateAgentDefinition } from "@kobe/agent-file";
+import { validateAgentDefinition, type AgentDefinition } from "@kobe/agent-file";
 import { withTeam, type KobeDb } from "@kobe/db";
 import type { BackgroundTasks } from "../../background.js";
 import type { TeamRef } from "../../sandbox/manifests.js";
@@ -9,7 +9,7 @@ import { mapAgentVersionToOrbit, orbitExportToYaml } from "../orbit/orbit-export
 import type { AgentLocation, AgentRecord } from "../store.js";
 import { contentKey, getVersion, type PublishError } from "../versions.js";
 import type { EvalRunner } from "./service.js";
-import { createEval, readEvalSettings, type EvalRecord } from "./store.js";
+import { createEval, readEvalSettings, versionScores, type EvalRecord } from "./store.js";
 
 /**
  * The pre-publish Orbit eval gate (KOBE-93, spec D19). When the team turned the gate on, Publish
@@ -40,6 +40,8 @@ export interface GateInput {
   readonly location: AgentLocation;
   /** The draft revision the publisher reviewed (If-Match); undefined publishes the current draft. */
   readonly expectedRevision: number | undefined;
+  /** A rollback to this version (KOBE-93): gated unless that version already passed the current limit. */
+  readonly rollbackFrom?: number;
 }
 
 export async function gatePublish(input: GateInput): Promise<GateOutcome> {
@@ -58,14 +60,30 @@ export async function gatePublish(input: GateInput): Promise<GateOutcome> {
     );
   }
   if (agent.archivedAt) return { kind: "publish_error", error: "archived" };
-  if (input.expectedRevision !== undefined && agent.revision !== input.expectedRevision) {
-    return { kind: "publish_error", error: "revision_mismatch" };
+  const rollbackFrom = input.rollbackFrom;
+  let definition: AgentDefinition;
+  if (rollbackFrom !== undefined) {
+    if (agent.currentVersion === rollbackFrom)
+      return { kind: "publish_error", error: "already_current" };
+    const source = await getVersion(db, location, agent.id, rollbackFrom);
+    if (!source) return { kind: "publish_error", error: "version_not_found" };
+    // Only a version with a passing eval under today's limit may be restored without a new eval.
+    const score = (await versionScores(db, input.team.id, agent.id)).get(rollbackFrom);
+    if (score && score.attackSuccessRate <= settings.maxAttackSuccessRate + 1e-9) {
+      return { kind: "ungated" };
+    }
+    definition = source.definition;
+  } else {
+    if (input.expectedRevision !== undefined && agent.revision !== input.expectedRevision) {
+      return { kind: "publish_error", error: "revision_mismatch" };
+    }
+    const draft = validateAgentDefinition({ frontmatter: agent.frontmatter, prompt: agent.prompt });
+    if (!draft.ok) return { kind: "publish_error", error: "invalid_draft" };
+    definition = draft.definition;
   }
-  const draft = validateAgentDefinition({ frontmatter: agent.frontmatter, prompt: agent.prompt });
-  if (!draft.ok) return { kind: "publish_error", error: "invalid_draft" };
 
   const options = await listOrbitModelOptions(db, input.team.id);
-  const model = pickOrbitModel(draft.definition.frontmatter.model, options);
+  const model = pickOrbitModel(definition.frontmatter.model, options);
   if (!model) {
     return refused(
       409,
@@ -77,15 +95,14 @@ export async function gatePublish(input: GateInput): Promise<GateOutcome> {
   const floor = await withTeam(db, input.team.id, (tx) =>
     readPublishFloor(tx, location.scope === "team" ? "team" : "install"),
   );
-  const toolManifest = computeToolManifest(draft.definition.frontmatter, floor, new Date());
-  if (agent.currentVersion !== null) {
+  const toolManifest = computeToolManifest(definition.frontmatter, floor, new Date());
+  if (rollbackFrom === undefined && agent.currentVersion !== null) {
     const current = await getVersion(db, location, agent.id, agent.currentVersion).catch(
       () => null,
     );
     if (
       current &&
-      contentKey(current.definition, current.toolManifest) ===
-        contentKey(draft.definition, toolManifest)
+      contentKey(current.definition, current.toolManifest) === contentKey(definition, toolManifest)
     ) {
       return { kind: "publish_error", error: "unchanged" };
     }
@@ -95,8 +112,8 @@ export async function gatePublish(input: GateInput): Promise<GateOutcome> {
     yaml = orbitExportToYaml(
       mapAgentVersionToOrbit({
         definition: {
-          ...draft.definition,
-          frontmatter: { ...draft.definition.frontmatter, model: gatewayModelId(model) },
+          ...definition,
+          frontmatter: { ...definition.frontmatter, model: gatewayModelId(model) },
         },
         toolManifest,
         version: (agent.currentVersion ?? 0) + 1,
@@ -116,9 +133,11 @@ export async function gatePublish(input: GateInput): Promise<GateOutcome> {
     agentSlug: agent.slug,
     requestedBy: input.userId,
     draftRevision: agent.revision,
-    definition: { frontmatter: draft.definition.frontmatter, prompt: draft.definition.prompt },
+    definition: { frontmatter: definition.frontmatter, prompt: definition.prompt },
     model: gatewayModelId(model),
+    toolManifest: toolManifest as unknown as Record<string, unknown>,
     threshold: settings.maxAttackSuccessRate,
+    ...(rollbackFrom === undefined ? {} : { rollbackFrom }),
   });
   if (!created.ok) {
     return refused(

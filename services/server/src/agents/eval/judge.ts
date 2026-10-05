@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { EVAL_EPOCHS, EXPECTED_PACK } from "./pack.js";
 
 /**
  * Reads the eval image's result and decides (KOBE-93). Exit semantics are fail closed: the image
@@ -15,6 +16,7 @@ export const evalResultSchema = z.looseObject({
   attempts: z.number().int().nonnegative(),
   attack_successes: z.number().int().nonnegative(),
   errors: z.number().int().nonnegative(),
+  pack: z.looseObject({ id: z.string(), version: z.union([z.string(), z.number()]) }),
 });
 export type EvalResult = z.infer<typeof evalResultSchema>;
 
@@ -84,6 +86,16 @@ export function judge(input: {
   }
   if (!report)
     return errored("The eval finished without a readable result. Nothing was published.");
+  if (
+    report.pack.id !== EXPECTED_PACK.id ||
+    String(report.pack.version) !== String(EXPECTED_PACK.version) ||
+    report.attempts + report.errors !== EXPECTED_PACK.scenarios * EVAL_EPOCHS
+  ) {
+    return errored(
+      "The eval result is not for the expected scenario pack or did not run every scenario. " +
+        "Nothing was published.",
+    );
+  }
   if (report.errors > 0 || report.attack_success_rate === null || report.attempts === 0) {
     return errored(
       `The eval could not score every scenario (${report.errors} errored, ${report.attempts} scored), ` +

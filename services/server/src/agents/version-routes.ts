@@ -172,6 +172,41 @@ export function mountVersionRoutes<E extends { Variables: object }>(
     });
   });
 
+  /** The eval gate (KOBE-93): a Response when it answered (202, refusal, publish error); else undefined. */
+  async function gateIfEnabled(
+    c: Context,
+    found: ResolvedAgent,
+    expectedRevision: number | undefined,
+    rollbackFrom?: number,
+  ): Promise<Response | undefined> {
+    if (!options.evals) return undefined;
+    const gate = await gatePublish({
+      db,
+      runner: options.evals.runner,
+      background: options.evals.background,
+      team: options.evals.team(c),
+      userId: options.userId(c),
+      agent: found.agent,
+      location: found.location,
+      expectedRevision,
+      ...(rollbackFrom === undefined ? {} : { rollbackFrom }),
+    });
+    if (gate.kind === "started") {
+      return c.json(
+        {
+          eval: evalView(gate.eval),
+          message:
+            "Evaluating: the version is published when its Orbit eval passes the team's threshold.",
+        },
+        202,
+      );
+    }
+    if (gate.kind === "publish_error") return publishError(c, gate.error);
+    if (gate.kind === "refused")
+      return c.json({ code: gate.code, message: gate.message }, gate.status);
+    return undefined;
+  }
+
   app.post("/:id/publish", async (c) => {
     const found = await resolve(c);
     if (!found) return notFound(c);
@@ -179,33 +214,8 @@ export function mountVersionRoutes<E extends { Variables: object }>(
     const ifMatch = ifMatchRevision(c);
     if (!ifMatch.ok) return ifMatch.response;
     if (!(await withinRate(c))) return rateLimited(c);
-    if (options.evals) {
-      const team = options.evals.team(c);
-      const gate = await gatePublish({
-        db,
-        runner: options.evals.runner,
-        background: options.evals.background,
-        team,
-        userId: options.userId(c),
-        agent: found.agent,
-        location: found.location,
-        expectedRevision: ifMatch.revision,
-      });
-      if (gate.kind === "started") {
-        return c.json(
-          {
-            eval: evalView(gate.eval),
-            message:
-              "Evaluating: the agent is published when its Orbit eval passes the team's threshold.",
-          },
-          202,
-        );
-      }
-      if (gate.kind === "publish_error") return publishError(c, gate.error);
-      if (gate.kind === "refused") {
-        return c.json({ code: gate.code, message: gate.message }, gate.status);
-      }
-    }
+    const gated = await gateIfEnabled(c, found, ifMatch.revision);
+    if (gated) return gated;
     const result = await publishAgent(db, found.location, found.agent.id, {
       publishedBy: options.userId(c),
       expectedRevision: ifMatch.revision,
@@ -224,6 +234,8 @@ export function mountVersionRoutes<E extends { Variables: object }>(
     if (!found.access.publish) return forbidden(c, "Your team role doesn't allow publishing it.");
     if (!(await withinRate(c))) return rateLimited(c);
     return guardUnreadable(c, async () => {
+      const started = await gateIfEnabled(c, found, undefined, body.version);
+      if (started) return started;
       const result = await rollbackAgent(db, found.location, found.agent.id, {
         publishedBy: options.userId(c),
         fromVersion: body.version,

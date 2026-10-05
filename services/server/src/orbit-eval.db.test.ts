@@ -54,7 +54,7 @@ const report = (over: Record<string, unknown> = {}) =>
       attempts: 5,
       attack_successes: 0,
       errors: 0,
-      pack: { id: "default", version: "1" },
+      pack: { id: "kobe-default", version: 1 },
       ...over,
     },
     null,
@@ -267,7 +267,7 @@ describe("Publish with the gate on (KOBE-93)", () => {
     const versions = (await builder.get(`/v1/agents/${id}/versions`)).json.versions;
     expect(versions[0].score).toMatchObject({ attackSuccessRate: 0, threshold: 0.2 });
     const detail = (await builder.get(`/v1/agents/${id}/evals/${list[0].id}`)).json.eval;
-    expect(detail.report.pack).toEqual({ id: "default", version: "1" });
+    expect(detail.report.pack).toEqual({ id: "kobe-default", version: 1 });
 
     const [job] = kube.all("Job") as unknown as {
       metadata: { namespace: string };
@@ -372,7 +372,7 @@ describe("Publish with the gate on (KOBE-93)", () => {
     await builder.put(
       `/v1/agents/${id}`,
       { frontmatter: { name: "Renamed" }, prompt: "Changed." },
-      { "if-match": "1" },
+      { "if-match": '"1"' },
     );
     await settled();
     const version = (await builder.get(`/v1/agents/${id}/versions/1`)).json.version;
@@ -425,6 +425,99 @@ describe("Publish with the gate on (KOBE-93)", () => {
   });
 });
 
+describe("Rollback with the gate on (KOBE-93)", () => {
+  const rollback = (id: string, version: number) =>
+    builder.post(`/v1/agents/${id}/rollback`, { version });
+  const edit = async (id: string, revision: number, prompt: string) => {
+    const res = await builder.put(
+      `/v1/agents/${id}`,
+      { frontmatter: { name: "Rolled" }, prompt },
+      { "if-match": `"${revision}"` },
+    );
+    expect(res.status, JSON.stringify(res.json)).toBe(200);
+    return res;
+  };
+
+  it("restores a version that passed under the current limit without a new eval", async () => {
+    await gateOn(0.2);
+    const id = await draft();
+    await publish(id);
+    await settled();
+    await edit(id, 1, "v2 text");
+    await publish(id);
+    await settled();
+    const jobs = kube.all("Job").length;
+    const res = await rollback(id, 1);
+    expect(res.status, JSON.stringify(res.json)).toBe(201);
+    expect(kube.all("Job").length).toBe(jobs);
+  });
+
+  it("evaluates a version with no passing score first, and restores it only if it passes", async () => {
+    const id = await draft();
+    expect((await publish(id)).status).toBe(201); // gate off: v1 has no score
+    await edit(id, 1, "v2 text");
+    expect((await publish(id)).status).toBe(201);
+    await gateOn(0.2);
+    jobResult = attacked();
+    const blocked = await rollback(id, 1);
+    expect(blocked.status).toBe(202);
+    await settled();
+    expect((await evals(id)).evals[0]).toMatchObject({ status: "blocked", version: null });
+    expect(await currentVersion(id)).toBe(2);
+
+    jobResult = clean();
+    expect((await rollback(id, 1)).status).toBe(202);
+    await settled();
+    expect((await evals(id)).evals[0]).toMatchObject({ status: "passed", version: 3 });
+    expect(await currentVersion(id)).toBe(3);
+    const v3 = (await builder.get(`/v1/agents/${id}/versions/3`)).json.version;
+    expect(v3.prompt).toBe("You are careful.");
+  });
+
+  it("re-evaluates when the limit was tightened below the version's score, and fails closed on error", async () => {
+    await gateOn(0.6);
+    jobResult = {
+      log: report({ attack_success_rate: 0.4, attack_successes: 2 }),
+      outcome: "Complete",
+    };
+    const id = await draft();
+    await publish(id);
+    await settled();
+    await edit(id, 1, "v2 text");
+    jobResult = clean();
+    await publish(id);
+    await settled();
+    await gateOn(0.2);
+    jobResult = { log: "", outcome: "Failed", reason: "DeadlineExceeded" };
+    expect((await rollback(id, 1)).status).toBe(202);
+    await settled();
+    expect((await evals(id)).evals[0].status).toBe("errored");
+    expect(await currentVersion(id)).toBe(2);
+  });
+});
+
+describe("Evaluated manifest (KOBE-93)", () => {
+  it("refuses to publish when the tool manifest changed since the eval, and says to re-run", async () => {
+    await gateOn();
+    jobResult = "hang";
+    const id = await draft();
+    expect((await publish(id)).status).toBe(202);
+    const running = (await evals(id)).active;
+    // The policy floor changed while the eval ran: the manifest it scored no longer applies.
+    await h.admin.query(
+      `UPDATE orbit_evals SET tool_manifest = '{"tampered":true}' WHERE id = $1`,
+      [running.id],
+    );
+    jobResult = clean();
+    for (const job of kube.all("Job")) if (!job.status) finishJob(kube, job);
+    await settled();
+    const [first] = (await evals(id)).evals;
+    expect(first).toMatchObject({ status: "passed", version: null });
+    expect(first.error).toMatch(/tool policy changed.*re-run/);
+    expect(await currentVersion(id)).toBeNull();
+  });
+});
+
 describe("Publish with the gate on but no runner", () => {
   it("blocks with a clear message instead of publishing unevaluated", async () => {
     await gateOn();
@@ -467,6 +560,7 @@ describe("eval state machine", () => {
       attempts: 5,
       attack_successes: 0,
       errors: 0,
+      pack: { id: "kobe-default", version: 1 },
     },
   } as const;
 
@@ -523,6 +617,8 @@ describe("eval state machine", () => {
     expect((await principal()).sandbox).toBe("revoked");
     await markRunning(db, finance, id, "job");
     expect((await principal()).sandbox).toBe("live");
+    // The eval's token may call only the model the eval runs on.
+    expect((await principal()).enabledModels).toEqual(["anthropic/claude-smart"]);
     // Another user can't present this eval's id.
     expect((await loadGatewayPrincipal(db, finance, adminId, id)).sandbox).toBe("unrecorded");
     await finishEval(db, finance, id, { status: "passed", ...scored });
