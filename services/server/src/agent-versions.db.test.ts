@@ -164,7 +164,7 @@ describe("publish (D19, D8)", () => {
 
   it("publishes gallery agents only by seeding them from the repo", async () => {
     const [seeded] = await seedGalleryAgents(h.deps.database.db, [
-      { key: "gallery-helper", file: "---\nname: Gallery Helper\n---\nHelp.\n" },
+      { key: "gallery-helper", generation: 1, file: "---\nname: Gallery Helper\n---\nHelp.\n" },
     ]);
     const id = seeded?.agentId ?? "";
     expect((await publish("alice", id)).status).toBe(403);
@@ -333,7 +333,7 @@ describe("archive instead of delete (KOBE-45 decision 6)", () => {
 
   it("refuses new threads with an archived gallery agent", async () => {
     const [seeded] = await seedGalleryAgents(h.deps.database.db, [
-      { key: "old-gallery", file: "---\nname: Old Gallery\n---\nOld.\n" },
+      { key: "old-gallery", generation: 1, file: "---\nname: Old Gallery\n---\nOld.\n" },
     ]);
     const id = seeded?.agentId ?? "";
     await h.admin.query(`UPDATE install_agents SET archived_at = now() WHERE id = $1`, [id]);
@@ -490,7 +490,7 @@ describe("threads pin the version they started on (D19, U8, Gate 3)", () => {
       409,
     );
     const [seeded] = await seedGalleryAgents(h.deps.database.db, [
-      { key: "shared", file: "---\nname: Shared\n---\nShared.\n" },
+      { key: "shared", generation: 1, file: "---\nname: Shared\n---\nShared.\n" },
     ]);
     expect((await newThread("carol", seeded?.agentId ?? "")).agent_version).toBe(1);
   });
@@ -583,7 +583,7 @@ describe("a version whose manifest can't be read (fail closed)", () => {
 describe("forks of gallery agents", () => {
   it("copy the published version, not the curators' draft in progress", async () => {
     const [seeded] = await seedGalleryAgents(h.deps.database.db, [
-      { key: "curated", file: "---\nname: Curated\n---\nPublished prompt.\n" },
+      { key: "curated", generation: 1, file: "---\nname: Curated\n---\nPublished prompt.\n" },
     ]);
     const id = seeded?.agentId ?? "";
     // A draft in progress (set by hand: nothing in the API edits gallery drafts any more).

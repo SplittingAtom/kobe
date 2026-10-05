@@ -8,6 +8,12 @@ import { agentSlugSchema, parseAgentFile, type AgentDefinition } from "@kobe/age
  */
 export interface GalleryDefinition {
   readonly key: string;
+  /**
+   * Monotonic positive integer: raise it with every change to `file`. A definition is published
+   * only when its generation is newer than the one seeded, so a replica still running an older
+   * release (rollout, rollback) never overwrites a newer definition.
+   */
+  readonly generation: number;
   readonly file: string;
 }
 
@@ -15,6 +21,7 @@ export const GALLERY_DEFINITIONS: readonly GalleryDefinition[] = [];
 
 export interface ParsedGalleryDefinition {
   readonly key: string;
+  readonly generation: number;
   readonly definition: AgentDefinition;
 }
 
@@ -23,7 +30,10 @@ export function parseGalleryDefinitions(
   definitions: readonly GalleryDefinition[],
 ): ParsedGalleryDefinition[] {
   const seen = new Set<string>();
-  return definitions.map(({ key, file }) => {
+  return definitions.map(({ key, generation, file }) => {
+    if (!Number.isSafeInteger(generation) || generation < 1) {
+      throw new Error(`gallery definition "${key}" needs a positive integer generation`);
+    }
     if (!agentSlugSchema.safeParse(key).success) {
       throw new Error(`gallery definition key "${key}" is not a valid slug`);
     }
@@ -36,6 +46,6 @@ export function parseGalleryDefinitions(
         `gallery definition "${key}" is invalid: ${first ? `${first.path} ${first.message}` : "unknown"}`,
       );
     }
-    return { key, definition: parsed.definition };
+    return { key, generation, definition: parsed.definition };
   });
 }

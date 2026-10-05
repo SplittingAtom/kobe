@@ -1,5 +1,5 @@
 {
-  "id": "186cb8a0-4782-47dc-98ce-3ad5f45cb185",
+  "id": "e0d6e2b7-3714-4295-9427-19ea32a39fa2",
   "prevId": "773eddba-ebb9-44f8-a70b-74ba5cdb948e",
   "version": "7",
   "dialect": "postgresql",
@@ -2910,9 +2910,9 @@
           "primaryKey": false,
           "notNull": false
         },
-        "gallery_hash": {
-          "name": "gallery_hash",
-          "type": "text",
+        "gallery_generation": {
+          "name": "gallery_generation",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
@@ -3079,6 +3079,10 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
+        "install_agents_gallery_generation": {
+          "name": "install_agents_gallery_generation",
+          "value": "\"install_agents\".\"gallery_generation\" IS NULL OR \"install_agents\".\"gallery_generation\" > 0"
+        },
         "install_agents_gallery_key_scope": {
           "name": "install_agents_gallery_key_scope",
           "value": "\"install_agents\".\"gallery_key\" IS NULL OR \"install_agents\".\"scope\" = 'gallery'"

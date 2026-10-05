@@ -131,11 +131,12 @@ export const installAgents = pgTable(
     scope: installAgentScope().notNull(),
     ownerUserId: uuid().references(() => users.id),
     /**
-     * Gallery agents seeded from the repo (KOBE-87): the definition's key and the hash of what was
-     * last published from it, so a restart seeds nothing and an upgrade publishes one new version.
+     * Gallery agents seeded from the repo (KOBE-87): the definition's key and its generation (a
+     * monotonic integer in the repo), so a restart seeds nothing, an upgrade publishes one new
+     * version, and an older replica never overwrites a newer definition.
      */
     galleryKey: text(),
-    galleryHash: text(),
+    galleryGeneration: integer(),
     ...definitionColumns(),
   },
   (t): PgTableExtraConfigValue[] => [
@@ -153,6 +154,10 @@ export const installAgents = pgTable(
     uniqueIndex("install_agents_gallery_key_unique")
       .on(t.galleryKey)
       .where(sql`${t.galleryKey} IS NOT NULL`),
+    check(
+      "install_agents_gallery_generation",
+      sql`${t.galleryGeneration} IS NULL OR ${t.galleryGeneration} > 0`,
+    ),
     check(
       "install_agents_gallery_key_scope",
       sql`${t.galleryKey} IS NULL OR ${t.scope} = 'gallery'`,

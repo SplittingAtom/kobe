@@ -1,10 +1,16 @@
-import { createHash } from "node:crypto";
-import type { AgentDefinition } from "@kobe/agent-file";
-import { and, eq, installAgents, sql, SYSTEM_ACTOR, type KobeDb } from "@kobe/db";
-import { canonicalJson } from "@kobe/protocol";
+import {
+  and,
+  eq,
+  installAgents,
+  isNull,
+  isNotNull,
+  sql,
+  SYSTEM_ACTOR,
+  type KobeDb,
+} from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { INSTALL, installWhere } from "../agents/store.js";
-import { publishAgent } from "../agents/versions.js";
+import { deleteOrArchiveAgent, publishAgent } from "../agents/versions.js";
 import { logger } from "../logger.js";
 import {
   GALLERY_DEFINITIONS,
@@ -18,14 +24,8 @@ const GALLERY = { scope: "gallery" } as const;
 export interface SeedResult {
   readonly key: string;
   readonly agentId: string;
-  readonly action: "created" | "updated" | "unchanged" | "skipped_archived";
+  readonly action: "created" | "updated" | "unchanged" | "skipped_archived" | "failed";
 }
-
-/** Hash of what a definition publishes: changes exactly when the repo's definition changes. */
-export const definitionHash = (definition: AgentDefinition): string =>
-  createHash("sha256")
-    .update(canonicalJson({ frontmatter: definition.frontmatter, prompt: definition.prompt }))
-    .digest("hex");
 
 const pgCode = (err: unknown): string | undefined => {
   const e = err as { code?: string; cause?: { code?: string } } | undefined;
@@ -39,12 +39,11 @@ const pgCode = (err: unknown): string | undefined => {
  */
 async function ensureDraft(
   db: KobeDb,
-  { key, definition }: ParsedGalleryDefinition,
-  hash: string,
+  { key, generation, definition }: ParsedGalleryDefinition,
 ): Promise<{ agentId: string; action: SeedResult["action"]; publish: boolean }> {
   return db.transaction(async (tx) => {
     const [found] = await tx
-      .select({ ...INSTALL, galleryHash: installAgents.galleryHash })
+      .select({ ...INSTALL, galleryGeneration: installAgents.galleryGeneration })
       .from(installAgents)
       .where(and(installWhere(GALLERY), eq(installAgents.galleryKey, key)))
       .for("update");
@@ -61,19 +60,34 @@ async function ensureDraft(
     if (!found) {
       // An agent curated through the old install console under the same slug is adopted.
       const [legacy] = await tx
-        .select({ id: installAgents.id, slug: installAgents.slug })
+        .select({
+          id: installAgents.id,
+          slug: installAgents.slug,
+          archivedAt: installAgents.archivedAt,
+        })
         .from(installAgents)
         .where(and(installWhere(GALLERY), eq(installAgents.slug, key)))
         .for("update");
+      // Archived by hand: never revived behind anyone's back (nor an error at every start).
+      if (legacy?.archivedAt) {
+        logger.warn({ key }, "gallery definition matches an archived agent; skipped");
+        return { agentId: legacy.id, action: "skipped_archived", publish: false };
+      }
       const [row] = legacy
         ? await tx
             .update(installAgents)
-            .set({ ...values, galleryKey: key, revision: bump() })
+            .set({ ...values, galleryKey: key, galleryGeneration: generation, revision: bump() })
             .where(eq(installAgents.id, legacy.id))
             .returning({ id: installAgents.id, revision: installAgents.revision })
         : await tx
             .insert(installAgents)
-            .values({ ...values, slug: key, scope: "gallery", galleryKey: key })
+            .values({
+              ...values,
+              slug: key,
+              scope: "gallery",
+              galleryKey: key,
+              galleryGeneration: generation,
+            })
             .returning({ id: installAgents.id, revision: installAgents.revision });
       if (!row) throw new Error("gallery seed: insert returned no row");
       const ref = target(row.id, key);
@@ -98,7 +112,12 @@ async function ensureDraft(
     if (found.archivedAt !== null) {
       return { agentId: found.id, action: "skipped_archived", publish: false };
     }
-    if (found.galleryHash === hash && found.currentVersion !== null) {
+    // Same or newer generation already seeded: an older replica (rollout, rollback) changes nothing.
+    if (
+      found.currentVersion !== null &&
+      found.galleryGeneration !== null &&
+      found.galleryGeneration >= generation
+    ) {
       return { agentId: found.id, action: "unchanged", publish: false };
     }
     const [row] = await tx
@@ -120,14 +139,13 @@ async function ensureDraft(
 const bump = () => sql`${installAgents.revision} + 1`;
 
 async function seedOne(db: KobeDb, parsed: ParsedGalleryDefinition): Promise<SeedResult> {
-  const hash = definitionHash(parsed.definition);
   let draft;
   try {
-    draft = await ensureDraft(db, parsed, hash);
+    draft = await ensureDraft(db, parsed);
   } catch (err) {
     // Another replica inserted the same key between our read and write: it is theirs now.
     if (pgCode(err) !== "23505") throw err;
-    draft = await ensureDraft(db, parsed, hash);
+    draft = await ensureDraft(db, parsed);
   }
   const { agentId, action } = draft;
   if (draft.publish) {
@@ -142,10 +160,30 @@ async function seedOne(db: KobeDb, parsed: ParsedGalleryDefinition): Promise<See
     }
     await db
       .update(installAgents)
-      .set({ galleryHash: hash })
+      .set({ galleryGeneration: parsed.generation })
       .where(and(installWhere(GALLERY), eq(installAgents.id, agentId)));
   }
   return { key: parsed.key, agentId, action };
+}
+
+/**
+ * Archives seeded gallery agents whose definition left the repo: gone from the gallery, no new
+ * threads, existing threads and team forks untouched. Idempotent (archived ones are skipped).
+ */
+async function retireRemoved(db: KobeDb, keys: readonly string[]): Promise<string[]> {
+  const gone = await db
+    .select({ id: installAgents.id, key: installAgents.galleryKey })
+    .from(installAgents)
+    .where(
+      and(
+        installWhere(GALLERY),
+        isNotNull(installAgents.galleryKey),
+        isNull(installAgents.archivedAt),
+      ),
+    );
+  const removed = gone.filter((g) => g.key !== null && !keys.includes(g.key));
+  for (const { id } of removed) await deleteOrArchiveAgent(db, GALLERY, id, SYSTEM_ACTOR);
+  return removed.map((g) => g.key ?? "");
 }
 
 /**
@@ -160,7 +198,24 @@ export async function seedGalleryAgents(
 ): Promise<SeedResult[]> {
   const parsed = parseGalleryDefinitions(definitions);
   const results: SeedResult[] = [];
-  for (const definition of parsed) results.push(await seedOne(db, definition));
+  // One definition failing (say, a row in an unexpected state) must not stop the server starting.
+  for (const definition of parsed) {
+    try {
+      results.push(await seedOne(db, definition));
+    } catch (err) {
+      logger.error({ err, key: definition.key }, "gallery agent could not be seeded");
+      results.push({ key: definition.key, agentId: "", action: "failed" });
+    }
+  }
+  try {
+    const retired = await retireRemoved(
+      db,
+      parsed.map((p) => p.key),
+    );
+    if (retired.length > 0) logger.info({ retired }, "gallery agents retired");
+  } catch (err) {
+    logger.error({ err }, "gallery agents could not be retired");
+  }
   const changed = results.filter((r) => r.action !== "unchanged");
   if (changed.length > 0) logger.info({ agents: changed }, "gallery agents seeded");
   return results;

@@ -467,7 +467,7 @@ describe("gallery (D19, D21)", () => {
 
   it("is seeded from the repo and curated by nobody through the API", async () => {
     const [seeded] = await seedGalleryAgents(deps.database.db, [
-      { key: "release-notes-writer", file: SPEC_EXAMPLE },
+      { key: "release-notes-writer", generation: 1, file: SPEC_EXAMPLE },
     ]);
     galleryId = seeded?.agentId ?? "";
     const plain = await as.bob.post("/v1/install/gallery/agents", definition("Rogue"));

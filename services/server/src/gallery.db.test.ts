@@ -25,7 +25,19 @@ const file = (name: string, prompt: string, skills = "[pdf, xlsx]") =>
   `---\nname: ${name}\ndescription: A fixture for the gallery tests\nskills: ${skills}\nstarters: ["Hello"]\n---\n${prompt}\n`;
 const FIXTURE: GalleryDefinition = {
   key: "fixture-analyst",
+  generation: 1,
   file: file("Fixture Analyst", "You analyse fixtures."),
+};
+
+const RACE: GalleryDefinition = {
+  key: "fixture-race",
+  generation: 1,
+  file: file("Fixture Race", "Racing."),
+};
+const FIXTURE_NEXT: GalleryDefinition = {
+  ...FIXTURE,
+  generation: 2,
+  file: file("Fixture Analyst", "You analyse fixtures, better."),
 };
 
 async function activate(who: Person, teamId: string): Promise<void> {
@@ -136,8 +148,7 @@ describe("seeding from the repo's definitions", () => {
   });
 
   it("survives replicas seeding at the same moment", async () => {
-    const other = { key: "fixture-race", file: file("Fixture Race", "Racing.") };
-    await Promise.all([seed(other), seed(other), seed(other)]);
+    await Promise.all([seed(FIXTURE, RACE), seed(FIXTURE, RACE), seed(FIXTURE, RACE)]);
     const id = await galleryId("carol", "fixture-race");
     expect(await versions(id)).toHaveLength(1);
   });
@@ -146,9 +157,8 @@ describe("seeding from the repo's definitions", () => {
     const id = await galleryId();
     const pinned = await as.carol.post("/v1/threads", { agent_id: id });
     expect(pinned.status, json(pinned)).toBe(201);
-    const next = { ...FIXTURE, file: file("Fixture Analyst", "You analyse fixtures, better.") };
-    expect((await seed(next))[0]).toMatchObject({ agentId: id, action: "updated" });
-    expect((await seed(next))[0]?.action).toBe("unchanged");
+    expect((await seed(FIXTURE_NEXT, RACE))[0]).toMatchObject({ agentId: id, action: "updated" });
+    expect((await seed(FIXTURE_NEXT, RACE))[0]?.action).toBe("unchanged");
     expect((await versions(id)).map((v) => v.version)).toEqual([1, 2]);
     const one = await as.carol.get(`/v1/agents/${id}`);
     expect(one.json.agent).toMatchObject({
@@ -162,9 +172,50 @@ describe("seeding from the repo's definitions", () => {
     expect(fresh.json.agent_version).toBe(2);
   });
 
+  it("ignores an older generation: a replica from an older release changes nothing", async () => {
+    const id = await galleryId();
+    const before = await versions(id);
+    expect((await seed(FIXTURE, RACE))[0]).toMatchObject({ agentId: id, action: "unchanged" });
+    expect(await versions(id)).toEqual(before);
+    expect((await as.carol.get(`/v1/agents/${id}`)).json.agent.prompt).toBe(
+      "You analyse fixtures, better.",
+    );
+  });
+
+  it("skips an archived agent with the same slug and keeps starting, restart after restart", async () => {
+    await h.admin.query(
+      `INSERT INTO install_agents (scope, slug, frontmatter, prompt, archived_at)
+       VALUES ('gallery', 'old-archived', '{"name":"Old"}', 'old', now())`,
+    );
+    const def = { key: "old-archived", generation: 1, file: file("Old", "New.") };
+    for (let restart = 0; restart < 2; restart++) {
+      const results = await seed(FIXTURE_NEXT, RACE, def);
+      expect(results[2]?.action).toBe("skipped_archived");
+      expect(results[0]?.action).toBe("unchanged");
+    }
+  });
+
+  it("logs a definition that fails and still seeds the others", async () => {
+    const bad = { key: "fixture-bad", generation: 1, file: file("Fixture Bad", "Bad.") };
+    const good = { key: "fixture-good", generation: 1, file: file("Fixture Good", "Fine.") };
+    await h.admin.query(
+      `ALTER TABLE install_agents ADD CONSTRAINT tmp_fail CHECK (slug <> 'fixture-bad') NOT VALID`,
+    );
+    try {
+      const results = await seed(FIXTURE_NEXT, RACE, bad, good);
+      expect(results.map((r) => r.action)).toEqual(["unchanged", "unchanged", "failed", "created"]);
+    } finally {
+      await h.admin.query(`ALTER TABLE install_agents DROP CONSTRAINT tmp_fail`);
+    }
+  });
+
   it("refuses a broken definition and duplicate keys before touching anything", async () => {
-    await expect(seed({ key: "bad", file: "no frontmatter" })).rejects.toThrow(/bad.*invalid/);
-    await expect(seed({ key: "Not A Slug", file: FIXTURE.file })).rejects.toThrow(/slug/);
+    await expect(seed({ key: "bad", generation: 1, file: "no frontmatter" })).rejects.toThrow(
+      /bad.*invalid/,
+    );
+    await expect(seed({ key: "Not A Slug", generation: 1, file: FIXTURE.file })).rejects.toThrow(
+      /slug/,
+    );
     await expect(seed(FIXTURE, FIXTURE)).rejects.toThrow(/twice/);
   });
 
@@ -172,7 +223,11 @@ describe("seeding from the repo's definitions", () => {
     await h.admin.query(
       `INSERT INTO install_agents (scope, slug, frontmatter, prompt) VALUES ('gallery', 'legacy-one', '{"name":"Legacy"}', 'old')`,
     );
-    const [result] = await seed({ key: "legacy-one", file: file("Legacy", "New text.") });
+    const [, , result] = await seed(FIXTURE_NEXT, RACE, {
+      key: "legacy-one",
+      generation: 1,
+      file: file("Legacy", "New text."),
+    });
     expect(result?.action).toBe("created");
     const id = await galleryId("carol", "legacy-one");
     expect((await as.carol.get(`/v1/agents/${id}`)).json.agent).toMatchObject({
@@ -328,5 +383,34 @@ describe("fork to team (ac-2)", () => {
     const id = await galleryId();
     const again = await as.bob.post(`/v1/agents/${id}/fork`, { scope: "team" });
     expect(again.json.agent.slug).toBe("fixture-analyst-2");
+  });
+});
+
+describe("retiring removed definitions", () => {
+  it("archives an agent whose definition left the repo, once, keeping threads and forks", async () => {
+    const keep = { key: "fixture-keep", generation: 1, file: file("Fixture Keep", "Stays.") };
+    const gone = { key: "fixture-gone", generation: 1, file: file("Fixture Gone", "Leaving.") };
+    await seed(FIXTURE_NEXT, RACE, keep, gone);
+    const id = await galleryId("carol", "fixture-gone");
+    const thread = await as.carol.post("/v1/threads", { agent_id: id });
+    const fork = await as.bob.post(`/v1/agents/${id}/fork`, { scope: "team" });
+    expect(fork.status, json(fork)).toBe(201);
+
+    await seed(FIXTURE_NEXT, RACE, keep);
+    const list = await as.carol.get("/v1/agents?scope=gallery");
+    const slugs = list.json.agents.map((a: { slug: string }) => a.slug);
+    expect(slugs).not.toContain("fixture-gone");
+    expect(slugs).toContain("fixture-keep");
+    expect((await as.carol.post("/v1/threads", { agent_id: id })).status).toBe(409);
+    const old = await as.carol.get(`/v1/threads/${thread.json.thread_id}`);
+    expect(old.json).toMatchObject({ agent_id: id, agent_version: 1 });
+    expect((await as.bob.get(`/v1/agents/${fork.json.agent.id}`)).status).toBe(200);
+
+    const archived = await audited("agent.archived", id);
+    expect(archived).toMatchObject([{ actor_kind: "system", team_id: null }]);
+    await seed(FIXTURE_NEXT, RACE, keep);
+    expect(await audited("agent.archived", id)).toHaveLength(1);
+    // Back in the repo: an archived agent is not revived behind anyone's back.
+    expect((await seed(FIXTURE_NEXT, RACE, keep, gone))[3]?.action).toBe("skipped_archived");
   });
 });

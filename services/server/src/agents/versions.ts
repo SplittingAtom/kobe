@@ -401,6 +401,7 @@ export async function deleteOrArchiveAgent(
   db: KobeDb,
   location: AgentLocation,
   id: string,
+  actor?: AuditActor,
 ): Promise<Removed | null> {
   return inLocation(db, location, async (tx) => {
     const agent = await lockAgent(tx, location, id);
@@ -412,6 +413,7 @@ export async function deleteOrArchiveAgent(
         await tx.delete(installAgents).where(and(installWhere(location), eq(installAgents.id, id)));
       }
       await recordAudit(tx, {
+        ...(actor ? { actor } : {}),
         action: "agent.deleted",
         teamId: auditTeam(location),
         target: ref(location, agent),
@@ -421,6 +423,7 @@ export async function deleteOrArchiveAgent(
     if (agent.archivedAt) return { kind: "archived", agent };
     const archived = await setArchived(tx, location, id, new Date());
     await recordAudit(tx, {
+      ...(actor ? { actor } : {}),
       action: "agent.archived",
       teamId: auditTeam(location),
       target: ref(location, agent),

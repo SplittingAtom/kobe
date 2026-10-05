@@ -104,9 +104,12 @@ if (config.auth && config.smtp) {
 }
 
 // Gallery agents come from definitions in the repo (KOBE-87): seeded at every start, so install and
-// upgrade alike. Idempotent; a broken definition or database fails the start rather than serving a
-// half-seeded gallery.
-if (deps && config.process === "server") await seedGalleryAgents(deps.database.db);
+// upgrade alike. Idempotent; a failure is logged and never stops the server from starting.
+if (deps && config.process === "server") {
+  await seedGalleryAgents(deps.database.db).catch((err: unknown) =>
+    logger.error({ err }, "gallery agents could not be seeded"),
+  );
+}
 
 // Spec D4: the process's own isolation check (startup + periodic). Agent work must go through
 // isolation.require(); without a verified gVisor/Kata RuntimeClass the server keeps serving.

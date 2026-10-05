@@ -1,6 +1,6 @@
 # KOBE-87: Gallery mechanism: read-only gallery agents and fork to team
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #87)
 - **Branch / worktree:** `kobe-87-gallery` in `../Kobe-wt87`
 - **Depends on:** KOBE-45/46 (agents, versions), KOBE-86 (team suspension), KOBE-84/97 (builder)
 
@@ -21,12 +21,17 @@
   validates names against skills that exist (the resolver does at run start).
 - **Seeding** (`gallery/seed.ts`), at server start before serving (`index.ts`, server process
   only; a bad definition or database fails the start). Per definition: lock the row by
-  `gallery_key`, replace the draft if `gallery_hash` differs, publish (system actor,
-  `published_by` NULL), then store the new hash. Same definition: no writes, no audit rows. Changed
-  definition: one new version (older versions stay; threads pinned to them keep them). Replicas
+  `gallery_key`, replace the draft if the definition's `generation` (monotonic integer in the repo)
+  is newer than `gallery_generation`, publish (system actor, `published_by` NULL), then store the
+  generation. Same or older generation (an old replica in a rollout/rollback): no writes. Newer: one new version (older versions stay; threads pinned to them keep them). Replicas
   starting together converge (unique key + row lock; `publishAgent` answers `unchanged` to the
   loser). A row an older install curated under the same slug is adopted by key. An archived
-  gallery agent is left alone (logged as `skipped_archived`, nothing revives it).
+  agent (by key or same slug) is skipped, never revived, never an error. One definition failing
+  is logged (`failed`) and the rest still seed; a seed error never stops server start.
+- **Retire on removal:** a seeded agent whose key left `GALLERY_DEFINITIONS` is archived (system
+  actor, `agent.archived`): hidden from the gallery, no new threads, existing threads and forks
+  untouched; idempotent. Risk: an old replica in a rollback would archive an agent only the newer
+  release knows (it does not know the key); re-seeding by the newer release skips archived rows.
 - **Read-only.** `/v1/install/gallery/agents` keeps GET list/one/export (`install.gallery.manage`);
   every POST/PUT/PATCH/DELETE under it answers 405 `gallery_read_only` for install admins (others
   keep 403 from the permission check). `GALLERY_ADMIN_ACCESS` is now all-false for edit/publish/
@@ -40,7 +45,7 @@
   `install_agents` (no FK: a personal source can be deleted); returned as `forkedFrom`;
   `agent.created` audit carries `forkedFrom` + `forkedFromVersion` (new `seed` source value for
   seeded agents, system actor).
-- **Migration `0059_gallery_agents`:** gallery key/hash columns (unique key, scope check),
+- **Migration `0059_gallery_agents`:** gallery key/generation columns (unique key, scope check),
   provenance columns, `install_agent_versions.published_by` nullable (NULL = published by the
   server from the repo). Team versions still need a publisher (checked in `insertVersion`).
 - **UI:** team agents page gets a Gallery section (list, "Fork to team" for builders, link to the
@@ -50,8 +55,8 @@
 
 ## Open questions
 
-- Removing a definition from the repo leaves its agent in the gallery (and its teams' forks
-  untouched). Retiring one needs an explicit step; not built here.
+- See the rollback risk under retire-on-removal; a release marker would fix it.
+- The chat agent picker is a separate ticket.
 - A fork copies the version published at fork time; "update from gallery" for forks is out of
   scope.
 
