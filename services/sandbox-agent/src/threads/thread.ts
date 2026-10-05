@@ -18,6 +18,11 @@ import { piCommand } from "../pi/pi-command.js";
 import { shareOnVolume } from "../workspace/volume.js";
 import { ensureSessionDir } from "../pi/session-files.js";
 import { MODEL_FILE_ENV } from "../kobe-models/protocol.js";
+import {
+  SYSTEM_PROMPT_FILE_NAME,
+  SystemPromptFile,
+  systemPromptArgs,
+} from "../pi/system-prompt-file.js";
 import { ModelFile } from "../models/model-file.js";
 import {
   AGENT_SUBDIR,
@@ -129,6 +134,7 @@ export class Thread {
   #modelFile: ModelFile | undefined;
   /** The current Pi's egress token file (undefined without egress wiring). */
   #egressFile: EgressTokenFile | undefined;
+  #promptFile: SystemPromptFile | undefined;
   /** Each process's private runtime directory (and identity), removed once it has exited. */
   readonly #runtimeDirs = new Map<PiProcess, RuntimeOf>();
   /** Removal of a runtime directory in progress (awaited by `stopProcess`). */
@@ -225,6 +231,7 @@ export class Thread {
     let pi: PiProcess;
     let modelFile: ModelFile | undefined;
     let egressFile: EgressTokenFile | undefined;
+    let promptFile: SystemPromptFile | undefined;
     try {
       runtimeDir = await mkdtemp(path.join(this.#env.runtimeDir, RUNTIME_DIR_PREFIX));
       const env: Record<string, string> = { ...launch.env };
@@ -260,9 +267,21 @@ export class Thread {
         await egressFile.write(await egress.tokens.current());
         Object.assign(env, egressEnv(egress, egressFile.path, this.id));
       }
+      if (launch.systemPrompt !== undefined) {
+        promptFile = new SystemPromptFile(
+          path.join(runtimeDir, SYSTEM_PROMPT_FILE_NAME),
+          launch.systemPrompt,
+          identity === undefined ? 0o600 : 0o640,
+        );
+        await promptFile.write();
+      }
       pi = new PiProcess({
         bin: command.bin,
-        args: [...command.prefix, ...launch.args],
+        args: [
+          ...command.prefix,
+          ...launch.args,
+          ...(promptFile === undefined ? [] : systemPromptArgs(promptFile.path)),
+        ],
         cwd: this.#env.workspaceDir,
         env,
         onEvent: (event) => this.#onEvent(pi, event),
@@ -305,6 +324,7 @@ export class Thread {
     this.#launchKey = launch.key;
     this.#modelFile = modelFile;
     this.#egressFile = egressFile;
+    this.#promptFile = promptFile;
     this.lastUsed = Date.now();
     // A token rotated while this spawn was in progress reached no file (the listener runs only
     // against `#modelFile`): take the current token again now that the file is attached.
@@ -367,6 +387,9 @@ export class Thread {
     }
     if (this.#egressFile !== undefined && !(await this.#egressFile.verify())) {
       return "the egress token file is not what the agent wrote";
+    }
+    if (this.#promptFile !== undefined && !(await this.#promptFile.verify())) {
+      return "the system prompt file is not what the agent wrote";
     }
     const unexpected = await unexpectedEntries(runtimeDir);
     if (unexpected.length > 0) {
@@ -611,6 +634,7 @@ export class Thread {
     this.#launchKey = undefined;
     this.#modelFile = undefined;
     this.#egressFile = undefined;
+    this.#promptFile = undefined;
     this.#streaming = false;
     this.#dialogs.clear();
     this.endRun();

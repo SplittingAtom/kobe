@@ -125,4 +125,22 @@ describe("buildPiLaunch", () => {
     expect(c.key).toBe(a.key);
     expect(a.env.PATH).toBe("/usr/local/bin:/usr/bin:/bin");
   });
+
+  it("hands the system prompt over as launch data, never as an argument (KOBE-123)", () => {
+    const text = "Be brief. $(touch /tmp/x) `id` ; rm -rf /";
+    const launch = buildPiLaunch({ ...base, parentEnv, config: { system_prompt: text } });
+    expect(launch.systemPrompt).toBe(text);
+    expect(launch.args.join("\n")).not.toContain("Be brief");
+    expect(Object.values(launch.env).join("\n")).not.toContain("Be brief");
+    expect(launch.key).toContain("Be brief");
+  });
+
+  it("has no system prompt for an absent or empty one, and the key changes with it", () => {
+    const none = buildPiLaunch({ ...base, parentEnv });
+    const empty = buildPiLaunch({ ...base, parentEnv, config: { system_prompt: "" } });
+    const some = buildPiLaunch({ ...base, parentEnv, config: { system_prompt: "x" } });
+    expect(none.systemPrompt).toBeUndefined();
+    expect(empty.systemPrompt).toBeUndefined();
+    expect(some.key).not.toBe(none.key);
+  });
 });

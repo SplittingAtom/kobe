@@ -108,9 +108,14 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
   }
 
   /** Run a shell command as a tool of `threadId`'s Pi (a new run on that thread). */
-  async function tool(threadId: string, runId: string, command: string) {
+  async function tool(
+    threadId: string,
+    runId: string,
+    command: string,
+    config: Record<string, unknown> = { model: MODEL },
+  ) {
     const result = await h.server.command({
-      ...runStart(`sh:${command}`, { config: { model: MODEL } }),
+      ...runStart(`sh:${command}`, { config }),
       thread_id: threadId,
       run_id: runId,
     });
@@ -194,6 +199,36 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
     );
     expect(out.code).not.toBe(0);
     expect(JSON.parse(await readFile(a.modelFile, "utf8"))).toMatchObject({ v: 1 });
+  });
+
+  it("the system prompt file is agent-owned and read-only to the Pi uid (KOBE-123)", async () => {
+    await start();
+    ok(
+      await h.server.command(runStart("say:a", { config: { model: MODEL, system_prompt: "P1" } })),
+    );
+    await h.server.waitFor(
+      (f) =>
+        f.type === "pi.event" &&
+        f.run_id === RUN &&
+        (f.event as { type?: string }).type === "agent_settled",
+    );
+    const a = await launch(THREAD);
+    const file = (a as unknown as { appendSystemPromptFile: string }).appendSystemPromptFile;
+    expect((a as unknown as { appendSystemPromptText: string }).appendSystemPromptText).toBe("P1");
+    const info = await stat(file);
+    expect(info.uid).toBe(process.getuid?.());
+    expect(info.mode & 0o777).toBe(0o640);
+    const out = await tool(
+      THREAD,
+      "4f5a6b7c-8d9e-4f0a-9b1c-2d3e4f5a6b7c",
+      `echo x >> ${file}; echo append=$?; mv ${file} ${file}.x; echo move=$?; rm -f ${file}; echo remove=$?`,
+      // The same config as the first run: a different one would restart Pi with a fresh directory.
+      { model: MODEL, system_prompt: "P1" },
+    );
+    expect(out.stdout).toMatch(/append=[1-9]/);
+    expect(out.stdout).toMatch(/move=[1-9]/);
+    expect(out.stdout).toMatch(/remove=[1-9]/);
+    expect(await readFile(file, "utf8")).toBe("P1");
   });
 
   it("a tool cannot read the agent's token file", async () => {

@@ -2,6 +2,7 @@ import { constants as FS } from "node:fs";
 import { chmod, lstat, mkdir, open, readdir, realpath, rm } from "node:fs/promises";
 import path from "node:path";
 import { EGRESS_TOKEN_FILE_NAME, isEgressTemp } from "../egress/egress-wiring.js";
+import { SYSTEM_PROMPT_FILE_NAME } from "../pi/system-prompt-file.js";
 import type { PiIdentities } from "../pi/identities.js";
 
 /**
@@ -65,6 +66,7 @@ export async function unexpectedEntries(runtimeDir: string): Promise<string[]> {
       name === MODEL_FILE_NAME ||
       isModelTemp(name) ||
       name === EGRESS_TOKEN_FILE_NAME ||
+      name === SYSTEM_PROMPT_FILE_NAME ||
       isEgressTemp(name)
     ) {
       if (kind !== "file" && kind !== "missing") found.push(`${name} (${kind})`);

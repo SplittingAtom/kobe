@@ -1766,8 +1766,17 @@ SH
     contains "Data Analyst: the run completed" '^terminal=run.completed$' "$g_out"
     contains "Data Analyst: the data-analysis skill profiled the data and the charts skill produced a PNG" \
       '^text=fake-openai: tool said: 1 chart-bytes [0-9]{4,}$' "$g_out"
-    g_out=$(gallery_run researcher "hello-researcher-$RANDOM")
+    # KOBE-123: the agent's prompt reaches Pi (--append-system-prompt) and so the model: the fake
+    # model answers "system?" with the system messages it received.
+    g_out=$(gallery_run researcher "system?")
     contains "Researcher: the run completes with no web search configured" '^terminal=run.completed$' "$g_out"
+    contains "Researcher: the web-search-unavailable notice reaches the model through Pi's system prompt" \
+      '^text=fake-openai: system said: .*Web search is not available here, so I can only work from the material you give me\.' "$g_out"
+    g_out=$(gallery_run assistant "system?")
+    contains "Assistant: its own prompt (not the Researcher's) reaches the model" \
+      '^text=fake-openai: system said: ' "$g_out"
+    contains "Assistant: the Researcher's notice is absent from its system prompt" '^0$' \
+      "$(printf '%s\n' "$g_out" | grep -c 'Web search is not available here' || true)"
     contains "Researcher: its published prompt has it say plainly that web search is unavailable" \
       'Web search is not available here, so I can only work from the material you give me\.' \
       "$(psql_kobe "SELECT v.prompt FROM install_agent_versions v JOIN install_agents a ON a.id = v.agent_id AND v.version = a.current_version WHERE a.gallery_key = 'researcher'")"
