@@ -38,6 +38,17 @@
   with the draft" to mean anything. **Behaviour change for published agents** (coordinator confirmed).
 - No protocol package change.
 
+## Review fixes (Opus)
+
+- HIGH: `resolveDraftAgent` re-checks at every run start that the thread owner still has
+  `agentAccess(...).edit` (current team role from `team_members`, ownership) and refuses archived
+  agents; the run fails `agent_unavailable`. Tests: demoted creator, archived agent.
+- MEDIUM: one prompt limit, `SYSTEM_PROMPT_MAX_BYTES` (100 KiB, UTF-8 bytes) in `@kobe/protocol`, used
+  by the agent file and the wire's `system_prompt` (was 100,000 chars). Boundary tests in
+  `frames.test.ts` and the db test.
+- MEDIUM: `run.started` gains optional `draft_revision` (additive) for draft runs. Run starts have no
+  separate audit event; the run event stream is the record.
+
 ## Open questions
 
 - `switchAgentVersion` on a test thread answers `no_agent` (it has no version); fine, the UI never offers it.

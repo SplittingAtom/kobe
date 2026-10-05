@@ -242,6 +242,16 @@ describe("payload id and input rules", () => {
     expect(parseEventPayload("run.started", payload)).toEqual(payload);
   });
 
+  it("records the draft revision of a builder test run (KOBE-85)", () => {
+    const payload = {
+      ...EVENT_PAYLOAD_EXAMPLES["run.started"],
+      agent_version: null,
+      draft_revision: 4,
+    };
+    expect(parseEventPayload("run.started", payload)).toEqual(payload);
+    expect(() => parseEventPayload("run.started", { ...payload, draft_revision: 0 })).toThrow();
+  });
+
   it("says where run.started's model came from (KOBE-44), from a closed set", () => {
     const base = { ...EVENT_PAYLOAD_EXAMPLES["run.started"], model: "smart" };
     for (const model_source of ["agent", "thread", "default"]) {

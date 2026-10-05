@@ -103,7 +103,13 @@ export const PINNED_AGENTS: RunAgentResolver = {
     };
     return {
       ok: true,
-      agent: { agentId: pinned.agent.id, version: pinned.version.version },
+      agent: {
+        agentId: pinned.agent.id,
+        version: pinned.version.version,
+        ...(pinned.version.version === null && pinned.version.draftRevision !== null
+          ? { draftRevision: pinned.version.draftRevision }
+          : {}),
+      },
       approvalMode: strictestApprovalMode(input.approvalMode, value.approvalMode),
       omissions: value.omissions,
       ...(Object.keys(config).length > 0 ? { config } : {}),

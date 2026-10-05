@@ -4,6 +4,7 @@ import {
   SANDBOX_FRAME_MAX_BYTES_BY_TYPE,
   SANDBOX_MAX_FRAME_BYTES,
   SANDBOX_SMALL_FRAME_MAX_BYTES,
+  SYSTEM_PROMPT_MAX_BYTES,
   decodeSandboxFrame,
   decodeServerFrame,
   encodeFrame,
@@ -379,7 +380,10 @@ describe("server → sandbox frames", () => {
     ],
     [
       "an oversize system prompt",
-      { ...serverFrames["run.start"], config: { ...config, system_prompt: "x".repeat(100_001) } },
+      {
+        ...serverFrames["run.start"],
+        config: { ...config, system_prompt: "x".repeat(SYSTEM_PROMPT_MAX_BYTES + 1) },
+      },
     ],
     [
       "an ambiguous connector name",
@@ -434,6 +438,25 @@ describe("server → sandbox frames", () => {
       ok: false,
       code: "malformed_frame",
     });
+  });
+});
+
+describe("system prompt limit (KOBE-85)", () => {
+  const withPrompt = (system_prompt: string) =>
+    decodeServerFrame(
+      encodeFrame({
+        ...serverFrames["run.start"],
+        config: { ...serverFrames["run.start"].config, system_prompt },
+      }),
+    );
+
+  it("counts UTF-8 bytes: exactly the agent-file limit passes, one more fails", () => {
+    expect(withPrompt("x".repeat(SYSTEM_PROMPT_MAX_BYTES)).ok).toBe(true);
+    expect(withPrompt("x".repeat(SYSTEM_PROMPT_MAX_BYTES + 1)).ok).toBe(false);
+    // 3-byte characters: under the limit in characters, over it in bytes.
+    const euro = "€".repeat(Math.floor(SYSTEM_PROMPT_MAX_BYTES / 3));
+    expect(withPrompt(euro).ok).toBe(true);
+    expect(withPrompt(`${euro}€€`).ok).toBe(false);
   });
 });
 

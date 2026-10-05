@@ -112,6 +112,11 @@ export const EVENT_PAYLOAD_SCHEMAS = {
     /** The thread's pinned agent; both null = the install default agent (threads.agent_id null). */
     agent_id: uuidSchema.nullable(),
     agent_version: z.number().int().positive().nullable(),
+    /**
+     * Builder test run (KOBE-85): `agent_version` is null and this is the revision of the draft the
+     * run used, so the record shows exactly what ran. Absent for published versions.
+     */
+    draft_revision: z.number().int().positive().optional(),
     /** Model alias from the team catalog (D30), e.g. `smart`. */
     model: z.string().min(1).max(128).optional(),
     /**

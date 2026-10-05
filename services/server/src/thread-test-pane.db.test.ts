@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { SYSTEM_PROMPT_MAX_BYTES } from "@kobe/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RunFixture } from "./testing/run-fixture.js";
 import type { Person } from "./testing/event-stream-fixture.js";
@@ -81,6 +82,14 @@ describe("builder test pane (KOBE-85)", () => {
       system_prompt: "Be terse.",
     });
     expect(start.config?.agent ?? null).toBeNull();
+    // The record shows which draft ran: no version, the draft's revision.
+    expect(
+      (await f.events(w.team, run)).find((e) => e.type === "run.started")?.payload,
+    ).toMatchObject({
+      agent_id: id,
+      agent_version: null,
+      draft_revision: 1,
+    });
     expect((await f.run(w.team, run)).approval_mode).toBe("ask-all");
     ws.reply(start, "ok");
     await f.until(w.team, run, "completed");
@@ -142,6 +151,66 @@ describe("builder test pane (KOBE-85)", () => {
     expect((await f.events(w.team, run)).at(-1)?.payload).toMatchObject({
       error: { code: "agent_model_not_enabled" },
     });
+  });
+
+  it("a demoted creator can't start another draft run from an existing test thread", async () => {
+    const w = await f.world(1);
+    const builder = w.others[0] as Person;
+    await f.fx.activate(builder, w.team);
+    await f.fx.admin.query(
+      `UPDATE team_members SET role = 'team_admin' WHERE team_id = $1 AND user_id = $2`,
+      [w.team, builder.id],
+    );
+    await catalog(w.team, w.owner.id);
+    const ws = await f.connect(
+      { ...w, owner: builder, target: { teamId: w.team, userId: builder.id } },
+      0,
+    );
+    const id = await draftAgent(builder, {});
+    const thread = await testThread(builder, id);
+    const first = await f.message(builder, thread.thread_id, "ok now");
+    ws.reply(await ws.started(first), "ok");
+    await f.until(w.team, first, "completed");
+
+    await f.fx.admin.query(
+      `UPDATE team_members SET role = 'member' WHERE team_id = $1 AND user_id = $2`,
+      [w.team, builder.id],
+    );
+    const second = await f.message(builder, thread.thread_id, "after demotion");
+    await f.until(w.team, second, "failed");
+    expect((await f.events(w.team, second)).at(-1)?.payload).toMatchObject({
+      error: { code: "agent_unavailable" },
+    });
+    expect(ws.starts().map((s) => s.run_id)).not.toContain(second);
+  });
+
+  it("an archived agent's draft can't run", async () => {
+    const w = await f.world();
+    await catalog(w.team, w.owner.id);
+    const id = await draftAgent(w.owner, {});
+    const b = f.on(0, w.owner);
+    expect((await b.request("POST", `/v1/agents/${id}/publish`, {}, ANY)).status).toBe(201);
+    const thread = await testThread(w.owner, id);
+    expect((await b.delete(`/v1/agents/${id}`)).status).toBe(200);
+    const run = await f.message(w.owner, thread.thread_id, "hello");
+    await f.until(w.team, run, "failed");
+    expect((await f.events(w.team, run)).at(-1)?.payload).toMatchObject({
+      error: { code: "agent_unavailable" },
+    });
+  });
+
+  it("a prompt at the agent-file limit reaches the sandbox whole", async () => {
+    const w = await f.world();
+    await catalog(w.team, w.owner.id);
+    const ws = await f.connect(w, 0);
+    const prompt = "p".repeat(SYSTEM_PROMPT_MAX_BYTES);
+    const id = await draftAgent(w.owner, {}, prompt);
+    const thread = await testThread(w.owner, id);
+    const run = await f.message(w.owner, thread.thread_id, "hi");
+    const start = await ws.started(run);
+    expect(start.config?.system_prompt).toHaveLength(SYSTEM_PROMPT_MAX_BYTES);
+    ws.reply(start, "ok");
+    await f.until(w.team, run, "completed");
   });
 
   it("only someone who can edit the agent may test it; the body is checked", async () => {

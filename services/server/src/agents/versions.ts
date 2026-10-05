@@ -10,6 +10,7 @@ import {
   sql,
   teamAgents,
   teamAgentVersions,
+  teamMembers,
   type AgentScope,
   type KobeDb,
   type KobeTx,
@@ -664,6 +665,16 @@ export async function resolveDraftAgent(
   const agent = await findPinnableAgent(tx, owner, pin.agentId);
   if (!agent || agent.scope !== pin.agentScope) return { ok: false, error: "agent_not_found" };
   if (agent.status === "suspended") return { ok: false, error: "agent_suspended" };
+  // Not just at thread creation: the owner must still be allowed to edit the agent now (demoted,
+  // removed from the team, or the agent changed hands), and an archived agent's draft never runs.
+  if (agent.archivedAt !== null) return { ok: false, error: "agent_not_found" };
+  const [member] = await tx
+    .select({ role: teamMembers.role })
+    .from(teamMembers)
+    .where(and(eq(teamMembers.teamId, owner.teamId), eq(teamMembers.userId, owner.userId)));
+  if (!member || !agentAccess({ userId: owner.userId, role: member.role }, agent).edit) {
+    return { ok: false, error: "agent_not_found" };
+  }
   const draft = validateAgentDefinition({ frontmatter: agent.frontmatter, prompt: agent.prompt });
   if (!draft.ok) return { ok: false, error: "version_unreadable" };
   const now = new Date();

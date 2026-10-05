@@ -40,7 +40,11 @@ export interface StartPlan {
   readonly input: string;
   readonly parentEntryId: string | null;
   readonly approvalMode: ApprovalMode;
-  readonly agent: { readonly agentId: string; readonly version: number | null } | null;
+  readonly agent: {
+    readonly agentId: string;
+    readonly version: number | null;
+    readonly draftRevision?: number;
+  } | null;
   readonly config?: Omit<PiThreadConfig, "agent" | "approval_mode">;
   /** What the resolver left out of the run's configuration (KOBE-76). */
   readonly omissions: readonly Omission[];
@@ -170,6 +174,9 @@ export async function promoteInTx(
         thread_id: threadId,
         agent_id: resolved.agent?.agentId ?? null,
         agent_version: resolved.agent?.version ?? null,
+        ...(resolved.agent?.draftRevision === undefined
+          ? {}
+          : { draft_revision: resolved.agent.draftRevision }),
         ...(model === undefined ? {} : { model: model.alias, model_source: requested.source }),
         ...(next.retryOfRunId !== null ? { retry_of_run_id: next.retryOfRunId } : {}),
       },

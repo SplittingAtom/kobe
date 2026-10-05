@@ -97,3 +97,13 @@ export const errorInfoSchema = z.object({
   message: z.string().max(2000),
 });
 export type ErrorInfo = z.infer<typeof errorInfoSchema>;
+
+/**
+ * The longest agent system prompt, in UTF-8 bytes. One limit for the agent file (`prompt`), the
+ * stored draft and version, and the run's `system_prompt` on the sandbox wire, so a prompt the
+ * builder accepts can always be sent to Pi.
+ */
+export const SYSTEM_PROMPT_MAX_BYTES = 100 * 1024;
+
+/** UTF-8 byte length of `text`. */
+export const utf8ByteLength = (text: string): number => new TextEncoder().encode(text).length;
