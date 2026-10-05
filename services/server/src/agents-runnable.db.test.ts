@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestDatabase, testServerUrl, type TestDatabase } from "@kobe/db/testing";
+import { serializeAgentFile } from "@kobe/agent-file";
 import { createApp } from "./app.js";
+import { seedGalleryAgents } from "./gallery/seed.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
 import { waitForAppSessionsToClose } from "./testing/app-sessions.js";
 import { TestBrowser } from "./testing/browser.js";
@@ -145,19 +147,19 @@ describe("GET /v1/agents/runnable (KOBE-122)", () => {
       prompt: "x",
     });
     draftOnly = draft.json.agent.id as string;
-    const g = await as.owner.post("/v1/install/gallery/agents", {
-      frontmatter: { name: "Gallery Bot", description: "From the gallery" },
-      prompt: "You are Gallery Bot.",
-    });
-    expect(g.status, JSON.stringify(g.json)).toBe(201);
-    gallery = g.json.agent.id as string;
-    const pub = await as.owner.request(
-      "POST",
-      `/v1/install/gallery/agents/${gallery}/publish`,
-      {},
-      ANY,
-    );
-    expect(pub.status, JSON.stringify(pub.json)).toBe(201);
+    // Gallery agents are seeded from the repo, never created through the API (KOBE-87).
+    const [seeded] = await seedGalleryAgents(deps.database.db, [
+      {
+        key: "gallery-bot",
+        generation: 1,
+        file: serializeAgentFile({
+          frontmatter: { name: "Gallery Bot", description: "From the gallery" },
+          prompt: "You are Gallery Bot.",
+        }),
+      },
+    ]);
+    expect(seeded?.agentId).toBeTruthy();
+    gallery = seeded?.agentId ?? "";
     // An install-wide agent can be suspended for a team once its threads have used it.
     const used = await as.carol.post("/v1/threads", { agent_id: suspendedPersonal });
     expect(used.status, JSON.stringify(used.json)).toBe(201);
