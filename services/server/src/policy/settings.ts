@@ -22,12 +22,21 @@ export const DEFAULT_POLICY_SETTINGS: PolicySettings = { promptSandboxWrites: fa
 /** `install_settings.key` for {@link PolicySettings.promptSandboxWrites}. */
 export const PROMPT_SANDBOX_WRITES_KEY = "policy.ask_on_write.prompt_sandbox_writes";
 
+/** Kobe tools that never prompt by risk class in `ask-on-write` (rules and `ask-all` still apply). */
+export const PROMPT_EXEMPT_KOBE_TOOLS: ReadonlySet<string> = new Set([
+  "create_artifact",
+  "update_artifact",
+]);
+
 /**
  * Risk-class prompting in `ask-on-write` (D29), by where the tool's effects land and its risk.
  * `true` = prompt. `sandbox` rows follow {@link PolicySettings.promptSandboxWrites}. `kobe`-scoped
- * writes (artifacts, shared files, memory) prompt — D23/D24 make project writes approval-gated —
- * except personal `remember` (D24: "personal writes via remember need no approval"), recognised by
- * `scope: "personal"` in its input (KOBE-55/56 must define that field; anything else prompts).
+ * writes (shared files, memory) prompt — D23/D24 make project writes approval-gated — except:
+ * - personal `remember` (D24: "personal writes via remember need no approval"), recognised by
+ *   `scope: "personal"` in its input (KOBE-55/56 must define that field; anything else prompts);
+ * - artifacts ({@link PROMPT_EXEMPT_KOBE_TOOLS}; Chris, 2026-10-06): they only write versioned,
+ *   Kobe-owned content into the user's own thread, shown in a sandboxed frame with no network.
+ * Install/team ask rules and `ask-all` still prompt for them (evaluate.ts runs those first).
  * Only interactive runs use this table; auto mode and scheduled runs don't (evaluate.ts).
  */
 export function riskClassPrompts(
@@ -38,6 +47,7 @@ export function riskClassPrompts(
   if (tool.source === "kobe" && tool.name === "remember" && input.scope === "personal") {
     return false;
   }
+  if (tool.source === "kobe" && PROMPT_EXEMPT_KOBE_TOOLS.has(tool.name)) return false;
   const table: Readonly<Record<ToolDescriptor["scope"], Readonly<Record<RiskClass, boolean>>>> = {
     sandbox: {
       read: false,

@@ -14,7 +14,7 @@ import {
   type ConnectorPolicyState,
 } from "./gates.js";
 import { matchingRules, type PolicyRule, type PolicyRuleSet } from "./rules.js";
-import { riskClassPrompts, type PolicySettings } from "./settings.js";
+import { PROMPT_EXEMPT_KOBE_TOOLS, riskClassPrompts, type PolicySettings } from "./settings.js";
 import { prepareInput } from "./tool-inputs.js";
 
 /**
@@ -140,7 +140,9 @@ function noPromptReason(ctx: Prepared): PolicyReason {
   const where =
     tool.scope === "sandbox"
       ? "runs inside your sandbox, bounded by the sandbox and egress policy"
-      : "writes your personal memory, which needs no approval and can be undone";
+      : PROMPT_EXEMPT_KOBE_TOOLS.has(tool.name)
+        ? "writes a versioned artifact in this conversation, which needs no approval"
+        : "writes your personal memory, which needs no approval and can be undone";
   return { code: RISK_REASON[tool.risk], stage: "risk_class", message: `${tool.name} ${where}.` };
 }
 

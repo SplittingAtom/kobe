@@ -353,7 +353,7 @@ describe("a policy rule makes the call wait for its user", () => {
 
   it("approve and remember writes a user allow rule for exactly this tool; the next call runs", async () => {
     const w = await world();
-    const first = check(w, "create_artifact", { kind: "markdown", title: "Q3", content: "x" });
+    const first = check(w, "share_file", { path: "/workspace/q3.md" });
     const pending = await first.pending();
     expect(
       (
@@ -365,7 +365,7 @@ describe("a policy rule makes the call wait for its user", () => {
     ).toMatchObject({ code: "glob_too_broad" });
     const ok = await decide(w.owner, pending.approval_id, {
       decision: "allow",
-      remember: { tool_glob: "create_artifact", expires_in: 3600 },
+      remember: { tool_glob: "share_file", expires_in: 3600 },
     });
     expect(ok.json).toMatchObject({ status: "allowed", remembered: true });
     expect((await first.result()).decision).toBe("allow");
@@ -378,23 +378,21 @@ describe("a policy rule makes the call wait for its user", () => {
         scope: "user",
         user_id: w.owner.id,
         effect: "allow",
-        tool_glob: "create_artifact",
+        tool_glob: "share_file",
       }),
     ]);
     expect(must(rows[0], "rule").expires_at).not.toBeNull();
-    // Remembered: the next create_artifact runs without asking.
-    expect(
-      (await check(w, "create_artifact", { kind: "markdown", title: "Q4", content: "x" }).result())
-        .decision,
-    ).toBe("allow");
+    // Remembered: the next share_file runs without asking.
+    expect((await check(w, "share_file", { path: "/workspace/q4.md" }).result()).decision).toBe(
+      "allow",
+    );
     const decidedAudit = (await audits(w.team, "approval.decided"))[0]?.target;
     expect(decidedAudit).toMatchObject({ remember: true, ruleId: expect.any(String) });
     expect((await audits(w.team, "policy.rule.created")).length).toBe(1);
     // A remember-rule never lifts an ask rule.
-    await askRule(w, "create_artifact");
+    await askRule(w, "share_file");
     expect(
-      (await check(w, "create_artifact", { kind: "markdown", title: "Q5", content: "x" }).pending())
-        .approval_id,
+      (await check(w, "share_file", { path: "/workspace/q5.md" }).pending()).approval_id,
     ).toBeTruthy();
   });
 

@@ -286,7 +286,7 @@ describe("team policy routes (D8: team admins manage, members read)", () => {
   it("lets team admins manage rules and members read them", async () => {
     const created = await as.alice.post(path, {
       effect: "ask",
-      tool_glob: "create_artifact",
+      tool_glob: "share_file",
       expires_at: "2099-01-01T00:00:00Z",
     });
     expect(created.status, JSON.stringify(created.json)).toBe(201);
@@ -302,7 +302,7 @@ describe("team policy routes (D8: team admins manage, members read)", () => {
     expect(listed.json.rules.map((r: { id: string }) => r.id)).toEqual([id]);
     const updated = await as.alice.put(`${path}/${id}`, {
       effect: "allow",
-      tool_glob: "create_artifact",
+      tool_glob: "share_file",
     });
     expect(updated.json.rule).toMatchObject({ effect: "allow", expires_at: null });
     expect(status(await as.bob.delete(`${path}/${id}`))).toBe(403);
@@ -437,36 +437,33 @@ describe("D29 order end to end (rules from Postgres)", () => {
   it("an install ask can't be removed by a remember-rule; without it the remember-rule allows", async () => {
     const askId = await make("installAdmin", install, {
       effect: "ask",
-      tool_glob: "update_artifact",
+      tool_glob: "remember",
     });
-    expect(
-      (await remember("bob", finance, "update_artifact", { tool_glob: "update_artifact" })).ok,
-    ).toBe(true);
-    const asked = await decide("bob", finance, "update_artifact");
+    expect((await remember("bob", finance, "remember", { tool_glob: "remember" })).ok).toBe(true);
+    const asked = await decide("bob", finance, "remember");
     expect(asked).toMatchObject({ effect: "require_approval" });
     expect(asked.reasons[0]).toMatchObject({ code: "install_ask_rule", rule_id: askId });
     await cleanup();
-    const allowed = await decide("bob", finance, "update_artifact");
+    const allowed = await decide("bob", finance, "remember");
     expect(allowed.effect).toBe("allow");
     expect(allowed.reasons[0]?.code).toBe("user_allow_rule");
   });
 
   it("a remember-rule applies to its owner in its team only", async () => {
-    expect(
-      (await remember("erin", finance, "create_artifact", { tool_glob: "create_artifact" })).ok,
-    ).toBe(true);
-    expect((await decide("erin", finance, "create_artifact")).effect).toBe("allow");
-    expect((await decide("bob", finance, "create_artifact")).effect).toBe("require_approval");
+    expect((await remember("erin", finance, "share_file", { tool_glob: "share_file" })).ok).toBe(
+      true,
+    );
+    expect((await decide("erin", finance, "share_file")).effect).toBe("allow");
+    // carol, not bob: earlier tests left bob remember-rules of his own for share_file.
+    expect((await decide("carol", finance, "share_file")).effect).toBe("require_approval");
     // erin is not in marketing; dave's decision there ignores erin's finance rule.
-    expect((await decide("dave", marketing, "create_artifact")).effect).toBe("require_approval");
+    expect((await decide("dave", marketing, "share_file")).effect).toBe("require_approval");
   });
 
   it("members list and revoke only their own remember-rules", async () => {
     const mine = await as.erin.get("/v1/team/policy/my-rules");
     expect(mine.status).toBe(200);
-    const rule = mine.json.rules.find(
-      (r: { tool_glob: string }) => r.tool_glob === "create_artifact",
-    );
+    const rule = mine.json.rules.find((r: { tool_glob: string }) => r.tool_glob === "share_file");
     expect(rule).toMatchObject({ scope: "user", scope_ref: ids.erin, effect: "allow" });
     expect(
       (await as.bob.get("/v1/team/policy/my-rules")).json.rules.map(
@@ -477,7 +474,7 @@ describe("D29 order end to end (rules from Postgres)", () => {
     // Team rule routes never touch user rules.
     expect(status(await as.alice.delete(`/v1/team/policy/rules/${rule.id}`))).toBe(404);
     expect(status(await as.erin.delete(`/v1/team/policy/my-rules/${rule.id}`))).toBe(204);
-    expect((await decide("erin", finance, "create_artifact")).effect).toBe("require_approval");
+    expect((await decide("erin", finance, "share_file")).effect).toBe("require_approval");
   });
 
   it("remember-rules: validation, scope to the approved tool, expiry", async () => {
@@ -546,13 +543,13 @@ describe("D29 order end to end (rules from Postgres)", () => {
   });
 
   it("a team allow rule only allow-lists for auto; it never lifts an interactive prompt", async () => {
-    await make("alice", team, { effect: "allow", tool_glob: "create_artifact" });
-    expect((await decide("carol", finance, "create_artifact")).effect).toBe("require_approval");
-    expect((await decide("carol", finance, "create_artifact", {}, { mode: "auto" })).effect).toBe(
+    await make("alice", team, { effect: "allow", tool_glob: "share_file" });
+    expect((await decide("carol", finance, "share_file")).effect).toBe("require_approval");
+    expect((await decide("carol", finance, "share_file", {}, { mode: "auto" })).effect).toBe(
       "allow",
     );
     await cleanup();
-    expect((await decide("carol", finance, "create_artifact", {}, { mode: "auto" })).effect).toBe(
+    expect((await decide("carol", finance, "share_file", {}, { mode: "auto" })).effect).toBe(
       "deny",
     );
   });
