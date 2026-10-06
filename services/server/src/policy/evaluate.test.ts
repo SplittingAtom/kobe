@@ -53,7 +53,8 @@ function run(c: Omit<Case, "name" | "effect" | "codes">): PolicyDecision {
 const bash = builtin("bash");
 const read = builtin("read");
 const write = builtin("write");
-const artifact = builtin("create_artifact");
+/** A Kobe-scoped write that prompts in ask-on-write (artifacts are exempt; see settings.ts). */
+const kobeWrite = builtin("share_file");
 const jiraCreate = mcpTool("mcp__jira__create_issue", "write");
 const jiraSearch = mcpTool("mcp__jira__search", "read");
 const PROMPT_SANDBOX: PolicySettings = { promptSandboxWrites: true };
@@ -196,11 +197,11 @@ const CASES: readonly Case[] = [
   // 2. team deny wins over ask, risk, mode and allow.
   {
     name: "team deny beats install ask and user allow",
-    tool: artifact,
+    tool: kobeWrite,
     rules: [
-      rule("install", "ask", "create_artifact"),
-      rule("team", "deny", "create_*"),
-      rule("user", "allow", "create_artifact"),
+      rule("install", "ask", "share_file"),
+      rule("team", "deny", "share_*"),
+      rule("user", "allow", "share_file"),
     ],
     effect: "deny",
     codes: ["team_deny_rule"],
@@ -257,8 +258,8 @@ const CASES: readonly Case[] = [
   },
   {
     name: "user allow cannot remove a team ask",
-    tool: artifact,
-    rules: [rule("team", "ask", "create_artifact"), rule("user", "allow", "create_artifact")],
+    tool: kobeWrite,
+    rules: [rule("team", "ask", "share_file"), rule("user", "allow", "share_file")],
     effect: "require_approval",
     codes: ["team_ask_rule"],
   },
@@ -301,7 +302,7 @@ const CASES: readonly Case[] = [
   },
   {
     name: "ask-on-write prompts for a Kobe-scoped write",
-    tool: artifact,
+    tool: kobeWrite,
     effect: "require_approval",
     codes: ["risk_write"],
   },
@@ -366,6 +367,28 @@ const CASES: readonly Case[] = [
     effect: "require_approval",
     codes: ["team_ask_rule"],
   },
+  {
+    name: "create_artifact is not prompted in ask-on-write (artifacts exempt)",
+    tool: builtin("create_artifact"),
+    input: { kind: "html", title: "Chart", content: "<p>x</p>" },
+    effect: "allow",
+    codes: ["risk_write"],
+  },
+  {
+    name: "update_artifact is not prompted in ask-on-write (artifacts exempt)",
+    tool: builtin("update_artifact"),
+    input: { artifact_id: "6f1c2a43-58a4-4c8e-9a51-0f2f6c3d7e10", content: "<p>y</p>" },
+    effect: "allow",
+    codes: ["risk_write"],
+  },
+  {
+    name: "a team ask rule overrides the artifact exemption",
+    tool: builtin("create_artifact"),
+    input: { kind: "html", title: "Chart", content: "<p>x</p>" },
+    rules: [rule("team", "ask", "create_artifact")],
+    effect: "require_approval",
+    codes: ["team_ask_rule"],
+  },
   // 5. thread approval mode.
   {
     name: "ask-all prompts even for a read-only tool",
@@ -390,6 +413,14 @@ const CASES: readonly Case[] = [
     codes: ["mode_ask_all"],
   },
   {
+    name: "ask-all prompts for artifacts (no built-in lifts ask-all)",
+    tool: builtin("create_artifact"),
+    input: { kind: "html", title: "Chart", content: "<p>x</p>" },
+    options: { mode: "ask-all" },
+    effect: "require_approval",
+    codes: ["mode_ask_all"],
+  },
+  {
     name: "auto allows read-only tools",
     tool: read,
     options: { mode: "auto" },
@@ -398,7 +429,7 @@ const CASES: readonly Case[] = [
   },
   {
     name: "auto denies a Kobe write that is not allow-listed",
-    tool: artifact,
+    tool: kobeWrite,
     options: { mode: "auto" },
     effect: "deny",
     codes: ["mode_auto_not_allowlisted", "risk_write"],
@@ -449,8 +480,8 @@ const CASES: readonly Case[] = [
   },
   {
     name: "agent tools.allow never allow-lists in auto",
-    tool: artifact,
-    options: { mode: "auto", toolsAllow: ["create_artifact"] },
+    tool: kobeWrite,
+    options: { mode: "auto", toolsAllow: ["share_file"] },
     effect: "deny",
     codes: ["mode_auto_not_allowlisted", "risk_write"],
   },
@@ -472,9 +503,9 @@ const CASES: readonly Case[] = [
   },
   {
     name: "user allow allow-lists a write in auto mode",
-    tool: artifact,
+    tool: kobeWrite,
     options: { mode: "auto" },
-    rules: [rule("user", "allow", "create_artifact")],
+    rules: [rule("user", "allow", "share_file")],
     effect: "allow",
     codes: ["user_allow_rule"],
   },
@@ -541,15 +572,15 @@ const CASES: readonly Case[] = [
   },
   {
     name: "expired user allow is ignored",
-    tool: artifact,
-    rules: [rule("user", "allow", "create_artifact", { expires_at: NOW.toISOString() })],
+    tool: kobeWrite,
+    rules: [rule("user", "allow", "share_file", { expires_at: NOW.toISOString() })],
     effect: "require_approval",
     codes: ["risk_write"],
   },
   {
     name: "team allow does not lift an ask-on-write prompt",
-    tool: artifact,
-    rules: [rule("team", "allow", "create_artifact")],
+    tool: kobeWrite,
+    rules: [rule("team", "allow", "share_file")],
     effect: "require_approval",
     codes: ["risk_write"],
   },
@@ -563,9 +594,9 @@ const CASES: readonly Case[] = [
   },
   {
     name: "team allow allow-lists a tool for auto mode",
-    tool: artifact,
+    tool: kobeWrite,
     options: { mode: "auto" },
-    rules: [rule("team", "allow", "create_artifact")],
+    rules: [rule("team", "allow", "share_file")],
     effect: "allow",
     codes: ["team_allow_rule"],
   },
@@ -579,7 +610,7 @@ const CASES: readonly Case[] = [
   },
   {
     name: "a blanket allow rule is ignored (no bypass)",
-    tool: artifact,
+    tool: kobeWrite,
     options: { mode: "auto" },
     rules: [rule("user", "allow", "*"), rule("team", "allow", "create_*")],
     effect: "deny",
@@ -627,8 +658,8 @@ const CASES: readonly Case[] = [
   },
   {
     name: "agent tools.allow never removes a prompt",
-    tool: artifact,
-    options: { toolsAllow: ["create_artifact"] },
+    tool: kobeWrite,
+    options: { toolsAllow: ["share_file"] },
     effect: "require_approval",
     codes: ["risk_write"],
   },
@@ -744,8 +775,8 @@ describe("evaluatePolicy: D29 order, table-driven", () => {
   });
 
   it("names the user rule that removed a prompt", () => {
-    const allow = rule("user", "allow", "create_artifact");
-    expect(run({ tool: artifact, rules: [allow] }).reasons[0]).toMatchObject({
+    const allow = rule("user", "allow", "share_file");
+    expect(run({ tool: kobeWrite, rules: [allow] }).reasons[0]).toMatchObject({
       code: "user_allow_rule",
       stage: "user_allow",
       rule_id: allow.id,
@@ -753,14 +784,14 @@ describe("evaluatePolicy: D29 order, table-driven", () => {
   });
 
   it("prefers the user's own allow rule over a team allow rule in the reason", () => {
-    const team = rule("team", "allow", "create_artifact");
-    const user = rule("user", "allow", "create_artifact");
-    const decision = run({ tool: artifact, rules: [team, user], options: { mode: "auto" } });
+    const team = rule("team", "allow", "share_file");
+    const user = rule("user", "allow", "share_file");
+    const decision = run({ tool: kobeWrite, rules: [team, user], options: { mode: "auto" } });
     expect(decision.reasons[0]?.rule_id).toBe(user.id);
   });
 
   it("sets a 1 h approval expiry on prompts", () => {
-    const decision = run({ tool: artifact });
+    const decision = run({ tool: kobeWrite });
     expect(decision).toMatchObject({
       effect: "require_approval",
       expires_at: "2026-10-02T13:00:00.000Z",
