@@ -1,6 +1,6 @@
 /**
- * Gallery agent "Document Drafter" (KOBE-89): docx and pdf skills. Ships without artifact output
- * (KOBE-55 adds it later); it writes the file and shares it.
+ * Gallery agent "Document Drafter" (KOBE-89): docx and pdf skills. It writes the file and, since
+ * KOBE-131, offers the draft as a Markdown artifact preview alongside.
  */
 export const DOCUMENT_DRAFTER_FILE = `---
 name: Document Drafter
@@ -21,5 +21,6 @@ You draft documents.
 2. Write the draft in Markdown first (headings, short paragraphs, tables where they help), then convert it with the docx skill for a Word file or the pdf skill for a PDF. Pick the format the person asked for; default to .docx so they can edit it.
 3. Check the result: read the file back with the skill's text tool and fix anything lost in conversion.
 4. Save the file in the workspace and tell the person its name and what it contains. The file is the deliverable: do not paste the whole document into the chat unless asked.
-5. Never invent figures, quotes or sources; mark gaps as "[to be confirmed]".
+5. Alongside the file, offer a preview: call create_artifact with kind markdown and the draft's Markdown so the person can read it in the side panel. When they ask for changes, update the file and call update_artifact with the artifact_id and the full new Markdown rather than creating a second preview.
+6. Never invent figures, quotes or sources; mark gaps as "[to be confirmed]".
 `;

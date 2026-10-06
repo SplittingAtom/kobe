@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
 /**
@@ -11,6 +12,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
  * Tool use (OpenAI chat API only, KOBE-39 e2e): a last user message `bash: <command>` is answered
  * with a `bash` tool call running `<command>`; once the tool's result comes back (a last message
  * with role `tool`) the reply is `fake-openai: tool said: <the result's text, one line>`.
+ *
+ * `tool: <name> <JSON>` is answered with a call of that tool (e.g. `create_artifact`, KOBE-131).
  *
  * System prompt echo (OpenAI chat API only, KOBE-89 e2e): a last user message `system?` is answered
  * with `fake-openai: system said: <the system/developer messages, one line>`, so a test can see
@@ -42,6 +45,25 @@ function lastUserText(body: unknown): string {
 }
 
 const BASH_PREFIX = "bash: ";
+const TOOL_PREFIX = "tool: ";
+
+/**
+ * `tool: <name> <JSON arguments>` (KOBE-131 e2e): any tool call with the given arguments. The call
+ * id is a hash of the prompt so two different calls never share one (the server dedupes by id).
+ */
+export function parseToolPrompt(
+  text: string,
+): { readonly id: string; readonly name: string; readonly args: unknown } | undefined {
+  const m = /^tool: ([A-Za-z0-9_]+) (\{[\s\S]*\})$/.exec(text);
+  if (!m?.[1] || !m[2]) return undefined;
+  try {
+    const args: unknown = JSON.parse(m[2]);
+    const id = `call_fake_${createHash("sha256").update(text).digest("hex").slice(0, 16)}`;
+    return { id, name: m[1], args };
+  } catch {
+    return undefined;
+  }
+}
 const SYSTEM_ECHO = "system?";
 const SYSTEM_ECHO_MAX = 40_000;
 const TOOL_ECHO_MAX = 600;
@@ -83,16 +105,16 @@ export function lastToolResult(body: unknown): string | undefined {
   return text.replace(/\s+/g, " ").trim().slice(0, TOOL_ECHO_MAX);
 }
 
-function openaiBashCall(
+function openaiNamedCall(
   res: ServerResponse,
-  command: string,
+  call: { readonly id: string; readonly name: string; readonly args: unknown },
   stream: boolean,
   model: string,
 ): void {
-  const call = {
-    id: "call_fake_bash",
+  const toolCall = {
+    id: call.id,
     type: "function",
-    function: { name: "bash", arguments: JSON.stringify({ command }) },
+    function: { name: call.name, arguments: JSON.stringify(call.args) },
   };
   const usage = { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 };
   if (!stream) {
@@ -104,7 +126,7 @@ function openaiBashCall(
       choices: [
         {
           index: 0,
-          message: { role: "assistant", content: null, tool_calls: [call] },
+          message: { role: "assistant", content: null, tool_calls: [toolCall] },
           finish_reason: "tool_calls",
         },
       ],
@@ -127,12 +149,20 @@ function openaiBashCall(
         role: "assistant",
         content: null,
         tool_calls: [
-          { index: 0, id: call.id, type: "function", function: { name: "bash", arguments: "" } },
+          {
+            index: 0,
+            id: toolCall.id,
+            type: "function",
+            function: { name: call.name, arguments: "" },
+          },
         ],
       },
       null,
     ),
-    chunk({ tool_calls: [{ index: 0, function: { arguments: call.function.arguments } }] }, null),
+    chunk(
+      { tool_calls: [{ index: 0, function: { arguments: toolCall.function.arguments } }] },
+      null,
+    ),
     chunk({}, "tool_calls", usage),
     "data: [DONE]\n\n",
   ]);
@@ -341,7 +371,11 @@ export function createFakeLlm(seen: SeenRequest[] = []): Server {
       } else if (text === SYSTEM_ECHO) {
         openai(res, `fake-openai: system said: ${systemText(body)}`, stream, model);
       } else if (text.startsWith(BASH_PREFIX)) {
-        openaiBashCall(res, text.slice(BASH_PREFIX.length), stream, model);
+        const args = { command: text.slice(BASH_PREFIX.length) };
+        openaiNamedCall(res, { id: "call_fake_bash", name: "bash", args }, stream, model);
+      } else if (text.startsWith(TOOL_PREFIX) && parseToolPrompt(text)) {
+        const parsed = parseToolPrompt(text);
+        if (parsed) openaiNamedCall(res, parsed, stream, model);
       } else {
         openai(res, `fake-openai: ${text}`, stream, model);
       }

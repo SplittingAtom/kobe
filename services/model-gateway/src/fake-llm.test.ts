@@ -41,6 +41,27 @@ describe("fake LLM tool use", () => {
     ]);
   });
 
+  it("answers 'tool: <name> <json>' with that tool call and a content-derived id", async () => {
+    const args = { kind: "html", title: "T", content: "<p>hi</p>" };
+    const prompt = `tool: create_artifact ${JSON.stringify(args)}`;
+    const a = await chat([{ role: "user", content: prompt }]);
+    const b = await chat([{ role: "user", content: `${prompt.slice(0, -1)} }` }]);
+    const calls = a.choices[0]?.message.tool_calls as {
+      id: string;
+      function: { name: string; arguments: string };
+    }[];
+    expect(a.choices[0]?.finish_reason).toBe("tool_calls");
+    expect(calls[0]?.function.name).toBe("create_artifact");
+    expect(JSON.parse(calls[0]?.function.arguments ?? "")).toEqual(args);
+    expect(calls[0]?.id).toMatch(/^call_fake_[0-9a-f]{16}$/);
+    expect((b.choices[0]?.message.tool_calls as { id: string }[])[0]?.id).not.toBe(calls[0]?.id);
+  });
+
+  it("treats a malformed 'tool:' prompt as plain text", async () => {
+    const res = await chat([{ role: "user", content: "tool: nope {bad" }]);
+    expect(res.choices[0]?.message.content).toBe("fake-openai: tool: nope {bad");
+  });
+
   it("echoes the tool's result on one line, bounded", async () => {
     const res = await chat([
       { role: "user", content: "bash: x" },

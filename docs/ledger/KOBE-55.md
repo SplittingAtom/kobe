@@ -97,3 +97,20 @@ unchanged.
 ## Open questions
 
 ## Evidence
+
+Recorded by KOBE-131 (55e). Criteria as KOBE-130 maps them (the ticket text lives in Hadron, not read here).
+
+- **ac-1 (an HTML artifact renders in a sandboxed frame; its script runs, network and external resources
+  are blocked):** web side, `apps/web/components/chat/artifacts.test.tsx` "shows html in a sandboxed frame"
+  (sandbox attrs, frame `src`, no `srcdoc`); server side, `e2e/run.sh` "artifacts (KOBE-131)": a run whose
+  fake model calls `create_artifact` with a page holding an inline `<script>` gets the real `/frame`
+  response with `sandbox allow-scripts allow-forms`, `connect-src 'none'` and `X-Frame-Options: SAMEORIGIN`;
+  unit side `services/server/src/artifacts.db.test.ts` ("/v1/artifacts"). A browser render is not run in CI.
+- **ac-2 (versions and download):** e2e: `update_artifact` in the same thread makes version 2
+  (`artifact.updated`, `GET /v1/artifacts/:id` lists two versions, version 2 content differs); the
+  content endpoint returns the bytes as an attachment; web "versions and download".
+- **ac-3 (reopen from an old thread / list):** e2e `GET /v1/artifacts?thread_id=` lists the artifact;
+  web "reopening artifacts" and "opening from the run".
+- Gallery agents use the tools: `services/server/src/gallery/definitions.test.ts` (prompts, generations,
+  frozen manifests allow `create_artifact`/`update_artifact`); fake model `tool: <name> <json>`:
+  `services/model-gateway/src/fake-llm.test.ts`.

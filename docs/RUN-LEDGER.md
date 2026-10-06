@@ -17,7 +17,7 @@ Hadron via `scripts/hadron.sh`.
   time; parents close when children are done). Batch 1 in progress: KOBE-75, 79, 90. Then
   78 (+76, 84) → 86 (+77, 83) → 80 (+91, 92) → 81 → 85 (+82) → 87 (+88) → 93 (+89) → 94.
 - **Decisions (2026-10-04):** resolver's user-connected connectors are empty until KOBE-61;
-  KOBE-89 ships the Document Drafter without artifact output until KOBE-55.
+  KOBE-89 shipped the Document Drafter without artifact output; KOBE-131 added its Markdown preview artifact.
 - **Follow-ups filed:** KOBE-95 (budget reservations across gateway replicas), KOBE-96 (flaky
   chart `models.test.ts`). Accepted LOWs on KOBE-39: echoing upstreams can reveal injected headers
   (documented); egress token visible in `env` output.
