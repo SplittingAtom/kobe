@@ -2096,6 +2096,8 @@ JS
   # Allow exactly that Service IP (proxy check), plain http on port 80 (CI only), and its pods
   # (proxy NetworkPolicy, which matches the pod port after Service translation).
   mcp_rule=$(printf '[{"to":[{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"%s"}}}]}]' "$MCP_NS")
+  mcp_upgrade_at=$(psql_kobe "SELECT clock_timestamp()")
+  server_gen_before=$($KUBECTL -n "$NS" get deploy/kobe-server -o jsonpath='{.metadata.generation}' 2>/dev/null || true)
   if out=$($HELM upgrade kobe charts/kobe -n "$NS" --reuse-values --wait --timeout 5m \
       --set mcpProxy.allowInsecureHttp=true --set-json 'mcpProxy.allowedPorts=[80]' \
       --set-json "mcpProxy.allowedInternalCidrs=[\"$fake_mcp_ip/32\"]" \
@@ -2112,6 +2114,22 @@ JS
       "$1" "$1" "$1" "$2" 0
   }
   snapshot="[$(pinned get_thing '{"readOnlyHint":true}'),$(pinned create_thing '{"destructiveHint":false}')]"
+  # KOBE-132: the upgrade above can roll the server, and the e2e sandbox's agent then reconnects at
+  # an arbitrary moment. Its hello lists no run for this fixture lease, so the server interrupts it
+  # (D14, not_resumed) and the proxy rightly answers "No active run of this thread". Lease the run
+  # only once the sandbox has reconnected to the rolled server, so no hello can still follow.
+  server_gen_after=$($KUBECTL -n "$NS" get deploy/kobe-server -o jsonpath='{.metadata.generation}' 2>/dev/null || true)
+  if [[ "$server_gen_after" != "$server_gen_before" ]]; then
+    reconnected=0
+    for _ in $(seq 1 120); do
+      if [[ "$(psql_kobe "SELECT count(*) FROM sandbox_connections WHERE team_id = '$E2E_TEAM_ID'
+          AND user_id = '$E2E_USER_ID' AND closed_at IS NULL AND connected_at > '$mcp_upgrade_at'")" == 1 ]]; then
+        reconnected=1; break
+      fi
+      sleep 1
+    done
+    contains "the e2e sandbox reconnected to the rolled server before the MCP run is leased" '^reconnected=1$' "reconnected=$reconnected"
+  fi
   psql_kobe "INSERT INTO connectors (id, name, url, tools_snapshot) VALUES ('$MCP_CONNECTOR', 'e2e-fake', 'http://$fake_mcp_ip/mcp', '$snapshot'::jsonb)
       ON CONFLICT (id) DO UPDATE SET url = EXCLUDED.url, tools_snapshot = EXCLUDED.tools_snapshot;
     INSERT INTO team_connectors (team_id, connector_id, exposure, enabled_by) VALUES ('$E2E_TEAM_ID', '$MCP_CONNECTOR', 'all', '$E2E_USER_ID') ON CONFLICT DO NOTHING;
