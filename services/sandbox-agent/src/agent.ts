@@ -1,6 +1,7 @@
 import {
   CAPABILITY_ARTIFACTS,
   CAPABILITY_BUILTIN_SKILLS,
+  CAPABILITY_RUN_TOKEN,
   CAPABILITY_SKILL_BUNDLES,
   KOBE_EVENT_DROPPED_TYPE,
   type HelloAckFrame,
@@ -225,6 +226,8 @@ export class Agent {
       ...(this.#deps.skills === undefined ? [] : [CAPABILITY_SKILL_BUNDLES]),
       ...(this.#deps.config.builtinSkillsDir === undefined ? [] : [CAPABILITY_BUILTIN_SKILLS]),
       ...(this.#deps.toolsExtension === undefined ? [] : [CAPABILITY_ARTIFACTS]),
+      // The run token reaches Pi through the models extension, so only with model wiring.
+      ...(this.#deps.models === undefined ? [] : [CAPABILITY_RUN_TOKEN]),
     ];
     return {
       v: 1,

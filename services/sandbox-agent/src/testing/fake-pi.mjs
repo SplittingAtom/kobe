@@ -179,6 +179,14 @@ function runPrompt(message) {
     policySocket.write(
       `${JSON.stringify({ type: "policy.check", nonce: policyNonce, request_id: requestId, tool_call_id: "call_1", tool: message.slice(5), input: { command: "ls" } })}\n`,
     );
+  } else if (message === "run-token") {
+    // KOBE-118: what kobe-models does on `input`: asks the agent for the run's token over RPC.
+    start();
+    dialogs.set("tok-1", (answer) => {
+      out({ type: "kobe_test_run_token_answer", answer });
+      settle();
+    });
+    out({ type: "extension_ui_request", id: "tok-1", method: "input", title: "kobe.run_token" });
   } else if (message === "dialog") {
     start();
     dialogs.set("ui-1", (answer) => {

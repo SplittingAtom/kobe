@@ -645,6 +645,7 @@
             }
           }
         },
+        "requireRunToken": { "type": "boolean" },
         "cacheTtlSeconds": {
           "type": "integer",
           "minimum": 0,

@@ -29,6 +29,7 @@ import {
   type KobeDatabase,
 } from "@kobe/db";
 import { signSessionToken, verifySessionToken } from "@kobe/session-token";
+import { noRunTokens } from "./testing/run-tokens.js";
 import pino from "pino";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { BudgetGate } from "./budget-gate.js";
@@ -172,6 +173,7 @@ beforeAll(async () => {
   });
   shim = createModelGateway({
     verify: (t) => verifySessionToken(t, "kobe.model-gateway", KEY),
+    runTokens: noRunTokens(),
     principals,
     isRunLeased: async () => false,
     bifrostUrl: `http://127.0.0.1:${(bifrost.address() as AddressInfo).port}`,

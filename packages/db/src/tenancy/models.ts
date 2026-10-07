@@ -4,7 +4,15 @@ import { ALL_PRIVILEGES, defineDomain } from "./types.js";
 export const models = defineDomain({
   // Team model enablement and each member's gateway virtual key (KOBE-40).
   // The model usage ledger (KOBE-43), written by the model-gateway shim.
-  team: ["team_models", "model_gateway_keys", "run_usage", "team_budgets", "model_spend_daily"],
+  // Run-bound gateway tokens (KOBE-118): minted and revoked by the server, read by the shim.
+  team: [
+    "team_models",
+    "model_gateway_keys",
+    "run_usage",
+    "team_budgets",
+    "model_spend_daily",
+    "run_tokens",
+  ],
   installWide: [
     "model_providers",
     "model_catalog",

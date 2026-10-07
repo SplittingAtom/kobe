@@ -21,6 +21,7 @@ import {
 import {
   KOBE_MODEL_ERROR_PREFIX,
   KOBE_PROVIDER_ID,
+  RUN_TOKEN_HEADER,
   gatewayBaseUrl,
   type ModelFileModel,
   type ModelFileState,
@@ -57,6 +58,11 @@ export interface KobeProviderDeps {
   /** The model file as read when this provider was built (its gateway URL and model). */
   readonly initial: ModelFileState;
   readonly readState: () => Promise<ModelFileState>;
+  /**
+   * The gateway token of `runId` (KOBE-118), held in this process's memory only; undefined when
+   * the run has none (older server or agent): calls then carry only the advisory run id.
+   */
+  readonly runToken?: (runId: string) => string | undefined;
   readonly apis: Readonly<Record<ModelFileModel["api"], ApiStreams>>;
   readonly sleep?: (ms: number, signal: AbortSignal | undefined) => Promise<void>;
   readonly now?: () => number;
@@ -99,11 +105,15 @@ export function kobeModel(gatewayUrl: string, model: ModelFileModel): Model {
 function withRunHeader(
   headers: ProviderHeaders | undefined,
   runId: string | null,
+  runToken: string | undefined,
 ): ProviderHeaders {
   const base: ProviderHeaders = Object.fromEntries(
-    Object.entries(headers ?? {}).filter(([name]) => name.toLowerCase() !== RUN_ID_HEADER),
+    Object.entries(headers ?? {}).filter(
+      ([name]) => ![RUN_ID_HEADER, RUN_TOKEN_HEADER].includes(name.toLowerCase()),
+    ),
   );
-  return runId === null ? base : { ...base, [RUN_ID_HEADER]: runId };
+  const withId = runId === null ? base : { ...base, [RUN_ID_HEADER]: runId };
+  return runToken === undefined ? withId : { ...withId, [RUN_TOKEN_HEADER]: runToken };
 }
 
 function errorResult(
@@ -117,6 +127,8 @@ function errorResult(
 export function createKobeProvider(deps: KobeProviderDeps): Provider {
   const sleep = deps.sleep ?? defaultSleep;
   const now = deps.now ?? Date.now;
+  const runTokenOf = (state: ModelFileState): string | undefined =>
+    state.run_id === null ? undefined : deps.runToken?.(state.run_id);
   const base = deps.pi.createProvider({
     id: KOBE_PROVIDER_ID,
     name: "Kobe model gateway",
@@ -128,7 +140,10 @@ export function createKobeProvider(deps: KobeProviderDeps): Provider {
         resolve: async () => {
           const state = await deps.readState();
           return {
-            auth: { apiKey: state.token, headers: withRunHeader(undefined, state.run_id) },
+            auth: {
+              apiKey: state.token,
+              headers: withRunHeader(undefined, state.run_id, runTokenOf(state)),
+            },
             source: "kobe-sandbox-agent",
           };
         },
@@ -195,7 +210,7 @@ export function createKobeProvider(deps: KobeProviderDeps): Provider {
         // The adapters' own SDK retries would hide the status this loop decides on.
         maxRetries: 0,
         apiKey: state.token,
-        headers: withRunHeader(options?.headers, state.run_id),
+        headers: withRunHeader(options?.headers, state.run_id, runTokenOf(state)),
         onResponse: async (r, m) => {
           response = r;
           await options?.onResponse?.(r, m);

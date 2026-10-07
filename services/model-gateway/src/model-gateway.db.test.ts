@@ -22,6 +22,7 @@ import {
   type KobeDatabase,
 } from "@kobe/db";
 import { signSessionToken, verifySessionToken } from "@kobe/session-token";
+import { noRunTokens } from "./testing/run-tokens.js";
 import pino from "pino";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createModelGateway } from "./gateway.js";
@@ -112,6 +113,7 @@ beforeAll(async () => {
   const db = app.db;
   shim = createModelGateway({
     verify: (t) => verifySessionToken(t, "kobe.model-gateway", KEY),
+    runTokens: noRunTokens(),
     principals: new PrincipalCache(
       {
         load: (t, u, s) => loadGatewayPrincipal(db, t, u, s),

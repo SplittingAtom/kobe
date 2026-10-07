@@ -5,7 +5,7 @@ import {
   type RunTransitionCause,
   type ThreadStatus,
 } from "@kobe/protocol";
-import { SYSTEM_ACTOR, sql, type KobeTx } from "@kobe/db";
+import { SYSTEM_ACTOR, revokeRunTokens, sql, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { auditExpiredApprovals, expireRunApprovalsInTx } from "../approvals/run-end.js";
 import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js";
@@ -128,6 +128,8 @@ export async function endRunInTx(
   await tx.execute(sql`
     UPDATE runs SET status = ${to}, ended_at = now()
      WHERE team_id = ${teamId} AND id = ${runId}`);
+  // The run's gateway tokens die with it (KOBE-118).
+  await revokeRunTokens(tx, teamId, runId);
   const nextStatus = nextThreadStatus(threadRow.status, {
     kind: "run_status",
     to,

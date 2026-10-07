@@ -45,6 +45,8 @@ export interface SandboxWireOptions {
   /** Object storage for `artifact.put` (KOBE-129); unset: artifacts answer `storage_failed`. */
   readonly blobs?: BlobStore;
   readonly tuning?: Partial<WireTuning>;
+  /** Key from `deriveRunTokenKey` (KOBE-118); unset: `run.start` carries no run token. */
+  readonly runTokenKey?: Uint8Array;
   /** Connections one replica accepts. */
   readonly maxConnections?: number;
   /** Run the lost-sandbox sweep on a timer (default true; tests call `sweep()`). */
@@ -203,6 +205,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
     bus,
     tuning,
     replicaId,
+    ...(options.runTokenKey ? { runTokenKey: options.runTokenKey } : {}),
     tools,
     policy: {
       db,

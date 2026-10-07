@@ -19,7 +19,7 @@ import type { PiLaunch } from "../pi/pi-launch.js";
 import { piCommand } from "../pi/pi-command.js";
 import { shareOnVolume } from "../workspace/volume.js";
 import { ensureSessionDir } from "../pi/session-files.js";
-import { MODEL_FILE_ENV } from "../kobe-models/protocol.js";
+import { MODEL_FILE_ENV, RUN_TOKEN_UI_TITLE } from "../kobe-models/protocol.js";
 import {
   SYSTEM_PROMPT_FILE_NAME,
   SystemPromptFile,
@@ -145,6 +145,8 @@ export class Thread {
   #launchKey: string | undefined;
   /** The current Pi's model file (undefined without model wiring). */
   #modelFile: ModelFile | undefined;
+  /** The active run's gateway token (KOBE-118): held in memory for this thread's Pi only. */
+  #runToken: { readonly runId: string; readonly token: string } | undefined;
   /** The current Pi's egress token file (undefined without egress wiring). */
   #egressFile: EgressTokenFile | undefined;
   #promptFile: SystemPromptFile | undefined;
@@ -431,7 +433,13 @@ export class Thread {
    * model, before the prompt is sent. The extension reads the file on Pi's `input` hook and per
    * request. No-op without model wiring.
    */
-  async attachRun(runId: string, model: RunModel | null): Promise<void> {
+  async attachRun(
+    runId: string,
+    model: RunModel | null,
+    runToken?: string | undefined,
+  ): Promise<void> {
+    // Memory only (KOBE-118): handed to this Pi on request, never written anywhere.
+    this.#runToken = runToken === undefined ? undefined : { runId, token: runToken };
     await this.#modelFile?.update({ runId, model });
   }
 
@@ -508,6 +516,7 @@ export class Thread {
     const run = this.#run;
     if (run === undefined) return;
     this.#run = undefined;
+    this.#runToken = undefined;
     this.lastUsed = Date.now();
     this.#modelFile
       ?.update({ runId: null })
@@ -566,6 +575,10 @@ export class Thread {
 
   #onUiRequest(pi: PiProcess, record: PiRecord): void {
     if (pi !== this.#pi) return;
+    if (record.method === "input" && record.title === RUN_TOKEN_UI_TITLE) {
+      this.#answerRunToken(pi, record);
+      return;
+    }
     const parsed = piExtensionUiRequestSchema.safeParse(record);
     if (!parsed.success) {
       const id = typeof record.id === "string" ? record.id : undefined;
@@ -588,6 +601,21 @@ export class Thread {
       this.#dialogs.set(request.id, request);
     }
     this.#hooks.uiRequest(this.id, runId, request);
+  }
+
+  /**
+   * kobe-models asks for the run's gateway token (KOBE-118). Answered here, never relayed to the
+   * server: the token for the active run, else a cancel (no run, no token, an older server).
+   */
+  #answerRunToken(pi: PiProcess, record: PiRecord): void {
+    const id = typeof record.id === "string" ? record.id : undefined;
+    if (id === undefined) return;
+    const held = this.#runToken;
+    if (held !== undefined && held.runId === this.#run?.runId) {
+      pi.send({ type: "extension_ui_response", id, value: held.token });
+    } else {
+      pi.send({ type: "extension_ui_response", id, cancelled: true });
+    }
   }
 
   /** Cancel open dialogs (their run is no longer leased to this connection). */
