@@ -15,6 +15,9 @@ s3:
   endpoint: http://s3.kobe-deps.svc.cluster.local:8333
   bucket: kobe
   existingSecret: kobe-dev-s3
+# The e2e asserts a reconcile pass over the team namespace it creates (KOBE-126): run it often.
+server:
+  teamReconcileSeconds: 30
 # Small sandbox requests so dev clusters and the k3d e2e runner fit several sandboxes.
 sandbox:
   resources:
