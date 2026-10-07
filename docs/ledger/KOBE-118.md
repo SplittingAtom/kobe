@@ -45,10 +45,10 @@ thread's Pi from memory; gateway verifies and enforces. The published KOBE-117 c
 
 ## Open questions (for Chris or the coordinator)
 
-- **Unverified against real Pi:** `ctx.ui.input` inside an `input` handler in `--mode rpc` (Pi 1.0.x) is
-  assumed from Pi's extension UI API; Pi is not installed here, so only the fake Pi and unit tests
-  cover it. If Pi rejects it the run simply carries no token (legacy path); add a real-Pi test in
-  `kobe-models.real-pi.test.ts` and e2e before turning enforcement on.
+- **Real Pi:** the first image check (CI `build-test-scan`) timed out because real Pi blocks on
+  `ctx.ui.input` until answered, which confirms the RPC mechanism works. Fixed: the extension waits at
+  most 5 s (an unanswering driver cannot stall a prompt) and `images/sandbox/test-image.sh` now answers
+  the request like the agent and asserts `x-kobe-run-token` reaches the gateway client.
 - Enforcement also refuses calls with no run at all (e.g. orbit eval sandboxes, whose tokens carry no
   run): keep it off until those are covered or exempted.
 - Rollout: server, gateway, agent image, then `requireRunToken: true`.

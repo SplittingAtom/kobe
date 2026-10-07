@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { RUN_TOKEN_HEADER as PROTOCOL_HEADER } from "@kobe/protocol";
 import { registerKobeModels, type ExtensionApiLike, type InputContextLike } from "./register.js";
 import { RUN_TOKEN_HEADER, RUN_TOKEN_UI_TITLE, type ModelFileState } from "./protocol.js";
@@ -84,5 +84,18 @@ describe("run token in kobe-models", () => {
       },
     });
     expect(await headers()).not.toHaveProperty("x-kobe-run-token");
+  });
+
+  it("does not hold the prompt on an agent that never answers", async () => {
+    vi.useFakeTimers();
+    try {
+      const { fire, headers } = await setup(() => state(RUN));
+      const fired = fire({ ui: { input: () => new Promise<string | undefined>(() => undefined) } });
+      await vi.advanceTimersByTimeAsync(5_000);
+      await fired;
+      expect(await headers()).not.toHaveProperty("x-kobe-run-token");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

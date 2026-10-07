@@ -3,6 +3,25 @@ import { KOBE_PROVIDER_ID, RUN_TOKEN_UI_TITLE, type ModelFileState } from "./pro
 import { createKobeProvider, kobeModel, type KobeProviderDeps, type PiAiLike } from "./provider.js";
 import { takeModelFilePath } from "./state-file.js";
 
+const RUN_TOKEN_WAIT_MS = 5_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve(undefined), ms);
+    timer.unref();
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
+}
+
 /** The registration logic of kobe-models, apart from `index.ts` so tests can load it without Pi. */
 export interface InputContextLike {
   readonly model?: { readonly provider: string; readonly id: string } | undefined;
@@ -65,7 +84,8 @@ export async function registerKobeModels(
     if (held?.runId === state.run_id || ctx.ui?.input === undefined) return;
     held = undefined;
     try {
-      const token = await ctx.ui.input(RUN_TOKEN_UI_TITLE);
+      // Never hold the prompt on an agent that does not answer (an older one, or a bare RPC driver).
+      const token = await withTimeout(ctx.ui.input(RUN_TOKEN_UI_TITLE), RUN_TOKEN_WAIT_MS);
       if (typeof token === "string" && token.length > 0) held = { runId: state.run_id, token };
     } catch (error) {
       deps.warn(`kobe-models: run token unavailable: ${(error as Error).message}`);
