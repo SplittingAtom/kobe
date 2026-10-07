@@ -10,6 +10,10 @@
     "lint": "helm lint . --strict --set ingress.host=kobe.example.com --set postgres.external.existingSecret=kobe-db --set s3.endpoint=https://s3.example.com --set s3.bucket=kobe --set s3.existingSecret=kobe-s3 --set smtp.host=smtp.example.com --set smtp.from=kobe@example.com"
   },
   "devDependencies": {
+    "@kobe/egress-proxy": "workspace:*",
+    "@kobe/mcp-proxy": "workspace:*",
+    "@kobe/model-gateway": "workspace:*",
+    "@kobe/server": "workspace:*",
     "yaml": "^2.9.1"
   }
 }
