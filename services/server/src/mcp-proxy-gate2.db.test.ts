@@ -230,6 +230,36 @@ describe("Gate 2 through the real MCP proxy, kobe-policy bypassed", () => {
     expect(consumed.rows[0]?.consumed_at).not.toBeNull();
   });
 
+  it("denies every call once the sandbox's reconnect ended the run, even a read or an approved write (KOBE-132)", async () => {
+    // The sandbox's hello lists no run, so the server interrupts the leased one (D14, cause
+    // "not_resumed"; runs-interrupted.db.test.ts drives the real hello). From then on the thread
+    // has no active run and the proxy must deny: a fixture that leases a run and then lets the
+    // sandbox (re)connect loses it. Nothing may reach the remote server.
+    const s = await sandbox();
+    await allowApproval(fx.admin, {
+      teamId: s.team,
+      runId: s.runId,
+      threadId: s.threadId,
+      userId: s.owner.id,
+      tool: s.tool,
+      input,
+      key: KEYRING.current,
+    });
+    await fx.admin.query(
+      `UPDATE runs SET status = 'interrupted', ended_at = now() WHERE team_id = $1 AND id = $2`,
+      [s.team, s.runId],
+    );
+    const read = await callDirect(s, "get_issue", { q: "1" });
+    const write = await callDirect(s, "create_issue", input);
+    for (const out of [read, write]) {
+      expect(out.result?.isError).toBe(true);
+      expect(out.result?.content[0]?.text).toContain(
+        "No active run of this thread runs in this sandbox.",
+      );
+    }
+    expect(writes()).toEqual([]);
+  });
+
   it("refuses a forged signature, a changed input and an expired approval", async () => {
     const s = await sandbox();
     const forged = await allowApproval(fx.admin, {
