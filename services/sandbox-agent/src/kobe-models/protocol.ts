@@ -35,6 +35,15 @@ export const MODEL_RUN_ERROR_CODES = [
 ] as const;
 export type ModelRunErrorCode = (typeof MODEL_RUN_ERROR_CODES)[number];
 
+/**
+ * KOBE-118: the run-bound gateway token never touches the model file, the environment or argv.
+ * The extension asks for it over Pi's own RPC channel (an `input` dialog with this title, which
+ * the agent answers from memory and never relays), once per run, and keeps it in memory.
+ */
+export const RUN_TOKEN_UI_TITLE = "kobe.run_token";
+/** Request header carrying it (mirrors `RUN_TOKEN_HEADER` in packages/protocol; a test pins it). */
+export const RUN_TOKEN_HEADER = "x-kobe-run-token";
+
 export interface ModelFileModel {
   /** `<gateway provider>/<model>` (the catalog's `gateway_model`). */
   readonly gateway_model: string;

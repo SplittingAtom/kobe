@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { createServer, request, type IncomingHttpHeaders, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { SecretBox, VIRTUAL_KEY_PURPOSE, virtualKeyContext, type GatewayPrincipal } from "@kobe/db";
-import type { SessionTokenAudience } from "@kobe/protocol";
+import { RUN_TOKEN_HEADER, type RunTokenClaims, type SessionTokenAudience } from "@kobe/protocol";
+import { deriveRunTokenKey, signRunToken } from "@kobe/protocol/node";
 import { signSessionToken, verifySessionToken } from "@kobe/session-token";
 import pino from "pino";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -117,6 +118,9 @@ let principal: GatewayPrincipal;
 let vkValue = "";
 let keyRequests = 0;
 let leased = new Set<string>();
+const RUN_KEY = deriveRunTokenKey(new TextEncoder().encode("r".repeat(40)));
+/** jti of the run tokens the (fake) record still holds as active. */
+let activeTokens = new Set<string>();
 let records: CallRecord[] = [];
 let forgot = 0;
 let gate: CallGate = OPEN_GATE;
@@ -145,6 +149,7 @@ interface ShimOptions {
   readonly perSandboxCalls?: number;
   readonly bytes?: { perSandbox: number; total: number };
   readonly rate?: { burst: number; perSecond: number };
+  readonly requireRunToken?: boolean;
 }
 
 async function start(over: ShimOptions = {}): Promise<void> {
@@ -172,6 +177,11 @@ async function start(over: ShimOptions = {}): Promise<void> {
       leaseChecks++;
       return leased.has(runId);
     },
+    runTokens: {
+      key: RUN_KEY,
+      isActive: async (s) => activeTokens.has(s.jti),
+      require: over.requireRunToken ?? false,
+    },
     bifrostUrl,
     limiter: new CallLimiter({ perSandbox: over.perSandboxCalls ?? 1, total: 10 }),
     bytes: new ByteBudget(over.bytes ?? { perSandbox: 8192, total: 16384 }),
@@ -197,6 +207,7 @@ beforeEach(async () => {
   leaseChecks = 0;
   loadDelayMs = 0;
   leased = new Set();
+  activeTokens = new Set();
   gate = OPEN_GATE;
   knownVks.clear();
   principal = { member: true, sandbox: "live", virtualKey: undefined, enabledModels: ENABLED };
@@ -533,6 +544,126 @@ describe("calls", () => {
       (await call("/v1/chat/completions", { headers: { ...bearer(), "x-kobe-run-id": "nope" } }))
         .status,
     ).toBe(400);
+  });
+});
+
+/** A run token for `runId` on this test's sandbox; `active`: the record still holds it. */
+function runToken(runId: string, over: Partial<RunTokenClaims> = {}, active = true): string {
+  const iat = Math.floor(Date.now() / 1000);
+  const claims: RunTokenClaims = {
+    iss: "kobe-server",
+    aud: "kobe.model-gateway",
+    run_id: runId,
+    team_id: team,
+    sandbox_id: sandbox,
+    iat,
+    exp: iat + 600,
+    jti: randomUUID(),
+    ...over,
+  };
+  if (active) activeTokens.add(claims.jti);
+  return signRunToken(RUN_KEY, claims).token;
+}
+const withRun = (t: string, extra: Record<string, string> = {}) => ({
+  headers: { ...bearer(), [RUN_TOKEN_HEADER]: t, ...extra },
+});
+const errorCode = (r: { text: string }) => JSON.parse(r.text).error.code;
+
+describe("run-bound tokens (KOBE-118)", () => {
+  it("attributes the call to the token's run and never forwards the token", async () => {
+    const runId = randomUUID();
+    const r = await call("/v1/chat/completions", withRun(runToken(runId)));
+    expect(r.status).toBe(200);
+    expect(records.at(-1)?.runId).toBe(runId);
+    expect(hits[0]?.headers[RUN_TOKEN_HEADER]).toBeUndefined();
+    // Not a lease lookup: the token's record is the authority.
+    expect(leaseChecks).toBe(0);
+  });
+
+  it("ac-1: refuses a token of an ended (revoked) run", async () => {
+    const runId = randomUUID();
+    const t = runToken(runId);
+    expect((await call("/v1/chat/completions", withRun(t))).status).toBe(200);
+    activeTokens.clear();
+    const r = await call("/v1/chat/completions", withRun(t));
+    expect(r.status).toBe(403);
+    expect(errorCode(r)).toBe("run_token_inactive");
+    expect(hits).toHaveLength(1);
+  });
+
+  it("ac-1: refuses another run's token, a token of another sandbox or team, and a mismatching run id", async () => {
+    const a = randomUUID();
+    const b = randomUUID();
+    const tokenA = runToken(a);
+    const other = [
+      withRun(runToken(a, { sandbox_id: randomUUID() })),
+      withRun(runToken(a, { team_id: randomUUID() })),
+      withRun(tokenA, { "x-kobe-run-id": b }),
+    ];
+    for (const init of other) {
+      const r = await call("/v1/chat/completions", init);
+      expect(r.status).toBe(403);
+    }
+    expect(
+      errorCode(await call("/v1/chat/completions", withRun(tokenA, { "x-kobe-run-id": b }))),
+    ).toBe("run_id_mismatch");
+    // A token never verified as ours (forged, expired, malformed, or minted under another key).
+    const now = Math.floor(Date.now() / 1000);
+    const forged = signRunToken(deriveRunTokenKey(new TextEncoder().encode("z".repeat(40))), {
+      iss: "kobe-server",
+      aud: "kobe.model-gateway",
+      run_id: a,
+      team_id: team,
+      sandbox_id: sandbox,
+      iat: now,
+      exp: now + 60,
+      jti: randomUUID(),
+    }).token;
+    for (const t of [forged, "krt1.x.y", "nope", runToken(a, { iat: now - 120, exp: now - 60 })]) {
+      const r = await call("/v1/chat/completions", withRun(t));
+      expect(r.status).toBe(401);
+      expect(errorCode(r)).toBe("invalid_run_token");
+    }
+    expect(hits).toEqual([]);
+  });
+
+  it("without enforcement a call with no token keeps the legacy advisory run id", async () => {
+    const runId = randomUUID();
+    leased.add(runId);
+    const r = await call("/v1/chat/completions", {
+      headers: { ...bearer(), "x-kobe-run-id": runId },
+    });
+    expect(r.status).toBe(200);
+    expect(records.at(-1)?.runId).toBe(runId);
+  });
+
+  it("ac-2: with enforcement a run's own tools cannot evade a per-run stop", async () => {
+    await start({ requireRunToken: true });
+    const stopped = randomUUID();
+    const other = randomUUID();
+    leased.add(stopped); // the legacy lease check would still pass: only the token decides now
+    const stoppedToken = runToken(stopped);
+    activeTokens.clear(); // the run was budget stopped: its tokens are revoked
+    const otherToken = runToken(other);
+
+    const attempts: Record<string, { headers: Record<string, string> }> = {
+      "no token": { headers: bearer() },
+      "forged run id": { headers: { ...bearer(), "x-kobe-run-id": stopped } },
+      "its own revoked token": withRun(stoppedToken),
+      "another run's token claiming its id": withRun(otherToken, { "x-kobe-run-id": stopped }),
+    };
+    for (const [name, init] of Object.entries(attempts)) {
+      const r = await call("/v1/chat/completions", init);
+      expect([401, 403], name).toContain(r.status);
+    }
+    expect(hits).toEqual([]);
+    // The no-token case is a 401 naming the missing token.
+    const none = await call("/v1/chat/completions", { headers: bearer() });
+    expect(none.status).toBe(401);
+    expect(errorCode(none)).toBe("run_token_required");
+    // Another run's own token still works, and is attributed to that run only.
+    expect((await call("/v1/chat/completions", withRun(otherToken))).status).toBe(200);
+    expect(records.at(-1)?.runId).toBe(other);
   });
 });
 

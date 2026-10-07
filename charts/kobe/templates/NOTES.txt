@@ -2,6 +2,11 @@ Kobe {{ .Chart.AppVersion }} is installed in namespace {{ .Release.Namespace }}.
 
 Isolation: sandboxes run under RuntimeClass "{{ .Values.isolation.runtimeClassName }}" (gVisor/Kata
 required; the install fails without one).
+{{- if (.Values.modelGateway).requireRunToken }}
+
+Warning: modelGateway.requireRunToken is on: model calls without a run token (Orbit eval sandboxes,
+runs whose token fetch timed out) are refused with 401.
+{{- end }}
 {{- if .Values.ingress.enabled }}
 
 Open: http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Server } from "node:http";
-import type { PolicyEngine, ToolRegistry } from "@kobe/protocol";
+import { MAX_RUN_TOKEN_TTL_SECONDS, type PolicyEngine, type ToolRegistry } from "@kobe/protocol";
+import { z } from "zod";
 import { SYSTEM_ACTOR, eq, getMembership, users, withTeam, type KobeDb } from "@kobe/db";
 import { logger as rootLogger } from "../logger.js";
 import { recordAudit, type ServerAuditEvent } from "../audit/record.js";
@@ -45,6 +46,8 @@ export interface SandboxWireOptions {
   /** Object storage for `artifact.put` (KOBE-129); unset: artifacts answer `storage_failed`. */
   readonly blobs?: BlobStore;
   readonly tuning?: Partial<WireTuning>;
+  /** Key from `deriveRunTokenKey` (KOBE-118); unset: `run.start` carries no run token. */
+  readonly runTokenKey?: Uint8Array;
   /** Connections one replica accepts. */
   readonly maxConnections?: number;
   /** Run the lost-sandbox sweep on a timer (default true; tests call `sweep()`). */
@@ -92,6 +95,16 @@ export const CANCEL_DIALOGS: UiBroker = {
   },
 };
 
+/** Fails fast at startup: an out-of-range TTL would fail every run.start in the lease transaction. */
+function assertRunTokenTtl(ttl: number): void {
+  const parsed = z.number().int().min(60).max(MAX_RUN_TOKEN_TTL_SECONDS).safeParse(ttl);
+  if (!parsed.success) {
+    throw new Error(
+      `Invalid configuration: runTokenTtlSeconds must be an integer between 60 and ${MAX_RUN_TOKEN_TTL_SECONDS}`,
+    );
+  }
+}
+
 const NO_WAKE: SandboxWaker = { wake: () => Promise.resolve() };
 const NOT_LIVE: SandboxLiveness = { isLive: () => Promise.resolve(false) };
 const VIOLATION_AUDIT_EVERY_MS = 5 * 60_000;
@@ -100,6 +113,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
   const replicaId = randomUUID();
   const log = rootLogger.child({ component: "sandbox-wire", replica: replicaId.slice(0, 8) });
   const tuning: WireTuning = { ...WIRE_DEFAULTS, ...options.tuning };
+  assertRunTokenTtl(tuning.runTokenTtlSeconds);
   const db = options.db;
   const metrics = newMetrics();
   const background = options.background ?? new BackgroundTasks();
@@ -203,6 +217,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
     bus,
     tuning,
     replicaId,
+    ...(options.runTokenKey ? { runTokenKey: options.runTokenKey } : {}),
     tools,
     policy: {
       db,

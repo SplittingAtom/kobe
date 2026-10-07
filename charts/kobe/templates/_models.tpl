@@ -129,6 +129,8 @@ session key only, the virtual-key secret only (never provider keys or Bifrost's 
   value: {{ mul (int $g.limits.idleTimeoutSeconds) 1000 | quote }}
 - name: KOBE_MODEL_GATEWAY_CACHE_TTL_MS
   value: {{ mul (int $g.cacheTtlSeconds) 1000 | quote }}
+- name: KOBE_MODEL_GATEWAY_REQUIRE_RUN_TOKEN
+  value: {{ ternary "true" "false" (default false $g.requireRunToken) | quote }}
 {{- end -}}
 
 {{/*

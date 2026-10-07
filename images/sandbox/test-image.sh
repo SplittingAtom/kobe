@@ -173,14 +173,15 @@ lines(p.stdout, (m) => {
 });'
 # kobe-models (KOBE-41) as the agent starts it: a private writable config dir, the model file with
 # a token and run id, a local fake OpenAI-compatible upstream standing in for the model gateway.
-# Pi must stream the upstream's answer, sending the token as the API key and the run id header.
-check "kobe-models loads into Pi and streams a model answer through the gateway client" '^ok Bearer image-token-0123456789abcdef run=11111111-1111-4111-8111-111111111111 text=hello from upstream$' run_ws node -e '
+# Pi must stream the upstream's answer, sending the token as the API key and the run id header, and the run
+# token (KOBE-118) the extension fetched from the "agent" over RPC as x-kobe-run-token.
+check "kobe-models loads into Pi and streams a model answer through the gateway client" '^ok Bearer image-token-0123456789abcdef run=11111111-1111-4111-8111-111111111111 tok=krt1.image-run-token text=hello from upstream$' run_ws node -e '
 const fs = require("node:fs");
 const http = require("node:http");
 const { spawn } = require("node:child_process");
 const srv = http.createServer((req, res) => {
   let b = ""; req.on("data", (d) => (b += d)); req.on("end", () => {
-    const seen = "Bearer " + (req.headers.authorization || "").replace(/^Bearer /, "") + " run=" + (req.headers["x-kobe-run-id"] || "-");
+    const seen = "Bearer " + (req.headers.authorization || "").replace(/^Bearer /, "") + " run=" + (req.headers["x-kobe-run-id"] || "-") + " tok=" + (req.headers["x-kobe-run-token"] || "-");
     res.writeHead(200, { "content-type": "text/event-stream" });
     const chunk = (delta, finish) => "data: " + JSON.stringify({ id: "c", object: "chat.completion.chunk", created: 1, model: "m", choices: [{ index: 0, delta, finish_reason: finish }] }) + "\n\n";
     res.write(chunk({ role: "assistant", content: "" }, null)); res.write(chunk({ content: "hello from upstream" }, null)); res.write(chunk({}, "stop")); res.end("data: [DONE]\n\n");
@@ -205,6 +206,8 @@ srv.listen(0, "127.0.0.1", () => {
   p.stdio[3].write(JSON.stringify({ type: "channel.hello", nonce: "image-test" }) + "\n");
   let text = "";
   lines(p.stdout, (m) => {
+    // KOBE-118: the extension asks the agent for the run token over RPC (memory only, no file); answer as the agent does.
+    if (m.type === "extension_ui_request" && m.method === "input" && m.title === "kobe.run_token") p.stdin.write(JSON.stringify({ type: "extension_ui_response", id: m.id, value: "krt1.image-run-token" }) + "\n");
     if (m.type === "message_update" && m.assistantMessageEvent.type === "text_delta") text += m.assistantMessageEvent.delta;
     if (m.type === "message_end" && m.message.role === "assistant" && m.message.stopReason === "error") done("model error: " + m.message.errorMessage, 1);
     if (m.type === "agent_settled") done("ok " + srv.seen + " text=" + text, 0);

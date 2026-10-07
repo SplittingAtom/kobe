@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   CAPABILITY_BUILTIN_SKILLS,
+  CAPABILITY_RUN_TOKEN,
   CAPABILITY_SKILL_BUNDLES,
   serverToSandboxFrameSchema,
   type PiGetEntriesData,
@@ -20,6 +21,7 @@ import {
   restoreParts,
 } from "./entries.js";
 import { endRunInTx, loadRun } from "./run-state.js";
+import { mintRunToken } from "./run-token.js";
 import { COMMAND_FAILURES, type CommandOutcome, type SandboxTarget } from "./types.js";
 
 /** What delivery needs from its connection. */
@@ -399,10 +401,21 @@ export class CommandDelivery {
               AND sandbox_run_leases.thread_id = EXCLUDED.thread_id`);
         if (leased.rowCount !== 1) return "run_not_active" as const;
         if (!(await markDelivered(tx, teamId, row.id, this.#host.id))) return "gone" as const;
-        return { cursor: run.sandboxSeq };
+        // Only to agents that can hand it to Pi alone (KOBE-118); older ones keep the legacy path.
+        const runToken =
+          ctx.runTokenKey && this.#host.hasCapability(CAPABILITY_RUN_TOKEN)
+            ? await mintRunToken(tx, {
+                key: ctx.runTokenKey,
+                teamId,
+                runId: row.runId ?? "",
+                sandboxId: this.#host.sandboxId,
+                ttlSeconds: ctx.tuning.runTokenTtlSeconds,
+              })
+            : undefined;
+        return { cursor: run.sandboxSeq, runToken };
       }
       return (await markDelivered(tx, teamId, row.id, this.#host.id))
-        ? { cursor: 0 }
+        ? { cursor: 0, runToken: undefined }
         : ("gone" as const);
     });
     if (claimed === "gone") return; // expired or taken meanwhile
@@ -428,7 +441,9 @@ export class CommandDelivery {
     });
     ctx.metrics.commandsDelivered += 1;
     // Not sent (closed meanwhile): the row stays delivered; the next hello reconciles it.
-    this.#host.send(frame);
+    this.#host.send(
+      claimed.runToken ? ({ ...frame, run_token: claimed.runToken } as typeof frame) : frame,
+    );
   }
 
   async #failRunStart(row: CommandRow, outcome: CommandOutcome): Promise<void> {

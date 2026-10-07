@@ -128,6 +128,7 @@ export async function endRunInTx(
   await tx.execute(sql`
     UPDATE runs SET status = ${to}, ended_at = now()
      WHERE team_id = ${teamId} AND id = ${runId}`);
+  // The run's gateway tokens are revoked by the `runs_revoke_run_tokens` trigger (KOBE-118).
   const nextStatus = nextThreadStatus(threadRow.status, {
     kind: "run_status",
     to,

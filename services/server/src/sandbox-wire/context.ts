@@ -60,6 +60,8 @@ export interface WireContext {
   readonly bus: SandboxBus;
   readonly tuning: WireTuning;
   readonly replicaId: string;
+  /** Derived run token key (KOBE-118); unset: no run tokens are minted. */
+  readonly runTokenKey?: Uint8Array;
   readonly tools: ToolRegistry;
   readonly policy: PolicyCheckDeps;
   /** Storage for `artifact.put` (KOBE-129). */

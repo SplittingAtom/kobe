@@ -72,6 +72,12 @@ const configSchema = z.object({
   ),
   /** How long membership, sandbox liveness and virtual keys are cached (revocation latency). */
   KOBE_MODEL_GATEWAY_CACHE_TTL_MS: int("KOBE_MODEL_GATEWAY_CACHE_TTL_MS", 0, 60_000, 5_000),
+  // KOBE-118: refuse calls without a run token (off while sandbox agents are rolled out).
+  KOBE_MODEL_GATEWAY_REQUIRE_RUN_TOKEN: z
+    .enum(["true", "false"], {
+      error: "KOBE_MODEL_GATEWAY_REQUIRE_RUN_TOKEN must be true or false",
+    })
+    .default("false"),
   // KOBE-42: how long a member's budget state is reused (spend hints drop it sooner).
   KOBE_MODEL_GATEWAY_BUDGET_CACHE_TTL_MS: int(
     "KOBE_MODEL_GATEWAY_BUDGET_CACHE_TTL_MS",
@@ -97,6 +103,8 @@ export interface Config {
   readonly idleTimeoutMs: number;
   readonly cacheTtlMs: number;
   readonly budgetCacheTtlMs: number;
+  /** Run token mandatory on every call (KOBE-118 enforcement); default off for rollout. */
+  readonly requireRunToken: boolean;
 }
 
 export function loadConfig(env: Readonly<Record<string, string | undefined>>): Config {
@@ -130,5 +138,6 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     idleTimeoutMs: c.KOBE_MODEL_GATEWAY_IDLE_TIMEOUT_MS,
     cacheTtlMs: c.KOBE_MODEL_GATEWAY_CACHE_TTL_MS,
     budgetCacheTtlMs: c.KOBE_MODEL_GATEWAY_BUDGET_CACHE_TTL_MS,
+    requireRunToken: c.KOBE_MODEL_GATEWAY_REQUIRE_RUN_TOKEN === "true",
   };
 }

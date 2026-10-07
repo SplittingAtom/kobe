@@ -9,10 +9,12 @@ import {
   VIRTUAL_KEY_PURPOSE,
   createDb,
   isActiveRunLeasedTo,
+  isRunTokenActive,
   loadGatewayPrincipal,
   notifyModels,
   recordModelUsage,
 } from "@kobe/db";
+import { deriveRunTokenKey } from "@kobe/protocol/node";
 import { verifySessionToken } from "@kobe/session-token";
 import { loadConfig } from "./config.js";
 import { createModelGateway } from "./gateway.js";
@@ -61,6 +63,14 @@ listener.start();
 /** Run lease answers, positive and negative, cached like principals (single-flight). */
 const leases = new TtlCache<boolean>({ ttlMs: Math.max(config.cacheTtlMs, 1_000) });
 
+/**
+ * Run token record answers (KOBE-118). A short fixed cache (at most 2 s, whatever the principal
+ * cache TTL is) bounds how long an "active" answer outlives revocation; no NOTIFY hint is used.
+ */
+const tokenRecords = new TtlCache<boolean>({
+  ttlMs: Math.min(Math.max(config.cacheTtlMs, 1_000), 2_000),
+});
+
 /** The run_usage ledger (KOBE-43): one row per forwarded model call, written in batches. */
 const usage = new DbUsageSink({
   write: (records) => recordModelUsage(db, records),
@@ -85,6 +95,12 @@ const server = createModelGateway({
     leases.get(`${teamId}:${runId}:${sandboxId}`, () =>
       isActiveRunLeasedTo(db, teamId, runId, sandboxId),
     ),
+  runTokens: {
+    // Same derivation as the server's: the gateway session key is the shared master secret.
+    key: deriveRunTokenKey(new TextEncoder().encode(config.sessionKey)),
+    isActive: (s) => tokenRecords.get(`${s.teamId}:${s.jti}`, () => isRunTokenActive(db, s)),
+    require: config.requireRunToken,
+  },
   bifrostUrl: config.bifrostUrl,
   limiter: new CallLimiter({ perSandbox: config.maxCallsPerSandbox, total: config.maxCalls }),
   bytes: new ByteBudget({

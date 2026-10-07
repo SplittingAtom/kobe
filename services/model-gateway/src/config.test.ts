@@ -23,6 +23,16 @@ describe("loadConfig", () => {
     });
   });
 
+  it("run token enforcement is off by default and switched by KOBE_MODEL_GATEWAY_REQUIRE_RUN_TOKEN", () => {
+    expect(loadConfig(env).requireRunToken).toBe(false);
+    expect(
+      loadConfig({ ...env, KOBE_MODEL_GATEWAY_REQUIRE_RUN_TOKEN: "true" }).requireRunToken,
+    ).toBe(true);
+    expect(() => loadConfig({ ...env, KOBE_MODEL_GATEWAY_REQUIRE_RUN_TOKEN: "yes" })).toThrow(
+      /REQUIRE_RUN_TOKEN/,
+    );
+  });
+
   it("fails fast on a missing or weak key without echoing it", () => {
     expect(() => loadConfig({ ...env, KOBE_SESSION_KEY_MODEL_GATEWAY: undefined })).toThrow(
       /KOBE_SESSION_KEY_MODEL_GATEWAY is required/,

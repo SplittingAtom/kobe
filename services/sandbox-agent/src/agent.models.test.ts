@@ -328,3 +328,63 @@ describe("model wiring (KOBE-41)", () => {
     expect((await stat(launch.agentDir)).mode & 0o777).toBe(0o700);
   });
 });
+
+describe("run token delivery (KOBE-118)", () => {
+  const GRANT = {
+    token: `krt1.${"p".repeat(60)}.${"m".repeat(43)}`,
+    expires_at: "2099-01-01T00:00:00.000Z",
+  };
+  const answerOf = async () => {
+    const frame = await h.server.waitFor(
+      (f) => f.type === "pi.event" && f.event.type === "kobe_test_run_token_answer",
+    );
+    return (frame as unknown as { event: { answer: Record<string, unknown> } }).event.answer;
+  };
+
+  it("advertises the capability only when models are wired", async () => {
+    await start(fakeTokens(TOKEN_1));
+    const hello = h.server.received.find((r) => r.frame.type === "hello")?.frame as {
+      capabilities?: string[];
+    };
+    expect(hello.capabilities).toContain("run_token");
+  });
+
+  it("answers Pi's token request from memory, never forwards it, never writes it to disk", async () => {
+    await start(fakeTokens(TOKEN_1));
+    await h.server.command(runStart("run-token", { config: { model: MODEL }, run_token: GRANT }));
+    expect(await answerOf()).toMatchObject({ id: "tok-1", value: GRANT.token });
+    expect(h.server.received.filter((r) => r.frame.type === "pi.ui_request")).toEqual([]);
+    const launch = await launchRecord();
+    expect(await readFile(launch.modelFile, "utf8")).not.toContain(GRANT.token);
+    expect(JSON.stringify(launch.argv)).not.toContain(GRANT.token);
+    expect(JSON.stringify(launch.env)).not.toContain(GRANT.token);
+    const files = await readdir(path.dirname(launch.agentDir), { recursive: true });
+    for (const f of files) {
+      const p = path.join(path.dirname(launch.agentDir), f);
+      if ((await stat(p)).isFile()) expect(await readFile(p, "utf8")).not.toContain(GRANT.token);
+    }
+  });
+
+  it("cancels the request when the run carries no token (older server)", async () => {
+    await start(fakeTokens(TOKEN_1));
+    await h.server.command(runStart("run-token", { config: { model: MODEL } }));
+    expect(await answerOf()).toMatchObject({ id: "tok-1", cancelled: true });
+  });
+
+  it("does not keep a run's token for the next run", async () => {
+    await start(fakeTokens(TOKEN_1));
+    await h.server.command(runStart("hang", { config: { model: MODEL }, run_token: GRANT }));
+    await h.server.command({
+      type: "run.stop",
+      run_id: RUN,
+      thread_id: THREAD,
+      mode: "abort",
+      reason: "user_cancelled",
+    });
+    await h.server.command({
+      ...runStart("run-token", { config: { model: MODEL } }),
+      run_id: RUN_2,
+    });
+    expect(await answerOf()).toMatchObject({ cancelled: true });
+  });
+});

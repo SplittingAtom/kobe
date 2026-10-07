@@ -128,7 +128,7 @@ export class ThreadManager {
         return fail("runtime_tampered", tampered);
       }
       try {
-        await thread.attachRun(frame.run_id, model);
+        await thread.attachRun(frame.run_id, model, frame.run_token?.token);
       } catch (error) {
         thread.endRun();
         return fail("pi_unavailable", `model file not written: ${(error as Error).message}`);

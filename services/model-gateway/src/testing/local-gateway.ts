@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { SecretBox, VIRTUAL_KEY_PURPOSE, virtualKeyContext, type GatewayPrincipal } from "@kobe/db";
+import { deriveRunTokenKey } from "@kobe/protocol/node";
 import { signSessionToken, verifySessionToken } from "@kobe/session-token";
 import pino from "pino";
 import { createModelGateway } from "../gateway.js";
@@ -85,6 +86,12 @@ export async function startLocalGateway(options: LocalGatewayOptions): Promise<L
     verify: (token) => verifySessionToken(token, "kobe.model-gateway", sessionKey),
     principals,
     isRunLeased: async (_team, runId) => options.isRunLeased?.(runId) ?? true,
+    // The harness' sessions carry no run token: enforcement stays off, legacy run ids apply.
+    runTokens: {
+      key: deriveRunTokenKey(new TextEncoder().encode(sessionKey)),
+      isActive: async () => false,
+      require: false,
+    },
     bifrostUrl: upstreamUrl,
     limiter: new CallLimiter({ perSandbox: 8, total: 32 }),
     bytes: new ByteBudget({ perSandbox: 8 * 1024 * 1024, total: 32 * 1024 * 1024 }),

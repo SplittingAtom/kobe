@@ -1,4 +1,5 @@
 import {
+  MAX_RUN_TOKEN_TTL_SECONDS,
   EVENT_ENTRY_PAYLOAD_MAX_BYTES,
   EVENT_TOOL_INPUT_MAX_BYTES,
   SANDBOX_HEARTBEAT_INTERVAL_MS,
@@ -8,6 +9,14 @@ import {
   SANDBOX_MAX_FRAME_BYTES,
   SANDBOX_SMALL_FRAME_MAX_BYTES,
 } from "@kobe/protocol";
+
+/**
+ * Run token lifetime (KOBE-118). Runs have no wall-clock limit (a run may wait for approvals up to
+ * their TTL, and steps can be long), so a short TTL would kill healthy runs mid-flight; the token
+ * is revoked at run end and the gateway also requires the run to be active, so the TTL only bounds
+ * a token whose revocation was somehow missed. Hence the contract maximum, 24 h.
+ */
+export const RUN_TOKEN_TTL_SECONDS = MAX_RUN_TOKEN_TTL_SECONDS;
 
 /** NOTIFY channel of the sandbox wire (ids only: any session may LISTEN on any channel). */
 export const SANDBOX_CHANNEL = "kobe_sandbox";
@@ -72,6 +81,8 @@ export interface WireTuning {
    * (`run_too_large` / `thread_too_large`) and is stopped in the sandbox.
    */
   readonly runMaxEvents: number;
+  /** Lifetime of a run token (KOBE-118): a backstop; the token is revoked when the run ends. */
+  readonly runTokenTtlSeconds: number;
   readonly runMaxBytes: number;
   readonly threadMaxEntries: number;
   /** `policy.denied` events per run: burst and refill per minute (the deny itself always stands). */
@@ -133,6 +144,7 @@ export const WIRE_DEFAULTS: WireTuning = {
   /** `artifact.put` frames being stored at once per connection (each holds up to 512 KiB). */
   maxPendingArtifactPuts: 4,
   runMaxEvents: 100_000,
+  runTokenTtlSeconds: RUN_TOKEN_TTL_SECONDS,
   runMaxBytes: 256 * 1024 * 1024,
   threadMaxEntries: 50_000,
   deniedEventBurst: 20,

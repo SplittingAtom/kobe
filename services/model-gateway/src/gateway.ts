@@ -16,7 +16,9 @@ import { forwardRequestHeaders, forwardResponseHeaders } from "./headers.js";
 import { topLevelModel, withStreamUsage } from "./body-model.js";
 import type { ByteBudget, CallLimiter, RequestRate } from "./limits.js";
 import type { PrincipalCache, Resolution } from "./principals.js";
+import { resolveRunAttribution } from "./run-attribution.js";
 import { classify, forwardedQuery, type RouteKind } from "./routes.js";
+import type { RunTokenSubject } from "@kobe/db";
 import type { CallContext, CallGate, UsageSink } from "./seams.js";
 import { chargedOutput } from "./usage/charge.js";
 import { UsageMeter, type UsageReading } from "./usage/meter.js";
@@ -29,7 +31,9 @@ import { UsageMeter, type UsageReading } from "./usage/meter.js";
  *    tokens fail) in any header a model SDK uses for its API key;
  * 2. an inference path (routes.ts) — never Bifrost's admin API;
  * 3. the token's member and sandbox still live (principals.ts; cached ≤ a few seconds);
- * 4. optional run attribution (`x-kobe-run-id`, must be leased to this sandbox);
+ * 4. run attribution: a run token (`x-kobe-run-token`, KOBE-118: verified, recorded and active,
+ *    bound to this team and sandbox, the run id comes from it), else the legacy advisory
+ *    `x-kobe-run-id` (must be leased to this sandbox) unless the token is mandatory;
  * 5. concurrency limits and the {@link CallGate} seam (KOBE-42);
  * 6. forwarded to Bifrost with only allowlisted headers plus `x-bf-vk: <member's virtual key>`,
  *    so Bifrost applies that member's team model allowlist (and, with KOBE-42, budgets);
@@ -40,6 +44,15 @@ export interface GatewayOptions {
   readonly principals: PrincipalCache;
   /** Whether `runId` is an active run leased to `sandboxId` in `teamId` (cached by the caller). */
   readonly isRunLeased: (teamId: string, runId: string, sandboxId: string) => Promise<boolean>;
+  /** Run-bound tokens (KOBE-118). */
+  readonly runTokens: {
+    /** Key from `deriveRunTokenKey` over the model-gateway session key. */
+    readonly key: Uint8Array;
+    /** The server's record: not revoked or expired, run active on that sandbox (cached by caller). */
+    readonly isActive: (subject: RunTokenSubject) => Promise<boolean>;
+    /** Enforcement: a call without a run token is refused (off for rollout). */
+    readonly require: boolean;
+  };
   readonly bifrostUrl: string;
   readonly limiter: CallLimiter;
   /** Request bytes held in memory, per sandbox and in total. */
@@ -55,7 +68,6 @@ export interface GatewayOptions {
   readonly ready: () => boolean;
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Bifrost's error types meaning "this virtual key does not exist here". */
 const KEY_UNKNOWN = new Set(["access_not_found", "virtual_key_required"]);
 const GEMINI_STATUS: Readonly<Record<number, string>> = {
@@ -270,22 +282,15 @@ export function createModelGateway(options: GatewayOptions): Server {
         return;
       }
 
-      // 5. Run attribution (optional header; when sent, an active run leased to this sandbox).
-      const runHeader = req.headers["x-kobe-run-id"];
-      let runId: string | undefined;
-      if (runHeader !== undefined) {
-        if (typeof runHeader !== "string" || !UUID.test(runHeader)) {
-          status = 400;
-          sendError(res, kind, 400, "invalid_run_id", "x-kobe-run-id must be a run id.");
-          return;
-        }
-        runId = runHeader.toLowerCase();
-        if (!(await options.isRunLeased(identity.teamId, runId, identity.sandboxId))) {
-          status = 403;
-          sendError(res, kind, 403, "run_not_leased", "That run is not active on this sandbox.");
-          return;
-        }
+      // 5. Run attribution: the run token when sent (it must verify, no fallback), else the legacy
+      // advisory header, unless enforcement makes the token mandatory (KOBE-118).
+      const attribution = await resolveRunAttribution(options, req.headers, identity);
+      if (!attribution.ok) {
+        status = attribution.status;
+        sendError(res, kind, attribution.status, attribution.code, attribution.message);
+        return;
       }
+      const runId = attribution.runId;
 
       // 6. The body (bounded, within the byte budget), its model, the team's enablement.
       const body = await readBody(

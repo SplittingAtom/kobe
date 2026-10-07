@@ -137,13 +137,18 @@ async function collect(stream: AssistantMessageEventStream) {
   return { events, result: await stream.result() };
 }
 
-function setup(script: Step[], states: ModelFileState[] = [state()]) {
+function setup(
+  script: Step[],
+  states: ModelFileState[] = [state()],
+  runToken?: (runId: string) => string | undefined,
+) {
   const calls: StreamOptions[] = [];
   const sleeps: number[] = [];
   let clock = 0;
   const provider = createKobeProvider({
     pi,
     initial: states[0] as ModelFileState,
+    ...(runToken ? { runToken } : {}),
     readState: async () =>
       states.length > 1 ? (states.shift() as ModelFileState) : (states[0] as ModelFileState),
     apis: {
@@ -191,6 +196,21 @@ describe("kobe provider", () => {
       maxRetries: 0,
       headers: { "x-other": "1", "x-kobe-run-id": RUN },
     });
+  });
+
+  it("sends the run's token as x-kobe-run-token (KOBE-118) and overrides one in the options", async () => {
+    const { provider, model, calls } = setup([{ text: "a" }, { text: "b" }], [state()], (runId) =>
+      runId === RUN ? "krt1.tok.mac" : undefined,
+    );
+    await collect(provider.stream(model, {}, { headers: { "X-Kobe-Run-Token": "forged" } }));
+    expect(calls[0]?.headers).toEqual({ "x-kobe-run-id": RUN, "x-kobe-run-token": "krt1.tok.mac" });
+    // Another run's token is never sent for this run, and none without a run.
+    const other = setup([{ text: "c" }], [state({ run_id: null })], () => "krt1.tok.mac");
+    await collect(other.provider.stream(other.model, {}));
+    expect(other.calls[0]?.headers).not.toHaveProperty("x-kobe-run-token");
+    const none = setup([{ text: "d" }], [state()], () => undefined);
+    await collect(none.provider.stream(none.model, {}));
+    expect(none.calls[0]?.headers).not.toHaveProperty("x-kobe-run-token");
   });
 
   it("reads the file per request: a rotated token and a cleared run id reach the next call", async () => {
