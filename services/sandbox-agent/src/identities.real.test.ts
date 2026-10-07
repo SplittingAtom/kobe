@@ -429,7 +429,9 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
     }
     const entries = await readdir(runtimeRoot);
     expect(entries.filter((name) => name.startsWith("k71-leftover"))).toEqual([]);
-  });
+    // Real helper: the Pi spawn, the idle reap and the reclaim of the deep tree take about 5 s on a
+    // loaded runner (KOBE-133: 5451 ms); the other real-helper tests that wait on a reclaim get 15 s+.
+  }, 30_000);
 
   it("retires an identity whose reclaim failed: it is never handed out again", async () => {
     const failing = path.join(scratch, "failing-reclaim");
