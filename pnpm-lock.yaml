@@ -290,6 +290,18 @@ importers:
 
   charts/kobe:
     devDependencies:
+      '@kobe/egress-proxy':
+        specifier: workspace:*
+        version: link:../../services/egress-proxy
+      '@kobe/mcp-proxy':
+        specifier: workspace:*
+        version: link:../../services/mcp-proxy
+      '@kobe/model-gateway':
+        specifier: workspace:*
+        version: link:../../services/model-gateway
+      '@kobe/server':
+        specifier: workspace:*
+        version: link:../../services/server
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
