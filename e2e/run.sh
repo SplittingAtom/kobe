@@ -324,6 +324,18 @@ contains "team namespace carries its team id" "^${E2E_TEAM_ID}$" \
   "$($KUBECTL get namespace "$TEAM_NS" -o jsonpath='{.metadata.labels.kobe\.splittingatom\.io/team-id}')"
 contains "team namespace enforces Pod Security 'baseline' (KOBE-71; the rest of 'restricted' by admission)" '^baseline$' \
   "$($KUBECTL get namespace "$TEAM_NS" -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}')"
+# KOBE-126: the server's team-namespace reconcile (KOBE-115) must converge the namespace just created
+# with failed=0 (no 403 from missing RBAC). dev/values.yaml runs it every 30 s; read the newest summary
+# line of any server pod (whichever replica holds the lock logs it), waiting for one that saw the team.
+reconcile_summary() {
+  local pod
+  for pod in $($KUBECTL -n "$NS" get pods -l app.kubernetes.io/component=server -o name); do
+    $KUBECTL -n "$NS" logs "$pod" -c server 2>/dev/null || true
+  done | grep '"msg":"team namespaces reconciled"' | grep -v '"converged":0,' | tail -n 1 || true
+}
+reconcile_line=$(wait_for 120 '"converged":[1-9]' reconcile_summary)
+contains "team-namespace reconcile converges the team namespace (KOBE-126)" '"converged":[1-9]' "$reconcile_line"
+contains "team-namespace reconcile reports failed=0 (KOBE-126)" '"failed":0,' "$reconcile_line"
 np_spec() { $KUBECTL -n "$TEAM_NS" get networkpolicy kobe-sandbox-isolation -o jsonpath="$1"; }
 contains "team NetworkPolicy selects every pod but Orbit eval pods (KOBE-93)" \
   '^\{"matchExpressions":\[\{"key":"kobe\.splittingatom\.io/orbit-eval","operator":"DoesNotExist"\}\]\}$' "$(np_spec '{.spec.podSelector}')"

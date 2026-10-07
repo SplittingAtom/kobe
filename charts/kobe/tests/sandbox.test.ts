@@ -403,6 +403,33 @@ describe("sandbox RBAC (least privilege; D11)", () => {
     expect(all).toContainEqual({ apiGroups: [""], resources: ["pods/log"], verbs: ["get"] });
   });
 
+  // KOBE-126: the team-namespace reconcile (server/src/sandbox/team-reconcile.ts) lists namespaces by
+  // label (orchestrator role), reads both NetworkPolicies, and server-side applies (PATCH, plus
+  // create when missing) every kind below. Exactly these verbs, per kind, in the manager role.
+  it("grants the team-namespace reconcile exactly its verbs per managed kind (KOBE-126)", () => {
+    const verbsFor = (role: string, group: string, resource: string): string[] =>
+      rules("ClusterRole", role)
+        .filter((r) => r.apiGroups.includes(group) && r.resources.includes(resource))
+        .flatMap((r) => r.verbs)
+        .sort();
+    const applyOnly = ["create", "patch"];
+    const expected: [string, string, string[]][] = [
+      ["networking.k8s.io", "networkpolicies", ["create", "get", "patch"]],
+      ["", "resourcequotas", applyOnly],
+      ["", "limitranges", applyOnly],
+      ["", "serviceaccounts", applyOnly],
+      ["", "secrets", applyOnly],
+      ["extensions.agents.x-k8s.io", "sandboxtemplates", applyOnly],
+      ["extensions.agents.x-k8s.io", "sandboxwarmpools", applyOnly],
+    ];
+    for (const [group, resource, verbs] of expected) {
+      expect(verbsFor(manager, group, resource), `${group}/${resource}`).toEqual(verbs);
+    }
+    // Cluster-scoped part: namespaces (list by label, get, apply) and the per-team RoleBinding.
+    expect(verbsFor(orchestrator, "", "namespaces")).toEqual(["create", "get", "list", "patch"]);
+    expect(verbsFor(orchestrator, "rbac.authorization.k8s.io", "rolebindings")).toEqual(applyOnly);
+  });
+
   it("lets the team-namespace reconcile read back its NetworkPolicies (KOBE-115)", () => {
     expect(rules("ClusterRole", manager)).toContainEqual({
       apiGroups: ["networking.k8s.io"],
