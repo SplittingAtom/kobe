@@ -270,6 +270,9 @@ modelGateway:
   cacheTtlSeconds: 5
   # Refuse model calls that carry no run-bound token (KOBE-118). Turn on once every sandbox agent
   # image supports run tokens; until then calls without one keep the advisory x-kobe-run-id.
+  # WARNING: when true, every call without a run token is refused with 401, including calls that
+  # belong to no run (Orbit eval sandboxes) and runs whose token fetch timed out. Keep it false
+  # until those are covered.
   requireRunToken: false
   networkPolicy:
     # Restrict the shim's own egress to DNS, Bifrost and Postgres.

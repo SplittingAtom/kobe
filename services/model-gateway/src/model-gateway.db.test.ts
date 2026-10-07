@@ -8,6 +8,12 @@ import {
   eq,
   and,
   isActiveRunLeasedTo,
+  isRunTokenActive,
+  recordRunToken,
+  runs,
+  sandboxRunLeases,
+  threads,
+  sql,
   loadGatewayPrincipal,
   modelCatalog,
   modelGatewayKeys,
@@ -21,8 +27,9 @@ import {
   withTeam,
   type KobeDatabase,
 } from "@kobe/db";
+import { deriveRunTokenKey, signRunToken } from "@kobe/protocol/node";
+import { RUN_TOKEN_HEADER } from "@kobe/protocol";
 import { signSessionToken, verifySessionToken } from "@kobe/session-token";
-import { noRunTokens } from "./testing/run-tokens.js";
 import pino from "pino";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createModelGateway } from "./gateway.js";
@@ -48,6 +55,8 @@ let bifrost: Server;
 let shim: Server;
 let base = "";
 const seenVks: string[] = [];
+const RUN_KEY = deriveRunTokenKey(new TextEncoder().encode(KEY));
+let requireRunToken = false;
 
 const token = (teamId = team) => {
   const now = Math.floor(Date.now() / 1000);
@@ -113,7 +122,13 @@ beforeAll(async () => {
   const db = app.db;
   shim = createModelGateway({
     verify: (t) => verifySessionToken(t, "kobe.model-gateway", KEY),
-    runTokens: noRunTokens(),
+    runTokens: {
+      key: RUN_KEY,
+      isActive: (s) => isRunTokenActive(db, s),
+      get require() {
+        return requireRunToken;
+      },
+    },
     principals: new PrincipalCache(
       {
         load: (t, u, s) => loadGatewayPrincipal(db, t, u, s),
@@ -184,5 +199,82 @@ describe("model gateway with its Postgres principal store", () => {
     );
     expect(await chat(t)).toBe(401);
     expect(seenVks).toHaveLength(3);
+  });
+});
+
+describe("run tokens against the real record (KOBE-118)", () => {
+  it("a real run end revokes the token: 200 while active, 403 after, 401 without a token when enforced", async () => {
+    const runId = await withTeam(app.db, team, async (tx) => {
+      // The previous test removed the member: put it back.
+      await tx.insert(teamMembers).values({ teamId: team, userId: user, role: "member" });
+      const [thread] = await tx
+        .insert(threads)
+        .values({ teamId: team, ownerUserId: user })
+        .returning({ id: threads.id });
+      const [run] = await tx
+        .insert(runs)
+        .values({
+          teamId: team,
+          threadId: thread?.id ?? "",
+          trigger: "user",
+          status: "running",
+          startedAt: new Date(),
+        })
+        .returning({ id: runs.id });
+      await tx.insert(sandboxRunLeases).values({
+        teamId: team,
+        runId: run?.id ?? "",
+        userId: user,
+        threadId: thread?.id ?? "",
+        sandboxId,
+      });
+      return run?.id ?? "";
+    });
+    const jti = randomUUID();
+    const iat = Math.floor(Date.now() / 1000);
+    await withTeam(app.db, team, (tx) =>
+      recordRunToken(tx, {
+        teamId: team,
+        jti,
+        runId,
+        sandboxId,
+        expiresAt: new Date((iat + 600) * 1000),
+      }),
+    );
+    const grant = signRunToken(RUN_KEY, {
+      iss: "kobe-server",
+      aud: "kobe.model-gateway",
+      run_id: runId,
+      team_id: team,
+      sandbox_id: sandboxId,
+      iat,
+      exp: iat + 600,
+      jti,
+    });
+    const call = (headers: Record<string, string>) =>
+      fetch(`${base}/v1/chat/completions`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token()}`,
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify({ model: "openai/gpt-x", messages: [] }),
+      }).then((r) => r.status);
+    expect(await call({ [RUN_TOKEN_HEADER]: grant.token })).toBe(200);
+    // The run ends the way every path ends it: its status leaves the active set.
+    await withTeam(app.db, team, (tx) =>
+      tx.execute(
+        sql`UPDATE runs SET status = 'cancelled', ended_at = now() WHERE team_id = ${team} AND id = ${runId}`,
+      ),
+    );
+    expect(await call({ [RUN_TOKEN_HEADER]: grant.token })).toBe(403);
+    requireRunToken = true;
+    try {
+      expect(await call({})).toBe(401);
+      expect(await call({ "x-kobe-run-id": runId })).toBe(401);
+    } finally {
+      requireRunToken = false;
+    }
   });
 });

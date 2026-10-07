@@ -23,8 +23,13 @@ thread's Pi from memory; gateway verifies and enforces. The published KOBE-117 c
   never stored. Several rows per run are possible (re-delivered `run.start` mints a new one).
 - **Mint:** in the delivery transaction that leases the run (`sandbox-wire/delivery.ts`), only when the
   agent's hello lists `run_token`; the frame sent carries `run_token`, the stored command row never does.
-- **Revoke:** `endRunInTx` (the single place runs end: completion, failure, Stop, budget stop,
-  lost-sandbox interrupt) sets `revoked_at` in the same transaction.
+- **Revoke:** migration 0070 adds trigger `runs_revoke_run_tokens`: any update that moves a run to a
+  status other than running/waiting_approval sets `revoked_at` on its tokens, whichever code path
+  (endRunInTx, applyTransition: Stop, budget stop, approval expiry, start failure; sweeps). The
+  gateway's record check also joins the run status and lease, as defence in depth.
+- **Revocation latency:** the gateway caches record answers at most 2 s (fixed, below the principal
+  cache TTL); no NOTIFY hint (chosen for being cheap and simple).
+- **TTL config:** `runTokenTtlSeconds` is validated with zod when the wire is built (integer 60..24 h).
 - **Gateway order (`run-attribution.ts`):** header present: verify (401 `invalid_run_token`, no fallback);
   team/sandbox must equal the session token's (403 `run_token_mismatch`); `x-kobe-run-id` that
   disagrees 403 `run_id_mismatch`; record check `isRunTokenActive` = not revoked, not expired, same
@@ -32,7 +37,7 @@ thread's Pi from memory; gateway verifies and enforces. The published KOBE-117 c
   `max(cacheTtl,1s)` like leases). Run id used for attribution is the token's. No header:
   `KOBE_MODEL_GATEWAY_REQUIRE_RUN_TOKEN=true` (chart `modelGateway.requireRunToken`, default false)
   gives 401 `run_token_required`, else the legacy advisory `x-kobe-run-id`.
-- **Per-run budget stop:** a stopped run is ended (`budget_stopped`), which revokes its tokens, so its
+- **Per-run budget stop:** a stopped run leaves the active statuses, which the trigger turns into revoked tokens, so its
   own tools get 403 with the token and, under enforcement, 401 without or with a forged run id; another
   run's token only ever attributes to that other run.
 - **Delivery to Pi (memory only):** no new fd (kobe-runas closes fds >= 5) and no file/env/argv. The
@@ -49,6 +54,8 @@ thread's Pi from memory; gateway verifies and enforces. The published KOBE-117 c
   `ctx.ui.input` until answered, which confirms the RPC mechanism works. Fixed: the extension waits at
   most 5 s (an unanswering driver cannot stall a prompt) and `images/sandbox/test-image.sh` now answers
   the request like the agent and asserts `x-kobe-run-token` reaches the gateway client.
+- Follow-up: assert in the image check that real Pi's session files never hold the dialog answer
+  (the check runs `--no-session`, so it needs a session-enabled variant).
 - Enforcement also refuses calls with no run at all (e.g. orbit eval sandboxes, whose tokens carry no
   run): keep it off until those are covered or exempted.
 - Rollout: server, gateway, agent image, then `requireRunToken: true`.
@@ -58,7 +65,7 @@ thread's Pi from memory; gateway verifies and enforces. The published KOBE-117 c
 - ac-1 (ended or other run refused): `services/model-gateway/src/gateway.test.ts` "run-bound tokens":
   revoked token 403, other sandbox/team/run id 403, forged/expired/malformed 401;
   `packages/db/src/run-tokens.db.test.ts` (revoked, expired, run ended without revocation, other
-  team/sandbox/run); `services/server/src/run-token.db.test.ts` (revoked at run end).
+  team/sandbox/run); `services/server/src/run-token.db.test.ts` (table-driven over every ended status; TTL bounds); `model-gateway.db.test.ts` "run tokens against the real record" (real run end, real check).
 - ac-2 (per-run stop cannot be evaded): gateway test "ac-2" with enforcement on: no token, forged run
   id, own revoked token, another run's token naming the stopped run all fail.
 - Delivery: `agent.models.test.ts` "run token delivery" (answered from memory, not forwarded, not in

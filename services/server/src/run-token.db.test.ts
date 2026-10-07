@@ -5,6 +5,7 @@ import { deriveRunTokenKey, verifyRunToken } from "@kobe/protocol/node";
 import { EventStreamFixture, must, type Person } from "./testing/event-stream-fixture.js";
 import { FakeSandbox, FakeSandboxAuth, isFake, sandboxListener } from "./testing/fake-sandbox.js";
 import { withAppendTx } from "./event-stream/append.js";
+import { createSandboxWire } from "./sandbox-wire/index.js";
 import { endRunInTx } from "./sandbox-wire/run-state.js";
 import { RUN_TOKEN_TTL_SECONDS } from "./sandbox-wire/constants.js";
 
@@ -99,5 +100,44 @@ describe("run tokens at run.start and run end", () => {
     const rows = (await records(w.team, w.runId)).rows;
     expect(rows).toHaveLength(1);
     expect(rows[0]?.revoked_at).not.toBeNull();
+  });
+
+  // Every way a run leaves the active statuses (user Stop, budget stop, approval expiry, start
+  // failure, interrupt, lost sandbox, completion) is a status update on the runs row: one trigger.
+  it.each(["completed", "failed", "interrupted", "cancelled", "budget_stopped"])(
+    "revokes the run's tokens when its status becomes %s, by any path",
+    async (status) => {
+      const w = await start([CAPABILITY_RUN_TOKEN]);
+      expect((await records(w.team, w.runId)).rows[0]?.revoked_at).toBeNull();
+      await fx.admin.query(
+        `UPDATE runs SET status = $3, ended_at = now() WHERE team_id = $1 AND id = $2`,
+        [w.team, w.runId, status],
+      );
+      expect((await records(w.team, w.runId)).rows[0]?.revoked_at).not.toBeNull();
+    },
+  );
+
+  it("keeps the tokens while the run only moves between active statuses", async () => {
+    const w = await start([CAPABILITY_RUN_TOKEN]);
+    await fx.admin.query(
+      `UPDATE runs SET status = 'waiting_approval' WHERE team_id = $1 AND id = $2`,
+      [w.team, w.runId],
+    );
+    expect((await records(w.team, w.runId)).rows[0]?.revoked_at).toBeNull();
+  });
+});
+
+describe("run token TTL configuration", () => {
+  it("fails fast on a TTL outside the contract's bounds", () => {
+    for (const bad of [0, -5, 59, 24 * 3600 + 1, 1.5]) {
+      expect(() =>
+        createSandboxWire({
+          db: fx.db,
+          databaseUrl: "postgres://unused",
+          runContext: {} as never,
+          tuning: { runTokenTtlSeconds: bad },
+        }),
+      ).toThrow(/runTokenTtlSeconds/);
+    }
   });
 });

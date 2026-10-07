@@ -63,8 +63,13 @@ listener.start();
 /** Run lease answers, positive and negative, cached like principals (single-flight). */
 const leases = new TtlCache<boolean>({ ttlMs: Math.max(config.cacheTtlMs, 1_000) });
 
-/** Run token record answers (KOBE-118), cached like leases; a revocation lands within the TTL. */
-const tokenRecords = new TtlCache<boolean>({ ttlMs: Math.max(config.cacheTtlMs, 1_000) });
+/**
+ * Run token record answers (KOBE-118). A short fixed cache (at most 2 s, whatever the principal
+ * cache TTL is) bounds how long an "active" answer outlives revocation; no NOTIFY hint is used.
+ */
+const tokenRecords = new TtlCache<boolean>({
+  ttlMs: Math.min(Math.max(config.cacheTtlMs, 1_000), 2_000),
+});
 
 /** The run_usage ledger (KOBE-43): one row per forwarded model call, written in batches. */
 const usage = new DbUsageSink({
