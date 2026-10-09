@@ -18,7 +18,6 @@ export { createS3ObjectStore, loadS3Settings, type S3Settings } from "./s3.js";
 export {
   COLLECT_DEFAULTS,
   createWorkspaceSync,
-  type SharedFile,
   type WorkspaceSync,
   type WorkspaceSyncOptions,
 } from "./service.js";
