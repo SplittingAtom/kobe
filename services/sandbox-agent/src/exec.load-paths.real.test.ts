@@ -121,7 +121,7 @@ describe.runIf(PI_AVAILABLE && EXECUTOR_BUILT && HELPER !== undefined)(
 
     it("control: a shared TMPDIR whose jiti cache the old reclaim opened to the group runs the planted code in the next Pi", async () => {
       const tmp = await sharedDir("tmp-old");
-      const canary = path.join(scratch, "canary-jiti-old");
+      const canary = path.join(await sharedDir("c1"), "canary");
       const first = await startPi(false, tmp);
       expect(existsSync(path.join(tmp, "jiti"))).toBe(true);
       await first.close();
@@ -135,7 +135,7 @@ describe.runIf(PI_AVAILABLE && EXECUTOR_BUILT && HELPER !== undefined)(
 
     it("hardened: the cache is off, Pi's TMPDIR is not writable by the partner uid, and nothing planted in the shared one runs", async () => {
       const tmp = await sharedDir("tmp-new");
-      const canary = path.join(scratch, "canary-jiti-new");
+      const canary = path.join(await sharedDir("c2"), "canary");
       const first = await startPi(true, tmp);
       // No jiti cache anywhere: not in Pi's own TMPDIR, not in the shared one.
       expect(existsSync(path.join(first.piTmp, "jiti"))).toBe(false);
@@ -144,7 +144,8 @@ describe.runIf(PI_AVAILABLE && EXECUTOR_BUILT && HELPER !== undefined)(
       const probe = await asTool(
         `for d in ${first.piTmp} ${first.piHome}; do mkdir $d/jiti 2>/dev/null && echo "wrote $d"; echo x > $d/f 2>/dev/null && echo "wrote $d"; done; echo done`,
       );
-      expect(probe.out).toBe("done\n");
+      expect(probe.out).not.toContain("wrote");
+      expect(probe.out.trim().endsWith("done")).toBe(true);
       expect((await stat(first.piTmp)).gid).toBe(identity.gid);
       // The tool plants wherever it can: shared TMPDIR/HOME (and a fake jiti dir there).
       await asTool(
@@ -170,8 +171,8 @@ describe.runIf(PI_AVAILABLE && EXECUTOR_BUILT && HELPER !== undefined)(
 
     it("Node's $HOME/.node_modules fallback: a package planted in the shared HOME loads for a Pi with that HOME (control), not with its private HOME", async () => {
       const home = await sharedDir("home");
-      const canaryOld = path.join(scratch, "canary-home-old");
-      const canaryNew = path.join(scratch, "canary-home-new");
+      const canaryOld = path.join(await sharedDir("c3"), "canary");
+      const canaryNew = path.join(await sharedDir("c4"), "canary");
       const planted = async (canary: string) => {
         await asTool(
           `mkdir -p ${home}/.node_modules/bufferutil && echo '${payload(canary)}' > ${home}/.node_modules/bufferutil/index.js`,

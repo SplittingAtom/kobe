@@ -35,18 +35,18 @@ group 1000 writable, which every partner uid holds: a tool plants an entry, the 
 
 ## Audit: what Pi reads or loads, and whether a tool uid can write it (flag on, pair)
 
-| Path / mechanism                                         | Writable by partner? | Handled by                                   |
-| -------------------------------------------------------- | -------------------- | -------------------------------------------- |
-| `$TMPDIR/jiti` (extension transpile cache)               | was yes (via reclaim)| private TMPDIR, cache off, reclaim deletes   |
-| `$TMPDIR/node-compile-cache` (V8 code cache)             | was yes (via reclaim)| private TMPDIR, `NODE_DISABLE_COMPILE_CACHE` |
-| `$HOME/.node_modules` (CJS fallback)                     | was yes              | private HOME                                 |
-| `$HOME/.pi`, XDG dirs, npm/npx caches, `.cache`          | was yes              | private HOME (`PI_CODING_AGENT_DIR` is explicit; nothing runs npm) |
-| `PI_CODING_AGENT_DIR` (`agent/`, `mcp.json`, `settings.json`, `models.json`) | no (KOBE-166/169) | unchanged                       |
-| Extension files (`-e`), Pi's `node_modules` (`/opt/pi`)  | no (root-owned)      | unchanged                                    |
-| `NODE_PATH`                                              | not set (allow-listed env) | `pi-launch.test.ts` pins the env       |
-| Project `.pi/`, `AGENTS.md`, skills, prompt templates, themes in `/workspace` | yes | not loaded: `--no-approve --no-context-files --no-skills ...`; skills are explicit root/agent dirs |
-| `/workspace/.kobe/sessions` (session JSONL)              | yes (group)          | data, not code (KOBE-71 residual 4)          |
-| `PATH` entries (`/usr/local/bin`, `/usr/bin`, `/bin`)    | no                   | unchanged                                    |
+| Path / mechanism                                                              | Writable by partner?       | Handled by                                                                                         |
+| ----------------------------------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------------------------------- |
+| `$TMPDIR/jiti` (extension transpile cache)                                    | was yes (via reclaim)      | private TMPDIR, cache off, reclaim deletes                                                         |
+| `$TMPDIR/node-compile-cache` (V8 code cache)                                  | was yes (via reclaim)      | private TMPDIR, `NODE_DISABLE_COMPILE_CACHE`                                                       |
+| `$HOME/.node_modules` (CJS fallback)                                          | was yes                    | private HOME                                                                                       |
+| `$HOME/.pi`, XDG dirs, npm/npx caches, `.cache`                               | was yes                    | private HOME (`PI_CODING_AGENT_DIR` is explicit; nothing runs npm)                                 |
+| `PI_CODING_AGENT_DIR` (`agent/`, `mcp.json`, `settings.json`, `models.json`)  | no (KOBE-166/169)          | unchanged                                                                                          |
+| Extension files (`-e`), Pi's `node_modules` (`/opt/pi`)                       | no (root-owned)            | unchanged                                                                                          |
+| `NODE_PATH`                                                                   | not set (allow-listed env) | `pi-launch.test.ts` pins the env                                                                   |
+| Project `.pi/`, `AGENTS.md`, skills, prompt templates, themes in `/workspace` | yes                        | not loaded: `--no-approve --no-context-files --no-skills ...`; skills are explicit root/agent dirs |
+| `/workspace/.kobe/sessions` (session JSONL)                                   | yes (group)                | data, not code (KOBE-71 residual 4)                                                                |
+| `PATH` entries (`/usr/local/bin`, `/usr/bin`, `/bin`)                         | no                         | unchanged                                                                                          |
 
 ## Tests (real helper, Linux CI step; `scripts/test-identities.sh`)
 

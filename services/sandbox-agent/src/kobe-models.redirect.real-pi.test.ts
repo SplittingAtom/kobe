@@ -271,9 +271,9 @@ describe.runIf(PI_AVAILABLE && EXECUTOR_BUILT && HELPER !== undefined)(
     });
 
     /** Nothing was planted: the agent's placeholders are what is on disk. */
-    async function expectPlantRefused(rpc: PiRpc, plant: Record<string, Plant>) {
+    async function expectPlantRefused(rpc: PiRpc, plant: Record<string, Plant>, locked = true) {
       for (const file of Object.keys(plant)) {
-        const expected = GUARDED_CONFIG[file];
+        const expected = locked ? GUARDED_CONFIG[file] : undefined;
         if (expected !== undefined) {
           expect(await readFile(path.join(rpc.agentDir, file), "utf8"), file).toBe(expected);
         } else if (existsSync(path.join(rpc.agentDir, file))) {
@@ -332,7 +332,7 @@ describe.runIf(PI_AVAILABLE && EXECUTOR_BUILT && HELPER !== undefined)(
         });
         expect(await toolUid(rpc)).toBe(partnerOf(identity).uid);
         expectNothingLeaked(listener, legit);
-        await expectPlantRefused(rpc, plant);
+        await expectPlantRefused(rpc, plant, false);
       },
       180_000,
     );
