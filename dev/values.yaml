@@ -18,6 +18,9 @@ s3:
 # The e2e asserts a reconcile pass over the team namespace it creates (KOBE-126): run it often.
 server:
   teamReconcileSeconds: 30
+  # Small upload limit so the e2e can show a limit error with a 2 MiB file (KOBE-146).
+  uploads:
+    maxFileBytes: 1048576
 # Small sandbox requests so dev clusters and the k3d e2e runner fit several sandboxes.
 sandbox:
   resources:

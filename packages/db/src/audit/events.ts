@@ -841,6 +841,15 @@ export const AUDIT_EVENTS = {
     reason: z.enum(["file_too_large", "message_too_large", "quota_exceeded"]),
     bytes: count,
   }),
+  /**
+   * The virus scan (ClamAV, KOBE-146) rejected an upload, or was unreachable while scanning is on
+   * (`reason`); the object was deleted. Counts only: no name, content or signature.
+   */
+  "workspace.upload_scan_refused": event("team", {
+    userId: id,
+    reason: z.enum(["scan_rejected", "scan_unavailable"]),
+    bytes: count,
+  }),
   /** Uploads never attached to a thread within the retention window were deleted (system). */
   "workspace.uploads_expired": event("team", { files: count, bytes: count }),
   /** The user downloaded a file of their own workspace in the file browser (KOBE-148; no names). */

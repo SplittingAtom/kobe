@@ -393,7 +393,10 @@ ingress:
     # cert-manager ClusterIssuer; leave empty to manage the TLS Secret yourself.
     clusterIssuer: ""
 
-# Optional upload scanning (spec D26), off by default.
+# Optional upload scanning (spec D26), off by default. When on, the server streams every upload to
+# clamd and refuses it unless clamd says clean: a hit is 422 scan_rejected, clamd down or still
+# loading signatures is 503 scan_unavailable (fail closed). ClamAV (GPL-2.0) runs as its own image,
+# non-root with a read-only root filesystem; it needs egress to database.clamav.net for signatures.
 clamav:
   enabled: false
   image:
