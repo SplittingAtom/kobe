@@ -827,6 +827,22 @@ export const AUDIT_EVENTS = {
   }),
   /** A workspace file was copied to a durable shared object (KOBE-54 `share_file`). */
   "workspace.file_shared": event("team", { userId: id, sharedId: id, bytes: count }),
+  // ── files: user uploads (KOBE-143, 53c of KOBE-53); counts and ids only, never names or content ──
+  /** A file was stored (S3 first, then the `files` row). `threadId` absent: not in a thread yet. */
+  "workspace.file_uploaded": event("team", {
+    userId: id,
+    fileId: id,
+    threadId: id.optional(),
+    bytes: count,
+  }),
+  /** An upload was refused (`bytes` seen before the refusal; 0 when refused up front). */
+  "workspace.upload_refused": event("team", {
+    userId: id,
+    reason: z.enum(["file_too_large", "message_too_large", "quota_exceeded"]),
+    bytes: count,
+  }),
+  /** Uploads never attached to a thread within the retention window were deleted (system). */
+  "workspace.uploads_expired": event("team", { files: count, bytes: count }),
   /** Unreferenced workspace blobs and old tombstones were purged (system; counts only, D18). */
   "workspace.purged": event("team", { userId: id, blobs: count, bytes: count, tombstones: count }),
 

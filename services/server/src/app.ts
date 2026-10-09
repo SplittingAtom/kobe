@@ -11,6 +11,7 @@ import { agentRoutes } from "./routes/agents.js";
 import { teamEvalSettingsRoutes } from "./routes/team-eval-settings.js";
 import { installBudgetRoutes, teamBudgetsRoutes } from "./routes/budgets.js";
 import { artifactRoutes } from "./routes/artifacts.js";
+import { uploadRoutes } from "./routes/uploads.js";
 import { approvalRoutes } from "./routes/approvals.js";
 import { egressRequestRoutes } from "./routes/egress-requests.js";
 import { installAuditRoutes } from "./routes/install-audit.js";
@@ -142,6 +143,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/threads", threadRetentionRoutes(deps));
   api.route("/threads", threadRoutes(deps));
   api.route("/artifacts", artifactRoutes(deps));
+  api.route("/uploads", uploadRoutes(deps));
   api.route("/agents", agentRoutes(deps, options.evals ? { runner: options.evals } : {}));
   api.route("/skills", skillRoutes(deps));
   api.route("/approvals", approvalRoutes(deps));

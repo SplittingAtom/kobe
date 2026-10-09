@@ -8,6 +8,7 @@ import {
   S3Client,
   S3ServiceException,
 } from "@aws-sdk/client-s3";
+import { Upload } from "@aws-sdk/lib-storage";
 import { z } from "zod";
 import type { ObjectStore } from "./object-store.js";
 
@@ -88,6 +89,9 @@ function isNotFound(err: unknown): boolean {
   );
 }
 
+const PART_BYTES = 8 * 1024 * 1024;
+const QUEUE_SIZE = 2;
+
 export function createS3ObjectStore(settings: S3Settings, client?: S3Client): ObjectStore {
   const s3 =
     client ??
@@ -123,6 +127,24 @@ export function createS3ObjectStore(settings: S3Settings, client?: S3Client): Ob
         body.off("error", onError);
       }
       if (failure !== undefined) throw failure;
+    },
+    async putStream(key, body) {
+      // Multipart: parts are buffered (PART_BYTES x QUEUE_SIZE in flight), never the whole body.
+      // A failing body aborts the upload and the parts already sent.
+      const upload = new Upload({
+        client: s3,
+        params: { Bucket, Key: key, Body: body },
+        partSize: PART_BYTES,
+        queueSize: QUEUE_SIZE,
+        leavePartsOnError: false,
+      });
+      const onError = () => void upload.abort();
+      body.once("error", onError);
+      try {
+        await upload.done();
+      } finally {
+        body.off("error", onError);
+      }
     },
     async get(key) {
       try {
