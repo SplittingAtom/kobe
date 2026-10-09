@@ -90,6 +90,8 @@ export interface PiRpcOptions {
   readonly modelsExtension: string;
   readonly policyExtension: string;
   readonly gatewayUrl: string;
+  /** Runs on the fresh agent dir before Pi starts (KOBE-169: the agent's guarded files). */
+  readonly prepareAgentDir?: (agentDir: string) => Promise<void>;
 }
 
 export interface ModelChoice {
@@ -124,6 +126,7 @@ export class PiRpc {
     const dir = await mkdtemp(path.join(tmpdir(), "kobe-pi-rpc-"));
     await mkdir(path.join(dir, "agent"), { mode: 0o700 });
     await mkdir(path.join(dir, "workspace"));
+    await options.prepareAgentDir?.(path.join(dir, "agent"));
     const modelFile = path.join(dir, "model.json");
     await writeFile(
       modelFile,

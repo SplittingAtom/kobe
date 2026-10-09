@@ -1,6 +1,7 @@
 import { constants as FS } from "node:fs";
 import { chmod, lstat, mkdir, open, readdir, realpath, rm } from "node:fs/promises";
 import path from "node:path";
+import { GUARDED_CONFIG } from "./agent-config.js";
 import { EGRESS_TOKEN_FILE_NAME, isEgressTemp } from "../egress/egress-wiring.js";
 import { SYSTEM_PROMPT_FILE_NAME } from "../pi/system-prompt-file.js";
 import type { PiIdentities } from "../pi/identities.js";
@@ -78,9 +79,10 @@ export async function unexpectedEntries(runtimeDir: string): Promise<string[]> {
   if (agent === undefined) return [...found, `<${AGENT_SUBDIR} missing>`];
   for (const name of agent) {
     const kind = await kindOf(path.join(runtimeDir, AGENT_SUBDIR, name));
+    // The guarded files must be there as files; their content is `tamperedConfig`'s business.
     const expected: Kind | undefined = PI_LOCK_DIRS.has(name)
       ? "dir"
-      : PI_OWN_FILES.has(name)
+      : PI_OWN_FILES.has(name) || name in GUARDED_CONFIG
         ? "file"
         : undefined;
     if (expected === undefined) found.push(`${AGENT_SUBDIR}/${name}`);
