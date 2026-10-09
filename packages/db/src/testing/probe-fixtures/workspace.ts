@@ -4,7 +4,10 @@ import {
   artifactVersions,
   artifacts,
   files,
+  memoryDocVersions,
+  memoryDocs,
   runs,
+  teamMemorySettings,
   teamStorageQuotas,
   threads,
   users,
@@ -33,6 +36,28 @@ async function insertThreadAndRun(tx: KobeTx, teamId: string) {
     .returning({ id: runs.id });
   if (!run) throw new Error("probe: run insert returned nothing");
   return { userId, threadId: thread.id, runId: run.id };
+}
+
+/** A personal memory doc with its first version; versions need a doc, docs need an owner. */
+async function insertMemoryDoc(tx: KobeTx, teamId: string) {
+  const userId = randomUUID();
+  await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
+  const [doc] = await tx
+    .insert(memoryDocs)
+    .values({ teamId, scope: "user", ownerUserId: userId, path: "MEMORY.md" })
+    .returning({ id: memoryDocs.id });
+  if (!doc) throw new Error("probe: memory doc insert returned nothing");
+  await tx.insert(memoryDocVersions).values({
+    teamId,
+    docId: doc.id,
+    version: 1,
+    blobRef: `teams/${teamId}/memory/${doc.id}/1`,
+    sizeBytes: 5,
+    sha256: "0".repeat(64),
+    actorKind: "user",
+    actorUserId: userId,
+  });
+  return { docId: doc.id, userId };
 }
 
 async function insertArtifact(tx: KobeTx, teamId: string) {
@@ -80,5 +105,24 @@ export const workspaceFixtures: Record<(typeof workspace.team)[number], ProbeFix
   team_storage_quotas: async (tx, teamId) => {
     const { userId } = await insertThreadAndRun(tx, teamId);
     await tx.insert(teamStorageQuotas).values({ teamId, maxBytes: 1024, updatedBy: userId });
+  },
+  memory_docs: async (tx, teamId) => {
+    await insertMemoryDoc(tx, teamId);
+  },
+  memory_doc_versions: async (tx, teamId) => {
+    const { docId } = await insertMemoryDoc(tx, teamId);
+    await tx.insert(memoryDocVersions).values({
+      teamId,
+      docId,
+      version: 2,
+      blobRef: `teams/${teamId}/memory/${docId}/2`,
+      sizeBytes: 5,
+      sha256: "0".repeat(64),
+      actorKind: "agent",
+    });
+  },
+  team_memory_settings: async (tx, teamId) => {
+    const { userId } = await insertThreadAndRun(tx, teamId);
+    await tx.insert(teamMemorySettings).values({ teamId, updatedBy: userId });
   },
 };
