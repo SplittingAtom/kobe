@@ -65,7 +65,7 @@ run_tests() {
     --inh-caps=-all -- "$(command -v node)" ../../node_modules/vitest/vitest.mjs run --no-file-parallelism "$@"
 }
 status=0
-run_tests src/identities.real.test.ts src/identities.partner.real.test.ts src/exec.real.test.ts "$@" || status=$?
+run_tests src/identities.real.test.ts src/identities.partner.real.test.ts src/exec.real.test.ts src/exec.load-paths.real.test.ts "$@" || status=$?
 # Real Pi with its tools in the partner-uid executor; the raw-Pi cases of that file run in `pnpm test`.
 run_tests src/kobe-models.redirect.real-pi.test.ts -t "KOBE-167" "$@" || status=$?
 exit "$status"

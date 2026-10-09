@@ -65,12 +65,44 @@ function imageDetector(pi: PiToolFactories): (head: Buffer) => Promise<string | 
   };
 }
 
+/** Pi's own home (private) and the tools' (shared), when they differ (KOBE-196). */
+export interface Homes {
+  readonly piHome: string;
+  readonly toolHome: string;
+}
+
+const underHome = (value: unknown, home: string): value is string =>
+  typeof value === "string" && (value === home || value.startsWith(`${home}/`));
+
+/**
+ * Pi resolves `~` in its file tools' paths against its own HOME, which is private to it when the
+ * tools run elsewhere: a path under it is the tools' home to the executor (the user's files live
+ * there). Only `path` and `cwd` fields are rewritten; Pi's private home holds nothing to read.
+ */
+export function mapHome(transport: ExecTransport, { piHome, toolHome }: Homes): ExecTransport {
+  const map = (value: string) => `${toolHome}${value.slice(piHome.length)}`;
+  return {
+    request(body, hooks) {
+      const mapped: Record<string, unknown> = { ...body };
+      for (const key of ["path", "cwd"]) {
+        const value = mapped[key];
+        if (underHome(value, piHome)) mapped[key] = map(value);
+      }
+      return transport.request(mapped as typeof body, hooks);
+    },
+  };
+}
+
 export function registerExecTools(
   api: ExtensionApiLike,
-  transport: ExecTransport,
+  rawTransport: ExecTransport,
   pi: PiToolFactories,
   cwd: string = process.cwd(),
+  homes?: Homes,
 ): void {
+  const mapped = homes !== undefined && homes.piHome !== homes.toolHome;
+  const transport = mapped ? mapHome(rawTransport, homes) : rawTransport;
+  const toolHome = mapped ? homes.toolHome : undefined;
   const bash = bashOperations(transport);
   const register = (tool: ToolLike) => api.registerTool(tool as never);
   register(pi.createBashToolDefinition(cwd, { operations: bash }));
@@ -81,18 +113,24 @@ export function registerExecTools(
   );
   register(pi.createWriteToolDefinition(cwd, { operations: writeOperations(transport) }));
   register(pi.createEditToolDefinition(cwd, { operations: editOperations(transport) }));
-  register(pi.createLsToolDefinition(cwd, { operations: lsOperations(transport) }));
+  register({
+    ...pi.createLsToolDefinition(cwd, { operations: lsOperations(transport) }),
+    defaultActive: false,
+  });
+  // Pi leaves grep, find and ls inactive by default; registering them must not switch them on.
   const grep = pi.createGrepToolDefinition(cwd);
   register({
     ...grep,
+    defaultActive: false,
     execute: (_id, params, signal, _onUpdate, ctx) =>
-      executeGrep(transport, pi, params as never, ctx?.cwd || cwd, signal),
+      executeGrep(transport, pi, params as never, ctx?.cwd || cwd, signal, toolHome),
   });
   const find = pi.createFindToolDefinition(cwd);
   register({
     ...find,
+    defaultActive: false,
     execute: (_id, params, signal, _onUpdate, ctx) =>
-      executeFind(transport, pi, params as never, ctx?.cwd || cwd, signal),
+      executeFind(transport, pi, params as never, ctx?.cwd || cwd, signal, toolHome),
   });
   // The RPC `bash` command (the server never sends it; the allow-list has no such command) and
   // user `!` commands would run in Pi: route them to the executor as well.

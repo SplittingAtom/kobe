@@ -218,6 +218,14 @@ describe.runIf(HELPER !== undefined && EXECUTOR_BUILT)(
       for (const name of Object.keys(attempts))
         expect(out, name).toMatch(new RegExp(`^${name}=[1-9]`, "m"));
       expect(await alive(piProc.pid as number)).toBe(true);
+      // Control (same layout): Pi's own uid reads its token file and its environment.
+      const control = await asUid([
+        String(t.identity.uid),
+        "/bin/sh",
+        "-c",
+        `cat ${t.runtime}/model.json >/dev/null && ls ${t.agentDir} >/dev/null && echo allowed`,
+      ]);
+      expect(control.stdout.trim()).toBe("allowed");
       expect(await readFile(path.join(t.agentDir, "models.json"), "utf8")).toBe(
         '{"providers":{}}\n',
       );

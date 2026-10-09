@@ -1,6 +1,7 @@
 import * as piCodingAgent from "@earendil-works/pi-coding-agent";
 import type { ExecTransport } from "./client.js";
 import { connect } from "./connect.js";
+import { TOOL_HOME_ENV } from "./protocol.js";
 import { registerExecTools, type ExtensionApiLike, type PiToolFactories } from "./tools.js";
 
 /**
@@ -21,8 +22,20 @@ import { registerExecTools, type ExtensionApiLike, type PiToolFactories } from "
  * only way out. The channel is opened once per Pi process (module scope).
  */
 let transport: ExecTransport | undefined;
+let homes: { piHome: string; toolHome: string } | undefined;
 
 export default function kobeExec(pi: ExtensionApiLike): void {
   transport ??= connect(process.env, (message) => process.stderr.write(`${message}\n`));
-  registerExecTools(pi, transport, piCodingAgent as unknown as PiToolFactories);
+  // Read once and removed, like the fd variable: tools must not see it.
+  const toolHome = process.env[TOOL_HOME_ENV];
+  Reflect.deleteProperty(process.env, TOOL_HOME_ENV);
+  const piHome = process.env.HOME;
+  if (toolHome !== undefined && piHome !== undefined) homes ??= { piHome, toolHome };
+  registerExecTools(
+    pi,
+    transport,
+    piCodingAgent as unknown as PiToolFactories,
+    process.cwd(),
+    homes,
+  );
 }

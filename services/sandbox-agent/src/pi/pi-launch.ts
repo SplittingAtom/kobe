@@ -150,6 +150,10 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
   env.PI_OFFLINE = "1";
   // Pi is a Node process the tools it runs can signal: SIGUSR1 must not open an inspector in it.
   env.NODE_OPTIONS = "--disable-sigusr1";
+  // Pi must not run code another uid could have left for it (KOBE-196): no jiti transpile cache
+  // (`$TMPDIR/jiti`, trusted by file name and a hash of public source) and no V8 compile cache.
+  env.JITI_FS_CACHE = "false";
+  env.NODE_DISABLE_COMPILE_CACHE = "1";
   env.KOBE_POLICY_FD = String(POLICY_CHANNEL_FD);
   if (input.toolsExtension !== undefined) env.KOBE_TOOLS_FD = String(TOOLS_CHANNEL_FD);
   if (input.execExtension !== undefined) env[EXEC_FD_ENV] = String(EXEC_CHANNEL_FD);

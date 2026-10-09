@@ -40,10 +40,10 @@ const DEFAULT_FIND_LIMIT = 1000;
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 
 /** Pi's `resolveToCwd`: unicode spaces, leading `@`, `~`, `file://`, then against the cwd. */
-export function resolveToCwd(input: string, cwd: string): string {
+export function resolveToCwd(input: string, cwd: string, homeDir?: string): string {
   let value = input.replace(UNICODE_SPACES, " ");
   if (value.startsWith("@")) value = value.slice(1);
-  const home = process.env.HOME ?? homedir();
+  const home = homeDir ?? process.env.HOME ?? homedir();
   if (value === "~") value = home;
   else if (value.startsWith("~/")) value = path.join(home, value.slice(2));
   if (/^file:\/\//.test(value)) value = fileURLToPath(value);
@@ -91,9 +91,10 @@ export async function executeGrep(
   input: GrepInput,
   cwd: string,
   signal: AbortSignal | undefined,
+  homeDir?: string,
 ): Promise<ToolResultLike> {
   if (isAborted(signal)) throw new Error("Operation aborted");
-  const searchPath = resolveToCwd(input.path || ".", cwd);
+  const searchPath = resolveToCwd(input.path || ".", cwd, homeDir);
   const stat = await transport.request({ op: OP_STAT, path: searchPath });
   if (!stat.ok) {
     if (stat.error.code === "unavailable") throw toError(stat);
@@ -277,9 +278,10 @@ export async function executeFind(
   input: FindInput,
   cwd: string,
   signal: AbortSignal | undefined,
+  homeDir?: string,
 ): Promise<ToolResultLike> {
   if (isAborted(signal)) throw new Error("Operation aborted");
-  const searchPath = resolveToCwd(input.path || ".", cwd);
+  const searchPath = resolveToCwd(input.path || ".", cwd, homeDir);
   const effectiveLimit = input.limit ?? DEFAULT_FIND_LIMIT;
   // Inside a git repository fd keeps its git-aware default; elsewhere --no-require-git.
   let insideGitRepo = false;
