@@ -25,9 +25,15 @@ export async function storageLimit(
   return own === null || own === undefined ? defaultBytes : Number(own);
 }
 
+/**
+ * Bytes the team holds. An upload attached to a message (`run_id` set, KOBE-144) is also synced
+ * into the workspace (`workspace_sync.live_bytes`), so it counts there only: unattached `files`
+ * rows plus all live workspace bytes. The thread copy of an attached file stays in S3 until the
+ * thread is purged but is not counted again.
+ */
 export async function storageUsed(tx: KobeTx, teamId: string): Promise<number> {
   const res = await tx.execute<{ used: string }>(sql`
-    SELECT (SELECT COALESCE(SUM(size_bytes), 0) FROM files WHERE team_id = ${teamId})
+    SELECT (SELECT COALESCE(SUM(size_bytes), 0) FROM files WHERE team_id = ${teamId} AND run_id IS NULL)
          + (SELECT COALESCE(SUM(live_bytes), 0) FROM workspace_sync WHERE team_id = ${teamId})
            AS used`);
   return Number(res.rows[0]?.used ?? 0);
