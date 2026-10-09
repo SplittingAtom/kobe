@@ -464,6 +464,7 @@ export class ThreadManager {
       modelsExtension: this.#options.models?.extension,
       policyExtension: this.#options.policyExtension,
       toolsExtension: this.#options.toolsExtension,
+      toolsFiles: this.#options.shareFiles,
       ...(this.#options.extensions === undefined ? {} : { extensions: this.#options.extensions }),
       parentEnv: this.#options.parentEnv,
       config: frame?.config,

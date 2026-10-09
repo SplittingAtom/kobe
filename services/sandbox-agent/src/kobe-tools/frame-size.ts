@@ -16,7 +16,7 @@ export function frameSizeProblem(
   tool: string,
   input: Record<string, unknown>,
 ): string | undefined {
-  for (const type of ["policy.check", "artifact.put"]) {
+  for (const type of ["policy.check", "artifact.put", "file.share"]) {
     const frame = {
       v: 1,
       type,
