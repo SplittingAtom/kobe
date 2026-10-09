@@ -128,6 +128,17 @@ $KUBECTL get runtimeclass gvisor >/dev/null 2>&1 || { echo "RuntimeClass gvisor 
 $KUBECTL get crd sandboxes.agents.x-k8s.io >/dev/null 2>&1 \
   || { echo "agent-sandbox CRDs missing: run scripts/install-agent-sandbox.sh" >&2; exit 2; }
 
+# k3s installs its bundled Traefik and CoreDNS asynchronously through helm-install Jobs that can retry for minutes
+# (KOBE-134: Service traefik did not exist for ~4 min, so probes got "bad address"). Wait on the conditions, not time.
+INFRA_TIMEOUT=${INFRA_TIMEOUT:-420s}
+for d in coredns traefik; do
+  $KUBECTL -n kube-system wait --for=create "deployment/$d" --timeout="$INFRA_TIMEOUT" >/dev/null \
+    && $KUBECTL -n kube-system rollout status "deployment/$d" --timeout="$INFRA_TIMEOUT" >/dev/null \
+    || { echo "kube-system/$d not available within $INFRA_TIMEOUT" >&2; exit 2; }
+done
+$KUBECTL -n kube-system wait --for=create service/traefik --timeout="$INFRA_TIMEOUT" >/dev/null \
+  || { echo "kube-system/traefik Service missing" >&2; exit 2; }
+
 echo "==> clean state"
 $HELM uninstall kobe -n "$NS" --wait >/dev/null 2>&1 || true
 $KUBECTL delete namespace "$NS" kobe-deps "$SANDBOX_NS" "$TEAM_NS" "$TEAM2_NS" "$UPSTREAM_NS" "$MCP_NS" "$LLM_NS" --ignore-not-found --wait=false >/dev/null
