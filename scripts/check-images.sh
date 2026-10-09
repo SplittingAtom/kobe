@@ -29,14 +29,7 @@ for entry in ${IMAGES}; do
     exit 1
   fi
 
-  configured_user="$(docker image inspect --format '{{.Config.User}}' "${image}")"
-  runtime_uid="$(docker run --rm --entrypoint id "${image}" -u)"
-  if [[ -z "${configured_user}" || "${configured_user%%:*}" == "0" || "${configured_user%%:*}" == "root" || "${runtime_uid}" == "0" ]]; then
-    echo "FAIL ${image}: USER='${configured_user}' uid=${runtime_uid}"
-    failed=1
-  else
-    echo "ok   ${image}: USER=${configured_user} uid=${runtime_uid}"
-  fi
+  scripts/assert-image-nonroot.sh "${image}" || failed=1
 done
 
 exit "${failed}"
