@@ -24,6 +24,8 @@ export interface RequestOptions {
   readonly json?: unknown;
   /** A raw body (e.g. an agent markdown file) with its content type. */
   readonly raw?: { readonly body: string | Uint8Array; readonly contentType: string } | undefined;
+  /** A multipart body (file upload); the browser sets the content type with its boundary. */
+  readonly form?: FormData | undefined;
   /** The active team this request acts on (`X-Kobe-Team`, the server's stale-tab guard). */
   readonly teamId?: string | undefined;
   /** `If-Match` (an ETag such as `"3"`): agent edits and publishes (KOBE-45/46). */
@@ -111,10 +113,12 @@ export async function apiRequest<T>(
   options: RequestOptions = {},
 ): Promise<ApiResult<T>> {
   assertApiPath(path);
-  const { method = "GET", json, raw, teamId, ifMatch, idempotencyKey, fetchFn = fetch } = options;
+  const { method = "GET", json, raw, form, teamId, ifMatch, idempotencyKey, fetchFn = fetch } = options;
   const headers = new Headers({ accept: "application/json" });
-  let body: string | Uint8Array<ArrayBuffer> | null = null;
-  if (json !== undefined) {
+  let body: string | Uint8Array<ArrayBuffer> | FormData | null = null;
+  if (form !== undefined) {
+    body = form;
+  } else if (json !== undefined) {
     headers.set("content-type", "application/json");
     body = JSON.stringify(json);
   } else if (raw !== undefined) {
