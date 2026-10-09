@@ -30,6 +30,10 @@
  * Capabilities: `hello.capabilities` may list `artifacts` ({@link CAPABILITY_ARTIFACTS}, artifacts.ts):
  *   the agent then sends `artifact.put` and the server answers `artifact.result`. The server refuses
  *   `artifact.put` from a connection that did not announce it.
+ *   It may also list `files` (`CAPABILITY_FILES`, files.ts, KOBE-147): the agent then registers `share_file`
+ *   and, after pushing the file through workspace sync, sends `file.share` (a small frame: no own size
+ *   entry in the table above); the server answers `file.share_result` and refuses `file.share` from a
+ *   connection that did not announce the capability.
  *   `memory` ({@link CAPABILITY_MEMORY}, memory.ts): `memory.put` / `memory.read` / `memory.result` and
  *   `run.start.memory`; same refusal rule.
  *
