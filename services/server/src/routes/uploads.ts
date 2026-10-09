@@ -5,6 +5,7 @@ import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz
 import type { ServerDeps } from "../deps.js";
 import { invalidRequest } from "../teams/http.js";
 import { openUpload } from "../uploads/parse.js";
+import { createClamdScanner } from "../uploads/clamd.js";
 import { DEFAULT_UPLOAD_SETTINGS } from "../uploads/settings.js";
 import { storeUpload } from "../uploads/store.js";
 
@@ -37,8 +38,14 @@ export function uploadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     if (!opened.ok) return invalidRequest(c, opened.reason);
     const length = Number(c.req.header("content-length"));
     const { upload } = opened;
+    const settings = deps.uploads ?? DEFAULT_UPLOAD_SETTINGS;
     const result = await storeUpload(
-      { db: deps.database.db, blobs, settings: deps.uploads ?? DEFAULT_UPLOAD_SETTINGS },
+      {
+        db: deps.database.db,
+        blobs,
+        settings,
+        ...(settings.clamav ? { scan: createClamdScanner(settings.clamav, blobs.objects) } : {}),
+      },
       { teamId: c.get("team").id, userId: c.get("user").id },
       {
         threadId: upload.threadId,

@@ -1,5 +1,6 @@
 import path from "node:path";
 import { KOBE_TOOLS_FD, type PiThreadConfig } from "@kobe/protocol";
+import { EXEC_FD, EXEC_FD_ENV } from "../kobe-exec/protocol.js";
 
 /**
  * How a thread's `pi --mode rpc` process is started.
@@ -30,6 +31,8 @@ import { KOBE_TOOLS_FD, type PiThreadConfig } from "@kobe/protocol";
 export const POLICY_CHANNEL_FD = 3;
 /** The kobe-tools channel (KOBE-128, artifacts.ts): fd 4, only when the extension is loaded. */
 export const TOOLS_CHANNEL_FD = KOBE_TOOLS_FD;
+/** The kobe-exec channel (KOBE-167, kobe-exec/protocol.ts): fd 5, only when the extension is loaded. */
+export const EXEC_CHANNEL_FD = EXEC_FD;
 
 export const PI_LOCKDOWN_ARGS = [
   "--no-extensions",
@@ -49,6 +52,8 @@ export interface PiLaunch {
   readonly key: string;
   /** Pi gets the kobe-tools channel as its fd 4 (the process is spawned with a fifth pipe). */
   readonly toolsChannel: boolean;
+  /** Pi gets the kobe-exec channel as its fd 5 (the process is spawned with a sixth pipe). */
+  readonly execChannel: boolean;
   /**
    * The agent's system prompt (KOBE-123), when the run has a non-empty one. Never an argument: the
    * thread writes it to a file in Pi's runtime directory at spawn and adds
@@ -73,6 +78,12 @@ export interface PiLaunchInput {
    * Absent: no fd 4, no tools (the agent then does not announce the `artifacts` capability).
    */
   readonly toolsExtension?: string | undefined;
+  /**
+   * kobe-exec (KOBE-167): a root-owned, read-only file that replaces Pi's seven built-in tools with
+   * ones that run in the thread's executor (its partner uid), loaded right before kobe-policy and
+   * given the channel on fd 5. Absent: Pi runs its tools itself, as before.
+   */
+  readonly execExtension?: string | undefined;
   /**
    * The agent announced the `files` capability (KOBE-149): the extension then registers
    * `share_file`. Meaningful only with {@link toolsExtension}.
@@ -104,18 +115,20 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
   const models =
     input.modelsExtension === undefined ? undefined : path.resolve(input.modelsExtension);
   const tools = input.toolsExtension === undefined ? undefined : path.resolve(input.toolsExtension);
+  const exec = input.execExtension === undefined ? undefined : path.resolve(input.execExtension);
   for (const extension of input.extensions ?? []) {
     // kobe-policy only once, last: a second copy would find the channel taken and block everything.
     const resolved = extension.startsWith("builtin:") ? undefined : path.resolve(extension);
     if (
       resolved !== undefined &&
-      (resolved === policy || resolved === models || resolved === tools)
+      (resolved === policy || resolved === models || resolved === tools || resolved === exec)
     )
       continue;
     args.push("--extension", extension);
   }
   if (input.modelsExtension !== undefined) args.push("--extension", input.modelsExtension);
   if (input.toolsExtension !== undefined) args.push("--extension", input.toolsExtension);
+  if (input.execExtension !== undefined) args.push("--extension", input.execExtension);
   args.push("--extension", input.policyExtension);
   for (const dir of input.skillDirs ?? []) args.push("--skill", path.resolve(dir));
   const config = input.config;
@@ -137,8 +150,13 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
   env.PI_OFFLINE = "1";
   // Pi is a Node process the tools it runs can signal: SIGUSR1 must not open an inspector in it.
   env.NODE_OPTIONS = "--disable-sigusr1";
+  // Pi must not run code another uid could have left for it (KOBE-196): no jiti transpile cache
+  // (`$TMPDIR/jiti`, trusted by file name and a hash of public source) and no V8 compile cache.
+  env.JITI_FS_CACHE = "false";
+  env.NODE_DISABLE_COMPILE_CACHE = "1";
   env.KOBE_POLICY_FD = String(POLICY_CHANNEL_FD);
   if (input.toolsExtension !== undefined) env.KOBE_TOOLS_FD = String(TOOLS_CHANNEL_FD);
+  if (input.execExtension !== undefined) env[EXEC_FD_ENV] = String(EXEC_CHANNEL_FD);
   if (input.toolsExtension !== undefined && input.toolsFiles === true) env.KOBE_TOOLS_FILES = "1";
 
   // The model is deliberately not part of the key (see `modelsExtension`).
@@ -157,6 +175,7 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
     env,
     key,
     toolsChannel: input.toolsExtension !== undefined,
+    execChannel: input.execExtension !== undefined,
     ...(systemPrompt === undefined || systemPrompt === "" ? {} : { systemPrompt }),
   };
 }

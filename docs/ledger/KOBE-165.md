@@ -44,8 +44,9 @@ prompt"). So: needs a `set_model` (or any other catalog lookup of the kobe model
   gateway behind a tap (records headers, strips the run token the local gateway does not know).
   No agent, so no tripwire. Runs in the normal `pnpm test` (needs Pi from `npm ci --prefix
 images/sandbox/pi`, as the other real-Pi suites); no setuid helper and no Linux needed.
-- Red tests are `it.fails` (3 cases) with the secure assertion; when KOBE-167 lands they fail with
-  "Expect test to fail": change them to `it`.
+- Red tests were `it.fails` (3 cases) with the secure assertion. KOBE-167 landed: they are plain `it` now,
+  run with the tool in the paired executor under the real helper (Linux CI step), plus a control case that
+  shows the raw scenario still leaks.
 
 ## Evidence (ac-1, ac-2)
 

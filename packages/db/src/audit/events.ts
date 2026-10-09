@@ -869,6 +869,15 @@ export const AUDIT_EVENTS = {
     reason: z.enum(["file_too_large", "message_too_large", "quota_exceeded"]),
     bytes: count,
   }),
+  /**
+   * The virus scan (ClamAV, KOBE-146) rejected an upload, or was unreachable while scanning is on
+   * (`reason`); the object was deleted. Counts only: no name, content or signature.
+   */
+  "workspace.upload_scan_refused": event("team", {
+    userId: id,
+    reason: z.enum(["scan_rejected", "scan_unavailable"]),
+    bytes: count,
+  }),
   /** Uploads never attached to a thread within the retention window were deleted (system). */
   "workspace.uploads_expired": event("team", { files: count, bytes: count }),
   /** The user downloaded a file of their own workspace in the file browser (KOBE-148; no names). */
@@ -1041,6 +1050,14 @@ export const AUDIT_EVENTS = {
     name: z.string().max(64),
     tools: z.array(z.string().max(128)).max(500),
   }),
+
+  // ── connector grants (KOBE-108): a user's own API key; ids and names only, never the key or its hint ──
+  /** A user added their API key for a connector their team enabled. */
+  "mcp.grant.added": event("team", { connectorId: id, name: z.string().max(64) }),
+  /** A user replaced their API key for a connector. */
+  "mcp.grant.replaced": event("team", { connectorId: id, name: z.string().max(64) }),
+  /** A user removed their API key for a connector. */
+  "mcp.grant.removed": event("team", { connectorId: id, name: z.string().max(64) }),
 } as const;
 
 export type AuditAction = keyof typeof AUDIT_EVENTS;

@@ -22,7 +22,8 @@ export type ProbeResult =
   | { readonly ok: false; readonly failure: ProbeFailure };
 
 export interface ConnectorProbe {
-  probe(url: string): Promise<ProbeResult>;
+  /** `apiKey`: the user's grant, for a connector that needs one (sent to the proxy, never stored). */
+  probe(url: string, apiKey?: string): Promise<ProbeResult>;
 }
 
 const FAILURES = [
@@ -56,7 +57,7 @@ export interface ProxyProbeOptions {
 export function createProxyProbe(options: ProxyProbeOptions): ConnectorProbe {
   const doFetch = options.fetch ?? fetch;
   return {
-    async probe(url) {
+    async probe(url, apiKey) {
       try {
         const res = await doFetch(`${options.baseUrl}/internal/v1/probe`, {
           method: "POST",
@@ -64,7 +65,7 @@ export function createProxyProbe(options: ProxyProbeOptions): ConnectorProbe {
             authorization: `Bearer ${options.internalKey}`,
             "content-type": "application/json",
           },
-          body: JSON.stringify({ url }),
+          body: JSON.stringify(apiKey === undefined ? { url } : { url, api_key: apiKey }),
           signal: AbortSignal.timeout(options.timeoutMs),
           redirect: "error",
         });

@@ -29,6 +29,15 @@ describe("createProxyProbe", () => {
     );
   });
 
+  it("sends a user's API key to the proxy in the body only when given (KOBE-108)", async () => {
+    const { probe, seen } = make(() => Response.json({ ok: true, tools: [] }));
+    await probe.probe("https://mcp.example/x", "sk-live-0123456789");
+    expect(seen[0]?.init.body).toBe(
+      JSON.stringify({ url: "https://mcp.example/x", api_key: "sk-live-0123456789" }),
+    );
+    expect(seen[0]?.url).not.toContain("sk-live");
+  });
+
   it("passes the proxy's failure code through", async () => {
     const { probe } = make(() => Response.json({ ok: false, failure: "auth_required" }));
     expect(await probe.probe("https://x")).toEqual({ ok: false, failure: "auth_required" });

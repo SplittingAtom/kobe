@@ -445,6 +445,17 @@ and get no network path to the object store. Objects live under
 Give the credentials read, write and delete on the bucket (collection deletes unreferenced
 content). Without `s3.bucket`, workspace sync stays off and the server logs a warning.
 
+### Sandbox tool executor
+
+By default Pi's built-in tools (`bash`, `read`, `write`, `edit`, `ls`, `grep`, `find`) run inside
+Pi's own process tree and uid. With `--set sandbox.toolExecutor.enabled=true` each thread's tools
+run in an executor process under a second uid, the partner of the thread's Pi uid (KOBE-167;
+design in `docs/design/paired-tool-uid.md`), so a prompt-injected tool cannot read Pi's memory, the
+model-gateway tokens or write Pi's config directory. The executor needs the partner groups the
+chart already gives the sandbox agent; an agent that is asked for it without them refuses to
+start. It applies to sandboxes started after the change (running ones keep the old setting until
+they restart). One extra Node process (tens of MB) runs per thread that uses a tool.
+
 ### Email (SMTP)
 
 SMTP is required: Kobe is invite-only and sends invitations and password-reset links by email.

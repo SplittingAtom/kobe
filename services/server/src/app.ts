@@ -25,6 +25,7 @@ import { installModelsRoutes } from "./routes/install-models.js";
 import { installLegalHoldRoutes } from "./routes/install-legal-hold.js";
 import { installPolicyRoutes } from "./routes/install-policy.js";
 import { installRetentionRoutes } from "./routes/install-retention.js";
+import { connectorGrantRoutes } from "./routes/connector-grants.js";
 import { installConnectorsRoutes } from "./routes/install-connectors.js";
 import { installSkillBlocklistRoutes } from "./routes/install-skill-blocklist.js";
 import { installRolesRoutes } from "./routes/install-roles.js";
@@ -153,6 +154,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/artifacts", artifactRoutes(deps));
   api.route("/uploads", uploadRoutes(deps));
   api.route("/files", fileRoutes(deps));
+  api.route("/connector-grants", connectorGrantRoutes(deps));
   api.route("/workspace", workspaceFileRoutes(deps, options.workspaceFiles));
   api.route("/agents", agentRoutes(deps, options.evals ? { runner: options.evals } : {}));
   api.route("/skills", skillRoutes(deps));
