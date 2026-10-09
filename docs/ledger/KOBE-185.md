@@ -29,3 +29,10 @@ No migration. Tests first: `workspace-sync-team-quota.db.test.ts`, `charts/kobe/
 
 - ac-1: `workspace-sync-team-quota.db.test.ts` (over-quota push, shrink allowed, race x5: exactly
   one of upload/push wins); `charts/kobe/tests/uploads.test.ts`.
+
+## KOBE-190 (follow-up, branch `kobe-190-attach-quota-once`)
+
+- `storageUsed` counts `files` rows only while unattached (`run_id IS NULL`); an attached upload is
+  synced into the workspace, so its `workspace_sync.live_bytes` copy is what counts. Trade-off: if the
+  user deletes the workspace copy the bytes leave the quota while the thread-tree object stays in S3
+  until the thread is purged. No migration. Test: `runs-attachments.db.test.ts` "counts an attached upload once".
