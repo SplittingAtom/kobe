@@ -12,6 +12,12 @@ import {
 import { connectorNameSchema } from "../tools.js";
 import { runTokenGrantSchema } from "../run-token.js";
 import { SANDBOX_ERROR_CODES, SANDBOX_WIRE_VERSION } from "./connection.js";
+import {
+  memoryPutFrameSchema,
+  memoryReadFrameSchema,
+  memoryResultFrameSchema,
+} from "./memory-frames.js";
+import { runMemoryContextSchema } from "../memory.js";
 import { artifactCallShape, artifactFailFields, artifactOkFields } from "../artifacts.js";
 import { BUILTIN_SKILL_NAMES, SKILL_BUNDLES_MAX, skillBundleRefSchema } from "./skill-bundles.js";
 import {
@@ -185,6 +191,8 @@ export const sandboxToServerFrameSchema = z.union([
   policyCheckFrameSchema,
   commandResultFrameSchema,
   artifactPutFrameSchema,
+  memoryPutFrameSchema,
+  memoryReadFrameSchema,
   piExitedFrameSchema,
   pingFrame,
   pongFrame,
@@ -308,6 +316,8 @@ export const runStartFrameSchema = frame("run.start", {
    * `CAPABILITY_RUN_TOKEN`; absent = legacy (session token + advisory `x-kobe-run-id`).
    */
   run_token: runTokenGrantSchema.optional(),
+  /** Memory indexes and enabled scopes (KOBE-153, memory.ts); only for agents with capability `memory`. */
+  memory: runMemoryContextSchema.optional(),
 });
 
 /** Pi `steer`: delivered after the current turn's tool calls, before the next model call. */
@@ -433,6 +443,7 @@ export const serverToSandboxFrameSchema = z.union([
   policyPendingFrameSchema,
   policyResultFrameSchema,
   artifactResultFrameSchema,
+  memoryResultFrameSchema,
   sessionRestoreFrameSchema,
   ackFrameSchema,
   resendFrameSchema,
