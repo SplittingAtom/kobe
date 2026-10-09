@@ -4,6 +4,7 @@ import { sql, withTeam, type KobeDb } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { threadKey, type BlobStore } from "./blobs.js";
 import { logger } from "../logger.js";
+import { personalMemoryForExport } from "../memory/export.js";
 import { entryMarkdown, threadHeader, type ThreadHeading } from "./export-markdown.js";
 import { TRASH_RETENTION_DAYS } from "./periods.js";
 import { artifactExtension, readArtifactBytes } from "../artifacts/serve.js";
@@ -15,6 +16,7 @@ import { artifactExtension, readArtifactBytes } from "../artifacts/serve.js";
  *  - `transcripts/<date>-<title>-<id>.md`: the active branch as Markdown;
  *  - `artifacts/<artifact id>/v<n>.<ext>`: every version of the thread's artifacts (KOBE-129);
  *  - `files/<file id>/<name>`: the thread's uploaded and shared files (KOBE-143), streamed;
+ *  - `memory/<path>`: the user's personal memory files, current versions (KOBE-155);
  *  - `threads.json` (index) and `README.md`.
  * Only threads the user owns in this team (Trash included while restorable) — never threads
  * shared with them, never another user's or team's data: every query names the team and the
@@ -283,6 +285,7 @@ This archive holds the conversations you own in one Kobe team.
   header line, then every entry, including other branches, in the order they were written).
 - \`transcripts/\`: each conversation's active branch as Markdown.
 - \`artifacts/<artifact id>/v<n>.<ext>\`: every version of the artifacts the assistant made.
+- \`memory/<path>\`: your personal memory files (current versions).
 - \`files/<file id>/<name>\`: the files you uploaded to the conversation or the assistant shared.
 - \`threads.json\`: an index (id, title, dates, file names).
 
@@ -427,6 +430,12 @@ export async function* exportZip(
     }
     if (threads.length < THREAD_PAGE) break;
     after = threads.at(-1)?.id ?? after;
+  }
+  if (blobs) {
+    for await (const m of personalMemoryForExport(db, viewer, blobs)) {
+      text(`memory/${m.path}`, m.content);
+      yield* drain();
+    }
   }
   text("threads.json", `${JSON.stringify({ threads: index }, null, 2)}\n`);
   zip.end();
