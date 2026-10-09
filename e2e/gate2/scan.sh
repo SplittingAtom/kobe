@@ -81,12 +81,17 @@ for m in $(awk "{print \$5}" /proc/self/mountinfo); do
 done
 find $roots -xdev -type f -size -2048k -not -path "/var/lib/apt/*" -not -path "/var/cache/*" -print0 2>/dev/null | tar --null -T - -cf - 2>/dev/null'
 
-# Kobe's own tokens travel as `Bearer <jwt>` and as the egress proxy's `http://kobe:<jwt>@...`:
-# those shapes are judged by jwt_class, not here.
-generic_unexpected() { # pattern name; "file:match" lines on stdin → those not Kobe's own token shapes
+# Allowed shapes (each reviewed, see docs/gates/gate-2.md):
+# - `Bearer <jwt>` and `scheme://user:<jwt>@`: Kobe's own session tokens; every JWT in the sandbox
+#   is judged by jwt_class, so these shapes add nothing here. The egress token reaches Pi's tools
+#   as HTTPS_PROXY=http://<thread id>:<token>@<proxy> (KOBE-39; "egress token visible in env
+#   output" is accepted LOW in docs/ledger/KOBE-39.md).
+# - /opt/kobe/egress-env.sh itself: the root-owned script that builds that URL from variables
+#   (`http://${user}:${token}@${host}`), a template without a value.
+generic_unexpected() { # pattern name; "file:match" lines on stdin → those not allowed above
   case "$1" in
     bearer-credential) grep -a -v -E 'Bearer eyJ' || true ;;
-    basic-url-credential) grep -a -v -E '://kobe:eyJ' || true ;;
+    basic-url-credential) grep -a -v -E '^[^:]*fs/opt/kobe/egress-env\.sh:|://[^:/]+:eyJ' || true ;;
     *) cat ;;
   esac
 }
@@ -98,11 +103,13 @@ jwt_class() { # token → "own <aud>" for this sandbox's user and team, else "fo
   json=$(printf '%s%s' "$payload" "$pad" | b64d 2>/dev/null || true)
   if [[ "$json" == *'"iss":"kobe-server"'* && "$json" == *"\"user_id\":\"$T2\""* && "$json" == *"\"team_id\":\"$TEAM\""* ]]; then
     echo "own $(printf '%s' "$json" | sed -n 's/.*"aud":"\([^"]*\)".*/\1/p')"
-  elif [[ "$json" == *'"kubernetes.io"'* && "$json" == *"kobe"* ]]; then
-    # The pod's projected bootstrap token: a short-lived ServiceAccount token for Kobe's audience.
-    echo "own bootstrap-serviceaccount-token"
+  elif [[ "$json" == *'"aud":["kobe.sandbox-bootstrap"]'* && "$json" == *"system:serviceaccount:$TNS:"* ]]; then
+    # The pod's projected bootstrap token (manifests.ts: audience kobe.sandbox-bootstrap, which the
+    # Kubernetes API rejects): the agent trades it for session tokens. Cluster-issued, sub = this
+    # team namespace's sandbox ServiceAccount.
+    echo "own bootstrap-serviceaccount-token(aud kobe.sandbox-bootstrap)"
   else
-    echo "foreign iss=$(printf '%s' "$json" | sed -n 's/.*"iss":"\([^"]*\)".*/\1/p') aud=$(printf '%s' "$json" | sed -n 's/.*"aud":\(\[[^]]*\]\|"[^"]*"\).*/\1/p')"
+    echo "foreign claims=$(printf '%s' "$json" | tr -cd '[:print:]' | sed -E 's/"(jti|nonce)":"[^"]*"//g' | cut -c1-400)"
   fi
 }
 
@@ -140,6 +147,7 @@ run_secret_scan() {
   $KUBECTL -n "$TNS" exec "$pod" -c agent -- sh -c "$FS_DUMP" >"$dir/files/fs.tar" 2>/dev/null || true
   mkdir -p "$dir/files/fs"
   tar -xf "$dir/files/fs.tar" -C "$dir/files/fs" 2>/dev/null || true
+  rm -f "$dir/files/fs.tar"
   contains "the sandbox's writable and mounted files were copied out" '^[1-9][0-9]*$' "$(find "$dir/files/fs" -type f | wc -l | tr -d ' ')"
   scan_as_pi "$dir" "$pod"
 
@@ -165,17 +173,17 @@ run_secret_scan() {
   for entry in "${GENERIC_PATTERNS[@]}"; do
     name=${entry%%=*}
     pat=${entry#*=}
-    matches=$(grep -raoE -- "$pat" "$dir/files" 2>/dev/null | generic_unexpected "$name" | cut -d: -f1 | sed "s#^$dir/files/##" | sort -u | head -3 | tr '\n' ' ' || true)
+    matches=$(grep -raoE -- "$pat" "$dir/files" 2>/dev/null | generic_unexpected "$name" | sed -E "s#^$dir/files/##; s#(://[^:/]+:)[^@]*@#\\1***@#" | sort -u | cut -c1-200 | head -3 | tr '\n' ' ' || true)
     if [[ -n "$matches" ]]; then generic=1; fail "ac-5: a $name-shaped value is in the sandbox: $matches"; fi
   done
   ((generic == 0)) && ok "no generic API key, private key or credential-bearing URL shape is in the sandbox"
   tokens_ok=1
   auds=""
-  while read -r tok; do
+  while IFS=: read -r tokfile tok; do
     [[ -z "$tok" ]] && continue
     class=$(jwt_class "$tok")
-    if [[ "$class" == own* ]]; then auds+="${class#own } "; else tokens_ok=0; echo "     unexpected token: $class"; fi
-  done < <(grep -rhaoE -- "$JWT_RE" "$dir/files" 2>/dev/null | sort -u)
+    if [[ "$class" == own* ]]; then auds+="${class#own } "; else tokens_ok=0; echo "     unexpected token in $tokfile: $class"; fi
+  done < <(grep -raoE -- "$JWT_RE" "$dir/files" 2>/dev/null | sed "s#^$dir/files/##" | sort -u -t: -k2,2)
   if ((tokens_ok)); then ok "every JWT in the sandbox is Kobe's own session token for this user and team (audiences: ${auds:-none found})"
   else fail "ac-5: a JWT in the sandbox is not Kobe's session token for this sandbox's user and team"; fi
 
