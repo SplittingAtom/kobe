@@ -1,9 +1,11 @@
 # KOBE-140: flaky db job
 
 ## Status
+
 PR open; 10-run proof below.
 
 ## Findings
+
 - Each run has its own `kobe_test_<random>` database (global-setup); files run serially. No cross-file race.
 - Retention: when the lock connection fails, `tick()` releases it as broken; pg closes the socket
   without waiting, so the backend and its session advisory lock outlive the tick briefly. The next
