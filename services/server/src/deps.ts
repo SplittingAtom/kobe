@@ -40,6 +40,7 @@ import {
   type ServerRunOrchestrator,
 } from "./runs/index.js";
 import type { RunAgentResolver } from "./runs/seams.js";
+import { createOffboarding, type Offboarding } from "./offboarding/index.js";
 import { UserLifecycle } from "./users/lifecycle.js";
 import { approvalVerifierForMcp } from "./mcp/approvals.js";
 import { createDbMcpCatalog } from "./mcp/catalog.js";
@@ -155,6 +156,11 @@ export interface ServerDeps {
   readonly authAttempts: AuthAttemptAudit;
   /** Downstream steps of deactivation/reactivation (sandboxes, grants, schedules, audit). */
   readonly lifecycle: UserLifecycle;
+  /**
+   * Offboarding (KOBE-28, D12): destroys a departed member's sandbox, retains the volume 30 days,
+   * exports it for team admins and deletes it afterwards. The sandbox provider is set later.
+   */
+  readonly offboarding: Offboarding;
   /**
    * Sandbox connection registry and routing (KOBE-24): `router` sends commands to any (user, team)
    * sandbox from any replica; `attach` serves the WebSocket on the sandbox listener only.
@@ -316,6 +322,16 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     name: "sandbox-wire",
     run: (userId) => sandboxWire.revalidateUser(userId),
   });
+  const offboarding = createOffboarding({
+    db: database.db,
+    blobs: options.blobs,
+    log: logger.child({ component: "offboarding" }),
+  });
+  // Deactivation destroys the user's sandboxes in every team now; volumes stay 30 days (D12).
+  lifecycle.on("deactivated", {
+    name: "sandbox-offboarding",
+    run: (userId) => offboarding.offboardUser(userId, "deactivated"),
+  });
 
   return {
     database,
@@ -335,6 +351,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     authAttempts,
     auditAnchor: new AuditAnchorLogger(database.db, options.authSecret),
     lifecycle,
+    offboarding,
     sandboxWire,
     runs,
     runAgents,
