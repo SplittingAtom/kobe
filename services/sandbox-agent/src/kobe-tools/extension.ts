@@ -2,8 +2,8 @@ import { fstatSync } from "node:fs";
 import net from "node:net";
 import type { Duplex } from "node:stream";
 import { ToolsClient, type ToolsClientOptions } from "./client.js";
-import { TOOLS_FD_ENV } from "./protocol.js";
-import { artifactTools, type ToolDefinitionLike, type ToolsTransport } from "./tools.js";
+import { TOOLS_FD_ENV, TOOLS_FILES_ENV } from "./protocol.js";
+import { artifactTools, shareFileTool, type ToolDefinitionLike, type ToolsTransport } from "./tools.js";
 
 /** The slice of Pi's `ExtensionAPI` kobe-tools uses. */
 export interface ExtensionApiLike {
@@ -41,12 +41,25 @@ export function connectTools(deps: KobeToolsDeps): ToolsTransport | undefined {
   }
 }
 
+/**
+ * Whether the agent enabled `share_file` (it announced the `files` capability to the server).
+ * Read once and removed, like the fd variable. Anything but `1` is off, so an old agent, which
+ * never sets it, gets no `share_file` from a newer image.
+ */
+export function filesEnabled(env: Record<string, string | undefined>): boolean {
+  const raw = env[TOOLS_FILES_ENV];
+  Reflect.deleteProperty(env, TOOLS_FILES_ENV);
+  return raw === "1";
+}
+
 export function registerKobeTools(
   pi: ExtensionApiLike,
   transport: ToolsTransport | undefined,
+  options: { readonly files?: boolean } = {},
 ): void {
   if (transport === undefined) return;
   for (const tool of artifactTools(transport)) pi.registerTool(tool);
+  if (options.files === true) pi.registerTool(shareFileTool(transport));
 }
 
 /** fd 4 must be the socket the agent passed. */
