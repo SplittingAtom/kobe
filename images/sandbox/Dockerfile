@@ -103,7 +103,9 @@ ENV KOBE_BUILTIN_SKILLS_DIR=/opt/kobe/skills
 # /workspace group (the pod's fsGroup). `kobe-agent` (1001) is a group only the agent has (pod
 # supplementalGroups): it alone may execute kobe-runas. `kobe-pi-<n>` (2000+n, own group each) are
 # the Pi identities: each Pi process and its tools run as one of them (the pod gives the agent
-# their groups too, so it can hand a Pi its private runtime directory).
+# their groups too, so it can hand a Pi its private runtime directory). `kobe-tool-<n>` (3000+n,
+# own group each) are their partner (tool) uids (KOBE-166, docs/design/paired-tool-uid.md): n pairs
+# with `kobe-pi-<n>`, shares the workspace group 1000 only, and is in no group of the Pi's.
 # /workspace is the persistent volume, /opt/kobe/skills holds the built-in gallery skills (KOBE-88,
 # root-owned, read-only), /opt/kobe/pi-extensions the root-owned Pi extensions, /run/kobe-agent the
 # agent-only directory the pod mounts the bootstrap token under, /run/kobe-pi the mount point of
@@ -118,6 +120,12 @@ RUN groupadd --gid 1000 kobe \
       && useradd --uid $((2000 + n)) --gid $((2000 + n)) --no-create-home --home-dir /home/kobe \
            --shell /bin/bash "kobe-pi-$n" || exit 1; \
     done \
+ && for n in $(seq 0 63); do \
+      groupadd --gid $((3000 + n)) "kobe-tool-$n" \
+      && useradd --uid $((3000 + n)) --gid $((3000 + n)) --no-create-home --home-dir /home/kobe \
+           --shell /bin/bash "kobe-tool-$n" || exit 1; \
+    done \
+ && git config --system --add safe.directory '*' \
  && mkdir -p /workspace /opt/kobe/skills /run/kobe-agent /run/kobe-pi \
  && chown 1000:1001 /run/kobe-agent && chmod 0700 /run/kobe-agent \
  && chmod 0555 /opt/kobe/entrypoint.sh \

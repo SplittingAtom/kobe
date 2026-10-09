@@ -142,8 +142,13 @@ describe("sandbox pod spec (D12, D13; secrets never enter sandboxes)", () => {
       runAsUser: 1000,
       runAsGroup: 1000,
       fsGroup: 1000,
-      // kobe-agent, then the 16 Pi identities' groups (2000-2015).
-      supplementalGroups: [1001, ...Array.from({ length: 16 }, (_, i) => 2000 + i)],
+      // kobe-agent, the 16 Pi identities' groups (2000-2015), then their partner (tool) groups
+      // (3000-3015, KOBE-166): Pi identity n pairs with n + 1000.
+      supplementalGroups: [
+        1001,
+        ...Array.from({ length: 16 }, (_, i) => 2000 + i),
+        ...Array.from({ length: 16 }, (_, i) => 3000 + i),
+      ],
       seccompProfile: { type: "RuntimeDefault" },
     });
     expect(must(spec.containers[0]).securityContext).toEqual({
