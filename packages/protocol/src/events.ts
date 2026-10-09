@@ -10,6 +10,7 @@ import {
   usageSchema,
   uuidSchema,
 } from "./common.js";
+import { skippedActionsSchema } from "./notifications.js";
 import { approvalResolutionCauseSchema, policyReasonSchema } from "./policy.js";
 
 /** Kobe Event Stream event types (spec §6.2). Every event is persisted to `run_events` with a monotonic `seq` before fan-out. */
@@ -249,9 +250,12 @@ export const EVENT_PAYLOAD_SCHEMAS = {
   "run.completed": z.strictObject({
     leaf_entry_id: idSchema.nullable(),
     usage: usageSchema.optional(),
+    /** Scheduled runs (D32): tool calls denied instead of asked. Names only, never inputs (KOBE-176). */
+    skipped_actions: skippedActionsSchema.optional(),
   }),
   "run.failed": z.strictObject({
     error: errorInfoSchema,
+    skipped_actions: skippedActionsSchema.optional(),
   }),
   "run.interrupted": z.strictObject({
     /**
@@ -261,6 +265,7 @@ export const EVENT_PAYLOAD_SCHEMAS = {
     reason: z.enum(["sandbox_lost", "cancelled"]),
     last_entry_id: idSchema.nullable(),
     retryable: z.boolean(),
+    skipped_actions: skippedActionsSchema.optional(),
   }),
   "run.budget_stopped": z.strictObject({
     scope: z.enum(["install", "team", "user"]),

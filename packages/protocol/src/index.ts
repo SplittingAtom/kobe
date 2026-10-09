@@ -10,6 +10,7 @@ export * from "./artifacts.js";
 export * from "./memory.js";
 export * from "./uploads.js";
 export * from "./schedules.js";
+export * from "./notifications.js";
 export * from "./sse.js";
 export * from "./runs.js";
 export * from "./run-orchestrator.js";
