@@ -974,6 +974,16 @@ export const AUDIT_EVENTS = {
     tools: z.number().int().nonnegative(),
     hash: z.string().regex(/^[0-9a-f]{64}$/),
   }),
+  // ── connectors: team enablement (KOBE-104); names and Pi tool names, never URLs or credentials ──
+  /** A team admin enabled a connector for the team, changed its exposure or tick list, or disabled it. */
+  "mcp.connector.team_changed": event("team", {
+    connectorId: id,
+    name: z.string().max(64),
+    change: z.enum(["enabled", "exposure_changed", "disabled"]),
+    exposure: z.enum(["read_only", "all", "custom"]).optional(),
+    /** The custom tick list (Pi tool names); empty unless exposure is custom. */
+    tools: z.array(z.string().max(256)).max(1000).optional(),
+  }),
   /**
    * The periodic refresh found a connector's live tools differ from its pins (KOBE-102): `changed`
    * and `added` tools are now disabled pending re-approval, `removed` ones are no longer offered.
@@ -985,6 +995,17 @@ export const AUDIT_EVENTS = {
     changed: z.array(z.string().max(128)).max(500),
     added: z.array(z.string().max(128)).max(500),
     removed: z.array(z.string().max(128)).max(500),
+  }),
+  /**
+   * A recipient was handled for one drift event (KOBE-103): `driftSeq` is the `mcp.connector.drift`
+   * row. `emailed: false` when the per-connector, per-recipient rate limit suppressed the email.
+   * Ids and counts only: no address, no tool names. Also the dedupe and rate-limit record.
+   */
+  "mcp.connector.drift_notified": event("install", {
+    connectorId: id,
+    driftSeq: z.number().int().positive(),
+    recipientId: id,
+    emailed: z.boolean(),
   }),
   /** An install admin re-approved drifted tools (KOBE-102); they are offered again. */
   "mcp.connector.reapproved": event("install", {

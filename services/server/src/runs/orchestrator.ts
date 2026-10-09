@@ -32,6 +32,7 @@ import { endRunInTx } from "../sandbox-wire/run-state.js";
 import type { SandboxRouter, SandboxTarget } from "../sandbox-wire/types.js";
 import { viewerProjectIds } from "../threads/references.js";
 import { findThread, isLockTimeout, type Viewer } from "../threads/repository.js";
+import type { AttachmentStager, StagedFile } from "../uploads/attach.js";
 import { RunError } from "./errors.js";
 import { budgetStoppedEvent, cancelledEvent, promoteInTx, type Promotion } from "./lifecycle.js";
 import {
@@ -119,6 +120,13 @@ export interface RunOrchestratorOptions {
   readonly log?: Logger;
 }
 
+/** Uploads staged for a message, between validation and the submit transaction (KOBE-144). */
+interface StagedAttachments {
+  readonly owner: { readonly teamId: string; readonly userId: string };
+  readonly caller: { readonly teamId: string; readonly userId: string };
+  readonly staged: readonly StagedFile[];
+}
+
 /** The orchestrator plus what the server wires around it (wire hooks, sweeps, isolation). */
 export interface ServerRunOrchestrator extends RunOrchestrator {
   /** `submitMessage` with a client idempotency key (unique per thread). */
@@ -135,6 +143,8 @@ export interface ServerRunOrchestrator extends RunOrchestrator {
   onRunEnded(event: { teamId: string; runId: string; threadId: string }): Promise<void>;
   /** Refuse new runs while the isolation runtime is missing (D4); set by index.ts. */
   useIsolation(probe: IsolationProbe): void;
+  /** Wire message attachments (KOBE-144); without it `file_ids` are refused `attachments_unavailable`. */
+  useAttachments(stager: AttachmentStager): void;
   sweep(): Promise<RunSweepResult>;
   /** Resolves once every background task started so far has finished (tests). */
   idle(): Promise<void>;
@@ -175,6 +185,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
   readonly #tasks = new Set<Promise<unknown>>();
   #listeners: readonly RunTransitionListener[] = [];
   #isolation: IsolationProbe = () => "available";
+  #attachments: AttachmentStager | undefined;
   #sweepTimer: NodeJS.Timeout | undefined;
   #closed = false;
   readonly #dispatch: RunDispatcher;
@@ -213,9 +224,65 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     options: { readonly clientKey?: string } = {},
   ): Promise<SubmitMessageResult> {
     if (this.#isolation() === "missing") throw new RunError("isolation_unavailable");
-    if ((command.file_ids?.length ?? 0) > 0) throw new RunError("attachments_unavailable");
-    const teamId = actor.team_id;
+    const fileIds = command.file_ids ?? [];
+    if (fileIds.length > 0 && this.#attachments === undefined) {
+      throw new RunError("attachments_unavailable");
+    }
     const clientKey = options.clientKey ?? null;
+    const attach =
+      fileIds.length > 0 ? await this.#stageAttachments(actor, command, clientKey) : undefined;
+    if (attach === undefined)
+      return this.#submitInTx(actor, command, clientKey, undefined, () => {});
+    // The copies stay only when the run row (and the files' claim) committed with them.
+    let claimed = false;
+    let committed = false;
+    try {
+      const result = await this.#submitInTx(actor, command, clientKey, attach, () => {
+        claimed = true;
+      });
+      committed = claimed;
+      return result;
+    } finally {
+      if (committed) await this.#attachments?.finalize(attach.staged);
+      else await this.#attachments?.discard(attach.staged);
+    }
+  }
+
+  /** Validates the files and copies them (object store, no transaction held); see uploads/attach.ts. */
+  async #stageAttachments(
+    actor: ActorContext,
+    command: SubmitMessageCommand,
+    clientKey: string | null,
+  ): Promise<StagedAttachments | undefined> {
+    const stager = this.#attachments;
+    if (stager === undefined) throw new RunError("attachments_unavailable");
+    const caller = { teamId: actor.team_id, userId: actor.user_id };
+    const found = await this.#threadTx(actor, async (tx, viewer) => {
+      const thread = await lockOwnedThread(tx, viewer, command.thread_id, "thread_not_found");
+      // A repeated submission is answered with its run; nothing to attach again.
+      if (clientKey !== null && (await runByClientKey(tx, caller.teamId, thread.id, clientKey))) {
+        return undefined;
+      }
+      const files = await stager.inspect(tx, caller, thread.id, command.file_ids ?? []);
+      return {
+        threadId: thread.id,
+        owner: { teamId: caller.teamId, userId: thread.ownerUserId },
+        files,
+      };
+    });
+    if (found === undefined) return undefined;
+    const staged = await stager.stage(found.owner, caller, found.threadId, found.files);
+    return { owner: found.owner, caller, staged };
+  }
+
+  async #submitInTx(
+    actor: ActorContext,
+    command: SubmitMessageCommand,
+    clientKey: string | null,
+    attach: StagedAttachments | undefined,
+    onAttached: () => void,
+  ): Promise<SubmitMessageResult> {
+    const teamId = actor.team_id;
     const out = await this.#threadTx(actor, async (tx, viewer) => {
       const thread = await lockOwnedThread(tx, viewer, command.thread_id, "thread_not_found");
       if (clientKey !== null) {
@@ -244,6 +311,17 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         retryOfRunId: null,
         clientKey,
       });
+      if (attach) {
+        await this.#attachments?.commit(
+          tx,
+          attach.owner,
+          attach.caller,
+          thread.id,
+          id,
+          attach.staged,
+        );
+        onAttached();
+      }
       await touchThread(tx, teamId, thread.id);
       // A user's new message releases a queue paused by Stop: it joins the end, earlier ones go
       // first. Scheduled runs (KOBE-64) queue behind a paused queue without releasing it.
@@ -607,6 +685,10 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
 
   useIsolation(probe: IsolationProbe): void {
     this.#isolation = probe;
+  }
+
+  useAttachments(stager: AttachmentStager): void {
+    this.#attachments = stager;
   }
 
   async sweep(): Promise<RunSweepResult> {

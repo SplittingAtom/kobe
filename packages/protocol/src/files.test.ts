@@ -19,6 +19,8 @@ import {
   workspaceDeleteQuerySchema,
   workspaceDownloadQuerySchema,
   workspaceFileEntrySchema,
+  WORKSPACE_FILE_ERROR_CODES,
+  WORKSPACE_LIST_CURSOR_MAX,
   workspaceFileErrorSchema,
   workspaceListQuerySchema,
   workspaceListResponseSchema,
@@ -66,6 +68,21 @@ describe("workspace file browser", () => {
     expect(workspaceDownloadQuerySchema.safeParse({}).success).toBe(false); // path required
     expect(workspaceDownloadQuerySchema.safeParse({ path: "a.txt" }).success).toBe(true);
     expect(workspaceDeleteQuerySchema.safeParse({ path: "" }).success).toBe(false);
+  });
+  it("paging cursor and legal_hold are additive (KOBE-184)", () => {
+    // Old shapes still decode: no cursor, no next_cursor.
+    expect(workspaceListQuerySchema.safeParse({ path: "a" }).success).toBe(true);
+    expect(workspaceListResponseSchema.safeParse({ path: "", entries: [] }).success).toBe(true);
+    expect(workspaceListQuerySchema.safeParse({ cursor: "eyJkIjoxfQ" }).success).toBe(true);
+    for (const bad of ["", "a b", "a/b", "x".repeat(WORKSPACE_LIST_CURSOR_MAX + 1)])
+      expect(workspaceListQuerySchema.safeParse({ cursor: bad }).success, bad).toBe(false);
+    const page = { path: "", entries: [entry], next_cursor: "abc_-9" };
+    expect(workspaceListResponseSchema.safeParse(page).success).toBe(true);
+    expect(workspaceListResponseSchema.safeParse({ ...page, next_cursor: "" }).success).toBe(false);
+    expect(
+      workspaceFileErrorSchema.safeParse({ code: "legal_hold", message: "held" }).success,
+    ).toBe(true);
+    expect(WORKSPACE_FILE_ERROR_CODES).toContain("read_only"); // kept
   });
   it("upload fields: folder path ('' = root), strict", () => {
     expect(workspaceUploadFieldsSchema.safeParse({}).success).toBe(true);

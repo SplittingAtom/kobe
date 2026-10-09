@@ -46,6 +46,10 @@ const BREAK_GLASS_QUALS: Record<string, string> = {
     `((team_id = ${g("team_id")}) AND (${g("thread_id")} IS NULL) AND ` +
     `((${g("user_id")} IS NULL) OR (EXISTS ( SELECT 1 FROM memory_docs d WHERE ((d.team_id = memory_doc_versions.team_id) ` +
     `AND (d.id = memory_doc_versions.doc_id) AND (d.owner_user_id = ${g("user_id")}))))))`,
+  // Project files are team content, not thread content (KOBE-160): team grants, user grants by adder.
+  project_files:
+    `((team_id = ${g("team_id")}) AND (${g("thread_id")} IS NULL) AND ` +
+    `((${g("user_id")} IS NULL) OR (added_by = ${g("user_id")})))`,
 };
 
 /** Schemas Kobe never creates objects in; everything else is scanned. */

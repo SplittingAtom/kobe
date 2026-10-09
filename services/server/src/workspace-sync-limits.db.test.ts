@@ -332,14 +332,20 @@ describe("one sandbox can't starve another's sync on a replica (re-review M1–M
     expect((await upload(e, a, "a1")).status).toBe(201);
     expect((await upload(e, a, "a2")).status).toBe(507); // kicks a collection of a (blocked)
     await expect.poll(() => objects.deletes).toBe(1);
+    let settled = false;
+    const finished = e.sync.settled().then(() => (settled = true));
     expect((await upload(e, b, "b1")).status).toBe(201);
     expect((await upload(e, b, "b2")).status).toBe(507); // no second concurrent collection
     await new Promise((r) => setTimeout(r, 200));
     expect(objects.deletes).toBe(1);
+    expect(settled).toBe(false); // still holding the replica's one collection slot
     objects.openDeletes();
-    await expect.poll(async () => (await counters(a))?.blob_count).toBe(0);
+    // Freed counters are not the end of the run (it still reconciles): wait for the run itself.
+    await finished;
+    expect((await counters(a))?.blob_count).toBe(0);
     expect((await upload(e, b, "b2")).status).toBe(507); // now b's own collection may run
-    await expect.poll(async () => (await counters(b))?.blob_count).toBe(0);
+    await e.sync.settled();
+    expect((await counters(b))?.blob_count).toBe(0);
   });
 });
 

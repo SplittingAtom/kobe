@@ -26,6 +26,7 @@ import { messageMeta, type KobeMessageMeta } from "../../lib/chat/tree";
 import { Button } from "../ui/button";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button";
 import { useKobeExtras } from "./kobe-runtime";
+import { SentAttachments } from "./attachment-chips";
 import { Markdown } from "./markdown";
 import { ToolCallCard } from "./tool-call";
 import styles from "./chat.module.css";
@@ -145,6 +146,11 @@ export function UserMessage() {
       )}
     >
       <h3 className="sr-only">You said</h3>
+      {meta?.kind === "user" && meta.attachments && meta.attachments.length > 0 && (
+        <div className="col-start-2 min-w-0">
+          <SentAttachments files={meta.attachments} />
+        </div>
+      )}
       <div className="relative col-start-2 min-w-0">
         <div className="peer bg-muted text-foreground rounded-2xl px-4 py-2 wrap-break-word whitespace-pre-wrap empty:hidden">
           <MessagePrimitive.Parts components={{ Text: PlainText }} />

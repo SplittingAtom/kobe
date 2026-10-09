@@ -73,6 +73,7 @@ export class RunDispatcher {
         runId: plan.runId,
         threadId: plan.threadId,
         message: plan.input,
+        ...(plan.attachments === undefined ? {} : { attachments: plan.attachments }),
         ...(plan.parentEntryId !== null ? { parentEntryId: plan.parentEntryId } : {}),
         config: {
           ...plan.config,

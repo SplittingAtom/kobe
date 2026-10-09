@@ -101,11 +101,25 @@ export function runsOpenApiPaths(): Record<string, Record<string, unknown>> {
         requestBody: body("SubmitMessageBody"),
         responses: {
           "201": json("SubmitMessageResult", "The run, and whether it waits in the queue."),
-          "404": json("Error", "`thread_not_found` or `entry_not_found`."),
-          "409": conflict("`thread_in_trash`, `queue_full`, `no_active_team`, `team_mismatch`, or"),
-          "422": json("Error", "`attachments_unavailable`: file_ids before uploads exist."),
+          "404": json(
+            "Error",
+            "`thread_not_found`, `entry_not_found` or `file_not_found` (unknown, someone else's " +
+              "or another thread's `file_ids`).",
+          ),
+          "409": conflict(
+            "`thread_in_trash`, `queue_full`, `file_in_use` (already attached), `no_active_team`, " +
+              "`team_mismatch`, or",
+          ),
+          "413": json(
+            "Error",
+            "`message_too_large`: the files add up to more than one message may (403 `quota_exceeded`: no storage left).",
+          ),
+          "422": json("Error", "`attachments_unavailable`: this install has no workspace storage."),
           "429": json("Error", "`budget_exhausted`: no new runs at 100 % of a budget (D30)."),
-          "503": json("Error", "`isolation_unavailable`: agents are disabled (D4)."),
+          "503": json(
+            "Error",
+            "`isolation_unavailable`: agents are disabled (D4); or `storage_unavailable`.",
+          ),
           ...COMMON,
         },
       },

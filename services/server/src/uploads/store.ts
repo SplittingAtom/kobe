@@ -13,7 +13,7 @@ import { threadKey, type BlobStore } from "../retention/blobs.js";
 import { uploadBlobKey } from "./keys.js";
 import { UploadMeter, UploadTooLargeError } from "./meter.js";
 import { resolveMime } from "./mime.js";
-import { lockTeamStorage, storageLimit, storageUsed } from "./quota.js";
+import { storageLimit, storageUsed, teamStorageAllows } from "./quota.js";
 import type { UploadSettings } from "./settings.js";
 
 /**
@@ -204,9 +204,9 @@ async function commit(
 ): Promise<UploadResponse> {
   const { teamId, userId } = caller;
   return withTeam(deps.db, teamId, async (tx: KobeTx) => {
-    await lockTeamStorage(tx, teamId);
-    const limit = await storageLimit(tx, teamId, deps.settings.defaultQuotaBytes);
-    if ((await storageUsed(tx, teamId)) + s.size > limit) throw new QuotaError();
+    if (!(await teamStorageAllows(tx, teamId, deps.settings.defaultQuotaBytes, s.size))) {
+      throw new QuotaError();
+    }
     const [row] = await tx
       .insert(files)
       .values({

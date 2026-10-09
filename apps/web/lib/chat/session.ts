@@ -6,6 +6,8 @@
 import type { ApiResult } from "../api/client";
 import type { TeamModels } from "../admin/api/team/models";
 import type { ChatApi } from "./api";
+import { AttachmentStore } from "./attachments";
+import { xhrUploadTransport, type UploadTransport } from "./uploads";
 import type { EventSourceFactory } from "./stream";
 import { ThreadController } from "./thread-controller";
 import type { RunnableAgent, ThreadSummary } from "./types";
@@ -18,6 +20,8 @@ export interface ChatSessionOptions {
   readonly reopenDelayMs?: ((attempt: number) => number) | undefined;
   /** Builder test pane (KOBE-85): new threads are test threads on this agent's draft. */
   readonly testAgentId?: string | undefined;
+  /** Tests replace the XHR upload transport (KOBE-145). */
+  readonly uploadTransport?: UploadTransport | undefined;
 }
 
 interface Held {
@@ -49,6 +53,8 @@ export const DEFAULT_AGENT_GALLERY_KEY = "assistant";
 export class ChatSession {
   readonly teamId: string;
   readonly api: ChatApi;
+  /** Files attached to the composer drafts of this tab (KOBE-145). */
+  readonly attachments: AttachmentStore;
   /** Set for the builder's test pane: threads it creates run this agent's unpublished draft. */
   get testAgentId(): string | undefined {
     return this.#options.testAgentId;
@@ -79,6 +85,10 @@ export class ChatSession {
   constructor(options: ChatSessionOptions) {
     this.teamId = options.teamId;
     this.api = options.api;
+    this.attachments = new AttachmentStore({
+      teamId: options.teamId,
+      transport: options.uploadTransport ?? xhrUploadTransport,
+    });
     this.#options = options;
   }
 
@@ -232,6 +242,7 @@ export class ChatSession {
   }
 
   dispose(): void {
+    this.attachments.dispose();
     for (const held of this.#held.values()) held.controller.dispose();
     this.#held.clear();
   }

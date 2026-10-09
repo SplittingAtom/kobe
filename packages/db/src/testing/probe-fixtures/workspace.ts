@@ -6,6 +6,9 @@ import {
   files,
   memoryDocVersions,
   memoryDocs,
+  projectFiles,
+  projectMembers,
+  projects,
   runs,
   teamMemorySettings,
   teamStorageQuotas,
@@ -58,6 +61,18 @@ async function insertMemoryDoc(tx: KobeTx, teamId: string) {
     actorUserId: userId,
   });
   return { docId: doc.id, userId };
+}
+
+/** A project with its creator, for members and files to hang off. */
+async function insertProject(tx: KobeTx, teamId: string) {
+  const userId = randomUUID();
+  await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
+  const [project] = await tx
+    .insert(projects)
+    .values({ teamId, slug: `probe-${userId.slice(0, 8)}`, name: "Probe", createdBy: userId })
+    .returning({ id: projects.id });
+  if (!project) throw new Error("probe: project insert returned nothing");
+  return { projectId: project.id, userId };
 }
 
 async function insertArtifact(tx: KobeTx, teamId: string) {
@@ -124,5 +139,27 @@ export const workspaceFixtures: Record<(typeof workspace.team)[number], ProbeFix
   team_memory_settings: async (tx, teamId) => {
     const { userId } = await insertThreadAndRun(tx, teamId);
     await tx.insert(teamMemorySettings).values({ teamId, updatedBy: userId });
+  },
+  projects: async (tx, teamId) => {
+    await insertProject(tx, teamId);
+  },
+  project_members: async (tx, teamId) => {
+    const { projectId, userId } = await insertProject(tx, teamId);
+    await tx
+      .insert(projectMembers)
+      .values({ teamId, projectId, userId, role: "owner", addedBy: userId });
+  },
+  project_files: async (tx, teamId) => {
+    const { projectId, userId } = await insertProject(tx, teamId);
+    await tx.insert(projectFiles).values({
+      teamId,
+      projectId,
+      path: "docs/probe.txt",
+      sizeBytes: 5,
+      sha256: "0".repeat(64),
+      mimeType: "text/plain",
+      blobRef: `teams/${teamId}/projects/${projectId}/files/probe`,
+      addedBy: userId,
+    });
   },
 };

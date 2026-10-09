@@ -28,6 +28,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { ApiError } from "../../lib/api/client";
+import { NEW_DRAFT } from "../../lib/chat/attachments";
 import type { ChatSession } from "../../lib/chat/session";
 import type { ThreadController } from "../../lib/chat/thread-controller";
 import {
@@ -169,6 +170,13 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
   const send = async (text: string, parentEntryId?: string): Promise<boolean> => {
     if (text === "") return false;
     let threadId = aui.threadListItem.getState().remoteId;
+    const draft = threadId ?? NEW_DRAFT;
+    const blocker = session.attachments.blocker(draft);
+    if (blocker !== undefined) {
+      controller?.reportError({ status: 0, code: "files_not_ready", message: blocker }, text);
+      return false;
+    }
+    const attach = session.attachments.ready(draft);
     const created = threadId === undefined;
     if (threadId === undefined) {
       try {
@@ -180,9 +188,10 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
     }
     const target = session.peek(threadId) ?? controller;
     // The controller reports its own failures; a throw must never leave the composer stuck.
-    const sent = await (target?.send(text, parentEntryId) ?? Promise.resolve(false)).catch(
+    const sent = await (target?.send(text, parentEntryId, attach) ?? Promise.resolve(false)).catch(
       () => false,
     );
+    if (sent) session.attachments.sent(draft);
     if (created) session.threadCreated();
     return sent;
   };

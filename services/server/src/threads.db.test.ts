@@ -339,12 +339,16 @@ describe("visibility: private threads, team admins and other teams", () => {
   });
 });
 
-describe("shared project threads (D23, data layer until projects exist)", () => {
+describe("shared project threads (D23, data layer)", () => {
   const project = randomUUID();
   let shared = "";
 
   beforeAll(async () => {
-    // Projects arrive with KOBE-57; the thread row can already carry a project id.
+    // threads.project_id references projects (KOBE-160): the project row comes first.
+    await admin.query(
+      `INSERT INTO projects (team_id, id, slug, name, created_by) VALUES ($1, $2, 'plan', 'Plan', $3)`,
+      [finance, project, ids.alice],
+    );
     const { rows } = await admin.query<{ id: string }>(
       `INSERT INTO threads (team_id, owner_user_id, project_id, title) VALUES ($1, $2, $3, 'plan')
        RETURNING id`,

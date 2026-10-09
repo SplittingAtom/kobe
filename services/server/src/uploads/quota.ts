@@ -25,10 +25,34 @@ export async function storageLimit(
   return own === null || own === undefined ? defaultBytes : Number(own);
 }
 
+/**
+ * Bytes the team holds. An upload attached to a message (`run_id` set, KOBE-144) is also synced
+ * into the workspace (`workspace_sync.live_bytes`), so it counts there only: unattached `files`
+ * rows plus all live workspace bytes. The thread copy of an attached file stays in S3 until the
+ * thread is purged but is not counted again.
+ */
 export async function storageUsed(tx: KobeTx, teamId: string): Promise<number> {
   const res = await tx.execute<{ used: string }>(sql`
-    SELECT (SELECT COALESCE(SUM(size_bytes), 0) FROM files WHERE team_id = ${teamId})
+    SELECT (SELECT COALESCE(SUM(size_bytes), 0) FROM files WHERE team_id = ${teamId} AND run_id IS NULL)
          + (SELECT COALESCE(SUM(live_bytes), 0) FROM workspace_sync WHERE team_id = ${teamId})
            AS used`);
   return Number(res.rows[0]?.used ?? 0);
+}
+
+/**
+ * The one team-quota check (uploads and workspace sync): takes the team's storage lock, then
+ * says whether `deltaBytes` more fits under the limit. The lock is held to the end of the
+ * caller's transaction, so the caller must write (the `files` row, the workspace state) in it.
+ * A delta of zero or less (a shrinking write) is always allowed, even when the team is over.
+ */
+export async function teamStorageAllows(
+  tx: KobeTx,
+  teamId: string,
+  defaultBytes: number,
+  deltaBytes: number,
+): Promise<boolean> {
+  await lockTeamStorage(tx, teamId);
+  if (deltaBytes <= 0) return true;
+  const limit = await storageLimit(tx, teamId, defaultBytes);
+  return (await storageUsed(tx, teamId)) + deltaBytes <= limit;
 }

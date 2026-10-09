@@ -7,8 +7,14 @@ import {
   PiIdentityError,
   RECLAIM_TIMEOUT_MS,
   checkHelperFile,
+  PARTNER_UID_MAX,
+  PARTNER_UID_MIN,
+  PI_UID_MAX,
+  PI_UID_MIN,
   identityUids,
   loadPiIdentities,
+  pairedUids,
+  partnerOf,
   type HelperRunner,
 } from "./identities.js";
 
@@ -214,5 +220,109 @@ describe("loading Pi identities", () => {
     expect(broken.calls).toEqual([["2000", "--probe-ptrace"]]);
     const ids = await loadPiIdentities("/bin/sh", 2, [1000, 2000, 2001], okRunner().run, "/bin/sh");
     expect(ids.size).toBe(2);
+  });
+});
+
+describe("paired partner (tool) uids (KOBE-166)", () => {
+  const pi = { uid: 2001, gid: 2001 };
+  const partner = { uid: 3001, gid: 3001 };
+
+  it("pairs every Pi uid with a distinct partner uid in a second range, same number", () => {
+    expect([PARTNER_UID_MIN, PARTNER_UID_MAX]).toEqual([3000, 3063]);
+    const partners = new Set<number>();
+    for (let uid = PI_UID_MIN; uid <= PI_UID_MAX; uid++) {
+      const p = partnerOf({ uid, gid: uid });
+      expect(p.gid).toBe(p.uid);
+      expect(p.uid).toBe(uid + 1000);
+      expect(p.uid).toBeGreaterThanOrEqual(PARTNER_UID_MIN);
+      expect(p.uid).toBeLessThanOrEqual(PARTNER_UID_MAX);
+      partners.add(p.uid);
+    }
+    expect(partners.size).toBe(PI_UID_MAX - PI_UID_MIN + 1);
+  });
+
+  it("is in force only when the agent holds every partner group", () => {
+    expect(pairedUids([2000, 2001], [1001, 2000, 2001, 3000, 3001])).toBe(true);
+    expect(pairedUids([2000, 2001], [1001, 2000, 2001, 3000])).toBe(false);
+    expect(pairedUids([2000, 2001], [1001, 2000, 2001])).toBe(false);
+    expect(pairedUids([], [3000])).toBe(false);
+    // The partner groups are not Pi identities.
+    expect(identityUids([2000, 3000, 3063])).toEqual([2000]);
+  });
+
+  it("kills both uids of a pair, every one even if the first fails", async () => {
+    const runner = fakeRunner((args) =>
+      args[0] === "2001" ? { code: 71, stderr: "boom" } : { code: 0, stderr: "" },
+    );
+    const ids = new PiIdentities("/helper", [2001], runner.run, "/reclaim", true);
+    await expect(ids.killAll(pi)).rejects.toThrow(/kill-all as 2001 failed: boom/);
+    expect(runner.calls).toEqual([
+      ["2001", "--kill-all"],
+      ["3001", "--kill-all"],
+    ]);
+    const bad = fakeRunner((args) =>
+      args[0] === "3001" ? { code: 71, stderr: "partner busy" } : { code: 0, stderr: "" },
+    );
+    const second = new PiIdentities("/helper", [2001], bad.run, "/reclaim", true);
+    await expect(second.killAll(pi)).rejects.toThrow(/kill-all as 3001 failed: partner busy/);
+  });
+
+  it("leaves the partner alone without pairs", async () => {
+    const runner = okRunner();
+    const ids = new PiIdentities("/helper", [2001], runner.run);
+    await ids.killAll(pi);
+    await ids.reclaimFiles(pi, 1000, ["/w"], { delaysMs: [] });
+    expect(runner.calls.map((c) => c[0])).toEqual(["2001", "2001"]);
+  });
+
+  it("reclaims the files of both uids, and gives the identity up if either fails", async () => {
+    const runner = okRunner();
+    const ids = new PiIdentities("/helper", [2001], runner.run, "/reclaim", true);
+    await ids.reclaimFiles(pi, 1000, ["/w"], { purgeDirs: ["/rt"], delaysMs: [] });
+    expect(runner.calls).toEqual([
+      ["2001", "/reclaim", "1000", "/w", "--", "/rt"],
+      ["3001", "/reclaim", "1000", "/w", "--", "/rt"],
+    ]);
+    const failing = fakeRunner((args) =>
+      args[0] === "3001" ? { code: 70, stderr: "left x" } : { code: 0, stderr: "" },
+    );
+    const broken = new PiIdentities("/helper", [2001], failing.run, "/reclaim", true);
+    await expect(broken.reclaimFiles(pi, 1000, ["/w"], { delaysMs: [] })).rejects.toThrow(
+      /reclaim as 3001 failed: left x/,
+    );
+  });
+
+  it("wraps a command for the partner uid", () => {
+    const ids = new PiIdentities("/helper", [2001], okRunner().run, "/reclaim", true);
+    expect(ids.partnerCommand(pi, "executor", ["-x"])).toEqual(["3001", "executor", "-x"]);
+    expect(ids.partnerCommand(pi, "executor", [], { TMPDIR: "/t" })).toEqual([
+      "3001",
+      "/usr/bin/env",
+      "TMPDIR=/t",
+      "executor",
+    ]);
+    expect(partnerOf(pi)).toEqual(partner);
+  });
+
+  it("probes a partner switch at start-up when paired, and fails closed if it cannot", async () => {
+    const ok = okRunner();
+    const ids = await loadPiIdentities("/bin/sh", 1, [2000, 3000], ok.run, "/bin/sh");
+    expect(ids.paired).toBe(true);
+    expect(ok.calls).toEqual([
+      ["2000", "--probe-ptrace"],
+      ["3000", "--probe-ptrace"],
+    ]);
+    const noPartner = fakeRunner((args) =>
+      args[0] === "3000"
+        ? { code: 77, stderr: "kobe-runas: uid refused" }
+        : { code: 0, stderr: "" },
+    );
+    await expect(
+      loadPiIdentities("/bin/sh", 1, [2000, 3000], noPartner.run, "/bin/sh"),
+    ).rejects.toThrow(/partner \(tool\) identity.*uid refused/);
+    const old = okRunner();
+    const unpaired = await loadPiIdentities("/bin/sh", 1, [2000], old.run, "/bin/sh");
+    expect(unpaired.paired).toBe(false);
+    expect(old.calls).toEqual([["2000", "--probe-ptrace"]]);
   });
 });
