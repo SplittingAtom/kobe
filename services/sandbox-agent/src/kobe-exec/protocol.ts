@@ -33,6 +33,11 @@ export const EXTENSION_NAME = "kobe-exec";
 /** Env var naming the inherited channel fd. Read once at load and removed from `process.env`. */
 export const EXEC_FD_ENV = "KOBE_EXEC_FD";
 export const EXEC_FD = 5;
+/**
+ * Env var (KOBE-196) naming the tools' HOME when Pi's own is private: Pi resolves `~` in the paths
+ * of its file tools against its HOME, so the extension maps the private home to this one.
+ */
+export const TOOL_HOME_ENV = "KOBE_EXEC_TOOL_HOME";
 
 export const OP_EXEC = "exec";
 export const OP_CANCEL = "cancel";

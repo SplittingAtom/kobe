@@ -136,6 +136,7 @@ export class Agent {
       policyExtension: config.policyExtension,
       toolsExtension: deps.toolsExtension,
       exec: deps.exec?.wiring,
+      piPrivateRoot: deps.parentEnv.TMPDIR ?? "/tmp",
       execExtension: deps.exec?.extension,
       shareFiles: this.#filesEnabled(),
       ...(deps.extensions === undefined ? {} : { extensions: deps.extensions }),

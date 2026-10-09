@@ -1,4 +1,6 @@
-import { chmod, chown, mkdir } from "node:fs/promises";
+import { chmod, chown, mkdir, readdir } from "node:fs/promises";
+import path from "node:path";
+import { removeRuntimeDir } from "../models/runtime-dir.js";
 import { ExecRelay } from "../exec/relay.js";
 import { executorEnv, startExecutor } from "../exec/spawn-executor.js";
 import { partnerOf, type PiIdentities, type PiIdentity } from "../pi/identities.js";
@@ -35,21 +37,31 @@ export interface PiPrivateDirs {
   readonly tmp: string;
 }
 
+/** Name prefix of Pi's private directories under the scratch volume (swept at agent start). */
+export const PI_PRIVATE_PREFIX = "kobe-pi-";
+
 /**
  * Pi's own HOME and TMPDIR once its tools are another uid (KOBE-196): Pi loads code from both
  * (jiti's transpile cache in `$TMPDIR/jiti`, Node's `$HOME/.node_modules`), so neither may be
- * writable by the partner uid, and `kobe-reclaim` must not hand them to the workspace group. They
- * sit beside the runtime directory, agent-owned with the Pi's group: `home` 2770 (nobody else
- * reaches it), `tmp` 2775 (the partner may read it, which the bash tool's "full output" files
- * need, never write it). The partner's HOME and TMPDIR stay the shared ones.
+ * writable by the partner uid, and `kobe-reclaim` must not hand them to the workspace group (they
+ * are deleted before it runs). They live on the scratch volume (`base`, the pod's /tmp, sized for
+ * tool output) and not on the small runtime volume the model file and egress token share: the bash
+ * tool's "full output" logs land in this TMPDIR and are unbounded. `base` is a sticky directory, so
+ * no other uid can rename or remove them. Agent-owned with the Pi's group: the root 2755, `home`
+ * 2770 (the partner cannot even read it), `tmp` 2775 (the partner may read, never write: the
+ * "Full output" files must stay readable to the read tool). The partner's HOME and TMPDIR stay the
+ * shared ones.
  */
 export async function preparePiPrivateDirs(
+  base: string,
   runtimeDir: string,
   identity: PiIdentity,
 ): Promise<PiPrivateDirs> {
-  const root = `${runtimeDir}-pi`;
-  await mkdir(root, { mode: 0o755 });
-  const dirs = { root, home: `${root}/home`, tmp: `${root}/tmp` };
+  const root = path.join(base, `${PI_PRIVATE_PREFIX}${path.basename(runtimeDir)}`);
+  await mkdir(root, { mode: 0o700 });
+  await chown(root, -1, identity.gid);
+  await chmod(root, 0o2755);
+  const dirs = { root, home: path.join(root, "home"), tmp: path.join(root, "tmp") };
   for (const [dir, mode] of [
     [dirs.home, 0o2770],
     [dirs.tmp, 0o2775],
@@ -59,6 +71,23 @@ export async function preparePiPrivateDirs(
     await chmod(dir, mode);
   }
   return dirs;
+}
+
+/** What an earlier agent left under `base` (it died before its Pi exited); best effort. */
+export async function sweepPiPrivateDirs(
+  base: string,
+  identities: PiIdentities | undefined,
+): Promise<number> {
+  let removed = 0;
+  for (const name of await readdir(base).catch(() => [] as string[])) {
+    if (!name.startsWith(PI_PRIVATE_PREFIX)) continue;
+    const ok = await removeRuntimeDir(path.join(base, name), identities).then(
+      () => true,
+      () => false,
+    );
+    if (ok) removed += 1;
+  }
+  return removed;
 }
 
 export interface OpenRelayOptions {

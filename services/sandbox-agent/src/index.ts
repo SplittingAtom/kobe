@@ -13,6 +13,7 @@ import type { ModelWiring } from "./models/types.js";
 import { loadPiIdentities, type PiIdentities } from "./pi/identities.js";
 import { buildPiLaunch } from "./pi/pi-launch.js";
 import { checkExtensionFile, checkPolicyExtensionFile } from "./policy/extension-file.js";
+import { sweepPiPrivateDirs } from "./threads/exec-wiring.js";
 import { SessionClient } from "./session/exchange.js";
 import { createSkillFetcher } from "./skills/client.js";
 import { SkillStore } from "./skills/store.js";
@@ -52,6 +53,9 @@ async function main(): Promise<void> {
   // are swept first, so no stale token outlives its process; the version probe gets its own dir.
   const swept = await sweepRuntimeDir(checked.piRuntimeDir, { identities });
   if (swept > 0) logger.warn({ removed: swept }, "removed stale Pi runtime directories");
+  // Pi's private HOME/TMPDIR (KOBE-196) live on the scratch volume: same rule.
+  const sweptPrivate = await sweepPiPrivateDirs(process.env.TMPDIR ?? "/tmp", identities);
+  if (sweptPrivate > 0) logger.warn({ removed: sweptPrivate }, "removed stale Pi private dirs");
   const probeDir = path.join(checked.piRuntimeDir, "version-probe");
   await mkdir(probeDir, { recursive: true, mode: 0o700 });
   const piEnv = {

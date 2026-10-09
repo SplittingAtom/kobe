@@ -125,6 +125,9 @@ export interface PiPair {
    * or the shared ones with the caches on, as before (the control that shows the attack).
    */
   readonly hardened?: boolean;
+  /** Each protection on its own (default: `hardened`, itself default true). */
+  readonly privateDirs?: boolean;
+  readonly cachesOff?: boolean;
   /** A shared scratch dir that outlives the Pi (default: one inside this Pi's scratch). */
   readonly sharedTmp?: string;
 }
@@ -215,8 +218,8 @@ export class PiRpc {
       await mkdir(sharedTmp, { recursive: true });
       await chown(sharedTmp, -1, pair.workspaceGid);
       await chmod(sharedTmp, 0o2775);
-      if (pair.hardened !== false) {
-        const priv = await preparePiPrivateDirs(dir, pair.identity);
+      if (pair.privateDirs ?? pair.hardened ?? true) {
+        const priv = await preparePiPrivateDirs(root, dir, pair.identity);
         piHome = priv.home;
         piTmp = priv.tmp;
       }
@@ -225,7 +228,7 @@ export class PiRpc {
       PATH: process.env.PATH ?? "",
       HOME: piHome,
       ...(pair === undefined ? {} : { TMPDIR: piTmp }),
-      ...(pair?.hardened === false
+      ...((pair?.cachesOff ?? pair?.hardened) === false
         ? {}
         : pair === undefined
           ? {}

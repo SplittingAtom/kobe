@@ -88,9 +88,23 @@ describe.runIf(PI_AVAILABLE && EXECUTOR_BUILT && HELPER !== undefined)(
       return dir;
     }
 
-    async function startPi(hardened: boolean, sharedTmp: string): Promise<PiRpc> {
+    async function startPi(
+      protections: boolean | { privateDirs: boolean; cachesOff: boolean },
+      sharedTmp: string,
+    ): Promise<PiRpc> {
+      const { privateDirs, cachesOff } =
+        typeof protections === "boolean"
+          ? { privateDirs: protections, cachesOff: protections }
+          : protections;
       gateway ??= await startLocalGateway({ enabledModels: [] });
-      const pair: PiPair = { identities, identity, workspaceGid: wsGid, hardened, sharedTmp };
+      const pair: PiPair = {
+        identities,
+        identity,
+        workspaceGid: wsGid,
+        privateDirs,
+        cachesOff,
+        sharedTmp,
+      };
       const rpc = await PiRpc.start(
         {
           piBin: PI_BIN,
@@ -147,15 +161,35 @@ describe.runIf(PI_AVAILABLE && EXECUTOR_BUILT && HELPER !== undefined)(
       expect(probe.out).not.toContain("wrote");
       expect(probe.out.trim().endsWith("done")).toBe(true);
       expect((await stat(first.piTmp)).gid).toBe(identity.gid);
-      // The tool plants wherever it can: shared TMPDIR/HOME (and a fake jiti dir there).
-      await asTool(
-        `mkdir -p ${tmp}/jiti && echo '${payload(canary)}' > ${tmp}/jiti/kobe-exec-index.deadbeef.mjs`,
-      );
       await first.close();
       open.splice(0);
       await startPi(true, tmp);
       expect(existsSync(canary)).toBe(false);
     }, 180_000);
+
+    it("each protection alone: a private TMPDIR with the cache on, and a shared TMPDIR with the cache off, both stop the plant", async () => {
+      // Private TMPDIR, cache ON: Pi writes its cache, the partner cannot touch an entry.
+      const tmpA = await sharedDir("tmp-a");
+      const canaryA = path.join(await sharedDir("c5"), "canary");
+      const a = await startPi({ privateDirs: true, cachesOff: false }, tmpA);
+      expect(existsSync(path.join(a.piTmp, "jiti"))).toBe(true);
+      expect((await plantJiti(a.piTmp, canaryA)).out).toContain("denied");
+      await a.close();
+      open.splice(0);
+      await startPi({ privateDirs: true, cachesOff: false }, tmpA);
+      expect(existsSync(canaryA)).toBe(false);
+      // Shared TMPDIR, cache OFF: nothing is cached, so there is no entry to plant (a file
+      // planted under the cache's name is not trusted: it is never looked up).
+      const tmpB = await sharedDir("tmp-b");
+      const canaryB = path.join(await sharedDir("c6"), "canary");
+      const b = await startPi({ privateDirs: false, cachesOff: true }, tmpB);
+      expect(existsSync(path.join(tmpB, "jiti"))).toBe(false);
+      await b.close();
+      open.splice(0);
+      await asTool(`mkdir -p ${tmpB}/jiti && echo '${payload(canaryB)}' > ${tmpB}/jiti/x.mjs`);
+      await startPi({ privateDirs: false, cachesOff: true }, tmpB);
+      expect(existsSync(canaryB)).toBe(false);
+    }, 240_000);
 
     it("kobe-reclaim deletes the jiti and compile caches of a finished Pi instead of opening them to the group", async () => {
       const tmp = await sharedDir("tmp-reclaim");

@@ -37,6 +37,7 @@ import {
   unexpectedEntries,
 } from "../models/runtime-dir.js";
 import type { ModelWiring, RunModel } from "../models/types.js";
+import { TOOL_HOME_ENV } from "../kobe-exec/protocol.js";
 import type { ExecRelay } from "../exec/relay.js";
 import {
   assertPaired,
@@ -136,6 +137,11 @@ export interface ThreadEnv {
    * relay and its tools run in an executor under its partner uid. Absent: Pi runs its own tools.
    */
   readonly exec?: ExecWiring | undefined;
+  /**
+   * The scratch volume (the pod's /tmp) Pi's private HOME and TMPDIR are made on when the tools run
+   * in the executor (KOBE-196). Default `/tmp`.
+   */
+  readonly piPrivateRoot?: string | undefined;
   /** The kobe-exec extension (root-owned file); loaded into every Pi when `exec` is set. */
   readonly execExtension?: string | undefined;
 }
@@ -293,10 +299,16 @@ export class Thread {
       // another uid Pi gets private ones, as it loads code from both.
       const toolEnvBase = { ...env };
       if (exec !== undefined && identity !== undefined) {
-        const priv = await preparePiPrivateDirs(runtimeDir, identity);
+        const priv = await preparePiPrivateDirs(
+          this.#env.piPrivateRoot ?? "/tmp",
+          runtimeDir,
+          identity,
+        );
         piDir = priv.root;
         env.HOME = priv.home;
         env.TMPDIR = priv.tmp;
+        // `~` in the file tools is resolved by Pi: tell kobe-exec where the tools' home is.
+        if (toolEnvBase.HOME !== undefined) env[TOOL_HOME_ENV] = toolEnvBase.HOME;
       }
       const models = this.#env.models;
       if (models !== undefined) {
@@ -739,6 +751,9 @@ export class Thread {
     if (identity !== undefined && identities !== undefined) {
       try {
         await identities.killAllPatiently(identity);
+        // Pi's private HOME/TMPDIR go first: the reclaim below opens what the uid owns in the
+        // shared trees to the workspace group, and these sit under one of them.
+        if (runtime.piDir !== undefined) await removeRuntimeDir(runtime.piDir, identities);
         // What the uid still owns in the shared trees becomes the workspace group's (nothing
         // stays private to it for the next thread that gets the uid), its IPC objects go.
         const gid = (await stat(this.#env.workspaceDir)).gid;
@@ -759,7 +774,6 @@ export class Thread {
     try {
       await removeRuntimeDir(runtime.dir, identities);
       if (runtime.toolDir !== undefined) await removeRuntimeDir(runtime.toolDir, identities);
-      if (runtime.piDir !== undefined) await removeRuntimeDir(runtime.piDir, identities);
     } catch (error) {
       this.#warn(`runtime directory not removed: ${(error as Error).message}`);
       // A directory the next holder of the identity could read: keep the identity out of use.

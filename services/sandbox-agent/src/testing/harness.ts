@@ -60,6 +60,8 @@ export interface HarnessOptions {
   readonly toolsExtension?: string;
   /** Skills store (KOBE-82); absent = this sandbox cannot materialize skills. */
   readonly skills?: SkillStore;
+  /** The agent's TMPDIR (default: none, so /tmp): where Pi's private HOME/TMPDIR go (KOBE-196). */
+  readonly tmpRoot?: string;
   /** The tool executor (KOBE-167); absent = Pi runs its own tools, as before. */
   readonly exec?: { readonly extension: string; readonly wiring: ExecWiring };
 }
@@ -92,6 +94,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     ...options.env,
   });
   const exits: number[] = [];
+  let closed = false;
   const agent = new Agent({
     config,
     logger: silentLogger,
@@ -99,7 +102,11 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     agentVersion: "0.0.0-test",
     piVersion: "1.0.0",
     home: path.join(dir, "home"),
-    parentEnv: { PATH: process.env.PATH, SECRET_IN_AGENT_ENV: "must-not-leak" },
+    parentEnv: {
+      PATH: process.env.PATH,
+      SECRET_IN_AGENT_ENV: "must-not-leak",
+      ...(options.tmpRoot === undefined ? {} : { TMPDIR: options.tmpRoot }),
+    },
     onExit: (code) => exits.push(code),
     backoff: { baseMs: 20, maxMs: 100, floorMs: 10 },
     ...(options.heartbeatTimeoutMs === undefined
@@ -134,6 +141,8 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
         .map((line) => JSON.parse(line) as Record<string, unknown>);
     },
     async close() {
+      if (closed) return;
+      closed = true;
       await agent.stop(500);
       await server.stop();
       await rm(dir, { recursive: true, force: true });
