@@ -319,7 +319,12 @@ export async function storeUpload(
     const outcome = deps.scan ? await deps.scan({ key, size, sha256: stored.sha256 }) : "none";
     if (outcome === "rejected" || outcome === "unavailable") {
       await discard(deps, key);
-      return refuseScan(deps, caller, outcome === "rejected" ? "scan_rejected" : "scan_unavailable", size);
+      return refuseScan(
+        deps,
+        caller,
+        outcome === "rejected" ? "scan_rejected" : "scan_unavailable",
+        size,
+      );
     }
     return {
       ok: true,

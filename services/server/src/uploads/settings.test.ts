@@ -27,9 +27,9 @@ describe("upload settings", () => {
       port: 3310,
       timeoutMs: 60_000,
     });
-    expect(loadUploadSettings({ KOBE_CLAMAV_HOST: "h", KOBE_CLAMAV_PORT: "4000" }).clamav?.port).toBe(
-      4000,
-    );
+    expect(
+      loadUploadSettings({ KOBE_CLAMAV_HOST: "h", KOBE_CLAMAV_PORT: "4000" }).clamav?.port,
+    ).toBe(4000);
     expect(() => loadUploadSettings({ KOBE_CLAMAV_HOST: "h", KOBE_CLAMAV_PORT: "0" })).toThrow(
       /KOBE_CLAMAV_PORT/,
     );
