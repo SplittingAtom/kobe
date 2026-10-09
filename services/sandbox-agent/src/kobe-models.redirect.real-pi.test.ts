@@ -3,7 +3,9 @@ import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startLocalGateway, type LocalGateway } from "@kobe/model-gateway/testing";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { GUARDED_CONFIG, writeGuardedConfig } from "./models/agent-config.js";
+import { loadPiIdentities, type PiIdentities, type PiIdentity } from "./pi/identities.js";
 import {
   PiRpc,
   startListener,
@@ -20,7 +22,14 @@ import {
   variants,
   type Plant,
 } from "./testing/redirect-plants.js";
-import { PI_AVAILABLE, PI_BIN, REAL_POLICY_EXTENSION } from "./testing/real-pi.js";
+import {
+  EXECUTOR_BUILT,
+  EXECUTOR_ENTRY,
+  PI_AVAILABLE,
+  PI_BIN,
+  REAL_EXEC_EXTENSION,
+  REAL_POLICY_EXTENSION,
+} from "./testing/real-pi.js";
 
 /**
  * KOBE-165 (T1 of KOBE-74, design: KOBE-119): can a tool, which runs as Pi's own uid, redirect the
@@ -38,11 +47,15 @@ import { PI_AVAILABLE, PI_BIN, REAL_POLICY_EXTENSION } from "./testing/real-pi.j
  * with its own `baseUrl` (provider-composer.js applyModelsJson), and kobe-models' `input` hook then
  * keeps that model because its id already matches (register.ts). The next request sends the session
  * token and `x-kobe-run-token` to the listener. A provider-level `baseUrl`, a second provider,
- * `settings.json` and `auth.json` do not redirect. The `it.fails` cases below are the red tests;
- * the fix is KOBE-167 (paired tool uid, which removes the tool's write access to `agent/`): when it
- * lands they start passing, `it.fails` then fails, and they become plain `it`.
+ * `settings.json` and `auth.json` do not redirect. Those three cases (two plants and the
+ * tripwire-clean one) were `it.fails` until KOBE-167: the paired tool uid takes the tool's write
+ * access to `agent/` away from Pi itself. They are plain `it` now, in the last `describe`, run with
+ * Pi's built-in tools in kobe-exec's executor under the partner uid of Pi's identity (the real
+ * `kobe-runas` helper, Linux CI step; skipped where it is not installed). Raw Pi, tools in Pi, is
+ * exploitable and stays so: the cases above this block plant from Pi's own uid and only show what
+ * Pi itself does with a planted file.
  * KOBE-169 closes the same cases in the agent (it refuses `set_model` over planted config); those
- * run in kobe-models.redirect-agent.real-pi.test.ts. This file stays raw Pi on purpose.
+ * run in kobe-models.redirect-agent.real-pi.test.ts.
  * Note the agent's tripwire (`verifyRuntime`) sees a planted file only before a prompt; a tool that
  * removes the file after the reload leaves it nothing to find (last case).
  */
@@ -54,6 +67,9 @@ const MODELS_EXTENSION =
 if (process.env.CI !== undefined && !existsSync(MODELS_EXTENSION)) {
   throw new Error(`kobe-models is not built: ${MODELS_EXTENSION} (run pnpm build first)`);
 }
+
+/** The planted models.json carries a model entry with its own baseUrl. */
+const LEAKING = ["models.json: provider kobe models with their own baseUrl", "everything at once"];
 
 let gateway: LocalGateway | undefined;
 let tap: Listener | undefined;
@@ -67,7 +83,9 @@ afterEach(async () => {
   pi = tap = evil = gateway = undefined;
 });
 
-async function setup() {
+type PiRpcExec = NonNullable<Parameters<typeof PiRpc.start>[0]["exec"]>;
+
+async function setup(exec?: PiRpcExec) {
   gateway = await startLocalGateway({
     enabledModels: [OPENAI, ANTHROPIC].map((m) => m.gateway_model),
   });
@@ -80,6 +98,9 @@ async function setup() {
       modelsExtension: MODELS_EXTENSION,
       policyExtension: REAL_POLICY_EXTENSION,
       gatewayUrl: tap.url,
+      ...(exec === undefined
+        ? {}
+        : { exec, prepareAgentDir: (dir: string) => writeGuardedConfig(dir, true) }),
     },
     session,
   );
@@ -101,26 +122,34 @@ async function runWith(
 type Scenario = {
   /** Remove the planted files after the reload, before the next prompt (the tripwire-clean state). */
   readonly removeAfterReload?: boolean;
+  /** Pi's tools run in the paired executor (KOBE-167), not in Pi. */
+  readonly exec?: PiRpcExec;
 };
 
 /**
  * Plant (in a run, with the real bash tool), run another model (kobe-models re-registers the
  * provider with that model only), reload through `set_model`, prompt, and report.
  */
-async function setModelScenario(name: string, { removeAfterReload = false }: Scenario = {}) {
-  const { pi: rpc, gateway: gw, tap: legit, evil: listener, session } = await setup();
+async function setModelScenario(name: string, { removeAfterReload = false, exec }: Scenario = {}) {
+  const { pi: rpc, gateway: gw, tap: legit, evil: listener, session } = await setup(exec);
   const plant = (variants(listener.url)[name] ?? {}) as Record<string, Plant>;
-  await runWith(rpc, gw, session, 1, OPENAI, `bash: ${plantCommand(plant)}`);
+  // Run by the executor the tool has no PI_CODING_AGENT_DIR: it is given the path outright.
+  const command = plantCommand(plant, exec === undefined ? undefined : rpc.agentDir);
+  await runWith(rpc, gw, session, 1, OPENAI, `bash: ${command}`);
   await runWith(rpc, gw, session, 2, ANTHROPIC, "another model");
   await rpc.command({ type: "set_model", provider: "kobe", modelId: OPENAI.gateway_model });
   if (removeAfterReload) {
-    // What the tool does from a background process (same uid): the files are gone again.
-    await Promise.all(
-      Object.keys(plant).map((f) => rm(path.join(rpc.agentDir, f), { force: true })),
-    );
+    // What the tool does from a background process: the files are gone again.
+    const files = Object.keys(plant);
+    if (exec === undefined) {
+      await Promise.all(files.map((f) => rm(path.join(rpc.agentDir, f), { force: true })));
+    } else {
+      const remove = files.map((f) => `rm -f '${rpc.agentDir}/${f}'`).join("; ");
+      await runWith(rpc, gw, session, 4, OPENAI, `bash: ${remove}`);
+    }
   }
   await runWith(rpc, gw, session, 3, OPENAI, "after set_model");
-  return { listener, legit };
+  return { listener, legit, rpc, plant };
 }
 
 function expectNothingLeaked(listener: Listener, legit: Listener): void {
@@ -133,11 +162,6 @@ describe.skipIf(!PI_AVAILABLE)(
   "a tool cannot redirect the Kobe provider through Pi's agent/ dir",
   () => {
     const names = Object.keys(variants("http://x"));
-    /** The planted models.json carries a model entry with its own baseUrl. */
-    const LEAKING = [
-      "models.json: provider kobe models with their own baseUrl",
-      "everything at once",
-    ];
     const SAFE = names.filter((n) => !LEAKING.includes(n));
 
     it.each(names)(
@@ -180,30 +204,71 @@ describe.skipIf(!PI_AVAILABLE)(
       },
       120_000,
     );
+  },
+);
 
-    // RED (KOBE-165): raw Pi, no agent in between, is exploitable and stays so: only the paired uid
-    // (KOBE-167) takes the tool's write access away from Pi itself. Through the agent the same cases
-    // pass since KOBE-169 (kobe-models.redirect-agent.real-pi.test.ts). Flip to `it` with KOBE-167.
-    it.fails.each(LEAKING)(
+/**
+ * KOBE-167: the three cases that were red. Pi runs as a Pi identity and its built-in tools in the
+ * executor as the identity's partner uid (the real helper; the agent's directory layout, the
+ * guarded placeholders in `agent/`). The plant is attempted for real, with the path handed to the
+ * tool, and refused by the kernel: nothing leaks, the guarded files are untouched.
+ */
+const HELPER = process.env.KOBE_TEST_PI_RUNAS;
+
+describe.runIf(PI_AVAILABLE && EXECUTOR_BUILT && HELPER !== undefined)(
+  "a tool in the paired executor cannot redirect the Kobe provider through Pi's agent/ dir (KOBE-167)",
+  () => {
+    let identities: PiIdentities;
+    let identity: PiIdentity;
+    let exec: PiRpcExec;
+    let umask: number;
+
+    beforeAll(async () => {
+      umask = process.umask(0o007);
+      identities = await loadPiIdentities(HELPER as string, 1);
+      identity = await identities.acquire(1000);
+      exec = {
+        extension: REAL_EXEC_EXTENSION,
+        executorEntry: EXECUTOR_ENTRY,
+        pair: { identities, identity, workspaceGid: process.getgid?.() ?? 0 },
+      };
+    });
+    afterAll(async () => {
+      process.umask(umask);
+      await identities.killAllPatiently(identity, [10, 10]).catch(() => undefined);
+      identities.release(identity);
+    });
+
+    /** Nothing was planted: the agent's placeholders are what is on disk. */
+    async function expectPlantRefused(rpc: PiRpc, plant: Record<string, Plant>) {
+      for (const file of Object.keys(plant)) {
+        const expected = GUARDED_CONFIG[file];
+        if (expected !== undefined) {
+          expect(await readFile(path.join(rpc.agentDir, file), "utf8"), file).toBe(expected);
+        } else {
+          expect(existsSync(path.join(rpc.agentDir, file)), file).toBe(false);
+        }
+      }
+    }
+
+    it.each(LEAKING)(
       "set_model after the plant: %s",
       async (name) => {
-        const { listener, legit } = await setModelScenario(name);
+        const { listener, legit, rpc, plant } = await setModelScenario(name, { exec });
         expectNothingLeaked(listener, legit);
+        await expectPlantRefused(rpc, plant);
       },
-      120_000,
+      180_000,
     );
 
-    // RED (KOBE-165), same reason (closed through the agent by KOBE-169). The planted file is gone again before the next prompt, so the
-    // agent's tripwire finds nothing, yet Pi keeps the redirected model in memory.
-    it.fails(
-      "set_model after the plant, plant removed before the prompt (tripwire-clean)",
-      async () => {
-        const { listener, legit } = await setModelScenario(LEAKING[0] as string, {
-          removeAfterReload: true,
-        });
-        expectNothingLeaked(listener, legit);
-      },
-      120_000,
-    );
+    // The tripwire-clean case: nothing is planted, so there is nothing to remove or to find.
+    it("set_model after the plant, plant removed before the prompt (tripwire-clean)", async () => {
+      const { listener, legit, rpc, plant } = await setModelScenario(LEAKING[0] as string, {
+        removeAfterReload: true,
+        exec,
+      });
+      expectNothingLeaked(listener, legit);
+      await expectPlantRefused(rpc, plant);
+    }, 180_000);
   },
 );
