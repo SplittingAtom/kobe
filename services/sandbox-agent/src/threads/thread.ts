@@ -107,6 +107,8 @@ export interface ThreadEnv {
   readonly policyExtension: string;
   /** The kobe-tools extension (root-owned file, KOBE-128); absent: no tools, no fd 4. */
   readonly toolsExtension?: string | undefined;
+  /** The agent announced the `files` capability: the extension registers `share_file` (KOBE-149). */
+  readonly shareFiles?: boolean | undefined;
   /** Other root-owned extension paths loaded with `-e`, before kobe-policy. */
   readonly extensions?: readonly string[];
   /** How long a new Pi may take to report kobe-policy ready (default {@link POLICY_READY_TIMEOUT_MS}). */

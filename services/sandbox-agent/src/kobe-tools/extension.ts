@@ -3,7 +3,12 @@ import net from "node:net";
 import type { Duplex } from "node:stream";
 import { ToolsClient, type ToolsClientOptions } from "./client.js";
 import { TOOLS_FD_ENV, TOOLS_FILES_ENV } from "./protocol.js";
-import { artifactTools, shareFileTool, type ToolDefinitionLike, type ToolsTransport } from "./tools.js";
+import {
+  artifactTools,
+  shareFileTool,
+  type ToolDefinitionLike,
+  type ToolsTransport,
+} from "./tools.js";
 
 /** The slice of Pi's `ExtensionAPI` kobe-tools uses. */
 export interface ExtensionApiLike {

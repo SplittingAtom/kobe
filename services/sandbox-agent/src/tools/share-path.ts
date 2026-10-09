@@ -35,6 +35,7 @@ export interface ResolvedSharePath {
 }
 
 function lexicalRel(root: string, input: string): string {
+  // eslint-disable-next-line no-control-regex
   if (input === "" || /[\u0000-\u001f\u007f\\]/u.test(input)) {
     throw new SharePathError("invalid_path", "the path is empty or has a forbidden character");
   }
@@ -61,6 +62,17 @@ function lexicalRel(root: string, input: string): string {
 export async function resolveSharePath(root: string, input: string): Promise<ResolvedSharePath> {
   const rel = lexicalRel(root, input);
   const target = path.join(root, rel);
+  // A symlink as the final component (even a dangling one) is refused as such, not as missing.
+  const final = await lstat(target).catch((error: NodeJS.ErrnoException) => error);
+  if (final instanceof Error) {
+    if (final.code === "ENOENT" || final.code === "ENOTDIR") {
+      throw new SharePathError("not_found", `no such file in the workspace: ${rel}`);
+    }
+    throw new SharePathError("invalid_path", `cannot resolve ${rel}`);
+  }
+  if (final.isSymbolicLink()) {
+    throw new SharePathError("invalid_path", "the path is a symbolic link");
+  }
   let real: string;
   let realRoot: string;
   try {
@@ -75,12 +87,7 @@ export async function resolveSharePath(root: string, input: string): Promise<Res
   if (real !== path.join(realRoot, rel)) {
     throw new SharePathError("invalid_path", "the path goes through a symbolic link");
   }
-  let stat;
-  try {
-    stat = await lstat(target);
-  } catch {
-    throw new SharePathError("not_found", `no such file in the workspace: ${rel}`);
-  }
+  const stat = final;
   if (!stat.isFile()) throw new SharePathError("invalid_path", `${rel} is not a regular file`);
   if (stat.size > FILE_SHARE_MAX_BYTES) {
     throw new SharePathError(

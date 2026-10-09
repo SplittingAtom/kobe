@@ -1,4 +1,9 @@
-import { connectTools, filesEnabled, registerKobeTools, type ExtensionApiLike } from "./extension.js";
+import {
+  connectTools,
+  filesEnabled,
+  registerKobeTools,
+  type ExtensionApiLike,
+} from "./extension.js";
 import type { ToolsTransport } from "./tools.js";
 
 /**

@@ -91,7 +91,7 @@ describe("share_file", () => {
     expect(calls).toEqual([
       { op: "file.share", tool_call_id: "call_7", tool: "share_file", input },
     ]);
-    const { ok: _ok, ...record } = FILE as Record<string, unknown>;
+    const { ok: _ok, ...record } = FILE as unknown as Record<string, unknown>;
     expect(JSON.parse(result.content[0]?.text ?? "")).toEqual(record);
     expect(result.details).toEqual(record);
   });

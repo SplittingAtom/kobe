@@ -1,4 +1,9 @@
-import type { FileShareFrame, FileShareResultFrame, KobeToolsRequest, KobeToolsResponse } from "@kobe/protocol";
+import type {
+  FileShareFrame,
+  FileShareResultFrame,
+  KobeToolsRequest,
+  KobeToolsResponse,
+} from "@kobe/protocol";
 import { PushPathError, type PushedFile } from "../workspace/sync.js";
 import { toolsError } from "./channel.js";
 import { resolveSharePath, SharePathError } from "./share-path.js";

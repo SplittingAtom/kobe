@@ -73,7 +73,12 @@ function setup(options: { sends?: boolean; push?: (rel: string) => Promise<Pushe
 describe("FileShareBroker", () => {
   it("pushes first, then sends file.share with the pushed entry, and returns the result", async () => {
     const u = setup();
-    u.broker.share(THREAD, RUN, request({ path: `${root}/out/report.csv`, name: "r.csv" }), u.reply);
+    u.broker.share(
+      THREAD,
+      RUN,
+      request({ path: `${root}/out/report.csv`, name: "r.csv" }),
+      u.reply,
+    );
     await u.settle();
     expect(u.order).toEqual(["push", "send"]);
     expect(u.pushed).toEqual(["out/report.csv"]);
@@ -136,7 +141,10 @@ describe("FileShareBroker", () => {
       {
         id: "kt_1",
         ok: false,
-        error: { code: "not_synced", message: "out/report.csv could not be pushed to the Kobe server" },
+        error: {
+          code: "not_synced",
+          message: "out/report.csv could not be pushed to the Kobe server",
+        },
       },
     ]);
     expect(t.broker.pendingCount).toBe(0);
@@ -191,7 +199,10 @@ describe("FileShareBroker", () => {
     }
     await t.settle();
     expect(t.replies).toEqual([
-      expect.objectContaining({ ok: false, error: expect.objectContaining({ code: "unavailable" }) }),
+      expect.objectContaining({
+        ok: false,
+        error: expect.objectContaining({ code: "unavailable" }),
+      }),
     ]);
   });
 

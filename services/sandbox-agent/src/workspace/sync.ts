@@ -366,7 +366,12 @@ export class WorkspaceSync {
       const result = out.results[0];
       if (result === undefined) return "no result";
       let refused = false;
-      await this.#applyResult(change, result, () => {}, () => (refused = true));
+      await this.#applyResult(
+        change,
+        result,
+        () => {},
+        () => (refused = true),
+      );
       if (refused) return "refused";
       const k = this.#known.get(rel);
       return k && !k.deleted && k.sha256 === change.sha256 ? k : "newer";

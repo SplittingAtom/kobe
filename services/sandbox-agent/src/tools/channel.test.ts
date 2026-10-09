@@ -44,6 +44,47 @@ async function setup() {
   return { channel, received, requests, closed, send, tick, extensionEnd: extensionEnd as Duplex };
 }
 
+describe("ToolsChannel file.share", () => {
+  const SHARE = {
+    id: "kt_2",
+    op: "file.share",
+    tool_call_id: "call_2",
+    tool: "share_file",
+    input: { path: "out/report.csv" },
+  };
+
+  it("hands a valid file.share to the handler", async () => {
+    const t = await setup();
+    t.send(SHARE);
+    await t.tick();
+    expect(t.requests).toEqual([SHARE]);
+  });
+
+  it.each([
+    ["traversal", { path: "../x" }],
+    ["an extra key", { path: "a", run_id: "x" }],
+    ["no path", {}],
+  ])("answers invalid_input for %s without calling the handler", async (_n, input) => {
+    const t = await setup();
+    t.send({ ...SHARE, input });
+    await t.tick();
+    expect(t.requests).toEqual([]);
+    expect(t.received[0]).toMatchObject({
+      id: "kt_2",
+      ok: false,
+      error: { code: "invalid_input" },
+    });
+  });
+
+  it("refuses a file.share that names a run or a different tool", async () => {
+    const t = await setup();
+    t.send({ ...SHARE, tool: "create_artifact" });
+    t.send({ ...SHARE, id: "kt_3", run_id: "x" });
+    await t.tick();
+    expect(t.requests).toEqual([]);
+  });
+});
+
 describe("ToolsChannel", () => {
   it("hands a valid artifact.put to the handler and writes its reply", async () => {
     const t = await setup();

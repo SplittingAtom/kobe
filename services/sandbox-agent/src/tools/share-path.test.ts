@@ -62,6 +62,11 @@ describe("resolveSharePath", () => {
     expect(await codeOf("out/link.txt")).toBe("invalid_path");
   });
 
+  it("refuses a dangling symlink as a symlink", async () => {
+    await symlink(path.join(outside, "gone"), path.join(root, "dangling"));
+    expect(await codeOf("dangling")).toBe("invalid_path");
+  });
+
   it("refuses a symlinked directory that leads outside", async () => {
     await symlink(outside, path.join(root, "out", "dir"));
     expect(await codeOf("out/dir/secret.txt")).toBe("invalid_path");
