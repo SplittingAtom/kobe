@@ -405,8 +405,8 @@ importers:
         specifier: ^1.30.0
         version: 1.43.0
       hono:
-        specifier: ^4.13.12
-        version: 4.13.12
+        specifier: ^4.13.13
+        version: 4.13.13
       zod:
         specifier: ^4.0.0
         version: 4.6.5
@@ -446,7 +446,7 @@ importers:
     dependencies:
       '@hono/node-server':
         specifier: ^2.1.3
-        version: 2.1.3(hono@4.13.12)
+        version: 2.1.3(hono@4.13.13)
       '@kobe/address-policy':
         specifier: workspace:*
         version: link:../../packages/address-policy
@@ -460,8 +460,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/telemetry
       hono:
-        specifier: ^4.13.12
-        version: 4.13.12
+        specifier: ^4.13.13
+        version: 4.13.13
       pino:
         specifier: ^10.3.1
         version: 10.3.1
@@ -535,7 +535,7 @@ importers:
         version: 1.7.7(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-auth@1.7.7(@opentelemetry/api@1.9.1)(drizzle-kit@0.31.11)(drizzle-orm@0.45.3(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(kysely@0.29.6)(pg@8.23.1))(next@16.3.8(@opentelemetry/api@1.9.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@5.0.3(@opentelemetry/api@1.9.1)(@types/node@24.19.0)(happy-dom@20.14.5)(vite@8.3.1(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))))(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)
       '@hono/node-server':
         specifier: ^2.1.3
-        version: 2.1.3(hono@4.13.12)
+        version: 2.1.3(hono@4.13.13)
       '@kobe/address-policy':
         specifier: workspace:*
         version: link:../../packages/address-policy
@@ -573,8 +573,8 @@ importers:
         specifier: ^0.8.3
         version: 0.8.3
       hono:
-        specifier: ^4.13.12
-        version: 4.13.12
+        specifier: ^4.13.13
+        version: 4.13.13
       nodemailer:
         specifier: ^10.0.13
         version: 10.0.13
@@ -3807,8 +3807,8 @@ packages:
   hast-util-whitespace@3.0.0:
     resolution: {integrity: sha512-88JUN06ipLwsnv+dVn+OIYOvAuvBMy/Qoi6O7mQHxdPXpjy+Cd6xRkWwux7DKO+4sYILtLBRIKgsdpS2gQc7qw==}
 
-  hono@4.13.12:
-    resolution: {integrity: sha512-6E2QDAc9Ick9Sq77ZrGS/dk2WUYni91aufTw6LJKpV7w8kW5/GxVUc650FOADOmlwg3K+f7Pun6XlV+pYmW6gw==}
+  hono@4.13.13:
+    resolution: {integrity: sha512-CQ46U0ZkAGmbT/4UxdzzGJpacP2IeKgY4a5/tOI9AABbpOMfK739wfDXmv1usCk+3RkKj1hQy4/fjhiwa2xlrA==}
     engines: {node: '>=16.9.0'}
 
   hookified@1.15.1:
@@ -4392,9 +4392,6 @@ packages:
     resolution: {integrity: sha512-gKtPkFdQPU3DksooVLi9LsjZxrsBUZIpa+7aVx+LV5pNh0KzP4Zleud2po+ConrxbuXGBJ6Hfer6hdgpIBpBaw==}
     peerDependencies:
       pg: '>=8.0'
-
-  pg-protocol@1.16.0:
-    resolution: {integrity: sha512-sILXutLVjCLjcDuOmvhX5e2Z4cS5qG/6Bu3VkpFwdf/633ElGLpEh9bgmuI5I4sqKqkifQiGyiCcx1HdtrK7tg==}
 
   pg-protocol@1.16.1:
     resolution: {integrity: sha512-p9VOFMiHB/ZbJATetbg+99PxssTVSQRnyuPSQ67mN1+1KBOjZaZ83ZQzltnxPhJwSsC3nwVjJ10DVJlerbFzLg==}
@@ -5706,9 +5703,9 @@ snapshots:
 
   '@hexagon/base64@1.1.28': {}
 
-  '@hono/node-server@2.1.3(hono@4.13.12)':
+  '@hono/node-server@2.1.3(hono@4.13.13)':
     dependencies:
-      hono: 4.13.12
+      hono: 4.13.13
 
   '@humanfs/core@0.19.2':
     dependencies:
@@ -7288,7 +7285,7 @@ snapshots:
   '@types/pg@8.23.1':
     dependencies:
       '@types/node': 24.19.0
-      pg-protocol: 1.16.0
+      pg-protocol: 1.16.1
       pg-types: 2.2.0
 
   '@types/react-dom@19.3.0(@types/react@19.3.0)':
@@ -8224,7 +8221,7 @@ snapshots:
     dependencies:
       '@types/hast': 3.0.5
 
-  hono@4.13.12: {}
+  hono@4.13.13: {}
 
   hookified@1.15.1: {}
 
@@ -8940,8 +8937,6 @@ snapshots:
   pg-pool@3.14.0(pg@8.23.1):
     dependencies:
       pg: 8.23.1
-
-  pg-protocol@1.16.0: {}
 
   pg-protocol@1.16.1: {}
 
