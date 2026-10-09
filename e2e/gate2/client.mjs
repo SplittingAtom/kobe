@@ -397,6 +397,36 @@ async function approve() {
 
 // --- break-glass -----------------------------------------------------------------------------------
 
+/** Polls `probe()` until `done(value)`, at most `timeoutMs`; returns the last value (never throws on timeout). */
+async function settled(probe, done, timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs;
+  let value = await probe();
+  while (!done(value) && Date.now() < deadline) {
+    await sleep(250);
+    value = await probe();
+  }
+  return value;
+}
+
+/**
+ * One read under the grant. A 503 `audit_busy` means the audit chain lock was held by another
+ * transaction past its timeout; the read rolled back (nothing returned, nothing audited) and the
+ * API says retrying is safe, so only that outcome is retried, bounded. Anything else is returned.
+ */
+async function readUnderGrant(asReader, path) {
+  const tries = [];
+  const res = await settled(
+    async () => {
+      const r = await asReader(path);
+      tries.push(`${r.status}:${r.json.code ?? "-"}`);
+      return r;
+    },
+    (r) => !(r.status === 503 && r.json.code === "audit_busy"),
+  );
+  out("read_attempts", tries.join(">"));
+  return res;
+}
+
 /** The whole break-glass story through the API (spec D10), then the evidence on both sides. */
 async function breakGlass() {
   const started = new Date(Date.now() - 2000).toISOString();
@@ -422,6 +452,12 @@ async function breakGlass() {
   out("read_before_approval", `${early.status}:${early.json.code ?? "-"}`);
 
   const approved = await owner.call("POST", `/v1/install/break-glass/${id}/approve`);
+  // The approval response is the activation (one transaction); wait on what the API exposes anyway.
+  const active = await settled(
+    () => ia.call("GET", `/v1/install/break-glass/${id}`),
+    (r) => r.json.grant?.status === "active",
+  );
+  out("grant_status_seen", active.json.grant?.status ?? `${active.status}`);
   out("approve", `${approved.status}:${approved.json.grant?.status ?? approved.json.code}`);
   out("approve_self_approved", approved.json.grant?.selfApproved ?? "-");
   out("approve_team_admins_queued", approved.json.notified?.teamAdmins ?? "-");
@@ -454,20 +490,23 @@ async function breakGlass() {
     `/v1/install/break-glass/${id}/threads/${config.threadId}/entries`,
   ];
   const statuses = [];
-  for (const p of paths) statuses.push((await asReader(p)).status);
+  for (const p of paths) statuses.push((await readUnderGrant(asReader, p)).status);
   out("reads", statuses.join(","));
   ia.team = team;
   const normal = await ia.call("GET", `/v1/threads/${config.threadId}`);
   out("normal_route_with_grant", normal.status);
   ia.team = undefined;
 
-  const seen = await admin.call(
-    "GET",
-    "/v1/team/audit?action=governance.break_glass.read&limit=200",
-  );
-  const mine = (seen.json.events ?? []).filter(
-    (e) => Date.parse(e.at) >= Date.parse(started) && e.actor?.id === config.requester.userId,
-  );
+  const auditedReads = async () => {
+    const seen = await admin.call(
+      "GET",
+      "/v1/team/audit?action=governance.break_glass.read&limit=200",
+    );
+    return (seen.json.events ?? []).filter(
+      (e) => Date.parse(e.at) >= Date.parse(started) && e.actor?.id === config.requester.userId,
+    );
+  };
+  const mine = await settled(auditedReads, (m) => m.length >= statuses.length);
   out("audited_reads", mine.length);
   out(
     "audited_reads_have_target",

@@ -1173,7 +1173,7 @@
             }
           },
           "404": {
-            "description": "`thread_not_found` or `entry_not_found`.",
+            "description": "`thread_not_found`, `entry_not_found` or `file_not_found` (unknown, someone else's or another thread's `file_ids`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1183,7 +1183,17 @@
             }
           },
           "409": {
-            "description": "`thread_in_trash`, `queue_full`, `no_active_team`, `team_mismatch`, or `thread_busy`: try again.",
+            "description": "`thread_in_trash`, `queue_full`, `file_in_use` (already attached), `no_active_team`, `team_mismatch`, or `thread_busy`: try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`message_too_large`: the files add up to more than one message may (403 `quota_exceeded`: no storage left).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1193,7 +1203,7 @@
             }
           },
           "422": {
-            "description": "`attachments_unavailable`: file_ids before uploads exist.",
+            "description": "`attachments_unavailable`: this install has no workspace storage.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1213,7 +1223,7 @@
             }
           },
           "503": {
-            "description": "`isolation_unavailable`: agents are disabled (D4).",
+            "description": "`isolation_unavailable`: agents are disabled (D4); or `storage_unavailable`.",
             "content": {
               "application/json": {
                 "schema": {

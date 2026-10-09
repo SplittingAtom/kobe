@@ -526,6 +526,34 @@
       "when": 1791556572050,
       "tag": "0074_memory_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1791562508391,
+      "tag": "0075_connector_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1791562513183,
+      "tag": "0076_connector_grants_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1791566832080,
+      "tag": "0077_projects",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1791566832638,
+      "tag": "0078_projects_rls",
+      "breakpoints": true
     }
   ]
 }

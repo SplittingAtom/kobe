@@ -82,7 +82,11 @@ export interface ChatApi {
   setLeaf(threadId: string, entryId: string): Promise<ApiResult<ThreadSummary>>;
   sendMessage(
     threadId: string,
-    body: { readonly content: string; readonly parentEntryId?: string | undefined },
+    body: {
+      readonly content: string;
+      readonly parentEntryId?: string | undefined;
+      readonly fileIds?: readonly string[] | undefined;
+    },
     idempotencyKey: string,
   ): Promise<ApiResult<SubmitResult>>;
   listRuns(threadId: string): Promise<ApiResult<ThreadRuns>>;
@@ -176,6 +180,9 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
         json: {
           content: body.content,
           ...(body.parentEntryId === undefined ? {} : { parent_entry_id: body.parentEntryId }),
+          ...(body.fileIds === undefined || body.fileIds.length === 0
+            ? {}
+            : { file_ids: body.fileIds }),
         },
         teamId,
         idempotencyKey,

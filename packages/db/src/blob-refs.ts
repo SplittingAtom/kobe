@@ -28,5 +28,6 @@ export const BLOB_REF_COLUMNS: readonly BlobRefColumn[] = [
   { table: "artifact_versions", column: "blob_ref", thread: true }, // artifact content (KOBE-129)
   { table: "files", column: "blob_ref", thread: true }, // uploads and shared files (KOBE-142)
   { table: "memory_doc_versions", column: "blob_ref" }, // memory file content (KOBE-154); not a thread tree
+  { table: "project_files", column: "blob_ref" }, // project file content (KOBE-160); not a thread tree
   { table: "workspace_files", column: "blob_key" }, // /workspace durable copy (KOBE-27)
 ];

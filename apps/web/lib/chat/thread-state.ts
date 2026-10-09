@@ -4,6 +4,7 @@
  */
 import { isActiveRunStatus } from "@kobe/protocol";
 import type { ApiError } from "../api/client";
+import type { SentFile } from "./attachments";
 import type { CommittedEntry, LiveRun } from "./live";
 import type { LiveOverlay } from "./tree";
 import type { PendingMessage, RunSnapshot, ThreadEntry, ThreadSummary } from "./types";
@@ -17,6 +18,8 @@ export interface SendingMessage {
   readonly parentEntryId: string | null;
   /** Another run held the thread when it was sent: it will queue. */
   readonly queues: boolean;
+  /** The files sent with it (chips until the entry is committed). */
+  readonly files?: readonly SentFile[] | undefined;
   /** Set once the server answered (queued): hidden as soon as the queue lists this run. */
   readonly runId?: string | undefined;
 }
@@ -42,7 +45,12 @@ export interface ThreadState {
   readonly agentModel?: string | null | undefined;
   /** The live run's message text, until Pi commits it. */
   readonly livePrompt?:
-    { readonly text: string; readonly parentEntryId: string | null } | undefined;
+    | {
+        readonly text: string;
+        readonly parentEntryId: string | null;
+        readonly files?: readonly SentFile[] | undefined;
+      }
+    | undefined;
   readonly sending?: SendingMessage | undefined;
   readonly connection: Connection;
   /** The last action that failed (rendered as an alert with its way out). */
@@ -154,7 +162,7 @@ export function liveOverlay(state: ThreadState): LiveOverlay | undefined {
     return {
       run: { ...emptyRun(`sending:${sending.key}`) },
       active: true,
-      prompt: { text: sending.text, parentEntryId: sending.parentEntryId },
+      prompt: { text: sending.text, parentEntryId: sending.parentEntryId, files: sending.files },
     };
   }
   const live = state.live;

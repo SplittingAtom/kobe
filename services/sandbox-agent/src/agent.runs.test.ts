@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, stat, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { parseTranslatedPiEvent, type SandboxToServerFrame } from "@kobe/protocol";
 import { afterEach, describe, expect, it } from "vitest";
@@ -167,6 +168,82 @@ describe("run.start → Pi prompt → pi.event stream", () => {
     );
     const prompt = (await h.commandsLog()).find((c) => c.type === "prompt");
     expect(prompt?.message).toBe(`say:x\n\nAttached files:\n- ${file} (text/csv)`);
+  });
+
+  it("refuses attachments that reach outside the workspace through a symlink (KOBE-144)", async () => {
+    h = await startHarness();
+    const outsideDir = await mkdtemp(path.join(tmpdir(), "kobe-outside-"));
+    await writeFile(path.join(outsideDir, "secret.txt"), "secret");
+    await mkdir(path.join(h.workspace, "uploads"), { recursive: true });
+    await symlink(outsideDir, path.join(h.workspace, "uploads", "dir"));
+    await symlink(path.join(outsideDir, "secret.txt"), path.join(h.workspace, "uploads", "file"));
+    await symlink(path.join(outsideDir, "gone"), path.join(h.workspace, "uploads", "dangling"));
+    for (const link of ["dir/secret.txt", "file", "dangling"]) {
+      const result = await h.server.command(
+        runStart("say:x", {
+          attachments: [{ path: path.join(h.workspace, "uploads", link), mime_type: "text/plain" }],
+        }),
+      );
+      expect(result, link).toMatchObject({ ok: false, error: { code: "pi_rejected" } });
+    }
+  });
+
+  it("refuses a symlink planted after the pre-check, before the prompt (KOBE-144)", async () => {
+    const outsideDir = await mkdtemp(path.join(tmpdir(), "kobe-outside-"));
+    await writeFile(path.join(outsideDir, "secret.png"), "secret");
+    h = await startHarness({
+      workspace: (dir) => ({
+        async beforeRun() {
+          await mkdir(path.join(dir, "uploads"), { recursive: true });
+          await symlink(path.join(outsideDir, "secret.png"), path.join(dir, "uploads", "p.png"));
+        },
+        runEnded: () => undefined,
+        flush: () => Promise.resolve(),
+      }),
+    });
+    const result = await h.server.command(
+      runStart("say:x", {
+        attachments: [
+          {
+            path: path.join(h.workspace, "uploads", "p.png"),
+            mime_type: "image/png",
+            native_media: "image",
+          },
+        ],
+      }),
+    );
+    expect(result).toMatchObject({ ok: false, error: { code: "pi_rejected" } });
+  });
+
+  it("passes native images to Pi as image blocks, other media by path with a note (KOBE-144)", async () => {
+    h = await startHarness();
+    const dir = path.join(h.workspace, "uploads", THREAD);
+    await mkdir(dir, { recursive: true });
+    const png = Buffer.from("not-really-a-png");
+    await writeFile(path.join(dir, "a.png"), png);
+    await writeFile(path.join(dir, "b.pdf"), "%PDF-1.4");
+    await writeFile(path.join(dir, "c.png"), png);
+    const result = await h.server.command(
+      runStart("say:x", {
+        attachments: [
+          { path: path.join(dir, "a.png"), mime_type: "image/png", native_media: "image" },
+          { path: path.join(dir, "b.pdf"), mime_type: "application/pdf", native_media: "pdf" },
+          { path: path.join(dir, "c.png"), mime_type: "image/png" },
+        ],
+      }),
+    );
+    expect(result).toMatchObject({ ok: true });
+    const prompt = (await h.commandsLog()).find((c) => c.type === "prompt");
+    expect(prompt?.images).toEqual([
+      { type: "image", data: png.toString("base64"), mimeType: "image/png" },
+    ]);
+    expect(prompt?.message).toContain(
+      `${path.join(dir, "a.png")} (image/png) - shown to you as an image`,
+    );
+    expect(prompt?.message).toContain(
+      `b.pdf (application/pdf) - not shown inline; open it from this path`,
+    );
+    expect(prompt?.message).toContain(`c.png (image/png) - not shown inline`);
   });
 });
 
