@@ -1,7 +1,19 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { chmod, chown, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  chown,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { writeGuardedConfig } from "./models/agent-config.js";
 import {
   loadPiIdentities,
   partnerOf,
@@ -53,6 +65,18 @@ async function victim(uid: number): Promise<ChildProcess & { pid: number }> {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   return child as ChildProcess & { pid: number };
+}
+
+/** Names, owners, modes and contents of a directory's entries (to prove nothing changed). */
+async function snapshot(dir: string): Promise<string[]> {
+  const names = (await readdir(dir)).sort();
+  return Promise.all(
+    names.map(async (name) => {
+      const info = await lstat(path.join(dir, name));
+      const text = info.isFile() ? await readFile(path.join(dir, name), "utf8") : "";
+      return `${name} ${info.uid} ${info.gid} ${(info.mode & 0o7777).toString(8)} ${text}`;
+    }),
+  );
 }
 
 async function isGone(pid: number): Promise<boolean> {
@@ -202,45 +226,77 @@ describe.runIf(HELPER !== undefined)("paired partner uids with the real helper (
     expect(out.stdout.trim()).toBe("-1 1"); // PTRACE_ATTACH: EPERM
   });
 
-  it("a partner cannot write, replace or read in its Pi's runtime directory (agent/, model.json)", async () => {
+  it("a partner cannot create, rename, delete or modify anything in its Pi's agent/ dir, nor read the run token (KOBE-169 layout)", async () => {
     const pi = await acquire();
-    // The layout the agent builds (KOBE-71): the agent owns the directory, the Pi's group
-    // reads it; only agent/ is group-writable.
+    // The layout the agent builds (thread.ts, KOBE-71/169): the agent owns the runtime dir (setgid
+    // 2750, the Pi's group), agent/ is 3770 (sticky), the guarded files are agent-owned 0440 and
+    // model.json (session token, run token) 0640. All of it belongs to the Pi's own group, which
+    // the partner is not in (it holds the workspace group 1000 only).
     const dir = path.join(scratch, "runtime");
-    await mkdir(path.join(dir, "agent"), { recursive: true });
-    await writeFile(path.join(dir, "model.json"), "{}", { mode: 0o640 });
-    await writeFile(path.join(dir, "agent", "models.json"), "{}", { mode: 0o660 });
+    const agentDir = path.join(dir, "agent");
+    await mkdir(agentDir, { recursive: true });
+    await writeFile(path.join(dir, "model.json"), '{"run_token":"secret-run-token"}', {
+      mode: 0o640,
+    });
     for (const [file, mode] of [
       [dir, 0o2750],
-      [path.join(dir, "agent"), 0o2770],
+      [agentDir, 0o3770],
       [path.join(dir, "model.json"), 0o640],
-      [path.join(dir, "agent", "models.json"), 0o660],
     ] as const) {
       await chown(file, process.getuid?.() ?? 0, pi.gid);
       await chmod(file, mode);
     }
-    const tryAll = [
-      `echo x > ${dir}/agent/planted; echo create=$?`,
-      `echo x > ${dir}/agent/models.json; echo overwrite=$?`,
-      `mv ${dir}/agent/models.json ${dir}/agent/models.json.x; echo rename=$?`,
-      `rm -f ${dir}/agent/models.json; echo remove=$?`,
-      `cat ${dir}/model.json; echo read=$?`,
-      `ls ${dir}/agent; echo list=$?`,
-    ].join("\n");
-    const out = await helper(identities.partnerCommand(pi, "/bin/sh", ["-c", tryAll]) as string[]);
-    for (const name of ["create", "overwrite", "rename", "remove", "read", "list"]) {
-      expect(out.stdout, name).toMatch(new RegExp(`${name}=[1-9]`));
+    // As in the agent: the guarded files get the agent's primary group, which is the workspace
+    // group (1000) the partner holds too. The partner still has no way in: agent/ itself belongs
+    // to the Pi's group and has no access for others (3770).
+    await writeGuardedConfig(agentDir, true);
+    expect((await stat(path.join(agentDir, "models.json"))).gid).toBe(WORKSPACE_GID);
+    // A file the Pi itself keeps there (auth store): Pi-owned, group-writable.
+    const made = await helper(
+      identities.command(pi, "/bin/sh", ["-c", `echo '{}' > ${agentDir}/auth.json`]) as string[],
+    );
+    expect(made.code).toBe(0);
+    const before = await snapshot(agentDir);
+    const attempts: Record<string, string> = {
+      create: `echo x > ${agentDir}/planted`,
+      mkdir: `mkdir ${agentDir}/d`,
+      link: `ln -s /etc/passwd ${agentDir}/l`,
+      overwrite: `echo x > ${agentDir}/models.json`,
+      append: `echo x >> ${agentDir}/settings.json`,
+      truncate: `: > ${agentDir}/settings.json`,
+      rename: `mv ${agentDir}/models.json ${agentDir}/models.json.x`,
+      renameover: `mv ${agentDir}/planted2 ${agentDir}/settings.json`,
+      remove: `rm -f ${agentDir}/models.json`,
+      removeauth: `rm -f ${agentDir}/auth.json`,
+      overwriteauth: `echo x > ${agentDir}/auth.json`,
+      chmod: `chmod 777 ${agentDir} ${agentDir}/models.json`,
+      readdir: `ls ${agentDir} >/dev/null`,
+      readtoken: `cat ${dir}/model.json`,
+      readguarded: `cat ${agentDir}/models.json`,
+      readauth: `cat ${agentDir}/auth.json`,
+      writetoken: `echo x > ${dir}/model.json`,
+      replacetoken: `mv ${dir}/model.json ${dir}/model.json.x`,
+      createrun: `echo x > ${dir}/planted`,
+    };
+    const script = Object.entries(attempts)
+      .map(([name, cmd]) => `( ${cmd} ) >/dev/null 2>&1; echo ${name}=$?`)
+      .join("\n");
+    const out = await helper(identities.partnerCommand(pi, "/bin/sh", ["-c", script]) as string[]);
+    for (const name of Object.keys(attempts)) {
+      expect(out.stdout, name).toMatch(new RegExp(`^${name}=[1-9]`, "m"));
     }
-    await expect(stat(path.join(dir, "agent", "planted"))).rejects.toThrow();
-    expect(await readFile(path.join(dir, "agent", "models.json"), "utf8")).toBe("{}");
-    // Control: the Pi's own uid can write agent/ (the test layout is the real one).
+    expect(await snapshot(agentDir)).toEqual(before);
+    expect(await readFile(path.join(dir, "model.json"), "utf8")).toContain("secret-run-token");
+    // Control (the layout is the real one): the Pi's uid can create in agent/ but, with the sticky
+    // bit, cannot replace or delete the agent's guarded files.
     const control = await helper(
       identities.command(pi, "/bin/sh", [
         "-c",
-        `echo x > ${dir}/agent/planted; echo $?`,
+        `echo x > ${agentDir}/created; echo create=$?; rm -f ${agentDir}/models.json; echo rm=$?`,
       ]) as string[],
     );
-    expect(control.stdout.trim()).toBe("0");
+    expect(control.stdout).toMatch(/create=0/);
+    expect(control.stdout).toMatch(/rm=[1-9]/);
   });
 
   it("shares the workspace between the two uids of a pair", async () => {

@@ -31,8 +31,11 @@ tools run as before, so behaviour is unchanged.
 - **Image:** `kobe-tool-<n>` users/groups 3000-3063 (no create-home, home `/home/kobe`), root-owned
   `/etc/gitconfig` with `safe.directory` = `/workspace` and `/workspace/*` only (git 2.46+ trailing `/*`; image has trixie git 2.47; test-image asserts a repo under /tmp stays untrusted). Nothing else needs more: repos live in the shared workspace. Workspace
   stays shared by group 1000 + umask 002 + setgid dirs, no ACLs (design).
-- Not touched: the KOBE-169 interim fix (agent-owned `agent/` files, sticky dir) is not on `main` yet;
-  the test layout uses today's `agent/` (2770, Pi group), which a partner is outside of either way.
+- **KOBE-169 layout checked (merged):** runtime dir and `agent/` belong to the Pi's own gid (`agent/` 3770, so no access for others);
+  the guarded files get the agent's primary group 1000 (0440), which the partner holds, but the partner cannot reach them through `agent/`,
+  and 0440 gives it no write anyway. So no layout change. Real test covers create, mkdir, symlink, overwrite, append, truncate,
+  rename, rename-over, delete, chmod, list, read of `model.json` (run token) and guarded files, and replacing `model.json`; the
+  directory is byte-identical afterwards.
 
 ## Open questions
 
