@@ -24,10 +24,9 @@ Server only: `projects/{access,repository,run-context,slug}.ts`, `routes/project
   Trash), project memory docs or project files exist: matches the RESTRICT FKs, and files go through
   KOBE-162 so their blobs are queued. Archive (`archived: true`) is the normal retirement. The
   contract comment "threads stay, unshared" for DELETE is superseded by the ticket and the FKs.
-- **default_agent_id:** validated with `findPinnableAgent` + `canPinAgent` (team, personal, gallery;
-  active and published). At thread creation without `agent_id` the project's default is pinned when
-  the creator can still start it, else the team default (no error). A personal agent as default only
-  works for its owner (open question).
+- **default_agent_id:** validated with `findPinnableAgent` + `canPinAgent`; team or gallery agents only, active and
+  published (personal agents are rejected, 422 `invalid_input`: only their owner can use them). At thread creation without `agent_id` the project's default is pinned when
+  the creator can still start it, else the team default (no error).
 - **Instructions to runs:** `ThreadRow.projectId` -> `projectRunContext` in both plan builders
   (`lifecycle.ts`: new start and recovery restart) -> `StartPlan.project` -> `RunStartRequest.project`
   -> `run.start.project`. Read fresh at every run start (edits apply to the next run). Sent only while
@@ -43,8 +42,7 @@ Server only: `projects/{access,repository,run-context,slug}.ts`, `routes/project
 
 ## Open questions (for Chris or the coordinator)
 
-- `project_in_use` is not in `PROJECT_ERROR_CODES` (contract change belongs in its own PR).
-- Personal agent as project default: allow (current) or restrict to team/gallery?
+- `project_in_use` is added to `PROJECT_ERROR_CODES` by PR #177 (own PR); #176 merges it. Delete stays refused while project files exist (their blobs are queued by KOBE-162's file delete).
 
 ## Evidence
 

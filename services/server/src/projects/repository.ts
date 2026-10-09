@@ -79,10 +79,10 @@ export async function toProject(
   };
 }
 
-/** A default agent must be one the team can see and start threads with (team, personal, gallery). */
+/** A default agent must be a team or gallery agent that can start threads: personal agents only work for their owner. */
 async function validAgent(tx: KobeTx, viewer: Viewer, agentId: string): Promise<boolean> {
   const agent = await findPinnableAgent(tx, viewer, agentId);
-  return agent !== null && canPinAgent(agent);
+  return agent !== null && agent.scope !== "personal" && canPinAgent(agent);
 }
 
 async function usersInTeam(tx: KobeTx, teamId: string, userIds: readonly string[]) {

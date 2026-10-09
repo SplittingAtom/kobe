@@ -164,6 +164,36 @@ describe("projects API", () => {
     expect((await as(b).get(url)).status).toBe(404);
   });
 
+  it("accepts a published team agent as default but rejects a personal one", async () => {
+    const w = await f.world();
+    const b = await builder(w.team);
+    const publish = async (scope: "team" | "personal") => {
+      const created = await as(b).post("/v1/agents", {
+        scope,
+        frontmatter: { name: `Agent ${scope}`, description: "does things" },
+        prompt: "You help.",
+      });
+      expect(created.status, JSON.stringify(created.json)).toBe(201);
+      const id = created.json.agent.id as string;
+      const pub = await as(b).request("POST", `/v1/agents/${id}/publish`, {}, { "if-match": "*" });
+      expect(pub.status, JSON.stringify(pub.json)).toBe(201);
+      return id;
+    };
+    const teamAgent = await publish("team");
+    const personal = await publish("personal");
+    const project = await create(b, { name: "Agents", default_agent_id: teamAgent });
+    expect(project.default_agent_id).toBe(teamAgent);
+    const rejected = await as(b).patch(`/v1/projects/${project.id}`, {
+      default_agent_id: personal,
+    });
+    expect(rejected.status).toBe(422);
+    expect(rejected.json.code).toBe("invalid_input");
+    expect(rejected.json.message).toContain("personal");
+    expect(
+      (await as(b).post("/v1/projects", { name: "P2", default_agent_id: personal })).status,
+    ).toBe(422);
+  });
+
   it("audits without instruction text", async () => {
     const w = await f.world();
     const b = await builder(w.team);

@@ -43,7 +43,7 @@ const ERRORS = {
   invalid_agent: [
     422,
     "invalid_input",
-    "The default agent must be an agent you can use that is published and active.",
+    "The default agent must be a published, active team or gallery agent; personal agents can't be a project default.",
   ],
   archived: [409, "archived", "The project is archived."],
   in_use: [409, "project_in_use", "The project still has content."],
