@@ -268,8 +268,8 @@ check "kobe-runas: the only file with capabilities, setuid+setgid, root:kobe-age
 check "kobe-runas starts a Pi identity: own uid/gid, workspace group, no capabilities, no_new_privs, umask 002" \
   '^uid=2000 gid=2000 groups=1000,2000 caps=0000000000000000/0000000000000000 nnp=1 umask=0002$' run_ps \
   $R 2000 sh -c 'echo "uid=$(id -u) gid=$(id -g) groups=$(id -G | tr " " "\n" | sort -n | paste -sd,) caps=$(awk "/^CapPrm/{p=\$2} /^CapEff/{e=\$2} END{print p \"/\" e}" /proc/self/status) nnp=$(awk "/^NoNewPrivs/{print \$2}" /proc/self/status) umask=$(umask)"'
-check "kobe-runas hands Pi fd 3 (policy) and fd 4 (kobe-tools) and closes everything above" '^open3 open4 closed5 closed6$' run_ps sh -c \
-  "exec 3<>/dev/null 4<>/dev/null 5<>/dev/null 6<>/dev/null; $R 2000 sh -c 'for n in 3 4 5 6; do if [ -e /proc/self/fd/\$n ]; then printf \"open%s \" \$n; else printf \"closed%s \" \$n; fi; done' | sed 's/ \$//'"
+check "kobe-runas hands Pi fd 3 (policy), fd 4 (kobe-tools) and fd 5 (executor relay) and closes everything above" '^open3 open4 open5 closed6 closed7$' run_ps sh -c \
+  "exec 3<>/dev/null 4<>/dev/null 5<>/dev/null 6<>/dev/null 7<>/dev/null; $R 2000 sh -c 'for n in 3 4 5 6 7; do if [ -e /proc/self/fd/\$n ]; then printf \"open%s \" \$n; else printf \"closed%s \" \$n; fi; done' | sed 's/ \$//'"
 check "kobe-reclaim: root-owned, read-only" '^root:root 555$' run stat -c '%U:%G %a' /opt/kobe/bin/kobe-reclaim
 check "as an identity, a process cannot ptrace or read the memory of its parent (--probe-ptrace)" '^probe=0$' run_ps \
   sh -c "$R 2000 --probe-ptrace; echo probe=\$?"
@@ -290,8 +290,8 @@ check "kobe-reclaim exits 70 when something the identity owns cannot be reclaime
 check "a Pi identity cannot run kobe-runas" 'Permission denied' run_ps sh -c "$R 2000 $R 2001 id 2>&1; true"
 check "kobe-runas refuses anyone but the agent" 'only the sandbox agent' host sh -c \
   "docker run --rm --cap-drop ALL --cap-add SETUID --cap-add SETGID --user 2000:1001 --entrypoint $R \"$IMAGE\" 2001 id 2>&1; true"
-check "kobe-runas refuses uids outside the Pi identities" '^64 64 64$' run_ps sh -c \
-  "for u in 0 1000 2064; do $R \$u id >/dev/null 2>&1; printf '%s ' \$?; done | sed 's/ \$//'"
+check "kobe-runas refuses uids outside the Pi and partner ranges" '^64 64 64 64 64 64$' run_ps sh -c \
+  "for u in 0 1000 1999 2064 2999 3064; do $R \$u id >/dev/null 2>&1; printf '%s ' \$?; done | sed 's/ \$//'"
 check "--kill-all ends every process of the identity, nothing else" '^left=0 agent=alive$' run_ps sh -c \
   "sleep 60 & a=\$!; $R 2001 sleep 60 & $R 2001 sh -c 'sleep 60 & sleep 60 & wait' & sleep 1; $R 2001 --kill-all; sleep 0.3;
    echo \"left=\$(ps -eo uid=,stat= | awk '\$1==2001 && \$2 !~ /^Z/' | wc -l) agent=\$(kill -0 \$a && echo alive)\""
@@ -299,6 +299,38 @@ check "a Pi identity cannot read the agent's files or signal it" '^denied denied
   "umask 077; mkdir -p /tmp/agent && echo secret > /tmp/agent/token; sleep 60 & a=\$!;
    r=\$($R 2000 cat /tmp/agent/token 2>&1 | grep -q 'Permission denied' && echo denied);
    k=\$($R 2000 sh -c \"kill -0 \$a\" 2>&1 | grep -q 'not permitted' && echo denied); echo \"\$r \$k\""
+# KOBE-166: partner (tool) uids 3000-3063, one per Pi identity (uid + 1000).
+PAIRED=("${PRIVSEP[@]}" --group-add 3000 --group-add 3001)
+run_pair() { docker run "${PAIRED[@]}" --entrypoint "$1" "$IMAGE" "${@:2}"; }
+check "passwd and group have the 64 Pi identities and their 64 partners, paired by number" '^64 64 ok$' run sh -c \
+  'p=$(getent passwd | grep -c "^kobe-pi-"); t=$(getent passwd | grep -c "^kobe-tool-"); ok=ok;
+   for n in 0 17 63; do [ "$(id -u kobe-pi-$n)" = "$((2000+n))" ] && [ "$(id -u kobe-tool-$n)" = "$((3000+n))" ] \
+     && [ "$(id -g kobe-tool-$n)" = "$((3000+n))" ] && [ "$(id -G kobe-tool-$n)" = "$((3000+n))" ] || ok=bad; done; echo "$p $t $ok"'
+check "kobe-runas starts a partner uid: own uid/gid, workspace group only, no capabilities, no_new_privs, umask 002" \
+  '^uid=3001 gid=3001 groups=1000,3001 caps=0000000000000000/0000000000000000 nnp=1 umask=0002$' run_pair \
+  $R 3001 sh -c 'echo "uid=$(id -u) gid=$(id -g) groups=$(id -G | tr " " "\n" | sort -n | paste -sd,) caps=$(awk "/^CapPrm/{p=\$2} /^CapEff/{e=\$2} END{print p \"/\" e}" /proc/self/status) nnp=$(awk "/^NoNewPrivs/{print \$2}" /proc/self/status) umask=$(umask)"'
+check "kobe-runas hands a partner uid stdio only (no fd 3, 4 or 5)" '^closed3 closed4 closed5$' run_pair sh -c \
+  "exec 3<>/dev/null 4<>/dev/null 5<>/dev/null; $R 3000 sh -c 'for n in 3 4 5; do if [ -e /proc/self/fd/\$n ]; then printf \"open%s \" \$n; else printf \"closed%s \" \$n; fi; done' | sed 's/ \$//'"
+check "as a partner uid, a process cannot ptrace or read the memory of its parent (--probe-ptrace)" '^probe=0$' run_pair \
+  sh -c "$R 3000 --probe-ptrace; echo probe=\$?"
+check "a partner uid cannot run kobe-runas" 'Permission denied' run_pair sh -c "$R 3000 $R 2000 id 2>&1; true"
+check "a partner uid cannot signal its Pi, write the Pi's private dir or read its /proc environ" '^denied denied denied$' run_pair sh -c \
+  "mkdir -m 2770 /tmp/pidir; chgrp 2000 /tmp/pidir; $R 2000 sleep 60 & sleep 0.5; p=\$(pgrep -u 2000 sleep);
+   k=\$($R 3000 kill -9 \$p 2>&1 | grep -q 'not permitted' && echo denied);
+   w=\$($R 3000 sh -c 'echo x > /tmp/pidir/f' 2>&1 | grep -q 'Permission denied' && echo denied);
+   e=\$($R 3000 cat /proc/\$p/environ 2>&1 | grep -q 'Permission denied' && echo denied); echo \"\$k \$w \$e\""
+check "--kill-all ends every process of a partner uid, nothing else" '^left=0 pi=alive$' run_pair sh -c \
+  "$R 2000 sleep 60 & $R 3000 sleep 60 & $R 3000 sh -c 'sleep 60 & sleep 60 & wait' & sleep 1; $R 3000 --kill-all; sleep 0.3;
+   echo \"left=\$(ps -eo uid=,stat= | awk '\$1==3000 && \$2 !~ /^Z/' | wc -l) pi=\$([ \$(pgrep -cu 2000 sleep) -ge 1 ] && echo alive)\""
+check "kobe-reclaim gives a partner uid's private files to the workspace group" '^1000 660$' run_pair sh -c \
+  "$R 3000 sh -c 'umask 077; echo s > /tmp/f'; $R 3000 /opt/kobe/bin/kobe-reclaim 1000 /tmp; stat -c '%g %a' /tmp/f"
+run_pair_ws() { docker run "${PAIRED[@]}" --tmpfs /workspace:uid=1000,gid=1000 --entrypoint "$1" "$IMAGE" "${@:2}"; }
+check "git trusts repositories owned by another uid under /workspace only (system safe.directory, root-owned)" \
+  '^trusted untrusted root:root$' run_pair_ws sh -c \
+  "mkdir -p /workspace/a/b /tmp/r && git init -q /workspace/a/b && git init -q /tmp/r;
+   $R 3000 git -C /workspace/a/b status >/dev/null 2>&1 && printf 'trusted ' || printf 'bad-workspace ';
+   $R 3000 git -C /tmp/r status >/dev/null 2>&1 && printf 'bad-tmp ' || printf 'untrusted ';
+   stat -c '%U:%G' /etc/gitconfig"
 # Fail closed: an agent asked for Pi identities (KOBE_PI_RUNAS) that cannot switch uids (here: no
 # capabilities, no_new_privs) refuses to start rather than run Pi as itself.
 check "the agent refuses to start when it cannot run Pi under its own uid" 'cannot start processes as a Pi identity' host sh -c \
