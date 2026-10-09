@@ -71,6 +71,15 @@ const configSchema = z.object({
       "KOBE_TEAM_RECONCILE_SECONDS must be 0 or between 30 and 86400",
     )
     .default(300),
+  // Seconds between re-probes of every pinned connector for tool drift (KOBE-102); 0 = never.
+  KOBE_CONNECTOR_REFRESH_SECONDS: z.coerce
+    .number({ error: "KOBE_CONNECTOR_REFRESH_SECONDS must be a number" })
+    .int("KOBE_CONNECTOR_REFRESH_SECONDS must be an integer")
+    .refine(
+      (n) => n === 0 || (n >= 60 && n <= 86_400),
+      "KOBE_CONNECTOR_REFRESH_SECONDS must be 0 or between 60 and 86400",
+    )
+    .default(3600),
 });
 
 /** Auth settings: required by the API server only (the scheduler never sees these secrets). */
@@ -132,6 +141,8 @@ export interface Config {
   readonly retentionHourUtc: number;
   /** Seconds between team-namespace reconciles; 0 = only at start (KOBE-115). */
   readonly teamReconcileSeconds: number;
+  /** Seconds between connector drift refreshes; 0 = off (KOBE-102). */
+  readonly connectorRefreshSeconds: number;
   /** SIEM forwarding of audit events (KOBE-19); empty when not configured. */
   readonly auditForwarding: AuditForwardingConfig;
   /** Present for the API server only. */
@@ -160,6 +171,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     mcpProxyUrl: base.data.KOBE_MCP_PROXY_URL,
     retentionHourUtc: base.data.KOBE_RETENTION_HOUR_UTC,
     teamReconcileSeconds: base.data.KOBE_TEAM_RECONCILE_SECONDS,
+    connectorRefreshSeconds: base.data.KOBE_CONNECTOR_REFRESH_SECONDS,
     auditForwarding: loadAuditForwardingConfig(env),
   };
   if (config.process !== "server") return config;
