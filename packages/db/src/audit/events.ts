@@ -958,6 +958,16 @@ export const AUDIT_EVENTS = {
     tools: z.number().int().nonnegative(),
     hash: z.string().regex(/^[0-9a-f]{64}$/),
   }),
+  // ── connectors: team enablement (KOBE-104); names and Pi tool names, never URLs or credentials ──
+  /** A team admin enabled a connector for the team, changed its exposure or tick list, or disabled it. */
+  "mcp.connector.team_changed": event("team", {
+    connectorId: id,
+    name: z.string().max(64),
+    change: z.enum(["enabled", "exposure_changed", "disabled"]),
+    exposure: z.enum(["read_only", "all", "custom"]).optional(),
+    /** The custom tick list (Pi tool names); empty unless exposure is custom. */
+    tools: z.array(z.string().max(256)).max(1000).optional(),
+  }),
 } as const;
 
 export type AuditAction = keyof typeof AUDIT_EVENTS;

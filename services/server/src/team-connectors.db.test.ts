@@ -21,13 +21,18 @@ let other: TestBrowser;
 let adminId = "";
 let jira: Awaited<ReturnType<typeof registerConnector>>;
 
+function requireConnector<T>(c: T | undefined): T {
+  if (c === undefined) throw new Error("connector not enabled");
+  return c;
+}
+
 const piNames = (c: typeof jira, ...tools: string[]) =>
   c.tools.filter((t) => tools.includes(t.name)).map((t) => t.pi_name);
 
 beforeAll(async () => {
   h = await openHarness();
   adminId = await h.createUser("ta@tc.test");
-  await h.createUser("tm@tc.test");
+  const memberId = await h.createUser("tm@tc.test");
   const otherId = await h.createUser("tb@tc.test");
   for (const [id, slug] of [
     [teamA, "alpha"],
@@ -35,9 +40,6 @@ beforeAll(async () => {
   ] as const) {
     await h.admin.query(`INSERT INTO teams (id, slug, name) VALUES ($1, $2, $2)`, [id, slug]);
   }
-  const memberId = (
-    await h.admin.query<{ id: string }>(`SELECT id FROM users WHERE email = 'tm@tc.test'`)
-  ).rows[0]!.id;
   for (const [t, u, role] of [
     [teamA, adminId, "team_admin"],
     [teamA, memberId, "member"],
@@ -55,6 +57,13 @@ beforeAll(async () => {
   admin.team = teamA;
   member.team = teamA;
   other.team = teamB;
+  for (const [b, t] of [
+    [admin, teamA],
+    [member, teamA],
+    [other, teamB],
+  ] as const) {
+    expect((await b.put("/v1/me/teams/active", { teamId: t })).status).toBe(200);
+  }
   jira = await registerConnector(h.admin, { name: "jira" });
 });
 afterAll(async () => {
@@ -70,9 +79,9 @@ describe("off by default", () => {
     expect(res.status).toBe(200);
     expect(await state(admin)).toMatchObject({ name: "jira", enabled: false, exposure: null });
     expect(await state(member)).toMatchObject({ enabled: false });
-    const facts = await withTeam(h.app.db, teamA, (tx) => loadTeamFacts(tx, teamA));
+    const facts = await withTeam(h.deps.database.db, teamA, (tx) => loadTeamFacts(tx, teamA));
     expect(facts.connectors).toEqual([]);
-    expect(await loadTeamConnector(h.app.db, teamA, jira.id)).toBeUndefined();
+    expect(await loadTeamConnector(h.deps.database.db, teamA, jira.id)).toBeUndefined();
   });
 });
 
@@ -96,9 +105,9 @@ describe("enable and exposure", () => {
     const res = await admin.put(`${BASE}/${jira.id}`, { exposure: "read_only" });
     expect(res.status, JSON.stringify(res.json)).toBe(200);
     expect(res.json.connector).toMatchObject({ enabled: true, exposure: "read_only" });
-    const c = await loadTeamConnector(h.app.db, teamA, jira.id);
-    expect(exposedTools(c!).map((t) => t.name)).toEqual(["get_issue"]);
-    const facts = await withTeam(h.app.db, teamA, (tx) => loadTeamFacts(tx, teamA));
+    const c = await loadTeamConnector(h.deps.database.db, teamA, jira.id);
+    expect(exposedTools(requireConnector(c)).map((t) => t.name)).toEqual(["get_issue"]);
+    const facts = await withTeam(h.deps.database.db, teamA, (tx) => loadTeamFacts(tx, teamA));
     expect(facts.connectors.map((x) => x.id)).toEqual([jira.id]);
   });
 
@@ -115,8 +124,12 @@ describe("enable and exposure", () => {
     });
     expect(res.status, JSON.stringify(res.json)).toBe(200);
     expect(res.json.connector.enabled_tools.toSorted()).toEqual(picked.toSorted());
-    const c = await loadTeamConnector(h.app.db, teamA, jira.id);
-    expect(exposedTools(c!).map((t) => t.name).toSorted()).toEqual(["delete_issue", "get_issue"]);
+    const c = await loadTeamConnector(h.deps.database.db, teamA, jira.id);
+    expect(
+      exposedTools(requireConnector(c))
+        .map((t) => t.name)
+        .toSorted(),
+    ).toEqual(["delete_issue", "get_issue"]);
 
     for (const bad of [piNames(jira, "rename_issue"), ["mcp__jira__nope"]]) {
       const r = await admin.put(`${BASE}/${jira.id}`, { exposure: "custom", enabled_tools: bad });
@@ -152,7 +165,7 @@ describe("enable and exposure", () => {
 
   it("a connector disabled or removed by the install stops being offered", async () => {
     await h.admin.query(`UPDATE connectors SET status = 'disabled' WHERE id = $1`, [jira.id]);
-    const facts = await withTeam(h.app.db, teamA, (tx) => loadTeamFacts(tx, teamA));
+    const facts = await withTeam(h.deps.database.db, teamA, (tx) => loadTeamFacts(tx, teamA));
     expect(facts.connectors).toEqual([]);
     expect((await state(admin)).status).toBe("disabled");
     await h.admin.query(`UPDATE connectors SET status = 'active' WHERE id = $1`, [jira.id]);
@@ -163,7 +176,7 @@ describe("disable", () => {
   it("removes the enablement and offers nothing again", async () => {
     expect((await admin.delete(`${BASE}/${jira.id}`)).status).toBe(204);
     expect(await state(admin)).toMatchObject({ enabled: false });
-    expect(await loadTeamConnector(h.app.db, teamA, jira.id)).toBeUndefined();
+    expect(await loadTeamConnector(h.deps.database.db, teamA, jira.id)).toBeUndefined();
     expect((await admin.delete(`${BASE}/${jira.id}`)).status).toBe(404);
   });
 });
@@ -171,7 +184,7 @@ describe("disable", () => {
 describe("audit", () => {
   it("records each change with the exposure and the custom list, nothing when unchanged", async () => {
     const { rows } = await h.admin.query(
-      `SELECT action, team_id, target FROM audit_log WHERE action = 'team.connector.changed' ORDER BY seq`,
+      `SELECT action, team_id, target FROM audit_log WHERE action = 'mcp.connector.team_changed' ORDER BY seq`,
     );
     expect(rows.map((r) => r.target.change)).toEqual([
       "enabled",
@@ -187,7 +200,7 @@ describe("audit", () => {
     await admin.put(`${BASE}/${jira.id}`, { exposure: "all" });
     await admin.put(`${BASE}/${jira.id}`, { exposure: "all" });
     const after = await h.admin.query(
-      `SELECT count(*)::int AS n FROM audit_log WHERE action = 'team.connector.changed'`,
+      `SELECT count(*)::int AS n FROM audit_log WHERE action = 'mcp.connector.team_changed'`,
     );
     expect(after.rows[0].n).toBe(5);
   });

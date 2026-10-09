@@ -65,7 +65,11 @@ function view(row: Row, e: Enablement | undefined): TeamConnectorView {
 export async function listTeamConnectors(db: KobeDb, teamId: string): Promise<TeamConnectorView[]> {
   return withTeam(db, teamId, async (tx) => {
     const [rows, enabled] = await Promise.all([
-      tx.select().from(connectors).where(isNull(connectors.deletedAt)).orderBy(asc(connectors.name)),
+      tx
+        .select()
+        .from(connectors)
+        .where(isNull(connectors.deletedAt))
+        .orderBy(asc(connectors.name)),
       tx.select().from(teamConnectors).where(eq(teamConnectors.teamId, teamId)),
     ]);
     const byId = new Map(enabled.map((e) => [e.connectorId, e]));
@@ -124,7 +128,7 @@ export async function setTeamConnector(
           set: next,
         });
       await recordAudit(tx, {
-        action: "team.connector.changed",
+        action: "mcp.connector.team_changed",
         teamId,
         target: {
           connectorId,
@@ -156,7 +160,7 @@ export async function disableTeamConnector(
       .from(connectors)
       .where(eq(connectors.id, connectorId));
     await recordAudit(tx, {
-      action: "team.connector.changed",
+      action: "mcp.connector.team_changed",
       teamId,
       target: { connectorId, name: row?.name ?? "", change: "disabled" },
     });
