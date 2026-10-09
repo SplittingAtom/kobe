@@ -14,6 +14,7 @@ predates the `sandbox` key still renders. Keep in sync with values.yaml.
   "warmPool" (dict "replicasPerTeam" 1)
   "hibernation" (dict "enabled" true "idleMinutes" 15 "sweepSeconds" 60)
   "workspaceSync" (dict "enabled" true "pushIntervalSeconds" 60 "maxFileSize" "1Gi" "maxWorkspaceSize" "" "maxFiles" 100000 "collectSeconds" 3600)
+  "toolExecutor" (dict "enabled" false)
   "orbitEval" (dict "deadlineSeconds" 900 "resources" (dict "requests" (dict "cpu" "250m" "memory" "512Mi") "limits" (dict "cpu" "1" "memory" "2Gi")))
   "sessionKeysSecret" "" -}}
 {{- mustMergeOverwrite $defaults (deepCopy (.Values.sandbox | default dict)) | toJson -}}
@@ -104,6 +105,7 @@ pod labels and port for the team NetworkPolicy).
     "idleMinutes" (int $s.hibernation.idleMinutes)
     "sweepSeconds" (int $s.hibernation.sweepSeconds))
   "workspaceSync" (include "kobe.workspaceSyncConfig" $s | fromJson)
+  "toolExecutor" (dict "enabled" $s.toolExecutor.enabled)
   "orbitEval" (dict
     "image" (include "kobe.image" (dict "root" . "name" "orbit-eval"))
     "deadlineSeconds" (int $s.orbitEval.deadlineSeconds)

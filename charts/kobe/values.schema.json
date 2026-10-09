@@ -275,6 +275,15 @@
             }
           }
         },
+        "toolExecutor": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        },
         "workspaceSync": {
           "type": "object",
           "additionalProperties": false,

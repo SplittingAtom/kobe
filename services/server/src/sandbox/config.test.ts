@@ -16,6 +16,16 @@ describe("sandbox config", () => {
     expect(loadSandboxConfig(env())).toEqual({ settings: SETTINGS, sessionKeys: KEYS });
   });
 
+  it("defaults the tool executor (KOBE-167) to off when the chart predates it, and reads it", () => {
+    const { toolExecutor: _te, ...older } = SETTINGS;
+    const loaded = loadSandboxConfig(env({ KOBE_SANDBOX_CONFIG: JSON.stringify(older) }));
+    expect(loaded?.settings.toolExecutor).toEqual({ enabled: false });
+    const on = loadSandboxConfig(
+      env({ KOBE_SANDBOX_CONFIG: JSON.stringify({ ...SETTINGS, toolExecutor: { enabled: true } }) }),
+    );
+    expect(on?.settings.toolExecutor).toEqual({ enabled: true });
+  });
+
   it("defaults workspace sync (KOBE-27) when the chart predates it, and reads quantities as bytes", () => {
     const { workspaceSync: _ws, ...older } = SETTINGS;
     const loaded = loadSandboxConfig(env({ KOBE_SANDBOX_CONFIG: JSON.stringify(older) }));

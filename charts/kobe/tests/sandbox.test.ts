@@ -223,6 +223,15 @@ describe("server sandbox configuration", () => {
     );
   });
 
+  it("keeps Pi's tools in Pi until the install turns the executor on (KOBE-167)", () => {
+    expect(sandboxConfig(ms).toolExecutor).toEqual({ enabled: false });
+    expect(
+      sandboxConfig(render({ "sandbox.toolExecutor.enabled": "true" })).toolExecutor,
+    ).toEqual({ enabled: true });
+    expect(sandboxConfig(render({ sandbox: "null" })).toolExecutor).toEqual({ enabled: false });
+    expect(renderError({ "sandbox.toolExecutor.enabled": "maybe" })).toMatch(/enabled|boolean/);
+  });
+
   it("defaults the sandbox key so `helm upgrade --reuse-values` keeps working", () => {
     expect(sandboxConfig(render({ sandbox: "null" })).warmPool).toEqual({ replicasPerTeam: 1 });
     expect(sandboxConfig(render({ sandbox: "null" })).hibernation).toMatchObject({
