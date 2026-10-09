@@ -97,6 +97,37 @@ describe("ToolsClient", () => {
     expect(t.client.closed).toBe(true);
   });
 
+  it("returns a file.share reply with its fields", async () => {
+    const t = await setup();
+    const pending = t.client.request({
+      op: "file.share",
+      tool_call_id: "c",
+      tool: "share_file",
+      input: { path: "a.csv" },
+    });
+    await t.waitFor(1);
+    const file = {
+      file_id: "f1",
+      name: "a.csv",
+      mime_type: "text/csv",
+      size_bytes: 8,
+      scan: "clean",
+      created_at: "2026-10-09T10:00:00.000Z",
+      sha256: "a".repeat(64),
+    };
+    t.reply({ id: "kt_1", ok: true, ...file });
+    expect(await pending).toEqual({ ok: true, ...file });
+  });
+
+  it("closes on a file reply with a missing field", async () => {
+    const t = await setup();
+    const pending = t.client.request(CALL);
+    await t.waitFor(1);
+    t.agentEnd.write(`${JSON.stringify({ id: "kt_1", ok: true, file_id: "f1", name: "a" })}\n`);
+    expect(await pending).toMatchObject({ ok: false, error: { code: "unavailable" } });
+    expect(t.client.closed).toBe(true);
+  });
+
   it("closes on an oversize reply line", async () => {
     const t = await setup();
     const pending = t.client.request(CALL);

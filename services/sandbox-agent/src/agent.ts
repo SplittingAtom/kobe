@@ -1,6 +1,7 @@
 import {
   CAPABILITY_ARTIFACTS,
   CAPABILITY_BUILTIN_SKILLS,
+  CAPABILITY_FILES,
   CAPABILITY_RUN_TOKEN,
   CAPABILITY_SKILL_BUNDLES,
   KOBE_EVENT_DROPPED_TYPE,
@@ -15,6 +16,9 @@ import type { Config } from "./config.js";
 import type { PiExit, PiRecord } from "./pi/pi-process.js";
 import { PolicyBroker } from "./policy/broker.js";
 import { ArtifactBroker } from "./tools/broker.js";
+import { FileShareBroker } from "./tools/share-broker.js";
+import { toolsError } from "./tools/channel.js";
+import type { PushedFile } from "./workspace/sync.js";
 import type { SkillStore } from "./skills/store.js";
 import { ThreadManager } from "./threads/manager.js";
 import { fail, type CommandOutcome } from "./threads/outcome.js";
@@ -75,6 +79,11 @@ export interface AgentDeps {
 export interface WorkspaceHooks {
   beforeRun(frame: RunStartFrame): Promise<void>;
   runEnded(): void;
+  /**
+   * Push one file now and return its synced entry (`share_file`, KOBE-149). Absent: this agent
+   * has no workspace sync, so it does not announce the `files` capability.
+   */
+  pushPath?(rel: string): Promise<PushedFile>;
   flush(deadlineMs: number): Promise<unknown>;
 }
 
@@ -101,6 +110,7 @@ export class Agent {
   readonly #threads: ThreadManager;
   readonly #broker: PolicyBroker;
   readonly #artifacts: ArtifactBroker;
+  readonly #shares: FileShareBroker;
   /** Command ids seen on the current connection (ids are not portable across reconnects). */
   #seenCommands = new Set<string>();
   #queuedExits: { runId: string; frame: PiExitedFrameT }[] = [];
@@ -112,6 +122,12 @@ export class Agent {
     this.#outbox = new Outbox(config.outboxMaxBytes);
     this.#broker = new PolicyBroker({ send: (frame) => this.#wire.send(frame) });
     this.#artifacts = new ArtifactBroker({ send: (frame) => this.#wire.send(frame) });
+    const pushPath = deps.workspace?.pushPath?.bind(deps.workspace);
+    this.#shares = new FileShareBroker({
+      root: config.workspaceDir,
+      send: (frame) => this.#wire.send(frame),
+      pushPath: pushPath ?? (() => Promise.reject(new Error("workspace sync is not available"))),
+    });
     this.#threads = new ThreadManager({
       bin: config.piBin,
       runtimeDir: config.piRuntimeDir,
@@ -121,6 +137,7 @@ export class Agent {
       toolsExtension: deps.toolsExtension,
       exec: deps.exec?.wiring,
       execExtension: deps.exec?.extension,
+      shareFiles: this.#filesEnabled(),
       ...(deps.extensions === undefined ? {} : { extensions: deps.extensions }),
       ...(deps.policyReadyTimeoutMs === undefined
         ? {}
@@ -150,6 +167,7 @@ export class Agent {
           this.#outbox.finish(runId);
           this.#broker.failRun(runId, "run ended");
           this.#artifacts.failRun(runId, "run ended");
+          this.#shares.failRun(runId, "run ended");
           deps.workspace?.runEnded();
         },
         uiRequest: (threadId, runId, request) => {
@@ -171,11 +189,18 @@ export class Agent {
           logger.debug({ thread_id: threadId, reason }, "policy channel closed");
           this.#broker.failThread(threadId, reason);
         },
-        toolsRequest: (threadId, runId, request, reply) =>
-          this.#artifacts.put(threadId, runId, request, reply),
+        toolsRequest: (threadId, runId, request, reply) => {
+          if (request.op === "file.share") {
+            if (this.#filesEnabled()) this.#shares.share(threadId, runId, request, reply);
+            else reply(toolsError(request.id, "not_allowed", "file sharing is not available"));
+            return;
+          }
+          this.#artifacts.put(threadId, runId, request, reply);
+        },
         toolsChannelClosed: (threadId, reason) => {
           logger.debug({ thread_id: threadId, reason }, "tools channel closed");
           this.#artifacts.failThread(threadId, reason);
+          this.#shares.failThread(threadId, reason);
         },
         diagnostic: (threadId, message) => logger.debug({ thread_id: threadId }, message),
         warning: (threadId, message) => logger.warn({ thread_id: threadId }, message),
@@ -190,6 +215,7 @@ export class Agent {
       onDisconnected: () => {
         this.#broker.failAll("connection to Kobe server lost");
         this.#artifacts.failAll("connection to Kobe server lost");
+        this.#shares.failAll("connection to Kobe server lost");
         void this.#threads.abortRestores();
       },
       onFatal: (reason) => void this.#onFatal(reason),
@@ -229,11 +255,20 @@ export class Agent {
     this.#threads.killAll();
   }
 
+  /**
+   * `share_file` needs the tools channel (fd 4) and workspace sync (push-then-share): without
+   * either this agent neither registers the tool nor announces `files`.
+   */
+  #filesEnabled(): boolean {
+    return this.#deps.toolsExtension !== undefined && this.#deps.workspace?.pushPath !== undefined;
+  }
+
   #hello(): HelloFrame {
     const capabilities = [
       ...(this.#deps.skills === undefined ? [] : [CAPABILITY_SKILL_BUNDLES]),
       ...(this.#deps.config.builtinSkillsDir === undefined ? [] : [CAPABILITY_BUILTIN_SKILLS]),
       ...(this.#deps.toolsExtension === undefined ? [] : [CAPABILITY_ARTIFACTS]),
+      ...(this.#filesEnabled() ? [CAPABILITY_FILES] : []),
       // The run token reaches Pi through the models extension, so only with model wiring.
       ...(this.#deps.models === undefined ? [] : [CAPABILITY_RUN_TOKEN]),
     ];
@@ -303,6 +338,9 @@ export class Agent {
         return;
       case "artifact.result":
         this.#artifacts.onResult(frame);
+        return;
+      case "file.share_result":
+        this.#shares.onResult(frame);
         return;
       case "ack":
         this.#outbox.ack(frame.run_id, frame.seq);

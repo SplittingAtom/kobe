@@ -1,4 +1,3 @@
-import path from "node:path";
 import type {
   PiExtensionUiRequest,
   PiSessionHeader,
@@ -16,6 +15,12 @@ import {
 } from "../pi/session-files.js";
 import { builtinSkillDirs } from "../skills/builtin.js";
 import { SkillError, type SkillStore } from "../skills/store.js";
+import {
+  AttachmentPathError,
+  confineAttachment,
+  nativeImages,
+  promptWithAttachments,
+} from "./attachments.js";
 import { fail, ok, type CommandOutcome } from "./outcome.js";
 import { Thread, type ThreadEnv, type ThreadHooks } from "./thread.js";
 import type { RunModel } from "../models/types.js";
@@ -106,7 +111,7 @@ export class ThreadManager {
     if (thread.runId === frame.run_id) return ok({ already_started: true });
     if (thread.runId !== undefined) return fail("pi_rejected", "thread has an active run");
     if (thread.restoring) return fail("pi_rejected", "session restore in progress");
-    const attachmentError = this.#checkAttachments(frame);
+    const attachmentError = await this.#checkAttachments(frame);
     if (attachmentError !== undefined) return fail("pi_rejected", attachmentError);
     const model = runModelOf(frame);
     if (this.#options.models !== undefined && model === null) {
@@ -150,10 +155,18 @@ export class ThreadManager {
           return fail("internal", "workspace preparation timed out");
         }
       }
+      // The files are in place now: confine them again (the model can write symlinks into the
+      // workspace) and read the images Pi gets inline.
+      const media = await this.#promptMedia(frame);
+      if (typeof media === "string") {
+        thread.endRun();
+        return fail("pi_rejected", media);
+      }
       const response = await thread.request(
         {
           type: "prompt",
-          message: promptText(frame),
+          message: promptWithAttachments(frame.message, frame.attachments ?? [], media.inlined),
+          ...(media.images.length > 0 ? { images: media.images } : {}),
           ...(thread.streaming ? { streamingBehavior: "followUp" } : {}),
         },
         PI_REQUEST_TIMEOUT_MS,
@@ -465,6 +478,7 @@ export class ThreadManager {
       policyExtension: this.#options.policyExtension,
       toolsExtension: this.#options.toolsExtension,
       execExtension: this.#options.exec === undefined ? undefined : this.#options.execExtension,
+      toolsFiles: this.#options.shareFiles,
       ...(this.#options.extensions === undefined ? {} : { extensions: this.#options.extensions }),
       parentEnv: this.#options.parentEnv,
       config: frame?.config,
@@ -535,13 +549,31 @@ export class ThreadManager {
     }
   }
 
-  #checkAttachments(frame: RunStartFrame): string | undefined {
-    const root = path.resolve(this.#options.workspaceDir);
-    for (const attachment of frame.attachments ?? []) {
-      const resolved = path.resolve(root, attachment.path);
-      if (!resolved.startsWith(`${root}${path.sep}`)) return "attachment outside the workspace";
+  async #checkAttachments(frame: RunStartFrame): Promise<string | undefined> {
+    try {
+      for (const attachment of frame.attachments ?? []) {
+        await confineAttachment(this.#options.workspaceDir, attachment.path);
+      }
+      return undefined;
+    } catch (error) {
+      if (error instanceof AttachmentPathError) return error.message;
+      throw error;
     }
-    return undefined;
+  }
+
+  /** The images for the prompt, or the refusal text when an attachment is not confined. */
+  async #promptMedia(
+    frame: RunStartFrame,
+  ): Promise<Awaited<ReturnType<typeof nativeImages>> | string> {
+    try {
+      await this.#checkAttachments(frame).then((refusal) => {
+        if (refusal !== undefined) throw new AttachmentPathError(refusal);
+      });
+      return await nativeImages(this.#options.workspaceDir, frame.attachments ?? []);
+    } catch (error) {
+      if (error instanceof AttachmentPathError) return error.message;
+      throw error;
+    }
   }
 
   /** Stop: drop Pi's steering/follow-up queue first (else abort continues it), then abort. */
@@ -571,13 +603,6 @@ function runModelOf(frame: RunStartFrame | undefined): RunModel | null {
   return model?.gateway_model !== undefined && model.api !== undefined
     ? { gatewayModel: model.gateway_model, api: model.api }
     : null;
-}
-
-function promptText(frame: RunStartFrame): string {
-  const attachments = frame.attachments ?? [];
-  if (attachments.length === 0) return frame.message;
-  const list = attachments.map((a) => `- ${a.path} (${a.mime_type})`).join("\n");
-  return `${frame.message}\n\nAttached files:\n${list}`;
 }
 
 function dispositionOf(data: unknown): string | undefined {

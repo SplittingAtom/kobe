@@ -153,6 +153,17 @@ server:
   # Seconds between re-probes of every pinned MCP connector for tool drift (KOBE-102); changed or
   # new tools stay disabled until an install admin re-approves them. 0 = never; otherwise 60..86400.
   connectorRefreshSeconds: 3600
+  # File uploads (KOBE-143); these are the server's code defaults.
+  uploads:
+    # Largest single file (bytes): 100 MiB.
+    maxFileBytes: 104857600
+    # Largest total per message (bytes): 500 MiB. Also bounds a single file.
+    maxMessageBytes: 524288000
+    # Storage quota per team (bytes) when the team has no value of its own: 10 GiB. Counts uploaded
+    # files and live workspace-sync bytes; uploads and sync pushes are refused beyond it.
+    teamStorageQuotaBytes: 10737418240
+    # Hours an upload that never joined a thread is kept (1..720).
+    orphanHours: 24
 
 scheduler:
   replicas: 1

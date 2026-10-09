@@ -85,6 +85,11 @@ export interface PiLaunchInput {
    */
   readonly execExtension?: string | undefined;
   /**
+   * The agent announced the `files` capability (KOBE-149): the extension then registers
+   * `share_file`. Meaningful only with {@link toolsExtension}.
+   */
+  readonly toolsFiles?: boolean | undefined;
+  /**
    * The kobe-policy extension (KOBE-36): a root-owned, read-only file. Always loaded, always the
    * **last** `-e`: Pi runs `tool_call` handlers in extension load order (verified Pi 1.0.0), so the
    * last one sees the final, possibly mutated input, and nobody can change it after the check.
@@ -148,6 +153,7 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
   env.KOBE_POLICY_FD = String(POLICY_CHANNEL_FD);
   if (input.toolsExtension !== undefined) env.KOBE_TOOLS_FD = String(TOOLS_CHANNEL_FD);
   if (input.execExtension !== undefined) env[EXEC_FD_ENV] = String(EXEC_CHANNEL_FD);
+  if (input.toolsExtension !== undefined && input.toolsFiles === true) env.KOBE_TOOLS_FILES = "1";
 
   // The model is deliberately not part of the key (see `modelsExtension`).
   const key = JSON.stringify({
