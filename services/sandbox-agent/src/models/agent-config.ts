@@ -14,7 +14,7 @@ import path from "node:path";
  *   (Pi's uid) can neither open them for writing nor rename or delete them to put its own in their
  *   place: kernel-enforced, so there is no check-then-read window to race.
  * - Without one the tool shares the agent's uid and can replace them; the content check
- *   ({@link tamperedConfig}) runs before every `set_model` and after it, and before every prompt.
+ *   ({@link tamperedConfig}) runs before and after every `pi.command` and before every prompt.
  *   Detection only; the boundary there is the paired uid (KOBE-167).
  */
 export const GUARDED_CONFIG: Readonly<Record<string, string>> = {

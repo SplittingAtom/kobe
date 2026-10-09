@@ -18,8 +18,11 @@ but it covers exactly the two files that matter.
 - Under a Pi identity `agent/` is now 3770 (sticky): a tool (Pi's uid) cannot open the files for
   writing, nor rename or delete them to put its own in place. Kernel-enforced, so no TOCTOU window
   and no "plant removed again" case: nothing can be planted. Test: `identities.real.test.ts`.
+- `set_model` is removed from the `pi.command` allow-list (protocol `pi-rpc.ts`; the server never
+  sent it; an agent receiving it answers an error frame; test in `frames.test.ts` and the real-Pi
+  agent test). Model choice per thread is `run.start`'s `config.model`.
 - Everywhere (also without identities, where the tool has the agent's uid and can replace the
-  files): `set_model` (`CATALOG_COMMANDS` in `threads/manager.ts`) is refused with
+  files): every remaining `pi.command` (`#piCommand` in `threads/manager.ts`) is refused with
   `runtime_tampered` if `verifyRuntime()` finds the guarded files changed (content compare against
   what the agent wrote, no-follow open) or any unexpected entry, and checked again after Pi
   answered. On a hit that Pi is stopped and a warning is logged (`stopTampered`); the
@@ -30,7 +33,7 @@ but it covers exactly the two files that matter.
 
 ## KOBE-165 cases
 
-Through the agent all three pass (`kobe-models.redirect-agent.real-pi.test.ts`). The raw-Pi
+Through the agent all three pass (set_model is refused at the wire, and the plant is caught by the next command or run) (`kobe-models.redirect-agent.real-pi.test.ts`). The raw-Pi
 `it.fails` cases stay red on purpose (no agent in between; Pi itself is unchanged): sentinel until
 KOBE-167. A normal `set_model` still works (real Pi test and fake-Pi test).
 
@@ -40,6 +43,5 @@ KOBE-167. A normal `set_model` still works (real Pi test and fake-Pi test).
   after the pre-check and is removed before the post-check/next prompt is not seen. Production
   runs with identities (KOBE-71), where the lock is kernel-level; the paired uid (KOBE-167) is the
   structural answer.
-- Other `pi.command`s are not checked; only `set_model` resolves models from the catalog today. A
-  new command that does must join `CATALOG_COMMANDS`.
+- A future `pi.command` that selects a model from Pi's catalog must not be added to the allow-list.
 - `identities.real.test.ts` additions run only in the Linux CI step (not run locally on macOS).

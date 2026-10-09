@@ -306,17 +306,16 @@ function handle(cmd) {
         settle();
       }
       return respond(cmd, { success: true });
-    case "set_model":
-      // "plant-during": a tool of this Pi plants config while the command is handled (KOBE-169).
-      if (cmd.modelId === "plant-during") {
-        const file = `${process.env.PI_CODING_AGENT_DIR}/models.json`;
-        rmSync(file, { force: true });
-        writeFileSync(file, '{"providers":{"kobe":{"models":[]}}}');
-      }
-      return respond(cmd, { success: true, data: { id: cmd.modelId } });
     case "get_state":
       return respond(cmd, { success: true, data: { sessionFile, isStreaming: streaming } });
     case "get_entries": {
+      // "plant-during": a tool of this Pi plants config while the command is handled (KOBE-169).
+      if (cmd.since === "plant-during") {
+        const file = `${process.env.PI_CODING_AGENT_DIR}/models.json`;
+        rmSync(file, { force: true });
+        writeFileSync(file, '{"providers":{"kobe":{"models":[]}}}');
+        return respond(cmd, { success: true, data: { entries: [], leafId: null } });
+      }
       const all = entries();
       const leafId = all.at(-1)?.id ?? null;
       if (cmd.since === undefined)

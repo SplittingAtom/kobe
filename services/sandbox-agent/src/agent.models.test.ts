@@ -220,12 +220,12 @@ describe("model wiring (KOBE-41)", () => {
     expect((await h.commandsLog()).filter((c) => c.argv !== undefined)).toHaveLength(2);
   });
 
-  describe("set_model against planted Pi config (KOBE-169)", () => {
-    const setModel = (modelId = "openai/gpt-fake") =>
+  describe("pi.command against planted Pi config (KOBE-169)", () => {
+    const setModel = (since?: string) =>
       h.server.command({
         type: "pi.command",
         thread_id: THREAD,
-        command: { id: "srv", type: "set_model", provider: "kobe", modelId },
+        command: { id: "srv", type: "get_entries", ...(since === undefined ? {} : { since }) },
       });
     const plant = async (agentDir: string) => {
       await rm(path.join(agentDir, "models.json"), { force: true });
@@ -235,7 +235,7 @@ describe("model wiring (KOBE-41)", () => {
       );
     };
 
-    it("forwards a normal set_model and leaves the guarded config read-only", async () => {
+    it("forwards a normal command and leaves the guarded config read-only", async () => {
       await start(fakeTokens(TOKEN_1));
       expect(await setModel()).toMatchObject({ ok: true });
       const launch = await launchRecord();
@@ -245,7 +245,7 @@ describe("model wiring (KOBE-41)", () => {
       );
     });
 
-    it("refuses set_model with runtime_tampered when models.json was planted, and stops that Pi", async () => {
+    it("refuses a command with runtime_tampered when models.json was planted, and stops that Pi", async () => {
       await start(fakeTokens(TOKEN_1));
       expect(await setModel()).toMatchObject({ ok: true });
       const launch = await launchRecord();
@@ -256,12 +256,12 @@ describe("model wiring (KOBE-41)", () => {
         "agent/models.json",
       );
       // Nothing reached Pi, and that Pi and its directory are gone; the next command gets a clean one.
-      expect((await h.commandsLog()).filter((c) => c.type === "set_model").length).toBe(1);
+      expect((await h.commandsLog()).filter((c) => c.type === "get_entries").length).toBe(1);
       await until(() => !existsSync(launch.agentDir));
       expect(await setModel()).toMatchObject({ ok: true });
     });
 
-    it("refuses a plant that lands while set_model is handled, and a deleted guarded file", async () => {
+    it("refuses a plant that lands while a command is handled, and a deleted guarded file", async () => {
       await start(fakeTokens(TOKEN_1));
       expect(await setModel("plant-during")).toMatchObject({
         ok: false,

@@ -22,8 +22,9 @@ import { PI_AVAILABLE, PI_BIN, REAL_POLICY_EXTENSION } from "./testing/real-pi.j
  * KOBE-169: the three KOBE-165 redirect cases, now THROUGH THE AGENT (real kobe-sandbox-agent, real
  * Pi 1.0.0, real kobe-models and kobe-policy, real bash tool). A tool plants `models.json` with a
  * `providers.kobe.models[]` entry carrying its own `baseUrl`; the server then sends `set_model`.
- * The agent refuses it with `runtime_tampered` (the guarded files are not what it wrote) and stops
- * that Pi, so neither the session token nor the run token reaches the tool's listener, also when the
+ * Since the follow-up the wire no longer admits `set_model` at all, and every remaining pi.command
+ * is refused with `runtime_tampered` (and that Pi stopped) while the guarded files are not what the
+ * agent wrote, so neither the session token nor the run token reaches the tool's listener, also when the
  * plant is removed again before the next prompt. The tool here shares the agent's uid, so it can
  * replace the agent's read-only file; the kernel-level lock (a Pi identity, sticky `agent/`) is
  * tested in identities.real.test.ts. What no agent-side check closes, a plant that lands after the
@@ -113,15 +114,23 @@ async function run(harness: Harness, n: number, model: typeof OPENAI, message: s
   );
 }
 
-const setModel = (harness: Harness, modelId: string) =>
+const piCommand = (harness: Harness, type: string, extra: Record<string, unknown> = {}) =>
   harness.server.command(
-    {
-      type: "pi.command",
-      thread_id: THREAD,
-      command: { id: "srv", type: "set_model", provider: "kobe", modelId },
-    },
+    { type: "pi.command", thread_id: THREAD, command: { id: "srv", type, ...extra } },
     30_000,
   );
+/** `set_model` is not in the wire's pi.command allow-list: the agent answers with an error frame. */
+async function setModelRefused(harness: Harness, modelId: string): Promise<void> {
+  const before = harness.server.frames("error").length;
+  harness.server.send({
+    v: 1,
+    type: "pi.command",
+    command_id: "sm-1",
+    thread_id: THREAD,
+    command: { id: "srv", type: "set_model", provider: "kobe", modelId },
+  } as never);
+  await until(() => harness.server.frames("error").length > before);
+}
 
 describe.skipIf(!PI_AVAILABLE)(
   "the agent closes the Pi agent/ provider redirect (KOBE-169)",
@@ -131,14 +140,18 @@ describe.skipIf(!PI_AVAILABLE)(
       "everything at once",
     ];
 
-    /** Plant in a run (the real bash tool), then `set_model` to a model only the plant defines. */
+    /**
+     * Plant in a run (the real bash tool), then `set_model` to a model only the plant defines. The
+     * wire refuses the command (it is not in the pi.command allow-list), so Pi never sees it.
+     */
     async function scenario(name: string, removeAfter: boolean) {
       const harness = await setup();
       const plant = (variants((evil as Listener).url)[name] ?? {}) as Record<string, Plant>;
       await run(harness, 1, OPENAI, `bash: ${plantCommand(plant)}`);
-      const reply = await setModel(harness, ANTHROPIC.gateway_model);
+      await setModelRefused(harness, ANTHROPIC.gateway_model);
+      // Any other command meanwhile finds the plant and stops that Pi (second line).
+      const other = await piCommand(harness, "get_state");
       if (removeAfter) {
-        // The Pi is gone by now (refused); a tool of a still-running Pi would remove them like this.
         const root = path.join(harness.dir, "pi-runtime");
         for (const d of await readdir(root)) {
           for (const f of Object.keys(plant)) {
@@ -147,7 +160,7 @@ describe.skipIf(!PI_AVAILABLE)(
         }
       }
       await run(harness, 2, ANTHROPIC, "after set_model");
-      return reply;
+      return { other };
     }
 
     function expectNothingLeaked(): void {
@@ -159,25 +172,25 @@ describe.skipIf(!PI_AVAILABLE)(
     }
 
     it.each(LEAKING)(
-      "set_model after the plant is refused as runtime_tampered, nothing leaks: %s",
+      "set_model is refused and the plant is caught by the next command, nothing leaks: %s",
       async (name) => {
-        const reply = await scenario(name, false);
-        expect(reply).toMatchObject({ ok: false, error: { code: "runtime_tampered" } });
+        const { other } = await scenario(name, false);
+        expect(other).toMatchObject({ ok: false, error: { code: "runtime_tampered" } });
         expectNothingLeaked();
       },
       120_000,
     );
 
-    it("plant removed again before the next prompt (tripwire-clean): refused, nothing leaks", async () => {
-      const reply = await scenario(LEAKING[0] as string, true);
-      expect(reply).toMatchObject({ ok: false, error: { code: "runtime_tampered" } });
+    it("plant removed again before the next prompt (tripwire-clean): set_model refused, nothing leaks", async () => {
+      await scenario(LEAKING[0] as string, true);
       expectNothingLeaked();
     }, 120_000);
 
-    it("a normal set_model still works, and the next run on it reaches the gateway", async () => {
+    it("set_model is refused, other commands and runs still work", async () => {
       const harness = await setup();
       await run(harness, 1, OPENAI, "one");
-      expect(await setModel(harness, OPENAI.gateway_model)).toMatchObject({ ok: true });
+      await setModelRefused(harness, OPENAI.gateway_model);
+      expect(await piCommand(harness, "get_state")).toMatchObject({ ok: true });
       await run(harness, 2, OPENAI, "two");
       await until(() => (tap as Listener).requests.length >= 2);
       expect((evil as Listener).requests).toEqual([]);
