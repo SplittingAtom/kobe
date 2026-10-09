@@ -35,6 +35,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Docker Hub pulls through a mirror (GitHub-hosted runners)
+        # Anonymous Docker Hub pulls from shared runner IPs get rate limited or fail (504s on
+        # 2026-10-09); the daemon tries Google's mirror first and falls back to Docker Hub.
+        if: runner.environment == 'github-hosted'
+        run: |
+          conf=/etc/docker/daemon.json
+          { sudo cat "$conf" 2>/dev/null || echo '{}'; } \
+            | jq '. + {"registry-mirrors": ["https://mirror.gcr.io"]}' | sudo tee "$conf.new" >/dev/null
+          sudo mv "$conf.new" "$conf"
+          sudo systemctl restart docker
+          docker info --format 'mirrors: {{.RegistryConfig.Mirrors}}'
       - name: Build
         run: docker build -f images/sandbox/Dockerfile -t kobe-sandbox:ci . || { scripts/ci-docker-diagnostics.sh; exit 1; }
       - name: Acceptance checks (hardened run, Pi 1.0.x, Python data stack, no setuid/secrets)
