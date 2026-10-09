@@ -18,6 +18,8 @@ export interface ReconcileLock {
 export function createPgReconcileLock(
   pool: Pick<pg.Pool, "connect">,
   onError: (err: unknown) => void = () => undefined,
+  /** Lock name; another sweep (audit forwarding, KOBE-19) uses its own. */
+  lockName: string = TEAM_RECONCILE_LOCK,
 ): ReconcileLock {
   return {
     async runExclusive(fn) {
@@ -32,7 +34,7 @@ export function createPgReconcileLock(
       try {
         const res = await client.query<{ ok: boolean }>(
           "SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS ok",
-          [TEAM_RECONCILE_LOCK],
+          [lockName],
         );
         locked = res.rows[0]?.ok === true;
         if (!locked) return { ran: false };
@@ -40,9 +42,7 @@ export function createPgReconcileLock(
       } finally {
         if (locked) {
           try {
-            await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [
-              TEAM_RECONCILE_LOCK,
-            ]);
+            await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [lockName]);
           } catch (err) {
             broken = true; // closing the connection releases a session lock for sure
             onError(err);

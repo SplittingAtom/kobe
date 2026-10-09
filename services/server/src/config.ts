@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { loadAuditForwardingConfig, type AuditForwardingConfig } from "./audit/forward/config.js";
 import { smtpSchema, type SmtpConfig } from "./mail/config.js";
 
 const configSchema = z.object({
@@ -125,6 +126,8 @@ export interface Config {
   readonly retentionHourUtc: number;
   /** Seconds between team-namespace reconciles; 0 = only at start (KOBE-115). */
   readonly teamReconcileSeconds: number;
+  /** SIEM forwarding of audit events (KOBE-19); empty when not configured. */
+  readonly auditForwarding: AuditForwardingConfig;
   /** Present for the API server only. */
   readonly auth?: AuthConfig;
   /** Present for the API server only (invites, password resets, notifications). */
@@ -150,6 +153,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     mcpProxyInternalKey: base.data.KOBE_MCP_PROXY_INTERNAL_KEY,
     retentionHourUtc: base.data.KOBE_RETENTION_HOUR_UTC,
     teamReconcileSeconds: base.data.KOBE_TEAM_RECONCILE_SECONDS,
+    auditForwarding: loadAuditForwardingConfig(env),
   };
   if (config.process !== "server") return config;
   const auth = authSchema.safeParse(env);

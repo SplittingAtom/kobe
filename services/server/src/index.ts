@@ -4,6 +4,8 @@ import { createApp } from "./app.js";
 import { seedGalleryAgents } from "./gallery/seed.js";
 import { approvalKeyring } from "./approvals/index.js";
 import { isolationAuditor } from "./audit/isolation.js";
+import { AUDIT_FORWARD_LOCK, AuditForwarder } from "./audit/forward/forwarder.js";
+import { destinationsOf, sinksFor } from "./audit/forward/index.js";
 import { AuditPiiSweeper } from "./audit/pii-sweeper.js";
 import { BreakGlassSweeper } from "./break-glass/sweeper.js";
 import { loadConfig } from "./config.js";
@@ -84,6 +86,7 @@ if (config.auth && config.smtp) {
     mailer: createSmtpMailer(config.smtp),
     sandboxWire: { waker, ...(runTokenKey ? { runTokenKey } : {}) },
     connectors: loadConnectorUrlPolicy(process.env),
+    auditForwardingDestinations: destinationsOf(config.auditForwarding),
     agents: { maxVersions: config.agentMaxVersions },
     ...(egressHeaderSecrets ? { egressHeaderSecrets } : {}),
     ...(envelope ? { envelope } : {}),
@@ -158,6 +161,21 @@ breakGlassSweeper?.start();
 // Audit rows lose their client IP and user agent after the retention period (KOBE-17).
 const auditPiiSweeper = deps ? new AuditPiiSweeper(deps.database.db) : undefined;
 auditPiiSweeper?.start();
+// Optional SIEM forwarding (syslog, OTLP; KOBE-19): a sweep, one replica forwards at a time.
+const auditForwarder =
+  deps && destinationsOf(config.auditForwarding).length > 0
+    ? new AuditForwarder({
+        db: deps.database.db,
+        sinks: sinksFor(config.auditForwarding),
+        lock: createPgReconcileLock(
+          deps.database.pool,
+          (err) => logger.warn({ err }, "audit forwarding lock connection problem"),
+          AUDIT_FORWARD_LOCK,
+        ),
+        log: logger,
+      })
+    : undefined;
+auditForwarder?.start();
 // Nightly retention (KOBE-18, D18): Trash and retention purges, run_events compaction, released
 // blobs. Every replica checks; an advisory lock lets one run a pass.
 const retentionJob = deps
@@ -431,6 +449,7 @@ function shutdown(signal: string): void {
   void modelSync?.close();
   breakGlassSweeper?.stop();
   auditPiiSweeper?.stop();
+  auditForwarder?.stop();
   void retentionJob?.stop();
   deps?.approvals.stop();
   // End event streams first so browsers reconnect (with Last-Event-ID) to another replica.

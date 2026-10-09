@@ -977,6 +977,31 @@
         }
       }
     },
+    "auditForwarding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "syslog": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "host": { "type": "string", "pattern": "^[A-Za-z0-9.:\\[\\]-]*$" },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "tls": { "type": "boolean" }
+          }
+        },
+        "otlp": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "endpoint": { "type": "string", "pattern": "^(https?://[^\\s]+)?$" },
+            "headersSecret": { "type": "string" }
+          }
+        }
+      }
+    },
     "smtp": {
       "type": "object",
       "additionalProperties": false,
