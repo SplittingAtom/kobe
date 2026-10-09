@@ -20,7 +20,9 @@ describe("files api", () => {
   it("lists a folder with the team header and camelized entries", async () => {
     const { calls, fetchFn } = stub(200, {
       path: "a b",
-      entries: [{ name: "x.txt", path: "a b/x.txt", type: "file", size_bytes: 3, area: "workspace" }],
+      entries: [
+        { name: "x.txt", path: "a b/x.txt", type: "file", size_bytes: 3, area: "workspace" },
+      ],
     });
     const res = await createFilesApi("t1", fetchFn).list("a b");
     expect(must(calls[0]).url).toBe("/v1/workspace/files?path=a+b");
@@ -33,7 +35,10 @@ describe("files api", () => {
     const api = createFilesApi("t1", fetchFn);
     await api.list("");
     await api.list("", "c1");
-    expect(calls.map((c) => c.url)).toEqual(["/v1/workspace/files", "/v1/workspace/files?cursor=c1"]);
+    expect(calls.map((c) => c.url)).toEqual([
+      "/v1/workspace/files",
+      "/v1/workspace/files?cursor=c1",
+    ]);
   });
 
   it("uploads multipart with the folder and the file", async () => {

@@ -113,7 +113,16 @@ export async function apiRequest<T>(
   options: RequestOptions = {},
 ): Promise<ApiResult<T>> {
   assertApiPath(path);
-  const { method = "GET", json, raw, form, teamId, ifMatch, idempotencyKey, fetchFn = fetch } = options;
+  const {
+    method = "GET",
+    json,
+    raw,
+    form,
+    teamId,
+    ifMatch,
+    idempotencyKey,
+    fetchFn = fetch,
+  } = options;
   const headers = new Headers({ accept: "application/json" });
   let body: string | Uint8Array<ArrayBuffer> | FormData | null = null;
   if (form !== undefined) {

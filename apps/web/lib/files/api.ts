@@ -47,8 +47,7 @@ function query(params: Readonly<Record<string, string | undefined>>): string {
 export function createFilesApi(teamId: string, fetchFn?: typeof fetch): FilesApi {
   const opts = { teamId, fetchFn };
   return {
-    list: (path, cursor) =>
-      apiRequest(`/v1/workspace/files${query({ path, cursor })}`, opts),
+    list: (path, cursor) => apiRequest(`/v1/workspace/files${query({ path, cursor })}`, opts),
     download: (path) => apiDownload(`/v1/workspace/file${query({ path })}`, opts),
     upload: (folder, file) => {
       const form = new FormData();

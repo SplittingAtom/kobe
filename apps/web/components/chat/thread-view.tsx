@@ -7,6 +7,7 @@ import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button";
 import { Skeleton } from "../ui/skeleton";
 import { isThreadRunning, type ThreadState } from "../../lib/chat/thread-state";
 import { ErrorNotice } from "../admin/error-notice";
+import { FilesToggleButton } from "../files/files-panel";
 import { ArtifactList } from "./artifact-list";
 import { AgentPicker, useDraftAgentName } from "./agent-picker";
 import { Composer } from "./composer";
@@ -136,6 +137,9 @@ export function ThreadView() {
         {label && (
           <span className="text-muted-foreground rounded-full border px-2 text-xs">{label}</span>
         )}
+        <span className="ms-auto">
+          <FilesToggleButton />
+        </span>
       </header>
       <ArtifactList threadId={state.threadId} />
       {state.phase === "error" && state.loadError && (
