@@ -29,12 +29,13 @@ Migration-only PR (ac-3): schema `packages/db/src/schema/files.ts`, migrations `
 - **RLS**: both tables ENABLE + FORCE with the canonical `team_isolation` policy (0072).
   Legal hold: statement-level delete guard and truncate guard on `files`, keyed on the file owner
   (`legal_hold_covers(team, user_id)`), since a file need not have a thread.
-- **No `break_glass_read` on files**: not thread-bound; read-side design belongs to the feature PR
-  (it must then be added to `BREAK_GLASS_READABLE_TABLES` with a policy).
+- **`break_glass_read` on files** (coordinator review): SELECT-only policy shaped exactly like
+  artifacts' (0067), in `0072`; `files` joins `BREAK_GLASS_READABLE_TABLES`. Thread-bound rows only:
+  files with `thread_id` NULL stay team-isolation only (the NULL comparison hides them).
 
 ## Open questions (for Chris or the coordinator)
 
-- Break-glass read for files (above): add in the feature PR, or want it now?
+- None.
 
 ## Evidence
 

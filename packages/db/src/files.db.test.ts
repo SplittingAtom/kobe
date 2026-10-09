@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
+import { BREAK_GLASS_ACTOR_SETTING, BREAK_GLASS_GRANT_SETTING } from "./settings.js";
 import { LEGAL_HOLD_SQLSTATE } from "./legal-hold/index.js";
 
 /** KOBE-142: files and team_storage_quotas constraints and cascades (probe suite: probe.db.test). */
@@ -166,6 +167,61 @@ describe("files under a legal hold", () => {
     );
     expect(await errorCode(admin.query(`TRUNCATE files`))).toBe(LEGAL_HOLD_SQLSTATE);
     expect(await count(`SELECT count(*) AS n FROM files WHERE team_id = $1`, [t])).toBe(1);
+  });
+});
+
+describe("files break-glass read", () => {
+  async function grant(teamId: string, threadId?: string): Promise<string> {
+    const { rows } = await appClient.query<{ id: string }>(
+      `INSERT INTO break_glass_grants (team_id, admin_id, thread_id, reason) VALUES ($1, $2, $3, 'probe') RETURNING id`,
+      [teamId, requester, threadId ?? null],
+    );
+    const id = rows[0]?.id ?? "";
+    await appClient.query(
+      `UPDATE break_glass_grants SET status = 'approved', approver_id = $2 WHERE id = $1`,
+      [id, approver],
+    );
+    return id;
+  }
+
+  /** Names of the files visible to the app role under a grant (or none), read-only. */
+  async function visible(grantId: string | null): Promise<string[]> {
+    await appClient.query("BEGIN");
+    try {
+      if (grantId)
+        await appClient.query(
+          `SELECT set_config('${BREAK_GLASS_GRANT_SETTING}', $1, true), set_config('${BREAK_GLASS_ACTOR_SETTING}', $2, true)`,
+          [grantId, requester],
+        );
+      const { rows } = await appClient.query<{ name: string }>(`SELECT name FROM files`);
+      return rows.map((r) => r.name).sort();
+    } finally {
+      await appClient.query("ROLLBACK");
+    }
+  }
+
+  const named = (teamId: string, threadId: string | null, name: string) =>
+    admin.query(
+      `INSERT INTO files (team_id, user_id, thread_id, kind, name, size_bytes, sha256, mime_type, blob_ref)
+       VALUES ($1, $2, $3, 'upload', $4, 1, repeat('a', 64), 'text/plain', 'k')`,
+      [teamId, owner, threadId, name],
+    );
+
+  it("shows a granted thread's files only, not other threads', unthreaded or other teams' files", async () => {
+    const t = await team();
+    const th1 = await thread(t);
+    const th2 = await thread(t);
+    const other = await team();
+    await named(t, th1, "in-thread-1");
+    await named(t, th2, "in-thread-2");
+    await named(t, null, "no-thread");
+    await named(other, await thread(other), "other-team");
+    expect(await visible(await grant(t, th1))).toEqual(["in-thread-1"]);
+    expect(await visible(await grant(t))).toEqual(["in-thread-1", "in-thread-2"]);
+  });
+
+  it("shows nothing without a grant", async () => {
+    expect(await visible(null)).toEqual([]);
   });
 });
 
