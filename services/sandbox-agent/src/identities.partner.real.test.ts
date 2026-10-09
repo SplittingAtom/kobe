@@ -31,7 +31,8 @@ interface Result {
 function helper(args: readonly string[], extraFds = 0): Promise<Result> {
   return new Promise((resolve) => {
     const stdio: ("ignore" | "pipe")[] = ["ignore", "pipe", "pipe"];
-    for (let i = 0; i < extraFds; i++) stdio.push("ignore");
+    // Sockets, not "ignore": Node leaves ignored fds above 2 closed.
+    for (let i = 0; i < extraFds; i++) stdio.push("pipe");
     const child = spawn(HELPER as string, [...args], { stdio, env: { PATH: process.env.PATH } });
     let stdout = "";
     let stderr = "";
@@ -79,7 +80,9 @@ describe.runIf(HELPER !== undefined)("paired partner uids with the real helper (
     await rm(scratch, { recursive: true, force: true });
   });
   afterEach(async () => {
-    for (const child of victims.splice(0)) child.kill("SIGKILL");
+    // The victims belong to uids of held identities: the kill-all below ends them (this process
+    // cannot signal another uid).
+    victims.splice(0);
     for (const identity of held.splice(0)) {
       await identities.killAllPatiently(identity, [10, 10]);
       identities.release(identity);
