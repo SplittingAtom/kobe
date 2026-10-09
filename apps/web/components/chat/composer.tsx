@@ -1,10 +1,12 @@
 "use client";
 
 import { ComposerPrimitive, useAui, useAuiState } from "@assistant-ui/react";
-import { ArrowUpIcon, MicIcon, SquareIcon } from "lucide-react";
-import type { KeyboardEvent } from "react";
+import { ArrowUpIcon, MicIcon, PaperclipIcon, SquareIcon } from "lucide-react";
+import { useRef, useState, type ChangeEvent, type DragEvent, type KeyboardEvent } from "react";
+import { NEW_DRAFT } from "../../lib/chat/attachments";
 import { useDictation } from "../../lib/chat/dictation";
 import { isBusy, isThreadRunning } from "../../lib/chat/thread-state";
+import { ComposerAttachments, useDraftFiles } from "./attachment-chips";
 import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button";
 import { Button } from "../ui/button";
@@ -28,11 +30,39 @@ export function Composer({ extras }: { readonly extras: KobeThreadExtras }) {
   const inTrash = state.summary?.deletedAt != null;
   const empty = text.trim() === "";
   const dictation = useDictation((t) => aui.composer.setText(t));
+  const draft = remoteId ?? NEW_DRAFT;
+  const files = useDraftFiles(draft);
+  const blocker = session.attachments.blocker(draft);
+  const picker = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+
+  const attach = (list: FileList | null) => {
+    if (list && list.length > 0) session.attachments.add(draft, [...list], remoteId);
+  };
+  const onPick = (e: ChangeEvent<HTMLInputElement>) => {
+    attach(e.target.files);
+    e.target.value = ""; // the same file can be picked again after removing it
+  };
+  const hasFiles = (e: DragEvent) => e.dataTransfer.types.includes("Files");
+  const onDragOver = (e: DragEvent) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    setDragging(true);
+  };
+  const onDrop = (e: DragEvent) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    setDragging(false);
+    attach(e.dataTransfer.files);
+  };
 
   const queue = async () => {
-    if (!controller || empty) return;
+    if (!controller || empty || blocker !== undefined) return;
     dictation.stop();
-    if (await controller.send(text.trim())) aui.composer.setText("");
+    if (await controller.send(text.trim(), undefined, session.attachments.ready(draft))) {
+      session.attachments.sent(draft);
+      aui.composer.setText("");
+    }
   };
   const steer = async () => {
     if (!controller || empty) return;
@@ -71,7 +101,14 @@ export function Composer({ extras }: { readonly extras: KobeThreadExtras }) {
         if (remoteId === undefined) session.setNextTitle(text);
       }}
     >
-      <div className="border-foreground/10 focus-within:border-foreground/25 bg-muted/30 flex w-full cursor-text flex-col gap-2 rounded-2xl border p-2 transition-[border-color]">
+      <div
+        data-dragging={dragging || undefined}
+        onDragOver={onDragOver}
+        onDragLeave={() => setDragging(false)}
+        onDrop={onDrop}
+        className="border-foreground/10 focus-within:border-foreground/25 data-[dragging]:border-primary data-[dragging]:bg-primary/5 bg-muted/30 flex w-full cursor-text flex-col gap-2 rounded-2xl border p-2 transition-[border-color]"
+      >
+        <ComposerAttachments draft={draft} threadId={remoteId} />
         <label htmlFor="kobe-composer" className="sr-only">
           Message
         </label>
@@ -88,6 +125,25 @@ export function Composer({ extras }: { readonly extras: KobeThreadExtras }) {
           className="caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none border-0 bg-transparent px-2.5 py-1 text-base leading-6 outline-none focus-visible:shadow-none"
         />
         <div className="flex flex-wrap items-center justify-end gap-1.5">
+          <input
+            ref={picker}
+            type="file"
+            multiple
+            tabIndex={-1}
+            aria-label="Choose files to attach"
+            className="sr-only"
+            onChange={onPick}
+          />
+          <TooltipIconButton
+            tooltip="Attach files"
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-7 rounded-full"
+            onClick={() => picker.current?.click()}
+          >
+            <PaperclipIcon className="size-4" />
+          </TooltipIconButton>
           <ModelPicker controller={controller} state={state} isNew={remoteId === undefined} />
           <span className="flex-1" />
           {dictation.supported && (
@@ -111,7 +167,7 @@ export function Composer({ extras }: { readonly extras: KobeThreadExtras }) {
                 size="sm"
                 className="h-8 rounded-full px-3"
                 onClick={() => void queue()}
-                disabled={empty}
+                disabled={empty || blocker !== undefined}
               >
                 Queue
               </Button>
@@ -121,7 +177,7 @@ export function Composer({ extras }: { readonly extras: KobeThreadExtras }) {
                 size="sm"
                 className="h-8 rounded-full px-3"
                 onClick={() => void steer()}
-                disabled={empty || isBusy(state, "steer")}
+                disabled={empty || isBusy(state, "steer") || files.length > 0}
               >
                 Steer now
               </Button>
@@ -145,6 +201,7 @@ export function Composer({ extras }: { readonly extras: KobeThreadExtras }) {
                 variant="default"
                 size="icon"
                 className="size-7 rounded-full"
+                disabled={blocker !== undefined}
               >
                 <ArrowUpIcon className="size-4" />
               </TooltipIconButton>
@@ -153,7 +210,9 @@ export function Composer({ extras }: { readonly extras: KobeThreadExtras }) {
         </div>
       </div>
       <p id="kobe-composer-hint" className="text-muted-foreground px-2 text-xs">
-        {dictation.error ? (
+        {blocker !== undefined ? (
+          <span role="status">{blocker}</span>
+        ) : dictation.error ? (
           <span role="alert">{dictation.error}</span>
         ) : dictation.listening ? (
           "Listening… speak your prompt, then press the mic again to stop"

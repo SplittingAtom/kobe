@@ -1,10 +1,11 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { expect } from "vitest";
+import type { UploadTransport } from "../../lib/chat/uploads";
 import type { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { ChatApp } from "./chat-app";
 
 /** Renders the chat app over the fake server, optionally on a thread (`?thread=`). */
-export function openApp(fake: FakeKobe, threadId?: string) {
+export function openApp(fake: FakeKobe, threadId?: string, uploadTransport?: UploadTransport) {
   window.history.replaceState(null, "", threadId ? `/?thread=${threadId}` : "/");
   let n = 0;
   return render(
@@ -13,6 +14,7 @@ export function openApp(fake: FakeKobe, threadId?: string) {
       eventSource={fake.eventSource}
       newKey={() => `key-${++n}`}
       reopenDelayMs={() => 0}
+      uploadTransport={uploadTransport}
     />,
   );
 }
