@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import pg from "pg";
-import { runMigrations } from "../migrate.js";
+import { DEFAULT_MIGRATIONS_FOLDER, runMigrations } from "../migrate.js";
+import { assertAllMigrationsApplied, assertJournalExtendsBase } from "./upgrade.js";
 
 export interface TestDatabase {
   /** Superuser URL to the throwaway database (tests only). */
@@ -14,7 +15,8 @@ export interface TestDatabase {
 
 /**
  * Creates a throwaway database with a separate owner role (runs migrations) and app role
- * (NOSUPERUSER NOBYPASSRLS, owns nothing), migrated from scratch. `serverUrl` is a superuser URL
+ * (NOSUPERUSER NOBYPASSRLS, owns nothing), migrated from scratch, or, when
+ * KOBE_TEST_BASE_MIGRATIONS names a base branch's migrations folder, upgraded from it. `serverUrl` is a superuser URL
  * to a Postgres 17 server, used only to create and drop the database and roles.
  */
 export async function createTestDatabase(serverUrl: string): Promise<TestDatabase> {
@@ -48,7 +50,21 @@ export async function createTestDatabase(serverUrl: string): Promise<TestDatabas
       `CREATE ROLE ${appRole} LOGIN PASSWORD '${password}' NOSUPERUSER NOBYPASSRLS`,
     );
     await admin.query(`CREATE DATABASE ${dbName} OWNER ${ownerRole}`);
-    await runMigrations({ databaseUrl: urlFor(ownerRole), appRole });
+    const baseFolder = process.env.KOBE_TEST_BASE_MIGRATIONS;
+    if (baseFolder) {
+      // Upgrade path (KOBE-69): the base branch's migrations first, then this branch's on top,
+      // through the same runner the chart's migration Job uses.
+      assertJournalExtendsBase(baseFolder, DEFAULT_MIGRATIONS_FOLDER);
+      await runMigrations({
+        databaseUrl: urlFor(ownerRole),
+        appRole,
+        migrationsFolder: baseFolder,
+      });
+      await runMigrations({ databaseUrl: urlFor(ownerRole), appRole });
+      await assertAllMigrationsApplied(urlFor(ownerRole), DEFAULT_MIGRATIONS_FOLDER);
+    } else {
+      await runMigrations({ databaseUrl: urlFor(ownerRole), appRole });
+    }
   } catch (err) {
     await drop();
     throw err;

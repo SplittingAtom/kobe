@@ -91,6 +91,18 @@ jobs:
         run: pnpm --filter @kobe/db exec drizzle-kit check && pnpm db:check
       - name: RLS catalog check and cross-team probe suite
         run: pnpm test:db
+      # KOBE-69: an existing install runs only migrations newer than its last one, so also migrate a
+      # database to the base branch's migrations (PR base, or the merge queue's base), then to this
+      # branch's with the chart's runner, and run the catalog check and probe suite against it.
+      - name: Upgrade path (base migrations, then this branch) with catalog check and probe suite
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: |
+          KOBE_TEST_BASE_MIGRATIONS="$(scripts/upgrade-base-migrations.sh)"
+          export KOBE_TEST_BASE_MIGRATIONS
+          echo "upgrading from base migrations in $KOBE_TEST_BASE_MIGRATIONS"
+          pnpm --filter @kobe/db exec vitest run -c vitest.db.config.ts src/catalog.db.test.ts src/probe.db.test.ts
 
   orbit-loader:
     # KOBE-90: the Orbit export mapper's fixtures load in Orbit's real YAML loader. Own job so the
