@@ -81,16 +81,22 @@ export function registerExecTools(
   );
   register(pi.createWriteToolDefinition(cwd, { operations: writeOperations(transport) }));
   register(pi.createEditToolDefinition(cwd, { operations: editOperations(transport) }));
-  register(pi.createLsToolDefinition(cwd, { operations: lsOperations(transport) }));
+  register({
+    ...pi.createLsToolDefinition(cwd, { operations: lsOperations(transport) }),
+    defaultActive: false,
+  });
+  // Pi leaves grep, find and ls inactive by default; registering them must not switch them on.
   const grep = pi.createGrepToolDefinition(cwd);
   register({
     ...grep,
+    defaultActive: false,
     execute: (_id, params, signal, _onUpdate, ctx) =>
       executeGrep(transport, pi, params as never, ctx?.cwd || cwd, signal),
   });
   const find = pi.createFindToolDefinition(cwd);
   register({
     ...find,
+    defaultActive: false,
     execute: (_id, params, signal, _onUpdate, ctx) =>
       executeFind(transport, pi, params as never, ctx?.cwd || cwd, signal),
   });

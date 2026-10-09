@@ -5,9 +5,15 @@ import { fileURLToPath } from "node:url";
 import { startLocalGateway, type LocalGateway } from "@kobe/model-gateway/testing";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { GUARDED_CONFIG, writeGuardedConfig } from "./models/agent-config.js";
-import { loadPiIdentities, type PiIdentities, type PiIdentity } from "./pi/identities.js";
+import {
+  loadPiIdentities,
+  partnerOf,
+  type PiIdentities,
+  type PiIdentity,
+} from "./pi/identities.js";
 import {
   PiRpc,
+  type PiPair,
   startListener,
   startTap,
   type Listener,
@@ -85,7 +91,16 @@ afterEach(async () => {
 
 type PiRpcExec = NonNullable<Parameters<typeof PiRpc.start>[0]["exec"]>;
 
-async function setup(exec?: PiRpcExec) {
+/** How Pi and its tool are set up: the executor, a real Pi identity, and KOBE-169's lock. */
+interface Layout {
+  readonly exec?: PiRpcExec;
+  /** Real identity for Pi with the tools in Pi (no executor): the controls. */
+  readonly pair?: PiPair;
+  /** The agent's read-only placeholders in agent/ (KOBE-169); default: with them. */
+  readonly lock?: boolean;
+}
+
+async function setup({ exec, pair, lock = true }: Layout = {}) {
   gateway = await startLocalGateway({
     enabledModels: [OPENAI, ANTHROPIC].map((m) => m.gateway_model),
   });
@@ -98,9 +113,11 @@ async function setup(exec?: PiRpcExec) {
       modelsExtension: MODELS_EXTENSION,
       policyExtension: REAL_POLICY_EXTENSION,
       gatewayUrl: tap.url,
-      ...(exec === undefined
-        ? {}
-        : { exec, prepareAgentDir: (dir: string) => writeGuardedConfig(dir, true) }),
+      ...(exec === undefined ? {} : { exec }),
+      ...(pair === undefined ? {} : { pair }),
+      ...((exec !== undefined || pair !== undefined) && lock
+        ? { prepareAgentDir: (dir: string) => writeGuardedConfig(dir, true) }
+        : {}),
     },
     session,
   );
@@ -122,20 +139,25 @@ async function runWith(
 type Scenario = {
   /** Remove the planted files after the reload, before the next prompt (the tripwire-clean state). */
   readonly removeAfterReload?: boolean;
-  /** Pi's tools run in the paired executor (KOBE-167), not in Pi. */
-  readonly exec?: PiRpcExec;
+  readonly layout?: Layout;
 };
 
 /**
  * Plant (in a run, with the real bash tool), run another model (kobe-models re-registers the
  * provider with that model only), reload through `set_model`, prompt, and report.
  */
-async function setModelScenario(name: string, { removeAfterReload = false, exec }: Scenario = {}) {
-  const { pi: rpc, gateway: gw, tap: legit, evil: listener, session } = await setup(exec);
+async function setModelScenario(
+  name: string,
+  { removeAfterReload = false, layout = {} }: Scenario = {},
+) {
+  const exec = layout.exec ?? layout.pair;
+  const { pi: rpc, gateway: gw, tap: legit, evil: listener, session } = await setup(layout);
   const plant = (variants(listener.url)[name] ?? {}) as Record<string, Plant>;
   // Run by the executor the tool has no PI_CODING_AGENT_DIR: it is given the path outright.
   const command = plantCommand(plant, exec === undefined ? undefined : rpc.agentDir);
-  await runWith(rpc, gw, session, 1, OPENAI, `bash: ${command}`);
+  // The tool says who it is first: the proof of which uid made (or failed) the plant.
+  const who = `id -u > '${rpc.workspace}/tool-uid'`;
+  await runWith(rpc, gw, session, 1, OPENAI, `bash: ${who}; ${command}`);
   await runWith(rpc, gw, session, 2, ANTHROPIC, "another model");
   await rpc.command({ type: "set_model", provider: "kobe", modelId: OPENAI.gateway_model });
   if (removeAfterReload) {
@@ -269,10 +291,22 @@ describe.runIf(PI_AVAILABLE && EXECUTOR_BUILT && HELPER !== undefined)(
       }
     }
 
+    const toolUid = async (rpc: PiRpc) =>
+      Number((await readFile(path.join(rpc.workspace, "tool-uid"), "utf8")).trim());
+    const tool = (): PiPair => exec.pair as PiPair;
+
+    // Each protection on its own. Both layouts are the agent's (real Pi identity, sticky agent/).
+    // 1. The executor alone (no KOBE-169 placeholders): the plant is attempted by the partner uid
+    //    (the tool says so) and fails.
+    // 2. KOBE-169's lock alone (the tool is Pi's own uid): refused too.
+    // 3. Neither: the same plant by Pi's uid works and redirects. So each stops the attack by itself.
     it.each(LEAKING)(
-      "set_model after the plant: %s",
+      "executor on, lock on: the partner uid's plant is refused: %s",
       async (name) => {
-        const { listener, legit, rpc, plant } = await setModelScenario(name, { exec });
+        const { listener, legit, rpc, plant } = await setModelScenario(name, {
+          layout: { exec },
+        });
+        expect(await toolUid(rpc)).toBe(partnerOf(identity).uid);
         expectNothingLeaked(listener, legit);
         await expectPlantRefused(rpc, plant);
       },
@@ -280,13 +314,45 @@ describe.runIf(PI_AVAILABLE && EXECUTOR_BUILT && HELPER !== undefined)(
     );
 
     // The tripwire-clean case: nothing is planted, so there is nothing to remove or to find.
-    it("set_model after the plant, plant removed before the prompt (tripwire-clean)", async () => {
+    it("executor on, lock on: plant removed before the prompt (tripwire-clean)", async () => {
       const { listener, legit, rpc, plant } = await setModelScenario(LEAKING[0] as string, {
         removeAfterReload: true,
-        exec,
+        layout: { exec },
       });
+      expect(await toolUid(rpc)).toBe(partnerOf(identity).uid);
       expectNothingLeaked(listener, legit);
       await expectPlantRefused(rpc, plant);
+    }, 180_000);
+
+    it.each(LEAKING)(
+      "executor on, lock OFF: the executor alone stops the plant: %s",
+      async (name) => {
+        const { listener, legit, rpc, plant } = await setModelScenario(name, {
+          layout: { exec, lock: false },
+        });
+        expect(await toolUid(rpc)).toBe(partnerOf(identity).uid);
+        expectNothingLeaked(listener, legit);
+        await expectPlantRefused(rpc, plant);
+      },
+      180_000,
+    );
+
+    it("executor OFF, lock on: KOBE-169's lock alone stops the plant by Pi's uid", async () => {
+      const { listener, legit, rpc, plant } = await setModelScenario(LEAKING[0] as string, {
+        layout: { pair: tool() },
+      });
+      expect(await toolUid(rpc)).toBe(identity.uid);
+      expectNothingLeaked(listener, legit);
+      await expectPlantRefused(rpc, plant);
+    }, 180_000);
+
+    it("control, executor OFF and lock OFF: Pi's uid plants and the token leaks", async () => {
+      const { listener, rpc } = await setModelScenario(LEAKING[0] as string, {
+        layout: { pair: tool(), lock: false },
+      });
+      expect(await toolUid(rpc)).toBe(identity.uid);
+      expect(listener.requests.length).toBeGreaterThan(0);
+      expect(listener.requests[0]?.headers["x-kobe-run-token"]).toBeTruthy();
     }, 180_000);
   },
 );

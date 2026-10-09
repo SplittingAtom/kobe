@@ -174,7 +174,7 @@ describe.skipIf(!PI_AVAILABLE || !EXECUTOR_BUILT)("kobe-exec in real Pi, through
     expect(existsSync(path.join(t.workspace, "ran.txt"))).toBe(false);
   }, 90_000);
 
-  it("writes, reads, edits, lists and searches files through the executor", async () => {
+  it("writes, reads and edits files through the executor (ls, grep, find stay inactive, as in Pi)", async () => {
     const t = await start();
     allowAll(t);
     await mkdir(path.join(t.workspace, "d"), { recursive: true });
@@ -187,7 +187,6 @@ describe.skipIf(!PI_AVAILABLE || !EXECUTOR_BUILT)("kobe-exec in real Pi, through
         id: "e1",
         args: { path: "notes.txt", edits: [{ oldText: "beta", newText: "BETA" }] },
       },
-      { tool: "ls", id: "l1", args: { path: "." } },
     ]);
     expect(await toolEnd(t, "w1")).toEqual({
       isError: false,
@@ -196,8 +195,6 @@ describe.skipIf(!PI_AVAILABLE || !EXECUTOR_BUILT)("kobe-exec in real Pi, through
     expect(await toolEnd(t, "r1")).toEqual({ isError: false, text: "alpha\nbeta\n" });
     expect(await toolEnd(t, "e1")).toMatchObject({ isError: false });
     expect(await readFile(path.join(t.workspace, "notes.txt"), "utf8")).toBe("alpha\nBETA\n");
-    const ls = await toolEnd(t, "l1");
-    expect(ls.text.split("\n")).toEqual(expect.arrayContaining(["d/", "notes.txt"]));
   }, 120_000);
 
   it("fails the call, never runs it in Pi, when the executor dies; the next call gets a new one", async () => {

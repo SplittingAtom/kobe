@@ -29,6 +29,38 @@ export async function prepareToolDir(runtimeDir: string, identity: PiIdentity): 
   return dir;
 }
 
+export interface PiPrivateDirs {
+  readonly root: string;
+  readonly home: string;
+  readonly tmp: string;
+}
+
+/**
+ * Pi's own HOME and TMPDIR once its tools are another uid (KOBE-196): Pi loads code from both
+ * (jiti's transpile cache in `$TMPDIR/jiti`, Node's `$HOME/.node_modules`), so neither may be
+ * writable by the partner uid, and `kobe-reclaim` must not hand them to the workspace group. They
+ * sit beside the runtime directory, agent-owned with the Pi's group: `home` 2770 (nobody else
+ * reaches it), `tmp` 2775 (the partner may read it, which the bash tool's "full output" files
+ * need, never write it). The partner's HOME and TMPDIR stay the shared ones.
+ */
+export async function preparePiPrivateDirs(
+  runtimeDir: string,
+  identity: PiIdentity,
+): Promise<PiPrivateDirs> {
+  const root = `${runtimeDir}-pi`;
+  await mkdir(root, { mode: 0o755 });
+  const dirs = { root, home: `${root}/home`, tmp: `${root}/tmp` };
+  for (const [dir, mode] of [
+    [dirs.home, 0o2770],
+    [dirs.tmp, 0o2775],
+  ] as const) {
+    await mkdir(dir, { mode: 0o700 });
+    await chown(dir, -1, identity.gid);
+    await chmod(dir, mode);
+  }
+  return dirs;
+}
+
 export interface OpenRelayOptions {
   readonly pi: PiProcess;
   readonly wiring: ExecWiring;

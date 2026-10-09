@@ -188,6 +188,8 @@ describe("buildPiLaunch", () => {
       PI_TELEMETRY: "0",
       PI_OFFLINE: "1",
       NODE_OPTIONS: "--disable-sigusr1",
+      JITI_FS_CACHE: "false",
+      NODE_DISABLE_COMPILE_CACHE: "1",
       KOBE_POLICY_FD: String(POLICY_CHANNEL_FD),
     });
   });

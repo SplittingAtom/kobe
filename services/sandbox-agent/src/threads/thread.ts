@@ -38,7 +38,13 @@ import {
 } from "../models/runtime-dir.js";
 import type { ModelWiring, RunModel } from "../models/types.js";
 import type { ExecRelay } from "../exec/relay.js";
-import { assertPaired, openRelay, prepareToolDir, type ExecWiring } from "./exec-wiring.js";
+import {
+  assertPaired,
+  openRelay,
+  preparePiPrivateDirs,
+  prepareToolDir,
+  type ExecWiring,
+} from "./exec-wiring.js";
 import {
   EGRESS_TOKEN_FILE_NAME,
   EgressTokenFile,
@@ -140,6 +146,8 @@ interface RuntimeOf {
   readonly identity: PiIdentity | undefined;
   /** The partner-readable directory beside `dir` (the egress token), under paired identities. */
   readonly toolDir?: string | undefined;
+  /** Pi's private HOME/TMPDIR root beside `dir` (KOBE-196), under paired identities. */
+  readonly piDir?: string | undefined;
   readonly relay?: ExecRelay | undefined;
 }
 
@@ -264,6 +272,7 @@ export class Thread {
     const identity = await identities?.acquire();
     let runtimeDir: string | undefined;
     let toolDir: string | undefined;
+    let piDir: string | undefined;
     let relay: ExecRelay | undefined;
     let pi: PiProcess;
     let modelFile: ModelFile | undefined;
@@ -280,6 +289,15 @@ export class Thread {
       }
       await writeGuardedConfig(agentDir, identity !== undefined);
       env.PI_CODING_AGENT_DIR = agentDir;
+      // The tools get the launch's HOME and TMPDIR (the shared ones); with the executor under
+      // another uid Pi gets private ones, as it loads code from both.
+      const toolEnvBase = { ...env };
+      if (exec !== undefined && identity !== undefined) {
+        const priv = await preparePiPrivateDirs(runtimeDir, identity);
+        piDir = priv.root;
+        env.HOME = priv.home;
+        env.TMPDIR = priv.tmp;
+      }
       const models = this.#env.models;
       if (models !== undefined) {
         modelFile = new ModelFile(
@@ -344,7 +362,7 @@ export class Thread {
           relay = openRelay({
             pi,
             wiring: exec,
-            launchEnv: env,
+            launchEnv: toolEnvBase,
             egress: egressVars,
             cwd: this.#env.workspaceDir,
             runAs:
@@ -365,7 +383,7 @@ export class Thread {
     } catch (error) {
       // Nothing of a Pi that never started may stay behind (the token included).
       if (runtimeDir !== undefined) {
-        const removed = await removeDirs([runtimeDir, toolDir], identities);
+        const removed = await removeDirs([runtimeDir, toolDir, piDir], identities);
         // A directory the next holder of the identity could read: keep the identity out of use.
         if (removed && identity !== undefined) identities?.release(identity);
       } else if (identity !== undefined) {
@@ -373,7 +391,7 @@ export class Thread {
       }
       throw error;
     }
-    this.#runtimeDirs.set(pi, { dir: runtimeDir, identity, toolDir, relay });
+    this.#runtimeDirs.set(pi, { dir: runtimeDir, identity, toolDir, piDir, relay });
     const control = pi.control;
     let channel: PolicyChannel | undefined;
     if (control !== undefined) {
@@ -741,6 +759,7 @@ export class Thread {
     try {
       await removeRuntimeDir(runtime.dir, identities);
       if (runtime.toolDir !== undefined) await removeRuntimeDir(runtime.toolDir, identities);
+      if (runtime.piDir !== undefined) await removeRuntimeDir(runtime.piDir, identities);
     } catch (error) {
       this.#warn(`runtime directory not removed: ${(error as Error).message}`);
       // A directory the next holder of the identity could read: keep the identity out of use.

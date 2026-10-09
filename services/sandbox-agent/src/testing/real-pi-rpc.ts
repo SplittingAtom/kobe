@@ -9,6 +9,7 @@ import { ExecRelay } from "../exec/relay.js";
 import { executorEnv, startExecutor } from "../exec/spawn-executor.js";
 import { EXEC_FD_ENV } from "../kobe-exec/protocol.js";
 import type { PiIdentities, PiIdentity } from "../pi/identities.js";
+import { preparePiPrivateDirs } from "../threads/exec-wiring.js";
 import { EXEC_CHANNEL_FD, PI_LOCKDOWN_ARGS } from "../pi/pi-launch.js";
 
 /**
@@ -106,12 +107,26 @@ export interface PiRpcOptions {
   readonly exec?: {
     readonly extension: string;
     readonly executorEntry: string;
-    readonly pair?: {
-      readonly identities: PiIdentities;
-      readonly identity: PiIdentity;
-      readonly workspaceGid: number;
-    };
+    readonly pair?: PiPair;
   };
+  /**
+   * Pi under a real Pi identity with the agent's layout but its tools in Pi (no executor): the
+   * controls that show KOBE-169's lock stops the plant on its own.
+   */
+  readonly pair?: PiPair;
+}
+
+export interface PiPair {
+  readonly identities: PiIdentities;
+  readonly identity: PiIdentity;
+  readonly workspaceGid: number;
+  /**
+   * KOBE-196: Pi's HOME and TMPDIR private to it and its jiti/compile caches off (default),
+   * or the shared ones with the caches on, as before (the control that shows the attack).
+   */
+  readonly hardened?: boolean;
+  /** A shared scratch dir that outlives the Pi (default: one inside this Pi's scratch). */
+  readonly sharedTmp?: string;
 }
 
 export interface ModelChoice {
@@ -123,12 +138,17 @@ type Message = Record<string, unknown>;
 
 export class PiRpc {
   readonly dir: string;
+  /** The shared scratch dirs (paired mode): what the tools use as HOME and TMPDIR. */
+  sharedHome = "";
+  sharedTmp = "";
+  piTmp = "";
+  piHome = "";
   readonly agentDir: string;
   readonly workspace: string;
   readonly events: Message[] = [];
   #child: ChildProcess;
   #relay: ExecRelay | undefined;
-  #pair: NonNullable<PiRpcOptions["exec"]>["pair"];
+  #pair: PiPair | undefined;
   #root: string;
   #modelFile: string;
   #gatewayUrl: string;
@@ -141,7 +161,7 @@ export class PiRpc {
     this.dir = dir;
     this.agentDir = path.join(dir, "agent");
     this.workspace = path.join(root, "workspace");
-    this.#pair = options.exec?.pair;
+    this.#pair = options.pair ?? options.exec?.pair;
     this.#modelFile = path.join(dir, "model.json");
     this.#child = child;
     this.#gatewayUrl = options.gatewayUrl;
@@ -149,7 +169,7 @@ export class PiRpc {
 
   static async start(options: PiRpcOptions, sessionToken: string): Promise<PiRpc> {
     const exec = options.exec;
-    const pair = exec?.pair;
+    const pair = options.pair ?? exec?.pair;
     // Paired uids: scratch under /dev/shm like the helper tests (every uid can reach it), the
     // runtime dir apart from the workspace and home the two uids share.
     const root = await mkdtemp(
@@ -187,9 +207,29 @@ export class PiRpc {
       }),
       { mode: pair === undefined ? 0o600 : 0o640 },
     );
+    // The shared scratch the tools use; Pi gets private ones when hardened.
+    const sharedTmp = pair?.sharedTmp ?? path.join(root, "tmp");
+    let piHome = home;
+    let piTmp = sharedTmp;
+    if (pair !== undefined) {
+      await mkdir(sharedTmp, { recursive: true });
+      await chown(sharedTmp, -1, pair.workspaceGid);
+      await chmod(sharedTmp, 0o2775);
+      if (pair.hardened !== false) {
+        const priv = await preparePiPrivateDirs(dir, pair.identity);
+        piHome = priv.home;
+        piTmp = priv.tmp;
+      }
+    }
     const piEnv: Record<string, string> = {
       PATH: process.env.PATH ?? "",
-      HOME: home,
+      HOME: piHome,
+      ...(pair === undefined ? {} : { TMPDIR: piTmp }),
+      ...(pair?.hardened === false
+        ? {}
+        : pair === undefined
+          ? {}
+          : { JITI_FS_CACHE: "false", NODE_DISABLE_COMPILE_CACHE: "1" }),
       PI_CODING_AGENT_DIR: path.join(dir, "agent"),
       KOBE_MODEL_FILE: modelFile,
       PI_OFFLINE: "1",
@@ -226,6 +266,10 @@ export class PiRpc {
           : ["pipe", "pipe", "inherit", "pipe", "pipe", "pipe"],
     });
     const pi = new PiRpc(root, dir, child, options);
+    pi.sharedHome = home;
+    pi.sharedTmp = sharedTmp;
+    pi.piHome = piHome;
+    pi.piTmp = piTmp;
     if (exec !== undefined) {
       pi.#relay = new ExecRelay({
         channel: (child.stdio as unknown[])[5] as Duplex,
@@ -233,7 +277,11 @@ export class PiRpc {
           startExecutor({
             nodeBin: process.execPath,
             entry: exec.executorEntry,
-            env: executorEnv({ PATH: piEnv.PATH ?? "", HOME: home }),
+            env: executorEnv({
+              PATH: piEnv.PATH ?? "",
+              HOME: home,
+              ...(pair === undefined ? {} : { TMPDIR: sharedTmp }),
+            }),
             cwd: workspace,
             runAs:
               pair === undefined
