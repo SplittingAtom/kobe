@@ -1,7 +1,6 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
-import { pinConnector, type PinOutcome } from "../connectors/pinning.js";
 import {
   listGrants,
   putGrant,
@@ -34,7 +33,7 @@ const notAvailable = (c: Context) =>
  * timestamps only. Every request acts on the caller's own grants in the active team.
  *
  * GET    /                 → 200 `{grants: [{connector_id, hint, created_at, updated_at}]}`
- * PUT    /{connector_id}   `{api_key}` → 200 `{grant, pin?}` (201 when new); 404 not enabled;
+ * PUT    /{connector_id}   `{api_key}` → 200 `{grant}` (201 when new); 404 not enabled;
  *                          422 `not_api_key`; 503 when the install has no envelope key
  * DELETE /{connector_id}   → 204; 404 when there is no key
  */
@@ -73,13 +72,8 @@ export function connectorGrantRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
         ? notAvailable(c)
         : c.json({ code: "not_api_key", message: "That connector does not use an API key." }, 422);
     }
-    // The key can now pin a connector no admin could probe (it needs a credential): only while it
-    // has no pins, and a failed probe never fails the save.
-    const pin = await pinConnector(db, deps.connectorProbe, id.data, body.api_key);
-    return c.json(
-      { grant: summaryBody(result.grant), ...(pin && pinShown(pin) ? { pin: pinBody(pin) } : {}) },
-      result.replaced ? 200 : 201,
-    );
+    // A user's key never probes or pins: pins are install-wide trust (install admins only).
+    return c.json({ grant: summaryBody(result.grant) }, result.replaced ? 200 : 201);
   });
 
   app.delete("/:connectorId", async (c) => {
@@ -97,7 +91,3 @@ export function connectorGrantRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
 
   return app;
 }
-
-const pinShown = (pin: PinOutcome) => pin.ok || pin.failure !== "already_pinned";
-const pinBody = (pin: PinOutcome) =>
-  pin.ok ? { ok: true as const, tools: pin.tools } : { ok: false as const, failure: pin.failure };

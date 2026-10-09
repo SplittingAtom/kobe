@@ -296,32 +296,51 @@ describe("nothing else carries the key", () => {
   });
 });
 
-describe("pinning with a user's key", () => {
-  it("probes an unpinned connector with the key, pins it, and not again once pinned", async () => {
+describe("pinning stays an install admin's action", () => {
+  const tools = [{ name: "get_x", description: "d", inputSchema: { type: "object" } }];
+  const hash = async (id: string) =>
+    (await h.admin.query(`SELECT tools_hash FROM connectors WHERE id = $1`, [id])).rows[0]
+      .tools_hash as string | null;
+
+  it("does not probe or pin when a member adds a key", async () => {
     const id = await connector("pinme", "api_key", [teamT]);
     probes.length = 0;
-    probeAnswer = {
-      ok: true,
-      tools: [{ name: "get_x", description: "d", inputSchema: { type: "object" } }],
-    };
+    probeAnswer = { ok: true, tools };
     const res = await alice.put(`${BASE}/${id}`, { api_key: KEY });
     expect(res.status).toBe(201);
-    expect(res.json).toMatchObject({ pin: { ok: true, tools: 1 } });
-    expect(probes).toEqual([{ url: "https://mcp.example.com/mcp", apiKey: KEY }]);
-    expect(res.text).not.toContain(KEY);
-    const { rows } = await h.admin.query(`SELECT tools_hash FROM connectors WHERE id = $1`, [id]);
-    expect(rows[0].tools_hash).toMatch(/^[0-9a-f]{64}$/);
-    const again = await bob.put(`${BASE}/${id}`, { api_key: KEY2 });
-    expect(again.json).not.toHaveProperty("pin");
-    expect(probes).toHaveLength(1);
+    expect(res.json).not.toHaveProperty("pin");
+    expect(probes).toEqual([]);
+    expect(await hash(id)).toBeNull();
   });
 
-  it("saves the key even when the probe fails", async () => {
-    const id = await connector("pinfail", "api_key", [teamT]);
+  it("re-pins with the admin's own grant, never another user's", async () => {
+    const id = await connector("repin", "api_key", [teamT]);
+    await alice.put(`${BASE}/${id}`, { api_key: KEY });
+    const rootId = await h.createUser("root@grants.test", "admin");
+    await h.admin.query(
+      `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'member')`,
+      [teamT, rootId],
+    );
+    const root = await h.signIn("root@grants.test");
+    expect((await root.put("/v1/me/teams/active", { teamId: teamT })).status).toBe(200);
+    root.team = teamT;
+    probes.length = 0;
     probeAnswer = { ok: false, failure: "auth_required" };
-    const res = await alice.put(`${BASE}/${id}`, { api_key: KEY });
-    expect(res.status).toBe(201);
-    expect(res.json).toMatchObject({ pin: { ok: false, failure: "auth_required" } });
-    expect((await grantFor(teamT, aliceId, id)).status).toBe(200);
+
+    // The admin has no key of their own yet: alice's key is not used.
+    await root.post(`/v1/install/connectors/${id}/pin`);
+    expect(probes).toEqual([{ url: "https://mcp.example.com/mcp", apiKey: undefined }]);
+
+    // With their own grant, that key (and no other) is used, and the pin lands.
+    expect((await root.put(`${BASE}/${id}`, { api_key: KEY2 })).status).toBe(201);
+    expect(probes).toHaveLength(1);
+    probes.length = 0;
+    probeAnswer = { ok: true, tools };
+    const pinned = await root.post(`/v1/install/connectors/${id}/pin`);
+    expect(pinned.status, pinned.text).toBe(200);
+    expect(probes).toEqual([{ url: "https://mcp.example.com/mcp", apiKey: KEY2 }]);
+    expect(pinned.text).not.toContain(KEY2);
+    expect(pinned.text).not.toContain(KEY);
+    expect(await hash(id)).toMatch(/^[0-9a-f]{64}$/);
   });
 });

@@ -7,6 +7,7 @@ import {
   teamConnectors,
   withTeam,
   Envelope,
+  listMemberships,
   type KobeDb,
 } from "@kobe/db";
 import { z } from "zod";
@@ -211,4 +212,27 @@ export async function revealApiKey(
   } catch {
     return { ok: false, failure: "unavailable" };
   }
+}
+
+/**
+ * The install admin's OWN key for a connector, for a pinning probe (pins are install-wide trust,
+ * so only an admin's action may probe with a grant, and only with that admin's grant). Looks
+ * through the admin's teams; never another user's key. Undefined when they have none.
+ */
+export async function adminProbeKey(
+  db: KobeDb,
+  envelope: Envelope | undefined,
+  adminUserId: string,
+  connectorId: string,
+): Promise<string | undefined> {
+  if (!envelope) return undefined;
+  for (const team of await listMemberships(db, adminUserId)) {
+    const found = await revealApiKey(db, envelope, {
+      teamId: team.teamId,
+      userId: adminUserId,
+      connectorId,
+    });
+    if (found.ok) return found.apiKey;
+  }
+  return undefined;
 }

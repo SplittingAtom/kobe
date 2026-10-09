@@ -17,6 +17,7 @@ import {
   approveSchema,
   reviewConnectorTools,
 } from "../connectors/reapproval.js";
+import { adminProbeKey } from "../connectors/grants.js";
 import { pinConnector, type PinOutcome } from "../connectors/pinning.js";
 import { checkConnectorUrl } from "../connectors/url-policy.js";
 import type { ServerDeps } from "../deps.js";
@@ -74,6 +75,10 @@ export function installConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: Aut
   const db = deps.database.db;
   app.use(requireInstallPermission("install.connectors.manage"));
 
+  // The acting admin's own grant, if any; never another user's.
+  const adminKey = (c: Context, connectorId: string) =>
+    adminProbeKey(db, deps.envelope, c.get("user").id, connectorId);
+
   const badUrl = (c: Context, check: { code: string; message: string }) =>
     c.json({ code: check.code, message: check.message }, 422);
 
@@ -93,7 +98,12 @@ export function installConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: Aut
     const result = await createConnector(db, { ...input, url: checked.url }, c.get("user").id);
     if (!result.ok) return nameConflict(c, result.error);
     // Registering snapshots and pins every tool; a failed probe leaves it registered, unpinned.
-    const pin = await pinConnector(db, deps.connectorProbe, result.connector.id);
+    const pin = await pinConnector(
+      db,
+      deps.connectorProbe,
+      result.connector.id,
+      await adminKey(c, result.connector.id),
+    );
     const connector = (await getConnector(db, result.connector.id)) ?? result.connector;
     return c.json({ connector, ...(pin ? { pin: pinBody(pin) } : {}) }, 201);
   });
@@ -114,7 +124,9 @@ export function installConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: Aut
       return result.error === "not_found" ? notFound(c) : nameConflict(c, result.error);
     // A new URL cleared the old pins; pin the new server's tools (no-op when pins still exist).
     const pin =
-      patch.url === undefined ? undefined : await pinConnector(db, deps.connectorProbe, id.data);
+      patch.url === undefined
+        ? undefined
+        : await pinConnector(db, deps.connectorProbe, id.data, await adminKey(c, id.data));
     const connector = (await getConnector(db, id.data)) ?? result.connector;
     const shown =
       pin && !(!pin.ok && pin.failure === "already_pinned") ? { pin: pinBody(pin) } : {};
@@ -124,7 +136,9 @@ export function installConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: Aut
   // Probe and pin again, for a connector that has none (the registration probe failed).
   app.post("/:id/pin", async (c) => {
     const id = idSchema.safeParse(c.req.param("id"));
-    const pin = id.success ? await pinConnector(db, deps.connectorProbe, id.data) : undefined;
+    const pin = id.success
+      ? await pinConnector(db, deps.connectorProbe, id.data, await adminKey(c, id.data))
+      : undefined;
     if (!id.success || !pin) return notFound(c);
     const connector = await getConnector(db, id.data);
     return c.json(

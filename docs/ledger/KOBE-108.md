@@ -24,20 +24,17 @@ Migration PR first (table, RLS, fixtures), then the service, routes, internal gr
   own token). The server derives (team, user) from the verified token, so only the run's own user's key can
   be returned; the proxy puts it in `Authorization: Bearer` on the upstream request, per call, uncached,
   unlogged. The sandbox listener has no such route; the sandbox only ever sees tool results.
-- **Pinning with a user's key.** After a PUT the server probes with the key (`api_key` field of the proxy's
-  internal probe) only while the connector has no pins (KOBE-101's conditional write); a failed probe never
-  fails the save. Audited as `mcp.connector.pinned`.
+- **Pinning stays admin-only** (pins are install-wide trust). A member's key never probes or pins. Only an
+  install admin's register, URL change or `POST /v1/install/connectors/:id/pin` may probe with a grant, and
+  only the acting admin's OWN grant (looked up through their teams); no grant: probe without credentials.
 - **Audit:** `mcp.grant.added|replaced|removed` (team scope; connector id and name only).
 - Out of scope (KOBE-110): refresh, revoke on offboarding, suspension. OAuth grants (KOBE-61).
 
 ## Open questions (for Chris or the coordinator)
 
-1. Placement: KOBE-100's ledger says API keys go in query parameters; I used a bearer header (query strings
-   leak into logs and are refused in connector URLs). A per-connector placement (header name or query
-   parameter) would need a registry column: separate ticket?
-2. A user's key can pin an unpinned connector's tools (as asked). An install admin can still re-approve
-   via KOBE-102 drift; say if pinning should stay admin-only.
-3. No connect UI in this PR (API only).
+1. Follow-up: per-connector key placement (header name or query parameter) needs a registry column.
+   Bearer header kept (query strings leak into logs).
+2. The connect UI is KOBE-105.
 
 ## Evidence
 
