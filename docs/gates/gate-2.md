@@ -162,6 +162,15 @@ and are bound to this user, team and sandbox. The scan classifies every JWT: it 
 `iss` is `kobe-server` and `user_id`/`team_id` are this sandbox's; any other token FAILS. The
 criterion is provider keys, connector tokens and internal keys, not Kobe's per-sandbox credentials.
 
+Allow-listed by exact shape, nothing broader: the egress token in `HTTPS_PROXY`
+(`scheme://<thread id>:<jwt>@proxy`, a Kobe credential for this sandbox; "egress token visible in
+env output" is accepted LOW in `docs/ledger/KOBE-39.md`); the template in
+`/opt/kobe/egress-env.sh` that builds that URL; the bootstrap token only when its audience is
+exactly `kobe.sandbox-bootstrap` and its subject is a ServiceAccount of this team namespace (the
+API server rejects that audience; any API-audience token would FAIL); and three library files
+inside the image by exact path (pino's `docs/transports.md`, zod's `tests/*.test.ts`: example URLs
+and the jwt.io sample token).
+
 | Check                                                            | What it proves                                                       |
 | ---------------------------------------------------------------- | -------------------------------------------------------------------- |
 | N secret/key values collected, provider keys among them          | The scan has the install's real values to look for.                  |

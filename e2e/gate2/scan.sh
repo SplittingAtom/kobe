@@ -88,7 +88,14 @@ find $roots -xdev -type f -size -2048k -not -path "/var/lib/apt/*" -not -path "/
 #   output" is accepted LOW in docs/ledger/KOBE-39.md).
 # - /opt/kobe/egress-env.sh itself: the root-owned script that builds that URL from variables
 #   (`http://${user}:${token}@${host}`), a template without a value.
+# - Library documentation and tests inside the image, by exact path (seen in the first CI runs):
+#   pino's docs/transports.md (an example URL), zod's test files (example URLs and the jwt.io sample
+#   token for "John Doe"). Nothing else under node_modules is excluded.
+FIXTURE_RE='fs/opt/kobe/sandbox-agent/node_modules/\.pnpm/(pino@[0-9.]+/node_modules/pino/docs/transports\.md|zod@[0-9.]+/node_modules/zod/src/[a-z0-9/]*tests/[a-z-]+\.test\.ts):'
 generic_unexpected() { # pattern name; "file:match" lines on stdin → those not allowed above
+  grep -a -v -E "$FIXTURE_RE" | generic_unexpected_by_kind "$1"
+}
+generic_unexpected_by_kind() {
   case "$1" in
     bearer-credential) grep -a -v -E 'Bearer eyJ' || true ;;
     basic-url-credential) grep -a -v -E '^[^:]*fs/opt/kobe/egress-env\.sh:|://[^:/]+:eyJ' || true ;;
@@ -183,7 +190,7 @@ run_secret_scan() {
     [[ -z "$tok" ]] && continue
     class=$(jwt_class "$tok")
     if [[ "$class" == own* ]]; then auds+="${class#own } "; else tokens_ok=0; echo "     unexpected token in $tokfile: $class"; fi
-  done < <(grep -raoE -- "$JWT_RE" "$dir/files" 2>/dev/null | sed "s#^$dir/files/##" | sort -u -t: -k2,2)
+  done < <(grep -raoE -- "$JWT_RE" "$dir/files" 2>/dev/null | sed "s#^$dir/files/##" | grep -a -v -E "$FIXTURE_RE" | sort -u -t: -k2,2)
   if ((tokens_ok)); then ok "every JWT in the sandbox is Kobe's own session token for this user and team (audiences: ${auds:-none found})"
   else fail "ac-5: a JWT in the sandbox is not Kobe's session token for this sandbox's user and team"; fi
 
