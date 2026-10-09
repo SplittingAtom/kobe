@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
 import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
-import { NO_GRANTS } from "./credentials.js";
+import { createServerCredentials } from "./credentials.js";
 import { createLimiter } from "./limits.js";
 import { logger } from "./logger.js";
 import { createPolicyServer } from "./server-client.js";
@@ -17,18 +17,19 @@ const upstream = createUpstreamClient({
   policy: config.upstream,
   maxResponseBytes: config.limits.maxResponseBytes,
 });
+const policyServer = createPolicyServer({
+  baseUrl: config.serverUrl,
+  internalKey: config.internalKey,
+  timeoutMs: config.limits.serverTimeoutMs,
+  onError: (err) => logger.warn({ err }, "policy server unavailable (call refused)"),
+});
 const app = createApp(
   {
     sessionKey: config.sessionKey,
-    server: createPolicyServer({
-      baseUrl: config.serverUrl,
-      internalKey: config.internalKey,
-      timeoutMs: config.limits.serverTimeoutMs,
-      onError: (err) => logger.warn({ err }, "policy server unavailable (call refused)"),
-    }),
+    server: policyServer,
     upstream,
-    // KOBE-61 replaces this with per-user grants (OAuth, API keys).
-    credentials: NO_GRANTS,
+    // Per-user API-key grants from the server (KOBE-108); OAuth grants arrive with KOBE-61.
+    credentials: createServerCredentials(policyServer),
     limiter: createLimiter({
       burst: config.limits.requestBurst,
       perSecond: config.limits.requestsPerSecond,

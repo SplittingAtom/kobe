@@ -31,7 +31,13 @@ export interface Harness {
 export async function openHarness(
   options: Pick<
     ServerDepsOptions,
-    "agents" | "models" | "blobs" | "egressHeaderSecrets" | "connectors" | "connectorProbe"
+    | "agents"
+    | "models"
+    | "blobs"
+    | "egressHeaderSecrets"
+    | "connectors"
+    | "connectorProbe"
+    | "envelope"
   > = {},
   /** App options that need the deps (e.g. the Orbit eval runner, KOBE-93). */
   appOptions?: (deps: ServerDeps) => AppOptions,
