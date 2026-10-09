@@ -112,12 +112,16 @@ describe.runIf(HELPER !== undefined && EXECUTOR_BUILT)(
       }
       await writeGuardedConfig(agentDir, true);
       const toolDir = await prepareToolDir(runtime, identity);
-      await writeFile(path.join(toolDir, "egress-token"), "egress-secret\n", { mode: 0o640 });
+      // As the agent's EgressTokenFile does: the mode is set exactly (the umask would strip it).
+      await writeFile(path.join(toolDir, "egress-token"), "egress-secret\n");
+      await chmod(path.join(toolDir, "egress-token"), 0o640);
 
       const [extensionEnd, agentEnd] = await socketPair();
       let started = 0;
+      const diagnostics: string[] = [];
       const relay = new ExecRelay({
         channel: agentEnd,
+        onDiagnostic: (m) => diagnostics.push(m),
         startExecutor: () => {
           started += 1;
           return startExecutor({
@@ -126,6 +130,7 @@ describe.runIf(HELPER !== undefined && EXECUTOR_BUILT)(
             env: executorEnv({ PATH: process.env.PATH ?? "", HOME: home }),
             cwd: workspace,
             runAs: { identities, identity },
+            onDiagnostic: (m) => diagnostics.push(m),
           });
         },
       });
@@ -150,6 +155,7 @@ describe.runIf(HELPER !== undefined && EXECUTOR_BUILT)(
         client,
         run,
         started: () => started,
+        diagnostics,
       };
     }
 

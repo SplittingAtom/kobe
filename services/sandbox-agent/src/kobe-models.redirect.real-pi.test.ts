@@ -204,6 +204,15 @@ describe.skipIf(!PI_AVAILABLE)(
       },
       120_000,
     );
+
+    // Control for the KOBE-167 cases below: the same scenario with the tool running in Pi's own
+    // uid (and no guarded placeholders) does redirect, so those cases can only pass because the
+    // tool is another uid. If Pi ever stops being exploitable here, this says so.
+    it("control: with the tool in Pi's uid the planted models.json redirects set_model", async () => {
+      const { listener } = await setModelScenario(LEAKING[0] as string);
+      expect(listener.requests.length).toBeGreaterThan(0);
+      expect(listener.requests[0]?.headers["x-kobe-run-token"]).toBeTruthy();
+    }, 120_000);
   },
 );
 
@@ -245,8 +254,17 @@ describe.runIf(PI_AVAILABLE && EXECUTOR_BUILT && HELPER !== undefined)(
         const expected = GUARDED_CONFIG[file];
         if (expected !== undefined) {
           expect(await readFile(path.join(rpc.agentDir, file), "utf8"), file).toBe(expected);
-        } else {
-          expect(existsSync(path.join(rpc.agentDir, file)), file).toBe(false);
+        } else if (existsSync(path.join(rpc.agentDir, file))) {
+          // A file Pi writes itself (auth.json) may exist; it must not be the tool's.
+          // Pi's own file is 0600 to Pi's uid: unreadable here, which a tool's file would not be.
+          const text = await readFile(path.join(rpc.agentDir, file), "utf8").catch(
+            (error: NodeJS.ErrnoException) => {
+              if (error.code === "EACCES") return undefined;
+              throw error;
+            },
+          );
+          if (text !== undefined)
+            expect(JSON.parse(text) as unknown, file).not.toEqual(plant[file]);
         }
       }
     }

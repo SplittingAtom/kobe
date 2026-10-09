@@ -166,6 +166,14 @@ async function toolExecutor(
     return undefined;
   }
   if (config.execExtension === undefined) {
+    // In Kobe's pods the server asked for it: an image that cannot provide it must not run quietly
+    // without (skew between the server and the sandbox image).
+    if (config.bootstrapTokenFile !== undefined) {
+      throw new Error(
+        "KOBE_TOOL_EXECUTOR is on but this image has no kobe-exec extension (KOBE_EXEC_EXTENSION): " +
+          "refusing to run the tools in Pi (set KOBE_TOOL_EXECUTOR=false to allow it)",
+      );
+    }
     logger.warn("KOBE_EXEC_EXTENSION not set: Pi runs its tools in its own process and uid");
     return undefined;
   }

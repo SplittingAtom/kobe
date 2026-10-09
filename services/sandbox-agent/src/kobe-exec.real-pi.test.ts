@@ -1,9 +1,11 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { SandboxToServerFrame } from "@kobe/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { startHarness, until, runStart, type Harness } from "./testing/harness.js";
+import type { EgressWiring } from "./egress/egress-wiring.js";
+import { THREAD, startHarness, until, runStart, type Harness } from "./testing/harness.js";
 import {
   EXECUTOR_BUILT,
   EXECUTOR_ENTRY,
@@ -34,8 +36,13 @@ afterEach(async () => {
   h = undefined;
 });
 
-async function start(entry = EXECUTOR_ENTRY, withExec = true): Promise<Harness> {
+async function start(
+  entry = EXECUTOR_ENTRY,
+  withExec = true,
+  egress?: EgressWiring,
+): Promise<Harness> {
   h = await startHarness({
+    ...(egress === undefined ? {} : { egress }),
     piBin: PI_BIN,
     env: { KOBE_POLICY_EXTENSION: REAL_POLICY_EXTENSION },
     extensions: [FAUX_MODEL_EXTENSION],
@@ -139,6 +146,22 @@ describe.skipIf(!PI_AVAILABLE || !EXECUTOR_BUILT)("kobe-exec in real Pi, through
     // What the model is told it can inspect (Pi's guideline) still arrives.
     expect(end.text).toContain("PI_PROVIDER=kobe-faux");
     expect(end.text).toContain("PI_MODEL=scripted");
+  }, 90_000);
+
+  it("gives the tools the egress proxy and the current token, through the executor's environment (KOBE-39)", async () => {
+    const token = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJl";
+    const script = fileURLToPath(new URL("../../../images/sandbox/egress-env.sh", import.meta.url));
+    const t = await start(EXECUTOR_ENTRY, true, {
+      proxyUrl: "http://egress-proxy.kobe.internal:80",
+      noProxy: "localhost",
+      envScript: script,
+      tokens: { current: async () => token, onChange: () => () => undefined },
+    });
+    allowAll(t);
+    await run(t, [bash("b1", 'printf "proxy=%s|bashenv=%s" "$HTTPS_PROXY" "$BASH_ENV"')]);
+    const end = await toolEnd(t, "b1");
+    expect(end.text).toContain(`proxy=http://${THREAD}:${token}@egress-proxy.kobe.internal:80`);
+    expect(end.text).toContain(`bashenv=${script}`);
   }, 90_000);
 
   it("keeps every tool call behind kobe-policy: a denied call never reaches the executor", async () => {

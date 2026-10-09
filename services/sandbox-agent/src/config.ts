@@ -91,12 +91,13 @@ const configSchema = z.object({
   /**
    * KOBE-167 rollout switch (the chart's `sandbox.toolExecutor.enabled`, via the server's pod
    * spec): "true"/"1" routes every Pi's built-in tools to an executor under the partner uid of its
-   * Pi identity (needs KOBE_EXEC_EXTENSION); "false"/"0" leaves them in Pi. On by default so
-   * development and tests exercise the routing.
+   * Pi identity (needs KOBE_EXEC_EXTENSION); "false"/"0" leaves them in Pi. Unset: on outside
+   * Kobe's pods (development and tests exercise the routing), off inside them (a server that does
+   * not know the setting has not asked for it, and has not given the pod the partner groups).
    */
   KOBE_TOOL_EXECUTOR: z
     .enum(["true", "1", "false", "0"], { error: "KOBE_TOOL_EXECUTOR must be true or false" })
-    .default("true"),
+    .optional(),
   /** kobe-policy (KOBE-36): root-owned, read-only, loaded last into every Pi. No way to omit it. */
   KOBE_POLICY_EXTENSION: z
     .string()
@@ -204,7 +205,10 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     policyExtension: c.KOBE_POLICY_EXTENSION,
     ...(c.KOBE_TOOLS_EXTENSION === undefined ? {} : { toolsExtension: c.KOBE_TOOLS_EXTENSION }),
     ...(c.KOBE_EXEC_EXTENSION === undefined ? {} : { execExtension: c.KOBE_EXEC_EXTENSION }),
-    toolExecutor: c.KOBE_TOOL_EXECUTOR === "true" || c.KOBE_TOOL_EXECUTOR === "1",
+    toolExecutor:
+      c.KOBE_TOOL_EXECUTOR === undefined
+        ? c.KOBE_BOOTSTRAP_TOKEN_FILE === undefined
+        : c.KOBE_TOOL_EXECUTOR === "true" || c.KOBE_TOOL_EXECUTOR === "1",
     ...(c.KOBE_PI_RUNAS === undefined ? {} : { piRunAs: c.KOBE_PI_RUNAS }),
     maxPiProcesses: c.KOBE_MAX_PI_PROCESSES,
     piIdleMs: c.KOBE_PI_IDLE_MS,

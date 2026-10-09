@@ -43,9 +43,12 @@ describe("sandbox-agent loadConfig", () => {
     expect(() => loadConfig({ ...env, KOBE_EXEC_EXTENSION: "relative.js" })).toThrow();
   });
 
-  it("switches the tool executor with KOBE_TOOL_EXECUTOR: on unless told otherwise", () => {
+  it("switches the tool executor with KOBE_TOOL_EXECUTOR: on unless told otherwise, off in Kobe's pods unless asked", () => {
     const env = { ...base, KOBE_SERVER_URL: "wss://kobe" };
     expect(loadConfig(env).toolExecutor).toBe(true);
+    const pod = { KOBE_SERVER_URL: "wss://kobe", KOBE_BOOTSTRAP_TOKEN_FILE: "/run/t" };
+    expect(loadConfig(pod).toolExecutor).toBe(false);
+    expect(loadConfig({ ...pod, KOBE_TOOL_EXECUTOR: "true" }).toolExecutor).toBe(true);
     for (const on of ["true", "1"]) {
       expect(loadConfig({ ...env, KOBE_TOOL_EXECUTOR: on }).toolExecutor).toBe(true);
     }

@@ -58,10 +58,11 @@ sudo install -d -m 0755 /usr/local/libexec
 sudo install -o root -g "$agent_gid" -m 0750 "$work/kobe-runas" "$helper"
 sudo install -o root -g root -m 0755 ../../images/sandbox/runas/kobe-reclaim.sh "$reclaim"
 sudo setcap cap_setuid,cap_setgid=ep "$helper"
+# One test file at a time: the suites share the identity pool and each kills the uids it used.
 run_tests() {
   sudo env PATH="$PATH" HOME="$HOME" CI=true KOBE_TEST_PI_RUNAS="$helper" \
     setpriv --reuid="$uid" --regid="$gid" --groups="$gid,$agent_gid,2000,2001,2002,2003,3000,3001,3002,3003" \
-    --inh-caps=-all -- "$(command -v node)" ../../node_modules/vitest/vitest.mjs run "$@"
+    --inh-caps=-all -- "$(command -v node)" ../../node_modules/vitest/vitest.mjs run --no-file-parallelism "$@"
 }
 status=0
 run_tests src/identities.real.test.ts src/identities.partner.real.test.ts src/exec.real.test.ts "$@" || status=$?
