@@ -197,4 +197,46 @@ model to run a command).
 
 ## Results
 
-_To be filled in: CI run link, per-criterion result on k3d, and the real-cluster run._
+Verified on 2026-10-09. Every criterion holds on k3d (CI, scripted model) and on the real cluster
+(real cloud model).
+
+| Criterion                                                                     | k3d (CI, scripted `fast` model) | Real k3s cluster (real cloud model)                                   |
+| ----------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------------------------- |
+| ac-1 Budget at 100%: the step in flight finishes, then `run.budget_stopped`   | **Proven**                      | **Proven** (11/11 checks)                                             |
+| ac-2 Blocked domain → `egress.blocked` + Request access → enabled, works      | **Proven**                      | **Proven** (10/10)                                                    |
+| ac-3 Tampered `kobe-policy` cannot run an MCP write without a signed approval | **Proven**                      | **Proven** (22/22)                                                    |
+| ac-4 Break-glass: second admin, team notified, every read audited             | **Proven**                      | **Proven** (17/17)                                                    |
+| ac-5 Secret scan finds no provider keys or connector tokens                   | **Proven** (incl. Pi-side scan) | **Proven** (12/12; Pi-side half skipped with a real model, see above) |
+
+Gate 2 holds on both. Sign-off is the user's (KOBE-2).
+
+### Environments
+
+|          | k3d (CI)                                                                                                                                                                                                                | Real cluster                                                                                                                                                              |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Where    | GitHub-hosted runner, `e2e` workflow, shard `gate2` (12–13 min, in parallel with the other shards)                                                                                                                      | k3s 1.34, 4 nodes, gVisor (`runsc`), agent-sandbox v1.0.4, Longhorn (`strict-local` workspaces)                                                                           |
+| Install  | `KOBE_E2E_SHARD=gate1-prep e2e/run.sh`, then `e2e/gate2.sh`                                                                                                                                                             | Release `kobe` in `kobe-gate1`, 2 server replicas; images built from `main` at `2f185f551ec7` and imported into every node                                                |
+| Model    | scripted `fast` (deterministic tool calls)                                                                                                                                                                              | `glm-5.3` through the model gateway; `KOBE_GATE2_BUDGET_PROMPT` / `_EGRESS_PROMPT` ask it to run the check's `bash` / `curl`                                              |
+| Evidence | merge-queue e2e run [37961102555](https://github.com/SplittingAtom/kobe/actions/runs/37961102555) (`main` + queue at `e91c00f5c9dd`): `Gate 2 suite: all checks passed`; the shard has run green on every PR since #131 | `e2e/gate2.sh` from `main` at `6a6c7f31a8a3`, 2026-10-09 17:10: **81 checks ok, 0 FAIL**, `Gate 2 suite: all checks passed` (log kept with the install's other gate logs) |
+
+### Real-cluster notes
+
+- **First run failed on storage, not on Kobe.** The 16:32 run's member sandbox never started: Longhorn
+  could not schedule its 10 GiB `strict-local` workspace replica on the node the pod landed on
+  (`LocalReplicaSchedulingFailure: insufficient storage`). The disk had ample real free space, but
+  scheduled (promised) space was at the 100% over-provisioning limit. With no running sandbox,
+  ac-1/2/3/5 failed or were invalid (ac-5's own canary controls failed), while ac-4 passed. Raising
+  Longhorn's `storage-over-provisioning-percentage` to 200 (volumes are thin; real free space is
+  still guarded by `storage-minimal-available-percentage`) fixed it, and the 17:10 rerun passed
+  every check. Follow-ups: KOBE-192 (surface a sandbox stuck on an unattachable volume instead of
+  leaving the user waiting) and KOBE-193 (`gate2.sh` fails fast with one clear message when the
+  sandbox pod is not Running, and ac-5 never prints `ok` when its controls fail).
+- **ac-5 scope on the real cluster:** 24 install secrets and sealed provider keys searched in 2533
+  files plus every process's environment and command line. The only tokens present are Kobe's own
+  short-lived ones, checked by audience (`kobe.model-gateway`, `kobe.egress-proxy`, and the bootstrap
+  ServiceAccount token for `kobe.sandbox-bootstrap`); no Secret volume or Secret-sourced variable in
+  the sandbox pod.
+- **Not covered here:** the run-bound gateway token redirect found by KOBE-165 is closed for the
+  agent path by KOBE-169 (merged before this run); the structural fix (paired tool uid,
+  KOBE-166..168) is still in progress and is a Gate 4 item. The ac-4 check flaked once in CI
+  (KOBE-187, being fixed); it passed on the real cluster and in every other run.
