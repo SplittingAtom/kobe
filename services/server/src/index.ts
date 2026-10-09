@@ -6,6 +6,7 @@ import { approvalKeyring } from "./approvals/index.js";
 import { isolationAuditor } from "./audit/isolation.js";
 import { AuditPiiSweeper } from "./audit/pii-sweeper.js";
 import { BreakGlassSweeper } from "./break-glass/sweeper.js";
+import { initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
 import { loadConfig } from "./config.js";
 import { loadConnectorUrlPolicy } from "./connectors/config.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
@@ -51,6 +52,7 @@ const EVAL_SWEEP_MS = 60_000;
 const DRAIN_TIMEOUT_MS = 10_000;
 
 const config = loadConfig(process.env);
+const telemetry = initTelemetry(loadTelemetryConfig(process.env, config.process));
 // Object storage (s3.*): workspace sync (KOBE-27), thread export and retention (KOBE-18).
 const s3 = loadS3Settings(process.env);
 const objectStore = s3 ? createS3ObjectStore(s3) : undefined;
@@ -437,7 +439,9 @@ function shutdown(signal: string): void {
   void deps?.eventStream.hub.close();
   server.close((err) => {
     if (err) logger.error({ err }, "shutdown error");
-    void (deps?.close() ?? Promise.resolve()).finally(() => process.exit(err ? 1 : 0));
+    void Promise.all([deps?.close(), telemetry.shutdown()]).finally(() =>
+      process.exit(err ? 1 : 0),
+    );
   });
   if ("closeIdleConnections" in server) server.closeIdleConnections();
   setTimeout(() => {

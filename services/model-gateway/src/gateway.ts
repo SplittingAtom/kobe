@@ -10,6 +10,13 @@ import {
 import { request as httpsRequest, Agent as HttpsAgent } from "node:https";
 import type { SessionTokenClaims } from "@kobe/protocol";
 import { SessionTokenError } from "@kobe/session-token";
+import {
+  annotate,
+  contentAttributes,
+  injectTraceHeaders,
+  telemetryState,
+  traceNodeRequest,
+} from "@kobe/telemetry";
 import type { Logger } from "pino";
 import { extractCredential } from "./credentials.js";
 import { forwardRequestHeaders, forwardResponseHeaders } from "./headers.js";
@@ -253,6 +260,7 @@ export function createModelGateway(options: GatewayOptions): Server {
     }
     const started = Date.now();
     let bytesIn = 0;
+    let promptBody: Buffer | undefined;
     let usage: UsageReading | undefined;
     let ttfbMs: number | undefined;
     let releaseGate: ((written: boolean) => void) | undefined;
@@ -312,6 +320,7 @@ export function createModelGateway(options: GatewayOptions): Server {
         return;
       }
       bytesIn = body.length;
+      if (telemetryState().captureContent) promptBody = body;
       let forwardBody = body;
       let model = route.pathModel;
       // Count-only endpoints generate nothing (KOBE-43 review): no output allowance.
@@ -431,6 +440,35 @@ export function createModelGateway(options: GatewayOptions): Server {
       }
     } finally {
       release();
+      if (call) {
+        // Metadata only; the prompt joins only when content capture is on.
+        annotate(
+          {
+            teamId: call.teamId,
+            userId: call.userId,
+            sandboxId: call.sandboxId,
+            runId: call.runId,
+          },
+          {
+            "kobe.call_id": call.callId,
+            "kobe.route": call.route,
+            ...(call.model === undefined ? {} : { "gen_ai.request.model": call.model }),
+            ...(usage === undefined
+              ? {}
+              : {
+                  "gen_ai.usage.input_tokens": usage.counts.input,
+                  "gen_ai.usage.output_tokens": usage.counts.output,
+                }),
+            "http.response.status_code": status,
+            "http.request.body.size": bytesIn,
+            "http.response.body.size": bytesOut,
+            "kobe.aborted": aborted,
+            ...(promptBody
+              ? contentAttributes({ "gen_ai.prompt": promptBody.toString("utf8") })
+              : {}),
+          },
+        );
+      }
       // The reservation lasts until the call's ledger row lands (usageRecordOf: forwarded calls
       // that named a model), so the gate never sees spend that is neither reserved nor recorded.
       releaseGate?.(usage !== undefined && call?.model !== undefined);
@@ -524,7 +562,10 @@ export function createModelGateway(options: GatewayOptions): Server {
           method: req.method,
           path,
           agent,
-          headers: forwardRequestHeaders(req.headers, virtualKey, body.length),
+          headers: {
+            ...forwardRequestHeaders(req.headers, virtualKey, body.length),
+            ...injectTraceHeaders({}),
+          },
         },
         (up) => {
           ttfbMs = Date.now() - call.started;
@@ -621,11 +662,13 @@ export function createModelGateway(options: GatewayOptions): Server {
   }
 
   const server = createServer((req, res) => {
-    handle(req, res).catch((err: unknown) => {
-      logger.error({ err }, "model gateway request failed");
-      if (!res.headersSent) sendError(res, "openai", 500, "internal_error", "Internal error.");
-      else res.destroy();
-    });
+    traceNodeRequest("model_gateway.request", req, res, () => handle(req, res)).catch(
+      (err: unknown) => {
+        logger.error({ err }, "model gateway request failed");
+        if (!res.headersSent) sendError(res, "openai", 500, "internal_error", "Internal error.");
+        else res.destroy();
+      },
+    );
   });
   // Slow-loris bounds: headers within 10 s, the request body within 2 minutes; responses
   // (streams) are bounded by the upstream idle timeout instead.

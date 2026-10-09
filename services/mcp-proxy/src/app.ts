@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { honoTracing } from "@kobe/telemetry";
 import { mcpRoutes, type McpRouteDeps } from "./mcp.js";
 
 const SERVICE = "mcp-proxy";
@@ -6,6 +7,7 @@ const SERVICE = "mcp-proxy";
 /** Health endpoints always; the sandbox-facing MCP endpoint when dependencies are provided. */
 export function createApp(deps?: McpRouteDeps): Hono {
   const app = new Hono();
+  app.use("*", honoTracing());
   app.get("/healthz", (c) => c.json({ status: "ok", service: SERVICE }));
   app.get("/readyz", (c) => c.json({ status: "ready", service: SERVICE }));
   if (deps) app.route("/v1/mcp", mcpRoutes(deps));

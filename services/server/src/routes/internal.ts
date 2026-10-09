@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { honoTracing } from "@kobe/telemetry";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
@@ -59,6 +60,7 @@ export function createInternalApp(deps: InternalAppDeps): Hono {
   const keyDigest = digest(`Bearer ${deps.internalKey}`);
   const decideLimiter = deps.decideLimiter ?? createRateLimiter(DECIDE_RATE);
   const app = new Hono();
+  app.use("*", honoTracing());
   app.get("/healthz", (c) => c.json({ status: "ok", service: "server-internal" }));
 
   const mcp = new Hono();

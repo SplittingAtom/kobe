@@ -7,6 +7,7 @@ import { bearerToken, verifySandboxToken } from "./auth.js";
 import type { Limits } from "./config.js";
 import type { CredentialResolver } from "./credentials.js";
 import { JSONRPC_ERRORS, parseMessage, rpcError, rpcResult, type JsonRpcId } from "./jsonrpc.js";
+import { annotate, contentAttributes, idAttributes, withSpan } from "@kobe/telemetry";
 import type { Limiter } from "./limits.js";
 import type { ExposedTool, PolicyServer } from "./server-client.js";
 import type { UpstreamClient, UpstreamFailure } from "./upstream.js";
@@ -204,7 +205,6 @@ async function listTools(ctx: CallContext, id: JsonRpcId): Promise<Answer> {
 }
 
 async function callTool(ctx: CallContext, id: JsonRpcId, params: unknown): Promise<Answer> {
-  const { deps } = ctx;
   if (!isObject(params) || typeof params.name !== "string" || params.name.length > 128) {
     return [rpcError(id, JSONRPC_ERRORS.invalidParams, "tools/call needs a tool name.")];
   }
@@ -226,11 +226,45 @@ async function callTool(ctx: CallContext, id: JsonRpcId, params: unknown): Promi
   const meta = isObject(params._meta) ? params._meta : {};
   const toolCallId = meta[TOOL_CALL_ID_META_KEY];
   const thread = uuidSchema.safeParse(ctx.threadHeader);
+  const threadId = thread.success ? thread.data : undefined;
 
+  return withSpan(
+    "mcp.tools/call",
+    {
+      attributes: {
+        ...idAttributes({
+          teamId: ctx.teamId,
+          sandboxId: ctx.sandboxId,
+          threadId,
+        }),
+        "kobe.connector_id": ctx.connectorId,
+        "kobe.tool.name": params.name,
+        ...contentAttributes({ "kobe.tool.input": canonical }),
+      },
+    },
+    () => decideAndForward(ctx, id, params.name as string, args, canonical, toolCallId, threadId),
+  );
+}
+
+async function decideAndForward(
+  ctx: CallContext,
+  id: JsonRpcId,
+  toolName: string,
+  args: Record<string, unknown>,
+  canonical: string,
+  toolCallId: unknown,
+  threadId: string | undefined,
+): Promise<Answer> {
+  const { deps } = ctx;
+  const params = { name: toolName };
   const release = deps.limiter.acquireCall(ctx.sandboxId);
   if (!release) return [rpcError(id, JSONRPC_ERRORS.internal, "Too many calls in flight."), 429];
   const started = Date.now();
-  const log = (fields: Record<string, unknown>) =>
+  const log = (fields: Record<string, unknown>) => {
+    annotate(
+      {},
+      { "kobe.outcome": String(fields.outcome), "kobe.duration_ms": Date.now() - started },
+    );
     deps.log.info(
       {
         sandboxId: ctx.sandboxId,
@@ -242,12 +276,13 @@ async function callTool(ctx: CallContext, id: JsonRpcId, params: unknown): Promi
       },
       "mcp tools/call",
     );
+  };
   try {
     const decided = await deps.server.decide(ctx.token, {
       connectorId: ctx.connectorId,
       tool: params.name,
       arguments: args,
-      ...(thread.success ? { threadId: thread.data } : {}),
+      ...(threadId === undefined ? {} : { threadId }),
       ...(typeof toolCallId === "string" && toolCallId.length <= 128 ? { toolCallId } : {}),
     });
     if (!decided.ok) {
@@ -301,6 +336,7 @@ async function callTool(ctx: CallContext, id: JsonRpcId, params: unknown): Promi
       signal: AbortSignal.timeout(deps.limits.upstreamTimeoutMs),
     });
     if (result.ok) {
+      annotate({}, contentAttributes({ "kobe.tool.output": JSON.stringify(result.result) }));
       log({ outcome: "ok", approvalId: decision.approval_id, reason: decision.reason });
       return [rpcResult(id, result.result)];
     }
