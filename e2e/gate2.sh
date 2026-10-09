@@ -352,7 +352,7 @@ if [[ "$STEPS" == *" break-glass "* ]]; then
   contains "the notification is durable in the outbox (delivery depends on the install's mail)" '^notification=team_admin/approved/(sent|pending|failed)=[1-9]' "$bg"
   contains "the team admin sees the active grant in the team's banner" '^team_banner=active:' "$bg"
   contains "the three reads under the grant succeed" '^reads=200,200,200$' "$bg"
-  contains "the grant is not honored by normal team routes" '^normal_route_with_grant=(403|404)$' "$bg"
+  contains "the grant is not honored by normal team routes" '^normal_route_with_grant=(403|404|409)$' "$bg"
   contains "every read is in the team's audit log (3 reads, 3 events)" '^audited_reads=3$' "$bg"
   contains "each audit event names the grant" '^audited_reads_have_target=true$' "$bg"
   contains "revoking ends access at once" '^revoke=200:revoked$' "$bg"

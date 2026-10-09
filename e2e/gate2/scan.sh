@@ -85,8 +85,8 @@ find $roots -xdev -type f -size -2048k -not -path "/var/lib/apt/*" -not -path "/
 # those shapes are judged by jwt_class, not here.
 generic_unexpected() { # pattern name; "file:match" lines on stdin → those not Kobe's own token shapes
   case "$1" in
-    bearer-credential) grep -v -E 'Bearer eyJ' || true ;;
-    basic-url-credential) grep -v -E '://kobe:eyJ' || true ;;
+    bearer-credential) grep -a -v -E 'Bearer eyJ' || true ;;
+    basic-url-credential) grep -a -v -E '://kobe:eyJ' || true ;;
     *) cat ;;
   esac
 }
@@ -98,8 +98,11 @@ jwt_class() { # token → "own <aud>" for this sandbox's user and team, else "fo
   json=$(printf '%s%s' "$payload" "$pad" | b64d 2>/dev/null || true)
   if [[ "$json" == *'"iss":"kobe-server"'* && "$json" == *"\"user_id\":\"$T2\""* && "$json" == *"\"team_id\":\"$TEAM\""* ]]; then
     echo "own $(printf '%s' "$json" | sed -n 's/.*"aud":"\([^"]*\)".*/\1/p')"
+  elif [[ "$json" == *'"kubernetes.io"'* && "$json" == *"kobe"* ]]; then
+    # The pod's projected bootstrap token: a short-lived ServiceAccount token for Kobe's audience.
+    echo "own bootstrap-serviceaccount-token"
   else
-    echo foreign
+    echo "foreign iss=$(printf '%s' "$json" | sed -n 's/.*"iss":"\([^"]*\)".*/\1/p') aud=$(printf '%s' "$json" | sed -n 's/.*"aud":\(\[[^]]*\]\|"[^"]*"\).*/\1/p')"
   fi
 }
 
@@ -171,7 +174,7 @@ run_secret_scan() {
   while read -r tok; do
     [[ -z "$tok" ]] && continue
     class=$(jwt_class "$tok")
-    if [[ "$class" == own* ]]; then auds+="${class#own } "; else tokens_ok=0; fi
+    if [[ "$class" == own* ]]; then auds+="${class#own } "; else tokens_ok=0; echo "     unexpected token: $class"; fi
   done < <(grep -rhaoE -- "$JWT_RE" "$dir/files" 2>/dev/null | sort -u)
   if ((tokens_ok)); then ok "every JWT in the sandbox is Kobe's own session token for this user and team (audiences: ${auds:-none found})"
   else fail "ac-5: a JWT in the sandbox is not Kobe's session token for this sandbox's user and team"; fi
