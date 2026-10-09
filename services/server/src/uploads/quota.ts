@@ -32,3 +32,21 @@ export async function storageUsed(tx: KobeTx, teamId: string): Promise<number> {
            AS used`);
   return Number(res.rows[0]?.used ?? 0);
 }
+
+/**
+ * The one team-quota check (uploads and workspace sync): takes the team's storage lock, then
+ * says whether `deltaBytes` more fits under the limit. The lock is held to the end of the
+ * caller's transaction, so the caller must write (the `files` row, the workspace state) in it.
+ * A delta of zero or less (a shrinking write) is always allowed, even when the team is over.
+ */
+export async function teamStorageAllows(
+  tx: KobeTx,
+  teamId: string,
+  defaultBytes: number,
+  deltaBytes: number,
+): Promise<boolean> {
+  await lockTeamStorage(tx, teamId);
+  if (deltaBytes <= 0) return true;
+  const limit = await storageLimit(tx, teamId, defaultBytes);
+  return (await storageUsed(tx, teamId)) + deltaBytes <= limit;
+}
