@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   PI_LOCKDOWN_ARGS,
   POLICY_CHANNEL_FD,
+  EXEC_CHANNEL_FD,
   TOOLS_CHANNEL_FD,
   buildPiLaunch,
 } from "./pi-launch.js";
@@ -18,6 +19,7 @@ const parentEnv = {
 const POLICY = "/opt/kobe/pi-extensions/kobe-policy/index.js";
 const MODELS = "/opt/kobe/pi-extensions/kobe-models/index.js";
 const TOOLS = "/opt/kobe/pi-extensions/kobe-tools/index.js";
+const EXEC = "/opt/kobe/pi-extensions/kobe-exec/index.js";
 const base = {
   sessionFile: "/s/t.jsonl",
   home: "/home/kobe",
@@ -52,6 +54,37 @@ describe("buildPiLaunch kobe-tools (KOBE-128)", () => {
   it("changes the launch key (a Pi without the tools restarts when they are added)", () => {
     const without = buildPiLaunch({ ...base, parentEnv }).key;
     expect(buildPiLaunch({ ...base, parentEnv, toolsExtension: TOOLS }).key).not.toBe(without);
+  });
+});
+
+describe("buildPiLaunch kobe-exec (KOBE-167)", () => {
+  const extensionsOf = (args: readonly string[]) =>
+    args.flatMap((a, i) => (a === "--extension" ? [args[i + 1]] : []));
+
+  it("loads kobe-exec after kobe-tools and before kobe-policy (still last), once, with fd 5", () => {
+    const launch = buildPiLaunch({
+      ...base,
+      parentEnv,
+      modelsExtension: MODELS,
+      toolsExtension: TOOLS,
+      execExtension: EXEC,
+      extensions: ["builtin:mcp", EXEC],
+    });
+    expect(extensionsOf(launch.args)).toEqual(["builtin:mcp", MODELS, TOOLS, EXEC, POLICY]);
+    expect(EXEC_CHANNEL_FD).toBe(5);
+    expect(launch.env.KOBE_EXEC_FD).toBe("5");
+    expect(launch.execChannel).toBe(true);
+  });
+
+  it("without it there is no fd 5 and no variable", () => {
+    const launch = buildPiLaunch({ ...base, parentEnv });
+    expect(launch.env.KOBE_EXEC_FD).toBeUndefined();
+    expect(launch.execChannel).toBe(false);
+  });
+
+  it("changes the launch key (a Pi without the routing restarts when it is switched on)", () => {
+    const without = buildPiLaunch({ ...base, parentEnv }).key;
+    expect(buildPiLaunch({ ...base, parentEnv, execExtension: EXEC }).key).not.toBe(without);
   });
 });
 
