@@ -171,7 +171,7 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
 
   it("a tool cannot plant a file in another thread's runtime directory (EACCES)", async () => {
     const [, b] = await twoThreads();
-    const planted = path.join(b.agentDir, "settings.json");
+    const planted = path.join(b.agentDir, "SYSTEM.md");
     const out = await tool(
       THREAD,
       "4f5a6b7c-8d9e-4f0a-9b1c-2d3e4f5a6b7c",
