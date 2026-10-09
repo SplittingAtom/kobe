@@ -48,6 +48,7 @@ import {
   resolveAll,
   type ConnectorUrlPolicy,
 } from "./connectors/url-policy.js";
+import { NO_PROBE, type ConnectorProbe } from "./connectors/probe.js";
 import { createMcpService, type McpService } from "./mcp/service.js";
 import { createPolicyEngine } from "./policy/engine.js";
 import { createToolRegistry } from "./policy/registry.js";
@@ -83,6 +84,8 @@ export interface ServerDepsOptions {
   readonly runs?: Partial<Omit<RunOrchestratorOptions, "db" | "router">>;
   /** Where registered connectors may point (KOBE-100); default: https, port 443, public addresses. */
   readonly connectors?: Partial<ConnectorUrlPolicy>;
+  /** Probes a registered connector's tools through the MCP proxy (KOBE-101); unset = cannot pin. */
+  readonly connectorProbe?: ConnectorProbe;
   /** MCP proxy re-check seams (KOBE-58). */
   readonly mcp?: { readonly now?: () => Date };
   /**
@@ -182,6 +185,8 @@ export interface ServerDeps {
   readonly mcp: McpService;
   /** The address policy registered connector URLs must pass (KOBE-100). */
   readonly connectorUrlPolicy: ConnectorUrlPolicy;
+  /** Fetches a connector's live `tools/list` through the MCP proxy, to pin it (KOBE-101). */
+  readonly connectorProbe: ConnectorProbe;
   /**
    * Approvals (KOBE-37, D29): the wire's broker, `POST /v1/approvals/{id}`, the TTL sweep, and the
    * signed-approval verifier the MCP proxy (KOBE-58) calls.
@@ -347,6 +352,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
       resolve: resolveAll,
       ...options.connectors,
     },
+    connectorProbe: options.connectorProbe ?? NO_PROBE,
     approvals,
     envelope: options.envelope,
     egressHeaders: options.egressHeaderSecrets ? headerBox(options.egressHeaderSecrets) : undefined,

@@ -8,6 +8,7 @@ import { AuditPiiSweeper } from "./audit/pii-sweeper.js";
 import { BreakGlassSweeper } from "./break-glass/sweeper.js";
 import { loadConfig } from "./config.js";
 import { loadConnectorUrlPolicy } from "./connectors/config.js";
+import { createProxyProbe, PROBE_TIMEOUT_MS } from "./connectors/probe.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
 import { EgressBlockedRelay } from "./egress/blocked-relay.js";
 import { loadEgressHeaderSecrets } from "./egress/config.js";
@@ -84,6 +85,15 @@ if (config.auth && config.smtp) {
     mailer: createSmtpMailer(config.smtp),
     sandboxWire: { waker, ...(runTokenKey ? { runTokenKey } : {}) },
     connectors: loadConnectorUrlPolicy(process.env),
+    ...(config.mcpProxyUrl && config.mcpProxyInternalKey
+      ? {
+          connectorProbe: createProxyProbe({
+            baseUrl: config.mcpProxyUrl,
+            internalKey: config.mcpProxyInternalKey,
+            timeoutMs: PROBE_TIMEOUT_MS,
+          }),
+        }
+      : {}),
     agents: { maxVersions: config.agentMaxVersions },
     ...(egressHeaderSecrets ? { egressHeaderSecrets } : {}),
     ...(envelope ? { envelope } : {}),
