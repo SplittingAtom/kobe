@@ -106,8 +106,18 @@ export interface BifrostAdmin {
    * provider call, and never a key.
    */
   listModels(provider: string): Promise<string[]>;
+  /**
+   * Like `listModels`, with the input modalities Bifrost reports per model (`input_modalities`,
+   * top level or under `architecture`); an empty list: the provider did not say (KOBE-191).
+   */
+  listModelInfo(provider: string): Promise<ListedModel[]>;
   /** Asks Bifrost to call the provider's list-models API now (uses the provider's key). */
   refreshModels(provider: string): Promise<void>;
+}
+
+export interface ListedModel {
+  readonly name: string;
+  readonly inputModalities: readonly string[];
 }
 
 /** Upper bound on models read per provider (a picker, not an inventory). */
@@ -146,6 +156,19 @@ export interface HttpBifrostAdminOptions {
 type Json = Record<string, unknown>;
 const record = (v: unknown): Json => (v && typeof v === "object" ? (v as Json) : {});
 const list = (v: unknown): Json[] => (Array.isArray(v) ? v.map(record) : []);
+/** The input modalities a model entry reports, lower-cased strings only (empty: not reported). */
+function modalitiesOf(model: Record<string, unknown>): string[] {
+  const arch = model.architecture;
+  const raw =
+    model.input_modalities ??
+    (typeof arch === "object" && arch !== null
+      ? (arch as Record<string, unknown>).input_modalities
+      : undefined);
+  return Array.isArray(raw)
+    ? raw.filter((v): v is string => typeof v === "string").map((v) => v.toLowerCase())
+    : [];
+}
+
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 const enc = encodeURIComponent;
 
@@ -348,15 +371,18 @@ export function createHttpBifrostAdmin(options: HttpBifrostAdminOptions): Bifros
     async updateVirtualKey(id, spec) {
       await call("PUT", `/api/governance/virtual-keys/${enc(id)}`, vkBody(spec));
     },
-    async listModels(provider) {
+    async listModelInfo(provider) {
       const res = await call(
         "GET",
         `/api/models?provider=${enc(provider)}&limit=${MAX_LISTED_MODELS}`,
       );
       return list(res.models).flatMap((m) => {
         const name = str(m.name);
-        return name === undefined ? [] : [name];
+        return name === undefined ? [] : [{ name, inputModalities: modalitiesOf(m) }];
       });
+    },
+    async listModels(provider) {
+      return (await this.listModelInfo(provider)).map((m) => m.name);
     },
     async refreshModels(provider) {
       await call("POST", `/api/providers/${enc(provider)}/refresh-models`);

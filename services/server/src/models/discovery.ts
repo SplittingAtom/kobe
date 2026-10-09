@@ -22,7 +22,7 @@ import {
  * server never sends a provider key anywhere itself, and nothing here returns one. A refresh makes
  * Bifrost call the provider's list-models API with the key, so it is audited and rate-limited.
  */
-export type ModelDiscovery = Pick<BifrostAdmin, "listKeys" | "listModels" | "refreshModels">;
+export type ModelDiscovery = Pick<BifrostAdmin, "listKeys" | "listModelInfo" | "refreshModels">;
 
 export type DiscoveryStatus =
   /** The provider's list-models call worked with its key. */
@@ -36,6 +36,8 @@ export interface ProviderModelsView {
   readonly provider_id: string;
   /** Model ids as the catalog stores them (no gateway prefix), sorted, deduplicated. */
   readonly models: readonly string[];
+  /** The subset of `models` the provider reports as accepting image input (KOBE-191). */
+  readonly image_models: readonly string[];
   /** Bifrost's last list-models result for the provider's key. */
   readonly discovery: DiscoveryStatus;
   /** Why the provider refused, as a fixed sentence (never the provider's own text). */
@@ -87,16 +89,22 @@ export function failureReason(text: string | undefined): string {
 export function catalogModelIds(
   names: readonly string[],
   gatewayProvider: string,
-): { models: string[]; truncated: boolean } {
+  imageNames: ReadonlySet<string> = new Set(),
+): { models: string[]; imageModels: string[]; truncated: boolean } {
   const prefix = `${gatewayProvider}/`;
   const ids = new Set<string>();
+  const images = new Set<string>();
   for (const name of names) {
     const id = name.startsWith(prefix) ? name.slice(prefix.length) : name;
-    if (MODEL_RE.test(id)) ids.add(id);
+    if (!MODEL_RE.test(id)) continue;
+    ids.add(id);
+    if (imageNames.has(name)) images.add(id);
   }
   const sorted = [...ids].sort((a, b) => a.localeCompare(b));
+  const models = sorted.slice(0, MAX_LISTED_MODELS);
   return {
-    models: sorted.slice(0, MAX_LISTED_MODELS),
+    models,
+    imageModels: models.filter((id) => images.has(id)),
     truncated: sorted.length > MAX_LISTED_MODELS || names.length >= MAX_LISTED_MODELS,
   };
 }
@@ -124,12 +132,26 @@ async function readView(
   try {
     // Keys first: an unknown provider is a 404 there (the models list would just be empty).
     const keys = await discovery.listKeys(gatewayProvider);
-    const names = await discovery.listModels(gatewayProvider);
-    const { models, truncated } = catalogModelIds(names, gatewayProvider);
+    const listed = await discovery.listModelInfo(gatewayProvider);
+    const imageNames = new Set(
+      listed.filter((m) => m.inputModalities.includes("image")).map((m) => m.name),
+    );
+    const { models, imageModels, truncated } = catalogModelIds(
+      listed.map((m) => m.name),
+      gatewayProvider,
+      imageNames,
+    );
     const { status, detail } = statusOf(keys);
     return {
       ok: true,
-      view: { provider_id: providerId, models, discovery: status, detail, truncated },
+      view: {
+        provider_id: providerId,
+        models,
+        image_models: imageModels,
+        discovery: status,
+        detail,
+        truncated,
+      },
     };
   } catch (err) {
     return { ok: false, error: gatewayError(err) };

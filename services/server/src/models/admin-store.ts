@@ -50,6 +50,8 @@ export interface CatalogView {
   readonly provider_id: string;
   readonly model: string;
   readonly label: string | null;
+  /** What the model accepts as input: always `text`, plus `image` when it can see images. */
+  readonly input_modalities: readonly string[];
   /** The model id to send to the gateway (`<gateway provider>/<model>`). */
   readonly gateway_model: string;
   /** Dollars per million tokens (KOBE-43); null: not set (cache prices then use the input's). */
@@ -92,6 +94,7 @@ export const catalogView = (r: CatalogRow, kind: ModelProviderKind): CatalogView
   provider_id: r.providerId,
   model: r.model,
   label: r.label,
+  input_modalities: r.inputModalities,
   gateway_model: `${gatewayProviderName(r.providerId, kind)}/${r.model}`,
   input_usd_per_mtok: r.inputUsdPerMtok,
   output_usd_per_mtok: r.outputUsdPerMtok,
@@ -373,6 +376,9 @@ export async function addCatalogEntry(
         providerId: input.provider_id,
         model: input.model,
         label: input.label ?? null,
+        ...(input.input_modalities === undefined
+          ? {}
+          : { inputModalities: input.input_modalities }),
         inputUsdPerMtok: input.input_usd_per_mtok ?? null,
         outputUsdPerMtok: input.output_usd_per_mtok ?? null,
         cacheReadUsdPerMtok: input.cache_read_usd_per_mtok ?? null,
@@ -431,6 +437,7 @@ export async function updateCatalogEntry(
         providerId,
         model: input.model ?? before.model,
         label: input.label === undefined ? before.label : input.label,
+        inputModalities: input.input_modalities ?? before.inputModalities,
         ...prices,
         updatedAt: new Date(),
       })
@@ -445,6 +452,7 @@ export async function updateCatalogEntry(
         change: "updated",
         providerId,
         model: entry.model,
+        inputModalitiesChanged: entry.inputModalities.join() !== before.inputModalities.join(),
         pricesChanged:
           entry.inputUsdPerMtok !== before.inputUsdPerMtok ||
           entry.outputUsdPerMtok !== before.outputUsdPerMtok ||

@@ -1,4 +1,5 @@
 import {
+  INPUT_MODALITIES,
   MAX_USD_PER_MTOK,
   MODEL_ALIAS_PATTERN,
   MODEL_PROVIDER_KINDS,
@@ -105,11 +106,21 @@ const priceFields = {
   cache_write_usd_per_mtok: priceSchema.optional(),
 };
 
+/**
+ * What a model accepts as input (KOBE-191). `text` is implied: the stored list always starts with
+ * it, so a client may send just `["image"]`.
+ */
+const inputModalitiesSchema = z
+  .array(z.enum(INPUT_MODALITIES, { error: "input modalities are text and image" }))
+  .max(INPUT_MODALITIES.length)
+  .transform((v) => INPUT_MODALITIES.filter((m) => m === "text" || v.includes(m)));
+
 export const addCatalogSchema = z.strictObject({
   alias: aliasSchema,
   provider_id: providerIdSchema,
   model: modelSchema,
   label: labelSchema.optional(),
+  input_modalities: inputModalitiesSchema.optional(),
   ...priceFields,
 });
 export type AddCatalogInput = z.infer<typeof addCatalogSchema>;
@@ -119,6 +130,7 @@ export const updateCatalogSchema = z
     provider_id: providerIdSchema.optional(),
     model: modelSchema.optional(),
     label: labelSchema.nullable().optional(),
+    input_modalities: inputModalitiesSchema.optional(),
     ...priceFields,
   })
   .refine((v) => Object.keys(v).length > 0, "nothing to change");

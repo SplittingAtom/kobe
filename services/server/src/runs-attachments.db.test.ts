@@ -45,9 +45,14 @@ beforeAll(async () => {
 });
 afterAll(() => f.teardown());
 
-async function upload(p: Person, text: string, name = "notes.txt"): Promise<string> {
+async function upload(
+  p: Person,
+  text: string | Uint8Array<ArrayBuffer>,
+  name = "notes.txt",
+  type = "text/plain",
+): Promise<string> {
   const form = new FormData();
-  form.append("file", new File([text], name, { type: "text/plain" }));
+  form.append("file", new File([text], name, { type }));
   const req = new Request("http://x.test/", { method: "POST", body: form });
   const body = new RawBody(
     new Uint8Array(await req.arrayBuffer()),
@@ -73,6 +78,62 @@ const manifest = async (team: string, user: string) =>
       [team, user],
     )
   ).rows;
+
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
+
+/** Install catalog + the team's default model, with or without image input (KOBE-191). */
+async function defaultModel(team: string, ownerId: string, modalities: string[]) {
+  const alias = `m-${randomUUID().slice(0, 8)}`;
+  const admin = f.fx.admin;
+  await admin.query(
+    `INSERT INTO model_providers (id, kind, name, api_key_enc, created_by)
+     VALUES ('openai', 'openai', 'openai', 'v2.test.sealed', $1) ON CONFLICT (id) DO NOTHING`,
+    [ownerId],
+  );
+  await admin.query(
+    `INSERT INTO model_catalog (alias, provider_id, model, input_modalities, created_by)
+     VALUES ($1, 'openai', 'gpt-fake', $2, $3)`,
+    [alias, modalities, ownerId],
+  );
+  await admin.query(
+    `INSERT INTO team_models (team_id, alias, is_default, enabled_by) VALUES ($1, $2, true, $3)`,
+    [team, alias, ownerId],
+  );
+}
+
+describe("native media (KOBE-191)", () => {
+  const send = async (modalities: string[]) => {
+    const w = await f.world();
+    await defaultModel(w.team, w.owner.id, modalities);
+    const ws = await f.connect(w);
+    const threadId = await f.thread(w.owner);
+    const files = [
+      await upload(w.owner, PNG, "a.png", "image/png"),
+      await upload(w.owner, JPEG, "b.jpg", "image/jpeg"),
+      await upload(w.owner, "%PDF-1.7 x", "c.pdf", "application/pdf"),
+      await upload(w.owner, "plain", "d.txt"),
+    ];
+    const res = await f.send(w.owner, threadId, "see", 0, { file_ids: files });
+    expect(res.status, JSON.stringify(res.json)).toBe(201);
+    const start = await ws.started(res.json.run_id as string);
+    return Object.fromEntries((start.attachments ?? []).map((a) => [a.name, a.native_media]));
+  };
+
+  it("marks images for a model that accepts them; PDFs and other files never", async () => {
+    expect(await send(["text", "image"])).toEqual({
+      "a.png": "image",
+      "b.jpg": "image",
+      "c.pdf": undefined,
+      "d.txt": undefined,
+    });
+  });
+
+  it("marks nothing for a text-only model", async () => {
+    const marks = Object.values(await send(["text"]));
+    expect(marks.every((m) => m === undefined)).toBe(true);
+  });
+});
 
 describe("message with file_ids", () => {
   it("syncs the upload into the workspace, moves it into the thread tree and sends the attachment", async () => {
