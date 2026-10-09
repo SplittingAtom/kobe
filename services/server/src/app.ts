@@ -30,6 +30,7 @@ import { installSettingsRoutes } from "./routes/install-settings.js";
 import { installTeamsRoutes } from "./routes/install-teams.js";
 import { installUsersRoutes } from "./routes/install-users.js";
 import { meRoutes } from "./routes/me.js";
+import { meConnectorNoticesRoutes } from "./routes/me-connector-notices.js";
 import { myInvitesRoutes } from "./routes/my-invites.js";
 import { myTeamsRoutes } from "./routes/my-teams.js";
 import { runEventsRoutes } from "./routes/run-events.js";
@@ -119,6 +120,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   });
   api.route("/me/teams", myTeamsRoutes(deps));
   api.route("/me/invites", myInvitesRoutes(deps));
+  api.route("/me/connector-notices", meConnectorNoticesRoutes(deps));
   api.route("/me", meRoutes());
   api.route("/team/policy", teamPolicyRoutes(deps));
   api.route("/team/invites", teamInvitesRoutes(deps));

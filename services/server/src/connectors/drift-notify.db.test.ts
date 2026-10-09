@@ -133,7 +133,7 @@ describe("drift notifications", () => {
     probeNow(t("a", "v2"));
     await refresh(id);
     h.mailer.failNext = new Error("smtp down");
-    expect(await sweep()).toBe(1); // root failed, nobody else
+    expect(await sweep()).toBe(0); // root's send failed, nobody else to tell
     expect(await sweep()).toBe(1); // retried
     expect(mailTo("root").filter((m) => m.subject.includes("notify-c"))).toHaveLength(1);
 
