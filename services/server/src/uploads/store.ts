@@ -26,13 +26,14 @@ import type { UploadSettings } from "./settings.js";
  *     mid-stream, SHA-256 and the first bytes for sniffing computed on the way). A threaded key
  *     is queued in `retention_blob_deletions` first (due in an hour), so a crash leaves nothing
  *     the retention pass can't delete;
- *  3. the scan seam (ClamAV is KOBE-146);
+ *  3. the optional virus scan (`uploads/clamd.ts`, KOBE-146): a hit or an unreachable scanner
+ *     deletes the object, audits `workspace.upload_scan_refused` and refuses (422 / 503);
  *  4. one transaction under the team's storage lock: usage + size against the quota, then the
  *     `files` row and the audit event. Over quota: the object is deleted, nothing is written.
  */
 
 export type ScanOutcome = "none" | "clean" | "rejected" | "unavailable";
-/** Seam for KOBE-146: scan the stored object. Absent: not scanned (`scan_status` `none`). */
+/** Scans the stored object (clamd). Absent: not scanned (`scan_status` `none`, `scan: skipped`). */
 export type UploadScanner = (object: {
   readonly key: string;
   readonly size: number;
@@ -134,6 +135,26 @@ async function refuse(
 ): Promise<StoreResult> {
   await auditRefused(deps, caller, reason, bytes);
   return refusal(reason, limitBytes);
+}
+
+async function refuseScan(
+  deps: UploadDeps,
+  caller: UploadCaller,
+  code: "scan_rejected" | "scan_unavailable",
+  bytes: number,
+): Promise<StoreResult> {
+  try {
+    await withTeam(deps.db, caller.teamId, (tx) =>
+      recordAudit(tx, {
+        action: "workspace.upload_scan_refused",
+        teamId: caller.teamId,
+        target: { userId: caller.userId, reason: code, bytes },
+      }),
+    );
+  } catch (err) {
+    logger.error({ err, teamId: caller.teamId }, "upload scan refusal could not be audited");
+  }
+  return refusal(code);
 }
 
 /** The smallest limit applying to one file, and the code reported when it is exceeded. */
@@ -298,7 +319,7 @@ export async function storeUpload(
     const outcome = deps.scan ? await deps.scan({ key, size, sha256: stored.sha256 }) : "none";
     if (outcome === "rejected" || outcome === "unavailable") {
       await discard(deps, key);
-      return refusal(outcome === "rejected" ? "scan_rejected" : "scan_unavailable");
+      return refuseScan(deps, caller, outcome === "rejected" ? "scan_rejected" : "scan_unavailable", size);
     }
     return {
       ok: true,

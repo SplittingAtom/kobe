@@ -19,4 +19,19 @@ describe("upload settings", () => {
       /KOBE_UPLOAD_ORPHAN_HOURS/,
     );
   });
+
+  it("turns scanning on only when the chart gives a clamd host", () => {
+    expect(loadUploadSettings({}).clamav).toBeUndefined();
+    expect(loadUploadSettings({ KOBE_CLAMAV_HOST: "kobe-clamav" }).clamav).toEqual({
+      host: "kobe-clamav",
+      port: 3310,
+      timeoutMs: 60_000,
+    });
+    expect(loadUploadSettings({ KOBE_CLAMAV_HOST: "h", KOBE_CLAMAV_PORT: "4000" }).clamav?.port).toBe(
+      4000,
+    );
+    expect(() => loadUploadSettings({ KOBE_CLAMAV_HOST: "h", KOBE_CLAMAV_PORT: "0" })).toThrow(
+      /KOBE_CLAMAV_PORT/,
+    );
+  });
 });
