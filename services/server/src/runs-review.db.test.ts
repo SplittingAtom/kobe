@@ -405,6 +405,10 @@ describe("forced interleavings and edges (L7)", () => {
     const threadId = await f.thread(w.owner);
     const projectId = "5b9d6c1e-2f3a-4b5c-8d9e-0f1a2b3c4d5e";
     await f.fx.admin.query(
+      `INSERT INTO projects (team_id, id, slug, name, created_by) VALUES ($1, $2, 'rr', 'RR', $3)`,
+      [w.team, projectId, w.owner.id],
+    );
+    await f.fx.admin.query(
       `UPDATE threads SET project_id = $1, shared_to_project = true WHERE id = $2`,
       [projectId, threadId],
     );

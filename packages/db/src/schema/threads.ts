@@ -18,6 +18,7 @@ import {
 import { agentScope, installAgentVersions, teamAgentVersions } from "./agents.js";
 import { MODEL_ALIAS_PATTERN } from "./models.js";
 import { users } from "./auth.js";
+import { projects } from "./projects.js";
 import { teams } from "./teams.js";
 
 // Conversations (spec D15, §5.4). Team tables: every key and foreign key includes team_id, so
@@ -39,7 +40,9 @@ const teamRef = () =>
  * two generated columns: `team_agent_id` (set for team agents) → team_agent_versions and
  * `install_agent_id` (personal and gallery agents) → install_agent_versions; MATCH SIMPLE skips
  * the null one. Both are NO ACTION, so a pinned version can never be deleted. Null agent = the
- * install default agent. `project_id`'s foreign key arrives with projects (KOBE-57).
+ * install default agent. `project_id` → projects (KOBE-160) is ON DELETE RESTRICT: a project is
+ * archived, and a hard delete must first detach or delete its threads (they are authors' private
+ * content, never silently orphaned, and a shared thread must be unshared with it).
  *
  * `tsv` (§5.4; the title, weight A) is a stored generated column added in SQL by migration
  * `*_thread_search.sql`, like `thread_entries.tsv`; neither is declared here (the entry column depends
@@ -128,6 +131,11 @@ export const threads = pgTable(
       columns: [t.installAgentId, t.agentVersion],
       foreignColumns: [installAgentVersions.agentId, installAgentVersions.version],
     }),
+    foreignKey({
+      name: "threads_project_fk",
+      columns: [t.teamId, t.projectId],
+      foreignColumns: [projects.teamId, projects.id],
+    }).onDelete("restrict"),
     // Usage per version (inventory, KOBE-48) and the foreign keys' checks on a team's cascade.
     index("threads_team_agent_idx")
       .on(t.teamId, t.teamAgentId, t.agentVersion)

@@ -540,6 +540,20 @@
       "when": 1791562513183,
       "tag": "0076_connector_grants_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1791566832080,
+      "tag": "0077_projects",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1791566832638,
+      "tag": "0078_projects_rls",
+      "breakpoints": true
     }
   ]
 }

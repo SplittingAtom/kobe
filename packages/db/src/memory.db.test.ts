@@ -51,9 +51,21 @@ interface DocOpts {
   path?: string;
 }
 
+/** A project of `teamId` (project docs reference one since KOBE-160). */
+async function project(teamId: string): Promise<string> {
+  const id = randomUUID();
+  await admin.query(
+    `INSERT INTO projects (team_id, id, slug, name, created_by) VALUES ($1, $2, $3, 'P', $4)`,
+    [teamId, id, `p-${id.slice(0, 8)}`, owner],
+  );
+  return id;
+}
+
 /** A personal doc of `owner` by default. */
 async function doc(teamId: string, o: DocOpts = {}): Promise<string> {
   const scope = o.scope ?? "user";
+  const projectId =
+    o.project === undefined && scope === "project" ? await project(teamId) : o.project;
   const { rows } = await admin.query<{ id: string }>(
     `INSERT INTO memory_docs (team_id, scope, owner_user_id, project_id, path)
      VALUES ($1, $2, $3, $4, $5) RETURNING id`,
@@ -61,7 +73,7 @@ async function doc(teamId: string, o: DocOpts = {}): Promise<string> {
       teamId,
       scope,
       o.owner === undefined ? (scope === "user" ? owner : null) : o.owner,
-      o.project === undefined ? (scope === "project" ? randomUUID() : null) : o.project,
+      projectId ?? null,
       o.path ?? "MEMORY.md",
     ],
   );
@@ -104,7 +116,7 @@ afterAll(async () => {
 });
 
 describe("memory_docs", () => {
-  it("accept a personal doc and a project doc without a projects table", async () => {
+  it("accept a personal doc and a project doc", async () => {
     const t = await team();
     expect(await errorCode(doc(t))).toBeUndefined();
     expect(await errorCode(doc(t, { scope: "project" }))).toBeUndefined();
@@ -114,8 +126,8 @@ describe("memory_docs", () => {
     const t = await team();
     expect(await errorCode(doc(t, { scope: "other" }))).toBe("23514");
     expect(await errorCode(doc(t, { owner: null }))).toBe("23514");
-    expect(await errorCode(doc(t, { project: randomUUID() }))).toBe("23514");
-    expect(await errorCode(doc(t, { scope: "project", owner, project: randomUUID() }))).toBe(
+    expect(await errorCode(doc(t, { project: await project(t) }))).toBe("23514");
+    expect(await errorCode(doc(t, { scope: "project", owner, project: await project(t) }))).toBe(
       "23514",
     );
     expect(await errorCode(doc(t, { scope: "project", project: null }))).toBe("23514");
@@ -145,11 +157,11 @@ describe("memory_docs", () => {
     expect(await errorCode(doc(t, { path: "x.md" }))).toBeUndefined();
     expect(await errorCode(doc(t, { path: "x.md" }))).toBe("23505");
     expect(await errorCode(doc(t, { path: "x.md", owner: other }))).toBeUndefined();
-    const project = randomUUID();
-    expect(await errorCode(doc(t, { scope: "project", project, path: "x.md" }))).toBeUndefined();
-    expect(await errorCode(doc(t, { scope: "project", project, path: "x.md" }))).toBe("23505");
+    const p = await project(t);
+    expect(await errorCode(doc(t, { scope: "project", project: p, path: "x.md" }))).toBeUndefined();
+    expect(await errorCode(doc(t, { scope: "project", project: p, path: "x.md" }))).toBe("23505");
     expect(
-      await errorCode(doc(t, { scope: "project", project: randomUUID(), path: "x.md" })),
+      await errorCode(doc(t, { scope: "project", project: await project(t), path: "x.md" })),
     ).toBeUndefined();
     // The same personal path in another team is another doc (memory is per user and team).
     expect(await errorCode(doc(await team(), { path: "x.md" }))).toBeUndefined();

@@ -13,6 +13,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { users } from "./auth.js";
+import { projects } from "./projects.js";
 import { teams } from "./teams.js";
 
 // File memory (KOBE-154 = 56b of KOBE-56, spec D24; contract: packages/protocol/src/memory.ts).
@@ -48,8 +49,10 @@ const teamRef = () =>
 
 /**
  * One memory file. `scope = 'user'`: `owner_user_id` set, `project_id` null (personal, per user
- * and team). `scope = 'project'`: `project_id` set, `owner_user_id` null. `project_id` has no
- * foreign key yet: KOBE-160 creates `projects` and adds it (as for `threads.project_id`).
+ * and team). `scope = 'project'`: `project_id` set, `owner_user_id` null. `project_id` → `projects`
+ * (KOBE-160) is ON DELETE RESTRICT: project memory is shared content under
+ * legal hold and retention, so deleting a project must first delete its docs deliberately (the
+ * hold guard then decides), never cascade.
  * `current_version` is the newest row of `memory_doc_versions`; `deleted_at` is a soft delete
  * (the panel's delete, restorable by Undo), so history stays. A path is unique per owner (user
  * scope) or project (project scope), deleted or not: re-creating a deleted path revives the row.
@@ -76,6 +79,11 @@ export const memoryDocs = pgTable(
     uniqueIndex("memory_docs_project_path_unique")
       .on(t.teamId, t.projectId, t.path)
       .where(sql`${t.scope} = 'project'`),
+    foreignKey({
+      name: "memory_docs_project_fk",
+      columns: [t.teamId, t.projectId],
+      foreignColumns: [projects.teamId, projects.id],
+    }).onDelete("restrict"),
     check("memory_docs_scope", sql`${t.scope} IN ('user', 'project')`),
     check(
       "memory_docs_scope_keys",
