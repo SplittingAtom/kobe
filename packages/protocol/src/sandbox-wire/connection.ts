@@ -30,6 +30,8 @@
  * Capabilities: `hello.capabilities` may list `artifacts` ({@link CAPABILITY_ARTIFACTS}, artifacts.ts):
  *   the agent then sends `artifact.put` and the server answers `artifact.result`. The server refuses
  *   `artifact.put` from a connection that did not announce it.
+ *   `memory` ({@link CAPABILITY_MEMORY}, memory.ts): `memory.put` / `memory.read` / `memory.result` and
+ *   `run.start.memory`; same refusal rule.
  *
  * Leasing (normative)
  * - The server leases each run and thread to exactly one authenticated connection: the one whose

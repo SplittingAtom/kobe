@@ -234,8 +234,8 @@ describe("hot thread queries use the team-leading index with the break-glass pol
     const { rows } = await admin.query(
       `SELECT count(*)::int AS n FROM pg_policy WHERE polname = 'break_glass_read'`,
     );
-    // threads, thread_entries, artifacts, artifact_versions (KOBE-129).
-    expect(rows[0]).toEqual({ n: 4 });
+    // threads, thread_entries, artifacts, artifact_versions (KOBE-129), files (KOBE-142).
+    expect(rows[0]).toEqual({ n: 5 });
   });
 
   it("thread list, Trash and thread lookup (repository)", async () => {

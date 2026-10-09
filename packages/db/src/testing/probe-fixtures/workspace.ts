@@ -1,6 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type { KobeTx } from "../../client.js";
-import { artifactVersions, artifacts, runs, threads, users } from "../../schema/index.js";
+import {
+  artifactVersions,
+  artifacts,
+  files,
+  runs,
+  teamStorageQuotas,
+  threads,
+  users,
+} from "../../schema/index.js";
 import type { workspace } from "../../tenancy/workspace.js";
 import type { ProbeFixture } from "./types.js";
 
@@ -54,5 +62,23 @@ export const workspaceFixtures: Record<(typeof workspace.team)[number], ProbeFix
       runId,
       toolCallId: "probe",
     });
+  },
+  files: async (tx, teamId) => {
+    const { userId, threadId } = await insertThreadAndRun(tx, teamId);
+    await tx.insert(files).values({
+      teamId,
+      userId,
+      threadId,
+      kind: "upload",
+      name: "probe.txt",
+      sizeBytes: 5,
+      sha256: "0".repeat(64),
+      mimeType: "text/plain",
+      blobRef: `teams/${teamId}/threads/${threadId}/files/probe`,
+    });
+  },
+  team_storage_quotas: async (tx, teamId) => {
+    const { userId } = await insertThreadAndRun(tx, teamId);
+    await tx.insert(teamStorageQuotas).values({ teamId, maxBytes: 1024, updatedBy: userId });
   },
 };

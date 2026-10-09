@@ -53,6 +53,12 @@ export interface LifecycleOptions {
   readonly idleMinutes: number;
   /** Most sandboxes one sweep hibernates per team (spreads Kubernetes writes). */
   readonly batchPerTeam?: number;
+  /**
+   * Called when a wake finds the member's sandbox offboarded (KOBE-28): drops the old retained
+   * volume so the wake can start a new sandbox. False refuses the wake (legal hold). Without it
+   * an offboarded sandbox is never woken.
+   */
+  readonly reinstate?: (target: SandboxTarget) => Promise<boolean>;
   readonly log?: Logger;
 }
 
@@ -154,7 +160,10 @@ export function createSandboxLifecycle(options: LifecycleOptions): SandboxLifecy
     const started = Date.now();
     await assertAllowed(target);
     const team = await teamRef(target.teamId);
-    const previous = await beginWake(db, target);
+    let previous = await beginWake(db, target);
+    if (previous === "destroyed" && options.reinstate && (await options.reinstate(target))) {
+      previous = await beginWake(db, target);
+    }
     if (previous === "destroyed") {
       throw new SandboxWakeError("sandbox_unavailable", "this sandbox was offboarded");
     }

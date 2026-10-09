@@ -4,10 +4,14 @@ import { createApp } from "./app.js";
 import { seedGalleryAgents } from "./gallery/seed.js";
 import { approvalKeyring } from "./approvals/index.js";
 import { isolationAuditor } from "./audit/isolation.js";
+import { AUDIT_FORWARD_LOCK, AuditForwarder } from "./audit/forward/forwarder.js";
+import { destinationsOf, sinksFor } from "./audit/forward/index.js";
 import { AuditPiiSweeper } from "./audit/pii-sweeper.js";
 import { BreakGlassSweeper } from "./break-glass/sweeper.js";
+import { initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
 import { loadConfig } from "./config.js";
 import { loadConnectorUrlPolicy } from "./connectors/config.js";
+import { createProxyProbe, PROBE_TIMEOUT_MS } from "./connectors/probe.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
 import { EgressBlockedRelay } from "./egress/blocked-relay.js";
 import { loadEgressHeaderSecrets } from "./egress/config.js";
@@ -21,6 +25,7 @@ import { createSmtpMailer } from "./mail/mailer.js";
 import { createHttpBifrostAdmin } from "./models/bifrost-admin.js";
 import { loadModelsConfig } from "./models/config.js";
 import { ModelGatewaySync } from "./models/sync.js";
+import { OFFBOARDING_SWEEP_LOCK } from "./offboarding/index.js";
 import { createPgReconcileLock } from "./sandbox/reconcile-lock.js";
 import { RetentionJob } from "./retention/job.js";
 import { createInternalApp } from "./routes/internal.js";
@@ -48,9 +53,11 @@ import {
 
 /** Open streams (SSE) get this long to finish before being cut; stays under k8s' 30 s grace period. */
 const EVAL_SWEEP_MS = 60_000;
+const OFFBOARDING_SWEEP_MS = 10 * 60_000;
 const DRAIN_TIMEOUT_MS = 10_000;
 
 const config = loadConfig(process.env);
+const telemetry = initTelemetry(loadTelemetryConfig(process.env, config.process));
 // Object storage (s3.*): workspace sync (KOBE-27), thread export and retention (KOBE-18).
 const s3 = loadS3Settings(process.env);
 const objectStore = s3 ? createS3ObjectStore(s3) : undefined;
@@ -84,6 +91,16 @@ if (config.auth && config.smtp) {
     mailer: createSmtpMailer(config.smtp),
     sandboxWire: { waker, ...(runTokenKey ? { runTokenKey } : {}) },
     connectors: loadConnectorUrlPolicy(process.env),
+    auditForwardingDestinations: destinationsOf(config.auditForwarding),
+    ...(config.mcpProxyUrl && config.mcpProxyInternalKey
+      ? {
+          connectorProbe: createProxyProbe({
+            baseUrl: config.mcpProxyUrl,
+            internalKey: config.mcpProxyInternalKey,
+            timeoutMs: PROBE_TIMEOUT_MS,
+          }),
+        }
+      : {}),
     agents: { maxVersions: config.agentMaxVersions },
     ...(egressHeaderSecrets ? { egressHeaderSecrets } : {}),
     ...(envelope ? { envelope } : {}),
@@ -158,6 +175,21 @@ breakGlassSweeper?.start();
 // Audit rows lose their client IP and user agent after the retention period (KOBE-17).
 const auditPiiSweeper = deps ? new AuditPiiSweeper(deps.database.db) : undefined;
 auditPiiSweeper?.start();
+// Optional SIEM forwarding (syslog, OTLP; KOBE-19): a sweep, one replica forwards at a time.
+const auditForwarder =
+  deps && destinationsOf(config.auditForwarding).length > 0
+    ? new AuditForwarder({
+        db: deps.database.db,
+        sinks: sinksFor(config.auditForwarding),
+        lock: createPgReconcileLock(
+          deps.database.pool,
+          (err) => logger.warn({ err }, "audit forwarding lock connection problem"),
+          AUDIT_FORWARD_LOCK,
+        ),
+        log: logger,
+      })
+    : undefined;
+auditForwarder?.start();
 // Nightly retention (KOBE-18, D18): Trash and retention purges, run_events compaction, released
 // blobs. Every replica checks; an advisory lock lets one run a pass.
 const retentionJob = deps
@@ -360,12 +392,15 @@ if (sandbox && deps && !config.mcpProxyInternalKey) {
 }
 // Hibernation and wake (KOBE-25, D14): the router wakes sandboxes it finds disconnected; every
 // replica sweeps for idle ones (the sandboxes row lock keeps replicas from colliding).
+if (sandbox && deps) deps.offboarding.setProvider(sandbox.provider);
 const lifecycle =
   sandbox && deps
     ? createSandboxLifecycle({
         db: deps.database.db,
         provider: sandbox.provider,
         idleMinutes: sandbox.settings.hibernation.idleMinutes,
+        // A returning member's offboarded sandbox is replaced by a new one (KOBE-28, D12).
+        reinstate: (target) => deps.offboarding.reinstate(target),
       })
     : undefined;
 if (lifecycle) waker.set(lifecycle.waker);
@@ -391,6 +426,19 @@ const stopTeamReconciler =
             );
           }
         },
+      })
+    : undefined;
+// Offboarding (KOBE-28, D12): finishes departures that were missed, deletes volumes and workspace
+// copies 30 days after the member left (never under a legal hold). One replica at a time.
+const stopOffboarding =
+  deps && config.process === "server"
+    ? deps.offboarding.start({
+        lock: createPgReconcileLock(
+          deps.database.pool,
+          (err) => logger.warn({ err }, "offboarding sweep lock connection problem"),
+          OFFBOARDING_SWEEP_LOCK,
+        ),
+        everyMs: OFFBOARDING_SWEEP_MS,
       })
     : undefined;
 const stopHibernation =
@@ -420,6 +468,7 @@ function shutdown(signal: string): void {
   isolation.stop();
   stopReconciler?.();
   stopTeamReconciler?.();
+  stopOffboarding?.();
   if (evalSweep) clearInterval(evalSweep);
   stopHibernation?.();
   stopCollector?.();
@@ -431,13 +480,16 @@ function shutdown(signal: string): void {
   void modelSync?.close();
   breakGlassSweeper?.stop();
   auditPiiSweeper?.stop();
+  auditForwarder?.stop();
   void retentionJob?.stop();
   deps?.approvals.stop();
   // End event streams first so browsers reconnect (with Last-Event-ID) to another replica.
   void deps?.eventStream.hub.close();
   server.close((err) => {
     if (err) logger.error({ err }, "shutdown error");
-    void (deps?.close() ?? Promise.resolve()).finally(() => process.exit(err ? 1 : 0));
+    void Promise.all([deps?.close(), telemetry.shutdown()]).finally(() =>
+      process.exit(err ? 1 : 0),
+    );
   });
   if ("closeIdleConnections" in server) server.closeIdleConnections();
   setTimeout(() => {

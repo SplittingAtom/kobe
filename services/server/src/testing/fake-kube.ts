@@ -183,7 +183,7 @@ export function createFakeKube(): FakeKube {
         throw new KubeApiError(409, `${r.kind} ${r.name}: the object has been modified`);
       }
       const merged = applyMergePatch(existing, body) as KubeObject;
-      const result = put({ ...merged, metadata: existing.metadata }, existing);
+      const result = put({ ...merged, metadata: merged.metadata }, existing);
       fake.afterWrite?.(result, fake);
       return result;
     },

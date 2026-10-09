@@ -140,6 +140,37 @@ describe("upstream MCP client (Streamable HTTP)", () => {
   });
 });
 
+describe("listTools (pinning probe)", () => {
+  const list = () =>
+    client.listTools({ url: fake.url, headers: {}, signal: AbortSignal.timeout(5_000) });
+  const tools = [1, 2, 3].map((n) => ({ name: `t${n}`, description: "d", inputSchema: {} }));
+
+  it("follows pagination and returns every tool", async () => {
+    fake.options = { tools, pageSize: 2 };
+    expect(await list()).toEqual({ ok: true, result: { tools } });
+    expect(fake.received.map((r) => r.method)).toEqual([
+      "initialize",
+      "notifications/initialized",
+      "tools/list",
+      "tools/list",
+    ]);
+  });
+
+  it("reports an upstream refusal as auth_required", async () => {
+    fake.options = { status: 401 };
+    expect(await list()).toEqual({ ok: false, failure: "auth_required" });
+  });
+
+  it("refuses a URL the policy does not allow", async () => {
+    const res = await client.listTools({
+      url: "http://10.0.0.5/mcp",
+      headers: {},
+      signal: AbortSignal.timeout(5_000),
+    });
+    expect(res).toEqual({ ok: false, failure: "url_not_allowed" });
+  });
+});
+
 describe("where the client may connect", () => {
   it("refuses plain http unless allowed, other ports, and credentials in the URL", async () => {
     const strict = createUpstreamClient({

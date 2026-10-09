@@ -1,3 +1,4 @@
+import { SpanKind, idAttributes, recordSpan } from "@kobe/telemetry";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { connect as netConnect, isIP, type Socket } from "node:net";
 import { normalizeHost } from "@kobe/db";
@@ -191,6 +192,26 @@ export function createEgressProxy(deps: ProxyDeps): Server {
       outcome,
       reason,
       ...bytes,
+    });
+    // Metadata only: the destination host and port (audited anyway), never a path or query.
+    recordSpan("egress.connection", {
+      startTime: a.started,
+      kind: SpanKind.SERVER,
+      error: outcome === "failed",
+      attributes: {
+        ...idAttributes({
+          teamId: identity.teamId,
+          userId: identity.userId,
+          sandboxId: identity.sandboxId,
+        }),
+        ...(a.host === undefined ? {} : { "server.address": a.host }),
+        ...(a.port === undefined ? {} : { "server.port": a.port }),
+        "kobe.outcome": outcome,
+        ...(reason === undefined ? {} : { "kobe.reason": reason }),
+        "kobe.bytes_up": bytes.bytesUp,
+        "kobe.bytes_down": bytes.bytesDown,
+        "kobe.upgraded": upgraded,
+      },
     });
     logger.info(
       {

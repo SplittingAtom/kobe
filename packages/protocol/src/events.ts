@@ -209,6 +209,9 @@ export const EVENT_PAYLOAD_SCHEMAS = {
     version: z.number().int().positive(),
     /** Version to restore for Undo (D24); absent when the doc was created. */
     previous_version: z.number().int().positive().optional(),
+    /** Correlates with the `remember` tool call (KOBE-153); absent on older events. */
+    tool_call_id: idSchema.optional(),
+    mode: z.enum(["replace", "append"]).optional(),
   }),
   "artifact.created": z.strictObject({
     artifact_id: uuidSchema,

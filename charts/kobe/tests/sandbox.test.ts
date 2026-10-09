@@ -403,6 +403,16 @@ describe("sandbox RBAC (least privilege; D11)", () => {
     expect(all).toContainEqual({ apiGroups: [""], resources: ["pods/log"], verbs: ["get"] });
   });
 
+  // KOBE-28: offboarding keeps a departed member's volume 30 days, then deletes it. Nothing wider.
+  it("lets the server detach and delete workspace volumes, and nothing else on them (KOBE-28)", () => {
+    const all = rules("ClusterRole", manager);
+    expect(all).toContainEqual({
+      apiGroups: [""],
+      resources: ["persistentvolumeclaims"],
+      verbs: ["get", "patch", "delete"],
+    });
+  });
+
   // KOBE-126: the team-namespace reconcile (server/src/sandbox/team-reconcile.ts) lists namespaces by
   // label (orchestrator role), reads both NetworkPolicies, and server-side applies (PATCH, plus
   // create when missing) every kind below. Exactly these verbs, per kind, in the manager role.

@@ -41,17 +41,25 @@ export type UpstreamResult =
     }
   | { readonly ok: false; readonly failure: UpstreamFailure };
 
-export interface UpstreamCall {
+/** Most `tools/list` pages a probe follows (KOBE-101). */
+export const MAX_TOOL_PAGES = 20;
+
+export interface UpstreamBase {
   readonly url: string;
   /** Credential headers (KOBE-61); never logged. */
   readonly headers: Readonly<Record<string, string>>;
+  readonly signal: AbortSignal;
+}
+
+export interface UpstreamCall extends UpstreamBase {
   readonly tool: string;
   readonly arguments: Record<string, unknown>;
-  readonly signal: AbortSignal;
 }
 
 export interface UpstreamClient {
   callTool(call: UpstreamCall): Promise<UpstreamResult>;
+  /** The live `tools/list` (all pages) as `{ tools: unknown[] }`, for the server's pinning probe. */
+  listTools(call: UpstreamBase): Promise<UpstreamResult>;
   /** Session DELETEs still in flight (bounded by `maxPendingDeletes`). */
   readonly pendingDeletes: number;
   close(): Promise<void>;
@@ -222,7 +230,7 @@ export function createUpstreamClient(options: UpstreamOptions): UpstreamClient {
 
   async function post(
     url: URL,
-    call: UpstreamCall,
+    call: UpstreamBase,
     session: Session,
     message: Record<string, unknown>,
   ): Promise<Record<string, unknown> | undefined> {
@@ -282,7 +290,7 @@ export function createUpstreamClient(options: UpstreamOptions): UpstreamClient {
   let pendingDeletes = 0;
   const maxPendingDeletes = options.maxPendingDeletes ?? 64;
 
-  function endSession(url: URL, call: UpstreamCall, session: Session): void {
+  function endSession(url: URL, call: UpstreamBase, session: Session): void {
     if (session.id === undefined || pendingDeletes >= maxPendingDeletes) return;
     pendingDeletes += 1;
     void undiciFetch(url, {
@@ -303,7 +311,11 @@ export function createUpstreamClient(options: UpstreamOptions): UpstreamClient {
       });
   }
 
-  async function callTool(call: UpstreamCall): Promise<UpstreamResult> {
+  /** initialize → initialized → `run` → session DELETE; maps every failure to a result. */
+  async function inSession(
+    call: UpstreamBase,
+    run: (url: URL, session: Session) => Promise<UpstreamResult>,
+  ): Promise<UpstreamResult> {
     const url = checkUpstreamUrl(call.url, options.policy, addresses);
     if (!url) return { ok: false, failure: "url_not_allowed" };
     const session: Session = {};
@@ -328,23 +340,7 @@ export function createUpstreamClient(options: UpstreamOptions): UpstreamClient {
       }
       session.version = version;
       await post(url, call, session, { jsonrpc: "2.0", method: "notifications/initialized" });
-      const response = await post(url, call, session, {
-        jsonrpc: "2.0",
-        id: 2,
-        method: "tools/call",
-        params: { name: call.tool, arguments: call.arguments },
-      });
-      if (response && isObject(response.error)) {
-        const { code, message } = response.error;
-        return {
-          ok: false,
-          failure: "rpc_error",
-          code: typeof code === "number" && Number.isSafeInteger(code) ? code : -32603,
-          message: typeof message === "string" ? message.slice(0, 1000) : "Upstream error.",
-        };
-      }
-      if (!response || !isObject(response.result)) return { ok: false, failure: "protocol_error" };
-      return { ok: true, result: response.result };
+      return await run(url, session);
     } catch (err) {
       if (err instanceof UpstreamError) return { ok: false, failure: err.failure };
       const cause = (err as { cause?: unknown }).cause;
@@ -356,8 +352,62 @@ export function createUpstreamClient(options: UpstreamOptions): UpstreamClient {
     }
   }
 
+  /** One request after initialize, its `result` object or the failure. */
+  async function request(
+    url: URL,
+    call: UpstreamBase,
+    session: Session,
+    id: number,
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<UpstreamResult> {
+    const response = await post(url, call, session, { jsonrpc: "2.0", id, method, params });
+    if (response && isObject(response.error)) {
+      const { code, message } = response.error;
+      return {
+        ok: false,
+        failure: "rpc_error",
+        code: typeof code === "number" && Number.isSafeInteger(code) ? code : -32603,
+        message: typeof message === "string" ? message.slice(0, 1000) : "Upstream error.",
+      };
+    }
+    if (!response || !isObject(response.result)) return { ok: false, failure: "protocol_error" };
+    return { ok: true, result: response.result };
+  }
+
+  const callTool = (call: UpstreamCall): Promise<UpstreamResult> =>
+    inSession(call, (url, session) =>
+      request(url, call, session, 2, "tools/call", { name: call.tool, arguments: call.arguments }),
+    );
+
+  async function listTools(call: UpstreamBase): Promise<UpstreamResult> {
+    return inSession(call, async (url, session) => {
+      const tools: unknown[] = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < MAX_TOOL_PAGES; page += 1) {
+        const answer = await request(
+          url,
+          call,
+          session,
+          2 + page,
+          "tools/list",
+          cursor === undefined ? {} : { cursor },
+        );
+        if (!answer.ok) return answer;
+        const pageTools = answer.result.tools;
+        if (!Array.isArray(pageTools)) return { ok: false, failure: "protocol_error" };
+        tools.push(...pageTools);
+        const next = answer.result.nextCursor;
+        if (typeof next !== "string" || next === "") return { ok: true, result: { tools } };
+        cursor = next;
+      }
+      return { ok: false, failure: "too_large" };
+    });
+  }
+
   return {
     callTool,
+    listTools,
     get pendingDeletes() {
       return pendingDeletes;
     },
