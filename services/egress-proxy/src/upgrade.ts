@@ -634,7 +634,10 @@ async function exchange(
         res.destroy();
       },
     },
-    Math.min(identity.expiresAt, deadline),
+    // Only the token lifetime: the request deadline is enforced by `overall` above. Registering
+    // it here too made two timers race at the same instant, and the registry's (reason
+    // not_enabled, 502) could beat `overall` (upstream_timeout, 504).
+    identity.expiresAt,
   );
   tls.setTimeout(deps.settings.idleTimeoutMs, () => fail("upstream_timeout"));
 

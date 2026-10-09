@@ -449,6 +449,25 @@ describe("upgrade (plain HTTP → verified HTTPS with the team's headers)", () =
   });
 });
 
+describe("upgrade time limit ordering (KOBE-135)", () => {
+  it("leaves the request deadline to the upgrade timer, not the tunnel registry", async () => {
+    const closeAts: number[] = [];
+    await start({
+      tunnels: {
+        register: (tunnel: { close(reason: string): void }, closeAt: number) => {
+          closeAts.push(closeAt);
+          // A registry timer that wins the race against the upgrade timer.
+          if (closeAt <= Date.now() + 1_500) setImmediate(() => tunnel.close("lifetime"));
+          return () => undefined;
+        },
+      } as unknown as TunnelRegistry,
+    });
+    const hang = await viaProxy("http://pkgs.example.com/hang");
+    expect(hang.status).toBe(504);
+    expect(closeAts).toHaveLength(1);
+  });
+});
+
 describe("upgrade hardening (security review)", () => {
   it("never injects headers for a wildcard pattern (the sandbox could pick the subdomain)", async () => {
     const res = await viaProxy("http://evil.wild.example.com/");
