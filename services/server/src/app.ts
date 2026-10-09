@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { annotate, honoTracing } from "@kobe/telemetry";
 import { AuditBusyError } from "@kobe/db";
 import { auditRequestContext, auditUserContext } from "./audit/context.js";
 import { requireSession, type AuthVariables } from "./auth/session.js";
@@ -68,6 +69,7 @@ export interface AppOptions {
 export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   const { isolation } = options;
   const app = new Hono();
+  app.use("*", honoTracing());
   // An audited action that couldn't get the audit chain lock in time rolled back: retryable.
   app.onError((err, c) => {
     if (err instanceof AuditBusyError) {
@@ -111,6 +113,10 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.use(requireSession(deps));
   // The signed-in user is the actor of everything audited in the request (KOBE-15).
   api.use(auditUserContext(deps));
+  api.use(async (c, next) => {
+    annotate({ userId: c.get("user").id });
+    await next();
+  });
   api.route("/me/teams", myTeamsRoutes(deps));
   api.route("/me/invites", myInvitesRoutes(deps));
   api.route("/me", meRoutes());

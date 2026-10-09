@@ -5,6 +5,7 @@ import { SecretBox, VIRTUAL_KEY_PURPOSE, virtualKeyContext, type GatewayPrincipa
 import { RUN_TOKEN_HEADER, type RunTokenClaims, type SessionTokenAudience } from "@kobe/protocol";
 import { deriveRunTokenKey, signRunToken } from "@kobe/protocol/node";
 import { signSessionToken, verifySessionToken } from "@kobe/session-token";
+import { InMemorySpanExporter, initTelemetry, type Telemetry } from "@kobe/telemetry";
 import pino from "pino";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createModelGateway } from "./gateway.js";
@@ -826,5 +827,69 @@ describe("virtual keys", () => {
     expect(r.status).toBe(503);
     expect(forgot).toBe(1);
     expect(JSON.parse(r.text).error.code).toBe("model_gateway_resyncing");
+  });
+});
+
+describe("tracing (KOBE-10)", () => {
+  let telemetry: Telemetry | undefined;
+  afterEach(async () => {
+    await telemetry?.shutdown();
+    telemetry = undefined;
+  });
+  function trace(captureContent: boolean) {
+    const exporter = new InMemorySpanExporter();
+    telemetry = initTelemetry(
+      { enabled: true, endpoint: "http://x:4318", headers: {}, captureContent, serviceName: "t" },
+      { exporter },
+    );
+    return exporter;
+  }
+  const PROMPT = "summarise the secret merger plan";
+  const send = (t: string) =>
+    call(`/v1/chat/completions?key=${t}`, {
+      headers: bearer(t),
+      body: { model: "openai/m", messages: [{ role: "user", content: PROMPT }] },
+    });
+
+  it("records ids, model and sizes but no prompt, query or credential by default", async () => {
+    const exporter = trace(false);
+    const t = token();
+    expect((await send(t)).status).toBe(200);
+    await new Promise((r) => setTimeout(r, 20));
+    const span = exporter.getFinishedSpans().find((s) => s.name === "model_gateway.request");
+    expect(span?.attributes).toMatchObject({
+      "kobe.team_id": team,
+      "kobe.user_id": user,
+      "kobe.sandbox_id": sandbox,
+      "gen_ai.request.model": "openai/m",
+      "http.response.status_code": 200,
+    });
+    const dump = JSON.stringify(exporter.getFinishedSpans().map((s) => s.attributes));
+    expect(dump).not.toContain(PROMPT);
+    expect(dump).not.toContain(t);
+    expect(dump).not.toContain("gen_ai.prompt");
+  });
+
+  it("joins the caller's trace and passes it on to Bifrost", async () => {
+    const exporter = trace(false);
+    await call("/v1/chat/completions", {
+      headers: {
+        ...bearer(),
+        traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+      },
+    });
+    const span = exporter.getFinishedSpans()[0];
+    expect(span?.spanContext().traceId).toBe("0af7651916cd43dd8448eb211c80319c");
+    const upstream = String(hits[0]?.headers.traceparent);
+    expect(upstream).toContain("0af7651916cd43dd8448eb211c80319c");
+    expect(upstream).toContain(span?.spanContext().spanId);
+  });
+
+  it("adds the prompt only with content capture on", async () => {
+    const exporter = trace(true);
+    await send(token());
+    await new Promise((r) => setTimeout(r, 20));
+    const span = exporter.getFinishedSpans()[0];
+    expect(String(span?.attributes["gen_ai.prompt"])).toContain(PROMPT);
   });
 });

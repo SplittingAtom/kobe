@@ -1,6 +1,7 @@
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { SKILL_BUNDLE_PATH, WORKSPACE_SYNC_PATH } from "@kobe/protocol";
 import { Hono, type Context } from "hono";
+import { honoTracing } from "@kobe/telemetry";
 import { IsolationRuntimeMissingError } from "../isolation/gate.js";
 import { logger } from "../logger.js";
 import type { SessionKeys } from "../sandbox/config.js";
@@ -49,6 +50,7 @@ function peerAddress(c: Context): string {
  */
 export function createSandboxApp(deps: SandboxRoutesDeps): Hono {
   const app = new Hono();
+  app.use("*", honoTracing());
   app.get("/healthz", (c) => c.json({ status: "ok", service: "server-sandbox" }));
   // Sandbox endpoints are cluster-internal: anything that came through the ingress is refused.
   app.use("/v1/sandbox/*", async (c, next) => {

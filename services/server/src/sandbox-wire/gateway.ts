@@ -6,6 +6,8 @@ import {
   SANDBOX_WS_SUBPROTOCOL,
   type SessionTokenClaims,
 } from "@kobe/protocol";
+import { SpanKind, type Span, annotate, extractContext, withSpan } from "@kobe/telemetry";
+
 import type { Logger } from "pino";
 import type WebSocket from "ws";
 import { WebSocketServer } from "ws";
@@ -93,8 +95,14 @@ export function attachSandboxGateway(server: Server, options: GatewayOptions): (
   });
   const limiter = new AttemptLimiter(options.attemptBurst ?? 20, options.attemptsPerSec ?? 2);
 
-  const handle = async (req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> => {
+  const handle = async (
+    req: IncomingMessage,
+    socket: Duplex,
+    head: Buffer,
+    span: Span,
+  ): Promise<void> => {
     const no = (status: number, reason: string) => {
+      span.setAttributes({ "http.response.status_code": status, "kobe.outcome": "refused" });
       options.onRefused(status, reason);
       refuse(socket, status);
     };
@@ -119,6 +127,7 @@ export function attachSandboxGateway(server: Server, options: GatewayOptions): (
       return no(401, "token");
     }
     const target = { teamId: claims.team_id, userId: claims.user_id };
+    annotate({ ...target, sandboxId: claims.sub });
     const principal = { sandboxId: claims.sub, ...target };
     if (!(await options.liveness.isLive(principal))) {
       options.onTokenRejected(principal, "not_live");
@@ -129,12 +138,19 @@ export function attachSandboxGateway(server: Server, options: GatewayOptions): (
       return no(401, "not allowed");
     }
     if (socket.destroyed) return;
+    span.setAttribute("kobe.outcome", "accepted");
     wss.handleUpgrade(req, socket, head, (ws) => options.accept(ws, claims));
   };
 
   const listener = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     socket.on("error", () => socket.destroy());
-    handle(req, socket, head).catch((err: unknown) => {
+    // The upgrade is one span in the caller's trace (traceparent on the request, when sent);
+    // the long-lived socket itself is not traced.
+    withSpan(
+      "sandbox.ws.upgrade",
+      { kind: SpanKind.SERVER, parent: extractContext(req.headers) },
+      (span) => handle(req, socket, head, span),
+    ).catch((err: unknown) => {
       options.log.error({ err }, "sandbox upgrade failed");
       refuse(socket, 503);
     });

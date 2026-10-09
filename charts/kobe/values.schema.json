@@ -450,6 +450,21 @@
         }
       }
     },
+    "telemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": {
+          "type": "string"
+        },
+        "headersSecret": {
+          "type": "string"
+        },
+        "captureContent": {
+          "type": "boolean"
+        }
+      }
+    },
     "envelope": {
       "type": "object",
       "additionalProperties": false,
