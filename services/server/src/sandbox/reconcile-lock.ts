@@ -18,7 +18,7 @@ export interface ReconcileLock {
 export function createPgReconcileLock(
   pool: Pick<pg.Pool, "connect">,
   onError: (err: unknown) => void = () => undefined,
-  /** Lock name; another sweep (audit forwarding, KOBE-19) uses its own. */
+  /** The advisory lock's name: each periodic job has its own. */
   lockName: string = TEAM_RECONCILE_LOCK,
 ): ReconcileLock {
   return {

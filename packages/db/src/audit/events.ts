@@ -830,6 +830,33 @@ export const AUDIT_EVENTS = {
   /** Unreferenced workspace blobs and old tombstones were purged (system; counts only, D18). */
   "workspace.purged": event("team", { userId: id, blobs: count, bytes: count, tombstones: count }),
 
+  // ── sandbox offboarding: a departed member's sandbox and volume (D12, KOBE-28) ──
+  /**
+   * A member's sandbox in a team was destroyed because the member was removed, deactivated or the
+   * team removed (actor: the admin who did it, else the platform). The workspace volume is kept
+   * until `retainUntil` (30 days) so a team admin can export it.
+   */
+  "sandbox.offboarded": event("team", {
+    userId: id,
+    sandboxId: id.optional(),
+    trigger: z.enum(["member_removed", "deactivated", "team_removed", "reconciled"]),
+    volumeKept: z.boolean(),
+    retainUntil: z.iso.datetime({ offset: true }),
+  }),
+  /** A team admin downloaded the zip export of a departed member's workspace (counts only). */
+  "sandbox.export_downloaded": event("team", { userId: id, files: count, bytes: count }),
+  /**
+   * The retention sweep deleted a departed member's volume and workspace copy after the 30 days
+   * (system; never while a legal hold covers the member in the team). Counts only.
+   */
+  "sandbox.volume_deleted": event("team", {
+    userId: id,
+    volumeDeleted: z.boolean(),
+    files: count,
+    blobs: count,
+    bytes: count,
+  }),
+
   // ── agent: definitions (D19); team agents in the team view, personal and gallery install-only ──
   "agent.created": event("any", {
     ...agentRef,
@@ -917,6 +944,13 @@ export const AUDIT_EVENTS = {
     name: z.string().max(64),
     soft: z.boolean(),
     teams: z.number().int().nonnegative(),
+  }),
+  /** Kobe probed a connector and pinned its tools (KOBE-101); the hash covers all pinned tools. */
+  "mcp.connector.pinned": event("install", {
+    connectorId: id,
+    name: z.string().max(64),
+    tools: z.number().int().nonnegative(),
+    hash: z.string().regex(/^[0-9a-f]{64}$/),
   }),
 } as const;
 

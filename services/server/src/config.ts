@@ -50,6 +50,10 @@ const configSchema = z.object({
     .string()
     .min(32, "KOBE_MCP_PROXY_INTERNAL_KEY must be at least 32 characters")
     .optional(),
+  // The MCP proxy's address for the pinning probe (KOBE-101); with the key above. Unset: no pinning.
+  KOBE_MCP_PROXY_URL: z
+    .url({ protocol: /^https?$/, error: "KOBE_MCP_PROXY_URL must be an http(s) URL" })
+    .optional(),
   // UTC hour the nightly retention pass runs in (KOBE-18, D18).
   KOBE_RETENTION_HOUR_UTC: z.coerce
     .number({ error: "KOBE_RETENTION_HOUR_UTC must be a number" })
@@ -122,6 +126,8 @@ export interface Config {
   readonly internalPort: number;
   /** Shared with the MCP proxy; without it the internal listener is not started. */
   readonly mcpProxyInternalKey: string | undefined;
+  /** The MCP proxy's base URL, for the pinning probe (KOBE-101). */
+  readonly mcpProxyUrl: string | undefined;
   /** UTC hour of the nightly retention pass (KOBE-18). */
   readonly retentionHourUtc: number;
   /** Seconds between team-namespace reconciles; 0 = only at start (KOBE-115). */
@@ -151,6 +157,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     agentMaxVersions: base.data.KOBE_AGENT_MAX_VERSIONS,
     internalPort: base.data.KOBE_INTERNAL_PORT,
     mcpProxyInternalKey: base.data.KOBE_MCP_PROXY_INTERNAL_KEY,
+    mcpProxyUrl: base.data.KOBE_MCP_PROXY_URL,
     retentionHourUtc: base.data.KOBE_RETENTION_HOUR_UTC,
     teamReconcileSeconds: base.data.KOBE_TEAM_RECONCILE_SECONDS,
     auditForwarding: loadAuditForwardingConfig(env),

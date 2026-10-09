@@ -1,4 +1,5 @@
 import { serve } from "@hono/node-server";
+import { initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
 import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { NO_GRANTS } from "./credentials.js";
@@ -11,30 +12,39 @@ import { createUpstreamClient } from "./upstream.js";
 const DRAIN_TIMEOUT_MS = 10_000;
 
 const config = loadConfig(process.env);
+const telemetry = initTelemetry(loadTelemetryConfig(process.env, "mcp-proxy"));
 const upstream = createUpstreamClient({
   policy: config.upstream,
   maxResponseBytes: config.limits.maxResponseBytes,
 });
-const app = createApp({
-  sessionKey: config.sessionKey,
-  server: createPolicyServer({
-    baseUrl: config.serverUrl,
+const app = createApp(
+  {
+    sessionKey: config.sessionKey,
+    server: createPolicyServer({
+      baseUrl: config.serverUrl,
+      internalKey: config.internalKey,
+      timeoutMs: config.limits.serverTimeoutMs,
+      onError: (err) => logger.warn({ err }, "policy server unavailable (call refused)"),
+    }),
+    upstream,
+    // KOBE-61 replaces this with per-user grants (OAuth, API keys).
+    credentials: NO_GRANTS,
+    limiter: createLimiter({
+      burst: config.limits.requestBurst,
+      perSecond: config.limits.requestsPerSecond,
+      callsPerSandbox: config.limits.callsPerSandbox,
+      maxConcurrentCalls: config.limits.maxConcurrentCalls,
+    }),
+    limits: config.limits,
+    log: logger,
+  },
+  {
     internalKey: config.internalKey,
-    timeoutMs: config.limits.serverTimeoutMs,
-    onError: (err) => logger.warn({ err }, "policy server unavailable (call refused)"),
-  }),
-  upstream,
-  // KOBE-61 replaces this with per-user grants (OAuth, API keys).
-  credentials: NO_GRANTS,
-  limiter: createLimiter({
-    burst: config.limits.requestBurst,
-    perSecond: config.limits.requestsPerSecond,
-    callsPerSandbox: config.limits.callsPerSandbox,
-    maxConcurrentCalls: config.limits.maxConcurrentCalls,
-  }),
-  limits: config.limits,
-  log: logger,
-});
+    upstream,
+    timeoutMs: config.limits.upstreamTimeoutMs,
+    maxRequestBytes: 4 * 1024,
+  },
+);
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   logger.info(
     {
@@ -50,7 +60,9 @@ function shutdown(signal: string): void {
   logger.info({ signal }, "shutting down");
   server.close((err) => {
     if (err) logger.error({ err }, "shutdown error");
-    void upstream.close().finally(() => process.exit(err ? 1 : 0));
+    void Promise.all([upstream.close(), telemetry.shutdown()]).finally(() =>
+      process.exit(err ? 1 : 0),
+    );
   });
   if ("closeIdleConnections" in server) server.closeIdleConnections();
   setTimeout(() => {

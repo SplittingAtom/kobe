@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import { teamPermissionsFor } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
+import { logger } from "../logger.js";
 import { invalidRequest, membershipError, parseBody } from "../teams/http.js";
 import { listMembers, removeMember, setMemberRole } from "../teams/members.js";
 import { idSchema, memberRoleSchema } from "../teams/schemas.js";
@@ -40,6 +41,13 @@ export function teamRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
     if (!result.ok) return membershipError(c, result.error);
     // The removed member's sandbox in this team loses its connection on every replica (KOBE-24).
     await deps.sandboxWire.revalidateUser(userId.data);
+    // The sandbox is destroyed at once and the volume kept 30 days (D12, KOBE-28). The removal is
+    // done either way; a failure here is finished by the offboarding sweep.
+    try {
+      await deps.offboarding.offboardMember(c.get("team").id, userId.data, "member_removed");
+    } catch (err) {
+      logger.error({ err, team_id: c.get("team").id }, "offboarding after member removal failed");
+    }
     return c.body(null, 204);
   });
 

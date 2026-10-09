@@ -20,6 +20,10 @@ export interface FakeUpstreamOptions {
   padding?: number;
   /** Answer tools/call with a JSON-RPC error. */
   rpcError?: boolean;
+  /** The tools `tools/list` returns (default: none). */
+  tools?: Record<string, unknown>[];
+  /** Page size for `tools/list` (cursor = start index as text); default: all in one page. */
+  pageSize?: number;
   /** Redirect every POST elsewhere. */
   redirectTo?: string;
 }
@@ -113,6 +117,20 @@ export class FakeUpstream {
               ],
             },
           };
+    } else if (method === "tools/list") {
+      const all = o.tools ?? [];
+      const params = (message.params ?? {}) as { cursor?: string };
+      const start = params.cursor === undefined ? 0 : Number(params.cursor);
+      const size = o.pageSize ?? all.length;
+      const end = start + size;
+      reply = {
+        jsonrpc: "2.0",
+        id,
+        result: {
+          tools: all.slice(start, end),
+          ...(end < all.length ? { nextCursor: String(end) } : {}),
+        },
+      };
     } else {
       reply = { jsonrpc: "2.0", id, error: { code: -32601, message: "nope" } };
     }

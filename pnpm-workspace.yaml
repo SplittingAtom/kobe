@@ -22,3 +22,5 @@ ignoredOptionalDependencies:
 # drizzle-kit and vite) works without its postinstall: it resolves its @esbuild/<platform> binary.
 allowBuilds:
   esbuild: false
+  # protobufjs (via the OTLP exporter) only runs a postinstall version-scheme check; not needed.
+  protobufjs: false

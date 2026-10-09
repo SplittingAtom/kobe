@@ -52,6 +52,16 @@ describe("loadConfig", () => {
     );
   });
 
+  it("reads the MCP proxy address for the pinning probe (KOBE-101)", () => {
+    expect(loadConfig(REQUIRED).mcpProxyUrl).toBeUndefined();
+    expect(
+      loadConfig({ ...REQUIRED, KOBE_MCP_PROXY_URL: "http://kobe-mcp-proxy:80" }).mcpProxyUrl,
+    ).toBe("http://kobe-mcp-proxy:80");
+    expect(() => loadConfig({ ...REQUIRED, KOBE_MCP_PROXY_URL: "ftp://x" })).toThrow(
+      /KOBE_MCP_PROXY_URL/,
+    );
+  });
+
   it("requires a postgres database URL", () => {
     const { KOBE_DATABASE_URL: _, ...rest } = REQUIRED;
     expect(() => loadConfig(rest)).toThrow(/KOBE_DATABASE_URL/);
