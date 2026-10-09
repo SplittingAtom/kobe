@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   CAPABILITY_BUILTIN_SKILLS,
+  CAPABILITY_PROJECTS,
   CAPABILITY_RUN_TOKEN,
   CAPABILITY_SKILL_BUNDLES,
   serverToSandboxFrameSchema,
@@ -441,9 +442,16 @@ export class CommandDelivery {
     });
     ctx.metrics.commandsDelivered += 1;
     // Not sent (closed meanwhile): the row stays delivered; the next hello reconciles it.
-    this.#host.send(
-      claimed.runToken ? ({ ...frame, run_token: claimed.runToken } as typeof frame) : frame,
-    );
+    let out = claimed.runToken
+      ? ({ ...frame, run_token: claimed.runToken } as typeof frame)
+      : frame;
+    // Project instructions only reach agents that know the field (KOBE-159): an older agent runs
+    // without them rather than failing on an unknown key.
+    if (row.kind === "run.start" && !this.#host.hasCapability(CAPABILITY_PROJECTS)) {
+      const { project: _project, ...rest } = out as RunStartFrame;
+      out = rest as typeof frame;
+    }
+    this.#host.send(out);
   }
 
   async #failRunStart(row: CommandRow, outcome: CommandOutcome): Promise<void> {
