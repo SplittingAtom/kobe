@@ -37,6 +37,7 @@ const BREAK_GLASS_QUALS: Record<string, string> = {
     `AND (t.id = thread_entries.thread_id) AND (t.owner_user_id = ${g("user_id")}))))))`,
   artifacts: threadBound("artifacts"),
   artifact_versions: threadBound("artifact_versions"),
+  files: threadBound("files"),
 };
 
 /** Schemas Kobe never creates objects in; everything else is scanned. */
