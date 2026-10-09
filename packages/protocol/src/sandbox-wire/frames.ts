@@ -17,6 +17,11 @@ import {
   memoryReadFrameSchema,
   memoryResultFrameSchema,
 } from "./memory-frames.js";
+import {
+  projectFileProposeFrameSchema,
+  projectFileProposeResultFrameSchema,
+} from "./project-frames.js";
+import { runProjectContextSchema } from "../projects.js";
 import { runMemoryContextSchema } from "../memory.js";
 import { UPLOAD_MAX_FILES_PER_MESSAGE, uploadFileNameSchema } from "../uploads.js";
 import { fileShareCallShape, fileShareOkFields, shareFileWorkspaceRefSchema } from "../files.js";
@@ -211,6 +216,7 @@ export const sandboxToServerFrameSchema = z.union([
   fileShareFrameSchema,
   memoryPutFrameSchema,
   memoryReadFrameSchema,
+  projectFileProposeFrameSchema,
   piExitedFrameSchema,
   pingFrame,
   pongFrame,
@@ -360,6 +366,8 @@ export const runStartFrameSchema = frame("run.start", {
   run_token: runTokenGrantSchema.optional(),
   /** Memory indexes and enabled scopes (KOBE-153, memory.ts); only for agents with capability `memory`. */
   memory: runMemoryContextSchema.optional(),
+  /** Project id, name and instructions (KOBE-159, projects.ts); only for agents with capability `projects`. */
+  project: runProjectContextSchema.optional(),
 });
 
 /** Pi `steer`: delivered after the current turn's tool calls, before the next model call. */
@@ -493,6 +501,7 @@ export const serverToSandboxFrameSchema = z.union([
   artifactResultFrameSchema,
   fileShareResultFrameSchema,
   memoryResultFrameSchema,
+  projectFileProposeResultFrameSchema,
   sessionRestoreFrameSchema,
   ackFrameSchema,
   resendFrameSchema,
