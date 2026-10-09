@@ -38,6 +38,14 @@ const BREAK_GLASS_QUALS: Record<string, string> = {
   artifacts: threadBound("artifacts"),
   artifact_versions: threadBound("artifact_versions"),
   files: threadBound("files"),
+  // Memory is not thread content (KOBE-154): team grants only, user grants by owner.
+  memory_docs:
+    `((team_id = ${g("team_id")}) AND (${g("thread_id")} IS NULL) AND ` +
+    `((${g("user_id")} IS NULL) OR (owner_user_id = ${g("user_id")})))`,
+  memory_doc_versions:
+    `((team_id = ${g("team_id")}) AND (${g("thread_id")} IS NULL) AND ` +
+    `((${g("user_id")} IS NULL) OR (EXISTS ( SELECT 1 FROM memory_docs d WHERE ((d.team_id = memory_doc_versions.team_id) ` +
+    `AND (d.id = memory_doc_versions.doc_id) AND (d.owner_user_id = ${g("user_id")}))))))`,
 };
 
 /** Schemas Kobe never creates objects in; everything else is scanned. */

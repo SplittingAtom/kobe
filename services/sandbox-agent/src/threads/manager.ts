@@ -219,11 +219,26 @@ export class ThreadManager {
     if (thread.restoring) return fail("pi_rejected", "session restore in progress");
     const prepared = await thread.withLock(() => this.#ensureProcess(thread, undefined));
     if (prepared !== undefined) return prepared;
+    // KOBE-169: no pi.command runs against config a tool planted (the plant could be gone again by
+    // the next prompt, so check before and after). The allow-list has no command that selects a
+    // model from Pi's catalog (set_model is gone; model choice is run.start's), this is the second line.
+    {
+      const before = await thread.verifyRuntime();
+      if (before !== undefined) {
+        await thread.stopTampered(before, command.type);
+        return fail("runtime_tampered", before);
+      }
+    }
     try {
       const timeout = SLOW_COMMANDS.has(command.type)
         ? PI_SLOW_REQUEST_TIMEOUT_MS
         : PI_REQUEST_TIMEOUT_MS;
       const response = await thread.request(command, timeout);
+      const after = await thread.verifyRuntime();
+      if (after !== undefined) {
+        await thread.stopTampered(after, command.type);
+        return fail("runtime_tampered", after);
+      }
       return response.success ? ok(response.data) : fail("pi_rejected", response.error);
     } catch (error) {
       return piFailure(error);

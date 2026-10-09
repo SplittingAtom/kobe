@@ -143,6 +143,9 @@ server:
   # Seconds between reconciles of every team namespace's NetworkPolicies, quota and other managed
   # objects (KOBE-115); also run at server start. 0 = only at start; otherwise 30..86400.
   teamReconcileSeconds: 300
+  # Seconds between re-probes of every pinned MCP connector for tool drift (KOBE-102); changed or
+  # new tools stay disabled until an install admin re-approves them. 0 = never; otherwise 60..86400.
+  connectorRefreshSeconds: 3600
 
 scheduler:
   replicas: 1

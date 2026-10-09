@@ -24,6 +24,20 @@ export const pinnedToolAnnotationsSchema = z.object({
   openWorldHint: z.boolean().optional(),
 });
 
+/**
+ * What a drifted tool's live definition says now (KOBE-102). The entry's own fields stay the
+ * approved ones until an install admin re-approves; nothing reads `proposed` except the review UI.
+ */
+export const proposedToolSchema = z.object({
+  title: z.string().max(256).optional(),
+  description: z.string().max(16_384).default(""),
+  input_schema: jsonObject,
+  output_schema: jsonObject.optional(),
+  annotations: pinnedToolAnnotationsSchema.default({}),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+});
+export type ProposedTool = z.infer<typeof proposedToolSchema>;
+
 export const pinnedToolSchema = z.object({
   /** The upstream server's tool name (what `tools/call` names upstream). */
   name: z.string().regex(MCP_TOOL_NAME_PATTERN),
@@ -38,6 +52,11 @@ export const pinnedToolSchema = z.object({
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   /** `drifted`: the live tool changed since it was pinned; disabled until re-approved (D27). */
   status: z.enum(["pinned", "drifted"]),
+  /**
+   * Only on a `drifted` tool whose approved definition changed upstream: the live one awaiting
+   * re-approval. A `drifted` tool without it is new upstream (the entry holds the live definition).
+   */
+  proposed: proposedToolSchema.optional(),
 });
 export type PinnedTool = z.infer<typeof pinnedToolSchema>;
 

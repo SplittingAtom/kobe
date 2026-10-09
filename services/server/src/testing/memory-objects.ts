@@ -20,6 +20,12 @@ export class MemoryObjects implements ObjectStore {
     this.objects.set(key, data);
   }
 
+  async putStream(key: string, body: Readable): Promise<void> {
+    const chunks: Buffer[] = [];
+    for await (const chunk of body) chunks.push(Buffer.from(chunk as Uint8Array));
+    this.objects.set(key, Buffer.concat(chunks));
+  }
+
   get(key: string): Promise<{ body: Readable; size: number } | null> {
     const data = this.lost.has(key) ? undefined : this.objects.get(key);
     return Promise.resolve(data ? { body: Readable.from([data]), size: data.length } : null);

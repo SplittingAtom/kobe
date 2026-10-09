@@ -59,6 +59,7 @@ import { logger } from "./logger.js";
 import { BudgetMonitor } from "./budgets/monitor.js";
 import { DB_RUN_BUDGET_GATE } from "./budgets/run-gate.js";
 import type { BlobStore } from "./retention/blobs.js";
+import type { UploadSettings } from "./uploads/settings.js";
 
 export interface ServerDepsOptions {
   readonly databaseUrl: string;
@@ -121,6 +122,8 @@ export interface ServerDepsOptions {
    * deletes released keys (KOBE-18). Unset: nothing is read or deleted from a bucket.
    */
   readonly blobs?: BlobStore;
+  /** Upload limits and the default team storage quota (KOBE-143); unset: the contract defaults. */
+  readonly uploads?: UploadSettings;
 }
 
 /** Limits on publishing agent versions (KOBE-46 review M3). */
@@ -214,6 +217,8 @@ export interface ServerDeps {
   readonly budgets: BudgetMonitor;
   /** Object storage for thread blobs (KOBE-18 export and retention); undefined when not set. */
   readonly blobs: BlobStore | undefined;
+  /** Upload limits (KOBE-143); undefined: the contract defaults. */
+  readonly uploads: UploadSettings | undefined;
   /** Creates an email+password user (and optional install role) atomically, without sign-up. */
   createUserWithPassword(
     input: NewUser,
@@ -381,6 +386,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     egressHeaders: options.egressHeaderSecrets ? headerBox(options.egressHeaderSecrets) : undefined,
     budgets,
     blobs: options.blobs,
+    uploads: options.uploads,
     async createUserWithPassword({ email, name, password }, { installRole, recordSetup } = {}) {
       const ctx = await auth.$context;
       const hash = await ctx.password.hash(password);

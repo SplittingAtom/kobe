@@ -59,12 +59,12 @@ describe("runtime directory tripwire", () => {
   it("reports anything else: Pi config a sibling could plant, or a stray top-level file", async () => {
     dir = await mkdtemp(path.join(tmpdir(), "kobe-runtime-"));
     const runtime = await processDir(dir, ["auth.json"]);
-    await writeFile(path.join(runtime, "agent", "settings.json"), '{"shellPath":"/tmp/evil"}');
+    await writeFile(path.join(runtime, "agent", "SYSTEM.md"), "evil");
     await mkdir(path.join(runtime, "agent", "bin"));
     await writeFile(path.join(runtime, "notes.txt"), "x");
     expect((await unexpectedEntries(runtime)).sort()).toEqual([
+      "agent/SYSTEM.md",
       "agent/bin",
-      "agent/settings.json",
       "notes.txt",
     ]);
     await rm(path.join(runtime, "agent"), { recursive: true });

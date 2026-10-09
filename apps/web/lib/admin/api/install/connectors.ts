@@ -14,6 +14,8 @@ export interface Connector {
   readonly authKind: ConnectorAuthKind;
   readonly status: ConnectorStatus;
   readonly toolCount: number;
+  /** Tools disabled pending re-approval (KOBE-102). */
+  readonly driftedCount: number;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -61,3 +63,35 @@ export const updateConnector = (
 
 export const removeConnector = (id: string): Promise<ApiResult<Removal>> =>
   apiRequest(`${BASE}/${encodeURIComponent(id)}`, { method: "DELETE" });
+
+export interface ToolDefinition {
+  readonly title?: string;
+  readonly description: string;
+  readonly inputSchema: Record<string, unknown>;
+}
+
+/** One tool of a connector; a drifted one carries the live definition awaiting approval. */
+export interface ToolReview {
+  readonly name: string;
+  readonly status: "pinned" | "drifted";
+  readonly change: "changed" | "added" | null;
+  readonly approved?: ToolDefinition;
+  readonly live?: ToolDefinition & { readonly sha256: string };
+}
+
+export async function listConnectorTools(id: string): Promise<ApiResult<readonly ToolReview[]>> {
+  const res = await apiRequest<{ tools: readonly ToolReview[] }>(
+    `${BASE}/${encodeURIComponent(id)}/tools`,
+  );
+  return res.ok ? { ...res, data: res.data.tools } : res;
+}
+
+/** Approve the reviewed live definitions; each tool names the hash that was shown. */
+export const approveConnectorTools = (
+  id: string,
+  tools: readonly { readonly name: string; readonly sha256: string }[],
+): Promise<ApiResult<{ approved: readonly string[] }>> =>
+  apiRequest(`${BASE}/${encodeURIComponent(id)}/tools/approve`, {
+    method: "POST",
+    json: { tools },
+  });

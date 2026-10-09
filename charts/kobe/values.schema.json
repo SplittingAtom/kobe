@@ -336,6 +336,10 @@
         "teamReconcileSeconds": {
           "type": "integer",
           "minimum": 0
+        },
+        "connectorRefreshSeconds": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     },

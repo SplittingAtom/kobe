@@ -14,6 +14,7 @@ import { artifactExtension, readArtifactBytes } from "../artifacts/serve.js";
  *    order), so Pi can open it as a session file;
  *  - `transcripts/<date>-<title>-<id>.md`: the active branch as Markdown;
  *  - `artifacts/<artifact id>/v<n>.<ext>`: every version of the thread's artifacts (KOBE-129);
+ *  - `files/<file id>/<name>`: the thread's uploaded and shared files (KOBE-143), streamed;
  *  - `threads.json` (index) and `README.md`.
  * Only threads the user owns in this team (Trash included while restorable) — never threads
  * shared with them, never another user's or team's data: every query names the team and the
@@ -256,6 +257,24 @@ async function artifactVersionPage(
   });
 }
 
+const FILE_PAGE = 50;
+
+type FileRow = { readonly id: string; readonly name: string; readonly blob_ref: string };
+
+/** One page of the thread's files (uploads and shared), by id, owner re-checked. */
+async function filePage(db: KobeDb, viewer: ExportViewer, threadId: string, after: string | null) {
+  return withTeam(db, viewer.teamId, async (tx) => {
+    const res = await tx.execute<FileRow>(sql`
+      SELECT f.id, f.name, f.blob_ref
+        FROM files f JOIN threads t ON t.team_id = f.team_id AND t.id = f.thread_id
+       WHERE f.team_id = ${viewer.teamId} AND f.thread_id = ${threadId}
+         AND t.team_id = ${viewer.teamId} AND ${OWN_THREADS(viewer)}
+         ${after === null ? sql.raw("") : sql`AND f.id > ${after}::uuid`}
+       ORDER BY f.id LIMIT ${FILE_PAGE}`);
+    return res.rows;
+  });
+}
+
 const README = `# Your Kobe conversations
 
 This archive holds the conversations you own in one Kobe team.
@@ -264,6 +283,7 @@ This archive holds the conversations you own in one Kobe team.
   header line, then every entry, including other branches, in the order they were written).
 - \`transcripts/\`: each conversation's active branch as Markdown.
 - \`artifacts/<artifact id>/v<n>.<ext>\`: every version of the artifacts the assistant made.
+- \`files/<file id>/<name>\`: the files you uploaded to the conversation or the assistant shared.
 - \`threads.json\`: an index (id, title, dates, file names).
 
 Entries marked \`kobe_unavailable\` had a large body Kobe could not read back from storage.
@@ -369,6 +389,30 @@ export async function* exportZip(
         const last = versions.at(-1);
         afterVersion = last ? { artifactId: last.artifact_id, version: last.version } : null;
         if (!afterVersion) break;
+      }
+      let afterFile: string | null = null;
+      for (;;) {
+        const page = await filePage(db, viewer, thread.id, afterFile);
+        for (const f of page) {
+          const object =
+            blobs && threadKey(blobs.prefix, viewer.teamId, thread.id, f.blob_ref)
+              ? await blobs.objects.get(f.blob_ref).catch((err: unknown) => {
+                  logger.warn({ err, teamId: viewer.teamId }, "export: file unreadable");
+                  return null;
+                })
+              : null;
+          // A missing object is left out of the archive, as an unreadable artifact is.
+          if (!object) continue;
+          const entry = file(`files/${f.id}/${f.name}`);
+          for await (const chunk of object.body) {
+            entry.push(new Uint8Array(chunk as Buffer));
+            yield* drain();
+          }
+          entry.push(new Uint8Array(0), true);
+          yield* drain();
+        }
+        afterFile = page.at(-1)?.id ?? null;
+        if (page.length < FILE_PAGE || afterFile === null) break;
       }
       index.push({
         id: thread.id,

@@ -42,12 +42,9 @@ export const piBridgeCommandSchema = z.discriminatedUnion("type", [
     type: z.literal("compact"),
     customInstructions: z.string().optional(),
   }),
-  z.strictObject({
-    id: piId,
-    type: z.literal("set_model"),
-    provider: z.string().min(1),
-    modelId: z.string().min(1),
-  }),
+  // No `set_model` (KOBE-169): it resolves the model from Pi's catalog, which re-reads the
+  // writable agent/ config (KOBE-165). A thread's model choice goes through `run.start`
+  // (config.model, applied by kobe-models), never through a pi.command.
   z.strictObject({
     id: piId,
     type: z.literal("set_thinking_level"),

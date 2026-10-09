@@ -106,4 +106,17 @@ describe("S3 object store (fake S3 over HTTP)", () => {
     await expect(store.put("teams/t/evil", stream, good.length)).rejects.toThrow();
     expect(fake.objects.has("teams/t/evil")).toBe(false);
   });
+
+  it("streams a body of unknown length, and stores nothing when the body fails", async () => {
+    await store.putStream("teams/t/stream", Readable.from([Buffer.from("ab"), Buffer.from("cd")]));
+    expect(fake.objects.get("teams/t/stream")?.toString()).toBe("abcd");
+    const failing = new Readable({
+      read() {
+        this.push(Buffer.from("partial"));
+        this.destroy(new Error("client went away"));
+      },
+    });
+    await expect(store.putStream("teams/t/broken", failing)).rejects.toThrow();
+    expect(fake.objects.has("teams/t/broken")).toBe(false);
+  });
 });
