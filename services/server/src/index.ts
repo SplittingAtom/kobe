@@ -12,6 +12,7 @@ import { initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
 import { loadConfig } from "./config.js";
 import { loadConnectorUrlPolicy } from "./connectors/config.js";
 import { createProxyProbe, PROBE_TIMEOUT_MS } from "./connectors/probe.js";
+import { notifyDrift } from "./connectors/drift-notify.js";
 import { CONNECTOR_REFRESH_LOCK, startConnectorRefresh } from "./connectors/refresh.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
 import { EgressBlockedRelay } from "./egress/blocked-relay.js";
@@ -465,6 +466,8 @@ const stopConnectorRefresh =
         ),
         intervalMs: config.connectorRefreshSeconds * 1000,
         logger,
+        afterPass: () =>
+          notifyDrift({ db: deps.database.db, mailer: deps.mailer, publicUrl: deps.publicUrl }),
       })
     : undefined;
 const stopHibernation =
