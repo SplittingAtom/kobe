@@ -7,7 +7,13 @@ export {
 export { collectWorkspace, type CollectResult } from "./gc.js";
 export { sharedKey, workspaceBlobKey, workspacePrefix, type WorkspaceOwner } from "./keys.js";
 export { IntegrityError, verifyingStream, type ObjectStore } from "./object-store.js";
-export { limitsQuota, type QuotaCheck, type QuotaDecision, type WorkspaceLimits } from "./quota.js";
+export {
+  limitsQuota,
+  resolveLimits,
+  type QuotaCheck,
+  type QuotaDecision,
+  type WorkspaceLimits,
+} from "./quota.js";
 export { createS3ObjectStore, loadS3Settings, type S3Settings } from "./s3.js";
 export {
   COLLECT_DEFAULTS,

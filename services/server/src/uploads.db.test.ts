@@ -115,7 +115,7 @@ describe("POST /v1/uploads", () => {
       [team],
     );
     expect(queued.rows).toHaveLength(0);
-    expect(await auditOf(team, "workspace.file_uploaded")).toEqual([
+    expect(await auditOf(team, "workspace.upload_stored")).toEqual([
       { userId: owner.id, fileId: body.file_id, threadId, bytes: 11 },
     ]);
   });

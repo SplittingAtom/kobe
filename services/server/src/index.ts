@@ -328,7 +328,11 @@ const evalRunner =
 // The scheduler serves health endpoints only (its jobs arrive in KOBE-64).
 const server = serve(
   {
-    fetch: createApp(deps, { isolation, ...(evalRunner ? { evals: evalRunner } : {}) }).fetch,
+    fetch: createApp(deps, {
+      isolation,
+      ...(evalRunner ? { evals: evalRunner } : {}),
+      ...(workspaceSync ? { workspaceFiles: { sync: workspaceSync, waker } } : {}),
+    }).fetch,
     port: config.port,
   },
   (info) => {

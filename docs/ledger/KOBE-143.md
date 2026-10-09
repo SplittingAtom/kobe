@@ -45,7 +45,7 @@ nightly retention pass; thread export includes files. Tests first: `uploads.db.t
   specific declared type (docx etc.). Never rejects.
 - **Scan seam:** `UploadScanner` option of `storeUpload` returns none/clean/rejected/unavailable
   (-> 422 / 503, object deleted); default none (`scan: skipped`). KOBE-146 supplies it.
-- **Audit:** `workspace.file_uploaded`, `workspace.upload_refused` (reason, bytes seen), `workspace.uploads_expired`
+- **Audit:** `workspace.upload_stored`, `workspace.upload_refused` (reason, bytes seen), `workspace.uploads_expired`
   (system); counts and ids only (docs/audit-log.md).
 - **Thread-less lifetime:** 24 h (`KOBE_UPLOAD_ORPHAN_HOURS`, max 720). `expireOrphanUploads` runs as
   a step of the nightly retention pass per team: so a draft file lives 24 h to ~48 h. Skips owners

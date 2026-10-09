@@ -228,7 +228,7 @@ async function commit(
       sql`DELETE FROM retention_blob_deletions WHERE team_id = ${teamId} AND key = ${s.key}`,
     );
     await recordAudit(tx, {
-      action: "workspace.file_uploaded",
+      action: "workspace.upload_stored",
       teamId,
       target: {
         userId,

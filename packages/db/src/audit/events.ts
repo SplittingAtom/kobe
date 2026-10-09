@@ -829,7 +829,7 @@ export const AUDIT_EVENTS = {
   "workspace.file_shared": event("team", { userId: id, sharedId: id, bytes: count }),
   // ── files: user uploads (KOBE-143, 53c of KOBE-53); counts and ids only, never names or content ──
   /** A file was stored (S3 first, then the `files` row). `threadId` absent: not in a thread yet. */
-  "workspace.file_uploaded": event("team", {
+  "workspace.upload_stored": event("team", {
     userId: id,
     fileId: id,
     threadId: id.optional(),
@@ -843,6 +843,12 @@ export const AUDIT_EVENTS = {
   }),
   /** Uploads never attached to a thread within the retention window were deleted (system). */
   "workspace.uploads_expired": event("team", { files: count, bytes: count }),
+  /** The user downloaded a file of their own workspace in the file browser (KOBE-148; no names). */
+  "workspace.file_downloaded": event("team", { userId: id, bytes: count }),
+  /** The user uploaded a file into their own workspace in the file browser (KOBE-148; no names). */
+  "workspace.file_uploaded": event("team", { userId: id, bytes: count }),
+  /** The user deleted a file or folder of their own workspace in the file browser (KOBE-148). */
+  "workspace.file_deleted": event("team", { userId: id, files: count, bytes: count }),
   /** Unreferenced workspace blobs and old tombstones were purged (system; counts only, D18). */
   "workspace.purged": event("team", { userId: id, blobs: count, bytes: count, tombstones: count }),
 
