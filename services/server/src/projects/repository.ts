@@ -9,7 +9,6 @@ import {
   projectFiles,
   projectMembers,
   projects,
-  sql,
   teamMembers,
   threads,
   type KobeTx,
