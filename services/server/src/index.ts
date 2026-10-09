@@ -46,6 +46,7 @@ import {
   loadEnvelope,
 } from "@kobe/db";
 import { quantityBytes } from "./sandbox/config.js";
+import { createAttachmentStager } from "./uploads/attach.js";
 import {
   createS3ObjectStore,
   createSandboxAuthenticator,
@@ -294,6 +295,12 @@ const workspaceSync =
         log: logger,
       })
     : undefined;
+// Message attachments (KOBE-144) need the workspace store; without it `file_ids` are refused.
+if (workspaceSync && deps) {
+  deps.runs.useAttachments(
+    createAttachmentStager({ db: deps.database.db, sync: workspaceSync, settings: uploadSettings }),
+  );
+}
 if (sandbox && syncSettings?.enabled && !s3) {
   logger.warn("object storage is not configured (s3.bucket): workspace sync is off");
 }
