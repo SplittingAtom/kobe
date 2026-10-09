@@ -213,9 +213,9 @@ describe("memory_doc_versions", () => {
       ),
     ).toBe("55000");
     await admin.query(`DELETE FROM memory_docs WHERE team_id = $1`, [t]);
-    expect(await count(`SELECT count(*) AS n FROM memory_doc_versions WHERE team_id = $1`, [t])).toBe(
-      0,
-    );
+    expect(
+      await count(`SELECT count(*) AS n FROM memory_doc_versions WHERE team_id = $1`, [t]),
+    ).toBe(0);
   });
 });
 
@@ -276,7 +276,9 @@ describe("memory under a legal hold", () => {
     await doc(t, { scope: "project" });
     await activeHold(t, owner);
     expect(
-      await errorCode(admin.query(`DELETE FROM memory_docs WHERE team_id = $1 AND scope = 'user'`, [t])),
+      await errorCode(
+        admin.query(`DELETE FROM memory_docs WHERE team_id = $1 AND scope = 'user'`, [t]),
+      ),
     ).toBeUndefined();
     expect(
       await errorCode(
