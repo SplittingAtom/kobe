@@ -1916,7 +1916,7 @@ SH
     # rejected, clamd down = 503) runs when KOBE_E2E_CLAMAV=1 (the nightly and manual runs).
     echo "==> uploads (KOBE-146)"
     read -r -d '' UPLOAD_JS <<'JS' || true
-const [team, mode, threadArg] = process.argv.slice(1);
+const [team, mode, threadArg, content] = process.argv.slice(1);
 const base = "http://127.0.0.1:" + process.env.PORT;
 const origin = new URL(process.env.KOBE_PUBLIC_URL).origin;
 const jar = new Map();
@@ -1960,7 +1960,7 @@ if (mode === "scan") {
   const thread = await jsonCall("POST", "/v1/threads", { title: "kobe-146" });
   const threadId = thread.json.thread_id;
   out("thread_id", threadId ?? "-");
-  const ok = await upload("e2e-upload.txt", process.env.UPLOAD_CONTENT ?? "", threadId);
+  const ok = await upload("e2e-upload.txt", content ?? "", threadId);
   out("upload", ok.status + ":" + (ok.json.scan ?? "-") + ":" + (ok.json.size_bytes ?? "-") + ":" + (ok.json.name ?? "-"));
   out("file_id", ok.json.file_id ?? "-");
   const big = await upload("big.bin", new Uint8Array(2 * 1024 * 1024).fill(97), threadId);
@@ -1968,8 +1968,8 @@ if (mode === "scan") {
 }
 JS
     upload_js() { # mode [thread-id] → the UPLOAD_JS output
-      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- env "UPLOAD_CONTENT=${UPLOAD_CONTENT:-}" \
-        node --input-type=module -e "$UPLOAD_JS" "$E2E_TEAM_ID" "$1" "${2:-}" 2>&1 | tail -8
+      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- \
+        node --input-type=module -e "$UPLOAD_JS" "$E2E_TEAM_ID" "$1" "${2:-}" "${UPLOAD_CONTENT:-}" 2>&1 | tail -8
     }
     UPLOAD_CONTENT="kobe-146 $(date +%s) $RANDOM"
     up_out=$(upload_js plain)
