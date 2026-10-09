@@ -190,6 +190,10 @@ describe("project memory", () => {
   it("is not reachable until the caller is a project member (seam)", async () => {
     const w = await world();
     const projectId = randomUUID();
+    await fx.admin.query(
+      `INSERT INTO projects (team_id, id, slug, name, created_by) VALUES ($1, $2, 'mem2', 'Mem', $3)`,
+      [w.team, projectId, w.admin.id],
+    );
     const res = await w.member.browser.put(`/v1/memory?project_id=${projectId}`, {
       scope: "project",
       path: "p.md",
@@ -238,6 +242,10 @@ describe("agent writes through the service", () => {
     expect(d.versions.map((v) => v.source)).toEqual(["agent", "agent"]);
     // Project docs (no FK yet) are keyed by project id.
     const pid = randomUUID();
+    await fx.admin.query(
+      `INSERT INTO projects (team_id, id, slug, name, created_by) VALUES ($1, $2, 'mem', 'Mem', $3)`,
+      [w.team, pid, w.admin.id],
+    );
     const proj = await withTeam(fx.db, w.team, (tx) =>
       writeMemory(
         tx,

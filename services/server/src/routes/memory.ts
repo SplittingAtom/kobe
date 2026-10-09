@@ -116,7 +116,8 @@ export function memoryRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
       if (projectId === undefined || !uuidSchema.safeParse(projectId).success) {
         return fail(400, { code: "invalid_request", message: "scope=project needs project_id." });
       }
-      if (!(await canAccessProject(tx, userId, projectId))) return fail(404, NOT_FOUND);
+      if (!(await canAccessProject(tx, c.get("team").id, userId, projectId)))
+        return fail(404, NOT_FOUND);
       target = { scope, projectId };
     }
     if (!(await scopeEnabled(tx, c.get("team").id, scope))) return fail(403, DISABLED);
@@ -131,7 +132,8 @@ export function memoryRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
       doc !== undefined &&
       (doc.scope === "user"
         ? doc.ownerUserId === userId
-        : doc.projectId !== null && (await canAccessProject(tx, userId, doc.projectId)));
+        : doc.projectId !== null &&
+          (await canAccessProject(tx, c.get("team").id, userId, doc.projectId)));
     if (!doc || !allowed) return fail(404, NOT_FOUND);
     if (!(await scopeEnabled(tx, c.get("team").id, doc.scope))) return fail(403, DISABLED);
     return { ok: true, value: doc };
