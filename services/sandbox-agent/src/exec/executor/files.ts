@@ -22,7 +22,10 @@ export function toExecError(error: unknown): ExecError {
 
 function notRegular(path: string, isDirectory: boolean): OperationError {
   return isDirectory
-    ? new OperationError({ code: "EISDIR", message: `EISDIR: illegal operation on a directory, read` })
+    ? new OperationError({
+        code: "EISDIR",
+        message: `EISDIR: illegal operation on a directory, read`,
+      })
     : new OperationError({ code: "EINVAL", message: `not a regular file: ${path}` });
 }
 
@@ -73,7 +76,9 @@ export function checkAccess(path: string, write: boolean): Promise<void> {
   return access(path, write ? FS.R_OK | FS.W_OK : FS.R_OK);
 }
 
-export async function statPath(path: string): Promise<{ kind: "file" | "dir" | "other"; size: number }> {
+export async function statPath(
+  path: string,
+): Promise<{ kind: "file" | "dir" | "other"; size: number }> {
   const info = await stat(path);
   return { kind: info.isDirectory() ? "dir" : info.isFile() ? "file" : "other", size: info.size };
 }

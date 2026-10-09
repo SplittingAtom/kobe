@@ -72,7 +72,8 @@ beforeAll(async () => {
   // Pi's own definitions, built the way the agent builds them.
   local = new Map(
     TOOL_NAMES.map((name) => {
-      const factory = `create${name[0]?.toUpperCase()}${name.slice(1)}ToolDefinition` as keyof PiToolFactories;
+      const factory =
+        `create${name[0]?.toUpperCase()}${name.slice(1)}ToolDefinition` as keyof PiToolFactories;
       return [name, (pi[factory] as (cwd: string) => ToolLike)(work)] as const;
     }),
   );
@@ -103,7 +104,12 @@ async function invocations(skip = 0): Promise<string[]> {
 }
 
 /** What a tool call produced: the result, or the error message. Wall-clock fields are dropped. */
-async function run(tools: Map<string, ToolLike>, name: string, params: Params, signal?: AbortSignal) {
+async function run(
+  tools: Map<string, ToolLike>,
+  name: string,
+  params: Params,
+  signal?: AbortSignal,
+) {
   try {
     const result = (await (tools.get(name) as ToolLike).execute(
       "call",
@@ -137,7 +143,13 @@ describe.skipIf(!PI_AVAILABLE)("the routed tools match Pi's own", () => {
     for (const name of TOOL_NAMES) {
       const a = local.get(name) as ToolLike;
       const b = routed.get(name) as ToolLike;
-      for (const key of ["label", "description", "promptSnippet", "promptGuidelines", "renderShell"]) {
+      for (const key of [
+        "label",
+        "description",
+        "promptSnippet",
+        "promptGuidelines",
+        "renderShell",
+      ]) {
         expect(b[key], `${name}.${key}`).toEqual(a[key]);
       }
       expect(JSON.stringify(b.parameters)).toBe(JSON.stringify(a.parameters));
@@ -226,8 +238,12 @@ describe.skipIf(!PI_AVAILABLE)("the routed tools match Pi's own", () => {
         "base64",
       );
       await writeFile(path.join(work, "p.png"), png);
-      const actual = (await run(routed, "read", { path: "p.png" })) as { content: { type: string }[] };
-      const expected = (await run(local, "read", { path: "p.png" })) as { content: { type: string }[] };
+      const actual = (await run(routed, "read", { path: "p.png" })) as {
+        content: { type: string }[];
+      };
+      const expected = (await run(local, "read", { path: "p.png" })) as {
+        content: { type: string }[];
+      };
       expect(actual.content.map((c) => c.type)).toEqual(expected.content.map((c) => c.type));
       expect(actual.content.map((c) => c.type)).toContain("image");
     });
@@ -332,7 +348,10 @@ describe.skipIf(!PI_AVAILABLE)("the routed tools match Pi's own", () => {
       if (!PI_AVAILABLE) return;
       await mkdir(path.join(grepRoot(), "sub"), { recursive: true });
       await writeFile(path.join(grepRoot(), "a.txt"), "one\nneedle two\nthree\nNEEDLE four\n");
-      await writeFile(path.join(grepRoot(), "sub/b.md"), "needle in b\n".repeat(3) + `${"x".repeat(700)} needle\n`);
+      await writeFile(
+        path.join(grepRoot(), "sub/b.md"),
+        "needle in b\n".repeat(3) + `${"x".repeat(700)} needle\n`,
+      );
     });
 
     it("matches Pi's output and the arguments it passes to rg", async () => {

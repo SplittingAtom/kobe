@@ -14,7 +14,10 @@ import { OP_EXEC, OP_STAT } from "./protocol.js";
  * (truncation helpers, size formatting) is reused through {@link SearchHelpers}.
  */
 export interface SearchHelpers {
-  truncateHead(content: string, options?: { maxLines?: number }): { content: string; truncated: boolean };
+  truncateHead(
+    content: string,
+    options?: { maxLines?: number },
+  ): { content: string; truncated: boolean };
   truncateLine(line: string, maxChars?: number): { text: string; wasTruncated: boolean };
   formatSize(bytes: number): string;
   readonly DEFAULT_MAX_BYTES: number;
@@ -34,7 +37,7 @@ function isAborted(signal: AbortSignal | undefined): boolean {
 const GREP_MAX_LINE_LENGTH = 500;
 const DEFAULT_GREP_LIMIT = 100;
 const DEFAULT_FIND_LIMIT = 1000;
-const UNICODE_SPACES = /[  -   　]/g;
+const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 
 /** Pi's `resolveToCwd`: unicode spaces, leading `@`, `~`, `file://`, then against the cwd. */
 export function resolveToCwd(input: string, cwd: string): string {
@@ -135,7 +138,10 @@ export async function executeGrep(
   signal?.addEventListener("abort", onAbort, { once: true });
   const lines = lineSplitter((line) => {
     if (!line.trim() || matchCount >= effectiveLimit) return;
-    let event: { type?: string; data?: { path?: { text?: string }; line_number?: unknown; lines?: { text?: string } } };
+    let event: {
+      type?: string;
+      data?: { path?: { text?: string }; line_number?: unknown; lines?: { text?: string } };
+    };
     try {
       event = JSON.parse(line) as typeof event;
     } catch {
@@ -196,7 +202,8 @@ export async function executeGrep(
     if (!fileLines.length) return [`${relativePath}:${lineNumber}: (unable to read file)`];
     const block: string[] = [];
     const start = contextValue > 0 ? Math.max(1, lineNumber - contextValue) : lineNumber;
-    const end = contextValue > 0 ? Math.min(fileLines.length, lineNumber + contextValue) : lineNumber;
+    const end =
+      contextValue > 0 ? Math.min(fileLines.length, lineNumber + contextValue) : lineNumber;
     for (let current = start; current <= end; current++) {
       const sanitized = (fileLines[current - 1] ?? "").replace(/\r/g, "");
       const { text, wasTruncated } = helpers.truncateLine(sanitized, GREP_MAX_LINE_LENGTH);
@@ -220,7 +227,9 @@ export async function executeGrep(
       outputLines.push(...(await formatBlock(match.filePath, match.lineNumber)));
     }
   }
-  const truncation = helpers.truncateHead(outputLines.join("\n"), { maxLines: Number.MAX_SAFE_INTEGER });
+  const truncation = helpers.truncateHead(outputLines.join("\n"), {
+    maxLines: Number.MAX_SAFE_INTEGER,
+  });
   let output = truncation.content;
   const details: Record<string, unknown> = {};
   const notices: string[] = [];
@@ -256,7 +265,9 @@ interface FindInput {
 /** Pi's `relativizeFindResultPath` (posix only: the sandbox is Linux). */
 export function relativizeFindResultPath(resultPath: string, searchPath: string): string {
   const hadTrailingSeparator = resultPath.endsWith("/");
-  const relativePath = path.isAbsolute(resultPath) ? path.relative(searchPath, resultPath) : resultPath;
+  const relativePath = path.isAbsolute(resultPath)
+    ? path.relative(searchPath, resultPath)
+    : resultPath;
   return hadTrailingSeparator && !relativePath.endsWith("/") ? `${relativePath}/` : relativePath;
 }
 
@@ -272,7 +283,7 @@ export async function executeFind(
   const effectiveLimit = input.limit ?? DEFAULT_FIND_LIMIT;
   // Inside a git repository fd keeps its git-aware default; elsewhere --no-require-git.
   let insideGitRepo = false;
-  for (let current = searchPath; ; ) {
+  for (let current = searchPath; ;) {
     if (await pathExists(transport, path.join(current, ".git"))) {
       insideGitRepo = true;
       break;
@@ -287,7 +298,11 @@ export async function executeFind(
   let effectivePattern = input.pattern;
   if (input.pattern.includes("/")) {
     args.push("--full-path");
-    if (!input.pattern.startsWith("/") && !input.pattern.startsWith("**/") && input.pattern !== "**") {
+    if (
+      !input.pattern.startsWith("/") &&
+      !input.pattern.startsWith("**/") &&
+      input.pattern !== "**"
+    ) {
       effectivePattern = `**/${input.pattern}`;
     }
   }
@@ -317,14 +332,19 @@ export async function executeFind(
   if (isAborted(signal)) throw new Error("Operation aborted");
   if (!outcome.ok) {
     if (outcome.error.code === "aborted") throw new Error("Operation aborted");
-    if (outcome.error.code === "spawn_failed") throw new Error(`Failed to run fd: ${outcome.error.message}`);
+    if (outcome.error.code === "spawn_failed")
+      throw new Error(`Failed to run fd: ${outcome.error.message}`);
     throw toError(outcome);
   }
   const output = found.join("\n");
   const code = outcome.fields.exit_code;
-  if (code !== 0 && !output) throw new Error(stderr.trim() || `fd exited with code ${String(code)}`);
+  if (code !== 0 && !output)
+    throw new Error(stderr.trim() || `fd exited with code ${String(code)}`);
   if (!output) {
-    return { content: [{ type: "text", text: "No files found matching pattern" }], details: undefined };
+    return {
+      content: [{ type: "text", text: "No files found matching pattern" }],
+      details: undefined,
+    };
   }
   const relativized: string[] = [];
   for (const rawLine of found) {
@@ -333,7 +353,9 @@ export async function executeFind(
     relativized.push(relativizeFindResultPath(line, searchPath));
   }
   const resultLimitReached = relativized.length >= effectiveLimit;
-  const truncation = helpers.truncateHead(relativized.join("\n"), { maxLines: Number.MAX_SAFE_INTEGER });
+  const truncation = helpers.truncateHead(relativized.join("\n"), {
+    maxLines: Number.MAX_SAFE_INTEGER,
+  });
   let resultOutput = truncation.content;
   const details: Record<string, unknown> = {};
   const notices: string[] = [];
@@ -353,4 +375,3 @@ export async function executeFind(
     details: Object.keys(details).length > 0 ? details : undefined,
   };
 }
-

@@ -22,7 +22,8 @@ async function setup(options: ConstructorParameters<typeof ExecClient>[1] = {}) 
   const client = new ExecClient(extensionEnd, options);
   const reply = (v: unknown) => agentEnd.write(`${JSON.stringify(v)}\n`);
   const waitFor = async (n: number) => {
-    for (let i = 0; i < 300 && requests.length < n; i += 1) await new Promise((r) => setTimeout(r, 5));
+    for (let i = 0; i < 300 && requests.length < n; i += 1)
+      await new Promise((r) => setTimeout(r, 5));
   };
   return { client, requests, reply, agentEnd: agentEnd as Duplex, waitFor };
 }
@@ -139,10 +140,14 @@ describe("connect", () => {
     const env: Record<string, string | undefined> = { KOBE_EXEC_FD: "5" };
     const warnings: string[] = [];
     const opened: number[] = [];
-    const transport = connect(env, (m) => warnings.push(m), (fd) => {
-      opened.push(fd);
-      return new PassThrough() as unknown as Duplex;
-    });
+    const transport = connect(
+      env,
+      (m) => warnings.push(m),
+      (fd) => {
+        opened.push(fd);
+        return new PassThrough() as unknown as Duplex;
+      },
+    );
     expect(env.KOBE_EXEC_FD).toBeUndefined();
     expect(opened).toEqual([5]);
     expect(transport).toBeInstanceOf(ExecClient);
@@ -157,17 +162,21 @@ describe("connect", () => {
       const transport = connect(env, (m) => warnings.push(m));
       expect(warnings).toHaveLength(1);
       const ops = bashOperations(transport);
-      await expect(
-        ops.exec("echo hi", "/workspace", { onData: () => undefined }),
-      ).rejects.toThrow(/tool executor is unavailable/);
+      await expect(ops.exec("echo hi", "/workspace", { onData: () => undefined })).rejects.toThrow(
+        /tool executor is unavailable/,
+      );
     },
   );
 
   it("fails every call when the fd cannot be opened", async () => {
     const warnings: string[] = [];
-    const transport = connect({ KOBE_EXEC_FD: "5" }, (m) => warnings.push(m), () => {
-      throw new Error("EBADF");
-    });
+    const transport = connect(
+      { KOBE_EXEC_FD: "5" },
+      (m) => warnings.push(m),
+      () => {
+        throw new Error("EBADF");
+      },
+    );
     expect(warnings[0]).toContain("EBADF");
     expect(await transport.request({ op: "stat", path: "/x" })).toMatchObject({
       ok: false,

@@ -21,7 +21,9 @@ describe("sandbox config", () => {
     const loaded = loadSandboxConfig(env({ KOBE_SANDBOX_CONFIG: JSON.stringify(older) }));
     expect(loaded?.settings.toolExecutor).toEqual({ enabled: false });
     const on = loadSandboxConfig(
-      env({ KOBE_SANDBOX_CONFIG: JSON.stringify({ ...SETTINGS, toolExecutor: { enabled: true } }) }),
+      env({
+        KOBE_SANDBOX_CONFIG: JSON.stringify({ ...SETTINGS, toolExecutor: { enabled: true } }),
+      }),
     );
     expect(on?.settings.toolExecutor).toEqual({ enabled: true });
   });

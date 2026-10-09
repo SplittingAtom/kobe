@@ -37,13 +37,34 @@ declare module "@earendil-works/pi-coding-agent" {
     readonly truncated: boolean;
   }
 
-  export function createBashToolDefinition(cwd: string, options?: ToolOptions<unknown>): ToolDefinition;
-  export function createReadToolDefinition(cwd: string, options?: ToolOptions<unknown>): ToolDefinition;
-  export function createWriteToolDefinition(cwd: string, options?: ToolOptions<unknown>): ToolDefinition;
-  export function createEditToolDefinition(cwd: string, options?: ToolOptions<unknown>): ToolDefinition;
-  export function createLsToolDefinition(cwd: string, options?: ToolOptions<unknown>): ToolDefinition;
-  export function createGrepToolDefinition(cwd: string, options?: ToolOptions<unknown>): ToolDefinition;
-  export function createFindToolDefinition(cwd: string, options?: ToolOptions<unknown>): ToolDefinition;
+  export function createBashToolDefinition(
+    cwd: string,
+    options?: ToolOptions<unknown>,
+  ): ToolDefinition;
+  export function createReadToolDefinition(
+    cwd: string,
+    options?: ToolOptions<unknown>,
+  ): ToolDefinition;
+  export function createWriteToolDefinition(
+    cwd: string,
+    options?: ToolOptions<unknown>,
+  ): ToolDefinition;
+  export function createEditToolDefinition(
+    cwd: string,
+    options?: ToolOptions<unknown>,
+  ): ToolDefinition;
+  export function createLsToolDefinition(
+    cwd: string,
+    options?: ToolOptions<unknown>,
+  ): ToolDefinition;
+  export function createGrepToolDefinition(
+    cwd: string,
+    options?: ToolOptions<unknown>,
+  ): ToolDefinition;
+  export function createFindToolDefinition(
+    cwd: string,
+    options?: ToolOptions<unknown>,
+  ): ToolDefinition;
   export function truncateHead(content: string, options?: { maxLines?: number }): Truncation;
   export function truncateLine(
     line: string,

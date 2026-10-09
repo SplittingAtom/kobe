@@ -23,7 +23,10 @@ export interface RequestHooks {
 
 /** What the tools need of the channel (the real one is {@link ExecClient}). */
 export interface ExecTransport {
-  request(body: { readonly op: string } & Record<string, unknown>, hooks?: RequestHooks): Promise<Outcome>;
+  request(
+    body: { readonly op: string } & Record<string, unknown>,
+    hooks?: RequestHooks,
+  ): Promise<Outcome>;
 }
 
 export interface ExecClientOptions {
@@ -87,7 +90,8 @@ export class ExecClient implements ExecTransport {
     body: { readonly op: string } & Record<string, unknown>,
     hooks: RequestHooks = {},
   ): Promise<Outcome> {
-    if (this.#closedReason !== undefined) return Promise.resolve(failure("unavailable", this.#closedReason));
+    if (this.#closedReason !== undefined)
+      return Promise.resolve(failure("unavailable", this.#closedReason));
     if (this.#pending.size >= MAX_PENDING_REQUESTS) {
       return Promise.resolve(failure("unavailable", "too many requests in flight"));
     }
@@ -110,10 +114,15 @@ export class ExecClient implements ExecTransport {
       if (body.op !== "exec") {
         const ms = this.#options.timeoutMs ?? FILE_OP_TIMEOUT_MS;
         timers.add(
-          setTimeout(() => this.#settle(id, failure("timeout", `no answer within ${ms / 1000} s`)), ms),
+          setTimeout(
+            () => this.#settle(id, failure("timeout", `no answer within ${ms / 1000} s`)),
+            ms,
+          ),
         );
       }
-      this.#send({ id, ...body }, () => this.#settle(id, failure("unavailable", "cannot write to the kobe-exec channel")));
+      this.#send({ id, ...body }, () =>
+        this.#settle(id, failure("unavailable", "cannot write to the kobe-exec channel")),
+      );
     });
   }
 
@@ -131,7 +140,9 @@ export class ExecClient implements ExecTransport {
     if (pending === undefined || this.#closedReason !== undefined) return;
     this.#send({ id: `ke_${this.#next++}`, op: OP_CANCEL, target }, () => undefined);
     const grace = this.#options.cancelGraceMs ?? CANCEL_GRACE_MS;
-    pending.timers.add(setTimeout(() => this.#settle(target, failure("aborted", "aborted")), grace));
+    pending.timers.add(
+      setTimeout(() => this.#settle(target, failure("aborted", "aborted")), grace),
+    );
   }
 
   #settle(id: string, outcome: Outcome): void {

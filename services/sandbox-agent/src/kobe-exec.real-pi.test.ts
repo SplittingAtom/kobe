@@ -166,7 +166,10 @@ describe.skipIf(!PI_AVAILABLE || !EXECUTOR_BUILT)("kobe-exec in real Pi, through
       },
       { tool: "ls", id: "l1", args: { path: "." } },
     ]);
-    expect(await toolEnd(t, "w1")).toEqual({ isError: false, text: "Successfully wrote to notes.txt" });
+    expect(await toolEnd(t, "w1")).toEqual({
+      isError: false,
+      text: "Successfully wrote to notes.txt",
+    });
     expect(await toolEnd(t, "r1")).toEqual({ isError: false, text: "alpha\nbeta\n" });
     expect(await toolEnd(t, "e1")).toMatchObject({ isError: false });
     expect(await readFile(path.join(t.workspace, "notes.txt"), "utf8")).toBe("alpha\nBETA\n");
@@ -178,7 +181,9 @@ describe.skipIf(!PI_AVAILABLE || !EXECUTOR_BUILT)("kobe-exec in real Pi, through
     const t = await start();
     allowAll(t);
     // The tool kills its own executor (its parent), as a hostile tool might.
-    await run(t, [bash("k1", "echo started > started.txt; kill -9 $PPID; sleep 5; echo after > after.txt")]);
+    await run(t, [
+      bash("k1", "echo started > started.txt; kill -9 $PPID; sleep 5; echo after > after.txt"),
+    ]);
     const end = await toolEnd(t, "k1");
     expect(end.isError).toBe(true);
     expect(end.text).toMatch(/tool executor is unavailable/);

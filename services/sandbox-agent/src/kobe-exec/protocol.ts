@@ -154,7 +154,9 @@ export function parseEnvelope(
 /** A reply frame as the relay and the extension read it: `id`, and `ok` when it is final. */
 export function parseReply(
   value: unknown,
-): { readonly id: string; readonly final: boolean; readonly raw: Record<string, unknown> } | undefined {
+):
+  | { readonly id: string; readonly final: boolean; readonly raw: Record<string, unknown> }
+  | undefined {
   if (!isRecord(value)) return undefined;
   const { id, ok } = value;
   if (typeof id !== "string" || !ID_PATTERN.test(id)) return undefined;

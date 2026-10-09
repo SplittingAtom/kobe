@@ -32,12 +32,7 @@ export class RequestError extends Error {
   }
 }
 
-function text(
-  raw: Record<string, unknown>,
-  key: string,
-  maxBytes: number,
-  id: string,
-): string {
+function text(raw: Record<string, unknown>, key: string, maxBytes: number, id: string): string {
   const value = raw[key];
   if (typeof value !== "string" || value.length === 0 || value.includes("\0")) {
     throw new RequestError(id, `${key} must be a non-empty string without NUL`);
@@ -86,7 +81,12 @@ function execRequest(raw: Record<string, unknown>, id: string): ExecRequest {
   let timeout: number | undefined;
   if (raw.timeout_s !== undefined) {
     const value = raw.timeout_s;
-    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0 || value > MAX_TIMEOUT_S) {
+    if (
+      typeof value !== "number" ||
+      !Number.isFinite(value) ||
+      value <= 0 ||
+      value > MAX_TIMEOUT_S
+    ) {
       throw new RequestError(id, "timeout_s must be a positive number of seconds");
     }
     timeout = value;

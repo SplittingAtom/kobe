@@ -91,7 +91,10 @@ export class ExecRelay {
     const active = this.#active;
     this.#active = undefined;
     this.#current = undefined;
-    void active?.then((a) => this.#kill(a), () => undefined);
+    void active?.then(
+      (a) => this.#kill(a),
+      () => undefined,
+    );
     this.#options.channel.destroy();
     this.#options.onClosed?.(reason);
   }

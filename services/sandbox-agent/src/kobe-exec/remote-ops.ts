@@ -35,7 +35,10 @@ type Failure = Extract<Outcome, { ok: false }>;
 export function toError(outcome: Failure): Error {
   const { code, message } = outcome.error;
   if (code === "unavailable") {
-    return new RemoteError(`The tool executor is unavailable (${message}); the tool did not run.`, code);
+    return new RemoteError(
+      `The tool executor is unavailable (${message}); the tool did not run.`,
+      code,
+    );
   }
   return new RemoteError(message, code);
 }
@@ -66,7 +69,10 @@ export async function readFileBuffer(
     const data = Buffer.from(String(fields.data ?? ""), "base64");
     total += data.length;
     if (total > MAX_FILE_BYTES) {
-      throw new RemoteError(`File is too large to read (limit ${MAX_FILE_BYTES / 1024 / 1024} MiB): ${file}`, "EFBIG");
+      throw new RemoteError(
+        `File is too large to read (limit ${MAX_FILE_BYTES / 1024 / 1024} MiB): ${file}`,
+        "EFBIG",
+      );
     }
     parts.push(data);
     if (fields.eof === true || data.length === 0) return Buffer.concat(parts, total);
@@ -81,14 +87,22 @@ export async function writeFileText(
 ): Promise<void> {
   const bytes = Buffer.from(content, "utf-8");
   if (bytes.length > MAX_FILE_BYTES) {
-    throw new RemoteError(`Content is too large to write (limit ${MAX_FILE_BYTES / 1024 / 1024} MiB): ${file}`, "EFBIG");
+    throw new RemoteError(
+      `Content is too large to write (limit ${MAX_FILE_BYTES / 1024 / 1024} MiB): ${file}`,
+      "EFBIG",
+    );
   }
   let offset = 0;
   do {
     const chunk = bytes.subarray(offset, offset + CHUNK_BYTES);
     await call(
       transport,
-      { op: OP_WRITE, path: file, data: chunk.toString("base64"), ...(offset > 0 ? { append: true } : {}) },
+      {
+        op: OP_WRITE,
+        path: file,
+        data: chunk.toString("base64"),
+        ...(offset > 0 ? { append: true } : {}),
+      },
       signal,
     );
     offset += chunk.length;
@@ -119,7 +133,8 @@ function checkTimeout(timeout: number | undefined): void {
   if (!Number.isFinite(timeout) || timeout <= 0) {
     throw new Error("Invalid timeout: must be a finite number of seconds");
   }
-  if (timeout > MAX_TIMEOUT_S) throw new Error(`Invalid timeout: maximum is ${MAX_TIMEOUT_S} seconds`);
+  if (timeout > MAX_TIMEOUT_S)
+    throw new Error(`Invalid timeout: maximum is ${MAX_TIMEOUT_S} seconds`);
 }
 
 export interface ExecOptions {

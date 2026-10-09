@@ -276,9 +276,9 @@ describe("paired partner (tool) uids (KOBE-166)", () => {
     const bad = new PiIdentities("/helper", [2001], failing.run, "/reclaim", true);
     await expect(bad.killPartner(pi)).rejects.toThrow(/kill-all as 3001 failed: busy/);
     const unpaired = okRunner();
-    await expect(
-      new PiIdentities("/helper", [2001], unpaired.run).killPartner(pi),
-    ).rejects.toThrow(/no partner uid/);
+    await expect(new PiIdentities("/helper", [2001], unpaired.run).killPartner(pi)).rejects.toThrow(
+      /no partner uid/,
+    );
     expect(unpaired.calls).toEqual([]);
   });
 

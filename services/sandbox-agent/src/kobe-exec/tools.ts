@@ -52,9 +52,7 @@ export interface ToolLike {
 }
 
 /** Pi's image sniffing, applied to bytes the executor read (it only takes a file path). */
-function imageDetector(
-  pi: PiToolFactories,
-): (head: Buffer) => Promise<string | null> {
+function imageDetector(pi: PiToolFactories): (head: Buffer) => Promise<string | null> {
   return async (head) => {
     const dir = await mkdtemp(path.join(tmpdir(), "kobe-exec-"));
     try {

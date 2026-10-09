@@ -1,5 +1,4 @@
 import { chmod, chown, mkdir } from "node:fs/promises";
-import path from "node:path";
 import { ExecRelay } from "../exec/relay.js";
 import { executorEnv, startExecutor } from "../exec/spawn-executor.js";
 import { partnerOf, type PiIdentities, type PiIdentity } from "../pi/identities.js";
@@ -22,10 +21,7 @@ export interface ExecWiring {
  * partner uid reads it and nobody can write it but the agent. The runtime directory stays
  * the Pi's group alone: the partner never reaches `agent/` or `model.json` (KOBE-166).
  */
-export async function prepareToolDir(
-  runtimeDir: string,
-  identity: PiIdentity,
-): Promise<string> {
+export async function prepareToolDir(runtimeDir: string, identity: PiIdentity): Promise<string> {
   const dir = `${runtimeDir}-tool`;
   await mkdir(dir, { mode: 0o700 });
   await chown(dir, -1, partnerOf(identity).gid);
