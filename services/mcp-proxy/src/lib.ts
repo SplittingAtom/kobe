@@ -8,7 +8,7 @@ export {
   type Limits,
   type UpstreamPolicy,
 } from "./config.js";
-export { NO_GRANTS, type CredentialResolver } from "./credentials.js";
+export { NO_GRANTS, createServerCredentials, type CredentialResolver } from "./credentials.js";
 export { createLimiter } from "./limits.js";
 export { THREAD_HEADER, TOOL_CALL_ID_META_KEY, type McpRouteDeps } from "./mcp.js";
 export { createPolicyServer, type PolicyServer } from "./server-client.js";

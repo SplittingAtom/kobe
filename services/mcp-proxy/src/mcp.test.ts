@@ -5,7 +5,12 @@ import { canonicalJson } from "@kobe/protocol";
 import { signSessionToken } from "@kobe/session-token";
 import { createApp } from "./app.js";
 import { DEFAULT_LIMITS, type Limits } from "./config.js";
-import { NO_GRANTS, type CredentialResolver } from "./credentials.js";
+import {
+  NO_GRANTS,
+  createServerCredentials,
+  type CredentialResolver,
+  type GrantAnswer,
+} from "./credentials.js";
 import { createLimiter } from "./limits.js";
 import type {
   CallDecision,
@@ -83,6 +88,10 @@ class FakePolicyServer implements PolicyServer {
 
   listTools() {
     return Promise.resolve(this.tools);
+  }
+
+  fetchGrant() {
+    return Promise.resolve<GrantAnswer>({ ok: false, failure: "not_connected" });
   }
 
   decide(t: string, query: CallQuery) {
@@ -470,6 +479,61 @@ describe("tools/call", () => {
     expect(first?.headers.authorization).toBe("Bearer grant");
     expect(first?.headers["x-api-key"]).toBeUndefined();
     expect(fake.received.every((r) => r.headers["kobe-thread-id"] === undefined)).toBe(true);
+  });
+
+  it("uses the server's per-user API key upstream and never shows it to the sandbox (KOBE-108)", async () => {
+    const apiKey = "sk-live-secret-0123456789";
+    server.fetchGrant = () => Promise.resolve({ ok: true, value: { kind: "api_key", apiKey } });
+    credentials = createServerCredentials(server);
+    server.next = (q) => ({
+      ok: true,
+      value: {
+        decision: "allow",
+        connector: { id: q.connectorId, name: "jira", url: fake.url, auth_kind: "api_key" },
+        tool: { name: q.tool, pi_name: "mcp__jira__get_issue" },
+        input_sha256: sha(q.arguments),
+        reason: "risk_read",
+      },
+    });
+    const res = await app().request(`/v1/mcp/${CONNECTOR}`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token()}`,
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        "kobe-thread-id": THREAD,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "get_issue", arguments: { id: 1 } },
+      }),
+    });
+    const text = await res.text();
+    expect(fake.received.at(-1)?.headers.authorization).toBe(`Bearer ${apiKey}`);
+    // Nothing the sandbox receives (body or headers) carries the key.
+    expect(text).not.toContain(apiKey);
+    expect([...res.headers.values()].join("\n")).not.toContain(apiKey);
+    // The server was asked with the sandbox's own token, so it can only answer for that user.
+    expect(JSON.stringify(server.asked)).not.toContain(apiKey);
+  });
+
+  it("says not connected when the user has no API key, and runs nothing upstream", async () => {
+    credentials = createServerCredentials(server);
+    server.next = (q) => ({
+      ok: true,
+      value: {
+        decision: "allow",
+        connector: { id: q.connectorId, name: "jira", url: fake.url, auth_kind: "api_key" },
+        tool: { name: q.tool, pi_name: "mcp__jira__get_issue" },
+        input_sha256: sha(q.arguments),
+        reason: "risk_read",
+      },
+    });
+    const res = await rpc("tools/call", { name: "get_issue", arguments: {} });
+    expect(res.json?.result.content[0].text).toMatch(/Connect your account for jira/);
+    expect(fake.received).toEqual([]);
   });
 
   it("does not pass the sandbox's session token upstream", async () => {

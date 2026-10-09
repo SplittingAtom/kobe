@@ -992,6 +992,14 @@ export const AUDIT_EVENTS = {
     name: z.string().max(64),
     tools: z.array(z.string().max(128)).max(500),
   }),
+
+  // ── connector grants (KOBE-108): a user's own API key; ids and names only, never the key or its hint ──
+  /** A user added their API key for a connector their team enabled. */
+  "connector.grant.added": event("team", { connectorId: id, name: z.string().max(64) }),
+  /** A user replaced their API key for a connector. */
+  "connector.grant.replaced": event("team", { connectorId: id, name: z.string().max(64) }),
+  /** A user removed their API key for a connector. */
+  "connector.grant.removed": event("team", { connectorId: id, name: z.string().max(64) }),
 } as const;
 
 export type AuditAction = keyof typeof AUDIT_EVENTS;
