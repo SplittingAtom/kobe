@@ -9,6 +9,7 @@ import {
   type ApprovalMode,
   type RunTrigger,
 } from "./common.js";
+import { UPLOAD_MAX_FILES_PER_MESSAGE } from "./uploads.js";
 import { runStatusSchema, type RunStatus, type RunTransitionCause } from "./runs.js";
 
 /**
@@ -35,7 +36,15 @@ export const submitMessageBodySchema = z.strictObject({
     .min(1)
     .max(200_000)
     .refine((s) => !s.includes("\u0000"), "U+0000"),
-  file_ids: z.array(uuidSchema).max(100).optional(),
+  /**
+   * Ids from `POST /v1/uploads` (uploads.ts): unique, at most {@link UPLOAD_MAX_FILES_PER_MESSAGE}.
+   * Absent = no files. Limits on their total size are checked at submit (`message_too_large`).
+   */
+  file_ids: z
+    .array(uuidSchema)
+    .max(UPLOAD_MAX_FILES_PER_MESSAGE)
+    .refine((ids) => new Set(ids).size === ids.length, "duplicate file_ids")
+    .optional(),
 });
 export type SubmitMessageBody = z.infer<typeof submitMessageBodySchema>;
 
