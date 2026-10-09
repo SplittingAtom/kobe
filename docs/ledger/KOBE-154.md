@@ -1,6 +1,6 @@
 # KOBE-154: 56b: Migration: memory_docs, versions and memory switches
 
-- **Status:** in progress (PR below)
+- **Status:** in review (PR #138)
 - **Branch / worktree:** `kobe-154-memory-migration` in `../Kobe-wt154`
 - **Depends on:** KOBE-37, KOBE-142, [KOBE-153](KOBE-153.md) (contract)
 
