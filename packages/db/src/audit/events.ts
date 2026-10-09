@@ -661,6 +661,18 @@ export const AUDIT_EVENTS = {
     rows: count,
     olderThanHours: z.number().int().positive(),
   }),
+  /**
+   * An admin downloaded the log as CSV or JSONL (KOBE-19). Install admins export the whole log
+   * (install scope); a team admin's export is the team view and is recorded in the team. `rows` is
+   * what was sent; `complete` is false when the download broke off or failed.
+   */
+  "audit.exported": event("any", {
+    format: z.enum(["csv", "jsonl"]),
+    from: z.iso.datetime({ offset: true }).optional(),
+    to: z.iso.datetime({ offset: true }).optional(),
+    rows: count,
+    complete: z.boolean(),
+  }),
   /** Written once after the chain v2 upgrade (server): the seal over every v1 row (hex SHA-256). */
   "audit.chain.upgraded": event("install", {
     throughSeq: z.number().int().positive(),

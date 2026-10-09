@@ -381,3 +381,22 @@ clamav:
   resources:
     requests: { cpu: 100m, memory: 1Gi }
     limits: { cpu: "1", memory: 2Gi }
+
+# Optional forwarding of audit events to a SIEM (spec D31, KOBE-19), off by default. One server
+# replica forwards at a time; each destination keeps its own cursor, retries with backoff when it
+# fails, and shows its state in the install admin's audit health view. Forwarding starts at the
+# newest event when first enabled; use the export for history.
+auditForwarding:
+  # Syslog (RFC 5424) over TCP. With tls: true the collector's certificate must chain to a CA
+  # the server image trusts.
+  syslog:
+    enabled: false
+    host: ""
+    port: 6514
+    tls: true
+  # OTLP/HTTP logs (JSON). endpoint is the full logs URL, e.g. https://collector:4318/v1/logs.
+  # headersSecret names a Secret with key "headers": "Name=value,Name2=value2" (auth tokens).
+  otlp:
+    enabled: false
+    endpoint: ""
+    headersSecret: ""

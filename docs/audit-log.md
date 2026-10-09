@@ -25,8 +25,9 @@ reports the first row that was edited (`hash_mismatch`), removed (`gap`) or re-c
 for rows chained before the v2 upgrade, that doesn't match the upgrade seal (`seal_mismatch`), and
 a second upgrade seal (`extra_seal`). The chain can't reveal two things on its own: a rewrite of every row from
 some point onwards, and the removal of the newest rows. To catch those, compare the reported `head`
-(`seq`, `hash`) with a copy kept outside the database. Audit export and SIEM forwarding (KOBE-19)
-are the intended places to keep that copy. Until KOBE-19 ships, the server log carries it (see
+(`seq`, `hash`) with a copy kept outside the database. Audit export and SIEM forwarding (KOBE-19, see
+[Export and forwarding](#export-and-forwarding)) are the intended places to keep that copy; forwarded
+events carry `hash` and `prev_hash`. The server log carries the head as well (see
 [Anchoring the chain](#anchoring-the-chain)).
 
 Why a hash chain and not only a sequence: a sequence shows that rows are missing, but it can't show
@@ -148,6 +149,7 @@ install for personal and gallery agents.
 | `governance.legal_hold.released`             | install | as requested, plus `selfApproved`                                                                                                                                          | A second install admin approved the release (single-admin install: flagged): purges may resume                                                                                                                                                       |
 | `audit.pii_erased`                           | install | `rows`, `olderThanHours`                                                                                                                                                   | The sweep erased the IP and user agent of rows past the retention period (system; counts only, nothing about holds)                                                                                                                                  |
 | `audit.chain.upgraded`                       | install | `throughSeq`, `rows`, `seal`                                                                                                                                               | Written once by the server after the chain v2 upgrade, on an install that had audit rows: the seal over every v1 row (system)                                                                                                                        |
+| `audit.exported`                             | any     | `format` (csv, jsonl), `from?`, `to?`, `rows`, `complete`                                                                                                                  | An admin downloaded the log (KOBE-19). Install admins: install scope; team admins: recorded in their team. `complete` false when the download broke off                                                                                              |
 | `agent.created`                              | any     | `agentId`, `scope`, `slug`, `source` (json, import, fork, seed), `forkedFrom?`, `forkedFromVersion?`                                                                       | Agent created, imported from a file, or forked                                                                                                                                                                                                       |
 | `agent.updated`                              | any     | `agentId`, `scope`, `slug`, `revision`, `source` (json, import, seed)                                                                                                      | Draft replaced                                                                                                                                                                                                                                       |
 | `agent.deleted`                              | any     | `agentId`, `scope`, `slug`                                                                                                                                                 | Never-published agent deleted (a published one is archived)                                                                                                                                                                                          |
@@ -328,7 +330,7 @@ the action, adding its actions to `AUDIT_EVENTS`:
 | Ticket                        | Actions to add (suggested names)                                                                                                                                                                                                                                                                                                                                                                                |
 | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | KOBE-18 retention             | Done: `retention.policy.changed`, `retention.maximum.changed`, `retention.purged`, `retention.compacted`, `retention.blobs_deleted`, `thread.purge_requested`, `thread.purged`, `thread.exported` (see the table above). KOBE-28 calls `purgeDepartedMember()` (services/server `retention/index.ts`), audited as `retention.purged` with reason `offboarding`.                                                 |
-| KOBE-19 export / SIEM         | `audit.exported` (`from`, `to`, `format`, `rows`). Export pages with `listAuditEvents({ after })` (ascending keyset) and forwards `head` from `verifyAuditChain` as the anchor.                                                                                                                                                                                                                                 |
+| KOBE-19 export / SIEM         | Done: `audit.exported` (`from`, `to`, `format`, `rows`). Export pages with `listAuditEvents({ after })` (ascending keyset) and forwards `head` from `verifyAuditChain` as the anchor.                                                                                                                                                                                                                           |
 | KOBE-23/25/28 sandbox         | `sandbox.created` and `sandbox.destroyed` (isolation enforcement) exist (KOBE-22); `sandbox.hibernated`/`.woken` (KOBE-25). Add offboarding destroy (`reason` value) and `sandbox.volume_purged` (`sandboxId`, `userId`). Never pod logs.                                                                                                                                                                       |
 | KOBE-53/54/57 workspace       | KOBE-27 records `workspace.restored`, `.file_shared`, `.purged`, `.integrity_failed` and push refusals (`sandbox.limit_exceeded`). Server writes into a workspace (`putServerFile`/`deleteServerFile`) take the caller's transaction: record the upload, file-browser delete or project-file change there (e.g. `file.uploaded`, `workspace.file_deleted`, `project.file_added`), never file names or contents. |
 | KOBE-30/31 runs               | Done: `run.cancelled`, `run.retried`, `run.budget_stopped`; KOBE-24 records `run.interrupted`. Run starts are not audited: one per message, and every audit write serializes on the chain lock.                                                                                                                                                                                                                 |
@@ -339,6 +341,40 @@ the action, adding its actions to `AUDIT_EVENTS`:
 | KOBE-47 agents and skills     | (KOBE-46 recorded `agent.published`, `.rolled_back`, `.archived`, `.unarchived`, `thread.agent_switched`.) `skill.published`, `skill.reviewed` (`decision`), `skill.blocked` (`contentHash`).                                                                                                                                                                                                                   |
 | KOBE-59–61 connectors         | `mcp.connector.registered`, `.pinned`, `.drift_approved`, `team.connector.enabled`, `connector.grant.connected`, `.revoked` (never credentials).                                                                                                                                                                                                                                                                |
 | KOBE-64 schedules             | `schedule.created`, `.paused`, `.deleted` (`scheduleId`, `agentId`).                                                                                                                                                                                                                                                                                                                                            |
+
+## Export and forwarding
+
+**Export (KOBE-19).** `GET /v1/install/audit/export?format=csv|jsonl&since=&until=[&teamId=]`
+(install Owner/Admin: the whole log, with `ip`, `user_agent`, `prev_hash` and `hash`) and
+`GET /v1/team/audit/export?format=csv|jsonl&since=&until=` (team admins: the team view, without
+those four fields; every page is read inside `withTeam()`). `since` and `until` filter on `at`
+(both inclusive, ISO date-times, optional). The response is a download streamed page by page (200
+rows per read, keyset on `seq`), so memory does not grow with the range. Rows are in `seq` order.
+CSV is RFC 4180 with CRLF; `target` is one JSON cell, and text cells starting with `= + - @` get a
+leading `'` so spreadsheets do not run them. JSONL has one event per line, shaped like the read
+API. At most 6 exports a minute per admin. Every export is recorded as `audit.exported` with the
+number of rows sent.
+
+**Forwarding (KOBE-19).** Off by default; Helm values `auditForwarding.syslog` (RFC 5424 over TCP
+or TLS, octet-counted frames, APP-NAME `kobe-audit`, MSGID the action, structured data
+`[kobe@32473 seq id team actorKind actor hash]`, body the event as JSON; `32473` is the enterprise
+number RFC 5612 reserves for documentation) and `auditForwarding.otlp` (OTLP/HTTP logs, JSON
+encoding; the action is the log body, fields are `kobe.audit.*` attributes; auth headers from a
+Secret). Both carry the same fields as the install export, including the chain hashes.
+
+- **Cursor.** Each destination keeps its last delivered `seq` and its health in
+  `install_settings['audit.forward.<destination>']`. It advances only after the collector accepted
+  a batch, so a failure or a crash repeats a batch and never skips one: de-duplicate on the event
+  `id`. A destination enabled for the first time starts at the newest event; use the export for
+  history.
+- **One replica.** A sweep every 15 s on every server replica, under a session advisory lock.
+- **Failures.** The wait before the next attempt doubles from 5 s up to 15 min; the failure count,
+  the last error (status or connection error, never the URL or headers) and the next attempt are
+  kept. `GET /v1/install/audit/forwarding` (install admins) reports per destination `status`
+  (`ok`, `retrying`, `failing` from 5 failures in a row, `pending`), `behind` (events not yet
+  delivered), `lastSuccessAt`, `lastError`, `nextAttemptAt`.
+- **TLS.** The collector's certificate is verified against the server image's trust store
+  (`NODE_EXTRA_CA_CERTS` for a private CA).
 
 ## Reading the log
 

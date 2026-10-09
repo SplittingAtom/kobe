@@ -1,3 +1,4 @@
+import type { ForwardDestination } from "./audit/forward/types.js";
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
   PROVIDER_KEY_PURPOSE,
@@ -73,6 +74,8 @@ export interface ServerDepsOptions {
     /** Connections of the stream read pool (default STREAM_POOL_MAX). */
     readonly poolMax?: number;
   };
+  /** SIEM destinations configured by Helm values (KOBE-19); the admin health view lists them. */
+  readonly auditForwardingDestinations?: readonly ForwardDestination[];
   /** Outgoing email (invitations, password resets, notifications). */
   readonly mailer: Mailer;
   /** Agent version limits (KOBE-46); defaults in `AGENT_LIMIT_DEFAULTS`. */
@@ -155,6 +158,8 @@ export interface ServerDeps {
   readonly background: BackgroundTasks;
   /** Logs and attests the audit chain head (started by index.ts, not in tests). */
   readonly auditAnchor: AuditAnchorLogger;
+  /** Destinations audit events are forwarded to (empty: forwarding off). */
+  readonly auditForwardingDestinations: readonly ForwardDestination[];
   /** Aggregated audit of unauthenticated auth attempts (flushed on close). */
   readonly authAttempts: AuthAttemptAudit;
   /** Downstream steps of deactivation/reactivation (sandboxes, grants, schedules, audit). */
@@ -355,6 +360,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     background,
     authAttempts,
     auditAnchor: new AuditAnchorLogger(database.db, options.authSecret),
+    auditForwardingDestinations: options.auditForwardingDestinations ?? [],
     lifecycle,
     offboarding,
     sandboxWire,

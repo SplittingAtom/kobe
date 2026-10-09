@@ -345,3 +345,25 @@ spec:
     requests: { cpu: 20m, memory: 64Mi }
     limits: { cpu: 200m, memory: 128Mi }
 {{- end -}}
+
+{{/* Audit forwarding destinations (KOBE-19); nothing is rendered when both are off. */}}
+{{- define "kobe.auditForwardingEnv" -}}
+{{- $f := .Values.auditForwarding | default dict -}}
+{{- $syslog := $f.syslog | default dict -}}
+{{- $otlp := $f.otlp | default dict -}}
+{{- if $syslog.enabled }}
+- name: KOBE_AUDIT_SYSLOG_URL
+  value: {{ printf "%s://%s:%d" (ternary "tls" "tcp" ($syslog.tls | default false)) (required "auditForwarding.syslog.host is required when syslog forwarding is enabled" $syslog.host) ($syslog.port | default 6514 | int) | quote }}
+{{- end }}
+{{- if $otlp.enabled }}
+- name: KOBE_AUDIT_OTLP_URL
+  value: {{ required "auditForwarding.otlp.endpoint is required when OTLP forwarding is enabled" $otlp.endpoint | quote }}
+{{- with $otlp.headersSecret }}
+- name: KOBE_AUDIT_OTLP_HEADERS
+  valueFrom:
+    secretKeyRef:
+      name: {{ . }}
+      key: headers
+{{- end }}
+{{- end }}
+{{- end -}}
