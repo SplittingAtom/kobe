@@ -24,15 +24,18 @@ import { invalidRequest, parseBody } from "../teams/http.js";
 const chain =
   (...steps: MiddlewareHandler[]): MiddlewareHandler =>
   (c, next) => {
-    const at = async (i: number): Promise<Response | void> => {
+    const at = async (i: number): Promise<Response | undefined> => {
       if (i === steps.length) {
         await next();
         return undefined;
       }
-      return steps[i]!(c, async () => {
+      const step = steps[i];
+      if (!step) return undefined;
+      const out = await step(c, async () => {
         const inner = await at(i + 1);
         if (inner instanceof Response) c.res = inner;
       });
+      return out instanceof Response ? out : undefined;
     };
     return at(0);
   };

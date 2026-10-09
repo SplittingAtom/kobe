@@ -126,7 +126,7 @@ describe("personal memory", () => {
     );
     expect(rows[2]?.sha256).toBe(rows[0]?.sha256);
     expect(rows[2]?.blob_ref).not.toBe(rows[0]?.blob_ref);
-    expect(objects.objects.get(rows[2]!.blob_ref)?.toString()).toBe("one");
+    expect(objects.objects.get(String(rows[2]?.blob_ref))?.toString()).toBe("one");
     expect((await auditOf(w.team, "memory.restored"))[0]).toEqual({
       scope: "user",
       memoryDocId: d1.id,
@@ -349,6 +349,6 @@ describe("export", () => {
       .filter((k) => k.startsWith("memory/"))
       .sort();
     expect(memory).toEqual(["memory/notes/deep.md", "memory/prefs.md"]);
-    expect(strFromU8(files["memory/prefs.md"]!)).toBe("likes tea");
+    expect(strFromU8(files["memory/prefs.md"] ?? new Uint8Array())).toBe("likes tea");
   });
 });
