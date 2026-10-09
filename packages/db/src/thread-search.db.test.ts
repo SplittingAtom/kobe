@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createDb, type KobeDatabase, type KobeTx } from "./client.js";
-import { teamMembers, teams, threadEntries, threads, users } from "./schema/index.js";
+import { projects, teamMembers, teams, threadEntries, threads, users } from "./schema/index.js";
 import {
   searchThreads,
   ThreadSearchError,
@@ -71,6 +71,19 @@ const text = (t: string) => ({ type: "text", text: t });
 
 async function newThread(teamId: string, spec: ThreadSpec): Promise<string> {
   return withTeam(app.db, teamId, async (tx) => {
+    // threads.project_id references projects (KOBE-160): make sure the named project exists.
+    if (spec.projectId !== undefined) {
+      await tx
+        .insert(projects)
+        .values({
+          teamId,
+          id: spec.projectId,
+          slug: `p-${spec.projectId.slice(0, 8)}`,
+          name: "P",
+          createdBy: spec.ownerUserId,
+        })
+        .onConflictDoNothing();
+    }
     const [row] = await tx
       .insert(threads)
       .values({

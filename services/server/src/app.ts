@@ -44,6 +44,7 @@ import { teamAuditRoutes } from "./routes/team-audit.js";
 import { teamEgressRoutes } from "./routes/team-egress.js";
 import { teamBreakGlassRoutes } from "./routes/team-break-glass.js";
 import { teamInvitesRoutes } from "./routes/team-invites.js";
+import { teamConnectorsRoutes } from "./routes/team-connectors.js";
 import { teamModelsRoutes } from "./routes/team-models.js";
 import { teamPolicyRoutes } from "./routes/team-policy.js";
 import { teamOffboardedRoutes } from "./routes/team-offboarded.js";
@@ -132,6 +133,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/team/audit", teamAuditRoutes(deps));
   api.route("/team/egress", teamEgressRoutes(deps));
   api.route("/team/models", teamModelsRoutes(deps));
+  api.route("/team/connectors", teamConnectorsRoutes(deps));
   api.route("/team/usage", teamUsageRoutes(deps));
   api.route("/team/budgets", teamBudgetsRoutes(deps));
   api.route("/team/break-glass", teamBreakGlassRoutes(deps));

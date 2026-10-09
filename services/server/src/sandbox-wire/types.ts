@@ -9,6 +9,7 @@ import type {
   PolicyDecision,
   PolicyReason,
   RunStatus,
+  SandboxAttachment,
   SessionTokenClaims,
 } from "@kobe/protocol";
 import type { KobeTx } from "@kobe/db";
@@ -77,7 +78,7 @@ export interface RunStartRequest {
   readonly runId: string;
   readonly threadId: string;
   readonly message: string;
-  readonly attachments?: readonly { readonly path: string; readonly mime_type: string }[];
+  readonly attachments?: readonly SandboxAttachment[];
   readonly parentEntryId?: string;
   readonly config?: PiThreadConfig;
 }

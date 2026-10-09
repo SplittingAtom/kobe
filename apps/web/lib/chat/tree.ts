@@ -15,6 +15,8 @@
  */
 import type { ThreadMessageLike } from "@assistant-ui/react";
 import { parseEntry, type ParsedEntry } from "./entries";
+import type { SentFile } from "./attachments";
+import { splitAttachedFiles } from "./uploads";
 import type { LiveMessage, LiveRun, ToolActivity } from "./live";
 import type { ThreadEntry } from "./types";
 
@@ -27,12 +29,22 @@ export type KobeMessageMeta =
       readonly parentEntryId: string | null;
       readonly text: string;
       readonly pending: boolean;
+      /** Files sent with it (chips): from the send while pending, from Pi's text once committed. */
+      readonly attachments?: readonly ChipFile[] | undefined;
     }
   | {
       readonly kind: "assistant";
       readonly entryIds: readonly string[];
       readonly live: boolean;
     };
+
+/** A file shown on a sent message; `size` is unknown for files not sent from this tab. */
+export interface ChipFile {
+  readonly name: string;
+  readonly mimeType: string;
+  readonly size?: number | undefined;
+  readonly previewUrl?: string | undefined;
+}
 
 export interface ProjectedItem {
   readonly parentId: string | null;
@@ -53,7 +65,13 @@ export interface LiveOverlay {
   /** The run still holds the thread (streaming or waiting). */
   readonly active: boolean;
   /** The run's message text, shown until Pi commits it (from pending-messages or the send). */
-  readonly prompt?: { readonly text: string; readonly parentEntryId: string | null } | undefined;
+  readonly prompt?:
+    | {
+        readonly text: string;
+        readonly parentEntryId: string | null;
+        readonly files?: readonly SentFile[] | undefined;
+      }
+    | undefined;
 }
 
 interface ToolResultInfo {
@@ -263,13 +281,15 @@ export function projectThread(
     const first = node.entries[0] as ThreadEntry;
     if (node.role === "user") {
       const p = parsed.get(first.entryId);
-      const text = p?.kind === "user" ? p.text : "";
+      const split = splitAttachedFiles(p?.kind === "user" ? p.text : "");
+      const text = split.text;
       const meta: KobeMessageMeta = {
         kind: "user",
         entryId: first.entryId,
         parentEntryId: first.parentId,
         text,
         pending: false,
+        ...(split.files.length > 0 ? { attachments: split.files } : {}),
       };
       indexOf.set(id, items.length);
       items.push({
@@ -356,6 +376,9 @@ function overlayLive(
       parentEntryId,
       text: live.prompt.text,
       pending: true,
+      ...(live.prompt.files && live.prompt.files.length > 0
+        ? { attachments: live.prompt.files }
+        : {}),
     };
     indexOf.set(id, items.length);
     items.push({
@@ -366,7 +389,7 @@ function overlayLive(
         content: [{ type: "text", text: live.prompt.text }],
         metadata: { custom: meta },
       },
-      deps: [live.prompt.text, parentNode],
+      deps: [live.prompt.text, parentNode, live.prompt.files],
     });
     anchor = id;
   }
