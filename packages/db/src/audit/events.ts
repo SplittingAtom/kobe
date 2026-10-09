@@ -1051,6 +1051,39 @@ export const AUDIT_EVENTS = {
     tools: z.array(z.string().max(128)).max(500),
   }),
 
+  // ── memory: file memory (KOBE-155, D24); ids, versions and sizes, never paths or content ──
+  /** A memory file got a new version (panel edit, personal `remember`, or an approved project write). */
+  "memory.written": event("team", {
+    scope: z.enum(["user", "project"]),
+    memoryDocId: id,
+    version,
+    previousVersion: version.optional(),
+    actorKind: z.enum(["user", "agent"]),
+    sizeBytes: count,
+  }),
+  /** Undo or restore: a new version copying an earlier one (a deleted file is revived). */
+  "memory.restored": event("team", {
+    scope: z.enum(["user", "project"]),
+    memoryDocId: id,
+    fromVersion: version,
+    version,
+  }),
+  /** A memory file was deleted (soft: its versions stay and Undo can restore it). */
+  "memory.deleted": event("team", {
+    scope: z.enum(["user", "project"]),
+    memoryDocId: id,
+    version,
+  }),
+  /** A team admin changed the team's memory switches. */
+  "memory.settings_changed": event("team", {
+    memoryEnabled: z.boolean(),
+    projectMemoryEnabled: z.boolean(),
+  }),
+  /** An install admin changed the install-wide memory switches. */
+  "memory.install_settings_changed": event("install", {
+    memoryEnabled: z.boolean(),
+    projectMemoryEnabled: z.boolean(),
+  }),
   // ── connector grants (KOBE-108): a user's own API key; ids and names only, never the key or its hint ──
   /** A user added their API key for a connector their team enabled. */
   "mcp.grant.added": event("team", { connectorId: id, name: z.string().max(64) }),
