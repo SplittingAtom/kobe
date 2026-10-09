@@ -29,7 +29,7 @@ tools run as before, so behaviour is unchanged.
   exactly as before. Paired start-up also probes one partner switch (`--probe-ptrace`) and fails
   closed if it cannot.
 - **Image:** `kobe-tool-<n>` users/groups 3000-3063 (no create-home, home `/home/kobe`), root-owned
-  `/etc/gitconfig` with `safe.directory = *` (not set before; also fixes uid recycling). Workspace
+  `/etc/gitconfig` with `safe.directory` = `/workspace` and `/workspace/*` only (git 2.46+ trailing `/*`; image has trixie git 2.47; test-image asserts a repo under /tmp stays untrusted). Nothing else needs more: repos live in the shared workspace. Workspace
   stays shared by group 1000 + umask 002 + setgid dirs, no ACLs (design).
 - Not touched: the KOBE-169 interim fix (agent-owned `agent/` files, sticky dir) is not on `main` yet;
   the test layout uses today's `agent/` (2770, Pi group), which a partner is outside of either way.

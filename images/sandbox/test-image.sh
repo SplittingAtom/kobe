@@ -324,8 +324,13 @@ check "--kill-all ends every process of a partner uid, nothing else" '^left=0 pi
    echo \"left=\$(ps -eo uid=,stat= | awk '\$1==3000 && \$2 !~ /^Z/' | wc -l) pi=\$([ \$(pgrep -cu 2000 sleep) -ge 1 ] && echo alive)\""
 check "kobe-reclaim gives a partner uid's private files to the workspace group" '^1000 660$' run_pair sh -c \
   "$R 3000 sh -c 'umask 077; echo s > /tmp/f'; $R 3000 /opt/kobe/bin/kobe-reclaim 1000 /tmp; stat -c '%g %a' /tmp/f"
-check "git trusts a repository owned by another uid (system safe.directory, root-owned)" '^trusted root:root$' run_pair sh -c \
-  "mkdir /tmp/r && cd /tmp/r && git init -q && $R 3000 git -C /tmp/r status >/dev/null 2>&1 && printf 'trusted '; stat -c '%U:%G' /etc/gitconfig"
+run_pair_ws() { docker run "${PAIRED[@]}" --tmpfs /workspace:uid=1000,gid=1000 --entrypoint "$1" "$IMAGE" "${@:2}"; }
+check "git trusts repositories owned by another uid under /workspace only (system safe.directory, root-owned)" \
+  '^trusted untrusted root:root$' run_pair_ws sh -c \
+  "mkdir -p /workspace/a/b /tmp/r && git init -q /workspace/a/b && git init -q /tmp/r;
+   $R 3000 git -C /workspace/a/b status >/dev/null 2>&1 && printf 'trusted ' || printf 'bad-workspace ';
+   $R 3000 git -C /tmp/r status >/dev/null 2>&1 && printf 'bad-tmp ' || printf 'untrusted ';
+   stat -c '%U:%G' /etc/gitconfig"
 # Fail closed: an agent asked for Pi identities (KOBE_PI_RUNAS) that cannot switch uids (here: no
 # capabilities, no_new_privs) refuses to start rather than run Pi as itself.
 check "the agent refuses to start when it cannot run Pi under its own uid" 'cannot start processes as a Pi identity' host sh -c \

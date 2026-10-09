@@ -125,7 +125,8 @@ RUN groupadd --gid 1000 kobe \
       && useradd --uid $((3000 + n)) --gid $((3000 + n)) --no-create-home --home-dir /home/kobe \
            --shell /bin/bash "kobe-tool-$n" || exit 1; \
     done \
- && git config --system --add safe.directory '*' \
+ && git config --system --add safe.directory /workspace \
+ && git config --system --add safe.directory '/workspace/*' \
  && mkdir -p /workspace /opt/kobe/skills /run/kobe-agent /run/kobe-pi \
  && chown 1000:1001 /run/kobe-agent && chmod 0700 /run/kobe-agent \
  && chmod 0555 /opt/kobe/entrypoint.sh \
