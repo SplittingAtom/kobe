@@ -32,6 +32,7 @@ import { installUsersRoutes } from "./routes/install-users.js";
 import { meRoutes } from "./routes/me.js";
 import { myInvitesRoutes } from "./routes/my-invites.js";
 import { myTeamsRoutes } from "./routes/my-teams.js";
+import { workspaceFileRoutes, type WorkspaceFilesOptions } from "./routes/workspace-files.js";
 import { runEventsRoutes } from "./routes/run-events.js";
 import { runRoutes, threadRunRoutes } from "./routes/runs.js";
 import { setupRoutes } from "./routes/setup.js";
@@ -63,6 +64,8 @@ export interface AppOptions {
   readonly isolation?: IsolationGate;
   /** Runs the pre-publish Orbit evals (KOBE-93); unset, an enabled gate blocks publishing. */
   readonly evals?: EvalRunner;
+  /** Workspace file browser (KOBE-148); unset (no object storage), its routes answer 503. */
+  readonly workspaceFiles?: WorkspaceFilesOptions;
 }
 
 /** Health endpoints always; auth and the /v1 API when dependencies are provided. */
@@ -142,6 +145,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/threads", threadRetentionRoutes(deps));
   api.route("/threads", threadRoutes(deps));
   api.route("/artifacts", artifactRoutes(deps));
+  api.route("/workspace", workspaceFileRoutes(deps, options.workspaceFiles));
   api.route("/agents", agentRoutes(deps, options.evals ? { runner: options.evals } : {}));
   api.route("/skills", skillRoutes(deps));
   api.route("/approvals", approvalRoutes(deps));

@@ -827,6 +827,12 @@ export const AUDIT_EVENTS = {
   }),
   /** A workspace file was copied to a durable shared object (KOBE-54 `share_file`). */
   "workspace.file_shared": event("team", { userId: id, sharedId: id, bytes: count }),
+  /** The user downloaded a file of their own workspace in the file browser (KOBE-148; no names). */
+  "workspace.file_downloaded": event("team", { userId: id, bytes: count }),
+  /** The user uploaded a file into their own workspace in the file browser (KOBE-148; no names). */
+  "workspace.file_uploaded": event("team", { userId: id, bytes: count }),
+  /** The user deleted a file or folder of their own workspace in the file browser (KOBE-148). */
+  "workspace.file_deleted": event("team", { userId: id, files: count, bytes: count }),
   /** Unreferenced workspace blobs and old tombstones were purged (system; counts only, D18). */
   "workspace.purged": event("team", { userId: id, blobs: count, bytes: count, tombstones: count }),
 
