@@ -21,7 +21,7 @@
 // It also plays kobe-policy's side of the fd-3 handshake: on channel.hello it answers channel.ready,
 // unless the last --extension path contains "refuse" (channel.refused) or "silent" (no answer).
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 
 const args = process.argv.slice(2);
@@ -306,6 +306,14 @@ function handle(cmd) {
         settle();
       }
       return respond(cmd, { success: true });
+    case "set_model":
+      // "plant-during": a tool of this Pi plants config while the command is handled (KOBE-169).
+      if (cmd.modelId === "plant-during") {
+        const file = `${process.env.PI_CODING_AGENT_DIR}/models.json`;
+        rmSync(file, { force: true });
+        writeFileSync(file, '{"providers":{"kobe":{"models":[]}}}');
+      }
+      return respond(cmd, { success: true, data: { id: cmd.modelId } });
     case "get_state":
       return respond(cmd, { success: true, data: { sessionFile, isStreaming: streaming } });
     case "get_entries": {

@@ -25,6 +25,7 @@ import {
   SystemPromptFile,
   systemPromptArgs,
 } from "../pi/system-prompt-file.js";
+import { tamperedConfig, writeGuardedConfig } from "../models/agent-config.js";
 import { ModelFile } from "../models/model-file.js";
 import {
   AGENT_SUBDIR,
@@ -256,6 +257,7 @@ export class Thread {
       } else {
         await this.#prepareIdentityDirs(runtimeDir, identity);
       }
+      await writeGuardedConfig(agentDir, identity !== undefined);
       env.PI_CODING_AGENT_DIR = agentDir;
       const models = this.#env.models;
       if (models !== undefined) {
@@ -383,14 +385,15 @@ export class Thread {
   /**
    * Under a Pi identity: the runtime directory becomes the agent's with the Pi's own group
    * (setgid, 2750: the Pi reads it, nobody else gets in), with `agent/` the only place that Pi
-   * may write (2770; Pi 1.0.0 writes its credential and catalog stores there).
+   * may write (3770, sticky: it cannot rename or delete the agent's guarded files there, see
+   * models/agent-config.ts; Pi 1.0.0 writes its credential and catalog stores there).
    */
   async #prepareIdentityDirs(runtimeDir: string, identity: PiIdentity): Promise<void> {
     await chown(runtimeDir, -1, identity.gid);
     await chmod(runtimeDir, 0o2750);
     const agentDir = path.join(runtimeDir, AGENT_SUBDIR);
     await mkdir(agentDir);
-    await chmod(agentDir, 0o2770);
+    await chmod(agentDir, 0o3770);
   }
 
   /**
@@ -421,11 +424,25 @@ export class Thread {
     if (unexpected.length > 0) {
       return `unexpected entries in Pi's runtime directory: ${unexpected.slice(0, 5).join(", ")}`;
     }
+    const changed = await tamperedConfig(path.join(runtimeDir, AGENT_SUBDIR));
+    if (changed.length > 0) {
+      return `${changed.join(", ")} is not what the agent wrote (KOBE-169)`;
+    }
     // Pi reads its catalog store back on every refresh; an offline Pi with no dynamic provider
     // never persists an entry (the file is absent or `{}`), so any entry was planted.
     const store = await piModelsStoreText(runtimeDir);
     if (store !== null && store !== "{}") return "Pi's models-store.json holds catalog entries";
     return undefined;
+  }
+
+  /**
+   * Stop this thread's Pi for a tampered runtime found around a command that could make it use
+   * planted config (audit: a warning with the reason; the caller fails the command with
+   * `runtime_tampered`, which the server records).
+   */
+  async stopTampered(reason: string, during: string): Promise<void> {
+    this.#warn(`runtime_tampered during ${during}: ${reason}; Pi stopped`);
+    await this.withLock(() => this.stopProcess());
   }
 
   /**

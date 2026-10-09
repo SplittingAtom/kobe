@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { chmod, copyFile, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -305,12 +306,31 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
     expect(await readdir(path.dirname(runtime))).toEqual([]);
   });
 
+  it("a Pi's own tools cannot write, replace or delete the guarded config (KOBE-169)", async () => {
+    const [a] = await twoThreads();
+    const dir = a.agentDir;
+    const attempts = (target: string) => [
+      `echo '{}' > ${target}`,
+      `rm -f ${target}`,
+      // A file of the tool's own moved over it; the stray file is cleaned up either way.
+      `echo '{}' > ${dir}/mine.json; mv -f ${dir}/mine.json ${target}; rc=$?; rm -f ${dir}/mine.json; exit $rc`,
+    ];
+    for (const file of ["models.json", "settings.json"]) {
+      for (const command of attempts(`${dir}/${file}`)) {
+        const out = await tool(THREAD, randomUUID(), command);
+        expect(out.code, command).not.toBe(0);
+      }
+    }
+    expect((await stat(dir)).mode & 0o7777).toBe(0o3770);
+    expect(await readFile(`${dir}/models.json`, "utf8")).toBe('{"providers":{}}\n');
+  });
+
   it("keeps the tripwire: a Pi's own tools planting config into its runtime dir fail the next run", async () => {
     const [a] = await twoThreads();
     const out = await tool(
       THREAD,
       "4f5a6b7c-8d9e-4f0a-9b1c-2d3e4f5a6b7c",
-      `echo '{}' > ${a.agentDir}/settings.json`,
+      `echo '{}' > ${a.agentDir}/SYSTEM.md`,
     );
     expect(out.code).toBe(0);
     const result = await h.server.command(
