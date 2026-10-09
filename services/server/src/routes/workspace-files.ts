@@ -1,9 +1,9 @@
 import { Readable } from "node:stream";
+import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { Hono, type Context } from "hono";
 import { isUnderLegalHold, lockLegalHolds, withTeam } from "@kobe/db";
 import {
   UPLOAD_DEFAULT_MAX_FILE_BYTES,
-  uploadFileNameSchema,
   workspaceDeleteQuerySchema,
   workspaceDownloadQuerySchema,
   workspaceListQuerySchema,
@@ -15,8 +15,16 @@ import { recordAudit } from "../audit/record.js";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { logger } from "../logger.js";
+import { openUpload } from "../uploads/parse.js";
+import { DEFAULT_UPLOAD_SETTINGS } from "../uploads/settings.js";
 import type { SandboxWaker } from "../sandbox-wire/types.js";
-import { fileEntry, listFolder, liveFilesUnder } from "../workspace-files/browse.js";
+import {
+  decodeCursor,
+  fileEntry,
+  LIST_MAX_ENTRIES,
+  listFolder,
+  liveFilesUnder,
+} from "../workspace-files/browse.js";
 import {
   attachmentDisposition,
   isInternalPath,
@@ -39,6 +47,8 @@ export interface WorkspaceFilesOptions {
   readonly sync: WorkspaceSync;
   /** Wakes the caller's sandbox when the panel opens (sandbox-lifecycle's waker). */
   readonly waker: SandboxWaker;
+  /** Entries per listing page (default {@link LIST_MAX_ENTRIES}; tests use small pages). */
+  readonly listPageSize?: number;
 }
 
 const fail = (c: Ctx, status: ErrStatus, code: WorkspaceFileError["code"], message: string) =>
@@ -73,6 +83,7 @@ export function workspaceFileRoutes(
     return app;
   }
   const { sync, waker } = options;
+  const pageSize = options.listPageSize ?? LIST_MAX_ENTRIES;
   const ownerOf = (c: Ctx) => ({ teamId: c.get("team").id, userId: c.get("user").id });
 
   app.get("/files", async (c) => {
@@ -80,12 +91,22 @@ export function workspaceFileRoutes(
     if (!query.success) return badPath(c);
     const folder = query.data.path ?? "";
     if (folder !== "" && isInternalPath(folder)) return notFound(c);
+    const after = query.data.cursor === undefined ? undefined : decodeCursor(query.data.cursor);
+    if (query.data.cursor !== undefined && !after) {
+      return c.json({ code: "invalid_request", message: "That cursor is not valid." }, 400);
+    }
     const owner = ownerOf(c);
-    const listing = await withTeam(db, owner.teamId, (tx) => listFolder(tx, owner, folder));
-    // Folders exist only through their files: an unknown or emptied one is not found.
-    if (folder !== "" && listing.entries.length === 0) return notFound(c);
-    if (listing.truncated) c.header("x-kobe-truncated", "true");
-    return c.json({ path: folder, entries: listing.entries });
+    const listing = await withTeam(db, owner.teamId, (tx) =>
+      listFolder(tx, owner, folder, { limit: pageSize, ...(after ? { after } : {}) }),
+    );
+    // Folders exist only through their files: an unknown or emptied one is not found (on the
+    // first page; a later page may legitimately be empty if files went away meanwhile).
+    if (folder !== "" && listing.entries.length === 0 && !after) return notFound(c);
+    return c.json({
+      path: folder,
+      entries: listing.entries,
+      ...(listing.nextCursor === undefined ? {} : { next_cursor: listing.nextCursor }),
+    });
   });
 
   app.get("/file", async (c) => {
@@ -131,39 +152,31 @@ export function workspaceFileRoutes(
     if (length > maxBytes + MULTIPART_OVERHEAD) {
       return fail(c, 413, "file_too_large", `Files over ${maxBytes} bytes are not accepted.`);
     }
-    const form = await c.req.raw.formData().catch(() => undefined);
-    if (!form) return c.json({ code: "invalid_request", message: "Malformed upload." }, 400);
-    const fields: Record<string, string> = {};
-    const files: File[] = [];
-    for (const [key, value] of form.entries()) {
-      if (typeof value !== "string") files.push(value);
-      else fields[key] = value;
-    }
-    const parsed = workspaceUploadFieldsSchema.safeParse(fields);
-    const [file] = files;
-    if (!parsed.success || files.length !== 1 || !file) {
-      return c.json(
-        { code: "invalid_request", message: "Send a folder path and exactly one file." },
-        400,
-      );
-    }
-    const folder = parsed.data.path ?? "";
-    const name = uploadFileNameSchema.safeParse(file.name);
-    const target = name.success ? joinPath(folder, name.data) : undefined;
-    if (!target || !workspacePathSchema.safeParse(target).success || isInternalPath(target)) {
-      return badPath(c);
-    }
-    if (isReadOnlyPath(target)) return readOnly(c);
-    if (file.size > maxBytes) {
-      return fail(c, 413, "file_too_large", `Files over ${maxBytes} bytes are not accepted.`);
-    }
-    const result = await uploadToWorkspace(
-      db,
-      sync,
-      ownerOf(c),
-      target,
-      Buffer.from(await file.arrayBuffer()),
+    const body = c.req.raw.body;
+    if (!body) return c.json({ code: "invalid_request", message: "Malformed upload." }, 400);
+    // Streamed: the file reaches object storage without ever being held (KOBE-184).
+    const opened = await openUpload(
+      c.req.header("content-type"),
+      Readable.fromWeb(body as WebReadableStream<Uint8Array>),
+      workspaceUploadFieldsSchema,
     );
+    if (!opened.ok) return c.json({ code: "invalid_request", message: opened.reason }, 400);
+    const { upload } = opened;
+    const refuse = (res: Response): Response => {
+      upload.file.destroy();
+      return res;
+    };
+    const folder = upload.fields.path ?? "";
+    const target = joinPath(folder, upload.name);
+    if (!workspacePathSchema.safeParse(target).success || isInternalPath(target)) {
+      return refuse(badPath(c));
+    }
+    if (isReadOnlyPath(target)) return refuse(readOnly(c));
+    const result = await uploadToWorkspace(db, sync, ownerOf(c), target, {
+      body: upload.file,
+      limitBytes: maxBytes,
+      teamQuotaDefaultBytes: (deps.uploads ?? DEFAULT_UPLOAD_SETTINGS).defaultQuotaBytes,
+    });
     if (!result.ok) return fail(c, result.status, result.code, result.message);
     return c.json(fileEntry(result.entry), 201);
   });
@@ -199,7 +212,7 @@ export function workspaceFileRoutes(
         return fail(
           c,
           409,
-          "read_only",
+          "legal_hold",
           "This workspace is under a legal hold; nothing can be deleted.",
         );
       case "missing":
