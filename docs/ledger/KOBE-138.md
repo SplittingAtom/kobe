@@ -19,7 +19,11 @@ Sum of job durations. Before: main push ci run 37673546054 (db 510 s, checks 208
 orbit-loader 36 s = 917 s) plus e2e merge_group run 37671424766 (images 191 s, shards 2126 s,
 changes/k3d 6 s = 2323 s) = 3240 s = 54.0 min.
 
-After: see below (filled from the PR's runs).
+After (PR #114: ci push run 37916845229 + e2e pull_request run 37916851802): 3501 s = 58.4 min. The ci
+`images` job (163 s) is gone and the aggregate `images` costs 3 s, but this run was not faster overall:
+the image matrix took 61-122 s per image (cold PR cache; 26-47 s in the merge-queue baseline) and `db`
+ran 525 s (first attempt failed on an unrelated retention.db.test.ts flake and was rerun). Like for like:
+ci -163 s per push; e2e adds `docker load` plus the assertion (a few seconds per image).
 
 ## Decisions
 
