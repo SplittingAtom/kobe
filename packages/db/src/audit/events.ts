@@ -906,6 +906,13 @@ export const AUDIT_EVENTS = {
     soft: z.boolean(),
     teams: z.number().int().nonnegative(),
   }),
+  /** Kobe probed a connector and pinned its tools (KOBE-101); the hash covers all pinned tools. */
+  "mcp.connector.pinned": event("install", {
+    connectorId: id,
+    name: z.string().max(64),
+    tools: z.number().int().nonnegative(),
+    hash: z.string().regex(/^[0-9a-f]{64}$/),
+  }),
 } as const;
 
 export type AuditAction = keyof typeof AUDIT_EVENTS;

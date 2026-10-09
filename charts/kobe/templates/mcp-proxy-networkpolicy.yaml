@@ -1,6 +1,6 @@
 {{- $fullname := include "kobe.fullname" . -}}
 {{- $m := include "kobe.mcpProxyValues" . | fromJson -}}
-# MCP proxy (spec D27). Ingress: only sandboxes (team namespaces), only the proxy port — the
+# MCP proxy (spec D27). Ingress: only sandboxes (team namespaces) and the server's probe, only the proxy port — the
 # receiving side holds regardless of how the CNI applies the team policy's egress selectors
 # (KOBE-22 kube-router finding). Egress: DNS, the server's internal listener (policy re-check), and
 # remote MCP servers directly (public addresses on the allowed ports; internal ones only when
@@ -26,6 +26,14 @@ spec:
         - namespaceSelector:
             matchLabels:
               kobe.splittingatom.io/team-namespace: "true"
+      ports:
+        - protocol: TCP
+          port: 8080
+    # The server's pinning probe (KOBE-101, `/internal/v1/probe`, internal key required).
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "kobe.selectorLabels" (dict "root" . "component" "server") | nindent 14 }}
       ports:
         - protocol: TCP
           port: 8080
