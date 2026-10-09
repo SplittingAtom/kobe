@@ -17,3 +17,6 @@ PR open; 10-run proof below.
   policy engine in that test has ttl 0 (no cache). Attributed to runner starvation; open if it recurs.
 
 ## Evidence
+
+- ac-2: PR #118 run https://github.com/SplittingAtom/kobe/actions/runs/37920137739, db matrix 1-10 all
+  passed (8-8.5 min each; matrix since reverted). e2e run 37920142070 passed.
