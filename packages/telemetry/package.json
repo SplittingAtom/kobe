@@ -1,0 +1,32 @@
+{
+  "name": "@kobe/telemetry",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "OpenTelemetry tracing for Kobe services: metadata-only spans, OTLP export from env, trace context propagation",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/context-async-hooks": "^2.0.0",
+    "@opentelemetry/core": "^2.0.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.223.0",
+    "@opentelemetry/resources": "^2.0.0",
+    "@opentelemetry/sdk-trace-base": "^2.0.0",
+    "@opentelemetry/sdk-trace-node": "^2.0.0",
+    "@opentelemetry/semantic-conventions": "^1.30.0",
+    "hono": "^4.13.12",
+    "zod": "^4.0.0"
+  }
+}

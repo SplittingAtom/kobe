@@ -1,3 +1,4 @@
+import { injectTraceHeaders } from "@kobe/telemetry";
 import { z } from "zod";
 
 /**
@@ -96,11 +97,11 @@ export function createPolicyServer(options: PolicyServerOptions): PolicyServer {
     try {
       const res = await doFetch(`${options.baseUrl}/internal/v1/mcp${path}`, {
         method: "POST",
-        headers: {
+        headers: injectTraceHeaders({
           authorization: `Bearer ${options.internalKey}`,
           "kobe-sandbox-token": token,
           "content-type": "application/json",
-        },
+        }),
         body: body === undefined ? null : JSON.stringify(body),
         signal: AbortSignal.timeout(options.timeoutMs),
         redirect: "error",

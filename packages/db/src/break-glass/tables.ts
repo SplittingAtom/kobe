@@ -11,6 +11,7 @@ export const BREAK_GLASS_READABLE_TABLES = [
   "thread_entries",
   "artifacts",
   "artifact_versions",
+  "files",
 ] as const satisfies readonly TeamTable[];
 
 export type BreakGlassReadableTable = (typeof BREAK_GLASS_READABLE_TABLES)[number];

@@ -120,6 +120,46 @@ describe("workloads", () => {
     expect(renderError({ "server.teamReconcileSeconds": "-1" })).toMatch(/teamReconcileSeconds/);
   });
 
+  it("configures audit forwarding on the server only, and only when enabled (KOBE-19)", () => {
+    const envOf = (
+      ms2: Manifest[],
+      name: string,
+    ): { name: string; value?: string; valueFrom?: any }[] =>
+      find(ms2, "Deployment", name)?.spec.template.spec.containers[0].env ?? [];
+    const audit = (ms2: Manifest[], name: string) =>
+      envOf(ms2, name).filter((e) => e.name.startsWith("KOBE_AUDIT_"));
+    expect(audit(ms, "kobe-server")).toEqual([]);
+    const on = render({
+      "auditForwarding.syslog.enabled": "true",
+      "auditForwarding.syslog.host": "siem.example.test",
+      "auditForwarding.otlp.enabled": "true",
+      "auditForwarding.otlp.endpoint": "https://otel.example.test:4318/v1/logs",
+      "auditForwarding.otlp.headersSecret": "otlp-auth",
+    });
+    expect(audit(on, "kobe-server")).toEqual([
+      { name: "KOBE_AUDIT_SYSLOG_URL", value: "tls://siem.example.test:6514" },
+      { name: "KOBE_AUDIT_OTLP_URL", value: "https://otel.example.test:4318/v1/logs" },
+      {
+        name: "KOBE_AUDIT_OTLP_HEADERS",
+        valueFrom: { secretKeyRef: { name: "otlp-auth", key: "headers" } },
+      },
+    ]);
+    expect(audit(on, "kobe-scheduler")).toEqual([]);
+    expect(
+      audit(
+        render({
+          "auditForwarding.syslog.enabled": "true",
+          "auditForwarding.syslog.host": "h",
+          "auditForwarding.syslog.tls": "false",
+          "auditForwarding.syslog.port": "514",
+        }),
+        "kobe-server",
+      ),
+    ).toEqual([{ name: "KOBE_AUDIT_SYSLOG_URL", value: "tcp://h:514" }]);
+    expect(renderError({ "auditForwarding.syslog.enabled": "true" })).toMatch(/syslog.host/);
+    expect(renderError({ "auditForwarding.otlp.enabled": "true" })).toMatch(/otlp.endpoint/);
+  });
+
   it("runs the scheduler as the server image in scheduler mode", () => {
     const c = find(ms, "Deployment", "kobe-scheduler")?.spec.template.spec.containers[0];
     expect(c.image).toBe("ghcr.io/splittingatom/kobe-server:0.1.0");

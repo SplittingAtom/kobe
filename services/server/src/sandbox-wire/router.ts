@@ -1,4 +1,5 @@
 import { withTeam, type KobeDb, type SandboxCommandKind } from "@kobe/db";
+import { idAttributes, withSpan } from "@kobe/telemetry";
 import type { Logger } from "pino";
 import type { SandboxBus } from "./bus.js";
 import {
@@ -146,6 +147,35 @@ export class CommandRouter implements SandboxRouter {
     if (this.#closed) {
       return { ok: false, error: { code: "unavailable", message: "the server is shutting down" } };
     }
+    return withSpan(
+      "sandbox.command",
+      {
+        attributes: {
+          ...idAttributes({
+            teamId: target.teamId,
+            userId: target.userId,
+            threadId,
+            runId,
+          }),
+          "kobe.command.kind": kind,
+        },
+      },
+      async (span) => {
+        const outcome = await this.#sendQueued(target, kind, threadId, runId, options, frame);
+        span.setAttribute("kobe.outcome", outcome.ok ? "ok" : outcome.error.code);
+        return outcome;
+      },
+    );
+  }
+
+  async #sendQueued(
+    target: SandboxTarget,
+    kind: SandboxCommandKind,
+    threadId: string,
+    runId: string | undefined,
+    options: SendOptions | undefined,
+    frame: Record<string, unknown>,
+  ): Promise<CommandOutcome> {
     const timeoutMs = options?.timeoutMs ?? this.#tuning.commandTimeoutMs[kind];
     const queued = await enqueueCommand(this.#db, this.#bus, {
       target,

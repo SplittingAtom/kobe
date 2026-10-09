@@ -34,6 +34,8 @@
  *   and, after pushing the file through workspace sync, sends `file.share` (a small frame: no own size
  *   entry in the table above); the server answers `file.share_result` and refuses `file.share` from a
  *   connection that did not announce the capability.
+ *   `memory` ({@link CAPABILITY_MEMORY}, memory.ts): `memory.put` / `memory.read` / `memory.result` and
+ *   `run.start.memory`; same refusal rule.
  *
  * Leasing (normative)
  * - The server leases each run and thread to exactly one authenticated connection: the one whose

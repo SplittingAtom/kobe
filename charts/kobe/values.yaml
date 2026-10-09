@@ -193,6 +193,17 @@ mcpProxy:
 envelope:
   keySecret: ""
 
+# OpenTelemetry tracing (KOBE-10, spec D31) for the server, scheduler, MCP proxy, egress proxy and
+# model gateway. Off without an endpoint. Spans carry ids, names, durations, status codes and sizes
+# only; captureContent adds prompts, tool input/output and query strings (install-level opt-in).
+telemetry:
+  # OTLP/HTTP base URL of a collector or backend, e.g. http://otel-collector.observability:4318
+  # (Tempo, Langfuse, Phoenix: see docs/operations/tracing.md).
+  endpoint: ""
+  # Existing Secret with key `headers` (name=value,name=value) for hosted backends; optional.
+  headersSecret: ""
+  captureContent: false
+
 # Default-deny egress proxy (spec D28): sandboxes reach the internet only through it, HTTPS only,
 # to domains their team enabled within the install's egress ceiling (admin consoles).
 egressProxy:
@@ -370,3 +381,22 @@ clamav:
   resources:
     requests: { cpu: 100m, memory: 1Gi }
     limits: { cpu: "1", memory: 2Gi }
+
+# Optional forwarding of audit events to a SIEM (spec D31, KOBE-19), off by default. One server
+# replica forwards at a time; each destination keeps its own cursor, retries with backoff when it
+# fails, and shows its state in the install admin's audit health view. Forwarding starts at the
+# newest event when first enabled; use the export for history.
+auditForwarding:
+  # Syslog (RFC 5424) over TCP. With tls: true the collector's certificate must chain to a CA
+  # the server image trusts.
+  syslog:
+    enabled: false
+    host: ""
+    port: 6514
+    tls: true
+  # OTLP/HTTP logs (JSON). endpoint is the full logs URL, e.g. https://collector:4318/v1/logs.
+  # headersSecret names a Secret with key "headers": "Name=value,Name2=value2" (auth tokens).
+  otlp:
+    enabled: false
+    endpoint: ""
+    headersSecret: ""
