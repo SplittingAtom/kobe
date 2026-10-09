@@ -49,3 +49,21 @@ export const SHORT_TIMEOUT_POLICY_EXTENSION = path.join(
 export function fauxScript(steps: readonly Record<string, unknown>[]): string {
   return `faux:${JSON.stringify(steps)}`;
 }
+
+/** kobe-exec (KOBE-167), same rule as kobe-policy. */
+export const REAL_EXEC_EXTENSION =
+  process.env.KOBE_TEST_EXEC_EXTENSION ??
+  path.join(
+    PACKAGE,
+    process.env.CI === undefined ? "src/kobe-exec/index.ts" : "dist/kobe-exec/index.js",
+  );
+
+/**
+ * The executor program, as `node` runs it: only the compiled file exists (`pnpm build`; CI builds
+ * before testing). Tests that start executors are skipped without it.
+ */
+export const EXECUTOR_ENTRY = path.join(PACKAGE, "dist/exec/executor/main.js");
+export const EXECUTOR_BUILT = existsSync(EXECUTOR_ENTRY);
+if (process.env.CI !== undefined && !EXECUTOR_BUILT) {
+  throw new Error(`the tool executor is not built: ${EXECUTOR_ENTRY} (run pnpm build first)`);
+}

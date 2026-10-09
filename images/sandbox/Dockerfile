@@ -88,6 +88,13 @@ COPY --from=agent /out/dist/kobe-models/*.js /opt/kobe/pi-extensions/kobe-models
 # and its own files only. The env var turns it on (and the `artifacts` capability with it).
 COPY --from=agent /out/dist/kobe-tools/*.js /opt/kobe/pi-extensions/kobe-tools/
 ENV KOBE_TOOLS_EXTENSION=/opt/kobe/pi-extensions/kobe-tools/index.js
+# kobe-exec (KOBE-167): the Pi extension that replaces Pi's seven built-in tools with ones that run
+# in an executor process under the Pi identity's partner uid (the agent's dist/exec/executor, read
+# by those uids), over fd 5. Loaded right before kobe-policy; root-owned and read-only like it;
+# node builtins, Pi's own package and its own files only. KOBE_TOOL_EXECUTOR (the pod spec, from
+# the chart's sandbox.toolExecutor.enabled) switches the routing on or off per install.
+COPY --from=agent /out/dist/kobe-exec/*.js /opt/kobe/pi-extensions/kobe-exec/
+ENV KOBE_EXEC_EXTENSION=/opt/kobe/pi-extensions/kobe-exec/index.js
 # Egress for Pi's tools (KOBE-39): the BASH_ENV script that turns the agent's rotating egress
 # token file into HTTPS_PROXY for each bash tool call. Root-owned and read-only: it runs in every
 # tool's shell, so sandbox code must not be able to change it.
@@ -134,8 +141,8 @@ RUN groupadd --gid 1000 kobe \
  && chown -R 0:0 /opt/kobe/pi-extensions /opt/kobe/skills \
  && find /opt/kobe/skills -type d -exec chmod 0555 {} + \
  && find /opt/kobe/skills -type f -exec chmod 0444 {} + \
- && chmod 0444 /opt/kobe/pi-extensions/kobe-policy/*.js /opt/kobe/pi-extensions/kobe-models/*.js /opt/kobe/pi-extensions/kobe-tools/*.js \
- && chmod 0555 /opt/kobe/pi-extensions /opt/kobe/pi-extensions/kobe-policy /opt/kobe/pi-extensions/kobe-models /opt/kobe/pi-extensions/kobe-tools \
+ && chmod 0444 /opt/kobe/pi-extensions/kobe-policy/*.js /opt/kobe/pi-extensions/kobe-models/*.js /opt/kobe/pi-extensions/kobe-tools/*.js /opt/kobe/pi-extensions/kobe-exec/*.js \
+ && chmod 0555 /opt/kobe/pi-extensions /opt/kobe/pi-extensions/kobe-policy /opt/kobe/pi-extensions/kobe-models /opt/kobe/pi-extensions/kobe-tools /opt/kobe/pi-extensions/kobe-exec \
  && chown kobe:kobe /workspace \
  && find / -xdev -perm /6000 -type f -exec chmod a-s {} + \
  && chown 0:1001 /opt/kobe/bin/kobe-runas && chmod 0750 /opt/kobe/bin/kobe-runas \

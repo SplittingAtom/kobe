@@ -83,6 +83,13 @@ sandbox:
     maxFiles: 100000
     # How often each server replica collects unreferenced content and old deletion markers.
     collectSeconds: 3600
+  # Run Pi's built-in tools (bash, read, write, edit, ls, grep, find) in an executor process under a
+  # uid of their own, the partner of the thread's Pi uid (KOBE-167, docs/design/paired-tool-uid.md):
+  # a tool then cannot read or signal Pi, read the model-gateway tokens in Pi's memory and model
+  # file, or write Pi's config directory. Off until the rollout (KOBE-168) turns it on; sandboxes
+  # started before the change keep running the tools in Pi.
+  toolExecutor:
+    enabled: false
   # Pre-publish Orbit evals (KOBE-93): when a team turns the gate on, Publish runs the kobe-orbit-eval
   # image as a Job in the team namespace, under the same isolation as sandboxes (gVisor/Kata, no
   # service account token, a NetworkPolicy that reaches only the model gateway).

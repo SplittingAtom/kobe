@@ -29,6 +29,7 @@ import type { BackoffPolicy } from "./wire/backoff.js";
 import type { EgressWiring } from "./egress/egress-wiring.js";
 import type { ModelWiring } from "./models/types.js";
 import type { PiIdentities } from "./pi/identities.js";
+import type { ExecWiring } from "./threads/exec-wiring.js";
 
 /**
  * kobe-sandbox-agent: glues the outbound wire (WireClient), per-run delivery (Outbox), the Pi
@@ -65,6 +66,11 @@ export interface AgentDeps {
    * the fd-4 channel and the agent announces the `artifacts` capability.
    */
   readonly toolsExtension?: string | undefined;
+  /**
+   * The tool executor (KOBE-167): the root-owned kobe-exec extension file and where the executor
+   * program lives. Present: every Pi's built-in tools run in an executor under its partner uid.
+   */
+  readonly exec?: { readonly extension: string; readonly wiring: ExecWiring } | undefined;
   /** Skills store (KOBE-82); absent: runs that list skills fail instead of starting without them. */
   readonly skills?: SkillStore;
 }
@@ -129,6 +135,8 @@ export class Agent {
       egress: deps.egress,
       policyExtension: config.policyExtension,
       toolsExtension: deps.toolsExtension,
+      exec: deps.exec?.wiring,
+      execExtension: deps.exec?.extension,
       shareFiles: this.#filesEnabled(),
       ...(deps.extensions === undefined ? {} : { extensions: deps.extensions }),
       ...(deps.policyReadyTimeoutMs === undefined

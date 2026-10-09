@@ -25,8 +25,8 @@ export const PI_UID_MAX = 2063;
  * with the uid `P + PARTNER_UID_OFFSET` in [{@link PARTNER_UID_MIN}, {@link PARTNER_UID_MAX}]
  * (uid = gid, groups {gid, workspace group}). The pair is allocated and reclaimed as one: a
  * partner uid is never in use without its Pi's identity being held, and the identity goes back
- * to the pool only after both uids have no process left. Nothing runs as a partner uid yet (the
- * tool executor, KOBE-167); the pool, the helper and the reclaim are ready for it.
+ * to the pool only after both uids have no process left. The tool executor (KOBE-167,
+ * exec/) is the one process that runs as a partner uid, with everything the tools start.
  */
 export const PARTNER_UID_OFFSET = 1000;
 export const PARTNER_UID_MIN = PI_UID_MIN + PARTNER_UID_OFFSET;
@@ -175,8 +175,7 @@ export class PiIdentities {
 
   /**
    * Like {@link command}, as the identity's partner (tool) uid. The helper keeps only stdio for
-   * it (fd 0-2): the executor (KOBE-167) talks to the agent's relay over them. Nothing calls
-   * this yet.
+   * it (fd 0-2): the executor (KOBE-167) talks to the agent's relay over them.
    */
   partnerCommand(
     identity: PiIdentity,
@@ -206,6 +205,27 @@ export class PiIdentities {
         if (code !== 0) failures.push(`kill-all as ${target.uid} failed: ${stderr}`);
       }
       if (failures.length > 0) throw new PiIdentityError(failures.join("; "));
+    });
+    const settled = next.catch(() => undefined);
+    this.#killing.set(identity.uid, settled);
+    void settled.then(() => {
+      if (this.#killing.get(identity.uid) === settled) this.#killing.delete(identity.uid);
+    });
+    return next;
+  }
+
+  /**
+   * SIGKILL every process of the identity's partner (tool) uid only: the executor and what it
+   * started, when the executor died or is being replaced while the Pi lives on (KOBE-167).
+   * Serialised with {@link killAll} of the same identity.
+   */
+  killPartner(identity: PiIdentity): Promise<void> {
+    if (!this.paired) return Promise.reject(new PiIdentityError("no partner uid without pairs"));
+    const previous = this.#killing.get(identity.uid) ?? Promise.resolve();
+    const next = previous.then(async () => {
+      const target = partnerOf(identity);
+      const { code, stderr } = await this.#run(this.helper, [String(target.uid), "--kill-all"]);
+      if (code !== 0) throw new PiIdentityError(`kill-all as ${target.uid} failed: ${stderr}`);
     });
     const settled = next.catch(() => undefined);
     this.#killing.set(identity.uid, settled);

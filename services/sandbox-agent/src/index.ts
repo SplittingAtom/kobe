@@ -1,6 +1,8 @@
-import { mkdir, readFile, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { access, mkdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import { Agent } from "./agent.js";
+import { fileURLToPath } from "node:url";
+import { Agent, type AgentDeps } from "./agent.js";
 import { loadConfig, type Config } from "./config.js";
 import { hardenProcess } from "./harden.js";
 import { logger } from "./logger.js";
@@ -44,6 +46,8 @@ async function main(): Promise<void> {
   // Pi identities first: they decide how the runtime directories are laid out, and an agent that
   // was asked for them but cannot provide them must not start Pi under the agent's uid instead.
   const identities = await piIdentities(checked);
+  // The tool executor (KOBE-167) needs the pairs from the pod spec: decided right after.
+  const exec = await toolExecutor(checked, identities);
   // Pi's private runtime directories live here: leftovers of an earlier agent (a pod restart)
   // are swept first, so no stale token outlives its process; the version probe gets its own dir.
   const swept = await sweepRuntimeDir(checked.piRuntimeDir, { identities });
@@ -135,6 +139,7 @@ async function main(): Promise<void> {
     models,
     egress,
     toolsExtension: checked.toolsExtension,
+    exec,
     onExit: (code) => process.exit(code),
   });
   process.on("exit", () => agent.killAll());
@@ -143,6 +148,51 @@ async function main(): Promise<void> {
   }
   agent.start();
   workspace?.start();
+}
+
+/**
+ * The tool executor (KOBE-167), when switched on (`KOBE_TOOL_EXECUTOR`, default on) and the image
+ * has the kobe-exec extension (`KOBE_EXEC_EXTENSION`): every Pi's built-in tools then run in an
+ * executor under its partner uid. Fails closed: asked for under Pi identities without the partner
+ * groups (a pod spec from before KOBE-166), the agent does not start rather than quietly run the
+ * tools in Pi; the extension is held to the same root-owned check as the others.
+ */
+async function toolExecutor(
+  config: Config,
+  identities: PiIdentities | undefined,
+): Promise<AgentDeps["exec"]> {
+  if (!config.toolExecutor) {
+    logger.warn("KOBE_TOOL_EXECUTOR is off: Pi runs its tools in its own process and uid");
+    return undefined;
+  }
+  if (config.execExtension === undefined) {
+    // In Kobe's pods the server asked for it: an image that cannot provide it must not run quietly
+    // without (skew between the server and the sandbox image).
+    if (config.bootstrapTokenFile !== undefined) {
+      throw new Error(
+        "KOBE_TOOL_EXECUTOR is on but this image has no kobe-exec extension (KOBE_EXEC_EXTENSION): " +
+          "refusing to run the tools in Pi (set KOBE_TOOL_EXECUTOR=false to allow it)",
+      );
+    }
+    logger.warn("KOBE_EXEC_EXTENSION not set: Pi runs its tools in its own process and uid");
+    return undefined;
+  }
+  if (identities !== undefined && !identities.paired) {
+    throw new Error(
+      "KOBE_TOOL_EXECUTOR is on but the pod gives the agent no partner (tool) uid groups " +
+        "3000-3063: refusing to run the tools in Pi (set KOBE_TOOL_EXECUTOR=false to allow it)",
+    );
+  }
+  const extension = await checkExtensionFile(config.execExtension, "kobe-exec");
+  const executorEntry = fileURLToPath(new URL("./exec/executor/main.js", import.meta.url));
+  await access(executorEntry, constants.R_OK).catch(() => {
+    throw new Error(`tool executor program not found: ${executorEntry}`);
+  });
+  logger.info(
+    { partnerUids: identities?.paired === true },
+    "Pi's tools run in an executor under the partner uid",
+  );
+  return { extension, wiring: { executorEntry, nodeBin: process.execPath } };
 }
 
 /**
