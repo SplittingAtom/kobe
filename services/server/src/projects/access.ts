@@ -67,8 +67,6 @@ export const teamRoleFor = teamRoleOf;
 
 /**
  * Active-team projects `userId` is a member of (explicitly, or implicitly in mode `team`).
- * TODO(KOBE-155, PR #146 not merged yet): the memory service's project-scope seam should call
- * `loadAccess` (`can.use` to read, `can.manage` to edit) instead of its own membership stub.
  */
 export async function memberProjectIds(
   tx: KobeTx,

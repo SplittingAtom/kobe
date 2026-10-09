@@ -38,7 +38,7 @@ Server only: `projects/{access,repository,run-context,slug}.ts`, `routes/project
   = `can.use` and not archived. Search/list/artifacts/pending already took `projectIds`.
 - **Audit** (`project.*`, `docs/audit-log.md`): ids, mode, role, changed field names; never name,
   description or instructions.
-- **Memory seam (KOBE-155, PR #146):** not merged; TODO in `projects/access.ts` to use `loadAccess`.
+- **Memory seam (KOBE-155):** `memory/access.ts` `canAccessProject` = `loadAccess` with a role (members only; a non-member team admin and a missing project both 404). Test in `memory.db.test.ts`.
 
 ## Open questions (for Chris or the coordinator)
 
