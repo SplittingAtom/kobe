@@ -104,7 +104,7 @@ describe("message with file_ids", () => {
         deleted: false,
       },
     ]);
-    expect(objects.objects.get(rows[0]!.blob_key)?.toString()).toBe("a,b\n1,2\n");
+    expect(objects.objects.get(must(rows[0]).blob_key)?.toString()).toBe("a,b\n1,2\n");
 
     // Attached to the thread and run, object moved into the thread's own tree, old one gone.
     const threadKey = `${PREFIX}teams/${w.team}/threads/${threadId}/uploads/${id}`;

@@ -101,7 +101,6 @@ export function runsOpenApiPaths(): Record<string, Record<string, unknown>> {
         requestBody: body("SubmitMessageBody"),
         responses: {
           "201": json("SubmitMessageResult", "The run, and whether it waits in the queue."),
-          "403": json("Error", "`quota_exceeded`: the team has no storage left for the files."),
           "404": json(
             "Error",
             "`thread_not_found`, `entry_not_found` or `file_not_found` (unknown, someone else's " +
@@ -113,7 +112,7 @@ export function runsOpenApiPaths(): Record<string, Record<string, unknown>> {
           ),
           "413": json(
             "Error",
-            "`message_too_large`: the files add up to more than one message may.",
+            "`message_too_large`: the files add up to more than one message may (403 `quota_exceeded`: no storage left).",
           ),
           "422": json("Error", "`attachments_unavailable`: this install has no workspace storage."),
           "429": json("Error", "`budget_exhausted`: no new runs at 100 % of a budget (D30)."),
