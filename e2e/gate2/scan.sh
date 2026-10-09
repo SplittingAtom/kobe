@@ -91,7 +91,7 @@ find $roots -xdev -type f -size -2048k -not -path "/var/lib/apt/*" -not -path "/
 # - Library documentation and tests inside the image, by exact path (seen in the first CI runs):
 #   pino's docs/transports.md (an example URL), zod's test files (example URLs and the jwt.io sample
 #   token for "John Doe"). Nothing else under node_modules is excluded.
-FIXTURE_RE='fs/opt/kobe/sandbox-agent/node_modules/\.pnpm/(pino@[0-9.]+/node_modules/pino/docs/transports\.md|zod@[0-9.]+/node_modules/zod/src/[a-z0-9/]*tests/[a-z-]+\.test\.ts):'
+FIXTURE_RE='fs/tmp/node-compile-cache/[^:]*:|fs/opt/kobe/sandbox-agent/node_modules/\.pnpm/(pino@[0-9.]+/node_modules/pino/docs/transports\.md|zod@[0-9.]+/node_modules/zod/src/[a-z0-9/]*tests/[a-z-]+\.test\.ts):'
 generic_unexpected() { # pattern name; "file:match" lines on stdin → those not allowed above
   grep -a -v -E "$FIXTURE_RE" | generic_unexpected_by_kind "$1"
 }

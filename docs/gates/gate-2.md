@@ -169,7 +169,7 @@ env output" is accepted LOW in `docs/ledger/KOBE-39.md`); the template in
 exactly `kobe.sandbox-bootstrap` and its subject is a ServiceAccount of this team namespace (the
 API server rejects that audience; any API-audience token would FAIL); and three library files
 inside the image by exact path (pino's `docs/transports.md`, zod's `tests/*.test.ts`: example URLs
-and the jwt.io sample token).
+and the jwt.io sample token), and Node's compiled-code cache in `/tmp/node-compile-cache` (bytecode of those same libraries, matched only by the generic URL shape; the exact-value scan still covers it).
 
 | Check                                                            | What it proves                                                       |
 | ---------------------------------------------------------------- | -------------------------------------------------------------------- |
