@@ -8,6 +8,9 @@ import { TestBrowser, type TestResponse } from "./browser.js";
 import { EventStreamFixture, PUBLIC_URL, must, type Person } from "./event-stream-fixture.js";
 import { FakeSandbox, FakeSandboxAuth, isFake, sandboxListener } from "./fake-sandbox.js";
 
+/** Condition waits are bounded below the 30 s test timeout and sized for a loaded 2-CPU CI runner. */
+const WAIT_MS = 25_000;
+
 /**
  * Run orchestrator (KOBE-30) test world: two server replicas on one throwaway database, each with
  * a sandbox listener, and scripted sandboxes ("workspaces") that answer like Pi: per-thread session
@@ -90,7 +93,7 @@ export class FakeWorkspace {
     return this.sb.frames("run.start");
   }
 
-  async started(runId: string, timeoutMs = 10_000): Promise<RunStart> {
+  async started(runId: string, timeoutMs = WAIT_MS): Promise<RunStart> {
     return this.sb.until(() => this.starts().find((f) => f.run_id === runId), timeoutMs);
   }
 
@@ -336,7 +339,7 @@ export class RunFixture {
   }
 
   /** Waits (polling) until the run has `status`. */
-  async until(team: string, runId: string, status: string, timeout = 10_000): Promise<void> {
+  async until(team: string, runId: string, status: string, timeout = WAIT_MS): Promise<void> {
     await expect.poll(() => this.status(team, runId), { timeout, interval: 25 }).toBe(status);
   }
 }

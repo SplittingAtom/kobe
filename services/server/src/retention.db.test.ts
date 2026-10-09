@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { strFromU8, unzipSync } from "fflate";
 import type { PoolClient } from "pg";
 import pino from "pino";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { runWithAuditContext } from "./audit/context.js";
 import {
   RetentionJob,
@@ -244,6 +244,26 @@ beforeEach(async () => {
   objects.objects.clear();
   objects.deleted.length = 0;
   h.mailer.sent.length = 0;
+});
+
+/**
+ * A tick whose lock connection failed releases it as broken: the pool closes the socket without
+ * waiting, so the backend (and its session advisory lock) can outlive the tick by a moment. Wait
+ * until none is held, so the next test never sees "busy" from a predecessor.
+ */
+afterEach(async () => {
+  await expect
+    .poll(
+      async () =>
+        (
+          await h.admin.query<{ n: string }>(
+            `SELECT count(*) AS n FROM pg_locks
+             WHERE locktype = 'advisory' AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`,
+          )
+        ).rows[0]?.n,
+      { timeout: 10_000 },
+    )
+    .toBe("0");
 });
 
 describe("retention settings (D6, D8; 7-day grace: user decision 2026-10-04)", () => {
