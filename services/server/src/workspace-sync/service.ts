@@ -5,7 +5,13 @@ import type { SandboxAuthenticator } from "./auth.js";
 import { collectAll, collectWorkspace, type CollectOptions, type CollectResult } from "./gc.js";
 import { sharedKey, type WorkspaceOwner } from "./keys.js";
 import type { ObjectStore } from "./object-store.js";
-import { limitsQuota, resolveLimits, type QuotaCheck, type WorkspaceLimits } from "./quota.js";
+import {
+  limitsQuota,
+  resolveLimits,
+  withTeamStorage,
+  type QuotaCheck,
+  type WorkspaceLimits,
+} from "./quota.js";
 import { workspaceRoutes, type WorkspaceRoutesDeps } from "./routes.js";
 import {
   currentEntry,
@@ -24,6 +30,11 @@ export interface WorkspaceSyncOptions {
   readonly limits: WorkspaceLimits;
   /** KOBE-53 seam: D26's per-team quota. Default: {@link limitsQuota}. */
   readonly quota?: QuotaCheck;
+  /**
+   * KOBE-185: when set, the default check also enforces the team storage quota (the same one
+   * uploads use, with this install default) under the team's storage lock. Ignored with `quota`.
+   */
+  readonly teamStorageDefaultBytes?: number;
   readonly collect?: Partial<Omit<CollectOptions, "prefix">>;
   readonly log: Pick<Logger, "error" | "warn" | "info">;
   /** Overrides of the routes' database caps and timeouts (tests). */
@@ -92,7 +103,11 @@ export interface WorkspaceSync {
 
 export function createWorkspaceSync(options: WorkspaceSyncOptions): WorkspaceSync {
   const { db, objects, prefix, limits, log } = options;
-  const quota = options.quota ?? limitsQuota(limits);
+  const quota =
+    options.quota ??
+    (options.teamStorageDefaultBytes === undefined
+      ? limitsQuota(limits)
+      : withTeamStorage(limitsQuota(limits), options.teamStorageDefaultBytes));
   const collectOptions: CollectOptions = { ...COLLECT_DEFAULTS, ...options.collect, prefix };
   const collect = () => collectAll(db, objects, collectOptions, log);
   const maxRows = resolveLimits(limits).maxRows;

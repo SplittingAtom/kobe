@@ -292,6 +292,7 @@ const workspaceSync =
           ),
           maxFiles: syncSettings.maxFiles,
         },
+        teamStorageDefaultBytes: uploadSettings.defaultQuotaBytes,
         log: logger,
       })
     : undefined;

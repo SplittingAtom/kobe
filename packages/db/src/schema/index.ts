@@ -34,3 +34,4 @@ export * from "./run-tokens.js";
 export * from "./files.js";
 export * from "./memory.js";
 export * from "./projects.js";
+export * from "./connector-grants.js";
