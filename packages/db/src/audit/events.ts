@@ -964,6 +964,17 @@ export const AUDIT_EVENTS = {
     added: z.array(z.string().max(128)).max(500),
     removed: z.array(z.string().max(128)).max(500),
   }),
+  /**
+   * A recipient was handled for one drift event (KOBE-103): `driftSeq` is the `mcp.connector.drift`
+   * row. `emailed: false` when the per-connector, per-recipient rate limit suppressed the email.
+   * Ids and counts only: no address, no tool names. Also the dedupe and rate-limit record.
+   */
+  "mcp.connector.drift_notified": event("install", {
+    connectorId: id,
+    driftSeq: z.number().int().positive(),
+    recipientId: id,
+    emailed: z.boolean(),
+  }),
   /** An install admin re-approved drifted tools (KOBE-102); they are offered again. */
   "mcp.connector.reapproved": event("install", {
     connectorId: id,
