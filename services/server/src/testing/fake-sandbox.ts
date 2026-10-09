@@ -13,6 +13,9 @@ import WebSocket from "ws";
 import type { SandboxLiveness, SessionTokenVerifier } from "../sandbox-wire/types.js";
 import type { ServerDeps } from "../deps.js";
 
+/** Condition waits are bounded below the 30 s test timeout and sized for a loaded 2-CPU CI runner. */
+const WAIT_MS = 25_000;
+
 /**
  * Test doubles for the sandbox side of the wire: a token "issuer" (opaque tokens mapped to claims;
  * KOBE-22's JWS verifier plugs in the same way), a liveness switch, a sandbox listener per replica,
@@ -229,7 +232,7 @@ export class FakeSandbox {
   }
 
   /** Waits until `predicate` holds over the received frames (or the socket closes). */
-  async until<T>(predicate: () => T | undefined | false, timeoutMs = 10_000): Promise<T> {
+  async until<T>(predicate: () => T | undefined | false, timeoutMs = WAIT_MS): Promise<T> {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       const value = predicate();
@@ -261,7 +264,7 @@ export class FakeSandbox {
     return this.until(() => this.frames("hello.ack")[0]);
   }
 
-  async waitClosed(timeoutMs = 10_000): Promise<Closed> {
+  async waitClosed(timeoutMs = WAIT_MS): Promise<Closed> {
     return this.until(() => this.closed, timeoutMs);
   }
 
