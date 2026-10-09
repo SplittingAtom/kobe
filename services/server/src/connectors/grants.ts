@@ -93,7 +93,10 @@ export async function putGrant(
   subject: Subject,
   apiKey: string,
 ): Promise<PutOutcome> {
-  const sealed = envelope.seal(apiKey, grantContext(subject.teamId, subject.userId, subject.connectorId));
+  const sealed = envelope.seal(
+    apiKey,
+    grantContext(subject.teamId, subject.userId, subject.connectorId),
+  );
   const values = {
     teamId: subject.teamId,
     userId: subject.userId,
@@ -134,7 +137,7 @@ export async function putGrant(
     if (!grant) throw new Error("grant upsert returned nothing");
     const replaced = existing !== undefined;
     await recordAudit(tx, {
-      action: replaced ? "connector.grant.replaced" : "connector.grant.added",
+      action: replaced ? "mcp.grant.replaced" : "mcp.grant.added",
       teamId: subject.teamId,
       target: { connectorId: subject.connectorId, name: connector.name },
     });
@@ -161,7 +164,7 @@ export function removeGrant(db: KobeDb, subject: Subject): Promise<boolean> {
       .from(connectors)
       .where(eq(connectors.id, subject.connectorId));
     await recordAudit(tx, {
-      action: "connector.grant.removed",
+      action: "mcp.grant.removed",
       teamId: subject.teamId,
       target: { connectorId: subject.connectorId, name: connector?.name ?? "unknown" },
     });

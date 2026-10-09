@@ -71,10 +71,7 @@ export function connectorGrantRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
     if (!result.ok) {
       return result.failure === "not_available"
         ? notAvailable(c)
-        : c.json(
-            { code: "not_api_key", message: "That connector does not use an API key." },
-            422,
-          );
+        : c.json({ code: "not_api_key", message: "That connector does not use an API key." }, 422);
     }
     // The key can now pin a connector no admin could probe (it needs a credential): only while it
     // has no pins, and a failed probe never fails the save.
@@ -93,7 +90,9 @@ export function connectorGrantRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
       userId: c.get("user").id,
       connectorId: id.data,
     });
-    return removed ? c.body(null, 204) : c.json({ code: "not_found", message: "No key stored." }, 404);
+    return removed
+      ? c.body(null, 204)
+      : c.json({ code: "not_found", message: "No key stored." }, 404);
   });
 
   return app;

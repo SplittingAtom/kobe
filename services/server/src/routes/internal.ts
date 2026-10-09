@@ -115,7 +115,10 @@ export function createInternalApp(deps: InternalAppDeps): Hono {
     const revealed = await deps.mcp.revealCredential(auth.principal, id.data);
     if (revealed.ok) return c.json({ kind: "api_key", api_key: revealed.apiKey });
     if (revealed.failure === "not_available") {
-      return c.json({ code: "connector_not_available", message: "Not enabled for this team." }, 404);
+      return c.json(
+        { code: "connector_not_available", message: "Not enabled for this team." },
+        404,
+      );
     }
     if (revealed.failure === "not_connected") {
       return c.json({ code: "not_connected", message: "No key stored." }, 404);
