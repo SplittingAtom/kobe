@@ -287,7 +287,8 @@ describe("hostile archives", () => {
     }
     expect(huge.length).toBeLessThan(120_000);
     expect(failure(huge)).toBe("invalid_zip");
-  });
+    // CPU-bound (~1 s alone: 60 MB inflate); on a loaded runner it passed 5 s (KOBE-139 ledger).
+  }, 30_000);
 
   it("enforces the bundle-wide uncompressed budget while inflating", () => {
     const two = zipSync({

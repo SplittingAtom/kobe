@@ -43,13 +43,20 @@ Read other code and ledgers only as needed; prefer grep over reading whole files
 <Anything the brief lacks: dependencies that just merged, a binding decision, files to start from.>
 
 Rules: tests first; notes in docs/ledger/KOBE-<N>.md (template; stay under ~150 lines, link
-evidence instead of pasting logs). Before pushing run `pnpm verify`. Open a PR, then wait for CI
-with one background `gh pr checks <n> --watch` (no polling loops); fix failures. Don't merge, don't
+evidence instead of pasting logs). Before pushing run `pnpm verify` (it formats, so commit after
+it). Open a PR, then wait for CI with exactly one background `gh pr checks <n> --watch`; never
+write until/while loops around pgrep or sleep (they outlive you and never exit). Fix failures.
+Skip packages/db/drizzle/meta/*_snapshot.json when reading diffs: generated. Don't merge, don't
 touch Hadron.
 
 No interim status messages: report once, when CI has finished.
-Final report, at most 150 words: PR number, CI status, criteria met (ac-1 ...), open questions.
+Final report, at most 150 words: PR number, CI status, criteria met (ac-1 ...), open questions,
+and your token use (input/output) for `scripts/hadron.sh cost`.
 ```
+
+A ticket that adds a migration lands it first in its own small PR (schema, migration, RLS policy,
+probe fixtures, nothing else), then the feature PR follows without a snapshot in its diff. Two
+agents can then work on a migration ticket's feature half while the next migration goes through.
 
 ## Review, sized by risk
 
@@ -60,14 +67,16 @@ Final report, at most 150 words: PR number, CI status, criteria met (ac-1 ...), 
 | Docs, CI config, chart values only                                          | Coordinator reads the diff               |
 
 One review pass per PR with a combined checklist; send findings back to the same agent
-(`SendMessage`) rather than starting a new one, so it keeps its context.
+(`SendMessage`) rather than starting a new one, so it keeps its context. Reviewers read the `.sql`
+migrations and the journal, never `drizzle/meta/*_snapshot.json` (generated, 10k+ lines each).
 
 ## After merge
 
 ```bash
 scripts/hadron.sh close <N> <pr>         # complete -> done (refuses gate tickets KOBE-1..4)
-scripts/hadron.sh cost <N> <in> <out> <dollars> <model>
+scripts/hadron.sh cost <N> <in> <out> <dollars> <model>   # from the agent's report; not optional
 git worktree remove ../Kobe-wt<N>
+ps -Ao pid,etime,command | grep shell-snapshots   # kill any wait loop the agent left behind
 ```
 
 Start a fresh coordinator session per wave; `docs/RUN-LEDGER.md` is the handoff.

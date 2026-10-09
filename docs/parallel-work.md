@@ -26,8 +26,10 @@ Keep a ticket ledger under ~150 lines: decisions and links to evidence, not past
 The coordinator starts each ticket agent with a generated `BRIEF.md` in the worktree
 (`scripts/hadron.sh brief <N>`) and the prompt in [agent-prompt.md](agent-prompt.md), which also
 sets the model per job and the review level per diff. Ticket agents read the brief instead of the
-whole spec and other ledgers, run `pnpm verify` before pushing, wait for CI with one background
-`gh pr checks <n> --watch` instead of polling, and end with a report of at most 150 words.
+whole spec and other ledgers, run `pnpm verify` before pushing (it formats and, with
+`KOBE_TEST_DATABASE_URL` set, runs the DB tests), wait for CI with exactly one background
+`gh pr checks <n> --watch` (never a loop around `pgrep` or `sleep`), and end with a report of at
+most 150 words that states their token use.
 
 ## Shared files
 
@@ -52,7 +54,10 @@ every merge: a stale or duplicate line only shows up there.
 
 Drizzle numbers migrations and chains their snapshots, so two branches that both add a migration
 always conflict (two `0004_*`, the journal, the snapshot chain). Never resolve those conflicts by
-hand. When `main` has moved on and your branch has migrations:
+hand. Land a ticket's migration in its own small PR first (schema, migration, RLS policy, probe
+fixtures), then the feature PR without a snapshot in its diff. `drizzle/meta/*_snapshot.json` is
+marked generated in `.gitattributes`: collapsed on GitHub, skipped in review. When `main` has moved
+on and your branch has migrations:
 
 ```bash
 git fetch origin
