@@ -63,7 +63,7 @@ export function threadKey(prefix: string, teamId: string, threadId: string, key:
 /** Longest one batch's object delete may take while the hold lock is held. */
 const DELETE_TIMEOUT_MS = 30_000;
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(`object store delete timed out after ${ms} ms`)), ms);

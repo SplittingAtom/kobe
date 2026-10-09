@@ -1,6 +1,6 @@
 import { duplexPair } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { connectTools, registerKobeTools } from "./extension.js";
+import { connectTools, filesEnabled, registerKobeTools } from "./extension.js";
 import type { ToolDefinitionLike } from "./tools.js";
 
 describe("connectTools", () => {
@@ -58,9 +58,31 @@ describe("registerKobeTools", () => {
     ours.destroy();
   });
 
+  it("registers share_file only when the agent enabled files", () => {
+    const [ours] = duplexPair();
+    const transport = connectTools({ env: { KOBE_TOOLS_FD: "4" }, openChannel: () => ours });
+    const names: string[] = [];
+    registerKobeTools({ registerTool: (t: ToolDefinitionLike) => names.push(t.name) }, transport, {
+      files: true,
+    });
+    expect(names).toEqual(["create_artifact", "update_artifact", "share_file"]);
+    ours.destroy();
+  });
+
   it("registers nothing without a transport", () => {
     const names: string[] = [];
     registerKobeTools({ registerTool: (t: ToolDefinitionLike) => names.push(t.name) }, undefined);
     expect(names).toEqual([]);
+  });
+});
+
+describe("filesEnabled", () => {
+  it("is true only for 1, and removes the variable so tools Pi spawns never see it", () => {
+    const env: Record<string, string | undefined> = { KOBE_TOOLS_FILES: "1" };
+    expect(filesEnabled(env)).toBe(true);
+    expect(env.KOBE_TOOLS_FILES).toBeUndefined();
+    for (const value of [undefined, "", "0", "true", "11"]) {
+      expect(filesEnabled({ KOBE_TOOLS_FILES: value })).toBe(false);
+    }
   });
 });

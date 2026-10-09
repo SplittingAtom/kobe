@@ -5,6 +5,11 @@ import {
   KOBE_TOOLS_FD,
   KOBE_TOOLS_TIMEOUT_MS,
   CAPABILITY_ARTIFACTS,
+  CAPABILITY_FILES,
+  FILE_SHARE_DESCRIPTION_MAX,
+  FILE_SHARE_PATH_MAX,
+  UPLOAD_FILE_NAME_MAX,
+  shareFileInputSchema,
 } from "@kobe/protocol";
 import { describe, expect, it } from "vitest";
 import { frameSizeProblem } from "./frame-size.js";
@@ -13,11 +18,16 @@ import {
   MAX_FRAME_BYTES,
   MAX_TITLE_LENGTH,
   OP_ARTIFACT_PUT,
+  OP_FILE_SHARE,
+  SHARE_DESCRIPTION_MAX,
+  SHARE_NAME_MAX,
+  SHARE_PATH_MAX,
+  TOOL_SHARE_FILE,
   TOOLS_FD,
   TOOLS_TIMEOUT_MS,
   type ToolsRequest,
 } from "./protocol.js";
-import { artifactTools, type ToolsTransport } from "./tools.js";
+import { artifactTools, shareFileTool, type ToolsTransport } from "./tools.js";
 import type { ToolsOutcome } from "./client.js";
 
 function transport(outcome: ToolsOutcome) {
@@ -50,6 +60,76 @@ describe("kobe-tools constants mirror the protocol", () => {
     expect(OP_ARTIFACT_PUT).toBe("artifact.put");
     expect(CAPABILITY_ARTIFACTS).toBe("artifacts");
     expect(artifactTools(transport(OK).t).map((x) => x.name)).toEqual([...ARTIFACT_TOOLS]);
+  });
+});
+
+describe("share_file", () => {
+  const FILE: ToolsOutcome = {
+    ok: true,
+    file_id: "11111111-1111-4111-8111-111111111111",
+    name: "report.csv",
+    mime_type: "text/csv",
+    size_bytes: 8,
+    scan: "clean",
+    created_at: "2026-10-09T10:00:00.000Z",
+    sha256: "a".repeat(64),
+  };
+
+  it("mirrors the protocol's constants", () => {
+    expect(OP_FILE_SHARE).toBe("file.share");
+    expect(TOOL_SHARE_FILE).toBe("share_file");
+    expect(CAPABILITY_FILES).toBe("files");
+    expect(SHARE_PATH_MAX).toBe(FILE_SHARE_PATH_MAX);
+    expect(SHARE_DESCRIPTION_MAX).toBe(FILE_SHARE_DESCRIPTION_MAX);
+    expect(SHARE_NAME_MAX).toBe(UPLOAD_FILE_NAME_MAX);
+  });
+
+  it("sends file.share with the tool call id and returns the file record", async () => {
+    const { t, calls } = transport(FILE);
+    const input = { path: "out/report.csv", name: "r.csv", description: "Q3" };
+    const result = await shareFileTool(t).execute("call_7", input);
+    expect(calls).toEqual([
+      { op: "file.share", tool_call_id: "call_7", tool: "share_file", input },
+    ]);
+    const { ok: _ok, ...record } = FILE as unknown as Record<string, unknown>;
+    expect(JSON.parse(result.content[0]?.text ?? "")).toEqual(record);
+    expect(result.details).toEqual(record);
+  });
+
+  it("turns a server error into a tool error", async () => {
+    const { t } = transport({ ok: false, error: { code: "not_synced", message: "push failed" } });
+    await expect(shareFileTool(t).execute("c", { path: "a" })).rejects.toThrow(
+      "not_synced: push failed",
+    );
+  });
+
+  it.each([
+    ["a non-object", "nope"],
+    ["no path", {}],
+    ["a numeric path", { path: 1 }],
+    ["an empty path", { path: "" }],
+    ["a long path", { path: "x".repeat(SHARE_PATH_MAX + 1) }],
+    ["a long description", { path: "a", description: "x".repeat(SHARE_DESCRIPTION_MAX + 1) }],
+    ["a long name", { path: "a", name: "x".repeat(SHARE_NAME_MAX + 1) }],
+    ["an extra key", { path: "a", extra: 1 }],
+  ])("refuses %s without sending", async (_n, input) => {
+    const { t, calls } = transport(FILE);
+    await expect(shareFileTool(t).execute("c", input)).rejects.toThrow();
+    expect(calls).toEqual([]);
+  });
+
+  it("refuses an answer that is not a file record", async () => {
+    const { t } = transport(OK);
+    await expect(shareFileTool(t).execute("c", { path: "a" })).rejects.toThrow(/unexpected/);
+  });
+
+  it("declares a strict schema that accepts exactly what the protocol accepts", () => {
+    expect(shareFileTool(transport(FILE).t).parameters).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      required: ["path"],
+    });
+    expect(shareFileInputSchema.safeParse({ path: "a" }).success).toBe(true);
   });
 });
 

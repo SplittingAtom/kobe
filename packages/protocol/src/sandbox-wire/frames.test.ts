@@ -324,6 +324,13 @@ describe("server → sandbox frames", () => {
       { ...serverFrames["pi.command"], command: { id: "c4", type: "prompt", message: "x" } },
     ],
     [
+      "set_model (KOBE-169: model choice goes through run.start; the catalog re-reads agent/ config)",
+      {
+        ...serverFrames["pi.command"],
+        command: { id: "c4", type: "set_model", provider: "kobe", modelId: "openai/gpt" },
+      },
+    ],
+    [
       "switch_session",
       {
         ...serverFrames["pi.command"],

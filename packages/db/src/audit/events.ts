@@ -827,6 +827,22 @@ export const AUDIT_EVENTS = {
   }),
   /** A workspace file was copied to a durable shared object (KOBE-54 `share_file`). */
   "workspace.file_shared": event("team", { userId: id, sharedId: id, bytes: count }),
+  // ── files: user uploads (KOBE-143, 53c of KOBE-53); counts and ids only, never names or content ──
+  /** A file was stored (S3 first, then the `files` row). `threadId` absent: not in a thread yet. */
+  "workspace.upload_stored": event("team", {
+    userId: id,
+    fileId: id,
+    threadId: id.optional(),
+    bytes: count,
+  }),
+  /** An upload was refused (`bytes` seen before the refusal; 0 when refused up front). */
+  "workspace.upload_refused": event("team", {
+    userId: id,
+    reason: z.enum(["file_too_large", "message_too_large", "quota_exceeded"]),
+    bytes: count,
+  }),
+  /** Uploads never attached to a thread within the retention window were deleted (system). */
+  "workspace.uploads_expired": event("team", { files: count, bytes: count }),
   /** The user downloaded a file of their own workspace in the file browser (KOBE-148; no names). */
   "workspace.file_downloaded": event("team", { userId: id, bytes: count }),
   /** The user uploaded a file into their own workspace in the file browser (KOBE-148; no names). */
@@ -967,6 +983,35 @@ export const AUDIT_EVENTS = {
     exposure: z.enum(["read_only", "all", "custom"]).optional(),
     /** The custom tick list (Pi tool names); empty unless exposure is custom. */
     tools: z.array(z.string().max(256)).max(1000).optional(),
+  }),
+  /**
+   * The periodic refresh found a connector's live tools differ from its pins (KOBE-102): `changed`
+   * and `added` tools are now disabled pending re-approval, `removed` ones are no longer offered.
+   * Tool names only, never descriptions or schemas. Written by the system actor; KOBE-103 reads it.
+   */
+  "mcp.connector.drift": event("install", {
+    connectorId: id,
+    name: z.string().max(64),
+    changed: z.array(z.string().max(128)).max(500),
+    added: z.array(z.string().max(128)).max(500),
+    removed: z.array(z.string().max(128)).max(500),
+  }),
+  /**
+   * A recipient was handled for one drift event (KOBE-103): `driftSeq` is the `mcp.connector.drift`
+   * row. `emailed: false` when the per-connector, per-recipient rate limit suppressed the email.
+   * Ids and counts only: no address, no tool names. Also the dedupe and rate-limit record.
+   */
+  "mcp.connector.drift_notified": event("install", {
+    connectorId: id,
+    driftSeq: z.number().int().positive(),
+    recipientId: id,
+    emailed: z.boolean(),
+  }),
+  /** An install admin re-approved drifted tools (KOBE-102); they are offered again. */
+  "mcp.connector.reapproved": event("install", {
+    connectorId: id,
+    name: z.string().max(64),
+    tools: z.array(z.string().max(128)).max(500),
   }),
 } as const;
 

@@ -12,6 +12,11 @@ import {
   updateSchema,
   type NameConflict,
 } from "../connectors/registry.js";
+import {
+  approveConnectorTools,
+  approveSchema,
+  reviewConnectorTools,
+} from "../connectors/reapproval.js";
 import { pinConnector, type PinOutcome } from "../connectors/pinning.js";
 import { checkConnectorUrl } from "../connectors/url-policy.js";
 import type { ServerDeps } from "../deps.js";
@@ -125,6 +130,40 @@ export function installConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: Aut
     return c.json(
       { connector, pin: pinBody(pin) },
       pin.ok || pin.failure === "already_pinned" ? 200 : 502,
+    );
+  });
+
+  // What each tool is now: approved vs live definition, for the re-approval review (KOBE-102).
+  app.get("/:id/tools", async (c) => {
+    const id = idSchema.safeParse(c.req.param("id"));
+    const tools = id.success ? await reviewConnectorTools(db, id.data) : undefined;
+    return tools ? c.json({ tools }) : notFound(c);
+  });
+
+  // Re-approve drifted tools, each with the hash of the live definition that was reviewed.
+  app.post("/:id/tools/approve", async (c) => {
+    const id = idSchema.safeParse(c.req.param("id"));
+    if (!id.success) return notFound(c);
+    const input = await parseBody(c, approveSchema);
+    if (!input) {
+      return invalidRequest(c, "Send tools: a list of { name, sha256 } of the reviewed tools.");
+    }
+    const result = await approveConnectorTools(db, id.data, input);
+    if (result.ok) return c.json({ approved: result.approved });
+    if (result.error === "not_found") return notFound(c);
+    return c.json(
+      result.error === "stale"
+        ? {
+            code: "stale",
+            tool: result.tool,
+            message: "That tool changed again since you reviewed it. Review it again.",
+          }
+        : {
+            code: "not_pending",
+            tool: result.tool,
+            message: "That tool is not waiting for approval.",
+          },
+      409,
     );
   });
 

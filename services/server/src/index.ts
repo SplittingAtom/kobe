@@ -12,6 +12,8 @@ import { initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
 import { loadConfig } from "./config.js";
 import { loadConnectorUrlPolicy } from "./connectors/config.js";
 import { createProxyProbe, PROBE_TIMEOUT_MS } from "./connectors/probe.js";
+import { notifyDrift } from "./connectors/drift-notify.js";
+import { CONNECTOR_REFRESH_LOCK, startConnectorRefresh } from "./connectors/refresh.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
 import { EgressBlockedRelay } from "./egress/blocked-relay.js";
 import { loadEgressHeaderSecrets } from "./egress/config.js";
@@ -28,6 +30,7 @@ import { ModelGatewaySync } from "./models/sync.js";
 import { OFFBOARDING_SWEEP_LOCK } from "./offboarding/index.js";
 import { createPgReconcileLock } from "./sandbox/reconcile-lock.js";
 import { RetentionJob } from "./retention/job.js";
+import { loadUploadSettings } from "./uploads/settings.js";
 import { createInternalApp } from "./routes/internal.js";
 import { createSandboxApp } from "./routes/sandbox.js";
 import { createSandboxRuntime } from "./sandbox/runtime.js";
@@ -61,6 +64,8 @@ const telemetry = initTelemetry(loadTelemetryConfig(process.env, config.process)
 // Object storage (s3.*): workspace sync (KOBE-27), thread export and retention (KOBE-18).
 const s3 = loadS3Settings(process.env);
 const objectStore = s3 ? createS3ObjectStore(s3) : undefined;
+// Upload limits and the default team storage quota (KOBE-143); invalid values fail the start.
+const uploadSettings = loadUploadSettings(process.env);
 // Model gateway (KOBE-40): undefined without the chart's Bifrost settings (models off).
 const modelsConfig = config.process === "server" ? loadModelsConfig(process.env) : undefined;
 // Header injection (KOBE-39): undefined without the chart's header secret (off).
@@ -105,6 +110,7 @@ if (config.auth && config.smtp) {
     ...(egressHeaderSecrets ? { egressHeaderSecrets } : {}),
     ...(envelope ? { envelope } : {}),
     ...(s3 && objectStore ? { blobs: { objects: objectStore, prefix: s3.prefix } } : {}),
+    uploads: uploadSettings,
     ...(modelsConfig
       ? {
           models: {
@@ -197,6 +203,7 @@ const retentionJob = deps
       db: deps.database.db,
       pool: deps.database.pool,
       blobs: deps.blobs,
+      uploadOrphanHours: uploadSettings.orphanHours,
       hourUtc: config.retentionHourUtc,
       logger,
     })
@@ -445,6 +452,24 @@ const stopOffboarding =
         everyMs: OFFBOARDING_SWEEP_MS,
       })
     : undefined;
+// Connector tool drift (KOBE-102, D27): re-probe pinned connectors; changed/new tools are disabled
+// until an install admin re-approves them. One replica at a time.
+const stopConnectorRefresh =
+  deps && config.process === "server"
+    ? startConnectorRefresh({
+        db: deps.database.db,
+        prober: deps.connectorProbe,
+        lock: createPgReconcileLock(
+          deps.database.pool,
+          (err) => logger.warn({ err }, "connector refresh lock connection problem"),
+          CONNECTOR_REFRESH_LOCK,
+        ),
+        intervalMs: config.connectorRefreshSeconds * 1000,
+        logger,
+        afterPass: () =>
+          notifyDrift({ db: deps.database.db, mailer: deps.mailer, publicUrl: deps.publicUrl }),
+      })
+    : undefined;
 const stopHibernation =
   lifecycle && sandbox?.settings.hibernation.enabled
     ? lifecycle.start(sandbox.settings.hibernation.sweepSeconds * 1000)
@@ -473,6 +498,7 @@ function shutdown(signal: string): void {
   stopReconciler?.();
   stopTeamReconciler?.();
   stopOffboarding?.();
+  stopConnectorRefresh?.();
   if (evalSweep) clearInterval(evalSweep);
   stopHibernation?.();
   stopCollector?.();

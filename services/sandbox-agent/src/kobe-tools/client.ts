@@ -4,6 +4,7 @@ import {
   MAX_PENDING_REQUESTS,
   MAX_REPLY_LINE_BYTES,
   TOOLS_TIMEOUT_MS,
+  type SharedFileFields,
   type ToolsError,
   type ToolsRequest,
   type ToolsResponse,
@@ -11,6 +12,7 @@ import {
 
 export type ToolsOutcome =
   | { readonly ok: true; readonly artifact_id: string; readonly version: number }
+  | ({ readonly ok: true } & SharedFileFields)
   | { readonly ok: false; readonly error: ToolsError };
 
 export interface ToolsClientOptions {
@@ -81,11 +83,8 @@ export class ToolsClient {
     if (pending === undefined) return; // late (timed out) or unknown: dropped
     this.#pending.delete(response.id);
     clearTimeout(pending.timer);
-    pending.resolve(
-      response.ok
-        ? { ok: true, artifact_id: response.artifact_id, version: response.version }
-        : { ok: false, error: response.error },
-    );
+    const { id: _id, ...outcome } = response;
+    pending.resolve(outcome);
   }
 
   #close(reason: string): void {
@@ -116,6 +115,7 @@ function parseResponse(line: string): ToolsResponse | undefined {
     return undefined;
   }
   if (!isRecord(value) || typeof value.id !== "string") return undefined;
+  if (value.ok === true && "file_id" in value) return parseFileReply(value);
   if (value.ok === true) {
     if (typeof value.artifact_id !== "string" || !Number.isSafeInteger(value.version))
       return undefined;
@@ -130,4 +130,22 @@ function parseResponse(line: string): ToolsResponse | undefined {
   if (value.ok !== false || !isRecord(error)) return undefined;
   if (typeof error.code !== "string" || typeof error.message !== "string") return undefined;
   return { id: value.id, ok: false, error: { code: error.code, message: error.message } };
+}
+
+const FILE_STRINGS = ["file_id", "name", "mime_type", "scan", "created_at", "sha256"] as const;
+
+function parseFileReply(value: Record<string, unknown>): ToolsResponse | undefined {
+  for (const key of FILE_STRINGS) if (typeof value[key] !== "string") return undefined;
+  if (!Number.isSafeInteger(value.size_bytes)) return undefined;
+  return {
+    id: value.id as string,
+    ok: true,
+    file_id: value.file_id as string,
+    name: value.name as string,
+    mime_type: value.mime_type as string,
+    size_bytes: value.size_bytes as number,
+    scan: value.scan as string,
+    created_at: value.created_at as string,
+    sha256: value.sha256 as string,
+  };
 }

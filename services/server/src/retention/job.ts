@@ -12,6 +12,8 @@ import type pg from "pg";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit/record.js";
 import { deleteReleasedBlobs, type BlobDeletionCounts, type BlobStore } from "./blobs.js";
+import { expireOrphanUploads, type ExpiredUploads } from "../uploads/expire.js";
+import { DEFAULT_ORPHAN_HOURS } from "../uploads/settings.js";
 import { compactRunEvents, type CompactionCounts } from "./compaction.js";
 import {
   NO_PURGE,
@@ -54,6 +56,8 @@ export interface TeamPassResult {
   readonly retention: PurgeCounts;
   readonly compacted: CompactionCounts;
   readonly blobs: BlobDeletionCounts;
+  /** Uploads without a thread deleted after the orphan window (KOBE-143). */
+  readonly uploads: ExpiredUploads;
   /** A step failed (logged); the others still ran. */
   readonly failed: boolean;
 }
@@ -68,6 +72,8 @@ export interface PassDeps {
   readonly db: KobeDb;
   /** Object storage for released keys; without it they stay queued. */
   readonly blobs?: BlobStore | undefined;
+  /** Hours before an upload without a thread is deleted (KOBE-143); default 24. */
+  readonly uploadOrphanHours?: number;
   readonly logger: Logger;
 }
 
@@ -165,7 +171,19 @@ async function teamPass(
           }),
         )
       : { blobs: 0, kept: 0 };
-  return { teamId, trash, retention, compacted, blobs, failed };
+  const uploads =
+    deps.blobs && !stop()
+      ? await step("uploads", { files: 0, bytes: 0 }, () =>
+          expireOrphanUploads(
+            db,
+            teamId,
+            deps.blobs as BlobStore,
+            deps.uploadOrphanHours ?? DEFAULT_ORPHAN_HOURS,
+            { stop },
+          ),
+        )
+      : { files: 0, bytes: 0 };
+  return { teamId, trash, retention, compacted, blobs, uploads, failed };
 }
 
 export interface PassOptions {

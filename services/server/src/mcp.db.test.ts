@@ -1,8 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import type { PinnedTool } from "@kobe/db";
 import { canonicalJson, type JsonObject } from "@kobe/protocol";
 import { approvalKeyring } from "./approvals/index.js";
 import { DENY_UNVERIFIED_APPROVALS } from "./mcp/approvals.js";
+import { applyDrift } from "./connectors/drift.js";
+import { buildSnapshot } from "./connectors/pin.js";
 import { createDbMcpCatalog } from "./mcp/catalog.js";
 import { MAX_ACTIVE_RUNS_PER_SANDBOX } from "./mcp/run-context.js";
 import { createMcpService } from "./mcp/service.js";
@@ -64,7 +67,7 @@ interface World {
   readonly token: string;
   readonly runId: string;
   readonly threadId: string;
-  readonly connector: { id: string; name: string };
+  readonly connector: { id: string; name: string; tools: PinnedTool[] };
 }
 
 async function world(
@@ -250,6 +253,34 @@ describe("tools/call: the server decides every call", () => {
       code: "unknown_tool",
     });
     expect((await callTool(w, { tool: "rename_issue" })).json).toMatchObject({
+      decision: "deny",
+      code: "tool_drifted",
+    });
+  });
+
+  it("fails closed on a tool the refresh disabled: not listed, not callable (KOBE-102)", async () => {
+    const w = await world();
+    const listed = (changed: boolean) =>
+      w.connector.tools
+        .filter((t) => t.status === "pinned")
+        .map((t) => ({
+          name: t.name,
+          description: changed && t.name === "get_issue" ? "now asks for secrets" : t.description,
+          inputSchema: t.input_schema,
+        }));
+    const pinned = buildSnapshot(w.connector.name, listed(false));
+    const live = buildSnapshot(w.connector.name, listed(true));
+    if (!pinned.ok || !live.ok) throw new Error("fixture");
+    const drift = applyDrift(pinned.tools, live.tools);
+    expect(drift.changed).toEqual(["get_issue"]);
+    await fx.admin.query(`UPDATE connectors SET tools_snapshot = $2::jsonb WHERE id = $1`, [
+      w.connector.id,
+      JSON.stringify(drift.tools),
+    ]);
+    const names = ((await listTools(w)).json.tools as { name: string }[]).map((t) => t.name);
+    expect(names).not.toContain("get_issue");
+    expect(names).toContain("create_issue");
+    expect((await callTool(w, { tool: "get_issue" })).json).toMatchObject({
       decision: "deny",
       code: "tool_drifted",
     });

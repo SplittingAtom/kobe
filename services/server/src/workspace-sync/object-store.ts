@@ -12,6 +12,12 @@ export interface ObjectStore {
    * errors or ends short (a verifying stream withholds its last chunk on a hash mismatch).
    */
   put(key: string, body: Readable, size: number): Promise<void>;
+  /**
+   * Stores a body of unknown length (an upload being received, KOBE-143) under `key` without
+   * holding it in memory (S3: multipart, a few MiB in flight). Rejects, storing nothing, when the
+   * body errors.
+   */
+  putStream(key: string, body: Readable): Promise<void>;
   /** The object's bytes, or null when there is no such object. */
   get(key: string): Promise<{ readonly body: Readable; readonly size: number } | null>;
   /** Server-side copy within the bucket. */
