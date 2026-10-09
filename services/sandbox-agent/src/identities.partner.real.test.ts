@@ -246,11 +246,11 @@ describe.runIf(HELPER !== undefined)("paired partner uids with the real helper (
       await chown(file, process.getuid?.() ?? 0, pi.gid);
       await chmod(file, mode);
     }
-    // As in the agent: the guarded files get the agent's primary group, which is the workspace
-    // group (1000) the partner holds too. The partner still has no way in: agent/ itself belongs
-    // to the Pi's group and has no access for others (3770).
+    // As in the agent. Whether the guarded files get the Pi's gid (setgid inheritance) or the
+    // agent's primary group (the workspace group 1000, which the partner holds) depends on the
+    // filesystem; either way the partner has no way in: agent/ itself belongs to the Pi's group
+    // and gives others nothing (3770), and 0440 allows no write.
     await writeGuardedConfig(agentDir, true);
-    expect((await stat(path.join(agentDir, "models.json"))).gid).toBe(WORKSPACE_GID);
     // A file the Pi itself keeps there (auth store): Pi-owned, group-writable.
     const made = await helper(
       identities.command(pi, "/bin/sh", ["-c", `echo '{}' > ${agentDir}/auth.json`]) as string[],
