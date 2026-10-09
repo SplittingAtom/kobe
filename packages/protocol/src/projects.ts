@@ -285,6 +285,7 @@ export const PROJECT_ERROR_CODES = [
   "file_too_large", // 413
   "quota_exceeded", // 413
   "invalid_input", // 422
+  "project_in_use", // 409 delete refused: threads, project memory or files remain
 ] as const;
 export const projectErrorCodeSchema = z.enum(PROJECT_ERROR_CODES);
 export type ProjectErrorCode = z.infer<typeof projectErrorCodeSchema>;
