@@ -958,6 +958,24 @@ export const AUDIT_EVENTS = {
     tools: z.number().int().nonnegative(),
     hash: z.string().regex(/^[0-9a-f]{64}$/),
   }),
+  /**
+   * The periodic refresh found a connector's live tools differ from its pins (KOBE-102): `changed`
+   * and `added` tools are now disabled pending re-approval, `removed` ones are no longer offered.
+   * Tool names only, never descriptions or schemas. Written by the system actor; KOBE-103 reads it.
+   */
+  "mcp.connector.drift": event("install", {
+    connectorId: id,
+    name: z.string().max(64),
+    changed: z.array(z.string().max(128)).max(500),
+    added: z.array(z.string().max(128)).max(500),
+    removed: z.array(z.string().max(128)).max(500),
+  }),
+  /** An install admin re-approved drifted tools (KOBE-102); they are offered again. */
+  "mcp.connector.reapproved": event("install", {
+    connectorId: id,
+    name: z.string().max(64),
+    tools: z.array(z.string().max(128)).max(500),
+  }),
 } as const;
 
 export type AuditAction = keyof typeof AUDIT_EVENTS;

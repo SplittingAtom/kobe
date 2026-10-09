@@ -15,6 +15,7 @@ import {
 import { MutationStatus } from "../error-notice";
 import { DateTime, ResourceView, confirmed } from "../parts";
 import { useMutation, useResource, type Mutation } from "../use-resource";
+import { ToolReviewPanel } from "./connector-tool-review";
 import styles from "../admin.module.css";
 
 const NAME_HINT = "Use lowercase letters and digits joined by - or _ (up to 64 characters).";
@@ -28,6 +29,7 @@ export function ConnectorsPage() {
   const { state, reload } = useResource(() => listConnectors());
   const mutation = useMutation();
   const [editing, setEditing] = useState<Connector | null>(null);
+  const [reviewing, setReviewing] = useState<Connector | null>(null);
 
   return (
     <>
@@ -54,10 +56,20 @@ export function ConnectorsPage() {
             connectors={connectors}
             mutation={mutation}
             onEdit={setEditing}
+            onReview={setReviewing}
             onChanged={reload}
           />
         )}
       </ResourceView>
+      {reviewing ? (
+        <ToolReviewPanel
+          key={reviewing.id}
+          connector={reviewing}
+          mutation={mutation}
+          onChanged={reload}
+          onClose={() => setReviewing(null)}
+        />
+      ) : null}
     </>
   );
 }
@@ -176,11 +188,13 @@ function ConnectorTable({
   connectors,
   mutation,
   onEdit,
+  onReview,
   onChanged,
 }: {
   readonly connectors: readonly Connector[];
   readonly mutation: Mutation;
   readonly onEdit: (c: Connector) => void;
+  readonly onReview: (c: Connector) => void;
   readonly onChanged: () => void;
 }) {
   async function toggle(c: Connector) {
@@ -211,6 +225,7 @@ function ConnectorTable({
             <th scope="col">Name</th>
             <th scope="col">Server URL</th>
             <th scope="col">Authentication</th>
+            <th scope="col">Tools</th>
             <th scope="col">Status</th>
             <th scope="col">Updated</th>
             <th scope="col">
@@ -231,6 +246,18 @@ function ConnectorTable({
                 <code>{c.url}</code>
               </td>
               <td>{AUTH_LABELS[c.authKind]}</td>
+              <td>
+                {c.toolCount}
+                {c.driftedCount > 0 ? (
+                  <>
+                    {" "}
+                    ({c.driftedCount} awaiting approval){" "}
+                    <button type="button" onClick={() => onReview(c)}>
+                      Review<span className={styles.visuallyHidden}> tools of {c.name}</span>
+                    </button>
+                  </>
+                ) : null}
+              </td>
               <td>{c.status === "active" ? "Active" : "Disabled"}</td>
               <td>
                 <DateTime value={c.updatedAt} />

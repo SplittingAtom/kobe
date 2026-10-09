@@ -75,6 +75,8 @@ export interface ConnectorView {
   readonly authKind: (typeof AUTH_KINDS)[number];
   readonly status: (typeof STATUSES)[number];
   readonly toolCount: number;
+  /** Tools disabled pending re-approval (KOBE-102). */
+  readonly driftedCount: number;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
@@ -87,6 +89,10 @@ const columns = {
   authKind: connectors.authKind,
   status: connectors.status,
   toolCount: sql<number>`jsonb_array_length(${connectors.toolsSnapshot})`.mapWith(Number),
+  driftedCount:
+    sql<number>`(SELECT count(*) FROM jsonb_array_elements(${connectors.toolsSnapshot}) AS t WHERE t->>'status' = 'drifted')`.mapWith(
+      Number,
+    ),
   createdAt: connectors.createdAt,
   updatedAt: connectors.updatedAt,
 } as const;

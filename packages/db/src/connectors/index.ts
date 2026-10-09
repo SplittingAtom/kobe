@@ -4,5 +4,7 @@ export {
   parseToolsSnapshot,
   pinnedToolAnnotationsSchema,
   pinnedToolSchema,
+  proposedToolSchema,
   type PinnedTool,
+  type ProposedTool,
 } from "./snapshot.js";

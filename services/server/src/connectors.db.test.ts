@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { toolHash } from "./connectors/pin.js";
+import { refreshAllConnectors, refreshConnector } from "./connectors/refresh.js";
 import type { ProbeResult } from "./connectors/probe.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 import type { TestBrowser } from "./testing/browser.js";
@@ -377,5 +378,162 @@ describe("probe and pin (KOBE-101)", () => {
   it("is for install admins only and 404s unknown connectors", async () => {
     expect((await alice.post(`${BASE}/${randomUUID()}/pin`, {})).status).toBe(403);
     expect((await root.post(`${BASE}/${randomUUID()}/pin`, {})).status).toBe(404);
+  });
+});
+
+describe("drift and re-approval (KOBE-102)", () => {
+  const quiet = { info: () => undefined, warn: () => undefined };
+  const t = (name: string, description = "d") => ({
+    name,
+    description,
+    inputSchema: { type: "object" },
+  });
+  const state = async (id: string) =>
+    (await h.admin.query(`SELECT tools_snapshot, tools_hash FROM connectors WHERE id = $1`, [id]))
+      .rows[0] as {
+      tools_snapshot: { name: string; status: string; description: string; proposed?: unknown }[];
+      tools_hash: string;
+    };
+  const probeNow = (...tools: ReturnType<typeof t>[]) => {
+    probeAnswer = () => ({ ok: true, tools });
+  };
+  const drifts = async () =>
+    (
+      await h.admin.query(
+        `SELECT actor_kind, target FROM audit_log WHERE action = 'mcp.connector.drift' ORDER BY seq`,
+      )
+    ).rows;
+  const register = async (name: string, ...tools: ReturnType<typeof t>[]) => {
+    probeNow(...tools);
+    const res = await create({ name, url: `https://${name}.example/mcp` });
+    return res.json.connector.id as string;
+  };
+  const refresh = (id: string) => refreshConnector(h.deps.database.db, h.deps.connectorProbe, id);
+
+  it("disables a tool whose description changed until re-approved (ac-1), then offers it again", async () => {
+    const id = await register("drift-a", t("a", "old"), t("b"));
+    const hash0 = (await state(id)).tools_hash;
+    probeNow(t("a", "new and sneaky"), t("b"));
+    expect(await refresh(id)).toEqual({ status: "drifted", changed: 1, added: 0, removed: 0 });
+    const s = await state(id);
+    expect(s.tools_snapshot.map((x) => [x.name, x.status])).toEqual([
+      ["a", "drifted"],
+      ["b", "pinned"],
+    ]);
+    expect(s.tools_snapshot[0]?.description).toBe("old");
+    expect(s.tools_hash).toBe(hash0);
+
+    const events = await drifts();
+    expect(events.at(-1)).toMatchObject({
+      actor_kind: "system",
+      target: { name: "drift-a", changed: ["a"], added: [], removed: [] },
+    });
+    expect(JSON.stringify(events.at(-1)?.target)).not.toMatch(/sneaky|https?:/);
+
+    // An unchanged live list writes nothing more.
+    const before = (await drifts()).length;
+    await refresh(id);
+    expect((await drifts()).length).toBe(before);
+
+    const review = await root.get(`${BASE}/${id}/tools`);
+    const a = review.json.tools.find((x: { name: string }) => x.name === "a");
+    expect(a).toMatchObject({
+      status: "drifted",
+      change: "changed",
+      approved: { description: "old" },
+      live: { description: "new and sneaky" },
+    });
+    const listed = (await root.get(BASE)).json.connectors.find((c: { id: string }) => c.id === id);
+    expect(listed).toMatchObject({ driftedCount: 1 });
+
+    expect((await alice.post(`${BASE}/${id}/tools/approve`, { tools: [] })).status).toBe(403);
+    const stale = await root.post(`${BASE}/${id}/tools/approve`, {
+      tools: [{ name: "a", sha256: "0".repeat(64) }],
+    });
+    expect(stale.status).toBe(409);
+    expect(stale.json.code).toBe("stale");
+    const ok = await root.post(`${BASE}/${id}/tools/approve`, {
+      tools: [{ name: "a", sha256: a.live.sha256 }],
+    });
+    expect(ok.json).toEqual({ approved: ["a"] });
+    const after = await state(id);
+    expect(after.tools_snapshot.map((x) => [x.name, x.status, x.description])).toEqual([
+      ["a", "pinned", "new and sneaky"],
+      ["b", "pinned", "d"],
+    ]);
+    expect(after.tools_hash).not.toBe(hash0);
+    const { rows } = await h.admin.query(
+      `SELECT actor_id, target FROM audit_log WHERE action = 'mcp.connector.reapproved'`,
+    );
+    expect(rows.at(-1).target).toMatchObject({ name: "drift-a", tools: ["a"] });
+    expect(rows.at(-1).actor_id).not.toBeNull();
+    // Approving something that is no longer pending is refused.
+    const again = await root.post(`${BASE}/${id}/tools/approve`, {
+      tools: [{ name: "a", sha256: a.live.sha256 }],
+    });
+    expect(again.status).toBe(409);
+  });
+
+  it("drops removed tools and adds new ones disabled (ac-2)", async () => {
+    const id = await register("drift-b", t("keep"), t("gone"));
+    probeNow(t("keep"), t("fresh", "brand new"));
+    await refresh(id);
+    const s = await state(id);
+    expect(s.tools_snapshot.map((x) => [x.name, x.status])).toEqual([
+      ["keep", "pinned"],
+      ["fresh", "drifted"],
+    ]);
+    expect((await drifts()).at(-1)?.target).toMatchObject({
+      changed: [],
+      added: ["fresh"],
+      removed: ["gone"],
+    });
+    const review = (await root.get(`${BASE}/${id}/tools`)).json.tools;
+    expect(review.find((x: { name: string }) => x.name === "fresh")).toMatchObject({
+      change: "added",
+      live: { description: "brand new" },
+    });
+  });
+
+  it("keeps the snapshot when the probe fails or the live list is unusable", async () => {
+    const id = await register("drift-c", t("a"));
+    const hash = (await state(id)).tools_hash;
+    probeAnswer = () => ({ ok: false, failure: "unreachable" });
+    expect(await refresh(id)).toEqual({ status: "skipped", reason: "unreachable" });
+    probeNow(t("get-x"), t("get_x"));
+    expect(await refresh(id)).toMatchObject({ status: "skipped" });
+    expect((await state(id)).tools_hash).toBe(hash);
+  });
+
+  it("skips unpinned and disabled connectors, and a pass survives them", async () => {
+    probeAnswer = () => ({ ok: false, failure: "unreachable" });
+    const unpinned = (await create({ name: "drift-d", url: "https://drift-d.example/mcp" })).json
+      .connector.id as string;
+    expect(await refresh(unpinned)).toEqual({ status: "skipped", reason: "not_pinned" });
+    const off = await register("drift-e", t("a"));
+    await root.patch(`${BASE}/${off}`, { status: "disabled" });
+    expect(await refresh(off)).toMatchObject({ status: "skipped" });
+    const summary = await refreshAllConnectors(h.deps.database.db, h.deps.connectorProbe, quiet);
+    expect(summary.failed).toBe(0);
+    expect(summary.checked).toBeGreaterThan(0);
+  });
+
+  it("does not write if the connector's URL changed during the probe", async () => {
+    const id = await register("drift-f", t("a"));
+    const hash = (await state(id)).tools_hash;
+    const slow = {
+      probe: async () => {
+        await h.admin.query(
+          `UPDATE connectors SET url = 'https://elsewhere.example/mcp' WHERE id = $1`,
+          [id],
+        );
+        return { ok: true as const, tools: [t("a", "changed")] };
+      },
+    };
+    expect(await refreshConnector(h.deps.database.db, slow, id)).toEqual({
+      status: "skipped",
+      reason: "changed",
+    });
+    expect((await state(id)).tools_hash).toBe(hash);
   });
 });

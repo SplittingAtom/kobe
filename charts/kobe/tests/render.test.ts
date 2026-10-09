@@ -160,6 +160,19 @@ describe("workloads", () => {
     expect(renderError({ "auditForwarding.otlp.enabled": "true" })).toMatch(/otlp.endpoint/);
   });
 
+  it("passes the connector refresh interval to the server only (KOBE-102)", () => {
+    const env = (ms2: Manifest[], name: string): { name: string; value?: string }[] =>
+      find(ms2, "Deployment", name)?.spec.template.spec.containers[0].env ?? [];
+    const value = (ms2: Manifest[], name: string) =>
+      env(ms2, name).find((e) => e.name === "KOBE_CONNECTOR_REFRESH_SECONDS")?.value;
+    expect(value(ms, "kobe-server")).toBe("3600");
+    expect(value(ms, "kobe-scheduler")).toBeUndefined();
+    expect(value(render({ "server.connectorRefreshSeconds": "0" }), "kobe-server")).toBe("0");
+    expect(renderError({ "server.connectorRefreshSeconds": "-1" })).toMatch(
+      /connectorRefreshSeconds/,
+    );
+  });
+
   it("runs the scheduler as the server image in scheduler mode", () => {
     const c = find(ms, "Deployment", "kobe-scheduler")?.spec.template.spec.containers[0];
     expect(c.image).toBe("ghcr.io/splittingatom/kobe-server:0.1.0");

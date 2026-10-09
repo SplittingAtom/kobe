@@ -12,6 +12,7 @@ import { initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
 import { loadConfig } from "./config.js";
 import { loadConnectorUrlPolicy } from "./connectors/config.js";
 import { createProxyProbe, PROBE_TIMEOUT_MS } from "./connectors/probe.js";
+import { CONNECTOR_REFRESH_LOCK, startConnectorRefresh } from "./connectors/refresh.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
 import { EgressBlockedRelay } from "./egress/blocked-relay.js";
 import { loadEgressHeaderSecrets } from "./egress/config.js";
@@ -445,6 +446,22 @@ const stopOffboarding =
         everyMs: OFFBOARDING_SWEEP_MS,
       })
     : undefined;
+// Connector tool drift (KOBE-102, D27): re-probe pinned connectors; changed/new tools are disabled
+// until an install admin re-approves them. One replica at a time.
+const stopConnectorRefresh =
+  deps && config.process === "server"
+    ? startConnectorRefresh({
+        db: deps.database.db,
+        prober: deps.connectorProbe,
+        lock: createPgReconcileLock(
+          deps.database.pool,
+          (err) => logger.warn({ err }, "connector refresh lock connection problem"),
+          CONNECTOR_REFRESH_LOCK,
+        ),
+        intervalMs: config.connectorRefreshSeconds * 1000,
+        logger,
+      })
+    : undefined;
 const stopHibernation =
   lifecycle && sandbox?.settings.hibernation.enabled
     ? lifecycle.start(sandbox.settings.hibernation.sweepSeconds * 1000)
@@ -473,6 +490,7 @@ function shutdown(signal: string): void {
   stopReconciler?.();
   stopTeamReconciler?.();
   stopOffboarding?.();
+  stopConnectorRefresh?.();
   if (evalSweep) clearInterval(evalSweep);
   stopHibernation?.();
   stopCollector?.();

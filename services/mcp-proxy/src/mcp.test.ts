@@ -378,6 +378,21 @@ describe("tools/call", () => {
     expect(fake.received).toEqual([]);
   });
 
+  it("runs nothing upstream for a tool disabled by drift until re-approved (KOBE-102)", async () => {
+    server.next = () => ({
+      ok: true,
+      value: {
+        decision: "deny",
+        code: "tool_drifted",
+        message: "This tool changed since it was approved and is disabled until re-approved.",
+      },
+    });
+    const res = await rpc("tools/call", { name: "get_issue", arguments: { a: "x" } });
+    expect(res.json?.result.isError).toBe(true);
+    expect(res.json?.result.content[0].text).toContain("disabled until re-approved");
+    expect(fake.received).toEqual([]);
+  });
+
   it("runs nothing upstream when the server cannot be reached (fail closed)", async () => {
     server.next = () => ({ ok: false, failure: "unavailable" });
     const res = await rpc("tools/call", { name: "create_issue", arguments: {} });
