@@ -347,6 +347,83 @@ describe("workspace sync (agent)", () => {
   );
 });
 
+describe("pushPath (share_file: push one file and return its revision)", () => {
+  it("uploads and commits one new file, and returns its rev and hash", async () => {
+    const root = await volume();
+    await put(root, "out/report.csv", "a,b\n1,2\n");
+    await put(root, "other.txt", "not pushed");
+    const sync = await started(root);
+    const pushed = await sync.pushPath("out/report.csv");
+    expect(pushed).toMatchObject({ path: "out/report.csv", size: 8 });
+    expect(pushed.rev).toBeGreaterThan(0);
+    expect(server.rows.get("out/report.csv")).toMatchObject({
+      rev: pushed.rev,
+      sha256: pushed.sha256,
+    });
+    expect(server.livePaths()).toEqual(["out/report.csv"]); // only that file
+  });
+
+  it("returns the existing revision for a file that is already synced and unchanged", async () => {
+    const root = await volume();
+    await put(root, "a.txt", "same");
+    const sync = await started(root);
+    await sync.push();
+    const row = must(server.rows.get("a.txt"));
+    expect(await sync.pushPath("a.txt")).toEqual({
+      path: "a.txt",
+      rev: row.rev,
+      sha256: row.sha256,
+      size: 4,
+    });
+    expect(server.rows.get("a.txt")?.rev).toBe(row.rev); // no new revision
+  });
+
+  it("commits a new revision for a file changed since the last sync", async () => {
+    const root = await volume();
+    await put(root, "a.txt", "one");
+    const sync = await started(root);
+    await sync.push();
+    const first = must(server.rows.get("a.txt")).rev;
+    await put(root, "a.txt", "two!");
+    const pushed = await sync.pushPath("a.txt");
+    expect(pushed.rev).toBeGreaterThan(first);
+    expect(pushed.size).toBe(4);
+  });
+
+  it("fails clearly when the server rejects the push", async () => {
+    const root = await volume();
+    await put(root, "a.txt", "x");
+    const sync = await started(root);
+    server.failWith = 500;
+    await expect(sync.pushPath("a.txt")).rejects.toThrow(/not_synced|could not be pushed/);
+  });
+
+  it("refuses a symlink, a missing file and an excluded or skipped path", async () => {
+    const root = await volume();
+    await put(root, ".kobe/x", "x");
+    await put(root, "app/node_modules/dep.js", "x");
+    await put(root, "real.txt", "x");
+    await symlink(path.join(root, "real.txt"), path.join(root, "link.txt"));
+    const sync = await started(root);
+    for (const rel of ["link.txt", "missing.txt", ".kobe/x", "app/node_modules/dep.js"]) {
+      await expect(sync.pushPath(rel), rel).rejects.toThrow();
+    }
+    expect(server.livePaths()).toEqual([]);
+  });
+
+  it("refuses to push when sync is off", async () => {
+    const root = await volume();
+    await put(root, "a.txt", "x");
+    const sync = new WorkspaceSync({
+      root,
+      client: new SyncClient({ serverUrl, readToken: () => Promise.resolve(server.token) }),
+      logger: quiet,
+      intervalMs: 0,
+    });
+    await expect(sync.pushPath("a.txt")).rejects.toThrow(/not available/);
+  });
+});
+
 function must<T>(v: T | undefined): T {
   if (v === undefined) throw new Error("missing");
   return v;

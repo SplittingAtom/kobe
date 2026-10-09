@@ -84,11 +84,29 @@ export const workspaceFileEntrySchema = z
   });
 export type WorkspaceFileEntry = z.infer<typeof workspaceFileEntrySchema>;
 
+/** Opaque paging cursor: clients echo it back and never build or parse it. */
+export const WORKSPACE_LIST_CURSOR_MAX = 1024;
+export const workspaceListCursorSchema = z
+  .string()
+  .min(1)
+  .max(WORKSPACE_LIST_CURSOR_MAX)
+  .regex(/^[A-Za-z0-9_-]+$/, "cursor is base64url");
+
 /** `GET /v1/threads/{id}/workspace/files?path=` (path absent = root) -> {@link workspaceListResponseSchema}. */
-export const workspaceListQuerySchema = z.strictObject({ path: dirPath.optional() });
+export const workspaceListQuerySchema = z.strictObject({
+  path: dirPath.optional(),
+  /** `next_cursor` of the previous page; absent = first page (KOBE-184). */
+  cursor: workspaceListCursorSchema.optional(),
+});
 export const workspaceListResponseSchema = z.strictObject({
   path: dirPath,
   entries: z.array(workspaceFileEntrySchema),
+  /**
+   * Present exactly when more entries follow: pass it as `cursor` (same `path`) for the next page.
+   * Order is stable (folders first, then name) and the cursor is a position, so entries added or
+   * removed between pages never repeat or skip an unchanged entry. Absent from old servers.
+   */
+  next_cursor: workspaceListCursorSchema.optional(),
 });
 export type WorkspaceListResponse = z.infer<typeof workspaceListResponseSchema>;
 
@@ -113,6 +131,8 @@ export const WORKSPACE_FILE_ERROR_CODES = [
   "not_found",
   "invalid_path",
   "read_only",
+  /** A delete refused because a legal hold covers the workspace (KOBE-184; was `read_only`). */
+  "legal_hold",
   "already_exists",
   "file_too_large",
   "quota_exceeded",

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { idSchema, timestampSchema, utf8ByteLength, uuidSchema } from "./common.js";
+import { projectProposeOkFields, projectToolsRequestSchema } from "./projects.js";
 import { fileShareOkFields, fileShareToolsRequestSchema } from "./files.js";
 
 /**
@@ -122,12 +123,14 @@ export const kobeToolsRequestSchema = z.union([
     ...artifactCallShape.update,
   }),
   fileShareToolsRequestSchema, // KOBE-147 (files.ts)
+  projectToolsRequestSchema, // KOBE-159 (projects.ts)
 ]);
 export type KobeToolsRequest = z.infer<typeof kobeToolsRequestSchema>;
 
 export const kobeToolsResponseSchema = z.union([
   z.strictObject({ id: idSchema, ...artifactOkFields }),
   z.strictObject({ id: idSchema, ...fileShareOkFields }), // KOBE-147 (files.ts)
+  z.strictObject({ id: idSchema, ...projectProposeOkFields }), // KOBE-159 (projects.ts)
   z.strictObject({ id: idSchema, ...artifactFailFields }),
 ]);
 export type KobeToolsResponse = z.infer<typeof kobeToolsResponseSchema>;

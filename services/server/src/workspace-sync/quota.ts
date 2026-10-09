@@ -1,4 +1,5 @@
-import type { KobeTx } from "@kobe/db";
+import { sql, type KobeTx } from "@kobe/db";
+import { teamStorageAllows } from "../uploads/quota.js";
 import type { WorkspaceOwner } from "./keys.js";
 
 /**
@@ -66,5 +67,30 @@ export function limitsQuota(limits: WorkspaceLimits): QuotaCheck {
       return Promise.resolve({ ok: false, code: "quota_exceeded", limit: "workspace_bytes" });
     }
     return Promise.resolve({ ok: true });
+  };
+}
+
+/**
+ * Adds the team storage quota (KOBE-185) to a per-workspace check: a write that grows the
+ * workspace past what the team may store is refused as `quota_exceeded` (`workspace_bytes` in the
+ * audit), via the same {@link teamStorageAllows} uploads use, so the two serialize on one lock.
+ * The delta is the workspace's new live bytes minus the committed ones (state is saved at the end
+ * of the commit, so `workspace_sync.live_bytes` is still the old value here).
+ */
+export function withTeamStorage(inner: QuotaCheck, defaultBytes: number): QuotaCheck {
+  return async (tx, r) => {
+    const decision = await inner(tx, r);
+    if (!decision.ok) return decision;
+    const res = await tx.execute<{ live_bytes: string }>(sql`
+      SELECT live_bytes FROM workspace_sync
+       WHERE team_id = ${r.owner.teamId} AND user_id = ${r.owner.userId}`);
+    const committed = Number(res.rows[0]?.live_bytes ?? 0);
+    const allowed = await teamStorageAllows(
+      tx,
+      r.owner.teamId,
+      defaultBytes,
+      r.liveBytes - committed,
+    );
+    return allowed ? { ok: true } : { ok: false, code: "quota_exceeded", limit: "workspace_bytes" };
   };
 }

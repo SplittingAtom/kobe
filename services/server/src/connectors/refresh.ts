@@ -154,6 +154,8 @@ export interface ConnectorRefreshOptions {
   readonly lock: ReconcileLock;
   readonly intervalMs: number;
   readonly logger: Logger;
+  /** After each pass (KOBE-103): emails about drift. Must not throw. */
+  readonly afterPass?: () => Promise<unknown>;
 }
 
 /** Starts the interval; returns the stop function. `intervalMs <= 0` starts nothing. */
@@ -164,7 +166,11 @@ export function startConnectorRefresh(options: ConnectorRefreshOptions): () => v
     if (running) return;
     running = true;
     options.lock
-      .runExclusive(() => refreshAllConnectors(options.db, options.prober, options.logger))
+      .runExclusive(async () => {
+        const summary = await refreshAllConnectors(options.db, options.prober, options.logger);
+        await options.afterPass?.();
+        return summary;
+      })
       .then((outcome) => {
         if (outcome.ran) options.logger.info(outcome.value, "connectors refreshed");
       })
