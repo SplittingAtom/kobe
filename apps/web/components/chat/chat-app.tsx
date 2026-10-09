@@ -12,8 +12,10 @@ import { ChatSession } from "../../lib/chat/session";
 import type { EventSourceFactory } from "../../lib/chat/stream";
 import { createThreadListAdapter } from "../../lib/chat/thread-list-adapter";
 import { ACTIVE_TEAM_EVENT, fetchMyTeams } from "../../lib/teams";
+import { createFilesApi } from "../../lib/files/api";
 import { ConsoleLinks } from "../admin/console-links";
 import { ArtifactPanel, ArtifactPanelProvider } from "./artifact-panel";
+import { FilesPanel, FilesPanelProvider } from "../files/files-panel";
 import { ChatSessionContext, useKobeRuntime } from "./kobe-runtime";
 import { RetentionNotice } from "./retention-notice";
 import { ThreadSidebar } from "./thread-sidebar";
@@ -108,7 +110,14 @@ const STARTER_SUGGESTIONS = [
   },
 ];
 
-function ChatWorkspace({ session }: { readonly session: ChatSession }) {
+function ChatWorkspace({
+  session,
+  fetchFn,
+}: {
+  readonly session: ChatSession;
+  readonly fetchFn: typeof fetch | undefined;
+}) {
+  const filesApi = useMemo(() => createFilesApi(session.teamId, fetchFn), [session, fetchFn]);
   const [threadId, setThreadId] = useThreadUrl();
   const [listError, setListError] = useState<ApiError | null>(null);
   const adapter = useMemo(
@@ -122,15 +131,20 @@ function ChatWorkspace({ session }: { readonly session: ChatSession }) {
   return (
     <AssistantRuntimeProvider aui={aui} runtime={runtime}>
       <RetentionNotice />
-      <ArtifactPanelProvider scope={`${session.teamId}:${threadId ?? ""}`}>
-        <div className={styles.body}>
-          <ThreadSidebar listError={listError} onOpenThread={setThreadId} />
-          <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
-            <ThreadView />
-          </main>
-          <ArtifactPanel className={styles.artifactPanel} />
-        </div>
-      </ArtifactPanelProvider>
+      <FilesPanelProvider scope={session.teamId}>
+        <ArtifactPanelProvider scope={`${session.teamId}:${threadId ?? ""}`}>
+          <div className={styles.body}>
+            <ThreadSidebar listError={listError} onOpenThread={setThreadId} />
+            <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
+              <ThreadView />
+            </main>
+            <div className={styles.sidePanels}>
+              <ArtifactPanel className={styles.sidePanel} />
+              <FilesPanel api={filesApi} className={styles.sidePanel} />
+            </div>
+          </div>
+        </ArtifactPanelProvider>
+      </FilesPanelProvider>
     </AssistantRuntimeProvider>
   );
 }
@@ -190,7 +204,7 @@ export function ChatApp({ fetchFn, eventSource, newKey, reopenDelayMs }: ChatApp
   } else if (session) {
     body = (
       <ChatSessionContext.Provider value={session}>
-        <ChatWorkspace key={session.teamId} session={session} />
+        <ChatWorkspace key={session.teamId} session={session} fetchFn={fetchFn} />
       </ChatSessionContext.Provider>
     );
   }
