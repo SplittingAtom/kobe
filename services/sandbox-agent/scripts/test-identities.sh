@@ -34,12 +34,14 @@ cleanup() {
   sudo groupdel kobe-test-agent 2>/dev/null || true
 }
 trap cleanup EXIT
-# CI only: let other uids traverse (never read or write) the directories to the checkout and node.
+# CI only: let the identities' uids traverse (never read or write) the directories to the checkout and
+# node. `a+x`, not `o+x`: the partner uids hold the workspace group, which is this user's group, and a
+# group class without `x` denies even when `other` has it.
 open_path() {
   local d
   d=$(cd "$1" && pwd -P)
   while [ "$d" != / ]; do
-    sudo chmod o+x "$d"
+    sudo chmod a+x "$d"
     d=$(dirname "$d")
   done
 }
