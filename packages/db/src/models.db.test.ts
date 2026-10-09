@@ -104,6 +104,28 @@ describe("providers and catalog", () => {
       expect(pgCode(err), `${a}/${m}`).toBe("23514");
     }
   });
+
+  it("input modalities default to text, allow image, and refuse anything else (KOBE-191)", async () => {
+    const [row] = await app.db.select().from(modelCatalog).where(eq(modelCatalog.alias, alias));
+    expect(row?.inputModalities).toEqual(["text"]);
+    await app.db
+      .update(modelCatalog)
+      .set({ inputModalities: ["text", "image"] })
+      .where(eq(modelCatalog.alias, alias));
+    for (const bad of [[], ["image"], ["text", "video"], ["text", "text", "audio"]]) {
+      const err = await failure(
+        app.db
+          .update(modelCatalog)
+          .set({ inputModalities: bad })
+          .where(eq(modelCatalog.alias, alias)),
+      );
+      expect(pgCode(err), bad.join()).toBe("23514");
+    }
+    await app.db
+      .update(modelCatalog)
+      .set({ inputModalities: ["text"] })
+      .where(eq(modelCatalog.alias, alias));
+  });
 });
 
 describe("team enablement", () => {
