@@ -2071,32 +2071,7 @@ fi
 # sandbox-like client pod as the egress checks, against a fake remote MCP server in the cluster.
 echo "==> MCP proxy (KOBE-58)"
 if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_id:-}" && "${client_ready:-0}" == 1 ]]; then
-  read -r -d '' FAKE_MCP_JS <<'JS' || true
-const http = require("http");
-http.createServer((req, res) => {
-  if (req.method !== "POST") { res.writeHead(405).end(); return; }
-  let body = "";
-  req.on("data", (c) => (body += c));
-  req.on("end", () => {
-    const m = JSON.parse(body);
-    if (req.headers.authorization) console.log("AUTH-HEADER-PRESENT");
-    if (!("id" in m)) { res.writeHead(202).end(); return; }
-    const reply = (x) => {
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ jsonrpc: "2.0", id: m.id, ...x }));
-    };
-    if (m.method === "initialize") {
-      reply({ result: { protocolVersion: m.params.protocolVersion, capabilities: { tools: {} },
-        serverInfo: { name: "e2e-fake", version: "1" } } });
-    } else if (m.method === "tools/call") {
-      console.log("CALL " + m.params.name + " " + JSON.stringify(m.params.arguments));
-      reply({ result: { content: [{ type: "text", text: "fake:" + m.params.name }] } });
-    } else {
-      reply({ error: { code: -32601, message: "not here" } });
-    }
-  });
-}).listen(8080);
-JS
+  FAKE_MCP_JS=$(cat e2e/lib/fake-mcp.js) # shared with e2e/gate2.sh
   $KUBECTL create namespace "$MCP_NS" --dry-run=client -o yaml | $KUBECTL apply -f - >/dev/null
   $KUBECTL -n "$MCP_NS" run fake-mcp --restart=Never --image="$KOBE_SANDBOX_IMAGE" --labels=app=fake-mcp \
     --command -- node -e "$FAKE_MCP_JS" >/dev/null

@@ -55,19 +55,20 @@ KOBE_IMAGE_TAG=<tag> e2e/run.sh             # k3d end-to-end suite (cluster from
 
 CI splits the k3d suite into shards that run in parallel, each on its own cluster:
 `KOBE_E2E_SHARD=suite` (every section but the KOBE-25 cold-start trials), `cold-start` (the
-sections up to KOBE-25, with its trials) and `gate1-prep` followed by `e2e/gate1.sh` (the install
-plus the KOBE-40 model setup Gate 1 needs). Unset, `e2e/run.sh` runs every section, as before. A
+sections up to KOBE-25, with its trials), `gate1-prep` followed by `e2e/gate1.sh` (the install
+plus the KOBE-40 model setup Gate 1 needs) and `gate1-prep` followed by `e2e/gate2.sh` (the same
+install, for the Gate 2 safety checks; see [gates/gate-2.md](gates/gate-2.md)). Unset, `e2e/run.sh` runs every section, as before. A
 new section needs no shard change: it runs in `suite`. The required `k3d` check passes only when
 every image build and every shard passed.
 
 ## CI
 
-| Workflow        | When                                | What                                                                                                  |
-| --------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `ci`            | every push, merge queue             | format, build, typecheck, lint, unit + chart tests, license check, DB/RLS suite, image non-root check |
-| `sandbox-image` | sandbox inputs change, nightly      | build, acceptance checks, license audit, Trivy (fails on fixable CRITICAL)                            |
-| `e2e`           | PRs to `main`, merge queue, nightly | images built once, then parallel k3d + gVisor shards: `e2e/run.sh`, cold-start trials, `e2e/gate1.sh` |
-| `publish`       | push to `main`                      | images (`sha-<short>`; `main` moved last) and the chart (`<version>-main.<run>.<attempt>`) to ghcr    |
+| Workflow        | When                                | What                                                                                                                  |
+| --------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `ci`            | every push, merge queue             | format, build, typecheck, lint, unit + chart tests, license check, DB/RLS suite, image non-root check                 |
+| `sandbox-image` | sandbox inputs change, nightly      | build, acceptance checks, license audit, Trivy (fails on fixable CRITICAL)                                            |
+| `e2e`           | PRs to `main`, merge queue, nightly | images built once, then parallel k3d + gVisor shards: `e2e/run.sh`, cold-start trials, `e2e/gate1.sh`, `e2e/gate2.sh` |
+| `publish`       | push to `main`                      | images (`sha-<short>`; `main` moved last) and the chart (`<version>-main.<run>.<attempt>`) to ghcr                    |
 
 CI runs on GitHub-hosted runners (free for public repositories). Deploy `sha-*` image tags or
 published chart versions, never `:main` (pods with `IfNotPresent` would keep a stale `:main`).
