@@ -1,8 +1,33 @@
 {{- if .Values.clamav.enabled -}}
 {{- $fullname := include "kobe.fullname" . -}}
 {{- $sel := dict "root" . "component" "clamav" -}}
-# Optional upload scanning (spec D26). The upstream image runs freshclam/clamd as its own users and
-# needs a writable root filesystem, so it is not held to the Kobe container baseline.
+{{- $limit := max (int64 .Values.server.uploads.maxFileBytes) (int64 .Values.server.uploads.maxMessageBytes) -}}
+# Optional upload scanning (spec D26, KOBE-146). GPL-2.0 ClamAV runs as its own service image
+# (docker.io/clamav/clamav), not bundled into any Kobe image. It runs non-root: the image's
+# /init-unprivileged entrypoint as its `clamav` user (uid 100, gid 101), no capabilities, read-only
+# root filesystem; the signature database lives in an emptyDir (downloaded by freshclam at start,
+# which needs egress to database.clamav.net; scanning stays refused, fail closed, until clamd is up).
+# The server alone may connect (NetworkPolicy). clamd is told to reject, not skip, what it cannot
+# scan in full (AlertExceedsMax) and to accept streams up to the upload limit.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $fullname }}-clamav
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+    app.kubernetes.io/component: clamav
+data:
+  clamd.conf: |
+    Foreground yes
+    LocalSocket /tmp/clamd.sock
+    TCPSocket 3310
+    TCPAddr 0.0.0.0
+    LogTime yes
+    StreamMaxLength {{ printf "%d" $limit }}
+    MaxFileSize {{ printf "%d" $limit }}
+    MaxScanSize {{ printf "%d" (mul $limit 4) }}
+    AlertExceedsMax yes
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -21,23 +46,53 @@ spec:
         {{- include "kobe.selectorLabels" $sel | nindent 8 }}
     spec:
       {{- include "kobe.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
       serviceAccountName: {{ $fullname }}-workload
       automountServiceAccountToken: false
       containers:
         - name: clamav
           image: "{{ .Values.clamav.image.repository }}:{{ .Values.clamav.image.tag }}"
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command: ["/init-unprivileged"]
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - { name: config, mountPath: /etc/clamav/clamd.conf, subPath: clamd.conf, readOnly: true }
+            - { name: db, mountPath: /var/lib/clamav }
+            - { name: tmp, mountPath: /tmp }
+            - { name: log, mountPath: /var/log/clamav }
           ports:
             - name: clamd
               containerPort: 3310
+          # The first start downloads the signature database (a few minutes).
+          startupProbe:
+            tcpSocket: { port: clamd }
+            periodSeconds: 10
+            failureThreshold: 90
           readinessProbe:
             tcpSocket: { port: clamd }
-            initialDelaySeconds: 60
             periodSeconds: 10
           resources:
             {{- toYaml .Values.clamav.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $fullname }}-clamav
+        - name: db
+          emptyDir: { sizeLimit: 1Gi }
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+        - name: log
+          emptyDir: { sizeLimit: 64Mi }
 ---
 apiVersion: v1
 kind: Service
