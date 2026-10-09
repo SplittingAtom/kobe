@@ -4,7 +4,12 @@ import {
   MAX_CONTENT_BYTES,
   MAX_TITLE_LENGTH,
   OP_ARTIFACT_PUT,
+  OP_FILE_SHARE,
+  SHARE_DESCRIPTION_MAX,
+  SHARE_NAME_MAX,
+  SHARE_PATH_MAX,
   TOOL_CREATE_ARTIFACT,
+  TOOL_SHARE_FILE,
   TOOL_UPDATE_ARTIFACT,
   type ToolsRequest,
 } from "./protocol.js";
@@ -95,6 +100,86 @@ export function artifactTools(transport: ToolsTransport): ToolDefinitionLike[] {
   ];
 }
 
+const SHARE_PARAMETERS = {
+  type: "object",
+  additionalProperties: false,
+  required: ["path"],
+  properties: {
+    path: {
+      type: "string",
+      minLength: 1,
+      maxLength: SHARE_PATH_MAX,
+      description:
+        "The file to share: a path under /workspace (absolute, or relative to /workspace).",
+    },
+    name: {
+      type: "string",
+      minLength: 1,
+      maxLength: SHARE_NAME_MAX,
+      description: "The name the user sees when downloading; default: the file's own name.",
+    },
+    description: {
+      type: "string",
+      minLength: 1,
+      maxLength: SHARE_DESCRIPTION_MAX,
+      description: "One line about what the file is.",
+    },
+  },
+};
+const SHARE_KEYS = new Set(["path", "name", "description"]);
+
+/** `share_file` (KOBE-149): registered only for an agent that announced the `files` capability. */
+export function shareFileTool(transport: ToolsTransport): ToolDefinitionLike {
+  return {
+    name: TOOL_SHARE_FILE,
+    label: "Share file",
+    description:
+      "Share a file from /workspace with the user as a download card. The file is saved first, so later edits do not change what the user gets. Returns the file record.",
+    promptSnippet: "Give the user a file from the workspace to download",
+    promptGuidelines: [
+      "Use share_file for a finished file the user asked for or will keep (a report, a spreadsheet, an archive); anything in /workspace can be shared, but not files over 100 MiB.",
+    ],
+    parameters: SHARE_PARAMETERS,
+    execute: (toolCallId, params) => share(transport, toolCallId, params),
+  };
+}
+
+function stringWithin(value: unknown, max: number, required: boolean): boolean {
+  if (value === undefined) return !required;
+  return typeof value === "string" && value.length >= 1 && value.length <= max;
+}
+
+async function share(
+  transport: ToolsTransport,
+  toolCallId: string,
+  params: unknown,
+): Promise<ToolResultLike> {
+  if (typeof params !== "object" || params === null || Array.isArray(params)) {
+    throw new ToolFailure("invalid input");
+  }
+  const input = params as Record<string, unknown>;
+  if (
+    Object.keys(input).some((key) => !SHARE_KEYS.has(key)) ||
+    !stringWithin(input.path, SHARE_PATH_MAX, true) ||
+    !stringWithin(input.name, SHARE_NAME_MAX, false) ||
+    !stringWithin(input.description, SHARE_DESCRIPTION_MAX, false)
+  ) {
+    throw new ToolFailure("invalid input: expected { path, name?, description? }");
+  }
+  const problem = frameSizeProblem(toolCallId, TOOL_SHARE_FILE, input);
+  if (problem !== undefined) throw new ToolFailure(problem);
+  const outcome = await transport.request({
+    op: OP_FILE_SHARE,
+    tool_call_id: toolCallId,
+    tool: TOOL_SHARE_FILE,
+    input,
+  });
+  if (!outcome.ok) throw new ToolFailure(`${outcome.error.code}: ${outcome.error.message}`);
+  if (!("file_id" in outcome)) throw new ToolFailure("unexpected answer to share_file");
+  const { ok: _ok, ...record } = outcome;
+  return { content: [{ type: "text", text: JSON.stringify(record) }], details: { ...record } };
+}
+
 async function put(
   transport: ToolsTransport,
   toolCallId: string,
@@ -118,6 +203,7 @@ async function put(
     input,
   });
   if (!outcome.ok) throw new ToolFailure(`${outcome.error.code}: ${outcome.error.message}`);
+  if (!("artifact_id" in outcome)) throw new ToolFailure("unexpected answer to the artifact call");
   const result = { artifact_id: outcome.artifact_id, version: outcome.version };
   return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
 }

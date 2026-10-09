@@ -1,6 +1,16 @@
-import { SYSTEM_ACTOR, sql, teams, withTeam, type KobeDb } from "@kobe/db";
+import {
+  SYSTEM_ACTOR,
+  isUnderLegalHold,
+  lockLegalHolds,
+  sql,
+  teams,
+  withTeam,
+  type KobeDb,
+  type KobeTx,
+} from "@kobe/db";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit/record.js";
+import { withTimeout } from "../retention/blobs.js";
 import { workspaceBlobKey, type WorkspaceOwner } from "./keys.js";
 import type { ObjectStore } from "./object-store.js";
 import { lockWorkspace } from "./store.js";
@@ -17,6 +27,12 @@ import { lockWorkspace } from "./store.js";
  * 2. delete the objects;
  * 3. delete the marked rows.
  *
+ * Legal hold (KOBE-17, KOBE-183): a workspace of a (team, user) covered by an active hold is never
+ * collected, neither its blobs and objects nor its tombstones. Step 1 and the combined steps 2
+ * and 3 each run in a transaction that takes the legal-hold lock shared first and checks the
+ * hold, so a hold approved meanwhile either waits for the batch (the batch started first) or is
+ * seen by it. A batch marked before a hold was placed is unmarked again and keeps its objects.
+ *
  * Batches repeat until the workspace is drained or the time budget is spent (the next run goes
  * on). Then the workspace's counters are recomputed from the rows (self-healing) and
  * reservations older than any possible upload are cleared; `workspace.purged` records counts.
@@ -29,6 +45,8 @@ export interface CollectOptions {
   readonly batch: number;
   /** Time spent on one workspace per run before moving on. */
   readonly budgetMs: number;
+  /** Test seam: runs after a batch was marked and before its objects are deleted. */
+  readonly afterMark?: () => Promise<void>;
 }
 
 export interface CollectResult {
@@ -40,13 +58,24 @@ export interface CollectResult {
 /** Uploads can't run longer than the sandbox listener's request timeout (1 h). */
 const STALE_RESERVATION = "2 hours";
 
+/** Longest one batch's object delete may take while the hold lock is held (approvals wait). */
+const DELETE_TIMEOUT_MS = 30_000;
+
+/** Legal-hold lock (shared) and check, first thing in a transaction that deletes content. */
+async function heldWorkspace(tx: KobeTx, owner: WorkspaceOwner): Promise<boolean> {
+  await tx.execute(sql.raw(`SET LOCAL lock_timeout = '5s'`));
+  await lockLegalHolds(tx);
+  return isUnderLegalHold(tx, owner.teamId, owner.userId);
+}
+
 async function collectBatch(
   db: KobeDb,
   objects: ObjectStore,
   owner: WorkspaceOwner,
   options: CollectOptions,
-): Promise<{ blobs: { sha256: string; size: number }[]; tombstones: number }> {
+): Promise<{ blobs: { sha256: string; size: number }[]; tombstones: number; held?: true }> {
   const marked = await withTeam(db, owner.teamId, async (tx) => {
+    if (await heldWorkspace(tx, owner)) return { blobs: [], tombstones: 0, held: true as const };
     await lockWorkspace(tx, owner);
     await tx.execute(sql`
       UPDATE workspace_blobs b SET deleting = true
@@ -87,8 +116,18 @@ async function collectBatch(
     };
   });
   if (marked.blobs.length === 0) return marked;
-  await objects.delete(marked.blobs.map((b) => workspaceBlobKey(options.prefix, owner, b.sha256)));
-  await withTeam(db, owner.teamId, async (tx) => {
+  await options.afterMark?.();
+  return withTeam(db, owner.teamId, async (tx) => {
+    // Re-checked under the lock: a hold placed since the marking keeps the objects.
+    if (await heldWorkspace(tx, owner)) {
+      await unmark(tx, owner, marked.blobs);
+      return { blobs: [], tombstones: marked.tombstones, held: true as const };
+    }
+    // Bounded: the transaction holds the legal-hold lock shared, and an approval waits for it.
+    await withTimeout(
+      objects.delete(marked.blobs.map((b) => workspaceBlobKey(options.prefix, owner, b.sha256))),
+      DELETE_TIMEOUT_MS,
+    );
     const gone = await tx.execute<{ size: string }>(sql`
       DELETE FROM workspace_blobs
        WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId} AND deleting
@@ -101,8 +140,20 @@ async function collectBatch(
          SET blob_count = GREATEST(blob_count - ${gone.rows.length}, 0),
              blob_bytes = GREATEST(blob_bytes - ${bytes}, 0)
        WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId}`);
+    return marked;
   });
-  return marked;
+}
+
+/** Makes marked blobs available again (their objects are still there). */
+async function unmark(
+  tx: KobeTx,
+  owner: WorkspaceOwner,
+  blobs: readonly { sha256: string }[],
+): Promise<void> {
+  await tx.execute(sql`
+    UPDATE workspace_blobs SET deleting = false
+     WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId} AND deleting
+       AND sha256 IN ${blobs.map((b) => b.sha256)}`);
 }
 
 export async function collectWorkspace(
@@ -116,6 +167,7 @@ export async function collectWorkspace(
   try {
     for (;;) {
       const batch = await collectBatch(db, objects, owner, options);
+      if (batch.held) break; // not collected now; the next run looks again
       total.blobs += batch.blobs.length;
       total.bytes += batch.blobs.reduce((n, b) => n + b.size, 0);
       total.tombstones += batch.tombstones;

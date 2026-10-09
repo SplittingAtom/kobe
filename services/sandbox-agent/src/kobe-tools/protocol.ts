@@ -5,11 +5,15 @@
  * channel.
  *
  *   extension → agent   {"id","op":"artifact.put","tool_call_id","tool","input"}
- *   agent → extension   {"id","ok":true,"artifact_id","version"}
+ *                       {"id","op":"file.share","tool_call_id","tool":"share_file","input"}
+ *   agent → extension   {"id","ok":true,"artifact_id","version"}            (artifact.put)
+ *                       {"id","ok":true,"file_id","name","mime_type","size_bytes","scan",
+ *                        "created_at","sha256"}                              (file.share)
  *                       {"id","ok":false,"error":{"code","message"}}
  *
- * Every op has its own `op` string; `share_file` (KOBE-54) and `remember` (KOBE-56) will add theirs
- * to {@link OPS} and a tool of their own. None is defined here.
+ * Every op has its own `op` string; `remember` (KOBE-56) will add its own to {@link OPS} and a tool
+ * of its own. `share_file` (KOBE-149) is registered only when the agent sets
+ * {@link TOOLS_FILES_ENV} (it announced the `files` capability; the server may then answer it).
  *
  * Dependency-free (node builtins only): the extension ships on its own, root-owned, without
  * node_modules. The values below mirror packages/protocol `artifacts.ts`; a test pins them.
@@ -22,7 +26,16 @@ export const TOOLS_FD = 4;
 export const TOOLS_TIMEOUT_MS = 30_000;
 
 export const OP_ARTIFACT_PUT = "artifact.put";
-export const OPS = [OP_ARTIFACT_PUT] as const;
+export const OP_FILE_SHARE = "file.share";
+export const OPS = [OP_ARTIFACT_PUT, OP_FILE_SHARE] as const;
+
+/** Env var set to `1` by an agent that announced the `files` capability. Read once, removed. */
+export const TOOLS_FILES_ENV = "KOBE_TOOLS_FILES";
+export const TOOL_SHARE_FILE = "share_file";
+/** Mirrors packages/protocol `files.ts` (pinned by a test). */
+export const SHARE_PATH_MAX = 1024;
+export const SHARE_DESCRIPTION_MAX = 500;
+export const SHARE_NAME_MAX = 255;
 
 export const TOOL_CREATE_ARTIFACT = "create_artifact";
 export const TOOL_UPDATE_ARTIFACT = "update_artifact";
@@ -39,7 +52,7 @@ export const MAX_ID_LENGTH = 128;
 
 export interface ToolsRequest {
   readonly id: string;
-  readonly op: typeof OP_ARTIFACT_PUT;
+  readonly op: (typeof OPS)[number];
   readonly tool_call_id: string;
   readonly tool: string;
   readonly input: Record<string, unknown>;
@@ -50,6 +63,16 @@ export interface ToolsError {
   readonly message: string;
 }
 
+export interface SharedFileFields {
+  readonly file_id: string;
+  readonly name: string;
+  readonly mime_type: string;
+  readonly size_bytes: number;
+  readonly scan: string;
+  readonly created_at: string;
+  readonly sha256: string;
+}
+
 export type ToolsResponse =
   | {
       readonly id: string;
@@ -57,4 +80,5 @@ export type ToolsResponse =
       readonly artifact_id: string;
       readonly version: number;
     }
+  | ({ readonly id: string; readonly ok: true } & SharedFileFields)
   | { readonly id: string; readonly ok: false; readonly error: ToolsError };
