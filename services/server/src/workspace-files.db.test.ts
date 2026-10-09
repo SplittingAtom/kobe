@@ -131,6 +131,96 @@ async function auditRows(team: string, action: string) {
   return rows.map((r) => r.target);
 }
 
+/** An app whose listing pages hold two entries, so paging is visible with a few files. */
+function pagedBrowser(w: World): TestBrowser {
+  const paged = createApp(fx.replica(0).deps, {
+    workspaceFiles: { sync, waker: { wake: () => Promise.resolve() }, listPageSize: 2 },
+  });
+  const b = new TestBrowser(paged, PUBLIC_URL);
+  for (const [k, v] of w.alice.browser.cookies) b.cookies.set(k, v);
+  b.team = w.team;
+  return b;
+}
+
+describe("GET /v1/workspace/files paging (KOBE-184)", () => {
+  const page = (b: TestBrowser, cursor?: string, path = "") =>
+    b.get(
+      `/v1/workspace/files?path=${path}${cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`}`,
+    );
+
+  it("pages in a stable order (folders first, then name) with an opaque cursor", async () => {
+    const w = await world();
+    for (const f of ["d1/x", "d2/x", "a.txt", "b.txt", "c.txt"]) await seed(w, w.alice, f, "x");
+    const b = pagedBrowser(w);
+    const names: string[] = [];
+    let cursor: string | undefined;
+    let pages = 0;
+    do {
+      const res = await page(b, cursor);
+      expect(res.status, res.text).toBe(200);
+      const body = workspaceListResponseSchema.parse(res.json);
+      expect(body.entries.length).toBeLessThanOrEqual(2);
+      names.push(...body.entries.map((e) => e.name));
+      cursor = body.next_cursor;
+      pages += 1;
+    } while (cursor !== undefined && pages < 10);
+    expect(names).toEqual(["d1", "d2", "a.txt", "b.txt", "c.txt"]);
+    expect(pages).toBe(3);
+  });
+
+  it("the last full page has no cursor, and a default-size listing never has one", async () => {
+    const w = await world();
+    await seed(w, w.alice, "a", "x");
+    await seed(w, w.alice, "b", "x");
+    expect(workspaceListResponseSchema.parse((await page(pagedBrowser(w))).json).next_cursor).toBe(
+      undefined,
+    );
+    for (const f of ["c", "d"]) await seed(w, w.alice, f, "x");
+    expect((await w.a.get("/v1/workspace/files")).json).not.toHaveProperty("next_cursor");
+  });
+
+  it("is a position: files added or removed between pages never repeat or skip the rest", async () => {
+    const w = await world();
+    for (const f of ["a", "b", "c", "d"]) await seed(w, w.alice, f, "x");
+    const b = pagedBrowser(w);
+    const first = workspaceListResponseSchema.parse((await page(b)).json);
+    expect(first.entries.map((e) => e.name)).toEqual(["a", "b"]);
+    await seed(w, w.alice, "0-before", "x"); // sorts before the cursor
+    expect((await w.a.request("DELETE", "/v1/workspace/files?path=a")).status).toBe(204);
+    await seed(w, w.alice, "bb", "x"); // sorts after the cursor
+    const second = workspaceListResponseSchema.parse((await page(b, first.next_cursor)).json);
+    expect(second.entries.map((e) => e.name)).toEqual(["bb", "c"]);
+    expect(
+      workspaceListResponseSchema
+        .parse((await page(b, second.next_cursor)).json)
+        .entries.map((e) => e.name),
+    ).toEqual(["d"]);
+  });
+
+  it("pages inside a folder; a cursor past the end is an empty page, not a 404", async () => {
+    const w = await world();
+    for (const f of ["f/1", "f/2", "f/3"]) await seed(w, w.alice, f, "x");
+    const b = pagedBrowser(w);
+    const first = workspaceListResponseSchema.parse((await page(b, undefined, "f")).json);
+    expect(first.entries.map((e) => e.name)).toEqual(["1", "2"]);
+    const last = workspaceListResponseSchema.parse((await page(b, first.next_cursor, "f")).json);
+    expect(last.entries.map((e) => e.name)).toEqual(["3"]);
+    await w.a.request("DELETE", "/v1/workspace/files?path=f/3");
+    const empty = await page(b, first.next_cursor, "f");
+    expect(empty.status).toBe(200);
+    expect(workspaceListResponseSchema.parse(empty.json).entries).toEqual([]);
+  });
+
+  it("refuses a cursor it did not issue", async () => {
+    const w = await world();
+    await seed(w, w.alice, "a", "x");
+    for (const bad of ["!!!", "bm90LWpzb24", Buffer.from('{"d":2,"n":1}').toString("base64url")]) {
+      const res = await page(pagedBrowser(w), bad);
+      expect(res.status, bad).toBe(400);
+    }
+  });
+});
+
 describe("GET /v1/workspace/files", () => {
   it("lists a folder from the synced manifest: dirs first, areas and owners", async () => {
     const w = await world();
@@ -409,6 +499,67 @@ describe("POST /v1/workspace/files (upload)", () => {
     expect((await w.a.get("/v1/workspace/file?path=doc.txt")).text).toBe("from browser");
   });
 
+  it("streams through the uploads pipeline: putStream, no buffered put, no staging object left", async () => {
+    const w = await world();
+    const original = { put: objects.put, putStream: objects.putStream };
+    let streamed = 0;
+    let buffered = 0;
+    objects.put = (...args) => {
+      buffered += 1;
+      return original.put.apply(objects, args);
+    };
+    objects.putStream = (...args) => {
+      streamed += 1;
+      return original.putStream.apply(objects, args);
+    };
+    try {
+      const res = await upload(w.a, "s", "big.bin", "y".repeat(5000));
+      expect(res.status, res.text).toBe(201);
+    } finally {
+      Object.assign(objects, original);
+    }
+    expect(streamed).toBe(1);
+    expect(buffered).toBe(0);
+    const owner = { teamId: w.team, userId: w.alice.id };
+    expect(objects.keys(`teams/${w.team}/users/${w.alice.id}/workspace/`)).toEqual([
+      workspaceBlobKey("", owner, sha(Buffer.from("y".repeat(5000)))),
+    ]);
+  });
+
+  it("cuts an oversized body off mid-stream and leaves no object or row", async () => {
+    const w = await world();
+    const before = objects.objects.size;
+    const m = multipart({}, { name: "huge.bin", data: "z".repeat(LIMITS.maxFileBytes + 10) });
+    // The declared length lies (fits the limit), so only the meter can stop the body.
+    const res = await w.a.request("POST", "/v1/workspace/files", m.raw, {
+      "content-length": "1000",
+    });
+    expect([400, 413]).toContain(res.status);
+    expect(objects.objects.size).toBe(before);
+    const { rows } = await fx.admin.query(
+      `SELECT 1 FROM workspace_files WHERE team_id = $1 AND path = 'huge.bin'`,
+      [w.team],
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it("counts against the team storage quota (KOBE-143) and cleans up when over it", async () => {
+    const w = await world();
+    await fx.admin.query(
+      `INSERT INTO team_storage_quotas (team_id, max_bytes, updated_by) VALUES ($1, 10, $2)`,
+      [w.team, w.alice.id],
+    );
+    const before = objects.objects.size;
+    expect((await upload(w.a, "", "ok.txt", "12345")).status).toBe(201);
+    const over = await upload(w.a, "", "over.txt", "1234567");
+    expect(over.status).toBe(507);
+    expect(workspaceFileErrorSchema.parse(over.json).code).toBe("quota_exceeded");
+    // The refused content stays as an unreferenced workspace blob (the collector's job, KOBE-27);
+    // no staging object is left either way.
+    expect(objects.objects.size).toBe(before + 2);
+    expect(objects.keys().filter((k) => k.includes("/incoming/"))).toEqual([]);
+  });
+
   it("reuses content a workspace already holds (no second object)", async () => {
     const w = await world();
     await seed(w, w.alice, "orig.txt", "same bytes");
@@ -492,7 +643,7 @@ describe("DELETE /v1/workspace/files", () => {
     }
     const res = await w.a.request("DELETE", "/v1/workspace/files?path=evidence.txt");
     expect(res.status).toBe(409);
-    expect(workspaceFileErrorSchema.parse(res.json).code).toBe("read_only");
+    expect(workspaceFileErrorSchema.parse(res.json).code).toBe("legal_hold");
     expect((await w.a.get("/v1/workspace/file?path=evidence.txt")).text).toBe("keep me");
     expect(await auditRows(w.team, "workspace.file_deleted")).toEqual([]);
   });

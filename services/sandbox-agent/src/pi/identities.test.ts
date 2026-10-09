@@ -267,6 +267,21 @@ describe("paired partner (tool) uids (KOBE-166)", () => {
     await expect(second.killAll(pi)).rejects.toThrow(/kill-all as 3001 failed: partner busy/);
   });
 
+  it("kills only the partner uid on request (a dead or restarted executor), never without pairs", async () => {
+    const runner = okRunner();
+    const ids = new PiIdentities("/helper", [2001], runner.run, "/reclaim", true);
+    await ids.killPartner(pi);
+    expect(runner.calls).toEqual([["3001", "--kill-all"]]);
+    const failing = fakeRunner(() => ({ code: 71, stderr: "busy" }));
+    const bad = new PiIdentities("/helper", [2001], failing.run, "/reclaim", true);
+    await expect(bad.killPartner(pi)).rejects.toThrow(/kill-all as 3001 failed: busy/);
+    const unpaired = okRunner();
+    await expect(new PiIdentities("/helper", [2001], unpaired.run).killPartner(pi)).rejects.toThrow(
+      /no partner uid/,
+    );
+    expect(unpaired.calls).toEqual([]);
+  });
+
   it("leaves the partner alone without pairs", async () => {
     const runner = okRunner();
     const ids = new PiIdentities("/helper", [2001], runner.run);

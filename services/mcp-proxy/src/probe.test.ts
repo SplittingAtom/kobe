@@ -46,6 +46,20 @@ describe("POST /internal/v1/probe", () => {
     expect(await res.json()).toEqual({ ok: true, tools });
   });
 
+  it("lists with the user's API key as a bearer token when the server sends one (KOBE-108)", async () => {
+    fake.options = { tools: [] };
+    await post({ url: fake.url, api_key: "sk-live-0123456789" });
+    expect(fake.received.at(-1)?.headers.authorization).toBe("Bearer sk-live-0123456789");
+    fake.received.length = 0;
+    await post({ url: fake.url });
+    expect(fake.received.at(-1)?.headers.authorization).toBeUndefined();
+  });
+
+  it("refuses an api_key that is not a plain header value", async () => {
+    expect((await post({ url: fake.url, api_key: "has space" })).status).toBe(400);
+    expect(fake.received).toHaveLength(0);
+  });
+
   it("reports an upstream failure as data", async () => {
     fake.options = { status: 401 };
     expect(await (await post({ url: fake.url })).json()).toEqual({

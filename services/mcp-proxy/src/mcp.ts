@@ -307,6 +307,7 @@ async function decideAndForward(
       return [toolError(id, "Kobe could not check this call, so it was not run.")];
     }
     const credentials = await deps.credentials.headersFor({
+      token: ctx.token,
       teamId: ctx.teamId,
       userId: ctx.userId,
       connector: decision.connector,

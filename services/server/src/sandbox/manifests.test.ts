@@ -120,6 +120,17 @@ describe("sandbox pod spec (D12, D13; secrets never enter sandboxes)", () => {
     ).toContainEqual({ name: "KOBE_WORKSPACE_SYNC_INTERVAL_MS", value: "0" });
   });
 
+  it("tells the agent whether to run Pi's tools in the partner-uid executor (KOBE-167), off by default", async () => {
+    const isolation = await verified();
+    const envOf = (settings: typeof SETTINGS) =>
+      (sandboxPodSpec(isolation, settings, ADDRESSES) as unknown as Pod).containers[0]?.env;
+    expect(envOf(SETTINGS)).toContainEqual({ name: "KOBE_TOOL_EXECUTOR", value: "false" });
+    expect(envOf({ ...SETTINGS, toolExecutor: { enabled: true } })).toContainEqual({
+      name: "KOBE_TOOL_EXECUTOR",
+      value: "true",
+    });
+  });
+
   it("never overrides the image's command (tini + hardened launcher, KOBE-23) or args", async () => {
     const spec = sandboxPodSpec(await verified(), SETTINGS, ADDRESSES) as unknown as {
       containers: Record<string, unknown>[];

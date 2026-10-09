@@ -124,8 +124,14 @@ spec:
       {{- include "kobe.selectorLabels" (dict "root" . "component" "clamav") | nindent 6 }}
   policyTypes: ["Ingress"]
   ingress:
+    # Only the API server streams uploads to clamd (D26); nothing else, sandboxes included.
     - from:
-        - podSelector: {}
+        - podSelector:
+            matchLabels:
+              {{- include "kobe.selectorLabels" (dict "root" . "component" "server") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 3310
 {{- end }}
 {{- if eq .Values.postgres.mode "cnpg" }}
 ---

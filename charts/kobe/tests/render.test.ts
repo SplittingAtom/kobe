@@ -29,6 +29,7 @@ type Manifest = {
   kind: string;
   metadata: { name: string; annotations?: Record<string, string> };
   spec?: any;
+  data?: Record<string, string>;
 };
 
 function helmArgs(values: Record<string, string>): string[] {
@@ -508,9 +509,24 @@ describe("network policies", () => {
   const ms = render({ "postgres.mode": "cnpg", "clamav.enabled": "true" });
   const policy = (name: string) => find(ms, "NetworkPolicy", name);
 
-  it("lets only pods in the release namespace reach ClamAV (Bifrost: tests/models.test.ts)", () => {
+  it("lets only the server reach ClamAV, on the clamd port (Bifrost: tests/models.test.ts)", () => {
     expect(policy("kobe-clamav")?.spec.policyTypes).toEqual(["Ingress"]);
-    expect(policy("kobe-clamav")?.spec.ingress).toEqual([{ from: [{ podSelector: {} }] }]);
+    expect(policy("kobe-clamav")?.spec.ingress).toEqual([
+      {
+        from: [
+          {
+            podSelector: {
+              matchLabels: {
+                "app.kubernetes.io/name": "kobe",
+                "app.kubernetes.io/instance": "kobe",
+                "app.kubernetes.io/component": "server",
+              },
+            },
+          },
+        ],
+        ports: [{ protocol: "TCP", port: 3310 }],
+      },
+    ]);
   });
 
   it("lets only the release namespace and the CloudNativePG operator reach Postgres", () => {
@@ -711,9 +727,50 @@ describe("auth (KOBE-12)", () => {
 });
 
 describe("ClamAV", () => {
+  const on = render({ "clamav.enabled": "true" });
+  const serverEnv = (ms: Manifest[]) =>
+    find(ms, "Deployment", "kobe-server")?.spec.template.spec.containers[0].env as {
+      name: string;
+      value?: string;
+    }[];
+
   it("is off by default and optional", () => {
     expect(find(render(), "Deployment", "kobe-clamav")).toBeUndefined();
-    expect(find(render({ "clamav.enabled": "true" }), "Deployment", "kobe-clamav")).toBeDefined();
+    expect(find(on, "Deployment", "kobe-clamav")).toBeDefined();
+  });
+
+  it("tells the server where clamd is only when enabled (scanning then fails closed)", () => {
+    expect(serverEnv(render()).map((e) => e.name)).not.toContain("KOBE_CLAMAV_HOST");
+    expect(serverEnv(on)).toContainEqual({ name: "KOBE_CLAMAV_HOST", value: "kobe-clamav" });
+    expect(serverEnv(on)).toContainEqual({ name: "KOBE_CLAMAV_PORT", value: "3310" });
+  });
+
+  it("runs as the image's non-root user with the unprivileged entrypoint", () => {
+    const pod = find(on, "Deployment", "kobe-clamav")?.spec.template.spec;
+    expect(pod.securityContext).toMatchObject({
+      runAsNonRoot: true,
+      runAsUser: 100,
+      runAsGroup: 101,
+      seccompProfile: { type: "RuntimeDefault" },
+    });
+    const c = pod.containers[0];
+    expect(c.command).toEqual(["/init-unprivileged"]);
+    expect(c.securityContext).toMatchObject({
+      allowPrivilegeEscalation: false,
+      capabilities: { drop: ["ALL"] },
+    });
+  });
+
+  it("configures clamd to reject what it cannot fully scan, up to the upload limit", () => {
+    const conf = find(on, "ConfigMap", "kobe-clamav")?.data["clamd.conf"] as string;
+    expect(conf).toMatch(/^TCPSocket 3310$/m);
+    expect(conf).toMatch(/^StreamMaxLength 524288000$/m);
+    expect(conf).toMatch(/^MaxFileSize 524288000$/m);
+    expect(conf).toMatch(/^AlertExceedsMax yes$/m);
+    const raised = render({ "clamav.enabled": "true", "server.uploads.maxFileBytes": "900000000" });
+    expect(find(raised, "ConfigMap", "kobe-clamav")?.data["clamd.conf"]).toMatch(
+      /^StreamMaxLength 900000000$/m,
+    );
   });
 });
 

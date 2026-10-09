@@ -51,6 +51,8 @@ export interface PiProcessOptions {
   readonly runAs?: { readonly identities: PiIdentities; readonly identity: PiIdentity };
   /** Also give Pi a fifth pipe as fd 4: the kobe-tools channel (KOBE-128). */
   readonly toolsChannel?: boolean;
+  /** Also give Pi a sixth pipe as fd 5: the kobe-exec channel (KOBE-167). */
+  readonly execChannel?: boolean;
 }
 
 interface Pending {
@@ -90,10 +92,13 @@ export class PiProcess {
     this.#child = spawn(file, args, {
       cwd: options.cwd,
       env: { ...options.env },
+      // fd 3 policy, fd 4 kobe-tools, fd 5 kobe-exec; a channel in use needs the ones before it.
       stdio:
-        options.toolsChannel === true
-          ? ["pipe", "pipe", "pipe", "pipe", "pipe"]
-          : ["pipe", "pipe", "pipe", "pipe"],
+        options.execChannel === true
+          ? ["pipe", "pipe", "pipe", "pipe", "pipe", "pipe"]
+          : options.toolsChannel === true
+            ? ["pipe", "pipe", "pipe", "pipe", "pipe"]
+            : ["pipe", "pipe", "pipe", "pipe"],
       detached: true,
       windowsHide: true,
     });
@@ -110,6 +115,7 @@ export class PiProcess {
     this.#child.stdin?.on("error", () => undefined);
     this.control?.on("error", () => undefined);
     this.toolsControl?.on("error", () => undefined);
+    this.execControl?.on("error", () => undefined);
 
     this.#exited = new Promise((resolve) => {
       const finish = (exitCode: number | null, signal: string | null) => {
@@ -118,6 +124,7 @@ export class PiProcess {
         this.#failPending(new PiProcessError("Pi process exited", "pi_unavailable"));
         this.control?.destroy();
         this.toolsControl?.destroy();
+        this.execControl?.destroy();
         resolve(this.#exit);
         options.onExit(this.#exit);
       };
@@ -144,7 +151,17 @@ export class PiProcess {
 
   /** fd 4 of the child: the kobe-tools channel (only with `toolsChannel`). */
   get toolsControl(): Duplex | undefined {
+    if (this.#options.toolsChannel !== true) return undefined;
     return (this.#child.stdio[4] as Duplex | null | undefined) ?? undefined;
+  }
+
+  /** fd 5 of the child: the kobe-exec channel (only with `execChannel`). */
+  get execControl(): Duplex | undefined {
+    if (this.#options.execChannel !== true) return undefined;
+    return (
+      ((this.#child.stdio as (Duplex | null | undefined)[])[5] as Duplex | null | undefined) ??
+      undefined
+    );
   }
 
   whenExited(): Promise<PiExit> {

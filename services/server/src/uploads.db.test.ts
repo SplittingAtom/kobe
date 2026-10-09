@@ -241,9 +241,11 @@ describe("scan seam", () => {
       contentLength: undefined,
     });
     const caller = { teamId: team, userId: owner.id };
-    const rejected = await storeUpload(deps("rejected"), caller, input());
+    const asUser = <T>(fn: () => Promise<T>) =>
+      runWithAuditContext({ actor: { kind: "user", id: owner.id }, ip: null, userAgent: null }, fn);
+    const rejected = await asUser(() => storeUpload(deps("rejected"), caller, input()));
     expect(rejected).toMatchObject({ ok: false, status: 422, body: { code: "scan_rejected" } });
-    const down = await storeUpload(deps("unavailable"), caller, input());
+    const down = await asUser(() => storeUpload(deps("unavailable"), caller, input()));
     expect(down).toMatchObject({ ok: false, status: 503, body: { code: "scan_unavailable" } });
     expect(await rowsOf(team)).toHaveLength(0);
     expect(objects.keys(`${PREFIX}teams/${team}/`)).toEqual([]);

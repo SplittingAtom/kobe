@@ -1,5 +1,6 @@
 import { injectTraceHeaders } from "@kobe/telemetry";
 import { z } from "zod";
+import type { GrantAnswer } from "./credentials.js";
 
 /**
  * The proxy's client for the server's internal listener (`services/server/src/routes/internal.ts`):
@@ -72,9 +73,13 @@ export type ServerAnswer<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly failure: ServerFailure };
 
+const grantSchema = z.object({ kind: z.literal("api_key"), api_key: z.string().min(1) });
+
 export interface PolicyServer {
   listTools(token: string, connectorId: string): Promise<ServerAnswer<ToolsResponse>>;
   decide(token: string, query: CallQuery): Promise<ServerAnswer<CallDecision>>;
+  /** The sandbox's own user's API key for a connector (KOBE-108); never cached. */
+  fetchGrant(token: string, connectorId: string): Promise<GrantAnswer>;
 }
 
 export interface PolicyServerOptions {
@@ -131,7 +136,42 @@ export function createPolicyServer(options: PolicyServerOptions): PolicyServer {
     }
   }
 
+  async function fetchGrant(token: string, connectorId: string): Promise<GrantAnswer> {
+    try {
+      const res = await doFetch(
+        `${options.baseUrl}/internal/v1/mcp/connectors/${encodeURIComponent(connectorId)}/grant`,
+        {
+          method: "POST",
+          headers: injectTraceHeaders({
+            authorization: `Bearer ${options.internalKey}`,
+            "kobe-sandbox-token": token,
+          }),
+          signal: AbortSignal.timeout(options.timeoutMs),
+          redirect: "error",
+        },
+      );
+      if (res.status === 404) {
+        const json = (await res.json().catch(() => ({}))) as { code?: unknown };
+        return {
+          ok: false,
+          failure: json.code === "not_connected" ? "not_connected" : "unavailable",
+        };
+      }
+      if (res.status !== 200) {
+        await res.body?.cancel();
+        return { ok: false, failure: "unavailable" };
+      }
+      const parsed = grantSchema.safeParse(await res.json());
+      if (!parsed.success) return { ok: false, failure: "unavailable" };
+      return { ok: true, value: { kind: "api_key", apiKey: parsed.data.api_key } };
+    } catch (error) {
+      options.onError?.(error);
+      return { ok: false, failure: "unavailable" };
+    }
+  }
+
   return {
+    fetchGrant,
     listTools: (token, connectorId) =>
       post(
         `/connectors/${encodeURIComponent(connectorId)}/tools`,

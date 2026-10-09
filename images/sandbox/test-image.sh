@@ -61,6 +61,11 @@ check "kobe-tools extension: root-owned, read-only, .js only" '^0:0 555 0:0 555 
 check "agent accepts the baked kobe-tools file" '^ok$' run node --input-type=module -e \
   'import { checkExtensionFile as c } from "/opt/kobe/sandbox-agent/dist/policy/extension-file.js"; await c("/opt/kobe/pi-extensions/kobe-tools/index.js", "kobe-tools"); console.log("ok")'
 check "the image turns kobe-tools on (KOBE_TOOLS_EXTENSION names the baked file)" '^/opt/kobe/pi-extensions/kobe-tools/index.js$' run sh -c 'echo $KOBE_TOOLS_EXTENSION'
+check "kobe-exec extension (KOBE-167): root-owned, read-only, .js only" '^0:0 555 0:0 555 ok$' run sh -c \
+  'd=/opt/kobe/pi-extensions/kobe-exec; echo "$(stat -c "%u:%g %a" ${d%/*}) $(stat -c "%u:%g %a" $d) $(for f in $d/*; do case "$f" in *.js) [ "$(stat -c "%u:%g %a" "$f")" = "0:0 444" ] || echo "bad $f";; *) echo "extra $f";; esac; done; [ -f $d/index.js ] && echo ok)"'
+check "agent accepts the baked kobe-exec file" '^ok$' run node --input-type=module -e \
+  'import { checkExtensionFile as c } from "/opt/kobe/sandbox-agent/dist/policy/extension-file.js"; await c("/opt/kobe/pi-extensions/kobe-exec/index.js", "kobe-exec"); console.log("ok")'
+check "the image turns kobe-exec on (KOBE_EXEC_EXTENSION names the baked file)" '^/opt/kobe/pi-extensions/kobe-exec/index.js$' run sh -c 'echo $KOBE_EXEC_EXTENSION'
 # kobe-tools (KOBE-128) as the agent starts it: fd 3 the policy socket, fd 4 the kobe-tools socket.
 # A scripted model (pi-ai faux provider, in /tmp) calls create_artifact; this script plays kobe-policy
 # (allows) and the agent's end of fd 4 (answers artifact.put), and the tool result must carry the
@@ -311,6 +316,9 @@ check "kobe-runas starts a partner uid: own uid/gid, workspace group only, no ca
   $R 3001 sh -c 'echo "uid=$(id -u) gid=$(id -g) groups=$(id -G | tr " " "\n" | sort -n | paste -sd,) caps=$(awk "/^CapPrm/{p=\$2} /^CapEff/{e=\$2} END{print p \"/\" e}" /proc/self/status) nnp=$(awk "/^NoNewPrivs/{print \$2}" /proc/self/status) umask=$(umask)"'
 check "kobe-runas hands a partner uid stdio only (no fd 3, 4 or 5)" '^closed3 closed4 closed5$' run_pair sh -c \
   "exec 3<>/dev/null 4<>/dev/null 5<>/dev/null; $R 3000 sh -c 'for n in 3 4 5; do if [ -e /proc/self/fd/\$n ]; then printf \"open%s \" \$n; else printf \"closed%s \" \$n; fi; done' | sed 's/ \$//'"
+check "the tool executor (KOBE-167) runs as a partner uid, from the agent's dist, and answers on its stdio" \
+  '^\{"id":"a","ok":true,"kind":"dir","size":[0-9]+\}$' run_pair sh -c \
+  "printf '{\"id\":\"a\",\"op\":\"stat\",\"path\":\"/tmp\"}\n' | $R 3000 node /opt/kobe/sandbox-agent/dist/exec/executor/main.js"
 check "as a partner uid, a process cannot ptrace or read the memory of its parent (--probe-ptrace)" '^probe=0$' run_pair \
   sh -c "$R 3000 --probe-ptrace; echo probe=\$?"
 check "a partner uid cannot run kobe-runas" 'Permission denied' run_pair sh -c "$R 3000 $R 2000 id 2>&1; true"

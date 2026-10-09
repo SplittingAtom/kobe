@@ -321,6 +321,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     runContext,
     // Gate 2: KOBE-37's verifier (finds, verifies and consumes the signed approval).
     approvals: approvalVerifierForMcp(database.db, approvals.verifier),
+    ...(options.envelope ? { envelope: options.envelope } : {}),
     ...(options.mcp?.now ? { now: options.mcp.now } : {}),
   });
   const budgets = new BudgetMonitor({
