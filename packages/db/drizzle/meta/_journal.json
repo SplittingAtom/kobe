@@ -526,6 +526,20 @@
       "when": 1791556572050,
       "tag": "0074_memory_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1791564701227,
+      "tag": "0075_projects",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1791564705683,
+      "tag": "0076_projects_rls",
+      "breakpoints": true
     }
   ]
 }
