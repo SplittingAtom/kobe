@@ -4,7 +4,9 @@ import {
   type ApprovalMode,
   type ErrorInfo,
   type PiThreadConfig,
+  type SandboxAttachment,
 } from "@kobe/protocol";
+import { listRunAttachments } from "../uploads/attach-list.js";
 import { sql, type KobeTx } from "@kobe/db";
 import { omittedItems } from "./omitted-event.js";
 import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js";
@@ -46,6 +48,8 @@ export interface StartPlan {
     readonly draftRevision?: number;
   } | null;
   readonly config?: Omit<PiThreadConfig, "agent" | "approval_mode">;
+  /** The message's uploads, already synced into the workspace (KOBE-144). */
+  readonly attachments?: readonly SandboxAttachment[];
   /** What the resolver left out of the run's configuration (KOBE-76). */
   readonly omissions: readonly Omission[];
 }
@@ -195,7 +199,10 @@ export async function promoteInTx(
     }
     return {
       transitions,
-      plan: planOf(thread, { ...next, parentEntryId, approvalMode }, resolved, model),
+      plan: withAttachments(
+        planOf(thread, { ...next, parentEntryId, approvalMode }, resolved, model),
+        await listRunAttachments(tx, teamId, threadId, next.id),
+      ),
     };
   }
   return { transitions };
@@ -296,7 +303,14 @@ export async function restartPlanInTx(
     started ?? requestedModel(thread, resolved).alias,
   );
   if (!resolution.ok) return undefined;
-  return planOf(thread, run, resolved, resolution.model);
+  return withAttachments(
+    planOf(thread, run, resolved, resolution.model),
+    await listRunAttachments(tx, run.teamId, thread.id, run.id),
+  );
+}
+
+function withAttachments(plan: StartPlan, attachments: readonly SandboxAttachment[]): StartPlan {
+  return attachments.length === 0 ? plan : { ...plan, attachments };
 }
 
 /** The alias in the run's `run.started` event, if any. */
