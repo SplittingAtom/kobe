@@ -56,7 +56,7 @@ jobs:
           if printf '%s\n' "${files}" | grep -qvE '^docs/|\.md$'; then code=true; else code=false; fi
           echo "code=${code}" | tee -a "$GITHUB_OUTPUT"
 
-  images:
+  image:
     name: image (${{ matrix.name }})
     needs: changes
     if: needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
@@ -97,6 +97,14 @@ jobs:
           # Read-only: publish.yml writes these scopes on every push to main, which every pull
           # request and merge-queue run may read; PR runs don't spend the repository's cache quota.
           cache-from: type=gha,scope=${{ matrix.name }}
+      # KOBE-138: the non-root assertion (formerly ci.yml's `images` job, which built every image a
+      # second time) runs on the image just built. The sandbox image has its own checks
+      # (images/sandbox/test-image.sh).
+      - name: Assert ${{ matrix.name }} runs as a non-root user
+        if: matrix.name != 'sandbox'
+        run: |
+          docker load --input "${RUNNER_TEMP}/e2e-image-${{ matrix.name }}.tar"
+          scripts/assert-image-nonroot.sh "ghcr.io/splittingatom/kobe-${{ matrix.name }}:${KOBE_IMAGE_TAG}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           # archive: false uploads the file as is (its layers are compressed already); the
@@ -107,9 +115,26 @@ jobs:
           overwrite: true
           if-no-files-found: error
 
+  # A required check (the main ruleset names it; it used to be a ci.yml job): passes when every
+  # image built and is non-root. Docs-only changes skip the builds, and it still reports.
+  images:
+    needs: [changes, image]
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every image built and is non-root
+        env:
+          IMAGES: ${{ needs.image.result }}
+          CODE: ${{ needs.changes.outputs.code }}
+        run: |
+          echo "code changed: ${CODE}, images: ${IMAGES}"
+          if [ "${CODE}" = false ]; then echo "docs-only change: nothing to build"; exit 0; fi
+          [ "${IMAGES}" = success ]
+
   e2e:
     name: e2e (${{ matrix.shard }})
-    needs: images
+    needs: image
     runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-latest') || vars.KOBE_RUNNER || 'ubuntu-latest' }}
     # Healthy shards take about 10 min; under peak load the self-hosted runners' Docker data
     # (Longhorn on the nodes' HDDs) is far slower (ci/runners/README.md).
@@ -207,14 +232,14 @@ jobs:
   # The required check (branch protection and the merge-queue ruleset name it): passes only when
   # every image built and every shard passed. Skipped for draft PRs, as the suite is.
   k3d:
-    needs: [changes, images, e2e]
+    needs: [changes, image, e2e]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Every image build and e2e shard passed
         env:
-          IMAGES: ${{ needs.images.result }}
+          IMAGES: ${{ needs.image.result }}
           SHARDS: ${{ needs.e2e.result }}
           CODE: ${{ needs.changes.outputs.code }}
         run: |
