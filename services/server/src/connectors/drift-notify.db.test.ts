@@ -91,7 +91,7 @@ describe("drift notifications", () => {
     expect(mailTo("carol")).toHaveLength(0); // not an admin, no grants yet
 
     // Names only, no tool content or secrets (ac-2).
-    const mail = mailTo("alice")[0]!;
+    const mail = mailTo("alice")[0] ?? { subject: "", text: "" };
     expect(mail.subject).toContain("notify-a");
     expect(mail.text).toContain("a");
     expect(`${mail.subject}\n${mail.text}`).not.toMatch(/ignore previous|evil|https:\/\/notify-a/);
