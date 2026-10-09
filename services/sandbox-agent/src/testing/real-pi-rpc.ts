@@ -1,11 +1,16 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import type { Duplex } from "node:stream";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, chown, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { PI_LOCKDOWN_ARGS } from "../pi/pi-launch.js";
+import { ExecRelay } from "../exec/relay.js";
+import { executorEnv, startExecutor } from "../exec/spawn-executor.js";
+import { EXEC_FD_ENV } from "../kobe-exec/protocol.js";
+import type { PiIdentities, PiIdentity } from "../pi/identities.js";
+import { preparePiPrivateDirs } from "../threads/exec-wiring.js";
+import { EXEC_CHANNEL_FD, PI_LOCKDOWN_ARGS } from "../pi/pi-launch.js";
 
 /**
  * A bare driver for the REAL pinned Pi 1.0.0 in RPC mode, started the way the agent starts it
@@ -92,6 +97,39 @@ export interface PiRpcOptions {
   readonly gatewayUrl: string;
   /** Runs on the fresh agent dir before Pi starts (KOBE-169: the agent's guarded files). */
   readonly prepareAgentDir?: (agentDir: string) => Promise<void>;
+  /**
+   * Run Pi's built-in tools in an executor (KOBE-167): kobe-exec loaded right before kobe-policy,
+   * fd 5 relayed by the agent's own `ExecRelay`. With `pair`, the way the agent does it under Pi
+   * identities: Pi runs as the identity, the executor as its partner uid, and the directories get
+   * the agent's layout (runtime dir in the Pi's group, `agent/` sticky); the real helper is needed.
+   * Without it Pi and the executor share this process's uid.
+   */
+  readonly exec?: {
+    readonly extension: string;
+    readonly executorEntry: string;
+    readonly pair?: PiPair;
+  };
+  /**
+   * Pi under a real Pi identity with the agent's layout but its tools in Pi (no executor): the
+   * controls that show KOBE-169's lock stops the plant on its own.
+   */
+  readonly pair?: PiPair;
+}
+
+export interface PiPair {
+  readonly identities: PiIdentities;
+  readonly identity: PiIdentity;
+  readonly workspaceGid: number;
+  /**
+   * KOBE-196: Pi's HOME and TMPDIR private to it and its jiti/compile caches off (default),
+   * or the shared ones with the caches on, as before (the control that shows the attack).
+   */
+  readonly hardened?: boolean;
+  /** Each protection on its own (default: `hardened`, itself default true). */
+  readonly privateDirs?: boolean;
+  readonly cachesOff?: boolean;
+  /** A shared scratch dir that outlives the Pi (default: one inside this Pi's scratch). */
+  readonly sharedTmp?: string;
 }
 
 export interface ModelChoice {
@@ -103,29 +141,62 @@ type Message = Record<string, unknown>;
 
 export class PiRpc {
   readonly dir: string;
+  /** The shared scratch dirs (paired mode): what the tools use as HOME and TMPDIR. */
+  sharedHome = "";
+  sharedTmp = "";
+  piTmp = "";
+  piHome = "";
   readonly agentDir: string;
   readonly workspace: string;
   readonly events: Message[] = [];
   #child: ChildProcess;
+  #relay: ExecRelay | undefined;
+  #pair: PiPair | undefined;
+  #root: string;
   #modelFile: string;
   #gatewayUrl: string;
   #runToken = "";
   #waiters: ((m: Message) => boolean)[] = [];
   #seq = 0;
 
-  private constructor(dir: string, child: ChildProcess, options: PiRpcOptions) {
+  private constructor(root: string, dir: string, child: ChildProcess, options: PiRpcOptions) {
+    this.#root = root;
     this.dir = dir;
     this.agentDir = path.join(dir, "agent");
-    this.workspace = path.join(dir, "workspace");
+    this.workspace = path.join(root, "workspace");
+    this.#pair = options.pair ?? options.exec?.pair;
     this.#modelFile = path.join(dir, "model.json");
     this.#child = child;
     this.#gatewayUrl = options.gatewayUrl;
   }
 
   static async start(options: PiRpcOptions, sessionToken: string): Promise<PiRpc> {
-    const dir = await mkdtemp(path.join(tmpdir(), "kobe-pi-rpc-"));
+    const exec = options.exec;
+    const pair = options.pair ?? exec?.pair;
+    // Paired uids: scratch under /dev/shm like the helper tests (every uid can reach it), the
+    // runtime dir apart from the workspace and home the two uids share.
+    const root = await mkdtemp(
+      path.join(pair === undefined ? tmpdir() : "/dev/shm", "kobe-pi-rpc-"),
+    );
+    const dir = pair === undefined ? root : path.join(root, "rt");
+    const workspace = path.join(root, "workspace");
+    const home = path.join(root, "home");
+    if (pair !== undefined) await chmod(root, 0o755);
+    await mkdir(dir, { recursive: true });
     await mkdir(path.join(dir, "agent"), { mode: 0o700 });
-    await mkdir(path.join(dir, "workspace"));
+    await mkdir(workspace);
+    if (pair !== undefined) {
+      // The agent's layout (threads/thread.ts): runtime dir in the Pi's group alone, agent/ sticky
+      // and group-writable, workspace and home shared through the workspace group.
+      await chown(dir, -1, pair.identity.gid);
+      await chmod(dir, 0o2750);
+      await chmod(path.join(dir, "agent"), 0o3770);
+      for (const shared of [workspace, home]) {
+        await mkdir(shared, { recursive: true });
+        await chown(shared, -1, pair.workspaceGid);
+        await chmod(shared, 0o2775);
+      }
+    }
     await options.prepareAgentDir?.(path.join(dir, "agent"));
     const modelFile = path.join(dir, "model.json");
     await writeFile(
@@ -137,36 +208,91 @@ export class PiRpc {
         token: sessionToken,
         run_id: null,
       }),
-      { mode: 0o600 },
+      { mode: pair === undefined ? 0o600 : 0o640 },
     );
-    const child = spawn(
-      options.piBin,
-      [
-        "--mode",
-        "rpc",
-        "--no-session",
-        ...PI_LOCKDOWN_ARGS,
-        "--extension",
-        options.modelsExtension,
-        "--extension",
-        options.policyExtension,
-      ],
-      {
-        cwd: path.join(dir, "workspace"),
-        env: {
-          PATH: process.env.PATH,
-          HOME: path.join(dir, "home"),
-          PI_CODING_AGENT_DIR: path.join(dir, "agent"),
-          KOBE_MODEL_FILE: modelFile,
-          PI_OFFLINE: "1",
-          PI_TELEMETRY: "0",
-          PI_SKIP_VERSION_CHECK: "1",
-          KOBE_POLICY_FD: "3",
-        },
-        stdio: ["pipe", "pipe", "inherit", "pipe"],
-      },
-    );
-    const pi = new PiRpc(dir, child, options);
+    // The shared scratch the tools use; Pi gets private ones when hardened.
+    const sharedTmp = pair?.sharedTmp ?? path.join(root, "tmp");
+    let piHome = home;
+    let piTmp = sharedTmp;
+    if (pair !== undefined) {
+      await mkdir(sharedTmp, { recursive: true });
+      await chown(sharedTmp, -1, pair.workspaceGid);
+      await chmod(sharedTmp, 0o2775);
+      if (pair.privateDirs ?? pair.hardened ?? true) {
+        const priv = await preparePiPrivateDirs(root, dir, pair.identity);
+        piHome = priv.home;
+        piTmp = priv.tmp;
+      }
+    }
+    const piEnv: Record<string, string> = {
+      PATH: process.env.PATH ?? "",
+      HOME: piHome,
+      ...(pair === undefined ? {} : { TMPDIR: piTmp }),
+      ...((pair?.cachesOff ?? pair?.hardened) === false
+        ? {}
+        : pair === undefined
+          ? {}
+          : { JITI_FS_CACHE: "false", NODE_DISABLE_COMPILE_CACHE: "1" }),
+      PI_CODING_AGENT_DIR: path.join(dir, "agent"),
+      KOBE_MODEL_FILE: modelFile,
+      PI_OFFLINE: "1",
+      PI_TELEMETRY: "0",
+      PI_SKIP_VERSION_CHECK: "1",
+      KOBE_POLICY_FD: "3",
+      ...(exec === undefined ? {} : { [EXEC_FD_ENV]: String(EXEC_CHANNEL_FD) }),
+    };
+    const args = [
+      "--mode",
+      "rpc",
+      "--no-session",
+      ...PI_LOCKDOWN_ARGS,
+      "--extension",
+      options.modelsExtension,
+      ...(exec === undefined ? [] : ["--extension", exec.extension]),
+      "--extension",
+      options.policyExtension,
+    ];
+    const [file, argv] =
+      pair === undefined
+        ? [options.piBin, args]
+        : [
+            pair.identities.helper,
+            [...pair.identities.command(pair.identity, options.piBin, args, piEnv)],
+          ];
+    const child = spawn(file, argv, {
+      cwd: workspace,
+      env: piEnv,
+      // fd 3 policy, fd 4 (unused here), fd 5 kobe-exec.
+      stdio:
+        exec === undefined
+          ? ["pipe", "pipe", "inherit", "pipe"]
+          : ["pipe", "pipe", "inherit", "pipe", "pipe", "pipe"],
+    });
+    const pi = new PiRpc(root, dir, child, options);
+    pi.sharedHome = home;
+    pi.sharedTmp = sharedTmp;
+    pi.piHome = piHome;
+    pi.piTmp = piTmp;
+    if (exec !== undefined) {
+      pi.#relay = new ExecRelay({
+        channel: (child.stdio as unknown[])[5] as Duplex,
+        startExecutor: () =>
+          startExecutor({
+            nodeBin: process.execPath,
+            entry: exec.executorEntry,
+            env: executorEnv({
+              PATH: piEnv.PATH ?? "",
+              HOME: home,
+              ...(pair === undefined ? {} : { TMPDIR: sharedTmp }),
+            }),
+            cwd: workspace,
+            runAs:
+              pair === undefined
+                ? undefined
+                : { identities: pair.identities, identity: pair.identity },
+          }),
+      });
+    }
     pi.#wire();
     await pi.#waitReady();
     return pi;
@@ -289,7 +415,14 @@ export class PiRpc {
   }
 
   async close(): Promise<void> {
-    this.#child.kill("SIGKILL");
-    await rm(this.dir, { recursive: true, force: true });
+    this.#relay?.close("test over");
+    const pair = this.#pair;
+    if (pair === undefined) {
+      this.#child.kill("SIGKILL");
+    } else {
+      // Another uid's processes: only the helper can end them (both uids of the pair).
+      await pair.identities.killAll(pair.identity).catch(() => undefined);
+    }
+    await rm(this.#root, { recursive: true, force: true });
   }
 }

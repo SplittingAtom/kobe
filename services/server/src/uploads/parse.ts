@@ -1,5 +1,6 @@
 import type { Readable } from "node:stream";
 import busboy from "busboy";
+import type { z } from "zod";
 import { uploadFieldsSchema, uploadFileNameSchema } from "@kobe/protocol";
 
 /**
@@ -10,6 +11,8 @@ import { uploadFieldsSchema, uploadFileNameSchema } from "@kobe/protocol";
  */
 export interface OpenedUpload {
   readonly threadId: string | undefined;
+  /** The parsed text fields (by the schema given to {@link openUpload}). */
+  readonly fields: Record<string, string | undefined>;
   readonly name: string;
   readonly declaredMime: string;
   readonly file: Readable;
@@ -23,7 +26,15 @@ export type OpenResult =
 
 const MAX_FIELD_BYTES = 256;
 
-export function openUpload(contentType: string | undefined, body: Readable): Promise<OpenResult> {
+/**
+ * `fieldsSchema` defaults to the uploads contract's (`thread_id`); the workspace browser (KOBE-184)
+ * passes its own (`path`). The same limits and ordering rules apply: text fields before the file.
+ */
+export function openUpload(
+  contentType: string | undefined,
+  body: Readable,
+  fieldsSchema: z.ZodType<Record<string, string | undefined>> = uploadFieldsSchema,
+): Promise<OpenResult> {
   let parser: busboy.Busboy;
   try {
     parser = busboy({
@@ -65,7 +76,7 @@ export function openUpload(contentType: string | undefined, body: Readable): Pro
         resolve({ ok: false, reason });
       };
       opened = true;
-      const parsedFields = uploadFieldsSchema.safeParse(fields);
+      const parsedFields = fieldsSchema.safeParse(fields);
       if (badField || !parsedFields.success) return reject("Check the form fields.");
       const name = uploadFileNameSchema.safeParse(info.filename);
       if (!name.success) return reject("The file name is not valid.");
@@ -74,6 +85,7 @@ export function openUpload(contentType: string | undefined, body: Readable): Pro
         ok: true,
         upload: {
           threadId: parsedFields.data.thread_id,
+          fields: parsedFields.data,
           name: name.data,
           declaredMime: info.mimeType,
           file,

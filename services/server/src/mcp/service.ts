@@ -1,4 +1,5 @@
-import type { KobeDb, PinnedTool } from "@kobe/db";
+import type { Envelope, KobeDb, PinnedTool } from "@kobe/db";
+import { revealApiKey, type RevealOutcome } from "../connectors/grants.js";
 import { createRateLimiter } from "../sandbox/rate-limit.js";
 import type { RunPolicyContextSource } from "../sandbox-wire/types.js";
 import { DENY_UNVERIFIED_APPROVALS, type McpApprovalVerifier } from "./approvals.js";
@@ -22,6 +23,12 @@ export interface McpService {
     connectorId: string,
   ): Promise<{ connector: { id: string; name: string }; tools: PinnedTool[] } | undefined>;
   decide(principal: McpPrincipal, request: McpCallRequest): Promise<McpCallDecision>;
+  /**
+   * The principal's own decrypted API key for an enabled `api_key` connector (KOBE-108). The user
+   * is the principal's, taken from the verified sandbox token: there is no way to ask for
+   * another user's. Only the internal API (internal key) calls this; the key goes to the proxy.
+   */
+  revealCredential(principal: McpPrincipal, connectorId: string): Promise<RevealOutcome>;
 }
 
 export interface McpServiceOptions {
@@ -31,6 +38,8 @@ export interface McpServiceOptions {
   readonly runContext: RunPolicyContextSource;
   /** KOBE-37 seam; deny-by-default until approvals are wired. */
   readonly approvals?: McpApprovalVerifier;
+  /** Install envelope (KOBE-107) that opens users' sealed keys; unset: no credential is served. */
+  readonly envelope?: Envelope;
   readonly now?: () => Date;
 }
 
@@ -54,5 +63,13 @@ export function createMcpService(options: McpServiceOptions): McpService {
       };
     },
     decide: (principal, request) => decideMcpCall(deps, principal, request),
+    revealCredential: (principal, connectorId) =>
+      options.envelope
+        ? revealApiKey(options.db, options.envelope, {
+            teamId: principal.teamId,
+            userId: principal.userId,
+            connectorId,
+          })
+        : Promise.resolve({ ok: false, failure: "unavailable" }),
   };
 }

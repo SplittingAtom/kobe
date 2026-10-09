@@ -46,8 +46,23 @@ purge_dir() {
   done
 }
 
+# Code caches Pi trusts (jiti's transpile cache, Node's compile cache) must never become group
+# writable: a tool could plant an entry the next Pi runs (KOBE-196). Pi runs with them off now;
+# whatever an older Pi left is deleted before the tree is opened to the group.
+drop_caches() {
+  for c in "$1/jiti" "$1/node-compile-cache"; do
+    [ -L "$c" ] || [ "$(stat -c %u "$c" 2>/dev/null)" != "$uid" ] || {
+      [ -d "$c" ] && find "$c" -xdev -type d -exec chmod u+rwx {} \; 2>/dev/null
+      rm -rf -- "$c" 2>/dev/null
+      if [ -e "$c" ]; then echo "$c"; fi
+    }
+  done
+}
+
 while [ $# -gt 0 ] && [ "$1" != "--" ]; do
   if [ -d "$1" ]; then
+    left=$(drop_caches "$1")
+    [ -z "$left" ] || fail "$left"
     left=$(fix_tree "$1")
     [ -z "$left" ] || fail "$left"
   fi

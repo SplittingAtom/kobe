@@ -34,8 +34,8 @@ but it covers exactly the two files that matter.
 ## KOBE-165 cases
 
 Through the agent all three pass (set_model is refused at the wire, and the plant is caught by the next command or run) (`kobe-models.redirect-agent.real-pi.test.ts`). The raw-Pi
-`it.fails` cases stay red on purpose (no agent in between; Pi itself is unchanged): sentinel until
-KOBE-167. A normal `set_model` still works (real Pi test and fake-Pi test).
+cases were `it.fails` until KOBE-167 (no agent in between; Pi itself is unchanged); they now run with the
+tool in the paired executor and pass. A normal `set_model` still works (real Pi test and fake-Pi test).
 
 ## Residual risk
 

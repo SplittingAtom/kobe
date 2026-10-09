@@ -54,6 +54,10 @@ export const MODEL_ALIAS_PATTERN = "^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$";
 /** A provider's model id as the provider spells it (no whitespace, no control characters). */
 export const PROVIDER_MODEL_PATTERN = "^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$";
 
+/** Input modalities a catalog model may declare (KOBE-191). Text is always present. */
+export const INPUT_MODALITIES = ["text", "image"] as const;
+export type InputModality = (typeof INPUT_MODALITIES)[number];
+
 const ts = () => timestamp({ withTimezone: true }).notNull().defaultNow();
 
 /**
@@ -132,6 +136,14 @@ export const modelCatalog = pgTable(
     outputUsdPerMtok: price(),
     cacheReadUsdPerMtok: price(),
     cacheWriteUsdPerMtok: price(),
+    /**
+     * What the model accepts as input (KOBE-191): `text` always, `image` when it can see images.
+     * The server sends an image attachment inline only when `image` is listed. Default text-only.
+     */
+    inputModalities: text()
+      .array()
+      .notNull()
+      .default(sql`'{text}'::text[]`),
     createdBy: uuid()
       .notNull()
       .references(() => users.id),
@@ -153,6 +165,11 @@ export const modelCatalog = pgTable(
       "model_catalog_price_set",
       sql`(${t.inputUsdPerMtok} IS NULL) = (${t.outputUsdPerMtok} IS NULL)
         AND (${t.inputUsdPerMtok} IS NOT NULL OR (${t.cacheReadUsdPerMtok} IS NULL AND ${t.cacheWriteUsdPerMtok} IS NULL))`,
+    ),
+    check(
+      "model_catalog_input_modalities",
+      sql`${t.inputModalities} <@ ${sql.raw(`ARRAY[${INPUT_MODALITIES.map((m) => `'${m}'`).join(",")}]::text[]`)}
+        AND ${t.inputModalities} @> ARRAY['text']::text[]`,
     ),
     check("model_catalog_alias", sql`${t.alias} ~ ${sql.raw(`'${MODEL_ALIAS_PATTERN}'`)}`),
     check("model_catalog_model", sql`${t.model} ~ ${sql.raw(`'${PROVIDER_MODEL_PATTERN}'`)}`),

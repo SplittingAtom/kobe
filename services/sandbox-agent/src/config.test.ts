@@ -33,6 +33,32 @@ describe("sandbox-agent loadConfig", () => {
     expect(() => loadConfig({ ...env, KOBE_TOOLS_EXTENSION: "relative.js" })).toThrow();
   });
 
+  it("takes the kobe-exec extension (KOBE-167) from KOBE_EXEC_EXTENSION, absolute, unset = none", () => {
+    const env = { ...base, KOBE_SERVER_URL: "wss://kobe" };
+    expect(loadConfig(env).execExtension).toBeUndefined();
+    expect(
+      loadConfig({ ...env, KOBE_EXEC_EXTENSION: "/opt/kobe/pi-extensions/kobe-exec/index.js" })
+        .execExtension,
+    ).toBe("/opt/kobe/pi-extensions/kobe-exec/index.js");
+    expect(() => loadConfig({ ...env, KOBE_EXEC_EXTENSION: "relative.js" })).toThrow();
+  });
+
+  it("switches the tool executor with KOBE_TOOL_EXECUTOR: on unless told otherwise, off in Kobe's pods unless asked", () => {
+    const env = { ...base, KOBE_SERVER_URL: "wss://kobe" };
+    expect(loadConfig(env).toolExecutor).toBe(true);
+    const pod = { KOBE_SERVER_URL: "wss://kobe", KOBE_BOOTSTRAP_TOKEN_FILE: "/run/t" };
+    expect(loadConfig(pod).toolExecutor).toBe(false);
+    expect(loadConfig({ ...pod, KOBE_TOOL_EXECUTOR: "true" }).toolExecutor).toBe(true);
+    for (const on of ["true", "1"]) {
+      expect(loadConfig({ ...env, KOBE_TOOL_EXECUTOR: on }).toolExecutor).toBe(true);
+    }
+    for (const off of ["false", "0"]) {
+      expect(loadConfig({ ...env, KOBE_TOOL_EXECUTOR: off }).toolExecutor).toBe(false);
+    }
+    // Anything else is a typo that must not silently leave the tools unrouted (or routed).
+    expect(() => loadConfig({ ...env, KOBE_TOOL_EXECUTOR: "yes" })).toThrow(/KOBE_TOOL_EXECUTOR/);
+  });
+
   it("takes the skills directory (KOBE-82) from KOBE_SKILLS_DIR, absolute, unset = unsupported", () => {
     const env = { ...base, KOBE_SERVER_URL: "wss://kobe" };
     expect(loadConfig(env).skillsDir).toBeUndefined();

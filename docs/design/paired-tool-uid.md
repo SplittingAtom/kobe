@@ -1,6 +1,6 @@
 # Paired tool uid per thread (KOBE-119, spike for KOBE-74)
 
-Status: proposal. Decision record only; no product code. Items marked **[unverified]** were not
+Status: accepted (option B); implemented in KOBE-166 (uid pool, helper) and KOBE-167 (executor, `kobe-exec`, see "Implementation notes" at the end). The text below is the original proposal. Items marked **[unverified]** were not
 checked against code, docs or a running gVisor in this spike.
 
 ## Question
@@ -207,3 +207,51 @@ mid-run, not only before prompts); that interim is not proposed as a replacement
 1. Is one extra Node process per live Pi acceptable on the smallest sandbox size? (A shared
    executor cannot hold a distinct `T` per thread without the agent holding the capability.)
 2. Should T1 outcome gate T2-T4 (as proposed), or do you want the paired uid regardless?
+
+## Implementation notes (KOBE-167)
+
+What was built, where it differs from the proposal, and the inventory T2 asked for.
+
+- **Pieces.** `services/sandbox-agent/src/kobe-exec/` is the Pi extension (loaded right before
+  kobe-policy; it re-registers the seven built-ins, `bash read write edit ls grep find`, and a
+  `user_bash` handler). `exec/relay.ts` is the agent's relay on Pi's fd 5, `exec/executor/` the
+  program that runs as the partner uid, `exec/spawn-executor.ts` starts it through `kobe-runas`,
+  `threads/exec-wiring.ts` ties it to a thread. The wire format is `kobe-exec/protocol.ts`.
+- **Helper: no change.** KOBE-166's helper already keeps fd 3, 4 and 5 for a Pi and stdio only for a
+  partner uid; the executor's channel is its stdio, the agent relays between the two sockets.
+- **Tool semantics.** Pi's own tool definitions are reused (schema, prompt text, renderers,
+  truncation, details) with Kobe `operations` for bash, read, write, edit, ls. Pi's grep and find
+  spawn `rg`/`fd` from Pi even with custom operations, so those two re-implement `execute` from
+  Pi's source with the executor running the program. `tools.pi-parity.test.ts` runs the same
+  operations through Pi's tool and the routed one and compares results and error messages.
+- **Fail closed.** Extension loaded without a usable channel: all seven tools are still registered
+  and fail. Executor missing, dead or not answering: the call fails (`unavailable`); the relay
+  clears the partner uid and starts a fresh executor on the next call. Asked for under Pi identities
+  without the partner groups, the agent does not start.
+- **Egress token** moves to a directory next to the runtime dir, in the _partner's_ group
+  (`<runtime>-tool/`, 2750), so tools read it and Pi does not; the egress variables go to the
+  executor's environment, not Pi's. The executor's environment is an allow-list; Pi's `PI_*` session
+  variables (model, session id) are passed on because the bash tool's prompt promises them.
+- **Limits** differing from running in-process: a file read or written by a tool call is capped at
+  64 MiB; a directory listing is cut after about 1.5 MiB of names (sorted first); the tools run in
+  the workspace group's view, so files they create are `partner:1000 0664`.
+
+### Pi's own spawn sites (Pi 1.0.0)
+
+Pinned by `kobe-exec/pi-spawn-sites.test.ts` (it fails when an upgrade adds, moves or drops one).
+
+| Site (module under `dist/`)                                                                                   | Starts                                                | In a Kobe launch                                                                                                                                                                                         |
+| ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `core/tools/{bash,grep,find}.js`, `utils/shell.js`                                                            | shell, `rg`, `fd`, `which`                            | Replaced by kobe-exec; none runs in Pi any more. RPC `bash` and user `!` commands go through `user_bash` to the executor (tested against real Pi).                                                       |
+| `core/resolve-config-value.js`                                                                                | `!command` config values                              | **Stays in Pi's uid.** Inputs are `models.json`/`settings.json` (agent-written placeholders, 0440) and `auth.json` (Pi's own store) in `agent/`, which no tool can write now. The tripwire still checks. |
+| `core/exec.js` (`pi.exec`)                                                                                    | any program                                           | Not reachable: only Kobe's root-owned extensions load (`--no-extensions`) and none calls it.                                                                                                             |
+| `extensions/mcp` (`builtin:mcp`) via pi-mcp `StdioTransport`                                                  | MCP stdio servers                                     | Servers come from `mcp.json` in the agent dir (not writable by tools); Kobe wires MCP over HTTP through mcp-proxy (KOBE-62), no stdio server is written.                                                 |
+| `core/package-manager.js`, `package-manager-cli.js`, `config.js`                                              | npm, git                                              | Package install/update and self-update: `settings.json` is guarded, `PI_OFFLINE=1`, `PI_SKIP_VERSION_CHECK=1`, no such RPC command.                                                                      |
+| `core/footer-data-provider.js`                                                                                | `git symbolic-ref`                                    | TUI footer; RPC mode builds none (the resource loader only reads `.git` files).                                                                                                                          |
+| `utils/clipboard-command.js`, `utils/open-browser.js`, `modes/interactive/*`, `rpc-client.js`                 | clipboard tools, `xdg-open`, `$EDITOR`, `gh`, `trash` | Interactive mode / OAuth / client library only; not constructed in `--mode rpc`.                                                                                                                         |
+| `utils/tools-manager.js`, `utils/paths.js`                                                                    | `rg --version`, downloads, `xattr`                    | Called by the replaced grep/find, interactive start-up and the package manager only.                                                                                                                     |
+| Bundled provider SDKs (AWS `credential_process`, Google external-account executables, Anthropic helper shell) | credential helpers                                    | Only when a Bedrock/Vertex/Anthropic-SDK model is selected; Kobe's model is the `kobe` provider, `set_model` is not allowed over the wire (KOBE-169) and `run.start` names a gateway model.              |
+| Built-in `codemode` extension (model-written JS in a worker inside Pi)                                        | -                                                     | Not loaded: built-ins load only as explicit `builtin:<name>` paths and the agent passes none but (later) `builtin:mcp`. Enabling it would put model code in Pi's process; do not.                        |
+
+The residual in-Pi site is therefore the `!command` resolver, and it is only as steerable as the
+files in `agent/`, which is what the partner uid takes away from tools.

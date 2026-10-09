@@ -21,6 +21,8 @@ export async function pinConnector(
   db: KobeDb,
   prober: ConnectorProbe,
   connectorId: string,
+  /** A user's API-key grant for connectors that need one (KOBE-108); used for this probe only. */
+  apiKey?: string,
 ): Promise<PinOutcome | undefined> {
   const [row] = await db
     .select({ name: connectors.name, url: connectors.url, hash: connectors.toolsHash })
@@ -29,7 +31,7 @@ export async function pinConnector(
   if (!row) return undefined;
   if (row.hash !== null) return { ok: false, failure: "already_pinned" };
 
-  const probed = await prober.probe(row.url);
+  const probed = await prober.probe(row.url, apiKey);
   if (!probed.ok) return probed;
   const snapshot = buildSnapshot(row.name, probed.tools);
   if (!snapshot.ok) return snapshot;

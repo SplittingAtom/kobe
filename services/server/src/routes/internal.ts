@@ -22,6 +22,8 @@ import { createRateLimiter, type RateLimiter } from "../sandbox/rate-limit.js";
  *      → 200 `{decision: "allow", connector, tool, input_sha256, reason, approval_id?}`
  *      | 200 `{decision: "deny", code, message, approval_failure?}`
  * 401 `unauthorized` (internal key), 401 `sandbox_unauthorized` (token, liveness, membership),
+ * POST /internal/v1/mcp/connectors/{id}/grant → 200 `{kind: "api_key", api_key}` for the sandbox's own
+ *      user only (KOBE-108); 404 `not_connected` | `connector_not_available`, 503 `unavailable`
  * 429 `rate_limited` (per sandbox, `DECIDE_RATE`),
  * 404 `connector_not_available`, 400 `invalid_request`.
  */
@@ -101,6 +103,27 @@ export function createInternalApp(deps: InternalAppDeps): Hono {
       );
     }
     return c.json(listed);
+  });
+
+  // The caller's own API key for the upstream request (KOBE-108). The user comes from the verified
+  // sandbox token only; the proxy puts the key on the upstream request and nowhere else.
+  mcp.post("/connectors/:id/grant", async (c) => {
+    const id = connectorId(c.req.param("id"));
+    if (!id.success) return c.json({ code: "connector_not_available", message: "Not found." }, 404);
+    const auth = await principalOf(c.req.header("kobe-sandbox-token"));
+    if (!auth.ok) return c.json({ code: "sandbox_unauthorized", message: auth.code }, 401);
+    const revealed = await deps.mcp.revealCredential(auth.principal, id.data);
+    if (revealed.ok) return c.json({ kind: "api_key", api_key: revealed.apiKey });
+    if (revealed.failure === "not_available") {
+      return c.json(
+        { code: "connector_not_available", message: "Not enabled for this team." },
+        404,
+      );
+    }
+    if (revealed.failure === "not_connected") {
+      return c.json({ code: "not_connected", message: "No key stored." }, 404);
+    }
+    return c.json({ code: "unavailable", message: "Credential unavailable." }, 503);
   });
 
   mcp.post("/connectors/:id/calls", async (c) => {

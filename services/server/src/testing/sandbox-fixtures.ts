@@ -80,6 +80,7 @@ export const SETTINGS: SandboxSettings = {
     maxFiles: 100_000,
     collectSeconds: 3600,
   },
+  toolExecutor: { enabled: false },
 };
 
 export const KEYS: SessionKeys = {
