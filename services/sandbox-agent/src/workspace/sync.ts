@@ -1,4 +1,5 @@
 import {
+  FILE_SHARE_MAX_BYTES,
   WORKSPACE_SERVER_OWNED_PREFIXES,
   isExcludedPath,
   isServerOwnedPath,
@@ -87,6 +88,22 @@ export interface PushStats {
   readonly bytes: number;
   readonly conflicts: number;
   readonly rejected: number;
+}
+
+/** The synced entry of one file: what `file.share` must name (files.ts, push-then-share). */
+export interface PushedFile {
+  readonly path: string;
+  readonly rev: number;
+  readonly sha256: string;
+  readonly size: number;
+}
+
+/** `pushPath` could not leave the file synced; the message is shown to the model as a tool error. */
+export class PushPathError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PushPathError";
+  }
 }
 
 export const DEFAULT_SKIP_DIRS = ["node_modules", "__pycache__", ".venv"] as const;
@@ -277,6 +294,91 @@ export class WorkspaceSync {
   /** One push now (tests, operators). */
   push(): Promise<PushStats> {
     return this.#push();
+  }
+
+  /**
+   * Pushes exactly one file now (blob + commit) and returns its entry, for `share_file`: the
+   * server shares only a file whose live row has this `rev` and `sha256`. Nothing else is pushed.
+   * The file is read without following links (a swapped symlink fails here, not later). Throws
+   * {@link PushPathError} when it cannot be left synced (sync off, not a regular file, too large,
+   * server refused, a newer server version won).
+   */
+  async pushPath(rel: string): Promise<PushedFile> {
+    if (!this.enabled) throw new PushPathError("workspace sync is not available");
+    if (isExcludedPath(rel) || rel.split("/").some((part) => this.#o.skipDirs.has(part))) {
+      throw new PushPathError(`${rel} is not part of the synced workspace`);
+    }
+    await Promise.race([
+      this.ready(),
+      new Promise<void>((resolve) => setTimeout(resolve, this.#o.restoreWaitMs).unref()),
+    ]);
+    if (!this.#restored) throw new PushPathError("the workspace is still being restored");
+    try {
+      return await this.#pushOne(rel);
+    } catch (error) {
+      if (error instanceof PushPathError) throw error;
+      this.#warn("push of one file failed", error);
+      throw new PushPathError(`${rel} could not be pushed to the Kobe server`);
+    }
+  }
+
+  async #pushOne(rel: string): Promise<PushedFile> {
+    const planned = await this.#serial(async () => {
+      const hashed = await hashFile(this.#o.root, rel);
+      const local = await statLocal(this.#o.root, rel);
+      if (hashed === undefined || local === undefined || hashed.size !== local.size) {
+        throw new PushPathError(`${rel} is not a readable regular file (or it is changing)`);
+      }
+      if (hashed.size > FILE_SHARE_MAX_BYTES) throw new PushPathError(`${rel} is too large`);
+      const k = this.#known.get(rel);
+      if (k && !k.deleted && k.sha256 === hashed.sha256) {
+        return { done: { path: rel, rev: k.rev, sha256: hashed.sha256, size: hashed.size } };
+      }
+      if (isServerOwnedPath(rel)) {
+        throw new PushPathError(`${rel} is in a read-only area and differs from the server's copy`);
+      }
+      const change: PlannedChange = {
+        op: "put",
+        path: rel,
+        base_rev: k?.rev ?? null,
+        sha256: hashed.sha256,
+        size: hashed.size,
+        mtime_ms: local.mtimeMs,
+        executable: local.executable,
+        local,
+      };
+      const missing = await this.#o.client.missing([hashed.sha256]);
+      return { change, upload: missing.length > 0 };
+    });
+    if ("done" in planned) return planned.done;
+    const { change } = planned;
+    if (planned.upload) {
+      await this.#o.client.upload(
+        change.sha256,
+        await openForUpload(this.#o.root, rel),
+        change.size,
+      );
+    }
+    const outcome = await this.#serial(async () => {
+      if ((this.#known.get(rel)?.rev ?? null) !== change.base_rev) return "stale";
+      const { local: _local, ...wire } = change;
+      const out = await this.#o.client.commit([wire]);
+      const result = out.results[0];
+      if (result === undefined) return "no result";
+      let refused = false;
+      await this.#applyResult(change, result, () => {}, () => (refused = true));
+      if (refused) return "refused";
+      const k = this.#known.get(rel);
+      return k && !k.deleted && k.sha256 === change.sha256 ? k : "newer";
+    });
+    if (typeof outcome === "string") {
+      throw new PushPathError(
+        outcome === "newer"
+          ? `${rel} was changed on the server meanwhile; your copy was kept beside it`
+          : `${rel} could not be synced (${outcome}); try again`,
+      );
+    }
+    return { path: rel, rev: outcome.rev, sha256: change.sha256, size: change.size };
   }
 
   /** One pull now (tests). */
