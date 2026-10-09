@@ -13,6 +13,7 @@ import { connectorNameSchema } from "../tools.js";
 import { runTokenGrantSchema } from "../run-token.js";
 import { SANDBOX_ERROR_CODES, SANDBOX_WIRE_VERSION } from "./connection.js";
 import { UPLOAD_MAX_FILES_PER_MESSAGE, uploadFileNameSchema } from "../uploads.js";
+import { fileShareCallShape, fileShareOkFields, shareFileWorkspaceRefSchema } from "../files.js";
 import { artifactCallShape, artifactFailFields, artifactOkFields } from "../artifacts.js";
 import { BUILTIN_SKILL_NAMES, SKILL_BUNDLES_MAX, skillBundleRefSchema } from "./skill-bundles.js";
 import {
@@ -160,6 +161,21 @@ export const artifactPutFrameSchema = z.union([
   frame("artifact.put", { ...artifactPutFields, ...artifactCallShape.update }),
 ]);
 
+/**
+ * Sandbox -> server (KOBE-147, files.ts), behind hello capability `files`: the `share_file` call
+ * kobe-policy let through, sent AFTER the agent pushed the file through workspace sync (push-then-
+ * share, files.ts); `workspace` is the pushed entry the server must find unchanged. Answered by
+ * `file.share_result` for the same `request_id`. A small frame (no own size entry).
+ */
+export const fileShareFrameSchema = frame("file.share", {
+  request_id: idSchema,
+  run_id: uuidSchema,
+  thread_id: uuidSchema,
+  tool_call_id: idSchema,
+  ...fileShareCallShape,
+  workspace: shareFileWorkspaceRefSchema,
+});
+
 /** Exactly one per server command. `data` is the Pi response `data` for `pi.command`. */
 export const commandResultFrameSchema = z.union([
   frame("command.result", {
@@ -186,6 +202,7 @@ export const sandboxToServerFrameSchema = z.union([
   policyCheckFrameSchema,
   commandResultFrameSchema,
   artifactPutFrameSchema,
+  fileShareFrameSchema,
   piExitedFrameSchema,
   pingFrame,
   pongFrame,
@@ -416,6 +433,12 @@ export const artifactResultFrameSchema = z.union([
   frame("artifact.result", { request_id: idSchema, ...artifactFailFields }),
 ]);
 
+/** Server -> sandbox answer to `file.share` (KOBE-147). `error.code` is open (known: `FILE_SHARE_ERROR_CODES`). */
+export const fileShareResultFrameSchema = z.union([
+  frame("file.share_result", { request_id: idSchema, ...fileShareOkFields }),
+  frame("file.share_result", { request_id: idSchema, ...artifactFailFields }),
+]);
+
 /**
  * Rebuild a thread's Pi session JSONL from Postgres (volume lost, D13/D15). Sent in parts, each
  * its own command with its own `command_id`, and **every part gets its own `command.result`**
@@ -458,6 +481,7 @@ export const serverToSandboxFrameSchema = z.union([
   policyPendingFrameSchema,
   policyResultFrameSchema,
   artifactResultFrameSchema,
+  fileShareResultFrameSchema,
   sessionRestoreFrameSchema,
   ackFrameSchema,
   resendFrameSchema,

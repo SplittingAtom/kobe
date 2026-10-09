@@ -229,6 +229,8 @@ export const EVENT_PAYLOAD_SCHEMAS = {
     name: z.string().min(1).max(1024),
     size: z.number().int().nonnegative(),
     mime_type: z.string().max(255).optional(),
+    /** `share_file` description (KOBE-147); absent in older events. */
+    description: z.string().min(1).max(500).optional(),
   }),
   "entry.committed": z.strictObject({
     entry_id: idSchema,

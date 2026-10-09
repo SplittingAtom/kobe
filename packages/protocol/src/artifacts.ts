@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { idSchema, timestampSchema, utf8ByteLength, uuidSchema } from "./common.js";
+import { fileShareOkFields, fileShareToolsRequestSchema } from "./files.js";
 
 /**
  * Artifacts contract (KOBE-127 = 55a of KOBE-55, spec D25; binding design in docs/ledger/KOBE-55.md).
@@ -102,7 +103,7 @@ export const artifactFailFields = { ok: z.literal(false), error: artifactErrorSc
  * File descriptor of the kobe-tools channel (D13): inherited by the Pi process like the policy
  * channel, JSON lines with the same framing and fail-closed rules (a closed or silent channel is a
  * tool error, never a retry elsewhere). 30 s timeout per request ({@link KOBE_TOOLS_TIMEOUT_MS}).
- * Room for later ops (`share_file`, `remember`): they get their own `op`; none is defined here.
+ * Later ops get their own `op`: `file.share` (files.ts, KOBE-147); `remember` is not defined yet.
  */
 export const KOBE_TOOLS_FD = 4;
 export const KOBE_TOOLS_TIMEOUT_MS = 30_000;
@@ -120,11 +121,13 @@ export const kobeToolsRequestSchema = z.union([
     tool_call_id: idSchema,
     ...artifactCallShape.update,
   }),
+  fileShareToolsRequestSchema, // KOBE-147 (files.ts)
 ]);
 export type KobeToolsRequest = z.infer<typeof kobeToolsRequestSchema>;
 
 export const kobeToolsResponseSchema = z.union([
   z.strictObject({ id: idSchema, ...artifactOkFields }),
+  z.strictObject({ id: idSchema, ...fileShareOkFields }), // KOBE-147 (files.ts)
   z.strictObject({ id: idSchema, ...artifactFailFields }),
 ]);
 export type KobeToolsResponse = z.infer<typeof kobeToolsResponseSchema>;
