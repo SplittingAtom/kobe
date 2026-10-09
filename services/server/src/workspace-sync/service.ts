@@ -54,6 +54,8 @@ export interface WorkspaceSync {
   routes(authenticate: SandboxAuthenticator): ReturnType<typeof workspaceRoutes>;
   /** One collection pass now. */
   collect(): Promise<CollectResult>;
+  /** Resolves when the quota-pressure collection in flight (if any) has fully finished. */
+  settled(): Promise<void>;
   /** Runs `collect` every `everyMs` (jittered); returns a stop function. */
   startCollector(everyMs: number): () => void;
   /**
@@ -98,6 +100,7 @@ export function createWorkspaceSync(options: WorkspaceSyncOptions): WorkspaceSyn
   const maxRows = resolveLimits(limits).maxRows;
   const kicked = new Map<string, number>();
   let kicking = false;
+  let kickRun: Promise<void> = Promise.resolve();
   return {
     objects,
     prefix,
@@ -126,7 +129,11 @@ export function createWorkspaceSync(options: WorkspaceSyncOptions): WorkspaceSyn
           if (kicked.size > 10_000) kicked.clear();
           kicked.set(key, Date.now());
           kicking = true;
-          void collectWorkspace(db, objects, owner, { ...collectOptions, budgetMs: KICK_BUDGET_MS })
+          kickRun = collectWorkspace(db, objects, owner, {
+            ...collectOptions,
+            budgetMs: KICK_BUDGET_MS,
+          })
+            .then(() => undefined)
             .catch((err: unknown) =>
               log.error({ err }, "workspace collection on quota pressure failed"),
             )
@@ -136,6 +143,7 @@ export function createWorkspaceSync(options: WorkspaceSyncOptions): WorkspaceSyn
         },
       }),
     collect,
+    settled: () => kickRun,
     startCollector(everyMs) {
       let timer: NodeJS.Timeout | undefined;
       let stopped = false;
