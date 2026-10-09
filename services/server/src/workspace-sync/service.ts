@@ -85,6 +85,9 @@ export interface WorkspaceSync {
   ): Promise<StoredEntry | undefined>;
   readonly objects: ObjectStore;
   readonly prefix: string;
+  /** This install's limits and quota check, for server writes that must honour them (KOBE-148). */
+  readonly limits: WorkspaceLimits;
+  readonly quota: QuotaCheck;
 }
 
 export function createWorkspaceSync(options: WorkspaceSyncOptions): WorkspaceSync {
@@ -98,6 +101,8 @@ export function createWorkspaceSync(options: WorkspaceSyncOptions): WorkspaceSyn
   return {
     objects,
     prefix,
+    limits,
+    quota,
     putServerFile: (tx, owner, file, area) =>
       putServerFile(tx, owner, file, { prefix, area, maxRows }),
     deleteServerFile: (tx, owner, path) => deleteServerFile(tx, owner, path),
