@@ -70,6 +70,7 @@ export function CatalogSection({
                 <th scope="col">Shown as</th>
                 <th scope="col">Provider</th>
                 <th scope="col">Model</th>
+                <th scope="col">Input</th>
                 <th scope="col">
                   <span className={styles.visuallyHidden}>Actions</span>
                 </th>
@@ -142,6 +143,7 @@ function CatalogRow({
             Gateway id <code>{m.gatewayModel}</code>
           </span>
         </td>
+        <td>{m.inputModalities.includes("image") ? "Text, images" : "Text"}</td>
         <td>
           <div className={styles.actions}>
             <button
@@ -161,7 +163,7 @@ function CatalogRow({
       </tr>
       {editing && (
         <tr>
-          <td colSpan={5}>
+          <td colSpan={6}>
             <EditCatalogForm
               model={m}
               providers={providers}
@@ -189,6 +191,7 @@ function EditCatalogForm({
   const [label, setLabel] = useState(m.label ?? "");
   const [providerId, setProviderId] = useState(m.providerId);
   const [model, setModel] = useState(m.model);
+  const images = useImageChoice(m.inputModalities.includes("image"));
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -197,6 +200,9 @@ function EditCatalogForm({
       ...(nextLabel !== m.label ? { label: nextLabel } : {}),
       ...(providerId !== m.providerId ? { providerId } : {}),
       ...(model.trim() !== m.model ? { model: model.trim() } : {}),
+      ...(images.checked !== m.inputModalities.includes("image")
+        ? { inputModalities: modalitiesOf(images.checked) }
+        : {}),
     };
     if (Object.keys(change).length === 0) {
       onSaved();
@@ -213,7 +219,13 @@ function EditCatalogForm({
     <form onSubmit={onSubmit} className={styles.form} aria-label={`Edit ${m.alias}`}>
       <LabelField value={label} onChange={setLabel} />
       <ProviderField providers={providers} value={providerId} onChange={setProviderId} />
-      <ModelIdField providerId={providerId} value={model} onChange={setModel} />
+      <ModelIdField
+        providerId={providerId}
+        value={model}
+        onChange={setModel}
+        onReportsImages={images.suggest}
+      />
+      <ImagesField choice={images} />
       <button type="submit" disabled={mutation.pending}>
         Save {m.alias}
       </button>
@@ -235,6 +247,7 @@ function AddCatalogForm({
   const [label, setLabel] = useState("");
   const [providerId, setProviderId] = useState(providers[0]?.id ?? "");
   const [model, setModel] = useState("");
+  const images = useImageChoice(false);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -245,6 +258,7 @@ function AddCatalogForm({
           providerId,
           model: model.trim(),
           label: label.trim() === "" ? null : label.trim(),
+          ...(images.checked ? { inputModalities: modalitiesOf(true) } : {}),
         }),
       (added) => `Published ${added.alias} (${added.gatewayModel}). Team admins can enable it now.`,
     );
@@ -252,6 +266,7 @@ function AddCatalogForm({
       setAlias("");
       setLabel("");
       setModel("");
+      images.reset();
       onAdded();
     }
   }
@@ -274,7 +289,13 @@ function AddCatalogForm({
         </label>
         <LabelField value={label} onChange={setLabel} />
         <ProviderField providers={providers} value={providerId} onChange={setProviderId} />
-        <ModelIdField providerId={providerId} value={model} onChange={setModel} />
+        <ModelIdField
+          providerId={providerId}
+          value={model}
+          onChange={setModel}
+          onReportsImages={images.suggest}
+        />
+        <ImagesField choice={images} />
         <button type="submit" disabled={mutation.pending || providerId === ""}>
           Add to catalog
         </button>
@@ -284,6 +305,49 @@ function AddCatalogForm({
         </p>
       </form>
     </>
+  );
+}
+
+const modalitiesOf = (images: boolean): string[] => (images ? ["text", "image"] : ["text"]);
+
+interface ImageChoice {
+  readonly checked: boolean;
+  /** The admin's own click: from then on the provider's hint no longer changes it. */
+  readonly set: (v: boolean) => void;
+  /** The provider reports the picked model takes images: tick the box unless the admin chose. */
+  readonly suggest: () => void;
+  readonly reset: () => void;
+}
+
+function useImageChoice(initial: boolean): ImageChoice {
+  const [checked, setChecked] = useState(initial);
+  const [chosen, setChosen] = useState(false);
+  return {
+    checked,
+    set: (v) => {
+      setChosen(true);
+      setChecked(v);
+    },
+    suggest: () => {
+      if (!chosen) setChecked(true);
+    },
+    reset: () => {
+      setChosen(false);
+      setChecked(initial);
+    },
+  };
+}
+
+function ImagesField({ choice }: { readonly choice: ImageChoice }) {
+  return (
+    <label>
+      <input
+        type="checkbox"
+        checked={choice.checked}
+        onChange={(e) => choice.set(e.target.checked)}
+      />{" "}
+      Accepts images (vision). Image attachments are shown to the model only when this is on.
+    </label>
   );
 }
 
@@ -344,10 +408,13 @@ export function ModelIdField({
   providerId,
   value,
   onChange,
+  onReportsImages,
 }: {
   readonly providerId: string;
   readonly value: string;
   readonly onChange: (v: string) => void;
+  /** Called when the typed or picked id is one the provider reports as accepting images. */
+  readonly onReportsImages?: () => void;
 }) {
   const id = useId();
   const [listing, setListing] = useState<Listing>({ status: "idle" });
@@ -390,7 +457,12 @@ export function ModelIdField({
           placeholder="kimi-k2.7-code"
           aria-describedby={`${id}-status`}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => {
+            onChange(e.target.value);
+            if (listing.status === "ready" && listing.data.imageModels.includes(e.target.value)) {
+              onReportsImages?.();
+            }
+          }}
         />
         <datalist id={`${id}-models`}>
           {models.map((m) => (

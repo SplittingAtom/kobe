@@ -452,7 +452,7 @@ export async function updateCatalogEntry(
         change: "updated",
         providerId,
         model: entry.model,
-        inputModalitiesChanged: entry.inputModalities.join() !== before.inputModalities.join(),
+        imageSupportChanged: entry.inputModalities.join() !== before.inputModalities.join(),
         pricesChanged:
           entry.inputUsdPerMtok !== before.inputUsdPerMtok ||
           entry.outputUsdPerMtok !== before.outputUsdPerMtok ||
