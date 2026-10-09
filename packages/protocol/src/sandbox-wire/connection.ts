@@ -36,6 +36,8 @@
  *   connection that did not announce the capability.
  *   `memory` ({@link CAPABILITY_MEMORY}, memory.ts): `memory.put` / `memory.read` / `memory.result` and
  *   `run.start.memory`; same refusal rule.
+ *   `projects` ({@link CAPABILITY_PROJECTS}, projects.ts, KOBE-159): `project.file_propose` /
+ *   `project.file_propose_result` and `run.start.project`; same refusal rule.
  *
  * Leasing (normative)
  * - The server leases each run and thread to exactly one authenticated connection: the one whose

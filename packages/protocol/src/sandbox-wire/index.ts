@@ -6,3 +6,4 @@ export * from "./codec.js";
 export * from "./workspace-sync.js";
 export * from "./skill-bundles.js";
 export * from "./memory-frames.js";
+export * from "./project-frames.js";
