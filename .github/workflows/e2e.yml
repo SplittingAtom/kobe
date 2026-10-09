@@ -209,6 +209,9 @@ jobs:
         env:
           KOBE_SANDBOX_IMAGE: ghcr.io/splittingatom/kobe-sandbox:${{ env.KOBE_IMAGE_TAG }}
           SHARD: ${{ matrix.shard }}
+          # The nightly and manual runs also exercise the real ClamAV image (KOBE-146): its image and
+          # signature download add minutes and ~1 GiB of memory, so pull requests leave it out.
+          KOBE_E2E_CLAMAV: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && matrix.shard == 'suite' && '1' || '' }}
         run: |
           case "${SHARD}" in
             suite | cold-start) KOBE_E2E_SHARD="${SHARD}" e2e/run.sh ;;
