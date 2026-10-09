@@ -18,6 +18,7 @@ import {
   memoryResultFrameSchema,
 } from "./memory-frames.js";
 import { runMemoryContextSchema } from "../memory.js";
+import { UPLOAD_MAX_FILES_PER_MESSAGE, uploadFileNameSchema } from "../uploads.js";
 import { artifactCallShape, artifactFailFields, artifactOkFields } from "../artifacts.js";
 import { BUILTIN_SKILL_NAMES, SKILL_BUNDLES_MAX, skillBundleRefSchema } from "./skill-bundles.js";
 import {
@@ -296,16 +297,40 @@ export const piThreadConfigSchema = z.object({
 });
 export type PiThreadConfig = z.infer<typeof piThreadConfigSchema>;
 
+/** One uploaded file as the agent sees it (`run.start.attachments`). */
+export const sandboxAttachmentSchema = z.strictObject({
+  /**
+   * Absolute path of the synced file, normally `{@link UPLOAD_ATTACHMENT_ROOT}/<thread>/<name>`.
+   * The schema only rejects `..` segments: the agent's workspace root is configurable and the agent
+   * refuses paths outside it (`pi_rejected`), so the exact root is not part of the wire shape.
+   */
+  path: z
+    .string()
+    .min(1)
+    .refine((p) => !p.split("/").includes(".."), "path traversal"),
+  mime_type: z.string().min(1),
+  /** Original file name, for the prompt; absent in frames from older servers. */
+  name: uploadFileNameSchema.optional(),
+  size_bytes: z.number().int().nonnegative().optional(),
+  /**
+   * Hint that the model supports this media natively: the agent MAY pass the file to Pi as an
+   * image / document block (read from `path`) in addition to listing it. Absent = text path only.
+   */
+  native_media: z.enum(["image", "pdf"]).optional(),
+});
+export type SandboxAttachment = z.infer<typeof sandboxAttachmentSchema>;
+
 /** Start a run: spawn/reuse the thread's `pi --mode rpc` process and send Pi `prompt`. */
 export const runStartFrameSchema = frame("run.start", {
   command_id: commandId,
   run_id: uuidSchema,
   thread_id: uuidSchema,
   message: z.string(),
-  /** Workspace paths of attachments already synced to /workspace/uploads (SPECULATIVE, KOBE-53). */
-  attachments: z
-    .array(z.strictObject({ path: z.string().min(1), mime_type: z.string().min(1) }))
-    .optional(),
+  /**
+   * Uploaded files already synced into the sandbox (KOBE-141, uploads.ts); absent = none. Older
+   * servers send only `path` and `mime_type`.
+   */
+  attachments: z.array(sandboxAttachmentSchema).max(UPLOAD_MAX_FILES_PER_MESSAGE).optional(),
   /** Branch point for edit-and-regenerate; absent = continue from the thread's leaf. */
   parent_entry_id: idSchema.optional(),
   config: piThreadConfigSchema.optional(),

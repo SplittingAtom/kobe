@@ -15,26 +15,34 @@ const upstream = createUpstreamClient({
   policy: config.upstream,
   maxResponseBytes: config.limits.maxResponseBytes,
 });
-const app = createApp({
-  sessionKey: config.sessionKey,
-  server: createPolicyServer({
-    baseUrl: config.serverUrl,
+const app = createApp(
+  {
+    sessionKey: config.sessionKey,
+    server: createPolicyServer({
+      baseUrl: config.serverUrl,
+      internalKey: config.internalKey,
+      timeoutMs: config.limits.serverTimeoutMs,
+      onError: (err) => logger.warn({ err }, "policy server unavailable (call refused)"),
+    }),
+    upstream,
+    // KOBE-61 replaces this with per-user grants (OAuth, API keys).
+    credentials: NO_GRANTS,
+    limiter: createLimiter({
+      burst: config.limits.requestBurst,
+      perSecond: config.limits.requestsPerSecond,
+      callsPerSandbox: config.limits.callsPerSandbox,
+      maxConcurrentCalls: config.limits.maxConcurrentCalls,
+    }),
+    limits: config.limits,
+    log: logger,
+  },
+  {
     internalKey: config.internalKey,
-    timeoutMs: config.limits.serverTimeoutMs,
-    onError: (err) => logger.warn({ err }, "policy server unavailable (call refused)"),
-  }),
-  upstream,
-  // KOBE-61 replaces this with per-user grants (OAuth, API keys).
-  credentials: NO_GRANTS,
-  limiter: createLimiter({
-    burst: config.limits.requestBurst,
-    perSecond: config.limits.requestsPerSecond,
-    callsPerSandbox: config.limits.callsPerSandbox,
-    maxConcurrentCalls: config.limits.maxConcurrentCalls,
-  }),
-  limits: config.limits,
-  log: logger,
-});
+    upstream,
+    timeoutMs: config.limits.upstreamTimeoutMs,
+    maxRequestBytes: 4 * 1024,
+  },
+);
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   logger.info(
     {

@@ -174,6 +174,14 @@ export type SandboxAuditEvent =
       };
     };
 
+/** What {@link SandboxProvider.destroySandbox} removed; empty when there was no sandbox. */
+export interface DestroyResult {
+  /** The deleted claim's UID. */
+  readonly sandboxId?: string;
+  /** The workspace volume that was kept (detached from its owner), by name. */
+  readonly pvc?: string;
+}
+
 export interface ReconcileResult {
   /** Pods deleted (namespace/name). */
   readonly deleted: readonly string[];
@@ -205,6 +213,20 @@ export interface SandboxProvider {
    * user. The sandbox wire (KOBE-24) checks it at connect and while connected. API errors throw.
    */
   isLive(team: TeamRef, userId: string, sandboxId: string): Promise<boolean>;
+  /**
+   * Offboarding (KOBE-28, D12): deletes the (team, user) claim, Sandbox and pod at once. With
+   * `retainVolume` the `/workspace` PVC is first detached from its owner (agent-sandbox would
+   * delete it with the Sandbox) and survives until {@link deleteVolume}; if the detach fails
+   * nothing is deleted. Idempotent: a missing claim returns `{}`. Throws when a delete fails
+   * (the caller retries).
+   */
+  destroySandbox(
+    team: TeamRef,
+    userId: string,
+    options: { readonly retainVolume: boolean },
+  ): Promise<DestroyResult>;
+  /** Deletes a retained workspace volume (`workspace-u-<user>`) of the team; missing is fine. */
+  deleteVolume(team: TeamRef, pvcName: string): Promise<void>;
   /** Verifies a sandbox pod's bootstrap token (TokenReview) and resolves who it is. */
   identifyBootstrapToken(token: string): Promise<BootstrapIdentity>;
   /**
@@ -232,6 +254,9 @@ const CLAIM = (namespace: string, name: string) =>
 const SANDBOX = (namespace: string, name: string) =>
   ref("agents.x-k8s.io/v1beta1", "Sandbox", name, namespace);
 const POD = (namespace: string, name: string) => ref("v1", "Pod", name, namespace);
+const PVC = (namespace: string, name: string) =>
+  ref("v1", "PersistentVolumeClaim", name, namespace);
+const WORKSPACE_PVC = /^workspace-u-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** Reads a nested field from an untyped Kubernetes object. */
 function field(obj: unknown, ...path: string[]): unknown {
@@ -677,6 +702,45 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     }
   };
 
+  const destroySandbox = async (
+    team: TeamRef,
+    userId: string,
+    options: { readonly retainVolume: boolean },
+  ): Promise<DestroyResult> => {
+    const namespace = teamNamespaceName(team);
+    const name = claimName(userId);
+    const claim = await kube.get(CLAIM(namespace, name));
+    if (!claim) return {};
+    const sandboxName = str(claim, "status", "sandbox", "name") ?? name;
+    const pvc = workspacePvcName(sandboxName);
+    let kept: string | undefined;
+    if (options.retainVolume && (await kube.get(PVC(namespace, pvc)))) {
+      // Before anything is deleted: the Sandbox's deletion would take the volume with it.
+      await kube.patch(PVC(namespace, pvc), { metadata: { ownerReferences: null } });
+      kept = pvc;
+    }
+    const claimGone = await deleteWithRetry(CLAIM(namespace, name));
+    const podGone = await deleteWithRetry(POD(namespace, sandboxName));
+    if (!claimGone || !podGone) {
+      throw new SandboxProvisioningError(
+        `Sandbox ${namespace}/${name} could not be deleted; retry`,
+      );
+    }
+    return {
+      ...(claim.metadata.uid ? { sandboxId: claim.metadata.uid } : {}),
+      ...(kept ? { pvc: kept } : {}),
+    };
+  };
+
+  const deleteVolume = async (team: TeamRef, pvcName: string): Promise<void> => {
+    if (!WORKSPACE_PVC.test(pvcName)) {
+      throw new SandboxProvisioningError(`${pvcName} is not a workspace volume; not deleting it`);
+    }
+    if (!(await deleteWithRetry(PVC(teamNamespaceName(team), pvcName)))) {
+      throw new SandboxProvisioningError(`Volume ${pvcName} could not be deleted; retry`);
+    }
+  };
+
   const identifyBootstrapToken = async (token: string): Promise<BootstrapIdentity> => {
     if (!/^[A-Za-z0-9_.-]{20,8192}$/.test(token)) throw new SandboxAuthError("malformed token");
     const review = await kube.reviewToken(token, [BOOTSTRAP_TOKEN_AUDIENCE]);
@@ -852,6 +916,8 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     ensureSandbox,
     wakeSandbox,
     hibernateSandbox,
+    destroySandbox,
+    deleteVolume,
     identifyBootstrapToken,
     reconcileIsolation,
     isLive,

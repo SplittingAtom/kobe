@@ -40,6 +40,7 @@ import {
   type ServerRunOrchestrator,
 } from "./runs/index.js";
 import type { RunAgentResolver } from "./runs/seams.js";
+import { createOffboarding, type Offboarding } from "./offboarding/index.js";
 import { UserLifecycle } from "./users/lifecycle.js";
 import { approvalVerifierForMcp } from "./mcp/approvals.js";
 import { createDbMcpCatalog } from "./mcp/catalog.js";
@@ -48,6 +49,7 @@ import {
   resolveAll,
   type ConnectorUrlPolicy,
 } from "./connectors/url-policy.js";
+import { NO_PROBE, type ConnectorProbe } from "./connectors/probe.js";
 import { createMcpService, type McpService } from "./mcp/service.js";
 import { createPolicyEngine } from "./policy/engine.js";
 import { createToolRegistry } from "./policy/registry.js";
@@ -83,6 +85,8 @@ export interface ServerDepsOptions {
   readonly runs?: Partial<Omit<RunOrchestratorOptions, "db" | "router">>;
   /** Where registered connectors may point (KOBE-100); default: https, port 443, public addresses. */
   readonly connectors?: Partial<ConnectorUrlPolicy>;
+  /** Probes a registered connector's tools through the MCP proxy (KOBE-101); unset = cannot pin. */
+  readonly connectorProbe?: ConnectorProbe;
   /** MCP proxy re-check seams (KOBE-58). */
   readonly mcp?: { readonly now?: () => Date };
   /**
@@ -156,6 +160,11 @@ export interface ServerDeps {
   /** Downstream steps of deactivation/reactivation (sandboxes, grants, schedules, audit). */
   readonly lifecycle: UserLifecycle;
   /**
+   * Offboarding (KOBE-28, D12): destroys a departed member's sandbox, retains the volume 30 days,
+   * exports it for team admins and deletes it afterwards. The sandbox provider is set later.
+   */
+  readonly offboarding: Offboarding;
+  /**
    * Sandbox connection registry and routing (KOBE-24): `router` sends commands to any (user, team)
    * sandbox from any replica; `attach` serves the WebSocket on the sandbox listener only.
    */
@@ -182,6 +191,8 @@ export interface ServerDeps {
   readonly mcp: McpService;
   /** The address policy registered connector URLs must pass (KOBE-100). */
   readonly connectorUrlPolicy: ConnectorUrlPolicy;
+  /** Fetches a connector's live `tools/list` through the MCP proxy, to pin it (KOBE-101). */
+  readonly connectorProbe: ConnectorProbe;
   /**
    * Approvals (KOBE-37, D29): the wire's broker, `POST /v1/approvals/{id}`, the TTL sweep, and the
    * signed-approval verifier the MCP proxy (KOBE-58) calls.
@@ -316,6 +327,16 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     name: "sandbox-wire",
     run: (userId) => sandboxWire.revalidateUser(userId),
   });
+  const offboarding = createOffboarding({
+    db: database.db,
+    blobs: options.blobs,
+    log: logger.child({ component: "offboarding" }),
+  });
+  // Deactivation destroys the user's sandboxes in every team now; volumes stay 30 days (D12).
+  lifecycle.on("deactivated", {
+    name: "sandbox-offboarding",
+    run: (userId) => offboarding.offboardUser(userId, "deactivated"),
+  });
 
   return {
     database,
@@ -335,6 +356,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     authAttempts,
     auditAnchor: new AuditAnchorLogger(database.db, options.authSecret),
     lifecycle,
+    offboarding,
     sandboxWire,
     runs,
     runAgents,
@@ -347,6 +369,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
       resolve: resolveAll,
       ...options.connectors,
     },
+    connectorProbe: options.connectorProbe ?? NO_PROBE,
     approvals,
     envelope: options.envelope,
     egressHeaders: options.egressHeaderSecrets ? headerBox(options.egressHeaderSecrets) : undefined,
