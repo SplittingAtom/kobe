@@ -367,3 +367,16 @@ spec:
 {{- end }}
 {{- end }}
 {{- end -}}
+
+{{/* Upload limits and the team storage quota (KOBE-143/185) as server env. */}}
+{{- define "kobe.uploadEnv" -}}
+{{- $u := .Values.server.uploads -}}
+- name: KOBE_UPLOAD_MAX_FILE_BYTES
+  value: {{ printf "%d" (int64 $u.maxFileBytes) | quote }}
+- name: KOBE_UPLOAD_MAX_MESSAGE_BYTES
+  value: {{ printf "%d" (int64 $u.maxMessageBytes) | quote }}
+- name: KOBE_TEAM_STORAGE_QUOTA_BYTES
+  value: {{ printf "%d" (int64 $u.teamStorageQuotaBytes) | quote }}
+- name: KOBE_UPLOAD_ORPHAN_HOURS
+  value: {{ printf "%d" (int64 $u.orphanHours) | quote }}
+{{- end -}}

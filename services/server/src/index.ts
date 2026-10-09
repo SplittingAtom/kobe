@@ -12,6 +12,7 @@ import { initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
 import { loadConfig } from "./config.js";
 import { loadConnectorUrlPolicy } from "./connectors/config.js";
 import { createProxyProbe, PROBE_TIMEOUT_MS } from "./connectors/probe.js";
+import { notifyDrift } from "./connectors/drift-notify.js";
 import { CONNECTOR_REFRESH_LOCK, startConnectorRefresh } from "./connectors/refresh.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
 import { EgressBlockedRelay } from "./egress/blocked-relay.js";
@@ -46,6 +47,7 @@ import {
   loadEnvelope,
 } from "@kobe/db";
 import { quantityBytes } from "./sandbox/config.js";
+import { createAttachmentStager } from "./uploads/attach.js";
 import {
   createS3ObjectStore,
   createSandboxAuthenticator,
@@ -291,9 +293,16 @@ const workspaceSync =
           ),
           maxFiles: syncSettings.maxFiles,
         },
+        teamStorageDefaultBytes: uploadSettings.defaultQuotaBytes,
         log: logger,
       })
     : undefined;
+// Message attachments (KOBE-144) need the workspace store; without it `file_ids` are refused.
+if (workspaceSync && deps) {
+  deps.runs.useAttachments(
+    createAttachmentStager({ db: deps.database.db, sync: workspaceSync, settings: uploadSettings }),
+  );
+}
 if (sandbox && syncSettings?.enabled && !s3) {
   logger.warn("object storage is not configured (s3.bucket): workspace sync is off");
 }
@@ -465,6 +474,8 @@ const stopConnectorRefresh =
         ),
         intervalMs: config.connectorRefreshSeconds * 1000,
         logger,
+        afterPass: () =>
+          notifyDrift({ db: deps.database.db, mailer: deps.mailer, publicUrl: deps.publicUrl }),
       })
     : undefined;
 const stopHibernation =

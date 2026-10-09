@@ -5,7 +5,13 @@ import type { SandboxAuthenticator } from "./auth.js";
 import { collectAll, collectWorkspace, type CollectOptions, type CollectResult } from "./gc.js";
 import { sharedKey, type WorkspaceOwner } from "./keys.js";
 import type { ObjectStore } from "./object-store.js";
-import { limitsQuota, resolveLimits, type QuotaCheck, type WorkspaceLimits } from "./quota.js";
+import {
+  limitsQuota,
+  resolveLimits,
+  withTeamStorage,
+  type QuotaCheck,
+  type WorkspaceLimits,
+} from "./quota.js";
 import { workspaceRoutes, type WorkspaceRoutesDeps } from "./routes.js";
 import {
   currentEntry,
@@ -24,6 +30,11 @@ export interface WorkspaceSyncOptions {
   readonly limits: WorkspaceLimits;
   /** KOBE-53 seam: D26's per-team quota. Default: {@link limitsQuota}. */
   readonly quota?: QuotaCheck;
+  /**
+   * KOBE-185: when set, the default check also enforces the team storage quota (the same one
+   * uploads use, with this install default) under the team's storage lock. Ignored with `quota`.
+   */
+  readonly teamStorageDefaultBytes?: number;
   readonly collect?: Partial<Omit<CollectOptions, "prefix">>;
   readonly log: Pick<Logger, "error" | "warn" | "info">;
   /** Overrides of the routes' database caps and timeouts (tests). */
@@ -54,6 +65,8 @@ export interface WorkspaceSync {
   routes(authenticate: SandboxAuthenticator): ReturnType<typeof workspaceRoutes>;
   /** One collection pass now. */
   collect(): Promise<CollectResult>;
+  /** Resolves when the quota-pressure collection in flight (if any) has fully finished. */
+  settled(): Promise<void>;
   /** Runs `collect` every `everyMs` (jittered); returns a stop function. */
   startCollector(everyMs: number): () => void;
   /**
@@ -92,12 +105,17 @@ export interface WorkspaceSync {
 
 export function createWorkspaceSync(options: WorkspaceSyncOptions): WorkspaceSync {
   const { db, objects, prefix, limits, log } = options;
-  const quota = options.quota ?? limitsQuota(limits);
+  const quota =
+    options.quota ??
+    (options.teamStorageDefaultBytes === undefined
+      ? limitsQuota(limits)
+      : withTeamStorage(limitsQuota(limits), options.teamStorageDefaultBytes));
   const collectOptions: CollectOptions = { ...COLLECT_DEFAULTS, ...options.collect, prefix };
   const collect = () => collectAll(db, objects, collectOptions, log);
   const maxRows = resolveLimits(limits).maxRows;
   const kicked = new Map<string, number>();
   let kicking = false;
+  let kickRun: Promise<void> = Promise.resolve();
   return {
     objects,
     prefix,
@@ -126,7 +144,11 @@ export function createWorkspaceSync(options: WorkspaceSyncOptions): WorkspaceSyn
           if (kicked.size > 10_000) kicked.clear();
           kicked.set(key, Date.now());
           kicking = true;
-          void collectWorkspace(db, objects, owner, { ...collectOptions, budgetMs: KICK_BUDGET_MS })
+          kickRun = collectWorkspace(db, objects, owner, {
+            ...collectOptions,
+            budgetMs: KICK_BUDGET_MS,
+          })
+            .then(() => undefined)
             .catch((err: unknown) =>
               log.error({ err }, "workspace collection on quota pressure failed"),
             )
@@ -136,6 +158,7 @@ export function createWorkspaceSync(options: WorkspaceSyncOptions): WorkspaceSyn
         },
       }),
     collect,
+    settled: () => kickRun,
     startCollector(everyMs) {
       let timer: NodeJS.Timeout | undefined;
       let stopped = false;

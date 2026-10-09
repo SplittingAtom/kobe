@@ -79,19 +79,34 @@
   }
 }
 
-/* The artifact panel (KOBE-130) is a third column beside the thread on wide screens, and below it
-   on narrow ones. */
-.artifactPanel {
+/* The side panels (artifact panel KOBE-130, file panel KOBE-151) share a third column beside the
+   thread on wide screens, and sit below it on narrow ones. Empty = no column. */
+.sidePanels {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sidePanels:empty {
+  display: none;
+}
+
+.sidePanel {
   border-top: 1px solid var(--admin-border);
+  flex: 1;
 }
 
 @media (min-width: 48rem) {
-  .body:has(.artifactPanel) {
+  .body:has(.sidePanels > *) {
     grid-template-columns: 17rem minmax(0, 1fr) minmax(20rem, 32rem);
   }
 
-  .artifactPanel {
+  .sidePanel {
     border-top: 0;
+  }
+
+  .sidePanel + .sidePanel {
+    border-top: 1px solid var(--admin-border);
   }
 }
 

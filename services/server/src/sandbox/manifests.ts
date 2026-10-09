@@ -17,6 +17,7 @@ import {
   LIMIT_RANGE,
   MANAGED_BY,
   NETWORK_POLICY,
+  PARTNER_IDENTITY_BASE,
   PI_IDENTITIES,
   PI_IDENTITY_BASE,
   PI_RUNAS_HELPER,
@@ -345,10 +346,12 @@ export function sandboxPodSpec(
       runAsGroup: SANDBOX_UID,
       fsGroup: SANDBOX_UID,
       // KOBE-71: `kobe-agent` (may run kobe-runas) and the Pi identities' groups, so the agent
-      // can hand each Pi a runtime directory only that Pi's group reads.
+      // can hand each Pi a runtime directory only that Pi's group reads. KOBE-166: and their
+      // partner (tool) groups, one per Pi identity (reconcile-only rollout, no migration).
       supplementalGroups: [
         SANDBOX_AGENT_GID,
         ...Array.from({ length: PI_IDENTITIES }, (_, i) => PI_IDENTITY_BASE + i),
+        ...Array.from({ length: PI_IDENTITIES }, (_, i) => PARTNER_IDENTITY_BASE + i),
       ],
       seccompProfile: { type: "RuntimeDefault" },
     },

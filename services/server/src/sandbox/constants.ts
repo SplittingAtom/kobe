@@ -80,6 +80,13 @@ export const SANDBOX_AGENT_GID = 1001;
 /** First Pi identity (`kobe-pi-0`, uid = gid) in the image; kobe-runas accepts 2000-2063. */
 export const PI_IDENTITY_BASE = 2000;
 /**
+ * First partner (tool) identity (`kobe-tool-0`, uid = gid; KOBE-166): Pi identity `n` is paired
+ * with `PARTNER_IDENTITY_BASE + n`, which kobe-runas accepts in 3000-3063. The agent gets their
+ * groups as well as the Pi ones. Keep equal to PI_IDENTITY_BASE + 1000
+ * (services/sandbox-agent `PARTNER_UID_OFFSET`).
+ */
+export const PARTNER_IDENTITY_BASE = 3000;
+/**
  * Pi identities per sandbox: more than the agent's Pi process cap (8 by default) so a new Pi need
  * not wait while an exited one's identity is being reclaimed.
  */

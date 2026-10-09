@@ -20,6 +20,17 @@ import path from "node:path";
  */
 export const PI_UID_MIN = 2000;
 export const PI_UID_MAX = 2063;
+/**
+ * Partner (tool) uids (KOBE-166, docs/design/paired-tool-uid.md): each Pi identity `P` is paired
+ * with the uid `P + PARTNER_UID_OFFSET` in [{@link PARTNER_UID_MIN}, {@link PARTNER_UID_MAX}]
+ * (uid = gid, groups {gid, workspace group}). The pair is allocated and reclaimed as one: a
+ * partner uid is never in use without its Pi's identity being held, and the identity goes back
+ * to the pool only after both uids have no process left. Nothing runs as a partner uid yet (the
+ * tool executor, KOBE-167); the pool, the helper and the reclaim are ready for it.
+ */
+export const PARTNER_UID_OFFSET = 1000;
+export const PARTNER_UID_MIN = PI_UID_MIN + PARTNER_UID_OFFSET;
+export const PARTNER_UID_MAX = PI_UID_MAX + PARTNER_UID_OFFSET;
 /** How long a new Pi waits for an identity (all in use, or still being reclaimed). */
 export const ACQUIRE_TIMEOUT_MS = 30_000;
 /** Bounded so a wedged helper cannot hold a slot or the agent's exit forever. */
@@ -28,6 +39,12 @@ const HELPER_TIMEOUT_MS = 10_000;
 export interface PiIdentity {
   readonly uid: number;
   readonly gid: number;
+}
+
+/** The partner (tool) identity paired with a Pi identity. */
+export function partnerOf(identity: PiIdentity): PiIdentity {
+  const uid = identity.uid + PARTNER_UID_OFFSET;
+  return { uid, gid: uid };
 }
 
 /** Run a helper invocation to completion; resolves with its exit code and stderr. */
@@ -83,6 +100,8 @@ export class PiIdentities {
     uids: readonly number[],
     run: HelperRunner = runHelper,
     reclaimScript: string = reclaimScriptFor(helper),
+    /** The agent holds the partner groups too (pod spec KOBE-166): pairs are in force. */
+    readonly paired: boolean = false,
   ) {
     if (uids.length === 0) throw new PiIdentityError("no Pi identities");
     for (const uid of uids) {
@@ -151,8 +170,26 @@ export class PiIdentities {
     args: readonly string[],
     env: Readonly<Record<string, string>> = {},
   ): readonly string[] {
-    const tmpdir = env.TMPDIR === undefined ? [] : ["/usr/bin/env", `TMPDIR=${env.TMPDIR}`];
-    return [String(identity.uid), ...tmpdir, bin, ...args];
+    return runasArgs(identity.uid, bin, args, env);
+  }
+
+  /**
+   * Like {@link command}, as the identity's partner (tool) uid. The helper keeps only stdio for
+   * it (fd 0-2): the executor (KOBE-167) talks to the agent's relay over them. Nothing calls
+   * this yet.
+   */
+  partnerCommand(
+    identity: PiIdentity,
+    bin: string,
+    args: readonly string[],
+    env: Readonly<Record<string, string>> = {},
+  ): readonly string[] {
+    return runasArgs(partnerOf(identity).uid, bin, args, env);
+  }
+
+  /** The uids that belong to `identity` and must be empty before it is reused. */
+  #uidsOf(identity: PiIdentity): readonly PiIdentity[] {
+    return this.paired ? [identity, partnerOf(identity)] : [identity];
   }
 
   /**
@@ -162,8 +199,13 @@ export class PiIdentities {
   killAll(identity: PiIdentity): Promise<void> {
     const previous = this.#killing.get(identity.uid) ?? Promise.resolve();
     const next = previous.then(async () => {
-      const { code, stderr } = await this.#run(this.helper, [String(identity.uid), "--kill-all"]);
-      if (code !== 0) throw new PiIdentityError(`kill-all as ${identity.uid} failed: ${stderr}`);
+      // Both uids of a pair, every one attempted even if an earlier one fails.
+      const failures: string[] = [];
+      for (const target of this.#uidsOf(identity)) {
+        const { code, stderr } = await this.#run(this.helper, [String(target.uid), "--kill-all"]);
+        if (code !== 0) failures.push(`kill-all as ${target.uid} failed: ${stderr}`);
+      }
+      if (failures.length > 0) throw new PiIdentityError(failures.join("; "));
     });
     const settled = next.catch(() => undefined);
     this.#killing.set(identity.uid, settled);
@@ -189,6 +231,21 @@ export class PiIdentities {
       /** Dirs (the Pi runtime dir) where everything the uid owns at top level is deleted. */
       readonly purgeDirs?: readonly string[];
     } = {},
+  ): Promise<void> {
+    for (const target of this.#uidsOf(identity)) {
+      await this.#reclaimOne(target, gid, dirs, options);
+    }
+  }
+
+  async #reclaimOne(
+    identity: PiIdentity,
+    gid: number,
+    dirs: readonly string[],
+    options: {
+      readonly timeoutMs?: number;
+      readonly delaysMs?: readonly number[];
+      readonly purgeDirs?: readonly string[];
+    },
   ): Promise<void> {
     const purge = options.purgeDirs ?? [];
     const delays = options.delaysMs ?? RECLAIM_RETRY_DELAYS_MS;
@@ -240,11 +297,13 @@ export class PiIdentities {
 
   /** Synchronous {@link killAll} for the agent's own exit (no event loop left to wait on). */
   killAllSync(identity: PiIdentity): void {
-    spawnSync(this.helper, [String(identity.uid), "--kill-all"], {
-      stdio: "ignore",
-      env: { PATH: "/usr/local/bin:/usr/bin:/bin" },
-      timeout: HELPER_TIMEOUT_MS,
-    });
+    for (const target of this.#uidsOf(identity)) {
+      spawnSync(this.helper, [String(target.uid), "--kill-all"], {
+        stdio: "ignore",
+        env: { PATH: "/usr/local/bin:/usr/bin:/bin" },
+        timeout: HELPER_TIMEOUT_MS,
+      });
+    }
   }
 
   /** Signal a process group of the identity (as the identity: the agent itself cannot). */
@@ -290,7 +349,27 @@ export class PiIdentities {
           `exit ${String(code)}): ${stderr}`,
       );
     }
+    if (!this.paired) return;
+    const partner = partnerOf(first);
+    const second = await this.#run(this.helper, [String(partner.uid), "--probe-ptrace"]);
+    if (second.code !== 0) {
+      throw new PiIdentityError(
+        `cannot start processes as a partner (tool) identity (${this.helper}, exit ` +
+          `${String(second.code)}): ${second.stderr}`,
+      );
+    }
   }
+}
+
+/** `kobe-runas <uid> [env TMPDIR=…] bin args…` (see {@link PiIdentities.command}). */
+function runasArgs(
+  uid: number,
+  bin: string,
+  args: readonly string[],
+  env: Readonly<Record<string, string>>,
+): readonly string[] {
+  const tmpdir = env.TMPDIR === undefined ? [] : ["/usr/bin/env", `TMPDIR=${env.TMPDIR}`];
+  return [String(uid), ...tmpdir, bin, ...args];
 }
 
 /** `kobe-reclaim`, installed next to the helper. */
@@ -301,6 +380,14 @@ export function reclaimScriptFor(helper: string): string {
 /** The Pi identities among the agent's supplementary groups. */
 export function identityUids(groups: readonly number[]): number[] {
   return groups.filter((gid) => Number.isInteger(gid) && gid >= PI_UID_MIN && gid <= PI_UID_MAX);
+}
+
+/**
+ * Whether the agent holds the partner group of every Pi identity in `uids` (the pod spec from
+ * KOBE-166 on): only then are pairs in force. A pod spec from before leaves Pi as it was.
+ */
+export function pairedUids(uids: readonly number[], groups: readonly number[]): boolean {
+  return uids.length > 0 && uids.every((uid) => groups.includes(uid + PARTNER_UID_OFFSET));
 }
 
 /**
@@ -342,7 +429,7 @@ export async function loadPiIdentities(
         `${minimum} Pi processes: the pod must list one group per process`,
     );
   }
-  const identities = new PiIdentities(helper, uids, run, reclaimScript);
+  const identities = new PiIdentities(helper, uids, run, reclaimScript, pairedUids(uids, groups));
   await identities.probe();
   return identities;
 }

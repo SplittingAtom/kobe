@@ -11,7 +11,12 @@ export type OrchestratorErrorCode =
   | "thread_busy" // 409: the thread row is held past the lock timeout
   | "thread_in_trash" // 409: restore the thread first (KOBE-34)
   | "queue_full" // 409: too many queued messages on the thread
-  | "attachments_unavailable" // 422: file_ids before uploads exist (KOBE-53)
+  | "attachments_unavailable" // 422: file_ids but this install has no workspace sync (no S3)
+  | "file_not_found" // 404: unknown, foreign, other-thread or rejected file_id (KOBE-144)
+  | "file_in_use" // 409: the file is attached to another message already
+  | "message_too_large" // 413: the files' total is over the per-message limit
+  | "quota_exceeded" // 403: the team has no storage left for the files
+  | "storage_unavailable" // 503: object storage did not take the files
   | "sandbox_unavailable"; // 503: the workspace did not answer a steer
 
 export const RUN_ERROR_STATUS: Record<OrchestratorErrorCode, number> = {
@@ -25,6 +30,11 @@ export const RUN_ERROR_STATUS: Record<OrchestratorErrorCode, number> = {
   thread_in_trash: 409,
   queue_full: 409,
   attachments_unavailable: 422,
+  file_not_found: 404,
+  file_in_use: 409,
+  message_too_large: 413,
+  quota_exceeded: 403,
+  storage_unavailable: 503,
   budget_exhausted: 429,
   isolation_unavailable: 503,
   sandbox_unavailable: 503,
@@ -40,7 +50,12 @@ const DEFAULT_MESSAGES: Record<OrchestratorErrorCode, string> = {
   thread_busy: "The thread is busy. Try again.",
   thread_in_trash: "The thread is in Trash. Restore it first.",
   queue_full: "Too many messages are waiting on this thread. Wait for some to run first.",
-  attachments_unavailable: "Attachments are not available yet.",
+  attachments_unavailable: "Attachments are not available on this install.",
+  file_not_found: "No such file. Upload it again.",
+  file_in_use: "That file is already attached to another message.",
+  message_too_large: "The attached files are too large for one message.",
+  quota_exceeded: "Your team has no storage left. Delete files or ask a team admin for more.",
+  storage_unavailable: "File storage did not answer. Try again.",
   budget_exhausted: "The budget is used up, so no new runs can start.",
   isolation_unavailable: "Agents are disabled: the sandbox isolation runtime is not available.",
   sandbox_unavailable: "Your workspace did not answer. Try again.",

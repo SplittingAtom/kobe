@@ -7,6 +7,14 @@
  *                                          memory and take one of its fds (pidfd_getfd): exit 0
  *                                          only if all are refused (Yama)
  *
+ * Partner (tool) uids (KOBE-166, docs/design/paired-tool-uid.md): a second range
+ * [KOBE_PARTNER_UID_MIN, KOBE_PARTNER_UID_MAX] (a Pi's uid + 1000) is accepted by every mode. A
+ * partner process gets the same identity switch (own uid = gid, supplementary group the workspace
+ * group, umask 002, no capabilities, no_new_privs) but is handed only stdio (fd 0-2): the tool
+ * executor's channel is its stdio, relayed by the agent. Pi, by contrast, keeps fd 3 (policy),
+ * fd 4 (kobe-tools) and fd 5 (the relay to its executor). Neither can reach the other: different
+ * uids, and the partner is in no group of the Pi's (its runtime dir, agent/, model.json).
+ *
  * kobe-sandbox-agent runs as KOBE_AGENT_UID; every Pi process and the tools it runs get their own
  * uid from [KOBE_SLOT_UID_MIN, KOBE_SLOT_UID_MAX] (gid = uid, the one supplementary group the
  * shared /workspace group), so a thread's tools cannot read the agent's files, write another
@@ -58,6 +66,13 @@
 #define KOBE_SLOT_UID_MAX 2063
 #endif
 
+#ifndef KOBE_PARTNER_UID_MIN
+#define KOBE_PARTNER_UID_MIN 3000
+#endif
+#ifndef KOBE_PARTNER_UID_MAX
+#define KOBE_PARTNER_UID_MAX 3063
+#endif
+
 #ifndef KOBE_SLOT_NPROC
 #define KOBE_SLOT_NPROC 1024
 #endif
@@ -71,15 +86,24 @@ static int fail(const char *what) {
   return EXIT_FAILED;
 }
 
-/* A slot uid: decimal digits only, inside the configured range. */
-static int parse_uid(const char *text, uid_t *out) {
+/* Which range a uid is in: a Pi identity or a partner (tool) uid. */
+enum kind { KIND_PI, KIND_PARTNER };
+
+/* A slot uid: decimal digits only, inside one of the configured ranges. */
+static int parse_uid(const char *text, uid_t *out, enum kind *kind) {
   if (text == NULL || *text == '\0' || strlen(text) > 10) return -1;
   unsigned long value = 0;
   for (const char *p = text; *p != '\0'; p++) {
     if (*p < '0' || *p > '9') return -1;
     value = value * 10 + (unsigned long)(*p - '0');
   }
-  if (value < KOBE_SLOT_UID_MIN || value > KOBE_SLOT_UID_MAX) return -1;
+  if (value >= KOBE_SLOT_UID_MIN && value <= KOBE_SLOT_UID_MAX) {
+    *kind = KIND_PI;
+  } else if (value >= KOBE_PARTNER_UID_MIN && value <= KOBE_PARTNER_UID_MAX) {
+    *kind = KIND_PARTNER;
+  } else {
+    return -1;
+  }
   *out = (uid_t)value;
   return 0;
 }
@@ -257,10 +281,12 @@ int main(int argc, char **argv) {
     return EXIT_REFUSED;
   }
   uid_t uid;
-  if (argc < 3 || parse_uid(argv[1], &uid) != 0) {
+  enum kind kind;
+  if (argc < 3 || parse_uid(argv[1], &uid, &kind) != 0) {
     fprintf(stderr,
-            "usage: kobe-runas <uid %d-%d> (<program> [args...] | --kill-all | --probe-ptrace)\n",
-            KOBE_SLOT_UID_MIN, KOBE_SLOT_UID_MAX);
+            "usage: kobe-runas <uid %d-%d or %d-%d> (<program> [args...] | --kill-all | "
+            "--probe-ptrace)\n",
+            KOBE_SLOT_UID_MIN, KOBE_SLOT_UID_MAX, KOBE_PARTNER_UID_MIN, KOBE_PARTNER_UID_MAX);
     return EXIT_USAGE;
   }
   const int kill_mode = strcmp(argv[2], "--kill-all") == 0;
@@ -274,10 +300,12 @@ int main(int argc, char **argv) {
   if (probe_mode) return probe_ptrace();
   const int limited = limit_processes();
   if (limited != 0) return limited;
-  /* Only Pi's stdio, its policy socket (fd 3) and its kobe-tools socket (fd 4, KOBE-128) go on;
-   * nothing else the agent might hold. */
-  if (syscall(SYS_close_range, 5U, ~0U, 0U) != 0) {
-    for (int fd = 5; fd < 1024; fd++) close(fd);
+  /* Pi gets stdio, its policy socket (fd 3), its kobe-tools socket (fd 4, KOBE-128) and the relay
+   * to its tool executor (fd 5, KOBE-166); a partner uid gets stdio only. Nothing else the agent
+   * might hold goes on. */
+  const unsigned int first_closed = kind == KIND_PI ? 6U : 3U;
+  if (syscall(SYS_close_range, first_closed, ~0U, 0U) != 0) {
+    for (int fd = (int)first_closed; fd < 1024; fd++) close(fd);
   }
   execvp(argv[2], argv + 2);
   return fail("exec");
