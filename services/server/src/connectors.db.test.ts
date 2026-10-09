@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { toolHash } from "./connectors/pin.js";
+import type { ProbeResult } from "./connectors/probe.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 import type { TestBrowser } from "./testing/browser.js";
 
@@ -16,6 +18,8 @@ let alice: TestBrowser;
 let bob: TestBrowser;
 let aliceId = "";
 let resolved: string[] = [PUBLIC];
+let probeAnswer: (url: string) => ProbeResult = () => ({ ok: false, failure: "proxy_unavailable" });
+const probedUrls: string[] = [];
 
 const body = (over: Record<string, unknown> = {}) => ({
   name: "github",
@@ -26,7 +30,15 @@ const body = (over: Record<string, unknown> = {}) => ({
 const create = (over: Record<string, unknown> = {}) => root.post(BASE, body(over));
 
 beforeAll(async () => {
-  h = await openHarness({ connectors: { resolve: async () => resolved } });
+  h = await openHarness({
+    connectors: { resolve: async () => resolved },
+    connectorProbe: {
+      probe: async (url) => {
+        probedUrls.push(url);
+        return probeAnswer(url);
+      },
+    },
+  });
   await h.createUser("root@conn.test", "admin");
   aliceId = await h.createUser("alice@conn.test");
   await h.createUser("bob@conn.test");
@@ -270,5 +282,100 @@ describe("audit", () => {
       `SELECT count(*)::int AS n FROM audit_log WHERE action LIKE 'mcp.connector.%'`,
     );
     expect(after.rows[0].n).toBe(before.rows[0].n);
+  });
+});
+
+describe("probe and pin (KOBE-101)", () => {
+  const issueTool = {
+    name: "create_issue",
+    description: "Create an issue",
+    inputSchema: { type: "object", properties: { title: { type: "string" } } },
+  };
+  const readTool = { name: "get.issue", inputSchema: { type: "object" } };
+  const pinRows = async (id: string) =>
+    (await h.admin.query(`SELECT tools_snapshot, tools_hash FROM connectors WHERE id = $1`, [id]))
+      .rows[0];
+
+  it("snapshots and pins every tool when a connector is registered (ac-1)", async () => {
+    probeAnswer = () => ({ ok: true, tools: [issueTool, readTool] });
+    const res = await create({ name: "pinned-one", url: "https://p1.example/mcp" });
+    expect(res.status, JSON.stringify(res.json)).toBe(201);
+    expect(res.json.pin).toEqual({ ok: true, tools: 2 });
+    expect(res.json.connector.toolCount).toBe(2);
+    expect(probedUrls.at(-1)).toBe("https://p1.example/mcp");
+    const row = await pinRows(res.json.connector.id);
+    expect(row.tools_hash).toMatch(/^[0-9a-f]{64}$/);
+    const pinned = row.tools_snapshot as {
+      name: string;
+      pi_name: string;
+      sha256: string;
+      status: string;
+    }[];
+    expect(pinned.map((t) => [t.name, t.pi_name, t.status])).toEqual([
+      ["create_issue", "mcp__pinned_one__create_issue", "pinned"],
+      ["get.issue", "mcp__pinned_one__get_issue", "pinned"],
+    ]);
+    expect(pinned[0]?.sha256).toBe(toolHash(issueTool));
+    const { rows } = await h.admin.query(
+      `SELECT target FROM audit_log WHERE action = 'mcp.connector.pinned'`,
+    );
+    expect(rows[0].target).toMatchObject({ name: "pinned-one", tools: 2 });
+    expect(JSON.stringify(rows[0].target)).not.toMatch(/https?:|example/);
+  });
+
+  it("registers an unreachable connector unpinned, and pins on a later probe", async () => {
+    probeAnswer = () => ({ ok: false, failure: "unreachable" });
+    const res = await create({ name: "late-pin", url: "https://p2.example/mcp" });
+    expect(res.status).toBe(201);
+    expect(res.json.pin).toMatchObject({ ok: false, failure: "unreachable" });
+    expect(res.json.connector.toolCount).toBe(0);
+    const id = res.json.connector.id as string;
+
+    probeAnswer = () => ({ ok: true, tools: [issueTool] });
+    const again = await root.post(`${BASE}/${id}/pin`, {});
+    expect(again.status).toBe(200);
+    expect(again.json.pin).toEqual({ ok: true, tools: 1 });
+    expect((await pinRows(id)).tools_snapshot).toHaveLength(1);
+
+    // Pins that exist are never replaced by a probe (drift needs re-approval).
+    probeAnswer = () => ({ ok: true, tools: [readTool] });
+    const third = await root.post(`${BASE}/${id}/pin`, {});
+    expect(third.json.pin).toMatchObject({ ok: false, failure: "already_pinned" });
+    expect((await pinRows(id)).tools_snapshot[0].name).toBe("create_issue");
+  });
+
+  it("pins nothing for a tool list Kobe cannot pin unambiguously", async () => {
+    probeAnswer = () => ({
+      ok: true,
+      tools: [
+        { name: "get-x", inputSchema: {} },
+        { name: "get_x", inputSchema: {} },
+      ],
+    });
+    const res = await create({ name: "collide", url: "https://p3.example/mcp" });
+    expect(res.json.pin).toMatchObject({ ok: false, failure: "ambiguous_tool_names" });
+    expect(res.json.connector.toolCount).toBe(0);
+  });
+
+  it("re-pins the new server's tools when the URL changes", async () => {
+    probeAnswer = () => ({ ok: true, tools: [issueTool] });
+    const created = await create({ name: "moves", url: "https://p4.example/mcp" });
+    const id = created.json.connector.id as string;
+    const old = await pinRows(id);
+    probeAnswer = () => ({ ok: true, tools: [readTool, issueTool] });
+    const moved = await root.patch(`${BASE}/${id}`, { url: "https://p5.example/mcp" });
+    expect(moved.json.pin).toEqual({ ok: true, tools: 2 });
+    expect(moved.json.connector.toolCount).toBe(2);
+    expect((await pinRows(id)).tools_hash).not.toBe(old.tools_hash);
+    // An edit that keeps the URL does not probe or report a pin.
+    const before = probedUrls.length;
+    const renamed = await root.patch(`${BASE}/${id}`, { authKind: "none" });
+    expect(renamed.json.pin).toBeUndefined();
+    expect(probedUrls.length).toBe(before);
+  });
+
+  it("is for install admins only and 404s unknown connectors", async () => {
+    expect((await alice.post(`${BASE}/${randomUUID()}/pin`, {})).status).toBe(403);
+    expect((await root.post(`${BASE}/${randomUUID()}/pin`, {})).status).toBe(404);
   });
 });

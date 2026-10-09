@@ -24,8 +24,8 @@ predates these keys still renders. Keep in sync with values.yaml.
 {{- define "kobe.serverInternalPort" -}}8082{{- end -}}
 
 {{/*
-Server env: the internal listener and the key the MCP proxy must present, and the connector URL
-policy (the proxy's own values, so the registry accepts only what the proxy will connect to).
+Server env: the internal listener and the key the MCP proxy must present, the proxy's address
+(the pinning probe, KOBE-101; it presents the same key), and the connector URL policy (the proxy's own values, so the registry accepts only what the proxy will connect to).
 */}}
 {{- define "kobe.serverInternalEnv" -}}
 {{- $m := include "kobe.mcpProxyValues" . | fromJson -}}
@@ -39,6 +39,8 @@ policy (the proxy's own values, so the registry accepts only what the proxy will
   value: {{ join "," $m.deniedCidrs | quote }}
 - name: KOBE_INTERNAL_PORT
   value: {{ include "kobe.serverInternalPort" . | quote }}
+- name: KOBE_MCP_PROXY_URL
+  value: {{ printf "http://%s-mcp-proxy" (include "kobe.fullname" .) | quote }}
 - name: KOBE_MCP_PROXY_INTERNAL_KEY
   valueFrom:
     secretKeyRef:

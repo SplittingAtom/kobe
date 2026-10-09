@@ -97,6 +97,7 @@ describe("server internal listener", () => {
   it("serves the internal port with the key; the scheduler gets neither", () => {
     const server = envOf(ms, "kobe-server");
     expect(plain(server).KOBE_INTERNAL_PORT).toBe("8082");
+    expect(plain(server).KOBE_MCP_PROXY_URL).toBe("http://kobe-mcp-proxy");
     expect(server.find((e) => e.name === "KOBE_MCP_PROXY_INTERNAL_KEY")?.valueFrom).toEqual({
       secretKeyRef: { name: "kobe-mcp-proxy-internal", key: "key" },
     });
@@ -116,12 +117,22 @@ describe("server internal listener", () => {
 });
 
 describe("MCP proxy NetworkPolicy", () => {
-  it("admits only team namespaces (sandboxes), only on the proxy port", () => {
+  it("admits only team namespaces (sandboxes) and the server's probe, only on the proxy port", () => {
     expect(policy(render())?.ingress).toEqual([
       {
         from: [
           {
             namespaceSelector: { matchLabels: { "kobe.splittingatom.io/team-namespace": "true" } },
+          },
+        ],
+        ports: [{ protocol: "TCP", port: 8080 }],
+      },
+      {
+        from: [
+          {
+            podSelector: {
+              matchLabels: expect.objectContaining({ "app.kubernetes.io/component": "server" }),
+            },
           },
         ],
         ports: [{ protocol: "TCP", port: 8080 }],

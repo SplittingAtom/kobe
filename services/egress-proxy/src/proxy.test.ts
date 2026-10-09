@@ -8,6 +8,7 @@ import {
   type Socket,
 } from "node:net";
 import { signSessionToken } from "@kobe/session-token";
+import { InMemorySpanExporter, initTelemetry } from "@kobe/telemetry";
 import { pino } from "pino";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { AddressPolicy } from "./address-policy.js";
@@ -580,3 +581,34 @@ describe("parseConnectTarget", () => {
 });
 
 vi.setConfig({ testTimeout: 10_000 });
+
+describe("tracing (KOBE-10)", () => {
+  it("records a metadata-only span per connection", async () => {
+    const exporter = new InMemorySpanExporter();
+    const telemetry = initTelemetry(
+      {
+        enabled: true,
+        endpoint: "http://x:4318",
+        headers: {},
+        captureContent: false,
+        serviceName: "t",
+      },
+      { exporter },
+    );
+    try {
+      await openConnect("pypi.org:443", basic(THREAD, token()));
+      const span = exporter.getFinishedSpans().find((s) => s.name === "egress.connection");
+      expect(span?.attributes).toMatchObject({
+        "kobe.team_id": TEAM,
+        "kobe.sandbox_id": SANDBOX,
+        "server.address": "pypi.org",
+        "server.port": 443,
+        "kobe.outcome": "blocked",
+        "kobe.reason": "not_enabled",
+      });
+      expect(JSON.stringify(span?.attributes)).not.toMatch(/authorization|token/i);
+    } finally {
+      await telemetry.shutdown();
+    }
+  });
+});

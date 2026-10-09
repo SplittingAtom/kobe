@@ -16,6 +16,7 @@ import {
 } from "@kobe/db";
 import { deriveRunTokenKey } from "@kobe/protocol/node";
 import { verifySessionToken } from "@kobe/session-token";
+import { initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
 import { loadConfig } from "./config.js";
 import { createModelGateway } from "./gateway.js";
 import { TtlCache } from "./cache.js";
@@ -32,6 +33,7 @@ const DRAIN_TIMEOUT_MS = 20_000;
 const RESYNC_EVERY_MS = 5_000;
 
 const config = loadConfig(process.env);
+const telemetry = initTelemetry(loadTelemetryConfig(process.env, "model-gateway"));
 const database = createDb(config.databaseUrl, { max: 10 });
 const db = database.db;
 
@@ -138,6 +140,7 @@ async function shutdown(signal: string): Promise<void> {
   await listener.close();
   await usage.close();
   await database.close();
+  await telemetry.shutdown();
   process.exit(0);
 }
 

@@ -7,6 +7,7 @@ import {
   loadTeamEgressHeaders,
   openHeaders,
 } from "@kobe/db";
+import { initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
 import { AddressPolicy } from "./address-policy.js";
 import { AllowlistCache } from "./allowlist.js";
 import { egressTokenVerifier } from "./auth.js";
@@ -25,6 +26,7 @@ import { dnsResolver } from "./resolver.js";
 const DRAIN_TIMEOUT_MS = 20_000;
 
 const config = loadConfig(process.env);
+const telemetry = initTelemetry(loadTelemetryConfig(process.env, "egress-proxy"));
 const database = createDb(config.databaseUrl, { max: 10 });
 const db = database.db;
 
@@ -129,6 +131,7 @@ async function shutdown(signal: string): Promise<void> {
   await blocked.drain();
   await listener.close();
   await database.close();
+  await telemetry.shutdown();
   process.exit(0);
 }
 
