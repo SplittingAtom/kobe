@@ -31,6 +31,7 @@ import {
   runToStream,
   type ThreadState,
 } from "./thread-state";
+import type { MessageFiles } from "./attachments";
 import type { ThreadEntry, ThreadRuns, ThreadSummary } from "./types";
 
 export interface ControllerOptions {
@@ -221,7 +222,11 @@ export class ThreadController {
           pending: messages,
           livePrompt:
             prompt !== undefined
-              ? { text: prompt.content, parentEntryId: prompt.parentEntryId }
+              ? {
+                  text: prompt.content,
+                  parentEntryId: prompt.parentEntryId,
+                  files: s.livePrompt?.files,
+                }
               : s.livePrompt,
         };
       });
@@ -469,9 +474,13 @@ export class ThreadController {
    * branches from that entry (edit-and-regenerate); absent = continue from the leaf. The
    * Idempotency-Key makes the one automatic resend after a network error safe.
    */
-  readonly send = async (text: string, parentEntryId?: string): Promise<boolean> => {
+  readonly send = async (
+    text: string,
+    parentEntryId?: string,
+    attach?: MessageFiles,
+  ): Promise<boolean> => {
     try {
-      return await this.#send(text, parentEntryId);
+      return await this.#send(text, parentEntryId, attach);
     } catch {
       // Whatever failed, the composer must not stay stuck: the message is offered back.
       this.#set((s) => ({ ...s, sending: undefined }));
@@ -480,7 +489,7 @@ export class ThreadController {
     }
   };
 
-  async #send(text: string, parentEntryId?: string): Promise<boolean> {
+  async #send(text: string, parentEntryId?: string, attach?: MessageFiles): Promise<boolean> {
     const threadId = this.#state.threadId;
     // One message at a time: a second Enter before the server answered is not a second message.
     if (threadId === null || this.#state.sending !== undefined) return false;
@@ -489,11 +498,11 @@ export class ThreadController {
     const branchFrom = parentEntryId ?? this.#state.summary?.leafEntryId ?? null;
     this.#set((s) => ({
       ...s,
-      sending: { key, text, parentEntryId: branchFrom, queues },
+      sending: { key, text, parentEntryId: branchFrom, queues, files: attach?.files },
       actionError: undefined,
       queuePaused: false, // sending releases a queue held by Stop
     }));
-    const body = { content: text, parentEntryId };
+    const body = { content: text, parentEntryId, fileIds: attach?.fileIds };
     let res = await this.#api.sendMessage(threadId, body, key);
     if (!res.ok && res.error.status === 0) res = await this.#api.sendMessage(threadId, body, key);
     if (this.#disposed) return res.ok;
@@ -513,7 +522,7 @@ export class ThreadController {
         ? {}
         : {
             live: { ...newLiveRun(runId), started: true },
-            livePrompt: { text, parentEntryId: branchFrom },
+            livePrompt: { text, parentEntryId: branchFrom, files: attach?.files },
             runs: [
               { runId, threadId, status: "running" as const, trigger: "user" as const },
               ...s.runs.filter((r) => r.status === "queued"),

@@ -10,6 +10,7 @@ import type { ApiError } from "../../lib/api/client";
 import { createChatApi } from "../../lib/chat/api";
 import { ChatSession } from "../../lib/chat/session";
 import type { EventSourceFactory } from "../../lib/chat/stream";
+import type { UploadTransport } from "../../lib/chat/uploads";
 import { createThreadListAdapter } from "../../lib/chat/thread-list-adapter";
 import { ACTIVE_TEAM_EVENT, fetchMyTeams } from "../../lib/teams";
 import { ConsoleLinks } from "../admin/console-links";
@@ -141,6 +142,7 @@ export interface ChatAppProps {
   readonly eventSource?: EventSourceFactory | undefined;
   readonly newKey?: (() => string) | undefined;
   readonly reopenDelayMs?: ((attempt: number) => number) | undefined;
+  readonly uploadTransport?: UploadTransport | undefined;
 }
 
 /**
@@ -148,7 +150,13 @@ export interface ChatAppProps {
  * the conversation on the right. Everything goes through the server's APIs with the session
  * cookie from this browser; nothing is fetched or cached on the Next.js server.
  */
-export function ChatApp({ fetchFn, eventSource, newKey, reopenDelayMs }: ChatAppProps) {
+export function ChatApp({
+  fetchFn,
+  eventSource,
+  newKey,
+  reopenDelayMs,
+  uploadTransport,
+}: ChatAppProps) {
   const team = useActiveTeam(fetchFn);
   const teamId = team.status === "ready" ? team.teamId : null;
   const session = useMemo(
@@ -161,8 +169,9 @@ export function ChatApp({ fetchFn, eventSource, newKey, reopenDelayMs }: ChatApp
             eventSource,
             newKey,
             reopenDelayMs,
+            uploadTransport,
           }),
-    [teamId, fetchFn, eventSource, newKey, reopenDelayMs],
+    [teamId, fetchFn, eventSource, newKey, reopenDelayMs, uploadTransport],
   );
   useEffect(() => () => session?.dispose(), [session]);
 
