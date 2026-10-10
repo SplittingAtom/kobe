@@ -1,6 +1,6 @@
 # KOBE-114: web_search tool for agents (63b)
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #194)
 - **Branch / worktree:** `kobe-114-web-search-tool` in `../Kobe-wt114`
 - **Depends on:** KOBE-113 (provider setting, sealed key, team opt-in), KOBE-107 (envelope), KOBE-128/147 (kobe-tools, wire pattern)
 
