@@ -39,4 +39,16 @@ describe("refreshAccessToken address policy", () => {
       refreshAccessToken(io("93.184.216.34"), without, new Date()),
     ).rejects.toMatchObject({ code: "refresh_rejected" });
   });
+
+  it("puts the DNS pre-check under the same deadline", async () => {
+    const hanging: OauthIo = {
+      timeoutMs: 150,
+      policy: { ...io("1.1.1.1").policy, resolve: () => new Promise(() => undefined) },
+    };
+    const started = Date.now();
+    await expect(
+      refreshAccessToken(hanging, bundle("https://as.example/token"), new Date()),
+    ).rejects.toMatchObject({ code: "oauth_unreachable" });
+    expect(Date.now() - started).toBeLessThan(1500);
+  });
 });

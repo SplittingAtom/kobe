@@ -132,14 +132,31 @@ export async function oauthRequest(
   init: { method?: "GET" | "POST"; headers?: Record<string, string>; body?: string },
   failure: OauthFailureCode,
 ): Promise<{ status: number; json: unknown; wwwAuthenticate: string | undefined }> {
-  const checked = await checkConnectorUrl(rawUrl, io.policy);
-  if (!checked.ok) throw new OauthError("oauth_unsupported");
+  // One deadline covers the DNS pre-check and the exchange.
+  const startedAt = Date.now();
+  let timer: NodeJS.Timeout | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new OauthError("oauth_unreachable")), io.timeoutMs);
+  });
+  expired.catch(() => undefined);
+  let checked: Awaited<ReturnType<typeof checkConnectorUrl>>;
   try {
-    const res = await rawRequest(new URL(checked.url), io, {
-      method: init.method ?? "GET",
-      headers: { accept: "application/json", ...init.headers },
-      ...(init.body === undefined ? {} : { body: init.body }),
-    });
+    checked = await Promise.race([checkConnectorUrl(rawUrl, io.policy), expired]);
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!checked.ok) throw new OauthError("oauth_unsupported");
+  const remaining = Math.max(1, io.timeoutMs - (Date.now() - startedAt));
+  try {
+    const res = await rawRequest(
+      new URL(checked.url),
+      { ...io, timeoutMs: remaining },
+      {
+        method: init.method ?? "GET",
+        headers: { accept: "application/json", ...init.headers },
+        ...(init.body === undefined ? {} : { body: init.body }),
+      },
+    );
     if (res.text === undefined) throw new OauthError(failure);
     let json: unknown;
     try {

@@ -6,6 +6,9 @@ import { createInternalApp } from "./routes/internal.js";
 import type { TestBrowser } from "./testing/browser.js";
 import { FakeOauthServer } from "./testing/fake-oauth-server.js";
 import { openHarness, type Harness } from "./testing/harness.js";
+import { grantContext, revealCredential } from "./connectors/grants.js";
+import { parseOauthBundle, serializeOauthBundle } from "./connectors/oauth/bundle.js";
+import { RefreshGate } from "./connectors/oauth/refresh-gate.js";
 import { INTERNAL_KEY, MCP_SESSION_KEY, mcpToken } from "./testing/mcp-fixtures.js";
 
 /**
@@ -108,6 +111,15 @@ const reveal = async () =>
       connectorId,
     )
   ).ok;
+const db = () => h.deps.database.db;
+const envelope = () => must(h.deps.envelope);
+const subject = () => ({ teamId: team, userId: aliceId, connectorId });
+/** One more "replica": its own gate, same database and authorization server. */
+const replica = (gate = new RefreshGate()) => ({
+  io: { policy: h.deps.connectorUrlPolicy, timeoutMs: 10_000 },
+  gate,
+});
+const as = async (r: Promise<{ ok: boolean }>) => (await r).ok;
 const disconnect = () => alice.delete(`${BASE}/${connectorId}`);
 const auditText = async () =>
   JSON.stringify((await h.admin.query(`SELECT action, target FROM audit_log`)).rows);
@@ -158,12 +170,18 @@ describe("refreshing an expired access token", () => {
     expect(results[0]?.body.access_token).toBe(must(fake.issued.at(-1)).accessToken);
   });
 
-  it("keeps the grant when the authorization server is down, and recovers", async () => {
+  it("keeps the grant when the authorization server is down, backs off, and recovers", async () => {
     await expire();
+    const gate = new RefreshGate({ backoffMs: 400 });
+    const direct = () => revealCredential(db(), envelope(), subject(), new Date(), replica(gate));
     fake.options = { ...fake.options, refreshUnavailable: true };
-    expect((await grantFor()).status).toBe(503);
+    const before = fake.refreshRequests.length;
+    expect((await direct()).ok).toBe(false);
+    expect((await direct()).ok).toBe(false);
+    expect(fake.refreshRequests.length).toBe(before + 1); // the second call backed off
     fake.options = { ...fake.options, refreshUnavailable: false };
-    expect((await grantFor()).status).toBe(200);
+    await new Promise((r) => setTimeout(r, 450));
+    expect((await direct()).ok).toBe(true);
   });
 
   it("treats invalid_grant as needs-reconnect: grant dropped, audited, no secrets", async () => {
@@ -179,6 +197,82 @@ describe("refreshing an expired access token", () => {
       expect(audit).not.toContain(secret);
       expect(JSON.stringify(logged)).not.toContain(secret);
     }
+  });
+});
+
+describe("refresh does not hold the database (compare-and-set)", () => {
+  const busy = () => h.deps.database.pool.totalCount - h.deps.database.pool.idleCount;
+
+  it("8 concurrent reveals against a hanging token endpoint: one HTTP call, no connection held", async () => {
+    await connect();
+    await expire();
+    fake.options = { ...fake.options, refreshDelayMs: 600 };
+    const before = fake.refreshRequests.length;
+    const calls = Array.from({ length: 8 }, () => grantFor());
+    await new Promise((r) => setTimeout(r, 300));
+    expect(fake.refreshRequests.length).toBe(before + 1);
+    expect(busy()).toBe(0);
+    // The pool is free for other work while the authorization server hangs.
+    expect((await alice.get(BASE)).status).toBe(200);
+    const results = await Promise.all(calls);
+    fake.options = { ...fake.options, refreshDelayMs: 0 };
+    expect(results.every((r) => r.status === 200)).toBe(true);
+    expect(new Set(results.map((r) => r.body.access_token)).size).toBe(1);
+  });
+
+  it("two replicas race: one wins, the other serves the winner's token", async () => {
+    await expire();
+    fake.options = { ...fake.options, refreshDelayMs: 150 };
+    const [a, b] = await Promise.all([
+      revealCredential(db(), envelope(), subject(), new Date(), replica()),
+      revealCredential(db(), envelope(), subject(), new Date(), replica()),
+    ]);
+    fake.options = { ...fake.options, refreshDelayMs: 0 };
+    const winner = must(fake.issued.at(-1)).accessToken;
+    for (const r of [a, b]) {
+      expect(r).toEqual({ ok: true, credential: { kind: "oauth", accessToken: winner } });
+    }
+    expect((await alice.get(BASE)).json).toMatchObject({ grants: [{ connector_id: connectorId }] });
+  });
+
+  it("a revoke during an in-flight refresh leaves the grant deleted", async () => {
+    await expire();
+    fake.options = { ...fake.options, refreshDelayMs: 300 };
+    const flight = revealCredential(db(), envelope(), subject(), new Date(), replica());
+    await new Promise((r) => setTimeout(r, 100));
+    expect((await disconnect()).status).toBe(204);
+    expect(await as(flight)).toBe(false);
+    fake.options = { ...fake.options, refreshDelayMs: 0 };
+    const { rows } = await h.admin.query(`SELECT 1 FROM connector_grants`);
+    expect(rows).toHaveLength(0);
+  });
+
+  it("invalid_grant after another replica rotated the grant does not drop it", async () => {
+    await connect();
+    await expire();
+    fake.options = { ...fake.options, refreshRejects: true, refreshDelayMs: 300 };
+    const flight = revealCredential(db(), envelope(), subject(), new Date(), replica());
+    await new Promise((r) => setTimeout(r, 100));
+    // Another replica stores a rotated bundle while this one waits.
+    const { rows } = await h.admin.query<{ sealed: string }>(`SELECT sealed FROM connector_grants`);
+    const ctx = grantContext(team, aliceId, connectorId);
+    const bundle = parseOauthBundle(envelope().openString(must(rows[0]).sealed, ctx));
+    const rotated = envelope().seal(
+      serializeOauthBundle({ ...bundle, access_token: "rotated-by-other-replica" }),
+      ctx,
+    );
+    await h.admin.query(
+      `UPDATE connector_grants SET sealed = $1, expires_at = now() + interval '1 hour'`,
+      [rotated],
+    );
+    const result = await flight;
+    fake.options = { ...fake.options, refreshRejects: false, refreshDelayMs: 0 };
+    expect(result).toEqual({
+      ok: true,
+      credential: { kind: "oauth", accessToken: "rotated-by-other-replica" },
+    });
+    expect((await h.admin.query(`SELECT 1 FROM connector_grants`)).rows).toHaveLength(1);
+    await disconnect();
   });
 });
 

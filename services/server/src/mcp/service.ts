@@ -1,6 +1,7 @@
 import { withTeam, type Envelope, type KobeDb, type PinnedTool } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { logger } from "../logger.js";
+import { RefreshGate } from "../connectors/oauth/refresh-gate.js";
 import type { OauthIo } from "../connectors/oauth/http.js";
 import { revealCredential, type RevealOutcome } from "../connectors/grants.js";
 import { createRateLimiter } from "../sandbox/rate-limit.js";
@@ -77,6 +78,7 @@ async function auditListRefused(
 }
 
 export function createMcpService(options: McpServiceOptions): McpService {
+  const refresh = options.oauthIo && { io: options.oauthIo, gate: new RefreshGate() };
   const deniedAudits = createRateLimiter(DENIED_AUDIT_RATE);
   const deps = {
     db: options.db,
@@ -110,7 +112,7 @@ export function createMcpService(options: McpServiceOptions): McpService {
               connectorId,
             },
             undefined,
-            options.oauthIo,
+            refresh,
           )
         : Promise.resolve({ ok: false, failure: "unavailable" }),
   };
