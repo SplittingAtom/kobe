@@ -76,3 +76,7 @@ Test bug, not a product bug. The restored-file check expected `$content writable
 file (written with `printf`, no trailing newline) directly followed by `writable`, so the tool said
 `kobe-168 <ts> <n>writable`: the file WAS restored and readable. Fixed the expectation in
 `e2e/executor/trials.sh`. Every other executor-shard check passed.
+
+Second executor run (38023321565): `chat (thread model)` failed `model_not_enabled` 2 s after the team enabled
+qwen; `suite` on the same commit passed, so it is a propagation race (gateway/Bifrost learn of an enable
+within seconds), not a main regression. `e2e/run.sh` now waits for qwen to answer before that run.

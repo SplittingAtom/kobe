@@ -1753,6 +1753,9 @@ SH
     # provider, `qwen`, not the team default); once the team disables it, the run fails clearly.
     # (KOBE-40's checks above left qwen disabled: enable it for the team first.)
     expect "the team enables qwen" '^200 ' "$(as_owner "PUT /v1/team/models/qwen {\"enabled\":true}")"
+    # The gateway and Bifrost learn of the enable within a few seconds: wait for it before the run
+    # (KOBE-168: the executor shard hit model_not_enabled 2 s after the PUT).
+    until_code 200 kobe-vllm/qwen-fake "$model_token" 30 >/dev/null
     chosen_out=$(chat_run "hello-qwen-$RANDOM" 300000 qwen)
     printf '     chat (thread model): %s\n' "$(printf '%s' "$chosen_out" | grep -v '^text=' | tr '\n' ' ')"
     contains "a thread created with a chosen model stores it (KOBE-44)" '^thread=201:qwen$' "$chosen_out"
