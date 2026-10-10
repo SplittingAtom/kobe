@@ -152,6 +152,18 @@ export const FILE_SHARE_REFUSALS = [
   "scan_rejected",
 ] as const;
 
+/** Why the server refused a `memory.put` / `memory.read` (audit `sandbox.memory_refused`, KOBE-156). */
+export const MEMORY_REFUSALS = [
+  "capability_missing",
+  "run_not_active",
+  "not_allowed",
+  "input_mismatch",
+  "memory_disabled",
+  "no_project",
+  "not_a_member",
+  "approval_denied",
+] as const;
+
 /** A Pi tool call id (`idSchema` in @kobe/protocol): no control characters, ≤ 128. */
 const toolCallId = z
   .string()
@@ -827,6 +839,23 @@ export const AUDIT_EVENTS = {
     sandboxId: id,
     userId: id,
     reason: z.enum(FILE_SHARE_REFUSALS),
+    runId: id.optional(),
+    toolCallId: toolCallId.optional(),
+  }),
+
+  /**
+   * The server refused a `memory.put` or `memory.read` (KOBE-156): no `memory` capability, a run
+   * not active here, a `remember` call it did not allow (or other input), a disabled scope, a
+   * thread outside a project, a user who is not a project member, or a project write whose
+   * approval was denied or lapsed. Never records paths or content (system; at most one per 5
+   * minutes per reason and user).
+   */
+  "sandbox.memory_refused": event("team", {
+    sandboxId: id,
+    userId: id,
+    op: z.enum(["put", "read"]),
+    reason: z.enum(MEMORY_REFUSALS),
+    scope: z.enum(["user", "project"]).optional(),
     runId: id.optional(),
     toolCallId: toolCallId.optional(),
   }),

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   CAPABILITY_BUILTIN_SKILLS,
+  CAPABILITY_MEMORY,
   CAPABILITY_RUN_TOKEN,
   CAPABILITY_SKILL_BUNDLES,
   serverToSandboxFrameSchema,
@@ -21,6 +22,7 @@ import {
   restoreParts,
 } from "./entries.js";
 import { endRunInTx, loadRun } from "./run-state.js";
+import { buildRunMemory } from "../memory/agent.js";
 import { mintRunToken } from "./run-token.js";
 import { COMMAND_FAILURES, type CommandOutcome, type SandboxTarget } from "./types.js";
 
@@ -441,9 +443,27 @@ export class CommandDelivery {
     });
     ctx.metrics.commandsDelivered += 1;
     // Not sent (closed meanwhile): the row stays delivered; the next hello reconciles it.
-    this.#host.send(
-      claimed.runToken ? ({ ...frame, run_token: claimed.runToken } as typeof frame) : frame,
-    );
+    let out = claimed.runToken
+      ? ({ ...frame, run_token: claimed.runToken } as typeof frame)
+      : frame;
+    // Memory indexes only reach agents that know the field (KOBE-156).
+    if (row.kind === "run.start" && this.#host.hasCapability(CAPABILITY_MEMORY)) {
+      const memory = await this.#runMemory(row.threadId);
+      if (memory) out = { ...out, memory } as typeof frame;
+    }
+    this.#host.send(out);
+  }
+
+  /** `run.start.memory`; a failed read means no context (every memory call is still enforced). */
+  async #runMemory(
+    threadId: string,
+  ): Promise<Awaited<ReturnType<typeof buildRunMemory>> | undefined> {
+    try {
+      return await buildRunMemory(this.#ctx.memory, { ...this.#host.target, threadId });
+    } catch (err) {
+      this.#host.log.warn({ err }, "run.start.memory could not be built; sent without it");
+      return undefined;
+    }
   }
 
   async #failRunStart(row: CommandRow, outcome: CommandOutcome): Promise<void> {
