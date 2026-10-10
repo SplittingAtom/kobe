@@ -58,8 +58,13 @@ missing_on() {
   done
 }
 
-for attempt in 1 2; do
-  k3d image import --mode direct -c "${cluster}" "${sources[@]}"
+# A failed import (for example k3d's stream to the Docker socket closing mid-tarball, "use of
+# closed network connection") must not end the script under `set -e`: the per-node check below
+# decides, and the next attempt re-imports.
+for attempt in 1 2 3; do
+  if ! k3d image import --mode direct -c "${cluster}" "${sources[@]}"; then
+    echo "warning: k3d image import attempt ${attempt} exited non-zero; checking the nodes" >&2
+  fi
   missing=""
   for node in ${nodes}; do
     m=$(missing_on "${node}")
@@ -71,6 +76,7 @@ for attempt in 1 2; do
   fi
   echo "warning: import attempt ${attempt} left images missing:" >&2
   printf '%s' "${missing}" >&2
+  sleep $((attempt * 5))
 done
-echo "error: images still missing from the k3d nodes after two imports" >&2
+echo "error: images still missing from the k3d nodes after three imports" >&2
 exit 1
