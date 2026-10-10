@@ -1,4 +1,10 @@
-import type { ApprovalMode, ErrorInfo, PiThreadConfig, RunMcpContext, RunTrigger } from "@kobe/protocol";
+import type {
+  ApprovalMode,
+  ErrorInfo,
+  PiThreadConfig,
+  RunMcpContext,
+  RunTrigger,
+} from "@kobe/protocol";
 import type { AgentScope, KobeTx } from "@kobe/db";
 import type { Omission } from "../resolver/resolve.js";
 

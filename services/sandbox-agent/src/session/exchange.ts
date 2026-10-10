@@ -137,6 +137,12 @@ export class SessionClient {
     return { token: g.tokens["kobe.egress-proxy"], expiresAt: g.expiresAt };
   }
 
+  /** The `kobe.mcp-proxy` token and its expiry (KOBE-111: Pi's per-session MCP config). */
+  async mcpProxyGrant(): Promise<{ token: string; expiresAt: number }> {
+    const g = await this.grant();
+    return { token: g.tokens["kobe.mcp-proxy"], expiresAt: g.expiresAt };
+  }
+
   get refreshMarginMs(): number {
     return this.#o.refreshMarginMs;
   }

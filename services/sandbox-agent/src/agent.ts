@@ -1,6 +1,7 @@
 import {
   CAPABILITY_ARTIFACTS,
   CAPABILITY_BUILTIN_SKILLS,
+  CAPABILITY_MCP,
   CAPABILITY_FILES,
   CAPABILITY_WEB_SEARCH,
   CAPABILITY_RUN_TOKEN,
@@ -29,6 +30,7 @@ import { encodeOutbound } from "./wire/encode.js";
 import { Outbox } from "./wire/outbox.js";
 import type { BackoffPolicy } from "./wire/backoff.js";
 import type { EgressWiring } from "./egress/egress-wiring.js";
+import type { McpWiring } from "./mcp/pi-mcp-config.js";
 import type { ModelWiring } from "./models/types.js";
 import type { PiIdentities } from "./pi/identities.js";
 import type { ExecWiring } from "./threads/exec-wiring.js";
@@ -59,6 +61,8 @@ export interface AgentDeps {
   readonly models?: ModelWiring | undefined;
   /** Egress for Pi's tools (KOBE-39); absent outside Kobe's pods. */
   readonly egress?: EgressWiring | undefined;
+  /** mcp-proxy wiring (KOBE-111); absent: no `mcp` capability, runs get no connector tools. */
+  readonly mcp?: McpWiring | undefined;
   /** Pi identities (KOBE-71); absent: Pi runs as the agent's uid. */
   readonly identities?: PiIdentities | undefined;
   /** Workspace sync (KOBE-27): restore before runs, push after them and before stopping. */
@@ -137,6 +141,7 @@ export class Agent {
       runtimeDir: config.piRuntimeDir,
       models: deps.models,
       egress: deps.egress,
+      mcp: deps.mcp,
       policyExtension: config.policyExtension,
       toolsExtension: deps.toolsExtension,
       exec: deps.exec?.wiring,
@@ -282,6 +287,9 @@ export class Agent {
       ...(this.#deps.toolsExtension === undefined ? [] : [CAPABILITY_ARTIFACTS]),
       ...(this.#filesEnabled() ? [CAPABILITY_FILES] : []),
       ...(this.#deps.toolsExtension === undefined ? [] : [CAPABILITY_WEB_SEARCH]),
+      // Per-session MCP config (KOBE-111) needs the proxy URL, a session to trade tokens with, and
+      // Pi's MCP extension (built into Pi 1.0.x).
+      ...(this.#deps.mcp === undefined ? [] : [CAPABILITY_MCP]),
       // The run token reaches Pi through the models extension, so only with model wiring.
       ...(this.#deps.models === undefined ? [] : [CAPABILITY_RUN_TOKEN]),
     ];

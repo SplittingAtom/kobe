@@ -65,6 +65,17 @@ const configSchema = z.object({
       return parsed.username === "" && parsed.password === "" && parsed.pathname === "/";
     }, "KOBE_EGRESS_PROXY_URL must be a plain origin without credentials")
     .optional(),
+  /**
+   * The MCP proxy as sandbox pods see it (set by the server's pod spec, KOBE-111): with a bootstrap
+   * session, Pi's per-session `mcp.json` points at it with the sandbox's mcp-proxy session token.
+   */
+  KOBE_MCP_PROXY_URL: z
+    .url({ protocol: /^https?$/, error: "KOBE_MCP_PROXY_URL must be an http(s) URL" })
+    .refine((url) => {
+      const parsed = new URL(url);
+      return parsed.username === "" && parsed.password === "" && parsed.pathname === "/";
+    }, "KOBE_MCP_PROXY_URL must be a plain origin without credentials")
+    .optional(),
   /** The root-owned BASH_ENV script that exports the proxy variables from the token file. */
   KOBE_EGRESS_ENV_SCRIPT: z.string().startsWith("/").default("/opt/kobe/egress-env.sh"),
   /** Hosts tools reach without the proxy (the pod's NO_PROXY); passed to Pi with the proxy. */
@@ -145,6 +156,8 @@ export interface Config {
   /** The egress proxy origin with its port (`http://host:port`), when the pod has one. */
   readonly egressProxyUrl?: string;
   readonly egressEnvScript: string;
+  /** The MCP proxy origin (`http://host[:port]`), when the pod has one (KOBE-111). */
+  readonly mcpProxyUrl?: string;
   readonly noProxy: string;
   readonly policyExtension: string;
   /** kobe-tools (KOBE-128); undefined = no artifact tools. */
@@ -201,6 +214,9 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
       ? {}
       : { egressProxyUrl: egressOrigin(c.KOBE_EGRESS_PROXY_URL) }),
     egressEnvScript: c.KOBE_EGRESS_ENV_SCRIPT,
+    ...(c.KOBE_MCP_PROXY_URL === undefined
+      ? {}
+      : { mcpProxyUrl: new URL(c.KOBE_MCP_PROXY_URL).origin }),
     noProxy: c.NO_PROXY,
     policyExtension: c.KOBE_POLICY_EXTENSION,
     ...(c.KOBE_TOOLS_EXTENSION === undefined ? {} : { toolsExtension: c.KOBE_TOOLS_EXTENSION }),

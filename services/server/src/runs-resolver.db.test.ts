@@ -1,7 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { withTeam } from "@kobe/db";
-import { enableConnector as enableTeamConnector, registerConnector } from "./testing/mcp-fixtures.js";
+import {
+  enableConnector as enableTeamConnector,
+  registerConnector,
+} from "./testing/mcp-fixtures.js";
 import { PINNED_AGENTS } from "./runs/agents.js";
 import { RunFixture } from "./testing/run-fixture.js";
 import type { Person } from "./testing/event-stream-fixture.js";
@@ -384,8 +387,14 @@ describe("effective connectors from grants (KOBE-111)", () => {
     const w = await f.world(1);
     await catalog(w.team, w.owner.id, [["fast", true]]);
     const tag = randomBytes(3).toString("hex");
-    const keyed = await registerConnector(f.fx.admin, { name: `keyed-${tag}`, authKind: "api_key" });
-    const ungranted = await registerConnector(f.fx.admin, { name: `bare-${tag}`, authKind: "api_key" });
+    const keyed = await registerConnector(f.fx.admin, {
+      name: `keyed-${tag}`,
+      authKind: "api_key",
+    });
+    const ungranted = await registerConnector(f.fx.admin, {
+      name: `bare-${tag}`,
+      authKind: "api_key",
+    });
     const stale = await registerConnector(f.fx.admin, { name: `stale-${tag}`, authKind: "oauth" });
     const open = await registerConnector(f.fx.admin, { name: `open-${tag}`, authKind: "none" });
     for (const c of [keyed, ungranted, stale, open]) {
@@ -409,6 +418,9 @@ describe("effective connectors from grants (KOBE-111)", () => {
         { kind: "connector", name: stale.name, reason: "not_user_connected" },
       ]),
     );
+    // ac-2: the frame field names connectors and tools only: no URL, no credential, no token.
+    const wire = JSON.stringify(res.ok ? res.mcp : null);
+    expect(wire).not.toMatch(/https?:\/\/|e1\.|sealed|token|api_key/i);
     // Another user's grant never counts: a teammate's run has only the `none` connector.
     const mate = w.others[0];
     if (mate === undefined) throw new Error("no teammate");
@@ -419,7 +431,9 @@ describe("effective connectors from grants (KOBE-111)", () => {
   it("the agent's tools.allow narrows the tools; a connector left empty is not offered", async () => {
     const w = await f.world();
     await catalog(w.team, w.owner.id, [["fast", true]]);
-    const c = await registerConnector(f.fx.admin, { name: `nar-${randomBytes(3).toString("hex")}` });
+    const c = await registerConnector(f.fx.admin, {
+      name: `nar-${randomBytes(3).toString("hex")}`,
+    });
     await enableTeamConnector(f.fx.admin, w.team, c.id, w.owner.id, "all");
     const seg = c.name.replace(/-/g, "_");
     const narrowed = await pinnedThread(w.owner, {
@@ -427,7 +441,9 @@ describe("effective connectors from grants (KOBE-111)", () => {
       tools: { allow: [`mcp__${seg}__get_*`] },
     });
     const r1 = await resolveFor(w.team, w.owner.id, narrowed);
-    expect(r1.ok && r1.mcp?.servers.flatMap((s) => s.tools.map((t) => t.name))).toEqual(["get_issue"]);
+    expect(r1.ok && r1.mcp?.servers.flatMap((s) => s.tools.map((t) => t.name))).toEqual([
+      "get_issue",
+    ]);
     const none = await pinnedThread(w.owner, { connectors: [c.name], tools: { allow: ["read"] } });
     const r2 = await resolveFor(w.team, w.owner.id, none);
     expect(r2.ok && r2.mcp).toEqual({ servers: [] });

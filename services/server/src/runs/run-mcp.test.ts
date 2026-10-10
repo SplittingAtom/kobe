@@ -32,7 +32,11 @@ describe("connectedConnectorNames (the user-connected stub, KOBE-111)", () => {
   it("needs a grant of the connector's kind; `none` connectors need none", () => {
     expect(connectedConnectorNames([jira, gh, open], [], NOW)).toEqual(["docs"]);
     expect(
-      connectedConnectorNames([jira, gh, open], [grant(ID_A, "api_key"), grant(ID_B, "oauth")], NOW),
+      connectedConnectorNames(
+        [jira, gh, open],
+        [grant(ID_A, "api_key"), grant(ID_B, "oauth")],
+        NOW,
+      ),
     ).toEqual(["jira", "git-hub", "docs"]);
   });
 
@@ -56,7 +60,8 @@ describe("buildRunMcp", () => {
     pinnedTool("jira", { name: "drifted", readOnly: true, status: "drifted" }),
   ];
   const jira = connector(ID_A, "jira", "api_key", tools);
-  const names = (r: ReturnType<typeof buildRunMcp>) => r.servers.flatMap((s) => s.tools.map((t) => t.pi_name));
+  const names = (r: ReturnType<typeof buildRunMcp>) =>
+    r.servers.flatMap((s) => s.tools.map((t) => t.pi_name));
 
   it("lists exactly the effective connectors and their exposed, pinned tools", () => {
     const out = buildRunMcp([jira, connector(ID_B, "other", "none")], ["jira"], undefined);
@@ -74,9 +79,9 @@ describe("buildRunMcp", () => {
     expect(names(buildRunMcp([jira], ["jira"], { allow: ["mcp__jira__get_*"] }))).toEqual([
       "mcp__jira__get_issue",
     ]);
-    expect(names(buildRunMcp([jira], ["jira"], { allow: ["mcp__jira__*"], deny: ["*create*"] }))).toEqual([
-      "mcp__jira__get_issue",
-    ]);
+    expect(
+      names(buildRunMcp([jira], ["jira"], { allow: ["mcp__jira__*"], deny: ["*create*"] })),
+    ).toEqual(["mcp__jira__get_issue"]);
     expect(names(buildRunMcp([jira], ["jira"], { allow: ["read"] }))).toEqual([]);
   });
 

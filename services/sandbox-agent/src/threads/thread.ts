@@ -12,7 +12,7 @@ import {
   type PolicyChannelReply,
 } from "../policy/channel.js";
 import { ToolsChannel } from "../tools/channel.js";
-import type { KobeToolsRequest, KobeToolsResponse } from "@kobe/protocol";
+import type { KobeToolsRequest, KobeToolsResponse, RunMcpContext } from "@kobe/protocol";
 import { PiProcess, PiProcessError, type PiExit, type PiRecord } from "../pi/pi-process.js";
 import type { PiIdentities, PiIdentity } from "../pi/identities.js";
 import type { PiLaunch } from "../pi/pi-launch.js";
@@ -26,6 +26,13 @@ import {
   systemPromptArgs,
 } from "../pi/system-prompt-file.js";
 import { tamperedConfig, writeGuardedConfig } from "../models/agent-config.js";
+import {
+  buildPiMcpConfig,
+  MCP_AGENT_FILES,
+  verifyMcpConfigFile,
+  writeMcpConfigFile,
+  type McpWiring,
+} from "../mcp/pi-mcp-config.js";
 import { ModelFile } from "../models/model-file.js";
 import {
   AGENT_SUBDIR,
@@ -99,6 +106,15 @@ export interface ThreadHooks {
   readonly warning?: (threadId: string, message: string) => void;
 }
 
+/** What the thread keeps of a Pi's `mcp.json` so a rotated token can be written into it. */
+interface McpConfigState {
+  readonly agentDir: string;
+  readonly shared: boolean;
+  readonly mcp: RunMcpContext;
+  /** The last two texts written (a rotation may be mid-rename): what the tripwire accepts. */
+  texts: readonly string[];
+}
+
 export interface ThreadEnv {
   readonly bin: string;
   /**
@@ -113,6 +129,8 @@ export interface ThreadEnv {
   readonly models?: ModelWiring | undefined;
   /** Egress for Pi's tools (KOBE-39): token file + BASH_ENV; absent outside Kobe's pods. */
   readonly egress?: EgressWiring | undefined;
+  /** mcp-proxy wiring for Pi's per-session MCP config (KOBE-111); absent: no connector tools. */
+  readonly mcp?: McpWiring | undefined;
   /** The kobe-policy extension (root-owned file), loaded last into every Pi (KOBE-36). */
   readonly policyExtension: string;
   /** The kobe-tools extension (root-owned file, KOBE-128); absent: no tools, no fd 4. */
@@ -176,6 +194,8 @@ export class Thread {
   #modelFile: ModelFile | undefined;
   /** The active run's gateway token (KOBE-118): held in memory for this thread's Pi only. */
   #runToken: { readonly runId: string; readonly token: string } | undefined;
+  /** Where the current Pi's `mcp.json` lives and what it was built from (KOBE-111). */
+  #mcpConfig: McpConfigState | undefined;
   /** The current Pi's egress token file (undefined without egress wiring). */
   #egressFile: EgressTokenFile | undefined;
   #promptFile: SystemPromptFile | undefined;
@@ -282,6 +302,7 @@ export class Thread {
     let relay: ExecRelay | undefined;
     let pi: PiProcess;
     let modelFile: ModelFile | undefined;
+    let mcpConfig: McpConfigState | undefined;
     let egressFile: EgressTokenFile | undefined;
     let promptFile: SystemPromptFile | undefined;
     try {
@@ -295,6 +316,19 @@ export class Thread {
       }
       await writeGuardedConfig(agentDir, identity !== undefined);
       env.PI_CODING_AGENT_DIR = agentDir;
+      // Per-session MCP (KOBE-111): the file goes into this process's private config dir, the one
+      // place Pi reads `mcp.json`; the workspace and the shared HOME are never involved.
+      if (launch.mcp !== undefined) {
+        const wiring = this.#env.mcp;
+        if (wiring === undefined) throw new Error("this sandbox has no MCP proxy wiring");
+        const text = buildPiMcpConfig({
+          proxyUrl: wiring.proxyUrl,
+          token: await wiring.tokens.current(),
+          mcp: launch.mcp,
+        });
+        mcpConfig = { agentDir, shared: identity !== undefined, mcp: launch.mcp, texts: [text] };
+        await writeMcpConfigFile(agentDir, text, mcpConfig.shared);
+      }
       // The tools get the launch's HOME and TMPDIR (the shared ones); Pi gets private ones, as it
       // loads code from both. With the executor the tools are another uid; without it (KOBE-228)
       // they are Pi's own and inherit its environment, so the shared ones reach them through the
@@ -437,6 +471,7 @@ export class Thread {
     this.#policy = channel;
     this.#launchKey = launch.key;
     this.#modelFile = modelFile;
+    this.#mcpConfig = mcpConfig;
     this.#egressFile = egressFile;
     this.#promptFile = promptFile;
     this.lastUsed = Date.now();
@@ -456,6 +491,24 @@ export class Thread {
     const egress = this.#env.egress;
     if (egressFile !== undefined && egress !== undefined) {
       await this.updateEgressToken(await egress.tokens.current());
+    }
+  }
+
+  /**
+   * A rotated mcp-proxy token (KOBE-111): `mcp.json` is rewritten atomically. Pi reads it when it
+   * connects, so a connection made before the rotation keeps the older token until it reconnects
+   * (ledger KOBE-111: open question).
+   */
+  async updateMcpToken(token: string): Promise<void> {
+    const state = this.#mcpConfig;
+    const wiring = this.#env.mcp;
+    if (state === undefined || wiring === undefined) return;
+    try {
+      const text = buildPiMcpConfig({ proxyUrl: wiring.proxyUrl, token, mcp: state.mcp });
+      state.texts = [state.texts.at(-1) ?? text, text];
+      await writeMcpConfigFile(state.agentDir, text, state.shared);
+    } catch (error) {
+      this.#warn(`mcp config not updated: ${(error as Error).message}`);
     }
   }
 
@@ -506,7 +559,14 @@ export class Thread {
     if (this.#promptFile !== undefined && !(await this.#promptFile.verify())) {
       return "the system prompt file is not what the agent wrote";
     }
-    const unexpected = await unexpectedEntries(runtimeDir);
+    const mcp = this.#mcpConfig;
+    if (mcp !== undefined && !(await verifyMcpConfigFile(mcp.agentDir, mcp.texts))) {
+      return "the MCP config file is not what the agent wrote";
+    }
+    const unexpected = await unexpectedEntries(
+      runtimeDir,
+      mcp === undefined ? undefined : MCP_AGENT_FILES,
+    );
     if (unexpected.length > 0) {
       return `unexpected entries in Pi's runtime directory: ${unexpected.slice(0, 5).join(", ")}`;
     }
@@ -799,6 +859,7 @@ export class Thread {
     this.#policy = undefined;
     this.#launchKey = undefined;
     this.#modelFile = undefined;
+    this.#mcpConfig = undefined;
     this.#egressFile = undefined;
     this.#promptFile = undefined;
     this.#streaming = false;

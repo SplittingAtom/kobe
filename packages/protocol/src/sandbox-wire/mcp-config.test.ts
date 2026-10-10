@@ -17,9 +17,9 @@ describe("run.start mcp (KOBE-111)", () => {
   it("rejects tool names that are not mcp__<server>__<tool>, and unknown keys", () => {
     const bad = { ...server, tools: [{ name: "search", pi_name: "search" }] };
     expect(runMcpContextSchema.safeParse({ servers: [bad] }).success).toBe(false);
-    expect(runMcpContextSchema.safeParse({ servers: [{ ...server, url: "http://x" }] }).success).toBe(
-      false,
-    );
+    expect(
+      runMcpContextSchema.safeParse({ servers: [{ ...server, url: "http://x" }] }).success,
+    ).toBe(false);
     expect(runMcpContextSchema.safeParse({ servers: [server], token: "t" }).success).toBe(false);
   });
 

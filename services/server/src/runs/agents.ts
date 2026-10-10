@@ -6,7 +6,12 @@ import { agentSkills } from "@kobe/agent-file";
 import { bundleRefsFor } from "../skills/materialize.js";
 import { buildResolveInput, loadSkillFacts, loadTeamFacts } from "./resolver-input.js";
 import type { AgentScope, KobeTx } from "@kobe/db";
-import { buildRunMcp, connectedConnectorNames, loadTeamConnectorRows, loadUserGrantFacts } from "./run-mcp.js";
+import {
+  buildRunMcp,
+  connectedConnectorNames,
+  loadTeamConnectorRows,
+  loadUserGrantFacts,
+} from "./run-mcp.js";
 import type { RunAgentResolver } from "./seams.js";
 
 /**
