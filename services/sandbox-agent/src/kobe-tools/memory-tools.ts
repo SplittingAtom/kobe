@@ -83,7 +83,11 @@ const RECALL_PARAMETERS = {
   additionalProperties: false,
   properties: {
     scope: { type: "string", enum: SCOPES },
-    path: { type: "string", maxLength: MEMORY_PATH_MAX, description: "Read one file (needs scope)." },
+    path: {
+      type: "string",
+      maxLength: MEMORY_PATH_MAX,
+      description: "Read one file (needs scope).",
+    },
     query: {
       type: "string",
       minLength: 1,
@@ -180,7 +184,11 @@ export function recallTool(transport: ToolsTransport): ToolDefinitionLike {
       ) {
         throw new ToolFailure("invalid input: expected { scope?, path? } or { scope?, query }");
       }
-      const outcome = await transport.request({ op: OP_MEMORY_READ, tool_call_id: toolCallId, input });
+      const outcome = await transport.request({
+        op: OP_MEMORY_READ,
+        tool_call_id: toolCallId,
+        input,
+      });
       if (!outcome.ok) throw new ToolFailure(`${outcome.error.code}: ${outcome.error.message}`);
       if (!("op" in outcome) || outcome.op !== "read") {
         throw new ToolFailure("unexpected answer to recall");
@@ -217,7 +225,8 @@ function recallText(outcome: {
   const parts: string[] = [MEMORY_NOTICE];
   if (listing.length > 0) parts.push(MEMORY_BEGIN, ...listing, MEMORY_END);
   parts.push(...blocks);
-  if (cut) parts.push("(output truncated: some content was cut; recall a single file for the rest)");
+  if (cut)
+    parts.push("(output truncated: some content was cut; recall a single file for the rest)");
   if (outcome.truncated) parts.push("(more files matched than are shown; narrow the query)");
   return parts.join("\n");
 }

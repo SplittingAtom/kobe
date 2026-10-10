@@ -62,7 +62,15 @@ describe("MemoryBroker", () => {
     };
     expect(broker.onResult(frame)).toBe(true);
     expect(replies).toEqual([
-      { id: "kt_1", ok: true, op: "put", status: "applied", scope: "user", path: "a.md", version: 1 },
+      {
+        id: "kt_1",
+        ok: true,
+        op: "put",
+        status: "applied",
+        scope: "user",
+        path: "a.md",
+        version: 1,
+      },
     ]);
     expect(broker.onResult(frame)).toBe(false);
   });

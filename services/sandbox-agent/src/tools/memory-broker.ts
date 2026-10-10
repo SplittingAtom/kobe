@@ -51,10 +51,7 @@ export class MemoryBroker {
       return;
     }
     const perThread = [...this.#pending.values()].filter((p) => p.threadId === threadId).length;
-    if (
-      this.#pending.size >= MAX_PENDING_MEMORY ||
-      perThread >= MAX_PENDING_MEMORY_PER_THREAD
-    ) {
+    if (this.#pending.size >= MAX_PENDING_MEMORY || perThread >= MAX_PENDING_MEMORY_PER_THREAD) {
       reply(toolsError(request.id, "unavailable", "too many memory requests in flight"));
       return;
     }

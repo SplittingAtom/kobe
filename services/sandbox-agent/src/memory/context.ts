@@ -4,11 +4,7 @@ import {
   type MemoryScope,
   type RunMemoryContext,
 } from "@kobe/protocol";
-import {
-  MEMORY_NOTICE,
-  capBytes,
-  untrustedMemoryBlock,
-} from "../kobe-tools/memory-tools.js";
+import { MEMORY_NOTICE, capBytes, untrustedMemoryBlock } from "../kobe-tools/memory-tools.js";
 
 /**
  * The memory index in the model's context (KOBE-157, memory.ts `run.start.memory`). Indexes are
