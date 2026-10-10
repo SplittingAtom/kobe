@@ -110,7 +110,7 @@ describe("install setting", () => {
 
   it("audits changes without the key or hint", async () => {
     const { rows } = await h.admin.query(
-      `SELECT action, target FROM audit_log WHERE action LIKE 'websearch.%' ORDER BY seq`,
+      `SELECT action, target FROM audit_log WHERE action LIKE 'mcp.web_search.%' ORDER BY seq`,
     );
     expect(rows.length).toBeGreaterThanOrEqual(3);
     const dump = JSON.stringify(rows);

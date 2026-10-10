@@ -93,7 +93,7 @@ export async function putWebSearch(
     }
     // A provider change leaves the old opt-ins in place: they follow the install's provider.
     await recordAudit(tx, {
-      action: "websearch.install.configured",
+      action: "mcp.web_search.configured",
       target: { provider: input.provider, enabled, keyChanged: sealedFields !== undefined },
     });
     const [view] = await tx.select(viewColumns).from(webSearchSettings);
@@ -125,7 +125,7 @@ export function removeWebSearch(db: KobeDb): Promise<boolean> {
       .returning({ provider: webSearchSettings.provider });
     const provider = removed[0]?.provider;
     if (!provider) return false;
-    await recordAudit(tx, { action: "websearch.install.removed", target: { provider } });
+    await recordAudit(tx, { action: "mcp.web_search.removed", target: { provider } });
     return true;
   });
 }
@@ -168,7 +168,7 @@ export async function setTeamWebSearch(
     } else {
       await tx.delete(teamWebSearch).where(eq(teamWebSearch.teamId, teamId));
     }
-    await recordAudit(tx, { action: "websearch.team.changed", teamId, target: { enabled } });
+    await recordAudit(tx, { action: "mcp.web_search.team_changed", teamId, target: { enabled } });
   });
   return { ok: true, view: await readTeamWebSearch(db, teamId) };
 }
