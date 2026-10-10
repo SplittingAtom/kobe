@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronRightIcon, DownloadIcon, FileIcon, FolderIcon, Trash2Icon } from "lucide-react";
 import type { ApiError } from "../../lib/api/client";
 import type { FileEntry, FilesApi } from "../../lib/files/api";
+import { saveBytes } from "../../lib/files/save";
 import { describeFileError, formatBytes, isReadOnlyPath } from "../../lib/files/format";
 import { ErrorNotice } from "../admin/error-notice";
 import { useFolder } from "./use-folder";
@@ -182,15 +183,6 @@ function Row({
   );
 }
 
-function triggerDownload(name: string, bytes: Uint8Array): void {
-  const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)]));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = name;
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
 export function FileBrowser({
   api,
   refreshAfterWakeMs = DEFAULT_REFRESH_AFTER_WAKE_MS,
@@ -218,7 +210,7 @@ export function FileBrowser({
     setActionError(null);
     const res = await api.download(entry.path);
     if (!res.ok) return setActionError(describeFileError(res.error));
-    triggerDownload(entry.name, res.data);
+    saveBytes(entry.name, res.data);
     setNotice(`Downloaded ${entry.name}`);
   };
 

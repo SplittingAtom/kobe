@@ -1,20 +1,14 @@
-import { lstat, readFile, realpath } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { SandboxAttachment } from "@kobe/protocol";
+import { confineFile, ConfineError } from "../workspace-confine.js";
 
 /**
  * Confinement of `run.start.attachments[].path` (KOBE-144). The server names paths, but the
  * workspace is writable by the model, so a path is only trusted after the filesystem agrees:
- *
- * 1. lexical: absolute, under the workspace root, no `..`, no control characters or backslashes;
- * 2. physical: `realpath` of the target (or of its deepest existing ancestor, when the file has not
- *    been synced yet) must equal `realpath(root)/rel`. A symlink in any component, to outside or
- *    elsewhere inside, changes the real path and is refused; a symlink as the last component is
- *    refused even when dangling;
- * 3. an existing target is a regular file (no FIFO, device, socket, directory).
- *
- * Same rule as `share_file`'s path check (KOBE-149, tools/share-path.ts); fold the two into one
- * helper once both are on main.
+ * lexically (absolute, under the workspace root, no `..`, no control characters or backslashes),
+ * then physically through the shared helper (`workspace-confine.ts`, also used by `share_file`).
+ * A file not synced yet is allowed.
  */
 export class AttachmentPathError extends Error {}
 
@@ -27,7 +21,7 @@ export interface ConfinedAttachment {
 // eslint-disable-next-line no-control-regex
 const FORBIDDEN = /[\u0000-\u001f\u007f\\]/u;
 
-function lexical(root: string, input: string): string {
+function lexicalRel(root: string, input: string): string {
   if (input === "" || FORBIDDEN.test(input) || !path.isAbsolute(input)) {
     throw new AttachmentPathError("attachment path is not a plain absolute path");
   }
@@ -36,22 +30,7 @@ function lexical(root: string, input: string): string {
   if (!resolved.startsWith(`${root}${path.sep}`)) {
     throw new AttachmentPathError("attachment outside the workspace");
   }
-  return resolved;
-}
-
-async function physicalMatches(root: string, realRoot: string, target: string): Promise<boolean> {
-  let probe = target;
-  for (;;) {
-    try {
-      const real = await realpath(probe);
-      return real === path.join(realRoot, path.relative(root, probe));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
-      const parent = path.dirname(probe);
-      if (parent === probe || !parent.startsWith(root)) return false;
-      probe = parent;
-    }
-  }
+  return path.relative(root, resolved);
 }
 
 export async function confineAttachment(
@@ -59,25 +38,15 @@ export async function confineAttachment(
   input: string,
 ): Promise<ConfinedAttachment> {
   const root = path.resolve(workspaceDir);
-  const absolute = lexical(root, input);
-  const realRoot = await realpath(root).catch(() => undefined);
-  if (realRoot === undefined) throw new AttachmentPathError("workspace root is unavailable");
-  const stat = await lstat(absolute).catch((error: NodeJS.ErrnoException) => error);
-  if (stat instanceof Error) {
-    if (stat.code !== "ENOENT" && stat.code !== "ENOTDIR") {
-      throw new AttachmentPathError("attachment cannot be resolved");
+  const rel = lexicalRel(root, input);
+  try {
+    return await confineFile(root, rel, { allowMissing: true });
+  } catch (error) {
+    if (error instanceof ConfineError) {
+      throw new AttachmentPathError(`attachment: ${error.message}`);
     }
-    if (!(await physicalMatches(root, realRoot, absolute))) {
-      throw new AttachmentPathError("attachment goes through a symbolic link");
-    }
-    return { absolute, exists: false, size: 0 };
+    throw error;
   }
-  if (stat.isSymbolicLink()) throw new AttachmentPathError("attachment is a symbolic link");
-  if (!(await physicalMatches(root, realRoot, absolute))) {
-    throw new AttachmentPathError("attachment goes through a symbolic link");
-  }
-  if (!stat.isFile()) throw new AttachmentPathError("attachment is not a regular file");
-  return { absolute, exists: true, size: stat.size };
 }
 
 /** Largest image handed to Pi inline (provider limits are around 5 MB per image). */

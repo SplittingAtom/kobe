@@ -9,6 +9,7 @@ import {
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { auditTimeout } from "../retention/locks.js";
+import { memoryRecorder, purgeMemoryBatchInTx } from "../retention/memory.js";
 import { workspaceBlobKey } from "../workspace-sync/keys.js";
 import type { Departed, OffboardingContext, TeamIdentity } from "./types.js";
 import { findTeam } from "./destroy.js";
@@ -132,7 +133,40 @@ async function deleteBlobs(
   }
 }
 
-/** Step 4: the sync state; the row stays `destroyed` (no retention left) and the purge is audited. */
+/**
+ * Step 4: the member's personal memory (D24, KOBE-188): files, versions and their objects. Project
+ * memory follows the project and stays. The guard above is the hold check; the batch re-checks
+ * `memory_legal_hold_covers` under the same lock.
+ */
+async function deleteMemory(
+  ctx: OffboardingContext,
+  target: Departed,
+): Promise<PurgeOutcome | "ok"> {
+  for (;;) {
+    const result = await withTeam(ctx.db, target.teamId, async (tx) => {
+      const state = await guard(tx, target);
+      if (state !== "ok") return state;
+      if (!ctx.blobs) {
+        const left = await tx.execute(sql`
+          SELECT 1 FROM memory_docs
+           WHERE team_id = ${target.teamId} AND scope = 'user' AND owner_user_id = ${target.userId}
+           LIMIT 1`);
+        return left.rowCount === 0 ? ("ok" as const) : ("unavailable" as const);
+      }
+      const counts = await purgeMemoryBatchInTx(
+        tx,
+        target.teamId,
+        ctx.blobs,
+        { kind: "user", userId: target.userId },
+        memoryRecorder(target.teamId, "offboarding", target.userId),
+      );
+      return counts.docs === 0 ? ("ok" as const) : ("more" as const);
+    });
+    if (result !== "more") return result;
+  }
+}
+
+/** Step 5: the sync state; the row stays `destroyed` (no retention left) and the purge is audited. */
 async function finish(
   ctx: OffboardingContext,
   target: Departed,
@@ -173,6 +207,7 @@ export async function purgeDeparted(
     () => deleteVolume(ctx, team, target, counts),
     () => deleteFiles(ctx, target, counts),
     () => deleteBlobs(ctx, target, counts),
+    () => deleteMemory(ctx, target),
     () => finish(ctx, target, counts),
   ]) {
     const outcome = await step();

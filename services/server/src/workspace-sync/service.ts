@@ -1,9 +1,8 @@
-import { SYSTEM_ACTOR, type AuditActor, type KobeDb, type KobeTx } from "@kobe/db";
+import type { KobeDb, KobeTx } from "@kobe/db";
 import type { Logger } from "pino";
-import { recordAudit } from "../audit/record.js";
 import type { SandboxAuthenticator } from "./auth.js";
 import { collectAll, collectWorkspace, type CollectOptions, type CollectResult } from "./gc.js";
-import { sharedKey, type WorkspaceOwner } from "./keys.js";
+import type { WorkspaceOwner } from "./keys.js";
 import type { ObjectStore } from "./object-store.js";
 import {
   limitsQuota,
@@ -14,7 +13,6 @@ import {
 } from "./quota.js";
 import { workspaceRoutes, type WorkspaceRoutesDeps } from "./routes.js";
 import {
-  currentEntry,
   deleteServerFile,
   putServerFile,
   type ServerFile,
@@ -52,14 +50,6 @@ export const COLLECT_DEFAULTS = {
 const KICK_EVERY_MS = 5 * 60_000;
 const KICK_BUDGET_MS = 5_000;
 
-export interface SharedFile {
-  /** Durable object key (KOBE-54 stores it as `files.blob_ref`). Never sent to a sandbox. */
-  readonly blobKey: string;
-  readonly sharedId: string;
-  readonly sha256: string;
-  readonly size: number;
-}
-
 export interface WorkspaceSync {
   /** The sandbox-facing endpoints (mount at WORKSPACE_SYNC_PATH on the sandbox listener). */
   routes(authenticate: SandboxAuthenticator): ReturnType<typeof workspaceRoutes>;
@@ -69,17 +59,6 @@ export interface WorkspaceSync {
   settled(): Promise<void>;
   /** Runs `collect` every `everyMs` (jittered); returns a stop function. */
   startCollector(everyMs: number): () => void;
-  /**
-   * Copies a live workspace file to a durable object of its own (`share_file`, KOBE-54), so the
-   * download outlives the volume and the workspace copy. Runs in the caller's team transaction,
-   * which also gets the `workspace.file_shared` audit row (last). Undefined: no such live file.
-   */
-  shareFile(
-    tx: KobeTx,
-    owner: WorkspaceOwner,
-    path: string,
-    actor?: AuditActor,
-  ): Promise<SharedFile | undefined>;
   /**
    * A server write into a workspace (KOBE-53/54/57): `store.putServerFile` with this install's
    * key prefix (the object must be under the team's tree, and inside `users/` the user's own)
@@ -179,21 +158,6 @@ export function createWorkspaceSync(options: WorkspaceSyncOptions): WorkspaceSyn
         stopped = true;
         clearTimeout(timer);
       };
-    },
-    async shareFile(tx, owner, path, actor = SYSTEM_ACTOR) {
-      const entry = await currentEntry(tx, owner, path);
-      if (!entry || entry.deleted || entry.blobKey === null || entry.sha256 === undefined) {
-        return undefined;
-      }
-      const shared = sharedKey(prefix, owner);
-      await objects.copy(entry.blobKey, shared.key);
-      await recordAudit(tx, {
-        action: "workspace.file_shared",
-        actor,
-        teamId: owner.teamId,
-        target: { userId: owner.userId, sharedId: shared.id, bytes: entry.size },
-      });
-      return { blobKey: shared.key, sharedId: shared.id, sha256: entry.sha256, size: entry.size };
     },
   };
 }

@@ -77,16 +77,25 @@ describe("provider model listing", () => {
     expect(cached.json).toEqual({
       provider_id: "ollama",
       models: [],
+      image_models: [],
       discovery: "unknown",
       detail: null,
       truncated: false,
     });
     expect(bifrost.calls).not.toContain("models.refresh ollama"); // a read never calls out
 
+    bifrost.liveModalities.set(
+      "ollama",
+      new Map([
+        ["kimi-k2.7-code", ["text", "image"]],
+        ["glm-5.3", ["text"]],
+      ]),
+    );
     const refreshed = await owner.post(`${BASE}/refresh`);
     expect(refreshed.status, JSON.stringify(refreshed.json)).toBe(200);
     expect(refreshed.json).toMatchObject({
       models: ["glm-5.3", "kimi-k2.7-code"], // prefix dropped, deduplicated, invalid ids skipped
+      image_models: ["kimi-k2.7-code"], // KOBE-191: what the provider says accepts images
       discovery: "ok",
     });
     expect(JSON.stringify(refreshed.json)).not.toContain(KEY);

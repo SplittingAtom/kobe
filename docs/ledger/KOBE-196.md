@@ -92,3 +92,5 @@ executor's job. Mitigation until the executor is on everywhere: KOBE-168 rollout
   `killPartner` may hit the next holder's fresh executor, which then fails its call).
 - #161 LOW-5: `exec` requests have no client-side bound (a tool can SIGSTOP its own executor); thread-local DoS,
   ended by Stop.
+
+Update: interim fix for the flag-off path in KOBE-228 (private Pi HOME/TMPDIR per thread).

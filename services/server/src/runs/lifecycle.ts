@@ -29,7 +29,7 @@ import {
   threadModelNotEnabled,
 } from "./failure-codes.js";
 import type { Omission } from "../resolver/resolve.js";
-import { resolveRunModel, type RunModelConfig } from "./models.js";
+import { modelAcceptsImages, resolveRunModel, type RunModelConfig } from "./models.js";
 import type { AgentResolution, RunAgentResolver } from "./seams.js";
 
 /** Everything a replica needs to send `run.start` for a run it just moved to `running`. */
@@ -201,7 +201,13 @@ export async function promoteInTx(
       transitions,
       plan: withAttachments(
         planOf(thread, { ...next, parentEntryId, approvalMode }, resolved, model),
-        await listRunAttachments(tx, teamId, threadId, next.id),
+        await listRunAttachments(
+          tx,
+          teamId,
+          threadId,
+          next.id,
+          await modelAcceptsImages(tx, model?.alias),
+        ),
       ),
     };
   }
@@ -305,7 +311,13 @@ export async function restartPlanInTx(
   if (!resolution.ok) return undefined;
   return withAttachments(
     planOf(thread, run, resolved, resolution.model),
-    await listRunAttachments(tx, run.teamId, thread.id, run.id),
+    await listRunAttachments(
+      tx,
+      run.teamId,
+      thread.id,
+      run.id,
+      await modelAcceptsImages(tx, resolution.model?.alias),
+    ),
   );
 }
 

@@ -1628,6 +1628,7 @@ const approvals = approveAll ? setInterval(async () => {
 const controller = new AbortController();
 const timer = setTimeout(() => controller.abort(), Number(timeoutMs));
 const artifactEvents = [];
+const fileEvents = []; // KOBE-152: file.shared as id:name:size
 let text = "", terminal = "none", code = "-", errorMessage = "-", first = null, waking = "-", startedModel = "-";
 try {
   const res = await fetch(base + "/v1/runs/" + runId + "/events", { headers: { ...headers(), accept: "text/event-stream" }, signal: controller.signal });
@@ -1649,6 +1650,7 @@ try {
       if (type === "sandbox.waking") waking = payload.reason;
       if (type === "run.started") startedModel = payload.model ?? "-";
       if (type === "artifact.created" || type === "artifact.updated") artifactEvents.push(type + ":" + payload.artifact_id + ":v" + (payload.version ?? "?"));
+      if (type === "file.shared") fileEvents.push(payload.file_id + ":" + payload.name + ":" + payload.size);
       if (type === "text.delta") { if (first === null) first = Date.now() - t0; text += payload.delta ?? ""; }
       if (type === "run.completed" || type === "run.failed" || type === "run.interrupted" || type === "run.budget_stopped") {
         terminal = type;
@@ -1664,6 +1666,7 @@ out("waking", waking);
 out("started_model", startedModel);
 out("first_token_ms", first ?? "-");
 out("artifact_events", artifactEvents.join(",") || "-");
+out("file_events", fileEvents.join(",") || "-");
 out("terminal", terminal);
 out("code", code);
 out("error_message", errorMessage);
@@ -1905,6 +1908,64 @@ SH
       "$(art_fetch "/v1/artifacts/$art_id" | sed -n 's/^body=//p' | grep -o '"version":[0-9]*' | sort -u | wc -l | tr -d ' ')"
     contains "artifacts: version 2 holds the revised content" 'Sales chart v2' \
       "$(art_fetch "/v1/artifacts/$art_id/versions/2/content")"
+
+    # KOBE-152 (54f of KOBE-54): the Document Drafter writes a file in the Owner's sandbox, then the
+    # fake model calls share_file; file.shared carries the file, the thread's reader downloads it
+    # (attachment, nosniff), another member of the team gets 404, and the file outlives its workspace
+    # copy (deleted from the browser API, which is audited).
+    echo "==> share_file (KOBE-152)"
+    READER_ID=7e2e0000-0000-4000-8000-0000000000f1
+    psql_kobe "INSERT INTO users (id, name, email, email_verified) VALUES ('$READER_ID', 'E2E reader', 'reader@e2e.test', true) ON CONFLICT DO NOTHING;
+      INSERT INTO accounts (user_id, account_id, provider_id, password)
+        SELECT '$READER_ID', '$READER_ID', 'credential', password FROM accounts
+        WHERE provider_id = 'credential' AND user_id = '$owner_id'
+          AND NOT EXISTS (SELECT 1 FROM accounts WHERE user_id = '$READER_ID');
+      INSERT INTO team_members (team_id, user_id, role) VALUES ('$E2E_TEAM_ID', '$READER_ID', 'member') ON CONFLICT DO NOTHING;" >/dev/null
+    file_fetch() { # email path [method] → status, then the headers and body (JSON lines) of that user's request
+      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "
+        const base = 'http://127.0.0.1:8080', origin = process.env.KOBE_PUBLIC_URL;
+        const h = { origin, 'content-type': 'application/json', 'x-kobe-team': '$E2E_TEAM_ID' };
+        let login;
+        for (let i = 0; i < 4; i++) { // sign-in is rate limited (3 per 10 s): wait out a 429
+          login = await fetch(base + '/api/auth/sign-in/email', { method: 'POST', headers: h,
+            body: JSON.stringify({ email: process.argv[1], password: 'e2e owner password' }) });
+          if (login.status !== 429) break;
+          await new Promise((r) => setTimeout(r, 11000));
+        }
+        const cookie = login.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
+        await fetch(base + '/v1/me/teams/active', { method: 'PUT', headers: { ...h, cookie }, body: JSON.stringify({ teamId: '$E2E_TEAM_ID' }) });
+        const res = await fetch(base + process.argv[2], { method: process.argv[3] || 'GET', headers: { ...h, cookie } });
+        console.log('status=' + res.status);
+        for (const [k, v] of res.headers) console.log('h:' + k + '=' + v);
+        console.log('body=' + (await res.text()).replace(/\\n/g, ' '));
+      " "$1" "$2" "${3:-}" 2>&1
+    }
+    share_text="kobe-152 $(date +%s) $RANDOM"
+    sf_out=$(chat_run "bash: echo '$share_text' > /workspace/shared-report.txt; exit 0" 300000 "" "$(gallery_id document-drafter)" "" 1)
+    sf_thread=$(printf '%s\n' "$sf_out" | sed -n 's/^thread_id=//p')
+    contains "share_file: the run that wrote the file completed" '^terminal=run.completed$' "$sf_out"
+    sf_out=$(chat_run "tool: share_file {\"path\":\"shared-report.txt\",\"description\":\"E2E report\"}" 300000 "" "" "$sf_thread" 1)
+    printf '     share_file: %s\n' "$(printf '%s' "$sf_out" | tr '\n' ' ' | cut -c1-500)"
+    contains "share_file: the run completed" '^terminal=run.completed$' "$sf_out"
+    contains "share_file: the event stream carried file.shared (id, name, size)" \
+      "^file_events=[0-9a-f-]{36}:shared-report.txt:$((${#share_text} + 1))\$" "$sf_out"
+    sf_id=$(printf '%s\n' "$sf_out" | sed -n 's/^file_events=\([0-9a-f-]*\):.*/\1/p')
+    contains "share_file: the file has a row (kind shared, in the thread)" "^shared\\|$sf_thread\$" \
+      "$(psql_kobe "SELECT kind || '|' || thread_id FROM files WHERE team_id = '$E2E_TEAM_ID' AND id = '${sf_id:-00000000-0000-4000-8000-000000000000}'")"
+    sf_dl=$(file_fetch owner@e2e.test "/v1/files/$sf_id/content")
+    contains "share_file: the thread's reader downloads the bytes (200)" '^status=200$' "$sf_dl"
+    contains "share_file: the body is the file written in the sandbox" "^body=$share_text( |\$)" "$sf_dl"
+    contains "share_file: the download is an attachment" '^h:content-disposition=attachment' "$sf_dl"
+    contains "share_file: the download is never sniffed" '^h:x-content-type-options=nosniff$' "$sf_dl"
+    sf_other=$(file_fetch reader@e2e.test "/v1/files/$sf_id/content")
+    contains "share_file: another member of the team cannot read the thread's file (404)" '^status=404$' "$sf_other"
+    if printf '%s' "$sf_other" | grep -q "$share_text"; then fail "share_file: the other user saw no bytes"; else ok "share_file: the other user saw no bytes"; fi
+    contains "share_file: the browser API deletes the workspace copy (2xx)" '^status=20[0-9]$' \
+      "$(file_fetch owner@e2e.test '/v1/workspace/files?path=shared-report.txt' DELETE)"
+    contains "share_file: deleting from the browser is audited" '^1$' \
+      "$(psql_kobe "SELECT count(*) FROM audit_log WHERE team_id = '$E2E_TEAM_ID' AND action = 'workspace.file_deleted'" | awk '$1 >= 1 {print 1; exit} {print 0}')"
+    contains "share_file: the shared file survives losing its workspace copy (still 200)" '^status=200$' \
+      "$(file_fetch owner@e2e.test "/v1/files/$sf_id/content")"
 
     # KOBE-146 (53f of KOBE-53): uploads end to end. The Owner uploads a file into a new thread
     # through the API, a limit error is refused, the file is attached to a message, and the
