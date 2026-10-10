@@ -56,8 +56,12 @@ describe("splitAttachedFiles", () => {
     expect(splitAttachedFiles(text)).toEqual({
       text: "Look at these",
       files: [
-        { name: "report.pdf", mimeType: "application/pdf" },
-        { name: "a b.png", mimeType: "image/png" },
+        {
+          name: "report.pdf",
+          mimeType: "application/pdf",
+          path: "/workspace/uploads/t/report.pdf",
+        },
+        { name: "a b.png", mimeType: "image/png", path: "/workspace/uploads/t/a b.png" },
       ],
     });
   });

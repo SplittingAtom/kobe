@@ -1,9 +1,10 @@
 "use client";
 
 import { FileIcon, RotateCwIcon, XIcon } from "lucide-react";
-import { useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import type { DraftFile } from "../../lib/chat/attachments";
 import type { ChipFile } from "../../lib/chat/tree";
+import type { SentFileInfo } from "../../lib/chat/sent-files";
 import { formatBytes } from "../../lib/chat/uploads";
 import { useChatSession } from "./kobe-runtime";
 
@@ -96,16 +97,44 @@ export function ComposerAttachments({
   );
 }
 
+/** Size and thumbnail of uploads whose chip lacks them (after a reload), looked up by path. */
+function useLookedUp(files: readonly ChipFile[]): ReadonlyMap<string, SentFileInfo> {
+  const { sentFiles } = useChatSession();
+  const [found, setFound] = useState<ReadonlyMap<string, SentFileInfo>>(new Map());
+  const wanted = files
+    .filter((f) => f.path !== undefined && (f.size === undefined || f.previewUrl === undefined))
+    .map((f) => `${f.mimeType}\u0000${f.path}`)
+    .join("\n");
+  useEffect(() => {
+    if (wanted === "") return;
+    let live = true;
+    void Promise.all(
+      wanted.split("\n").map(async (line) => {
+        const [mimeType = "", path = ""] = line.split("\u0000");
+        return [path, await sentFiles.info(path, mimeType)] as const;
+      }),
+    ).then((rows) => {
+      if (live) setFound(new Map(rows));
+    });
+    return () => {
+      live = false;
+    };
+  }, [wanted, sentFiles]);
+  return found;
+}
+
 /** The files on a sent message. */
 export function SentAttachments({ files }: { readonly files: readonly ChipFile[] }) {
   const { attachments } = useChatSession();
+  const found = useLookedUp(files);
   return (
     <ul aria-label="Attached files" className="flex flex-wrap justify-end gap-1.5">
       {files.map((file, i) => {
-        const size = file.size ?? attachments.sizeOf(file.name);
+        const looked = file.path === undefined ? undefined : found.get(file.path);
+        const size = file.size ?? attachments.sizeOf(file.name) ?? looked?.size;
         return (
           <li key={`${file.name}-${i}`} className={chip}>
-            <Thumb url={file.previewUrl} />
+            <Thumb url={file.previewUrl ?? looked?.previewUrl} />
             <span className="truncate" title={file.name}>
               {file.name}
               {size !== undefined && (
