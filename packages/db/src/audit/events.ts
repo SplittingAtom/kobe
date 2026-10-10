@@ -608,6 +608,18 @@ export const AUDIT_EVENTS = {
   }),
   /** Ended runs' live events folded away 7 days after the run (system; entries keep the content). */
   "retention.compacted": event("team", { runs: count, events: count }),
+  /**
+   * Memory purged (system; KOBE-188, D24): superseded versions and long-deleted files past the
+   * team's window (`retention`), or a departed member's personal memory (`offboarding`, `userId`).
+   * Counts only, never paths or content; live files and held owners' memory are never in a batch.
+   */
+  "retention.memory_purged": event("team", {
+    reason: z.enum(["retention", "offboarding"]),
+    docs: count,
+    versions: count,
+    blobs: count,
+    userId: id.optional(),
+  }),
   /** Objects of purged rows deleted from object storage (system); `kept`: still referenced. */
   "retention.blobs_deleted": event("team", { blobs: count, kept: count }),
 
