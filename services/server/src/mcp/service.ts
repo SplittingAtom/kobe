@@ -1,7 +1,7 @@
 import { withTeam, type Envelope, type KobeDb, type PinnedTool } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { logger } from "../logger.js";
-import { revealApiKey, type RevealOutcome } from "../connectors/grants.js";
+import { revealCredential, type RevealOutcome } from "../connectors/grants.js";
 import { createRateLimiter } from "../sandbox/rate-limit.js";
 import type { RunPolicyContextSource } from "../sandbox-wire/types.js";
 import { DENY_UNVERIFIED_APPROVALS, type McpApprovalVerifier } from "./approvals.js";
@@ -26,7 +26,8 @@ export interface McpService {
   ): Promise<{ connector: { id: string; name: string }; tools: PinnedTool[] } | undefined>;
   decide(principal: McpPrincipal, request: McpCallRequest): Promise<McpCallDecision>;
   /**
-   * The principal's own decrypted API key for an enabled `api_key` connector (KOBE-108). The user
+   * The principal's own decrypted credential (API key, or OAuth access token) for an enabled
+   * `api_key` / `oauth` connector (KOBE-108, KOBE-109). The user
    * is the principal's, taken from the verified sandbox token: there is no way to ask for
    * another user's. Only the internal API (internal key) calls this; the key goes to the proxy.
    */
@@ -97,7 +98,7 @@ export function createMcpService(options: McpServiceOptions): McpService {
     decide: (principal, request) => decideMcpCall(deps, principal, request),
     revealCredential: (principal, connectorId) =>
       options.envelope
-        ? revealApiKey(options.db, options.envelope, {
+        ? revealCredential(options.db, options.envelope, {
             teamId: principal.teamId,
             userId: principal.userId,
             connectorId,

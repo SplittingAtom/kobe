@@ -15,6 +15,7 @@ import {
   type KobeTx,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
+import { dropConnectorGrants } from "./grants.js";
 
 /**
  * The install connector registry (KOBE-100, spec D6, D27): MCP servers an install admin registers.
@@ -185,6 +186,8 @@ export async function updateConnector(
       set.toolsSnapshot = [];
       set.toolsHash = null;
       changed.push("url");
+      // Credentials were issued for the old server: drop them (users reconnect), same transaction.
+      await dropConnectorGrants(tx, id, current.name);
     }
     if (input.iconUrl !== undefined && input.iconUrl !== current.iconUrl) {
       set.iconUrl = input.iconUrl;

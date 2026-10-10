@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { checkConnectorUrl, type ConnectorUrlPolicy } from "./url-policy.js";
+import { describe, expect, it, vi } from "vitest";
+import { checkConnectorUrl, RESOLVE_TIMEOUT_MS, type ConnectorUrlPolicy } from "./url-policy.js";
 
 const resolving =
   (...addresses: string[]) =>
@@ -88,5 +88,21 @@ describe("checkConnectorUrl", () => {
       ok: false,
       code: "address_not_allowed",
     });
+  });
+});
+
+describe("checkConnectorUrl DNS deadline", () => {
+  it("gives up on a lookup that never answers", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = checkConnectorUrl(
+        "https://slow.example.com/mcp",
+        policy({ resolve: () => new Promise<string[]>(() => undefined) }),
+      );
+      await vi.advanceTimersByTimeAsync(RESOLVE_TIMEOUT_MS + 1);
+      expect(await pending).toMatchObject({ ok: false, code: "host_unresolvable" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

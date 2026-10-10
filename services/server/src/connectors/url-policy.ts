@@ -20,6 +20,9 @@ export interface ConnectorUrlPolicy {
   readonly resolve: (host: string) => Promise<readonly string[]>;
 }
 
+/** The registration-time DNS lookup shares the 10 s budget of an outbound OAuth request. */
+export const RESOLVE_TIMEOUT_MS = 10_000;
+
 export const DEFAULT_ALLOWED_PORTS: readonly number[] = [443];
 
 export async function resolveAll(host: string): Promise<string[]> {
@@ -91,7 +94,12 @@ export async function checkConnectorUrl(
     resolved = [host];
   } else {
     try {
-      resolved = await policy.resolve(host);
+      resolved = await Promise.race([
+        policy.resolve(host),
+        new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error("dns timeout")), RESOLVE_TIMEOUT_MS).unref();
+        }),
+      ]);
     } catch {
       return refuse("host_unresolvable", "That host name does not resolve.");
     }

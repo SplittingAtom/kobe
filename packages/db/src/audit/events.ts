@@ -1180,6 +1180,12 @@ export const AUDIT_EVENTS = {
   "mcp.grant.replaced": event("team", { connectorId: id, name: z.string().max(64) }),
   /** A user removed their API key for a connector. */
   "mcp.grant.removed": event("team", { connectorId: id, name: z.string().max(64) }),
+  /** A stored OAuth token was not served because it was issued for another server (KOBE-109). */
+  "mcp.grant.refused": event("team", {
+    connectorId: id,
+    name: z.string().max(64),
+    reason: z.enum(["resource_mismatch"]),
+  }),
   // ── web search (KOBE-113): provider and switches only, never the key or its hint ──
   /** An install admin set the web search provider, its enabled switch, or replaced its key. */
   "mcp.web_search.configured": event("install", {

@@ -50,12 +50,26 @@ describe("createServerCredentials", () => {
     expect(out).toEqual({ ok: false, code: failure });
   });
 
-  it("does not serve oauth connectors yet (KOBE-61)", async () => {
-    const s = source({ ok: true, value: { kind: "api_key", apiKey: KEY } });
-    const out = await createServerCredentials(s.grants).headersFor(request("oauth"));
-    expect(out).toEqual({ ok: false, code: "not_connected" });
-    expect(s.asked).toEqual([]);
+  it("attaches the user's OAuth access token as a bearer token (KOBE-109)", async () => {
+    const s = source({ ok: true, value: { kind: "oauth", accessToken: "at-123" } });
+    const req = request("oauth");
+    const out = await createServerCredentials(s.grants).headersFor(req);
+    expect(out).toEqual({ ok: true, headers: { authorization: "Bearer at-123" } });
+    expect(s.asked).toEqual([{ token: "sandbox-token", connectorId: req.connector.id }]);
   });
+
+  it.each([
+    ["oauth", { kind: "api_key", apiKey: KEY }],
+    ["api_key", { kind: "oauth", accessToken: "at-123" }],
+  ] as const)(
+    "refuses a %s connector answered with the other kind of grant",
+    async (kind, value) => {
+      const out = await createServerCredentials(source({ ok: true, value }).grants).headersFor(
+        request(kind),
+      );
+      expect(out).toEqual({ ok: false, code: "not_connected" });
+    },
+  );
 });
 
 describe("policy server grant client", () => {
@@ -91,6 +105,14 @@ describe("policy server grant client", () => {
     expect(seen.at(-1)?.headers.get("authorization")).toBe(`Bearer ${"i".repeat(40)}`);
   });
 
+  it("parses an OAuth access token", async () => {
+    const out = await client(respond(200, { kind: "oauth", access_token: "at-1" })).fetchGrant(
+      "tok",
+      "c1",
+    );
+    expect(out).toEqual({ ok: true, value: { kind: "oauth", accessToken: "at-1" } });
+  });
+
   it("separates not connected from everything else, failing closed", async () => {
     expect(await client(respond(404, { code: "not_connected" })).fetchGrant("t", "c")).toEqual({
       ok: false,
@@ -101,6 +123,7 @@ describe("policy server grant client", () => {
       [401, { code: "sandbox_unauthorized" }],
       [503, { code: "unavailable" }],
       [200, { kind: "oauth" }],
+      [200, { kind: "oauth", access_token: "" }],
       [200, { kind: "api_key", api_key: "" }],
     ] as const) {
       expect(await client(respond(status, body)).fetchGrant("t", "c")).toEqual({
