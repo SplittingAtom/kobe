@@ -76,7 +76,7 @@ describe("nextOccurrence", () => {
     it("spring-forward gap: a nonexistent local time fires at the next valid instant", () => {
       // Berlin 2026-03-29: 02:00 -> 03:00 (UTC+1 -> UTC+2). 02:30 does not exist; valid again at 01:00Z.
       const r: ScheduleRecurrence = { kind: "daily", at: "02:30" };
-      expect(next(r, "Europe/Berlin", "2026-03-28T12:00:00Z")).toBe("2026-03-28T01:30:00.000Z");
+      expect(next(r, "Europe/Berlin", "2026-03-27T12:00:00Z")).toBe("2026-03-28T01:30:00.000Z");
       expect(next(r, "Europe/Berlin", "2026-03-28T23:00:00Z")).toBe("2026-03-29T01:00:00.000Z");
       // The day after is normal again (02:30 CEST = 00:30Z).
       expect(next(r, "Europe/Berlin", "2026-03-29T01:00:00Z")).toBe("2026-03-30T00:30:00.000Z");
