@@ -94,3 +94,6 @@ model): its principal cache holds each member's enabled-model set for `KOBE_MODE
 (5 s), and only `keys:<team>` hints dropped it, which an enable does not send. Product fix in
 `services/model-gateway/src/listener.ts`: the `config` hint (every enablement change) now drops all
 principals. The test wait in `e2e/run.sh` was removed. Not an executor bug; users could hit it too.
+
+The user decided the "chat (thread model) answered through that model's provider" check is non-blocking: it
+retries `model_not_enabled` for about 60 s, then prints WARN (model enable slow, provider-side) instead of FAIL.

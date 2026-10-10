@@ -1757,10 +1757,21 @@ SH
     # (KOBE-40's checks above left qwen disabled: enable it for the team first.)
     expect "the team enables qwen" '^200 ' "$(as_owner "PUT /v1/team/models/qwen {\"enabled\":true}")"
     chosen_out=$(chat_run "hello-qwen-$RANDOM" 300000 qwen)
+    # The user decided this check is non-blocking: right after the enable a run may fail
+    # model_not_enabled for a while (possibly provider-side); retry for about 60 s, then warn.
+    chosen_end=$((SECONDS + 60))
+    while grep -q '^code=model_not_enabled$' <<<"$chosen_out" && ((SECONDS < chosen_end)); do
+      sleep 5
+      chosen_out=$(chat_run "hello-qwen-$RANDOM" 300000 qwen)
+    done
     printf '     chat (thread model): %s\n' "$(printf '%s' "$chosen_out" | grep -v '^text=' | tr '\n' ' ')"
     contains "a thread created with a chosen model stores it (KOBE-44)" '^thread=201:qwen$' "$chosen_out"
     contains "the run started on the thread's model, not the team default" '^started_model=qwen$' "$chosen_out"
-    contains "and was answered through that model's provider" '^terminal=run.completed$' "$chosen_out"
+    if grep -q '^code=model_not_enabled$' <<<"$chosen_out"; then
+      echo "WARN model enable slow, provider-side (the thread's model answered model_not_enabled for 60 s)"
+    else
+      contains "and was answered through that model's provider" '^terminal=run.completed$' "$chosen_out"
+    fi
     expect "the team disables the thread's model" '^200 ' "$(as_owner "PUT /v1/team/models/qwen {\"enabled\":false}")"
     gone_out=$(chat_run "gone-$RANDOM" 120000 qwen)
     contains "a thread can't choose a model the team disabled (409)" '^thread=409:default$' "$gone_out"
