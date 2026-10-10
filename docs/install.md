@@ -488,6 +488,13 @@ and get no network path to the object store. Objects live under
 Give the credentials read, write and delete on the bucket (collection deletes unreferenced
 content). Without `s3.bucket`, workspace sync stays off and the server logs a warning.
 
+`s3.prefix` (default empty) puts every object under a key prefix, for a bucket shared with other
+applications. It must be relative and end in `/` (for example `kobe/`; letters, digits and
+`! _ . * ' ( ) / -` only); the chart rejects anything else. It is applied on the server and the
+scheduler (`KOBE_S3_PREFIX`). Changing it on an existing install hides the objects written under
+the old prefix, so move them first or keep the old value. `kobe backup` and `kobe restore` read
+`KOBE_S3_PREFIX` too; set it to the same value.
+
 ### Sandbox tool executor
 
 By default Pi's built-in tools (`bash`, `read`, `write`, `edit`, `ls`, `grep`, `find`) run inside

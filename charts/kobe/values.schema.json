@@ -910,6 +910,11 @@
         "forcePathStyle": {
           "type": "boolean"
         },
+        "prefix": {
+          "type": "string",
+          "maxLength": 1024,
+          "pattern": "^$|^[A-Za-z0-9!_.*'()-][A-Za-z0-9!_.*'()/-]*/$"
+        },
         "existingSecret": {
           "type": "string",
           "minLength": 1
