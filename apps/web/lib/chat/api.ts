@@ -8,6 +8,7 @@ import type { ArtifactDetailView, ArtifactSummaryView } from "./artifacts";
 import type { BudgetStatus } from "../admin/api/budgets";
 import type { RunUsage } from "../admin/api/usage";
 import { listTeamModels, type TeamModels } from "../admin/api/team/models";
+import { createMemoryApi } from "../memory/api";
 import type {
   ApprovalDecisionBody,
   ApprovalView,
@@ -123,6 +124,14 @@ export interface ChatApi {
   artifactContent(artifactId: string, version: number): Promise<ApiResult<TextFile>>;
   /** The bytes of a file the agent shared (`GET /v1/files/:id/content`, KOBE-150). */
   downloadSharedFile(fileId: string): Promise<ApiResult<Uint8Array>>;
+  /**
+   * Undo of a `memory.updated` (KOBE-158): restores `version` (a new version with the old content)
+   * or, for a doc the write created, deletes it (`undoMemoryAction`).
+   */
+  undoMemory(
+    docId: string,
+    action: { readonly action: "restore"; readonly version: number } | { readonly action: "delete" },
+  ): Promise<ApiResult<unknown>>;
   /** Your own requests for one domain, newest first. */
   egressRequests(
     domain: string,
@@ -132,6 +141,7 @@ export interface ChatApi {
 /** The chat API for one team; `teamId` goes in `X-Kobe-Team` on every request. */
 export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
   const get = <T>(path: string) => apiRequest<T>(path, { teamId, fetchFn });
+  const memory = createMemoryApi(teamId, fetchFn);
   const send = <T>(method: "POST" | "PATCH" | "DELETE", path: string, json?: unknown) =>
     apiRequest<T>(path, { method, json, teamId, fetchFn });
 
@@ -211,6 +221,8 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     artifactContent: (id, version) =>
       apiTextFile(`/v1/artifacts/${enc(id)}/versions/${version}/content`, { teamId, fetchFn }),
     downloadSharedFile: (id) => apiDownload(`/v1/files/${enc(id)}/content`, { teamId, fetchFn }),
+    undoMemory: (docId, action) =>
+      action.action === "restore" ? memory.restore(docId, action.version) : memory.remove(docId),
     egressRequests: (domain) => get(`/v1/egress/requests${query({ domain })}`),
     decideApproval: (id, body) =>
       send("POST", `/v1/approvals/${enc(id)}`, {

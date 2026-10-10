@@ -4,6 +4,7 @@ import { useEffect, useId, useState } from "react";
 import type { KobeEventPayload } from "@kobe/protocol";
 import type { ApiError } from "../../lib/api/client";
 import type { ChatApi } from "../../lib/chat/api";
+import { visible } from "../../lib/security/visible";
 import styles from "./chat.module.css";
 
 type Requested = KobeEventPayload<"approval.requested">;
@@ -41,19 +42,7 @@ export function resolvedText(resolved: Resolved): string {
   return EXPIRED_TEXT[resolved.cause === "user" ? "run_interrupted" : resolved.cause];
 }
 
-/**
- * Characters that make shown text differ from what runs: controls, format characters (bidi
- * overrides/isolates U+202A–202E, U+2066–2069, zero-width U+200B–200F, U+FEFF, …), line and
- * paragraph separators, surrogates, private-use and unusual spaces. Shown as visible `\uXXXX`.
- */
-const INVISIBLE = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Zl}\p{Zp}\u00a0\u2000-\u200a\u202f\u205f\u3000]/gu;
-
-/** `text` with every invisible or reordering character as a visible `\uXXXX` escape. */
-export function visible(text: string, keep: RegExp = /\n/): string {
-  return text.replace(INVISIBLE, (ch) =>
-    keep.test(ch) ? ch : `\\u${(ch.codePointAt(0) ?? 0).toString(16).padStart(4, "0")}`,
-  );
-}
+export { visible };
 
 /** Pretty JSON of the input, with invisible characters escaped (the newlines are formatting). */
 export function pretty(input: unknown): string {

@@ -501,6 +501,7 @@ export class FakeKobe {
         },
       });
     }
+    if (url.pathname.startsWith("/v1/memory/")) return this.#memoryRoute(method, url, headers);
     const scoped =
       url.pathname === "/v1/team/budgets/status" ||
       url.pathname.startsWith("/v1/threads") ||
@@ -512,6 +513,30 @@ export class FakeKobe {
     if (headers.get("x-kobe-team") !== this.teamId) return error(409, "team_mismatch");
     return this.#route(method, url, body as Json | undefined, headers);
   };
+
+  /**
+   * `/v1/memory/:id` (KOBE-155) for the Undo chip: DELETE answers 204, `POST .../restore` the doc
+   * at the asked version. Both are recorded in `requests`; `failNext` makes one fail.
+   */
+  #memoryRoute(method: string, url: URL, headers: Headers): Response {
+    if (headers.get("x-kobe-team") !== this.teamId) return error(409, "team_mismatch");
+    const [, , id, leaf] = url.pathname.split("/").filter(Boolean); // v1 memory id restore
+    if (method === "DELETE" && id && leaf === undefined) return new Response(null, { status: 204 });
+    if (method === "POST" && id && leaf === "restore") {
+      return json(200, {
+        id,
+        scope: "user",
+        path: "notes.md",
+        current_version: 3,
+        size_bytes: 1,
+        updated_at: NOW,
+        updated_by: null,
+        content: "",
+        versions: [],
+      });
+    }
+    return error(404, "not_found");
+  }
 
   #artifactRoute(url: URL, headers: Headers): Response {
     const [, , id, , n, leaf] = url.pathname.split("/").filter(Boolean); // v1 artifacts id versions n leaf
