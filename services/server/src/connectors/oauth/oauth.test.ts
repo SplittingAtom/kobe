@@ -23,7 +23,6 @@ const info: AuthServerInfo = {
 };
 const io: OauthIo = {
   policy: {} as never,
-  fetch: (() => Promise.reject(new Error("no network"))) as never,
   timeoutMs: 1000,
 };
 

@@ -22,6 +22,10 @@ export interface FakeOauthOptions {
   /** Registration endpoint advertised (default true). */
   readonly dcr?: boolean;
   readonly expiresIn?: number;
+  /** Serve the PRM only at /custom-prm, announced by a 401 WWW-Authenticate on the MCP URL. */
+  readonly prmHint?: boolean;
+  /** Answer /redirect with a redirect to this URL. */
+  readonly redirectTo?: string;
 }
 
 export interface IssuedTokens {
@@ -82,10 +86,31 @@ export class FakeOauthServer {
     return Buffer.concat(chunks).toString("utf8");
   }
 
+  /** Every path requested, for "nothing was contacted" assertions. */
+  readonly hits: string[] = [];
+
   private async handle(req: IncomingMessage, res: ServerResponse) {
     const url = new URL(req.url ?? "/", this.base);
+    this.hits.push(url.pathname);
     const o = this.options;
-    if (url.pathname === "/.well-known/oauth-protected-resource/mcp") {
+    if (url.pathname === "/mcp" && req.method === "POST" && o.prmHint) {
+      res.writeHead(401, {
+        "www-authenticate": `Bearer resource_metadata="${this.base}/custom-prm"`,
+      });
+      return res.end();
+    }
+    if (url.pathname === "/big") {
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ pad: "x".repeat(400_000) }));
+    }
+    if (url.pathname === "/redirect" && o.redirectTo) {
+      res.writeHead(302, { location: o.redirectTo });
+      return res.end();
+    }
+    if (
+      url.pathname === "/custom-prm" ||
+      (url.pathname === "/.well-known/oauth-protected-resource/mcp" && !o.prmHint)
+    ) {
       return this.json(res, {
         resource: o.prmResource ?? this.mcpUrl,
         authorization_servers: [this.base],

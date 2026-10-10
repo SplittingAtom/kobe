@@ -18,7 +18,7 @@ function flowDeps(deps: ServerDeps): OauthFlowDeps | undefined {
   return {
     db: deps.database.db,
     envelope: deps.envelope,
-    io: { policy: deps.connectorUrlPolicy, fetch, timeoutMs: DEFAULT_TIMEOUT_MS },
+    io: { policy: deps.connectorUrlPolicy, timeoutMs: DEFAULT_TIMEOUT_MS },
     kobe: kobeOrigin(deps.publicUrl),
     now: () => new Date(),
   };

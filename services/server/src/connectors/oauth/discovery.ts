@@ -66,9 +66,31 @@ async function firstJson(io: OauthIo, urls: string[]): Promise<unknown> {
   throw new OauthError("oauth_unsupported");
 }
 
+/**
+ * The `resource_metadata` URL an unauthenticated request to the MCP server is answered with
+ * (RFC 9728 §5.1), if it is on the server's own origin; undefined otherwise.
+ */
+async function metadataHint(io: OauthIo, mcpUrl: string): Promise<string | undefined> {
+  try {
+    const res = await oauthRequest(
+      io,
+      mcpUrl,
+      { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
+      "oauth_unreachable",
+    );
+    const match = /resource_metadata="([^"]{1,2048})"/i.exec(res.wwwAuthenticate ?? "");
+    if (res.status !== 401 || !match?.[1]) return undefined;
+    return new URL(match[1]).origin === new URL(mcpUrl).origin ? match[1] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function discoverAuthServer(io: OauthIo, mcpUrl: string): Promise<AuthServerInfo> {
+  const hint = await metadataHint(io, mcpUrl);
   const prm = prmSchema.safeParse(
     await firstJson(io, [
+      ...(hint ? [hint] : []),
       wellKnown(mcpUrl, "oauth-protected-resource"),
       `${new URL(mcpUrl).origin}/.well-known/oauth-protected-resource`,
     ]),

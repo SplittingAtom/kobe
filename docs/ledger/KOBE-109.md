@@ -38,11 +38,11 @@ Migration PR first (`kind` allows `oauth`, nullable `expires_at`), then the flow
 
 ## Open questions
 
-1. The server fetches discovery URLs after a DNS check; a rebinding race between check and connect
-   is not closed there (the proxy closes it per connection for upstream calls). Same trade-off as the
-   registry probe URL check.
-2. A connector that returns 401 with `WWW-Authenticate: resource_metadata=` is not consulted; only
-   the well-known locations are tried.
+None open. DNS rebinding is closed: outbound OAuth requests use `node:http(s)` with a pinned
+`lookup` that resolves, checks every address against the connector policy and connects to a
+checked one (hostname kept for Host/SNI); redirects are refused, not followed; 10 s, 256 KB caps
+(`connectors/oauth/http.ts`, `ssrf.test.ts`). The `WWW-Authenticate` `resource_metadata` hint (same
+origin only) is tried before the well-known URLs.
 
 ## Evidence
 
