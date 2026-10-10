@@ -314,7 +314,8 @@ export class Thread {
         if (toolEnvBase.HOME !== undefined) env[TOOL_HOME_ENV] = toolEnvBase.HOME;
       } else {
         if (toolEnvBase.HOME !== undefined) env.KOBE_TOOL_HOME = toolEnvBase.HOME;
-        if (toolEnvBase.TMPDIR !== undefined) env.KOBE_TOOL_TMPDIR = toolEnvBase.TMPDIR;
+        // No TMPDIR in the launch: the tools' scratch is /tmp, never Pi's private (deleted) one.
+        env.KOBE_TOOL_TMPDIR = toolEnvBase.TMPDIR ?? "/tmp";
       }
       const models = this.#env.models;
       if (models !== undefined) {
