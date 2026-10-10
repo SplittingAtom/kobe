@@ -144,6 +144,12 @@ describe("steps script (KOBE-244: several tool calls in one run)", () => {
     expect(done.choices[0]?.message.content).toBe("fake-openai: tool said: fake:get_thing");
   });
 
+  it("reads the script from content parts too (how Pi sends the prompt)", async () => {
+    const parts = { role: "user", content: [{ type: "text", text: user.content }] };
+    const first = await chat([parts]);
+    expect(JSON.stringify(first.choices[0]?.message)).toContain("echo one");
+  });
+
   it("gives the same step a different call id in a different script", async () => {
     const a = await chat([user]);
     const b = await chat([

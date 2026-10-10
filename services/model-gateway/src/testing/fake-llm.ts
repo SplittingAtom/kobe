@@ -84,7 +84,16 @@ export function parseStepsPrompt(
   if (!Array.isArray(messages)) return undefined;
   const first = messages.find((m) => (m as Record<string, unknown>)?.role === "user") as
     Record<string, unknown> | undefined;
-  const text = typeof first?.content === "string" ? first.content : "";
+  // Pi sends the prompt as a string or as content parts.
+  const content = first?.content;
+  const text =
+    typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content
+            .map((p: unknown) => ((p as Record<string, unknown>).text as string | undefined) ?? "")
+            .join("")
+        : "";
   if (!text.startsWith(STEPS_PREFIX)) return undefined;
   try {
     const raw: unknown = JSON.parse(text.slice(STEPS_PREFIX.length));
