@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { orbitExperimentSchema } from "./agents/orbit/orbit-schema.js";
 import type { TestBrowser } from "./testing/browser.js";
+import { enableConnector, piName, registerConnector } from "./testing/mcp-fixtures.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 
 /**
@@ -105,7 +106,7 @@ describe("GET /v1/agents/:id/versions/:version/orbit (KOBE-91)", () => {
     );
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
     expect(res.headers.get("cache-control")).toBe("no-store");
-    expect(res.text).toMatch(/^# Note: MCP tools are not included/);
+    expect(res.text).not.toMatch(/MCP tools are not included/);
     const config = orbitExperimentSchema.parse(parse(res.text));
     expect(config.setup.agents[0]?.model).toBe("anthropic/claude-fast");
     expect(config.setup.agents[0]?.system_prompt).toBe("You export.");
@@ -190,5 +191,53 @@ describe("GET /v1/agents/:id/versions/:version/orbit (KOBE-91)", () => {
       [id],
     );
     expect(rows).toHaveLength(0);
+  });
+});
+
+describe("MCP tools in the export (KOBE-112 ac-2)", () => {
+  const SECRET_URL = "https://mcp.example.com/hook/secret-path-4711";
+
+  async function withConnector(options: {
+    exposure?: "read_only" | "all" | "custom";
+    tools?: object;
+  }) {
+    const connector = await registerConnector(h.admin, { url: SECRET_URL, authKind: "api_key" });
+    await enableConnector(h.admin, finance, connector.id, ids.alice, options.exposure ?? "all", []);
+    const id = await published("bob", {
+      connectors: [connector.name],
+      ...(options.tools === undefined ? {} : { tools: options.tools }),
+    });
+    return { id, connector };
+  }
+  const toolsOf = async (id: string) =>
+    (parse((await orbit("bob", id)).text).setup.agents[0].tools as string[]).filter((t) =>
+      t.startsWith("mcp__"),
+    );
+
+  it("lists the exposed tools by their mcp__<server>__<tool> names, never URL or credential", async () => {
+    const { id, connector } = await withConnector({});
+    const res = await orbit("bob", id);
+    expect(res.status, res.text).toBe(200);
+    const config = orbitExperimentSchema.parse(parse(res.text));
+    const mcp = config.setup.agents[0]?.tools.filter((t) => t.startsWith("mcp__"));
+    expect(mcp).toEqual(
+      ["get_issue", "create_issue", "delete_issue"].map((t) => piName(connector.name, t)).sort(),
+    );
+    expect(res.text).not.toContain("secret-path-4711");
+    expect(res.text).not.toContain("mcp.example.com");
+    expect(res.text).not.toMatch(/api_key|Bearer/i);
+  });
+
+  it("follows team exposure and the agent's own tool globs", async () => {
+    const readOnly = await withConnector({ exposure: "read_only" });
+    expect(await toolsOf(readOnly.id)).toEqual([piName(readOnly.connector.name, "get_issue")]);
+    const allowed = await withConnector({ tools: { allow: ["mcp__*__get_*"] } });
+    expect(await toolsOf(allowed.id)).toEqual([piName(allowed.connector.name, "get_issue")]);
+  });
+
+  it("a connector the team has not enabled adds no tools (and does not fail the export)", async () => {
+    const connector = await registerConnector(h.admin);
+    const id = await published("bob", { connectors: [connector.name] });
+    expect(await toolsOf(id)).toEqual([]);
   });
 });

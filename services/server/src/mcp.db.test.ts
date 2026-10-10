@@ -365,6 +365,53 @@ describe("tools/call: the server decides every call", () => {
   });
 });
 
+describe("connector changes mid-run are enforced at the next call (KOBE-112, KOBE-106)", () => {
+  it("a team exposure narrowed after the run started denies the call it used to allow", async () => {
+    const w = await world();
+    expect(
+      (await callTool(w, { tool: "create_issue", tool_call_id: "t1" })).json,
+    ).not.toMatchObject({ code: "connector_exposure" });
+    await enableConnector(fx.admin, w.team, w.connector.id, w.owner.id, "read_only", []);
+    expect((await callTool(w, { tool: "create_issue", tool_call_id: "t2" })).json).toMatchObject({
+      decision: "deny",
+      code: "connector_exposure",
+    });
+    expect(((await listTools(w)).json.tools as { name: string }[]).map((t) => t.name)).toEqual([
+      "get_issue",
+    ]);
+  });
+
+  it("a connector disabled or removed from the team mid-run is gone for both list and call", async () => {
+    const w = await world();
+    expect((await callTool(w, { tool: "get_issue" })).json).toMatchObject({ decision: "allow" });
+    await fx.admin.query(`UPDATE connectors SET status = 'disabled' WHERE id = $1`, [
+      w.connector.id,
+    ]);
+    expect((await listTools(w)).status).toBe(404);
+    expect((await callTool(w, { tool: "get_issue" })).json).not.toMatchObject({
+      decision: "allow",
+    });
+    await fx.admin.query(`UPDATE connectors SET status = 'active' WHERE id = $1`, [w.connector.id]);
+    await fx.admin.query(`DELETE FROM team_connectors WHERE connector_id = $1`, [w.connector.id]);
+    expect((await listTools(w)).status).toBe(404);
+    expect((await callTool(w, { tool: "get_issue" })).json).not.toMatchObject({
+      decision: "allow",
+    });
+  });
+
+  it("a changed connector URL is used by the very next call (nothing is cached)", async () => {
+    const w = await world();
+    await fx.admin.query(`UPDATE connectors SET url = $2 WHERE id = $1`, [
+      w.connector.id,
+      "https://moved.example.com/mcp",
+    ]);
+    expect((await callTool(w, { tool: "get_issue" })).json).toMatchObject({
+      decision: "allow",
+      connector: { url: "https://moved.example.com/mcp" },
+    });
+  });
+});
+
 describe("Gate 2: an MCP write runs only with a valid signed approval", () => {
   let w: World;
   const input = { q: "create the ticket" };

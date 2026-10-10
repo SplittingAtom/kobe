@@ -5,6 +5,7 @@ import type { TeamRef } from "../../sandbox/manifests.js";
 import { readPublishFloor } from "../floor.js";
 import { computeToolManifest } from "../manifest.js";
 import { gatewayModelId, listOrbitModelOptions, pickOrbitModel } from "../orbit/model.js";
+import { orbitMcpToolNames } from "../orbit/mcp-tools.js";
 import { mapAgentVersionToOrbit, orbitExportToYaml } from "../orbit/orbit-export.js";
 import type { AgentLocation, AgentRecord } from "../store.js";
 import { contentKey, getVersion, type PublishError } from "../versions.js";
@@ -107,6 +108,12 @@ export async function gatePublish(input: GateInput): Promise<GateOutcome> {
       return { kind: "publish_error", error: "unchanged" };
     }
   }
+  const mcpTools = await orbitMcpToolNames(
+    db,
+    input.team.id,
+    toolManifest,
+    definition.frontmatter.tools,
+  );
   let yaml: string;
   try {
     yaml = orbitExportToYaml(
@@ -117,6 +124,7 @@ export async function gatePublish(input: GateInput): Promise<GateOutcome> {
         },
         toolManifest,
         version: (agent.currentVersion ?? 0) + 1,
+        mcpTools,
       }),
     );
   } catch (err) {

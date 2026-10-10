@@ -449,4 +449,38 @@ describe("effective connectors from grants (KOBE-111)", () => {
     expect(r2.ok && r2.mcp).toEqual({ servers: [] });
     expect(r2.ok && r2.config?.mcp_servers).toBeUndefined();
   });
+  it("KOBE-112 ac-1: every change shows in the next resolve of the same thread (nothing is cached)", async () => {
+    const w = await f.world();
+    await catalog(w.team, w.owner.id, [["fast", true]]);
+    const c = await registerConnector(f.fx.admin, {
+      name: `chg-${randomBytes(3).toString("hex")}`,
+      authKind: "api_key",
+    });
+    await enableTeamConnector(f.fx.admin, w.team, c.id, w.owner.id, "all");
+    await grant(w.team, w.owner.id, c.id, "api_key", "");
+    const thread = await pinnedThread(w.owner, { connectors: [c.name] });
+    const tools = async () => {
+      const r = await resolveFor(w.team, w.owner.id, thread);
+      return r.ok ? r.mcp?.servers.flatMap((s) => s.tools.map((t) => t.name)) : "failed";
+    };
+    expect(await tools()).toEqual(["get_issue", "create_issue", "delete_issue"]);
+    // Team exposure narrowed.
+    await enableTeamConnector(f.fx.admin, w.team, c.id, w.owner.id, "read_only");
+    expect(await tools()).toEqual(["get_issue"]);
+    // The user's grant removed, then added back.
+    await f.fx.admin.query(`DELETE FROM connector_grants WHERE connector_id = $1`, [c.id]);
+    expect(await tools()).toEqual([]);
+    await grant(w.team, w.owner.id, c.id, "api_key", "");
+    expect(await tools()).toEqual(["get_issue"]);
+    // A tool re-pinned (drifted) is dropped; the connector disabled is gone.
+    await f.fx.admin.query(
+      `UPDATE connectors SET tools_snapshot = (
+         SELECT jsonb_agg(CASE WHEN t->>'name' = 'get_issue' THEN jsonb_set(t, '{status}', '"drifted"') ELSE t END)
+         FROM jsonb_array_elements(tools_snapshot) t) WHERE id = $1`,
+      [c.id],
+    );
+    expect(await tools()).toEqual([]);
+    await f.fx.admin.query(`UPDATE connectors SET status = 'disabled' WHERE id = $1`, [c.id]);
+    expect(await tools()).toEqual([]);
+  });
 });
