@@ -454,7 +454,23 @@ design in `docs/design/paired-tool-uid.md`), so a prompt-injected tool cannot re
 model-gateway tokens or write Pi's config directory. The executor needs the partner groups the
 chart already gives the sandbox agent; an agent that is asked for it without them refuses to
 start. It applies to sandboxes started after the change (running ones keep the old setting until
-they restart). One extra Node process (tens of MB) runs per thread that uses a tool.
+they restart). One extra Node process runs per thread that uses a tool.
+
+The k3d e2e (`executor` shard, KOBE-168) runs the whole suite with the flag on under gVisor and
+proves that a tool cannot signal or ptrace Pi, read `model.json` or the agent's tokens, write Pi's
+`agent/` directory or private HOME/TMPDIR, or plant code a Pi loads; that a thread's tool cannot
+reach another thread's Pi (which also closes KOBE-228: with the flag on a Pi's HOME is private);
+and that the workspace and KOBE-27 sync still work for both uids. To turn it on:
+
+```bash
+helm upgrade kobe charts/kobe -n <namespace> -f <your values> --reset-values --set sandbox.toolExecutor.enabled=true
+```
+
+Running sandboxes keep the old setting until they restart (hibernate and wake them, or wait for
+idle hibernation). To turn it off set it back to `false`; the same applies. What it costs: one Node
+process per thread that runs a tool, started on that thread's first tool call (resident memory
+and the cold-start effect are measured in `docs/ledger/KOBE-168.md`); no extra pod, no
+extra network hop. With the flag off, threads in one sandbox share Pi's HOME (KOBE-228).
 
 ### Email (SMTP)
 
