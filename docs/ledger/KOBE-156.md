@@ -25,7 +25,10 @@ Server only. `memory/agent.ts` (put, read, `run.start.memory`), `#onMemoryPut` /
   (`applied`). Otherwise the broker creates the approval (card, run `waiting_approval`), the sandbox gets
   `pending_approval`, and on approval the write is verified, consumed and applied with `memory.updated`.
   Denied, expired or ended: nothing is written, `sandbox.memory_refused` `approval_denied`.
-  This holds in every approval mode (auto and scheduled runs too: a project write is never silent).
+  Interactive modes only: in `auto` mode and scheduled runs (D32, deny-don't-wait) a project write without an
+  existing signed approval is denied at once (`scheduled_run_no_prompt` / `mode_auto_not_allowlisted`), no
+  approval is created, and a `policy.denied` event records it for the run report.
+  TODO(KOBE-178): attach `skipped_actions` (KOBE-176 shape) to the terminal event; no server plumbing exists yet.
 - **Needed a change in `approvals/decide.ts`:** a decision used to mark every non-MCP approval consumed at once
   (the sandbox enforces it). Project `remember` is now left unconsumed so the memory handler consumes it, as the
   MCP proxy does for MCP tools.
@@ -45,8 +48,7 @@ Server only. `memory/agent.ts` (put, read, `run.start.memory`), `#onMemoryPut` /
 
 ## Open questions
 
-- Scheduled runs: a project write waits up to 1 h for a human who may not be there. Allow-list instead?
-- Index on `memory_doc_versions (team_id, run_id, tool_call_id)` for replay lookups (needs a migration).
+- Follow-up (needs a migration, not here): index `memory_doc_versions (team_id, run_id, tool_call_id)` for the replay lookup.
 - After merging #176: add a test with real `project_members` rows (the seam test covers the logic now).
 
 ## Evidence

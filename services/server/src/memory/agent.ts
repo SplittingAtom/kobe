@@ -355,6 +355,64 @@ async function verified(deps: MemoryAgentDeps, req: PutRequest): Promise<boolean
   return check.ok;
 }
 
+/** Why this run may not ask a person, if it may not (scheduled run or `auto` approval mode). */
+async function noPromptCode(
+  deps: MemoryAgentDeps,
+  req: PutRequest,
+): Promise<"scheduled_run_no_prompt" | "mode_auto_not_allowlisted" | undefined> {
+  const res = await withTeam(deps.db, req.teamId, (tx) =>
+    tx.execute<{ trigger: string; approval_mode: string }>(sql`
+      SELECT trigger, approval_mode FROM runs WHERE team_id = ${req.teamId} AND id = ${req.runId}`),
+  );
+  const run = res.rows[0];
+  if (run?.trigger === "schedule") return "scheduled_run_no_prompt";
+  return run?.approval_mode === "auto" ? "mode_auto_not_allowlisted" : undefined;
+}
+
+/**
+ * The denied write as the same `policy.denied` event the policy check records, which is what the
+ * run report's skipped actions are built from. TODO(KOBE-178): attach `skipped_actions` to the
+ * terminal event once the run-report plumbing reads them.
+ */
+async function recordDenied(
+  deps: MemoryAgentDeps,
+  req: PutRequest,
+  code: "scheduled_run_no_prompt" | "mode_auto_not_allowlisted",
+): Promise<void> {
+  try {
+    await withAppendTx(deps.db, req.teamId, (tx) => appendDenied(tx, deps, req, code));
+  } catch (err) {
+    deps.log.warn({ err, run_id: req.runId }, "could not record the skipped project write");
+  }
+}
+
+async function appendDenied(
+  tx: KobeTx,
+  deps: MemoryAgentDeps,
+  req: PutRequest,
+  code: "scheduled_run_no_prompt" | "mode_auto_not_allowlisted",
+): Promise<void> {
+  const run = await tx.execute<{ last_seq: number }>(sql`
+    SELECT last_seq FROM runs WHERE team_id = ${req.teamId} AND id = ${req.runId}`);
+  if ((run.rows[0]?.last_seq ?? deps.runMaxEvents) + 2 > deps.runMaxEvents) return;
+  await appendRunEventsInTx(tx, req.teamId, req.runId, [
+    {
+      type: "policy.denied",
+      payload: {
+        tool_call_id: req.toolCallId,
+        tool: "remember",
+        reasons: [
+          {
+            code,
+            stage: "approval_mode",
+            message: "This run does not wait for approvals, so the project write was skipped.",
+          },
+        ],
+      },
+    },
+  ]);
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((r) => {
@@ -390,6 +448,20 @@ function putProject(deps: MemoryAgentDeps, req: PutRequest): PutOutcome {
         req.refused("approval_denied", "project");
         answer.resolve(fail("not_allowed", "This write was not approved."));
       }
+      return;
+    }
+    // D32: a run in `auto` mode (and every scheduled run) never waits for a person: what would
+    // ask is denied at once and reported as a skipped action (`policy.denied`).
+    const noPrompt = await noPromptCode(deps, req);
+    if (noPrompt) {
+      await recordDenied(deps, req, noPrompt);
+      req.refused("approval_denied", "project");
+      answer.resolve(
+        fail(
+          "not_allowed",
+          "This run does not wait for approvals, so the project write was skipped.",
+        ),
+      );
       return;
     }
     const outcome = await deps.approvals.request(

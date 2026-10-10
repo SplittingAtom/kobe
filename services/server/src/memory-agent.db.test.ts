@@ -6,7 +6,7 @@ import {
   runMemoryContextSchema,
   type PolicyEngine,
 } from "@kobe/protocol";
-import { approvalKeyring } from "./approvals/index.js";
+import { approvalKeyring, createApprovalVerifier } from "./approvals/index.js";
 import { EventStreamFixture, must, type Person } from "./testing/event-stream-fixture.js";
 import { FakeSandbox, FakeSandboxAuth, isFake, sandboxListener } from "./testing/fake-sandbox.js";
 import { MemoryObjects } from "./testing/memory-objects.js";
@@ -573,6 +573,92 @@ describe("project memory", () => {
     expect(await docCount(w.team)).toBe(1);
     // One approval was asked for, none new for the put.
     expect((await rows(`SELECT 1 FROM approvals WHERE team_id = $1`, [w.team])).length).toBe(1);
+    members.delete(w.owner.id);
+  });
+
+  it.each([
+    ["auto approval mode", `UPDATE runs SET approval_mode = 'auto'`, "mode_auto_not_allowlisted"],
+    ["a scheduled run", `UPDATE runs SET trigger = 'schedule'`, "scheduled_run_no_prompt"],
+  ])(
+    "%s never waits: the project write is denied at once and reported",
+    async (_n, update, code) => {
+      const w = await world();
+      await inProject(w);
+      members.add(w.owner.id);
+      await fx.admin.query(`${update} WHERE team_id = $1 AND id = $2`, [w.team, w.runId]);
+      const sb = await started(w);
+      await check(sb, w, "a1", input);
+      const res = await result(sb, sendPut(sb, w, "a1", input));
+      expect(errorCode(res)).toBe("not_allowed");
+      expect(res.status).toBeUndefined();
+      expect((await rows(`SELECT 1 FROM approvals WHERE team_id = $1`, [w.team])).length).toBe(0);
+      expect(await docCount(w.team)).toBe(0);
+      const denied = await rows<{ payload: { tool: string; reasons: { code: string }[] } }>(
+        `SELECT payload FROM run_events WHERE team_id = $1 AND run_id = $2 AND type = 'policy.denied'`,
+        [w.team, w.runId],
+      );
+      expect(denied[0]?.payload).toMatchObject({ tool: "remember", reasons: [{ code }] });
+      // Personal memory is not an approval matter: it still applies.
+      expect((await put(sb, w, "a2", { scope: "user", path: "a.md", content: "x" })).status).toBe(
+        "applied",
+      );
+      members.delete(w.owner.id);
+    },
+  );
+
+  it("an approval is single use and bound to its input", async () => {
+    const w = await world();
+    await inProject(w);
+    members.add(w.owner.id);
+    const sb = await started(w);
+    askProject = true;
+    try {
+      const requestId = `c${seq++}`;
+      sb.send({
+        v: 1,
+        type: "policy.check",
+        request_id: requestId,
+        run_id: w.runId,
+        thread_id: w.threadId,
+        tool_call_id: "s1",
+        tool: "remember",
+        input,
+      });
+      const pending = await sb.until(
+        () => sb.frames("policy.pending").find((f) => f.request_id === requestId),
+        3000,
+      );
+      await decide(w.owner, String(pending.approval_id), "allow");
+      await sb.until(
+        () => sb.frames("policy.result").find((f) => f.request_id === requestId),
+        3000,
+      );
+    } finally {
+      askProject = false;
+    }
+    const verifier = createApprovalVerifier({ db: fx.db, keys: KEY });
+    const call = {
+      teamId: w.team,
+      userId: w.owner.id,
+      runId: w.runId,
+      toolCallId: "s1",
+      tool: "remember",
+    };
+    // Another input hash: refused, and the approval is still unspent.
+    expect((await verifier.authorize({ ...call, input: { ...input, content: "other" } })).ok).toBe(
+      false,
+    );
+    // The handler spends it exactly once.
+    expect(await result(sb, sendPut(sb, w, "s1", input))).toMatchObject({ status: "applied" });
+    expect((await verifier.authorize({ ...call, input })).ok).toBe(false);
+    // A replayed memory.put answers the stored version and writes nothing more.
+    expect(await result(sb, sendPut(sb, w, "s1", input))).toMatchObject({
+      status: "applied",
+      version: 1,
+    });
+    expect(
+      (await rows(`SELECT 1 FROM memory_doc_versions WHERE team_id = $1`, [w.team])).length,
+    ).toBe(1);
     members.delete(w.owner.id);
   });
 
