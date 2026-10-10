@@ -42,6 +42,7 @@ import {
   type TeamRef,
 } from "./manifests.js";
 import { logger } from "../logger.js";
+import { diagnoseStall, isPodReady, type StallDiagnosis } from "./stall-diagnosis.js";
 import { reconcileTeamNamespaces, type TeamReconcileSummary } from "./team-reconcile.js";
 import type { SandboxPrincipal } from "./session-token.js";
 
@@ -57,6 +58,9 @@ import type { SandboxPrincipal } from "./session-token.js";
  */
 
 export const POD_WAIT_TIMEOUT_MS = 30_000;
+/** Same as the wire wakeRetryBudgetMs: the budget a wake had before KOBE-192. */
+export const READY_TIMEOUT_MS = 90_000;
+const READY_DIAGNOSE_EVERY_MS = 5_000;
 /** Name of the dry-run namespace the admission self-check expects to be refused. */
 export const ADMISSION_PROBE_NAMESPACE = "kobe-admission-probe";
 const DELETE_RETRIES = 4;
@@ -111,6 +115,11 @@ export interface WakeResult {
   readonly resumed: boolean;
 }
 
+/** Outcome of {@link SandboxProvider.awaitReady}. */
+export type ReadyOutcome =
+  | { readonly ready: true }
+  | { readonly ready: false; readonly sandboxId: string; readonly stall: StallDiagnosis };
+
 /** The `/workspace` PVC agent-sandbox creates for a Sandbox (volumeClaimTemplate `workspace`). */
 export const workspacePvcName = (sandboxName: string): string => `workspace-${sandboxName}`;
 
@@ -142,6 +151,8 @@ export interface SandboxProviderOptions {
   readonly sleep?: (ms: number) => Promise<void>;
   readonly now?: () => number;
   readonly podWaitTimeoutMs?: number;
+  /** How long a woken sandbox pod may take to be Ready (KOBE-192): the wire wake budget. */
+  readonly readyTimeoutMs?: number;
   /**
    * The configured RuntimeClass (KOBE_RUNTIME_CLASS). Used only by the reconciler, to recognise a
    * definitive loss of isolation (class deleted or no longer isolating) when require() fails.
@@ -201,6 +212,15 @@ export interface SandboxProvider {
    * ensureSandbox (deleted on a RuntimeClass/handler mismatch, KOBE-9).
    */
   wakeSandbox(team: TeamRef, userId: string): Promise<WakeResult>;
+  /**
+   * Waits for the sandbox pod to be Ready, up to `readyTimeoutMs`, reading the events of this wake
+   * (`since`, epoch ms) about the pod and the workspace volume as it waits. Returns early, not
+   * ready, only on a definite unrecoverable signal (replica cannot be scheduled, no capacity, an
+   * attach failing repeatedly, an image that cannot be pulled); progress such as Pulling or
+   * ContainerCreating keeps it waiting. At the budget it returns the diagnosis, `unknown`
+   * included (KOBE-192). Read-only: it never deletes anything.
+   */
+  awaitReady(team: TeamRef, userId: string, since: number): Promise<ReadyOutcome>;
   /**
    * Hibernates `sandboxId` (D14): `operatingMode: Suspended` — agent-sandbox deletes the pod and
    * keeps the claim and its volume. Idempotent; no isolation check (stopping is always safe). The
@@ -280,6 +300,7 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     now = () => Date.now(),
     podWaitTimeoutMs = POD_WAIT_TIMEOUT_MS,
+    readyTimeoutMs = READY_TIMEOUT_MS,
     runtimeClassName,
     audit,
   } = options;
@@ -671,6 +692,56 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     return { handle: { ...handle, state: "running" }, resumed };
   };
 
+  /** The claim's Sandbox, pod name and workspace PVC name (undefined while they do not exist). */
+  const locate = async (team: TeamRef, userId: string) => {
+    const namespace = teamNamespaceName(team);
+    const claim = await kube.get(CLAIM(namespace, claimName(userId)));
+    const sandboxName = claim ? str(claim, "status", "sandbox", "name") : undefined;
+    const sandbox = sandboxName ? await kube.get(SANDBOX(namespace, sandboxName)) : undefined;
+    if (!claim?.metadata.uid || !sandboxName || !sandbox) return undefined;
+    const podName = sandbox.metadata.annotations?.[POD_NAME_ANNOTATION] ?? sandboxName;
+    return {
+      namespace,
+      sandboxId: claim.metadata.uid,
+      sandbox,
+      podName,
+      pvcName: workspacePvcName(sandboxName),
+    };
+  };
+
+  const awaitReady = async (
+    team: TeamRef,
+    userId: string,
+    since: number,
+  ): Promise<ReadyOutcome> => {
+    assertTeamRef(team);
+    assertUserId(userId);
+    const deadline = now() + readyTimeoutMs;
+    let nextDiagnosis = now() + READY_DIAGNOSE_EVERY_MS;
+    for (;;) {
+      const found = await locate(team, userId);
+      if (!found) {
+        throw new SandboxProvisioningError(`Sandbox for ${teamNamespaceName(team)} vanished`);
+      }
+      if (isPodReady(await kube.get(POD(found.namespace, found.podName)))) return { ready: true };
+      const last = now() >= deadline;
+      if (last || now() >= nextDiagnosis) {
+        nextDiagnosis = now() + READY_DIAGNOSE_EVERY_MS;
+        const stall = await diagnoseStall(
+          kube,
+          found.namespace,
+          found.podName,
+          found.pvcName,
+          since,
+          now(),
+        );
+        // Only a definite signal ends the wait early; otherwise the sandbox gets the whole budget.
+        if (last || stall.definite) return { ready: false, sandboxId: found.sandboxId, stall };
+      }
+      await sleep(1000);
+    }
+  };
+
   const hibernateSandbox = async (
     team: TeamRef,
     userId: string,
@@ -915,6 +986,7 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     reconcileTeams,
     ensureSandbox,
     wakeSandbox,
+    awaitReady,
     hibernateSandbox,
     destroySandbox,
     deleteVolume,
