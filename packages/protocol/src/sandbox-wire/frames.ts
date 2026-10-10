@@ -21,6 +21,7 @@ import {
   projectFileProposeFrameSchema,
   projectFileProposeResultFrameSchema,
 } from "./project-frames.js";
+import { runMcpContextSchema } from "./mcp-config.js";
 import { webSearchQueryFrameSchema, webSearchResultFrameSchema } from "./web-search-frames.js";
 import { runProjectContextSchema } from "../projects.js";
 import { runMemoryContextSchema } from "../memory.js";
@@ -370,6 +371,8 @@ export const runStartFrameSchema = frame("run.start", {
   memory: runMemoryContextSchema.optional(),
   /** Project id, name and instructions (KOBE-159, projects.ts); only for agents with capability `projects`. */
   project: runProjectContextSchema.optional(),
+  /** The run's effective MCP connectors (KOBE-111, mcp-config.ts); only for agents with capability `mcp`. */
+  mcp: runMcpContextSchema.optional(),
 });
 
 /** Pi `steer`: delivered after the current turn's tool calls, before the next model call. */

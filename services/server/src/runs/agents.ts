@@ -6,6 +6,7 @@ import { agentSkills } from "@kobe/agent-file";
 import { bundleRefsFor } from "../skills/materialize.js";
 import { buildResolveInput, loadSkillFacts, loadTeamFacts } from "./resolver-input.js";
 import type { AgentScope, KobeTx } from "@kobe/db";
+import { buildRunMcp, connectedConnectorNames, loadTeamConnectorRows, loadUserGrantFacts } from "./run-mcp.js";
 import type { RunAgentResolver } from "./seams.js";
 
 /**
@@ -63,8 +64,15 @@ export const PINNED_AGENTS: RunAgentResolver = {
       agentSkillNames: agentSkills(frontmatter).names,
       personalSkillsDisabled: team.personalSkillsDisabled,
     });
+    const connectorRows = await loadTeamConnectorRows(tx, input.teamId);
+    const connectedConnectors = connectedConnectorNames(
+      connectorRows,
+      await loadUserGrantFacts(tx, input.teamId, input.ownerUserId),
+      new Date(),
+    );
     const resolved = resolveEffective(
       buildResolveInput({
+        connectedConnectors,
         frontmatter,
         versionMode: pinned.version.toolManifest.approval_mode.effective,
         floor,
@@ -74,11 +82,9 @@ export const PINNED_AGENTS: RunAgentResolver = {
     );
     if (!resolved.ok) return { ok: false, error: resolved.error };
     const { value } = resolved;
-    const ids = new Map(team.connectors.map((c) => [c.name, c.id]));
-    const mcpServers = value.connectors.flatMap((name) => {
-      const id = ids.get(name);
-      return id === undefined ? [] : [{ name, connector_id: id }];
-    });
+    // Per-session MCP config (KOBE-111): the effective connectors with the tools the agent may see.
+    const mcp = buildRunMcp(connectorRows, value.connectors, frontmatter.tools);
+    const mcpServers = mcp.servers.map((s) => ({ name: s.name, connector_id: s.connector_id }));
     // Both this and `resolveRunModel` (lifecycle.ts) exist because the resolver sees aliases only:
     // `resolveRunModel` adds the gateway id/API style and the thread's choice (no resolver input).
     // Only an agent's own pin is its model; otherwise the thread's choice or the team default
@@ -117,6 +123,7 @@ export const PINNED_AGENTS: RunAgentResolver = {
       },
       approvalMode: strictestApprovalMode(input.approvalMode, value.approvalMode),
       omissions: value.omissions,
+      mcp,
       ...(Object.keys(config).length > 0 ? { config } : {}),
     };
   },
