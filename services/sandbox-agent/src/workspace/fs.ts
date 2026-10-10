@@ -160,11 +160,31 @@ export async function openForUpload(root: string, rel: string): Promise<Readable
   return handle.createReadStream();
 }
 
+/** Owner-only write: the Pi and tool uids hold the workspace group but are not the owner (KOBE-162). */
+const OWNED_DIR_MODE = 0o755;
+
+/**
+ * A top-level server-owned folder (`projects`, `uploads`) that is not the agent's own was put there
+ * by sandbox code (the workspace root is group-writable, so a tool can rename the real folder and
+ * make its own). It is moved to `<name>.replaced-<random>` (a sandbox-owned path, kept and synced
+ * as the user's data) so the real folder is rebuilt by the next sync. Without a uid (Windows) or
+ * when running as root nothing can be told apart.
+ */
+async function reclaimAreaRoot(root: string, name: string): Promise<void> {
+  const agentUid = process.getuid?.();
+  const stat = await lstat(path.join(root, name)).catch(() => undefined);
+  if (agentUid === undefined || agentUid === 0 || stat === undefined) return;
+  if (stat.isDirectory() && stat.uid === agentUid) return;
+  const aside = `${name}.replaced-${randomBytes(6).toString("hex")}`;
+  await rename(path.join(root, name), path.join(root, aside));
+}
+
 /**
  * Makes every parent directory of `rel` a real directory inside `root`. In server-owned areas a
  * symlink or file in the way is removed (those areas mirror the server); elsewhere it is an
  * error (the sandbox's own data is never removed to make room). Directories in server-owned
- * areas are made writable for the agent (they are re-locked by {@link lockServerOwned}).
+ * areas are owner-writable only, always (a group bit would let a tool write into a project
+ * folder while it is being filled); they are locked read-only by {@link lockServerOwned}.
  */
 export async function ensureParents(root: string, rel: string): Promise<void> {
   const parts = rel.split("/").slice(0, -1);
@@ -173,26 +193,29 @@ export async function ensureParents(root: string, rel: string): Promise<void> {
     current = current === "" ? part : `${current}/${part}`;
     const abs = path.join(root, current);
     const owned = isServerOwnedPath(`${current}/`);
+    if (owned && !current.includes("/")) await reclaimAreaRoot(root, current);
+    const dirMode = owned ? OWNED_DIR_MODE : 0o775;
     let stat;
     try {
       stat = await lstat(abs);
     } catch {
       // Parallel downloads may create the same directory: EEXIST is fine if it is one.
-      await mkdir(abs, { mode: 0o775 }).catch(async (error: unknown) => {
+      await mkdir(abs, { mode: dirMode }).catch(async (error: unknown) => {
         if (!(await lstat(abs).catch(() => undefined))?.isDirectory()) throw error;
       });
       // The agent's umask is 077: every thread shares the workspace through its group.
-      await shareOnVolume(root, abs, 0o775);
+      await shareOnVolume(root, abs, dirMode);
       continue;
     }
     if (stat.isDirectory()) {
-      if (owned && (stat.mode & 0o200) === 0) await chmod(abs, 0o755);
+      if (owned && (stat.mode & 0o7777 & ~0o2000) !== OWNED_DIR_MODE)
+        await chmod(abs, OWNED_DIR_MODE);
       continue;
     }
     if (!owned) throw new Error(`a file or link is in the way of directory ${current}`);
     await rm(abs, { force: true });
-    await mkdir(abs, { mode: 0o775 });
-    await shareOnVolume(root, abs, 0o775);
+    await mkdir(abs, { mode: dirMode });
+    await shareOnVolume(root, abs, dirMode);
   }
 }
 
@@ -307,9 +330,12 @@ export async function renameWithin(root: string, from: string, to: string): Prom
 }
 
 /**
- * Server-owned areas are read-only to the agent: files 0444, directories 0555. (Same uid, so this
- * is a speed bump; the guarantee is that the server never accepts writes there and the agent
- * reverts local changes on its next sync.)
+ * Server-owned areas are read-only to the agent's tools: files 0444, directories 0555, all owned
+ * by the agent's uid (KOBE-162). Under Pi identities (KOBE-71) the Pi and its tools run as other
+ * uids that only hold the workspace group, so these modes are a real barrier: no write, create,
+ * delete, rename or chmod in the area. Without identities (development) the tools share the
+ * agent's uid and this is a speed bump; either way the server never accepts writes there and the
+ * agent reverts local changes on its next sync.
  */
 export async function lockServerOwned(root: string, areas: readonly string[]): Promise<void> {
   // Directory entries never follow links; the area roots are checked the same way (a symlinked
