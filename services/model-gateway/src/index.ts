@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   MODELS_ENSURE_PREFIX,
   MODELS_RESYNC,
@@ -56,7 +57,17 @@ const budgets = new BudgetGate(
   {
     ttlMs: config.budgetCacheTtlMs,
     // Shared by all replicas, with an expiry (KOBE-120).
-    reservations: new DbReservations(db, { ttlMs: config.reservationTtlMs }),
+    reservations: new DbReservations(db, {
+      ttlMs: config.reservationTtlMs,
+      // Hashes the install-wide keys; the same on every replica (derived from the shared key).
+      salt: createHash("sha256")
+        .update(`kobe.budget-reservations:${config.sessionKey}`)
+        .digest("hex"),
+    }),
+    // A settled hold keeps counting until the other replicas' cached spend has caught up, and a
+    // running call extends its hold, so the TTL need not exceed the longest call.
+    settleHoldMs: config.budgetCacheTtlMs,
+    heartbeatMs: Math.floor(config.reservationTtlMs / 2),
     onError: (err) => logger.warn({ err }, "budget reservation could not be ended"),
   },
 );

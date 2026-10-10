@@ -16,7 +16,8 @@ import {
 export class DbReservations implements ReservationStore {
   constructor(
     private readonly db: KobeDb,
-    private readonly options: { readonly ttlMs: number },
+    /** `salt`: the per-install secret the functions hash team and member keys with. */
+    private readonly options: { readonly ttlMs: number; readonly salt: string },
   ) {}
 
   async reserve(r: ReserveRequest): Promise<ReserveVerdict> {
@@ -31,17 +32,24 @@ export class DbReservations implements ReservationStore {
     const res = await this.db.execute<{ r: string }>(
       sql`SELECT kobe_reserve_budget(${r.teamId}::uuid, ${r.userId}::uuid, ${r.callId},
         ${r.cost.usd.toFixed(12)}::numeric, ${Math.ceil(r.cost.tokens)}::bigint,
-        ${this.options.ttlMs}::integer, ${MEMBER_SHARE}::numeric, ${lines}::jsonb) AS r`,
+        ${this.options.ttlMs}::integer, ${MEMBER_SHARE}::numeric, ${lines}::jsonb, ${this.options.salt}) AS r`,
     );
     return parseVerdict(res.rows[0]?.r);
   }
 
+  async extend(teamId: string, callIds: readonly string[]): Promise<void> {
+    if (callIds.length === 0) return;
+    await this.db.execute(
+      sql`SELECT kobe_extend_budget(${teamId}::uuid, ${pgArray(callIds)}::text[],
+        ${this.options.ttlMs}::integer, ${this.options.salt})`,
+    );
+  }
+
   async end(teamId: string, callIds: readonly string[], keepMs?: number): Promise<void> {
     if (callIds.length === 0) return;
-    const ids = `{${callIds.map((id) => `"${id.replace(/["\\]/g, "")}"`).join(",")}}`;
     const keep = keepMs === undefined ? null : Math.max(0, Math.round(keepMs));
     await this.db.execute(
-      sql`SELECT kobe_settle_budget(${teamId}::uuid, ${ids}::text[], ${keep}::integer)`,
+      sql`SELECT kobe_settle_budget(${teamId}::uuid, ${pgArray(callIds)}::text[], ${keep}::integer, ${this.options.salt})`,
     );
   }
 }
@@ -52,3 +60,7 @@ export function parseVerdict(text: string | undefined): ReserveVerdict {
   if (!m) throw new Error(`kobe_reserve_budget: unexpected answer ${JSON.stringify(text)}`);
   return { ok: false, verdict: m[1] as "full" | "own_share", line: Number(m[2]) };
 }
+
+/** A text[] literal; call ids are server-generated UUIDs, quotes and backslashes are dropped. */
+const pgArray = (ids: readonly string[]): string =>
+  `{${ids.map((id) => `"${id.replace(/["\\]/g, "")}"`).join(",")}}`;

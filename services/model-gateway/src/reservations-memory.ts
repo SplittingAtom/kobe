@@ -41,6 +41,9 @@ export class MemoryReservations implements ReservationStore {
     return { ok: true };
   }
 
+  /** Memory reservations have no expiry to extend. */
+  async extend(): Promise<void> {}
+
   async end(_teamId: string, callIds: readonly string[], keepMs?: number): Promise<void> {
     for (const id of callIds) {
       const h = this.held.get(id);

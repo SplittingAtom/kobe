@@ -201,6 +201,7 @@ describe("BudgetGate (KOBE-42)", () => {
         throw new Error("db down");
       },
       end: async () => undefined,
+      extend: async () => undefined,
     };
     const lines = () => ({
       lines: [line({ unit: "tokens", scope: "user", limit: 1e6, spent: 0 })],
@@ -225,6 +226,7 @@ describe("BudgetGate (KOBE-42)", () => {
       const ended: { calls: readonly string[]; keepMs: number | undefined }[] = [];
       const store: ReservationStore = {
         reserve: async () => ({ ok: true }),
+        extend: async () => undefined,
         end: async (_t, calls, keepMs) => {
           ended.push({ calls, keepMs });
         },
@@ -248,10 +250,40 @@ describe("BudgetGate (KOBE-42)", () => {
       ]);
     });
 
+    it("holds a settled reservation for the budget cache TTL, and extends running calls", async () => {
+      const ended: (number | undefined)[] = [];
+      let beats = 0;
+      const store: ReservationStore = {
+        reserve: async () => ({ ok: true }),
+        extend: async () => {
+          beats++;
+        },
+        end: async (_t, _c, keepMs) => {
+          ended.push(keepMs);
+        },
+      };
+      const g = new BudgetGate(
+        { load: async () => lines(), prices: async () => new Map() },
+        { ttlMs: 1_000, reservations: store, settleHoldMs: 1_000, heartbeatMs: 10 },
+      );
+      const c = call(randomUUID());
+      const d = await g.admit(c);
+      if (!d.ok) throw new Error("refused");
+      await new Promise((r) => setTimeout(r, 60));
+      expect(beats).toBeGreaterThanOrEqual(2);
+      d.release?.(true);
+      const seen = beats;
+      await new Promise((r) => setTimeout(r, 40));
+      expect(beats).toBe(seen); // the heartbeat stops with the call
+      g.settle(teamId, [c.callId ?? ""]);
+      expect(ended).toEqual([30_000, 1_000]);
+    });
+
     it("a refused reservation gives the rate-limit token back", async () => {
       const store: ReservationStore = {
         reserve: async () => ({ ok: false, verdict: "full", line: 0 }),
         end: async () => undefined,
+        extend: async () => undefined,
       };
       const g = new BudgetGate(
         {

@@ -30,6 +30,8 @@ export type ReserveVerdict =
 export interface ReservationStore {
   /** Checks the lines against the live reservations and, if they allow it, holds the cost. */
   reserve(request: ReserveRequest): Promise<ReserveVerdict>;
+  /** Heartbeat of calls still running: keeps their live reservations from expiring. */
+  extend(teamId: string, callIds: readonly string[]): Promise<void>;
   /**
    * Ends these calls' reservations. With `keepMs`, they stay that long (at most as long as they
    * would anyway): the call ended but its ledger row has not landed yet.

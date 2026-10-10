@@ -39,7 +39,7 @@ const gateOn = (ttlMs: number) =>
       load: async () => ({ lines: [line], requestsPerMinute: 10_000 }),
       prices: async () => new Map(),
     },
-    { ttlMs: 1_000, reservations: new DbReservations(app.db, { ttlMs }) },
+    { ttlMs: 1_000, reservations: new DbReservations(app.db, { ttlMs, salt: "test-salt" }) },
   );
 
 beforeAll(async () => {
@@ -93,7 +93,7 @@ describe("DbReservations through BudgetGate (KOBE-120)", () => {
   });
 
   it("measures the added latency of a reserve and an end (printed, not asserted)", async () => {
-    const store = new DbReservations(app.db, { ttlMs: 60_000 });
+    const store = new DbReservations(app.db, { ttlMs: 60_000, salt: "test-salt" });
     const n = 100;
     const user = randomUUID();
     const pingMs: number[] = [];

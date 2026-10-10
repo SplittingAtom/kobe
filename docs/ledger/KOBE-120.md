@@ -13,7 +13,10 @@ replicas share them. Migration PR first (schema, RLS, probe fixture, SQL functio
 
 - **Two tables.** `budget_reservations` is a team table (RLS, FK to teams, `team_id` first in PK and
   expiry index) and serves the team and user lines. The install line spans teams, which RLS would hide, so
-  `install_budget_reservations` is install-wide with no team or user ids (member key `team:user` only).
+  `install_budget_reservations` is install-wide. It holds no raw ids: `team_key` and `member_key` are salted
+  SHA-256 hashes made inside the functions (salt = hash of the shared session key, passed by the gateway),
+  enough for equality only. PK `(team_key, call_id)`: settle, extend and the upsert are scoped to the
+  caller's team, so team A can never end or overwrite team B's hold (db test).
 - **Atomic reserve, one round trip.** `kobe_reserve_budget(...)` (plpgsql, invoker's rights) takes
   transaction advisory locks (team, then install; fixed order, no deadlock), then sums live reservations and
   inserts. plpgsql takes a new snapshot per statement, so the sums see every reservation committed by an
@@ -24,8 +27,12 @@ replicas share them. Migration PR first (schema, RLS, probe fixture, SQL functio
   10 min). Every read filters `expires_at > clock_timestamp()`, so an expired row never counts, with or
   without a sweep. A crashed replica's rows therefore free themselves.
 - **Settle.** Call ends without a ledger row: `kobe_settle_budget` deletes. With a row on its way: expiry is
-  shortened to 30 s (the old settle timeout); the sink's `onWritten` then deletes. One statement each, ids as
-  a batch.
+  shortened to 30 s (the old settle timeout); the sink's `onWritten` then shortens it to the budget cache TTL
+  (`settleHoldMs`) instead of deleting, so the hold keeps counting until other replicas' cached spend shows
+  the row (spend hints usually do that sooner). One statement each, ids as a batch.
+- **Long calls: heartbeat (chosen over a TTL > max duration; the gateway has no max call duration).** While
+  a call runs, the gate calls `kobe_extend_budget` every TTL/2 (never revives an expired hold). The TTL can
+  then stay short (default 10 min); a crashed replica stops beating and its holds expire within the TTL.
 - **Sweep.** No separate sweeper: reserve deletes the team's rows (and install rows) expired for over a
   minute, under its locks. The index on `(team_id, expires_at)` keeps it cheap.
 - **Team context.** The functions set `kobe.team_id` themselves (same transaction-local setting as
@@ -40,10 +47,6 @@ replicas share them. Migration PR first (schema, RLS, probe fixture, SQL functio
 
 ## Open questions (for Chris or the coordinator)
 
-- A call running longer than the TTL loses its reservation while still running (no heartbeat). 10 min is
-  well above the idle timeout; add a heartbeat only if long calls show up.
-- `kobe_settle_budget` by call id on the install table has no team check (ids are random UUIDs, the table
-  holds no team data). Acceptable?
 - Reserving sets the team context inside the function rather than via `withTeam()` (latency). Say if you
   want `withTeam()` on this path anyway (about 3 more round trips).
 

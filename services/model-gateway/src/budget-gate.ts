@@ -59,6 +59,8 @@ export class BudgetGate implements CallGate {
   private readonly buckets = new Map<string, Bucket>();
   private readonly reservations: ReservationStore;
   private readonly onError: (err: unknown) => void;
+  private readonly settleHoldMs: number;
+  private readonly heartbeatMs: number | undefined;
   private readonly priceCache: TtlCache<ReadonlyMap<string, ModelPrice>>;
   private readonly now: () => number;
 
@@ -70,6 +72,14 @@ export class BudgetGate implements CallGate {
       readonly maxEntries?: number;
       /** Where reservations live; default: this process's memory (tests, no shared state). */
       readonly reservations?: ReservationStore;
+      /**
+       * How long a settled reservation keeps counting (KOBE-120): the other replicas' cached
+       * spend may not show the call's cost yet. Default 0 (ended at once); production passes
+       * the budget cache TTL.
+       */
+      readonly settleHoldMs?: number;
+      /** Extend the reservations of calls still running this often (a TTL/2 heartbeat). */
+      readonly heartbeatMs?: number;
       /** A reservation could not be ended (it then expires on its own). */
       readonly onError?: (err: unknown) => void;
     },
@@ -77,6 +87,8 @@ export class BudgetGate implements CallGate {
     this.now = options.now ?? Date.now;
     this.reservations = options.reservations ?? new MemoryReservations();
     this.onError = options.onError ?? (() => undefined);
+    this.settleHoldMs = options.settleHoldMs ?? 0;
+    this.heartbeatMs = options.heartbeatMs;
     this.states = new TtlCache<MemberBudgetState>({
       ttlMs: options.ttlMs,
       now: this.now,
@@ -178,15 +190,28 @@ export class BudgetGate implements CallGate {
    * failure to end it is only logged: the reservation then expires by itself.
    */
   private releaser(call: CallContext, callId: string): (written: boolean) => void {
+    // A call still running keeps its reservation alive (no expiry while it streams).
+    const beat =
+      this.heartbeatMs === undefined
+        ? undefined
+        : setInterval(() => {
+            this.reservations.extend(call.teamId, [callId]).catch(this.onError);
+          }, this.heartbeatMs);
+    beat?.unref();
     return (written) => {
+      if (beat) clearInterval(beat);
       const keep = written && call.callId ? SETTLE_TIMEOUT_MS : undefined;
       this.reservations.end(call.teamId, [callId], keep).catch(this.onError);
     };
   }
 
-  /** The ledger rows of these calls were written: their reservations end (cache dropped first). */
+  /**
+   * The ledger rows of these calls were written: their reservations end, after
+   * `settleHoldMs`, so that replicas whose cached spend predates the rows still count them.
+   */
   settle(teamId: string, callIds: readonly string[]): void {
-    this.reservations.end(teamId, callIds).catch(this.onError);
+    const hold = this.settleHoldMs > 0 ? this.settleHoldMs : undefined;
+    this.reservations.end(teamId, callIds, hold).catch(this.onError);
   }
 
   private giveBack(key: string): void {
