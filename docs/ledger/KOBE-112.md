@@ -26,7 +26,7 @@
   id), so Pi is reused and the proxy/server decision hands out the current URL on the next call
   (`decideMcpCall` reads the connector row per call; nothing cached, tested).
 - **Mid-run changes** stay enforced by the per-call decision (KOBE-106): exposure narrowed, connector
-  disabled or removed give deny/404 on the next call of the *running* Pi. Test only, no code change.
+  disabled or removed give deny/404 on the next call of the _running_ Pi. Test only, no code change.
   Not tested here: mid-run grant removal, enforced at the proxy credential fetch (KOBE-108/109).
 - **Orbit export (ac-2):** `agents/orbit/mcp-tools.ts` `orbitMcpToolNames` reuses `buildRunMcp`
   (the same function that builds `run.start.mcp`), so the eval sees exactly the tools a run would
@@ -47,7 +47,7 @@
 - No real-Pi test of the next-run reload: Pi is not installed locally and there is no real-Pi MCP
   harness (see KOBE-111 ledger). The reload is covered with the scripted Pi that records launches
   and agent dirs, which exercises the same `ThreadManager` path.
-- Export tool surface is the team's *current* exposure, not a snapshot at publish time (the
+- Export tool surface is the team's _current_ exposure, not a snapshot at publish time (the
   manifest only freezes connector names). That matches what a run would get now.
 
 ## Evidence (acceptance criteria -> test or command output)
