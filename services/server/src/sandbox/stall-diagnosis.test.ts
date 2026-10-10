@@ -57,9 +57,9 @@ describe("classifyStall", () => {
   it("recognises an attach failure, a scheduling failure and an image pull failure", () => {
     const run = (events: KubeObject[], status: Record<string, unknown> = {}) =>
       classifyStall({ ...base, pod: pod(status), pvc: pvc("Bound"), events }).cause;
-    expect(run([event("Pod", "u-1", "FailedAttachVolume", "volume is not ready for workloads")])).toBe(
-      "volume_attach",
-    );
+    expect(
+      run([event("Pod", "u-1", "FailedAttachVolume", "volume is not ready for workloads")]),
+    ).toBe("volume_attach");
     expect(run([event("Pod", "u-1", "FailedMount", "Unable to attach or mount volumes")])).toBe(
       "volume_attach",
     );
@@ -90,16 +90,24 @@ describe("classifyStall", () => {
   });
 
   it("falls back to unknown with the phases, strips control characters and bounds the text", () => {
-    const d = classifyStall({ ...base, pod: pod({ phase: "Pending" }), pvc: undefined, events: [] });
+    const d = classifyStall({
+      ...base,
+      pod: pod({ phase: "Pending" }),
+      pvc: undefined,
+      events: [],
+    });
     expect(d).toMatchObject({ cause: "unknown", detail: "pod Pending, volume missing" });
     const long = classifyStall({
       ...base,
       pod: pod(),
       pvc: pvc("Bound"),
-      events: [event("Pod", "u-1", "FailedMount", `a\n\u0000${"x".repeat(2000)}`)],
+      events: [
+        event("Pod", "u-1", "FailedMount", `a\n${String.fromCharCode(0)}${"x".repeat(2000)}`),
+      ],
     });
     expect(long.detail.length).toBeLessThanOrEqual(600);
-    expect(long.detail).not.toMatch(/[\n\u0000]/);
+    expect(long.detail).not.toContain("\n");
+    expect(long.detail).not.toContain(String.fromCharCode(0));
   });
 
   it("notes when a container has run before", () => {

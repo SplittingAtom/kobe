@@ -140,6 +140,45 @@ sandbox on a fresh volume, which restores from S3. S3 sync needs `s3.bucket` and
 it a lost node loses those workspaces for good. Conversations are never at risk: Postgres is the
 record of threads and runs.
 
+### Longhorn sizing for 10 GiB strict-local workspaces
+
+A strict-local volume keeps its single replica on the node where its sandbox starts, so that node
+must have room for the whole volume when the pod is scheduled. Longhorn refuses to schedule a
+replica when `(already scheduled + this volume) > (disk size - reserved) x over-provisioning%`, or
+when free space would fall under `storage-minimal-available-percentage`. The default
+over-provisioning is 100%, which counts every thin volume at its full size: ten 10 GiB workspaces
+promise 100 GiB although each holds a few hundred MiB. On a kobe-gate1 test cluster this left a
+sandbox in `ContainerCreating` for over 30 minutes (`LocalReplicaSchedulingFailure: insufficient
+storage` while 419 GB were free).
+
+- Set Longhorn's `storage-over-provisioning-percentage` to at least **200** (Longhorn UI: Settings,
+  or `kubectl -n longhorn-system edit settings.longhorn.io storage-over-provisioning-percentage`).
+  Workspace volumes are thin, so this is safe as long as real usage is watched.
+- Keep `storage-minimal-available-percentage` at 25 or more (the default). It is the guard that
+  matters once over-provisioning is raised: Longhorn stops placing replicas on a disk with less
+  than that share free, whatever has been promised.
+- Rule of thumb for the promise: `users x teams x workspace size` spread across the nodes you
+  want sandboxes on, should stay under `disk x (over-provisioning / 100)` per node; size real disks
+  for what workspaces actually hold, not for their 10 GiB limit.
+- Longhorn must be able to place a replica on every node that can run sandboxes. A node that is
+  cordoned in Longhorn (scheduling disabled) or full cannot start strict-local sandboxes.
+
+**When a sandbox does not start.** The server waits for a woken sandbox's pod to be Ready for the
+wake timeout (30 s). If it is not, the run fails with `workspace_unavailable` ("Your workspace
+could not be started because the cluster could not provide it. Ask your install admin to check the
+cluster."). Members never see node or volume names. Install admins find the reason in the install
+audit log: filter on action `sandbox.wake_stalled` (`GET /v1/install/audit?action=sandbox.wake_stalled`),
+whose `detail` is the pod's or volume's own event (`FailedAttachVolume`, `FailedScheduling`,
+`LocalReplicaSchedulingFailure`, `ImagePullBackOff`, ...) and `cause` one of `volume_unschedulable`,
+`volume_attach`, `scheduling`, `image_pull`, `unknown`. The server log has the same line ("sandbox
+not ready within the wake timeout", level error).
+
+For a strict-local workspace that has never come up, the server also retries **once**: it deletes
+the unused pod and volume claim so the scheduler can pick another node (audit action
+`sandbox.volume_retried`), then waits another wake timeout. A volume whose sandbox ever came up, or
+whose pod ever ran a container, is never deleted by this. The server needs read access to events
+in team namespaces for this (included in the chart's role).
+
 ## Egress
 
 Sandboxes reach the internet only through the **egress proxy** (spec D28), and only over HTTPS:

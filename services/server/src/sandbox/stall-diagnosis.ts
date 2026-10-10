@@ -43,7 +43,8 @@ const text = (v: unknown): string => (typeof v === "string" ? v : "");
 
 function toEvent(o: KubeObject): KubeEvent {
   const involved = (o["involvedObject"] ?? {}) as Record<string, unknown>;
-  const stamp = text(o["lastTimestamp"]) || text(o["eventTime"]) || text(o.metadata.creationTimestamp);
+  const stamp =
+    text(o["lastTimestamp"]) || text(o["eventTime"]) || text(o.metadata.creationTimestamp);
   return {
     reason: text(o["reason"]),
     message: text(o["message"]),
@@ -65,7 +66,8 @@ function containerStates(pod: KubeObject | undefined): { waiting: string[]; ran:
   for (const c of all) {
     const state = c["state"] ?? {};
     const last = c["lastState"] ?? {};
-    if (state["running"] || state["terminated"] || last["running"] || last["terminated"]) ran = true;
+    if (state["running"] || state["terminated"] || last["running"] || last["terminated"])
+      ran = true;
     const reason = text(state["waiting"]?.["reason"]);
     if (reason) waiting.push(reason);
   }
@@ -73,8 +75,12 @@ function containerStates(pod: KubeObject | undefined): { waiting: string[]; ran:
 }
 
 const clean = (s: string): string =>
-  // eslint-disable-next-line no-control-regex
-  s.replace(/[\u0000-\u001f\u007f]+/g, " ").trim().slice(0, MAX_DETAIL);
+  [...s]
+    .map((ch) => (ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127 ? " " : ch))
+    .join("")
+    .replace(/ {2,}/g, " ")
+    .trim()
+    .slice(0, MAX_DETAIL);
 
 /** Pure classification of what was read (tested with fake API responses). */
 export function classifyStall(input: {
@@ -112,7 +118,7 @@ export function classifyStall(input: {
   const pull = pick(IMAGE_PULL) ?? undefined;
   const pullWaiting = waiting.find((w) => IMAGE_PULL.test(w));
   if (pull || pullWaiting) {
-    return { ...base, cause: "image_pull", detail: clean(pull ? line(pull) : pullWaiting ?? "") };
+    return { ...base, cause: "image_pull", detail: clean(pull ? line(pull) : (pullWaiting ?? "")) };
   }
   const unschedulable = pick(/FailedScheduling/);
   if (unschedulable) return { ...base, cause: "scheduling", detail: clean(line(unschedulable)) };

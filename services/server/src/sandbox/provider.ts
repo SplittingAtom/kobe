@@ -716,7 +716,8 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     const deadline = now() + podWaitTimeoutMs;
     for (;;) {
       const found = await locate(team, userId);
-      if (!found) throw new SandboxProvisioningError(`Sandbox for ${teamNamespaceName(team)} vanished`);
+      if (!found)
+        throw new SandboxProvisioningError(`Sandbox for ${teamNamespaceName(team)} vanished`);
       if (isPodReady(await kube.get(POD(found.namespace, found.podName)))) return { ready: true };
       if (now() >= deadline) {
         const stall = await diagnoseStall(kube, found.namespace, found.podName, found.pvcName);
@@ -748,7 +749,9 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
       await kube.patch(
         SANDBOX(namespace, sandbox.metadata.name),
         { metadata: { annotations: { [ANNOTATION_VOLUME_RETRY]: "true" } } },
-        sandbox.metadata.resourceVersion ? { resourceVersion: sandbox.metadata.resourceVersion } : {},
+        sandbox.metadata.resourceVersion
+          ? { resourceVersion: sandbox.metadata.resourceVersion }
+          : {},
       );
     } catch (err) {
       if (isKubeStatus(err, 409)) return "declined";

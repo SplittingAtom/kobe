@@ -54,12 +54,7 @@ const podEvent = (kube: FakeKube, pod: string, reason: string, message: string) 
     lastTimestamp: "2026-10-09T10:00:00Z",
   });
 const attachFailure = (kube: FakeKube, pod: string) =>
-  podEvent(
-    kube,
-    pod,
-    "FailedAttachVolume",
-    "LocalReplicaSchedulingFailure: insufficient storage",
-  );
+  podEvent(kube, pod, "FailedAttachVolume", "LocalReplicaSchedulingFailure: insufficient storage");
 
 const exists = (kube: FakeKube, kind: string, name: string) =>
   kube.peek({ apiVersion: "v1", kind, name, namespace: NS }) !== undefined;
@@ -120,9 +115,7 @@ describe("retryStalledVolume", () => {
     const { kube, provider, handle } = await setup({
       podStatus: {
         phase: "Pending",
-        containerStatuses: [
-          { state: { waiting: {} }, lastState: { terminated: { exitCode: 1 } } },
-        ],
+        containerStatuses: [{ state: { waiting: {} }, lastState: { terminated: { exitCode: 1 } } }],
       },
     });
     attachFailure(kube, handle.sandboxName);

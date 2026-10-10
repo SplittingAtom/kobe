@@ -109,7 +109,13 @@ export function createSandboxLifecycle(options: LifecycleOptions): SandboxLifecy
   const { db, provider } = options;
   const log = options.log ?? rootLogger.child({ component: "sandbox-lifecycle" });
   const batch = options.batchPerTeam ?? 20;
-  const metrics: LifecycleMetrics = { hibernated: 0, woken: 0, wakeFailures: 0, stalledWakes: 0, wakeMs: [] };
+  const metrics: LifecycleMetrics = {
+    hibernated: 0,
+    woken: 0,
+    wakeFailures: 0,
+    stalledWakes: 0,
+    wakeMs: [],
+  };
   /** One wake per sandbox per process; runs that joined it get its `sandbox.waking` too. */
   const inflight = new Map<string, InflightWake>();
 
