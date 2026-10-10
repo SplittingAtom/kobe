@@ -1,4 +1,5 @@
 import type { ForwardDestination } from "./audit/forward/types.js";
+import { DEFAULT_TIMEOUT_MS } from "./connectors/oauth/http.js";
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
   PROVIDER_KEY_PURPOSE,
@@ -320,7 +321,16 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     router: sandboxWire.router,
     onRunEnded: (event) => runs.onRunEnded(event),
   });
+  const connectorUrlPolicy: ConnectorUrlPolicy = {
+    allowHttp: false,
+    allowedPorts: DEFAULT_ALLOWED_PORTS,
+    allowedInternalCidrs: [],
+    deniedCidrs: [],
+    resolve: resolveAll,
+    ...options.connectors,
+  };
   const mcp = createMcpService({
+    oauthIo: { policy: connectorUrlPolicy, timeoutMs: DEFAULT_TIMEOUT_MS },
     db: database.db,
     policy: policySources,
     runContext,
@@ -378,14 +388,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     runs,
     runAgents,
     mcp,
-    connectorUrlPolicy: {
-      allowHttp: false,
-      allowedPorts: DEFAULT_ALLOWED_PORTS,
-      allowedInternalCidrs: [],
-      deniedCidrs: [],
-      resolve: resolveAll,
-      ...options.connectors,
-    },
+    connectorUrlPolicy,
     connectorProbe: options.connectorProbe ?? NO_PROBE,
     approvals,
     envelope: options.envelope,
