@@ -1971,6 +1971,10 @@ SH
     contains "share_file: the run that wrote the file completed" '^terminal=run.completed$' "$sf_out"
     sf_out=$(chat_run "tool: share_file {\"path\":\"shared-report.txt\",\"description\":\"E2E report\"}" 300000 "" "" "$sf_thread" 1)
     printf '     share_file: %s\n' "$(printf '%s' "$sf_out" | tr '\n' ' ' | cut -c1-500)"
+    if printf '%s' "$sf_out" | grep -q "Policy could not be evaluated"; then # KOBE-242: the cause is in the server log
+      $KUBECTL -n "$NS" logs -l app.kubernetes.io/component=server -c server --since=3m --tail=-1 2>&1 \
+        | grep -E "policy|lock timeout|approval" | tail -n 20 | cut -c1-600 | sed 's/^/     server: /' || true
+    fi
     contains "share_file: the run completed" '^terminal=run.completed$' "$sf_out"
     contains "share_file: the event stream carried file.shared (id, name, size)" \
       "^file_events=[0-9a-f-]{36}:shared-report.txt:$((${#share_text} + 1))\$" "$sf_out"
