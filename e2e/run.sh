@@ -2471,6 +2471,11 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && "$(type -t chat_run)" == function && -n "$
   sleep $((ROT_TTL + 2))
   rot2=$(chat_run 'tool: mcp__e2e_fake__get_thing {"id":"102"}' 240000 "" "$ROT_AGENT" "$rot_thread" 1)
   printf '     rotation, after: %s\n' "$(printf '%s' "$rot2" | grep -v '^text=' | tr '\n' ' ' | cut -c1-300)"
+  # Diagnostics (not asserted): what the owner's sandbox agent and the server say about MCP.
+  for rot_pod in $($KUBECTL -n "$TEAM_NS" get pods -o name 2>/dev/null); do
+    $KUBECTL -n "$TEAM_NS" logs "$rot_pod" -c agent --tail=-1 2>/dev/null | grep -i 'mcp' | tail -n 8 | cut -c1-300 | sed "s|^|     $rot_pod agent: |" || true
+    $KUBECTL -n "$TEAM_NS" exec "$rot_pod" -c agent -- sh -c 'for d in /run/kobe-pi/pi-*/agent; do ls -l $d; cat $d/mcp.json; done' 2>&1 | head -30 | sed "s|^|     $rot_pod fs: |" || true
+  done
   contains "after the rotation: the same thread's MCP call succeeded" '^terminal=run.completed$' "$rot2"
   contains "after the rotation: the model saw the fake server's answer" 'tool said: .*fake:get_thing' "$rot2"
   contains "each call ran exactly once on the fake MCP server (a 404 retry never runs the call twice)" '^2$' "$(( $(rot_calls) - rot_before ))"
