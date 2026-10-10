@@ -60,4 +60,19 @@ executor and the fake model's `bash: <command>` tool call. Extra sections live i
 
 ### Numbers (CI, k3d, gVisor)
 
-To be filled from the `executor` and `suite` shard logs ("first-token (executor on|off)").
+From workflow_dispatch run 38019583969 (N=8 hibernated-to-first-token trials per shard):
+
+| Metric                                  | Executor off (`suite`) | Executor on (`executor`) |
+| --------------------------------------- | ---------------------- | ------------------------ |
+| first token p50 / p95 (ms)              | 4341 / 5222            | 3972 / 4939              |
+| first tool call after wake, terminal_ms | p50 2337, p95 2424     | p50 2110, p95 2173       |
+| executor RSS                            | n/a                    | 138748 KiB (Pi 177868)   |
+
+On is not slower (differences are runner noise). Both pass the 8000 ms p95 gate.
+
+## Executor shard failure (run 38019583969)
+
+Test bug, not a product bug. The restored-file check expected `$content writable`, but `cat` prints the
+file (written with `printf`, no trailing newline) directly followed by `writable`, so the tool said
+`kobe-168 <ts> <n>writable`: the file WAS restored and readable. Fixed the expectation in
+`e2e/executor/trials.sh`. Every other executor-shard check passed.
