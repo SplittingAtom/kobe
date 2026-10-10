@@ -32,6 +32,8 @@ import { installConnectorsRoutes } from "./routes/install-connectors.js";
 import { installSkillBlocklistRoutes } from "./routes/install-skill-blocklist.js";
 import { installRolesRoutes } from "./routes/install-roles.js";
 import { installSettingsRoutes } from "./routes/install-settings.js";
+import { installWebSearchRoutes } from "./routes/install-web-search.js";
+import { teamWebSearchRoutes } from "./routes/team-web-search.js";
 import { installTeamsRoutes } from "./routes/install-teams.js";
 import { installUsersRoutes } from "./routes/install-users.js";
 import { meRoutes } from "./routes/me.js";
@@ -137,6 +139,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/team/egress", teamEgressRoutes(deps));
   api.route("/team/models", teamModelsRoutes(deps));
   api.route("/team/connectors", teamConnectorsRoutes(deps));
+  api.route("/team/web-search", teamWebSearchRoutes(deps));
   api.route("/team/usage", teamUsageRoutes(deps));
   api.route("/team/budgets", teamBudgetsRoutes(deps));
   api.route("/team/break-glass", teamBreakGlassRoutes(deps));
@@ -165,6 +168,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/approvals", approvalRoutes(deps));
   api.route("/egress/requests", egressRequestRoutes(deps));
   api.route("/install/settings", installSettingsRoutes(deps));
+  api.route("/install/web-search", installWebSearchRoutes(deps));
   api.route("/install/teams", installTeamsRoutes(deps));
   api.route("/install/roles", installRolesRoutes(deps));
   api.route("/install/policy", installPolicyRoutes(deps));

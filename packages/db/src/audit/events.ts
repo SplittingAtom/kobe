@@ -1091,6 +1091,17 @@ export const AUDIT_EVENTS = {
   "mcp.grant.replaced": event("team", { connectorId: id, name: z.string().max(64) }),
   /** A user removed their API key for a connector. */
   "mcp.grant.removed": event("team", { connectorId: id, name: z.string().max(64) }),
+  // ── web search (KOBE-113): provider and switches only, never the key or its hint ──
+  /** An install admin set the web search provider, its enabled switch, or replaced its key. */
+  "websearch.install.configured": event("install", {
+    provider: z.enum(["brave", "tavily", "exa"]),
+    enabled: z.boolean(),
+    keyChanged: z.boolean(),
+  }),
+  /** An install admin removed the web search provider (team opt-ins go with it). */
+  "websearch.install.removed": event("install", { provider: z.enum(["brave", "tavily", "exa"]) }),
+  /** A team admin turned web search on or off for the team. */
+  "websearch.team.changed": event("team", { enabled: z.boolean() }),
 } as const;
 
 export type AuditAction = keyof typeof AUDIT_EVENTS;
