@@ -19,8 +19,9 @@
 
 ## Open questions
 
-- A crash between copy and commit leaves unreferenced keys under a thread id that never existed; nothing
-  sweeps those (no `retention_blob_deletions` row). Small and bounded; say if a sweep is wanted.
+- None. A crash between copy and commit leaves unreferenced fork keys (no thread row, no
+  `retention_blob_deletions` row). KOBE-189's orphan sweep should also cover them: they are always
+  `<prefix>teams/<team>/threads/<id>/entries/<64 hex>` where no `threads` row has that id (see `forkedBlobKey`).
 
 ## Evidence
 
