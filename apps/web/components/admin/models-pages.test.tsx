@@ -27,6 +27,7 @@ const KIMI = {
   model: "kimi-k2.7-code",
   label: "Kimi K2.7 Code",
   gateway_model: "ollama/kimi-k2.7-code",
+  input_modalities: ["text"],
   created_at: T,
   updated_at: T,
 };
@@ -42,6 +43,7 @@ const MODELS = { providers: [OLLAMA], catalog: [KIMI], gateway: IN_SYNC, configu
 const LISTED = {
   provider_id: "ollama",
   models: ["glm-5.3", "kimi-k2.7-code"],
+  image_models: ["kimi-k2.7-code"],
   discovery: "ok",
   detail: null,
   truncated: false,
@@ -241,6 +243,79 @@ describe("install: models and providers", () => {
       alias: "glm",
       provider_id: "ollama",
       model: "glm-5.3",
+    });
+  });
+
+  it("prefills image input from what the provider reports, and the admin can change it (KOBE-191)", async () => {
+    const calls = stubApi({
+      "GET /v1/install/models": [200, { ...MODELS, catalog: [] }],
+      "GET /v1/install/models/providers/ollama/models": [200, LISTED],
+      "POST /v1/install/models/catalog": [201, { model: { ...KIMI, alias: "see" } }],
+    });
+    renderInstall(<InstallModelsPage />);
+    const user = userEvent.setup();
+    const form = await screen.findByRole("form", { name: "Add a catalog model" });
+    await within(form).findByText(/2 models available/);
+    const images = within(form).getByLabelText(/Accepts images/) as HTMLInputElement;
+    expect(images.checked).toBe(false);
+    await user.type(within(form).getByLabelText("Alias"), "see");
+    await user.type(within(form).getByLabelText("Model"), "kimi-k2.7-code");
+    expect(images.checked).toBe(true); // the provider says it takes images
+    await user.click(within(form).getByRole("button", { name: "Add to catalog" }));
+    await screen.findByText(/Published see/);
+    expect(bodyOf(calls.find((c) => c.method === "POST" && c.url.endsWith("/catalog")))).toEqual({
+      alias: "see",
+      provider_id: "ollama",
+      model: "kimi-k2.7-code",
+      input_modalities: ["text", "image"],
+    });
+  });
+
+  it("an admin's own choice is not overridden by the provider's hint", async () => {
+    stubApi({
+      "GET /v1/install/models": [200, { ...MODELS, catalog: [] }],
+      "GET /v1/install/models/providers/ollama/models": [200, LISTED],
+    });
+    renderInstall(<InstallModelsPage />);
+    const user = userEvent.setup();
+    const form = await screen.findByRole("form", { name: "Add a catalog model" });
+    await within(form).findByText(/2 models available/);
+    const images = within(form).getByLabelText(/Accepts images/) as HTMLInputElement;
+    await user.click(images);
+    await user.click(images); // explicitly off
+    await user.type(within(form).getByLabelText("Model"), "kimi-k2.7-code");
+    expect(images.checked).toBe(false);
+  });
+
+  it("shows which models take images and changes it on edit", async () => {
+    const calls = stubApi({
+      "GET /v1/install/models": [
+        200,
+        {
+          ...MODELS,
+          catalog: [KIMI, { ...KIMI, alias: "eye", input_modalities: ["text", "image"] }],
+        },
+      ],
+      "GET /v1/install/models/providers/ollama/models": [200, LISTED],
+      "PATCH /v1/install/models/catalog/kimi": [
+        200,
+        { model: { ...KIMI, input_modalities: ["text", "image"] } },
+      ],
+    });
+    renderInstall(<InstallModelsPage />);
+    const user = userEvent.setup();
+    const catalog = await screen.findByRole("table", { name: /Catalog models/ });
+    expect(within(catalog).getByRole("row", { name: /eye/ }).textContent).toContain("Text, images");
+    expect(within(catalog).getByRole("row", { name: /^kimi/ }).textContent).not.toContain(
+      "Text, images",
+    );
+    await user.click(screen.getByRole("button", { name: "Edit kimi" }));
+    const form = screen.getByRole("form", { name: "Edit kimi" });
+    await user.click(within(form).getByLabelText(/Accepts images/));
+    await user.click(within(form).getByRole("button", { name: "Save kimi" }));
+    await screen.findByText(/Saved kimi/);
+    expect(bodyOf(calls.find((c) => c.method === "PATCH"))).toEqual({
+      input_modalities: ["text", "image"],
     });
   });
 
