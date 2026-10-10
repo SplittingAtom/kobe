@@ -130,7 +130,8 @@ export interface ChatApi {
    */
   undoMemory(
     docId: string,
-    action: { readonly action: "restore"; readonly version: number } | { readonly action: "delete" },
+    action:
+      { readonly action: "restore"; readonly version: number } | { readonly action: "delete" },
   ): Promise<ApiResult<unknown>>;
   /** Your own requests for one domain, newest first. */
   egressRequests(

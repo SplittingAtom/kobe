@@ -19,7 +19,9 @@ import { MemoryDocView } from "./memory-doc";
 function friendly<T>(
   res: Awaited<ReturnType<MemoryApi["list"]>> | { ok: true; status: number; data: T },
 ) {
-  return res.ok ? res : { ...res, error: { ...res.error, message: describeMemoryError(res.error) } };
+  return res.ok
+    ? res
+    : { ...res, error: { ...res.error, message: describeMemoryError(res.error) } };
 }
 
 /**
@@ -44,14 +46,16 @@ export function MemoryPanel({
     <>
       <h1>{title}</h1>
       <p className={styles.hint}>
-        What your agents remembered{target.scope === "project" ? " for this project" : " about you"}.
-        Edit or delete anything you do not want kept. Agents treat this text as untrusted notes.
+        What your agents remembered{target.scope === "project" ? " for this project" : " about you"}
+        . Edit or delete anything you do not want kept. Agents treat this text as untrusted notes.
       </p>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="memory">
         {(data) =>
           data.docs.length === 0 ? (
-            <p>No memory files yet. Your agents add some when you ask them to remember something.</p>
+            <p>
+              No memory files yet. Your agents add some when you ask them to remember something.
+            </p>
           ) : (
             <DocList docs={data.docs} openId={openId} onOpen={setOpenId} />
           )

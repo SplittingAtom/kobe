@@ -53,6 +53,50 @@ export function pretty(input: unknown): string {
   }
 }
 
+interface RememberInput {
+  readonly scope: string;
+  readonly path: string;
+  readonly content: string;
+  readonly mode: string | undefined;
+}
+
+function rememberInput(tool: string, input: unknown): RememberInput | undefined {
+  if (tool !== "remember" || input === null || typeof input !== "object") return undefined;
+  const { scope, path, content, mode } = input as Record<string, unknown>;
+  if (typeof path !== "string" || typeof content !== "string") return undefined;
+  if (scope !== "user" && scope !== "project") return undefined;
+  return { scope, path, content, mode: typeof mode === "string" ? mode : undefined };
+}
+
+/**
+ * The input being approved. A `remember` call (KOBE-158) shows the text exactly as it would be
+ * stored: plain text only (never HTML or markdown, so no links or images), hidden characters as
+ * visible escapes. Anything else is the JSON of the input.
+ */
+function ApprovedInput({ tool, input }: { readonly tool: string; readonly input: unknown }) {
+  const mem = rememberInput(tool, input);
+  if (!mem) {
+    return (
+      <pre className={styles.toolPre} aria-label="Input to approve">
+        {pretty(input)}
+      </pre>
+    );
+  }
+  return (
+    <>
+      <p>
+        Saved to{" "}
+        <strong>{mem.scope === "project" ? "project memory" : "your personal memory"}</strong> in{" "}
+        <span className={styles.toolName}>{visible(mem.path)}</span> (
+        {mem.mode === "append" ? "added to the end of the file" : "replaces the file"}):
+      </p>
+      <pre className={styles.toolPre} aria-label="Memory to store">
+        {visible(mem.content)}
+      </pre>
+    </>
+  );
+}
+
 /** Anything outside printable ASCII in a tool name (lookalike letters, hidden characters). */
 const NON_ASCII = /[^\x20-\x7e]/;
 
@@ -171,9 +215,7 @@ export function ApprovalCard({
       </ul>
       <p className={styles.who}>Exactly this input runs if you allow it:</p>
       {inputState === "ready" ? (
-        <pre className={styles.toolPre} aria-label="Input to approve">
-          {pretty(input)}
-        </pre>
+        <ApprovedInput tool={requested.tool} input={input} />
       ) : inputState === "loading" ? (
         <p className={styles.hint} role="status">
           Loading the exact input…

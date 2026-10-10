@@ -106,7 +106,10 @@ describe("Memory panel (KOBE-158, ac-2)", () => {
 
   it("deletes a file after confirming, and the list refreshes", async () => {
     const calls = stubApi({
-      [`GET ${LIST}`]: [[200, { docs: [summary()] }], [200, { docs: [] }]],
+      [`GET ${LIST}`]: [
+        [200, { docs: [summary()] }],
+        [200, { docs: [] }],
+      ],
       [`GET ${ONE}`]: [200, detail()],
       [`DELETE ${ONE}`]: [204],
     });

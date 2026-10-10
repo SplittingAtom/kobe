@@ -62,9 +62,7 @@ describe("Memory updated chip", () => {
     const user = await remembered({});
     await user.click(screen.getByRole("button", { name: /Undo memory update/ }));
     await screen.findByText("Undone.");
-    expect(memoryCalls().map((r) => `${r.method} ${r.path}`)).toEqual([
-      `DELETE /v1/memory/${DOC}`,
-    ]);
+    expect(memoryCalls().map((r) => `${r.method} ${r.path}`)).toEqual([`DELETE /v1/memory/${DOC}`]);
   });
 
   it("a failed Undo says so and can be tried again", async () => {

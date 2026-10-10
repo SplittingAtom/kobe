@@ -40,7 +40,9 @@ export interface MemoryTarget {
 const enc = encodeURIComponent;
 
 function withProject(target: MemoryTarget): string {
-  return target.scope === "project" && target.projectId ? `&project_id=${enc(target.projectId)}` : "";
+  return target.scope === "project" && target.projectId
+    ? `&project_id=${enc(target.projectId)}`
+    : "";
 }
 
 export interface MemoryApi {
@@ -65,17 +67,20 @@ export function createMemoryApi(teamId: string, fetchFn?: typeof fetch): MemoryA
       apiRequest(`/v1/memory?scope=${target.scope}${withProject(target)}`, { teamId, fetchFn }),
     get: (id) => apiRequest(`/v1/memory/${enc(id)}`, { teamId, fetchFn }),
     put: (target, path, content, expectedVersion) =>
-      apiRequest(`/v1/memory${target.scope === "project" && target.projectId ? `?project_id=${enc(target.projectId)}` : ""}`, {
-        method: "PUT",
-        json: {
-          scope: target.scope,
-          path,
-          content,
-          ...(expectedVersion === undefined ? {} : { expected_version: expectedVersion }),
+      apiRequest(
+        `/v1/memory${target.scope === "project" && target.projectId ? `?project_id=${enc(target.projectId)}` : ""}`,
+        {
+          method: "PUT",
+          json: {
+            scope: target.scope,
+            path,
+            content,
+            ...(expectedVersion === undefined ? {} : { expected_version: expectedVersion }),
+          },
+          teamId,
+          fetchFn,
         },
-        teamId,
-        fetchFn,
-      }),
+      ),
     remove: (id) => apiRequest(`/v1/memory/${enc(id)}`, { method: "DELETE", teamId, fetchFn }),
     restore: (id, version) =>
       apiRequest(`/v1/memory/${enc(id)}/restore`, {
@@ -88,10 +93,16 @@ export function createMemoryApi(teamId: string, fetchFn?: typeof fetch): MemoryA
 }
 
 /** The words for a failed memory call. */
-export function describeMemoryError(error: { readonly status: number; readonly code: string; readonly message: string }): string {
+export function describeMemoryError(error: {
+  readonly status: number;
+  readonly code: string;
+  readonly message: string;
+}): string {
   if (error.code === "memory_disabled") return "Memory is turned off for this team.";
-  if (error.code === "version_conflict") return "This file changed since you opened it. Reload and try again.";
-  if (error.code === "index_full") return "The memory index is full (200 lines). Remove something first.";
+  if (error.code === "version_conflict")
+    return "This file changed since you opened it. Reload and try again.";
+  if (error.code === "index_full")
+    return "The memory index is full (200 lines). Remove something first.";
   if (error.status === 404) return "This memory file no longer exists.";
   return error.message;
 }

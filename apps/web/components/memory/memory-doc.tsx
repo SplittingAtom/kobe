@@ -111,11 +111,15 @@ function Loaded({
       <h2>{shown}</h2>
       <p className={styles.hint}>
         Current version {doc.currentVersion}
-        {current ? `, ${WRITTEN_BY[current.source]}` : ""}. Updated <DateTime value={doc.updatedAt} />.
+        {current ? `, ${WRITTEN_BY[current.source]}` : ""}. Updated{" "}
+        <DateTime value={doc.updatedAt} />.
       </p>
       {draft === null ? (
         <>
-          <pre aria-label="Memory content" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+          <pre
+            aria-label="Memory content"
+            style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
+          >
             {visible(doc.content)}
           </pre>
           {hasHidden(doc.content) && (
@@ -175,9 +179,13 @@ function Loaded({
 
 /** Turns a failed result's message into words for people. */
 function explain<T>(
-  res: { ok: true; status: number; data: T } | { ok: false; error: { status: number; code: string; message: string } },
+  res:
+    | { ok: true; status: number; data: T }
+    | { ok: false; error: { status: number; code: string; message: string } },
 ) {
-  return res.ok ? res : { ...res, error: { ...res.error, message: describeMemoryError(res.error) } };
+  return res.ok
+    ? res
+    : { ...res, error: { ...res.error, message: describeMemoryError(res.error) } };
 }
 
 function History({

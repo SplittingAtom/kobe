@@ -13,6 +13,7 @@ import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
 import styles from "../admin.module.css";
+import { MemorySwitchesSection } from "./memory-switches";
 import { WebSearchSection } from "./web-search-form";
 
 /**
@@ -30,6 +31,7 @@ export function SettingsPage() {
             <SettingsForm settings={settings} onSaved={reload} />
             <AuditPrivacyForm settings={settings} onSaved={reload} />
             <WebSearchSection />
+            <MemorySwitchesSection />
           </>
         )}
       </ResourceView>
