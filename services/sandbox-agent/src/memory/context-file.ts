@@ -13,6 +13,8 @@ export const MEMORY_FILE_ENV = "KOBE_MEMORY_FILE";
 export interface MemoryFileContent {
   readonly tools: boolean;
   readonly text: string;
+  /** Project instructions block (KOBE-245); empty for a non-project run. */
+  readonly project: string;
 }
 
 export const isMemoryTemp = (name: string): boolean =>
@@ -30,7 +32,11 @@ export class MemoryContextFile {
   }
 
   write(content: MemoryFileContent): Promise<void> {
-    const text = JSON.stringify({ tools: content.tools, text: content.text });
+    const text = JSON.stringify({
+      tools: content.tools,
+      text: content.text,
+      project: content.project,
+    });
     const temp = `${this.path}.${randomBytes(8).toString("hex")}.tmp`;
     const next = this.#chain.then(async () => {
       try {

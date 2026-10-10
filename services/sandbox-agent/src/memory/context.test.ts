@@ -93,10 +93,18 @@ describe("memoryRunFileContent", () => {
   it("tools on whenever some scope is enabled, text only with index content", () => {
     expect(memoryRunFileContent(ctx()).tools).toBe(true);
     expect(memoryRunFileContent(ctx()).text).toContain("likes tea");
-    expect(memoryRunFileContent(ctx({ indexes: [] }))).toEqual({ tools: true, text: "" });
+    expect(memoryRunFileContent(ctx({ indexes: [] }))).toEqual({
+      tools: true,
+      text: "",
+      project: "",
+    });
   });
   it("memory off, absent or unreadable: no tools and no text", () => {
-    expect(memoryRunFileContent({ scopes: [], indexes: [] })).toEqual({ tools: false, text: "" });
-    expect(memoryRunFileContent(undefined)).toEqual({ tools: false, text: "" });
+    expect(memoryRunFileContent({ scopes: [], indexes: [] })).toEqual({
+      tools: false,
+      text: "",
+      project: "",
+    });
+    expect(memoryRunFileContent(undefined)).toEqual({ tools: false, text: "", project: "" });
   });
 });

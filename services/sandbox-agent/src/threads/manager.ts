@@ -140,7 +140,11 @@ export class ThreadManager {
       try {
         await thread.attachRun(frame.run_id, model, frame.run_token?.token);
         // The run's memory (KOBE-157): its own file, so a changed index never restarts Pi.
-        await thread.attachMemory(frame.memory);
+        // Project instructions (KOBE-245) only for an agent that announced `projects`.
+        await thread.attachMemory(
+          frame.memory,
+          this.#options.projectTools ? frame.project : undefined,
+        );
       } catch (error) {
         thread.endRun();
         return fail("pi_unavailable", `model file not written: ${(error as Error).message}`);
