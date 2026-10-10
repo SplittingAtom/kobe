@@ -47,8 +47,8 @@ for d in /run/kobe-pi/*; do
     *)
       cat "$d/model.json" >/dev/null 2>&1 && model_ok=$((model_ok + 1))
       ls "$d/agent" >/dev/null 2>&1 && agent_ls_ok=$((agent_ls_ok + 1))
-      { : >"$d/agent/settings.json"; } 2>/dev/null && agent_w_ok=$((agent_w_ok + 1))
-      { : >"$d/planted"; } 2>/dev/null && top_w_ok=$((top_w_ok + 1))
+      { true >"$d/agent/settings.json"; } 2>/dev/null && agent_w_ok=$((agent_w_ok + 1))
+      { true >"$d/planted"; } 2>/dev/null && top_w_ok=$((top_w_ok + 1))
       ;;
   esac
 done
@@ -66,11 +66,11 @@ for d in /tmp/kobe-pi-*; do
   [ -d "$d" ] || continue
   priv=$((priv + 1))
   for s in home tmp; do
-    { : >"$d/$s/planted"; } 2>/dev/null && priv_w=$((priv_w + 1))
+    { true >"$d/$s/planted"; } 2>/dev/null && priv_w=$((priv_w + 1))
     mkdir "$d/$s/planted.d" 2>/dev/null && priv_w=$((priv_w + 1))
     ls "$d/$s" >/dev/null 2>&1 && priv_ls=$((priv_ls + 1))
   done
-  { : >"$d/planted"; } 2>/dev/null && priv_w=$((priv_w + 1))
+  { true >"$d/planted"; } 2>/dev/null && priv_w=$((priv_w + 1))
 done
 printf ' private_dirs=%s private_write_ok=%s' "$priv" "$priv_w"
 # A "Full output" log of the tool stays readable to the read tool: tmp is listable, home is not.
