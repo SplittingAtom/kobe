@@ -16,6 +16,7 @@ import {
   projectSchema,
   projectSlugSchema,
   proposeProjectFileInputSchema,
+  projectErrorCodeSchema,
   runProjectContextSchema,
   runStartFrameSchema,
   shareThreadRequestSchema,
@@ -225,5 +226,11 @@ describe("propose_project_file", () => {
       error: { code: "future", message: "m" },
     };
     expect(decodeServerFrame(JSON.stringify(fail)).ok).toBe(true);
+  });
+});
+
+describe("project_in_use error code (KOBE-161)", () => {
+  it("is a known project error code", () => {
+    expect(projectErrorCodeSchema.safeParse("project_in_use").success).toBe(true);
   });
 });
