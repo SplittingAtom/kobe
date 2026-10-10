@@ -3,7 +3,7 @@ import {
   type ScheduleRecurrence,
   type ScheduleResponse,
 } from "@kobe/protocol";
-import { TEAM_ID_SETTING, and, desc, eq, schedules, sql, type KobeTx } from "@kobe/db";
+import { and, desc, eq, schedules, sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import { resolveAgentPin } from "../agents/versions.js";
 import { recordAudit } from "../audit/record.js";
 import { nextOccurrence, recurrenceToCron } from "./recurrence.js";
@@ -12,8 +12,8 @@ import { nextOccurrence, recurrenceToCron } from "./recurrence.js";
  * Schedules repository (KOBE-173, spec D32). Every function runs inside `withTeam()` for the
  * request's team; `team_id` is still stated in each query. The per-user cap of 10 active
  * schedules spans ALL of a user's teams, which RLS hides from any one team's transaction, so
- * `activeSchedulesOf` counts team by team (switching the transaction's team setting) while
- * `lockUserSchedules` serializes every cap check and activation of that user.
+ * other teams are counted by `countActiveElsewhere` (one `withTeam()` each) while
+ * `withUserScheduleLock` serializes every cap check and activation of that user.
  */
 
 type Row = typeof schedules.$inferSelect;
@@ -49,17 +49,7 @@ export async function agentRunnable(
   return (await resolveAgentPin(tx, viewer, agentId)).ok;
 }
 
-/**
- * Serializes cap checks and activations of one user across all teams and connections: a
- * transaction-scoped advisory lock keyed by the user id, held until commit.
- */
-export async function lockUserSchedules(tx: KobeTx, userId: string): Promise<void> {
-  await tx.execute(
-    sql`SELECT pg_advisory_xact_lock(hashtextextended(${`kobe.schedules:${userId}`}, 0))`,
-  );
-}
-
-async function countActiveHere(tx: KobeTx, teamId: string, userId: string): Promise<number> {
+export async function countActiveHere(tx: KobeTx, teamId: string, userId: string): Promise<number> {
   const [row] = await tx
     .select({ n: sql<number>`count(*)::int` })
     .from(schedules)
@@ -70,25 +60,17 @@ async function countActiveHere(tx: KobeTx, teamId: string, userId: string): Prom
 }
 
 /**
- * The user's active schedules over `currentTeamId` and `otherTeamIds`. The transaction's team
- * setting is switched to each other team for its count and restored to `currentTeamId` after.
- * Call after `lockUserSchedules`.
+ * The user's active schedules in `teamIds`, one `withTeam()` per team (the only way the team is
+ * ever set). Callers needing a stable number hold `withUserScheduleLock` around the whole check.
  */
-export async function activeSchedulesOf(
-  tx: KobeTx,
+export async function countActiveElsewhere(
+  db: KobeDb,
   userId: string,
-  currentTeamId: string,
-  otherTeamIds: readonly string[],
+  teamIds: readonly string[],
 ): Promise<number> {
-  let total = await countActiveHere(tx, currentTeamId, userId);
-  try {
-    for (const teamId of otherTeamIds) {
-      if (teamId === currentTeamId) continue;
-      await tx.execute(sql`SELECT set_config(${TEAM_ID_SETTING}, ${teamId}, true)`);
-      total += await countActiveHere(tx, teamId, userId);
-    }
-  } finally {
-    await tx.execute(sql`SELECT set_config(${TEAM_ID_SETTING}, ${currentTeamId}, true)`);
+  let total = 0;
+  for (const teamId of teamIds) {
+    total += await withTeam(db, teamId, (tx) => countActiveHere(tx, teamId, userId));
   }
   return total;
 }

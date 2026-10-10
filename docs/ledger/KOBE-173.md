@@ -23,14 +23,17 @@ audit events `schedule.*`, thread summaries gain `schedule_id`.
   `invalid_timezone`; other bad bodies, ids and queries are 400 `invalid_request`. `agent_not_runnable` uses
   `resolveAgentPin` (the thread-start rule: visible to the user in the team, active, published).
   A cron that never fires (Feb 31) is `invalid_recurrence`.
-- **Cap (race-safe, no migration):** every cap check and activation (create active, PATCH `active:true`, resume)
-  runs in one `withTeam` transaction that first takes `pg_advisory_xact_lock(hashtextextended('kobe.schedules:'||owner))`,
-  then counts active schedules in the current team and in each of the owner's other teams (`listMemberships`, read
-  BEFORE the transaction so waiting requests never hold a connection while needing a second one). The count
-  switches the transaction-local `kobe.team_id` per team and restores it, so RLS stays in force. Resume by a
-  team admin locks and counts the schedule owner, not the caller. 12 concurrent creates over two teams -> 10x 201,
-  2x 409 (verified to fail with the lock removed). Inactive schedules are uncapped; no DB backstop (172 open
-  question stands: it would need a SECURITY DEFINER function).
+- **Cap (race-safe, no migration, team set only by `withTeam()`):** every cap check and activation (create active,
+  PATCH `active:true`, resume) runs under `withUserScheduleLock` (`schedules/user-lock.ts`): an in-process queue per
+  user and at most 4 concurrent holders (so waiters cannot starve the 10-connection pool), then an outer transaction
+  holding `pg_advisory_xact_lock(hashtextextended('kobe.schedules:'||owner))` across replicas. Inside it: the owner's
+  other teams (`listMemberships`, read before the lock) are counted with one `withTeam()` each, then the active
+  team's own `withTeam()` transaction counts, checks and inserts; it commits before the lock is released. Resume by
+  a team admin locks and counts the owner. 12 concurrent creates over two teams -> 10x 201, 2x 409. Inactive
+  schedules are uncapped; no DB backstop (it would need a SECURITY DEFINER function). A team admin hitting the cap
+  on someone else's resume gets only `schedule_cap_reached` (no `active_count`/`limit`).
+- Admin pause is sticky: an owner's PATCH `active:false` never clears `paused_by=team_admin`; owner resume or
+  PATCH `active:true` of such a schedule is 403 `paused_by_team_admin`; only an admin resumes it.
 - `next_due_at`: computed on create (active), on PATCH of recurrence/tz while active, on activation; null while
   inactive. `schedules.cron` is the derived cron (`recurrenceToCron`).
 - Recurrence engine `schedules/recurrence.ts`: pure, `Intl` based, **no tz library** (none in the repo; croner and
@@ -45,6 +48,8 @@ audit events `schedule.*`, thread summaries gain `schedule_id`.
 
 ## Not done / for later
 
+- KOBE-174: re-check the agent pin (`resolveAgentPin`: visible, active, published) at FIRE time; the store keeps only
+  `agent_id`, so an agent suspended or unpublished after creation must not run.
 - Firing, `last_run_id`, `last_fired_at`: KOBE-174. Team-removal/deactivation pausing (`paused_by=deactivation`):
   nothing sets it yet; belongs with the runner or offboarding.
 - OpenAPI path entries for `/v1/schedules` are not added (only the thread schema change).

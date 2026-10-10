@@ -302,6 +302,26 @@ describe("CRUD (ac-1)", () => {
   });
 });
 
+describe("team admin pause cannot be undone by the owner (review fix)", () => {
+  it("owner PATCH active:false keeps paused_by; owner cannot resume; admin can", async () => {
+    const res = await create("carol", financeAgent);
+    const id = res.json.schedule_id as string;
+    const paused = await as.admin.post(`/v1/schedules/${id}/pause`);
+    expect(paused.json).toMatchObject({ active: false, paused_by: "team_admin" });
+    const again = await as.carol.request("PATCH", `/v1/schedules/${id}`, { active: false });
+    expect(again.status, JSON.stringify(again.json)).toBe(200);
+    expect(again.json).toMatchObject({ active: false, paused_by: "team_admin" });
+    expect((await as.carol.post(`/v1/schedules/${id}/resume`)).status).toBe(403);
+    expect((await as.carol.request("PATCH", `/v1/schedules/${id}`, { active: true })).status).toBe(
+      403,
+    );
+    expect((await as.carol.get(`/v1/schedules/${id}`)).json).toMatchObject({ active: false });
+    const resumed = await as.admin.post(`/v1/schedules/${id}/resume`);
+    expect(resumed.json).toMatchObject({ active: true, paused_by: null });
+    await as.carol.request("DELETE", `/v1/schedules/${id}`);
+  });
+});
+
 describe("cap of 10 active schedules per user across teams (ac-2)", () => {
   it("counts every team, refuses the 11th and frees a slot on deactivation", async () => {
     const made: { team: Person; id: string }[] = [];
@@ -353,6 +373,38 @@ describe("cap of 10 active schedules per user across teams (ac-2)", () => {
     const resume = await as.erin.post(`/v1/schedules/${inactive.json.schedule_id}/resume`);
     expect(resume.status, JSON.stringify(resume.json)).toBe(200);
     expect(await activeCount(ids.erin)).toBe(10);
+  });
+
+  it("an admin resuming at the owner's cap learns the code, not the count", async () => {
+    const owner = "dave";
+    await activate(owner, marketing);
+    const made: string[] = [];
+    for (let i = 0; i < MAX_ACTIVE_SCHEDULES_PER_USER; i++) {
+      const r = await as.dave.post("/v1/schedules", body(marketingAgent));
+      expect(r.status, JSON.stringify(r.json)).toBe(201);
+      made.push(r.json.schedule_id);
+    }
+    const extra = await as.dave.post("/v1/schedules", body(marketingAgent, { active: false }));
+    expect(extra.status).toBe(201);
+    // Dave has no admin here; make alice-like admin via erin in marketing? Use SQL role change.
+    await adminPg.query(
+      `UPDATE team_members SET role = 'team_admin' WHERE team_id = $1 AND user_id = $2`,
+      [marketing, ids.erin],
+    );
+    await adminPg.query(`UPDATE schedules SET paused_by = 'team_admin' WHERE id = $1`, [
+      extra.json.schedule_id,
+    ]);
+    await activate("erin", marketing);
+    const res = await as.erin.post(`/v1/schedules/${extra.json.schedule_id}/resume`);
+    expect(res.status).toBe(409);
+    expect(res.json.code).toBe("schedule_cap_reached");
+    expect(res.json).not.toHaveProperty("active_count");
+    expect(res.json).not.toHaveProperty("limit");
+    await adminPg.query(
+      `UPDATE team_members SET role = 'builder' WHERE team_id = $1 AND user_id = $2`,
+      [marketing, ids.erin],
+    );
+    await adminPg.query(`DELETE FROM schedules WHERE user_id = $1`, [ids.dave]);
   });
 
   it("12 concurrent creates across two teams leave at most 10 active", async () => {
