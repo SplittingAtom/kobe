@@ -23,7 +23,9 @@ Most of D23 already existed (KOBE-34/44: `PATCH shared_to_project`, `read_only` 
   author-scoped, so a reader sees none. `GET /v1/threads/:id` gains `read_only` (computed for the caller).
 - **Run event stream:** `canWatchThread(thread, userId, projectIds)` now admits project members while the
   thread is shared and not in Trash; the reader (`event-stream/read.ts`) returns `project_id` and
-  `shared` for the initial check and for periodic revalidation, so unsharing or trashing ends open streams.
+  `shared` for the initial check and for periodic revalidation, so unsharing, trashing or removing a member ends an open reader stream at the next revalidation, which is
+  every 30 s in production (`STREAM_DEFAULTS.revalidateMs`). There is no push hook across replicas (the only
+  NOTIFY channel is per-run event hints), so that window stays; the test uses a 100 ms timer.
 - **Fork** (`threads/fork.ts`, `POST /:id/fork {entry_id?, title?}` -> 201 `{thread_id}`): any reader (or the
   author) copies the root-to-`entry_id` path (default leaf) with the same entry ids; the fork is owned by the
   caller, private, in the source's project if they can still create there (else no project), pinned to the
@@ -31,6 +33,8 @@ Most of D23 already existed (KOBE-34/44: `PATCH shared_to_project`, `read_only` 
   default), model alias kept if the team still enables it, title kept unless given. Workspace files are not
   copied (KOBE-159 note stands). A path containing an offloaded entry (`blob_ref`, > 64 KB) is refused
   `409 entry_offloaded`: blobs live under the source thread's tree and are purged with it.
+- **Share needs a usable project:** enabling the share requires `canCreateInProject` for the owner (still a
+  member who can use it, project not archived); otherwise 404 `project_not_found`. Unsharing is always allowed.
 - **Audit:** `thread.sharing_changed` (adds `visibility`), new `thread.forked` (`threadId`, `sourceThreadId`,
   `projectId`, `entries`; no titles). `docs/audit-log.md` updated; schemas in `packages/db/src/audit/events.ts`.
 

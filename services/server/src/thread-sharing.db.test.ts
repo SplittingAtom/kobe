@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RunFixture } from "./testing/run-fixture.js";
+import { SseReader } from "./testing/sse.js";
 import type { Person } from "./testing/event-stream-fixture.js";
 
 /**
@@ -9,7 +11,7 @@ import type { Person } from "./testing/event-stream-fixture.js";
 const f = new RunFixture();
 
 beforeAll(async () => {
-  await f.setup();
+  await f.setup({ streamTimings: { keepaliveMs: 50, revalidateMs: 100 } });
 });
 afterAll(async () => {
   await f.teardown();
@@ -18,7 +20,7 @@ afterAll(async () => {
 const as = (p: Person) => f.on(0, p);
 
 /** A team with a selected-mode project (author + reader inside, outsider outside) and one run. */
-async function world() {
+async function world(settle = true) {
   const w = await f.world();
   const author = w.owner;
   const reader = await f.member(w.team);
@@ -37,9 +39,9 @@ async function world() {
   const ws = await f.connect(w, 0);
   const runId = await f.message(author, threadId, "hello");
   const start = await ws.started(runId);
-  const entries = ws.reply(start, "world");
+  const entries = ws.reply(start, "world", settle);
   await ws.acked(runId);
-  await f.until(w.team, runId, "completed");
+  if (settle) await f.until(w.team, runId, "completed");
   return {
     w,
     author,
@@ -137,10 +139,26 @@ describe("read-only enforcement", () => {
       await r.post(`/v1/runs/${x.runId}/cancel`, {}),
       await r.post(`/v1/runs/${x.runId}/retry`, {}),
       await r.patch(`/v1/runs/${x.runId}`, { content: "x" }),
+      await r.post(`${t}/share`, { visibility: "private" }),
     ];
     for (const res of attempts) {
       expect([res.status, res.json.code], JSON.stringify(res.json)).toEqual([403, "read_only"]);
     }
+    // Purge is the author's, and an approval is decided by its asker only: both are 404 to a reader.
+    expect((await r.post(`${t}/purge`, {})).status).toBe(404);
+    const approvalId = randomUUID();
+    await f.fx.admin.query(
+      `INSERT INTO approvals (team_id, id, run_id, thread_id, user_id, connection_id, tool_call_id,
+                              tool, input_canonical, risk, reasons, status, expires_at)
+       VALUES ($1, $2, $3, $4, $5, gen_random_uuid(), 'tc-1', 'bash', '{}', 'write', '[]',
+               'pending', now() + interval '1 hour')`,
+      [x.w.team, approvalId, x.runId, x.threadId, x.author.id],
+    );
+    expect((await r.post(`/v1/approvals/${approvalId}`, { decision: "allow" })).status).toBe(404);
+    const pending = await f.fx.admin.query(`SELECT status FROM approvals WHERE id = $1`, [
+      approvalId,
+    ]);
+    expect(pending.rows[0]).toEqual({ status: "pending" });
     // Nothing changed.
     const still = await as(x.author).get(t);
     expect(still.json).toMatchObject({ title: "plan", deleted_at: null });
@@ -209,5 +227,51 @@ describe("fork", () => {
     const missing = await as(x.author).post(url, { entry_id: "nope" });
     expect([missing.status, missing.json.code]).toEqual([404, "entry_not_found"]);
     expect((await as(x.author).post(url, { extra: 1 })).status).toBe(400);
+  });
+});
+
+describe("sharing needs a usable project", () => {
+  it("refuses a removed member and an archived project with the missing-project 404", async () => {
+    const x = await world();
+    const member = await f.member(x.w.team);
+    await as(x.author).post(`/v1/projects/${x.projectId}/members`, { user_id: member.id });
+    const made = await as(member).post("/v1/threads", { project_id: x.projectId });
+    const id = made.json.thread_id as string;
+    const share = `/v1/threads/${id}/share`;
+    await as(x.author).delete(`/v1/projects/${x.projectId}/members/${member.id}`);
+    const removed = await as(member).post(share, { visibility: "project" });
+    expect([removed.status, removed.json.code]).toEqual([404, "project_not_found"]);
+    // Unsharing is never blocked.
+    expect((await as(member).post(share, { visibility: "private" })).status).toBe(200);
+
+    await as(x.author).post(`/v1/projects/${x.projectId}/members`, { user_id: member.id });
+    await as(x.author).patch(`/v1/projects/${x.projectId}`, { archived: true });
+    const archived = await as(member).post(share, { visibility: "project" });
+    expect([archived.status, archived.json.code]).toEqual([404, "project_not_found"]);
+  });
+});
+
+describe("reader streams", () => {
+  it("lets a reader watch a live run, refuses a non-reader, and ends when access is revoked", async () => {
+    for (const revoke of ["unshare", "removal"] as const) {
+      const x = await world(false);
+      await as(x.author).post(`/v1/threads/${x.threadId}/share`, { visibility: "project" });
+      expect((await f.fx.open(0, x.outsider, x.runId)).status).toBe(404);
+      const res = await f.fx.open(0, x.reader, x.runId);
+      expect(res.status).toBe(200);
+      const sse = new SseReader(res.body);
+      expect((await sse.nextEvent())?.run_id).toBe(x.runId);
+      if (revoke === "unshare") {
+        await as(x.author).post(`/v1/threads/${x.threadId}/share`, { visibility: "private" });
+      } else {
+        await as(x.author).delete(`/v1/projects/${x.projectId}/members/${x.reader.id}`);
+      }
+      // Revalidation (every revalidateMs; 30 s in production) closes the stream.
+      const ended = await Promise.race([
+        sse.rest().then(() => true),
+        new Promise<boolean>((r) => setTimeout(() => r(false), 5_000)),
+      ]);
+      expect(ended, revoke).toBe(true);
+    }
   });
 });
