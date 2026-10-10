@@ -178,7 +178,7 @@ export function projectRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables
     });
     // A new members mode changes who the files are mounted for.
     if (res.ok && body.members_mode !== undefined) {
-      await deps.projectMounts.reconcileProject(viewerOf(c).teamId, c.req.param("id") ?? "");
+      await deps.projectMounts.reconcileTeam(viewerOf(c).teamId);
     }
     return res;
   });

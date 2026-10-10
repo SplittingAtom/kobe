@@ -40,6 +40,8 @@ export interface ProjectMounts {
   reconcileUser(teamId: string, userId: string): Promise<void>;
   reconcileUsers(teamId: string, userIds: readonly string[]): Promise<void>;
   reconcileProject(teamId: string, projectId: string): Promise<void>;
+  /** Every member of the team: a project's members mode changed, so who lost access is not listed by it. */
+  reconcileTeam(teamId: string): Promise<void>;
   /** In the caller's transaction: the same as {@link reconcileUser} (for tests and run start). */
   reconcileUserIn(tx: KobeTx, teamId: string, userId: string): Promise<void>;
 }
@@ -173,6 +175,20 @@ export function createProjectMounts(db: KobeDb, log: Pick<Logger, "warn">): Proj
     },
     reconcileUsers,
     reconcileUser: (teamId, userId) => reconcileUsers(teamId, [userId]),
+    async reconcileTeam(teamId) {
+      if (!sync) return;
+      try {
+        const users = await withTeam(db, teamId, async (tx) => {
+          const res = await tx.execute<{ user_id: string }>(
+            sql`SELECT user_id FROM team_members WHERE team_id = ${teamId}`,
+          );
+          return res.rows.map((r) => r.user_id);
+        });
+        await reconcileUsers(teamId, users);
+      } catch (err) {
+        log.warn({ err, teamId }, "project files: could not list the team to update");
+      }
+    },
     async reconcileProject(teamId, projectId) {
       if (!sync) return;
       try {
