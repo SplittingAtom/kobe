@@ -142,7 +142,9 @@ describe("adding, replacing and removing a key", () => {
     expect(Object.keys(grants[0] ?? {}).sort()).toEqual([
       "connector_id",
       "created_at",
+      "expires_at",
       "hint",
+      "kind",
       "updated_at",
     ]);
   });

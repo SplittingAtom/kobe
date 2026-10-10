@@ -2,6 +2,7 @@ import {
   CAPABILITY_ARTIFACTS,
   CAPABILITY_BUILTIN_SKILLS,
   CAPABILITY_FILES,
+  CAPABILITY_WEB_SEARCH,
   CAPABILITY_RUN_TOKEN,
   CAPABILITY_SKILL_BUNDLES,
   KOBE_EVENT_DROPPED_TYPE,
@@ -17,6 +18,7 @@ import type { PiExit, PiRecord } from "./pi/pi-process.js";
 import { PolicyBroker } from "./policy/broker.js";
 import { ArtifactBroker } from "./tools/broker.js";
 import { FileShareBroker } from "./tools/share-broker.js";
+import { WebSearchBroker } from "./tools/web-search-broker.js";
 import { toolsError } from "./tools/channel.js";
 import type { PushedFile } from "./workspace/sync.js";
 import type { SkillStore } from "./skills/store.js";
@@ -111,6 +113,7 @@ export class Agent {
   readonly #broker: PolicyBroker;
   readonly #artifacts: ArtifactBroker;
   readonly #shares: FileShareBroker;
+  readonly #searches: WebSearchBroker;
   /** Command ids seen on the current connection (ids are not portable across reconnects). */
   #seenCommands = new Set<string>();
   #queuedExits: { runId: string; frame: PiExitedFrameT }[] = [];
@@ -122,6 +125,7 @@ export class Agent {
     this.#outbox = new Outbox(config.outboxMaxBytes);
     this.#broker = new PolicyBroker({ send: (frame) => this.#wire.send(frame) });
     this.#artifacts = new ArtifactBroker({ send: (frame) => this.#wire.send(frame) });
+    this.#searches = new WebSearchBroker({ send: (frame) => this.#wire.send(frame) });
     const pushPath = deps.workspace?.pushPath?.bind(deps.workspace);
     this.#shares = new FileShareBroker({
       root: config.workspaceDir,
@@ -169,6 +173,7 @@ export class Agent {
           this.#broker.failRun(runId, "run ended");
           this.#artifacts.failRun(runId, "run ended");
           this.#shares.failRun(runId, "run ended");
+          this.#searches.failRun(runId, "run ended");
           deps.workspace?.runEnded();
         },
         uiRequest: (threadId, runId, request) => {
@@ -191,6 +196,10 @@ export class Agent {
           this.#broker.failThread(threadId, reason);
         },
         toolsRequest: (threadId, runId, request, reply) => {
+          if (request.op === "web_search") {
+            this.#searches.query(threadId, runId, request, reply);
+            return;
+          }
           if (request.op === "file.share") {
             if (this.#filesEnabled()) this.#shares.share(threadId, runId, request, reply);
             else reply(toolsError(request.id, "not_allowed", "file sharing is not available"));
@@ -202,6 +211,7 @@ export class Agent {
           logger.debug({ thread_id: threadId, reason }, "tools channel closed");
           this.#artifacts.failThread(threadId, reason);
           this.#shares.failThread(threadId, reason);
+          this.#searches.failThread(threadId, reason);
         },
         diagnostic: (threadId, message) => logger.debug({ thread_id: threadId }, message),
         warning: (threadId, message) => logger.warn({ thread_id: threadId }, message),
@@ -217,6 +227,7 @@ export class Agent {
         this.#broker.failAll("connection to Kobe server lost");
         this.#artifacts.failAll("connection to Kobe server lost");
         this.#shares.failAll("connection to Kobe server lost");
+        this.#searches.failAll("connection to Kobe server lost");
         void this.#threads.abortRestores();
       },
       onFatal: (reason) => void this.#onFatal(reason),
@@ -270,6 +281,7 @@ export class Agent {
       ...(this.#deps.config.builtinSkillsDir === undefined ? [] : [CAPABILITY_BUILTIN_SKILLS]),
       ...(this.#deps.toolsExtension === undefined ? [] : [CAPABILITY_ARTIFACTS]),
       ...(this.#filesEnabled() ? [CAPABILITY_FILES] : []),
+      ...(this.#deps.toolsExtension === undefined ? [] : [CAPABILITY_WEB_SEARCH]),
       // The run token reaches Pi through the models extension, so only with model wiring.
       ...(this.#deps.models === undefined ? [] : [CAPABILITY_RUN_TOKEN]),
     ];
@@ -342,6 +354,9 @@ export class Agent {
         return;
       case "file.share_result":
         this.#shares.onResult(frame);
+        return;
+      case "web_search.result":
+        this.#searches.onResult(frame);
         return;
       case "ack":
         this.#outbox.ack(frame.run_id, frame.seq);

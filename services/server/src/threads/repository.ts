@@ -26,6 +26,8 @@ import {
   type DraftPin,
   type PinError,
 } from "../agents/versions.js";
+import { canCreateInProject } from "./references.js";
+import { visibilityOf } from "./share.js";
 import { isModelEnabled } from "../models/team-store.js";
 
 /**
@@ -57,6 +59,8 @@ export type ThreadError =
   | "not_in_trash"
   | "not_in_project"
   | "entry_not_found"
+  | "entry_offloaded"
+  | "project_not_found"
   | "no_agent"
   | "model_not_enabled"
   | PinError;
@@ -131,6 +135,7 @@ export function toSummary(row: SummaryRow): ThreadSummary {
     agent_id: row.agentId,
     agent_version: row.agentVersion,
     shared_to_project: row.sharedToProject,
+    visibility: visibilityOf(row),
     model: row.modelAlias,
     leaf_entry_id: row.leafEntryId,
     last_activity_at: row.lastActivityAt.toISOString(),
@@ -332,6 +337,16 @@ export async function updateThread(
   if (body.shared_to_project !== undefined && locked.thread.projectId === null) {
     return { ok: false, error: "not_in_project" };
   }
+  // Sharing needs the owner to still be a member who can use the (unarchived) project: a removed
+  // member's old thread can't be put back in front of the project. Unsharing is always allowed.
+  if (
+    body.shared_to_project === true &&
+    !locked.thread.sharedToProject &&
+    locked.thread.projectId !== null &&
+    !(await canCreateInProject(tx, viewer, locked.thread.projectId))
+  ) {
+    return { ok: false, error: "project_not_found" };
+  }
   // A newly chosen model must be one the team enabled; keeping the current one is always fine.
   const modelChanged = body.model !== undefined && body.model !== locked.thread.modelAlias;
   if (modelChanged && body.model && !(await isModelEnabled(tx, viewer.teamId, body.model))) {
@@ -351,7 +366,12 @@ export async function updateThread(
     await recordAudit(tx, {
       action: "thread.sharing_changed",
       teamId: viewer.teamId,
-      target: { threadId: id, projectId: row.projectId, shared: row.sharedToProject },
+      target: {
+        threadId: id,
+        projectId: row.projectId,
+        shared: row.sharedToProject,
+        visibility: visibilityOf(row),
+      },
     });
   }
   if (modelChanged) {

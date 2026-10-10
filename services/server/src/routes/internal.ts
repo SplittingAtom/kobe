@@ -105,7 +105,7 @@ export function createInternalApp(deps: InternalAppDeps): Hono {
     return c.json(listed);
   });
 
-  // The caller's own API key for the upstream request (KOBE-108). The user comes from the verified
+  // The caller's own API key or OAuth access token for the upstream request (KOBE-108/109). The user comes from the verified
   // sandbox token only; the proxy puts the key on the upstream request and nowhere else.
   mcp.post("/connectors/:id/grant", async (c) => {
     const id = connectorId(c.req.param("id"));
@@ -113,7 +113,14 @@ export function createInternalApp(deps: InternalAppDeps): Hono {
     const auth = await principalOf(c.req.header("kobe-sandbox-token"));
     if (!auth.ok) return c.json({ code: "sandbox_unauthorized", message: auth.code }, 401);
     const revealed = await deps.mcp.revealCredential(auth.principal, id.data);
-    if (revealed.ok) return c.json({ kind: "api_key", api_key: revealed.apiKey });
+    if (revealed.ok) {
+      const credential = revealed.credential;
+      return c.json(
+        credential.kind === "api_key"
+          ? { kind: "api_key", api_key: credential.apiKey }
+          : { kind: "oauth", access_token: credential.accessToken },
+      );
+    }
     if (revealed.failure === "not_available") {
       return c.json(
         { code: "connector_not_available", message: "Not enabled for this team." },

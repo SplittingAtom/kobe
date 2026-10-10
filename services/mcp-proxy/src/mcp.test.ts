@@ -533,6 +533,25 @@ describe("tools/call", () => {
     expect(JSON.stringify(server.asked)).not.toContain(apiKey);
   });
 
+  it("uses the server's per-user OAuth access token upstream and never shows it to the sandbox (KOBE-109)", async () => {
+    const accessToken = "at-secret-0123456789";
+    server.fetchGrant = () => Promise.resolve({ ok: true, value: { kind: "oauth", accessToken } });
+    credentials = createServerCredentials(server);
+    server.next = (q) => ({
+      ok: true,
+      value: {
+        decision: "allow",
+        connector: { id: q.connectorId, name: "jira", url: fake.url, auth_kind: "oauth" },
+        tool: { name: q.tool, pi_name: "mcp__jira__get_issue" },
+        input_sha256: sha(q.arguments),
+        reason: "risk_read",
+      },
+    });
+    const res = await rpc("tools/call", { name: "get_issue", arguments: { id: 1 } });
+    expect(fake.received.at(-1)?.headers.authorization).toBe(`Bearer ${accessToken}`);
+    expect(JSON.stringify(res.json)).not.toContain(accessToken);
+  });
+
   it("says not connected when the user has no API key, and runs nothing upstream", async () => {
     credentials = createServerCredentials(server);
     server.next = (q) => ({

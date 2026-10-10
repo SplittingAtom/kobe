@@ -164,6 +164,15 @@ export const MEMORY_REFUSALS = [
   "approval_denied",
 ] as const;
 
+/** Why the server refused a `web_search.query` (audit `sandbox.web_search_refused`, KOBE-114). */
+export const WEB_SEARCH_REFUSALS = [
+  "capability_missing",
+  "run_not_active",
+  "not_allowed",
+  "input_mismatch",
+  "replayed",
+] as const;
+
 /** A Pi tool call id (`idSchema` in @kobe/protocol): no control characters, ≤ 128. */
 const toolCallId = z
   .string()
@@ -567,7 +576,20 @@ export const AUDIT_EVENTS = {
   // ── thread: lifecycle metadata only, never titles or content (KOBE-34, D18, D23) ──
   "thread.trashed": event("team", { threadId: id }),
   "thread.restored": event("team", { threadId: id }),
-  "thread.sharing_changed": event("team", { threadId: id, projectId: id, shared: z.boolean() }),
+  /** `visibility` is the share scope after the change (private | project; `team` joins with KOBE-221). */
+  "thread.sharing_changed": event("team", {
+    threadId: id,
+    projectId: id,
+    shared: z.boolean(),
+    visibility: z.enum(["private", "project"]),
+  }),
+  /** A new private thread copied from `sourceThreadId`; `threadId` is the fork. */
+  "thread.forked": event("team", {
+    threadId: id,
+    sourceThreadId: id,
+    projectId: id.nullable(),
+    entries: z.number().int().nonnegative(),
+  }),
   // ── project: configuration metadata only, never names, instructions or descriptions (KOBE-161, D23) ──
   "project.created": event("team", { projectId: id, membersMode: z.enum(["team", "selected"]) }),
   /** `fields` lists which settings changed (names, not values). */
@@ -886,6 +908,31 @@ export const AUDIT_EVENTS = {
   }),
 
   /**
+   * The server refused a `web_search.query` (KOBE-114): no `web_search` capability, a run not
+   * active here, or a tool call it did not allow (or other input). Never records the query (system;
+   * at most one per 5 minutes per reason and user).
+   */
+  "sandbox.web_search_refused": event("team", {
+    sandboxId: id,
+    userId: id,
+    reason: z.enum(WEB_SEARCH_REFUSALS),
+    runId: id.optional(),
+    toolCallId: toolCallId.optional(),
+  }),
+
+  /**
+   * A `web_search` reached the provider (KOBE-114). Counts toward the per-run cap, read back from
+   * this table under a per-run lock, so it holds across replicas. Never records the query (system).
+   */
+  "sandbox.web_search_queried": event("team", {
+    sandboxId: id,
+    userId: id,
+    runId: id,
+    toolCallId,
+    provider: z.enum(["brave", "tavily", "exa"]),
+  }),
+
+  /**
    * The server refused a `memory.put` or `memory.read` (KOBE-156): no `memory` capability, a run
    * not active here, a `remember` call it did not allow (or other input), a disabled scope, a
    * thread outside a project, a user who is not a project member, or a project write whose
@@ -1162,6 +1209,12 @@ export const AUDIT_EVENTS = {
   "mcp.grant.replaced": event("team", { connectorId: id, name: z.string().max(64) }),
   /** A user removed their API key for a connector. */
   "mcp.grant.removed": event("team", { connectorId: id, name: z.string().max(64) }),
+  /** A stored OAuth token was not served because it was issued for another server (KOBE-109). */
+  "mcp.grant.refused": event("team", {
+    connectorId: id,
+    name: z.string().max(64),
+    reason: z.enum(["resource_mismatch"]),
+  }),
   // ── web search (KOBE-113): provider and switches only, never the key or its hint ──
   /** An install admin set the web search provider, its enabled switch, or replaced its key. */
   "mcp.web_search.configured": event("install", {

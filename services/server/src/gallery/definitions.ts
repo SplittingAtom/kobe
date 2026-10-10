@@ -29,7 +29,7 @@ export interface GalleryDefinition {
 export const GALLERY_DEFINITIONS: readonly GalleryDefinition[] = [
   { key: "assistant", generation: 3, file: ASSISTANT_FILE },
   { key: "data-analyst", generation: 3, file: DATA_ANALYST_FILE },
-  { key: "researcher", generation: 1, file: RESEARCHER_FILE },
+  { key: "researcher", generation: 2, file: RESEARCHER_FILE },
   { key: "document-drafter", generation: 3, file: DOCUMENT_DRAFTER_FILE },
   { key: "code-helper", generation: 1, file: CODE_HELPER_FILE },
 ];

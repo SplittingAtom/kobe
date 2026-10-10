@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { ARTIFACT_TOOLS, canonicalJson } from "@kobe/protocol";
 
 /**
- * The artifact, `share_file` (KOBE-150) `remember` and `recall` (KOBE-156, `memory.put` / `memory.read`) tool calls this connection's policy checks allowed (D-3 of KOBE-55). At allow time
+ * The artifact and `share_file` (KOBE-150) tool calls this connection's policy checks allowed (D-3 of KOBE-55). At allow time
  * the SHA-256 of `canonicalJson(input)` is recorded under (run, tool call); `artifact.put` / `file.share`
  * is accepted only for a call recorded here, for the same tool and the same input hash. The first
  * allowed input of a tool call wins: a later allow of the same id with other input does not
@@ -12,13 +12,20 @@ import { ARTIFACT_TOOLS, canonicalJson } from "@kobe/protocol";
 
 export type AllowedVerdict = "ok" | "not_allowed" | "input_mismatch";
 
-/** Tools whose wire frame (`artifact.put`, `file.share`) is bound to an allowed policy check. */
-export const BOUND_TOOLS = [...ARTIFACT_TOOLS, "share_file", "remember", "recall"] as const;
+/** Tools whose wire frame (`artifact.put`, `file.share`, `web_search.query`) is bound to an allowed policy check. */
+export const BOUND_TOOLS = [
+  ...ARTIFACT_TOOLS,
+  "share_file",
+  "web_search",
+  "remember",
+  "recall",
+] as const;
 export type BoundToolName = (typeof BOUND_TOOLS)[number];
 
 interface Allowed {
   readonly tool: BoundToolName;
   readonly hash: string;
+  used: boolean;
 }
 
 export const ALLOWED_MAX = 4096;
@@ -54,12 +61,31 @@ export class AllowedArtifactCalls {
       const oldest = this.#calls.keys().next();
       if (!oldest.done) this.#calls.delete(oldest.value);
     }
-    this.#calls.set(key, { tool, hash });
+    this.#calls.set(key, { tool, hash, used: false });
   }
 
   check(runId: string, toolCallId: string, tool: string, input: unknown): AllowedVerdict {
     const allowed = this.#calls.get(this.#key(runId, toolCallId));
     if (allowed?.tool !== tool) return "not_allowed";
     return allowed.hash === inputHash(input) ? "ok" : "input_mismatch";
+  }
+
+  /**
+   * Like {@link check}, but the allowance is single use (`web_search`, KOBE-114): the first
+   * matching call takes it, in this one synchronous step before any work starts, and a repeat is
+   * "replayed". Artifact and file calls keep using `check`: they are idempotent in the database.
+   */
+  consume(
+    runId: string,
+    toolCallId: string,
+    tool: string,
+    input: unknown,
+  ): AllowedVerdict | "replayed" {
+    const verdict = this.check(runId, toolCallId, tool, input);
+    if (verdict !== "ok") return verdict;
+    const allowed = this.#calls.get(this.#key(runId, toolCallId));
+    if (!allowed || allowed.used) return "replayed";
+    allowed.used = true;
+    return "ok";
   }
 }

@@ -38,9 +38,17 @@ export function apiKeyHeaders(apiKey: string): Record<string, string> {
   return { authorization: `Bearer ${apiKey}` };
 }
 
+/** How an OAuth access token reaches the upstream (MCP authorization spec): a bearer token. */
+export const oauthHeaders = apiKeyHeaders;
+
 /** What the server's grant endpoint can say (KOBE-108). */
 export type GrantAnswer =
-  | { readonly ok: true; readonly value: { readonly kind: "api_key"; readonly apiKey: string } }
+  | {
+      readonly ok: true;
+      readonly value:
+        | { readonly kind: "api_key"; readonly apiKey: string }
+        | { readonly kind: "oauth"; readonly accessToken: string };
+    }
   | { readonly ok: false; readonly failure: "not_connected" | "unavailable" };
 
 export interface GrantSource {
@@ -48,19 +56,25 @@ export interface GrantSource {
 }
 
 /**
- * Per-user API-key grants from the server's internal API (KOBE-108). `none` connectors need
- * nothing; `api_key` connectors get the run's user's key as a bearer token, fetched per call and
- * held only for that request (never cached, logged or returned to the sandbox); `oauth` waits for
- * KOBE-61 and answers "not connected".
+ * Per-user grants from the server's internal API (KOBE-108, KOBE-109). `none` connectors need
+ * nothing; `api_key` and `oauth` connectors get the run's user's key or access token as a bearer
+ * token, fetched per call and held only for that request (never cached, logged or returned to the
+ * sandbox). A grant of the other kind than the connector's is "not connected". Refreshing an
+ * expired access token is the server's job (KOBE-110).
  */
 export function createServerCredentials(source: GrantSource): CredentialResolver {
   return {
     async headersFor({ token, connector }) {
       if (connector.auth_kind === "none") return { ok: true, headers: {} };
-      if (connector.auth_kind !== "api_key") return { ok: false, code: "not_connected" };
       const grant = await source.fetchGrant(token, connector.id);
       if (!grant.ok) return { ok: false, code: grant.failure };
-      return { ok: true, headers: apiKeyHeaders(grant.value.apiKey) };
+      const value = grant.value;
+      if (value.kind !== connector.auth_kind) return { ok: false, code: "not_connected" };
+      return {
+        ok: true,
+        headers:
+          value.kind === "oauth" ? oauthHeaders(value.accessToken) : apiKeyHeaders(value.apiKey),
+      };
     },
   };
 }

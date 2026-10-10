@@ -1,17 +1,22 @@
 import { randomUUID } from "node:crypto";
 import type { Server } from "node:http";
-import { MAX_RUN_TOKEN_TTL_SECONDS, type PolicyEngine, type ToolRegistry } from "@kobe/protocol";
+import {
+  MAX_RUN_TOKEN_TTL_SECONDS,
+  WEB_SEARCH_UNAVAILABLE_MESSAGES,
+  type PolicyEngine,
+  type ToolRegistry,
+} from "@kobe/protocol";
 import { z } from "zod";
 import { SYSTEM_ACTOR, eq, getMembership, users, withTeam, type KobeDb } from "@kobe/db";
 import { logger as rootLogger } from "../logger.js";
 import { recordAudit, type ServerAuditEvent } from "../audit/record.js";
 import { BackgroundTasks } from "../background.js";
-import type { ApprovalVerifier } from "../approvals/verify.js";
 import type { BlobStore } from "../retention/blobs.js";
 import { DEFAULT_UPLOAD_SETTINGS, type UploadSettings } from "../uploads/settings.js";
 import { createPolicyEngine } from "../policy/engine.js";
 import { createToolRegistry } from "../policy/registry.js";
 import { createDbRuleSource, createDbSettingsSource } from "../policy/rule-store.js";
+import type { WebSearchService } from "../web-search/service.js";
 import { createSandboxBus, type BusHint } from "./bus.js";
 import { SandboxConnection } from "./connection.js";
 import { WIRE_DEFAULTS, type WireTuning } from "./constants.js";
@@ -40,8 +45,6 @@ export interface SandboxWireOptions {
   readonly engine?: PolicyEngine;
   readonly tools?: ToolRegistry;
   readonly approvals?: ApprovalBroker;
-  /** Verifies and consumes signed approvals (project `remember`, KOBE-156); unset: none verifies. */
-  readonly approvalVerifier?: ApprovalVerifier;
   readonly ui?: UiBroker;
   readonly hooks?: RunLifecycleHooks;
   /** Run policy inputs incl. the approval-mode floor (`createDbRunContextSource()` in production). */
@@ -51,6 +54,8 @@ export interface SandboxWireOptions {
   readonly blobs?: BlobStore;
   /** Upload limits and storage quota default, applied to `file.share` too (KOBE-150). */
   readonly uploads?: UploadSettings;
+  /** Runs `web_search.query` (KOBE-114); unset: every search answers "not configured". */
+  readonly webSearch?: WebSearchService;
   readonly tuning?: Partial<WireTuning>;
   /** Key from `deriveRunTokenKey` (KOBE-118); unset: `run.start` carries no run token. */
   readonly runTokenKey?: Uint8Array;
@@ -111,6 +116,14 @@ function assertRunTokenTtl(ttl: number): void {
   }
 }
 
+const NO_WEB_SEARCH: WebSearchService = {
+  search: () =>
+    Promise.resolve({
+      kind: "unavailable",
+      reason: "not_configured",
+      message: WEB_SEARCH_UNAVAILABLE_MESSAGES.not_configured,
+    }),
+};
 const NO_WAKE: SandboxWaker = { wake: () => Promise.resolve() };
 const NOT_LIVE: SandboxLiveness = { isLive: () => Promise.resolve(false) };
 const VIOLATION_AUDIT_EVERY_MS = 5 * 60_000;
@@ -248,6 +261,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       verifier: options.approvalVerifier,
       log,
     },
+    webSearch: options.webSearch ?? NO_WEB_SEARCH,
     ui: options.ui ?? CANCEL_DIALOGS,
     hooks,
     get liveness() {
@@ -324,6 +338,24 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
             ...(refusal.scope ? { scope: refusal.scope } : {}),
             runId: refusal.runId,
             ...(refusal.toolCallId ? { toolCallId: refusal.toolCallId } : {}),
+          },
+        },
+      );
+    },
+    auditWebSearchRefused(target, sandboxId, refusal) {
+      throttledAudit(
+        `${target.teamId}:${target.userId}:web_search:${refusal.reason}`,
+        target.teamId,
+        {
+          action: "sandbox.web_search_refused",
+          actor: SYSTEM_ACTOR,
+          teamId: target.teamId,
+          target: {
+            sandboxId,
+            userId: target.userId,
+            reason: refusal.reason,
+            runId: refusal.runId,
+            toolCallId: refusal.toolCallId,
           },
         },
       );
