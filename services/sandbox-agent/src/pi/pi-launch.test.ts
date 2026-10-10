@@ -64,6 +64,19 @@ describe("buildPiLaunch kobe-tools (KOBE-128)", () => {
     ).toBeUndefined();
   });
 
+  it("tells the extension to register propose_project_file only with the extension and the projects flag", () => {
+    expect(
+      buildPiLaunch({ ...base, parentEnv, toolsExtension: TOOLS, toolsProjects: true }).env
+        .KOBE_TOOLS_PROJECTS,
+    ).toBe("1");
+    expect(
+      buildPiLaunch({ ...base, parentEnv, toolsExtension: TOOLS }).env.KOBE_TOOLS_PROJECTS,
+    ).toBeUndefined();
+    expect(
+      buildPiLaunch({ ...base, parentEnv, toolsProjects: true }).env.KOBE_TOOLS_PROJECTS,
+    ).toBeUndefined();
+  });
+
   it("changes the launch key (a Pi without the tools restarts when they are added)", () => {
     const without = buildPiLaunch({ ...base, parentEnv }).key;
     expect(buildPiLaunch({ ...base, parentEnv, toolsExtension: TOOLS }).key).not.toBe(without);

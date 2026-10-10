@@ -4,7 +4,14 @@ import type { Duplex } from "node:stream";
 import { ToolsClient, type ToolsClientOptions } from "./client.js";
 import { installMemoryHooks, type MemoryHooksApi } from "./memory-hooks.js";
 import { recallTool, rememberTool } from "./memory-tools.js";
-import { MEMORY_FILE_ENV, TOOLS_FD_ENV, TOOLS_FILES_ENV, TOOLS_MEMORY_ENV } from "./protocol.js";
+import { proposeProjectFileTool } from "./project-tool.js";
+import {
+  MEMORY_FILE_ENV,
+  TOOLS_FD_ENV,
+  TOOLS_FILES_ENV,
+  TOOLS_MEMORY_ENV,
+  TOOLS_PROJECTS_ENV,
+} from "./protocol.js";
 import {
   artifactTools,
   shareFileTool,
@@ -60,6 +67,13 @@ export function filesEnabled(env: Record<string, string | undefined>): boolean {
   return raw === "1";
 }
 
+/** Whether the agent announced the `projects` capability (KOBE_TOOLS_PROJECTS=1); read once, removed. */
+export function projectsEnabled(env: Record<string, string | undefined>): boolean {
+  const raw = env[TOOLS_PROJECTS_ENV];
+  Reflect.deleteProperty(env, TOOLS_PROJECTS_ENV);
+  return raw === "1";
+}
+
 /** Whether the agent announced the `memory` capability (KOBE_TOOLS_MEMORY=1); read once, removed. */
 export function memoryEnabled(env: Record<string, string | undefined>): boolean {
   const raw = env[TOOLS_MEMORY_ENV];
@@ -79,6 +93,7 @@ export function registerKobeTools(
   transport: ToolsTransport | undefined,
   options: {
     readonly files?: boolean;
+    readonly projects?: boolean;
     readonly memory?: boolean;
     readonly memoryFile?: string | undefined;
   } = {},
@@ -88,6 +103,7 @@ export function registerKobeTools(
   // Always listed: the server answers "unavailable" when the install or team has it off.
   pi.registerTool(webSearchTool(transport));
   if (options.files === true) pi.registerTool(shareFileTool(transport));
+  if (options.projects === true) pi.registerTool(proposeProjectFileTool(transport));
   if (options.memory === true) {
     pi.registerTool(rememberTool(transport));
     pi.registerTool(recallTool(transport));

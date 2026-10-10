@@ -1,6 +1,11 @@
 import { posix } from "node:path";
 import { z } from "zod";
-import { artifactToolInputSchema, type JsonObject, type ToolDescriptor } from "@kobe/protocol";
+import {
+  artifactToolInputSchema,
+  projectToolInputSchema,
+  type JsonObject,
+  type ToolDescriptor,
+} from "@kobe/protocol";
 
 /**
  * Input checks for built-in tools before any rule is evaluated (review KOBE-35 HIGH 1).
@@ -53,6 +58,7 @@ export const BUILTIN_INPUT_SCHEMAS: Readonly<Record<string, z.ZodType<unknown>>>
   tool_search: z.strictObject({ query: str, limit: num.optional() }),
   create_artifact: artifactToolInputSchema.create_artifact,
   update_artifact: artifactToolInputSchema.update_artifact,
+  propose_project_file: projectToolInputSchema.propose_project_file,
 };
 
 /** Built-ins whose `path` is a filesystem path, and whether an omitted path means the cwd. */
@@ -64,6 +70,7 @@ const PATH_TOOLS: Readonly<Record<string, { readonly defaultsToCwd: boolean }>> 
   grep: { defaultsToCwd: true },
   find: { defaultsToCwd: true },
   share_file: { defaultsToCwd: false },
+  propose_project_file: { defaultsToCwd: false },
 };
 
 // Characters Pi rewrites in paths (utils/paths.js UNICODE_SPACES).

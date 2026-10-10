@@ -164,6 +164,23 @@ export const MEMORY_REFUSALS = [
   "approval_denied",
 ] as const;
 
+/** Why the server refused a `project.file_propose` (audit `sandbox.project_file_refused`, KOBE-162). */
+export const PROJECT_FILE_REFUSALS = [
+  "capability_missing",
+  "run_not_active",
+  "not_allowed",
+  "input_mismatch",
+  "no_project",
+  "not_a_member",
+  "path_mismatch",
+  "not_synced",
+  "not_found",
+  "too_large",
+  "quota_exceeded",
+  "already_exists",
+  "approval_denied",
+] as const;
+
 /** Why the server refused a `web_search.query` (audit `sandbox.web_search_refused`, KOBE-114). */
 export const WEB_SEARCH_REFUSALS = [
   "capability_missing",
@@ -617,6 +634,14 @@ export const AUDIT_EVENTS = {
     role: z.enum(["owner", "member"]),
   }),
   "project.member_removed": event("team", { projectId: id, userId: id }),
+  /** A file joined the project (KOBE-162); `source` says whether a person uploaded it or an approved agent proposal added it. Never names or content. */
+  "project.file_added": event("team", {
+    projectId: id,
+    fileId: id,
+    source: z.enum(["upload", "proposal"]),
+    sizeBytes: z.number().int().nonnegative(),
+  }),
+  "project.file_removed": event("team", { projectId: id, fileId: id }),
   "project.member_role_changed": event("team", {
     projectId: id,
     userId: id,
@@ -919,6 +944,21 @@ export const AUDIT_EVENTS = {
     sandboxId: id,
     userId: id,
     reason: z.enum(FILE_SHARE_REFUSALS),
+    runId: id.optional(),
+    toolCallId: toolCallId.optional(),
+  }),
+
+  /**
+   * The server refused a `project.file_propose` (KOBE-162): no `projects` capability, a run not
+   * active here, a `propose_project_file` call it did not allow (or other input), a thread outside
+   * a project, a user who is not a project member, a workspace entry that does not match the push,
+   * a size / quota / duplicate refusal, or an approval that was denied or lapsed. Never records
+   * names, paths or content (system; at most one per 5 minutes per reason and user).
+   */
+  "sandbox.project_file_refused": event("team", {
+    sandboxId: id,
+    userId: id,
+    reason: z.enum(PROJECT_FILE_REFUSALS),
     runId: id.optional(),
     toolCallId: toolCallId.optional(),
   }),

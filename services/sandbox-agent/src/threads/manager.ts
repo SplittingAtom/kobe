@@ -490,6 +490,7 @@ export class ThreadManager {
       toolsExtension: this.#options.toolsExtension,
       execExtension: this.#options.exec === undefined ? undefined : this.#options.execExtension,
       toolsFiles: this.#options.shareFiles,
+      toolsProjects: this.#options.projectTools,
       toolsMemory: this.#options.memoryTools,
       ...(this.#options.extensions === undefined ? {} : { extensions: this.#options.extensions }),
       parentEnv: this.#options.parentEnv,

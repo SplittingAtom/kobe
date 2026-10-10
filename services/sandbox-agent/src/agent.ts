@@ -4,6 +4,7 @@ import {
   CAPABILITY_MCP,
   CAPABILITY_MEMORY,
   CAPABILITY_FILES,
+  CAPABILITY_PROJECTS,
   CAPABILITY_WEB_SEARCH,
   CAPABILITY_RUN_TOKEN,
   CAPABILITY_SKILL_BUNDLES,
@@ -20,6 +21,7 @@ import type { PiExit, PiRecord } from "./pi/pi-process.js";
 import { PolicyBroker } from "./policy/broker.js";
 import { ArtifactBroker } from "./tools/broker.js";
 import { FileShareBroker } from "./tools/share-broker.js";
+import { ProjectFileBroker } from "./tools/project-broker.js";
 import { MemoryBroker } from "./tools/memory-broker.js";
 import { WebSearchBroker } from "./tools/web-search-broker.js";
 import { toolsError } from "./tools/channel.js";
@@ -119,6 +121,7 @@ export class Agent {
   readonly #broker: PolicyBroker;
   readonly #artifacts: ArtifactBroker;
   readonly #shares: FileShareBroker;
+  readonly #proposals: ProjectFileBroker;
   readonly #searches: WebSearchBroker;
   readonly #memory: MemoryBroker;
   /** Command ids seen on the current connection (ids are not portable across reconnects). */
@@ -140,6 +143,11 @@ export class Agent {
       send: (frame) => this.#wire.send(frame),
       pushPath: pushPath ?? (() => Promise.reject(new Error("workspace sync is not available"))),
     });
+    this.#proposals = new ProjectFileBroker({
+      root: config.workspaceDir,
+      send: (frame) => this.#wire.send(frame),
+      pushPath: pushPath ?? (() => Promise.reject(new Error("workspace sync is not available"))),
+    });
     this.#threads = new ThreadManager({
       bin: config.piBin,
       runtimeDir: config.piRuntimeDir,
@@ -152,6 +160,7 @@ export class Agent {
       piPrivateRoot: deps.parentEnv.TMPDIR ?? "/tmp",
       execExtension: deps.exec?.extension,
       shareFiles: this.#filesEnabled(),
+      projectTools: this.#projectsEnabled(),
       memoryTools: this.#memoryEnabled(),
       ...(deps.extensions === undefined ? {} : { extensions: deps.extensions }),
       ...(deps.policyReadyTimeoutMs === undefined
@@ -183,6 +192,7 @@ export class Agent {
           this.#broker.failRun(runId, "run ended");
           this.#artifacts.failRun(runId, "run ended");
           this.#shares.failRun(runId, "run ended");
+          this.#proposals.failRun(runId, "run ended");
           this.#searches.failRun(runId, "run ended");
           this.#memory.failRun(runId, "run ended");
           deps.workspace?.runEnded();
@@ -216,6 +226,12 @@ export class Agent {
             else reply(toolsError(request.id, "not_allowed", "memory is not available"));
             return;
           }
+          if (request.op === "project.file_propose") {
+            if (this.#projectsEnabled()) {
+              this.#proposals.propose(threadId, runId, request, reply);
+            } else reply(toolsError(request.id, "not_allowed", "projects are not available"));
+            return;
+          }
           if (request.op === "file.share") {
             if (this.#filesEnabled()) this.#shares.share(threadId, runId, request, reply);
             else reply(toolsError(request.id, "not_allowed", "file sharing is not available"));
@@ -227,6 +243,7 @@ export class Agent {
           logger.debug({ thread_id: threadId, reason }, "tools channel closed");
           this.#artifacts.failThread(threadId, reason);
           this.#shares.failThread(threadId, reason);
+          this.#proposals.failThread(threadId, reason);
           this.#searches.failThread(threadId, reason);
           this.#memory.failThread(threadId, reason);
         },
@@ -244,6 +261,7 @@ export class Agent {
         this.#broker.failAll("connection to Kobe server lost");
         this.#artifacts.failAll("connection to Kobe server lost");
         this.#shares.failAll("connection to Kobe server lost");
+        this.#proposals.failAll("connection to Kobe server lost");
         this.#searches.failAll("connection to Kobe server lost");
         this.#memory.failAll("connection to Kobe server lost");
         void this.#threads.abortRestores();
@@ -293,6 +311,11 @@ export class Agent {
     return this.#deps.toolsExtension !== undefined && this.#deps.workspace?.pushPath !== undefined;
   }
 
+  /** `propose_project_file` needs what `share_file` needs (it pushes the file first). */
+  #projectsEnabled(): boolean {
+    return this.#filesEnabled();
+  }
+
   /** `remember` / `recall` need the tools channel (fd 4); without it neither is registered nor announced. */
   #memoryEnabled(): boolean {
     return this.#deps.toolsExtension !== undefined;
@@ -304,6 +327,7 @@ export class Agent {
       ...(this.#deps.config.builtinSkillsDir === undefined ? [] : [CAPABILITY_BUILTIN_SKILLS]),
       ...(this.#deps.toolsExtension === undefined ? [] : [CAPABILITY_ARTIFACTS]),
       ...(this.#filesEnabled() ? [CAPABILITY_FILES] : []),
+      ...(this.#projectsEnabled() ? [CAPABILITY_PROJECTS] : []),
       ...(this.#deps.toolsExtension === undefined ? [] : [CAPABILITY_WEB_SEARCH]),
       ...(this.#memoryEnabled() ? [CAPABILITY_MEMORY] : []),
       // Per-session MCP config (KOBE-111) needs the proxy URL, a session to trade tokens with, and
@@ -381,6 +405,9 @@ export class Agent {
         return;
       case "file.share_result":
         this.#shares.onResult(frame);
+        return;
+      case "project.file_propose_result":
+        this.#proposals.onResult(frame);
         return;
       case "web_search.result":
         this.#searches.onResult(frame);

@@ -113,6 +113,7 @@ export const SAMPLE_INPUTS: Readonly<Record<string, JsonObject>> = {
   tool_search: { query: "jira" },
   create_artifact: { kind: "markdown", title: "Notes", content: "# Notes" },
   update_artifact: { artifact_id: "5b1c0f52-8f6e-4a34-9d57-3a6e0c1f2b44", content: "# Notes v2" },
+  propose_project_file: { path: "notes.md", folder: "docs", reason: "keep it" },
 };
 
 export function sampleInput(tool: ToolDescriptor): JsonObject {
