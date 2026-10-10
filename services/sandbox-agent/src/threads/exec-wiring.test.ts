@@ -36,6 +36,26 @@ describe("preparePiPrivateDirs (KOBE-196)", () => {
     }
   });
 
+  it("without the executor (KOBE-228) nobody outside the Pi's group gets in: root, home and tmp are 2770", async () => {
+    const dirs = await preparePiPrivateDirs(base, path.join(base, "pi-Z"), identity, {
+      partner: false,
+    });
+    for (const dir of [dirs.root, dirs.home, dirs.tmp]) {
+      const info = await stat(dir);
+      expect(info.mode & 0o7777).toBe(0o2770);
+      expect(info.gid).toBe(identity.gid);
+    }
+  });
+
+  it("without an identity (no uid separation) the directories are 0700 and the agent's", async () => {
+    const dirs = await preparePiPrivateDirs(base, path.join(base, "pi-W"), undefined, {
+      partner: false,
+    });
+    for (const dir of [dirs.root, dirs.home, dirs.tmp]) {
+      expect((await stat(dir)).mode & 0o7777).toBe(0o700);
+    }
+  });
+
   it("refuses a name that already exists (never reuses what another uid may have made)", async () => {
     const runtime = path.join(base, "pi-X");
     await preparePiPrivateDirs(base, runtime, identity);

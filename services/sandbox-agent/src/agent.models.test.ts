@@ -79,6 +79,7 @@ describe("model wiring (KOBE-41)", () => {
     expect(launch.env.filter((k) => k.startsWith("KOBE_"))).toEqual([
       "KOBE_MODEL_FILE",
       "KOBE_POLICY_FD",
+      "KOBE_TOOL_HOME",
     ]);
     // The config dir: fresh, private (0700), writable, inside the runtime dir, next to the file.
     const runtime = path.join(h.dir, "pi-runtime");

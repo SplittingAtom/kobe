@@ -295,20 +295,26 @@ export class Thread {
       }
       await writeGuardedConfig(agentDir, identity !== undefined);
       env.PI_CODING_AGENT_DIR = agentDir;
-      // The tools get the launch's HOME and TMPDIR (the shared ones); with the executor under
-      // another uid Pi gets private ones, as it loads code from both.
+      // The tools get the launch's HOME and TMPDIR (the shared ones); Pi gets private ones, as it
+      // loads code from both. With the executor the tools are another uid; without it (KOBE-228)
+      // they are Pi's own and inherit its environment, so the shared ones reach them through the
+      // BASH_ENV script (`KOBE_TOOL_HOME`/`KOBE_TOOL_TMPDIR`).
       const toolEnvBase = { ...env };
-      if (exec !== undefined && identity !== undefined) {
-        const priv = await preparePiPrivateDirs(
-          this.#env.piPrivateRoot ?? "/tmp",
-          runtimeDir,
-          identity,
-        );
-        piDir = priv.root;
-        env.HOME = priv.home;
-        env.TMPDIR = priv.tmp;
+      const priv = await preparePiPrivateDirs(
+        this.#env.piPrivateRoot ?? "/tmp",
+        runtimeDir,
+        identity,
+        { partner: exec !== undefined },
+      );
+      piDir = priv.root;
+      env.HOME = priv.home;
+      env.TMPDIR = priv.tmp;
+      if (exec !== undefined) {
         // `~` in the file tools is resolved by Pi: tell kobe-exec where the tools' home is.
         if (toolEnvBase.HOME !== undefined) env[TOOL_HOME_ENV] = toolEnvBase.HOME;
+      } else {
+        if (toolEnvBase.HOME !== undefined) env.KOBE_TOOL_HOME = toolEnvBase.HOME;
+        if (toolEnvBase.TMPDIR !== undefined) env.KOBE_TOOL_TMPDIR = toolEnvBase.TMPDIR;
       }
       const models = this.#env.models;
       if (models !== undefined) {
@@ -772,6 +778,10 @@ export class Thread {
       }
     }
     try {
+      // (Under an identity it is already gone, removed before the reclaim.)
+      if (identity === undefined && runtime.piDir !== undefined) {
+        await removeRuntimeDir(runtime.piDir, identities);
+      }
       await removeRuntimeDir(runtime.dir, identities);
       if (runtime.toolDir !== undefined) await removeRuntimeDir(runtime.toolDir, identities);
     } catch (error) {

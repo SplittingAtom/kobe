@@ -9,6 +9,12 @@
 # is exported, and direct connections are refused by the sandbox's NetworkPolicy anyway.
 # Only POSIX/bash builtins below: it runs before every command. Tracing (`bash -x`, whose output
 # becomes the tool result) is paused while the token is handled, so it never shows in a trace.
+# The tools' own HOME and TMPDIR (KOBE-228). With the executor off, Pi's HOME and TMPDIR are private
+# to its thread (Pi loads code from both: ~/.node_modules, caches), so the agent names the shared
+# ones in KOBE_TOOL_HOME / KOBE_TOOL_TMPDIR and every bash tool call switches to them here. Absolute
+# paths on one line only (never build a path from anything else).
+case "${KOBE_TOOL_HOME:-}" in /*) case "$KOBE_TOOL_HOME" in *[!A-Za-z0-9._/-]*) ;; *) export HOME="$KOBE_TOOL_HOME" ;; esac ;; esac
+case "${KOBE_TOOL_TMPDIR:-}" in /*) case "$KOBE_TOOL_TMPDIR" in *[!A-Za-z0-9._/-]*) ;; *) export TMPDIR="$KOBE_TOOL_TMPDIR" ;; esac ;; esac
 case "$-" in *x*) __kobe_egress_xtrace=1; set +x ;; *) __kobe_egress_xtrace="" ;; esac
 if [ -n "${KOBE_EGRESS_TOKEN_FILE:-}" ] && [ -n "${KOBE_EGRESS_PROXY:-}" ] && [ ! -r "$KOBE_EGRESS_TOKEN_FILE" ]; then
   # Say why internet access will fail instead of failing silently (one line, on stderr).
