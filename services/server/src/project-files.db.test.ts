@@ -6,6 +6,7 @@ import type { Person } from "./testing/event-stream-fixture.js";
 import { MemoryObjects } from "./testing/memory-objects.js";
 import { RunFixture } from "./testing/run-fixture.js";
 import { createWorkspaceSync } from "./workspace-sync/index.js";
+import { storageUsed } from "./uploads/quota.js";
 import { listLive } from "./workspace-sync/store.js";
 
 /**
@@ -19,9 +20,10 @@ const objects = new MemoryObjects();
 const PREFIX = "kobe/";
 const silent = { error: () => {}, warn: () => {}, info: () => {} };
 
+let sync: ReturnType<typeof createWorkspaceSync>;
 beforeAll(async () => {
   await f.setup({ blobs: { objects, prefix: PREFIX } });
-  const sync = createWorkspaceSync({
+  sync = createWorkspaceSync({
     db: f.fx.db,
     objects,
     prefix: PREFIX,
@@ -282,5 +284,70 @@ describe("one membership decides files and memory (ac-3)", () => {
     // A team admin who is not a member has neither.
     expect((await memory(w.owner)).status).toBe(404);
     expect(await paths(w.team, w.owner.id)).toEqual([]);
+  });
+});
+
+describe("team storage quota counts project files once (KOBE-162)", () => {
+  it("50 members do not multiply the usage, and their own saves are not affected", async () => {
+    const w = await f.world();
+    const b = await builder(w.team);
+    const project = await create(b, { name: "Big Shared" });
+    const members: Person[] = [];
+    for (let i = 0; i < 49; i += 1) members.push(await f.member(w.team));
+    const data = "x".repeat(200_000);
+    expect((await upload(b, project.id, "big.bin", data)).status).toBe(201);
+    for (const m of members) expect(await paths(w.team, m.id)).toHaveLength(1);
+
+    expect(await withTeam(f.fx.db, w.team, (tx) => storageUsed(tx, w.team))).toBe(200_000);
+    // The mounts add nothing to a member's own workspace budget.
+    const live = await f.fx.admin.query<{ n: string }>(
+      `SELECT COALESCE(SUM(live_bytes), 0) AS n FROM workspace_sync WHERE team_id = $1`,
+      [w.team],
+    );
+    expect(Number(live.rows[0]?.n)).toBe(0);
+    // Removing the file gives the same single share back.
+    const list = (await as(b).get(`/v1/projects/${project.id}/files`)).json.files as {
+      id: string;
+    }[];
+    expect((await as(b).delete(`/v1/projects/${project.id}/files/${list[0]?.id}`)).status).toBe(
+      204,
+    );
+    const after = await f.fx.admin.query<{ n: string }>(
+      `SELECT COALESCE(SUM(live_bytes), 0) AS n FROM workspace_sync WHERE team_id = $1`,
+      [w.team],
+    );
+    expect(Number(after.rows[0]?.n)).toBe(0);
+  }, 120_000);
+});
+
+describe("a failed reconcile never leaves a row pointing at a deleted object", () => {
+  it("keeps the object while a workspace could not be updated, and the next reconcile heals it", async () => {
+    const w = await f.world();
+    const b = await builder(w.team);
+    const m = await f.member(w.team);
+    const project = await create(b, { name: "Flaky" });
+    await upload(b, project.id, "f.md", "F");
+    const file = (
+      (await as(b).get(`/v1/projects/${project.id}/files`)).json.files as { id: string }[]
+    )[0];
+    const key = (
+      await f.fx.admin.query<{ blob_ref: string }>(
+        `SELECT blob_ref FROM project_files WHERE team_id = $1`,
+        [w.team],
+      )
+    ).rows[0]?.blob_ref as string;
+    const real = sync.deleteServerFile;
+    sync.deleteServerFile = () => Promise.reject(new Error("storage hiccup"));
+    try {
+      expect((await as(b).delete(`/v1/projects/${project.id}/files/${file?.id}`)).status).toBe(204);
+    } finally {
+      sync.deleteServerFile = real;
+    }
+    // The member's row still names the object, so the object must still exist.
+    expect(await paths(w.team, m.id)).toHaveLength(1);
+    expect(objects.objects.has(key)).toBe(true);
+    // Healing (the next run start) drops the stale row.
+    expect(await f.fx.replica(0).deps.projectMounts.reconcileUser(w.team, m.id)).toBe(true);
+    expect(await paths(w.team, m.id)).toEqual([]);
   });
 });

@@ -1,5 +1,15 @@
 import { spawn } from "node:child_process";
-import { chmod, chown, lstat, mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import {
+  chmod,
+  chown,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { createHash } from "node:crypto";
@@ -181,5 +191,37 @@ describe.runIf(HELPER !== undefined)("project files are read-only to tools (KOBE
     const names = await readdir(root);
     expect(names.some((n) => n.startsWith("projects.replaced-"))).toBe(true);
     expect(partnerOf(id).uid).toBeGreaterThan(id.uid); // both uids of the pair are covered above
+  });
+
+  it("a symlink swapped in for projects/ cannot make the agent chmod what it points at (KOBE-162 review)", async () => {
+    const root = await workspace();
+    const id = await identity();
+    // The agent-owned directory a tool would aim at: Pi's runtime dir, owner-only.
+    const victim = path.join(scratch, `victim-${Math.random().toString(36).slice(2)}`);
+    await mkdir(path.join(victim, "agent"), { recursive: true });
+    await writeFile(path.join(victim, "model.json"), "token", { mode: 0o600 });
+    await chmod(victim, 0o700);
+    await chmod(path.join(victim, "agent"), 0o700);
+    const before = await tree(victim);
+    const swap = await run([
+      ...(identities.command(id, "/bin/sh", []) as string[]),
+      "-c",
+      `mv ${root}/projects ${root}/stolen && ln -s ${victim} ${root}/projects`,
+    ]);
+    expect(swap.code).toBe(0);
+    // A sync pass: make the folders, write the file, lock the area.
+    await ensureParents(root, "projects/acme/docs/brief.md");
+    const body = Buffer.from(BRIEF);
+    await writeFileAtomic(root, "projects/acme/docs/brief.md", Readable.from([body]), {
+      sha256: createHash("sha256").update(body).digest("hex"),
+      size: body.length,
+      mtimeMs: Date.now(),
+      mode: 0o444,
+    }).catch(() => undefined);
+    await lockServerOwned(root, ["projects/"]);
+    expect(await tree(victim)).toEqual(before);
+    expect((await lstat(path.join(root, "projects"))).isDirectory()).toBe(true);
+    const aside = (await readdir(root)).find((n) => n.startsWith("projects.replaced-")) ?? "";
+    expect((await lstat(path.join(root, aside))).isSymbolicLink()).toBe(true);
   });
 });

@@ -1,4 +1,5 @@
 import {
+  chmod,
   lstat,
   mkdir,
   mkdtemp,
@@ -89,5 +90,27 @@ describe("workspace fs helpers", () => {
     expect(aside).toMatch(/^projects\.replaced-/);
     expect(await readFile(path.join(root, aside, "acme/fake.md"), "utf8")).toBe("planted");
     expect(await readdir(path.join(root, "projects/acme"))).toEqual([]);
+  });
+
+  it("moves a symlink put in place of projects/ aside and never chmods or writes through it (KOBE-162)", async () => {
+    const root = await dir();
+    const target = await dir();
+    await mkdir(path.join(target, "acme"));
+    await writeFile(path.join(target, "secret"), "x", { mode: 0o600 });
+    await chmod(target, 0o700);
+    await chmod(path.join(target, "acme"), 0o700);
+    await symlink(target, path.join(root, "projects"));
+    await ensureParents(root, "projects/acme/brief.md");
+    await lockServerOwned(root, ["projects/"]);
+    expect((await stat(target)).mode & 0o777).toBe(0o700);
+    expect((await stat(path.join(target, "acme"))).mode & 0o777).toBe(0o700);
+    expect((await stat(path.join(target, "secret"))).mode & 0o777).toBe(0o600);
+    expect(await readdir(target)).toEqual(["acme", "secret"]);
+    expect((await lstat(path.join(root, "projects"))).isDirectory()).toBe(true);
+    const aside = (await readdir(root)).find((n) => n.startsWith("projects.replaced-")) ?? "";
+    expect((await lstat(path.join(root, aside))).isSymbolicLink()).toBe(true);
+    // Locked read-only: make it removable for the cleanup.
+    await chmod(path.join(root, "projects/acme"), 0o755);
+    await chmod(path.join(root, "projects"), 0o755);
   });
 });

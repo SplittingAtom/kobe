@@ -323,9 +323,14 @@ export function projectRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables
       return key === undefined ? failure(c, "not_found") : c.body(null, 204);
     });
     if (res.ok && key !== undefined) {
-      // Mounts first, so no workspace still names the object when it goes.
-      await deps.projectMounts.reconcileProject(viewerOf(c).teamId, c.req.param("id") ?? "");
-      await deleteProjectObject(deps.blobs, key);
+      // Mounts first, so no workspace still names the object when it goes. If any workspace
+      // could not be updated, the object stays: a row never points at a deleted object (the
+      // next run start of that member drops the row; the object is then an unreferenced orphan).
+      const clean = await deps.projectMounts.reconcileProject(
+        viewerOf(c).teamId,
+        c.req.param("id") ?? "",
+      );
+      if (clean) await deleteProjectObject(deps.blobs, key);
     }
     return res;
   });

@@ -411,7 +411,7 @@ export async function commitChanges(
         ...state,
         headRev: rev,
         liveFiles: state.liveFiles - 1,
-        liveBytes: state.liveBytes - current.size,
+        liveBytes: state.liveBytes - countedBytes(current),
         tombstones: state.tombstones + 1,
       };
       results.push({ status: "applied", path, entry: publicEntry(entry) });
@@ -443,7 +443,7 @@ export async function commitChanges(
       }
     }
     const liveFiles = state.liveFiles + (live ? 0 : 1);
-    const liveBytes = state.liveBytes - (live ? current.size : 0) + change.size;
+    const liveBytes = state.liveBytes - (live ? countedBytes(current) : 0) + change.size;
     const tombstones = state.tombstones - (current?.deleted === true ? 1 : 0);
     const decision = await ctx.quota(tx, {
       owner,
@@ -565,12 +565,28 @@ export async function putServerFile(
       ...state,
       headRev: rev,
       liveFiles: state.liveFiles + (live ? 0 : 1),
-      liveBytes: state.liveBytes - (live ? current.size : 0) + file.size,
+      liveBytes:
+        state.liveBytes -
+        (live ? countedBytes(current) : 0) +
+        countedBytes({ path: file.path, origin: "server", size: file.size }),
       tombstones: state.tombstones - (current?.deleted === true ? 1 : 0),
     },
     false,
   );
   return entry;
+}
+
+/**
+ * Bytes a row adds to `workspace_sync.live_bytes`. Server-written project files (`projects/`) are
+ * mounts of one shared object, counted once per project in the team quota (`project_files`), not
+ * once per member, and they must not eat the member's own workspace budget (KOBE-162).
+ */
+export function countedBytes(row: {
+  readonly path: string;
+  readonly origin: string;
+  readonly size: number;
+}): number {
+  return row.origin === "server" && row.path.startsWith("projects/") ? 0 : row.size;
 }
 
 /** A server-side delete (KOBE-54 file browser, KOBE-57 project file removal). */
@@ -599,7 +615,7 @@ export async function deleteServerFile(
       ...state,
       headRev: rev,
       liveFiles: state.liveFiles - 1,
-      liveBytes: state.liveBytes - current.size,
+      liveBytes: state.liveBytes - countedBytes(current),
       tombstones: state.tombstones + 1,
     },
     false,

@@ -1,6 +1,16 @@
 import { createHash, randomBytes } from "node:crypto";
-import { constants as FS } from "node:fs";
-import { chmod, lstat, mkdir, open, opendir, rename, rm, unlink } from "node:fs/promises";
+import { constants as FS, existsSync } from "node:fs";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  open,
+  opendir,
+  rename,
+  rm,
+  unlink,
+  type FileHandle,
+} from "node:fs/promises";
 import path from "node:path";
 import type { Readable } from "node:stream";
 import {
@@ -9,7 +19,7 @@ import {
   isServerOwnedPath,
   workspacePathIssue,
 } from "@kobe/protocol";
-import { assertOnVolume, openOnVolume, shareOnVolume } from "./volume.js";
+import { assertOnVolume, openOnVolume, shareOnVolume, volumeDevice } from "./volume.js";
 
 /**
  * Filesystem side of workspace sync (KOBE-27). Paths are workspace-relative POSIX paths (protocol
@@ -164,19 +174,85 @@ export async function openForUpload(root: string, rel: string): Promise<Readable
 const OWNED_DIR_MODE = 0o755;
 
 /**
- * A top-level server-owned folder (`projects`, `uploads`) that is not the agent's own was put there
- * by sandbox code (the workspace root is group-writable, so a tool can rename the real folder and
- * make its own). It is moved to `<name>.replaced-<random>` (a sandbox-owned path, kept and synced
- * as the user's data) so the real folder is rebuilt by the next sync. Without a uid (Windows) or
- * when running as root nothing can be told apart.
+ * A held top-level server-owned folder (`projects`, `uploads`): opened once with
+ * `O_DIRECTORY | O_NOFOLLOW`, so it is the real directory and no symlink, on the workspace volume
+ * and the agent's own. `dir` names it through the open descriptor (`/proc/self/fd/N`, so a later
+ * rename or symlink swap of the name changes nothing), `chmod` is `fchmod` on it. Inside, every
+ * directory belongs to the agent and is not writable by anyone else, so tools cannot swap
+ * anything below the root; only the root's own name (the workspace root is group-writable, D13)
+ * can be swapped, and that is what this closes (KOBE-162 review).
  */
-async function reclaimAreaRoot(root: string, name: string): Promise<void> {
-  const agentUid = process.getuid?.();
-  const stat = await lstat(path.join(root, name)).catch(() => undefined);
-  if (agentUid === undefined || agentUid === 0 || stat === undefined) return;
-  if (stat.isDirectory() && stat.uid === agentUid) return;
+export interface HeldRoot {
+  readonly dir: string;
+  chmod(mode: number): Promise<void>;
+  close(): Promise<void>;
+}
+
+const OPEN_DIR = FS.O_RDONLY | FS.O_DIRECTORY | FS.O_NOFOLLOW | FS.O_NONBLOCK;
+
+async function setAside(root: string, name: string): Promise<void> {
+  // rename never follows a symlink: it moves the link (or the foreign folder) itself.
   const aside = `${name}.replaced-${randomBytes(6).toString("hex")}`;
   await rename(path.join(root, name), path.join(root, aside));
+}
+
+function held(handle: FileHandle, fallback: string): HeldRoot {
+  const proc = `/proc/self/fd/${handle.fd}`;
+  return {
+    dir: existsSync(proc) ? proc : fallback,
+    chmod: (mode) => handle.chmod(mode),
+    close: () => handle.close(),
+  };
+}
+
+/**
+ * Opens (and with `create`, makes) the top-level folder `name` of the workspace. A symlink, a
+ * file, a folder on another device or one that is not the agent's (a tool renamed the real
+ * folder and made its own) is moved to `<name>.replaced-<random>` (user data, synced as such)
+ * and replaced. Undefined when there is no folder and `create` is off. Without a uid (Windows)
+ * or as root only the type is checked.
+ */
+export async function holdAreaRoot(
+  root: string,
+  name: string,
+  create: boolean,
+): Promise<HeldRoot | undefined> {
+  const agentUid = process.getuid?.();
+  const target = path.join(root, name);
+  let fresh = false;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let handle: FileHandle | undefined;
+    try {
+      handle = await open(target, OPEN_DIR);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        if (!create) return undefined;
+        await mkdir(target, { mode: OWNED_DIR_MODE }).catch(() => undefined);
+        fresh = true;
+        continue;
+      }
+      // ELOOP: a symlink; ENOTDIR: a file. Either way not ours.
+      if (code !== "ELOOP" && code !== "ENOTDIR") throw error;
+      await setAside(root, name);
+      if (!create) return undefined;
+      continue;
+    }
+    try {
+      const info = await handle.stat();
+      const ours =
+        info.isDirectory() &&
+        info.dev === (await volumeDevice(root)) &&
+        (fresh || agentUid === undefined || agentUid === 0 || info.uid === agentUid);
+      if (ours) return held(handle, target);
+    } catch {
+      // fall through: not usable
+    }
+    await handle.close().catch(() => undefined);
+    await setAside(root, name);
+    if (!create) return undefined;
+  }
+  throw new Error(`cannot establish the ${name} folder`);
 }
 
 /**
@@ -188,13 +264,32 @@ async function reclaimAreaRoot(root: string, name: string): Promise<void> {
  */
 export async function ensureParents(root: string, rel: string): Promise<void> {
   const parts = rel.split("/").slice(0, -1);
+  if (parts.length > 0 && isServerOwnedPath(`${parts[0]}/`)) {
+    // Through the held root: a swapped name cannot redirect a mkdir, chmod or rm below it.
+    const top = await holdAreaRoot(root, parts[0] as string, true);
+    try {
+      await top?.chmod(OWNED_DIR_MODE);
+      await ensureBelow(root, top?.dir ?? "", parts.slice(1), true);
+    } finally {
+      await top?.close();
+    }
+    return;
+  }
+  await ensureBelow(root, root, parts, false);
+}
+
+/** `parts` under `base`; `owned` areas are owner-write only, the rest group-shared (D13). */
+async function ensureBelow(
+  volumeRoot: string,
+  base: string,
+  parts: readonly string[],
+  owned: boolean,
+): Promise<void> {
+  const dirMode = owned ? OWNED_DIR_MODE : 0o775;
   let current = "";
   for (const part of parts) {
     current = current === "" ? part : `${current}/${part}`;
-    const abs = path.join(root, current);
-    const owned = isServerOwnedPath(`${current}/`);
-    if (owned && !current.includes("/")) await reclaimAreaRoot(root, current);
-    const dirMode = owned ? OWNED_DIR_MODE : 0o775;
+    const abs = path.join(base, current);
     let stat;
     try {
       stat = await lstat(abs);
@@ -204,18 +299,19 @@ export async function ensureParents(root: string, rel: string): Promise<void> {
         if (!(await lstat(abs).catch(() => undefined))?.isDirectory()) throw error;
       });
       // The agent's umask is 077: every thread shares the workspace through its group.
-      await shareOnVolume(root, abs, dirMode);
+      await shareOnVolume(volumeRoot, abs, dirMode);
       continue;
     }
     if (stat.isDirectory()) {
-      if (owned && (stat.mode & 0o7777 & ~0o2000) !== OWNED_DIR_MODE)
-        await chmod(abs, OWNED_DIR_MODE);
+      if (owned && (stat.mode & 0o7777 & ~0o2000) !== OWNED_DIR_MODE) {
+        await shareOnVolume(volumeRoot, abs, OWNED_DIR_MODE);
+      }
       continue;
     }
     if (!owned) throw new Error(`a file or link is in the way of directory ${current}`);
     await rm(abs, { force: true });
     await mkdir(abs, { mode: dirMode });
-    await shareOnVolume(root, abs, dirMode);
+    await shareOnVolume(volumeRoot, abs, dirMode);
   }
 }
 
@@ -338,25 +434,32 @@ export async function renameWithin(root: string, from: string, to: string): Prom
  * agent reverts local changes on its next sync.
  */
 export async function lockServerOwned(root: string, areas: readonly string[]): Promise<void> {
-  // Directory entries never follow links; the area roots are checked the same way (a symlinked
-  // `uploads` would otherwise chmod whatever it points at).
-  const lock = async (rel: string): Promise<void> => {
+  // Each area root is held open without following links (a symlinked `uploads` or `projects`
+  // is moved aside, never chmod-ed through), and everything below is reached through it.
+  const lock = async (dirPath: string): Promise<void> => {
     let dir;
     try {
-      dir = await opendir(path.join(root, rel));
+      dir = await opendir(dirPath);
     } catch {
       return;
     }
     for await (const entry of dir) {
-      const child = `${rel}/${entry.name}`;
-      if (entry.isDirectory()) await lock(child);
-      else if (entry.isFile()) await chmod(path.join(root, child), 0o444).catch(() => {});
+      const child = path.join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        await lock(child);
+        await chmod(child, 0o555).catch(() => {});
+      } else if (entry.isFile()) await chmod(child, 0o444).catch(() => {});
     }
-    await chmod(path.join(root, rel), 0o555).catch(() => {});
   };
   for (const area of areas) {
-    const rel = area.replace(/\/$/, "");
-    const stat = await lstat(path.join(root, rel)).catch(() => undefined);
-    if (stat?.isDirectory()) await lock(rel);
+    const name = area.replace(/\/$/, "");
+    const top = await holdAreaRoot(root, name, false).catch(() => undefined);
+    if (!top) continue;
+    try {
+      await lock(top.dir);
+      await top.chmod(0o555).catch(() => {});
+    } finally {
+      await top.close();
+    }
   }
 }

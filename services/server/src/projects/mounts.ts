@@ -37,11 +37,12 @@ export interface ProjectMounts {
   /** Binds the workspace store once it exists (it is built after the server deps). */
   use(sync: WorkspaceSync): void;
   readonly enabled: boolean;
-  reconcileUser(teamId: string, userId: string): Promise<void>;
-  reconcileUsers(teamId: string, userIds: readonly string[]): Promise<void>;
-  reconcileProject(teamId: string, projectId: string): Promise<void>;
+  /** The reconcile methods resolve true only when every workspace was brought in line. */
+  reconcileUser(teamId: string, userId: string): Promise<boolean>;
+  reconcileUsers(teamId: string, userIds: readonly string[]): Promise<boolean>;
+  reconcileProject(teamId: string, projectId: string): Promise<boolean>;
   /** Every member of the team: a project's members mode changed, so who lost access is not listed by it. */
-  reconcileTeam(teamId: string): Promise<void>;
+  reconcileTeam(teamId: string): Promise<boolean>;
   /** In the caller's transaction: the same as {@link reconcileUser} (for tests and run start). */
   reconcileUserIn(tx: KobeTx, teamId: string, userId: string): Promise<void>;
 }
@@ -151,20 +152,23 @@ async function membersOf(tx: KobeTx, teamId: string, projectId: string): Promise
 
 export function createProjectMounts(db: KobeDb, log: Pick<Logger, "warn">): ProjectMounts {
   let sync: WorkspaceSync | undefined;
-  const reconcileUsers = async (teamId: string, userIds: readonly string[]): Promise<void> => {
+  const reconcileUsers = async (teamId: string, userIds: readonly string[]): Promise<boolean> => {
     const store = sync;
-    if (!store) return;
+    if (!store) return true;
+    let allOk = true;
     for (let i = 0; i < userIds.length; i += BATCH) {
       await Promise.all(
         userIds.slice(i, i + BATCH).map(async (userId) => {
           try {
             await withTeam(db, teamId, (tx) => reconcile(tx, store, teamId, userId));
           } catch (err) {
+            allOk = false;
             log.warn({ err, teamId }, "project files: could not update a workspace");
           }
         }),
       );
     }
+    return allOk;
   };
   return {
     use: (store) => {
@@ -176,7 +180,7 @@ export function createProjectMounts(db: KobeDb, log: Pick<Logger, "warn">): Proj
     reconcileUsers,
     reconcileUser: (teamId, userId) => reconcileUsers(teamId, [userId]),
     async reconcileTeam(teamId) {
-      if (!sync) return;
+      if (!sync) return true;
       try {
         const users = await withTeam(db, teamId, async (tx) => {
           const res = await tx.execute<{ user_id: string }>(
@@ -184,18 +188,20 @@ export function createProjectMounts(db: KobeDb, log: Pick<Logger, "warn">): Proj
           );
           return res.rows.map((r) => r.user_id);
         });
-        await reconcileUsers(teamId, users);
+        return await reconcileUsers(teamId, users);
       } catch (err) {
         log.warn({ err, teamId }, "project files: could not list the team to update");
+        return false;
       }
     },
     async reconcileProject(teamId, projectId) {
-      if (!sync) return;
+      if (!sync) return true;
       try {
         const users = await withTeam(db, teamId, (tx) => membersOf(tx, teamId, projectId));
-        await reconcileUsers(teamId, users);
+        return await reconcileUsers(teamId, users);
       } catch (err) {
         log.warn({ err, teamId }, "project files: could not list the members to update");
+        return false;
       }
     },
     async reconcileUserIn(tx, teamId, userId) {

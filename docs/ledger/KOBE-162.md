@@ -62,11 +62,24 @@ Server: `projects/{files,mounts,proposals}.ts`, file routes in `routes/projects.
 - **Protocol (additive):** `BUILTIN_TOOLS.propose_project_file` (risk write), `ProjectFilePropose(Result)Frame`
   type aliases. The contract itself (KOBE-159) is unchanged.
 
+## Review round (Opus review of #210)
+
+- **Quota (HIGH):** `storageUsed` now adds `SUM(project_files.size_bytes)` once; server-written `projects/` rows
+  are excluded from `workspace_sync.live_bytes` (`countedBytes` in `workspace-sync/store.ts`), so members' own
+  budgets are untouched. Test: 50 members, usage = one copy, member live_bytes 0.
+- **Symlink swap (HIGH):** area roots are opened once with `O_DIRECTORY|O_NOFOLLOW` (`holdAreaRoot`), checked for
+  type, device and agent uid; a symlink or foreign folder is moved aside; mkdir/chmod/rm/lock below it go through
+  `/proc/self/fd/N` and `fchmod` on the handle (path fallback where /proc is missing). Below the root every dir
+  is agent-owned and not group-writable, so only the root's name can be swapped. Tests: `fs.test.ts`, real-helper
+  "a symlink swapped in for projects/". The sticky bit on /workspace was not set: the mount root is not ours to chmod.
+- **Archived projects (MEDIUM):** stay mounted, read-only. Spec CE19/KOBE-161: archive = retirement, content stays
+  readable (shared threads of archived projects stay readable too); only new adds are refused (`archived`).
+- **Failed reconcile (MEDIUM):** each user's reconcile is one transaction (all or nothing). Reconcile methods now
+  report success; the file object is deleted only when every member's workspace was updated, so a row never
+  points at a deleted object; the next run start heals the stale row. Test with an injected failure.
+
 ## Open questions (for Chris or the coordinator)
 
-- Quota: every member's workspace counts the project file's bytes (`live_bytes`), so a 50 MiB file in a team of 50
-  counts 2.5 GiB toward the team storage quota. Server writes do not check it per member; the upload checks the
-  file once. Dedup in the quota query would fix it (separate ticket).
 - The sandbox does not yet apply `run.start.project` instructions to the prompt (no ticket in this PR's scope);
   the agent now announces `projects`, so the server already sends them.
 - Orphans: a crash between row delete and object delete leaves an object nothing references (no sweep for the
