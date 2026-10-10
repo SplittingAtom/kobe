@@ -34,22 +34,34 @@
   shape: per connector `url = <proxy>/v1/mcp/<connector_id>`, `headers.Authorization = Bearer
 <session token>`, `exposure: hidden` plus `toolExposure: {<mcp tool>: direct}` so Pi registers
   exactly the listed tools. Nothing else (no upstream URL, key, OAuth block, stdio command).
-- **Where it lands**: `<runtime dir>/agent/mcp.json`, i.e. Pi's `PI_CODING_AGENT_DIR` (private,
-  fresh per Pi process, removed on exit; KOBE-41/196/228). Mode 0400 (0440 under a Pi identity).
-  Never the workspace or the shared HOME. Pi loads it only with `builtin:mcp`, which
-  `buildPiLaunch` adds (first, before kobe-policy) only when servers exist; `mcp` is part of the
-  launch key, so a changed set restarts an idle Pi (`ThreadManager` also treats a frame with `mcp`
-  but no `config` as a change).
-- **Tripwire**: `mcp.json` is allowed in `agent/` only when the thread wrote one, and its content
-  is verified (last two texts written) in `verifyRuntime`, like the model file.
-- **Token rotation**: the keeper's new token rewrites `mcp.json` atomically (temp + rename).
+- **Where it lands**: `<runtime dir>/agent/mcp.json` and `agent/mcp-token`, i.e. Pi's
+  `PI_CODING_AGENT_DIR` (private, fresh per Pi process, removed on exit; KOBE-41/196/228). Both
+  mode 0400 (0440 under a Pi identity), written atomically. Never the workspace or the shared
+  HOME. Pi loads `mcp.json` only with `builtin:mcp`, which `buildPiLaunch` adds (first, before
+  kobe-policy) only when servers exist; `mcp` is part of the launch key, so a changed set restarts
+  an idle Pi (`ThreadManager` also treats a frame with `mcp` but no `config` as a change).
+- **Token rotation (15 min TTL)**: `mcp.json` holds no token. Each server's header is
+  `Authorization: !cat '<agent dir>/mcp-token'` (Pi's `!command` config values); the file holds
+  `Bearer <token>` and the keeper's rotation rewrites it atomically. The path is the agent's own
+  `mkdtemp` dir, checked against `^/[A-Za-z0-9_./-]+$` before use; no tool or model input reaches
+  the command. Verified in Pi source (1.0.3 dist, `extensions/mcp/runtime.js`,
+  `core/resolve-config-value.js`): header values are resolved uncached when a transport is
+  created (connect), NOT per request, and a 401 does not reconnect (only OAuth servers sign in).
+  So the proxy closes the gap: `initialize` now returns a constant `Mcp-Session-Id`; a request
+  carrying it with a genuine-but-expired token gets 404 (`isExpiredSandboxToken`: signature and
+  audience valid, only `exp` failed). Pi's `withClient` treats 404 on a session as
+  `McpSessionExpiredError`: it drops the client, opens a new session (re-running the command, so
+  reading the rotated file) and retries once; the call never ran. Forged, wrong-audience or
+  session-less expired tokens still get 401.
+- **Tripwire**: `mcp.json` and `mcp-token` are allowed in `agent/` only when the thread wrote them;
+  content is verified (config; last two token texts) in `verifyRuntime`, like the model file.
 
 ## Open questions (for Chris or the coordinator)
 
-- Pi resolves header values when it opens a server connection, not per request. A Pi connected
-  before a rotation keeps the 15-minute token until it reconnects, so a run longer than the token
-  TTL may see 401s from the proxy. Options: a `!command` header that cats a rotated file (shell
-  from Pi's uid), a longer mcp-proxy token TTL, or restarting idle Pi on rotation. Not done here.
+- The rotation path is covered by unit tests (the header command re-reads the rotated file; proxy
+  404 on an expired session) and the Pi source reading above, not by a real-Pi MCP run (Pi is
+  not installed locally; there is no real-Pi MCP test yet). Worth a CI real-Pi test with a fake
+  MCP server if the coordinator wants it.
 - Under a Pi identity the tool uid equals Pi's, so tools can read `mcp.json` (same as the model
   file today); the paired tool uid (KOBE-167) separates them. The token is audience-scoped to the
   proxy and the user's own grants only.
@@ -62,5 +74,5 @@
   connectors from grants"), `runs/run-mcp.test.ts`, `mcp/pi-mcp-config.test.ts` (toolExposure),
   `agent.mcp.test.ts` (extension only with connectors).
 - ac-2 (sandbox config has no upstream credentials): `pi-mcp-config.test.ts` (only the session
-  token; no other secret-like string, only proxy URLs), `runs-resolver.db.test.ts` (wire field has no
+  token file; none in mcp.json, only proxy URLs), `mcp-proxy/src/mcp.test.ts` (expired session -> 404), `runs-resolver.db.test.ts` (wire field has no
   URL/credential), `mcp-config.test.ts` (strict schema).

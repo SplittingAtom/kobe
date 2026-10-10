@@ -29,8 +29,11 @@ import { tamperedConfig, writeGuardedConfig } from "../models/agent-config.js";
 import {
   buildPiMcpConfig,
   MCP_AGENT_FILES,
-  verifyMcpConfigFile,
-  writeMcpConfigFile,
+  MCP_CONFIG_FILE,
+  MCP_TOKEN_FILE,
+  mcpTokenFileText,
+  verifyAgentFile,
+  writeAgentFile,
   type McpWiring,
 } from "../mcp/pi-mcp-config.js";
 import { ModelFile } from "../models/model-file.js";
@@ -111,8 +114,10 @@ interface McpConfigState {
   readonly agentDir: string;
   readonly shared: boolean;
   readonly mcp: RunMcpContext;
-  /** The last two texts written (a rotation may be mid-rename): what the tripwire accepts. */
-  texts: readonly string[];
+  /** `mcp.json` as written (static for this process). */
+  readonly config: string;
+  /** The last two token file texts written (a rotation may be mid-rename): what the tripwire accepts. */
+  tokenTexts: readonly string[];
 }
 
 export interface ThreadEnv {
@@ -321,13 +326,22 @@ export class Thread {
       if (launch.mcp !== undefined) {
         const wiring = this.#env.mcp;
         if (wiring === undefined) throw new Error("this sandbox has no MCP proxy wiring");
-        const text = buildPiMcpConfig({
+        const config = buildPiMcpConfig({
           proxyUrl: wiring.proxyUrl,
-          token: await wiring.tokens.current(),
+          tokenFile: path.join(agentDir, MCP_TOKEN_FILE),
           mcp: launch.mcp,
         });
-        mcpConfig = { agentDir, shared: identity !== undefined, mcp: launch.mcp, texts: [text] };
-        await writeMcpConfigFile(agentDir, text, mcpConfig.shared);
+        const tokenText = mcpTokenFileText(await wiring.tokens.current());
+        mcpConfig = {
+          agentDir,
+          shared: identity !== undefined,
+          mcp: launch.mcp,
+          config,
+          tokenTexts: [tokenText],
+        };
+        // Token first: Pi may run the header command as soon as it reads the config.
+        await writeAgentFile(agentDir, MCP_TOKEN_FILE, tokenText, mcpConfig.shared);
+        await writeAgentFile(agentDir, MCP_CONFIG_FILE, config, mcpConfig.shared);
       }
       // The tools get the launch's HOME and TMPDIR (the shared ones); Pi gets private ones, as it
       // loads code from both. With the executor the tools are another uid; without it (KOBE-228)
@@ -495,18 +509,16 @@ export class Thread {
   }
 
   /**
-   * A rotated mcp-proxy token (KOBE-111): `mcp.json` is rewritten atomically. Pi reads it when it
-   * connects, so a connection made before the rotation keeps the older token until it reconnects
-   * (ledger KOBE-111: open question).
+   * A rotated mcp-proxy token (KOBE-111): the token file is rewritten atomically. Pi's header
+   * command reads it whenever Pi opens a connection (mcp-proxy makes an expired session reconnect).
    */
   async updateMcpToken(token: string): Promise<void> {
     const state = this.#mcpConfig;
-    const wiring = this.#env.mcp;
-    if (state === undefined || wiring === undefined) return;
+    if (state === undefined) return;
     try {
-      const text = buildPiMcpConfig({ proxyUrl: wiring.proxyUrl, token, mcp: state.mcp });
-      state.texts = [state.texts.at(-1) ?? text, text];
-      await writeMcpConfigFile(state.agentDir, text, state.shared);
+      const text = mcpTokenFileText(token);
+      state.tokenTexts = [state.tokenTexts.at(-1) ?? text, text];
+      await writeAgentFile(state.agentDir, MCP_TOKEN_FILE, text, state.shared);
     } catch (error) {
       this.#warn(`mcp config not updated: ${(error as Error).message}`);
     }
@@ -560,8 +572,14 @@ export class Thread {
       return "the system prompt file is not what the agent wrote";
     }
     const mcp = this.#mcpConfig;
-    if (mcp !== undefined && !(await verifyMcpConfigFile(mcp.agentDir, mcp.texts))) {
-      return "the MCP config file is not what the agent wrote";
+    if (
+      mcp !== undefined &&
+      !(
+        (await verifyAgentFile(mcp.agentDir, MCP_CONFIG_FILE, [mcp.config])) &&
+        (await verifyAgentFile(mcp.agentDir, MCP_TOKEN_FILE, mcp.tokenTexts))
+      )
+    ) {
+      return "the MCP config or token file is not what the agent wrote";
     }
     const unexpected = await unexpectedEntries(
       runtimeDir,

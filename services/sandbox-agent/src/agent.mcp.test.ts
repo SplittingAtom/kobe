@@ -78,19 +78,25 @@ describe("per-session MCP config (KOBE-111)", () => {
     );
     expect(extensions).toEqual(["builtin:mcp", FAKE_POLICY_EXTENSION]);
     const file = path.join(launch.agentDir, "mcp.json");
+    const tokenFile = path.join(launch.agentDir, "mcp-token");
     expect(file.startsWith(path.join(h.dir, "pi-runtime"))).toBe(true);
     expect((await stat(file)).mode & 0o777).toBe(0o400);
+    expect((await stat(tokenFile)).mode & 0o777).toBe(0o400);
     const text = await readFile(file, "utf8");
     expect(JSON.parse(text).mcpServers.jira).toMatchObject({
       url: `${PROXY}/v1/mcp/${ID}`,
-      headers: { Authorization: `Bearer ${TOKEN_1}` },
+      headers: { Authorization: `!cat '${tokenFile}'` },
     });
+    expect(text).not.toContain(TOKEN_1);
+    expect(await readFile(tokenFile, "utf8")).toBe(`Bearer ${TOKEN_1}\n`);
     // Nothing under the workspace names the connector config.
     expect(existsSync(path.join(h.dir, "workspace", "mcp.json"))).toBe(false);
 
+    // Rotation mid-run: only the token file changes; mcp.json and the tripwire stay as they are.
     tokens.rotate(TOKEN_2);
-    await until(async () => (await readFile(file, "utf8")).includes(TOKEN_2));
-    expect(await readFile(file, "utf8")).not.toContain(TOKEN_1);
+    await until(async () => (await readFile(tokenFile, "utf8")).includes(TOKEN_2));
+    expect(await readFile(file, "utf8")).toBe(text);
+    expect(await readFile(tokenFile, "utf8")).not.toContain(TOKEN_1);
   });
 
   it("a run with no effective connector starts Pi without the MCP extension or file", async () => {
