@@ -19,6 +19,9 @@ export interface WatchableRun extends RunState {
   readonly runId: string;
   readonly threadId: string;
   readonly ownerUserId: string;
+  readonly projectId: string | null;
+  /** Shared to its project and not in Trash (D23). */
+  readonly sharedToProject: boolean;
 }
 
 export interface Page {
@@ -34,6 +37,8 @@ export interface Access {
   readonly role: TeamRole | null;
   /** Owner of the run's thread, null when the run is gone. */
   readonly ownerUserId: string | null;
+  readonly projectId: string | null;
+  readonly sharedToProject: boolean;
 }
 
 /** Database reads behind the event stream, on their own small pool. */
@@ -76,7 +81,8 @@ const PAGE_SQL = `
    ORDER BY p.seq`;
 
 const RUN_SQL = `
-  SELECT r.thread_id, t.owner_user_id, r.ended_at IS NOT NULL AS ended,
+  SELECT r.thread_id, t.owner_user_id, t.project_id,
+         (t.shared_to_project AND t.deleted_at IS NULL) AS shared, r.ended_at IS NOT NULL AS ended,
          r.events_compacted_at IS NOT NULL AS compacted, r.last_seq
     FROM runs r
     JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
@@ -87,7 +93,13 @@ const ACCESS_SQL = `
          (SELECT m.role::text FROM team_members m WHERE m.team_id = $2 AND m.user_id = $3) AS role,
          (SELECT t.owner_user_id FROM runs r
             JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
-           WHERE r.team_id = $2 AND r.id = $4) AS owner_user_id`;
+           WHERE r.team_id = $2 AND r.id = $4) AS owner_user_id,
+         (SELECT t.project_id FROM runs r
+            JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
+           WHERE r.team_id = $2 AND r.id = $4) AS project_id,
+         COALESCE((SELECT t.shared_to_project AND t.deleted_at IS NULL FROM runs r
+            JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
+           WHERE r.team_id = $2 AND r.id = $4), false) AS shared`;
 
 interface PageRow {
   ended: boolean;
@@ -169,6 +181,8 @@ export function createStreamReader(options: {
       const [row] = await inTeam<{
         thread_id: string;
         owner_user_id: string;
+        project_id: string | null;
+        shared: boolean;
         ended: boolean;
         compacted: boolean;
         last_seq: number;
@@ -178,6 +192,8 @@ export function createStreamReader(options: {
         runId,
         threadId: row.thread_id,
         ownerUserId: row.owner_user_id,
+        projectId: row.project_id,
+        sharedToProject: row.shared,
         ended: row.ended,
         compacted: row.compacted,
         lastSeq: row.last_seq,
@@ -197,11 +213,15 @@ export function createStreamReader(options: {
         session_live: boolean;
         role: TeamRole | null;
         owner_user_id: string | null;
+        project_id: string | null;
+        shared: boolean;
       }>(teamId, ACCESS_SQL, [sessionId, teamId, userId, runId]);
       return {
         sessionLive: row?.session_live ?? false,
         role: row?.role ?? null,
         ownerUserId: row?.owner_user_id ?? null,
+        projectId: row?.project_id ?? null,
+        sharedToProject: row?.shared ?? false,
       };
     },
     close: () => pool.end(),

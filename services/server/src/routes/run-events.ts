@@ -5,6 +5,8 @@ import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz
 import { teamRoleAllows } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
 import { createRunEventStream, type StreamSource } from "../event-stream/stream.js";
+import { withTeam } from "@kobe/db";
+import { viewerProjectIds } from "../threads/references.js";
 import { canWatchThread } from "../event-stream/visibility.js";
 
 const uuid = z.uuid();
@@ -51,8 +53,15 @@ export function runEventsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariabl
     const team = c.get("team");
     const user = c.get("user");
     const sessionId = c.get("sessionId");
+    const memberOf = () =>
+      withTeam(deps.database.db, team.id, (tx) => viewerProjectIds(tx, team.id, user.id));
     const run = await reader.loadRun(team.id, runId);
-    if (!run || !canWatchThread(run, user.id)) return notFound();
+    if (
+      !run ||
+      !canWatchThread(run, user.id, run.ownerUserId === user.id ? [] : await memberOf())
+    ) {
+      return notFound();
+    }
     // No honest client holds a seq the run hasn't issued (seq is assigned on commit). Refuse it
     // instead of waiting for it, which also ends EventSource's reconnect loop (non-200 stops it).
     // Ended runs answer 204 below, per the contract.
@@ -98,7 +107,15 @@ export function runEventsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariabl
           access.sessionLive &&
           teamRoleAllows(access.role, "team.chat") &&
           access.ownerUserId !== null &&
-          canWatchThread({ ownerUserId: access.ownerUserId }, user.id)
+          canWatchThread(
+            {
+              ownerUserId: access.ownerUserId,
+              projectId: access.projectId,
+              sharedToProject: access.sharedToProject,
+            },
+            user.id,
+            access.ownerUserId === user.id ? [] : await memberOf(),
+          )
         );
       },
     };

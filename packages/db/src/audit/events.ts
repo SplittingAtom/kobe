@@ -564,7 +564,20 @@ export const AUDIT_EVENTS = {
   // ── thread: lifecycle metadata only, never titles or content (KOBE-34, D18, D23) ──
   "thread.trashed": event("team", { threadId: id }),
   "thread.restored": event("team", { threadId: id }),
-  "thread.sharing_changed": event("team", { threadId: id, projectId: id, shared: z.boolean() }),
+  /** `visibility` is the share scope after the change (private | project; `team` joins with KOBE-221). */
+  "thread.sharing_changed": event("team", {
+    threadId: id,
+    projectId: id,
+    shared: z.boolean(),
+    visibility: z.enum(["private", "project"]),
+  }),
+  /** A new private thread copied from `sourceThreadId`; `threadId` is the fork. */
+  "thread.forked": event("team", {
+    threadId: id,
+    sourceThreadId: id,
+    projectId: id.nullable(),
+    entries: z.number().int().nonnegative(),
+  }),
   // ── project: configuration metadata only, never names, instructions or descriptions (KOBE-161, D23) ──
   "project.created": event("team", { projectId: id, membersMode: z.enum(["team", "selected"]) }),
   /** `fields` lists which settings changed (names, not values). */

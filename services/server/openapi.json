@@ -995,6 +995,205 @@
         }
       }
     },
+    "/v1/threads/{id}/share": {
+      "post": {
+        "operationId": "shareThread",
+        "summary": "Set who can read the thread: `private` or `project` (author only)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": true,
+            "description": "The team the client believes is active. Required on changes; must match.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShareThreadBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated thread.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Thread"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`, `invalid_cursor` or `team_header_required`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, `forbidden` (team role) or `read_only`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`thread_not_found`: unknown id, another team's or user's thread.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`not_in_project`, `thread_busy` or `thread_in_trash`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/threads/{id}/fork": {
+      "post": {
+        "operationId": "forkThread",
+        "summary": "Copy a readable thread (own, or shared to your project) into a new private thread",
+        "description": "Copies the entries from the root up to `entry_id` (default: the leaf). Workspace files are not copied.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": true,
+            "description": "The team the client believes is active. Required on changes; must match.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForkThreadBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The new thread.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedThread"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`, `invalid_cursor` or `team_header_required`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, `forbidden` (team role) or `read_only`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`thread_not_found`: unknown id, another team's or user's thread.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`thread_in_trash` or `entry_offloaded`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/threads/{id}/restore": {
       "post": {
         "operationId": "restoreThread",
@@ -2343,6 +2542,10 @@
           "shared_to_project": {
             "type": "boolean"
           },
+          "visibility": {
+            "type": "string",
+            "enum": ["private", "project"]
+          },
           "is_test": {
             "type": "boolean"
           },
@@ -2406,6 +2609,7 @@
           "agent_id",
           "agent_version",
           "shared_to_project",
+          "visibility",
           "is_test",
           "model",
           "leaf_entry_id",
@@ -2504,6 +2708,10 @@
                 "shared_to_project": {
                   "type": "boolean"
                 },
+                "visibility": {
+                  "type": "string",
+                  "enum": ["private", "project"]
+                },
                 "is_test": {
                   "type": "boolean"
                 },
@@ -2567,6 +2775,7 @@
                 "agent_id",
                 "agent_version",
                 "shared_to_project",
+                "visibility",
                 "is_test",
                 "model",
                 "leaf_entry_id",
@@ -2673,6 +2882,10 @@
                 "shared_to_project": {
                   "type": "boolean"
                 },
+                "visibility": {
+                  "type": "string",
+                  "enum": ["private", "project"]
+                },
                 "is_test": {
                   "type": "boolean"
                 },
@@ -2775,6 +2988,7 @@
                 "agent_id",
                 "agent_version",
                 "shared_to_project",
+                "visibility",
                 "is_test",
                 "model",
                 "leaf_entry_id",
@@ -2879,6 +3093,10 @@
           "shared_to_project": {
             "type": "boolean"
           },
+          "visibility": {
+            "type": "string",
+            "enum": ["private", "project"]
+          },
           "is_test": {
             "type": "boolean"
           },
@@ -2934,6 +3152,9 @@
           },
           "agent_name": {
             "type": ["string", "null"]
+          },
+          "read_only": {
+            "type": "boolean"
           },
           "agent_status": {
             "anyOf": [
@@ -3043,6 +3264,7 @@
           "agent_id",
           "agent_version",
           "shared_to_project",
+          "visibility",
           "is_test",
           "model",
           "leaf_entry_id",
@@ -3051,6 +3273,7 @@
           "deleted_at",
           "purge_after",
           "agent_name",
+          "read_only",
           "agent_status",
           "agent_current_version",
           "agent_model",
@@ -3223,6 +3446,34 @@
         },
         "additionalProperties": false
       },
+      "ShareThreadBody": {
+        "type": "object",
+        "properties": {
+          "visibility": {
+            "type": "string",
+            "enum": ["private", "project"]
+          }
+        },
+        "required": ["visibility"],
+        "additionalProperties": false
+      },
+      "ForkThreadBody": {
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "additionalProperties": false
+      },
       "SetLeafBody": {
         "type": "object",
         "properties": {
@@ -3330,6 +3581,10 @@
           "shared_to_project": {
             "type": "boolean"
           },
+          "visibility": {
+            "type": "string",
+            "enum": ["private", "project"]
+          },
           "is_test": {
             "type": "boolean"
           },
@@ -3393,6 +3648,7 @@
           "agent_id",
           "agent_version",
           "shared_to_project",
+          "visibility",
           "is_test",
           "model",
           "leaf_entry_id",
