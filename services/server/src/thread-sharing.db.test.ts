@@ -1,17 +1,23 @@
 import { randomUUID } from "node:crypto";
+import pino from "pino";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RunFixture } from "./testing/run-fixture.js";
 import { SseReader } from "./testing/sse.js";
 import type { Person } from "./testing/event-stream-fixture.js";
+import { MemoryObjects } from "./testing/memory-objects.js";
+import { runRetentionPass, type BlobStore } from "./retention/index.js";
 
 /**
  * KOBE-163: share a thread to its project, read-only access for members, unshare, fork (D23).
  * A reader is a project member who is not the author; everyone else gets 404.
  */
 const f = new RunFixture();
+const objects = new MemoryObjects();
+const PREFIX = "kobe/";
+const blobs: BlobStore = { objects, prefix: PREFIX };
 
 beforeAll(async () => {
-  await f.setup({ streamTimings: { keepaliveMs: 50, revalidateMs: 100 } });
+  await f.setup({ blobs, streamTimings: { keepaliveMs: 50, revalidateMs: 100 } });
 });
 afterAll(async () => {
   await f.teardown();
@@ -214,6 +220,82 @@ describe("fork", () => {
     // Unsharing hides the source from forking again.
     await as(x.author).post(`${url}/share`, { visibility: "private" });
     expect((await as(x.reader).post(`${url}/fork`, {})).status).toBe(404);
+  });
+
+  it("copies an offloaded entry body into the fork's own tree, so purging the source keeps it", async () => {
+    const x = await world();
+    const team = x.w.team;
+    const sourceKey = `${PREFIX}teams/${team}/threads/${x.threadId}/entries/big`;
+    const body = Buffer.from(JSON.stringify({ message: { role: "user", content: "x".repeat(70_000) } }));
+    objects.objects.set(sourceKey, body);
+    await f.fx.admin.query(
+      `INSERT INTO thread_entries (team_id, thread_id, entry_id, parent_id, type, payload, blob_ref)
+       VALUES ($1, $2, 'big', $3, 'message', '{}', $4)`,
+      [team, x.threadId, x.entries.assistant, sourceKey],
+    );
+    await f.fx.admin.query(`UPDATE threads SET leaf_entry_id = 'big' WHERE team_id = $1 AND id = $2`, [
+      team,
+      x.threadId,
+    ]);
+    const forked = await as(x.author).post(`/v1/threads/${x.threadId}/fork`, {});
+    expect(forked.status, JSON.stringify(forked.json)).toBe(201);
+    const id = forked.json.thread_id as string;
+    const { rows } = await f.fx.admin.query<{ blob_ref: string }>(
+      `SELECT blob_ref FROM thread_entries WHERE team_id = $1 AND thread_id = $2 AND entry_id = 'big'`,
+      [team, id],
+    );
+    const copy = rows[0]?.blob_ref ?? "";
+    expect(copy).not.toBe(sourceKey);
+    expect(copy.startsWith(`${PREFIX}teams/${team}/threads/${id}/`)).toBe(true);
+    expect(objects.objects.get(copy)).toEqual(body);
+
+    // Purge the source (trashed long ago): its blob goes, the fork's copy stays readable.
+    await f.fx.admin.query(
+      `UPDATE threads SET deleted_at = now() - interval '400 days' WHERE team_id = $1 AND id = $2`,
+      [team, x.threadId],
+    );
+    await runRetentionPass({ db: f.fx.db, blobs, logger: pino({ level: "silent" }) });
+    expect(objects.objects.has(sourceKey)).toBe(false);
+    expect(objects.objects.get(copy)).toEqual(body);
+    const detail = await as(x.author).get(`/v1/threads/${id}`);
+    expect(detail.json.entries.at(-1)).toMatchObject({ entry_id: "big", payload_offloaded: true });
+    expect(await audit(team, "thread.forked")).toContainEqual({
+      threadId: id,
+      sourceThreadId: x.threadId,
+      projectId: x.projectId,
+      entries: 3,
+    });
+  });
+
+  it("deletes the copied bodies when the fork cannot be stored", async () => {
+    const x = await world();
+    const team = x.w.team;
+    const sourceKey = `${PREFIX}teams/${team}/threads/${x.threadId}/entries/big2`;
+    objects.objects.set(sourceKey, Buffer.from("{}"));
+    await f.fx.admin.query(
+      `INSERT INTO thread_entries (team_id, thread_id, entry_id, parent_id, type, payload, blob_ref)
+       VALUES ($1, $2, 'big2', $3, 'message', '{}', $4)`,
+      [team, x.threadId, x.entries.assistant, sourceKey],
+    );
+    await f.fx.admin.query(`UPDATE threads SET leaf_entry_id = 'big2' WHERE team_id = $1 AND id = $2`, [
+      team,
+      x.threadId,
+    ]);
+    // A reader who lost access between planning and storing is the 404 path; here the source
+    // is trashed after the copy would start, which the second transaction re-checks.
+    const before = new Set(objects.objects.keys());
+    const real = objects.copy.bind(objects);
+    objects.copy = async (from, to) => {
+      await real(from, to);
+      await f.fx.admin.query(
+        `UPDATE threads SET deleted_at = now() WHERE team_id = $1 AND id = $2`,
+        [team, x.threadId],
+      );
+    };
+    const res = await as(x.author).post(`/v1/threads/${x.threadId}/fork`, {});
+    objects.copy = real;
+    expect(res.status).toBe(409);
+    expect(new Set(objects.objects.keys())).toEqual(before);
   });
 
   it("forks up to an entry, with a new title, and the author may fork their own thread", async () => {
