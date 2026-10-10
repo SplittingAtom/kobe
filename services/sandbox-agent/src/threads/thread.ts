@@ -329,7 +329,6 @@ export class Thread {
         const config = buildPiMcpConfig({
           proxyUrl: wiring.proxyUrl,
           tokenFile: path.join(agentDir, MCP_TOKEN_FILE),
-          threadId: this.id,
           mcp: launch.mcp,
         });
         const tokenText = mcpTokenFileText(await wiring.tokens.current());

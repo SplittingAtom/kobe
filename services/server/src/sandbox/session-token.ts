@@ -26,18 +26,14 @@ export type IssuedSessionTokens = {
   readonly tokens: Readonly<Record<SessionTokenAudience, string>>;
 };
 
-/**
- * One token per audience for a sandbox, all expiring together. `ttlSeconds` is the install's
- * KOBE_SESSION_TOKEN_TTL_SECONDS (15 min unless a test install shortens it).
- */
+/** One token per audience for a sandbox, all expiring together. */
 export function issueSessionTokens(
   principal: SandboxPrincipal,
   keys: SessionKeys,
   now: Date = new Date(),
-  ttlSeconds: number = SESSION_TOKEN_TTL_SECONDS,
 ): IssuedSessionTokens {
   const iat = Math.floor(now.getTime() / 1000);
-  const exp = iat + ttlSeconds;
+  const exp = iat + SESSION_TOKEN_TTL_SECONDS;
   const tokens = Object.fromEntries(
     SESSION_TOKEN_AUDIENCES.map((aud) => [
       aud,

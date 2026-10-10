@@ -27,18 +27,6 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ ...REQUIRED, KOBE_PROCESS: "worker" })).toThrow(/KOBE_PROCESS/);
   });
 
-  it("session token TTL defaults to 15 min, shortened only within 10–900 s (KOBE-241, e2e)", () => {
-    expect(loadConfig(REQUIRED).sessionTokenTtlSeconds).toBe(900);
-    expect(
-      loadConfig({ ...REQUIRED, KOBE_SESSION_TOKEN_TTL_SECONDS: "15" }).sessionTokenTtlSeconds,
-    ).toBe(15);
-    for (const bad of ["9", "901", "x"]) {
-      expect(() => loadConfig({ ...REQUIRED, KOBE_SESSION_TOKEN_TTL_SECONDS: bad })).toThrow(
-        /KOBE_SESSION_TOKEN_TTL_SECONDS/,
-      );
-    }
-  });
-
   it("caps agent versions at 1000 by default, configurable within 1–100000 (KOBE-46)", () => {
     expect(loadConfig(REQUIRED).agentMaxVersions).toBe(1000);
     expect(loadConfig({ ...REQUIRED, KOBE_AGENT_MAX_VERSIONS: "50" }).agentMaxVersions).toBe(50);

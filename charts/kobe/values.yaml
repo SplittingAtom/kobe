@@ -153,9 +153,6 @@ server:
   # Seconds between re-probes of every pinned MCP connector for tool drift (KOBE-102); changed or
   # new tools stay disabled until an install admin re-approves them. 0 = never; otherwise 60..86400.
   connectorRefreshSeconds: 3600
-  # Lifetime of sandbox session tokens, 10..900 s. Leave at 900 (15 min); only the e2e shortens it
-  # to run a real Pi past a token rotation (KOBE-241).
-  sessionTokenTtlSeconds: 900
   # File uploads (KOBE-143); these are the server's code defaults.
   uploads:
     # Largest single file (bytes): 100 MiB.

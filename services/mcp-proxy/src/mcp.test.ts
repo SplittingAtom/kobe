@@ -123,12 +123,7 @@ let upstream: UpstreamClient;
 let credentials: CredentialResolver;
 let limits: Limits;
 
-function app(
-  overrides: {
-    limits?: Partial<Limits>;
-    log?: NonNullable<Parameters<typeof createApp>[0]>["log"];
-  } = {},
-) {
+function app(overrides: { limits?: Partial<Limits> } = {}) {
   const l = { ...limits, ...overrides.limits };
   return createApp({
     sessionKey: KEY,
@@ -142,7 +137,7 @@ function app(
       maxConcurrentCalls: l.maxConcurrentCalls,
     }),
     limits: l,
-    log: overrides.log ?? pino({ level: "silent" }),
+    log: pino({ level: "silent" }),
   });
 }
 
@@ -223,21 +218,6 @@ describe("authentication and transport", () => {
       expect(res.headers.get("www-authenticate")).toContain("Bearer");
     }
     expect(server.asked).toEqual([]);
-  });
-
-  it("KOBE-241: logs the expired-token 404 (the e2e reads it), without the token", async () => {
-    const lines: string[] = [];
-    const log = pino({ level: "info" }, { write: (line: string) => void lines.push(line) });
-    const stale = token({ age: 1200, ttl: 600 });
-    const res = await rpc("tools/list", undefined, {
-      token: stale,
-      app: app({ log }),
-      headers: { "mcp-session-id": "kobe-stateless" },
-    });
-    expect(res.status).toBe(404);
-    const logged = lines.join("");
-    expect(logged).toContain("mcp: expired token on a live session; answered 404");
-    expect(logged).not.toContain(stale);
   });
 
   it("KOBE-111: initialize hands out a constant session id; an expired token on that session is a 404, not a 401", async () => {

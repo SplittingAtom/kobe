@@ -45,18 +45,6 @@ describe("session tokens", () => {
     expect(new Set(jtis).size).toBe(4);
   });
 
-  it("issues tokens for a shorter TTL when asked (e2e rotation)", () => {
-    const short = issueSessionTokens(PRINCIPAL, KEYS, NOW, 15);
-    const claims = verifySessionToken(
-      short.tokens["kobe.mcp-proxy"],
-      "kobe.mcp-proxy",
-      KEYS["kobe.mcp-proxy"],
-      NOW_S,
-    );
-    expect(claims.exp).toBe(NOW_S + 15);
-    expect(short.expiresAt).toEqual(new Date((NOW_S + 15) * 1000));
-  });
-
   it("rejects a token presented to another audience, even with that audience's key", () => {
     expect(() => verifySessionToken(wire, "kobe.mcp-proxy", KEYS["kobe.mcp-proxy"], NOW_S)).toThrow(
       SessionTokenError,
