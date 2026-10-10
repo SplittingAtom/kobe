@@ -76,6 +76,8 @@ export class ChatSession {
   readonly #createdListeners = new Set<() => void>();
   /** Model for the thread `initialize` creates next (the new-thread picker; null = default). */
   #nextModel: string | null = null;
+  /** Project for the thread `initialize` creates next (`/?project=<id>`, KOBE-164). */
+  #nextProjectId: string | null = null;
   /** Agent for the thread `initialize` creates next (null = plain chat; KOBE-122). */
   #nextAgent: RunnableAgent | null = null;
   /** The runnable Assistant (null when missing, suspended or archived), preselected untouched. */
@@ -157,6 +159,22 @@ export class ChatSession {
     const title = this.#nextTitle;
     this.#nextTitle = undefined;
     return title;
+  }
+
+  /** The project the conversation not created yet will belong to, or null. */
+  get draftProjectId(): string | null {
+    return this.#nextProjectId;
+  }
+
+  setDraftProject(projectId: string | null): void {
+    this.#nextProjectId = projectId;
+  }
+
+  /** The draft's project for the thread being created; the next draft starts without one. */
+  takeNextProject(): string | null {
+    const id = this.#nextProjectId;
+    this.#nextProjectId = null;
+    return id;
   }
 
   /** The model picked for a conversation not created yet (KOBE-44). */

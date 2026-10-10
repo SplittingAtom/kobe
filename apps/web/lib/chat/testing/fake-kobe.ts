@@ -31,6 +31,10 @@ interface FakeThread {
   /** What the thread detail says of the pinned agent (KOBE-122). */
   agent_name?: string | null;
   agent_status?: "active" | "suspended" | "archived" | null;
+  /** The thread's project and sharing (KOBE-163); `read_only` = shared to you by someone else. */
+  project_id?: string | null;
+  visibility?: "private" | "project";
+  read_only?: boolean;
   entries: FakeEntry[];
 }
 
@@ -410,11 +414,13 @@ export class FakeKobe {
     return {
       ...rest,
       owner_user_id: uuid(3, 1),
-      project_id: null,
+      project_id: thread.project_id ?? null,
+      visibility: thread.visibility ?? "private",
+      ...(thread.read_only === undefined ? {} : { read_only: thread.read_only }),
       agent_id: thread.agent_id ?? null,
       agent_version: null,
       is_test: thread.is_test ?? false,
-      shared_to_project: false,
+      shared_to_project: thread.visibility === "project",
       purge_after: thread.deleted_at === null ? null : "2026-11-01T10:00:00.000Z",
     };
   }
@@ -770,12 +776,31 @@ export class FakeKobe {
           agent_status: "active",
         });
       }
+      if (typeof body?.project_id === "string") {
+        this.#thread(threadId).project_id = body.project_id;
+      }
       return json(201, this.#summary(this.#thread(threadId)));
     }
     const thread = id === undefined ? undefined : this.threads.get(id);
     if (!thread) return error(404, "thread_not_found", "No thread with that id.");
     if (action === undefined) return this.#threadItself(method, thread, url, body);
     if (action === "entries") return json(200, this.#entryPage(thread, url));
+    if (action === "share" && method === "POST") {
+      if (thread.read_only)
+        return error(403, "read_only", "This thread is shared with you read-only.");
+      if (!thread.project_id)
+        return error(409, "not_in_project", "Only threads in a project can be shared.");
+      thread.visibility = body?.visibility === "project" ? "project" : "private";
+      return json(200, this.#summary(thread));
+    }
+    if (action === "fork" && method === "POST") {
+      const forkId = this.addThread(thread.title);
+      const fork = this.#thread(forkId);
+      fork.project_id = thread.project_id ?? null;
+      fork.entries = [...thread.entries];
+      fork.leaf_entry_id = thread.leaf_entry_id;
+      return json(201, { thread_id: forkId });
+    }
     if (action === "leaf") {
       if (this.activeRun(thread.thread_id)) return error(409, "thread_busy", "The thread is busy.");
       thread.leaf_entry_id = String(body?.entry_id);

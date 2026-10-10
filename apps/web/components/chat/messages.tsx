@@ -26,6 +26,7 @@ import { messageMeta, type KobeMessageMeta } from "../../lib/chat/tree";
 import { Button } from "../ui/button";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button";
 import { useKobeExtras } from "./kobe-runtime";
+import { isReadOnlyThread } from "./project-bar";
 import { SentAttachments } from "./attachment-chips";
 import { Markdown } from "./markdown";
 import { ToolCallCard } from "./tool-call";
@@ -134,8 +135,11 @@ function BranchPicker({ className }: { readonly className?: string }) {
 export function UserMessage() {
   const meta = useMeta();
   const pending = meta?.kind === "user" && meta.pending;
-  const canEdit = meta?.kind === "user" && !meta.pending && meta.parentEntryId !== null;
-  const firstMessage = meta?.kind === "user" && !meta.pending && meta.parentEntryId === null;
+  const readOnly = isReadOnlyThread(useKobeExtras());
+  const canEdit =
+    !readOnly && meta?.kind === "user" && !meta.pending && meta.parentEntryId !== null;
+  const firstMessage =
+    !readOnly && meta?.kind === "user" && !meta.pending && meta.parentEntryId === null;
   const messageId = useAuiState((s) => s.message.id);
   return (
     <MessagePrimitive.Root
@@ -194,6 +198,7 @@ function useRegenerate(): "yes" | "root" | "no" {
 
 export function AssistantMessage() {
   const running = useAuiState((s) => s.message.status?.type === "running");
+  const readOnly = isReadOnlyThread(useKobeExtras());
   const regenerate = useRegenerate();
   const messageId = useAuiState((s) => s.message.id);
   return (
@@ -227,14 +232,14 @@ export function AssistantMessage() {
               </AuiIf>
             </TooltipIconButton>
           </ActionBarPrimitive.Copy>
-          {regenerate === "yes" && (
+          {!readOnly && regenerate === "yes" && (
             <ActionBarPrimitive.Reload asChild>
               <TooltipIconButton tooltip="Regenerate">
                 <RefreshCwIcon />
               </TooltipIconButton>
             </ActionBarPrimitive.Reload>
           )}
-          {regenerate === "root" && !ROOT_BRANCHING_AVAILABLE && (
+          {!readOnly && regenerate === "root" && !ROOT_BRANCHING_AVAILABLE && (
             <PendingAction
               label="Regenerate"
               id={`kobe-regenerate-pending-${messageId}`}
