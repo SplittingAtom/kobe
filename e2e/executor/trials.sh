@@ -68,7 +68,7 @@ executor_sync_checks() {
   contains "the sandbox is woken onto a new volume" '"woken":true' "$(owner_lifecycle wake)"
   # A tool of a new Pi reads the restored file, appends to it and adds a file in the restored directory.
   out=$(chat_run "bash: cat /workspace/kobe168-sync/q3.md && echo ' appended' >> /workspace/kobe168-sync/q3.md && echo new > /workspace/kobe168-sync/new.txt && echo writable" 300000)
-  contains "the file is back after the volume was lost, readable by a tool" "tool said: $content writable" "$out"
+  contains "the file is back after the volume was lost, readable by a tool" "tool said: ${content}writable" "$out"
   contains "the restored file is group 1000 and group-writable (agent-owned, shared with every tool uid)" '^1000:66[46]$' \
     "$(in_owner 'stat -c "%g:%a" /workspace/kobe168-sync/q3.md')"
 }
