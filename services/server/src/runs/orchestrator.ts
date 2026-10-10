@@ -757,7 +757,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     return {
       teamId: actor.team_id,
       userId: actor.user_id,
-      projectIds: await viewerProjectIds(tx, actor.user_id),
+      projectIds: await viewerProjectIds(tx, actor.team_id, actor.user_id),
     };
   }
 

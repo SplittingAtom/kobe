@@ -1,5 +1,7 @@
-import type { Envelope, KobeDb, PinnedTool } from "@kobe/db";
-import { revealApiKey, type RevealOutcome } from "../connectors/grants.js";
+import { withTeam, type Envelope, type KobeDb, type PinnedTool } from "@kobe/db";
+import { recordAudit } from "../audit/record.js";
+import { logger } from "../logger.js";
+import { revealCredential, type RevealOutcome } from "../connectors/grants.js";
 import { createRateLimiter } from "../sandbox/rate-limit.js";
 import type { RunPolicyContextSource } from "../sandbox-wire/types.js";
 import { DENY_UNVERIFIED_APPROVALS, type McpApprovalVerifier } from "./approvals.js";
@@ -24,7 +26,8 @@ export interface McpService {
   ): Promise<{ connector: { id: string; name: string }; tools: PinnedTool[] } | undefined>;
   decide(principal: McpPrincipal, request: McpCallRequest): Promise<McpCallDecision>;
   /**
-   * The principal's own decrypted API key for an enabled `api_key` connector (KOBE-108). The user
+   * The principal's own decrypted credential (API key, or OAuth access token) for an enabled
+   * `api_key` / `oauth` connector (KOBE-108, KOBE-109). The user
    * is the principal's, taken from the verified sandbox token: there is no way to ask for
    * another user's. Only the internal API (internal key) calls this; the key goes to the proxy.
    */
@@ -43,6 +46,33 @@ export interface McpServiceOptions {
   readonly now?: () => Date;
 }
 
+/** A `tools/list` for a connector the team has not enabled: audited, throttled like denied calls. */
+async function auditListRefused(
+  db: KobeDb,
+  principal: McpPrincipal,
+  connectorId: string,
+  limiter: ReturnType<typeof createRateLimiter>,
+): Promise<void> {
+  if (limiter.take(principal.sandboxId) !== 0) return;
+  try {
+    await withTeam(db, principal.teamId, (tx) =>
+      recordAudit(tx, {
+        action: "mcp.list_refused",
+        teamId: principal.teamId,
+        actor: { kind: "user", id: principal.userId },
+        target: {
+          sandboxId: principal.sandboxId,
+          userId: principal.userId,
+          connectorId,
+          reason: "connector_not_enabled",
+        },
+      }),
+    );
+  } catch (err) {
+    logger.error({ err }, "mcp: refused tools/list could not be audited");
+  }
+}
+
 export function createMcpService(options: McpServiceOptions): McpService {
   const deniedAudits = createRateLimiter(DENIED_AUDIT_RATE);
   const deps = {
@@ -56,7 +86,10 @@ export function createMcpService(options: McpServiceOptions): McpService {
   return {
     async listTools(principal, connectorId) {
       const connector = await loadTeamConnector(options.db, principal.teamId, connectorId);
-      if (!connector) return undefined;
+      if (!connector) {
+        await auditListRefused(options.db, principal, connectorId, deniedAudits);
+        return undefined;
+      }
       return {
         connector: { id: connector.id, name: connector.name },
         tools: exposedTools(connector),
@@ -65,7 +98,7 @@ export function createMcpService(options: McpServiceOptions): McpService {
     decide: (principal, request) => decideMcpCall(deps, principal, request),
     revealCredential: (principal, connectorId) =>
       options.envelope
-        ? revealApiKey(options.db, options.envelope, {
+        ? revealCredential(options.db, options.envelope, {
             teamId: principal.teamId,
             userId: principal.userId,
             connectorId,

@@ -4,6 +4,7 @@ import {
   idSchema,
   threadStatusSchema,
   timestampSchema,
+  threadVisibilitySchema,
   uuidSchema as wireUuidSchema,
 } from "@kobe/protocol";
 
@@ -138,6 +139,8 @@ export const threadSummarySchema = z.object({
   agent_id: wireUuidSchema.nullable(),
   agent_version: z.number().int().nullable(),
   shared_to_project: z.boolean(),
+  /** The share scope (D23): `private` or `project` (a `team` scope may follow, KOBE-221). */
+  visibility: threadVisibilitySchema,
   /** A builder test thread (KOBE-85): runs the agent's draft, `agent_version` is null. */
   is_test: z.boolean(),
   /** The model chosen for the thread (a catalog alias); null = the team's default (KOBE-44). */
@@ -197,6 +200,8 @@ export const threadDetailSchema = threadSummarySchema.extend({
    */
   /** The pinned agent's name and effective status in this team (KOBE-122); null without one. */
   agent_name: z.string().nullable(),
+  /** True for a reader of a thread shared to their project: no messages, runs or changes (D23). */
+  read_only: z.boolean(),
   agent_status: z.enum(["active", "suspended", "archived"]).nullable(),
   agent_current_version: z.number().int().nullable(),
   /**

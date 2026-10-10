@@ -9,6 +9,7 @@ export * from "./events.js";
 export * from "./artifacts.js";
 export * from "./memory.js";
 export * from "./projects.js";
+export * from "./web-search.js";
 export * from "./uploads.js";
 export * from "./files.js";
 export * from "./schedules.js";

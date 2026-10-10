@@ -8,6 +8,7 @@ import type {
   PiThreadConfig,
   PolicyDecision,
   PolicyReason,
+  RunProjectContext,
   RunStatus,
   SandboxAttachment,
   SessionTokenClaims,
@@ -81,6 +82,8 @@ export interface RunStartRequest {
   readonly attachments?: readonly SandboxAttachment[];
   readonly parentEntryId?: string;
   readonly config?: PiThreadConfig;
+  /** Project instructions (KOBE-161); dropped for agents without the `projects` capability. */
+  readonly project?: RunProjectContext;
 }
 
 export interface RunSteerRequest {

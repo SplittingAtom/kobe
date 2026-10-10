@@ -52,6 +52,22 @@ function tracedShell(env: Record<string, string>, command: string): string {
   return result.stderr;
 }
 
+describe("the tools' own HOME and TMPDIR (KOBE-228)", () => {
+  const base = { BASH_ENV: SCRIPT, HOME: "/tmp/kobe-pi-x/home", TMPDIR: "/tmp/kobe-pi-x/tmp" };
+  const show = 'printf "%s|%s" "$HOME" "$TMPDIR"';
+
+  it("a bash tool call gets the shared HOME and TMPDIR instead of Pi's private ones", () => {
+    const env = { ...base, KOBE_TOOL_HOME: "/home/kobe", KOBE_TOOL_TMPDIR: "/tmp" };
+    expect(toolShell(env, show)).toBe("/home/kobe|/tmp");
+  });
+
+  it("keeps Pi's values when the variables are absent, relative or carry a newline", () => {
+    expect(toolShell(base, show)).toBe("/tmp/kobe-pi-x/home|/tmp/kobe-pi-x/tmp");
+    const relative = { ...base, KOBE_TOOL_HOME: "home", KOBE_TOOL_TMPDIR: "/tmp\nx" };
+    expect(toolShell(relative, show)).toBe("/tmp/kobe-pi-x/home|/tmp/kobe-pi-x/tmp");
+  });
+});
+
 describe("egress env for Pi's tools", () => {
   it("names the script, the token file, the proxy and the thread; never the token itself", () => {
     const env = egressEnv(wiring(), "/tmp/kobe-pi/pi-x/egress-token", THREAD);

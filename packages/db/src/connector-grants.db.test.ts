@@ -77,6 +77,27 @@ describe("connector_grants", () => {
     ).rejects.toSatisfy((e) => pgCode(e) === "23514");
   });
 
+  it("accepts the oauth kind with an expiry, and refuses an unknown kind", async () => {
+    const other = randomUUID();
+    await app.db.insert(users).values({ id: other, name: "O", email: `${other}@g.test` });
+    const oauth = { ...row(teamA), userId: other, kind: "oauth" as const };
+    await withTeam(app.db, teamA, (tx) =>
+      tx.insert(connectorGrants).values({ ...oauth, expiresAt: new Date(Date.now() + 3600_000) }),
+    );
+    const [stored] = await withTeam(app.db, teamA, (tx) =>
+      tx.select().from(connectorGrants).where(eq(connectorGrants.userId, other)),
+    );
+    expect(stored?.kind).toBe("oauth");
+    expect(stored?.expiresAt).toBeInstanceOf(Date);
+    await expect(
+      withTeam(app.db, teamA, (tx) =>
+        tx
+          .insert(connectorGrants)
+          .values({ ...oauth, userId: userId, connectorId, kind: "saml" as never }),
+      ),
+    ).rejects.toSatisfy((e) => pgCode(e) === "23514");
+  });
+
   it("has no break-glass policy", async () => {
     const owner = createDb(inject("ownerUrl"));
     const { rows } = await owner.pool.query(

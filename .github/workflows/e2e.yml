@@ -47,6 +47,10 @@ jobs:
       pull-requests: read
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      # "true" unless this is a pull request that is a draft right now. Read live from the API, not
+      # from the event: an agent that pushes and then marks the PR ready seconds later gets one run,
+      # from the push, whose payload still says draft (the required checks were then skipped).
+      ready: ${{ steps.filter.outputs.ready }}
     steps:
       - id: filter
         env:
@@ -54,7 +58,13 @@ jobs:
           EVENT: ${{ github.event_name }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          if [ "${EVENT}" != pull_request ]; then echo "code=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if [ "${EVENT}" != pull_request ]; then
+            { echo "code=true"; echo "ready=true"; } >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          draft="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '.draft')"
+          if [ "${draft}" = true ]; then ready=false; else ready=true; fi
+          echo "ready=${ready} (draft now: ${draft})" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "ready=${ready}" >> "$GITHUB_OUTPUT"
           files="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR}/files" --jq '.[].filename')"
           if printf '%s\n' "${files}" | grep -qvE '^docs/|\.md$'; then code=true; else code=false; fi
           echo "code=${code}" | tee -a "$GITHUB_OUTPUT"
@@ -62,7 +72,7 @@ jobs:
   image:
     name: image (${{ matrix.name }})
     needs: changes
-    if: needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.ready == 'true'
     runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-latest') || vars.KOBE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     strategy:
@@ -124,7 +134,7 @@ jobs:
   # image built and is non-root. Docs-only changes skip the builds, and it still reports.
   images:
     needs: [changes, image]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
+    if: ${{ !cancelled() && needs.changes.outputs.ready == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -250,7 +260,7 @@ jobs:
   # every image built and every shard passed. Skipped for draft PRs, as the suite is.
   k3d:
     needs: [changes, image, e2e]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
+    if: ${{ !cancelled() && needs.changes.outputs.ready == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

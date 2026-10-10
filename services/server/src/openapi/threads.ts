@@ -1,3 +1,4 @@
+import { forkThreadRequestSchema, shareThreadRequestSchema } from "@kobe/protocol";
 import { z } from "zod";
 import {
   createThreadBodySchema,
@@ -250,6 +251,37 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         },
       },
     },
+    "/v1/threads/{id}/share": {
+      post: {
+        operationId: "shareThread",
+        summary: "Set who can read the thread: `private` or `project` (author only)",
+        parameters: change([idParameter]),
+        requestBody: body("ShareThreadBody"),
+        responses: {
+          "200": json("Thread", "The updated thread."),
+          "404": notFound,
+          ...ERROR_RESPONSES,
+          "409": json("Error", "`not_in_project`, `thread_busy` or `thread_in_trash`."),
+        },
+      },
+    },
+    "/v1/threads/{id}/fork": {
+      post: {
+        operationId: "forkThread",
+        summary:
+          "Copy a readable thread (own, or shared to your project) into a new private thread",
+        description:
+          "Copies the entries from the root up to `entry_id` (default: the leaf). Workspace files are not copied.",
+        parameters: change([idParameter]),
+        requestBody: body("ForkThreadBody"),
+        responses: {
+          "201": json("CreatedThread", "The new thread."),
+          "404": notFound,
+          ...ERROR_RESPONSES,
+          "409": json("Error", "`thread_in_trash` or `entry_offloaded`."),
+        },
+      },
+    },
     "/v1/threads/{id}/restore": {
       post: {
         operationId: "restoreThread",
@@ -275,6 +307,8 @@ export function threadsOpenApiSchemas(): Record<string, JsonSchema> {
     EntryPage: withoutDialect(output(entryPageSchema)),
     CreateThreadBody: withoutDialect(input(createThreadBodySchema)),
     UpdateThreadBody: withoutDialect(input(updateThreadBodySchema)),
+    ShareThreadBody: withoutDialect(input(shareThreadRequestSchema)),
+    ForkThreadBody: withoutDialect(input(forkThreadRequestSchema)),
     SetLeafBody: withoutDialect(input(setLeafBodySchema)),
     SwitchAgentVersionBody: withoutDialect(input(switchAgentVersionBodySchema)),
     CreatedThread: withoutDialect(output(createdThreadSchema)),

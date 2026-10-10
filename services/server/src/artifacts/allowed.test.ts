@@ -38,4 +38,17 @@ describe("AllowedArtifactCalls (D-3)", () => {
     expect(calls.check("run", "c0", "create_artifact", input)).toBe("not_allowed");
     expect(calls.check("run", `c${ALLOWED_MAX}`, "create_artifact", input)).toBe("ok");
   });
+
+  it("consume() makes a web_search allowance single use; check() stays reusable", () => {
+    const calls = new AllowedArtifactCalls();
+    const input = { query: " a b " };
+    calls.record("r", "c1", "web_search", input);
+    expect(calls.consume("r", "c1", "web_search", { query: "other" })).toBe("input_mismatch");
+    expect(calls.consume("r", "c1", "web_search", input)).toBe("ok");
+    expect(calls.consume("r", "c1", "web_search", input)).toBe("replayed");
+    expect(calls.consume("r", "never", "web_search", input)).toBe("not_allowed");
+    calls.record("r", "c2", "share_file", { path: "a" });
+    expect(calls.check("r", "c2", "share_file", { path: "a" })).toBe("ok");
+    expect(calls.check("r", "c2", "share_file", { path: "a" })).toBe("ok");
+  });
 });

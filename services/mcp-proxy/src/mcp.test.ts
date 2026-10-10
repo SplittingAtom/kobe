@@ -402,6 +402,20 @@ describe("tools/call", () => {
     expect(fake.received).toEqual([]);
   });
 
+  it.each([
+    ["connector_not_enabled", "This connector is not enabled in your team."],
+    ["connector_exposure", "create_issue is not exposed to agents in your team (read-only)."],
+  ] as const)(
+    "runs nothing upstream and says why when the team's exposure refuses (%s, KOBE-106)",
+    async (code, message) => {
+      server.next = () => ({ ok: true, value: { decision: "deny", code, message } });
+      const res = await rpc("tools/call", { name: "create_issue", arguments: { a: "x" } });
+      expect(res.json?.result.isError).toBe(true);
+      expect(res.json?.result.content[0].text).toContain(message);
+      expect(fake.received).toEqual([]);
+    },
+  );
+
   it("runs nothing upstream when the server cannot be reached (fail closed)", async () => {
     server.next = () => ({ ok: false, failure: "unavailable" });
     const res = await rpc("tools/call", { name: "create_issue", arguments: {} });
@@ -517,6 +531,25 @@ describe("tools/call", () => {
     expect([...res.headers.values()].join("\n")).not.toContain(apiKey);
     // The server was asked with the sandbox's own token, so it can only answer for that user.
     expect(JSON.stringify(server.asked)).not.toContain(apiKey);
+  });
+
+  it("uses the server's per-user OAuth access token upstream and never shows it to the sandbox (KOBE-109)", async () => {
+    const accessToken = "at-secret-0123456789";
+    server.fetchGrant = () => Promise.resolve({ ok: true, value: { kind: "oauth", accessToken } });
+    credentials = createServerCredentials(server);
+    server.next = (q) => ({
+      ok: true,
+      value: {
+        decision: "allow",
+        connector: { id: q.connectorId, name: "jira", url: fake.url, auth_kind: "oauth" },
+        tool: { name: q.tool, pi_name: "mcp__jira__get_issue" },
+        input_sha256: sha(q.arguments),
+        reason: "risk_read",
+      },
+    });
+    const res = await rpc("tools/call", { name: "get_issue", arguments: { id: 1 } });
+    expect(fake.received.at(-1)?.headers.authorization).toBe(`Bearer ${accessToken}`);
+    expect(JSON.stringify(res.json)).not.toContain(accessToken);
   });
 
   it("says not connected when the user has no API key, and runs nothing upstream", async () => {

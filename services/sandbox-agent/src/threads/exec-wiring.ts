@@ -51,23 +51,38 @@ export const PI_PRIVATE_PREFIX = "kobe-pi-";
  * 2770 (the partner cannot even read it), `tmp` 2775 (the partner may read, never write: the
  * "Full output" files must stay readable to the read tool). The partner's HOME and TMPDIR stay the
  * shared ones.
+ *
+ * KOBE-228: the same directories without the executor (`partner: false`), where the tools are Pi's
+ * own uid and mode 2770 keeps every other thread's uid out; the tools get the shared HOME/TMPDIR
+ * through `KOBE_TOOL_HOME`/`KOBE_TOOL_TMPDIR` (the BASH_ENV script). Same uid means a tool of the
+ * same thread can still reach them; see docs/ledger/KOBE-228.md.
  */
 export async function preparePiPrivateDirs(
   base: string,
   runtimeDir: string,
-  identity: PiIdentity,
+  identity: PiIdentity | undefined,
+  options: { readonly partner: boolean } = { partner: true },
 ): Promise<PiPrivateDirs> {
   const root = path.join(base, `${PI_PRIVATE_PREFIX}${path.basename(runtimeDir)}`);
+  // Without a partner uid (KOBE-228) the tools are Pi's own uid: nothing is shared with them, and
+  // other threads' uids (and the workspace group) get no access at all. Without any identity the
+  // directories are the agent's alone (0700).
+  const modes =
+    identity === undefined
+      ? ([0o700, 0o700, 0o700] as const)
+      : options.partner
+        ? ([0o2755, 0o2770, 0o2775] as const)
+        : ([0o2770, 0o2770, 0o2770] as const);
   await mkdir(root, { mode: 0o700 });
-  await chown(root, -1, identity.gid);
-  await chmod(root, 0o2755);
   const dirs = { root, home: path.join(root, "home"), tmp: path.join(root, "tmp") };
-  for (const [dir, mode] of [
-    [dirs.home, 0o2770],
-    [dirs.tmp, 0o2775],
-  ] as const) {
-    await mkdir(dir, { mode: 0o700 });
-    await chown(dir, -1, identity.gid);
+  const entries = [
+    [root, modes[0]],
+    [dirs.home, modes[1]],
+    [dirs.tmp, modes[2]],
+  ] as const;
+  for (const [dir, mode] of entries) {
+    if (dir !== root) await mkdir(dir, { mode: 0o700 });
+    if (identity !== undefined) await chown(dir, -1, identity.gid);
     await chmod(dir, mode);
   }
   return dirs;

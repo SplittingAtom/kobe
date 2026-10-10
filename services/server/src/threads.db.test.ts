@@ -346,7 +346,14 @@ describe("shared project threads (D23, data layer)", () => {
   beforeAll(async () => {
     // threads.project_id references projects (KOBE-160): the project row comes first.
     await admin.query(
-      `INSERT INTO projects (team_id, id, slug, name, created_by) VALUES ($1, $2, 'plan', 'Plan', $3)`,
+      `INSERT INTO projects (team_id, id, slug, name, created_by, members_mode)
+       VALUES ($1, $2, 'plan', 'Plan', $3, 'selected')`,
+      [finance, project, ids.alice],
+    );
+    // Selected mode (KOBE-161): bob is in the team but not in the project.
+    await admin.query(
+      `INSERT INTO project_members (team_id, project_id, user_id, role, added_by)
+       VALUES ($1, $2, $3, 'owner', $3)`,
       [finance, project, ids.alice],
     );
     const { rows } = await admin.query<{ id: string }>(
@@ -836,6 +843,7 @@ describe("search (GET /v1/threads?q=, KOBE-33)", () => {
       agent_model: _am,
       agent_name: _an,
       agent_status: _as,
+      read_only: _ro,
       ...summary
     } = detail;
     const { matched_entry_id: _m, snippet: _s, score: _sc, ...hitSummary } = hit ?? {};

@@ -17,6 +17,8 @@ const idSchema = z.uuid();
 const summaryBody = (g: GrantSummary) => ({
   connector_id: g.connectorId,
   hint: g.hint,
+  kind: g.kind,
+  expires_at: g.expiresAt?.toISOString() ?? null,
   created_at: g.createdAt.toISOString(),
   updated_at: g.updatedAt.toISOString(),
 });

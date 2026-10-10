@@ -32,12 +32,13 @@ describe("the five gallery agents (KOBE-89)", () => {
     expect([...byKey.keys()].sort()).toEqual(
       ["assistant", "code-helper", "data-analyst", "document-drafter", "researcher"].sort(),
     );
-    // Assistant: skill-creator (2), artifacts (3). Data Analyst, Document Drafter: artifacts (2).
+    // Assistant: skill-creator (2), artifacts (3). Data Analyst, Document Drafter: artifacts (2),
+    // share_file (3, KOBE-152).
     expect(Object.fromEntries(parsed.map((p) => [p.key, p.generation]))).toEqual({
       assistant: 3,
-      "data-analyst": 2,
-      researcher: 1,
-      "document-drafter": 2,
+      "data-analyst": 3,
+      researcher: 2,
+      "document-drafter": 3,
       "code-helper": 1,
     });
   });
@@ -65,6 +66,13 @@ describe("the five gallery agents (KOBE-89)", () => {
     expect(def("researcher").prompt).toContain(RESEARCHER_NO_SEARCH_NOTICE);
   });
 
+  it("the Researcher searches with web_search, cites URLs, and explains an unavailable answer (KOBE-114)", () => {
+    const prompt = def("researcher").prompt;
+    expect(prompt).toContain("web_search");
+    expect(prompt).toMatch(/unavailable/);
+    expect(prompt).toMatch(/URL/);
+  });
+
   it("the Document Drafter writes files and offers a Markdown artifact preview alongside", () => {
     const prompt = def("document-drafter").prompt;
     expect(prompt).toMatch(/docx/);
@@ -80,6 +88,22 @@ describe("the five gallery agents (KOBE-89)", () => {
     expect(prompt).toMatch(/html/i);
     expect(prompt).toMatch(/xlsx/);
     expect(prompt).toMatch(/file/i);
+  });
+
+  it("the Document Drafter and Data Analyst hand over files with share_file (KOBE-152)", () => {
+    for (const key of ["document-drafter", "data-analyst"]) {
+      expect(def(key).prompt, key).toMatch(/share_file/);
+    }
+    expect(def("document-drafter").prompt).toMatch(/docx|pdf/);
+    expect(def("data-analyst").prompt).toMatch(/xlsx/);
+  });
+
+  it("their frozen tool manifests let share_file through", () => {
+    const floor = { scope: "install", install: [], team: [], approvalFloor: "auto" } as const;
+    for (const key of ["document-drafter", "data-analyst"]) {
+      const manifest = computeToolManifest(def(key).frontmatter, floor, new Date());
+      expect(manifestAllowsTool(manifest, "share_file"), key).toBe(true);
+    }
   });
 
   it("the Assistant uses artifacts for output best viewed and update_artifact for revisions", () => {

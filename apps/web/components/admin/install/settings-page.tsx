@@ -13,6 +13,7 @@ import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
 import styles from "../admin.module.css";
+import { WebSearchSection } from "./web-search-form";
 
 /**
  * Install settings (`/v1/install/settings`): required two-factor authentication (D7) and how long
@@ -28,6 +29,7 @@ export function SettingsPage() {
           <>
             <SettingsForm settings={settings} onSaved={reload} />
             <AuditPrivacyForm settings={settings} onSaved={reload} />
+            <WebSearchSection />
           </>
         )}
       </ResourceView>

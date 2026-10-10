@@ -28,10 +28,14 @@ import { installLegalHoldRoutes } from "./routes/install-legal-hold.js";
 import { installPolicyRoutes } from "./routes/install-policy.js";
 import { installRetentionRoutes } from "./routes/install-retention.js";
 import { connectorGrantRoutes } from "./routes/connector-grants.js";
+import { connectorOauthRoutes } from "./routes/connector-oauth.js";
+import { clientMetadataDocument, kobeOrigin } from "./connectors/oauth/client.js";
 import { installConnectorsRoutes } from "./routes/install-connectors.js";
 import { installSkillBlocklistRoutes } from "./routes/install-skill-blocklist.js";
 import { installRolesRoutes } from "./routes/install-roles.js";
 import { installSettingsRoutes } from "./routes/install-settings.js";
+import { installWebSearchRoutes } from "./routes/install-web-search.js";
+import { teamWebSearchRoutes } from "./routes/team-web-search.js";
 import { installTeamsRoutes } from "./routes/install-teams.js";
 import { installUsersRoutes } from "./routes/install-users.js";
 import { meRoutes } from "./routes/me.js";
@@ -54,6 +58,7 @@ import { teamOffboardedRoutes } from "./routes/team-offboarded.js";
 import { teamRetentionRoutes } from "./routes/team-retention.js";
 import { teamSkillReviewRoutes } from "./routes/team-skill-review.js";
 import { teamRoutes } from "./routes/team.js";
+import { projectRoutes } from "./routes/projects.js";
 import { threadPendingRoutes } from "./routes/thread-pending.js";
 import { threadRetentionRoutes } from "./routes/thread-retention.js";
 import { threadRoutes } from "./routes/threads.js";
@@ -109,6 +114,12 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   app.on(["GET", "POST"], "/api/auth/*", (c) => deps.auth.handler(c.req.raw));
   app.route("/v1/setup", setupRoutes(deps));
 
+  // Kobe's OAuth Client ID Metadata Document (KOBE-109): public, fetched by authorization servers.
+  app.get("/v1/oauth/client-metadata.json", (c) => {
+    c.header("Cache-Control", "public, max-age=3600");
+    return c.json(clientMetadataDocument(kobeOrigin(deps.publicUrl)));
+  });
+
   const api = new Hono<{ Variables: AuthVariables }>();
   // CSRF: state-changing API calls must come from the install's own origin.
   api.use(async (c, next) => {
@@ -137,6 +148,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/team/egress", teamEgressRoutes(deps));
   api.route("/team/models", teamModelsRoutes(deps));
   api.route("/team/connectors", teamConnectorsRoutes(deps));
+  api.route("/team/web-search", teamWebSearchRoutes(deps));
   api.route("/team/usage", teamUsageRoutes(deps));
   api.route("/team/budgets", teamBudgetsRoutes(deps));
   api.route("/team/break-glass", teamBreakGlassRoutes(deps));
@@ -148,6 +160,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/runs", runEventsRoutes(deps));
   api.route("/runs", runRoutes(deps));
   api.route("/runs", runUsageRoutes(deps));
+  api.route("/projects", projectRoutes(deps));
   api.route("/threads", threadRunRoutes(deps));
   api.route("/threads", threadPendingRoutes(deps));
   api.route("/threads", threadUsageRoutes(deps));
@@ -158,6 +171,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/memory", memoryRoutes(deps));
   api.route("/uploads", uploadRoutes(deps));
   api.route("/files", fileRoutes(deps));
+  api.route("/connector-grants", connectorOauthRoutes(deps));
   api.route("/connector-grants", connectorGrantRoutes(deps));
   api.route("/workspace", workspaceFileRoutes(deps, options.workspaceFiles));
   api.route("/agents", agentRoutes(deps, options.evals ? { runner: options.evals } : {}));
@@ -165,6 +179,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/approvals", approvalRoutes(deps));
   api.route("/egress/requests", egressRequestRoutes(deps));
   api.route("/install/settings", installSettingsRoutes(deps));
+  api.route("/install/web-search", installWebSearchRoutes(deps));
   api.route("/install/teams", installTeamsRoutes(deps));
   api.route("/install/roles", installRolesRoutes(deps));
   api.route("/install/policy", installPolicyRoutes(deps));

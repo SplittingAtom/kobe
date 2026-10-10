@@ -5,6 +5,8 @@ import { expect } from "vitest";
 import type { ServerToSandboxFrame } from "@kobe/protocol";
 import { WIRE_DEFAULTS } from "../sandbox-wire/constants.js";
 import { TestBrowser, type TestResponse } from "./browser.js";
+import { approvalKeyring } from "../approvals/index.js";
+import type { StreamTimings } from "../event-stream/stream.js";
 import { EventStreamFixture, PUBLIC_URL, must, type Person } from "./event-stream-fixture.js";
 import { FakeSandbox, FakeSandboxAuth, isFake, sandboxListener } from "./fake-sandbox.js";
 
@@ -170,9 +172,13 @@ export class RunFixture {
       readonly agents?: RunAgentResolver;
       /** Object storage for skill bundles (KOBE-82): both replicas share it. */
       readonly blobs?: BlobStore;
+      /** Event stream timers for both replicas (e.g. a short `revalidateMs` for revocation tests). */
+      readonly streamTimings?: Partial<StreamTimings>;
     } = {},
   ): Promise<void> {
-    await this.fx.setup([{}, {}], () => ({
+    const timings = options.streamTimings === undefined ? {} : { timings: options.streamTimings };
+    await this.fx.setup([timings, timings], () => ({
+      approvalKeys: approvalKeyring("run-fixture-approval-key-".padEnd(48, "k")),
       ...(options.blobs === undefined ? {} : { blobs: options.blobs }),
       sandboxWire: {
         sweep: false,

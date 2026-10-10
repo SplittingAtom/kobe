@@ -35,6 +35,8 @@ export class FakeBifrost implements BifrostAdmin {
   readonly upstream = new Map<string, readonly string[] | { readonly error: string }>();
   /** Bifrost's model cache per provider (filled by a refresh, or set by a test). */
   readonly liveModels = new Map<string, readonly string[]>();
+  /** Input modalities Bifrost reports per provider and model name (KOBE-191). */
+  readonly liveModalities = new Map<string, ReadonlyMap<string, readonly string[]>>();
   private readonly discovery = new Map<string, { status: string; description?: string }>();
   /** Make the next calls fail (unreachable) while true. */
   down = false;
@@ -198,6 +200,12 @@ export class FakeBifrost implements BifrostAdmin {
   async listModels(provider: string) {
     this.check("GET", "/api/models");
     return [...(this.liveModels.get(provider) ?? [])];
+  }
+  async listModelInfo(provider: string) {
+    return (await this.listModels(provider)).map((name) => ({
+      name,
+      inputModalities: this.liveModalities.get(provider)?.get(name) ?? [],
+    }));
   }
   async refreshModels(provider: string) {
     this.check("POST", "/api/providers/refresh-models");
