@@ -22,7 +22,7 @@ export function serializeOauthBundle(bundle: Omit<OauthBundle, "v">): string {
   return JSON.stringify({ v: 1, ...bundle });
 }
 
-/** The access token of a sealed bundle; throws when the bundle is malformed. */
-export function parseOauthBundle(plaintext: string): string {
-  return bundleSchema.parse(JSON.parse(plaintext)).access_token;
+/** A sealed bundle; throws when it is malformed. */
+export function parseOauthBundle(plaintext: string): OauthBundle {
+  return bundleSchema.parse(JSON.parse(plaintext));
 }

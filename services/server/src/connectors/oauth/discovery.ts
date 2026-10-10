@@ -87,6 +87,15 @@ async function metadataHint(io: OauthIo, mcpUrl: string): Promise<string | undef
 }
 
 export async function discoverAuthServer(io: OauthIo, mcpUrl: string): Promise<AuthServerInfo> {
+  try {
+    return await discover(io, mcpUrl);
+  } catch (error) {
+    // Metadata is hostile input: a malformed issuer or URL is "unsupported", never a 500.
+    throw error instanceof OauthError ? error : new OauthError("oauth_unsupported");
+  }
+}
+
+async function discover(io: OauthIo, mcpUrl: string): Promise<AuthServerInfo> {
   const hint = await metadataHint(io, mcpUrl);
   const prm = prmSchema.safeParse(
     await firstJson(io, [

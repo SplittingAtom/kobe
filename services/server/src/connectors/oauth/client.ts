@@ -92,6 +92,8 @@ export function authorizationUrl(input: {
   readonly redirectUri: string;
   readonly state: string;
   readonly verifier: string;
+  /** Dev only (`allowHttp` of the connector policy): accept an http authorization endpoint. */
+  readonly allowHttp: boolean;
 }): string {
   let url: URL;
   try {
@@ -99,7 +101,8 @@ export function authorizationUrl(input: {
   } catch {
     throw new OauthError("oauth_unsupported");
   }
-  if (!["https:", "http:"].includes(url.protocol) || url.hash !== "") {
+  const schemeOk = url.protocol === "https:" || (input.allowHttp && url.protocol === "http:");
+  if (!schemeOk || url.hash !== "" || url.username !== "" || url.password !== "") {
     throw new OauthError("oauth_unsupported");
   }
   const set = (k: string, v: string) => url.searchParams.set(k, v);

@@ -227,6 +227,60 @@ describe("connecting an OAuth connector", () => {
   });
 });
 
+describe("a connector pointed at another server", () => {
+  const evil = "https://evil.example/mcp";
+  it("never sends a token issued for the old server (refused and audited)", async () => {
+    const { back } = await authorizeFor(alice);
+    expect((await alice.get(callbackPath(back))).headers.get("location")).toContain("connected");
+    const aliceUser = aliceId;
+    expect((await grantFor(teamT, aliceUser, oauthConnector)).status).toBe(200);
+    // A URL change that bypassed the registry (e.g. restored backup): the resource check holds.
+    await h.admin.query(`UPDATE connectors SET url = $2 WHERE id = $1`, [oauthConnector, evil]);
+    const served = await grantFor(teamT, aliceUser, oauthConnector);
+    expect(served.status).toBe(503);
+    expect(served.text).not.toContain(must(fake.issued.at(-1)).accessToken);
+    const audit = await h.admin.query(
+      `SELECT target FROM audit_log WHERE action = 'mcp.grant.refused'`,
+    );
+    expect(audit.rows).toHaveLength(1);
+    expect(JSON.stringify(audit.rows)).not.toContain("at-secret");
+    await h.admin.query(`UPDATE connectors SET url = $2 WHERE id = $1`, [
+      oauthConnector,
+      fake.mcpUrl,
+    ]);
+    await alice.delete(`${BASE}/${oauthConnector}`);
+  });
+
+  it("drops OAuth and API-key grants when the registry changes the URL", async () => {
+    const { back } = await authorizeFor(alice);
+    await alice.get(callbackPath(back));
+    const bobUser = (
+      await h.admin.query<{ id: string }>(`SELECT id FROM users WHERE email = 'bob@oauth.test'`)
+    ).rows[0]?.id;
+    expect((await bob.put(`${BASE}/${keyConnector}`, { api_key: "k".repeat(20) })).status).toBe(
+      201,
+    );
+    const count = async () =>
+      (await h.admin.query<{ n: string }>(`SELECT count(*) AS n FROM connector_grants`)).rows[0]?.n;
+    expect(await count()).toBe("2");
+    await h.createUser("root@oauth.test", "owner");
+    const root = await h.signIn("root@oauth.test");
+    for (const id of [oauthConnector, keyConnector]) {
+      const res = await root.patch(`/v1/install/connectors/${id}`, { url: `${fake.base}/moved` });
+      expect(res.status, res.text).toBe(200);
+    }
+    expect(await count()).toBe("0");
+    expect(bobUser).toBeDefined();
+    const removed = await h.admin.query(
+      `SELECT count(*) AS n FROM audit_log WHERE action = 'mcp.grant.removed'`,
+    );
+    expect(Number(removed.rows[0]?.n)).toBeGreaterThanOrEqual(2);
+    for (const id of [oauthConnector, keyConnector]) {
+      await h.admin.query(`UPDATE connectors SET url = $2 WHERE id = $1`, [id, fake.mcpUrl]);
+    }
+  });
+});
+
 describe("client metadata", () => {
   it("publishes Kobe's Client ID Metadata Document without a session", async () => {
     const res = await h.app.request("http://kobe.test/v1/oauth/client-metadata.json");
@@ -316,6 +370,17 @@ describe("discovery checks", () => {
     ["an issuer that differs from the server's", { metadataIssuer: "https://other.example" }],
   ])("refuses %s", async (_name, options) => {
     fake.options = options;
+    try {
+      const res = await start(alice);
+      expect(res.status).toBe(422);
+      expect(res.json).toMatchObject({ code: "oauth_unsupported" });
+    } finally {
+      reset();
+    }
+  });
+
+  it("answers a malformed issuer with oauth_unsupported, not an error", async () => {
+    fake.options = { prmAuthServer: "http://[bad" };
     try {
       const res = await start(alice);
       expect(res.status).toBe(422);

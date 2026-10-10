@@ -8,12 +8,17 @@ import {
   withTeam,
   Envelope,
   listMemberships,
+  SYSTEM_ACTOR,
+  teams,
+  TEAM_ID_SETTING,
   type ConnectorGrantKind,
+  type KobeTx,
   type KobeDb,
 } from "@kobe/db";
 import { z } from "zod";
 import { recordAudit } from "../audit/record.js";
 import { parseOauthBundle } from "./oauth/bundle.js";
+import { sameUrl } from "./oauth/discovery.js";
 
 /**
  * Per-user API-key grants (KOBE-108, D27: no shared team credentials; OAuth tokens KOBE-109). A user stores their own key
@@ -217,6 +222,21 @@ export function removeGrant(db: KobeDb, subject: Subject): Promise<boolean> {
   });
 }
 
+async function auditRefusal(db: KobeDb, subject: Subject, name: string): Promise<void> {
+  try {
+    await withTeam(db, subject.teamId, (tx) =>
+      recordAudit(tx, {
+        action: "mcp.grant.refused",
+        actor: SYSTEM_ACTOR,
+        teamId: subject.teamId,
+        target: { connectorId: subject.connectorId, name, reason: "resource_mismatch" },
+      }),
+    );
+  } catch {
+    // The refusal stands even if the audit write fails; the caller gets "unavailable".
+  }
+}
+
 /** A credential decrypted for the MCP proxy. */
 export type RevealedCredential =
   | { readonly kind: "api_key"; readonly apiKey: string }
@@ -256,7 +276,9 @@ export async function revealCredential(
           eq(connectorGrants.connectorId, subject.connectorId),
         ),
       );
-    return grant && grant.kind === connector.authKind ? grant : ("not_connected" as const);
+    return grant && grant.kind === connector.authKind
+      ? { ...grant, connectorUrl: connector.url, connectorName: connector.name }
+      : ("not_connected" as const);
   });
   if (typeof row === "string") return { ok: false, failure: row };
   if (row.kind === "oauth" && row.expiresAt !== null && row.expiresAt.getTime() <= now.getTime()) {
@@ -267,9 +289,16 @@ export async function revealCredential(
       row.sealed,
       grantContext(subject.teamId, subject.userId, subject.connectorId),
     );
-    return row.kind === "oauth"
-      ? { ok: true, credential: { kind: "oauth", accessToken: parseOauthBundle(plaintext) } }
-      : { ok: true, credential: { kind: "api_key", apiKey: plaintext } };
+    if (row.kind !== "oauth")
+      return { ok: true, credential: { kind: "api_key", apiKey: plaintext } };
+    const bundle = parseOauthBundle(plaintext);
+    // The token was issued for one server. If the connector now points elsewhere (a URL change
+    // that left this grant behind), it must not be sent there.
+    if (!sameUrl(bundle.resource, row.connectorUrl)) {
+      await auditRefusal(db, subject, row.connectorName);
+      return { ok: false, failure: "unavailable" };
+    }
+    return { ok: true, credential: { kind: "oauth", accessToken: bundle.access_token } };
   } catch {
     return { ok: false, failure: "unavailable" };
   }
@@ -296,4 +325,35 @@ export async function adminProbeKey(
     if (found.ok && found.credential.kind === "api_key") return found.credential.apiKey;
   }
   return undefined;
+}
+
+/**
+ * Drops every user's grants for a connector, in every team, inside the caller's transaction. Used
+ * when the connector's URL changes: a credential issued for one server must never reach another,
+ * and users reconnect or re-enter their key. Audits one `mcp.grant.removed` per grant.
+ */
+export async function dropConnectorGrants(
+  tx: KobeTx,
+  connectorId: string,
+  name: string,
+): Promise<number> {
+  const all = await tx.select({ id: teams.id }).from(teams);
+  let dropped = 0;
+  for (const team of all) {
+    await tx.execute(sql`SELECT set_config(${TEAM_ID_SETTING}, ${team.id}, true)`);
+    const removed = await tx
+      .delete(connectorGrants)
+      .where(and(eq(connectorGrants.teamId, team.id), eq(connectorGrants.connectorId, connectorId)))
+      .returning({ userId: connectorGrants.userId });
+    for (const _ of removed) {
+      await recordAudit(tx, {
+        action: "mcp.grant.removed",
+        teamId: team.id,
+        target: { connectorId, name },
+      });
+    }
+    dropped += removed.length;
+  }
+  await tx.execute(sql`SELECT set_config(${TEAM_ID_SETTING}, '', true)`);
+  return dropped;
 }

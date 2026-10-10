@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { loadEnvelope } from "@kobe/db";
-import { clientMetadataDocument, kobeOrigin, obtainClient } from "./client.js";
+import { authorizationUrl, clientMetadataDocument, kobeOrigin, obtainClient } from "./client.js";
 import { sameUrl, wellKnown, type AuthServerInfo } from "./discovery.js";
 import type { OauthIo } from "./http.js";
 import { challengeOf, newVerifier } from "./pkce.js";
@@ -113,5 +113,22 @@ describe("flow state", () => {
     const state = sealState(envelope, subject, payload, now);
     const later = new Date(now.getTime() + STATE_TTL_MS + 1);
     expect(() => openState(envelope, state, subject.userId, later)).toThrow("invalid_state");
+  });
+});
+
+describe("authorization endpoint", () => {
+  const base = {
+    client: { clientId: "c", clientSecret: undefined },
+    redirectUri: "https://kobe.example.com/cb",
+    state: "s",
+    verifier: newVerifier(),
+  };
+  it("requires https unless the operator allows http", () => {
+    const http = { ...info, authorizationEndpoint: "http://auth.example.com/authorize" };
+    expect(() => authorizationUrl({ ...base, info: http, allowHttp: false })).toThrow(
+      "oauth_unsupported",
+    );
+    expect(authorizationUrl({ ...base, info: http, allowHttp: true })).toContain("code_challenge=");
+    expect(authorizationUrl({ ...base, info, allowHttp: false })).toContain("response_type=code");
   });
 });

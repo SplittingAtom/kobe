@@ -26,6 +26,8 @@ export interface FakeOauthOptions {
   readonly prmHint?: boolean;
   /** Answer /redirect with a redirect to this URL. */
   readonly redirectTo?: string;
+  /** What the PRM lists as authorization server (default: this server). */
+  readonly prmAuthServer?: string;
 }
 
 export interface IssuedTokens {
@@ -113,7 +115,7 @@ export class FakeOauthServer {
     ) {
       return this.json(res, {
         resource: o.prmResource ?? this.mcpUrl,
-        authorization_servers: [this.base],
+        authorization_servers: [o.prmAuthServer ?? this.base],
         scopes_supported: ["tools"],
       });
     }

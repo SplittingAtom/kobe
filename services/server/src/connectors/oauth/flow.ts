@@ -60,6 +60,7 @@ export async function startFlow(deps: OauthFlowDeps, subject: Subject): Promise<
         redirectUri: deps.kobe.redirectUri,
         state,
         verifier,
+        allowHttp: deps.io.policy.allowHttp,
       }),
     };
   } catch (error) {
