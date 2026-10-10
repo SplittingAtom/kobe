@@ -1,4 +1,4 @@
-import { Envelope, withTeam, type KobeDb } from "@kobe/db";
+import { withTeam, type Envelope, type KobeDb } from "@kobe/db";
 import { enabledConnector, storeGrant, type Subject } from "../grants.js";
 import { authorizationUrl, exchangeCode, obtainClient, type KobeOrigin } from "./client.js";
 import { serializeOauthBundle } from "./bundle.js";

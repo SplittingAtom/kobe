@@ -13,6 +13,10 @@ import { INTERNAL_KEY, MCP_SESSION_KEY, mcpToken } from "./testing/mcp-fixtures.
  * 2026-07-28 authorization spec: discovery, PKCE S256, state bound to user/team/connector, resource
  * and iss checks, tokens sealed at rest and never returned or logged.
  */
+const must = <T>(v: T | undefined): T => {
+  if (v === undefined) throw new Error("expected a value");
+  return v;
+};
 const BASE = "/v1/connector-grants";
 const CALLBACK = `${BASE}/oauth/callback`;
 const teamT = randomUUID();
@@ -52,9 +56,9 @@ beforeAll(async () => {
       return (real as (...a: unknown[]) => void)(...args);
     }) as never);
   }
-  const loaded = loadEnvelope({ KOBE_ENVELOPE_KEY: "e".repeat(48) });
+  const loaded = must(loadEnvelope({ KOBE_ENVELOPE_KEY: "e".repeat(48) }));
   h = await openHarness({
-    envelope: loaded!,
+    envelope: loaded,
     connectors: {
       allowHttp: true,
       allowedPorts: [fake.port],
@@ -160,7 +164,7 @@ describe("connecting an OAuth connector", () => {
     expect(token?.get("resource")).toBe(fake.mcpUrl);
     expect(token?.get("redirect_uri")).toBe(`http://kobe.test${CALLBACK}`);
 
-    const tokens = fake.issued.at(-1)!;
+    const tokens = must(fake.issued.at(-1));
     const { rows } = await h.admin.query<{ kind: string; sealed: string; expires_at: Date }>(
       `SELECT kind, sealed, expires_at FROM connector_grants WHERE user_id = $1 AND connector_id = $2`,
       [aliceId, oauthConnector],
@@ -177,7 +181,7 @@ describe("connecting an OAuth connector", () => {
   });
 
   it("never returns or logs tokens, state secrets or the verifier", async () => {
-    const tokens = fake.issued.at(-1)!;
+    const tokens = must(fake.issued.at(-1));
     const list = await alice.get(BASE);
     expect(list.json).toMatchObject({
       grants: [{ connector_id: oauthConnector, kind: "oauth", hint: "••••" }],
@@ -193,18 +197,20 @@ describe("connecting an OAuth connector", () => {
   });
 
   it("never serves another user's or another team's grant", async () => {
-    const bobId = (
-      await h.admin.query<{ id: string }>(`SELECT id FROM users WHERE email = $1`, [
-        "bob@oauth.test",
-      ])
-    ).rows[0]!.id;
+    const bobId =
+      (
+        await h.admin.query<{ id: string }>(`SELECT id FROM users WHERE email = $1`, [
+          "bob@oauth.test",
+        ])
+      ).rows[0]?.id ?? "";
     expect((await grantFor(teamT, bobId, oauthConnector)).status).toBe(404);
     expect((await bob.get(BASE)).json).toEqual({ grants: [] });
-    const carolId = (
-      await h.admin.query<{ id: string }>(`SELECT id FROM users WHERE email = $1`, [
-        "carol@oauth.test",
-      ])
-    ).rows[0]!.id;
+    const carolId =
+      (
+        await h.admin.query<{ id: string }>(`SELECT id FROM users WHERE email = $1`, [
+          "carol@oauth.test",
+        ])
+      ).rows[0]?.id ?? "";
     expect((await grantFor(teamU, carolId, oauthConnector)).status).toBe(404);
   });
 

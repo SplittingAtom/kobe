@@ -7,7 +7,9 @@ import type { OauthIo } from "./http.js";
 import { challengeOf, newVerifier } from "./pkce.js";
 import { openState, sealState, STATE_TTL_MS } from "./state.js";
 
-const envelope = loadEnvelope({ KOBE_ENVELOPE_KEY: "e".repeat(48) })!;
+const loaded = loadEnvelope({ KOBE_ENVELOPE_KEY: "e".repeat(48) });
+if (!loaded) throw new Error("envelope not loaded");
+const envelope = loaded;
 const info: AuthServerInfo = {
   resource: "https://mcp.example.com/mcp",
   scopes: [],
