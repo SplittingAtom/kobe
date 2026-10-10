@@ -1213,7 +1213,13 @@ export const AUDIT_EVENTS = {
   "mcp.grant.refused": event("team", {
     connectorId: id,
     name: z.string().max(64),
-    reason: z.enum(["resource_mismatch"]),
+    reason: z.enum(["resource_mismatch", "user_inactive"]),
+  }),
+  /** An OAuth refresh failed for good (KOBE-110): the grant was dropped and the user must reconnect. */
+  "mcp.grant.refresh_failed": event("team", {
+    connectorId: id,
+    name: z.string().max(64),
+    reason: z.enum(["rejected", "no_refresh_token"]),
   }),
   // ── web search (KOBE-113): provider and switches only, never the key or its hint ──
   /** An install admin set the web search provider, its enabled switch, or replaced its key. */

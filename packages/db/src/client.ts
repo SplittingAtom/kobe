@@ -14,11 +14,17 @@ export interface KobeDatabase {
 export interface CreateDbOptions {
   /** Pool size (default 10). */
   readonly max?: number;
+  /** How long to wait for a free pooled connection before failing (default 10 s). */
+  readonly acquireTimeoutMs?: number;
 }
 
 /** Connects as the app role. Team data is reachable only through `withTeam()`. */
 export function createDb(connectionString: string, options: CreateDbOptions = {}): KobeDatabase {
-  const pool = new pg.Pool({ connectionString, max: options.max ?? 10 });
+  const pool = new pg.Pool({
+    connectionString,
+    max: options.max ?? 10,
+    connectionTimeoutMillis: options.acquireTimeoutMs ?? 10_000,
+  });
   const db = drizzle({ client: pool, schema, casing: "snake_case" });
   return { db, pool, close: () => pool.end() };
 }
