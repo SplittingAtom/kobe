@@ -423,9 +423,9 @@ describe("sandbox RBAC (least privilege; D11)", () => {
   });
 
   // KOBE-192: a sandbox that is not Ready is diagnosed from events; reading only, never writing them.
-  it("lets the server read events in team namespaces, read-only (KOBE-192)", () => {
+  it("lets the server list events in team namespaces, read-only (KOBE-192)", () => {
     const all = rules("ClusterRole", manager);
-    expect(all).toContainEqual({ apiGroups: [""], resources: ["events"], verbs: ["get", "list"] });
+    expect(all).toContainEqual({ apiGroups: [""], resources: ["events"], verbs: ["list"] });
   });
 
   // KOBE-126: the team-namespace reconcile (server/src/sandbox/team-reconcile.ts) lists namespaces by

@@ -374,18 +374,6 @@ export const AUDIT_EVENTS = {
       .max(600)
       // eslint-disable-next-line no-control-regex
       .regex(/^[^\u0000-\u001f\u007f]*$/),
-    /** The one-time volume retry (delete the unused pod and volume) was made for this stall. */
-    retried: z.boolean(),
-  }),
-  /**
-   * The server deleted a never-used strict-local workspace volume and its pod once so the scheduler
-   * could pick another node (KOBE-192; system actor).
-   */
-  "sandbox.volume_retried": event("install", {
-    teamId: id,
-    sandboxId: id,
-    userId: id,
-    cause: z.enum(["volume_unschedulable", "volume_attach"]),
   }),
 
   // ── egress: ceiling (install), enablement (team), connections (team; KOBE-38, D28) ──

@@ -7,7 +7,6 @@ import type { SandboxSettings } from "./config.js";
 import { isIsolationHandler } from "../isolation/runtime-class.js";
 import {
   ANNOTATION_TEAM_ID,
-  ANNOTATION_VOLUME_RETRY,
   ANNOTATION_USER_ID,
   BOOTSTRAP_TOKEN_AUDIENCE,
   KOBE_ENDPOINTS,
@@ -59,6 +58,9 @@ import type { SandboxPrincipal } from "./session-token.js";
  */
 
 export const POD_WAIT_TIMEOUT_MS = 30_000;
+/** Same as the wire wakeRetryBudgetMs: the budget a wake had before KOBE-192. */
+export const READY_TIMEOUT_MS = 90_000;
+const READY_DIAGNOSE_EVERY_MS = 5_000;
 /** Name of the dry-run namespace the admission self-check expects to be refused. */
 export const ADMISSION_PROBE_NAMESPACE = "kobe-admission-probe";
 const DELETE_RETRIES = 4;
@@ -149,6 +151,8 @@ export interface SandboxProviderOptions {
   readonly sleep?: (ms: number) => Promise<void>;
   readonly now?: () => number;
   readonly podWaitTimeoutMs?: number;
+  /** How long a woken sandbox pod may take to be Ready (KOBE-192): the wire wake budget. */
+  readonly readyTimeoutMs?: number;
   /**
    * The configured RuntimeClass (KOBE_RUNTIME_CLASS). Used only by the reconciler, to recognise a
    * definitive loss of isolation (class deleted or no longer isolating) when require() fails.
@@ -209,20 +213,14 @@ export interface SandboxProvider {
    */
   wakeSandbox(team: TeamRef, userId: string): Promise<WakeResult>;
   /**
-   * Waits up to the wake timeout (`podWaitTimeoutMs`) for the sandbox's pod to be Ready. When it
-   * is not, reads the pod's events and the workspace volume (FailedAttachVolume, FailedScheduling,
-   * Longhorn replica scheduling, image pulls) and returns the diagnosis (KOBE-192).
+   * Waits for the sandbox pod to be Ready, up to `readyTimeoutMs`, reading the events of this wake
+   * (`since`, epoch ms) about the pod and the workspace volume as it waits. Returns early, not
+   * ready, only on a definite unrecoverable signal (replica cannot be scheduled, no capacity, an
+   * attach failing repeatedly, an image that cannot be pulled); progress such as Pulling or
+   * ContainerCreating keeps it waiting. At the budget it returns the diagnosis, `unknown`
+   * included (KOBE-192). Read-only: it never deletes anything.
    */
-  awaitReady(team: TeamRef, userId: string): Promise<ReadyOutcome>;
-  /**
-   * Once per sandbox: when a strict-local workspace volume never became usable (no container ever
-   * ran, volume attach or replica scheduling failed), deletes the pod and the volume claim so the
-   * scheduler can pick another node. Declines (no deletion) when a retry was made before, the
-   * volume is not strict-local, the cause is something else, or any container ever ran, which is
-   * the only evidence a volume may hold data. The caller must also prove the sandbox never
-   * started (KOBE-192).
-   */
-  retryStalledVolume(team: TeamRef, userId: string): Promise<"retried" | "declined">;
+  awaitReady(team: TeamRef, userId: string, since: number): Promise<ReadyOutcome>;
   /**
    * Hibernates `sandboxId` (D14): `operatingMode: Suspended` — agent-sandbox deletes the pod and
    * keeps the claim and its volume. Idempotent; no isolation check (stopping is always safe). The
@@ -302,6 +300,7 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     now = () => Date.now(),
     podWaitTimeoutMs = POD_WAIT_TIMEOUT_MS,
+    readyTimeoutMs = READY_TIMEOUT_MS,
     runtimeClassName,
     audit,
   } = options;
@@ -710,57 +709,37 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     };
   };
 
-  const awaitReady = async (team: TeamRef, userId: string): Promise<ReadyOutcome> => {
+  const awaitReady = async (
+    team: TeamRef,
+    userId: string,
+    since: number,
+  ): Promise<ReadyOutcome> => {
     assertTeamRef(team);
     assertUserId(userId);
-    const deadline = now() + podWaitTimeoutMs;
+    const deadline = now() + readyTimeoutMs;
+    let nextDiagnosis = now() + READY_DIAGNOSE_EVERY_MS;
     for (;;) {
       const found = await locate(team, userId);
-      if (!found)
+      if (!found) {
         throw new SandboxProvisioningError(`Sandbox for ${teamNamespaceName(team)} vanished`);
+      }
       if (isPodReady(await kube.get(POD(found.namespace, found.podName)))) return { ready: true };
-      if (now() >= deadline) {
-        const stall = await diagnoseStall(kube, found.namespace, found.podName, found.pvcName);
-        return { ready: false, sandboxId: found.sandboxId, stall };
+      const last = now() >= deadline;
+      if (last || now() >= nextDiagnosis) {
+        nextDiagnosis = now() + READY_DIAGNOSE_EVERY_MS;
+        const stall = await diagnoseStall(
+          kube,
+          found.namespace,
+          found.podName,
+          found.pvcName,
+          since,
+          now(),
+        );
+        // Only a definite signal ends the wait early; otherwise the sandbox gets the whole budget.
+        if (last || stall.definite) return { ready: false, sandboxId: found.sandboxId, stall };
       }
       await sleep(1000);
     }
-  };
-
-  const retryStalledVolume = async (
-    team: TeamRef,
-    userId: string,
-  ): Promise<"retried" | "declined"> => {
-    assertTeamRef(team);
-    assertUserId(userId);
-    const found = await locate(team, userId);
-    if (!found || found.sandbox.metadata.annotations?.[ANNOTATION_VOLUME_RETRY]) return "declined";
-    const { namespace, podName, pvcName, sandbox } = found;
-    const pvc = await kube.get(PVC(namespace, pvcName));
-    const strictLocal = /strict-local/.test(str(pvc, "spec", "storageClassName") ?? "");
-    if (!pvc || pvc.metadata.deletionTimestamp || !strictLocal) return "declined";
-    const pod = await kube.get(POD(namespace, podName));
-    if (!pod || isPodReady(pod)) return "declined";
-    const stall = await diagnoseStall(kube, namespace, podName, pvcName);
-    const volumeCause = stall.cause === "volume_unschedulable" || stall.cause === "volume_attach";
-    if (!volumeCause || !stall.neverRan) return "declined";
-    try {
-      // The marker first: a crash after it costs the retry, never allows a second deletion.
-      await kube.patch(
-        SANDBOX(namespace, sandbox.metadata.name),
-        { metadata: { annotations: { [ANNOTATION_VOLUME_RETRY]: "true" } } },
-        sandbox.metadata.resourceVersion
-          ? { resourceVersion: sandbox.metadata.resourceVersion }
-          : {},
-      );
-    } catch (err) {
-      if (isKubeStatus(err, 409)) return "declined";
-      throw err;
-    }
-    // The pod first (a volume claim in use is protected from deletion), then the claim.
-    await kube.delete(POD(namespace, podName));
-    await kube.delete(PVC(namespace, pvcName));
-    return "retried";
   };
 
   const hibernateSandbox = async (
@@ -1008,7 +987,6 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     ensureSandbox,
     wakeSandbox,
     awaitReady,
-    retryStalledVolume,
     hibernateSandbox,
     destroySandbox,
     deleteVolume,

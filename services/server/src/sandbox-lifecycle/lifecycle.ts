@@ -19,14 +19,13 @@ import { workspacePvcName, type SandboxProvider } from "../sandbox/provider.js";
 import { notifyHintInTx } from "../sandbox-wire/bus.js";
 import { SandboxWakeError, type SandboxTarget, type SandboxWaker } from "../sandbox-wire/types.js";
 import { resolveIdleMinutes, TEAM_IDLE_MINUTES } from "./idle.js";
-import { ensureReady, type ReadyProvider } from "./ready.js";
+import { ensureReady, REMEDY, type ReadyProvider } from "./ready.js";
 import {
   beginWake,
   forgetSandboxIdentity,
   idleCandidates,
   lockIfIdle,
   markHibernated,
-  neverRecorded,
   recordSandboxIdentity,
 } from "./store.js";
 
@@ -168,37 +167,35 @@ export function createSandboxLifecycle(options: LifecycleOptions): SandboxLifecy
   };
 
   /**
-   * The pod must be Ready within the wake timeout (KOBE-192). Not Ready: the run fails
-   * `workspace_unavailable` (no cluster detail) and install admins get the reason in the audit log
-   * (`sandbox.wake_stalled`) and the server log. Runs before the sandbox's identity is recorded,
-   * so "identity recorded" means "has come up at least once", the proof the volume-retry needs.
+   * The pod must be Ready (KOBE-192). Not Ready after a definite signal or the wake budget: the
+   * run fails `workspace_unavailable` (no cluster detail) and install admins get the reason in the
+   * audit log (`sandbox.wake_stalled`) and the server log.
    */
-  const waitUntilReady = async (team: TeamRef, target: SandboxTarget): Promise<void> => {
-    const { awaitReady, retryStalledVolume } = provider;
-    if (!awaitReady || !retryStalledVolume) return;
-    const base = { teamId: target.teamId, userId: target.userId };
+  const waitUntilReady = async (
+    team: TeamRef,
+    target: SandboxTarget,
+    since: number,
+  ): Promise<void> => {
+    const { awaitReady } = provider;
+    if (!awaitReady) return;
     await ensureReady({
-      provider: { awaitReady, retryStalledVolume },
+      provider: { awaitReady },
       team,
       userId: target.userId,
-      neverStarted: await neverRecorded(db, target),
+      since,
       log,
-      onRetried: ({ sandboxId, stall }) =>
-        recordAuditAfter(db, {
-          action: "sandbox.volume_retried",
-          actor: SYSTEM_ACTOR,
-          target: {
-            ...base,
-            sandboxId,
-            cause: stall.cause === "volume_attach" ? "volume_attach" : "volume_unschedulable",
-          },
-        }),
-      onStalled: ({ sandboxId, stall, retried }) => {
+      onStalled: ({ sandboxId, stall }) => {
         metrics.stalledWakes += 1;
         return recordAuditAfter(db, {
           action: "sandbox.wake_stalled",
           actor: SYSTEM_ACTOR,
-          target: { ...base, sandboxId, cause: stall.cause, detail: stall.detail, retried },
+          target: {
+            teamId: target.teamId,
+            userId: target.userId,
+            sandboxId,
+            cause: stall.cause,
+            detail: `${stall.detail} | ${REMEDY[stall.cause]}`,
+          },
         });
       },
     });
@@ -237,7 +234,7 @@ export function createSandboxLifecycle(options: LifecycleOptions): SandboxLifecy
       throw err;
     }
     const { handle, resumed } = result;
-    await waitUntilReady(team, target);
+    await waitUntilReady(team, target, started);
     // sandbox.woken is recorded by the provider when its resume patch is committed.
     await withTeam(db, target.teamId, (tx) =>
       recordSandboxIdentity(tx, target, handle.sandboxId, workspacePvcName(handle.sandboxName)),

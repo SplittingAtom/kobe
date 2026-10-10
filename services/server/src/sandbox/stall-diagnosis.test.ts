@@ -2,122 +2,158 @@ import { describe, expect, it } from "vitest";
 import { classifyStall, isPodReady } from "./stall-diagnosis.js";
 import type { KubeObject } from "./manifests.js";
 
+const SINCE = Date.parse("2026-10-09T10:00:00Z");
+const NOW = SINCE + 20_000;
+const iso = (offsetMs: number) => new Date(SINCE + offsetMs).toISOString();
+
 const event = (
   kind: string,
-  name: string,
+  uid: string,
   reason: string,
   message: string,
-  type = "Warning",
-  lastTimestamp = "2026-10-09T10:00:00Z",
+  extra: Record<string, unknown> = {},
 ): KubeObject => ({
   apiVersion: "v1",
   kind: "Event",
-  metadata: { name: `${name}.${reason}`, namespace: "kobe-team-a" },
-  involvedObject: { kind, name },
+  metadata: { name: `${uid}.${reason}.${message.length}`, namespace: "kobe-team-a" },
+  involvedObject: { kind, name: kind === "Pod" ? "u-1" : "workspace-u-1", uid },
   reason,
   message,
-  type,
-  lastTimestamp,
+  type: "Warning",
+  lastTimestamp: iso(1_000),
+  ...extra,
 });
 const pod = (status: Record<string, unknown> = {}): KubeObject => ({
   apiVersion: "v1",
   kind: "Pod",
-  metadata: { name: "u-1", namespace: "kobe-team-a" },
+  metadata: { name: "u-1", namespace: "kobe-team-a", uid: "pod-uid" },
   status,
 });
 const pvc = (phase: string): KubeObject => ({
   apiVersion: "v1",
   kind: "PersistentVolumeClaim",
-  metadata: { name: "workspace-u-1", namespace: "kobe-team-a" },
+  metadata: { name: "workspace-u-1", namespace: "kobe-team-a", uid: "pvc-uid" },
   status: { phase },
 });
-const base = { podName: "u-1", pvcName: "workspace-u-1" };
+const podEv = (reason: string, message: string, extra: Record<string, unknown> = {}) =>
+  event("Pod", "pod-uid", reason, message, extra);
+const classify = (events: KubeObject[], status: Record<string, unknown> = {}, now = NOW) =>
+  classifyStall({ pod: pod(status), pvc: pvc("Bound"), events, since: SINCE, now });
 
-describe("classifyStall", () => {
-  it("recognises a Longhorn replica that cannot be scheduled", () => {
-    const d = classifyStall({
-      ...base,
-      pod: pod({ phase: "Pending" }),
-      pvc: pvc("Bound"),
-      events: [
-        event(
-          "Pod",
-          "u-1",
-          "FailedAttachVolume",
-          "AttachVolume.Attach failed for volume pvc-1: rpc error: LocalReplicaSchedulingFailure: insufficient storage on node compute2",
-        ),
-      ],
+describe("classifyStall: definite signals", () => {
+  it("a Longhorn replica that cannot be scheduled", () => {
+    const d = classify([
+      podEv(
+        "FailedAttachVolume",
+        "AttachVolume.Attach failed: LocalReplicaSchedulingFailure: insufficient storage on node compute2",
+      ),
+    ]);
+    expect(d).toMatchObject({
+      cause: "volume_unschedulable",
+      definite: true,
+      volumePhase: "Bound",
     });
-    expect(d.cause).toBe("volume_unschedulable");
     expect(d.detail).toContain("compute2");
-    expect(d.volumePhase).toBe("Bound");
-    expect(d.neverRan).toBe(true);
   });
 
-  it("recognises an attach failure, a scheduling failure and an image pull failure", () => {
-    const run = (events: KubeObject[], status: Record<string, unknown> = {}) =>
-      classifyStall({ ...base, pod: pod(status), pvc: pvc("Bound"), events }).cause;
+  it("FailedScheduling for storage or no nodes available", () => {
     expect(
-      run([event("Pod", "u-1", "FailedAttachVolume", "volume is not ready for workloads")]),
-    ).toBe("volume_attach");
-    expect(run([event("Pod", "u-1", "FailedMount", "Unable to attach or mount volumes")])).toBe(
-      "volume_attach",
-    );
-    expect(run([event("Pod", "u-1", "FailedScheduling", "0/4 nodes are available")])).toBe(
-      "scheduling",
-    );
-    expect(run([event("Pod", "u-1", "Failed", "Failed to pull image: ErrImagePull")])).toBe(
-      "image_pull",
-    );
+      classify([podEv("FailedScheduling", "0/4 nodes are available: insufficient storage")]),
+    ).toMatchObject({
+      definite: true,
+    });
     expect(
-      run([], { containerStatuses: [{ state: { waiting: { reason: "ImagePullBackOff" } } }] }),
-    ).toBe("image_pull");
+      classify([podEv("FailedScheduling", "no nodes available to schedule pods")]),
+    ).toMatchObject({
+      cause: "scheduling",
+      definite: true,
+    });
   });
 
-  it("reads PVC events and ignores Normal events and other objects", () => {
+  it("image pull failures, by event or by container state", () => {
+    expect(classify([podEv("Failed", "Failed to pull image: ErrImagePull")])).toMatchObject({
+      cause: "image_pull",
+      definite: true,
+    });
     expect(
-      classifyStall({
-        ...base,
-        pod: pod(),
-        pvc: pvc("Pending"),
-        events: [
-          event("PersistentVolumeClaim", "workspace-u-1", "ProvisioningFailed", "no capacity"),
-          event("Pod", "someone-else", "FailedAttachVolume", "x"),
-          event("Pod", "u-1", "FailedAttachVolume", "x", "Normal"),
-        ],
-      }).cause,
-    ).toBe("volume_unschedulable");
+      classify([], { containerStatuses: [{ state: { waiting: { reason: "ImagePullBackOff" } } }] }),
+    ).toMatchObject({ cause: "image_pull", definite: true });
   });
 
-  it("falls back to unknown with the phases, strips control characters and bounds the text", () => {
+  it("FailedAttachVolume once it repeats or has lasted a minute", () => {
+    const attach = (extra: Record<string, unknown>) =>
+      podEv("FailedAttachVolume", "not ready", extra);
+    expect(classify([attach({ count: 3 })]).definite).toBe(true);
+    expect(classify([attach({ firstTimestamp: iso(0) })], {}, SINCE + 61_000).definite).toBe(true);
+  });
+});
+
+describe("classifyStall: progress is not a stall", () => {
+  it("a single FailedMount, a young FailedAttachVolume, Pulling and ContainerCreating keep waiting", () => {
+    expect(classify([podEv("FailedMount", "Unable to attach or mount volumes")]).definite).toBe(
+      false,
+    );
+    expect(
+      classify([podEv("FailedAttachVolume", "not ready", { count: 1, firstTimestamp: iso(0) })])
+        .definite,
+    ).toBe(false);
+    const pulling = event("Pod", "pod-uid", "Pulling", "Pulling image", { type: "Normal" });
+    expect(
+      classify([pulling], {
+        containerStatuses: [{ state: { waiting: { reason: "ContainerCreating" } } }],
+      }),
+    ).toMatchObject({ cause: "unknown", definite: false });
+    expect(
+      classify([podEv("FailedScheduling", "pod has unbound PersistentVolumeClaims")]).definite,
+    ).toBe(false);
+  });
+});
+
+describe("classifyStall: only events of this wake about this pod and volume", () => {
+  it("ignores a stale event from an earlier wake", () => {
+    const stale = podEv("FailedMount", "old", { lastTimestamp: iso(-3_600_000), count: 9 });
+    expect(classify([stale])).toMatchObject({ cause: "unknown", definite: false });
+  });
+
+  it("ignores events of another pod with the same name (uid differs) and of other objects", () => {
+    const old = event(
+      "Pod",
+      "previous-pod-uid",
+      "FailedAttachVolume",
+      "LocalReplicaSchedulingFailure",
+    );
+    const other = event(
+      "Pod",
+      "someone-else",
+      "FailedAttachVolume",
+      "LocalReplicaSchedulingFailure",
+    );
+    expect(classify([old, other]).cause).toBe("unknown");
+  });
+
+  it("reads PVC events by the volume uid", () => {
+    const d = classify([
+      event("PersistentVolumeClaim", "pvc-uid", "ProvisioningFailed", "no capacity"),
+    ]);
+    expect(d).toMatchObject({ cause: "volume_unschedulable", definite: false });
+  });
+
+  it("strips control characters and bounds the text", () => {
+    const d = classify([podEv("FailedMount", `a\n${String.fromCharCode(0)}${"x".repeat(2000)}`)]);
+    expect(d.detail.length).toBeLessThanOrEqual(400);
+    expect(d.detail).not.toContain("\n");
+    expect(d.detail).not.toContain(String.fromCharCode(0));
+  });
+
+  it("describes an unknown stall by phases", () => {
     const d = classifyStall({
-      ...base,
       pod: pod({ phase: "Pending" }),
       pvc: undefined,
       events: [],
+      since: SINCE,
+      now: NOW,
     });
     expect(d).toMatchObject({ cause: "unknown", detail: "pod Pending, volume missing" });
-    const long = classifyStall({
-      ...base,
-      pod: pod(),
-      pvc: pvc("Bound"),
-      events: [
-        event("Pod", "u-1", "FailedMount", `a\n${String.fromCharCode(0)}${"x".repeat(2000)}`),
-      ],
-    });
-    expect(long.detail.length).toBeLessThanOrEqual(600);
-    expect(long.detail).not.toContain("\n");
-    expect(long.detail).not.toContain(String.fromCharCode(0));
-  });
-
-  it("notes when a container has run before", () => {
-    const d = classifyStall({
-      ...base,
-      pod: pod({ containerStatuses: [{ state: { waiting: {} }, lastState: { terminated: {} } }] }),
-      pvc: pvc("Bound"),
-      events: [],
-    });
-    expect(d.neverRan).toBe(false);
   });
 });
 

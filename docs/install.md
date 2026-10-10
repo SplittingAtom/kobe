@@ -163,21 +163,25 @@ storage` while 419 GB were free).
 - Longhorn must be able to place a replica on every node that can run sandboxes. A node that is
   cordoned in Longhorn (scheduling disabled) or full cannot start strict-local sandboxes.
 
-**When a sandbox does not start.** The server waits for a woken sandbox's pod to be Ready for the
-wake timeout (30 s). If it is not, the run fails with `workspace_unavailable` ("Your workspace
-could not be started because the cluster could not provide it. Ask your install admin to check the
-cluster."). Members never see node or volume names. Install admins find the reason in the install
-audit log: filter on action `sandbox.wake_stalled` (`GET /v1/install/audit?action=sandbox.wake_stalled`),
-whose `detail` is the pod's or volume's own event (`FailedAttachVolume`, `FailedScheduling`,
-`LocalReplicaSchedulingFailure`, `ImagePullBackOff`, ...) and `cause` one of `volume_unschedulable`,
-`volume_attach`, `scheduling`, `image_pull`, `unknown`. The server log has the same line ("sandbox
-not ready within the wake timeout", level error).
+**When a sandbox does not start.** After a wake the server waits for the sandbox pod to be Ready
+(up to 90 s, the wake budget). It keeps waiting while the pod shows progress (image pull,
+ContainerCreating, a single `FailedMount`) and fails early only on a definite signal: a replica or
+storage that cannot be scheduled (`LocalReplicaSchedulingFailure`, `FailedScheduling` with
+insufficient storage or no nodes available), `FailedAttachVolume` repeating (3 times or over a
+minute), or `ImagePullBackOff`/`ErrImagePull`. Only events of that wake about that pod and volume
+count. The run then fails with `workspace_unavailable` ("Your workspace could not be started because
+the cluster could not provide it. Ask your install admin to check the cluster."); members never
+see node or volume names.
 
-For a strict-local workspace that has never come up, the server also retries **once**: it deletes
-the unused pod and volume claim so the scheduler can pick another node (audit action
-`sandbox.volume_retried`), then waits another wake timeout. A volume whose sandbox ever came up, or
-whose pod ever ran a container, is never deleted by this. The server needs read access to events
-in team namespaces for this (included in the chart's role).
+Install admins find the reason in the install audit log: filter on action `sandbox.wake_stalled`
+(`GET /v1/install/audit?action=sandbox.wake_stalled`). `cause` is one of `volume_unschedulable`,
+`volume_attach`, `scheduling`, `image_pull`, `unknown`; `detail` is the cluster's own event text
+followed by a suggested remedy. The server log has the same line (level error, "sandbox not ready:
+failing the wake"). The server never deletes a pod or volume for this: if a workspace that has
+never run is stuck on a volume that cannot attach, delete its PVC by hand
+(`kubectl -n kobe-team-<slug> delete pvc workspace-u-<user-id>`) after confirming it holds no data;
+the next message starts a fresh sandbox. The server needs `list` on events in team namespaces
+(included in the chart role).
 
 ## Egress
 

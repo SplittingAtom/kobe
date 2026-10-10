@@ -1,143 +1,128 @@
 import { describe, expect, it } from "vitest";
 import { createFakeKube, simulateAgentSandbox, type FakeKube } from "../testing/fake-kube.js";
 import { SETTINGS, TEAM, USER, gateFor, must, seedCluster } from "../testing/sandbox-fixtures.js";
-import { ANNOTATION_VOLUME_RETRY } from "./constants.js";
 import { createSandboxProvider, workspacePvcName } from "./provider.js";
 
-/** A sandbox not Ready within the wake timeout (KOBE-192), against the fake cluster. */
+/** A woken sandbox that is slow or stuck (KOBE-192), against the fake cluster and a fake clock. */
 const NS = "kobe-team-finance";
-const STRICT = "kobe-abc123-workspace-strict-local";
 const READY = { phase: "Running", conditions: [{ type: "Ready", status: "True" }] };
+const T0 = Date.parse("2026-10-09T10:00:00Z");
 
-async function setup(
-  opts: { storageClass?: string; pvcPhase?: string; podStatus?: Record<string, unknown> } = {},
-) {
+async function setup(readyTimeoutMs = 90_000) {
   const kube = createFakeKube();
   seedCluster(kube);
   simulateAgentSandbox(kube);
-  let clock = 0;
+  const clock = { ms: 0 };
+  const ticks: ((ms: number) => void)[] = [];
   const provider = createSandboxProvider({
     kube,
     isolation: gateFor(kube),
     settings: SETTINGS,
-    now: () => clock,
-    sleep: async (ms) => void (clock += ms),
-    podWaitTimeoutMs: 5_000,
+    now: () => T0 + clock.ms,
+    sleep: async (ms) => {
+      clock.ms += ms;
+      ticks.forEach((t) => t(clock.ms));
+    },
+    readyTimeoutMs,
   });
   const handle = await provider.ensureSandbox(TEAM, USER);
-  const pod = must(
-    kube.peek({ apiVersion: "v1", kind: "Pod", name: handle.sandboxName, namespace: NS }),
-  );
-  kube.seed({ ...pod, status: opts.podStatus ?? { phase: "Pending" } });
-  seedPvc(kube, handle.sandboxName, opts.storageClass ?? STRICT, opts.pvcPhase ?? "Bound");
-  return { kube, provider, handle };
-}
-
-const seedPvc = (kube: FakeKube, sandboxName: string, storageClassName: string, phase: string) =>
-  kube.seed({
+  const podRef = { apiVersion: "v1", kind: "Pod", name: handle.sandboxName, namespace: NS };
+  const pod = must(kube.peek(podRef));
+  const setStatus = (status: Record<string, unknown>) =>
+    kube.seed({ ...must(kube.peek(podRef)), status });
+  setStatus({ phase: "Pending" });
+  const pvc = kube.seed({
     apiVersion: "v1",
     kind: "PersistentVolumeClaim",
-    metadata: { name: workspacePvcName(sandboxName), namespace: NS },
-    spec: { storageClassName },
-    status: { phase },
+    metadata: { name: workspacePvcName(handle.sandboxName), namespace: NS },
+    spec: { storageClassName: "kobe-abc123-workspace-strict-local" },
+    status: { phase: "Bound" },
   });
-
-const podEvent = (kube: FakeKube, pod: string, reason: string, message: string) =>
-  kube.seed({
-    apiVersion: "v1",
-    kind: "Event",
-    metadata: { name: `${pod}.${reason}`, namespace: NS },
-    involvedObject: { kind: "Pod", name: pod },
-    reason,
-    message,
-    type: "Warning",
-    lastTimestamp: "2026-10-09T10:00:00Z",
-  });
-const attachFailure = (kube: FakeKube, pod: string) =>
-  podEvent(kube, pod, "FailedAttachVolume", "LocalReplicaSchedulingFailure: insufficient storage");
-
-const exists = (kube: FakeKube, kind: string, name: string) =>
-  kube.peek({ apiVersion: "v1", kind, name, namespace: NS }) !== undefined;
-
-describe("awaitReady", () => {
-  it("returns at once for a Ready pod", async () => {
-    const { provider } = await setup({ podStatus: READY });
-    await expect(provider.awaitReady(TEAM, USER)).resolves.toEqual({ ready: true });
-  });
-
-  it("after the wake timeout reports the volume cause for admins", async () => {
-    const { kube, provider, handle } = await setup();
-    attachFailure(kube, handle.sandboxName);
-    const outcome = await provider.awaitReady(TEAM, USER);
-    expect(outcome).toMatchObject({
-      ready: false,
-      sandboxId: handle.sandboxId,
-      stall: { cause: "volume_unschedulable", volumePhase: "Bound", neverRan: true },
-    });
-  });
-});
-
-describe("retryStalledVolume", () => {
-  it("deletes the pod and the never-used strict-local volume once", async () => {
-    const { kube, provider, handle } = await setup();
-    attachFailure(kube, handle.sandboxName);
-    await expect(provider.retryStalledVolume(TEAM, USER)).resolves.toBe("retried");
-    expect(exists(kube, "Pod", handle.sandboxName)).toBe(false);
-    expect(exists(kube, "PersistentVolumeClaim", workspacePvcName(handle.sandboxName))).toBe(false);
-    const sandbox = must(
-      kube.peek({
-        apiVersion: "agents.x-k8s.io/v1beta1",
-        kind: "Sandbox",
-        name: handle.sandboxName,
-        namespace: NS,
-      }),
-    );
-    expect(sandbox.metadata.annotations?.[ANNOTATION_VOLUME_RETRY]).toBe("true");
-  });
-
-  it("never retries twice", async () => {
-    const { kube, provider, handle } = await setup();
-    attachFailure(kube, handle.sandboxName);
-    await provider.retryStalledVolume(TEAM, USER);
-    // The controller recreates the pod and the volume; they stall again.
-    seedPvc(kube, handle.sandboxName, STRICT, "Bound");
+  const podEvent = (reason: string, message: string, extra: Record<string, unknown> = {}) =>
     kube.seed({
       apiVersion: "v1",
-      kind: "Pod",
-      metadata: { name: handle.sandboxName, namespace: NS },
-      status: { phase: "Pending" },
+      kind: "Event",
+      metadata: { name: `${reason}.${kube.all("Event").length}`, namespace: NS },
+      involvedObject: { kind: "Pod", name: handle.sandboxName, uid: pod.metadata.uid },
+      reason,
+      message,
+      type: "Warning",
+      lastTimestamp: new Date(T0 + clock.ms).toISOString(),
+      ...extra,
     });
-    await expect(provider.retryStalledVolume(TEAM, USER)).resolves.toBe("declined");
-    expect(exists(kube, "PersistentVolumeClaim", workspacePvcName(handle.sandboxName))).toBe(true);
+  return { kube, provider, handle, clock, ticks, setStatus, podEvent, pvc };
+}
+
+const noDeletes = (kube: FakeKube) => kube.calls.filter((c) => c.verb === "delete");
+
+describe("awaitReady (KOBE-192)", () => {
+  it("returns at once for a Ready pod", async () => {
+    const t = await setup();
+    t.setStatus(READY);
+    await expect(t.provider.awaitReady(TEAM, USER, T0)).resolves.toEqual({ ready: true });
   });
 
-  it("never deletes a volume whose container has run before", async () => {
-    const { kube, provider, handle } = await setup({
-      podStatus: {
-        phase: "Pending",
-        containerStatuses: [{ state: { waiting: {} }, lastState: { terminated: { exitCode: 1 } } }],
-      },
+  it("waits through a 60 s image pull (only Pulling events), then succeeds", async () => {
+    const t = await setup();
+    t.kube.seed({
+      apiVersion: "v1",
+      kind: "Event",
+      metadata: { name: "pulling", namespace: NS },
+      involvedObject: { kind: "Pod", name: t.handle.sandboxName, uid: "x" },
+      reason: "Pulling",
+      message: "Pulling image kobe-sandbox (1.5 GB)",
+      type: "Normal",
+      lastTimestamp: new Date(T0).toISOString(),
     });
-    attachFailure(kube, handle.sandboxName);
-    await expect(provider.retryStalledVolume(TEAM, USER)).resolves.toBe("declined");
-    expect(exists(kube, "PersistentVolumeClaim", workspacePvcName(handle.sandboxName))).toBe(true);
-    expect(kube.calls.some((c) => c.verb === "delete")).toBe(false);
+    t.setStatus({
+      phase: "Pending",
+      containerStatuses: [{ state: { waiting: { reason: "ContainerCreating" } } }],
+    });
+    t.ticks.push((ms) => {
+      if (ms >= 60_000) t.setStatus(READY);
+    });
+    await expect(t.provider.awaitReady(TEAM, USER, T0)).resolves.toEqual({ ready: true });
+    expect(t.clock.ms).toBeGreaterThanOrEqual(60_000);
+    expect(noDeletes(t.kube)).toEqual([]);
   });
 
-  it("declines other storage classes and other causes", async () => {
-    const other = await setup({ storageClass: "longhorn" });
-    attachFailure(other.kube, other.handle.sandboxName);
-    await expect(other.provider.retryStalledVolume(TEAM, USER)).resolves.toBe("declined");
-
-    const pull = await setup();
-    podEvent(pull.kube, pull.handle.sandboxName, "Failed", "ErrImagePull");
-    await expect(pull.provider.retryStalledVolume(TEAM, USER)).resolves.toBe("declined");
-    expect(pull.kube.calls.some((c) => c.verb === "delete")).toBe(false);
+  it("ignores a stale FailedMount from an earlier wake and waits the whole budget", async () => {
+    const t = await setup(20_000);
+    t.podEvent("FailedMount", "old attach problem", {
+      lastTimestamp: new Date(T0 - 3_600_000).toISOString(),
+      count: 20,
+    });
+    const outcome = await t.provider.awaitReady(TEAM, USER, T0);
+    expect(outcome).toMatchObject({ ready: false, stall: { cause: "unknown", definite: false } });
+    expect(t.clock.ms).toBeGreaterThanOrEqual(20_000);
   });
 
-  it("declines when the pod is Ready", async () => {
-    const { kube, provider, handle } = await setup({ podStatus: READY });
-    attachFailure(kube, handle.sandboxName);
-    await expect(provider.retryStalledVolume(TEAM, USER)).resolves.toBe("declined");
+  it("fails early with an admin reason on FailedScheduling for insufficient storage", async () => {
+    const t = await setup();
+    t.podEvent("FailedScheduling", "0/4 nodes are available: 4 insufficient storage.");
+    const outcome = await t.provider.awaitReady(TEAM, USER, T0);
+    expect(outcome).toMatchObject({
+      ready: false,
+      sandboxId: t.handle.sandboxId,
+      stall: { cause: "volume_unschedulable", definite: true },
+    });
+    expect(t.clock.ms).toBeLessThan(30_000);
+  });
+
+  it("fails early on a Longhorn replica scheduling failure", async () => {
+    const t = await setup();
+    t.podEvent("FailedAttachVolume", "LocalReplicaSchedulingFailure: insufficient storage");
+    const outcome = await t.provider.awaitReady(TEAM, USER, T0);
+    expect(outcome).toMatchObject({ ready: false, stall: { cause: "volume_unschedulable" } });
+    expect(t.clock.ms).toBeLessThan(30_000);
+  });
+
+  it("never deletes anything, whatever it finds", async () => {
+    const t = await setup(10_000);
+    t.podEvent("FailedAttachVolume", "LocalReplicaSchedulingFailure: insufficient storage");
+    await t.provider.awaitReady(TEAM, USER, T0);
+    expect(noDeletes(t.kube)).toEqual([]);
+    expect(t.kube.calls.filter((c) => c.verb === "patch")).toEqual([]);
+    expect(t.kube.peek({ ...t.pvc, name: t.pvc.metadata.name, namespace: NS })).toBeDefined();
   });
 });

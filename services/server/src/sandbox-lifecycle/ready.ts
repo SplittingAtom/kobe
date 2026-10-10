@@ -10,7 +10,18 @@ import { SandboxWakeError } from "../sandbox-wire/types.js";
 export const WORKSPACE_UNAVAILABLE_MESSAGE =
   "Your workspace could not be started because the cluster could not provide it. Ask your install admin to check the cluster, then try again.";
 
-export type ReadyProvider = Pick<SandboxProvider, "awaitReady" | "retryStalledVolume">;
+/** What an install admin can do, by cause; appended to the audit detail (docs/install.md). */
+export const REMEDY: Readonly<Record<StallDiagnosis["cause"], string>> = {
+  volume_unschedulable:
+    "Remedy: free or add Longhorn disk space or raise over-provisioning (docs/install.md, Longhorn sizing); the next message retries",
+  volume_attach:
+    "Remedy: check the Longhorn volume and node; if the workspace never ran, delete its PVC by hand (docs/install.md)",
+  scheduling: "Remedy: add node capacity or check taints and quotas",
+  image_pull: "Remedy: check the sandbox image tag, registry and pull secrets",
+  unknown: "Remedy: kubectl describe the sandbox pod in the team namespace",
+};
+
+export type ReadyProvider = Pick<SandboxProvider, "awaitReady">;
 
 export interface StallReport {
   readonly sandboxId: string;
@@ -21,37 +32,21 @@ export interface EnsureReadyOptions {
   readonly provider: ReadyProvider;
   readonly team: { readonly id: string; readonly slug: string };
   readonly userId: string;
-  /**
-   * Kobe has never seen this sandbox come up (no identity recorded). The one-time volume retry is
-   * only allowed then: a sandbox that ran before may hold data on its volume.
-   */
-  readonly neverStarted: boolean;
+  /** Start of this wake (epoch ms): older cluster events are not about it. */
+  readonly since: number;
   readonly log: Logger;
-  readonly onStalled: (report: StallReport & { readonly retried: boolean }) => Promise<void>;
-  readonly onRetried: (report: StallReport) => Promise<void>;
+  readonly onStalled: (report: StallReport) => Promise<void>;
 }
 
 /**
- * Waits for the woken sandbox's pod to be Ready (within the wake timeout). If it is not, and its
- * workspace volume never worked, retries once on a fresh volume; if it still is not, records why
- * for install admins and fails the wake with `workspace_unavailable`.
+ * Waits for the woken sandbox pod to be Ready. If it is not (a definite unrecoverable signal, or
+ * the wake budget ran out), records why for install admins and fails the wake with
+ * `workspace_unavailable`. Nothing is ever deleted here: the remedy is the admin to apply.
  */
 export async function ensureReady(options: EnsureReadyOptions): Promise<void> {
   const { provider, team, userId, log } = options;
-  let outcome = await provider.awaitReady(team, userId);
+  const outcome = await provider.awaitReady(team, userId, options.since);
   if (outcome.ready) return;
-  let retried = false;
-  const first = { sandboxId: outcome.sandboxId, stall: outcome.stall };
-  if (options.neverStarted && (await provider.retryStalledVolume(team, userId)) === "retried") {
-    retried = true;
-    log.warn(
-      { team_id: team.id, sandbox_id: first.sandboxId, cause: first.stall.cause },
-      "workspace volume never worked: deleted the unused volume and pod once to reschedule",
-    );
-    await options.onRetried(first).catch((err: unknown) => log.error({ err }, "audit failed"));
-    outcome = await provider.awaitReady(team, userId);
-    if (outcome.ready) return;
-  }
   const report = { sandboxId: outcome.sandboxId, stall: outcome.stall };
   log.error(
     {
@@ -61,12 +56,10 @@ export async function ensureReady(options: EnsureReadyOptions): Promise<void> {
       cause: report.stall.cause,
       detail: report.stall.detail,
       volume_phase: report.stall.volumePhase,
-      retried,
+      definite: report.stall.definite,
     },
-    "sandbox not ready within the wake timeout",
+    "sandbox not ready: failing the wake",
   );
-  await options
-    .onStalled({ ...report, retried })
-    .catch((err: unknown) => log.error({ err }, "audit failed"));
+  await options.onStalled(report).catch((err: unknown) => log.error({ err }, "audit failed"));
   throw new SandboxWakeError("workspace_unavailable", WORKSPACE_UNAVAILABLE_MESSAGE);
 }

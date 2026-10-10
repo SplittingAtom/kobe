@@ -25,7 +25,7 @@ rules:
   # workspace volume's events (FailedAttachVolume, FailedScheduling, image pulls). Read-only.
   - apiGroups: [""]
     resources: ["events"]
-    verbs: ["get", "list"]
+    verbs: ["list"]
   # Server-side apply of the namespace's fixed objects. Image pull Secrets for the kubelet are
   # copied in write-only (no get/list: the server never reads Secrets here).
   - apiGroups: [""]
