@@ -184,6 +184,7 @@ export function ChatApp({
             newKey,
             reopenDelayMs,
             uploadTransport,
+            fetchFn,
           }),
     [teamId, fetchFn, eventSource, newKey, reopenDelayMs, uploadTransport],
   );

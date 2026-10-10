@@ -171,6 +171,8 @@ export const xhrUploadTransport: UploadTransport = ({
 export interface AttachedFileRef {
   readonly name: string;
   readonly mimeType: string;
+  /** The sandbox path Pi was given (`/workspace/uploads/<thread>/<name>`). */
+  readonly path: string;
 }
 
 const ATTACHED = /\n\nAttached files:\n((?:- \S.* \([^()\n]*\)(?: - [^\n]*)?\n?)+)$/u;
@@ -189,7 +191,9 @@ export function splitAttachedFiles(text: string): {
   const files: AttachedFileRef[] = [];
   for (const line of (match[1] ?? "").split("\n")) {
     const m = ATTACHED_LINE.exec(line);
-    if (m) files.push({ name: (m[1] ?? "").split("/").at(-1) ?? "", mimeType: m[2] ?? "" });
+    if (!m) continue;
+    const path = m[1] ?? "";
+    files.push({ name: path.split("/").at(-1) ?? "", mimeType: m[2] ?? "", path });
   }
   return files.length === 0 ? { text, files: [] } : { text: text.slice(0, match.index), files };
 }

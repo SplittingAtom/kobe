@@ -160,6 +160,21 @@ export class AttachmentStore {
     };
   }
 
+  /**
+   * Hands a draft's files to another draft (a new thread was created but the send failed, so the
+   * composer is now on that thread). Only settled files move; uploads in flight keep their draft.
+   */
+  move(from: string, to: string): void {
+    const moving = this.get(from).filter((f) => f.status !== "uploading");
+    if (moving.length === 0) return;
+    const ids = new Set(moving.map((f) => f.id));
+    this.#drafts.set(
+      from,
+      this.get(from).filter((f) => !ids.has(f.id)),
+    );
+    this.#update(to, (files) => [...files, ...moving]);
+  }
+
   /** The message was accepted: the draft's files now belong to it. */
   sent(draft: string): void {
     for (const f of this.get(draft)) {
