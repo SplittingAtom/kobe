@@ -155,6 +155,9 @@ export class FakeKobe {
   readonly artifacts = new Map<string, FakeArtifact>();
   #artifactN = 0;
 
+  /** Shared files of `GET /v1/files/:id/content` (KOBE-150), by id; `status` makes the download fail. */
+  readonly sharedFiles = new Map<string, { readonly bytes: Uint8Array; readonly status: number }>();
+
   // --- setup ----------------------------------------------------------------------------------
 
   /** An artifact that exists before the test; `versions` are the contents of v1, v2, ... */
@@ -177,6 +180,13 @@ export class FakeKobe {
       language: a.language ?? null,
       versions: [...a.versions],
     });
+    return id;
+  }
+
+  /** A file `share_file` made; the download answers `status` (200 serves `bytes`). */
+  addSharedFile(bytes: Uint8Array, status = 200): string {
+    const id = uuid(8, this.sharedFiles.size + 1);
+    this.sharedFiles.set(id, { bytes, status });
     return id;
   }
 
@@ -478,6 +488,19 @@ export class FakeKobe {
       });
     }
     if (url.pathname.startsWith("/v1/artifacts")) return this.#artifactRoute(url, headers);
+    const shared = /^\/v1\/files\/([^/]+)\/content$/u.exec(url.pathname);
+    if (shared) {
+      const file = this.sharedFiles.get(shared[1] ?? "");
+      if (!file) return error(404, "not_found");
+      if (file.status !== 200) return error(file.status, "unavailable");
+      return new Response(new Uint8Array(file.bytes), {
+        status: 200,
+        headers: {
+          "content-type": "application/octet-stream",
+          "x-content-type-options": "nosniff",
+        },
+      });
+    }
     const scoped =
       url.pathname === "/v1/team/budgets/status" ||
       url.pathname.startsWith("/v1/threads") ||
