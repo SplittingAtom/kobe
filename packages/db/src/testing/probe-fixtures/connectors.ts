@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { connectorGrants, connectors, teamConnectors, users } from "../../schema/index.js";
+import {
+  connectorGrants,
+  connectors,
+  teamConnectors,
+  teamWebSearch,
+  users,
+} from "../../schema/index.js";
 import type { connectors as connectorsDomain } from "../../tenancy/connectors.js";
 import type { ProbeFixture } from "./types.js";
 
@@ -37,5 +43,10 @@ export const connectorsFixtures: Record<(typeof connectorsDomain.team)[number], 
       keyId: "probe",
       hint: "••••test",
     });
+  },
+  team_web_search: async (tx, teamId) => {
+    const userId = randomUUID();
+    await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
+    await tx.insert(teamWebSearch).values({ teamId, enabledBy: userId });
   },
 };
