@@ -280,9 +280,7 @@ async function webSearch(
   if (!outcome.available) {
     return { content: [{ type: "text", text: outcome.message }], details: { ...details } };
   }
-  const lines = outcome.results.map(
-    (r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`,
-  );
+  const lines = outcome.results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`);
   const text =
     lines.length === 0
       ? `No results for "${outcome.query}".`

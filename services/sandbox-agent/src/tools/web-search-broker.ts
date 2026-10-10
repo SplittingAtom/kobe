@@ -49,7 +49,10 @@ export class WebSearchBroker {
       return;
     }
     const perThread = [...this.#pending.values()].filter((p) => p.threadId === threadId).length;
-    if (this.#pending.size >= MAX_PENDING_SEARCHES || perThread >= MAX_PENDING_SEARCHES_PER_THREAD) {
+    if (
+      this.#pending.size >= MAX_PENDING_SEARCHES ||
+      perThread >= MAX_PENDING_SEARCHES_PER_THREAD
+    ) {
       reply(toolsError(request.id, "unavailable", "too many searches in flight"));
       return;
     }

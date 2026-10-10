@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { Server } from "node:http";
-import { MAX_RUN_TOKEN_TTL_SECONDS, type PolicyEngine, type ToolRegistry } from "@kobe/protocol";
+import {
+  MAX_RUN_TOKEN_TTL_SECONDS,
+  WEB_SEARCH_UNAVAILABLE_MESSAGES,
+  type PolicyEngine,
+  type ToolRegistry,
+} from "@kobe/protocol";
 import { z } from "zod";
 import { SYSTEM_ACTOR, eq, getMembership, users, withTeam, type KobeDb } from "@kobe/db";
 import { logger as rootLogger } from "../logger.js";
@@ -11,6 +16,7 @@ import { DEFAULT_UPLOAD_SETTINGS, type UploadSettings } from "../uploads/setting
 import { createPolicyEngine } from "../policy/engine.js";
 import { createToolRegistry } from "../policy/registry.js";
 import { createDbRuleSource, createDbSettingsSource } from "../policy/rule-store.js";
+import type { WebSearchService } from "../web-search/service.js";
 import { createSandboxBus, type BusHint } from "./bus.js";
 import { SandboxConnection } from "./connection.js";
 import { WIRE_DEFAULTS, type WireTuning } from "./constants.js";
@@ -48,6 +54,8 @@ export interface SandboxWireOptions {
   readonly blobs?: BlobStore;
   /** Upload limits and storage quota default, applied to `file.share` too (KOBE-150). */
   readonly uploads?: UploadSettings;
+  /** Runs `web_search.query` (KOBE-114); unset: every search answers "not configured". */
+  readonly webSearch?: WebSearchService;
   readonly tuning?: Partial<WireTuning>;
   /** Key from `deriveRunTokenKey` (KOBE-118); unset: `run.start` carries no run token. */
   readonly runTokenKey?: Uint8Array;
@@ -108,6 +116,14 @@ function assertRunTokenTtl(ttl: number): void {
   }
 }
 
+const NO_WEB_SEARCH: WebSearchService = {
+  search: () =>
+    Promise.resolve({
+      kind: "unavailable",
+      reason: "not_configured",
+      message: WEB_SEARCH_UNAVAILABLE_MESSAGES.not_configured,
+    }),
+};
 const NO_WAKE: SandboxWaker = { wake: () => Promise.resolve() };
 const NOT_LIVE: SandboxLiveness = { isLive: () => Promise.resolve(false) };
 const VIOLATION_AUDIT_EVERY_MS = 5 * 60_000;
@@ -237,6 +253,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       settings: options.uploads ?? DEFAULT_UPLOAD_SETTINGS,
       runMaxEvents: tuning.runMaxEvents,
     },
+    webSearch: options.webSearch ?? NO_WEB_SEARCH,
     ui: options.ui ?? CANCEL_DIALOGS,
     hooks,
     get liveness() {
@@ -285,6 +302,24 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
         target.teamId,
         {
           action: "sandbox.file_share_refused",
+          actor: SYSTEM_ACTOR,
+          teamId: target.teamId,
+          target: {
+            sandboxId,
+            userId: target.userId,
+            reason: refusal.reason,
+            runId: refusal.runId,
+            toolCallId: refusal.toolCallId,
+          },
+        },
+      );
+    },
+    auditWebSearchRefused(target, sandboxId, refusal) {
+      throttledAudit(
+        `${target.teamId}:${target.userId}:web_search:${refusal.reason}`,
+        target.teamId,
+        {
+          action: "sandbox.web_search_refused",
           actor: SYSTEM_ACTOR,
           teamId: target.teamId,
           target: {

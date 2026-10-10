@@ -152,6 +152,14 @@ export const FILE_SHARE_REFUSALS = [
   "scan_rejected",
 ] as const;
 
+/** Why the server refused a `web_search.query` (audit `sandbox.web_search_refused`, KOBE-114). */
+export const WEB_SEARCH_REFUSALS = [
+  "capability_missing",
+  "run_not_active",
+  "not_allowed",
+  "input_mismatch",
+] as const;
+
 /** A Pi tool call id (`idSchema` in @kobe/protocol): no control characters, ≤ 128. */
 const toolCallId = z
   .string()
@@ -852,6 +860,19 @@ export const AUDIT_EVENTS = {
     sandboxId: id,
     userId: id,
     reason: z.enum(FILE_SHARE_REFUSALS),
+    runId: id.optional(),
+    toolCallId: toolCallId.optional(),
+  }),
+
+  /**
+   * The server refused a `web_search.query` (KOBE-114): no `web_search` capability, a run not
+   * active here, or a tool call it did not allow (or other input). Never records the query (system;
+   * at most one per 5 minutes per reason and user).
+   */
+  "sandbox.web_search_refused": event("team", {
+    sandboxId: id,
+    userId: id,
+    reason: z.enum(WEB_SEARCH_REFUSALS),
     runId: id.optional(),
     toolCallId: toolCallId.optional(),
   }),

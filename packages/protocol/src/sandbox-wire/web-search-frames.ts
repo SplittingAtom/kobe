@@ -1,7 +1,11 @@
 import { z } from "zod";
 import { idSchema, uuidSchema } from "../common.js";
 import { artifactFailFields } from "../artifacts.js";
-import { webSearchCallShape, webSearchOkFields, webSearchUnavailableFields } from "../web-search.js";
+import {
+  webSearchCallShape,
+  webSearchOkFields,
+  webSearchUnavailableFields,
+} from "../web-search.js";
 import { SANDBOX_WIRE_VERSION } from "./connection.js";
 
 /** Web search frames (KOBE-114, web-search.ts), behind hello capability `web_search`. */

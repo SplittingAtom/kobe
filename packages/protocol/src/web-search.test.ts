@@ -31,7 +31,13 @@ describe("web_search contract", () => {
   });
 
   it("accepts the query frame and the three result shapes", () => {
-    const query = { v: 1, type: "web_search.query", ...ids, tool: "web_search", input: { query: "q" } };
+    const query = {
+      v: 1,
+      type: "web_search.query",
+      ...ids,
+      tool: "web_search",
+      input: { query: "q" },
+    };
     expect(decodeSandboxFrame(JSON.stringify(query)).ok).toBe(true);
     const ok = {
       ok: true,

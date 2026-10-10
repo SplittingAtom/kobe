@@ -1,5 +1,11 @@
 import type { ToolRegistry } from "@kobe/protocol";
-import type { ARTIFACT_PUT_REFUSALS, FILE_SHARE_REFUSALS, KobeDb } from "@kobe/db";
+import type {
+  ARTIFACT_PUT_REFUSALS,
+  FILE_SHARE_REFUSALS,
+  KobeDb,
+  WEB_SEARCH_REFUSALS,
+} from "@kobe/db";
+import type { WebSearchService } from "../web-search/service.js";
 import type { Logger } from "pino";
 import type { SandboxBus } from "./bus.js";
 import type { WireTuning } from "./constants.js";
@@ -69,6 +75,8 @@ export interface WireContext {
   readonly artifacts: ArtifactPutDeps;
   /** Storage for `file.share` (KOBE-150). */
   readonly fileShare: FileShareDeps;
+  /** Runs `web_search.query` (KOBE-114). */
+  readonly webSearch: WebSearchService;
   readonly ui: UiBroker;
   readonly hooks: RunLifecycleHooks;
   readonly liveness: SandboxLiveness;
@@ -98,6 +106,16 @@ export interface WireContext {
     sandboxId: string,
     refusal: {
       reason: (typeof FILE_SHARE_REFUSALS)[number];
+      runId: string;
+      toolCallId: string;
+    },
+  ): void;
+  /** Records `sandbox.web_search_refused` (throttled per user and reason); never carries the query. */
+  auditWebSearchRefused(
+    target: SandboxTarget,
+    sandboxId: string,
+    refusal: {
+      reason: (typeof WEB_SEARCH_REFUSALS)[number];
       runId: string;
       toolCallId: string;
     },

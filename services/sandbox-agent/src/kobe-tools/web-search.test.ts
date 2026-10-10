@@ -2,7 +2,12 @@ import { CAPABILITY_WEB_SEARCH, WEB_SEARCH_QUERY_MAX } from "@kobe/protocol";
 import { describe, expect, it } from "vitest";
 import type { ToolsOutcome } from "./client.js";
 import { registerKobeTools } from "./extension.js";
-import { OP_WEB_SEARCH, OPS, TOOL_WEB_SEARCH, WEB_SEARCH_QUERY_MAX as QUERY_MAX } from "./protocol.js";
+import {
+  OP_WEB_SEARCH,
+  OPS,
+  TOOL_WEB_SEARCH,
+  WEB_SEARCH_QUERY_MAX as QUERY_MAX,
+} from "./protocol.js";
 import { ToolFailure, webSearchTool, type ToolDefinitionLike } from "./tools.js";
 
 const calls: unknown[] = [];
@@ -65,14 +70,21 @@ describe("web_search tool", () => {
     await expect(tool.execute("c", { query: "x" })).rejects.toThrow(ToolFailure);
   });
 
-  it.each([{}, { query: "" }, { query: "x".repeat(QUERY_MAX + 1) }, { query: "x", count: 0 }, { query: "x", n: 1 }])(
-    "refuses invalid input %j before sending",
-    async (input) => {
-      const before = calls.length;
-      await expect(webSearchTool(transport({ ok: true, available: false, reason: "not_configured", message: "m" })).execute("c", input)).rejects.toThrow(ToolFailure);
-      expect(calls.length).toBe(before);
-    },
-  );
+  it.each([
+    {},
+    { query: "" },
+    { query: "x".repeat(QUERY_MAX + 1) },
+    { query: "x", count: 0 },
+    { query: "x", n: 1 },
+  ])("refuses invalid input %j before sending", async (input) => {
+    const before = calls.length;
+    await expect(
+      webSearchTool(
+        transport({ ok: true, available: false, reason: "not_configured", message: "m" }),
+      ).execute("c", input),
+    ).rejects.toThrow(ToolFailure);
+    expect(calls.length).toBe(before);
+  });
 
   it("is registered next to the other tools", () => {
     const names: string[] = [];
