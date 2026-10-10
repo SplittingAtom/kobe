@@ -259,11 +259,12 @@ if [[ "$STEPS" == *" replicas "* ]]; then
       -o jsonpath='{range .items[*]}{.status.podIP}{"\n"}{end}'))
     contains "the chart runs two model-gateway replicas" '^2$' "${#mg_ips[@]}"
     sbx_ready || wake
-    # The fake model reports 5 + 3 tokens; a call reserves its input estimate (14) plus max_tokens (3).
-    # Headroom 20 holds two reservations, so a shared gate admits two of the burst. Two gates that do
-    # not share would admit two each, four calls, 32 tokens: over headroom + one call (28).
+    # The fake model reports 5 + 3 tokens a call; a call reserves its input estimate (about 21) plus
+    # max_tokens (3), more than the headroom. A shared gate admits the first call of the burst and
+    # refuses the rest (402) until its ledger row lands, which exhausts the budget: 8 tokens, 7 over.
+    # Two gates that do not share admit one each: 16 tokens, 15 over, more than one call.
     ONE_CALL=8
-    HEADROOM=20
+    HEADROOM=1
     rtoken=$(client "$(printf '{"mode":"mint2","base":"%s","audiences":["kobe.model-gateway"],"sandboxId":"%s","teamId":"%s","userId":"%s"}' "$BASE" "$SBX_ID" "$TEAM" "$T2")" \
       | sed -n 's/^token kobe.model-gateway //p')
     rstep() { client "$(printf '{"mode":"replica-budget","base":"%s","admin":%s,"teamId":"%s","userId":"%s","action":"%s","headroom":%s}' "$BASE" "$U_T1" "$TEAM" "$T2" "$1" "$HEADROOM")"; }
@@ -273,7 +274,7 @@ if [[ "$STEPS" == *" replicas "* ]]; then
     contains "t2 has a daily token budget of what it spent plus $HEADROOM" '^member_budget_status=200$' "$set_b"
     baseline=$(field member_baseline "$set_b")
     sleep 3 # the budgets hint reaches both replicas
-    body='{"model":"openai/gpt-fake","max_tokens":3,"messages":[]}'
+    body='{"model":"openai/gpt-fake","max_tokens":3,"messages":[{"role":"user","content":"hi"}]}'
     burst=$(in_sbx "i=0; while [ \$i -lt 30 ]; do
         if [ \$((i % 2)) -eq 0 ]; then ip=${mg_ips[0]:-0.0.0.0}; else ip=${mg_ips[1]:-0.0.0.0}; fi
         ( curl -s -m 30 --noproxy '*' -o /dev/null -w 'code=%{http_code}\n' -X POST http://\$ip:8080/v1/chat/completions \

@@ -19,8 +19,8 @@ Test only; fix model-gateway if a real overshoot shows.
     expire, free the budget and leave no live row.
 - e2e: new `replicas` step in `e2e/gate2.sh` (gate2 shard has slack; about 25 s). 30 curls from t2's sandbox
   straight at the two model-gateway pod IPs against a member token budget (scope user, so the 25 % member
-  share does not interfere) of baseline + 20 tokens. Fake model: 8 tokens a call; a call reserves 17. Shared
-  holds admit two; two unshared gates would admit four (32 > 20 + 8). Asserts ledger = admitted x 8 and
+  share does not interfere) of baseline + 1 token. Fake model: 8 tokens a call; a call reserves about 24. A shared
+  gate admits one (8 tokens, 7 over); two unshared gates would admit two (16, 15 over > one call). Asserts ledger = admitted x 8 and
   overshoot <= one call.
 
 ## Evidence
