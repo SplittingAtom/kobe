@@ -121,9 +121,10 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
     runId: string,
     command: string,
     config: Record<string, unknown> = { model: MODEL },
+    extra: Record<string, unknown> = {},
   ) {
     const result = await h.server.command({
-      ...runStart(`sh:${command}`, { config }),
+      ...runStart(`sh:${command}`, { config, ...extra }),
       thread_id: threadId,
       run_id: runId,
     });
@@ -272,6 +273,69 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
     expect(read.code).not.toBe(0);
     expect(read.stdout).toBe("");
     expect(read.stderr).toMatch(/Permission denied/);
+  });
+
+  it("MCP files (KOBE-244): Pi's identity reads mcp.json and the token (owner kobe, Pi's group, 0440); another thread's identity cannot", async () => {
+    const mcp = {
+      servers: [
+        {
+          name: "jira",
+          connector_id: "11111111-1111-4111-8111-111111111111",
+          tools: [{ name: "get_issue", pi_name: "mcp__jira__get_issue" }],
+        },
+      ],
+    };
+    await start(
+      {},
+      {
+        mcp: {
+          proxyUrl: "http://mcp-proxy.kobe.internal:80",
+          tokens: {
+            current: async () => "mcp-token-".padEnd(40, "x"),
+            onChange: () => () => undefined,
+          },
+        },
+      },
+    );
+    ok(await h.server.command(runStart("say:a", { config: { model: MODEL }, mcp })));
+    ok(
+      await h.server.command({
+        ...runStart("say:b", { config: { model: MODEL }, mcp }),
+        thread_id: THREAD_2,
+        run_id: RUN_2,
+      }),
+    );
+    await until(async () => (await h.commandsLog(THREAD_2).catch(() => [])).length > 0);
+    const a = await launch(THREAD);
+    const files = ["mcp.json", "mcp-token"].map((n) => path.join(a.agentDir, n));
+    for (const file of files) {
+      const info = await stat(file);
+      expect([info.uid, info.gid, info.mode & 0o777]).toEqual([
+        process.getuid?.() ?? 0,
+        a.gid,
+        0o440,
+      ]);
+    }
+    const own = await tool(
+      THREAD,
+      "4f5a6b7c-8d9e-4f0a-9b1c-2d3e4f5a6b7d",
+      `cat ${files.join(" ")}`,
+      { model: MODEL },
+      { mcp },
+    );
+    expect(own.code).toBe(0);
+    expect(own.stdout).toContain(`"Kobe-Thread-Id": "${THREAD}"`);
+    expect(own.stdout).toContain("Bearer mcp-token-");
+    const other = await tool(
+      THREAD_2,
+      "5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8e",
+      `cat ${files.join(" ")}`,
+      { model: MODEL },
+      { mcp },
+    );
+    expect(other.code).not.toBe(0);
+    expect(other.stdout).toBe("");
+    expect(other.stderr).toMatch(/Permission denied/);
   });
 
   it("a tool cannot rewrite its own Pi's model file (token, run id) either", async () => {

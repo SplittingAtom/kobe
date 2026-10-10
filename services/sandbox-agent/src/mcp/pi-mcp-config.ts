@@ -1,5 +1,5 @@
 import { constants as FS } from "node:fs";
-import { open, rename, writeFile } from "node:fs/promises";
+import { open, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import type { RunMcpContext } from "@kobe/protocol";
 import type { ModelTokenSource } from "../models/types.js";
@@ -30,6 +30,8 @@ export const MCP_TOKEN_FILE = "mcp-token";
 const PROXY_PATH = "/v1/mcp";
 /** Runtime dirs are `mkdtemp` names under an absolute path: nothing a shell would interpret. */
 const SAFE_PATH = /^\/[A-Za-z0-9_./-]+$/;
+/** Thread ids are UUIDs; anything else never reaches a header. */
+const SAFE_THREAD_ID = /^[A-Za-z0-9-]{1,64}$/;
 
 export interface McpWiring {
   /** `KOBE_MCP_PROXY_URL`: an http(s) origin, no credentials. */
@@ -47,16 +49,25 @@ export function buildPiMcpConfig(input: {
   readonly proxyUrl: string;
   /** Absolute path of the token file the header command prints. */
   readonly tokenFile: string;
+  /**
+   * The Pi process's thread (fixed for the process, from the agent, never from tools): sent as
+   * `Kobe-Thread-Id`, which mcp-proxy requires to bind each call to the thread's active run.
+   */
+  readonly threadId: string;
   readonly mcp: RunMcpContext;
 }): string {
   if (!SAFE_PATH.test(input.tokenFile)) throw new Error("unsafe MCP token file path");
+  if (!SAFE_THREAD_ID.test(input.threadId)) throw new Error("unsafe thread id");
   const origin = input.proxyUrl.replace(/\/+$/, "");
   const mcpServers = Object.fromEntries(
     input.mcp.servers.map((server) => [
       server.name,
       {
         url: `${origin}${PROXY_PATH}/${server.connector_id}`,
-        headers: { Authorization: `!cat '${input.tokenFile}'` },
+        headers: {
+          Authorization: `!cat '${input.tokenFile}'`,
+          "Kobe-Thread-Id": input.threadId,
+        },
         exposure: "hidden",
         toolExposure: Object.fromEntries(server.tools.map((t) => [t.name, "direct"])),
       },
@@ -78,7 +89,20 @@ export async function writeAgentFile(
 ): Promise<void> {
   const file = path.join(agentDir, name);
   const temp = `${file}.tmp`;
-  await writeFile(temp, text, { mode: shared ? 0o440 : 0o400, flag: "w" });
+  const mode = shared ? 0o440 : 0o400;
+  // The agent's umask is 077, which filters open()'s mode and would drop the group's read bit
+  // (Pi, a different uid in the file's group, then could not read its own MCP config): set the
+  // mode exactly with fchmod before any content is written. O_NOFOLLOW: never write through a link.
+  const handle = await open(temp, FS.O_WRONLY | FS.O_CREAT | FS.O_TRUNC | FS.O_NOFOLLOW, mode);
+  try {
+    await handle.chmod(mode);
+    await handle.writeFile(text);
+  } catch (error) {
+    await handle.close().catch(() => undefined);
+    await rm(temp, { force: true }).catch(() => undefined);
+    throw error;
+  }
+  await handle.close();
   await rename(temp, file);
 }
 

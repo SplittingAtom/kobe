@@ -80,6 +80,15 @@ const configSchema = z.object({
       "KOBE_CONNECTOR_REFRESH_SECONDS must be 0 or between 60 and 86400",
     )
     .default(3600),
+  // Lifetime of sandbox session tokens (15 min, packages/session-token). Shorter only so the e2e
+  // can run a real Pi past a token rotation (KOBE-241); the MCP proxy's expired-token cap stays
+  // at twice the default.
+  KOBE_SESSION_TOKEN_TTL_SECONDS: z.coerce
+    .number({ error: "KOBE_SESSION_TOKEN_TTL_SECONDS must be a number" })
+    .int("KOBE_SESSION_TOKEN_TTL_SECONDS must be an integer")
+    .min(10, "KOBE_SESSION_TOKEN_TTL_SECONDS must be between 10 and 900")
+    .max(900, "KOBE_SESSION_TOKEN_TTL_SECONDS must be between 10 and 900")
+    .default(900),
 });
 
 /** Auth settings: required by the API server only (the scheduler never sees these secrets). */
@@ -143,6 +152,8 @@ export interface Config {
   readonly teamReconcileSeconds: number;
   /** Seconds between connector drift refreshes; 0 = off (KOBE-102). */
   readonly connectorRefreshSeconds: number;
+  /** Sandbox session token lifetime in seconds (900 unless an e2e install shortens it). */
+  readonly sessionTokenTtlSeconds: number;
   /** SIEM forwarding of audit events (KOBE-19); empty when not configured. */
   readonly auditForwarding: AuditForwardingConfig;
   /** Present for the API server only. */
@@ -172,6 +183,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     retentionHourUtc: base.data.KOBE_RETENTION_HOUR_UTC,
     teamReconcileSeconds: base.data.KOBE_TEAM_RECONCILE_SECONDS,
     connectorRefreshSeconds: base.data.KOBE_CONNECTOR_REFRESH_SECONDS,
+    sessionTokenTtlSeconds: base.data.KOBE_SESSION_TOKEN_TTL_SECONDS,
     auditForwarding: loadAuditForwardingConfig(env),
   };
   if (config.process !== "server") return config;

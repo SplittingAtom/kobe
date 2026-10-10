@@ -25,6 +25,8 @@ export const SESSION_RATE = { capacity: 20, refillPerSecond: 1 } as const;
 export interface SandboxRoutesDeps {
   readonly provider: Pick<SandboxProvider, "identifyBootstrapToken">;
   readonly sessionKeys: SessionKeys;
+  /** Session token lifetime in seconds (KOBE_SESSION_TOKEN_TTL_SECONDS); default 15 min. */
+  readonly sessionTokenTtlSeconds?: number;
   readonly now?: () => Date;
   readonly limiter?: RateLimiter;
   /** Rate-limit key for a request (default: the peer address of the TCP connection). */
@@ -80,6 +82,7 @@ export function sandboxRoutes(deps: SandboxRoutesDeps): Hono {
   const {
     provider,
     sessionKeys,
+    sessionTokenTtlSeconds,
     now = () => new Date(),
     limiter = createRateLimiter(SESSION_RATE),
     sourceOf = peerAddress,
@@ -120,7 +123,7 @@ export function sandboxRoutes(deps: SandboxRoutesDeps): Hono {
         );
       }
       const { principal } = identity;
-      const issued = issueSessionTokens(principal, sessionKeys, now());
+      const issued = issueSessionTokens(principal, sessionKeys, now(), sessionTokenTtlSeconds);
       logger.info(
         { sandboxId: principal.sandboxId, teamId: principal.teamId, pod: identity.podName },
         "sandbox session tokens issued",

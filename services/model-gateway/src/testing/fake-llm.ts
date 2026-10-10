@@ -67,6 +67,48 @@ export function parseToolPrompt(
     return undefined;
   }
 }
+const STEPS_PREFIX = "steps: ";
+
+/**
+ * `steps: [{"name": ..., "args": {...}}, ...]` (KOBE-244 e2e): the first user message scripts
+ * several tool calls in ONE run. Each model turn answers with the next step (the number of tool
+ * results already in the conversation is the index); after the last, the usual tool-result echo.
+ * Call ids hash the script and the index, so no two calls share one.
+ */
+export function parseStepsPrompt(
+  body: unknown,
+):
+  | ReadonlyArray<{ readonly id: string; readonly name: string; readonly args: unknown }>
+  | undefined {
+  const messages = ((body ?? {}) as Record<string, unknown>).messages;
+  if (!Array.isArray(messages)) return undefined;
+  const first = messages.find((m) => (m as Record<string, unknown>)?.role === "user") as
+    Record<string, unknown> | undefined;
+  // Pi sends the prompt as a string or as content parts.
+  const content = first?.content;
+  const text =
+    typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content
+            .map((p: unknown) => ((p as Record<string, unknown>).text as string | undefined) ?? "")
+            .join("")
+        : "";
+  if (!text.startsWith(STEPS_PREFIX)) return undefined;
+  try {
+    const raw: unknown = JSON.parse(text.slice(STEPS_PREFIX.length));
+    if (!Array.isArray(raw)) return undefined;
+    return raw.flatMap((step: unknown, i: number) => {
+      const { name, args } = (step ?? {}) as { name?: unknown; args?: unknown };
+      if (typeof name !== "string" || !/^[A-Za-z0-9_]+$/.test(name)) return [];
+      const id = `call_fake_${createHash("sha256").update(`${text}#${i}`).digest("hex").slice(0, 16)}`;
+      return [{ id, name, args: args ?? {} }];
+    });
+  } catch {
+    return undefined;
+  }
+}
+
 const SYSTEM_ECHO = "system?";
 const TOOLS_ECHO = "tools?";
 
@@ -378,10 +420,14 @@ export function createFakeLlm(seen: SeenRequest[] = []): Server {
       const messages = Array.isArray(body.messages)
         ? (body.messages as Record<string, unknown>[])
         : [];
+      const steps = parseStepsPrompt(body);
+      const stepsDone = messages.filter((m) => m.role === "tool").length;
       const toolStep = JSON.stringify(messages).includes(TOOL_STEP_MARKER);
       const toolDone = messages.some((m) => m.role === "tool");
       const toolResult = lastToolResult(body);
-      if (toolStep && !toolDone && stream) openaiToolCall(res, model);
+      const nextStep = steps?.[stepsDone];
+      if (nextStep) openaiNamedCall(res, nextStep, stream, model);
+      else if (toolStep && !toolDone && stream) openaiToolCall(res, model);
       else if (toolStep) openai(res, "fake-openai: tool step done", stream, model);
       else if (toolResult !== undefined) {
         openai(res, `fake-openai: tool said: ${toolResult}`, stream, model);
