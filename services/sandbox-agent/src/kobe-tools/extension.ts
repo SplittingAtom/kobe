@@ -6,6 +6,7 @@ import { TOOLS_FD_ENV, TOOLS_FILES_ENV } from "./protocol.js";
 import {
   artifactTools,
   shareFileTool,
+  webSearchTool,
   type ToolDefinitionLike,
   type ToolsTransport,
 } from "./tools.js";
@@ -64,6 +65,8 @@ export function registerKobeTools(
 ): void {
   if (transport === undefined) return;
   for (const tool of artifactTools(transport)) pi.registerTool(tool);
+  // Always listed: the server answers "unavailable" when the install or team has it off.
+  pi.registerTool(webSearchTool(transport));
   if (options.files === true) pi.registerTool(shareFileTool(transport));
 }
 
