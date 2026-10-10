@@ -28,6 +28,12 @@ export interface FakeOauthOptions {
   readonly redirectTo?: string;
   /** What the PRM lists as authorization server (default: this server). */
   readonly prmAuthServer?: string;
+  /** Answer refresh_token requests with invalid_grant (a revoked or expired refresh token). */
+  readonly refreshRejects?: boolean;
+  /** Answer refresh_token requests with a 503. */
+  readonly refreshUnavailable?: boolean;
+  /** Delay before answering a refresh request, to overlap concurrent callers. */
+  readonly refreshDelayMs?: number;
 }
 
 export interface IssuedTokens {
@@ -43,6 +49,10 @@ export class FakeOauthServer {
   readonly authorizeRequests: URLSearchParams[] = [];
   readonly tokenAuthHeaders: (string | undefined)[] = [];
   readonly issued: IssuedTokens[] = [];
+  /** refresh_token requests received, in order. */
+  readonly refreshRequests: URLSearchParams[] = [];
+  /** Refresh tokens that may still be used once (rotation: each is single-use). */
+  private readonly liveRefresh = new Set<string>();
   private readonly codes = new Map<
     string,
     { challenge: string; clientId: string; used: boolean }
@@ -80,6 +90,34 @@ export class FakeOauthServer {
   private json(res: ServerResponse, body: unknown, status = 200) {
     res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
     res.end(JSON.stringify(body));
+  }
+
+  private async refresh(res: ServerResponse, form: URLSearchParams) {
+    this.refreshRequests.push(form);
+    const o = this.options;
+    if (o.refreshDelayMs) await new Promise((r) => setTimeout(r, o.refreshDelayMs));
+    if (o.refreshUnavailable) return this.json(res, { error: "temporarily_unavailable" }, 503);
+    const presented = form.get("refresh_token") ?? "";
+    if (
+      o.refreshRejects ||
+      !this.liveRefresh.delete(presented) ||
+      form.get("resource") !== this.mcpUrl
+    ) {
+      return this.json(res, { error: "invalid_grant" }, 400);
+    }
+    const n = ++this.n;
+    const tokens = {
+      accessToken: `at-secret-${n}-${randomBytes(8).toString("hex")}`,
+      refreshToken: `rt-secret-${n}-${randomBytes(8).toString("hex")}`,
+    };
+    this.issued.push(tokens);
+    this.liveRefresh.add(tokens.refreshToken);
+    return this.json(res, {
+      access_token: tokens.accessToken,
+      token_type: "Bearer",
+      expires_in: o.expiresIn ?? 3600,
+      refresh_token: tokens.refreshToken,
+    });
   }
 
   private async body(req: IncomingMessage): Promise<string> {
@@ -171,6 +209,7 @@ export class FakeOauthServer {
       const form = new URLSearchParams(await this.body(req));
       this.tokenRequests.push(form);
       this.tokenAuthHeaders.push(req.headers.authorization);
+      if (form.get("grant_type") === "refresh_token") return this.refresh(res, form);
       const entry = this.codes.get(form.get("code") ?? "");
       const verifier = form.get("code_verifier") ?? "";
       const challenge = createHash("sha256").update(verifier).digest("base64url");
@@ -196,6 +235,7 @@ export class FakeOauthServer {
         refreshToken: `rt-secret-${n}-${randomBytes(8).toString("hex")}`,
       };
       this.issued.push(tokens);
+      this.liveRefresh.add(tokens.refreshToken);
       return this.json(res, {
         access_token: tokens.accessToken,
         token_type: "Bearer",

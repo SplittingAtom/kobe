@@ -2,7 +2,16 @@ import { fstatSync } from "node:fs";
 import net from "node:net";
 import type { Duplex } from "node:stream";
 import { ToolsClient, type ToolsClientOptions } from "./client.js";
-import { TOOLS_FD_ENV, TOOLS_FILES_ENV } from "./protocol.js";
+import { installMemoryHooks, type MemoryHooksApi } from "./memory-hooks.js";
+import { recallTool, rememberTool } from "./memory-tools.js";
+import { proposeProjectFileTool } from "./project-tool.js";
+import {
+  MEMORY_FILE_ENV,
+  TOOLS_FD_ENV,
+  TOOLS_FILES_ENV,
+  TOOLS_MEMORY_ENV,
+  TOOLS_PROJECTS_ENV,
+} from "./protocol.js";
 import {
   artifactTools,
   shareFileTool,
@@ -12,7 +21,7 @@ import {
 } from "./tools.js";
 
 /** The slice of Pi's `ExtensionAPI` kobe-tools uses. */
-export interface ExtensionApiLike {
+export interface ExtensionApiLike extends Partial<MemoryHooksApi> {
   registerTool(tool: ToolDefinitionLike): unknown;
 }
 
@@ -58,16 +67,51 @@ export function filesEnabled(env: Record<string, string | undefined>): boolean {
   return raw === "1";
 }
 
+/** Whether the agent announced the `projects` capability (KOBE_TOOLS_PROJECTS=1); read once, removed. */
+export function projectsEnabled(env: Record<string, string | undefined>): boolean {
+  const raw = env[TOOLS_PROJECTS_ENV];
+  Reflect.deleteProperty(env, TOOLS_PROJECTS_ENV);
+  return raw === "1";
+}
+
+/** Whether the agent announced the `memory` capability (KOBE_TOOLS_MEMORY=1); read once, removed. */
+export function memoryEnabled(env: Record<string, string | undefined>): boolean {
+  const raw = env[TOOLS_MEMORY_ENV];
+  Reflect.deleteProperty(env, TOOLS_MEMORY_ENV);
+  return raw === "1";
+}
+
+/** The per-run memory file named by KOBE_MEMORY_FILE; read once and removed like the other variables. */
+export function memoryFile(env: Record<string, string | undefined>): string | undefined {
+  const raw = env[MEMORY_FILE_ENV];
+  Reflect.deleteProperty(env, MEMORY_FILE_ENV);
+  return raw === undefined || raw === "" ? undefined : raw;
+}
+
 export function registerKobeTools(
   pi: ExtensionApiLike,
   transport: ToolsTransport | undefined,
-  options: { readonly files?: boolean } = {},
+  options: {
+    readonly files?: boolean;
+    readonly projects?: boolean;
+    readonly memory?: boolean;
+    readonly memoryFile?: string | undefined;
+  } = {},
 ): void {
   if (transport === undefined) return;
   for (const tool of artifactTools(transport)) pi.registerTool(tool);
   // Always listed: the server answers "unavailable" when the install or team has it off.
   pi.registerTool(webSearchTool(transport));
   if (options.files === true) pi.registerTool(shareFileTool(transport));
+  if (options.projects === true) pi.registerTool(proposeProjectFileTool(transport));
+  if (options.memory === true) {
+    pi.registerTool(rememberTool(transport));
+    pi.registerTool(recallTool(transport));
+    // Active only for runs that have memory on (the agent says so in the run's memory file).
+    if (pi.on && pi.getActiveTools && pi.setActiveTools) {
+      installMemoryHooks(pi as MemoryHooksApi, options.memoryFile);
+    }
+  }
 }
 
 /** fd 4 must be the socket the agent passed. */

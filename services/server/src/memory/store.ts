@@ -351,6 +351,7 @@ export async function deleteMemory(
 export interface ListedDoc extends DocRow {
   readonly sizeBytes: number;
   readonly updatedBy: string | null;
+  readonly actorKind: "user" | "agent";
 }
 
 /** Live docs of one scope owner, newest first; `MEMORY.md` is just another path. */
@@ -368,6 +369,7 @@ export async function listMemory(
       ...DOC_COLUMNS,
       sizeBytes: memoryDocVersions.sizeBytes,
       updatedBy: memoryDocVersions.actorUserId,
+      actorKind: memoryDocVersions.actorKind,
     })
     .from(memoryDocs)
     .innerJoin(

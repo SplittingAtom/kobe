@@ -1,6 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { withTeam } from "@kobe/db";
+import {
+  enableConnector as enableTeamConnector,
+  registerConnector,
+} from "./testing/mcp-fixtures.js";
 import { PINNED_AGENTS } from "./runs/agents.js";
 import { RunFixture } from "./testing/run-fixture.js";
 import type { Person } from "./testing/event-stream-fixture.js";
@@ -60,7 +64,7 @@ async function pinnedThread(p: Person, frontmatter: Record<string, unknown>) {
 
 async function enableConnector(team: string, ownerId: string, name: string) {
   const { rows } = await f.fx.admin.query<{ id: string }>(
-    `INSERT INTO connectors (name, url) VALUES ($1, 'https://mcp.example/x') RETURNING id`,
+    `INSERT INTO connectors (name, url, auth_kind) VALUES ($1, 'https://mcp.example/x', 'api_key') RETURNING id`,
     [name],
   );
   await f.fx.admin.query(
@@ -347,5 +351,136 @@ describe("run start resolves skills (KOBE-80)", () => {
     const approved = await skillsOfRun(w, thread);
     expect([...approved.skills].sort()).toEqual(["clean-helper", "risky-helper"]);
     expect(approved.omitted).toEqual([]);
+  });
+});
+
+describe("effective connectors from grants (KOBE-111)", () => {
+  async function resolveFor(team: string, ownerId: string, thread: string) {
+    const db = f.fx.replica(0).deps.database.db;
+    return withTeam(db, team, async (tx) => {
+      const { rows } = await tx.execute<{ agent_scope: string; agent_id: string; v: number }>(
+        `SELECT agent_scope, agent_id, agent_version AS v FROM threads WHERE id = '${thread}'`,
+      );
+      const t = rows[0];
+      if (t === undefined) throw new Error("thread row missing");
+      return PINNED_AGENTS.resolve(tx, {
+        teamId: team,
+        ownerUserId: ownerId,
+        threadId: thread,
+        runId: "00000000-0000-4000-8000-000000000000",
+        trigger: "user",
+        agentScope: t.agent_scope as "team",
+        agentId: t.agent_id,
+        agentVersion: t.v,
+        approvalMode: "auto",
+      });
+    });
+  }
+  const grant = (team: string, user: string, connector: string, kind: string, expires: string) =>
+    f.fx.admin.query(
+      `INSERT INTO connector_grants (team_id, user_id, connector_id, kind, sealed, key_id, hint, expires_at)
+       VALUES ($1, $2, $3, $4, 'e1.k.sealed', 'k', '', $5)`,
+      [team, user, connector, kind, expires === "" ? null : expires],
+    );
+
+  it("ac-1: the agent gets exactly the connectors with a usable grant, and their exposed tools", async () => {
+    const w = await f.world(1);
+    await catalog(w.team, w.owner.id, [["fast", true]]);
+    const tag = randomBytes(3).toString("hex");
+    const keyed = await registerConnector(f.fx.admin, {
+      name: `keyed-${tag}`,
+      authKind: "api_key",
+    });
+    const ungranted = await registerConnector(f.fx.admin, {
+      name: `bare-${tag}`,
+      authKind: "api_key",
+    });
+    const stale = await registerConnector(f.fx.admin, { name: `stale-${tag}`, authKind: "oauth" });
+    const open = await registerConnector(f.fx.admin, { name: `open-${tag}`, authKind: "none" });
+    for (const c of [keyed, ungranted, stale, open]) {
+      await enableTeamConnector(f.fx.admin, w.team, c.id, w.owner.id, "read_only");
+    }
+    await grant(w.team, w.owner.id, keyed.id, "api_key", "");
+    await grant(w.team, w.owner.id, stale.id, "oauth", "2020-01-01T00:00:00Z");
+    const names = [keyed.name, ungranted.name, stale.name, open.name];
+    const thread = await pinnedThread(w.owner, { connectors: names });
+    const res = await resolveFor(w.team, w.owner.id, thread);
+    expect(res.ok && res.mcp?.servers.map((s) => s.name)).toEqual([keyed.name, open.name]);
+    // read_only exposure: the one read-only tool of the fixture's standard set, as mcp__<server>__<tool>.
+    expect(res.ok && res.mcp?.servers.flatMap((s) => s.tools.map((t) => t.pi_name))).toEqual([
+      `mcp__${keyed.name.replace(/-/g, "_")}__get_issue`,
+      `mcp__${open.name.replace(/-/g, "_")}__get_issue`,
+    ]);
+    expect(res.ok && res.config?.mcp_servers?.map((s) => s.name)).toEqual([keyed.name, open.name]);
+    expect(res.ok && res.omissions).toEqual(
+      expect.arrayContaining([
+        { kind: "connector", name: ungranted.name, reason: "not_user_connected" },
+        { kind: "connector", name: stale.name, reason: "not_user_connected" },
+      ]),
+    );
+    // ac-2: the frame field names connectors and tools only: no URL, no credential, no token.
+    const wire = JSON.stringify(res.ok ? res.mcp : null);
+    expect(wire).not.toMatch(/https?:\/\/|e1\.|sealed|token|api_key/i);
+    // Another user's grant never counts: a teammate's run has only the `none` connector.
+    const mate = w.others[0];
+    if (mate === undefined) throw new Error("no teammate");
+    const theirs = await resolveFor(w.team, mate.id, thread);
+    expect(theirs.ok && theirs.mcp?.servers.map((s) => s.name)).toEqual([open.name]);
+  });
+
+  it("the agent's tools.allow narrows the tools; a connector left empty is not offered", async () => {
+    const w = await f.world();
+    await catalog(w.team, w.owner.id, [["fast", true]]);
+    const c = await registerConnector(f.fx.admin, {
+      name: `nar-${randomBytes(3).toString("hex")}`,
+    });
+    await enableTeamConnector(f.fx.admin, w.team, c.id, w.owner.id, "all");
+    const seg = c.name.replace(/-/g, "_");
+    const narrowed = await pinnedThread(w.owner, {
+      connectors: [c.name],
+      tools: { allow: [`mcp__${seg}__get_*`] },
+    });
+    const r1 = await resolveFor(w.team, w.owner.id, narrowed);
+    expect(r1.ok && r1.mcp?.servers.flatMap((s) => s.tools.map((t) => t.name))).toEqual([
+      "get_issue",
+    ]);
+    const none = await pinnedThread(w.owner, { connectors: [c.name], tools: { allow: ["read"] } });
+    const r2 = await resolveFor(w.team, w.owner.id, none);
+    expect(r2.ok && r2.mcp).toEqual({ servers: [] });
+    expect(r2.ok && r2.config?.mcp_servers).toBeUndefined();
+  });
+  it("KOBE-112 ac-1: every change shows in the next resolve of the same thread (nothing is cached)", async () => {
+    const w = await f.world();
+    await catalog(w.team, w.owner.id, [["fast", true]]);
+    const c = await registerConnector(f.fx.admin, {
+      name: `chg-${randomBytes(3).toString("hex")}`,
+      authKind: "api_key",
+    });
+    await enableTeamConnector(f.fx.admin, w.team, c.id, w.owner.id, "all");
+    await grant(w.team, w.owner.id, c.id, "api_key", "");
+    const thread = await pinnedThread(w.owner, { connectors: [c.name] });
+    const tools = async () => {
+      const r = await resolveFor(w.team, w.owner.id, thread);
+      return r.ok ? r.mcp?.servers.flatMap((s) => s.tools.map((t) => t.name)) : "failed";
+    };
+    expect(await tools()).toEqual(["get_issue", "create_issue", "delete_issue"]);
+    // Team exposure narrowed.
+    await enableTeamConnector(f.fx.admin, w.team, c.id, w.owner.id, "read_only");
+    expect(await tools()).toEqual(["get_issue"]);
+    // The user's grant removed, then added back.
+    await f.fx.admin.query(`DELETE FROM connector_grants WHERE connector_id = $1`, [c.id]);
+    expect(await tools()).toEqual([]);
+    await grant(w.team, w.owner.id, c.id, "api_key", "");
+    expect(await tools()).toEqual(["get_issue"]);
+    // A tool re-pinned (drifted) is dropped; the connector disabled is gone.
+    await f.fx.admin.query(
+      `UPDATE connectors SET tools_snapshot = (
+         SELECT jsonb_agg(CASE WHEN t->>'name' = 'get_issue' THEN jsonb_set(t, '{status}', '"drifted"') ELSE t END)
+         FROM jsonb_array_elements(tools_snapshot) t) WHERE id = $1`,
+      [c.id],
+    );
+    expect(await tools()).toEqual([]);
+    await f.fx.admin.query(`UPDATE connectors SET status = 'disabled' WHERE id = $1`, [c.id]);
+    expect(await tools()).toEqual([]);
   });
 });

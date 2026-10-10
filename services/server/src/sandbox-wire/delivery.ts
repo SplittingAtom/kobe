@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
   CAPABILITY_BUILTIN_SKILLS,
+  CAPABILITY_MCP,
+  CAPABILITY_MEMORY,
   CAPABILITY_PROJECTS,
   CAPABILITY_RUN_TOKEN,
   CAPABILITY_SKILL_BUNDLES,
@@ -22,6 +24,7 @@ import {
   restoreParts,
 } from "./entries.js";
 import { endRunInTx, loadRun } from "./run-state.js";
+import { buildRunMemory } from "../memory/agent.js";
 import { mintRunToken } from "./run-token.js";
 import { COMMAND_FAILURES, type CommandOutcome, type SandboxTarget } from "./types.js";
 
@@ -445,13 +448,41 @@ export class CommandDelivery {
     let out = claimed.runToken
       ? ({ ...frame, run_token: claimed.runToken } as typeof frame)
       : frame;
+    // Project files: the user's workspace is brought in line with their memberships before the
+    // sandbox pulls it at run start (KOBE-162). Never blocks or fails the run; see ProjectMounts.
+    if (row.kind === "run.start") {
+      const { teamId, userId } = this.#host.target;
+      await this.#ctx.projectMounts?.reconcileUser(teamId, userId);
+    }
+    // Memory indexes only reach agents that know the field (KOBE-156).
+    if (row.kind === "run.start" && this.#host.hasCapability(CAPABILITY_MEMORY)) {
+      const memory = await this.#runMemory(row.threadId);
+      if (memory) out = { ...out, memory } as typeof frame;
+    }
     // Project instructions only reach agents that know the field (KOBE-159): an older agent runs
     // without them rather than failing on an unknown key.
     if (row.kind === "run.start" && !this.#host.hasCapability(CAPABILITY_PROJECTS)) {
       const { project: _project, ...rest } = out as RunStartFrame;
       out = rest as typeof frame;
     }
+    // Same for the per-session MCP config (KOBE-111): an agent without it has no connector tools.
+    if (row.kind === "run.start" && !this.#host.hasCapability(CAPABILITY_MCP)) {
+      const { mcp: _mcp, ...rest } = out as RunStartFrame;
+      out = rest as typeof frame;
+    }
     this.#host.send(out);
+  }
+
+  /** `run.start.memory`; a failed read means no context (every memory call is still enforced). */
+  async #runMemory(
+    threadId: string,
+  ): Promise<Awaited<ReturnType<typeof buildRunMemory>> | undefined> {
+    try {
+      return await buildRunMemory(this.#ctx.memory, { ...this.#host.target, threadId });
+    } catch (err) {
+      this.#host.log.warn({ err }, "run.start.memory could not be built; sent without it");
+      return undefined;
+    }
   }
 
   async #failRunStart(row: CommandRow, outcome: CommandOutcome): Promise<void> {

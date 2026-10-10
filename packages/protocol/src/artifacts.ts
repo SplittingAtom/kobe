@@ -7,6 +7,7 @@ import {
   webSearchUnavailableFields,
 } from "./web-search.js";
 import { fileShareOkFields, fileShareToolsRequestSchema } from "./files.js";
+import { memoryPutOkFields, memoryReadOkFields, memoryToolsRequestSchema } from "./memory.js";
 
 /**
  * Artifacts contract (KOBE-127 = 55a of KOBE-55, spec D25; binding design in docs/ledger/KOBE-55.md).
@@ -130,6 +131,7 @@ export const kobeToolsRequestSchema = z.union([
   fileShareToolsRequestSchema, // KOBE-147 (files.ts)
   projectToolsRequestSchema, // KOBE-159 (projects.ts)
   webSearchToolsRequestSchema, // KOBE-114 (web-search.ts)
+  memoryToolsRequestSchema, // KOBE-157 (memory.ts)
 ]);
 export type KobeToolsRequest = z.infer<typeof kobeToolsRequestSchema>;
 
@@ -139,6 +141,8 @@ export const kobeToolsResponseSchema = z.union([
   z.strictObject({ id: idSchema, ...projectProposeOkFields }), // KOBE-159 (projects.ts)
   z.strictObject({ id: idSchema, ...webSearchOkFields }), // KOBE-114 (web-search.ts)
   z.strictObject({ id: idSchema, ...webSearchUnavailableFields }), // KOBE-114
+  z.strictObject({ id: idSchema, ...memoryPutOkFields }), // KOBE-157 (memory.ts)
+  z.strictObject({ id: idSchema, ...memoryReadOkFields }), // KOBE-157
   z.strictObject({ id: idSchema, ...artifactFailFields }),
 ]);
 export type KobeToolsResponse = z.infer<typeof kobeToolsResponseSchema>;

@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import {
   CAPABILITY_ARTIFACTS,
   CAPABILITY_FILES,
+  CAPABILITY_MEMORY,
+  CAPABILITY_PROJECTS,
   CAPABILITY_WEB_SEARCH,
   PI_PINNED_VERSION,
   SANDBOX_CLOSE_CODES,
@@ -29,6 +31,12 @@ import { RunIngest } from "./ingest.js";
 import { AllowedArtifactCalls } from "../artifacts/allowed.js";
 import { putArtifact } from "../artifacts/put.js";
 import { shareFile } from "../files/share.js";
+import {
+  proposeProjectFile,
+  type ProposeRefusal,
+  type ProposeReply,
+} from "../projects/proposals.js";
+import { putMemory, readMemory, type MemoryRefusal, type MemoryReply } from "../memory/agent.js";
 import { decidePolicyCheck, denyFrame } from "./policy-check.js";
 import type { ConnectionRegistry, RegisteredConnection } from "./registry.js";
 import { activeLeasedRuns, endRunInTx, type InterruptCause } from "./run-state.js";
@@ -96,6 +104,10 @@ export class SandboxConnection implements RegisteredConnection {
   #artifactPuts = 0;
   #fileShares = 0;
   #webSearches = 0;
+  #memoryOps = 0;
+  #projectProposals = 0;
+  /** Aborts pending project-memory approvals when the connection ends. */
+  readonly #memoryAbort = new AbortController();
   readonly #deniedBuckets = new Map<string, { tokens: number; at: number }>();
   readonly #delivery: CommandDelivery;
   #state: State = "hello";
@@ -377,6 +389,15 @@ export class SandboxConnection implements RegisteredConnection {
         return;
       case "file.share":
         this.#onFileShare(frame);
+        return;
+      case "project.file_propose":
+        this.#onProjectFilePropose(frame);
+        return;
+      case "memory.put":
+        this.#onMemoryPut(frame);
+        return;
+      case "memory.read":
+        this.#onMemoryRead(frame);
         return;
       case "web_search.query":
         this.#onWebSearch(frame);
@@ -811,6 +832,232 @@ export class SandboxConnection implements RegisteredConnection {
       });
   }
 
+  /**
+   * `memory.put` (KOBE-156). Accepted only if this connection announced `memory`, the run is
+   * leased here and active, and this `remember` call was allowed here with the same canonical
+   * input hash (D-3). Scope switches, project membership, the approval of a project write and the
+   * store are in `putMemory`. Every refusal is audited (reason only) and answered `memory.result`.
+   */
+  #onMemoryPut(frame: Extract<SandboxToServerFrame, { type: "memory.put" }>): void {
+    const answer = (reply: MemoryReply) =>
+      this.send({ v: 1, type: "memory.result", request_id: frame.request_id, ...reply });
+    const audit = (
+      reason: MemoryRefusal | "capability_missing" | "input_mismatch",
+      scope?: "user" | "project",
+    ) =>
+      this.#ctx.auditMemoryRefused(this.target, this.sandboxId, {
+        op: "put",
+        reason,
+        scope: scope ?? frame.input.scope,
+        runId: frame.run_id,
+        toolCallId: frame.tool_call_id,
+      });
+    const refuse = (reason: Parameters<typeof audit>[0], message: string) => {
+      audit(reason);
+      answer({ ok: false, error: { code: "not_allowed", message } });
+    };
+    if (!this.hasCapability(CAPABILITY_MEMORY)) {
+      refuse("capability_missing", "This sandbox did not announce memory.");
+      return;
+    }
+    const check = this.#checkRun(frame.run_id, frame.thread_id, "memory.put");
+    if (check === "violation") return;
+    if (check === "ended") {
+      refuse("run_not_active", "The run has ended, so nothing was remembered.");
+      return;
+    }
+    const verdict = this.#allowedArtifacts.check(
+      frame.run_id,
+      frame.tool_call_id,
+      "remember",
+      frame.input,
+    );
+    if (verdict !== "ok") {
+      refuse(
+        verdict === "input_mismatch" ? "input_mismatch" : "not_allowed",
+        verdict === "input_mismatch"
+          ? "The memory differs from the call that was allowed."
+          : "This tool call was not allowed for this tool.",
+      );
+      return;
+    }
+    if (this.#memoryOps >= this.#ctx.tuning.maxPendingArtifactPuts) {
+      answer({
+        ok: false,
+        error: {
+          code: "storage_failed",
+          message: "Too many memory writes are waiting. Try again.",
+        },
+      });
+      return;
+    }
+    this.#memoryOps += 1;
+    const outcome = putMemory(this.#ctx.memory, {
+      teamId: this.target.teamId,
+      userId: this.target.userId,
+      runId: frame.run_id,
+      threadId: frame.thread_id,
+      connectionId: this.id,
+      toolCallId: frame.tool_call_id,
+      input: frame.input,
+      signal: this.#memoryAbort.signal,
+      refused: audit,
+    });
+    // The slot frees once the sandbox is answered; a project write waiting for approval after its
+    // `pending_approval` answer is bounded by the approvals per run (broker), not by this counter.
+    void outcome.reply.then(answer).finally(() => {
+      this.#memoryOps -= 1;
+    });
+  }
+
+  /**
+   * `project.file_propose` (KOBE-162). Accepted only if this connection announced `projects`, the
+   * run is leased here and active, and this `propose_project_file` call was allowed here with the
+   * same canonical input hash (D-3). The thread's project, membership, the pushed workspace entry,
+   * the signed approval and the copy are in `proposeProjectFile`. Every refusal is audited (reason
+   * only) and answered `project.file_propose_result`.
+   */
+  #onProjectFilePropose(
+    frame: Extract<SandboxToServerFrame, { type: "project.file_propose" }>,
+  ): void {
+    const answer = (reply: ProposeReply) =>
+      this.send({
+        v: 1,
+        type: "project.file_propose_result",
+        request_id: frame.request_id,
+        ...reply,
+      });
+    const audit = (reason: ProposeRefusal | "capability_missing" | "input_mismatch") =>
+      this.#ctx.auditProjectFileRefused(this.target, this.sandboxId, {
+        reason,
+        runId: frame.run_id,
+        toolCallId: frame.tool_call_id,
+      });
+    const refuse = (reason: Parameters<typeof audit>[0], message: string) => {
+      audit(reason);
+      answer({ ok: false, error: { code: "not_allowed", message } });
+    };
+    if (!this.hasCapability(CAPABILITY_PROJECTS)) {
+      refuse("capability_missing", "This sandbox did not announce projects.");
+      return;
+    }
+    const check = this.#checkRun(frame.run_id, frame.thread_id, "project.file_propose");
+    if (check === "violation") return;
+    if (check === "ended") {
+      refuse("run_not_active", "The run has ended, so nothing was added.");
+      return;
+    }
+    const verdict = this.#allowedArtifacts.check(
+      frame.run_id,
+      frame.tool_call_id,
+      "propose_project_file",
+      frame.input,
+    );
+    if (verdict !== "ok") {
+      refuse(
+        verdict === "input_mismatch" ? "input_mismatch" : "not_allowed",
+        verdict === "input_mismatch"
+          ? "The file differs from the call that was allowed."
+          : "This tool call was not allowed for this tool.",
+      );
+      return;
+    }
+    if (this.#projectProposals >= this.#ctx.tuning.maxPendingArtifactPuts) {
+      answer({
+        ok: false,
+        error: { code: "storage_failed", message: "Too many proposals are waiting. Try again." },
+      });
+      return;
+    }
+    this.#projectProposals += 1;
+    const outcome = proposeProjectFile(this.#ctx.projectFiles, {
+      teamId: this.target.teamId,
+      userId: this.target.userId,
+      runId: frame.run_id,
+      threadId: frame.thread_id,
+      connectionId: this.id,
+      toolCallId: frame.tool_call_id,
+      input: frame.input,
+      workspace: frame.workspace,
+      signal: this.#memoryAbort.signal,
+      refused: audit,
+    });
+    void outcome.reply.then(answer).finally(() => {
+      this.#projectProposals -= 1;
+    });
+  }
+
+  /** `memory.read` (KOBE-156): a read, so no allowed-call binding; same capability and lease rules. */
+  #onMemoryRead(frame: Extract<SandboxToServerFrame, { type: "memory.read" }>): void {
+    const answer = (reply: MemoryReply) =>
+      this.send({ v: 1, type: "memory.result", request_id: frame.request_id, ...reply });
+    const audit = (
+      reason: MemoryRefusal | "capability_missing" | "input_mismatch",
+      scope?: "user" | "project",
+    ) =>
+      this.#ctx.auditMemoryRefused(this.target, this.sandboxId, {
+        op: "read",
+        reason,
+        ...(scope ? { scope } : {}),
+        runId: frame.run_id,
+        toolCallId: frame.tool_call_id,
+      });
+    const refuse = (reason: Parameters<typeof audit>[0], message: string) => {
+      audit(reason);
+      answer({ ok: false, error: { code: "not_allowed", message } });
+    };
+    if (!this.hasCapability(CAPABILITY_MEMORY)) {
+      refuse("capability_missing", "This sandbox did not announce memory.");
+      return;
+    }
+    const check = this.#checkRun(frame.run_id, frame.thread_id, "memory.read");
+    if (check === "violation") return;
+    if (check === "ended") {
+      refuse("run_not_active", "The run has ended.");
+      return;
+    }
+    // D-3: the server decides every tool call; a recall that policy did not allow (deny rule, the
+    // agent's tool list, approval mode) is not served, whatever the sandbox sends.
+    const verdict = this.#allowedArtifacts.check(
+      frame.run_id,
+      frame.tool_call_id,
+      "recall",
+      frame.input,
+    );
+    if (verdict !== "ok") {
+      refuse(
+        verdict === "input_mismatch" ? "input_mismatch" : "not_allowed",
+        verdict === "input_mismatch"
+          ? "The recall differs from the call that was allowed."
+          : "This tool call was not allowed for this tool.",
+      );
+      return;
+    }
+    if (this.#memoryOps >= this.#ctx.tuning.maxPendingArtifactPuts) {
+      answer({
+        ok: false,
+        error: {
+          code: "storage_failed",
+          message: "Too many memory requests are waiting. Try again.",
+        },
+      });
+      return;
+    }
+    this.#memoryOps += 1;
+    void readMemory(this.#ctx.memory, {
+      teamId: this.target.teamId,
+      userId: this.target.userId,
+      runId: frame.run_id,
+      threadId: frame.thread_id,
+      input: frame.input,
+      refused: audit,
+    })
+      .then(answer)
+      .finally(() => {
+        this.#memoryOps -= 1;
+      });
+  }
+
   #onCommandResult(frame: CommandResultFrame): void {
     const issued = this.#delivery.takeIssued(frame.command_id);
     if (issued === "answered") return;
@@ -1072,6 +1319,7 @@ export class SandboxConnection implements RegisteredConnection {
     this.#timers = [];
     for (const abort of this.#policyPending.values()) abort.abort();
     this.#policyPending.clear();
+    this.#memoryAbort.abort();
     for (const lease of this.#leases.values()) lease.ingest.close();
     this.#delivery.close();
     if (this.#registered) {

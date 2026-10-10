@@ -129,6 +129,10 @@ export class FakeKobe {
   budgetStatus: Json = { state: "ok", lines: [] };
   /** Requests answered with an error once, keyed "METHOD /path" (e.g. to simulate a 503). */
   readonly failNext = new Map<string, Response>();
+  /** The caller's workspace (KOBE-194): path (no leading slash) -> bytes; listed per folder. */
+  readonly workspaceFiles = new Map<string, Uint8Array>();
+  /** Folders listed so far (`GET /v1/workspace/files`), to assert one request per thread. */
+  readonly workspaceListings: string[] = [];
   /** The install catalog with the team's choice (KOBE-44); empty = no models route answers. */
   readonly teamModels: FakeTeamModel[] = [];
   /** `GET /v1/agents/runnable` (KOBE-122), in this order; `runnablePageSize` pages it. */
@@ -488,6 +492,31 @@ export class FakeKobe {
       });
     }
     if (url.pathname.startsWith("/v1/artifacts")) return this.#artifactRoute(url, headers);
+    if (url.pathname === "/v1/workspace/files" && method === "GET") {
+      const dir = url.searchParams.get("path") ?? "";
+      this.workspaceListings.push(dir);
+      const entries = [...this.workspaceFiles]
+        .filter(([path]) => path.startsWith(`${dir}/`) && !path.slice(dir.length + 1).includes("/"))
+        .map(([path, bytes]) => ({
+          name: path.split("/").at(-1),
+          path,
+          type: "file",
+          size_bytes: bytes.length,
+          mtime: NOW,
+          source: "synced",
+          owner: "server",
+          area: "uploads",
+        }));
+      return json(200, { path: dir, entries });
+    }
+    if (url.pathname === "/v1/workspace/file" && method === "GET") {
+      const bytes = this.workspaceFiles.get(url.searchParams.get("path") ?? "");
+      if (!bytes) return error(404, "not_found");
+      return new Response(new Uint8Array(bytes), {
+        status: 200,
+        headers: { "content-type": "application/octet-stream" },
+      });
+    }
     const shared = /^\/v1\/files\/([^/]+)\/content$/u.exec(url.pathname);
     if (shared) {
       const file = this.sharedFiles.get(shared[1] ?? "");
@@ -501,6 +530,7 @@ export class FakeKobe {
         },
       });
     }
+    if (url.pathname.startsWith("/v1/memory/")) return this.#memoryRoute(method, url, headers);
     const scoped =
       url.pathname === "/v1/team/budgets/status" ||
       url.pathname.startsWith("/v1/threads") ||
@@ -512,6 +542,30 @@ export class FakeKobe {
     if (headers.get("x-kobe-team") !== this.teamId) return error(409, "team_mismatch");
     return this.#route(method, url, body as Json | undefined, headers);
   };
+
+  /**
+   * `/v1/memory/:id` (KOBE-155) for the Undo chip: DELETE answers 204, `POST .../restore` the doc
+   * at the asked version. Both are recorded in `requests`; `failNext` makes one fail.
+   */
+  #memoryRoute(method: string, url: URL, headers: Headers): Response {
+    if (headers.get("x-kobe-team") !== this.teamId) return error(409, "team_mismatch");
+    const [, , id, leaf] = url.pathname.split("/").filter(Boolean); // v1 memory id restore
+    if (method === "DELETE" && id && leaf === undefined) return new Response(null, { status: 204 });
+    if (method === "POST" && id && leaf === "restore") {
+      return json(200, {
+        id,
+        scope: "user",
+        path: "notes.md",
+        current_version: 3,
+        size_bytes: 1,
+        updated_at: NOW,
+        updated_by: null,
+        content: "",
+        versions: [],
+      });
+    }
+    return error(404, "not_found");
+  }
 
   #artifactRoute(url: URL, headers: Headers): Response {
     const [, , id, , n, leaf] = url.pathname.split("/").filter(Boolean); // v1 artifacts id versions n leaf

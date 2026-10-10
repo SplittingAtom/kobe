@@ -214,13 +214,6 @@ describe("connecting an OAuth connector", () => {
     expect((await grantFor(teamU, carolId, oauthConnector)).status).toBe(404);
   });
 
-  it("refuses an expired access token (refresh is KOBE-110)", async () => {
-    await h.admin.query(`UPDATE connector_grants SET expires_at = now() - interval '1 minute'`);
-    expect((await grantFor(teamT, aliceId, oauthConnector)).status).toBe(503);
-    await h.admin.query(`UPDATE connector_grants SET expires_at = now() + interval '1 hour'`);
-    expect((await grantFor(teamT, aliceId, oauthConnector)).status).toBe(200);
-  });
-
   it("lets the owner remove the grant", async () => {
     expect((await alice.delete(`${BASE}/${oauthConnector}`)).status).toBe(204);
     expect((await grantFor(teamT, aliceId, oauthConnector)).status).toBe(404);

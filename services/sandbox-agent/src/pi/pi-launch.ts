@@ -1,5 +1,5 @@
 import path from "node:path";
-import { KOBE_TOOLS_FD, type PiThreadConfig } from "@kobe/protocol";
+import { KOBE_TOOLS_FD, type PiThreadConfig, type RunMcpContext } from "@kobe/protocol";
 import { EXEC_FD, EXEC_FD_ENV } from "../kobe-exec/protocol.js";
 
 /**
@@ -61,6 +61,16 @@ export interface PiLaunch {
    * by the argument size limit.
    */
   readonly systemPrompt?: string;
+  /**
+   * The run's effective MCP connectors (KOBE-111), only when there are some: the thread writes
+   * Pi's `mcp.json` from it (mcp/pi-mcp-config.ts) and Pi loads `builtin:mcp`.
+   */
+  readonly mcp?: RunMcpContext;
+  /**
+   * Pi gets a per-run memory file (KOBE-157, memory/context-file.ts): the thread creates it at spawn
+   * and rewrites it before every prompt, so memory changes never change the launch key.
+   */
+  readonly memoryFile: boolean;
 }
 
 export interface PiLaunchInput {
@@ -90,6 +100,16 @@ export interface PiLaunchInput {
    */
   readonly toolsFiles?: boolean | undefined;
   /**
+   * The agent announced the `projects` capability (KOBE-162): the extension then registers
+   * `propose_project_file`. Meaningful only with {@link toolsExtension}.
+   */
+  readonly toolsProjects?: boolean | undefined;
+  /**
+   * The agent announced the `memory` capability (KOBE-157): the extension then registers `remember`
+   * and `recall`. Meaningful only with {@link toolsExtension}.
+   */
+  readonly toolsMemory?: boolean | undefined;
+  /**
    * The kobe-policy extension (KOBE-36): a root-owned, read-only file. Always loaded, always the
    * **last** `-e`: Pi runs `tool_call` handlers in extension load order (verified Pi 1.0.0), so the
    * last one sees the final, possibly mutated input, and nobody can change it after the check.
@@ -105,6 +125,8 @@ export interface PiLaunchInput {
    * materialized by the skills store. Exactly these, in this order.
    */
   readonly skillDirs?: readonly string[];
+  /** `run.start.mcp` (KOBE-111): when it lists servers Pi gets `builtin:mcp` and a per-session `mcp.json`. */
+  readonly mcp?: RunMcpContext | undefined;
   readonly parentEnv: Readonly<Record<string, string | undefined>>;
   readonly config?: PiThreadConfig | undefined;
 }
@@ -116,9 +138,12 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
     input.modelsExtension === undefined ? undefined : path.resolve(input.modelsExtension);
   const tools = input.toolsExtension === undefined ? undefined : path.resolve(input.toolsExtension);
   const exec = input.execExtension === undefined ? undefined : path.resolve(input.execExtension);
+  const mcp = input.mcp !== undefined && input.mcp.servers.length > 0 ? input.mcp : undefined;
+  if (mcp !== undefined) args.push("--extension", "builtin:mcp");
   for (const extension of input.extensions ?? []) {
     // kobe-policy only once, last: a second copy would find the channel taken and block everything.
     const resolved = extension.startsWith("builtin:") ? undefined : path.resolve(extension);
+    if (extension === "builtin:mcp" && mcp !== undefined) continue;
     if (
       resolved !== undefined &&
       (resolved === policy || resolved === models || resolved === tools || resolved === exec)
@@ -158,6 +183,9 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
   if (input.toolsExtension !== undefined) env.KOBE_TOOLS_FD = String(TOOLS_CHANNEL_FD);
   if (input.execExtension !== undefined) env[EXEC_FD_ENV] = String(EXEC_CHANNEL_FD);
   if (input.toolsExtension !== undefined && input.toolsFiles === true) env.KOBE_TOOLS_FILES = "1";
+  if (input.toolsExtension !== undefined && input.toolsProjects === true)
+    env.KOBE_TOOLS_PROJECTS = "1";
+  if (input.toolsExtension !== undefined && input.toolsMemory === true) env.KOBE_TOOLS_MEMORY = "1";
 
   // The model is deliberately not part of the key (see `modelsExtension`).
   const key = JSON.stringify({
@@ -168,14 +196,17 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
     skill_bundles: config?.skill_bundles ?? null,
     builtin_skills: config?.builtin_skills ?? null,
     mcp_servers: config?.mcp_servers ?? null,
+    mcp: mcp ?? null,
   });
   const systemPrompt = config?.system_prompt;
   return {
     args,
     env,
     key,
+    memoryFile: input.toolsExtension !== undefined && input.toolsMemory === true,
     toolsChannel: input.toolsExtension !== undefined,
     execChannel: input.execExtension !== undefined,
+    ...(mcp === undefined ? {} : { mcp }),
     ...(systemPrompt === undefined || systemPrompt === "" ? {} : { systemPrompt }),
   };
 }

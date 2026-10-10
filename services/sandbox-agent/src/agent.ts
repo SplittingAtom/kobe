@@ -1,7 +1,10 @@
 import {
   CAPABILITY_ARTIFACTS,
   CAPABILITY_BUILTIN_SKILLS,
+  CAPABILITY_MCP,
+  CAPABILITY_MEMORY,
   CAPABILITY_FILES,
+  CAPABILITY_PROJECTS,
   CAPABILITY_WEB_SEARCH,
   CAPABILITY_RUN_TOKEN,
   CAPABILITY_SKILL_BUNDLES,
@@ -18,6 +21,8 @@ import type { PiExit, PiRecord } from "./pi/pi-process.js";
 import { PolicyBroker } from "./policy/broker.js";
 import { ArtifactBroker } from "./tools/broker.js";
 import { FileShareBroker } from "./tools/share-broker.js";
+import { ProjectFileBroker } from "./tools/project-broker.js";
+import { MemoryBroker } from "./tools/memory-broker.js";
 import { WebSearchBroker } from "./tools/web-search-broker.js";
 import { toolsError } from "./tools/channel.js";
 import type { PushedFile } from "./workspace/sync.js";
@@ -29,6 +34,7 @@ import { encodeOutbound } from "./wire/encode.js";
 import { Outbox } from "./wire/outbox.js";
 import type { BackoffPolicy } from "./wire/backoff.js";
 import type { EgressWiring } from "./egress/egress-wiring.js";
+import type { McpWiring } from "./mcp/pi-mcp-config.js";
 import type { ModelWiring } from "./models/types.js";
 import type { PiIdentities } from "./pi/identities.js";
 import type { ExecWiring } from "./threads/exec-wiring.js";
@@ -59,6 +65,8 @@ export interface AgentDeps {
   readonly models?: ModelWiring | undefined;
   /** Egress for Pi's tools (KOBE-39); absent outside Kobe's pods. */
   readonly egress?: EgressWiring | undefined;
+  /** mcp-proxy wiring (KOBE-111); absent: no `mcp` capability, runs get no connector tools. */
+  readonly mcp?: McpWiring | undefined;
   /** Pi identities (KOBE-71); absent: Pi runs as the agent's uid. */
   readonly identities?: PiIdentities | undefined;
   /** Workspace sync (KOBE-27): restore before runs, push after them and before stopping. */
@@ -113,7 +121,9 @@ export class Agent {
   readonly #broker: PolicyBroker;
   readonly #artifacts: ArtifactBroker;
   readonly #shares: FileShareBroker;
+  readonly #proposals: ProjectFileBroker;
   readonly #searches: WebSearchBroker;
+  readonly #memory: MemoryBroker;
   /** Command ids seen on the current connection (ids are not portable across reconnects). */
   #seenCommands = new Set<string>();
   #queuedExits: { runId: string; frame: PiExitedFrameT }[] = [];
@@ -126,8 +136,14 @@ export class Agent {
     this.#broker = new PolicyBroker({ send: (frame) => this.#wire.send(frame) });
     this.#artifacts = new ArtifactBroker({ send: (frame) => this.#wire.send(frame) });
     this.#searches = new WebSearchBroker({ send: (frame) => this.#wire.send(frame) });
+    this.#memory = new MemoryBroker({ send: (frame) => this.#wire.send(frame) });
     const pushPath = deps.workspace?.pushPath?.bind(deps.workspace);
     this.#shares = new FileShareBroker({
+      root: config.workspaceDir,
+      send: (frame) => this.#wire.send(frame),
+      pushPath: pushPath ?? (() => Promise.reject(new Error("workspace sync is not available"))),
+    });
+    this.#proposals = new ProjectFileBroker({
       root: config.workspaceDir,
       send: (frame) => this.#wire.send(frame),
       pushPath: pushPath ?? (() => Promise.reject(new Error("workspace sync is not available"))),
@@ -137,12 +153,15 @@ export class Agent {
       runtimeDir: config.piRuntimeDir,
       models: deps.models,
       egress: deps.egress,
+      mcp: deps.mcp,
       policyExtension: config.policyExtension,
       toolsExtension: deps.toolsExtension,
       exec: deps.exec?.wiring,
       piPrivateRoot: deps.parentEnv.TMPDIR ?? "/tmp",
       execExtension: deps.exec?.extension,
       shareFiles: this.#filesEnabled(),
+      projectTools: this.#projectsEnabled(),
+      memoryTools: this.#memoryEnabled(),
       ...(deps.extensions === undefined ? {} : { extensions: deps.extensions }),
       ...(deps.policyReadyTimeoutMs === undefined
         ? {}
@@ -173,7 +192,9 @@ export class Agent {
           this.#broker.failRun(runId, "run ended");
           this.#artifacts.failRun(runId, "run ended");
           this.#shares.failRun(runId, "run ended");
+          this.#proposals.failRun(runId, "run ended");
           this.#searches.failRun(runId, "run ended");
+          this.#memory.failRun(runId, "run ended");
           deps.workspace?.runEnded();
         },
         uiRequest: (threadId, runId, request) => {
@@ -200,6 +221,17 @@ export class Agent {
             this.#searches.query(threadId, runId, request, reply);
             return;
           }
+          if (request.op === "memory.put" || request.op === "memory.read") {
+            if (this.#memoryEnabled()) this.#memory.request(threadId, runId, request, reply);
+            else reply(toolsError(request.id, "not_allowed", "memory is not available"));
+            return;
+          }
+          if (request.op === "project.file_propose") {
+            if (this.#projectsEnabled()) {
+              this.#proposals.propose(threadId, runId, request, reply);
+            } else reply(toolsError(request.id, "not_allowed", "projects are not available"));
+            return;
+          }
           if (request.op === "file.share") {
             if (this.#filesEnabled()) this.#shares.share(threadId, runId, request, reply);
             else reply(toolsError(request.id, "not_allowed", "file sharing is not available"));
@@ -211,7 +243,9 @@ export class Agent {
           logger.debug({ thread_id: threadId, reason }, "tools channel closed");
           this.#artifacts.failThread(threadId, reason);
           this.#shares.failThread(threadId, reason);
+          this.#proposals.failThread(threadId, reason);
           this.#searches.failThread(threadId, reason);
+          this.#memory.failThread(threadId, reason);
         },
         diagnostic: (threadId, message) => logger.debug({ thread_id: threadId }, message),
         warning: (threadId, message) => logger.warn({ thread_id: threadId }, message),
@@ -227,7 +261,9 @@ export class Agent {
         this.#broker.failAll("connection to Kobe server lost");
         this.#artifacts.failAll("connection to Kobe server lost");
         this.#shares.failAll("connection to Kobe server lost");
+        this.#proposals.failAll("connection to Kobe server lost");
         this.#searches.failAll("connection to Kobe server lost");
+        this.#memory.failAll("connection to Kobe server lost");
         void this.#threads.abortRestores();
       },
       onFatal: (reason) => void this.#onFatal(reason),
@@ -275,13 +311,28 @@ export class Agent {
     return this.#deps.toolsExtension !== undefined && this.#deps.workspace?.pushPath !== undefined;
   }
 
+  /** `propose_project_file` needs what `share_file` needs (it pushes the file first). */
+  #projectsEnabled(): boolean {
+    return this.#filesEnabled();
+  }
+
+  /** `remember` / `recall` need the tools channel (fd 4); without it neither is registered nor announced. */
+  #memoryEnabled(): boolean {
+    return this.#deps.toolsExtension !== undefined;
+  }
+
   #hello(): HelloFrame {
     const capabilities = [
       ...(this.#deps.skills === undefined ? [] : [CAPABILITY_SKILL_BUNDLES]),
       ...(this.#deps.config.builtinSkillsDir === undefined ? [] : [CAPABILITY_BUILTIN_SKILLS]),
       ...(this.#deps.toolsExtension === undefined ? [] : [CAPABILITY_ARTIFACTS]),
       ...(this.#filesEnabled() ? [CAPABILITY_FILES] : []),
+      ...(this.#projectsEnabled() ? [CAPABILITY_PROJECTS] : []),
       ...(this.#deps.toolsExtension === undefined ? [] : [CAPABILITY_WEB_SEARCH]),
+      ...(this.#memoryEnabled() ? [CAPABILITY_MEMORY] : []),
+      // Per-session MCP config (KOBE-111) needs the proxy URL, a session to trade tokens with, and
+      // Pi's MCP extension (built into Pi 1.0.x).
+      ...(this.#deps.mcp === undefined ? [] : [CAPABILITY_MCP]),
       // The run token reaches Pi through the models extension, so only with model wiring.
       ...(this.#deps.models === undefined ? [] : [CAPABILITY_RUN_TOKEN]),
     ];
@@ -355,8 +406,14 @@ export class Agent {
       case "file.share_result":
         this.#shares.onResult(frame);
         return;
+      case "project.file_propose_result":
+        this.#proposals.onResult(frame);
+        return;
       case "web_search.result":
         this.#searches.onResult(frame);
+        return;
+      case "memory.result":
+        this.#memory.onResult(frame);
         return;
       case "ack":
         this.#outbox.ack(frame.run_id, frame.seq);

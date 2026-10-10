@@ -140,6 +140,49 @@ sandbox on a fresh volume, which restores from S3. S3 sync needs `s3.bucket` and
 it a lost node loses those workspaces for good. Conversations are never at risk: Postgres is the
 record of threads and runs.
 
+### Longhorn sizing for 10 GiB strict-local workspaces
+
+A strict-local volume keeps its single replica on the node where its sandbox starts, so that node
+must have room for the whole volume when the pod is scheduled. Longhorn refuses to schedule a
+replica when `(already scheduled + this volume) > (disk size - reserved) x over-provisioning%`, or
+when free space would fall under `storage-minimal-available-percentage`. The default
+over-provisioning is 100%, which counts every thin volume at its full size: ten 10 GiB workspaces
+promise 100 GiB although each holds a few hundred MiB. On a kobe-gate1 test cluster this left a
+sandbox in `ContainerCreating` for over 30 minutes (`LocalReplicaSchedulingFailure: insufficient
+storage` while 419 GB were free).
+
+- Set Longhorn's `storage-over-provisioning-percentage` to at least **200** (Longhorn UI: Settings,
+  or `kubectl -n longhorn-system edit settings.longhorn.io storage-over-provisioning-percentage`).
+  Workspace volumes are thin, so this is safe as long as real usage is watched.
+- Keep `storage-minimal-available-percentage` at 25 or more (the default). It is the guard that
+  matters once over-provisioning is raised: Longhorn stops placing replicas on a disk with less
+  than that share free, whatever has been promised.
+- Rule of thumb for the promise: `users x teams x workspace size` spread across the nodes you
+  want sandboxes on, should stay under `disk x (over-provisioning / 100)` per node; size real disks
+  for what workspaces actually hold, not for their 10 GiB limit.
+- Longhorn must be able to place a replica on every node that can run sandboxes. A node that is
+  cordoned in Longhorn (scheduling disabled) or full cannot start strict-local sandboxes.
+
+**When a sandbox does not start.** After a wake the server waits for the sandbox pod to be Ready
+(up to 90 s, the wake budget). It keeps waiting while the pod shows progress (image pull,
+ContainerCreating, a single `FailedMount`) and fails early only on a definite signal: a replica or
+storage that cannot be scheduled (`LocalReplicaSchedulingFailure`, `FailedScheduling` with
+insufficient storage or no nodes available), `FailedAttachVolume` repeating (3 times or over a
+minute), or `ImagePullBackOff`/`ErrImagePull`. Only events of that wake about that pod and volume
+count. The run then fails with `workspace_unavailable` ("Your workspace could not be started because
+the cluster could not provide it. Ask your install admin to check the cluster."); members never
+see node or volume names.
+
+Install admins find the reason in the install audit log: filter on action `sandbox.wake_stalled`
+(`GET /v1/install/audit?action=sandbox.wake_stalled`). `cause` is one of `volume_unschedulable`,
+`volume_attach`, `scheduling`, `image_pull`, `unknown`; `detail` is the cluster's own event text
+followed by a suggested remedy. The server log has the same line (level error, "sandbox not ready:
+failing the wake"). The server never deletes a pod or volume for this: if a workspace that has
+never run is stuck on a volume that cannot attach, delete its PVC by hand
+(`kubectl -n kobe-team-<slug> delete pvc workspace-u-<user-id>`) after confirming it holds no data;
+the next message starts a fresh sandbox. The server needs `list` on events in team namespaces
+(included in the chart role).
+
 ## Egress
 
 Sandboxes reach the internet only through the **egress proxy** (spec D28), and only over HTTPS:
@@ -445,6 +488,13 @@ and get no network path to the object store. Objects live under
 Give the credentials read, write and delete on the bucket (collection deletes unreferenced
 content). Without `s3.bucket`, workspace sync stays off and the server logs a warning.
 
+`s3.prefix` (default empty) puts every object under a key prefix, for a bucket shared with other
+applications. It must be relative and end in `/` (for example `kobe/`; letters, digits and
+`! _ . * ' ( ) / -` only); the chart rejects anything else. It is applied on the server and the
+scheduler (`KOBE_S3_PREFIX`). Changing it on an existing install hides the objects written under
+the old prefix, so move them first or keep the old value. `kobe backup` and `kobe restore` read
+`KOBE_S3_PREFIX` too; set it to the same value.
+
 ### Sandbox tool executor
 
 By default Pi's built-in tools (`bash`, `read`, `write`, `edit`, `ls`, `grep`, `find`) run inside
@@ -454,7 +504,23 @@ design in `docs/design/paired-tool-uid.md`), so a prompt-injected tool cannot re
 model-gateway tokens or write Pi's config directory. The executor needs the partner groups the
 chart already gives the sandbox agent; an agent that is asked for it without them refuses to
 start. It applies to sandboxes started after the change (running ones keep the old setting until
-they restart). One extra Node process (tens of MB) runs per thread that uses a tool.
+they restart). One extra Node process runs per thread that uses a tool.
+
+The k3d e2e (`executor` shard, KOBE-168) runs the whole suite with the flag on under gVisor and
+proves that a tool cannot signal or ptrace Pi, read `model.json` or the agent's tokens, write Pi's
+`agent/` directory or private HOME/TMPDIR, or plant code a Pi loads; that a thread's tool cannot
+reach another thread's Pi (which also closes KOBE-228: with the flag on a Pi's HOME is private);
+and that the workspace and KOBE-27 sync still work for both uids. To turn it on:
+
+```bash
+helm upgrade kobe charts/kobe -n <namespace> -f <your values> --reset-values --set sandbox.toolExecutor.enabled=true
+```
+
+Running sandboxes keep the old setting until they restart (hibernate and wake them, or wait for
+idle hibernation). To turn it off set it back to `false`; the same applies. What it costs: one Node
+process per thread that runs a tool, started on that thread's first tool call (resident memory
+and the cold-start effect are measured in `docs/ledger/KOBE-168.md`); no extra pod, no
+extra network hop. With the flag off, threads in one sandbox share Pi's HOME (KOBE-228).
 
 ### Email (SMTP)
 

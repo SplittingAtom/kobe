@@ -1,4 +1,10 @@
-import type { ApprovalMode, ErrorInfo, PiThreadConfig, RunTrigger } from "@kobe/protocol";
+import type {
+  ApprovalMode,
+  ErrorInfo,
+  PiThreadConfig,
+  RunMcpContext,
+  RunTrigger,
+} from "@kobe/protocol";
 import type { AgentScope, KobeTx } from "@kobe/db";
 import type { Omission } from "../resolver/resolve.js";
 
@@ -44,6 +50,8 @@ export type AgentResolution =
       readonly config?: Omit<PiThreadConfig, "agent" | "approval_mode">;
       /** What the effective-config resolver left out (KOBE-76; KOBE-77 turns it into notices). */
       readonly omissions?: readonly Omission[];
+      /** The run's effective MCP connectors and tools (KOBE-111); empty = none. */
+      readonly mcp?: RunMcpContext;
     }
   | { readonly ok: false; readonly error: ErrorInfo };
 

@@ -24,6 +24,29 @@ export interface ObjectStore {
   copy(from: string, to: string): Promise<void>;
   /** Deletes the objects (missing ones are fine). */
   delete(keys: readonly string[]): Promise<void>;
+  /**
+   * One page of the keys under `prefix` (KOBE-189), in key order. With `delimiter` the keys below
+   * the first delimiter after the prefix come back folded into `prefixes` ("directories").
+   * `next` is the cursor for the following page, absent on the last one.
+   */
+  list(prefix: string, options?: ListOptions): Promise<ListPage>;
+}
+
+export interface ListOptions {
+  readonly cursor?: string;
+  readonly limit?: number;
+  readonly delimiter?: string;
+}
+
+export interface ListedObject {
+  readonly key: string;
+  readonly lastModified: Date;
+}
+
+export interface ListPage {
+  readonly objects: readonly ListedObject[];
+  readonly prefixes: readonly string[];
+  readonly next?: string;
 }
 
 export class IntegrityError extends Error {

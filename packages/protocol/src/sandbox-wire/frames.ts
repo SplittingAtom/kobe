@@ -21,6 +21,7 @@ import {
   projectFileProposeFrameSchema,
   projectFileProposeResultFrameSchema,
 } from "./project-frames.js";
+import { runMcpContextSchema } from "./mcp-config.js";
 import { webSearchQueryFrameSchema, webSearchResultFrameSchema } from "./web-search-frames.js";
 import { runProjectContextSchema } from "../projects.js";
 import { runMemoryContextSchema } from "../memory.js";
@@ -370,6 +371,8 @@ export const runStartFrameSchema = frame("run.start", {
   memory: runMemoryContextSchema.optional(),
   /** Project id, name and instructions (KOBE-159, projects.ts); only for agents with capability `projects`. */
   project: runProjectContextSchema.optional(),
+  /** The run's effective MCP connectors (KOBE-111, mcp-config.ts); only for agents with capability `mcp`. */
+  mcp: runMcpContextSchema.optional(),
 });
 
 /** Pi `steer`: delivered after the current turn's tool calls, before the next model call. */
@@ -523,8 +526,13 @@ export type ArtifactPutFrame = z.infer<typeof artifactPutFrameSchema>;
 export type ArtifactResultFrame = z.infer<typeof artifactResultFrameSchema>;
 export type FileShareFrame = z.infer<typeof fileShareFrameSchema>;
 export type FileShareResultFrame = z.infer<typeof fileShareResultFrameSchema>;
+export type ProjectFileProposeFrame = z.infer<typeof projectFileProposeFrameSchema>;
+export type ProjectFileProposeResultFrame = z.infer<typeof projectFileProposeResultFrameSchema>;
 export type WebSearchQueryFrame = z.infer<typeof webSearchQueryFrameSchema>;
 export type WebSearchResultFrame = z.infer<typeof webSearchResultFrameSchema>;
+export type MemoryPutFrame = z.infer<typeof memoryPutFrameSchema>;
+export type MemoryReadFrame = z.infer<typeof memoryReadFrameSchema>;
+export type MemoryResultFrame = z.infer<typeof memoryResultFrameSchema>;
 export type PolicyResultFrame = z.infer<typeof policyResultFrameSchema>;
 export type RunStartFrame = z.infer<typeof runStartFrameSchema>;
 export type RunStopFrame = z.infer<typeof runStopFrameSchema>;

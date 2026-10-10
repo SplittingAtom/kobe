@@ -67,7 +67,7 @@ export class ArtifactBroker {
       run_id: runId,
       thread_id: threadId,
       tool_call_id: request.tool_call_id,
-      tool: request.tool,
+      tool: "tool" in request ? request.tool : undefined,
       input: request.input,
     } as ArtifactPutFrame;
     if (Buffer.byteLength(JSON.stringify(frame)) > MAX_ARTIFACT_PUT_FRAME_BYTES) {

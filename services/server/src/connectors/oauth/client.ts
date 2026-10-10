@@ -117,7 +117,7 @@ export function authorizationUrl(input: {
   return url.toString();
 }
 
-const tokenSchema = z.object({
+export const tokenSchema = z.object({
   access_token: z.string().min(1).max(8192),
   token_type: z.string().refine((t) => t.toLowerCase() === "bearer"),
   expires_in: z
@@ -134,6 +134,23 @@ export interface TokenSet {
   readonly refreshToken: string | undefined;
   readonly scope: string | undefined;
   readonly expiresAt: Date | undefined;
+}
+
+/** Content type plus client authentication: Basic for a confidential client, else `client_id` in the form. */
+export function tokenRequestHeaders(
+  form: URLSearchParams,
+  client: ClientRegistration,
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    "content-type": "application/x-www-form-urlencoded",
+  };
+  if (client.clientSecret === undefined) {
+    form.set("client_id", client.clientId);
+  } else {
+    const pair = `${encodeURIComponent(client.clientId)}:${encodeURIComponent(client.clientSecret)}`;
+    headers.authorization = `Basic ${Buffer.from(pair).toString("base64")}`;
+  }
+  return headers;
 }
 
 /** Exchanges the authorization code server-side, with the PKCE verifier and the resource. */
@@ -156,15 +173,7 @@ export async function exchangeCode(
     code_verifier: input.verifier,
     resource: input.resource,
   });
-  const headers: Record<string, string> = {
-    "content-type": "application/x-www-form-urlencoded",
-  };
-  if (input.client.clientSecret === undefined) {
-    form.set("client_id", input.client.clientId);
-  } else {
-    const pair = `${encodeURIComponent(input.client.clientId)}:${encodeURIComponent(input.client.clientSecret)}`;
-    headers.authorization = `Basic ${Buffer.from(pair).toString("base64")}`;
-  }
+  const headers = tokenRequestHeaders(form, input.client);
   const res = await oauthRequest(
     io,
     input.tokenEndpoint,

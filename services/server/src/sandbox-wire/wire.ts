@@ -11,8 +11,10 @@ import { SYSTEM_ACTOR, eq, getMembership, users, withTeam, type KobeDb } from "@
 import { logger as rootLogger } from "../logger.js";
 import { recordAudit, type ServerAuditEvent } from "../audit/record.js";
 import { BackgroundTasks } from "../background.js";
+import type { ApprovalVerifier } from "../approvals/verify.js";
 import type { BlobStore } from "../retention/blobs.js";
 import { DEFAULT_UPLOAD_SETTINGS, type UploadSettings } from "../uploads/settings.js";
+import type { ProjectMounts } from "../projects/mounts.js";
 import { createPolicyEngine } from "../policy/engine.js";
 import { createToolRegistry } from "../policy/registry.js";
 import { createDbRuleSource, createDbSettingsSource } from "../policy/rule-store.js";
@@ -45,6 +47,8 @@ export interface SandboxWireOptions {
   readonly engine?: PolicyEngine;
   readonly tools?: ToolRegistry;
   readonly approvals?: ApprovalBroker;
+  /** Verifies and consumes signed approvals (project `remember`, KOBE-156); unset: none verifies. */
+  readonly approvalVerifier?: ApprovalVerifier;
   readonly ui?: UiBroker;
   readonly hooks?: RunLifecycleHooks;
   /** Run policy inputs incl. the approval-mode floor (`createDbRunContextSource()` in production). */
@@ -54,6 +58,8 @@ export interface SandboxWireOptions {
   readonly blobs?: BlobStore;
   /** Upload limits and storage quota default, applied to `file.share` too (KOBE-150). */
   readonly uploads?: UploadSettings;
+  /** Project file mounts: refreshed at run start, used by `project.file_propose` (KOBE-162). */
+  readonly projectMounts?: ProjectMounts;
   /** Runs `web_search.query` (KOBE-114); unset: every search answers "not configured". */
   readonly webSearch?: WebSearchService;
   readonly tuning?: Partial<WireTuning>;
@@ -253,6 +259,28 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       settings: options.uploads ?? DEFAULT_UPLOAD_SETTINGS,
       runMaxEvents: tuning.runMaxEvents,
     },
+    memory: {
+      db,
+      blobs: options.blobs,
+      runMaxEvents: tuning.runMaxEvents,
+      approvals,
+      verifier: options.approvalVerifier,
+      log,
+    },
+    ...(options.projectMounts ? { projectMounts: options.projectMounts } : {}),
+    projectFiles: {
+      db,
+      blobs: options.blobs,
+      approvals,
+      verifier: options.approvalVerifier,
+      mounts: options.projectMounts,
+      files: {
+        maxFileBytes: (options.uploads ?? DEFAULT_UPLOAD_SETTINGS).maxFileBytes,
+        teamQuotaDefaultBytes: (options.uploads ?? DEFAULT_UPLOAD_SETTINGS).defaultQuotaBytes,
+      },
+      runMaxEvents: tuning.runMaxEvents,
+      log,
+    },
     webSearch: options.webSearch ?? NO_WEB_SEARCH,
     ui: options.ui ?? CANCEL_DIALOGS,
     hooks,
@@ -310,6 +338,44 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
             reason: refusal.reason,
             runId: refusal.runId,
             toolCallId: refusal.toolCallId,
+          },
+        },
+      );
+    },
+    auditProjectFileRefused(target, sandboxId, refusal) {
+      throttledAudit(
+        `${target.teamId}:${target.userId}:project_file:${refusal.reason}`,
+        target.teamId,
+        {
+          action: "sandbox.project_file_refused",
+          actor: SYSTEM_ACTOR,
+          teamId: target.teamId,
+          target: {
+            sandboxId,
+            userId: target.userId,
+            reason: refusal.reason,
+            runId: refusal.runId,
+            toolCallId: refusal.toolCallId,
+          },
+        },
+      );
+    },
+    auditMemoryRefused(target, sandboxId, refusal) {
+      throttledAudit(
+        `${target.teamId}:${target.userId}:memory:${refusal.op}:${refusal.reason}`,
+        target.teamId,
+        {
+          action: "sandbox.memory_refused",
+          actor: SYSTEM_ACTOR,
+          teamId: target.teamId,
+          target: {
+            sandboxId,
+            userId: target.userId,
+            op: refusal.op,
+            reason: refusal.reason,
+            ...(refusal.scope ? { scope: refusal.scope } : {}),
+            runId: refusal.runId,
+            ...(refusal.toolCallId ? { toolCallId: refusal.toolCallId } : {}),
           },
         },
       );

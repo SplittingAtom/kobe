@@ -64,6 +64,19 @@ describe("buildPiLaunch kobe-tools (KOBE-128)", () => {
     ).toBeUndefined();
   });
 
+  it("tells the extension to register propose_project_file only with the extension and the projects flag", () => {
+    expect(
+      buildPiLaunch({ ...base, parentEnv, toolsExtension: TOOLS, toolsProjects: true }).env
+        .KOBE_TOOLS_PROJECTS,
+    ).toBe("1");
+    expect(
+      buildPiLaunch({ ...base, parentEnv, toolsExtension: TOOLS }).env.KOBE_TOOLS_PROJECTS,
+    ).toBeUndefined();
+    expect(
+      buildPiLaunch({ ...base, parentEnv, toolsProjects: true }).env.KOBE_TOOLS_PROJECTS,
+    ).toBeUndefined();
+  });
+
   it("changes the launch key (a Pi without the tools restarts when they are added)", () => {
     const without = buildPiLaunch({ ...base, parentEnv }).key;
     expect(buildPiLaunch({ ...base, parentEnv, toolsExtension: TOOLS }).key).not.toBe(without);
@@ -227,5 +240,59 @@ describe("buildPiLaunch", () => {
     expect(none.systemPrompt).toBeUndefined();
     expect(empty.systemPrompt).toBeUndefined();
     expect(some.key).not.toBe(none.key);
+  });
+});
+
+describe("buildPiLaunch per-session MCP (KOBE-111)", () => {
+  const extensionsOf = (args: readonly string[]) =>
+    args.flatMap((a, i) => (a === "--extension" ? [args[i + 1]] : []));
+  const mcp = {
+    servers: [
+      {
+        name: "jira",
+        connector_id: "11111111-1111-4111-8111-111111111111",
+        tools: [{ name: "get", pi_name: "mcp__jira__get" }],
+      },
+    ],
+  };
+
+  it("loads builtin:mcp first (before kobe-policy) only when connectors are effective", () => {
+    const withMcp = buildPiLaunch({ ...base, parentEnv, modelsExtension: MODELS, mcp });
+    expect(extensionsOf(withMcp.args)).toEqual(["builtin:mcp", MODELS, POLICY]);
+    expect(withMcp.mcp).toEqual(mcp);
+    for (const none of [undefined, { servers: [] }]) {
+      const launch = buildPiLaunch({ ...base, parentEnv, ...(none ? { mcp: none } : {}) });
+      expect(extensionsOf(launch.args)).toEqual([POLICY]);
+      expect(launch.mcp).toBeUndefined();
+    }
+  });
+
+  it("a changed connector set changes the key, so an idle Pi restarts with the new config", () => {
+    const a = buildPiLaunch({ ...base, parentEnv, mcp });
+    const b = buildPiLaunch({ ...base, parentEnv, mcp: { servers: [] } });
+    const c = buildPiLaunch({ ...base, parentEnv, mcp });
+    expect(a.key).not.toBe(b.key);
+    expect(a.key).toBe(c.key);
+  });
+});
+
+describe("buildPiLaunch memory (KOBE-157)", () => {
+  it("memory is not a launch input: no system prompt text, no key change", () => {
+    const config = { system_prompt: "be brief" };
+    const launch = buildPiLaunch({ ...base, parentEnv, config, toolsExtension: TOOLS });
+    expect(launch.systemPrompt).toBe("be brief");
+    expect(launch.key).toBe(
+      buildPiLaunch({ ...base, parentEnv, config, toolsExtension: TOOLS, toolsMemory: true }).key,
+    );
+  });
+
+  it("registers remember/recall and a per-run memory file only with the extension and the flag", () => {
+    const launch = (extra: object) => buildPiLaunch({ ...base, parentEnv, ...extra });
+    expect(launch({ toolsExtension: TOOLS, toolsMemory: true }).env.KOBE_TOOLS_MEMORY).toBe("1");
+    expect(launch({ toolsExtension: TOOLS, toolsMemory: true }).memoryFile).toBe(true);
+    expect(launch({ toolsExtension: TOOLS }).env.KOBE_TOOLS_MEMORY).toBeUndefined();
+    expect(launch({ toolsExtension: TOOLS }).memoryFile).toBe(false);
+    expect(launch({ toolsMemory: true }).env.KOBE_TOOLS_MEMORY).toBeUndefined();
+    expect(launch({ toolsMemory: true }).memoryFile).toBe(false);
   });
 });

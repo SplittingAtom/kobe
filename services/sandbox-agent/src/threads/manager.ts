@@ -66,6 +66,7 @@ export class ThreadManager {
   readonly #reaper: NodeJS.Timeout;
   readonly #unsubscribeTokens: (() => void) | undefined;
   readonly #unsubscribeEgress: (() => void) | undefined;
+  readonly #unsubscribeMcp: (() => void) | undefined;
   #draining = false;
 
   constructor(options: ThreadManagerOptions) {
@@ -75,6 +76,10 @@ export class ThreadManager {
     // A rotated model-gateway token reaches every live Pi's model file (KOBE-41).
     this.#unsubscribeTokens = options.models?.tokens.onChange((token) => {
       for (const thread of this.#threads.values()) void thread.updateToken(token);
+    });
+    // A rotated mcp-proxy token reaches every live Pi's mcp.json (KOBE-111).
+    this.#unsubscribeMcp = options.mcp?.tokens.onChange((token) => {
+      for (const thread of this.#threads.values()) void thread.updateMcpToken(token);
     });
     // A rotated egress token reaches every live Pi's egress token file (KOBE-39).
     this.#unsubscribeEgress = options.egress?.tokens.onChange((token) => {
@@ -134,6 +139,8 @@ export class ThreadManager {
       }
       try {
         await thread.attachRun(frame.run_id, model, frame.run_token?.token);
+        // The run's memory (KOBE-157): its own file, so a changed index never restarts Pi.
+        await thread.attachMemory(frame.memory);
       } catch (error) {
         thread.endRun();
         return fail("pi_unavailable", `model file not written: ${(error as Error).message}`);
@@ -341,6 +348,7 @@ export class ThreadManager {
     clearInterval(this.#reaper);
     this.#unsubscribeTokens?.();
     this.#unsubscribeEgress?.();
+    this.#unsubscribeMcp?.();
     const active = [...this.#threads.values()].map((t) => t.runEnded());
     let timer: NodeJS.Timeout | undefined;
     await Promise.race([
@@ -470,6 +478,9 @@ export class ThreadManager {
         return fail("pi_unavailable", `skills: ${message}`);
       }
     }
+    // Connector tools need the proxy wiring: a run that lists connectors never starts without them.
+    if ((frame?.mcp?.servers.length ?? 0) > 0 && this.#options.mcp === undefined)
+      return fail("pi_unavailable", "mcp: this sandbox has no MCP proxy access");
     const launch = buildPiLaunch({
       sessionFile: this.#sessionFile(thread.id),
       skillDirs,
@@ -479,12 +490,18 @@ export class ThreadManager {
       toolsExtension: this.#options.toolsExtension,
       execExtension: this.#options.exec === undefined ? undefined : this.#options.execExtension,
       toolsFiles: this.#options.shareFiles,
+      toolsProjects: this.#options.projectTools,
+      toolsMemory: this.#options.memoryTools,
       ...(this.#options.extensions === undefined ? {} : { extensions: this.#options.extensions }),
       parentEnv: this.#options.parentEnv,
       config: frame?.config,
+      mcp: frame?.mcp,
     });
     if (thread.hasProcess) {
-      const changed = frame?.config !== undefined && launch.key !== thread.launchKey;
+      // `mcp` can arrive without `config` (an agent that lost all its connectors): still a change.
+      const changed =
+        (frame?.config !== undefined || frame?.mcp !== undefined) &&
+        launch.key !== thread.launchKey;
       // A Pi whose policy channel closed blocks every tool call for good: start a fresh one (not
       // while it is busy — its calls are blocked anyway, and Stop must still reach it).
       const broken = !thread.policyUsable;

@@ -379,6 +379,9 @@ s3:
   region: us-east-1
   bucket: ""
   forcePathStyle: true
+  # Optional key prefix for every object (relative, must end in "/", e.g. "kobe/"). Empty = bucket root.
+  # Changing it on an existing install hides objects written under the old prefix.
+  prefix: ""
   # Secret with keys access-key-id and secret-access-key.
   existingSecret: ""
 

@@ -299,6 +299,8 @@ const workspaceSync =
     : undefined;
 // Message attachments (KOBE-144) need the workspace store; without it `file_ids` are refused.
 if (workspaceSync && deps) {
+  // Project files are mounted into members' workspaces through the same store (KOBE-162).
+  deps.projectMounts.use(workspaceSync);
   deps.runs.useAttachments(
     createAttachmentStager({ db: deps.database.db, sync: workspaceSync, settings: uploadSettings }),
   );

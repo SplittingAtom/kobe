@@ -2,6 +2,8 @@ import type { ToolRegistry } from "@kobe/protocol";
 import type {
   ARTIFACT_PUT_REFUSALS,
   FILE_SHARE_REFUSALS,
+  MEMORY_REFUSALS,
+  PROJECT_FILE_REFUSALS,
   KobeDb,
   WEB_SEARCH_REFUSALS,
 } from "@kobe/db";
@@ -11,6 +13,9 @@ import type { SandboxBus } from "./bus.js";
 import type { WireTuning } from "./constants.js";
 import type { ArtifactPutDeps } from "../artifacts/put.js";
 import type { FileShareDeps } from "../files/share.js";
+import type { MemoryAgentDeps } from "../memory/agent.js";
+import type { ProjectMounts } from "../projects/mounts.js";
+import type { ProposeDeps } from "../projects/proposals.js";
 import type { PolicyCheckDeps } from "./policy-check.js";
 import type { RunLifecycleHooks, SandboxLiveness, SandboxTarget, UiBroker } from "./types.js";
 
@@ -75,6 +80,12 @@ export interface WireContext {
   readonly artifacts: ArtifactPutDeps;
   /** Storage for `file.share` (KOBE-150). */
   readonly fileShare: FileShareDeps;
+  /** Storage, approvals and membership for `memory.put` / `memory.read` / `run.start.memory` (KOBE-156). */
+  readonly memory: MemoryAgentDeps;
+  /** Project file mounts (KOBE-162): refreshed at run start. Undefined in tests that don't need it. */
+  readonly projectMounts?: ProjectMounts;
+  /** Storage, approvals and membership for `project.file_propose` (KOBE-162). */
+  readonly projectFiles: ProposeDeps;
   /** Runs `web_search.query` (KOBE-114). */
   readonly webSearch: WebSearchService;
   readonly ui: UiBroker;
@@ -108,6 +119,28 @@ export interface WireContext {
       reason: (typeof FILE_SHARE_REFUSALS)[number];
       runId: string;
       toolCallId: string;
+    },
+  ): void;
+  /** Records `sandbox.project_file_refused` (throttled per user and reason); never carries names or content. */
+  auditProjectFileRefused(
+    target: SandboxTarget,
+    sandboxId: string,
+    refusal: {
+      reason: (typeof PROJECT_FILE_REFUSALS)[number];
+      runId: string;
+      toolCallId: string;
+    },
+  ): void;
+  /** Records `sandbox.memory_refused` (throttled per user, op and reason); never carries content. */
+  auditMemoryRefused(
+    target: SandboxTarget,
+    sandboxId: string,
+    refusal: {
+      op: "put" | "read";
+      reason: (typeof MEMORY_REFUSALS)[number];
+      scope?: "user" | "project";
+      runId: string;
+      toolCallId?: string;
     },
   ): void;
   /** Records `sandbox.web_search_refused` (throttled per user and reason); never carries the query. */

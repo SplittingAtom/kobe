@@ -6,6 +6,7 @@ import { versionParamSchema } from "../schemas.js";
 import { getVersion } from "../versions.js";
 import { guardUnreadable, type ResolvedAgent } from "../version-routes.js";
 import { mapAgentVersionToOrbit, orbitExportToYaml, type OrbitExport } from "./orbit-export.js";
+import { orbitMcpToolNames } from "./mcp-tools.js";
 import { listOrbitModelOptions, resolveOrbitModel } from "./model.js";
 
 export interface OrbitRouteOptions {
@@ -16,12 +17,9 @@ export interface OrbitRouteOptions {
   readonly teamId: (c: Context) => string;
 }
 
-const MCP_NOTE =
-  "MCP tools are not included: connector tool snapshots are not wired into exports yet.";
-
 /** The YAML with a leading comment block for what the export left out (Orbit ignores comments). */
 function yamlWithNotes(result: OrbitExport): string {
-  const notes = [MCP_NOTE, ...result.warnings].map((n) => `# Note: ${n}\n`).join("");
+  const notes = result.warnings.map((n) => `# Note: ${n}\n`).join("");
   return notes + orbitExportToYaml(result);
 }
 
@@ -48,9 +46,14 @@ export function mountOrbitExport<E extends { Variables: object }>(
       const enabled = await listOrbitModelOptions(db, options.teamId(c));
       const model = resolveOrbitModel(record.definition.frontmatter.model, enabled);
       if (!model.ok) return c.json({ code: model.code, message: model.message }, 409);
+      const mcpTools = await orbitMcpToolNames(
+        db,
+        options.teamId(c),
+        record.toolManifest,
+        record.definition.frontmatter.tools,
+      );
       let result: OrbitExport;
       try {
-        // TODO(KOBE-62): pass the pinned connector snapshots' MCP tool names (mcpTools).
         result = mapAgentVersionToOrbit({
           definition: {
             ...record.definition,
@@ -58,6 +61,7 @@ export function mountOrbitExport<E extends { Variables: object }>(
           },
           toolManifest: record.toolManifest,
           version: record.version,
+          mcpTools,
         });
       } catch (err) {
         return c.json(

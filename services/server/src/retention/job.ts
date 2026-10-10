@@ -13,6 +13,7 @@ import type pg from "pg";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit/record.js";
 import { deleteReleasedBlobs, type BlobDeletionCounts, type BlobStore } from "./blobs.js";
+import { NO_ORPHANS, sweepOrphanObjects, type OrphanCounts } from "./orphans.js";
 import { expireOrphanUploads, type ExpiredUploads } from "../uploads/expire.js";
 import { DEFAULT_ORPHAN_HOURS } from "../uploads/settings.js";
 import { NO_MEMORY_PURGE, purgeMemory, type MemoryPurgeCounts } from "./memory.js";
@@ -36,7 +37,8 @@ import {
  *  3. purge memory (D24, KOBE-188): superseded versions and files deleted longer ago than the
  *     team's window, never a live file (needs object storage);
  *  4. compact the live events of runs that ended more than 7 days ago;
- *  5. delete the object-store keys purges released.
+ *  5. delete the object-store keys purges released;
+ *  6. sweep orphaned upload staging objects and fork-copied entry bodies (KOBE-189).
  * Every step skips data under legal hold and is audited with counts only (system actor).
  *
  * Every server replica runs the timer; a session-level advisory lock on a dedicated connection
@@ -65,6 +67,8 @@ export interface TeamPassResult {
   readonly blobs: BlobDeletionCounts;
   /** Uploads without a thread deleted after the orphan window (KOBE-143). */
   readonly uploads: ExpiredUploads;
+  /** Orphaned staging and fork objects deleted (KOBE-189). */
+  readonly orphans: OrphanCounts;
   /** A step failed (logged); the others still ran. */
   readonly failed: boolean;
 }
@@ -81,6 +85,8 @@ export interface PassDeps {
   readonly blobs?: BlobStore | undefined;
   /** Hours before an upload without a thread is deleted (KOBE-143); default 24. */
   readonly uploadOrphanHours?: number;
+  /** Age before an orphaned staging or fork object is swept (KOBE-189); default 24 h. */
+  readonly orphanGraceMs?: number;
   readonly logger: Logger;
 }
 
@@ -230,7 +236,17 @@ async function teamPass(
           ),
         )
       : { files: 0, bytes: 0 };
-  return { teamId, trash, retention, memory, compacted, blobs, uploads, failed };
+  const orphans =
+    deps.blobs && !stop()
+      ? await step("orphans", NO_ORPHANS, () =>
+          sweepOrphanObjects(db, teamId, deps.blobs as BlobStore, {
+            stop,
+            ...(deps.orphanGraceMs === undefined ? {} : { graceMs: deps.orphanGraceMs }),
+          }),
+        )
+      : NO_ORPHANS;
+  if (orphans.staging + orphans.forks > 0) logger.info({ teamId, ...orphans }, "orphans swept");
+  return { teamId, trash, retention, memory, compacted, blobs, uploads, orphans, failed };
 }
 
 export interface PassOptions {

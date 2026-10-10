@@ -192,6 +192,9 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
       () => false,
     );
     if (sent) session.attachments.sent(draft);
+    // The thread exists but the message did not go: the composer is on that thread now, so the
+    // files follow it instead of staying under the abandoned "new" draft (KOBE-194).
+    else if (created) session.attachments.move(draft, threadId);
     if (created) session.threadCreated();
     return sent;
   };

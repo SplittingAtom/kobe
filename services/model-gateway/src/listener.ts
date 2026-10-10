@@ -1,6 +1,7 @@
 import {
   MODELS_BUDGETS_PREFIX,
   MODELS_CHANNEL,
+  MODELS_CONFIG_CHANGED,
   MODELS_KEYS_PREFIX,
   MODELS_SPEND_PREFIX,
 } from "@kobe/db";
@@ -22,7 +23,10 @@ function drop(cache: TeamCache, teamId: string): void {
 }
 
 /**
- * Applies one `kobe_models` hint: `keys:<team>` drops that team's principals; `spend:<team>` and
+ * Applies one `kobe_models` hint: `keys:<team>` drops that team's principals; `config` (a provider,
+ * the catalog or a team's enablement changed) drops every principal, because each carries the
+ * team's enabled models and an enable must hold at once (KOBE-168: a run started right after an
+ * enable failed `model_not_enabled` from a copy up to the cache TTL old); `spend:<team>` and
  * `budgets:<team|*>` (KOBE-42) drop its budget states.
  */
 export function applyModelsHint(
@@ -30,6 +34,7 @@ export function applyModelsHint(
   payload: string | undefined,
   budgets?: TeamCache,
 ): void {
+  if (payload === MODELS_CONFIG_CHANGED) cache.invalidateAll();
   if (payload?.startsWith(MODELS_KEYS_PREFIX))
     drop(cache, payload.slice(MODELS_KEYS_PREFIX.length));
   if (!budgets || !payload) return;

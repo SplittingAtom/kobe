@@ -3,6 +3,7 @@ import { chmod, lstat, mkdir, open, readdir, realpath, rm } from "node:fs/promis
 import path from "node:path";
 import { GUARDED_CONFIG } from "./agent-config.js";
 import { EGRESS_TOKEN_FILE_NAME, isEgressTemp } from "../egress/egress-wiring.js";
+import { MEMORY_FILE_NAME, isMemoryTemp } from "../memory/context-file.js";
 import { SYSTEM_PROMPT_FILE_NAME } from "../pi/system-prompt-file.js";
 import type { PiIdentities } from "../pi/identities.js";
 
@@ -55,7 +56,11 @@ async function kindOf(file: string): Promise<Kind> {
  * directories; `agent` itself must be a real directory. An expected entry that vanished between
  * `readdir` and `lstat` (the agent's temp file renamed into place, a lock Pi released) is fine.
  */
-export async function unexpectedEntries(runtimeDir: string): Promise<string[]> {
+export async function unexpectedEntries(
+  runtimeDir: string,
+  /** Extra regular files the agent placed in `agent/` for this process (KOBE-111: `mcp.json`). */
+  extraAgentFiles: ReadonlySet<string> = new Set(),
+): Promise<string[]> {
   const found: string[] = [];
   const top = await readdir(runtimeDir).catch(() => undefined);
   if (top === undefined) return ["<runtime dir missing>"];
@@ -68,6 +73,8 @@ export async function unexpectedEntries(runtimeDir: string): Promise<string[]> {
       isModelTemp(name) ||
       name === EGRESS_TOKEN_FILE_NAME ||
       name === SYSTEM_PROMPT_FILE_NAME ||
+      name === MEMORY_FILE_NAME ||
+      isMemoryTemp(name) ||
       isEgressTemp(name)
     ) {
       if (kind !== "file" && kind !== "missing") found.push(`${name} (${kind})`);
@@ -82,7 +89,7 @@ export async function unexpectedEntries(runtimeDir: string): Promise<string[]> {
     // The guarded files must be there as files; their content is `tamperedConfig`'s business.
     const expected: Kind | undefined = PI_LOCK_DIRS.has(name)
       ? "dir"
-      : PI_OWN_FILES.has(name) || name in GUARDED_CONFIG
+      : PI_OWN_FILES.has(name) || name in GUARDED_CONFIG || extraAgentFiles.has(name)
         ? "file"
         : undefined;
     if (expected === undefined) found.push(`${AGENT_SUBDIR}/${name}`);

@@ -194,6 +194,8 @@ existing Secret, unless explicitly allowed for throwaway environments (dev, CI).
   value: {{ .Values.s3.bucket | quote }}
 - name: KOBE_S3_FORCE_PATH_STYLE
   value: {{ .Values.s3.forcePathStyle | quote }}
+- name: KOBE_S3_PREFIX
+  value: {{ .Values.s3.prefix | default "" | quote }}
 - name: KOBE_S3_ACCESS_KEY_ID
   valueFrom:
     secretKeyRef:

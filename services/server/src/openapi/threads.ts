@@ -278,7 +278,10 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
           "201": json("CreatedThread", "The new thread."),
           "404": notFound,
           ...ERROR_RESPONSES,
-          "409": json("Error", "`thread_in_trash` or `entry_offloaded`."),
+          "409": json(
+            "Error",
+            "`thread_in_trash`, or `entry_offloaded` (an offloaded body that cannot be copied: no object storage, or not in the source thread's tree).",
+          ),
         },
       },
     },

@@ -15,6 +15,9 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
  *
  * `tool: <name> <JSON>` is answered with a call of that tool (e.g. `create_artifact`, KOBE-131).
  *
+ * Tool list echo (OpenAI chat API only, KOBE-158 e2e): a last user message `tools?` is answered with
+ * `fake-openai: tools said: <the names of the tools the request offers, comma separated>`.
+ *
  * System prompt echo (OpenAI chat API only, KOBE-89 e2e): a last user message `system?` is answered
  * with `fake-openai: system said: <the system/developer messages, one line>`, so a test can see
  * what agent prompt reached the model.
@@ -65,6 +68,20 @@ export function parseToolPrompt(
   }
 }
 const SYSTEM_ECHO = "system?";
+const TOOLS_ECHO = "tools?";
+
+/** The names of the tools a chat request offers (`tools[].function.name`), sorted. */
+export function toolNames(body: unknown): string[] {
+  const tools = ((body ?? {}) as Record<string, unknown>).tools;
+  if (!Array.isArray(tools)) return [];
+  return tools
+    .map(
+      (t) =>
+        ((t as Record<string, unknown>)?.function as Record<string, unknown> | undefined)?.name,
+    )
+    .filter((n): n is string => typeof n === "string")
+    .sort();
+}
 const SYSTEM_ECHO_MAX = 40_000;
 const TOOL_ECHO_MAX = 600;
 
@@ -368,6 +385,8 @@ export function createFakeLlm(seen: SeenRequest[] = []): Server {
       else if (toolStep) openai(res, "fake-openai: tool step done", stream, model);
       else if (toolResult !== undefined) {
         openai(res, `fake-openai: tool said: ${toolResult}`, stream, model);
+      } else if (text === TOOLS_ECHO) {
+        openai(res, `fake-openai: tools said: ${toolNames(body).join(",")}`, stream, model);
       } else if (text === SYSTEM_ECHO) {
         openai(res, `fake-openai: system said: ${systemText(body)}`, stream, model);
       } else if (text.startsWith(BASH_PREFIX)) {

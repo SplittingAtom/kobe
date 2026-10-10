@@ -9,6 +9,7 @@ import type {
   PolicyDecision,
   PolicyReason,
   RunProjectContext,
+  RunMcpContext,
   RunStatus,
   SandboxAttachment,
   SessionTokenClaims,
@@ -50,10 +51,13 @@ export interface WakeContext {
   readonly runId?: string;
 }
 
-/** A wake that cannot succeed by waiting: no verified isolation runtime, an offboarded sandbox. */
+/**
+ * A wake that cannot succeed by waiting: no verified isolation runtime, an offboarded sandbox, a
+ * pod that is not Ready within the wake timeout (`workspace_unavailable`, KOBE-192).
+ */
 export class SandboxWakeError extends Error {
   constructor(
-    readonly code: "isolation_runtime_missing" | "sandbox_unavailable",
+    readonly code: "isolation_runtime_missing" | "sandbox_unavailable" | "workspace_unavailable",
     message: string,
   ) {
     super(message);
@@ -84,6 +88,8 @@ export interface RunStartRequest {
   readonly config?: PiThreadConfig;
   /** Project instructions (KOBE-161); dropped for agents without the `projects` capability. */
   readonly project?: RunProjectContext;
+  /** Effective MCP connectors (KOBE-111); dropped for agents without the `mcp` capability. */
+  readonly mcp?: RunMcpContext;
 }
 
 export interface RunSteerRequest {

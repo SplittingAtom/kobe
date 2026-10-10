@@ -43,6 +43,8 @@ export interface ChipFile {
   readonly name: string;
   readonly mimeType: string;
   readonly size?: number | undefined;
+  /** Sandbox path of an upload, to look its size and thumbnail up after a reload (KOBE-194). */
+  readonly path?: string | undefined;
   readonly previewUrl?: string | undefined;
 }
 

@@ -6,7 +6,9 @@
 import type { ApiResult } from "../api/client";
 import type { TeamModels } from "../admin/api/team/models";
 import type { ChatApi } from "./api";
+import { createFilesApi } from "../files/api";
 import { AttachmentStore } from "./attachments";
+import { SentFileCache } from "./sent-files";
 import { xhrUploadTransport, type UploadTransport } from "./uploads";
 import type { EventSourceFactory } from "./stream";
 import { ThreadController } from "./thread-controller";
@@ -20,6 +22,8 @@ export interface ChatSessionOptions {
   readonly reopenDelayMs?: ((attempt: number) => number) | undefined;
   /** Builder test pane (KOBE-85): new threads are test threads on this agent's draft. */
   readonly testAgentId?: string | undefined;
+  /** Tests replace the files API behind the chips of sent messages (KOBE-194). */
+  readonly fetchFn?: typeof fetch | undefined;
   /** Tests replace the XHR upload transport (KOBE-145). */
   readonly uploadTransport?: UploadTransport | undefined;
 }
@@ -55,6 +59,8 @@ export class ChatSession {
   readonly api: ChatApi;
   /** Files attached to the composer drafts of this tab (KOBE-145). */
   readonly attachments: AttachmentStore;
+  /** Size and thumbnail lookups for the chips of sent messages after a reload (KOBE-194). */
+  readonly sentFiles: SentFileCache;
   /** Set for the builder's test pane: threads it creates run this agent's unpublished draft. */
   get testAgentId(): string | undefined {
     return this.#options.testAgentId;
@@ -89,6 +95,7 @@ export class ChatSession {
       teamId: options.teamId,
       transport: options.uploadTransport ?? xhrUploadTransport,
     });
+    this.sentFiles = new SentFileCache(createFilesApi(options.teamId, options.fetchFn));
     this.#options = options;
   }
 
@@ -243,6 +250,7 @@ export class ChatSession {
 
   dispose(): void {
     this.attachments.dispose();
+    this.sentFiles.dispose();
     for (const held of this.#held.values()) held.controller.dispose();
     this.#held.clear();
   }

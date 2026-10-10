@@ -7,7 +7,8 @@
 # publish.yml fills on main) and shared as artifacts. The suite then runs as parallel shards, each
 # on its own fresh cluster: `suite` (every e2e/run.sh section but the KOBE-25 cold-start trials),
 # `cold-start` (the sections up to KOBE-25, with its trials), `gate1` (the install plus the
-# KOBE-40 model setup, then e2e/gate1.sh) and `gate2` (the same install, then e2e/gate2.sh).
+# KOBE-40 model setup, then e2e/gate1.sh), `gate2` (the same install, then e2e/gate2.sh) and
+# `executor` (KOBE-168: the `suite` sections with the paired tool uid on, plus e2e/executor/).
 # Branch protection and the merge queue require the check named `k3d`: the last job, which passes
 # only when every image build and every shard passed.
 name: e2e
@@ -72,7 +73,7 @@ jobs:
     name: image (${{ matrix.name }})
     needs: changes
     if: needs.changes.outputs.code == 'true' && needs.changes.outputs.ready == 'true'
-    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-latest') || vars.KOBE_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-latest') || vars.KOBE_BUILD_RUNNER || vars.KOBE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     strategy:
       fail-fast: true
@@ -156,7 +157,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [suite, cold-start, gate1, gate2]
+        shard: [suite, cold-start, gate1, gate2, executor]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -227,6 +228,10 @@ jobs:
         run: |
           case "${SHARD}" in
             suite | cold-start) KOBE_E2E_SHARD="${SHARD}" e2e/run.sh ;;
+            # KOBE-168: the whole `suite` with sandbox.toolExecutor.enabled=true (Pi's tools in the
+            # paired-uid executor), plus the isolation, cold-start and workspace-sync checks of
+            # e2e/executor/. The chart default stays false; this proves it ready.
+            executor) KOBE_E2E_SHARD=suite KOBE_E2E_TOOL_EXECUTOR=1 e2e/run.sh ;;
             # Gate 1 (KOBE-1) against a fresh install with the model setup it needs: two teams ×
             # five users, refresh mid-run, live cross-team probe, kill mid-run + Retry, 20
             # cold-start trials (docs/gates/gate-1.md).

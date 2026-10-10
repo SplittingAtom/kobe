@@ -1,11 +1,29 @@
-import { lstat, mkdir, mkdtemp, rm, stat, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { conflictCopyName, lockServerOwned, renameWithin, truncateUtf8 } from "./fs.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  conflictCopyName,
+  ensureParents,
+  lockServerOwned,
+  renameWithin,
+  truncateUtf8,
+} from "./fs.js";
 
 const dirs: string[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const d of dirs.splice(0)) await rm(d, { recursive: true, force: true });
 });
 async function dir(): Promise<string> {
@@ -43,5 +61,56 @@ describe("workspace fs helpers", () => {
     await symlink(outside, path.join(root, "out"));
     await expect(renameWithin(root, "a/f", "out/f")).rejects.toThrow(/link/);
     expect((await lstat(path.join(root, "a/f"))).isFile()).toBe(true);
+  });
+
+  it("never leaves a directory of a read-only area group-writable, not even while it is filled (KOBE-162)", async () => {
+    const root = await dir();
+    await ensureParents(root, "projects/acme/docs/a.md");
+    for (const rel of ["projects", "projects/acme", "projects/acme/docs"]) {
+      // Owner-only write: a Pi or tool uid holds the workspace group, so a group bit would be a hole.
+      expect((await stat(path.join(root, rel))).mode & 0o022, rel).toBe(0);
+    }
+    // Sandbox-owned folders stay shared (D13).
+    await ensureParents(root, "mine/x.txt");
+    expect((await stat(path.join(root, "mine"))).mode & 0o020).not.toBe(0);
+  });
+
+  it("moves a read-only area root another uid put in its place out of the way (KOBE-162)", async () => {
+    const root = await dir();
+    await mkdir(path.join(root, "projects/acme"), { recursive: true });
+    await writeFile(path.join(root, "projects/acme/fake.md"), "planted");
+    // A tool renamed the real folder and made its own: it is not owned by the agent's uid.
+    const real = process.getuid?.() ?? 0;
+    vi.spyOn(process, "getuid").mockReturnValue(real + 1);
+    await ensureParents(root, "projects/acme/brief.md");
+    vi.restoreAllMocks();
+    const names = (await readdir(root)).sort();
+    expect(names).toHaveLength(2);
+    const aside = names.find((n) => n !== "projects") ?? "";
+    expect(aside).toMatch(/^projects\.replaced-/);
+    expect(await readFile(path.join(root, aside, "acme/fake.md"), "utf8")).toBe("planted");
+    expect(await readdir(path.join(root, "projects/acme"))).toEqual([]);
+  });
+
+  it("moves a symlink put in place of projects/ aside and never chmods or writes through it (KOBE-162)", async () => {
+    const root = await dir();
+    const target = await dir();
+    await mkdir(path.join(target, "acme"));
+    await writeFile(path.join(target, "secret"), "x", { mode: 0o600 });
+    await chmod(target, 0o700);
+    await chmod(path.join(target, "acme"), 0o700);
+    await symlink(target, path.join(root, "projects"));
+    await ensureParents(root, "projects/acme/brief.md");
+    await lockServerOwned(root, ["projects/"]);
+    expect((await stat(target)).mode & 0o777).toBe(0o700);
+    expect((await stat(path.join(target, "acme"))).mode & 0o777).toBe(0o700);
+    expect((await stat(path.join(target, "secret"))).mode & 0o777).toBe(0o600);
+    expect(await readdir(target)).toEqual(["acme", "secret"]);
+    expect((await lstat(path.join(root, "projects"))).isDirectory()).toBe(true);
+    const aside = (await readdir(root)).find((n) => n.startsWith("projects.replaced-")) ?? "";
+    expect((await lstat(path.join(root, aside))).isSymbolicLink()).toBe(true);
+    // Locked read-only: make it removable for the cleanup.
+    await chmod(path.join(root, "projects/acme"), 0o755);
+    await chmod(path.join(root, "projects"), 0o755);
   });
 });

@@ -152,6 +152,35 @@ export const FILE_SHARE_REFUSALS = [
   "scan_rejected",
 ] as const;
 
+/** Why the server refused a `memory.put` / `memory.read` (audit `sandbox.memory_refused`, KOBE-156). */
+export const MEMORY_REFUSALS = [
+  "capability_missing",
+  "run_not_active",
+  "not_allowed",
+  "input_mismatch",
+  "memory_disabled",
+  "no_project",
+  "not_a_member",
+  "approval_denied",
+] as const;
+
+/** Why the server refused a `project.file_propose` (audit `sandbox.project_file_refused`, KOBE-162). */
+export const PROJECT_FILE_REFUSALS = [
+  "capability_missing",
+  "run_not_active",
+  "not_allowed",
+  "input_mismatch",
+  "no_project",
+  "not_a_member",
+  "path_mismatch",
+  "not_synced",
+  "not_found",
+  "too_large",
+  "quota_exceeded",
+  "already_exists",
+  "approval_denied",
+] as const;
+
 /** Why the server refused a `web_search.query` (audit `sandbox.web_search_refused`, KOBE-114). */
 export const WEB_SEARCH_REFUSALS = [
   "capability_missing",
@@ -347,6 +376,22 @@ export const AUDIT_EVENTS = {
    * with the current pod template (system actor, or the user whose request woke it).
    */
   "sandbox.woken": event("team", { sandboxId: id, userId: id }),
+  /**
+   * A woken sandbox was not Ready within the wake timeout and its run failed
+   * `workspace_unavailable` (KOBE-192; system actor). Install scope: `detail` is the cluster's own
+   * reason (events, volume phase) and may name nodes and volumes, so team members never see it.
+   */
+  "sandbox.wake_stalled": event("install", {
+    teamId: id,
+    sandboxId: id,
+    userId: id,
+    cause: z.enum(["volume_unschedulable", "volume_attach", "scheduling", "image_pull", "unknown"]),
+    detail: z
+      .string()
+      .max(600)
+      // eslint-disable-next-line no-control-regex
+      .regex(/^[^\u0000-\u001f\u007f]*$/),
+  }),
 
   // ── egress: ceiling (install), enablement (team), connections (team; KOBE-38, D28) ──
   "egress.ceiling.added": event("install", { domain: egressDomain }),
@@ -589,6 +634,14 @@ export const AUDIT_EVENTS = {
     role: z.enum(["owner", "member"]),
   }),
   "project.member_removed": event("team", { projectId: id, userId: id }),
+  /** A file joined the project (KOBE-162); `source` says whether a person uploaded it or an approved agent proposal added it. Never names or content. */
+  "project.file_added": event("team", {
+    projectId: id,
+    fileId: id,
+    source: z.enum(["upload", "proposal"]),
+    sizeBytes: z.number().int().nonnegative(),
+  }),
+  "project.file_removed": event("team", { projectId: id, fileId: id }),
   "project.member_role_changed": event("team", {
     projectId: id,
     userId: id,
@@ -822,7 +875,7 @@ export const AUDIT_EVENTS = {
     runId: id,
     toolCallId,
     tool: toolName,
-    enforcementPoint: z.enum(["mcp_proxy"]),
+    enforcementPoint: z.enum(["mcp_proxy", "server"]),
   }),
   /**
    * A call needing approval was refused before it could be used: at the MCP proxy (missing,
@@ -896,6 +949,21 @@ export const AUDIT_EVENTS = {
   }),
 
   /**
+   * The server refused a `project.file_propose` (KOBE-162): no `projects` capability, a run not
+   * active here, a `propose_project_file` call it did not allow (or other input), a thread outside
+   * a project, a user who is not a project member, a workspace entry that does not match the push,
+   * a size / quota / duplicate refusal, or an approval that was denied or lapsed. Never records
+   * names, paths or content (system; at most one per 5 minutes per reason and user).
+   */
+  "sandbox.project_file_refused": event("team", {
+    sandboxId: id,
+    userId: id,
+    reason: z.enum(PROJECT_FILE_REFUSALS),
+    runId: id.optional(),
+    toolCallId: toolCallId.optional(),
+  }),
+
+  /**
    * The server refused a `web_search.query` (KOBE-114): no `web_search` capability, a run not
    * active here, or a tool call it did not allow (or other input). Never records the query (system;
    * at most one per 5 minutes per reason and user).
@@ -918,6 +986,23 @@ export const AUDIT_EVENTS = {
     runId: id,
     toolCallId,
     provider: z.enum(["brave", "tavily", "exa"]),
+  }),
+
+  /**
+   * The server refused a `memory.put` or `memory.read` (KOBE-156): no `memory` capability, a run
+   * not active here, a `remember` call it did not allow (or other input), a disabled scope, a
+   * thread outside a project, a user who is not a project member, or a project write whose
+   * approval was denied or lapsed. Never records paths or content (system; at most one per 5
+   * minutes per reason and user).
+   */
+  "sandbox.memory_refused": event("team", {
+    sandboxId: id,
+    userId: id,
+    op: z.enum(["put", "read"]),
+    reason: z.enum(MEMORY_REFUSALS),
+    scope: z.enum(["user", "project"]).optional(),
+    runId: id.optional(),
+    toolCallId: toolCallId.optional(),
   }),
 
   // ── workspace: the durable S3 copy of each sandbox's /workspace (KOBE-27, D12, D15, D26) ──
@@ -1184,7 +1269,13 @@ export const AUDIT_EVENTS = {
   "mcp.grant.refused": event("team", {
     connectorId: id,
     name: z.string().max(64),
-    reason: z.enum(["resource_mismatch"]),
+    reason: z.enum(["resource_mismatch", "user_inactive"]),
+  }),
+  /** An OAuth refresh failed for good (KOBE-110): the grant was dropped and the user must reconnect. */
+  "mcp.grant.refresh_failed": event("team", {
+    connectorId: id,
+    name: z.string().max(64),
+    reason: z.enum(["rejected", "no_refresh_token"]),
   }),
   // ── web search (KOBE-113): provider and switches only, never the key or its hint ──
   /** An install admin set the web search provider, its enabled switch, or replaced its key. */

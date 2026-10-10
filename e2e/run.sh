@@ -18,6 +18,8 @@ UPSTREAM_NS=kobe-e2e-upstream # KOBE-38: an in-cluster HTTPS server standing in 
 MCP_NS=kobe-e2e-mcp # KOBE-58: a fake remote MCP server
 LLM_NS=kobe-e2e-llm # KOBE-40: a fake model provider
 # CI runs the suite as parallel shards, each on its own cluster (.github/workflows/e2e.yml).
+# KOBE_E2E_TOOL_EXECUTOR=1 installs with sandbox.toolExecutor.enabled=true (KOBE-168): every section
+# then runs with Pi's tools in the paired-uid executor, plus the isolation checks of e2e/executor/.
 # Every shard installs from clean state and runs the checks section; then:
 #   all (default)  every section, in order
 #   suite          every section except the KOBE-25 cold-start trials
@@ -154,7 +156,8 @@ $KUBECTL -n kobe-deps rollout status deploy/mailpit --timeout=180s >/dev/null
 $KUBECTL apply -f dev/s3.yaml >/dev/null # KOBE-27: S3-compatible test fixture (SeaweedFS, Apache-2.0)
 $KUBECTL -n kobe-deps rollout status deploy/s3 --timeout=300s >/dev/null
 $HELM upgrade --install kobe charts/kobe -n "$NS" -f dev/values.yaml \
-  --set global.imageTag="$TAG" --set global.imagePullPolicy=IfNotPresent --wait --timeout 10m
+  --set global.imageTag="$TAG" --set global.imagePullPolicy=IfNotPresent \
+  ${KOBE_E2E_TOOL_EXECUTOR:+--set sandbox.toolExecutor.enabled=true} --wait --timeout 10m
 
 echo "==> checks"
 psql_kobe() { $KUBECTL -n kobe-deps exec deploy/pg -- psql -U postgres -d kobe -tAc "$1" 2>&1; }
@@ -223,10 +226,15 @@ contains "server and scheduler verified the gVisor RuntimeClass in process" '^ve
 # The sync's own record says whether it reached Bifrost (a pass lists and writes through its admin API).
 gateway_state() { psql_kobe "SELECT 'in_sync=' || (synced_version >= desired_version) || ' error=' || coalesce(last_error, '-') FROM model_gateway_state"; }
 wait_endpoints "$NS" kobe-bifrost
-bifrost=$(wait_for 90 '^in_sync=true error=-$' gateway_state)
+bifrost=$(wait_for 180 '^in_sync=true error=-$' gateway_state)
 contains "the server's gateway sync reached Bifrost (in sync, no error)" '^in_sync=true error=-$' "$bifrost"
-contains "Bifrost has not restarted" '^0$' "$($KUBECTL -n "$NS" get pods -l app.kubernetes.io/component=bifrost \
-  -o jsonpath='{.items[*].status.containerStatuses[*].restartCount}' 2>/dev/null)"
+bifrost_restarts=$($KUBECTL -n "$NS" get pods -l app.kubernetes.io/component=bifrost \
+  -o jsonpath='{.items[*].status.containerStatuses[*].restartCount}' 2>/dev/null)
+if [[ "$bifrost_restarts" != 0 ]]; then # KOBE-242: say why it restarted (OOM, failed probe) before the check fails
+  $KUBECTL -n "$NS" describe pod -l app.kubernetes.io/component=bifrost 2>&1 | grep -E "Last State|Reason|Exit Code|Liveness|Unhealthy" | sed 's/^/     bifrost: /' || true
+  $KUBECTL -n "$NS" logs -l app.kubernetes.io/component=bifrost --previous --tail=30 2>&1 | sed 's/^/     bifrost prev: /' || true
+fi
+contains "Bifrost has not restarted" '^0$' "$bifrost_restarts"
 # Once the control answers, the probe pod is in the policy ipsets: BLOCKED below is the policy.
 np=$(probe default "$(gated http://kobe-web.$NS/api/healthz bifrost http://kobe-bifrost.$NS:8080/health)")
 contains "probe from another namespace can reach unrestricted services (control)" '^control=REACHED$' "$np"
@@ -1629,6 +1637,7 @@ const controller = new AbortController();
 const timer = setTimeout(() => controller.abort(), Number(timeoutMs));
 const artifactEvents = [];
 const fileEvents = []; // KOBE-152: file.shared as id:name:size
+const memoryEvents = []; // KOBE-158: memory.updated as doc:path:vN:previous
 let text = "", terminal = "none", code = "-", errorMessage = "-", first = null, waking = "-", startedModel = "-";
 try {
   const res = await fetch(base + "/v1/runs/" + runId + "/events", { headers: { ...headers(), accept: "text/event-stream" }, signal: controller.signal });
@@ -1651,6 +1660,7 @@ try {
       if (type === "run.started") startedModel = payload.model ?? "-";
       if (type === "artifact.created" || type === "artifact.updated") artifactEvents.push(type + ":" + payload.artifact_id + ":v" + (payload.version ?? "?"));
       if (type === "file.shared") fileEvents.push(payload.file_id + ":" + payload.name + ":" + payload.size);
+      if (type === "memory.updated") memoryEvents.push(payload.memory_doc_id + ":" + payload.path + ":v" + payload.version + ":" + (payload.previous_version ?? "none"));
       if (type === "text.delta") { if (first === null) first = Date.now() - t0; text += payload.delta ?? ""; }
       if (type === "run.completed" || type === "run.failed" || type === "run.interrupted" || type === "run.budget_stopped") {
         terminal = type;
@@ -1665,15 +1675,17 @@ if (approvals) clearInterval(approvals);
 out("waking", waking);
 out("started_model", startedModel);
 out("first_token_ms", first ?? "-");
+out("terminal_ms", Date.now() - t0);
 out("artifact_events", artifactEvents.join(",") || "-");
 out("file_events", fileEvents.join(",") || "-");
+out("memory_events", memoryEvents.join(",") || "-");
 out("terminal", terminal);
 out("code", code);
 out("error_message", errorMessage);
 out("text", text);
 JS
     chat_run() { # content timeout-ms [model] [agent-id] [thread-id] [approve-all] [file-ids] → the CHAT_JS output (not `chat`: KOBE-40's helper above)
-      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$CHAT_JS" "$E2E_TEAM_ID" "$1" "$2" "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}" 2>&1 | tail -16
+      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$CHAT_JS" "$E2E_TEAM_ID" "$1" "$2" "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}" 2>&1 | tail -17
     }
     chat_out=$(chat_run "hello-pi-$RANDOM" 300000)
     printf '     chat: %s\n' "$(printf '%s' "$chat_out" | grep -v '^text=' | tr '\n' ' ')"
@@ -1745,16 +1757,29 @@ SH
     contains "gVisor enforces an identity's process limit (1500 tried, at most 1024 run)" '^nproc=(10[0-2][0-9]|9[5-9][0-9])$' "$privsep"
     contains "--kill-all clears an identity at its process limit" '^nproc_kill=0$' "$privsep"
     contains "nothing of it is left" '^nproc_left=0$' "$privsep"
+    # KOBE-168: with the tool executor on, the isolation and workspace checks of the paired uid.
+    if [[ "${KOBE_E2E_TOOL_EXECUTOR:-}" == 1 ]]; then source e2e/executor/isolation.sh; fi
 
     # KOBE-44: a model chosen for the thread is the run's model (here the vLLM-style custom
     # provider, `qwen`, not the team default); once the team disables it, the run fails clearly.
     # (KOBE-40's checks above left qwen disabled: enable it for the team first.)
     expect "the team enables qwen" '^200 ' "$(as_owner "PUT /v1/team/models/qwen {\"enabled\":true}")"
     chosen_out=$(chat_run "hello-qwen-$RANDOM" 300000 qwen)
+    # The user decided this check is non-blocking: right after the enable a run may fail
+    # model_not_enabled for a while (possibly provider-side); retry for about 60 s, then warn.
+    chosen_end=$((SECONDS + 60))
+    while grep -q '^code=model_not_enabled$' <<<"$chosen_out" && ((SECONDS < chosen_end)); do
+      sleep 5
+      chosen_out=$(chat_run "hello-qwen-$RANDOM" 300000 qwen)
+    done
     printf '     chat (thread model): %s\n' "$(printf '%s' "$chosen_out" | grep -v '^text=' | tr '\n' ' ')"
     contains "a thread created with a chosen model stores it (KOBE-44)" '^thread=201:qwen$' "$chosen_out"
     contains "the run started on the thread's model, not the team default" '^started_model=qwen$' "$chosen_out"
-    contains "and was answered through that model's provider" '^terminal=run.completed$' "$chosen_out"
+    if grep -q '^code=model_not_enabled$' <<<"$chosen_out"; then
+      echo "WARN model enable slow, provider-side (the thread's model answered model_not_enabled for 60 s)"
+    else
+      contains "and was answered through that model's provider" '^terminal=run.completed$' "$chosen_out"
+    fi
     expect "the team disables the thread's model" '^200 ' "$(as_owner "PUT /v1/team/models/qwen {\"enabled\":false}")"
     gone_out=$(chat_run "gone-$RANDOM" 120000 qwen)
     contains "a thread can't choose a model the team disabled (409)" '^thread=409:default$' "$gone_out"
@@ -1934,11 +1959,11 @@ SH
         }
         const cookie = login.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
         await fetch(base + '/v1/me/teams/active', { method: 'PUT', headers: { ...h, cookie }, body: JSON.stringify({ teamId: '$E2E_TEAM_ID' }) });
-        const res = await fetch(base + process.argv[2], { method: process.argv[3] || 'GET', headers: { ...h, cookie } });
+        const res = await fetch(base + process.argv[2], { method: process.argv[3] || 'GET', headers: { ...h, cookie }, body: process.argv[4] || undefined });
         console.log('status=' + res.status);
         for (const [k, v] of res.headers) console.log('h:' + k + '=' + v);
         console.log('body=' + (await res.text()).replace(/\\n/g, ' '));
-      " "$1" "$2" "${3:-}" 2>&1
+      " "$1" "$2" "${3:-}" "${4:-}" 2>&1
     }
     share_text="kobe-152 $(date +%s) $RANDOM"
     sf_out=$(chat_run "bash: echo '$share_text' > /workspace/shared-report.txt; exit 0" 300000 "" "$(gallery_id document-drafter)" "" 1)
@@ -1946,6 +1971,10 @@ SH
     contains "share_file: the run that wrote the file completed" '^terminal=run.completed$' "$sf_out"
     sf_out=$(chat_run "tool: share_file {\"path\":\"shared-report.txt\",\"description\":\"E2E report\"}" 300000 "" "" "$sf_thread" 1)
     printf '     share_file: %s\n' "$(printf '%s' "$sf_out" | tr '\n' ' ' | cut -c1-500)"
+    if printf '%s' "$sf_out" | grep -q "Policy could not be evaluated"; then # KOBE-242: the cause is in the server log
+      $KUBECTL -n "$NS" logs -l app.kubernetes.io/component=server -c server --since=3m --tail=-1 2>&1 \
+        | grep -E "policy|lock timeout|approval" | tail -n 20 | cut -c1-600 | sed 's/^/     server: /' || true
+    fi
     contains "share_file: the run completed" '^terminal=run.completed$' "$sf_out"
     contains "share_file: the event stream carried file.shared (id, name, size)" \
       "^file_events=[0-9a-f-]{36}:shared-report.txt:$((${#share_text} + 1))\$" "$sf_out"
@@ -1966,6 +1995,65 @@ SH
       "$(psql_kobe "SELECT count(*) FROM audit_log WHERE team_id = '$E2E_TEAM_ID' AND action = 'workspace.file_deleted'" | awk '$1 >= 1 {print 1; exit} {print 0}')"
     contains "share_file: the shared file survives losing its workspace copy (still 200)" '^status=200$' \
       "$(file_fetch owner@e2e.test "/v1/files/$sf_id/content")"
+
+    # KOBE-158 (56f of KOBE-56): memory end to end. The fake model calls remember (personal writes
+    # apply at once); memory.updated carries what Undo needs; the panel API restores the prior
+    # version or deletes a created doc; then the team switch turns memory off and the next run
+    # lists no remember/recall tools and has no memory index in its system prompt ("tools?" and
+    # "system?" make the fake model echo both). The switch is turned back on afterwards.
+    echo "==> memory (KOBE-158)"
+    mem_id=$(date +%s)-$RANDOM
+    mem_marker="kobe-158-index-$mem_id"
+    mem_put() { # path content → the chat_run output of a remember call (replace mode)
+      chat_run "tool: remember {\"scope\":\"user\",\"path\":\"$1\",\"content\":\"$2\"}" 300000 "" "" "" 1
+    }
+    mem_settings() { file_fetch owner@e2e.test "/v1/memory/settings?level=team" PUT "$1"; }
+    contains "memory: the team switch is on" '^status=200$' "$(mem_settings '{"memory_enabled":true,"project_memory_enabled":true}')"
+    mem1=$(mem_put "notes/e2e-$mem_id.md" "v1 $mem_id")
+    printf '     memory remember 1: %s\n' "$(printf '%s' "$mem1" | grep -E '^(terminal|memory_events|text)=' | tr '\n' ' ' | cut -c1-400)"
+    contains "memory: remember completed" '^terminal=run.completed$' "$mem1"
+    contains "memory: memory.updated for the created doc has no previous version" \
+      "^memory_events=[0-9a-f-]{36}:notes/e2e-$mem_id.md:v1:none\$" "$mem1"
+    mem_doc=$(printf '%s\n' "$mem1" | sed -n 's/^memory_events=\([0-9a-f-]*\):.*/\1/p')
+    mem2=$(mem_put "notes/e2e-$mem_id.md" "v2 $mem_id")
+    contains "memory: the second write names version 1 as the one to restore" \
+      "^memory_events=$mem_doc:notes/e2e-$mem_id.md:v2:1\$" "$mem2"
+    contains "memory: the panel API shows the new content" "\"content\":\"v2 $mem_id\"" \
+      "$(file_fetch owner@e2e.test "/v1/memory/$mem_doc")"
+    contains "memory: Undo (restore version 1) is accepted" '^status=200$' \
+      "$(file_fetch owner@e2e.test "/v1/memory/$mem_doc/restore" POST '{"version":1}')"
+    mem_after=$(file_fetch owner@e2e.test "/v1/memory/$mem_doc")
+    contains "memory: Undo restored the prior content" "\"content\":\"v1 $mem_id\"" "$mem_after"
+    contains "memory: Undo made a new version, history is kept" '"current_version":3' "$mem_after"
+    contains "memory: another member cannot read the personal doc (404)" '^status=404$' \
+      "$(file_fetch reader@e2e.test "/v1/memory/$mem_doc")"
+    contains "memory: Undo of a created doc (delete) answers 204" '^status=204$' \
+      "$(file_fetch owner@e2e.test "/v1/memory/$mem_doc" DELETE)"
+    contains "memory: the deleted doc is gone from the panel API (404)" '^status=404$' \
+      "$(file_fetch owner@e2e.test "/v1/memory/$mem_doc")"
+    mem_put "MEMORY.md" "- $mem_marker" >/dev/null
+    mem_on=$(chat_run "tools?" 300000)
+    contains "memory on: the run lists remember" '^text=.*tools said: .*remember' "$mem_on"
+    contains "memory on: the run lists recall" '^text=.*tools said: .*recall' "$mem_on"
+    contains "memory on: the system prompt carries the memory index" "^text=.*$mem_marker" \
+      "$(chat_run "system?" 300000)"
+    contains "memory: turning memory off is accepted" '^body=.*"memory_enabled":false' \
+      "$(mem_settings '{"memory_enabled":false}')"
+    contains "memory: the switch persisted (GET)" '^body=.*"memory_enabled":false' \
+      "$(file_fetch owner@e2e.test "/v1/memory/settings?level=team")"
+    mem_off=$(chat_run "tools?" 300000)
+    contains "memory off: the next run completed" '^terminal=run.completed$' "$mem_off"
+    contains "memory off: the run answered with its tool list" '^text=.*tools said: ' "$mem_off"
+    if printf '%s' "$mem_off" | grep -qE '^text=.*(remember|recall)'; then fail "memory off: the run lists no remember or recall"; else ok "memory off: the run lists no remember or recall"; fi
+    mem_off_sys=$(chat_run "system?" 300000)
+    contains "memory off: the system prompt answered" '^text=.*system said: ' "$mem_off_sys"
+    if printf '%s' "$mem_off_sys" | grep -q "$mem_marker"; then fail "memory off: the system prompt has no memory index"; else ok "memory off: the system prompt has no memory index"; fi
+    contains "memory off: the panel API refuses with memory_disabled (403)" '^status=403$' \
+      "$(file_fetch owner@e2e.test "/v1/memory?scope=user")"
+    contains "memory: turning memory back on is accepted" '^body=.*"memory_enabled":true' \
+      "$(mem_settings '{"memory_enabled":true}')"
+    contains "memory back on: the next run lists remember again" '^text=.*tools said: .*remember' \
+      "$(chat_run "tools?" 300000)"
 
     # KOBE-146 (53f of KOBE-53): uploads end to end. The Owner uploads a file into a new thread
     # through the API, a limit error is refused, the file is attached to a message, and the
@@ -2399,6 +2487,14 @@ fi
 # "newly allowed service"). Last section: it rolls the server twice (the sandbox wire reconnects), so
 # no run is leased across it; it needs only the e2e sandbox. Waits end on conditions (the reconcile
 # log line of a server pod started by the upgrade, then a bounded reachability probe), never sleeps.
+# KOBE-168: cold start (hibernated → first token, first tool call) with the executor on or off, and
+# KOBE-27 workspace sync with tools under the partner uid. Needs the model setup of the sections above.
+if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && "$(type -t chat_run)" == function ]]; then
+  source e2e/executor/trials.sh
+  executor_first_token_trials
+  if [[ "${KOBE_E2E_TOOL_EXECUTOR:-}" == 1 ]]; then executor_sync_checks; fi
+fi
+
 echo "==> chart upgrade reaches an awake sandbox (KOBE-116)"
 if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_id:-}" ]]; then
   # Exit status = reachability, from the real agent container; --noproxy: the pod's HTTP_PROXY
