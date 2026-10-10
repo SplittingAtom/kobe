@@ -13,6 +13,7 @@ setup:
         - grep
         - ls
         - powershell
+        - propose_project_file
         - read
         - recall
         - remember
