@@ -42,7 +42,10 @@ afterAll(() => fx.teardown());
 
 type Body = Record<string, unknown>;
 
-async function world(exposure: "read_only" | "all" | "custom" | "off", enabledTools: string[] = []) {
+async function world(
+  exposure: "read_only" | "all" | "custom" | "off",
+  enabledTools: string[] = [],
+) {
   const owner = await fx.person(`x${randomUUID().slice(0, 4)}`);
   const team = await fx.team(`exp-${randomUUID().slice(0, 6)}`, owner);
   const sandboxId = randomUUID();

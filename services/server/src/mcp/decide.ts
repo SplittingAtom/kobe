@@ -15,7 +15,12 @@ import { recordAudit } from "../audit/record.js";
 import { logger } from "../logger.js";
 import type { RunPolicyContextSource } from "../sandbox-wire/types.js";
 import type { McpApprovalFailure, McpApprovalVerifier } from "./approvals.js";
-import { describePinnedTool, exposedTools, loadTeamConnector, type TeamConnector } from "./catalog.js";
+import {
+  describePinnedTool,
+  exposedTools,
+  loadTeamConnector,
+  type TeamConnector,
+} from "./catalog.js";
 import {
   DECISION_CONCURRENCY,
   distinctSiblings,
