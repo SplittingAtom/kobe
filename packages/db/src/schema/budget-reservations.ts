@@ -53,18 +53,22 @@ export const budgetReservations = pgTable(
 /**
  * Install-wide (†): the same reservation counted against the install budget, which spans teams
  * and so cannot live in a team table (RLS would hide other teams' rows). It holds no team or
- * user ids, only the member key (`team:user`) the per-member share is computed over.
+ * user ids: `team_key` and `member_key` are salted SHA-256 hashes (the salt is a per-install
+ * secret the gateways share), enough for equality (a team ends only its own holds; the
+ * per-member share) and useless for reading who reserved. Computed inside the functions.
  */
 export const installBudgetReservations = pgTable(
   "install_budget_reservations",
   {
-    callId: text().primaryKey(),
+    teamKey: text().notNull(),
+    callId: text().notNull(),
     memberKey: text().notNull(),
     ...amounts(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp({ withTimezone: true }).notNull(),
   },
   (t) => [
+    primaryKey({ columns: [t.teamKey, t.callId] }),
     check(
       "install_budget_reservations_call_id_len",
       sql`char_length(${t.callId}) BETWEEN 1 AND 128`,

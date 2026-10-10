@@ -12,12 +12,14 @@ CREATE TABLE "budget_reservations" (
 );
 --> statement-breakpoint
 CREATE TABLE "install_budget_reservations" (
-	"call_id" text PRIMARY KEY NOT NULL,
+	"team_key" text NOT NULL,
+	"call_id" text NOT NULL,
 	"member_key" text NOT NULL,
 	"usd" numeric(20, 12) DEFAULT 0 NOT NULL,
 	"tokens" bigint DEFAULT 0 NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"expires_at" timestamp with time zone NOT NULL,
+	CONSTRAINT "install_budget_reservations_team_key_call_id_pk" PRIMARY KEY("team_key","call_id"),
 	CONSTRAINT "install_budget_reservations_call_id_len" CHECK (char_length("install_budget_reservations"."call_id") BETWEEN 1 AND 128),
 	CONSTRAINT "install_budget_reservations_amounts" CHECK ("install_budget_reservations"."usd" >= 0 AND "install_budget_reservations"."tokens" >= 0)
 );

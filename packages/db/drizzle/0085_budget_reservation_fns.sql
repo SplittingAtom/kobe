@@ -13,13 +13,15 @@
 -- reservation committed by a reserver that held the lock before. Expired rows never count.
 CREATE FUNCTION "kobe_reserve_budget"(
   p_team uuid, p_user uuid, p_call text, p_usd numeric, p_tokens bigint,
-  p_ttl_ms integer, p_member_share numeric, p_lines jsonb
+  p_ttl_ms integer, p_member_share numeric, p_lines jsonb, p_salt text
 ) RETURNS text LANGUAGE plpgsql
   SET search_path = pg_catalog, public AS $$
 DECLARE
   cur text := NULLIF(current_setting('kobe.team_id', true), '');
   expiry timestamptz := clock_timestamp() + make_interval(secs => p_ttl_ms / 1000.0);
   has_install boolean;
+  v_team_key text := encode(sha256(convert_to(p_salt || ':team:' || p_team::text, 'utf8')), 'hex');
+  v_member_key text := encode(sha256(convert_to(p_salt || ':member:' || p_team::text || ':' || p_user::text, 'utf8')), 'hex');
   n integer := jsonb_array_length(p_lines);
   i integer;
   line jsonb;
@@ -58,7 +60,7 @@ BEGIN
     cost := CASE WHEN unit_usd THEN p_usd ELSE p_tokens END;
     share := CASE WHEN line->>'scope' = 'user' THEN 'Infinity'::numeric
                   ELSE greatest(0, lim - spent) * p_member_share END;
-    self_key := CASE WHEN line->>'scope' = 'install' THEN p_team::text || ':' || p_user::text
+    self_key := CASE WHEN line->>'scope' = 'install' THEN v_member_key
                      ELSE p_user::text END;
     SELECT COALESCE(sum(least(m.amt, share)), 0),
            COALESCE(sum(m.amt) FILTER (WHERE m.member = self_key), 0),
@@ -75,7 +77,7 @@ BEGIN
           SELECT member_key, CASE WHEN unit_usd THEN usd ELSE tokens::numeric END
             FROM "install_budget_reservations"
             WHERE line->>'scope' = 'install'
-              AND expires_at > clock_timestamp() AND call_id <> p_call
+              AND expires_at > clock_timestamp() AND NOT (team_key = v_team_key AND call_id = p_call)
         ) r GROUP BY r.member
       ) m;
     IF spent + total >= lim THEN
@@ -90,9 +92,9 @@ BEGIN
     ON CONFLICT ("team_id", "call_id") DO UPDATE
       SET "usd" = EXCLUDED."usd", "tokens" = EXCLUDED."tokens", "expires_at" = EXCLUDED."expires_at";
   IF has_install THEN
-    INSERT INTO "install_budget_reservations" ("call_id", "member_key", "usd", "tokens", "expires_at")
-      VALUES (p_call, p_team::text || ':' || p_user::text, p_usd, p_tokens, expiry)
-      ON CONFLICT ("call_id") DO UPDATE
+    INSERT INTO "install_budget_reservations" ("team_key", "call_id", "member_key", "usd", "tokens", "expires_at")
+      VALUES (v_team_key, p_call, v_member_key, p_usd, p_tokens, expiry)
+      ON CONFLICT ("team_key", "call_id") DO UPDATE
         SET "usd" = EXCLUDED."usd", "tokens" = EXCLUDED."tokens", "expires_at" = EXCLUDED."expires_at";
   END IF;
   RETURN 'ok';
@@ -100,12 +102,13 @@ END $$;--> statement-breakpoint
 -- kobe_settle_budget: ends these calls' reservations. p_keep_ms NULL deletes them; otherwise it
 -- shortens their expiry to at most that long from now (the call ended but its ledger row has not
 -- landed: the reservation stays a little longer, never longer than it already would).
-CREATE FUNCTION "kobe_settle_budget"(p_team uuid, p_calls text[], p_keep_ms integer)
+CREATE FUNCTION "kobe_settle_budget"(p_team uuid, p_calls text[], p_keep_ms integer, p_salt text)
 RETURNS integer LANGUAGE plpgsql
   SET search_path = pg_catalog, public AS $$
 DECLARE
   cur text := NULLIF(current_setting('kobe.team_id', true), '');
   keep timestamptz := clock_timestamp() + make_interval(secs => COALESCE(p_keep_ms, 0) / 1000.0);
+  tkey text := encode(sha256(convert_to(p_salt || ':team:' || p_team::text, 'utf8')), 'hex');
   n integer;
 BEGIN
   IF cur IS NOT NULL AND cur <> p_team::text THEN
@@ -113,14 +116,36 @@ BEGIN
   END IF;
   PERFORM set_config('kobe.team_id', p_team::text, true);
   IF p_keep_ms IS NULL THEN
-    DELETE FROM "install_budget_reservations" WHERE call_id = ANY (p_calls);
+    DELETE FROM "install_budget_reservations" WHERE team_key = tkey AND call_id = ANY (p_calls);
     DELETE FROM "budget_reservations" WHERE team_id = p_team AND call_id = ANY (p_calls);
   ELSE
     UPDATE "install_budget_reservations" SET expires_at = least(expires_at, keep)
-      WHERE call_id = ANY (p_calls);
+      WHERE team_key = tkey AND call_id = ANY (p_calls);
     UPDATE "budget_reservations" SET expires_at = least(expires_at, keep)
       WHERE team_id = p_team AND call_id = ANY (p_calls);
   END IF;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RETURN n;
+END $$;--> statement-breakpoint
+-- kobe_extend_budget: the heartbeat of a call still running. Pushes the expiry of its live
+-- reservations to p_ttl_ms from now (never of an expired one, never shortening).
+CREATE FUNCTION "kobe_extend_budget"(p_team uuid, p_calls text[], p_ttl_ms integer, p_salt text)
+RETURNS integer LANGUAGE plpgsql
+  SET search_path = pg_catalog, public AS $$
+DECLARE
+  cur text := NULLIF(current_setting('kobe.team_id', true), '');
+  expiry timestamptz := clock_timestamp() + make_interval(secs => p_ttl_ms / 1000.0);
+  tkey text := encode(sha256(convert_to(p_salt || ':team:' || p_team::text, 'utf8')), 'hex');
+  n integer;
+BEGIN
+  IF cur IS NOT NULL AND cur <> p_team::text THEN
+    RAISE EXCEPTION 'kobe_extend_budget: another team is in force' USING ERRCODE = '42501';
+  END IF;
+  PERFORM set_config('kobe.team_id', p_team::text, true);
+  UPDATE "install_budget_reservations" SET expires_at = greatest(expires_at, expiry)
+    WHERE team_key = tkey AND call_id = ANY (p_calls) AND expires_at > clock_timestamp();
+  UPDATE "budget_reservations" SET expires_at = greatest(expires_at, expiry)
+    WHERE team_id = p_team AND call_id = ANY (p_calls) AND expires_at > clock_timestamp();
   GET DIAGNOSTICS n = ROW_COUNT;
   RETURN n;
 END $$;

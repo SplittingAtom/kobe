@@ -1,6 +1,6 @@
 {
-  "id": "f3ef6672-3635-4330-8afe-0e8b7e990bbf",
-  "prevId": "474d4b2e-011c-415c-bc31-2d0393295c4f",
+  "id": "58b51db7-2944-4b41-a5ba-31d7abca9747",
+  "prevId": "6c1469ca-d514-4d87-8827-48ee181cba1c",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -12275,10 +12275,16 @@
       "name": "install_budget_reservations",
       "schema": "",
       "columns": {
+        "team_key": {
+          "name": "team_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "call_id": {
           "name": "call_id",
           "type": "text",
-          "primaryKey": true,
+          "primaryKey": false,
           "notNull": true
         },
         "member_key": {
@@ -12333,7 +12339,15 @@
         }
       },
       "foreignKeys": {},
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "install_budget_reservations_team_key_call_id_pk": {
+          "name": "install_budget_reservations_team_key_call_id_pk",
+          "columns": [
+            "team_key",
+            "call_id"
+          ]
+        }
+      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
