@@ -133,10 +133,28 @@ chat() { # content [thread] [ask] → the run step's key=value lines (t2 chats)
   client "$(printf '{"mode":"run","base":"%s","user":%s,"content":"%s","threadId":%s,"ask":%s,"domain":"%s","timeoutMs":300000}' \
     "$BASE" "$U_T2" "$1" "$thread" "${3:-false}" "${UP_HOST:-}")" | grep -E '^[a-z_]+=' || true
 }
-wake() { # a short chat wakes the sandbox and leaves a thread to read later
-  local r
-  r=$(chat "gate2 hello $NONCE")
-  HELLO_THREAD=$(field thread "$r")
+HELLO_THREAD=""
+wake() { # a short chat wakes the sandbox and leaves a thread to read later (ac-4 reads it under break-glass)
+  # wake runs again after the server roll and before ac-3/ac-5: a chat that fails then (the server
+  # is still swapping pods) must not blank the thread the first wake left, which ac-4 reads. Only a
+  # real thread id replaces HELLO_THREAD; a wake that yields none is retried and then fails loudly.
+  local r thread attempt
+  for attempt in 1 2 3; do
+    r=$(chat "gate2 hello $NONCE")
+    thread=$(field thread "$r")
+    [[ "$thread" =~ ^[0-9a-f-]{36}$ ]] && break
+    echo "     wake: attempt $attempt gave no thread id; chat output: $(printf '%s' "$r" | tr '\n' ' ' | cut -c1-300)"
+    thread=""
+    sleep 5
+  done
+  if [[ -n "$thread" ]]; then
+    HELLO_THREAD=$thread
+  elif [[ -z "$HELLO_THREAD" ]]; then
+    fail "wake: the hello chat returned no thread id after 3 attempts"
+    exit 1
+  else
+    fail "wake: the hello chat returned no thread id after 3 attempts (keeping thread $HELLO_THREAD)"
+  fi
   until_ok 120 sbx_ready || true
 }
 wake
@@ -341,7 +359,7 @@ fi
 if [[ "$STEPS" == *" break-glass "* ]]; then
   echo "==> ac-4: break-glass: second admin approves, the team is told, every read is audited"
   bg=$(client "$(printf '{"mode":"break-glass","base":"%s","owner":%s,"requester":%s,"teamAdmin":%s,"teamId":"%s","threadId":"%s"}' \
-    "$BASE" "$OWNER_JSON" "$U_IA" "$U_T1" "$TEAM" "${HELLO_THREAD:-none}")")
+    "$BASE" "$OWNER_JSON" "$U_IA" "$U_T1" "$TEAM" "$HELLO_THREAD")")
   printf '%s\n' "$bg" | sed 's/^/     /'
   contains "an install admin requests access to the team (pending)" '^request=201:pending$' "$bg"
   contains "the requester can't approve their own request (second admin required)" '^self_approve=403:self_approval_forbidden$' "$bg"

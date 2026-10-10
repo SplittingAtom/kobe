@@ -102,7 +102,7 @@ describe("run.start → Pi prompt → pi.event stream", () => {
     expect(launch?.env).toContain("PI_CODING_AGENT_DIR");
     expect(launch?.env).not.toContain("SECRET_IN_AGENT_ENV");
     const kobeVars = (launch?.env as string[]).filter((k) => k.startsWith("KOBE_"));
-    expect(kobeVars).toEqual(["KOBE_POLICY_FD"]);
+    expect(kobeVars).toEqual(["KOBE_POLICY_FD", "KOBE_TOOL_HOME", "KOBE_TOOL_TMPDIR"]);
     const prompts = (await h.commandsLog()).filter((c) => c.type === "prompt");
     expect(prompts).toEqual([{ type: "prompt", message: "say:hi", id: expect.any(String) }]);
   });
@@ -640,7 +640,7 @@ describe("what a tool started by Pi can reach", () => {
       // ... and the socket cannot be re-opened through /proc (Linux).
       procOpen: false,
       // The env var is inherited (harmless: it names an fd the tool does not have).
-      env: ["KOBE_POLICY_FD"],
+      env: ["KOBE_POLICY_FD", "KOBE_TOOL_HOME", "KOBE_TOOL_TMPDIR"],
     });
     await h.server.waitFor(settled());
     // The channel is intact: a real check still goes through.
@@ -658,7 +658,7 @@ describe("what a tool started by Pi can reach", () => {
       sameToolsChannel: false,
       fd4Write: false,
       procOpen4: false,
-      env: ["KOBE_POLICY_FD", "KOBE_TOOLS_FD"],
+      env: ["KOBE_POLICY_FD", "KOBE_TOOLS_FD", "KOBE_TOOL_HOME", "KOBE_TOOL_TMPDIR"],
     });
     await h.server.waitFor(settled());
   });

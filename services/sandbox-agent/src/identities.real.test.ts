@@ -191,13 +191,47 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
     await until(() => !existsSync(root), 30_000);
   }, 60_000);
 
-  it("without the executor Pi keeps the shared HOME and TMPDIR and no private dir exists", async () => {
+  it("without the executor Pi's HOME and TMPDIR are private too (KOBE-228); the tools are told the shared ones", async () => {
     await start({}, { tmpRoot: shm });
     ok(await h.server.command(runStart("say:a", { config: { model: MODEL } })));
     const pi = await launch(THREAD);
-    expect(pi.home).not.toContain("kobe-pi-");
+    const root = path.dirname(pi.home);
+    expect(root.startsWith(path.join(shm, "kobe-pi-"))).toBe(true);
+    expect(pi.home).not.toBe(path.join(h.dir, "home"));
+    expect(pi.tmpdir).toBe(path.join(root, "tmp"));
+    const me = process.getuid?.() ?? 0;
+    for (const dir of [root, pi.home, pi.tmpdir]) {
+      const info = await stat(dir);
+      expect([info.uid, info.gid, info.mode & 0o7777]).toEqual([me, pi.gid, 0o2770]);
+    }
+    expect(pi.env).toEqual(expect.arrayContaining(["KOBE_TOOL_HOME", "KOBE_TOOL_TMPDIR"]));
     expect(pi.env).not.toContain("KOBE_EXEC_TOOL_HOME");
-    expect((await readdir(shm)).filter((n) => n.startsWith("kobe-pi-"))).toEqual([]);
+  }, 60_000);
+
+  it("a tool of thread A cannot plant ~/.node_modules in thread B's Pi HOME, and B's Pi HOME is not the shared one (KOBE-228)", async () => {
+    await start({}, { tmpRoot: shm });
+    ok(await h.server.command(runStart("say:a", { config: { model: MODEL } })));
+    ok(
+      await h.server.command({
+        ...runStart("say:b", { config: { model: MODEL } }),
+        thread_id: THREAD_2,
+        run_id: RUN_2,
+      }),
+    );
+    await until(async () => (await h.commandsLog(THREAD_2).catch(() => [])).length > 0);
+    const b = await launch(THREAD_2);
+    const shared = path.join(h.dir, "home");
+    expect(b.home).not.toBe(shared);
+    const plant = (home: string) =>
+      `mkdir -p ${home}/.node_modules/pkg && echo "require('fs').writeFileSync('${home}/pwned','x')" > ${home}/.node_modules/pkg/index.js`;
+    const toB = await tool(THREAD, "6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d", plant(b.home));
+    expect(toB.code).not.toBe(0);
+    expect(toB.stderr).toMatch(/Permission denied/);
+    expect(existsSync(path.join(b.home, ".node_modules"))).toBe(false);
+    // The shared home is where the tools plant (and keep their files): no Pi loads from it.
+    const toShared = await tool(THREAD, "7b8c9d0e-1f2a-4b3c-9d4e-5f6a7b8c9d0e", plant(shared));
+    expect(toShared.code).toBe(0);
+    expect(existsSync(path.join(b.home, "pwned"))).toBe(false);
   }, 60_000);
 
   it("runs every Pi under its own identity, never the agent's uid", async () => {
@@ -208,8 +242,8 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
       expect(pi.uid).not.toBe(process.getuid?.());
       expect(pi.gid).toBe(pi.uid);
       expect(pi.groups.sort()).toEqual([process.getgid?.(), pi.uid].sort());
-      // HOME stays the shared one (like /workspace, D13); see docs/ledger/KOBE-71.md.
-      expect(pi.home).toBe(path.join(h.dir, "home"));
+      // HOME is Pi's own and private (KOBE-228); the shared one is the tools' (KOBE_TOOL_HOME).
+      expect(pi.home).not.toBe(path.join(h.dir, "home"));
     }
     const dir = await stat(path.dirname(a.agentDir));
     expect(dir.uid).toBe(process.getuid?.());
@@ -437,7 +471,7 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
       RUN,
       [
         "umask 077",
-        'echo s > "$HOME/k71-secret-$$"; echo s > /tmp/k71-secret-$$; echo s > k71-ws-secret-$$',
+        'echo s > "$KOBE_TOOL_HOME/k71-secret-$$"; echo s > /tmp/k71-secret-$$; echo s > k71-ws-secret-$$',
         "echo \"pid=$$ uid=$(id -u) shm=$(ipcmk -M 4096 | awk '{print $NF}')\"",
       ].join("\n"),
     );

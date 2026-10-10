@@ -1,5 +1,5 @@
 {
-  "id": "90b11c70-f198-471e-a25d-466e91b51aae",
+  "id": "92aa6162-6db4-4c95-b429-014635beb896",
   "prevId": "cecff14d-af5a-4375-b4b4-e1de4c4d22c0",
   "version": "7",
   "dialect": "postgresql",
@@ -11885,12 +11885,6 @@
           "notNull": true,
           "default": "now()"
         },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
         "updated_at": {
           "name": "updated_at",
           "type": "timestamp with time zone",
@@ -11978,7 +11972,7 @@
       "checkConstraints": {
         "connector_grants_kind": {
           "name": "connector_grants_kind",
-          "value": "\"connector_grants\".\"kind\" IN ('api_key', 'oauth')"
+          "value": "\"connector_grants\".\"kind\" IN ('api_key')"
         },
         "connector_grants_sealed": {
           "name": "connector_grants_sealed",
@@ -11991,6 +11985,171 @@
         "connector_grants_hint": {
           "name": "connector_grants_hint",
           "value": "char_length(\"connector_grants\".\"hint\") <= 16"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.team_web_search": {
+      "name": "team_web_search",
+      "schema": "",
+      "columns": {
+        "team_id": {
+          "name": "team_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "enabled_by": {
+          "name": "enabled_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "team_web_search_team_id_teams_id_fk": {
+          "name": "team_web_search_team_id_teams_id_fk",
+          "tableFrom": "team_web_search",
+          "tableTo": "teams",
+          "columnsFrom": [
+            "team_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "team_web_search_enabled_by_users_id_fk": {
+          "name": "team_web_search_enabled_by_users_id_fk",
+          "tableFrom": "team_web_search",
+          "tableTo": "users",
+          "columnsFrom": [
+            "enabled_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.web_search_settings": {
+      "name": "web_search_settings",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "default": 1
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "sealed": {
+          "name": "sealed",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "key_id": {
+          "name": "key_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "hint": {
+          "name": "hint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "web_search_settings_updated_by_users_id_fk": {
+          "name": "web_search_settings_updated_by_users_id_fk",
+          "tableFrom": "web_search_settings",
+          "tableTo": "users",
+          "columnsFrom": [
+            "updated_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "web_search_settings_singleton": {
+          "name": "web_search_settings_singleton",
+          "value": "\"web_search_settings\".\"id\" = 1"
+        },
+        "web_search_settings_provider": {
+          "name": "web_search_settings_provider",
+          "value": "\"web_search_settings\".\"provider\" IN ('brave', 'tavily', 'exa')"
+        },
+        "web_search_settings_sealed": {
+          "name": "web_search_settings_sealed",
+          "value": "\"web_search_settings\".\"sealed\" ~ '^e1\\.[A-Za-z0-9_.-]+$' AND char_length(\"web_search_settings\".\"sealed\") <= 16384"
+        },
+        "web_search_settings_key_id": {
+          "name": "web_search_settings_key_id",
+          "value": "char_length(\"web_search_settings\".\"key_id\") BETWEEN 1 AND 64"
+        },
+        "web_search_settings_hint": {
+          "name": "web_search_settings_hint",
+          "value": "char_length(\"web_search_settings\".\"hint\") <= 16"
         }
       },
       "isRLSEnabled": false

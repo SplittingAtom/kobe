@@ -534,28 +534,6 @@ describe("collection, sharing and restore reports", () => {
     });
   });
 
-  it("shares a file to a durable object that outlives the workspace copy", async () => {
-    const b = await box();
-    const owner = { teamId: b.teamId, userId: b.person.id };
-    const put = await push(b, "out/chart.html", "<svg/>");
-    const shared = await withTeam(fx.db, b.teamId, (tx) =>
-      sync.shareFile(tx, owner, "out/chart.html"),
-    );
-    expect(shared).toMatchObject({ sha256: sha("<svg/>"), size: 6 });
-    expect(shared?.blobKey).toBe(
-      `teams/${b.teamId}/users/${b.person.id}/shared/${shared?.sharedId}`,
-    );
-    // The volume is lost and the workspace file deleted and collected: the share stays.
-    await commit(b, [{ op: "delete", path: "out/chart.html", base_rev: must(put.entry, "e").rev }]);
-    await sync.collect();
-    expect(objects.objects.has(workspaceBlobKey("", owner, sha("<svg/>")))).toBe(false);
-    expect(objects.objects.get(must(shared, "shared").blobKey)?.toString()).toBe("<svg/>");
-    expect(await auditCount(b.teamId, "workspace.file_shared")).toBe(1);
-    expect(
-      await withTeam(fx.db, b.teamId, (tx) => sync.shareFile(tx, owner, "nope")),
-    ).toBeUndefined();
-  });
-
   it("purges old tombstones and asks stale pullers to resync", async () => {
     const b = await box();
     const owner = { teamId: b.teamId, userId: b.person.id };

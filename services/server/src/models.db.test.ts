@@ -330,6 +330,41 @@ describe("catalog and team enablement", () => {
     ]);
   });
 
+  it("install admins set a model's input modalities; text is always kept (KOBE-191)", async () => {
+    const add = await as.installAdmin.post(`${MODELS}/catalog`, {
+      alias: "vision",
+      provider_id: "openai",
+      model: "gpt-5-vision",
+      input_modalities: ["image"],
+    });
+    expect(add.status, JSON.stringify(add.json)).toBe(201);
+    expect(add.json.model.input_modalities).toEqual(["text", "image"]);
+    const plain = await as.installAdmin.get(MODELS);
+    const find = (a: string) =>
+      (plain.json.catalog as { alias: string; input_modalities: string[] }[]).find(
+        (c) => c.alias === a,
+      );
+    expect(find("fast")?.input_modalities).toEqual(["text"]); // default
+    expect(find("vision")?.input_modalities).toEqual(["text", "image"]);
+
+    const off = await as.installAdmin.patch(`${MODELS}/catalog/vision`, {
+      input_modalities: ["text"],
+    });
+    expect(off.status, JSON.stringify(off.json)).toBe(200);
+    expect(off.json.model.input_modalities).toEqual(["text"]);
+    const label = await as.installAdmin.patch(`${MODELS}/catalog/vision`, { label: "V" });
+    expect(label.json.model.input_modalities).toEqual(["text"]); // kept
+    for (const bad of [["video"], "image", [1]]) {
+      const r = await as.installAdmin.patch(`${MODELS}/catalog/vision`, { input_modalities: bad });
+      expect(r.status, JSON.stringify(bad)).toBe(400);
+    }
+    expect(
+      (await as.bob.patch(`${MODELS}/catalog/vision`, { input_modalities: ["text", "image"] }))
+        .status,
+    ).toBe(403);
+    expect((await as.installAdmin.delete(`${MODELS}/catalog/vision`)).status).toBe(204);
+  });
+
   it("members see the catalog; only team admins enable models and pick the default", async () => {
     const seen = await as.bob.get("/v1/team/models");
     expect(seen.status).toBe(200);
