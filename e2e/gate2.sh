@@ -276,7 +276,7 @@ if [[ "$STEPS" == *" replicas "* ]]; then
     body='{"model":"openai/gpt-fake","max_tokens":3,"messages":[]}'
     burst=$(in_sbx "i=0; while [ \$i -lt 30 ]; do
         if [ \$((i % 2)) -eq 0 ]; then ip=${mg_ips[0]:-0.0.0.0}; else ip=${mg_ips[1]:-0.0.0.0}; fi
-        ( curl -s -m 30 -o /dev/null -w 'code=%{http_code}\n' -X POST http://\$ip:8080/v1/chat/completions \
+        ( curl -s -m 30 --noproxy '*' -o /dev/null -w 'code=%{http_code}\n' -X POST http://\$ip:8080/v1/chat/completions \
             -H 'authorization: Bearer $rtoken' -H 'content-type: application/json' -d '$body' ) &
         i=\$((i+1))
       done; wait")
