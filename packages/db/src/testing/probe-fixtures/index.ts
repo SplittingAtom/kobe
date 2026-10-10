@@ -6,6 +6,7 @@ import { identityFixtures } from "./identity.js";
 import { modelsFixtures } from "./models.js";
 import { policyFixtures } from "./policy.js";
 import { sandboxFixtures } from "./sandbox.js";
+import { schedulesFixtures } from "./schedules.js";
 import type { ProbeFixture } from "./types.js";
 import { workspaceFixtures } from "./workspace.js";
 
@@ -23,4 +24,5 @@ export const PROBE_FIXTURES: Readonly<Record<TeamTable, ProbeFixture>> = {
   ...modelsFixtures,
   ...connectorsFixtures,
   ...workspaceFixtures,
+  ...schedulesFixtures,
 };

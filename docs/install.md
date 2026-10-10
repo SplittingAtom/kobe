@@ -612,6 +612,19 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
   DROP INDEX CONCURRENTLY IF EXISTS thread_entries_blob_ref_idx;  -- only if listed above
   ```
 
+- **Schedule fire index (KOBE-172, migration `*_schedules_rls`).** A unique index on `events` is
+  added with a plain `CREATE UNIQUE INDEX` (migrations run in one transaction), which blocks writes
+  to `events` while it scans. On a large install, build it first, then upgrade (the migration skips
+  an existing index):
+
+  ```sql
+  CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS events_schedule_fire_uniq
+    ON events (team_id, (lower(ref->>'schedule_id')), due_at) WHERE kind = 'schedule.fire';
+  ```
+
+  As above, a failed `CONCURRENTLY` build leaves an INVALID index: check `pg_index.indisvalid` for
+  `events_schedule_fire_uniq` and `DROP INDEX CONCURRENTLY IF EXISTS` it before upgrading.
+
 - **Retention job (KOBE-18).** One server replica at a time runs the nightly retention pass under
   a session-level advisory lock, so the server needs a direct (or session-mode pooled) Postgres
   connection; transaction-mode poolers break session locks. `KOBE_RETENTION_HOUR_UTC` (0-23,
