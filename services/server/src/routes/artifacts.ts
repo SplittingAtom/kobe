@@ -45,7 +45,7 @@ export function artifactRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
     const teamId = c.get("team").id;
     const userId = c.get("user").id;
     return withTeam(db, teamId, async (tx) =>
-      fn(tx, { teamId, userId, projectIds: await viewerProjectIds(tx, userId) }),
+      fn(tx, { teamId, userId, projectIds: await viewerProjectIds(tx, teamId, userId) }),
     );
   };
 

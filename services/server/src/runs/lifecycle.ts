@@ -4,8 +4,10 @@ import {
   type ApprovalMode,
   type ErrorInfo,
   type PiThreadConfig,
+  type RunProjectContext,
   type SandboxAttachment,
 } from "@kobe/protocol";
+import { projectRunContext } from "../projects/run-context.js";
 import { listRunAttachments } from "../uploads/attach-list.js";
 import { sql, type KobeTx } from "@kobe/db";
 import { omittedItems } from "./omitted-event.js";
@@ -48,6 +50,8 @@ export interface StartPlan {
     readonly draftRevision?: number;
   } | null;
   readonly config?: Omit<PiThreadConfig, "agent" | "approval_mode">;
+  /** Project instructions context (KOBE-161), for a thread in a project its owner belongs to. */
+  readonly project?: RunProjectContext;
   /** The message's uploads, already synced into the workspace (KOBE-144). */
   readonly attachments?: readonly SandboxAttachment[];
   /** What the resolver left out of the run's configuration (KOBE-76). */
@@ -199,15 +203,18 @@ export async function promoteInTx(
     }
     return {
       transitions,
-      plan: withAttachments(
-        planOf(thread, { ...next, parentEntryId, approvalMode }, resolved, model),
-        await listRunAttachments(
-          tx,
-          teamId,
-          threadId,
-          next.id,
-          await modelAcceptsImages(tx, model?.alias),
+      plan: withProject(
+        withAttachments(
+          planOf(thread, { ...next, parentEntryId, approvalMode }, resolved, model),
+          await listRunAttachments(
+            tx,
+            teamId,
+            threadId,
+            next.id,
+            await modelAcceptsImages(tx, model?.alias),
+          ),
         ),
+        await projectRunContext(tx, { teamId, userId: thread.ownerUserId }, thread.projectId),
       ),
     };
   }
@@ -309,16 +316,27 @@ export async function restartPlanInTx(
     started ?? requestedModel(thread, resolved).alias,
   );
   if (!resolution.ok) return undefined;
-  return withAttachments(
-    planOf(thread, run, resolved, resolution.model),
-    await listRunAttachments(
+  return withProject(
+    withAttachments(
+      planOf(thread, run, resolved, resolution.model),
+      await listRunAttachments(
+        tx,
+        run.teamId,
+        thread.id,
+        run.id,
+        await modelAcceptsImages(tx, resolution.model?.alias),
+      ),
+    ),
+    await projectRunContext(
       tx,
-      run.teamId,
-      thread.id,
-      run.id,
-      await modelAcceptsImages(tx, resolution.model?.alias),
+      { teamId: run.teamId, userId: thread.ownerUserId },
+      thread.projectId,
     ),
   );
+}
+
+function withProject(plan: StartPlan, project: RunProjectContext | undefined): StartPlan {
+  return project === undefined ? plan : { ...plan, project };
 }
 
 function withAttachments(plan: StartPlan, attachments: readonly SandboxAttachment[]): StartPlan {

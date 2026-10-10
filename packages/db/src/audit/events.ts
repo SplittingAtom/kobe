@@ -556,6 +556,23 @@ export const AUDIT_EVENTS = {
   "thread.trashed": event("team", { threadId: id }),
   "thread.restored": event("team", { threadId: id }),
   "thread.sharing_changed": event("team", { threadId: id, projectId: id, shared: z.boolean() }),
+  // ── project: configuration metadata only, never names, instructions or descriptions (KOBE-161, D23) ──
+  "project.created": event("team", { projectId: id, membersMode: z.enum(["team", "selected"]) }),
+  /** `fields` lists which settings changed (names, not values). */
+  "project.updated": event("team", { projectId: id, fields: z.array(z.string().max(40)).max(10) }),
+  "project.deleted": event("team", { projectId: id }),
+  "project.member_added": event("team", {
+    projectId: id,
+    userId: id,
+    role: z.enum(["owner", "member"]),
+  }),
+  "project.member_removed": event("team", { projectId: id, userId: id }),
+  "project.member_role_changed": event("team", {
+    projectId: id,
+    userId: id,
+    from: z.enum(["owner", "member"]),
+    to: z.enum(["owner", "member"]),
+  }),
   /** The thread's chosen model changed (KOBE-44, D30); null = the team's default. */
   "thread.model_changed": event("team", {
     threadId: id,
