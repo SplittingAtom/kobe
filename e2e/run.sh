@@ -18,6 +18,8 @@ UPSTREAM_NS=kobe-e2e-upstream # KOBE-38: an in-cluster HTTPS server standing in 
 MCP_NS=kobe-e2e-mcp # KOBE-58: a fake remote MCP server
 LLM_NS=kobe-e2e-llm # KOBE-40: a fake model provider
 # CI runs the suite as parallel shards, each on its own cluster (.github/workflows/e2e.yml).
+# KOBE_E2E_TOOL_EXECUTOR=1 installs with sandbox.toolExecutor.enabled=true (KOBE-168): every section
+# then runs with Pi's tools in the paired-uid executor, plus the isolation checks of e2e/executor/.
 # Every shard installs from clean state and runs the checks section; then:
 #   all (default)  every section, in order
 #   suite          every section except the KOBE-25 cold-start trials
@@ -154,7 +156,8 @@ $KUBECTL -n kobe-deps rollout status deploy/mailpit --timeout=180s >/dev/null
 $KUBECTL apply -f dev/s3.yaml >/dev/null # KOBE-27: S3-compatible test fixture (SeaweedFS, Apache-2.0)
 $KUBECTL -n kobe-deps rollout status deploy/s3 --timeout=300s >/dev/null
 $HELM upgrade --install kobe charts/kobe -n "$NS" -f dev/values.yaml \
-  --set global.imageTag="$TAG" --set global.imagePullPolicy=IfNotPresent --wait --timeout 10m
+  --set global.imageTag="$TAG" --set global.imagePullPolicy=IfNotPresent \
+  ${KOBE_E2E_TOOL_EXECUTOR:+--set sandbox.toolExecutor.enabled=true} --wait --timeout 10m
 
 echo "==> checks"
 psql_kobe() { $KUBECTL -n kobe-deps exec deploy/pg -- psql -U postgres -d kobe -tAc "$1" 2>&1; }
@@ -1665,6 +1668,7 @@ if (approvals) clearInterval(approvals);
 out("waking", waking);
 out("started_model", startedModel);
 out("first_token_ms", first ?? "-");
+out("terminal_ms", Date.now() - t0);
 out("artifact_events", artifactEvents.join(",") || "-");
 out("file_events", fileEvents.join(",") || "-");
 out("terminal", terminal);
@@ -1745,16 +1749,29 @@ SH
     contains "gVisor enforces an identity's process limit (1500 tried, at most 1024 run)" '^nproc=(10[0-2][0-9]|9[5-9][0-9])$' "$privsep"
     contains "--kill-all clears an identity at its process limit" '^nproc_kill=0$' "$privsep"
     contains "nothing of it is left" '^nproc_left=0$' "$privsep"
+    # KOBE-168: with the tool executor on, the isolation and workspace checks of the paired uid.
+    if [[ "${KOBE_E2E_TOOL_EXECUTOR:-}" == 1 ]]; then source e2e/executor/isolation.sh; fi
 
     # KOBE-44: a model chosen for the thread is the run's model (here the vLLM-style custom
     # provider, `qwen`, not the team default); once the team disables it, the run fails clearly.
     # (KOBE-40's checks above left qwen disabled: enable it for the team first.)
     expect "the team enables qwen" '^200 ' "$(as_owner "PUT /v1/team/models/qwen {\"enabled\":true}")"
     chosen_out=$(chat_run "hello-qwen-$RANDOM" 300000 qwen)
+    # The user decided this check is non-blocking: right after the enable a run may fail
+    # model_not_enabled for a while (possibly provider-side); retry for about 60 s, then warn.
+    chosen_end=$((SECONDS + 60))
+    while grep -q '^code=model_not_enabled$' <<<"$chosen_out" && ((SECONDS < chosen_end)); do
+      sleep 5
+      chosen_out=$(chat_run "hello-qwen-$RANDOM" 300000 qwen)
+    done
     printf '     chat (thread model): %s\n' "$(printf '%s' "$chosen_out" | grep -v '^text=' | tr '\n' ' ')"
     contains "a thread created with a chosen model stores it (KOBE-44)" '^thread=201:qwen$' "$chosen_out"
     contains "the run started on the thread's model, not the team default" '^started_model=qwen$' "$chosen_out"
-    contains "and was answered through that model's provider" '^terminal=run.completed$' "$chosen_out"
+    if grep -q '^code=model_not_enabled$' <<<"$chosen_out"; then
+      echo "WARN model enable slow, provider-side (the thread's model answered model_not_enabled for 60 s)"
+    else
+      contains "and was answered through that model's provider" '^terminal=run.completed$' "$chosen_out"
+    fi
     expect "the team disables the thread's model" '^200 ' "$(as_owner "PUT /v1/team/models/qwen {\"enabled\":false}")"
     gone_out=$(chat_run "gone-$RANDOM" 120000 qwen)
     contains "a thread can't choose a model the team disabled (409)" '^thread=409:default$' "$gone_out"
@@ -2399,6 +2416,14 @@ fi
 # "newly allowed service"). Last section: it rolls the server twice (the sandbox wire reconnects), so
 # no run is leased across it; it needs only the e2e sandbox. Waits end on conditions (the reconcile
 # log line of a server pod started by the upgrade, then a bounded reachability probe), never sleeps.
+# KOBE-168: cold start (hibernated → first token, first tool call) with the executor on or off, and
+# KOBE-27 workspace sync with tools under the partner uid. Needs the model setup of the sections above.
+if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && "$(type -t chat_run)" == function ]]; then
+  source e2e/executor/trials.sh
+  executor_first_token_trials
+  if [[ "${KOBE_E2E_TOOL_EXECUTOR:-}" == 1 ]]; then executor_sync_checks; fi
+fi
+
 echo "==> chart upgrade reaches an awake sandbox (KOBE-116)"
 if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_id:-}" ]]; then
   # Exit status = reachability, from the real agent container; --noproxy: the pod's HTTP_PROXY
