@@ -123,7 +123,7 @@ let upstream: UpstreamClient;
 let credentials: CredentialResolver;
 let limits: Limits;
 
-function app(overrides: { limits?: Partial<Limits>; log?: Parameters<typeof createApp>[0]["log"] } = {}) {
+function app(overrides: { limits?: Partial<Limits>; log?: NonNullable<Parameters<typeof createApp>[0]>["log"] } = {}) {
   const l = { ...limits, ...overrides.limits };
   return createApp({
     sessionKey: KEY,
