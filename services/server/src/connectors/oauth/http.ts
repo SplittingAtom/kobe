@@ -11,6 +11,7 @@ export type OauthFailureCode =
   | "invalid_state"
   | "iss_mismatch"
   | "token_exchange_failed"
+  | "refresh_rejected"
   | "registration_failed";
 
 export class OauthError extends Error {

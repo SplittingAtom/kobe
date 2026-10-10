@@ -1,6 +1,7 @@
 import { withTeam, type Envelope, type KobeDb, type PinnedTool } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { logger } from "../logger.js";
+import type { OauthIo } from "../connectors/oauth/http.js";
 import { revealCredential, type RevealOutcome } from "../connectors/grants.js";
 import { createRateLimiter } from "../sandbox/rate-limit.js";
 import type { RunPolicyContextSource } from "../sandbox-wire/types.js";
@@ -44,6 +45,8 @@ export interface McpServiceOptions {
   /** Install envelope (KOBE-107) that opens users' sealed keys; unset: no credential is served. */
   readonly envelope?: Envelope;
   readonly now?: () => Date;
+  /** Pinned-address client for OAuth token refresh (KOBE-110); unset: expired tokens are not refreshed. */
+  readonly oauthIo?: OauthIo;
 }
 
 /** A `tools/list` for a connector the team has not enabled: audited, throttled like denied calls. */
@@ -98,11 +101,17 @@ export function createMcpService(options: McpServiceOptions): McpService {
     decide: (principal, request) => decideMcpCall(deps, principal, request),
     revealCredential: (principal, connectorId) =>
       options.envelope
-        ? revealCredential(options.db, options.envelope, {
-            teamId: principal.teamId,
-            userId: principal.userId,
-            connectorId,
-          })
+        ? revealCredential(
+            options.db,
+            options.envelope,
+            {
+              teamId: principal.teamId,
+              userId: principal.userId,
+              connectorId,
+            },
+            undefined,
+            options.oauthIo,
+          )
         : Promise.resolve({ ok: false, failure: "unavailable" }),
   };
 }

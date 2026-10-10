@@ -9,15 +9,20 @@ import {
   Envelope,
   listMemberships,
   SYSTEM_ACTOR,
+  teamMembers,
   teams,
   TEAM_ID_SETTING,
+  users,
   type ConnectorGrantKind,
   type KobeTx,
   type KobeDb,
 } from "@kobe/db";
 import { z } from "zod";
+import { logger } from "../logger.js";
 import { recordAudit } from "../audit/record.js";
-import { parseOauthBundle } from "./oauth/bundle.js";
+import { parseOauthBundle, serializeOauthBundle, type OauthBundle } from "./oauth/bundle.js";
+import { OauthError, type OauthIo } from "./oauth/http.js";
+import { refreshAccessToken } from "./oauth/refresh.js";
 import { sameUrl } from "./oauth/discovery.js";
 
 /**
@@ -222,14 +227,19 @@ export function removeGrant(db: KobeDb, subject: Subject): Promise<boolean> {
   });
 }
 
-async function auditRefusal(db: KobeDb, subject: Subject, name: string): Promise<void> {
+async function auditRefusal(
+  db: KobeDb,
+  subject: Subject,
+  name: string,
+  reason: "resource_mismatch" | "user_inactive",
+): Promise<void> {
   try {
     await withTeam(db, subject.teamId, (tx) =>
       recordAudit(tx, {
         action: "mcp.grant.refused",
         actor: SYSTEM_ACTOR,
         teamId: subject.teamId,
-        target: { connectorId: subject.connectorId, name, reason: "resource_mismatch" },
+        target: { connectorId: subject.connectorId, name, reason },
       }),
     );
   } catch {
@@ -246,62 +256,231 @@ export type RevealOutcome =
   | { readonly ok: true; readonly credential: RevealedCredential }
   | { readonly ok: false; readonly failure: "not_available" | "not_connected" | "unavailable" };
 
+/** An access token is refreshed this long before it expires, so a call never races the expiry. */
+export const REFRESH_SKEW_MS = 60_000;
+
+interface GrantRow {
+  readonly sealed: string;
+  readonly kind: ConnectorGrantKind;
+  readonly expiresAt: Date | null;
+  readonly connectorUrl: string;
+  readonly connectorName: string;
+}
+type GrantLookup = GrantRow | "not_available" | "not_connected" | "user_inactive";
+
+/**
+ * The grant, if the whole chain is live right now: the connector enabled for the team and active,
+ * the user not deactivated (KOBE-13) and still a member of the team, the grant present and of the
+ * connector's kind. Checked on every reveal, so a deactivation, removal, suspension or revoke
+ * needs no sweep to take effect. `lock` takes the grant row `FOR UPDATE`.
+ */
+async function loadGrant(tx: KobeTx, s: Subject, lock: boolean): Promise<GrantLookup> {
+  const connector = await enabledConnector(tx, s);
+  if (!connector || connector.authKind === "none") return "not_available";
+  const [account] = await tx
+    .select({ deactivatedAt: users.deactivatedAt })
+    .from(users)
+    .where(eq(users.id, s.userId));
+  const [member] = await tx
+    .select({ userId: teamMembers.userId })
+    .from(teamMembers)
+    .where(and(eq(teamMembers.teamId, s.teamId), eq(teamMembers.userId, s.userId)));
+  if (!account || account.deactivatedAt !== null || !member) return "user_inactive";
+  const query = tx
+    .select({
+      sealed: connectorGrants.sealed,
+      kind: connectorGrants.kind,
+      expiresAt: connectorGrants.expiresAt,
+    })
+    .from(connectorGrants)
+    .where(
+      and(
+        eq(connectorGrants.teamId, s.teamId),
+        eq(connectorGrants.userId, s.userId),
+        eq(connectorGrants.connectorId, s.connectorId),
+      ),
+    );
+  const [grant] = await (lock ? query.for("update") : query);
+  return grant && grant.kind === connector.authKind
+    ? { ...grant, connectorUrl: connector.url, connectorName: connector.name }
+    : "not_connected";
+}
+
+const needsRefresh = (row: GrantRow, now: Date): boolean =>
+  row.kind === "oauth" &&
+  row.expiresAt !== null &&
+  row.expiresAt.getTime() - REFRESH_SKEW_MS <= now.getTime();
+const isExpired = (row: GrantRow, now: Date): boolean =>
+  row.expiresAt !== null && row.expiresAt.getTime() <= now.getTime();
+
+/** Opens the sealed material; the token was issued for one server and must not go elsewhere. */
+async function openRow(
+  db: KobeDb,
+  envelope: Envelope,
+  subject: Subject,
+  row: GrantRow,
+): Promise<RevealOutcome> {
+  const plaintext = envelope.openString(
+    row.sealed,
+    grantContext(subject.teamId, subject.userId, subject.connectorId),
+  );
+  if (row.kind !== "oauth") return { ok: true, credential: { kind: "api_key", apiKey: plaintext } };
+  const bundle = parseOauthBundle(plaintext);
+  if (!sameUrl(bundle.resource, row.connectorUrl)) {
+    await auditRefusal(db, subject, row.connectorName, "resource_mismatch");
+    return { ok: false, failure: "unavailable" };
+  }
+  return { ok: true, credential: { kind: "oauth", accessToken: bundle.access_token } };
+}
+
 /**
  * Decrypts the grant of (team, user, connector) for the MCP proxy. Only the internal API calls
  * this, with `userId` taken from the verified sandbox token, never from the request. Fails
- * closed: an unreadable ciphertext (wrong key, tampering) or an expired OAuth access token
- * (refresh is KOBE-110) is `unavailable`, with nothing about why; a grant whose kind no longer
- * matches the connector's auth kind is `not_connected`.
+ * closed: an unreadable ciphertext (wrong key, tampering) is `unavailable`, with nothing about
+ * why; a grant whose kind no longer matches the connector's auth kind is `not_connected`. An
+ * OAuth access token at or near expiry is refreshed first ({@link refreshAndReveal}); without
+ * `refresh` (no OAuth client wired) it is `unavailable`.
  */
 export async function revealCredential(
   db: KobeDb,
   envelope: Envelope,
   subject: Subject,
   now: Date = new Date(),
+  refresh?: OauthIo,
 ): Promise<RevealOutcome> {
-  const row = await withTeam(db, subject.teamId, async (tx) => {
-    const connector = await enabledConnector(tx, subject);
-    if (!connector || connector.authKind === "none") return "not_available" as const;
-    const [grant] = await tx
-      .select({
-        sealed: connectorGrants.sealed,
-        kind: connectorGrants.kind,
-        expiresAt: connectorGrants.expiresAt,
-      })
-      .from(connectorGrants)
-      .where(
-        and(
-          eq(connectorGrants.teamId, subject.teamId),
-          eq(connectorGrants.userId, subject.userId),
-          eq(connectorGrants.connectorId, subject.connectorId),
+  const row = await withTeam(db, subject.teamId, (tx) => loadGrant(tx, subject, false));
+  const refused = await refusal(db, subject, row);
+  if (refused) return refused;
+  const grant = row as GrantRow;
+  try {
+    if (needsRefresh(grant, now)) {
+      if (!refresh)
+        return isExpired(grant, now) ? UNAVAILABLE : await openRow(db, envelope, subject, grant);
+      return await refreshAndReveal(db, envelope, subject, now, refresh);
+    }
+    return await openRow(db, envelope, subject, grant);
+  } catch {
+    return UNAVAILABLE;
+  }
+}
+
+function bundleWithoutVersion(bundle: OauthBundle): Omit<OauthBundle, "v"> {
+  const { v: _v, ...rest } = bundle;
+  return rest;
+}
+
+const UNAVAILABLE: RevealOutcome = { ok: false, failure: "unavailable" };
+
+async function refusal(
+  db: KobeDb,
+  subject: Subject,
+  row: GrantLookup,
+): Promise<RevealOutcome | undefined> {
+  if (typeof row !== "string") return undefined;
+  if (row === "user_inactive") {
+    await auditRefusal(db, subject, "connector", "user_inactive");
+    return { ok: false, failure: "not_available" };
+  }
+  return { ok: false, failure: row };
+}
+
+/**
+ * Refreshes an OAuth grant under a row lock. The lock is what keeps replicas from both spending
+ * a rotating refresh token: the second caller blocks on `FOR UPDATE`, then re-reads the row,
+ * finds it fresh and serves what the first stored. A revoke (a DELETE of the row) queues behind
+ * the same lock and wins afterwards, so no token is stored after it. The authorization server
+ * is called with the lock held (10 s cap). A refresh the server rejects for good drops the grant
+ * and audits it (the user reconnects); a transient failure keeps it and serves the old token
+ * only if it has not actually expired.
+ */
+async function refreshAndReveal(
+  db: KobeDb,
+  envelope: Envelope,
+  subject: Subject,
+  now: Date,
+  io: OauthIo,
+): Promise<RevealOutcome> {
+  const result = await withTeam(
+    db,
+    subject.teamId,
+    async (tx): Promise<RevealOutcome | GrantRow> => {
+      const row = await loadGrant(tx, subject, true);
+      if (typeof row === "string") return (await refusal(db, subject, row)) as RevealOutcome;
+      if (!needsRefresh(row, now)) return row;
+      const bundle = parseOauthBundle(
+        envelope.openString(
+          row.sealed,
+          grantContext(subject.teamId, subject.userId, subject.connectorId),
         ),
       );
-    return grant && grant.kind === connector.authKind
-      ? { ...grant, connectorUrl: connector.url, connectorName: connector.name }
-      : ("not_connected" as const);
-  });
-  if (typeof row === "string") return { ok: false, failure: row };
-  if (row.kind === "oauth" && row.expiresAt !== null && row.expiresAt.getTime() <= now.getTime()) {
-    return { ok: false, failure: "unavailable" };
-  }
-  try {
-    const plaintext = envelope.openString(
-      row.sealed,
-      grantContext(subject.teamId, subject.userId, subject.connectorId),
-    );
-    if (row.kind !== "oauth")
-      return { ok: true, credential: { kind: "api_key", apiKey: plaintext } };
-    const bundle = parseOauthBundle(plaintext);
-    // The token was issued for one server. If the connector now points elsewhere (a URL change
-    // that left this grant behind), it must not be sent there.
-    if (!sameUrl(bundle.resource, row.connectorUrl)) {
-      await auditRefusal(db, subject, row.connectorName);
-      return { ok: false, failure: "unavailable" };
-    }
-    return { ok: true, credential: { kind: "oauth", accessToken: bundle.access_token } };
-  } catch {
-    return { ok: false, failure: "unavailable" };
-  }
+      if (!sameUrl(bundle.resource, row.connectorUrl)) return row;
+      const failed = async (reason: "rejected" | "no_refresh_token"): Promise<RevealOutcome> => {
+        await tx
+          .delete(connectorGrants)
+          .where(
+            and(
+              eq(connectorGrants.teamId, subject.teamId),
+              eq(connectorGrants.userId, subject.userId),
+              eq(connectorGrants.connectorId, subject.connectorId),
+            ),
+          );
+        await recordAudit(tx, {
+          action: "mcp.grant.refresh_failed",
+          actor: SYSTEM_ACTOR,
+          teamId: subject.teamId,
+          target: { connectorId: subject.connectorId, name: row.connectorName, reason },
+        });
+        return { ok: false, failure: "not_connected" };
+      };
+      if (bundle.refresh_token === undefined) {
+        return isExpired(row, now) ? failed("no_refresh_token") : row;
+      }
+      try {
+        const tokens = await refreshAccessToken(io, bundle, now);
+        const next = serializeOauthBundle({
+          ...bundleWithoutVersion(bundle),
+          access_token: tokens.accessToken,
+          refresh_token: tokens.refreshToken ?? bundle.refresh_token,
+          ...(tokens.scope === undefined ? {} : { scope: tokens.scope }),
+        });
+        const sealed = envelope.seal(
+          next,
+          grantContext(subject.teamId, subject.userId, subject.connectorId),
+        );
+        const [saved] = await tx
+          .update(connectorGrants)
+          .set({
+            sealed,
+            keyId: Envelope.keyIdOf(sealed),
+            expiresAt: tokens.expiresAt ?? null,
+            updatedAt: sql`now()`,
+          })
+          .where(
+            and(
+              eq(connectorGrants.teamId, subject.teamId),
+              eq(connectorGrants.userId, subject.userId),
+              eq(connectorGrants.connectorId, subject.connectorId),
+            ),
+          )
+          .returning({ id: connectorGrants.connectorId });
+        if (!saved) throw new Error("grant vanished under lock");
+        return { ok: true, credential: { kind: "oauth", accessToken: tokens.accessToken } };
+      } catch (error) {
+        if (error instanceof OauthError && error.code === "refresh_rejected")
+          return failed("rejected");
+        logger.warn(
+          {
+            connectorId: subject.connectorId,
+            code: error instanceof OauthError ? error.code : "error",
+          },
+          "oauth grant refresh failed; keeping the grant",
+        );
+        return isExpired(row, now) ? UNAVAILABLE : row;
+      }
+    },
+  );
+  if ("ok" in result) return result;
+  return openRow(db, envelope, subject, result);
 }
 
 /**
