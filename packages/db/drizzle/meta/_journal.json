@@ -617,6 +617,20 @@
       "when": 1791668279356,
       "tag": "0087_schedules_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1791672140030,
+      "tag": "0088_schedule_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1791672150486,
+      "tag": "0089_schedule_notifications_rls",
+      "breakpoints": true
     }
   ]
 }
