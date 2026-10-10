@@ -2424,6 +2424,66 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && "$(type -t chat_run)" == function ]]; then
   if [[ "${KOBE_E2E_TOOL_EXECUTOR:-}" == 1 ]]; then executor_sync_checks; fi
 fi
 
+# KOBE-241 (KOBE-111 ac-2): a real Pi makes an MCP call, the sandbox session tokens rotate past their
+# TTL, and the next MCP call in the same thread still succeeds. Pi resolves the Authorization header
+# only when it connects; the mcp-proxy answers 404 to an expired token on the kept Mcp-Session-Id, so
+# Pi reconnects, re-reads the rotated token file and retries. The install shortens the token TTL to
+# 15 s for this (server.sessionTokenTtlSeconds, 10..900); the 116 section below restores 900. The
+# owner's sandbox is hibernated first so its next wake trades tokens of the short TTL. Needs the MCP
+# fixture (connector e2e-fake) and the fake model.
+echo "==> real Pi past an MCP token rotation (KOBE-241)"
+if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && "$(type -t chat_run)" == function && -n "${MCP_CONNECTOR:-}" && -n "${owner_id:-}" ]]; then
+  ROT_TTL=15
+  ROT_AGENT=6a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d
+  rot_t0=$SECONDS
+  # A published personal agent of the owner: the assistant's definition plus the e2e-fake connector.
+  psql_kobe "DELETE FROM install_agents WHERE id = '$ROT_AGENT' AND current_version IS NULL;
+    INSERT INTO install_agents (id, scope, owner_user_id, slug, frontmatter, prompt)
+      SELECT '$ROT_AGENT', 'personal', '$owner_id', 'e2e-mcp-rotation',
+        (a.frontmatter - 'tools') || '{\"name\":\"E2E MCP rotation\",\"connectors\":[\"e2e-fake\"]}'::jsonb, a.prompt
+      FROM install_agents a WHERE a.gallery_key = 'assistant' ON CONFLICT DO NOTHING;
+    INSERT INTO install_agent_versions (agent_id, version, frontmatter, prompt, tool_manifest, draft_revision)
+      SELECT a.id, 1, a.frontmatter, a.prompt,
+        (SELECT v.tool_manifest FROM install_agent_versions v JOIN install_agents g ON g.id = v.agent_id AND v.version = g.current_version
+          WHERE g.gallery_key = 'assistant') || '{\"connectors\":[\"e2e-fake\"]}'::jsonb, 1
+      FROM install_agents a WHERE a.id = '$ROT_AGENT' ON CONFLICT DO NOTHING;
+    UPDATE install_agents SET current_version = 1 WHERE id = '$ROT_AGENT';" >/dev/null
+  contains "the owner has a published agent with the e2e-fake connector" '^1$' \
+    "$(psql_kobe "SELECT current_version FROM install_agents WHERE id = '$ROT_AGENT'")"
+  owner_lifecycle() { # hibernate|wake for the owner's sandbox
+    $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node dist/cli/lifecycle.js "$1" \
+      --team-id "$E2E_TEAM_ID" --user-id "$owner_id" 2>&1 | grep -E '^\{"(hibernated|woken)"' || true
+  }
+  owner_lifecycle hibernate >/dev/null
+  if out=$($HELM upgrade kobe charts/kobe -n "$NS" --reuse-values --wait --timeout 5m \
+      --set "server.sessionTokenTtlSeconds=$ROT_TTL" 2>&1); then ok "session tokens now live $ROT_TTL s (test install)"
+  else fail "session tokens now live $ROT_TTL s (test install): $out"; fi
+  rot_calls() { $KUBECTL -n "$MCP_NS" logs fake-mcp 2>&1 | grep -c '^CALL get_thing ' || true; }
+  rot_before=$(rot_calls)
+  rot_t1=$SECONDS
+  rot1=$(chat_run 'tool: mcp__e2e_fake__get_thing {"id":"101"}' 240000 "" "$ROT_AGENT" "" 1)
+  printf '     rotation, before: %s\n' "$(printf '%s' "$rot1" | grep -v '^text=' | tr '\n' ' ' | cut -c1-300)"
+  rot_thread=$(printf '%s\n' "$rot1" | sed -n 's/^thread_id=//p')
+  contains "before the rotation: Pi's MCP call through the proxy succeeded" '^terminal=run.completed$' "$rot1"
+  contains "before the rotation: the model saw the fake server's answer" 'tool said: .*fake:get_thing' "$rot1"
+  rot_t2=$SECONDS
+  # Past the token's life: the token Pi connected with is now expired, the file holds a newer one.
+  sleep $((ROT_TTL + 2))
+  rot2=$(chat_run 'tool: mcp__e2e_fake__get_thing {"id":"102"}' 240000 "" "$ROT_AGENT" "$rot_thread" 1)
+  printf '     rotation, after: %s\n' "$(printf '%s' "$rot2" | grep -v '^text=' | tr '\n' ' ' | cut -c1-300)"
+  contains "after the rotation: the same thread's MCP call succeeded" '^terminal=run.completed$' "$rot2"
+  contains "after the rotation: the model saw the fake server's answer" 'tool said: .*fake:get_thing' "$rot2"
+  contains "each call ran exactly once on the fake MCP server (a 404 retry never runs the call twice)" '^2$' "$(( $(rot_calls) - rot_before ))"
+  contains "the mcp-proxy answered an expired token on the live session with 404 (Pi reconnected)" '^[1-9][0-9]*$' \
+    "$($KUBECTL -n "$NS" logs -l app.kubernetes.io/component=mcp-proxy --tail=-1 --since=15m 2>/dev/null \
+      | grep -c 'expired token on a live session; answered 404' || true)"
+  printf '     rotation e2e: %ss in all (setup %ss, first run %ss)\n' "$((SECONDS - rot_t0))" "$((rot_t1 - rot_t0))" "$((rot_t2 - rot_t1))"
+elif [[ "${CI:-}" == "true" ]]; then
+  fail "the MCP token rotation check needs KOBE_SANDBOX_IMAGE, the MCP fixture and the model setup"
+else
+  echo "SKIP MCP token rotation check (KOBE-241: needs the MCP fixture and the model setup)"
+fi
+
 echo "==> chart upgrade reaches an awake sandbox (KOBE-116)"
 if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_id:-}" ]]; then
   # Exit status = reachability, from the real agent container; --noproxy: the pod's HTTP_PROXY
@@ -2443,7 +2503,8 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_id:-}" ]]; then
     done | grep '"msg":"team namespaces reconciled"' | grep '"policyChanged":[1-9]' | tail -n 1 || true
   }
   upgrade_gateway_access() { # true|false → sets the flag; prints the helm output
-    $HELM upgrade kobe charts/kobe -n "$NS" --reuse-values --wait --timeout 5m --set "sandbox.modelGatewayAccess=$1" 2>&1
+    $HELM upgrade kobe charts/kobe -n "$NS" --reuse-values --wait --timeout 5m \
+      --set "sandbox.modelGatewayAccess=$1" --set server.sessionTokenTtlSeconds=900 2>&1
   }
 
   mg_url="http://$(svc_ip kobe-model-gateway)/healthz"
