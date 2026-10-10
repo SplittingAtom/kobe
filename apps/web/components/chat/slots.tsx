@@ -9,7 +9,7 @@
  *   `POST /v1/approvals/{id}`.
  * - `ArtifactSlot` (KOBE-55): `artifact.created` / `artifact.updated`, on a tool call or on its own
  *   (run notice). The notice has an Open button for the artifact panel (KOBE-130).
- * - `FileSlot` (KOBE-54): `file.shared`; KOBE-54 renders the download card.
+ * - `FileCard` (KOBE-152, `file-card.tsx`): `file.shared`, a download card.
  * - `NoticeSlot`: run-level notices not tied to a tool call (`egress.blocked`, `steer.applied`,
  *   `memory.updated` (KOBE-56 adds Undo), `context.omitted` (KOBE-77), artifacts and files shared outside a tool call).
  */
@@ -18,6 +18,7 @@ import type { KobeEventPayload } from "@kobe/protocol";
 import type { RunNotice, ToolActivity } from "../../lib/chat/live";
 import { ApprovalCard } from "./approval-card";
 import { OpenArtifactButton } from "./artifact-panel";
+import { FileCard } from "./file-card";
 import { ConnectedEgressNotice } from "./egress-notice";
 import { OmissionNotice } from "./omission-notice";
 import { ChatSessionContext } from "./kobe-runtime";
@@ -52,20 +53,6 @@ export function ArtifactSlot({ artifact }: { readonly artifact: ArtifactPayload 
   );
 }
 
-function formatBytes(size: number): string {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-export function FileSlot({ file }: { readonly file: KobeEventPayload<"file.shared"> }) {
-  return (
-    <p className={styles.notice}>
-      File shared: {file.name} ({formatBytes(file.size)})
-    </p>
-  );
-}
-
 export function NoticeSlot({ notice }: { readonly notice: RunNotice }) {
   switch (notice.type) {
     case "egress.blocked":
@@ -84,7 +71,7 @@ export function NoticeSlot({ notice }: { readonly notice: RunNotice }) {
     case "artifact.updated":
       return <ArtifactSlot artifact={notice.payload} />;
     case "file.shared":
-      return <FileSlot file={notice.payload} />;
+      return <FileCard file={notice.payload} />;
   }
 }
 
@@ -96,3 +83,5 @@ export function EgressBlocked({
 }) {
   return <ConnectedEgressNotice payload={payload} />;
 }
+
+export { FileCard as FileSlot };

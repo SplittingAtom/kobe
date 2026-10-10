@@ -402,6 +402,20 @@ describe("tools/call", () => {
     expect(fake.received).toEqual([]);
   });
 
+  it.each([
+    ["connector_not_enabled", "This connector is not enabled in your team."],
+    ["connector_exposure", "create_issue is not exposed to agents in your team (read-only)."],
+  ] as const)(
+    "runs nothing upstream and says why when the team's exposure refuses (%s, KOBE-106)",
+    async (code, message) => {
+      server.next = () => ({ ok: true, value: { decision: "deny", code, message } });
+      const res = await rpc("tools/call", { name: "create_issue", arguments: { a: "x" } });
+      expect(res.json?.result.isError).toBe(true);
+      expect(res.json?.result.content[0].text).toContain(message);
+      expect(fake.received).toEqual([]);
+    },
+  );
+
   it("runs nothing upstream when the server cannot be reached (fail closed)", async () => {
     server.next = () => ({ ok: false, failure: "unavailable" });
     const res = await rpc("tools/call", { name: "create_issue", arguments: {} });
