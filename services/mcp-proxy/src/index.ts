@@ -28,7 +28,7 @@ const app = createApp(
     sessionKey: config.sessionKey,
     server: policyServer,
     upstream,
-    // Per-user API-key grants from the server (KOBE-108); OAuth grants arrive with KOBE-61.
+    // Per-user API-key and OAuth grants from the server (KOBE-108, KOBE-109).
     credentials: createServerCredentials(policyServer),
     limiter: createLimiter({
       burst: config.limits.requestBurst,

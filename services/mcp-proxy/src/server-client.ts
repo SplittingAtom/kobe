@@ -73,12 +73,15 @@ export type ServerAnswer<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly failure: ServerFailure };
 
-const grantSchema = z.object({ kind: z.literal("api_key"), api_key: z.string().min(1) });
+const grantSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("api_key"), api_key: z.string().min(1) }),
+  z.object({ kind: z.literal("oauth"), access_token: z.string().min(1) }),
+]);
 
 export interface PolicyServer {
   listTools(token: string, connectorId: string): Promise<ServerAnswer<ToolsResponse>>;
   decide(token: string, query: CallQuery): Promise<ServerAnswer<CallDecision>>;
-  /** The sandbox's own user's API key for a connector (KOBE-108); never cached. */
+  /** The sandbox's own user's API key or OAuth access token for a connector; never cached. */
   fetchGrant(token: string, connectorId: string): Promise<GrantAnswer>;
 }
 
@@ -163,7 +166,13 @@ export function createPolicyServer(options: PolicyServerOptions): PolicyServer {
       }
       const parsed = grantSchema.safeParse(await res.json());
       if (!parsed.success) return { ok: false, failure: "unavailable" };
-      return { ok: true, value: { kind: "api_key", apiKey: parsed.data.api_key } };
+      return {
+        ok: true,
+        value:
+          parsed.data.kind === "oauth"
+            ? { kind: "oauth", accessToken: parsed.data.access_token }
+            : { kind: "api_key", apiKey: parsed.data.api_key },
+      };
     } catch (error) {
       options.onError?.(error);
       return { ok: false, failure: "unavailable" };
