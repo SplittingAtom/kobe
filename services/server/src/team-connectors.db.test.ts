@@ -78,6 +78,8 @@ describe("off by default", () => {
     const res = await admin.get(BASE);
     expect(res.status).toBe(200);
     expect(await state(admin)).toMatchObject({ name: "jira", enabled: false, exposure: null });
+    // KOBE-105: every tool states whether it is open-world (MCP default: yes).
+    for (const t of (await state(admin)).tools) expect(typeof t.open_world).toBe("boolean");
     expect(await state(member)).toMatchObject({ enabled: false });
     const facts = await withTeam(h.deps.database.db, teamA, (tx) => loadTeamFacts(tx, teamA));
     expect(facts.connectors).toEqual([]);
