@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 import {
   CAPABILITY_ARTIFACTS,
+  CAPABILITY_FILES,
   PI_PINNED_VERSION,
   SANDBOX_CLOSE_CODES,
   decodeSandboxFrame,
   type ArtifactPutFrame,
   type CommandResultFrame,
+  type FileShareFrame,
   type HelloFrame,
   type PiEventFrame,
   type PolicyCheckFrame,
@@ -24,6 +26,7 @@ import { CommandDelivery, type IssuedCommand } from "./delivery.js";
 import { RunIngest } from "./ingest.js";
 import { AllowedArtifactCalls } from "../artifacts/allowed.js";
 import { putArtifact } from "../artifacts/put.js";
+import { shareFile } from "../files/share.js";
 import { decidePolicyCheck, denyFrame } from "./policy-check.js";
 import type { ConnectionRegistry, RegisteredConnection } from "./registry.js";
 import { activeLeasedRuns, endRunInTx, type InterruptCause } from "./run-state.js";
@@ -89,6 +92,7 @@ export class SandboxConnection implements RegisteredConnection {
   /** Artifact tool calls this connection's policy checks allowed (D-3 of KOBE-55). */
   readonly #allowedArtifacts = new AllowedArtifactCalls();
   #artifactPuts = 0;
+  #fileShares = 0;
   readonly #deniedBuckets = new Map<string, { tokens: number; at: number }>();
   readonly #delivery: CommandDelivery;
   #state: State = "hello";
@@ -368,6 +372,9 @@ export class SandboxConnection implements RegisteredConnection {
       case "artifact.put":
         this.#onArtifactPut(frame);
         return;
+      case "file.share":
+        this.#onFileShare(frame);
+        return;
       case "command.result":
         this.#onCommandResult(frame);
         return;
@@ -602,6 +609,95 @@ export class SandboxConnection implements RegisteredConnection {
           ok: false,
           error: { code: result.code, message: result.message },
         });
+      });
+  }
+
+  /**
+   * `file.share` (KOBE-150). Accepted only if this connection announced `files`, the run is
+   * leased here and active, and this `share_file` call was allowed here with the same canonical
+   * input hash (D-3). The manifest check, copy, quota, row and event are in `shareFile`. Every
+   * refusal is audited (no names or content) and answered with `file.share_result`.
+   */
+  #onFileShare(frame: FileShareFrame): void {
+    const answer = (result: Parameters<SandboxConnection["send"]>[0]) => this.send(result);
+    const fail = (code: string, message: string) =>
+      answer({
+        v: 1,
+        type: "file.share_result",
+        request_id: frame.request_id,
+        ok: false,
+        error: { code, message },
+      });
+    const refuse = (
+      reason: Parameters<WireContext["auditFileShareRefused"]>[2]["reason"],
+      message: string,
+    ) => {
+      this.#ctx.auditFileShareRefused(this.target, this.sandboxId, {
+        reason,
+        runId: frame.run_id,
+        toolCallId: frame.tool_call_id,
+      });
+      fail("not_allowed", message);
+    };
+    if (!this.hasCapability(CAPABILITY_FILES)) {
+      refuse("capability_missing", "This sandbox did not announce file sharing.");
+      return;
+    }
+    const check = this.#checkRun(frame.run_id, frame.thread_id, "file.share");
+    if (check === "violation") return;
+    if (check === "ended") {
+      refuse("run_not_active", "The run has ended, so the file was not shared.");
+      return;
+    }
+    const verdict = this.#allowedArtifacts.check(
+      frame.run_id,
+      frame.tool_call_id,
+      frame.tool,
+      frame.input,
+    );
+    if (verdict !== "ok") {
+      refuse(
+        verdict,
+        verdict === "input_mismatch"
+          ? "The file differs from the call that was allowed."
+          : "This tool call was not allowed for this tool.",
+      );
+      return;
+    }
+    if (this.#fileShares >= this.#ctx.tuning.maxPendingArtifactPuts) {
+      fail("storage_failed", "Too many files are being shared. Try again.");
+      return;
+    }
+    this.#fileShares += 1;
+    void shareFile(this.#ctx.fileShare, this.target, frame)
+      .catch((err: unknown) => {
+        this.log.error({ err }, "file.share failed");
+        return {
+          ok: false,
+          code: "storage_failed",
+          message: "The file could not be shared. Try again.",
+        } as const;
+      })
+      .then((result) => {
+        this.#fileShares -= 1;
+        if (result.ok) {
+          answer({
+            v: 1,
+            type: "file.share_result",
+            request_id: frame.request_id,
+            ok: true,
+            ...result.file,
+          });
+          return;
+        }
+        if ("refusal" in result && result.refusal) {
+          this.#ctx.auditFileShareRefused(this.target, this.sandboxId, {
+            reason: result.refusal,
+            runId: frame.run_id,
+            toolCallId: frame.tool_call_id,
+          });
+        }
+        fail(result.code, result.message);
       });
   }
 
