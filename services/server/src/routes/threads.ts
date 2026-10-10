@@ -17,6 +17,7 @@ import {
   resolveAgentPin,
   resolveDraftPin,
 } from "../agents/versions.js";
+import { projectDefaultAgent } from "../projects/run-context.js";
 import { canCreateInProject, viewerProjectIds } from "../threads/references.js";
 import {
   clearTestThreads,
@@ -132,7 +133,7 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     const teamId = c.get("team").id;
     const userId = c.get("user").id;
     return withTeam(db, teamId, async (tx) =>
-      fn(tx, { teamId, userId, projectIds: await viewerProjectIds(tx, userId) }),
+      fn(tx, { teamId, userId, projectIds: await viewerProjectIds(tx, teamId, userId) }),
     );
   };
 
@@ -201,7 +202,7 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     const actor = { userId: c.get("user").id, role: c.get("team").role };
     const result = await asViewer(c, async (tx, viewer) => {
       const projectId = body.project_id ?? null;
-      if (projectId !== null && !(await canCreateInProject(tx, viewer.userId, projectId))) {
+      if (projectId !== null && !(await canCreateInProject(tx, viewer, projectId))) {
         return "project_not_found" as const;
       }
       // D19: the thread pins the agent's current published version.
@@ -209,7 +210,11 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
       const pin =
         test && body.agent_id
           ? await resolveDraftPin(tx, viewer, actor, body.agent_id)
-          : await resolveAgentPin(tx, viewer, body.agent_id ?? null);
+          : await resolveAgentPin(
+              tx,
+              viewer,
+              body.agent_id ?? (await projectDefaultAgent(tx, viewer, projectId)),
+            );
       if (!pin.ok) return pin.error;
       const model = body.model ?? null;
       if (model !== null && !(await isModelEnabled(tx, viewer.teamId, model))) {

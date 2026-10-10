@@ -1,4 +1,6 @@
-import type { Envelope, KobeDb, PinnedTool } from "@kobe/db";
+import { withTeam, type Envelope, type KobeDb, type PinnedTool } from "@kobe/db";
+import { recordAudit } from "../audit/record.js";
+import { logger } from "../logger.js";
 import { revealApiKey, type RevealOutcome } from "../connectors/grants.js";
 import { createRateLimiter } from "../sandbox/rate-limit.js";
 import type { RunPolicyContextSource } from "../sandbox-wire/types.js";
@@ -43,6 +45,33 @@ export interface McpServiceOptions {
   readonly now?: () => Date;
 }
 
+/** A `tools/list` for a connector the team has not enabled: audited, throttled like denied calls. */
+async function auditListRefused(
+  db: KobeDb,
+  principal: McpPrincipal,
+  connectorId: string,
+  limiter: ReturnType<typeof createRateLimiter>,
+): Promise<void> {
+  if (limiter.take(principal.sandboxId) !== 0) return;
+  try {
+    await withTeam(db, principal.teamId, (tx) =>
+      recordAudit(tx, {
+        action: "mcp.list_refused",
+        teamId: principal.teamId,
+        actor: { kind: "user", id: principal.userId },
+        target: {
+          sandboxId: principal.sandboxId,
+          userId: principal.userId,
+          connectorId,
+          reason: "connector_not_enabled",
+        },
+      }),
+    );
+  } catch (err) {
+    logger.error({ err }, "mcp: refused tools/list could not be audited");
+  }
+}
+
 export function createMcpService(options: McpServiceOptions): McpService {
   const deniedAudits = createRateLimiter(DENIED_AUDIT_RATE);
   const deps = {
@@ -56,7 +85,10 @@ export function createMcpService(options: McpServiceOptions): McpService {
   return {
     async listTools(principal, connectorId) {
       const connector = await loadTeamConnector(options.db, principal.teamId, connectorId);
-      if (!connector) return undefined;
+      if (!connector) {
+        await auditListRefused(options.db, principal, connectorId, deniedAudits);
+        return undefined;
+      }
       return {
         connector: { id: connector.id, name: connector.name },
         tools: exposedTools(connector),

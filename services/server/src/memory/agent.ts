@@ -57,13 +57,6 @@ import { readSwitches } from "./switches.js";
  *   (reason only); never paths or content.
  */
 
-export type ProjectAccess = (
-  tx: KobeTx,
-  teamId: string,
-  userId: string,
-  projectId: string,
-) => Promise<boolean>;
-
 export interface MemoryAgentDeps {
   readonly db: KobeDb;
   readonly blobs: BlobStore | undefined;
@@ -71,8 +64,6 @@ export interface MemoryAgentDeps {
   readonly approvals: ApprovalBroker;
   readonly verifier: ApprovalVerifier | undefined;
   readonly log: Logger;
-  /** Project membership; default {@link canAccessProject}. */
-  readonly projectAccess?: ProjectAccess;
 }
 
 export type MemoryReply = MemoryToolsResponse extends infer R
@@ -158,7 +149,7 @@ async function gate(
   }
   if (scope === "user") return { ok: true, target: { scope, ownerUserId: c.userId } };
   if (run.projectId === null) return { ok: false, reason: "no_project", reply: NO_PROJECT };
-  const access = deps.projectAccess ?? canAccessProject;
+  const access = canAccessProject;
   if (!(await access(tx, c.teamId, c.userId, run.projectId))) {
     return { ok: false, reason: "not_a_member", reply: NOT_MEMBER };
   }
@@ -546,7 +537,7 @@ async function targetsFor(
       targets.push({ scope, ownerUserId: req.userId });
       continue;
     }
-    const access = deps.projectAccess ?? canAccessProject;
+    const access = canAccessProject;
     if (run.projectId === null || !(await access(tx, req.teamId, req.userId, run.projectId))) {
       if (req.input.scope) {
         return run.projectId === null
@@ -650,7 +641,7 @@ const indexOf = (content: string) => {
  * RLS; the caller treats a throw as "no memory context" (the server still enforces every call).
  */
 export async function buildRunMemory(
-  deps: Pick<MemoryAgentDeps, "db" | "blobs" | "projectAccess">,
+  deps: Pick<MemoryAgentDeps, "db" | "blobs">,
   caller: { teamId: string; userId: string; threadId: string },
 ): Promise<RunMemoryContext> {
   return withTeam(deps.db, caller.teamId, async (tx) => {
@@ -662,7 +653,7 @@ export async function buildRunMemory(
         SELECT project_id FROM threads
          WHERE team_id = ${caller.teamId} AND id = ${caller.threadId}`);
       const projectId = res.rows[0]?.project_id;
-      const access = deps.projectAccess ?? canAccessProject;
+      const access = canAccessProject;
       if (projectId && (await access(tx, caller.teamId, caller.userId, projectId))) {
         targets.push({ scope: "project", projectId });
       }

@@ -5,6 +5,7 @@ import {
   gt,
   installSettings,
   teams,
+  withTeam,
   type KobeDb,
   type KobeTx,
 } from "@kobe/db";
@@ -14,6 +15,9 @@ import { recordAudit } from "../audit/record.js";
 import { deleteReleasedBlobs, type BlobDeletionCounts, type BlobStore } from "./blobs.js";
 import { expireOrphanUploads, type ExpiredUploads } from "../uploads/expire.js";
 import { DEFAULT_ORPHAN_HOURS } from "../uploads/settings.js";
+import { NO_MEMORY_PURGE, purgeMemory, type MemoryPurgeCounts } from "./memory.js";
+import { PERIOD_DAYS, effectiveAt } from "./periods.js";
+import { readMaximumLayer, readTeamLayer } from "./settings.js";
 import { compactRunEvents, type CompactionCounts } from "./compaction.js";
 import {
   NO_PURGE,
@@ -29,8 +33,10 @@ import {
  *  1. purge threads 30 days in Trash (and those the owner deleted for good while held);
  *  2. purge threads past the team's effective retention period (team period capped by the
  *     install maximum; nothing when forever);
- *  3. compact the live events of runs that ended more than 7 days ago;
- *  4. delete the object-store keys purges released.
+ *  3. purge memory (D24, KOBE-188): superseded versions and files deleted longer ago than the
+ *     team's window, never a live file (needs object storage);
+ *  4. compact the live events of runs that ended more than 7 days ago;
+ *  5. delete the object-store keys purges released.
  * Every step skips data under legal hold and is audited with counts only (system actor).
  *
  * Every server replica runs the timer; a session-level advisory lock on a dedicated connection
@@ -54,6 +60,7 @@ export interface TeamPassResult {
   readonly teamId: string;
   readonly trash: PurgeCounts;
   readonly retention: PurgeCounts;
+  readonly memory: MemoryPurgeCounts;
   readonly compacted: CompactionCounts;
   readonly blobs: BlobDeletionCounts;
   /** Uploads without a thread deleted after the orphan window (KOBE-143). */
@@ -128,6 +135,43 @@ function logHeld(deps: PassDeps, teamId: string, step: string, outcome: PurgeOut
     deps.logger.warn({ teamId, step }, "retention purge skipped: held");
 }
 
+/** The team's effective retention window in days (null: forever), read at the start of the step. */
+async function windowDays(db: KobeDb, teamId: string): Promise<number | null> {
+  return withTeam(
+    db,
+    teamId,
+    async (tx) =>
+      PERIOD_DAYS[
+        effectiveAt(await readTeamLayer(tx, teamId), await readMaximumLayer(tx), new Date())
+      ],
+  );
+}
+
+/** Memory past the window: deleted files first (all their versions), then superseded versions. */
+async function purgeMemoryPastWindow(
+  deps: PassDeps,
+  teamId: string,
+  stop: () => boolean,
+): Promise<MemoryPurgeCounts> {
+  const days = await windowDays(deps.db, teamId);
+  if (days === null || !deps.blobs) return NO_MEMORY_PURGE;
+  const cutoff = new Date(Date.now() - days * 86_400_000);
+  const docs = await purgeMemory(deps.db, teamId, deps.blobs, { kind: "docs", cutoff }, { stop });
+  if (stop()) return docs;
+  const versions = await purgeMemory(
+    deps.db,
+    teamId,
+    deps.blobs,
+    { kind: "versions", cutoff },
+    { stop },
+  );
+  return {
+    docs: docs.docs + versions.docs,
+    versions: docs.versions + versions.versions,
+    blobs: docs.blobs + versions.blobs,
+  };
+}
+
 async function teamPass(
   deps: PassDeps,
   teamId: string,
@@ -158,6 +202,9 @@ async function teamPass(
   const retention = stop()
     ? NO_PURGE
     : await step("retention", NO_PURGE, () => run({ kind: "retention" }, "retention"));
+  const memory = stop()
+    ? NO_MEMORY_PURGE
+    : await step("memory", NO_MEMORY_PURGE, () => purgeMemoryPastWindow(deps, teamId, stop));
   const compacted = stop()
     ? { runs: 0, events: 0 }
     : await step("compaction", { runs: 0, events: 0 }, () =>
@@ -183,7 +230,7 @@ async function teamPass(
           ),
         )
       : { files: 0, bytes: 0 };
-  return { teamId, trash, retention, compacted, blobs, uploads, failed };
+  return { teamId, trash, retention, memory, compacted, blobs, uploads, failed };
 }
 
 export interface PassOptions {

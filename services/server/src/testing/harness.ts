@@ -18,6 +18,8 @@ export interface Harness {
   readonly mailer: MemoryMailer;
   /** Superuser connection for assertions and test-only setup (bypasses RLS). */
   readonly admin: pg.Client;
+  /** Superuser URL of the same database, for extra sessions (locks held across calls). */
+  readonly adminUrl: string;
   /** App-role URL of the test database (LISTEN connections). */
   readonly appUrl: string;
   browser(): TestBrowser;
@@ -65,6 +67,7 @@ export async function openHarness(
     app,
     mailer,
     admin,
+    adminUrl: database.adminUrl,
     appUrl: database.appUrl,
     browser,
     async createUser(email, installRole) {

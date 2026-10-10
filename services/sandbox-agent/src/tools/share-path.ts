@@ -1,6 +1,6 @@
-import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 import { FILE_SHARE_MAX_BYTES, isExcludedPath, workspacePathIssue } from "@kobe/protocol";
+import { confineFile, ConfineError } from "../workspace-confine.js";
 
 /**
  * Path confinement for `share_file` (KOBE-149). The model names a path; before anything is read or
@@ -8,11 +8,9 @@ import { FILE_SHARE_MAX_BYTES, isExcludedPath, workspacePathIssue } from "@kobe/
  *
  * 1. lexical: relative, or absolute under the workspace root; no `..`, control characters or
  *    backslashes (`workspacePathIssue`); not under `.kobe/` (the agent's own data);
- * 2. physical: `realpath` of the target must equal `realpath(root)/rel` exactly. Any symlink in
- *    any component (to outside, or to elsewhere inside) changes the real path, so it is refused:
- *    nothing is followed. Fail closed on every filesystem error;
- * 3. the target is a regular file (lstat: no FIFO, device, socket, directory) of at most
- *    {@link FILE_SHARE_MAX_BYTES}.
+ * 2. physical: the shared `workspace-confine.ts` check (no symlink in any component, a regular
+ *    file; fail closed on every filesystem error);
+ * 3. the target is at most {@link FILE_SHARE_MAX_BYTES}.
  *
  * This is a check; the push itself (`WorkspaceSync.pushPath`) re-opens the file with
  * `O_NOFOLLOW` and verifies the volume, so a swap after this check is caught there.
@@ -61,39 +59,18 @@ function lexicalRel(root: string, input: string): string {
 
 export async function resolveSharePath(root: string, input: string): Promise<ResolvedSharePath> {
   const rel = lexicalRel(root, input);
-  const target = path.join(root, rel);
-  // A symlink as the final component (even a dangling one) is refused as such, not as missing.
-  const final = await lstat(target).catch((error: NodeJS.ErrnoException) => error);
-  if (final instanceof Error) {
-    if (final.code === "ENOENT" || final.code === "ENOTDIR") {
-      throw new SharePathError("not_found", `no such file in the workspace: ${rel}`);
-    }
-    throw new SharePathError("invalid_path", `cannot resolve ${rel}`);
-  }
-  if (final.isSymbolicLink()) {
-    throw new SharePathError("invalid_path", "the path is a symbolic link");
-  }
-  let real: string;
-  let realRoot: string;
+  let file;
   try {
-    realRoot = await realpath(root);
-    real = await realpath(target);
+    file = await confineFile(root, rel, { allowMissing: false });
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new SharePathError("not_found", `no such file in the workspace: ${rel}`);
-    }
-    throw new SharePathError("invalid_path", `cannot resolve ${rel}`);
+    if (error instanceof ConfineError) throw new SharePathError(error.code, error.message);
+    throw error;
   }
-  if (real !== path.join(realRoot, rel)) {
-    throw new SharePathError("invalid_path", "the path goes through a symbolic link");
-  }
-  const stat = final;
-  if (!stat.isFile()) throw new SharePathError("invalid_path", `${rel} is not a regular file`);
-  if (stat.size > FILE_SHARE_MAX_BYTES) {
+  if (file.size > FILE_SHARE_MAX_BYTES) {
     throw new SharePathError(
       "too_large",
-      `${rel} is ${stat.size} bytes; the limit is ${FILE_SHARE_MAX_BYTES}`,
+      `${rel} is ${file.size} bytes; the limit is ${FILE_SHARE_MAX_BYTES}`,
     );
   }
-  return { rel, size: stat.size };
+  return { rel, size: file.size };
 }

@@ -23,6 +23,8 @@ export interface TeamConnectorToolView {
   readonly name: string;
   readonly title: string | null;
   readonly read_only: boolean;
+  /** MCP default: a tool is open-world unless it says openWorldHint: false. */
+  readonly open_world: boolean;
   readonly status: "pinned" | "drifted";
 }
 
@@ -56,6 +58,7 @@ function view(row: Row, e: Enablement | undefined): TeamConnectorView {
       name: t.name,
       title: t.title ?? t.annotations.title ?? null,
       read_only: t.annotations.readOnlyHint === true,
+      open_world: t.annotations.openWorldHint !== false,
       status: t.status,
     })),
   };

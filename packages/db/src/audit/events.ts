@@ -477,6 +477,8 @@ export const AUDIT_EVENTS = {
     model: providerModel.optional(),
     /** Its prices were set or changed (KOBE-43; the amounts are in the catalog). */
     pricesChanged: z.boolean().optional(),
+    /** Its input modalities (image input, KOBE-191) changed. */
+    imageSupportChanged: z.boolean().optional(),
   }),
   /** A team admin enabled or disabled a catalog alias for the team, or changed its default. */
   "models.team.changed": event("team", {
@@ -551,10 +553,38 @@ export const AUDIT_EVENTS = {
     approvalFailure: z.enum(MCP_APPROVAL_FAILURES).optional(),
   }),
 
+  /**
+   * The MCP proxy asked for the tools of a connector the team has not enabled (KOBE-106); nothing
+   * is listed. Throttled per sandbox like denied calls.
+   */
+  "mcp.list_refused": event("team", {
+    sandboxId: id,
+    userId: id,
+    connectorId: id,
+    reason: reasonCode,
+  }),
+
   // ── thread: lifecycle metadata only, never titles or content (KOBE-34, D18, D23) ──
   "thread.trashed": event("team", { threadId: id }),
   "thread.restored": event("team", { threadId: id }),
   "thread.sharing_changed": event("team", { threadId: id, projectId: id, shared: z.boolean() }),
+  // ── project: configuration metadata only, never names, instructions or descriptions (KOBE-161, D23) ──
+  "project.created": event("team", { projectId: id, membersMode: z.enum(["team", "selected"]) }),
+  /** `fields` lists which settings changed (names, not values). */
+  "project.updated": event("team", { projectId: id, fields: z.array(z.string().max(40)).max(10) }),
+  "project.deleted": event("team", { projectId: id }),
+  "project.member_added": event("team", {
+    projectId: id,
+    userId: id,
+    role: z.enum(["owner", "member"]),
+  }),
+  "project.member_removed": event("team", { projectId: id, userId: id }),
+  "project.member_role_changed": event("team", {
+    projectId: id,
+    userId: id,
+    from: z.enum(["owner", "member"]),
+    to: z.enum(["owner", "member"]),
+  }),
   /** The thread's chosen model changed (KOBE-44, D30); null = the team's default. */
   "thread.model_changed": event("team", {
     threadId: id,
@@ -620,6 +650,18 @@ export const AUDIT_EVENTS = {
   }),
   /** Ended runs' live events folded away 7 days after the run (system; entries keep the content). */
   "retention.compacted": event("team", { runs: count, events: count }),
+  /**
+   * Memory purged (system; KOBE-188, D24): superseded versions and long-deleted files past the
+   * team's window (`retention`), or a departed member's personal memory (`offboarding`, `userId`).
+   * Counts only, never paths or content; live files and held owners' memory are never in a batch.
+   */
+  "retention.memory_purged": event("team", {
+    reason: z.enum(["retention", "offboarding"]),
+    docs: count,
+    versions: count,
+    blobs: count,
+    userId: id.optional(),
+  }),
   /** Objects of purged rows deleted from object storage (system); `kept`: still referenced. */
   "retention.blobs_deleted": event("team", { blobs: count, kept: count }),
 
@@ -1120,6 +1162,17 @@ export const AUDIT_EVENTS = {
   "mcp.grant.replaced": event("team", { connectorId: id, name: z.string().max(64) }),
   /** A user removed their API key for a connector. */
   "mcp.grant.removed": event("team", { connectorId: id, name: z.string().max(64) }),
+  // ── web search (KOBE-113): provider and switches only, never the key or its hint ──
+  /** An install admin set the web search provider, its enabled switch, or replaced its key. */
+  "mcp.web_search.configured": event("install", {
+    provider: z.enum(["brave", "tavily", "exa"]),
+    enabled: z.boolean(),
+    keyChanged: z.boolean(),
+  }),
+  /** An install admin removed the web search provider. */
+  "mcp.web_search.removed": event("install", { provider: z.enum(["brave", "tavily", "exa"]) }),
+  /** A team admin turned web search on or off for the team. */
+  "mcp.web_search.team_changed": event("team", { enabled: z.boolean() }),
 } as const;
 
 export type AuditAction = keyof typeof AUDIT_EVENTS;

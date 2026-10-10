@@ -50,7 +50,7 @@ export function threadPendingRoutes(deps: ServerDeps): Hono<{ Variables: TeamVar
     const teamId = c.get("team").id;
     const userId = c.get("user").id;
     const body = await withTeam(deps.database.db, teamId, async (tx) => {
-      const viewer = { teamId, userId, projectIds: await viewerProjectIds(tx, userId) };
+      const viewer = { teamId, userId, projectIds: await viewerProjectIds(tx, teamId, userId) };
       const found = await findThread(tx, viewer, threadId);
       if (!found) return null;
       const owner = found.access === "owner";

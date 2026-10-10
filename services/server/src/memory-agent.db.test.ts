@@ -26,8 +26,6 @@ const KEY = approvalKeyring("approval-key-for-tests-".padEnd(48, "k"));
 const sandboxes: FakeSandbox[] = [];
 let listener: Awaited<ReturnType<typeof sandboxListener>>;
 
-/** Users who count as members of any project (the real check lands with KOBE-161). */
-const members = new Set<string>();
 /** When set, the policy check itself asks for approval of project writes. */
 let askProject = false;
 
@@ -57,7 +55,6 @@ beforeAll(async () => {
     sandboxWire: {
       engine,
       sweep: false,
-      projectAccess: (_tx, _team, userId) => Promise.resolve(members.has(userId)),
       tuning: { batchWindowMs: 20, resultPollMs: 200, lostGraceMs: 0, helloTimeoutMs: 1_000 },
     },
   }));
@@ -114,11 +111,11 @@ async function started(w: World, capabilities: readonly string[] = [CAPABILITY_M
   return sb;
 }
 
-/** Puts the world's thread into a new project (rows by SQL; membership is the `members` set). */
+/** Puts the world's thread into a new project (rows by SQL, members_mode `selected`: only `join`ed users are members, team admins are not). */
 async function inProject(w: World): Promise<string> {
   const id = randomUUID();
   await fx.admin.query(
-    `INSERT INTO projects (team_id, id, slug, name, created_by) VALUES ($1, $2, $3, 'P', $4)`,
+    `INSERT INTO projects (team_id, id, slug, name, created_by, members_mode) VALUES ($1, $2, $3, 'P', $4, 'selected')`,
     [w.team, id, `p-${randomBytes(3).toString("hex")}`, w.owner.id],
   );
   await fx.admin.query(`UPDATE threads SET project_id = $3 WHERE team_id = $1 AND id = $2`, [
@@ -127,6 +124,16 @@ async function inProject(w: World): Promise<string> {
     id,
   ]);
   return id;
+}
+
+/** Makes the world's owner an explicit member of the thread's project (real `project_members`). */
+async function join(w: World): Promise<void> {
+  await fx.admin.query(
+    `INSERT INTO project_members (team_id, project_id, user_id, role, added_by)
+     SELECT t.team_id, t.project_id, $3, 'member', $3 FROM threads t
+      WHERE t.team_id = $1 AND t.id = $2 AND t.project_id IS NOT NULL`,
+    [w.team, w.threadId, w.owner.id],
+  );
 }
 
 type Input = Record<string, unknown>;
@@ -433,7 +440,7 @@ describe("run.start.memory", () => {
   it("lists project only for a member of the thread's project, with its index", async () => {
     const w = await world();
     const projectId = await inProject(w);
-    members.add(w.owner.id);
+    await join(w);
     const sb0 = await started(w);
     const start = sb0.frames("run.start")[0] as { memory?: unknown } | undefined;
     expect(runMemoryContextSchema.parse(start?.memory)).toEqual({
@@ -444,7 +451,6 @@ describe("run.start.memory", () => {
       ],
     });
     expect(projectId).toBeTruthy();
-    members.delete(w.owner.id);
 
     const w2 = await world();
     await inProject(w2);
@@ -456,7 +462,7 @@ describe("run.start.memory", () => {
 
     const w3 = await world();
     await inProject(w3);
-    members.add(w3.owner.id);
+    await join(w3);
     await setTeamSwitches(w3, { project_memory_enabled: false });
     const sb3 = await started(w3);
     expect(
@@ -464,7 +470,6 @@ describe("run.start.memory", () => {
         (sb3.frames("run.start")[0] as { memory?: unknown } | undefined)?.memory,
       ).scopes,
     ).toEqual(["user"]);
-    members.delete(w3.owner.id);
   });
 });
 
@@ -474,7 +479,7 @@ describe("project memory", () => {
   it("waits for a signed approval, then applies and emits memory.updated", async () => {
     const w = await world();
     await inProject(w);
-    members.add(w.owner.id);
+    await join(w);
     const sb = await started(w);
     expect((await check(sb, w, "p1", input)).decision).toBe("allow");
     const reqId = sendPut(sb, w, "p1", input);
@@ -510,13 +515,12 @@ describe("project memory", () => {
       status: "applied",
       version: 1,
     });
-    members.delete(w.owner.id);
   });
 
   it("a denied approval writes nothing", async () => {
     const w = await world();
     await inProject(w);
-    members.add(w.owner.id);
+    await join(w);
     const sb = await started(w);
     await check(sb, w, "p2", input);
     expect(await result(sb, sendPut(sb, w, "p2", input))).toMatchObject({
@@ -530,13 +534,12 @@ describe("project memory", () => {
     expect(await refusals(w.team)).toContain("put:approval_denied");
     expect(await docCount(w.team)).toBe(0);
     expect(await updates(w)).toHaveLength(0);
-    members.delete(w.owner.id);
   });
 
   it("applies at once when the policy check already got the signed approval, and only for that input", async () => {
     const w = await world();
     await inProject(w);
-    members.add(w.owner.id);
+    await join(w);
     const sb = await started(w);
     askProject = true;
     try {
@@ -573,7 +576,6 @@ describe("project memory", () => {
     expect(await docCount(w.team)).toBe(1);
     // One approval was asked for, none new for the put.
     expect((await rows(`SELECT 1 FROM approvals WHERE team_id = $1`, [w.team])).length).toBe(1);
-    members.delete(w.owner.id);
   });
 
   it.each([
@@ -584,7 +586,7 @@ describe("project memory", () => {
     async (_n, update, code) => {
       const w = await world();
       await inProject(w);
-      members.add(w.owner.id);
+      await join(w);
       await fx.admin.query(`${update} WHERE team_id = $1 AND id = $2`, [w.team, w.runId]);
       const sb = await started(w);
       await check(sb, w, "a1", input);
@@ -602,14 +604,13 @@ describe("project memory", () => {
       expect((await put(sb, w, "a2", { scope: "user", path: "a.md", content: "x" })).status).toBe(
         "applied",
       );
-      members.delete(w.owner.id);
     },
   );
 
   it("an approval is single use and bound to its input", async () => {
     const w = await world();
     await inProject(w);
-    members.add(w.owner.id);
+    await join(w);
     const sb = await started(w);
     askProject = true;
     try {
@@ -659,7 +660,6 @@ describe("project memory", () => {
     expect(
       (await rows(`SELECT 1 FROM memory_doc_versions WHERE team_id = $1`, [w.team])).length,
     ).toBe(1);
-    members.delete(w.owner.id);
   });
 
   it("refuses non-members, threads outside a project and a disabled project scope", async () => {
@@ -677,7 +677,7 @@ describe("project memory", () => {
     );
 
     const loose = await world();
-    members.add(loose.owner.id);
+    await join(loose);
     const sbL = await started(loose);
     await check(sbL, loose, "n2", input);
     expect(errorCode(await result(sbL, sendPut(sbL, loose, "n2", input)))).toBe("not_allowed");
@@ -685,7 +685,7 @@ describe("project memory", () => {
 
     const off = await world();
     await inProject(off);
-    members.add(off.owner.id);
+    await join(off);
     await setTeamSwitches(off, { project_memory_enabled: false });
     const sbO = await started(off);
     await check(sbO, off, "n3", input);
@@ -693,13 +693,12 @@ describe("project memory", () => {
     // Personal memory still works while project memory is off.
     const personal = await put(sbO, off, "n4", { scope: "user", path: "a.md", content: "x" });
     expect(personal.status).toBe("applied");
-    for (const w of [loose, off]) members.delete(w.owner.id);
   });
 
   it("members read project memory", async () => {
     const w = await world();
     await inProject(w);
-    members.add(w.owner.id);
+    await join(w);
     const sb = await started(w);
     await check(sb, w, "r1", input);
     expect((await result(sb, sendPut(sb, w, "r1", input))).status).toBe("pending_approval");
@@ -712,6 +711,5 @@ describe("project memory", () => {
     expect(found.files).toEqual([
       { scope: "project", path: "decisions.md", content: "use pnpm", version: 1 },
     ]);
-    members.delete(w.owner.id);
   });
 });

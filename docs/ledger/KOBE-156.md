@@ -43,13 +43,12 @@ Server only. `memory/agent.ts` (put, read, `run.start.memory`), `#onMemoryPut` /
   200 docs, 20 files and 256 KiB of content (`truncated`); neither lists paths (no content).
 - **Audit:** `memory.written` (actorKind agent); new `sandbox.memory_refused` (op, reason, scope; throttled
   1/5 min per user, op, reason). Never paths or content.
-- **Test seam:** `SandboxWireOptions.projectAccess` replaces `canAccessProject` in tests (membership by a set);
-  until #176 merges the real function is always false.
+- **Membership** is the real `canAccessProject` (KOBE-161, `project_members`); tests use `selected`-mode projects, so a
+  team admin who did not join is refused.
 
 ## Open questions
 
 - Follow-up (needs a migration, not here): index `memory_doc_versions (team_id, run_id, tool_call_id)` for the replay lookup.
-- After merging #176: add a test with real `project_members` rows (the seam test covers the logic now).
 
 ## Evidence
 
