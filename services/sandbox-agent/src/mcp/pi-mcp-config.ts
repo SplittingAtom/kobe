@@ -1,5 +1,5 @@
 import { constants as FS } from "node:fs";
-import { open, rename, writeFile } from "node:fs/promises";
+import { chmod, open, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { RunMcpContext } from "@kobe/protocol";
 import type { ModelTokenSource } from "../models/types.js";
@@ -78,7 +78,11 @@ export async function writeAgentFile(
 ): Promise<void> {
   const file = path.join(agentDir, name);
   const temp = `${file}.tmp`;
-  await writeFile(temp, text, { mode: shared ? 0o440 : 0o400, flag: "w" });
+  const mode = shared ? 0o440 : 0o400;
+  await writeFile(temp, text, { mode, flag: "w" });
+  // writeFile's mode is filtered by the agent's umask (077), which would drop the group's read bit
+  // and leave Pi (a different uid, in the file's group) unable to read its own MCP config.
+  await chmod(temp, mode);
   await rename(temp, file);
 }
 

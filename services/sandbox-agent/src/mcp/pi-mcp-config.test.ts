@@ -100,6 +100,23 @@ describe("the token file and rotation", () => {
     }
   });
 
+  it("KOBE-241: under a Pi identity the group can read the files despite the agent's umask 077", async () => {
+    const f = await fixture();
+    const previous = process.umask(0o077);
+    try {
+      await writeAgentFile(f.dir, MCP_CONFIG_FILE, "{}\n", true);
+      await writeAgentFile(f.dir, MCP_TOKEN_FILE, mcpTokenFileText(TOKEN), true);
+      for (const name of [MCP_CONFIG_FILE, MCP_TOKEN_FILE]) {
+        expect((await stat(path.join(f.dir, name))).mode & 0o777).toBe(0o440);
+      }
+      await writeAgentFile(f.dir, MCP_TOKEN_FILE, mcpTokenFileText(TOKEN_2), false);
+      expect((await stat(path.join(f.dir, MCP_TOKEN_FILE))).mode & 0o777).toBe(0o400);
+    } finally {
+      process.umask(previous);
+      await f.done();
+    }
+  });
+
   it("a rotation mid-run: the next time Pi opens a connection its header is the new token", async () => {
     const f = await fixture();
     try {
