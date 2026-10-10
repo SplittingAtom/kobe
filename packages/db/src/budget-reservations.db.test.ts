@@ -136,6 +136,31 @@ describe("kobe_reserve_budget", () => {
   });
 });
 
+describe("sweep", () => {
+  it("reserving removes this team's rows long past their expiry", async () => {
+    const t = randomUUID();
+    const owner = createDb(inject("ownerUrl"));
+    await owner.db.insert(teams).values({ id: t, slug: `rs-${t.slice(0, 8)}`, name: "Sweep" });
+    await owner.close();
+    await withTeam(app.db, t, (tx) =>
+      tx.execute(
+        sql`INSERT INTO budget_reservations (team_id, call_id, user_id, tokens, expires_at)
+          VALUES (${t}, 'old', ${user}, 5, now() - interval '5 minutes'),
+                 (${t}, 'recent', ${user}, 5, now() - interval '5 seconds')`,
+      ),
+    );
+    const lines = [line("user", "tokens", 1000)];
+    expect(await reserve(t, user, randomUUID(), 1, lines)).toBe("ok");
+    const calls = await withTeam(app.db, t, async (tx) =>
+      (
+        await tx.execute<{ call_id: string }>(sql`SELECT call_id FROM budget_reservations`)
+      ).rows.map((r) => r.call_id),
+    );
+    expect(calls).toContain("recent");
+    expect(calls).not.toContain("old");
+  });
+});
+
 describe("kobe_settle_budget", () => {
   it("deletes on settle and shortens the expiry when a write is pending", async () => {
     const who = randomUUID();

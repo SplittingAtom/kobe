@@ -42,6 +42,14 @@ BEGIN
   IF has_install THEN
     PERFORM pg_advisory_xact_lock(hashtextextended('kobe.budget:install', 0));
   END IF;
+  -- The sweep: rows long expired (a minute past their expiry; they never counted) are removed here,
+  -- under the locks, so no separate sweeper is needed. The install-wide rows of every team go too.
+  DELETE FROM "budget_reservations"
+    WHERE team_id = p_team AND expires_at <= clock_timestamp() - interval '1 minute';
+  IF has_install THEN
+    DELETE FROM "install_budget_reservations"
+      WHERE expires_at <= clock_timestamp() - interval '1 minute';
+  END IF;
   FOR i IN 0 .. n - 1 LOOP
     line := p_lines -> i;
     unit_usd := line->>'unit' = 'usd';
