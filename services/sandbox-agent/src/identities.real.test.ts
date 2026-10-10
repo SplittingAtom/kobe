@@ -471,7 +471,7 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
       RUN,
       [
         "umask 077",
-        'echo s > "$HOME/k71-secret-$$"; echo s > /tmp/k71-secret-$$; echo s > k71-ws-secret-$$',
+        'echo s > "$KOBE_TOOL_HOME/k71-secret-$$"; echo s > /tmp/k71-secret-$$; echo s > k71-ws-secret-$$',
         "echo \"pid=$$ uid=$(id -u) shm=$(ipcmk -M 4096 | awk '{print $NF}')\"",
       ].join("\n"),
     );
