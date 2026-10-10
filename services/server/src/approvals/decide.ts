@@ -39,6 +39,16 @@ const STALE_CONNECTION_SECONDS = WIRE_DEFAULTS.staleConnectionMs / 1000;
  * - One transaction: thread → run → approval locks, decision, `approval.resolved`, run back to
  *   `running` when nothing else waits, bus hint, audit last.
  */
+/** A `remember` into the project's shared memory: the server writes it only against its approval. */
+function isProjectRemember(tool: string, input: unknown): boolean {
+  return (
+    tool === "remember" &&
+    typeof input === "object" &&
+    input !== null &&
+    (input as { scope?: unknown }).scope === "project"
+  );
+}
+
 export async function decideApproval(
   ctx: ApprovalContext,
   actor: ActorContext,
@@ -103,7 +113,11 @@ export async function decideApproval(
         now,
       });
       if (body.remember !== undefined) ruleId = await remember(tx, actor, row.tool, body, now);
-      const usedNow = parseMcpToolName(row.tool) === undefined;
+      // Sandbox-enforced tools are spent by the decision itself. Two are enforced again by the
+      // server and verified-and-consumed there: MCP calls (the proxy) and project `remember`
+      // (the memory handler, KOBE-156).
+      const usedNow =
+        parseMcpToolName(row.tool) === undefined && !isProjectRemember(row.tool, input);
       await tx.execute(sql`
         UPDATE approvals
            SET status = 'allowed', cause = 'user', decided_by = ${actor.user_id},

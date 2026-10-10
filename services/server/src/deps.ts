@@ -289,6 +289,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     engine: policyEngine,
     ...options.sandboxWire,
     approvals: options.sandboxWire?.approvals ?? approvals.broker,
+    approvalVerifier: options.sandboxWire?.approvalVerifier ?? approvals.verifier,
     background,
     runContext,
     ...(options.blobs ? { blobs: options.blobs } : {}),

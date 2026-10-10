@@ -341,7 +341,7 @@ const CASES: readonly Case[] = [
   {
     name: "personal remember is not prompted in ask-on-write (D24)",
     tool: builtin("remember"),
-    input: { scope: "personal", content: "likes tea" },
+    input: { scope: "user", content: "likes tea" },
     effect: "allow",
     codes: ["risk_write"],
   },
@@ -362,7 +362,7 @@ const CASES: readonly Case[] = [
   {
     name: "a team ask rule overrides the personal remember exemption",
     tool: builtin("remember"),
-    input: { scope: "personal" },
+    input: { scope: "user" },
     rules: [rule("team", "ask", "remember")],
     effect: "require_approval",
     codes: ["team_ask_rule"],
@@ -407,7 +407,7 @@ const CASES: readonly Case[] = [
   {
     name: "ask-all prompts for personal remember (no built-in lifts ask-all)",
     tool: builtin("remember"),
-    input: { scope: "personal" },
+    input: { scope: "user" },
     options: { mode: "ask-all" },
     effect: "require_approval",
     codes: ["mode_ask_all"],
@@ -452,7 +452,7 @@ const CASES: readonly Case[] = [
   {
     name: "auto denies personal remember that is not allow-listed",
     tool: builtin("remember"),
-    input: { scope: "personal" },
+    input: { scope: "user" },
     options: { mode: "auto" },
     effect: "deny",
     codes: ["mode_auto_not_allowlisted", "risk_write"],

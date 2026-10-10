@@ -13,7 +13,13 @@ import { ARTIFACT_TOOLS, canonicalJson } from "@kobe/protocol";
 export type AllowedVerdict = "ok" | "not_allowed" | "input_mismatch";
 
 /** Tools whose wire frame (`artifact.put`, `file.share`, `web_search.query`) is bound to an allowed policy check. */
-export const BOUND_TOOLS = [...ARTIFACT_TOOLS, "share_file", "web_search"] as const;
+export const BOUND_TOOLS = [
+  ...ARTIFACT_TOOLS,
+  "share_file",
+  "web_search",
+  "remember",
+  "recall",
+] as const;
 export type BoundToolName = (typeof BOUND_TOOLS)[number];
 
 interface Allowed {

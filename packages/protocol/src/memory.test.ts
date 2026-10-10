@@ -123,7 +123,7 @@ describe("kobe-tools ops", () => {
       memoryToolsRequestSchema.safeParse({ ...put, input: { scope: "user", path: "a.md" } })
         .success,
     ).toBe(false);
-    const read = { id: "r2", op: "memory.read", input: { query: "q" } };
+    const read = { id: "r2", op: "memory.read", tool_call_id: "tc", input: { query: "q" } };
     expect(memoryToolsRequestSchema.safeParse(read).success).toBe(true);
   });
   it("responses: applied, pending approval, read, error", () => {
@@ -192,6 +192,7 @@ describe("wire frames", () => {
       request_id: "q2",
       run_id: ID,
       thread_id: ID2,
+      tool_call_id: "tc2",
       input: { path: "a.md", scope: "user" },
     };
     expect(decodeSandboxFrame(JSON.stringify(read)).ok).toBe(true);

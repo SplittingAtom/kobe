@@ -33,7 +33,7 @@ export const PROMPT_EXEMPT_KOBE_TOOLS: ReadonlySet<string> = new Set([
  * `true` = prompt. `sandbox` rows follow {@link PolicySettings.promptSandboxWrites}. `kobe`-scoped
  * writes (shared files, memory) prompt — D23/D24 make project writes approval-gated — except:
  * - personal `remember` (D24: "personal writes via remember need no approval"), recognised by
- *   `scope: "personal"` in its input (KOBE-55/56 must define that field; anything else prompts);
+ *   `scope: "user"` in its input (the memory contract, KOBE-153; anything else prompts);
  * - artifacts ({@link PROMPT_EXEMPT_KOBE_TOOLS}; Chris, 2026-10-06): they only write versioned,
  *   Kobe-owned content into the user's own thread, shown in a sandboxed frame with no network.
  * Install/team ask rules and `ask-all` still prompt for them (evaluate.ts runs those first).
@@ -44,7 +44,7 @@ export function riskClassPrompts(
   input: JsonObject,
   settings: PolicySettings,
 ): boolean {
-  if (tool.source === "kobe" && tool.name === "remember" && input.scope === "personal") {
+  if (tool.source === "kobe" && tool.name === "remember" && input.scope === "user") {
     return false;
   }
   if (tool.source === "kobe" && PROMPT_EXEMPT_KOBE_TOOLS.has(tool.name)) return false;

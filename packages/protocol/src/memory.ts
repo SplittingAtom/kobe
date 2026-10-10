@@ -173,7 +173,12 @@ export const memoryToolsRequestSchema = z.union([
     tool_call_id: idSchema,
     input: rememberInputSchema,
   }),
-  z.strictObject({ id: idSchema, op: z.literal("memory.read"), input: recallInputSchema }),
+  z.strictObject({
+    id: idSchema,
+    op: z.literal("memory.read"),
+    tool_call_id: idSchema,
+    input: recallInputSchema,
+  }),
 ]);
 export type MemoryToolsRequest = z.infer<typeof memoryToolsRequestSchema>;
 

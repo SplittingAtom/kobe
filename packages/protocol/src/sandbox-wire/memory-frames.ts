@@ -28,6 +28,8 @@ export const memoryReadFrameSchema = frame("memory.read", {
   request_id: idSchema,
   run_id: uuidSchema,
   thread_id: uuidSchema,
+  /** The `recall` call kobe-policy let through: the server only reads for an allowed call (D-3). */
+  tool_call_id: idSchema,
   input: recallInputSchema,
 });
 

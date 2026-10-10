@@ -35,6 +35,8 @@ export interface ApprovedCall {
   readonly tool: string;
   /** The parsed `params.arguments` the proxy is about to forward (`toolInputSchema`-valid). */
   readonly input: unknown;
+  /** Who enforces (audit): the MCP proxy (default) or the server itself (project `remember`). */
+  readonly enforcementPoint?: "mcp_proxy" | "server";
 }
 
 export type ApprovalCheck =
@@ -76,7 +78,7 @@ export function createApprovalVerifier(options: {
               toolCallId: call.toolCallId,
               tool: call.tool,
               reason,
-              enforcementPoint: "mcp_proxy",
+              enforcementPoint: call.enforcementPoint ?? "mcp_proxy",
               ...(approvalId === undefined ? {} : { approvalId }),
               ...(taken.suppressed > 0 ? { suppressed: taken.suppressed } : {}),
             },
@@ -128,7 +130,7 @@ export function createApprovalVerifier(options: {
                     runId: call.runId,
                     toolCallId: call.toolCallId,
                     tool: call.tool,
-                    enforcementPoint: "mcp_proxy",
+                    enforcementPoint: call.enforcementPoint ?? "mcp_proxy",
                   },
                 });
                 return true;

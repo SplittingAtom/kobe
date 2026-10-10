@@ -11,6 +11,7 @@ import { SYSTEM_ACTOR, eq, getMembership, users, withTeam, type KobeDb } from "@
 import { logger as rootLogger } from "../logger.js";
 import { recordAudit, type ServerAuditEvent } from "../audit/record.js";
 import { BackgroundTasks } from "../background.js";
+import type { ApprovalVerifier } from "../approvals/verify.js";
 import type { BlobStore } from "../retention/blobs.js";
 import { DEFAULT_UPLOAD_SETTINGS, type UploadSettings } from "../uploads/settings.js";
 import { createPolicyEngine } from "../policy/engine.js";
@@ -45,6 +46,8 @@ export interface SandboxWireOptions {
   readonly engine?: PolicyEngine;
   readonly tools?: ToolRegistry;
   readonly approvals?: ApprovalBroker;
+  /** Verifies and consumes signed approvals (project `remember`, KOBE-156); unset: none verifies. */
+  readonly approvalVerifier?: ApprovalVerifier;
   readonly ui?: UiBroker;
   readonly hooks?: RunLifecycleHooks;
   /** Run policy inputs incl. the approval-mode floor (`createDbRunContextSource()` in production). */
@@ -253,6 +256,14 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       settings: options.uploads ?? DEFAULT_UPLOAD_SETTINGS,
       runMaxEvents: tuning.runMaxEvents,
     },
+    memory: {
+      db,
+      blobs: options.blobs,
+      runMaxEvents: tuning.runMaxEvents,
+      approvals,
+      verifier: options.approvalVerifier,
+      log,
+    },
     webSearch: options.webSearch ?? NO_WEB_SEARCH,
     ui: options.ui ?? CANCEL_DIALOGS,
     hooks,
@@ -310,6 +321,26 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
             reason: refusal.reason,
             runId: refusal.runId,
             toolCallId: refusal.toolCallId,
+          },
+        },
+      );
+    },
+    auditMemoryRefused(target, sandboxId, refusal) {
+      throttledAudit(
+        `${target.teamId}:${target.userId}:memory:${refusal.op}:${refusal.reason}`,
+        target.teamId,
+        {
+          action: "sandbox.memory_refused",
+          actor: SYSTEM_ACTOR,
+          teamId: target.teamId,
+          target: {
+            sandboxId,
+            userId: target.userId,
+            op: refusal.op,
+            reason: refusal.reason,
+            ...(refusal.scope ? { scope: refusal.scope } : {}),
+            runId: refusal.runId,
+            ...(refusal.toolCallId ? { toolCallId: refusal.toolCallId } : {}),
           },
         },
       );
