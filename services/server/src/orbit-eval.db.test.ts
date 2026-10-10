@@ -13,6 +13,7 @@ import {
 import type { SandboxSettings } from "./sandbox/config.js";
 import type { KubeObject } from "./sandbox/manifests.js";
 import { createFakeKube, type FakeKube } from "./testing/fake-kube.js";
+import { enableConnector, piName, registerConnector } from "./testing/mcp-fixtures.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 import type { TestBrowser } from "./testing/browser.js";
 import { KEYS, SETTINGS, gateFor, seedCluster } from "./testing/sandbox-fixtures.js";
@@ -303,6 +304,31 @@ describe("Publish with the gate on (KOBE-93)", () => {
       "agent.eval.requested",
       "agent.eval.finished",
     ]);
+  });
+
+  it("evaluates the same MCP tool surface the agent runs with, by name only (KOBE-112 ac-2)", async () => {
+    await gateOn(0.2);
+    const connector = await registerConnector(h.admin, {
+      url: "https://mcp.example.com/hook/secret-path-4711",
+      authKind: "api_key",
+    });
+    await enableConnector(h.admin, finance, connector.id, adminId, "read_only", []);
+    const created = await builder.post("/v1/agents", {
+      scope: "team",
+      frontmatter: { name: `Mcp ${randomUUID().slice(0, 6)}`, connectors: [connector.name] },
+      prompt: "You use Jira.",
+    });
+    expect(created.status, JSON.stringify(created.json)).toBe(201);
+    expect((await publish(created.json.agent.id as string)).status).toBe(202);
+    await settled();
+    const maps = kube.all("ConfigMap") as unknown as { data: Record<string, string> }[];
+    const yaml = maps
+      .map((m) => m.data["agent.yaml"] ?? "")
+      .find((y) => y.includes("You use Jira."));
+    expect(yaml).toContain(`- ${piName(connector.name, "get_issue")}`);
+    expect(yaml).not.toContain("create_issue");
+    expect(yaml).not.toContain("secret-path-4711");
+    expect(yaml).not.toContain("mcp.example.com");
   });
 
   it("blocks above the threshold: no version, a clear result, the draft stays", async () => {

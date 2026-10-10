@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ModelTokenSource } from "./models/types.js";
 import {
+  RUN_2,
   runStart,
   startHarness,
   until,
@@ -113,5 +114,80 @@ describe("per-session MCP config (KOBE-111)", () => {
     h = await startHarness();
     const result = await h.server.command(runStart("hang", { mcp: MCP }));
     expect(result).toMatchObject({ ok: false, error: { code: "pi_unavailable" } });
+  });
+});
+
+describe("connector changes on the next run of the same thread (KOBE-112 ac-1)", () => {
+  const OTHER = "22222222-2222-4222-8222-222222222222";
+  const SECOND = {
+    servers: [
+      {
+        name: "wiki",
+        connector_id: OTHER,
+        tools: [{ name: "search", pi_name: "mcp__wiki__search" }],
+      },
+    ],
+  };
+
+  async function settledRun(run: ReturnType<typeof runStart>) {
+    const result = await h.server.command(run);
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true });
+    await h.server.waitFor(
+      (f) => f.type === "pi.event" && f.run_id === run.run_id && f.event.type === "agent_settled",
+    );
+  }
+  const launchAt = (all: { argv: string[]; agentDir: string }[], n: number) => {
+    const l = all[n];
+    if (l === undefined) throw new Error(`launch ${n} missing`);
+    return l;
+  };
+  const launches = async () =>
+    (await h.commandsLog()).filter((c) => "argv" in c) as unknown as {
+      argv: string[];
+      agentDir: string;
+    }[];
+
+  it("a changed connector set restarts the idle Pi with a fresh mcp.json, the old dir is gone", async () => {
+    h = await startHarness({ mcp: { proxyUrl: PROXY, tokens: fakeTokens(TOKEN_1) } });
+    await settledRun(runStart("say:one", { mcp: MCP }));
+    const first = launchAt(await launches(), 0);
+    const firstFile = path.join(first.agentDir, "mcp.json");
+    expect(JSON.parse(await readFile(firstFile, "utf8")).mcpServers).toHaveProperty("jira");
+
+    await settledRun(runStart("say:two", { run_id: RUN_2, mcp: SECOND }));
+    const all = await launches();
+    expect(all).toHaveLength(2);
+    const secondFile = path.join(launchAt(all, 1).agentDir, "mcp.json");
+    const servers = JSON.parse(await readFile(secondFile, "utf8")).mcpServers;
+    expect(Object.keys(servers)).toEqual(["wiki"]);
+    expect(existsSync(firstFile)).toBe(false);
+  });
+
+  it("a changed tool list (re-pin, agent tools) restarts Pi too; an identical one reuses it", async () => {
+    h = await startHarness({ mcp: { proxyUrl: PROXY, tokens: fakeTokens(TOKEN_1) } });
+    await settledRun(runStart("say:one", { mcp: MCP }));
+    await settledRun(runStart("say:two", { run_id: RUN_2, mcp: MCP }));
+    expect(await launches()).toHaveLength(1);
+    const narrowed = {
+      servers: MCP.servers.map((sv) => ({
+        ...sv,
+        tools: [{ name: "x", pi_name: "mcp__jira__x" }],
+      })),
+    };
+    await settledRun(
+      runStart("say:three", { run_id: "3e4f5a6b-7c8d-4e9f-8a1b-2c3d4e5f6073", mcp: narrowed }),
+    );
+    expect(await launches()).toHaveLength(2);
+  });
+
+  it("losing every connector restarts Pi without the MCP extension or file", async () => {
+    h = await startHarness({ mcp: { proxyUrl: PROXY, tokens: fakeTokens(TOKEN_1) } });
+    await settledRun(runStart("say:one", { mcp: MCP }));
+    await settledRun(runStart("say:two", { run_id: RUN_2, mcp: { servers: [] } }));
+    const all = await launches();
+    expect(all).toHaveLength(2);
+    expect(launchAt(all, 1).argv).not.toContain("builtin:mcp");
+    expect(existsSync(path.join(launchAt(all, 1).agentDir, "mcp.json"))).toBe(false);
+    expect(existsSync(path.join(launchAt(all, 0).agentDir, "mcp.json"))).toBe(false);
   });
 });

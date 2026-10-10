@@ -2,6 +2,7 @@ import { DEFAULT_EVAL_MAX_ASR, eq, teamMembers, teams, withTeam, type KobeDb } f
 import type { BackgroundTasks } from "../../background.js";
 import type { TeamRef } from "../../sandbox/manifests.js";
 import { gatewayModelId, listOrbitModelOptions, pickOrbitModel } from "../orbit/model.js";
+import { orbitMcpToolNames } from "../orbit/mcp-tools.js";
 import { mapAgentVersionToOrbit, orbitExportToYaml } from "../orbit/orbit-export.js";
 import type { AgentRecord } from "../store.js";
 import { getVersion } from "../versions.js";
@@ -72,6 +73,12 @@ export async function startGalleryEval(input: {
       "The agent's model is not enabled for that team (or it has no default model), so the eval can't run.",
     );
   }
+  const mcpTools = await orbitMcpToolNames(
+    db,
+    team.id,
+    record.toolManifest,
+    record.definition.frontmatter.tools,
+  );
   let yaml: string;
   try {
     yaml = orbitExportToYaml(
@@ -82,6 +89,7 @@ export async function startGalleryEval(input: {
         },
         toolManifest: record.toolManifest,
         version,
+        mcpTools,
       }),
     );
   } catch (err) {
