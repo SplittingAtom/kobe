@@ -26,6 +26,7 @@ import {
   type DraftPin,
   type PinError,
 } from "../agents/versions.js";
+import { visibilityOf } from "./share.js";
 import { isModelEnabled } from "../models/team-store.js";
 
 /**
@@ -57,6 +58,7 @@ export type ThreadError =
   | "not_in_trash"
   | "not_in_project"
   | "entry_not_found"
+  | "entry_offloaded"
   | "no_agent"
   | "model_not_enabled"
   | PinError;
@@ -131,6 +133,7 @@ export function toSummary(row: SummaryRow): ThreadSummary {
     agent_id: row.agentId,
     agent_version: row.agentVersion,
     shared_to_project: row.sharedToProject,
+    visibility: visibilityOf(row),
     model: row.modelAlias,
     leaf_entry_id: row.leafEntryId,
     last_activity_at: row.lastActivityAt.toISOString(),
@@ -351,7 +354,12 @@ export async function updateThread(
     await recordAudit(tx, {
       action: "thread.sharing_changed",
       teamId: viewer.teamId,
-      target: { threadId: id, projectId: row.projectId, shared: row.sharedToProject },
+      target: {
+        threadId: id,
+        projectId: row.projectId,
+        shared: row.sharedToProject,
+        visibility: visibilityOf(row),
+      },
     });
   }
   if (modelChanged) {

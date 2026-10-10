@@ -5,6 +5,7 @@ import {
   type KobeTx,
   type ThreadSearchHit as SearchHit,
 } from "@kobe/db";
+import { visibilityOf } from "./share.js";
 import type { Viewer } from "./repository.js";
 import type { ThreadSearchHit } from "./schemas.js";
 
@@ -71,6 +72,7 @@ function toWire(hit: SearchHit): ThreadSearchHit {
     agent_id: hit.agentId,
     agent_version: hit.agentVersion,
     shared_to_project: hit.sharedToProject,
+    visibility: visibilityOf(hit),
     // Search never returns test threads (KOBE-85).
     is_test: false,
     model: hit.modelAlias,

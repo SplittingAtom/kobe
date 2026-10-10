@@ -1,0 +1,213 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { RunFixture } from "./testing/run-fixture.js";
+import type { Person } from "./testing/event-stream-fixture.js";
+
+/**
+ * KOBE-163: share a thread to its project, read-only access for members, unshare, fork (D23).
+ * A reader is a project member who is not the author; everyone else gets 404.
+ */
+const f = new RunFixture();
+
+beforeAll(async () => {
+  await f.setup();
+});
+afterAll(async () => {
+  await f.teardown();
+});
+
+const as = (p: Person) => f.on(0, p);
+
+/** A team with a selected-mode project (author + reader inside, outsider outside) and one run. */
+async function world() {
+  const w = await f.world();
+  const author = w.owner;
+  const reader = await f.member(w.team);
+  const outsider = await f.member(w.team);
+  const project = await as(author).post("/v1/projects", {
+    name: "Shared",
+    members_mode: "selected",
+    member_user_ids: [reader.id],
+  });
+  expect(project.status, JSON.stringify(project.json)).toBe(201);
+  const made = await as(author).post("/v1/threads", {
+    project_id: project.json.id,
+    title: "plan",
+  });
+  const threadId = made.json.thread_id as string;
+  const ws = await f.connect(w, 0);
+  const runId = await f.message(author, threadId, "hello");
+  const start = await ws.started(runId);
+  const entries = ws.reply(start, "world");
+  await ws.acked(runId);
+  await f.until(w.team, runId, "completed");
+  return {
+    w,
+    author,
+    reader,
+    outsider,
+    projectId: project.json.id as string,
+    threadId,
+    runId,
+    entries,
+  };
+}
+
+async function audit(team: string, action: string) {
+  const { rows } = await f.fx.admin.query<{ target: Record<string, unknown> }>(
+    `SELECT target FROM audit_log WHERE team_id = $1 AND action = $2 ORDER BY seq`,
+    [team, action],
+  );
+  return rows.map((r) => r.target);
+}
+
+describe("share and unshare", () => {
+  it("shares to the project, readable by members only, and unshare hides it again", async () => {
+    const x = await world();
+    const url = `/v1/threads/${x.threadId}`;
+    expect((await as(x.reader).get(url)).status).toBe(404);
+    const shared = await as(x.author).post(`${url}/share`, { visibility: "project" });
+    expect(shared.status, JSON.stringify(shared.json)).toBe(200);
+    expect(shared.json).toMatchObject({ visibility: "project", shared_to_project: true });
+    const seen = await as(x.reader).get(url);
+    expect(seen.status).toBe(200);
+    expect(seen.json).toMatchObject({ read_only: true, visibility: "project" });
+    expect(seen.json.entries.length).toBeGreaterThan(0);
+    expect((await as(x.author).get(url)).json.read_only).toBe(false);
+    expect((await as(x.outsider).get(url)).status).toBe(404);
+    expect((await as(x.outsider).get(`${url}/entries`)).status).toBe(404);
+    // The run stream follows the thread's visibility.
+    const seq = (await f.events(x.w.team, x.runId)).length;
+    const stream = `/v1/runs/${x.runId}/events?starting_after=${seq}`;
+    expect((await as(x.reader).get(stream)).status).toBe(204);
+    expect((await as(x.outsider).get(stream)).status).toBe(404);
+
+    const back = await as(x.author).post(`${url}/share`, { visibility: "private" });
+    expect(back.json.visibility).toBe("private");
+    expect((await as(x.reader).get(url)).status).toBe(404);
+    expect((await as(x.reader).get(stream)).status).toBe(404);
+    expect(await audit(x.w.team, "thread.sharing_changed")).toEqual([
+      { threadId: x.threadId, projectId: x.projectId, shared: true, visibility: "project" },
+      { threadId: x.threadId, projectId: x.projectId, shared: false, visibility: "private" },
+    ]);
+  });
+
+  it("is the author's call, needs a project and a valid scope", async () => {
+    const x = await world();
+    await as(x.author).post(`/v1/threads/${x.threadId}/share`, { visibility: "project" });
+    const url = `/v1/threads/${x.threadId}/share`;
+    const refused = await as(x.reader).post(url, { visibility: "private" });
+    expect([refused.status, refused.json.code]).toEqual([403, "read_only"]);
+    expect((await as(x.outsider).post(url, { visibility: "private" })).status).toBe(404);
+    expect((await as(x.author).post(url, { visibility: "team" })).status).toBe(400);
+    const loose = await f.thread(x.author);
+    const noProject = await as(x.author).post(`/v1/threads/${loose}/share`, {
+      visibility: "project",
+    });
+    expect([noProject.status, noProject.json.code]).toEqual([409, "not_in_project"]);
+  });
+
+  it("hides a shared thread while it is in Trash", async () => {
+    const x = await world();
+    const url = `/v1/threads/${x.threadId}`;
+    await as(x.author).post(`${url}/share`, { visibility: "project" });
+    expect((await as(x.author).delete(url)).status).toBe(200);
+    expect((await as(x.reader).get(url)).status).toBe(404);
+    const seq = (await f.events(x.w.team, x.runId)).length;
+    expect(
+      (await as(x.reader).get(`/v1/runs/${x.runId}/events?starting_after=${seq}`)).status,
+    ).toBe(404);
+  });
+});
+
+describe("read-only enforcement", () => {
+  it("answers 403 read_only to a reader on every mutating route", async () => {
+    const x = await world();
+    await as(x.author).post(`/v1/threads/${x.threadId}/share`, { visibility: "project" });
+    const t = `/v1/threads/${x.threadId}`;
+    const r = as(x.reader);
+    const attempts = [
+      await r.patch(t, { title: "mine now" }),
+      await r.post(`${t}/leaf`, { entry_id: x.entries.user }),
+      await r.post(`${t}/agent-version`, {}),
+      await r.delete(t),
+      await r.post(`${t}/restore`, {}),
+      await r.post(`${t}/messages`, { content: "hi" }),
+      await r.post(`${t}/queue/resume`, {}),
+      await r.post(`/v1/runs/${x.runId}/steer`, { content: "x" }),
+      await r.post(`/v1/runs/${x.runId}/cancel`, {}),
+      await r.post(`/v1/runs/${x.runId}/retry`, {}),
+      await r.patch(`/v1/runs/${x.runId}`, { content: "x" }),
+    ];
+    for (const res of attempts) {
+      expect([res.status, res.json.code], JSON.stringify(res.json)).toEqual([403, "read_only"]);
+    }
+    // Nothing changed.
+    const still = await as(x.author).get(t);
+    expect(still.json).toMatchObject({ title: "plan", deleted_at: null });
+    // Queued drafts and approvals belong to the author: invisible to the reader.
+    expect((await r.get(`${t}/pending-messages`)).json.messages ?? []).toEqual([]);
+    expect((await r.get("/v1/approvals")).json.approvals).toEqual([]);
+  });
+
+  it("gives an outsider the same 404 as for a missing thread", async () => {
+    const x = await world();
+    await as(x.author).post(`/v1/threads/${x.threadId}/share`, { visibility: "project" });
+    const o = as(x.outsider);
+    const t = `/v1/threads/${x.threadId}`;
+    for (const res of [
+      await o.patch(t, { title: "x" }),
+      await o.post(`${t}/messages`, { content: "hi" }),
+      await o.post(`/v1/runs/${x.runId}/cancel`, {}),
+      await o.post(`${t}/fork`, {}),
+    ]) {
+      expect(res.status).toBe(404);
+    }
+  });
+});
+
+describe("fork", () => {
+  it("copies the conversation into the forker's own private thread and audits it", async () => {
+    const x = await world();
+    const url = `/v1/threads/${x.threadId}`;
+    expect((await as(x.reader).post(`${url}/fork`, {})).status).toBe(404); // not shared yet
+    await as(x.author).post(`${url}/share`, { visibility: "project" });
+    const forked = await as(x.reader).post(`${url}/fork`, {});
+    expect(forked.status, JSON.stringify(forked.json)).toBe(201);
+    const id = forked.json.thread_id as string;
+    const mine = await as(x.reader).get(`/v1/threads/${id}`);
+    expect(mine.json).toMatchObject({
+      owner_user_id: x.reader.id,
+      project_id: x.projectId,
+      visibility: "private",
+      read_only: false,
+      title: "plan",
+      leaf_entry_id: x.entries.assistant,
+    });
+    expect(mine.json.entries.map((e: { entry_id: string }) => e.entry_id)).toEqual(
+      (await as(x.author).get(url)).json.entries.map((e: { entry_id: string }) => e.entry_id),
+    );
+    // Private to the forker; the source is untouched.
+    expect((await as(x.author).get(`/v1/threads/${id}`)).status).toBe(404);
+    expect((await as(x.reader).patch(`/v1/threads/${id}`, { title: "mine" })).status).toBe(200);
+    expect((await as(x.author).get(url)).json.title).toBe("plan");
+    expect(await audit(x.w.team, "thread.forked")).toEqual([
+      { threadId: id, sourceThreadId: x.threadId, projectId: x.projectId, entries: 2 },
+    ]);
+    // Unsharing hides the source from forking again.
+    await as(x.author).post(`${url}/share`, { visibility: "private" });
+    expect((await as(x.reader).post(`${url}/fork`, {})).status).toBe(404);
+  });
+
+  it("forks up to an entry, with a new title, and the author may fork their own thread", async () => {
+    const x = await world();
+    const url = `/v1/threads/${x.threadId}/fork`;
+    const cut = await as(x.author).post(url, { entry_id: x.entries.user, title: "Take 2" });
+    expect(cut.status, JSON.stringify(cut.json)).toBe(201);
+    const detail = await as(x.author).get(`/v1/threads/${cut.json.thread_id}`);
+    expect(detail.json).toMatchObject({ title: "Take 2", leaf_entry_id: x.entries.user });
+    expect(detail.json.entries).toHaveLength(1);
+    const missing = await as(x.author).post(url, { entry_id: "nope" });
+    expect([missing.status, missing.json.code]).toEqual([404, "entry_not_found"]);
+    expect((await as(x.author).post(url, { extra: 1 })).status).toBe(400);
+  });
+});

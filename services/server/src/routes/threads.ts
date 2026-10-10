@@ -17,6 +17,9 @@ import {
   resolveAgentPin,
   resolveDraftPin,
 } from "../agents/versions.js";
+import { forkThreadRequestSchema, shareThreadRequestSchema } from "@kobe/protocol";
+import { forkThread } from "../threads/fork.js";
+import { sharedToProjectFor } from "../threads/share.js";
 import { projectDefaultAgent } from "../projects/run-context.js";
 import { canCreateInProject, viewerProjectIds } from "../threads/references.js";
 import {
@@ -58,6 +61,10 @@ type ThreadContext = Context<{ Variables: TeamVariables }>;
 const ERRORS = {
   thread_not_found: [404, "No thread with that id."],
   entry_not_found: [404, "That entry is not part of this thread."],
+  entry_offloaded: [
+    409,
+    "This conversation has very large messages that can't be copied into a fork yet.",
+  ],
   agent_not_found: [404, "No agent with that id is available in this team."],
   agent_unavailable: [
     409,
@@ -263,6 +270,7 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
         : null;
       return {
         ...toSummary(found.thread),
+        read_only: found.access !== "owner",
         agent_name: pinned?.frontmatter.name ?? null,
         agent_status: pinned === null ? null : agentStatusOf(pinned),
         agent_current_version: latest,
@@ -292,6 +300,25 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     const body = await parseBody(c, updateThreadBodySchema);
     if (!id || !body) return invalidRequest(c, "Give title, shared_to_project and/or model.");
     return change(c, (tx, viewer) => updateThread(tx, viewer, id, body));
+  });
+
+  app.post("/:id/share", async (c) => {
+    const id = threadIdParam(c);
+    const body = await parseBody(c, shareThreadRequestSchema);
+    if (!id || !body) return invalidRequest(c, "Give visibility: private or project.");
+    return change(c, (tx, viewer) =>
+      updateThread(tx, viewer, id, { shared_to_project: sharedToProjectFor(body.visibility) }),
+    );
+  });
+
+  app.post("/:id/fork", async (c) => {
+    const id = threadIdParam(c);
+    const body = await parseBody(c, forkThreadRequestSchema);
+    if (!id || !body) return invalidRequest(c, "Give entry_id and/or title (or {}).");
+    const result = await asViewer(c, (tx, viewer) =>
+      forkThread(tx, viewer, id, { entryId: body.entry_id, title: body.title }),
+    );
+    return result.ok ? c.json({ thread_id: result.thread.thread_id }, 201) : fail(c, result.error);
   });
 
   app.post("/:id/leaf", async (c) => {
