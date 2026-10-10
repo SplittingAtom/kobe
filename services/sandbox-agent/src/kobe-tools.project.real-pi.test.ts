@@ -87,8 +87,7 @@ describe.skipIf(!PI_AVAILABLE)(
       expect(first).toContain("Always answer in French.");
       expect(first).toContain("Apollo");
       expect(first).not.toContain("<<<");
-      // eslint-disable-next-line no-control-regex
-      expect(first).not.toMatch(/\u0007|​/);
+      expect(first.includes("\u0007") || first.includes("\u200b")).toBe(false);
       expect(first).not.toMatch(/UNTRUSTED MEMORY BEGIN|BEGIN UNTRUSTED/);
 
       // Same Pi: a changed instruction applies to the next run, no restart.

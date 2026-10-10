@@ -426,7 +426,7 @@ export class Thread {
           path.join(runtimeDir, MEMORY_FILE_NAME),
           identity === undefined ? 0o600 : 0o640,
         );
-        await memoryFile.write({ tools: false, text: "" });
+        await memoryFile.write({ tools: false, text: "", project: "" });
         env[MEMORY_FILE_ENV] = memoryFile.path;
       }
       pi = new PiProcess({
