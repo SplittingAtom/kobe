@@ -14,7 +14,7 @@
     "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {
-    "@assistant-ui/react": "0.15.23",
+    "@assistant-ui/react": "0.15.25",
     "@better-auth/passkey": "1.7.7",
     "@kobe/agent-file": "workspace:*",
     "@kobe/protocol": "workspace:*",
