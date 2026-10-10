@@ -114,7 +114,9 @@ describe("nextOccurrence", () => {
     it("a half-hour DST zone (Lord Howe) is handled", () => {
       const r: ScheduleRecurrence = { kind: "daily", at: "12:00" };
       // Lord Howe is UTC+10:30 in winter (June).
-      expect(next(r, "Australia/Lord_Howe", "2026-06-10T00:00:00Z")).toBe("2026-06-10T01:30:00.000Z");
+      expect(next(r, "Australia/Lord_Howe", "2026-06-10T00:00:00Z")).toBe(
+        "2026-06-10T01:30:00.000Z",
+      );
     });
   });
 

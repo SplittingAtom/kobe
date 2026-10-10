@@ -158,9 +158,7 @@ describe("CRUD (ac-1)", () => {
     });
     expect(made.next_due_at).not.toBeNull();
     expect(new Date(made.next_due_at as string).getTime()).toBeGreaterThan(Date.now());
-    const row = await adminPg.query(`SELECT cron FROM schedules WHERE id = $1`, [
-      made.schedule_id,
-    ]);
+    const row = await adminPg.query(`SELECT cron FROM schedules WHERE id = $1`, [made.schedule_id]);
     expect(row.rows[0].cron).toBe("0 9 * * *");
 
     const got = await as.carol.get(`/v1/schedules/${made.schedule_id}`);
@@ -226,7 +224,9 @@ describe("CRUD (ac-1)", () => {
   });
 
   it("validation errors use the contract codes", async () => {
-    const badRec = await create("carol", financeAgent, { recurrence: { kind: "cron", expr: "* * * * *" } });
+    const badRec = await create("carol", financeAgent, {
+      recurrence: { kind: "cron", expr: "* * * * *" },
+    });
     expect(badRec.status).toBe(422);
     expect(badRec.json.code).toBe("invalid_recurrence");
     const badTz = await create("carol", financeAgent, { tz: "+01:00" });
@@ -284,14 +284,18 @@ describe("CRUD (ac-1)", () => {
     expect((await as.carol.get("/v1/schedules?scope=team")).status).toBe(403);
     const inventory = await as.admin.get("/v1/schedules?scope=team");
     expect(inventory.status).toBe(200);
-    expect(inventory.json.schedules.map((s: { schedule_id: string }) => s.schedule_id)).toContain(id);
+    expect(inventory.json.schedules.map((s: { schedule_id: string }) => s.schedule_id)).toContain(
+      id,
+    );
     // The admin cannot read or edit it through the owner routes (404), only pause/resume it.
     expect((await as.admin.get(`/v1/schedules/${id}`)).status).toBe(404);
     const paused = await as.admin.post(`/v1/schedules/${id}/pause`);
     expect(paused.status, JSON.stringify(paused.json)).toBe(200);
     expect(paused.json).toMatchObject({ active: false, paused_by: "team_admin" });
     expect((await as.carol.post(`/v1/schedules/${id}/resume`)).status).toBe(403);
-    expect((await as.carol.request("PATCH", `/v1/schedules/${id}`, { active: true })).status).toBe(403);
+    expect((await as.carol.request("PATCH", `/v1/schedules/${id}`, { active: true })).status).toBe(
+      403,
+    );
     const resumed = await as.admin.post(`/v1/schedules/${id}/resume`);
     expect(resumed.json).toMatchObject({ active: true, paused_by: null });
     await as.carol.request("DELETE", `/v1/schedules/${id}`);
@@ -305,7 +309,7 @@ describe("cap of 10 active schedules per user across teams (ac-2)", () => {
     for (let i = 0; i < MAX_ACTIVE_SCHEDULES_PER_USER; i++) {
       const inMarketing = i % 2 === 1;
       const browser = as.erin;
-      browser.team = inMarketing ? marketing : finance;
+      await activate("erin", inMarketing ? marketing : finance);
       const res = await browser.post(
         "/v1/schedules",
         body(inMarketing ? marketingAgent : financeAgent),
@@ -315,7 +319,7 @@ describe("cap of 10 active schedules per user across teams (ac-2)", () => {
     }
     expect(await activeCount(ids.erin)).toBe(10);
     for (const team of [finance, marketing]) {
-      as.erin.team = team;
+      await activate("erin", team);
       const over = await as.erin.post(
         "/v1/schedules",
         body(team === finance ? financeAgent : marketingAgent),
@@ -329,7 +333,7 @@ describe("cap of 10 active schedules per user across teams (ac-2)", () => {
       expect((await as.erin.get("/v1/schedules")).json.active_count).toBe(10);
     }
     // An inactive schedule is allowed past the cap; activating it is not.
-    as.erin.team = finance;
+    await activate("erin", finance);
     const inactive = await as.erin.post("/v1/schedules", body(financeAgent, { active: false }));
     expect(inactive.status, JSON.stringify(inactive.json)).toBe(201);
     expect(inactive.json).toMatchObject({ active: false, next_due_at: null });
@@ -343,7 +347,7 @@ describe("cap of 10 active schedules per user across teams (ac-2)", () => {
     expect(patchAtCap.status).toBe(409);
     // Deactivating one (in the other team) frees a slot.
     const [first] = made;
-    as.erin.team = finance;
+    await activate("erin", finance);
     const pause = await as.erin.post(`/v1/schedules/${first?.id}/pause`);
     expect(pause.status).toBe(200);
     const resume = await as.erin.post(`/v1/schedules/${inactive.json.schedule_id}/resume`);
