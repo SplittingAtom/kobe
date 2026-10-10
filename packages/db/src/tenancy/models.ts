@@ -12,6 +12,8 @@ export const models = defineDomain({
     "team_budgets",
     "model_spend_daily",
     "run_tokens",
+    // In-flight budget reservations shared by gateway replicas, with expiry (KOBE-120).
+    "budget_reservations",
   ],
   installWide: [
     "model_providers",
@@ -21,6 +23,7 @@ export const models = defineDomain({
     "install_model_spend_daily",
     "budget_alerts",
     "budget_alert_emails",
+    "install_budget_reservations",
   ],
   grants: {
     // Providers and their sealed keys (KOBE-40): no team data; catalog entries RESTRICT deletes.
@@ -44,6 +47,9 @@ export const models = defineDomain({
     // Its email outbox: rows only from the budget_alerts trigger (guarded); delivery updates the
     // status columns only (columnGrants). RLS through the alert.
     budget_alert_emails: ["SELECT", "INSERT"],
+    // KOBE-120: reservations against the install budget (spans teams, so not a team table):
+    // created, shortened on settle, deleted on settle or by the expiry sweep. No team or user ids.
+    install_budget_reservations: ALL_PRIVILEGES,
   },
   columnGrants: {
     budget_alert_emails: {

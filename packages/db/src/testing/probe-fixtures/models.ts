@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  budgetReservations,
   modelCatalog,
   modelGatewayKeys,
   modelProviders,
@@ -89,6 +90,16 @@ export const modelsFixtures: Record<(typeof models.team)[number], ProbeFixture> 
       runId: run.id,
       sandboxId: randomUUID(),
       expiresAt: new Date(Date.now() + 3_600_000),
+    });
+  },
+  budget_reservations: async (tx, teamId) => {
+    await tx.insert(budgetReservations).values({
+      teamId,
+      callId: randomUUID(),
+      userId: randomUUID(),
+      usd: 1.5,
+      tokens: 100,
+      expiresAt: new Date(Date.now() + 60_000),
     });
   },
   // Kept by the run_usage trigger only (guarded): a usage row makes the counter row.
