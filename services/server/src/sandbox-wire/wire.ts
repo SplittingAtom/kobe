@@ -11,6 +11,7 @@ import { SYSTEM_ACTOR, eq, getMembership, users, withTeam, type KobeDb } from "@
 import { logger as rootLogger } from "../logger.js";
 import { recordAudit, type ServerAuditEvent } from "../audit/record.js";
 import { BackgroundTasks } from "../background.js";
+import type { ApprovalVerifier } from "../approvals/verify.js";
 import type { BlobStore } from "../retention/blobs.js";
 import { DEFAULT_UPLOAD_SETTINGS, type UploadSettings } from "../uploads/settings.js";
 import { createPolicyEngine } from "../policy/engine.js";
@@ -45,6 +46,8 @@ export interface SandboxWireOptions {
   readonly engine?: PolicyEngine;
   readonly tools?: ToolRegistry;
   readonly approvals?: ApprovalBroker;
+  /** Verifies and consumes signed approvals (project `remember`, KOBE-156); unset: none verifies. */
+  readonly approvalVerifier?: ApprovalVerifier;
   readonly ui?: UiBroker;
   readonly hooks?: RunLifecycleHooks;
   /** Run policy inputs incl. the approval-mode floor (`createDbRunContextSource()` in production). */
