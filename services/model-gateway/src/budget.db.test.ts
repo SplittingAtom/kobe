@@ -167,7 +167,7 @@ beforeAll(async () => {
     logger,
     onWritten: (teamId, callIds) => {
       gate.invalidateTeam(teamId);
-      gate.settle(callIds);
+      gate.settle(teamId, callIds);
       void notifyModels(db, `${MODELS_SPEND_PREFIX}${teamId}`);
     },
   });

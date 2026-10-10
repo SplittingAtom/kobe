@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   MODELS_ENSURE_PREFIX,
   MODELS_RESYNC,
@@ -25,6 +26,7 @@ import { ModelsListener } from "./listener.js";
 import { logger } from "./logger.js";
 import { PrincipalCache } from "./principals.js";
 import { BudgetGate } from "./budget-gate.js";
+import { DbReservations } from "./reservations-db.js";
 import { DbUsageSink } from "./usage/sink.js";
 
 /** Open calls get this long to finish on shutdown; stays under k8s' 30 s grace period. */
@@ -52,7 +54,22 @@ const budgets = new BudgetGate(
       withTeam(db, teamId, (tx) => loadMemberBudgetState(tx, teamId, userId)),
     prices: () => loadGatewayPrices(db),
   },
-  { ttlMs: config.budgetCacheTtlMs },
+  {
+    ttlMs: config.budgetCacheTtlMs,
+    // Shared by all replicas, with an expiry (KOBE-120).
+    reservations: new DbReservations(db, {
+      ttlMs: config.reservationTtlMs,
+      // Hashes the install-wide keys; the same on every replica (derived from the shared key).
+      salt: createHash("sha256")
+        .update(`kobe.budget-reservations:${config.sessionKey}`)
+        .digest("hex"),
+    }),
+    // A settled hold keeps counting until the other replicas' cached spend has caught up, and a
+    // running call extends its hold, so the TTL need not exceed the longest call.
+    settleHoldMs: config.budgetCacheTtlMs,
+    heartbeatMs: Math.floor(config.reservationTtlMs / 2),
+    onError: (err) => logger.warn({ err }, "budget reservation could not be ended"),
+  },
 );
 const listener = new ModelsListener({
   connectionString: config.databaseUrl,
@@ -81,7 +98,7 @@ const usage = new DbUsageSink({
     // Drop the cached spend first, then end the calls' reservations: the next check reloads the
     // spend including these rows.
     budgets.invalidateTeam(teamId);
-    budgets.settle(callIds);
+    budgets.settle(teamId, callIds);
     notifyModels(db, `${MODELS_SPEND_PREFIX}${teamId}`).catch((err: unknown) =>
       logger.warn({ err }, "spend hint failed"),
     );

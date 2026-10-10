@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import type { BudgetLine, MemberBudgetState } from "@kobe/db";
 import { describe, expect, it } from "vitest";
 import { BudgetGate } from "./budget-gate.js";
+import type { ReservationStore } from "./reservations.js";
+import { parseVerdict } from "./reservations-db.js";
 import type { CallContext } from "./seams.js";
 
 const teamId = randomUUID();
@@ -181,7 +183,7 @@ describe("BudgetGate (KOBE-42)", () => {
     d.release?.(true);
     // The call ended but its row has not landed: its 200 tokens stay reserved (of 200).
     expect(await g.admit(call(user))).toMatchObject({ ok: false, code: "budget_exhausted" });
-    g.settle([c.callId ?? ""]);
+    g.settle(teamId, [c.callId ?? ""]);
     expect((await g.admit(call(user))).ok).toBe(true);
   });
 
@@ -191,5 +193,116 @@ describe("BudgetGate (KOBE-42)", () => {
       requestsPerMinute: 10,
     }));
     expect((await g.admit(call(randomUUID()))).ok).toBe(false);
+  });
+
+  describe("with a shared reservation store (KOBE-120)", () => {
+    const failing: ReservationStore = {
+      reserve: async () => {
+        throw new Error("db down");
+      },
+      end: async () => undefined,
+      extend: async () => undefined,
+    };
+    const lines = () => ({
+      lines: [line({ unit: "tokens", scope: "user", limit: 1e6, spent: 0 })],
+      requestsPerMinute: 1_000,
+    });
+
+    it("fails closed (503) when the store is down, and logs it", async () => {
+      const errors: unknown[] = [];
+      const g = new BudgetGate(
+        { load: async () => lines(), prices: async () => new Map() },
+        { ttlMs: 1_000, reservations: failing, onError: (e) => errors.push(e) },
+      );
+      expect(await g.admit(call(randomUUID()))).toMatchObject({
+        ok: false,
+        status: 503,
+        code: "budget_unavailable",
+      });
+      expect(errors).toHaveLength(1);
+    });
+
+    it("ends the reservation through the store: now, or kept while the row is pending", async () => {
+      const ended: { calls: readonly string[]; keepMs: number | undefined }[] = [];
+      const store: ReservationStore = {
+        reserve: async () => ({ ok: true }),
+        extend: async () => undefined,
+        end: async (_t, calls, keepMs) => {
+          ended.push({ calls, keepMs });
+        },
+      };
+      const g = new BudgetGate(
+        { load: async () => lines(), prices: async () => new Map() },
+        { ttlMs: 1_000, reservations: store },
+      );
+      const a = call(randomUUID());
+      const b = call(randomUUID());
+      const da = await g.admit(a);
+      const db = await g.admit(b);
+      if (!da.ok || !db.ok) throw new Error("refused");
+      da.release?.(false);
+      db.release?.(true);
+      g.settle(teamId, [b.callId ?? ""]);
+      expect(ended).toEqual([
+        { calls: [a.callId], keepMs: undefined },
+        { calls: [b.callId], keepMs: 30_000 },
+        { calls: [b.callId], keepMs: undefined },
+      ]);
+    });
+
+    it("holds a settled reservation for the budget cache TTL, and extends running calls", async () => {
+      const ended: (number | undefined)[] = [];
+      let beats = 0;
+      const store: ReservationStore = {
+        reserve: async () => ({ ok: true }),
+        extend: async () => {
+          beats++;
+        },
+        end: async (_t, _c, keepMs) => {
+          ended.push(keepMs);
+        },
+      };
+      const g = new BudgetGate(
+        { load: async () => lines(), prices: async () => new Map() },
+        { ttlMs: 1_000, reservations: store, settleHoldMs: 1_000, heartbeatMs: 10 },
+      );
+      const c = call(randomUUID());
+      const d = await g.admit(c);
+      if (!d.ok) throw new Error("refused");
+      await new Promise((r) => setTimeout(r, 60));
+      expect(beats).toBeGreaterThanOrEqual(2);
+      d.release?.(true);
+      const seen = beats;
+      await new Promise((r) => setTimeout(r, 40));
+      expect(beats).toBe(seen); // the heartbeat stops with the call
+      g.settle(teamId, [c.callId ?? ""]);
+      expect(ended).toEqual([30_000, 1_000]);
+    });
+
+    it("a refused reservation gives the rate-limit token back", async () => {
+      const store: ReservationStore = {
+        reserve: async () => ({ ok: false, verdict: "full", line: 0 }),
+        end: async () => undefined,
+        extend: async () => undefined,
+      };
+      const g = new BudgetGate(
+        {
+          load: async () => ({ ...lines(), requestsPerMinute: 1 }),
+          prices: async () => new Map(),
+        },
+        { ttlMs: 1_000, reservations: store },
+      );
+      const user = randomUUID();
+      // With one request per minute, a second refusal would be 429 if the token were kept.
+      expect(await g.admit(call(user))).toMatchObject({ status: 402 });
+      expect(await g.admit(call(user))).toMatchObject({ status: 402 });
+    });
+  });
+
+  it("parses the reserve function's answers", () => {
+    expect(parseVerdict("ok")).toEqual({ ok: true });
+    expect(parseVerdict("full:2")).toEqual({ ok: false, verdict: "full", line: 2 });
+    expect(parseVerdict("own_share:0")).toEqual({ ok: false, verdict: "own_share", line: 0 });
+    expect(() => parseVerdict(undefined)).toThrow();
   });
 });
