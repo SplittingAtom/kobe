@@ -2,6 +2,7 @@ import {
   connectTools,
   filesEnabled,
   memoryEnabled,
+  memoryFile,
   registerKobeTools,
   type ExtensionApiLike,
 } from "./extension.js";
@@ -25,6 +26,7 @@ import type { ToolsTransport } from "./tools.js";
 let transport: ToolsTransport | undefined;
 let files = false;
 let memory = false;
+let memoryPath: string | undefined;
 let connected = false;
 
 export default function kobeTools(pi: ExtensionApiLike): void {
@@ -32,11 +34,12 @@ export default function kobeTools(pi: ExtensionApiLike): void {
     connected = true;
     files = filesEnabled(process.env);
     memory = memoryEnabled(process.env);
+    memoryPath = memoryFile(process.env);
     transport = connectTools({
       env: process.env,
       // stderr only: stdout is Pi's RPC stream.
       warn: (message) => process.stderr.write(`${message}\n`),
     });
   }
-  registerKobeTools(pi, transport, { files, memory });
+  registerKobeTools(pi, transport, { files, memory, memoryFile: memoryPath });
 }

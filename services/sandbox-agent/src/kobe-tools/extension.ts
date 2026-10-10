@@ -2,8 +2,9 @@ import { fstatSync } from "node:fs";
 import net from "node:net";
 import type { Duplex } from "node:stream";
 import { ToolsClient, type ToolsClientOptions } from "./client.js";
+import { installMemoryHooks, type MemoryHooksApi } from "./memory-hooks.js";
 import { recallTool, rememberTool } from "./memory-tools.js";
-import { TOOLS_FD_ENV, TOOLS_FILES_ENV, TOOLS_MEMORY_ENV } from "./protocol.js";
+import { MEMORY_FILE_ENV, TOOLS_FD_ENV, TOOLS_FILES_ENV, TOOLS_MEMORY_ENV } from "./protocol.js";
 import {
   artifactTools,
   shareFileTool,
@@ -13,7 +14,7 @@ import {
 } from "./tools.js";
 
 /** The slice of Pi's `ExtensionAPI` kobe-tools uses. */
-export interface ExtensionApiLike {
+export interface ExtensionApiLike extends Partial<MemoryHooksApi> {
   registerTool(tool: ToolDefinitionLike): unknown;
 }
 
@@ -66,10 +67,21 @@ export function memoryEnabled(env: Record<string, string | undefined>): boolean 
   return raw === "1";
 }
 
+/** The per-run memory file named by KOBE_MEMORY_FILE; read once and removed like the other variables. */
+export function memoryFile(env: Record<string, string | undefined>): string | undefined {
+  const raw = env[MEMORY_FILE_ENV];
+  Reflect.deleteProperty(env, MEMORY_FILE_ENV);
+  return raw === undefined || raw === "" ? undefined : raw;
+}
+
 export function registerKobeTools(
   pi: ExtensionApiLike,
   transport: ToolsTransport | undefined,
-  options: { readonly files?: boolean; readonly memory?: boolean } = {},
+  options: {
+    readonly files?: boolean;
+    readonly memory?: boolean;
+    readonly memoryFile?: string | undefined;
+  } = {},
 ): void {
   if (transport === undefined) return;
   for (const tool of artifactTools(transport)) pi.registerTool(tool);
@@ -79,6 +91,10 @@ export function registerKobeTools(
   if (options.memory === true) {
     pi.registerTool(rememberTool(transport));
     pi.registerTool(recallTool(transport));
+    // Active only for runs that have memory on (the agent says so in the run's memory file).
+    if (pi.on && pi.getActiveTools && pi.setActiveTools) {
+      installMemoryHooks(pi as MemoryHooksApi, options.memoryFile);
+    }
   }
 }
 

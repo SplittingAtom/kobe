@@ -1,6 +1,8 @@
+import { readdir } from "node:fs/promises";
+import path from "node:path";
 import type { SandboxToServerFrame } from "@kobe/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { runStart, startHarness, until, type Harness } from "./testing/harness.js";
+import { RUN_2, runStart, startHarness, until, type Harness } from "./testing/harness.js";
 import {
   FAUX_MODEL_EXTENSION,
   PI_AVAILABLE,
@@ -20,8 +22,8 @@ type PiEventFrame = Extract<SandboxToServerFrame, { type: "pi.event" }>;
 type CheckFrame = Extract<SandboxToServerFrame, { type: "policy.check" }>;
 type MemoryFrame = Extract<SandboxToServerFrame, { type: "memory.put" | "memory.read" }>;
 
-const BEGIN = "<<<BEGIN UNTRUSTED MEMORY>>>";
-const END = "<<<END UNTRUSTED MEMORY>>>";
+const BEGIN = "<<<BEGIN UNTRUSTED MEMORY";
+const END = "<<<END UNTRUSTED MEMORY";
 
 let h: Harness | undefined;
 afterEach(async () => {
@@ -92,6 +94,7 @@ async function systemPromptOf(t: Harness, extra: Record<string, unknown>): Promi
   return assistantTexts(t).find((x) => x.startsWith("SYSTEM:")) as string;
 }
 
+const ON = { scopes: ["user", "project"], indexes: [] };
 const MEMORY = {
   scopes: ["user", "project"],
   indexes: [
@@ -114,13 +117,50 @@ describe.skipIf(!PI_AVAILABLE)("memory tools in real Pi, through kobe-sandbox-ag
     expect(caps(await start(false))).not.toContain("memory");
   }, 90_000);
 
-  it("lists remember and recall to the model", async () => {
+  it("lists remember and recall only for runs that have memory on", async () => {
     const t = await start();
-    const prompt = await systemPromptOf(t, {});
-    expect(prompt).toContain("remember");
-    expect(prompt).toContain("recall");
-    expect(prompt).not.toContain("## Saved memory");
-  }, 90_000);
+    const on = await systemPromptOf(t, { memory: ON });
+    expect(on).toContain("Save a durable fact");
+    expect(on).toContain("Look up saved memory");
+    await h?.close();
+    for (const memory of [{ scopes: [], indexes: [] }, undefined]) {
+      const off = await start();
+      const prompt = await systemPromptOf(off, memory === undefined ? {} : { memory });
+      expect(prompt).not.toContain("Save a durable fact");
+      expect(prompt).not.toContain("Look up saved memory");
+      expect(prompt).not.toContain("## Saved memory");
+      await h?.close();
+    }
+  }, 120_000);
+
+  it("a changed index reaches the next run without restarting Pi", async () => {
+    const t = await start();
+    const dirs = async () =>
+      (await readdir(path.join(t.dir, "pi-runtime"))).filter((n) => n.startsWith("pi-"));
+    const memory = (content: string) => ({
+      scopes: ["user"],
+      indexes: [{ scope: "user", content, version: 1, truncated: false }],
+    });
+    const first = await systemPromptOf(t, { memory: memory("- [one](one.md) alpha-marker") });
+    expect(first).toContain("alpha-marker");
+    const before = await dirs();
+    expect(before.length).toBe(1);
+    await t.server.command(
+      runStart(fauxScript([{ echoSystemPrompt: true }]), {
+        run_id: RUN_2,
+        memory: memory("- [two](two.md) beta-marker"),
+      }),
+      30_000,
+    );
+    await until(() => assistantTexts(t).filter((x) => x.startsWith("SYSTEM:")).length >= 2, 30_000);
+    const second = assistantTexts(t).filter((x) => x.startsWith("SYSTEM:"))[1] as string;
+    expect(second).toContain("beta-marker");
+    expect(second).not.toContain("alpha-marker");
+    // The same Pi process (same private runtime directory), and it never exited.
+    expect(await dirs()).toEqual(before);
+    expect(t.server.frames("pi.exited")).toEqual([]);
+    expect(t.server.frames("policy.check")).toEqual([]);
+  }, 120_000);
 
   it("injects the index as untrusted data, and nothing when memory is off", async () => {
     const t = await start();
@@ -152,9 +192,16 @@ describe.skipIf(!PI_AVAILABLE)("memory tools in real Pi, through kobe-sandbox-ag
 
   it("runs kobe-policy before remember, then sends memory.put with the tool call id", async () => {
     const t = await start();
-    const args = { scope: "user", path: "tea.md", content: "likes tea", mode: "append" };
+    // Invisible characters are stripped before kobe-policy sees the call (so a card shows what is stored).
+    const sent = {
+      scope: "user",
+      path: "tea.md",
+      content: "likes\u200b tea\u{e0041}",
+      mode: "append",
+    };
+    const args = { ...sent, content: "likes tea" };
     const result = await t.server.command(
-      runStart(fauxScript([{ tool: "remember", id: "m1", args }])),
+      runStart(fauxScript([{ tool: "remember", id: "m1", args: sent }]), { memory: ON }),
       30_000,
     );
     expect(result).toMatchObject({ ok: true });
@@ -185,7 +232,10 @@ describe.skipIf(!PI_AVAILABLE)("memory tools in real Pi, through kobe-sandbox-ag
   it("says a project write waits for approval, and turns a refusal into a tool error", async () => {
     const t = await start();
     const args = { scope: "project", path: "deploy.md", content: "helm" };
-    await t.server.command(runStart(fauxScript([{ tool: "remember", id: "m2", args }])), 30_000);
+    await t.server.command(
+      runStart(fauxScript([{ tool: "remember", id: "m2", args }]), { memory: ON }),
+      30_000,
+    );
     await until(() => checks(t).length > 0, 30_000);
     allow(t, checks(t)[0] as CheckFrame);
     await until(() => memoryFrames(t).length > 0, 30_000);
@@ -207,7 +257,10 @@ describe.skipIf(!PI_AVAILABLE)("memory tools in real Pi, through kobe-sandbox-ag
   it("runs kobe-policy before recall and fences what it returns as untrusted", async () => {
     const t = await start();
     const args = { scope: "project", path: "deploy.md" };
-    await t.server.command(runStart(fauxScript([{ tool: "recall", id: "r1", args }])), 30_000);
+    await t.server.command(
+      runStart(fauxScript([{ tool: "recall", id: "r1", args }]), { memory: ON }),
+      30_000,
+    );
     await until(() => checks(t).length > 0, 30_000);
     expect(checks(t)[0]).toMatchObject({ tool: "recall", tool_call_id: "r1", input: args });
     await new Promise((r) => setTimeout(r, 300));
@@ -242,7 +295,10 @@ describe.skipIf(!PI_AVAILABLE)("memory tools in real Pi, through kobe-sandbox-ag
 
   it("a server error reaches the model as a tool error", async () => {
     const t = await start();
-    await t.server.command(runStart(fauxScript([{ tool: "recall", id: "r2", args: {} }])), 30_000);
+    await t.server.command(
+      runStart(fauxScript([{ tool: "recall", id: "r2", args: {} }]), { memory: ON }),
+      30_000,
+    );
     await until(() => checks(t).length > 0, 30_000);
     allow(t, checks(t)[0] as CheckFrame);
     await until(() => memoryFrames(t).length > 0, 30_000);

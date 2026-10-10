@@ -139,6 +139,8 @@ export class ThreadManager {
       }
       try {
         await thread.attachRun(frame.run_id, model, frame.run_token?.token);
+        // The run's memory (KOBE-157): its own file, so a changed index never restarts Pi.
+        await thread.attachMemory(frame.memory);
       } catch (error) {
         thread.endRun();
         return fail("pi_unavailable", `model file not written: ${(error as Error).message}`);
@@ -493,12 +495,11 @@ export class ThreadManager {
       parentEnv: this.#options.parentEnv,
       config: frame?.config,
       mcp: frame?.mcp,
-      memory: frame?.memory,
     });
     if (thread.hasProcess) {
       // `mcp` can arrive without `config` (an agent that lost all its connectors): still a change.
       const changed =
-        (frame?.config !== undefined || frame?.mcp !== undefined || frame?.memory !== undefined) &&
+        (frame?.config !== undefined || frame?.mcp !== undefined) &&
         launch.key !== thread.launchKey;
       // A Pi whose policy channel closed blocks every tool call for good: start a fresh one (not
       // while it is busy — its calls are blocked anyway, and Stop must still reach it).

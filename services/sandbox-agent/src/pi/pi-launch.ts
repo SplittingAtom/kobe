@@ -1,12 +1,6 @@
 import path from "node:path";
-import {
-  KOBE_TOOLS_FD,
-  type PiThreadConfig,
-  type RunMcpContext,
-  type RunMemoryContext,
-} from "@kobe/protocol";
+import { KOBE_TOOLS_FD, type PiThreadConfig, type RunMcpContext } from "@kobe/protocol";
 import { EXEC_FD, EXEC_FD_ENV } from "../kobe-exec/protocol.js";
-import { withMemoryContext } from "../memory/context.js";
 
 /**
  * How a thread's `pi --mode rpc` process is started.
@@ -72,6 +66,11 @@ export interface PiLaunch {
    * Pi's `mcp.json` from it (mcp/pi-mcp-config.ts) and Pi loads `builtin:mcp`.
    */
   readonly mcp?: RunMcpContext;
+  /**
+   * Pi gets a per-run memory file (KOBE-157, memory/context-file.ts): the thread creates it at spawn
+   * and rewrites it before every prompt, so memory changes never change the launch key.
+   */
+  readonly memoryFile: boolean;
 }
 
 export interface PiLaunchInput {
@@ -105,8 +104,6 @@ export interface PiLaunchInput {
    * and `recall`. Meaningful only with {@link toolsExtension}.
    */
   readonly toolsMemory?: boolean | undefined;
-  /** `run.start.memory` (KOBE-157): the enabled scopes' indexes join the system prompt, fenced as untrusted. */
-  readonly memory?: RunMemoryContext | undefined;
   /**
    * The kobe-policy extension (KOBE-36): a root-owned, read-only file. Always loaded, always the
    * **last** `-e`: Pi runs `tool_call` handlers in extension load order (verified Pi 1.0.0), so the
@@ -182,24 +179,24 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
   if (input.execExtension !== undefined) env[EXEC_FD_ENV] = String(EXEC_CHANNEL_FD);
   if (input.toolsExtension !== undefined && input.toolsFiles === true) env.KOBE_TOOLS_FILES = "1";
   if (input.toolsExtension !== undefined && input.toolsMemory === true) env.KOBE_TOOLS_MEMORY = "1";
-  // The memory index travels with the system prompt, so a changed index is a changed launch.
-  const systemPrompt = withMemoryContext(config?.system_prompt, input.memory);
 
   // The model is deliberately not part of the key (see `modelsExtension`).
   const key = JSON.stringify({
     args,
     agent: config?.agent ?? null,
-    system_prompt: systemPrompt ?? null,
+    system_prompt: config?.system_prompt ?? null,
     skills: config?.skills ?? null,
     skill_bundles: config?.skill_bundles ?? null,
     builtin_skills: config?.builtin_skills ?? null,
     mcp_servers: config?.mcp_servers ?? null,
     mcp: mcp ?? null,
   });
+  const systemPrompt = config?.system_prompt;
   return {
     args,
     env,
     key,
+    memoryFile: input.toolsExtension !== undefined && input.toolsMemory === true,
     toolsChannel: input.toolsExtension !== undefined,
     execChannel: input.execExtension !== undefined,
     ...(mcp === undefined ? {} : { mcp }),

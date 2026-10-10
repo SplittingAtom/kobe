@@ -20,27 +20,32 @@ to the server (`tools/memory-broker.ts`); `run.start.memory` joins the system pr
   unions in `packages/protocol/src/artifacts.ts` did not list them: added (additive, 4 lines) with the three
   missing `MemoryPutFrame` / `MemoryReadFrame` / `MemoryResultFrame` type exports. `ToolsRequest.tool` is
   optional in the extension; `ArtifactBroker` sends `tool` only when present.
-- **Untrusted framing (both recall output and the injected index):** each file is wrapped in
-  `<<<BEGIN UNTRUSTED MEMORY>>>` / `<<<END UNTRUSTED MEMORY>>>` with a `scope: .., file: ..` label line,
-  and a notice that it is data, never instructions. Content is sanitised: CR/U+2028/2029 become LF, all other
-  control characters (C0 except LF/TAB, DEL, C1) are removed, and `<<<` becomes `< < <` so content cannot
-  forge a fence. Same helper for both (`sanitizeUntrusted`, `untrustedMemoryBlock`).
-- **Caps:** recall output at most 32 KiB in total (content cut, notice added); each injected index at most
-  12 KiB; the memory section is dropped whole (never cut through a fence) when the agent's own system prompt
-  leaves no room under `SYSTEM_PROMPT_MAX_BYTES`.
-- **Injection:** `buildPiLaunch` appends the section to the agent's system prompt (`--append-system-prompt`
-  file, KOBE-123) and puts the result in the launch key. Only indexes of scopes listed in
-  `memory.scopes` are used; empty/absent index, empty scopes or no `memory` field give no section at all.
-  Consequence: an index that changed since the last run restarts an idle Pi at the next `run.start`
-  (session file restores context); an unchanged index does not. `ThreadManager` treats a `memory` field
-  as a launch input change like `mcp`.
-- **No system-prompt arg change:** the existing `--append-system-prompt` path is reused, nothing new at Pi launch.
+- **Untrusted framing (recall output and injected index; `kobe-tools/memory-fence.ts`):** each file sits in
+  `<<<BEGIN UNTRUSTED MEMORY <nonce>>>>` / `<<<END UNTRUSTED MEMORY <nonce>>>>`; the nonce is random per recall and per
+  run, so text written earlier cannot close the fence even if a look-alike slips past. Sanitising: NFKC (fullwidth
+  folds to ASCII), strip `\p{Cf}` (zero-width, bidi, BOM, Unicode tag block), variation selectors, C0/C1 controls
+  (LF/TAB kept), line separators become LF, then `<<<` runs are broken up. Same for labels (scope, file, provenance).
+- **Provenance:** `run.start.memory.indexes[].written_by` (`agent`|`person`, new optional field, server fills it from the
+  current version's actor). Label: "last written by the agent and approved by a project member" (agent writes to
+  project memory only land after approval), "last edited by a person", or none. The approver's identity is not
+  stored; naming them needs a migration (follow-up, with an author/approver name for KOBE-158's panel).
+- **Caps:** recall 8 KiB per file inside 32 KiB total (a note inside the fence, END kept); each injected index 12 KiB;
+  a section that would not fit under the system prompt limit is dropped whole.
+- **Injection is per run, not part of the launch (review of #205):** the agent writes `memory-context.json` in Pi's
+  runtime dir (like `model.json`: atomic, tripwire-verified, env `KOBE_MEMORY_FILE`) before every prompt:
+  `{tools, text}`. kobe-tools reads it: `input` hook activates/deactivates `remember`/`recall` (tools listed only when
+  memory is on for the run: some scope enabled), `before_agent_start` appends `text` to that run's system prompt
+  only (not persisted in the session). A changed index or switch never changes the launch key, so no Pi restart.
+  Missing/malformed file = no tools, no text.
+- **Approval card = stored content:** kobe-tools' `tool_call` hook strips invisible characters from `remember`
+  content before kobe-policy's check (policy loads last), so the policy input, the HMAC-signed input and the card all
+  show what is stored. Web-side rendering of the card (escape/mark invisible characters in other content) is KOBE-158's area.
 - `agent.runs.test.ts` env probe: the fake Pi does not strip `KOBE_TOOLS_MEMORY` like the real extension does.
 
 ## Open questions
 
 - A mid-run `remember` is not visible in the injected index until the next run (by design: topic files via `recall`).
-- Pi restarts when the index changes; if that proves slow, move the section to a per-run Pi message instead.
+- Approver identity/name in provenance (migration). Card rendering of invisible characters in non-remember input: KOBE-158.
 
 ## Evidence
 
@@ -49,4 +54,4 @@ to the server (`tools/memory-broker.ts`); `run.start.memory` joins the system pr
   unit: `kobe-tools/memory-tools.test.ts`, `tools/memory-broker.test.ts`.
 - ac-2: same file, "injects the index as untrusted data, and nothing when memory is off";
   unit: `memory/context.test.ts`, `pi/pi-launch.test.ts` ("buildPiLaunch memory").
-- ac-3: `kobe-tools.memory.real-pi.test.ts` (7 tests).
+- ac-3: `kobe-tools.memory.real-pi.test.ts` (9 tests, incl. no-restart and tools-off).

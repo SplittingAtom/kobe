@@ -3,6 +3,7 @@ import { chmod, lstat, mkdir, open, readdir, realpath, rm } from "node:fs/promis
 import path from "node:path";
 import { GUARDED_CONFIG } from "./agent-config.js";
 import { EGRESS_TOKEN_FILE_NAME, isEgressTemp } from "../egress/egress-wiring.js";
+import { MEMORY_FILE_NAME, isMemoryTemp } from "../memory/context-file.js";
 import { SYSTEM_PROMPT_FILE_NAME } from "../pi/system-prompt-file.js";
 import type { PiIdentities } from "../pi/identities.js";
 
@@ -72,6 +73,8 @@ export async function unexpectedEntries(
       isModelTemp(name) ||
       name === EGRESS_TOKEN_FILE_NAME ||
       name === SYSTEM_PROMPT_FILE_NAME ||
+      name === MEMORY_FILE_NAME ||
+      isMemoryTemp(name) ||
       isEgressTemp(name)
     ) {
       if (kind !== "file" && kind !== "missing") found.push(`${name} (${kind})`);

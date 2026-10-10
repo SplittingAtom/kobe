@@ -40,6 +40,8 @@ export const OPS = [
 
 /** Env var set to `1` by an agent that announced the `memory` capability. Read once, removed. */
 export const TOOLS_MEMORY_ENV = "KOBE_TOOLS_MEMORY";
+/** Env var naming the per-run memory file (memory-hooks.ts). Read once, removed. */
+export const MEMORY_FILE_ENV = "KOBE_MEMORY_FILE";
 export const TOOL_REMEMBER = "remember";
 export const TOOL_RECALL = "recall";
 /** Mirrors packages/protocol `memory.ts` (pinned by a test). */

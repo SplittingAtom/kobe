@@ -692,5 +692,8 @@ async function loadIndex(
   const doc = docs.find((d) => d.path === MEMORY_INDEX_FILE);
   const raw = doc && blobs ? await readCurrent(tx, blobs, teamId, doc) : null;
   if (!doc || raw === null) return { content: "", version: 0, truncated: false };
-  return { ...indexOf(raw), version: doc.currentVersion };
+  // Provenance for the model (KOBE-157): a panel edit is a person; an agent write into project
+  // memory only lands after a member approved it.
+  const writtenBy = doc.actorKind === "agent" ? ("agent" as const) : ("person" as const);
+  return { ...indexOf(raw), version: doc.currentVersion, written_by: writtenBy };
 }

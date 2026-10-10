@@ -478,7 +478,16 @@ describe("run.start.memory", () => {
     const start = sb.frames("run.start")[0] as { memory?: unknown } | undefined;
     expect(runMemoryContextSchema.parse(start?.memory)).toEqual({
       scopes: ["user"],
-      indexes: [{ scope: "user", content: "- tea\n- coffee", version: 1, truncated: false }],
+      // written_by: the index was last written by the agent (provenance for the model, KOBE-157).
+      indexes: [
+        {
+          scope: "user",
+          content: "- tea\n- coffee",
+          version: 1,
+          truncated: false,
+          written_by: "agent",
+        },
+      ],
     });
 
     const w3 = await world();

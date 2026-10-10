@@ -198,6 +198,11 @@ export const memoryIndexSchema = z.strictObject({
   /** 0 = no index yet. */
   version: z.number().int().nonnegative(),
   truncated: z.boolean(),
+  /**
+   * Who wrote the current version (KOBE-157): `agent` (project: only after a member approved it) or
+   * `person` (panel edit). Absent: unknown. Shown to the model as provenance of the untrusted text.
+   */
+  written_by: z.enum(["agent", "person"]).optional(),
 });
 export type MemoryIndex = z.infer<typeof memoryIndexSchema>;
 
