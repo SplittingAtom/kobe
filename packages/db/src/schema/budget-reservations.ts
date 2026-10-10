@@ -65,7 +65,10 @@ export const installBudgetReservations = pgTable(
     expiresAt: timestamp({ withTimezone: true }).notNull(),
   },
   (t) => [
-    check("install_budget_reservations_call_id_len", sql`char_length(${t.callId}) BETWEEN 1 AND 128`),
+    check(
+      "install_budget_reservations_call_id_len",
+      sql`char_length(${t.callId}) BETWEEN 1 AND 128`,
+    ),
     check("install_budget_reservations_amounts", sql`${t.usd} >= 0 AND ${t.tokens} >= 0`),
     index("install_budget_reservations_expiry_idx").on(t.expiresAt),
   ],

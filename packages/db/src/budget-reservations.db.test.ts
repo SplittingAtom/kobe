@@ -42,7 +42,7 @@ async function reserve(
 const settle = async (team: string, calls: string[], keepMs: number | null) =>
   (
     await app.db.execute<{ n: number }>(
-      sql`SELECT kobe_settle_budget(${team}::uuid, ${calls}::text[], ${keepMs}::integer) AS n`,
+      sql`SELECT kobe_settle_budget(${team}::uuid, ${`{${calls.join(",")}}`}::text[], ${keepMs}::integer) AS n`,
     )
   ).rows[0]?.n;
 
@@ -77,13 +77,12 @@ describe("kobe_reserve_budget", () => {
     // The same member's next 200 would pass the 250 share.
     expect(await reserve(teamA, user, randomUUID(), 200, lines)).toBe("own_share:0");
     // A user line has no share: only the total counts.
+    // (a call is admitted while the reserved amount is below the limit, as before KOBE-120)
     const own = [line("user", "tokens", 300)];
-    expect(await reserve(teamA, user, randomUUID(), 100, own)).toBe("ok");
-    expect(await reserve(teamA, user, randomUUID(), 100, own)).toBe("ok");
-    expect(await reserve(teamA, user, randomUUID(), 1, own)).toBe("ok");
-    expect(await reserve(teamA, user, randomUUID(), 1, [line("user", "tokens", 300, 0)])).toBe(
-      "full:0",
-    );
+    const solo = randomUUID();
+    expect(await reserve(teamA, solo, randomUUID(), 150, own)).toBe("ok");
+    expect(await reserve(teamA, solo, randomUUID(), 150, own)).toBe("ok");
+    expect(await reserve(teamA, solo, randomUUID(), 1, own)).toBe("full:0");
   });
 
   it("two connections cannot both reserve the last amount (atomic)", async () => {
@@ -111,8 +110,9 @@ describe("kobe_reserve_budget", () => {
   it("counts the install line across teams, with the install-wide rows", async () => {
     await app.db.execute(sql`DELETE FROM install_budget_reservations`);
     const lines = [line("install", "tokens", 100)];
-    expect(await reserve(teamA, randomUUID(), randomUUID(), 20, lines, 60_000, 1)).toBe("ok");
-    expect(await reserve(teamB, randomUUID(), randomUUID(), 80, lines, 60_000, 1)).toBe("full:0");
+    expect(await reserve(teamA, randomUUID(), randomUUID(), 60, lines, 60_000, 1)).toBe("ok");
+    expect(await reserve(teamB, randomUUID(), randomUUID(), 60, lines, 60_000, 1)).toBe("ok");
+    expect(await reserve(teamA, randomUUID(), randomUUID(), 1, lines, 60_000, 1)).toBe("full:0");
   });
 
   it("a repeated call id replaces its reservation", async () => {
