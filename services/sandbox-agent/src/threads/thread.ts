@@ -12,7 +12,14 @@ import {
   type PolicyChannelReply,
 } from "../policy/channel.js";
 import { ToolsChannel } from "../tools/channel.js";
-import type { KobeToolsRequest, KobeToolsResponse, RunMcpContext } from "@kobe/protocol";
+import type {
+  KobeToolsRequest,
+  KobeToolsResponse,
+  RunMcpContext,
+  RunMemoryContext,
+} from "@kobe/protocol";
+import { MEMORY_FILE_ENV, MEMORY_FILE_NAME, MemoryContextFile } from "../memory/context-file.js";
+import { memoryRunFileContent } from "../memory/context.js";
 import { PiProcess, PiProcessError, type PiExit, type PiRecord } from "../pi/pi-process.js";
 import type { PiIdentities, PiIdentity } from "../pi/identities.js";
 import type { PiLaunch } from "../pi/pi-launch.js";
@@ -142,6 +149,8 @@ export interface ThreadEnv {
   readonly toolsExtension?: string | undefined;
   /** The agent announced the `files` capability: the extension registers `share_file` (KOBE-149). */
   readonly shareFiles?: boolean | undefined;
+  /** The agent announced `memory` (KOBE-157): kobe-tools registers remember/recall. */
+  readonly memoryTools?: boolean | undefined;
   /** Other root-owned extension paths loaded with `-e`, before kobe-policy. */
   readonly extensions?: readonly string[];
   /** How long a new Pi may take to report kobe-policy ready (default {@link POLICY_READY_TIMEOUT_MS}). */
@@ -204,6 +213,7 @@ export class Thread {
   /** The current Pi's egress token file (undefined without egress wiring). */
   #egressFile: EgressTokenFile | undefined;
   #promptFile: SystemPromptFile | undefined;
+  #memoryFile: MemoryContextFile | undefined;
   /** Each process's private runtime directory (and identity), removed once it has exited. */
   readonly #runtimeDirs = new Map<PiProcess, RuntimeOf>();
   /** Removal of a runtime directory in progress (awaited by `stopProcess`). */
@@ -310,6 +320,7 @@ export class Thread {
     let mcpConfig: McpConfigState | undefined;
     let egressFile: EgressTokenFile | undefined;
     let promptFile: SystemPromptFile | undefined;
+    let memoryFile: MemoryContextFile | undefined;
     try {
       runtimeDir = await mkdtemp(path.join(this.#env.runtimeDir, RUNTIME_DIR_PREFIX));
       const env: Record<string, string> = { ...launch.env };
@@ -405,6 +416,15 @@ export class Thread {
         );
         await promptFile.write();
       }
+      if (launch.memoryFile) {
+        // Memory off until the run says otherwise (attachMemory, before every prompt).
+        memoryFile = new MemoryContextFile(
+          path.join(runtimeDir, MEMORY_FILE_NAME),
+          identity === undefined ? 0o600 : 0o640,
+        );
+        await memoryFile.write({ tools: false, text: "" });
+        env[MEMORY_FILE_ENV] = memoryFile.path;
+      }
       pi = new PiProcess({
         bin: command.bin,
         args: [
@@ -488,6 +508,7 @@ export class Thread {
     this.#mcpConfig = mcpConfig;
     this.#egressFile = egressFile;
     this.#promptFile = promptFile;
+    this.#memoryFile = memoryFile;
     this.lastUsed = Date.now();
     // A token rotated while this spawn was in progress reached no file (the listener runs only
     // against `#modelFile`): take the current token again now that the file is attached.
@@ -571,6 +592,9 @@ export class Thread {
     if (this.#promptFile !== undefined && !(await this.#promptFile.verify())) {
       return "the system prompt file is not what the agent wrote";
     }
+    if (this.#memoryFile !== undefined && !(await this.#memoryFile.verify())) {
+      return "the memory context file is not what the agent wrote";
+    }
     const mcp = this.#mcpConfig;
     if (
       mcp !== undefined &&
@@ -622,6 +646,14 @@ export class Thread {
     // Memory only (KOBE-118): handed to this Pi on request, never written anywhere.
     this.#runToken = runToken === undefined ? undefined : { runId, token: runToken };
     await this.#modelFile?.update({ runId, model });
+  }
+
+  /**
+   * The run's memory (KOBE-157): the kobe-tools extension lists `remember` / `recall` and adds the
+   * fenced index to the run's prompt only while this says so. A per-run file, not a launch input.
+   */
+  async attachMemory(memory: RunMemoryContext | undefined): Promise<void> {
+    await this.#memoryFile?.write(memoryRunFileContent(memory));
   }
 
   /** A rotated model-gateway token: the next model request uses it (the current one is not cut). */
@@ -880,6 +912,7 @@ export class Thread {
     this.#mcpConfig = undefined;
     this.#egressFile = undefined;
     this.#promptFile = undefined;
+    this.#memoryFile = undefined;
     this.#streaming = false;
     this.#dialogs.clear();
     this.endRun();

@@ -66,6 +66,11 @@ export interface PiLaunch {
    * Pi's `mcp.json` from it (mcp/pi-mcp-config.ts) and Pi loads `builtin:mcp`.
    */
   readonly mcp?: RunMcpContext;
+  /**
+   * Pi gets a per-run memory file (KOBE-157, memory/context-file.ts): the thread creates it at spawn
+   * and rewrites it before every prompt, so memory changes never change the launch key.
+   */
+  readonly memoryFile: boolean;
 }
 
 export interface PiLaunchInput {
@@ -94,6 +99,11 @@ export interface PiLaunchInput {
    * `share_file`. Meaningful only with {@link toolsExtension}.
    */
   readonly toolsFiles?: boolean | undefined;
+  /**
+   * The agent announced the `memory` capability (KOBE-157): the extension then registers `remember`
+   * and `recall`. Meaningful only with {@link toolsExtension}.
+   */
+  readonly toolsMemory?: boolean | undefined;
   /**
    * The kobe-policy extension (KOBE-36): a root-owned, read-only file. Always loaded, always the
    * **last** `-e`: Pi runs `tool_call` handlers in extension load order (verified Pi 1.0.0), so the
@@ -168,6 +178,7 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
   if (input.toolsExtension !== undefined) env.KOBE_TOOLS_FD = String(TOOLS_CHANNEL_FD);
   if (input.execExtension !== undefined) env[EXEC_FD_ENV] = String(EXEC_CHANNEL_FD);
   if (input.toolsExtension !== undefined && input.toolsFiles === true) env.KOBE_TOOLS_FILES = "1";
+  if (input.toolsExtension !== undefined && input.toolsMemory === true) env.KOBE_TOOLS_MEMORY = "1";
 
   // The model is deliberately not part of the key (see `modelsExtension`).
   const key = JSON.stringify({
@@ -185,6 +196,7 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
     args,
     env,
     key,
+    memoryFile: input.toolsExtension !== undefined && input.toolsMemory === true,
     toolsChannel: input.toolsExtension !== undefined,
     execChannel: input.execExtension !== undefined,
     ...(mcp === undefined ? {} : { mcp }),

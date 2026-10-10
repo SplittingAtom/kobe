@@ -262,3 +262,24 @@ describe("buildPiLaunch per-session MCP (KOBE-111)", () => {
     expect(a.key).toBe(c.key);
   });
 });
+
+describe("buildPiLaunch memory (KOBE-157)", () => {
+  it("memory is not a launch input: no system prompt text, no key change", () => {
+    const config = { system_prompt: "be brief" };
+    const launch = buildPiLaunch({ ...base, parentEnv, config, toolsExtension: TOOLS });
+    expect(launch.systemPrompt).toBe("be brief");
+    expect(launch.key).toBe(
+      buildPiLaunch({ ...base, parentEnv, config, toolsExtension: TOOLS, toolsMemory: true }).key,
+    );
+  });
+
+  it("registers remember/recall and a per-run memory file only with the extension and the flag", () => {
+    const launch = (extra: object) => buildPiLaunch({ ...base, parentEnv, ...extra });
+    expect(launch({ toolsExtension: TOOLS, toolsMemory: true }).env.KOBE_TOOLS_MEMORY).toBe("1");
+    expect(launch({ toolsExtension: TOOLS, toolsMemory: true }).memoryFile).toBe(true);
+    expect(launch({ toolsExtension: TOOLS }).env.KOBE_TOOLS_MEMORY).toBeUndefined();
+    expect(launch({ toolsExtension: TOOLS }).memoryFile).toBe(false);
+    expect(launch({ toolsMemory: true }).env.KOBE_TOOLS_MEMORY).toBeUndefined();
+    expect(launch({ toolsMemory: true }).memoryFile).toBe(false);
+  });
+});

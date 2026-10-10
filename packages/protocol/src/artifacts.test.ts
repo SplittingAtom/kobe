@@ -212,3 +212,44 @@ describe("API types", () => {
     expect(artifactDetailSchema.safeParse(summary).success).toBe(false);
   });
 });
+
+describe("kobe-tools memory ops (KOBE-157)", () => {
+  it("accepts memory.put / memory.read requests and their answers, nothing else", () => {
+    const put = {
+      id: "kt_1",
+      op: "memory.put",
+      tool_call_id: "c1",
+      input: { scope: "user", path: "a.md", content: "x" },
+    };
+    expect(kobeToolsRequestSchema.safeParse(put).success).toBe(true);
+    expect(kobeToolsRequestSchema.safeParse({ ...put, tool: "remember" }).success).toBe(false);
+    expect(
+      kobeToolsRequestSchema.safeParse({
+        id: "kt_2",
+        op: "memory.read",
+        tool_call_id: "c2",
+        input: {},
+      }).success,
+    ).toBe(true);
+    expect(
+      kobeToolsResponseSchema.safeParse({
+        id: "kt_1",
+        ok: true,
+        op: "put",
+        status: "applied",
+        scope: "user",
+        path: "a.md",
+        version: 1,
+      }).success,
+    ).toBe(true);
+    expect(
+      kobeToolsResponseSchema.safeParse({
+        id: "kt_2",
+        ok: true,
+        op: "read",
+        files: [],
+        truncated: false,
+      }).success,
+    ).toBe(true);
+  });
+});

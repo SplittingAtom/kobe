@@ -658,7 +658,15 @@ describe("what a tool started by Pi can reach", () => {
       sameToolsChannel: false,
       fd4Write: false,
       procOpen4: false,
-      env: ["KOBE_POLICY_FD", "KOBE_TOOLS_FD", "KOBE_TOOL_HOME", "KOBE_TOOL_TMPDIR"],
+      // KOBE_TOOLS_MEMORY and KOBE_MEMORY_FILE (KOBE-157) are removed by the real extension at load; the fake Pi keeps it.
+      env: [
+        "KOBE_MEMORY_FILE",
+        "KOBE_POLICY_FD",
+        "KOBE_TOOLS_FD",
+        "KOBE_TOOLS_MEMORY",
+        "KOBE_TOOL_HOME",
+        "KOBE_TOOL_TMPDIR",
+      ],
     });
     await h.server.waitFor(settled());
   });
