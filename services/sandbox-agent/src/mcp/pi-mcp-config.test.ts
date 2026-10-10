@@ -17,6 +17,7 @@ const TOKEN = "session-token-for-mcp-proxy-0123456789";
 const TOKEN_2 = "rotated-token-for-mcp-proxy-9876543210";
 const PROXY = "http://mcp-proxy.kobe.internal:80";
 const TOKEN_FILE = "/run/pi-abc123/agent/mcp-token";
+const THREAD = "33333333-3333-4333-8333-333333333333";
 const ID = "11111111-1111-4111-8111-111111111111";
 const ID_2 = "22222222-2222-4222-8222-222222222222";
 const mcp: RunMcpContext = {
@@ -41,7 +42,7 @@ function strings(value: unknown): string[] {
 }
 
 describe("buildPiMcpConfig (KOBE-111)", () => {
-  const text = buildPiMcpConfig({ proxyUrl: PROXY, tokenFile: TOKEN_FILE, mcp });
+  const text = buildPiMcpConfig({ proxyUrl: PROXY, tokenFile: TOKEN_FILE, threadId: THREAD, mcp });
   const config = JSON.parse(text) as { mcpServers: Record<string, Record<string, unknown>> };
 
   it("lists exactly the effective connectors, each at mcp-proxy's per-connector URL", () => {
@@ -59,22 +60,40 @@ describe("buildPiMcpConfig (KOBE-111)", () => {
   it("ac-2: holds no credential at all; the header is a fixed command naming the token file", () => {
     for (const server of Object.values(config.mcpServers)) {
       expect(Object.keys(server).sort()).toEqual(["exposure", "headers", "toolExposure", "url"]);
-      expect(server.headers).toEqual({ Authorization: `!cat '${TOKEN_FILE}'` });
+      expect(server.headers).toEqual({
+        Authorization: `!cat '${TOKEN_FILE}'`,
+        "Kobe-Thread-Id": THREAD,
+      });
     }
     const urls = strings(config).filter((s) => /^[a-z]+:\/\//.test(s));
     expect(urls.every((u) => u.startsWith(`${PROXY}/v1/mcp/`))).toBe(true);
     expect(text).not.toMatch(/api[_-]?key|secret|password|oauth|Bearer/i);
   });
 
+  it("KOBE-241: refuses a thread id a header or shell could misread", () => {
+    for (const bad of ["", "a b", "a\nb", "x".repeat(65)]) {
+      expect(() =>
+        buildPiMcpConfig({ proxyUrl: PROXY, tokenFile: TOKEN_FILE, threadId: bad, mcp }),
+      ).toThrow();
+    }
+  });
+
   it("refuses a token file path a shell would interpret", () => {
     for (const bad of ["rel/path", "/a b", "/a'b", "/a;rm", "/a$(x)", "/a`x`", ""]) {
-      expect(() => buildPiMcpConfig({ proxyUrl: PROXY, tokenFile: bad, mcp })).toThrow();
+      expect(() =>
+        buildPiMcpConfig({ proxyUrl: PROXY, tokenFile: bad, threadId: THREAD, mcp }),
+      ).toThrow();
     }
   });
 
   it("no connectors: an empty server list", () => {
     const empty = JSON.parse(
-      buildPiMcpConfig({ proxyUrl: PROXY, tokenFile: TOKEN_FILE, mcp: { servers: [] } }),
+      buildPiMcpConfig({
+        proxyUrl: PROXY,
+        tokenFile: TOKEN_FILE,
+        threadId: THREAD,
+        mcp: { servers: [] },
+      }),
     );
     expect(empty).toEqual({ mcpServers: {}, autoEnableCodemode: false });
   });
@@ -121,8 +140,9 @@ describe("the token file and rotation", () => {
     const f = await fixture();
     try {
       const file = path.join(f.dir, MCP_TOKEN_FILE);
-      const header = JSON.parse(buildPiMcpConfig({ proxyUrl: PROXY, tokenFile: file, mcp }))
-        .mcpServers.jira.headers.Authorization as string;
+      const header = JSON.parse(
+        buildPiMcpConfig({ proxyUrl: PROXY, tokenFile: file, threadId: THREAD, mcp }),
+      ).mcpServers.jira.headers.Authorization as string;
       await writeAgentFile(f.dir, MCP_TOKEN_FILE, mcpTokenFileText(TOKEN), false);
       expect(resolveHeader(header)).toBe(`Bearer ${TOKEN}`);
       await writeAgentFile(f.dir, MCP_TOKEN_FILE, mcpTokenFileText(TOKEN_2), false);
@@ -135,7 +155,12 @@ describe("the token file and rotation", () => {
   it("the tripwire notices other content or a link", async () => {
     const f = await fixture();
     try {
-      const text = buildPiMcpConfig({ proxyUrl: PROXY, tokenFile: TOKEN_FILE, mcp });
+      const text = buildPiMcpConfig({
+        proxyUrl: PROXY,
+        tokenFile: TOKEN_FILE,
+        threadId: THREAD,
+        mcp,
+      });
       await writeAgentFile(f.dir, MCP_CONFIG_FILE, text, false);
       expect(await verifyAgentFile(f.dir, MCP_CONFIG_FILE, [text])).toBe(true);
       expect(await verifyAgentFile(f.dir, MCP_CONFIG_FILE, ["other"])).toBe(false);

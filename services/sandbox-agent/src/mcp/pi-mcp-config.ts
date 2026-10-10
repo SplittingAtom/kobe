@@ -30,6 +30,7 @@ export const MCP_TOKEN_FILE = "mcp-token";
 const PROXY_PATH = "/v1/mcp";
 /** Runtime dirs are `mkdtemp` names under an absolute path: nothing a shell would interpret. */
 const SAFE_PATH = /^\/[A-Za-z0-9_./-]+$/;
+const SAFE_THREAD_ID = /^[A-Za-z0-9-]{1,64}$/;
 
 export interface McpWiring {
   /** `KOBE_MCP_PROXY_URL`: an http(s) origin, no credentials. */
@@ -47,16 +48,22 @@ export function buildPiMcpConfig(input: {
   readonly proxyUrl: string;
   /** Absolute path of the token file the header command prints. */
   readonly tokenFile: string;
+  /** The Pi process's thread: sent as `Kobe-Thread-Id` so the proxy can bind each call to its run. */
+  readonly threadId: string;
   readonly mcp: RunMcpContext;
 }): string {
   if (!SAFE_PATH.test(input.tokenFile)) throw new Error("unsafe MCP token file path");
+  if (!SAFE_THREAD_ID.test(input.threadId)) throw new Error("unsafe thread id");
   const origin = input.proxyUrl.replace(/\/+$/, "");
   const mcpServers = Object.fromEntries(
     input.mcp.servers.map((server) => [
       server.name,
       {
         url: `${origin}${PROXY_PATH}/${server.connector_id}`,
-        headers: { Authorization: `!cat '${input.tokenFile}'` },
+        headers: {
+          Authorization: `!cat '${input.tokenFile}'`,
+          "Kobe-Thread-Id": input.threadId,
+        },
         exposure: "hidden",
         toolExposure: Object.fromEntries(server.tools.map((t) => [t.name, "direct"])),
       },
