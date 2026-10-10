@@ -283,9 +283,12 @@ describe("project.file_propose (ac-2)", () => {
     );
     expect(objects.objects.get(key)?.toString()).toBe("# spec\n");
     // The member's workspace names it, read-only area, origin server.
-    const mounted = await withTeam(fx.db, w.team, (tx) =>
-      listLive(tx, { teamId: w.team, userId: w.owner.id }, "projects/", 100),
-    );
+    const mounted = await eventually(async () => {
+      const found = await withTeam(fx.db, w.team, (tx) =>
+        listLive(tx, { teamId: w.team, userId: w.owner.id }, "projects/", 100),
+      );
+      return found.length > 0 ? found : undefined;
+    });
     expect(mounted.map((e) => [e.path, e.origin, e.blobKey])).toEqual([
       [`projects/${w.slug}/docs/spec.md`, "server", key],
     ]);
