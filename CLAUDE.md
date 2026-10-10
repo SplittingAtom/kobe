@@ -67,7 +67,11 @@ services/<svc>/Dockerfile .`), runtime `USER 1000:1000` (numeric, for `runAsNonR
   via `egress-proxy`.
 - Every team table: `team_id NOT NULL`, `ENABLE` + `FORCE ROW LEVEL SECURITY`, policy on
   `current_setting('kobe.team_id')` set with `SET LOCAL` inside `withTeam()`. App connects as a non-owner
-  role. The cross-team probe suite must stay green on every migration.
+  role. The cross-team probe suite must stay green on every migration. One accepted exception
+  (KOBE-120, user-approved 2026-10-10): the budget reservation functions (`kobe_reserve_budget` and
+  friends) set the team themselves with transaction-local `set_config(..., true)` to stay one round
+  trip; they are invoker-rights (never `SECURITY DEFINER`), pin `search_path`, and refuse when a
+  different team is already in force. No other code may set the team outside `withTeam()`.
 - Server decides every tool call; approvals are HMAC-signed over (run_id, tool_call_id, canonical input).
   No approval bypass.
 - Pi `1.0.x` in RPC mode behind `kobe-sandbox-agent`, which dials out over WSS; sandboxes accept no
