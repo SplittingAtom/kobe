@@ -174,6 +174,20 @@ describe("workloads", () => {
     );
   });
 
+  it("passes the session token TTL to the server only, 10..900 s (KOBE-241)", () => {
+    const value = (ms2: Manifest[], name: string) =>
+      (find(ms2, "Deployment", name)?.spec.template.spec.containers[0].env ?? []).find(
+        (e: { name: string }) => e.name === "KOBE_SESSION_TOKEN_TTL_SECONDS",
+      )?.value;
+    expect(value(ms, "kobe-server")).toBe("900");
+    expect(value(ms, "kobe-scheduler")).toBeUndefined();
+    expect(value(render({ "server.sessionTokenTtlSeconds": "15" }), "kobe-server")).toBe("15");
+    expect(renderError({ "server.sessionTokenTtlSeconds": "5" })).toMatch(/sessionTokenTtlSeconds/);
+    expect(renderError({ "server.sessionTokenTtlSeconds": "901" })).toMatch(
+      /sessionTokenTtlSeconds/,
+    );
+  });
+
   it("runs the scheduler as the server image in scheduler mode", () => {
     const c = find(ms, "Deployment", "kobe-scheduler")?.spec.template.spec.containers[0];
     expect(c.image).toBe("ghcr.io/splittingatom/kobe-server:0.1.0");
