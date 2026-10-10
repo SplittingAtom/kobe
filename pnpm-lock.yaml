@@ -323,8 +323,8 @@ importers:
   packages/cli:
     dependencies:
       '@aws-sdk/client-s3':
-        specifier: ^3.1144.0
-        version: 3.1144.0
+        specifier: ^3.1146.0
+        version: 3.1146.0
       '@kobe/db':
         specifier: workspace:*
         version: link:../db
@@ -525,11 +525,11 @@ importers:
   services/server:
     dependencies:
       '@aws-sdk/client-s3':
-        specifier: ^3.1144.0
-        version: 3.1144.0
+        specifier: ^3.1146.0
+        version: 3.1146.0
       '@aws-sdk/lib-storage':
         specifier: ^3.1147.0
-        version: 3.1147.0(@aws-sdk/client-s3@3.1144.0)
+        version: 3.1147.0(@aws-sdk/client-s3@3.1146.0)
       '@better-auth/passkey':
         specifier: 1.7.7
         version: 1.7.7(@better-auth/core@1.7.7(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(@opentelemetry/api@1.9.1)(better-call@1.4.0(zod@4.6.5))(jose@6.2.12)(kysely@0.29.6)(nanostores@1.5.4))(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.2)(better-auth@1.7.7(@opentelemetry/api@1.9.1)(drizzle-kit@0.31.11)(drizzle-orm@0.45.3(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(kysely@0.29.6)(pg@8.23.1))(next@16.3.8(@opentelemetry/api@1.9.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(pg@8.23.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(vitest@5.0.3(@opentelemetry/api@1.9.1)(@types/node@24.19.0)(happy-dom@20.14.5)(vite@8.3.1(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))))(better-call@1.4.0(zod@4.6.5))(nanostores@1.5.4)
@@ -677,8 +677,8 @@ packages:
     resolution: {integrity: sha512-x12Q17KYlJAd3nKf8LV5LV0vt8sh8/6YfQLGPtrGnQf/tW4jqxPGq5GPpuVitpQYM3eUR4XB7CbxZf751NMbLw==}
     engines: {node: '>=20.0.0'}
 
-  '@aws-sdk/client-s3@3.1144.0':
-    resolution: {integrity: sha512-CAicFlKAuCAUEU1tIptCTh6Eikr4rig9CWYwofZdEuJm9i24XNclgCspV4DKXlOY2nK2AMGHRt88oxmwDdNW7w==}
+  '@aws-sdk/client-s3@3.1146.0':
+    resolution: {integrity: sha512-WY0YCBzxc4muFfY6UbGpA+oib0nGT/Px2aEPGYX7pp1la2OmDLChnK81mu8H7LdYvwGU1pLAsLIa/qgad0Wd7g==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/core@3.978.1':
@@ -4393,9 +4393,6 @@ packages:
     peerDependencies:
       pg: '>=8.0'
 
-  pg-protocol@1.16.0:
-    resolution: {integrity: sha512-sILXutLVjCLjcDuOmvhX5e2Z4cS5qG/6Bu3VkpFwdf/633ElGLpEh9bgmuI5I4sqKqkifQiGyiCcx1HdtrK7tg==}
-
   pg-protocol@1.16.1:
     resolution: {integrity: sha512-p9VOFMiHB/ZbJATetbg+99PxssTVSQRnyuPSQ67mN1+1KBOjZaZ83ZQzltnxPhJwSsC3nwVjJ10DVJlerbFzLg==}
 
@@ -5155,7 +5152,7 @@ snapshots:
       '@smithy/types': 4.19.0
       tslib: 2.8.1
 
-  '@aws-sdk/client-s3@3.1144.0':
+  '@aws-sdk/client-s3@3.1146.0':
     dependencies:
       '@aws-sdk/checksums': 3.1001.1
       '@aws-sdk/core': 3.978.1
@@ -5264,9 +5261,9 @@ snapshots:
       '@smithy/types': 4.19.0
       tslib: 2.8.1
 
-  '@aws-sdk/lib-storage@3.1147.0(@aws-sdk/client-s3@3.1144.0)':
+  '@aws-sdk/lib-storage@3.1147.0(@aws-sdk/client-s3@3.1146.0)':
     dependencies:
-      '@aws-sdk/client-s3': 3.1144.0
+      '@aws-sdk/client-s3': 3.1146.0
       '@smithy/core': 3.35.1
       '@smithy/types': 4.19.0
       buffer: 5.6.0
@@ -7288,7 +7285,7 @@ snapshots:
   '@types/pg@8.23.1':
     dependencies:
       '@types/node': 24.19.0
-      pg-protocol: 1.16.0
+      pg-protocol: 1.16.1
       pg-types: 2.2.0
 
   '@types/react-dom@19.3.0(@types/react@19.3.0)':
@@ -8940,8 +8937,6 @@ snapshots:
   pg-pool@3.14.0(pg@8.23.1):
     dependencies:
       pg: 8.23.1
-
-  pg-protocol@1.16.0: {}
 
   pg-protocol@1.16.1: {}
 
