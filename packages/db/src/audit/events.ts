@@ -539,6 +539,17 @@ export const AUDIT_EVENTS = {
     approvalFailure: z.enum(MCP_APPROVAL_FAILURES).optional(),
   }),
 
+  /**
+   * The MCP proxy asked for the tools of a connector the team has not enabled (KOBE-106); nothing
+   * is listed. Throttled per sandbox like denied calls.
+   */
+  "mcp.list_refused": event("team", {
+    sandboxId: id,
+    userId: id,
+    connectorId: id,
+    reason: reasonCode,
+  }),
+
   // ── thread: lifecycle metadata only, never titles or content (KOBE-34, D18, D23) ──
   "thread.trashed": event("team", { threadId: id }),
   "thread.restored": event("team", { threadId: id }),

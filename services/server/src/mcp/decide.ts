@@ -15,7 +15,7 @@ import { recordAudit } from "../audit/record.js";
 import { logger } from "../logger.js";
 import type { RunPolicyContextSource } from "../sandbox-wire/types.js";
 import type { McpApprovalFailure, McpApprovalVerifier } from "./approvals.js";
-import { describePinnedTool, loadTeamConnector, type TeamConnector } from "./catalog.js";
+import { describePinnedTool, exposedTools, loadTeamConnector, type TeamConnector } from "./catalog.js";
 import {
   DECISION_CONCURRENCY,
   distinctSiblings,
@@ -163,9 +163,9 @@ async function audit(
 }
 
 /** Pi's name for an unpinned upstream tool (audit only): same sanitising as Pi 1.0.0. */
-function fallbackPiName(connector: TeamConnector, tool: string): string {
+function fallbackPiName(connectorName: string, tool: string): string {
   const segment = (s: string) => s.replace(/[^A-Za-z0-9_]/g, "_");
-  return `mcp__${segment(connector.name)}__${segment(tool) || "_"}`.slice(0, 256);
+  return `mcp__${segment(connectorName) || "_"}__${segment(tool) || "_"}`.slice(0, 256);
 }
 
 function policyInputFor(
@@ -267,12 +267,18 @@ export async function decideMcpCall(
   try {
     const connector = await loadTeamConnector(deps.db, principal.teamId, request.connectorId);
     if (!connector) {
+      // Not enabled (or not registered): the name is unknown, the refusal is still audited.
+      facts = {
+        connectorId: request.connectorId,
+        piName: fallbackPiName("unknown", request.tool),
+        ...(request.threadId === undefined ? {} : { threadId: request.threadId }),
+      };
       return await denied("connector_not_enabled", "This connector is not enabled in your team.");
     }
     const pinned: PinnedTool | undefined = connector.tools.find((t) => t.name === request.tool);
     facts = {
       connectorId: connector.id,
-      piName: pinned?.pi_name ?? fallbackPiName(connector, request.tool),
+      piName: pinned?.pi_name ?? fallbackPiName(connector.name, request.tool),
       ...(request.threadId === undefined ? {} : { threadId: request.threadId }),
       ...(request.toolCallId === undefined ? {} : { toolCallId: request.toolCallId }),
     };
@@ -284,6 +290,23 @@ export async function decideMcpCall(
     }
     const descriptor = describePinnedTool(connector.id, pinned);
     facts = { ...facts, risk: descriptor.risk };
+
+    // Team exposure (KOBE-106), checked before any run is looked at and independent of the
+    // engine's own gate: a drifted tool, or one the team's exposure does not include (read_only =
+    // readOnlyHint tools only, so unannotated tools are out; custom = ticked tools), is refused
+    // with its own reason whatever the sandbox sent.
+    if (pinned.status !== "pinned") {
+      return await denied(
+        "tool_drifted",
+        `${pinned.pi_name} changed since it was approved and is disabled until an admin re-approves it.`,
+      );
+    }
+    if (!exposedTools(connector).some((t) => t.pi_name === pinned.pi_name)) {
+      return await denied(
+        "connector_exposure",
+        `${pinned.pi_name} is not exposed to agents in your team (${connector.exposure.replace("_", "-")}).`,
+      );
+    }
 
     const input = toolInputSchema.safeParse(request.arguments ?? {});
     if (!input.success) {
