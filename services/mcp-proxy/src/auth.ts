@@ -1,5 +1,5 @@
 import type { SessionTokenClaims } from "@kobe/protocol";
-import { verifySessionToken } from "@kobe/session-token";
+import { SESSION_TOKEN_TTL_SECONDS, verifySessionToken } from "@kobe/session-token";
 
 /**
  * Sandbox authentication at the proxy (D27): `Authorization: Bearer <kobe.mcp-proxy session token>`,
@@ -13,10 +13,17 @@ export function bearerToken(header: string | undefined): string | undefined {
 }
 
 /**
+ * How long past `exp` a genuine token still gets the 404 (a sandbox that missed a rotation or two,
+ * e.g. a laptop-slow gVisor pause); older ones are plain 401s. Twice the session token TTL.
+ */
+export const EXPIRED_TOKEN_MAX_AGE_SECONDS = 2 * SESSION_TOKEN_TTL_SECONDS;
+
+/**
  * A token that is genuine (signature, header, audience, claims) but past `exp`. Checked by
  * verifying it again at its own `iat`, so only expiry can be what failed. Used for one thing: a
  * request on an MCP session (`Mcp-Session-Id`) with such a token gets a 404, which MCP clients
- * answer by opening a new session (re-reading their credentials) and retrying once.
+ * answer by opening a new session (re-reading their credentials) and retrying once. A token that
+ * expired more than EXPIRED_TOKEN_MAX_AGE_SECONDS ago does not qualify.
  */
 export function isExpiredSandboxToken(
   token: string | undefined,
@@ -28,8 +35,13 @@ export function isExpiredSandboxToken(
     const payload = JSON.parse(
       Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8"),
     );
-    const iat: unknown = payload?.iat;
-    return typeof iat === "number" && verifySandboxToken(token, key, iat) !== undefined;
+    const { iat, exp } = payload ?? {};
+    return (
+      typeof iat === "number" &&
+      typeof exp === "number" &&
+      nowSeconds - exp <= EXPIRED_TOKEN_MAX_AGE_SECONDS &&
+      verifySandboxToken(token, key, iat) !== undefined
+    );
   } catch {
     return false;
   }
