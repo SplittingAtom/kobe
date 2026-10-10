@@ -7,6 +7,7 @@ import { logger as rootLogger } from "../logger.js";
 import { recordAudit, type ServerAuditEvent } from "../audit/record.js";
 import { BackgroundTasks } from "../background.js";
 import type { BlobStore } from "../retention/blobs.js";
+import { DEFAULT_UPLOAD_SETTINGS, type UploadSettings } from "../uploads/settings.js";
 import { createPolicyEngine } from "../policy/engine.js";
 import { createToolRegistry } from "../policy/registry.js";
 import { createDbRuleSource, createDbSettingsSource } from "../policy/rule-store.js";
@@ -45,6 +46,8 @@ export interface SandboxWireOptions {
   readonly waker?: SandboxWaker;
   /** Object storage for `artifact.put` (KOBE-129); unset: artifacts answer `storage_failed`. */
   readonly blobs?: BlobStore;
+  /** Upload limits and storage quota default, applied to `file.share` too (KOBE-150). */
+  readonly uploads?: UploadSettings;
   readonly tuning?: Partial<WireTuning>;
   /** Key from `deriveRunTokenKey` (KOBE-118); unset: `run.start` carries no run token. */
   readonly runTokenKey?: Uint8Array;
@@ -228,6 +231,12 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       runMaxEvents: tuning.runMaxEvents,
     },
     artifacts: { db, blobs: options.blobs, runMaxEvents: tuning.runMaxEvents },
+    fileShare: {
+      db,
+      blobs: options.blobs,
+      settings: options.uploads ?? DEFAULT_UPLOAD_SETTINGS,
+      runMaxEvents: tuning.runMaxEvents,
+    },
     ui: options.ui ?? CANCEL_DIALOGS,
     hooks,
     get liveness() {
@@ -264,6 +273,24 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
             userId: target.userId,
             reason: refusal.reason,
             tool: refusal.tool,
+            runId: refusal.runId,
+            toolCallId: refusal.toolCallId,
+          },
+        },
+      );
+    },
+    auditFileShareRefused(target, sandboxId, refusal) {
+      throttledAudit(
+        `${target.teamId}:${target.userId}:file_share:${refusal.reason}`,
+        target.teamId,
+        {
+          action: "sandbox.file_share_refused",
+          actor: SYSTEM_ACTOR,
+          teamId: target.teamId,
+          target: {
+            sandboxId,
+            userId: target.userId,
+            reason: refusal.reason,
             runId: refusal.runId,
             toolCallId: refusal.toolCallId,
           },

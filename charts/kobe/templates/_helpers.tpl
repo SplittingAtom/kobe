@@ -379,4 +379,11 @@ spec:
   value: {{ printf "%d" (int64 $u.teamStorageQuotaBytes) | quote }}
 - name: KOBE_UPLOAD_ORPHAN_HOURS
   value: {{ printf "%d" (int64 $u.orphanHours) | quote }}
+{{- if .Values.clamav.enabled }}
+# Scanning on: every upload is streamed to clamd; clamd unreachable refuses uploads (fail closed).
+- name: KOBE_CLAMAV_HOST
+  value: {{ printf "%s-clamav" (include "kobe.fullname" .) | quote }}
+- name: KOBE_CLAMAV_PORT
+  value: "3310"
+{{- end }}
 {{- end -}}

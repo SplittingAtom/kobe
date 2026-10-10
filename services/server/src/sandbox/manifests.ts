@@ -304,6 +304,9 @@ function sandboxEnv(s: SandboxSettings): { name: string; value: string }[] {
     { name: "NO_PROXY", value: noProxy },
     { name: "no_proxy", value: noProxy },
     { name: "HOME", value: "/home/kobe" },
+    // KOBE-167: Pi's built-in tools in an executor under the partner uid (needs the partner
+    // groups in the pod spec above); the agent refuses to start if it is on and they are missing.
+    { name: "KOBE_TOOL_EXECUTOR", value: String(s.toolExecutor.enabled) },
     // KOBE-27: how often the agent pushes /workspace changes (through the server); 0 = sync off.
     {
       name: "KOBE_WORKSPACE_SYNC_INTERVAL_MS",

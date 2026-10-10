@@ -37,6 +37,15 @@ import {
   unexpectedEntries,
 } from "../models/runtime-dir.js";
 import type { ModelWiring, RunModel } from "../models/types.js";
+import { TOOL_HOME_ENV } from "../kobe-exec/protocol.js";
+import type { ExecRelay } from "../exec/relay.js";
+import {
+  assertPaired,
+  openRelay,
+  preparePiPrivateDirs,
+  prepareToolDir,
+  type ExecWiring,
+} from "./exec-wiring.js";
 import {
   EGRESS_TOKEN_FILE_NAME,
   EgressTokenFile,
@@ -123,12 +132,29 @@ export interface ThreadEnv {
    * agent's own uid (development, tests outside the image).
    */
   readonly identities?: PiIdentities | undefined;
+  /**
+   * The tool executor (KOBE-167): present, a Pi started with the kobe-exec extension gets the fd-5
+   * relay and its tools run in an executor under its partner uid. Absent: Pi runs its own tools.
+   */
+  readonly exec?: ExecWiring | undefined;
+  /**
+   * The scratch volume (the pod's /tmp) Pi's private HOME and TMPDIR are made on when the tools run
+   * in the executor (KOBE-196). Default `/tmp`.
+   */
+  readonly piPrivateRoot?: string | undefined;
+  /** The kobe-exec extension (root-owned file); loaded into every Pi when `exec` is set. */
+  readonly execExtension?: string | undefined;
 }
 
 /** A Pi process's private directory and the identity it runs as (if any). */
 interface RuntimeOf {
   readonly dir: string;
   readonly identity: PiIdentity | undefined;
+  /** The partner-readable directory beside `dir` (the egress token), under paired identities. */
+  readonly toolDir?: string | undefined;
+  /** Pi's private HOME/TMPDIR root beside `dir` (KOBE-196), under paired identities. */
+  readonly piDir?: string | undefined;
+  readonly relay?: ExecRelay | undefined;
 }
 
 interface ActiveRun {
@@ -244,8 +270,16 @@ export class Thread {
     // Shared by every thread (the pod's home volume is; one the agent made itself must be too).
     if (identities !== undefined) await shareOnVolume(this.#env.home, this.#env.home, 0o2770);
     await ensureRuntimeRoot(this.#env.runtimeDir, identities !== undefined);
+    const exec = launch.execChannel ? this.#env.exec : undefined;
+    if (launch.execChannel && exec === undefined) {
+      throw new Error("the launch asks for kobe-exec but this agent has no tool executor");
+    }
+    if (exec !== undefined) assertPaired(identities);
     const identity = await identities?.acquire();
     let runtimeDir: string | undefined;
+    let toolDir: string | undefined;
+    let piDir: string | undefined;
+    let relay: ExecRelay | undefined;
     let pi: PiProcess;
     let modelFile: ModelFile | undefined;
     let egressFile: EgressTokenFile | undefined;
@@ -261,6 +295,21 @@ export class Thread {
       }
       await writeGuardedConfig(agentDir, identity !== undefined);
       env.PI_CODING_AGENT_DIR = agentDir;
+      // The tools get the launch's HOME and TMPDIR (the shared ones); with the executor under
+      // another uid Pi gets private ones, as it loads code from both.
+      const toolEnvBase = { ...env };
+      if (exec !== undefined && identity !== undefined) {
+        const priv = await preparePiPrivateDirs(
+          this.#env.piPrivateRoot ?? "/tmp",
+          runtimeDir,
+          identity,
+        );
+        piDir = priv.root;
+        env.HOME = priv.home;
+        env.TMPDIR = priv.tmp;
+        // `~` in the file tools is resolved by Pi: tell kobe-exec where the tools' home is.
+        if (toolEnvBase.HOME !== undefined) env[TOOL_HOME_ENV] = toolEnvBase.HOME;
+      }
       const models = this.#env.models;
       if (models !== undefined) {
         modelFile = new ModelFile(
@@ -278,13 +327,20 @@ export class Thread {
       }
       const command = await piCommand(this.#env.bin, launch.env.PATH);
       const egress = this.#env.egress;
+      let egressVars: Record<string, string> = {};
       if (egress !== undefined) {
+        // With the executor the tools are not Pi's: the token lives where their uid (and not
+        // Pi) can read it, and the variables go to the executor, not to Pi.
+        if (exec !== undefined && identity !== undefined) {
+          toolDir = await prepareToolDir(runtimeDir, identity);
+        }
         egressFile = new EgressTokenFile(
-          path.join(runtimeDir, EGRESS_TOKEN_FILE_NAME),
+          path.join(toolDir ?? runtimeDir, EGRESS_TOKEN_FILE_NAME),
           identity === undefined ? 0o600 : 0o640,
         );
         await egressFile.write(await egress.tokens.current());
-        Object.assign(env, egressEnv(egress, egressFile.path, this.id));
+        egressVars = egressEnv(egress, egressFile.path, this.id);
+        if (exec === undefined) Object.assign(env, egressVars);
       }
       if (launch.systemPrompt !== undefined) {
         promptFile = new SystemPromptFile(
@@ -308,17 +364,38 @@ export class Thread {
         onExit: (exit) => this.#onExit(pi, exit),
         onDiagnostic: (message) => this.#hooks.diagnostic(this.id, message),
         ...(launch.toolsChannel ? { toolsChannel: true } : {}),
+        ...(exec === undefined ? {} : { execChannel: true }),
         ...(identity === undefined || identities === undefined
           ? {}
           : { runAs: { identities, identity } }),
       });
+      if (exec !== undefined) {
+        try {
+          relay = openRelay({
+            pi,
+            wiring: exec,
+            launchEnv: toolEnvBase,
+            egress: egressVars,
+            cwd: this.#env.workspaceDir,
+            runAs:
+              identity === undefined || identities === undefined
+                ? undefined
+                : { identities, identity },
+            onDiagnostic: (message) => this.#hooks.diagnostic(this.id, message),
+          });
+        } catch (error) {
+          // A Pi whose tools have nowhere to go must not run: its own would be the fallback.
+          this.#closing.add(pi);
+          pi.kill();
+          await pi.whenExited();
+          this.#closing.delete(pi);
+          throw error;
+        }
+      }
     } catch (error) {
       // Nothing of a Pi that never started may stay behind (the token included).
       if (runtimeDir !== undefined) {
-        const removed = await removeRuntimeDir(runtimeDir, identities).then(
-          () => true,
-          () => false,
-        );
+        const removed = await removeDirs([runtimeDir, toolDir, piDir], identities);
         // A directory the next holder of the identity could read: keep the identity out of use.
         if (removed && identity !== undefined) identities?.release(identity);
       } else if (identity !== undefined) {
@@ -326,7 +403,7 @@ export class Thread {
       }
       throw error;
     }
-    this.#runtimeDirs.set(pi, { dir: runtimeDir, identity });
+    this.#runtimeDirs.set(pi, { dir: runtimeDir, identity, toolDir, piDir, relay });
     const control = pi.control;
     let channel: PolicyChannel | undefined;
     if (control !== undefined) {
@@ -656,6 +733,9 @@ export class Thread {
     if (pi === this.#pi) this.#detach(pi);
     const runtime = this.#runtimeDirs.get(pi);
     this.#runtimeDirs.delete(pi);
+    // The tools stop with their Pi (the executor is killed; under an identity the uid pair is
+    // killed below, before the identity can go to another thread).
+    runtime?.relay?.close("Pi exited");
     // The process is gone: so is its private directory (auth.json, model file, token), and under
     // a Pi identity every process of its uid, before the identity can go to another thread.
     if (runtime !== undefined) {
@@ -671,6 +751,9 @@ export class Thread {
     if (identity !== undefined && identities !== undefined) {
       try {
         await identities.killAllPatiently(identity);
+        // Pi's private HOME/TMPDIR go first: the reclaim below opens what the uid owns in the
+        // shared trees to the workspace group, and these sit under one of them.
+        if (runtime.piDir !== undefined) await removeRuntimeDir(runtime.piDir, identities);
         // What the uid still owns in the shared trees becomes the workspace group's (nothing
         // stays private to it for the next thread that gets the uid), its IPC objects go.
         const gid = (await stat(this.#env.workspaceDir)).gid;
@@ -690,6 +773,7 @@ export class Thread {
     }
     try {
       await removeRuntimeDir(runtime.dir, identities);
+      if (runtime.toolDir !== undefined) await removeRuntimeDir(runtime.toolDir, identities);
     } catch (error) {
       this.#warn(`runtime directory not removed: ${(error as Error).message}`);
       // A directory the next holder of the identity could read: keep the identity out of use.
@@ -710,4 +794,21 @@ export class Thread {
     this.#dialogs.clear();
     this.endRun();
   }
+}
+
+/** Remove runtime directories (the second is optional); true when every one is gone. */
+async function removeDirs(
+  dirs: readonly (string | undefined)[],
+  identities: PiIdentities | undefined,
+): Promise<boolean> {
+  let all = true;
+  for (const dir of dirs) {
+    if (dir === undefined) continue;
+    const removed = await removeRuntimeDir(dir, identities).then(
+      () => true,
+      () => false,
+    );
+    all = all && removed;
+  }
+  return all;
 }

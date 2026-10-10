@@ -57,7 +57,9 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:17
+        # Through Google's Docker Hub mirror: anonymous Docker Hub pulls from shared runner IPs get
+        # rate limited or fail outright (merge-queue runs failed on `Docker pull failed`, 2026-10-09).
+        image: mirror.gcr.io/library/postgres:17
         env:
           POSTGRES_PASSWORD: ci-only
         ports: ["5432:5432"]

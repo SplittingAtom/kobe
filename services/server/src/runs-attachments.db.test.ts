@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { UPLOAD_ATTACHMENT_ROOT } from "@kobe/protocol";
+import { withTeam } from "@kobe/db";
+import { storageUsed } from "./uploads/quota.js";
 import type { Person } from "./testing/event-stream-fixture.js";
 import { RawBody } from "./testing/browser.js";
 import { MemoryObjects } from "./testing/memory-objects.js";
@@ -136,6 +138,20 @@ describe("native media (KOBE-191)", () => {
 });
 
 describe("message with file_ids", () => {
+  it("counts an attached upload once toward the team quota (KOBE-190)", async () => {
+    const w = await f.world();
+    const used = () => withTeam(f.fx.db, w.team, (tx) => storageUsed(tx, w.team));
+    const threadId = await f.thread(w.owner);
+    const before = await used();
+    const text = "a,b\n1,2\n";
+    const id = await upload(w.owner, text);
+    expect(await used()).toBe(before + text.length);
+    const res = await f.send(w.owner, threadId, "look", 0, { file_ids: [id] });
+    expect(res.status, JSON.stringify(res.json)).toBe(201);
+    // The files row is attached now; the workspace copy is what counts, so still +X, not +2X.
+    expect(await used()).toBe(before + text.length);
+  });
+
   it("syncs the upload into the workspace, moves it into the thread tree and sends the attachment", async () => {
     const w = await f.world();
     const ws = await f.connect(w);

@@ -4,8 +4,36 @@ import type { WorkspaceOwner } from "../workspace-sync/keys.js";
 import type { StoredEntry } from "../workspace-sync/store.js";
 import { areaOf, baseName, underPattern } from "./paths.js";
 
-/** Entries one folder listing returns at most (the contract has no cursor; see the ledger). */
+/** Entries one page of a folder listing holds at most (more follow through `next_cursor`). */
 export const LIST_MAX_ENTRIES = 5000;
+
+/** A position in the listing order (folders first, then name): the last entry of the previous page. */
+export interface ListPosition {
+  readonly dir: boolean;
+  readonly name: string;
+}
+
+/** Opaque cursor: base64url JSON of the last entry's position. Not signed; it only names a position in the caller's own listing. */
+export function encodeCursor(position: ListPosition): string {
+  return Buffer.from(JSON.stringify({ d: position.dir ? 1 : 0, n: position.name })).toString(
+    "base64url",
+  );
+}
+
+/** The position a cursor names, or undefined when it is not one this server issues. */
+export function decodeCursor(cursor: string): ListPosition | undefined {
+  try {
+    const raw: unknown = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+    if (typeof raw !== "object" || raw === null) return undefined;
+    const { d, n } = raw as { d?: unknown; n?: unknown };
+    if ((d !== 0 && d !== 1) || typeof n !== "string" || n === "" || n.length > 255) {
+      return undefined;
+    }
+    return { dir: d === 1, name: n };
+  } catch {
+    return undefined;
+  }
+}
 
 type ChildRow = {
   name: string;
@@ -17,19 +45,29 @@ type ChildRow = {
 
 export interface FolderListing {
   readonly entries: WorkspaceFileEntry[];
-  readonly truncated: boolean;
+  /** Present when more entries follow: the `cursor` of the next page. */
+  readonly nextCursor: string | undefined;
+}
+
+export interface ListOptions {
+  readonly limit?: number;
+  readonly after?: ListPosition;
 }
 
 /**
  * The immediate children of `folder` in the user's last synced manifest (live rows only), folders
  * first. Folders are implied by deeper paths: their mtime is the newest below. One grouped query
- * over the path prefix; rows come from the caller's own (team, user) only.
+ * over the path prefix; rows come from the caller's own (team, user) only. Pages are keyset
+ * pages on (folder?, name): `after` skips everything up to and including that position.
  */
 export async function listFolder(
   tx: KobeTx,
   owner: WorkspaceOwner,
   folder: string,
+  options: ListOptions = {},
 ): Promise<FolderListing> {
+  const limit = options.limit ?? LIST_MAX_ENTRIES;
+  const { after } = options;
   const skip = folder === "" ? 0 : [...folder].length + 1;
   const res = await tx.execute<ChildRow>(sql`
     SELECT name, bool_or(deeper) AS is_dir, max(size) AS size, max(mtime_ms) AS mtime_ms,
@@ -45,12 +83,23 @@ export async function listFolder(
           ) AS under
       ) AS children
      GROUP BY name
+     ${
+       after
+         ? sql`HAVING (${after.dir}::boolean AND NOT bool_or(deeper))
+                   OR (bool_or(deeper) = ${after.dir}::boolean
+                       AND name COLLATE "C" > ${after.name} COLLATE "C")`
+         : sql``
+     }
      ORDER BY bool_or(deeper) DESC, name COLLATE "C"
-     LIMIT ${LIST_MAX_ENTRIES + 1}`);
-  const rows = res.rows.slice(0, LIST_MAX_ENTRIES);
+     LIMIT ${limit + 1}`);
+  const page = res.rows.slice(0, limit);
+  const last = page.at(-1);
   return {
-    entries: rows.map((r) => childEntry(folder, r)),
-    truncated: res.rows.length > LIST_MAX_ENTRIES,
+    entries: page.map((r) => childEntry(folder, r)),
+    nextCursor:
+      res.rows.length > limit && last
+        ? encodeCursor({ dir: last.is_dir, name: last.name })
+        : undefined,
   };
 }
 

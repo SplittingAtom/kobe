@@ -16,12 +16,19 @@ export type Plant = Readonly<Record<string, unknown>>;
  * there (the agent's read-only placeholder, KOBE-169) is removed first, as a tool of Pi's own uid
  * can when nothing else stops it.
  */
-export function plantCommand(files: Readonly<Record<string, Plant>>): string {
+export function plantCommand(
+  files: Readonly<Record<string, Plant>>,
+  /**
+   * Where to plant: by default Pi's own variable (a tool run by Pi has it). A tool run by the
+   * executor does not (KOBE-167), so the attacker is given the path outright: the strongest case.
+   */
+  agentDir?: string,
+): string {
+  const dir = agentDir === undefined ? '"$PI_CODING_AGENT_DIR"' : `'${agentDir}'`;
   return Object.entries(files)
     .map(
       ([name, json]) =>
-        `rm -f "$PI_CODING_AGENT_DIR/${name}" && ` +
-        `printf '%s' '${JSON.stringify(json)}' > "$PI_CODING_AGENT_DIR/${name}"`,
+        `rm -f ${dir}/${name} && printf '%s' '${JSON.stringify(json)}' > ${dir}/${name}`,
     )
     .join(" && ");
 }

@@ -138,6 +138,20 @@ export const ARTIFACT_PUT_REFUSALS = [
   "artifact_not_found",
 ] as const;
 
+/** Why the server refused a `file.share` (audit `sandbox.file_share_refused`, KOBE-150). */
+export const FILE_SHARE_REFUSALS = [
+  "capability_missing",
+  "run_not_active",
+  "not_allowed",
+  "input_mismatch",
+  "path_mismatch",
+  "not_synced",
+  "not_found",
+  "too_large",
+  "quota_exceeded",
+  "scan_rejected",
+] as const;
+
 /** A Pi tool call id (`idSchema` in @kobe/protocol): no control characters, ≤ 128. */
 const toolCallId = z
   .string()
@@ -805,6 +819,20 @@ export const AUDIT_EVENTS = {
     toolCallId: toolCallId.optional(),
   }),
 
+  /**
+   * The server refused a `file.share` (KOBE-150): no `files` capability, a run not active here, a
+   * tool call it did not allow (or other input), a workspace entry that does not match the push,
+   * or a size / quota / scan refusal. Never records names, paths or content (system; at most one
+   * per 5 minutes per reason and user).
+   */
+  "sandbox.file_share_refused": event("team", {
+    sandboxId: id,
+    userId: id,
+    reason: z.enum(FILE_SHARE_REFUSALS),
+    runId: id.optional(),
+    toolCallId: toolCallId.optional(),
+  }),
+
   // ── workspace: the durable S3 copy of each sandbox's /workspace (KOBE-27, D12, D15, D26) ──
   /**
    * A sandbox restored its workspace onto an empty volume from the durable copy (rebuild after a
@@ -841,6 +869,15 @@ export const AUDIT_EVENTS = {
   "workspace.upload_refused": event("team", {
     userId: id,
     reason: z.enum(["file_too_large", "message_too_large", "quota_exceeded"]),
+    bytes: count,
+  }),
+  /**
+   * The virus scan (ClamAV, KOBE-146) rejected an upload, or was unreachable while scanning is on
+   * (`reason`); the object was deleted. Counts only: no name, content or signature.
+   */
+  "workspace.upload_scan_refused": event("team", {
+    userId: id,
+    reason: z.enum(["scan_rejected", "scan_unavailable"]),
     bytes: count,
   }),
   /** Uploads never attached to a thread within the retention window were deleted (system). */
@@ -1015,6 +1052,47 @@ export const AUDIT_EVENTS = {
     name: z.string().max(64),
     tools: z.array(z.string().max(128)).max(500),
   }),
+
+  // ── memory: file memory (KOBE-155, D24); ids, versions and sizes, never paths or content ──
+  /** A memory file got a new version (panel edit, personal `remember`, or an approved project write). */
+  "memory.written": event("team", {
+    scope: z.enum(["user", "project"]),
+    memoryDocId: id,
+    version,
+    previousVersion: version.optional(),
+    actorKind: z.enum(["user", "agent"]),
+    sizeBytes: count,
+  }),
+  /** Undo or restore: a new version copying an earlier one (a deleted file is revived). */
+  "memory.restored": event("team", {
+    scope: z.enum(["user", "project"]),
+    memoryDocId: id,
+    fromVersion: version,
+    version,
+  }),
+  /** A memory file was deleted (soft: its versions stay and Undo can restore it). */
+  "memory.deleted": event("team", {
+    scope: z.enum(["user", "project"]),
+    memoryDocId: id,
+    version,
+  }),
+  /** A team admin changed the team's memory switches. */
+  "memory.settings_changed": event("team", {
+    memoryEnabled: z.boolean(),
+    projectMemoryEnabled: z.boolean(),
+  }),
+  /** An install admin changed the install-wide memory switches. */
+  "memory.install_settings_changed": event("install", {
+    memoryEnabled: z.boolean(),
+    projectMemoryEnabled: z.boolean(),
+  }),
+  // ── connector grants (KOBE-108): a user's own API key; ids and names only, never the key or its hint ──
+  /** A user added their API key for a connector their team enabled. */
+  "mcp.grant.added": event("team", { connectorId: id, name: z.string().max(64) }),
+  /** A user replaced their API key for a connector. */
+  "mcp.grant.replaced": event("team", { connectorId: id, name: z.string().max(64) }),
+  /** A user removed their API key for a connector. */
+  "mcp.grant.removed": event("team", { connectorId: id, name: z.string().max(64) }),
 } as const;
 
 export type AuditAction = keyof typeof AUDIT_EVENTS;

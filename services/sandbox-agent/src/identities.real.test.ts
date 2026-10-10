@@ -2,9 +2,11 @@ import { randomUUID } from "node:crypto";
 import { chmod, copyFile, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { existsSync } from "node:fs";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { ModelTokenSource } from "./models/types.js";
 import { loadPiIdentities, PI_UID_MIN, PiIdentities } from "./pi/identities.js";
+import { EXECUTOR_ENTRY } from "./testing/real-pi.js";
 import {
   FAKE_PI,
   RUN,
@@ -49,6 +51,7 @@ interface Launch {
   readonly modelFile: string;
   readonly home: string;
   readonly tmpdir: string;
+  readonly env: string[];
 }
 
 /** A command result that must be ok (the error, if any, in the failure message). */
@@ -88,10 +91,14 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
     await h.close();
   });
 
-  async function start(env: Record<string, string> = {}): Promise<Harness> {
+  async function start(
+    env: Record<string, string> = {},
+    extra: Partial<Parameters<typeof startHarness>[0]> = {},
+  ): Promise<Harness> {
     h = await startHarness({
       piBin,
       env,
+      ...extra,
       identities,
       runtimeDir: path.join(shm, "pi-runtime"),
       models: {
@@ -150,6 +157,48 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
     await until(async () => (await h.commandsLog(THREAD_2).catch(() => [])).length > 0);
     return [await launch(THREAD), await launch(THREAD_2)];
   }
+
+  it("with the executor, Pi's HOME and TMPDIR are private (KOBE-196): its group, not the partner's, gone with the Pi; flag off, the shared ones", async () => {
+    await start(
+      {},
+      {
+        tmpRoot: shm,
+        exec: {
+          extension: MODELS_EXTENSION,
+          wiring: { executorEntry: EXECUTOR_ENTRY, nodeBin: process.execPath },
+        },
+      },
+    );
+    ok(await h.server.command(runStart("say:a", { config: { model: MODEL } })));
+    const pi = await launch(THREAD);
+    const root = path.dirname(pi.home);
+    expect(root.startsWith(path.join(shm, "kobe-pi-"))).toBe(true);
+    expect(pi.tmpdir).toBe(path.join(root, "tmp"));
+    const modes = async (dir: string) => {
+      const info = await stat(dir);
+      return [info.uid, info.gid, info.mode & 0o7777];
+    };
+    const me = process.getuid?.() ?? 0;
+    // Agent-owned, the Pi's group: home reaches nobody else, tmp is readable (not writable) to all.
+    expect(await modes(root)).toEqual([me, pi.gid, 0o2755]);
+    expect(await modes(pi.home)).toEqual([me, pi.gid, 0o2770]);
+    expect(await modes(pi.tmpdir)).toEqual([me, pi.gid, 0o2775]);
+    // The jiti and compile caches are off for it, and it is told where the tools' home is.
+    expect(pi.env).toEqual(expect.arrayContaining(["JITI_FS_CACHE", "NODE_DISABLE_COMPILE_CACHE"]));
+    expect(pi.env).toContain("KOBE_EXEC_TOOL_HOME");
+    // Gone once the Pi is (its files, which the reclaim would otherwise open to the group).
+    await h.close();
+    await until(() => !existsSync(root), 30_000);
+  }, 60_000);
+
+  it("without the executor Pi keeps the shared HOME and TMPDIR and no private dir exists", async () => {
+    await start({}, { tmpRoot: shm });
+    ok(await h.server.command(runStart("say:a", { config: { model: MODEL } })));
+    const pi = await launch(THREAD);
+    expect(pi.home).not.toContain("kobe-pi-");
+    expect(pi.env).not.toContain("KOBE_EXEC_TOOL_HOME");
+    expect((await readdir(shm)).filter((n) => n.startsWith("kobe-pi-"))).toEqual([]);
+  }, 60_000);
 
   it("runs every Pi under its own identity, never the agent's uid", async () => {
     const [a, b] = await twoThreads();
