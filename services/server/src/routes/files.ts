@@ -30,7 +30,11 @@ export function fileRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
 
   const readable = (teamId: string, userId: string, id: string) =>
     withTeam(db, teamId, async (tx: KobeTx) => {
-      const viewer: Viewer = { teamId, userId, projectIds: await viewerProjectIds(tx, teamId, userId) };
+      const viewer: Viewer = {
+        teamId,
+        userId,
+        projectIds: await viewerProjectIds(tx, teamId, userId),
+      };
       const [row] = await tx
         .select()
         .from(files)
