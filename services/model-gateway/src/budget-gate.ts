@@ -1,5 +1,8 @@
 import { exhaustedLine, type BudgetLine, type MemberBudgetState, type ModelPrice } from "@kobe/db";
+import { randomUUID } from "node:crypto";
 import { TtlCache } from "./cache.js";
+import { MemoryReservations } from "./reservations-memory.js";
+import { MEMBER_SHARE, type Cost, type ReservationStore } from "./reservations.js";
 import { chargedOutput } from "./usage/charge.js";
 import type { CallContext, CallGate, GateDecision } from "./seams.js";
 
@@ -18,9 +21,9 @@ import type { CallContext, CallGate, GateDecision } from "./seams.js";
  *   its install, team and member levels until it ends, and a call is refused when spend plus the
  *   others' reservations reach a budget. Concurrent calls (many sandboxes of one team) therefore
  *   cannot together overshoot a budget on one shim replica by more than the last admitted
- *   call. Replicas do not share reservations (no Postgres-backed reservations; a follow-up
- *   ticket), so with R replicas a budget can be exceeded by up to about the budget that was
- *   left, per replica, in the worst case of simultaneous calls.
+ *   call. Reservations live in a {@link ReservationStore}: Postgres in production (KOBE-120:
+ *   shared by all replicas, atomic against the budget, each with an expiry so a crashed
+ *   replica's reservations free themselves), memory for tests.
  * - More requests than the member's per-minute rate (the install's, or the team's lower one): 429
  *   `rate_limited` with Retry-After. A token bucket per member per shim replica; Bifrost's
  *   virtual-key rate limit is the install-wide backstop.
@@ -31,22 +34,9 @@ export interface BudgetStore {
   prices(): Promise<ReadonlyMap<string, ModelPrice>>;
 }
 
-/** Of what is left on a shared (install or team) line, the most one member's calls can hold. */
-export const MEMBER_SHARE = 0.25;
+export { MEMBER_SHARE };
 /** A reservation whose ledger row never lands (lost write) ends after this long. */
 export const SETTLE_TIMEOUT_MS = 30_000;
-
-interface Reserved {
-  usd: number;
-  tokens: number;
-}
-
-/** The reservation keys of a member's levels. */
-const reservationKeys = (teamId: string, userId: string) => ({
-  install: "install",
-  team: `team:${teamId}`,
-  user: `user:${teamId}:${userId}`,
-});
 
 const SCOPE_NAMES: Readonly<Record<BudgetLine["scope"], string>> = {
   install: "The install's",
@@ -67,18 +57,38 @@ interface Bucket {
 export class BudgetGate implements CallGate {
   private readonly states: TtlCache<MemberBudgetState>;
   private readonly buckets = new Map<string, Bucket>();
-  /** Line key → member (`team:user`) → reserved. */
-  private readonly reserved = new Map<string, Map<string, Reserved>>();
-  /** Calls whose ledger row is on its way: callId → release. */
-  private readonly pending = new Map<string, () => void>();
+  private readonly reservations: ReservationStore;
+  private readonly onError: (err: unknown) => void;
+  private readonly settleHoldMs: number;
+  private readonly heartbeatMs: number | undefined;
   private readonly priceCache: TtlCache<ReadonlyMap<string, ModelPrice>>;
   private readonly now: () => number;
 
   constructor(
     private readonly store: BudgetStore,
-    options: { readonly ttlMs: number; readonly now?: () => number; readonly maxEntries?: number },
+    options: {
+      readonly ttlMs: number;
+      readonly now?: () => number;
+      readonly maxEntries?: number;
+      /** Where reservations live; default: this process's memory (tests, no shared state). */
+      readonly reservations?: ReservationStore;
+      /**
+       * How long a settled reservation keeps counting (KOBE-120): the other replicas' cached
+       * spend may not show the call's cost yet. Default 0 (ended at once); production passes
+       * the budget cache TTL.
+       */
+      readonly settleHoldMs?: number;
+      /** Extend the reservations of calls still running this often (a TTL/2 heartbeat). */
+      readonly heartbeatMs?: number;
+      /** A reservation could not be ended (it then expires on its own). */
+      readonly onError?: (err: unknown) => void;
+    },
   ) {
     this.now = options.now ?? Date.now;
+    this.reservations = options.reservations ?? new MemoryReservations();
+    this.onError = options.onError ?? (() => undefined);
+    this.settleHoldMs = options.settleHoldMs ?? 0;
+    this.heartbeatMs = options.heartbeatMs;
     this.states = new TtlCache<MemberBudgetState>({
       ttlMs: options.ttlMs,
       now: this.now,
@@ -90,8 +100,6 @@ export class BudgetGate implements CallGate {
   async admit(call: CallContext): Promise<GateDecision> {
     const key = `${call.teamId}:${call.userId}`;
     const state = await this.states.get(key, () => this.store.load(call.teamId, call.userId));
-    // Everything async happens before the check: from the in-flight check to the reservation
-    // there is no await, so concurrent calls on this replica cannot all pass the same check.
     const prices =
       state.lines.length === 0
         ? new Map<string, ModelPrice>()
@@ -99,32 +107,15 @@ export class BudgetGate implements CallGate {
     return this.decide(call, key, state, prices);
   }
 
-  private decide(
+  private async decide(
     call: CallContext,
     key: string,
     state: MemberBudgetState,
     prices: ReadonlyMap<string, ModelPrice>,
-  ): GateDecision {
+  ): Promise<GateDecision> {
     const used = exhaustedLine(state.lines);
     if (used) {
       return { ok: false, status: 402, code: "budget_exhausted", message: budgetMessage(used) };
-    }
-    const keys = reservationKeys(call.teamId, call.userId);
-    const cost = this.costOf(call, prices);
-    for (const l of state.lines) {
-      const verdict = this.inFlight(l, keys[l.scope], key, cost);
-      if (verdict === "full") {
-        return { ok: false, status: 402, code: "budget_exhausted", message: budgetMessage(l) };
-      }
-      if (verdict === "own_share") {
-        return {
-          ok: false,
-          status: 429,
-          code: "too_many_calls_in_flight",
-          message: "Too many large model calls are in flight for this user; retry shortly.",
-          retryAfterSeconds: 2,
-        };
-      }
     }
     const wait = this.take(key, state.requestsPerMinute);
     if (wait > 0) {
@@ -137,10 +128,52 @@ export class BudgetGate implements CallGate {
       };
     }
     if (state.lines.length === 0) return { ok: true };
-    return { ok: true, release: this.reserve(call, keys, key, cost) };
+    const callId = call.callId ?? randomUUID();
+    let verdict;
+    try {
+      // One atomic check-and-hold against the reservations of every replica.
+      verdict = await this.reservations.reserve({
+        teamId: call.teamId,
+        userId: call.userId,
+        callId,
+        cost: this.costOf(call, prices),
+        lines: state.lines,
+      });
+    } catch (err) {
+      // Fail closed: without the reservations an overspend cannot be ruled out.
+      this.onError(err);
+      this.giveBack(key);
+      return {
+        ok: false,
+        status: 503,
+        code: "budget_unavailable",
+        message: "The budget check is unavailable; retry shortly.",
+        retryAfterSeconds: 2,
+      };
+    }
+    if (!verdict.ok) {
+      this.giveBack(key);
+      if (verdict.verdict === "own_share") {
+        return {
+          ok: false,
+          status: 429,
+          code: "too_many_calls_in_flight",
+          message: "Too many large model calls are in flight for this user; retry shortly.",
+          retryAfterSeconds: 2,
+        };
+      }
+      const l = state.lines[verdict.line] ?? state.lines[0];
+      return {
+        ok: false,
+        status: 402,
+        code: "budget_exhausted",
+        message: l ? budgetMessage(l) : "A budget is used up.",
+      };
+    }
+    return { ok: true, release: this.releaser(call, callId) };
   }
 
-  private costOf(call: CallContext, prices: ReadonlyMap<string, ModelPrice>): Reserved {
+  private costOf(call: CallContext, prices: ReadonlyMap<string, ModelPrice>): Cost {
     const input = call.inputEstimate ?? 0;
     const output = call.outputAllowance ?? chargedOutput(undefined);
     const price = call.model ? prices.get(call.model) : undefined;
@@ -151,84 +184,39 @@ export class BudgetGate implements CallGate {
   }
 
   /**
-   * In-flight reservations against one budget line (KOBE-42 review). On a shared line (install,
-   * team) each member's reservations count only up to their share of what is left
-   * ({@link MEMBER_SHARE}), so one sandbox reserving large calls cannot deny everyone else; that
-   * member alone is refused (429) once its own reservations reach its share.
+   * The release of one reservation. `written`: the call's ledger row is on its way, so the
+   * reservation stays until {@link settle} (the row landed and the cached spend was dropped, so
+   * the next check sees it), or {@link SETTLE_TIMEOUT_MS} at most; otherwise it ends now. A
+   * failure to end it is only logged: the reservation then expires by itself.
    */
-  private inFlight(
-    line: BudgetLine,
-    lineKey: string,
-    member: string,
-    cost: Reserved,
-  ): "ok" | "full" | "own_share" {
-    const byMember = this.reserved.get(lineKey);
-    if (!byMember) return "ok";
-    const left = Math.max(0, line.limit - line.spent);
-    const share = line.scope === "user" ? Number.POSITIVE_INFINITY : left * MEMBER_SHARE;
-    let total = 0;
-    for (const r of byMember.values()) total += Math.min(r[line.unit], share);
-    if (line.spent + total >= line.limit) return "full";
-    // The share caps the member's first call too (own = 0), whenever others hold reservations
-    // (a lone call is always admitted: the line is then not shared in practice).
-    const own = byMember.get(member)?.[line.unit] ?? 0;
-    const others = [...byMember.keys()].some((m) => m !== member);
-    return (own > 0 || others) && own + cost[line.unit] > share ? "own_share" : "ok";
+  private releaser(call: CallContext, callId: string): (written: boolean) => void {
+    // A call still running keeps its reservation alive (no expiry while it streams).
+    const beat =
+      this.heartbeatMs === undefined
+        ? undefined
+        : setInterval(() => {
+            this.reservations.extend(call.teamId, [callId]).catch(this.onError);
+          }, this.heartbeatMs);
+    beat?.unref();
+    return (written) => {
+      if (beat) clearInterval(beat);
+      const keep = written && call.callId ? SETTLE_TIMEOUT_MS : undefined;
+      this.reservations.end(call.teamId, [callId], keep).catch(this.onError);
+    };
   }
 
   /**
-   * Reserves the call's possible cost at its levels. The release takes whether the call's ledger
-   * row will be written: then the reservation stays until {@link settle} (the row landed and the
-   * cached spend was dropped, so the next check sees it), or {@link SETTLE_TIMEOUT_MS} at most.
+   * The ledger rows of these calls were written: their reservations end, after
+   * `settleHoldMs`, so that replicas whose cached spend predates the rows still count them.
    */
-  private reserve(
-    call: CallContext,
-    keys: ReturnType<typeof reservationKeys>,
-    member: string,
-    cost: Reserved,
-  ): (written: boolean) => void {
-    const all = [keys.install, keys.team, keys.user];
-    for (const k of all) this.add(k, member, cost, 1);
-    let released = false;
-    const drop = () => {
-      if (released) return;
-      released = true;
-      for (const k of all) this.add(k, member, cost, -1);
-    };
-    return (written) => {
-      if (!written || !call.callId) {
-        drop();
-        return;
-      }
-      const timer = setTimeout(() => {
-        this.pending.delete(call.callId ?? "");
-        drop();
-      }, SETTLE_TIMEOUT_MS);
-      timer.unref();
-      this.pending.set(call.callId, () => {
-        clearTimeout(timer);
-        drop();
-      });
-    };
+  settle(teamId: string, callIds: readonly string[]): void {
+    const hold = this.settleHoldMs > 0 ? this.settleHoldMs : undefined;
+    this.reservations.end(teamId, callIds, hold).catch(this.onError);
   }
 
-  /** The ledger rows of these calls were written: their reservations end (cache dropped first). */
-  settle(callIds: readonly string[]): void {
-    for (const id of callIds) {
-      const done = this.pending.get(id);
-      this.pending.delete(id);
-      done?.();
-    }
-  }
-
-  private add(lineKey: string, member: string, cost: Reserved, sign: 1 | -1): void {
-    const byMember = this.reserved.get(lineKey) ?? new Map<string, Reserved>();
-    const r = byMember.get(member) ?? { usd: 0, tokens: 0 };
-    const next = { usd: r.usd + sign * cost.usd, tokens: r.tokens + sign * cost.tokens };
-    if (next.tokens <= 0 && next.usd <= 1e-12) byMember.delete(member);
-    else byMember.set(member, next);
-    if (byMember.size === 0) this.reserved.delete(lineKey);
-    else this.reserved.set(lineKey, byMember);
+  private giveBack(key: string): void {
+    const b = this.buckets.get(key);
+    if (b) this.buckets.set(key, { ...b, tokens: b.tokens + 1 });
   }
 
   /** Takes one request from the member's bucket; 0 when allowed, else seconds until one is. */

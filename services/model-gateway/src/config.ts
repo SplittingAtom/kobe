@@ -85,6 +85,14 @@ const configSchema = z.object({
     60_000,
     1_000,
   ),
+  // KOBE-120: how long a call's budget reservation lives if nothing ends it (a replica that
+  // crashed mid-call). Longer than the longest model call; ended reservations are removed at once.
+  KOBE_MODEL_GATEWAY_RESERVATION_TTL_MS: int(
+    "KOBE_MODEL_GATEWAY_RESERVATION_TTL_MS",
+    60_000,
+    3_600_000,
+    600_000,
+  ),
 });
 
 export interface Config {
@@ -103,6 +111,8 @@ export interface Config {
   readonly idleTimeoutMs: number;
   readonly cacheTtlMs: number;
   readonly budgetCacheTtlMs: number;
+  /** Expiry of a budget reservation that nothing ends (crashed replica), KOBE-120. */
+  readonly reservationTtlMs: number;
   /** Run token mandatory on every call (KOBE-118 enforcement); default off for rollout. */
   readonly requireRunToken: boolean;
 }
@@ -138,6 +148,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     idleTimeoutMs: c.KOBE_MODEL_GATEWAY_IDLE_TIMEOUT_MS,
     cacheTtlMs: c.KOBE_MODEL_GATEWAY_CACHE_TTL_MS,
     budgetCacheTtlMs: c.KOBE_MODEL_GATEWAY_BUDGET_CACHE_TTL_MS,
+    reservationTtlMs: c.KOBE_MODEL_GATEWAY_RESERVATION_TTL_MS,
     requireRunToken: c.KOBE_MODEL_GATEWAY_REQUIRE_RUN_TOKEN === "true",
   };
 }
