@@ -4,6 +4,7 @@ import { useEffect, useId, useState } from "react";
 import type { KobeEventPayload } from "@kobe/protocol";
 import type { ApiError } from "../../lib/api/client";
 import type { ChatApi } from "../../lib/chat/api";
+import { visible } from "../../lib/security/visible";
 import styles from "./chat.module.css";
 
 type Requested = KobeEventPayload<"approval.requested">;
@@ -41,19 +42,7 @@ export function resolvedText(resolved: Resolved): string {
   return EXPIRED_TEXT[resolved.cause === "user" ? "run_interrupted" : resolved.cause];
 }
 
-/**
- * Characters that make shown text differ from what runs: controls, format characters (bidi
- * overrides/isolates U+202A–202E, U+2066–2069, zero-width U+200B–200F, U+FEFF, …), line and
- * paragraph separators, surrogates, private-use and unusual spaces. Shown as visible `\uXXXX`.
- */
-const INVISIBLE = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Zl}\p{Zp}\u00a0\u2000-\u200a\u202f\u205f\u3000]/gu;
-
-/** `text` with every invisible or reordering character as a visible `\uXXXX` escape. */
-export function visible(text: string, keep: RegExp = /\n/): string {
-  return text.replace(INVISIBLE, (ch) =>
-    keep.test(ch) ? ch : `\\u${(ch.codePointAt(0) ?? 0).toString(16).padStart(4, "0")}`,
-  );
-}
+export { visible };
 
 /** Pretty JSON of the input, with invisible characters escaped (the newlines are formatting). */
 export function pretty(input: unknown): string {
@@ -62,6 +51,50 @@ export function pretty(input: unknown): string {
   } catch {
     return "";
   }
+}
+
+interface RememberInput {
+  readonly scope: string;
+  readonly path: string;
+  readonly content: string;
+  readonly mode: string | undefined;
+}
+
+function rememberInput(tool: string, input: unknown): RememberInput | undefined {
+  if (tool !== "remember" || input === null || typeof input !== "object") return undefined;
+  const { scope, path, content, mode } = input as Record<string, unknown>;
+  if (typeof path !== "string" || typeof content !== "string") return undefined;
+  if (scope !== "user" && scope !== "project") return undefined;
+  return { scope, path, content, mode: typeof mode === "string" ? mode : undefined };
+}
+
+/**
+ * The input being approved. A `remember` call (KOBE-158) shows the text exactly as it would be
+ * stored: plain text only (never HTML or markdown, so no links or images), hidden characters as
+ * visible escapes. Anything else is the JSON of the input.
+ */
+function ApprovedInput({ tool, input }: { readonly tool: string; readonly input: unknown }) {
+  const mem = rememberInput(tool, input);
+  if (!mem) {
+    return (
+      <pre className={styles.toolPre} aria-label="Input to approve">
+        {pretty(input)}
+      </pre>
+    );
+  }
+  return (
+    <>
+      <p>
+        Saved to{" "}
+        <strong>{mem.scope === "project" ? "project memory" : "your personal memory"}</strong> in{" "}
+        <span className={styles.toolName}>{visible(mem.path)}</span> (
+        {mem.mode === "append" ? "added to the end of the file" : "replaces the file"}):
+      </p>
+      <pre className={styles.toolPre} aria-label="Memory to store">
+        {visible(mem.content)}
+      </pre>
+    </>
+  );
 }
 
 /** Anything outside printable ASCII in a tool name (lookalike letters, hidden characters). */
@@ -182,9 +215,7 @@ export function ApprovalCard({
       </ul>
       <p className={styles.who}>Exactly this input runs if you allow it:</p>
       {inputState === "ready" ? (
-        <pre className={styles.toolPre} aria-label="Input to approve">
-          {pretty(input)}
-        </pre>
+        <ApprovedInput tool={requested.tool} input={input} />
       ) : inputState === "loading" ? (
         <p className={styles.hint} role="status">
           Loading the exact input…

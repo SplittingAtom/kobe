@@ -262,4 +262,35 @@ describe("ApprovalCard", () => {
     );
     expect(screen.getByText(text)).toBeTruthy();
   });
+
+  describe("remember (KOBE-158)", () => {
+    const input = {
+      scope: "project",
+      path: "topics/p\u202eq.md",
+      mode: "append",
+      content:
+        "See [docs](https://evil.example/x) ![i](https://evil.example/p.png)\n<b>bold</b> a\u200bb\u202ec",
+    };
+
+    it("shows exactly what will be stored as plain text, hidden characters escaped", async () => {
+      const t = fake.addThread("Notes");
+      openApp(fake, t);
+      const user = userEvent.setup();
+      await user.type(await composer(), "remember{Enter}");
+      await waitFor(() => expect(fake.activeRun(t)).toBeDefined());
+      const runId = must(fake.activeRun(t)).run_id;
+      await streaming(fake, runId);
+      fake.agent.toolCall(runId, "tc1", "remember", input, "m1");
+      fake.requestApproval(runId, asked({ tool: "remember", input }));
+      const card = await screen.findByRole("group", { name: /Approval needed/ });
+      const stored = screen.getByLabelText("Memory to store");
+      expect(stored.textContent).toContain(
+        "[docs](https://evil.example/x) ![i](https://evil.example/p.png)\n<b>bold</b> a\\u200bb\\u202ec",
+      );
+      expect(card.textContent).toContain("project memory");
+      expect(card.textContent).toContain("topics/p\\u202eq.md");
+      expect(card.textContent).toContain("added to the end");
+      expect(card.querySelector("a, img, b")).toBeNull();
+    });
+  });
 });

@@ -13,11 +13,11 @@ beforeAll(async () => {
 });
 afterAll(() => server.close());
 
-const chat = (messages: unknown[]) =>
+const chat = (messages: unknown[], extra: Record<string, unknown> = {}) =>
   fetch(`${base}/v1/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ model: "gpt-fake", messages }),
+    body: JSON.stringify({ model: "gpt-fake", messages, ...extra }),
   }).then(
     (r) =>
       r.json() as Promise<{
@@ -92,5 +92,22 @@ describe("fake LLM system prompt echo (KOBE-89)", () => {
     expect(res.choices[0]?.message.content).toBe(
       "fake-openai: system said: Be brief. Be kind. Extra.",
     );
+  });
+});
+
+describe("fake LLM tool list echo (KOBE-158)", () => {
+  it("answers 'tools?' with the names of the offered tools", async () => {
+    const res = await chat([{ role: "user", content: "tools?" }], {
+      tools: [
+        { type: "function", function: { name: "recall", parameters: {} } },
+        { type: "function", function: { name: "bash", parameters: {} } },
+      ],
+    });
+    expect(res.choices[0]?.message.content).toBe("fake-openai: tools said: bash,recall");
+  });
+
+  it("lists nothing when the request offers no tools", async () => {
+    const res = await chat([{ role: "user", content: "tools?" }]);
+    expect(res.choices[0]?.message.content).toBe("fake-openai: tools said: ");
   });
 });

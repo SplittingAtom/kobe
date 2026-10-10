@@ -1632,6 +1632,7 @@ const controller = new AbortController();
 const timer = setTimeout(() => controller.abort(), Number(timeoutMs));
 const artifactEvents = [];
 const fileEvents = []; // KOBE-152: file.shared as id:name:size
+const memoryEvents = []; // KOBE-158: memory.updated as doc:path:vN:previous
 let text = "", terminal = "none", code = "-", errorMessage = "-", first = null, waking = "-", startedModel = "-";
 try {
   const res = await fetch(base + "/v1/runs/" + runId + "/events", { headers: { ...headers(), accept: "text/event-stream" }, signal: controller.signal });
@@ -1654,6 +1655,7 @@ try {
       if (type === "run.started") startedModel = payload.model ?? "-";
       if (type === "artifact.created" || type === "artifact.updated") artifactEvents.push(type + ":" + payload.artifact_id + ":v" + (payload.version ?? "?"));
       if (type === "file.shared") fileEvents.push(payload.file_id + ":" + payload.name + ":" + payload.size);
+      if (type === "memory.updated") memoryEvents.push(payload.memory_doc_id + ":" + payload.path + ":v" + payload.version + ":" + (payload.previous_version ?? "none"));
       if (type === "text.delta") { if (first === null) first = Date.now() - t0; text += payload.delta ?? ""; }
       if (type === "run.completed" || type === "run.failed" || type === "run.interrupted" || type === "run.budget_stopped") {
         terminal = type;
@@ -1671,13 +1673,14 @@ out("first_token_ms", first ?? "-");
 out("terminal_ms", Date.now() - t0);
 out("artifact_events", artifactEvents.join(",") || "-");
 out("file_events", fileEvents.join(",") || "-");
+out("memory_events", memoryEvents.join(",") || "-");
 out("terminal", terminal);
 out("code", code);
 out("error_message", errorMessage);
 out("text", text);
 JS
     chat_run() { # content timeout-ms [model] [agent-id] [thread-id] [approve-all] [file-ids] → the CHAT_JS output (not `chat`: KOBE-40's helper above)
-      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$CHAT_JS" "$E2E_TEAM_ID" "$1" "$2" "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}" 2>&1 | tail -16
+      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$CHAT_JS" "$E2E_TEAM_ID" "$1" "$2" "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}" 2>&1 | tail -17
     }
     chat_out=$(chat_run "hello-pi-$RANDOM" 300000)
     printf '     chat: %s\n' "$(printf '%s' "$chat_out" | grep -v '^text=' | tr '\n' ' ')"
@@ -1951,11 +1954,11 @@ SH
         }
         const cookie = login.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
         await fetch(base + '/v1/me/teams/active', { method: 'PUT', headers: { ...h, cookie }, body: JSON.stringify({ teamId: '$E2E_TEAM_ID' }) });
-        const res = await fetch(base + process.argv[2], { method: process.argv[3] || 'GET', headers: { ...h, cookie } });
+        const res = await fetch(base + process.argv[2], { method: process.argv[3] || 'GET', headers: { ...h, cookie }, body: process.argv[4] || undefined });
         console.log('status=' + res.status);
         for (const [k, v] of res.headers) console.log('h:' + k + '=' + v);
         console.log('body=' + (await res.text()).replace(/\\n/g, ' '));
-      " "$1" "$2" "${3:-}" 2>&1
+      " "$1" "$2" "${3:-}" "${4:-}" 2>&1
     }
     share_text="kobe-152 $(date +%s) $RANDOM"
     sf_out=$(chat_run "bash: echo '$share_text' > /workspace/shared-report.txt; exit 0" 300000 "" "$(gallery_id document-drafter)" "" 1)
@@ -1983,6 +1986,65 @@ SH
       "$(psql_kobe "SELECT count(*) FROM audit_log WHERE team_id = '$E2E_TEAM_ID' AND action = 'workspace.file_deleted'" | awk '$1 >= 1 {print 1; exit} {print 0}')"
     contains "share_file: the shared file survives losing its workspace copy (still 200)" '^status=200$' \
       "$(file_fetch owner@e2e.test "/v1/files/$sf_id/content")"
+
+    # KOBE-158 (56f of KOBE-56): memory end to end. The fake model calls remember (personal writes
+    # apply at once); memory.updated carries what Undo needs; the panel API restores the prior
+    # version or deletes a created doc; then the team switch turns memory off and the next run
+    # lists no remember/recall tools and has no memory index in its system prompt ("tools?" and
+    # "system?" make the fake model echo both). The switch is turned back on afterwards.
+    echo "==> memory (KOBE-158)"
+    mem_id=$(date +%s)-$RANDOM
+    mem_marker="kobe-158-index-$mem_id"
+    mem_put() { # path content → the chat_run output of a remember call (replace mode)
+      chat_run "tool: remember {\"scope\":\"user\",\"path\":\"$1\",\"content\":\"$2\"}" 300000 "" "" "" 1
+    }
+    mem_settings() { file_fetch owner@e2e.test "/v1/memory/settings?level=team" PUT "$1"; }
+    contains "memory: the team switch is on" '^status=200$' "$(mem_settings '{"memory_enabled":true,"project_memory_enabled":true}')"
+    mem1=$(mem_put "notes/e2e-$mem_id.md" "v1 $mem_id")
+    printf '     memory remember 1: %s\n' "$(printf '%s' "$mem1" | grep -E '^(terminal|memory_events|text)=' | tr '\n' ' ' | cut -c1-400)"
+    contains "memory: remember completed" '^terminal=run.completed$' "$mem1"
+    contains "memory: memory.updated for the created doc has no previous version" \
+      "^memory_events=[0-9a-f-]{36}:notes/e2e-$mem_id.md:v1:none\$" "$mem1"
+    mem_doc=$(printf '%s\n' "$mem1" | sed -n 's/^memory_events=\([0-9a-f-]*\):.*/\1/p')
+    mem2=$(mem_put "notes/e2e-$mem_id.md" "v2 $mem_id")
+    contains "memory: the second write names version 1 as the one to restore" \
+      "^memory_events=$mem_doc:notes/e2e-$mem_id.md:v2:1\$" "$mem2"
+    contains "memory: the panel API shows the new content" "\"content\":\"v2 $mem_id\"" \
+      "$(file_fetch owner@e2e.test "/v1/memory/$mem_doc")"
+    contains "memory: Undo (restore version 1) is accepted" '^status=200$' \
+      "$(file_fetch owner@e2e.test "/v1/memory/$mem_doc/restore" POST '{"version":1}')"
+    mem_after=$(file_fetch owner@e2e.test "/v1/memory/$mem_doc")
+    contains "memory: Undo restored the prior content" "\"content\":\"v1 $mem_id\"" "$mem_after"
+    contains "memory: Undo made a new version, history is kept" '"current_version":3' "$mem_after"
+    contains "memory: another member cannot read the personal doc (404)" '^status=404$' \
+      "$(file_fetch reader@e2e.test "/v1/memory/$mem_doc")"
+    contains "memory: Undo of a created doc (delete) answers 204" '^status=204$' \
+      "$(file_fetch owner@e2e.test "/v1/memory/$mem_doc" DELETE)"
+    contains "memory: the deleted doc is gone from the panel API (404)" '^status=404$' \
+      "$(file_fetch owner@e2e.test "/v1/memory/$mem_doc")"
+    mem_put "MEMORY.md" "- $mem_marker" >/dev/null
+    mem_on=$(chat_run "tools?" 300000)
+    contains "memory on: the run lists remember" '^text=.*tools said: .*remember' "$mem_on"
+    contains "memory on: the run lists recall" '^text=.*tools said: .*recall' "$mem_on"
+    contains "memory on: the system prompt carries the memory index" "^text=.*$mem_marker" \
+      "$(chat_run "system?" 300000)"
+    contains "memory: turning memory off is accepted" '^body=.*"memory_enabled":false' \
+      "$(mem_settings '{"memory_enabled":false}')"
+    contains "memory: the switch persisted (GET)" '^body=.*"memory_enabled":false' \
+      "$(file_fetch owner@e2e.test "/v1/memory/settings?level=team")"
+    mem_off=$(chat_run "tools?" 300000)
+    contains "memory off: the next run completed" '^terminal=run.completed$' "$mem_off"
+    contains "memory off: the run answered with its tool list" '^text=.*tools said: ' "$mem_off"
+    if printf '%s' "$mem_off" | grep -qE '^text=.*(remember|recall)'; then fail "memory off: the run lists no remember or recall"; else ok "memory off: the run lists no remember or recall"; fi
+    mem_off_sys=$(chat_run "system?" 300000)
+    contains "memory off: the system prompt answered" '^text=.*system said: ' "$mem_off_sys"
+    if printf '%s' "$mem_off_sys" | grep -q "$mem_marker"; then fail "memory off: the system prompt has no memory index"; else ok "memory off: the system prompt has no memory index"; fi
+    contains "memory off: the panel API refuses with memory_disabled (403)" '^status=403$' \
+      "$(file_fetch owner@e2e.test "/v1/memory?scope=user")"
+    contains "memory: turning memory back on is accepted" '^body=.*"memory_enabled":true' \
+      "$(mem_settings '{"memory_enabled":true}')"
+    contains "memory back on: the next run lists remember again" '^text=.*tools said: .*remember' \
+      "$(chat_run "tools?" 300000)"
 
     # KOBE-146 (53f of KOBE-53): uploads end to end. The Owner uploads a file into a new thread
     # through the API, a limit error is refused, the file is attached to a message, and the

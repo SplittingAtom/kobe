@@ -11,7 +11,7 @@
  *   (run notice). The notice has an Open button for the artifact panel (KOBE-130).
  * - `FileCard` (KOBE-152, `file-card.tsx`): `file.shared`, a download card.
  * - `NoticeSlot`: run-level notices not tied to a tool call (`egress.blocked`, `steer.applied`,
- *   `memory.updated` (KOBE-56 adds Undo), `context.omitted` (KOBE-77), artifacts and files shared outside a tool call).
+ *   `memory.updated` (KOBE-158: the chip with Undo), `context.omitted` (KOBE-77), artifacts and files shared outside a tool call).
  */
 import { useContext } from "react";
 import type { KobeEventPayload } from "@kobe/protocol";
@@ -20,6 +20,7 @@ import { ApprovalCard } from "./approval-card";
 import { OpenArtifactButton } from "./artifact-panel";
 import { FileCard } from "./file-card";
 import { ConnectedEgressNotice } from "./egress-notice";
+import { MemoryNotice } from "./memory-notice";
 import { OmissionNotice } from "./omission-notice";
 import { ChatSessionContext } from "./kobe-runtime";
 import styles from "./chat.module.css";
@@ -62,11 +63,7 @@ export function NoticeSlot({ notice }: { readonly notice: RunNotice }) {
     case "steer.applied":
       return <p className={styles.notice}>Steered: “{notice.payload.content}”</p>;
     case "memory.updated":
-      return (
-        <p className={styles.notice}>
-          Memory updated: {notice.payload.path} ({notice.payload.scope} memory)
-        </p>
-      );
+      return <MemoryNotice payload={notice.payload} />;
     case "artifact.created":
     case "artifact.updated":
       return <ArtifactSlot artifact={notice.payload} />;

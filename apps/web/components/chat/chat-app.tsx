@@ -227,7 +227,8 @@ export function ChatApp({
         <h1 className={styles.brand}>Kobe</h1>
         <TeamSwitcher />
         <nav aria-label="My area">
-          <Link href="/me/agents">My agents</Link> <Link href="/me/skills">My skills</Link>
+          <Link href="/me/agents">My agents</Link> <Link href="/me/skills">My skills</Link>{" "}
+          <Link href="/me/memory">My memory</Link>
         </nav>
         <ConsoleLinks />
       </header>
