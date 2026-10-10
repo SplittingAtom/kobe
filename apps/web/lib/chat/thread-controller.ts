@@ -637,6 +637,36 @@ export class ThreadController {
     return true;
   };
 
+  /** Shares the thread to its project or makes it private again (owner only; the server decides). */
+  readonly setVisibility = async (visibility: "private" | "project"): Promise<boolean> => {
+    const threadId = this.#state.threadId;
+    if (threadId === null) return false;
+    const res = await this.#busy("share", () => this.#api.shareThread(threadId, visibility));
+    if (!res.ok) {
+      this.#fail(res.error);
+      return false;
+    }
+    this.#set((s) => ({ ...s, summary: { ...res.data, readOnly: false } }));
+    this.#announce(
+      visibility === "project"
+        ? "Shared with the project. Its members can read and fork this conversation."
+        : "Private again. Only you can see this conversation.",
+    );
+    return true;
+  };
+
+  /** Forks the thread (any reader, or the owner) and returns the new thread's id. */
+  readonly fork = async (): Promise<string | null> => {
+    const threadId = this.#state.threadId;
+    if (threadId === null) return null;
+    const res = await this.#busy("fork", () => this.#api.forkThread(threadId));
+    if (!res.ok) {
+      this.#fail(res.error);
+      return null;
+    }
+    return res.data.threadId;
+  };
+
   /** Shows another branch (assistant-ui's branch picker) and makes it the thread's leaf. */
   readonly switchLeaf = async (entryId: string): Promise<void> => {
     const threadId = this.#state.threadId;

@@ -11,6 +11,7 @@ import { FilesToggleButton } from "../files/files-panel";
 import { ArtifactList } from "./artifact-list";
 import { AgentPicker, useDraftAgentName } from "./agent-picker";
 import { Composer } from "./composer";
+import { DraftProjectNote, ProjectBar } from "./project-bar";
 import { useChatSession, useKobeExtras } from "./kobe-runtime";
 import { AssistantMessage, EditComposer, UserMessage } from "./messages";
 import { RunPanel } from "./run-panel";
@@ -99,7 +100,11 @@ function LoadingSkeleton() {
 }
 
 /** The conversation on screen: the active branch of the entry tree, the run panel and composer. */
-export function ThreadView() {
+export function ThreadView({
+  onOpenThread,
+}: {
+  readonly onOpenThread?: ((threadId: string) => void) | undefined;
+} = {}) {
   const extras = useKobeExtras();
   const session = useChatSession();
   const summary = extras?.state.summary;
@@ -141,6 +146,10 @@ export function ThreadView() {
           <FilesToggleButton />
         </span>
       </header>
+      <div className="mx-auto w-full max-w-(--thread-max-width) px-4">
+        <ProjectBar extras={extras} onOpenThread={onOpenThread} />
+        {state.threadId === null && <DraftProjectNote />}
+      </div>
       <ArtifactList threadId={state.threadId} />
       {state.phase === "error" && state.loadError && (
         <div className="mx-auto flex w-full max-w-(--thread-max-width) flex-col gap-2 px-4">

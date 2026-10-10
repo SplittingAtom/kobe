@@ -26,6 +26,10 @@ export interface ThreadSummary {
   readonly agentName?: string | null;
   readonly agentStatus?: "active" | "suspended" | "archived" | null;
   readonly sharedToProject: boolean;
+  /** `private` or `project` (KOBE-163); absent on older answers = see `sharedToProject`. */
+  readonly visibility?: "private" | "project";
+  /** True for a thread shared to you by someone else: you read and fork it, nothing else. */
+  readonly readOnly?: boolean;
   /** A builder test thread (KOBE-85); never in the lists the chat shows. */
   readonly isTest?: boolean;
   /** The model chosen for the thread (a catalog alias); null = the team's default (KOBE-44). */

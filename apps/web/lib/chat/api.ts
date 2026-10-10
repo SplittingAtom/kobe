@@ -59,7 +59,15 @@ export interface ChatApi {
     title?: string,
     model?: string | null,
     agent?: { readonly agentId: string; readonly test: boolean },
+    projectId?: string | null,
   ): Promise<ApiResult<ThreadSummary>>;
+  /** Shares the thread to its project, or makes it private again (owner only, KOBE-163). */
+  shareThread(
+    threadId: string,
+    visibility: "private" | "project",
+  ): Promise<ApiResult<ThreadSummary>>;
+  /** Copies the thread into a new private thread of yours (`POST /v1/threads/:id/fork`). */
+  forkThread(threadId: string): Promise<ApiResult<{ readonly threadId: string }>>;
   /** Agents the user can start a chat with in this team, every page (KOBE-122). */
   runnableAgents(): Promise<ApiResult<readonly RunnableAgent[]>>;
   /** Clears the caller's builder test threads of one agent (KOBE-85); they go to Trash, hidden. */
@@ -150,8 +158,11 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     listThreads: (cursor) => get(`/v1/threads${query({ cursor })}`),
     searchThreads: (q, cursor) => get(`/v1/threads${query({ q, cursor })}`),
     listTrash: (cursor) => get(`/v1/threads/trash${query({ cursor })}`),
-    createThread: (title, model, agent) =>
+    shareThread: (id, visibility) => send("POST", `/v1/threads/${enc(id)}/share`, { visibility }),
+    forkThread: (id) => send("POST", `/v1/threads/${enc(id)}/fork`, {}),
+    createThread: (title, model, agent, projectId) =>
       send("POST", "/v1/threads", {
+        ...(projectId === undefined || projectId === null ? {} : { project_id: projectId }),
         ...(title === undefined ? {} : { title }),
         ...(model === undefined || model === null ? {} : { model }),
         ...(agent === undefined

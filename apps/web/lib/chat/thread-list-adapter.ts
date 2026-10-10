@@ -85,6 +85,7 @@ export function createThreadListAdapter(
       const test = session.testAgentId;
       const model = session.takeNextModel();
       const agent = session.takeNextAgent();
+      const projectId = session.takeNextProject();
       const created = await unwrap(
         api.createThread(
           session.takeNextTitle(),
@@ -95,6 +96,7 @@ export function createThreadListAdapter(
             : agent === null
               ? undefined
               : { agentId: agent.id, test: false },
+          projectId,
         ),
       );
       session.seed(created);

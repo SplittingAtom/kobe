@@ -1594,7 +1594,7 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
     if until_ok 180 owner_closed; then ok "no scripted agent holds the Owner's sandbox identity any more"
     else fail "no scripted agent holds the Owner's sandbox identity any more"; fi
     read -r -d '' CHAT_JS <<'JS' || true
-const [team, content, timeoutMs, model, agentId, reuseThread, approveAll, fileIds] = process.argv.slice(1);
+const [team, content, timeoutMs, model, agentId, reuseThread, approveAll, fileIds, projectId] = process.argv.slice(1);
 const base = "http://127.0.0.1:" + process.env.PORT;
 const origin = new URL(process.env.KOBE_PUBLIC_URL).origin;
 const jar = new Map();
@@ -1619,7 +1619,7 @@ await call("PUT", "/v1/me/teams/active", { teamId: team });
 // KOBE-44: an optional model chosen for the thread (an alias the team enabled).
 // KOBE-89: an optional agent (a gallery agent's id) to chat with.
 // KOBE-131: an optional existing thread to continue (an artifact update must stay in its thread).
-const thread = reuseThread ? { status: 200, json: { thread_id: reuseThread } } : await call("POST", "/v1/threads", { title: "kobe-41", ...(model ? { model } : {}), ...(agentId ? { agent_id: agentId } : {}) });
+const thread = reuseThread ? { status: 200, json: { thread_id: reuseThread } } : await call("POST", "/v1/threads", { title: "kobe-41", ...(model ? { model } : {}), ...(agentId ? { agent_id: agentId } : {}), ...(projectId ? { project_id: projectId } : {}) });
 out("thread", thread.status + ":" + (thread.json.model ?? "default"));
 out("thread_id", thread.json.thread_id ?? "-");
 const t0 = Date.now();
@@ -1685,7 +1685,7 @@ out("error_message", errorMessage);
 out("text", text);
 JS
     chat_run() { # content timeout-ms [model] [agent-id] [thread-id] [approve-all] [file-ids] → the CHAT_JS output (not `chat`: KOBE-40's helper above)
-      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$CHAT_JS" "$E2E_TEAM_ID" "$1" "$2" "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}" 2>&1 | tail -17
+      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "$CHAT_JS" "$E2E_TEAM_ID" "$1" "$2" "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}" "${CHAT_PROJECT:-}" 2>&1 | tail -17
     }
     chat_out=$(chat_run "hello-pi-$RANDOM" 300000)
     printf '     chat: %s\n' "$(printf '%s' "$chat_out" | grep -v '^text=' | tr '\n' ' ')"
@@ -2054,6 +2054,144 @@ SH
       "$(mem_settings '{"memory_enabled":true}')"
     contains "memory back on: the next run lists remember again" '^text=.*tools said: .*remember' \
       "$(chat_run "tools?" 300000)"
+
+    # KOBE-164 (57f of KOBE-57): projects end to end, as the web UI drives them. The Owner (team
+    # admin) creates a project and a second one nobody else is in, adds the reader as a member,
+    # uploads a file, and starts a conversation in the project (a real run: the fork copies its
+    # entries). Then the thread is shared: the reader sees it read-only (reads, lists, cannot
+    # post) and forks it into a private thread of their own; unsharing hides it again; an archived
+    # project refuses new files. Non-members get 404 for the project, never 403.
+    echo "==> projects (KOBE-164)"
+    read -r -d '' PROJECTS_JS <<'JS' || true
+const [team, mode, readerEmail, projectArg, threadArg, readerId] = process.argv.slice(1);
+const base = "http://127.0.0.1:" + process.env.PORT;
+const origin = new URL(process.env.KOBE_PUBLIC_URL).origin;
+const out = (k, v) => console.log(k + "=" + v);
+const session = async (email) => {
+  const jar = new Map();
+  const call = async (method, path, body, form) => {
+    const headers = { origin, "x-kobe-team": team, cookie: [...jar].map(([k, v]) => k + "=" + v).join("; ") };
+    if (body !== undefined) headers["content-type"] = "application/json";
+    const res = await fetch(base + path, { method, headers, body: form ?? (body === undefined ? undefined : JSON.stringify(body)) });
+    for (const c of res.headers.getSetCookie()) { const [pair] = c.split(";"); const at = pair.indexOf("="); jar.set(pair.slice(0, at), pair.slice(at + 1)); }
+    const text = await res.text();
+    let json = {}; try { json = JSON.parse(text); } catch {}
+    return { status: res.status, json, text };
+  };
+  let login;
+  for (let i = 0; i < 4; i++) { // sign-in is rate limited (3 per 10 s): wait out a 429
+    login = await call("POST", "/api/auth/sign-in/email", { email, password: "e2e owner password" });
+    if (login.status !== 429) break;
+    await new Promise((r) => setTimeout(r, 11000));
+  }
+  await call("PUT", "/v1/me/teams/active", { teamId: team });
+  call.login = login.status;
+  return call;
+};
+const owner = await session("owner@e2e.test");
+const reader = await session(readerEmail);
+const upload = (call, projectId, name, text) => {
+  const form = new FormData();
+  form.append("path", "docs");
+  form.append("file", new Blob([text], { type: "text/plain" }), name);
+  return call("POST", "/v1/projects/" + projectId + "/files", undefined, form);
+};
+const code = (r) => r.status + ":" + (r.json.code ?? "-");
+out("signin", owner.login + ":" + reader.login);
+if (mode === "setup") {
+  const marker = "E2E projects " + Date.now();
+  const created = await owner("POST", "/v1/projects", { name: marker, instructions: "Always answer in " + marker, members_mode: "selected", member_user_ids: [] });
+  const id = created.json.id;
+  out("project_id", id ?? "-");
+  out("create", created.status + ":" + created.json.my_role + ":" + created.json.members_mode);
+  const hidden = await owner("POST", "/v1/projects", { name: marker + " hidden", members_mode: "selected", member_user_ids: [] });
+  out("hidden_project_id", hidden.json.id ?? "-");
+  out("outsider_get", code(await reader("GET", "/v1/projects/" + id)));
+  out("outsider_list", (await reader("GET", "/v1/projects")).json.projects.some((p) => p.id === id || p.id === hidden.json.id));
+  out("add_member", (await owner("POST", "/v1/projects/" + id + "/members", { user_id: readerId, role: "member" })).status);
+  const mine = await reader("GET", "/v1/projects/" + id);
+  out("member_get", mine.status + ":" + mine.json.my_role + ":" + (mine.json.instructions === "Always answer in " + marker));
+  out("member_patch", code(await reader("PATCH", "/v1/projects/" + id, { name: "mine now" })));
+  out("member_add", code(await reader("POST", "/v1/projects/" + id + "/members", { user_id: readerId, role: "owner" })));
+  out("hidden_still_404", code(await reader("GET", "/v1/projects/" + hidden.json.id)));
+  const up = await upload(owner, id, "brief.txt", "project brief " + marker);
+  out("upload", up.status + ":" + (up.json.path ?? "-") + ":" + (up.json.source ?? "-"));
+  out("member_upload", code(await upload(reader, id, "nope.txt", "x")));
+  const files = await reader("GET", "/v1/projects/" + id + "/files");
+  out("member_files", files.status + ":" + (files.json.files ?? []).map((f) => f.path).join(","));
+  const list = await owner("GET", "/v1/projects");
+  out("owner_list", list.json.projects.find((p) => p.id === id)?.file_count);
+} else {
+  const share = await owner("POST", "/v1/threads/" + threadArg + "/share", { visibility: "project" });
+  out("share", share.status + ":" + share.json.visibility);
+  out("reader_share", code(await reader("POST", "/v1/threads/" + threadArg + "/share", { visibility: "private" })));
+  const seen = await reader("GET", "/v1/threads/" + threadArg);
+  out("reader_get", seen.status + ":read_only=" + seen.json.read_only);
+  out("reader_list", (await reader("GET", "/v1/threads?project_id=" + projectArg)).json.threads.some((t) => t.thread_id === threadArg));
+  out("reader_default_list", (await reader("GET", "/v1/threads")).json.threads.some((t) => t.thread_id === threadArg));
+  out("reader_post", code(await reader("POST", "/v1/threads/" + threadArg + "/messages", { content: "can I?" })));
+  out("reader_rename", code(await reader("PATCH", "/v1/threads/" + threadArg, { title: "mine" })));
+  const fork = await reader("POST", "/v1/threads/" + threadArg + "/fork", {});
+  out("fork", fork.status);
+  const mine = await reader("GET", "/v1/threads/" + fork.json.thread_id);
+  out("fork_get", mine.status + ":read_only=" + mine.json.read_only + ":" + mine.json.visibility + ":" + (mine.json.project_id === projectArg) + ":entries=" + (mine.json.entries?.length > 0));
+  out("fork_hidden_from_owner", code(await owner("GET", "/v1/threads/" + fork.json.thread_id)));
+  const unshare = await owner("POST", "/v1/threads/" + threadArg + "/share", { visibility: "private" });
+  out("unshare", unshare.status + ":" + unshare.json.visibility);
+  out("reader_after_unshare", code(await reader("GET", "/v1/threads/" + threadArg)));
+  const archived = await owner("PATCH", "/v1/projects/" + projectArg, { archived: true });
+  out("archive", archived.status + ":" + (archived.json.archived_at != null));
+  out("archived_upload", code(await upload(owner, projectArg, "late.txt", "late")));
+  out("archived_listed", (await owner("GET", "/v1/projects")).json.projects.some((p) => p.id === projectArg));
+  out("archived_listed_when_asked", (await owner("GET", "/v1/projects?include_archived=true")).json.projects.some((p) => p.id === projectArg));
+}
+JS
+    projects_js() { # mode [project-id] [thread-id] → the PROJECTS_JS output
+      $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- \
+        node --input-type=module -e "$PROJECTS_JS" "$E2E_TEAM_ID" "$1" reader@e2e.test "${2:-}" "${3:-}" "$READER_ID" 2>&1 | tail -24
+    }
+    pr_out=$(projects_js setup)
+    printf '     projects: %s\n' "$(printf '%s' "$pr_out" | tr '\n' ' ' | cut -c1-700)"
+    pr_id=$(printf '%s\n' "$pr_out" | sed -n 's/^project_id=//p')
+    contains "projects: both users signed in" '^signin=200:200$' "$pr_out"
+    contains "projects: the Owner creates a project and becomes its owner (201)" '^create=201:owner:selected$' "$pr_out"
+    contains "projects: a person outside the project gets 404, not 403" '^outsider_get=404:not_found$' "$pr_out"
+    contains "projects: the project is not in the outsider's list" '^outsider_list=false$' "$pr_out"
+    contains "projects: the Owner adds the reader as a member (201)" '^add_member=201$' "$pr_out"
+    contains "projects: the member sees the project, its role and instructions" '^member_get=200:member:true$' "$pr_out"
+    contains "projects: a member cannot change the project (403)" '^member_patch=403:forbidden$' "$pr_out"
+    contains "projects: a member cannot manage members (403)" '^member_add=403:forbidden$' "$pr_out"
+    contains "projects: another project without the reader stays 404" '^hidden_still_404=404:not_found$' "$pr_out"
+    contains "projects: the Owner uploads a project file (201, upload, in its folder)" '^upload=201:docs/brief.txt:upload$' "$pr_out"
+    contains "projects: a member cannot upload (403)" '^member_upload=403:forbidden$' "$pr_out"
+    contains "projects: a member lists the file" '^member_files=200:docs/brief.txt$' "$pr_out"
+    contains "projects: the project counts one file" '^owner_list=1$' "$pr_out"
+    CHAT_PROJECT="$pr_id"
+    pr_chat=$(chat_run "hello-project-$RANDOM" 300000 "" "" "" 1)
+    CHAT_PROJECT=""
+    pr_thread=$(printf '%s\n' "$pr_chat" | sed -n 's/^thread_id=//p')
+    contains "projects: a conversation in the project completes a run" '^terminal=run.completed$' "$pr_chat"
+    contains "projects: the thread belongs to the project and is private" '^true\|false$' \
+      "$(psql_kobe "SELECT (project_id = '${pr_id:-00000000-0000-4000-8000-000000000000}')::text || '|' || shared_to_project::text FROM threads WHERE id = '${pr_thread:-00000000-0000-4000-8000-000000000000}'")"
+    pr_out=$(projects_js share "$pr_id" "$pr_thread")
+    printf '     projects share: %s\n' "$(printf '%s' "$pr_out" | tr '\n' ' ' | cut -c1-900)"
+    contains "projects: the author shares the thread to the project" '^share=200:project$' "$pr_out"
+    contains "projects: the reader cannot change the sharing (403 read_only)" '^reader_share=403:read_only$' "$pr_out"
+    contains "projects: the member opens the shared thread read-only" '^reader_get=200:read_only=true$' "$pr_out"
+    contains "projects: the shared thread is in the member's project list" '^reader_list=true$' "$pr_out"
+    contains "projects: it is not in the member's own thread list" '^reader_default_list=false$' "$pr_out"
+    contains "projects: the member cannot post to it (403 read_only)" '^reader_post=403:read_only$' "$pr_out"
+    contains "projects: the member cannot rename it (403 read_only)" '^reader_rename=403:read_only$' "$pr_out"
+    contains "projects: the member forks it (201)" '^fork=201$' "$pr_out"
+    contains "projects: the fork is the member's own private thread in the project, with the conversation" \
+      '^fork_get=200:read_only=false:private:true:entries=true$' "$pr_out"
+    contains "projects: the fork is invisible to the author (404)" '^fork_hidden_from_owner=404:thread_not_found$' "$pr_out"
+    contains "projects: unsharing makes the thread private again" '^unshare=200:private$' "$pr_out"
+    contains "projects: the member loses the thread at once (404)" '^reader_after_unshare=404:thread_not_found$' "$pr_out"
+    contains "projects: archiving works (200, archived_at set)" '^archive=200:true$' "$pr_out"
+    contains "projects: an archived project refuses new files (409 archived)" '^archived_upload=409:archived$' "$pr_out"
+    contains "projects: archived projects are listed only when asked" '^archived_listed=false$' "$pr_out"
+    contains "projects: ...and are listed when asked" '^archived_listed_when_asked=true$' "$pr_out"
 
     # KOBE-146 (53f of KOBE-53): uploads end to end. The Owner uploads a file into a new thread
     # through the API, a limit error is refused, the file is attached to a message, and the

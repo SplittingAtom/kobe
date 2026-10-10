@@ -363,6 +363,15 @@ function BudgetBanner({
 export function RunPanel({ extras }: { readonly extras: KobeThreadExtras }) {
   const { controller, state } = extras;
   if (!controller) return null;
+  // A reader of a shared thread only follows it: no usage, queue, retry or other owner controls.
+  if (state.summary?.readOnly === true) {
+    return (
+      <>
+        <RunStatus state={state} controller={controller} />
+        <ActionError state={state} controller={controller} />
+      </>
+    );
+  }
   return (
     <>
       <RunStatus state={state} controller={controller} />

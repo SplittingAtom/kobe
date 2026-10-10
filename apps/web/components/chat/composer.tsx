@@ -81,6 +81,14 @@ export function Composer({ extras }: { readonly extras: KobeThreadExtras }) {
     }
   };
 
+  if (extras.state.summary?.readOnly === true && !inTrash) {
+    return (
+      <p className={styles.banner} role="note">
+        You are reading a shared conversation. Fork it to ask the agent something of your own.
+      </p>
+    );
+  }
+
   if (inTrash) {
     return (
       <div className={styles.banner} role="note">

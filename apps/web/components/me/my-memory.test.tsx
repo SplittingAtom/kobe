@@ -191,3 +191,74 @@ describe("Memory panel (KOBE-158, ac-2)", () => {
     await screen.findByText(/Memory is turned off for this team/);
   });
 });
+
+describe("Memory panel project picker (KOBE-164)", () => {
+  const PROJECT = "00000000-0000-4000-8000-0000000000a1";
+  const project = (over: Record<string, unknown> = {}) => ({
+    id: PROJECT,
+    team_id: "t-1",
+    slug: "launch",
+    name: "Launch",
+    description: "",
+    instructions: "",
+    default_agent_id: null,
+    members_mode: "team",
+    my_role: "member",
+    file_count: 0,
+    created_by: "u-me",
+    created_at: "2026-10-01T10:00:00Z",
+    updated_at: "2026-10-01T10:00:00Z",
+    archived_at: null,
+    ...over,
+  });
+
+  afterEach(() => window.history.replaceState(null, "", "/"));
+
+  it("switches between my memory and a project's, and keeps the choice in the address", async () => {
+    window.history.replaceState(null, "", "/me/memory");
+    const calls = stubApi({
+      "GET /v1/projects?include_archived=true": [
+        200,
+        { projects: [project(), project({ id: "p-admin", name: "Not mine", my_role: null })] },
+      ],
+      [`GET ${LIST}`]: [200, { docs: [summary()] }],
+      [`GET /v1/memory?scope=project&project_id=${PROJECT}`]: [
+        200,
+        { docs: [summary({ id: "pd1", scope: "project", path: "plan.md" })] },
+      ],
+    });
+    renderTeam(<MyMemoryPage />, MEMBER);
+    await screen.findByRole("button", { name: "Open MEMORY.md" });
+    const picker = await screen.findByLabelText("Memory of");
+    // A team admin who is not a member would only get 404s: not offered.
+    expect(within(picker).queryByRole("option", { name: "Not mine" })).toBeNull();
+    await userEvent.selectOptions(picker, "Launch");
+    expect(await screen.findByRole("button", { name: "Open plan.md" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Project memory" })).toBeTruthy();
+    expect(window.location.search).toBe(`?project=${PROJECT}`);
+    await userEvent.selectOptions(picker, "Me");
+    await screen.findByRole("button", { name: "Open MEMORY.md" });
+    expect(window.location.search).toBe("");
+    expect(calls.map((c) => c.url)).toContain(`/v1/memory?scope=project&project_id=${PROJECT}`);
+  });
+
+  it("starts on the project from ?project= and shows no picker when there are none", async () => {
+    window.history.replaceState(null, "", `/me/memory?project=${PROJECT}`);
+    stubApi({
+      "GET /v1/projects?include_archived=true": [200, { projects: [project()] }],
+      [`GET /v1/memory?scope=project&project_id=${PROJECT}`]: [200, { docs: [] }],
+    });
+    renderTeam(<MyMemoryPage />, MEMBER);
+    expect(await screen.findByRole("heading", { name: "Project memory" })).toBeTruthy();
+    expect(((await screen.findByLabelText("Memory of")) as HTMLSelectElement).value).toBe(PROJECT);
+    cleanup();
+    window.history.replaceState(null, "", "/me/memory");
+    stubApi({
+      "GET /v1/projects?include_archived=true": [200, { projects: [] }],
+      [`GET ${LIST}`]: [200, { docs: [] }],
+    });
+    renderTeam(<MyMemoryPage />, MEMBER);
+    await screen.findByText(/No memory files yet/);
+    expect(screen.queryByLabelText("Memory of")).toBeNull();
+  });
+});

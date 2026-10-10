@@ -125,6 +125,12 @@ function ChatWorkspace({
     () => createThreadListAdapter(session, { onError: setListError }),
     [session],
   );
+  // `/?project=<id>` starts the next new conversation inside that project (KOBE-164).
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("project") ?? "";
+    if (UUID.test(id) && threadId === undefined) session.setDraftProject(id.toLowerCase());
+    // Read once per session: the address changes when a thread opens, the draft must not.
+  }, [session]);
   const runtime = useKobeRuntime({ session, adapter, threadId, onThreadIdChange: setThreadId });
   // A thread created by its first message: read the list again for its title.
   useEffect(() => session.onThreadCreated(() => void runtime.threads.reload()), [session, runtime]);
@@ -137,7 +143,7 @@ function ChatWorkspace({
           <div className={styles.body}>
             <ThreadSidebar listError={listError} onOpenThread={setThreadId} />
             <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
-              <ThreadView />
+              <ThreadView onOpenThread={setThreadId} />
             </main>
             <div className={styles.sidePanels}>
               <ArtifactPanel className={styles.sidePanel} />
@@ -229,7 +235,7 @@ export function ChatApp({
         <TeamSwitcher />
         <nav aria-label="My area">
           <Link href="/me/agents">My agents</Link> <Link href="/me/skills">My skills</Link>{" "}
-          <Link href="/me/memory">My memory</Link>
+          <Link href="/me/memory">My memory</Link> <Link href="/me/projects">Projects</Link>
         </nav>
         <ConsoleLinks />
       </header>

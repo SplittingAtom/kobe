@@ -5,8 +5,13 @@ import type { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { ChatApp } from "./chat-app";
 
 /** Renders the chat app over the fake server, optionally on a thread (`?thread=`). */
-export function openApp(fake: FakeKobe, threadId?: string, uploadTransport?: UploadTransport) {
-  window.history.replaceState(null, "", threadId ? `/?thread=${threadId}` : "/");
+export function openApp(
+  fake: FakeKobe,
+  threadId?: string,
+  uploadTransport?: UploadTransport,
+  search = "",
+) {
+  window.history.replaceState(null, "", threadId ? `/?thread=${threadId}` : `/${search}`);
   let n = 0;
   return render(
     <ChatApp
