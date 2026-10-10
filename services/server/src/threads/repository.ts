@@ -243,6 +243,8 @@ export async function createThread(
     teamId: string;
     ownerUserId: string;
     projectId: string | null;
+    /** A pre-chosen id (a fork copies blobs into the new thread's tree first); default: random. */
+    id?: string;
     /**
      * The published agent version the thread pins (D19); null = the install default agent. A
      * `DraftPin` (no version) makes it a builder test thread (KOBE-85): pass `isTest`.

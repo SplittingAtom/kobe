@@ -226,17 +226,19 @@ describe("fork", () => {
     const x = await world();
     const team = x.w.team;
     const sourceKey = `${PREFIX}teams/${team}/threads/${x.threadId}/entries/big`;
-    const body = Buffer.from(JSON.stringify({ message: { role: "user", content: "x".repeat(70_000) } }));
+    const body = Buffer.from(
+      JSON.stringify({ message: { role: "user", content: "x".repeat(70_000) } }),
+    );
     objects.objects.set(sourceKey, body);
     await f.fx.admin.query(
       `INSERT INTO thread_entries (team_id, thread_id, entry_id, parent_id, type, payload, blob_ref)
        VALUES ($1, $2, 'big', $3, 'message', '{}', $4)`,
       [team, x.threadId, x.entries.assistant, sourceKey],
     );
-    await f.fx.admin.query(`UPDATE threads SET leaf_entry_id = 'big' WHERE team_id = $1 AND id = $2`, [
-      team,
-      x.threadId,
-    ]);
+    await f.fx.admin.query(
+      `UPDATE threads SET leaf_entry_id = 'big' WHERE team_id = $1 AND id = $2`,
+      [team, x.threadId],
+    );
     const forked = await as(x.author).post(`/v1/threads/${x.threadId}/fork`, {});
     expect(forked.status, JSON.stringify(forked.json)).toBe(201);
     const id = forked.json.thread_id as string;
@@ -277,10 +279,10 @@ describe("fork", () => {
        VALUES ($1, $2, 'big2', $3, 'message', '{}', $4)`,
       [team, x.threadId, x.entries.assistant, sourceKey],
     );
-    await f.fx.admin.query(`UPDATE threads SET leaf_entry_id = 'big2' WHERE team_id = $1 AND id = $2`, [
-      team,
-      x.threadId,
-    ]);
+    await f.fx.admin.query(
+      `UPDATE threads SET leaf_entry_id = 'big2' WHERE team_id = $1 AND id = $2`,
+      [team, x.threadId],
+    );
     // A reader who lost access between planning and storing is the 404 path; here the source
     // is trashed after the copy would start, which the second transaction re-checks.
     const before = new Set(objects.objects.keys());

@@ -63,7 +63,7 @@ const ERRORS = {
   entry_not_found: [404, "That entry is not part of this thread."],
   entry_offloaded: [
     409,
-    "This conversation has very large messages that can't be copied into a fork yet.",
+    "Some very large messages in this conversation could not be copied into a fork.",
   ],
   agent_not_found: [404, "No agent with that id is available in this team."],
   agent_unavailable: [
@@ -315,9 +315,10 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     const id = threadIdParam(c);
     const body = await parseBody(c, forkThreadRequestSchema);
     if (!id || !body) return invalidRequest(c, "Give entry_id and/or title (or {}).");
-    const result = await asViewer(c, (tx, viewer) =>
-      forkThread(tx, viewer, id, { entryId: body.entry_id, title: body.title }),
-    );
+    const result = await forkThread((fn) => asViewer(c, fn), deps.blobs, id, {
+      entryId: body.entry_id,
+      title: body.title,
+    });
     return result.ok ? c.json({ thread_id: result.thread.thread_id }, 201) : fail(c, result.error);
   });
 
