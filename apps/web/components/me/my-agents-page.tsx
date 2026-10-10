@@ -20,7 +20,8 @@ export function MyAgentsPage() {
         you into every team you belong to.
       </p>
       <p>
-        <Link href="/me/agents/new">New agent</Link>
+        <Link href="/me/agents/new">New agent</Link> ·{" "}
+        <Link href="/me/connectors">My connector keys</Link>
       </p>
       <ResourceView state={state} label="your agents">
         {(agents) =>
