@@ -48,6 +48,7 @@ describe("audit event taxonomy", () => {
       "retention",
       "run",
       "sandbox",
+      "schedule",
       "skill",
       "thread",
       "workspace",
