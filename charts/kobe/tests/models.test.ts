@@ -71,6 +71,13 @@ describe("Bifrost", () => {
     expect(() => helm({ "bifrost.replicas": "2" })).toThrow(/maximum|replicas/);
   });
 
+  it("gives its probes room on a loaded node (KOBE-242: a 1 s timeout restarted it in CI)", () => {
+    const c = spec?.containers[0];
+    expect(c.livenessProbe.timeoutSeconds).toBeGreaterThanOrEqual(5);
+    expect(c.livenessProbe.failureThreshold).toBeGreaterThanOrEqual(6);
+    expect(c.readinessProbe.timeoutSeconds).toBeGreaterThanOrEqual(5);
+  });
+
   it("pins the same image Dependabot tracks (images/bifrost/Dockerfile)", () => {
     const tracked = readFileSync(
       fileURLToPath(new URL("../../../images/bifrost/Dockerfile", import.meta.url)),

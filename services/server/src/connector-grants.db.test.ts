@@ -204,7 +204,8 @@ describe("adding, replacing and removing a key", () => {
     expect(rows.every((r) => r.team_id === teamT)).toBe(true);
     expect(rows[0].target).toMatchObject({ connectorId: apiKeyConnector });
     const all = JSON.stringify((await h.admin.query(`SELECT * FROM audit_log`)).rows);
-    for (const secret of [KEY, KEY2, KEY.slice(-4), KEY2.slice(-4)]) {
+    // The hint is `••••<last4>`; a bare 4-digit suffix would also match random UUIDs/timestamps.
+    for (const secret of [KEY, KEY2, `••••${KEY.slice(-4)}`, `••••${KEY2.slice(-4)}`]) {
       expect(all).not.toContain(secret);
     }
   });

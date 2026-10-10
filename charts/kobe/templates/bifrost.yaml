@@ -75,9 +75,13 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+          # Generous timeouts (KOBE-242): on a loaded node (a CI k3d cluster starting everything at
+          # once) /health can take longer than the 1 s default, and three misses restarted Bifrost,
+          # which then re-ran its store setup and delayed the server's config sync.
           readinessProbe:
             httpGet: { path: /health, port: http }
             periodSeconds: 5
+            timeoutSeconds: 5
           # As for Kobe's services (_helpers.tpl): liveness starts once Bifrost has started.
           startupProbe:
             httpGet: { path: /health, port: http }
@@ -86,6 +90,8 @@ spec:
           livenessProbe:
             httpGet: { path: /health, port: http }
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
           resources:
             {{- toYaml $b.resources | nindent 12 }}
           volumeMounts:

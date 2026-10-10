@@ -3,6 +3,7 @@ import {
   approvalModeSchema,
   type ApprovalMode,
   type PolicyCheckFrame,
+  type PolicyDecision,
   type PolicyEngine,
   type PolicyInput,
   type PolicyReason,
@@ -10,6 +11,7 @@ import {
   type ToolRegistry,
 } from "@kobe/protocol";
 import { eq, getMembership, sql, users, withTeam, type KobeDb } from "@kobe/db";
+import { logger } from "../logger.js";
 import { appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
 import { readApprovalFloor, strictestApprovalMode } from "../policy/approval-floor.js";
 import type {
@@ -101,6 +103,68 @@ export interface PolicyCheckDeps {
   readonly runContext: RunPolicyContextSource;
   /** Run event cap (`WireTuning.runMaxEvents`). */
   readonly runMaxEvents: number;
+  /** Pause before the single retry of a failed evaluation (default 150 ms). */
+  readonly retryDelayMs?: number;
+}
+
+const DEFAULT_RETRY_DELAY_MS = 150;
+
+export type Evaluated =
+  | { readonly reason: PolicyReason }
+  | { readonly input: PolicyInput; readonly decision: PolicyDecision };
+
+/** The engine's own fail-closed deny (an internal error, already reported through `onError`). */
+function isInternalError(decision: PolicyDecision): boolean {
+  const first = decision.reasons[0];
+  return (
+    decision.effect === "deny" &&
+    first?.code === "policy_error" &&
+    first.message.startsWith("Policy could not be evaluated")
+  );
+}
+
+/**
+ * Builds the input and asks the engine. Both are read-only, so a transient failure (a pooled
+ * connection dropped or timed out under load, KOBE-242) is retried once before the call is denied;
+ * a second failure still denies (fail closed) and is logged with its cause.
+ */
+async function evaluateOnce(
+  deps: PolicyCheckDeps,
+  target: SandboxTarget,
+  frame: PolicyCheckFrame,
+): Promise<Evaluated> {
+  const input = await buildInput(deps, target, frame);
+  if ("code" in input) return { reason: input };
+  return { input, decision: await deps.engine.decide(input) };
+}
+
+export async function retryEvaluation(
+  run: () => Promise<Evaluated>,
+  delayMs: number,
+  onError: (err: unknown, attempt: number) => void,
+): Promise<Evaluated> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      const out = await run();
+      if (!("decision" in out) || !isInternalError(out.decision) || attempt > 1) return out;
+    } catch (err) {
+      onError(err, attempt);
+      if (attempt > 1) throw err;
+    }
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+}
+
+function evaluateWithRetry(deps: PolicyCheckDeps, target: SandboxTarget, frame: PolicyCheckFrame) {
+  return retryEvaluation(
+    () => evaluateOnce(deps, target, frame),
+    deps.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS,
+    (err, attempt) =>
+      logger.error(
+        { err, attempt, runId: frame.run_id, tool: frame.tool },
+        "policy.check evaluation failed",
+      ),
+  );
 }
 
 async function accountActive(db: KobeDb, userId: string): Promise<boolean> {
@@ -238,8 +302,9 @@ export async function decidePolicyCheck(
   mayRecordDenied: () => boolean = () => true,
 ): Promise<PolicyResultFrame> {
   try {
-    const input = await buildInput(deps, target, frame);
-    if ("code" in input) {
+    const evaluated = await evaluateWithRetry(deps, target, frame);
+    if ("reason" in evaluated) {
+      const input = evaluated.reason;
       if (input.code === "unknown_tool") {
         await recordDenied(deps, target.teamId, frame, [input], mayRecordDenied);
         return denyFrame(frame, [input], input.message);
@@ -247,7 +312,7 @@ export async function decidePolicyCheck(
       const message = `${input.message} The tool call was denied.`;
       return denyFrame(frame, [{ ...input, message }], message);
     }
-    const decision = await deps.engine.decide(input);
+    const { decision } = evaluated;
     if (decision.effect === "allow") {
       return {
         v: 1,
@@ -296,7 +361,8 @@ export async function decidePolicyCheck(
     }
     await recordDenied(deps, target.teamId, frame, outcome.reasons, mayRecordDenied);
     return denyFrame(frame, outcome.reasons, outcome.message);
-  } catch {
+  } catch (err) {
+    logger.error({ err, runId: frame.run_id, tool: frame.tool }, "policy.check denied on error");
     return denyFrame(
       frame,
       [],
