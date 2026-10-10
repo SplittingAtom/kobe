@@ -96,6 +96,12 @@ export const threads = pgTable(
      * thread lists, search, Trash, sharing and the inventory's "used" counts; its runs still bill.
      */
     isTest: boolean().notNull().default(false),
+    /**
+     * The schedule that created this thread (KOBE-172; the "Scheduled" folder). Null for ordinary
+     * threads. Foreign key (team_id, schedule_id) → schedules ON DELETE SET NULL (schedule_id) is
+     * SQL-only (migration `0087_schedules_rls.sql`): drizzle cannot null one column of a key.
+     */
+    scheduleId: uuid(),
   },
   // Annotated: threads and thread_entries reference each other (leaf and thread foreign keys).
   (t): PgTableExtraConfigValue[] => [
@@ -136,6 +142,9 @@ export const threads = pgTable(
       columns: [t.teamId, t.projectId],
       foreignColumns: [projects.teamId, projects.id],
     }).onDelete("restrict"),
+    index("threads_schedule_idx")
+      .on(t.teamId, t.scheduleId, t.lastActivityAt.desc())
+      .where(sql`${t.scheduleId} IS NOT NULL`),
     // Usage per version (inventory, KOBE-48) and the foreign keys' checks on a team's cascade.
     index("threads_team_agent_idx")
       .on(t.teamId, t.teamAgentId, t.agentVersion)

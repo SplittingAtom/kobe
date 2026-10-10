@@ -603,6 +603,20 @@
       "when": 1791636914001,
       "tag": "0085_budget_reservation_fns",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1791665847436,
+      "tag": "0086_schedules",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1791665852081,
+      "tag": "0087_schedules_rls",
+      "breakpoints": true
     }
   ]
 }

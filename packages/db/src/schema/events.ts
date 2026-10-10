@@ -8,6 +8,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { teams } from "./teams.js";
@@ -42,6 +43,10 @@ export const events = pgTable(
     index("events_scheduled_idx")
       .on(t.teamId, t.dueAt)
       .where(sql`${t.status} = 'scheduled'`),
+    // Each occurrence of a schedule is recorded once (KOBE-172): racing runners hit this index.
+    uniqueIndex("events_schedule_fire_uniq")
+      .on(t.teamId, sql`(${t.ref}->>'schedule_id')`, t.dueAt)
+      .where(sql`${t.kind} = 'schedule.fire'`),
     check("events_due_at", sql`${t.status} <> 'scheduled' OR ${t.dueAt} IS NOT NULL`),
     check("events_kind_format", sql`${t.kind} ~ '^[a-z][a-z_]*(\\.[a-z][a-z_]*)*$'`),
   ],
