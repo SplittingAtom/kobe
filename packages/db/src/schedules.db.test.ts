@@ -65,6 +65,28 @@ describe("schedules", () => {
     ).rejects.toSatisfy((e) => pgCode(e) === "23514");
   });
 
+  it("rejects a fire without a schedule id or due time, so NULLs cannot dodge the index", async () => {
+    const due = new Date("2031-01-01T08:00:00Z");
+    const noId = { ...fire(teamA, randomUUID(), due), ref: {} };
+    const noDue = { ...fire(teamA, randomUUID(), due), status: "pending" as const, dueAt: null };
+    for (const bad of [noId, noDue]) {
+      await expect(
+        withTeam(app.db, teamA, (tx) => tx.insert(events).values(bad)),
+      ).rejects.toSatisfy((e) => pgCode(e) === "23514");
+    }
+  });
+
+  it("treats the schedule id case-insensitively", async () => {
+    const due = new Date("2032-01-01T08:00:00Z");
+    const sid = randomUUID();
+    await withTeam(app.db, teamA, (tx) => tx.insert(events).values(fire(teamA, sid, due)));
+    await expect(
+      withTeam(app.db, teamA, (tx) =>
+        tx.insert(events).values(fire(teamA, sid.toUpperCase(), due)),
+      ),
+    ).rejects.toSatisfy((e) => pgCode(e) === "23505");
+  });
+
   it("rejects a duplicate (schedule_id, due_at) schedule.fire event", async () => {
     const due = new Date("2030-01-01T08:00:00Z");
     const sid = randomUUID();

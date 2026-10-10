@@ -19,7 +19,7 @@ import { teams } from "./teams.js";
 // it cannot be a per-team RLS-visible trigger; the server enforces it (KOBE-173).
 //
 // Fires are recorded as `events` rows of kind `schedule.fire` (`ref.schedule_id`, `due_at`); the
-// partial unique index `events_schedule_fire_uniq` (migration 0086) rejects a second row for the
+// partial unique index `events_schedule_fire_uniq` (SQL-only, migration 0087) rejects a second row for the
 // same occurrence, so racing runners fire each occurrence once. `threads.schedule_id` marks the
 // threads a schedule created (the "Scheduled" folder); its foreign key (ON DELETE SET NULL
 // (schedule_id), which drizzle cannot express) is added in SQL by migration 0087 (schedules_rls).
@@ -65,9 +65,9 @@ export const schedules = pgTable(
     check("schedules_tz", sql`char_length(${t.tz}) BETWEEN 1 AND 64`),
     check("schedules_paused_by", sql`${t.pausedBy} IN ('team_admin', 'deactivation')`),
     check("schedules_paused_inactive", sql`${t.pausedBy} IS NULL OR NOT ${t.active}`),
-    // The runner's due scan (active schedules by next occurrence).
+    // The runner's due scan, team by team under RLS (active schedules by next occurrence).
     index("schedules_due_idx")
-      .on(t.nextDueAt)
+      .on(t.teamId, t.nextDueAt)
       .where(sql`${t.active} AND ${t.nextDueAt} IS NOT NULL`),
     // A user's schedules (list "mine", cap count) and the agent's (suspension, usage).
     index("schedules_user_idx").on(t.teamId, t.userId),
