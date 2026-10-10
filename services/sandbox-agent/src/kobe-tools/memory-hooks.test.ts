@@ -19,26 +19,39 @@ const file = (content: unknown) => () => JSON.stringify(content);
 
 describe("readMemoryRunFile", () => {
   it("fails closed: missing, unreadable or malformed means off", () => {
-    expect(readMemoryRunFile(undefined)).toEqual({ tools: false, text: "" });
+    expect(readMemoryRunFile(undefined)).toEqual({ tools: false, text: "", project: "" });
     expect(
       readMemoryRunFile("/x", () => {
         throw new Error("ENOENT");
       }),
-    ).toEqual({ tools: false, text: "" });
-    expect(readMemoryRunFile("/x", () => "not json")).toEqual({ tools: false, text: "" });
+    ).toEqual({ tools: false, text: "", project: "" });
+    expect(readMemoryRunFile("/x", () => "not json")).toEqual({
+      tools: false,
+      text: "",
+      project: "",
+    });
     expect(readMemoryRunFile("/x", file({ tools: "yes", text: 1 }))).toEqual({
       tools: false,
       text: "",
+      project: "",
     });
   });
   it("gives no text when tools are off", () => {
     expect(readMemoryRunFile("/x", file({ tools: false, text: "secret" }))).toEqual({
       tools: false,
       text: "",
+      project: "",
     });
     expect(readMemoryRunFile("/x", file({ tools: true, text: "idx" }))).toEqual({
       tools: true,
       text: "idx",
+      project: "",
+    });
+    // Project instructions do not depend on memory being on.
+    expect(readMemoryRunFile("/x", file({ tools: false, text: "", project: "P" }))).toEqual({
+      tools: false,
+      text: "",
+      project: "P",
     });
   });
 });
@@ -50,7 +63,7 @@ describe("installMemoryHooks", () => {
     installMemoryHooks(pi.api, "/f", () => JSON.stringify(content));
     pi.fire("input");
     expect(pi.active()).toEqual(["bash", "remember", "recall"]);
-    content = { tools: false, text: "" };
+    content = { tools: false, text: "", project: "" };
     pi.fire("input");
     expect(pi.active()).toEqual(["bash"]);
     content = { tools: true, text: "" };
@@ -67,6 +80,23 @@ describe("installMemoryHooks", () => {
     });
     content = { tools: true, text: "" };
     expect(pi.fire("before_agent_start", { systemPrompt: "base" })).toBeUndefined();
+  });
+
+  it("adds the project block after memory, also with memory off", () => {
+    const pi = fakePi([]);
+    installMemoryHooks(pi.api, "/f", () =>
+      JSON.stringify({ tools: true, text: "MEM", project: "PROJ" }),
+    );
+    expect(pi.fire("before_agent_start", { systemPrompt: "base" })).toEqual({
+      systemPrompt: "base\n\nMEM\n\nPROJ",
+    });
+    const off = fakePi([]);
+    installMemoryHooks(off.api, "/f", () =>
+      JSON.stringify({ tools: false, text: "", project: "PROJ" }),
+    );
+    expect(off.fire("before_agent_start", { systemPrompt: "base" })).toEqual({
+      systemPrompt: "base\n\nPROJ",
+    });
   });
 
   it("strips invisible characters from a remember call before kobe-policy sees it", () => {

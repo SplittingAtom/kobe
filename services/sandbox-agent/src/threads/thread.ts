@@ -17,6 +17,7 @@ import type {
   KobeToolsResponse,
   RunMcpContext,
   RunMemoryContext,
+  RunProjectContext,
 } from "@kobe/protocol";
 import { MEMORY_FILE_ENV, MEMORY_FILE_NAME, MemoryContextFile } from "../memory/context-file.js";
 import { memoryRunFileContent } from "../memory/context.js";
@@ -655,8 +656,11 @@ export class Thread {
    * The run's memory (KOBE-157): the kobe-tools extension lists `remember` / `recall` and adds the
    * fenced index to the run's prompt only while this says so. A per-run file, not a launch input.
    */
-  async attachMemory(memory: RunMemoryContext | undefined): Promise<void> {
-    await this.#memoryFile?.write(memoryRunFileContent(memory));
+  async attachMemory(
+    memory: RunMemoryContext | undefined,
+    project?: RunProjectContext,
+  ): Promise<void> {
+    await this.#memoryFile?.write(memoryRunFileContent(memory, undefined, project));
   }
 
   /** A rotated model-gateway token: the next model request uses it (the current one is not cut). */
