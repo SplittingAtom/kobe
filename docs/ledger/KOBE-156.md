@@ -13,7 +13,7 @@ Server only. `memory/agent.ts` (put, read, `run.start.memory`), `#onMemoryPut` /
 
 - **Gate on the connection** (as `artifact.put`): capability `memory`, run leased and active, and for
   `memory.put` the `remember` call allowed by this connection's policy check with the same canonical input
-  hash (`remember` joins `BOUND_TOOLS`). `memory.read` is a read: capability and lease only. The database
+  hash (`remember` joins `BOUND_TOOLS`). `memory.read` carries the `recall` call's `tool_call_id` (protocol change) and is bound the same way (`recall` in `BOUND_TOOLS`), so a recall policy denied is refused. The database
   re-checks run active/owner, switches and membership in the write transaction.
 - **Personal** writes apply at once: `writeMemory` (actor agent, run and tool call recorded), audit
   `memory.written`, `memory.updated` (doc, path, version, previous_version, tool_call_id, mode). Idempotent on
@@ -32,6 +32,8 @@ Server only. `memory/agent.ts` (put, read, `run.start.memory`), `#onMemoryPut` /
 - **Needed a change in `approvals/decide.ts`:** a decision used to mark every non-MCP approval consumed at once
   (the sandbox enforces it). Project `remember` is now left unconsumed so the memory handler consumes it, as the
   MCP proxy does for MCP tools.
+- **Auto-mode check** uses the effective mode (run mode clamped to the current install floor), like the policy check.
+  Consumes by the handler are audited with `enforcementPoint: "server"`.
 - **Policy fix:** the personal-`remember` exemption looked for `scope: "personal"`; the contract says `user`
   (`policy/settings.ts`, tests). Before this a personal `remember` would have prompted.
 - **Switches:** `scopeEnabled` logic of `readSwitches` (install AND team; project needs memory too). Disabled:

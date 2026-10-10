@@ -28,6 +28,8 @@ let listener: Awaited<ReturnType<typeof sandboxListener>>;
 
 /** When set, the policy check itself asks for approval of project writes. */
 let askProject = false;
+/** When set, the policy denies `recall` (a deny rule, or the agent's tool list). */
+let denyRecall = false;
 
 const engine: PolicyEngine = {
   decide: (input) => {
@@ -35,6 +37,15 @@ const engine: PolicyEngine = {
     const reasons = [
       { code: "team_allow_rule" as const, stage: "user_allow" as const, message: "ok" },
     ];
+    if (denyRecall && input.tool.name === "recall") {
+      return Promise.resolve({
+        effect: "deny" as const,
+        risk: "read" as const,
+        reasons: [
+          { code: "install_deny_rule" as const, stage: "install_deny" as const, message: "no" },
+        ],
+      });
+    }
     if (askProject && input.tool.name === "remember" && scope === "project") {
       return Promise.resolve({
         effect: "require_approval" as const,
@@ -139,7 +150,7 @@ async function join(w: World): Promise<void> {
 type Input = Record<string, unknown>;
 let seq = 0;
 
-async function check(sb: FakeSandbox, w: World, callId: string, input: Input) {
+async function check(sb: FakeSandbox, w: World, callId: string, input: Input, tool = "remember") {
   const request_id = `c${seq++}`;
   sb.send({
     v: 1,
@@ -148,7 +159,7 @@ async function check(sb: FakeSandbox, w: World, callId: string, input: Input) {
     run_id: w.runId,
     thread_id: w.threadId,
     tool_call_id: callId,
-    tool: "remember",
+    tool,
     input,
   });
   return sb.until(() => sb.frames("policy.result").find((r) => r.request_id === request_id), 3000);
@@ -181,7 +192,15 @@ async function put(sb: FakeSandbox, w: World, callId: string, input: Input) {
   return result(sb, sendPut(sb, w, callId, input));
 }
 
-async function read(sb: FakeSandbox, w: World, input: Input) {
+/** `recall`: the policy check first (the server only reads for an allowed call), then `memory.read`. */
+async function read(sb: FakeSandbox, w: World, input: Input, opts: { check?: boolean } = {}) {
+  const callId = `rc${seq++}`;
+  if (opts.check !== false)
+    expect((await check(sb, w, callId, input, "recall")).decision).toBe("allow");
+  return result(sb, sendRead(sb, w, callId, input));
+}
+
+function sendRead(sb: FakeSandbox, w: World, callId: string, input: Input): string {
   const request_id = `r${seq++}`;
   sb.send({
     v: 1,
@@ -189,9 +208,10 @@ async function read(sb: FakeSandbox, w: World, input: Input) {
     request_id,
     run_id: w.runId,
     thread_id: w.threadId,
+    tool_call_id: callId,
     input,
   });
-  return result(sb, request_id);
+  return request_id;
 }
 
 const rows = async <T>(text: string, params: unknown[]) =>
@@ -375,6 +395,35 @@ describe("memory.put / memory.read: personal memory", () => {
   });
 });
 
+describe("recall is bound to the policy check (D-3)", () => {
+  it("a recall that policy denied, never checked or changed is refused", async () => {
+    const w = await world();
+    const sb = await started(w);
+    await put(sb, w, "k1", { scope: "user", path: "a.md", content: "secret" });
+    // Never checked.
+    const ghost = await result(sb, sendRead(sb, w, "ghost", {}));
+    expect(errorCode(ghost)).toBe("not_allowed");
+    // Checked for one input, sent with another.
+    expect((await check(sb, w, "rc-x", { query: "none" }, "recall")).decision).toBe("allow");
+    expect(errorCode(await result(sb, sendRead(sb, w, "rc-x", { query: "secret" })))).toBe(
+      "not_allowed",
+    );
+    // Denied by policy.
+    denyRecall = true;
+    try {
+      expect((await check(sb, w, "rc-d", {}, "recall")).decision).toBe("deny");
+    } finally {
+      denyRecall = false;
+    }
+    const denied = await result(sb, sendRead(sb, w, "rc-d", {}));
+    expect(errorCode(denied)).toBe("not_allowed");
+    expect(JSON.stringify(denied)).not.toContain("secret");
+    expect(await refusals(w.team)).toEqual(
+      expect.arrayContaining(["read:not_allowed", "read:input_mismatch"]),
+    );
+  });
+});
+
 describe("switches", () => {
   it("a disabled scope answers memory_disabled and is left out of run.start.memory", async () => {
     const w = await world();
@@ -505,11 +554,12 @@ describe("project memory", () => {
       version: 1,
       tool_call_id: "p1",
     });
-    const consumed = await rows(
-      `SELECT 1 FROM audit_log WHERE team_id = $1 AND action = 'approval.consumed'`,
+    const consumed = await rows<{ target: { enforcementPoint: string } }>(
+      `SELECT target FROM audit_log WHERE team_id = $1 AND action = 'approval.consumed'`,
       [w.team],
     );
     expect(consumed).toHaveLength(1);
+    expect(consumed[0]?.target.enforcementPoint).toBe("server");
     // A repeat of the applied call answers its version; the approval is not reused.
     expect(await result(sb, sendPut(sb, w, "p1", input))).toMatchObject({
       status: "applied",
@@ -606,6 +656,29 @@ describe("project memory", () => {
       );
     },
   );
+
+  it("uses the effective mode: an install floor above the run's own `auto` still asks", async () => {
+    const w = await world();
+    await inProject(w);
+    await join(w);
+    await fx.admin.query(`UPDATE runs SET approval_mode = 'auto' WHERE team_id = $1 AND id = $2`, [
+      w.team,
+      w.runId,
+    ]);
+    await fx.admin.query(
+      `INSERT INTO install_settings (key, value) VALUES ('policy.approval_floor', 'ask-on-write')
+       ON CONFLICT (key) DO UPDATE SET value = 'ask-on-write'`,
+    );
+    try {
+      const sb = await started(w);
+      await check(sb, w, "f1", input);
+      expect(await result(sb, sendPut(sb, w, "f1", input))).toMatchObject({
+        status: "pending_approval",
+      });
+    } finally {
+      await fx.admin.query(`DELETE FROM install_settings WHERE key = 'policy.approval_floor'`);
+    }
+  });
 
   it("an approval is single use and bound to its input", async () => {
     const w = await world();

@@ -794,12 +794,16 @@ export class SandboxConnection implements RegisteredConnection {
   #onMemoryRead(frame: Extract<SandboxToServerFrame, { type: "memory.read" }>): void {
     const answer = (reply: MemoryReply) =>
       this.send({ v: 1, type: "memory.result", request_id: frame.request_id, ...reply });
-    const audit = (reason: MemoryRefusal | "capability_missing", scope?: "user" | "project") =>
+    const audit = (
+      reason: MemoryRefusal | "capability_missing" | "input_mismatch",
+      scope?: "user" | "project",
+    ) =>
       this.#ctx.auditMemoryRefused(this.target, this.sandboxId, {
         op: "read",
         reason,
         ...(scope ? { scope } : {}),
         runId: frame.run_id,
+        toolCallId: frame.tool_call_id,
       });
     const refuse = (reason: Parameters<typeof audit>[0], message: string) => {
       audit(reason);
@@ -813,6 +817,23 @@ export class SandboxConnection implements RegisteredConnection {
     if (check === "violation") return;
     if (check === "ended") {
       refuse("run_not_active", "The run has ended.");
+      return;
+    }
+    // D-3: the server decides every tool call; a recall that policy did not allow (deny rule, the
+    // agent's tool list, approval mode) is not served, whatever the sandbox sends.
+    const verdict = this.#allowedArtifacts.check(
+      frame.run_id,
+      frame.tool_call_id,
+      "recall",
+      frame.input,
+    );
+    if (verdict !== "ok") {
+      refuse(
+        verdict === "input_mismatch" ? "input_mismatch" : "not_allowed",
+        verdict === "input_mismatch"
+          ? "The recall differs from the call that was allowed."
+          : "This tool call was not allowed for this tool.",
+      );
       return;
     }
     if (this.#memoryOps >= this.#ctx.tuning.maxPendingArtifactPuts) {

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { ARTIFACT_TOOLS, canonicalJson } from "@kobe/protocol";
 
 /**
- * The artifact, `share_file` (KOBE-150) and `remember` (KOBE-156, `memory.put`) tool calls this connection's policy checks allowed (D-3 of KOBE-55). At allow time
+ * The artifact, `share_file` (KOBE-150) `remember` and `recall` (KOBE-156, `memory.put` / `memory.read`) tool calls this connection's policy checks allowed (D-3 of KOBE-55). At allow time
  * the SHA-256 of `canonicalJson(input)` is recorded under (run, tool call); `artifact.put` / `file.share`
  * is accepted only for a call recorded here, for the same tool and the same input hash. The first
  * allowed input of a tool call wins: a later allow of the same id with other input does not
@@ -13,7 +13,7 @@ import { ARTIFACT_TOOLS, canonicalJson } from "@kobe/protocol";
 export type AllowedVerdict = "ok" | "not_allowed" | "input_mismatch";
 
 /** Tools whose wire frame (`artifact.put`, `file.share`) is bound to an allowed policy check. */
-export const BOUND_TOOLS = [...ARTIFACT_TOOLS, "share_file", "remember"] as const;
+export const BOUND_TOOLS = [...ARTIFACT_TOOLS, "share_file", "remember", "recall"] as const;
 export type BoundToolName = (typeof BOUND_TOOLS)[number];
 
 interface Allowed {

@@ -812,7 +812,7 @@ export const AUDIT_EVENTS = {
     runId: id,
     toolCallId,
     tool: toolName,
-    enforcementPoint: z.enum(["mcp_proxy"]),
+    enforcementPoint: z.enum(["mcp_proxy", "server"]),
   }),
   /**
    * A call needing approval was refused before it could be used: at the MCP proxy (missing,

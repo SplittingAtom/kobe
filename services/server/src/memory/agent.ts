@@ -1,5 +1,6 @@
 import {
   APPROVAL_TTL_MS,
+  approvalModeSchema,
   MEMORY_INDEX_FILE,
   MEMORY_INDEX_MAX_LINES,
   MEMORY_RECALL_MAX_FILES,
@@ -27,6 +28,7 @@ import { recordAudit } from "../audit/record.js";
 import { AppendError, appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
 import type { BlobStore } from "../retention/blobs.js";
 import type { ApprovalBroker } from "../sandbox-wire/types.js";
+import { readApprovalFloor, strictestApprovalMode } from "../policy/approval-floor.js";
 import { canAccessProject } from "./access.js";
 import {
   MemoryStorageError,
@@ -342,6 +344,7 @@ async function verified(deps: MemoryAgentDeps, req: PutRequest): Promise<boolean
     toolCallId: req.toolCallId,
     tool: "remember",
     input: req.input,
+    enforcementPoint: "server",
   });
   return check.ok;
 }
@@ -351,13 +354,23 @@ async function noPromptCode(
   deps: MemoryAgentDeps,
   req: PutRequest,
 ): Promise<"scheduled_run_no_prompt" | "mode_auto_not_allowlisted" | undefined> {
-  const res = await withTeam(deps.db, req.teamId, (tx) =>
-    tx.execute<{ trigger: string; approval_mode: string }>(sql`
-      SELECT trigger, approval_mode FROM runs WHERE team_id = ${req.teamId} AND id = ${req.runId}`),
-  );
-  const run = res.rows[0];
-  if (run?.trigger === "schedule") return "scheduled_run_no_prompt";
-  return run?.approval_mode === "auto" ? "mode_auto_not_allowlisted" : undefined;
+  // The effective mode, as the policy check computes it: scheduled runs are `auto`; otherwise the
+  // run's mode clamped to the install floor as it is now (the floor may have risen since).
+  const { trigger, mode, floor } = await withTeam(deps.db, req.teamId, async (tx) => {
+    const res = await tx.execute<{ trigger: string; approval_mode: string }>(sql`
+      SELECT trigger, approval_mode FROM runs WHERE team_id = ${req.teamId} AND id = ${req.runId}`);
+    const run = res.rows[0];
+    return {
+      trigger: run?.trigger,
+      mode: approvalModeSchema.safeParse(run?.approval_mode),
+      floor: await readApprovalFloor(tx),
+    };
+  });
+  if (trigger === "schedule") return "scheduled_run_no_prompt";
+  const requested = mode.success ? mode.data : "ask-on-write";
+  return strictestApprovalMode(requested, floor) === "auto"
+    ? "mode_auto_not_allowlisted"
+    : undefined;
 }
 
 /**
