@@ -139,7 +139,7 @@ describe("notification_emails", () => {
       tx.insert(notifications).values(note(teamA, s)).returning(),
     );
     if (!n) throw new Error("notification");
-    const mail = { teamId: teamA, notificationId: n.id, recipientId: userId };
+    const mail = { teamId: teamA, notificationId: n.id };
     const [e] = await withTeam(app.db, teamA, (tx) =>
       tx.insert(notificationEmails).values(mail).returning(),
     );
@@ -186,9 +186,7 @@ describe("removal with the thread (ac-2)", () => {
     );
     if (!n) throw new Error("notification");
     await withTeam(app.db, teamA, async (tx) => {
-      await tx
-        .insert(notificationEmails)
-        .values({ teamId: teamA, notificationId: n.id, recipientId: userId });
+      await tx.insert(notificationEmails).values({ teamId: teamA, notificationId: n.id });
       await tx.insert(runSkippedActions).values(skip(teamA, s.runId));
     });
     return s;
@@ -236,5 +234,18 @@ describe("removal with the thread (ac-2)", () => {
       withTeam(app.db, teamA, (tx) => tx.delete(threads).where(eq(threads.id, s.threadId))),
     ).rejects.toSatisfy((e) => pgCode(e) === "KH001");
     expect(await counts(s)).toEqual({ notes: 1, skips: 1 });
+  });
+
+  it("a schedule delete keeps the notifications of a held thread, clearing only the link", async () => {
+    const s = await fill();
+    await withTeam(app.db, teamA, (tx) =>
+      tx.delete(schedules).where(eq(schedules.id, s.scheduleId)),
+    );
+    const rows = await withTeam(app.db, teamA, (tx) =>
+      tx.select().from(notifications).where(eq(notifications.runId, s.runId)),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ scheduleId: null, threadId: s.threadId });
+    expect((await counts(s)).skips).toBe(1);
   });
 });

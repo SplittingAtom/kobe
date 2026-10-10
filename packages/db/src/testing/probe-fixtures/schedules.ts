@@ -66,9 +66,7 @@ const scheduledRunFixtures: Record<
       })
       .returning({ id: notifications.id });
     if (!n) throw new Error("probe: notification insert returned nothing");
-    await tx
-      .insert(notificationEmails)
-      .values({ teamId, notificationId: n.id, recipientId: s.userId });
+    await tx.insert(notificationEmails).values({ teamId, notificationId: n.id });
   },
   run_skipped_actions: async (tx, teamId) => {
     const s = await scheduledRun(tx, teamId);

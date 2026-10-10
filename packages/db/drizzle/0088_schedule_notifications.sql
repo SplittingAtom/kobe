@@ -2,7 +2,6 @@ CREATE TABLE "notification_emails" (
 	"team_id" uuid NOT NULL,
 	"id" uuid DEFAULT gen_random_uuid() NOT NULL,
 	"notification_id" uuid NOT NULL,
-	"recipient_id" uuid NOT NULL,
 	"status" text DEFAULT 'pending' NOT NULL,
 	"attempts" integer DEFAULT 0 NOT NULL,
 	"next_attempt_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -22,7 +21,7 @@ CREATE TABLE "notifications" (
 	"id" uuid DEFAULT gen_random_uuid() NOT NULL,
 	"user_id" uuid NOT NULL,
 	"kind" text NOT NULL,
-	"schedule_id" uuid NOT NULL,
+	"schedule_id" uuid,
 	"thread_id" uuid,
 	"run_id" uuid,
 	"skipped_count" integer,
@@ -53,11 +52,9 @@ CREATE TABLE "run_skipped_actions" (
 );
 --> statement-breakpoint
 ALTER TABLE "notification_emails" ADD CONSTRAINT "notification_emails_team_id_teams_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."teams"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "notification_emails" ADD CONSTRAINT "notification_emails_recipient_id_users_id_fk" FOREIGN KEY ("recipient_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "notification_emails" ADD CONSTRAINT "notification_emails_notification_fk" FOREIGN KEY ("team_id","notification_id") REFERENCES "public"."notifications"("team_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "notifications" ADD CONSTRAINT "notifications_team_id_teams_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."teams"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "notifications" ADD CONSTRAINT "notifications_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "notifications" ADD CONSTRAINT "notifications_schedule_fk" FOREIGN KEY ("team_id","schedule_id") REFERENCES "public"."schedules"("team_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "notifications" ADD CONSTRAINT "notifications_thread_fk" FOREIGN KEY ("team_id","thread_id") REFERENCES "public"."threads"("team_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "notifications" ADD CONSTRAINT "notifications_run_fk" FOREIGN KEY ("team_id","run_id") REFERENCES "public"."runs"("team_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "run_skipped_actions" ADD CONSTRAINT "run_skipped_actions_team_id_teams_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."teams"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint

@@ -13,7 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { users } from "./auth.js";
 import { runs } from "./runs.js";
-import { schedules, SCHEDULE_PAUSED_BY } from "./schedules.js";
+import { SCHEDULE_PAUSED_BY } from "./schedules.js";
 import { teams } from "./teams.js";
 import { threads } from "./threads.js";
 
@@ -22,6 +22,8 @@ import { threads } from "./threads.js";
 // belong to a thread or run are removed with it by foreign-key cascade: a retention or Trash
 // purge deletes the thread, and the legal-hold triggers on `threads` / `runs` (0033) refuse that
 // delete while a hold covers it, so a hold also keeps these rows. No separate guard is needed.
+// A schedule delete keeps the notifications (a held thread's run notifications must survive it):
+// the foreign key to `schedules` is ON DELETE SET NULL (schedule_id), SQL-only, in 0089.
 // New outbox: the existing ones (`budget_alert_emails`, `egress_request_notifications`) are tied
 // to their own parents and recipients, so this one follows their shape for notifications.
 
@@ -52,7 +54,8 @@ export const notifications = pgTable(
       .notNull()
       .references(() => users.id),
     kind: text().$type<NotificationKind>().notNull(),
-    scheduleId: uuid().notNull(),
+    /** Null once the schedule is deleted (the foreign key, SQL-only in 0089, sets it null). */
+    scheduleId: uuid(),
     /** Null only for `schedule.paused`. */
     threadId: uuid(),
     runId: uuid(),
@@ -63,11 +66,6 @@ export const notifications = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.id] }),
-    foreignKey({
-      name: "notifications_schedule_fk",
-      columns: [t.teamId, t.scheduleId],
-      foreignColumns: [schedules.teamId, schedules.id],
-    }).onDelete("cascade"),
     foreignKey({
       name: "notifications_thread_fk",
       columns: [t.teamId, t.threadId],
@@ -106,7 +104,7 @@ export const notifications = pgTable(
 
 /**
  * Email outbox for notifications (`schedules.notify_email`): written with the notification,
- * delivered at least once with retry, backoff and a lease so replicas do not double-send. Holds
+ * delivered at least once, to the notification's `user_id`, with retry, backoff and a lease so replicas do not double-send. Holds
  * ids only; the message is rendered at delivery.
  */
 export const notificationEmails = pgTable(
@@ -117,9 +115,6 @@ export const notificationEmails = pgTable(
       .references(() => teams.id, { onDelete: "cascade" }),
     id: uuid().notNull().defaultRandom(),
     notificationId: uuid().notNull(),
-    recipientId: uuid()
-      .notNull()
-      .references(() => users.id),
     status: text().$type<NotificationEmailStatus>().notNull().default("pending"),
     attempts: integer().notNull().default(0),
     nextAttemptAt: timestamp({ withTimezone: true }).notNull().defaultNow(),

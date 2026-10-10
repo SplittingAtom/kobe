@@ -16,3 +16,10 @@ ALTER TABLE "run_skipped_actions" FORCE ROW LEVEL SECURITY;--> statement-breakpo
 CREATE POLICY "team_isolation" ON "run_skipped_actions"
   USING ("team_id" = NULLIF(current_setting('kobe.team_id', true), '')::uuid)
   WITH CHECK ("team_id" = NULLIF(current_setting('kobe.team_id', true), '')::uuid);
+--> statement-breakpoint
+-- Deleting a schedule keeps its notifications and only clears the link, so a held thread's run
+-- notifications survive it (a cascade would bypass the legal-hold guards). The column list limits
+-- SET NULL to schedule_id: team_id is NOT NULL (PostgreSQL 15+); drizzle cannot express it.
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_schedule_fk"
+  FOREIGN KEY ("team_id", "schedule_id") REFERENCES "schedules" ("team_id", "id")
+  ON DELETE SET NULL ("schedule_id");
