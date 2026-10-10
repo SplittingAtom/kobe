@@ -67,6 +67,7 @@ async function resolved(teamId: string, userId: string, skills: string[]) {
       floor: "auto",
       team,
       skills: facts,
+      connectedConnectors: [],
     });
   });
   const out = resolveEffective(input);

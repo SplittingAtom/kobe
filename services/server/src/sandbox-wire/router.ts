@@ -91,6 +91,7 @@ export class CommandRouter implements SandboxRouter {
       ...(run.parentEntryId === undefined ? {} : { parent_entry_id: run.parentEntryId }),
       ...(run.config === undefined ? {} : { config: run.config }),
       ...(run.project === undefined ? {} : { project: run.project }),
+      ...(run.mcp === undefined ? {} : { mcp: run.mcp }),
     });
   }
 

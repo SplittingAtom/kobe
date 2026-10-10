@@ -55,7 +55,11 @@ async function kindOf(file: string): Promise<Kind> {
  * directories; `agent` itself must be a real directory. An expected entry that vanished between
  * `readdir` and `lstat` (the agent's temp file renamed into place, a lock Pi released) is fine.
  */
-export async function unexpectedEntries(runtimeDir: string): Promise<string[]> {
+export async function unexpectedEntries(
+  runtimeDir: string,
+  /** Extra regular files the agent placed in `agent/` for this process (KOBE-111: `mcp.json`). */
+  extraAgentFiles: ReadonlySet<string> = new Set(),
+): Promise<string[]> {
   const found: string[] = [];
   const top = await readdir(runtimeDir).catch(() => undefined);
   if (top === undefined) return ["<runtime dir missing>"];
@@ -82,7 +86,7 @@ export async function unexpectedEntries(runtimeDir: string): Promise<string[]> {
     // The guarded files must be there as files; their content is `tamperedConfig`'s business.
     const expected: Kind | undefined = PI_LOCK_DIRS.has(name)
       ? "dir"
-      : PI_OWN_FILES.has(name) || name in GUARDED_CONFIG
+      : PI_OWN_FILES.has(name) || name in GUARDED_CONFIG || extraAgentFiles.has(name)
         ? "file"
         : undefined;
     if (expected === undefined) found.push(`${AGENT_SUBDIR}/${name}`);

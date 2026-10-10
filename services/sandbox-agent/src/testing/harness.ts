@@ -8,6 +8,7 @@ import { loadConfig } from "../config.js";
 import { FakeServer, type FakeServerOptions } from "./fake-server.js";
 import type { EgressWiring } from "../egress/egress-wiring.js";
 import type { ModelWiring } from "../models/types.js";
+import type { McpWiring } from "../mcp/pi-mcp-config.js";
 import type { PiIdentities } from "../pi/identities.js";
 import type { SkillStore } from "../skills/store.js";
 import type { ExecWiring } from "../threads/exec-wiring.js";
@@ -48,6 +49,8 @@ export interface HarnessOptions {
   readonly models?: ModelWiring;
   /** Egress wiring for Pi's tools (KOBE-39); absent = none, as before. */
   readonly egress?: EgressWiring;
+  /** mcp-proxy wiring (KOBE-111); absent = no `mcp` capability. */
+  readonly mcp?: McpWiring;
   readonly workspace?: (workspaceDir: string) => WorkspaceHooks;
   /**
    * Pi identities (KOBE-71): Pi runs under them, so the test directories are opened up the way
@@ -115,6 +118,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     ...(options.extensions === undefined ? {} : { extensions: options.extensions }),
     ...(options.models === undefined ? {} : { models: options.models }),
     ...(options.egress === undefined ? {} : { egress: options.egress }),
+    ...(options.mcp === undefined ? {} : { mcp: options.mcp }),
     ...(options.identities === undefined ? {} : { identities: options.identities }),
     ...(options.toolsExtension === undefined ? {} : { toolsExtension: options.toolsExtension }),
     ...(options.skills === undefined ? {} : { skills: options.skills }),

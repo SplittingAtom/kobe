@@ -5,6 +5,7 @@ import {
   type ErrorInfo,
   type PiThreadConfig,
   type RunProjectContext,
+  type RunMcpContext,
   type SandboxAttachment,
 } from "@kobe/protocol";
 import { projectRunContext } from "../projects/run-context.js";
@@ -50,6 +51,8 @@ export interface StartPlan {
     readonly draftRevision?: number;
   } | null;
   readonly config?: Omit<PiThreadConfig, "agent" | "approval_mode">;
+  /** Effective MCP connectors for Pi's per-session config (KOBE-111); dropped for older agents. */
+  readonly mcp?: RunMcpContext;
   /** Project instructions context (KOBE-161), for a thread in a project its owner belongs to. */
   readonly project?: RunProjectContext;
   /** The message's uploads, already synced into the workspace (KOBE-144). */
@@ -290,6 +293,7 @@ function planOf(
     approvalMode: resolved.approvalMode,
     agent: resolved.agent,
     omissions: resolved.omissions ?? [],
+    ...(resolved.mcp === undefined ? {} : { mcp: resolved.mcp }),
     ...(Object.keys(config).length > 0 ? { config } : {}),
   };
 }

@@ -3,7 +3,7 @@ import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { Logger } from "pino";
 import { canonicalJson, toolInputSchema, uuidSchema } from "@kobe/protocol";
-import { bearerToken, verifySandboxToken } from "./auth.js";
+import { bearerToken, isExpiredSandboxToken, verifySandboxToken } from "./auth.js";
 import type { Limits } from "./config.js";
 import type { CredentialResolver } from "./credentials.js";
 import { JSONRPC_ERRORS, parseMessage, rpcError, rpcResult, type JsonRpcId } from "./jsonrpc.js";
@@ -14,7 +14,8 @@ import type { UpstreamClient, UpstreamFailure } from "./upstream.js";
 
 /**
  * The sandbox-facing MCP endpoint (D27): `POST /v1/mcp/{connector_id}`, MCP Streamable HTTP,
- * stateless (no `Mcp-Session-Id`: every request carries the sandbox's session token), JSON answers
+ * stateless (the `Mcp-Session-Id` it hands out is a constant; every request carries the sandbox's
+ * session token), JSON answers
  * only. Pi's MCP client talks only to this endpoint; the proxy talks to the remote server.
  *
  * - `initialize`, `ping`, `tools/list` (the connector's **pinned** tools the team exposes, from the
@@ -97,10 +98,21 @@ export function mcpRoutes(deps: McpRouteDeps): Hono {
   return app;
 }
 
+const SESSION_HEADER = "mcp-session-id";
+const SESSION_ID = "kobe-stateless";
+
 async function handlePost(deps: McpRouteDeps, c: Context): Promise<Response> {
   c.header("Cache-Control", "no-store");
   const token = bearerToken(c.req.header("authorization"));
   const claims = verifySandboxToken(token, deps.sessionKey);
+  if (
+    token &&
+    !claims &&
+    c.req.header(SESSION_HEADER) &&
+    isExpiredSandboxToken(token, deps.sessionKey)
+  ) {
+    return c.json(rpcError(null, JSONRPC_ERRORS.invalidRequest, "Session expired."), 404);
+  }
   if (!token || !claims) {
     c.header("WWW-Authenticate", 'Bearer realm="kobe-mcp-proxy"');
     return c.json(rpcError(null, JSONRPC_ERRORS.invalidRequest, "Unauthorized."), 401);
@@ -143,6 +155,8 @@ async function handlePost(deps: McpRouteDeps, c: Context): Promise<Response> {
   };
   switch (message.method) {
     case "initialize":
+      // Stateless, but a session id lets Pi's client recover from an expired token (see auth.ts).
+      c.header(SESSION_HEADER, SESSION_ID);
       return c.json(...(await initialize(ctx, message.id, message.params)));
     case "ping":
       return c.json(rpcResult(message.id, {}));

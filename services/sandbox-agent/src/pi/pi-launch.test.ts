@@ -229,3 +229,36 @@ describe("buildPiLaunch", () => {
     expect(some.key).not.toBe(none.key);
   });
 });
+
+describe("buildPiLaunch per-session MCP (KOBE-111)", () => {
+  const extensionsOf = (args: readonly string[]) =>
+    args.flatMap((a, i) => (a === "--extension" ? [args[i + 1]] : []));
+  const mcp = {
+    servers: [
+      {
+        name: "jira",
+        connector_id: "11111111-1111-4111-8111-111111111111",
+        tools: [{ name: "get", pi_name: "mcp__jira__get" }],
+      },
+    ],
+  };
+
+  it("loads builtin:mcp first (before kobe-policy) only when connectors are effective", () => {
+    const withMcp = buildPiLaunch({ ...base, parentEnv, modelsExtension: MODELS, mcp });
+    expect(extensionsOf(withMcp.args)).toEqual(["builtin:mcp", MODELS, POLICY]);
+    expect(withMcp.mcp).toEqual(mcp);
+    for (const none of [undefined, { servers: [] }]) {
+      const launch = buildPiLaunch({ ...base, parentEnv, ...(none ? { mcp: none } : {}) });
+      expect(extensionsOf(launch.args)).toEqual([POLICY]);
+      expect(launch.mcp).toBeUndefined();
+    }
+  });
+
+  it("a changed connector set changes the key, so an idle Pi restarts with the new config", () => {
+    const a = buildPiLaunch({ ...base, parentEnv, mcp });
+    const b = buildPiLaunch({ ...base, parentEnv, mcp: { servers: [] } });
+    const c = buildPiLaunch({ ...base, parentEnv, mcp });
+    expect(a.key).not.toBe(b.key);
+    expect(a.key).toBe(c.key);
+  });
+});

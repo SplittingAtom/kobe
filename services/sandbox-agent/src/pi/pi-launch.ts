@@ -1,5 +1,5 @@
 import path from "node:path";
-import { KOBE_TOOLS_FD, type PiThreadConfig } from "@kobe/protocol";
+import { KOBE_TOOLS_FD, type PiThreadConfig, type RunMcpContext } from "@kobe/protocol";
 import { EXEC_FD, EXEC_FD_ENV } from "../kobe-exec/protocol.js";
 
 /**
@@ -61,6 +61,11 @@ export interface PiLaunch {
    * by the argument size limit.
    */
   readonly systemPrompt?: string;
+  /**
+   * The run's effective MCP connectors (KOBE-111), only when there are some: the thread writes
+   * Pi's `mcp.json` from it (mcp/pi-mcp-config.ts) and Pi loads `builtin:mcp`.
+   */
+  readonly mcp?: RunMcpContext;
 }
 
 export interface PiLaunchInput {
@@ -105,6 +110,8 @@ export interface PiLaunchInput {
    * materialized by the skills store. Exactly these, in this order.
    */
   readonly skillDirs?: readonly string[];
+  /** `run.start.mcp` (KOBE-111): when it lists servers Pi gets `builtin:mcp` and a per-session `mcp.json`. */
+  readonly mcp?: RunMcpContext | undefined;
   readonly parentEnv: Readonly<Record<string, string | undefined>>;
   readonly config?: PiThreadConfig | undefined;
 }
@@ -116,9 +123,12 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
     input.modelsExtension === undefined ? undefined : path.resolve(input.modelsExtension);
   const tools = input.toolsExtension === undefined ? undefined : path.resolve(input.toolsExtension);
   const exec = input.execExtension === undefined ? undefined : path.resolve(input.execExtension);
+  const mcp = input.mcp !== undefined && input.mcp.servers.length > 0 ? input.mcp : undefined;
+  if (mcp !== undefined) args.push("--extension", "builtin:mcp");
   for (const extension of input.extensions ?? []) {
     // kobe-policy only once, last: a second copy would find the channel taken and block everything.
     const resolved = extension.startsWith("builtin:") ? undefined : path.resolve(extension);
+    if (extension === "builtin:mcp" && mcp !== undefined) continue;
     if (
       resolved !== undefined &&
       (resolved === policy || resolved === models || resolved === tools || resolved === exec)
@@ -168,6 +178,7 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
     skill_bundles: config?.skill_bundles ?? null,
     builtin_skills: config?.builtin_skills ?? null,
     mcp_servers: config?.mcp_servers ?? null,
+    mcp: mcp ?? null,
   });
   const systemPrompt = config?.system_prompt;
   return {
@@ -176,6 +187,7 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
     key,
     toolsChannel: input.toolsExtension !== undefined,
     execChannel: input.execExtension !== undefined,
+    ...(mcp === undefined ? {} : { mcp }),
     ...(systemPrompt === undefined || systemPrompt === "" ? {} : { systemPrompt }),
   };
 }
