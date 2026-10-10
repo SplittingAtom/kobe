@@ -3,6 +3,7 @@ import {
   SYSTEM_PROMPT_MAX_BYTES,
   type MemoryIndex,
   type MemoryScope,
+  type RunProjectContext,
   type RunMemoryContext,
 } from "@kobe/protocol";
 import {
@@ -13,6 +14,7 @@ import {
   untrustedMemoryBlock,
 } from "../kobe-tools/memory-fence.js";
 import type { MemoryFileContent } from "./context-file.js";
+import { projectContextText } from "./project-context.js";
 
 /**
  * The memory index in the model's context (KOBE-157, memory.ts `run.start.memory`). Indexes are
@@ -73,9 +75,14 @@ export function memoryContextText(
 export function memoryRunFileContent(
   memory: RunMemoryContext | undefined,
   nonce?: string,
+  project?: RunProjectContext,
 ): MemoryFileContent {
   const tools = memory !== undefined && memory.scopes.length > 0;
-  return { tools, text: tools ? (memoryContextText(memory, nonce) ?? "") : "" };
+  return {
+    tools,
+    text: tools ? (memoryContextText(memory, nonce) ?? "") : "",
+    project: projectContextText(project) ?? "",
+  };
 }
 
 export { beginMarker };

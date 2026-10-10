@@ -3,7 +3,7 @@ import { sanitizeRememberInput } from "./memory-tools.js";
 import { TOOL_RECALL, TOOL_REMEMBER } from "./protocol.js";
 
 /**
- * Per-run memory wiring of the kobe-tools extension (KOBE-157, review of #205). The agent writes the
+ * Per-run memory and project wiring of the kobe-tools extension (KOBE-157, review of #205). The agent writes the
  * run's memory file (`KOBE_MEMORY_FILE`, memory/context-file.ts) before every prompt, so a change
  * to memory never restarts Pi:
  *  - `tools`: whether memory is on for this run; `remember` / `recall` are active only then;
@@ -14,8 +14,10 @@ import { TOOL_RECALL, TOOL_REMEMBER } from "./protocol.js";
 export interface MemoryRunFile {
   readonly tools: boolean;
   readonly text: string;
+  /** The project-instructions block (KOBE-245); independent of whether memory is on. */
+  readonly project: string;
 }
-const OFF: MemoryRunFile = { tools: false, text: "" };
+const OFF: MemoryRunFile = { tools: false, text: "", project: "" };
 
 export function readMemoryRunFile(
   file: string | undefined,
@@ -25,9 +27,11 @@ export function readMemoryRunFile(
   try {
     const value: unknown = JSON.parse(read(file));
     if (typeof value !== "object" || value === null) return OFF;
-    const { tools, text } = value as Record<string, unknown>;
+    const { tools, text, project } = value as Record<string, unknown>;
     if (typeof tools !== "boolean" || typeof text !== "string") return OFF;
-    return { tools, text: tools ? text : "" };
+    // `project` is absent in files from an older agent: no project block.
+    if (project !== undefined && typeof project !== "string") return OFF;
+    return { tools, text: tools ? text : "", project: project ?? "" };
   } catch {
     return OFF;
   }
@@ -61,7 +65,10 @@ export function installMemoryHooks(
   };
   pi.on("input", syncTools as never);
   pi.on("before_agent_start", ((event: { systemPrompt: string }) => {
-    const { text } = state();
-    return text === "" ? undefined : { systemPrompt: `${event.systemPrompt}\n\n${text}` };
+    const { text, project } = state();
+    const parts = [text, project].filter((part) => part !== "");
+    return parts.length === 0
+      ? undefined
+      : { systemPrompt: `${event.systemPrompt}\n\n${parts.join("\n\n")}` };
   }) as never);
 }
