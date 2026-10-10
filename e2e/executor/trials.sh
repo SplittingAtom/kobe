@@ -20,17 +20,29 @@ percentile() { # p (0-100) values... → nearest-rank percentile
 }
 field_of() { printf '%s\n' "$2" | sed -n "s/^$1=//p" | head -1; } # key, chat_run output → value
 
+# A slow wake leaves its evidence here: the server logs run for hours and are rolled by later chart
+# upgrades, so the job's final diagnostics no longer hold the window (KOBE-168: one 34 s trial).
+slow_trial_diagnostics() { # since (RFC3339)
+  echo "     SLOW wake since $1: server wake/sandbox log lines, claim and pod events"
+  $KUBECTL -n "$NS" logs deploy/kobe-server -c server --since-time="$1" 2>&1 \
+    | grep -iE 'wake|woken|sandbox|lease|pod' | cut -c1-300 | tail -40 || true
+  $KUBECTL -n "$TEAM_NS" get events --sort-by=.lastTimestamp 2>&1 | tail -25 | cut -c1-260 || true
+  $KUBECTL -n "$TEAM_NS" logs -l "agents.x-k8s.io/claim-uid=$(owner_claim_uid)" -c agent --tail=40 2>&1 | cut -c1-300 || true
+}
+
 # Hibernated → first token (a hello through the real wake path), then the first tool call of the
 # woken sandbox (a new thread: its Pi and, with the flag on, its executor start cold).
 executor_first_token_trials() {
-  local n="${KOBE_E2E_FT_TRIALS:-8}" i out ft tool_ms hib
+  local n="${KOBE_E2E_FT_TRIALS:-8}" i out ft tool_ms hib trial_start
   local -a fts=() tools=()
   echo "==> cold start: hibernated → first token, executor ${EXEC_LABEL} (KOBE-168)"
   for ((i = 1; i <= n; i++)); do
     hib=$(owner_lifecycle hibernate)
     until_ok 120 owner_pod_gone || true
+    trial_start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     out=$(chat_run "hello-ft-$RANDOM" 300000)
     ft=$(field_of first_token_ms "$out")
+    [[ "$ft" =~ ^[0-9]+$ ]] && ((ft > 10000)) && slow_trial_diagnostics "$trial_start"
     out=$(chat_run "bash: true" 300000)
     tool_ms=$(field_of terminal_ms "$out")
     echo "     trial $i: hibernate=${hib:+ok} first_token_ms=${ft:-none} tool_run_ms=${tool_ms:-none}"

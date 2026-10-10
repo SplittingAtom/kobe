@@ -80,3 +80,10 @@ file (written with `printf`, no trailing newline) directly followed by `writable
 Second executor run (38023321565): `chat (thread model)` failed `model_not_enabled` 2 s after the team enabled
 qwen; `suite` on the same commit passed, so it is a propagation race (gateway/Bifrost learn of an enable
 within seconds), not a main regression. `e2e/run.sh` now waits for qwen to answer before that run.
+
+Third executor run (38024905989): trial 5 of the cold-start trials took 34426 ms (the other seven ~4.3 s),
+so the p95 gate (nearest rank, n=8, i.e. the maximum) failed. The 30 s extra matches a 30 s constant in the
+wake path (`POD_WAIT_TIMEOUT_MS` then the wake retry in `sandbox-wire/router.ts`, or the 30 s run stall
+sweep), but the job's diagnostics hold no server/agent logs for that window (the chart upgrades later in
+the suite rolled the server pods), so the cause is NOT proven. The trial now dumps server, event and agent
+logs for any first token above 10 s (`slow_trial_diagnostics`); the gate is unchanged.
