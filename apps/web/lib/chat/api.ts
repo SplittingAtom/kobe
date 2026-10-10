@@ -3,7 +3,7 @@
  * sends `X-Kobe-Team`, reads included, so a tab left on another team gets `team_mismatch` instead of
  * acting on the wrong team. Request bodies use the routes' snake_case (spec §6.1).
  */
-import { apiRequest, apiTextFile, type ApiResult, type TextFile } from "../api/client";
+import { apiDownload, apiRequest, apiTextFile, type ApiResult, type TextFile } from "../api/client";
 import type { ArtifactDetailView, ArtifactSummaryView } from "./artifacts";
 import type { BudgetStatus } from "../admin/api/budgets";
 import type { RunUsage } from "../admin/api/usage";
@@ -121,6 +121,8 @@ export interface ChatApi {
   getArtifact(artifactId: string): Promise<ApiResult<ArtifactDetailView>>;
   /** The bytes of one version as text, for the panel's renderers. */
   artifactContent(artifactId: string, version: number): Promise<ApiResult<TextFile>>;
+  /** The bytes of a file the agent shared (`GET /v1/files/:id/content`, KOBE-150). */
+  downloadSharedFile(fileId: string): Promise<ApiResult<Uint8Array>>;
   /** Your own requests for one domain, newest first. */
   egressRequests(
     domain: string,
@@ -208,6 +210,7 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     getArtifact: (id) => get(`/v1/artifacts/${enc(id)}`),
     artifactContent: (id, version) =>
       apiTextFile(`/v1/artifacts/${enc(id)}/versions/${version}/content`, { teamId, fetchFn }),
+    downloadSharedFile: (id) => apiDownload(`/v1/files/${enc(id)}/content`, { teamId, fetchFn }),
     egressRequests: (domain) => get(`/v1/egress/requests${query({ domain })}`),
     decideApproval: (id, body) =>
       send("POST", `/v1/approvals/${enc(id)}`, {

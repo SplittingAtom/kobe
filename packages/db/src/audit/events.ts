@@ -465,6 +465,8 @@ export const AUDIT_EVENTS = {
     model: providerModel.optional(),
     /** Its prices were set or changed (KOBE-43; the amounts are in the catalog). */
     pricesChanged: z.boolean().optional(),
+    /** Its input modalities (image input, KOBE-191) changed. */
+    imageSupportChanged: z.boolean().optional(),
   }),
   /** A team admin enabled or disabled a catalog alias for the team, or changed its default. */
   "models.team.changed": event("team", {

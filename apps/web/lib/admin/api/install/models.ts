@@ -35,6 +35,8 @@ export interface CatalogModel {
   readonly providerId: string;
   readonly model: string;
   readonly label: string | null;
+  /** What the model accepts as input: always `text`, plus `image` when it can see images. */
+  readonly inputModalities: readonly string[];
   /** `<gateway provider>/<model>`: what sandboxes send to the model gateway. */
   readonly gatewayModel: string;
   readonly createdAt: string;
@@ -82,6 +84,8 @@ export interface CatalogEntryInput {
   readonly providerId: string;
   readonly model: string;
   readonly label?: string | null | undefined;
+  /** Sent as `["text", "image"]` or `["text"]`; absent: unchanged (update) or text only (add). */
+  readonly inputModalities?: readonly string[] | undefined;
 }
 
 export type ModelDiscovery = "ok" | "failed" | "unknown";
@@ -90,6 +94,8 @@ export type ModelDiscovery = "ok" | "failed" | "unknown";
 export interface ProviderModels {
   readonly providerId: string;
   readonly models: readonly string[];
+  /** The models of `models` the provider reports as accepting images (KOBE-191). */
+  readonly imageModels: readonly string[];
   readonly discovery: ModelDiscovery;
   /** The provider's failure reason (scrubbed by the server); null when none. */
   readonly detail: string | null;
@@ -148,6 +154,7 @@ export async function addCatalogModel(input: CatalogEntryInput): Promise<ApiResu
       provider_id: input.providerId,
       model: input.model,
       label: input.label ?? undefined,
+      input_modalities: input.inputModalities,
     }),
   });
   return res.ok ? { ...res, data: res.data.model } : res;
@@ -159,7 +166,12 @@ export async function updateCatalogModel(
 ): Promise<ApiResult<CatalogModel>> {
   const res = await apiRequest<{ model: CatalogModel }>(`${BASE}/catalog/${enc(alias)}`, {
     method: "PATCH",
-    json: defined({ provider_id: change.providerId, model: change.model, label: change.label }),
+    json: defined({
+      provider_id: change.providerId,
+      model: change.model,
+      label: change.label,
+      input_modalities: change.inputModalities,
+    }),
   });
   return res.ok ? { ...res, data: res.data.model } : res;
 }

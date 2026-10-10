@@ -32,6 +32,28 @@ describe("Bifrost admin model listing", () => {
     expect(seen[0]?.auth).toMatch(/^Bearer /);
   });
 
+  it("reads the input modalities a model reports, top level or under architecture", async () => {
+    const { admin } = stub({
+      "GET /api/models?provider=p&limit=1000": [
+        200,
+        {
+          models: [
+            { name: "a", input_modalities: ["text", "IMAGE"] },
+            { name: "b", architecture: { input_modalities: ["text"] } },
+            { name: "c" },
+            { name: "d", input_modalities: "image" },
+          ],
+        },
+      ],
+    });
+    expect(await admin.listModelInfo("p")).toEqual([
+      { name: "a", inputModalities: ["text", "image"] },
+      { name: "b", inputModalities: ["text"] },
+      { name: "c", inputModalities: [] },
+      { name: "d", inputModalities: [] },
+    ]);
+  });
+
   it("refreshes through the provider's refresh-models route; errors carry the status only", async () => {
     const { admin, seen } = stub({
       "POST /api/providers/ollama/refresh-models": [200, { keys: [], total: 0 }],

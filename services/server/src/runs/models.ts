@@ -92,3 +92,16 @@ export async function resolveRunModel(
         : { alias: chosen.alias, gateway_model: chosen.gatewayModel, api: chosen.api },
   };
 }
+
+/**
+ * Whether the catalog says a model accepts image input (KOBE-191). The catalog is install-wide,
+ * so no team context is needed; an alias that is not in it (or none) accepts text only.
+ */
+export async function modelAcceptsImages(tx: KobeTx, alias: string | undefined): Promise<boolean> {
+  if (alias === undefined) return false;
+  const [row] = await tx
+    .select({ modalities: modelCatalog.inputModalities })
+    .from(modelCatalog)
+    .where(eq(modelCatalog.alias, alias));
+  return row?.modalities.includes("image") ?? false;
+}
