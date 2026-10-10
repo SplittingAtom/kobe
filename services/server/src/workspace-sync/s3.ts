@@ -3,6 +3,7 @@ import {
   CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
+  ListObjectsV2Command,
   NoSuchKey,
   PutObjectCommand,
   S3Client,
@@ -164,6 +165,26 @@ export function createS3ObjectStore(settings: S3Settings, client?: S3Client): Ob
           CopySource: `${Bucket}/${from.split("/").map(encodeURIComponent).join("/")}`,
         }),
       );
+    },
+    async list(prefix, options = {}) {
+      const out = await s3.send(
+        new ListObjectsV2Command({
+          Bucket,
+          Prefix: prefix,
+          MaxKeys: options.limit ?? 1000,
+          ...(options.cursor ? { ContinuationToken: options.cursor } : {}),
+          ...(options.delimiter ? { Delimiter: options.delimiter } : {}),
+        }),
+      );
+      return {
+        objects: (out.Contents ?? []).flatMap((o) =>
+          o.Key === undefined ? [] : [{ key: o.Key, lastModified: o.LastModified ?? new Date() }],
+        ),
+        prefixes: (out.CommonPrefixes ?? []).flatMap((p) => (p.Prefix === undefined ? [] : [p.Prefix])),
+        ...(out.IsTruncated && out.NextContinuationToken
+          ? { next: out.NextContinuationToken }
+          : {}),
+      };
     },
     async delete(keys) {
       // One by one: DeleteObjects requires a body checksum some S3-compatible stores reject.
