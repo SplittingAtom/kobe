@@ -1,9 +1,12 @@
 import type { Duplex } from "node:stream";
 import { LineReader } from "./lines.js";
+import { parseMemoryReply } from "./memory-reply.js";
 import {
   MAX_PENDING_REQUESTS,
   MAX_REPLY_LINE_BYTES,
   TOOLS_TIMEOUT_MS,
+  type MemoryPutAnswer,
+  type MemoryReadAnswer,
   type SharedFileFields,
   type ToolsError,
   type ToolsRequest,
@@ -15,6 +18,8 @@ import {
 export type ToolsOutcome =
   | WebSearchAnswer
   | WebSearchUnavailable
+  | MemoryPutAnswer
+  | MemoryReadAnswer
   | { readonly ok: true; readonly artifact_id: string; readonly version: number }
   | ({ readonly ok: true } & SharedFileFields)
   | { readonly ok: false; readonly error: ToolsError };
@@ -120,6 +125,7 @@ function parseResponse(line: string): ToolsResponse | undefined {
   }
   if (!isRecord(value) || typeof value.id !== "string") return undefined;
   if (value.ok === true && "file_id" in value) return parseFileReply(value);
+  if (value.ok === true && "op" in value) return parseMemoryReply(value);
   if (value.ok === true && "available" in value) return parseWebSearchReply(value);
   if (value.ok === true) {
     if (typeof value.artifact_id !== "string" || !Number.isSafeInteger(value.version))

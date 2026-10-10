@@ -1,3 +1,4 @@
+import type { RunMemoryContext } from "@kobe/protocol";
 import { describe, expect, it } from "vitest";
 import {
   PI_LOCKDOWN_ARGS,
@@ -260,5 +261,37 @@ describe("buildPiLaunch per-session MCP (KOBE-111)", () => {
     const c = buildPiLaunch({ ...base, parentEnv, mcp });
     expect(a.key).not.toBe(b.key);
     expect(a.key).toBe(c.key);
+  });
+});
+
+describe("buildPiLaunch memory (KOBE-157)", () => {
+  const memory: RunMemoryContext = {
+    scopes: ["user"],
+    indexes: [{ scope: "user", content: "- [tea](tea.md)", version: 1, truncated: false }],
+  };
+
+  it("appends the memory index to the system prompt and changes the launch key", () => {
+    const config = { system_prompt: "be brief" };
+    const plain = buildPiLaunch({ ...base, parentEnv, config });
+    const withMemory = buildPiLaunch({ ...base, parentEnv, config, memory });
+    expect(plain.systemPrompt).toBe("be brief");
+    expect(withMemory.systemPrompt).toMatch(/^be brief\n\n## Saved memory/);
+    expect(withMemory.systemPrompt).toContain("tea.md");
+    expect(withMemory.key).not.toBe(plain.key);
+    expect(buildPiLaunch({ ...base, parentEnv, memory }).systemPrompt).toContain("## Saved memory");
+  });
+
+  it("adds nothing when memory is off", () => {
+    const off = buildPiLaunch({ ...base, parentEnv, memory: { scopes: [], indexes: [] } });
+    expect(off.systemPrompt).toBeUndefined();
+    expect(off.key).toBe(buildPiLaunch({ ...base, parentEnv }).key);
+  });
+
+  it("tells the extension to register remember/recall only with the extension and the flag", () => {
+    const env = (extra: object) =>
+      buildPiLaunch({ ...base, parentEnv, ...extra }).env.KOBE_TOOLS_MEMORY;
+    expect(env({ toolsExtension: TOOLS, toolsMemory: true })).toBe("1");
+    expect(env({ toolsExtension: TOOLS })).toBeUndefined();
+    expect(env({ toolsMemory: true })).toBeUndefined();
   });
 });

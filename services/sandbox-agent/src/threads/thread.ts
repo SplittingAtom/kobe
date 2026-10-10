@@ -142,6 +142,8 @@ export interface ThreadEnv {
   readonly toolsExtension?: string | undefined;
   /** The agent announced the `files` capability: the extension registers `share_file` (KOBE-149). */
   readonly shareFiles?: boolean | undefined;
+  /** The agent announced `memory` (KOBE-157): kobe-tools registers remember/recall. */
+  readonly memoryTools?: boolean | undefined;
   /** Other root-owned extension paths loaded with `-e`, before kobe-policy. */
   readonly extensions?: readonly string[];
   /** How long a new Pi may take to report kobe-policy ready (default {@link POLICY_READY_TIMEOUT_MS}). */

@@ -2,7 +2,8 @@ import { fstatSync } from "node:fs";
 import net from "node:net";
 import type { Duplex } from "node:stream";
 import { ToolsClient, type ToolsClientOptions } from "./client.js";
-import { TOOLS_FD_ENV, TOOLS_FILES_ENV } from "./protocol.js";
+import { recallTool, rememberTool } from "./memory-tools.js";
+import { TOOLS_FD_ENV, TOOLS_FILES_ENV, TOOLS_MEMORY_ENV } from "./protocol.js";
 import {
   artifactTools,
   shareFileTool,
@@ -58,16 +59,27 @@ export function filesEnabled(env: Record<string, string | undefined>): boolean {
   return raw === "1";
 }
 
+/** Whether the agent announced the `memory` capability (KOBE_TOOLS_MEMORY=1); read once, removed. */
+export function memoryEnabled(env: Record<string, string | undefined>): boolean {
+  const raw = env[TOOLS_MEMORY_ENV];
+  Reflect.deleteProperty(env, TOOLS_MEMORY_ENV);
+  return raw === "1";
+}
+
 export function registerKobeTools(
   pi: ExtensionApiLike,
   transport: ToolsTransport | undefined,
-  options: { readonly files?: boolean } = {},
+  options: { readonly files?: boolean; readonly memory?: boolean } = {},
 ): void {
   if (transport === undefined) return;
   for (const tool of artifactTools(transport)) pi.registerTool(tool);
   // Always listed: the server answers "unavailable" when the install or team has it off.
   pi.registerTool(webSearchTool(transport));
   if (options.files === true) pi.registerTool(shareFileTool(transport));
+  if (options.memory === true) {
+    pi.registerTool(rememberTool(transport));
+    pi.registerTool(recallTool(transport));
+  }
 }
 
 /** fd 4 must be the socket the agent passed. */

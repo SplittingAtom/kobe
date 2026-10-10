@@ -488,15 +488,17 @@ export class ThreadManager {
       toolsExtension: this.#options.toolsExtension,
       execExtension: this.#options.exec === undefined ? undefined : this.#options.execExtension,
       toolsFiles: this.#options.shareFiles,
+      toolsMemory: this.#options.memoryTools,
       ...(this.#options.extensions === undefined ? {} : { extensions: this.#options.extensions }),
       parentEnv: this.#options.parentEnv,
       config: frame?.config,
       mcp: frame?.mcp,
+      memory: frame?.memory,
     });
     if (thread.hasProcess) {
       // `mcp` can arrive without `config` (an agent that lost all its connectors): still a change.
       const changed =
-        (frame?.config !== undefined || frame?.mcp !== undefined) &&
+        (frame?.config !== undefined || frame?.mcp !== undefined || frame?.memory !== undefined) &&
         launch.key !== thread.launchKey;
       // A Pi whose policy channel closed blocks every tool call for good: start a fresh one (not
       // while it is busy — its calls are blocked anyway, and Stop must still reach it).

@@ -2,6 +2,7 @@ import {
   CAPABILITY_ARTIFACTS,
   CAPABILITY_BUILTIN_SKILLS,
   CAPABILITY_MCP,
+  CAPABILITY_MEMORY,
   CAPABILITY_FILES,
   CAPABILITY_WEB_SEARCH,
   CAPABILITY_RUN_TOKEN,
@@ -19,6 +20,7 @@ import type { PiExit, PiRecord } from "./pi/pi-process.js";
 import { PolicyBroker } from "./policy/broker.js";
 import { ArtifactBroker } from "./tools/broker.js";
 import { FileShareBroker } from "./tools/share-broker.js";
+import { MemoryBroker } from "./tools/memory-broker.js";
 import { WebSearchBroker } from "./tools/web-search-broker.js";
 import { toolsError } from "./tools/channel.js";
 import type { PushedFile } from "./workspace/sync.js";
@@ -118,6 +120,7 @@ export class Agent {
   readonly #artifacts: ArtifactBroker;
   readonly #shares: FileShareBroker;
   readonly #searches: WebSearchBroker;
+  readonly #memory: MemoryBroker;
   /** Command ids seen on the current connection (ids are not portable across reconnects). */
   #seenCommands = new Set<string>();
   #queuedExits: { runId: string; frame: PiExitedFrameT }[] = [];
@@ -130,6 +133,7 @@ export class Agent {
     this.#broker = new PolicyBroker({ send: (frame) => this.#wire.send(frame) });
     this.#artifacts = new ArtifactBroker({ send: (frame) => this.#wire.send(frame) });
     this.#searches = new WebSearchBroker({ send: (frame) => this.#wire.send(frame) });
+    this.#memory = new MemoryBroker({ send: (frame) => this.#wire.send(frame) });
     const pushPath = deps.workspace?.pushPath?.bind(deps.workspace);
     this.#shares = new FileShareBroker({
       root: config.workspaceDir,
@@ -148,6 +152,7 @@ export class Agent {
       piPrivateRoot: deps.parentEnv.TMPDIR ?? "/tmp",
       execExtension: deps.exec?.extension,
       shareFiles: this.#filesEnabled(),
+      memoryTools: this.#memoryEnabled(),
       ...(deps.extensions === undefined ? {} : { extensions: deps.extensions }),
       ...(deps.policyReadyTimeoutMs === undefined
         ? {}
@@ -179,6 +184,7 @@ export class Agent {
           this.#artifacts.failRun(runId, "run ended");
           this.#shares.failRun(runId, "run ended");
           this.#searches.failRun(runId, "run ended");
+          this.#memory.failRun(runId, "run ended");
           deps.workspace?.runEnded();
         },
         uiRequest: (threadId, runId, request) => {
@@ -205,6 +211,11 @@ export class Agent {
             this.#searches.query(threadId, runId, request, reply);
             return;
           }
+          if (request.op === "memory.put" || request.op === "memory.read") {
+            if (this.#memoryEnabled()) this.#memory.request(threadId, runId, request, reply);
+            else reply(toolsError(request.id, "not_allowed", "memory is not available"));
+            return;
+          }
           if (request.op === "file.share") {
             if (this.#filesEnabled()) this.#shares.share(threadId, runId, request, reply);
             else reply(toolsError(request.id, "not_allowed", "file sharing is not available"));
@@ -217,6 +228,7 @@ export class Agent {
           this.#artifacts.failThread(threadId, reason);
           this.#shares.failThread(threadId, reason);
           this.#searches.failThread(threadId, reason);
+          this.#memory.failThread(threadId, reason);
         },
         diagnostic: (threadId, message) => logger.debug({ thread_id: threadId }, message),
         warning: (threadId, message) => logger.warn({ thread_id: threadId }, message),
@@ -233,6 +245,7 @@ export class Agent {
         this.#artifacts.failAll("connection to Kobe server lost");
         this.#shares.failAll("connection to Kobe server lost");
         this.#searches.failAll("connection to Kobe server lost");
+        this.#memory.failAll("connection to Kobe server lost");
         void this.#threads.abortRestores();
       },
       onFatal: (reason) => void this.#onFatal(reason),
@@ -280,6 +293,11 @@ export class Agent {
     return this.#deps.toolsExtension !== undefined && this.#deps.workspace?.pushPath !== undefined;
   }
 
+  /** `remember` / `recall` need the tools channel (fd 4); without it neither is registered nor announced. */
+  #memoryEnabled(): boolean {
+    return this.#deps.toolsExtension !== undefined;
+  }
+
   #hello(): HelloFrame {
     const capabilities = [
       ...(this.#deps.skills === undefined ? [] : [CAPABILITY_SKILL_BUNDLES]),
@@ -287,6 +305,7 @@ export class Agent {
       ...(this.#deps.toolsExtension === undefined ? [] : [CAPABILITY_ARTIFACTS]),
       ...(this.#filesEnabled() ? [CAPABILITY_FILES] : []),
       ...(this.#deps.toolsExtension === undefined ? [] : [CAPABILITY_WEB_SEARCH]),
+      ...(this.#memoryEnabled() ? [CAPABILITY_MEMORY] : []),
       // Per-session MCP config (KOBE-111) needs the proxy URL, a session to trade tokens with, and
       // Pi's MCP extension (built into Pi 1.0.x).
       ...(this.#deps.mcp === undefined ? [] : [CAPABILITY_MCP]),
@@ -365,6 +384,9 @@ export class Agent {
         return;
       case "web_search.result":
         this.#searches.onResult(frame);
+        return;
+      case "memory.result":
+        this.#memory.onResult(frame);
         return;
       case "ack":
         this.#outbox.ack(frame.run_id, frame.seq);
