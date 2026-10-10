@@ -561,13 +561,6 @@
       "when": 1791571215380,
       "tag": "0079_model_input_modalities",
       "breakpoints": true
-    },
-    {
-      "idx": 80,
-      "version": "7",
-      "when": 1791600072541,
-      "tag": "0080_connector_grants_oauth",
-      "breakpoints": true
     }
   ]
 }
