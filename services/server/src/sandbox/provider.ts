@@ -7,6 +7,7 @@ import type { SandboxSettings } from "./config.js";
 import { isIsolationHandler } from "../isolation/runtime-class.js";
 import {
   ANNOTATION_TEAM_ID,
+  ANNOTATION_VOLUME_RETRY,
   ANNOTATION_USER_ID,
   BOOTSTRAP_TOKEN_AUDIENCE,
   KOBE_ENDPOINTS,
@@ -42,6 +43,7 @@ import {
   type TeamRef,
 } from "./manifests.js";
 import { logger } from "../logger.js";
+import { diagnoseStall, isPodReady, type StallDiagnosis } from "./stall-diagnosis.js";
 import { reconcileTeamNamespaces, type TeamReconcileSummary } from "./team-reconcile.js";
 import type { SandboxPrincipal } from "./session-token.js";
 
@@ -110,6 +112,11 @@ export interface WakeResult {
   /** True when this call resumed a hibernated sandbox (false: it was running, or new). */
   readonly resumed: boolean;
 }
+
+/** Outcome of {@link SandboxProvider.awaitReady}. */
+export type ReadyOutcome =
+  | { readonly ready: true }
+  | { readonly ready: false; readonly sandboxId: string; readonly stall: StallDiagnosis };
 
 /** The `/workspace` PVC agent-sandbox creates for a Sandbox (volumeClaimTemplate `workspace`). */
 export const workspacePvcName = (sandboxName: string): string => `workspace-${sandboxName}`;
@@ -201,6 +208,21 @@ export interface SandboxProvider {
    * ensureSandbox (deleted on a RuntimeClass/handler mismatch, KOBE-9).
    */
   wakeSandbox(team: TeamRef, userId: string): Promise<WakeResult>;
+  /**
+   * Waits up to the wake timeout (`podWaitTimeoutMs`) for the sandbox's pod to be Ready. When it
+   * is not, reads the pod's events and the workspace volume (FailedAttachVolume, FailedScheduling,
+   * Longhorn replica scheduling, image pulls) and returns the diagnosis (KOBE-192).
+   */
+  awaitReady(team: TeamRef, userId: string): Promise<ReadyOutcome>;
+  /**
+   * Once per sandbox: when a strict-local workspace volume never became usable (no container ever
+   * ran, volume attach or replica scheduling failed), deletes the pod and the volume claim so the
+   * scheduler can pick another node. Declines (no deletion) when a retry was made before, the
+   * volume is not strict-local, the cause is something else, or any container ever ran, which is
+   * the only evidence a volume may hold data. The caller must also prove the sandbox never
+   * started (KOBE-192).
+   */
+  retryStalledVolume(team: TeamRef, userId: string): Promise<"retried" | "declined">;
   /**
    * Hibernates `sandboxId` (D14): `operatingMode: Suspended` — agent-sandbox deletes the pod and
    * keeps the claim and its volume. Idempotent; no isolation check (stopping is always safe). The
@@ -671,6 +693,73 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     return { handle: { ...handle, state: "running" }, resumed };
   };
 
+  /** The claim's Sandbox, pod name and workspace PVC name (undefined while they do not exist). */
+  const locate = async (team: TeamRef, userId: string) => {
+    const namespace = teamNamespaceName(team);
+    const claim = await kube.get(CLAIM(namespace, claimName(userId)));
+    const sandboxName = claim ? str(claim, "status", "sandbox", "name") : undefined;
+    const sandbox = sandboxName ? await kube.get(SANDBOX(namespace, sandboxName)) : undefined;
+    if (!claim?.metadata.uid || !sandboxName || !sandbox) return undefined;
+    const podName = sandbox.metadata.annotations?.[POD_NAME_ANNOTATION] ?? sandboxName;
+    return {
+      namespace,
+      sandboxId: claim.metadata.uid,
+      sandbox,
+      podName,
+      pvcName: workspacePvcName(sandboxName),
+    };
+  };
+
+  const awaitReady = async (team: TeamRef, userId: string): Promise<ReadyOutcome> => {
+    assertTeamRef(team);
+    assertUserId(userId);
+    const deadline = now() + podWaitTimeoutMs;
+    for (;;) {
+      const found = await locate(team, userId);
+      if (!found) throw new SandboxProvisioningError(`Sandbox for ${teamNamespaceName(team)} vanished`);
+      if (isPodReady(await kube.get(POD(found.namespace, found.podName)))) return { ready: true };
+      if (now() >= deadline) {
+        const stall = await diagnoseStall(kube, found.namespace, found.podName, found.pvcName);
+        return { ready: false, sandboxId: found.sandboxId, stall };
+      }
+      await sleep(1000);
+    }
+  };
+
+  const retryStalledVolume = async (
+    team: TeamRef,
+    userId: string,
+  ): Promise<"retried" | "declined"> => {
+    assertTeamRef(team);
+    assertUserId(userId);
+    const found = await locate(team, userId);
+    if (!found || found.sandbox.metadata.annotations?.[ANNOTATION_VOLUME_RETRY]) return "declined";
+    const { namespace, podName, pvcName, sandbox } = found;
+    const pvc = await kube.get(PVC(namespace, pvcName));
+    const strictLocal = /strict-local/.test(str(pvc, "spec", "storageClassName") ?? "");
+    if (!pvc || pvc.metadata.deletionTimestamp || !strictLocal) return "declined";
+    const pod = await kube.get(POD(namespace, podName));
+    if (!pod || isPodReady(pod)) return "declined";
+    const stall = await diagnoseStall(kube, namespace, podName, pvcName);
+    const volumeCause = stall.cause === "volume_unschedulable" || stall.cause === "volume_attach";
+    if (!volumeCause || !stall.neverRan) return "declined";
+    try {
+      // The marker first: a crash after it costs the retry, never allows a second deletion.
+      await kube.patch(
+        SANDBOX(namespace, sandbox.metadata.name),
+        { metadata: { annotations: { [ANNOTATION_VOLUME_RETRY]: "true" } } },
+        sandbox.metadata.resourceVersion ? { resourceVersion: sandbox.metadata.resourceVersion } : {},
+      );
+    } catch (err) {
+      if (isKubeStatus(err, 409)) return "declined";
+      throw err;
+    }
+    // The pod first (a volume claim in use is protected from deletion), then the claim.
+    await kube.delete(POD(namespace, podName));
+    await kube.delete(PVC(namespace, pvcName));
+    return "retried";
+  };
+
   const hibernateSandbox = async (
     team: TeamRef,
     userId: string,
@@ -915,6 +1004,8 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     reconcileTeams,
     ensureSandbox,
     wakeSandbox,
+    awaitReady,
+    retryStalledVolume,
     hibernateSandbox,
     destroySandbox,
     deleteVolume,

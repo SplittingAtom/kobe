@@ -21,6 +21,11 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "delete"]
+  # KOBE-192: a sandbox not Ready within the wake timeout is diagnosed from the pod's and the
+  # workspace volume's events (FailedAttachVolume, FailedScheduling, image pulls). Read-only.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list"]
   # Server-side apply of the namespace's fixed objects. Image pull Secrets for the kubelet are
   # copied in write-only (no get/list: the server never reads Secrets here).
   - apiGroups: [""]

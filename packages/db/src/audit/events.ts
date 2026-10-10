@@ -359,6 +359,34 @@ export const AUDIT_EVENTS = {
    * with the current pod template (system actor, or the user whose request woke it).
    */
   "sandbox.woken": event("team", { sandboxId: id, userId: id }),
+  /**
+   * A woken sandbox was not Ready within the wake timeout and its run failed
+   * `workspace_unavailable` (KOBE-192; system actor). Install scope: `detail` is the cluster's own
+   * reason (events, volume phase) and may name nodes and volumes, so team members never see it.
+   */
+  "sandbox.wake_stalled": event("install", {
+    teamId: id,
+    sandboxId: id,
+    userId: id,
+    cause: z.enum(["volume_unschedulable", "volume_attach", "scheduling", "image_pull", "unknown"]),
+    detail: z
+      .string()
+      .max(600)
+      // eslint-disable-next-line no-control-regex
+      .regex(/^[^\u0000-\u001f\u007f]*$/),
+    /** The one-time volume retry (delete the unused pod and volume) was made for this stall. */
+    retried: z.boolean(),
+  }),
+  /**
+   * The server deleted a never-used strict-local workspace volume and its pod once so the scheduler
+   * could pick another node (KOBE-192; system actor).
+   */
+  "sandbox.volume_retried": event("install", {
+    teamId: id,
+    sandboxId: id,
+    userId: id,
+    cause: z.enum(["volume_unschedulable", "volume_attach"]),
+  }),
 
   // ── egress: ceiling (install), enablement (team), connections (team; KOBE-38, D28) ──
   "egress.ceiling.added": event("install", { domain: egressDomain }),

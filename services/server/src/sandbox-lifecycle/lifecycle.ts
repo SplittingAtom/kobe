@@ -10,7 +10,7 @@ import {
 } from "@kobe/db";
 import type { Logger } from "pino";
 import { currentAuditContext } from "../audit/context.js";
-import { recordAudit } from "../audit/record.js";
+import { recordAudit, recordAuditAfter } from "../audit/record.js";
 import { appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
 import { IsolationRuntimeMissingError } from "../isolation/gate.js";
 import { logger as rootLogger } from "../logger.js";
@@ -19,12 +19,14 @@ import { workspacePvcName, type SandboxProvider } from "../sandbox/provider.js";
 import { notifyHintInTx } from "../sandbox-wire/bus.js";
 import { SandboxWakeError, type SandboxTarget, type SandboxWaker } from "../sandbox-wire/types.js";
 import { resolveIdleMinutes, TEAM_IDLE_MINUTES } from "./idle.js";
+import { ensureReady, type ReadyProvider } from "./ready.js";
 import {
   beginWake,
   forgetSandboxIdentity,
   idleCandidates,
   lockIfIdle,
   markHibernated,
+  neverRecorded,
   recordSandboxIdentity,
 } from "./store.js";
 
@@ -44,7 +46,8 @@ import {
  *   started on a pod on its way out.
  */
 
-export type LifecycleProvider = Pick<SandboxProvider, "wakeSandbox" | "hibernateSandbox">;
+export type LifecycleProvider = Pick<SandboxProvider, "wakeSandbox" | "hibernateSandbox"> &
+  Partial<ReadyProvider>;
 
 export interface LifecycleOptions {
   readonly db: KobeDb;
@@ -66,6 +69,8 @@ export interface LifecycleMetrics {
   hibernated: number;
   woken: number;
   wakeFailures: number;
+  /** Wakes that failed because the pod was not Ready within the wake timeout (KOBE-192). */
+  stalledWakes: number;
   /** Latest wake durations (ms), newest last; bounded. */
   readonly wakeMs: number[];
 }
@@ -104,7 +109,7 @@ export function createSandboxLifecycle(options: LifecycleOptions): SandboxLifecy
   const { db, provider } = options;
   const log = options.log ?? rootLogger.child({ component: "sandbox-lifecycle" });
   const batch = options.batchPerTeam ?? 20;
-  const metrics: LifecycleMetrics = { hibernated: 0, woken: 0, wakeFailures: 0, wakeMs: [] };
+  const metrics: LifecycleMetrics = { hibernated: 0, woken: 0, wakeFailures: 0, stalledWakes: 0, wakeMs: [] };
   /** One wake per sandbox per process; runs that joined it get its `sandbox.waking` too. */
   const inflight = new Map<string, InflightWake>();
 
@@ -156,6 +161,43 @@ export function createSandboxLifecycle(options: LifecycleOptions): SandboxLifecy
     }
   };
 
+  /**
+   * The pod must be Ready within the wake timeout (KOBE-192). Not Ready: the run fails
+   * `workspace_unavailable` (no cluster detail) and install admins get the reason in the audit log
+   * (`sandbox.wake_stalled`) and the server log. Runs before the sandbox's identity is recorded,
+   * so "identity recorded" means "has come up at least once", the proof the volume-retry needs.
+   */
+  const waitUntilReady = async (team: TeamRef, target: SandboxTarget): Promise<void> => {
+    const { awaitReady, retryStalledVolume } = provider;
+    if (!awaitReady || !retryStalledVolume) return;
+    const base = { teamId: target.teamId, userId: target.userId };
+    await ensureReady({
+      provider: { awaitReady, retryStalledVolume },
+      team,
+      userId: target.userId,
+      neverStarted: await neverRecorded(db, target),
+      log,
+      onRetried: ({ sandboxId, stall }) =>
+        recordAuditAfter(db, {
+          action: "sandbox.volume_retried",
+          actor: SYSTEM_ACTOR,
+          target: {
+            ...base,
+            sandboxId,
+            cause: stall.cause === "volume_attach" ? "volume_attach" : "volume_unschedulable",
+          },
+        }),
+      onStalled: ({ sandboxId, stall, retried }) => {
+        metrics.stalledWakes += 1;
+        return recordAuditAfter(db, {
+          action: "sandbox.wake_stalled",
+          actor: SYSTEM_ACTOR,
+          target: { ...base, sandboxId, cause: stall.cause, detail: stall.detail, retried },
+        });
+      },
+    });
+  };
+
   const wakeOnce = async (target: SandboxTarget, entry: InflightWake): Promise<void> => {
     const started = Date.now();
     await assertAllowed(target);
@@ -189,6 +231,7 @@ export function createSandboxLifecycle(options: LifecycleOptions): SandboxLifecy
       throw err;
     }
     const { handle, resumed } = result;
+    await waitUntilReady(team, target);
     // sandbox.woken is recorded by the provider when its resume patch is committed.
     await withTeam(db, target.teamId, (tx) =>
       recordSandboxIdentity(tx, target, handle.sandboxId, workspacePvcName(handle.sandboxName)),

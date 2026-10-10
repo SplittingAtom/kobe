@@ -15,6 +15,11 @@ export const LABEL_TEAM_ID = `${DOMAIN}/team-id`;
 export const LABEL_USER_ID = `${DOMAIN}/user-id`;
 export const ANNOTATION_TEAM_ID = LABEL_TEAM_ID;
 export const ANNOTATION_USER_ID = LABEL_USER_ID;
+/**
+ * On a Sandbox whose never-attached strict-local workspace volume was deleted once so the
+ * scheduler could pick another node (KOBE-192). Its presence caps the retry at one.
+ */
+export const ANNOTATION_VOLUME_RETRY = `${DOMAIN}/workspace-volume-retried`;
 /** On the pods (and Job, ConfigMap) of an Orbit eval (KOBE-93); the value is the eval id. */
 export const LABEL_ORBIT_EVAL = `${DOMAIN}/orbit-eval`;
 export const LABEL_MANAGED_BY = "app.kubernetes.io/managed-by";

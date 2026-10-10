@@ -49,6 +49,19 @@ export async function recordSandboxIdentity(
      WHERE team_id = ${target.teamId} AND user_id = ${target.userId}`);
 }
 
+/**
+ * True when Kobe never recorded this sandbox coming up (no identity: it is recorded after the
+ * first Ready wake). Only then may an unusable, never-used volume be replaced (KOBE-192).
+ */
+export async function neverRecorded(db: KobeDb, target: SandboxTarget): Promise<boolean> {
+  return withTeam(db, target.teamId, async (tx) => {
+    const res = await tx.execute<{ sandbox_id: string | null }>(sql`
+      SELECT sandbox_id FROM sandboxes
+       WHERE team_id = ${target.teamId} AND user_id = ${target.userId}`);
+    return res.rows[0]?.sandbox_id == null;
+  });
+}
+
 export interface IdleCandidate {
   readonly userId: string;
   readonly idleMinutes: number;
