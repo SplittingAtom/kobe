@@ -2173,6 +2173,16 @@ JS
     contains "projects: a conversation in the project completes a run" '^terminal=run.completed$' "$pr_chat"
     contains "projects: the thread belongs to the project and is private" '^true\|false$' \
       "$(psql_kobe "SELECT (project_id = '${pr_id:-00000000-0000-4000-8000-000000000000}')::text || '|' || shared_to_project::text FROM threads WHERE id = '${pr_thread:-00000000-0000-4000-8000-000000000000}'")"
+    # KOBE-245: the instructions reach the model (the fake model echoes the system messages it got);
+    # a conversation outside any project never sees them.
+    pr_marker=$(psql_kobe "SELECT instructions FROM projects WHERE id = '${pr_id:-00000000-0000-4000-8000-000000000000}'")
+    pr_sys=$(chat_run "system?" 300000 "" "" "$pr_thread")
+    contains "projects: a project run's model input has the labelled instructions" \
+      '^text=.*Project instructions \(set by project admins\)' "$pr_sys"
+    contains "projects: ...and the instructions the admins wrote" "^text=.*${pr_marker:-no-marker}" "$pr_sys"
+    pr_plain=$(chat_run "system?" 300000)
+    contains "projects: a conversation outside a project answered" '^text=.*system said: ' "$pr_plain"
+    if printf '%s' "$pr_plain" | grep -q "Project instructions"; then fail "projects: a non-project run has no project instructions"; else ok "projects: a non-project run has no project instructions"; fi
     pr_out=$(projects_js share "$pr_id" "$pr_thread")
     printf '     projects share: %s\n' "$(printf '%s' "$pr_out" | tr '\n' ' ' | cut -c1-900)"
     contains "projects: the author shares the thread to the project" '^share=200:project$' "$pr_out"
