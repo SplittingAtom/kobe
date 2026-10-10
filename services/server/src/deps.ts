@@ -34,6 +34,7 @@ import {
   type SandboxWire,
   type SandboxWireOptions,
 } from "./sandbox-wire/index.js";
+import { createWebSearchService } from "./web-search/service.js";
 import {
   DbRunOrchestrator,
   PINNED_AGENTS,
@@ -291,6 +292,9 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     runContext,
     ...(options.blobs ? { blobs: options.blobs } : {}),
     ...(options.uploads ? { uploads: options.uploads } : {}),
+    webSearch:
+      options.sandboxWire?.webSearch ??
+      createWebSearchService({ db: database.db, envelope: options.envelope }),
     hooks: {
       async onRunEnded(event) {
         try {

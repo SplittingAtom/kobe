@@ -90,6 +90,7 @@ export class CommandRouter implements SandboxRouter {
       ...(run.attachments === undefined ? {} : { attachments: run.attachments }),
       ...(run.parentEntryId === undefined ? {} : { parent_entry_id: run.parentEntryId }),
       ...(run.config === undefined ? {} : { config: run.config }),
+      ...(run.project === undefined ? {} : { project: run.project }),
     });
   }
 

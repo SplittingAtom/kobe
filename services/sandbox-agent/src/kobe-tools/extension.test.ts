@@ -54,7 +54,7 @@ describe("registerKobeTools", () => {
     const transport = connectTools({ env: { KOBE_TOOLS_FD: "4" }, openChannel: () => ours });
     const names: string[] = [];
     registerKobeTools({ registerTool: (t: ToolDefinitionLike) => names.push(t.name) }, transport);
-    expect(names).toEqual(["create_artifact", "update_artifact"]);
+    expect(names).toEqual(["create_artifact", "update_artifact", "web_search"]);
     ours.destroy();
   });
 
@@ -65,7 +65,7 @@ describe("registerKobeTools", () => {
     registerKobeTools({ registerTool: (t: ToolDefinitionLike) => names.push(t.name) }, transport, {
       files: true,
     });
-    expect(names).toEqual(["create_artifact", "update_artifact", "share_file"]);
+    expect(names).toEqual(["create_artifact", "update_artifact", "web_search", "share_file"]);
     ours.destroy();
   });
 

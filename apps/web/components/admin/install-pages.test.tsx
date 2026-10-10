@@ -348,11 +348,80 @@ describe("Teams: keyboard flow of rename", () => {
   });
 });
 
+const WEB_SEARCH = {
+  configured: false,
+  provider: null,
+  enabled: false,
+  hint: null,
+  updatedAt: null,
+  providers: [
+    { id: "brave", label: "Brave Search", domain: "api.search.brave.com" },
+    { id: "tavily", label: "Tavily", domain: "api.tavily.com" },
+  ],
+};
+
+describe("Web search setting", () => {
+  it("saves the provider and key, then shows only the masked hint", async () => {
+    const calls = stubApi({
+      "GET /v1/install/settings": [200, { requireTwoFactor: false }],
+      "GET /v1/install/web-search": [
+        [200, WEB_SEARCH],
+        [
+          200,
+          { ...WEB_SEARCH, configured: true, provider: "brave", enabled: true, hint: "••••wxyz" },
+        ],
+      ],
+      "PUT /v1/install/web-search": [
+        200,
+        { ...WEB_SEARCH, configured: true, provider: "brave", enabled: true, hint: "••••wxyz" },
+      ],
+    });
+    renderInstall(<SettingsPage />, "admin");
+    await userEvent.selectOptions(await screen.findByLabelText("Search provider"), "brave");
+    await userEvent.type(screen.getByLabelText("API key"), "BSA-secret-key-wxyz");
+    await userEvent.click(screen.getByRole("button", { name: "Save web search" }));
+    await screen.findByText(/Web search is on with Brave Search/);
+    const put = must(calls.find((c) => c.method === "PUT"));
+    expect(JSON.parse(String(put.body))).toEqual({
+      provider: "brave",
+      api_key: "BSA-secret-key-wxyz",
+      enabled: true,
+    });
+    await screen.findByText(/••••wxyz/);
+    expect((screen.getByLabelText("API key") as HTMLInputElement).value).toBe("");
+    expect(document.body.textContent).not.toContain("BSA-secret-key-wxyz");
+  });
+
+  it("removes the provider after confirmation", async () => {
+    const configured = {
+      ...WEB_SEARCH,
+      configured: true,
+      provider: "brave",
+      enabled: true,
+      hint: "••••wxyz",
+    };
+    const calls = stubApi({
+      "GET /v1/install/settings": [200, { requireTwoFactor: false }],
+      "GET /v1/install/web-search": [
+        [200, configured],
+        [200, WEB_SEARCH],
+      ],
+      "DELETE /v1/install/web-search": [204],
+    });
+    renderInstall(<SettingsPage />, "admin");
+    await userEvent.click(await screen.findByRole("button", { name: "Remove provider" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "DELETE")).toBe(true));
+  });
+});
+
 describe("Settings", () => {
   it("doesn't let an Admin turn required 2FA off", async () => {
-    stubApi({ "GET /v1/install/settings": [200, { requireTwoFactor: true }] });
+    stubApi({
+      "GET /v1/install/settings": [200, { requireTwoFactor: true }],
+      "GET /v1/install/web-search": [200, WEB_SEARCH],
+    });
     renderInstall(<SettingsPage />, "admin");
-    const box = (await screen.findByRole("checkbox")) as HTMLInputElement;
+    const box = (await screen.findAllByRole("checkbox"))[0] as HTMLInputElement;
     expect(box.checked).toBe(true);
     expect(box.disabled).toBe(true);
     expect(screen.getByText("Only the Owner can turn this off.")).toBeTruthy();
@@ -362,10 +431,11 @@ describe("Settings", () => {
     const calls = stubApi({
       "GET /v1/install/settings": [200, { requireTwoFactor: false }],
       "PUT /v1/install/settings": [200, { requireTwoFactor: true }],
+      "GET /v1/install/web-search": [200, WEB_SEARCH],
     });
     renderInstall(<SettingsPage />, "admin");
-    await userEvent.click(await screen.findByRole("checkbox"));
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await userEvent.click((await screen.findAllByRole("checkbox"))[0] as HTMLElement);
+    await userEvent.click(screen.getByRole("button", { name: /^Save$/ }));
     await screen.findByText(/now required/);
     const put = must(calls.find((c) => c.method === "PUT"));
     expect(JSON.parse(String(put.body))).toEqual({ requireTwoFactor: true });

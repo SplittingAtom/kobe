@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   CAPABILITY_ARTIFACTS,
   CAPABILITY_FILES,
+  CAPABILITY_WEB_SEARCH,
   PI_PINNED_VERSION,
   SANDBOX_CLOSE_CODES,
   decodeSandboxFrame,
@@ -14,6 +15,7 @@ import {
   type SandboxCloseReason,
   type SandboxErrorCode,
   type SandboxToServerFrame,
+  type WebSearchQueryFrame,
   type ServerToSandboxFrame,
 } from "@kobe/protocol";
 import { withTeam } from "@kobe/db";
@@ -93,6 +95,7 @@ export class SandboxConnection implements RegisteredConnection {
   readonly #allowedArtifacts = new AllowedArtifactCalls();
   #artifactPuts = 0;
   #fileShares = 0;
+  #webSearches = 0;
   readonly #deniedBuckets = new Map<string, { tokens: number; at: number }>();
   readonly #delivery: CommandDelivery;
   #state: State = "hello";
@@ -374,6 +377,9 @@ export class SandboxConnection implements RegisteredConnection {
         return;
       case "file.share":
         this.#onFileShare(frame);
+        return;
+      case "web_search.query":
+        this.#onWebSearch(frame);
         return;
       case "command.result":
         this.#onCommandResult(frame);
@@ -698,6 +704,110 @@ export class SandboxConnection implements RegisteredConnection {
           });
         }
         fail(result.code, result.message);
+      });
+  }
+
+  /**
+   * `web_search.query` (KOBE-114). Accepted only if this connection announced `web_search`, the
+   * run is leased here and active, and this `web_search` call was allowed here with the same
+   * canonical input hash (D-3). The server then decides availability (install provider, team
+   * opt-in), opens the key and searches; "unavailable" is an answer, not an error. Refusals are
+   * audited (never the query).
+   */
+  #onWebSearch(frame: WebSearchQueryFrame): void {
+    const answer = (result: Parameters<SandboxConnection["send"]>[0]) => this.send(result);
+    const fail = (code: string, message: string) =>
+      answer({
+        v: 1,
+        type: "web_search.result",
+        request_id: frame.request_id,
+        ok: false,
+        error: { code, message },
+      });
+    const refuse = (
+      reason: Parameters<WireContext["auditWebSearchRefused"]>[2]["reason"],
+      message: string,
+    ) => {
+      this.#ctx.auditWebSearchRefused(this.target, this.sandboxId, {
+        reason,
+        runId: frame.run_id,
+        toolCallId: frame.tool_call_id,
+      });
+      fail("not_allowed", message);
+    };
+    if (!this.hasCapability(CAPABILITY_WEB_SEARCH)) {
+      refuse("capability_missing", "This sandbox did not announce web search.");
+      return;
+    }
+    const check = this.#checkRun(frame.run_id, frame.thread_id, "web_search.query");
+    if (check === "violation") return;
+    if (check === "ended") {
+      refuse("run_not_active", "The run has ended, so the search was not run.");
+      return;
+    }
+    const verdict = this.#allowedArtifacts.consume(
+      frame.run_id,
+      frame.tool_call_id,
+      frame.tool,
+      frame.input,
+    );
+    if (verdict !== "ok") {
+      refuse(
+        verdict,
+        verdict === "input_mismatch"
+          ? "The search differs from the call that was allowed."
+          : verdict === "replayed"
+            ? "This search was already run; ask the model to search again."
+            : "This tool call was not allowed for this tool.",
+      );
+      return;
+    }
+    if (this.#webSearches >= this.#ctx.tuning.maxPendingArtifactPuts) {
+      fail("rate_limited", "Too many searches are running. Try again.");
+      return;
+    }
+    this.#webSearches += 1;
+    void this.#ctx.webSearch
+      .search(this.target.teamId, frame.input, {
+        runId: frame.run_id,
+        toolCallId: frame.tool_call_id,
+        sandboxId: this.sandboxId,
+        userId: this.target.userId,
+      })
+      .catch((err: unknown) => {
+        this.log.error({ err }, "web_search failed");
+        return {
+          kind: "error",
+          code: "search_failed",
+          message: "The search could not be run. Try again.",
+        } as const;
+      })
+      .then((result) => {
+        this.#webSearches -= 1;
+        if (result.kind === "results") {
+          answer({
+            v: 1,
+            type: "web_search.result",
+            request_id: frame.request_id,
+            ok: true,
+            available: true,
+            provider: result.provider,
+            query: frame.input.query,
+            results: [...result.results],
+          });
+        } else if (result.kind === "unavailable") {
+          answer({
+            v: 1,
+            type: "web_search.result",
+            request_id: frame.request_id,
+            ok: true,
+            available: false,
+            reason: result.reason,
+            message: result.message,
+          });
+        } else {
+          fail(result.code, result.message);
+        }
       });
   }
 
