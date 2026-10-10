@@ -4,7 +4,7 @@
  * U+200B–200F, U+FEFF, line and paragraph separators, surrogates, private-use and unusual spaces)
  * become visible `\uXXXX` escapes, so a reviewer sees what will be stored (KOBE-157/158).
  */
-const INVISIBLE = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Zl}\p{Zp}  -   　]/gu;
+const INVISIBLE = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Zl}\p{Zp}\u00a0\u2000-\u200a\u202f\u205f\u3000]/gu;
 
 /** `text` with every invisible or reordering character as a visible `\uXXXX` escape. */
 export function visible(text: string, keep: RegExp = /\n/): string {
