@@ -290,6 +290,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     background,
     runContext,
     ...(options.blobs ? { blobs: options.blobs } : {}),
+    ...(options.uploads ? { uploads: options.uploads } : {}),
     hooks: {
       async onRunEnded(event) {
         try {

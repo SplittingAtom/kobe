@@ -11,6 +11,7 @@ import { agentRoutes } from "./routes/agents.js";
 import { teamEvalSettingsRoutes } from "./routes/team-eval-settings.js";
 import { installBudgetRoutes, teamBudgetsRoutes } from "./routes/budgets.js";
 import { artifactRoutes } from "./routes/artifacts.js";
+import { fileRoutes } from "./routes/files.js";
 import { memoryRoutes } from "./routes/memory.js";
 import { memorySettingsRoutes } from "./routes/memory-settings.js";
 import { uploadRoutes } from "./routes/uploads.js";
@@ -156,6 +157,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/memory/settings", memorySettingsRoutes(deps));
   api.route("/memory", memoryRoutes(deps));
   api.route("/uploads", uploadRoutes(deps));
+  api.route("/files", fileRoutes(deps));
   api.route("/connector-grants", connectorGrantRoutes(deps));
   api.route("/workspace", workspaceFileRoutes(deps, options.workspaceFiles));
   api.route("/agents", agentRoutes(deps, options.evals ? { runner: options.evals } : {}));

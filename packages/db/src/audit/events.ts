@@ -138,6 +138,20 @@ export const ARTIFACT_PUT_REFUSALS = [
   "artifact_not_found",
 ] as const;
 
+/** Why the server refused a `file.share` (audit `sandbox.file_share_refused`, KOBE-150). */
+export const FILE_SHARE_REFUSALS = [
+  "capability_missing",
+  "run_not_active",
+  "not_allowed",
+  "input_mismatch",
+  "path_mismatch",
+  "not_synced",
+  "not_found",
+  "too_large",
+  "quota_exceeded",
+  "scan_rejected",
+] as const;
+
 /** A Pi tool call id (`idSchema` in @kobe/protocol): no control characters, ≤ 128. */
 const toolCallId = z
   .string()
@@ -799,6 +813,20 @@ export const AUDIT_EVENTS = {
     userId: id,
     reason: z.enum(ARTIFACT_PUT_REFUSALS),
     tool: z.enum(["create_artifact", "update_artifact"]),
+    runId: id.optional(),
+    toolCallId: toolCallId.optional(),
+  }),
+
+  /**
+   * The server refused a `file.share` (KOBE-150): no `files` capability, a run not active here, a
+   * tool call it did not allow (or other input), a workspace entry that does not match the push,
+   * or a size / quota / scan refusal. Never records names, paths or content (system; at most one
+   * per 5 minutes per reason and user).
+   */
+  "sandbox.file_share_refused": event("team", {
+    sandboxId: id,
+    userId: id,
+    reason: z.enum(FILE_SHARE_REFUSALS),
     runId: id.optional(),
     toolCallId: toolCallId.optional(),
   }),
