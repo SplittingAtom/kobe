@@ -252,3 +252,35 @@ describe("project files in members' workspaces", () => {
     expect(await paths(w.team, member.id)).toEqual([]);
   });
 });
+
+describe("one membership decides files and memory (ac-3)", () => {
+  it("project memory read/write follows the same membership as the file mounts", async () => {
+    const w = await f.world();
+    const b = await builder(w.team);
+    const m = await f.member(w.team);
+    const project = await create(b, {
+      name: "Shared Brain",
+      members_mode: "selected",
+      member_user_ids: [m.id],
+    });
+    await upload(b, project.id, "k.md", "K");
+    const memory = (p: Person) =>
+      as(p).put(`/v1/memory?project_id=${project.id}`, {
+        scope: "project",
+        path: "notes.md",
+        content: "x",
+      });
+    expect((await memory(m)).status).toBe(200);
+    expect((await as(m).get(`/v1/memory?scope=project&project_id=${project.id}`)).status).toBe(200);
+    expect(await paths(w.team, m.id)).toHaveLength(1);
+
+    expect((await as(b).delete(`/v1/projects/${project.id}/members/${m.id}`)).status).toBe(204);
+    // Removed: memory is a 404 like any outsider's, and the files left the workspace.
+    expect((await memory(m)).status).toBe(404);
+    expect((await as(m).get(`/v1/memory?scope=project&project_id=${project.id}`)).status).toBe(404);
+    expect(await paths(w.team, m.id)).toEqual([]);
+    // A team admin who is not a member has neither.
+    expect((await memory(w.owner)).status).toBe(404);
+    expect(await paths(w.team, w.owner.id)).toEqual([]);
+  });
+});

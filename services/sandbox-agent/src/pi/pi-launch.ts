@@ -100,6 +100,11 @@ export interface PiLaunchInput {
    */
   readonly toolsFiles?: boolean | undefined;
   /**
+   * The agent announced the `projects` capability (KOBE-162): the extension then registers
+   * `propose_project_file`. Meaningful only with {@link toolsExtension}.
+   */
+  readonly toolsProjects?: boolean | undefined;
+  /**
    * The agent announced the `memory` capability (KOBE-157): the extension then registers `remember`
    * and `recall`. Meaningful only with {@link toolsExtension}.
    */
@@ -178,6 +183,8 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
   if (input.toolsExtension !== undefined) env.KOBE_TOOLS_FD = String(TOOLS_CHANNEL_FD);
   if (input.execExtension !== undefined) env[EXEC_FD_ENV] = String(EXEC_CHANNEL_FD);
   if (input.toolsExtension !== undefined && input.toolsFiles === true) env.KOBE_TOOLS_FILES = "1";
+  if (input.toolsExtension !== undefined && input.toolsProjects === true)
+    env.KOBE_TOOLS_PROJECTS = "1";
   if (input.toolsExtension !== undefined && input.toolsMemory === true) env.KOBE_TOOLS_MEMORY = "1";
 
   // The model is deliberately not part of the key (see `modelsExtension`).

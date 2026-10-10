@@ -3,6 +3,7 @@ import {
   filesEnabled,
   memoryEnabled,
   memoryFile,
+  projectsEnabled,
   registerKobeTools,
   type ExtensionApiLike,
 } from "./extension.js";
@@ -11,7 +12,7 @@ import type { ToolsTransport } from "./tools.js";
 /**
  * kobe-tools: the Pi 1.0.x extension that gives the model Kobe's own tools (spec D13; KOBE-128):
  * `create_artifact` and `update_artifact`, `share_file` (only when the agent announced the `files`
- * capability: KOBE_TOOLS_FILES=1) and `remember` / `recall` (only when the agent announced `memory`: KOBE_TOOLS_MEMORY=1). Each call goes
+ * capability: KOBE_TOOLS_FILES=1), `propose_project_file` (only with `projects`: KOBE_TOOLS_PROJECTS=1) and `remember` / `recall` (only when the agent announced `memory`: KOBE_TOOLS_MEMORY=1). Each call goes
  * through kobe-policy first (it is the last extension, so it checks the tool call before this
  * extension's `execute` runs), then to kobe-sandbox-agent on fd 4 (`KOBE_TOOLS_FD`), which forwards
  * it to the Kobe server; the server's answer is the tool result.
@@ -25,6 +26,7 @@ import type { ToolsTransport } from "./tools.js";
  */
 let transport: ToolsTransport | undefined;
 let files = false;
+let projects = false;
 let memory = false;
 let memoryPath: string | undefined;
 let connected = false;
@@ -33,6 +35,7 @@ export default function kobeTools(pi: ExtensionApiLike): void {
   if (!connected) {
     connected = true;
     files = filesEnabled(process.env);
+    projects = projectsEnabled(process.env);
     memory = memoryEnabled(process.env);
     memoryPath = memoryFile(process.env);
     transport = connectTools({
@@ -41,5 +44,5 @@ export default function kobeTools(pi: ExtensionApiLike): void {
       warn: (message) => process.stderr.write(`${message}\n`),
     });
   }
-  registerKobeTools(pi, transport, { files, memory, memoryFile: memoryPath });
+  registerKobeTools(pi, transport, { files, projects, memory, memoryFile: memoryPath });
 }

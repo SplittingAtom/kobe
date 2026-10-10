@@ -6,6 +6,7 @@
  *
  *   extension → agent   {"id","op":"artifact.put","tool_call_id","tool","input"}
  *                       {"id","op":"file.share","tool_call_id","tool":"share_file","input"}
+ *                       {"id","op":"project.file_propose","tool_call_id","tool":"propose_project_file","input"}
  *   agent → extension   {"id","ok":true,"artifact_id","version"}            (artifact.put)
  *                       {"id","ok":true,"file_id","name","mime_type","size_bytes","scan",
  *                        "created_at","sha256"}                              (file.share)
@@ -27,12 +28,14 @@ export const TOOLS_TIMEOUT_MS = 30_000;
 
 export const OP_ARTIFACT_PUT = "artifact.put";
 export const OP_FILE_SHARE = "file.share";
+export const OP_PROJECT_FILE_PROPOSE = "project.file_propose";
 export const OP_WEB_SEARCH = "web_search";
 export const OP_MEMORY_PUT = "memory.put";
 export const OP_MEMORY_READ = "memory.read";
 export const OPS = [
   OP_ARTIFACT_PUT,
   OP_FILE_SHARE,
+  OP_PROJECT_FILE_PROPOSE,
   OP_WEB_SEARCH,
   OP_MEMORY_PUT,
   OP_MEMORY_READ,
@@ -62,6 +65,15 @@ export const TOOL_SHARE_FILE = "share_file";
 export const SHARE_PATH_MAX = 1024;
 export const SHARE_DESCRIPTION_MAX = 500;
 export const SHARE_NAME_MAX = 255;
+
+/**
+ * Env var set to `1` by an agent that announced the `projects` capability (KOBE-162). Read once,
+ * removed. `propose_project_file` is registered only then; the server also checks the capability.
+ */
+export const TOOLS_PROJECTS_ENV = "KOBE_TOOLS_PROJECTS";
+export const TOOL_PROPOSE_PROJECT_FILE = "propose_project_file";
+/** Mirrors packages/protocol `projects.ts` (pinned by a test). */
+export const PROJECT_PROPOSE_REASON_MAX = 500;
 
 export const TOOL_CREATE_ARTIFACT = "create_artifact";
 export const TOOL_UPDATE_ARTIFACT = "update_artifact";
@@ -98,6 +110,17 @@ export interface SharedFileFields {
   readonly scan: string;
   readonly created_at: string;
   readonly sha256: string;
+}
+
+/** `propose_project_file` answer: the proposal waits for a person's approval, or was applied. */
+export interface ProjectProposeAnswer {
+  readonly ok: true;
+  readonly op: "project_file_propose";
+  readonly status: "pending_approval" | "applied";
+  readonly proposal_id: string;
+  readonly project_id: string;
+  readonly path: string;
+  readonly file?: Record<string, unknown>;
 }
 
 export interface WebSearchCitation {
@@ -145,6 +168,7 @@ export interface MemoryReadAnswer {
 export type ToolsResponse =
   | ({ readonly id: string } & MemoryPutAnswer)
   | ({ readonly id: string } & MemoryReadAnswer)
+  | ({ readonly id: string } & ProjectProposeAnswer)
   | ({ readonly id: string } & WebSearchAnswer)
   | ({ readonly id: string } & WebSearchUnavailable)
   | {
