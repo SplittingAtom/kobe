@@ -8,8 +8,8 @@ import { readPersonalSkillsDisabled } from "../skills/settings.js";
 
 /**
  * Run-start inputs of the effective-config resolver (KOBE-76, 47b), gathered inside `withTeam()`.
- * Until KOBE-61 lands, no connector is user-connected (user decision: an agent's connectors are
- * left out with `not_user_connected`). Skills (KOBE-78/80): the agent's named team skills resolve to their
+ * A connector is user-connected when the user holds a usable grant for it (KOBE-111, run-mcp.ts);
+ * the others are left out with `not_user_connected`. Skills (KOBE-78/80): the agent's named team skills resolve to their
  * newest team-admin-approved version (an unreviewed, pending or rejected one is unusable and
  * dropped), the user's personal skills to their latest versions (a flagged or unscanned one only once this team approved it), and the team's switch
  * `personalSkillsDisabled` is read here. Blocklisted hashes (KOBE-81) are read from the table at
@@ -104,6 +104,8 @@ export function buildResolveInput(args: {
   readonly floor: ApprovalMode;
   readonly team: TeamResolverFacts;
   readonly skills: SkillFacts;
+  /** Names of the team connectors the run's user can use (run-mcp.ts `connectedConnectorNames`). */
+  readonly connectedConnectors: readonly string[];
 }): ResolveInput {
   const { frontmatter, team } = args;
   return {
@@ -124,7 +126,7 @@ export function buildResolveInput(args: {
     user: {
       skills: args.skills.user,
       unapprovedSkills: args.skills.userUnapproved,
-      connectedConnectors: [], // TODO(KOBE-61): the user's connected connectors
+      connectedConnectors: args.connectedConnectors,
     },
     approvalFloor: args.floor,
     blockedHashes: args.skills.blockedHashes,

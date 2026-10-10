@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   CAPABILITY_BUILTIN_SKILLS,
+  CAPABILITY_MCP,
   CAPABILITY_MEMORY,
   CAPABILITY_PROJECTS,
   CAPABILITY_RUN_TOKEN,
@@ -456,6 +457,11 @@ export class CommandDelivery {
     // without them rather than failing on an unknown key.
     if (row.kind === "run.start" && !this.#host.hasCapability(CAPABILITY_PROJECTS)) {
       const { project: _project, ...rest } = out as RunStartFrame;
+      out = rest as typeof frame;
+    }
+    // Same for the per-session MCP config (KOBE-111): an agent without it has no connector tools.
+    if (row.kind === "run.start" && !this.#host.hasCapability(CAPABILITY_MCP)) {
+      const { mcp: _mcp, ...rest } = out as RunStartFrame;
       out = rest as typeof frame;
     }
     this.#host.send(out);

@@ -35,9 +35,11 @@ function token(
     aud?: "kobe.mcp-proxy" | "kobe.egress-proxy";
     ttl?: number;
     sub?: string;
+    /** Seconds ago it was issued (with `ttl`, it can be genuine but expired). */
+    age?: number;
   } = {},
 ) {
-  const now = Math.floor(Date.now() / 1000);
+  const now = Math.floor(Date.now() / 1000) - (options.age ?? 0);
   return signSessionToken(
     {
       iss: "kobe-server",
@@ -218,6 +220,39 @@ describe("authentication and transport", () => {
     expect(server.asked).toEqual([]);
   });
 
+  it("KOBE-111: initialize hands out a constant session id; an expired token on that session is a 404, not a 401", async () => {
+    const init = await rpc("initialize", {});
+    expect(init.status).toBe(200);
+    const session = init.headers.get("mcp-session-id");
+    expect(session).toBeTruthy();
+    // Pi's MCP client retries a 404 on a session once, on a new session, re-reading its token:
+    // that is how a run that outlives the 15 min token recovers without running the call twice.
+    server.asked.length = 0;
+    const stale = await rpc("tools/list", undefined, {
+      token: token({ age: 1200, ttl: 600 }),
+      headers: { "mcp-session-id": session ?? "" },
+    });
+    expect(stale.status).toBe(404);
+    expect(server.asked).toEqual([]);
+    // Forged or wrong-audience tokens never get the softer answer; neither does a fresh session.
+    for (const t of [
+      token({ key: "x".repeat(48), age: 1200, ttl: 600 }),
+      token({ aud: "kobe.egress-proxy", age: 1200, ttl: 600 }),
+    ]) {
+      const res = await rpc("tools/list", undefined, {
+        token: t,
+        headers: { "mcp-session-id": session ?? "" },
+      });
+      expect(res.status).toBe(401);
+    }
+    expect((await rpc("initialize", {}, { token: token({ age: 1200, ttl: 600 }) })).status).toBe(
+      401,
+    );
+    // A valid token with the session id works (the id carries no state).
+    const ok = await rpc("tools/list", undefined, { headers: { "mcp-session-id": session ?? "" } });
+    expect(ok.status).toBe(200);
+  });
+
   it("answers only POST (stateless: no GET stream, no session to delete)", async () => {
     for (const method of ["GET", "DELETE"]) {
       const res = await app().request(`/v1/mcp/${CONNECTOR}`, {
@@ -290,7 +325,8 @@ describe("initialize, ping, tools/list", () => {
       capabilities: { tools: { listChanged: false } },
       serverInfo: { name: "kobe-mcp-proxy", version: "1.0.0" },
     });
-    expect(res.headers.get("mcp-session-id")).toBeNull();
+    // A constant id only: no state behind it (KOBE-111, see the session test).
+    expect(res.headers.get("mcp-session-id")).toBe("kobe-stateless");
     const newest = await rpc("initialize", { protocolVersion: "2099-01-01" });
     expect(newest.json?.result.protocolVersion).toBe("2025-11-25");
   });

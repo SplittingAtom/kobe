@@ -40,6 +40,8 @@
  *   `project.file_propose_result` and `run.start.project`; same refusal rule.
  *   `web_search` ({@link CAPABILITY_WEB_SEARCH}, web-search.ts, KOBE-114): `web_search.query` /
  *   `web_search.result`; same refusal rule.
+ *   `mcp` ({@link CAPABILITY_MCP}, mcp-config.ts, KOBE-111): `run.start.mcp`, the run's effective
+ *   connectors for Pi's per-session MCP config; dropped (not refused) for agents without it.
  *
  * Leasing (normative)
  * - The server leases each run and thread to exactly one authenticated connection: the one whose

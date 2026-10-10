@@ -9,6 +9,7 @@ import { logger } from "./logger.js";
 import { sweepRuntimeDir } from "./models/runtime-dir.js";
 import { ModelTokenKeeper } from "./models/token-keeper.js";
 import type { EgressWiring } from "./egress/egress-wiring.js";
+import type { McpWiring } from "./mcp/pi-mcp-config.js";
 import type { ModelWiring } from "./models/types.js";
 import { loadPiIdentities, type PiIdentities } from "./pi/identities.js";
 import { buildPiLaunch } from "./pi/pi-launch.js";
@@ -79,12 +80,13 @@ async function main(): Promise<void> {
           bootstrapTokenFile: loaded.bootstrapTokenFile,
           logger,
         });
-  const [agentVersion, piVersion, grant, models, egress] = await Promise.all([
+  const [agentVersion, piVersion, grant, models, egress, mcp] = await Promise.all([
     readAgentVersion(new URL("../package.json", import.meta.url)),
     readPiVersion(loaded.piBin, piEnv),
     session?.grant(),
     modelWiring(checked, session),
     egressWiring(checked, session),
+    mcpWiring(checked, session),
   ]);
   const config = grant ? { ...checked, sandboxId: grant.sandboxId } : checked;
   logger.info(
@@ -142,6 +144,7 @@ async function main(): Promise<void> {
     parentEnv: process.env,
     models,
     egress,
+    mcp,
     toolsExtension: checked.toolsExtension,
     exec,
     onExit: (code) => process.exit(code),
@@ -285,6 +288,24 @@ async function egressWiring(
   });
   await keeper.start();
   return { proxyUrl: config.egressProxyUrl, noProxy: config.noProxy, envScript, tokens: keeper };
+}
+
+/**
+ * MCP proxy access for Pi (KOBE-111): only with the proxy URL and a session to trade tokens with.
+ * Nothing is read from disk: Pi's `mcp.json` is written per process from the run's effective
+ * connectors, with the rotating `kobe.mcp-proxy` token as the only credential.
+ */
+function mcpWiring(
+  config: ReturnType<typeof loadConfig>,
+  session: SessionClient | undefined,
+): Promise<McpWiring | undefined> {
+  if (config.mcpProxyUrl === undefined || session === undefined) return Promise.resolve(undefined);
+  const keeper = new ModelTokenKeeper({
+    grant: () => session.mcpProxyGrant(),
+    refreshMarginMs: session.refreshMarginMs,
+    logger,
+  });
+  return keeper.start().then(() => ({ proxyUrl: config.mcpProxyUrl as string, tokens: keeper }));
 }
 
 main().catch((error: unknown) => {

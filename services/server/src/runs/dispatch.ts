@@ -75,6 +75,7 @@ export class RunDispatcher {
         message: plan.input,
         ...(plan.attachments === undefined ? {} : { attachments: plan.attachments }),
         ...(plan.project === undefined ? {} : { project: plan.project }),
+        ...(plan.mcp === undefined ? {} : { mcp: plan.mcp }),
         ...(plan.parentEntryId !== null ? { parentEntryId: plan.parentEntryId } : {}),
         config: {
           ...plan.config,

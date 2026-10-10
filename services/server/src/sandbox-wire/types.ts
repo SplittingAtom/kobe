@@ -9,6 +9,7 @@ import type {
   PolicyDecision,
   PolicyReason,
   RunProjectContext,
+  RunMcpContext,
   RunStatus,
   SandboxAttachment,
   SessionTokenClaims,
@@ -84,6 +85,8 @@ export interface RunStartRequest {
   readonly config?: PiThreadConfig;
   /** Project instructions (KOBE-161); dropped for agents without the `projects` capability. */
   readonly project?: RunProjectContext;
+  /** Effective MCP connectors (KOBE-111); dropped for agents without the `mcp` capability. */
+  readonly mcp?: RunMcpContext;
 }
 
 export interface RunSteerRequest {
