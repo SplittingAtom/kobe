@@ -57,11 +57,11 @@ beforeAll(async () => {
     sandboxWire: {
       engine: allowAll,
       sweep: false,
-      webSearch: { search: (t, i) => service.search(t, i) },
+      webSearch: { search: (t, i, c) => service.search(t, i, c) },
       tuning: { batchWindowMs: 20, resultPollMs: 200, lostGraceMs: 0, helloTimeoutMs: 1_000 },
     },
   }));
-  service = createWebSearchService({ db: fx.db, envelope, fetch: fakeFetch });
+  service = createWebSearchService({ db: fx.db, envelope, fetch: fakeFetch, maxPerRun: 3 });
   listener = await sandboxListener(fx.replica(0).deps, auth);
 });
 afterAll(async () => {
@@ -260,5 +260,61 @@ describe("web_search.query", () => {
       ["capability_missing", "input_mismatch", "not_allowed"].sort(),
     );
     expect(JSON.stringify(rows)).not.toContain("kobe");
+  });
+
+  it("an allowed call is single use: a replay is refused and the provider is called once", async () => {
+    await clearInstall();
+    const w = await world();
+    await configure(w, true);
+    const sb = await started(w);
+    const before = providerCalls.length;
+    expect((await allowedSearch(sb, w, "once", { query: "kobe" })).ok).toBe(true);
+    expect(await search(sb, w, "once", { query: "kobe" })).toMatchObject({
+      ok: false,
+      error: { code: "not_allowed" },
+    });
+    expect(providerCalls.length).toBe(before + 1);
+    await new Promise((r) => setTimeout(r, 300));
+    const { rows } = await fx.admin.query<{ target: { reason: string } }>(
+      `SELECT target FROM audit_log WHERE action = 'sandbox.web_search_refused' AND team_id = $1`,
+      [w.team],
+    );
+    expect(rows.map((r) => r.target.reason)).toEqual(["replayed"]);
+  });
+
+  it("a query with leading and trailing spaces is searched as sent (same bytes as the policy hash)", async () => {
+    await clearInstall();
+    const w = await world();
+    await configure(w, true);
+    const sb = await started(w);
+    const res = await allowedSearch(sb, w, "sp", { query: "  kobe bryant  " });
+    expect(res).toMatchObject({ ok: true, available: true, query: "  kobe bryant  " });
+  });
+
+  it("caps searches per run from the database, across service instances", async () => {
+    await clearInstall();
+    const w = await world();
+    await configure(w, true);
+    const other = createWebSearchService({ db: fx.db, envelope, fetch: fakeFetch, maxPerRun: 3 });
+    const call = (n: number) => ({
+      runId: w.runId,
+      toolCallId: `cap-${n}`,
+      sandboxId: w.sandboxId,
+      userId: w.owner.id,
+    });
+    const answers = [];
+    for (let n = 0; n < 5; n++) {
+      answers.push(await (n % 2 === 0 ? service : other).search(w.team, { query: "q" }, call(n)));
+    }
+    expect(answers.map((a) => a.kind)).toEqual(["results", "results", "results", "error", "error"]);
+    expect(answers[3]).toMatchObject({ code: "run_limit" });
+    // Another run is unaffected.
+    const w2 = await world();
+    await fx.admin.query(`INSERT INTO team_web_search (team_id, enabled_by) VALUES ($1, $2)`, [
+      w2.team,
+      w2.owner.id,
+    ]);
+    const fresh = await service.search(w2.team, { query: "q" }, { ...call(9), runId: w2.runId });
+    expect(fresh.kind).toBe("results");
   });
 });

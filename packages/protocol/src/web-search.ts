@@ -24,12 +24,19 @@ export const TOOL_WEB_SEARCH = "web_search";
 export const WEB_SEARCH_QUERY_MAX = 400;
 export const WEB_SEARCH_COUNT_MAX = 10;
 export const WEB_SEARCH_COUNT_DEFAULT = 5;
+/** Searches one run may make; counted in the database so it holds across replicas. */
+export const WEB_SEARCHES_PER_RUN = 50;
 export const WEB_SEARCH_TITLE_MAX = 300;
 export const WEB_SEARCH_URL_MAX = 2048;
 export const WEB_SEARCH_SNIPPET_MAX = 1000;
 
 export const webSearchInputSchema = z.strictObject({
-  query: z.string().trim().min(1).max(WEB_SEARCH_QUERY_MAX),
+  // Not trimmed: policy hashes `canonicalJson(input)` as sent, and the server must see the same
+  // bytes. A blank query is refused instead.
+  query: z
+    .string()
+    .max(WEB_SEARCH_QUERY_MAX)
+    .refine((q) => q.trim() !== "", "blank query"),
   count: z.number().int().min(1).max(WEB_SEARCH_COUNT_MAX).optional(),
 });
 export type WebSearchInput = z.infer<typeof webSearchInputSchema>;
@@ -69,6 +76,7 @@ export const WEB_SEARCH_ERROR_CODES = [
   "not_allowed",
   "invalid_input",
   "rate_limited",
+  "run_limit",
   "search_failed",
 ] as const;
 

@@ -21,11 +21,18 @@ describe("web_search contract", () => {
   });
 
   it("validates the model input strictly", () => {
+    // Kept as sent: the policy check hashed these exact bytes (no trim, or input_mismatch).
     expect(webSearchInputSchema.safeParse({ query: " cats ", count: 3 }).data).toEqual({
-      query: "cats",
+      query: " cats ",
       count: 3,
     });
-    for (const bad of [{}, { query: "" }, { query: "x", count: 11 }, { query: "x", extra: 1 }]) {
+    for (const bad of [
+      {},
+      { query: "" },
+      { query: "   " },
+      { query: "x", count: 11 },
+      { query: "x", extra: 1 },
+    ]) {
       expect(webSearchInputSchema.safeParse(bad).success).toBe(false);
     }
   });

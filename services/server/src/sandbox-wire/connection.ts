@@ -745,7 +745,7 @@ export class SandboxConnection implements RegisteredConnection {
       refuse("run_not_active", "The run has ended, so the search was not run.");
       return;
     }
-    const verdict = this.#allowedArtifacts.check(
+    const verdict = this.#allowedArtifacts.consume(
       frame.run_id,
       frame.tool_call_id,
       frame.tool,
@@ -756,7 +756,9 @@ export class SandboxConnection implements RegisteredConnection {
         verdict,
         verdict === "input_mismatch"
           ? "The search differs from the call that was allowed."
-          : "This tool call was not allowed for this tool.",
+          : verdict === "replayed"
+            ? "This search was already run; ask the model to search again."
+            : "This tool call was not allowed for this tool.",
       );
       return;
     }
@@ -766,7 +768,12 @@ export class SandboxConnection implements RegisteredConnection {
     }
     this.#webSearches += 1;
     void this.#ctx.webSearch
-      .search(this.target.teamId, frame.input)
+      .search(this.target.teamId, frame.input, {
+        runId: frame.run_id,
+        toolCallId: frame.tool_call_id,
+        sandboxId: this.sandboxId,
+        userId: this.target.userId,
+      })
       .catch((err: unknown) => {
         this.log.error({ err }, "web_search failed");
         return {

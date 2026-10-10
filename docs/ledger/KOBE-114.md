@@ -36,6 +36,14 @@ decides, read tool) -> kobe-tools fd 4 `{op:"web_search"}` -> agent -> wire fram
 - **Capability, no env flag.** The agent announces `web_search` whenever it has the tools extension; the
   tool is always registered, so "unavailable" is reachable. The server refuses `web_search.query` from a
   connection without the capability (audit `sandbox.web_search_refused`, never the query).
+- **Review fixes.** (1) A `web_search` allowance is single use: `AllowedArtifactCalls.consume()` takes it
+  synchronously before the search runs; a repeat is `replayed` (audited). Artifact/file calls keep the reusable
+  `check()` (they are idempotent in the DB). Per-run cap of 50 (`WEB_SEARCHES_PER_RUN`): each provider call first
+  writes `sandbox.web_search_queried` (ids only) under a per-run advisory lock, and the count is read from
+  `audit_log` in the same transaction, so it holds across replicas without a migration; a dedicated counter
+  column would be cheaper at scale. (2) Tool text fences results between untrusted markers; titles, URLs and
+  snippets lose CR/LF/control characters and `<<<`. (3) The input schema no longer trims (policy hashes the bytes
+  as sent); a blank query is refused.
 - **Risk.** `BUILTIN_TOOLS.web_search` = kobe source, `read`, scope `external`, open-world: no approval
   in ask-on-write; deny/ask rules and `ask-all` still apply, and agent files can name it.
 
