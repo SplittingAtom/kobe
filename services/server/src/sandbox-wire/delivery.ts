@@ -448,6 +448,12 @@ export class CommandDelivery {
     let out = claimed.runToken
       ? ({ ...frame, run_token: claimed.runToken } as typeof frame)
       : frame;
+    // Project files: the user's workspace is brought in line with their memberships before the
+    // sandbox pulls it at run start (KOBE-162). Never blocks or fails the run; see ProjectMounts.
+    if (row.kind === "run.start") {
+      const { teamId, userId } = this.#host.target;
+      await this.#ctx.projectMounts?.reconcileUser(teamId, userId);
+    }
     // Memory indexes only reach agents that know the field (KOBE-156).
     if (row.kind === "run.start" && this.#host.hasCapability(CAPABILITY_MEMORY)) {
       const memory = await this.#runMemory(row.threadId);

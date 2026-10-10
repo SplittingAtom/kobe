@@ -61,6 +61,7 @@ import { logger } from "./logger.js";
 import { BudgetMonitor } from "./budgets/monitor.js";
 import { DB_RUN_BUDGET_GATE } from "./budgets/run-gate.js";
 import type { BlobStore } from "./retention/blobs.js";
+import { createProjectMounts, type ProjectMounts } from "./projects/mounts.js";
 import type { UploadSettings } from "./uploads/settings.js";
 
 export interface ServerDepsOptions {
@@ -221,6 +222,8 @@ export interface ServerDeps {
   readonly blobs: BlobStore | undefined;
   /** Upload limits (KOBE-143); undefined: the contract defaults. */
   readonly uploads: UploadSettings | undefined;
+  /** Keeps members' `projects/` workspace area equal to their projects' files (KOBE-162). */
+  readonly projectMounts: ProjectMounts;
   /** Creates an email+password user (and optional install role) atomically, without sign-up. */
   createUserWithPassword(
     input: NewUser,
@@ -284,6 +287,8 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   };
   const policyEngine = createPolicyEngine(policySources);
   const runContext = options.sandboxWire?.runContext ?? createDbRunContextSource();
+  // Project files in members' workspaces (KOBE-162); `index.ts` binds the workspace store later.
+  const projectMounts = createProjectMounts(database.db, logger);
   const sandboxWire = createSandboxWire({
     tools: toolRegistry,
     engine: policyEngine,
@@ -294,6 +299,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     runContext,
     ...(options.blobs ? { blobs: options.blobs } : {}),
     ...(options.uploads ? { uploads: options.uploads } : {}),
+    projectMounts,
     webSearch:
       options.sandboxWire?.webSearch ??
       createWebSearchService({ db: database.db, envelope: options.envelope }),
@@ -397,6 +403,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     budgets,
     blobs: options.blobs,
     uploads: options.uploads,
+    projectMounts,
     async createUserWithPassword({ email, name, password }, { installRole, recordSetup } = {}) {
       const ctx = await auth.$context;
       const hash = await ctx.password.hash(password);

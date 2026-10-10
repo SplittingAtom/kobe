@@ -147,6 +147,7 @@ describe("server-side tool registry", () => {
         "list_mcp_resources",
         "ls",
         "powershell",
+        "propose_project_file",
         "read",
         "read_mcp_resource",
         "recall",

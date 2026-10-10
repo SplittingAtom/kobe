@@ -1,6 +1,5 @@
 import {
   APPROVAL_TTL_MS,
-  approvalModeSchema,
   MEMORY_INDEX_FILE,
   MEMORY_INDEX_MAX_LINES,
   MEMORY_RECALL_MAX_FILES,
@@ -22,13 +21,17 @@ import {
   type KobeTx,
 } from "@kobe/db";
 import type { Logger } from "pino";
-import { loadApprovalForCall } from "../approvals/store.js";
+import {
+  approvalHolds,
+  hasApproval,
+  noPromptCode,
+  recordDeniedWrite,
+} from "../approvals/server-write.js";
 import type { ApprovalVerifier } from "../approvals/verify.js";
 import { recordAudit } from "../audit/record.js";
 import { AppendError, appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
 import type { BlobStore } from "../retention/blobs.js";
 import type { ApprovalBroker } from "../sandbox-wire/types.js";
-import { readApprovalFloor, strictestApprovalMode } from "../policy/approval-floor.js";
 import { canAccessProject } from "./access.js";
 import {
   MemoryStorageError,
@@ -327,96 +330,6 @@ const projectDecision = (): Extract<PolicyDecision, { effect: "require_approval"
   ],
 });
 
-/** Whether an approval row exists for this call already (the policy check may have got it). */
-async function hasApproval(deps: MemoryAgentDeps, req: PutRequest): Promise<boolean> {
-  const row = await withTeam(deps.db, req.teamId, (tx) =>
-    loadApprovalForCall(tx, req.teamId, req.runId, req.toolCallId),
-  );
-  return row !== undefined;
-}
-
-async function verified(deps: MemoryAgentDeps, req: PutRequest): Promise<boolean> {
-  if (!deps.verifier) return false;
-  const check = await deps.verifier.authorize({
-    teamId: req.teamId,
-    userId: req.userId,
-    runId: req.runId,
-    toolCallId: req.toolCallId,
-    tool: "remember",
-    input: req.input,
-    enforcementPoint: "server",
-  });
-  return check.ok;
-}
-
-/** Why this run may not ask a person, if it may not (scheduled run or `auto` approval mode). */
-async function noPromptCode(
-  deps: MemoryAgentDeps,
-  req: PutRequest,
-): Promise<"scheduled_run_no_prompt" | "mode_auto_not_allowlisted" | undefined> {
-  // The effective mode, as the policy check computes it: scheduled runs are `auto`; otherwise the
-  // run's mode clamped to the install floor as it is now (the floor may have risen since).
-  const { trigger, mode, floor } = await withTeam(deps.db, req.teamId, async (tx) => {
-    const res = await tx.execute<{ trigger: string; approval_mode: string }>(sql`
-      SELECT trigger, approval_mode FROM runs WHERE team_id = ${req.teamId} AND id = ${req.runId}`);
-    const run = res.rows[0];
-    return {
-      trigger: run?.trigger,
-      mode: approvalModeSchema.safeParse(run?.approval_mode),
-      floor: await readApprovalFloor(tx),
-    };
-  });
-  if (trigger === "schedule") return "scheduled_run_no_prompt";
-  const requested = mode.success ? mode.data : "ask-on-write";
-  return strictestApprovalMode(requested, floor) === "auto"
-    ? "mode_auto_not_allowlisted"
-    : undefined;
-}
-
-/**
- * The denied write as the same `policy.denied` event the policy check records, which is what the
- * run report's skipped actions are built from. TODO(KOBE-178): attach `skipped_actions` to the
- * terminal event once the run-report plumbing reads them.
- */
-async function recordDenied(
-  deps: MemoryAgentDeps,
-  req: PutRequest,
-  code: "scheduled_run_no_prompt" | "mode_auto_not_allowlisted",
-): Promise<void> {
-  try {
-    await withAppendTx(deps.db, req.teamId, (tx) => appendDenied(tx, deps, req, code));
-  } catch (err) {
-    deps.log.warn({ err, run_id: req.runId }, "could not record the skipped project write");
-  }
-}
-
-async function appendDenied(
-  tx: KobeTx,
-  deps: MemoryAgentDeps,
-  req: PutRequest,
-  code: "scheduled_run_no_prompt" | "mode_auto_not_allowlisted",
-): Promise<void> {
-  const run = await tx.execute<{ last_seq: number }>(sql`
-    SELECT last_seq FROM runs WHERE team_id = ${req.teamId} AND id = ${req.runId}`);
-  if ((run.rows[0]?.last_seq ?? deps.runMaxEvents) + 2 > deps.runMaxEvents) return;
-  await appendRunEventsInTx(tx, req.teamId, req.runId, [
-    {
-      type: "policy.denied",
-      payload: {
-        tool_call_id: req.toolCallId,
-        tool: "remember",
-        reasons: [
-          {
-            code,
-            stage: "approval_mode",
-            message: "This run does not wait for approvals, so the project write was skipped.",
-          },
-        ],
-      },
-    },
-  ]);
-}
-
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((r) => {
@@ -444,9 +357,9 @@ function putProject(deps: MemoryAgentDeps, req: PutRequest): PutOutcome {
       answer.resolve(replyFor(early.prior));
       return;
     }
-    if (await hasApproval(deps, req)) {
+    if (await hasApproval(deps.db, req)) {
       // The policy check already asked: apply only if that signed approval covers this input.
-      if (await verified(deps, req)) {
+      if (await approvalHolds(deps.verifier, req, "remember", req.input)) {
         answer.resolve(finish(req, await apply(deps, req)));
       } else {
         req.refused("approval_denied", "project");
@@ -456,9 +369,9 @@ function putProject(deps: MemoryAgentDeps, req: PutRequest): PutOutcome {
     }
     // D32: a run in `auto` mode (and every scheduled run) never waits for a person: what would
     // ask is denied at once and reported as a skipped action (`policy.denied`).
-    const noPrompt = await noPromptCode(deps, req);
+    const noPrompt = await noPromptCode(deps.db, req);
     if (noPrompt) {
-      await recordDenied(deps, req, noPrompt);
+      await recordDeniedWrite(deps.db, deps.log, req, "remember", deps.runMaxEvents, noPrompt);
       req.refused("approval_denied", "project");
       answer.resolve(
         fail(
@@ -490,7 +403,10 @@ function putProject(deps: MemoryAgentDeps, req: PutRequest): PutOutcome {
           path: req.input.path,
         }),
     );
-    if (outcome.decision === "deny" || !(await verified(deps, req))) {
+    if (
+      outcome.decision === "deny" ||
+      !(await approvalHolds(deps.verifier, req, "remember", req.input))
+    ) {
       req.refused("approval_denied", "project");
       answer.resolve(
         fail(

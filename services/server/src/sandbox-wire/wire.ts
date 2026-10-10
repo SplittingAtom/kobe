@@ -14,6 +14,7 @@ import { BackgroundTasks } from "../background.js";
 import type { ApprovalVerifier } from "../approvals/verify.js";
 import type { BlobStore } from "../retention/blobs.js";
 import { DEFAULT_UPLOAD_SETTINGS, type UploadSettings } from "../uploads/settings.js";
+import type { ProjectMounts } from "../projects/mounts.js";
 import { createPolicyEngine } from "../policy/engine.js";
 import { createToolRegistry } from "../policy/registry.js";
 import { createDbRuleSource, createDbSettingsSource } from "../policy/rule-store.js";
@@ -57,6 +58,8 @@ export interface SandboxWireOptions {
   readonly blobs?: BlobStore;
   /** Upload limits and storage quota default, applied to `file.share` too (KOBE-150). */
   readonly uploads?: UploadSettings;
+  /** Project file mounts: refreshed at run start, used by `project.file_propose` (KOBE-162). */
+  readonly projectMounts?: ProjectMounts;
   /** Runs `web_search.query` (KOBE-114); unset: every search answers "not configured". */
   readonly webSearch?: WebSearchService;
   readonly tuning?: Partial<WireTuning>;
@@ -264,6 +267,20 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       verifier: options.approvalVerifier,
       log,
     },
+    ...(options.projectMounts ? { projectMounts: options.projectMounts } : {}),
+    projectFiles: {
+      db,
+      blobs: options.blobs,
+      approvals,
+      verifier: options.approvalVerifier,
+      mounts: options.projectMounts,
+      files: {
+        maxFileBytes: (options.uploads ?? DEFAULT_UPLOAD_SETTINGS).maxFileBytes,
+        teamQuotaDefaultBytes: (options.uploads ?? DEFAULT_UPLOAD_SETTINGS).defaultQuotaBytes,
+      },
+      runMaxEvents: tuning.runMaxEvents,
+      log,
+    },
     webSearch: options.webSearch ?? NO_WEB_SEARCH,
     ui: options.ui ?? CANCEL_DIALOGS,
     hooks,
@@ -313,6 +330,24 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
         target.teamId,
         {
           action: "sandbox.file_share_refused",
+          actor: SYSTEM_ACTOR,
+          teamId: target.teamId,
+          target: {
+            sandboxId,
+            userId: target.userId,
+            reason: refusal.reason,
+            runId: refusal.runId,
+            toolCallId: refusal.toolCallId,
+          },
+        },
+      );
+    },
+    auditProjectFileRefused(target, sandboxId, refusal) {
+      throttledAudit(
+        `${target.teamId}:${target.userId}:project_file:${refusal.reason}`,
+        target.teamId,
+        {
+          action: "sandbox.project_file_refused",
           actor: SYSTEM_ACTOR,
           teamId: target.teamId,
           target: {
