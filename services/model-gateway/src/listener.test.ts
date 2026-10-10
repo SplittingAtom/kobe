@@ -5,7 +5,7 @@ import { applyModelsHint } from "./listener.js";
 import { PrincipalCache } from "./principals.js";
 
 describe("applyModelsHint", () => {
-  it("drops a team's cached keys on keys:<team>, nothing on other hints", async () => {
+  it("drops a team's cached keys on keys:<team>, a config change drops all, nothing on other teams' hints", async () => {
     const box = new SecretBox("v".repeat(40), VIRTUAL_KEY_PURPOSE);
     const team = randomUUID();
     const user = randomUUID();
@@ -29,12 +29,16 @@ describe("applyModelsHint", () => {
     await cache.resolve(team, user, "s");
     await cache.resolve(team, user, "s");
     expect(loads).toBe(1);
-    applyModelsHint(cache, "config");
     applyModelsHint(cache, `keys:${randomUUID()}`);
+    applyModelsHint(cache, `spend:${team}`);
     await cache.resolve(team, user, "s");
     expect(loads).toBe(1);
     applyModelsHint(cache, `keys:${team}`);
     await cache.resolve(team, user, "s");
     expect(loads).toBe(2);
+    // A config change (a team enabling a model) drops every principal: its enabled-model set is stale.
+    applyModelsHint(cache, "config");
+    await cache.resolve(team, user, "s");
+    expect(loads).toBe(3);
   });
 });

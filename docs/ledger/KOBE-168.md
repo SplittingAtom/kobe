@@ -87,3 +87,10 @@ wake path (`POD_WAIT_TIMEOUT_MS` then the wake retry in `sandbox-wire/router.ts`
 sweep), but the job's diagnostics hold no server/agent logs for that window (the chart upgrades later in
 the suite rolled the server pods), so the cause is NOT proven. The trial now dumps server, event and agent
 logs for any first token above 10 s (`slow_trial_diagnostics`); the gate is unchanged.
+
+Fourth run (38048784387): `model_not_enabled` again, so the earlier wait was not the cause (it probed another
+member's gateway principal). The 403 is the model gateway's (log: status 403 at 11:45:25 for the run's
+model): its principal cache holds each member's enabled-model set for `KOBE_MODEL_GATEWAY_CACHE_TTL_MS`
+(5 s), and only `keys:<team>` hints dropped it, which an enable does not send. Product fix in
+`services/model-gateway/src/listener.ts`: the `config` hint (every enablement change) now drops all
+principals. The test wait in `e2e/run.sh` was removed. Not an executor bug; users could hit it too.
