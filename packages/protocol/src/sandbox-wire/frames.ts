@@ -21,6 +21,7 @@ import {
   projectFileProposeFrameSchema,
   projectFileProposeResultFrameSchema,
 } from "./project-frames.js";
+import { webSearchQueryFrameSchema, webSearchResultFrameSchema } from "./web-search-frames.js";
 import { runProjectContextSchema } from "../projects.js";
 import { runMemoryContextSchema } from "../memory.js";
 import { UPLOAD_MAX_FILES_PER_MESSAGE, uploadFileNameSchema } from "../uploads.js";
@@ -217,6 +218,7 @@ export const sandboxToServerFrameSchema = z.union([
   memoryPutFrameSchema,
   memoryReadFrameSchema,
   projectFileProposeFrameSchema,
+  webSearchQueryFrameSchema,
   piExitedFrameSchema,
   pingFrame,
   pongFrame,
@@ -502,6 +504,7 @@ export const serverToSandboxFrameSchema = z.union([
   fileShareResultFrameSchema,
   memoryResultFrameSchema,
   projectFileProposeResultFrameSchema,
+  webSearchResultFrameSchema,
   sessionRestoreFrameSchema,
   ackFrameSchema,
   resendFrameSchema,
@@ -520,6 +523,8 @@ export type ArtifactPutFrame = z.infer<typeof artifactPutFrameSchema>;
 export type ArtifactResultFrame = z.infer<typeof artifactResultFrameSchema>;
 export type FileShareFrame = z.infer<typeof fileShareFrameSchema>;
 export type FileShareResultFrame = z.infer<typeof fileShareResultFrameSchema>;
+export type WebSearchQueryFrame = z.infer<typeof webSearchQueryFrameSchema>;
+export type WebSearchResultFrame = z.infer<typeof webSearchResultFrameSchema>;
 export type PolicyResultFrame = z.infer<typeof policyResultFrameSchema>;
 export type RunStartFrame = z.infer<typeof runStartFrameSchema>;
 export type RunStopFrame = z.infer<typeof runStopFrameSchema>;

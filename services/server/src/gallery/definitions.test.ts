@@ -37,7 +37,7 @@ describe("the five gallery agents (KOBE-89)", () => {
     expect(Object.fromEntries(parsed.map((p) => [p.key, p.generation]))).toEqual({
       assistant: 3,
       "data-analyst": 3,
-      researcher: 1,
+      researcher: 2,
       "document-drafter": 3,
       "code-helper": 1,
     });
@@ -64,6 +64,13 @@ describe("the five gallery agents (KOBE-89)", () => {
 
   it("the Researcher tells the person plainly when it has no web search", () => {
     expect(def("researcher").prompt).toContain(RESEARCHER_NO_SEARCH_NOTICE);
+  });
+
+  it("the Researcher searches with web_search, cites URLs, and explains an unavailable answer (KOBE-114)", () => {
+    const prompt = def("researcher").prompt;
+    expect(prompt).toContain("web_search");
+    expect(prompt).toMatch(/unavailable/);
+    expect(prompt).toMatch(/URL/);
   });
 
   it("the Document Drafter writes files and offers a Markdown artifact preview alongside", () => {

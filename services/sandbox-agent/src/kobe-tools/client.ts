@@ -8,9 +8,13 @@ import {
   type ToolsError,
   type ToolsRequest,
   type ToolsResponse,
+  type WebSearchAnswer,
+  type WebSearchUnavailable,
 } from "./protocol.js";
 
 export type ToolsOutcome =
+  | WebSearchAnswer
+  | WebSearchUnavailable
   | { readonly ok: true; readonly artifact_id: string; readonly version: number }
   | ({ readonly ok: true } & SharedFileFields)
   | { readonly ok: false; readonly error: ToolsError };
@@ -116,6 +120,7 @@ function parseResponse(line: string): ToolsResponse | undefined {
   }
   if (!isRecord(value) || typeof value.id !== "string") return undefined;
   if (value.ok === true && "file_id" in value) return parseFileReply(value);
+  if (value.ok === true && "available" in value) return parseWebSearchReply(value);
   if (value.ok === true) {
     if (typeof value.artifact_id !== "string" || !Number.isSafeInteger(value.version))
       return undefined;
@@ -148,4 +153,24 @@ function parseFileReply(value: Record<string, unknown>): ToolsResponse | undefin
     created_at: value.created_at as string,
     sha256: value.sha256 as string,
   };
+}
+
+function parseWebSearchReply(value: Record<string, unknown>): ToolsResponse | undefined {
+  const id = value.id as string;
+  if (value.available === false) {
+    if (typeof value.reason !== "string" || typeof value.message !== "string") return undefined;
+    return { id, ok: true, available: false, reason: value.reason, message: value.message };
+  }
+  if (value.available !== true || typeof value.provider !== "string") return undefined;
+  if (typeof value.query !== "string" || !Array.isArray(value.results)) return undefined;
+  const results = [];
+  for (const item of value.results as unknown[]) {
+    if (!isRecord(item)) return undefined;
+    const { title, url, snippet } = item;
+    if (typeof title !== "string" || typeof url !== "string" || typeof snippet !== "string") {
+      return undefined;
+    }
+    results.push({ title, url, snippet });
+  }
+  return { id, ok: true, available: true, provider: value.provider, query: value.query, results };
 }
