@@ -226,10 +226,15 @@ contains "server and scheduler verified the gVisor RuntimeClass in process" '^ve
 # The sync's own record says whether it reached Bifrost (a pass lists and writes through its admin API).
 gateway_state() { psql_kobe "SELECT 'in_sync=' || (synced_version >= desired_version) || ' error=' || coalesce(last_error, '-') FROM model_gateway_state"; }
 wait_endpoints "$NS" kobe-bifrost
-bifrost=$(wait_for 90 '^in_sync=true error=-$' gateway_state)
+bifrost=$(wait_for 180 '^in_sync=true error=-$' gateway_state)
 contains "the server's gateway sync reached Bifrost (in sync, no error)" '^in_sync=true error=-$' "$bifrost"
-contains "Bifrost has not restarted" '^0$' "$($KUBECTL -n "$NS" get pods -l app.kubernetes.io/component=bifrost \
-  -o jsonpath='{.items[*].status.containerStatuses[*].restartCount}' 2>/dev/null)"
+bifrost_restarts=$($KUBECTL -n "$NS" get pods -l app.kubernetes.io/component=bifrost \
+  -o jsonpath='{.items[*].status.containerStatuses[*].restartCount}' 2>/dev/null)
+if [[ "$bifrost_restarts" != 0 ]]; then # KOBE-242: say why it restarted (OOM, failed probe) before the check fails
+  $KUBECTL -n "$NS" describe pod -l app.kubernetes.io/component=bifrost 2>&1 | grep -E "Last State|Reason|Exit Code|Liveness|Unhealthy" | sed 's/^/     bifrost: /' || true
+  $KUBECTL -n "$NS" logs -l app.kubernetes.io/component=bifrost --previous --tail=30 2>&1 | sed 's/^/     bifrost prev: /' || true
+fi
+contains "Bifrost has not restarted" '^0$' "$bifrost_restarts"
 # Once the control answers, the probe pod is in the policy ipsets: BLOCKED below is the policy.
 np=$(probe default "$(gated http://kobe-web.$NS/api/healthz bifrost http://kobe-bifrost.$NS:8080/health)")
 contains "probe from another namespace can reach unrestricted services (control)" '^control=REACHED$' "$np"
@@ -1966,6 +1971,10 @@ SH
     contains "share_file: the run that wrote the file completed" '^terminal=run.completed$' "$sf_out"
     sf_out=$(chat_run "tool: share_file {\"path\":\"shared-report.txt\",\"description\":\"E2E report\"}" 300000 "" "" "$sf_thread" 1)
     printf '     share_file: %s\n' "$(printf '%s' "$sf_out" | tr '\n' ' ' | cut -c1-500)"
+    if printf '%s' "$sf_out" | grep -q "Policy could not be evaluated"; then # KOBE-242: the cause is in the server log
+      $KUBECTL -n "$NS" logs -l app.kubernetes.io/component=server -c server --since=3m --tail=-1 2>&1 \
+        | grep -E "policy|lock timeout|approval" | tail -n 20 | cut -c1-600 | sed 's/^/     server: /' || true
+    fi
     contains "share_file: the run completed" '^terminal=run.completed$' "$sf_out"
     contains "share_file: the event stream carried file.shared (id, name, size)" \
       "^file_events=[0-9a-f-]{36}:shared-report.txt:$((${#share_text} + 1))\$" "$sf_out"

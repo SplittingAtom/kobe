@@ -35,6 +35,17 @@ export const APPROVAL_INPUT_SHOWN_MAX_BYTES = 192 * 1024;
  */
 export const APPROVALS_MAX_PER_RUN = 100;
 
+const CREATE_ATTEMPTS = 3;
+
+/** Postgres lock_not_available (`lock_timeout` expired), possibly wrapped by Drizzle. */
+export function isLockTimeout(err: unknown): boolean {
+  for (let e: unknown = err, depth = 0; e && depth < 5; depth += 1) {
+    if ((e as { code?: unknown }).code === "55P03") return true;
+    e = (e as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 export interface BrokerTuning {
   /** Re-read a pending approval this often even without a hint (default 2 s). */
   readonly pollMs: number;
@@ -132,7 +143,7 @@ export class ApprovalBrokerImpl implements ApprovalBroker {
     if (Buffer.byteLength(canonical, "utf8") > APPROVAL_INPUT_SHOWN_MAX_BYTES) {
       return deny("its input is too large to review for approval (over 192 KiB).");
     }
-    const created = await this.#create(req, canonical);
+    const created = await this.#createWithRetry(req, canonical);
     if (created.kind !== "created") {
       const why: Record<typeof created.kind, string> = {
         replay: "this tool call id already asked for approval in this run.",
@@ -167,6 +178,25 @@ export class ApprovalBrokerImpl implements ApprovalBroker {
       reasons: denyReasons(row, req.decision.reasons),
       message: `${DENY_PREFIX}${denyMessage(row)}`,
     };
+  }
+
+  /**
+   * `#create` rolls back entirely when it fails, so a lock timeout (55P03: another transaction held
+   * the thread or run row past APPEND_LOCK_TIMEOUT, e.g. ingest or a sweep under load) is retried a
+   * couple of times before it turns the call into a "Policy could not be evaluated" deny (KOBE-242).
+   */
+  async #createWithRetry(req: ApprovalRequest, canonical: string) {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await this.#create(req, canonical);
+      } catch (err) {
+        if (!isLockTimeout(err) || attempt >= CREATE_ATTEMPTS || req.signal.aborted) throw err;
+        this.#ctx.log.warn(
+          { err, attempt, run_id: req.runId },
+          "approval create lock timeout; retrying",
+        );
+      }
+    }
   }
 
   async #create(
