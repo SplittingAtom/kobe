@@ -556,6 +556,42 @@ async function providerKeys() {
   }
 }
 
+/**
+ * KOBE-121: a member's daily token budget for the two-replica check. `set`: the limit is what the
+ * member has spent today plus `headroom`; `spend`: tokens spent today; `clear`: no member budget.
+ */
+async function replicaBudget() {
+  const database = await db();
+  const { withTeam, sql } = await import("/app/node_modules/@kobe/db/dist/index.js");
+  const spent = async () => {
+    const rows = await withTeam(database.db, config.teamId, (tx) =>
+      tx.execute(sql`
+        SELECT coalesce(sum(tokens), 0)::text AS tokens FROM model_spend_daily
+         WHERE team_id = ${config.teamId} AND user_id = ${config.userId}
+           AND day = (now() AT TIME ZONE 'UTC')::date`),
+    );
+    return Number(rows.rows[0].tokens);
+  };
+  try {
+    if (config.action === "spend") {
+      out("member_spent", await spent());
+      return;
+    }
+    const admin = await userClient(config.admin);
+    const path = `/v1/team/budgets/members/${config.userId}`;
+    if (config.action === "clear") {
+      out("member_budget_status", (await admin.call("DELETE", path)).status);
+      return;
+    }
+    const baseline = await spent();
+    const res = await admin.call("PUT", path, { daily_tokens: baseline + config.headroom });
+    out("member_budget_status", res.status);
+    out("member_baseline", baseline);
+  } finally {
+    await database.close();
+  }
+}
+
 const MODES = {
   "provider-keys": providerKeys,
   fixtures,
@@ -569,6 +605,7 @@ const MODES = {
   decide,
   audit,
   ledger,
+  "replica-budget": replicaBudget,
   wire,
   "mcp-fixture": mcpFixture,
   "mcp-clean": mcpClean,

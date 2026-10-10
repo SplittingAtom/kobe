@@ -2,6 +2,8 @@
 # Gate 2 (KOBE-2, Safety) against an installed Kobe, five criteria end to end:
 #   ac-1 budget    a team budget at 100% lets the run in flight finish its current model step, then
 #                  stops it with run.budget_stopped (and refuses new runs)
+#   replicas       (KOBE-121) concurrent calls straight at both model-gateway replicas against a small
+#                  member token budget overshoot it by at most one call (reservations are shared)
 #   ac-2 egress    a blocked domain gives egress.blocked + Request access; after team-admin
 #                  enablement the same request succeeds
 #   ac-3 mcp       a sandbox with a tampered kobe-policy extension cannot execute an MCP write
@@ -30,7 +32,7 @@ HELM="${HELM:-helm}"
 NS="${KOBE_GATE2_NS:-kobe-dev}"
 RELEASE="${KOBE_GATE2_RELEASE:-kobe}"
 CHART="${KOBE_GATE2_CHART:-charts/kobe}"
-STEPS=" ${KOBE_GATE2_STEPS:-budget egress mcp break-glass scan} "
+STEPS=" ${KOBE_GATE2_STEPS:-budget replicas egress mcp break-glass scan} "
 MODEL_ALIAS="${KOBE_GATE2_MODEL:-fast}"
 OWNER_EMAIL="${KOBE_GATE2_OWNER_EMAIL:-owner@e2e.test}"
 OWNER_PASSWORD="${KOBE_GATE2_OWNER_PASSWORD:-e2e owner password}"
@@ -246,6 +248,59 @@ if [[ "$STEPS" == *" budget "* ]]; then
     [[ "$priced" == *price=set* ]] && step price "\"alias\":\"$MODEL_ALIAS\",\"action\":\"restore\"" >/dev/null
   else
     fail "ac-1 needs a model on the install (catalog entry '$MODEL_ALIAS' enabled for the team)"
+  fi
+fi
+
+# ---- KOBE-121: two model-gateway replicas, one hard budget --------------------------------------------
+if [[ "$STEPS" == *" replicas "* ]]; then
+  echo "==> replicas: concurrent calls at both model-gateway pods stay within a member's token budget by one call"
+  if ((MODELS)); then
+    mg_ips=($($KUBECTL -n "$NS" get pods -l app.kubernetes.io/component=model-gateway --field-selector=status.phase=Running \
+      -o jsonpath='{range .items[*]}{.status.podIP}{"\n"}{end}'))
+    contains "the chart runs two model-gateway replicas" '^2$' "${#mg_ips[@]}"
+    sbx_ready || wake
+    # The fake model reports 5 + 3 tokens; a call reserves its input estimate (14) plus max_tokens (3).
+    # Headroom 20 holds two reservations, so a shared gate admits two of the burst. Two gates that do
+    # not share would admit two each, four calls, 32 tokens: over headroom + one call (28).
+    ONE_CALL=8
+    HEADROOM=20
+    rtoken=$(client "$(printf '{"mode":"mint2","base":"%s","audiences":["kobe.model-gateway"],"sandboxId":"%s","teamId":"%s","userId":"%s"}' "$BASE" "$SBX_ID" "$TEAM" "$T2")" \
+      | sed -n 's/^token kobe.model-gateway //p')
+    rstep() { client "$(printf '{"mode":"replica-budget","base":"%s","admin":%s,"teamId":"%s","userId":"%s","action":"%s","headroom":%s}' "$BASE" "$U_T1" "$TEAM" "$T2" "$1" "$HEADROOM")"; }
+    UNDO+=("client '$(printf '{"mode":"replica-budget","base":"%s","admin":%s,"teamId":"%s","userId":"%s","action":"clear"}' "$BASE" "$U_T1" "$TEAM" "$T2")'")
+    sleep 3 # the ledger rows of earlier steps have landed
+    set_b=$(rstep set)
+    contains "t2 has a daily token budget of what it spent plus $HEADROOM" '^member_budget_status=200$' "$set_b"
+    baseline=$(field member_baseline "$set_b")
+    sleep 3 # the budgets hint reaches both replicas
+    body='{"model":"openai/gpt-fake","max_tokens":3,"messages":[]}'
+    burst=$(in_sbx "i=0; while [ \$i -lt 30 ]; do
+        if [ \$((i % 2)) -eq 0 ]; then ip=${mg_ips[0]:-0.0.0.0}; else ip=${mg_ips[1]:-0.0.0.0}; fi
+        ( curl -s -m 30 -o /dev/null -w 'code=%{http_code}\n' -X POST http://\$ip:8080/v1/chat/completions \
+            -H 'authorization: Bearer $rtoken' -H 'content-type: application/json' -d '$body' ) &
+        i=\$((i+1))
+      done; wait")
+    admitted=$(printf '%s\n' "$burst" | grep -c '^code=200$' || true)
+    echo "     30 calls at ${mg_ips[*]}: $(printf '%s\n' "$burst" | grep '^code=' | sort | uniq -c | tr -s ' \n' ' ')"
+    contains "all 30 calls got an answer" '^30$' "$(printf '%s\n' "$burst" | grep -c '^code=[0-9]')"
+    contains "none failed with a server error (the budget check is available)" '^0$' "$(printf '%s\n' "$burst" | grep -c '^code=5' || true)"
+    # Wait for the ledger to stop moving.
+    last=-1
+    for _ in 1 2 3 4 5 6 7 8; do
+      sleep 2
+      spent=$(field member_spent "$(rstep spend)")
+      [[ "$spent" == "$last" ]] && break
+      last=$spent
+    done
+    over=$((spent - baseline - HEADROOM))
+    ((over < 0)) && over=0
+    echo "     ledger: $((spent - baseline)) tokens for $admitted calls, headroom $HEADROOM, overshoot $over (one call: $ONE_CALL)"
+    contains "at least one call was admitted" '^[1-9][0-9]*$' "$admitted"
+    contains "the ledger shows the admitted calls" "^$((admitted * ONE_CALL))\$" "$((spent - baseline))"
+    contains "the budget was overshot by at most one call" '^[0-8]$' "$over"
+    contains "the budget is removed again" '^member_budget_status=(200|204)$' "$(rstep clear)"
+  else
+    fail "the replicas step needs a model on the install (catalog entry '$MODEL_ALIAS' enabled for the team)"
   fi
 fi
 
