@@ -20,8 +20,10 @@
   `server.sessionTokenTtlSeconds`. The e2e sets 10 s with one server roll; the KOBE-116 section's
   first upgrade restores 900. mcp-proxy logs the expired-token 404 so the e2e can prove the reconnect.
 - **e2e:** `e2e/run.sh` section "real Pi past an MCP token rotation", executor shard only
-  (`KOBE_E2E_TOOL_EXECUTOR=1`). Asserts per run: completes, the model saw `fake:get_thing`, the fake
-  server's call count rose by exactly one; plus the proxy's 404 log line. Prints its own elapsed time.
+  (`KOBE_E2E_TOOL_EXECUTOR=1`). Two separate runs never hit the 404: Pi opened a fresh connection per
+  run (both calls fine, no 404 in the proxy log). So ONE run holds the connection: the fake model's new
+  `steps:` script (model-gateway `fake-llm.ts`) issues MCP call, `bash sleep TTL+3`, MCP call. Asserts
+  the run completes, each call reached the fake server exactly once, and the proxy logged the 404.
 
 ## Open questions
 

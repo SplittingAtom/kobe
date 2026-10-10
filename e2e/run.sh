@@ -2522,27 +2522,22 @@ elif [[ -n "${KOBE_SANDBOX_IMAGE:-}" && "$(type -t chat_run)" == function && -n 
   if out=$($HELM upgrade kobe charts/kobe -n "$NS" --reuse-values --wait --timeout 5m \
       --set "server.sessionTokenTtlSeconds=$ROT_TTL" 2>&1); then ok "session tokens now live $ROT_TTL s (test install)"
   else fail "session tokens now live $ROT_TTL s (test install): $out"; fi
-  rot_calls() { $KUBECTL -n "$MCP_NS" logs fake-mcp 2>&1 | grep -c '^CALL get_thing ' || true; }
-  rot_before=$(rot_calls)
+  rot_calls() { $KUBECTL -n "$MCP_NS" logs fake-mcp 2>&1 | grep -c "^CALL get_thing .*\"id\":\"$1\"" || true; }
   rot_t1=$SECONDS
-  rot1=$(chat_run 'tool: mcp__e2e_fake__get_thing {"id":"101"}' 240000 "" "$ROT_AGENT" "" 1)
-  printf '     rotation, before: %s\n' "$(printf '%s' "$rot1" | grep -v '^text=' | tr '\n' ' ' | cut -c1-300)"
-  rot_thread=$(printf '%s\n' "$rot1" | sed -n 's/^thread_id=//p')
-  contains "before the rotation: Pi's MCP call through the proxy succeeded" '^terminal=run.completed$' "$rot1"
-  contains "before the rotation: the model saw the fake server's answer" 'tool said: .*fake:get_thing' "$rot1"
-  contains "before the rotation: the fake MCP server saw the call exactly once" '^1$' "$(( $(rot_calls) - rot_before ))"
-  rot_t2=$SECONDS
-  # Past the token's life: the token Pi connected with is now expired, the file holds a newer one.
-  sleep $((ROT_TTL + 2)) # the token Pi connected with is past its life; the file holds a newer one
-  rot2=$(chat_run 'tool: mcp__e2e_fake__get_thing {"id":"102"}' 240000 "" "$ROT_AGENT" "$rot_thread" 1)
-  printf '     rotation, after: %s\n' "$(printf '%s' "$rot2" | grep -v '^text=' | tr '\n' ' ' | cut -c1-300)"
-  contains "after the rotation: the same thread's MCP call succeeded" '^terminal=run.completed$' "$rot2"
-  contains "after the rotation: the model saw the fake server's answer" 'tool said: .*fake:get_thing' "$rot2"
-  contains "after the rotation: the call reached the fake MCP server exactly once (the 404 retry never runs it twice)" '^2$' "$(( $(rot_calls) - rot_before ))"
+  # One run, three scripted tool calls (the fake model's "steps:" script): an MCP call, a bash sleep
+  # past the token's life (Pi's connection and its token are now stale; the file holds a newer one),
+  # and the same MCP call again.
+  rot_steps='[{"name":"mcp__e2e_fake__get_thing","args":{"id":"101"}},{"name":"bash","args":{"command":"sleep '$((ROT_TTL + 3))'; echo slept"}},{"name":"mcp__e2e_fake__get_thing","args":{"id":"102"}}]'
+  rot_out=$(chat_run "steps: $rot_steps" 240000 "" "$ROT_AGENT" "" 1)
+  printf '     rotation run: %s\n' "$(printf '%s' "$rot_out" | tr '\n' ' ' | cut -c1-400)"
+  contains "the run with an MCP call before and after the token rotation completed" '^terminal=run.completed$' "$rot_out"
+  contains "the model saw the fake server's answer to the call after the rotation" 'tool said: .*fake:get_thing' "$rot_out"
+  contains "the call before the rotation reached the fake MCP server exactly once" '^1$' "$(rot_calls 101)"
+  contains "the call after the rotation reached the fake MCP server exactly once (the 404 retry never runs it twice)" '^1$' "$(rot_calls 102)"
   contains "the mcp-proxy answered an expired token on the live session with 404 (Pi reconnected)" '^[1-9][0-9]*$' \
     "$($KUBECTL -n "$NS" logs -l app.kubernetes.io/component=mcp-proxy --tail=-1 --since=15m 2>/dev/null \
       | grep -c 'expired token on a live session; answered 404' || true)"
-  printf '     rotation e2e: %ss in all (setup %ss, first run %ss)\n' "$((SECONDS - rot_t0))" "$((rot_t1 - rot_t0))" "$((rot_t2 - rot_t1))"
+  printf '     rotation e2e: %ss in all (setup %ss, run %ss)\n' "$((SECONDS - rot_t0))" "$((rot_t1 - rot_t0))" "$((SECONDS - rot_t1))"
 elif [[ "${CI:-}" == "true" ]]; then
   fail "the MCP token rotation check needs KOBE_SANDBOX_IMAGE, the MCP fixture and the model setup"
 else
