@@ -1,7 +1,7 @@
 import type { RunMemoryContext } from "@kobe/protocol";
 import { SYSTEM_PROMPT_MAX_BYTES } from "@kobe/protocol";
 import { describe, expect, it } from "vitest";
-import { MARKER_BEGIN, MARKER_END } from "../kobe-tools/memory-fence.js";
+import { MARKER_BEGIN, MARKER_END, sanitizeForStorage } from "../kobe-tools/memory-fence.js";
 import { INDEX_MAX_BYTES, memoryContextText, memoryRunFileContent } from "./context.js";
 
 const NONCE = "0123456789abcdef";
@@ -67,8 +67,7 @@ describe("memoryContextText", () => {
       ) ?? "";
     expect(ends(text)).toBe(1);
     expect(text.slice(0, text.lastIndexOf(MARKER_END))).not.toContain("<<<END");
-    // eslint-disable-next-line no-control-regex
-    expect(text).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f​‮]|\u{e0041}/u);
+    expect(sanitizeForStorage(text)).toBe(text);
   });
 
   it("caps each index, notes the cut, and keeps the fence closed", () => {

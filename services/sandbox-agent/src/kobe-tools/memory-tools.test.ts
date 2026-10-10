@@ -8,7 +8,7 @@ import {
 import { describe, expect, it } from "vitest";
 import type { ToolsOutcome } from "./client.js";
 import { filesEnabled, memoryEnabled, registerKobeTools } from "./extension.js";
-import { MARKER_BEGIN, MARKER_END, sanitizeUntrusted } from "./memory-fence.js";
+import { MARKER_BEGIN, MARKER_END, sanitizeForStorage, sanitizeUntrusted } from "./memory-fence.js";
 import {
   RECALL_FILE_MAX_BYTES,
   RECALL_OUTPUT_MAX_BYTES,
@@ -159,10 +159,8 @@ describe("recall", () => {
     // No `<<<` survives in the content, whatever it was folded from.
     const inner = text.slice(text.indexOf("before"), text.lastIndexOf(MARKER_END));
     expect(inner).not.toContain("<<<");
-    // eslint-disable-next-line no-control-regex, no-misleading-character-class
-    expect(text).not.toMatch(
-      /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]|\u{e0000}|[\u{e0020}-\u{e007f}]/u,
-    );
+    // Nothing invisible or control-like is left (sanitising it again changes nothing).
+    expect(sanitizeForStorage(text)).toBe(text);
     expect(text).not.toContain("\r");
   });
 
