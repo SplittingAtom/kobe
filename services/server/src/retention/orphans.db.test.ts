@@ -16,6 +16,8 @@ const PREFIX = "kobe/";
 const store: BlobStore = { objects, prefix: PREFIX };
 let team = "";
 let user = "";
+let admin = "";
+let member = "";
 const DAY = 86_400_000;
 const hex = (s: string) => createHash("sha256").update(s).digest("hex");
 
@@ -36,7 +38,7 @@ async function placeHold(userId: string | null): Promise<string> {
   const { rows } = await h.admin.query<{ id: string }>(
     `INSERT INTO legal_holds (team_id, user_id, reason, placed_by) VALUES ($1, $2, 'matter', $3)
      RETURNING id`,
-    [team, userId, user],
+    [team, userId, admin],
   );
   const id = rows[0]?.id ?? "";
   await h.admin.query(`UPDATE legal_holds SET status = 'active', approved_by = $2 WHERE id = $1`, [
@@ -49,11 +51,18 @@ async function placeHold(userId: string | null): Promise<string> {
 beforeAll(async () => {
   h = await openHarness({ blobs: store });
   user = await h.createUser("owner@orphans.test", "owner");
+  admin = await h.createUser("admin@orphans.test", "admin");
+  member = await h.createUser("member@orphans.test");
   team = (
-    await runWithAuditContext({ actor: { kind: "user", id: user }, ip: null, userAgent: null }, () =>
-      createTeamWithAdmin(h.deps.database.db, { slug: "orphans", name: "orphans" }, user),
+    await runWithAuditContext(
+      { actor: { kind: "user", id: user }, ip: null, userAgent: null },
+      () => createTeamWithAdmin(h.deps.database.db, { slug: "orphans", name: "orphans" }, user),
     )
   ).id;
+  await h.admin.query(
+    `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'member')`,
+    [team, member],
+  );
 }, 120_000);
 
 afterAll(() => h?.close());
@@ -90,8 +99,8 @@ describe("staging objects", () => {
   });
 
   it("keeps the owner's under a hold, and everything under a team-wide hold", async () => {
-    const key = put(staging(), 3 * DAY);
-    await placeHold(user);
+    const key = put(staging(team, member), 3 * DAY);
+    await placeHold(member);
     expect((await sweep()).staging).toBe(0);
     await h.admin.query(`DELETE FROM legal_holds`);
     await placeHold(null);

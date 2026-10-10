@@ -57,6 +57,7 @@ export class MemoryObjects implements ObjectStore {
   list(prefix: string, options: ListOptions = {}): Promise<ListPage> {
     const limit = options.limit ?? 1000;
     const after = options.cursor ?? "";
+    const delimiter = options.delimiter ?? "";
     const objects: { key: string; lastModified: Date }[] = [];
     const prefixes = new Set<string>();
     let last = "";
@@ -64,8 +65,8 @@ export class MemoryObjects implements ObjectStore {
     for (const key of [...this.objects.keys()].sort()) {
       if (!key.startsWith(prefix) || key <= after) continue;
       const rest = key.slice(prefix.length);
-      const cut = options.delimiter ? rest.indexOf(options.delimiter) : -1;
-      const folded = cut >= 0 ? prefix + rest.slice(0, cut + options.delimiter!.length) : null;
+      const cut = delimiter ? rest.indexOf(delimiter) : -1;
+      const folded = cut >= 0 ? prefix + rest.slice(0, cut + delimiter.length) : null;
       if (folded !== null && prefixes.has(folded)) continue;
       if (objects.length + prefixes.size >= limit) {
         more = true;
@@ -76,7 +77,7 @@ export class MemoryObjects implements ObjectStore {
       last = folded ?? key;
     }
     // A folded prefix is resumed after all of its keys.
-    const cursor = last.endsWith(options.delimiter ?? "\0") ? `${last}\uffff` : last;
+    const cursor = delimiter !== "" && last.endsWith(delimiter) ? `${last}\uffff` : last;
     return Promise.resolve({ objects, prefixes: [...prefixes], ...(more ? { next: cursor } : {}) });
   }
 

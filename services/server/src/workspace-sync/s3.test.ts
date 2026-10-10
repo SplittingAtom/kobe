@@ -120,3 +120,40 @@ describe("S3 object store (fake S3 over HTTP)", () => {
     expect(fake.objects.has("teams/t/broken")).toBe(false);
   });
 });
+
+describe("list", () => {
+  it("maps ListObjectsV2 pages, prefixes and the continuation token", async () => {
+    const sent: unknown[] = [];
+    const client = {
+      send: (cmd: { input: unknown }) => {
+        sent.push(cmd.input);
+        return Promise.resolve({
+          Contents: [{ Key: "p/a", LastModified: new Date(1000) }, { LastModified: new Date() }],
+          CommonPrefixes: [{ Prefix: "p/d/" }],
+          IsTruncated: true,
+          NextContinuationToken: "tok",
+        });
+      },
+    };
+    const store = createS3ObjectStore(
+      {
+        bucket: "b",
+        endpoint: undefined,
+        region: "r",
+        forcePathStyle: true,
+        prefix: "",
+        credentials: null,
+      },
+      client as never,
+    );
+    const page = await store.list("p/", { limit: 5, cursor: "c", delimiter: "/" });
+    expect(page).toEqual({
+      objects: [{ key: "p/a", lastModified: new Date(1000) }],
+      prefixes: ["p/d/"],
+      next: "tok",
+    });
+    expect(sent).toEqual([
+      { Bucket: "b", Prefix: "p/", MaxKeys: 5, ContinuationToken: "c", Delimiter: "/" },
+    ]);
+  });
+});

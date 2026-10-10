@@ -180,7 +180,9 @@ export function createS3ObjectStore(settings: S3Settings, client?: S3Client): Ob
         objects: (out.Contents ?? []).flatMap((o) =>
           o.Key === undefined ? [] : [{ key: o.Key, lastModified: o.LastModified ?? new Date() }],
         ),
-        prefixes: (out.CommonPrefixes ?? []).flatMap((p) => (p.Prefix === undefined ? [] : [p.Prefix])),
+        prefixes: (out.CommonPrefixes ?? []).flatMap((p) =>
+          p.Prefix === undefined ? [] : [p.Prefix],
+        ),
         ...(out.IsTruncated && out.NextContinuationToken
           ? { next: out.NextContinuationToken }
           : {}),
