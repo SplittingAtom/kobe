@@ -234,6 +234,13 @@ describe("authentication and transport", () => {
     });
     expect(stale.status).toBe(404);
     expect(server.asked).toEqual([]);
+    // A token expired for longer than twice the session TTL (30 min) is a plain 401 again.
+    const ancient = await rpc("tools/list", undefined, {
+      token: token({ age: 600 + 1801, ttl: 600 }),
+      headers: { "mcp-session-id": session ?? "" },
+    });
+    expect(ancient.status).toBe(401);
+    expect(server.asked).toEqual([]);
     // Forged or wrong-audience tokens never get the softer answer; neither does a fresh session.
     for (const t of [
       token({ key: "x".repeat(48), age: 1200, ttl: 600 }),
