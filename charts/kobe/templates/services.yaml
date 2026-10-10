@@ -8,6 +8,7 @@
 {{- $runtime := printf "- name: KOBE_RUNTIME_CLASS\n  value: %s" (.Values.isolation.runtimeClassName | quote) -}}
 {{- $reconcile := printf "- name: KOBE_TEAM_RECONCILE_SECONDS\n  value: %s" (.Values.server.teamReconcileSeconds | int | toString | quote) -}}
 {{- $refresh := printf "- name: KOBE_CONNECTOR_REFRESH_SECONDS\n  value: %s" (.Values.server.connectorRefreshSeconds | int | toString | quote) -}}
+{{- $sessionTtl := printf "- name: KOBE_SESSION_TOKEN_TTL_SECONDS\n  value: %s" (.Values.server.sessionTokenTtlSeconds | int | toString | quote) -}}
 {{- include "kobe.nodeService" (dict "root" . "component" "web" "image" "web" "values" .Values.web
       "healthPath" "/api/healthz" "readyPath" "/api/healthz"
       "extraMounts" "- name: next-cache\n  mountPath: /app/apps/web/.next/cache"
@@ -18,7 +19,7 @@
       "annotations" $dbAnnotations
       "extraPorts" "- name: sandbox\n  containerPort: 8081\n- name: internal\n  containerPort: 8082"
       "extraServicePorts" "- name: sandbox\n  port: 8081\n  targetPort: sandbox\n- name: internal\n  port: 8082\n  targetPort: internal"
-      "env" (printf "- name: KOBE_PROCESS\n  value: server\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s" $runtime $reconcile $refresh (include "kobe.uploadEnv" .) $common (include "kobe.authEnv" .) (include "kobe.smtpEnv" .) (include "kobe.sandboxEnv" .) (include "kobe.serverInternalEnv" .) (include "kobe.serverModelsEnv" .) (include "kobe.egressHeaderEnv" .) (include "kobe.envelopeEnv" .) (include "kobe.telemetryEnv" .) (include "kobe.auditForwardingEnv" .))) }}
+      "env" (printf "- name: KOBE_PROCESS\n  value: server\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s" $runtime $reconcile $refresh $sessionTtl (include "kobe.uploadEnv" .) $common (include "kobe.authEnv" .) (include "kobe.smtpEnv" .) (include "kobe.sandboxEnv" .) (include "kobe.serverInternalEnv" .) (include "kobe.serverModelsEnv" .) (include "kobe.egressHeaderEnv" .) (include "kobe.envelopeEnv" .) (include "kobe.telemetryEnv" .) (include "kobe.auditForwardingEnv" .))) }}
 ---
 {{ include "kobe.nodeService" (dict "root" . "component" "scheduler" "image" "server" "values" .Values.scheduler
       "serviceAccount" (printf "%s-server" $fullname) "automountToken" true "preflight" true "migrations" true

@@ -100,6 +100,8 @@ export function mcpRoutes(deps: McpRouteDeps): Hono {
 
 const SESSION_HEADER = "mcp-session-id";
 const SESSION_ID = "kobe-stateless";
+/** The e2e (token rotation) greps the proxy log for this line. */
+const EXPIRED_SESSION_LOG = "mcp: expired token on a live session; answered 404";
 
 async function handlePost(deps: McpRouteDeps, c: Context): Promise<Response> {
   c.header("Cache-Control", "no-store");
@@ -111,6 +113,7 @@ async function handlePost(deps: McpRouteDeps, c: Context): Promise<Response> {
     c.req.header(SESSION_HEADER) &&
     isExpiredSandboxToken(token, deps.sessionKey)
   ) {
+    deps.log.info({ connectorId: c.req.param("connectorId") }, EXPIRED_SESSION_LOG);
     return c.json(rpcError(null, JSONRPC_ERRORS.invalidRequest, "Session expired."), 404);
   }
   if (!token || !claims) {

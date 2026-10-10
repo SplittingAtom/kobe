@@ -350,6 +350,11 @@
           "type": "integer",
           "minimum": 0
         },
+        "sessionTokenTtlSeconds": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 900
+        },
         "uploads": {
           "type": "object",
           "additionalProperties": false,

@@ -356,6 +356,7 @@ const sandboxServer = sandbox
       {
         fetch: createSandboxApp({
           ...sandbox,
+          sessionTokenTtlSeconds: config.sessionTokenTtlSeconds,
           ...(workspaceSync && sandboxAuth ? { workspace: workspaceSync.routes(sandboxAuth) } : {}),
           // Skill bundles (KOBE-82): served from the same object store, to live sandboxes only.
           ...(deps?.blobs && sandboxAuth
