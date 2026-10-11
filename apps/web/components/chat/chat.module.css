@@ -320,6 +320,20 @@
   border-radius: 0.5rem;
 }
 
+.dismissibleBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--admin-warn-bg);
+  border-radius: 0.5rem;
+}
+
+.dismissibleBanner > p {
+  flex: 1;
+  margin: 0;
+}
+
 .visuallyHidden {
   position: absolute;
   width: 1px;

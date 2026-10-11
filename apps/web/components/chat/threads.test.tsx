@@ -10,6 +10,7 @@ let fake: FakeKobe;
 
 beforeEach(() => {
   sessionStorage.clear(); // resume points are per tab; each test is a fresh tab
+  localStorage.clear(); // a closed retention notice is remembered per browser
   fake = new FakeKobe();
   vi.stubGlobal("fetch", fake.fetch);
 });
@@ -131,6 +132,25 @@ describe("thread list (RemoteThreadListAdapter)", () => {
     const notice = await screen.findByText(/older than 90 days will be deleted from/);
     const link = within(notice).getByRole("link", { name: "Export your conversations" });
     expect(link.getAttribute("href")).toBe(`/v1/threads/export?team=${fake.teamId}`);
+  });
+
+  it("closes the retention notice and keeps it closed until the notice changes", async () => {
+    fake.upcomingRetention = { period: "90d", effective_at: "2026-10-11T03:00:00.000Z" };
+    openApp(fake);
+    const user = userEvent.setup();
+    await screen.findByText(/older than 90 days will be deleted from/);
+    await user.click(screen.getByRole("button", { name: "Dismiss retention notice" }));
+    expect(screen.queryByText(/will be deleted from/)).toBeNull();
+
+    cleanup();
+    openApp(fake);
+    await list();
+    expect(screen.queryByText(/will be deleted from/)).toBeNull();
+
+    cleanup();
+    fake.upcomingRetention = { period: "30d", effective_at: "2026-10-16T03:00:00.000Z" };
+    openApp(fake);
+    expect(await screen.findByText(/older than 30 days will be deleted from/)).toBeTruthy();
   });
 
   it("shows the server's refusal to Trash a busy thread", async () => {
