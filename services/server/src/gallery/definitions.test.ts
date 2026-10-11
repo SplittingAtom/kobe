@@ -25,8 +25,9 @@ describe("the one gallery agent, Kobe (KOBE-254)", () => {
   const floor = { scope: "install", install: [], team: [], approvalFloor: "auto" } as const;
   const manifest = computeToolManifest(kobe.frontmatter, floor, new Date());
 
-  it("ships exactly one gallery agent, Kobe, at generation 1", () => {
-    expect(parsed.map((p) => [p.key, p.generation])).toEqual([[KOBE_GALLERY_KEY, 1]]);
+  it("ships exactly one gallery agent, Kobe, at generation 2", () => {
+    // 2: the web-search notice is scoped to requests that need the web (review of #240).
+    expect(parsed.map((p) => [p.key, p.generation])).toEqual([[KOBE_GALLERY_KEY, 2]]);
     expect(KOBE_GALLERY_KEY).toBe("kobe");
     expect(kobe.frontmatter.name).toBe("Kobe");
     expect(kobe.frontmatter.description).toBeTruthy();
@@ -68,6 +69,11 @@ describe("the one gallery agent, Kobe (KOBE-254)", () => {
     expect(kobe.prompt).toContain("web_search");
     expect(kobe.prompt).toMatch(/URL/);
     expect(kobe.prompt).toContain(KOBE_NO_SEARCH_NOTICE);
+    // Only when a request needs the web: never as the opening of every reply.
+    const notice = kobe.prompt.indexOf(KOBE_NO_SEARCH_NOTICE);
+    const sentence = kobe.prompt.slice(kobe.prompt.lastIndexOf("Research:", notice), notice);
+    expect(sentence).toMatch(/When a request needs current or external facts/);
+    expect(sentence).not.toMatch(/begin your reply/);
   });
 
   it("carries the Document Drafter's Markdown preview artifact (KOBE-131) and share_file (KOBE-152)", () => {

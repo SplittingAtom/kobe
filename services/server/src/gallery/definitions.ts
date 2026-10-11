@@ -27,7 +27,7 @@ export const KOBE_GALLERY_KEY = "kobe";
  * their keys are no longer listed here. Raise an entry's generation with every change to its file.
  */
 export const GALLERY_DEFINITIONS: readonly GalleryDefinition[] = [
-  { key: KOBE_GALLERY_KEY, generation: 1, file: KOBE_FILE },
+  { key: KOBE_GALLERY_KEY, generation: 2, file: KOBE_FILE },
 ];
 
 export interface ParsedGalleryDefinition {

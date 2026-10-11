@@ -1,5 +1,9 @@
 import { APPROVAL_MODES } from "@kobe/agent-file";
-import type { FieldErrors, FormState } from "../../../../lib/admin/agent-builder/form-model";
+import {
+  replacedConnectorNames,
+  type FieldErrors,
+  type FormState,
+} from "../../../../lib/admin/agent-builder/form-model";
 import { Field } from "./field";
 import { ModelField } from "./model-field";
 import styles from "./agent-builder.module.css";
@@ -46,6 +50,7 @@ export function FrontmatterForm({
 }) {
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     onChange({ ...form, [key]: value });
+  const replaced = replacedConnectorNames(form);
   return (
     <div className={styles.fields}>
       {TEXT_FIELDS.map(({ key, label, hint, wide }) => (
@@ -110,6 +115,12 @@ export function FrontmatterForm({
         />
         Use every connector the team enables (each person still connects their own account)
       </label>
+      {replaced.length > 0 && (
+        <p role="note" className={styles.wide}>
+          Every team connector replaces the connector names listed above ({replaced.join(", ")});
+          they are not saved.
+        </p>
+      )}
       <label className={`${styles.checkbox} ${styles.wide}`}>
         <input
           type="checkbox"

@@ -42,4 +42,18 @@ describe("FrontmatterForm connectors (KOBE-254)", () => {
     await userEvent.setup().click(screen.getByRole("checkbox", { name: ALL_LABEL }));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ connectorsAll: true }));
   });
+
+  it("says typed names are replaced and not saved when the box is ticked", () => {
+    const form: FormState = { ...EMPTY_FORM, name: "A", connectors: "jira", connectorsAll: true };
+    renderTeam(<FrontmatterForm form={form} errors={{}} readOnly={false} onChange={() => {}} />);
+    expect(screen.getByRole("note").textContent).toMatch(
+      /replaces the connector names listed above \(jira\); they are not saved/,
+    );
+  });
+
+  it("shows no note while the box is clear", () => {
+    const form: FormState = { ...EMPTY_FORM, name: "A", connectors: "jira" };
+    renderTeam(<FrontmatterForm form={form} errors={{}} readOnly={false} onChange={() => {}} />);
+    expect(screen.queryByRole("note")).toBeNull();
+  });
 });

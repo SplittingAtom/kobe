@@ -60,6 +60,14 @@ const joinLines = (list: unknown): string =>
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
+/**
+ * Connector names typed in the list that `connectors: all` replaces on save (KOBE-254): shown to
+ * the builder and warned about, never dropped silently.
+ */
+export function replacedConnectorNames(form: FormState): string[] {
+  return form.connectorsAll ? splitLines(form.connectors) : [];
+}
+
 /** The frontmatter object the API takes; empty fields are left out (schema: optional, not blank). */
 export function toFrontmatter(form: FormState): Record<string, unknown> {
   const out: Record<string, unknown> = { name: form.name };
@@ -146,10 +154,18 @@ function fieldOf(path: string): { field: FieldKey; entry: number | null } {
 export function validateForm(form: FormState, prompt: string): Validation {
   const result = validateAgentDefinition({ frontmatter: toFrontmatter(form), prompt });
   if (result.ok) {
+    const replaced = replacedConnectorNames(form);
     return {
       ok: true,
       definition: result.definition,
-      warnings: agentWarnings(result.definition.frontmatter).map((w) => w.message),
+      warnings: [
+        ...agentWarnings(result.definition.frontmatter).map((w) => w.message),
+        ...(replaced.length > 0
+          ? [
+              `every team connector replaces the ${replaced.length} connector names listed (${replaced.join(", ")}); they are not saved`,
+            ]
+          : []),
+      ],
     };
   }
   const errors: Partial<Record<FieldKey, string[]>> = {};

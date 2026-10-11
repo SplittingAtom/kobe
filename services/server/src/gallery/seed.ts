@@ -207,6 +207,18 @@ async function retireRemoved(db: KobeDb, keys: readonly string[]): Promise<strin
   return removed.map((g) => g.key ?? "");
 }
 
+async function retireAll(db: KobeDb, parsed: readonly ParsedGalleryDefinition[]): Promise<void> {
+  try {
+    const retired = await retireRemoved(
+      db,
+      parsed.map((p) => p.key),
+    );
+    if (retired.length > 0) logger.info({ retired }, "gallery agents retired");
+  } catch (err) {
+    logger.error({ err }, "gallery agents could not be retired");
+  }
+}
+
 /**
  * Seeds the gallery from definitions in the repo (KOBE-87): at server start, so install and every
  * upgrade. Idempotent: an unchanged definition does nothing; a changed one replaces the agent's
@@ -228,14 +240,13 @@ export async function seedGalleryAgents(
       results.push({ key: definition.key, agentId: "", action: "failed" });
     }
   }
-  try {
-    const retired = await retireRemoved(
-      db,
-      parsed.map((p) => p.key),
-    );
-    if (retired.length > 0) logger.info({ retired }, "gallery agents retired");
-  } catch (err) {
-    logger.error({ err }, "gallery agents could not be retired");
+  // Retire only once every definition is seeded and published (KOBE-254): a failed seed must not
+  // leave the gallery without its replacement. The next start tries again.
+  const failed = results.filter((r) => r.action === "failed").map((r) => r.key);
+  if (failed.length > 0) {
+    logger.warn({ failed }, "gallery retirement postponed: a definition failed to seed");
+  } else {
+    await retireAll(db, parsed);
   }
   const changed = results.filter((r) => r.action !== "unchanged");
   if (changed.length > 0) logger.info({ agents: changed }, "gallery agents seeded");

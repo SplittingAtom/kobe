@@ -575,7 +575,16 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
   the server archives the five earlier gallery agents (Assistant, Code Helper, Data Analyst,
   Document Drafter, Researcher), audited as `agent.archived` by the system. Nothing is deleted:
   their threads stay readable and team forks keep working, but no new thread can start on them,
-  and a restart does not bring them back.
+  and a restart does not bring them back. They are archived only once Kobe is seeded and
+  published; if that fails, the five stay until a later start succeeds. After upgrading:
+  - **Schedules** on the five stop: each occurrence is skipped (`agent_unavailable`). Kobe is not
+    put in their place automatically, because it can use more tools and connectors than the agent
+    the schedule was made with. Their owners re-create them on Kobe (or another agent) themselves.
+  - **Team suspensions** of the five do not carry over to Kobe, which is a new agent. A team admin
+    who suspended one of them should review Kobe in the team's agent inventory and suspend it
+    there if the team should not use it.
+  - **Rolling back** to an older release restores the five and archives Kobe; the older release
+    cannot read Kobe's versions or any agent using `connectors: all`.
 - **One approval floor (migration `0024_approval_floor_unify`).** The minimum approval mode is
   install-wide only (spec D6), stored as `install_settings['policy.approval_floor']`. The older key
   `policy.approval_mode_floor` is folded into it (the stricter value wins), and team floors

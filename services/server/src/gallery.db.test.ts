@@ -426,6 +426,27 @@ describe("retiring removed definitions", () => {
     expect(await audited("agent.unarchived", id)).toMatchObject([{ actor_kind: "system" }]);
   });
 
+  it("retires nothing while a definition fails, so the gallery is never left empty (KOBE-254)", async () => {
+    const old = { key: "fixture-old", generation: 1, file: file("Fixture Old", "Old.") };
+    const next = { key: "fixture-next", generation: 1, file: file("Fixture Next", "New.") };
+    await seed(FIXTURE_NEXT, RACE, old);
+    const oldId = await galleryId("carol", "fixture-old");
+    await h.admin.query(
+      `ALTER TABLE install_agents ADD CONSTRAINT tmp_fail_next CHECK (slug <> 'fixture-next') NOT VALID`,
+    );
+    try {
+      const results = await seed(FIXTURE_NEXT, RACE, next);
+      expect(results.map((r) => r.action)).toEqual(["unchanged", "unchanged", "failed"]);
+      expect(await audited("agent.archived", oldId)).toEqual([]);
+      expect(await galleryId("carol", "fixture-old")).toBe(oldId);
+    } finally {
+      await h.admin.query(`ALTER TABLE install_agents DROP CONSTRAINT tmp_fail_next`);
+    }
+    // The next start seeds the new definition, then retires the old one.
+    expect((await seed(FIXTURE_NEXT, RACE, next))[2]?.action).toBe("created");
+    expect(await audited("agent.archived", oldId)).toHaveLength(1);
+  });
+
   it("restores a retired agent and publishes only a newer generation", async () => {
     const def = { key: "fixture-gen", generation: 1, file: file("Fixture Gen", "One.") };
     const [, , first] = await seed(FIXTURE_NEXT, RACE, def);

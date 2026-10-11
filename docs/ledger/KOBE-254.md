@@ -43,11 +43,16 @@ all`; prompt folds in the five (research with the no-web-search notice from KOBE
 - The upgrade DB test keeps the five old keys as fixture data (`gallery-kobe.db.test.ts`); no
   other code, test, e2e or doc names them (historic ledgers untouched).
 
+- **Review of #240:** retirement is postponed while any definition fails to seed (never an empty
+  gallery); the web-search notice is scoped to requests that need the web (generation 2); the
+  builder warns (inline note and publish warning) that `all` replaces typed connector names;
+  `docs/install.md` names the schedule, suspension and rollback consequences. Schedules are not
+  moved to Kobe on purpose (that would widen tools and connectors without consent).
+
 ## Open questions (for Chris or the coordinator)
 
 - Should Kobe show a notice for team connectors the user has not connected? Chosen: no (see above).
-- Schedules or project defaults that pointed at an old gallery agent now point at an archived one;
-  their behaviour is the existing archived-agent path (no new thread). Not migrated to Kobe.
+- Follow-up? A visible "agent archived" state or email for skipped schedules (KOBE-181 mailer).
 
 ## Evidence (acceptance criteria → test or command output)
 
