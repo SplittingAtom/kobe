@@ -159,7 +159,10 @@ server:
   # Output limit and context window (tokens) of catalog models that have none of their own
   # (KOBE-259); site admins set either per model on the Models page. Not any provider's maximum:
   # a provider refuses calls above its own, so set the model's limits there when it allows less.
-  # Each model call's budget reservation holds the output limit while the call runs.
+  # Each model call's budget reservation holds the output limit while the call runs, and a call
+  # that is stopped or cut off without a usage report is charged the full output limit (hidden
+  # reasoning is never seen), so a higher limit makes interrupted calls cost more. A budget whose
+  # limit is below one call (input plus output limit) refuses that model's calls outright.
   modelDefaults:
     # Models that answer directly: what every model got before KOBE-259 (256..131072).
     maxOutputTokens: 16384

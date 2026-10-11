@@ -68,7 +68,12 @@ export function limitsChange(
 } {
   const maxOutput = parsed(choice.maxOutput);
   const contextWindow = parsed(choice.contextWindow);
-  const before = model ?? { reasoning: false, maxOutputTokens: null, contextWindow: null };
+  // `??`: an older server (rolling upgrade) sends no limits at all.
+  const before = {
+    reasoning: model?.reasoning ?? false,
+    maxOutputTokens: model?.maxOutputTokens ?? null,
+    contextWindow: model?.contextWindow ?? null,
+  };
   return {
     ...(choice.reasoning !== before.reasoning ? { reasoning: choice.reasoning } : {}),
     ...(maxOutput !== before.maxOutputTokens ? { maxOutputTokens: maxOutput } : {}),
@@ -135,8 +140,9 @@ export function LimitsFields({
       </label>
       <p id={`${id}-limits`} className={styles.hint}>
         Leave a field empty for the site default. Each model call may write up to the output limit,
-        reasoning included, and budgets hold that much while it runs. Use the values your provider
-        documents for this model: it refuses calls above its own maximum.
+        reasoning included: budgets hold that much while it runs, and a call that is stopped or cut
+        off is charged all of it. Use the values your provider documents for this model: it refuses
+        calls above its own maximum.
       </p>
     </>
   );
@@ -145,11 +151,12 @@ export function LimitsFields({
 /** The table cell: each limit, marked when it is a default. */
 export function limitsText(m: CatalogModel, defaults: TokenDefaults | undefined): string {
   const output =
-    m.maxOutputTokens !== null
+    // `== null`: an older server (rolling upgrade) sends no limits at all.
+    m.maxOutputTokens != null
       ? tokens(m.maxOutputTokens)
       : `${outputDefaultText(m.reasoning, defaults)} (${m.reasoning ? "reasoning" : "site"} default)`;
   const window =
-    m.contextWindow !== null
+    m.contextWindow != null
       ? tokens(m.contextWindow)
       : `${defaults === undefined ? "—" : tokens(defaults.contextWindow)} (site default)`;
   return `Output ${output} · Window ${window}${m.reasoning ? " · Reasons" : ""}`;

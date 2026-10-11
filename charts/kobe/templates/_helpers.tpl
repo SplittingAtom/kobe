@@ -390,7 +390,6 @@ spec:
 {{- end }}
 {{- end -}}
 
-{{/* Pauses the nightly retention pass (KOBE-243): set after restoring the database from an older backup. */}}
 {{- /* Limits of catalog models without their own (KOBE-259): server and scheduler. */ -}}
 {{- define "kobe.modelDefaultsEnv" -}}
 {{- $d := .Values.server.modelDefaults -}}
@@ -402,6 +401,7 @@ spec:
   value: {{ $d.contextWindow | int | toString | quote }}
 {{- end -}}
 
+{{/* Pauses the nightly retention pass (KOBE-243): set after restoring the database from an older backup. */}}
 {{- define "kobe.retentionEnv" -}}
 - name: KOBE_RETENTION_PAUSED
   value: {{ .Values.retention.paused | default false | toString | quote }}

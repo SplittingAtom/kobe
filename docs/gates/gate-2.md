@@ -44,7 +44,7 @@ grants (revoked at the end; they lapse after 15 minutes anyway), and the audit t
 Re-running reuses the fixtures.
 
 **What it changes temporarily, and undoes on exit.** The catalog model's price, only when it has
-none (so one model call can use up a $0.01 budget); the test upstream in the install's egress
+none (so one model call can use up the budget); the test upstream in the install's egress
 ceiling (only if it added it); the team's budget. One `helm upgrade` adds exactly the two fake
 servers (as `/32` addresses plus a namespace selector) to the egress proxy's and MCP proxy's
 allow-lists and enables plain HTTP and port 80 on the MCP proxy, which the fake server needs. It
@@ -58,8 +58,10 @@ _Filled in from the CI run and the real-cluster run; see the end of this file._
 
 ## ac-1 Budget at 100%: the step in flight finishes, then `run.budget_stopped`
 
-**Scenario.** The team admin sets a $0.01 monthly budget; the member sends a prompt that makes the
-model call `bash` (`sleep 3; echo step-done`). That one model call costs more than the budget.
+**Scenario.** The team admin sets a $1,000 monthly budget (`KOBE_GATE2_BUDGET_USD`; above one
+call's reservation, since a budget below one call refuses it outright, KOBE-259); the member sends a
+prompt that makes the model call `bash` (`sleep 3; echo step-done`). The fake model reports a
+1,000,000-token prompt for that call, so that one model call costs more than the budget.
 
 | Check                                                             | What it proves                                                                             |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |

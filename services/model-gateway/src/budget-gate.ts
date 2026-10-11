@@ -24,10 +24,11 @@ import type { CallContext, CallGate, GateDecision } from "./seams.js";
  *   call. Reservations live in a {@link ReservationStore}: Postgres in production (KOBE-120:
  *   shared by all replicas, atomic against the budget, each with an expiry so a crashed
  *   replica's reservations free themselves), memory for tests.
- * - **A budget below one call's allowance** (KOBE-259): a call whose reservation alone exceeds a
- *   line's whole limit is still admitted while nothing else is reserved (a lone call; the overshoot
- *   is that one call at most), but refused with a final 402 `budget_below_call` that names the fix
- *   (lower the model's output limit or raise the budget) instead of a 429 the sandbox retries.
+ * - **A budget limit below one call** (KOBE-259): a call whose cost alone (input estimate plus
+ *   output allowance, i.e. the model's output limit) exceeds a budget's limit itself (not what is
+ *   left) could never run within it, so it is refused at once, alone or not, with a final 402
+ *   `budget_below_call` that names the fix (raise the budget or lower the model's output limit).
+ *   Every other budget keeps the rules above: a lone call is admitted, overlapping calls wait.
  * - More requests than the member's per-minute rate (the install's, or the team's lower one): 429
  *   `rate_limited` with Retry-After. A token bucket per member per shim replica; Bifrost's
  *   virtual-key rate limit is the install-wide backstop.
@@ -57,10 +58,9 @@ export function budgetMessage(line: BudgetLine): string {
   return `${budgetName(line)} is used up.`;
 }
 
-/** KOBE-259: one call's allowance alone exceeds the whole budget; waiting cannot help. */
+/** KOBE-259: the budget's limit is below one call's cost; waiting cannot help. */
 export function budgetBelowCallMessage(line: BudgetLine): string {
-  const name = budgetName(line);
-  return `One call to this model may use more than ${name.charAt(0).toLowerCase()}${name.slice(1)} (its output limit is reserved up front). Ask an admin to lower the model's output limit or raise the budget.`;
+  return `${budgetName(line)} is smaller than one call to this model (its input plus its output limit). Ask an admin to raise the budget or lower the model's output limit.`;
 }
 
 interface Bucket {
@@ -131,6 +131,16 @@ export class BudgetGate implements CallGate {
     if (used) {
       return { ok: false, status: 402, code: "budget_exhausted", message: budgetMessage(used) };
     }
+    const cost = this.costOf(call, prices);
+    const below = state.lines.find((l) => cost[l.unit] > l.limit);
+    if (below) {
+      return {
+        ok: false,
+        status: 402,
+        code: "budget_below_call",
+        message: budgetBelowCallMessage(below),
+      };
+    }
     const wait = this.take(key, state.requestsPerMinute);
     if (wait > 0) {
       return {
@@ -143,7 +153,6 @@ export class BudgetGate implements CallGate {
     }
     if (state.lines.length === 0) return { ok: true };
     const callId = call.callId ?? randomUUID();
-    const cost = this.costOf(call, prices);
     let verdict;
     try {
       // One atomic check-and-hold against the reservations of every replica.
@@ -168,18 +177,6 @@ export class BudgetGate implements CallGate {
     }
     if (!verdict.ok) {
       this.giveBack(key);
-      const l = state.lines[verdict.line] ?? state.lines[0];
-      // KOBE-259: a call whose allowance alone exceeds the line's whole budget runs only while
-      // nothing else is reserved (a lone call is always admitted). Refused otherwise, it says so
-      // once (402, final) instead of a 429 the sandbox retries until it gives up, or "used up".
-      if (l && cost[l.unit] > l.limit) {
-        return {
-          ok: false,
-          status: 402,
-          code: "budget_below_call",
-          message: budgetBelowCallMessage(l),
-        };
-      }
       if (verdict.verdict === "own_share") {
         return {
           ok: false,
@@ -189,6 +186,7 @@ export class BudgetGate implements CallGate {
           retryAfterSeconds: 2,
         };
       }
+      const l = state.lines[verdict.line] ?? state.lines[0];
       return {
         ok: false,
         status: 402,

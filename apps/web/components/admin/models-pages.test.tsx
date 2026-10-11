@@ -360,6 +360,17 @@ describe("install: models and providers", () => {
     expect(row(/^big/)).toContain("Window 200,000");
   });
 
+  it("renders entries from an older server without limits (rolling upgrade, KOBE-259)", async () => {
+    const { max_output_tokens: _m, context_window: _c, reasoning: _r, ...old } = KIMI;
+    const { token_defaults: _d, ...oldModels } = MODELS;
+    stubApi({ "GET /v1/install/models": [200, { ...oldModels, catalog: [old] }] });
+    renderInstall(<InstallModelsPage />);
+    const catalog = await screen.findByRole("table", { name: /Catalog models/ });
+    expect(within(catalog).getByRole("row", { name: /^kimi/ }).textContent).toContain(
+      "Output — (site default)",
+    );
+  });
+
   it("sets a model's limits and reasoning flag, and clears them back to the defaults (KOBE-259)", async () => {
     const calls = stubApi({
       "GET /v1/install/models": [

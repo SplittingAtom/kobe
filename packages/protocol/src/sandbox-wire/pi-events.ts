@@ -161,8 +161,8 @@ export const MODEL_RUN_ERROR_CODES = [
    */
   "model_budget_exhausted",
   /**
-   * 402 `budget_below_call` from the shim (KOBE-259): one call's output allowance alone exceeds a
-   * budget's whole limit, so waiting cannot help; the model's output limit or the budget must change.
+   * 402 `budget_below_call` from the shim (KOBE-259): a budget's limit is below one call's cost
+   * (input plus output limit), so waiting cannot help; the budget or the model's limit must change.
    */
   "model_budget_too_small",
 ] as const;

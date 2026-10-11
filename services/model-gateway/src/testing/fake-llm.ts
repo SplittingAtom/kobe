@@ -256,6 +256,12 @@ function sse(res: ServerResponse, events: readonly string[]): void {
  * first answer is a `bash` tool call; once the conversation holds its result, a text answer.
  */
 export const TOOL_STEP_MARKER = "kobe-tool-step";
+/**
+ * The tool step reports this many prompt tokens (a long context), so it alone uses up a Gate 2
+ * budget that is still larger than one call's reservation (KOBE-259: a budget below one call
+ * refuses it outright).
+ */
+export const TOOL_STEP_PROMPT_TOKENS = 1_000_000;
 
 function openaiToolCall(res: ServerResponse, model: string): void {
   const chunk = (delta: unknown, finish: string | null, usage?: unknown) =>
@@ -287,7 +293,11 @@ function openaiToolCall(res: ServerResponse, model: string): void {
       },
       null,
     ),
-    chunk({}, "tool_calls", { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 }),
+    chunk({}, "tool_calls", {
+      prompt_tokens: TOOL_STEP_PROMPT_TOKENS,
+      completion_tokens: 3,
+      total_tokens: TOOL_STEP_PROMPT_TOKENS + 3,
+    }),
     "data: [DONE]\n\n",
   ]);
 }

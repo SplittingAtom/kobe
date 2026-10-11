@@ -13,7 +13,7 @@ describe("run failure messages", () => {
     expect(failureInfo("model_budget_too_small", "model_error")).toEqual({
       code: "model_budget_too_small",
       message:
-        "One call to this model may cost more than the whole budget allows, so it was refused. Ask your site admin to lower the model's output limit, or your team admin to raise the budget.",
+        "The budget is smaller than one call to this model (its input plus its output limit), so the call was refused. Ask your team admin to raise the budget, or your site admin to lower the model's output limit.",
     });
   });
 });

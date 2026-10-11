@@ -223,8 +223,11 @@ if [[ "$STEPS" == *" budget "* ]]; then
     started=$(server_now)
     priced=$(step price "\"alias\":\"$MODEL_ALIAS\",\"action\":\"set\"")
     contains "the catalog model has a price (set only when it had none)" '^price=(set:200|kept)$' "$priced"
-    contains "the team budget is set to \$0.01 a month" '^budget_status=200$' \
-      "$(step reset "\"admin\":$U_T1,\"budget\":0.01")"
+    # Above one call's reservation (KOBE-259: a smaller budget refuses the call outright); the fake
+    # model's tool step reports a 1,000,000-token prompt ($10,000 at the e2e price), using it up.
+    BUDGET_USD="${KOBE_GATE2_BUDGET_USD:-1000}"
+    contains "the team budget is set to \$$BUDGET_USD a month" '^budget_status=200$' \
+      "$(step reset "\"admin\":$U_T1,\"budget\":$BUDGET_USD")"
     [[ "$priced" == *price=set* ]] && UNDO+=("client '$(printf '{"mode":"price","base":"%s","owner":%s,"alias":"%s","action":"restore"}' "$BASE" "$OWNER_JSON" "$MODEL_ALIAS")'")
     UNDO+=("client '$(printf '{"mode":"reset","base":"%s","admin":%s,"budget":null}' "$BASE" "$U_T1")'")
     prompt="${KOBE_GATE2_BUDGET_PROMPT:-kobe-tool-step budget-$NONCE}"
@@ -269,12 +272,18 @@ if [[ "$STEPS" == *" replicas "* ]]; then
       | sed -n 's/^token kobe.model-gateway //p')
     rstep() { client "$(printf '{"mode":"replica-budget","base":"%s","admin":%s,"teamId":"%s","userId":"%s","action":"%s","headroom":%s}' "$BASE" "$U_T1" "$TEAM" "$T2" "$1" "$HEADROOM")"; }
     UNDO+=("client '$(printf '{"mode":"replica-budget","base":"%s","admin":%s,"teamId":"%s","userId":"%s","action":"clear"}' "$BASE" "$U_T1" "$TEAM" "$T2")'")
+    body='{"model":"openai/gpt-fake","max_tokens":3,"messages":[{"role":"user","content":"hi"}]}'
+    # KOBE-259: a budget whose limit is below one call (about 25 tokens here) refuses it outright, so
+    # the member first spends a few calls today: the limit (spent + headroom) is then above one call.
+    for _ in 1 2 3 4; do
+      in_sbx "curl -s -m 30 --noproxy '*' -o /dev/null -X POST http://${mg_ips[0]:-0.0.0.0}:8080/v1/chat/completions \
+        -H 'authorization: Bearer $rtoken' -H 'content-type: application/json' -d '$body'" >/dev/null
+    done
     sleep 3 # the ledger rows of earlier steps have landed
     set_b=$(rstep set)
     contains "t2 has a daily token budget of what it spent plus $HEADROOM" '^member_budget_status=200$' "$set_b"
     baseline=$(field member_baseline "$set_b")
     sleep 3 # the budgets hint reaches both replicas
-    body='{"model":"openai/gpt-fake","max_tokens":3,"messages":[{"role":"user","content":"hi"}]}'
     burst=$(in_sbx "i=0; while [ \$i -lt 30 ]; do
         if [ \$((i % 2)) -eq 0 ]; then ip=${mg_ips[0]:-0.0.0.0}; else ip=${mg_ips[1]:-0.0.0.0}; fi
         ( curl -s -m 30 --noproxy '*' -o /dev/null -w 'code=%{http_code}\n' -X POST http://\$ip:8080/v1/chat/completions \

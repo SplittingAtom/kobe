@@ -41,11 +41,22 @@
   clamped to window - input - 4,096 (pi-ai `clampMaxTokensToContext`).
 - **Gateway.** Reservation already used the request's cap; its ceiling
   (`MAX_CHARGED_OUTPUT_TOKENS`) was 65,536 and is now the catalog ceiling 131,072, so any configured
-  limit is reserved (and charged on lost usage) in full. A lone call is still always admitted (D30,
-  Gate 2 e2e). New: when a reservation is refused and the call's allowance alone exceeds the line's
-  whole limit, the gate answers 402 `budget_below_call` with a message naming the fix, instead of a
-  429 `too_many_calls_in_flight` that the sandbox retried for 60 s (the stall) or "used up". The
-  sandbox maps it to the new run error `model_budget_too_small` (protocol + server message).
+  limit is reserved in full. ac-4 "a budget smaller than one call's allowance" means (review M1):
+  a budget whose **limit** (not what is left) is below one call's cost (input estimate + output
+  allowance) refuses every such call at once, alone or not: 402 `budget_below_call`, run error
+  `model_budget_too_small`, message naming the cause and the fix. Deterministic, no concurrency
+  involved. Every other budget keeps the old rules exactly: a lone call is admitted, overlapping
+  calls get 429 and retry, exhaustion ends `budget_stopped`.
+- **E2E adapted to that rule.** Gate 2 used $0.01 budgets (below one call): now $1,000, and the fake
+  model's tool step reports a 1,000,000-token prompt ($10,000 at the e2e price), so the step still
+  uses the budget up (run.sh, gate2.sh ac-1, docs/gates/gate-2.md). KOBE-121 replicas: the member
+  first spends 4 calls so its limit (spent + 1) is above one call (~25 tokens); checks unchanged.
+- **Charges on interrupted calls (review L1).** A call stopped or cut off without a usage report is
+  charged at least its output allowance (existing policy: hidden reasoning is never seen), which is
+  now the model's limit: 2x for the reasoning default, up to 8x for a 131,072 admin limit. Documented
+  in values.yaml, the models page hint and docs/install.md. Charging actual output instead is a
+  small code change (`UsageMeter.finish` drops `outputAllowance` for client aborts) but a policy
+  change: provider-side reasoning would then go uncharged on every Stop.
 - **Protocol in the feature PR.** `model_limits` and `model_budget_too_small` are additive contract
   changes made in the feature PR rather than a third PR (flagged for the coordinator).
 
