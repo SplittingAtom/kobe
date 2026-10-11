@@ -144,6 +144,7 @@ async function main(): Promise<void> {
     parentEnv: process.env,
     models,
     egress,
+    toolEnvScript: egress?.envScript ?? (await toolEnvScript(checked)),
     mcp,
     toolsExtension: checked.toolsExtension,
     exec,
@@ -268,6 +269,23 @@ async function modelWiring(
   });
   await keeper.start();
   return { gatewayUrl: config.modelGatewayUrl, extension, tokens: keeper };
+}
+
+/**
+ * The BASH_ENV script for Pi's tools when egress is not wired (KOBE-235): it also switches each
+ * bash tool call to the shared HOME/TMPDIR (correctness, not security). Same root-owned check;
+ * a missing or unsafe script (development outside the image) means tools keep Pi's own HOME.
+ */
+async function toolEnvScript(config: ReturnType<typeof loadConfig>): Promise<string | undefined> {
+  try {
+    return await checkExtensionFile(config.egressEnvScript, "egress-env");
+  } catch (error) {
+    logger.warn(
+      { err: (error as Error).message },
+      "tool env script unavailable: tools keep Pi's private HOME and TMPDIR",
+    );
+    return undefined;
+  }
 }
 
 /**

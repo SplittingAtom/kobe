@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { chmod, chown, mkdir, readdir } from "node:fs/promises";
 import path from "node:path";
 import { removeRuntimeDir } from "../models/runtime-dir.js";
@@ -31,6 +32,35 @@ export async function prepareToolDir(runtimeDir: string, identity: PiIdentity): 
   return dir;
 }
 
+export interface PrivateDirOptions {
+  /** True (default) when the tools are another uid (the executor); false: they share Pi's uid. */
+  readonly partner?: boolean;
+  /** Test seam: the next candidate directory name (default: 128 random bits). */
+  readonly newName?: () => string;
+}
+
+const randomName = (): string => `${PI_PRIVATE_PREFIX}${randomBytes(16).toString("hex")}`;
+const NAME_ATTEMPTS = 8;
+
+/**
+ * Create a fresh directory under `base` with a name nobody can guess. `base` is the sticky scratch
+ * volume, which a tool may list and write: a derivable name (the runtime dir's) let a tool
+ * pre-create it so another thread's Pi failed to start (KOBE-235). A name that exists anyway
+ * (squatted or a collision) is never reused: retry with a fresh one.
+ */
+async function makeUnguessableDir(base: string, newName: () => string): Promise<string> {
+  for (let attempt = 0; attempt < NAME_ATTEMPTS; attempt += 1) {
+    const dir = path.join(base, newName());
+    try {
+      await mkdir(dir, { mode: 0o700 });
+      return dir;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+  }
+  throw new Error(`could not create a private directory under ${base} (names kept existing)`);
+}
+
 export interface PiPrivateDirs {
   readonly root: string;
   readonly home: string;
@@ -59,21 +89,20 @@ export const PI_PRIVATE_PREFIX = "kobe-pi-";
  */
 export async function preparePiPrivateDirs(
   base: string,
-  runtimeDir: string,
   identity: PiIdentity | undefined,
-  options: { readonly partner: boolean } = { partner: true },
+  options: PrivateDirOptions = {},
 ): Promise<PiPrivateDirs> {
-  const root = path.join(base, `${PI_PRIVATE_PREFIX}${path.basename(runtimeDir)}`);
+  const partner = options.partner ?? true;
   // Without a partner uid (KOBE-228) the tools are Pi's own uid: nothing is shared with them, and
   // other threads' uids (and the workspace group) get no access at all. Without any identity the
   // directories are the agent's alone (0700).
   const modes =
     identity === undefined
       ? ([0o700, 0o700, 0o700] as const)
-      : options.partner
+      : partner
         ? ([0o2755, 0o2770, 0o2775] as const)
         : ([0o2770, 0o2770, 0o2770] as const);
-  await mkdir(root, { mode: 0o700 });
+  const root = await makeUnguessableDir(base, options.newName ?? randomName);
   const dirs = { root, home: path.join(root, "home"), tmp: path.join(root, "tmp") };
   const entries = [
     [root, modes[0]],

@@ -1,5 +1,5 @@
-import { randomBytes } from "node:crypto";
-import { chmod, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { writeFileAtomic } from "../atomic-file.js";
 import { MODEL_FILE_VERSION, type ModelFileState } from "../kobe-models/protocol.js";
 import type { RunModel } from "./types.js";
 
@@ -93,17 +93,8 @@ export class ModelFile {
 
   #write(content: ModelFileContent): Promise<void> {
     const text = JSON.stringify(modelFileState(content));
-    const temp = `${this.path}.${randomBytes(8).toString("hex")}.tmp`;
     const next = this.#chain.then(async () => {
-      try {
-        await writeFile(temp, text, { mode: this.#mode, flag: "wx" });
-        // writeFile's mode is filtered by the umask: set it exactly.
-        await chmod(temp, this.#mode);
-        await rename(temp, this.path);
-      } catch (error) {
-        await rm(temp, { force: true }).catch(() => undefined);
-        throw error;
-      }
+      await writeFileAtomic(this.path, text, this.#mode);
       this.#written = content;
       this.#writtenText = text;
     });

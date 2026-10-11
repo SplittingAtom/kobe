@@ -1,5 +1,5 @@
-import { randomBytes } from "node:crypto";
-import { chmod, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { writeFileAtomic } from "../atomic-file.js";
 
 /**
  * The per-run memory file (KOBE-157): `<runtimeDir>/memory-context.json`, agent-owned like the model
@@ -37,16 +37,8 @@ export class MemoryContextFile {
       text: content.text,
       project: content.project,
     });
-    const temp = `${this.path}.${randomBytes(8).toString("hex")}.tmp`;
     const next = this.#chain.then(async () => {
-      try {
-        await writeFile(temp, text, { mode: this.#mode, flag: "wx" });
-        await chmod(temp, this.#mode);
-        await rename(temp, this.path);
-      } catch (error) {
-        await rm(temp, { force: true }).catch(() => undefined);
-        throw error;
-      }
+      await writeFileAtomic(this.path, text, this.#mode);
       this.#writtenText = text;
     });
     this.#chain = next.catch(() => undefined);

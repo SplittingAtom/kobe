@@ -1,6 +1,7 @@
 import { constants as FS } from "node:fs";
 import { chmod, lstat, mkdir, open, readdir, realpath, rm } from "node:fs/promises";
 import path from "node:path";
+import { isTempOf } from "../atomic-file.js";
 import { GUARDED_CONFIG } from "./agent-config.js";
 import { EGRESS_TOKEN_FILE_NAME, isEgressTemp } from "../egress/egress-wiring.js";
 import { MEMORY_FILE_NAME, isMemoryTemp } from "../memory/context-file.js";
@@ -89,7 +90,10 @@ export async function unexpectedEntries(
     // The guarded files must be there as files; their content is `tamperedConfig`'s business.
     const expected: Kind | undefined = PI_LOCK_DIRS.has(name)
       ? "dir"
-      : PI_OWN_FILES.has(name) || name in GUARDED_CONFIG || extraAgentFiles.has(name)
+      : PI_OWN_FILES.has(name) ||
+          name in GUARDED_CONFIG ||
+          extraAgentFiles.has(name) ||
+          [...extraAgentFiles].some((base) => isTempOf(base, name))
         ? "file"
         : undefined;
     if (expected === undefined) found.push(`${AGENT_SUBDIR}/${name}`);

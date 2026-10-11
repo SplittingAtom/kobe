@@ -64,6 +64,8 @@ appendFileSync(
     // KOBE-39: the egress wiring Pi's bash tool calls see (no token among these).
     egressTokenFile: process.env.KOBE_EGRESS_TOKEN_FILE ?? null,
     bashEnv: process.env.BASH_ENV ?? null,
+    toolHome: process.env.KOBE_TOOL_HOME ?? null,
+    toolTmp: process.env.KOBE_TOOL_TMPDIR ?? null,
     egressProxy: process.env.KOBE_EGRESS_PROXY ?? null,
     threadId: process.env.KOBE_THREAD_ID ?? null,
     // KOBE-71: who this Pi runs as, and its HOME/TMPDIR.

@@ -142,6 +142,12 @@ export interface ThreadEnv {
   readonly models?: ModelWiring | undefined;
   /** Egress for Pi's tools (KOBE-39): token file + BASH_ENV; absent outside Kobe's pods. */
   readonly egress?: EgressWiring | undefined;
+  /**
+   * The root-owned BASH_ENV script (KOBE-235) for Pi's tools when there is no egress wiring: it
+   * switches each bash tool call to the shared HOME/TMPDIR, which does not depend on egress.
+   * Absent outside the image (development); with egress, `egress.envScript` is the same file.
+   */
+  readonly toolEnvScript?: string | undefined;
   /** mcp-proxy wiring for Pi's per-session MCP config (KOBE-111); absent: no connector tools. */
   readonly mcp?: McpWiring | undefined;
   /** The kobe-policy extension (root-owned file), loaded last into every Pi (KOBE-36). */
@@ -362,13 +368,14 @@ export class Thread {
       // loads code from both. With the executor the tools are another uid; without it (KOBE-228)
       // they are Pi's own and inherit its environment, so the shared ones reach them through the
       // BASH_ENV script (`KOBE_TOOL_HOME`/`KOBE_TOOL_TMPDIR`).
+      // Known limit (KOBE-235): `~` in Pi's own read/write/edit tools is expanded inside Pi against
+      // its private HOME, so a file written to `~/x` there is lost when Pi exits; bash tools and
+      // the executor's file tools see the shared home. Not mapped: Pi's HOME must stay private
+      // (it loads code from it) and Pi 1.0.x has no hook to remap `~` without the executor.
       const toolEnvBase = { ...env };
-      const priv = await preparePiPrivateDirs(
-        this.#env.piPrivateRoot ?? "/tmp",
-        runtimeDir,
-        identity,
-        { partner: exec !== undefined },
-      );
+      const priv = await preparePiPrivateDirs(this.#env.piPrivateRoot ?? "/tmp", identity, {
+        partner: exec !== undefined,
+      });
       piDir = priv.root;
       env.HOME = priv.home;
       env.TMPDIR = priv.tmp;
@@ -379,6 +386,9 @@ export class Thread {
         if (toolEnvBase.HOME !== undefined) env.KOBE_TOOL_HOME = toolEnvBase.HOME;
         // No TMPDIR in the launch: the tools' scratch is /tmp, never Pi's private (deleted) one.
         env.KOBE_TOOL_TMPDIR = toolEnvBase.TMPDIR ?? "/tmp";
+        // The switch itself is the BASH_ENV script, whether or not egress is wired (KOBE-235);
+        // with egress it sets the same variable below.
+        if (this.#env.toolEnvScript !== undefined) env.BASH_ENV = this.#env.toolEnvScript;
       }
       const models = this.#env.models;
       if (models !== undefined) {

@@ -42,6 +42,8 @@ interface Launch {
   readonly agentDir: string;
   readonly egressTokenFile: string | null;
   readonly bashEnv: string | null;
+  readonly toolHome: string | null;
+  readonly toolTmp: string | null;
   readonly egressProxy: string | null;
   readonly threadId: string | null;
 }
@@ -93,5 +95,34 @@ describe("egress for Pi's tools (KOBE-39)", () => {
     const result = await h.server.command(runStart("say:hi", { run_id: RUN_2 }));
     expect(result).toMatchObject({ ok: false, error: { code: "runtime_tampered" } });
     await until(() => !existsSync(launch.egressTokenFile ?? ""));
+  });
+});
+
+describe("the tools' HOME and TMPDIR without egress (KOBE-235)", () => {
+  async function startPlain(extra: Parameters<typeof startHarness>[0] = {}): Promise<Launch> {
+    h = await startHarness(extra);
+    expect(await h.server.command(runStart("hang"))).toMatchObject({ ok: true });
+    const [launch] = await h.commandsLog();
+    return launch as unknown as Launch;
+  }
+
+  it("with a tool env script and no egress, Pi still gets BASH_ENV and the shared HOME/TMPDIR names", async () => {
+    const launch = await startPlain({ toolEnvScript: SCRIPT });
+    expect(launch.bashEnv).toBe(SCRIPT);
+    expect(launch.toolHome).toMatch(/\/home$/);
+    expect(launch.toolTmp).toBe("/tmp");
+    expect(launch.egressTokenFile).toBeNull();
+    expect(launch.env).not.toContain("KOBE_EGRESS_PROXY");
+  });
+
+  it("without the script (development) nothing is set", async () => {
+    const launch = await startPlain();
+    expect(launch.bashEnv).toBeNull();
+  });
+
+  it("with egress the egress script wins (one BASH_ENV)", async () => {
+    const launch = await start(fakeTokens(TOKEN_1));
+    expect(launch.bashEnv).toBe(SCRIPT);
+    expect(launch.toolHome).toMatch(/\/home$/);
   });
 });

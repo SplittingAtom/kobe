@@ -219,7 +219,7 @@ export class PiRpc {
       await chown(sharedTmp, -1, pair.workspaceGid);
       await chmod(sharedTmp, 0o2775);
       if (pair.privateDirs ?? pair.hardened ?? true) {
-        const priv = await preparePiPrivateDirs(root, dir, pair.identity);
+        const priv = await preparePiPrivateDirs(root, pair.identity);
         piHome = priv.home;
         piTmp = priv.tmp;
       }

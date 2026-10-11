@@ -65,6 +65,8 @@ export interface AgentDeps {
   readonly models?: ModelWiring | undefined;
   /** Egress for Pi's tools (KOBE-39); absent outside Kobe's pods. */
   readonly egress?: EgressWiring | undefined;
+  /** The root-owned BASH_ENV script for tools when egress is not wired (KOBE-235). */
+  readonly toolEnvScript?: string | undefined;
   /** mcp-proxy wiring (KOBE-111); absent: no `mcp` capability, runs get no connector tools. */
   readonly mcp?: McpWiring | undefined;
   /** Pi identities (KOBE-71); absent: Pi runs as the agent's uid. */
@@ -153,6 +155,7 @@ export class Agent {
       runtimeDir: config.piRuntimeDir,
       models: deps.models,
       egress: deps.egress,
+      toolEnvScript: deps.toolEnvScript,
       mcp: deps.mcp,
       policyExtension: config.policyExtension,
       toolsExtension: deps.toolsExtension,

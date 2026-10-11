@@ -1,5 +1,5 @@
-import { constants as FS } from "node:fs";
-import { chmod, mkdir, open } from "node:fs/promises";
+import { chmod, mkdir } from "node:fs/promises";
+import { openAgentTemp } from "../atomic-file.js";
 import path from "node:path";
 import type { BundleFile } from "./bundle.js";
 
@@ -24,11 +24,7 @@ export async function extractFiles(dest: string, files: readonly BundleFile[]): 
     const target = path.resolve(root, file.path);
     if (!target.startsWith(root + path.sep)) throw new Error("bundle path escapes its directory");
     await ensureDirs(path.dirname(target), root, made);
-    const handle = await open(
-      target,
-      FS.O_WRONLY | FS.O_CREAT | FS.O_EXCL | FS.O_NOFOLLOW,
-      SKILL_FILE_MODE,
-    );
+    const handle = await openAgentTemp(target, SKILL_FILE_MODE);
     try {
       await handle.writeFile(file.data);
       await handle.chmod(SKILL_FILE_MODE);
