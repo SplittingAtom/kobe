@@ -135,7 +135,7 @@ async function db() {
 async function ensureUser(owner, ownerId, user, database) {
   const c = client(user.ip);
   if ((await c.signIn(user.email)).status === 200) return c;
-  const { issueInvite } = await import("/app/dist/invitations/install-invites.js");
+  const { issueInvite } = await import("/app/dist/invitations/site-invites.js");
   const { runWithAuditContext } = await import("/app/dist/audit/context.js");
   // Audited as the Owner, like POST /v1/site/invites (which mails the token instead).
   const invite = await runWithAuditContext(

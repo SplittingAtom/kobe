@@ -13,7 +13,7 @@ import { selfTestIdentifiers, siteIdentifierHits } from "./site-identifiers.mjs"
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const AREAS = ["apps", "services", "packages"];
 /** Areas whose identifiers, API paths, permissions and file names are renamed (KOBE-255). */
-const IDENTIFIER_AREAS = ["services", "packages"];
+const IDENTIFIER_AREAS = ["services", "packages", "e2e"];
 const SKIP_DIRS = new Set(["node_modules", "dist", ".next", ".turbo", "coverage", "drizzle"]);
 const SOURCE = /\.(ts|tsx|mts|mjs|js)$/;
 const TEST = /\.(test|spec)\.[a-z]+$|\/testing\//;
