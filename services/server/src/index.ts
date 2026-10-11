@@ -97,7 +97,8 @@ if (config.process === "scheduler") {
   deps = createServerDeps({
     databaseUrl: config.databaseUrl,
     ...schedulerAuthStandIn(),
-    sandboxWire: { waker, ...(runTokenKey ? { runTokenKey } : {}) },
+    // No run-token key: the wire host that delivers run.start mints run tokens, not the scheduler.
+    sandboxWire: { waker },
     connectors: loadConnectorUrlPolicy(process.env),
     agents: { maxVersions: config.agentMaxVersions },
     uploads: uploadSettings,
@@ -284,8 +285,17 @@ if (config.process === "server" && !modelsConfig) {
 
 // Sandbox provider (KOBE-22): the server and the scheduler (scheduled runs, KOBE-174) both start
 // sandboxes through it.
-const sandbox = createSandboxRuntime(process.env, isolation, deps?.database.db);
-if (!sandbox) {
+// The scheduler gets the provider only: it wakes sandboxes but holds no session-token key (tokens
+// are signed on the server's sandbox listener and wire), so a compromised scheduler can't forge them.
+const sandbox = isServer
+  ? createSandboxRuntime(process.env, isolation, deps?.database.db)
+  : undefined;
+const providerRuntime =
+  sandbox ??
+  (isServer
+    ? undefined
+    : createSandboxRuntime(process.env, isolation, deps?.database.db, { providerOnly: true }));
+if (!providerRuntime) {
   logger.error(
     "KOBE_SANDBOX_CONFIG is not set: sandboxes are disabled (install with the Helm chart)",
   );
@@ -431,13 +441,13 @@ if (isServer && sandbox && deps && !config.mcpProxyInternalKey) {
 }
 // Hibernation and wake (KOBE-25, D14): the router wakes sandboxes it finds disconnected; every
 // replica sweeps for idle ones (the sandboxes row lock keeps replicas from colliding).
-if (sandbox && deps) deps.offboarding.setProvider(sandbox.provider);
+if (providerRuntime && deps) deps.offboarding.setProvider(providerRuntime.provider);
 const lifecycle =
-  sandbox && deps
+  providerRuntime && deps
     ? createSandboxLifecycle({
         db: deps.database.db,
-        provider: sandbox.provider,
-        idleMinutes: sandbox.settings.hibernation.idleMinutes,
+        provider: providerRuntime.provider,
+        idleMinutes: providerRuntime.settings.hibernation.idleMinutes,
         // A returning member's offboarded sandbox is replaced by a new one (KOBE-28, D12).
         reinstate: (target) => deps.offboarding.reinstate(target),
       })
@@ -517,7 +527,7 @@ const stopReconciler = (isServer ? sandbox : undefined)?.startReconciler((result
 // provider (KOBE_SANDBOX_CONFIG) nothing could run, so the runner stays off rather than creating
 // runs that fail.
 const schedulerRunner =
-  !isServer && deps && sandbox
+  !isServer && deps && providerRuntime
     ? new SchedulerRunner({
         db: deps.database.db,
         runs: deps.runs,

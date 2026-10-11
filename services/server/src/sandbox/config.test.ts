@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { createSandboxRuntime } from "./runtime.js";
 import { KEYS, SETTINGS } from "../testing/sandbox-fixtures.js";
-import { loadSandboxConfig, quantityBytes, sessionKeyEnvName } from "./config.js";
+import {
+  loadSandboxConfig,
+  loadSandboxSettings,
+  quantityBytes,
+  sessionKeyEnvName,
+} from "./config.js";
 
 const env = (over: Record<string, string | undefined> = {}) => ({
   KOBE_SANDBOX_CONFIG: JSON.stringify(SETTINGS),
@@ -12,6 +18,24 @@ const env = (over: Record<string, string | undefined> = {}) => ({
 });
 
 describe("sandbox config", () => {
+  it("loads provider-only settings with none of the four session keys (the scheduler, KOBE-174)", () => {
+    const bare = { KOBE_SANDBOX_CONFIG: JSON.stringify(SETTINGS) };
+    expect(() => loadSandboxConfig(bare)).toThrow(/KOBE_SESSION_KEY_/);
+    expect(loadSandboxSettings(bare)).toEqual(SETTINGS);
+    expect(loadSandboxSettings({})).toBeUndefined();
+  });
+
+  it("builds the sandbox provider without keys, exposing none", () => {
+    const rt = createSandboxRuntime(
+      { KOBE_SANDBOX_CONFIG: JSON.stringify(SETTINGS), KOBE_RUNTIME_CLASS: "gvisor" },
+      { require: () => Promise.reject(new Error("not needed")) } as never,
+      undefined,
+      { providerOnly: true },
+    );
+    expect(rt?.provider).toBeDefined();
+    expect(rt).not.toHaveProperty("sessionKeys");
+  });
+
   it("parses the chart's settings and one key per audience", () => {
     expect(loadSandboxConfig(env())).toEqual({ settings: SETTINGS, sessionKeys: KEYS });
   });

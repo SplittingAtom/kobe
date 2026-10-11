@@ -135,7 +135,14 @@ HMAC key (KOBE-37). The approval key is optional so a pre-created Secret without
 still starts: the server then denies every tool call that needs approval (fail closed) and logs it.
 */}}
 {{- define "kobe.sandboxEnv" -}}
-{{ include "kobe.sandboxSessionEnv" . }}
+{{ include "kobe.sandboxConfigEnv" . }}
+{{- range $env, $key := include "kobe.sessionKeyNames" . | fromJson }}
+- name: KOBE_SESSION_KEY_{{ $env }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "kobe.sessionKeysSecretName" $ }}
+      key: {{ $key }}
+{{- end }}
 - name: KOBE_APPROVAL_KEY
   valueFrom:
     secretKeyRef:
@@ -145,18 +152,10 @@ still starts: the server then denies every tool call that needs approval (fail c
 {{- end -}}
 
 {{/*
-Sandbox config and the session-token keys without the approval key: the scheduler (KOBE-174) starts
-sandboxes for scheduled runs, so it needs the provider's settings and keys, but it never signs or
-verifies approvals (a scheduled run is `auto`: nothing waits for one).
+Sandbox config alone, for the scheduler (KOBE-174): it wakes sandboxes through the provider but
+holds no session-token key, run-token key or approval key (the server signs and verifies those).
 */}}
-{{- define "kobe.sandboxSessionEnv" -}}
+{{- define "kobe.sandboxConfigEnv" -}}
 - name: KOBE_SANDBOX_CONFIG
   value: {{ include "kobe.sandboxConfig" . | quote }}
-{{- range $env, $key := include "kobe.sessionKeyNames" . | fromJson }}
-- name: KOBE_SESSION_KEY_{{ $env }}
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "kobe.sessionKeysSecretName" $ }}
-      key: {{ $key }}
-{{- end }}
 {{- end -}}

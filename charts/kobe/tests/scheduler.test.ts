@@ -62,12 +62,10 @@ describe("scheduler runner chart (KOBE-174)", () => {
     expect(() => render({ "scheduler.replicas": "0" })).toThrow();
   });
 
-  it("gets the sandbox provider's config and session keys, but no approval or auth secrets", () => {
+  it("gets the sandbox config but no session key, approval key or auth secret", () => {
     const names = envOf(render()).map((e) => e.name);
     expect(names).toContain("KOBE_SANDBOX_CONFIG");
-    for (const key of ["SANDBOX_WIRE", "MODEL_GATEWAY", "MCP_PROXY", "EGRESS_PROXY"]) {
-      expect(names).toContain(`KOBE_SESSION_KEY_${key}`);
-    }
+    expect(names.filter((n) => n.startsWith("KOBE_SESSION_KEY_"))).toEqual([]);
     for (const forbidden of ["KOBE_APPROVAL_KEY", "KOBE_AUTH_SECRET", "KOBE_SETUP_TOKEN"]) {
       expect(names).not.toContain(forbidden);
     }

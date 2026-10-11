@@ -42,8 +42,11 @@ run orchestrator, `index.ts` wiring, chart values/env.
   health only (no user API), and runs none of the server's jobs (retention, budgets, audit sweeps, reconcilers,
   hibernation, evals, workspace sync). No sandbox config: the runner stays off and logs an error.
 - **Chart:** `scheduler.tickSeconds` (15), `scheduler.catchUpGraceMinutes` (60), `replicas` already allowed > 1.
-  Env: `KOBE_SANDBOX_CONFIG` and the four session keys via new `kobe.sandboxSessionEnv` (server's
-  `kobe.sandboxEnv` = that + approval key). The scheduler gets NO approval key, auth secrets or provider/virtual keys.
+  Env: `KOBE_SANDBOX_CONFIG` only (`kobe.sandboxConfigEnv`). The scheduler gets NO session key, run-token key,
+  approval key, auth secret or provider/virtual key (review fix; the two "scheduler holds no keys" chart tests are restored).
+- **No signing keys in the scheduler:** `createSandboxRuntime(..., {providerOnly: true})` loads settings only
+  (`loadSandboxSettings`) and returns no `sessionKeys`. Session tokens are signed on the server's sandbox listener and
+  run tokens by the wire host that delivers `run.start`, so the scheduler only wakes sandboxes through the k8s provider.
 
 ## Hook for 178 / 179
 
@@ -53,12 +56,9 @@ failure). index.ts subscribes a debug log in both. 179 should insert idempotentl
 
 ## Open questions (Chris / coordinator)
 
-- Privilege change: the scheduler now holds the four session keys (incl. `model-gateway`, which mints run tokens) so
-  it can start sandboxes. Two chart tests asserting it held none were updated to "same keys as the server, no approval
-  key". Alternative: leave dispatch to a server replica's stalled-queue sweep (slower, about 30-45 s).
 - Grace 60 min and tick 15 s are my choices. Nothing sets `paused_by=deactivation` yet (a deactivated user's
   schedules are skipped and keep advancing; KOBE-180).
-- Every skipped occurrence of a still-deactivated user writes one `schedule.skip` event per occurrence.
+- MEDIUM, until KOBE-180 lands: a deactivated user's schedule writes one `schedule.skip` per occurrence.
 
 ## Evidence
 
