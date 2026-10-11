@@ -48,6 +48,11 @@
   hand (a lost hook). Admin resume of that schedule is a 404 (only admin-paused schedules), so the
   409 `schedule_owner_inactive` path is covered by the component test, not the e2e.
 - The e2e section runs in the `suite` shard only (skipped with the executor on).
+- Bug found by the e2e (KOBE-179 wiring, fixed here): the run-end email kick also ran in the
+  scheduler process, which has no mailer (`disabledMailer`). A fire-time budget block ends there, so
+  the kick claimed the email, failed and backed it off 2 min (`attempts` 1). `index.ts` now kicks on
+  server replicas only; the server's 60 s sweep sends those emails. First CI run: everything else in
+  the section passed ([run 38130008392](https://github.com/SplittingAtom/kobe/actions/runs/38130008392)).
 
 ## Open questions (for Chris or the coordinator)
 
