@@ -81,7 +81,7 @@ describe("install break-glass page", () => {
     await userEvent.type(within(form).getByLabelText("Reason"), "Incident 42: exfiltration");
     await userEvent.click(within(form).getByLabelText(/Legal hold/));
     await userEvent.click(within(form).getByRole("button", { name: "Request access" }));
-    await screen.findByText(/A second install admin must approve it/);
+    await screen.findByText(/A second site admin must approve it/);
     const post = must(calls.find((c) => c.method === "POST"));
     expect(JSON.parse(String(post.body))).toEqual({
       teamId: "t-1",
@@ -101,7 +101,7 @@ describe("install break-glass page", () => {
         403,
         {
           code: "self_approval_forbidden",
-          message: "A second install admin must approve your request.",
+          message: "A second site admin must approve your request.",
         },
       ],
     });
@@ -110,7 +110,7 @@ describe("install break-glass page", () => {
     expect(within(row).getByText("Waiting for approval")).toBeTruthy();
     await userEvent.click(within(row).getByRole("button", { name: "Approve" }));
     expect((await screen.findByRole("alert")).textContent).toContain(
-      "A second install admin must approve",
+      "A second site admin must approve",
     );
     expect(summary(calls)).toContain("POST /v1/install/break-glass/g-1/approve");
   });
@@ -329,7 +329,7 @@ describe("team break-glass page", () => {
   it("says when nobody has access", async () => {
     stubApi({ "GET /v1/team/break-glass": [200, { active: [], recent: [] }] });
     renderTeam(<TeamBreakGlassPage />);
-    await screen.findByText(/No install admin has break-glass access/);
+    await screen.findByText(/No site admin has break-glass access/);
   });
 });
 

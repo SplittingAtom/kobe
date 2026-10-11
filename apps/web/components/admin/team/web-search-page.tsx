@@ -31,8 +31,8 @@ export function TeamWebSearchPage() {
             <WebSearchForm teamId={teamId} setting={setting} onSaved={reload} />
           ) : (
             <p>
-              The install admin has not set up a web search provider, so web search is not available
-              to teams yet.
+              The site admin has not set up a web search provider, so web search is not available to
+              teams yet.
             </p>
           )
         }
@@ -74,8 +74,8 @@ function WebSearchForm({
       </label>
       <p className={styles.hint}>
         When on, the text of agents&apos; search queries is sent to {provider}, the provider your
-        install admin configured, and leaves this install. Off by default; do not turn it on if
-        queries could contain information that must stay inside.
+        site admin configured, and leaves this site. Off by default; do not turn it on if queries
+        could contain information that must stay inside.
       </p>
       <button type="submit" disabled={mutation.pending || enabled === setting.enabled}>
         Save

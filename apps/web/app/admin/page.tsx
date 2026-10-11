@@ -9,8 +9,8 @@ export default function AdminHome() {
       <h1>Administration</h1>
       <ConsoleLinks />
       <p>
-        The install console is for the install Owner and Admins; the team console is for team admins
-        of your active team. <a href="/">Back to Kobe</a>
+        The site console is for the site Owner and Admins; the team console is for team admins of
+        your active team. <a href="/">Back to Kobe</a>
       </p>
     </main>
   );

@@ -21,11 +21,11 @@ export function PolicyFloorPage() {
     <>
       <h1>Policy floor</h1>
       <p className={styles.hint}>
-        Install rules bind every team. The floor only restricts: deny rules always win, ask rules
+        Site rules bind every team. The floor only restricts: deny rules always win, ask rules
         always prompt, and teams can tighten but never loosen them.
       </p>
       <RulesEditor
-        caption="Install rules"
+        caption="Site rules"
         effects={["deny", "ask"]}
         load={listInstallRules}
         create={(rule) =>

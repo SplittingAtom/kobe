@@ -114,7 +114,7 @@ describe("My connector keys (KOBE-105)", () => {
       [`GET ${GRANTS}`]: [200, { grants: [] }],
       [`PUT ${GRANTS}/c-1`]: [
         503,
-        { code: "credentials_unavailable", message: "This install cannot store credentials yet." },
+        { code: "credentials_unavailable", message: "This site cannot store credentials yet." },
       ],
     });
     renderTeam(<MyConnectorsPage />, MEMBER);

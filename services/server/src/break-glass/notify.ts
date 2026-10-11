@@ -63,10 +63,10 @@ export function grantMessage(
     if (grant.legalHold) lines.push("Marked as legal hold: the subject user is not notified.");
   }
   if (event === "approved" && grant.startsAt && grant.expiresAt) {
-    const approver = oneLine(detail.approvedBy?.name ?? "an install admin");
+    const approver = oneLine(detail.approvedBy?.name ?? "a site admin");
     lines.push(
       grant.selfApproved
-        ? `${approver} approved it alone: this install has a single admin (flagged).`
+        ? `${approver} approved it alone: this site has a single admin (flagged).`
         : `${approver} approved it.`,
       `Access is read-only and ends at ${grant.expiresAt.toUTCString()} ` +
         `(${Math.round((grant.expiresAt.getTime() - grant.startsAt.getTime()) / MINUTE)} minutes). ` +
@@ -74,11 +74,9 @@ export function grantMessage(
     );
   }
   if (event === "denied")
-    lines.push(`${oneLine(detail.decidedBy?.name ?? "An install admin")} denied it.`);
+    lines.push(`${oneLine(detail.decidedBy?.name ?? "A site admin")} denied it.`);
   if (event === "revoked") {
-    lines.push(
-      `${oneLine(detail.decidedBy?.name ?? "An install admin")} ended it before it expired.`,
-    );
+    lines.push(`${oneLine(detail.decidedBy?.name ?? "A site admin")} ended it before it expired.`);
   }
   if (event === "expired")
     lines.push(lapsed ? "Nobody decided within 24 hours." : "The time box ended.");
@@ -86,7 +84,7 @@ export function grantMessage(
   lines.push(
     "",
     options.isInstallAdmin
-      ? `Review it: ${deps.publicUrl}/admin/install/break-glass`
+      ? `Review it: ${deps.publicUrl}/admin/site/break-glass`
       : `See it in your team console: ${deps.publicUrl}/admin/team/break-glass`,
   );
   return { to: to.email, subject, text: lines.join("\n") };

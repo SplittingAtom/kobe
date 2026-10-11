@@ -135,9 +135,7 @@ function Body({
     const r = rpm.trim() === "" ? null : Number(rpm);
     if (typeof amounts === "string") return setInvalid(amounts);
     if (r !== null && (!Number.isInteger(r) || r < 1 || r > installRpm)) {
-      return setInvalid(
-        `The request rate is a whole number from 1 to ${installRpm} (the install's).`,
-      );
+      return setInvalid(`The request rate is a whole number from 1 to ${installRpm} (the site's).`);
     }
     setInvalid(null);
     void run(
@@ -275,9 +273,9 @@ function Body({
       </section>
 
       <section aria-labelledby="install-budget">
-        <h2 id="install-budget">Install</h2>
+        <h2 id="install-budget">Site</h2>
         <p className={styles.hint}>
-          Set by install admins; every team's spend counts against it (shown in percent).
+          Set by site admins; every team's spend counts against it (shown in percent).
         </p>
         <dl className={styles.dl}>
           <dt>This month</dt>

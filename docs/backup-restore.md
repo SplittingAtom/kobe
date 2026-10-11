@@ -271,7 +271,7 @@ listed in `packages/cli/src/seeded.ts`), which the backup's rows replace in the 
    anything newer whether to keep it (copy it aside or re-create the rows) or delete it yourself,
    then set `retention.paused: false` and `helm upgrade`. While paused, Trash and retention
    windows stand still, departed members' volumes are kept, and no workspace space is reclaimed.
-   Install admins see a banner on the retention page (`paused: true` in
+   Site admins see a banner on the retention page (`paused: true` in
    `GET /v1/install/retention`), and the server logs `retention is paused` at start. A restore
    from a backup taken just before an outage, with no writes since, needs no pause.
 

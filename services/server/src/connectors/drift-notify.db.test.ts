@@ -95,7 +95,7 @@ describe("drift notifications", () => {
     expect(mail.subject).toContain("notify-a");
     expect(mail.text).toContain("a");
     expect(`${mail.subject}\n${mail.text}`).not.toMatch(/ignore previous|evil|https:\/\/notify-a/);
-    expect(mail.text).toContain("https://kobe.test");
+    expect(mail.text).toContain("https://kobe.test/admin/site/connectors"); // KOBE-257
 
     // The same drift event is not notified again.
     expect(await sweep()).toBe(0);

@@ -213,7 +213,7 @@ describe("errors", () => {
     openApp(fake, t);
     expect(
       await screen.findByText(
-        "Your access may have changed. Ask an install or team admin if you need it.",
+        "Your access may have changed. Ask a site or team admin if you need it.",
       ),
     ).toBeTruthy();
     cleanup();

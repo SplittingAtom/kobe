@@ -27,7 +27,7 @@ const DEFAULT_LOADERS: Readonly<Record<ConsoleKind, () => Promise<ApiResult<Cons
 };
 
 const DENIED: Readonly<Record<ConsoleKind, string>> = {
-  install: "The install console is for the install Owner and Admins.",
+  install: "The site console is for the site Owner and Admins.",
   team: "The team console is for team admins of the active team.",
 };
 

@@ -136,7 +136,7 @@ export function installModelsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVar
       return err(c, 409, "provider_exists", "That provider is already configured.");
     }
     if (result.error === "too_many") {
-      return err(c, 409, "too_many_providers", "The install has reached its provider limit.");
+      return err(c, 409, "too_many_providers", "The site has reached its provider limit.");
     }
     return endpointError(c, result.error);
   });

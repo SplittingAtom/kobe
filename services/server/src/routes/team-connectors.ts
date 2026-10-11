@@ -21,7 +21,7 @@ const bodySchema = z
 
 const MESSAGES = {
   not_found: [404, "connector_not_found", "That connector is not registered."],
-  connector_disabled: [409, "connector_disabled", "The install admin has disabled that connector."],
+  connector_disabled: [409, "connector_disabled", "The site admin has disabled that connector."],
   unknown_tool: [422, "unknown_tool", "Pick only tools the connector lists (not drifted ones)."],
 } as const;
 

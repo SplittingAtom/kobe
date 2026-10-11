@@ -8,8 +8,7 @@ export const ConsoleAccessContext = createContext<ConsoleAccess | null>(null);
 
 export function useInstallAccess(): InstallAccess {
   const access = useContext(ConsoleAccessContext);
-  if (access?.console !== "install")
-    throw new Error("useInstallAccess outside the install console");
+  if (access?.console !== "install") throw new Error("useInstallAccess outside the site console");
   return access;
 }
 

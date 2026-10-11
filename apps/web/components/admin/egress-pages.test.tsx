@@ -168,7 +168,7 @@ describe("Team egress", () => {
     });
     renderTeam(<TeamEgressPage />);
     const table = await screen.findByRole("table", { name: /Domains/ });
-    expect(table.textContent).toMatch(/old.example.com.*Suspended \(not in the install ceiling\)/);
+    expect(table.textContent).toMatch(/old.example.com.*Suspended \(not in the site ceiling\)/);
     await userEvent.click(screen.getByRole("checkbox", { name: "pypi.org enabled" }));
     await screen.findByText("Enabled pypi.org for the team's sandboxes.");
     await userEvent.click(screen.getByRole("button", { name: "Disable old.example.com" }));
@@ -188,12 +188,12 @@ describe("Team egress", () => {
       "GET /v1/team/egress": [200, { domains: [team("pypi.org", true, false)] }],
       "PUT /v1/team/egress/domains/pypi.org": [
         409,
-        { code: "not_in_ceiling", message: "That domain is not in the install's egress ceiling." },
+        { code: "not_in_ceiling", message: "That domain is not in the site's egress ceiling." },
       ],
     });
     renderTeam(<TeamEgressPage />);
     await userEvent.click(await screen.findByRole("checkbox", { name: "pypi.org enabled" }));
-    expect((await screen.findByRole("alert")).textContent).toMatch(/not in the install/);
+    expect((await screen.findByRole("alert")).textContent).toMatch(/not in the site/);
   });
 
   it("approves an access request (KOBE-39) and reloads the domains", async () => {

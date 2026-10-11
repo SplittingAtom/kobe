@@ -15,7 +15,7 @@ export function parseAuditQuery(c: Context, { allowTeamFilter = true } = {}): Pa
           code: "invalid_request",
           message:
             "Check the filters: limit 1-200, before/after (not both), a known action or category, " +
-            "actorId (and teamId on the install log) as ids, since/until as ISO date-times.",
+            "actorId (and teamId on the site log) as ids, since/until as ISO date-times.",
         },
         400,
       ),

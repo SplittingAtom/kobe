@@ -101,7 +101,7 @@ export function EgressNotice({
         Internet access to <strong>{domain}</strong> was blocked by your team&apos;s egress policy.
         {payload.request_access
           ? " A team admin can allow it."
-          : " It is outside what this install allows."}
+          : " It is outside what this site allows."}
       </p>
       {showButton ? (
         <button type="button" onClick={() => void request()} disabled={view.kind === "sending"}>

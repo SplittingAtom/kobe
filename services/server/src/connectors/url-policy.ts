@@ -79,10 +79,7 @@ export async function checkConnectorUrl(
   }
   const port = url.port === "" ? (https ? 443 : 80) : Number(url.port);
   if (!policy.allowedPorts.includes(port)) {
-    return refuse(
-      "port_not_allowed",
-      `Port ${port} is not allowed for connectors on this install.`,
-    );
+    return refuse("port_not_allowed", `Port ${port} is not allowed for connectors on this site.`);
   }
   const addresses = new AddressPolicy({
     allowedInternal: policy.allowedInternalCidrs,

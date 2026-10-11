@@ -55,7 +55,7 @@ const ERRORS = {
   request_lapsed: [409, "This request lapsed: nobody decided within 24 hours. Ask again."],
   self_approval_forbidden: [
     403,
-    "A second install admin must approve your request. You can approve your own only when you are the install's only admin.",
+    "A second site admin must approve your request. You can approve your own only when you are the site's only admin.",
   ],
   subject_cannot_approve: [403, "The subject of a request can't approve it."],
   subject_cannot_decide: [403, "The subject of a request can't deny or revoke it."],
@@ -67,11 +67,11 @@ const ERRORS = {
   rate_limited: [429, "Too many break-glass reads. Wait a minute and continue."],
   request_rate_limited: [
     429,
-    "Too many break-glass requests in the last hour. Each one notifies every install admin.",
+    "Too many break-glass requests in the last hour. Each one notifies every site admin.",
   ],
   grant_not_active: [
     403,
-    "This grant doesn't give access now: it is pending, ended, or you are no longer an install admin.",
+    "This grant doesn't give access now: it is pending, ended, or you are no longer a site admin.",
   ],
   thread_not_found: [404, "No thread with that id within this grant's scope."],
   invalid_cursor: [400, "The cursor is not valid. Start from the first page."],

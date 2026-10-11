@@ -27,7 +27,7 @@ export function TeamModelsPage() {
     <>
       <h1>Models</h1>
       <p className={styles.hint}>
-        Choose which of the install&apos;s models your team may use and which one is the default.
+        Choose which of the site&apos;s models your team may use and which one is the default.
         Conversations use the default unless someone picks another enabled model for them. Usage is
         charged to the team&apos;s budget.
       </p>
@@ -53,7 +53,7 @@ function ModelsTable({
   readonly onChanged: () => void;
 }) {
   if (data.models.length === 0) {
-    return <p>The install&apos;s catalog is empty: ask an install admin to publish models.</p>;
+    return <p>The site&apos;s catalog is empty: ask a site admin to publish models.</p>;
   }
   const enabled = data.models.filter((m) => m.enabled);
   const defaultModel = data.models.find((m) => m.alias === data.default);
@@ -102,7 +102,7 @@ function ModelsTable({
       )}
       <div className={styles.tableWrap}>
         <table className={styles.table}>
-          <caption>Install catalog ({data.models.length})</caption>
+          <caption>Site catalog ({data.models.length})</caption>
           <thead>
             <tr>
               <th scope="col">Model</th>

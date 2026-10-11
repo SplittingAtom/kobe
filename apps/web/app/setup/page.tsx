@@ -72,8 +72,8 @@ export default function SetupPage() {
           Setup token <input name="setupToken" autoComplete="off" spellCheck={false} required />
         </label>
         <p>
-          Prove you control this install: run the <code>kubectl … setup-token</code> command printed
-          by <code>helm install</code>.
+          Prove you control this site: run the <code>kubectl … setup-token</code> command printed by{" "}
+          <code>helm install</code>.
         </p>
         <label>
           Name <input name="name" autoComplete="name" required />

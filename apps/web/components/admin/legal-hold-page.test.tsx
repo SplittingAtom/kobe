@@ -94,7 +94,7 @@ describe("install legal hold page", () => {
     await userEvent.selectOptions(within(form).getByLabelText("User"), "u-bob");
     await userEvent.type(within(form).getByLabelText("Reason"), "Litigation matter 7");
     await userEvent.click(within(form).getByRole("button", { name: "Request hold" }));
-    await screen.findByText(/A second install admin must place it/);
+    await screen.findByText(/A second site admin must place it/);
     const post = must(calls.find((c) => c.method === "POST"));
     expect(JSON.parse(String(post.body))).toEqual({
       teamId: "t-1",
@@ -138,7 +138,7 @@ describe("install legal hold page", () => {
     const form = await screen.findByRole("form", { name: "Ask to release a legal hold" });
     await userEvent.type(within(form).getByLabelText("Why can it end?"), "The case was closed");
     await userEvent.click(within(form).getByRole("button", { name: "Ask to release" }));
-    await screen.findByText(/stays in force until a second install admin approves/);
+    await screen.findByText(/stays in force until a second site admin approves/);
     const ask = must(calls.find((c) => c.url.endsWith("/h-2/release")));
     expect(JSON.parse(String(ask.body))).toEqual({ reason: "The case was closed" });
 

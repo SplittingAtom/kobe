@@ -38,7 +38,7 @@ export function IsolationBanner({ hidden }: { readonly hidden: boolean }) {
   return (
     <div role="alert" className={styles.banner}>
       <strong>Agents are disabled:</strong> the isolation runtime is missing.{" "}
-      <Link href="/admin/install/isolation">See how to fix it</Link>.
+      <Link href="/admin/site/isolation">See how to fix it</Link>.
     </div>
   );
 }

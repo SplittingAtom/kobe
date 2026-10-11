@@ -18,7 +18,7 @@ const notInCeiling = (c: Context) =>
   c.json(
     {
       code: "not_in_ceiling",
-      message: "That domain is not in the install's egress ceiling. Ask an install admin.",
+      message: "That domain is not in the site's egress ceiling. Ask a site admin.",
     },
     409,
   );
@@ -85,8 +85,7 @@ export function teamEgressRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
       return c.json(
         {
           code: "header_injection_unavailable",
-          message:
-            "Header injection is not configured on this install (KOBE_EGRESS_HEADER_SECRET).",
+          message: "Header injection is not configured on this site (KOBE_EGRESS_HEADER_SECRET).",
         },
         503,
       );

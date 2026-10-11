@@ -62,7 +62,7 @@ describe("BudgetGate (KOBE-42)", () => {
       ok: false,
       status: 402,
       code: "budget_exhausted",
-      message: "The install's monthly model budget is used up.",
+      message: "The site's monthly model budget is used up.",
     });
   });
 

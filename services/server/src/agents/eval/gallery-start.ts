@@ -38,7 +38,7 @@ export async function startGalleryEval(input: {
 }): Promise<GalleryEvalOutcome> {
   const { db, agent, userId, runner } = input;
   if (!runner?.available) {
-    return refused(503, "eval_unavailable", "Evals are not set up on this install.");
+    return refused(503, "eval_unavailable", "Evals are not set up on this site.");
   }
   const [team] = await db
     .select({ id: teams.id, slug: teams.slug })

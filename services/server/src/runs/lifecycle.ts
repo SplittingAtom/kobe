@@ -87,7 +87,7 @@ export function cancelledEvent(thread: ThreadRow): NewRunEvent {
 }
 
 export function budgetStoppedEvent(scope: "install" | "team" | "user"): NewRunEvent {
-  const whose = scope === "user" ? "your" : scope === "team" ? "the team's" : "the install's";
+  const whose = scope === "user" ? "your" : scope === "team" ? "the team's" : "the site's";
   return {
     type: "run.budget_stopped",
     payload: { scope, message: `The run stopped because ${whose} budget is used up.` },

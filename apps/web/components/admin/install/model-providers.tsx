@@ -99,7 +99,7 @@ export function ProvidersSection({
         <AddProviderForm providers={providers} mutation={mutation} onAdded={onChanged} />
       ) : (
         <p className={styles.banner}>
-          The model gateway is not configured on this install, so providers can&apos;t be added. Set
+          The model gateway is not configured on this site, so providers can&apos;t be added. Set
           the chart&apos;s <code>bifrost</code> values and upgrade.
         </p>
       )}

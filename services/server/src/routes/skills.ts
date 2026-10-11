@@ -54,11 +54,11 @@ const error = (
 ) => c.json({ code, message }, status);
 
 const UPLOAD_ERRORS: Record<UploadError | "blocklisted_download", string> = {
-  blocklisted_download: "This skill version is on the install's blocklist and can't be opened.",
+  blocklisted_download: "This skill version is on the site's blocklist and can't be opened.",
   unchanged: "That bundle is identical to the current version.",
   skill_limit: "This location has reached its limit of skills.",
   version_limit: "This skill has reached its limit of versions.",
-  blocklisted: "This skill bundle is on the install's blocklist and can't be uploaded.",
+  blocklisted: "This skill bundle is on the site's blocklist and can't be uploaded.",
 };
 
 const skillJson = (s: SkillRecord) => ({

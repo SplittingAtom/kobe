@@ -42,7 +42,7 @@ describe("EgressNotice (KOBE-39)", () => {
         threadId={THREAD}
       />,
     );
-    expect(screen.getByText(/outside what this install allows/)).toBeTruthy();
+    expect(screen.getByText(/outside what this site allows/)).toBeTruthy();
     expect(screen.queryByRole("button")).toBeNull();
   });
 

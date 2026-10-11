@@ -73,22 +73,22 @@ afterEach(() => {
 describe("install console", () => {
   it.each(["owner", "admin"] as const)("opens for the %s with grouped navigation", async (role) => {
     render(
-      <ConsoleShell kind="install" pathname="/admin/install/users" loadAccess={install(role)}>
+      <ConsoleShell kind="install" pathname="/admin/site/users" loadAccess={install(role)}>
         <Page />
       </ConsoleShell>,
     );
     expect(await screen.findByRole("heading", { name: "The page" })).toBeTruthy();
-    const nav = screen.getByRole("navigation", { name: "Install console sections" });
+    const nav = screen.getByRole("navigation", { name: "Site console sections" });
     const current = within(nav).getByRole("link", { name: "Users" });
     expect(current.getAttribute("aria-current")).toBe("page");
-    expect(current.getAttribute("href")).toBe("/admin/install/users");
+    expect(current.getAttribute("href")).toBe("/admin/site/users");
     expect(within(nav).getByRole("link", { name: /Web search.*coming in KOBE-63/ })).toBeTruthy();
     expect(within(nav).getByRole("list", { name: "People" })).toBeTruthy();
   });
 
   it("refuses a plain user and never mounts the page", async () => {
     render(
-      <ConsoleShell kind="install" pathname="/admin/install/users" loadAccess={install("user")}>
+      <ConsoleShell kind="install" pathname="/admin/site/users" loadAccess={install("user")}>
         <Page />
       </ConsoleShell>,
     );
@@ -101,7 +101,7 @@ describe("install console", () => {
     render(
       <ConsoleShell
         kind="install"
-        pathname="/admin/install"
+        pathname="/admin/site"
         loadAccess={() => fail(401, "unauthenticated", "Sign in to continue.")}
       >
         <Page />
@@ -121,13 +121,13 @@ describe("install console", () => {
       docs: "",
     });
     render(
-      <ConsoleShell kind="install" pathname="/admin/install/users" loadAccess={install("admin")}>
+      <ConsoleShell kind="install" pathname="/admin/site/users" loadAccess={install("admin")}>
         <Page />
       </ConsoleShell>,
     );
     const banner = await screen.findByRole("alert");
     expect(banner.textContent).toMatch(/isolation runtime is missing/);
-    expect(within(banner).getByRole("link").getAttribute("href")).toBe("/admin/install/isolation");
+    expect(within(banner).getByRole("link").getAttribute("href")).toBe("/admin/site/isolation");
   });
 });
 
@@ -222,7 +222,7 @@ describe("team console", () => {
 describe("navigation on narrow screens", () => {
   it("folds the section list behind a labelled toggle", async () => {
     const { container } = render(
-      <ConsoleShell kind="install" pathname="/admin/install/users" loadAccess={install("admin")}>
+      <ConsoleShell kind="install" pathname="/admin/site/users" loadAccess={install("admin")}>
         <Page />
       </ConsoleShell>,
     );
@@ -262,7 +262,7 @@ describe("isolation banner", () => {
   it("clears when the Isolation page re-checks successfully", async () => {
     stubFetch({ state: "missing", agentsEnabled: false, message: "x", checkedAt: "", docs: "" });
     render(
-      <ConsoleShell kind="install" pathname="/admin/install/users" loadAccess={install("admin")}>
+      <ConsoleShell kind="install" pathname="/admin/site/users" loadAccess={install("admin")}>
         <Page />
       </ConsoleShell>,
     );

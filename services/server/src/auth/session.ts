@@ -59,7 +59,7 @@ export function requireSession(deps: ServerDeps) {
       return c.json(
         {
           code: "two_factor_enrollment_required",
-          message: "This install requires two-factor authentication.",
+          message: "This site requires two-factor authentication.",
         },
         403,
       );

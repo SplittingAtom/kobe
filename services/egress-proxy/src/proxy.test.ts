@@ -254,7 +254,7 @@ describe("default deny", () => {
   it("blocks a domain outside the install ceiling without offering request access", async () => {
     const { head } = await openConnect("example.org:443", auth());
     expect(status(head)).toMatch(
-      /403 Kobe egress blocked: example.org is not allowed in this install/,
+      /403 Kobe egress blocked: example.org is not allowed on this site/,
     );
     expect(blocked[0]).toMatchObject({ reason: "not_in_ceiling", requestAccess: false });
   });

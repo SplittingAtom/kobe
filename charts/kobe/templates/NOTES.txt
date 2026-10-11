@@ -13,6 +13,6 @@ Open: http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.ho
 {{- end }}
 
 First run: open {{ include "kobe.publicUrl" . }}/setup and create the Owner. The wizard asks for
-the setup token, which proves you control this install:
+the setup token, which proves you control this site:
 
   kubectl -n {{ .Release.Namespace }} get secret {{ include "kobe.authSecretName" . }} -o jsonpath='{.data.setup-token}' | base64 -d

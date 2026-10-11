@@ -48,8 +48,7 @@ export function egressRequestRoutes(deps: ServerDeps): Hono<{ Variables: TeamVar
         return c.json(
           {
             code: "not_in_ceiling",
-            message:
-              "That domain is outside what this install allows; only an install admin can add it.",
+            message: "That domain is outside what this site allows; only a site admin can add it.",
           },
           409,
         );

@@ -16,10 +16,10 @@ afterEach(() => {
 describe("console overview", () => {
   it("lists the install sections with what each is for, placeholders marked", () => {
     renderInstall(<ConsoleOverview kind="install" />);
-    expect(screen.getByRole("heading", { level: 1, name: "Install console" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Site console" })).toBeTruthy();
     const people = screen.getByRole("region", { name: "People" });
     expect(within(people).getByRole("link", { name: "Users" }).getAttribute("href")).toBe(
-      "/admin/install/users",
+      "/admin/site/users",
     );
     const models = screen.getByRole("region", { name: "Models and connectors" });
     expect(models.textContent).toMatch(/Coming in KOBE-63/);
@@ -63,7 +63,7 @@ describe("console links on the home page", () => {
       within(nav)
         .getAllByRole("link")
         .map((a) => a.getAttribute("href")),
-    ).toEqual(["/admin/install", "/admin/team"]);
+    ).toEqual(["/admin/site", "/admin/team"]);
   });
 
   it("shows nothing to a member", async () => {
@@ -84,6 +84,6 @@ describe("console links on the home page", () => {
       within(nav)
         .getAllByRole("link")
         .map((a) => a.textContent),
-    ).toEqual(["Install console"]);
+    ).toEqual(["Site console"]);
   });
 });

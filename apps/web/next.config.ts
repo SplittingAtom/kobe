@@ -13,6 +13,13 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: [...SECURITY_HEADERS] }];
   },
+  // KOBE-257: the install console is the Site console; old links and bookmarks still land.
+  async redirects() {
+    return [
+      { source: "/admin/install", destination: "/admin/site", permanent: true },
+      { source: "/admin/install/:path*", destination: "/admin/site/:path*", permanent: true },
+    ];
+  },
 };
 
 export default nextConfig;

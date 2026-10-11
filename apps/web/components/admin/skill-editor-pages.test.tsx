@@ -59,13 +59,13 @@ describe("Blocklisted skill version (KOBE-81)", () => {
         422,
         {
           code: "skill_blocklisted",
-          message: "This skill version is on the install's blocklist and can't be opened.",
+          message: "This skill version is on the site's blocklist and can't be opened.",
         },
       ],
     });
     renderTeam(<SkillEditorPage skillId="s-1" />);
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain("on the install's blocklist");
+    expect(alert.textContent).toContain("on the site's blocklist");
   });
 });
 

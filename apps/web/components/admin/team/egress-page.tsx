@@ -40,7 +40,7 @@ export function TeamEgressPage() {
       <h1>Egress</h1>
       <p className={styles.hint}>
         Your team&apos;s sandboxes reach nothing on the internet until you enable a domain here, and
-        only domains in the install&apos;s egress ceiling can be enabled. Connections are HTTPS only
+        only domains in the site&apos;s egress ceiling can be enabled. Connections are HTTPS only
         and logged to the audit view. Members can&apos;t enable domains themselves: when their
         sandbox is blocked they can request access, and you approve or deny it here.
       </p>
@@ -50,7 +50,7 @@ export function TeamEgressPage() {
       <ResourceView state={state} label="egress domains">
         {(domains) =>
           domains.length === 0 ? (
-            <p>The install ceiling is empty: ask an install admin to add domains.</p>
+            <p>The site ceiling is empty: ask a site admin to add domains.</p>
           ) : (
             <div className={styles.tableWrap}>
               <table className={styles.table}>
@@ -73,7 +73,7 @@ export function TeamEgressPage() {
                       </th>
                       <td>
                         {!d.inCeiling
-                          ? "Suspended (not in the install ceiling)"
+                          ? "Suspended (not in the site ceiling)"
                           : d.enabled
                             ? "Enabled"
                             : "Off"}

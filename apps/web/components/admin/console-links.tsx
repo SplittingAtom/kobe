@@ -46,7 +46,7 @@ export function ConsoleLinks() {
       <ul>
         {open.includes("install") && (
           <li>
-            <Link href={consoleHref("install")}>Install console</Link>
+            <Link href={consoleHref("install")}>Site console</Link>
           </li>
         )}
         {open.includes("team") && (

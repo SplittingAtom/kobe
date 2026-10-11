@@ -58,7 +58,7 @@ export function budgetAlertMessage(input: {
   const team = input.teamName ? oneLine(input.teamName) : null;
   const whose =
     input.scope === "install"
-      ? "The install's"
+      ? "The site's"
       : input.scope === "team"
         ? `The ${team ?? "team"} team's`
         : input.own
@@ -164,7 +164,7 @@ async function deliverIn(options: DeliverOptions, teamId: string | null): Promis
       const [team] = row.team_id
         ? await db.select({ name: teams.name }).from(teams).where(eq(teams.id, row.team_id))
         : [];
-      const path = row.scope === "install" ? "/admin/install/usage" : "/admin/team/budgets";
+      const path = row.scope === "install" ? "/admin/site/usage" : "/admin/team/budgets";
       try {
         await mailer.send(
           budgetAlertMessage({

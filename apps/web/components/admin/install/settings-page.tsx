@@ -64,7 +64,7 @@ function SettingsForm({
   }
 
   return (
-    <form onSubmit={onSubmit} aria-label="Install settings">
+    <form onSubmit={onSubmit} aria-label="Site settings">
       <fieldset>
         <legend>Sign-in</legend>
         <label>

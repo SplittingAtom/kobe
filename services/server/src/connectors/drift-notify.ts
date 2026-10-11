@@ -54,11 +54,11 @@ export function driftMessage(
     subject: `Connector ${name}: tools changed and are disabled`,
     text: [
       `The tools of the ${name} connector changed upstream. These tools are disabled in Kobe until`,
-      "an install admin reviews and re-approves them:",
+      "a site admin reviews and re-approves them:",
       ...shown,
       ...(more > 0 ? [`  ... and ${more} more`] : []),
       "",
-      `Install admins can review them at ${publicUrl}/admin/connectors`,
+      `Site admins can review them at ${publicUrl}/admin/site/connectors`,
     ].join("\n"),
   };
 }

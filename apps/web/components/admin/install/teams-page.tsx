@@ -42,7 +42,7 @@ export function TeamsPage() {
     <>
       <h1>Teams</h1>
       <p className={styles.hint}>
-        Teams are walls: each has its own members, agents and data. Install admins create teams and
+        Teams are walls: each has its own members, agents and data. Site admins create teams and
         name the first team admin; the team&apos;s admins manage its members from then on.
       </p>
       <MutationStatus error={mutation.error} notice={mutation.notice} />

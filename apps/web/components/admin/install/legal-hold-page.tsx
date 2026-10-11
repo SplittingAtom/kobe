@@ -91,7 +91,7 @@ export function LegalHoldPage() {
         A legal hold suspends every purge of a team&apos;s data, or of one user&apos;s data in a
         team: retention and Trash purges, deletion of an offboarded member&apos;s workspace, and the
         erasure of IP addresses from the audit log. Placing and releasing a hold each need a second
-        install admin. The person held is not told, and can&apos;t see the hold.
+        site admin. The person held is not told, and can&apos;t see the hold.
       </p>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="legal holds">
@@ -164,8 +164,8 @@ function RequestForm({
         }),
       ({ hold }) =>
         soleAdmin
-          ? `Requested a hold on ${hold.team.name}. You are the only install admin: you can place it yourself (it will be flagged).`
-          : `Requested a hold on ${hold.team.name}. A second install admin must place it.`,
+          ? `Requested a hold on ${hold.team.name}. You are the only site admin: you can place it yourself (it will be flagged).`
+          : `Requested a hold on ${hold.team.name}. A second site admin must place it.`,
     );
     if (done) {
       setReason("");
@@ -235,8 +235,8 @@ function RequestForm({
       </form>
       {soleAdmin && (
         <p className={styles.hint}>
-          You are this install&apos;s only active admin, so you can place and release holds you
-          asked for yourself. They are flagged as self-approved.
+          You are this site&apos;s only active admin, so you can place and release holds you asked
+          for yourself. They are flagged as self-approved.
         </p>
       )}
     </>
@@ -260,7 +260,7 @@ function ReleaseForm({
     e.preventDefault();
     const done = await mutation.run(
       () => requestRelease(hold.id, reason.trim()),
-      () => "Release requested. The hold stays in force until a second install admin approves.",
+      () => "Release requested. The hold stays in force until a second site admin approves.",
     );
     if (done) onDone();
   }

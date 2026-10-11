@@ -38,7 +38,7 @@ export function TeamConnectorsPage() {
       <ResourceView state={state} label="connectors">
         {(connectors) =>
           connectors.length === 0 ? (
-            <p>No connectors are registered: ask an install admin to register one.</p>
+            <p>No connectors are registered: ask a site admin to register one.</p>
           ) : (
             connectors.map((c) => (
               <ConnectorCard
@@ -116,7 +116,7 @@ function ConnectorCard({
       </p>
       {c.status === "disabled" ? (
         <p className={styles.banner}>
-          Disabled by an install admin: its tools are not offered
+          Disabled by a site admin: its tools are not offered
           {c.enabled ? "" : " and the team cannot enable it"}.
         </p>
       ) : null}
@@ -196,7 +196,7 @@ function ToolList({
                 <code>{t.name}</code>
               )}{" "}
               {drifted ? (
-                <span>Unavailable: changed upstream, waiting for an install admin</span>
+                <span>Unavailable: changed upstream, waiting for a site admin</span>
               ) : (
                 <>
                   <span className={styles.hint}>{t.readOnly ? "Read-only" : "Write"}</span>{" "}

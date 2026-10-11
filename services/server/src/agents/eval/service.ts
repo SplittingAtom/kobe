@@ -169,7 +169,7 @@ export class EvalRunner {
     const { options } = this;
     const { orbitEval } = options.settings;
     if (!orbitEval || !options.settings.modelGatewayAccess) {
-      throw new Error("Orbit evals are not configured for this install (the eval image is unset).");
+      throw new Error("Orbit evals are not configured for this site (the eval image is unset).");
     }
     const { record, team } = run;
     const verified = await options.isolation.require();
