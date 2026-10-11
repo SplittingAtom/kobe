@@ -51,14 +51,15 @@ function mapModel(model: string | undefined, warnings: string[]): { model?: stri
 
 function mapMcpTools(
   names: readonly string[],
-  connectors: readonly string[],
+  connectors: ToolManifest["connectors"],
   warnings: string[],
 ): string[] {
-  const segments = new Set(connectors.map(mcpServerSegment));
+  // `all` (KOBE-254): the names come from the team's enabled connectors (orbitMcpToolNames).
+  const segments = connectors === "all" ? null : new Set(connectors.map(mcpServerSegment));
   const mapped = new Set<string>();
   for (const name of names) {
     const parsed = parseMcpToolName(name);
-    if (parsed === undefined || !segments.has(parsed.server_segment)) {
+    if (parsed === undefined || (segments !== null && !segments.has(parsed.server_segment))) {
       throw new Error(`MCP tool "${name}" is not from a connector of this agent version`);
     }
     if (!ORBIT_TOOL_NAME.test(name)) {
@@ -97,7 +98,7 @@ export function mapAgentVersionToOrbit(input: OrbitExportInput): OrbitExport {
       kobe: {
         agent_version: version,
         approval_mode: toolManifest.approval_mode.effective,
-        connectors: [...toolManifest.connectors],
+        connectors: toolManifest.connectors === "all" ? "all" : [...toolManifest.connectors],
         manifest_format: toolManifest.format,
       },
     },

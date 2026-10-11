@@ -475,16 +475,43 @@ export async function deleteOrArchiveAgent(
       });
       return { kind: "deleted" };
     }
-    if (agent.archivedAt) return { kind: "archived", agent };
-    const archived = await setArchived(tx, location, id, new Date(), archivedBy);
-    await recordAudit(tx, {
-      ...(actor ? { actor } : {}),
-      action: "agent.archived",
-      teamId: auditTeam(location),
-      target: ref(location, agent),
-    });
-    return { kind: "archived", agent: archived };
+    return { kind: "archived", agent: await archiveLocked(tx, location, agent, actor, archivedBy) };
   });
+}
+
+/**
+ * Archives an agent whether or not it was ever published, never deleting it (KOBE-254: the seed
+ * retiring gallery agents whose definition left the repo). Idempotent; null when it isn't there.
+ */
+export async function archiveAgent(
+  db: KobeDb,
+  location: AgentLocation,
+  id: string,
+  actor: AuditActor,
+  archivedBy: "seed" | null,
+): Promise<AgentRecord | null> {
+  return inLocation(db, location, async (tx) => {
+    const agent = await lockAgent(tx, location, id);
+    return agent ? archiveLocked(tx, location, agent, actor, archivedBy) : null;
+  });
+}
+
+async function archiveLocked(
+  tx: KobeTx,
+  location: AgentLocation,
+  agent: AgentRecord,
+  actor: AuditActor | undefined,
+  archivedBy: "seed" | null,
+): Promise<AgentRecord> {
+  if (agent.archivedAt) return agent;
+  const archived = await setArchived(tx, location, agent.id, new Date(), archivedBy);
+  await recordAudit(tx, {
+    ...(actor ? { actor } : {}),
+    action: "agent.archived",
+    teamId: auditTeam(location),
+    target: ref(location, agent),
+  });
+  return archived;
 }
 
 /** Brings an archived agent back (editable, publishable, pinnable). Null when it isn't there. */

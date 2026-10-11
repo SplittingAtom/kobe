@@ -496,8 +496,8 @@ describe("Gallery agents", () => {
       {
         id: "a-1",
         scope: "gallery",
-        slug: "assistant",
-        name: "Assistant",
+        slug: "kobe",
+        name: "Kobe",
         status: "active",
         ownerUserId: null,
         currentVersion: null,
@@ -533,7 +533,7 @@ describe("Gallery agents", () => {
   it("lists and exports, with no way to edit a gallery agent", async () => {
     stubApi({ "GET /v1/install/gallery/agents": [200, AGENTS] });
     renderInstall(<GalleryPage />);
-    const exportLink = await screen.findByRole("link", { name: "Export Assistant" });
+    const exportLink = await screen.findByRole("link", { name: "Export Kobe" });
     expect(exportLink.getAttribute("href")).toBe("/v1/install/gallery/agents/a-1/export");
     expect(screen.queryByLabelText("Agent file (.md)")).toBeNull();
     expect(screen.queryByRole("button", { name: /Delete|Edit|Save/ })).toBeNull();
@@ -550,8 +550,8 @@ describe("Gallery agents", () => {
     renderInstall(<GalleryPage />);
     expect(await screen.findByText("60% attacks succeeded (blocked)")).toBeTruthy();
     await userEvent.selectOptions(await screen.findByLabelText("Run evals in team"), "t-2");
-    await userEvent.click(screen.getByRole("button", { name: "Run eval for Assistant" }));
-    await screen.findByText("Evaluating Assistant. The score appears here when it finishes.");
+    await userEvent.click(screen.getByRole("button", { name: "Run eval for Kobe" }));
+    await screen.findByText("Evaluating Kobe. The score appears here when it finishes.");
     const post = must(calls.find((c) => c.method === "POST"));
     expect(JSON.parse(String(post.body))).toEqual({ teamId: "t-2" });
   });

@@ -6,13 +6,13 @@ import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
 import { chatRequests, composer, openApp } from "./testing";
 
-/** KOBE-124: new chats preselect the gallery Assistant (by gallery key) when it is runnable. */
+/** KOBE-124, KOBE-254: new chats preselect the gallery agent Kobe (by gallery key) when it is runnable. */
 let fake: FakeKobe;
 
-const ASSISTANT = {
-  id: "a-assistant",
+const KOBE = {
+  id: "a-kobe",
   scope: "gallery",
-  galleryKey: "assistant",
+  galleryKey: "kobe",
   name: "Helper",
   model: null,
 } as const;
@@ -20,7 +20,7 @@ const ASSISTANT = {
 beforeEach(() => {
   sessionStorage.clear();
   fake = new FakeKobe();
-  fake.runnableAgents.push({ id: "a-team", scope: "team", name: "Assistant", model: null });
+  fake.runnableAgents.push({ id: "a-team", scope: "team", name: "Kobe", model: null });
   vi.stubGlobal("fetch", fake.fetch);
 });
 
@@ -36,16 +36,16 @@ const checked = async () =>
     .map((r) => r.closest("label")?.querySelector("span")?.textContent);
 
 describe("default agent", () => {
-  it("preselects the gallery Assistant by key, not by display name", async () => {
-    fake.runnableAgents.push(ASSISTANT);
+  it("preselects the gallery agent Kobe by key, not by display name", async () => {
+    fake.runnableAgents.push(KOBE);
     openApp(fake);
     await waitFor(async () => expect(await checked()).toEqual(["Helper"]));
     await userEvent.setup().type(await composer(), "hi{Enter}");
     await waitFor(() => expect(fake.threads.size).toBe(1));
-    expect(must(chatRequests(fake, "POST")[0]).body).toMatchObject({ agent_id: "a-assistant" });
+    expect(must(chatRequests(fake, "POST")[0]).body).toMatchObject({ agent_id: "a-kobe" });
   });
 
-  it("falls back to No agent when the Assistant is not runnable (suspended or missing)", async () => {
+  it("falls back to No agent when Kobe is not runnable (suspended or missing)", async () => {
     openApp(fake);
     expect(await checked()).toEqual(["No agent"]);
     await userEvent.setup().type(await composer(), "hi{Enter}");
@@ -54,7 +54,7 @@ describe("default agent", () => {
   });
 
   it("lets the user change the selection back to No agent", async () => {
-    fake.runnableAgents.push(ASSISTANT);
+    fake.runnableAgents.push(KOBE);
     openApp(fake);
     const user = userEvent.setup();
     await waitFor(async () => expect(await checked()).toEqual(["Helper"]));

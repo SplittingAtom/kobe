@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { agentSkills } from "@kobe/agent-file";
-import { BUILTIN_SKILL_NAMES } from "@kobe/protocol";
+import { agentConnectors, agentSkills } from "@kobe/agent-file";
+import { BUILTIN_SKILL_NAMES, BUILTIN_TOOLS } from "@kobe/protocol";
 import { computeToolManifest, manifestAllowsTool } from "../agents/manifest.js";
-import { RESEARCHER_NO_SEARCH_NOTICE } from "./agents/researcher.js";
-import { GALLERY_DEFINITIONS, parseGalleryDefinitions } from "./definitions.js";
+import { KOBE_NO_SEARCH_NOTICE } from "./agents/kobe.js";
+import { GALLERY_DEFINITIONS, KOBE_GALLERY_KEY, parseGalleryDefinitions } from "./definitions.js";
 
 describe("the repo's gallery definitions", () => {
   it("all parse, with unique keys and positive generations", () => {
@@ -18,107 +18,71 @@ describe("the repo's gallery definitions", () => {
   });
 });
 
-describe("the five gallery agents (KOBE-89)", () => {
+describe("the one gallery agent, Kobe (KOBE-254)", () => {
   const parsed = parseGalleryDefinitions(GALLERY_DEFINITIONS);
-  const byKey = new Map(parsed.map((p) => [p.key, p.definition]));
-  const def = (key: string) => {
-    const found = byKey.get(key);
-    if (!found) throw new Error(`no gallery definition ${key}`);
-    return found;
-  };
-  const skillsOf = (key: string) => agentSkills(def(key).frontmatter).names;
+  const kobe = parsed[0]?.definition;
+  if (!kobe) throw new Error("no gallery definition");
+  const floor = { scope: "install", install: [], team: [], approvalFloor: "auto" } as const;
+  const manifest = computeToolManifest(kobe.frontmatter, floor, new Date());
 
-  it("ships exactly the five", () => {
-    expect([...byKey.keys()].sort()).toEqual(
-      ["assistant", "code-helper", "data-analyst", "document-drafter", "researcher"].sort(),
+  it("ships exactly one gallery agent, Kobe, at generation 1", () => {
+    expect(parsed.map((p) => [p.key, p.generation])).toEqual([[KOBE_GALLERY_KEY, 1]]);
+    expect(KOBE_GALLERY_KEY).toBe("kobe");
+    expect(kobe.frontmatter.name).toBe("Kobe");
+    expect(kobe.frontmatter.description).toBeTruthy();
+    expect(kobe.frontmatter.starters?.length).toBeGreaterThan(0);
+  });
+
+  it("pins no model, narrows no tool and asks for every team connector", () => {
+    expect(kobe.frontmatter.model).toBeUndefined();
+    expect(kobe.frontmatter.tools).toBeUndefined();
+    expect(kobe.frontmatter.approval_mode).toBeUndefined();
+    expect(agentConnectors(kobe.frontmatter)).toEqual({ all: true, names: [] });
+  });
+
+  it("freezes every available built-in tool and `all` connectors (ac-1)", () => {
+    const unavailable = ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"];
+    const available = Object.keys(BUILTIN_TOOLS)
+      .filter((n) => !unavailable.includes(n))
+      .sort();
+    expect(manifest.tools.map((t) => t.name)).toEqual(available);
+    expect(manifest.excluded.every((e) => e.reason === "unavailable")).toBe(true);
+    expect(manifest.connectors).toBe("all");
+    for (const tool of ["create_artifact", "update_artifact", "share_file", "web_search"]) {
+      expect(manifestAllowsTool(manifest, tool), tool).toBe(true);
+    }
+  });
+
+  it("lists every built-in skill, and only built-ins", () => {
+    expect([...agentSkills(kobe.frontmatter).names].sort()).toEqual(
+      [...BUILTIN_SKILL_NAMES].sort(),
     );
-    // Assistant: skill-creator (2), artifacts (3). Data Analyst, Document Drafter: artifacts (2),
-    // share_file (3, KOBE-152).
-    expect(Object.fromEntries(parsed.map((p) => [p.key, p.generation]))).toEqual({
-      assistant: 3,
-      "data-analyst": 3,
-      researcher: 2,
-      "document-drafter": 3,
-      "code-helper": 1,
-    });
   });
 
-  it("pins no model and lists only built-in skills", () => {
-    for (const { definition } of parsed) {
-      expect(definition.frontmatter.model).toBeUndefined();
-      expect(definition.prompt.length).toBeGreaterThan(200);
-      expect(definition.frontmatter.description).toBeTruthy();
-      for (const name of agentSkills(definition.frontmatter).names) {
-        expect(BUILTIN_SKILL_NAMES).toContain(name);
-      }
-    }
+  it("keeps the prompt general-purpose and concise", () => {
+    expect(kobe.prompt.length).toBeGreaterThan(500);
+    expect(new TextEncoder().encode(kobe.prompt).length).toBeLessThan(5000);
   });
 
-  it("gives each specialist its skills", () => {
-    expect(skillsOf("data-analyst")).toEqual(["data-analysis", "charts", "xlsx"]);
-    expect(skillsOf("document-drafter")).toEqual(["docx", "pdf"]);
-    expect(skillsOf("code-helper")).toEqual(["code-review"]);
-    expect(skillsOf("researcher")).toEqual(["pdf", "docx", "xlsx"]);
-    expect(skillsOf("assistant")).toEqual(["skill-creator"]);
+  it("carries the research guidance: web_search with URLs, and says plainly when it is unavailable", () => {
+    expect(kobe.prompt).toContain("web_search");
+    expect(kobe.prompt).toMatch(/URL/);
+    expect(kobe.prompt).toContain(KOBE_NO_SEARCH_NOTICE);
   });
 
-  it("the Researcher tells the person plainly when it has no web search", () => {
-    expect(def("researcher").prompt).toContain(RESEARCHER_NO_SEARCH_NOTICE);
+  it("carries the Document Drafter's Markdown preview artifact (KOBE-131) and share_file (KOBE-152)", () => {
+    expect(kobe.prompt).toMatch(/docx/);
+    expect(kobe.prompt).toMatch(/create_artifact with kind markdown/);
+    expect(kobe.prompt).toMatch(/update_artifact/);
+    expect(kobe.prompt).toMatch(/share_file/);
   });
 
-  it("the Researcher searches with web_search, cites URLs, and explains an unavailable answer (KOBE-114)", () => {
-    const prompt = def("researcher").prompt;
-    expect(prompt).toContain("web_search");
-    expect(prompt).toMatch(/unavailable/);
-    expect(prompt).toMatch(/URL/);
-  });
-
-  it("the Document Drafter writes files and offers a Markdown artifact preview alongside", () => {
-    const prompt = def("document-drafter").prompt;
-    expect(prompt).toMatch(/docx/);
-    expect(prompt).toMatch(/create_artifact/);
-    expect(prompt).toMatch(/markdown/i);
-    expect(prompt).toMatch(/update_artifact/);
-    expect(prompt).not.toMatch(/until KOBE-55/);
-  });
-
-  it("the Data Analyst draws charts as HTML artifacts and still saves files when asked", () => {
-    const prompt = def("data-analyst").prompt;
-    expect(prompt).toMatch(/create_artifact/);
-    expect(prompt).toMatch(/html/i);
-    expect(prompt).toMatch(/xlsx/);
-    expect(prompt).toMatch(/file/i);
-  });
-
-  it("the Document Drafter and Data Analyst hand over files with share_file (KOBE-152)", () => {
-    for (const key of ["document-drafter", "data-analyst"]) {
-      expect(def(key).prompt, key).toMatch(/share_file/);
-    }
-    expect(def("document-drafter").prompt).toMatch(/docx|pdf/);
-    expect(def("data-analyst").prompt).toMatch(/xlsx/);
-  });
-
-  it("their frozen tool manifests let share_file through", () => {
-    const floor = { scope: "install", install: [], team: [], approvalFloor: "auto" } as const;
-    for (const key of ["document-drafter", "data-analyst"]) {
-      const manifest = computeToolManifest(def(key).frontmatter, floor, new Date());
-      expect(manifestAllowsTool(manifest, "share_file"), key).toBe(true);
-    }
-  });
-
-  it("the Assistant uses artifacts for output best viewed and update_artifact for revisions", () => {
-    const prompt = def("assistant").prompt;
-    expect(prompt).toMatch(/create_artifact/);
-    expect(prompt).toMatch(/update_artifact/);
-    for (const what of ["HTML", "diagram", "table", "code"]) expect(prompt).toContain(what);
-  });
-
-  it("the three agents' frozen tool manifests let both artifact tools through", () => {
-    const floor = { scope: "install", install: [], team: [], approvalFloor: "auto" } as const;
-    for (const key of ["assistant", "data-analyst", "document-drafter"]) {
-      const manifest = computeToolManifest(def(key).frontmatter, floor, new Date());
-      expect(manifestAllowsTool(manifest, "create_artifact"), key).toBe(true);
-      expect(manifestAllowsTool(manifest, "update_artifact"), key).toBe(true);
-    }
+  it("carries the data, code and artifact guidance of the agents it replaced", () => {
+    expect(kobe.prompt).toMatch(/data-analysis skill/);
+    expect(kobe.prompt).toMatch(/html artifact/);
+    expect(kobe.prompt).toMatch(/xlsx/);
+    expect(kobe.prompt).toMatch(/code-review skill/);
+    expect(kobe.prompt).toMatch(/skill-creator skill/);
+    for (const what of ["HTML", "diagram", "table", "code"]) expect(kobe.prompt).toContain(what);
   });
 });

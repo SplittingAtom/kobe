@@ -19,7 +19,7 @@ const LIST_FIELDS: readonly { key: ListKey; label: string; hint: string }[] = [
   {
     key: "connectors",
     label: "Connectors",
-    hint: "Connector names, one per line. Pickers come with KOBE-59.",
+    hint: "Connector names, one per line, or tick every team connector below.",
   },
   { key: "toolsAllow", label: "Allowed tools", hint: "Tool globs that narrow what it may use." },
   { key: "toolsDeny", label: "Denied tools", hint: "Tool globs it must never use." },
@@ -95,12 +95,21 @@ export function FrontmatterForm({
               {...control}
               rows={4}
               value={form[key]}
-              readOnly={readOnly}
+              readOnly={readOnly || (key === "connectors" && form.connectorsAll)}
               onChange={(e) => set(key, e.target.value)}
             />
           )}
         </Field>
       ))}
+      <label className={`${styles.checkbox} ${styles.wide}`}>
+        <input
+          type="checkbox"
+          checked={form.connectorsAll}
+          disabled={readOnly}
+          onChange={(e) => set("connectorsAll", e.target.checked)}
+        />
+        Use every connector the team enables (each person still connects their own account)
+      </label>
       <label className={`${styles.checkbox} ${styles.wide}`}>
         <input
           type="checkbox"

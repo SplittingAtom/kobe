@@ -49,7 +49,7 @@ export interface ThreadSummary {
 export interface RunnableAgent {
   readonly id: string;
   readonly scope: "team" | "personal" | "gallery";
-  /** Stable key of a gallery agent (e.g. "assistant"); absent for team and personal agents. */
+  /** Stable key of a gallery agent (e.g. "kobe"); absent for team and personal agents. */
   readonly galleryKey?: string;
   readonly name: string;
   readonly description?: string;

@@ -10,7 +10,7 @@ import {
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { INSTALL, installWhere } from "../agents/store.js";
-import { deleteOrArchiveAgent, publishAgent } from "../agents/versions.js";
+import { archiveAgent, publishAgent } from "../agents/versions.js";
 import { logger } from "../logger.js";
 import {
   GALLERY_DEFINITIONS,
@@ -187,8 +187,9 @@ async function seedOne(db: KobeDb, parsed: ParsedGalleryDefinition): Promise<See
 }
 
 /**
- * Archives seeded gallery agents whose definition left the repo: gone from the gallery, no new
- * threads, existing threads and team forks untouched. Idempotent (archived ones are skipped).
+ * Archives seeded gallery agents whose definition left the repo (KOBE-254: the five agents Kobe
+ * replaced): gone from the gallery, no new threads, existing threads and team forks untouched.
+ * Never deletes, not even one that was never published. Idempotent (archived ones are skipped).
  */
 async function retireRemoved(db: KobeDb, keys: readonly string[]): Promise<string[]> {
   const gone = await db
@@ -202,7 +203,7 @@ async function retireRemoved(db: KobeDb, keys: readonly string[]): Promise<strin
       ),
     );
   const removed = gone.filter((g) => g.key !== null && !keys.includes(g.key));
-  for (const { id } of removed) await deleteOrArchiveAgent(db, GALLERY, id, SYSTEM_ACTOR, "seed");
+  for (const { id } of removed) await archiveAgent(db, GALLERY, id, SYSTEM_ACTOR, "seed");
   return removed.map((g) => g.key ?? "");
 }
 

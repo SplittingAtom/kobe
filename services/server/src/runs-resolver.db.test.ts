@@ -484,3 +484,75 @@ describe("effective connectors from grants (KOBE-111)", () => {
     expect(await tools()).toEqual([]);
   });
 });
+
+describe("connectors: all (KOBE-254 ac-3)", () => {
+  it("uses the team's enabled connectors, under exposure, drift and each user's grants", async () => {
+    const w = await f.world(1);
+    const elsewhere = await f.world();
+    await catalog(w.team, w.owner.id, [["fast", true]]);
+    const tag = randomBytes(3).toString("hex");
+    const keyed = await registerConnector(f.fx.admin, { name: `allk-${tag}`, authKind: "api_key" });
+    const bare = await registerConnector(f.fx.admin, { name: `allb-${tag}`, authKind: "api_key" });
+    const open = await registerConnector(f.fx.admin, { name: `allo-${tag}`, authKind: "none" });
+    // Registered but never enabled here; enabled (and granted) only in another team.
+    const idle = await registerConnector(f.fx.admin, { name: `alli-${tag}`, authKind: "none" });
+    const foreign = await registerConnector(f.fx.admin, { name: `allf-${tag}`, authKind: "none" });
+    await enableTeamConnector(f.fx.admin, w.team, keyed.id, w.owner.id, "all");
+    await enableTeamConnector(f.fx.admin, w.team, bare.id, w.owner.id, "all");
+    await enableTeamConnector(f.fx.admin, w.team, open.id, w.owner.id, "read_only");
+    await enableTeamConnector(f.fx.admin, elsewhere.team, foreign.id, elsewhere.owner.id, "all");
+    await f.fx.admin.query(
+      `INSERT INTO connector_grants (team_id, user_id, connector_id, kind, sealed, key_id, hint)
+       VALUES ($1, $2, $3, 'api_key', 'e1.k.sealed', 'k', '')`,
+      [w.team, w.owner.id, keyed.id],
+    );
+    const thread = await pinnedThread(w.owner, { connectors: "all" });
+    const resolve = (userId: string) =>
+      withTeam(f.fx.replica(0).deps.database.db, w.team, async (tx) => {
+        const { rows } = await tx.execute<{ agent_id: string; v: number }>(
+          `SELECT agent_id, agent_version AS v FROM threads WHERE id = '${thread}'`,
+        );
+        const t = rows[0];
+        if (t === undefined) throw new Error("thread row missing");
+        return PINNED_AGENTS.resolve(tx, {
+          teamId: w.team,
+          ownerUserId: userId,
+          threadId: thread,
+          runId: "00000000-0000-4000-8000-000000000000",
+          trigger: "user",
+          agentScope: "team",
+          agentId: t.agent_id,
+          agentVersion: t.v,
+          approvalMode: "auto",
+        });
+      });
+    const seg = (name: string) => name.replace(/-/g, "_");
+    const mine = await resolve(w.owner.id);
+    expect(mine.ok && mine.mcp?.servers.map((s) => s.name).sort()).toEqual(
+      [keyed.name, open.name].sort(),
+    );
+    // Team exposure still applies: the read-only connector offers its read tool only.
+    expect(
+      mine.ok && mine.mcp?.servers.find((s) => s.name === open.name)?.tools.map((t) => t.pi_name),
+    ).toEqual([`mcp__${seg(open.name)}__get_issue`]);
+    // Nothing named, so nothing to explain: no notice for the connector the user lacks.
+    expect(mine.ok && mine.omissions).toEqual([]);
+    const names = JSON.stringify(mine.ok ? mine.mcp : null);
+    for (const c of [bare, idle, foreign]) expect(names).not.toContain(c.name);
+    // Another member's run never borrows the owner's grant.
+    const mate = w.others[0];
+    if (mate === undefined) throw new Error("no teammate");
+    const theirs = await resolve(mate.id);
+    expect(theirs.ok && theirs.mcp?.servers.map((s) => s.name)).toEqual([open.name]);
+    // A drifted tool is dropped and a disabled connector is gone, at the next run start.
+    await f.fx.admin.query(
+      `UPDATE connectors SET tools_snapshot = (
+         SELECT jsonb_agg(CASE WHEN t->>'name' = 'get_issue' THEN jsonb_set(t, '{status}', '"drifted"') ELSE t END)
+         FROM jsonb_array_elements(tools_snapshot) t) WHERE id = $1`,
+      [open.id],
+    );
+    await f.fx.admin.query(`UPDATE connectors SET status = 'disabled' WHERE id = $1`, [keyed.id]);
+    const later = await resolve(w.owner.id);
+    expect(later.ok && later.mcp).toEqual({ servers: [] });
+  });
+});

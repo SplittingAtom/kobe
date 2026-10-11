@@ -1,9 +1,5 @@
 import { agentSlugSchema, parseAgentFile, type AgentDefinition } from "@kobe/agent-file";
-import { ASSISTANT_FILE } from "./agents/assistant.js";
-import { CODE_HELPER_FILE } from "./agents/code-helper.js";
-import { DATA_ANALYST_FILE } from "./agents/data-analyst.js";
-import { DOCUMENT_DRAFTER_FILE } from "./agents/document-drafter.js";
-import { RESEARCHER_FILE } from "./agents/researcher.js";
+import { KOBE_FILE } from "./agents/kobe.js";
 
 /**
  * One gallery agent as it is kept in the repo (KOBE-87): a stable `key` (also its slug) and the
@@ -22,16 +18,16 @@ export interface GalleryDefinition {
   readonly file: string;
 }
 
+/** Key of the one gallery agent, Kobe (KOBE-254); the web preselects it for new chats. */
+export const KOBE_GALLERY_KEY = "kobe";
+
 /**
- * The five gallery agents (KOBE-89). None pins a model: they use the team default. Raise an entry's
- * generation with every change to its file.
+ * The gallery (KOBE-254, user decision 2026-10-11): one general-purpose agent, Kobe. It pins no
+ * model (team default). The five agents it replaced are archived on upgrade by the seed, since
+ * their keys are no longer listed here. Raise an entry's generation with every change to its file.
  */
 export const GALLERY_DEFINITIONS: readonly GalleryDefinition[] = [
-  { key: "assistant", generation: 3, file: ASSISTANT_FILE },
-  { key: "data-analyst", generation: 3, file: DATA_ANALYST_FILE },
-  { key: "researcher", generation: 2, file: RESEARCHER_FILE },
-  { key: "document-drafter", generation: 3, file: DOCUMENT_DRAFTER_FILE },
-  { key: "code-helper", generation: 1, file: CODE_HELPER_FILE },
+  { key: KOBE_GALLERY_KEY, generation: 1, file: KOBE_FILE },
 ];
 
 export interface ParsedGalleryDefinition {

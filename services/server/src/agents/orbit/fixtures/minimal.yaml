@@ -1,7 +1,7 @@
-name: kobe-data-analyst-v1
+name: kobe-sales-analyst-v1
 setup:
   agents:
-    - name: data-analyst
+    - name: sales-analyst
       role: assistant
       system_prompt: You are a careful analyst.
       tools:

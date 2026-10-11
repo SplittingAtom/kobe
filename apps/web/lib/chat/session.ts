@@ -51,8 +51,8 @@ export function titleFrom(text: string): string | undefined {
 
 /** How long the agent list is reused by the picker and the header. */
 export const AGENTS_TTL_MS = 30_000;
-/** Stable gallery key of the Assistant (KOBE-89), preselected for new chats (KOBE-124). */
-export const DEFAULT_AGENT_GALLERY_KEY = "assistant";
+/** Stable gallery key of Kobe, the one gallery agent (KOBE-254), preselected for new chats (KOBE-124). */
+export const DEFAULT_AGENT_GALLERY_KEY = "kobe";
 
 export class ChatSession {
   readonly teamId: string;
@@ -82,7 +82,7 @@ export class ChatSession {
   #nextProjectId: string | null = null;
   /** Agent for the thread `initialize` creates next (null = plain chat; KOBE-122). */
   #nextAgent: RunnableAgent | null = null;
-  /** The runnable Assistant (null when missing, suspended or archived), preselected untouched. */
+  /** The runnable gallery agent Kobe (null when missing, suspended or archived), preselected untouched. */
   #defaultAgent: RunnableAgent | null = null;
   /** The user picked (or cleared) the agent for this draft: the default no longer applies. */
   #agentTouched = false;
@@ -229,7 +229,7 @@ export class ChatSession {
     return agent;
   }
 
-  /** New chats start with the gallery Assistant when it is runnable here, else No agent. */
+  /** New chats start with the gallery agent Kobe when it is runnable here, else No agent. */
   #applyDefaultAgent(agents: readonly RunnableAgent[]): void {
     this.#defaultAgent =
       agents.find((a) => a.scope === "gallery" && a.galleryKey === DEFAULT_AGENT_GALLERY_KEY) ??

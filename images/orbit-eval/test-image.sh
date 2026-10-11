@@ -87,7 +87,7 @@ out="$(job badyaml "$FIX/invalid-unknown-key.yaml" -- "${STDIN_YAML[@]}" --valid
 expect "Orbit's loader rejects an invalid export" 'invalid input' "$out"
 expect "...exit code 2" 'rc=2$' "$out"
 out="$(job validate "$KOBE_EXPORT_FIXTURE" -- "${STDIN_YAML[@]}" --validate-only)"
-expect "validates a KOBE-90 export fixture without model calls" 'ok: 5 scenarios, agent .data-analyst. with 3 tools' "$out"
+expect "validates a KOBE-90 export fixture without model calls" 'ok: 5 scenarios, agent .sales-analyst. with 3 tools' "$out"
 
 echo "== evaluation against a fake model endpoint"
 docker run -d "${HARDENED[@]}" --network "$NET" --name "$RUN_ID-fake" \

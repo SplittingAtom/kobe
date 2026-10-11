@@ -1,8 +1,8 @@
-name: kobe-data-analyst-v7
+name: kobe-sales-analyst-v7
 description: Crunches numbers
 setup:
   agents:
-    - name: data-analyst
+    - name: sales-analyst
       role: Analyst
       model: openai/gpt-4o
       system_prompt: |-

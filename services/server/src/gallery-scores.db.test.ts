@@ -150,7 +150,7 @@ const runEval = (id: string, teamId = finance, who: TestBrowser = owner) =>
 
 describe("gallery scores (install level)", () => {
   it("runs the eval in the admin's team, publishes nothing and stores the score", async () => {
-    const id = await galleryId("assistant");
+    const id = await galleryId("kobe");
     const before = (
       await h.admin.query(`SELECT current_version FROM install_agents WHERE id = $1`, [id])
     ).rows[0];
@@ -182,7 +182,7 @@ describe("gallery scores (install level)", () => {
   });
 
   it("any team reads the published scores; the score above the limit is blocked", async () => {
-    const id = await galleryId("researcher");
+    const id = await galleryId("kobe");
     jobLog = {
       log: report({ attack_success_rate: 0.6, attack_successes: 3 }),
       outcome: "Complete",
@@ -196,7 +196,7 @@ describe("gallery scores (install level)", () => {
   });
 
   it("stores nothing when the eval errors", async () => {
-    const id = await galleryId("assistant");
+    const id = await galleryId("kobe");
     jobLog = { log: "error: boom\n", outcome: "Failed" };
     expect((await runEval(id)).status).toBe(202);
     await h.deps.background.idle();
@@ -212,7 +212,7 @@ describe("gallery scores (install level)", () => {
     await h.admin.query(`CREATE TRIGGER fail_score BEFORE INSERT ON gallery_agent_scores
       FOR EACH ROW EXECUTE FUNCTION fail_score()`);
     try {
-      const id = await galleryId("assistant");
+      const id = await galleryId("kobe");
       expect((await runEval(id)).status).toBe(202);
       await h.deps.background.idle();
       expect((await h.admin.query(`SELECT 1 FROM gallery_agent_scores`)).rows).toEqual([]);
@@ -233,7 +233,7 @@ describe("gallery scores (install level)", () => {
   });
 
   it("scores the current version only: a newer version has none until it is evaluated", async () => {
-    const id = await galleryId("assistant");
+    const id = await galleryId("kobe");
     expect((await runEval(id)).status).toBe(202);
     await h.deps.background.idle();
     await h.admin.query(
@@ -247,7 +247,7 @@ describe("gallery scores (install level)", () => {
   });
 
   it("is for install admins, in a team they belong to, and one eval at a time", async () => {
-    const id = await galleryId("assistant");
+    const id = await galleryId("kobe");
     expect((await runEval(id, finance, builder)).status).toBe(403);
     expect((await runEval(id, marketing)).status).toBe(404); // not a member
     expect((await runEval(id, randomUUID())).status).toBe(404);
@@ -329,7 +329,7 @@ describe("inventory scores", () => {
   });
 
   it("shows the install-level score of a gallery agent used in the team", async () => {
-    const id = await galleryId("data-analyst");
+    const id = await galleryId("kobe");
     const thread = await builder.post("/v1/threads", { agent_id: id });
     expect(thread.status, JSON.stringify(thread.json)).toBe(201);
     expect(await score(id)).toMatchObject({ status: "none" });

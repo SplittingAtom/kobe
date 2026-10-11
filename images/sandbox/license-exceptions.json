@@ -7,7 +7,7 @@
   "matplotlib": {
     "license": "Python-2.0",
     "versions": ["3.11.2"],
-    "reason": "matplotlib's PSF-based license: permissive, not copyleft. Required for chart artifacts (Data Analyst, spec D21). Pending Chris's sign-off (KOBE-21)."
+    "reason": "matplotlib's PSF-based license: permissive, not copyleft. Required for chart artifacts (the charts skill, spec D21). Pending Chris's sign-off (KOBE-21)."
   },
   "pillow": {
     "license": "MIT-CMU",

@@ -568,6 +568,14 @@ Migrations report what an upgrade changed in the migration Job's log (`"msg":"mi
 from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it during the upgrade
 (`kubectl logs -f job/<release>-migrate`) or read it from your log aggregation afterwards.
 
+- **One gallery agent, Kobe (KOBE-254).** The gallery now holds one general-purpose agent, Kobe
+  (key `kobe`), preselected for new chats. It pins no model, narrows no tool and asks for every
+  connector the team enables (`connectors: all`): team policy, the approval floor, connector
+  exposure and drift, and each person's own connector accounts still decide. At its first start
+  the server archives the five earlier gallery agents (Assistant, Code Helper, Data Analyst,
+  Document Drafter, Researcher), audited as `agent.archived` by the system. Nothing is deleted:
+  their threads stay readable and team forks keep working, but no new thread can start on them,
+  and a restart does not bring them back.
 - **One approval floor (migration `0024_approval_floor_unify`).** The minimum approval mode is
   install-wide only (spec D6), stored as `install_settings['policy.approval_floor']`. The older key
   `policy.approval_mode_floor` is folded into it (the stricter value wins), and team floors

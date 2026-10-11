@@ -12,7 +12,7 @@ const FLOOR: PublishFloor = { scope: "team", install: [], team: [], approvalFloo
 const definition = (
   frontmatter: Partial<AgentDefinition["frontmatter"]> = {},
   prompt = "You are a careful analyst.",
-): AgentDefinition => ({ frontmatter: { name: "Data Analyst", ...frontmatter }, prompt });
+): AgentDefinition => ({ frontmatter: { name: "Sales Analyst", ...frontmatter }, prompt });
 
 const manifestFor = (def: AgentDefinition): ToolManifest =>
   computeToolManifest(def.frontmatter, FLOOR, NOW);
@@ -27,11 +27,11 @@ describe("mapAgentVersionToOrbit (KOBE-90)", () => {
   it("maps role, prompt and one agent into Orbit's setup layer", () => {
     const def = definition({ role: "Analyst", description: "Crunches numbers" });
     const { config } = exportOf(def);
-    expect(config.name).toBe("kobe-data-analyst-v3");
+    expect(config.name).toBe("kobe-sales-analyst-v3");
     expect(config.description).toBe("Crunches numbers");
     expect(config.setup.agents).toHaveLength(1);
     expect(config.setup.agents[0]).toMatchObject({
-      name: "data-analyst",
+      name: "sales-analyst",
       role: "Analyst",
       system_prompt: "You are a careful analyst.",
     });
@@ -70,6 +70,18 @@ describe("mapAgentVersionToOrbit (KOBE-90)", () => {
   it("refuses MCP tools of a connector the version does not list", () => {
     const def = definition({ connectors: ["github"] });
     expect(() => exportOf(def, { mcpTools: ["mcp__slack__post"] })).toThrow(/connector/);
+  });
+
+  it("passes the team's MCP tools for `connectors: all` and records `all` (KOBE-254)", () => {
+    const def = definition({ connectors: "all", tools: { allow: ["read"] } });
+    const { config } = exportOf(def, { mcpTools: ["mcp__slack__post", "mcp__github__get_pr"] });
+    expect(config.setup.agents[0]?.tools).toEqual([
+      "read",
+      "mcp__github__get_pr",
+      "mcp__slack__post",
+    ]);
+    expect(config.metadata.kobe).toMatchObject({ connectors: "all" });
+    expect(() => exportOf(def, { mcpTools: ["not_mcp"] })).toThrow(/connector/);
   });
 
   it("drops MCP tools Orbit cannot name and says so", () => {

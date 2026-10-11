@@ -39,6 +39,21 @@ describe("agent builder form model", () => {
     expect(toFrontmatter(fromFrontmatter(stored))).toEqual(stored);
   });
 
+  it("writes and reads `connectors: all` (every team connector, KOBE-254)", () => {
+    expect(toFrontmatter(form({ connectorsAll: true, connectors: "ignored" }))).toEqual({
+      name: "Triage",
+      connectors: "all",
+    });
+    const stored = { name: "Triage", connectors: "all" };
+    expect(fromFrontmatter(stored)).toMatchObject({ connectorsAll: true, connectors: "" });
+    expect(toFrontmatter(fromFrontmatter(stored))).toEqual(stored);
+    expect(fromFrontmatter({ name: "T", connectors: ["all"] })).toMatchObject({
+      connectorsAll: false,
+      connectors: "all",
+    });
+    expect(validateForm(form({ connectorsAll: true }), "").ok).toBe(true);
+  });
+
   it("validates with the agent-file schema and reports per field", () => {
     const result = validateForm(form({ name: "", skills: "ok\nNot A Slug" }), "");
     expect(result.ok).toBe(false);

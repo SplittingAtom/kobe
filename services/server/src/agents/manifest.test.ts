@@ -160,6 +160,13 @@ describe("computeToolManifest (D19 frozen tool manifest)", () => {
     expect(names(m)).toEqual([]);
   });
 
+  it("freezes `connectors: all` as the literal, never as a list of names (KOBE-254)", () => {
+    const m = computeToolManifest(fm({ connectors: "all" }), floor(), NOW);
+    expect(m.connectors).toBe("all");
+    expect(names(m)).toEqual(AVAILABLE);
+    expect(toolManifestSchema.parse(JSON.parse(JSON.stringify(m)))).toEqual(m);
+  });
+
   it.each([
     [undefined, "auto", "ask-on-write"],
     ["auto", "auto", "auto"],
@@ -195,6 +202,15 @@ describe("run-time helpers for KOBE-47", () => {
     expect(manifestAllowsTool(manifest, "mcp__slack__post")).toBe(false);
     expect(manifestAllowsTool(manifest, "mcp__github")).toBe(false);
     expect(manifestAllowsTool(manifest, "brand_new_builtin")).toBe(false);
+  });
+
+  it("manifestAllowsTool: `connectors: all` admits any connector's tool; live checks decide", () => {
+    const all = computeToolManifest(fm({ connectors: "all" }), floor(), NOW);
+    expect(manifestAllowsTool(all, "mcp__slack__post")).toBe(true);
+    expect(manifestAllowsTool(all, "mcp__github")).toBe(false);
+    expect(manifestAllowsTool(all, "brand_new_builtin")).toBe(false);
+    const none = computeToolManifest(fm(), floor(), NOW);
+    expect(manifestAllowsTool(none, "mcp__slack__post")).toBe(false);
   });
 
   it("versionAllowsCall: the manifest, then the agent's own deny (wins) and allow (narrows)", () => {

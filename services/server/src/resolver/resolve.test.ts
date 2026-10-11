@@ -237,7 +237,11 @@ describe("connectors", () => {
     ],
     ["both filters name the team first", ["a"], [], [], [], [omit("a", "not_team_enabled")]],
     ["empty", [], ["t"], ["u"], [], []],
-  ])("%s", (_n, agent, team, user, want, omissions) => {
+    // KOBE-254: `all` is the team's list, still filtered by the user's connections; it names
+    // nothing, so a connector the user has not connected is left out without a notice.
+    ["all: the team's list, user-connected only", "all", ["a", "b"], ["a", "u"], ["a"], []],
+    ["all with no team connectors", "all", [], ["u"], [], []],
+  ] as const)("%s", (_n, agent, team, user, want, omissions) => {
     const r = resolveEffective(
       with_({
         agent: { connectors: agent },
