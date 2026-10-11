@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AGENT_FILE_LIMITS,
+  agentConnectors,
   agentSkills,
   agentWarnings,
   parseAgentFile,
@@ -70,6 +71,14 @@ describe("parseAgentFile: the spec §6.3 example", () => {
     ).toEqual(["google_drive", "jira-cloud"]);
   });
 
+  it("reads `connectors: all` as every team connector, distinct from a connector named all", () => {
+    expect(parsed(file("name: A\nconnectors: all")).frontmatter.connectors).toBe("all");
+    expect(parsed(file("name: A\nconnectors: [all]")).frontmatter.connectors).toEqual(["all"]);
+    expect(issuesOf(file("name: A\nconnectors: every"))).toEqual([
+      expect.stringMatching(/^frontmatter\.connectors: /),
+    ]);
+  });
+
   it("accepts every approval mode (D29) and the icon forms", () => {
     for (const mode of ["ask-on-write", "ask-all", "auto"]) {
       expect(parsed(file(`name: A\napproval_mode: ${mode}`)).frontmatter.approval_mode).toBe(mode);
@@ -93,6 +102,7 @@ describe("round trip (import → export → import is stable)", () => {
     ),
     "exclusive skills": file("name: A\nskills: { exclusive: [docx, pdf] }"),
     "exclusive shorthand": file("name: A\nskills: exclusive"),
+    "every team connector": file("name: A\nconnectors: all"),
     "a body containing frontmatter-like delimiters": file("name: A", "Start\n---\nnot: yaml\n---"),
     unicode: file("name: Ünïcödé 助手\nicon: 🧑‍💻", "Réponds en français. 日本語も。"),
   };
@@ -112,6 +122,12 @@ describe("round trip (import → export → import is stable)", () => {
     );
     expect(exported).toBe(
       "---\nname: Ordered\nmodel: fast\napproval_mode: auto\nstarters:\n  - Go\n---\nPrompt.\n",
+    );
+  });
+
+  it("exports every team connector as the `all` literal (KOBE-254)", () => {
+    expect(serializeAgentFile(parsed(file("connectors: all\nname: A")))).toBe(
+      "---\nname: A\nconnectors: all\n---\nPrompt.\n",
     );
   });
 
@@ -278,6 +294,29 @@ describe("helpers", () => {
       names: ["pdf"],
       exclusive: true,
     });
+  });
+
+  it("agentConnectors reads a list, `all` and the default (none)", () => {
+    expect(agentConnectors({ name: "A" })).toEqual({ all: false, names: [] });
+    expect(agentConnectors({ name: "A", connectors: ["jira"] })).toEqual({
+      all: false,
+      names: ["jira"],
+    });
+    expect(agentConnectors({ name: "A", connectors: "all" })).toEqual({ all: true, names: [] });
+  });
+
+  it("validates `connectors: all` from the API like the file", () => {
+    const result = validateAgentDefinition({
+      frontmatter: { name: "A", connectors: "all" },
+      prompt: "",
+    });
+    expect(result).toEqual({
+      ok: true,
+      definition: { frontmatter: { name: "A", connectors: "all" }, prompt: "" },
+    });
+    expect(
+      validateAgentDefinition({ frontmatter: { name: "A", connectors: "ALL" }, prompt: "" }).ok,
+    ).toBe(false);
   });
 
   it("slugFromName derives a valid slug", () => {

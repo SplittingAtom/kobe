@@ -1,4 +1,5 @@
 import {
+  ALL_CONNECTORS,
   APPROVAL_MODES,
   agentWarnings,
   validateAgentDefinition,
@@ -17,6 +18,8 @@ export interface FormState {
   readonly skills: string;
   readonly skillsExclusive: boolean;
   readonly connectors: string;
+  /** `connectors: all` (KOBE-254): every connector the team enables; the list is then unused. */
+  readonly connectorsAll: boolean;
   readonly toolsAllow: string;
   readonly toolsDeny: string;
   readonly starters: string;
@@ -32,6 +35,7 @@ export const EMPTY_FORM: FormState = {
   skills: "",
   skillsExclusive: false,
   connectors: "",
+  connectorsAll: false,
   toolsAllow: "",
   toolsDeny: "",
   starters: "",
@@ -56,6 +60,14 @@ const joinLines = (list: unknown): string =>
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
+/**
+ * Connector names typed in the list that `connectors: all` replaces on save (KOBE-254): shown to
+ * the builder and warned about, never dropped silently.
+ */
+export function replacedConnectorNames(form: FormState): string[] {
+  return form.connectorsAll ? splitLines(form.connectors) : [];
+}
+
 /** The frontmatter object the API takes; empty fields are left out (schema: optional, not blank). */
 export function toFrontmatter(form: FormState): Record<string, unknown> {
   const out: Record<string, unknown> = { name: form.name };
@@ -70,7 +82,8 @@ export function toFrontmatter(form: FormState): Record<string, unknown> {
   if (form.skillsExclusive) out.skills = { exclusive: skills };
   else if (skills.length > 0) out.skills = skills;
   const connectors = splitLines(form.connectors);
-  if (connectors.length > 0) out.connectors = connectors;
+  if (form.connectorsAll) out.connectors = ALL_CONNECTORS;
+  else if (connectors.length > 0) out.connectors = connectors;
   const allow = splitLines(form.toolsAllow);
   const deny = splitLines(form.toolsDeny);
   if (allow.length > 0 || deny.length > 0) {
@@ -104,6 +117,7 @@ export function fromFrontmatter(frontmatter: Record<string, unknown>): FormState
     skills: joinLines(exclusive ?? skills),
     skillsExclusive: exclusive !== undefined,
     connectors: joinLines(frontmatter.connectors),
+    connectorsAll: frontmatter.connectors === ALL_CONNECTORS,
     toolsAllow: joinLines(tools.allow),
     toolsDeny: joinLines(tools.deny),
     starters: joinLines(frontmatter.starters),
@@ -140,10 +154,18 @@ function fieldOf(path: string): { field: FieldKey; entry: number | null } {
 export function validateForm(form: FormState, prompt: string): Validation {
   const result = validateAgentDefinition({ frontmatter: toFrontmatter(form), prompt });
   if (result.ok) {
+    const replaced = replacedConnectorNames(form);
     return {
       ok: true,
       definition: result.definition,
-      warnings: agentWarnings(result.definition.frontmatter).map((w) => w.message),
+      warnings: [
+        ...agentWarnings(result.definition.frontmatter).map((w) => w.message),
+        ...(replaced.length > 0
+          ? [
+              `every team connector replaces the ${replaced.length} connector names listed (${replaced.join(", ")}); they are not saved`,
+            ]
+          : []),
+      ],
     };
   }
   const errors: Partial<Record<FieldKey, string[]>> = {};

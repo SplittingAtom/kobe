@@ -1824,12 +1824,12 @@ SH
       "PATCH /v1/install/models/catalog/fast {\"input_usd_per_mtok\":null,\"output_usd_per_mtok\":null}")
     expect "the budget and prices are removed again" '^200 ' "$restore"
 
-    # KOBE-89: the five gallery agents each complete a short sample task in the Owner's real sandbox
-    # (gVisor, the image's baked built-in skills, no network), through the fake model: it answers
-    # "bash: <command>" with a bash tool call. No
-    # model is pinned by any gallery agent, so the runs use the team default. The server seeded the
-    # agents at start. Sandbox tools run without approval unless a rule asks (KOBE-37 left one).
-    echo "==> gallery agents (KOBE-89)"
+    # KOBE-89, KOBE-254: the one gallery agent, Kobe, completes a short sample task per built-in
+    # skill in the Owner's real sandbox (gVisor, the image's baked built-in skills, no network),
+    # through the fake model: it answers "bash: <command>" with a bash tool call. Kobe pins no
+    # model, so the runs use the team default. The server seeded it at start. Sandbox tools run
+    # without approval unless a rule asks (KOBE-37 left one).
+    echo "==> gallery agent Kobe (KOBE-89, KOBE-254)"
     psql_kobe "DELETE FROM tool_rules WHERE team_id = '$E2E_TEAM_ID' AND scope = 'team';" >/dev/null
     gallery_id() { psql_kobe "SELECT id FROM install_agents WHERE scope = 'gallery' AND gallery_key = '$1' AND archived_at IS NULL"; }
     gallery_run() { # key content [timeout-ms] → CHAT_JS output for a thread with that gallery agent
@@ -1839,44 +1839,37 @@ SH
       chat_run "$2" "${3:-300000}" "" "$id"
     }
     gal_dir='cd "${TMPDIR:-/tmp}" && rm -rf g89 && mkdir g89 && cd g89 && SK=/opt/kobe/skills'
-    for gkey in assistant data-analyst researcher document-drafter code-helper; do
-      contains "gallery agent $gkey is seeded and not archived" '^[0-9a-f-]{36}$' "$(gallery_id "$gkey")"
-    done
-    g_out=$(gallery_run assistant "hello-assistant-$RANDOM")
-    printf '     gallery assistant: %s\n' "$(printf '%s' "$g_out" | grep -v '^text=' | tr '\n' ' ')"
-    contains "Assistant: a thread with it starts (201, team default model)" '^thread=201:default$' "$g_out"
-    contains "Assistant: the run completed with the expected text" '^text=fake-openai: hello-assistant-[0-9]+$' "$g_out"
-    contains "Assistant: the thread is pinned to the gallery agent" '^gallery$' \
+    contains "the gallery holds exactly one agent, Kobe (key kobe)" '^kobe$' \
+      "$(psql_kobe "SELECT string_agg(gallery_key, ',') FROM install_agents WHERE scope = 'gallery' AND archived_at IS NULL")"
+    contains "Kobe asks for every team connector and narrows no tool" '^all:none$' \
+      "$(psql_kobe "SELECT (v.frontmatter->>'connectors') || ':' || coalesce(v.frontmatter->>'tools', 'none') FROM install_agent_versions v JOIN install_agents a ON a.id = v.agent_id AND v.version = a.current_version WHERE a.gallery_key = 'kobe'")"
+    g_out=$(gallery_run kobe "hello-kobe-$RANDOM")
+    printf '     gallery kobe: %s\n' "$(printf '%s' "$g_out" | grep -v '^text=' | tr '\n' ' ')"
+    contains "Kobe: a thread with it starts (201, team default model)" '^thread=201:default$' "$g_out"
+    contains "Kobe: the run completed with the expected text" '^text=fake-openai: hello-kobe-[0-9]+$' "$g_out"
+    contains "Kobe: the thread is pinned to the gallery agent" '^gallery$' \
       "$(psql_kobe "SELECT agent_scope FROM threads WHERE id = '$(printf '%s\n' "$g_out" | sed -n 's/^thread_id=//p')'")"
-    g_out=$(gallery_run data-analyst "bash: $gal_dir && python \$SK/data-analysis/scripts/describe.py \$SK/data-analysis/scripts/sample.csv | grep -c 'rows: 6' && python \$SK/charts/scripts/chart.py \$SK/charts/scripts/sample.csv --kind bar --x region --y amount --agg sum --title t --out c.png >/dev/null && echo chart-bytes \$(wc -c < c.png)")
-    printf '     gallery data analyst: %s\n' "$(printf '%s' "$g_out" | tr '\n' ' ' | cut -c1-400)"
-    contains "Data Analyst: the run completed" '^terminal=run.completed$' "$g_out"
-    contains "Data Analyst: the data-analysis skill profiled the data and the charts skill produced a PNG" \
+    g_out=$(gallery_run kobe "bash: $gal_dir && python \$SK/data-analysis/scripts/describe.py \$SK/data-analysis/scripts/sample.csv | grep -c 'rows: 6' && python \$SK/charts/scripts/chart.py \$SK/charts/scripts/sample.csv --kind bar --x region --y amount --agg sum --title t --out c.png >/dev/null && echo chart-bytes \$(wc -c < c.png)")
+    printf '     kobe data: %s\n' "$(printf '%s' "$g_out" | tr '\n' ' ' | cut -c1-400)"
+    contains "Kobe data: the run completed" '^terminal=run.completed$' "$g_out"
+    contains "Kobe data: the data-analysis skill profiled the data and the charts skill produced a PNG" \
       '^text=fake-openai: tool said: 1 chart-bytes [0-9]{4,}$' "$g_out"
     # KOBE-123: the agent's prompt reaches Pi (--append-system-prompt) and so the model: the fake
     # model answers "system?" with the system messages it received.
-    g_out=$(gallery_run researcher "system?")
-    contains "Researcher: the run completes with no web search configured" '^terminal=run.completed$' "$g_out"
-    contains "Researcher: the web-search-unavailable notice reaches the model through Pi's system prompt" \
+    g_out=$(gallery_run kobe "system?")
+    contains "Kobe: the run completes with no web search configured" '^terminal=run.completed$' "$g_out"
+    contains "Kobe: the web-search-unavailable notice reaches the model through Pi's system prompt" \
       '^text=fake-openai: system said: .*Web search is not available here, so I can only work from the material you give me\.' "$g_out"
-    g_out=$(gallery_run assistant "system?")
-    contains "Assistant: its own prompt (not the Researcher's) reaches the model" \
-      '^text=fake-openai: system said: ' "$g_out"
-    contains "Assistant: the Researcher's notice is absent from its system prompt" '^0$' \
-      "$(printf '%s\n' "$g_out" | grep -c 'Web search is not available here' || true)"
-    contains "Researcher: its published prompt has it say plainly that web search is unavailable" \
+    contains "Kobe: its published prompt has it say plainly that web search is unavailable" \
       'Web search is not available here, so I can only work from the material you give me\.' \
-      "$(psql_kobe "SELECT v.prompt FROM install_agent_versions v JOIN install_agents a ON a.id = v.agent_id AND v.version = a.current_version WHERE a.gallery_key = 'researcher'")"
-    g_out=$(gallery_run researcher "bash: $gal_dir && python \$SK/docx/scripts/md_to_docx.py \$SK/docx/scripts/sample.md in.docx --title T >/dev/null && python \$SK/docx/scripts/docx_text.py in.docx | grep -c 'south | 310.35'")
-    contains "Researcher: it reads provided material with its skills offline (docx text extracted)" \
-      '^text=fake-openai: tool said: 1$' "$g_out"
-    g_out=$(gallery_run document-drafter "bash: $gal_dir && python \$SK/docx/scripts/md_to_docx.py \$SK/docx/scripts/sample.md out.docx --title T >/dev/null && python \$SK/docx/scripts/docx_text.py out.docx | grep -c 'south | 310.35' && python \$SK/pdf/scripts/md_to_pdf.py \$SK/pdf/scripts/sample.md out.pdf --title T >/dev/null && test -s out.pdf && echo docx-and-pdf-produced")
-    printf '     gallery document drafter: %s\n' "$(printf '%s' "$g_out" | tr '\n' ' ' | cut -c1-400)"
-    contains "Document Drafter: the docx and pdf skills produced the files" \
+      "$(psql_kobe "SELECT v.prompt FROM install_agent_versions v JOIN install_agents a ON a.id = v.agent_id AND v.version = a.current_version WHERE a.gallery_key = 'kobe'")"
+    g_out=$(gallery_run kobe "bash: $gal_dir && python \$SK/docx/scripts/md_to_docx.py \$SK/docx/scripts/sample.md out.docx --title T >/dev/null && python \$SK/docx/scripts/docx_text.py out.docx | grep -c 'south | 310.35' && python \$SK/pdf/scripts/md_to_pdf.py \$SK/pdf/scripts/sample.md out.pdf --title T >/dev/null && test -s out.pdf && echo docx-and-pdf-produced")
+    printf '     kobe documents: %s\n' "$(printf '%s' "$g_out" | tr '\n' ' ' | cut -c1-400)"
+    contains "Kobe documents: the docx and pdf skills produced and read back the files offline" \
       '^text=fake-openai: tool said: 1 docx-and-pdf-produced$' "$g_out"
-    g_out=$(gallery_run code-helper "bash: $gal_dir && python \$SK/code-review/scripts/scan.py \$SK/code-review/scripts/sample.py | grep -o '[0-9]* finding' | head -1")
-    printf '     gallery code helper: %s\n' "$(printf '%s' "$g_out" | tr '\n' ' ' | cut -c1-400)"
-    contains "Code Helper: the code-review skill scanned the sample" '^text=fake-openai: tool said: 4 finding$' "$g_out"
+    g_out=$(gallery_run kobe "bash: $gal_dir && python \$SK/code-review/scripts/scan.py \$SK/code-review/scripts/sample.py | grep -o '[0-9]* finding' | head -1")
+    printf '     kobe code: %s\n' "$(printf '%s' "$g_out" | tr '\n' ' ' | cut -c1-400)"
+    contains "Kobe code: the code-review skill scanned the sample" '^text=fake-openai: tool said: 4 finding$' "$g_out"
 
     # KOBE-131 (KOBE-55): a run's fake model calls create_artifact with an HTML page holding an inline
     # script ("tool: <name> <json>"); the artifact is stored, listed, readable and framed under the
@@ -1884,7 +1877,7 @@ SH
     echo "==> artifacts (KOBE-131)"
     art_html='<!doctype html><html><body><h1 id=t>Sales</h1><script>document.getElementById("t").textContent="Sales chart"</script></body></html>'
     art_new="${art_html/Sales chart/Sales chart v2}"
-    art_out=$(chat_run "tool: create_artifact {\"kind\":\"html\",\"title\":\"Sales chart\",\"content\":\"${art_html//\"/\\\"}\"}" 300000 "" "$(gallery_id data-analyst)" "" 1)
+    art_out=$(chat_run "tool: create_artifact {\"kind\":\"html\",\"title\":\"Sales chart\",\"content\":\"${art_html//\"/\\\"}\"}" 300000 "" "$(gallery_id kobe)" "" 1)
     printf '     artifact create: %s\n' "$(printf '%s' "$art_out" | tr '\n' ' ' | cut -c1-500)"
     art_thread=$(printf '%s\n' "$art_out" | sed -n 's/^thread_id=//p')
     contains "artifacts: the run completed" '^terminal=run.completed$' "$art_out"
@@ -1934,7 +1927,7 @@ SH
     contains "artifacts: version 2 holds the revised content" 'Sales chart v2' \
       "$(art_fetch "/v1/artifacts/$art_id/versions/2/content")"
 
-    # KOBE-152 (54f of KOBE-54): the Document Drafter writes a file in the Owner's sandbox, then the
+    # KOBE-152 (54f of KOBE-54): Kobe writes a file in the Owner's sandbox, then the
     # fake model calls share_file; file.shared carries the file, the thread's reader downloads it
     # (attachment, nosniff), another member of the team gets 404, and the file outlives its workspace
     # copy (deleted from the browser API, which is audited).
@@ -1966,7 +1959,7 @@ SH
       " "$1" "$2" "${3:-}" "${4:-}" 2>&1
     }
     share_text="kobe-152 $(date +%s) $RANDOM"
-    sf_out=$(chat_run "bash: echo '$share_text' > /workspace/shared-report.txt; exit 0" 300000 "" "$(gallery_id document-drafter)" "" 1)
+    sf_out=$(chat_run "bash: echo '$share_text' > /workspace/shared-report.txt; exit 0" 300000 "" "$(gallery_id kobe)" "" 1)
     sf_thread=$(printf '%s\n' "$sf_out" | sed -n 's/^thread_id=//p')
     contains "share_file: the run that wrote the file completed" '^terminal=run.completed$' "$sf_out"
     sf_out=$(chat_run "tool: share_file {\"path\":\"shared-report.txt\",\"description\":\"E2E report\"}" 300000 "" "" "$sf_thread" 1)
@@ -2673,16 +2666,16 @@ elif [[ -n "${KOBE_SANDBOX_IMAGE:-}" && "$(type -t chat_run)" == function && -n 
   ROT_TTL=10
   ROT_AGENT=6a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d
   rot_t0=$SECONDS
-  # A published personal agent of the owner: the assistant's definition plus the e2e-fake connector.
+  # A published personal agent of the owner: Kobe's definition with only the e2e-fake connector.
   psql_kobe "DELETE FROM install_agents WHERE id = '$ROT_AGENT' AND current_version IS NULL;
     INSERT INTO install_agents (id, scope, owner_user_id, slug, frontmatter, prompt)
       SELECT '$ROT_AGENT', 'personal', '$owner_id', 'e2e-mcp-rotation',
         (a.frontmatter - 'tools') || '{\"name\":\"E2E MCP rotation\",\"connectors\":[\"e2e-fake\"]}'::jsonb, a.prompt
-      FROM install_agents a WHERE a.gallery_key = 'assistant' ON CONFLICT DO NOTHING;
+      FROM install_agents a WHERE a.gallery_key = 'kobe' ON CONFLICT DO NOTHING;
     INSERT INTO install_agent_versions (agent_id, version, frontmatter, prompt, tool_manifest, draft_revision)
       SELECT a.id, 1, a.frontmatter, a.prompt,
         (SELECT v.tool_manifest FROM install_agent_versions v JOIN install_agents g ON g.id = v.agent_id AND v.version = g.current_version
-          WHERE g.gallery_key = 'assistant') || '{\"connectors\":[\"e2e-fake\"]}'::jsonb, 1
+          WHERE g.gallery_key = 'kobe') || '{\"connectors\":[\"e2e-fake\"]}'::jsonb, 1
       FROM install_agents a WHERE a.id = '$ROT_AGENT' ON CONFLICT DO NOTHING;
     UPDATE install_agents SET current_version = 1 WHERE id = '$ROT_AGENT';" >/dev/null
   contains "the owner has a published agent with the e2e-fake connector" '^1$' \

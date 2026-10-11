@@ -12,7 +12,7 @@ import {
   type JsonObject,
   type ToolDescriptor,
 } from "@kobe/protocol";
-import type { AgentFrontmatter } from "@kobe/agent-file";
+import { ALL_CONNECTORS, agentConnectors, type AgentFrontmatter } from "@kobe/agent-file";
 import { strictestApprovalMode } from "../policy/approval-floor.js";
 import { checkAvailable } from "../policy/gates.js";
 import { matchAgentToolEntry, matchSubject, splitAgentToolEntry } from "../policy/patterns.js";
@@ -66,8 +66,12 @@ export const toolManifestSchema = z.strictObject({
   floor: z.enum(["install", "team"]),
   /** Built-in tools (Pi and kobe-tools) this version may call, by name. */
   tools: z.array(manifestToolSchema),
-  /** Connectors whose (pinned) MCP tools this version may call. */
-  connectors: z.array(connectorNameSchema),
+  /**
+   * Connectors whose (pinned) MCP tools this version may call, or `all` (KOBE-254): whichever the
+   * team enables at run time. Either way the run start intersects it with the team's enablement
+   * and the user's grants, and exposure and drift stay live checks.
+   */
+  connectors: z.union([z.array(connectorNameSchema), z.literal(ALL_CONNECTORS)]),
   /** The agent's own entries, kept for per-call checks (argument shorthands like `bash:ls *`). */
   tools_allow: z.array(z.string()),
   tools_deny: z.array(z.string()),
@@ -151,6 +155,22 @@ function exclusion(
   return undefined;
 }
 
+function frozenConnectors(frontmatter: AgentFrontmatter): ToolManifest["connectors"] {
+  const { all, names } = agentConnectors(frontmatter);
+  return all ? ALL_CONNECTORS : [...names];
+}
+
+/**
+ * The connector names a manifest covers, given the team's enabled ones: the frozen list, or for
+ * `all` the team's own list (so never a connector the team has not enabled).
+ */
+export function manifestConnectorNames(
+  manifest: Pick<ToolManifest, "connectors">,
+  teamConnectors: readonly string[],
+): string[] {
+  return manifest.connectors === ALL_CONNECTORS ? [...teamConnectors] : [...manifest.connectors];
+}
+
 /** Computes the manifest a version freezes (pure; deterministic for the same inputs). */
 export function computeToolManifest(
   frontmatter: AgentFrontmatter,
@@ -175,7 +195,7 @@ export function computeToolManifest(
     format: TOOL_MANIFEST_FORMAT,
     floor: floor.scope,
     tools,
-    connectors: [...(frontmatter.connectors ?? [])],
+    connectors: frozenConnectors(frontmatter),
     tools_allow: [...(frontmatter.tools?.allow ?? [])],
     tools_deny: [...(frontmatter.tools?.deny ?? [])],
     excluded,
@@ -195,6 +215,7 @@ export function manifestAllowsTool(manifest: ToolManifest, toolName: string): bo
   if (manifest.tools.some((t) => t.name === toolName)) return true;
   const mcp = parseMcpToolName(toolName);
   if (!mcp) return false;
+  if (manifest.connectors === ALL_CONNECTORS) return true;
   return manifest.connectors.some((c) => mcpServerSegment(c) === mcp.server_segment);
 }
 

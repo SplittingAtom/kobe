@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY_FORM, fromFrontmatter, splitLines, toFrontmatter, validateForm } from "./form-model";
+import {
+  EMPTY_FORM,
+  fromFrontmatter,
+  replacedConnectorNames,
+  splitLines,
+  toFrontmatter,
+  validateForm,
+} from "./form-model";
 
 const form = (over: Partial<typeof EMPTY_FORM>) => ({ ...EMPTY_FORM, name: "Triage", ...over });
 
@@ -37,6 +44,32 @@ describe("agent builder form model", () => {
       approval_mode: "auto",
     };
     expect(toFrontmatter(fromFrontmatter(stored))).toEqual(stored);
+  });
+
+  it("writes and reads `connectors: all` (every team connector, KOBE-254)", () => {
+    expect(toFrontmatter(form({ connectorsAll: true, connectors: "ignored" }))).toEqual({
+      name: "Triage",
+      connectors: "all",
+    });
+    const stored = { name: "Triage", connectors: "all" };
+    expect(fromFrontmatter(stored)).toMatchObject({ connectorsAll: true, connectors: "" });
+    expect(toFrontmatter(fromFrontmatter(stored))).toEqual(stored);
+    expect(fromFrontmatter({ name: "T", connectors: ["all"] })).toMatchObject({
+      connectorsAll: false,
+      connectors: "all",
+    });
+    expect(validateForm(form({ connectorsAll: true }), "").ok).toBe(true);
+  });
+
+  it("warns, never silently, that ticking every connector replaces typed names", () => {
+    const ticked = form({ connectorsAll: true, connectors: "jira\ngithub" });
+    expect(replacedConnectorNames(ticked)).toEqual(["jira", "github"]);
+    const result = validateForm(ticked, "");
+    expect(result.ok && result.warnings).toEqual([
+      "every team connector replaces the 2 connector names listed (jira, github); they are not saved",
+    ]);
+    expect(replacedConnectorNames(form({ connectors: "jira" }))).toEqual([]);
+    expect(replacedConnectorNames(form({ connectorsAll: true }))).toEqual([]);
   });
 
   it("validates with the agent-file schema and reports per field", () => {

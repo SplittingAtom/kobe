@@ -13,7 +13,7 @@ import { idSchema } from "./common.js";
  * leaves the server: the sandbox sees the query it sent and the citations that come back.
  *
  * Unavailable is an answer, not an error: `available: false` with a `reason` and a `message` the
- * model repeats to the user (the Researcher agent explains it). Real failures (provider down,
+ * model repeats to the user (the gallery agent Kobe explains it). Real failures (provider down,
  * rate limit) are `ok: false` errors.
  */
 

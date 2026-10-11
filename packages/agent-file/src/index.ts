@@ -3,8 +3,10 @@
 export { parseAgentFile, validateAgentDefinition } from "./parse.js";
 export {
   AGENT_FILE_LIMITS,
+  ALL_CONNECTORS,
   APPROVAL_MODES,
   FRONTMATTER_KEYS,
+  agentConnectors,
   agentFrontmatterSchema,
   agentSkills,
   agentWarnings,

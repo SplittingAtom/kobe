@@ -10,7 +10,7 @@ import {
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { INSTALL, installWhere } from "../agents/store.js";
-import { deleteOrArchiveAgent, publishAgent } from "../agents/versions.js";
+import { archiveAgent, publishAgent } from "../agents/versions.js";
 import { logger } from "../logger.js";
 import {
   GALLERY_DEFINITIONS,
@@ -187,8 +187,9 @@ async function seedOne(db: KobeDb, parsed: ParsedGalleryDefinition): Promise<See
 }
 
 /**
- * Archives seeded gallery agents whose definition left the repo: gone from the gallery, no new
- * threads, existing threads and team forks untouched. Idempotent (archived ones are skipped).
+ * Archives seeded gallery agents whose definition left the repo (KOBE-254: the five agents Kobe
+ * replaced): gone from the gallery, no new threads, existing threads and team forks untouched.
+ * Never deletes, not even one that was never published. Idempotent (archived ones are skipped).
  */
 async function retireRemoved(db: KobeDb, keys: readonly string[]): Promise<string[]> {
   const gone = await db
@@ -202,8 +203,20 @@ async function retireRemoved(db: KobeDb, keys: readonly string[]): Promise<strin
       ),
     );
   const removed = gone.filter((g) => g.key !== null && !keys.includes(g.key));
-  for (const { id } of removed) await deleteOrArchiveAgent(db, GALLERY, id, SYSTEM_ACTOR, "seed");
+  for (const { id } of removed) await archiveAgent(db, GALLERY, id, SYSTEM_ACTOR, "seed");
   return removed.map((g) => g.key ?? "");
+}
+
+async function retireAll(db: KobeDb, parsed: readonly ParsedGalleryDefinition[]): Promise<void> {
+  try {
+    const retired = await retireRemoved(
+      db,
+      parsed.map((p) => p.key),
+    );
+    if (retired.length > 0) logger.info({ retired }, "gallery agents retired");
+  } catch (err) {
+    logger.error({ err }, "gallery agents could not be retired");
+  }
 }
 
 /**
@@ -227,14 +240,13 @@ export async function seedGalleryAgents(
       results.push({ key: definition.key, agentId: "", action: "failed" });
     }
   }
-  try {
-    const retired = await retireRemoved(
-      db,
-      parsed.map((p) => p.key),
-    );
-    if (retired.length > 0) logger.info({ retired }, "gallery agents retired");
-  } catch (err) {
-    logger.error({ err }, "gallery agents could not be retired");
+  // Retire only once every definition is seeded and published (KOBE-254): a failed seed must not
+  // leave the gallery without its replacement. The next start tries again.
+  const failed = results.filter((r) => r.action === "failed").map((r) => r.key);
+  if (failed.length > 0) {
+    logger.warn({ failed }, "gallery retirement postponed: a definition failed to seed");
+  } else {
+    await retireAll(db, parsed);
   }
   const changed = results.filter((r) => r.action !== "unchanged");
   if (changed.length > 0) logger.info({ agents: changed }, "gallery agents seeded");

@@ -34,7 +34,8 @@ export interface ResolveInput {
     readonly unapprovedSkills?: readonly string[];
     /** Exclusive agents ignore the user's skills. */
     readonly exclusiveSkills: boolean;
-    readonly connectors: readonly string[];
+    /** Named connectors, or `all`: the team's enabled list (agent file `connectors: all`, KOBE-254). */
+    readonly connectors: readonly string[] | "all";
   };
   readonly team: {
     readonly models: readonly { readonly alias: string; readonly isDefault: boolean }[];
@@ -128,16 +129,22 @@ function resolveSkills(input: ResolveInput): {
   return { skills, omissions };
 }
 
-/** Agent list, team-enabled and user-connected: a connector must pass all three. */
+/**
+ * Agent list, team-enabled and user-connected: a connector must pass all three. `all` (KOBE-254)
+ * takes the team's list as the agent list, so it passes the same two filters and widens nothing;
+ * it names no connector, so one the user has not connected is left out without a notice.
+ */
 function resolveConnectors(input: ResolveInput): { connectors: string[]; omissions: Omission[] } {
+  const all = input.agent.connectors === "all";
+  const requested = all ? input.team.connectors : input.agent.connectors;
   const enabled = new Set(input.team.connectors);
   const connected = new Set(input.user.connectedConnectors);
   const connectors: string[] = [];
   const omissions: Omission[] = [];
-  for (const name of new Set(input.agent.connectors)) {
+  for (const name of new Set(requested)) {
     if (!enabled.has(name)) omissions.push({ kind: "connector", name, reason: "not_team_enabled" });
     else if (!connected.has(name)) {
-      omissions.push({ kind: "connector", name, reason: "not_user_connected" });
+      if (!all) omissions.push({ kind: "connector", name, reason: "not_user_connected" });
     } else connectors.push(name);
   }
   return { connectors, omissions };

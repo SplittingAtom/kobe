@@ -120,6 +120,18 @@ const skillsSchema = z.union([
   z.literal("exclusive").transform(() => ({ exclusive: [] as string[] })),
 ]);
 
+/**
+ * Connectors (D27, KOBE-254): a list of connector registry names, or `all` for every connector the
+ * team enables at run time. Either way it is a request: the team's enablement, exposure, drift
+ * checks and each user's grants still decide, and `all` never names a connector the team has not
+ * enabled. `[all]` is a list holding a connector named `all`, not this form.
+ */
+export const ALL_CONNECTORS = "all";
+const connectorsSchema = z.union([
+  uniqueList(connectorNameSchema, AGENT_FILE_LIMITS.connectors),
+  z.literal(ALL_CONNECTORS),
+]);
+
 /** Policy glob grammar (@kobe/protocol glob.ts), on a single line. */
 const toolGlobSchema = globSchema.refine(
   (s) => !ANY_CONTROL.test(s),
@@ -144,7 +156,8 @@ const toolsSchema = z
  *   - `tools.deny`, install/team deny rules and ask rules always win over `tools.allow`.
  *   - `approval_mode` is clamped to the team/install floor: it can only make a run stricter (D19,
  *     D29); `auto` below an `ask-on-write` floor runs as `ask-on-write`.
- *   - `model`, `skills`, `connectors` are opaque names intersected with the team's settings.
+ *   - `model`, `skills`, `connectors` are opaque names intersected with the team's settings;
+ *     `connectors: all` is the team's enabled list itself, still under exposure, drift and grants.
  * `agentWarnings` flags the broad values at save time, but enforcement is the policy engine's.
  */
 export const agentFrontmatterSchema = z
@@ -155,8 +168,8 @@ export const agentFrontmatterSchema = z
     icon: iconSchema.optional(),
     model: modelSchema.optional(),
     skills: skillsSchema.optional(),
-    /** Connector registry names (D27); same format as @kobe/protocol `connectorNameSchema`. */
-    connectors: uniqueList(connectorNameSchema, AGENT_FILE_LIMITS.connectors).optional(),
+    /** Connector registry names (D27; @kobe/protocol `connectorNameSchema`) or `all`. */
+    connectors: connectorsSchema.optional(),
     tools: toolsSchema.optional(),
     approval_mode: approvalModeSchema.optional(),
     starters: uniqueList(text(AGENT_FILE_LIMITS.starter), AGENT_FILE_LIMITS.starters).optional(),
@@ -190,6 +203,19 @@ export function agentSkills(frontmatter: AgentFrontmatter): {
   if (skills === undefined) return { names: [], exclusive: false };
   if (Array.isArray(skills)) return { names: skills, exclusive: false };
   return { names: skills.exclusive, exclusive: true };
+}
+
+/**
+ * Connector inputs of an agent (D27) for run-time resolution: `all` (every connector the team
+ * enables, KOBE-254) or the listed names; none when the key is absent.
+ */
+export function agentConnectors(frontmatter: AgentFrontmatter): {
+  all: boolean;
+  names: readonly string[];
+} {
+  const connectors = frontmatter.connectors;
+  if (connectors === ALL_CONNECTORS) return { all: true, names: [] };
+  return { all: false, names: connectors ?? [] };
 }
 
 /** A glob that matches every tool name (only `*` wildcards). */

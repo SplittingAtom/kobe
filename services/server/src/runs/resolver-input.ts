@@ -1,4 +1,4 @@
-import { agentSkills, type AgentFrontmatter } from "@kobe/agent-file";
+import { agentConnectors, agentSkills, type AgentFrontmatter } from "@kobe/agent-file";
 import { isBuiltinSkillName, type ApprovalMode } from "@kobe/protocol";
 import { and, connectors, eq, teamConnectors, teamModels, type KobeTx } from "@kobe/db";
 import type { ResolveInput, SkillRef } from "../resolver/resolve.js";
@@ -108,6 +108,7 @@ export function buildResolveInput(args: {
   readonly connectedConnectors: readonly string[];
 }): ResolveInput {
   const { frontmatter, team } = args;
+  const connectors = agentConnectors(frontmatter);
   return {
     agent: {
       modelAlias: frontmatter.model ?? null,
@@ -116,7 +117,8 @@ export function buildResolveInput(args: {
       builtinSkills: args.skills.agentBuiltin,
       unapprovedSkills: args.skills.agentUnapproved,
       exclusiveSkills: agentSkills(frontmatter).exclusive,
-      connectors: frontmatter.connectors ?? [],
+      // `connectors: all` (KOBE-254) stays a request: the resolver intersects it like a list.
+      connectors: connectors.all ? "all" : connectors.names,
     },
     team: {
       models: team.models,
