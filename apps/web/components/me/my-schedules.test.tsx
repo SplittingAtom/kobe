@@ -94,8 +94,29 @@ describe("Schedules page (KOBE-175)", () => {
       prompt: "Weekly report",
       recurrence: { kind: "weekly", days: ["mon", "thu"], at: "09:00" },
       tz: "Asia/Tokyo",
+      notify_email: false,
     });
     vi.restoreAllMocks();
+  });
+
+  it("emails run results only when asked: off by default, on with the toggle (KOBE-181)", async () => {
+    const calls = stubApi({
+      [`GET ${LIST}`]: [200, list([])],
+      [`GET ${AGENTS}`]: agents,
+      "POST /v1/schedules": [201, schedule({ notify_email: true })],
+    });
+    renderTeam(<MySchedulesPage />, MEMBER);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "New schedule" }));
+    const toggle = screen.getByRole("checkbox", { name: /Email me when a run ends/ });
+    expect((toggle as HTMLInputElement).checked).toBe(false);
+    await user.selectOptions(await screen.findByLabelText("Agent"), "Analyst");
+    await user.type(screen.getByLabelText("Prompt"), "Report");
+    await user.click(toggle);
+    await user.click(screen.getByRole("button", { name: "Save schedule" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "POST")).toBe(true));
+    const post = must(calls.find((c) => c.method === "POST"));
+    expect(JSON.parse(String(post.body))).toMatchObject({ notify_email: true });
   });
 
   it("offers weekdays and cron presets", async () => {
@@ -115,7 +136,7 @@ describe("Schedules page (KOBE-175)", () => {
 
   it("edits a schedule with PATCH (ac-1)", async () => {
     const calls = stubApi({
-      [`GET ${LIST}`]: [200, list([schedule()])],
+      [`GET ${LIST}`]: [200, list([schedule({ notify_email: true })])],
       [`GET ${AGENTS}`]: agents,
       [`PATCH /v1/schedules/${S1}`]: [200, schedule({ prompt: "New prompt" })],
     });
@@ -134,6 +155,7 @@ describe("Schedules page (KOBE-175)", () => {
       prompt: "New prompt",
       recurrence: { kind: "daily", at: "08:30" },
       tz: "Europe/Paris",
+      notify_email: true,
     });
   });
 

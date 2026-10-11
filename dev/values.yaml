@@ -21,6 +21,10 @@ server:
   # Small upload limit so the e2e can show a limit error with a 2 MiB file (KOBE-146).
   uploads:
     maxFileBytes: 1048576
+# The e2e pulls a schedule's next run forward in Postgres and waits for the runner (KOBE-181):
+# tick at the chart's minimum so a due schedule fires within 5 s. Test-only; the chart keeps 15 s.
+scheduler:
+  tickSeconds: 5
 # Small sandbox requests so dev clusters and the k3d e2e runner fit several sandboxes.
 sandbox:
   resources:

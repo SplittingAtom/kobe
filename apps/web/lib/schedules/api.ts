@@ -17,7 +17,10 @@ export interface Schedule {
   readonly notifyEmail: boolean;
   readonly nextDueAt: string | null;
   readonly lastRunId: string | null;
-  /** `team_admin`: only a team admin resumes it. `deactivation`: the owner resumes. */
+  /**
+   * `team_admin`: only a team admin resumes it. `deactivation`: the owner was deactivated or left
+   * the team; only the owner resumes it, once back. Null on an inactive schedule: the owner paused it.
+   */
   readonly pausedBy: "team_admin" | "deactivation" | null;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -34,6 +37,8 @@ export interface ScheduleDraft {
   readonly prompt: string;
   readonly recurrence: ScheduleRecurrence;
   readonly tz: string;
+  /** Email the owner when a run ends (opt-in; in-app notifications are always on). */
+  readonly notifyEmail: boolean;
 }
 
 export interface ScheduleAgent {
@@ -43,6 +48,8 @@ export interface ScheduleAgent {
 
 export interface SchedulesApi {
   list(): Promise<ApiResult<ScheduleList>>;
+  /** Every schedule in the team (team admins, `team.schedules.pause`; KOBE-173/180). */
+  listTeam(): Promise<ApiResult<ScheduleList>>;
   create(draft: ScheduleDraft): Promise<ApiResult<Schedule>>;
   update(id: string, draft: ScheduleDraft): Promise<ApiResult<Schedule>>;
   pause(id: string): Promise<ApiResult<Schedule>>;
@@ -60,9 +67,11 @@ export function createSchedulesApi(teamId: string, fetchFn?: typeof fetch): Sche
     prompt: d.prompt,
     recurrence: d.recurrence,
     tz: d.tz,
+    notify_email: d.notifyEmail,
   });
   return {
     list: () => apiRequest("/v1/schedules?scope=mine", base),
+    listTeam: () => apiRequest("/v1/schedules?scope=team", base),
     create: (d) => apiRequest("/v1/schedules", { ...base, method: "POST", json: body(d) }),
     update: (id, d) =>
       apiRequest(`/v1/schedules/${enc(id)}`, { ...base, method: "PATCH", json: body(d) }),

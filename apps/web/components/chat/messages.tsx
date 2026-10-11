@@ -55,6 +55,34 @@ function Problem({ data }: DataMessagePartProps) {
   );
 }
 
+/**
+ * A scheduled run's skipped-actions summary (KOBE-178): the server's template text, one line per
+ * skipped call ("- tool (risk): reason"), shown as plain text.
+ */
+function SkippedActions({ data }: DataMessagePartProps) {
+  const { text = "", count = 0 } = data as { readonly text?: string; readonly count?: number };
+  const lines = text.split("\n").filter((l) => l.trim() !== "");
+  const calls = lines.filter((l) => l.startsWith("- ")).map((l) => l.slice(2));
+  const intro = lines.filter((l) => !l.startsWith("- ") && l !== "Skipped actions");
+  return (
+    <section className={styles.skipped} aria-label="Skipped actions">
+      <p className={styles.skippedTitle}>Skipped actions{count > 0 ? ` (${count})` : ""}</p>
+      {intro.map((line, i) => (
+        <p key={i} className={styles.hint}>
+          {line}
+        </p>
+      ))}
+      {calls.length > 0 && (
+        <ul className={styles.skippedList}>
+          {calls.map((line, i) => (
+            <li key={i}>{line}</li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 function Offloaded() {
   return <p className={styles.notice}>This part of the conversation is too large to show here.</p>;
 }
@@ -68,7 +96,13 @@ const ASSISTANT_PARTS = {
   Text: MarkdownText,
   Reasoning,
   tools: { Override: ToolCallCard },
-  data: { by_name: { "kobe-problem": Problem, "kobe-offloaded": Offloaded } },
+  data: {
+    by_name: {
+      "kobe-problem": Problem,
+      "kobe-offloaded": Offloaded,
+      "kobe-skipped": SkippedActions,
+    },
+  },
 } as const;
 
 function useMeta(): KobeMessageMeta | undefined {

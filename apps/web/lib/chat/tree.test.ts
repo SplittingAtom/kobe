@@ -4,6 +4,7 @@ import {
   assistant,
   entry,
   resetEntrySeq,
+  skippedSummary,
   text,
   toolCall,
   toolResult,
@@ -167,6 +168,57 @@ describe("projectThread", () => {
     const p = projectThread(entries, parent);
     expect(p.items).toHaveLength(5000);
     expect(p.headId).toBe("e4999");
+  });
+});
+
+describe("projectThread with a scheduled run's skipped-actions summary (KOBE-178/181)", () => {
+  const summaryText =
+    "Skipped actions\nThis scheduled run does not wait for approval, so 1 tool call was skipped:\n- bash (changes data): scheduled runs cannot ask";
+
+  it("shows the summary as a card at the end of the run's answer, never as its own message", () => {
+    const entries = [
+      user("u1", null, "nightly"),
+      assistant("a1", "u1", toolCall("tc1", "bash")),
+      toolResult("r1", "a1", "tc1", "denied", true),
+      assistant("a2", "r1", text("Could not write")),
+      skippedSummary("ks-1", "a2", summaryText, 1),
+    ];
+    const p = projectThread(entries, "a2");
+    expect(shape(p)).toEqual([
+      ["u1", null, "user"],
+      ["a1", "u1", "assistant"],
+    ]);
+    expect(content(p, "a1")?.at(-1)).toEqual({
+      type: "data-kobe-skipped",
+      data: { text: summaryText, count: 1 },
+    });
+    expect(p.headId).toBe("a1");
+  });
+
+  it("is never a branch point: no branch beside a reply, and no entry to continue from", () => {
+    const entries = [
+      user("u1", null, "nightly"),
+      assistant("a1", "u1", text("done")),
+      skippedSummary("ks-1", "a1", summaryText, 2),
+      user("u2", "a1", "thanks"),
+      assistant("a2", "u2", text("welcome")),
+    ];
+    const p = projectThread(entries, "a2");
+    expect(shape(p)).toEqual([
+      ["u1", null, "user"],
+      ["a1", "u1", "assistant"],
+      ["u2", "a1", "user"],
+      ["a2", "u2", "assistant"],
+    ]);
+    expect(p.lastEntryOfNode.get("a1")).toBe("a1");
+    expect(p.nodeOfEntry.has("ks-1")).toBe(false);
+    expect([...p.lastEntryOfNode.values()]).not.toContain("ks-1");
+  });
+
+  it("drops a summary whose parent is not loaded", () => {
+    const entries = [user("u1", null, "q"), skippedSummary("ks-1", "gone", summaryText)];
+    const p = projectThread(entries, "u1");
+    expect(shape(p)).toEqual([["u1", null, "user"]]);
   });
 });
 

@@ -9,6 +9,9 @@
  *   assistant message, id = its first entry; the chain ends where the tree branches;
  * - other entry types (`model_change`, `compaction`, …) are not shown and belong to the message
  *   around them.
+ * - a scheduled run's skipped-actions summary (KOBE-178, written by the server under the run's
+ *   last entry) is not part of the tree at all: it becomes a card at the end of the assistant
+ *   message holding its parent, so it is never a branch, a head or an entry to continue from.
  * Branches (edit-and-regenerate, Retry) are siblings in the tree, so assistant-ui's branch picker
  * works on them as is. The client keeps both directions of the mapping: `nodeOfEntry` (the leaf's
  * message is the head) and `lastEntryOfNode` (the entry to continue from when a branch is chosen).
@@ -264,16 +267,19 @@ export function projectThread(
   live?: LiveOverlay,
 ): Projection {
   const parsed = new Map(entries.map((e) => [e.entryId, parseEntry(e)] as const));
+  const isSummary = (e: ThreadEntry) => parsed.get(e.entryId)?.kind === "skipped";
+  const summaries = entries.filter(isSummary);
+  const treeEntries = summaries.length === 0 ? entries : entries.filter((e) => !isSummary(e));
   const results = new Map<string, ToolResultInfo>();
   const resultEntries = new Map<string, ThreadEntry>();
-  for (const entry of entries) {
+  for (const entry of treeEntries) {
     const p = parsed.get(entry.entryId);
     if (p?.kind === "toolResult") {
       results.set(p.toolCallId, { text: p.text, isError: p.isError });
       resultEntries.set(p.toolCallId, entry);
     }
   }
-  const { nodes, order, nodeOfEntry, lastEntryOfNode } = buildNodes(entries, parsed);
+  const { nodes, order, nodeOfEntry, lastEntryOfNode } = buildNodes(treeEntries, parsed);
   const tools = live?.run.tools ?? {};
 
   const items: ProjectedItem[] = [];
@@ -328,9 +334,38 @@ export function projectThread(
     }
   }
 
-  let headId: string | null = headOf(entries, leafEntryId, nodeOfEntry) ?? order.at(-1) ?? null;
+  attachSummaries(items, indexOf, summaries, parsed, nodeOfEntry);
+  let headId: string | null = headOf(treeEntries, leafEntryId, nodeOfEntry) ?? order.at(-1) ?? null;
   if (live) headId = overlayLive(live, items, indexOf, nodeOfEntry, lastEntryOfNode, headId);
   return { items, headId, nodeOfEntry, lastEntryOfNode };
+}
+
+/** Puts each skipped-actions summary at the end of the assistant message holding its parent. */
+function attachSummaries(
+  items: ProjectedItem[],
+  indexOf: ReadonlyMap<string, number>,
+  summaries: readonly ThreadEntry[],
+  parsed: ReadonlyMap<string, ParsedEntry>,
+  nodeOfEntry: ReadonlyMap<string, string>,
+): void {
+  for (const entry of summaries) {
+    const p = parsed.get(entry.entryId);
+    const node = entry.parentId === null ? undefined : nodeOfEntry.get(entry.parentId);
+    const index = node === undefined ? undefined : indexOf.get(node);
+    const item = index === undefined ? undefined : items[index];
+    if (p?.kind !== "skipped" || index === undefined || item?.message.role !== "assistant") {
+      continue;
+    }
+    const part: MessagePart = { type: "data-kobe-skipped", data: { text: p.text, count: p.count } };
+    items[index] = {
+      parentId: item.parentId,
+      message: {
+        ...item.message,
+        content: [...(item.message.content as readonly MessagePart[]), part],
+      },
+      deps: [...item.deps, entry],
+    };
+  }
 }
 
 /**
