@@ -54,6 +54,23 @@ export async function lastMirroredEntryId(
   return res.rows[0]?.entry_id;
 }
 
+/**
+ * Whether the thread has a user or assistant message in Postgres (KOBE-258). Without one there is
+ * nothing to restore into Pi: a Pi that no longer knows the mirrored cursor is adopted instead.
+ */
+export async function threadHasConversation(
+  tx: KobeTx,
+  teamId: string,
+  threadId: string,
+): Promise<boolean> {
+  const res = await tx.execute(sql`
+    SELECT 1 FROM thread_entries
+     WHERE team_id = ${teamId} AND thread_id = ${threadId} AND type = 'message'
+       AND payload -> 'message' ->> 'role' IN ('user', 'assistant')
+     LIMIT 1`);
+  return (res.rowCount ?? 0) > 0;
+}
+
 const CHUNK = 100;
 
 /**

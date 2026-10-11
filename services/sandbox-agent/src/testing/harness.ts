@@ -40,6 +40,8 @@ export interface Harness {
 
 export interface HarnessOptions {
   readonly server?: Partial<FakeServerOptions>;
+  /** The agent's logger (default: silent). */
+  readonly logger?: typeof silentLogger;
   readonly env?: Record<string, string>;
   readonly piBin?: string;
   readonly heartbeatTimeoutMs?: number;
@@ -102,7 +104,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   let closed = false;
   const agent = new Agent({
     config,
-    logger: silentLogger,
+    logger: options.logger ?? silentLogger,
     readToken: async () => (await readFile(tokenFile, "utf8")).trim(),
     agentVersion: "0.0.0-test",
     piVersion: "1.0.0",

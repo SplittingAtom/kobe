@@ -872,8 +872,8 @@ describe("session restore (lost volume)", () => {
     await withTeam(fx.db, w.team, (tx) =>
       tx.execute(sql`
         INSERT INTO thread_entries (team_id, thread_id, entry_id, parent_id, type, payload) VALUES
-          (${w.team}, ${w.threadId}, 'e1', NULL, 'message', ${JSON.stringify({ type: "message", id: "e1", parentId: null, timestamp: t })}::jsonb),
-          (${w.team}, ${w.threadId}, 'e2', 'e1', 'message', ${JSON.stringify({ type: "message", id: "e2", parentId: "e1", timestamp: t })}::jsonb)`),
+          (${w.team}, ${w.threadId}, 'e1', NULL, 'message', ${JSON.stringify({ type: "message", id: "e1", parentId: null, timestamp: t, message: { role: "user" } })}::jsonb),
+          (${w.team}, ${w.threadId}, 'e2', 'e1', 'message', ${JSON.stringify({ type: "message", id: "e2", parentId: "e1", timestamp: t, message: { role: "assistant" } })}::jsonb)`),
     );
     const sb = await connect(0, w); // fresh volume: empty session
     const r = await fx.replica(1).deps.sandboxWire.router.startRun(w.target, {

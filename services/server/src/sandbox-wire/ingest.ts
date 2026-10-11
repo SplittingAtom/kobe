@@ -287,7 +287,11 @@ export class RunIngest {
     if (first === undefined || last === undefined) return;
     try {
       // Network I/O (get_entries) before the transaction, never inside it (KOBE-29/31).
-      const entries = sync ? await this.#fetchEntries(settled) : undefined;
+      const fetched = sync ? await this.#fetchEntries(settled) : undefined;
+      const entries = fetched?.entries;
+      // KOBE-258: a run whose entries could not be saved never ends completed (a model failure
+      // is still the reason shown: it is why the run went wrong).
+      const end = failure ?? (settled && fetched?.lost === true ? "entries_not_saved" : undefined);
       const { runMaxEvents, runMaxBytes, threadMaxEntries } = this.#o.tuning;
       const ended = await withAppendTx(db, teamId, async (tx) => {
         const touchesThread = entries !== undefined || settled;
@@ -339,12 +343,13 @@ export class RunIngest {
           await appendRunEventsInTx(tx, teamId, runId, all.slice(i, i + MAX_APPEND_BATCH));
         }
         if (settled) {
-          // The last model call failed (KOBE-41): the run fails with the server's own message.
-          const end =
-            failure === undefined
+          // The last model call failed (KOBE-41) or was cut off (KOBE-258), or the run's entries
+          // were not saved: the run fails with the server's own message.
+          const outcome =
+            end === undefined
               ? ({ status: "completed" } as const)
-              : ({ status: "failed", error: failureInfo(failure, "model_error") } as const);
-          return (await endRunInTx(tx, teamId, runId, end)).ended;
+              : ({ status: "failed", error: failureInfo(end, "model_error") } as const);
+          return (await endRunInTx(tx, teamId, runId, outcome)).ended;
         }
         return false;
       });
@@ -354,7 +359,7 @@ export class RunIngest {
       host.sendAck(runId, last);
       if (settled) {
         this.#ended = true;
-        host.runEnded(runId, ended ? (failure === undefined ? "completed" : "failed") : undefined);
+        host.runEnded(runId, ended ? (end === undefined ? "completed" : "failed") : undefined);
       }
     } catch (err) {
       this.#recover(err, last);
@@ -363,22 +368,26 @@ export class RunIngest {
 
   /**
    * Entries for a sync. Before the run completes a failed fetch is retried; if it still fails the
-   * thread is flagged so its next run starts with a full sync (nothing is silently lost: Pi keeps
-   * the entries and `get_entries since` fetches them later).
+   * thread is flagged so its next run starts with a full sync (Pi keeps the entries and
+   * `get_entries since` fetches them later), and `lost` fails the run (KOBE-258: it must not look
+   * completed while its messages are missing from the conversation).
    */
-  async #fetchEntries(settling: boolean): Promise<PiGetEntriesData | undefined> {
+  async #fetchEntries(
+    settling: boolean,
+  ): Promise<{ readonly entries?: PiGetEntriesData; readonly lost: boolean }> {
     const { host, threadId, runId } = this.#o;
     const attempts = settling ? SETTLE_SYNC_ATTEMPTS : 1;
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       const entries = await host.fetchNewEntries(threadId);
-      if (entries !== undefined || this.#closed) return entries;
+      if (entries !== undefined) return { entries, lost: false };
+      // The connection closed: no retry here, and a run ending now has its entries missing.
+      if (this.#closed) break;
       if (attempt < attempts) await new Promise((r) => setTimeout(r, 250 * 2 ** attempt));
     }
-    if (settling) {
-      host.log.warn({ run_id: runId, thread_id: threadId }, "entries not mirrored at run end");
-      host.needsSync(threadId);
-    }
-    return undefined;
+    if (!settling) return { lost: false };
+    host.log.warn({ run_id: runId, thread_id: threadId }, "entries not mirrored at run end");
+    host.needsSync(threadId);
+    return { lost: true };
   }
 
   #recover(err: unknown, last: number): void {

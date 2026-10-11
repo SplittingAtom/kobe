@@ -223,11 +223,16 @@ describe("model wiring (KOBE-41)", () => {
   });
 
   describe("pi.command against planted Pi config (KOBE-169)", () => {
+    // `get_state` reaches Pi; so does `get_entries since` (KOBE-258: a bare `get_entries` before
+    // the session file exists is answered without Pi).
     const setModel = (since?: string) =>
       h.server.command({
         type: "pi.command",
         thread_id: THREAD,
-        command: { id: "srv", type: "get_entries", ...(since === undefined ? {} : { since }) },
+        command:
+          since === undefined
+            ? { id: "srv", type: "get_state" }
+            : { id: "srv", type: "get_entries", since },
       });
     const plant = async (agentDir: string) => {
       await rm(path.join(agentDir, "models.json"), { force: true });
@@ -258,7 +263,7 @@ describe("model wiring (KOBE-41)", () => {
         "agent/models.json",
       );
       // Nothing reached Pi, and that Pi and its directory are gone; the next command gets a clean one.
-      expect((await h.commandsLog()).filter((c) => c.type === "get_entries").length).toBe(1);
+      expect((await h.commandsLog()).filter((c) => c.type === "get_state").length).toBe(1);
       await until(() => !existsSync(launch.agentDir));
       expect(await setModel()).toMatchObject({ ok: true });
     });
