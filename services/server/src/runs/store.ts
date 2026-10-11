@@ -17,6 +17,7 @@ import {
   expiryCauseOf,
 } from "../approvals/run-end.js";
 import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js";
+import { reportSkippedActionsInTx } from "../policy/skipped-summary.js";
 import { THREAD_LOCK_TIMEOUT } from "../threads/repository.js";
 import { RunError } from "./errors.js";
 
@@ -414,7 +415,18 @@ export async function applyTransition(
       UPDATE threads SET status = ${threadStatus}, last_activity_at = now()
        WHERE team_id = ${run.teamId} AND id = ${thread.id}`);
   }
-  if (event) await appendRunEventsInTx(tx, run.teamId, run.id, [event]);
+  if (event) {
+    // A scheduled run's denied calls are reported on its terminal event (Stop, start failures).
+    const reported = terminal
+      ? await reportSkippedActionsInTx(
+          tx,
+          { teamId: run.teamId, runId: run.id, threadId: thread.id },
+          event,
+          run.trigger === "schedule",
+        )
+      : event;
+    await appendRunEventsInTx(tx, run.teamId, run.id, [reported]);
+  }
   await auditExpiredApprovals(tx, run.teamId, expired);
   return {
     threadStatus,

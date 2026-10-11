@@ -29,6 +29,7 @@ import {
   type PolicySources,
 } from "./fan-out.js";
 import { loadActiveRuns, type ActiveRunContext } from "./run-context.js";
+import { recordSkippedActionInTx } from "../policy/skipped-actions.js";
 
 /**
  * The MCP proxy's policy re-check (D27, D29 "MCP calls are enforced a second time at the MCP
@@ -236,6 +237,31 @@ export function combineDecisions(
   };
 }
 
+async function recordSkipped(
+  deps: McpDecideDeps,
+  principal: McpPrincipal,
+  runId: string,
+  toolCallId: string,
+  tool: string,
+  descriptor: ToolDescriptor,
+  reason: PolicyReasonCode,
+): Promise<void> {
+  try {
+    await withTeam(deps.db, principal.teamId, (tx) =>
+      recordSkippedActionInTx(tx, {
+        teamId: principal.teamId,
+        runId,
+        toolCallId,
+        tool,
+        risk: descriptor.risk,
+        reason,
+      }),
+    );
+  } catch (err) {
+    logger.error({ err, runId }, "mcp: skipped action could not be recorded");
+  }
+}
+
 /** Decides one call; never throws (every failure is a deny). */
 export async function decideMcpCall(
   deps: McpDecideDeps,
@@ -344,8 +370,30 @@ export async function decideMcpCall(
       decide,
     );
     const combined = combineDecisions(namedDecision, siblings);
+    // A scheduled run (D32) is never asked and has no approvals: a deny, or an ask (a stricter
+    // sibling run), both end the call, and it is recorded as a skipped action of the run.
+    const skip = async (code: PolicyReasonCode, message: string) => {
+      if (named.trigger === "schedule") {
+        await recordSkipped(
+          deps,
+          principal,
+          named.runId,
+          toolCallId,
+          pinned.pi_name,
+          descriptor,
+          code,
+        );
+      }
+      return await denied(code, message);
+    };
     if (combined.effect === "deny") {
-      return await denied(combined.reason.code, combined.reason.message);
+      return await skip(combined.reason.code, combined.reason.message);
+    }
+    if (combined.effect === "require_approval" && named.trigger === "schedule") {
+      return await skip(
+        "scheduled_run_no_prompt",
+        "Scheduled runs only run allow-listed and read-only tools; this call was skipped.",
+      );
     }
 
     let reason: PolicyReasonCode = combined.reason.code;

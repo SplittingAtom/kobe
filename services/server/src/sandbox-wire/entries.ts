@@ -7,6 +7,7 @@ import {
 } from "@kobe/protocol";
 import { sql, threadEntries, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import type { NewRunEvent } from "../event-stream/append.js";
+import { SKIPPED_ENTRY_TYPE } from "../policy/skipped-summary.js";
 import { ENTRY_EVENT_PAYLOAD_MAX_BYTES, RESTORE_PART_MAX_BYTES } from "./constants.js";
 
 /**
@@ -35,7 +36,11 @@ export function parseGetEntries(data: unknown): PiGetEntriesData | undefined {
   return parsed.success ? parsed.data : undefined;
 }
 
-/** The last mirrored entry of a thread (the `get_entries since` cursor), by append order. */
+/**
+ * The last mirrored entry of a thread (the `get_entries since` cursor), by append order. Entries
+ * the server wrote itself (the scheduled run's skipped-actions report) are not in Pi's session, so
+ * they are never the cursor: Pi would not know them.
+ */
 export async function lastMirroredEntryId(
   tx: KobeTx,
   teamId: string,
@@ -44,6 +49,7 @@ export async function lastMirroredEntryId(
   const res = await tx.execute<{ entry_id: string }>(sql`
     SELECT entry_id FROM thread_entries
      WHERE team_id = ${teamId} AND thread_id = ${threadId}
+       AND NOT (type = 'custom_message' AND payload ->> 'customType' = ${SKIPPED_ENTRY_TYPE})
      ORDER BY seq DESC LIMIT 1`);
   return res.rows[0]?.entry_id;
 }

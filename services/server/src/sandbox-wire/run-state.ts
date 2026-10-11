@@ -9,6 +9,7 @@ import { SYSTEM_ACTOR, sql, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { auditExpiredApprovals, expireRunApprovalsInTx } from "../approvals/run-end.js";
 import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js";
+import { reportSkippedActionsInTx } from "../policy/skipped-summary.js";
 import type { RunEnd } from "./types.js";
 
 /** Why the wire interrupted a run (audit `run.interrupted.cause`). */
@@ -105,8 +106,12 @@ export async function endRunInTx(
   const thread = await tx.execute<{ status: ThreadStatus; leaf_entry_id: string | null }>(sql`
     SELECT status, leaf_entry_id FROM threads
      WHERE team_id = ${teamId} AND id = ${threadId} FOR NO KEY UPDATE`);
-  const run = await tx.execute<{ status: RunStatus; budget_stop_scope: BudgetScope | null }>(sql`
-    SELECT status, budget_stop_scope FROM runs
+  const run = await tx.execute<{
+    status: RunStatus;
+    budget_stop_scope: BudgetScope | null;
+    trigger: "user" | "schedule";
+  }>(sql`
+    SELECT status, budget_stop_scope, trigger FROM runs
      WHERE team_id = ${teamId} AND id = ${runId} FOR NO KEY UPDATE`);
   const from = run.rows[0]?.status;
   const threadRow = thread.rows[0];
@@ -139,10 +144,18 @@ export async function endRunInTx(
       UPDATE threads SET status = ${nextStatus}, last_activity_at = now()
        WHERE team_id = ${teamId} AND id = ${threadId}`);
   }
-  await appendRunEventsInTx(tx, teamId, runId, [
+  const terminal =
     budgetScope && to === "budget_stopped"
       ? budgetStoppedEvent(budgetScope)
-      : terminalEvent(end, threadRow.leaf_entry_id),
+      : terminalEvent(end, threadRow.leaf_entry_id);
+  // A scheduled run's denied calls (D32) are reported on its terminal event and in its thread.
+  await appendRunEventsInTx(tx, teamId, runId, [
+    await reportSkippedActionsInTx(
+      tx,
+      { teamId, runId, threadId },
+      terminal,
+      run.rows[0]?.trigger === "schedule",
+    ),
   ]);
   if (budgetScope && to === "budget_stopped") {
     await recordAudit(tx, {

@@ -614,6 +614,101 @@ describe("Gate 2: an MCP write runs only with a valid signed approval", () => {
   });
 });
 
+describe("scheduled runs never wait for approval at the proxy (KOBE-178, D32)", () => {
+  const input = { q: "create the ticket" };
+  const scheduled = async () => {
+    const w = await world();
+    await fx.admin.query(`UPDATE runs SET trigger = 'schedule' WHERE id = $1`, [w.runId]);
+    return w;
+  };
+  const skipped = async (w: World) =>
+    (
+      await fx.admin.query<{ tool: string; risk_class: string; reason: string }>(
+        `SELECT tool, risk_class, reason FROM run_skipped_actions WHERE team_id = $1 AND run_id = $2`,
+        [w.team, w.runId],
+      )
+    ).rows;
+  const signedApproval = (w: World) =>
+    allowApproval(fx.admin, {
+      teamId: w.team,
+      runId: w.runId,
+      threadId: w.threadId,
+      userId: w.owner.id,
+      tool: piName(w.connector.name, "create_issue"),
+      input,
+      key: KEYRING.current,
+    });
+  const consumed = async (w: World) =>
+    (
+      await fx.admin.query<{ consumed_at: Date | null }>(
+        `SELECT consumed_at FROM approvals WHERE team_id = $1 AND run_id = $2`,
+        [w.team, w.runId],
+      )
+    ).rows.map((r) => r.consumed_at);
+
+  it("denies a write that would ask, records it, and a signed approval cannot stand in", async () => {
+    const w = await scheduled();
+    await signedApproval(w);
+    const res = await callTool(w, { tool: "create_issue", arguments: input });
+    expect(res.json).toMatchObject({ decision: "deny", code: "scheduled_run_no_prompt" });
+    expect(res.json).not.toHaveProperty("approval_failure");
+    expect(await consumed(w)).toEqual([null]);
+    expect(await skipped(w)).toEqual([
+      {
+        tool: piName(w.connector.name, "create_issue"),
+        risk_class: "write",
+        reason: "scheduled_run_no_prompt",
+      },
+    ]);
+  });
+
+  it("an allow-listed write runs alone, but a stricter sibling run cannot turn it into an ask", async () => {
+    const w = await scheduled();
+    await fx.admin.query(
+      `INSERT INTO tool_rules (team_id, scope, effect, tool_glob, created_by)
+       VALUES ($1, 'team', 'allow', $3, $2)`,
+      [w.team, w.owner.id, piName(w.connector.name, "create_issue")],
+    );
+    expect((await callTool(w, { tool: "create_issue", arguments: input })).json).toMatchObject({
+      decision: "allow",
+    });
+    // An interactive run of the same sandbox would ask: the combined decision needs an approval,
+    // which a scheduled run can never have.
+    const sibling = await fx.run(w.team, w.owner);
+    await leaseRun(fx.admin, w.team, sibling, w.owner.id, w.sandboxId);
+    await signedApproval(w);
+    const res = await callTool(w, { tool: "create_issue", arguments: input });
+    expect(res.json).toMatchObject({ decision: "deny", code: "scheduled_run_no_prompt" });
+    expect(await consumed(w)).toEqual([null]);
+    expect((await skipped(w)).map((r) => r.reason)).toEqual(["scheduled_run_no_prompt"]);
+  });
+
+  it("read-only tools run and leave no skipped action; a deny rule is recorded with its code", async () => {
+    const w = await scheduled();
+    expect((await callTool(w, { tool: "get_issue" })).json).toMatchObject({ decision: "allow" });
+    expect(await skipped(w)).toEqual([]);
+    await fx.admin.query(
+      `INSERT INTO tool_rules (team_id, scope, effect, tool_glob, created_by)
+       VALUES ($1, 'team', 'deny', $3, $2)`,
+      [w.team, w.owner.id, piName(w.connector.name, "get_issue")],
+    );
+    expect((await callTool(w, { tool: "get_issue" })).json).toMatchObject({
+      decision: "deny",
+      code: "team_deny_rule",
+    });
+    expect((await skipped(w)).map((r) => r.reason)).toEqual(["team_deny_rule"]);
+  });
+
+  it("an interactive run's denied call is not a skipped action", async () => {
+    const w = await world();
+    expect((await callTool(w, { tool: "create_issue", arguments: input })).json).toMatchObject({
+      decision: "deny",
+      approval_failure: "no_approval",
+    });
+    expect(await skipped(w)).toEqual([]);
+  });
+});
+
 describe("review M1: the thread claim never selects a laxer policy", () => {
   it("decides under every active run of the sandbox: an auto sibling cannot allow thread A's write", async () => {
     const w = await world();
