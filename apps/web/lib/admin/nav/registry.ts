@@ -12,13 +12,9 @@ import {
   type TeamSection,
 } from "./types";
 
-export const CONSOLE_BASE = "/admin";
+import { consoleHref } from "./paths";
 
-/** URL segment per console: the install console is served as the Site console (KOBE-257). */
-export const CONSOLE_SEGMENTS: Readonly<Record<ConsoleKind, string>> = {
-  install: "site",
-  team: "team",
-};
+export { CONSOLE_BASE, CONSOLE_SEGMENTS, consoleHref } from "./paths";
 
 export const CONSOLE_TITLES: Readonly<Record<ConsoleKind, string>> = {
   install: "Site console",
@@ -69,10 +65,6 @@ export function findSection(kind: ConsoleKind, id: string): ConsoleSection | und
 
 export function sectionHref(section: ConsoleSection): string {
   return `${consoleHref(section.console)}/${section.id}`;
-}
-
-export function consoleHref(kind: ConsoleKind): string {
-  return `${CONSOLE_BASE}/${CONSOLE_SEGMENTS[kind]}`;
 }
 
 const INSTALL_RANK: Readonly<Record<InstallRole, number>> = { user: 0, admin: 1, owner: 2 };

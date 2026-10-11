@@ -18,7 +18,7 @@
     "images:check": "scripts/check-images.sh",
     "test:db": "turbo run test:db",
     "db:check": "pnpm --filter @kobe/db run db:check",
-    "verify": "pnpm format && pnpm lint && pnpm typecheck && pnpm test && (test -z \"$KOBE_TEST_DATABASE_URL\" || pnpm test:db) && pnpm license:check && scripts/check-public-hygiene.sh"
+    "verify": "pnpm format && pnpm lint && pnpm typecheck && pnpm test && (test -z \"$KOBE_TEST_DATABASE_URL\" || pnpm test:db) && pnpm license:check && scripts/check-public-hygiene.sh && scripts/check-site-wording.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

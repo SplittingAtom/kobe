@@ -58,7 +58,7 @@ export const models = defineDomain({
   },
   teamReferencing: {
     budget_alerts:
-      "A budget threshold crossed (KOBE-42, D30) must be recorded once for the install budget " +
+      "A budget threshold crossed (KOBE-42, D30) must be recorded once for the site budget " +
       "(no team) as well as for a team or one member, and be read by the server's budget " +
       "monitor and outbox across teams. It holds the team and user ids, the scope, the period " +
       "and two amounts, never team content; team views filter on team_id. No FK to `teams`.",

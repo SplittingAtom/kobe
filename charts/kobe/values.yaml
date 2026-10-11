@@ -218,7 +218,7 @@ mcpProxy:
     # Extra raw NetworkPolicy egress rules for the proxy.
     extraEgress: []
 
-# Envelope encryption (KOBE-107): the install key-encryption key for per-record secrets such as
+# Envelope encryption (KOBE-107): the site key-encryption key for per-record secrets such as
 # connector credentials. Existing Secret (key `key`, optional `key-previous`), or empty to generate
 # one and keep it across upgrades. Only the API server gets it; mcp-proxy never decrypts.
 envelope:
@@ -345,7 +345,7 @@ bifrost:
   # (>= 32 chars each, all different), optionally provider-keys-previous / virtual-keys-previous
   # during a rotation. Empty: generated, kept.
   keysSecret: ""
-  # Test installs only (e2e with a fake provider): lets OpenAI/Anthropic/Gemini providers take a
+  # Test sites only (e2e with a fake provider): lets OpenAI/Anthropic/Gemini providers take a
   # base_url and keyed providers a plain-http endpoint. Off: a provider key only ever goes to its
   # vendor, or over https to the endpoint it was entered with.
   allowUnsafeProviderEndpoints: false
@@ -396,7 +396,7 @@ s3:
   bucket: ""
   forcePathStyle: true
   # Optional key prefix for every object (relative, must end in "/", e.g. "kobe/"). Empty = bucket root.
-  # Changing it on an existing install hides objects written under the old prefix.
+  # Changing it on an existing site hides objects written under the old prefix.
   prefix: ""
   # Secret with keys access-key-id and secret-access-key.
   existingSecret: ""

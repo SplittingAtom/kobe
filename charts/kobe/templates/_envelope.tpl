@@ -1,4 +1,4 @@
-{{/* Install key-encryption key for envelope encryption (KOBE-107): the API server only. */}}
+{{/* Site key-encryption key for envelope encryption (KOBE-107): the API server only. */}}
 {{- define "kobe.envelopeSecretName" -}}
 {{- default (printf "%s-envelope-key" (include "kobe.fullname" .)) (.Values.envelope).keySecret -}}
 {{- end -}}

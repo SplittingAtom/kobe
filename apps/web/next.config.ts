@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
+import { consoleRedirects } from "./lib/admin/nav/paths";
 import { SECURITY_HEADERS } from "./lib/security/csp";
 
 const nextConfig: NextConfig = {
@@ -15,10 +16,7 @@ const nextConfig: NextConfig = {
   },
   // KOBE-257: the install console is the Site console; old links and bookmarks still land.
   async redirects() {
-    return [
-      { source: "/admin/install", destination: "/admin/site", permanent: true },
-      { source: "/admin/install/:path*", destination: "/admin/site/:path*", permanent: true },
-    ];
+    return consoleRedirects();
   },
 };
 

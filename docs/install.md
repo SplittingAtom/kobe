@@ -105,7 +105,7 @@ default; it changes nothing on clusters without Rancher.
 
 Private registries: the names in `global.imagePullSecrets` are copied into each team namespace for
 the kubelet (pods there cannot mount them). Alternatively configure registry credentials on the
-nodes (k3s `registries.yaml`). Kobe assumes one install per cluster (`kobe-team-*` names are
+nodes (k3s `registries.yaml`). Kobe assumes one site per cluster (`kobe-team-*` names are
 cluster-wide).
 
 ### Workspace storage
@@ -187,7 +187,7 @@ the next message starts a fresh sandbox. The server needs `list` on events in te
 
 Sandboxes reach the internet only through the **egress proxy** (spec D28), and only over HTTPS:
 `HTTPS_PROXY` points at it, the team NetworkPolicy allows nothing else, and the proxy admits only
-team namespaces. It is **default deny**: a fresh install reaches nothing. Site admins define the
+team namespaces. It is **default deny**: a new site reaches nothing. Site admins define the
 **ceiling** (Site console → Egress ceiling; presets: package registries, which start in the
 ceiling, and git hosts, which start out of it); team admins **enable** domains within it (Team
 console → Egress). `*.example.com` matches subdomains, never `example.com` itself. Changes apply
@@ -346,7 +346,7 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
   endpoint; other providers' keys go only over `https://`; changing a keyed provider's endpoint
   requires entering the key again (a stored key is never sent somewhere new), and the audit log
   records the endpoint host. `bifrost.allowUnsafeProviderEndpoints` (Helm only, never the admin
-  API) lifts the first two rules for test installs (the e2e suite's fake provider).
+  API) lifts the first two rules for test sites (the e2e suite's fake provider).
 - **Sandboxes call the shim** (`model-gateway.kobe.internal`) with their short-lived
   `kobe.model-gateway` session token as the API key (`Authorization: Bearer`, `x-api-key`,
   `x-goog-api-key` or `?key=`). The shim verifies it, checks that the user is still an active member
@@ -491,7 +491,7 @@ content). Without `s3.bucket`, workspace sync stays off and the server logs a wa
 `s3.prefix` (default empty) puts every object under a key prefix, for a bucket shared with other
 applications. It must be relative and end in `/` (for example `kobe/`; letters, digits and
 `! _ . * ' ( ) / -` only); the chart rejects anything else. It is applied on the server and the
-scheduler (`KOBE_S3_PREFIX`). Changing it on an existing install hides the objects written under
+scheduler (`KOBE_S3_PREFIX`). Changing it on an existing site hides the objects written under
 the old prefix, so move them first or keep the old value. `kobe backup` and `kobe restore` read
 `KOBE_S3_PREFIX` too; set it to the same value.
 

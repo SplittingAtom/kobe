@@ -6,8 +6,8 @@ import { consoleHref, sectionHref, INSTALL_SECTIONS } from "./registry";
 describe("Site console URLs", () => {
   it("redirects every old /admin/install path to /admin/site permanently", async () => {
     const rules = (await nextConfig.redirects?.()) ?? [];
+    // One rule: `:path*` matches zero or more segments, so the bare /admin/install too.
     expect(rules).toEqual([
-      { source: "/admin/install", destination: "/admin/site", permanent: true },
       { source: "/admin/install/:path*", destination: "/admin/site/:path*", permanent: true },
     ]);
   });

@@ -11,6 +11,7 @@ import {
 import type { Logger } from "pino";
 import type { Mailer, MailMessage } from "../mail/mailer.js";
 import { oneLine } from "../mail/messages.js";
+import { CONSOLE_PATHS } from "../mail/console-paths.js";
 
 /**
  * Budget alert emails (KOBE-42): queued with the alert in its transaction, delivered here **at
@@ -85,6 +86,17 @@ export function budgetAlertMessage(input: {
 }
 
 /** At most this many budget emails per recipient per UTC day (the rest are skipped, logged). */
+/**
+ * Where a budget email links: site admins to site usage; a member about their own budget to the
+ * chat, whose budget banner shows it (members can't open the team console); team admins to the
+ * team's budgets.
+ */
+export function budgetAlertPath(scope: Claimed["scope"], own: boolean): string {
+  if (scope === "install") return CONSOLE_PATHS.siteUsage;
+  if (scope === "user" && own) return CONSOLE_PATHS.chat;
+  return CONSOLE_PATHS.teamBudgets;
+}
+
 export const BUDGET_EMAILS_PER_RECIPIENT_PER_DAY = 20;
 
 interface DeliverOptions {
@@ -164,7 +176,7 @@ async function deliverIn(options: DeliverOptions, teamId: string | null): Promis
       const [team] = row.team_id
         ? await db.select({ name: teams.name }).from(teams).where(eq(teams.id, row.team_id))
         : [];
-      const path = row.scope === "install" ? "/admin/site/usage" : "/admin/team/budgets";
+      const path = budgetAlertPath(row.scope, row.user_id === row.recipient_id);
       try {
         await mailer.send(
           budgetAlertMessage({

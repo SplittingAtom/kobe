@@ -286,7 +286,7 @@ function EditProviderForm({
       {insecure && (
         <p role="alert" className={styles.banner}>
           The server sends API keys over https:// only (unless the operator allowed unsafe endpoints
-          for a test install). Use an https:// URL, or remove the key.
+          for a test site). Use an https:// URL, or remove the key.
         </p>
       )}
     </form>
@@ -424,7 +424,7 @@ function AddProviderForm({
         {insecure && (
           <p role="alert" className={styles.banner}>
             The server sends API keys over https:// only (unless the operator allowed unsafe
-            endpoints for a test install). Use an https:// URL, or leave the key empty.
+            endpoints for a test site). Use an https:// URL, or leave the key empty.
           </p>
         )}
       </form>

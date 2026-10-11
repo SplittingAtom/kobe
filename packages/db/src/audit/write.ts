@@ -82,7 +82,7 @@ function checkActor(actor: AuditActor): void {
 function checkTeam(action: AuditAction, teamId: string | null): void {
   const { scope } = AUDIT_EVENTS[action];
   if (scope === "install" && teamId !== null) {
-    throw new AuditEventError(`audit: ${action} is install-level and takes no team`);
+    throw new AuditEventError(`audit: ${action} is site-level and takes no team`);
   }
   if (scope === "team" && teamId === null) {
     throw new AuditEventError(`audit: ${action} needs the team it belongs to`);

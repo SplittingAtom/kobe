@@ -13,6 +13,7 @@ import { logger } from "../logger.js";
 import type { MailMessage, Mailer } from "../mail/mailer.js";
 import { oneLine } from "../mail/messages.js";
 import { driftRecipients, type DriftRecipient } from "./drift-recipients.js";
+import { CONSOLE_PATHS } from "../mail/console-paths.js";
 
 /**
  * Emails about connector tool drift (KOBE-103, D27). Driven by the audit log, so no table is
@@ -58,7 +59,7 @@ export function driftMessage(
       ...shown,
       ...(more > 0 ? [`  ... and ${more} more`] : []),
       "",
-      `Site admins can review them at ${publicUrl}/admin/site/connectors`,
+      `Site admins can review them at ${publicUrl}${CONSOLE_PATHS.siteConnectors}`,
     ].join("\n"),
   };
 }

@@ -493,7 +493,7 @@ broken chain. A v1 row may be erased only once that event is **24 hours old**: b
 release, whose verifier recomputes v1 hashes, are gone, so no false integrity alert. Once a v1
 row's values are erased its v1 hash can no longer be recomputed; the verifier then accepts it only
 under a valid seal (which covers every field but the raw values, and its stored hash) and checks
-its `prev_hash` link. A fresh install has no v1 rows, no seal and no event. Verifying from a later
+its `prev_hash` link. A new site has no v1 rows, no seal and no event. Verifying from a later
 seq (incremental checks) can't recompute the seal; the full check (`/integrity`, restore) starts at
 seq 1.
 
@@ -576,7 +576,7 @@ chain verification failed`. `GET /v1/install/audit/integrity` runs a full check 
   rolls the whole restore back. The restore event records the operator (`--operator`, default the
   OS user) and the restored head, and the CLI prints the final head: record it. The append-only
   triggers and grants are the release's own (restore never touches schema or grants).
-- **Restore into a fresh install:** a restore refuses a database that already has audit rows.
+- **Restore into a new site:** a restore refuses a database that already has audit rows.
   Before first-run setup, Kobe records only failed sign-ins (for example a scanner trying
   `/api/auth/sign-in/email`). If the restore reports `audit_log` as non-empty, reinstall the target
   database and scale the server down before anyone can reach it.

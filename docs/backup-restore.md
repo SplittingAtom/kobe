@@ -98,13 +98,13 @@ provider ever store OAuth tokens there, those tokens are in the dump too, and th
 only by the backup encryption. The test suite seeds such tokens and asserts exactly this. Inside
 the encryption:
 
-| Data                                          | Inside the backup as                                                        |
-| --------------------------------------------- | --------------------------------------------------------------------------- |
-| Passwords                                     | scrypt hashes (`accounts.password`)                                         |
-| TOTP secrets and backup codes                 | ciphertext under the **auth secret** (`two_factors`)                        |
-| OAuth tokens in `accounts` (if SSO is added)  | **as stored** (plaintext inside the encrypted dump)                         |
-| Connector grants, header injection (later)    | ciphertext under an install key held in a Kubernetes Secret (spec D27, D28) |
-| Sessions, reset tokens, JWT keys, rate limits | not included (absent even from the decrypted dump; tested)                  |
+| Data                                          | Inside the backup as                                                    |
+| --------------------------------------------- | ----------------------------------------------------------------------- |
+| Passwords                                     | scrypt hashes (`accounts.password`)                                     |
+| TOTP secrets and backup codes                 | ciphertext under the **auth secret** (`two_factors`)                    |
+| OAuth tokens in `accounts` (if SSO is added)  | **as stored** (plaintext inside the encrypted dump)                     |
+| Connector grants, header injection (later)    | ciphertext under a site key held in a Kubernetes Secret (spec D27, D28) |
+| Sessions, reset tokens, JWT keys, rate limits | not included (absent even from the decrypted dump; tested)              |
 
 Even so, a backup holds personal data (names, e-mail addresses, and conversations once they
 exist). Restrict who can read the backup files and who can read the key.
@@ -216,7 +216,7 @@ recorded fingerprint can.
 
 A restore goes into a **freshly installed Kobe of the same version** (same migrations). It refuses
 a target whose applied migrations differ or that already has data, and it never deletes anything
-except rows a migration seeds into every fresh install (the egress presets in `egress_domains`,
+except rows a migration seeds into every new site (the egress presets in `egress_domains`,
 listed in `packages/cli/src/seeded.ts`), which the backup's rows replace in the same transaction.
 
 1. Recreate the Secrets from your secret store. Give the auth and envelope Secrets new names so
@@ -321,6 +321,6 @@ INITIALLY DEFERRED` (the owner may do this), so FK cycles such as `threads.leaf_
   immediate again; a violation rolls everything back.
 - Sequence positions (`setval`) are not transactional. After a failed restore, the target's
   sequences may already have moved forward. This is harmless (ids skip), but the target is not
-  byte-identical to a fresh install.
+  byte-identical to a new site.
 - Each backup is a full copy, and there is no point-in-time recovery. For that, use
   CloudNativePG's own backups or your managed Postgres in addition.

@@ -3,6 +3,7 @@ import type { ServerDeps } from "../deps.js";
 import type { MailMessage } from "../mail/mailer.js";
 import { oneLine } from "../mail/messages.js";
 import { scopeOf, type GrantDetail } from "./store.js";
+import { CONSOLE_PATHS } from "../mail/console-paths.js";
 
 /** Break-glass emails (spec D10). Who receives them and when: see `outbox.ts`. */
 export type GrantEvent = BreakGlassNotificationEvent;
@@ -84,8 +85,8 @@ export function grantMessage(
   lines.push(
     "",
     options.isInstallAdmin
-      ? `Review it: ${deps.publicUrl}/admin/site/break-glass`
-      : `See it in your team console: ${deps.publicUrl}/admin/team/break-glass`,
+      ? `Review it: ${deps.publicUrl}${CONSOLE_PATHS.siteBreakGlass}`
+      : `See it in your team console: ${deps.publicUrl}${CONSOLE_PATHS.teamBreakGlass}`,
   );
   return { to: to.email, subject, text: lines.join("\n") };
 }
