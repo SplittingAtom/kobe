@@ -7,6 +7,7 @@ import {
 } from "@kobe/protocol";
 import { sql, threadEntries, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import type { NewRunEvent } from "../event-stream/append.js";
+import { SKIPPED_ENTRY_TYPE } from "../policy/skipped-summary.js";
 import { ENTRY_EVENT_PAYLOAD_MAX_BYTES, RESTORE_PART_MAX_BYTES } from "./constants.js";
 
 /**
@@ -35,7 +36,11 @@ export function parseGetEntries(data: unknown): PiGetEntriesData | undefined {
   return parsed.success ? parsed.data : undefined;
 }
 
-/** The last mirrored entry of a thread (the `get_entries since` cursor), by append order. */
+/**
+ * The last mirrored entry of a thread (the `get_entries since` cursor), by append order. Entries
+ * the server wrote itself (the scheduled run's skipped-actions report) are not in Pi's session, so
+ * they are never the cursor: Pi would not know them.
+ */
 export async function lastMirroredEntryId(
   tx: KobeTx,
   teamId: string,
@@ -44,6 +49,7 @@ export async function lastMirroredEntryId(
   const res = await tx.execute<{ entry_id: string }>(sql`
     SELECT entry_id FROM thread_entries
      WHERE team_id = ${teamId} AND thread_id = ${threadId}
+       AND NOT (type = 'custom_message' AND payload ->> 'customType' = ${SKIPPED_ENTRY_TYPE})
      ORDER BY seq DESC LIMIT 1`);
   return res.rows[0]?.entry_id;
 }
@@ -175,7 +181,8 @@ const RESTORE_PAGE_ROWS = 16;
 /**
  * The thread's entries in append order as `session.restore` parts of bounded size (D13, D15),
  * read page by page (keyset on `seq`, one short transaction each), so a long thread is never held
- * in memory at once. The last part has `final: true` (an empty thread yields one empty final part).
+ * in memory at once. Server-written entries (the skipped-actions report) are left out: Pi never
+ * had them, and as the last entry one would become the session's resume point. The last part has `final: true` (an empty thread yields one empty final part).
  */
 export async function* restoreParts(
   db: KobeDb,
@@ -190,6 +197,7 @@ export async function* restoreParts(
       const res = await tx.execute<{ seq: number; payload: PiSessionEntry }>(sql`
         SELECT seq, payload FROM thread_entries
          WHERE team_id = ${teamId} AND thread_id = ${threadId} AND seq > ${after}
+           AND NOT (type = 'custom_message' AND payload ->> 'customType' = ${SKIPPED_ENTRY_TYPE})
          ORDER BY seq LIMIT ${RESTORE_PAGE_ROWS}`);
       return res.rows;
     });

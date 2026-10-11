@@ -14,6 +14,8 @@ import { eq, getMembership, sql, users, withTeam, type KobeDb } from "@kobe/db";
 import { logger } from "../logger.js";
 import { appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
 import { readApprovalFloor, strictestApprovalMode } from "../policy/approval-floor.js";
+import { neverPromptReason } from "../policy/evaluate.js";
+import { recordSkippedActionInTx } from "../policy/skipped-actions.js";
 import type {
   ApprovalBroker,
   ApprovalOutcome,
@@ -290,6 +292,35 @@ async function recordDenied(
 }
 
 /**
+ * A scheduled run's denied call (D32), recorded for the run's report. Only scheduled runs get a row
+ * (the insert checks the run's trigger itself). A failure is logged: the deny stands either way.
+ */
+async function recordSkipped(
+  deps: PolicyCheckDeps,
+  teamId: string,
+  frame: PolicyCheckFrame,
+  risk: PolicyDecision["risk"],
+  reasons: readonly PolicyReason[],
+): Promise<void> {
+  const reason = reasons[0];
+  if (reason === undefined) return;
+  try {
+    await withTeam(deps.db, teamId, (tx) =>
+      recordSkippedActionInTx(tx, {
+        teamId,
+        runId: frame.run_id,
+        toolCallId: frame.tool_call_id,
+        tool: frame.tool,
+        risk,
+        reason: reason.code,
+      }),
+    );
+  } catch (err) {
+    logger.warn({ err, runId: frame.run_id }, "could not record a skipped action");
+  }
+}
+
+/**
  * Decides one call. Never throws: any failure is a deny. `onPending` sends `policy.pending` when a
  * human is asked (the sandbox keeps waiting until `policy.result`).
  */
@@ -307,6 +338,7 @@ export async function decidePolicyCheck(
       const input = evaluated.reason;
       if (input.code === "unknown_tool") {
         await recordDenied(deps, target.teamId, frame, [input], mayRecordDenied);
+        await recordSkipped(deps, target.teamId, frame, "destructive", [input]);
         return denyFrame(frame, [input], input.message);
       }
       const message = `${input.message} The tool call was denied.`;
@@ -326,11 +358,21 @@ export async function decidePolicyCheck(
     }
     if (decision.effect === "deny") {
       await recordDenied(deps, target.teamId, frame, decision.reasons, mayRecordDenied);
+      await recordSkipped(deps, target.teamId, frame, decision.risk, decision.reasons);
       return denyFrame(
         frame,
         decision.reasons,
         decision.reasons[0]?.message ?? "Denied by policy.",
       );
+    }
+    // Defence in depth (the engine never asks here): nobody can answer a scheduled or auto run,
+    // so no approval row is created for it and the sandbox is not left waiting.
+    const never = neverPromptReason(evaluated.input);
+    if (never !== undefined) {
+      const reasons = [never, ...decision.reasons];
+      await recordDenied(deps, target.teamId, frame, reasons, mayRecordDenied);
+      await recordSkipped(deps, target.teamId, frame, decision.risk, reasons);
+      return denyFrame(frame, reasons, never.message);
     }
     const outcome = await deps.approvals.request(
       {

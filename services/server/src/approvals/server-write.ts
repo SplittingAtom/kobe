@@ -3,6 +3,7 @@ import { sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import type { Logger } from "pino";
 import { AppendError, appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
 import { readApprovalFloor, strictestApprovalMode } from "../policy/approval-floor.js";
+import { recordSkippedActionInTx } from "../policy/skipped-actions.js";
 import { loadApprovalForCall } from "./store.js";
 import type { ApprovalVerifier } from "./verify.js";
 
@@ -69,6 +70,16 @@ async function appendDenied(
   runMaxEvents: number,
   code: NoPromptCode,
 ): Promise<void> {
+  // A scheduled run's report lists it (KOBE-178); the insert only takes scheduled runs. These
+  // server-side project writes are all `write` risk.
+  await recordSkippedActionInTx(tx, {
+    teamId: call.teamId,
+    runId: call.runId,
+    toolCallId: call.toolCallId,
+    tool,
+    risk: "write",
+    reason: code,
+  });
   const run = await tx.execute<{ last_seq: number }>(sql`
     SELECT last_seq FROM runs WHERE team_id = ${call.teamId} AND id = ${call.runId}`);
   if ((run.rows[0]?.last_seq ?? runMaxEvents) + 2 > runMaxEvents) return;
@@ -91,9 +102,8 @@ async function appendDenied(
 }
 
 /**
- * The denied write as the same `policy.denied` event the policy check records, which is what the
- * run report's skipped actions are built from. TODO(KOBE-178): attach `skipped_actions` to the
- * terminal event once the run-report plumbing reads them.
+ * The denied write as the same `policy.denied` event the policy check records, and, for a
+ * scheduled run, a `run_skipped_actions` row (KOBE-178), which the run report is built from.
  */
 export async function recordDeniedWrite(
   db: KobeDb,

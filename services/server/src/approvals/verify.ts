@@ -185,6 +185,14 @@ export async function enforceMcpCall(
       message: decision.reasons[0]?.message ?? "Denied by policy.",
     };
   }
+  if (input.actor.kind === "schedule") {
+    // D32: nobody answers a scheduled run, so no approval can stand in for one.
+    return {
+      decision: "deny",
+      reasons: decision.reasons,
+      message: "Scheduled runs only run allow-listed and read-only tools; this call was skipped.",
+    };
+  }
   const check = await verifier.authorize({
     teamId: input.team_id,
     userId: input.actor.user_id,

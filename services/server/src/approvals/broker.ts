@@ -147,6 +147,7 @@ export class ApprovalBrokerImpl implements ApprovalBroker {
     if (created.kind !== "created") {
       const why: Record<typeof created.kind, string> = {
         replay: "this tool call id already asked for approval in this run.",
+        scheduled: "scheduled runs do not wait for approvals, so the call was skipped.",
         inactive: "the run is no longer active.",
         too_many: `the run already asked for ${APPROVALS_MAX_PER_RUN} approvals.`,
         event_cap: "the run has reached its event limit.",
@@ -204,7 +205,7 @@ export class ApprovalBrokerImpl implements ApprovalBroker {
     canonical: string,
   ): Promise<
     | { readonly kind: "created"; readonly id: string; readonly expiresAt: Date }
-    | { readonly kind: "inactive" | "replay" | "too_many" | "event_cap" }
+    | { readonly kind: "inactive" | "replay" | "too_many" | "event_cap" | "scheduled" }
   > {
     const { teamId } = req;
     const expiresAt = new Date(this.#ctx.now().getTime() + this.#ctx.ttlMs);
@@ -220,6 +221,9 @@ export class ApprovalBrokerImpl implements ApprovalBroker {
       ) {
         return { kind: "inactive" as const };
       }
+      // D32: nobody answers a scheduled run, so it never gets an approval row (the engine denies
+      // such calls before they get here; this is the last line of defence).
+      if (run.trigger === "schedule") return { kind: "scheduled" as const };
       const limits = await tx.execute<{ last_seq: number; approvals: number }>(sql`
         SELECT r.last_seq,
                (SELECT count(*)::int FROM approvals a

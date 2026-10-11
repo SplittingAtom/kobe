@@ -659,6 +659,10 @@ describe("project memory", () => {
         [w.team, w.runId],
       );
       expect(denied[0]?.payload).toMatchObject({ tool: "remember", reasons: [{ code }] });
+      // KOBE-178: only a scheduled run's skipped writes are reported on its run.
+      expect(
+        await rows(`SELECT tool, reason FROM run_skipped_actions WHERE team_id = $1`, [w.team]),
+      ).toEqual(code === "scheduled_run_no_prompt" ? [{ tool: "remember", reason: code }] : []);
       // Personal memory is not an approval matter: it still applies.
       expect((await put(sb, w, "a2", { scope: "user", path: "a.md", content: "x" })).status).toBe(
         "applied",

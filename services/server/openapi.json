@@ -1402,7 +1402,7 @@
             }
           },
           "422": {
-            "description": "`attachments_unavailable`: this install has no workspace storage.",
+            "description": "`attachments_unavailable` (this install has no workspace storage) or `invalid_parent_entry` (`parent_entry_id` is a note from Kobe, not a message).",
             "content": {
               "application/json": {
                 "schema": {

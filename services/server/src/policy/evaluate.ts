@@ -163,7 +163,7 @@ function allowListed(ctx: Prepared): PolicyReason | undefined {
 }
 
 /** The reason a call is denied instead of asked when nobody may be asked; undefined if interactive. */
-function neverPromptReason(input: PolicyInput): PolicyReason | undefined {
+export function neverPromptReason(input: PolicyInput): PolicyReason | undefined {
   if (input.actor.kind === "schedule") {
     return {
       code: "scheduled_run_no_prompt",

@@ -114,7 +114,11 @@ export function runsOpenApiPaths(): Record<string, Record<string, unknown>> {
             "Error",
             "`message_too_large`: the files add up to more than one message may (403 `quota_exceeded`: no storage left).",
           ),
-          "422": json("Error", "`attachments_unavailable`: this install has no workspace storage."),
+          "422": json(
+            "Error",
+            "`attachments_unavailable` (this install has no workspace storage) or " +
+              "`invalid_parent_entry` (`parent_entry_id` is a note from Kobe, not a message).",
+          ),
           "429": json("Error", "`budget_exhausted`: no new runs at 100 % of a budget (D30)."),
           "503": json(
             "Error",
