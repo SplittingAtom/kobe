@@ -284,20 +284,31 @@ describe("request access", () => {
   });
 
   it("retries a failed email from the sweep", async () => {
+    // Earlier tests' background sends must be done first, or one could consume failNext.
+    await h.mailer.settle();
     h.mailer.failNext = new Error("smtp down");
     const req = await as.bob.post(REQUESTS, { domain: "registry.npmjs.org" });
     expect(req.status).toBe(201);
     await h.mailer.settle();
-    const { rows } = await h.admin.query(
-      `SELECT status, attempts, last_error FROM egress_request_notifications WHERE request_id = $1`,
-      [req.json.request.id],
-    );
+    const state = (id: string) =>
+      h.admin.query(
+        `SELECT status, attempts, last_error FROM egress_request_notifications WHERE request_id = $1`,
+        [id],
+      );
+    const { rows } = await state(req.json.request.id);
+    expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ status: "pending", attempts: 1, last_error: "smtp_error" });
     await h.admin.query(
       `UPDATE egress_request_notifications SET next_attempt_at = now() WHERE request_id = $1`,
       [req.json.request.id],
     );
-    expect(await sweepEgressRequestNotifications(h.deps)).toBe(1);
+    // The sweep covers every team, so other due rows may add to its count; assert on this
+    // request's own row rather than on the total.
+    expect(await sweepEgressRequestNotifications(h.deps)).toBeGreaterThanOrEqual(1);
+    expect((await state(req.json.request.id)).rows[0]).toMatchObject({
+      status: "sent",
+      attempts: 2,
+    });
     expect(h.mailer.to("alice@req.test").at(-1)?.subject).toBe(
       "Access request: registry.npmjs.org for the Finance team",
     );
