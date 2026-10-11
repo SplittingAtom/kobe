@@ -3,6 +3,13 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ApiError, ApiResult } from "../../lib/api/client";
 
+/** A failure the client caused (a thrown call), shown with a way out. */
+export const CLIENT_ERROR: ApiError = {
+  status: 0,
+  code: "client_error",
+  message: "Something went wrong. Try again.",
+};
+
 export type ResourceState<T> =
   | { readonly status: "loading" }
   | { readonly status: "error"; readonly error: ApiError }
@@ -87,7 +94,7 @@ export function useMutation(): Mutation {
         setNotice(onSuccess?.(res.data) ?? null);
         return true;
       } catch {
-        setError({ status: 0, code: "client_error", message: "Something went wrong. Try again." });
+        setError(CLIENT_ERROR);
         return false;
       } finally {
         setPending(false);

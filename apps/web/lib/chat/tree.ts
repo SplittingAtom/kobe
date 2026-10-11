@@ -9,6 +9,10 @@
  *   assistant message, id = its first entry; the chain ends where the tree branches;
  * - other entry types (`model_change`, `compaction`, …) are not shown and belong to the message
  *   around them.
+ * - a scheduled run's skipped-actions summary (KOBE-178, written by the server under the run's
+ *   last entry) is not part of the tree at all: it becomes a card after the nearest shown message
+ *   above it (at the end of an answer, or under a prompt the run never answered), so it is never
+ *   a branch, a head or an entry to continue from.
  * Branches (edit-and-regenerate, Retry) are siblings in the tree, so assistant-ui's branch picker
  * works on them as is. The client keeps both directions of the mapping: `nodeOfEntry` (the leaf's
  * message is the head) and `lastEntryOfNode` (the entry to continue from when a branch is chosen).
@@ -31,12 +35,20 @@ export type KobeMessageMeta =
       readonly pending: boolean;
       /** Files sent with it (chips): from the send while pending, from Pi's text once committed. */
       readonly attachments?: readonly ChipFile[] | undefined;
+      /** Skipped-actions reports of a run that left no answer after this prompt (KOBE-181). */
+      readonly skipped?: readonly SkippedReport[] | undefined;
     }
   | {
       readonly kind: "assistant";
       readonly entryIds: readonly string[];
       readonly live: boolean;
     };
+
+/** A scheduled run's skipped-actions report (KOBE-178), as the card shows it. */
+export interface SkippedReport {
+  readonly text: string;
+  readonly count: number;
+}
 
 /** A file shown on a sent message; `size` is unknown for files not sent from this tab. */
 export interface ChipFile {
@@ -92,6 +104,7 @@ type MessagePart = Exclude<ThreadMessageLike["content"], string>[number];
 
 const PREFIX_PROMPT = "prompt:";
 const PREFIX_LIVE = "live:";
+const PREFIX_SKIPPED = "skipped:";
 
 function isAssistantSide(parsed: ParsedEntry): boolean {
   return parsed.kind === "assistant" || parsed.kind === "toolResult" || parsed.kind === "offloaded";
@@ -264,19 +277,22 @@ export function projectThread(
   live?: LiveOverlay,
 ): Projection {
   const parsed = new Map(entries.map((e) => [e.entryId, parseEntry(e)] as const));
+  const isSummary = (e: ThreadEntry) => parsed.get(e.entryId)?.kind === "skipped";
+  const summaries = entries.filter(isSummary);
+  const treeEntries = summaries.length === 0 ? entries : entries.filter((e) => !isSummary(e));
   const results = new Map<string, ToolResultInfo>();
   const resultEntries = new Map<string, ThreadEntry>();
-  for (const entry of entries) {
+  for (const entry of treeEntries) {
     const p = parsed.get(entry.entryId);
     if (p?.kind === "toolResult") {
       results.set(p.toolCallId, { text: p.text, isError: p.isError });
       resultEntries.set(p.toolCallId, entry);
     }
   }
-  const { nodes, order, nodeOfEntry, lastEntryOfNode } = buildNodes(entries, parsed);
+  const { nodes, order, nodeOfEntry, lastEntryOfNode } = buildNodes(treeEntries, parsed);
   const tools = live?.run.tools ?? {};
 
-  const items: ProjectedItem[] = [];
+  const built: ProjectedItem[] = [];
   const indexOf = new Map<string, number>();
   for (const id of order) {
     const node = nodes.get(id) as Node;
@@ -293,8 +309,8 @@ export function projectThread(
         pending: false,
         ...(split.files.length > 0 ? { attachments: split.files } : {}),
       };
-      indexOf.set(id, items.length);
-      items.push({
+      indexOf.set(id, built.length);
+      built.push({
         parentId: node.parentId,
         message: {
           id,
@@ -313,8 +329,8 @@ export function projectThread(
         entryIds: node.entries.map((e) => e.entryId),
         live: false,
       };
-      indexOf.set(id, items.length);
-      items.push({
+      indexOf.set(id, built.length);
+      built.push({
         parentId: node.parentId,
         message: {
           id,
@@ -328,9 +344,105 @@ export function projectThread(
     }
   }
 
-  let headId: string | null = headOf(entries, leafEntryId, nodeOfEntry) ?? order.at(-1) ?? null;
+  // overlayLive appends to this projection's own list below; `built` is not touched again.
+  const items = attachSummaries(built, indexOf, summaries, parsed, nodeOfEntry, treeEntries);
+  let headId: string | null =
+    headOf(treeEntries, leafEntryId, nodeOfEntry) ??
+    order.at(-1) ??
+    items.at(-1)?.message.id ??
+    null;
   if (live) headId = overlayLive(live, items, indexOf, nodeOfEntry, lastEntryOfNode, headId);
   return { items, headId, nodeOfEntry, lastEntryOfNode };
+}
+
+/** The nearest shown message at or above `entryId` (hidden entries belong to none). */
+function nearestNode(
+  entryId: string | null,
+  parentOf: ReadonlyMap<string, string | null>,
+  nodeOfEntry: ReadonlyMap<string, string>,
+): string | undefined {
+  const seen = new Set<string>();
+  let id = entryId;
+  while (id !== null && !seen.has(id)) {
+    const node = nodeOfEntry.get(id);
+    if (node !== undefined) return node;
+    seen.add(id);
+    id = parentOf.get(id) ?? null;
+  }
+  return undefined;
+}
+
+function withReports(
+  item: ProjectedItem,
+  reports: readonly SkippedReport[],
+  entries: readonly ThreadEntry[],
+): ProjectedItem {
+  const meta = messageMeta(item.message);
+  const deps = [...item.deps, ...entries];
+  if (meta?.kind === "user") {
+    const skipped = [...(meta.skipped ?? []), ...reports];
+    const custom: KobeMessageMeta = { ...meta, skipped };
+    return { ...item, message: { ...item.message, metadata: { custom } }, deps };
+  }
+  const parts = reports.map((data): MessagePart => ({ type: "data-kobe-skipped", data }));
+  const content = [...(item.message.content as readonly MessagePart[]), ...parts];
+  return { ...item, message: { ...item.message, content }, deps };
+}
+
+/**
+ * Places each skipped-actions summary after the nearest shown message above it: at the end of an
+ * answer, or under a prompt its run never answered. A summary with nothing shown above it (under a
+ * hidden root) becomes the only message when there is none; one whose parent is not loaded waits.
+ * Returns new items; `items` is left as it was.
+ */
+function attachSummaries(
+  items: readonly ProjectedItem[],
+  indexOf: ReadonlyMap<string, number>,
+  summaries: readonly ThreadEntry[],
+  parsed: ReadonlyMap<string, ParsedEntry>,
+  nodeOfEntry: ReadonlyMap<string, string>,
+  treeEntries: readonly ThreadEntry[],
+): ProjectedItem[] {
+  if (summaries.length === 0) return [...items];
+  const parentOf = new Map(treeEntries.map((e) => [e.entryId, e.parentId] as const));
+  const byIndex = new Map<number, { reports: SkippedReport[]; entries: ThreadEntry[] }>();
+  const unplaced: { report: SkippedReport; entry: ThreadEntry }[] = [];
+  for (const entry of summaries) {
+    const p = parsed.get(entry.entryId);
+    if (p?.kind !== "skipped") continue;
+    const report: SkippedReport = { text: p.text, count: p.count };
+    const node = nearestNode(entry.parentId, parentOf, nodeOfEntry);
+    const index = node === undefined ? undefined : indexOf.get(node);
+    if (index !== undefined) {
+      const slot = byIndex.get(index) ?? { reports: [], entries: [] };
+      byIndex.set(index, { reports: [...slot.reports, report], entries: [...slot.entries, entry] });
+    } else if (entry.parentId === null || parentOf.has(entry.parentId)) {
+      unplaced.push({ report, entry });
+    }
+  }
+  const placed = items.map((item, i) => {
+    const slot = byIndex.get(i);
+    return slot ? withReports(item, slot.reports, slot.entries) : item;
+  });
+  const first = unplaced[0];
+  if (placed.length > 0 || first === undefined) return placed;
+  const meta: KobeMessageMeta = { kind: "assistant", entryIds: [], live: false };
+  return [
+    {
+      parentId: null,
+      message: {
+        id: `${PREFIX_SKIPPED}${first.entry.entryId}`,
+        role: "assistant",
+        content: unplaced.map(({ report }): MessagePart => ({
+          type: "data-kobe-skipped",
+          data: report,
+        })),
+        status: { type: "complete", reason: "stop" },
+        metadata: { custom: meta },
+      },
+      deps: unplaced.map(({ entry }) => entry),
+    },
+  ];
 }
 
 /**

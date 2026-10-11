@@ -223,6 +223,37 @@ export class FakeKobe {
     this.#thread(threadId).schedule_id = scheduleId;
   }
 
+  /**
+   * The server-written skipped-actions summary of a scheduled run (KOBE-178): a `custom_message`
+   * under `parentId` that never moves the leaf.
+   */
+  addSkippedSummary(threadId: string, parentId: string, content: string, count: number): string {
+    const thread = this.#thread(threadId);
+    const id = `ks-${thread.entries.length + 1}`;
+    thread.entries.push({
+      entry_id: id,
+      parent_id: parentId,
+      seq: thread.entries.length + 1,
+      type: "custom_message",
+      payload: {
+        type: "custom_message",
+        id,
+        parentId,
+        timestamp: NOW,
+        customType: "kobe.skipped_actions",
+        content,
+        display: true,
+        details: { run_id: "r-scheduled", skipped_count: count },
+      },
+      payload_offloaded: false,
+      created_at: NOW,
+    });
+    return id;
+  }
+
+  /** In-app notifications the bell lists (KOBE-181), newest first. */
+  readonly notifications: Json[] = [];
+
   /** Adds a committed entry directly (history that exists before the test). */
   addEntry(
     threadId: string,
@@ -476,6 +507,10 @@ export class FakeKobe {
       });
     }
     if (url.pathname === "/v1/me/invites") return json(200, { invitations: [] });
+    if (url.pathname === "/v1/notifications" || url.pathname === "/v1/notifications/read") {
+      return this.#notificationRoute(method, url);
+    }
+    if (url.pathname === "/v1/schedules") return json(200, { schedules: [], active_count: 0 });
     if (url.pathname === "/v1/team/models" && this.teamModels.length > 0) {
       if (headers.get("x-kobe-team") !== this.teamId) return error(409, "team_mismatch");
       const models = this.teamModels.map((m) => ({
@@ -561,6 +596,18 @@ export class FakeKobe {
    * `/v1/memory/:id` (KOBE-155) for the Undo chip: DELETE answers 204, `POST .../restore` the doc
    * at the asked version. Both are recorded in `requests`; `failNext` makes one fail.
    */
+  #notificationRoute(method: string, url: URL): Response {
+    const unread = () => this.notifications.filter((n) => n.read_at === null);
+    if (method === "POST") {
+      const before = unread().length;
+      for (const n of this.notifications) n.read_at = NOW;
+      return json(200, { updated: before, unread_count: 0 });
+    }
+    const only = url.searchParams.get("unread") === "true";
+    const list = only ? unread() : this.notifications;
+    return json(200, { notifications: list, unread_count: unread().length, next_cursor: null });
+  }
+
   #memoryRoute(method: string, url: URL, headers: Headers): Response {
     if (headers.get("x-kobe-team") !== this.teamId) return error(409, "team_mismatch");
     const [, , id, leaf] = url.pathname.split("/").filter(Boolean); // v1 memory id restore

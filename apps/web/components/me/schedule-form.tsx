@@ -64,10 +64,17 @@ export function ScheduleForm({
   const [days, setDays] = useState<readonly string[]>(initialDays(r));
   const [expr, setExpr] = useState(r?.kind === "cron" ? r.expr : DEFAULT_CRON);
   const [tz, setTz] = useState(editing?.tz ?? browserTimeZone());
+  const [notifyEmail, setNotifyEmail] = useState(editing?.notifyEmail ?? false);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    onSubmit({ agentId, prompt, recurrence: buildRecurrence(kind, at, days, expr), tz });
+    onSubmit({
+      agentId,
+      prompt,
+      recurrence: buildRecurrence(kind, at, days, expr),
+      tz,
+      notifyEmail,
+    });
   };
   const toggleDay = (d: string) =>
     setDays((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d]));
@@ -148,6 +155,18 @@ export function ScheduleForm({
           ))}
         </select>
       </label>
+      <label>
+        <input
+          type="checkbox"
+          checked={notifyEmail}
+          onChange={(e) => setNotifyEmail(e.target.checked)}
+        />{" "}
+        Email me when a run ends
+      </label>
+      <p className={styles.hint}>
+        Every run also shows up under the bell in the chat. The email says how the run ended and
+        links to its conversation; it never includes the prompt or the answer.
+      </p>
       {error && <ErrorNotice error={error} />}
       <p className={styles.actions}>
         <button type="submit" disabled={pending}>

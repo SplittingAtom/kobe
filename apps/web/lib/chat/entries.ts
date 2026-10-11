@@ -6,9 +6,13 @@
  * where `role` is `user` (content: string | parts), `assistant` (parts: text / thinking / toolCall,
  * plus `stopReason` and `errorMessage`) or `toolResult` (`toolCallId`, `toolName`, `content`,
  * `isError`). Other entry types (`model_change`, `compaction`, `branch_summary`, …) are not
- * conversation turns.
+ * conversation turns. One entry is the server's, not Pi's: a scheduled run's skipped-actions
+ * summary (KOBE-178), a `custom_message` with `customType` {@link SKIPPED_SUMMARY_TYPE}.
  */
 import type { ThreadEntry } from "./types";
+
+/** `customType` of the server-written skipped-actions summary of a scheduled run (KOBE-178). */
+export const SKIPPED_SUMMARY_TYPE = "kobe.skipped_actions";
 
 export type AssistantPiece =
   | { readonly kind: "text"; readonly text: string }
@@ -35,6 +39,11 @@ export type ParsedEntry =
       readonly text: string;
       readonly isError: boolean;
     }
+  /**
+   * A scheduled run's skipped-actions summary. Pi does not know it: it is never a branch point,
+   * a leaf, or a message of its own (the server refuses it as a parent, 422 invalid_parent_entry).
+   */
+  | { readonly kind: "skipped"; readonly text: string; readonly count: number }
   /** A message whose body is in object storage (D15); its role is unknown here. */
   | { readonly kind: "offloaded" }
   /** Not a conversation turn: kept in the tree, never rendered. */
@@ -99,7 +108,36 @@ function assistantProblem(message: Record<string, unknown>) {
   return { reason, message: clip(str(message.errorMessage) ?? fallback).slice(0, 2000) } as const;
 }
 
+const MAX_SUMMARY = 20_000;
+
+/** The id prefix the server gives a summary entry (`ks-<run>`); Pi's entry ids are short hex. */
+const SKIPPED_SUMMARY_ID = "ks-";
+
+/**
+ * A summary is known by its `customType`, or by its server id when its body is offloaded (the
+ * payload is then empty): either way it must never enter the tree as a branch or a head.
+ */
+function isSkippedSummary(entry: ThreadEntry): boolean {
+  return (
+    entry.type === "custom_message" &&
+    (entry.payload.customType === SKIPPED_SUMMARY_TYPE ||
+      (entry.payloadOffloaded && entry.entryId.startsWith(SKIPPED_SUMMARY_ID)))
+  );
+}
+
+function skippedSummary(entry: ThreadEntry): ParsedEntry | undefined {
+  if (!isSkippedSummary(entry)) return undefined;
+  const count = record(entry.payload.details)?.skipped_count;
+  return {
+    kind: "skipped",
+    text: entry.payloadOffloaded ? "" : contentText(entry.payload.content).slice(0, MAX_SUMMARY),
+    count: typeof count === "number" && Number.isInteger(count) && count > 0 ? count : 0,
+  };
+}
+
 export function parseEntry(entry: ThreadEntry): ParsedEntry {
+  const skipped = skippedSummary(entry);
+  if (skipped) return skipped;
   if (entry.payloadOffloaded) return { kind: "offloaded" };
   if (entry.type !== "message") return { kind: "other", type: entry.type };
   const message = record(entry.payload.message);

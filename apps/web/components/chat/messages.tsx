@@ -22,7 +22,7 @@ import {
 import type { ComponentType } from "react";
 import { cn } from "../../lib/utils";
 import { ROOT_BRANCHING_AVAILABLE, ROOT_BRANCHING_PENDING } from "../../lib/chat/features";
-import { messageMeta, type KobeMessageMeta } from "../../lib/chat/tree";
+import { messageMeta, type KobeMessageMeta, type SkippedReport } from "../../lib/chat/tree";
 import { Button } from "../ui/button";
 import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button";
 import { useKobeExtras } from "./kobe-runtime";
@@ -55,6 +55,41 @@ function Problem({ data }: DataMessagePartProps) {
   );
 }
 
+/**
+ * A scheduled run's skipped-actions summary (KOBE-178): the server's template text, one line per
+ * skipped call ("- tool (risk): reason"), shown as plain text. Empty text: the body is offloaded.
+ */
+function SkippedReportCard({ text, count }: SkippedReport) {
+  const lines = text.split("\n").filter((l) => l.trim() !== "");
+  const calls = lines.filter((l) => l.startsWith("- ")).map((l) => l.slice(2));
+  const intro = lines.filter((l) => !l.startsWith("- ") && l !== "Skipped actions");
+  return (
+    <section className={styles.skipped} aria-label="Skipped actions">
+      <p className={styles.skippedTitle}>Skipped actions{count > 0 ? ` (${count})` : ""}</p>
+      {lines.length === 0 && (
+        <p className={styles.hint}>This scheduled run&apos;s report is too large to show here.</p>
+      )}
+      {intro.map((line, i) => (
+        <p key={i} className={styles.hint}>
+          {line}
+        </p>
+      ))}
+      {calls.length > 0 && (
+        <ul className={styles.skippedList}>
+          {calls.map((line, i) => (
+            <li key={i}>{line}</li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function SkippedActions({ data }: DataMessagePartProps) {
+  const { text = "", count = 0 } = data as Partial<SkippedReport>;
+  return <SkippedReportCard text={text} count={count} />;
+}
+
 function Offloaded() {
   return <p className={styles.notice}>This part of the conversation is too large to show here.</p>;
 }
@@ -68,7 +103,13 @@ const ASSISTANT_PARTS = {
   Text: MarkdownText,
   Reasoning,
   tools: { Override: ToolCallCard },
-  data: { by_name: { "kobe-problem": Problem, "kobe-offloaded": Offloaded } },
+  data: {
+    by_name: {
+      "kobe-problem": Problem,
+      "kobe-offloaded": Offloaded,
+      "kobe-skipped": SkippedActions,
+    },
+  },
 } as const;
 
 function useMeta(): KobeMessageMeta | undefined {
@@ -176,6 +217,12 @@ export function UserMessage() {
           </div>
         </div>
       </div>
+      {meta?.kind === "user" &&
+        meta.skipped?.map((report, i) => (
+          <div key={i} className="col-span-full col-start-1 min-w-0">
+            <SkippedReportCard text={report.text} count={report.count} />
+          </div>
+        ))}
       {pending && (
         <span className="text-muted-foreground col-span-full col-start-1 justify-self-end text-xs">
           Sent, waiting for the agent

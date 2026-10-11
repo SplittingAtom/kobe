@@ -22,12 +22,17 @@ const BASE: Record<string, string> = {
 type Env = { name: string; value?: string; valueFrom?: unknown };
 type Manifest = { kind: string; metadata: { name: string }; [k: string]: any };
 
-function render(values: Record<string, string> = {}): Manifest[] {
+function render(values: Record<string, string> = {}, files: readonly string[] = []): Manifest[] {
   const args = Object.entries({ ...BASE, ...values }).flatMap(([k, v]) => ["--set", `${k}=${v}`]);
-  const out = execFileSync(HELM, ["template", "kobe", CHART_DIR, "-n", "kobe", ...args], {
-    encoding: "utf8",
-    stdio: "pipe",
-  });
+  const valueFiles = files.flatMap((f) => ["-f", f]);
+  const out = execFileSync(
+    HELM,
+    ["template", "kobe", CHART_DIR, "-n", "kobe", ...valueFiles, ...args],
+    {
+      encoding: "utf8",
+      stdio: "pipe",
+    },
+  );
   return parseAllDocuments(out)
     .map((d) => d.toJS() as Manifest | null)
     .filter((d): d is Manifest => d !== null);
@@ -53,6 +58,15 @@ describe("scheduler runner chart (KOBE-174)", () => {
   it("defaults to a 15 s tick and a 60 minute grace window", () => {
     const env = envOf(render());
     expect(value(env, "KOBE_SCHEDULER_TICK_SECONDS")).toBe("15");
+    expect(value(env, "KOBE_SCHEDULER_GRACE_MINUTES")).toBe("60");
+  });
+
+  // KOBE-181: the k3d e2e (dev/values.yaml) observes scheduled runs it pulls due, so it ticks at the
+  // chart's minimum; production keeps the 15 s default above.
+  it("ticks every 5 s with the dev/e2e values", () => {
+    const devValues = fileURLToPath(new URL("../../../dev/values.yaml", import.meta.url));
+    const env = envOf(render({}, [devValues]));
+    expect(value(env, "KOBE_SCHEDULER_TICK_SECONDS")).toBe("5");
     expect(value(env, "KOBE_SCHEDULER_GRACE_MINUTES")).toBe("60");
   });
 

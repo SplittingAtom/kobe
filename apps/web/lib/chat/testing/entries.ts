@@ -57,3 +57,25 @@ export const toolResult = (
     content: [{ type: "text", text: output }],
     isError,
   });
+
+/** The server-written skipped-actions summary of a scheduled run (KOBE-178): never a Pi entry. */
+export const skippedSummary = (id: string, parent: string, content: string, count = 1) => {
+  seq += 1;
+  return {
+    entryId: id,
+    parentId: parent,
+    seq,
+    type: "custom_message",
+    payload: {
+      type: "custom_message",
+      id,
+      parentId: parent,
+      customType: "kobe.skipped_actions",
+      content,
+      display: true,
+      details: { run_id: "r1", skipped_count: count },
+    },
+    payloadOffloaded: false,
+    createdAt: "2026-10-02T10:00:00.000Z",
+  } satisfies ThreadEntry;
+};

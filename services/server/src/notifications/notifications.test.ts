@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { scheduledRunMessage } from "../mail/messages.js";
-import { scheduleWhen } from "./email.js";
+import { disabledMailer } from "../scheduler/process-deps.js";
+import {
+  deliverNotificationEmails,
+  scheduleWhen,
+  sweepNotificationEmails,
+  type DeliverDeps,
+} from "./email.js";
 import { notificationKindOf } from "./record.js";
 import { decodeCursor, encodeCursor } from "./store.js";
 
@@ -72,5 +78,21 @@ describe("notification cursors", () => {
     expect(decodeCursor(fake("2026-13-45T09:00:00.123456Z"))).toBeNull();
     expect(decodeCursor(fake("2026-02-30T09:00:00.123456Z"))).toBeNull();
     expect(decodeCursor(Buffer.from('{"t":"x","i":"y"}').toString("base64url"))).toBeNull();
+  });
+});
+
+describe("notification email delivery without a mailer (KOBE-181)", () => {
+  it("claims nothing in a process that cannot send (the scheduler), so the server's sweep sends it", async () => {
+    const touched: string[] = [];
+    const database = new Proxy({} as DeliverDeps["database"], {
+      get: (_t, key) => {
+        touched.push(String(key));
+        throw new Error("the database must not be used");
+      },
+    });
+    const deps = { database, mailer: disabledMailer, publicUrl: "http://scheduler.invalid" };
+    expect(await deliverNotificationEmails(deps, "6f1d1a2b-0c3d-4e5f-8a9b-0c1d2e3f4a5b")).toBe(0);
+    expect(await sweepNotificationEmails(deps)).toBe(0);
+    expect(touched).toEqual([]);
   });
 });

@@ -16,6 +16,7 @@ import { ACTIVE_TEAM_EVENT, fetchMyTeams } from "../../lib/teams";
 import { createFilesApi } from "../../lib/files/api";
 import { ConsoleLinks } from "../admin/console-links";
 import { ArtifactPanel, ArtifactPanelProvider } from "./artifact-panel";
+import { NotificationBell } from "./notification-bell";
 import { FilesPanel, FilesPanelProvider } from "../files/files-panel";
 import { ChatSessionContext, useKobeRuntime } from "./kobe-runtime";
 import { RetentionNotice } from "./retention-notice";
@@ -49,6 +50,14 @@ function useThreadUrl(): readonly [string | undefined, (id: string | undefined) 
     window.history.pushState(null, "", url);
   }, []);
   return [threadId, change];
+}
+
+/** Opens a thread from outside the workspace (the notification bell): `useThreadUrl` follows. */
+function openThreadFromHeader(id: string): void {
+  const url = new URL(window.location.href);
+  url.searchParams.set(THREAD_PARAM, id);
+  window.history.pushState(null, "", url);
+  window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
 type TeamState =
@@ -238,6 +247,9 @@ export function ChatApp({
           <Link href="/me/memory">My memory</Link> <Link href="/me/schedules">My schedules</Link>{" "}
           <Link href="/me/projects">Projects</Link>
         </nav>
+        {teamId !== null && (
+          <NotificationBell teamId={teamId} fetchFn={fetchFn} onOpenThread={openThreadFromHeader} />
+        )}
         <ConsoleLinks />
       </header>
       <TeamInvites />
