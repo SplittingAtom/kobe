@@ -34,6 +34,8 @@ export interface ThreadSummary {
   readonly isTest?: boolean;
   /** The model chosen for the thread (a catalog alias); null = the team's default (KOBE-44). */
   readonly model?: string | null;
+  /** Set when a schedule started the thread (KOBE-173); drives the Scheduled folder. */
+  readonly scheduleId?: string | null;
   readonly leafEntryId: string | null;
   readonly lastActivityAt: string;
   readonly createdAt: string;
