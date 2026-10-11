@@ -31,6 +31,15 @@ export const PAUSED_BY_ADMIN: Answer = {
   },
 };
 
+export const OWNER_INACTIVE: Answer = {
+  status: 409,
+  json: {
+    code: "schedule_owner_inactive",
+    message:
+      "The schedule's owner is deactivated or no longer in this team; only the owner can resume it.",
+  },
+};
+
 const MESSAGES: Record<ScheduleErrorCode, string> = {
   schedule_cap_reached: `You can have at most ${MAX_ACTIVE_SCHEDULES_PER_USER} active schedules across all your teams. Pause one first.`,
   invalid_recurrence: "That recurrence is not valid.",

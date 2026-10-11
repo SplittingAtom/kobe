@@ -13,6 +13,7 @@ import {
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { revokeInvitesSentBy } from "../invitations/team-invites.js";
+import { pauseOwnerSchedulesInTx } from "../schedules/offboard.js";
 
 export interface TeamMember {
   readonly userId: string;
@@ -133,7 +134,10 @@ export async function setMemberRole(
   });
 }
 
-/** Removes a member; the last team admin can't be removed. */
+/**
+ * Removes a member; the last team admin can't be removed. Their schedules in this team are paused
+ * in the same transaction; the route then cancels their in-flight scheduled runs here.
+ */
 export async function removeMember(
   db: KobeDb,
   teamId: string,
@@ -147,6 +151,8 @@ export async function removeMember(
       .delete(teamMembers)
       .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
     await revokeInvitesSentBy(tx, teamId, userId);
+    // Their schedules here stop with the membership; other teams' keep running (KOBE-180).
+    await pauseOwnerSchedulesInTx(tx, teamId, userId, "member_removed");
     // Egress proxies close the user's open tunnels in this team (KOBE-38).
     await notifyEgressUserChanged(tx, userId);
     await recordAudit(tx, {

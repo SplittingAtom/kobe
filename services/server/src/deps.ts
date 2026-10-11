@@ -44,6 +44,7 @@ import {
 } from "./runs/index.js";
 import type { RunAgentResolver } from "./runs/seams.js";
 import { createOffboarding, type Offboarding } from "./offboarding/index.js";
+import { stopUserSchedules } from "./schedules/offboard.js";
 import { UserLifecycle } from "./users/lifecycle.js";
 import { approvalVerifierForMcp } from "./mcp/approvals.js";
 import { createDbMcpCatalog } from "./mcp/catalog.js";
@@ -359,6 +360,11 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     logger: logger.child({ component: "budgets" }),
   });
   const lifecycle = new UserLifecycle();
+  // First, while the sandbox still answers: pause the user's schedules, cancel scheduled runs (KOBE-180).
+  lifecycle.on("deactivated", {
+    name: "schedules",
+    run: (userId) => stopUserSchedules(database.db, runs, userId),
+  });
   // A deactivated user's sandboxes lose their connections on every replica at once (KOBE-13).
   lifecycle.on("deactivated", {
     name: "sandbox-wire",

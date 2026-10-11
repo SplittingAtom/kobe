@@ -10,11 +10,13 @@ import { listMemberships, withTeam, type KobeTx } from "@kobe/db";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import { teamRoleAllows } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
+import { principalActive } from "../runs/store.js";
 import { invalidRequest } from "../teams/http.js";
 import { uuidSchema } from "../threads/schemas.js";
 import {
   NOT_ALLOWED,
   NOT_FOUND,
+  OWNER_INACTIVE,
   PAUSED_BY_ADMIN,
   capReached,
   parseScheduleBody,
@@ -279,6 +281,8 @@ export function scheduleRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
       if (!row || (!own && !(admin && row.pausedBy === "team_admin"))) return NOT_FOUND;
       if (row.active) return { status: 200, json: toResponse(row) };
       if (own && row.pausedBy === "team_admin") return PAUSED_BY_ADMIN;
+      // An admin never revives a deactivated or removed owner's schedule (KOBE-180 review).
+      if (!own && !(await principalActive(tx, teamId, row.userId))) return OWNER_INACTIVE;
       const blocked = await capAnswer(tx, row.userId, teamId, elsewhere, userId);
       if (blocked) return blocked;
       const due = nextDueAt(row.recurrence as Parameters<typeof nextDueAt>[0], row.tz);

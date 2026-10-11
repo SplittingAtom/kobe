@@ -213,7 +213,7 @@ const item = (over: Record<string, unknown>) => ({
   runCount: 7,
   lastRunAt: "2026-10-02T10:00:00Z",
   tokens: 1234,
-  schedules: null,
+  schedules: [],
   orbitScore: { status: "none", attackSuccessRate: null, at: null },
   canExport: true,
   ...over,
@@ -275,6 +275,59 @@ describe("Agent inventory", () => {
     expect(summary(calls)).toContain(
       "GET /v1/agents/inventory?cursor=mine%3A00000000-0000-0000-0000-000000000001",
     );
+  });
+
+  it("lists each agent's schedules with owner and status (KOBE-180)", async () => {
+    const schedule = (over: Record<string, unknown>) => ({
+      scheduleId: "s-1",
+      ownerUserId: "u-bob",
+      ownerName: "Bob",
+      status: "active",
+      pausedBy: null,
+      nextDueAt: "2026-10-12T09:00:00Z",
+      ...over,
+    });
+    stubApi({
+      [GALLERY_LIST]: NO_GALLERY,
+      [LIST]: [200, AGENTS],
+      "GET /v1/agents/inventory": [
+        200,
+        {
+          agents: [
+            item({
+              schedules: [
+                schedule({}),
+                schedule({
+                  scheduleId: "s-2",
+                  ownerName: "Carol",
+                  status: "paused",
+                  pausedBy: "team_admin",
+                }),
+                schedule({
+                  scheduleId: "s-3",
+                  ownerName: "Dan",
+                  status: "paused",
+                  pausedBy: "deactivation",
+                }),
+                schedule({ scheduleId: "s-4", ownerName: "Eve", status: "paused" }),
+              ],
+            }),
+          ],
+          nextCursor: null,
+        },
+      ],
+    });
+    renderTeam(<TeamAgentsPage />);
+    const row = (await screen.findByRole("row", { name: /Carol/ })) as HTMLElement;
+    const cells = within(row)
+      .getAllByRole("listitem")
+      .map((li) => li.textContent);
+    expect(cells).toEqual([
+      "Bob: active",
+      "Carol: paused by a team admin",
+      "Dan: paused (owner deactivated or removed)",
+      "Eve: paused",
+    ]);
   });
 
   it("suspends and reactivates any listed agent, personal ones included", async () => {

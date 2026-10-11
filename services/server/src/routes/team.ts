@@ -37,16 +37,27 @@ export function teamRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
   app.delete("/members/:userId", requireTeamPermission("team.members.manage"), async (c) => {
     const userId = idSchema.safeParse(c.req.param("userId"));
     if (!userId.success) return invalidRequest(c);
-    const result = await removeMember(db, c.get("team").id, userId.data);
+    const teamId = c.get("team").id;
+    const result = await removeMember(db, teamId, userId.data);
     if (!result.ok) return membershipError(c, result.error);
+    // Their scheduled runs here stop while the sandbox still answers (KOBE-180); the schedules were
+    // paused with the removal. A failure is logged: the runs then end with the sandbox teardown.
+    try {
+      await deps.runs.cancelScheduledRuns(teamId, userId.data, "member_removed");
+    } catch (err) {
+      logger.error(
+        { err, team_id: teamId },
+        "cancelling scheduled runs after member removal failed",
+      );
+    }
     // The removed member's sandbox in this team loses its connection on every replica (KOBE-24).
     await deps.sandboxWire.revalidateUser(userId.data);
     // The sandbox is destroyed at once and the volume kept 30 days (D12, KOBE-28). The removal is
     // done either way; a failure here is finished by the offboarding sweep.
     try {
-      await deps.offboarding.offboardMember(c.get("team").id, userId.data, "member_removed");
+      await deps.offboarding.offboardMember(teamId, userId.data, "member_removed");
     } catch (err) {
-      logger.error({ err, team_id: c.get("team").id }, "offboarding after member removal failed");
+      logger.error({ err, team_id: teamId }, "offboarding after member removal failed");
     }
     return c.body(null, 204);
   });

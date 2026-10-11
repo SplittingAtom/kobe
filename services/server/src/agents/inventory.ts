@@ -6,9 +6,9 @@ import { findAgent, setAgentStatus, type AgentRecord } from "./store.js";
 
 /**
  * Agent inventory for team admins (KOBE-86, spec D19): the team's agents plus the install-wide
- * agents (members' personal agents, gallery agents) that threads of this team have used, with
- * usage counts. Every query states `team_id` explicitly, on top of `withTeam()` (break-glass
- * policy). A personal agent is install-wide data, so a team admin suspends it for this team only
+ * agents (members' personal agents, gallery agents) that threads or schedules of this team use,
+ * with usage counts and the team's schedules per agent (KOBE-180). Every query states `team_id`
+ * explicitly, on top of `withTeam()` (break-glass policy). A personal agent is install-wide data, so a team admin suspends it for this team only
  * (`team_agent_suspensions`); team agents use their own `status`.
  */
 
@@ -50,10 +50,21 @@ export interface InventoryItem {
   readonly lastRunAt: string | null;
   /** Input plus output tokens of the team's attributed model calls (`run_usage`); no money. */
   readonly tokens: number;
-  /** KOBE-64 (schedules) is not built: always null. */
-  readonly schedules: null;
+  /** This team's schedules of the agent, any owner, oldest first (KOBE-180). */
+  readonly schedules: readonly InventorySchedule[];
   /** The latest Orbit score (KOBE-94). */
   readonly orbitScore: InventoryScore;
+}
+
+/** A schedule as the inventory shows it: who owns it and whether it fires. */
+export interface InventorySchedule {
+  readonly scheduleId: string;
+  readonly ownerUserId: string;
+  readonly ownerName: string;
+  readonly status: "active" | "paused";
+  /** Why it is paused when the owner did not pause it: a team admin, or deactivation/removal. */
+  readonly pausedBy: "team_admin" | "deactivation" | null;
+  readonly nextDueAt: string | null;
 }
 
 /**
@@ -103,7 +114,10 @@ const SCORE_STATUS: Readonly<Record<string, InventoryScore["status"]>> = {
 const iso = (v: Date | string | null): string | null =>
   v === null ? null : new Date(v).toISOString();
 
-export function toInventoryItem(r: InventoryRow): InventoryItem {
+export function toInventoryItem(
+  r: InventoryRow,
+  schedules: readonly InventorySchedule[] = [],
+): InventoryItem {
   return {
     id: r.id,
     scope: r.scope,
@@ -118,7 +132,7 @@ export function toInventoryItem(r: InventoryRow): InventoryItem {
     runCount: Number(r.run_count),
     lastRunAt: iso(r.last_run_at),
     tokens: Number(r.tokens),
-    schedules: null,
+    schedules,
     orbitScore: {
       status: (r.score_status && SCORE_STATUS[r.score_status]) || "none",
       attackSuccessRate: r.score_rate,
@@ -126,6 +140,14 @@ export function toInventoryItem(r: InventoryRow): InventoryItem {
     },
   };
 }
+
+/** Install-wide agents this team uses: pinned by a live thread or by a schedule (KOBE-180). */
+const usedInstallAgentIds = (teamId: string) => sql`
+  SELECT t.install_agent_id FROM threads t
+   WHERE t.team_id = ${teamId} AND t.install_agent_id IS NOT NULL AND t.deleted_at IS NULL
+     AND NOT t.is_test
+  UNION
+  SELECT s.agent_id FROM schedules s WHERE s.team_id = ${teamId}`;
 
 /** The agents of the inventory (before paging), as a CTE body over `${teamId}`. */
 const inventoryRows = (teamId: string) => sql`
@@ -138,10 +160,7 @@ const inventoryRows = (teamId: string) => sql`
          i.current_version, i.archived_at
     FROM install_agents i
     LEFT JOIN team_agent_suspensions s ON s.team_id = ${teamId} AND s.agent_id = i.id
-   WHERE i.id IN (
-     SELECT t.install_agent_id FROM threads t
-      WHERE t.team_id = ${teamId} AND t.install_agent_id IS NOT NULL AND t.deleted_at IS NULL
-        AND NOT t.is_test)`;
+   WHERE i.id IN (${usedInstallAgentIds(teamId)})`;
 
 export async function listInventory(
   db: KobeDb,
@@ -151,7 +170,7 @@ export async function listInventory(
   const limit = query.limit ?? INVENTORY_PAGE_DEFAULT;
   const match = query.cursor ? CURSOR.exec(query.cursor) : null;
   const after = match ? sql`WHERE (inv.slug, inv.id) > (${match[1]}, ${match[2]}::uuid)` : sql``;
-  const rows = await withTeam(db, teamId, async (tx) => {
+  const { more, pageRows, scheduled } = await withTeam(db, teamId, async (tx) => {
     const result = await tx.execute<InventoryRow>(sql`
       WITH inv AS (${inventoryRows(teamId)}),
       page AS (SELECT inv.* FROM inv ${after} ORDER BY inv.slug, inv.id LIMIT ${limit + 1}),
@@ -195,17 +214,63 @@ export async function listInventory(
         LEFT JOIN team_score ts ON ts.agent_id = page.id
         LEFT JOIN gallery_score gs ON gs.agent_id = page.id
        ORDER BY page.slug, page.id`);
-    return result.rows;
+    const pageRows = result.rows.slice(0, limit);
+    const scheduled = await schedulesOf(
+      tx,
+      teamId,
+      pageRows.map((r) => r.id),
+    );
+    return { more: result.rows.length > limit, pageRows, scheduled };
   });
-  const pageRows = rows.slice(0, limit);
   const last = pageRows.at(-1);
   return {
-    agents: pageRows.map(toInventoryItem),
-    nextCursor: rows.length > limit && last ? `${last.slug}:${last.id}` : null,
+    agents: pageRows.map((r) => toInventoryItem(r, scheduled.get(r.id))),
+    nextCursor: more && last ? `${last.slug}:${last.id}` : null,
   };
 }
 
-/** An install-wide agent this team's threads use (the only ones a team may suspend). */
+type ScheduleRow = {
+  id: string;
+  agent_id: string;
+  user_id: string;
+  owner_name: string;
+  active: boolean;
+  paused_by: InventorySchedule["pausedBy"];
+  next_due_at: Date | string | null;
+};
+
+/** The team's schedules of these agents, grouped by agent (RLS and an explicit `team_id`). */
+async function schedulesOf(
+  tx: KobeTx,
+  teamId: string,
+  agentIds: readonly string[],
+): Promise<ReadonlyMap<string, readonly InventorySchedule[]>> {
+  if (agentIds.length === 0) return new Map();
+  const result = await tx.execute<ScheduleRow>(sql`
+    SELECT s.id, s.agent_id, s.user_id, u.name AS owner_name, s.active, s.paused_by, s.next_due_at
+      FROM schedules s JOIN users u ON u.id = s.user_id
+     WHERE s.team_id = ${teamId}
+       AND s.agent_id IN (${sql.join(
+         agentIds.map((id) => sql`${id}::uuid`),
+         sql`, `,
+       )})
+     ORDER BY s.created_at, s.id`);
+  const grouped = new Map<string, InventorySchedule[]>();
+  for (const r of result.rows) {
+    const item: InventorySchedule = {
+      scheduleId: r.id,
+      ownerUserId: r.user_id,
+      ownerName: r.owner_name,
+      status: r.active ? "active" : "paused",
+      pausedBy: r.paused_by,
+      nextDueAt: iso(r.next_due_at),
+    };
+    grouped.set(r.agent_id, [...(grouped.get(r.agent_id) ?? []), item]);
+  }
+  return grouped;
+}
+
+/** An install-wide agent this team's threads or schedules use (the only ones a team may suspend). */
 async function usedInstallAgent(
   tx: KobeTx,
   teamId: string,
@@ -213,9 +278,7 @@ async function usedInstallAgent(
 ): Promise<{ slug: string; scope: "personal" | "gallery" } | null> {
   const result = await tx.execute<{ slug: string; scope: "personal" | "gallery" }>(sql`
     SELECT i.slug, i.scope::text AS scope FROM install_agents i
-     WHERE i.id = ${id}::uuid AND EXISTS (
-       SELECT 1 FROM threads t WHERE t.team_id = ${teamId} AND t.install_agent_id = i.id
-         AND t.deleted_at IS NULL AND NOT t.is_test)`);
+     WHERE i.id = ${id}::uuid AND i.id IN (${usedInstallAgentIds(teamId)})`);
   return result.rows[0] ?? null;
 }
 

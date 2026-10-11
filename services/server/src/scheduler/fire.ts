@@ -1,4 +1,4 @@
-import { and, eq, events, schedules, sql, type KobeTx } from "@kobe/db";
+import { and, desc, eq, events, inArray, schedules, sql, type KobeTx } from "@kobe/db";
 import type { ScheduleRecurrence } from "@kobe/protocol";
 import { resolveAgentPin } from "../agents/versions.js";
 import { principalActive } from "../runs/store.js";
@@ -55,7 +55,34 @@ async function leaseRow(tx: KobeTx, due: DueSchedule) {
   return row;
 }
 
-/** Records the skipped occurrences and moves the schedule on (no run is created). */
+/**
+ * The schedule's latest fire or skip event. `created_at` ties inside one fire transaction (a
+ * `collapsed` skip and its fire): the later `due_at`, the fire, wins.
+ */
+async function latestEvent(
+  tx: KobeTx,
+  due: DueSchedule,
+): Promise<{ kind: string; reason: string | null } | undefined> {
+  const [last] = await tx
+    .select({ kind: events.kind, reason: sql<string | null>`${events.ref}->>'reason'` })
+    .from(events)
+    .where(
+      and(
+        eq(events.teamId, due.teamId),
+        inArray(events.kind, ["schedule.fire", "schedule.skip"]),
+        sql`${events.ref}->>'schedule_id' = ${due.id}`,
+      ),
+    )
+    .orderBy(desc(events.createdAt), sql`${events.dueAt} DESC NULLS LAST`)
+    .limit(1);
+  return last;
+}
+
+/**
+ * Moves the schedule on (no run is created) and records the skip, once per streak: when the
+ * schedule's latest event is already a skip for the same reason, nothing is added (a suspended
+ * agent's 15-minute schedule would otherwise write ~96 rows a day, forever; KOBE-180 review).
+ */
 export async function recordSkip(
   tx: KobeTx,
   due: DueSchedule,
@@ -67,6 +94,8 @@ export async function recordSkip(
     .update(schedules)
     .set({ nextDueAt: plan.next })
     .where(and(eq(schedules.teamId, due.teamId), eq(schedules.id, due.id)));
+  const last = await latestEvent(tx, due);
+  if (last?.kind === "schedule.skip" && last.reason === reason) return;
   await tx.insert(events).values({
     teamId: due.teamId,
     kind: "schedule.skip",

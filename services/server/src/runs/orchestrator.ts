@@ -34,6 +34,7 @@ import type { SandboxRouter, SandboxTarget } from "../sandbox-wire/types.js";
 import { viewerProjectIds } from "../threads/references.js";
 import { findThread, isLockTimeout, type Viewer } from "../threads/repository.js";
 import type { AttachmentStager, StagedFile } from "../uploads/attach.js";
+import { cancelScheduledRuns, type ScheduledCancelReason } from "./cancel-scheduled.js";
 import { RunError } from "./errors.js";
 import {
   budgetStoppedEvent,
@@ -77,7 +78,7 @@ import {
   type RunRow,
 } from "./store.js";
 import { lockOwnedThread, ownedRun } from "./access.js";
-import { RunDispatcher } from "./dispatch.js";
+import { RunDispatcher, type StopTarget } from "./dispatch.js";
 import { sweepRuns, type RunSweepResult } from "./sweeper.js";
 
 /** Timings and limits (tests shorten them). */
@@ -149,6 +150,12 @@ export interface ServerRunOrchestrator extends RunOrchestrator {
   queuePaused(actor: ActorContext, threadId: string): Promise<boolean>;
   /** KOBE-24 `RunLifecycleHooks.onRunEnded`: the wire ended a run; advance its thread's queue. */
   onRunEnded(event: { teamId: string; runId: string; threadId: string }): Promise<void>;
+  /** KOBE-180: the system cancels a deactivated or removed owner's in-flight scheduled runs. */
+  cancelScheduledRuns(
+    teamId: string,
+    userId: string,
+    reason: ScheduledCancelReason,
+  ): Promise<readonly string[]>;
   /** Refuse new runs while the isolation runtime is missing (D4); set by index.ts. */
   useIsolation(probe: IsolationProbe): void;
   /** Wire message attachments (KOBE-144); without it `file_ids` are refused `attachments_unavailable`. */
@@ -670,6 +677,22 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       throw new Error(`budget stop: ${failures} run(s) could not be stopped; call again`);
     }
     return affected;
+  }
+
+  cancelScheduledRuns(
+    teamId: string,
+    userId: string,
+    reason: ScheduledCancelReason,
+  ): Promise<readonly string[]> {
+    const ctx = {
+      db: this.#db,
+      withRetry: <T>(fn: () => Promise<T>) => this.#withRetry(fn),
+      emit: (team: string, transitions: readonly AppliedTransition[]) =>
+        this.#emit(team, transitions),
+      stopThenAdvance: (target: StopTarget) => this.#track(this.#dispatch.stopThenAdvance(target)),
+      log: this.#log,
+    };
+    return cancelScheduledRuns(ctx, teamId, userId, reason);
   }
 
   async markSandboxLost(teamId: string, sandboxId: string): Promise<readonly string[]> {
