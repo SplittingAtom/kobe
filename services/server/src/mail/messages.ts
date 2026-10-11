@@ -70,3 +70,49 @@ export function passwordResetMessage(input: {
     ].join("\n"),
   };
 }
+
+/** What a scheduled run's end email says it was (KOBE-179). */
+export type ScheduledRunOutcome = "succeeded" | "failed" | "interrupted" | "skipped_actions";
+
+const OUTCOME_SUBJECT: Readonly<Record<ScheduledRunOutcome, string>> = {
+  succeeded: "succeeded",
+  failed: "failed",
+  interrupted: "was interrupted",
+  skipped_actions: "finished with skipped actions",
+};
+
+/**
+ * A scheduled run ended (spec D32, KOBE-179). Metadata only: the outcome, the team, when the
+ * schedule runs, the skipped-action count and links. Never the prompt, the thread title or any
+ * output; the thread holds the content.
+ */
+export function scheduledRunMessage(input: {
+  readonly to: string;
+  readonly outcome: ScheduledRunOutcome;
+  readonly teamName: string;
+  /** e.g. "daily at 09:00 (Europe/Berlin)"; null when the schedule is gone. */
+  readonly when: string | null;
+  readonly skippedCount: number | null;
+  readonly threadLink: string;
+  readonly schedulesLink: string;
+}): MailMessage {
+  const team = oneLine(input.teamName);
+  const when = input.when === null ? "" : ` (${oneLine(input.when)})`;
+  const outcome = OUTCOME_SUBJECT[input.outcome];
+  const skipped = input.skippedCount ?? 0;
+  return {
+    to: input.to,
+    subject: `Your scheduled run ${outcome} in the ${team} team`,
+    text: [
+      `Your scheduled run${when} in the ${team} team on Kobe ${outcome}.`,
+      ...(skipped > 0
+        ? [
+            `${skipped === 1 ? "1 tool call was" : `${skipped} tool calls were`} skipped: scheduled runs do not wait for approval.`,
+          ]
+        : []),
+      "",
+      `Open the thread: ${input.threadLink}`,
+      `Manage your schedules: ${input.schedulesLink}`,
+    ].join("\n"),
+  };
+}

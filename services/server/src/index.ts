@@ -19,6 +19,7 @@ import { EgressBlockedRelay } from "./egress/blocked-relay.js";
 import { loadEgressHeaderSecrets } from "./egress/config.js";
 import { resealTeamHeaders } from "./egress/header-store.js";
 import { EgressRequestSweeper } from "./egress/request-notify.js";
+import { NotificationEmailSweeper, deliverNotificationEmails } from "./notifications/email.js";
 import { EvalRunner } from "./agents/eval/service.js";
 import { createIsolationGate } from "./isolation/gate.js";
 import { listRuntimeClasses } from "./isolation/kubernetes.js";
@@ -245,6 +246,10 @@ egressRelay?.start();
 const egressRequestSweeper =
   deps && config.process === "server" ? new EgressRequestSweeper(deps) : undefined;
 egressRequestSweeper?.start();
+// Scheduled-run notification emails (KOBE-179): retries and anything a crashed replica left queued.
+const notificationEmailSweeper =
+  deps && config.process === "server" ? new NotificationEmailSweeper(deps) : undefined;
+notificationEmailSweeper?.start();
 // Header values sealed with a previous header secret are re-sealed with the current one (rotation).
 if (deps?.egressHeaders && config.process === "server") {
   const box = deps.egressHeaders;
@@ -538,12 +543,13 @@ const schedulerRunner =
       })
     : undefined;
 schedulerRunner?.start(config.scheduler.tickSeconds * 1000);
-// Where a scheduled run ends (KOBE-178 reports skipped actions, KOBE-179 notifies): subscribe with
-// onScheduledRunEnded(deps.runs, ...) in the process that should react. Nothing reacts yet.
+// A scheduled run ended (KOBE-174 hook): its notification and queued email were written with the
+// end (KOBE-179); send the email now rather than at the next sweep. Never throws.
 const stopRunHook = deps
-  ? onScheduledRunEnded(deps.runs, (t) =>
-      logger.debug({ run_id: t.run.run_id, status: t.to }, "scheduled run ended"),
-    )
+  ? onScheduledRunEnded(deps.runs, (t) => {
+      logger.debug({ run_id: t.run.run_id, status: t.to }, "scheduled run ended");
+      void deliverNotificationEmails(deps, t.run.team_id);
+    })
   : undefined;
 
 // Evals whose driver died with a server (restart mid-eval) are finished or errored by any replica.
@@ -571,6 +577,7 @@ function shutdown(signal: string): void {
   deps?.auditAnchor.stop();
   void egressRelay?.close();
   egressRequestSweeper?.stop();
+  notificationEmailSweeper?.stop();
   void modelSync?.close();
   breakGlassSweeper?.stop();
   auditPiiSweeper?.stop();
