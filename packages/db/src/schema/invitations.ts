@@ -14,7 +14,7 @@ import { teamRole } from "./team-members.js";
 import { teams } from "./teams.js";
 
 /**
- * Install-wide (spec §5.4 †, D7). An install admin's invitation of one email address into the
+ * Site-wide (spec §5.4 †, D7). A site admin's invitation of one email address into the
  * install. Only a SHA-256 hash of the single-use token is stored; the token itself exists only in
  * the email. Accepted and revoked rows are kept (they are the record of who let whom in).
  */

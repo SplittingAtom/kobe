@@ -23,15 +23,15 @@ export interface PolicyRule {
   readonly expires_at?: string;
 }
 
-/** The rules that apply to one decision: install floor, the active team's, and the caller's own. */
+/** The rules that apply to one decision: site floor, the active team's, and the caller's own. */
 export interface PolicyRuleSet {
-  readonly install: readonly PolicyRule[];
+  readonly site: readonly PolicyRule[];
   readonly team: readonly PolicyRule[];
   /** The acting user's remember-rules in the active team. */
   readonly user: readonly PolicyRule[];
 }
 
-export const EMPTY_RULE_SET: PolicyRuleSet = { install: [], team: [], user: [] };
+export const EMPTY_RULE_SET: PolicyRuleSet = { site: [], team: [], user: [] };
 
 function biasOf(effect: RuleEffect): MatchBias {
   return effect === "allow" ? "loosen" : "restrict";

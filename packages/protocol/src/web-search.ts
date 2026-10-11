@@ -8,8 +8,8 @@ import { idSchema } from "./common.js";
  * The server performs the search. Sequence: `web_search` -> kobe-policy `policy.check` (a read
  * tool, so the engine decides as for any tool) -> kobe-tools `{op:"web_search"}` on fd 4 -> frame
  * `web_search.query` -> the server checks capability, lease and the allowed input hash (as
- * artifacts), then resolves availability (install provider enabled AND the team opted in), opens
- * the install's sealed key, calls the provider and answers `web_search.result`. The key never
+ * artifacts), then resolves availability (site provider enabled AND the team opted in), opens
+ * the site's sealed key, calls the provider and answers `web_search.result`. The key never
  * leaves the server: the sandbox sees the query it sent and the citations that come back.
  *
  * Unavailable is an answer, not an error: `available: false` with a `reason` and a `message` the

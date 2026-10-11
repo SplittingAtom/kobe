@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AuthVariables } from "../auth/session.js";
-import { requireInstallPermission } from "../authz/middleware.js";
+import { requireSitePermission } from "../authz/middleware.js";
 import type { IsolationGate, IsolationStatus } from "../isolation/gate.js";
 
 const DOCS = "docs/install.md#isolation";
@@ -36,15 +36,13 @@ function toBody(status: IsolationStatus) {
 }
 
 /**
- * Isolation status for the install admin console (spec D4: "the admin console shows the fix").
- * Install Owner/Admin only: the message names cluster details. POST /check re-verifies now.
+ * Isolation status for the site admin console (spec D4: "the admin console shows the fix").
+ * Site Owner/Admin only: the message names cluster details. POST /check re-verifies now.
  */
-export function installIsolationRoutes(
-  isolation: IsolationGate,
-): Hono<{ Variables: AuthVariables }> {
+export function siteIsolationRoutes(isolation: IsolationGate): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
 
-  app.use(requireInstallPermission("install.settings.manage"));
+  app.use(requireSitePermission("site.settings.manage"));
 
   app.get("/", (c) => c.json(toBody(isolation.status())));
   app.post("/check", async (c) => c.json(toBody(await isolation.check())));

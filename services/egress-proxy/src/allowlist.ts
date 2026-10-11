@@ -1,7 +1,7 @@
 import { findMatchingPattern } from "@kobe/db";
 
 /**
- * Per-team egress allowlists (spec D6, D28): effective(team) = team enablement ∩ install ceiling,
+ * Per-team egress allowlists (spec D6, D28): effective(team) = team enablement ∩ site ceiling,
  * read from Postgres and cached. Change hints (LISTEN/NOTIFY, see change-listener.ts) invalidate
  * entries; a TTL bounds staleness anyway, and while the listener is down entries live only
  * `degradedTtlMs`. Generation counters make sure a load that started before an invalidation never

@@ -1400,16 +1400,16 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
     " "$@" 2>&1
   }
   setup_models=$(as_owner \
-    "POST /v1/install/models/providers {\"kind\":\"openai\",\"name\":\"Fake OpenAI\",\"api_key\":\"e2e-provider-key-openai\",\"base_url\":\"$LLM\",\"allow_private_network\":true}" \
-    "POST /v1/install/models/providers {\"kind\":\"anthropic\",\"name\":\"Fake Anthropic\",\"api_key\":\"e2e-provider-key-anthropic\",\"base_url\":\"$LLM\",\"allow_private_network\":true}" \
-    "POST /v1/install/models/providers {\"kind\":\"gemini\",\"name\":\"Fake Gemini\",\"api_key\":\"e2e-provider-key-gemini\",\"base_url\":\"$LLM/v1beta\",\"allow_private_network\":true}" \
-    "POST /v1/install/models/providers {\"kind\":\"ollama\",\"name\":\"Fake Ollama\",\"base_url\":\"$LLM\",\"allow_private_network\":true}" \
-    "POST /v1/install/models/providers {\"kind\":\"openai_compatible\",\"id\":\"vllm\",\"name\":\"Fake vLLM\",\"base_url\":\"$LLM\",\"allow_private_network\":true}" \
-    "POST /v1/install/models/catalog {\"alias\":\"fast\",\"provider_id\":\"openai\",\"model\":\"gpt-fake\"}" \
-    "POST /v1/install/models/catalog {\"alias\":\"smart\",\"provider_id\":\"anthropic\",\"model\":\"claude-fake\"}" \
-    "POST /v1/install/models/catalog {\"alias\":\"gem\",\"provider_id\":\"gemini\",\"model\":\"gemini-fake\"}" \
-    "POST /v1/install/models/catalog {\"alias\":\"local\",\"provider_id\":\"ollama\",\"model\":\"llama-fake\"}" \
-    "POST /v1/install/models/catalog {\"alias\":\"qwen\",\"provider_id\":\"vllm\",\"model\":\"qwen-fake\"}" \
+    "POST /v1/site/models/providers {\"kind\":\"openai\",\"name\":\"Fake OpenAI\",\"api_key\":\"e2e-provider-key-openai\",\"base_url\":\"$LLM\",\"allow_private_network\":true}" \
+    "POST /v1/site/models/providers {\"kind\":\"anthropic\",\"name\":\"Fake Anthropic\",\"api_key\":\"e2e-provider-key-anthropic\",\"base_url\":\"$LLM\",\"allow_private_network\":true}" \
+    "POST /v1/site/models/providers {\"kind\":\"gemini\",\"name\":\"Fake Gemini\",\"api_key\":\"e2e-provider-key-gemini\",\"base_url\":\"$LLM/v1beta\",\"allow_private_network\":true}" \
+    "POST /v1/site/models/providers {\"kind\":\"ollama\",\"name\":\"Fake Ollama\",\"base_url\":\"$LLM\",\"allow_private_network\":true}" \
+    "POST /v1/site/models/providers {\"kind\":\"openai_compatible\",\"id\":\"vllm\",\"name\":\"Fake vLLM\",\"base_url\":\"$LLM\",\"allow_private_network\":true}" \
+    "POST /v1/site/models/catalog {\"alias\":\"fast\",\"provider_id\":\"openai\",\"model\":\"gpt-fake\"}" \
+    "POST /v1/site/models/catalog {\"alias\":\"smart\",\"provider_id\":\"anthropic\",\"model\":\"claude-fake\"}" \
+    "POST /v1/site/models/catalog {\"alias\":\"gem\",\"provider_id\":\"gemini\",\"model\":\"gemini-fake\"}" \
+    "POST /v1/site/models/catalog {\"alias\":\"local\",\"provider_id\":\"ollama\",\"model\":\"llama-fake\"}" \
+    "POST /v1/site/models/catalog {\"alias\":\"qwen\",\"provider_id\":\"vllm\",\"model\":\"qwen-fake\"}" \
     "PUT /v1/team/models/fast {\"enabled\":true,\"is_default\":true}" \
     "PUT /v1/team/models/smart {\"enabled\":true}" \
     "PUT /v1/team/models/gem {\"enabled\":true}" \
@@ -1429,13 +1429,13 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
 
   # KOBE-44: the catalog's model listing asks the real Bifrost to call a provider with its key. A
   # provider on a private address WITHOUT allow_private_network must not be reached that way.
-  priv_add=$(as_owner "POST /v1/install/models/providers {\"kind\":\"openai_compatible\",\"id\":\"e2epriv\",\"name\":\"Private, not allowed\",\"api_key\":\"e2e-private-key\",\"base_url\":\"$LLM\",\"allow_private_network\":false}")
+  priv_add=$(as_owner "POST /v1/site/models/providers {\"kind\":\"openai_compatible\",\"id\":\"e2epriv\",\"name\":\"Private, not allowed\",\"api_key\":\"e2e-private-key\",\"base_url\":\"$LLM\",\"allow_private_network\":false}")
   expect "a keyed provider on a private address is added with private network off" '^201 ' "$priv_add"
   # Wait until Bifrost has the provider (the listing answers 200, not 409 provider_not_synced).
-  priv_listed() { as_owner "GET /v1/install/models/providers/e2epriv/models" | head -1; }
+  priv_listed() { as_owner "GET /v1/site/models/providers/e2epriv/models" | head -1; }
   priv_ready=$(wait_for 45 '^200 ' priv_listed)
   printf '     private provider in the gateway: %s | %s\n' "$(printf '%s' "$priv_ready" | cut -c1-120)" "$(gateway_state)"
-  priv_refresh=$(as_owner "POST /v1/install/models/providers/e2epriv/models/refresh")
+  priv_refresh=$(as_owner "POST /v1/site/models/providers/e2epriv/models/refresh")
   printf '     private refresh: %s\n' "$(printf '%s' "$priv_refresh" | cut -c1-200)"
   # Bifrost v2.2.5 refuses such a provider when the sync pushes it (gateway error bifrost_rejected,
   # observed in CI), so it never gets as far as a list-models call; a Bifrost that accepted it must
@@ -1452,7 +1452,7 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
   else fail "Bifrost never sent that provider's key to the private address"; fi
   contains "the refresh is audited without the key" '^1$' \
     "$(psql_kobe "SELECT count(*) FROM audit_log WHERE action = 'models.provider.models_refreshed' AND target->>'providerId' = 'e2epriv' AND target::text NOT LIKE '%e2e-private-key%'")"
-  as_owner "DELETE /v1/install/models/providers/e2epriv" >/dev/null
+  as_owner "DELETE /v1/site/models/providers/e2epriv" >/dev/null
   contains "the gateway is in sync again once that provider is removed" '^in_sync=true error=-$' \
     "$(wait_for 60 '^in_sync=true' gateway_state)"
 
@@ -1805,7 +1805,7 @@ SH
     # $100 at these prices): a request whose input exceeds the budget is refused outright
     # (KOBE-259 budget_below_call).
     budget_setup=$(as_owner \
-      "PATCH /v1/install/models/catalog/fast {\"input_usd_per_mtok\":10000,\"output_usd_per_mtok\":10000}" \
+      "PATCH /v1/site/models/catalog/fast {\"input_usd_per_mtok\":10000,\"output_usd_per_mtok\":10000}" \
       "PUT /v1/team/budgets/team {\"monthly_usd\":1000}")
     expect "the catalog model is priced and the team budget set" '^200 ' "$budget_setup"
     budget_out=$(chat_run "kobe-tool-step budget-$RANDOM" 300000)
@@ -1828,7 +1828,7 @@ SH
       "$(chat_run "refused-$RANDOM" 60000)"
     restore=$(as_owner \
       "PUT /v1/team/budgets/team {\"monthly_usd\":null}" \
-      "PATCH /v1/install/models/catalog/fast {\"input_usd_per_mtok\":null,\"output_usd_per_mtok\":null}")
+      "PATCH /v1/site/models/catalog/fast {\"input_usd_per_mtok\":null,\"output_usd_per_mtok\":null}")
     expect "the budget and prices are removed again" '^200 ' "$restore"
 
     # KOBE-89, KOBE-254: the one gallery agent, Kobe, completes a short sample task per built-in

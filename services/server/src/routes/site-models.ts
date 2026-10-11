@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import type { z } from "zod";
 import type { AuthVariables } from "../auth/session.js";
-import { requireInstallPermission } from "../authz/middleware.js";
+import { requireSitePermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import {
   addCatalogEntry,
@@ -108,14 +108,14 @@ const aliasNotFound = (c: Context) =>
   err(c, 404, "model_not_found", "That model is not in the catalog.");
 
 /**
- * Install model administration (`/v1/install/models`, spec D6, D8, D30): providers and their API
- * keys (write-only), and the model catalog. Owner/Admins only (`install.models.manage`). Changes
+ * Site model administration (`/v1/site/models`, spec D6, D8, D30): providers and their API
+ * keys (write-only), and the model catalog. Owner/Admins only (`site.models.manage`). Changes
  * reach Bifrost through the gateway sync; `gateway` reports whether it has caught up.
  */
-export function installModelsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
+export function siteModelsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
   const db = deps.database.db;
-  app.use(requireInstallPermission("install.models.manage"));
+  app.use(requireSitePermission("site.models.manage"));
 
   app.get("/", async (c) => {
     const [providers, catalog, gateway] = await Promise.all([

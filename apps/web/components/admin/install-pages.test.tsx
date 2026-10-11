@@ -12,16 +12,11 @@ import { TeamsPage } from "./install/teams-page";
 import { UsersPage } from "./install/users-page";
 import { ME, renderInstall, stubApi, summary } from "./testing";
 
-const user = (
-  id: string,
-  name: string,
-  installRole: string,
-  deactivatedAt: string | null = null,
-) => ({
+const user = (id: string, name: string, siteRole: string, deactivatedAt: string | null = null) => ({
   id,
   name,
   email: `${id}@x.io`,
-  installRole,
+  siteRole,
   twoFactorEnabled: false,
   deactivatedAt,
   createdAt: "2026-10-01T10:00:00.000Z",
@@ -53,10 +48,10 @@ afterEach(() => {
 
 describe("Users", () => {
   it("lists users and offers only the deactivations the server allows an Admin", async () => {
-    const calls = stubApi({ "GET /v1/install/users": [200, USERS] });
+    const calls = stubApi({ "GET /v1/site/users": [200, USERS] });
     renderInstall(<UsersPage />, "admin");
     await screen.findByRole("table");
-    expect(summary(calls)).toEqual(["GET /v1/install/users"]);
+    expect(summary(calls)).toEqual(["GET /v1/site/users"]);
     expect(screen.getByRole("button", { name: "Deactivate Bob" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Reactivate Gus" })).toBeTruthy();
     // Not yourself, not the Owner, and (as an Admin) not another Admin.
@@ -67,7 +62,7 @@ describe("Users", () => {
 
   it("lets the Owner act on Admins", async () => {
     stubApi({
-      "GET /v1/install/users": [
+      "GET /v1/site/users": [
         200,
         { users: [user(ME.id, ME.name, "owner"), user("u-admin", "Abe", "admin")] },
       ],
@@ -78,8 +73,8 @@ describe("Users", () => {
 
   it("deactivates, reports orphaned teams and failed steps, and reloads", async () => {
     const calls = stubApi({
-      "GET /v1/install/users": [200, USERS],
-      "POST /v1/install/users/u-bob/deactivate": [
+      "GET /v1/site/users": [200, USERS],
+      "POST /v1/site/users/u-bob/deactivate": [
         200,
         {
           user_id: "u-bob",
@@ -96,9 +91,9 @@ describe("Users", () => {
     expect(status.textContent).toMatch(/sandboxes/);
     await waitFor(() =>
       expect(summary(calls)).toEqual([
-        "GET /v1/install/users",
-        "POST /v1/install/users/u-bob/deactivate",
-        "GET /v1/install/users",
+        "GET /v1/site/users",
+        "POST /v1/site/users/u-bob/deactivate",
+        "GET /v1/site/users",
       ]),
     );
   });
@@ -108,14 +103,14 @@ describe("Users", () => {
       "confirm",
       vi.fn(() => false),
     );
-    const calls = stubApi({ "GET /v1/install/users": [200, USERS] });
+    const calls = stubApi({ "GET /v1/site/users": [200, USERS] });
     renderInstall(<UsersPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Deactivate Bob" }));
-    expect(summary(calls)).toEqual(["GET /v1/install/users"]);
+    expect(summary(calls)).toEqual(["GET /v1/site/users"]);
   });
 
   it("renders a 403 from the API as the answer, whatever the UI showed", async () => {
-    stubApi({ "GET /v1/install/users": forbidden });
+    stubApi({ "GET /v1/site/users": forbidden });
     renderInstall(<UsersPage />);
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toMatch(/don't have permission/);
@@ -125,8 +120,8 @@ describe("Users", () => {
 
   it("shows the server's refusal of a change", async () => {
     stubApi({
-      "GET /v1/install/users": [200, USERS],
-      "POST /v1/install/users/u-bob/deactivate": [
+      "GET /v1/site/users": [200, USERS],
+      "POST /v1/site/users/u-bob/deactivate": [
         404,
         { code: "user_not_found", message: "No Kobe user with that id." },
       ],
@@ -153,8 +148,8 @@ describe("Invitations", () => {
 
   it("invites by email and warns when the email couldn't be sent", async () => {
     const calls = stubApi({
-      "GET /v1/install/invites": [200, INVITES],
-      "POST /v1/install/invites": [
+      "GET /v1/site/invites": [200, INVITES],
+      "POST /v1/site/invites": [
         201,
         { invitation: { id: "i-2", email: "b@x.io", expiresAt: "" }, emailSent: false },
       ],
@@ -170,26 +165,26 @@ describe("Invitations", () => {
 
   it("resends and revokes", async () => {
     const calls = stubApi({
-      "GET /v1/install/invites": [200, INVITES],
-      "POST /v1/install/invites/i-1/resend": [
+      "GET /v1/site/invites": [200, INVITES],
+      "POST /v1/site/invites/i-1/resend": [
         200,
         { invitation: { id: "i-1", email: "new@x.io", expiresAt: "" }, emailSent: true },
       ],
-      "DELETE /v1/install/invites/i-1": [204],
+      "DELETE /v1/site/invites/i-1": [204],
     });
     renderInstall(<InstallInvitesPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Resend to new@x.io" }));
     await screen.findByText("Invitation sent to new@x.io.");
     await userEvent.click(screen.getByRole("button", { name: "Revoke invitation to new@x.io" }));
     await screen.findByText("Revoked the invitation to new@x.io.");
-    expect(summary(calls)).toContain("POST /v1/install/invites/i-1/resend");
-    expect(summary(calls)).toContain("DELETE /v1/install/invites/i-1");
+    expect(summary(calls)).toContain("POST /v1/site/invites/i-1/resend");
+    expect(summary(calls)).toContain("DELETE /v1/site/invites/i-1");
   });
 
   it("shows user_exists from the server", async () => {
     stubApi({
-      "GET /v1/install/invites": [200, { invitations: [] }],
-      "POST /v1/install/invites": [
+      "GET /v1/site/invites": [200, { invitations: [] }],
+      "POST /v1/site/invites": [
         409,
         { code: "user_exists", message: "That address already has a Kobe account." },
       ],
@@ -211,7 +206,7 @@ describe("Install roles", () => {
   };
 
   it("is read-only for Admins", async () => {
-    stubApi({ "GET /v1/install/roles": [200, ROLES], "GET /v1/install/users": [200, USERS] });
+    stubApi({ "GET /v1/site/roles": [200, ROLES], "GET /v1/site/users": [200, USERS] });
     renderInstall(<RolesPage />, "admin");
     await screen.findByRole("table");
     expect(screen.getByText(/Only the Owner grants or revokes Admin/)).toBeTruthy();
@@ -221,10 +216,10 @@ describe("Install roles", () => {
 
   it("lets the Owner grant and revoke Admin", async () => {
     const calls = stubApi({
-      "GET /v1/install/roles": [200, ROLES],
-      "GET /v1/install/users": [200, USERS],
-      "PUT /v1/install/roles/u-admin": [200, { userId: "u-admin", role: "user" }],
-      "PUT /v1/install/roles/u-bob": [200, { userId: "u-bob", role: "admin" }],
+      "GET /v1/site/roles": [200, ROLES],
+      "GET /v1/site/users": [200, USERS],
+      "PUT /v1/site/roles/u-admin": [200, { userId: "u-admin", role: "user" }],
+      "PUT /v1/site/roles/u-bob": [200, { userId: "u-bob", role: "admin" }],
     });
     renderInstall(<RolesPage />, "owner");
     await userEvent.click(await screen.findByRole("button", { name: "Revoke Admin from Abe" }));
@@ -240,8 +235,8 @@ describe("Install roles", () => {
     await screen.findByText("Bob is now an Admin.");
     const puts = calls.filter((c) => c.method === "PUT");
     expect(puts.map((c) => [c.url, JSON.parse(String(c.body))])).toEqual([
-      ["/v1/install/roles/u-admin", { role: "user" }],
-      ["/v1/install/roles/u-bob", { role: "admin" }],
+      ["/v1/site/roles/u-admin", { role: "user" }],
+      ["/v1/site/roles/u-bob", { role: "admin" }],
     ]);
   });
 });
@@ -253,9 +248,9 @@ describe("Teams", () => {
 
   it("creates a team with a suggested slug and its first team admin", async () => {
     const calls = stubApi({
-      "GET /v1/install/teams": [200, TEAMS],
-      "GET /v1/install/users": [200, USERS],
-      "POST /v1/install/teams": [
+      "GET /v1/site/teams": [200, TEAMS],
+      "GET /v1/site/users": [200, USERS],
+      "POST /v1/site/teams": [
         201,
         { team: { id: "t-2", slug: "marketing-sales", name: "Marketing & Sales" } },
       ],
@@ -279,13 +274,13 @@ describe("Teams", () => {
 
   it("shows slug_taken and reads a roster", async () => {
     const calls = stubApi({
-      "GET /v1/install/teams": [200, TEAMS],
-      "GET /v1/install/users": [200, USERS],
-      "POST /v1/install/teams": [
+      "GET /v1/site/teams": [200, TEAMS],
+      "GET /v1/site/users": [200, USERS],
+      "POST /v1/site/teams": [
         409,
         { code: "slug_taken", message: "Another team already uses that slug." },
       ],
-      "GET /v1/install/teams/t-1/members": [
+      "GET /v1/site/teams/t-1/members": [
         200,
         {
           members: [
@@ -303,14 +298,14 @@ describe("Teams", () => {
     await userEvent.click(screen.getByRole("button", { name: "Members of Finance" }));
     const roster = await screen.findByRole("list", { name: "Members of Finance" });
     expect(roster.textContent).toMatch(/Bob \(b@x\.io\) · Team admin/);
-    expect(summary(calls)).toContain("GET /v1/install/teams/t-1/members");
+    expect(summary(calls)).toContain("GET /v1/site/teams/t-1/members");
   });
 
   it("renames a team", async () => {
     const calls = stubApi({
-      "GET /v1/install/teams": [200, TEAMS],
-      "GET /v1/install/users": [200, USERS],
-      "PATCH /v1/install/teams/t-1": [
+      "GET /v1/site/teams": [200, TEAMS],
+      "GET /v1/site/users": [200, USERS],
+      "PATCH /v1/site/teams/t-1": [
         200,
         { team: { id: "t-1", slug: "fin", name: "Finance & Ops" } },
       ],
@@ -330,8 +325,8 @@ describe("Teams", () => {
 describe("Teams: keyboard flow of rename", () => {
   it("moves focus into the form and back, and Cancel discards the edit", async () => {
     stubApi({
-      "GET /v1/install/teams": [200, { teams: [{ id: "t-1", slug: "fin", name: "Finance" }] }],
-      "GET /v1/install/users": [200, USERS],
+      "GET /v1/site/teams": [200, { teams: [{ id: "t-1", slug: "fin", name: "Finance" }] }],
+      "GET /v1/site/users": [200, USERS],
     });
     renderInstall(<TeamsPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Rename Finance" }));
@@ -363,15 +358,15 @@ const WEB_SEARCH = {
 describe("Web search setting", () => {
   it("saves the provider and key, then shows only the masked hint", async () => {
     const calls = stubApi({
-      "GET /v1/install/settings": [200, { requireTwoFactor: false }],
-      "GET /v1/install/web-search": [
+      "GET /v1/site/settings": [200, { requireTwoFactor: false }],
+      "GET /v1/site/web-search": [
         [200, WEB_SEARCH],
         [
           200,
           { ...WEB_SEARCH, configured: true, provider: "brave", enabled: true, hint: "••••wxyz" },
         ],
       ],
-      "PUT /v1/install/web-search": [
+      "PUT /v1/site/web-search": [
         200,
         { ...WEB_SEARCH, configured: true, provider: "brave", enabled: true, hint: "••••wxyz" },
       ],
@@ -401,12 +396,12 @@ describe("Web search setting", () => {
       hint: "••••wxyz",
     };
     const calls = stubApi({
-      "GET /v1/install/settings": [200, { requireTwoFactor: false }],
-      "GET /v1/install/web-search": [
+      "GET /v1/site/settings": [200, { requireTwoFactor: false }],
+      "GET /v1/site/web-search": [
         [200, configured],
         [200, WEB_SEARCH],
       ],
-      "DELETE /v1/install/web-search": [204],
+      "DELETE /v1/site/web-search": [204],
     });
     renderInstall(<SettingsPage />, "admin");
     await userEvent.click(await screen.findByRole("button", { name: "Remove provider" }));
@@ -417,8 +412,8 @@ describe("Web search setting", () => {
 describe("Settings", () => {
   it("doesn't let an Admin turn required 2FA off", async () => {
     stubApi({
-      "GET /v1/install/settings": [200, { requireTwoFactor: true }],
-      "GET /v1/install/web-search": [200, WEB_SEARCH],
+      "GET /v1/site/settings": [200, { requireTwoFactor: true }],
+      "GET /v1/site/web-search": [200, WEB_SEARCH],
     });
     renderInstall(<SettingsPage />, "admin");
     const box = (await screen.findAllByRole("checkbox"))[0] as HTMLInputElement;
@@ -429,9 +424,9 @@ describe("Settings", () => {
 
   it("saves the setting", async () => {
     const calls = stubApi({
-      "GET /v1/install/settings": [200, { requireTwoFactor: false }],
-      "PUT /v1/install/settings": [200, { requireTwoFactor: true }],
-      "GET /v1/install/web-search": [200, WEB_SEARCH],
+      "GET /v1/site/settings": [200, { requireTwoFactor: false }],
+      "PUT /v1/site/settings": [200, { requireTwoFactor: true }],
+      "GET /v1/site/web-search": [200, WEB_SEARCH],
     });
     renderInstall(<SettingsPage />, "admin");
     await userEvent.click((await screen.findAllByRole("checkbox"))[0] as HTMLElement);
@@ -454,8 +449,8 @@ describe("Isolation", () => {
 
   it("shows the fix when the runtime is missing, and re-checks", async () => {
     const calls = stubApi({
-      "GET /v1/install/isolation": [200, MISSING],
-      "POST /v1/install/isolation/check": [
+      "GET /v1/site/isolation": [200, MISSING],
+      "POST /v1/site/isolation/check": [
         200,
         {
           state: "verified",
@@ -477,10 +472,7 @@ describe("Isolation", () => {
     await screen.findByText("Isolation verified: agents are enabled.");
     expect(screen.queryByRole("region", { name: /isolation runtime missing/ })).toBeNull();
     expect(screen.getByText("runsc")).toBeTruthy();
-    expect(summary(calls)).toEqual([
-      "GET /v1/install/isolation",
-      "POST /v1/install/isolation/check",
-    ]);
+    expect(summary(calls)).toEqual(["GET /v1/site/isolation", "POST /v1/site/isolation/check"]);
   });
 
   it("reports a server without the isolation route", async () => {
@@ -531,10 +523,10 @@ describe("Gallery agents", () => {
   };
 
   it("lists and exports, with no way to edit a gallery agent", async () => {
-    stubApi({ "GET /v1/install/gallery/agents": [200, AGENTS] });
+    stubApi({ "GET /v1/site/gallery/agents": [200, AGENTS] });
     renderInstall(<GalleryPage />);
     const exportLink = await screen.findByRole("link", { name: "Export Kobe" });
-    expect(exportLink.getAttribute("href")).toBe("/v1/install/gallery/agents/a-1/export");
+    expect(exportLink.getAttribute("href")).toBe("/v1/site/gallery/agents/a-1/export");
     expect(screen.queryByLabelText("Agent file (.md)")).toBeNull();
     expect(screen.queryByRole("button", { name: /Delete|Edit|Save/ })).toBeNull();
   });
@@ -542,10 +534,10 @@ describe("Gallery agents", () => {
   it("shows the published score and starts an eval in the chosen team", async () => {
     const published = { agents: [{ ...AGENTS.agents[0], currentVersion: 1 }] };
     const calls = stubApi({
-      "GET /v1/install/gallery/agents": [200, published],
-      "GET /v1/install/gallery/agents/scores": [200, SCORES],
+      "GET /v1/site/gallery/agents": [200, published],
+      "GET /v1/site/gallery/agents/scores": [200, SCORES],
       "GET /v1/me/teams": [200, MY_TEAMS],
-      "POST /v1/install/gallery/agents/a-1/eval": [202, { message: "Evaluating" }],
+      "POST /v1/site/gallery/agents/a-1/eval": [202, { message: "Evaluating" }],
     });
     renderInstall(<GalleryPage />);
     expect(await screen.findByText("60% attacks succeeded (blocked)")).toBeTruthy();
@@ -557,7 +549,7 @@ describe("Gallery agents", () => {
   });
 
   it("says when the gallery is empty", async () => {
-    stubApi({ "GET /v1/install/gallery/agents": [200, { agents: [] }] });
+    stubApi({ "GET /v1/site/gallery/agents": [200, { agents: [] }] });
     renderInstall(<GalleryPage />);
     await screen.findByText("The gallery is empty.");
   });

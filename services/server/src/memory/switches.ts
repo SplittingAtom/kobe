@@ -1,5 +1,5 @@
 import {
-  MEMORY_INSTALL_ENABLED_KEY,
+  MEMORY_SITE_ENABLED_KEY,
   eq,
   inArray,
   installSettings,
@@ -9,14 +9,14 @@ import {
 import type { MemoryScope } from "@kobe/protocol";
 
 /**
- * The memory switches (D24), in one place. Two levels (install admins, team admins), each with
+ * The memory switches (D24), in one place. Two levels (site admins, team admins), each with
  * `memory_enabled` and `project_memory_enabled` (default on). A scope is effective only when both
- * levels allow it; `project` also needs `memory_enabled`. The install level is two
+ * levels allow it; `project` also needs `memory_enabled`. The site level is two
  * `install_settings` keys (`false` = off, absent = on), the team level `team_memory_settings`
  * (no row = both on).
  */
 
-export const MEMORY_INSTALL_PROJECT_ENABLED_KEY = "memory.project_enabled";
+export const MEMORY_SITE_PROJECT_ENABLED_KEY = "memory.project_enabled";
 
 export interface SwitchPair {
   readonly memoryEnabled: boolean;
@@ -24,26 +24,23 @@ export interface SwitchPair {
 }
 
 export interface MemorySwitches {
-  readonly install: SwitchPair;
+  readonly site: SwitchPair;
   readonly team: SwitchPair;
   /** Which scopes work for this team now. */
   readonly effective: Readonly<Record<MemoryScope, boolean>>;
 }
 
-export async function readInstallSwitches(tx: KobeTx): Promise<SwitchPair> {
+export async function readSiteSwitches(tx: KobeTx): Promise<SwitchPair> {
   const rows = await tx
     .select({ key: installSettings.key, value: installSettings.value })
     .from(installSettings)
     .where(
-      inArray(installSettings.key, [
-        MEMORY_INSTALL_ENABLED_KEY,
-        MEMORY_INSTALL_PROJECT_ENABLED_KEY,
-      ]),
+      inArray(installSettings.key, [MEMORY_SITE_ENABLED_KEY, MEMORY_SITE_PROJECT_ENABLED_KEY]),
     );
   const off = (key: string) => rows.some((r) => r.key === key && r.value === "false");
   return {
-    memoryEnabled: !off(MEMORY_INSTALL_ENABLED_KEY),
-    projectMemoryEnabled: !off(MEMORY_INSTALL_PROJECT_ENABLED_KEY),
+    memoryEnabled: !off(MEMORY_SITE_ENABLED_KEY),
+    projectMemoryEnabled: !off(MEMORY_SITE_PROJECT_ENABLED_KEY),
   };
 }
 
@@ -59,15 +56,15 @@ export async function readTeamSwitches(tx: KobeTx, teamId: string): Promise<Swit
 }
 
 export async function readSwitches(tx: KobeTx, teamId: string): Promise<MemorySwitches> {
-  const install = await readInstallSwitches(tx);
+  const site = await readSiteSwitches(tx);
   const team = await readTeamSwitches(tx, teamId);
-  const user = install.memoryEnabled && team.memoryEnabled;
+  const user = site.memoryEnabled && team.memoryEnabled;
   return {
-    install,
+    site,
     team,
     effective: {
       user,
-      project: user && install.projectMemoryEnabled && team.projectMemoryEnabled,
+      project: user && site.projectMemoryEnabled && team.projectMemoryEnabled,
     },
   };
 }
@@ -102,18 +99,18 @@ export async function writeTeamSwitches(
   return next;
 }
 
-export async function writeInstallSwitches(
+export async function writeSiteSwitches(
   tx: KobeTx,
   change: Partial<SwitchPair>,
 ): Promise<SwitchPair> {
-  const current = await readInstallSwitches(tx);
+  const current = await readSiteSwitches(tx);
   const next: SwitchPair = {
     memoryEnabled: change.memoryEnabled ?? current.memoryEnabled,
     projectMemoryEnabled: change.projectMemoryEnabled ?? current.projectMemoryEnabled,
   };
   const entries = [
-    [MEMORY_INSTALL_ENABLED_KEY, next.memoryEnabled],
-    [MEMORY_INSTALL_PROJECT_ENABLED_KEY, next.projectMemoryEnabled],
+    [MEMORY_SITE_ENABLED_KEY, next.memoryEnabled],
+    [MEMORY_SITE_PROJECT_ENABLED_KEY, next.projectMemoryEnabled],
   ] as const;
   for (const [key, on] of entries) {
     const value = String(on);

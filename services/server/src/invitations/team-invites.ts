@@ -15,12 +15,12 @@ import {
   type TeamRole,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
-import { normalizeEmail } from "./install-invites.js";
+import { normalizeEmail } from "./site-invites.js";
 
 /** Team invitations stay open for 14 days (no secret involved: acceptance needs a signed-in user). */
 export const TEAM_INVITE_TTL_DAYS = 14;
 
-// Database clock for expiry, as for install invitations.
+// Database clock for expiry, as for site invitations.
 const teamInviteExpiry = sql`now() + make_interval(days => ${TEAM_INVITE_TTL_DAYS})`;
 
 export interface TeamInvite {

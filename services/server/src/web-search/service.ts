@@ -20,8 +20,8 @@ import { searchProvider } from "./search.js";
 import { webSearchContext } from "./store.js";
 
 /**
- * Runs a sandbox's `web_search` (KOBE-114). The server decides: it checks that the install offers
- * a provider and that this team opted in (KOBE-113), opens the install's sealed key, calls the
+ * Runs a sandbox's `web_search` (KOBE-114). The server decides: it checks that the site offers
+ * a provider and that this team opted in (KOBE-113), opens the site's sealed key, calls the
  * provider and returns citations. The key is never sent to a sandbox or the egress proxy.
  */
 export type WebSearchAnswer =
@@ -53,7 +53,7 @@ export const SEARCHES_PER_TEAM_PER_MINUTE = 30;
 
 export interface WebSearchServiceOptions {
   readonly db: KobeDb;
-  /** Without the install envelope key there is no readable provider key: unavailable. */
+  /** Without the site envelope key there is no readable provider key: unavailable. */
   readonly envelope: Envelope | undefined;
   readonly fetch?: typeof fetch;
   readonly now?: () => number;
@@ -87,14 +87,14 @@ export function createWebSearchService(options: WebSearchServiceOptions): WebSea
 
   return {
     async search(teamId, input, call) {
-      const [install] = await options.db
+      const [site] = await options.db
         .select({
           provider: webSearchSettings.provider,
           enabled: webSearchSettings.enabled,
           sealed: webSearchSettings.sealed,
         })
         .from(webSearchSettings);
-      if (!install?.enabled || !options.envelope) return unavailable("not_configured");
+      if (!site?.enabled || !options.envelope) return unavailable("not_configured");
       const [optIn] = await withTeam(options.db, teamId, (tx) =>
         tx.select().from(teamWebSearch).where(eq(teamWebSearch.teamId, teamId)),
       );
@@ -106,7 +106,7 @@ export function createWebSearchService(options: WebSearchServiceOptions): WebSea
           message: "Too many searches; wait a moment.",
         };
       }
-      const reserved = await reserveSearch(options.db, teamId, call, install.provider, maxPerRun);
+      const reserved = await reserveSearch(options.db, teamId, call, site.provider, maxPerRun);
       if (!reserved) {
         return {
           kind: "error",
@@ -116,14 +116,14 @@ export function createWebSearchService(options: WebSearchServiceOptions): WebSea
       }
       let key: string;
       try {
-        key = options.envelope.openString(install.sealed, webSearchContext);
+        key = options.envelope.openString(site.sealed, webSearchContext);
       } catch {
-        // A key that no longer opens (rotated install secret) is the admin's to fix.
+        // A key that no longer opens (rotated site secret) is the admin's to fix.
         return unavailable("not_configured");
       }
-      const outcome = await searchProvider(install.provider, key, input, options.fetch);
+      const outcome = await searchProvider(site.provider, key, input, options.fetch);
       if (!outcome.ok) return { kind: "error", code: outcome.code, message: outcome.message };
-      return { kind: "results", provider: install.provider, results: outcome.results };
+      return { kind: "results", provider: site.provider, results: outcome.results };
     },
   };
 }

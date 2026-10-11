@@ -15,7 +15,7 @@ import { RulesEditor } from "../policy-rules";
 import { useMutation, useResource } from "../use-resource";
 import styles from "../admin.module.css";
 
-/** The install policy floor (spec D6/D29; `/v1/install/policy`, KOBE-35). */
+/** The install policy floor (spec D6/D29; `/v1/site/policy`, KOBE-35). */
 export function PolicyFloorPage() {
   return (
     <>

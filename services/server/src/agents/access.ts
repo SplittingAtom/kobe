@@ -7,7 +7,7 @@ import { teamRoleAllows } from "../authz/permissions.js";
  */
 
 export type AgentScope = "personal" | "team" | "gallery";
-/** Scopes a team member can create into; gallery agents are created by install admins. */
+/** Scopes a team member can create into; gallery agents are created by site admins. */
 export type CreatableScope = Exclude<AgentScope, "gallery">;
 
 export interface AgentRef {
@@ -63,7 +63,7 @@ export function agentAccess(actor: AgentActor, agent: AgentRef): AgentAccess {
       return { see: true, readDefinition: true, edit: own, publish: own, setStatus: false };
     }
     case "gallery": {
-      // Install-wide, admin-curated and read-only to teams; teams fork (D19).
+      // Site-wide, admin-curated and read-only to teams; teams fork (D19).
       const use = teamRoleAllows(role, "team.agents.use");
       return { see: use, readDefinition: use, edit: false, publish: false, setStatus: false };
     }
@@ -85,7 +85,7 @@ export function canForkAgent(actor: AgentActor, source: AgentRef, target: Creata
 }
 
 /**
- * Install admins (install.gallery.manage) see the gallery but change nothing through the API:
+ * Site admins (site.gallery.manage) see the gallery but change nothing through the API:
  * gallery agents come from definitions in the repo, seeded at install and upgrade (KOBE-87).
  */
 export const GALLERY_ADMIN_ACCESS: AgentAccess = {

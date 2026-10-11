@@ -1,7 +1,7 @@
 /**
  * Who may watch a run's events: the people who may read its thread. That is the thread's owner
  * and, while it is shared (not in Trash), the members of its project (D23, read-only). Team admins
- * cannot read members' threads (D18) and install admins reach team content only through
+ * cannot read members' threads (D18) and site admins reach team content only through
  * break-glass (D10).
  */
 export interface ThreadVisibility {

@@ -10,12 +10,12 @@ import {
   type KobeTx,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
-import { activeInstallAdmins } from "../break-glass/store.js";
+import { activeSiteAdmins } from "../break-glass/store.js";
 import type { RequestHoldBody } from "./schemas.js";
 
 /**
  * Legal holds (spec D18, KOBE-17): request, two-person approval, denial or withdrawal, and a
- * release that needs a second install admin too (D10's rule; a single-admin install
+ * release that needs a second site admin too (D10's rule; a single-admin site
  * self-approves, flagged). Every change runs in one transaction with the hold row locked and its
  * audit event as the last write. The `legal_holds_guard` trigger enforces the same rules in
  * Postgres; the checks here exist to answer with clear errors. Purge jobs consult holds through
@@ -50,7 +50,7 @@ export type HoldResult = { ok: true; hold: HoldRow } | { ok: false; error: HoldE
 const LOCK_TIMEOUT = "30s";
 
 /**
- * Whether `by` may approve their own request on this hold: no other active install admin exists
+ * Whether `by` may approve their own request on this hold: no other active site admin exists
  * besides the held user (who can't approve), as the trigger decides (D10, flagged).
  */
 export async function mayApproveOwn(
@@ -58,7 +58,7 @@ export async function mayApproveOwn(
   by: string,
   hold: Pick<HoldRow, "userId">,
 ): Promise<boolean> {
-  return (await activeInstallAdmins(db, by)).every((a) => a.id === hold.userId);
+  return (await activeSiteAdmins(db, by)).every((a) => a.id === hold.userId);
 }
 
 export function scopeOf(hold: Pick<HoldRow, "userId">): HoldScope {
@@ -67,7 +67,7 @@ export function scopeOf(hold: Pick<HoldRow, "userId">): HoldScope {
 
 /**
  * The audit target of a hold: its id only. Not the held user, the team, the scope or the reason:
- * a held install admin who reads the install audit log must not learn of it (the hold row, behind
+ * a held site admin who reads the site audit log must not learn of it (the hold row, behind
  * the console, keeps everything).
  */
 function holdRef(hold: HoldRow) {
@@ -134,7 +134,7 @@ export async function requestHold(
   });
 }
 
-/** Places a pending hold: a second install admin, or the requester on a single-admin install. */
+/** Places a pending hold: a second site admin, or the requester on a single-admin site. */
 export function approveHold(db: KobeDb, by: string, id: string): Promise<HoldResult> {
   return changeHold(db, by, id, async (tx, current) => {
     if (current.status !== "pending") return { ok: false, error: "not_pending" };
@@ -150,7 +150,7 @@ export function approveHold(db: KobeDb, by: string, id: string): Promise<HoldRes
   });
 }
 
-/** Another install admin turns a pending hold down; the requester withdraws instead. */
+/** Another site admin turns a pending hold down; the requester withdraws instead. */
 export function denyHold(db: KobeDb, by: string, id: string): Promise<HoldResult> {
   return changeHold(db, by, id, async (tx, current) => {
     if (current.status !== "pending") return { ok: false, error: "not_pending" };
@@ -174,7 +174,7 @@ export function withdrawHold(db: KobeDb, by: string, id: string): Promise<HoldRe
   });
 }
 
-/** Asks to end an active hold; it stays in force until a second install admin approves. */
+/** Asks to end an active hold; it stays in force until a second site admin approves. */
 export function requestRelease(
   db: KobeDb,
   by: string,
@@ -220,7 +220,7 @@ const CANCELLED_RELEASE = {
   releaseReason: null,
 } as const;
 
-/** Another install admin turns the release down; the hold stays in force. */
+/** Another site admin turns the release down; the hold stays in force. */
 export function denyRelease(db: KobeDb, by: string, id: string): Promise<HoldResult> {
   return changeHold(db, by, id, async (tx, current) => {
     if (current.status !== "active") return { ok: false, error: "not_active" };
@@ -313,7 +313,7 @@ async function withDetails(db: KobeDb, rows: readonly HoldRow[]): Promise<HoldDe
 /** Holds about `viewerId` are left out: the held user never sees them. */
 const notAbout = (viewerId: string) => sql`${legalHolds.userId} IS DISTINCT FROM ${viewerId}::uuid`;
 
-/** Holds with their people and team, newest first (install view). */
+/** Holds with their people and team, newest first (site view). */
 export async function listHolds(db: KobeDb, viewerId: string, limit = 200): Promise<HoldDetail[]> {
   const rows = await db
     .select()

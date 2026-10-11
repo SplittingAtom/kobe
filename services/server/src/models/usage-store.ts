@@ -4,8 +4,8 @@ import { scanTeams, sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 /**
  * Usage dashboards and run details (KOBE-43, spec D30): aggregates of the `run_usage` ledger
  * (written by the model-gateway shim). Team views run inside the team's RLS transaction; the
- * install view visits every team with `scanTeams` (no RLS bypass) and adds them up. Only ids,
- * names and counts leave here: never thread titles or content (install admins cannot read team
+ * site view visits every team with `scanTeams` (no RLS bypass) and adds them up. Only ids,
+ * names and counts leave here: never thread titles or content (site admins cannot read team
  * content, D8; team admins do not see members' threads).
  */
 export type Bucket = "hour" | "day";
@@ -47,7 +47,7 @@ export interface ModelUsage extends UsageTotals {
 }
 
 export interface AgentUsage extends UsageTotals {
-  /** Null: chats with the install default agent (no agent pinned) or calls outside a run. */
+  /** Null: chats with the site default agent (no agent pinned) or calls outside a run. */
   readonly agent_id: string | null;
   readonly slug: string | null;
   readonly scope: "team" | "personal" | "gallery" | null;
@@ -68,7 +68,7 @@ export interface TeamUsageSummary extends UsageTotals {
   readonly name: string;
 }
 
-export interface InstallUsageReport extends TeamUsageReport {
+export interface SiteUsageReport extends TeamUsageReport {
   readonly by_team: readonly TeamUsageSummary[];
 }
 
@@ -154,7 +154,7 @@ async function teamReport(
   range: UsageRange,
   limit: number | null = BREAKDOWN_LIMIT,
 ): Promise<Omit<TeamUsageReport, "range">> {
-  // The install view merges teams first and limits after, so it reads every group.
+  // The site view merges teams first and limits after, so it reads every group.
   const LIMIT = limit === null ? sql`` : sql`LIMIT ${limit}`;
   const where = sql`u.team_id = ${teamId}::uuid AND u.at >= ${range.from.toISOString()}::timestamptz
     AND u.at < ${range.to.toISOString()}::timestamptz`;
@@ -236,11 +236,11 @@ function mergeBy<T extends UsageTotals>(
 }
 
 /**
- * The install's usage: every team's report (one RLS transaction visiting each team), summed.
+ * The site's usage: every team's report (one RLS transaction visiting each team), summed.
  * Per-agent rows are summed by agent id; a user in several teams is one row.
  */
-export async function installUsage(db: KobeDb, range: UsageRange): Promise<InstallUsageReport> {
-  const teams = await scanTeams(db, "installUsage", async (tx, team) => ({
+export async function siteUsage(db: KobeDb, range: UsageRange): Promise<SiteUsageReport> {
+  const teams = await scanTeams(db, "siteUsage", async (tx, team) => ({
     team,
     report: await teamReport(tx, team.id, range, null),
   }));

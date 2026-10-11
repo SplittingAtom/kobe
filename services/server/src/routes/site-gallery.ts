@@ -16,25 +16,25 @@ import { agentIdSchema } from "../agents/schemas.js";
 import { findAgent, listAgents, type AgentLocation, type AgentRecord } from "../agents/store.js";
 import type { AuthVariables } from "../auth/session.js";
 import { recordAuditAfter } from "../audit/record.js";
-import { requireInstallPermission } from "../authz/middleware.js";
+import { requireSitePermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 
 const GALLERY: AgentLocation = { scope: "gallery" };
 const bodySchema = z.object({ teamId: z.uuid() }).strict();
 
 /**
- * Gallery agents for install admins (spec D6, D19, D21; §6.1 `/v1/install/gallery`): a read-only
+ * Gallery agents for site admins (spec D6, D19, D21; §6.1 `/v1/site/gallery`): a read-only
  * view. Gallery agents are seeded from definitions in the repo at install and upgrade
  * (`gallery/seed.ts`, KOBE-87), so every write method answers 405 `gallery_read_only`, whoever
  * asks; teams use gallery agents through `/v1/agents` and fork them to change them.
  */
-export function installGalleryRoutes(
+export function siteGalleryRoutes(
   deps: ServerDeps,
   evalOptions: { readonly runner?: EvalRunner } = {},
 ): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
   const db = deps.database.db;
-  app.use(requireInstallPermission("install.gallery.manage"));
+  app.use(requireSitePermission("site.gallery.manage"));
 
   async function galleryAgent(c: Context): Promise<AgentRecord | null> {
     const id = agentIdSchema.safeParse(c.req.param("id"));

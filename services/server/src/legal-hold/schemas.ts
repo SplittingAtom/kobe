@@ -8,7 +8,7 @@ const reason = z
   .min(10, "Explain why in at least 10 characters.")
   .max(LEGAL_HOLD_REASON_MAX);
 
-/** `POST /v1/install/legal-hold` (spec D18): one team, optionally one user in it. */
+/** `POST /v1/site/legal-hold` (spec D18): one team, optionally one user in it. */
 export const requestHoldSchema = z.strictObject({
   teamId: id,
   userId: id.optional(),
@@ -16,7 +16,7 @@ export const requestHoldSchema = z.strictObject({
 });
 export type RequestHoldBody = z.infer<typeof requestHoldSchema>;
 
-/** `POST /v1/install/legal-hold/{id}/release`: why the hold can end. */
+/** `POST /v1/site/legal-hold/{id}/release`: why the hold can end. */
 export const requestReleaseSchema = z.strictObject({ reason });
 
 export const idParamSchema = id;

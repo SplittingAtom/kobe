@@ -147,7 +147,7 @@ describe("agent versions are immutable (D19)", () => {
     expect(await sqlState(del)).toBe("55000");
   });
 
-  it("gives the app role no UPDATE or DELETE on install versions, and the trigger stops the owner", async () => {
+  it("gives the app role no UPDATE or DELETE on site versions, and the trigger stops the owner", async () => {
     const agentId = await publishedPersonalAgent();
     const where = eq(installAgentVersions.agentId, agentId);
     expect(
@@ -258,7 +258,7 @@ describe("threads pin a published version", () => {
     );
   });
 
-  it("confines personal pins to the agent's owner and install pins to their scope (M2)", async () => {
+  it("confines personal pins to the agent's owner and site pins to their scope (M2)", async () => {
     const personal = await publishedPersonalAgent();
     expect(
       await sqlState(

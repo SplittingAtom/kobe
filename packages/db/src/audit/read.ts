@@ -1,24 +1,51 @@
-import { and, asc, desc, eq, gt, gte, lt, lte, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, lt, lte, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import type { KobeDb, KobeTx } from "../client.js";
 import { auditLog, type AuditActorKind } from "../schema/audit.js";
 import { users } from "../schema/auth.js";
-import { AUDIT_ACTIONS, AUDIT_CATEGORIES, type AuditAction } from "./events.js";
+import {
+  auditActionNames,
+  auditCategoryNames,
+  currentAuditAction,
+  currentAuditCategory,
+  type AuditAction,
+} from "./events.js";
 
 export const AUDIT_PAGE_DEFAULT = 50;
 export const AUDIT_PAGE_MAX = 200;
 
+/** A current or historical (pre-KOBE-255 `install.*`) action name, read as the current one. */
+const actionFilter = z.string().transform((value, ctx): AuditAction => {
+  const action = currentAuditAction(value);
+  if (action === null) {
+    ctx.addIssue({ code: "custom", message: "unknown action" });
+    return z.NEVER;
+  }
+  return action;
+});
+
+/** A current or historical (`install`) category, read as the current one (`site`). */
+const categoryFilter = z.string().transform((value, ctx): string => {
+  const category = currentAuditCategory(value);
+  if (category === null) {
+    ctx.addIssue({ code: "custom", message: "unknown category" });
+    return z.NEVER;
+  }
+  return category;
+});
+
 /**
  * Filters and keyset cursor for reading the audit log. Newest first by default (`before` pages
  * backwards); with `after`, oldest first (export-style, pages forwards). Cursors are `seq` values.
+ * An action or category filter also matches rows stored under its historical names (KOBE-255).
  */
 export const auditQuerySchema = z
   .strictObject({
     limit: z.coerce.number().int().min(1).max(AUDIT_PAGE_MAX).optional(),
     before: z.coerce.number().int().positive().optional(),
     after: z.coerce.number().int().nonnegative().optional(),
-    action: z.enum(AUDIT_ACTIONS as [AuditAction, ...AuditAction[]]).optional(),
-    category: z.enum(AUDIT_CATEGORIES as [string, ...string[]]).optional(),
+    action: actionFilter.optional(),
+    category: categoryFilter.optional(),
     actorId: z.uuid().optional(),
     teamId: z.uuid().optional(),
     since: z.iso.datetime({ offset: true }).optional(),
@@ -60,9 +87,13 @@ function conditions(query: AuditQuery): SQL[] {
   const where: (SQL | undefined)[] = [
     query.before === undefined ? undefined : lt(auditLog.seq, query.before),
     query.after === undefined ? undefined : gt(auditLog.seq, query.after),
-    query.action === undefined ? undefined : eq(auditLog.action, query.action),
+    query.action === undefined
+      ? undefined
+      : inArray(auditLog.action, auditActionNames(query.action)),
     // Stored first segment of the action: uses audit_log_category_seq_idx.
-    query.category === undefined ? undefined : eq(auditLog.category, query.category),
+    query.category === undefined
+      ? undefined
+      : inArray(auditLog.category, auditCategoryNames(query.category)),
     query.actorId === undefined ? undefined : eq(auditLog.actorId, query.actorId),
     query.teamId === undefined ? undefined : eq(auditLog.teamId, query.teamId),
     query.since === undefined ? undefined : gte(auditLog.at, new Date(query.since)),
@@ -124,7 +155,7 @@ async function select(
 }
 
 /**
- * Reads the install-wide audit log (install Owner/Admin, spec D6). Validate untrusted input with
+ * Reads the site-wide audit log (site Owner/Admin, spec D6). Validate untrusted input with
  * `auditQuerySchema` first. Keyset pagination over `seq`: stable under concurrent appends.
  */
 export async function listAuditEvents(db: KobeDb, query: AuditQuery): Promise<AuditPage> {
@@ -144,7 +175,7 @@ export interface TeamAuditPage {
  * Reads the team audit view (team admins, spec D6) inside a `withTeam()` transaction. The team is
  * not a parameter: the query matches `team_id` against the transaction's `kobe.team_id`, the same
  * setting team RLS uses, so outside withTeam it returns nothing and a `teamId` in the query is
- * ignored. Client IPs, user agents and hash-chain fields stay in the install view.
+ * ignored. Client IPs, user agents and hash-chain fields stay in the site view.
  */
 export async function listTeamAuditEvents(tx: KobeTx, query: AuditQuery): Promise<TeamAuditPage> {
   const { teamId: _ignored, ...rest } = query;

@@ -49,10 +49,10 @@ beforeAll(async () => {
   });
   app = createApp(deps);
   for (const who of PEOPLE) {
-    const installRole = who === "owner" ? "owner" : undefined;
+    const siteRole = who === "owner" ? "owner" : undefined;
     const user = await deps.createUserWithPassword(
       { email: `${who}@agents.test`, name: who, password: PASSWORD },
-      installRole ? { installRole } : {},
+      siteRole ? { siteRole } : {},
     );
     ids[who] = user.id;
   }
@@ -160,7 +160,7 @@ describe("GET /v1/agents/runnable (KOBE-122)", () => {
     ]);
     expect(seeded?.agentId).toBeTruthy();
     gallery = seeded?.agentId ?? "";
-    // An install-wide agent can be suspended for a team once its threads have used it.
+    // A site-wide agent can be suspended for a team once its threads have used it.
     const used = await as.carol.post("/v1/threads", { agent_id: suspendedPersonal });
     expect(used.status, JSON.stringify(used.json)).toBe(201);
     for (const id of [suspendedTeam, suspendedPersonal]) {

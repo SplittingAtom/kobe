@@ -1,4 +1,4 @@
-/** Install console: retention maximum (`/v1/install/retention`, install.retention.manage; KOBE-18). */
+/** Install console: retention maximum (`/v1/site/retention`, install.retention.manage; KOBE-18). */
 import { apiRequest, type ApiResult } from "../../../api/client";
 import type { RetentionPeriod } from "../team/retention";
 
@@ -17,7 +17,7 @@ export interface RetentionStatus extends RetentionMaximum {
   readonly paused: boolean;
 }
 
-const BASE = "/v1/install/retention";
+const BASE = "/v1/site/retention";
 
 export function getRetentionMaximum(): Promise<ApiResult<RetentionStatus>> {
   return apiRequest(BASE);

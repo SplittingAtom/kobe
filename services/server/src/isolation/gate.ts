@@ -82,7 +82,7 @@ export class IsolationRuntimeMissingError extends Error {
     this.name = "IsolationRuntimeMissingError";
   }
 
-  /** User-facing body: no cluster details; install admins see those in the admin console. */
+  /** User-facing body: no cluster details; site admins see those in the admin console. */
   toResponseBody(): { code: "isolation_runtime_missing"; message: string } {
     return {
       code: this.code,

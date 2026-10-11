@@ -63,10 +63,10 @@ afterEach(() => {
 describe("install break-glass page", () => {
   it("requests access narrowed to one user, with reason, duration and legal hold", async () => {
     const calls = stubApi({
-      "GET /v1/install/break-glass": [200, { grants: [], selfApprovalAllowed: false }],
-      "GET /v1/install/teams": [200, TEAMS],
-      "GET /v1/install/teams/t-1/members": [200, ROSTER],
-      "POST /v1/install/break-glass": [
+      "GET /v1/site/break-glass": [200, { grants: [], selfApprovalAllowed: false }],
+      "GET /v1/site/teams": [200, TEAMS],
+      "GET /v1/site/teams/t-1/members": [200, ROSTER],
+      "POST /v1/site/break-glass": [
         201,
         { grant: grant({ scope: "user" }), notified: { recipients: 1 }, warnings: [] },
       ],
@@ -95,9 +95,9 @@ describe("install break-glass page", () => {
 
   it("offers approve and deny on others' requests, and shows the server's refusal", async () => {
     const calls = stubApi({
-      "GET /v1/install/break-glass": [200, { grants: [grant()], selfApprovalAllowed: false }],
-      "GET /v1/install/teams": [200, TEAMS],
-      "POST /v1/install/break-glass/g-1/approve": [
+      "GET /v1/site/break-glass": [200, { grants: [grant()], selfApprovalAllowed: false }],
+      "GET /v1/site/teams": [200, TEAMS],
+      "POST /v1/site/break-glass/g-1/approve": [
         403,
         {
           code: "self_approval_forbidden",
@@ -112,7 +112,7 @@ describe("install break-glass page", () => {
     expect((await screen.findByRole("alert")).textContent).toContain(
       "A second site admin must approve",
     );
-    expect(summary(calls)).toContain("POST /v1/install/break-glass/g-1/approve");
+    expect(summary(calls)).toContain("POST /v1/site/break-glass/g-1/approve");
   });
 
   it("shows the legal-hold note and the no-team-admin warning after approval", async () => {
@@ -124,9 +124,9 @@ describe("install break-glass page", () => {
     const confirm = vi.fn((_message?: string) => true);
     vi.stubGlobal("confirm", confirm);
     stubApi({
-      "GET /v1/install/break-glass": [200, { grants: [held], selfApprovalAllowed: false }],
-      "GET /v1/install/teams": [200, TEAMS],
-      "POST /v1/install/break-glass/g-1/approve": [
+      "GET /v1/site/break-glass": [200, { grants: [held], selfApprovalAllowed: false }],
+      "GET /v1/site/teams": [200, TEAMS],
+      "POST /v1/site/break-glass/g-1/approve": [
         200,
         {
           grant: { ...held, status: "active" },
@@ -150,7 +150,7 @@ describe("install break-glass page", () => {
 
   it("explains self-approval on a single-admin install and shows the flag", async () => {
     stubApi({
-      "GET /v1/install/break-glass": [
+      "GET /v1/site/break-glass": [
         200,
         {
           grants: [
@@ -166,7 +166,7 @@ describe("install break-glass page", () => {
           selfApprovalAllowed: true,
         },
       ],
-      "GET /v1/install/teams": [200, TEAMS],
+      "GET /v1/site/teams": [200, TEAMS],
     });
     renderInstall(<BreakGlassPage />);
     await screen.findByText(/only active admin/);
@@ -175,9 +175,9 @@ describe("install break-glass page", () => {
 
   it("reads threads and entries read-only under an own active grant", async () => {
     const calls = stubApi({
-      "GET /v1/install/break-glass": [200, { grants: [ACTIVE_OWN], selfApprovalAllowed: false }],
-      "GET /v1/install/teams": [200, TEAMS],
-      "GET /v1/install/break-glass/g-2/threads": [
+      "GET /v1/site/break-glass": [200, { grants: [ACTIVE_OWN], selfApprovalAllowed: false }],
+      "GET /v1/site/teams": [200, TEAMS],
+      "GET /v1/site/break-glass/g-2/threads": [
         200,
         {
           grant: {
@@ -202,7 +202,7 @@ describe("install break-glass page", () => {
           next_cursor: null,
         },
       ],
-      "GET /v1/install/break-glass/g-2/threads/th-1/entries?after=0": [
+      "GET /v1/site/break-glass/g-2/threads/th-1/entries?after=0": [
         200,
         {
           grant: { id: "g-2" },
@@ -235,9 +235,9 @@ describe("install break-glass page", () => {
 
   it("shows a revoked or expired grant's refusal on the next read", async () => {
     stubApi({
-      "GET /v1/install/break-glass": [200, { grants: [ACTIVE_OWN], selfApprovalAllowed: false }],
-      "GET /v1/install/teams": [200, TEAMS],
-      "GET /v1/install/break-glass/g-2/threads": [
+      "GET /v1/site/break-glass": [200, { grants: [ACTIVE_OWN], selfApprovalAllowed: false }],
+      "GET /v1/site/teams": [200, TEAMS],
+      "GET /v1/site/break-glass/g-2/threads": [
         403,
         {
           code: "grant_not_active",

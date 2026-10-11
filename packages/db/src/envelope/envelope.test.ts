@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { ENVELOPE_KEY_ENV, ENVELOPE_KEY_PREVIOUS_ENV, loadEnvelope } from "./config.js";
 import { Envelope, EnvelopeError, type EnvelopeContext } from "./envelope.js";
 
-const KEY = "install-key-".padEnd(48, "k");
+const KEY = "site-key-".padEnd(48, "k");
 const OTHER = "another-key-".padEnd(48, "o");
 const CTX: EnvelopeContext = { teamId: "team-1", kind: "connector_grant", recordId: "rec-1" };
 
@@ -120,7 +120,7 @@ describe("Envelope", () => {
     expect(logs).toHaveLength(1);
     const all = [...seen, ...logs].join("\n");
     for (const secret of [KEY, OTHER, "short"]) expect(all).not.toContain(secret);
-    expect(all).not.toMatch(/install-key|another-key/);
+    expect(all).not.toMatch(/site-key|another-key/);
   });
 });
 

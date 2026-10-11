@@ -119,9 +119,9 @@ const CASES: readonly Case[] = [
     effect: "deny",
     codes: ["invalid_input"],
   },
-  // 1. install deny wins over everything after it.
+  // 1. site deny wins over everything after it.
   {
-    name: "install deny beats team allow, user allow and a read-only tool",
+    name: "site deny beats team allow, user allow and a read-only tool",
     tool: read,
     rules: [
       rule("install", "deny", "read"),
@@ -132,14 +132,14 @@ const CASES: readonly Case[] = [
     codes: ["install_deny_rule"],
   },
   {
-    name: "install deny reports before team deny when both match",
+    name: "site deny reports before team deny when both match",
     tool: bash,
     rules: [rule("team", "deny", "bash"), rule("install", "deny", "ba*")],
     effect: "deny",
     codes: ["install_deny_rule", "team_deny_rule"],
   },
   {
-    name: "install deny with arg pattern only denies matching input",
+    name: "site deny with arg pattern only denies matching input",
     tool: bash,
     input: { command: "ls -la" },
     rules: [rule("install", "deny", "bash", { arg_pattern: { "/command": "rm *" } })],
@@ -147,7 +147,7 @@ const CASES: readonly Case[] = [
     codes: ["risk_destructive"],
   },
   {
-    name: "install deny with arg pattern denies matching input",
+    name: "site deny with arg pattern denies matching input",
     tool: bash,
     input: { command: "rm -rf /" },
     rules: [rule("install", "deny", "bash", { arg_pattern: { "/command": "rm *" } })],
@@ -196,7 +196,7 @@ const CASES: readonly Case[] = [
   },
   // 2. team deny wins over ask, risk, mode and allow.
   {
-    name: "team deny beats install ask and user allow",
+    name: "team deny beats site ask and user allow",
     tool: kobeWrite,
     rules: [
       rule("install", "ask", "share_file"),
@@ -236,7 +236,7 @@ const CASES: readonly Case[] = [
   },
   // 3. ask rules: no allow rule removes them (decision (a)).
   {
-    name: "install ask on a read-only tool prompts",
+    name: "site ask on a read-only tool prompts",
     tool: read,
     rules: [rule("install", "ask", "read")],
     effect: "require_approval",
@@ -250,7 +250,7 @@ const CASES: readonly Case[] = [
     codes: ["team_ask_rule"],
   },
   {
-    name: "user allow cannot remove an install ask",
+    name: "user allow cannot remove a site ask",
     tool: write,
     rules: [rule("install", "ask", "write"), rule("user", "allow", "write")],
     effect: "require_approval",
@@ -271,7 +271,7 @@ const CASES: readonly Case[] = [
     codes: ["team_ask_rule"],
   },
   {
-    name: "both ask rules are reported, install first",
+    name: "both ask rules are reported, site first",
     tool: bash,
     rules: [rule("team", "ask", "bash"), rule("install", "ask", "bash")],
     effect: "require_approval",
@@ -851,7 +851,7 @@ describe("evaluatePolicy: invariants over every combination", () => {
     }
   });
 
-  it("an install deny always denies, whatever else applies", () => {
+  it("a site deny always denies, whatever else applies", () => {
     for (const c of combos) {
       const decision = run({
         tool: c.tool,

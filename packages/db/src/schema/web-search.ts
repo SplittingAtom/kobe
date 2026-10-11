@@ -3,8 +3,8 @@ import { boolean, check, integer, pgTable, text, timestamp, uuid } from "drizzle
 import { users } from "./auth.js";
 import { teams } from "./teams.js";
 
-// Web search provider setting (KOBE-113, 63a of KOBE-63). The install admin picks one provider and
-// stores its API key (`web_search_settings`, install-wide, one row); a team admin then opts the
+// Web search provider setting (KOBE-113, 63a of KOBE-63). The site admin picks one provider and
+// stores its API key (`web_search_settings`, site-wide, one row); a team admin then opts the
 // team in (`team_web_search`, a team table). The `web_search` tool itself is KOBE-114.
 
 /** Providers Kobe can call. The egress ceiling gets the provider's API domain when enabled. */
@@ -17,7 +17,7 @@ export const WEB_SEARCH_HINT_MAX = 16;
 export const WEB_SEARCH_SEALED_MAX = 16384;
 
 /**
- * Install-wide (†): the single web-search provider and its key. Exactly one row may exist (`id`
+ * Site-wide (†): the single web-search provider and its key. Exactly one row may exist (`id`
  * is pinned to 1); no row means web search is not configured. The key is stored only as the
  * KOBE-107 envelope text (`e1.<kid>...`), never plaintext, and no API returns it: the app reads
  * `hint`. No team data.
@@ -33,7 +33,7 @@ export const webSearchSettings = pgTable(
     sealed: text().notNull(),
     /** KEK id of `sealed` (`Envelope.keyIdOf`), so a rotation sweep can find stale rows. */
     keyId: text().notNull(),
-    /** Masked display hint (last characters only), safe to show an install admin. */
+    /** Masked display hint (last characters only), safe to show a site admin. */
     hint: text().notNull(),
     updatedBy: uuid()
       .notNull()

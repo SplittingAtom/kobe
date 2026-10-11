@@ -13,7 +13,7 @@ export const sandbox = defineDomain({
     "workspace_files",
     "workspace_blobs",
   ],
-  installWide: [],
+  siteWide: [],
   grants: {},
   teamReferencing: {},
 });

@@ -23,8 +23,8 @@ export interface Harness {
   /** App-role URL of the test database (LISTEN connections). */
   readonly appUrl: string;
   browser(): TestBrowser;
-  /** Creates a user with PASSWORD (and an optional install role) and returns its id. */
-  createUser(email: string, installRole?: "owner" | "admin"): Promise<string>;
+  /** Creates a user with PASSWORD (and an optional site role) and returns its id. */
+  createUser(email: string, siteRole?: "owner" | "admin"): Promise<string>;
   /** Signs in with email + PASSWORD (no 2FA) and returns the browser. */
   signIn(email: string, password?: string): Promise<TestBrowser>;
   close(): Promise<void>;
@@ -71,10 +71,10 @@ export async function openHarness(
     adminUrl: database.adminUrl,
     appUrl: database.appUrl,
     browser,
-    async createUser(email, installRole) {
+    async createUser(email, siteRole) {
       const user = await deps.createUserWithPassword(
         { email, name: email.split("@")[0] ?? email, password: PASSWORD },
-        installRole ? { installRole } : {},
+        siteRole ? { siteRole } : {},
       );
       return user.id;
     },

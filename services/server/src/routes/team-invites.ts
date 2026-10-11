@@ -15,7 +15,7 @@ const INVITES_PER_HOUR = 50;
  * Team invitations (`/v1/team/invites`, KOBE-13): the way a team admin brings someone into the
  * active team. The person must accept while signed in as the invited address, so nobody joins a
  * team without consent, and the answer is the same whether or not the address is a Kobe user (no
- * account-existence oracle). People without an account need an install invitation too.
+ * account-existence oracle). People without an account need a site invitation too.
  */
 export function teamInvitesRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();

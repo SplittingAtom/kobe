@@ -9,7 +9,7 @@ export const identity = defineDomain({
     "team_retention",
     "retention_blob_deletions",
   ],
-  installWide: [
+  siteWide: [
     // Better Auth (KOBE-12)
     "users",
     "sessions",

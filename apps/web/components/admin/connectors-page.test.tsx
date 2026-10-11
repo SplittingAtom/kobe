@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConnectorsPage } from "./install/connectors-page";
 import { renderInstall, stubApi } from "./testing";
 
-const BASE = "/v1/install/connectors";
+const BASE = "/v1/site/connectors";
 const connector = (over: Record<string, unknown> = {}) => ({
   id: "c-1",
   name: "github",

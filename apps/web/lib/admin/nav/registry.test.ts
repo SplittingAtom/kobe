@@ -26,10 +26,10 @@ import {
 import { must } from "../../testing/must";
 
 const user = { id: "u-1", name: "Ada", email: "ada@example.com" };
-const install = (installRole: InstallAccess["installRole"]): InstallAccess => ({
+const install = (siteRole: InstallAccess["siteRole"]): InstallAccess => ({
   console: "install",
   user,
-  installRole,
+  siteRole,
 });
 
 // Mirrors the server's TEAM_PERMISSIONS (services/server/src/authz/permissions.ts).

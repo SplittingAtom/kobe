@@ -1,6 +1,6 @@
 /**
  * Web pages that emails link to (KOBE-257): one place for the console URLs, so a route move in
- * apps/web is one edit here. The site console is `/admin/site` (it was `/admin/install`, which
+ * apps/web is one edit here. The site console is `/admin/site` (it was `/admin/site`, which
  * still redirects); the team console is `/admin/team`.
  */
 const SITE_CONSOLE = "/admin/site";

@@ -8,9 +8,12 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { selfTestIdentifiers, siteIdentifierHits } from "./site-identifiers.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const AREAS = ["apps", "services", "packages"];
+/** Areas whose identifiers, API paths, permissions and file names are renamed (KOBE-255). */
+const IDENTIFIER_AREAS = ["services", "packages"];
 const SKIP_DIRS = new Set(["node_modules", "dist", ".next", ".turbo", "coverage", "drizzle"]);
 const SOURCE = /\.(ts|tsx|mts|mjs|js)$/;
 const TEST = /\.(test|spec)\.[a-z]+$|\/testing\//;
@@ -82,6 +85,16 @@ function sources(dir) {
 }
 
 selfTest();
+selfTestIdentifiers();
+const named = siteIdentifierHits(ROOT, IDENTIFIER_AREAS);
+if (named.length > 0) {
+  console.error(named.join("\n"));
+  console.error(
+    `error: ${named.length} identifier(s), path(s) or file name(s) name the scope "install"; ` +
+      "use site (KOBE-255). Database names stay until KOBE-256 (scripts/site-identifiers.mjs).",
+  );
+  process.exit(1);
+}
 const hits = AREAS.flatMap((area) => sources(join(ROOT, area))).flatMap((file) =>
   findings(readFileSync(file, "utf8")).map((at) => `${relative(ROOT, file)}: …${at}…`),
 );

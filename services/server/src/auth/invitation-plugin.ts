@@ -3,7 +3,7 @@ import { APIError, createAuthEndpoint } from "better-auth/api";
 import { setSessionCookie } from "better-auth/cookies";
 import { z } from "zod";
 import type { KobeDb } from "@kobe/db";
-import { acceptInvite, findInviteByToken } from "../invitations/install-invites.js";
+import { acceptInvite, findInviteByToken } from "../invitations/site-invites.js";
 
 export const PASSWORD_MIN = 12;
 export const PASSWORD_MAX = 128;
@@ -28,14 +28,14 @@ const invalidInvitation = () =>
  * origin check, Postgres rate limits (per client IP) and session handling:
  * - POST /api/auth/invitation/lookup {token} → the invited email, for the accept page;
  * - POST /api/auth/invitation/accept {token, name, password} → creates the account, consumes the
- *   invitation and signs the new user in (2FA enrollment follows if the install requires it).
+ *   invitation and signs the new user in (2FA enrollment follows if the site requires it).
  */
 export function invitationPlugin({
   db,
   publicOrigin,
 }: {
   readonly db: KobeDb;
-  /** Acceptance signs the browser in, so it must come from the install's own pages. */
+  /** Acceptance signs the browser in, so it must come from the site's own pages. */
   readonly publicOrigin: string;
 }) {
   return {
@@ -58,7 +58,7 @@ export function invitationPlugin({
         },
         async (ctx) => {
           // Better Auth checks Origin only on requests that carry cookies; acceptance sets one
-          // (login CSRF), so always require the install's own origin here.
+          // (login CSRF), so always require the site's own origin here.
           if (ctx.request?.headers.get("origin") !== publicOrigin) {
             throw new APIError("FORBIDDEN", { code: "INVALID_ORIGIN", message: "Invalid origin" });
           }

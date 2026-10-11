@@ -1,5 +1,5 @@
 /**
- * Install console: legal hold (spec D18; `/v1/install/legal-hold`, install admins). Placing and
+ * Install console: legal hold (spec D18; `/v1/site/legal-hold`, install admins). Placing and
  * releasing a hold each need a second install admin (D10's rule). Responses arrive camelized.
  */
 import { apiRequest, type ApiResult } from "../../../api/client";
@@ -68,11 +68,11 @@ export type HoldDecision =
 type HoldResponse = { readonly hold: LegalHold };
 
 export function listHolds(): Promise<ApiResult<HoldList>> {
-  return apiRequest<HoldList>("/v1/install/legal-hold");
+  return apiRequest<HoldList>("/v1/site/legal-hold");
 }
 
 export function requestHold(input: HoldRequest): Promise<ApiResult<HoldResponse>> {
-  return apiRequest<HoldResponse>("/v1/install/legal-hold", {
+  return apiRequest<HoldResponse>("/v1/site/legal-hold", {
     method: "POST",
     json: {
       teamId: input.teamId,
@@ -83,13 +83,13 @@ export function requestHold(input: HoldRequest): Promise<ApiResult<HoldResponse>
 }
 
 export function decideHold(id: string, decision: HoldDecision): Promise<ApiResult<HoldResponse>> {
-  return apiRequest<HoldResponse>(`/v1/install/legal-hold/${enc(id)}/${decision}`, {
+  return apiRequest<HoldResponse>(`/v1/site/legal-hold/${enc(id)}/${decision}`, {
     method: "POST",
   });
 }
 
 export function requestRelease(id: string, reason: string): Promise<ApiResult<HoldResponse>> {
-  return apiRequest<HoldResponse>(`/v1/install/legal-hold/${enc(id)}/release`, {
+  return apiRequest<HoldResponse>(`/v1/site/legal-hold/${enc(id)}/release`, {
     method: "POST",
     json: { reason },
   });

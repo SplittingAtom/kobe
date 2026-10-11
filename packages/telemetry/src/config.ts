@@ -3,7 +3,7 @@ import { z } from "zod";
 /**
  * Tracing configuration (KOBE-10, spec D31), validated at startup like every service config. No
  * endpoint means tracing is off and nothing is registered (zero overhead). Content capture is an
- * install-level opt-in; by default spans carry metadata only.
+ * site-level opt-in; by default spans carry metadata only.
  */
 const configSchema = z.object({
   /** OTLP/HTTP collector base URL, e.g. http://otel-collector:4318 (`/v1/traces` is appended). */

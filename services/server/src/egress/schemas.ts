@@ -28,5 +28,5 @@ export const ceilingMembershipBodySchema = z.strictObject({ in_ceiling: z.boolea
 
 export const presetSchema = z.enum(EGRESS_PRESETS);
 
-/** Install-wide cap on ceiling rows (presets included): a ceiling is a short, reviewed list. */
+/** Site-wide cap on ceiling rows (presets included): a ceiling is a short, reviewed list. */
 export const MAX_CEILING_DOMAINS = 500;

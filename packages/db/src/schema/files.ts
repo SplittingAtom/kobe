@@ -90,7 +90,7 @@ export const files = pgTable(
 );
 
 /**
- * A team's storage limit for files. No row, or `max_bytes` null, = the install default (chart
+ * A team's storage limit for files. No row, or `max_bytes` null, = the site default (chart
  * value; resolved by the server). A table rather than a column on `teams` because `teams` has no
  * team RLS: team admins edit this under `withTeam()`, like `team_retention`.
  */

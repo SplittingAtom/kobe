@@ -10,7 +10,7 @@ import type { WebSearchProvider } from "@kobe/db";
 import { providerInfo } from "./providers.js";
 
 /**
- * One search against the install's provider. Runs in the server process: the key is opened here,
+ * One search against the site's provider. Runs in the server process: the key is opened here,
  * sent to the provider's fixed API host (`providers.ts`) and goes nowhere else. Nothing a provider
  * says (status text, body) is passed on beyond the citations we parse, so an error cannot echo the
  * key back to a sandbox.

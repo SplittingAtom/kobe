@@ -15,7 +15,7 @@ export const models = defineDomain({
     // In-flight budget reservations shared by gateway replicas, with expiry (KOBE-120).
     "budget_reservations",
   ],
-  installWide: [
+  siteWide: [
     "model_providers",
     "model_catalog",
     "model_gateway_state",
@@ -34,7 +34,7 @@ export const models = defineDomain({
     model_catalog: ALL_PRIVILEGES,
     // Gateway sync progress (one row, seeded by the migration): read and advanced, never added.
     model_gateway_state: ["SELECT", "UPDATE"],
-    // KOBE-42: the install budget and default rate (one row, seeded): read and changed, never added.
+    // KOBE-42: the site budget and default rate (one row, seeded): read and changed, never added.
     install_model_limits: ["SELECT", "UPDATE"],
     // Spend of all teams per day, kept by the run_usage trigger (invoker's rights: the repo has
     // no SECURITY DEFINER functions, catalog.db.test.ts). The privileges serve that trigger only:
@@ -42,12 +42,12 @@ export const models = defineDomain({
     install_model_spend_daily: ["SELECT", "INSERT", "UPDATE"],
     // Budget thresholds crossed (once per period): insert-only, and an insert is verified against
     // the configured budget and the real spend counters (budget_alerts_verify). RLS: a team's rows
-    // only in its context, install rows everywhere.
+    // only in its context, site rows everywhere.
     budget_alerts: ["SELECT", "INSERT"],
     // Its email outbox: rows only from the budget_alerts trigger (guarded); delivery updates the
     // status columns only (columnGrants). RLS through the alert.
     budget_alert_emails: ["SELECT", "INSERT"],
-    // KOBE-120: reservations against the install budget (spans teams, so not a team table):
+    // KOBE-120: reservations against the site budget (spans teams, so not a team table):
     // created, shortened on settle, deleted on settle or by the expiry sweep. No team or user ids.
     install_budget_reservations: ALL_PRIVILEGES,
   },

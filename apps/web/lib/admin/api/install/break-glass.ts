@@ -1,5 +1,5 @@
 /**
- * Install console: break-glass (spec D10; `/v1/install/break-glass`, install admins). Responses
+ * Install console: break-glass (spec D10; `/v1/site/break-glass`, install admins). Responses
  * arrive camelized; thread entry payloads stay verbatim (`payload` is opaque in lib/api/casing).
  */
 import { apiRequest, type ApiResult } from "../../../api/client";
@@ -60,11 +60,11 @@ export interface GrantRequest {
 }
 
 export function listGrants(): Promise<ApiResult<GrantList>> {
-  return apiRequest<GrantList>("/v1/install/break-glass");
+  return apiRequest<GrantList>("/v1/site/break-glass");
 }
 
 export function requestGrant(input: GrantRequest): Promise<ApiResult<GrantChange>> {
-  return apiRequest<GrantChange>("/v1/install/break-glass", {
+  return apiRequest<GrantChange>("/v1/site/break-glass", {
     method: "POST",
     json: {
       teamId: input.teamId,
@@ -91,7 +91,7 @@ export function decideGrant(
   grantId: string,
   decision: GrantDecision,
 ): Promise<ApiResult<GrantChange>> {
-  return apiRequest<GrantChange>(`/v1/install/break-glass/${enc(grantId)}/${decision}`, {
+  return apiRequest<GrantChange>(`/v1/site/break-glass/${enc(grantId)}/${decision}`, {
     method: "POST",
   });
 }
@@ -145,7 +145,7 @@ export function readGrantThreads(
   cursor?: string | null,
 ): Promise<ApiResult<GrantThreadPage>> {
   const query = cursor ? `?cursor=${enc(cursor)}` : "";
-  return apiRequest<GrantThreadPage>(`/v1/install/break-glass/${enc(grantId)}/threads${query}`);
+  return apiRequest<GrantThreadPage>(`/v1/site/break-glass/${enc(grantId)}/threads${query}`);
 }
 
 export function readGrantEntries(
@@ -154,6 +154,6 @@ export function readGrantEntries(
   after = 0,
 ): Promise<ApiResult<GrantEntryPage>> {
   return apiRequest<GrantEntryPage>(
-    `/v1/install/break-glass/${enc(grantId)}/threads/${enc(threadId)}/entries?after=${after}`,
+    `/v1/site/break-glass/${enc(grantId)}/threads/${enc(threadId)}/entries?after=${after}`,
   );
 }

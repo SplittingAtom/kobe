@@ -115,7 +115,7 @@ export function exposedTools(connector: TeamConnector): PinnedTool[] {
  * The policy engine's view of MCP connectors, from Postgres:
  * - `resolve(team, piName)`: the pinned tool whose Pi name it is, in the connector whose Pi server
  *   segment the name starts with (`mcp__<segment>__`; names differing only in `-`/`_` are one
- *   server, unique install-wide). Drifted tools resolve too, so the engine can say `tool_drifted`.
+ *   server, unique site-wide). Drifted tools resolve too, so the engine can say `tool_drifted`.
  * - `get(team, connectorId)`: enablement, exposure, custom tools and drifted tools in that team.
  */
 export function createDbMcpCatalog(db: KobeDb): McpToolCatalog & ConnectorStateSource {

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import pino from "pino";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-  INSTALL_CUSTOMER,
+  SITE_CUSTOMER,
   buildDesiredState,
   gatewayTeamName,
   keyName,
@@ -70,9 +70,9 @@ const desired = (over: Partial<{ providers: ProviderInput[]; teams: TeamInput[] 
   );
 
 describe("buildDesiredState", () => {
-  it("maps D30's hierarchy: install customer, a team per Kobe team, a key per member", () => {
+  it("maps D30's hierarchy: site customer, a team per Kobe team, a key per member", () => {
     const d = desired();
-    expect(d.customer.name).toBe(INSTALL_CUSTOMER);
+    expect(d.customer.name).toBe(SITE_CUSTOMER);
     expect(d.teams.map((t) => t.name)).toEqual([gatewayTeamName(teamA), gatewayTeamName(teamB)]);
     expect(d.virtualKeys.map((v) => v.name)).toEqual([
       virtualKeyName(teamA, alice),
@@ -124,7 +124,7 @@ describe("reconcile", () => {
     ]);
     expect(bifrost.keyValue("anthropic")).toBe("sk-ant");
     expect(bifrost.providers.get("kobe-vllm")?.keys).toEqual([]);
-    expect([...bifrost.customers.values()].map((c) => c.name)).toEqual([INSTALL_CUSTOMER]);
+    expect([...bifrost.customers.values()].map((c) => c.name)).toEqual([SITE_CUSTOMER]);
     expect(bifrost.teams.size).toBe(2);
     expect([...result.virtualKeys.keys()]).toHaveLength(3);
     for (const { value } of result.virtualKeys.values()) expect(value).toMatch(/^sk-bf-/);

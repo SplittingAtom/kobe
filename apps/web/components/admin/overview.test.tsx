@@ -47,8 +47,8 @@ describe("section placeholder", () => {
 });
 
 describe("console links on the home page", () => {
-  const me = (installRole: string | null) =>
-    [200, { user: { ...ME, twoFactorEnabled: false }, installRole }] as const;
+  const me = (siteRole: string | null) =>
+    [200, { user: { ...ME, twoFactorEnabled: false }, siteRole }] as const;
   const team = (role: string, permissions: string[]) =>
     [200, { team: { id: "t-1", slug: "fin", name: "Finance" }, role, permissions }] as const;
 

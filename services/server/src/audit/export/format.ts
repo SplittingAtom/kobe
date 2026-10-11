@@ -1,7 +1,7 @@
 import type { AuditEntry, TeamAuditEntry } from "@kobe/db";
 
-/** Which view an export reads: the install log (all fields) or a team's view (no IP or chain). */
-export type ExportScope = "install" | "team";
+/** Which view an export reads: the site log (all fields) or a team's view (no IP or chain). */
+export type ExportScope = "site" | "team";
 export type ExportFormat = "csv" | "jsonl";
 
 type Entry = AuditEntry | TeamAuditEntry;
@@ -18,10 +18,10 @@ const TEAM_COLUMNS = [
   "action",
   "target",
 ] as const;
-const INSTALL_COLUMNS = [...TEAM_COLUMNS, "ip", "user_agent", "prev_hash", "hash"] as const;
+const SITE_COLUMNS = [...TEAM_COLUMNS, "ip", "user_agent", "prev_hash", "hash"] as const;
 
 export function exportColumns(scope: ExportScope): readonly string[] {
-  return scope === "install" ? INSTALL_COLUMNS : TEAM_COLUMNS;
+  return scope === "site" ? SITE_COLUMNS : TEAM_COLUMNS;
 }
 
 /**
@@ -42,7 +42,7 @@ export function csvHeader(scope: ExportScope): string {
 }
 
 export function csvRow(entry: Entry, scope: ExportScope): string {
-  const install = "hash" in entry ? entry : null;
+  const site = "hash" in entry ? entry : null;
   const cells = [
     entry.seq,
     entry.id,
@@ -54,16 +54,14 @@ export function csvRow(entry: Entry, scope: ExportScope): string {
     entry.actor.email,
     entry.action,
     JSON.stringify(entry.target),
-    ...(scope === "install"
-      ? [install?.ip, install?.userAgent, install?.prevHash, install?.hash]
-      : []),
+    ...(scope === "site" ? [site?.ip, site?.userAgent, site?.prevHash, site?.hash] : []),
   ];
   return `${cells.map(csvCell).join(",")}\r\n`;
 }
 
 /** One JSON object per line, shaped like the read API's events. */
 export function jsonlRow(entry: Entry, scope: ExportScope): string {
-  const install = "hash" in entry ? entry : null;
+  const site = "hash" in entry ? entry : null;
   return `${JSON.stringify({
     seq: entry.seq,
     id: entry.id,
@@ -72,12 +70,12 @@ export function jsonlRow(entry: Entry, scope: ExportScope): string {
     actor: entry.actor,
     action: entry.action,
     target: entry.target,
-    ...(scope === "install" && install
+    ...(scope === "site" && site
       ? {
-          ip: install.ip,
-          userAgent: install.userAgent,
-          prevHash: install.prevHash,
-          hash: install.hash,
+          ip: site.ip,
+          userAgent: site.userAgent,
+          prevHash: site.prevHash,
+          hash: site.hash,
         }
       : {}),
   })}\n`;

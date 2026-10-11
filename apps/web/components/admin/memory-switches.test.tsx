@@ -10,7 +10,7 @@ import { renderInstall, renderTeam, stubApi } from "./testing";
 afterEach(cleanup);
 
 const TEAM = "/v1/memory/settings?level=team";
-const INSTALL = "/v1/memory/settings?level=install";
+const INSTALL = "/v1/memory/settings?level=site";
 const on = { memory_enabled: true, project_memory_enabled: true };
 
 describe("Team memory switches (KOBE-158, ac-3)", () => {

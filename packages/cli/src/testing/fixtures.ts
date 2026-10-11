@@ -153,7 +153,7 @@ export async function seed(db: TestDatabase): Promise<void> {
 export async function freshTarget(server: string): Promise<TestDatabase> {
   const db = await createTestDatabase(server);
   await sql(db.ownerUrl, WIDGETS + GUARD_TRIGGER);
-  // The new install's server already generated its own signing key; it must survive the restore.
+  // The new site's server already generated its own signing key; it must survive the restore.
   await sql(
     db.adminUrl,
     `INSERT INTO jwks (public_key, private_key) VALUES ('new-pub', 'new-enc')`,

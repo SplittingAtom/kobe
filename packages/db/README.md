@@ -15,14 +15,14 @@ SHA-256 hash chain; `verifyAuditChain()`). Read with `listAuditEvents()` (instal
 
 Design, field allowlist, taxonomy and the events later tickets must add:
 [docs/audit-log.md](../../docs/audit-log.md). The client IP and user agent are erased after the
-install's retention period (default 12 h, KOBE-17): the hash covers a salted commitment to them
+site's retention period (default 12 h, KOBE-17): the hash covers a salted commitment to them
 (chain v2), `eraseExpiredAuditPii(tx, pageSize)` is the server sweep's step and `sealAuditV1(db)`
 seals the rows chained before the upgrade.
 
 ## Legal hold (KOBE-17)
 
-`legal_holds` (install-wide) holds a team's data, or one user's data in a team, against every
-purge (spec D18). Placing and releasing need a second install admin; the `legal_holds_guard`
+`legal_holds` (site-wide) holds a team's data, or one user's data in a team, against every
+purge (spec D18). Placing and releasing need a second site admin; the `legal_holds_guard`
 trigger enforces that. **Every purge job (KOBE-18 retention and Trash, KOBE-28 offboarding
 volumes, and any later one) must:**
 
@@ -43,7 +43,7 @@ update and stays allowed. Add the same guards to any new table a purge deletes f
 ## Retention (KOBE-18)
 
 `team_retention` (team period, `30d|90d|1y|forever`, no row = forever) and
-`install_settings['retention.maximum']` (install maximum): the nightly job applies the shorter.
+`install_settings['retention.maximum']` (site maximum): the nightly job applies the shorter.
 Purges queue the object keys of thread-owned blob columns (`BLOB_REF_COLUMNS` entries with
 `thread: true`) in `retention_blob_deletions` inside the purge transaction; the bytes go later,
 only when no registered column of the team references the key and no hold covers its owner. **A
@@ -58,7 +58,7 @@ KOBE-28) are in `services/server/src/retention/`; design in `docs/ledger/KOBE-18
 
 `threads` and `thread_entries` have two RLS policies: the canonical `team_isolation` (all
 commands) and `break_glass_read` (SELECT only, spec D10), which honors an approved, unexpired
-break-glass grant for the named install admin. Team content is read under a grant only through
+break-glass grant for the named site admin. Team content is read under a grant only through
 `readWithBreakGlass()`, which verifies the grant, writes the audit row and sets
 `kobe.break_glass_grant` / `kobe.break_glass_actor`; the policies re-check the grant in Postgres.
 

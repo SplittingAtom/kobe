@@ -127,7 +127,7 @@ function Body({
   );
   const [who, setWho] = useState("");
   const [invalid, setInvalid] = useState<string | null>(null);
-  const installRpm = budgets.install.userRequestsPerMinute;
+  const installRpm = budgets.site.userRequestsPerMinute;
 
   function saveTeam(e: FormEvent) {
     e.preventDefault();
@@ -280,13 +280,13 @@ function Body({
         <dl className={styles.dl}>
           <dt>This month</dt>
           <dd>
-            Dollars: {usedOf(budgets.install.percentUsed.monthUsd)}; tokens:{" "}
-            {usedOf(budgets.install.percentUsed.monthTokens)}
+            Dollars: {usedOf(budgets.site.percentUsed.monthUsd)}; tokens:{" "}
+            {usedOf(budgets.site.percentUsed.monthTokens)}
           </dd>
           <dt>Today</dt>
           <dd>
-            Dollars: {usedOf(budgets.install.percentUsed.dayUsd)}; tokens:{" "}
-            {usedOf(budgets.install.percentUsed.dayTokens)}
+            Dollars: {usedOf(budgets.site.percentUsed.dayUsd)}; tokens:{" "}
+            {usedOf(budgets.site.percentUsed.dayTokens)}
           </dd>
         </dl>
       </section>

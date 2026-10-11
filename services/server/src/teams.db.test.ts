@@ -16,9 +16,9 @@ let deps: ServerDeps;
 let app: ReturnType<typeof createApp>;
 let admin: pg.Client;
 
-const ids: Record<"owner" | "installAdmin" | "alice" | "bob" | "carol" | "dave", string> = {
+const ids: Record<"owner" | "siteAdmin" | "alice" | "bob" | "carol" | "dave", string> = {
   owner: "",
-  installAdmin: "",
+  siteAdmin: "",
   alice: "",
   bob: "",
   carol: "",
@@ -53,10 +53,10 @@ beforeAll(async () => {
   });
   app = createApp(deps);
   for (const who of Object.keys(ids) as Person[]) {
-    const installRole = who === "owner" ? "owner" : who === "installAdmin" ? "admin" : undefined;
+    const siteRole = who === "owner" ? "owner" : who === "siteAdmin" ? "admin" : undefined;
     const user = await deps.createUserWithPassword(
       { email: email(who), name: who, password: PASSWORD },
-      installRole ? { installRole } : {},
+      siteRole ? { siteRole } : {},
     );
     ids[who] = user.id;
   }
@@ -98,96 +98,90 @@ afterAll(async () => {
   }
 });
 
-describe("install roles (ac-3)", () => {
-  it("lets install admins list roles and refuses plain users", async () => {
-    expect((await as.alice.get("/v1/install/roles")).status).toBe(403);
-    const res = await as.installAdmin.get("/v1/install/roles");
+describe("site roles (ac-3)", () => {
+  it("lets site admins list roles and refuses plain users", async () => {
+    expect((await as.alice.get("/v1/site/roles")).status).toBe(403);
+    const res = await as.siteAdmin.get("/v1/site/roles");
     expect(res.status).toBe(200);
     expect(res.json.roles).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ userId: ids.owner, role: "owner" }),
-        expect.objectContaining({ userId: ids.installAdmin, role: "admin" }),
+        expect.objectContaining({ userId: ids.siteAdmin, role: "admin" }),
       ]),
     );
   });
 
   it("lets only the Owner grant and revoke Admin", async () => {
-    expect(
-      (await as.installAdmin.put(`/v1/install/roles/${ids.dave}`, { role: "admin" })).status,
-    ).toBe(403);
-    expect((await as.owner.put(`/v1/install/roles/${ids.dave}`, { role: "admin" })).status).toBe(
-      200,
+    expect((await as.siteAdmin.put(`/v1/site/roles/${ids.dave}`, { role: "admin" })).status).toBe(
+      403,
     );
-    expect((await as.dave.get("/v1/me")).json.installRole).toBe("admin");
-    expect((await as.owner.put(`/v1/install/roles/${ids.dave}`, { role: "user" })).status).toBe(
-      200,
-    );
-    expect((await as.dave.get("/v1/me")).json.installRole).toBeNull();
+    expect((await as.owner.put(`/v1/site/roles/${ids.dave}`, { role: "admin" })).status).toBe(200);
+    expect((await as.dave.get("/v1/me")).json.siteRole).toBe("admin");
+    expect((await as.owner.put(`/v1/site/roles/${ids.dave}`, { role: "user" })).status).toBe(200);
+    expect((await as.dave.get("/v1/me")).json.siteRole).toBeNull();
   });
 
   it("never changes the Owner's role except by transfer", async () => {
-    const res = await as.owner.put(`/v1/install/roles/${ids.owner}`, { role: "user" });
+    const res = await as.owner.put(`/v1/site/roles/${ids.owner}`, { role: "user" });
     expect(res).toMatchObject({ status: 409, json: { code: "owner_role_fixed" } });
-    expect((await as.owner.put(`/v1/install/roles/${ids.owner}`, { role: "owner" })).status).toBe(
-      400,
+    expect((await as.owner.put(`/v1/site/roles/${ids.owner}`, { role: "owner" })).status).toBe(400);
+    expect((await as.owner.put(`/v1/site/roles/${randomUUID()}`, { role: "admin" })).status).toBe(
+      404,
     );
-    expect(
-      (await as.owner.put(`/v1/install/roles/${randomUUID()}`, { role: "admin" })).status,
-    ).toBe(404);
   });
 
   it("transfers ownership atomically: the old Owner becomes an Admin", async () => {
-    const path = "/v1/install/roles/transfer-ownership";
-    expect((await as.installAdmin.post(path, { userId: ids.installAdmin })).status).toBe(403);
+    const path = "/v1/site/roles/transfer-ownership";
+    expect((await as.siteAdmin.post(path, { userId: ids.siteAdmin })).status).toBe(403);
     expect((await as.owner.post(path, { userId: ids.owner })).status).toBe(400);
     expect((await as.owner.post(path, { userId: randomUUID() })).status).toBe(404);
 
-    expect((await as.owner.post(path, { userId: ids.installAdmin })).status).toBe(200);
-    expect((await as.owner.get("/v1/me")).json.installRole).toBe("admin");
-    expect((await as.installAdmin.get("/v1/me")).json.installRole).toBe("owner");
+    expect((await as.owner.post(path, { userId: ids.siteAdmin })).status).toBe(200);
+    expect((await as.owner.get("/v1/me")).json.siteRole).toBe("admin");
+    expect((await as.siteAdmin.get("/v1/me")).json.siteRole).toBe("owner");
     // The former Owner can no longer transfer; the new one hands it back.
     expect((await as.owner.post(path, { userId: ids.owner })).status).toBe(403);
-    expect((await as.installAdmin.post(path, { userId: ids.owner })).status).toBe(200);
+    expect((await as.siteAdmin.post(path, { userId: ids.owner })).status).toBe(200);
     const { rows } = await admin.query(`SELECT user_id, role FROM install_roles ORDER BY role`);
     expect(rows).toEqual([
       { user_id: ids.owner, role: "owner" },
-      { user_id: ids.installAdmin, role: "admin" },
+      { user_id: ids.siteAdmin, role: "admin" },
     ]);
   });
   it("never leaves the install without an Owner when a demotion races a transfer", async () => {
-    const path = "/v1/install/roles/transfer-ownership";
+    const path = "/v1/site/roles/transfer-ownership";
     for (let i = 0; i < 5; i++) {
       await Promise.all([
         as.owner.post(path, { userId: ids.dave }),
-        as.owner.put(`/v1/install/roles/${ids.dave}`, { role: "user" }),
+        as.owner.put(`/v1/site/roles/${ids.dave}`, { role: "user" }),
       ]);
       const { rows } = await admin.query(`SELECT user_id FROM install_roles WHERE role = 'owner'`);
       expect(rows).toHaveLength(1);
-      // Restore: the Owner, the install admin, and Dave as a plain user.
+      // Restore: the Owner, the site admin, and Dave as a plain user.
       if (rows[0].user_id === ids.dave) await as.dave.post(path, { userId: ids.owner });
-      await as.owner.put(`/v1/install/roles/${ids.dave}`, { role: "user" });
+      await as.owner.put(`/v1/site/roles/${ids.dave}`, { role: "user" });
     }
     const { rows } = await admin.query(`SELECT user_id, role FROM install_roles ORDER BY role`);
     expect(rows).toEqual([
       { user_id: ids.owner, role: "owner" },
-      { user_id: ids.installAdmin, role: "admin" },
+      { user_id: ids.siteAdmin, role: "admin" },
     ]);
   });
 });
 
 describe("teams (ac-1)", () => {
   it("refuses team creation to plain users", async () => {
-    const res = await as.alice.post("/v1/install/teams", {
+    const res = await as.alice.post("/v1/site/teams", {
       slug: "rogue",
       name: "Rogue",
       adminUserId: ids.alice,
     });
     expect(res.status).toBe(403);
-    expect((await as.alice.get("/v1/install/teams")).status).toBe(403);
+    expect((await as.alice.get("/v1/site/teams")).status).toBe(403);
   });
 
   it("creates a team with its first team admin", async () => {
-    const res = await as.installAdmin.post("/v1/install/teams", {
+    const res = await as.siteAdmin.post("/v1/site/teams", {
       slug: "finance",
       name: "Finance",
       adminUserId: ids.alice,
@@ -195,12 +189,12 @@ describe("teams (ac-1)", () => {
     expect(res.status, JSON.stringify(res.json)).toBe(201);
     finance = res.json.team.id;
     expect(res.json.team).toMatchObject({ slug: "finance", name: "Finance" });
-    const members = await as.installAdmin.get(`/v1/install/teams/${finance}/members`);
+    const members = await as.siteAdmin.get(`/v1/site/teams/${finance}/members`);
     expect(members.json.members).toEqual([
       expect.objectContaining({ userId: ids.alice, role: "team_admin", email: email("alice") }),
     ]);
 
-    const second = await as.owner.post("/v1/install/teams", {
+    const second = await as.owner.post("/v1/site/teams", {
       slug: "marketing",
       name: "Marketing",
       adminUserId: ids.bob,
@@ -210,7 +204,7 @@ describe("teams (ac-1)", () => {
   });
 
   it("validates input and leaves no team behind on failure", async () => {
-    const bad = (body: object) => as.installAdmin.post("/v1/install/teams", body);
+    const bad = (body: object) => as.siteAdmin.post("/v1/site/teams", body);
     expect((await bad({ slug: "Bad Slug", name: "X", adminUserId: ids.alice })).status).toBe(400);
     expect((await bad({ slug: "x".repeat(33), name: "X", adminUserId: ids.alice })).status).toBe(
       400,
@@ -228,28 +222,26 @@ describe("teams (ac-1)", () => {
   });
 
   it("lists and renames teams; the slug never changes", async () => {
-    const renamed = await as.installAdmin.patch(`/v1/install/teams/${finance}`, {
+    const renamed = await as.siteAdmin.patch(`/v1/site/teams/${finance}`, {
       name: "Finance & Ops",
     });
     expect(renamed.json.team).toEqual({ id: finance, slug: "finance", name: "Finance & Ops" });
-    expect(
-      (await as.installAdmin.patch(`/v1/install/teams/${finance}`, { slug: "x" })).status,
-    ).toBe(400);
-    expect(
-      (await as.installAdmin.patch(`/v1/install/teams/${randomUUID()}`, { name: "N" })).status,
-    ).toBe(404);
-    const list = await as.installAdmin.get("/v1/install/teams");
+    expect((await as.siteAdmin.patch(`/v1/site/teams/${finance}`, { slug: "x" })).status).toBe(400);
+    expect((await as.siteAdmin.patch(`/v1/site/teams/${randomUUID()}`, { name: "N" })).status).toBe(
+      404,
+    );
+    const list = await as.siteAdmin.get("/v1/site/teams");
     expect(list.json.teams.map((t: { slug: string }) => t.slug)).toEqual(["finance", "marketing"]);
   });
 
   it("leaves membership of existing teams to the team's own admins", async () => {
-    // D8: install admins create teams and name the first team admin, nothing more. Otherwise an
-    // accomplice account could be made team admin and add the install admin, skipping break-glass.
-    const path = (user: string) => `/v1/install/teams/${finance}/members/${user}`;
-    for (const user of [ids.bob, ids.installAdmin, ids.alice]) {
-      expect((await as.installAdmin.put(path(user), { role: "team_admin" })).status).toBe(404);
-      expect((await as.installAdmin.patch(path(user), { role: "member" })).status).toBe(404);
-      expect((await as.installAdmin.delete(path(user))).status).toBe(404);
+    // D8: site admins create teams and name the first team admin, nothing more. Otherwise an
+    // accomplice account could be made team admin and add the site admin, skipping break-glass.
+    const path = (user: string) => `/v1/site/teams/${finance}/members/${user}`;
+    for (const user of [ids.bob, ids.siteAdmin, ids.alice]) {
+      expect((await as.siteAdmin.put(path(user), { role: "team_admin" })).status).toBe(404);
+      expect((await as.siteAdmin.patch(path(user), { role: "member" })).status).toBe(404);
+      expect((await as.siteAdmin.delete(path(user))).status).toBe(404);
       expect((await as.owner.put(path(user), { role: "team_admin" })).status).toBe(404);
     }
     const { rows } = await admin.query(
@@ -489,9 +481,9 @@ describe("team membership via /v1/team (ac-2, ac-4)", () => {
   });
 });
 
-describe("install admins and team content (ac-4)", () => {
-  it("gives install roles no team access: they can't select or use a team they're not in", async () => {
-    for (const who of ["owner", "installAdmin"] as const) {
+describe("site admins and team content (ac-4)", () => {
+  it("gives site roles no team access: they can't select or use a team they're not in", async () => {
+    for (const who of ["owner", "siteAdmin"] as const) {
       expect((await as[who].get("/v1/me/teams")).json.teams).toEqual([]);
       expect((await as[who].put("/v1/me/teams/active", { teamId: finance })).status).toBe(403);
       expect((await as[who].get("/v1/team/members")).status).toBe(409);
@@ -501,7 +493,7 @@ describe("install admins and team content (ac-4)", () => {
   it("keeps a removed member out even with a stale active-team pointer", async () => {
     // Plant a pointer directly (as if set before removal) and check every request re-verifies.
     const [sessionRow] = (
-      await admin.query(`SELECT id FROM sessions WHERE user_id = $1 LIMIT 1`, [ids.installAdmin])
+      await admin.query(`SELECT id FROM sessions WHERE user_id = $1 LIMIT 1`, [ids.siteAdmin])
     ).rows;
     await admin.query(
       `INSERT INTO session_active_teams (session_id, team_id) VALUES ($1, $2)
@@ -510,10 +502,10 @@ describe("install admins and team content (ac-4)", () => {
     );
     const sessions = await admin.query(
       `SELECT count(*)::int AS n FROM sessions WHERE user_id = $1`,
-      [ids.installAdmin],
+      [ids.siteAdmin],
     );
     expect(sessions.rows[0]).toEqual({ n: 1 });
-    expect(await as.installAdmin.get("/v1/team/members")).toMatchObject({
+    expect(await as.siteAdmin.get("/v1/team/members")).toMatchObject({
       status: 403,
       json: { code: "not_a_team_member" },
     });

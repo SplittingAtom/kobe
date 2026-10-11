@@ -7,7 +7,7 @@ import { withTeam } from "../with-team.js";
  * Change hints for egress allowlists (spec D28; CLAUDE.md "No Redis"). Writers NOTIFY in the
  * transaction that changes the ceiling or a team's enablement, so the hint is delivered only on
  * commit; the egress proxy drops its cached allowlists and re-reads Postgres. Payloads carry ids
- * only (any session may LISTEN): a team id, or {@link CEILING_CHANGED} for the install ceiling.
+ * only (any session may LISTEN): a team id, or {@link CEILING_CHANGED} for the site ceiling.
  */
 export const EGRESS_CHANGES_CHANNEL = "kobe_egress";
 export const CEILING_CHANGED = "ceiling";
@@ -35,7 +35,7 @@ export async function notifyEgressUserChanged(tx: KobeTx, userId: string): Promi
   );
 }
 
-/** The install ceiling: patterns teams may enable (rows with `in_ceiling`). */
+/** The site ceiling: patterns teams may enable (rows with `in_ceiling`). */
 export async function loadEgressCeiling(db: KobeDb): Promise<string[]> {
   const rows = await db
     .select({ domain: egressDomains.domain })

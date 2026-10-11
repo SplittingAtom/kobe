@@ -130,7 +130,7 @@ export async function notifyShortening(
   return sent;
 }
 
-/** After the install maximum was lowered: every team whose applied period will get shorter. */
+/** After the site maximum was lowered: every team whose applied period will get shorter. */
 export async function notifyAllTeams(deps: NotifyDeps, now = new Date()): Promise<number> {
   const all = await deps.db.select({ id: teams.id }).from(teams).orderBy(asc(teams.id));
   let sent = 0;

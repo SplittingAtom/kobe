@@ -2,7 +2,7 @@ import { Hono, type Context } from "hono";
 import type { z } from "zod";
 import { EGRESS_PRESETS } from "@kobe/db";
 import type { AuthVariables } from "../auth/session.js";
-import { requireInstallPermission } from "../authz/middleware.js";
+import { requireSitePermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import {
   addCeilingDomain,
@@ -37,13 +37,13 @@ const notFound = (c: Context) =>
   c.json({ code: "domain_not_found", message: "That domain is not listed." }, 404);
 
 /**
- * The install egress ceiling (`/v1/install/egress-ceiling`, spec D6, D8, D28): the domains teams
- * may enable for their sandboxes, presets included. Install Owner/Admins only.
+ * The site egress ceiling (`/v1/site/egress-ceiling`, spec D6, D8, D28): the domains teams
+ * may enable for their sandboxes, presets included. Site Owner/Admins only.
  */
-export function installEgressRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
+export function siteEgressRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
   const db = deps.database.db;
-  app.use(requireInstallPermission("install.egress.manage"));
+  app.use(requireSitePermission("site.egress.manage"));
 
   app.get("/", async (c) => c.json({ domains: await listCeiling(db), presets: EGRESS_PRESETS }));
 

@@ -48,7 +48,7 @@ export type FileOutcome =
 export interface ProjectFileDeps {
   readonly db: KobeDb;
   readonly blobs: BlobStore | undefined;
-  /** Install defaults: largest single file and the team storage quota default. */
+  /** Site defaults: largest single file and the team storage quota default. */
   readonly maxFileBytes: number;
   readonly teamQuotaDefaultBytes: number;
 }

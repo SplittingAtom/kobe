@@ -11,7 +11,7 @@ import {
 } from "../settings.js";
 
 /**
- * Break-glass reads (spec D10, KOBE-16): the only way an install admin reads team content.
+ * Break-glass reads (spec D10, KOBE-16): the only way a site admin reads team content.
  *
  * `readWithBreakGlass()` runs one read in one transaction:
  *   1. locks the grant row (`FOR SHARE`) and verifies, in the same statement, that it is approved,
@@ -37,7 +37,7 @@ export type BreakGlassScope = "team" | "user" | "thread";
 
 export interface BreakGlassAccess {
   readonly grantId: string;
-  /** The signed-in install admin; must be the grant's requester. */
+  /** The signed-in site admin; must be the grant's requester. */
   readonly adminId: string;
   /** Client address and user agent for the audit row. */
   readonly request?: AuditRequestContext;
@@ -127,7 +127,7 @@ export type BreakGlassReadResult =
 export type BreakGlassDeniedCode =
   /** No such grant, or another admin's: indistinguishable. */
   | "grant_not_found"
-  /** Pending, denied, revoked, expired, or the requester is no longer an install admin. */
+  /** Pending, denied, revoked, expired, or the requester is no longer a site admin. */
   | "grant_not_active"
   /** The thread doesn't exist in the team or is outside the grant's scope. */
   | "not_found";

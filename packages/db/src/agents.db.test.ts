@@ -7,7 +7,7 @@ import { withTeam } from "./with-team.js";
 
 /**
  * Agent definition tables (KOBE-45): team agents behind team RLS, personal and gallery agents
- * install-wide, with slug uniqueness per scope and backstop checks. Runs as the app role.
+ * site-wide, with slug uniqueness per scope and backstop checks. Runs as the app role.
  */
 const teamA = randomUUID();
 const teamB = randomUUID();
@@ -53,7 +53,7 @@ const teamAgent = (
       .returning({ id: teamAgents.id }),
   );
 
-const installAgent = (values: Partial<typeof installAgents.$inferInsert> & { slug: string }) =>
+const siteAgent = (values: Partial<typeof installAgents.$inferInsert> & { slug: string }) =>
   app.db
     .insert(installAgents)
     .values({
@@ -116,27 +116,27 @@ describe("team_agents", () => {
 
 describe("install_agents (personal and gallery)", () => {
   it("requires an owner for personal agents and forbids one for gallery agents", async () => {
-    expect(await sqlState(installAgent({ slug: "no-owner", ownerUserId: null }))).toBe("23514");
-    expect(await sqlState(installAgent({ slug: "owned-gallery", scope: "gallery" }))).toBe("23514");
+    expect(await sqlState(siteAgent({ slug: "no-owner", ownerUserId: null }))).toBe("23514");
+    expect(await sqlState(siteAgent({ slug: "owned-gallery", scope: "gallery" }))).toBe("23514");
     await expect(
-      installAgent({ slug: "gallery-ok", scope: "gallery", ownerUserId: null }),
+      siteAgent({ slug: "gallery-ok", scope: "gallery", ownerUserId: null }),
     ).resolves.toHaveLength(1);
   });
 
-  it("keeps personal slugs unique per owner and gallery slugs unique install-wide", async () => {
-    await installAgent({ slug: "mine" });
-    expect(await sqlState(installAgent({ slug: "mine" }))).toBe("23505");
-    await expect(installAgent({ slug: "mine", ownerUserId: bob })).resolves.toHaveLength(1);
+  it("keeps personal slugs unique per owner and gallery slugs unique site-wide", async () => {
+    await siteAgent({ slug: "mine" });
+    expect(await sqlState(siteAgent({ slug: "mine" }))).toBe("23505");
+    await expect(siteAgent({ slug: "mine", ownerUserId: bob })).resolves.toHaveLength(1);
     await expect(
-      installAgent({ slug: "mine", scope: "gallery", ownerUserId: null }),
+      siteAgent({ slug: "mine", scope: "gallery", ownerUserId: null }),
     ).resolves.toHaveLength(1);
-    expect(
-      await sqlState(installAgent({ slug: "mine", scope: "gallery", ownerUserId: null })),
-    ).toBe("23505");
+    expect(await sqlState(siteAgent({ slug: "mine", scope: "gallery", ownerUserId: null }))).toBe(
+      "23505",
+    );
   });
 
   it("lets the app role update and delete (no team data hangs off these rows)", async () => {
-    const [row] = await installAgent({ slug: "temp" });
+    const [row] = await siteAgent({ slug: "temp" });
     const id = row?.id ?? "";
     await app.db
       .update(installAgents)
@@ -150,8 +150,8 @@ describe("install_agents (personal and gallery)", () => {
   });
 
   it("applies the same backstop checks as team agents", async () => {
-    expect(await sqlState(installAgent({ slug: "x".repeat(49) }))).toBe("23514");
-    expect(await sqlState(installAgent({ slug: "huge", prompt: "p".repeat(100 * 1024 + 1) }))).toBe(
+    expect(await sqlState(siteAgent({ slug: "x".repeat(49) }))).toBe("23514");
+    expect(await sqlState(siteAgent({ slug: "huge", prompt: "p".repeat(100 * 1024 + 1) }))).toBe(
       "23514",
     );
   });

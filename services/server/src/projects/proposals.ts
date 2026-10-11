@@ -141,7 +141,7 @@ const refuse = (reason: ProposeRefusal, reply: ProposeReply): Gate => ({
   reply,
 });
 
-/** Pure checks of the frame against the install's limits. */
+/** Pure checks of the frame against the site's limits. */
 function checkFrame(
   deps: ProposeDeps,
   req: ProposeRequest,

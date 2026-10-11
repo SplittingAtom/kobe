@@ -477,7 +477,7 @@ describe("authorization and thread state", () => {
     }
   });
 
-  it("fixes the approval mode at creation, never looser than the install floor", async () => {
+  it("fixes the approval mode at creation, never looser than the site floor", async () => {
     const w = await f.world();
     const ws = await f.connect(w);
     const threadId = await f.thread(w.owner);

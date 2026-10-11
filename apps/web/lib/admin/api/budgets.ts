@@ -1,6 +1,6 @@
 /**
  * Budgets and rate limits (KOBE-42, D30): `/v1/team/budgets` (team.budgets.manage),
- * `/v1/team/budgets/status` (any member, the chat banner), `/v1/install/budget`
+ * `/v1/team/budgets/status` (any member, the chat banner), `/v1/site/budget`
  * (install.budgets.manage). Responses arrive camelized; request bodies use the routes' snake_case.
  */
 import { apiRequest, type ApiResult } from "../../api/client";
@@ -45,7 +45,7 @@ export interface MemberBudget extends BudgetAmounts {
 export interface TeamBudgets {
   readonly period: { readonly month: string; readonly day: string };
   /** The install's spend is every team's together: shown in percent only. */
-  readonly install: {
+  readonly site: {
     readonly userRequestsPerMinute: number;
     readonly percentUsed: {
       readonly monthUsd: number | null;
@@ -122,13 +122,13 @@ export function getBudgetStatus(teamId: string): Promise<ApiResult<BudgetStatus>
 }
 
 export function getInstallBudget(): Promise<ApiResult<InstallLimits>> {
-  return apiRequest<InstallLimits>("/v1/install/budget");
+  return apiRequest<InstallLimits>("/v1/site/budget");
 }
 
 export function setInstallBudget(
   input: BudgetAmountsInput & { readonly user_requests_per_minute: number },
 ): Promise<ApiResult<InstallLimits>> {
-  return apiRequest<InstallLimits>("/v1/install/budget", { method: "PUT", json: input });
+  return apiRequest<InstallLimits>("/v1/site/budget", { method: "PUT", json: input });
 }
 
 /** "12.5" → 12.5, "" → null, anything else → undefined (invalid). */

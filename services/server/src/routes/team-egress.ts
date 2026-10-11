@@ -30,7 +30,7 @@ const statusQuerySchema = z.enum(["pending", "approved", "denied", "all"]).defau
 /**
  * Team egress (`/v1/team/egress`, spec D6, D8, D28). Every member can see what the team's sandboxes
  * may reach (it explains blocked requests); only team admins enable or disable domains, within the
- * install ceiling, decide access requests (KOBE-39) and configure injected headers (write-only:
+ * site ceiling, decide access requests (KOBE-39) and configure injected headers (write-only:
  * names are listed, values never leave the server except sealed to the egress proxy). Members never
  * self-allow (D28): they ask through `/v1/egress/requests`.
  */

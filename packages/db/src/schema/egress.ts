@@ -4,8 +4,8 @@ import { MAX_INJECTED_HEADERS } from "../egress/header-rules.js";
 import { users } from "./auth.js";
 import { teams } from "./teams.js";
 
-// Egress allowlists (spec D6, D28, §5.4). Install admins define the **ceiling** (`egress_domains`,
-// install-wide); team admins **enable** domains within it (`team_egress`, a team table). A sandbox
+// Egress allowlists (spec D6, D28, §5.4). Site admins define the **ceiling** (`egress_domains`,
+// site-wide); team admins **enable** domains within it (`team_egress`, a team table). A sandbox
 // may open a connection to a host only if its team enabled a pattern that matches the host and that
 // pattern is in the ceiling. Patterns are lowercase ASCII (IDNA) host names, optionally `*.` + name
 // (subdomains only, never the apex); `packages/db/src/egress/domain.ts` validates and matches them.
@@ -22,7 +22,7 @@ const patternCheck = (column: unknown) =>
   sql`char_length(${column}) <= 253 AND ${column} ~ ${sql.raw(`'${DOMAIN_PATTERN_SQL}'`)}`;
 
 /**
- * Install-wide (†): every domain pattern the install knows, preset or custom. `in_ceiling` says
+ * Site-wide (†): every domain pattern the site knows, preset or custom. `in_ceiling` says
  * whether teams may enable it; preset rows stay listed when taken out of the ceiling, custom rows
  * are deleted (which removes every team's enablement of it with them).
  */
@@ -30,7 +30,7 @@ export const egressDomains = pgTable(
   "egress_domains",
   {
     domain: text().primaryKey(),
-    /** Preset group, or null for a domain an install admin added. */
+    /** Preset group, or null for a domain a site admin added. */
     preset: text().$type<EgressPreset>(),
     inCeiling: boolean().notNull().default(false),
     note: text(),

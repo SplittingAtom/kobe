@@ -1,8 +1,8 @@
 import type { JsonObject, RiskClass, ToolDescriptor } from "@kobe/protocol";
 
 /**
- * Install-level policy switches. Stored in `install_settings` (one row per key), so an install
- * Owner/Admin flips them through `PUT /v1/install/policy/settings` — no code change, no redeploy.
+ * Site-level policy switches. Stored in `install_settings` (one row per key), so an install
+ * Owner/Admin flips them through `PUT /v1/site/policy/settings` — no code change, no redeploy.
  */
 export interface PolicySettings {
   /**
@@ -11,7 +11,7 @@ export interface PolicySettings {
    * risk class. Default `false` — **user decision (Chris, 2026-10-03; KOBE-37 ledger): sandbox tools
    * ask for approval only when a policy rule says so; there is no default prompt for them** (D29:
    * "shell and file tools are bounded by the sandbox and egress policy"). An `ask` rule (install or
-   * team) is how a team asks for them; `true` is an install admin's explicit opt-in to prompting
+   * team) is how a team asks for them; `true` is a site admin's explicit opt-in to prompting
    * every sandbox write. Deny/ask rules and `ask-all` apply either way.
    */
   readonly promptSandboxWrites: boolean;
@@ -36,7 +36,7 @@ export const PROMPT_EXEMPT_KOBE_TOOLS: ReadonlySet<string> = new Set([
  *   `scope: "user"` in its input (the memory contract, KOBE-153; anything else prompts);
  * - artifacts ({@link PROMPT_EXEMPT_KOBE_TOOLS}; Chris, 2026-10-06): they only write versioned,
  *   Kobe-owned content into the user's own thread, shown in a sandboxed frame with no network.
- * Install/team ask rules and `ask-all` still prompt for them (evaluate.ts runs those first).
+ * Site/team ask rules and `ask-all` still prompt for them (evaluate.ts runs those first).
  * Only interactive runs use this table; auto mode and scheduled runs don't (evaluate.ts).
  */
 export function riskClassPrompts(

@@ -20,7 +20,7 @@ function sentNotice(result: InviteSent): string {
     : `Invitation created for ${result.invitation.email}, but the email could not be sent. Check SMTP, then use Resend.`;
 }
 
-/** Install invitations (spec D7; `/v1/install/invites`). Teams invite people separately. */
+/** Install invitations (spec D7; `/v1/site/invites`). Teams invite people separately. */
 export function InstallInvitesPage() {
   const { state, reload } = useResource(listInstallInvites);
   const mutation = useMutation();

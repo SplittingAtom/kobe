@@ -2,9 +2,9 @@ import pg from "pg";
 import { afterAll, describe, expect, inject, it } from "vitest";
 import { BREAK_GLASS_READABLE_TABLES } from "./break-glass/tables.js";
 import {
-  INSTALL_WIDE_COLUMN_GRANTS,
-  INSTALL_WIDE_TABLES,
-  TEAM_REFERENCING_INSTALL_WIDE,
+  SITE_WIDE_COLUMN_GRANTS,
+  SITE_WIDE_TABLES,
+  TEAM_REFERENCING_SITE_WIDE,
   TEAM_TABLES,
   appPrivilegesFor,
 } from "./tenancy.js";
@@ -100,14 +100,14 @@ describe("RLS catalog check (ac-1)", () => {
     expect(odd).toEqual([]);
   });
 
-  it("classifies every top-level table as team-owned or install-wide", async () => {
-    const known = new Set<string>([...TEAM_TABLES, ...INSTALL_WIDE_TABLES]);
+  it("classifies every top-level table as team-owned or site-wide", async () => {
+    const known = new Set<string>([...TEAM_TABLES, ...SITE_WIDE_TABLES]);
     const tables = (await relations()).filter((r) => !r.ispartition);
     expect(tables.map((t) => t.name).filter((name) => !known.has(name))).toEqual([]);
     expect(tables.map((t) => t.name)).toEqual(expect.arrayContaining([...TEAM_TABLES]));
   });
 
-  it("keeps team_id and team foreign keys out of install-wide tables unless allowlisted", async () => {
+  it("keeps team_id and team foreign keys out of site-wide tables unless allowlisted", async () => {
     const referencing = await rows<{ table: string }>(
       `SELECT DISTINCT c.relname AS table
        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -117,10 +117,7 @@ describe("RLS catalog check (ac-1)", () => {
                     AND k.confrelid = 'public.teams'::regclass))
        ORDER BY 1`,
     );
-    const allowed = new Set<string>([
-      ...TEAM_TABLES,
-      ...Object.keys(TEAM_REFERENCING_INSTALL_WIDE),
-    ]);
+    const allowed = new Set<string>([...TEAM_TABLES, ...Object.keys(TEAM_REFERENCING_SITE_WIDE)]);
     expect(referencing.map((r) => r.table).filter((t) => !allowed.has(t))).toEqual([]);
   });
 
@@ -314,7 +311,7 @@ describe("app role privileges", () => {
        ORDER BY 1, 3, 2`,
       [appRole],
     );
-    const expected = Object.entries(INSTALL_WIDE_COLUMN_GRANTS)
+    const expected = Object.entries(SITE_WIDE_COLUMN_GRANTS)
       .flatMap(([table, grants]) =>
         Object.entries(grants ?? {}).flatMap(([privilege, columns]) =>
           (columns ?? []).map((column) => ({ table, column, privilege })),

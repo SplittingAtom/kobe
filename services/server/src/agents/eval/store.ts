@@ -234,7 +234,7 @@ export function finishEval(
       .where(and(eq(orbitEvals.id, id), inArray(orbitEvals.status, ACTIVE)))
       .returning(COLUMNS);
     if (!row) return null;
-    // A gallery eval's verdict becomes the install-level score in the same transaction (KOBE-94).
+    // A gallery eval's verdict becomes the site-level score in the same transaction (KOBE-94).
     if (row.agentScope === "gallery") await recordGalleryScore(tx, row);
     await recordAudit(tx, {
       actor: SYSTEM_ACTOR,

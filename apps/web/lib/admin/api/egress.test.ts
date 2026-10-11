@@ -35,22 +35,22 @@ describe("install egress ceiling API", () => {
     let fetchFn = stub(201, { domain: ENTRY });
     await install.addCeilingDomain("*.example.com", null);
     let [url, init] = must(fetchFn.mock.calls[0]);
-    expect(url).toBe("/v1/install/egress-ceiling");
+    expect(url).toBe("/v1/site/egress-ceiling");
     expect(JSON.parse(String(init?.body))).toEqual({ domain: "*.example.com", note: null });
 
     fetchFn = stub(200, { domain: ENTRY });
     await install.setCeilingMembership("*.example.com", false);
     [url, init] = must(fetchFn.mock.calls[0]);
-    expect(url).toBe("/v1/install/egress-ceiling/*.example.com");
+    expect(url).toBe("/v1/site/egress-ceiling/*.example.com");
     expect(JSON.parse(String(init?.body))).toEqual({ in_ceiling: false });
 
     fetchFn = stub(204);
     await install.deleteCeilingDomain("a b.com");
-    expect(must(fetchFn.mock.calls[0])[0]).toBe("/v1/install/egress-ceiling/a%20b.com");
+    expect(must(fetchFn.mock.calls[0])[0]).toBe("/v1/site/egress-ceiling/a%20b.com");
 
     fetchFn = stub(200, { domains: [], presets: [] });
     await install.setPresetMembership("git_hosts", true);
-    expect(must(fetchFn.mock.calls[0])[0]).toBe("/v1/install/egress-ceiling/presets/git_hosts");
+    expect(must(fetchFn.mock.calls[0])[0]).toBe("/v1/site/egress-ceiling/presets/git_hosts");
   });
 });
 

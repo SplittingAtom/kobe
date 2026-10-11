@@ -26,7 +26,7 @@ export const pinnedToolAnnotationsSchema = z.object({
 
 /**
  * What a drifted tool's live definition says now (KOBE-102). The entry's own fields stay the
- * approved ones until an install admin re-approves; nothing reads `proposed` except the review UI.
+ * approved ones until a site admin re-approves; nothing reads `proposed` except the review UI.
  */
 export const proposedToolSchema = z.object({
   title: z.string().max(256).optional(),

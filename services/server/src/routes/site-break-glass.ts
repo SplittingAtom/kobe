@@ -9,7 +9,7 @@ import {
 } from "@kobe/db";
 import type { AuthVariables } from "../auth/session.js";
 import { currentAuditContext } from "../audit/context.js";
-import { requireInstallPermission } from "../authz/middleware.js";
+import { requireSitePermission } from "../authz/middleware.js";
 import { deliverBreakGlassNotifications } from "../break-glass/outbox.js";
 import { hitRateLimit } from "../rate-limit.js";
 import {
@@ -24,7 +24,7 @@ import {
   denyGrant,
   effectiveStatus,
   getGrant,
-  isSoleInstallAdmin,
+  isSoleSiteAdmin,
   listGrants,
   requestGrant,
   revokeGrant,
@@ -40,9 +40,9 @@ import { toSummary } from "../threads/repository.js";
 
 type Ctx = Context<{ Variables: AuthVariables }>;
 
-/** Reads per install admin and minute, across replicas (every read is an audited transaction). */
+/** Reads per site admin and minute, across replicas (every read is an audited transaction). */
 export const BREAK_GLASS_READ_LIMIT = { windowMs: 60_000, max: 120 } as const;
-/** Requests per install admin and hour: each one emails every other install admin. */
+/** Requests per site admin and hour: each one emails every other site admin. */
 export const BREAK_GLASS_REQUEST_LIMIT = { windowMs: 3_600_000, max: 10 } as const;
 
 const ERRORS = {
@@ -84,7 +84,7 @@ function fail(c: Ctx, code: keyof typeof ERRORS, extra: Record<string, unknown> 
 
 const iso = (d: Date | null) => d?.toISOString() ?? null;
 
-/** A grant as install admins see it, with what the viewer may do with it. */
+/** A grant as site admins see it, with what the viewer may do with it. */
 function grantJson(detail: GrantDetail, viewerId: string, soleAdmin: boolean) {
   const { grant } = detail;
   const status = effectiveStatus(grant);
@@ -145,15 +145,15 @@ function readGrantJson(result: BreakGlassReadResult) {
 }
 
 /**
- * Break-glass (spec D10; §6.1 `/v1/install/break-glass`), install admins only. Requests,
+ * Break-glass (spec D10; §6.1 `/v1/site/break-glass`), site admins only. Requests,
  * two-person approval, denial, revocation, and the **only** read path to team content for install
  * admins: read-only GET routes under an active grant, each read verified and audited in the data
  * layer (`readWithBreakGlass`). Normal team routes never honor a grant.
  */
-export function installBreakGlassRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
+export function siteBreakGlassRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
   const db = deps.database.db;
-  app.use(requireInstallPermission("install.break_glass.request"));
+  app.use(requireSitePermission("site.break_glass.request"));
 
   const respond = async (c: Ctx, result: GrantResult, status: 200 | 201 = 200) => {
     if (!result.ok) return fail(c, result.error satisfies GrantError);
@@ -174,7 +174,7 @@ export function installBreakGlassRoutes(deps: ServerDeps): Hono<{ Variables: Aut
         : [];
     return c.json(
       {
-        grant: grantJson(detail, viewer, await isSoleInstallAdmin(db, viewer)),
+        grant: grantJson(detail, viewer, await isSoleSiteAdmin(db, viewer)),
         notified: result.queued,
         warnings,
       },
@@ -186,7 +186,7 @@ export function installBreakGlassRoutes(deps: ServerDeps): Hono<{ Variables: Aut
     const query = listGrantsQuerySchema.safeParse(c.req.query());
     if (!query.success) return invalidRequest(c, "Filter by status and teamId only.");
     const viewer = c.get("user").id;
-    const sole = await isSoleInstallAdmin(db, viewer);
+    const sole = await isSoleSiteAdmin(db, viewer);
     const grants = (await listGrants(db, viewer, { teamId: query.data.teamId }))
       .map((d) => grantJson(d, viewer, sole))
       .filter((g) => query.data.status === undefined || g.status === query.data.status);
@@ -214,7 +214,7 @@ export function installBreakGlassRoutes(deps: ServerDeps): Hono<{ Variables: Aut
     const detail = await getGrant(db, id.data, c.get("user").id);
     if (!detail) return fail(c, "grant_not_found");
     const viewer = c.get("user").id;
-    return c.json({ grant: grantJson(detail, viewer, await isSoleInstallAdmin(db, viewer)) });
+    return c.json({ grant: grantJson(detail, viewer, await isSoleSiteAdmin(db, viewer)) });
   });
 
   const decide = (action: typeof approveGrant) => async (c: Ctx) => {
@@ -222,7 +222,7 @@ export function installBreakGlassRoutes(deps: ServerDeps): Hono<{ Variables: Aut
     if (!id.success) return fail(c, "grant_not_found");
     return respond(c, await action(db, c.get("user").id, id.data));
   };
-  const approver = requireInstallPermission("install.break_glass.approve");
+  const approver = requireSitePermission("site.break_glass.approve");
   app.post("/:id/approve", approver, decide(approveGrant));
   app.post("/:id/deny", approver, decide(denyGrant));
   app.post("/:id/revoke", decide(revokeGrant));

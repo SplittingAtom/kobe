@@ -180,7 +180,7 @@ describe("POST /v1/uploads", () => {
 });
 
 describe("team storage quota", () => {
-  it("uses the install default, a team's own limit, and counts workspace bytes", async () => {
+  it("uses the site default, a team's own limit, and counts workspace bytes", async () => {
     const { owner, team } = await world();
     expect((await upload(owner, filled(1000))).status).toBe(201);
     expect((await upload(owner, filled(1000))).status).toBe(201);
@@ -202,7 +202,7 @@ describe("team storage quota", () => {
       [team, owner.id],
     );
     expect((await upload(owner, filled(1))).status).toBe(403);
-    // null max_bytes = the install default again.
+    // null max_bytes = the site default again.
     await fx.admin.query(`UPDATE team_storage_quotas SET max_bytes = NULL WHERE team_id = $1`, [
       team,
     ]);
@@ -275,23 +275,23 @@ describe("orphan sweep", () => {
       `UPDATE files SET created_at = now() - interval '25 hours' WHERE id = ANY($1::uuid[])`,
       [[old.file_id, threaded.file_id, heldFile.file_id]],
     );
-    const create = (installRole: "owner" | "admin") =>
+    const create = (siteRole: "owner" | "admin") =>
       fx.replica(0).deps.createUserWithPassword(
         {
-          email: `${installRole}-${randomUUID().slice(0, 6)}@hold.test`,
-          name: installRole,
+          email: `${siteRole}-${randomUUID().slice(0, 6)}@hold.test`,
+          name: siteRole,
           password: "correct horse battery 1",
         },
-        { installRole },
+        { siteRole },
       );
-    const [installOwner, installAdmin] = [await create("owner"), await create("admin")];
+    const [siteOwner, siteAdmin] = [await create("owner"), await create("admin")];
     const hold = await fx.admin.query<{ id: string }>(
       `INSERT INTO legal_holds (team_id, user_id, reason, placed_by) VALUES ($1, $2, 'matter', $3) RETURNING id`,
-      [team, held.id, installAdmin.id],
+      [team, held.id, siteAdmin.id],
     );
     await fx.admin.query(
       `UPDATE legal_holds SET status = 'active', approved_by = $2 WHERE id = $1`,
-      [must(hold.rows[0], "hold").id, installOwner.id],
+      [must(hold.rows[0], "hold").id, siteOwner.id],
     );
     const counts = await expireOrphanUploads(fx.db, team, blobs, 24);
     expect(counts).toEqual({ files: 1, bytes: 10 });

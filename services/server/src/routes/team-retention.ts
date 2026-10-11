@@ -13,7 +13,7 @@ const view = (v: RetentionView) => ({ ...v, allowed: allowedPeriods(v.maximum) }
 
 /**
  * Team retention (`/v1/team/retention`, spec D6, D8, D18). Every member can read the period and
- * any upcoming shortening (the banner); team admins set it within the install maximum. A shorter
+ * any upcoming shortening (the banner); team admins set it within the site maximum. A shorter
  * period applies after a 7-day grace period, during which the team admins are emailed and can
  * cancel it (user decision 2026-10-04); a longer one applies at once. Team admins still can't read
  * or delete members' threads: the period applies to everyone's alike.

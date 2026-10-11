@@ -216,7 +216,7 @@ describe("Stop pauses the queue", () => {
     const actor: ActorContext = {
       user_id: w.owner.id,
       team_id: w.team,
-      install_role: "user",
+      site_role: "user",
       team_role: "member",
     };
     const scheduled = await f.fx.replica(0).deps.runs.submitMessage(actor, {

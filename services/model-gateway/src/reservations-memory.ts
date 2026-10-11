@@ -65,7 +65,7 @@ export class MemoryReservations implements ReservationStore {
   }
 
   /**
-   * In-flight reservations against one budget line. On a shared line (install, team) each
+   * In-flight reservations against one budget line. On a shared line (site, team) each
    * member's reservations count only up to their share of what is left, so one sandbox reserving
    * large calls cannot deny everyone else; that member alone is refused once its own reach it.
    */

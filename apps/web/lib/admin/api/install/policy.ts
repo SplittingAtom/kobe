@@ -1,9 +1,9 @@
-/** Install console: policy floor (`/v1/install/policy`, install.policy.manage; KOBE-35). */
+/** Install console: policy floor (`/v1/site/policy`, install.policy.manage; KOBE-35). */
 import { apiRequest, type ApiResult } from "../../../api/client";
 import { ruleBody, type NewRule, type PolicyRule } from "../policy";
 
 const enc = encodeURIComponent;
-const BASE = "/v1/install/policy";
+const BASE = "/v1/site/policy";
 
 export async function listInstallRules(): Promise<ApiResult<readonly PolicyRule[]>> {
   const res = await apiRequest<{ rules: PolicyRule[] }>(`${BASE}/rules`);

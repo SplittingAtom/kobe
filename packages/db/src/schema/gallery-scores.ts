@@ -14,8 +14,8 @@ import {
 import { installAgentVersions, installAgents } from "./agents.js";
 
 /**
- * Published Orbit scores of gallery agent versions (KOBE-94). Install-wide (†): gallery agents
- * belong to no team, so their scores can't live in the team table `orbit_evals`. An install admin
+ * Published Orbit scores of gallery agent versions (KOBE-94). Site-wide (†): gallery agents
+ * belong to no team, so their scores can't live in the team table `orbit_evals`. A site admin
  * runs the eval in a team of theirs (an `orbit_evals` row there is the execution record); the
  * verdict is copied here. Append only; the newest row of a version is its score.
  */

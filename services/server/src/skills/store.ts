@@ -20,7 +20,7 @@ import { recordPendingReview, recordPersonalScan } from "./review.js";
 
 /**
  * Skill bundles in the database (KOBE-78). Team skills live in RLS tables and are always touched
- * inside `withTeam`; personal skills live in install-wide tables, where the owner filter below is
+ * inside `withTeam`; personal skills live in site-wide tables, where the owner filter below is
  * the only wall between users, so every personal query applies it. Each upload is one immutable
  * version (the database refuses to change or delete it); uploads to a location are serialized by
  * an advisory lock, so version numbers are consecutive and the slug cap holds.
@@ -85,9 +85,9 @@ const lockKey = (l: SkillLocation) =>
   l.scope === "team" ? `kobe.skills.team:${l.teamId}` : `kobe.skills.personal:${l.ownerUserId}`;
 
 type TeamRow = typeof teamSkills.$inferSelect;
-type InstallRow = typeof installSkills.$inferSelect;
+type SiteRow = typeof installSkills.$inferSelect;
 
-function toRecord(scope: SkillScope, row: TeamRow | InstallRow): SkillRecord {
+function toRecord(scope: SkillScope, row: TeamRow | SiteRow): SkillRecord {
   return {
     id: row.id,
     scope,

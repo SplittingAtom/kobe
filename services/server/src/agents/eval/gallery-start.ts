@@ -10,10 +10,10 @@ import type { EvalRunner } from "./service.js";
 import { createEval, type EvalRecord } from "./store.js";
 
 /**
- * An install admin runs the Orbit eval for a gallery agent's current version (KOBE-94). It runs in
+ * A site admin runs the Orbit eval for a gallery agent's current version (KOBE-94). It runs in
  * `teamId`, a team the admin belongs to (the Job, namespace, gateway access and budget are that
- * team's), with the install default threshold. Nothing is published: the verdict becomes the
- * install-level score (`recordGalleryScore`).
+ * team's), with the site default threshold. Nothing is published: the verdict becomes the
+ * site-level score (`recordGalleryScore`).
  */
 
 export type GalleryEvalOutcome =

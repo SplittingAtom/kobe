@@ -25,7 +25,7 @@ export interface ResolveInput {
     readonly approvalMode: ApprovalMode | null;
     readonly skills: readonly SkillRef[];
     /**
-     * Built-in skills the agent lists (KOBE-88): install-provided, baked into the sandbox image, so
+     * Built-in skills the agent lists (KOBE-88): site-provided, baked into the sandbox image, so
      * they have no hash (not blocklistable, no review) and always resolve. A personal skill of the
      * same name is shadowed. Naming one in an exclusive agent keeps it; there is no other exclusion.
      */

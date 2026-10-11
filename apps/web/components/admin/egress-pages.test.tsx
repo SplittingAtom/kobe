@@ -41,7 +41,7 @@ afterEach(() => {
 
 describe("Install egress ceiling", () => {
   it("lists domains by preset and offers delete for custom domains only", async () => {
-    stubApi({ "GET /v1/install/egress-ceiling": [200, CEILING] });
+    stubApi({ "GET /v1/site/egress-ceiling": [200, CEILING] });
     renderInstall(<EgressCeilingPage />);
     const registries = await screen.findByRole("table", { name: "Package registries" });
     expect(registries.textContent).toContain("pypi.org");
@@ -60,32 +60,32 @@ describe("Install egress ceiling", () => {
 
   it("toggles a domain and a whole preset, and deletes a custom domain", async () => {
     const calls = stubApi({
-      "GET /v1/install/egress-ceiling": [200, CEILING],
-      "PUT /v1/install/egress-ceiling/github.com": [
+      "GET /v1/site/egress-ceiling": [200, CEILING],
+      "PUT /v1/site/egress-ceiling/github.com": [
         200,
         { domain: entry("github.com", "git_hosts", true) },
       ],
-      "PUT /v1/install/egress-ceiling/presets/package_registries": [200, CEILING],
-      "DELETE /v1/install/egress-ceiling/*.example.com": [204],
+      "PUT /v1/site/egress-ceiling/presets/package_registries": [200, CEILING],
+      "DELETE /v1/site/egress-ceiling/*.example.com": [204],
     });
     renderInstall(<EgressCeilingPage />);
     await userEvent.click(
       await screen.findByRole("checkbox", { name: "github.com in the ceiling" }),
     );
     await screen.findByText(/github.com is in the ceiling/);
-    const put = must(calls.find((c) => c.url === "/v1/install/egress-ceiling/github.com"));
+    const put = must(calls.find((c) => c.url === "/v1/site/egress-ceiling/github.com"));
     expect(JSON.parse(String(put.body))).toEqual({ in_ceiling: true });
     await userEvent.click(screen.getByRole("button", { name: "Remove all package registries" }));
     await screen.findByText(/all out of the ceiling/);
     await userEvent.click(screen.getByRole("button", { name: "Delete *.example.com" }));
     await screen.findByText("Deleted *.example.com.");
-    expect(summary(calls)).toContain("DELETE /v1/install/egress-ceiling/*.example.com");
+    expect(summary(calls)).toContain("DELETE /v1/site/egress-ceiling/*.example.com");
   });
 
   it("adds a domain and shows the server's validation errors", async () => {
     const calls = stubApi({
-      "GET /v1/install/egress-ceiling": [200, CEILING],
-      "POST /v1/install/egress-ceiling": [
+      "GET /v1/site/egress-ceiling": [200, CEILING],
+      "POST /v1/site/egress-ceiling": [
         [201, { domain: entry("api.vendor.io", null, true) }],
         [
           400,
@@ -114,8 +114,8 @@ describe("Install egress ceiling", () => {
 describe("Domain fronting warnings", () => {
   it("marks shared hosting in the list and repeats the server's warning after adding", async () => {
     stubApi({
-      "GET /v1/install/egress-ceiling": [200, CEILING],
-      "POST /v1/install/egress-ceiling": [
+      "GET /v1/site/egress-ceiling": [200, CEILING],
+      "POST /v1/site/egress-ceiling": [
         [
           201,
           {

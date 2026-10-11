@@ -153,8 +153,8 @@ const toolsSchema = z
  * write any value here in a personal agent, so these fields are requests, never grants.
  *   - `tools.allow` only RESTRICTS: the effective tool set is the intersection of the agent's allow
  *     list with what the team and install expose. It never adds a tool or removes a prompt.
- *   - `tools.deny`, install/team deny rules and ask rules always win over `tools.allow`.
- *   - `approval_mode` is clamped to the team/install floor: it can only make a run stricter (D19,
+ *   - `tools.deny`, site/team deny rules and ask rules always win over `tools.allow`.
+ *   - `approval_mode` is clamped to the team/site floor: it can only make a run stricter (D19,
  *     D29); `auto` below an `ask-on-write` floor runs as `ask-on-write`.
  *   - `model`, `skills`, `connectors` are opaque names intersected with the team's settings;
  *     `connectors: all` is the team's enabled list itself, still under exposure, drift and grants.

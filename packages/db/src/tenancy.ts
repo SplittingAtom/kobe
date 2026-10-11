@@ -38,15 +38,16 @@ export const TENANCY_DOMAINS = [
 
 type Domain = (typeof TENANCY_DOMAINS)[number];
 type TeamOf<D> = D extends { team: readonly (infer T)[] } ? T : never;
-type InstallWideOf<D> = D extends { installWide: readonly (infer T)[] } ? T : never;
+type SiteWideOf<D> = D extends { siteWide: readonly (infer T)[] } ? T : never;
 
 export type TeamTable = TeamOf<Domain>;
-export type InstallWideTable = InstallWideOf<Domain>;
+export type SiteWideTable = SiteWideOf<Domain>;
 
 export const TEAM_TABLES: readonly TeamTable[] = TENANCY_DOMAINS.flatMap<TeamTable>((d) => d.team);
 
-export const INSTALL_WIDE_TABLES: readonly InstallWideTable[] =
-  TENANCY_DOMAINS.flatMap<InstallWideTable>((d) => d.installWide);
+export const SITE_WIDE_TABLES: readonly SiteWideTable[] = TENANCY_DOMAINS.flatMap<SiteWideTable>(
+  (d) => d.siteWide,
+);
 
 const TEAM_TABLE_SET: ReadonlySet<string> = new Set(TEAM_TABLES);
 
@@ -55,38 +56,37 @@ export function isTeamTable(name: string): name is TeamTable {
 }
 
 /**
- * App-role privileges on install-wide tables, least privilege. Install-wide tables have no RLS, so
+ * App-role privileges on site-wide tables, least privilege. Site-wide tables have no RLS, so
  * every privilege here is reachable from any team context.
  */
-export const INSTALL_WIDE_GRANTS: Readonly<
-  Partial<Record<InstallWideTable, readonly Privilege[]>>
-> = Object.assign({}, ...TENANCY_DOMAINS.map((d) => d.grants)) as Partial<
-  Record<InstallWideTable, readonly Privilege[]>
->;
+export const SITE_WIDE_GRANTS: Readonly<Partial<Record<SiteWideTable, readonly Privilege[]>>> =
+  Object.assign({}, ...TENANCY_DOMAINS.map((d) => d.grants)) as Partial<
+    Record<SiteWideTable, readonly Privilege[]>
+  >;
 
 /**
- * Install-wide tables allowed to carry `team_id` or a foreign key to `teams`, each with a reason.
+ * Site-wide tables allowed to carry `team_id` or a foreign key to `teams`, each with a reason.
  * Any other table with either must be a team table (enforced by the catalog check).
  */
-export const TEAM_REFERENCING_INSTALL_WIDE: Readonly<Partial<Record<InstallWideTable, string>>> =
+export const TEAM_REFERENCING_SITE_WIDE: Readonly<Partial<Record<SiteWideTable, string>>> =
   Object.assign({}, ...TENANCY_DOMAINS.map((d) => d.teamReferencing)) as Partial<
-    Record<InstallWideTable, string>
+    Record<SiteWideTable, string>
   >;
 
 /** Privileges the migration runner grants the app role on `table` (undefined: none). */
 export function appPrivilegesFor(table: string): readonly Privilege[] | undefined {
   if (isTeamTable(table)) return TEAM_TABLE_PRIVILEGES;
-  return INSTALL_WIDE_GRANTS[table as InstallWideTable];
+  return SITE_WIDE_GRANTS[table as SiteWideTable];
 }
 
-/** Column-level privileges on install-wide tables, on top of INSTALL_WIDE_GRANTS. */
-export const INSTALL_WIDE_COLUMN_GRANTS: Readonly<Partial<Record<InstallWideTable, ColumnGrants>>> =
+/** Column-level privileges on site-wide tables, on top of SITE_WIDE_GRANTS. */
+export const SITE_WIDE_COLUMN_GRANTS: Readonly<Partial<Record<SiteWideTable, ColumnGrants>>> =
   Object.assign({}, ...TENANCY_DOMAINS.map((d) => d.columnGrants ?? {})) as Partial<
-    Record<InstallWideTable, ColumnGrants>
+    Record<SiteWideTable, ColumnGrants>
   >;
 
 /** Column privileges the migration runner grants the app role on `table` (undefined: none). */
 export function appColumnPrivilegesFor(table: string): ColumnGrants | undefined {
   if (isTeamTable(table)) return undefined;
-  return INSTALL_WIDE_COLUMN_GRANTS[table as InstallWideTable];
+  return SITE_WIDE_COLUMN_GRANTS[table as SiteWideTable];
 }

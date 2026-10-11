@@ -24,7 +24,7 @@ export type AuditEvent = {
   [A in AuditAction]: {
     readonly action: A;
     readonly actor: AuditActor;
-    /** Required for team-scoped actions, null/omitted for install-level ones (AUDIT_EVENTS scope). */
+    /** Required for team-scoped actions, null/omitted for site-level ones (AUDIT_EVENTS scope). */
     readonly teamId?: string | null;
     readonly target: AuditTarget<A>;
     readonly request?: AuditRequestContext;
@@ -81,7 +81,7 @@ function checkActor(actor: AuditActor): void {
 
 function checkTeam(action: AuditAction, teamId: string | null): void {
   const { scope } = AUDIT_EVENTS[action];
-  if (scope === "install" && teamId !== null) {
+  if (scope === "site" && teamId !== null) {
     throw new AuditEventError(`audit: ${action} is site-level and takes no team`);
   }
   if (scope === "team" && teamId === null) {

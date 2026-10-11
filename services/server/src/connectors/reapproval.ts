@@ -13,7 +13,7 @@ import { recordAudit } from "../audit/record.js";
 import { approveTools, approvedHash } from "./drift.js";
 
 /**
- * Install-admin review and re-approval of drifted tools (KOBE-102, D27). The review shows the
+ * Site-admin review and re-approval of drifted tools (KOBE-102, D27). The review shows the
  * approved definition next to the live one; approving names each tool with the SHA-256 of the
  * definition the admin saw, so a tool that changed again meanwhile is refused (`stale`).
  */

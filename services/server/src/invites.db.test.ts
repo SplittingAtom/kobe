@@ -1,18 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import {
-  INVITES_PER_ADDRESS_PER_HOUR,
-  INVITES_PER_ADMIN_PER_HOUR,
-} from "./routes/install-invites.js";
+import { INVITES_PER_ADDRESS_PER_HOUR, INVITES_PER_ADMIN_PER_HOUR } from "./routes/site-invites.js";
 import type { TestBrowser } from "./testing/browser.js";
 import { openHarness, PASSWORD, type Harness } from "./testing/harness.js";
 import { totpFromUri } from "./testing/totp.js";
 
-// KOBE-13 ac-1 (install invitations) and ac-2 (team invitations): invite-only onboarding (D7, U1).
+// KOBE-13 ac-1 (site invitations) and ac-2 (team invitations): invite-only onboarding (D7, U1).
 let h: Harness;
 const ids = { owner: "", admin: "", alice: "", dan: "" };
 let owner: TestBrowser;
-let installAdmin: TestBrowser;
+let siteAdmin: TestBrowser;
 let alice: TestBrowser;
 let finance = "";
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -23,12 +20,12 @@ beforeAll(async () => {
   ids.owner = await h.createUser("owner@inv.test", "owner");
   ids.admin = await h.createUser("admin@inv.test", "admin");
   ids.alice = await h.createUser("alice@inv.test");
-  [owner, installAdmin, alice] = await Promise.all([
+  [owner, siteAdmin, alice] = await Promise.all([
     h.signIn("owner@inv.test"),
     h.signIn("admin@inv.test"),
     h.signIn("alice@inv.test"),
   ]);
-  const team = await owner.post("/v1/install/teams", {
+  const team = await owner.post("/v1/site/teams", {
     slug: "finance",
     name: "Finance",
     adminUserId: ids.alice,
@@ -42,8 +39,8 @@ afterAll(async () => {
   await h?.close();
 });
 
-async function invite(email: string, by: TestBrowser = installAdmin): Promise<string> {
-  const res = await by.post("/v1/install/invites", { email });
+async function invite(email: string, by: TestBrowser = siteAdmin): Promise<string> {
+  const res = await by.post("/v1/site/invites", { email });
   expect(res.status, JSON.stringify(res.json)).toBe(201);
   return h.mailer.lastToken(email);
 }
@@ -52,15 +49,15 @@ async function accept(token: unknown, b: TestBrowser = h.browser(), password = P
   return b.post("/api/auth/invitation/accept", { token, name: "New Person", password });
 }
 
-describe("install invitations (ac-1)", () => {
-  it("are for install admins only", async () => {
-    expect((await alice.post("/v1/install/invites", { email: "x@inv.test" })).status).toBe(403);
-    expect((await alice.get("/v1/install/invites")).status).toBe(403);
+describe("site invitations (ac-1)", () => {
+  it("are for site admins only", async () => {
+    expect((await alice.post("/v1/site/invites", { email: "x@inv.test" })).status).toBe(403);
+    expect((await alice.get("/v1/site/invites")).status).toBe(403);
     expect(h.mailer.to("x@inv.test")).toEqual([]);
   });
 
   it("mail a single-use link whose token is only stored hashed", async () => {
-    const res = await installAdmin.post("/v1/install/invites", { email: "Nina@Inv.Test" });
+    const res = await siteAdmin.post("/v1/site/invites", { email: "Nina@Inv.Test" });
     expect(res).toMatchObject({
       status: 201,
       json: { invitation: { email: "nina@inv.test" }, emailSent: true },
@@ -90,7 +87,7 @@ describe("install invitations (ac-1)", () => {
     expect(res.json.user).toMatchObject({ email: "nina@inv.test", name: "New Person" });
     expect((await b.get("/v1/me")).json).toMatchObject({
       user: { email: "nina@inv.test" },
-      installRole: null,
+      siteRole: null,
     });
     // U1: only teams the person was invited to (none yet).
     expect((await b.get("/v1/me/teams")).json.teams).toEqual([]);
@@ -125,7 +122,7 @@ describe("install invitations (ac-1)", () => {
       `UPDATE invitations SET expires_at = now() - interval '1 second' WHERE email = 'late@inv.test'`,
     );
     const revokedToken = await invite("gone@inv.test");
-    const list = await installAdmin.get("/v1/install/invites");
+    const list = await siteAdmin.get("/v1/site/invites");
     const gone = list.json.invitations.find((i: { email: string }) => i.email === "gone@inv.test");
     expect(list.json.invitations).toEqual(
       expect.arrayContaining([
@@ -133,8 +130,8 @@ describe("install invitations (ac-1)", () => {
         expect.objectContaining({ email: "gone@inv.test", status: "pending" }),
       ]),
     );
-    expect((await installAdmin.delete(`/v1/install/invites/${gone.id}`)).status).toBe(204);
-    expect((await installAdmin.delete(`/v1/install/invites/${gone.id}`)).status).toBe(404);
+    expect((await siteAdmin.delete(`/v1/site/invites/${gone.id}`)).status).toBe(204);
+    expect((await siteAdmin.delete(`/v1/site/invites/${gone.id}`)).status).toBe(404);
 
     const bodies = [];
     for (const token of [
@@ -158,10 +155,10 @@ describe("install invitations (ac-1)", () => {
 
   it("rotate the token on resend (the old link stops working)", async () => {
     const old = await invite("resend@inv.test");
-    const id = (await installAdmin.get("/v1/install/invites")).json.invitations.find(
+    const id = (await siteAdmin.get("/v1/site/invites")).json.invitations.find(
       (i: { email: string }) => i.email === "resend@inv.test",
     ).id;
-    expect((await installAdmin.post(`/v1/install/invites/${id}/resend`)).status).toBe(200);
+    expect((await siteAdmin.post(`/v1/site/invites/${id}/resend`)).status).toBe(200);
     const fresh = h.mailer.lastToken("resend@inv.test");
     expect(fresh).not.toBe(old);
     expect((await accept(old)).json.code).toBe(INVALID);
@@ -174,9 +171,10 @@ describe("install invitations (ac-1)", () => {
   });
 
   it("refuse addresses that already have an account", async () => {
-    expect(
-      await installAdmin.post("/v1/install/invites", { email: "ALICE@inv.test" }),
-    ).toMatchObject({ status: 409, json: { code: "user_exists" } });
+    expect(await siteAdmin.post("/v1/site/invites", { email: "ALICE@inv.test" })).toMatchObject({
+      status: 409,
+      json: { code: "user_exists" },
+    });
   });
 
   it("enforce the password policy", async () => {
@@ -188,9 +186,9 @@ describe("install invitations (ac-1)", () => {
 
   it("report a failed delivery and let the admin resend", async () => {
     h.mailer.failNext = new Error("SMTP down");
-    const res = await installAdmin.post("/v1/install/invites", { email: "bounce@inv.test" });
+    const res = await siteAdmin.post("/v1/site/invites", { email: "bounce@inv.test" });
     expect(res).toMatchObject({ status: 201, json: { emailSent: false } });
-    const resent = await installAdmin.post(`/v1/install/invites/${res.json.invitation.id}/resend`);
+    const resent = await siteAdmin.post(`/v1/site/invites/${res.json.invitation.id}/resend`);
     expect(resent.json.emailSent).toBe(true);
     expect((await accept(h.mailer.lastToken("bounce@inv.test"))).status).toBe(200);
   });
@@ -227,9 +225,9 @@ describe("install invitations (ac-1)", () => {
     expect(statuses[5]).toBe(429);
   });
 
-  it("make the new user enroll 2FA before using the API when the install requires it", async () => {
+  it("make the new user enroll 2FA before using the API when the site requires it", async () => {
     const token = await invite("strict@inv.test");
-    await owner.put("/v1/install/settings", { requireTwoFactor: true });
+    await owner.put("/v1/site/settings", { requireTwoFactor: true });
     try {
       const b = h.browser();
       expect((await accept(token, b)).status).toBe(200);
@@ -289,9 +287,9 @@ describe("team invitations (ac-2)", () => {
         expiresAt: expect.any(String),
       },
     ]);
-    expect((await installAdmin.get("/v1/me/invites")).json.invitations).toEqual([]);
+    expect((await siteAdmin.get("/v1/me/invites")).json.invitations).toEqual([]);
     // Nobody else can accept Bob's invitation.
-    expect((await installAdmin.post(`/v1/me/invites/${finance}/accept`)).status).toBe(404);
+    expect((await siteAdmin.post(`/v1/me/invites/${finance}/accept`)).status).toBe(404);
     expect((await bob.post(`/v1/me/invites/${randomUUID()}/accept`)).status).toBe(404);
     expect(await bob.post(`/v1/me/invites/${finance}/accept`)).toMatchObject({
       status: 200,
@@ -324,7 +322,7 @@ describe("team invitations (ac-2)", () => {
     expect((await carol.get("/v1/me/teams")).json.teams).toEqual([]);
   });
 
-  it("are only for the team's admins, never install admins (D8)", async () => {
+  it("are only for the team's admins, never site admins (D8)", async () => {
     const bob = await h.signIn("bob@inv.test");
     await bob.put("/v1/me/teams/active", { teamId: finance });
     bob.team = finance;
@@ -332,10 +330,10 @@ describe("team invitations (ac-2)", () => {
       (await bob.post("/v1/team/invites", { email: "z@inv.test", role: "member" })).status,
     ).toBe(403);
     expect((await bob.get("/v1/team/invites")).status).toBe(403);
-    // An install admin who is not a member has no active team to invite into.
+    // A site admin who is not a member has no active team to invite into.
     expect(
       (
-        await installAdmin.request(
+        await siteAdmin.request(
           "POST",
           "/v1/team/invites",
           { email: "z@inv.test", role: "member" },
@@ -345,8 +343,8 @@ describe("team invitations (ac-2)", () => {
     ).toBe(409);
   });
 
-  it("carry a brand-new person from the install invitation into their team (U1)", async () => {
-    // The team admin invites the address first; the install admin brings the person in.
+  it("carry a brand-new person from the site invitation into their team (U1)", async () => {
+    // The team admin invites the address first; the site admin brings the person in.
     await alice.post("/v1/team/invites", { email: "newbie@inv.test", role: "builder" });
     const b = h.browser();
     expect((await accept(await invite("newbie@inv.test"), b)).status).toBe(200);
@@ -424,10 +422,10 @@ describe("team invitations end with the inviter's authority (review)", () => {
 
   it("revokes them when the inviter is deactivated", async () => {
     await dan.post("/v1/team/invites", { email: "m3@inv.test", role: "team_admin" });
-    expect((await installAdmin.post(`/v1/install/users/${ids.dan}/deactivate`)).status).toBe(200);
+    expect((await siteAdmin.post(`/v1/site/users/${ids.dan}/deactivate`)).status).toBe(200);
     expect(await pendingFor("m3@inv.test")).toBe(0);
     expect(await accepts("m3@inv.test")).toBe(404);
-    expect((await installAdmin.post(`/v1/install/users/${ids.dan}/reactivate`)).status).toBe(200);
+    expect((await siteAdmin.post(`/v1/site/users/${ids.dan}/reactivate`)).status).toBe(200);
     dan = await h.signIn("dan@inv.test");
     await dan.put("/v1/me/teams/active", { teamId: finance });
     dan.team = finance;
@@ -460,28 +458,26 @@ describe("team invitations end with the inviter's authority (review)", () => {
   });
 });
 
-describe("install invitation rate limits (review)", () => {
+describe("site invitation rate limits (review)", () => {
   it("caps re-sends to one address", async () => {
-    const first = await installAdmin.post("/v1/install/invites", { email: "spam@inv.test" });
+    const first = await siteAdmin.post("/v1/site/invites", { email: "spam@inv.test" });
     expect(first.status).toBe(201);
     const statuses = [];
     for (let i = 0; i < INVITES_PER_ADDRESS_PER_HOUR; i++) {
       statuses.push(
-        (await installAdmin.post(`/v1/install/invites/${first.json.invitation.id}/resend`)).status,
+        (await siteAdmin.post(`/v1/site/invites/${first.json.invitation.id}/resend`)).status,
       );
     }
     expect(statuses.slice(0, -1).every((s) => s === 200)).toBe(true);
     expect(statuses.at(-1)).toBe(429);
-    expect((await owner.post("/v1/install/invites", { email: "spam@inv.test" })).status).toBe(429);
+    expect((await owner.post("/v1/site/invites", { email: "spam@inv.test" })).status).toBe(429);
     expect(h.mailer.to("spam@inv.test")).toHaveLength(INVITES_PER_ADDRESS_PER_HOUR);
   });
 
   it("caps invitations per admin", async () => {
     const statuses = [];
     for (let i = 0; i <= INVITES_PER_ADMIN_PER_HOUR; i++) {
-      statuses.push(
-        (await owner.post("/v1/install/invites", { email: `bulk${i}@inv.test` })).status,
-      );
+      statuses.push((await owner.post("/v1/site/invites", { email: `bulk${i}@inv.test` })).status);
     }
     expect(statuses.filter((s) => s === 201).length).toBe(INVITES_PER_ADMIN_PER_HOUR - 1);
     expect(statuses.at(-1)).toBe(429);

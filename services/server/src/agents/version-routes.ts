@@ -83,7 +83,7 @@ export interface VersionRouteOptions {
   };
 }
 
-/** Gallery versions: curators' user ids are for install admins only (review L3). */
+/** Gallery versions: curators' user ids are for site admins only (review L3). */
 function redact<T extends { publishedBy: string | null }>(found: ResolvedAgent, version: T): T {
   return found.agent.scope === "gallery" && !found.access.edit
     ? { ...version, publishedBy: null }

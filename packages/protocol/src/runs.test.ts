@@ -159,7 +159,7 @@ describe("fake run orchestrator", () => {
   const actor: ActorContext = {
     user_id: EXAMPLE_IDS.user,
     team_id: EXAMPLE_IDS.team,
-    install_role: "user",
+    site_role: "user",
     team_role: "member",
   };
   const other: ActorContext = { ...actor, team_id: EXAMPLE_IDS.otherTeam };

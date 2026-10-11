@@ -1,7 +1,15 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { AUDIT_ACTIONS, AUDIT_CATEGORIES, AUDIT_EVENTS } from "./events.js";
+import {
+  AUDIT_ACTIONS,
+  AUDIT_CATEGORIES,
+  AUDIT_EVENTS,
+  HISTORICAL_AUDIT_ACTIONS,
+  auditActionNames,
+  auditCategoryNames,
+  isAuditAction,
+} from "./events.js";
 
 /** Field names that suggest content or credentials; the allowlist must never contain them. */
 const FORBIDDEN_FIELD =
@@ -38,7 +46,6 @@ describe("audit event taxonomy", () => {
       "egress",
       "governance",
       "identity",
-      "install",
       "mcp",
       "memory",
       "models",
@@ -49,10 +56,34 @@ describe("audit event taxonomy", () => {
       "run",
       "sandbox",
       "schedule",
+      "site",
       "skill",
       "thread",
       "workspace",
     ]);
+  });
+
+  // KOBE-255: "install" became "site". Rows written before keep their names (the hash chain
+  // covers them); readers and filters treat each historical name as its successor.
+  it("maps every historical install name to a current site action, never written again", () => {
+    expect(HISTORICAL_AUDIT_ACTIONS).toEqual({
+      "install.settings.updated": "site.settings.updated",
+      "identity.install_role.granted": "identity.site_role.granted",
+      "identity.install_role.revoked": "identity.site_role.revoked",
+      "memory.install_settings_changed": "memory.site_settings_changed",
+    });
+    for (const [old, current] of Object.entries(HISTORICAL_AUDIT_ACTIONS)) {
+      expect(isAuditAction(old)).toBe(false);
+      expect(isAuditAction(current)).toBe(true);
+      expect(auditActionNames(current)).toEqual([current, old]);
+    }
+    expect(AUDIT_ACTIONS.filter((a) => /install/.test(a))).toEqual([]);
+    expect(auditActionNames("auth.sign_out")).toEqual(["auth.sign_out"]);
+  });
+
+  it("filters the site category over historical site rows too", () => {
+    expect(auditCategoryNames("site")).toEqual(["site", "install"]);
+    expect(auditCategoryNames("identity")).toEqual(["identity"]);
   });
 
   it("is documented: docs/audit-log.md lists every action", () => {

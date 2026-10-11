@@ -1,18 +1,18 @@
 import { and, eq, isNull, users, type TeamRole } from "@kobe/db";
 import type { ServerDeps } from "../deps.js";
 import { logger } from "../logger.js";
-import { installInviteMessage, teamInviteMessage } from "../mail/messages.js";
-import type { IssuedInvite } from "./install-invites.js";
+import { siteInviteMessage, teamInviteMessage } from "../mail/messages.js";
+import type { IssuedInvite } from "./site-invites.js";
 
-/** Mails an install invitation; false when the SMTP server refused or was unreachable. */
-export async function mailInstallInvite(
+/** Mails a site invitation; false when the SMTP server refused or was unreachable. */
+export async function mailSiteInvite(
   deps: ServerDeps,
   invite: IssuedInvite,
   inviterName: string,
 ): Promise<boolean> {
   try {
     await deps.mailer.send(
-      installInviteMessage({
+      siteInviteMessage({
         to: invite.email,
         inviterName,
         // In the fragment: never sent to the server or proxies, so never in access logs.

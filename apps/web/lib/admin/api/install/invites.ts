@@ -1,4 +1,4 @@
-/** Install console: invitations (`/v1/install`, install.users.manage). Responses arrive camelized. */
+/** Install console: invitations (`/v1/site`, install.users.manage). Responses arrive camelized. */
 import { apiRequest, type ApiResult } from "../../../api/client";
 
 const enc = encodeURIComponent;
@@ -18,18 +18,18 @@ export interface InviteSent {
 }
 
 export async function listInstallInvites(): Promise<ApiResult<readonly InstallInvite[]>> {
-  const res = await apiRequest<{ invitations: InstallInvite[] }>("/v1/install/invites");
+  const res = await apiRequest<{ invitations: InstallInvite[] }>("/v1/site/invites");
   return res.ok ? { ...res, data: res.data.invitations } : res;
 }
 
 export function createInstallInvite(email: string): Promise<ApiResult<InviteSent>> {
-  return apiRequest("/v1/install/invites", { method: "POST", json: { email } });
+  return apiRequest("/v1/site/invites", { method: "POST", json: { email } });
 }
 
 export function resendInstallInvite(id: string): Promise<ApiResult<InviteSent>> {
-  return apiRequest(`/v1/install/invites/${enc(id)}/resend`, { method: "POST" });
+  return apiRequest(`/v1/site/invites/${enc(id)}/resend`, { method: "POST" });
 }
 
 export function revokeInstallInvite(id: string): Promise<ApiResult<void>> {
-  return apiRequest(`/v1/install/invites/${enc(id)}`, { method: "DELETE" });
+  return apiRequest(`/v1/site/invites/${enc(id)}`, { method: "DELETE" });
 }

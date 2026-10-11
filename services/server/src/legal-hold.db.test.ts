@@ -7,7 +7,7 @@ import { openHarness, type Harness } from "./testing/harness.js";
 
 /**
  * KOBE-17 legal hold end to end: request, two-person placement and release (D18 → D10 rule),
- * single-admin self-approval (flagged), audit of every change (install scope, no subject id or
+ * single-admin self-approval (flagged), audit of every change (site scope, no subject id or
  * reason), invisibility to the held user, and purges refused while held (ac-1).
  */
 let h: Harness;
@@ -15,7 +15,7 @@ const ids = { owner: "", admin: "", heldAdmin: "", alice: "", bob: "" };
 let as: Record<keyof typeof ids, TestBrowser>;
 let finance = "";
 
-const BASE = "/v1/install/legal-hold";
+const BASE = "/v1/site/legal-hold";
 const REASON = "Litigation hold for matter 2026-17";
 
 async function auditFor(holdId: string) {
@@ -85,7 +85,7 @@ beforeAll(async () => {
 afterAll(() => h?.close());
 
 describe("access", () => {
-  it("is for install admins only", async () => {
+  it("is for site admins only", async () => {
     for (const [method, path] of [
       ["GET", BASE],
       ["POST", BASE],
@@ -179,7 +179,7 @@ describe("placing a hold (ac-2, ac-3)", () => {
     ]);
   });
 
-  it("lets a single-admin install self-approve placing and releasing, flagged (D10)", async () => {
+  it("lets a single-admin site self-approve placing and releasing, flagged (D10)", async () => {
     const { rows } = await h.admin.query<{ user_id: string; role: string }>(
       `DELETE FROM install_roles WHERE user_id <> $1 RETURNING user_id, role::text`,
       [ids.owner],
@@ -211,7 +211,7 @@ describe("placing a hold (ac-2, ac-3)", () => {
   });
 });
 
-describe("a hold on the only other install admin", () => {
+describe("a hold on the only other site admin", () => {
   it("is placed by the requester alone, flagged: the held admin can't approve", async () => {
     const { rows } = await h.admin.query<{ user_id: string; role: string }>(
       `DELETE FROM install_roles WHERE user_id NOT IN ($1, $2) RETURNING user_id, role::text`,
@@ -238,7 +238,7 @@ describe("a hold on the only other install admin", () => {
 });
 
 describe("releasing a hold (ac-2, ac-3)", () => {
-  it("needs a second install admin; the hold stays in force meanwhile", async () => {
+  it("needs a second site admin; the hold stays in force meanwhile", async () => {
     const id = await placed();
     const ask = await as.admin.post(`${BASE}/${id}/release`, { reason: "Matter settled in full" });
     expect(ask.json.hold).toMatchObject({
@@ -291,7 +291,7 @@ describe("releasing a hold (ac-2, ac-3)", () => {
 });
 
 describe("confidentiality", () => {
-  it("hides a hold from the held install admin, and from the team's audit view", async () => {
+  it("hides a hold from the held site admin, and from the team's audit view", async () => {
     const id = await requestHold({ userId: ids.heldAdmin });
     const list = await as.heldAdmin.get(BASE);
     expect(list.json.holds.map((x: { id: string }) => x.id)).not.toContain(id);

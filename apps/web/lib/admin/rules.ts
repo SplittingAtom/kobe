@@ -8,10 +8,10 @@ import type { InstallRole } from "./nav/types";
 /** Deactivation (KOBE-13): Admins act on Users, only the Owner on Admins; nobody on the Owner or themselves. */
 export function canChangeActivation(
   me: { readonly userId: string; readonly role: InstallRole },
-  target: Pick<InstallUser, "id" | "installRole">,
+  target: Pick<InstallUser, "id" | "siteRole">,
 ): boolean {
-  if (target.id === me.userId || target.installRole === "owner") return false;
-  if (target.installRole === "admin") return me.role === "owner";
+  if (target.id === me.userId || target.siteRole === "owner") return false;
+  if (target.siteRole === "admin") return me.role === "owner";
   return me.role === "owner" || me.role === "admin";
 }
 

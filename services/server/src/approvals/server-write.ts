@@ -45,7 +45,7 @@ export type NoPromptCode = "scheduled_run_no_prompt" | "mode_auto_not_allowliste
 /** Why this run may not ask a person, if it may not (scheduled run or `auto` approval mode). */
 export async function noPromptCode(db: KobeDb, call: CallRef): Promise<NoPromptCode | undefined> {
   // The effective mode, as the policy check computes it: scheduled runs are `auto`; otherwise the
-  // run's mode clamped to the install floor as it is now (the floor may have risen since).
+  // run's mode clamped to the site floor as it is now (the floor may have risen since).
   const { trigger, mode, floor } = await withTeam(db, call.teamId, async (tx) => {
     const res = await tx.execute<{ trigger: string; approval_mode: string }>(sql`
       SELECT trigger, approval_mode FROM runs WHERE team_id = ${call.teamId} AND id = ${call.runId}`);

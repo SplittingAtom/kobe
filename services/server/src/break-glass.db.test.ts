@@ -83,7 +83,7 @@ interface RequestBody {
 }
 
 async function requestGrant(body: RequestBody = {}, by: Person = "investigator"): Promise<string> {
-  const res = await as[by].post("/v1/install/break-glass", {
+  const res = await as[by].post("/v1/site/break-glass", {
     teamId: finance,
     reason: "Incident 42: suspected data exfiltration",
     ...body,
@@ -94,7 +94,7 @@ async function requestGrant(body: RequestBody = {}, by: Person = "investigator")
 
 async function activeGrant(body: RequestBody = {}): Promise<string> {
   const id = await requestGrant(body);
-  const res = await as.owner.post(`/v1/install/break-glass/${id}/approve`);
+  const res = await as.owner.post(`/v1/site/break-glass/${id}/approve`);
   expect(res.status, JSON.stringify(res.json)).toBe(200);
   return id;
 }
@@ -146,10 +146,10 @@ beforeAll(async () => {
   });
   app = createApp(deps);
   for (const who of PEOPLE) {
-    const installRole = who === "owner" ? "owner" : who === "investigator" ? "admin" : undefined;
+    const siteRole = who === "owner" ? "owner" : who === "investigator" ? "admin" : undefined;
     const user = await deps.createUserWithPassword(
       { email: email(who), name: who, password: PASSWORD },
-      installRole ? { installRole } : {},
+      siteRole ? { siteRole } : {},
     );
     ids[who] = user.id;
   }
@@ -157,7 +157,7 @@ beforeAll(async () => {
     await Promise.all(PEOPLE.map(async (w) => [w, await signIn(w)])),
   ) as Record<Person, TestBrowser>;
   const create = async (slug: string, adminUser: Person) => {
-    const res = await as.owner.post("/v1/install/teams", {
+    const res = await as.owner.post("/v1/site/teams", {
       slug,
       name: slug,
       adminUserId: ids[adminUser],
@@ -219,10 +219,10 @@ afterAll(async () => {
   }
 });
 
-describe("requesting (POST /v1/install/break-glass)", () => {
-  it("records a pending request under the team and asks the other install admins", async () => {
+describe("requesting (POST /v1/site/break-glass)", () => {
+  it("records a pending request under the team and asks the other site admins", async () => {
     const before = mailCounts();
-    const res = await as.investigator.post("/v1/install/break-glass", {
+    const res = await as.investigator.post("/v1/site/break-glass", {
       teamId: finance,
       reason: "Incident 42: suspected data exfiltration",
     });
@@ -241,7 +241,7 @@ describe("requesting (POST /v1/install/break-glass)", () => {
         action: "governance.break_glass.requested",
         team_id: finance,
         actor_id: ids.investigator,
-        // The owner is the only other install admin.
+        // The owner is the only other site admin.
         target: { grantId, scope: "team", legalHold: false, durationMinutes: 60, recipients: 1 },
       },
     ]);
@@ -257,7 +257,7 @@ describe("requesting (POST /v1/install/break-glass)", () => {
 
   it("validates the scope: one narrowing, a member subject, a bounded window, a real reason", async () => {
     const post = (body: object) =>
-      as.investigator.post("/v1/install/break-glass", {
+      as.investigator.post("/v1/site/break-glass", {
         teamId: finance,
         reason: "Long enough reason",
         ...body,
@@ -272,29 +272,29 @@ describe("requesting (POST /v1/install/break-glass)", () => {
     expect((await post({ unknown: 1 })).status).toBe(400);
   });
 
-  it("is for install admins only: members and team admins get 403 everywhere", async () => {
+  it("is for site admins only: members and team admins get 403 everywhere", async () => {
     const grantId = await requestGrant();
     for (const who of ["alice", "bob"] as const) {
-      expect((await as[who].get("/v1/install/break-glass")).status).toBe(403);
+      expect((await as[who].get("/v1/site/break-glass")).status).toBe(403);
       expect(
-        (await as[who].post("/v1/install/break-glass", { teamId: finance, reason: "x".repeat(20) }))
+        (await as[who].post("/v1/site/break-glass", { teamId: finance, reason: "x".repeat(20) }))
           .status,
       ).toBe(403);
-      expect((await as[who].post(`/v1/install/break-glass/${grantId}/approve`)).status).toBe(403);
-      expect((await as[who].get(`/v1/install/break-glass/${grantId}/threads`)).status).toBe(403);
+      expect((await as[who].post(`/v1/site/break-glass/${grantId}/approve`)).status).toBe(403);
+      expect((await as[who].get(`/v1/site/break-glass/${grantId}/threads`)).status).toBe(403);
     }
   });
 });
 
 describe("two-person approval", () => {
-  it("refuses self-approval while a second install admin exists", async () => {
+  it("refuses self-approval while a second site admin exists", async () => {
     const grantId = await requestGrant();
-    const res = await as.investigator.post(`/v1/install/break-glass/${grantId}/approve`);
+    const res = await as.investigator.post(`/v1/site/break-glass/${grantId}/approve`);
     expect(res.status).toBe(403);
     expect(res.json.code).toBe("self_approval_forbidden");
-    expect(
-      (await as.investigator.get(`/v1/install/break-glass/${grantId}`)).json.grant.status,
-    ).toBe("pending");
+    expect((await as.investigator.get(`/v1/site/break-glass/${grantId}`)).json.grant.status).toBe(
+      "pending",
+    );
     expect((await auditFor(grantId)).map((a) => a.action)).toEqual([
       "governance.break_glass.requested",
     ]);
@@ -303,7 +303,7 @@ describe("two-person approval", () => {
   it("activates on a second admin's approval, time-boxed, and notifies team admins and admins", async () => {
     const before = mailCounts();
     const grantId = await requestGrant({ userId: ids.bob, durationMinutes: 30 });
-    const res = await as.owner.post(`/v1/install/break-glass/${grantId}/approve`);
+    const res = await as.owner.post(`/v1/site/break-glass/${grantId}/approve`);
     expect(res.status, JSON.stringify(res.json)).toBe(200);
     const grant = res.json.grant;
     expect(grant).toMatchObject({
@@ -350,7 +350,7 @@ describe("two-person approval", () => {
   it("legal hold: the subject is not notified, and the team view hides reason and subject", async () => {
     const before = mailCounts();
     const grantId = await requestGrant({ userId: ids.bob, legalHold: true });
-    await as.owner.post(`/v1/install/break-glass/${grantId}/approve`);
+    await as.owner.post(`/v1/site/break-glass/${grantId}/approve`);
     const alice = await mailTo("alice", before.alice + 1);
     expect(alice.at(-1)?.text).toContain("restricted (legal hold)");
     expect(alice.at(-1)?.text).not.toContain("Incident 42");
@@ -366,21 +366,21 @@ describe("two-person approval", () => {
     });
   });
 
-  it("hides a legal hold from a subject who is an install admin, who can't end it either", async () => {
+  it("hides a legal hold from a subject who is a site admin, who can't end it either", async () => {
     await admin.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, 'admin')`, [
       ids.carol,
     ]);
     try {
       const grantId = await activeGrant({ userId: ids.carol, legalHold: true });
-      const list = await as.carol.get("/v1/install/break-glass");
+      const list = await as.carol.get("/v1/site/break-glass");
       expect(list.json.grants.map((g: { id: string }) => g.id)).not.toContain(grantId);
-      expect((await as.carol.get(`/v1/install/break-glass/${grantId}`)).status).toBe(404);
+      expect((await as.carol.get(`/v1/site/break-glass/${grantId}`)).status).toBe(404);
       // Deciding answers exactly like the hidden grant's GET: 404, so nothing leaks.
       for (const action of ["approve", "deny", "revoke"]) {
-        const res = await as.carol.post(`/v1/install/break-glass/${grantId}/${action}`);
+        const res = await as.carol.post(`/v1/site/break-glass/${grantId}/${action}`);
         expect([res.status, res.json.code], action).toEqual([404, "grant_not_found"]);
       }
-      expect((await as.owner.get(`/v1/install/break-glass/${grantId}`)).json.grant.status).toBe(
+      expect((await as.owner.get(`/v1/site/break-glass/${grantId}`)).json.grant.status).toBe(
         "active",
       );
       await settled();
@@ -395,9 +395,9 @@ describe("two-person approval", () => {
     try {
       const before = mailer.to(email("alice")).length;
       const grantId = await requestGrant();
-      const list = await as.investigator.get("/v1/install/break-glass");
+      const list = await as.investigator.get("/v1/site/break-glass");
       expect(list.json.selfApprovalAllowed).toBe(true);
-      const res = await as.investigator.post(`/v1/install/break-glass/${grantId}/approve`);
+      const res = await as.investigator.post(`/v1/site/break-glass/${grantId}/approve`);
       expect(res.status, JSON.stringify(res.json)).toBe(200);
       expect(res.json.grant).toMatchObject({ status: "active", selfApproved: true });
       expect((await auditFor(grantId)).at(-1)?.target).toMatchObject({ selfApproved: true });
@@ -410,14 +410,14 @@ describe("two-person approval", () => {
 
   it("denial by another admin tells the requester; the requester can't deny their own", async () => {
     const grantId = await requestGrant();
-    expect((await as.investigator.post(`/v1/install/break-glass/${grantId}/deny`)).json.code).toBe(
+    expect((await as.investigator.post(`/v1/site/break-glass/${grantId}/deny`)).json.code).toBe(
       "cannot_deny_own",
     );
     const before = mailer.to(email("investigator")).length;
-    const res = await as.owner.post(`/v1/install/break-glass/${grantId}/deny`);
+    const res = await as.owner.post(`/v1/site/break-glass/${grantId}/deny`);
     expect(res.json.grant.status).toBe("denied");
     expect((await mailTo("investigator", before + 1)).at(-1)?.subject).toContain("was denied");
-    expect((await as.owner.post(`/v1/install/break-glass/${grantId}/approve`)).json.code).toBe(
+    expect((await as.owner.post(`/v1/site/break-glass/${grantId}/approve`)).json.code).toBe(
       "not_pending",
     );
     expect((await auditFor(grantId)).map((a) => a.action)).toEqual([
@@ -430,24 +430,24 @@ describe("two-person approval", () => {
 describe("reading under a grant", () => {
   it("is refused before approval", async () => {
     const grantId = await requestGrant();
-    const res = await as.investigator.get(`/v1/install/break-glass/${grantId}/threads`);
+    const res = await as.investigator.get(`/v1/site/break-glass/${grantId}/threads`);
     expect(res.status).toBe(403);
     expect(res.json).toMatchObject({ code: "grant_not_active", status: "pending" });
   });
 
   it("reads the team's threads and entries read-only, and audits every read in the team view", async () => {
     const grantId = await activeGrant();
-    const list = await as.investigator.get(`/v1/install/break-glass/${grantId}/threads`);
+    const list = await as.investigator.get(`/v1/site/break-glass/${grantId}/threads`);
     expect(list.status, JSON.stringify(list.json)).toBe(200);
     expect(list.json.threads.map((t: { thread_id: string }) => t.thread_id).sort()).toEqual(
       [aliceThread, bobThread].sort(),
     );
     const thread = await as.investigator.get(
-      `/v1/install/break-glass/${grantId}/threads/${aliceThread}`,
+      `/v1/site/break-glass/${grantId}/threads/${aliceThread}`,
     );
     expect(thread.json.thread).toMatchObject({ thread_id: aliceThread, title: "secret plans" });
     const entries = await as.investigator.get(
-      `/v1/install/break-glass/${grantId}/threads/${aliceThread}/entries?limit=2`,
+      `/v1/site/break-glass/${grantId}/threads/${aliceThread}/entries?limit=2`,
     );
     expect(entries.json.entries.map((e: { entry_id: string }) => e.entry_id)).toEqual(["e1", "e2"]);
     expect(entries.json.next_after).toBe(2);
@@ -484,10 +484,10 @@ describe("reading under a grant", () => {
   it("offers no write: only GET routes exist for reads", async () => {
     const grantId = await activeGrant();
     for (const [method, path] of [
-      ["POST", `/v1/install/break-glass/${grantId}/threads`],
-      ["PATCH", `/v1/install/break-glass/${grantId}/threads/${aliceThread}`],
-      ["POST", `/v1/install/break-glass/${grantId}/threads/${aliceThread}/entries`],
-      ["DELETE", `/v1/install/break-glass/${grantId}/threads/${aliceThread}`],
+      ["POST", `/v1/site/break-glass/${grantId}/threads`],
+      ["PATCH", `/v1/site/break-glass/${grantId}/threads/${aliceThread}`],
+      ["POST", `/v1/site/break-glass/${grantId}/threads/${aliceThread}/entries`],
+      ["DELETE", `/v1/site/break-glass/${grantId}/threads/${aliceThread}`],
     ] as const) {
       expect((await as.investigator.request(method, path, {})).status, `${method} ${path}`).toBe(
         404,
@@ -509,14 +509,14 @@ describe("reading under a grant", () => {
 
   it("narrows a user grant to the subject's threads; out-of-scope reads are 404 and not audited", async () => {
     const grantId = await activeGrant({ userId: ids.bob });
-    const list = await as.investigator.get(`/v1/install/break-glass/${grantId}/threads`);
+    const list = await as.investigator.get(`/v1/site/break-glass/${grantId}/threads`);
     expect(list.json.threads.map((t: { thread_id: string }) => t.thread_id)).toEqual([bobThread]);
     for (const path of [
       `threads/${aliceThread}`,
       `threads/${aliceThread}/entries`,
       `threads/${marketingThread}`,
     ]) {
-      const res = await as.investigator.get(`/v1/install/break-glass/${grantId}/${path}`);
+      const res = await as.investigator.get(`/v1/site/break-glass/${grantId}/${path}`);
       expect(res.status, path).toBe(404);
       expect(res.json.code).toBe("thread_not_found");
     }
@@ -527,16 +527,16 @@ describe("reading under a grant", () => {
 
   it("narrows a thread grant to that thread", async () => {
     const grantId = await activeGrant({ threadId: aliceThread });
-    const list = await as.investigator.get(`/v1/install/break-glass/${grantId}/threads`);
+    const list = await as.investigator.get(`/v1/site/break-glass/${grantId}/threads`);
     expect(list.json.threads.map((t: { thread_id: string }) => t.thread_id)).toEqual([aliceThread]);
     expect(
-      (await as.investigator.get(`/v1/install/break-glass/${grantId}/threads/${bobThread}`)).status,
+      (await as.investigator.get(`/v1/site/break-glass/${grantId}/threads/${bobThread}`)).status,
     ).toBe(404);
   });
 
   it("is usable only by the requester", async () => {
     const grantId = await activeGrant();
-    const res = await as.owner.get(`/v1/install/break-glass/${grantId}/threads`);
+    const res = await as.owner.get(`/v1/site/break-glass/${grantId}/threads`);
     expect(res.status).toBe(404);
     expect(res.json.code).toBe("grant_not_found");
   });
@@ -545,10 +545,10 @@ describe("reading under a grant", () => {
 describe("ending a grant", () => {
   it("revocation applies to the very next request, and the team is told", async () => {
     const grantId = await activeGrant();
-    const path = `/v1/install/break-glass/${grantId}/threads`;
+    const path = `/v1/site/break-glass/${grantId}/threads`;
     expect((await as.investigator.get(path)).status).toBe(200);
     const before = mailer.to(email("alice")).length;
-    const revoked = await as.owner.post(`/v1/install/break-glass/${grantId}/revoke`);
+    const revoked = await as.owner.post(`/v1/site/break-glass/${grantId}/revoke`);
     expect(revoked.json.grant.status).toBe("revoked");
     const denied = await as.investigator.get(path);
     expect(denied.status).toBe(403);
@@ -558,7 +558,7 @@ describe("ending a grant", () => {
       action: "governance.break_glass.revoked",
       target: { grantId, wasActive: true },
     });
-    expect((await as.owner.post(`/v1/install/break-glass/${grantId}/revoke`)).json.code).toBe(
+    expect((await as.owner.post(`/v1/site/break-glass/${grantId}/revoke`)).json.code).toBe(
       "not_open",
     );
   });
@@ -571,11 +571,11 @@ describe("ending a grant", () => {
       [grantId],
     );
     await admin.query(`SET session_replication_role = origin`);
-    const res = await as.investigator.get(`/v1/install/break-glass/${grantId}/threads`);
+    const res = await as.investigator.get(`/v1/site/break-glass/${grantId}/threads`);
     expect(res.status).toBe(403);
-    expect(
-      (await as.investigator.get(`/v1/install/break-glass/${grantId}`)).json.grant.status,
-    ).toBe("expired");
+    expect((await as.investigator.get(`/v1/site/break-glass/${grantId}`)).json.grant.status).toBe(
+      "expired",
+    );
 
     const before = mailer.to(email("alice")).length;
     const [first, second] = await Promise.all([sweepBreakGlass(deps), sweepBreakGlass(deps)]);
@@ -599,12 +599,12 @@ describe("ending a grant", () => {
     for (let i = 0; i < 6; i++) {
       const grantId = await requestGrant();
       const [approve, revoke] = await Promise.all([
-        as.owner.post(`/v1/install/break-glass/${grantId}/approve`),
-        as.investigator.post(`/v1/install/break-glass/${grantId}/revoke`),
+        as.owner.post(`/v1/site/break-glass/${grantId}/approve`),
+        as.investigator.post(`/v1/site/break-glass/${grantId}/revoke`),
       ]);
       expect(revoke.status, JSON.stringify(revoke.json)).toBe(200);
       const actions = (await auditFor(grantId)).map((a) => a.action);
-      const final = (await as.investigator.get(`/v1/install/break-glass/${grantId}`)).json.grant;
+      const final = (await as.investigator.get(`/v1/site/break-glass/${grantId}`)).json.grant;
       expect(final.status).toBe("revoked");
       if (approve.status === 200) {
         expect(actions).toEqual([
@@ -621,7 +621,7 @@ describe("ending a grant", () => {
         ]);
         expect((await auditFor(grantId)).at(-1)?.target).toMatchObject({ wasActive: false });
       }
-      expect((await as.investigator.get(`/v1/install/break-glass/${grantId}/threads`)).status).toBe(
+      expect((await as.investigator.get(`/v1/site/break-glass/${grantId}/threads`)).status).toBe(
         403,
       );
     }
@@ -630,14 +630,14 @@ describe("ending a grant", () => {
   it("refuses reads after the requester loses the admin role", async () => {
     const grantId = await activeGrant();
     expect(
-      (await as.owner.put(`/v1/install/roles/${ids.investigator}`, { role: "user" })).status,
+      (await as.owner.put(`/v1/site/roles/${ids.investigator}`, { role: "user" })).status,
     ).toBe(200);
     try {
-      expect((await as.investigator.get(`/v1/install/break-glass/${grantId}/threads`)).status).toBe(
+      expect((await as.investigator.get(`/v1/site/break-glass/${grantId}/threads`)).status).toBe(
         403,
       );
     } finally {
-      await as.owner.put(`/v1/install/roles/${ids.investigator}`, { role: "admin" });
+      await as.owner.put(`/v1/site/roles/${ids.investigator}`, { role: "admin" });
     }
   });
 });
@@ -662,7 +662,7 @@ describe("durable notifications and limits", () => {
     await settled();
     mailer.failNext = new Error("SMTP down");
     const before = mailer.to(email("alice")).length;
-    const res = await as.owner.post(`/v1/install/break-glass/${grantId}/approve`);
+    const res = await as.owner.post(`/v1/site/break-glass/${grantId}/approve`);
     expect(res.status).toBe(200);
     await settled();
     const approved = (await outbox(grantId)).filter((r) => r.event === "approved");
@@ -703,7 +703,7 @@ describe("durable notifications and limits", () => {
     await admin.query(`UPDATE users SET deactivated_at = now() WHERE id = $1`, [ids.erin]);
     try {
       const grantId = await requestGrant({ teamId: ops });
-      const res = await as.owner.post(`/v1/install/break-glass/${grantId}/approve`);
+      const res = await as.owner.post(`/v1/site/break-glass/${grantId}/approve`);
       expect(res.status).toBe(200);
       expect(res.json.notified.teamAdmins).toBe(0);
       expect(res.json.warnings.map((w: { code: string }) => w.code)).toEqual([
@@ -718,7 +718,7 @@ describe("durable notifications and limits", () => {
   it("refuses state changes from another origin", async () => {
     const res = await as.investigator.request(
       "POST",
-      "/v1/install/break-glass",
+      "/v1/site/break-glass",
       { teamId: finance, reason: "Incident 42: suspected data exfiltration" },
       { origin: "http://evil.test" },
     );
@@ -726,7 +726,7 @@ describe("durable notifications and limits", () => {
     const grantId = await requestGrant();
     const approve = await as.owner.request(
       "POST",
-      `/v1/install/break-glass/${grantId}/approve`,
+      `/v1/site/break-glass/${grantId}/approve`,
       {},
       { origin: "http://evil.test" },
     );
@@ -735,20 +735,20 @@ describe("durable notifications and limits", () => {
 
   it("caps open requests per admin", async () => {
     for (let i = 0; i < 3; i++) await requestGrant();
-    const res = await as.investigator.post("/v1/install/break-glass", {
+    const res = await as.investigator.post("/v1/site/break-glass", {
       teamId: finance,
       reason: "Incident 42: suspected data exfiltration",
     });
     expect([res.status, res.json.code]).toEqual([429, "too_many_pending"]);
   });
 
-  it("rate-limits requests per admin (each one emails every install admin)", async () => {
+  it("rate-limits requests per admin (each one emails every site admin)", async () => {
     await admin.query(
       `INSERT INTO rate_limits (key, count, last_request) VALUES ($1, 10, $2)
        ON CONFLICT (key) DO UPDATE SET count = 10, last_request = $2`,
       [`kobe:break-glass-request:${ids.investigator}`, Date.now()],
     );
-    const res = await as.investigator.post("/v1/install/break-glass", {
+    const res = await as.investigator.post("/v1/site/break-glass", {
       teamId: finance,
       reason: "Incident 42: suspected data exfiltration",
     });
@@ -764,7 +764,7 @@ describe("durable notifications and limits", () => {
       [key, Date.now()],
     );
     try {
-      const res = await as.investigator.get(`/v1/install/break-glass/${grantId}/threads`);
+      const res = await as.investigator.get(`/v1/site/break-glass/${grantId}/threads`);
       expect([res.status, res.json.code]).toEqual([429, "rate_limited"]);
     } finally {
       await admin.query(`DELETE FROM rate_limits WHERE key = $1`, [key]);
@@ -773,9 +773,9 @@ describe("durable notifications and limits", () => {
 
   it("revocation wins over a flood of reads", async () => {
     const grantId = await activeGrant();
-    const path = `/v1/install/break-glass/${grantId}/threads`;
+    const path = `/v1/site/break-glass/${grantId}/threads`;
     const flood = Array.from({ length: 30 }, () => as.investigator.get(path));
-    const revoke = as.owner.post(`/v1/install/break-glass/${grantId}/revoke`);
+    const revoke = as.owner.post(`/v1/site/break-glass/${grantId}/revoke`);
     const [revoked, ...reads] = await Promise.all([revoke, ...flood]);
     expect(revoked?.status, JSON.stringify(revoked?.json)).toBe(200);
     expect(reads.every((r) => r.status === 200 || r.status === 403)).toBe(true);

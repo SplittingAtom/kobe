@@ -21,12 +21,12 @@ const ruleFields = {
   expires_at: expiresAtSchema.default(null),
 };
 
-/** Install floor (D6): deny and ask only — the floor never loosens. */
-export const installRuleBodySchema = z.strictObject({
+/** Site floor (D6): deny and ask only — the floor never loosens. */
+export const siteRuleBodySchema = z.strictObject({
   effect: z.enum(["deny", "ask"]),
   ...ruleFields,
 });
-export type InstallRuleBody = z.infer<typeof installRuleBodySchema>;
+export type SiteRuleBody = z.infer<typeof siteRuleBodySchema>;
 
 /**
  * Team rules (D6): deny, ask, or allow. Team allow rules pre-approve a tool for the team's members
@@ -47,7 +47,7 @@ export type TeamRuleBody = z.infer<typeof teamRuleBodySchema>;
 
 export const ruleIdSchema = z.uuid();
 
-/** Install policy switches (settings.ts). */
+/** Site policy switches (settings.ts). */
 export const policySettingsBodySchema = z.strictObject({
   promptSandboxWrites: z.boolean(),
 });

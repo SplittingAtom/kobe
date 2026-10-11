@@ -28,7 +28,7 @@ import {
 } from "./schema/index.js";
 import { withTeam } from "./with-team.js";
 
-/** KOBE-40: providers and catalog (install-wide), team enablement and gateway keys (team, RLS). */
+/** KOBE-40: providers and catalog (site-wide), team enablement and gateway keys (team, RLS). */
 let app: KobeDatabase;
 const teamA = randomUUID();
 const teamB = randomUUID();

@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  INSTALL_PERMISSIONS,
+  SITE_PERMISSIONS,
   TEAM_PERMISSIONS,
-  installPermissionsFor,
-  installRoleAllows,
+  sitePermissionsFor,
+  siteRoleAllows,
   teamPermissionsFor,
   teamRoleAllows,
-  type InstallPermission,
+  type SitePermission,
   type TeamPermission,
 } from "./permissions.js";
 
@@ -57,32 +57,32 @@ describe("team permission matrix (spec D8)", () => {
   });
 });
 
-describe("install permission matrix (spec D8)", () => {
-  it.each<[InstallPermission, boolean, boolean, boolean]>([
+describe("site permission matrix (spec D8)", () => {
+  it.each<[SitePermission, boolean, boolean, boolean]>([
     // permission, user, admin, owner
-    ["install.settings.manage", false, true, true],
-    ["install.users.manage", false, true, true],
-    ["install.teams.manage", false, true, true],
-    ["install.audit.read", false, true, true],
-    ["install.usage.read", false, true, true],
-    ["install.budgets.manage", false, true, true],
-    ["install.break_glass.request", false, true, true],
-    ["install.roles.manage", false, false, true],
-    ["install.ownership.transfer", false, false, true],
+    ["site.settings.manage", false, true, true],
+    ["site.users.manage", false, true, true],
+    ["site.teams.manage", false, true, true],
+    ["site.audit.read", false, true, true],
+    ["site.usage.read", false, true, true],
+    ["site.budgets.manage", false, true, true],
+    ["site.break_glass.request", false, true, true],
+    ["site.roles.manage", false, false, true],
+    ["site.ownership.transfer", false, false, true],
   ])("%s: user=%s admin=%s owner=%s", (permission, user, admin, owner) => {
-    expect(installRoleAllows(null, permission)).toBe(user);
-    expect(installRoleAllows("admin", permission)).toBe(admin);
-    expect(installRoleAllows("owner", permission)).toBe(owner);
+    expect(siteRoleAllows(null, permission)).toBe(user);
+    expect(siteRoleAllows("admin", permission)).toBe(admin);
+    expect(siteRoleAllows("owner", permission)).toBe(owner);
   });
 
   it("gives the Owner everything and plain users nothing", () => {
-    expect(installPermissionsFor("owner")).toEqual(Object.keys(INSTALL_PERMISSIONS).sort());
-    expect(installPermissionsFor(null)).toEqual([]);
+    expect(sitePermissionsFor("owner")).toEqual(Object.keys(SITE_PERMISSIONS).sort());
+    expect(sitePermissionsFor(null)).toEqual([]);
   });
 
-  it("keeps install and team permissions disjoint (install roles never reach team content)", () => {
-    const install = Object.keys(INSTALL_PERMISSIONS);
-    expect(install.every((p) => p.startsWith("install."))).toBe(true);
+  it("keeps site and team permissions disjoint (site roles never reach team content)", () => {
+    const site = Object.keys(SITE_PERMISSIONS);
+    expect(site.every((p) => p.startsWith("site."))).toBe(true);
     expect(Object.keys(TEAM_PERMISSIONS).every((p) => p.startsWith("team."))).toBe(true);
   });
 });

@@ -13,7 +13,7 @@ import { recordAudit } from "../audit/record.js";
 import { MAX_CEILING_DOMAINS } from "./schemas.js";
 
 /**
- * The install egress ceiling (spec D6, D28; `/v1/install/egress-ceiling`): which domains teams
+ * The site egress ceiling (spec D6, D28; `/v1/site/egress-ceiling`): which domains teams
  * may enable. Every change is audited and NOTIFYs the egress proxies in the same transaction.
  */
 export interface CeilingEntry {
@@ -70,7 +70,7 @@ export async function addCeilingDomain(
   userId: string,
 ): Promise<AddResult> {
   return db.transaction(async (tx) => {
-    // Serializes concurrent adds so the cap holds (install-wide table, small).
+    // Serializes concurrent adds so the cap holds (site-wide table, small).
     await tx.execute(sql`LOCK TABLE ${egressDomains} IN SHARE ROW EXCLUSIVE MODE`);
     const [existing] = await tx
       .select()

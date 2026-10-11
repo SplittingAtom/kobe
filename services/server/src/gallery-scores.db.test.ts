@@ -11,8 +11,8 @@ import { KEYS, SETTINGS, gateFor, seedCluster } from "./testing/sandbox-fixtures
 
 /**
  * Orbit scores shown in the inventory and published for gallery agents (KOBE-94). The eval Job is
- * simulated as in orbit-eval.db.test.ts; the install admin's eval runs in one of their teams and
- * its verdict becomes an install-level score every team reads.
+ * simulated as in orbit-eval.db.test.ts; the site admin's eval runs in one of their teams and
+ * its verdict becomes a site-level score every team reads.
  */
 const finance = randomUUID();
 const marketing = randomUUID();
@@ -146,9 +146,9 @@ const galleryId = async (key: string): Promise<string> =>
   ).rows[0]?.id as string;
 
 const runEval = (id: string, teamId = finance, who: TestBrowser = owner) =>
-  who.post(`/v1/install/gallery/agents/${id}/eval`, { teamId });
+  who.post(`/v1/site/gallery/agents/${id}/eval`, { teamId });
 
-describe("gallery scores (install level)", () => {
+describe("gallery scores (site level)", () => {
   it("runs the eval in the admin's team, publishes nothing and stores the score", async () => {
     const id = await galleryId("kobe");
     const before = (
@@ -158,7 +158,7 @@ describe("gallery scores (install level)", () => {
     expect(res.status, JSON.stringify(res.json)).toBe(202);
     await h.deps.background.idle();
 
-    const scores = (await owner.get("/v1/install/gallery/agents/scores")).json.scores;
+    const scores = (await owner.get("/v1/site/gallery/agents/scores")).json.scores;
     expect(scores).toHaveLength(1);
     expect(scores[0]).toMatchObject({
       agentId: id,
@@ -200,7 +200,7 @@ describe("gallery scores (install level)", () => {
     jobLog = { log: "error: boom\n", outcome: "Failed" };
     expect((await runEval(id)).status).toBe(202);
     await h.deps.background.idle();
-    expect((await owner.get("/v1/install/gallery/agents/scores")).json.scores).toEqual([]);
+    expect((await owner.get("/v1/site/gallery/agents/scores")).json.scores).toEqual([]);
     expect(
       (await h.admin.query(`SELECT status FROM orbit_evals`)).rows.map((r) => r.status),
     ).toEqual(["errored"]);
@@ -246,14 +246,14 @@ describe("gallery scores (install level)", () => {
     expect((await builder.get("/v1/agents/gallery-scores")).json.scores).toEqual([]);
   });
 
-  it("is for install admins, in a team they belong to, and one eval at a time", async () => {
+  it("is for site admins, in a team they belong to, and one eval at a time", async () => {
     const id = await galleryId("kobe");
     expect((await runEval(id, finance, builder)).status).toBe(403);
     expect((await runEval(id, marketing)).status).toBe(404); // not a member
     expect((await runEval(id, randomUUID())).status).toBe(404);
     expect((await runEval(randomUUID())).status).toBe(404);
-    expect((await owner.post(`/v1/install/gallery/agents/${id}/eval`, {})).status).toBe(400);
-    expect((await builder.get("/v1/install/gallery/agents/scores")).status).toBe(403);
+    expect((await owner.post(`/v1/site/gallery/agents/${id}/eval`, {})).status).toBe(400);
+    expect((await builder.get("/v1/site/gallery/agents/scores")).status).toBe(403);
   });
 });
 
@@ -328,7 +328,7 @@ describe("inventory scores", () => {
     expect((await score(id))?.status).toBe("none");
   });
 
-  it("shows the install-level score of a gallery agent used in the team", async () => {
+  it("shows the site-level score of a gallery agent used in the team", async () => {
     const id = await galleryId("kobe");
     const thread = await builder.post("/v1/threads", { agent_id: id });
     expect(thread.status, JSON.stringify(thread.json)).toBe(201);

@@ -32,10 +32,10 @@ export type MemoryActorKind = (typeof MEMORY_ACTOR_KIND_VALUES)[number];
 export const MEMORY_FILE_MAX_BYTES = 64 * 1024;
 
 /**
- * Install setting (`install_settings`) holding the install-wide memory switch: `false` turns
- * memory off for every team; absent or anything else = on. Effective = install AND team (D24).
+ * Site setting (`install_settings`) holding the site-wide memory switch: `false` turns
+ * memory off for every team; absent or anything else = on. Effective = site AND team (D24).
  */
-export const MEMORY_INSTALL_ENABLED_KEY = "memory.enabled";
+export const MEMORY_SITE_ENABLED_KEY = "memory.enabled";
 
 // Mirrors protocol `memoryPathSchema`: relative `.md`, 1-4 segments of [A-Za-z0-9][A-Za-z0-9._-]*,
 // max 200 chars, no `..` segment (the segment pattern also refuses empty and dot-led segments;
@@ -139,7 +139,7 @@ export const memoryDocVersions = pgTable(
 
 /**
  * A team's memory switches (D24, team admins). No row = both on. Effective = this AND the
- * install switch (`MEMORY_INSTALL_ENABLED_KEY`); `project_memory_enabled` only matters while
+ * site switch (`MEMORY_SITE_ENABLED_KEY`); `project_memory_enabled` only matters while
  * `memory_enabled` is on. A table, not `teams.settings`: `teams` has no team RLS.
  */
 export const teamMemorySettings = pgTable(

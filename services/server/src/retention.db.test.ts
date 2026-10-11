@@ -18,7 +18,7 @@ import { openHarness, type Harness } from "./testing/harness.js";
 import { MemoryObjects } from "./testing/memory-objects.js";
 
 /**
- * KOBE-18 end to end: team retention settings within the install maximum, the nightly pass
+ * KOBE-18 end to end: team retention settings within the site maximum, the nightly pass
  * (Trash purge, retention purge, run_events compaction, released blobs), legal hold suspending
  * every purge, "Delete forever", the user's export, and the offboarding entry point for KOBE-28.
  */
@@ -267,7 +267,7 @@ afterEach(async () => {
 });
 
 describe("retention settings (D6, D8; 7-day grace: user decision 2026-10-04)", () => {
-  it("defaults to forever; members read it, only team admins change it, within the install maximum", async () => {
+  it("defaults to forever; members read it, only team admins change it, within the site maximum", async () => {
     const read = await as.bob.get("/v1/team/retention");
     expect(read.json).toEqual({
       period: "forever",
@@ -280,7 +280,7 @@ describe("retention settings (D6, D8; 7-day grace: user decision 2026-10-04)", (
     expect((await as.bob.put("/v1/team/retention", { period: "30d" })).status).toBe(403);
     expect((await as.bob.delete("/v1/team/retention/pending")).status).toBe(403);
     expect((await as.alice.put("/v1/team/retention", { period: "7d" })).status).toBe(400);
-    expect((await as.alice.put("/v1/install/retention", { maximum: "90d" })).status).toBe(403);
+    expect((await as.alice.put("/v1/site/retention", { maximum: "90d" })).status).toBe(403);
   });
 
   it("schedules a shortening 7 days out: banner for members, email to admins (count only), cancellable", async () => {
@@ -355,10 +355,10 @@ describe("retention settings (D6, D8; 7-day grace: user decision 2026-10-04)", (
     });
   });
 
-  it("lowers the install maximum after the grace period, emailing the teams it shortens; cancellable", async () => {
+  it("lowers the site maximum after the grace period, emailing the teams it shortens; cancellable", async () => {
     await setPeriod(other, "30d");
     h.mailer.sent.length = 0;
-    const max = await as.owner.put("/v1/install/retention", { maximum: "90d" });
+    const max = await as.owner.put("/v1/site/retention", { maximum: "90d" });
     expect(max.json).toMatchObject({
       maximum: "90d",
       applied: "forever",
@@ -387,9 +387,9 @@ describe("retention settings (D6, D8; 7-day grace: user decision 2026-10-04)", (
     expect(over.json.code).toBe("exceeds_maximum");
 
     // The status admins read carries the pause flag (KOBE-243); the harness runs unpaused.
-    expect((await as.owner.get("/v1/install/retention")).json).toMatchObject({ paused: false });
+    expect((await as.owner.get("/v1/site/retention")).json).toMatchObject({ paused: false });
 
-    const cancelled = await as.owner.delete("/v1/install/retention/pending");
+    const cancelled = await as.owner.delete("/v1/site/retention/pending");
     expect(cancelled.json).toEqual({ maximum: "forever", applied: "forever", pending: null });
     expect((await audits("retention.maximum.change_cancelled", null)).at(-1)?.target).toEqual({
       maximum: "90d",

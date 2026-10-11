@@ -4,10 +4,10 @@ import { loadEnvelope } from "@kobe/db";
 import type { TestBrowser } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 
-/** KOBE-113: install web-search provider and key, team opt-in. The key is never returned. */
+/** KOBE-113: site web-search provider and key, team opt-in. The key is never returned. */
 const KEY = "BSA-live-AbCdEf0123456789XyZ";
 const KEY2 = "BSA-live-SecondKey0123456789";
-const INSTALL = "/v1/install/web-search";
+const SITE = "/v1/site/web-search";
 const TEAM = "/v1/team/web-search";
 const team = randomUUID();
 let h: Harness;
@@ -44,18 +44,18 @@ afterAll(async () => {
   await h?.close();
 });
 
-describe("install setting", () => {
+describe("site setting", () => {
   it("starts unconfigured and lists providers", async () => {
-    const res = await owner.get(INSTALL);
+    const res = await owner.get(SITE);
     expect(res.status).toBe(200);
     expect(res.json).toMatchObject({ configured: false });
     expect(res.json.providers.map((p: { id: string }) => p.id)).toEqual(["brave", "tavily", "exa"]);
   });
 
-  it("needs install admin rights", async () => {
-    expect((await member.get(INSTALL)).status).toBe(403);
-    expect((await member.put(INSTALL, { provider: "brave", api_key: KEY })).status).toBe(403);
-    expect((await h.browser().get(INSTALL)).status).toBe(401);
+  it("needs site admin rights", async () => {
+    expect((await member.get(SITE)).status).toBe(403);
+    expect((await member.put(SITE, { provider: "brave", api_key: KEY })).status).toBe(403);
+    expect((await h.browser().get(SITE)).status).toBe(401);
   });
 
   it("validates the body", async () => {
@@ -67,12 +67,12 @@ describe("install setting", () => {
       { provider: "brave", api_key: "has a space in it" },
       { provider: "brave", api_key: KEY, extra: 1 },
     ]) {
-      expect((await owner.put(INSTALL, body)).status, JSON.stringify(body)).toBe(400);
+      expect((await owner.put(SITE, body)).status, JSON.stringify(body)).toBe(400);
     }
   });
 
   it("stores the key sealed and returns only a masked hint", async () => {
-    const res = await owner.put(INSTALL, { provider: "brave", api_key: KEY });
+    const res = await owner.put(SITE, { provider: "brave", api_key: KEY });
     expect(res.status, res.text).toBe(200);
     expect(res.json).toMatchObject({
       configured: true,
@@ -82,7 +82,7 @@ describe("install setting", () => {
     });
     expect(res.text).not.toContain(KEY);
     expect(res.headers.get("cache-control")).toBe("no-store");
-    expect((await owner.get(INSTALL)).text).not.toContain(KEY);
+    expect((await owner.get(SITE)).text).not.toContain(KEY);
     const { rows } = await h.admin.query(`SELECT * FROM web_search_settings`);
     expect(rows).toHaveLength(1);
     expect(rows[0].sealed).toMatch(/^e1\./);
@@ -98,14 +98,14 @@ describe("install setting", () => {
 
   it("keeps the key when only enabled changes, and needs a new key for a new provider", async () => {
     const before = (await h.admin.query(`SELECT sealed FROM web_search_settings`)).rows[0].sealed;
-    const off = await owner.put(INSTALL, { provider: "brave", enabled: false });
+    const off = await owner.put(SITE, { provider: "brave", enabled: false });
     expect(off.status).toBe(200);
     expect(off.json.enabled).toBe(false);
     expect((await h.admin.query(`SELECT sealed FROM web_search_settings`)).rows[0].sealed).toBe(
       before,
     );
-    expect((await owner.put(INSTALL, { provider: "tavily", enabled: true })).status).toBe(400);
-    expect((await owner.put(INSTALL, { provider: "brave", api_key: KEY2 })).status).toBe(200);
+    expect((await owner.put(SITE, { provider: "tavily", enabled: true })).status).toBe(400);
+    expect((await owner.put(SITE, { provider: "brave", api_key: KEY2 })).status).toBe(200);
   });
 
   it("audits changes without the key or hint", async () => {
@@ -120,13 +120,13 @@ describe("install setting", () => {
 
 describe("team opt-in", () => {
   it("is available only while the install enables a provider", async () => {
-    await owner.put(INSTALL, { provider: "brave", enabled: true });
+    await owner.put(SITE, { provider: "brave", enabled: true });
     const res = await teamAdmin.get(TEAM);
     expect(res.json).toEqual({ available: true, enabled: false, provider: "brave" });
-    await owner.put(INSTALL, { provider: "brave", enabled: false });
+    await owner.put(SITE, { provider: "brave", enabled: false });
     expect((await teamAdmin.get(TEAM)).json).toMatchObject({ available: false });
     expect((await teamAdmin.put(TEAM, { enabled: true })).status).toBe(409);
-    await owner.put(INSTALL, { provider: "brave", enabled: true });
+    await owner.put(SITE, { provider: "brave", enabled: true });
   });
 
   it("lets only team admins change it, and members read it", async () => {
@@ -142,10 +142,10 @@ describe("team opt-in", () => {
 describe("removing the provider", () => {
   it("deletes the key; team opt-ins go dormant", async () => {
     await teamAdmin.put(TEAM, { enabled: true });
-    expect((await member.delete(INSTALL)).status).toBe(403);
-    expect((await owner.delete(INSTALL)).status).toBe(204);
-    expect((await owner.delete(INSTALL)).status).toBe(404);
-    expect((await owner.get(INSTALL)).json).toMatchObject({ configured: false });
+    expect((await member.delete(SITE)).status).toBe(403);
+    expect((await owner.delete(SITE)).status).toBe(204);
+    expect((await owner.delete(SITE)).status).toBe(404);
+    expect((await owner.get(SITE)).json).toMatchObject({ configured: false });
     expect((await h.admin.query(`SELECT 1 FROM web_search_settings`)).rows).toHaveLength(0);
     expect((await teamAdmin.get(TEAM)).json).toMatchObject({ available: false, enabled: false });
   });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createTeamSchema,
-  installRoleChangeSchema,
+  siteRoleChangeSchema,
   memberRoleSchema,
   teamSlugSchema,
 } from "./schemas.js";
@@ -40,7 +40,7 @@ describe("request bodies", () => {
   });
 
   it("never lets a role change name the Owner (ownership moves only by transfer)", () => {
-    expect(installRoleChangeSchema.safeParse({ role: "owner" }).success).toBe(false);
-    expect(installRoleChangeSchema.safeParse({ role: "admin" }).success).toBe(true);
+    expect(siteRoleChangeSchema.safeParse({ role: "owner" }).success).toBe(false);
+    expect(siteRoleChangeSchema.safeParse({ role: "admin" }).success).toBe(true);
   });
 });

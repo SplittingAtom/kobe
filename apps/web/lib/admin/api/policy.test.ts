@@ -34,7 +34,7 @@ describe("install policy floor API", () => {
       ok: true,
       data: [{ toolGlob: "mcp__github__*", argPattern: { "/repo_name": "secret-*" } }],
     });
-    expect(must(fetchFn.mock.calls[0])[0]).toBe("/v1/install/policy/rules");
+    expect(must(fetchFn.mock.calls[0])[0]).toBe("/v1/site/policy/rules");
   });
 
   it("creates with the strict snake_case body", async () => {
@@ -46,7 +46,7 @@ describe("install policy floor API", () => {
       expiresAt: null,
     });
     const [url, init] = must(fetchFn.mock.calls[0]);
-    expect(url).toBe("/v1/install/policy/rules");
+    expect(url).toBe("/v1/site/policy/rules");
     expect(init?.method).toBe("POST");
     expect(JSON.parse(String(init?.body))).toEqual({
       effect: "ask",
@@ -59,12 +59,12 @@ describe("install policy floor API", () => {
   it("deletes and reads/writes settings", async () => {
     let fetchFn = stub(204);
     await install.deleteInstallRule("r 1");
-    expect(must(fetchFn.mock.calls[0])[0]).toBe("/v1/install/policy/rules/r%201");
+    expect(must(fetchFn.mock.calls[0])[0]).toBe("/v1/site/policy/rules/r%201");
     fetchFn = stub(200, { promptSandboxWrites: true });
     await install.putPolicySettings({ promptSandboxWrites: true });
     const [url, init] = must(fetchFn.mock.calls[0]);
     expect([url, init?.method, init?.body]).toEqual([
-      "/v1/install/policy/settings",
+      "/v1/site/policy/settings",
       "PUT",
       '{"promptSandboxWrites":true}',
     ]);

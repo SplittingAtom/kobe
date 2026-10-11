@@ -14,13 +14,13 @@ import {
   type KobeDb,
 } from "@kobe/db";
 import { z } from "zod";
-import { canPinAgent, installVisibleTo } from "./versions.js";
-import { INSTALL, TEAM, toRecord, type AgentRecord } from "./store.js";
+import { canPinAgent, siteVisibleTo } from "./versions.js";
+import { SITE, TEAM, toRecord, type AgentRecord } from "./store.js";
 
 /**
  * Agents the caller can start a chat with from the active team (KOBE-122): the same set a new
  * thread can pin (`findPinnableAgent` + `unavailable` in `versions.ts`): the team's agents, the
- * caller's own personal agents and the gallery, that are active (not suspended, install-wide or
+ * caller's own personal agents and the gallery, that are active (not suspended, site-wide or
  * for this team), not archived and published. Read-only, paginated by (slug, id), `team_id`
  * explicit on top of `withTeam()`. The model is the one the *current version* pins, since that is
  * what a new thread gets.
@@ -91,12 +91,12 @@ export async function listRunnableAgents(
   const limit = query.limit ?? RUNNABLE_PAGE_DEFAULT;
   return withTeam(db, viewer.teamId, async (tx) => {
     const team = await tx.select(TEAM).from(teamAgents).where(eq(teamAgents.teamId, viewer.teamId));
-    const install = await tx
-      .select({ ...INSTALL, scope: installAgents.scope, galleryKey: installAgents.galleryKey })
+    const site = await tx
+      .select({ ...SITE, scope: installAgents.scope, galleryKey: installAgents.galleryKey })
       .from(installAgents)
-      .where(installVisibleTo(viewer.userId));
+      .where(siteVisibleTo(viewer.userId));
     const galleryKeys = new Map(
-      install.flatMap((r) => (r.galleryKey === null ? [] : [[r.id, r.galleryKey] as const])),
+      site.flatMap((r) => (r.galleryKey === null ? [] : [[r.id, r.galleryKey] as const])),
     );
     const suspended = new Set(
       (
@@ -111,7 +111,7 @@ export async function listRunnableAgents(
       suspended.has(a.id) ? { ...a, status: "suspended" } : a;
     const records = [
       ...team.flatMap((r) => published(effective(toRecord("team", r)))),
-      ...install.flatMap(({ scope, galleryKey: _key, ...r }) =>
+      ...site.flatMap(({ scope, galleryKey: _key, ...r }) =>
         published(effective(toRecord(scope, r))),
       ),
     ]

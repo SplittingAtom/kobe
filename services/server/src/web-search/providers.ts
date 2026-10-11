@@ -7,7 +7,7 @@ export interface WebSearchProviderInfo {
   readonly domain: string;
 }
 
-/** The providers an install admin can choose, in display order. */
+/** The providers a site admin can choose, in display order. */
 export const WEB_SEARCH_PROVIDERS: readonly WebSearchProviderInfo[] = [
   { id: "brave", label: "Brave Search", domain: "api.search.brave.com" },
   { id: "tavily", label: "Tavily", domain: "api.tavily.com" },

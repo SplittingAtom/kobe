@@ -109,11 +109,8 @@ describe("team budgets API (D8: team admins)", () => {
       user_requests_per_minute: 30,
     });
     expect(set.json.effective_requests_per_minute).toBe(30);
-    // The install budget is shown to a team in percent only (its spend is every team's).
-    expect(Object.keys(set.json.install).sort()).toEqual([
-      "percent_used",
-      "user_requests_per_minute",
-    ]);
+    // The site budget is shown to a team in percent only (its spend is every team's).
+    expect(Object.keys(set.json.site).sort()).toEqual(["percent_used", "user_requests_per_minute"]);
     const member = await admin.put(`/v1/team/budgets/members/${bob.id}`, {
       monthly_usd: 5,
       daily_usd: null,

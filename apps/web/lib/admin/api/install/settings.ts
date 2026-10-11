@@ -1,4 +1,4 @@
-/** Install console: settings (`/v1/install`, install.settings.manage; turning 2FA off: Owner only). Responses arrive camelized. */
+/** Install console: settings (`/v1/site`, install.settings.manage; turning 2FA off: Owner only). Responses arrive camelized. */
 import { apiRequest, type ApiResult } from "../../../api/client";
 
 export interface InstallSettings {
@@ -14,9 +14,9 @@ export const AUDIT_PII_RETENTION_HOURS = { min: 1, max: 8760, default: 12 } as c
 export function putInstallSettings(
   change: Partial<InstallSettings>,
 ): Promise<ApiResult<InstallSettings>> {
-  return apiRequest("/v1/install/settings", { method: "PUT", json: { ...change } });
+  return apiRequest("/v1/site/settings", { method: "PUT", json: { ...change } });
 }
 
 export function getInstallSettings(): Promise<ApiResult<InstallSettings>> {
-  return apiRequest("/v1/install/settings");
+  return apiRequest("/v1/site/settings");
 }

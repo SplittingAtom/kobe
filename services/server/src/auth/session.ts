@@ -1,9 +1,9 @@
 import { createMiddleware } from "hono/factory";
 import { eq, installRoles, installSettings, users } from "@kobe/db";
-import type { InstallRole } from "../authz/permissions.js";
+import type { SiteRole } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
 
-export type { InstallRole } from "../authz/permissions.js";
+export type { SiteRole } from "../authz/permissions.js";
 
 export interface SessionUser {
   readonly id: string;
@@ -16,7 +16,7 @@ export interface AuthVariables {
   user: SessionUser;
   /** The Better Auth session row id (the active team hangs off it, spec D9). */
   sessionId: string;
-  installRole: InstallRole;
+  siteRole: SiteRole;
 }
 
 export const REQUIRE_TWO_FACTOR = "require_2fa";
@@ -31,7 +31,7 @@ export async function readRequireTwoFactor(deps: ServerDeps): Promise<boolean> {
 
 /**
  * Requires a live Better Auth session (looked up in Postgres on every request, so revocation is
- * immediate) and, when the install requires 2FA, an enrolled TOTP factor. Enrollment itself goes
+ * immediate) and, when the site requires 2FA, an enrolled TOTP factor. Enrollment itself goes
  * through /api/auth/two-factor/*, which this middleware does not guard.
  */
 export function requireSession(deps: ServerDeps) {
@@ -66,7 +66,7 @@ export function requireSession(deps: ServerDeps) {
     }
     c.set("user", user);
     c.set("sessionId", session.session.id);
-    c.set("installRole", account.role ?? null);
+    c.set("siteRole", account.role ?? null);
     await next();
   });
 }

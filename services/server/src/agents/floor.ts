@@ -9,7 +9,7 @@ const compact = <T>(values: readonly (T | undefined)[]): T[] =>
 
 /**
  * Reads the policy floor a version is published against, in the publishing transaction: the
- * install's deny/ask rules and approval floor, plus (for a team agent, `tx` inside the team's
+ * site's deny/ask rules and approval floor, plus (for a team agent, `tx` inside the team's
  * `withTeam`) the team's own rules. User remember-rules never shape a manifest. Rows are read
  * through `toPolicyRule`, which fails closed on unreadable rows like the engine does.
  */
@@ -17,7 +17,7 @@ export async function readPublishFloor(
   tx: KobeTx,
   scope: PublishFloor["scope"],
 ): Promise<PublishFloor> {
-  const install = await tx.select().from(installToolRules);
+  const site = await tx.select().from(installToolRules);
   const team: PolicyRule[] =
     scope === "team"
       ? compact(
@@ -28,7 +28,7 @@ export async function readPublishFloor(
       : [];
   return {
     scope,
-    install: compact(install.map((r) => toPolicyRule(r, "install"))),
+    site: compact(site.map((r) => toPolicyRule(r, "install"))),
     team,
     approvalFloor: await readApprovalFloor(tx),
   };

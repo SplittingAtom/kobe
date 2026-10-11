@@ -4,7 +4,7 @@ import { TRASH_RETENTION_DAYS } from "../threads/schemas.js";
 
 /**
  * Retention periods (spec D18): a team keeps threads 30 days, 90 days, 1 year or forever, within
- * the install maximum. Pure helpers, shared by the API, the console and the nightly job.
+ * the site maximum. Pure helpers, shared by the API, the console and the nightly job.
  */
 export { RETENTION_GRACE_DAYS, RETENTION_PERIODS, TRASH_RETENTION_DAYS, type RetentionPeriod };
 
@@ -21,7 +21,7 @@ export const PERIOD_DAYS: Readonly<Record<RetentionPeriod, number | null>> = {
 /** Ended runs' live events are folded away this long after the run ended (D18). */
 export const COMPACTION_DAYS = 7;
 
-/** Default team period and install maximum: keep forever (D18). */
+/** Default team period and site maximum: keep forever (D18). */
 export const DEFAULT_PERIOD: RetentionPeriod = "forever";
 
 function rank(period: RetentionPeriod): number {
@@ -52,7 +52,7 @@ export function parsePeriod(value: string | null | undefined): RetentionPeriod {
 const DAY_MS = 86_400_000;
 
 /**
- * One layer of the setting (the team's period or the install maximum) with its grace period (user
+ * One layer of the setting (the team's period or the site maximum) with its grace period (user
  * decision 2026-10-04): a shortening waits `RETENTION_GRACE_DAYS` as `pending` before it applies;
  * a lengthening applies at once.
  */
@@ -122,7 +122,7 @@ export function upcomingShortening(team: Layer, maximum: Layer, now: Date): Upco
 export interface RetentionView {
   /** What the team admins chose (in force or pending). */
   readonly period: RetentionPeriod;
-  /** The install maximum as chosen (in force or pending). */
+  /** The site maximum as chosen (in force or pending). */
   readonly maximum: RetentionPeriod;
   /** What the nightly job applies now. */
   readonly effective: RetentionPeriod;

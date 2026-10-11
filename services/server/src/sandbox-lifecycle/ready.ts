@@ -10,7 +10,7 @@ import { SandboxWakeError } from "../sandbox-wire/types.js";
 export const WORKSPACE_UNAVAILABLE_MESSAGE =
   "Your workspace could not be started because the cluster could not provide it. Ask your site admin to check the cluster, then try again.";
 
-/** What an install admin can do, by cause; appended to the audit detail (docs/install.md). */
+/** What a site admin can do, by cause; appended to the audit detail (docs/install.md). */
 export const REMEDY: Readonly<Record<StallDiagnosis["cause"], string>> = {
   volume_unschedulable:
     "Remedy: free or add Longhorn disk space or raise over-provisioning (docs/install.md, Longhorn sizing); the next message retries",
@@ -40,7 +40,7 @@ export interface EnsureReadyOptions {
 
 /**
  * Waits for the woken sandbox pod to be Ready. If it is not (a definite unrecoverable signal, or
- * the wake budget ran out), records why for install admins and fails the wake with
+ * the wake budget ran out), records why for site admins and fails the wake with
  * `workspace_unavailable`. Nothing is ever deleted here: the remedy is the admin to apply.
  */
 export async function ensureReady(options: EnsureReadyOptions): Promise<void> {

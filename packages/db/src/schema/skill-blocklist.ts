@@ -2,8 +2,8 @@ import { sql } from "drizzle-orm";
 import { check, index, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { users } from "./auth.js";
 
-// Install-wide skill blocklist (KOBE-81, spec D22): SHA-256 hashes of canonical skill bundles
-// (`skill_*_versions.content_hash`, KOBE-78) that never load anywhere in the install. Install admins
+// Site-wide skill blocklist (KOBE-81, spec D22): SHA-256 hashes of canonical skill bundles
+// (`skill_*_versions.content_hash`, KOBE-78) that never load anywhere in the install. Site admins
 // manage it; the server reads it on every upload, review decision and run start (never cached).
 // Rows are only added or removed, never edited.
 

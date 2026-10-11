@@ -31,7 +31,7 @@ function stubUsage(body: unknown) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, init: RequestInit = {}) => {
-      if (url === "/v1/install/budget") {
+      if (url === "/v1/site/budget") {
         const limits = {
           monthly_usd: null,
           daily_usd: null,

@@ -137,7 +137,7 @@ async function ensureUser(owner, ownerId, user, database) {
   if ((await c.signIn(user.email)).status === 200) return c;
   const { issueInvite } = await import("/app/dist/invitations/install-invites.js");
   const { runWithAuditContext } = await import("/app/dist/audit/context.js");
-  // Audited as the Owner, like POST /v1/install/invites (which mails the token instead).
+  // Audited as the Owner, like POST /v1/site/invites (which mails the token instead).
   const invite = await runWithAuditContext(
     { actor: { kind: "user", id: ownerId }, ip: null, userAgent: "kobe-gate1" },
     () => issueInvite(database.db, { email: user.email, invitedBy: ownerId }),
@@ -181,14 +181,14 @@ async function fixtures() {
   } finally {
     await database.close();
   }
-  const listed = await owner.call("GET", "/v1/install/teams");
+  const listed = await owner.call("GET", "/v1/site/teams");
   const teamIds = {};
   for (const team of config.teams) {
     const members = config.users.filter((u) => u.team === team.key);
     const admin = members[0];
     let id = (listed.json.teams ?? []).find((t) => t.slug === team.slug)?.id;
     if (!id) {
-      const made = await owner.call("POST", "/v1/install/teams", {
+      const made = await owner.call("POST", "/v1/site/teams", {
         slug: team.slug,
         name: team.name,
         adminUserId: ids.get(admin.key),

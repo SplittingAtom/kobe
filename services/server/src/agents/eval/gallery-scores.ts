@@ -11,7 +11,7 @@ import {
 import type { EvalRecord } from "./store.js";
 
 /**
- * Install-level Orbit scores of gallery agents (KOBE-94). Gallery agents belong to no team, so the
+ * Site-level Orbit scores of gallery agents (KOBE-94). Gallery agents belong to no team, so the
  * eval runs in a host team (an `orbit_evals` row with scope `gallery` is the execution record) and
  * its verdict is copied into `gallery_agent_scores`, which every team may read.
  */
@@ -33,7 +33,7 @@ export function galleryVersionOf(record: Pick<EvalRecord, "definition">): number
 }
 
 /**
- * Copies a finished gallery eval's verdict (passed or blocked) to the install-level score. Runs in
+ * Copies a finished gallery eval's verdict (passed or blocked) to the site-level score. Runs in
  * `finishEval`'s transaction: if it fails, the verdict rolls back and the sweeper retries.
  */
 export async function recordGalleryScore(db: KobeDb | KobeTx, record: EvalRecord): Promise<void> {

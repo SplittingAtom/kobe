@@ -9,7 +9,7 @@ import {
 
 const id = z.uuid().transform((v) => v.toLowerCase());
 
-/** `POST /v1/install/break-glass` (spec D10): one team, optionally one user or one thread. */
+/** `POST /v1/site/break-glass` (spec D10): one team, optionally one user or one thread. */
 export const requestGrantSchema = z
   .strictObject({
     teamId: id,

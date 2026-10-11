@@ -69,7 +69,7 @@ import type { UploadSettings } from "./uploads/settings.js";
 export interface ServerDepsOptions {
   readonly databaseUrl: string;
   readonly publicUrl: string;
-  /** KOBE_RETENTION_PAUSED (KOBE-243): shown to install admins; the deleting jobs honour it. */
+  /** KOBE_RETENTION_PAUSED (KOBE-243): shown to site admins; the deleting jobs honour it. */
   readonly retentionPaused?: boolean;
   readonly authSecret: string;
   /** One-time secret proving possession of the install for first-run setup. */
@@ -111,7 +111,7 @@ export interface ServerDepsOptions {
     readonly discovery?: ModelDiscovery;
   };
   /**
-   * The install's approval HMAC key (KOBE-37, config `KOBE_APPROVAL_KEY`); without it, tool calls
+   * The site's approval HMAC key (KOBE-37, config `KOBE_APPROVAL_KEY`); without it, tool calls
    * that need approval are denied.
    */
   readonly approvalKeys?: ApprovalKeyring;
@@ -122,7 +122,7 @@ export interface ServerDepsOptions {
    * header values (current first); unset = header injection off.
    */
   readonly egressHeaderSecrets?: readonly string[];
-  /** Install envelope (KOBE-107, `KOBE_ENVELOPE_KEY`) for per-record secrets; unset = off. */
+  /** Site envelope (KOBE-107, `KOBE_ENVELOPE_KEY`) for per-record secrets; unset = off. */
   readonly envelope?: Envelope;
   /**
    * Object storage (`s3.*`, KOBE-27) for thread blobs: export reads offloaded entries, retention
@@ -234,14 +234,14 @@ export interface ServerDeps {
   readonly modelTokenDefaults: ModelTokenDefaults;
   /** Keeps members' `projects/` workspace area equal to their projects' files (KOBE-162). */
   readonly projectMounts: ProjectMounts;
-  /** Creates an email+password user (and optional install role) atomically, without sign-up. */
+  /** Creates an email+password user (and optional site role) atomically, without sign-up. */
   createUserWithPassword(
     input: NewUser,
-    options?: { installRole?: "owner" | "admin"; recordSetup?: boolean },
+    options?: { siteRole?: "owner" | "admin"; recordSetup?: boolean },
   ): Promise<{ id: string }>;
   /** Deletes every session of a user; the next request with any of their cookies is rejected. */
   revokeAllSessions(userId: string): Promise<void>;
-  /** Constant-time comparison against the install's setup token. */
+  /** Constant-time comparison against the site's setup token. */
   isSetupToken(candidate: unknown): boolean;
   close(): Promise<void>;
 }
@@ -424,7 +424,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     uploads: options.uploads,
     modelTokenDefaults,
     projectMounts,
-    async createUserWithPassword({ email, name, password }, { installRole, recordSetup } = {}) {
+    async createUserWithPassword({ email, name, password }, { siteRole, recordSetup } = {}) {
       const ctx = await auth.$context;
       const hash = await ctx.password.hash(password);
       // One transaction: a failure can't leave a half-created user (e.g. an Owner without a role).
@@ -440,8 +440,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
           providerId: "credential",
           password: hash,
         });
-        if (installRole)
-          await tx.insert(installRoles).values({ userId: user.id, role: installRole });
+        if (siteRole) await tx.insert(installRoles).values({ userId: user.id, role: siteRole });
         if (recordSetup) {
           await recordAudit(tx, {
             action: "identity.setup.completed",

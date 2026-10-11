@@ -25,7 +25,7 @@ import {
 } from "./periods.js";
 
 /**
- * Where the periods live (D6): the install maximum in `install_settings` (install admins), the
+ * Where the periods live (D6): the site maximum in `install_settings` (site admins), the
  * team's period in `team_retention` (team admins, behind team RLS). Both default to forever. A
  * shortening of either waits 7 days as a pending change (user decision 2026-10-04), cancellable
  * meanwhile; a lengthening applies at once. Reads settle a pending change whose date has come, so
@@ -45,7 +45,7 @@ function parsePending(value: string | undefined): Pick<Layer, "pending" | "pendi
   return { pending: parsed, pendingAt: when };
 }
 
-/** The install maximum's layer (row-locked with `forUpdate`). */
+/** The site maximum's layer (row-locked with `forUpdate`). */
 export async function readMaximumLayer(db: Executor, forUpdate = false): Promise<Layer> {
   const query = db
     .select({ key: installSettings.key, value: installSettings.value })
@@ -118,7 +118,7 @@ export type SetTeamPeriodResult =
   | { readonly ok: false; readonly error: "exceeds_maximum"; readonly maximum: RetentionPeriod };
 
 /**
- * Sets the team's period (team admins), within the install maximum as chosen. A shorter period is
+ * Sets the team's period (team admins), within the site maximum as chosen. A shorter period is
  * scheduled 7 days out; a longer one applies at once (and drops a pending shortening). Audited
  * (`retention.policy.changed`, with `effectiveAt` when scheduled).
  */
@@ -200,7 +200,7 @@ export async function readMaximum(db: Executor, now = new Date()): Promise<Maxim
   return maximumView(await readMaximumLayer(db), now);
 }
 
-/** Upserts an install setting (the app role can't delete them: "" means none). */
+/** Upserts a site setting (the app role can't delete them: "" means none). */
 async function store(tx: KobeTx, key: string, value: string): Promise<void> {
   await tx
     .insert(installSettings)
@@ -220,7 +220,7 @@ async function writeMaximumLayer(tx: KobeTx, layer: Layer): Promise<void> {
 }
 
 /**
- * Sets the install maximum (install admins). Lowering it is scheduled 7 days out (teams keep their
+ * Sets the site maximum (site admins). Lowering it is scheduled 7 days out (teams keep their
  * choices; the job applies the shorter); raising it applies at once. Audited
  * (`retention.maximum.changed`, with `effectiveAt` when scheduled).
  */

@@ -25,7 +25,7 @@ afterAll(async () => {
 const actorOf = (team: string, userId: string) => ({
   user_id: userId,
   team_id: team,
-  install_role: "user" as const,
+  site_role: "user" as const,
   team_role: "member" as const,
 });
 

@@ -16,22 +16,22 @@ import { teamMembers } from "./team-members.js";
 import { teams } from "./teams.js";
 
 // Tool rules (spec D6, D29, §5.4). The spec's single `tool_rules(team_id?, scope, …)` is split in
-// two so every team row sits behind team RLS: install rules (the policy floor) are install-wide;
+// two so every team row sits behind team RLS: site rules (the policy floor) are site-wide;
 // team and user rules are a team table. `arg_pattern` is `{ "<JSON Pointer>": "<glob>" }`
 // (`argPatternSchema` in @kobe/protocol), never a regular expression; the server validates it.
 
-/** deny | ask | allow. Install rules use deny and ask only; user rules use allow only. */
+/** deny | ask | allow. Site rules use deny and ask only; user rules use allow only. */
 export const toolRuleEffect = pgEnum("tool_rule_effect", ["deny", "ask", "allow"]);
 export type ToolRuleEffect = (typeof toolRuleEffect.enumValues)[number];
 
-/** Scope of a row in `tool_rules` (install rules live in `install_tool_rules`). */
+/** Scope of a row in `tool_rules` (site rules live in `install_tool_rules`). */
 export const toolRuleScope = pgEnum("tool_rule_scope", ["team", "user"]);
 
 const GLOB_LENGTH_CHECK = (column: unknown) => sql`char_length(${column}) BETWEEN 1 AND 256`;
 const ARG_PATTERN_CHECK = (column: unknown) =>
   sql`${column} IS NULL OR jsonb_typeof(${column}) = 'object'`;
 
-/** Install-wide (†): the install policy floor, managed by install Owner/Admins (D6, D8). */
+/** Site-wide (†): the site policy floor, managed by site Owner/Admins (D6, D8). */
 export const installToolRules = pgTable(
   "install_tool_rules",
   {
@@ -47,7 +47,7 @@ export const installToolRules = pgTable(
     expiresAt: timestamp({ withTimezone: true }),
   },
   (t) => [
-    // The floor only tightens: install allow rules would loosen every team at once.
+    // The floor only tightens: site allow rules would loosen every team at once.
     check("install_tool_rules_effect", sql`${t.effect} IN ('deny', 'ask')`),
     check("install_tool_rules_glob", GLOB_LENGTH_CHECK(t.toolGlob)),
     check("install_tool_rules_arg_pattern", ARG_PATTERN_CHECK(t.argPattern)),

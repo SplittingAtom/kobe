@@ -80,7 +80,7 @@ export const DENY_APPROVALS: ApprovalBroker = {
 };
 
 /**
- * Run policy context from Postgres: the install floor (`readApprovalFloor`, spec D6: install-wide
+ * Run policy context from Postgres: the site floor (`readApprovalFloor`, spec D6: site-wide
  * only, no team floor) and the run's own mode, fixed at creation by the orchestrator
  * (`runs.approval_mode`, KOBE-30). Agent tool lists arrive with KOBE-47. An unreadable floor is the
  * strictest mode (`ask-all`); a failed read throws, and the call is denied.

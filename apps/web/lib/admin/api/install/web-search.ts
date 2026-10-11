@@ -1,4 +1,4 @@
-/** Install console: web search provider (`/v1/install/web-search`, KOBE-113). Responses arrive camelized. */
+/** Install console: web search provider (`/v1/site/web-search`, KOBE-113). Responses arrive camelized. */
 import { apiRequest, type ApiResult } from "../../../api/client";
 
 export type WebSearchProviderId = "brave" | "tavily" | "exa";
@@ -20,7 +20,7 @@ export interface InstallWebSearch {
 }
 
 export function getInstallWebSearch(): Promise<ApiResult<InstallWebSearch>> {
-  return apiRequest("/v1/install/web-search");
+  return apiRequest("/v1/site/web-search");
 }
 
 /** `apiKey` is required for a first provider or a change of provider; omit it to keep the key. */
@@ -29,7 +29,7 @@ export function putInstallWebSearch(change: {
   readonly apiKey?: string | undefined;
   readonly enabled?: boolean | undefined;
 }): Promise<ApiResult<InstallWebSearch>> {
-  return apiRequest("/v1/install/web-search", {
+  return apiRequest("/v1/site/web-search", {
     method: "PUT",
     json: {
       provider: change.provider,
@@ -40,5 +40,5 @@ export function putInstallWebSearch(change: {
 }
 
 export function deleteInstallWebSearch(): Promise<ApiResult<null>> {
-  return apiRequest("/v1/install/web-search", { method: "DELETE" });
+  return apiRequest("/v1/site/web-search", { method: "DELETE" });
 }

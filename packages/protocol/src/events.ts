@@ -110,7 +110,7 @@ export const EVENT_PAYLOAD_SCHEMAS = {
   }),
   "run.started": z.strictObject({
     thread_id: uuidSchema,
-    /** The thread's pinned agent; both null = the install default agent (threads.agent_id null). */
+    /** The thread's pinned agent; both null = the site default agent (threads.agent_id null). */
     agent_id: uuidSchema.nullable(),
     agent_version: z.number().int().positive().nullable(),
     /**

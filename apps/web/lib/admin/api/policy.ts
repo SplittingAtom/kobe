@@ -1,4 +1,4 @@
-/** Tool policy rules as `/v1/install/policy` and `/v1/team/policy` return them (KOBE-35). */
+/** Tool policy rules as `/v1/site/policy` and `/v1/team/policy` return them (KOBE-35). */
 
 export type RuleEffect = "deny" | "ask" | "allow";
 

@@ -5,7 +5,7 @@ import { EXPORT_PAGE_SIZE } from "../audit/export/stream.js";
 import { readForwardingHealth } from "../audit/forward/state.js";
 import { auditPageBody, parseAuditQuery } from "../audit/http.js";
 import type { AuthVariables } from "../auth/session.js";
-import { requireInstallPermission } from "../authz/middleware.js";
+import { requireSitePermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { hitRateLimit } from "../rate-limit.js";
 
@@ -16,14 +16,14 @@ export const AUDIT_EXPORTS_PER_MINUTE = 6;
 export const INTEGRITY_CHECKS_PER_MINUTE = 3;
 
 /**
- * The install-wide audit log (spec D6, D8; §6.1 `/v1/install/audit`), install Owner/Admin only:
+ * The site-wide audit log (spec D6, D8; §6.1 `/v1/site/audit`), site Owner/Admin only:
  * every event, newest first, keyset-paginated (`before`/`after` = seq) and filterable by action,
  * category, actor, team and time. `GET /integrity` recomputes the hash chain.
  */
-export function installAuditRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
+export function siteAuditRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
   const db = deps.database.db;
-  app.use(requireInstallPermission("install.audit.read"));
+  app.use(requireSitePermission("site.audit.read"));
 
   app.get("/", async (c) => {
     const query = parseAuditQuery(c);
@@ -47,7 +47,7 @@ export function installAuditRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
     return exportResponse(c, {
       db,
       query: parsed.value,
-      scope: "install",
+      scope: "site",
       actorId,
       fetchPage: (after) =>
         listAuditEvents(db, {

@@ -137,7 +137,7 @@ describe("audit() inside the action's transaction", () => {
         target: { invitationId: randomUUID(), email: "a@example.com", token: "abc" },
       },
       { action: "auth.unknown_thing", actor: user(), target: {} },
-      // Team events need a team; install events refuse one.
+      // Team events need a team; site events refuse one.
       {
         action: "identity.member.removed",
         actor: user(),
@@ -389,7 +389,7 @@ describe("reading the audit log", () => {
     }
   });
 
-  it("filters the install log by action, category, actor, team and time; pages forwards", async () => {
+  it("filters the site log by action, category, actor, team and time; pages forwards", async () => {
     const byTeam = await listAuditEvents(app.db, { teamId: teamB, limit: 50 });
     expect(byTeam.events).toHaveLength(3);
     const byActor = await listAuditEvents(app.db, { actorId: actor.id ?? "", limit: 50 });
@@ -434,5 +434,75 @@ describe("reading the audit log", () => {
     });
     const page = await listAuditEvents(app.db, { action: "platform.isolation.changed" });
     expect(page.events[0]?.actor).toEqual({ kind: "system", id: null, name: null, email: null });
+  });
+});
+
+// KOBE-255: "install" became "site". Rows recorded under the old names stay as they are (the hash
+// chain covers them); new events use site.* names, and filters find both.
+describe("historical install.* rows next to new site.* rows", () => {
+  const actorId = randomUUID();
+
+  /** A row as an older server wrote it: the database hashes it into the chain. */
+  async function historical(action: string, target: Record<string, unknown>) {
+    await app.pool.query(
+      `INSERT INTO audit_log (actor_kind, actor_id, action, target) VALUES ('user', $1, $2, $3)`,
+      [actorId, action, JSON.stringify(target)],
+    );
+  }
+
+  it("keeps the chain intact and finds old and new names by action and category", async () => {
+    await historical("install.settings.updated", { setting: "require_two_factor", value: true });
+    await historical("identity.install_role.granted", { userId: randomUUID(), role: "admin" });
+    await record({
+      action: "site.settings.updated",
+      actor: { kind: "user", id: actorId },
+      target: { setting: "require_two_factor", value: false },
+    });
+    await record({
+      action: "identity.site_role.revoked",
+      actor: { kind: "user", id: actorId },
+      target: { userId: randomUUID(), role: "admin" },
+    });
+
+    const report = await verifyAuditChain(app.db);
+    expect(report.ok).toBe(true);
+
+    const actions = async (query: Record<string, string>) =>
+      (await listAuditEvents(app.db, auditQuerySchema.parse({ actorId, ...query }))).events.map(
+        (e) => e.action,
+      );
+    expect(await actions({ action: "site.settings.updated" })).toEqual([
+      "site.settings.updated",
+      "install.settings.updated",
+    ]);
+    expect(await actions({ action: "install.settings.updated" })).toEqual([
+      "site.settings.updated",
+      "install.settings.updated",
+    ]);
+    expect(await actions({ action: "identity.site_role.granted" })).toEqual([
+      "identity.install_role.granted",
+    ]);
+    expect(await actions({ category: "site" })).toEqual([
+      "site.settings.updated",
+      "install.settings.updated",
+    ]);
+    expect(await actions({ category: "install" })).toEqual([
+      "site.settings.updated",
+      "install.settings.updated",
+    ]);
+    expect(await actions({ category: "identity" })).toEqual([
+      "identity.site_role.revoked",
+      "identity.install_role.granted",
+    ]);
+  });
+
+  it("never records a historical name again", async () => {
+    await expect(
+      record({
+        action: "install.settings.updated",
+        actor: { kind: "user", id: actorId },
+        target: { setting: "require_two_factor", value: true },
+      } as unknown as AuditEvent),
+    ).rejects.toBeInstanceOf(AuditEventError);
   });
 });

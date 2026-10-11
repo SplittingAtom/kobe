@@ -16,7 +16,7 @@ import { useState } from "react";
 import styles from "../admin.module.css";
 
 /**
- * Gallery agents (spec D19/D21; `/v1/install/gallery/agents`), read-only: they come from the
+ * Gallery agents (spec D19/D21; `/v1/site/gallery/agents`), read-only: they come from the
  * definitions in the repository, seeded at install and upgrade (KOBE-87). Teams fork them.
  */
 export function GalleryPage() {

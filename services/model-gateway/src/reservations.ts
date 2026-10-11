@@ -2,10 +2,10 @@ import type { BudgetLine } from "@kobe/db";
 
 /**
  * In-flight budget reservations (KOBE-42 review, shared across replicas by KOBE-120): what an
- * admitted call may still cost, held at its install, team and member levels until it ends.
+ * admitted call may still cost, held at its site, team and member levels until it ends.
  */
 
-/** Of what is left on a shared (install or team) line, the most one member's calls can hold. */
+/** Of what is left on a shared (site or team) line, the most one member's calls can hold. */
 export const MEMBER_SHARE = 0.25;
 
 export interface Cost {

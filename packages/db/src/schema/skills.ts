@@ -20,7 +20,7 @@ import { teams } from "./teams.js";
 // Skill bundles (spec D19/§5.4, KOBE-78). Like agents, the spec's one skills table is split by
 // scope because a team table's team_id is NOT NULL (D5):
 //   - team skills live in the team table `team_skills` (RLS on team_id);
-//   - personal skills (they follow the user into every team, D9) live in install-wide
+//   - personal skills (they follow the user into every team, D9) live in site-wide
 //     `install_skills`; the server confines them to their owner.
 // Each upload creates an immutable numbered version (`*_skill_versions`): the bundle is a zip in
 // object storage (`storage_key`) with its SHA-256 (`content_hash`, what the blocklist and
@@ -117,7 +117,7 @@ export const teamSkills = pgTable(
   ],
 );
 
-/** Install-wide (†): personal skills, owned by one user and usable in any of their teams (D9). */
+/** Site-wide (†): personal skills, owned by one user and usable in any of their teams (D9). */
 export const installSkills = pgTable(
   "install_skills",
   {
@@ -155,7 +155,7 @@ export const teamSkillVersions = pgTable(
   ],
 );
 
-/** Install-wide (†): immutable versions of personal skills (app role: SELECT and INSERT only). */
+/** Site-wide (†): immutable versions of personal skills (app role: SELECT and INSERT only). */
 export const installSkillVersions = pgTable(
   "install_skill_versions",
   {

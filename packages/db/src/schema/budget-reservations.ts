@@ -51,9 +51,9 @@ export const budgetReservations = pgTable(
 );
 
 /**
- * Install-wide (†): the same reservation counted against the install budget, which spans teams
+ * Site-wide (†): the same reservation counted against the site budget, which spans teams
  * and so cannot live in a team table (RLS would hide other teams' rows). It holds no team or
- * user ids: `team_key` and `member_key` are salted SHA-256 hashes (the salt is a per-install
+ * user ids: `team_key` and `member_key` are salted SHA-256 hashes (the salt is a per-site
  * secret the gateways share), enough for equality (a team ends only its own holds; the
  * per-member share) and useless for reading who reserved. Computed inside the functions.
  */

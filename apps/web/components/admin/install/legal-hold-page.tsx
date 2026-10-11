@@ -59,7 +59,7 @@ export function holdScopeLabel(hold: Pick<LegalHold, "scope" | "subject">): stri
 }
 
 /**
- * Legal hold (spec D18; `/v1/install/legal-hold`). An install admin asks to hold a team's data, or
+ * Legal hold (spec D18; `/v1/site/legal-hold`). An install admin asks to hold a team's data, or
  * one user's data in a team, with a reason; a second install admin places it (a single-admin
  * install self-approves, flagged). While in force, retention and Trash purges, offboarding volume
  * deletion and the audit log's IP erasure skip that data. Releasing needs a second admin too.

@@ -11,9 +11,9 @@ export const policy = defineDomain({
     "egress_requests",
     "egress_request_notifications",
   ],
-  installWide: ["egress_domains", "install_tool_rules"],
+  siteWide: ["egress_domains", "install_tool_rules"],
   grants: {
-    // The install policy floor (KOBE-35): rules only, no team data, no cascades into teams.
+    // The site policy floor (KOBE-35): rules only, no team data, no cascades into teams.
     install_tool_rules: ALL_PRIVILEGES,
     // The egress ceiling (KOBE-38): domain patterns only, no team data. Deleting a custom domain
     // cascades into every team's `team_egress` row for it: intended (it left the ceiling), audited

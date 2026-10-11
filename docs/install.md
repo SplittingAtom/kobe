@@ -44,7 +44,7 @@ apply`, or deleting the RuntimeClass later cannot run agents without isolation:
   agent work. Without a verified RuntimeClass it keeps serving sign-in
   and the admin console but **agents are disabled**: chat returns `isolation_runtime_missing`
   (HTTP 503), the server logs the problem and the fix at `error` level, and site admins see
-  both at `GET /v1/install/isolation` (`POST /v1/install/isolation/check` re-checks immediately
+  both at `GET /v1/site/isolation` (`POST /v1/site/isolation/check` re-checks immediately
   after you fix the cluster). `/readyz` does not disclose the result (it is unauthenticated); it is
   not ready only until the first check completes. Errors and timeouts talking to the Kubernetes
   API count as missing.
@@ -174,7 +174,7 @@ the cluster could not provide it. Ask your site admin to check the cluster."); m
 see node or volume names.
 
 Site admins find the reason in the site audit log: filter on action `sandbox.wake_stalled`
-(`GET /v1/install/audit?action=sandbox.wake_stalled`). `cause` is one of `volume_unschedulable`,
+(`GET /v1/site/audit?action=sandbox.wake_stalled`). `cause` is one of `volume_unschedulable`,
 `volume_attach`, `scheduling`, `image_pull`, `unknown`; `detail` is the cluster's own event text
 followed by a suggested remedy. The server log has the same line (level error, "sandbox not ready:
 failing the wake"). The server never deletes a pod or volume for this: if a workspace that has
@@ -333,7 +333,7 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
   by every conversation that chose it, on the new target, once a team enables it. Re-pointing an
   alias (Edit) changes its model everywhere at once in the same way.
 - **Output limit and context window** (KOBE-259): per catalog model, `max_output_tokens`
-  (256..131,072) and `context_window` (1,024..10,000,000) on `POST/PATCH /v1/install/models/catalog`
+  (256..131,072) and `context_window` (1,024..10,000,000) on `POST/PATCH /v1/site/models/catalog`
   (site console **Models and providers**), plus a `reasoning` flag for models that think before
   answering. Unset values use `server.modelDefaults`: 16,384 output tokens, 32,768 for reasoning
   models (their hidden reasoning spends the same allowance), and a 128,000-token window. The run's
@@ -345,7 +345,7 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
   provider.
 - **Kobe pushes it to Bifrost.** The server reconciles Bifrost through Bifrost's admin API: on every
   change (Postgres `LISTEN/NOTIFY`, within seconds) and every 30 s. One server replica leads (a
-  Postgres advisory lock); `GET /v1/install/models` reports `gateway.in_sync` and the last error.
+  Postgres advisory lock); `GET /v1/site/models` reports `gateway.in_sync` and the last error.
   Bifrost holds one customer (the site), one team per Kobe team and one virtual key per member
   of each team, allowed exactly the team's enabled models. Kobe owns this Bifrost: anything else
   configured in it (by hand, through its UI) is removed by the next sync.
@@ -402,7 +402,7 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
 - **Budgets and rate limits** (KOBE-42, D30): budgets in **dollars** (at catalog prices) and in
   **tokens** (input + output + cache reads + cache writes, every model; this is what caps models
   without prices such as Ollama Cloud's), each monthly with an optional daily cap, for the site
-  (`PUT /v1/install/budget`, site admins; also the per-user request rate, default 60/min), each
+  (`PUT /v1/site/budget`, site admins; also the per-user request rate, default 60/min), each
   team, a team's **default member budget** (every member without one of their own) and single
   members (`/v1/team/budgets`, team admins; a team may only lower the rate). Periods are calendar
   months and days in **UTC**. At 80 % team admins (and the member, for their own budget; install
@@ -425,11 +425,11 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
   really crossed in the current period, alert emails only with their alert.
 - **Prices are optional, per catalog model**: `input_usd_per_mtok`, `output_usd_per_mtok` and
   optionally `cache_read_usd_per_mtok` / `cache_write_usd_per_mtok` (dollars per million tokens;
-  cache prices default to the input price) on `POST/PATCH /v1/install/models/catalog`. Providers
+  cache prices default to the input price) on `POST/PATCH /v1/site/models/catalog`. Providers
   such as Ollama publish no prices: without input and output prices calls are counted in tokens
   with no cost. A call is priced when it is recorded (later price changes do not rewrite history).
   Dashboards: team console **Usage** (`GET /v1/team/usage`, team admins) and site console
-  **Usage and spend** (`GET /v1/install/usage`, `install.usage.read`), both with `from`/`to` (at
+  **Usage and spend** (`GET /v1/site/usage`, `site.usage.read`), both with `from`/`to` (at
   most 400 days) and `bucket` (`hour`/`day`); per run and per thread for whoever can read them
   (`GET /v1/runs/{id}/usage`, `GET /v1/threads/{id}/usage`).
 

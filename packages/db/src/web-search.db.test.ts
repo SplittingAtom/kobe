@@ -4,7 +4,7 @@ import { createDb, type KobeDatabase } from "./client.js";
 import { teams, teamWebSearch, users, webSearchSettings } from "./schema/index.js";
 import { withTeam } from "./with-team.js";
 
-/** KOBE-113: the install web-search provider (sealed key) and the team opt-in. */
+/** KOBE-113: the site web-search provider (sealed key) and the team opt-in. */
 let app: KobeDatabase;
 const teamA = randomUUID();
 const teamB = randomUUID();

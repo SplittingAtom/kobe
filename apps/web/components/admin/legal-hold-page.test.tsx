@@ -81,10 +81,10 @@ afterEach(() => {
 describe("install legal hold page", () => {
   it("requests a hold on one user's data with a reason", async () => {
     const calls = stubApi({
-      "GET /v1/install/legal-hold": [200, { holds: [], selfApprovalAllowed: false }],
-      "GET /v1/install/teams": [200, TEAMS],
-      "GET /v1/install/teams/t-1/members": [200, ROSTER],
-      "POST /v1/install/legal-hold": [201, { hold: hold({ scope: "user" }) }],
+      "GET /v1/site/legal-hold": [200, { holds: [], selfApprovalAllowed: false }],
+      "GET /v1/site/teams": [200, TEAMS],
+      "GET /v1/site/teams/t-1/members": [200, ROSTER],
+      "POST /v1/site/legal-hold": [201, { hold: hold({ scope: "user" }) }],
     });
     renderInstall(<LegalHoldPage />);
     const form = await screen.findByRole("form", { name: "Request a legal hold" });
@@ -105,9 +105,9 @@ describe("install legal hold page", () => {
 
   it("places a pending hold and shows self-approval flagged", async () => {
     const calls = stubApi({
-      "GET /v1/install/legal-hold": [200, { holds: [hold(), ACTIVE], selfApprovalAllowed: false }],
-      "GET /v1/install/teams": [200, TEAMS],
-      "POST /v1/install/legal-hold/h-1/approve": [200, { hold: hold({ status: "active" }) }],
+      "GET /v1/site/legal-hold": [200, { holds: [hold(), ACTIVE], selfApprovalAllowed: false }],
+      "GET /v1/site/teams": [200, TEAMS],
+      "POST /v1/site/legal-hold/h-1/approve": [200, { hold: hold({ status: "active" }) }],
     });
     renderInstall(<LegalHoldPage />);
     const table = await screen.findByRole("table", { name: "Holds and requests" });
@@ -120,13 +120,10 @@ describe("install legal hold page", () => {
 
   it("asks to release with a reason, and approves another admin's release", async () => {
     const calls = stubApi({
-      "GET /v1/install/legal-hold": [
-        200,
-        { holds: [ACTIVE, RELEASING], selfApprovalAllowed: false },
-      ],
-      "GET /v1/install/teams": [200, TEAMS],
-      "POST /v1/install/legal-hold/h-2/release": [200, { hold: ACTIVE }],
-      "POST /v1/install/legal-hold/h-3/release/approve": [
+      "GET /v1/site/legal-hold": [200, { holds: [ACTIVE, RELEASING], selfApprovalAllowed: false }],
+      "GET /v1/site/teams": [200, TEAMS],
+      "POST /v1/site/legal-hold/h-2/release": [200, { hold: ACTIVE }],
+      "POST /v1/site/legal-hold/h-3/release/approve": [
         200,
         { hold: hold({ id: "h-3", status: "released" }) },
       ],
@@ -155,8 +152,8 @@ describe("install legal hold page", () => {
 describe("audit log privacy setting", () => {
   it("saves how long audit events keep IP addresses", async () => {
     const calls = stubApi({
-      "GET /v1/install/settings": [200, { requireTwoFactor: false, auditPiiRetentionHours: 12 }],
-      "PUT /v1/install/settings": [200, { requireTwoFactor: false, auditPiiRetentionHours: 48 }],
+      "GET /v1/site/settings": [200, { requireTwoFactor: false, auditPiiRetentionHours: 12 }],
+      "PUT /v1/site/settings": [200, { requireTwoFactor: false, auditPiiRetentionHours: 48 }],
     });
     renderInstall(<SettingsPage />, "admin");
     const form = await screen.findByRole("form", { name: "Audit log privacy" });

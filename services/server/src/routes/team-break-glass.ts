@@ -39,7 +39,7 @@ function teamGrantJson(detail: GrantDetail) {
 
 /**
  * Break-glass on the team (spec D10): the banner of the team's audit view. Team admins see every
- * grant that gave an install admin access to the team, active ones first; each read under a grant
+ * grant that gave a site admin access to the team, active ones first; each read under a grant
  * is in `/v1/team/audit` as `governance.break_glass.read`.
  */
 export function teamBreakGlassRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {

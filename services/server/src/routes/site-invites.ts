@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AuthVariables } from "../auth/session.js";
-import { requireInstallPermission } from "../authz/middleware.js";
+import { requireSitePermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import {
   findOpenInviteEmail,
@@ -10,31 +10,31 @@ import {
   normalizeEmail,
   reissueInvite,
   revokeInvite,
-} from "../invitations/install-invites.js";
-import { mailInstallInvite } from "../invitations/notify.js";
+} from "../invitations/site-invites.js";
+import { mailSiteInvite } from "../invitations/notify.js";
 import { hitRateLimit } from "../rate-limit.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 import { idSchema } from "../teams/schemas.js";
 
 const inviteSchema = z.object({ email: z.email().max(254) }).strict();
 
-/** Invitations (new or re-sent) one install admin may send per hour. */
+/** Invitations (new or re-sent) one site admin may send per hour. */
 export const INVITES_PER_ADMIN_PER_HOUR = 30;
 /** Invitations (new or re-sent) one address may receive per hour, whoever sends them. */
 export const INVITES_PER_ADDRESS_PER_HOUR = 5;
 const HOUR = 3_600_000;
 
 /**
- * Install invitations (spec D6/D7, §6.1 `/v1/install/invites`): install admins invite people into
+ * Site invitations (spec D6/D7, §6.1 `/v1/site/invites`): site admins invite people into
  * the install by email. The link carries a single-use token (hashed at rest, 72 h); the invitee
  * sets a password and is signed in. Team membership then comes from each team's own admins (team
- * invitations the invitee accepts), never from install admins (D8, KOBE-14).
+ * invitations the invitee accepts), never from site admins (D8, KOBE-14).
  */
-export function installInvitesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
+export function siteInvitesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
   const db = deps.database.db;
   const notFound = { code: "invitation_not_found", message: "No open invitation with that id." };
-  app.use(requireInstallPermission("install.users.manage"));
+  app.use(requireSitePermission("site.users.manage"));
 
   /** Counts one invitation email against the sender's and the address's hourly caps. */
   async function withinCaps(adminId: string, email: string): Promise<boolean> {
@@ -64,7 +64,7 @@ export function installInvitesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
         409,
       );
     }
-    const emailSent = await mailInstallInvite(deps, invite, me.name);
+    const emailSent = await mailSiteInvite(deps, invite, me.name);
     return c.json(
       {
         invitation: {
@@ -87,7 +87,7 @@ export function installInvitesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
     if (!(await withinCaps(me.id, email))) return c.json(tooMany, 429);
     const invite = await reissueInvite(db, id.data, me.id);
     if (!invite) return c.json(notFound, 404);
-    const emailSent = await mailInstallInvite(deps, invite, me.name);
+    const emailSent = await mailSiteInvite(deps, invite, me.name);
     return c.json({
       invitation: { id: invite.id, email: invite.email, expiresAt: invite.expiresAt.toISOString() },
       emailSent,

@@ -16,14 +16,14 @@ import type { TeamModelInput } from "./schemas.js";
 
 /**
  * Team model enablement (spec D6, D30; `/v1/team/models`): team admins choose a subset of the
- * install catalog and one default. The gateway allows a team's members exactly the enabled models.
+ * site catalog and one default. The gateway allows a team's members exactly the enabled models.
  */
 export interface TeamModelView extends CatalogView {
   readonly enabled: boolean;
   readonly is_default: boolean;
 }
 
-/** The whole catalog with the team's choice (catalog install-wide; enablement under RLS). */
+/** The whole catalog with the team's choice (catalog site-wide; enablement under RLS). */
 export async function listTeamModels(db: KobeDb, teamId: string): Promise<TeamModelView[]> {
   const [catalog, enabled] = await Promise.all([
     db

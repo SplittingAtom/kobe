@@ -19,7 +19,7 @@ describe("retention periods (D18)", () => {
     expect(shorterPeriod("forever", "forever")).toBe("forever");
   });
 
-  it("lets a team choose only periods within the install maximum", () => {
+  it("lets a team choose only periods within the site maximum", () => {
     expect(allowedPeriods("forever")).toEqual(["30d", "90d", "1y", "forever"]);
     expect(allowedPeriods("90d")).toEqual(["30d", "90d"]);
     expect(withinMaximum("1y", "90d")).toBe(false);

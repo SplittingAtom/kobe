@@ -58,10 +58,10 @@ export {
   TEAM_ID_SETTING,
 } from "./settings.js";
 export {
-  INSTALL_WIDE_TABLES,
+  SITE_WIDE_TABLES,
   TEAM_TABLES,
   isTeamTable,
-  type InstallWideTable,
+  type SiteWideTable,
   type TeamTable,
 } from "./tenancy.js";
 export { withTeam } from "./with-team.js";

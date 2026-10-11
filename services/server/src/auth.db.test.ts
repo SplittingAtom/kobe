@@ -124,7 +124,7 @@ describe("first-run setup (ac-1)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("requires the install's setup token (no first-caller Owner takeover)", async () => {
+  it("requires the site's setup token (no first-caller Owner takeover)", async () => {
     expect((await new Browser().post("/v1/setup", OWNER)).status).toBe(403);
     expect(
       (
@@ -174,7 +174,7 @@ describe("first-run setup (ac-1)", () => {
     const b = await signedIn(OWNER.email, OWNER.password);
     const me = await b.get("/v1/me");
     expect(me.status).toBe(200);
-    expect(me.json).toMatchObject({ user: { email: OWNER.email }, installRole: "owner" });
+    expect(me.json).toMatchObject({ user: { email: OWNER.email }, siteRole: "owner" });
   });
 
   it("does not allow self sign-up (invite-only)", async () => {
@@ -279,17 +279,17 @@ describe("required 2FA (ac-2)", () => {
     await deps.createUserWithPassword(MEMBER);
   });
 
-  it("only install admins can require 2FA", async () => {
+  it("only site admins can require 2FA", async () => {
     const member = await signedIn(MEMBER.email, MEMBER.password);
     expect(
-      (await member.request("PUT", "/v1/install/settings", { requireTwoFactor: true })).status,
+      (await member.request("PUT", "/v1/site/settings", { requireTwoFactor: true })).status,
     ).toBe(403);
   });
 
   it("forces users without 2FA to enroll before using the API", async () => {
     const owner = await signInOwner();
     expect(
-      (await owner.request("PUT", "/v1/install/settings", { requireTwoFactor: true })).status,
+      (await owner.request("PUT", "/v1/site/settings", { requireTwoFactor: true })).status,
     ).toBe(200);
 
     const member = await signedIn(MEMBER.email, MEMBER.password);
@@ -321,7 +321,7 @@ describe("required 2FA (ac-2)", () => {
     const code = totpFromUri(memberTotpUri);
     expect((await adminUser.post("/api/auth/two-factor/verify-totp", { code })).status).toBe(200);
     const put = (b: Browser, requireTwoFactor: boolean) =>
-      b.request("PUT", "/v1/install/settings", { requireTwoFactor });
+      b.request("PUT", "/v1/site/settings", { requireTwoFactor });
     expect((await put(adminUser, false)).status).toBe(403);
     expect((await put(adminUser, true)).status).toBe(200);
     expect((await put(await signInOwner(), false)).status).toBe(200);
@@ -356,7 +356,7 @@ describe("request hardening", () => {
     const evil = new Browser(owner.ip, "https://evil.example");
     for (const [k, v] of owner.cookies) evil.cookies.set(k, v);
     expect(
-      (await evil.request("PUT", "/v1/install/settings", { requireTwoFactor: true })).status,
+      (await evil.request("PUT", "/v1/site/settings", { requireTwoFactor: true })).status,
     ).toBe(403);
   });
 

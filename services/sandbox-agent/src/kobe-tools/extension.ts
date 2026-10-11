@@ -100,7 +100,7 @@ export function registerKobeTools(
 ): void {
   if (transport === undefined) return;
   for (const tool of artifactTools(transport)) pi.registerTool(tool);
-  // Always listed: the server answers "unavailable" when the install or team has it off.
+  // Always listed: the server answers "unavailable" when the site or team has it off.
   pi.registerTool(webSearchTool(transport));
   if (options.files === true) pi.registerTool(shareFileTool(transport));
   if (options.projects === true) pi.registerTool(proposeProjectFileTool(transport));

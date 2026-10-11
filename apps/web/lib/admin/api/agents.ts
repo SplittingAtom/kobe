@@ -1,4 +1,4 @@
-/** Agent summaries as `/v1/agents` and `/v1/install/gallery/agents` return them (KOBE-45/46). */
+/** Agent summaries as `/v1/agents` and `/v1/site/gallery/agents` return them (KOBE-45/46). */
 
 export interface AgentSummary {
   readonly id: string;

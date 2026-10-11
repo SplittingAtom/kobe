@@ -14,12 +14,12 @@ import type { TestBrowser } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 
 /**
- * KOBE-43: catalog prices, the run_usage ledger's dashboards (team admin, install admin) and the
+ * KOBE-43: catalog prices, the run_usage ledger's dashboards (team admin, site admin) and the
  * per-run / per-thread usage the chat shows. Rows are written with the shim's own writer
  * (`recordModelUsage`), as the model-gateway does.
  */
 let h: Harness;
-const ids = { installAdmin: "", alice: "", bob: "", dave: "" };
+const ids = { siteAdmin: "", alice: "", bob: "", dave: "" };
 let as: Record<keyof typeof ids, TestBrowser>;
 let finance = "";
 let marketing = "";
@@ -29,7 +29,7 @@ let bobThread = "";
 const asUser = <T>(userId: string, fn: () => Promise<T>) =>
   runWithAuditContext({ actor: { kind: "user", id: userId }, ip: null, userAgent: null }, fn);
 
-const MODELS = "/v1/install/models";
+const MODELS = "/v1/site/models";
 const GW = "kobe-usage/m1";
 
 const usage = (over: Partial<ModelUsageRecord>): ModelUsageRecord => ({
@@ -55,7 +55,7 @@ const usage = (over: Partial<ModelUsageRecord>): ModelUsageRecord => ({
 
 beforeAll(async () => {
   h = await openHarness({ models: { providerKeySecrets: ["p".repeat(40)] } });
-  ids.installAdmin = await h.createUser("admin@usage.test", "admin");
+  ids.siteAdmin = await h.createUser("admin@usage.test", "admin");
   ids.alice = await h.createUser("alice@usage.test");
   ids.bob = await h.createUser("bob@usage.test");
   ids.dave = await h.createUser("dave@usage.test");
@@ -74,7 +74,7 @@ beforeAll(async () => {
     tx.insert(teamMembers).values({ teamId: finance, userId: ids.bob, role: "member" }),
   );
   as = {
-    installAdmin: await h.signIn("admin@usage.test"),
+    siteAdmin: await h.signIn("admin@usage.test"),
     alice: await h.signIn("alice@usage.test"),
     bob: await h.signIn("bob@usage.test"),
     dave: await h.signIn("dave@usage.test"),
@@ -111,16 +111,16 @@ beforeAll(async () => {
 }, 120_000);
 afterAll(() => h.close());
 
-describe("catalog prices (install admin)", () => {
+describe("catalog prices (site admin)", () => {
   it("sets, shows, changes and clears prices; the audit says prices changed, not the amounts", async () => {
-    const p = await as.installAdmin.post(`${MODELS}/providers`, {
+    const p = await as.siteAdmin.post(`${MODELS}/providers`, {
       kind: "openai_compatible",
       id: "usage",
       name: "Usage",
       base_url: "http://usage.lan:8000/v1",
     });
     expect(p.status, JSON.stringify(p.json)).toBe(201);
-    const add = await as.installAdmin.post(`${MODELS}/catalog`, {
+    const add = await as.siteAdmin.post(`${MODELS}/catalog`, {
       alias: "usage-m1",
       provider_id: "usage",
       model: "m1",
@@ -134,24 +134,24 @@ describe("catalog prices (install admin)", () => {
       output_usd_per_mtok: 15,
       cache_read_usd_per_mtok: null,
     });
-    const bad = await as.installAdmin.patch(`${MODELS}/catalog/usage-m1`, {
+    const bad = await as.siteAdmin.patch(`${MODELS}/catalog/usage-m1`, {
       output_usd_per_mtok: -1,
     });
     expect(bad.status).toBe(400);
     // KOBE-43 review: prices come as a set (input and output together; cache only with them).
-    const partial = await as.installAdmin.patch(`${MODELS}/catalog/usage-m1`, {
+    const partial = await as.siteAdmin.patch(`${MODELS}/catalog/usage-m1`, {
       output_usd_per_mtok: null,
     });
     expect(partial.status).toBe(400);
     expect(partial.json.code).toBe("partial_prices");
-    const cacheOnly = await as.installAdmin.post(`${MODELS}/catalog`, {
+    const cacheOnly = await as.siteAdmin.post(`${MODELS}/catalog`, {
       alias: "usage-cache-only",
       provider_id: "usage",
       model: "m2",
       cache_read_usd_per_mtok: 0.1,
     });
     expect(cacheOnly.json.code).toBe("partial_prices");
-    const cleared = await as.installAdmin.patch(`${MODELS}/catalog/usage-m1`, {
+    const cleared = await as.siteAdmin.patch(`${MODELS}/catalog/usage-m1`, {
       cache_read_usd_per_mtok: 0.3,
       label: "M1",
     });
@@ -208,15 +208,15 @@ describe("dashboards", () => {
     expect(hourly.json.range.bucket).toBe("hour");
   });
 
-  it("install admins see every team's usage summed and per team; team admins cannot", async () => {
-    const r = await as.installAdmin.get("/v1/install/usage");
+  it("site admins see every team's usage summed and per team; team admins cannot", async () => {
+    const r = await as.siteAdmin.get("/v1/site/usage");
     expect(r.status, JSON.stringify(r.json)).toBe(200);
     expect(r.json.totals.calls).toBe(4);
     expect(r.json.by_team.map((t: { name: string; calls: number }) => [t.name, t.calls])).toEqual([
       ["Finance", 3],
       ["Marketing", 1],
     ]);
-    expect((await as.alice.get("/v1/install/usage")).status).toBe(403);
+    expect((await as.alice.get("/v1/site/usage")).status).toBe(403);
   });
 
   it("the thread's owner sees per-run and per-thread usage; another team's member does not", async () => {
@@ -236,7 +236,7 @@ describe("dashboards", () => {
   });
 });
 
-describe("install breakdowns across teams (KOBE-43 review)", () => {
+describe("site breakdowns across teams (KOBE-43 review)", () => {
   it("merge every team's full groups before limiting, so a model outside each team's top 50 still totals", async () => {
     const db = h.deps.database.db;
     const bulk = (teamId: string, userId: string, prefix: string) =>
@@ -263,7 +263,7 @@ describe("install breakdowns across teams (KOBE-43 review)", () => {
       ...bulk(marketing, ids.dave, "g"),
       shared(marketing, ids.dave),
     ]);
-    const r = await as.installAdmin.get("/v1/install/usage");
+    const r = await as.siteAdmin.get("/v1/site/usage");
     expect(r.status).toBe(200);
     expect(r.json.by_model).toHaveLength(50);
     const top = r.json.by_model.find((m: { model: string }) => m.model === "kobe-usage/shared");

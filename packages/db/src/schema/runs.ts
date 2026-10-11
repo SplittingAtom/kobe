@@ -101,7 +101,7 @@ export const runs = pgTable(
     sandboxBytes: bigint({ mode: "number" }).notNull().default(0),
     /**
      * The effective approval mode fixed when the run is created (KOBE-30; `@kobe/protocol`
-     * `RunSnapshot.approval_mode`): the requested mode clamped to the install and team floors, so a
+     * `RunSnapshot.approval_mode`): the requested mode clamped to the site and team floors, so a
      * later change can't loosen a run. Scheduled runs are `auto` (D32). The policy check clamps it
      * to the floor again at call time (floors only tighten).
      */

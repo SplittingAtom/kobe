@@ -12,14 +12,14 @@ describe("canChangeActivation", () => {
   const owner = { userId: "o", role: "owner" as const };
   const admin = { userId: "a", role: "admin" as const };
   it.each([
-    [owner, { id: "u", installRole: "user" as const }, true],
-    [owner, { id: "a2", installRole: "admin" as const }, true],
-    [owner, { id: "o", installRole: "owner" as const }, false],
-    [admin, { id: "u", installRole: "user" as const }, true],
-    [admin, { id: "a2", installRole: "admin" as const }, false],
-    [admin, { id: "o", installRole: "owner" as const }, false],
-    [admin, { id: "a", installRole: "admin" as const }, false],
-    [{ userId: "x", role: "user" as const }, { id: "u", installRole: "user" as const }, false],
+    [owner, { id: "u", siteRole: "user" as const }, true],
+    [owner, { id: "a2", siteRole: "admin" as const }, true],
+    [owner, { id: "o", siteRole: "owner" as const }, false],
+    [admin, { id: "u", siteRole: "user" as const }, true],
+    [admin, { id: "a2", siteRole: "admin" as const }, false],
+    [admin, { id: "o", siteRole: "owner" as const }, false],
+    [admin, { id: "a", siteRole: "admin" as const }, false],
+    [{ userId: "x", role: "user" as const }, { id: "u", siteRole: "user" as const }, false],
   ])("%j on %j → %s", (me, target, expected) => {
     expect(canChangeActivation(me, target)).toBe(expected);
   });

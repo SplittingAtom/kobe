@@ -76,7 +76,7 @@ const modelsConfig = config.process === "server" ? loadModelsConfig(process.env)
 // Header injection (KOBE-39): undefined without the chart's header secret (off).
 const egressHeaderSecrets =
   config.process === "server" ? loadEgressHeaderSecrets(process.env) : undefined;
-// Install envelope key (KOBE-107): seals per-record secrets (connector credentials, KOBE-108).
+// Site envelope key (KOBE-107): seals per-record secrets (connector credentials, KOBE-108).
 // Fails fast when malformed; the key itself is never logged.
 const envelope = config.process === "server" ? loadEnvelope(process.env, logger) : undefined;
 // One admin client for the config sync and the catalog editor's model listing (KOBE-44).
@@ -501,7 +501,7 @@ const stopOffboarding =
       })
     : undefined;
 // Connector tool drift (KOBE-102, D27): re-probe pinned connectors; changed/new tools are disabled
-// until an install admin re-approves them. One replica at a time.
+// until a site admin re-approves them. One replica at a time.
 const stopConnectorRefresh =
   deps && config.process === "server"
     ? startConnectorRefresh({

@@ -259,7 +259,7 @@ describe("a connector pointed at another server", () => {
     await h.createUser("root@oauth.test", "owner");
     const root = await h.signIn("root@oauth.test");
     for (const id of [oauthConnector, keyConnector]) {
-      const res = await root.patch(`/v1/install/connectors/${id}`, { url: `${fake.base}/moved` });
+      const res = await root.patch(`/v1/site/connectors/${id}`, { url: `${fake.base}/moved` });
       expect(res.status, res.text).toBe(200);
     }
     expect(await count()).toBe("0");

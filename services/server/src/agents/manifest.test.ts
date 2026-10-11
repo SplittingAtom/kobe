@@ -17,7 +17,7 @@ const RULE_B = "00000000-0000-4000-8000-00000000000b";
 
 const floor = (extra: Partial<PublishFloor> = {}): PublishFloor => ({
   scope: "team",
-  install: [],
+  site: [],
   team: [],
   approvalFloor: "auto",
   ...extra,
@@ -86,11 +86,11 @@ describe("computeToolManifest (D19 frozen tool manifest)", () => {
     expect(names(m)).toEqual([]);
   });
 
-  it("applies the install floor's and the team's whole-tool deny rules", () => {
+  it("applies the site floor's and the team's whole-tool deny rules", () => {
     const m = computeToolManifest(
       fm(),
       floor({
-        install: [rule({ tool_glob: "bash" })],
+        site: [rule({ tool_glob: "bash" })],
         team: [rule({ id: RULE_B, scope: "team", tool_glob: "power*" })],
       }),
       NOW,
@@ -109,7 +109,7 @@ describe("computeToolManifest (D19 frozen tool manifest)", () => {
     });
   });
 
-  it("ignores team rules for an install-floor manifest (personal and gallery agents)", () => {
+  it("ignores team rules for a site-floor manifest (personal and gallery agents)", () => {
     const m = computeToolManifest(
       fm(),
       floor({ scope: "install", team: [rule({ scope: "team", tool_glob: "bash" })] }),
@@ -123,7 +123,7 @@ describe("computeToolManifest (D19 frozen tool manifest)", () => {
     const m = computeToolManifest(
       fm(),
       floor({
-        install: [
+        site: [
           rule({ tool_glob: "bash", arg_pattern: { "/command": "rm*" } }),
           rule({ tool_glob: "write", expires_at: "2027-01-01T00:00:00.000Z" }),
           rule({ tool_glob: "edit", effect: "ask" }),
@@ -138,14 +138,14 @@ describe("computeToolManifest (D19 frozen tool manifest)", () => {
   it("ignores an already expired deny rule", () => {
     const m = computeToolManifest(
       fm(),
-      floor({ install: [rule({ tool_glob: "bash", expires_at: "2026-01-01T00:00:00.000Z" })] }),
+      floor({ site: [rule({ tool_glob: "bash", expires_at: "2026-01-01T00:00:00.000Z" })] }),
       NOW,
     );
     expect(names(m)).toContain("bash");
   });
 
   it("fails closed on a malformed deny glob (it covers everything)", () => {
-    const m = computeToolManifest(fm(), floor({ install: [rule({ tool_glob: "\\" })] }), NOW);
+    const m = computeToolManifest(fm(), floor({ site: [rule({ tool_glob: "\\" })] }), NOW);
     expect(names(m)).toEqual([]);
   });
 

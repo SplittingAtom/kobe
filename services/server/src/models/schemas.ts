@@ -126,7 +126,7 @@ const tokenCount = (what: string, [min, max]: readonly [number, number]) =>
     .nullable();
 
 /**
- * A model's output limit and context window (KOBE-259; null: the install default) and whether it
+ * A model's output limit and context window (KOBE-259; null: the site default) and whether it
  * reasons (it then gets the higher output default).
  */
 const tokenLimitFields = {
@@ -165,6 +165,6 @@ export const teamModelSchema = z.strictObject({
 });
 export type TeamModelInput = z.infer<typeof teamModelSchema>;
 
-/** Catalog size bound (install-wide table; keeps the gateway sync and team pages small). */
+/** Catalog size bound (site-wide table; keeps the gateway sync and team pages small). */
 export const MAX_CATALOG_ENTRIES = 200;
 export const MAX_PROVIDERS = 50;

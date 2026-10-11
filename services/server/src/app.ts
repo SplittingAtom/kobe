@@ -9,7 +9,7 @@ import type { IsolationGate } from "./isolation/gate.js";
 import type { EvalRunner } from "./agents/eval/service.js";
 import { agentRoutes } from "./routes/agents.js";
 import { teamEvalSettingsRoutes } from "./routes/team-eval-settings.js";
-import { installBudgetRoutes, teamBudgetsRoutes } from "./routes/budgets.js";
+import { siteBudgetRoutes, teamBudgetsRoutes } from "./routes/budgets.js";
 import { artifactRoutes } from "./routes/artifacts.js";
 import { scheduleRoutes } from "./routes/schedules.js";
 import { notificationRoutes } from "./routes/notifications.js";
@@ -19,27 +19,27 @@ import { memorySettingsRoutes } from "./routes/memory-settings.js";
 import { uploadRoutes } from "./routes/uploads.js";
 import { approvalRoutes } from "./routes/approvals.js";
 import { egressRequestRoutes } from "./routes/egress-requests.js";
-import { installAuditRoutes } from "./routes/install-audit.js";
-import { installEgressRoutes } from "./routes/install-egress.js";
-import { installBreakGlassRoutes } from "./routes/install-break-glass.js";
-import { installGalleryRoutes } from "./routes/install-gallery.js";
-import { installInvitesRoutes } from "./routes/install-invites.js";
-import { installIsolationRoutes } from "./routes/install-isolation.js";
-import { installModelsRoutes } from "./routes/install-models.js";
-import { installLegalHoldRoutes } from "./routes/install-legal-hold.js";
-import { installPolicyRoutes } from "./routes/install-policy.js";
-import { installRetentionRoutes } from "./routes/install-retention.js";
+import { siteAuditRoutes } from "./routes/site-audit.js";
+import { siteEgressRoutes } from "./routes/site-egress.js";
+import { siteBreakGlassRoutes } from "./routes/site-break-glass.js";
+import { siteGalleryRoutes } from "./routes/site-gallery.js";
+import { siteInvitesRoutes } from "./routes/site-invites.js";
+import { siteIsolationRoutes } from "./routes/site-isolation.js";
+import { siteModelsRoutes } from "./routes/site-models.js";
+import { siteLegalHoldRoutes } from "./routes/site-legal-hold.js";
+import { sitePolicyRoutes } from "./routes/site-policy.js";
+import { siteRetentionRoutes } from "./routes/site-retention.js";
 import { connectorGrantRoutes } from "./routes/connector-grants.js";
 import { connectorOauthRoutes } from "./routes/connector-oauth.js";
 import { clientMetadataDocument, kobeOrigin } from "./connectors/oauth/client.js";
-import { installConnectorsRoutes } from "./routes/install-connectors.js";
-import { installSkillBlocklistRoutes } from "./routes/install-skill-blocklist.js";
-import { installRolesRoutes } from "./routes/install-roles.js";
-import { installSettingsRoutes } from "./routes/install-settings.js";
-import { installWebSearchRoutes } from "./routes/install-web-search.js";
+import { siteConnectorsRoutes } from "./routes/site-connectors.js";
+import { siteSkillBlocklistRoutes } from "./routes/site-skill-blocklist.js";
+import { siteRolesRoutes } from "./routes/site-roles.js";
+import { siteSettingsRoutes } from "./routes/site-settings.js";
+import { siteWebSearchRoutes } from "./routes/site-web-search.js";
 import { teamWebSearchRoutes } from "./routes/team-web-search.js";
-import { installTeamsRoutes } from "./routes/install-teams.js";
-import { installUsersRoutes } from "./routes/install-users.js";
+import { siteTeamsRoutes } from "./routes/site-teams.js";
+import { siteUsersRoutes } from "./routes/site-users.js";
 import { meRoutes } from "./routes/me.js";
 import { meConnectorNoticesRoutes } from "./routes/me-connector-notices.js";
 import { myInvitesRoutes } from "./routes/my-invites.js";
@@ -65,7 +65,7 @@ import { threadPendingRoutes } from "./routes/thread-pending.js";
 import { threadRetentionRoutes } from "./routes/thread-retention.js";
 import { threadRoutes } from "./routes/threads.js";
 import {
-  installUsageRoutes,
+  siteUsageRoutes,
   runUsageRoutes,
   teamUsageRoutes,
   threadUsageRoutes,
@@ -74,7 +74,7 @@ import {
 const SERVICE = "server";
 
 export interface AppOptions {
-  /** Isolation gate (spec D4): its state is shown in the install admin console only. */
+  /** Isolation gate (spec D4): its state is shown in the site admin console only. */
   readonly isolation?: IsolationGate;
   /** Runs the pre-publish Orbit evals (KOBE-93); unset, an enabled gate blocks publishing. */
   readonly evals?: EvalRunner;
@@ -103,7 +103,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   app.get("/readyz", (c) => {
     if (!isolation) return c.json({ status: "ready", service: SERVICE });
     // Ready once the startup check has an answer; a missing runtime keeps serving (D4). The
-    // answer itself is not disclosed here (unauthenticated): see /v1/install/isolation and logs.
+    // answer itself is not disclosed here (unauthenticated): see /v1/site/isolation and logs.
     return isolation.status().state === "checking"
       ? c.json({ status: "starting", service: SERVICE }, 503)
       : c.json({ status: "ready", service: SERVICE });
@@ -123,7 +123,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   });
 
   const api = new Hono<{ Variables: AuthVariables }>();
-  // CSRF: state-changing API calls must come from the install's own origin.
+  // CSRF: state-changing API calls must come from the site's own origin.
   api.use(async (c, next) => {
     if (
       !["GET", "HEAD", "OPTIONS"].includes(c.req.method) &&
@@ -182,28 +182,28 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/skills", skillRoutes(deps));
   api.route("/approvals", approvalRoutes(deps));
   api.route("/egress/requests", egressRequestRoutes(deps));
-  api.route("/install/settings", installSettingsRoutes(deps));
-  api.route("/install/web-search", installWebSearchRoutes(deps));
-  api.route("/install/teams", installTeamsRoutes(deps));
-  api.route("/install/roles", installRolesRoutes(deps));
-  api.route("/install/policy", installPolicyRoutes(deps));
-  api.route("/install/users", installUsersRoutes(deps));
-  api.route("/install/invites", installInvitesRoutes(deps));
+  api.route("/site/settings", siteSettingsRoutes(deps));
+  api.route("/site/web-search", siteWebSearchRoutes(deps));
+  api.route("/site/teams", siteTeamsRoutes(deps));
+  api.route("/site/roles", siteRolesRoutes(deps));
+  api.route("/site/policy", sitePolicyRoutes(deps));
+  api.route("/site/users", siteUsersRoutes(deps));
+  api.route("/site/invites", siteInvitesRoutes(deps));
   api.route(
-    "/install/gallery/agents",
-    installGalleryRoutes(deps, options.evals ? { runner: options.evals } : {}),
+    "/site/gallery/agents",
+    siteGalleryRoutes(deps, options.evals ? { runner: options.evals } : {}),
   );
-  api.route("/install/audit", installAuditRoutes(deps));
-  api.route("/install/egress-ceiling", installEgressRoutes(deps));
-  api.route("/install/models", installModelsRoutes(deps));
-  api.route("/install/usage", installUsageRoutes(deps));
-  api.route("/install/budget", installBudgetRoutes(deps));
-  api.route("/install/break-glass", installBreakGlassRoutes(deps));
-  api.route("/install/legal-hold", installLegalHoldRoutes(deps));
-  api.route("/install/retention", installRetentionRoutes(deps));
-  api.route("/install/connectors", installConnectorsRoutes(deps));
-  api.route("/install/skill-blocklist", installSkillBlocklistRoutes(deps));
-  if (isolation) api.route("/install/isolation", installIsolationRoutes(isolation));
+  api.route("/site/audit", siteAuditRoutes(deps));
+  api.route("/site/egress-ceiling", siteEgressRoutes(deps));
+  api.route("/site/models", siteModelsRoutes(deps));
+  api.route("/site/usage", siteUsageRoutes(deps));
+  api.route("/site/budget", siteBudgetRoutes(deps));
+  api.route("/site/break-glass", siteBreakGlassRoutes(deps));
+  api.route("/site/legal-hold", siteLegalHoldRoutes(deps));
+  api.route("/site/retention", siteRetentionRoutes(deps));
+  api.route("/site/connectors", siteConnectorsRoutes(deps));
+  api.route("/site/skill-blocklist", siteSkillBlocklistRoutes(deps));
+  if (isolation) api.route("/site/isolation", siteIsolationRoutes(isolation));
   app.route("/v1", api);
   return app;
 }

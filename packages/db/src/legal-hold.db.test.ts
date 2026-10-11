@@ -127,7 +127,7 @@ async function errorCode(promise: Promise<unknown>): Promise<string | undefined>
   return undefined;
 }
 
-/** Runs `fn` with every install admin but `keep` removed, then restores them. */
+/** Runs `fn` with every site admin but `keep` removed, then restores them. */
 async function asSoleAdmin(keep: string, fn: () => Promise<void>): Promise<void> {
   const { rows } = await admin.query<{ user_id: string; role: string }>(
     `DELETE FROM install_roles WHERE user_id <> $1 RETURNING user_id, role::text`,
@@ -163,7 +163,7 @@ afterAll(async () => {
 });
 
 describe("legal_holds_guard: the two-person rule in Postgres (ac-2)", () => {
-  it("starts every hold as a pending request from an active install admin", async () => {
+  it("starts every hold as a pending request from an active site admin", async () => {
     const id = await request({ userId: alice });
     expect(await holdRow(id)).toMatchObject({ status: "pending", approved_by: null });
     expect(
@@ -180,7 +180,7 @@ describe("legal_holds_guard: the two-person rule in Postgres (ac-2)", () => {
     expect(await errorCode(request({ userId: requester }))).toBe("23514");
   });
 
-  it("is placed by a second install admin, never the requester while another admin exists", async () => {
+  it("is placed by a second site admin, never the requester while another admin exists", async () => {
     const id = await request();
     expect(await errorCode(approve(id, requester))).toBe("42501");
     expect((await holdRow(id)).status).toBe("pending");
@@ -203,7 +203,7 @@ describe("legal_holds_guard: the two-person rule in Postgres (ac-2)", () => {
     expect((await holdRow(onAdmin)).status).toBe("pending");
   });
 
-  it("lets a single-admin install self-approve placing and releasing, flagged (D10)", async () => {
+  it("lets a single-admin site self-approve placing and releasing, flagged (D10)", async () => {
     await asSoleAdmin(requester, async () => {
       const id = await request();
       await approve(id, requester);
@@ -232,7 +232,7 @@ describe("legal_holds_guard: the two-person rule in Postgres (ac-2)", () => {
     });
   });
 
-  it("releases only through a release request approved by a second install admin", async () => {
+  it("releases only through a release request approved by a second site admin", async () => {
     const id = await active({ userId: alice });
     // No release without a request; the requester of the release can't approve it.
     expect(await errorCode(release(id))).toBe("55000");

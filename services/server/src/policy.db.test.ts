@@ -32,7 +32,7 @@ let deps: ServerDeps;
 let app: ReturnType<typeof createApp>;
 let engine: PolicyEngine;
 
-const people = ["owner", "installAdmin", "alice", "bob", "carol", "dave", "erin"] as const;
+const people = ["owner", "siteAdmin", "alice", "bob", "carol", "dave", "erin"] as const;
 type Person = (typeof people)[number];
 const ids = Object.fromEntries(people.map((p) => [p, ""])) as Record<Person, string>;
 const email = (who: Person) => `${who.toLowerCase()}@policy.test`;
@@ -41,7 +41,7 @@ let finance = "";
 let marketing = "";
 
 // finance: alice team_admin, bob member, carol builder, erin member. marketing: dave team_admin.
-// installAdmin and owner are in no team.
+// siteAdmin and owner are in no team.
 
 async function signIn(who: Person): Promise<TestBrowser> {
   const b = new TestBrowser(app, PUBLIC_URL);
@@ -57,7 +57,7 @@ async function activate(who: Person, teamId: string): Promise<void> {
 }
 
 async function createTeam(slug: string, admin: Person): Promise<string> {
-  const res = await as.installAdmin.post("/v1/install/teams", {
+  const res = await as.siteAdmin.post("/v1/site/teams", {
     slug,
     name: slug,
     adminUserId: ids[admin],
@@ -110,10 +110,10 @@ beforeAll(async () => {
     settings: createDbSettingsSource(deps.database.db, 0),
   });
   for (const who of people) {
-    const installRole = who === "owner" ? "owner" : who === "installAdmin" ? "admin" : undefined;
+    const siteRole = who === "owner" ? "owner" : who === "siteAdmin" ? "admin" : undefined;
     const user = await deps.createUserWithPassword(
       { email: email(who), name: who, password: PASSWORD },
-      installRole ? { installRole } : {},
+      siteRole ? { siteRole } : {},
     );
     ids[who] = user.id;
   }
@@ -171,17 +171,17 @@ async function adminQuery<T extends pg.QueryResultRow>(text: string, values: unk
   }
 }
 
-describe("install policy routes (D8: install Owner/Admin)", () => {
-  const path = "/v1/install/policy/rules";
+describe("site policy routes (D8: site Owner/Admin)", () => {
+  const path = "/v1/site/policy/rules";
 
   it("refuses plain users and team admins", async () => {
     expect(status(await as.alice.get(path))).toBe(403);
     expect(status(await as.bob.post(path, { effect: "deny", tool_glob: "bash" }))).toBe(403);
-    expect(status(await as.dave.get("/v1/install/policy/settings"))).toBe(403);
+    expect(status(await as.dave.get("/v1/site/policy/settings"))).toBe(403);
   });
 
-  it("lets install admins and the Owner create, list, update and delete floor rules", async () => {
-    const created = await as.installAdmin.post(path, {
+  it("lets site admins and the Owner create, list, update and delete floor rules", async () => {
+    const created = await as.siteAdmin.post(path, {
       effect: "ask",
       tool_glob: "mcp__*",
       note: "Ask before any connector call",
@@ -193,7 +193,7 @@ describe("install policy routes (D8: install Owner/Admin)", () => {
       effect: "ask",
       tool_glob: "mcp__*",
       arg_pattern: null,
-      created_by: ids.installAdmin,
+      created_by: ids.siteAdmin,
       expires_at: null,
     });
     const id = created.json.rule.id as string;
@@ -205,12 +205,10 @@ describe("install policy routes (D8: install Owner/Admin)", () => {
     });
     expect(updated.status, JSON.stringify(updated.json)).toBe(200);
     expect(updated.json.rule).toMatchObject({ effect: "deny", arg_pattern: { "/force": "true" } });
-    expect(status(await as.installAdmin.delete(`${path}/${id}`))).toBe(204);
-    expect(status(await as.installAdmin.delete(`${path}/${id}`))).toBe(404);
+    expect(status(await as.siteAdmin.delete(`${path}/${id}`))).toBe(204);
+    expect(status(await as.siteAdmin.delete(`${path}/${id}`))).toBe(404);
     expect(
-      status(
-        await as.installAdmin.put(`${path}/${randomUUID()}`, { effect: "deny", tool_glob: "x" }),
-      ),
+      status(await as.siteAdmin.put(`${path}/${randomUUID()}`, { effect: "deny", tool_glob: "x" })),
     ).toBe(404);
   });
 
@@ -237,21 +235,21 @@ describe("install policy routes (D8: install Owner/Admin)", () => {
     ["unknown field", { effect: "deny", tool_glob: "bash", scope: "team" }],
     ["long note", { effect: "deny", tool_glob: "bash", note: "n".repeat(501) }],
   ])("rejects %s", async (_name, body) => {
-    const res = await as.installAdmin.post(path, body);
+    const res = await as.siteAdmin.post(path, body);
     expect(res.status, JSON.stringify(res.json)).toBe(400);
     expect(res.json.code).toBe("invalid_request");
   });
 
   it("rejects a non-uuid rule id", async () => {
-    expect(status(await as.installAdmin.delete(`${path}/1`))).toBe(400);
+    expect(status(await as.siteAdmin.delete(`${path}/1`))).toBe(400);
   });
 
-  it("flips the sandbox-writes switch (install admins only) and the engine follows it", async () => {
-    expect((await as.installAdmin.get("/v1/install/policy/settings")).json).toEqual({
+  it("flips the sandbox-writes switch (site admins only) and the engine follows it", async () => {
+    expect((await as.siteAdmin.get("/v1/site/policy/settings")).json).toEqual({
       promptSandboxWrites: false,
     });
     expect((await decide("bob", finance, "bash", { command: "ls" })).effect).toBe("allow");
-    const on = await as.installAdmin.put("/v1/install/policy/settings", {
+    const on = await as.siteAdmin.put("/v1/site/policy/settings", {
       promptSandboxWrites: true,
     });
     expect(on.status).toBe(200);
@@ -259,11 +257,9 @@ describe("install policy routes (D8: install Owner/Admin)", () => {
       "require_approval",
     );
     expect(
-      status(
-        await as.installAdmin.put("/v1/install/policy/settings", { promptSandboxWrites: "no" }),
-      ),
+      status(await as.siteAdmin.put("/v1/site/policy/settings", { promptSandboxWrites: "no" })),
     ).toBe(400);
-    await as.owner.put("/v1/install/policy/settings", { promptSandboxWrites: false });
+    await as.owner.put("/v1/site/policy/settings", { promptSandboxWrites: false });
     expect((await decide("bob", finance, "bash", { command: "ls" })).effect).toBe("allow");
   });
 });
@@ -271,9 +267,9 @@ describe("install policy routes (D8: install Owner/Admin)", () => {
 describe("team policy routes (D8: team admins manage, members read)", () => {
   const path = "/v1/team/policy/rules";
 
-  it("needs a team: install admins outside the team get nothing", async () => {
-    expect(status(await as.installAdmin.get(path))).toBe(409); // no active team
-    const forced = await as.installAdmin.get(path, { "x-kobe-team": finance });
+  it("needs a team: site admins outside the team get nothing", async () => {
+    expect(status(await as.siteAdmin.get(path))).toBe(409); // no active team
+    const forced = await as.siteAdmin.get(path, { "x-kobe-team": finance });
     expect(forced.status).toBe(409);
   });
 
@@ -390,7 +386,7 @@ describe("team policy routes (D8: team admins manage, members read)", () => {
 });
 
 describe("D29 order end to end (rules from Postgres)", () => {
-  const install = "/v1/install/policy/rules";
+  const site = "/v1/site/policy/rules";
   const team = "/v1/team/policy/rules";
   const created: { path: string; id: string; by: Person }[] = [];
 
@@ -418,8 +414,8 @@ describe("D29 order end to end (rules from Postgres)", () => {
     );
   }
 
-  it("install deny beats a team allow and the user's own allow", async () => {
-    await make("installAdmin", install, { effect: "deny", tool_glob: "share_file" });
+  it("site deny beats a team allow and the user's own allow", async () => {
+    await make("siteAdmin", site, { effect: "deny", tool_glob: "share_file" });
     await make("alice", team, { effect: "allow", tool_glob: "share_file" });
     expect((await remember("bob", finance, "share_file", { tool_glob: "share_file" })).ok).toBe(
       true,
@@ -434,8 +430,8 @@ describe("D29 order end to end (rules from Postgres)", () => {
     await cleanup();
   });
 
-  it("an install ask can't be removed by a remember-rule; without it the remember-rule allows", async () => {
-    const askId = await make("installAdmin", install, {
+  it("an site ask can't be removed by a remember-rule; without it the remember-rule allows", async () => {
+    const askId = await make("siteAdmin", site, {
       effect: "ask",
       tool_glob: "remember",
     });
@@ -522,12 +518,12 @@ describe("D29 order end to end (rules from Postgres)", () => {
       `UPDATE tool_rules SET expires_at = $1 WHERE scope = 'user' AND tool_glob = 'edit'`,
       [new Date(Date.now() - 1000)],
     );
-    await as.installAdmin.put("/v1/install/policy/settings", { promptSandboxWrites: true });
+    await as.siteAdmin.put("/v1/site/policy/settings", { promptSandboxWrites: true });
     const edits = [{ oldText: "a", newText: "b" }];
     expect((await decide("bob", finance, "edit", { path: "/workspace/x", edits })).effect).toBe(
       "require_approval",
     );
-    await as.installAdmin.put("/v1/install/policy/settings", { promptSandboxWrites: false });
+    await as.siteAdmin.put("/v1/site/policy/settings", { promptSandboxWrites: false });
   });
 
   it("drops a user's remember-rules when they leave the team", async () => {

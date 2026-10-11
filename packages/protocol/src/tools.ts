@@ -6,7 +6,7 @@ import { riskClassSchema, uuidSchema, type RiskClass } from "./common.js";
  * the sandbox says about a tool (source, annotations, risk) is used for a decision.** `policy.check`
  * carries only the tool name and input. Resolution (KOBE-35, KOBE-58/59):
  *   1. `BUILTIN_TOOLS[name]` — Pi 1.0.0 built-ins and kobe-tools, fixed below;
- *   2. `mcp__<server>__<tool>` — the install's pinned `tools/list` snapshot for that connector
+ *   2. `mcp__<server>__<tool>` — the site's pinned `tools/list` snapshot for that connector
  *      (D27, SHA-256 pinned; a drifted tool is disabled), annotations from the snapshot;
  *   3. anything else → unknown: the engine **denies** with reason `unknown_tool` (fail closed).
  */
@@ -165,13 +165,13 @@ export function builtinToolDescriptor(name: string): ToolDescriptor | undefined 
 }
 
 /**
- * Connector names (install registry, D27) and Pi's MCP tool names. Pi 1.0.0 (verified, docs/mcp.md)
+ * Connector names (site registry, D27) and Pi's MCP tool names. Pi 1.0.0 (verified, docs/mcp.md)
  * names a tool `mcp__<server>__<tool>`, replacing every character other than letters, digits and
  * `_` with `_`, and treats server names differing only in `-`/`_` as the same server. Kobe connector
  * names are lowercase `[a-z0-9]` runs joined by single `-` or `_` — no `__`, no leading/trailing
  * separator — so the server segment never contains `__` or ends in `_`, and the first `__` after
  * `mcp__` always separates server from tool (tool names may contain `__`). KOBE-59 enforces this
- * and uniqueness of `mcpServerSegment(name)` install-wide.
+ * and uniqueness of `mcpServerSegment(name)` site-wide.
  *
  * Resolution is by server state, never by parsing alone: the server maps the segment to a
  * `connector_id` through the run's own exposed connectors (`run.start` `config.mcp_servers`), then

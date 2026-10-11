@@ -50,7 +50,7 @@ export type GrantError =
 export type GrantResult =
   { ok: true; grant: GrantRow; queued: QueuedCounts } | { ok: false; error: GrantError };
 
-/** Open (undecided) requests one install admin may have at a time. */
+/** Open (undecided) requests one site admin may have at a time. */
 export const BREAK_GLASS_MAX_PENDING_PER_ADMIN = 3;
 
 /** Lock wait for a grant row: approvals and revocations are short. */
@@ -73,7 +73,7 @@ export function effectiveStatus(grant: GrantRow, now = new Date()): EffectiveSta
 /**
  * The audit target describing a grant's scope (ids only, never the reason). Team-scope events show
  * in the team's audit view, so a legal hold leaves out the subject and thread (the grant row,
- * resolved by `grantId` in the install console, keeps them).
+ * resolved by `grantId` in the site console, keeps them).
  */
 function scopeTarget(grant: GrantRow) {
   const shown = !grant.legalHold;
@@ -86,8 +86,8 @@ function scopeTarget(grant: GrantRow) {
   };
 }
 
-/** Active install admins (Owner and Admins), optionally without one user. */
-export async function activeInstallAdmins(
+/** Active site admins (Owner and Admins), optionally without one user. */
+export async function activeSiteAdmins(
   db: KobeDb | KobeTx,
   except?: string,
 ): Promise<{ id: string; name: string; email: string }[]> {
@@ -98,9 +98,9 @@ export async function activeInstallAdmins(
     .where(and(isNull(users.deactivatedAt), except ? ne(users.id, except) : undefined));
 }
 
-/** Whether `adminId` is the only active install admin, so D10 lets them approve their own request. */
-export async function isSoleInstallAdmin(db: KobeDb | KobeTx, adminId: string): Promise<boolean> {
-  return (await activeInstallAdmins(db, adminId)).length === 0;
+/** Whether `adminId` is the only active site admin, so D10 lets them approve their own request. */
+export async function isSoleSiteAdmin(db: KobeDb | KobeTx, adminId: string): Promise<boolean> {
+  return (await activeSiteAdmins(db, adminId)).length === 0;
 }
 
 async function lockGrant(
@@ -132,7 +132,7 @@ export async function requestGrant(
   if (!team) return { ok: false, error: "team_not_found" };
   if (body.userId !== undefined) {
     if (body.userId === adminId) return { ok: false, error: "subject_is_requester" };
-    // Rosters are team metadata install admins may read (KOBE-14), not content.
+    // Rosters are team metadata site admins may read (KOBE-14), not content.
     if ((await getMembership(db, body.teamId, body.userId)) === null) {
       return { ok: false, error: "subject_not_member" };
     }
@@ -179,8 +179,8 @@ export async function requestGrant(
 }
 
 /**
- * Approves a pending request as `approverId` (D10): a second active install admin, or the
- * requester only when no other active install admin exists (flagged `selfApproved`).
+ * Approves a pending request as `approverId` (D10): a second active site admin, or the
+ * requester only when no other active site admin exists (flagged `selfApproved`).
  */
 export async function approveGrant(
   db: KobeDb,
@@ -194,7 +194,7 @@ export async function approveGrant(
     if (subject) return { ok: false, error: subject };
     if (current.status !== "pending") return { ok: false, error: "not_pending" };
     if (current.requestExpiresAt <= new Date()) return { ok: false, error: "request_lapsed" };
-    if (current.adminId === approverId && !(await isSoleInstallAdmin(tx, approverId))) {
+    if (current.adminId === approverId && !(await isSoleSiteAdmin(tx, approverId))) {
       return { ok: false, error: "self_approval_forbidden" };
     }
     const [row] = await tx
@@ -394,8 +394,8 @@ async function withDetails(db: KobeDb, rows: readonly GrantRow[]): Promise<Grant
 }
 
 /**
- * Grants with their people and team, newest first (install view). A legal hold is invisible to
- * its subject, even when the subject is an install admin.
+ * Grants with their people and team, newest first (site view). A legal hold is invisible to
+ * its subject, even when the subject is a site admin.
  */
 export async function listGrants(
   db: KobeDb,

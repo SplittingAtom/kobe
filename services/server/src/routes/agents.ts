@@ -69,7 +69,7 @@ function locationFor(c: Ctx, scope: AgentScope): AgentLocation {
  * the team's agents, the caller's personal agents, and the read-only gallery. POST and PUT take
  * JSON or an agent markdown file (import); `GET /:id/export` downloads the file. Versions,
  * publish, rollback and unarchive (KOBE-46) are `agents/version-routes.ts`. Gallery curation is
- * `/v1/install/gallery/agents`.
+ * `/v1/site/gallery/agents`.
  */
 export function agentRoutes(
   deps: ServerDeps,

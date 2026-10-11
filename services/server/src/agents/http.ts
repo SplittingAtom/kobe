@@ -14,7 +14,7 @@ import type { AgentRecord, CreateError } from "./store.js";
 import type { AgentVersionRecord, AgentVersionSummary, PublishError } from "./versions.js";
 
 /**
- * HTTP plumbing shared by the team (`/v1/agents`) and gallery (`/v1/install/gallery/agents`)
+ * HTTP plumbing shared by the team (`/v1/agents`) and gallery (`/v1/site/gallery/agents`)
  * routes: request bodies (JSON or an agent markdown file), response shapes, ETags, errors.
  */
 

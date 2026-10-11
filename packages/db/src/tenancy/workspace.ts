@@ -14,7 +14,7 @@ export const workspace = defineDomain({
     "project_members",
     "project_files",
   ],
-  installWide: [],
+  siteWide: [],
   grants: {},
   teamReferencing: {},
 });

@@ -154,7 +154,7 @@ describe("publish (D19, D8)", () => {
     expect((await publish("alice", id)).status).toBe(201);
   });
 
-  it("lets any member publish their own personal agent, against the install floor", async () => {
+  it("lets any member publish their own personal agent, against the site floor", async () => {
     const id = await create("carol", "personal", "Mine");
     const res = await published("carol", id);
     expect(toolManifestSchema.parse(res.version.toolManifest).floor).toBe("install");
@@ -168,7 +168,7 @@ describe("publish (D19, D8)", () => {
     ]);
     const id = seeded?.agentId ?? "";
     expect((await publish("alice", id)).status).toBe(403);
-    expect((await publish("admin", id, ANY, "/v1/install/gallery/agents")).status).toBe(405);
+    expect((await publish("admin", id, ANY, "/v1/site/gallery/agents")).status).toBe(405);
     const one = await as.carol.get(`/v1/agents/${id}`);
     expect(one.json.agent.currentVersion).toBe(1);
   });
@@ -498,11 +498,11 @@ describe("threads pin the version they started on (D19, U8, Gate 3)", () => {
 
 describe("frozen manifest against the floor (D6, D19, D29)", () => {
   it("excludes floor-denied tools at publish; a later floor change never edits a version", async () => {
-    const install = await as.admin.post("/v1/install/policy/rules", {
+    const site = await as.admin.post("/v1/site/policy/rules", {
       effect: "deny",
       tool_glob: "bash",
     });
-    expect(install.status, json(install)).toBe(201);
+    expect(site.status, json(site)).toBe(201);
     const team = await as.alice.post("/v1/team/policy/rules", {
       effect: "deny",
       tool_glob: "powershell",
@@ -520,7 +520,7 @@ describe("frozen manifest against the floor (D6, D19, D29)", () => {
       expect(v1.excluded).toContainEqual({
         name: "bash",
         reason: "install_deny_rule",
-        rule_id: install.json.rule.id,
+        rule_id: site.json.rule.id,
       });
       expect(v1.excluded).toContainEqual({
         name: "powershell",
@@ -533,16 +533,16 @@ describe("frozen manifest against the floor (D6, D19, D29)", () => {
         effective: "ask-on-write",
       });
 
-      // Personal agents follow the user into other teams: only the install floor freezes them.
+      // Personal agents follow the user into other teams: only the site floor freezes them.
       const personal = await create("bob", "personal", "Portable");
       const p1 = toolManifestSchema.parse((await published("bob", personal)).version.toolManifest);
       expect(p1.tools.map((t) => t.name)).toContain("powershell");
       expect(p1.tools.map((t) => t.name)).not.toContain("bash");
 
       // The floor loosens: v1 stays as published; a republish picks the change up.
-      expect(
-        (await as.admin.delete(`/v1/install/policy/rules/${install.json.rule.id}`)).status,
-      ).toBe(204);
+      expect((await as.admin.delete(`/v1/site/policy/rules/${site.json.rule.id}`)).status).toBe(
+        204,
+      );
       const again = await as.bob.get(`/v1/agents/${teamAgent}/versions/1`);
       expect(again.json.version.toolManifest).toEqual(v1);
       const v2 = toolManifestSchema.parse((await published("bob", teamAgent)).version.toolManifest);

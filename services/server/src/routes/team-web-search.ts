@@ -8,7 +8,7 @@ import { readTeamWebSearch, setTeamWebSearch } from "../web-search/store.js";
 const bodySchema = z.strictObject({ enabled: z.boolean() });
 
 /**
- * Team web search opt-in (`/v1/team/web-search`, KOBE-113). Members see whether the install offers
+ * Team web search opt-in (`/v1/team/web-search`, KOBE-113). Members see whether the site offers
  * web search and whether the team turned it on; team admins turn it on or off. Off by default.
  * The `web_search` tool that honors it is KOBE-114.
  */

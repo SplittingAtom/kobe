@@ -16,7 +16,7 @@ import {
 } from "@kobe/db";
 
 /**
- * Who hears about connector tool drift (KOBE-103, D27). Today: every active install owner and
+ * Who hears about connector tool drift (KOBE-103, D27). Today: every active site owner and
  * admin (they re-approve), plus the active admins of each team with a `team_connectors` row for the
  * connector. Per-user grants (KOBE-108) and team enablement changes (KOBE-104) extend this module
  * only: add the users holding a grant for the connector to {@link driftRecipients} and, in
@@ -44,7 +44,7 @@ async function teamsUsing(db: KobeDb, connectorId: string): Promise<string[]> {
 }
 
 export async function driftRecipients(db: KobeDb, connectorId: string): Promise<DriftRecipient[]> {
-  const installAdmins = await db
+  const siteAdmins = await db
     .select({ userId: users.id, email: users.email })
     .from(installRoles)
     .innerJoin(users, eq(users.id, installRoles.userId))
@@ -69,7 +69,7 @@ export async function driftRecipients(db: KobeDb, connectorId: string): Promise<
     );
   }
   const byId = new Map<string, DriftRecipient>();
-  for (const r of [...installAdmins, ...teamAdmins]) byId.set(r.userId, r);
+  for (const r of [...siteAdmins, ...teamAdmins]) byId.set(r.userId, r);
   return [...byId.values()].sort((a, b) => a.email.localeCompare(b.email));
 }
 
@@ -83,7 +83,7 @@ export interface DriftNotice {
 /** Connectors with tools awaiting re-approval that this user is told about (the in-app notice). */
 export async function driftNoticesFor(
   db: KobeDb,
-  user: { readonly id: string; readonly installRole: "owner" | "admin" | null },
+  user: { readonly id: string; readonly siteRole: "owner" | "admin" | null },
 ): Promise<DriftNotice[]> {
   const rows = await db
     .select({ id: connectors.id, name: connectors.name, snapshot: connectors.toolsSnapshot })
@@ -99,7 +99,7 @@ export async function driftNoticesFor(
         .map((t) => t.name),
     }))
     .filter((r) => r.tools.length > 0);
-  if (user.installRole !== null || drifted.length === 0) return drifted;
+  if (user.siteRole !== null || drifted.length === 0) return drifted;
 
   const adminOf = (await listMemberships(db, user.id)).filter((m) => m.role === "team_admin");
   const visible = new Set<string>();

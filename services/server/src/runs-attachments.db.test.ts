@@ -84,7 +84,7 @@ const manifest = async (team: string, user: string) =>
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
 
-/** Install catalog + the team's default model, with or without image input (KOBE-191). */
+/** Site catalog + the team's default model, with or without image input (KOBE-191). */
 async function defaultModel(team: string, ownerId: string, modalities: string[]) {
   const alias = `m-${randomUUID().slice(0, 8)}`;
   const admin = f.fx.admin;

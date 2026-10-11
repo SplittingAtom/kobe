@@ -1,8 +1,8 @@
-/** Install console: egress ceiling (`/v1/install/egress-ceiling`, install.egress.manage; KOBE-38). */
+/** Install console: egress ceiling (`/v1/site/egress-ceiling`, install.egress.manage; KOBE-38). */
 import { apiRequest, type ApiResult } from "../../../api/client";
 
 const enc = encodeURIComponent;
-const BASE = "/v1/install/egress-ceiling";
+const BASE = "/v1/site/egress-ceiling";
 
 export type EgressPreset = "package_registries" | "git_hosts" | "web_search";
 

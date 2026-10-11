@@ -36,7 +36,7 @@ const notAvailable = (c: Context) =>
  *
  * GET    /                 → 200 `{grants: [{connector_id, hint, created_at, updated_at}]}`
  * PUT    /{connector_id}   `{api_key}` → 200 `{grant}` (201 when new); 404 not enabled;
- *                          422 `not_api_key`; 503 when the install has no envelope key
+ *                          422 `not_api_key`; 503 when the site has no envelope key
  * DELETE /{connector_id}   → 204; 404 when there is no key
  */
 export function connectorGrantRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
@@ -74,7 +74,7 @@ export function connectorGrantRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
         ? notAvailable(c)
         : c.json({ code: "not_api_key", message: "That connector does not use an API key." }, 422);
     }
-    // A user's key never probes or pins: pins are install-wide trust (install admins only).
+    // A user's key never probes or pins: pins are site-wide trust (site admins only).
     return c.json({ grant: summaryBody(result.grant) }, result.replaced ? 200 : 201);
   });
 

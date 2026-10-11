@@ -236,7 +236,7 @@ describe("erasure (ac-4)", () => {
     const elevenHours = await recordedAgo(11);
     expect(await errorCode(erase(elevenHours))).toBe("42501");
     expect((await row(elevenHours)).ip).toBe(IP);
-    // A shorter period (an audited install setting) makes it erasable.
+    // A shorter period (an audited site setting) makes it erasable.
     await admin.query(`INSERT INTO install_settings (key, value) VALUES ($1, '10')`, [
       AUDIT_PII_RETENTION_KEY,
     ]);
@@ -267,13 +267,13 @@ describe("erasure (ac-4)", () => {
 
   it("keeps held rows: the held team's rows and every row of a held user", async () => {
     const teamRow = await recordedAgo(30, { actorId: randomUUID(), teamId: teamA });
-    const aliceInstallRow = await recordedAgo(30, { actorId: alice });
+    const aliceSiteRow = await recordedAgo(30, { actorId: alice });
     const otherRow = await recordedAgo(30, { actorId: randomUUID() });
     await hold(teamA, null);
     expect(await errorCode(erase(teamRow))).toBe("KH001");
     await hold(teamA, alice);
-    // A user hold keeps the user's install-level rows (sign-ins) too.
-    expect(await errorCode(erase(aliceInstallRow))).toBe("KH001");
+    // A user hold keeps the user's site-level rows (sign-ins) too.
+    expect(await errorCode(erase(aliceSiteRow))).toBe("KH001");
     await erase(otherRow);
     expect((await row(teamRow)).ip).toBe(IP);
     expect((await row(otherRow)).ip).toBeNull();

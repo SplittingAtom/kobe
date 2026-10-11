@@ -8,7 +8,7 @@ import { SoftwareAuthenticator } from "./testing/webauthn.js";
 let h: Harness;
 const ids = { owner: "", admin: "", admin2: "", uma: "", tess: "", pat: "", rita: "" };
 let owner: TestBrowser;
-let installAdmin: TestBrowser;
+let siteAdmin: TestBrowser;
 
 beforeAll(async () => {
   h = await openHarness();
@@ -20,7 +20,7 @@ beforeAll(async () => {
   ids.pat = await h.createUser("pat@life.test");
   ids.rita = await h.createUser("rita@life.test");
   owner = await h.signIn("owner@life.test");
-  installAdmin = await h.signIn("admin@life.test");
+  siteAdmin = await h.signIn("admin@life.test");
 });
 
 afterAll(async () => {
@@ -221,7 +221,7 @@ describe("deactivation (ac-4)", () => {
       response: authenticator.register(options.json),
     });
     expect(reg.status, JSON.stringify(reg.json)).toBe(200);
-    const created = await owner.post("/v1/install/teams", {
+    const created = await owner.post("/v1/site/teams", {
       slug: "ops",
       name: "Ops",
       adminUserId: ids.uma,
@@ -253,23 +253,21 @@ describe("deactivation (ac-4)", () => {
     return { status: res.status, browser: b };
   }
 
-  it("is for install admins, and only the Owner acts on Admins", async () => {
+  it("is for site admins, and only the Owner acts on Admins", async () => {
     const pat = await h.signIn("pat@life.test");
-    expect((await pat.post(`/v1/install/users/${ids.uma}/deactivate`)).status).toBe(403);
-    expect((await pat.get("/v1/install/users")).status).toBe(403);
-    expect((await installAdmin.post(`/v1/install/users/${ids.admin2}/deactivate`)).status).toBe(
-      403,
-    );
-    expect(await installAdmin.post(`/v1/install/users/${ids.owner}/deactivate`)).toMatchObject({
+    expect((await pat.post(`/v1/site/users/${ids.uma}/deactivate`)).status).toBe(403);
+    expect((await pat.get("/v1/site/users")).status).toBe(403);
+    expect((await siteAdmin.post(`/v1/site/users/${ids.admin2}/deactivate`)).status).toBe(403);
+    expect(await siteAdmin.post(`/v1/site/users/${ids.owner}/deactivate`)).toMatchObject({
       status: 409,
       json: { code: "owner_cannot_be_deactivated" },
     });
-    expect(await installAdmin.post(`/v1/install/users/${ids.admin}/deactivate`)).toMatchObject({
+    expect(await siteAdmin.post(`/v1/site/users/${ids.admin}/deactivate`)).toMatchObject({
       status: 400,
       json: { code: "cannot_change_self" },
     });
     expect(
-      (await installAdmin.post(`/v1/install/users/00000000-0000-4000-8000-000000000000/deactivate`))
+      (await siteAdmin.post(`/v1/site/users/00000000-0000-4000-8000-000000000000/deactivate`))
         .status,
     ).toBe(404);
   });
@@ -287,7 +285,7 @@ describe("deactivation (ac-4)", () => {
       name: "test-hook",
       run: async (id) => void calls.push(id),
     });
-    const res = await installAdmin.post(`/v1/install/users/${ids.uma}/deactivate`);
+    const res = await siteAdmin.post(`/v1/site/users/${ids.uma}/deactivate`);
     expect(res.status, JSON.stringify(res.json)).toBe(200);
     expect(res.json).toMatchObject({ deactivated: true, incompleteSteps: [] });
     expect(calls).toEqual([ids.uma]);
@@ -343,27 +341,27 @@ describe("deactivation (ac-4)", () => {
     );
   });
 
-  it("lists users with their status for install admins", async () => {
-    const res = await installAdmin.get("/v1/install/users");
+  it("lists users with their status for site admins", async () => {
+    const res = await siteAdmin.get("/v1/site/users");
     const uma = res.json.users.find((u: { id: string }) => u.id === ids.uma);
-    expect(uma).toMatchObject({ email: "uma@life.test", installRole: "user" });
+    expect(uma).toMatchObject({ email: "uma@life.test", siteRole: "user" });
     expect(uma.deactivatedAt).toEqual(expect.any(String));
     expect(res.json.users.find((u: { id: string }) => u.id === ids.owner)).toMatchObject({
-      installRole: "owner",
+      siteRole: "owner",
       deactivatedAt: null,
     });
   });
 
   it("reports teams left without an active team admin", async () => {
     const tess = await h.signIn("tess@life.test");
-    const res = await owner.post(`/v1/install/users/${ids.tess}/deactivate`);
+    const res = await owner.post(`/v1/site/users/${ids.tess}/deactivate`);
     expect(res.json.teamsWithoutActiveAdmin).toEqual([{ id: team, slug: "ops", name: "Ops" }]);
     expect((await tess.get("/v1/me")).status).toBe(401);
   });
 
   it("reactivation restores sign-in and team access", async () => {
-    expect((await installAdmin.post(`/v1/install/users/${ids.uma}/reactivate`)).status).toBe(200);
-    expect((await installAdmin.post(`/v1/install/users/${ids.tess}/reactivate`)).status).toBe(200);
+    expect((await siteAdmin.post(`/v1/site/users/${ids.uma}/reactivate`)).status).toBe(200);
+    expect((await siteAdmin.post(`/v1/site/users/${ids.tess}/reactivate`)).status).toBe(200);
     const totp = await signInUmaWithTotp();
     expect(totp.status).toBe(200);
     const { browser, status } = await signInUmaWithPasskey();
@@ -379,7 +377,7 @@ describe("deactivation (ac-4)", () => {
         throw new Error("cluster unreachable");
       },
     });
-    const res = await owner.post(`/v1/install/users/${ids.admin2}/deactivate`);
+    const res = await owner.post(`/v1/site/users/${ids.admin2}/deactivate`);
     expect(res.json.incompleteSteps).toEqual(["stop-sandboxes"]);
     // Password-only account: the right password still gets no session.
     const signIn = await h

@@ -31,7 +31,7 @@ const DEFAULT_BATCH = 50;
 const ownerActor = (due: DueSchedule): ActorContext => ({
   user_id: due.userId,
   team_id: due.teamId,
-  install_role: "user",
+  site_role: "user",
   team_role: "member",
 });
 

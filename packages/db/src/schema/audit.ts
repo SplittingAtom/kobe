@@ -21,7 +21,7 @@ export const auditActorKind = pgEnum("audit_actor_kind", ["user", "agent", "syst
 export type AuditActorKind = (typeof auditActorKind.enumValues)[number];
 
 /**
- * Install-wide append-only audit log (spec D6, D31, §5.4 `audit_log†`). One row per audited action,
+ * Site-wide append-only audit log (spec D6, D31, §5.4 `audit_log†`). One row per audited action,
  * written with `audit()` in the same transaction as the action. Metadata only: `target` holds the
  * per-action allowlisted fields of `AUDIT_EVENTS`, never secrets, tokens or content.
  *
@@ -42,7 +42,7 @@ export const auditLog = pgTable(
     id: uuid().notNull().unique().defaultRandom(),
     /** Assigned by the database under the chain lock, so `at` never decreases along `seq`. */
     at: timestamp({ withTimezone: true }).notNull().defaultNow(),
-    /** The team the event belongs to (team audit view); null for install-level events. */
+    /** The team the event belongs to (team audit view); null for site-level events. */
     teamId: uuid(),
     actorKind: auditActorKind().notNull(),
     /** User or agent id; null for system events and unauthenticated attempts. */

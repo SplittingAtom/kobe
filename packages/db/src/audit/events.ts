@@ -27,15 +27,17 @@ import { PI_TOOL_NAME_PATTERN } from "../connectors/snapshot.js";
  *
  * Adding an event: add an entry here (never reuse or rename a published action; export and SIEM
  * consumers key on it), call `audit()` in the transaction that performs the action, and test it.
+ * The one rename so far (KOBE-255, "install" became "site") is listed in
+ * `HISTORICAL_AUDIT_ACTIONS`: old rows keep their names, readers accept both.
  */
 
-/** Where an event appears: install audit only, the team's audit view too, or either. */
+/** Where an event appears: site audit only, the team's audit view too, or either. */
 export type AuditScope =
-  /** `teamId` must be null: install-level (users, install settings, gallery, platform). */
-  | "install"
+  /** `teamId` must be null: site-level (users, site settings, gallery, platform). */
+  | "site"
   /** `teamId` is required: the team's audit view shows it (team admins). */
   | "team"
-  /** Team when the subject is a team's (e.g. a team agent), install otherwise (personal agents). */
+  /** Team when the subject is a team's (e.g. a team agent), site otherwise (personal agents). */
   | "any";
 
 const id = z.uuid();
@@ -105,7 +107,7 @@ const breakGlassScope = {
 
 /**
  * A legal hold (KOBE-17) by its id only: never the team, the scope, the held user or the reason
- * (a held install admin reads the install log; the console resolves the id).
+ * (a held site admin reads the site log; the console resolves the id).
  */
 const legalHoldRef = { holdId: id };
 
@@ -237,21 +239,21 @@ const event = <const S extends AuditScope, T extends z.ZodRawShape>(scope: S, sh
 
 export const AUDIT_EVENTS = {
   // ── auth: Better Auth sign-in and credential changes (actor: the user) ──
-  "auth.sign_in.succeeded": event("install", { method: signInMethod }),
+  "auth.sign_in.succeeded": event("site", { method: signInMethod }),
   /** Actor id null (unauthenticated); `userId` only when the attempt named an existing account. */
-  "auth.sign_in.failed": event("install", {
+  "auth.sign_in.failed": event("site", {
     method: signInMethod,
     reason: reasonCode,
     userId: id.optional(),
   }),
   /** Password accepted; the second factor is still outstanding (no session yet). */
-  "auth.sign_in.two_factor_required": event("install", { method: signInMethod }),
+  "auth.sign_in.two_factor_required": event("site", { method: signInMethod }),
   /**
    * Unauthenticated attempts are aggregated (KOBE-15 review): the first of each kind per account (or
    * per "no account") and method in a window is recorded as itself; the rest of that window become
    * one summary, so a flood from rotating IPs adds at most two rows per key and window.
    */
-  "auth.attempts.summarized": event("install", {
+  "auth.attempts.summarized": event("site", {
     of: z.enum([
       "auth.sign_in.failed",
       "auth.sign_in.two_factor_required",
@@ -266,32 +268,32 @@ export const AUDIT_EVENTS = {
     from: z.iso.datetime(),
     to: z.iso.datetime(),
   }),
-  "auth.sign_out": event("install", {}),
-  "auth.session.revoked": event("install", { which: z.enum(["one", "others", "all"]) }),
-  "auth.password.changed": event("install", {}),
+  "auth.sign_out": event("site", {}),
+  "auth.session.revoked": event("site", { which: z.enum(["one", "others", "all"]) }),
+  "auth.password.changed": event("site", {}),
   /** Actor id null: whoever asked; only requests for an existing, active account are recorded. */
-  "auth.password.reset_requested": event("install", { userId: id }),
-  "auth.password.reset": event("install", { userId: id }),
-  "auth.two_factor.enabled": event("install", {}),
-  "auth.two_factor.disabled": event("install", {}),
-  "auth.two_factor.backup_codes_regenerated": event("install", {}),
-  "auth.passkey.added": event("install", {}),
-  "auth.passkey.removed": event("install", { passkeyId: z.string().max(128).optional() }),
+  "auth.password.reset_requested": event("site", { userId: id }),
+  "auth.password.reset": event("site", { userId: id }),
+  "auth.two_factor.enabled": event("site", {}),
+  "auth.two_factor.disabled": event("site", {}),
+  "auth.two_factor.backup_codes_regenerated": event("site", {}),
+  "auth.passkey.added": event("site", {}),
+  "auth.passkey.removed": event("site", { passkeyId: z.string().max(128).optional() }),
 
   // ── identity: users, invitations, roles, teams, membership ──
-  "identity.setup.completed": event("install", { ownerUserId: id }),
+  "identity.setup.completed": event("site", { ownerUserId: id }),
   // No invitee email (personal data in an append-only log): the invitation id resolves it while
-  // the invitation exists (install invitations are kept; KOBE-15 review).
-  "identity.invitation.created": event("install", { invitationId: id }),
-  "identity.invitation.resent": event("install", { invitationId: id }),
-  "identity.invitation.revoked": event("install", { invitationId: id }),
+  // the invitation exists (site invitations are kept; KOBE-15 review).
+  "identity.invitation.created": event("site", { invitationId: id }),
+  "identity.invitation.resent": event("site", { invitationId: id }),
+  "identity.invitation.revoked": event("site", { invitationId: id }),
   /** Actor: the new user. */
-  "identity.invitation.accepted": event("install", { invitationId: id, userId: id }),
-  "identity.user.deactivated": event("install", { userId: id }),
-  "identity.user.reactivated": event("install", { userId: id }),
-  "identity.install_role.granted": event("install", { userId: id, role: z.literal("admin") }),
-  "identity.install_role.revoked": event("install", { userId: id, role: z.literal("admin") }),
-  "identity.ownership.transferred": event("install", { fromUserId: id, toUserId: id }),
+  "identity.invitation.accepted": event("site", { invitationId: id, userId: id }),
+  "identity.user.deactivated": event("site", { userId: id }),
+  "identity.user.reactivated": event("site", { userId: id }),
+  "identity.site_role.granted": event("site", { userId: id, role: z.literal("admin") }),
+  "identity.site_role.revoked": event("site", { userId: id, role: z.literal("admin") }),
+  "identity.ownership.transferred": event("site", { fromUserId: id, toUserId: id }),
   "identity.team.created": event("team", { slug, name: label, adminUserId: id }),
   "identity.team.renamed": event("team", { name: label }),
   "identity.team_invitation.created": event("team", { invitationId: id, role }),
@@ -303,15 +305,15 @@ export const AUDIT_EVENTS = {
   "identity.member.role_changed": event("team", { userId: id, from: role, to: role }),
   "identity.member.removed": event("team", { userId: id, role }),
 
-  // ── install: install-wide settings ──
-  "install.settings.updated": event("install", {
+  // ── site: site-wide settings ──
+  "site.settings.updated": event("site", {
     setting: z.enum(["require_two_factor", "audit_pii_retention_hours"]),
     value: z.union([z.boolean(), z.number().int().nonnegative(), label]),
   }),
 
   // ── platform: isolation runtime, restore (actor: system) ──
   /** A server replica's isolation state changed (spec D4); boot-time "verified" is not recorded. */
-  "platform.isolation.changed": event("install", {
+  "platform.isolation.changed": event("site", {
     from: isolationState,
     to: isolationState,
     runtimeClass: z.string().max(253).optional(),
@@ -319,7 +321,7 @@ export const AUDIT_EVENTS = {
     replica: z.string().max(253),
   }),
   /** `kobe restore` loaded a backup into this database (written by the restore transaction). */
-  "platform.restore.completed": event("install", {
+  "platform.restore.completed": event("site", {
     backupCreatedAt: z.iso.datetime(),
     tables: z.number().int().nonnegative(),
     rows: z.number().int().nonnegative(),
@@ -333,12 +335,12 @@ export const AUDIT_EVENTS = {
       .optional(),
   }),
 
-  // ── policy: tool rules and switches (D29, KOBE-35); install rules install-only, others team ──
+  // ── policy: tool rules and switches (D29, KOBE-35); site rules site-only, others team ──
   "policy.rule.created": event("any", toolRule),
   "policy.rule.updated": event("any", toolRule),
   /** Includes a member revoking their own remember-rule (scope `user`). */
   "policy.rule.deleted": event("any", toolRule),
-  "policy.settings.updated": event("install", {
+  "policy.settings.updated": event("site", {
     setting: z.enum(["prompt_sandbox_writes"]),
     value: z.boolean(),
   }),
@@ -378,10 +380,10 @@ export const AUDIT_EVENTS = {
   "sandbox.woken": event("team", { sandboxId: id, userId: id }),
   /**
    * A woken sandbox was not Ready within the wake timeout and its run failed
-   * `workspace_unavailable` (KOBE-192; system actor). Install scope: `detail` is the cluster's own
+   * `workspace_unavailable` (KOBE-192; system actor). Site scope: `detail` is the cluster's own
    * reason (events, volume phase) and may name nodes and volumes, so team members never see it.
    */
-  "sandbox.wake_stalled": event("install", {
+  "sandbox.wake_stalled": event("site", {
     teamId: id,
     sandboxId: id,
     userId: id,
@@ -393,12 +395,12 @@ export const AUDIT_EVENTS = {
       .regex(/^[^\u0000-\u001f\u007f]*$/),
   }),
 
-  // ── egress: ceiling (install), enablement (team), connections (team; KOBE-38, D28) ──
-  "egress.ceiling.added": event("install", { domain: egressDomain }),
+  // ── egress: ceiling (site), enablement (team), connections (team; KOBE-38, D28) ──
+  "egress.ceiling.added": event("site", { domain: egressDomain }),
   /** A ceiling domain (preset or custom) was put into or taken out of the ceiling. */
-  "egress.ceiling.changed": event("install", { domain: egressDomain, inCeiling: z.boolean() }),
+  "egress.ceiling.changed": event("site", { domain: egressDomain, inCeiling: z.boolean() }),
   /** A custom domain was deleted; every team's enablement of it went with it. */
-  "egress.ceiling.removed": event("install", { domain: egressDomain }),
+  "egress.ceiling.removed": event("site", { domain: egressDomain }),
   "egress.domain.enabled": event("team", { domain: egressDomain }),
   /** `headersRemoved`: the domain's injected headers (KOBE-39) were deleted with it. */
   "egress.domain.disabled": event("team", {
@@ -482,16 +484,16 @@ export const AUDIT_EVENTS = {
     to: z.iso.datetime(),
   }),
 
-  // ── models: providers and catalog (install), team enablement (team; KOBE-40, D6, D30) ──
+  // ── models: providers and catalog (site), team enablement (team; KOBE-40, D6, D30) ──
   // Never the API key itself: only whether one is set or changed.
-  "models.provider.added": event("install", {
+  "models.provider.added": event("site", {
     providerId,
     kind: providerKind,
     keySet: z.boolean(),
     privateNetwork: z.boolean(),
     endpointHost,
   }),
-  "models.provider.changed": event("install", {
+  "models.provider.changed": event("site", {
     providerId,
     kind: providerKind,
     keyChanged: z.boolean(),
@@ -500,19 +502,19 @@ export const AUDIT_EVENTS = {
     /** The endpoint's host after the change (where the stored key is sent). */
     endpointHost,
   }),
-  "models.provider.removed": event("install", { providerId, kind: providerKind }),
+  "models.provider.removed": event("site", { providerId, kind: providerKind }),
   /**
-   * An install admin had the gateway call the provider's list-models API with the stored key
+   * A site admin had the gateway call the provider's list-models API with the stored key
    * (KOBE-44 model picker). The outcome only: never the provider's answer or the key.
    */
-  "models.provider.models_refreshed": event("install", {
+  "models.provider.models_refreshed": event("site", {
     providerId,
     kind: providerKind,
     outcome: z.enum(["ok", "failed", "unavailable"]),
     models: count,
   }),
   /** A catalog alias was added, re-pointed or removed (removal also disables it for every team). */
-  "models.catalog.changed": event("install", {
+  "models.catalog.changed": event("site", {
     alias: modelAlias,
     change: z.enum(["added", "updated", "removed"]),
     providerId: providerId.optional(),
@@ -531,7 +533,7 @@ export const AUDIT_EVENTS = {
     isDefault: z.boolean(),
   }),
   /**
-   * A budget or rate limit was set, changed or removed (KOBE-42, D30): the install's (install
+   * A budget or rate limit was set, changed or removed (KOBE-42, D30): the site's (install
    * admins; no team), the team's or one member's (team admins). Amounts in dollars; null = none.
    */
   "models.budget.changed": event("any", {
@@ -551,7 +553,7 @@ export const AUDIT_EVENTS = {
         dailyVolume: tokenAmount.nullable(),
       })
       .optional(),
-    /** Per-user requests per minute (install and team levels only); null = the install's. */
+    /** Per-user requests per minute (site and team levels only); null = the site's. */
     requestsPerMinute: z.number().int().positive().nullable().optional(),
     removed: z.literal(true).optional(),
   }),
@@ -696,14 +698,14 @@ export const AUDIT_EVENTS = {
     period: retentionPeriod,
     kept: retentionPeriod,
   }),
-  /** An install admin changed the longest period any team may keep threads. */
-  "retention.maximum.changed": event("install", {
+  /** A site admin changed the longest period any team may keep threads. */
+  "retention.maximum.changed": event("site", {
     maximum: retentionPeriod,
     previous: retentionPeriod,
     effectiveAt: z.iso.datetime({ offset: true }).optional(),
   }),
-  /** An install admin cancelled a pending lowering of the maximum. */
-  "retention.maximum.change_cancelled": event("install", {
+  /** A site admin cancelled a pending lowering of the maximum. */
+  "retention.maximum.change_cancelled": event("site", {
     maximum: retentionPeriod,
     kept: retentionPeriod,
   }),
@@ -742,13 +744,13 @@ export const AUDIT_EVENTS = {
   "retention.blobs_deleted": event("team", { blobs: count, kept: count }),
 
   // ── governance: break-glass (D10, KOBE-16); team scope, so the team's audit view shows them ──
-  /** An install admin asked for read access to the team (the reason stays in the grant row). */
+  /** A site admin asked for read access to the team (the reason stays in the grant row). */
   "governance.break_glass.requested": event("team", {
     ...breakGlassScope,
     durationMinutes: z.number().int().min(1).max(BREAK_GLASS_MAX_MINUTES),
     ...notified,
   }),
-  /** A second install admin approved; `selfApproved` flags a single-admin install (D10). */
+  /** A second site admin approved; `selfApproved` flags a single-admin site (D10). */
   "governance.break_glass.approved": event("team", {
     ...breakGlassScope,
     expiresAt: z.iso.datetime({ offset: true }),
@@ -781,33 +783,33 @@ export const AUDIT_EVENTS = {
     threadId: id.optional(),
   }),
 
-  // ── governance: legal hold (D18, KOBE-17); install scope: holds are confidential, and the team's
+  // ── governance: legal hold (D18, KOBE-17); site scope: holds are confidential, and the team's
   // admins may be the people held. Never the held user's id or the reason (the hold row keeps them).
-  /** An install admin asked for a hold on a team, or on one user in it. */
-  "governance.legal_hold.requested": event("install", legalHoldRef),
-  /** A second install admin approved (or a single-admin install self-approved, flagged): in force. */
-  "governance.legal_hold.placed": event("install", { ...legalHoldRef, selfApproved: z.boolean() }),
-  "governance.legal_hold.denied": event("install", { holdId: id }),
-  "governance.legal_hold.withdrawn": event("install", { holdId: id }),
-  /** An install admin asked to release an active hold; it stays in force until approved. */
-  "governance.legal_hold.release_requested": event("install", { holdId: id }),
-  "governance.legal_hold.release_denied": event("install", { holdId: id }),
-  "governance.legal_hold.release_withdrawn": event("install", { holdId: id }),
-  /** A second install admin approved the release (single-admin install: flagged): purges resume. */
-  "governance.legal_hold.released": event("install", {
+  /** A site admin asked for a hold on a team, or on one user in it. */
+  "governance.legal_hold.requested": event("site", legalHoldRef),
+  /** A second site admin approved (or a single-admin site self-approved, flagged): in force. */
+  "governance.legal_hold.placed": event("site", { ...legalHoldRef, selfApproved: z.boolean() }),
+  "governance.legal_hold.denied": event("site", { holdId: id }),
+  "governance.legal_hold.withdrawn": event("site", { holdId: id }),
+  /** A site admin asked to release an active hold; it stays in force until approved. */
+  "governance.legal_hold.release_requested": event("site", { holdId: id }),
+  "governance.legal_hold.release_denied": event("site", { holdId: id }),
+  "governance.legal_hold.release_withdrawn": event("site", { holdId: id }),
+  /** A second site admin approved the release (single-admin site: flagged): purges resume. */
+  "governance.legal_hold.released": event("site", {
     ...legalHoldRef,
     selfApproved: z.boolean(),
   }),
 
   // ── audit: the audit log's own maintenance (KOBE-17; actor: system) ──
   /** The IP and user agent of rows past the retention period were erased (counts only). */
-  "audit.pii_erased": event("install", {
+  "audit.pii_erased": event("site", {
     rows: count,
     olderThanHours: z.number().int().positive(),
   }),
   /**
-   * An admin downloaded the log as CSV or JSONL (KOBE-19). Install admins export the whole log
-   * (install scope); a team admin's export is the team view and is recorded in the team. `rows` is
+   * An admin downloaded the log as CSV or JSONL (KOBE-19). Site admins export the whole log
+   * (site scope); a team admin's export is the team view and is recorded in the team. `rows` is
    * what was sent; `complete` is false when the download broke off or failed.
    */
   "audit.exported": event("any", {
@@ -818,7 +820,7 @@ export const AUDIT_EVENTS = {
     complete: z.boolean(),
   }),
   /** Written once after the chain v2 upgrade (server): the seal over every v1 row (hex SHA-256). */
-  "audit.chain.upgraded": event("install", {
+  "audit.chain.upgraded": event("site", {
     throughSeq: z.number().int().positive(),
     rows: z.number().int().positive(),
     seal: z.string().regex(/^[0-9a-f]{64}$/),
@@ -1105,7 +1107,7 @@ export const AUDIT_EVENTS = {
     bytes: count,
   }),
 
-  // ── agent: definitions (D19); team agents in the team view, personal and gallery install-only ──
+  // ── agent: definitions (D19); team agents in the team view, personal and gallery site-only ──
   "agent.created": event("any", {
     ...agentRef,
     // "seed": a gallery agent created from the repo's definitions at install or upgrade (KOBE-87).
@@ -1143,7 +1145,7 @@ export const AUDIT_EVENTS = {
   "agent.archived": event("any", agentRef),
   "agent.unarchived": event("any", agentRef),
 
-  // ── skill: uploaded bundles (KOBE-78); team skills in the team view, personal install-only ──
+  // ── skill: uploaded bundles (KOBE-78); team skills in the team view, personal site-only ──
   /** A skill bundle was uploaded as a new immutable version (never the bundle's contents). */
   "skill.uploaded": event("any", {
     skillId: id,
@@ -1168,33 +1170,33 @@ export const AUDIT_EVENTS = {
   }),
   /** A team admin switched the team's personal skills off or on (KOBE-80, D22). */
   "skill.personal_switch.changed": event("team", { disabled: z.boolean() }),
-  /** An install admin put a bundle hash on the install blocklist (KOBE-81); hash only, no reason. */
-  "skill.blocklist.added": event("install", { bundleHash: z.string().regex(/^[0-9a-f]{64}$/) }),
-  /** An install admin took a bundle hash off the blocklist (KOBE-81). */
-  "skill.blocklist.removed": event("install", { bundleHash: z.string().regex(/^[0-9a-f]{64}$/) }),
+  /** A site admin put a bundle hash on the site blocklist (KOBE-81); hash only, no reason. */
+  "skill.blocklist.added": event("site", { bundleHash: z.string().regex(/^[0-9a-f]{64}$/) }),
+  /** A site admin took a bundle hash off the blocklist (KOBE-81). */
+  "skill.blocklist.removed": event("site", { bundleHash: z.string().regex(/^[0-9a-f]{64}$/) }),
 
-  // ── connectors: the install registry (KOBE-100); ids, names and field names, never URLs or credentials ──
-  /** An install admin registered an MCP server. */
-  "mcp.connector.registered": event("install", {
+  // ── connectors: the site registry (KOBE-100); ids, names and field names, never URLs or credentials ──
+  /** A site admin registered an MCP server. */
+  "mcp.connector.registered": event("site", {
     connectorId: id,
     name: z.string().max(64),
     authKind: z.enum(["none", "api_key", "oauth"]),
   }),
-  /** An install admin edited a connector; `changed` names the fields, values are not recorded. */
-  "mcp.connector.updated": event("install", {
+  /** A site admin edited a connector; `changed` names the fields, values are not recorded. */
+  "mcp.connector.updated": event("site", {
     connectorId: id,
     name: z.string().max(64),
     changed: z.array(z.enum(["name", "url", "iconUrl", "authKind", "status"])).max(5),
   }),
-  /** An install admin removed a connector; `soft` when teams still used it (kept disabled). */
-  "mcp.connector.removed": event("install", {
+  /** A site admin removed a connector; `soft` when teams still used it (kept disabled). */
+  "mcp.connector.removed": event("site", {
     connectorId: id,
     name: z.string().max(64),
     soft: z.boolean(),
     teams: z.number().int().nonnegative(),
   }),
   /** Kobe probed a connector and pinned its tools (KOBE-101); the hash covers all pinned tools. */
-  "mcp.connector.pinned": event("install", {
+  "mcp.connector.pinned": event("site", {
     connectorId: id,
     name: z.string().max(64),
     tools: z.number().int().nonnegative(),
@@ -1215,7 +1217,7 @@ export const AUDIT_EVENTS = {
    * and `added` tools are now disabled pending re-approval, `removed` ones are no longer offered.
    * Tool names only, never descriptions or schemas. Written by the system actor; KOBE-103 reads it.
    */
-  "mcp.connector.drift": event("install", {
+  "mcp.connector.drift": event("site", {
     connectorId: id,
     name: z.string().max(64),
     changed: z.array(z.string().max(128)).max(500),
@@ -1227,14 +1229,14 @@ export const AUDIT_EVENTS = {
    * row. `emailed: false` when the per-connector, per-recipient rate limit suppressed the email.
    * Ids and counts only: no address, no tool names. Also the dedupe and rate-limit record.
    */
-  "mcp.connector.drift_notified": event("install", {
+  "mcp.connector.drift_notified": event("site", {
     connectorId: id,
     driftSeq: z.number().int().positive(),
     recipientId: id,
     emailed: z.boolean(),
   }),
-  /** An install admin re-approved drifted tools (KOBE-102); they are offered again. */
-  "mcp.connector.reapproved": event("install", {
+  /** A site admin re-approved drifted tools (KOBE-102); they are offered again. */
+  "mcp.connector.reapproved": event("site", {
     connectorId: id,
     name: z.string().max(64),
     tools: z.array(z.string().max(128)).max(500),
@@ -1268,8 +1270,8 @@ export const AUDIT_EVENTS = {
     memoryEnabled: z.boolean(),
     projectMemoryEnabled: z.boolean(),
   }),
-  /** An install admin changed the install-wide memory switches. */
-  "memory.install_settings_changed": event("install", {
+  /** A site admin changed the site-wide memory switches. */
+  "memory.site_settings_changed": event("site", {
     memoryEnabled: z.boolean(),
     projectMemoryEnabled: z.boolean(),
   }),
@@ -1293,14 +1295,14 @@ export const AUDIT_EVENTS = {
     reason: z.enum(["rejected", "no_refresh_token"]),
   }),
   // ── web search (KOBE-113): provider and switches only, never the key or its hint ──
-  /** An install admin set the web search provider, its enabled switch, or replaced its key. */
-  "mcp.web_search.configured": event("install", {
+  /** A site admin set the web search provider, its enabled switch, or replaced its key. */
+  "mcp.web_search.configured": event("site", {
     provider: z.enum(["brave", "tavily", "exa"]),
     enabled: z.boolean(),
     keyChanged: z.boolean(),
   }),
-  /** An install admin removed the web search provider. */
-  "mcp.web_search.removed": event("install", { provider: z.enum(["brave", "tavily", "exa"]) }),
+  /** A site admin removed the web search provider. */
+  "mcp.web_search.removed": event("site", { provider: z.enum(["brave", "tavily", "exa"]) }),
   /** A team admin turned web search on or off for the team. */
   "mcp.web_search.team_changed": event("team", { enabled: z.boolean() }),
 } as const;
@@ -1315,4 +1317,49 @@ export const AUDIT_CATEGORIES = [...new Set(AUDIT_ACTIONS.map((a) => a.split("."
 
 export function isAuditAction(value: string): value is AuditAction {
   return Object.hasOwn(AUDIT_EVENTS, value);
+}
+
+/**
+ * Action names rows were recorded under before KOBE-255 renamed the "install" scope to "site",
+ * each with the action that replaced it. Never written again; historical rows keep them (the hash
+ * chain covers the stored name), so filters for either name find both (`auditActionNames`).
+ */
+export const HISTORICAL_AUDIT_ACTIONS: Readonly<Record<string, AuditAction>> = Object.freeze({
+  "install.settings.updated": "site.settings.updated",
+  "identity.install_role.granted": "identity.site_role.granted",
+  "identity.install_role.revoked": "identity.site_role.revoked",
+  "memory.install_settings_changed": "memory.site_settings_changed",
+});
+
+/** Categories of historical rows by the category that replaced them (`install` → `site`). */
+const HISTORICAL_CATEGORIES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  site: ["install"],
+});
+
+/** The current action for a current or historical name, or null for an unknown name. */
+export function currentAuditAction(value: string): AuditAction | null {
+  if (isAuditAction(value)) return value;
+  return Object.hasOwn(HISTORICAL_AUDIT_ACTIONS, value)
+    ? (HISTORICAL_AUDIT_ACTIONS[value] ?? null)
+    : null;
+}
+
+/** Every stored name of an action: the current one first, then the historical ones. */
+export function auditActionNames(action: AuditAction): string[] {
+  const old = Object.keys(HISTORICAL_AUDIT_ACTIONS).filter(
+    (name) => HISTORICAL_AUDIT_ACTIONS[name] === action,
+  );
+  return [action, ...old];
+}
+
+/** The current category for a current or historical one (`install` → `site`), or null. */
+export function currentAuditCategory(value: string): string | null {
+  if (AUDIT_CATEGORIES.includes(value)) return value;
+  const found = Object.entries(HISTORICAL_CATEGORIES).find(([, old]) => old.includes(value));
+  return found ? found[0] : null;
+}
+
+/** Every stored category a filter on `category` matches: the current one, then historical ones. */
+export function auditCategoryNames(category: string): string[] {
+  return [category, ...(HISTORICAL_CATEGORIES[category] ?? [])];
 }

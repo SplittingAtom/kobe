@@ -27,7 +27,7 @@ export type IssuedSessionTokens = {
 };
 
 /**
- * One token per audience for a sandbox, all expiring together. `ttlSeconds` is the install's
+ * One token per audience for a sandbox, all expiring together. `ttlSeconds` is the site's
  * KOBE_SESSION_TOKEN_TTL_SECONDS (15 min unless a test install shortens it).
  */
 export function issueSessionTokens(
