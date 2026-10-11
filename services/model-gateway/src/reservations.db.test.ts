@@ -33,14 +33,29 @@ const call = (userId: string): CallContext => ({
   outputAllowance: 100,
   callId: randomUUID(),
 });
-const gateOn = (ttlMs: number) =>
-  new BudgetGate(
+/** Records every end() so a test can wait for the gate's fire-and-forget release/settle. */
+class TrackedReservations extends DbReservations {
+  readonly pending = new Set<Promise<void>>();
+  override end(teamId: string, callIds: readonly string[], keepMs?: number): Promise<void> {
+    const p = super.end(teamId, callIds, keepMs);
+    this.pending.add(p);
+    return p.finally(() => this.pending.delete(p));
+  }
+  async idle(): Promise<void> {
+    await Promise.allSettled([...this.pending]);
+  }
+}
+const gateOn = (ttlMs: number, settleHoldMs?: number) => {
+  const reservations = new TrackedReservations(app.db, { ttlMs, salt: "test-salt" });
+  const gate = new BudgetGate(
     {
       load: async () => ({ lines: [line], requestsPerMinute: 10_000 }),
       prices: async () => new Map(),
     },
-    { ttlMs: 1_000, reservations: new DbReservations(app.db, { ttlMs, salt: "test-salt" }) },
+    { ttlMs: 1_000, reservations, ...(settleHoldMs !== undefined ? { settleHoldMs } : {}) },
   );
+  return { gate, idle: () => reservations.idle() };
+};
 
 beforeAll(async () => {
   const owner = createDb(inject("ownerUrl"));
@@ -52,8 +67,8 @@ afterAll(() => app.close());
 
 describe("DbReservations through BudgetGate (KOBE-120)", () => {
   it("a second gate sees the first's reservation; release and settle end it", async () => {
-    const a = gateOn(60_000);
-    const b = gateOn(60_000);
+    const { gate: a } = gateOn(60_000);
+    const { gate: b } = gateOn(60_000);
     const user = randomUUID();
     // 500 tokens per call, 1000 limit: two calls fit, the third is refused, on either gate.
     const first = await a.admit(call(user));
@@ -67,7 +82,7 @@ describe("DbReservations through BudgetGate (KOBE-120)", () => {
   });
 
   it("settle ends a written call's reservation", async () => {
-    const g = gateOn(60_000);
+    const { gate: g, idle } = gateOn(60_000);
     const user = randomUUID();
     const c = call(user);
     const d = await g.admit(c);
@@ -75,18 +90,42 @@ describe("DbReservations through BudgetGate (KOBE-120)", () => {
     if (!d.ok || !d2.ok) throw new Error("refused");
     d.release?.(true);
     expect(await g.admit(call(user))).toMatchObject({ ok: false });
+    await idle();
     g.settle(team, [c.callId ?? ""]);
-    await new Promise((r) => setTimeout(r, 100));
+    await idle();
     expect((await g.admit(call(user))).ok).toBe(true);
+  });
+
+  it("a settled hold keeps counting until the hold passes, then expires (KOBE-120 TTL semantics)", async () => {
+    const { gate: g, idle } = gateOn(60_000, 1_500);
+    const user = randomUUID();
+    const c = call(user);
+    const d = await g.admit(c);
+    const d2 = await g.admit(call(user));
+    if (!d.ok || !d2.ok) throw new Error("refused");
+    d.release?.(true);
+    await idle();
+    g.settle(team, [c.callId ?? ""]);
+    await idle();
+    // Still counted right after settle: the hold (1.5 s) is far longer than this check.
+    expect(await g.admit(call(user))).toMatchObject({ ok: false });
+    // Poll (bounded) until the hold expires on the database clock.
+    const deadline = Date.now() + 10_000;
+    let admitted = false;
+    while (!admitted && Date.now() < deadline) {
+      admitted = (await g.admit(call(user))).ok;
+      if (!admitted) await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(admitted).toBe(true);
   });
 
   it("a crashed replica's reservation expires on its own, even before any sweep (ac-1, ac-2)", async () => {
     const user = randomUUID();
-    const crashing = gateOn(300);
+    const { gate: crashing } = gateOn(300);
     expect((await crashing.admit(call(user))).ok).toBe(true);
     expect((await crashing.admit(call(user))).ok).toBe(true);
     // The "replica" never releases. A healthy one is refused until the expiry, then admitted.
-    const healthy = gateOn(60_000);
+    const { gate: healthy } = gateOn(60_000);
     expect(await healthy.admit(call(user))).toMatchObject({ ok: false });
     await new Promise((r) => setTimeout(r, 450));
     expect((await healthy.admit(call(user))).ok).toBe(true);

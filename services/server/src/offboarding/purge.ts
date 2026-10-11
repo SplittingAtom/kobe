@@ -10,6 +10,8 @@ import {
 import { recordAudit } from "../audit/record.js";
 import { auditTimeout } from "../retention/locks.js";
 import { memoryRecorder, purgeMemoryBatchInTx } from "../retention/memory.js";
+import { deleteBounded } from "../retention/bounded-delete.js";
+import { withTeamRecovering } from "../retention/recovering.js";
 import { workspaceBlobKey } from "../workspace-sync/keys.js";
 import type { Departed, OffboardingContext, TeamIdentity } from "./types.js";
 import { findTeam } from "./destroy.js";
@@ -80,7 +82,7 @@ async function deleteFiles(
   counts: Counts,
 ): Promise<PurgeOutcome | "ok"> {
   for (;;) {
-    const result = await withTeam(ctx.db, target.teamId, async (tx) => {
+    const result = await withTeamRecovering(ctx.db, target.teamId, async (tx) => {
       const state = await guard(tx, target);
       if (state !== "ok") return state;
       const rows = await tx.execute<{ path: string; blob_key: string | null; size: string }>(sql`
@@ -90,7 +92,20 @@ async function deleteFiles(
       const keys = rows.rows.flatMap((r) =>
         r.blob_key && ownedKey(ctx, target, r.blob_key) ? [r.blob_key] : [],
       );
-      if (keys.length > 0) await ctx.blobs?.objects.delete(keys);
+      if (keys.length > 0 && ctx.blobs) {
+        await deleteBounded(
+          ctx.blobs.objects,
+          keys,
+          ctx.blobs.deleteTimeoutMs,
+          undefined,
+          (gone) => async (t) => {
+            await t.execute(sql`
+            DELETE FROM workspace_files
+             WHERE team_id = ${target.teamId} AND user_id = ${target.userId}
+               AND blob_key IN ${gone} AND NOT public.legal_hold_covers(team_id, user_id)`);
+          },
+        );
+      }
       await tx.execute(sql`
         DELETE FROM workspace_files
          WHERE team_id = ${target.teamId} AND user_id = ${target.userId}
@@ -109,7 +124,7 @@ async function deleteBlobs(
   counts: Counts,
 ): Promise<PurgeOutcome | "ok"> {
   for (;;) {
-    const result = await withTeam(ctx.db, target.teamId, async (tx) => {
+    const result = await withTeamRecovering(ctx.db, target.teamId, async (tx) => {
       const state = await guard(tx, target);
       if (state !== "ok") return state;
       const rows = await tx.execute<{ sha256: string; size: string }>(sql`
@@ -118,8 +133,24 @@ async function deleteBlobs(
       if (rows.rows.length === 0) return "ok" as const;
       if (!ctx.blobs) return "unavailable" as const;
       const owner = { teamId: target.teamId, userId: target.userId };
-      await ctx.blobs.objects.delete(
-        rows.rows.map((r) => workspaceBlobKey(ctx.blobs?.prefix ?? "", owner, r.sha256)),
+      const byKey = new Map(
+        rows.rows.map((r) => [
+          workspaceBlobKey(ctx.blobs?.prefix ?? "", owner, r.sha256),
+          r.sha256,
+        ]),
+      );
+      await deleteBounded(
+        ctx.blobs.objects,
+        [...byKey.keys()],
+        ctx.blobs.deleteTimeoutMs,
+        undefined,
+        (gone) => async (t) => {
+          const shas = gone.flatMap((k) => byKey.get(k) ?? []);
+          await t.execute(sql`
+            DELETE FROM workspace_blobs
+             WHERE team_id = ${target.teamId} AND user_id = ${target.userId}
+               AND sha256 IN ${shas} AND NOT public.legal_hold_covers(team_id, user_id)`);
+        },
       );
       await tx.execute(sql`
         DELETE FROM workspace_blobs
@@ -143,7 +174,7 @@ async function deleteMemory(
   target: Departed,
 ): Promise<PurgeOutcome | "ok"> {
   for (;;) {
-    const result = await withTeam(ctx.db, target.teamId, async (tx) => {
+    const result = await withTeamRecovering(ctx.db, target.teamId, async (tx) => {
       const state = await guard(tx, target);
       if (state !== "ok") return state;
       if (!ctx.blobs) {
@@ -200,6 +231,7 @@ export async function purgeDeparted(
   ctx: OffboardingContext,
   target: Departed,
 ): Promise<PurgeOutcome> {
+  if (ctx.paused) return "unavailable";
   const team = await findTeam(ctx, target.teamId);
   if (!team) return "not_due";
   const counts: Counts = { files: 0, blobs: 0, bytes: 0, volumeDeleted: false };

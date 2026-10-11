@@ -389,3 +389,9 @@ spec:
   value: "3310"
 {{- end }}
 {{- end -}}
+
+{{/* Pauses the nightly retention pass (KOBE-243): set after restoring the database from an older backup. */}}
+{{- define "kobe.retentionEnv" -}}
+- name: KOBE_RETENTION_PAUSED
+  value: {{ .Values.retention.paused | default false | toString | quote }}
+{{- end -}}

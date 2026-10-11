@@ -35,6 +35,11 @@ export interface WorkspaceSyncOptions {
   readonly teamStorageDefaultBytes?: number;
   readonly collect?: Partial<Omit<CollectOptions, "prefix">>;
   readonly log: Pick<Logger, "error" | "warn" | "info">;
+  /**
+   * KOBE_RETENTION_PAUSED (KOBE-243): no collection runs, timed or on quota pressure. After a
+   * restore from an older backup, rows would judge live blobs unused.
+   */
+  readonly paused?: boolean;
   /** Overrides of the routes' database caps and timeouts (tests). */
   readonly dbLimits?: WorkspaceRoutesDeps["dbLimits"];
 }
@@ -90,7 +95,10 @@ export function createWorkspaceSync(options: WorkspaceSyncOptions): WorkspaceSyn
       ? limitsQuota(limits)
       : withTeamStorage(limitsQuota(limits), options.teamStorageDefaultBytes));
   const collectOptions: CollectOptions = { ...COLLECT_DEFAULTS, ...options.collect, prefix };
-  const collect = () => collectAll(db, objects, collectOptions, log);
+  const collect = (): Promise<CollectResult> =>
+    options.paused
+      ? Promise.resolve({ blobs: 0, bytes: 0, tombstones: 0 })
+      : collectAll(db, objects, collectOptions, log);
   const maxRows = resolveLimits(limits).maxRows;
   const kicked = new Map<string, number>();
   let kicking = false;
@@ -119,7 +127,7 @@ export function createWorkspaceSync(options: WorkspaceSyncOptions): WorkspaceSyn
           // One such collection per replica at a time (each holds a connection for its budget).
           const key = `${owner.teamId}:${owner.userId}`;
           const last = kicked.get(key) ?? 0;
-          if (kicking || Date.now() - last < KICK_EVERY_MS) return;
+          if (options.paused || kicking || Date.now() - last < KICK_EVERY_MS) return;
           if (kicked.size > 10_000) kicked.clear();
           kicked.set(key, Date.now());
           kicking = true;

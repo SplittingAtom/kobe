@@ -1,7 +1,8 @@
 import { constants as FS } from "node:fs";
-import { open, rename, rm } from "node:fs/promises";
+import { open } from "node:fs/promises";
 import path from "node:path";
 import type { RunMcpContext } from "@kobe/protocol";
+import { writeFileAtomic } from "../atomic-file.js";
 import type { ModelTokenSource } from "../models/types.js";
 
 /**
@@ -87,29 +88,15 @@ export async function writeAgentFile(
   text: string,
   shared: boolean,
 ): Promise<void> {
-  const file = path.join(agentDir, name);
-  const temp = `${file}.tmp`;
-  const mode = shared ? 0o440 : 0o400;
   // The agent's umask is 077, which filters open()'s mode and would drop the group's read bit
-  // (Pi, a different uid in the file's group, then could not read its own MCP config): set the
-  // mode exactly with fchmod before any content is written. O_NOFOLLOW: never write through a link.
-  const handle = await open(temp, FS.O_WRONLY | FS.O_CREAT | FS.O_TRUNC | FS.O_NOFOLLOW, mode);
-  try {
-    await handle.chmod(mode);
-    await handle.writeFile(text);
-  } catch (error) {
-    await handle.close().catch(() => undefined);
-    await rm(temp, { force: true }).catch(() => undefined);
-    throw error;
-  }
-  await handle.close();
-  await rename(temp, file);
+  // (Pi, a different uid in the file's group, then could not read its own MCP config): the helper
+  // sets the mode exactly. The temp name is random and exclusive (KOBE-235): a FIFO or link a tool
+  // planted at `mcp-token.tmp` can neither stall nor redirect the write.
+  await writeFileAtomic(path.join(agentDir, name), text, shared ? 0o440 : 0o400);
 }
 
 /** The files the agent puts in `agent/` for MCP (the temp files exist only during a write). */
-export const MCP_AGENT_FILES: ReadonlySet<string> = new Set(
-  [MCP_CONFIG_FILE, MCP_TOKEN_FILE].flatMap((name) => [name, `${name}.tmp`]),
-);
+export const MCP_AGENT_FILES: ReadonlySet<string> = new Set([MCP_CONFIG_FILE, MCP_TOKEN_FILE]);
 
 /**
  * Whether an agent-written file is still one of the texts the agent wrote (the last two, as a

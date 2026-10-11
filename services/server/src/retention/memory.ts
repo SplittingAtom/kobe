@@ -1,8 +1,10 @@
-import { SYSTEM_ACTOR, lockLegalHolds, sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
+import { SYSTEM_ACTOR, lockLegalHolds, sql, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { memoryBlobKey } from "../memory/keys.js";
 import { auditTimeout } from "./locks.js";
-import { withTimeout, type BlobStore } from "./blobs.js";
+import type { BlobStore } from "./blobs.js";
+import { deleteBounded, type Forget } from "./bounded-delete.js";
+import { withTeamRecovering } from "./recovering.js";
 
 /**
  * Memory retention (spec D24 "memory follows team retention", user decision 2026-10-09, KOBE-188).
@@ -34,7 +36,6 @@ export const NO_MEMORY_PURGE: MemoryPurgeCounts = { docs: 0, versions: 0, blobs:
 
 const BATCH_DOCS = 50;
 const BATCH_VERSIONS = 200;
-const DELETE_TIMEOUT_MS = 30_000;
 
 interface Doomed {
   readonly docId: string;
@@ -53,12 +54,14 @@ async function deleteObjects(
   store: BlobStore,
   teamId: string,
   rows: readonly Doomed[],
+  forget: Forget,
 ): Promise<number> {
   const keys = rows
     .filter((r) => r.blobRef === memoryBlobKey(store.prefix, teamId, r.docId, r.version))
     .map((r) => r.blobRef);
   // Bounded: the transaction holds the legal-hold lock shared, and an approval waits for it.
-  if (keys.length > 0) await withTimeout(store.objects.delete(keys), DELETE_TIMEOUT_MS);
+  if (keys.length > 0)
+    await deleteBounded(store.objects, keys, store.deleteTimeoutMs, undefined, forget);
   return keys.length;
 }
 
@@ -87,7 +90,21 @@ async function versionBatch(
     version: r.version,
     blobRef: r.blob_ref,
   }));
-  const blobs = await deleteObjects(store, teamId, rows);
+  // After a timeout, versions whose object is gone are dropped (they are all non-current).
+  const forget: Forget = (gone) => async (t) => {
+    for (const r of rows) {
+      if (!gone.includes(r.blobRef)) continue;
+      await t.execute(sql`
+        DELETE FROM memory_doc_versions v
+         WHERE v.team_id = ${teamId} AND v.doc_id = ${r.docId} AND v.version = ${r.version}
+           AND v.version < (SELECT d.current_version FROM memory_docs d
+                             WHERE d.team_id = v.team_id AND d.id = v.doc_id)
+           AND NOT public.memory_legal_hold_covers(
+                 v.team_id, (SELECT d.owner_user_id FROM memory_docs d
+                              WHERE d.team_id = v.team_id AND d.id = v.doc_id))`);
+    }
+  };
+  const blobs = await deleteObjects(store, teamId, rows, forget);
   for (const r of rows) {
     await tx.execute(sql`
       DELETE FROM memory_doc_versions
@@ -123,7 +140,17 @@ async function docBatch(
     version: r.version,
     blobRef: r.blob_ref,
   }));
-  const blobs = await deleteObjects(store, teamId, rows);
+  // After a timeout, a file whose every version object is gone is dropped (cascading its rows).
+  const forget: Forget = (gone) => async (t) => {
+    await t.execute(sql`
+      DELETE FROM memory_docs d
+       WHERE d.team_id = ${teamId} AND d.id = ANY(${keyList(ids)}::uuid[])
+         AND NOT public.memory_legal_hold_covers(d.team_id, d.owner_user_id)
+         AND NOT EXISTS (SELECT 1 FROM memory_doc_versions v
+                          WHERE v.team_id = d.team_id AND v.doc_id = d.id
+                            AND NOT (v.blob_ref = ANY(${keyList(gone)}::text[])))`);
+  };
+  const blobs = await deleteObjects(store, teamId, rows, forget);
   // The versions go with their file (ON DELETE CASCADE).
   await tx.execute(sql`
     DELETE FROM memory_docs WHERE team_id = ${teamId} AND id = ANY(${keyList(ids)}::uuid[])`);
@@ -194,7 +221,7 @@ export async function purgeMemory(
   let total = NO_MEMORY_PURGE;
   for (let batch = 0; batch < (options.maxBatches ?? 1000); batch++) {
     if (options.stop?.()) break;
-    const counts = await withTeam(db, teamId, (tx) =>
+    const counts = await withTeamRecovering(db, teamId, (tx) =>
       purgeMemoryBatchInTx(tx, teamId, store, selection, record),
     );
     if (counts.docs + counts.versions === 0) break;

@@ -49,6 +49,8 @@ export interface HarnessOptions {
   readonly models?: ModelWiring;
   /** Egress wiring for Pi's tools (KOBE-39); absent = none, as before. */
   readonly egress?: EgressWiring;
+  /** The root-owned BASH_ENV script for tools without egress (KOBE-235); absent = none. */
+  readonly toolEnvScript?: string;
   /** mcp-proxy wiring (KOBE-111); absent = no `mcp` capability. */
   readonly mcp?: McpWiring;
   readonly workspace?: (workspaceDir: string) => WorkspaceHooks;
@@ -118,6 +120,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     ...(options.extensions === undefined ? {} : { extensions: options.extensions }),
     ...(options.models === undefined ? {} : { models: options.models }),
     ...(options.egress === undefined ? {} : { egress: options.egress }),
+    ...(options.toolEnvScript === undefined ? {} : { toolEnvScript: options.toolEnvScript }),
     ...(options.mcp === undefined ? {} : { mcp: options.mcp }),
     ...(options.identities === undefined ? {} : { identities: options.identities }),
     ...(options.toolsExtension === undefined ? {} : { toolsExtension: options.toolsExtension }),

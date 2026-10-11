@@ -85,6 +85,17 @@ describe("runtime directory tripwire", () => {
     expect(await unexpectedEntries(runtime)).toEqual([]);
   });
 
+  it("KOBE-235: the MCP writer's random temp files are expected in agent/ (only with MCP files), the old fixed .tmp name is not", async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "kobe-runtime-"));
+    const runtime = await processDir(dir, ["auth.json"]);
+    const agent = path.join(runtime, "agent");
+    await writeFile(path.join(agent, `mcp-token.${"c".repeat(16)}.tmp`), "t");
+    await writeFile(path.join(agent, "mcp-token.tmp"), "t");
+    const mcp = new Set(["mcp.json", "mcp-token"]);
+    expect(await unexpectedEntries(runtime, mcp)).toEqual(["agent/mcp-token.tmp"]);
+    expect((await unexpectedEntries(runtime)).length).toBe(2);
+  });
+
   it("checks kinds with lstat: symlinks, a file where Pi's lock dir belongs, a linked agent dir", async () => {
     dir = await mkdtemp(path.join(tmpdir(), "kobe-runtime-"));
     const victim = path.join(dir, "victim");

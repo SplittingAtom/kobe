@@ -71,6 +71,8 @@ export class ChatSession {
   }
   readonly #options: ChatSessionOptions;
   readonly #held = new Map<string, Held>();
+  /** Threads a schedule started (from list and summary answers): the Scheduled folder. */
+  readonly #scheduled = new Set<string>();
   /** Title for the thread `initialize` creates next (taken from the message being sent). */
   #nextTitle: string | undefined;
   readonly #createdListeners = new Set<() => void>();
@@ -138,6 +140,18 @@ export class ChatSession {
   }
 
   /** A thread just created by the thread list: ready (empty) and not read again on mount. */
+  /** Remembers which of these threads a schedule started (KOBE-175). */
+  noteScheduled(threads: readonly ThreadSummary[]): void {
+    for (const t of threads) {
+      if (t.scheduleId != null) this.#scheduled.add(t.threadId);
+      else this.#scheduled.delete(t.threadId);
+    }
+  }
+
+  isScheduled(threadId: string | undefined): boolean {
+    return threadId !== undefined && this.#scheduled.has(threadId);
+  }
+
   seed(summary: ThreadSummary): ThreadController {
     const existing = this.#held.get(summary.threadId);
     if (existing) return existing.controller;

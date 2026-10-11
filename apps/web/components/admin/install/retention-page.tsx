@@ -29,7 +29,18 @@ export function RetentionMaximumPage() {
         so raising the maximum again restores it). Legal holds suspend every deletion.
       </p>
       <ResourceView state={state} label="retention maximum">
-        {(current) => <MaximumForm current={current} onSaved={reload} />}
+        {(current) => (
+          <>
+            {current.paused && (
+              <p role="alert" className={styles.banner}>
+                Retention is paused (KOBE_RETENTION_PAUSED): no nightly deletion, offboarding purge
+                or workspace cleanup runs. Resume it with the chart value retention.paused=false
+                once the bucket is reconciled after a restore.
+              </p>
+            )}
+            <MaximumForm current={current} onSaved={reload} />
+          </>
+        )}
       </ResourceView>
     </>
   );

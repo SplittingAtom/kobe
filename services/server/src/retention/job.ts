@@ -323,12 +323,14 @@ export interface RetentionJobOptions extends PassDeps {
   readonly pool: Pick<pg.Pool, "connect">;
   /** UTC hour the nightly pass runs in (0–23). */
   readonly hourUtc: number;
+  /** KOBE_RETENTION_PAUSED (KOBE-243): no pass runs, whatever is due. */
+  readonly paused?: boolean;
   readonly now?: () => Date;
   readonly budgetMs?: number;
 }
 
 /** `lost`: the lock connection failed mid-pass; the pass stopped and resumes on the next check. */
-export type TickResult = "ran" | "busy" | "not_due" | "lost";
+export type TickResult = "ran" | "busy" | "not_due" | "lost" | "paused";
 
 export class RetentionJob {
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -344,6 +346,7 @@ export class RetentionJob {
    */
   async tick(force = false): Promise<TickResult> {
     const { pool, db, logger } = this.options;
+    if (this.options.paused) return "paused";
     const client = await pool.connect();
     let lost = false;
     // A checked-out client without a listener would crash the process on a failover or an idle
@@ -419,6 +422,9 @@ export class RetentionJob {
   }
 
   start(intervalMs: number = RETENTION_CHECK_INTERVAL_MS): void {
+    if (this.options.paused) {
+      this.options.logger.warn("retention is paused (KOBE_RETENTION_PAUSED); no pass will run");
+    }
     const run = () => {
       if (this.running) return;
       this.running = this.tick()

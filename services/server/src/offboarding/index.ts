@@ -57,6 +57,8 @@ export interface OffboardingOptions {
   readonly db: KobeDb;
   readonly blobs: BlobStore | undefined;
   readonly log: Pick<Logger, "info" | "warn" | "error" | "debug">;
+  /** KOBE_RETENTION_PAUSED (KOBE-243): the sweep and the purge do nothing. */
+  readonly paused?: boolean;
 }
 
 async function settle<T>(items: readonly T[], run: (item: T) => Promise<unknown>): Promise<void> {
@@ -76,6 +78,7 @@ export function createOffboarding(options: OffboardingOptions): Offboarding {
     db: options.db,
     blobs: options.blobs,
     log: options.log,
+    paused: options.paused ?? false,
     provider: () => provider,
   };
   const log = options.log;
@@ -85,6 +88,9 @@ export function createOffboarding(options: OffboardingOptions): Offboarding {
     let purged = 0;
     let held = 0;
     let failed = 0;
+    // After a restore from an older backup, "departed" and "due" are judged from stale rows: a
+    // member re-added since would look long gone and lose their live volume (KOBE-243).
+    if (ctx.paused) return { offboarded, purged, held, failed };
     for (const departed of await departedNotOffboarded(ctx, SWEEP_LIMIT)) {
       try {
         if ((await offboardSandbox(ctx, departed, "reconciled")) === "offboarded") offboarded += 1;

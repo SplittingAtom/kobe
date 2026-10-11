@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -21,9 +21,8 @@ const mode = async (dir: string) => (await stat(dir)).mode & 0o777;
 
 describe("preparePiPrivateDirs (KOBE-196)", () => {
   it("makes agent-owned, Pi-group directories under the scratch volume: home private, tmp world-readable", async () => {
-    const runtime = path.join(base, "run", "pi-AbC123");
-    const dirs = await preparePiPrivateDirs(base, runtime, identity);
-    expect(dirs.root).toBe(path.join(base, `${PI_PRIVATE_PREFIX}pi-AbC123`));
+    const dirs = await preparePiPrivateDirs(base, identity);
+    expect(dirs.root).toMatch(new RegExp(`^${base}/${PI_PRIVATE_PREFIX}[0-9a-f]{32}$`));
     expect(dirs.home).toBe(path.join(dirs.root, "home"));
     expect(dirs.tmp).toBe(path.join(dirs.root, "tmp"));
     expect(await mode(dirs.root)).toBe(0o755);
@@ -37,7 +36,7 @@ describe("preparePiPrivateDirs (KOBE-196)", () => {
   });
 
   it("without the executor (KOBE-228) nobody outside the Pi's group gets in: root, home and tmp are 2770", async () => {
-    const dirs = await preparePiPrivateDirs(base, path.join(base, "pi-Z"), identity, {
+    const dirs = await preparePiPrivateDirs(base, identity, {
       partner: false,
     });
     for (const dir of [dirs.root, dirs.home, dirs.tmp]) {
@@ -48,7 +47,7 @@ describe("preparePiPrivateDirs (KOBE-196)", () => {
   });
 
   it("without an identity (no uid separation) the directories are 0700 and the agent's", async () => {
-    const dirs = await preparePiPrivateDirs(base, path.join(base, "pi-W"), undefined, {
+    const dirs = await preparePiPrivateDirs(base, undefined, {
       partner: false,
     });
     for (const dir of [dirs.root, dirs.home, dirs.tmp]) {
@@ -56,14 +55,33 @@ describe("preparePiPrivateDirs (KOBE-196)", () => {
     }
   });
 
-  it("refuses a name that already exists (never reuses what another uid may have made)", async () => {
-    const runtime = path.join(base, "pi-X");
-    await preparePiPrivateDirs(base, runtime, identity);
-    await expect(preparePiPrivateDirs(base, runtime, identity)).rejects.toThrow(/EEXIST/);
+  it("KOBE-235: a squatted name never stops a Pi from starting: it retries with a fresh one and leaves the squatter's directory alone", async () => {
+    await mkdir(path.join(base, `${PI_PRIVATE_PREFIX}squat1`));
+    await writeFile(path.join(base, `${PI_PRIVATE_PREFIX}squat2`), "a file, not a dir");
+    const names = ["squat1", "squat2", "fresh"].map((n) => `${PI_PRIVATE_PREFIX}${n}`);
+    const dirs = await preparePiPrivateDirs(base, identity, {
+      newName: () => names.shift() ?? "unexpected",
+    });
+    expect(dirs.root).toBe(path.join(base, `${PI_PRIVATE_PREFIX}fresh`));
+    expect(await mode(dirs.home)).toBe(0o770);
+    expect(await readdir(path.join(base, `${PI_PRIVATE_PREFIX}squat1`))).toEqual([]);
+  });
+
+  it("KOBE-235: names are unguessable (random, different every time)", async () => {
+    const a = await preparePiPrivateDirs(base, undefined, { partner: false });
+    const b = await preparePiPrivateDirs(base, undefined, { partner: false });
+    expect(a.root).not.toBe(b.root);
+  });
+
+  it("KOBE-235: gives up with a clear error when every name keeps existing", async () => {
+    await mkdir(path.join(base, "same"));
+    await expect(preparePiPrivateDirs(base, undefined, { newName: () => "same" })).rejects.toThrow(
+      /could not create a private directory/,
+    );
   });
 
   it("is swept at start-up: only its own prefix, with what a Pi left inside", async () => {
-    const dirs = await preparePiPrivateDirs(base, path.join(base, "pi-Y"), identity);
+    const dirs = await preparePiPrivateDirs(base, identity);
     await mkdir(path.join(dirs.tmp, "jiti"));
     await writeFile(path.join(dirs.tmp, "jiti", "x.mjs"), "x");
     await mkdir(path.join(base, "keep-me"));

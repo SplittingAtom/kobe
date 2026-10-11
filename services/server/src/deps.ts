@@ -67,6 +67,8 @@ import type { UploadSettings } from "./uploads/settings.js";
 export interface ServerDepsOptions {
   readonly databaseUrl: string;
   readonly publicUrl: string;
+  /** KOBE_RETENTION_PAUSED (KOBE-243): shown to install admins; the deleting jobs honour it. */
+  readonly retentionPaused?: boolean;
   readonly authSecret: string;
   /** One-time secret proving possession of the install for first-run setup. */
   readonly setupToken: string;
@@ -152,6 +154,8 @@ export interface ServerDeps {
   readonly database: KobeDatabase;
   readonly auth: KobeAuth;
   readonly publicUrl: string;
+  /** The nightly retention pass, offboarding purges and workspace GC are paused (KOBE-243). */
+  readonly retentionPaused: boolean;
   /** Kobe Event Stream fan-out (one LISTEN connection per process) and SSE timings (KOBE-31). */
   readonly eventStream: {
     readonly hub: RunEventHub;
@@ -363,6 +367,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   const offboarding = createOffboarding({
     db: database.db,
     blobs: options.blobs,
+    paused: options.retentionPaused ?? false,
     log: logger.child({ component: "offboarding" }),
   });
   // Deactivation destroys the user's sandboxes in every team now; volumes stay 30 days (D12).
@@ -382,6 +387,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
       : undefined,
     auth,
     publicUrl: new URL(options.publicUrl).origin,
+    retentionPaused: options.retentionPaused ?? false,
     eventStream: { hub, reader, timings: { ...STREAM_DEFAULTS, ...options.eventStream?.timings } },
     mailer: options.mailer,
     agentLimits: { ...AGENT_LIMIT_DEFAULTS, ...options.agents },

@@ -14,8 +14,12 @@ import { ErrorNotice } from "../admin/error-notice";
 import { useChatSession } from "./kobe-runtime";
 import styles from "./chat.module.css";
 
-function ThreadItem({ archived }: { readonly archived: boolean }) {
+type View = "threads" | "scheduled" | "trash";
+
+function ThreadItem({ archived, view }: { readonly archived: boolean; readonly view: View }) {
   const aui = useAui();
+  const session = useChatSession();
+  const remoteId = useAuiState((s) => s.threadListItem.remoteId);
   const title = useAuiState((s) => s.threadListItem.title) || "Untitled conversation";
   const [draft, setDraft] = useState<string | null>(null);
 
@@ -25,6 +29,9 @@ function ThreadItem({ archived }: { readonly archived: boolean }) {
     setDraft(null);
     if (next !== "" && next !== title) aui.threadListItem.rename(next);
   };
+
+  // Schedule threads live in the Scheduled folder, not among the conversations (Trash shows all).
+  if (!archived && session.isScheduled(remoteId) !== (view === "scheduled")) return null;
 
   return (
     <li>
@@ -154,7 +161,7 @@ export function ThreadSidebar({
   readonly onOpenThread: (threadId: string) => void;
 }) {
   const session = useChatSession();
-  const [view, setView] = useState<"threads" | "trash">("threads");
+  const [view, setView] = useState<View>("threads");
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState<SearchState>({ status: "idle" });
   const [folded, setFolded] = useState(true);
@@ -246,12 +253,24 @@ export function ThreadSidebar({
                 </button>
                 <button
                   type="button"
+                  aria-pressed={view === "scheduled"}
+                  onClick={() => setView("scheduled")}
+                >
+                  Scheduled
+                </button>
+                <button
+                  type="button"
                   aria-pressed={view === "trash"}
                   onClick={() => setView("trash")}
                 >
                   Trash
                 </button>
               </div>
+              {view === "scheduled" && (
+                <p className={styles.hint}>
+                  Conversations your <a href="/me/schedules">schedules</a> started.
+                </p>
+              )}
               {view === "trash" && (
                 <p className={styles.hint}>
                   Conversations in Trash are deleted for good after 30 days.
@@ -259,13 +278,19 @@ export function ThreadSidebar({
               )}
               <ul
                 className={styles.threadList}
-                aria-label={view === "trash" ? "Trash" : "Your conversations"}
+                aria-label={
+                  view === "trash"
+                    ? "Trash"
+                    : view === "scheduled"
+                      ? "Scheduled"
+                      : "Your conversations"
+                }
               >
                 <ThreadListPrimitive.Items archived={view === "trash"}>
-                  {() => <ThreadItem archived={view === "trash"} />}
+                  {() => <ThreadItem archived={view === "trash"} view={view} />}
                 </ThreadListPrimitive.Items>
               </ul>
-              {view === "threads" && hasMore && (
+              {view !== "trash" && hasMore && (
                 <ThreadListPrimitive.LoadMore>Load more</ThreadListPrimitive.LoadMore>
               )}
               <p className={styles.hint}>

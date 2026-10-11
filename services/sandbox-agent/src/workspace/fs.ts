@@ -12,6 +12,7 @@ import {
   type FileHandle,
 } from "node:fs/promises";
 import path from "node:path";
+import { openAgentTemp } from "../atomic-file.js";
 import type { Readable } from "node:stream";
 import {
   WORKSPACE_SEGMENT_MAX_BYTES,
@@ -341,7 +342,7 @@ export async function writeFileAtomic(
   await ensureParents(root, rel);
   const target = path.join(root, rel);
   const temp = path.join(path.dirname(target), `${TEMP_PREFIX}${randomBytes(12).toString("hex")}`);
-  const handle = await open(temp, FS.O_WRONLY | FS.O_CREAT | FS.O_EXCL | FS.O_NOFOLLOW, 0o600);
+  const handle = await openAgentTemp(temp, 0o600);
   const hash = createHash("sha256");
   let size = 0;
   try {

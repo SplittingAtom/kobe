@@ -188,9 +188,20 @@ export function createS3ObjectStore(settings: S3Settings, client?: S3Client): Ob
           : {}),
       };
     },
-    async delete(keys) {
+    async delete(keys, options) {
       // One by one: DeleteObjects requires a body checksum some S3-compatible stores reject.
-      for (const Key of keys) await s3.send(new DeleteObjectCommand({ Bucket, Key }));
+      const deleted: string[] = [];
+      try {
+        for (const Key of keys) {
+          options?.signal?.throwIfAborted();
+          await s3.send(new DeleteObjectCommand({ Bucket, Key }), {
+            ...(options?.signal ? { abortSignal: options.signal } : {}),
+          });
+          deleted.push(Key);
+        }
+      } catch (err) {
+        throw Object.assign(err instanceof Error ? err : new Error(String(err)), { deleted });
+      }
     },
   };
 }

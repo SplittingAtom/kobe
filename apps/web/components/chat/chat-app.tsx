@@ -235,7 +235,8 @@ export function ChatApp({
         <TeamSwitcher />
         <nav aria-label="My area">
           <Link href="/me/agents">My agents</Link> <Link href="/me/skills">My skills</Link>{" "}
-          <Link href="/me/memory">My memory</Link> <Link href="/me/projects">Projects</Link>
+          <Link href="/me/memory">My memory</Link> <Link href="/me/schedules">My schedules</Link>{" "}
+          <Link href="/me/projects">Projects</Link>
         </nav>
         <ConsoleLinks />
       </header>
