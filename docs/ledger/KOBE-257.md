@@ -1,6 +1,6 @@
 # KOBE-257: Rename R1: Site replaces Install in everything users see
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #242)
 - **Branch / worktree:** `kobe-257-site-rename-ui` in `../Kobe-wt257`
 - **Depends on:** none. Followed by R2 KOBE-255 (API + code), then R3 KOBE-256 (database).
 
