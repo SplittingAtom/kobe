@@ -1,6 +1,6 @@
 # KOBE-181: 65f: Web and e2e: notifications, run report, team schedules; scheduled-run e2e
 
-- **Status:** in review (PR #)
+- **Status:** in review (PR #237)
 - **Branch / worktree:** `kobe-181-schedules-web-e2e` in `../Kobe-wt181`
 - **Depends on:** KOBE-175, KOBE-178, KOBE-179, KOBE-180 (all merged)
 
