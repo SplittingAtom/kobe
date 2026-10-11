@@ -28,7 +28,7 @@
     "@kobe/session-token": "workspace:*",
     "@kobe/telemetry": "workspace:*",
     "pg": "^8.23.1",
-    "pino": "^10.3.1",
+    "pino": "^10.4.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {

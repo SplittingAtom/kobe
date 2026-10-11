@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "@kobe/protocol": "workspace:*",
-    "pino": "^10.3.1",
+    "pino": "^10.4.0",
     "ws": "^8.22.0",
     "zod": "^4.0.0"
   },
