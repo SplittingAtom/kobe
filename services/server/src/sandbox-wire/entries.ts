@@ -181,7 +181,8 @@ const RESTORE_PAGE_ROWS = 16;
 /**
  * The thread's entries in append order as `session.restore` parts of bounded size (D13, D15),
  * read page by page (keyset on `seq`, one short transaction each), so a long thread is never held
- * in memory at once. The last part has `final: true` (an empty thread yields one empty final part).
+ * in memory at once. Server-written entries (the skipped-actions report) are left out: Pi never
+ * had them, and as the last entry one would become the session's resume point. The last part has `final: true` (an empty thread yields one empty final part).
  */
 export async function* restoreParts(
   db: KobeDb,
@@ -196,6 +197,7 @@ export async function* restoreParts(
       const res = await tx.execute<{ seq: number; payload: PiSessionEntry }>(sql`
         SELECT seq, payload FROM thread_entries
          WHERE team_id = ${teamId} AND thread_id = ${threadId} AND seq > ${after}
+           AND NOT (type = 'custom_message' AND payload ->> 'customType' = ${SKIPPED_ENTRY_TYPE})
          ORDER BY seq LIMIT ${RESTORE_PAGE_ROWS}`);
       return res.rows;
     });

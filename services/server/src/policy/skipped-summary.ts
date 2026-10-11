@@ -123,3 +123,20 @@ async function appendSummaryEntry(
     })
     .onConflictDoNothing();
 }
+
+/**
+ * Whether `entryId` is a server-written skipped-actions entry. Pi does not know it, so it can be
+ * neither a branch point (`run.start.parent_entry_id`) nor the thread's leaf.
+ */
+export async function isSkippedSummaryEntry(
+  tx: KobeTx,
+  teamId: string,
+  threadId: string,
+  entryId: string,
+): Promise<boolean> {
+  const res = await tx.execute(sql`
+    SELECT 1 FROM thread_entries
+     WHERE team_id = ${teamId} AND thread_id = ${threadId} AND entry_id = ${entryId}
+       AND type = 'custom_message' AND payload ->> 'customType' = ${SKIPPED_ENTRY_TYPE}`);
+  return res.rows.length > 0;
+}

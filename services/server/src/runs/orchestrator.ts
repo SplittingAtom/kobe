@@ -27,6 +27,7 @@ import {
 } from "../event-stream/append.js";
 import { logger as rootLogger } from "../logger.js";
 import { readApprovalFloor } from "../policy/approval-floor.js";
+import { isSkippedSummaryEntry } from "../policy/skipped-summary.js";
 import { clampApprovalMode } from "../sandbox-wire/policy-check.js";
 import { endRunInTx } from "../sandbox-wire/run-state.js";
 import type { SandboxRouter, SandboxTarget } from "../sandbox-wire/types.js";
@@ -304,6 +305,10 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       const parent = command.parent_entry_id ?? null;
       if (parent !== null && !(await entryExists(tx, teamId, thread.id, parent))) {
         throw new RunError("entry_not_found");
+      }
+      // The skipped-actions note is not in Pi's session: branching from it would fail the run.
+      if (parent !== null && (await isSkippedSummaryEntry(tx, teamId, thread.id, parent))) {
+        throw new RunError("invalid_parent_entry");
       }
       if ((await queuedCount(tx, teamId, thread.id)) >= this.#tuning.maxQueuedPerThread) {
         throw new RunError("queue_full");

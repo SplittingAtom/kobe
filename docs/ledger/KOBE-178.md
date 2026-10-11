@@ -34,6 +34,9 @@ since` cursor (`lastMirroredEntryId`) skips these entries, otherwise Pi would re
   No entry when the thread has no leaf yet (the event field still carries the report).
 - Covered terminal events: `run.completed|failed|interrupted` from the wire (`endRunInTx`) and from Stop
   (`applyTransition`). Not `run.budget_stopped` (no field in the KOBE-176 contract).
+- The note is invisible to Pi everywhere it could matter (review of #226): `restoreParts` and `lastMirroredEntryId`
+  skip it; `parent_entry_id` pointing at it is `422 invalid_parent_entry`; `POST /v1/threads/{id}/leaf` to it is
+  `404 entry_not_found`.
 - MCP proxy: denials after the run is identified are recorded. Earlier refusals (connector off, unpinned, drifted, not
   exposed) are not tied to a run yet and those tools are not listed to the model anyway.
 
@@ -43,6 +46,9 @@ since` cursor (`lastMirroredEntryId`) skips these entries, otherwise Pi would re
   entry is a child of the leaf, a sibling of the next user message (branch picker), not on the active path.
 - Alternative if that is unwanted: drop the entry and let web render the summary from `run.completed.skipped_actions`.
 - 1000 stored rows per run is my choice.
+- Known LOWs, left as is: the 1000-row cap is checked in the insert without a lock, so concurrent denials can
+  overshoot it slightly; Stop can race a policy check, so a denial recorded just after the terminal event is not in
+  the report; an MCP call naming another thread's run is denied by policy but is not in the named run's report.
 
 ## Evidence
 

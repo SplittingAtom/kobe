@@ -6,7 +6,7 @@ import { approvalKeyring } from "./approvals/index.js";
 import { createPolicyEngine } from "./policy/engine.js";
 import { createToolRegistry } from "./policy/registry.js";
 import { createDbRuleSource, createDbSettingsSource } from "./policy/rule-store.js";
-import { lastMirroredEntryId } from "./sandbox-wire/entries.js";
+import { lastMirroredEntryId, restoreParts } from "./sandbox-wire/entries.js";
 import { createDbRunContextSource, decidePolicyCheck } from "./sandbox-wire/policy-check.js";
 import { EventStreamFixture, must, type Person } from "./testing/event-stream-fixture.js";
 import { FakeSandbox, FakeSandboxAuth, isFake, sandboxListener } from "./testing/fake-sandbox.js";
@@ -232,6 +232,25 @@ describe("a write that would ask is skipped and reported (ac-1)", () => {
       lastMirroredEntryId(tx, w.team, w.threadId),
     );
     expect(cursor).toBe("a1");
+
+    // A Pi session restore never sends the note: as the last entry it would become Pi's resume point.
+    const restored: string[] = [];
+    for await (const part of restoreParts(fx.replica(0).deps.database.db, w.team, w.threadId)) {
+      restored.push(...part.entries.map((e) => e.id));
+    }
+    expect(restored).toEqual(["u1", "a1"]);
+
+    // Pi does not know the note: it is neither a branch point nor a place to move the leaf to.
+    const summaryId = must(rows[0], "summary").entry_id;
+    const branch = await w.owner.browser.post(`/v1/threads/${w.threadId}/messages`, {
+      content: "again",
+      parent_entry_id: summaryId,
+    });
+    expect([branch.status, branch.json.code]).toEqual([422, "invalid_parent_entry"]);
+    const leaf = await w.owner.browser.post(`/v1/threads/${w.threadId}/leaf`, {
+      entry_id: summaryId,
+    });
+    expect([leaf.status, leaf.json.code]).toEqual([404, "entry_not_found"]);
   });
 
   it("a run without skips gets neither the field nor a thread entry", async () => {

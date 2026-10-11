@@ -8,6 +8,7 @@ export type OrchestratorErrorCode =
   | RunErrorCode
   | "read_only" // 403: a project reader of a shared thread (D23)
   | "entry_not_found" // 404: parent_entry_id is not an entry of the thread
+  | "invalid_parent_entry" // 422: parent_entry_id is a server note Pi does not know (KOBE-178)
   | "thread_busy" // 409: the thread row is held past the lock timeout
   | "thread_in_trash" // 409: restore the thread first (KOBE-34)
   | "queue_full" // 409: too many queued messages on the thread
@@ -23,6 +24,7 @@ export const RUN_ERROR_STATUS: Record<OrchestratorErrorCode, number> = {
   run_not_found: 404,
   thread_not_found: 404,
   entry_not_found: 404,
+  invalid_parent_entry: 422,
   forbidden: 403,
   read_only: 403,
   invalid_transition: 409,
@@ -44,6 +46,8 @@ const DEFAULT_MESSAGES: Record<OrchestratorErrorCode, string> = {
   run_not_found: "No run with that id.",
   thread_not_found: "No thread with that id.",
   entry_not_found: "That entry is not part of this thread.",
+  invalid_parent_entry:
+    "That entry is a note from Kobe, not a message. Branch from a message instead.",
   forbidden: "You can't do that.",
   read_only: "This thread is shared with you read-only.",
   invalid_transition: "The run is not in a state that allows this.",

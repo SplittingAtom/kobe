@@ -28,6 +28,7 @@ import {
 } from "../agents/versions.js";
 import { canCreateInProject } from "./references.js";
 import { visibilityOf } from "./share.js";
+import { isSkippedSummaryEntry } from "../policy/skipped-summary.js";
 import { isModelEnabled } from "../models/team-store.js";
 
 /**
@@ -416,7 +417,10 @@ export async function setLeaf(
         eq(threadEntries.entryId, entryId),
       ),
     );
-  if (!entry) return { ok: false, error: "entry_not_found" };
+  // The skipped-actions note is not in Pi's session: it can't be where Pi continues from.
+  if (!entry || (await isSkippedSummaryEntry(tx, viewer.teamId, id, entryId))) {
+    return { ok: false, error: "entry_not_found" };
+  }
   const [row] = await tx
     .update(threads)
     .set({ leafEntryId: entryId })
