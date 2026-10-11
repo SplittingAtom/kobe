@@ -380,7 +380,8 @@ export class RunIngest {
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       const entries = await host.fetchNewEntries(threadId);
       if (entries !== undefined) return { entries, lost: false };
-      if (this.#closed) return { lost: false };
+      // The connection closed: no retry here, and a run ending now has its entries missing.
+      if (this.#closed) break;
       if (attempt < attempts) await new Promise((r) => setTimeout(r, 250 * 2 ** attempt));
     }
     if (!settling) return { lost: false };

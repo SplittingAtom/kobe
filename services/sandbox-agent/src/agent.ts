@@ -462,7 +462,7 @@ export class Agent {
       this.#deps.logger.debug({ command_id: commandId }, "result dropped: connection changed");
       return;
     }
-    this.#sendResult(commandId, outcome);
+    this.#sendResult(frame, commandId, outcome);
   }
 
   #execute(frame: ServerToSandboxFrame): Promise<CommandOutcome> {
@@ -482,7 +482,7 @@ export class Agent {
     }
   }
 
-  #sendResult(commandId: string, outcome: CommandOutcome): void {
+  #sendResult(frame: ServerToSandboxFrame, commandId: string, outcome: CommandOutcome): void {
     const sent = outcome.ok
       ? this.#wire.send({
           v: 1,
@@ -497,6 +497,7 @@ export class Agent {
       ? fail("frame_too_large", "result does not fit in one frame")
       : outcome;
     if (failure.ok) return;
+    if (outcome.ok) logRefusal(this.#deps.logger, frame, failure);
     this.#wire.send({
       v: 1,
       type: "command.result",

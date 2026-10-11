@@ -177,6 +177,31 @@ describe("run end entries (KOBE-258)", () => {
     expect(w.sb.restored).toEqual([]);
   });
 
+  it("never completes a run whose connection closed during its run-end sync", async () => {
+    const w = await world([]);
+    await start(w, w.runId);
+    w.sb.session = [msg("u1", null, "user"), msg("a1", "u1", "assistant")];
+    // The sandbox goes away while the server asks for the run's entries at settle.
+    w.sb.respond = (f) => {
+      if (f.type !== "pi.command" || f.command.type !== "get_entries") return undefined;
+      w.sb.close();
+      return null;
+    };
+    const frames = [
+      { type: "agent_start" },
+      { type: "message_start", message: { role: "assistant" } },
+      { type: "message_end", message: { role: "assistant", stopReason: "stop" } },
+      { type: "agent_settled" },
+    ];
+    frames.forEach((e, i) => w.sb.event(w.runId, w.threadId, i + 1, e));
+    await expect.poll(() => status(w, w.runId), { timeout: 15_000 }).toBe("failed");
+    expect(await entryIds(w)).toEqual([]);
+    expect(await lastEvent(w, w.runId)).toMatchObject({
+      type: "run.failed",
+      payload: { error: { code: "entries_not_saved" } },
+    });
+  });
+
   it("never completes a run whose entries could not be saved", async () => {
     const w = await world([msg("u0", null, "user"), msg("a0", "u0", "assistant")]);
     await start(w, w.runId);

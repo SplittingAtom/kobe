@@ -68,4 +68,24 @@ describe("session entries (KOBE-258)", () => {
       msg: "command refused",
     });
   });
+
+  it("logs a result too large for one frame as a refusal", async () => {
+    const logged: { obj: Record<string, unknown>; msg: string }[] = [];
+    h = await startHarness({
+      logger: {
+        ...silentLogger,
+        info: (obj: Record<string, unknown>, msg: string) => void logged.push({ obj, msg }),
+      } as typeof silentLogger,
+    });
+    const tooLarge = await h.server.command({
+      type: "pi.command",
+      thread_id: THREAD,
+      command: { id: "srv", type: "get_tree" },
+    });
+    expect(tooLarge).toMatchObject({ ok: false, error: { code: "frame_too_large" } });
+    expect(logged).toContainEqual({
+      obj: expect.objectContaining({ command: "get_tree", code: "frame_too_large" }),
+      msg: "command refused",
+    });
+  });
 });

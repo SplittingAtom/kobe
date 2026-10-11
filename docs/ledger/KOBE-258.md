@@ -56,6 +56,19 @@ Pi itself is not changed (third party, pinned): the agent works around its lazy 
   here, so this reply is incomplete.", notice style) so the marker survives a reload.
 - `maxTokens` 16384 untouched (KOBE-259).
 
+## Review (PR #243)
+
+- Fixed: a connection that closes during the run-end sync now also ends the run
+  `entries_not_saved` (was `completed`); `frame_too_large` results are logged as refusals too.
+- LOW 1, not fixed (predates this PR): a tool that deletes `/workspace/.kobe/sessions/<thread>.jsonl`
+  mid-thread makes Pi lose the cursor while Postgres has a conversation, so the next run's restore
+  overwrites the run's unmirrored output. Possible follow-up: adopt Pi's orphan session as extra
+  roots before restoring.
+- LOW 3, by design: a brief sandbox stall at run end (four failed syncs, about 3.5 s) marks the run
+  `failed`/`entries_not_saved` and sends `schedule.run.failed` even when the next sync gets the
+  entries. A thread whose backlog since the cursor exceeds one frame now fails every run instead
+  of completing quietly.
+
 ## Open questions (for Chris or the coordinator)
 
 - Threads already damaged on kobe-gate1 cannot be repaired: their Pi session was overwritten by
