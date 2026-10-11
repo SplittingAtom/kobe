@@ -92,6 +92,7 @@ if (config.auth && config.smtp) {
   const { approvalKey, ...auth } = config.auth;
   deps = createServerDeps({
     databaseUrl: config.databaseUrl,
+    retentionPaused: config.retentionPaused,
     ...auth,
     ...(approvalKey ? { approvalKeys: approvalKeyring(approvalKey) } : {}),
     mailer: createSmtpMailer(config.smtp),
@@ -206,6 +207,7 @@ const retentionJob = deps
       blobs: deps.blobs,
       uploadOrphanHours: uploadSettings.orphanHours,
       hourUtc: config.retentionHourUtc,
+      paused: config.retentionPaused,
       logger,
     })
   : undefined;
@@ -294,6 +296,7 @@ const workspaceSync =
           maxFiles: syncSettings.maxFiles,
         },
         teamStorageDefaultBytes: uploadSettings.defaultQuotaBytes,
+        paused: config.retentionPaused,
         log: logger,
       })
     : undefined;

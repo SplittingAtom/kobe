@@ -1,5 +1,10 @@
 import { Readable } from "node:stream";
-import type { ListOptions, ListPage, ObjectStore } from "../workspace-sync/object-store.js";
+import type {
+  DeleteOptions,
+  ListOptions,
+  ListPage,
+  ObjectStore,
+} from "../workspace-sync/object-store.js";
 
 /**
  * In-memory {@link ObjectStore} for tests. Like S3 with a Content-Length, a put whose body errors
@@ -38,7 +43,8 @@ export class MemoryObjects implements ObjectStore {
     return Promise.resolve();
   }
 
-  delete(keys: readonly string[]): Promise<void> {
+  delete(keys: readonly string[], options?: DeleteOptions): Promise<void> {
+    if (options?.signal?.aborted) return Promise.reject(new Error("aborted"));
     for (const k of keys) {
       this.objects.delete(k);
       this.deleted.push(k);

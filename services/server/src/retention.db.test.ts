@@ -386,6 +386,9 @@ describe("retention settings (D6, D8; 7-day grace: user decision 2026-10-04)", (
     expect(over.status).toBe(409);
     expect(over.json.code).toBe("exceeds_maximum");
 
+    // The status admins read carries the pause flag (KOBE-243); the harness runs unpaused.
+    expect((await as.owner.get("/v1/install/retention")).json).toMatchObject({ paused: false });
+
     const cancelled = await as.owner.delete("/v1/install/retention/pending");
     expect(cancelled.json).toEqual({ maximum: "forever", applied: "forever", pending: null });
     expect((await audits("retention.maximum.change_cancelled", null)).at(-1)?.target).toEqual({

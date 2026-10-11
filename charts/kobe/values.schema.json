@@ -895,6 +895,15 @@
         }
       }
     },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "paused": {
+          "type": "boolean"
+        }
+      }
+    },
     "s3": {
       "type": "object",
       "additionalProperties": false,

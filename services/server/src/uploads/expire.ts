@@ -1,7 +1,9 @@
-import { SYSTEM_ACTOR, lockLegalHolds, sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
+import { SYSTEM_ACTOR, lockLegalHolds, sql, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { auditTimeout } from "../retention/locks.js";
 import type { BlobStore } from "../retention/blobs.js";
+import { withTeamRecovering } from "../retention/recovering.js";
+import { deleteBounded } from "../retention/bounded-delete.js";
 
 /**
  * Deletes uploads that never joined a thread (`thread_id` null) once they are older than
@@ -17,7 +19,6 @@ export interface ExpiredUploads {
 }
 
 const BATCH = 100;
-const DELETE_TIMEOUT_MS = 30_000;
 
 async function expireBatch(
   tx: KobeTx,
@@ -37,10 +38,22 @@ async function expireBatch(
      FOR UPDATE SKIP LOCKED`);
   if (due.rows.length === 0) return { files: 0, bytes: 0, more: false };
   const keys = due.rows.map((r) => r.blob_ref);
-  const timer = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error("object store delete timed out")), DELETE_TIMEOUT_MS).unref(),
+  await deleteBounded(
+    blobs.objects,
+    keys,
+    blobs.deleteTimeoutMs,
+    undefined,
+    (gone) => async (t) => {
+      await t.execute(sql`
+      DELETE FROM files
+       WHERE team_id = ${teamId} AND kind = 'upload' AND thread_id IS NULL
+         AND blob_ref = ANY(ARRAY[${sql.join(
+           gone.map((k) => sql`${k}`),
+           sql`, `,
+         )}]::text[])
+         AND NOT public.legal_hold_covers(team_id, user_id)`);
+    },
   );
-  await Promise.race([blobs.objects.delete(keys), timer]);
   await tx.execute(sql`
     DELETE FROM files WHERE team_id = ${teamId}
        AND id = ANY(ARRAY[${sql.join(
@@ -71,7 +84,9 @@ export async function expireOrphanUploads(
   let total = { files: 0, bytes: 0 };
   for (let i = 0; i < (options.maxBatches ?? 1000); i++) {
     if (options.stop?.()) break;
-    const r = await withTeam(db, teamId, (tx) => expireBatch(tx, teamId, blobs, orphanHours));
+    const r = await withTeamRecovering(db, teamId, (tx) =>
+      expireBatch(tx, teamId, blobs, orphanHours),
+    );
     total = { files: total.files + r.files, bytes: total.bytes + r.bytes };
     if (!r.more) break;
   }

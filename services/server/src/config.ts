@@ -61,6 +61,12 @@ const configSchema = z.object({
     .min(0, "KOBE_RETENTION_HOUR_UTC must be between 0 and 23")
     .max(23, "KOBE_RETENTION_HOUR_UTC must be between 0 and 23")
     .default(3),
+  // Pauses the nightly retention pass (KOBE-243); set after restoring the database from an older
+  // backup, until the bucket is reconciled (docs/backup-restore.md).
+  KOBE_RETENTION_PAUSED: z
+    .enum(["true", "false"], { error: "KOBE_RETENTION_PAUSED must be true or false" })
+    .default("false")
+    .transform((v) => v === "true"),
   // Seconds between reconciles of every team namespace's managed objects (KOBE-115); 0 turns the
   // interval off (the run at server start stays).
   KOBE_TEAM_RECONCILE_SECONDS: z.coerce
@@ -148,6 +154,8 @@ export interface Config {
   readonly mcpProxyUrl: string | undefined;
   /** UTC hour of the nightly retention pass (KOBE-18). */
   readonly retentionHourUtc: number;
+  /** The nightly retention pass is paused (KOBE-243). */
+  readonly retentionPaused: boolean;
   /** Seconds between team-namespace reconciles; 0 = only at start (KOBE-115). */
   readonly teamReconcileSeconds: number;
   /** Seconds between connector drift refreshes; 0 = off (KOBE-102). */
@@ -181,6 +189,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     mcpProxyInternalKey: base.data.KOBE_MCP_PROXY_INTERNAL_KEY,
     mcpProxyUrl: base.data.KOBE_MCP_PROXY_URL,
     retentionHourUtc: base.data.KOBE_RETENTION_HOUR_UTC,
+    retentionPaused: base.data.KOBE_RETENTION_PAUSED,
     teamReconcileSeconds: base.data.KOBE_TEAM_RECONCILE_SECONDS,
     connectorRefreshSeconds: base.data.KOBE_CONNECTOR_REFRESH_SECONDS,
     sessionTokenTtlSeconds: base.data.KOBE_SESSION_TOKEN_TTL_SECONDS,

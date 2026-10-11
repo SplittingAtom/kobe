@@ -18,6 +18,7 @@ let team = "";
 let user = "";
 let admin = "";
 let member = "";
+let ghost = "";
 const DAY = 86_400_000;
 const hex = (s: string) => createHash("sha256").update(s).digest("hex");
 
@@ -59,6 +60,7 @@ beforeAll(async () => {
       () => createTeamWithAdmin(h.deps.database.db, { slug: "orphans", name: "orphans" }, user),
     )
   ).id;
+  ghost = await h.createUser("ghost@orphans.test");
   await h.admin.query(
     `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'member')`,
     [team, member],
@@ -116,6 +118,69 @@ describe("staging objects", () => {
     const foreign = put(staging(randomUUID(), user), 3 * DAY);
     expect(await sweep()).toEqual({ staging: 0, forks: 0 });
     expect(objects.keys().sort()).toEqual([odd, content, foreign].sort());
+  });
+});
+
+describe("staging objects of removed members (KOBE-243)", () => {
+  it("sweeps a removed member's old staging objects, keeps young ones", async () => {
+    const orphan = put(staging(team, ghost), 3 * DAY);
+    const gone = put(staging(team, randomUUID()), 3 * DAY);
+    const young = put(staging(team, ghost), 60_000);
+    expect(await sweep()).toEqual({ staging: 2, forks: 0 });
+    expect(objects.keys()).toEqual([young]);
+    expect(objects.deleted.sort()).toEqual([orphan, gone].sort());
+  });
+
+  it("keeps them under the user's hold or a team-wide hold", async () => {
+    const key = put(staging(team, ghost), 3 * DAY);
+    await placeHold(ghost);
+    expect((await sweep()).staging).toBe(0);
+    await h.admin.query(`DELETE FROM legal_holds`);
+    await placeHold(null);
+    expect((await sweep()).staging).toBe(0);
+    expect(objects.keys()).toEqual([key]);
+  });
+
+  it("leaves non-uuid folders and other prefixes under users/ alone", async () => {
+    const odd = put(
+      `${PREFIX}teams/${team}/users/not-a-uuid/workspace/incoming/${randomUUID()}`,
+      3 * DAY,
+    );
+    const other = put(`${PREFIX}teams/${team}/users/${ghost}/shared/${randomUUID()}`, 3 * DAY);
+    expect(await sweep()).toEqual({ staging: 0, forks: 0 });
+    expect(objects.keys().sort()).toEqual([odd, other].sort());
+  });
+});
+
+describe("a hanging delete (KOBE-243)", () => {
+  it("is aborted and settled before the transaction, and so the hold lock, is released", async () => {
+    const key = put(staging(), 3 * DAY);
+    const events: string[] = [];
+    const hanging: BlobStore = {
+      prefix: PREFIX,
+      deleteTimeoutMs: 50,
+      objects: Object.assign(Object.create(objects) as MemoryObjects, {
+        delete: (_keys: readonly string[], o?: { signal?: AbortSignal }) =>
+          new Promise<void>((_res, rej) => {
+            events.push("delete started");
+            o?.signal?.addEventListener("abort", () => {
+              events.push("delete aborted");
+              setTimeout(() => {
+                events.push("delete settled");
+                rej(new Error("aborted"));
+              }, 20);
+            });
+          }),
+      }),
+    };
+    await expect(sweepOrphanObjects(h.deps.database.db, team, hanging)).rejects.toThrow(
+      /timed out/,
+    );
+    events.push("lock released");
+    expect(events).toEqual(["delete started", "delete aborted", "delete settled", "lock released"]);
+    expect(objects.keys()).toEqual([key]);
+    // Retry is idempotent: a working store deletes it.
+    expect((await sweep()).staging).toBe(1);
   });
 });
 

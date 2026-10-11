@@ -8,7 +8,8 @@ import {
   type KobeTx,
 } from "@kobe/db";
 import type { ListedObject } from "../workspace-sync/object-store.js";
-import { withTimeout, type BlobStore } from "./blobs.js";
+import type { BlobStore } from "./blobs.js";
+import { deleteBounded } from "./bounded-delete.js";
 
 /**
  * Orphaned object sweep (KOBE-189), a step of the nightly retention pass (so one replica runs it
@@ -33,7 +34,6 @@ export const MAX_DELETIONS = 1000;
 /** Listing pages (of {@link PAGE_SIZE}) one sweep reads per team and listing before stopping. */
 export const MAX_PAGES = 200;
 const PAGE_SIZE = 1000;
-const DELETE_TIMEOUT_MS = 30_000;
 const BATCH = 100;
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
@@ -84,6 +84,26 @@ async function workspaceUsers(db: KobeDb, teamId: string): Promise<string[]> {
   });
 }
 
+/**
+ * Users whose staging folders are swept: team members and users with workspace rows, plus (KOBE-243)
+ * the user folders found under `<prefix>teams/<team>/users/` that match neither, i.e. removed
+ * members whose uploads died with a crash. The same grace, reference and hold checks apply to them
+ * (a hold on a removed user still protects their staging objects).
+ */
+async function stagingUsers(db: KobeDb, teamId: string, store: BlobStore): Promise<string[]> {
+  const known = await workspaceUsers(db, teamId);
+  const root = `${store.prefix}teams/${teamId}/users/`;
+  const folder = new RegExp(`^${escape(root)}(${UUID})/$`);
+  const seen = new Set(known);
+  for await (const page of pages(store, root, "/")) {
+    for (const p of page.prefixes) {
+      const id = folder.exec(p)?.[1];
+      if (id !== undefined) seen.add(id);
+    }
+  }
+  return [...seen];
+}
+
 async function stagingCandidates(
   db: KobeDb,
   teamId: string,
@@ -93,7 +113,7 @@ async function stagingCandidates(
   stop: () => boolean,
 ): Promise<Candidate[]> {
   const found: Candidate[] = [];
-  for (const userId of await workspaceUsers(db, teamId)) {
+  for (const userId of await stagingUsers(db, teamId, store)) {
     const prefix = `${store.prefix}teams/${teamId}/users/${userId}/workspace/incoming/`;
     const shape = new RegExp(`^${escape(prefix)}${UUID}$`);
     for await (const page of pages(store, prefix)) {
@@ -189,7 +209,7 @@ async function deleteBatch(
       if (await isUnderLegalHold(tx, teamId, c.userId)) continue;
       doomed.push(c.key);
     }
-    if (doomed.length > 0) await withTimeout(store.objects.delete(doomed), DELETE_TIMEOUT_MS);
+    if (doomed.length > 0) await deleteBounded(store.objects, doomed, store.deleteTimeoutMs);
     return doomed.length;
   });
 }

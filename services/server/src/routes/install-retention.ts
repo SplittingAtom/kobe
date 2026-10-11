@@ -20,7 +20,7 @@ export function installRetentionRoutes(deps: ServerDeps): Hono<{ Variables: Auth
   const db = deps.database.db;
   app.use(requireInstallPermission("install.retention.manage"));
 
-  app.get("/", async (c) => c.json(await readMaximum(db)));
+  app.get("/", async (c) => c.json({ ...(await readMaximum(db)), paused: deps.retentionPaused }));
 
   app.put("/", async (c) => {
     const parsed = bodySchema.safeParse(await c.req.json().catch(() => null));

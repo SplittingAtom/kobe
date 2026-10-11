@@ -11,9 +11,15 @@ export interface RetentionMaximum {
   readonly pending: { readonly maximum: RetentionPeriod; readonly effectiveAt: string } | null;
 }
 
+/** What GET returns: the maximum plus whether the deleting jobs are paused (KOBE-243). */
+export interface RetentionStatus extends RetentionMaximum {
+  /** KOBE_RETENTION_PAUSED: the nightly pass, offboarding purges and workspace GC do nothing. */
+  readonly paused: boolean;
+}
+
 const BASE = "/v1/install/retention";
 
-export function getRetentionMaximum(): Promise<ApiResult<RetentionMaximum>> {
+export function getRetentionMaximum(): Promise<ApiResult<RetentionStatus>> {
   return apiRequest(BASE);
 }
 

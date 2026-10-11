@@ -252,7 +252,35 @@ listed in `packages/cli/src/seeded.ts`), which the backup's rows replace in the 
    Before the load starts, check that the printed fingerprint and creation time match the
    values you recorded when the backup was taken.
 
-5. Scale back up, either with `helm upgrade` using the same values or with
+5. **Pause every deleting job if the backup is older than the bucket or the cluster.** Set
+   `retention.paused: true` in your values (chart env `KOBE_RETENTION_PAUSED=true`, on the server
+   and the scheduler) before you scale back up. The restored database knows nothing of what
+   happened after the backup: objects written since (fork-copied entry bodies, staging objects,
+   uploads, workspace blobs), members re-added since, volumes created since. Three jobs judge
+   things from rows and would delete live data from that stale view, so the flag stops all three:
+
+   | Job                                               | Why it must not run on a stale restore                                                                                      |
+   | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+   | Nightly retention pass (purges, sweeps, uploads)  | The orphan sweep deletes objects no restored row references once they are 24 h old                                          |
+   | Offboarding sweep and purge                       | A member re-added since the backup looks long departed; their live volume and workspace copy would be deleted after 30 days |
+   | Workspace garbage collection (timed and on quota) | Blobs the restored rows do not reference look unused and are deleted                                                        |
+
+   Leave the flag on until you have reconciled the bucket and the cluster with the restored
+   database: list the bucket and compare it with the backup's object listing (objects the listing
+   lacks were written after the backup), check the sandbox volumes against `sandboxes`, decide for
+   anything newer whether to keep it (copy it aside or re-create the rows) or delete it yourself,
+   then set `retention.paused: false` and `helm upgrade`. While paused, Trash and retention
+   windows stand still, departed members' volumes are kept, and no workspace space is reclaimed.
+   Install admins see a banner on the retention page (`paused: true` in
+   `GET /v1/install/retention`), and the server logs `retention is paused` at start. A restore
+   from a backup taken just before an outage, with no writes since, needs no pause.
+
+   Timers that do not need the pause, because they act on a row's own age or on ephemeral state
+   and never judge references: audit IP/user-agent erasure (by event age), break-glass and
+   approval expiry, sandbox command and rate-limit cleanup, idle hibernation (keeps the volume),
+   budget and model-gateway syncs, connector drift probes (they disable tools, never delete).
+
+6. Scale back up, either with `helm upgrade` using the same values or with
    `kubectl scale ... --replicas=<n>`. Users have to sign in again; enrolled passkeys and TOTP
    keep working.
 
