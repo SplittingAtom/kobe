@@ -9,13 +9,13 @@ Index only: the coordinator edits this file; each ticket keeps notes in `docs/le
 Parallel-work rules: [parallel-work.md](parallel-work.md); handoff: [agent-prompt.md](agent-prompt.md);
 Hadron via `scripts/hadron.sh`.
 
-- **Run (2026-10-04):** Chris: finish open work (wave A), then Agents, Skills, Gallery & Orbit
-  (wave B), small tickets and small contexts to save tokens.
-- **Wave A, done:** #64 (token workflow), #30/#31 (deps), KOBE-43 (#56), KOBE-71 (#62), KOBE-42
-  (#61), KOBE-39 (#60), web restyle on assistant-ui (#65). Test install upgraded to `main` a63e726.
-- **Wave B:** KOBE-47..52 split into KOBE-75..94 (label `wave-b`; `migration` label = one at a
-  time; parents close when children are done). Batch 1 in progress: KOBE-75, 79, 90. Then
-  78 (+76, 84) → 86 (+77, 83) → 80 (+91, 92) → 81 → 85 (+82) → 87 (+88) → 93 (+89) → 94.
+- **Run (2026-10-11):** one agent session at a time, sequentially (ticket agent, then its review);
+  ticket agents on Opus 5.5 from KOBE-180 on. Waves A–E are done.
+- **Wave E, done (2026-10-11):** Personal Schedules — KOBE-178 (#226), 180 (#235), 179 (#236),
+  181 (#237), on top of 172–177. Next: deploy `main` 7c79940 to kobe-gate1 for performance testing.
+- **Open after wave E:** KOBE-193, 229 (claimed, not started); gates G3a/G4a/G4b (KOBE-231..233 →
+  KOBE-3/4); v1.1 Conversational Enhancements (KOBE-197..227, 234, none started); parents
+  KOBE-53..65 need closing against their children. Follow-ups: KOBE-74, 95, 182, 240, 247, 252, 253.
 - **Decisions (2026-10-04):** resolver's user-connected connectors are empty until KOBE-61;
   KOBE-89 shipped the Document Drafter without artifact output; KOBE-131 added its Markdown preview artifact.
 - **Follow-ups filed:** KOBE-95 (budget reservations across gateway replicas), KOBE-96 (flaky
