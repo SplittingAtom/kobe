@@ -10,7 +10,7 @@ import {
 } from "@kobe/db";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit/record.js";
-import { withTimeout } from "../retention/blobs.js";
+import { deleteBounded } from "../retention/bounded-delete.js";
 import { workspaceBlobKey, type WorkspaceOwner } from "./keys.js";
 import type { ObjectStore } from "./object-store.js";
 import { lockWorkspace } from "./store.js";
@@ -59,7 +59,6 @@ export interface CollectResult {
 const STALE_RESERVATION = "2 hours";
 
 /** Longest one batch's object delete may take while the hold lock is held (approvals wait). */
-const DELETE_TIMEOUT_MS = 30_000;
 
 /** Legal-hold lock (shared) and check, first thing in a transaction that deletes content. */
 async function heldWorkspace(tx: KobeTx, owner: WorkspaceOwner): Promise<boolean> {
@@ -124,9 +123,9 @@ async function collectBatch(
       return { blobs: [], tombstones: marked.tombstones, held: true as const };
     }
     // Bounded: the transaction holds the legal-hold lock shared, and an approval waits for it.
-    await withTimeout(
-      objects.delete(marked.blobs.map((b) => workspaceBlobKey(options.prefix, owner, b.sha256))),
-      DELETE_TIMEOUT_MS,
+    await deleteBounded(
+      objects,
+      marked.blobs.map((b) => workspaceBlobKey(options.prefix, owner, b.sha256)),
     );
     const gone = await tx.execute<{ size: string }>(sql`
       DELETE FROM workspace_blobs

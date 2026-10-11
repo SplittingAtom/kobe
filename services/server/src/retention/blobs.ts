@@ -1,3 +1,4 @@
+import { deleteBounded } from "./bounded-delete.js";
 import { auditTimeout } from "./locks.js";
 import {
   BLOB_REF_COLUMNS,
@@ -33,6 +34,8 @@ export interface BlobStore {
   readonly objects: ObjectStore;
   /** The configured key prefix (`s3.prefix`), e.g. `kobe/` or ``. */
   readonly prefix: string;
+  /** Test hook: how long a batch delete may run before it is aborted (default 30 s). */
+  readonly deleteTimeoutMs?: number;
 }
 
 export interface BlobDeletionCounts {
@@ -58,17 +61,6 @@ export function threadKey(prefix: string, teamId: string, threadId: string, key:
     .slice(tree.length)
     .split("/")
     .some((p) => p === "" || p === "." || p === "..");
-}
-
-/** Longest one batch's object delete may take while the hold lock is held. */
-const DELETE_TIMEOUT_MS = 30_000;
-
-export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`object store delete timed out after ${ms} ms`)), ms);
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 /** Keys among `keys` that a thread-owned column of the team still references (another thread). */
@@ -118,8 +110,9 @@ export async function deleteBlobBatchInTx(
   const doomed = queued.rows
     .filter((r) => !referenced.has(r.key) && threadKey(store.prefix, teamId, r.thread_id, r.key))
     .map((r) => r.key);
-  // Bounded: the transaction holds the legal-hold lock shared, and an approval waits for it.
-  if (doomed.length > 0) await withTimeout(store.objects.delete(doomed), DELETE_TIMEOUT_MS);
+  // Bounded and abortable: the transaction holds the legal-hold lock shared, and an approval
+  // waits for it; on timeout the delete is aborted and settled before the lock is released.
+  if (doomed.length > 0) await deleteBounded(store.objects, doomed, store.deleteTimeoutMs);
   await tx.execute(sql`
     DELETE FROM retention_blob_deletions
      WHERE team_id = ${teamId} AND key = ANY(ARRAY[${sql.join(

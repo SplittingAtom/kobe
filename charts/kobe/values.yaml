@@ -377,6 +377,12 @@ postgres:
       storageClass: ""
 
 # External S3-compatible object storage (no bundled S3).
+# The nightly retention pass (KOBE-18). Set paused: true after restoring the database from an older
+# backup and leave it until the bucket is reconciled (docs/backup-restore.md); otherwise the orphan
+# sweep deletes bodies the restored database does not know about.
+retention:
+  paused: false
+
 s3:
   endpoint: ""
   region: us-east-1

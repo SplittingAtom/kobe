@@ -22,14 +22,22 @@ export interface ObjectStore {
   get(key: string): Promise<{ readonly body: Readable; readonly size: number } | null>;
   /** Server-side copy within the bucket. */
   copy(from: string, to: string): Promise<void>;
-  /** Deletes the objects (missing ones are fine). */
-  delete(keys: readonly string[]): Promise<void>;
+  /**
+   * Deletes the objects (missing ones are fine). With `signal`, an abort stops the calls in
+   * flight and the rest; the rejection then carries `deleted`, the keys confirmed gone
+   * (KOBE-243: retention holds its legal-hold lock until this has settled).
+   */
+  delete(keys: readonly string[], options?: DeleteOptions): Promise<void>;
   /**
    * One page of the keys under `prefix` (KOBE-189), in key order. With `delimiter` the keys below
    * the first delimiter after the prefix come back folded into `prefixes` ("directories").
    * `next` is the cursor for the following page, absent on the last one.
    */
   list(prefix: string, options?: ListOptions): Promise<ListPage>;
+}
+
+export interface DeleteOptions {
+  readonly signal?: AbortSignal;
 }
 
 export interface ListOptions {

@@ -252,7 +252,22 @@ listed in `packages/cli/src/seeded.ts`), which the backup's rows replace in the 
    Before the load starts, check that the printed fingerprint and creation time match the
    values you recorded when the backup was taken.
 
-5. Scale back up, either with `helm upgrade` using the same values or with
+5. **Pause the nightly retention pass if the backup is older than the bucket.** Set
+   `retention.paused: true` in your values (chart env `KOBE_RETENTION_PAUSED=true`, on the server
+   and the scheduler) before you scale back up. The bucket keeps everything written after the
+   backup was taken (fork-copied entry bodies, staging objects, uploads), and the restored database
+   knows nothing of it. The orphan sweep (a step of the retention pass) treats an object that no
+   restored row references as an orphan and deletes it once it is older than 24 hours, so an
+   unpaused pass would remove bodies of threads that existed only after the backup. Leave it paused
+   until you have reconciled the bucket with the restored database: compare the bucket with the
+   backup's object listing (objects in the bucket that the listing lacks were written after
+   the backup), decide for the
+   newer objects whether to keep them (copy them aside) or delete them yourself, then set
+   `retention.paused: false` and `helm upgrade`. A restore from a backup taken just before an
+   outage, with no writes since, needs no pause. A paused install logs `retention is paused` at
+   start and runs no purge, compaction or sweep, so Trash and retention windows stand still
+   meanwhile.
+6. Scale back up, either with `helm upgrade` using the same values or with
    `kubectl scale ... --replicas=<n>`. Users have to sign in again; enrolled passkeys and TOTP
    keep working.
 

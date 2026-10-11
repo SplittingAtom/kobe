@@ -206,6 +206,7 @@ const retentionJob = deps
       blobs: deps.blobs,
       uploadOrphanHours: uploadSettings.orphanHours,
       hourUtc: config.retentionHourUtc,
+      paused: config.retentionPaused,
       logger,
     })
   : undefined;

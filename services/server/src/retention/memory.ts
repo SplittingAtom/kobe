@@ -2,7 +2,8 @@ import { SYSTEM_ACTOR, lockLegalHolds, sql, withTeam, type KobeDb, type KobeTx }
 import { recordAudit } from "../audit/record.js";
 import { memoryBlobKey } from "../memory/keys.js";
 import { auditTimeout } from "./locks.js";
-import { withTimeout, type BlobStore } from "./blobs.js";
+import type { BlobStore } from "./blobs.js";
+import { deleteBounded } from "./bounded-delete.js";
 
 /**
  * Memory retention (spec D24 "memory follows team retention", user decision 2026-10-09, KOBE-188).
@@ -34,7 +35,6 @@ export const NO_MEMORY_PURGE: MemoryPurgeCounts = { docs: 0, versions: 0, blobs:
 
 const BATCH_DOCS = 50;
 const BATCH_VERSIONS = 200;
-const DELETE_TIMEOUT_MS = 30_000;
 
 interface Doomed {
   readonly docId: string;
@@ -58,7 +58,7 @@ async function deleteObjects(
     .filter((r) => r.blobRef === memoryBlobKey(store.prefix, teamId, r.docId, r.version))
     .map((r) => r.blobRef);
   // Bounded: the transaction holds the legal-hold lock shared, and an approval waits for it.
-  if (keys.length > 0) await withTimeout(store.objects.delete(keys), DELETE_TIMEOUT_MS);
+  if (keys.length > 0) await deleteBounded(store.objects, keys, store.deleteTimeoutMs);
   return keys.length;
 }
 
