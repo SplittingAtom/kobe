@@ -606,6 +606,13 @@ export const AUDIT_EVENTS = {
     reason: reasonCode,
   }),
 
+  // ── schedule: personal scheduled runs (KOBE-173, D32); ids only, never the prompt ──
+  "schedule.created": event("team", { scheduleId: id, agentId: id, active: z.boolean() }),
+  "schedule.updated": event("team", { scheduleId: id, agentId: id }),
+  "schedule.deleted": event("team", { scheduleId: id }),
+  "schedule.activated": event("team", { scheduleId: id, by: z.enum(["owner", "team_admin"]) }),
+  "schedule.deactivated": event("team", { scheduleId: id, by: z.enum(["owner", "team_admin"]) }),
+
   // ── thread: lifecycle metadata only, never titles or content (KOBE-34, D18, D23) ──
   "thread.trashed": event("team", { threadId: id }),
   "thread.restored": event("team", { threadId: id }),

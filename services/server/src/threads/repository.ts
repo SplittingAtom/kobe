@@ -105,6 +105,7 @@ const summaryColumns = {
   createdAt: threads.createdAt,
   deletedAt: threads.deletedAt,
   isTest: threads.isTest,
+  scheduleId: threads.scheduleId,
 };
 
 type SummaryRow = {
@@ -123,6 +124,7 @@ type SummaryRow = {
   createdAt: Date;
   deletedAt: Date | null;
   isTest: boolean;
+  scheduleId?: string | null;
 };
 
 export function toSummary(row: SummaryRow): ThreadSummary {
@@ -141,6 +143,7 @@ export function toSummary(row: SummaryRow): ThreadSummary {
     last_activity_at: row.lastActivityAt.toISOString(),
     created_at: row.createdAt.toISOString(),
     is_test: row.isTest,
+    schedule_id: row.scheduleId ?? null,
     deleted_at: row.deletedAt?.toISOString() ?? null,
     purge_after: row.deletedAt
       ? new Date(row.deletedAt.getTime() + TRASH_RETENTION_DAYS * DAY_MS).toISOString()

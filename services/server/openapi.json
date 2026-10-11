@@ -2598,6 +2598,25 @@
                 "type": "null"
               }
             ]
+          },
+          "schedule_id": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "allOf": [
+                  {
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  {
+                    "pattern": "^[0-9a-f-]+$"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -2616,7 +2635,8 @@
           "last_activity_at",
           "created_at",
           "deleted_at",
-          "purge_after"
+          "purge_after",
+          "schedule_id"
         ],
         "additionalProperties": false
       },
@@ -2764,6 +2784,25 @@
                       "type": "null"
                     }
                   ]
+                },
+                "schedule_id": {
+                  "default": null,
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "allOf": [
+                        {
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        {
+                          "pattern": "^[0-9a-f-]+$"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
@@ -2782,7 +2821,8 @@
                 "last_activity_at",
                 "created_at",
                 "deleted_at",
-                "purge_after"
+                "purge_after",
+                "schedule_id"
               ],
               "additionalProperties": false
             }
@@ -2939,6 +2979,25 @@
                     }
                   ]
                 },
+                "schedule_id": {
+                  "default": null,
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "allOf": [
+                        {
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        {
+                          "pattern": "^[0-9a-f-]+$"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "matched_entry_id": {
                   "anyOf": [
                     {
@@ -2996,6 +3055,7 @@
                 "created_at",
                 "deleted_at",
                 "purge_after",
+                "schedule_id",
                 "matched_entry_id",
                 "snippet",
                 "score"
@@ -3150,6 +3210,25 @@
               }
             ]
           },
+          "schedule_id": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "allOf": [
+                  {
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  {
+                    "pattern": "^[0-9a-f-]+$"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "agent_name": {
             "type": ["string", "null"]
           },
@@ -3272,6 +3351,7 @@
           "created_at",
           "deleted_at",
           "purge_after",
+          "schedule_id",
           "agent_name",
           "read_only",
           "agent_status",
@@ -3637,6 +3717,25 @@
                 "type": "null"
               }
             ]
+          },
+          "schedule_id": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "allOf": [
+                  {
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  {
+                    "pattern": "^[0-9a-f-]+$"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -3655,7 +3754,8 @@
           "last_activity_at",
           "created_at",
           "deleted_at",
-          "purge_after"
+          "purge_after",
+          "schedule_id"
         ],
         "additionalProperties": false
       },

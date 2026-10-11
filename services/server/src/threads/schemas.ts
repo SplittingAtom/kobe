@@ -2,6 +2,7 @@ import { MODEL_ALIAS_PATTERN } from "@kobe/db";
 import { z } from "zod";
 import {
   idSchema,
+  scheduleThreadMarkerSchema,
   threadStatusSchema,
   timestampSchema,
   threadVisibilitySchema,
@@ -152,6 +153,8 @@ export const threadSummarySchema = z.object({
   deleted_at: timestamp.nullable(),
   /** When the Trash purge may remove it (deleted_at + 30 days); null when not in Trash. */
   purge_after: timestamp.nullable(),
+  /** The schedule that created the thread (the web "Scheduled" folder), null otherwise (KOBE-173). */
+  ...scheduleThreadMarkerSchema.shape,
 });
 export type ThreadSummary = z.infer<typeof threadSummarySchema>;
 
