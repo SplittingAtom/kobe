@@ -60,7 +60,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("install break-glass page", () => {
+describe("site break-glass page", () => {
   it("requests access narrowed to one user, with reason, duration and legal hold", async () => {
     const calls = stubApi({
       "GET /v1/site/break-glass": [200, { grants: [], selfApprovalAllowed: false }],

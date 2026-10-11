@@ -78,7 +78,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("install legal hold page", () => {
+describe("site legal hold page", () => {
   it("requests a hold on one user's data with a reason", async () => {
     const calls = stubApi({
       "GET /v1/site/legal-hold": [200, { holds: [], selfApprovalAllowed: false }],

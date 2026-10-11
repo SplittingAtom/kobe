@@ -61,7 +61,7 @@ export function holdScopeLabel(hold: Pick<LegalHold, "scope" | "subject">): stri
 /**
  * Legal hold (spec D18; `/v1/site/legal-hold`). A site admin asks to hold a team's data, or
  * one user's data in a team, with a reason; a second site admin places it (a single-admin
- * install self-approves, flagged). While in force, retention and Trash purges, offboarding volume
+ * site self-approves, flagged). While in force, retention and Trash purges, offboarding volume
  * deletion and the audit log's IP erasure skip that data. Releasing needs a second admin too.
  * Holds are confidential: the held user never sees them, and team admins aren't told.
  */

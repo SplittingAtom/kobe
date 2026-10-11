@@ -118,8 +118,8 @@ function agentName(a: UsageReport["byAgent"][number]): string {
 }
 
 /**
- * The usage page body shared by the team and install consoles (KOBE-43, D30): a time range,
- * totals, spend or tokens over time, and breakdowns by team (install only), user, model and agent.
+ * The usage page body shared by the team and site consoles (KOBE-43, D30): a time range,
+ * totals, spend or tokens over time, and breakdowns by team (site only), user, model and agent.
  */
 export function UsageDashboard({
   load,

@@ -73,7 +73,7 @@ describe("Team memory switches (KOBE-158, ac-3)", () => {
   });
 });
 
-describe("Install memory switches (KOBE-158, ac-3)", () => {
+describe("Site memory switches (KOBE-158, ac-3)", () => {
   it("persists the site-wide switch", async () => {
     const calls = stubApi({
       [`GET ${SITE}`]: [200, on],

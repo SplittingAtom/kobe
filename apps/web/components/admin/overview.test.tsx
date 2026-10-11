@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 describe("console overview", () => {
-  it("lists the install sections with what each is for, placeholders marked", () => {
+  it("lists the site sections with what each is for, placeholders marked", () => {
     renderSite(<ConsoleOverview kind="site" />);
     expect(screen.getByRole("heading", { level: 1, name: "Site console" })).toBeTruthy();
     const people = screen.getByRole("region", { name: "People" });

@@ -10,7 +10,7 @@ import styles from "./admin.module.css";
 export const ISOLATION_EVENT = "kobe:isolation";
 
 /**
- * Spec D4: without a gVisor/Kata runtime "the admin console shows the fix". Install pages show
+ * Spec D4: without a gVisor/Kata runtime "the admin console shows the fix". Site pages show
  * this banner while agents are disabled; the Isolation page has the details and the fix.
  */
 export function IsolationBanner({ hidden }: { readonly hidden: boolean }) {

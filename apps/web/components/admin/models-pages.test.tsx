@@ -7,7 +7,7 @@ import { SiteModelsPage } from "./site/models-page";
 import { TeamModelsPage } from "./team/models-page";
 import { TEAM, renderSite, renderTeam, stubApi, summary, type RecordedCall } from "./testing";
 
-/** KOBE-44: install Models and providers, team Models (over KOBE-40's API, snake_case wire). */
+/** KOBE-44: site Models and providers, team Models (over KOBE-40's API, snake_case wire). */
 const T = "2026-10-03T10:00:00Z";
 const OLLAMA = {
   id: "ollama",
@@ -78,7 +78,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("install: models and providers", () => {
+describe("site: models and providers", () => {
   it("shows providers with only whether a key is set, the catalog, and the gateway in sync", async () => {
     const calls = stubApi({ "GET /v1/site/models": [200, MODELS] });
     renderSite(<SiteModelsPage />);

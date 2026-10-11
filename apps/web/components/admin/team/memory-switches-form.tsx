@@ -7,7 +7,7 @@ import { MutationStatus } from "../error-notice";
 import { useMutation } from "../use-resource";
 import styles from "../admin.module.css";
 
-/** The two memory switches of one level (team or install) with one Save. */
+/** The two memory switches of one level (team or site) with one Save. */
 export function MemorySwitchesForm({
   where,
   switches,

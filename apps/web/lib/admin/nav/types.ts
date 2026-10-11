@@ -1,5 +1,5 @@
 /**
- * Admin console navigation (KOBE-20). Each console section is one file under `install/` or
+ * Admin console navigation (KOBE-20). Each console section is one file under `site/` or
  * `team/` exporting one `defineSiteSection(…)` / `defineTeamSection(…)`, listed with one line in
  * that folder's `index.ts`. Order comes from `group` + `order`, never from line order.
  *
@@ -59,7 +59,7 @@ interface SectionBase {
 export interface SiteSection extends SectionBase {
   readonly console: "site";
   readonly group: SiteGroup;
-  /** Least site role that may open it, mirroring the route's `install.*` permission. */
+  /** Least site role that may open it, mirroring the route's `site.*` permission. */
   readonly minRole: "admin" | "owner";
 }
 

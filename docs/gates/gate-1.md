@@ -169,7 +169,7 @@ budget is gone before any model time.
 
 Gate install upgraded to `main` at `296c275` (images built from that commit on the build host
 and imported into each node: the ghcr packages are still private). Models are configured through
-the install admin API (`/v1/install/models`): provider kind **`ollama`** (Bifrost's native Ollama
+the site admin API (`/v1/site/models`; `/v1/install/models` at the time): provider kind **`ollama`** (Bifrost's native Ollama
 provider) against the vendor's cloud endpoint, catalog aliases `kimi-k2.7-code` and `glm-5.3`,
 both enabled for every team with `kimi-k2.7-code` the default. Workspace sync (KOBE-27) runs
 against an in-cluster SeaweedFS, so the wake path includes the workspace restore.

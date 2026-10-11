@@ -28,7 +28,7 @@ export interface TeamRetention {
   readonly effective: RetentionPeriod;
   /** The team's own pending shortening (team admins can cancel it). */
   readonly pending: PendingRetention | null;
-  /** The next shortening of what applies, from the team or the install (the banner). */
+  /** The next shortening of what applies, from the team or the site (the banner). */
   readonly upcoming: PendingRetention | null;
   /** Periods the team may choose under the maximum. */
   readonly allowed: readonly RetentionPeriod[];

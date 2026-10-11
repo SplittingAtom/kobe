@@ -58,7 +58,7 @@ export function scopeLabel(grant: Pick<BreakGlassGrant, "scope" | "subject" | "t
 
 /**
  * Break-glass (spec D10; `/v1/site/break-glass`). A site admin asks for time-boxed,
- * read-only access to one team (optionally one user or one thread) with a reason; a second install
+ * read-only access to one team (optionally one user or one thread) with a reason; a second site
  * admin approves (a single-admin site self-approves, flagged). The team's admins are notified,
  * and every read is recorded in the team's audit log. The server and the database decide.
  */

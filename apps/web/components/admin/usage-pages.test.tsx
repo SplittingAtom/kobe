@@ -71,7 +71,7 @@ describe("usage pages (KOBE-43)", () => {
     expect(screen.getByRole("img", { name: /Tokens per day/ })).toBeTruthy();
   });
 
-  it("install: adds the by-team breakdown", async () => {
+  it("site: adds the by-team breakdown", async () => {
     stubUsage({
       ...REPORT,
       by_team: [{ team_id: "t-1", slug: "fin", name: "Finance", ...totals(4.5, 3) }],

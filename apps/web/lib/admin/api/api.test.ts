@@ -80,7 +80,7 @@ describe("console access", () => {
   });
 });
 
-describe("install resources call the right routes", () => {
+describe("site resources call the right routes", () => {
   it.each([
     ["listUsers", () => users.listUsers(), "GET /v1/site/users", { users: [] }],
     [
@@ -122,7 +122,7 @@ describe("install resources call the right routes", () => {
     expect(res.ok).toBe(true);
     expect(calls).toHaveLength(1);
     expect(`${must(calls[0]).method} ${must(calls[0]).url}`).toBe(route);
-    // Install routes are not team-scoped: no team header.
+    // Site routes are not team-scoped: no team header.
     expect(must(calls[0]).headers.has("x-kobe-team")).toBe(false);
   });
 

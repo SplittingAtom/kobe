@@ -81,7 +81,7 @@ describe("Team retention (KOBE-18)", () => {
   });
 });
 
-describe("Install retention maximum (KOBE-18)", () => {
+describe("Site retention maximum (KOBE-18)", () => {
   it("lowers the maximum after confirming", async () => {
     const calls = stubApi({
       "GET /v1/site/retention": [
