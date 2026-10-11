@@ -13,6 +13,7 @@ import { listRunAttachments } from "../uploads/attach-list.js";
 import { sql, type KobeTx } from "@kobe/db";
 import { omittedItems } from "./omitted-event.js";
 import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js";
+import { readApprovalFloor } from "../policy/approval-floor.js";
 import { clampApprovalMode } from "../sandbox-wire/policy-check.js";
 import {
   applyTransition,
@@ -265,9 +266,16 @@ async function resolveForStart(
       approvalMode: run.approvalMode,
     })
     .catch(() => ({ ok: false as const, error: { code: "agent_unavailable", message: "" } }));
-  return resolved.ok
-    ? { ...resolved, approvalMode: clampApprovalMode(resolved.approvalMode, run.approvalMode) }
-    : resolved;
+  if (!resolved.ok) return resolved;
+  // A scheduled run (D32, KOBE-174) is always `auto`: nobody is there to approve, so the agent
+  // version's own (stricter) mode must not make it wait. Only the install floor tightens it.
+  if (run.trigger === "schedule") {
+    return {
+      ...resolved,
+      approvalMode: clampApprovalMode(run.approvalMode, await readApprovalFloor(tx)),
+    };
+  }
+  return { ...resolved, approvalMode: clampApprovalMode(resolved.approvalMode, run.approvalMode) };
 }
 
 /**

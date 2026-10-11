@@ -34,7 +34,14 @@ import { viewerProjectIds } from "../threads/references.js";
 import { findThread, isLockTimeout, type Viewer } from "../threads/repository.js";
 import type { AttachmentStager, StagedFile } from "../uploads/attach.js";
 import { RunError } from "./errors.js";
-import { budgetStoppedEvent, cancelledEvent, promoteInTx, type Promotion } from "./lifecycle.js";
+import {
+  budgetStoppedEvent,
+  cancelledEvent,
+  failedEvent,
+  promoteInTx,
+  type Promotion,
+} from "./lifecycle.js";
+import type { ScheduledSubmit } from "./scheduled-submit.js";
 import {
   NO_BUDGETS,
   PASS_THROUGH_AGENTS,
@@ -133,7 +140,7 @@ export interface ServerRunOrchestrator extends RunOrchestrator {
   submitMessage(
     actor: ActorContext,
     command: SubmitMessageCommand,
-    options?: { readonly clientKey?: string },
+    options?: { readonly clientKey?: string; readonly scheduled?: ScheduledSubmit },
   ): Promise<SubmitMessageResult>;
   /** The run an `interrupted` thread waits on (Retry), or null. */
   latestInterruptedRun(actor: ActorContext, threadId: string): Promise<RunSnapshot | null>;
@@ -221,7 +228,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
   async submitMessage(
     actor: ActorContext,
     command: SubmitMessageCommand,
-    options: { readonly clientKey?: string } = {},
+    options: { readonly clientKey?: string; readonly scheduled?: ScheduledSubmit } = {},
   ): Promise<SubmitMessageResult> {
     if (this.#isolation() === "missing") throw new RunError("isolation_unavailable");
     const fileIds = command.file_ids ?? [];
@@ -232,7 +239,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     const attach =
       fileIds.length > 0 ? await this.#stageAttachments(actor, command, clientKey) : undefined;
     if (attach === undefined)
-      return this.#submitInTx(actor, command, clientKey, undefined, () => {});
+      return this.#submitInTx(actor, command, clientKey, undefined, () => {}, options.scheduled);
     // The copies stay only when the run row (and the files' claim) committed with them.
     let claimed = false;
     let committed = false;
@@ -281,16 +288,19 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     clientKey: string | null,
     attach: StagedAttachments | undefined,
     onAttached: () => void,
+    scheduled?: ScheduledSubmit,
   ): Promise<SubmitMessageResult> {
     const teamId = actor.team_id;
     const out = await this.#threadTx(actor, async (tx, viewer) => {
+      await scheduled?.before(tx);
       const thread = await lockOwnedThread(tx, viewer, command.thread_id, "thread_not_found");
       if (clientKey !== null) {
         // A repeated submission (same key, same thread) answers with the run it created.
         const seen = await runByClientKey(tx, teamId, thread.id, clientKey);
         if (seen) return { result: { run_id: seen.id, queued: seen.status === "queued" } };
       }
-      await this.#assertMayRun(tx, actor);
+      // A scheduled run the budget refuses is recorded as failed below (no retry storm, KOBE-174).
+      const budgetBlocked = await this.#budgetBlocksSchedule(tx, actor, scheduled !== undefined);
       const parent = command.parent_entry_id ?? null;
       if (parent !== null && !(await entryExists(tx, teamId, thread.id, parent))) {
         throw new RunError("entry_not_found");
@@ -323,14 +333,48 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         onAttached();
       }
       await touchThread(tx, teamId, thread.id);
+      if (budgetBlocked) {
+        const run = await getRunRow(tx, teamId, id);
+        if (!run) throw new Error("scheduled run vanished in its own transaction");
+        const applied = await applyTransition(
+          tx,
+          thread,
+          run,
+          "failed",
+          "error",
+          failedEvent("budget_exhausted"),
+        );
+        await scheduled?.after(tx, { runId: id, budgetBlocked });
+        return { result: { run_id: id, queued: false }, transitions: [applied.transition] };
+      }
       // A user's new message releases a queue paused by Stop: it joins the end, earlier ones go
       // first. Scheduled runs (KOBE-64) queue behind a paused queue without releasing it.
       if (command.trigger === "user") await setQueuePaused(tx, teamId, thread.id, false);
       const { promotion, queued } = await this.#promoteOrQueue(tx, teamId, thread.id, id);
+      await scheduled?.after(tx, { runId: id, budgetBlocked });
       return { result: { run_id: id, queued }, promotion };
     });
-    if (out.promotion) this.#afterCommit(teamId, out.promotion);
+    if ("transitions" in out && out.transitions) this.#emit(teamId, out.transitions);
+    if ("promotion" in out && out.promotion) this.#afterCommit(teamId, out.promotion);
     return out.result;
+  }
+
+  /**
+   * The account check of a new run, plus the budget gate: a scheduled run the gate refuses is not
+   * thrown away (that would be retried every tick) but reported to the caller to fail visibly.
+   */
+  async #budgetBlocksSchedule(
+    tx: KobeTx,
+    actor: ActorContext,
+    scheduled: boolean,
+  ): Promise<boolean> {
+    try {
+      await this.#assertMayRun(tx, actor);
+      return false;
+    } catch (err) {
+      if (scheduled && err instanceof RunError && err.code === "budget_exhausted") return true;
+      throw err;
+    }
   }
 
   async steer(actor: ActorContext, runId: string, body: SteerBody): Promise<RunSnapshot> {
