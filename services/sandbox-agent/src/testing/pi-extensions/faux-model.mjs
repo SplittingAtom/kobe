@@ -1,12 +1,19 @@
 // Test-only Pi extension: a scripted model (pi-ai's faux provider), so real Pi 1.0.0 issues tool
 // calls without credentials. The script is the user prompt: `faux:` + a JSON array of steps, each
-// `{ "tool", "args", "id" }` (one tool call), `{ "calls": [...] }` (parallel calls in one message)
-// or `{ "text" }`. The n-th assistant message after the prompt plays step n (then "done").
+// `{ "tool", "args", "id" }` (one tool call), `{ "calls": [...] }` (parallel calls in one message),
+// `{ "text" }`, `{ "thinking", "stopReason" }` (reasoning only, e.g. cut off at the output limit,
+// KOBE-258) or `{ "echoUsers": true }` (replies with every user message the model was given).
+// The n-th assistant message after the prompt plays step n (then "done").
 // It selects its model on every prompt (an `input` handler runs before Pi checks the model, while
 // `session_start` may still be pending when the first prompt arrives) and activates `codemode` when the built-in is loaded (it
 // registers inactive). Pi needs a writable PI_CODING_AGENT_DIR to use any provider (it opens its
 // credential store there), so tests using this extension give Pi one.
-import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
+import {
+  fauxAssistantMessage,
+  fauxProvider,
+  fauxThinking,
+  fauxToolCall,
+} from "@earendil-works/pi-ai";
 
 function textOf(message) {
   if (typeof message.content === "string") return message.content;
@@ -36,6 +43,15 @@ function step(context) {
     const system = messages.filter((m) => m.role === "system" || m.role === "developer");
     const rendered = system.map((m) => [textOf(m), ...Object.values(m.sections ?? {})].join("\n"));
     return fauxAssistantMessage(`SYSTEM:${rendered.join("\n")}`);
+  }
+  if (next.thinking !== undefined) {
+    return fauxAssistantMessage([fauxThinking(next.thinking)], {
+      stopReason: next.stopReason ?? "stop",
+    });
+  }
+  if (next.echoUsers) {
+    const users = messages.filter((m) => m.role === "user").map((m) => textOf(m));
+    return fauxAssistantMessage(`USERS:${JSON.stringify(users)}`);
   }
   const calls = next.calls ?? (next.tool === undefined ? [] : [next]);
   if (calls.length === 0) return fauxAssistantMessage(next.text ?? "done");

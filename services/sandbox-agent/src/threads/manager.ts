@@ -1,3 +1,4 @@
+import { access } from "node:fs/promises";
 import type {
   PiExtensionUiRequest,
   PiSessionHeader,
@@ -241,6 +242,17 @@ export class ThreadManager {
   async #piCommand(thread: Thread, frame: Frame<"pi.command">): Promise<CommandOutcome> {
     const { id: _serverId, ...command } = frame.command;
     if (thread.restoring) return fail("pi_rejected", "session restore in progress");
+    if (
+      command.type === "get_entries" &&
+      command.since === undefined &&
+      !(await fileExists(this.#sessionFile(thread.id)))
+    ) {
+      // KOBE-258: Pi 1.0.0 keeps a new session's setup entries (model, thinking level) in memory
+      // until the first user message. Reported, they would be mirrored, and the thread's next Pi
+      // (restarted for a run's config) makes new ones with other ids: `get_entries since` then
+      // fails for good. Before the file exists nothing is durable, so nothing is reported.
+      return ok({ entries: [], leafId: null });
+    }
     const prepared = await thread.withLock(() => this.#ensureProcess(thread, undefined));
     if (prepared !== undefined) return prepared;
     // KOBE-169: no pi.command runs against config a tool planted (the plant could be gone again by
@@ -635,6 +647,15 @@ function dispositionOf(data: unknown): string | undefined {
 function piFailure(error: unknown): CommandOutcome {
   if (error instanceof PiProcessError) return fail("pi_unavailable", error.message);
   return fail("internal", "unexpected error talking to Pi");
+}
+
+async function fileExists(file: string): Promise<boolean> {
+  try {
+    await access(file);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Resolves true when `promise` did not settle within `ms` (its rejection propagates). */

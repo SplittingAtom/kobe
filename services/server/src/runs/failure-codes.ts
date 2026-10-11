@@ -39,6 +39,12 @@ export const FAILURE_MESSAGES: Readonly<Record<string, string>> = {
   // KOBE-42: the gateway refused a model call because a budget is used up.
   model_budget_exhausted:
     "The model budget is used up, so the model call was refused. Ask your team admin about the budget.",
+  // KOBE-258: the last model step stopped at the model's output limit (`stopReason: "length"`).
+  model_output_limit:
+    "The model hit its output limit before it finished, so its reply is incomplete. Ask for a shorter answer, or for the work to be written to files in smaller steps.",
+  // KOBE-258: the run's conversation entries could not be saved when it ended.
+  entries_not_saved:
+    "The run finished, but its messages could not be saved to the conversation, so they may be missing after a reload. If they are, send your message again.",
   // KOBE-82: the run has skills, but the workspace's agent is too old to load them.
   skills_unsupported:
     "Your workspace is running an older version that can't load this agent's skills. Ask your admin to upgrade it.",

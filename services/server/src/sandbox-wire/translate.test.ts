@@ -222,3 +222,25 @@ describe("model call failures (KOBE-41)", () => {
     expect((await t.translate(2, { type: "agent_settled" } as never)).failure).toBeUndefined();
   });
 });
+
+describe("the model's output limit (KOBE-258)", () => {
+  const assistantEnd = (stopReason: string) => ({
+    type: "message_end",
+    message: { role: "assistant", stopReason },
+  });
+
+  it("fails the run with model_output_limit when its last assistant message was cut off", async () => {
+    const t = translator();
+    await t.translate(1, { type: "message_start", message: { role: "assistant" } } as never);
+    await t.translate(2, assistantEnd("length") as never);
+    const end = await t.translate(3, { type: "agent_settled" } as never);
+    expect(end).toMatchObject({ settled: true, syncEntries: true, failure: "model_output_limit" });
+  });
+
+  it("completes when a later message finished (Pi went on after a cut-off step)", async () => {
+    const t = translator();
+    await t.translate(1, assistantEnd("length") as never);
+    await t.translate(2, assistantEnd("stop") as never);
+    expect((await t.translate(3, { type: "agent_settled" } as never)).failure).toBeUndefined();
+  });
+});

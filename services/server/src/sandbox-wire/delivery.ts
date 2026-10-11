@@ -22,6 +22,7 @@ import {
   mirrorEntriesInTx,
   parseGetEntries,
   restoreParts,
+  threadHasConversation,
 } from "./entries.js";
 import { endRunInTx, loadRun } from "./run-state.js";
 import { buildRunMemory } from "../memory/agent.js";
@@ -207,15 +208,44 @@ export class CommandDelivery {
     });
   }
 
+  /**
+   * `get_entries since`; when Pi no longer knows the cursor while Postgres holds no conversation
+   * yet, Pi's whole session (KOBE-258: setup entries an older agent reported before Pi had written
+   * them, then a new Pi made other ones). Restoring would overwrite Pi's real session with
+   * nothing, so it is adopted: its entries are new roots next to the stale ones.
+   */
+  async #entriesSince(threadId: string, since: string | undefined): Promise<CommandOutcome> {
+    const outcome = await this.#getEntries(threadId, since);
+    if (outcome.ok || since === undefined || outcome.error.code !== "pi_rejected") return outcome;
+    const { teamId } = this.#host.target;
+    const conversation = await withTeam(this.#ctx.db, teamId, (tx) =>
+      threadHasConversation(tx, teamId, threadId),
+    );
+    if (conversation) return outcome;
+    this.#host.log.warn(
+      { thread_id: threadId, error: outcome.error.message.slice(0, 300) },
+      "Pi lost the mirrored cursor of a thread without a conversation; adopting its session",
+    );
+    return this.#getEntries(threadId, undefined);
+  }
+
   /** New entries of a thread since the last mirrored one; undefined when unavailable. */
   async fetchNewEntries(threadId: string): Promise<PiGetEntriesData | undefined> {
     const { teamId } = this.#host.target;
     const since = await withTeam(this.#ctx.db, teamId, (tx) =>
       lastMirroredEntryId(tx, teamId, threadId),
     );
-    const outcome = await this.#getEntries(threadId, since);
+    const outcome = await this.#entriesSince(threadId, since);
     if (!outcome.ok) {
-      this.#host.log.warn({ thread_id: threadId, code: outcome.error.code }, "entry sync failed");
+      // The sandbox's text is untrusted: logged (capped), never shown.
+      this.#host.log.warn(
+        {
+          thread_id: threadId,
+          code: outcome.error.code,
+          error: outcome.error.message.slice(0, 300),
+        },
+        "entry sync failed",
+      );
       return undefined;
     }
     const data = parseGetEntries(outcome.data);
@@ -233,7 +263,7 @@ export class CommandDelivery {
     const { teamId } = this.#host.target;
     const db = this.#ctx.db;
     const since = await withTeam(db, teamId, (tx) => lastMirroredEntryId(tx, teamId, threadId));
-    const outcome = await this.#getEntries(threadId, since);
+    const outcome = await this.#entriesSince(threadId, since);
     if (outcome.ok) {
       const data = parseGetEntries(outcome.data);
       if (data) {
@@ -254,7 +284,10 @@ export class CommandDelivery {
       return { ok: true };
     }
     if (since === undefined || outcome.error.code !== "pi_rejected") return outcome;
-    this.#host.log.warn({ thread_id: threadId }, "Pi session lost; restoring from Postgres");
+    this.#host.log.warn(
+      { thread_id: threadId, error: outcome.error.message.slice(0, 300) },
+      "Pi session lost; restoring from Postgres",
+    );
     let part = 0;
     for await (const { entries, final } of restoreParts(db, teamId, threadId)) {
       const restored = await this.#internal({

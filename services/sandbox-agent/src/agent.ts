@@ -457,6 +457,7 @@ export class Agent {
       this.#deps.logger.warn({ err: (error as Error).message, type: frame.type }, "command failed");
       outcome = fail("internal", "command failed in the sandbox agent");
     }
+    if (!outcome.ok) logRefusal(this.#deps.logger, frame, outcome);
     if (this.#wire.epoch !== epoch || !this.#wire.ready) {
       this.#deps.logger.debug({ command_id: commandId }, "result dropped: connection changed");
       return;
@@ -588,4 +589,26 @@ export function encodePiEvent(
   });
   if (!placeholder.ok) throw new Error("cannot encode placeholder pi.event");
   return placeholder.text;
+}
+
+/**
+ * A refused command, with Pi's own text (KOBE-258: a refused `get_entries` once lost a run's
+ * entries and nothing said why). The server never shows that text to users; the log keeps it.
+ */
+function logRefusal(
+  logger: WireLogger,
+  frame: ServerToSandboxFrame,
+  outcome: Extract<CommandOutcome, { ok: false }>,
+): void {
+  logger.info(
+    {
+      type: frame.type,
+      ...("thread_id" in frame ? { thread_id: frame.thread_id } : {}),
+      ...("run_id" in frame ? { run_id: frame.run_id } : {}),
+      ...(frame.type === "pi.command" ? { command: frame.command.type } : {}),
+      code: outcome.code,
+      error: outcome.message.slice(0, 500),
+    },
+    "command refused",
+  );
 }

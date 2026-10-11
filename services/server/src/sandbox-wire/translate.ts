@@ -15,6 +15,13 @@ import type { NewRunEvent } from "../event-stream/append.js";
 import { TOOL_INPUT_MAX_BYTES, TOOL_PREVIEW_MAX_CHARS } from "./constants.js";
 
 /**
+ * Why a run fails at settle: a kobe-models code (KOBE-41), or `model_output_limit` when the last
+ * assistant message stopped at the model's output limit (`stopReason: "length"`, KOBE-258): the
+ * reply is incomplete, so the run must not look completed.
+ */
+export type RunFailureCode = ModelRunErrorCode | "model_output_limit";
+
+/**
  * What one bridged Pi event means for Kobe (contract: `parseTranslatedPiEvent`, pi-events.ts).
  *
  * | Pi event                                     | Kobe effect                                         |
@@ -27,7 +34,8 @@ import { TOOL_INPUT_MAX_BYTES, TOOL_PREVIEW_MAX_CHARS } from "./constants.js";
  * | `tool_execution_end`                         | `tool.result` (text preview, capped)                |
  * | `turn_end`, `entry_appended`                 | mirror new session entries (`get_entries since`)    |
  * | `agent_settled`                              | mirror entries, then the run completes — or fails,  |
- * |                                              | when its last assistant message ended in error      |
+ * |                                              | when its last assistant message ended in error or   |
+ * |                                              | was cut off at the output limit (KOBE-258)          |
  * | anything else (incl. `kobe.event_dropped`)   | accepted, no effect                                 |
  *
  * Session entries are never taken from the event stream: Pi emits `entry_appended` only for
@@ -44,9 +52,9 @@ export interface Translation {
    * With `settled`: the run's last assistant message ended with `stopReason: "error"` (KOBE-41):
    * the model call failed for good (Pi's own retries included), so the run fails with this code —
    * kobe-models' (`parseKobeModelError`) or `model_error` for any other error text, which is
-   * untrusted and never shown.
+   * untrusted and never shown. `model_output_limit` when it stopped at the output limit.
    */
-  readonly failure?: ModelRunErrorCode;
+  readonly failure?: RunFailureCode;
   /** A known event type failed its schema: answered with `malformed_frame`, otherwise a no-op. */
   readonly invalid?: string;
   /** Produced events that failed their schema and were dropped (logged, never sent). */
@@ -114,7 +122,7 @@ export function createRunTranslator(options: {
 }): RunTranslator {
   let current: string | undefined;
   let lastAssistant: string | undefined;
-  let lastStop: ModelRunErrorCode | undefined;
+  let lastStop: RunFailureCode | undefined;
   const completed: string[] = [];
 
   const checked = (type: KobeEventType, payload: unknown): NewRunEvent | undefined => {
@@ -171,7 +179,9 @@ export function createRunTranslator(options: {
           lastStop =
             message.stopReason === "error"
               ? (parseKobeModelError(message.errorMessage) ?? "model_error")
-              : undefined;
+              : message.stopReason === "length"
+                ? "model_output_limit"
+                : undefined;
           if (current !== undefined) {
             completed.push(current);
             current = undefined;
