@@ -8,7 +8,7 @@ import type { TestBrowser } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 
 /**
- * KOBE-44: the catalog editor's model picker. Install admins list a provider's models through
+ * KOBE-44: the catalog editor's model picker. Site admins list a provider's models through
  * the gateway (Bifrost holds the key and reaches the provider); a refresh, which makes Bifrost
  * call the provider with the key, is audited and rate-limited. No key is ever returned.
  */
@@ -41,7 +41,7 @@ beforeAll(async () => {
   owner = await h.signIn("owner@discovery.test");
   member = await h.signIn("member@discovery.test");
   // The real test install: Ollama Cloud with an API key.
-  const added = await owner.post("/v1/install/models/providers", {
+  const added = await owner.post("/v1/site/models/providers", {
     kind: "ollama",
     name: "Ollama Cloud",
     base_url: "https://ollama.com",
@@ -51,7 +51,7 @@ beforeAll(async () => {
 }, 120_000);
 afterAll(() => h.close());
 
-const BASE = "/v1/install/models/providers/ollama/models";
+const BASE = "/v1/site/models/providers/ollama/models";
 
 async function refreshAudit() {
   const { rows } = await h.admin.query<{ target: Record<string, unknown> }>(
@@ -61,7 +61,7 @@ async function refreshAudit() {
 }
 
 describe("provider model listing", () => {
-  it("is for install admins only", async () => {
+  it("is for site admins only", async () => {
     expect((await member.get(BASE)).status).toBe(403);
     expect((await member.post(`${BASE}/refresh`)).status).toBe(403);
   });
@@ -138,8 +138,8 @@ describe("provider model listing", () => {
     } finally {
       bifrost.down = false;
     }
-    expect((await owner.get("/v1/install/models/providers/nope/models")).status).toBe(404);
-    expect((await owner.get("/v1/install/models/providers/Bad_Id/models")).status).toBe(404);
+    expect((await owner.get("/v1/site/models/providers/nope/models")).status).toBe(404);
+    expect((await owner.get("/v1/site/models/providers/Bad_Id/models")).status).toBe(404);
   });
 });
 

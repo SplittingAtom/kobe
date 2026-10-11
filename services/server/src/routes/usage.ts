@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { ActorContext } from "@kobe/protocol";
 import type { AuthVariables } from "../auth/session.js";
 import {
-  requireInstallPermission,
+  requireSitePermission,
   requireTeam,
   requireTeamPermission,
   type TeamVariables,
@@ -12,7 +12,7 @@ import {
 import type { ServerDeps } from "../deps.js";
 import {
   addTotals,
-  installUsage,
+  siteUsage,
   runsUsage,
   teamUsage,
   type Bucket,
@@ -75,14 +75,14 @@ export function teamUsageRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariabl
   return app;
 }
 
-/** Install usage dashboard (`/v1/install/usage`): Owner/Admins, every team summed. */
-export function installUsageRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
+/** Site usage dashboard (`/v1/site/usage`): Owner/Admins, every team summed. */
+export function siteUsageRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
-  app.use(requireInstallPermission("install.usage.read"));
+  app.use(requireSitePermission("site.usage.read"));
   app.get("/", async (c) => {
     const r = range(c);
     if (r instanceof Response) return r;
-    return c.json(await installUsage(deps.database.db, r));
+    return c.json(await siteUsage(deps.database.db, r));
   });
   return app;
 }
@@ -92,7 +92,7 @@ function actorOf(c: Context<{ Variables: TeamVariables }>): ActorContext {
   return {
     user_id: c.get("user").id,
     team_id: team.id,
-    install_role: c.get("installRole") ?? "user",
+    site_role: c.get("siteRole") ?? "user",
     team_role: team.role,
   };
 }

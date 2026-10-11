@@ -21,7 +21,7 @@ import { idSchema, timestampSchema, utf8ByteLength, uuidSchema } from "./common.
  * `memory.updated`, only once approved. `recall` is a read (`memory.read`), never needs approval.
  *
  * Switches (D24): booleans {@link memorySettingsSchema} `memory_enabled` and
- * `project_memory_enabled`, kept per team (team admins) and install-wide (install admins). The
+ * `project_memory_enabled`, kept per team (team admins) and site-wide (site admins). The
  * effective value is the AND of both levels (`project_memory_enabled` also needs `memory_enabled`).
  * Disabled: the scope is absent from `run.start.memory.scopes`, its index is not sent, and the
  * server answers `memory.put` / `memory.read` for it with error `memory_disabled`.
@@ -244,7 +244,7 @@ export function undoMemoryAction(e: {
  *   also for `project`: a human edit is not an agent write)
  * - `DELETE /v1/memory/:id` -> 204
  * - `POST   /v1/memory/:id/restore` body {@link memoryRestoreRequestSchema} -> detail (Undo)
- * - `GET/PUT /v1/memory/settings?level=team|install` -> {@link memorySettingsSchema}
+ * - `GET/PUT /v1/memory/settings?level=team|site` -> {@link memorySettingsSchema}
  */
 export const memoryDocSummarySchema = z.strictObject({
   id: uuidSchema,

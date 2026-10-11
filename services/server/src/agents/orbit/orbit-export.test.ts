@@ -7,7 +7,7 @@ import { mapAgentVersionToOrbit, orbitExportToYaml } from "./orbit-export.js";
 import { orbitExperimentSchema } from "./orbit-schema.js";
 
 const NOW = new Date("2026-10-02T12:00:00Z");
-const FLOOR: PublishFloor = { scope: "team", install: [], team: [], approvalFloor: "auto" };
+const FLOOR: PublishFloor = { scope: "team", site: [], team: [], approvalFloor: "auto" };
 
 const definition = (
   frontmatter: Partial<AgentDefinition["frontmatter"]> = {},

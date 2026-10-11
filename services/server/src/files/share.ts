@@ -343,7 +343,7 @@ async function markPending(
   );
 }
 
-/** Pure checks of the frame against the install's limits; undefined = fine. */
+/** Pure checks of the frame against the site's limits; undefined = fine. */
 function checkFrame(
   deps: FileShareDeps,
   frame: FileShareFrame,

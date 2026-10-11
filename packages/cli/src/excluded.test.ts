@@ -1,11 +1,11 @@
-import { INSTALL_WIDE_TABLES, isTeamTable } from "@kobe/db";
+import { SITE_WIDE_TABLES, isTeamTable } from "@kobe/db";
 import { describe, expect, it } from "vitest";
 import { EXCLUDED_TABLES, isExcluded } from "./excluded.js";
 
 describe("tables excluded from backups", () => {
-  it("are real install-wide tables (a rename must update this list)", () => {
+  it("are real site-wide tables (a rename must update this list)", () => {
     for (const name of Object.keys(EXCLUDED_TABLES)) {
-      expect(INSTALL_WIDE_TABLES).toContain(name);
+      expect(SITE_WIDE_TABLES).toContain(name);
       expect(isTeamTable(name)).toBe(false);
     }
   });

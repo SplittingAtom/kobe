@@ -26,10 +26,10 @@ const STALE_CONNECTION_SECONDS = WIRE_DEFAULTS.staleConnectionMs / 1000;
  * `POST /v1/approvals/{id}` (§6.1, D29): the run's user allows or denies a pending approval.
  *
  * - **Who:** only the run's user (the thread owner whose sandbox and credentials run the call;
- *   D8 gives no role the power to consent for someone else, and install admins can't read team
+ *   D8 gives no role the power to consent for someone else, and site admins can't read team
  *   content). Anyone else gets 404, as for a thread they can't see.
  * - **Allow** signs `HMAC(team, run, tool_call_id, tool, token expiry, canonical input)` with the
- *   install's approval key (`@kobe/protocol` approval.ts), over the canonical input stored when the
+ *   site's approval key (`@kobe/protocol` approval.ts), over the canonical input stored when the
  *   approval was requested — the exact bytes the sandbox asked about. Built-in and kobe tools have
  *   no downstream verifier (the `policy.result` is the authorisation), so their approval is marked
  *   used at once; MCP approvals stay consumable once, by the MCP proxy (KOBE-58).

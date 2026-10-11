@@ -17,7 +17,7 @@ import {
 import { users } from "./auth.js";
 import { teams } from "./teams.js";
 
-// Models and the model gateway (KOBE-40, spec D6, D30). Install admins own the **providers** (with
+// Models and the model gateway (KOBE-40, spec D6, D30). Site admins own the **providers** (with
 // their API keys) and the **model catalog** (aliases such as `fast`, `smart`, `local` mapped to a
 // provider's model); team admins enable a subset of the catalog with one default (`team_models`).
 // Kobe is the source of truth: the server reconciles Bifrost (the gateway) from these rows, and
@@ -62,7 +62,7 @@ export type InputModality = (typeof INPUT_MODALITIES)[number];
  * Bounds of a catalog model's output limit and context window in tokens (KOBE-259). The output
  * ceiling matches the model gateway's per-call charge ceiling (`usage/charge.ts`), so a call's
  * budget reservation is never less than the output it may produce; the window's ceiling is above
- * any model offered today. Null means the install-wide default (server config, chart value).
+ * any model offered today. Null means the site-wide default (server config, chart value).
  */
 export const MODEL_OUTPUT_TOKENS_RANGE = [256, 131_072] as const;
 export const MODEL_CONTEXT_WINDOW_RANGE = [1_024, 10_000_000] as const;
@@ -78,7 +78,7 @@ export const MAX_USD_PER_MTOK = 10_000;
 const price = () => numeric({ precision: 14, scale: 6, mode: "number" });
 
 /**
- * Install-wide (†): model providers and their API keys. The key is sealed with the server's
+ * Site-wide (†): model providers and their API keys. The key is sealed with the server's
  * provider-key secret (`secret-box.ts`, AAD bound to the provider id) and never returned by any
  * API; `key_revision` counts key changes (the gateway's copy carries it, so a change is pushed).
  */
@@ -123,7 +123,7 @@ export const modelProviders = pgTable(
 );
 
 /**
- * Install-wide (†): the model catalog (the ceiling teams choose from). Deleting an alias removes
+ * Site-wide (†): the model catalog (the ceiling teams choose from). Deleting an alias removes
  * every team's enablement of it (cascade into `team_models`, audited); a provider with catalog
  * entries cannot be deleted.
  */
@@ -155,7 +155,7 @@ export const modelCatalog = pgTable(
       .default(sql`'{text}'::text[]`),
     /**
      * The most output tokens one call may ask for (KOBE-259; Pi's `maxTokens`, sent as the
-     * request's `max_tokens`). Reasoning tokens count against it. Null: the install default
+     * request's `max_tokens`). Reasoning tokens count against it. Null: the site default
      * for the model's kind (see {@link reasoning}).
      */
     maxOutputTokens: integer(),
@@ -265,7 +265,7 @@ export const modelGatewayKeys = pgTable(
 );
 
 /**
- * Install-wide (†), one row: gateway sync progress. Every committed admin change bumps
+ * Site-wide (†), one row: gateway sync progress. Every committed admin change bumps
  * `desired_version`; the sync records the version a successful pass applied, so "Bifrost reflects
  * every change" is `synced_version >= desired_version` (admin status, e2e).
  */

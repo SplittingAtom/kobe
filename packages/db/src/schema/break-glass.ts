@@ -36,9 +36,9 @@ export const BREAK_GLASS_REQUEST_TTL_HOURS = 24;
 export const BREAK_GLASS_REASON_MAX = 2000;
 
 /**
- * Install-wide (§5.4 `break_glass_grants†`): an install admin's request for read-only access to one
+ * Site-wide (§5.4 `break_glass_grants†`): a site admin's request for read-only access to one
  * team's content, optionally narrowed to one user or one thread (D10). It must exist before any
- * team context does and be visible to every install admin who may approve it, so it is not a team
+ * team context does and be visible to every site admin who may approve it, so it is not a team
  * table; it holds no team content (the reason is the requester's own text; `thread_id` is an id).
  *
  * The two-person rule, the approver's role, the time box and the allowed status transitions are
@@ -55,11 +55,11 @@ export const breakGlassGrants = pgTable(
     teamId: uuid()
       .notNull()
       .references(() => teams.id),
-    /** The install admin who asked; the only person who can read with the grant. */
+    /** The site admin who asked; the only person who can read with the grant. */
     adminId: uuid()
       .notNull()
       .references(() => users.id),
-    /** The second install admin (or Owner) who approved; the requester only when self-approved. */
+    /** The second site admin (or Owner) who approved; the requester only when self-approved. */
     approverId: uuid().references(() => users.id),
     /** Narrows the grant to threads owned by one user (the subject). */
     userId: uuid().references(() => users.id),

@@ -9,7 +9,7 @@ import {
 
 /**
  * Budget state for one member of one team (KOBE-42, D30), read inside that team's transaction:
- * every budget that applies (install, team, the member's own), each with its period's spend, and
+ * every budget that applies (site, team, the member's own), each with its period's spend, and
  * the member's request rate. Spend comes from the daily counters the `run_usage` trigger keeps.
  * Shared by the model-gateway's call gate, the run orchestrator's new-run gate and the server's
  * budget monitor, so all three judge the same numbers.
@@ -54,7 +54,7 @@ export function lineUsedUp(line: BudgetLine): boolean {
 
 export interface MemberBudgetState {
   readonly lines: readonly BudgetLine[];
-  /** Effective per-user requests per minute (the install's, or the team's lower one). */
+  /** Effective per-user requests per minute (the site's, or the team's lower one). */
   readonly requestsPerMinute: number;
 }
 
@@ -144,8 +144,8 @@ const spendColumns = (starts: { month: string; day: string }) =>
       COALESCE(sum(s.tokens) FILTER (WHERE s.day >= ${starts.month}::date), 0) AS month_tokens,
       COALESCE(sum(s.tokens) FILTER (WHERE s.day = ${starts.day}::date), 0) AS day_tokens`;
 
-/** The install limits and the install's spend this month and today (any team context). */
-async function installPart(
+/** The site limits and the site's spend this month and today (any team context). */
+async function sitePart(
   tx: KobeTx,
   starts: { readonly month: string; readonly day: string },
 ): Promise<{ row: Row; rpm: number }> {
@@ -161,7 +161,7 @@ async function installPart(
 }
 
 /**
- * Every budget line of one team: install, team, and each member budget (with that member's spend).
+ * Every budget line of one team: site, team, and each member budget (with that member's spend).
  * Must run inside the team's transaction (`withTeam`).
  */
 export function loadTeamBudgetLines(
@@ -179,7 +179,7 @@ async function budgetLines(
   now: Date,
 ): Promise<{ readonly lines: readonly BudgetLine[]; readonly requestsPerMinute: number }> {
   const starts = periodStarts(now);
-  const install = await installPart(tx, starts);
+  const site = await sitePart(tx, starts);
   const budgets = await tx.execute<Row>(sql`
     SELECT b.user_id, b.monthly_usd, b.daily_usd, b.monthly_tokens, b.daily_tokens,
            b.member_monthly_usd, b.member_daily_usd, b.member_monthly_tokens, b.member_daily_tokens,
@@ -190,8 +190,8 @@ async function budgetLines(
                        AND (b.user_id IS NULL OR s.user_id = b.user_id)) sp
      WHERE b.team_id = ${teamId}::uuid
        ${member === undefined ? sql`` : sql`AND (b.user_id IS NULL OR b.user_id = ${member}::uuid)`}`);
-  const lines = linesOf("install", undefined, install.row, starts);
-  let rpm = install.rpm;
+  const lines = linesOf("install", undefined, site.row, starts);
+  let rpm = site.rpm;
   const own = new Set<string>();
   let defaults: Row | undefined;
   for (const r of budgets.rows) {
@@ -232,7 +232,7 @@ function memberDefaults(r: Row): Row | undefined {
   return Object.values(d).some((v) => v !== null && v !== undefined) ? d : undefined;
 }
 
-/** The lines that apply to one member: install, team and their own (inside `withTeam`). */
+/** The lines that apply to one member: site, team and their own (inside `withTeam`). */
 export async function loadMemberBudgetState(
   tx: KobeTx,
   teamId: string,

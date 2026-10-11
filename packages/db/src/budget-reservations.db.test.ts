@@ -108,7 +108,7 @@ describe("kobe_reserve_budget", () => {
     expect(await count(teamA)).toBeGreaterThan(1);
   });
 
-  it("counts the install line across teams, with the install-wide rows", async () => {
+  it("counts the site line across teams, with the site-wide rows", async () => {
     await app.db.execute(sql`DELETE FROM install_budget_reservations`);
     const lines = [line("install", "tokens", 100)];
     expect(await reserve(teamA, randomUUID(), randomUUID(), 60, lines, 60_000, 1)).toBe("ok");
@@ -137,8 +137,8 @@ describe("kobe_reserve_budget", () => {
   });
 });
 
-describe("install holds are scoped to their team", () => {
-  const installRows = async () =>
+describe("site holds are scoped to their team", () => {
+  const siteRows = async () =>
     (
       await app.db.execute<{ team_key: string; call_id: string; member_key: string; n: string }>(
         sql`SELECT team_key, call_id, member_key, tokens AS n FROM install_budget_reservations`,
@@ -151,20 +151,20 @@ describe("install holds are scoped to their team", () => {
     const who = randomUUID();
     const call = randomUUID();
     expect(await reserve(teamA, who, call, 10, lines, 60_000, 1)).toBe("ok");
-    const [row] = await installRows();
+    const [row] = await siteRows();
     expect(row?.team_key).toMatch(/^[0-9a-f]{64}$/);
     expect(row?.member_key).toMatch(/^[0-9a-f]{64}$/);
     expect(JSON.stringify(row)).not.toContain(teamA);
     expect(JSON.stringify(row)).not.toContain(who);
     // Team B ends the same call id: nothing of A's changes.
     expect(await settle(teamB, [call], null)).toBe(0);
-    expect(await installRows()).toHaveLength(1);
+    expect(await siteRows()).toHaveLength(1);
     // Team B reserves the same call id: its hold is its own row, A's is untouched.
     expect(await reserve(teamB, who, call, 99, lines, 60_000, 1)).toBe("ok");
-    const rows = await installRows();
+    const rows = await siteRows();
     expect(rows.map((r) => Number(r.n)).sort()).toEqual([10, 99]);
     expect(await settle(teamA, [call], null)).toBeGreaterThan(0);
-    expect((await installRows()).map((r) => Number(r.n))).toEqual([99]);
+    expect((await siteRows()).map((r) => Number(r.n))).toEqual([99]);
   });
 });
 

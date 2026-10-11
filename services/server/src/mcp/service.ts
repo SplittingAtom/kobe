@@ -43,7 +43,7 @@ export interface McpServiceOptions {
   readonly runContext: RunPolicyContextSource;
   /** KOBE-37 seam; deny-by-default until approvals are wired. */
   readonly approvals?: McpApprovalVerifier;
-  /** Install envelope (KOBE-107) that opens users' sealed keys; unset: no credential is served. */
+  /** Site envelope (KOBE-107) that opens users' sealed keys; unset: no credential is served. */
   readonly envelope?: Envelope;
   readonly now?: () => Date;
   /** Pinned-address client for OAuth token refresh (KOBE-110); unset: expired tokens are not refreshed. */

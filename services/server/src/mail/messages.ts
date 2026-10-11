@@ -8,7 +8,7 @@ export function oneLine(value: string, max = 100): string {
 
 const ROLE_NAMES = { team_admin: "team admin", builder: "builder", member: "member" } as const;
 
-export function installInviteMessage(input: {
+export function siteInviteMessage(input: {
   readonly to: string;
   readonly inviterName: string;
   readonly link: string;

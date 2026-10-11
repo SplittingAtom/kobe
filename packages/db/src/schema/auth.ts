@@ -13,7 +13,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-// Better Auth tables (install-wide, spec D7). Field names follow Better Auth's model fields; the
+// Better Auth tables (site-wide, spec D7). Field names follow Better Auth's model fields; the
 // client's snake_case casing maps them to columns. Ids are UUIDs (advanced.database.generateId).
 const createdAt = () => timestamp({ withTimezone: true }).notNull().defaultNow();
 const updatedAt = () => timestamp({ withTimezone: true }).notNull().defaultNow();
@@ -141,14 +141,14 @@ export const rateLimits = pgTable("rate_limits", {
   lastRequest: bigint({ mode: "number" }).notNull(),
 });
 
-export const installRole = pgEnum("install_role", ["owner", "admin"]);
+export const installRole = pgEnum("install_role", ["owner", "admin"]); // site-identifiers: allow (KOBE-256)
 
-/** Install roles (spec D8): one Owner (enforced), any number of Admins; absent row = User. */
+/** Site roles (spec D8): one Owner (enforced), any number of Admins; absent row = User. */
 export const installRoles = pgTable(
   "install_roles",
   {
     userId: userRef(),
-    role: installRole().notNull(),
+    role: installRole().notNull(), // site-identifiers: allow (KOBE-256)
     createdAt: createdAt(),
   },
   (t) => [
@@ -159,7 +159,7 @@ export const installRoles = pgTable(
   ],
 );
 
-/** Install-wide settings (e.g. require_2fa), one row per key. */
+/** Site-wide settings (e.g. require_2fa), one row per key. */
 export const installSettings = pgTable("install_settings", {
   key: text().primaryKey(),
   value: text().notNull(),

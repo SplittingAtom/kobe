@@ -5,10 +5,10 @@ import { recordAudit } from "../audit/record.js";
 import { findAgent, setAgentStatus, type AgentRecord } from "./store.js";
 
 /**
- * Agent inventory for team admins (KOBE-86, spec D19): the team's agents plus the install-wide
+ * Agent inventory for team admins (KOBE-86, spec D19): the team's agents plus the site-wide
  * agents (members' personal agents, gallery agents) that threads or schedules of this team use,
  * with usage counts and the team's schedules per agent (KOBE-180). Every query states `team_id`
- * explicitly, on top of `withTeam()` (break-glass policy). A personal agent is install-wide data, so a team admin suspends it for this team only
+ * explicitly, on top of `withTeam()` (break-glass policy). A personal agent is site-wide data, so a team admin suspends it for this team only
  * (`team_agent_suspensions`); team agents use their own `status`.
  */
 
@@ -39,7 +39,7 @@ export interface InventoryItem {
   readonly name: string;
   readonly ownerUserId: string | null;
   readonly ownerName: string | null;
-  /** Effective status in this team: suspended here or install-wide. */
+  /** Effective status in this team: suspended here or site-wide. */
   readonly status: "active" | "suspended";
   readonly archivedAt: string | null;
   readonly currentVersion: number | null;
@@ -70,7 +70,7 @@ export interface InventorySchedule {
 /**
  * Latest Orbit result of an agent. Team and personal agents: this team's newest eval (`evaluating`
  * while one runs, `errored` when it could not finish, so no rate); a personal agent evaluated in
- * another team shows `none` here. Gallery agents: the install-level score of the current version.
+ * another team shows `none` here. Gallery agents: the site-level score of the current version.
  */
 export interface InventoryScore {
   readonly status: "none" | "evaluating" | "passed" | "blocked" | "errored";
@@ -141,8 +141,8 @@ export function toInventoryItem(
   };
 }
 
-/** Install-wide agents this team uses: pinned by a live thread or by a schedule (KOBE-180). */
-const usedInstallAgentIds = (teamId: string) => sql`
+/** Site-wide agents this team uses: pinned by a live thread or by a schedule (KOBE-180). */
+const usedSiteAgentIds = (teamId: string) => sql`
   SELECT t.install_agent_id FROM threads t
    WHERE t.team_id = ${teamId} AND t.install_agent_id IS NOT NULL AND t.deleted_at IS NULL
      AND NOT t.is_test
@@ -160,7 +160,7 @@ const inventoryRows = (teamId: string) => sql`
          i.current_version, i.archived_at
     FROM install_agents i
     LEFT JOIN team_agent_suspensions s ON s.team_id = ${teamId} AND s.agent_id = i.id
-   WHERE i.id IN (${usedInstallAgentIds(teamId)})`;
+   WHERE i.id IN (${usedSiteAgentIds(teamId)})`;
 
 export async function listInventory(
   db: KobeDb,
@@ -270,15 +270,15 @@ async function schedulesOf(
   return grouped;
 }
 
-/** An install-wide agent this team's threads or schedules use (the only ones a team may suspend). */
-async function usedInstallAgent(
+/** A site-wide agent this team's threads or schedules use (the only ones a team may suspend). */
+async function usedSiteAgent(
   tx: KobeTx,
   teamId: string,
   id: string,
 ): Promise<{ slug: string; scope: "personal" | "gallery" } | null> {
   const result = await tx.execute<{ slug: string; scope: "personal" | "gallery" }>(sql`
     SELECT i.slug, i.scope::text AS scope FROM install_agents i
-     WHERE i.id = ${id}::uuid AND i.id IN (${usedInstallAgentIds(teamId)})`);
+     WHERE i.id = ${id}::uuid AND i.id IN (${usedSiteAgentIds(teamId)})`);
   return result.rows[0] ?? null;
 }
 
@@ -302,7 +302,7 @@ export async function setInventoryStatus(
     return updated ? { ok: true, scope: "team" } : { ok: false, error: "not_found" };
   }
   return withTeam(db, teamId, async (tx): Promise<SuspendResult> => {
-    const agent = await usedInstallAgent(tx, teamId, id);
+    const agent = await usedSiteAgent(tx, teamId, id);
     if (!agent) return { ok: false, error: "not_found" };
     if (status === "suspended") {
       await tx
@@ -323,7 +323,7 @@ export async function setInventoryStatus(
   });
 }
 
-/** True when the team suspended this install-wide agent (run start and pinning check it). */
+/** True when the team suspended this site-wide agent (run start and pinning check it). */
 export async function suspendedInTeam(tx: KobeTx, teamId: string, id: string): Promise<boolean> {
   const [row] = await tx
     .select({ id: teamAgentSuspensions.agentId })

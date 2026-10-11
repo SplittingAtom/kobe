@@ -96,7 +96,7 @@ export interface CurrentUser {
 export interface InstallAccess {
   readonly console: "install";
   readonly user: CurrentUser;
-  readonly installRole: InstallRole;
+  readonly siteRole: InstallRole;
 }
 
 export interface TeamAccess {

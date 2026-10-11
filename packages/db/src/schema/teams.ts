@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { check, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
-/** Install-wide. A team's slug names its sandbox namespace `kobe-team-<slug>` (≤ 63 chars). */
+/** Site-wide. A team's slug names its sandbox namespace `kobe-team-<slug>` (≤ 63 chars). */
 export const teams = pgTable(
   "teams",
   {

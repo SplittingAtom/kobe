@@ -19,7 +19,7 @@ import type { AgentScope } from "./access.js";
 /**
  * Agent definitions in Postgres (spec D19). Team agents live in the team table `team_agents` and
  * are always read and written inside `withTeam`; personal and gallery agents live in the
- * install-wide `install_agents`, where every query is pinned to its scope (and, for personal
+ * site-wide `install_agents`, where every query is pinned to its scope (and, for personal
  * agents, to the owner). A row is the agent's editable draft; published versions, archive and
  * thread pins are `versions.ts` (KOBE-46).
  */
@@ -76,7 +76,7 @@ const columnsOf = (t: typeof teamAgents | typeof installAgents) => ({
   updatedAt: t.updatedAt,
 });
 export const TEAM = columnsOf(teamAgents);
-export const INSTALL = columnsOf(installAgents);
+export const SITE = columnsOf(installAgents);
 
 export type Row = Omit<AgentRecord, "scope" | "frontmatter"> & {
   frontmatter: Record<string, unknown>;
@@ -92,10 +92,10 @@ export const toRecord = (scope: AgentScope, row: Row): AgentRecord => ({
 const OWNER_ID = z.uuid();
 
 /**
- * The only wall between users' personal agents: install_agents has no RLS (install-wide, D6), so
+ * The only wall between users' personal agents: install_agents has no RLS (site-wide, D6), so
  * every install_agents query goes through here and a personal location must name a valid owner.
  */
-export function installWhere(location: Exclude<AgentLocation, { scope: "team" }>) {
+export function siteWhere(location: Exclude<AgentLocation, { scope: "team" }>) {
   if (location.scope === "gallery") return eq(installAgents.scope, "gallery");
   if (!OWNER_ID.safeParse(location.ownerUserId).success) {
     throw new Error("store: personal agents need an owner (a user id)");
@@ -109,7 +109,7 @@ export function installWhere(location: Exclude<AgentLocation, { scope: "team" }>
 /** How a definition arrived (audit): a JSON body, an imported agent file, or a fork. */
 export type AgentSource = "json" | "import" | "fork";
 
-/** The team an agent's audit events belong to: team agents only (D6); others are install-level. */
+/** The team an agent's audit events belong to: team agents only (D6); others are site-level. */
 export const auditTeam = (location: AgentLocation) =>
   location.scope === "team" ? location.teamId : null;
 
@@ -124,7 +124,7 @@ export async function listAgents(db: KobeDb, location: AgentLocation): Promise<A
   const rows: Row[] =
     location.scope === "team"
       ? await withTeam(db, location.teamId, (tx) => tx.select(TEAM).from(teamAgents))
-      : await db.select(INSTALL).from(installAgents).where(installWhere(location));
+      : await db.select(SITE).from(installAgents).where(siteWhere(location));
   return rows
     .map((r) => toRecord(location.scope, r))
     .sort(
@@ -161,9 +161,9 @@ export async function findAgent(
           tx.select(TEAM).from(teamAgents).where(eq(teamAgents.id, id)),
         )
       : await db
-          .select(INSTALL)
+          .select(SITE)
           .from(installAgents)
-          .where(and(installWhere(location), eq(installAgents.id, id)));
+          .where(and(siteWhere(location), eq(installAgents.id, id)));
   return row ? toRecord(location.scope, row) : null;
 }
 
@@ -230,7 +230,7 @@ export async function createAgent(
                 scope: location.scope,
                 ownerUserId: location.scope === "personal" ? location.ownerUserId : null,
               })
-              .returning(INSTALL);
+              .returning(SITE);
       if (!row) throw new Error("agent insert returned no row");
       await recordAudit(tx, {
         action: "agent.created",
@@ -273,7 +273,7 @@ async function takenSlugs(
     : tx
         .select({ slug: installAgents.slug, archivedAt: installAgents.archivedAt })
         .from(installAgents)
-        .where(installWhere(location));
+        .where(siteWhere(location));
 }
 
 /**
@@ -314,7 +314,7 @@ export async function updateAgent(
             .set({ ...set, revision: sql`${installAgents.revision} + 1` })
             .where(
               and(
-                installWhere(location),
+                siteWhere(location),
                 eq(installAgents.id, id),
                 isNull(installAgents.archivedAt),
                 expectedRevision === undefined
@@ -322,7 +322,7 @@ export async function updateAgent(
                   : eq(installAgents.revision, expectedRevision),
               ),
             )
-            .returning(INSTALL);
+            .returning(SITE);
     if (row) {
       await recordAudit(tx, {
         action: "agent.updated",
@@ -356,9 +356,9 @@ export async function lockAgent(
     location.scope === "team"
       ? await tx.select(TEAM).from(teamAgents).where(eq(teamAgents.id, id)).for("update")
       : await tx
-          .select(INSTALL)
+          .select(SITE)
           .from(installAgents)
-          .where(and(installWhere(location), eq(installAgents.id, id)))
+          .where(and(siteWhere(location), eq(installAgents.id, id)))
           .for("update");
   return row ? toRecord(location.scope, row) : null;
 }
@@ -381,8 +381,8 @@ export async function setAgentStatus(
         : await tx
             .update(installAgents)
             .set({ status, updatedAt: new Date() })
-            .where(and(installWhere(location), eq(installAgents.id, id)))
-            .returning(INSTALL);
+            .where(and(siteWhere(location), eq(installAgents.id, id)))
+            .returning(SITE);
     if (!row) return null;
     await recordAudit(tx, {
       action: "agent.status_changed",

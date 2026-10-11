@@ -172,7 +172,7 @@ export interface RunPolicyContext {
   /** Effective approval mode (KOBE-30 `runs.approval_mode`); undefined → `ask-on-write` (D29). */
   readonly approvalMode?: ApprovalMode;
   /**
-   * The loosest mode a run may use (install and team floor, the stricter of both). Required: when
+   * The loosest mode a run may use (site and team floor, the stricter of both). Required: when
    * it cannot be determined the call is denied.
    */
   readonly floor: ApprovalMode;

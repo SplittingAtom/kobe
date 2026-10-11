@@ -18,7 +18,7 @@ const spend = (month: number, day: number, monthTokens = 0, dayTokens = 0) => ({
 const none = { monthly_usd: null, daily_usd: null, monthly_tokens: null, daily_tokens: null };
 const BUDGETS = {
   period: { month: "2026-10-01", day: "2026-10-04" },
-  install: {
+  site: {
     user_requests_per_minute: 60,
     percent_used: { month_usd: 12, day_usd: null, month_tokens: null, day_tokens: null },
   },
@@ -150,8 +150,8 @@ describe("install budget (KOBE-42)", () => {
   it("saves the install's dollar and token budgets and per-user rate", async () => {
     const limits = { ...none, user_requests_per_minute: 60, updated_at: "2026-10-01T00:00:00Z" };
     const calls = stubApi({
-      "GET /v1/install/budget": [200, limits],
-      "PUT /v1/install/budget": [200, { ...limits, monthly_usd: 500 }],
+      "GET /v1/site/budget": [200, limits],
+      "PUT /v1/site/budget": [200, { ...limits, monthly_usd: 500 }],
     });
     renderInstall(<InstallBudget />);
     await userEvent.type(await screen.findByLabelText("Site Monthly ($)"), "500");

@@ -64,7 +64,7 @@ beforeAll(async () => {
   ]);
   await owner.close();
   app = createDb(inject("appUrl"));
-  // Alice is an install admin (install limits are changed by one, KOBE-42 review).
+  // Alice is a site admin (site limits are changed by one, KOBE-42 review).
   await app.db.insert(users).values([
     { id: alice, name: "Alice", email: `${alice}@b.test` },
     { id: bob, name: "Bob", email: `${bob}@b.test` },
@@ -89,7 +89,7 @@ beforeAll(async () => {
 afterAll(() => app.close());
 
 describe("daily spend counters (run_usage trigger)", () => {
-  it("adds every inserted call to the team's (day, user) row and the install's day", async () => {
+  it("adds every inserted call to the team's (day, user) row and the site's day", async () => {
     const before = await app.db
       .select()
       .from(installModelSpendDaily)
@@ -128,7 +128,7 @@ describe("daily spend counters (run_usage trigger)", () => {
 });
 
 describe("budget state", () => {
-  it("lists install, team and member budgets with their period's spend; the widest used-up one stops", async () => {
+  it("lists site, team and member budgets with their period's spend; the widest used-up one stops", async () => {
     await app.db
       .update(installModelLimits)
       .set({ monthlyUsd: 1_000_000, userRequestsPerMinute: 100, updatedBy: alice })
@@ -162,7 +162,7 @@ describe("budget state", () => {
     const aliceState = await withTeam(app.db, teamA, (tx) =>
       loadMemberBudgetState(tx, teamA, alice, now),
     );
-    // Alice sees the install's, the team's and her own budget, not Bob's.
+    // Alice sees the site's, the team's and her own budget, not Bob's.
     expect(aliceState.lines.filter((l) => l.scope === "user")).toHaveLength(1);
     // The team's daily budget ($3) is used up today: the team level stops (wider than Alice's).
     expect(exhaustedLine(aliceState.lines)).toMatchObject({ scope: "team", period: "day" });
@@ -353,7 +353,7 @@ describe("integrity against the app role (KOBE-42 review)", () => {
     ).toBe("23514");
   });
 
-  it("the install limits are changed by an install admin only", async () => {
+  it("the site limits are changed by a site admin only", async () => {
     expect(
       await refused(app.db.update(installModelLimits).set({ monthlyUsd: null, updatedBy: bob })),
     ).toBe("42501");

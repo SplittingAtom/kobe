@@ -438,7 +438,7 @@ describe("switches", () => {
     expect(await refusals(w.team)).toContain("put:memory_disabled");
   });
 
-  it("the install switch is ANDed with the team's", async () => {
+  it("the site switch is ANDed with the team's", async () => {
     const w = await world();
     const sb = await started(w);
     await fx.admin.query(
@@ -670,7 +670,7 @@ describe("project memory", () => {
     },
   );
 
-  it("uses the effective mode: an install floor above the run's own `auto` still asks", async () => {
+  it("uses the effective mode: a site floor above the run's own `auto` still asks", async () => {
     const w = await world();
     await inProject(w);
     await join(w);

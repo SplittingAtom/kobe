@@ -13,7 +13,7 @@ import {
 import { recordAudit } from "../audit/record.js";
 
 /**
- * The install skill blocklist (KOBE-81, spec D22): SHA-256 hashes of canonical skill bundles that
+ * The site skill blocklist (KOBE-81, spec D22): SHA-256 hashes of canonical skill bundles that
  * never load anywhere. Every enforcement point reads the table itself (upload, review decision,
  * run start); nothing is cached, so a new entry takes effect on the next request in every team.
  */

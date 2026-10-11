@@ -38,7 +38,7 @@ export interface StoredFinding {
 
 export const skillReviewScope = ["team", "personal"] as const;
 
-/** Install-wide: the scan of a personal skill version, made with the (immutable) version. */
+/** Site-wide: the scan of a personal skill version, made with the (immutable) version. */
 export const installSkillScans = pgTable(
   "install_skill_scans",
   {

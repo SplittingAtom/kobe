@@ -28,7 +28,7 @@ import { sameUrl } from "./oauth/discovery.js";
 
 /**
  * Per-user API-key grants (KOBE-108, D27: no shared team credentials; OAuth tokens KOBE-109). A user stores their own key
- * for an `api_key` connector their team enabled. The key is sealed with the install envelope
+ * for an `api_key` connector their team enabled. The key is sealed with the site envelope
  * (KOBE-107, bound to team + user + connector) before it reaches Postgres, is never returned by
  * any API (callers get {@link GrantSummary}: a masked hint and timestamps), and is decrypted only
  * by {@link revealCredential}, which the internal API hands to the MCP proxy for the run's own user.
@@ -554,7 +554,7 @@ async function dropIfUnchanged(
 }
 
 /**
- * The install admin's OWN key for a connector, for a pinning probe (pins are install-wide trust,
+ * The site admin's OWN key for a connector, for a pinning probe (pins are site-wide trust,
  * so only an admin's action may probe with a grant, and only with that admin's grant). Looks
  * through the admin's teams; never another user's key. Undefined when they have none.
  */

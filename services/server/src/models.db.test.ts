@@ -22,12 +22,12 @@ import type { TestBrowser } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 
 /**
- * KOBE-40: install model admin (providers with write-only keys, catalog), team enablement, audit,
+ * KOBE-40: site model admin (providers with write-only keys, catalog), team enablement, audit,
  * and the gateway sync (Bifrost faked in memory; the real one is exercised by e2e and the
  * `bifrost.int.test.ts` check against a local binary).
  */
 const PROVIDER_SECRET = "p".repeat(40);
-/** Install defaults for models without catalog limits (chart values; KOBE-259). */
+/** Site defaults for models without catalog limits (chart values; KOBE-259). */
 const TOKEN_DEFAULTS = {
   maxOutputTokens: 12_000,
   reasoningMaxOutputTokens: 48_000,
@@ -39,7 +39,7 @@ const vkBox = new SecretBox(VK_SECRET, VIRTUAL_KEY_PURPOSE);
 const logger = pino({ level: "silent" });
 
 let h: Harness;
-const ids = { owner: "", installAdmin: "", alice: "", bob: "", dave: "" };
+const ids = { owner: "", siteAdmin: "", alice: "", bob: "", dave: "" };
 let as: Record<keyof typeof ids, TestBrowser>;
 let finance = "";
 let marketing = "";
@@ -87,7 +87,7 @@ beforeAll(async () => {
     modelTokenDefaults: TOKEN_DEFAULTS,
   });
   ids.owner = await h.createUser("owner@models.test", "owner");
-  ids.installAdmin = await h.createUser("admin@models.test", "admin");
+  ids.siteAdmin = await h.createUser("admin@models.test", "admin");
   ids.alice = await h.createUser("alice@models.test");
   ids.bob = await h.createUser("bob@models.test");
   ids.dave = await h.createUser("dave@models.test");
@@ -107,7 +107,7 @@ beforeAll(async () => {
   );
   as = {
     owner: await h.signIn("owner@models.test"),
-    installAdmin: await h.signIn("admin@models.test"),
+    siteAdmin: await h.signIn("admin@models.test"),
     alice: await h.signIn("alice@models.test"),
     bob: await h.signIn("bob@models.test"),
     dave: await h.signIn("dave@models.test"),
@@ -124,10 +124,10 @@ beforeAll(async () => {
 }, 120_000);
 afterAll(() => h.close());
 
-const MODELS = "/v1/install/models";
+const MODELS = "/v1/site/models";
 
-describe("install providers", () => {
-  it("is for install admins only", async () => {
+describe("site providers", () => {
+  it("is for site admins only", async () => {
     expect((await as.alice.get(MODELS)).status).toBe(403);
     expect(
       (await as.alice.post(`${MODELS}/providers`, { kind: "openai", name: "x", api_key: "k" }))
@@ -136,7 +136,7 @@ describe("install providers", () => {
   });
 
   it("stores the API key sealed, never returns or audits it", async () => {
-    const res = await as.installAdmin.post(`${MODELS}/providers`, {
+    const res = await as.siteAdmin.post(`${MODELS}/providers`, {
       kind: "anthropic",
       name: "Anthropic",
       api_key: "  sk-ant-secret-0001  ",
@@ -157,7 +157,7 @@ describe("install providers", () => {
     expect(providerBox.open(rows[0]?.api_key_enc ?? "", providerKeyContext("anthropic", 1))).toBe(
       "sk-ant-secret-0001",
     );
-    const listed = await as.installAdmin.get(MODELS);
+    const listed = await as.siteAdmin.get(MODELS);
     expect(JSON.stringify(listed.json)).not.toContain("sk-ant-secret");
     const events = await audit("models.provider");
     expect(events.at(-1)).toMatchObject({
@@ -185,11 +185,11 @@ describe("install providers", () => {
       { kind: "openai", name: "x", api_key: "has space" },
       { kind: "bedrock", name: "x", api_key: "k" },
     ]) {
-      const r = await as.installAdmin.post(`${MODELS}/providers`, bad);
+      const r = await as.siteAdmin.post(`${MODELS}/providers`, bad);
       expect(r.status, JSON.stringify(bad)).toBe(400);
       expect(JSON.stringify(r.json)).not.toContain("has space");
     }
-    const dup = await as.installAdmin.post(`${MODELS}/providers`, {
+    const dup = await as.siteAdmin.post(`${MODELS}/providers`, {
       kind: "anthropic",
       name: "Again",
       api_key: "k",
@@ -215,17 +215,17 @@ describe("install providers", () => {
       { kind: "openai", name: "OpenAI", api_key: "sk-openai-0001" },
       { kind: "gemini", name: "Gemini", api_key: "gem-0001" },
     ]) {
-      const r = await as.installAdmin.post(`${MODELS}/providers`, body);
+      const r = await as.siteAdmin.post(`${MODELS}/providers`, body);
       expect(r.status, JSON.stringify(r.json)).toBe(201);
     }
-    const ollama = await as.installAdmin.get(MODELS);
+    const ollama = await as.siteAdmin.get(MODELS);
     const byId = Object.fromEntries(
       (ollama.json.providers as { id: string }[]).map((p) => [p.id, p]),
     );
     expect(byId.ollama).toMatchObject({ base_url: "http://ollama.lan:11434", key_set: false });
     expect(byId.vllm).toMatchObject({ gateway_provider: "kobe-vllm", key_set: false });
 
-    const r = await as.installAdmin.patch(`${MODELS}/providers/openai`, {
+    const r = await as.siteAdmin.patch(`${MODELS}/providers/openai`, {
       api_key: "sk-openai-0002",
     });
     expect(r.status, JSON.stringify(r.json)).toBe(200);
@@ -235,18 +235,16 @@ describe("install providers", () => {
       keyChanged: true,
       baseUrlChanged: false,
     });
-    expect(
-      (await as.installAdmin.patch(`${MODELS}/providers/openai`, { api_key: null })).status,
-    ).toBe(400);
-    expect((await as.installAdmin.patch(`${MODELS}/providers/nope`, { name: "x" })).status).toBe(
-      404,
+    expect((await as.siteAdmin.patch(`${MODELS}/providers/openai`, { api_key: null })).status).toBe(
+      400,
     );
+    expect((await as.siteAdmin.patch(`${MODELS}/providers/nope`, { name: "x" })).status).toBe(404);
   });
 });
 
 describe("provider endpoints: a stored key never moves without being re-entered", () => {
   it("vendor providers keep their vendor's endpoint", async () => {
-    const r = await as.installAdmin.patch(`${MODELS}/providers/openai`, {
+    const r = await as.siteAdmin.patch(`${MODELS}/providers/openai`, {
       base_url: "https://evil.example.com",
       api_key: "sk-openai-0002",
     });
@@ -255,7 +253,7 @@ describe("provider endpoints: a stored key never moves without being re-entered"
   });
 
   it("an endpoint change on a keyed provider needs the key again; never over plain http", async () => {
-    const add = await as.installAdmin.post(`${MODELS}/providers`, {
+    const add = await as.siteAdmin.post(`${MODELS}/providers`, {
       kind: "openai_compatible",
       id: "together",
       name: "Together",
@@ -263,17 +261,17 @@ describe("provider endpoints: a stored key never moves without being re-entered"
       api_key: "tg-key-0001",
     });
     expect(add.status, JSON.stringify(add.json)).toBe(201);
-    const moved = await as.installAdmin.patch(`${MODELS}/providers/together`, {
+    const moved = await as.siteAdmin.patch(`${MODELS}/providers/together`, {
       base_url: "https://attacker.example",
     });
     expect(moved.status).toBe(400);
     expect(moved.json.code).toBe("key_required_for_new_endpoint");
-    const plain = await as.installAdmin.patch(`${MODELS}/providers/together`, {
+    const plain = await as.siteAdmin.patch(`${MODELS}/providers/together`, {
       base_url: "http://api2.together.example",
       api_key: "tg-key-0002",
     });
     expect(plain.json.code).toBe("insecure_endpoint");
-    const ok = await as.installAdmin.patch(`${MODELS}/providers/together`, {
+    const ok = await as.siteAdmin.patch(`${MODELS}/providers/together`, {
       base_url: "https://api2.together.example",
       api_key: "tg-key-0002",
     });
@@ -284,7 +282,7 @@ describe("provider endpoints: a stored key never moves without being re-entered"
       baseUrlChanged: true,
       endpointHost: "api2.together.example",
     });
-    const insecureAdd = await as.installAdmin.post(`${MODELS}/providers`, {
+    const insecureAdd = await as.siteAdmin.post(`${MODELS}/providers`, {
       kind: "openai_compatible",
       id: "plainhttp",
       name: "x",
@@ -292,7 +290,7 @@ describe("provider endpoints: a stored key never moves without being re-entered"
       api_key: "k-0001",
     });
     expect(insecureAdd.json.code).toBe("insecure_endpoint");
-    expect((await as.installAdmin.delete(`${MODELS}/providers/together`)).status).toBe(204);
+    expect((await as.siteAdmin.delete(`${MODELS}/providers/together`)).status).toBe(204);
   });
 });
 
@@ -304,17 +302,17 @@ describe("catalog and team enablement", () => {
       { alias: "local", provider_id: "ollama", model: "llama3.3" },
       { alias: "qwen", provider_id: "vllm", model: "qwen/qwen3-8b" },
     ]) {
-      const r = await as.installAdmin.post(`${MODELS}/catalog`, body);
+      const r = await as.siteAdmin.post(`${MODELS}/catalog`, body);
       expect(r.status, JSON.stringify(r.json)).toBe(201);
     }
-    const list = await as.installAdmin.get(MODELS);
+    const list = await as.siteAdmin.get(MODELS);
     const qwen = (list.json.catalog as { alias: string; gateway_model: string }[]).find(
       (c) => c.alias === "qwen",
     );
     expect(qwen?.gateway_model).toBe("kobe-vllm/qwen/qwen3-8b");
     expect(
       (
-        await as.installAdmin.post(`${MODELS}/catalog`, {
+        await as.siteAdmin.post(`${MODELS}/catalog`, {
           alias: "x",
           provider_id: "nope",
           model: "m",
@@ -323,14 +321,14 @@ describe("catalog and team enablement", () => {
     ).toBe(404);
     expect(
       (
-        await as.installAdmin.post(`${MODELS}/catalog`, {
+        await as.siteAdmin.post(`${MODELS}/catalog`, {
           alias: "smart",
           provider_id: "openai",
           model: "m",
         })
       ).status,
     ).toBe(409);
-    expect((await as.installAdmin.delete(`${MODELS}/providers/vllm`)).status).toBe(409);
+    expect((await as.siteAdmin.delete(`${MODELS}/providers/vllm`)).status).toBe(409);
     expect((await audit("models.catalog")).map((e) => e.target.change)).toEqual([
       "added",
       "added",
@@ -339,8 +337,8 @@ describe("catalog and team enablement", () => {
     ]);
   });
 
-  it("install admins set a model's input modalities; text is always kept (KOBE-191)", async () => {
-    const add = await as.installAdmin.post(`${MODELS}/catalog`, {
+  it("site admins set a model's input modalities; text is always kept (KOBE-191)", async () => {
+    const add = await as.siteAdmin.post(`${MODELS}/catalog`, {
       alias: "vision",
       provider_id: "openai",
       model: "gpt-5-vision",
@@ -348,7 +346,7 @@ describe("catalog and team enablement", () => {
     });
     expect(add.status, JSON.stringify(add.json)).toBe(201);
     expect(add.json.model.input_modalities).toEqual(["text", "image"]);
-    const plain = await as.installAdmin.get(MODELS);
+    const plain = await as.siteAdmin.get(MODELS);
     const find = (a: string) =>
       (plain.json.catalog as { alias: string; input_modalities: string[] }[]).find(
         (c) => c.alias === a,
@@ -356,33 +354,33 @@ describe("catalog and team enablement", () => {
     expect(find("fast")?.input_modalities).toEqual(["text"]); // default
     expect(find("vision")?.input_modalities).toEqual(["text", "image"]);
 
-    const off = await as.installAdmin.patch(`${MODELS}/catalog/vision`, {
+    const off = await as.siteAdmin.patch(`${MODELS}/catalog/vision`, {
       input_modalities: ["text"],
     });
     expect(off.status, JSON.stringify(off.json)).toBe(200);
     expect(off.json.model.input_modalities).toEqual(["text"]);
-    const label = await as.installAdmin.patch(`${MODELS}/catalog/vision`, { label: "V" });
+    const label = await as.siteAdmin.patch(`${MODELS}/catalog/vision`, { label: "V" });
     expect(label.json.model.input_modalities).toEqual(["text"]); // kept
     for (const bad of [["video"], "image", [1]]) {
-      const r = await as.installAdmin.patch(`${MODELS}/catalog/vision`, { input_modalities: bad });
+      const r = await as.siteAdmin.patch(`${MODELS}/catalog/vision`, { input_modalities: bad });
       expect(r.status, JSON.stringify(bad)).toBe(400);
     }
     expect(
       (await as.bob.patch(`${MODELS}/catalog/vision`, { input_modalities: ["text", "image"] }))
         .status,
     ).toBe(403);
-    expect((await as.installAdmin.delete(`${MODELS}/catalog/vision`)).status).toBe(204);
+    expect((await as.siteAdmin.delete(`${MODELS}/catalog/vision`)).status).toBe(204);
   });
 
-  it("install admins set a model's output limit, context window and reasoning flag (KOBE-259)", async () => {
-    const listed = await as.installAdmin.get(MODELS);
+  it("site admins set a model's output limit, context window and reasoning flag (KOBE-259)", async () => {
+    const listed = await as.siteAdmin.get(MODELS);
     // What a model without its own values gets (chart values), for the page to show.
     expect(listed.json.token_defaults).toEqual({
       max_output_tokens: 12_000,
       reasoning_max_output_tokens: 48_000,
       context_window: 100_000,
     });
-    const add = await as.installAdmin.post(`${MODELS}/catalog`, {
+    const add = await as.siteAdmin.post(`${MODELS}/catalog`, {
       alias: "thinker",
       provider_id: "openai",
       model: "o-fake",
@@ -393,7 +391,7 @@ describe("catalog and team enablement", () => {
       max_output_tokens: null,
       context_window: null,
     });
-    const set = await as.installAdmin.patch(`${MODELS}/catalog/thinker`, {
+    const set = await as.siteAdmin.patch(`${MODELS}/catalog/thinker`, {
       reasoning: true,
       max_output_tokens: 65_536,
       context_window: 200_000,
@@ -405,7 +403,7 @@ describe("catalog and team enablement", () => {
       context_window: 200_000,
     });
     // A new entry may carry them too; a too-large limit is refused before anything is written.
-    const refused = await as.installAdmin.post(`${MODELS}/catalog`, {
+    const refused = await as.siteAdmin.post(`${MODELS}/catalog`, {
       alias: "thinker-2",
       provider_id: "openai",
       model: "o-fake-2",
@@ -414,7 +412,7 @@ describe("catalog and team enablement", () => {
     });
     expect(refused.json).toMatchObject({ code: "output_limit_exceeds_context" });
     // Cleared back to the defaults; the flag kept.
-    const cleared = await as.installAdmin.patch(`${MODELS}/catalog/thinker`, {
+    const cleared = await as.siteAdmin.patch(`${MODELS}/catalog/thinker`, {
       max_output_tokens: null,
       context_window: null,
     });
@@ -425,13 +423,13 @@ describe("catalog and team enablement", () => {
       context_window: null,
     });
     // The output limit must leave room for input: in the model's own window, else the default's.
-    const tooBig = await as.installAdmin.patch(`${MODELS}/catalog/thinker`, {
+    const tooBig = await as.siteAdmin.patch(`${MODELS}/catalog/thinker`, {
       max_output_tokens: 100_000,
     });
     expect(tooBig.status).toBe(400);
     expect(tooBig.json).toMatchObject({ code: "output_limit_exceeds_context" });
     expect(tooBig.json.message).toContain("100,000");
-    const fits = await as.installAdmin.patch(`${MODELS}/catalog/thinker`, {
+    const fits = await as.siteAdmin.patch(`${MODELS}/catalog/thinker`, {
       max_output_tokens: 100_000,
       context_window: 400_000,
     });
@@ -444,7 +442,7 @@ describe("catalog and team enablement", () => {
       { context_window: 10_000_001 },
       { reasoning: "yes" },
     ]) {
-      const r = await as.installAdmin.patch(`${MODELS}/catalog/thinker`, bad);
+      const r = await as.siteAdmin.patch(`${MODELS}/catalog/thinker`, bad);
       expect(r.status, JSON.stringify(bad)).toBe(400);
     }
     expect((await as.bob.patch(`${MODELS}/catalog/thinker`, { reasoning: false })).status).toBe(
@@ -457,7 +455,7 @@ describe("catalog and team enablement", () => {
     ).toMatchObject({ max_output_tokens: 100_000, context_window: 400_000, reasoning: true });
     const events = await audit("models.catalog");
     expect(events.at(-1)?.target).toMatchObject({ alias: "thinker", limitsChanged: true });
-    expect((await as.installAdmin.delete(`${MODELS}/catalog/thinker`)).status).toBe(204);
+    expect((await as.siteAdmin.delete(`${MODELS}/catalog/thinker`)).status).toBe(204);
   });
 
   it("members see the catalog; only team admins enable models and pick the default", async () => {
@@ -519,7 +517,7 @@ describe("gateway sync", () => {
       expect(row.vkValueEnc).not.toContain("sk-bf-");
       expect(vkBox.open(row.vkValueEnc, virtualKeyContext(finance, row.userId))).toBe(vk?.value);
     }
-    const status = await as.installAdmin.get(MODELS);
+    const status = await as.siteAdmin.get(MODELS);
     expect(status.json.gateway).toMatchObject({ in_sync: true, last_error: null });
   });
 
@@ -547,7 +545,7 @@ describe("gateway sync", () => {
     expect(models?.ollama).toEqual(["llama3.3"]);
     expect(Date.now() - started).toBeLessThan(10_000);
     const status = await until(
-      () => as.installAdmin.get(MODELS),
+      () => as.siteAdmin.get(MODELS),
       (s) => s.json.gateway.in_sync === true,
     );
     expect(status.json.gateway.in_sync).toBe(true);
@@ -599,13 +597,13 @@ describe("gateway sync", () => {
     const bifrost = new FakeBifrost();
     bifrost.down = true;
     const sync = newSync(bifrost);
-    await as.installAdmin.patch(`${MODELS}/providers/gemini`, { name: "Google Gemini" });
+    await as.siteAdmin.patch(`${MODELS}/providers/gemini`, { name: "Google Gemini" });
     expect((await sync.runOnce()).ok).toBe(false);
-    const down = await as.installAdmin.get(MODELS);
+    const down = await as.siteAdmin.get(MODELS);
     expect(down.json.gateway).toMatchObject({ in_sync: false, last_error: "bifrost_unreachable" });
     bifrost.down = false;
     expect((await sync.runOnce()).ok).toBe(true);
-    const up = await as.installAdmin.get(MODELS);
+    const up = await as.siteAdmin.get(MODELS);
     expect(up.json.gateway).toMatchObject({ in_sync: true, last_error: null });
   });
 

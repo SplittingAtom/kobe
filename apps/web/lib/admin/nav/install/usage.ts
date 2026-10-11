@@ -6,7 +6,7 @@ export default defineInstallSection({
   description: "Spend by team, user, agent and model against the site budget.",
   group: "Governance",
   order: 50,
-  // GET /v1/install/usage (install.usage.read, KOBE-43).
+  // GET /v1/site/usage (install.usage.read, KOBE-43).
   minRole: "admin",
   status: READY,
 });

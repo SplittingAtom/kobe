@@ -14,7 +14,7 @@ import { useMutation, useResource } from "../use-resource";
 import styles from "../admin.module.css";
 
 /**
- * The install budget (spec D30, Bifrost's customer level; `/v1/install/budget`): every team's
+ * The install budget (spec D30, Bifrost's customer level; `/v1/site/budget`): every team's
  * spend counts against it, and the per-user request rate is every team's ceiling.
  */
 export function InstallBudget() {

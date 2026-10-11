@@ -50,8 +50,8 @@ export const uuidSchema = z.uuid().regex(/^[0-9a-f-]+$/, "lowercase uuid");
 export const timestampSchema = z.iso.datetime({ offset: false });
 
 /** Who is acting. Every server request carries exactly one `team_id` (D9). */
-export const installRoleSchema = z.enum(["owner", "admin", "user"]);
-export type InstallRole = z.infer<typeof installRoleSchema>;
+export const siteRoleSchema = z.enum(["owner", "admin", "user"]);
+export type SiteRole = z.infer<typeof siteRoleSchema>;
 
 export const teamRoleSchema = z.enum(["team_admin", "builder", "member"]);
 export type TeamRole = z.infer<typeof teamRoleSchema>;
@@ -77,7 +77,7 @@ export type RiskClass = z.infer<typeof riskClassSchema>;
 export interface ActorContext {
   readonly user_id: string;
   readonly team_id: string;
-  readonly install_role: InstallRole;
+  readonly site_role: SiteRole;
   readonly team_role: TeamRole;
 }
 

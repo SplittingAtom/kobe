@@ -123,7 +123,7 @@ export const sandboxSettingsSchema = z.strictObject({
    * KOBE-167 (docs/design/paired-tool-uid.md): run Pi's built-in tools (bash, read, write, edit,
    * ls, grep, find) in an executor under the partner uid of the thread's Pi identity, so a tool
    * cannot reach Pi's memory, the model file, or Pi's config directory. Off by default: KOBE-168
-   * rolls it out per install. Takes effect in sandboxes started with this setting; a pod from an
+   * rolls it out per site. Takes effect in sandboxes started with this setting; a pod from an
    * older spec keeps running Pi's tools in Pi.
    */
   toolExecutor: z.strictObject({ enabled: z.boolean() }).default({ enabled: false }),

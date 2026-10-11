@@ -57,9 +57,9 @@ async function follow(c, runId, timeoutMs) {
 /** Makes a user an install admin (the second admin break-glass needs). */
 async function grant() {
   const owner = await ownerClient();
-  const res = await owner.call("PUT", `/v1/install/roles/${config.userId}`, { role: "admin" });
+  const res = await owner.call("PUT", `/v1/site/roles/${config.userId}`, { role: "admin" });
   out("role_status", res.status);
-  const roles = await owner.call("GET", "/v1/install/roles");
+  const roles = await owner.call("GET", "/v1/site/roles");
   const privileged = (roles.json.roles ?? []).filter(
     (r) => r.role === "admin" || r.role === "owner",
   );
@@ -69,14 +69,14 @@ async function grant() {
 /** Prices the catalog model only when it has no price (so a budget can be reached); restores. */
 async function price() {
   const owner = await ownerClient();
-  const listed = await owner.call("GET", "/v1/install/models");
+  const listed = await owner.call("GET", "/v1/site/models");
   const entry = (listed.json.catalog ?? []).find((e) => e.alias === config.alias);
   if (!entry) {
     out("price", "no_such_model");
     return;
   }
   if (config.action === "restore") {
-    const res = await owner.call("PATCH", `/v1/install/models/catalog/${config.alias}`, {
+    const res = await owner.call("PATCH", `/v1/site/models/catalog/${config.alias}`, {
       input_usd_per_mtok: null,
       output_usd_per_mtok: null,
     });
@@ -87,7 +87,7 @@ async function price() {
     out("price", "kept");
     return;
   }
-  const res = await owner.call("PATCH", `/v1/install/models/catalog/${config.alias}`, {
+  const res = await owner.call("PATCH", `/v1/site/models/catalog/${config.alias}`, {
     input_usd_per_mtok: 10_000,
     output_usd_per_mtok: 10_000,
   });
@@ -98,17 +98,17 @@ async function price() {
 async function ceiling() {
   const owner = await ownerClient();
   if (config.action === "remove") {
-    const res = await owner.call("DELETE", `/v1/install/egress-ceiling/${config.domain}`);
+    const res = await owner.call("DELETE", `/v1/site/egress-ceiling/${config.domain}`);
     out("ceiling", `removed:${res.status}`);
     return;
   }
-  const res = await owner.call("POST", "/v1/install/egress-ceiling", { domain: config.domain });
+  const res = await owner.call("POST", "/v1/site/egress-ceiling", { domain: config.domain });
   if (res.status === 201) {
     out("ceiling", "added");
     return;
   }
   // Already there (an earlier run, or an admin's entry): make sure it is in the ceiling, keep it.
-  const put = await owner.call("PUT", `/v1/install/egress-ceiling/${config.domain}`, {
+  const put = await owner.call("PUT", `/v1/site/egress-ceiling/${config.domain}`, {
     in_ceiling: true,
   });
   out("ceiling", `present:${res.status}:${put.status}`);
@@ -436,7 +436,7 @@ async function breakGlass() {
   const team = config.teamId;
   const asReader = (path) => ia.call("GET", path);
 
-  const asked = await ia.call("POST", "/v1/install/break-glass", {
+  const asked = await ia.call("POST", "/v1/site/break-glass", {
     teamId: team,
     reason: "Gate 2 verification: second-admin approval, notice and audit",
     durationMinutes: 15,
@@ -446,15 +446,15 @@ async function breakGlass() {
   out("grant", id ?? "-");
   if (!id) return;
   out("request_notified", asked.json.notified?.recipients ?? "-");
-  const own = await ia.call("POST", `/v1/install/break-glass/${id}/approve`);
+  const own = await ia.call("POST", `/v1/site/break-glass/${id}/approve`);
   out("self_approve", `${own.status}:${own.json.code ?? "-"}`);
-  const early = await asReader(`/v1/install/break-glass/${id}/threads`);
+  const early = await asReader(`/v1/site/break-glass/${id}/threads`);
   out("read_before_approval", `${early.status}:${early.json.code ?? "-"}`);
 
-  const approved = await owner.call("POST", `/v1/install/break-glass/${id}/approve`);
+  const approved = await owner.call("POST", `/v1/site/break-glass/${id}/approve`);
   // The approval response is the activation (one transaction); wait on what the API exposes anyway.
   const active = await settled(
-    () => ia.call("GET", `/v1/install/break-glass/${id}`),
+    () => ia.call("GET", `/v1/site/break-glass/${id}`),
     (r) => r.json.grant?.status === "active",
   );
   out("grant_status_seen", active.json.grant?.status ?? `${active.status}`);
@@ -485,9 +485,9 @@ async function breakGlass() {
   );
 
   const paths = [
-    `/v1/install/break-glass/${id}/threads`,
-    `/v1/install/break-glass/${id}/threads/${config.threadId}`,
-    `/v1/install/break-glass/${id}/threads/${config.threadId}/entries`,
+    `/v1/site/break-glass/${id}/threads`,
+    `/v1/site/break-glass/${id}/threads/${config.threadId}`,
+    `/v1/site/break-glass/${id}/threads/${config.threadId}/entries`,
   ];
   const statuses = [];
   for (const p of paths) statuses.push((await readUnderGrant(asReader, p)).status);
@@ -513,7 +513,7 @@ async function breakGlass() {
     mine.every((e) => JSON.stringify(e.target).includes(id)),
   );
 
-  const revoked = await ia.call("POST", `/v1/install/break-glass/${id}/revoke`);
+  const revoked = await ia.call("POST", `/v1/site/break-glass/${id}/revoke`);
   out("revoke", `${revoked.status}:${revoked.json.grant?.status ?? revoked.json.code}`);
   const after = await asReader(paths[0]);
   out("read_after_revoke", `${after.status}:${after.json.code ?? "-"}`);

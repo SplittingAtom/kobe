@@ -5,7 +5,7 @@ import { MIN_SECRET_LENGTH, deriveKey } from "../models/secret-box.js";
  * Envelope encryption for per-record secrets (KOBE-107: connector credentials and the like).
  *
  * Each record gets its own random 256-bit data key (DEK). The DEK encrypts the plaintext with
- * AES-256-GCM; the install's key-encryption key (KEK, derived with HKDF-SHA256 from the chart's
+ * AES-256-GCM; the site's key-encryption key (KEK, derived with HKDF-SHA256 from the chart's
  * Kubernetes Secret) wraps the DEK with AES-256-GCM. Both layers authenticate the same
  * {@link EnvelopeContext} (team, record kind, record id; length-prefixed so fields can't be
  * shifted into each other), and the wrap also authenticates the key id, so a ciphertext moved to
@@ -115,7 +115,7 @@ function parse(sealed: string): Parsed {
 export class Envelope {
   #keks: Kek[] | undefined;
 
-  /** `secrets`: the current install secret first, then previous ones still accepted for opening. */
+  /** `secrets`: the current site secret first, then previous ones still accepted for opening. */
   constructor(secrets: string | readonly string[]) {
     const list = (typeof secrets === "string" ? [secrets] : secrets).filter((s) => s !== "");
     if (list.length === 0 || list.some((s) => s.length < MIN_SECRET_LENGTH)) {

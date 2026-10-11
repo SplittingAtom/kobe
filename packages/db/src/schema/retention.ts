@@ -15,7 +15,7 @@ import { teams } from "./teams.js";
 // Retention and deletion (spec D18, KOBE-18). Team tables (identity area): FORCE RLS on kobe.team_id.
 
 /**
- * Retention periods a team admin may choose, and the install maximum's values (D18: 30 d / 90 d /
+ * Retention periods a team admin may choose, and the site maximum's values (D18: 30 d / 90 d /
  * 1 y / forever). `forever` keeps everything (the default).
  */
 export const RETENTION_PERIODS = ["30d", "90d", "1y", "forever"] as const;
@@ -23,10 +23,10 @@ export type RetentionPeriod = (typeof RETENTION_PERIODS)[number];
 
 const periodList = sql.raw(RETENTION_PERIODS.map((p) => `'${p}'`).join(", "));
 
-/** Install setting (`install_settings`) holding the install maximum; absent = `forever`. */
+/** Site setting (`install_settings`) holding the site maximum; absent = `forever`. */
 export const RETENTION_MAXIMUM_KEY = "retention.maximum";
 
-/** Install setting holding a scheduled lowering of the maximum: `<period>@<ISO time>`. */
+/** Site setting holding a scheduled lowering of the maximum: `<period>@<ISO time>`. */
 export const RETENTION_MAXIMUM_PENDING_KEY = "retention.maximum.pending";
 
 /** Days a shortening waits before it applies (user decision 2026-10-04, KOBE-18). */
@@ -36,7 +36,7 @@ export const RETENTION_GRACE_DAYS = 7;
  * A team's retention period (D6: team-scoped, team admins). No row = `forever`. `period` is the
  * period in force; a shortening is first recorded as `pending_period`, applied at `pending_at`
  * (7 days later) unless cancelled; a lengthening applies at once. The period the job uses is the
- * shorter of the team's and the install maximum's (each with its own grace), so lowering the
+ * shorter of the team's and the site maximum's (each with its own grace), so lowering the
  * maximum caps every team without rewriting their choice.
  */
 export const teamRetention = pgTable(

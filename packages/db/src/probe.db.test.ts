@@ -341,7 +341,7 @@ describe("break-glass probe", () => {
   });
 });
 
-describe("install-wide tables", () => {
+describe("site-wide tables", () => {
   it("does not let the app role delete teams (FK cascades would bypass RLS)", async () => {
     const err: unknown = await app.pool.query(`DELETE FROM teams WHERE id = $1`, [teamB]).then(
       () => undefined,

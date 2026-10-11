@@ -17,7 +17,7 @@ import { DateTime, ResourceView, confirmed } from "../parts";
 import { useMutation, useResource } from "../use-resource";
 import styles from "../admin.module.css";
 
-/** The install's retention maximum (spec D6/D18; `/v1/install/retention`, KOBE-18). */
+/** The install's retention maximum (spec D6/D18; `/v1/site/retention`, KOBE-18). */
 export function RetentionMaximumPage() {
   const { state, reload } = useResource(getRetentionMaximum);
   return (

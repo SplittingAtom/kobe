@@ -14,7 +14,7 @@ import type { ApprovalView } from "./view.js";
 
 export interface ApprovalServiceOptions {
   readonly db: KobeDb;
-  /** The install's approval key; absent → approvals are denied (logged at startup). */
+  /** The site's approval key; absent → approvals are denied (logged at startup). */
   readonly keys?: ApprovalKeyring;
   /** Pending TTL (default D29's 1 h; tests shorten it). */
   readonly ttlMs?: number;

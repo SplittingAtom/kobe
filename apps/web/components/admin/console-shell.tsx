@@ -210,7 +210,7 @@ function Frame({
 
 function Who({ access }: { readonly access: ConsoleAccess }) {
   if (access.console === "install") {
-    const role = access.installRole === "owner" ? "Owner" : "Admin";
+    const role = access.siteRole === "owner" ? "Owner" : "Admin";
     return (
       <p className={styles.who}>
         {access.user.name} · {role}

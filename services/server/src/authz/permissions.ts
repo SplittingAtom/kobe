@@ -3,42 +3,42 @@ import type { TeamRole } from "@kobe/db";
 /**
  * The fixed role model (spec D8) as one permission matrix. Each permission names the least
  * privileged role that holds it; roles are hierarchical (Owner > Admin > User;
- * team_admin > builder > member). Install and team permissions are separate maps: an install role
- * never grants a team permission, so install admins reach team content only through break-glass.
+ * team_admin > builder > member). Site and team permissions are separate maps: a site role
+ * never grants a team permission, so site admins reach team content only through break-glass.
  * Custom roles are out of scope for v1.
  */
 
-/** Install role as stored in `install_roles`; null is a plain User. */
-export type InstallRole = "owner" | "admin" | null;
+/** Site role as stored in `install_roles`; null is a plain User. */
+export type SiteRole = "owner" | "admin" | null;
 
-const INSTALL_RANK = { user: 0, admin: 1, owner: 2 } as const;
-type InstallLevel = keyof typeof INSTALL_RANK;
+const SITE_RANK = { user: 0, admin: 1, owner: 2 } as const;
+type SiteLevel = keyof typeof SITE_RANK;
 
 const TEAM_RANK: Readonly<Record<TeamRole, number>> = { member: 0, builder: 1, team_admin: 2 };
 
-export const INSTALL_PERMISSIONS = {
-  "install.settings.manage": "admin",
-  "install.users.manage": "admin",
-  "install.teams.manage": "admin",
-  "install.models.manage": "admin",
-  "install.policy.manage": "admin",
-  "install.connectors.manage": "admin",
-  "install.gallery.manage": "admin",
-  "install.blocklist.manage": "admin",
-  "install.egress.manage": "admin",
-  "install.retention.manage": "admin",
-  "install.legal_hold.manage": "admin",
-  "install.audit.read": "admin",
+export const SITE_PERMISSIONS = {
+  "site.settings.manage": "admin",
+  "site.users.manage": "admin",
+  "site.teams.manage": "admin",
+  "site.models.manage": "admin",
+  "site.policy.manage": "admin",
+  "site.connectors.manage": "admin",
+  "site.gallery.manage": "admin",
+  "site.blocklist.manage": "admin",
+  "site.egress.manage": "admin",
+  "site.retention.manage": "admin",
+  "site.legal_hold.manage": "admin",
+  "site.audit.read": "admin",
   // Usage and spend across every team (KOBE-43, D30): counts and costs, never team content.
-  "install.usage.read": "admin",
-  // The install budget and default per-user request rate (KOBE-42, D30).
-  "install.budgets.manage": "admin",
-  "install.break_glass.request": "admin",
+  "site.usage.read": "admin",
+  // The site budget and default per-user request rate (KOBE-42, D30).
+  "site.budgets.manage": "admin",
+  "site.break_glass.request": "admin",
   // D10: a second Admin or the Owner approves (enforced again by the database trigger).
-  "install.break_glass.approve": "admin",
-  "install.roles.manage": "owner",
-  "install.ownership.transfer": "owner",
-} as const satisfies Record<`install.${string}`, InstallLevel>;
+  "site.break_glass.approve": "admin",
+  "site.roles.manage": "owner",
+  "site.ownership.transfer": "owner",
+} as const satisfies Record<`site.${string}`, SiteLevel>;
 
 export const TEAM_PERMISSIONS = {
   // Member: chat and use what the team offers; personal items and schedules.
@@ -76,21 +76,21 @@ export const TEAM_PERMISSIONS = {
   "team.projects.manage": "team_admin",
 } as const satisfies Record<`team.${string}`, TeamRole>;
 
-export type InstallPermission = keyof typeof INSTALL_PERMISSIONS;
+export type SitePermission = keyof typeof SITE_PERMISSIONS;
 export type TeamPermission = keyof typeof TEAM_PERMISSIONS;
 
-export function installRoleAllows(role: InstallRole, permission: InstallPermission): boolean {
-  return INSTALL_RANK[role ?? "user"] >= INSTALL_RANK[INSTALL_PERMISSIONS[permission]];
+export function siteRoleAllows(role: SiteRole, permission: SitePermission): boolean {
+  return SITE_RANK[role ?? "user"] >= SITE_RANK[SITE_PERMISSIONS[permission]];
 }
 
 export function teamRoleAllows(role: TeamRole | null, permission: TeamPermission): boolean {
   return role !== null && TEAM_RANK[role] >= TEAM_RANK[TEAM_PERMISSIONS[permission]];
 }
 
-/** Sorted install permissions of a role (for clients deciding what to show). */
-export function installPermissionsFor(role: InstallRole): InstallPermission[] {
-  return (Object.keys(INSTALL_PERMISSIONS) as InstallPermission[])
-    .filter((p) => installRoleAllows(role, p))
+/** Sorted site permissions of a role (for clients deciding what to show). */
+export function sitePermissionsFor(role: SiteRole): SitePermission[] {
+  return (Object.keys(SITE_PERMISSIONS) as SitePermission[])
+    .filter((p) => siteRoleAllows(role, p))
     .sort();
 }
 

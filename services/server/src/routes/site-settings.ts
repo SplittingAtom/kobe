@@ -9,7 +9,7 @@ import {
 } from "@kobe/db";
 import { REQUIRE_TWO_FACTOR, readRequireTwoFactor, type AuthVariables } from "../auth/session.js";
 import { recordAudit } from "../audit/record.js";
-import { requireInstallPermission } from "../authz/middleware.js";
+import { requireSitePermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 
 const settingsSchema = z
@@ -29,12 +29,12 @@ async function store(tx: KobeTx, key: string, value: string): Promise<void> {
     .onConflictDoUpdate({ target: installSettings.key, set: { value, updatedAt: new Date() } });
 }
 
-/** Install settings (install Owner/Admin only). Each change is audited. */
-export function installSettingsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
+/** Site settings (site Owner/Admin only). Each change is audited. */
+export function siteSettingsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
   const db = deps.database.db;
 
-  app.use(requireInstallPermission("install.settings.manage"));
+  app.use(requireSitePermission("site.settings.manage"));
 
   const current = async () => ({
     requireTwoFactor: await readRequireTwoFactor(deps),
@@ -56,7 +56,7 @@ export function installSettingsRoutes(deps: ServerDeps): Hono<{ Variables: AuthV
     }
     const { requireTwoFactor, auditPiiRetentionHours } = parsed.data;
     // Lowering the requirement weakens every account: Owner only.
-    if (requireTwoFactor === false && c.get("installRole") !== "owner") {
+    if (requireTwoFactor === false && c.get("siteRole") !== "owner") {
       return c.json(
         { code: "forbidden", message: "Only the Owner can turn off required 2FA." },
         403,
@@ -72,13 +72,13 @@ export function installSettingsRoutes(deps: ServerDeps): Hono<{ Variables: AuthV
       }
       if (requireTwoFactor !== undefined) {
         await recordAudit(tx, {
-          action: "install.settings.updated",
+          action: "site.settings.updated",
           target: { setting: "require_two_factor", value: requireTwoFactor },
         });
       }
       if (auditPiiRetentionHours !== undefined) {
         await recordAudit(tx, {
-          action: "install.settings.updated",
+          action: "site.settings.updated",
           target: { setting: "audit_pii_retention_hours", value: auditPiiRetentionHours },
         });
       }

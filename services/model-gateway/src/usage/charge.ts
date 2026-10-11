@@ -17,7 +17,7 @@ export const MAX_CHARGED_OUTPUT_TOKENS = MODEL_OUTPUT_TOKENS_RANGE[1];
  * (unbounded when unreadable) up to the ceiling, times the answers asked for (`n`,
  * `candidateCount`). Count-only endpoints (`count_tokens`, `countTokens`) generate nothing: 0.
  *
- * Residual risk (documented): the ceiling is one install-wide constant, not per model; hidden
+ * Residual risk (documented): the ceiling is one site-wide constant, not per model; hidden
  * reasoning beyond 131,072 tokens on a call whose usage report is lost is not charged.
  */
 export function chargedOutput(

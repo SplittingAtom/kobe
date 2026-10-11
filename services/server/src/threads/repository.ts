@@ -36,7 +36,7 @@ import { isModelEnabled } from "../models/team-store.js";
  * `withTeam` transaction, so RLS confines it to the active team; the visibility rules below add
  * the per-user layer: a viewer reads their own threads (including their Trash) and threads shared
  * to a project they belong to (read-only, never from Trash). Nobody else reads a thread — not a
- * team admin (D18), not an install admin (D8; break-glass is its own audited path, KOBE-16).
+ * team admin (D18), not a site admin (D8; break-glass is its own audited path, KOBE-16).
  * Only the owner changes a thread.
  */
 
@@ -250,7 +250,7 @@ export async function createThread(
     /** A pre-chosen id (a fork copies blobs into the new thread's tree first); default: random. */
     id?: string;
     /**
-     * The published agent version the thread pins (D19); null = the install default agent. A
+     * The published agent version the thread pins (D19); null = the site default agent. A
      * `DraftPin` (no version) makes it a builder test thread (KOBE-85): pass `isTest`.
      */
     agent: AgentPin | DraftPin | null;

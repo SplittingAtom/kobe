@@ -16,7 +16,7 @@ import {
 export class DbReservations implements ReservationStore {
   constructor(
     private readonly db: KobeDb,
-    /** `salt`: the per-install secret the functions hash team and member keys with. */
+    /** `salt`: the per-site secret the functions hash team and member keys with. */
     private readonly options: { readonly ttlMs: number; readonly salt: string },
   ) {}
 

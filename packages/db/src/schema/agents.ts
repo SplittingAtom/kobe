@@ -21,8 +21,8 @@ import { teams } from "./teams.js";
 // Agent definitions (spec D19, §5.4, §6.3). The spec's one `agents(team_id?, …)` table is split by
 // scope, because a team table's team_id is NOT NULL (D5):
 //   - team agents live in the team table `team_agents` (RLS on team_id);
-//   - personal agents (follow the user install-wide, D6/D9) and gallery agents (install-wide,
-//     admin-curated, read-only to teams) live in the install-wide `install_agents`.
+//   - personal agents (follow the user site-wide, D6/D9) and gallery agents (site-wide,
+//     admin-curated, read-only to teams) live in the site-wide `install_agents`.
 // Each row is the agent's editable draft: `frontmatter` (the file's YAML as JSON, validated by
 // @kobe/agent-file) and `prompt` (the body). Publish (KOBE-46) copies the draft into an immutable
 // numbered version with a frozen tool manifest (`team_agent_versions` / `install_agent_versions`)
@@ -120,8 +120,8 @@ export const teamAgents = pgTable(
 );
 
 /**
- * Install-wide (†): personal agents (owned by one user, usable in any of their teams, D9) and
- * gallery agents (no owner; install admins curate, everyone reads, teams fork). No RLS: the
+ * Site-wide (†): personal agents (owned by one user, usable in any of their teams, D9) and
+ * gallery agents (no owner; site admins curate, everyone reads, teams fork). No RLS: the
  * server confines personal agents to their owner. No team data and no team foreign keys.
  */
 export const installAgents = pgTable(
@@ -202,7 +202,7 @@ const versionColumns = () => ({
   prompt: text().notNull(),
   /**
    * The frozen tool manifest (D19, server `agents/manifest.ts`): the tools this version may ever
-   * use, computed at publish time against the install floor (and the team's rules for team
+   * use, computed at publish time against the site floor (and the team's rules for team
    * agents). A ceiling, never a grant: run-time policy still decides every call.
    */
   toolManifest: jsonb().$type<Record<string, unknown>>().notNull(),
@@ -270,7 +270,7 @@ export const teamAgentVersions = pgTable(
 );
 
 /**
- * Install-wide (†): published versions of personal and gallery agents. The app role may only
+ * Site-wide (†): published versions of personal and gallery agents. The app role may only
  * SELECT and INSERT (tenancy grants); a trigger refuses changes from anyone else too. The server
  * confines personal versions to their agent's owner, as for `install_agents`.
  */

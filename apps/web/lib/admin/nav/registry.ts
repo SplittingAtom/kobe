@@ -73,8 +73,7 @@ const INSTALL_RANK: Readonly<Record<InstallRole, number>> = { user: 0, admin: 1,
 export function canSee(section: ConsoleSection, access: ConsoleAccess): boolean {
   if (section.console === "install") {
     return (
-      access.console === "install" &&
-      INSTALL_RANK[access.installRole] >= INSTALL_RANK[section.minRole]
+      access.console === "install" && INSTALL_RANK[access.siteRole] >= INSTALL_RANK[section.minRole]
     );
   }
   return access.console === "team" && access.permissions.includes(section.permission);

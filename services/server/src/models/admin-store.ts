@@ -25,7 +25,7 @@ import {
 import { outputLimitProblem, type ModelTokenDefaults } from "./token-limits.js";
 
 /**
- * Install model administration (spec D6, D8, D30; `/v1/install/models`): providers with their API
+ * Site model administration (spec D6, D8, D30; `/v1/site/models`): providers with their API
  * keys, and the model catalog. Every change is audited and bumps the gateway's desired version
  * with a change hint in the same transaction (the sync pushes it to Bifrost). API keys are sealed
  * before they reach the database and are never returned.
@@ -53,7 +53,7 @@ export interface CatalogView {
   readonly label: string | null;
   /** What the model accepts as input: always `text`, plus `image` when it can see images. */
   readonly input_modalities: readonly string[];
-  /** Output limit and context window in tokens (KOBE-259); null: the install default. */
+  /** Output limit and context window in tokens (KOBE-259); null: the site default. */
   readonly max_output_tokens: number | null;
   readonly context_window: number | null;
   /** The model reasons before answering: it gets the higher default output limit. */
@@ -185,7 +185,7 @@ export async function addProvider(
   const problem = endpointProblem(input.kind, baseUrl, input.api_key !== undefined, policy);
   if (problem) return { ok: false, error: problem };
   return db.transaction(async (tx) => {
-    // Serializes concurrent adds so the cap holds (install-wide table, small).
+    // Serializes concurrent adds so the cap holds (site-wide table, small).
     await tx.execute(sql`LOCK TABLE ${modelProviders} IN SHARE ROW EXCLUSIVE MODE`);
     const [existing] = await tx.select().from(modelProviders).where(eq(modelProviders.id, id));
     if (existing) return { ok: false, error: "exists" };

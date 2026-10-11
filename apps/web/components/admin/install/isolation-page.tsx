@@ -19,7 +19,7 @@ const STATE_LABEL = {
 } as const;
 
 /**
- * Isolation status (spec D4, KOBE-9 `/v1/install/isolation`). Without a gVisor or Kata runtime Kobe
+ * Isolation status (spec D4, KOBE-9 `/v1/site/isolation`). Without a gVisor or Kata runtime Kobe
  * refuses to run agents and "the admin console shows the fix": this page.
  */
 export function IsolationPage() {

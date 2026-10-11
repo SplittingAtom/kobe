@@ -2,7 +2,7 @@ import { accounts, and, asc, eq, gt, invitations, isNull, sql, users, type KobeD
 import { recordAudit } from "../audit/record.js";
 import { hashToken, newToken, sameHash, TOKEN_PATTERN } from "./tokens.js";
 
-/** Install invitations expire after 72 hours; a resend issues a new token and a new expiry. */
+/** Site invitations expire after 72 hours; a resend issues a new token and a new expiry. */
 export const INVITE_TTL_HOURS = 72;
 
 // Expiry is set and checked with the database clock, so replicas with skewed clocks agree.
@@ -38,7 +38,7 @@ async function userExists(db: KobeDb, email: string): Promise<boolean> {
 
 /**
  * Invites an address into the install, or re-issues the open invitation for it (new token, new
- * expiry: the old link stops working). Install admins see the user list, so "already a user" is
+ * expiry: the old link stops working). Site admins see the user list, so "already a user" is
  * reported plainly here.
  */
 export async function issueInvite(

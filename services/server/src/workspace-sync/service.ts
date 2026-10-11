@@ -30,7 +30,7 @@ export interface WorkspaceSyncOptions {
   readonly quota?: QuotaCheck;
   /**
    * KOBE-185: when set, the default check also enforces the team storage quota (the same one
-   * uploads use, with this install default) under the team's storage lock. Ignored with `quota`.
+   * uploads use, with this site default) under the team's storage lock. Ignored with `quota`.
    */
   readonly teamStorageDefaultBytes?: number;
   readonly collect?: Partial<Omit<CollectOptions, "prefix">>;
@@ -65,7 +65,7 @@ export interface WorkspaceSync {
   /** Runs `collect` every `everyMs` (jittered); returns a stop function. */
   startCollector(everyMs: number): () => void;
   /**
-   * A server write into a workspace (KOBE-53/54/57): `store.putServerFile` with this install's
+   * A server write into a workspace (KOBE-53/54/57): `store.putServerFile` with this site's
    * key prefix (the object must be under the team's tree, and inside `users/` the user's own)
    * and row cap. In the caller's team transaction.
    */
@@ -82,7 +82,7 @@ export interface WorkspaceSync {
   ): Promise<StoredEntry | undefined>;
   readonly objects: ObjectStore;
   readonly prefix: string;
-  /** This install's limits and quota check, for server writes that must honour them (KOBE-148). */
+  /** This site's limits and quota check, for server writes that must honour them (KOBE-148). */
   readonly limits: WorkspaceLimits;
   readonly quota: QuotaCheck;
 }

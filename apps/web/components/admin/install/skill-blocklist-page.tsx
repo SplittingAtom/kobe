@@ -15,7 +15,7 @@ import { useMutation, useResource, type Mutation } from "../use-resource";
 import styles from "../admin.module.css";
 
 /**
- * The install skill blocklist (spec D22; `/v1/install/skill-blocklist`, KOBE-81): bundle hashes
+ * The install skill blocklist (spec D22; `/v1/site/skill-blocklist`, KOBE-81): bundle hashes
  * that can't be uploaded, approved or run in any team. Takes effect at once for existing versions.
  */
 export function SkillBlocklistPage() {

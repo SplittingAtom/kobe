@@ -12,7 +12,7 @@ export async function lockTeamStorage(tx: KobeTx, teamId: string): Promise<void>
   );
 }
 
-/** The team's limit: its own `max_bytes`, else the install default. */
+/** The team's limit: its own `max_bytes`, else the site default. */
 export async function storageLimit(
   tx: KobeTx,
   teamId: string,

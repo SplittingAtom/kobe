@@ -25,6 +25,6 @@ export const memberRoleSchema = z.object({ role: teamRoleSchema }).strict();
 
 export const activeTeamSchema = z.object({ teamId: idSchema }).strict();
 
-export const installRoleChangeSchema = z.object({ role: z.enum(["admin", "user"]) }).strict();
+export const siteRoleChangeSchema = z.object({ role: z.enum(["admin", "user"]) }).strict();
 
 export const transferOwnershipSchema = z.object({ userId: idSchema }).strict();

@@ -731,7 +731,7 @@ export class SandboxConnection implements RegisteredConnection {
   /**
    * `web_search.query` (KOBE-114). Accepted only if this connection announced `web_search`, the
    * run is leased here and active, and this `web_search` call was allowed here with the same
-   * canonical input hash (D-3). The server then decides availability (install provider, team
+   * canonical input hash (D-3). The server then decides availability (site provider, team
    * opt-in), opens the key and searches; "unavailable" is an answer, not an error. Refusals are
    * audited (never the query).
    */

@@ -7,7 +7,7 @@ import type { CallContext } from "./seams.js";
 
 /**
  * KOBE-121 (ac-1) at the gate level: two gate instances ("replicas", each with its own pool and
- * spend cache) share one Postgres and one install-wide token budget across several teams. The
+ * spend cache) share one Postgres and one site-wide token budget across several teams. The
  * ledger is simulated and never pushed to the gates (no spend hints): each gate only learns of the
  * spend when its cache expires, so the settled holds alone must cover that window. Also: a
  * crashed replica's holds expire and free the budget, and leave no live row behind.
@@ -24,7 +24,7 @@ const dbs: KobeDatabase[] = [];
 
 /** The simulated ledger: tokens already written for the install. */
 const ledger = { spent: 0 };
-const installLine = (): BudgetLine => ({
+const siteLine = (): BudgetLine => ({
   scope: "install",
   userId: undefined,
   period: "day",
@@ -50,7 +50,7 @@ const replica = (reservationTtlMs: number) => {
   dbs.push(app);
   return new BudgetGate(
     {
-      load: async () => ({ lines: [installLine()], requestsPerMinute: 10_000 }),
+      load: async () => ({ lines: [siteLine()], requestsPerMinute: 10_000 }),
       prices: async () => new Map(),
     },
     {
@@ -78,7 +78,7 @@ afterAll(async () => {
   await Promise.all([...dbs, owner].map((d) => d.close()));
 });
 
-describe("two gate replicas, one install-wide hard budget (KOBE-121 ac-1)", () => {
+describe("two gate replicas, one site-wide hard budget (KOBE-121 ac-1)", () => {
   it("calls over time on both replicas, with stale caches, overshoot by at most one call", async () => {
     ledger.spent = 0;
     const gates = [replica(60_000), replica(60_000)];
@@ -107,7 +107,7 @@ describe("two gate replicas, one install-wide hard budget (KOBE-121 ac-1)", () =
     await Promise.all(Array.from({ length: 40 }, (_, i) => worker(i)));
     const overshoot = Math.max(0, ledger.spent - LIMIT);
     console.info(
-      `KOBE-121 install line: limit ${LIMIT}, one call ${CALL}, admitted ${admitted}, spent ${ledger.spent}, overshoot ${overshoot}`,
+      `KOBE-121 site line: limit ${LIMIT}, one call ${CALL}, admitted ${admitted}, spent ${ledger.spent}, overshoot ${overshoot}`,
     );
     expect(ledger.spent).toBe(admitted * CALL);
     expect(overshoot).toBeLessThanOrEqual(CALL);

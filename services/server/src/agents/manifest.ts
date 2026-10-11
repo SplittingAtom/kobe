@@ -25,7 +25,7 @@ import { isRuleActive, type PolicyRule } from "../policy/rules.js";
  * HARD CONTRACT (KOBE-45 decision 10): the manifest is a **ceiling, never a grant**. It is the
  * agent's own narrowing (`tools.allow` intersected with the server's tool registry, minus
  * `tools.deny`) intersected with the policy floor at publish time (whole-tool deny rules of the
- * install, plus the team's for team agents). At run time (KOBE-36/47) a call must be inside the
+ * site, plus the team's for team agents). At run time (KOBE-36/47) a call must be inside the
  * manifest (`manifestAllowsTool`) **and** pass the live policy engine with the version's
  * `tools_allow`/`tools_deny`, so:
  *   - a floor that tightens after publish applies at once (live rules, `effectiveApprovalMode`);
@@ -62,7 +62,7 @@ const manifestToolSchema = z.strictObject({
 
 export const toolManifestSchema = z.strictObject({
   format: z.literal(TOOL_MANIFEST_FORMAT),
-  /** The floor it was computed against: install only (personal, gallery) or install + team. */
+  /** The floor it was computed against: site only (personal, gallery) or site + team. */
   floor: z.enum(["install", "team"]),
   /** Built-in tools (Pi and kobe-tools) this version may call, by name. */
   tools: z.array(manifestToolSchema),
@@ -85,7 +85,7 @@ export const toolManifestSchema = z.strictObject({
   approval_mode: z.strictObject({
     /** What the agent file asked for (null: the default, ask-on-write). */
     requested: approvalModeSchema.nullable(),
-    /** The install floor at publish time. */
+    /** The site floor at publish time. */
     floor: approvalModeSchema,
     /** The stricter of the two; never looser than the floor. */
     effective: approvalModeSchema,
@@ -96,12 +96,12 @@ type Excluded = ToolManifest["excluded"][number];
 
 /** The policy floor a version is published against. */
 export interface PublishFloor {
-  /** `install` for personal and gallery agents (they run in many teams), `team` for team agents. */
+  /** `install` (the site; stored name until KOBE-256) for personal and gallery agents (they run in many teams), `team` for team agents. */
   readonly scope: "install" | "team";
-  readonly install: readonly PolicyRule[];
+  readonly site: readonly PolicyRule[];
   /** The team's own rules; ignored unless `scope` is `team`. */
   readonly team: readonly PolicyRule[];
-  /** The install's approval floor (install-wide only, D6; `policy/approval-floor.ts`). */
+  /** The site's approval floor (site-wide only, D6; `policy/approval-floor.ts`). */
   readonly approvalFloor: ApprovalMode;
 }
 
@@ -148,8 +148,8 @@ function exclusion(
       return glob !== "" && matchSubject(glob, name, "loosen");
     });
   if (!allowed) return { name, reason: "agent_tools_allow" };
-  const install = wholeToolDeny(floor.install, name, now);
-  if (install) return { name, reason: "install_deny_rule", rule_id: install.id };
+  const site = wholeToolDeny(floor.site, name, now);
+  if (site) return { name, reason: "install_deny_rule", rule_id: site.id };
   const team = floor.scope === "team" ? wholeToolDeny(floor.team, name, now) : undefined;
   if (team) return { name, reason: "team_deny_rule", rule_id: team.id };
   return undefined;

@@ -1,4 +1,4 @@
-/** Install console: users (`/v1/install`, install.users.manage). Responses arrive camelized. */
+/** Install console: users (`/v1/site`, install.users.manage). Responses arrive camelized. */
 import { apiRequest, type ApiResult } from "../../../api/client";
 import type { InstallRole } from "../../nav/types";
 
@@ -8,7 +8,7 @@ export interface InstallUser {
   readonly id: string;
   readonly name: string;
   readonly email: string;
-  readonly installRole: InstallRole;
+  readonly siteRole: InstallRole;
   readonly twoFactorEnabled: boolean;
   readonly deactivatedAt: string | null;
   readonly createdAt: string;
@@ -28,7 +28,7 @@ export interface DeactivationResult {
 }
 
 export async function listUsers(): Promise<ApiResult<readonly InstallUser[]>> {
-  const res = await apiRequest<{ users: InstallUser[] }>("/v1/install/users");
+  const res = await apiRequest<{ users: InstallUser[] }>("/v1/site/users");
   return res.ok ? { ...res, data: res.data.users } : res;
 }
 
@@ -36,7 +36,7 @@ export function setUserActive(
   userId: string,
   active: boolean,
 ): Promise<ApiResult<DeactivationResult>> {
-  return apiRequest(`/v1/install/users/${enc(userId)}/${active ? "reactivate" : "deactivate"}`, {
+  return apiRequest(`/v1/site/users/${enc(userId)}/${active ? "reactivate" : "deactivate"}`, {
     method: "POST",
   });
 }

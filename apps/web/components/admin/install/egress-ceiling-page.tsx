@@ -22,7 +22,7 @@ export const PRESET_LABEL: Readonly<Record<EgressPreset, string>> = {
   web_search: "Web search provider",
 };
 
-/** The install egress ceiling (spec D6/D28; `/v1/install/egress-ceiling`, KOBE-38). */
+/** The install egress ceiling (spec D6/D28; `/v1/site/egress-ceiling`, KOBE-38). */
 export function EgressCeilingPage() {
   const { state, reload } = useResource(getEgressCeiling);
   const mutation = useMutation();

@@ -15,7 +15,7 @@ const setupSchema = z.object({
 
 /**
  * First-run setup (spec D7): creates the Owner while none exists, then disables itself. Requires
- * the install's setup token (from the Helm-generated Secret), so the first caller on an exposed
+ * the site's setup token (from the Helm-generated Secret), so the first caller on an exposed
  * fresh install can't take ownership. An advisory lock plus the single-owner unique index
  * guarantee one Owner across replicas; the user, credential and role are written atomically.
  */
@@ -55,7 +55,7 @@ export function setupRoutes(deps: ServerDeps): Hono {
       const { email, name, password } = parsed.data;
       const owner = await deps.createUserWithPassword(
         { email, name, password },
-        { installRole: "owner", recordSetup: true },
+        { siteRole: "owner", recordSetup: true },
       );
       return c.json({ userId: owner.id }, 201);
     } finally {

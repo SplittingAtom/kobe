@@ -258,22 +258,22 @@ describe("auth events", () => {
   });
 });
 
-describe("identity and install events", () => {
+describe("identity and site events", () => {
   it("records team creation and rename in the new team's audit", async () => {
     const created = await recorded(async () => {
-      const res = await admin.post("/v1/install/teams", {
+      const res = await admin.post("/v1/site/teams", {
         slug: "finance",
         name: "Finance",
         adminUserId: ids.alice,
       });
       finance = res.json.team.id;
-      const other = await admin.post("/v1/install/teams", {
+      const other = await admin.post("/v1/site/teams", {
         slug: "marketing",
         name: "Marketing",
         adminUserId: ids.bob,
       });
       marketing = other.json.team.id;
-      await admin.patch(`/v1/install/teams/${finance}`, { name: "Finance & Ops" });
+      await admin.patch(`/v1/site/teams/${finance}`, { name: "Finance & Ops" });
     });
     expect(created.map((r) => [r.action, r.team_id, r.actor_id, r.target])).toEqual([
       [
@@ -295,25 +295,25 @@ describe("identity and install events", () => {
 
   it("records nothing when the action fails (duplicate slug)", async () => {
     const rows = await recorded(() =>
-      admin.post("/v1/install/teams", { slug: "finance", name: "Again", adminUserId: ids.bob }),
+      admin.post("/v1/site/teams", { slug: "finance", name: "Again", adminUserId: ids.bob }),
     );
     expect(rows).toEqual([]);
   });
 
-  it("records install invitations without their token", async () => {
+  it("records site invitations without their token", async () => {
     let token = "";
     const rows = await recorded(async () => {
-      const res = await admin.post("/v1/install/invites", { email: "dana@audit.test" });
+      const res = await admin.post("/v1/site/invites", { email: "dana@audit.test" });
       token = h.mailer.lastToken("dana@audit.test");
-      await admin.post(`/v1/install/invites/${res.json.invitation.id}/resend`);
+      await admin.post(`/v1/site/invites/${res.json.invitation.id}/resend`);
       const resent = h.mailer.lastToken("dana@audit.test");
       await h.browser().post("/api/auth/invitation/accept", {
         token: resent,
         name: "Dana",
         password: PASSWORD,
       });
-      const revoked = await admin.post("/v1/install/invites", { email: "eve@audit.test" });
-      await admin.delete(`/v1/install/invites/${revoked.json.invitation.id}`);
+      const revoked = await admin.post("/v1/site/invites", { email: "eve@audit.test" });
+      await admin.delete(`/v1/site/invites/${revoked.json.invitation.id}`);
     });
     expect(actions(rows)).toEqual([
       "identity.invitation.created",
@@ -332,31 +332,31 @@ describe("identity and install events", () => {
     expect(JSON.stringify(rows)).not.toContain("eve@audit.test");
   });
 
-  it("records install role grants, revocations and the ownership transfer", async () => {
+  it("records site role grants, revocations and the ownership transfer", async () => {
     const rows = await recorded(async () => {
-      await owner.put(`/v1/install/roles/${ids.carol}`, { role: "admin" });
-      await owner.put(`/v1/install/roles/${ids.carol}`, { role: "admin" }); // no change
-      await owner.put(`/v1/install/roles/${ids.carol}`, { role: "user" });
-      await owner.post("/v1/install/roles/transfer-ownership", { userId: ids.admin });
-      await admin.post("/v1/install/roles/transfer-ownership", { userId: ids.owner });
+      await owner.put(`/v1/site/roles/${ids.carol}`, { role: "admin" });
+      await owner.put(`/v1/site/roles/${ids.carol}`, { role: "admin" }); // no change
+      await owner.put(`/v1/site/roles/${ids.carol}`, { role: "user" });
+      await owner.post("/v1/site/roles/transfer-ownership", { userId: ids.admin });
+      await admin.post("/v1/site/roles/transfer-ownership", { userId: ids.owner });
     });
     expect(rows.map((r) => [r.action, r.actor_id, r.target])).toEqual([
-      ["identity.install_role.granted", ids.owner, { userId: ids.carol, role: "admin" }],
-      ["identity.install_role.revoked", ids.owner, { userId: ids.carol, role: "admin" }],
+      ["identity.site_role.granted", ids.owner, { userId: ids.carol, role: "admin" }],
+      ["identity.site_role.revoked", ids.owner, { userId: ids.carol, role: "admin" }],
       ["identity.ownership.transferred", ids.owner, { fromUserId: ids.owner, toUserId: ids.admin }],
       ["identity.ownership.transferred", ids.admin, { fromUserId: ids.admin, toUserId: ids.owner }],
     ]);
   });
 
-  it("records install settings, deactivation and reactivation", async () => {
+  it("records site settings, deactivation and reactivation", async () => {
     const rows = await recorded(async () => {
-      await owner.put("/v1/install/settings", { requireTwoFactor: false });
-      await admin.post(`/v1/install/users/${ids.carol}/deactivate`);
-      await admin.post(`/v1/install/users/${ids.carol}/deactivate`); // already: no event
-      await admin.post(`/v1/install/users/${ids.carol}/reactivate`);
+      await owner.put("/v1/site/settings", { requireTwoFactor: false });
+      await admin.post(`/v1/site/users/${ids.carol}/deactivate`);
+      await admin.post(`/v1/site/users/${ids.carol}/deactivate`); // already: no event
+      await admin.post(`/v1/site/users/${ids.carol}/reactivate`);
     });
     expect(rows.map((r) => [r.action, r.target])).toEqual([
-      ["install.settings.updated", { setting: "require_two_factor", value: false }],
+      ["site.settings.updated", { setting: "require_two_factor", value: false }],
       ["identity.user.deactivated", { userId: ids.carol }],
       ["identity.user.reactivated", { userId: ids.carol }],
     ]);
@@ -450,26 +450,26 @@ describe("team events", () => {
 
 describe("policy and thread events", () => {
   it("records tool-rule changes and policy switches by metadata, never notes or patterns", async () => {
-    let installRule = "";
+    let siteRule = "";
     let teamRule = "";
     const rows = await recorded(async () => {
-      const created = await admin.post("/v1/install/policy/rules", {
+      const created = await admin.post("/v1/site/policy/rules", {
         effect: "deny",
         tool_glob: "bash",
         arg_pattern: { "/command": "rm -rf *SECRET-PATTERN*" },
         note: "NOTE-must-not-be-audited",
       });
       expect(created.status, JSON.stringify(created.json)).toBe(201);
-      installRule = created.json.rule.id;
-      await admin.request("PUT", `/v1/install/policy/rules/${installRule}`, {
+      siteRule = created.json.rule.id;
+      await admin.request("PUT", `/v1/site/policy/rules/${siteRule}`, {
         effect: "ask",
         tool_glob: "bash",
         arg_pattern: null,
         note: null,
         expires_at: null,
       });
-      await admin.delete(`/v1/install/policy/rules/${installRule}`);
-      await admin.put("/v1/install/policy/settings", { promptSandboxWrites: true });
+      await admin.delete(`/v1/site/policy/rules/${siteRule}`);
+      await admin.put("/v1/site/policy/settings", { promptSandboxWrites: true });
       const team = await alice.post("/v1/team/policy/rules", {
         effect: "deny",
         tool_glob: "write",
@@ -489,7 +489,7 @@ describe("policy and thread events", () => {
       ["policy.rule.deleted", finance, "team", "deny"],
     ]);
     expect(rows[0]?.target).toEqual({
-      ruleId: installRule,
+      ruleId: siteRule,
       scope: "install",
       effect: "deny",
       toolGlob: "bash",
@@ -560,20 +560,20 @@ describe("audit and action commit together", () => {
 });
 
 describe("read APIs", () => {
-  it("limits the install log to install admins", async () => {
-    expect((await alice.get("/v1/install/audit")).status).toBe(403);
-    const page = await admin.get("/v1/install/audit?limit=5");
+  it("limits the site log to site admins", async () => {
+    expect((await alice.get("/v1/site/audit")).status).toBe(403);
+    const page = await admin.get("/v1/site/audit?limit=5");
     expect(page.status).toBe(200);
     expect(page.json.events).toHaveLength(5);
     expect(typeof page.json.nextCursor).toBe("string");
-    const next = await admin.get(`/v1/install/audit?limit=5&before=${page.json.nextCursor}`);
+    const next = await admin.get(`/v1/site/audit?limit=5&before=${page.json.nextCursor}`);
     expect(next.json.events[0].seq).toBeLessThan(page.json.events[4].seq);
-    const auth = await admin.get("/v1/install/audit?category=auth&limit=200");
+    const auth = await admin.get("/v1/site/audit?category=auth&limit=200");
     expect(auth.json.events.every((e: { action: string }) => e.action.startsWith("auth."))).toBe(
       true,
     );
-    expect((await admin.get("/v1/install/audit?limit=0")).status).toBe(400);
-    expect((await admin.get("/v1/install/audit?bogus=1")).status).toBe(400);
+    expect((await admin.get("/v1/site/audit?limit=0")).status).toBe(400);
+    expect((await admin.get("/v1/site/audit?bogus=1")).status).toBe(400);
   });
 
   it("shows team admins only their team's events, without IPs or chain fields", async () => {
@@ -609,14 +609,14 @@ describe("read APIs", () => {
   });
 
   it("verifies the hash chain over everything recorded", async () => {
-    const res = await admin.get("/v1/install/audit/integrity");
+    const res = await admin.get("/v1/site/audit/integrity");
     const seq = await head();
     expect(res.json).toMatchObject({ ok: true, head: { seq }, anchor: { seq } });
     // The anchor is attested with a key derived from the auth secret (not in the database).
     expect(res.json.anchor.mac).toBe(
       anchorMac(anchorKey("h".repeat(48)), seq, res.json.head.hash as string),
     );
-    expect((await alice.get("/v1/install/audit/integrity")).status).toBe(403);
+    expect((await alice.get("/v1/site/audit/integrity")).status).toBe(403);
   });
 });
 
@@ -691,7 +691,7 @@ describe("a busy audit chain", () => {
     await h.admin.query("BEGIN");
     try {
       await h.admin.query(`SELECT pg_advisory_xact_lock(hashtextextended('kobe.audit_log', 0))`);
-      const res = await owner.put("/v1/install/settings", { requireTwoFactor: true });
+      const res = await owner.put("/v1/site/settings", { requireTwoFactor: true });
       expect(res.status).toBe(503);
       expect(res.json.code).toBe("audit_busy");
     } finally {

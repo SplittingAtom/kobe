@@ -27,7 +27,7 @@ import { recordAudit } from "../audit/record.js";
  * Request access (spec D28, U12; KOBE-39). A member whose sandbox was blocked from a host asks the
  * team's admins to enable it: there is no user self-allow, only a request. The request names the
  * ceiling pattern that would allow the host; approving enables exactly that pattern (within the
- * install ceiling, like the team console does) and settles every pending request for it; denying
+ * site ceiling, like the team console does) and settles every pending request for it; denying
  * settles them too. Admins are told when a request arrives, requesters when it is decided (email
  * outbox, request-notify.ts; in-app: the team console's list and the chat notice). Everything is
  * audited; thread metadata is the thread id only.
@@ -232,7 +232,7 @@ export type DecideResult =
 
 /**
  * A team admin's decision (the route checks `team.egress.manage`). Approve enables the request's
- * pattern if it is still in the install ceiling (409 otherwise; the request stays pending), and
+ * pattern if it is still in the site ceiling (409 otherwise; the request stays pending), and
  * either decision settles every pending request for the pattern, each requester notified.
  */
 export async function decideEgressRequest(

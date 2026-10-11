@@ -5,10 +5,10 @@ import { users } from "./auth.js";
 import { teams } from "./teams.js";
 
 // Team-level suspension of agents the team does not own (KOBE-86, spec D19): a member's personal
-// agent that is used in the team, or a gallery agent. Those agents live install-wide
+// agent that is used in the team, or a gallery agent. Those agents live site-wide
 // (`install_agents`), so their own `status` can't be a team's decision (it would reach other
 // teams); a row here suspends the agent in this team only. Team agents keep using
-// `team_agents.status`. No foreign key to `install_agents`: the agent is install-wide data and a
+// `team_agents.status`. No foreign key to `install_agents`: the agent is site-wide data and a
 // suspension is not worth blocking its deletion; a row for a deleted agent is inert.
 
 /** Scopes a team can suspend through this table. */

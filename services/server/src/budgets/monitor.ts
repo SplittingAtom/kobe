@@ -25,7 +25,7 @@ import { deliverBudgetEmails } from "./outbox.js";
  * Watches spend against budgets (KOBE-42, D30) and acts on it:
  *
  * - **80 %**: a warning, recorded once per budget and period (`budget_alerts`) and emailed (team
- *   admins; for a member budget the member too; install admins for the install budget). Members
+ *   admins; for a member budget the member too; site admins for the site budget). Members
  *   see it in the chat (`GET /v1/team/budget-status`).
  * - **100 %**: the same, audited `models.budget.reached`, and every active run at that level is
  *   budget-stopped (`stopForBudget`): queued runs end now, running ones after their current step,
@@ -192,14 +192,14 @@ export class BudgetMonitor {
       }
     }
     let alerts = 0;
-    let installReached = false;
+    let siteReached = false;
     for (const line of lines) {
       for (const threshold of BUDGET_THRESHOLDS) {
         if (!thresholdReached(line, threshold)) continue;
         try {
           if (await this.alert(teamId, line, threshold)) {
             alerts++;
-            if (line.scope === "install" && threshold === 100) installReached = true;
+            if (line.scope === "install" && threshold === 100) siteReached = true;
           }
         } catch (err) {
           // One alert (e.g. its budget changed meanwhile) never blocks the others.
@@ -207,8 +207,8 @@ export class BudgetMonitor {
         }
       }
     }
-    // The install budget just ran out: stop every team's runs now, not at the next sweep.
-    if (installReached) void this.sweep();
+    // The site budget just ran out: stop every team's runs now, not at the next sweep.
+    if (siteReached) void this.sweep();
     if (alerts > 0) await this.deliver();
     return { alerts, stopped };
   }

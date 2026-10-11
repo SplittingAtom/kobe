@@ -21,7 +21,7 @@ function actorOf(c: RunContext): ActorContext {
   return {
     user_id: c.get("user").id,
     team_id: team.id,
-    install_role: c.get("installRole") ?? "user",
+    site_role: c.get("siteRole") ?? "user",
     team_role: team.role,
   };
 }

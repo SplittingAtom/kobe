@@ -816,7 +816,7 @@ describe("policy.check", () => {
     expect(sb.frames("policy.result").filter((r) => r.request_id === "dup")).toHaveLength(1);
   });
 
-  it("applies the install approval floor (no team floor, D6) and fails closed on an invalid one", async () => {
+  it("applies the site approval floor (no team floor, D6) and fails closed on an invalid one", async () => {
     const w = await world();
     const sb = await started(w);
     const decide = async (id: string) => {
@@ -838,10 +838,10 @@ describe("policy.check", () => {
         [value],
       );
     try {
-      // Install floor ask-all: even a read needs approval (denied by the default broker).
+      // Site floor ask-all: even a read needs approval (denied by the default broker).
       await setFloor("ask-all");
-      const install = await decide("f2");
-      expect(install.decision === "deny" && install.message).toMatch(/approval/);
+      const site = await decide("f2");
+      expect(site.decision === "deny" && site.message).toMatch(/approval/);
       // An unreadable floor is the strictest mode: fail closed.
       await setFloor("yolo");
       expect((await decide("f3")).decision).toBe("deny");

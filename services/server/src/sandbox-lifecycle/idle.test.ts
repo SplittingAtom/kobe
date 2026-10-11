@@ -8,7 +8,7 @@ describe("resolveIdleMinutes (D14: 15 minutes, team range 5–60)", () => {
     expect(resolveIdleMinutes(30, 15)).toBe(30);
   });
 
-  it("falls back to the install default for anything else", () => {
+  it("falls back to the site default for anything else", () => {
     for (const bad of [undefined, null, 4, 61, 7.5, "30", {}, -1]) {
       expect(resolveIdleMinutes(bad, 15)).toBe(15);
     }

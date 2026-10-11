@@ -47,7 +47,7 @@ let app: ReturnType<typeof createApp>;
 let adminPg: pg.Client;
 let financeAgent: string;
 let marketingAgent: string;
-let installOwner: TestBrowser;
+let siteOwner: TestBrowser;
 
 async function signIn(who: Person, teamId: string): Promise<void> {
   const b = new TestBrowser(app, PUBLIC_URL);
@@ -126,10 +126,10 @@ beforeAll(async () => {
   for (const who of PEOPLE) await signIn(who, who === "madmin" ? marketing : finance);
   await deps.createUserWithPassword(
     { email: "owner@gov.test", name: "owner", password: PASSWORD },
-    { installRole: "owner" },
+    { siteRole: "owner" },
   );
-  installOwner = new TestBrowser(app, PUBLIC_URL);
-  const owner = await installOwner.post("/api/auth/sign-in/email", {
+  siteOwner = new TestBrowser(app, PUBLIC_URL);
+  const owner = await siteOwner.post("/api/auth/sign-in/email", {
     email: "owner@gov.test",
     password: PASSWORD,
   });
@@ -249,7 +249,7 @@ describe("deactivation stops the user's schedules (ac-1)", () => {
     runs = await fire([inFinance, inMarketing]);
     expect(await runStatus(runs[0] as string)).toBe("running");
     await requeue(runs[1] as string);
-    const res = await installOwner.post(`/v1/install/users/${ids.bob}/deactivate`);
+    const res = await siteOwner.post(`/v1/site/users/${ids.bob}/deactivate`);
     expect(res.status, JSON.stringify(res.json)).toBe(200);
     expect(res.json.incompleteSteps).not.toContain("schedules");
   });
@@ -289,7 +289,7 @@ describe("deactivation stops the user's schedules (ac-1)", () => {
   });
 
   it("reactivation keeps them paused until the owner resumes each one", async () => {
-    expect((await installOwner.post(`/v1/install/users/${ids.bob}/reactivate`)).status).toBe(200);
+    expect((await siteOwner.post(`/v1/site/users/${ids.bob}/reactivate`)).status).toBe(200);
     expect((await scheduleRow(inFinance))?.paused_by).toBe("deactivation");
     // A team admin does not resume a schedule the owner's deactivation paused.
     expect((await as.admin.post(`/v1/schedules/${inFinance}/resume`)).status).toBe(404);
@@ -445,7 +445,7 @@ describe("an admin pause does not outlive the owner's deactivation or removal (r
   it("deactivation turns an admin pause into the owner's; only the owner resumes after reactivation", async () => {
     const id = await schedule("fred", financeAgent);
     expect((await as.admin.post(`/v1/schedules/${id}/pause`)).json.paused_by).toBe("team_admin");
-    expect((await installOwner.post(`/v1/install/users/${ids.fred}/deactivate`)).status).toBe(200);
+    expect((await siteOwner.post(`/v1/site/users/${ids.fred}/deactivate`)).status).toBe(200);
     expect((await scheduleRow(id))?.paused_by).toBe("deactivation");
     expect((await as.admin.post(`/v1/schedules/${id}/resume`)).status).toBe(404);
     await forceAdminPause(id);
@@ -454,7 +454,7 @@ describe("an admin pause does not outlive the owner's deactivation or removal (r
     expect(refused.json.code).toBe("schedule_owner_inactive");
     expect((await scheduleRow(id))?.active).toBe(false);
     await adminPg.query(`UPDATE schedules SET paused_by = 'deactivation' WHERE id = $1`, [id]);
-    expect((await installOwner.post(`/v1/install/users/${ids.fred}/reactivate`)).status).toBe(200);
+    expect((await siteOwner.post(`/v1/site/users/${ids.fred}/reactivate`)).status).toBe(200);
     expect((await as.admin.post(`/v1/schedules/${id}/resume`)).status).toBe(404);
     await signIn("fred", finance);
     const resumed = await as.fred.post(`/v1/schedules/${id}/resume`);

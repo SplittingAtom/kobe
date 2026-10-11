@@ -16,7 +16,7 @@ const f = new RunFixture();
 /** Threads whose (fake) agent pins a model alias — what KOBE-47's resolver will supply. */
 const pinnedAliases = new Map<string, string>();
 
-/** Install defaults (chart values, KOBE-259): what a model without catalog limits gets. */
+/** Site defaults (chart values, KOBE-259): what a model without catalog limits gets. */
 const TOKEN_DEFAULTS = {
   maxOutputTokens: 12_000,
   reasoningMaxOutputTokens: 48_000,
@@ -42,7 +42,7 @@ afterAll(async () => {
   await f.teardown();
 });
 
-/** Install catalog rows and the team's choice, as the admin API would leave them. */
+/** Site catalog rows and the team's choice, as the admin API would leave them. */
 async function catalog(
   team: string,
   ownerId: string,
@@ -142,7 +142,7 @@ describe("run model resolution (D30)", () => {
     const start = await ws.started(runId);
     expect(start.config).toEqual({
       model: { alias: "smart", gateway_model: "anthropic/claude-fake", api: "anthropic-messages" },
-      // KOBE-259: no catalog limits, not a reasoning model: the install defaults.
+      // KOBE-259: no catalog limits, not a reasoning model: the site defaults.
       model_limits: { max_output_tokens: 12_000, context_window: 100_000 },
       agent: null,
       approval_mode: "ask-on-write",

@@ -31,7 +31,7 @@ describe("install model resources", () => {
     expect(res).toMatchObject({ ok: true, data: { id: "openai", keySet: true } });
     expect(calls).toEqual([
       {
-        url: "/v1/install/models/providers/openai",
+        url: "/v1/site/models/providers/openai",
         method: "PATCH",
         team: null,
         body: { api_key: "sk-x" },
@@ -51,8 +51,8 @@ describe("install model resources", () => {
     expect((await install.deleteProvider("vllm")).ok).toBe(true);
     await install.deleteCatalogModel("a.b");
     expect(del.map((c) => `${c.method} ${c.url}`)).toEqual([
-      "DELETE /v1/install/models/providers/vllm",
-      "DELETE /v1/install/models/catalog/a.b",
+      "DELETE /v1/site/models/providers/vllm",
+      "DELETE /v1/site/models/catalog/a.b",
     ]);
   });
 
@@ -62,8 +62,8 @@ describe("install model resources", () => {
     await install.refreshProviderModels("ollama");
     expect(listed).toMatchObject({ ok: true, data: { providerId: "ollama", models: ["glm-5.3"] } });
     expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
-      "GET /v1/install/models/providers/ollama/models",
-      "POST /v1/install/models/providers/ollama/models/refresh",
+      "GET /v1/site/models/providers/ollama/models",
+      "POST /v1/site/models/providers/ollama/models/refresh",
     ]);
   });
 });

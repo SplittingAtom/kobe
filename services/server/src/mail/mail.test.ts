@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseFrom } from "./config.js";
 import { smtpTransportOptions } from "./mailer.js";
-import {
-  installInviteMessage,
-  oneLine,
-  passwordResetMessage,
-  teamInviteMessage,
-} from "./messages.js";
+import { siteInviteMessage, oneLine, passwordResetMessage, teamInviteMessage } from "./messages.js";
 
 const base = { host: "smtp.example.com", port: 587, from: { address: "k@example.com" } } as const;
 
@@ -62,7 +57,7 @@ describe("messages", () => {
   });
 
   it("puts tokens in the link only", () => {
-    const invite = installInviteMessage({
+    const invite = siteInviteMessage({
       to: "a@b.test",
       inviterName: "Owner",
       link: "https://kobe.test/invite#token=abc",

@@ -31,7 +31,7 @@ async function loadTeams(): Promise<ApiResult<TeamsData>> {
 }
 
 /**
- * Teams (spec D5/D8; `/v1/install/teams`). Install admins create a team with its first team admin,
+ * Teams (spec D5/D8; `/v1/site/teams`). Install admins create a team with its first team admin,
  * rename teams and read rosters. Membership changes belong to the team's own admins (KOBE-14).
  */
 export function TeamsPage() {

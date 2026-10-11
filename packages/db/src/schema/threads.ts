@@ -40,7 +40,7 @@ const teamRef = () =>
  * two generated columns: `team_agent_id` (set for team agents) → team_agent_versions and
  * `install_agent_id` (personal and gallery agents) → install_agent_versions; MATCH SIMPLE skips
  * the null one. Both are NO ACTION, so a pinned version can never be deleted. Null agent = the
- * install default agent. `project_id` → projects (KOBE-160) is ON DELETE RESTRICT: a project is
+ * site default agent. `project_id` → projects (KOBE-160) is ON DELETE RESTRICT: a project is
  * archived, and a hard delete must first detach or delete its threads (they are authors' private
  * content, never silently orphaned, and a shared thread must be unshared with it).
  *

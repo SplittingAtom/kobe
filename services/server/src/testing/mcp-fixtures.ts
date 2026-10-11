@@ -136,7 +136,7 @@ export function mcpToken(
 
 /**
  * An `allowed` approval row exactly as KOBE-37's decide path stores it (canonical input, token
- * kid/expiry, `input_hmac` = the MAC), signed with `key` (the install key, or a forger's). The row
+ * kid/expiry, `input_hmac` = the MAC), signed with `key` (the site key, or a forger's). The row
  * goes in as the superuser; signing is the protocol reference HMAC.
  */
 export async function allowApproval(

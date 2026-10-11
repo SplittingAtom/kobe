@@ -5,7 +5,7 @@ import { createDb, type KobeDatabase } from "./client.js";
 import { connectors, teamConnectors, teamMembers, teams, users } from "./schema/index.js";
 import { withTeam } from "./with-team.js";
 
-/** KOBE-58: connector registry (install-wide) and team enablement (team table, RLS). */
+/** KOBE-58: connector registry (site-wide) and team enablement (team table, RLS). */
 let app: KobeDatabase;
 const teamA = randomUUID();
 const teamB = randomUUID();

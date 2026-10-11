@@ -8,7 +8,7 @@ import { activeTeamSchema } from "../teams/schemas.js";
 
 /**
  * The team switcher's API (spec D9): the caller's teams with their role, and the session's one
- * active team. Install roles add nothing: only memberships are listed or selectable.
+ * active team. Site roles add nothing: only memberships are listed or selectable.
  */
 export function myTeamsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();

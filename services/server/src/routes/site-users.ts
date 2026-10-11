@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import { asc, eq, installRoles, users } from "@kobe/db";
 import type { AuthVariables } from "../auth/session.js";
-import { requireInstallPermission } from "../authz/middleware.js";
+import { requireSitePermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { invalidRequest } from "../teams/http.js";
 import { idSchema } from "../teams/schemas.js";
@@ -12,15 +12,15 @@ import {
 } from "../users/deactivation.js";
 
 /**
- * Install users (spec D7, §6.1 `/v1/install/users`): list, deactivate, reactivate. Deactivation
+ * Site users (spec D7, §6.1 `/v1/site/users`): list, deactivate, reactivate. Deactivation
  * blocks every sign-in method and all API access at once and revokes every session; memberships
  * are kept so reactivation restores the user's teams. Admins act on Users; only the Owner acts on
  * Admins (as with granting Admin); the Owner can't be deactivated (transfer ownership first).
  */
-export function installUsersRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
+export function siteUsersRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
   const db = deps.database.db;
-  app.use(requireInstallPermission("install.users.manage"));
+  app.use(requireSitePermission("site.users.manage"));
 
   app.get("/", async (c) => {
     const rows = await db
@@ -28,7 +28,7 @@ export function installUsersRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
         id: users.id,
         name: users.name,
         email: users.email,
-        installRole: installRoles.role,
+        siteRole: installRoles.role,
         twoFactorEnabled: users.twoFactorEnabled,
         deactivatedAt: users.deactivatedAt,
         createdAt: users.createdAt,
@@ -39,7 +39,7 @@ export function installUsersRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
     return c.json({
       users: rows.map((u) => ({
         ...u,
-        installRole: u.installRole ?? "user",
+        siteRole: u.siteRole ?? "user",
         deactivatedAt: u.deactivatedAt?.toISOString() ?? null,
         createdAt: u.createdAt.toISOString(),
       })),
@@ -67,7 +67,7 @@ export function installUsersRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
         409,
       );
     }
-    if (target.role === "admin" && c.get("installRole") !== "owner") {
+    if (target.role === "admin" && c.get("siteRole") !== "owner") {
       return c.json(
         { code: "forbidden", message: "Only the Owner can deactivate or reactivate an Admin." },
         403,

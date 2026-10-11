@@ -43,7 +43,7 @@ const approve = async (p: Person, skillId: string) => {
   });
   expect(res.status, JSON.stringify(res.json)).toBe(200);
 };
-/** Lists a hash on the install blocklist (KOBE-81's table; the admin route has its own tests). */
+/** Lists a hash on the site blocklist (KOBE-81's table; the admin route has its own tests). */
 async function blockAs(owner: Person, hash: string) {
   await f.fx.admin.query(
     `INSERT INTO skill_blocklist (content_hash, reason, added_by) VALUES ($1, 'malware', $2)`,

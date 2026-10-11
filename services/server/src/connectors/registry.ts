@@ -18,7 +18,7 @@ import { recordAudit } from "../audit/record.js";
 import { dropConnectorGrants } from "./grants.js";
 
 /**
- * The install connector registry (KOBE-100, spec D6, D27): MCP servers an install admin registers.
+ * The site connector registry (KOBE-100, spec D6, D27): MCP servers a site admin registers.
  * This module owns the rows; probing and pinning tools (KOBE-101), team enablement (KOBE-104) and
  * credentials (KOBE-107/108) come later. Audit records ids, names and changed field names only:
  * a URL can carry a key in its query string, so it never leaves the table.

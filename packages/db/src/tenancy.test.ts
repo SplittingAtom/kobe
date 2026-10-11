@@ -1,7 +1,7 @@
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 import * as schema from "./schema/index.js";
-import { INSTALL_WIDE_TABLES, TEAM_TABLES, TENANCY_DOMAINS, isTeamTable } from "./tenancy.js";
+import { SITE_WIDE_TABLES, TEAM_TABLES, TENANCY_DOMAINS, isTeamTable } from "./tenancy.js";
 
 const schemaTables = Object.values(schema)
   .filter((v) => typeof v === "object" && v !== null && Symbol.for("drizzle:IsDrizzleTable") in v)
@@ -11,22 +11,20 @@ const schemaTables = Object.values(schema)
 const snake = (name: string): string => name.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`);
 
 describe("tenancy registry", () => {
-  it("never lists a table as both team-owned and install-wide", () => {
-    const overlap = TEAM_TABLES.filter((t) =>
-      (INSTALL_WIDE_TABLES as readonly string[]).includes(t),
-    );
+  it("never lists a table as both team-owned and site-wide", () => {
+    const overlap = TEAM_TABLES.filter((t) => (SITE_WIDE_TABLES as readonly string[]).includes(t));
     expect(overlap).toEqual([]);
   });
 
   it("lists every table once across all spec areas", () => {
-    const all = [...TEAM_TABLES, ...INSTALL_WIDE_TABLES];
+    const all = [...TEAM_TABLES, ...SITE_WIDE_TABLES];
     expect(all.filter((t, i) => all.indexOf(t) !== i)).toEqual([]);
   });
 
   // Areas are merged last-wins; a grant declared by another area could silently widen access.
   it("keeps grants and team-referencing exceptions inside the declaring area", () => {
     for (const domain of TENANCY_DOMAINS) {
-      const own = new Set<string>(domain.installWide);
+      const own = new Set<string>(domain.siteWide);
       const foreign = [
         ...Object.keys(domain.grants),
         ...Object.keys(domain.teamReferencing),
@@ -35,9 +33,9 @@ describe("tenancy registry", () => {
     }
   });
 
-  it("explicitly lists the spec's install-wide tables", () => {
+  it("explicitly lists the spec's site-wide tables", () => {
     for (const t of ["users", "teams", "install_roles", "connectors", "audit_log"]) {
-      expect(INSTALL_WIDE_TABLES).toContain(t);
+      expect(SITE_WIDE_TABLES).toContain(t);
     }
   });
 
@@ -45,7 +43,7 @@ describe("tenancy registry", () => {
     const unclassified = schemaTables
       .map((t) => t.name)
       .filter(
-        (name) => !isTeamTable(name) && !(INSTALL_WIDE_TABLES as readonly string[]).includes(name),
+        (name) => !isTeamTable(name) && !(SITE_WIDE_TABLES as readonly string[]).includes(name),
       );
     expect(unclassified).toEqual([]);
   });

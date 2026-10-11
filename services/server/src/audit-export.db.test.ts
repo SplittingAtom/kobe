@@ -48,14 +48,14 @@ beforeAll(async () => {
   bob = await h.signIn("bob@export.test");
   member = await h.signIn("member@export.test");
   finance = (
-    await admin.post("/v1/install/teams", {
+    await admin.post("/v1/site/teams", {
       slug: "finance",
       name: "Finance",
       adminUserId: aliceId,
     })
   ).json.team.id;
   marketing = (
-    await admin.post("/v1/install/teams", {
+    await admin.post("/v1/site/teams", {
       slug: "marketing",
       name: "Marketing",
       adminUserId: bobId,
@@ -78,13 +78,13 @@ const lines = (text: string) =>
 
 describe("export", () => {
   it("is for admins only", async () => {
-    expect((await member.get("/v1/install/audit/export?format=csv")).status).toBe(403);
+    expect((await member.get("/v1/site/audit/export?format=csv")).status).toBe(403);
     // Not a team admin (the member has no team yet, so the team gate answers first).
     expect((await member.get("/v1/team/audit/export?format=csv")).status).not.toBe(200);
   });
 
-  it("downloads the install log as CSV and JSONL with the install-only fields", async () => {
-    const csv = await admin.get("/v1/install/audit/export?format=csv");
+  it("downloads the site log as CSV and JSONL with the site-only fields", async () => {
+    const csv = await admin.get("/v1/site/audit/export?format=csv");
     expect(csv.status).toBe(200);
     expect(csv.headers.get("content-type")).toContain("text/csv");
     expect(csv.headers.get("content-disposition")).toMatch(
@@ -93,7 +93,7 @@ describe("export", () => {
     expect(csv.text.split("\r\n")[0]).toBe(
       "seq,id,at,team_id,actor_kind,actor_id,actor_name,actor_email,action,target,ip,user_agent,prev_hash,hash",
     );
-    const jsonl = await admin.get("/v1/install/audit/export?format=jsonl");
+    const jsonl = await admin.get("/v1/site/audit/export?format=jsonl");
     const events = lines(jsonl.text);
     expect(events.map((e) => e.seq)).toEqual([...events.map((e) => e.seq)].sort((a, b) => a - b));
     expect(events[0]).toHaveProperty("hash");
@@ -103,20 +103,20 @@ describe("export", () => {
   });
 
   it("exports only the requested date range, and one team on request", async () => {
-    const all = lines((await admin.get("/v1/install/audit/export?format=jsonl")).text);
+    const all = lines((await admin.get("/v1/site/audit/export?format=jsonl")).text);
     const future = new Date(Date.now() + 3600_000).toISOString();
     const none = await admin.get(
-      `/v1/install/audit/export?format=jsonl&since=${encodeURIComponent(future)}`,
+      `/v1/site/audit/export?format=jsonl&since=${encodeURIComponent(future)}`,
     );
     expect(none.status).toBe(200);
     expect(none.text).toBe("");
     const until = await admin.get(
-      `/v1/install/audit/export?format=jsonl&until=${encodeURIComponent(all[2]?.at ?? "")}`,
+      `/v1/site/audit/export?format=jsonl&until=${encodeURIComponent(all[2]?.at ?? "")}`,
     );
     expect(lines(until.text).length).toBeGreaterThanOrEqual(2);
     expect(lines(until.text).length).toBeLessThan(all.length);
     const team = lines(
-      (await admin.get(`/v1/install/audit/export?format=jsonl&teamId=${marketing}`)).text,
+      (await admin.get(`/v1/site/audit/export?format=jsonl&teamId=${marketing}`)).text,
     );
     expect(team.length).toBeGreaterThan(0);
     expect(team.every((e) => e.teamId === marketing)).toBe(true);
@@ -130,7 +130,7 @@ describe("export", () => {
       "format=csv&bogus=1",
       `format=csv&since=${encodeURIComponent("2026-10-02T00:00:00Z")}&until=${encodeURIComponent("2026-10-01T00:00:00Z")}`,
     ]) {
-      expect((await admin.get(`/v1/install/audit/export?${q}`)).status, q).toBe(400);
+      expect((await admin.get(`/v1/site/audit/export?${q}`)).status, q).toBe(400);
     }
     expect((await alice.get(`/v1/team/audit/export?format=csv&teamId=${marketing}`)).status).toBe(
       400,
@@ -165,15 +165,13 @@ describe("export", () => {
       target: { format: "jsonl", complete: true },
     });
     expect(latest.target.rows).toBeGreaterThanOrEqual(before);
-    const install = await admin.get("/v1/install/audit?action=audit.exported&limit=50");
-    expect(install.json.events.some((e: { teamId: string | null }) => e.teamId === null)).toBe(
-      true,
-    );
+    const site = await admin.get("/v1/site/audit?action=audit.exported&limit=50");
+    expect(site.json.events.some((e: { teamId: string | null }) => e.teamId === null)).toBe(true);
   });
 
   it("streams a long log in pages without gaps or repeats", async () => {
     for (let i = 0; i < 430; i++) await record(`bulk-${i}`);
-    const events = lines((await owner.get("/v1/install/audit/export?format=jsonl")).text);
+    const events = lines((await owner.get("/v1/site/audit/export?format=jsonl")).text);
     const seqs = events.map((e) => e.seq as number);
     expect(seqs.length).toBeGreaterThan(430);
     expect(seqs.every((s, i) => i === 0 || s === (seqs[i - 1] ?? 0) + 1)).toBe(true);
@@ -225,9 +223,9 @@ const syslogSeqs = (chunks: Buffer[]): number[] =>
   ].map((m) => Number(m[1]));
 
 describe("forwarding health view", () => {
-  it("is for install admins and says when nothing is configured", async () => {
-    expect((await member.get("/v1/install/audit/forwarding")).status).toBe(403);
-    const res = await admin.get("/v1/install/audit/forwarding");
+  it("is for site admins and says when nothing is configured", async () => {
+    expect((await member.get("/v1/site/audit/forwarding")).status).toBe(403);
+    const res = await admin.get("/v1/site/audit/forwarding");
     expect(res.status).toBe(200);
     expect(res.json).toMatchObject({ enabled: false, destinations: [] });
   });

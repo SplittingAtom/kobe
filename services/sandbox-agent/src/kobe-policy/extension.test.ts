@@ -107,9 +107,9 @@ describe("kobe-policy extension load", () => {
       tool_call_id: "c1",
       decision: "deny",
       reasons: [],
-      message: "Denied by install rule",
+      message: "Denied by site rule",
     });
-    expect(await result).toEqual({ block: true, reason: "policy.denied: Denied by install rule" });
+    expect(await result).toEqual({ block: true, reason: "policy.denied: Denied by site rule" });
   });
 
   it("refuses (and blocks everything) when it is not the last extension", async () => {

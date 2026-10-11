@@ -321,7 +321,7 @@ export class ModelGatewaySync {
         .select({ alias: teamModels.alias })
         .from(teamModels)
         .where(eq(teamModels.teamId, team.id));
-      // KOBE-42: the members' request rate (the install's, or the team's lower one).
+      // KOBE-42: the members' request rate (the site's, or the team's lower one).
       const rate = await tx.execute<{ rpm: number }>(sql`
         SELECT LEAST(l.user_requests_per_minute,
                      COALESCE(b.user_requests_per_minute, l.user_requests_per_minute)) AS rpm

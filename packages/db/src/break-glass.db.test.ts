@@ -170,7 +170,7 @@ afterAll(async () => {
 });
 
 describe("break_glass_grants guard trigger", () => {
-  it("lets an install admin request; the database stamps the request window", async () => {
+  it("lets a site admin request; the database stamps the request window", async () => {
     const row = await grantRow(await request());
     expect(row.status).toBe("pending");
     expect(row.request_expires_at.getTime() - row.requested_at.getTime()).toBe(24 * 3600_000);
@@ -187,7 +187,7 @@ describe("break_glass_grants guard trigger", () => {
     ).rejects.toMatchObject({ code: "55000" });
   });
 
-  it("refuses self-approval while a second install admin exists", async () => {
+  it("refuses self-approval while a second site admin exists", async () => {
     const id = await request();
     expect(await errorCode(approve(id, requester))).toBe("42501");
     expect((await grantRow(id)).status).toBe("pending");
@@ -334,8 +334,8 @@ describe("break_glass_grants guard trigger", () => {
     ).toBe("42501");
   });
 
-  it("lets a single-admin install self-approve, flagged (D10)", async () => {
-    // Every other install role is removed for the duration of this test.
+  it("lets a single-admin site self-approve, flagged (D10)", async () => {
+    // Every other site role is removed for the duration of this test.
     const { rows } = await admin.query<{ user_id: string; role: string }>(
       `DELETE FROM install_roles WHERE user_id <> $1 RETURNING user_id, role::text`,
       [requester],
@@ -465,7 +465,7 @@ describe("readWithBreakGlass", () => {
     expect(await errorCode(read(id, { kind: "threads", limit: 5 }))).toBe("grant_not_active");
   });
 
-  it("is usable only by the requester, and only while they are an install admin", async () => {
+  it("is usable only by the requester, and only while they are a site admin", async () => {
     const id = await approved();
     expect(await errorCode(read(id, { kind: "threads", limit: 5 }, approver))).toBe(
       "grant_not_found",

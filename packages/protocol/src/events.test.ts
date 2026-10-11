@@ -233,7 +233,7 @@ describe("stream open decision", () => {
 });
 
 describe("payload id and input rules", () => {
-  it("allows the install default agent (null pin) on run.started", () => {
+  it("allows the site default agent (null pin) on run.started", () => {
     const payload = {
       ...EVENT_PAYLOAD_EXAMPLES["run.started"],
       agent_id: null,

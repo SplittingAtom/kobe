@@ -14,7 +14,7 @@ import { useMutation, useResource } from "../use-resource";
 import styles from "../admin.module.css";
 
 /**
- * Web search provider (`/v1/install/web-search`, KOBE-113): which provider the `web_search` tool
+ * Web search provider (`/v1/site/web-search`, KOBE-113): which provider the `web_search` tool
  * uses and its API key. The key is write-only: after saving, only a masked hint is shown.
  */
 export function WebSearchSection() {

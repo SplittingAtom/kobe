@@ -4,7 +4,7 @@ import { z } from "zod";
 
 /**
  * A model's output limit and context window (KOBE-259). The catalog may set both per model; a null
- * falls back to these install defaults (chart `server.modelDefaults`, config
+ * falls back to these site defaults (chart `server.modelDefaults`, config
  * `KOBE_MODEL_DEFAULT_*`). Reasoning models (the catalog's admin-set `reasoning` flag) get a
  * higher output default: their hidden reasoning spends the same allowance as the answer.
  */
@@ -109,7 +109,7 @@ const tokenDefaultsSchema = z
     }
   });
 
-/** The install defaults from the environment (config `KOBE_MODEL_DEFAULT_*`, KOBE-259). */
+/** The site defaults from the environment (config `KOBE_MODEL_DEFAULT_*`, KOBE-259). */
 export function parseModelTokenDefaults(env: Readonly<Record<string, string | undefined>>) {
   return tokenDefaultsSchema
     .transform((v): ModelTokenDefaults => ({

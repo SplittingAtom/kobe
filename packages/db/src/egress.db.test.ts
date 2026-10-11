@@ -15,7 +15,7 @@ import {
 import { egressDomains, teamEgress, teamMembers, teams, users } from "./schema/index.js";
 import { withTeam } from "./with-team.js";
 
-/** KOBE-38: egress ceiling (install-wide) and team enablement (team table, RLS). */
+/** KOBE-38: egress ceiling (site-wide) and team enablement (team table, RLS). */
 let app: KobeDatabase;
 const teamA = randomUUID();
 const teamB = randomUUID();

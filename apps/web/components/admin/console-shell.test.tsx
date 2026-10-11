@@ -12,8 +12,8 @@ const user = { id: "u-1", name: "Ada", email: "a@x.io" };
 const ok = <T,>(data: T): Promise<ApiResult<T>> => Promise.resolve({ ok: true, status: 200, data });
 const fail = (status: number, code: string, message: string): Promise<ApiResult<ConsoleAccess>> =>
   Promise.resolve({ ok: false, error: { status, code, message } });
-const install = (installRole: InstallAccess["installRole"]) => () =>
-  ok<ConsoleAccess>({ console: "install", user, installRole });
+const install = (siteRole: InstallAccess["siteRole"]) => () =>
+  ok<ConsoleAccess>({ console: "install", user, siteRole });
 const TEAM_ADMIN = [
   "team.members.manage",
   "team.agents.build",

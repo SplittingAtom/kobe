@@ -61,7 +61,7 @@ export interface StartPlan {
   readonly attachments?: readonly SandboxAttachment[];
   /** What the resolver left out of the run's configuration (KOBE-76). */
   readonly omissions: readonly Omission[];
-  /** The model's catalog limits (KOBE-259); the dispatcher fills in the install defaults. */
+  /** The model's catalog limits (KOBE-259); the dispatcher fills in the site defaults. */
   readonly modelLimits?: CatalogTokenLimits;
 }
 
@@ -277,7 +277,7 @@ async function resolveForStart(
     .catch(() => ({ ok: false as const, error: { code: "agent_unavailable", message: "" } }));
   if (!resolved.ok) return resolved;
   // A scheduled run (D32, KOBE-174) is always `auto`: nobody is there to approve, so the agent
-  // version's own (stricter) mode must not make it wait. Only the install floor tightens it.
+  // version's own (stricter) mode must not make it wait. Only the site floor tightens it.
   if (run.trigger === "schedule") {
     return {
       ...resolved,

@@ -7,10 +7,10 @@ import { openHarness, type Harness } from "./testing/harness.js";
 import type { TestBrowser } from "./testing/browser.js";
 
 /**
- * Connector registry (KOBE-100, D6, D27): install admins register, edit and remove MCP servers;
+ * Connector registry (KOBE-100, D6, D27): site admins register, edit and remove MCP servers;
  * team admins and members can't; URLs must pass the address policy; audit never holds a URL.
  */
-const BASE = "/v1/install/connectors";
+const BASE = "/v1/site/connectors";
 const teamId = randomUUID();
 const PUBLIC = "93.184.216.34";
 let h: Harness;
@@ -60,7 +60,7 @@ afterAll(async () => {
 });
 
 describe("access", () => {
-  it("is for install admins only", async () => {
+  it("is for site admins only", async () => {
     for (const who of [alice, bob]) {
       expect((await who.get(BASE)).status).toBe(403);
       expect((await who.post(BASE, body())).status).toBe(403);
@@ -375,7 +375,7 @@ describe("probe and pin (KOBE-101)", () => {
     expect(probedUrls.length).toBe(before);
   });
 
-  it("is for install admins only and 404s unknown connectors", async () => {
+  it("is for site admins only and 404s unknown connectors", async () => {
     expect((await alice.post(`${BASE}/${randomUUID()}/pin`, {})).status).toBe(403);
     expect((await root.post(`${BASE}/${randomUUID()}/pin`, {})).status).toBe(404);
   });

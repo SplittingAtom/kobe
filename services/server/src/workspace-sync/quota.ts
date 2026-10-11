@@ -54,7 +54,7 @@ export type QuotaDecision =
 
 export type QuotaCheck = (tx: KobeTx, request: QuotaRequest) => Promise<QuotaDecision>;
 
-/** The default check: the install's limits per workspace. */
+/** The default check: the site's limits per workspace. */
 export function limitsQuota(limits: WorkspaceLimits): QuotaCheck {
   return (_tx, r) => {
     if (r.fileBytes > limits.maxFileBytes) {

@@ -5,7 +5,7 @@ import { teams } from "./teams.js";
 
 /**
  * Lifecycle of a legal hold (spec D18, KOBE-17). Only `active` holds suspend purges; a hold stays
- * `active` while its release waits for a second install admin.
+ * `active` while its release waits for a second site admin.
  */
 export const legalHoldStatus = pgEnum("legal_hold_status", [
   "pending",
@@ -19,10 +19,10 @@ export type LegalHoldStatus = (typeof legalHoldStatus.enumValues)[number];
 export const LEGAL_HOLD_REASON_MAX = 2000;
 
 /**
- * Install-wide (§5.4 `legal_holds†`): an install admin's hold on one team's data, or on one user's
+ * Site-wide (§5.4 `legal_holds†`): a site admin's hold on one team's data, or on one user's
  * data in that team, which suspends every purge of it (D18: retention, Trash purge, offboarding
  * volume deletion) and the erasure of the audit log's IP and user agent. Placing and releasing a
- * hold need a second install admin (D10's two-person rule; a single-admin install self-approves,
+ * hold need a second site admin (D10's two-person rule; a single-admin site self-approves,
  * flagged). The rules and transitions are enforced by the `legal_holds_guard` trigger (migration
  * `*_legal_hold.sql`); the server's checks only answer with clear errors. Never deleted: it is the
  * record behind the `governance.legal_hold.*` audit events. Holds no team content (ids and the
@@ -40,12 +40,12 @@ export const legalHolds = pgTable(
     userId: uuid().references(() => users.id),
     reason: text().notNull(),
     status: legalHoldStatus().notNull().default("pending"),
-    /** The install admin who asked for the hold. */
+    /** The site admin who asked for the hold. */
     placedBy: uuid()
       .notNull()
       .references(() => users.id),
     requestedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
-    /** The second install admin who approved; the requester only when self-approved. */
+    /** The second site admin who approved; the requester only when self-approved. */
     approvedBy: uuid().references(() => users.id),
     approvedAt: timestamp({ withTimezone: true }),
     /** Single-admin install: the requester approved their own hold (D10: flagged). */

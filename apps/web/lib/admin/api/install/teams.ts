@@ -1,4 +1,4 @@
-/** Install console: teams (`/v1/install`, install.teams.manage). Responses arrive camelized. */
+/** Install console: teams (`/v1/site`, install.teams.manage). Responses arrive camelized. */
 import { apiRequest, type ApiResult } from "../../../api/client";
 
 const enc = encodeURIComponent;
@@ -22,7 +22,7 @@ export interface RosterMember {
 export const TEAM_SLUG_PATTERN = "[a-z0-9]([a-z0-9\\-]{0,30}[a-z0-9])?";
 
 export async function listInstallTeams(): Promise<ApiResult<readonly InstallTeam[]>> {
-  const res = await apiRequest<{ teams: InstallTeam[] }>("/v1/install/teams");
+  const res = await apiRequest<{ teams: InstallTeam[] }>("/v1/site/teams");
   return res.ok ? { ...res, data: res.data.teams } : res;
 }
 
@@ -31,7 +31,7 @@ export async function createTeam(input: {
   name: string;
   adminUserId: string;
 }): Promise<ApiResult<InstallTeam>> {
-  const res = await apiRequest<{ team: InstallTeam }>("/v1/install/teams", {
+  const res = await apiRequest<{ team: InstallTeam }>("/v1/site/teams", {
     method: "POST",
     json: { slug: input.slug, name: input.name, adminUserId: input.adminUserId },
   });
@@ -39,7 +39,7 @@ export async function createTeam(input: {
 }
 
 export async function renameTeam(teamId: string, name: string): Promise<ApiResult<InstallTeam>> {
-  const res = await apiRequest<{ team: InstallTeam }>(`/v1/install/teams/${enc(teamId)}`, {
+  const res = await apiRequest<{ team: InstallTeam }>(`/v1/site/teams/${enc(teamId)}`, {
     method: "PATCH",
     json: { name },
   });
@@ -48,7 +48,7 @@ export async function renameTeam(teamId: string, name: string): Promise<ApiResul
 
 export async function teamRoster(teamId: string): Promise<ApiResult<readonly RosterMember[]>> {
   const res = await apiRequest<{ members: RosterMember[] }>(
-    `/v1/install/teams/${enc(teamId)}/members`,
+    `/v1/site/teams/${enc(teamId)}/members`,
   );
   return res.ok ? { ...res, data: res.data.members } : res;
 }

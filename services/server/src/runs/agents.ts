@@ -38,8 +38,8 @@ function resolveRunAgent(
  * version or the default agent (an error fails the run, `agent_unavailable`). The pinned version
  * is resolved against the team by `resolveEffective` (KOBE-75/76): the pinned model (not enabled
  * for the team: error `agent_model_not_enabled`, no fallback), the run's mode (the version's frozen
- * mode under today's install floor, only stricter), and the connectors; `omissions` lists what the
- * resolver left out. The install default agent (no pin) still gets the KOBE-46 install floor.
+ * mode under today's site floor, only stricter), and the connectors; `omissions` lists what the
+ * resolver left out. The site default agent (no pin) still gets the KOBE-46 site floor.
  * Per-call `versionAllowsCall` gating is KOBE-47.
  */
 export const PINNED_AGENTS: RunAgentResolver = {

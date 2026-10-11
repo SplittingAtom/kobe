@@ -1,7 +1,7 @@
-/** Install console: skill blocklist (`/v1/install/skill-blocklist`, install.blocklist.manage; KOBE-81). */
+/** Install console: skill blocklist (`/v1/site/skill-blocklist`, install.blocklist.manage; KOBE-81). */
 import { apiRequest, type ApiResult } from "../../../api/client";
 
-const BASE = "/v1/install/skill-blocklist";
+const BASE = "/v1/site/skill-blocklist";
 
 export interface BlockedSkill {
   readonly contentHash: string;

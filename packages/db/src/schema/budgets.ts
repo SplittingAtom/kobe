@@ -20,7 +20,7 @@ import { teams } from "./teams.js";
 
 // Budgets and rate limits (KOBE-42, spec D30): dollar budgets and token budgets (user decision
 // 2026-10-04: token budgets cap models without catalog prices), monthly with an optional daily
-// cap, at the install, team and user-in-team levels; per-user request rate limits at the gateway.
+// cap, at the site, team and user-in-team levels; per-user request rate limits at the gateway.
 // Spend is the `run_usage` ledger (KOBE-43), summed per day by a trigger into `model_spend_daily`
 // (team) and `install_model_spend_daily` (install), so a budget check reads at most 31 small rows.
 // Tokens count every token a call processed: input + output + cache reads + cache writes.
@@ -57,7 +57,7 @@ const rpmOk = (c: unknown) =>
 const ts = () => timestamp({ withTimezone: true }).notNull().defaultNow();
 
 /**
- * Install-wide (†), one row (seeded): the install budget (Bifrost customer level, D30) and the
+ * Site-wide (†), one row (seeded): the site budget (Bifrost customer level, D30) and the
  * per-user request rate every team gets unless it sets a lower one.
  */
 export const installModelLimits = pgTable(
@@ -153,7 +153,7 @@ export const modelSpendDaily = pgTable(
   (t) => [primaryKey({ columns: [t.teamId, t.day, t.userId] })],
 );
 
-/** Install-wide (†): spend of every team per day (install budget); no team ids. */
+/** Site-wide (†): spend of every team per day (site budget); no team ids. */
 export const installModelSpendDaily = pgTable("install_model_spend_daily", {
   day: date({ mode: "string" }).primaryKey(),
   costUsd: numeric({ precision: 24, scale: 10, mode: "number" }).notNull().default(0),
@@ -161,14 +161,14 @@ export const installModelSpendDaily = pgTable("install_model_spend_daily", {
 });
 
 /**
- * Install-wide (†): a budget threshold crossed in a period, recorded once (the unique key across
+ * Site-wide (†): a budget threshold crossed in a period, recorded once (the unique key across
  * replicas) — the warning/stop log and the outbox source. Ids and amounts only, never content.
  */
 export const budgetAlerts = pgTable(
   "budget_alerts",
   {
     id: uuid().primaryKey().defaultRandom(),
-    /** Null for the install budget. */
+    /** Null for the site budget. */
     teamId: uuid(),
     /** Set for a user-in-team budget. */
     userId: uuid(),
@@ -208,7 +208,7 @@ export const budgetAlerts = pgTable(
 export const BUDGET_EMAIL_STATUSES = ["pending", "sent", "skipped", "failed"] as const;
 export type BudgetEmailStatus = (typeof BUDGET_EMAIL_STATUSES)[number];
 
-/** Install-wide (†): one email per alert and recipient (durable outbox, at least once). */
+/** Site-wide (†): one email per alert and recipient (durable outbox, at least once). */
 export const budgetAlertEmails = pgTable(
   "budget_alert_emails",
   {

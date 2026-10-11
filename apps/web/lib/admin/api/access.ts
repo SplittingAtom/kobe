@@ -5,7 +5,7 @@ import type { CurrentUser, InstallAccess, InstallRole, TeamAccess } from "../nav
 
 interface MeBody {
   readonly user: CurrentUser;
-  readonly installRole: "owner" | "admin" | null;
+  readonly siteRole: "owner" | "admin" | null;
 }
 
 interface TeamBody {
@@ -14,7 +14,7 @@ interface TeamBody {
   readonly permissions: readonly string[];
 }
 
-function installRoleOf(role: MeBody["installRole"]): InstallRole {
+function installRoleOf(role: MeBody["siteRole"]): InstallRole {
   return role === "owner" || role === "admin" ? role : "user";
 }
 
@@ -29,7 +29,7 @@ export async function fetchInstallAccess(
     data: {
       console: "install",
       user: { id, name, email },
-      installRole: installRoleOf(me.data.installRole),
+      siteRole: installRoleOf(me.data.siteRole),
     },
   };
 }

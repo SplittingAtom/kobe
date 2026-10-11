@@ -15,7 +15,7 @@ import { blockedAmong, isBlocked } from "./blocklist.js";
 
 /**
  * Skill materialization, server side (KOBE-82, D22). Two read paths, both inside a transaction and
- * both checking the install blocklist again in it:
+ * both checking the site blocklist again in it:
  *
  * - {@link bundleRefsFor}: the run-start list. The resolver's effective skills (approved, not
  *   blocklisted, not team-disabled) become `{name, sha256, size}` refs in `run.start`; nothing else

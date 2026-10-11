@@ -9,8 +9,8 @@ import type { ServerDeps } from "../deps.js";
 
 /**
  * The active team's audit view (spec D6; §6.1 `/v1/team/audit`), team admins only: the events
- * recorded for this team (membership, invitations, team agents, and install-level actions on the
- * team such as break-glass), with the same paging and filters as the install log except `teamId`.
+ * recorded for this team (membership, invitations, team agents, and site-level actions on the
+ * team such as break-glass), with the same paging and filters as the site log except `teamId`.
  */
 export function teamAuditRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();

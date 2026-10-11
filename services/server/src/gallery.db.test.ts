@@ -238,9 +238,9 @@ describe("seeding from the repo's definitions", () => {
 });
 
 describe("gallery agents are read-only (ac-1)", () => {
-  it("answers every write on the install route with 405, install admins included", async () => {
+  it("answers every write on the site route with 405, site admins included", async () => {
     const id = await galleryId();
-    const base = "/v1/install/gallery/agents";
+    const base = "/v1/site/gallery/agents";
     const body = { frontmatter: { name: "X" }, prompt: "x" };
     for (const who of ["admin", "bob", "carol"] as const) {
       const calls = [
@@ -267,12 +267,12 @@ describe("gallery agents are read-only (ac-1)", () => {
     expect(admin.json.code).toBe("gallery_read_only");
   });
 
-  it("lets install admins read the gallery and export", async () => {
+  it("lets site admins read the gallery and export", async () => {
     const id = await galleryId();
-    const list = await as.admin.get("/v1/install/gallery/agents");
+    const list = await as.admin.get("/v1/site/gallery/agents");
     expect(list.json.agents.map((a: { id: string }) => a.id)).toContain(id);
-    expect((await as.admin.get(`/v1/install/gallery/agents/${id}`)).json.agent.canEdit).toBe(false);
-    expect((await as.admin.get(`/v1/install/gallery/agents/${id}/export`)).text).toMatch(
+    expect((await as.admin.get(`/v1/site/gallery/agents/${id}`)).json.agent.canEdit).toBe(false);
+    expect((await as.admin.get(`/v1/site/gallery/agents/${id}/export`)).text).toMatch(
       /^---\nname: Fixture Analyst\n/,
     );
   });

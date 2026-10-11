@@ -8,7 +8,7 @@ import { openHarness, type Harness } from "./testing/harness.js";
 
 /**
  * KOBE-17 (user decision 2026-10-03): audit rows lose their client IP and user agent after a
- * configurable period (install setting, default 12 h, audited); the sweep records counts only,
+ * configurable period (site setting, default 12 h, audited); the sweep records counts only,
  * legal holds suspend it, rows stay, and the chain still verifies.
  */
 let h: Harness;
@@ -59,27 +59,27 @@ afterAll(() => h?.close());
 
 describe("the retention setting", () => {
   it("defaults to 12 hours, is bounded, and every change is audited", async () => {
-    expect((await as.admin.get("/v1/install/settings")).json).toMatchObject({
+    expect((await as.admin.get("/v1/site/settings")).json).toMatchObject({
       auditPiiRetentionHours: 12,
     });
     for (const bad of [0, 8761, 1.5, "24"]) {
-      const res = await as.admin.put("/v1/install/settings", { auditPiiRetentionHours: bad });
+      const res = await as.admin.put("/v1/site/settings", { auditPiiRetentionHours: bad });
       expect(res.status, String(bad)).toBe(400);
     }
-    expect((await as.admin.put("/v1/install/settings", {})).status).toBe(400);
-    expect(
-      (await as.alice.put("/v1/install/settings", { auditPiiRetentionHours: 24 })).status,
-    ).toBe(403);
-    const res = await as.admin.put("/v1/install/settings", { auditPiiRetentionHours: 48 });
+    expect((await as.admin.put("/v1/site/settings", {})).status).toBe(400);
+    expect((await as.alice.put("/v1/site/settings", { auditPiiRetentionHours: 24 })).status).toBe(
+      403,
+    );
+    const res = await as.admin.put("/v1/site/settings", { auditPiiRetentionHours: 48 });
     expect(res.status, JSON.stringify(res.json)).toBe(200);
     expect(res.json).toMatchObject({ auditPiiRetentionHours: 48 });
-    await as.admin.put("/v1/install/settings", { auditPiiRetentionHours: 12 });
+    await as.admin.put("/v1/site/settings", { auditPiiRetentionHours: 12 });
     expect(
-      (await events("install.settings.updated"))
+      (await events("site.settings.updated"))
         .filter((e) => e.target.setting === "audit_pii_retention_hours")
         .map((e) => e.target.value),
     ).toEqual([48, 12]);
-    expect((await as.admin.get("/v1/install/settings")).json.auditPiiRetentionHours).toBe(12);
+    expect((await as.admin.get("/v1/site/settings")).json.auditPiiRetentionHours).toBe(12);
   });
 });
 
@@ -96,12 +96,12 @@ describe("the erasure sweep (ac-4)", () => {
     const recent = await appendBackdatedAuditRow(h.admin, { hours: 2, actorId: ids.alice });
 
     // A team-wide hold on finance keeps the team's rows.
-    const hold = await as.admin.post("/v1/install/legal-hold", {
+    const hold = await as.admin.post("/v1/site/legal-hold", {
       teamId: finance,
       reason: "Litigation hold for matter 7",
     });
     const holdId = hold.json.hold.id as string;
-    expect((await as.owner.post(`/v1/install/legal-hold/${holdId}/approve`)).status).toBe(200);
+    expect((await as.owner.post(`/v1/site/legal-hold/${holdId}/approve`)).status).toBe(200);
 
     const result = await sweepAuditPii(h.deps.database.db);
     expect(result).toEqual({ erased: 1, ran: true });
@@ -118,21 +118,21 @@ describe("the erasure sweep (ac-4)", () => {
     expect((await events("audit.pii_erased")).length).toBe(before + 1);
 
     // Released: the held row goes in the next run.
-    await as.admin.post(`/v1/install/legal-hold/${holdId}/release`, {
+    await as.admin.post(`/v1/site/legal-hold/${holdId}/release`, {
       reason: "Matter closed now",
     });
-    await as.owner.post(`/v1/install/legal-hold/${holdId}/release/approve`);
+    await as.owner.post(`/v1/site/legal-hold/${holdId}/release/approve`);
     expect(await sweepAuditPii(h.deps.database.db)).toEqual({ erased: 1, ran: true });
     expect(await ipOf(held)).toBeNull();
   });
 
-  it("keeps the rows and a verifiable chain; the install log shows no IP for erased rows", async () => {
+  it("keeps the rows and a verifiable chain; the site log shows no IP for erased rows", async () => {
     const seq = await appendBackdatedAuditRow(h.admin, { hours: 30, actorId: ids.alice });
     await sweepAuditPii(h.deps.database.db);
-    const integrity = await as.owner.get("/v1/install/audit/integrity");
+    const integrity = await as.owner.get("/v1/site/audit/integrity");
     expect(integrity.status, JSON.stringify(integrity.json)).toBe(200);
     expect(integrity.json).toMatchObject({ ok: true });
-    const page = await as.owner.get(`/v1/install/audit?after=${seq - 1}&limit=1`);
+    const page = await as.owner.get(`/v1/site/audit?after=${seq - 1}&limit=1`);
     expect(page.json.events[0]).toMatchObject({ seq, ip: null, userAgent: null });
   });
 

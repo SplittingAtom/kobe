@@ -36,18 +36,18 @@ const SUBJECTS: Record<GrantEvent, string> = {
   expired: "Break-glass access to the {team} team ended",
 };
 
-/** The email for one recipient. Install admins see the reason; team-side readers see it unless the grant is a legal hold. */
+/** The email for one recipient. Site admins see the reason; team-side readers see it unless the grant is a legal hold. */
 export function grantMessage(
   deps: Pick<ServerDeps, "publicUrl">,
   detail: GrantDetail,
   event: GrantEvent,
   to: Recipient,
-  options: { isInstallAdmin: boolean; wasActive?: boolean },
+  options: { isSiteAdmin: boolean; wasActive?: boolean },
 ): MailMessage {
   const { grant } = detail;
   const team = oneLine(detail.team.name);
   const requester = oneLine(detail.requestedBy.name);
-  const teamSide = !options.isInstallAdmin;
+  const teamSide = !options.isSiteAdmin;
   const lapsed = event === "expired" && !options.wasActive;
   const withdrawn = event === "revoked" && !options.wasActive;
   const subject = lapsed
@@ -84,7 +84,7 @@ export function grantMessage(
   if (!teamSide || !grant.legalHold) lines.push("", "Reason given:", grant.reason);
   lines.push(
     "",
-    options.isInstallAdmin
+    options.isSiteAdmin
       ? `Review it: ${deps.publicUrl}${CONSOLE_PATHS.siteBreakGlass}`
       : `See it in your team console: ${deps.publicUrl}${CONSOLE_PATHS.teamBreakGlass}`,
   );

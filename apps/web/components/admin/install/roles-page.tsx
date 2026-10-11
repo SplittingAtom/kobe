@@ -31,7 +31,7 @@ async function loadRoles(): Promise<ApiResult<RolesData>> {
 /** Install roles (spec D8): read by install admins; changed only by the Owner. */
 export function RolesPage() {
   const access = useInstallAccess();
-  const isOwner = canManageInstallRoles(access.installRole);
+  const isOwner = canManageInstallRoles(access.siteRole);
   const { state, reload } = useResource(loadRoles);
   const mutation = useMutation();
   const [grantTo, setGrantTo] = useState("");
@@ -83,7 +83,7 @@ export function RolesPage() {
       <ResourceView state={state} label="site roles">
         {({ holders, users }) => {
           const active = users.filter((u) => u.deactivatedAt === null);
-          const candidates = active.filter((u) => u.installRole === "user");
+          const candidates = active.filter((u) => u.siteRole === "user");
           const successors = active.filter((u) => u.id !== access.user.id);
           return (
             <>

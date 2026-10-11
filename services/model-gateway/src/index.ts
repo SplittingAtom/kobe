@@ -59,7 +59,7 @@ const budgets = new BudgetGate(
     // Shared by all replicas, with an expiry (KOBE-120).
     reservations: new DbReservations(db, {
       ttlMs: config.reservationTtlMs,
-      // Hashes the install-wide keys; the same on every replica (derived from the shared key).
+      // Hashes the site-wide keys; the same on every replica (derived from the shared key).
       salt: createHash("sha256")
         .update(`kobe.budget-reservations:${config.sessionKey}`)
         .digest("hex"),

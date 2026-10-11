@@ -4,9 +4,9 @@ import { eq, getMembership, sessionActiveTeams, teams, type TeamRole } from "@ko
 import type { AuthVariables } from "../auth/session.js";
 import type { ServerDeps } from "../deps.js";
 import {
-  installRoleAllows,
+  siteRoleAllows,
   teamRoleAllows,
-  type InstallPermission,
+  type SitePermission,
   type TeamPermission,
 } from "./permissions.js";
 
@@ -28,10 +28,10 @@ export interface TeamVariables extends AuthVariables {
 const uuid = z.uuid();
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
-/** 403 unless the caller's install role holds `permission`. Runs after requireSession. */
-export function requireInstallPermission(permission: InstallPermission) {
+/** 403 unless the caller's site role holds `permission`. Runs after requireSession. */
+export function requireSitePermission(permission: SitePermission) {
   return createMiddleware<{ Variables: AuthVariables }>(async (c, next) => {
-    if (!installRoleAllows(c.get("installRole"), permission)) {
+    if (!siteRoleAllows(c.get("siteRole"), permission)) {
       return c.json({ code: "forbidden", message: "You don't have permission to do that." }, 403);
     }
     await next();
@@ -53,7 +53,7 @@ export async function readActiveTeamId(
 /**
  * Resolves exactly one team for the request from the session's active team (spec D9) and
  * re-verifies membership under that team's RLS on every request, so removal takes effect at once.
- * Install roles grant nothing here: an install admin who is not a member is refused like anyone.
+ * Site roles grant nothing here: a site admin who is not a member is refused like anyone.
  * Handlers run their team queries with `withTeam(db, c.var.team.id, ...)`.
  */
 export function requireTeam(deps: ServerDeps) {

@@ -1,6 +1,6 @@
 /**
  * Usage dashboards and run usage (KOBE-43): `/v1/team/usage` (team.budgets.manage),
- * `/v1/install/usage` (install.usage.read), `/v1/runs/{id}/usage` (the run's readers).
+ * `/v1/site/usage` (install.usage.read), `/v1/runs/{id}/usage` (the run's readers).
  * Responses arrive camelized.
  */
 import { apiRequest, type ApiResult } from "../../api/client";
@@ -72,7 +72,7 @@ export function getTeamUsage(teamId: string, q: UsageQuery): Promise<ApiResult<U
 }
 
 export function getInstallUsage(q: UsageQuery): Promise<ApiResult<UsageReport>> {
-  return apiRequest<UsageReport>(`/v1/install/usage${query(q)}`);
+  return apiRequest<UsageReport>(`/v1/site/usage${query(q)}`);
 }
 
 export function getRunUsage(teamId: string, runId: string): Promise<ApiResult<RunUsage>> {

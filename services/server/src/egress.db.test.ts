@@ -22,7 +22,7 @@ import { openHarness, type Harness } from "./testing/harness.js";
 
 /** KOBE-38: egress ceiling and team enablement APIs, audit, change hints, egress.blocked relay. */
 let h: Harness;
-const ids = { owner: "", installAdmin: "", alice: "", bob: "", dave: "" };
+const ids = { owner: "", siteAdmin: "", alice: "", bob: "", dave: "" };
 let as: Record<keyof typeof ids, TestBrowser>;
 let finance = "";
 let marketing = "";
@@ -43,7 +43,7 @@ async function auditActions(
 beforeAll(async () => {
   h = await openHarness();
   ids.owner = await h.createUser("owner@egress.test", "owner");
-  ids.installAdmin = await h.createUser("admin@egress.test", "admin");
+  ids.siteAdmin = await h.createUser("admin@egress.test", "admin");
   ids.alice = await h.createUser("alice@egress.test");
   ids.bob = await h.createUser("bob@egress.test");
   ids.dave = await h.createUser("dave@egress.test");
@@ -63,7 +63,7 @@ beforeAll(async () => {
   );
   as = {
     owner: await h.signIn("owner@egress.test"),
-    installAdmin: await h.signIn("admin@egress.test"),
+    siteAdmin: await h.signIn("admin@egress.test"),
     alice: await h.signIn("alice@egress.test"),
     bob: await h.signIn("bob@egress.test"),
     dave: await h.signIn("dave@egress.test"),
@@ -80,17 +80,17 @@ beforeAll(async () => {
 }, 120_000);
 afterAll(() => h.close());
 
-const CEILING = "/v1/install/egress-ceiling";
+const CEILING = "/v1/site/egress-ceiling";
 const enc = encodeURIComponent;
 
-describe("install egress ceiling", () => {
-  it("is for install admins only", async () => {
+describe("site egress ceiling", () => {
+  it("is for site admins only", async () => {
     expect((await as.alice.get(CEILING)).status).toBe(403);
     expect((await as.alice.post(CEILING, { domain: "x.example.com" })).status).toBe(403);
   });
 
   it("lists the presets: registries in the ceiling, git hosts listed but out", async () => {
-    const res = await as.installAdmin.get(CEILING);
+    const res = await as.siteAdmin.get(CEILING);
     expect(res.status).toBe(200);
     const byDomain = Object.fromEntries(
       (res.json.domains as { domain: string; preset: string; in_ceiling: boolean }[]).map((d) => [
@@ -104,7 +104,7 @@ describe("install egress ceiling", () => {
   });
 
   it("adds a canonicalized custom domain, refuses duplicates and junk", async () => {
-    const res = await as.installAdmin.post(CEILING, {
+    const res = await as.siteAdmin.post(CEILING, {
       domain: " Data.Example.COM ",
       note: "vendor API",
     });
@@ -115,18 +115,18 @@ describe("install egress ceiling", () => {
       preset: null,
       note: "vendor API",
     });
-    expect((await as.installAdmin.post(CEILING, { domain: "data.example.com" })).status).toBe(409);
+    expect((await as.siteAdmin.post(CEILING, { domain: "data.example.com" })).status).toBe(409);
     for (const bad of ["10.0.0.1", "https://x.com", "a.*.com", "*.com", ""]) {
-      const r = await as.installAdmin.post(CEILING, { domain: bad });
+      const r = await as.siteAdmin.post(CEILING, { domain: bad });
       expect(r.status, bad).toBe(400);
       expect(r.json.code).toBe("invalid_request");
     }
     expect((await as.owner.post(CEILING, { domain: "*.cdn.example.com" })).status).toBe(201);
     // Public suffixes can't be wildcarded; shared hosting is accepted with a warning.
-    const suffix = await as.installAdmin.post(CEILING, { domain: "*.github.io" });
+    const suffix = await as.siteAdmin.post(CEILING, { domain: "*.github.io" });
     expect(suffix.status).toBe(400);
     expect(suffix.json.message).toMatch(/public suffix/);
-    const fronted = await as.installAdmin.post(CEILING, { domain: "d111.cloudfront.net" });
+    const fronted = await as.siteAdmin.post(CEILING, { domain: "d111.cloudfront.net" });
     expect(fronted.status).toBe(201);
     expect(fronted.json.domain.shared_hosting).toBe(true);
     expect(fronted.json.warnings[0]).toMatch(/domain fronting/);
@@ -134,36 +134,36 @@ describe("install egress ceiling", () => {
   });
 
   it("puts a preset into and out of the ceiling, as a group or one domain", async () => {
-    const on = await as.installAdmin.put(`${CEILING}/presets/git_hosts`, { in_ceiling: true });
+    const on = await as.siteAdmin.put(`${CEILING}/presets/git_hosts`, { in_ceiling: true });
     expect(on.status).toBe(200);
     const git = (on.json.domains as { domain: string; in_ceiling: boolean }[]).filter((d) =>
       ["github.com", "gitlab.com"].includes(d.domain),
     );
     expect(git.every((d) => d.in_ceiling)).toBe(true);
-    const off = await as.installAdmin.put(`${CEILING}/${enc("gitlab.com")}`, { in_ceiling: false });
+    const off = await as.siteAdmin.put(`${CEILING}/${enc("gitlab.com")}`, { in_ceiling: false });
     expect(off.json.domain).toMatchObject({ domain: "gitlab.com", in_ceiling: false });
+    expect((await as.siteAdmin.put(`${CEILING}/presets/nope`, { in_ceiling: true })).status).toBe(
+      404,
+    );
     expect(
-      (await as.installAdmin.put(`${CEILING}/presets/nope`, { in_ceiling: true })).status,
-    ).toBe(404);
-    expect(
-      (await as.installAdmin.put(`${CEILING}/${enc("nope.example.com")}`, { in_ceiling: true }))
+      (await as.siteAdmin.put(`${CEILING}/${enc("nope.example.com")}`, { in_ceiling: true }))
         .status,
     ).toBe(404);
   });
 
   it("deletes custom domains (and every team's enablement) but never presets", async () => {
-    expect((await as.installAdmin.delete(`${CEILING}/pypi.org`)).status).toBe(409);
-    await as.installAdmin.post(CEILING, { domain: "temp.example.com" });
+    expect((await as.siteAdmin.delete(`${CEILING}/pypi.org`)).status).toBe(409);
+    await as.siteAdmin.post(CEILING, { domain: "temp.example.com" });
     expect((await as.alice.put(`/v1/team/egress/domains/temp.example.com`)).status).toBe(201);
-    expect((await as.installAdmin.delete(`${CEILING}/temp.example.com`)).status).toBe(204);
+    expect((await as.siteAdmin.delete(`${CEILING}/temp.example.com`)).status).toBe(204);
     const team = await as.alice.get("/v1/team/egress");
     expect((team.json.domains as { domain: string }[]).map((d) => d.domain)).not.toContain(
       "temp.example.com",
     );
-    expect((await as.installAdmin.delete(`${CEILING}/temp.example.com`)).status).toBe(404);
+    expect((await as.siteAdmin.delete(`${CEILING}/temp.example.com`)).status).toBe(404);
   });
 
-  it("audits every ceiling change as install-level events", async () => {
+  it("audits every ceiling change as site-level events", async () => {
     const rows = await auditActions("egress.ceiling.");
     expect(rows.map((r) => r.action)).toEqual(
       expect.arrayContaining([
@@ -192,9 +192,9 @@ describe("team egress", () => {
 
   it("members cannot self-allow; team admins enable within the ceiling only", async () => {
     expect((await as.bob.put("/v1/team/egress/domains/pypi.org")).status).toBe(403);
-    // Install admins hold no team role (D8): no active team here, so the request is refused.
+    // Site admins hold no team role (D8): no active team here, so the request is refused.
     expect([400, 403]).toContain(
-      (await as.installAdmin.put("/v1/team/egress/domains/pypi.org")).status,
+      (await as.siteAdmin.put("/v1/team/egress/domains/pypi.org")).status,
     );
     const ok = await as.alice.put("/v1/team/egress/domains/pypi.org");
     expect(ok.status, JSON.stringify(ok.json)).toBe(201);
@@ -217,7 +217,7 @@ describe("team egress", () => {
   });
 
   it("shows enabled domains that left the ceiling as not in it, and disables them", async () => {
-    await as.installAdmin.put(`${CEILING}/pypi.org`, { in_ceiling: false });
+    await as.siteAdmin.put(`${CEILING}/pypi.org`, { in_ceiling: false });
     const res = await as.alice.get("/v1/team/egress");
     expect(
       (res.json.domains as { domain: string }[]).find((d) => d.domain === "pypi.org"),
@@ -225,7 +225,7 @@ describe("team egress", () => {
       enabled: true,
       in_ceiling: false,
     });
-    await as.installAdmin.put(`${CEILING}/pypi.org`, { in_ceiling: true });
+    await as.siteAdmin.put(`${CEILING}/pypi.org`, { in_ceiling: true });
     expect((await as.alice.delete("/v1/team/egress/domains/pypi.org")).status).toBe(204);
     expect((await as.alice.delete("/v1/team/egress/domains/pypi.org")).status).toBe(404);
   });
@@ -239,7 +239,7 @@ describe("team egress", () => {
     listener.on("notification", (n) => heard.push(n.payload ?? ""));
     await listener.query(`LISTEN ${EGRESS_CHANGES_CHANNEL}`);
     await as.alice.put("/v1/team/egress/domains/registry.npmjs.org");
-    await as.installAdmin.put(`${CEILING}/deb.debian.org`, { in_ceiling: false });
+    await as.siteAdmin.put(`${CEILING}/deb.debian.org`, { in_ceiling: false });
     await new Promise((r) => setTimeout(r, 200));
     await listener.end();
     expect(heard).toEqual([finance, "ceiling"]);
@@ -437,7 +437,7 @@ describe("user hints", () => {
     expect(await asSystem(ids.alice, () => removeMember(db, finance, ids.bob))).toEqual({
       ok: true,
     });
-    await asSystem(ids.installAdmin, () => deactivateUser(db, ids.dave));
+    await asSystem(ids.siteAdmin, () => deactivateUser(db, ids.dave));
     await new Promise((r) => setTimeout(r, 200));
     await listener.end();
     expect(heard).toEqual([`user:${ids.bob}`, `user:${ids.dave}`]);

@@ -207,7 +207,7 @@ describe("removal with the thread (ac-2)", () => {
 
   it("a legal hold on the thread's owner keeps the thread and all of them", async () => {
     const s = await fill();
-    // Two install admins place and approve the hold (fixtures as superuser, like retention tests).
+    // Two site admins place and approve the hold (fixtures as superuser, like retention tests).
     const admin = new pg.Client({ connectionString: inject("adminUrl") });
     await admin.connect();
     try {

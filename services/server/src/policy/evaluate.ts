@@ -20,14 +20,14 @@ import { prepareInput } from "./tool-inputs.js";
 /**
  * The D29 pipeline as one pure, synchronous function:
  *
- *   install deny → team deny → install/team ask → risk class → thread approval mode →
+ *   site deny → team deny → site/team ask → risk class → thread approval mode →
  *   user allow rules → prompt
  *
  * - The input is checked first: built-ins against their strict Pi schema, file paths made
  *   canonical (tool-inputs.ts). Rules match the canonical view.
- * - Any deny (install rule, team rule, unavailable tool, agent `tools.deny`/`tools.allow`,
+ * - Any deny (site rule, team rule, unavailable tool, agent `tools.deny`/`tools.allow`,
  *   connector enablement, exposure or drift) decides `deny`; all deny reasons are reported.
- * - A matching ask rule (install or team) decides `require_approval`. No allow rule removes it
+ * - A matching ask rule (site or team) decides `require_approval`. No allow rule removes it
  *   (decision (a)).
  * - Interactive runs (`ask-on-write`, `ask-all`): mode and risk class decide whether to ask
  *   (`ask-all`: always; `ask-on-write`: `riskClassPrompts`). **Only the user's own allow rules
@@ -78,7 +78,7 @@ function ruleReason(
 function denyReasons(ctx: Prepared): PolicyReason[] {
   const { tool, rules, now, view } = ctx;
   return [
-    ...matchingRules(rules.install, "deny", tool, view, now).map((r) =>
+    ...matchingRules(rules.site, "deny", tool, view, now).map((r) =>
       ruleReason(r, "install_deny_rule", "install_deny", `${tool.name} is blocked by site policy.`),
     ),
     ...matchingRules(rules.team, "deny", tool, view, now).map((r) =>
@@ -93,7 +93,7 @@ function denyReasons(ctx: Prepared): PolicyReason[] {
 function askReasons(ctx: Prepared): PolicyReason[] {
   const { tool, rules, now, view } = ctx;
   return [
-    ...matchingRules(rules.install, "ask", tool, view, now).map((r) =>
+    ...matchingRules(rules.site, "ask", tool, view, now).map((r) =>
       ruleReason(r, "install_ask_rule", "ask_rule", `Site policy asks before ${tool.name}.`),
     ),
     ...matchingRules(rules.team, "ask", tool, view, now).map((r) =>

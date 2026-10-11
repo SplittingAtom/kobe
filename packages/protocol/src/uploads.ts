@@ -18,7 +18,7 @@ import { timestampSchema, uuidSchema } from "./common.js";
 const MIB = 1024 * 1024;
 
 /**
- * Install-wide defaults (D26: 100 MB per file, 500 MB per message). The server may configure other
+ * Site-wide defaults (D26: 100 MB per file, 500 MB per message). The server may configure other
  * values (Helm), but never above the per-message count {@link UPLOAD_MAX_FILES_PER_MESSAGE}; the
  * effective limits are reported in `limit_bytes` of the error, not negotiated up front.
  */

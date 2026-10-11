@@ -11,7 +11,7 @@ export const createMetaSchema = z
   .object({ scope: creatableScope, slug: agentSlugSchema.optional() })
   .strict();
 
-/** Meta when an install admin creates (or imports) a gallery agent. */
+/** Meta when a site admin creates (or imports) a gallery agent. */
 export const galleryCreateMetaSchema = z.object({ slug: agentSlugSchema.optional() }).strict();
 
 /** Replacing a draft takes no meta: slugs are immutable. */

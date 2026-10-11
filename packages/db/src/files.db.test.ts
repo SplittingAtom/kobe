@@ -226,7 +226,7 @@ describe("files break-glass read", () => {
 });
 
 describe("team_storage_quotas", () => {
-  it("hold one row per team, with null meaning the install default, and no negative limit", async () => {
+  it("hold one row per team, with null meaning the site default, and no negative limit", async () => {
     const t = await team();
     const q = (max: number | null) =>
       admin.query(

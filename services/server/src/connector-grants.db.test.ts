@@ -299,7 +299,7 @@ describe("nothing else carries the key", () => {
   });
 });
 
-describe("pinning stays an install admin's action", () => {
+describe("pinning stays a site admin's action", () => {
   const tools = [{ name: "get_x", description: "d", inputSchema: { type: "object" } }];
   const hash = async (id: string) =>
     (await h.admin.query(`SELECT tools_hash FROM connectors WHERE id = $1`, [id])).rows[0]
@@ -331,7 +331,7 @@ describe("pinning stays an install admin's action", () => {
     probeAnswer = { ok: false, failure: "auth_required" };
 
     // The admin has no key of their own yet: alice's key is not used.
-    await root.post(`/v1/install/connectors/${id}/pin`);
+    await root.post(`/v1/site/connectors/${id}/pin`);
     expect(probes).toEqual([{ url: "https://mcp.example.com/mcp", apiKey: undefined }]);
 
     // With their own grant, that key (and no other) is used, and the pin lands.
@@ -339,7 +339,7 @@ describe("pinning stays an install admin's action", () => {
     expect(probes).toHaveLength(1);
     probes.length = 0;
     probeAnswer = { ok: true, tools };
-    const pinned = await root.post(`/v1/install/connectors/${id}/pin`);
+    const pinned = await root.post(`/v1/site/connectors/${id}/pin`);
     expect(pinned.status, pinned.text).toBe(200);
     expect(probes).toEqual([{ url: "https://mcp.example.com/mcp", apiKey: KEY2 }]);
     expect(pinned.text).not.toContain(KEY2);

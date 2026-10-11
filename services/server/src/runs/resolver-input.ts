@@ -25,14 +25,14 @@ export interface TeamResolverFacts {
 /** The skills of a run: the agent's approved team skills and the user's personal ones. */
 export interface SkillFacts {
   readonly agent: readonly SkillRef[];
-  /** Built-in names the agent lists (KOBE-88): install-provided, never looked up or reviewed. */
+  /** Built-in names the agent lists (KOBE-88): site-provided, never looked up or reviewed. */
   readonly agentBuiltin: readonly string[];
   readonly user: readonly SkillRef[];
   /** Agent skill names with no approved team version (KOBE-99). */
   readonly agentUnapproved: readonly string[];
   /** Personal skills blocked for lack of this team's approval (KOBE-99). */
   readonly userUnapproved: readonly string[];
-  /** Hashes among the two lists that the install blocklist holds (read at this run start, KOBE-81). */
+  /** Hashes among the two lists that the site blocklist holds (read at this run start, KOBE-81). */
   readonly blockedHashes: readonly string[];
 }
 

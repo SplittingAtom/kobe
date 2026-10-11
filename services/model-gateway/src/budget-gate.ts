@@ -8,7 +8,7 @@ import type { CallContext, CallGate, GateDecision } from "./seams.js";
 
 /**
  * Kobe's own enforcement of budgets and per-user rate limits (KOBE-42, D30), at the identities the
- * session token proves: install, team and user (never the advisory run id, KOBE-41). A call is
+ * session token proves: site, team and user (never the advisory run id, KOBE-41). A call is
  * refused **before** it reaches Bifrost; a call already forwarded is never cut, so the step in
  * flight finishes. The server's budget monitor then ends the runs (`stopForBudget`).
  *
@@ -18,7 +18,7 @@ import type { CallContext, CallGate, GateDecision } from "./seams.js";
  *   of a call ending); the state is cached for `ttlMs` and dropped on `spend:` / `budgets:` hints.
  * - **In-flight reservations** (KOBE-42 review): an admitted call reserves what it may cost (its
  *   input estimate plus the output it allows, `usage/charge.ts`; dollars at the catalog price) at
- *   its install, team and member levels until it ends, and a call is refused when spend plus the
+ *   its site, team and member levels until it ends, and a call is refused when spend plus the
  *   others' reservations reach a budget. Concurrent calls (many sandboxes of one team) therefore
  *   cannot together overshoot a budget on one shim replica by more than the last admitted
  *   call. Reservations live in a {@link ReservationStore}: Postgres in production (KOBE-120:
@@ -29,9 +29,9 @@ import type { CallContext, CallGate, GateDecision } from "./seams.js";
  *   refused at once, alone or not, with a final 402 `budget_below_call`. A budget below one call's
  *   output allowance is fine: the rules above apply unchanged (a lone call is admitted and may
  *   overshoot, overlapping calls wait).
- * - More requests than the member's per-minute rate (the install's, or the team's lower one): 429
+ * - More requests than the member's per-minute rate (the site's, or the team's lower one): 429
  *   `rate_limited` with Retry-After. A token bucket per member per shim replica; Bifrost's
- *   virtual-key rate limit is the install-wide backstop.
+ *   virtual-key rate limit is the site-wide backstop.
  */
 export interface BudgetStore {
   load(teamId: string, userId: string): Promise<MemberBudgetState>;

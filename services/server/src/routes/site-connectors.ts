@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import type { AuthVariables } from "../auth/session.js";
-import { requireInstallPermission } from "../authz/middleware.js";
+import { requireSitePermission } from "../authz/middleware.js";
 import {
   createConnector,
   createSchema,
@@ -66,14 +66,14 @@ const invalidFields =
   "Check the fields: name is lowercase letters and digits joined by - or _ (up to 64), url and iconUrl are https URLs, authKind is none, api_key or oauth.";
 
 /**
- * The install connector registry (`/v1/install/connectors`, spec D6, D27; KOBE-100): install
+ * The site connector registry (`/v1/site/connectors`, spec D6, D27; KOBE-100): install
  * Owner/Admins register MCP servers. URLs must pass the address policy the MCP proxy enforces at
  * connect time. Every change is audited without the URL (it may carry a key).
  */
-export function installConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
+export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
   const db = deps.database.db;
-  app.use(requireInstallPermission("install.connectors.manage"));
+  app.use(requireSitePermission("site.connectors.manage"));
 
   // The acting admin's own grant, if any; never another user's.
   const adminKey = (c: Context, connectorId: string) =>

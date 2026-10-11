@@ -57,7 +57,7 @@ export type DiscoveryResult =
   | { readonly ok: true; readonly view: ProviderModelsView }
   | { readonly ok: false; readonly error: DiscoveryError };
 
-/** Refreshes per provider; each one is a provider call with the install's key. */
+/** Refreshes per provider; each one is a provider call with the site's key. */
 export const REFRESH_RATE: RateLimitRule = { windowMs: 60_000, max: 6 };
 
 const MODEL_RE = new RegExp(PROVIDER_MODEL_PATTERN);

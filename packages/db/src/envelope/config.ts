@@ -9,7 +9,7 @@ interface Logger {
 }
 
 /**
- * The install envelope from env (the chart's Secret), or undefined when unset. Invalid values fail
+ * The site envelope from env (the chart's Secret), or undefined when unset. Invalid values fail
  * fast; messages name the variable only, never its value. Logs the key id (not secret) once.
  */
 export function loadEnvelope(

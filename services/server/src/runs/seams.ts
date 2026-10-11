@@ -20,11 +20,11 @@ export interface AgentResolutionInput {
   readonly threadId: string;
   readonly runId: string;
   readonly trigger: RunTrigger;
-  /** The thread's pin (D19); all null = the install default agent. */
+  /** The thread's pin (D19); all null = the site default agent. */
   readonly agentScope: AgentScope | null;
   readonly agentId: string | null;
   readonly agentVersion: number | null;
-  /** The run's mode as fixed at creation (already clamped to the install/team floor). */
+  /** The run's mode as fixed at creation (already clamped to the site/team floor). */
   readonly approvalMode: ApprovalMode;
 }
 
@@ -32,7 +32,7 @@ export type AgentResolution =
   | {
       readonly ok: true;
       /**
-       * The exact version the run uses; null = the install default agent. `version` null = the
+       * The exact version the run uses; null = the site default agent. `version` null = the
        * agent's draft (a builder test thread, KOBE-85).
        */
       readonly agent: {

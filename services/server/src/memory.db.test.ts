@@ -284,13 +284,13 @@ describe("switches", () => {
       ? p.browser.put(`/v1/memory/settings?level=${level}`, body)
       : p.browser.get(`/v1/memory/settings?level=${level}`);
 
-  async function installAdmin(): Promise<TestBrowser> {
+  async function siteAdmin(): Promise<TestBrowser> {
     const email = `ia${n++}-${randomUUID().slice(0, 6)}@events.test`;
     await fx
       .replica(0)
       .deps.createUserWithPassword(
         { email, name: "ia", password: "a long enough password" },
-        { installRole: "admin" },
+        { siteRole: "admin" },
       );
     const b = new TestBrowser(fx.replica(0).app, PUBLIC_URL);
     const res = await b.post("/api/auth/sign-in/email", {
@@ -334,24 +334,26 @@ describe("switches", () => {
     });
   });
 
-  it("install level is AND-ed with the team and needs an install admin", async () => {
+  it("site level is AND-ed with the team and needs a site admin", async () => {
     const w = await world();
-    expect((await settings(w.admin, "install")).status).toBe(403);
-    expect((await settings(w.admin, "install", { memory_enabled: false })).status).toBe(403);
-    const ia = await installAdmin();
+    expect((await settings(w.admin, "site")).status).toBe(403);
+    expect((await settings(w.admin, "site", { memory_enabled: false })).status).toBe(403);
+    const ia = await siteAdmin();
+    // KOBE-255: the level is `site`; the old name is no longer a level.
+    expect((await settings({ browser: ia } as Person, "install")).status).toBe(400);
     try {
-      const off = await settings({ browser: ia } as Person, "install", { memory_enabled: false });
+      const off = await settings({ browser: ia } as Person, "site", { memory_enabled: false });
       expect(off.json).toEqual({ memory_enabled: false, project_memory_enabled: true });
       expect((await put(w.member, "x.md", "x")).json).toMatchObject({ code: "memory_disabled" });
-      await settings({ browser: ia } as Person, "install", { memory_enabled: true });
+      await settings({ browser: ia } as Person, "site", { memory_enabled: true });
       expect((await put(w.member, "x.md", "x")).status).toBe(200);
       expect(
         await fx.admin.query(
-          `SELECT 1 FROM audit_log WHERE action = 'memory.install_settings_changed'`,
+          `SELECT 1 FROM audit_log WHERE action = 'memory.site_settings_changed'`,
         ),
       ).toMatchObject({ rowCount: 2 });
     } finally {
-      await settings({ browser: ia } as Person, "install", {
+      await settings({ browser: ia } as Person, "site", {
         memory_enabled: true,
         project_memory_enabled: true,
       });

@@ -17,7 +17,7 @@ import { MemorySwitchesSection } from "./memory-switches";
 import { WebSearchSection } from "./web-search-form";
 
 /**
- * Install settings (`/v1/install/settings`): required two-factor authentication (D7) and how long
+ * Install settings (`/v1/site/settings`): required two-factor authentication (D7) and how long
  * audit events keep the client IP address and user agent (KOBE-17).
  */
 export function SettingsPage() {
@@ -49,7 +49,7 @@ function SettingsForm({
   const access = useInstallAccess();
   const mutation = useMutation();
   const [requireTwoFactor, setRequireTwoFactor] = useState(settings.requireTwoFactor);
-  const locked = settings.requireTwoFactor && !canTurnOffRequiredTwoFactor(access.installRole);
+  const locked = settings.requireTwoFactor && !canTurnOffRequiredTwoFactor(access.siteRole);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();

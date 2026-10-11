@@ -6,7 +6,7 @@ import { useResource } from "../use-resource";
 import { MemorySwitchesForm } from "../team/memory-switches-form";
 
 /**
- * Install-wide memory switches (`/v1/memory/settings?level=install`, KOBE-155). A team's memory is
+ * Install-wide memory switches (`/v1/memory/settings?level=site`, KOBE-155). A team's memory is
  * on only while both this and the team's own switch are on.
  */
 export function MemorySwitchesSection() {

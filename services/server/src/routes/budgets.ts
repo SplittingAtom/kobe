@@ -3,16 +3,16 @@ import { z } from "zod";
 import { MAX_BUDGET_TOKENS, MAX_BUDGET_USD, MAX_REQUESTS_PER_MINUTE } from "@kobe/db";
 import type { AuthVariables } from "../auth/session.js";
 import {
-  requireInstallPermission,
+  requireSitePermission,
   requireTeam,
   requireTeamPermission,
   type TeamVariables,
 } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import {
-  getInstallLimits,
+  getSiteLimits,
   memberBudgetStatus,
-  setInstallLimits,
+  setSiteLimits,
   setMemberBudget,
   setTeamBudget,
   teamBudgetsView,
@@ -33,7 +33,7 @@ const rate = z.number().int().min(1).max(MAX_REQUESTS_PER_MINUTE);
 const tokenFields = { monthly_tokens: tokens.optional(), daily_tokens: tokens.optional() };
 const nonEmpty = (v: object) => Object.keys(v).length > 0;
 
-const installSchema = z
+const siteSchema = z
   .strictObject({
     monthly_usd: amount.optional(),
     daily_usd: amount.optional(),
@@ -46,7 +46,7 @@ const teamSchema = z
     monthly_usd: amount.optional(),
     daily_usd: amount.optional(),
     ...tokenFields,
-    /** Null: the install's rate. */
+    /** Null: the site's rate. */
     user_requests_per_minute: rate.nullable().optional(),
     /** The default budget of every member without one of their own (KOBE-42 review). */
     member_default: z
@@ -133,26 +133,26 @@ export function teamBudgetsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
 }
 
 /**
- * The install budget and default per-user request rate (`/v1/install/budget`, Owner/Admins,
- * `install.budgets.manage`; the Bifrost customer level of D30).
+ * The site budget and default per-user request rate (`/v1/site/budget`, Owner/Admins,
+ * `site.budgets.manage`; the Bifrost customer level of D30).
  */
-export function installBudgetRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
+export function siteBudgetRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
   const db = deps.database.db;
-  app.use(requireInstallPermission("install.budgets.manage"));
+  app.use(requireSitePermission("site.budgets.manage"));
 
-  app.get("/", async (c) => c.json(await getInstallLimits(db)));
+  app.get("/", async (c) => c.json(await getSiteLimits(db)));
 
   app.put("/", async (c) => {
-    const input = await parseBody(c, installSchema);
+    const input = await parseBody(c, siteSchema);
     if (!input) {
       return invalidRequest(
         c,
         `${BUDGET_HINT} Optionally "user_requests_per_minute": 1–${MAX_REQUESTS_PER_MINUTE}.`,
       );
     }
-    const view = await setInstallLimits(db, input, c.get("user").id);
-    // Every team's runs answer to the install budget.
+    const view = await setSiteLimits(db, input, c.get("user").id);
+    // Every team's runs answer to the site budget.
     void deps.budgets.sweep();
     return c.json(view);
   });

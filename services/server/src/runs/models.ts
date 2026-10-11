@@ -79,7 +79,7 @@ async function enabledModels(tx: KobeTx, teamId: string): Promise<EnabledModel[]
 
 /**
  * `limits`: what the catalog says about the model's output limit and context window (KOBE-259);
- * the dispatcher adds the install defaults when it sends `run.start`.
+ * the dispatcher adds the site defaults when it sends `run.start`.
  */
 export type RunModelResolution =
   | {
@@ -111,7 +111,7 @@ export async function resolveRunModel(
 }
 
 /**
- * Whether the catalog says a model accepts image input (KOBE-191). The catalog is install-wide,
+ * Whether the catalog says a model accepts image input (KOBE-191). The catalog is site-wide,
  * so no team context is needed; an alias that is not in it (or none) accepts text only.
  */
 export async function modelAcceptsImages(tx: KobeTx, alias: string | undefined): Promise<boolean> {

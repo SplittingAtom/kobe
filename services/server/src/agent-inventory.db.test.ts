@@ -51,10 +51,10 @@ beforeAll(async () => {
   });
   app = createApp(deps);
   for (const who of PEOPLE) {
-    const installRole = who === "owner" ? "owner" : undefined;
+    const siteRole = who === "owner" ? "owner" : undefined;
     const user = await deps.createUserWithPassword(
       { email: `${who}@agents.test`, name: who, password: PASSWORD },
-      installRole ? { installRole } : {},
+      siteRole ? { siteRole } : {},
     );
     ids[who] = user.id;
   }

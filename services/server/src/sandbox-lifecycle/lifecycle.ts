@@ -51,7 +51,7 @@ export type LifecycleProvider = Pick<SandboxProvider, "wakeSandbox" | "hibernate
 export interface LifecycleOptions {
   readonly db: KobeDb;
   readonly provider: LifecycleProvider;
-  /** Install default idle minutes (Helm `sandbox.hibernation.idleMinutes`, D14: 15). */
+  /** Site default idle minutes (Helm `sandbox.hibernation.idleMinutes`, D14: 15). */
   readonly idleMinutes: number;
   /** Most sandboxes one sweep hibernates per team (spreads Kubernetes writes). */
   readonly batchPerTeam?: number;
@@ -168,7 +168,7 @@ export function createSandboxLifecycle(options: LifecycleOptions): SandboxLifecy
 
   /**
    * The pod must be Ready (KOBE-192). Not Ready after a definite signal or the wake budget: the
-   * run fails `workspace_unavailable` (no cluster detail) and install admins get the reason in the
+   * run fails `workspace_unavailable` (no cluster detail) and site admins get the reason in the
    * audit log (`sandbox.wake_stalled`) and the server log.
    */
   const waitUntilReady = async (

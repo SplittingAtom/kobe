@@ -51,7 +51,7 @@ describe("policy contract", () => {
     ]);
   });
 
-  it("fills defaults and accepts the install default agent", () => {
+  it("fills defaults and accepts the site default agent", () => {
     expect(input.agent.tools_allow).toEqual([]);
     const defaultAgent = { ...input, agent: { ...input.agent, agent_id: null, version: null } };
     expect(policyInputSchema.safeParse(defaultAgent).success).toBe(true);

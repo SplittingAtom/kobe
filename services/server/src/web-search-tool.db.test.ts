@@ -11,7 +11,7 @@ import { webSearchContext } from "./web-search/store.js";
 /**
  * KOBE-114 end to end through the sandbox wire: `web_search.query` is accepted only for a connection
  * that announced `web_search`, an active leased run and an allowed `web_search` call with the same
- * input hash; the server (not the sandbox) searches with the install's sealed key. An install with
+ * input hash; the server (not the sandbox) searches with the site's sealed key. An install with
  * no provider, or a team that has not opted in, gets an "unavailable" answer. The key never appears
  * in a frame to the sandbox.
  */
@@ -164,14 +164,14 @@ async function configure(w: World, optIn: boolean) {
     ]);
   }
 }
-async function clearInstall() {
+async function clearSite() {
   await fx.admin.query(`DELETE FROM team_web_search`);
   await fx.admin.query(`DELETE FROM web_search_settings`);
 }
 
 describe("web_search.query", () => {
   it("unconfigured install: unavailable, nothing is called", async () => {
-    await clearInstall();
+    await clearSite();
     const w = await world();
     const sb = await started(w);
     const before = providerCalls.length;
@@ -185,8 +185,8 @@ describe("web_search.query", () => {
     expect(providerCalls.length).toBe(before);
   });
 
-  it("configured install, team not opted in: unavailable", async () => {
-    await clearInstall();
+  it("configured site, team not opted in: unavailable", async () => {
+    await clearSite();
     const w = await world();
     await configure(w, false);
     const sb = await started(w);
@@ -195,7 +195,7 @@ describe("web_search.query", () => {
   });
 
   it("configured and opted in: citations come back, the key goes only to the provider", async () => {
-    await clearInstall();
+    await clearSite();
     const w = await world();
     await configure(w, true);
     const sb = await started(w);
@@ -214,7 +214,7 @@ describe("web_search.query", () => {
   });
 
   it("a provider failure is an error result without the key", async () => {
-    await clearInstall();
+    await clearSite();
     const w = await world();
     await configure(w, true);
     const sb = await started(w);
@@ -229,7 +229,7 @@ describe("web_search.query", () => {
   });
 
   it("refuses a search the policy check did not allow, with other input, or without the capability", async () => {
-    await clearInstall();
+    await clearSite();
     const w = await world();
     await configure(w, true);
     const sb = await started(w);
@@ -263,7 +263,7 @@ describe("web_search.query", () => {
   });
 
   it("an allowed call is single use: a replay is refused and the provider is called once", async () => {
-    await clearInstall();
+    await clearSite();
     const w = await world();
     await configure(w, true);
     const sb = await started(w);
@@ -283,7 +283,7 @@ describe("web_search.query", () => {
   });
 
   it("a query with leading and trailing spaces is searched as sent (same bytes as the policy hash)", async () => {
-    await clearInstall();
+    await clearSite();
     const w = await world();
     await configure(w, true);
     const sb = await started(w);
@@ -292,7 +292,7 @@ describe("web_search.query", () => {
   });
 
   it("caps searches per run from the database, across service instances", async () => {
-    await clearInstall();
+    await clearSite();
     const w = await world();
     await configure(w, true);
     const other = createWebSearchService({ db: fx.db, envelope, fetch: fakeFetch, maxPerRun: 3 });

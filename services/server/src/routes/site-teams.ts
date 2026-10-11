@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { asc, eq, teams } from "@kobe/db";
 import type { AuthVariables } from "../auth/session.js";
 import { recordAudit } from "../audit/record.js";
-import { requireInstallPermission } from "../authz/middleware.js";
+import { requireSitePermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 import { createTeamWithAdmin, findTeam, findUserId, listMembers } from "../teams/members.js";
@@ -16,15 +16,15 @@ function isUniqueViolation(err: unknown): boolean {
 }
 
 /**
- * Install admins create teams and name each team's first team admin (spec D8), rename teams and
+ * Site admins create teams and name each team's first team admin (spec D8), rename teams and
  * read rosters (team metadata, not content). They cannot add, re-role or remove members of an
- * existing team: that belongs to the team's own admins, or an install admin could make an
+ * existing team: that belongs to the team's own admins, or a site admin could make an
  * accomplice team admin, get added, and read team content without break-glass.
  */
-export function installTeamsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
+export function siteTeamsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
   const db = deps.database.db;
-  app.use(requireInstallPermission("install.teams.manage"));
+  app.use(requireSitePermission("site.teams.manage"));
 
   const teamNotFound = { code: "team_not_found", message: "No team with that id." } as const;
   const userNotFound = { code: "user_not_found", message: "No Kobe user with that id." } as const;

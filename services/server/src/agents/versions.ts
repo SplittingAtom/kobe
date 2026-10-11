@@ -24,8 +24,8 @@ import { computeToolManifest, toolManifestSchema, type ToolManifest } from "./ma
 import {
   auditTeam,
   inLocation,
-  installWhere,
-  INSTALL,
+  siteWhere,
+  SITE,
   lockAgent,
   TEAM,
   toRecord,
@@ -177,7 +177,7 @@ async function agentExists(tx: KobeTx, location: AgentLocation, id: string): Pro
       : await tx
           .select({ id: installAgents.id })
           .from(installAgents)
-          .where(and(installWhere(location), eq(installAgents.id, id)));
+          .where(and(siteWhere(location), eq(installAgents.id, id)));
   return rows.length > 0;
 }
 
@@ -286,8 +286,8 @@ async function insertVersion(
     [updated] = await tx
       .update(installAgents)
       .set({ currentVersion: values.version, updatedAt: now })
-      .where(and(installWhere(location), eq(installAgents.id, agent.id)))
-      .returning(INSTALL);
+      .where(and(siteWhere(location), eq(installAgents.id, agent.id)))
+      .returning(SITE);
   }
   if (!row || !updated) throw new Error("agent version insert returned no row");
   return { ok: true, value: { agent: toRecord(location.scope, updated), version: toVersion(row) } };
@@ -465,7 +465,7 @@ export async function deleteOrArchiveAgent(
       if (location.scope === "team") {
         await tx.delete(teamAgents).where(eq(teamAgents.id, id));
       } else {
-        await tx.delete(installAgents).where(and(installWhere(location), eq(installAgents.id, id)));
+        await tx.delete(installAgents).where(and(siteWhere(location), eq(installAgents.id, id)));
       }
       await recordAudit(tx, {
         ...(actor ? { actor } : {}),
@@ -548,8 +548,8 @@ async function setArchived(
       : await tx
           .update(installAgents)
           .set({ ...set, archivedBy })
-          .where(and(installWhere(location), eq(installAgents.id, id)))
-          .returning(INSTALL);
+          .where(and(siteWhere(location), eq(installAgents.id, id)))
+          .returning(SITE);
   if (!row) throw new Error("agent archive update returned no row");
   return toRecord(location.scope, row);
 }
@@ -597,17 +597,17 @@ export async function findPinnableAgent(
     .where(and(eq(teamAgents.teamId, viewer.teamId), eq(teamAgents.id, agentId)));
   const [team]: Row[] = await (options.lock ? teamQuery.for("share") : teamQuery);
   if (team) return toRecord("team", team);
-  const installQuery = tx
-    .select({ ...INSTALL, scope: installAgents.scope })
+  const siteQuery = tx
+    .select({ ...SITE, scope: installAgents.scope })
     .from(installAgents)
-    .where(and(eq(installAgents.id, agentId), installVisibleTo(viewer.userId)));
+    .where(and(eq(installAgents.id, agentId), siteVisibleTo(viewer.userId)));
   const [own]: (Row & { scope: "personal" | "gallery" })[] = await (options.lock
-    ? installQuery.for("share")
-    : installQuery);
+    ? siteQuery.for("share")
+    : siteQuery);
   if (!own) return null;
   const { scope, ...row } = own;
   const record = toRecord(scope, row);
-  // A team can suspend an install-wide agent for itself (KOBE-86): effective status here.
+  // A team can suspend a site-wide agent for itself (KOBE-86): effective status here.
   return record.status === "active" && (await suspendedInTeam(tx, viewer.teamId, agentId))
     ? { ...record, status: "suspended" }
     : record;
@@ -619,8 +619,8 @@ export function agentStatusOf(agent: AgentRecord): "active" | "suspended" | "arc
   return agent.status === "suspended" ? "suspended" : "active";
 }
 
-/** Install-wide agents a user sees: the gallery and their own personal agents. */
-export const installVisibleTo = (userId: string) =>
+/** Site-wide agents a user sees: the gallery and their own personal agents. */
+export const siteVisibleTo = (userId: string) =>
   sql`(${installAgents.scope} = 'gallery' OR (${installAgents.scope} = 'personal' AND ${installAgents.ownerUserId} = ${userId}::uuid))`;
 
 /** Why an agent can't be pinned by a new thread or a switch, if it can't. */
@@ -633,7 +633,7 @@ export const canPinAgent = (agent: AgentRecord): boolean => !unavailable(agent);
 
 /**
  * The pin a new thread takes for `agentId` (`POST /v1/threads`): the agent's current published
- * version. Null agent → null pin (the install default agent). Suspended, archived and never
+ * version. Null agent → null pin (the site default agent). Suspended, archived and never
  * published agents can't start threads.
  */
 export async function resolveAgentPin(

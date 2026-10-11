@@ -1,4 +1,4 @@
-/** Install console: isolation (`/v1/install`, install.settings.manage). Responses arrive camelized. */
+/** Install console: isolation (`/v1/site`, install.settings.manage). Responses arrive camelized. */
 import { apiRequest, type ApiResult } from "../../../api/client";
 
 export type IsolationStatus =
@@ -24,9 +24,9 @@ export type IsolationStatus =
     };
 
 export function getIsolation(): Promise<ApiResult<IsolationStatus>> {
-  return apiRequest("/v1/install/isolation");
+  return apiRequest("/v1/site/isolation");
 }
 
 export function recheckIsolation(): Promise<ApiResult<IsolationStatus>> {
-  return apiRequest("/v1/install/isolation/check", { method: "POST" });
+  return apiRequest("/v1/site/isolation/check", { method: "POST" });
 }

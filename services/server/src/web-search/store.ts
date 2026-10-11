@@ -25,10 +25,10 @@ export const putWebSearchSchema = z.strictObject({
   enabled: z.boolean().optional(),
 });
 
-/** An install-wide record has no team: the envelope binds to the nil team id. */
-const INSTALL_TEAM = "00000000-0000-0000-0000-000000000000";
+/** A site-wide record has no team: the envelope binds to the nil team id. */
+const SITE_TEAM = "00000000-0000-0000-0000-000000000000";
 export const webSearchContext = {
-  teamId: INSTALL_TEAM,
+  teamId: SITE_TEAM,
   kind: "web_search",
   recordId: "install",
 } as const;
@@ -91,7 +91,7 @@ export async function putWebSearch(
     } else if (sealedFields) {
       await tx.insert(webSearchSettings).values({ ...set, ...sealedFields });
     }
-    // A provider change leaves the old opt-ins in place: they follow the install's provider.
+    // A provider change leaves the old opt-ins in place: they follow the site's provider.
     await recordAudit(tx, {
       action: "mcp.web_search.configured",
       target: { provider: input.provider, enabled, keyChanged: sealedFields !== undefined },
@@ -137,15 +137,15 @@ export interface TeamWebSearchView {
 }
 
 export async function readTeamWebSearch(db: KobeDb, teamId: string): Promise<TeamWebSearchView> {
-  const install = await readWebSearch(db);
-  const available = install.configured && install.enabled === true;
+  const site = await readWebSearch(db);
+  const available = site.configured && site.enabled === true;
   const [row] = await withTeam(db, teamId, (tx) =>
     tx.select().from(teamWebSearch).where(eq(teamWebSearch.teamId, teamId)),
   );
   return {
     available,
     enabled: available && row !== undefined,
-    provider: available ? (install.provider ?? null) : null,
+    provider: available ? (site.provider ?? null) : null,
   };
 }
 

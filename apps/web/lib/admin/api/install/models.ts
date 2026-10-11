@@ -1,11 +1,11 @@
 /**
- * Install console: model providers and the catalog (`/v1/install/models`, install.models.manage;
+ * Install console: model providers and the catalog (`/v1/site/models`, install.models.manage;
  * KOBE-40 API, KOBE-44 UI). Provider keys are write-only: the API says only whether one is set.
  */
 import { apiRequest, type ApiResult } from "../../../api/client";
 
 const enc = encodeURIComponent;
-const BASE = "/v1/install/models";
+const BASE = "/v1/site/models";
 
 export const PROVIDER_KINDS = [
   "openai",

@@ -9,7 +9,7 @@ import {
   type KobeDb,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
-import { INSTALL, installWhere } from "../agents/store.js";
+import { SITE, siteWhere } from "../agents/store.js";
 import { archiveAgent, publishAgent } from "../agents/versions.js";
 import { logger } from "../logger.js";
 import {
@@ -44,12 +44,12 @@ async function ensureDraft(
   return db.transaction(async (tx) => {
     const [found] = await tx
       .select({
-        ...INSTALL,
+        ...SITE,
         galleryGeneration: installAgents.galleryGeneration,
         archivedBy: installAgents.archivedBy,
       })
       .from(installAgents)
-      .where(and(installWhere(GALLERY), eq(installAgents.galleryKey, key)))
+      .where(and(siteWhere(GALLERY), eq(installAgents.galleryKey, key)))
       .for("update");
     const values = {
       frontmatter: definition.frontmatter,
@@ -62,7 +62,7 @@ async function ensureDraft(
       slug,
     });
     if (!found) {
-      // An agent curated through the old install console under the same slug is adopted.
+      // An agent curated through the old site console under the same slug is adopted.
       const [legacy] = await tx
         .select({
           id: installAgents.id,
@@ -70,7 +70,7 @@ async function ensureDraft(
           archivedAt: installAgents.archivedAt,
         })
         .from(installAgents)
-        .where(and(installWhere(GALLERY), eq(installAgents.slug, key)))
+        .where(and(siteWhere(GALLERY), eq(installAgents.slug, key)))
         .for("update");
       // Archived by hand: never revived behind anyone's back (nor an error at every start).
       if (legacy?.archivedAt) {
@@ -181,7 +181,7 @@ async function seedOne(db: KobeDb, parsed: ParsedGalleryDefinition): Promise<See
     await db
       .update(installAgents)
       .set({ galleryGeneration: parsed.generation })
-      .where(and(installWhere(GALLERY), eq(installAgents.id, agentId)));
+      .where(and(siteWhere(GALLERY), eq(installAgents.id, agentId)));
   }
   return { key: parsed.key, agentId, action };
 }
@@ -197,7 +197,7 @@ async function retireRemoved(db: KobeDb, keys: readonly string[]): Promise<strin
     .from(installAgents)
     .where(
       and(
-        installWhere(GALLERY),
+        siteWhere(GALLERY),
         isNotNull(installAgents.galleryKey),
         isNull(installAgents.archivedAt),
       ),

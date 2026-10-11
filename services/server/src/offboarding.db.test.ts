@@ -165,7 +165,7 @@ beforeAll(async () => {
   for (const who of WHO) {
     const user = await deps.createUserWithPassword(
       { email: email(who), name: who, password: PASSWORD },
-      who === "owner" ? { installRole: "owner" } : {},
+      who === "owner" ? { siteRole: "owner" } : {},
     );
     ids[who] = user.id;
   }
@@ -182,7 +182,7 @@ beforeAll(async () => {
       }),
     ),
   ) as Record<Person, TestBrowser>;
-  const created = await as.owner.post("/v1/install/teams", {
+  const created = await as.owner.post("/v1/site/teams", {
     slug: "finance",
     name: "Finance",
     adminUserId: ids.tadmin,
@@ -263,7 +263,7 @@ describe("removal destroys the sandbox at once and keeps the volume (ac-1)", () 
 
   it("destroys the sandboxes of a deactivated user in every team", async () => {
     await seedWorkspace(ids.dan);
-    const res = await as.owner.post(`/v1/install/users/${ids.dan}/deactivate`);
+    const res = await as.owner.post(`/v1/site/users/${ids.dan}/deactivate`);
     expect(res.status, JSON.stringify(res.json)).toBe(200);
     expect(res.json.incompleteSteps ?? []).toEqual([]);
     expect((await rowOf(ids.dan))?.state).toBe("destroyed");
@@ -320,7 +320,7 @@ describe("the team admin can export the workspace for 30 days (ac-2)", () => {
   });
 
   it("never offers another team's departed members", async () => {
-    const other = await as.owner.post("/v1/install/teams", {
+    const other = await as.owner.post("/v1/site/teams", {
       slug: "legal",
       name: "Legal",
       adminUserId: ids.carol,

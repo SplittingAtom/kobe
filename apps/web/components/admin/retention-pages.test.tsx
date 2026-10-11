@@ -84,15 +84,15 @@ describe("Team retention (KOBE-18)", () => {
 describe("Install retention maximum (KOBE-18)", () => {
   it("lowers the maximum after confirming", async () => {
     const calls = stubApi({
-      "GET /v1/install/retention": [
+      "GET /v1/site/retention": [
         [200, { maximum: "forever", applied: "forever", pending: null }],
         [200, { maximum: "1y", applied: "forever", pending: { maximum: "1y", effectiveAt: AT } }],
       ],
-      "PUT /v1/install/retention": [
+      "PUT /v1/site/retention": [
         200,
         { maximum: "1y", applied: "forever", pending: { maximum: "1y", effectiveAt: AT } },
       ],
-      "DELETE /v1/install/retention/pending": [
+      "DELETE /v1/site/retention/pending": [
         200,
         { maximum: "forever", applied: "forever", pending: null },
       ],

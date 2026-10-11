@@ -94,10 +94,10 @@ beforeAll(async () => {
   }
   // A custom ceiling domain and a wildcard (registries are seeded in the ceiling by migration).
   expect(
-    (await as.owner.post("/v1/install/egress-ceiling", { domain: "pkgs.example.com" })).status,
+    (await as.owner.post("/v1/site/egress-ceiling", { domain: "pkgs.example.com" })).status,
   ).toBe(201);
   expect(
-    (await as.owner.post("/v1/install/egress-ceiling", { domain: "*.files.example.com" })).status,
+    (await as.owner.post("/v1/site/egress-ceiling", { domain: "*.files.example.com" })).status,
   ).toBe(201);
 }, 120_000);
 afterAll(() => h.close());
@@ -254,7 +254,7 @@ describe("request access", () => {
     const id = req.json.request.id as string;
     expect(
       (
-        await as.owner.put(`/v1/install/egress-ceiling/${enc("*.files.example.com")}`, {
+        await as.owner.put(`/v1/site/egress-ceiling/${enc("*.files.example.com")}`, {
           in_ceiling: false,
         })
       ).status,
@@ -264,7 +264,7 @@ describe("request access", () => {
     expect(res.json.code).toBe("not_in_ceiling");
     const pending = await as.alice.get(TEAM_REQUESTS);
     expect(pending.json.requests.some((r: { id: string }) => r.id === id)).toBe(true);
-    await as.owner.put(`/v1/install/egress-ceiling/${enc("*.files.example.com")}`, {
+    await as.owner.put(`/v1/site/egress-ceiling/${enc("*.files.example.com")}`, {
       in_ceiling: true,
     });
   });
@@ -329,7 +329,7 @@ describe("request access under concurrency (review)", () => {
 
   it("parallel requests can't pass the hourly quota (one admin email each, at most 10)", async () => {
     for (let i = 0; i < 15; i++) {
-      await as.owner.post("/v1/install/egress-ceiling", { domain: `q${i}.quota.example.com` });
+      await as.owner.post("/v1/site/egress-ceiling", { domain: `q${i}.quota.example.com` });
     }
     const erin = await member("erin@req.test");
     const before = h.mailer.to("alice@req.test").length;
@@ -345,7 +345,7 @@ describe("request access under concurrency (review)", () => {
   });
 
   it("parallel decisions on one pattern don't deadlock; the requests are settled once", async () => {
-    await as.owner.post("/v1/install/egress-ceiling", { domain: "race.example.com" });
+    await as.owner.post("/v1/site/egress-ceiling", { domain: "race.example.com" });
     const [f1, f2, f3] = [
       await member("f1@req.test"),
       await member("f2@req.test"),
@@ -371,7 +371,7 @@ describe("request access under concurrency (review)", () => {
   });
 
   it("enabling a domain directly settles its pending requests and tells the requesters", async () => {
-    await as.owner.post("/v1/install/egress-ceiling", { domain: "direct.example.com" });
+    await as.owner.post("/v1/site/egress-ceiling", { domain: "direct.example.com" });
     const gina = await member("gina@req.test");
     expect((await gina.post(REQUESTS, { domain: "direct.example.com" })).status).toBe(201);
     const res = await as.alice.put("/v1/team/egress/domains/direct.example.com", {});
@@ -386,7 +386,7 @@ describe("request access under concurrency (review)", () => {
   });
 
   it("skips an email whose recipient is no longer a team admin when it is delivered", async () => {
-    await as.owner.post("/v1/install/egress-ceiling", { domain: "late.example.com" });
+    await as.owner.post("/v1/site/egress-ceiling", { domain: "late.example.com" });
     const hank = await member("hank@req.test");
     h.mailer.failNext = new Error("smtp down");
     const req = await hank.post(REQUESTS, { domain: "late.example.com" });

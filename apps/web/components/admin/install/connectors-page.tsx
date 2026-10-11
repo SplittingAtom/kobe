@@ -22,7 +22,7 @@ const NAME_HINT = "Use lowercase letters and digits joined by - or _ (up to 64 c
 const EMPTY: ConnectorInput = { name: "", url: "", iconUrl: null, authKind: "none" };
 
 /**
- * The install connector registry (spec D6, D27; `/v1/install/connectors`, KOBE-100): the MCP
+ * The install connector registry (spec D6, D27; `/v1/site/connectors`, KOBE-100): the MCP
  * servers teams may enable. Tool review (KOBE-101) and team enablement (KOBE-104) come later.
  */
 export function ConnectorsPage() {

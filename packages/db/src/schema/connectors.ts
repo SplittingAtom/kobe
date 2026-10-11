@@ -14,8 +14,8 @@ import type { PinnedTool } from "../connectors/snapshot.js";
 import { users } from "./auth.js";
 import { teams } from "./teams.js";
 
-// MCP connectors (spec D6, D27, §5.4). Install admins register remote (Streamable HTTP) servers
-// and Kobe pins each tool (`connectors`, install-wide); team admins enable a connector for their
+// MCP connectors (spec D6, D27, §5.4). Site admins register remote (Streamable HTTP) servers
+// and Kobe pins each tool (`connectors`, site-wide); team admins enable a connector for their
 // team with an exposure (`team_connectors`, a team table). The MCP proxy (KOBE-58) lists and calls
 // only pinned tools of connectors enabled in the caller's team. This is the minimal model the proxy
 // core needs; KOBE-59 (registry, pinning, drift), KOBE-60 (enablement UI) and KOBE-61 (grants) add
@@ -42,7 +42,7 @@ export const CONNECTOR_NAME_PATTERN = "^[a-z0-9]+([-_][a-z0-9]+)*$";
 /** Longest connector URL / icon URL the registry stores. */
 export const CONNECTOR_URL_MAX = 2048;
 
-/** Install-wide (†): the connector registry (install admins, D6). */
+/** Site-wide (†): the connector registry (site admins, D6). */
 export const connectors = pgTable(
   "connectors",
   {
@@ -55,7 +55,7 @@ export const connectors = pgTable(
     status: connectorStatus().notNull().default("active"),
     /** Optional https icon URL (KOBE-100); the admin UI renders it as an image. */
     iconUrl: text(),
-    /** The install admin who registered it (KOBE-100); null for rows older than that. */
+    /** The site admin who registered it (KOBE-100); null for rows older than that. */
     createdBy: uuid().references(() => users.id),
     /**
      * Soft delete (KOBE-100): a removed connector that teams still reference stays as a disabled

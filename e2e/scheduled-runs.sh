@@ -138,7 +138,7 @@ scheduled_run_checks() {
   contains "the member's bell lists the failure" '^200 .*"kind":"schedule.run.failed".*"unread_count":1,' "$(printf '%s\n' "$out" | sed -n 1p)"
   contains "the member marks it read" '^200 \{"updated":1,"unread_count":0\}$' "$(printf '%s\n' "$out" | sed -n 2p)"
 
-  out=$(sched_as owner@e2e.test "POST /v1/install/users/$SCHED_USER_ID/deactivate" "POST /v1/schedules/$s3/resume")
+  out=$(sched_as owner@e2e.test "POST /v1/site/users/$SCHED_USER_ID/deactivate" "POST /v1/schedules/$s3/resume")
   contains "the Owner deactivates the member" '^200 .*"deactivated":true' "$(printf '%s\n' "$out" | sed -n 1p)"
   contains "deactivation paused the member's schedule" '^false:deactivation:true$' \
     "$(psql_kobe "SELECT active::text || ':' || coalesce(paused_by, '-') || ':' || (next_due_at IS NULL)::text FROM schedules WHERE id = '${s3:-$SCHED_NONE}'")"

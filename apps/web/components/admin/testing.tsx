@@ -50,11 +50,8 @@ export function stubApi(routes: Record<string, Reply | readonly Reply[]>): Recor
 
 export const ME = { id: "u-me", name: "Ada", email: "ada@x.io" };
 
-export function renderInstall(
-  ui: ReactElement,
-  installRole: InstallAccess["installRole"] = "admin",
-) {
-  const access: InstallAccess = { console: "install", user: ME, installRole };
+export function renderInstall(ui: ReactElement, siteRole: InstallAccess["siteRole"] = "admin") {
+  const access: InstallAccess = { console: "install", user: ME, siteRole };
   return render(<ConsoleAccessContext.Provider value={access}>{ui}</ConsoleAccessContext.Provider>);
 }
 

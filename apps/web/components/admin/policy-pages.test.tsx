@@ -39,7 +39,7 @@ afterEach(() => {
 
 describe("Install policy floor", () => {
   const routes = {
-    "GET /v1/install/policy/rules": [
+    "GET /v1/site/policy/rules": [
       200,
       {
         rules: [
@@ -50,7 +50,7 @@ describe("Install policy floor", () => {
         ],
       },
     ],
-    "GET /v1/install/policy/settings": [200, { promptSandboxWrites: false }],
+    "GET /v1/site/policy/settings": [200, { promptSandboxWrites: false }],
   } as const;
 
   it("lists rules with their argument patterns and offers only deny and ask", async () => {
@@ -71,8 +71,8 @@ describe("Install policy floor", () => {
   it("adds a rule with the wire body and removes one", async () => {
     const calls = stubApi({
       ...routes,
-      "POST /v1/install/policy/rules": [201, { rule: rule("r-2", "ask", "bash") }],
-      "DELETE /v1/install/policy/rules/r-1": [204],
+      "POST /v1/site/policy/rules": [201, { rule: rule("r-2", "ask", "bash") }],
+      "DELETE /v1/site/policy/rules/r-1": [204],
     });
     renderInstall(<PolicyFloorPage />);
     const form = await screen.findByRole("form", { name: "Add a rule" });
@@ -90,13 +90,13 @@ describe("Install policy floor", () => {
     });
     await userEvent.click(screen.getByRole("button", { name: "Remove rule Deny mcp__github__*" }));
     await screen.findByText("Removed: Deny for mcp__github__*.");
-    expect(summary(calls)).toContain("DELETE /v1/install/policy/rules/r-1");
+    expect(summary(calls)).toContain("DELETE /v1/site/policy/rules/r-1");
   });
 
   it("shows the server's validation and limit errors", async () => {
     stubApi({
       ...routes,
-      "POST /v1/install/policy/rules": [
+      "POST /v1/site/policy/rules": [
         409,
         {
           code: "too_many_rules",
@@ -114,7 +114,7 @@ describe("Install policy floor", () => {
   it("saves the sandbox-writes switch", async () => {
     const calls = stubApi({
       ...routes,
-      "PUT /v1/install/policy/settings": [200, { promptSandboxWrites: true }],
+      "PUT /v1/site/policy/settings": [200, { promptSandboxWrites: true }],
     });
     renderInstall(<PolicyFloorPage />);
     await userEvent.click(
@@ -128,11 +128,11 @@ describe("Install policy floor", () => {
 
   it("renders a 403", async () => {
     stubApi({
-      "GET /v1/install/policy/rules": [
+      "GET /v1/site/policy/rules": [
         403,
         { code: "forbidden", message: "You don't have permission to do that." },
       ],
-      "GET /v1/install/policy/settings": [
+      "GET /v1/site/policy/settings": [
         403,
         { code: "forbidden", message: "You don't have permission to do that." },
       ],

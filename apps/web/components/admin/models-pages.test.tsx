@@ -80,7 +80,7 @@ afterEach(() => {
 
 describe("install: models and providers", () => {
   it("shows providers with only whether a key is set, the catalog, and the gateway in sync", async () => {
-    const calls = stubApi({ "GET /v1/install/models": [200, MODELS] });
+    const calls = stubApi({ "GET /v1/site/models": [200, MODELS] });
     renderInstall(<InstallModelsPage />);
     const providers = await screen.findByRole("table", { name: /Providers/ });
     const row = within(providers).getByRole("row", { name: /Ollama Cloud/ });
@@ -96,7 +96,7 @@ describe("install: models and providers", () => {
 
   it("shows a failing gateway sync with its last error", async () => {
     stubApi({
-      "GET /v1/install/models": [
+      "GET /v1/site/models": [
         200,
         {
           ...MODELS,
@@ -116,8 +116,8 @@ describe("install: models and providers", () => {
 
   it("adds Ollama Cloud with its endpoint and key (write-only)", async () => {
     const calls = stubApi({
-      "GET /v1/install/models": [200, { ...MODELS, providers: [], catalog: [] }],
-      "POST /v1/install/models/providers": [201, { provider: OLLAMA }],
+      "GET /v1/site/models": [200, { ...MODELS, providers: [], catalog: [] }],
+      "POST /v1/site/models/providers": [201, { provider: OLLAMA }],
     });
     renderInstall(<InstallModelsPage />);
     const user = userEvent.setup();
@@ -143,8 +143,8 @@ describe("install: models and providers", () => {
 
   it("asks for an id for OpenAI-compatible endpoints and offers vendor kinds once", async () => {
     const calls = stubApi({
-      "GET /v1/install/models": [200, MODELS],
-      "POST /v1/install/models/providers": [
+      "GET /v1/site/models": [200, MODELS],
+      "POST /v1/site/models/providers": [
         201,
         { provider: { ...OLLAMA, id: "vllm", kind: "openai_compatible", name: "vLLM" } },
       ],
@@ -174,8 +174,8 @@ describe("install: models and providers", () => {
 
   it("changing a keyed provider's endpoint requires the key again, and says why", async () => {
     const calls = stubApi({
-      "GET /v1/install/models": [200, MODELS],
-      "PATCH /v1/install/models/providers/ollama": [200, { provider: OLLAMA }],
+      "GET /v1/site/models": [200, MODELS],
+      "PATCH /v1/site/models/providers/ollama": [200, { provider: OLLAMA }],
     });
     renderInstall(<InstallModelsPage />);
     const user = userEvent.setup();
@@ -199,8 +199,8 @@ describe("install: models and providers", () => {
 
   it("shows the server's refusal (key_required_for_new_endpoint) as it is", async () => {
     stubApi({
-      "GET /v1/install/models": [200, MODELS],
-      "PATCH /v1/install/models/providers/ollama": [
+      "GET /v1/site/models": [200, MODELS],
+      "PATCH /v1/site/models/providers/ollama": [
         400,
         {
           code: "key_required_for_new_endpoint",
@@ -221,13 +221,13 @@ describe("install: models and providers", () => {
 
   it("adds a catalog model picked from the provider's list, and asks the provider again", async () => {
     const calls = stubApi({
-      "GET /v1/install/models": [200, { ...MODELS, catalog: [] }],
-      "GET /v1/install/models/providers/ollama/models": [
+      "GET /v1/site/models": [200, { ...MODELS, catalog: [] }],
+      "GET /v1/site/models/providers/ollama/models": [
         200,
         { ...LISTED, models: [], discovery: "unknown" },
       ],
-      "POST /v1/install/models/providers/ollama/models/refresh": [200, LISTED],
-      "POST /v1/install/models/catalog": [
+      "POST /v1/site/models/providers/ollama/models/refresh": [200, LISTED],
+      "POST /v1/site/models/catalog": [
         201,
         {
           model: {
@@ -263,9 +263,9 @@ describe("install: models and providers", () => {
 
   it("prefills image input from what the provider reports, and the admin can change it (KOBE-191)", async () => {
     const calls = stubApi({
-      "GET /v1/install/models": [200, { ...MODELS, catalog: [] }],
-      "GET /v1/install/models/providers/ollama/models": [200, LISTED],
-      "POST /v1/install/models/catalog": [201, { model: { ...KIMI, alias: "see" } }],
+      "GET /v1/site/models": [200, { ...MODELS, catalog: [] }],
+      "GET /v1/site/models/providers/ollama/models": [200, LISTED],
+      "POST /v1/site/models/catalog": [201, { model: { ...KIMI, alias: "see" } }],
     });
     renderInstall(<InstallModelsPage />);
     const user = userEvent.setup();
@@ -288,8 +288,8 @@ describe("install: models and providers", () => {
 
   it("an admin's own choice is not overridden by the provider's hint", async () => {
     stubApi({
-      "GET /v1/install/models": [200, { ...MODELS, catalog: [] }],
-      "GET /v1/install/models/providers/ollama/models": [200, LISTED],
+      "GET /v1/site/models": [200, { ...MODELS, catalog: [] }],
+      "GET /v1/site/models/providers/ollama/models": [200, LISTED],
     });
     renderInstall(<InstallModelsPage />);
     const user = userEvent.setup();
@@ -304,15 +304,15 @@ describe("install: models and providers", () => {
 
   it("shows which models take images and changes it on edit", async () => {
     const calls = stubApi({
-      "GET /v1/install/models": [
+      "GET /v1/site/models": [
         200,
         {
           ...MODELS,
           catalog: [KIMI, { ...KIMI, alias: "eye", input_modalities: ["text", "image"] }],
         },
       ],
-      "GET /v1/install/models/providers/ollama/models": [200, LISTED],
-      "PATCH /v1/install/models/catalog/kimi": [
+      "GET /v1/site/models/providers/ollama/models": [200, LISTED],
+      "PATCH /v1/site/models/catalog/kimi": [
         200,
         { model: { ...KIMI, input_modalities: ["text", "image"] } },
       ],
@@ -336,7 +336,7 @@ describe("install: models and providers", () => {
 
   it("shows each model's output limit and context window, and the site default when unset (KOBE-259)", async () => {
     stubApi({
-      "GET /v1/install/models": [
+      "GET /v1/site/models": [
         200,
         {
           ...MODELS,
@@ -363,7 +363,7 @@ describe("install: models and providers", () => {
   it("renders entries from an older server without limits (rolling upgrade, KOBE-259)", async () => {
     const { max_output_tokens: _m, context_window: _c, reasoning: _r, ...old } = KIMI;
     const { token_defaults: _d, ...oldModels } = MODELS;
-    stubApi({ "GET /v1/install/models": [200, { ...oldModels, catalog: [old] }] });
+    stubApi({ "GET /v1/site/models": [200, { ...oldModels, catalog: [old] }] });
     renderInstall(<InstallModelsPage />);
     const catalog = await screen.findByRole("table", { name: /Catalog models/ });
     expect(within(catalog).getByRole("row", { name: /^kimi/ }).textContent).toContain(
@@ -373,13 +373,13 @@ describe("install: models and providers", () => {
 
   it("sets a model's limits and reasoning flag, and clears them back to the defaults (KOBE-259)", async () => {
     const calls = stubApi({
-      "GET /v1/install/models": [
+      "GET /v1/site/models": [
         200,
         { ...MODELS, catalog: [KIMI, { ...KIMI, alias: "big", max_output_tokens: 65_536 }] },
       ],
-      "GET /v1/install/models/providers/ollama/models": [200, LISTED],
-      "PATCH /v1/install/models/catalog/kimi": [200, { model: { ...KIMI, reasoning: true } }],
-      "PATCH /v1/install/models/catalog/big": [200, { model: { ...KIMI, alias: "big" } }],
+      "GET /v1/site/models/providers/ollama/models": [200, LISTED],
+      "PATCH /v1/site/models/catalog/kimi": [200, { model: { ...KIMI, reasoning: true } }],
+      "PATCH /v1/site/models/catalog/big": [200, { model: { ...KIMI, alias: "big" } }],
     });
     renderInstall(<InstallModelsPage />);
     const user = userEvent.setup();
@@ -412,9 +412,9 @@ describe("install: models and providers", () => {
 
   it("adds a model with its own limits; empty fields keep the site defaults (KOBE-259)", async () => {
     const calls = stubApi({
-      "GET /v1/install/models": [200, { ...MODELS, catalog: [] }],
-      "GET /v1/install/models/providers/ollama/models": [200, LISTED],
-      "POST /v1/install/models/catalog": [201, { model: { ...KIMI, alias: "glm" } }],
+      "GET /v1/site/models": [200, { ...MODELS, catalog: [] }],
+      "GET /v1/site/models/providers/ollama/models": [200, LISTED],
+      "POST /v1/site/models/catalog": [201, { model: { ...KIMI, alias: "glm" } }],
     });
     renderInstall(<InstallModelsPage />);
     const user = userEvent.setup();
@@ -436,8 +436,8 @@ describe("install: models and providers", () => {
 
   it("explains a provider that refused to list its models; the id can still be typed", async () => {
     stubApi({
-      "GET /v1/install/models": [200, { ...MODELS, catalog: [] }],
-      "GET /v1/install/models/providers/ollama/models": [
+      "GET /v1/site/models": [200, { ...MODELS, catalog: [] }],
+      "GET /v1/site/models/providers/ollama/models": [
         200,
         { ...LISTED, models: [], discovery: "failed", detail: "401 unauthorized" },
       ],
@@ -450,10 +450,10 @@ describe("install: models and providers", () => {
 
   it("edits and removes catalog entries", async () => {
     const calls = stubApi({
-      "GET /v1/install/models": [200, MODELS],
-      "GET /v1/install/models/providers/ollama/models": [200, LISTED],
-      "PATCH /v1/install/models/catalog/kimi": [200, { model: { ...KIMI, label: "Kimi" } }],
-      "DELETE /v1/install/models/catalog/kimi": [204],
+      "GET /v1/site/models": [200, MODELS],
+      "GET /v1/site/models/providers/ollama/models": [200, LISTED],
+      "PATCH /v1/site/models/catalog/kimi": [200, { model: { ...KIMI, label: "Kimi" } }],
+      "DELETE /v1/site/models/catalog/kimi": [204],
     });
     renderInstall(<InstallModelsPage />);
     const user = userEvent.setup();
@@ -467,12 +467,12 @@ describe("install: models and providers", () => {
     expect(bodyOf(calls.find((c) => c.method === "PATCH"))).toEqual({ label: "Kimi" });
     await user.click(screen.getByRole("button", { name: "Remove kimi" }));
     await screen.findByText(/Removed kimi from the catalog/);
-    expect(summary(calls)).toContain("DELETE /v1/install/models/catalog/kimi");
+    expect(summary(calls)).toContain("DELETE /v1/site/models/catalog/kimi");
   });
 
   it("says so when the model gateway is not configured", async () => {
     stubApi({
-      "GET /v1/install/models": [200, { ...MODELS, providers: [], catalog: [], configured: false }],
+      "GET /v1/site/models": [200, { ...MODELS, providers: [], catalog: [], configured: false }],
     });
     renderInstall(<InstallModelsPage />);
     expect(await screen.findByText(/Model gateway: not configured/)).toBeTruthy();

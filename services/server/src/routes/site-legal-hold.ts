@@ -1,8 +1,8 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
 import type { AuthVariables } from "../auth/session.js";
-import { requireInstallPermission } from "../authz/middleware.js";
-import { activeInstallAdmins } from "../break-glass/store.js";
+import { requireSitePermission } from "../authz/middleware.js";
+import { activeSiteAdmins } from "../break-glass/store.js";
 import type { ServerDeps } from "../deps.js";
 import { idParamSchema, requestHoldSchema, requestReleaseSchema } from "../legal-hold/schemas.js";
 import {
@@ -55,7 +55,7 @@ function fail(c: Ctx, code: HoldError) {
 
 const iso = (d: Date | null) => d?.toISOString() ?? null;
 
-/** A hold as install admins see it, with what the viewer may do with it (a courtesy). */
+/** A hold as site admins see it, with what the viewer may do with it (a courtesy). */
 function holdJson(detail: HoldDetail, viewerId: string, otherAdmins: readonly string[]) {
   const { hold } = detail;
   // Self-approval only when no other active admin but the held user exists (D10, flagged).
@@ -100,17 +100,17 @@ function holdJson(detail: HoldDetail, viewerId: string, otherAdmins: readonly st
 }
 
 /**
- * Legal hold (spec D18; §6.1 `/v1/install/legal-hold`), install admins only. Placing and
- * releasing a hold each need a second install admin (D10's rule). A hold about the viewer is
+ * Legal hold (spec D18; §6.1 `/v1/site/legal-hold`), site admins only. Placing and
+ * releasing a hold each need a second site admin (D10's rule). A hold about the viewer is
  * invisible to them.
  */
-export function installLegalHoldRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
+export function siteLegalHoldRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
   const db = deps.database.db;
-  app.use(requireInstallPermission("install.legal_hold.manage"));
+  app.use(requireSitePermission("site.legal_hold.manage"));
 
   const otherAdmins = async (viewer: string) =>
-    (await activeInstallAdmins(db, viewer)).map((a) => a.id);
+    (await activeSiteAdmins(db, viewer)).map((a) => a.id);
 
   const respond = async (c: Ctx, result: HoldResult, status: 200 | 201 = 200) => {
     if (!result.ok) return fail(c, result.error);

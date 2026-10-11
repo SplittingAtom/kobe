@@ -33,12 +33,12 @@ function deactivationNotice(user: InstallUser, result: DeactivationResult): stri
   return parts.join(" ");
 }
 
-/** Install users (spec D7; `/v1/install/users`). */
+/** Install users (spec D7; `/v1/site/users`). */
 export function UsersPage() {
   const access = useInstallAccess();
   const { state, reload } = useResource(listUsers);
   const mutation = useMutation();
-  const me = { userId: access.user.id, role: access.installRole };
+  const me = { userId: access.user.id, role: access.siteRole };
 
   async function toggle(user: InstallUser) {
     const activate = user.deactivatedAt !== null;
@@ -84,7 +84,7 @@ export function UsersPage() {
                   <tr key={u.id}>
                     <th scope="row">{u.name}</th>
                     <td>{u.email}</td>
-                    <td>{ROLE[u.installRole]}</td>
+                    <td>{ROLE[u.siteRole]}</td>
                     <td>{u.twoFactorEnabled ? "On" : "Off"}</td>
                     <td>{u.deactivatedAt ? "Deactivated" : "Active"}</td>
                     <td>

@@ -46,7 +46,7 @@ export const skillBundleRefSchema = z.strictObject({
 export type SkillBundleRef = z.infer<typeof skillBundleRefSchema>;
 
 /**
- * Built-in (install-provided) skills (KOBE-88). The sandbox image bakes the gallery skills read-only
+ * Built-in (site-provided) skills (KOBE-88). The sandbox image bakes the gallery skills read-only
  * under `/opt/kobe/skills/<name>/` (root-owned, not writable by the agent, Pi or tool uids), so
  * there is nothing to fetch: `run.start.config.builtin_skills` lists the names of the built-ins the
  * run's effective skills include, and kobe-sandbox-agent registers exactly those with Pi

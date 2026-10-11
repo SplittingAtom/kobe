@@ -17,7 +17,7 @@ import { recordAudit } from "../audit/record.js";
 import type { ServerDeps } from "../deps.js";
 import { logger } from "../logger.js";
 import { grantMessage } from "./notify.js";
-import { activeInstallAdmins, getGrant, type GrantDetail, type GrantRow } from "./store.js";
+import { activeSiteAdmins, getGrant, type GrantDetail, type GrantRow } from "./store.js";
 
 /**
  * Durable break-glass notifications (spec D10: team admins are notified). Recipients are chosen
@@ -27,11 +27,11 @@ import { activeInstallAdmins, getGrant, type GrantDetail, type GrantRow } from "
  * and again from every replica's sweep, with backoff; a notification that gives up is audited.
  *
  * Who is told:
- * - requested → the other active install admins (they can approve), never the subject
+ * - requested → the other active site admins (they can approve), never the subject
  * - approved, and revoked/expired while active → the team's active admins, the active install
  *   admins, and the subject user unless the grant is a legal hold
  * - denied, withdrawn, or lapsed undecided → the requester
- * Under legal hold the subject is in no list (also when they are a team or install admin). The
+ * Under legal hold the subject is in no list (also when they are a team or site admin). The
  * person who acted is not told about their own action.
  */
 
@@ -85,14 +85,14 @@ export async function recipientsFor(
 ): Promise<Recipient[]> {
   const list: Recipient[] = [];
   if (event === "requested") {
-    for (const a of await activeInstallAdmins(tx, grant.adminId)) {
+    for (const a of await activeSiteAdmins(tx, grant.adminId)) {
       list.push({ id: a.id, role: "install_admin" });
     }
   } else if (reachesTeam(event, options.wasActive)) {
     for (const a of await activeTeamAdmins(tx, grant.teamId)) {
       list.push({ id: a.id, role: "team_admin" });
     }
-    for (const a of await activeInstallAdmins(tx)) {
+    for (const a of await activeSiteAdmins(tx)) {
       list.push({ id: a.id, role: a.id === grant.adminId ? "requester" : "install_admin" });
     }
     if (grant.userId && !grant.legalHold && (await isActiveUser(tx, grant.userId))) {
@@ -258,8 +258,7 @@ export async function deliverBreakGlassNotifications(
         continue;
       }
       const message = grantMessage(deps, detail, row.event, to, {
-        isInstallAdmin:
-          row.recipient_role === "install_admin" || row.recipient_role === "requester",
+        isSiteAdmin: row.recipient_role === "install_admin" || row.recipient_role === "requester",
         wasActive: row.was_active,
       });
       try {

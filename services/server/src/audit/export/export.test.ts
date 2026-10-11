@@ -28,8 +28,8 @@ describe("csv", () => {
     expect(csvCell(-5)).toBe("-5");
   });
 
-  it("gives the install view the IP and chain columns and the team view neither", () => {
-    expect(csvHeader("install").trim().split(",").slice(-4)).toEqual([
+  it("gives the site view the IP and chain columns and the team view neither", () => {
+    expect(csvHeader("site").trim().split(",").slice(-4)).toEqual([
       "ip",
       "user_agent",
       "prev_hash",
@@ -38,7 +38,7 @@ describe("csv", () => {
     expect(csvHeader("team")).not.toMatch(/hash|ip/);
     const row = csvRow(
       entry({ actor: { kind: "user", id: null, name: "=cmd", email: null } }),
-      "install",
+      "site",
     );
     expect(row).toContain("'=cmd");
     expect(row).toContain("203.0.113.7");
@@ -54,7 +54,7 @@ describe("csv", () => {
 
 describe("jsonl", () => {
   it("is one object per line with ISO times", () => {
-    const lines = formatPage([entry({ seq: 1 }), entry({ seq: 2 })], "jsonl", "install")
+    const lines = formatPage([entry({ seq: 1 }), entry({ seq: 2 })], "jsonl", "site")
       .trim()
       .split("\n");
     expect(lines).toHaveLength(2);
@@ -83,7 +83,7 @@ describe("exportStream", () => {
     const text = await drain(
       exportStream({
         format: "csv",
-        scope: "install",
+        scope: "site",
         fetchPage,
         onDone: (o) => void outcomes.push(o),
       }),

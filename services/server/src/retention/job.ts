@@ -33,7 +33,7 @@ import {
  * The nightly retention job (spec D18, KOBE-18). For every team, in short batches:
  *  1. purge threads 30 days in Trash (and those the owner deleted for good while held);
  *  2. purge threads past the team's effective retention period (team period capped by the
- *     install maximum; nothing when forever);
+ *     site maximum; nothing when forever);
  *  3. purge memory (D24, KOBE-188): superseded versions and files deleted longer ago than the
  *     team's window, never a live file (needs object storage);
  *  4. compact the live events of runs that ended more than 7 days ago;

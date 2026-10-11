@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SkillBlocklistPage } from "./install/skill-blocklist-page";
 import { renderInstall, stubApi } from "./testing";
 
-const BASE = "/v1/install/skill-blocklist";
+const BASE = "/v1/site/skill-blocklist";
 const H1 = "a".repeat(64);
 const H2 = "b".repeat(64);
 const entry = (contentHash: string, reason: string) => ({

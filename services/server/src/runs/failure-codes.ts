@@ -14,7 +14,7 @@ export const FAILURE_MESSAGES: Readonly<Record<string, string>> = {
   budget_exhausted: "The scheduled run did not start: the budget is used up.",
   timeout: "Your workspace did not answer in time, so the run could not start.",
   // KOBE-192: the pod was not Ready within the wake timeout (volume, scheduling, image pull).
-  // Deliberately generic: the cluster's reason is for install admins (audit log, server log).
+  // Deliberately generic: the cluster's reason is for site admins (audit log, server log).
   workspace_unavailable:
     "Your workspace could not be started because the cluster could not provide it. Ask your site admin to check the cluster, then try again.",
   thread_not_found: "The run could not start: the thread is not available to the workspace.",

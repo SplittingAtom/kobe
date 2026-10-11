@@ -11,7 +11,7 @@ import type { GatewayLimits, KeySpec, ProviderSpec } from "./bifrost-admin.js";
  * - Hierarchy (D30): customer = the install, Bifrost team = Kobe team, virtual key = a member in a
  *   team, allowed exactly the team's enabled catalog models (deny-by-default otherwise).
  */
-export const INSTALL_CUSTOMER = "kobe-install";
+export const SITE_CUSTOMER = "kobe-install";
 export const gatewayTeamName = (teamId: string) => `kobe-team-${teamId}`;
 export const virtualKeyName = (teamId: string, userId: string) => `kobe-vk-${teamId}-${userId}`;
 
@@ -37,8 +37,8 @@ export interface TeamInput {
   /** Enabled catalog aliases. */
   readonly aliases: readonly string[];
   /**
-   * Per-member requests per minute (KOBE-42: the install's, or the team's lower one); pushed as
-   * each member's virtual-key rate limit, Bifrost's install-wide backstop for the shim's limiter.
+   * Per-member requests per minute (KOBE-42: the site's, or the team's lower one); pushed as
+   * each member's virtual-key rate limit, Bifrost's site-wide backstop for the shim's limiter.
    */
   readonly requestsPerMinute?: number;
 }
@@ -165,7 +165,7 @@ export function buildDesiredState(
   }
   return {
     providers,
-    customer: { name: INSTALL_CUSTOMER, limits: limits.customer?.() },
+    customer: { name: SITE_CUSTOMER, limits: limits.customer?.() },
     teams,
     virtualKeys,
   };

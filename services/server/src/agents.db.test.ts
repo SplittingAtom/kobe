@@ -39,10 +39,10 @@ const definition = (name: string, prompt = `You are ${name}.`) => ({
   prompt,
 });
 
-type Person = "owner" | "installAdmin" | "alice" | "bob" | "carol" | "dave";
+type Person = "owner" | "siteAdmin" | "alice" | "bob" | "carol" | "dave";
 // Finance: alice team_admin, bob builder, carol member, dave builder.
 // Marketing: carol member, dave builder.
-const PEOPLE: readonly Person[] = ["owner", "installAdmin", "alice", "bob", "carol", "dave"];
+const PEOPLE: readonly Person[] = ["owner", "siteAdmin", "alice", "bob", "carol", "dave"];
 const ids = {} as Record<Person, string>;
 const as = {} as Record<Person, TestBrowser>;
 const finance = randomUUID();
@@ -70,10 +70,10 @@ beforeAll(async () => {
   });
   app = createApp(deps);
   for (const who of PEOPLE) {
-    const installRole = who === "owner" ? "owner" : who === "installAdmin" ? "admin" : undefined;
+    const siteRole = who === "owner" ? "owner" : who === "siteAdmin" ? "admin" : undefined;
     const user = await deps.createUserWithPassword(
       { email: `${who}@agents.test`, name: who, password: PASSWORD },
-      installRole ? { installRole } : {},
+      siteRole ? { siteRole } : {},
     );
     ids[who] = user.id;
   }
@@ -457,8 +457,8 @@ describe("team walls and personal agents (D5, D6, D9)", () => {
     }
   });
 
-  it("refuses team routes to install admins who aren't members", async () => {
-    expect((await as.installAdmin.get("/v1/agents")).json.code).toBe("no_active_team");
+  it("refuses team routes to site admins who aren't members", async () => {
+    expect((await as.siteAdmin.get("/v1/agents")).json.code).toBe("no_active_team");
   });
 });
 
@@ -470,18 +470,18 @@ describe("gallery (D19, D21)", () => {
       { key: "release-notes-writer", generation: 1, file: SPEC_EXAMPLE },
     ]);
     galleryId = seeded?.agentId ?? "";
-    const plain = await as.bob.post("/v1/install/gallery/agents", definition("Rogue"));
+    const plain = await as.bob.post("/v1/site/gallery/agents", definition("Rogue"));
     expect(plain.status).toBe(403);
-    const res = await as.installAdmin.post("/v1/install/gallery/agents", markdown(SPEC_EXAMPLE));
+    const res = await as.siteAdmin.post("/v1/site/gallery/agents", markdown(SPEC_EXAMPLE));
     expect(res.status).toBe(405);
-    const list = await as.owner.get("/v1/install/gallery/agents");
+    const list = await as.owner.get("/v1/site/gallery/agents");
     expect(list.json.agents.map((a: { id: string }) => a.id)).toContain(galleryId);
-    const exported = await as.installAdmin.get(`/v1/install/gallery/agents/${galleryId}/export`);
+    const exported = await as.siteAdmin.get(`/v1/site/gallery/agents/${galleryId}/export`);
     expect(exported.text).toMatch(/^---\nname: Release Notes Writer\n/);
   });
 
-  it("refuses gallery reads and writes to non-admins on the install route", async () => {
-    const base = `/v1/install/gallery/agents/${galleryId}`;
+  it("refuses gallery reads and writes to non-admins on the site route", async () => {
+    const base = `/v1/site/gallery/agents/${galleryId}`;
     for (const who of ["alice", "bob", "carol"] as const) {
       expect((await as[who].put(base, definition("X"), ANY)).status).toBe(403);
       expect((await as[who].delete(base)).status).toBe(403);

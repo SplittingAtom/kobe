@@ -23,7 +23,7 @@ import {
 import { runWithAuditContext } from "../audit/context.js";
 
 /**
- * install_agents has no RLS backstop (install-wide, D6), so the owner filter in the store is the
+ * install_agents has no RLS backstop (site-wide, D6), so the owner filter in the store is the
  * only wall between users' personal agents. Every store function, given a personal location, must
  * apply it, and must refuse a location without an owner.
  */

@@ -108,7 +108,7 @@ interface DeliverOptions {
 
 /**
  * Delivers due budget emails in every context their alerts are visible in (RLS, KOBE-42 review):
- * the install's (no team), then each team's. Never throws; returns how many were sent.
+ * the site's (no team), then each team's. Never throws; returns how many were sent.
  */
 export async function deliverBudgetEmails(options: DeliverOptions): Promise<number> {
   let sent = await deliverIn(options, null);

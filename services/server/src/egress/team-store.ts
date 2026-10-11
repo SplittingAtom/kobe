@@ -15,12 +15,12 @@ import { lockPattern, settlePending } from "./request-store.js";
 
 /**
  * Team egress enablement (spec D6, D28; `/v1/team/egress`): team admins enable domains within the
- * install ceiling. Nothing is enabled by default ("fresh installs reach nothing").
+ * site ceiling. Nothing is enabled by default ("fresh installs reach nothing").
  */
 export interface TeamEgressEntry {
   readonly domain: string;
   readonly preset: EgressPreset | null;
-  /** In the install ceiling now (enablement only takes effect while it is). */
+  /** In the site ceiling now (enablement only takes effect while it is). */
   readonly in_ceiling: boolean;
   /** Shared hosting / CDN: domain fronting can reach other sites behind it (see ceiling-store). */
   readonly shared_hosting: boolean;
@@ -34,7 +34,7 @@ export interface TeamEgressEntry {
 
 /**
  * Every ceiling domain with the team's choice, plus enabled domains that left the ceiling (shown
- * as suspended). The ceiling is install-wide; the team's rows are read under its RLS.
+ * as suspended). The ceiling is site-wide; the team's rows are read under its RLS.
  */
 export async function listTeamEgress(db: KobeDb, teamId: string): Promise<TeamEgressEntry[]> {
   const [ceiling, enabled] = await Promise.all([

@@ -23,7 +23,7 @@ mode and in scheduled runs nothing asks: a call that would ask is denied instead
 the audit log bound them (D29). To ask for them, a team admin adds an ask rule, for example
 `{"effect": "ask", "tool_glob": "bash"}` in `POST /v1/team/policy/rules`, or a site admin adds
 one to the site floor. The site switch `promptSandboxWrites` (`PUT
-/v1/install/policy/settings`, default `false`) is the explicit opt-in to prompting every sandbox
+/v1/site/policy/settings`, default `false`) is the explicit opt-in to prompting every sandbox
 write. Kobe seeds no rules.
 
 ## The flow

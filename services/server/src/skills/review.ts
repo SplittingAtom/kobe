@@ -83,7 +83,7 @@ export interface ReviewRecord {
   readonly reviewedBy: string | null;
   readonly reviewedAt: Date | null;
   readonly reviewNote: string | null;
-  /** The bundle hash is on the install blocklist (KOBE-81): it can't be approved. */
+  /** The bundle hash is on the site blocklist (KOBE-81): it can't be approved. */
   readonly blocked: boolean;
 }
 

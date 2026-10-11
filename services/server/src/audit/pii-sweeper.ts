@@ -41,7 +41,7 @@ async function sweepPage(db: KobeDb, pageSize: number): Promise<AuditPiiErasure 
 }
 
 /**
- * Erases the client IP and user agent of audit rows older than the install's retention period
+ * Erases the client IP and user agent of audit rows older than the site's retention period
  * (default 12 h) that no legal hold covers (KOBE-17; user decision 2026-10-03). Rows are kept;
  * the chain still verifies. Safe on every replica: a try-lock lets one sweep at a time, and the
  * database re-checks age, hold and version for every row.

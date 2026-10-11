@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AuthVariables } from "../auth/session.js";
-import { requireInstallPermission } from "../authz/middleware.js";
+import { requireSitePermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import {
   addBlocked,
@@ -24,14 +24,14 @@ const entryJson = (e: { contentHash: string; reason: string; addedBy: string; ad
 });
 
 /**
- * The install skill blocklist (`/v1/install/skill-blocklist`, spec D22, KOBE-81): bundle hashes
- * that can't be uploaded, approved or run in any team. Install Owner/Admins only; every change is
+ * The site skill blocklist (`/v1/site/skill-blocklist`, spec D22, KOBE-81): bundle hashes
+ * that can't be uploaded, approved or run in any team. Site Owner/Admins only; every change is
  * audited (hash only, never bundle content).
  */
-export function installSkillBlocklistRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
+export function siteSkillBlocklistRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
   const db = deps.database.db;
-  app.use(requireInstallPermission("install.blocklist.manage"));
+  app.use(requireSitePermission("site.blocklist.manage"));
 
   app.get("/", async (c) => {
     const limit = limitSchema.safeParse(c.req.query("limit") ?? 50);

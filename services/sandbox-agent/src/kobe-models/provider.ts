@@ -49,7 +49,7 @@ const NO_FAILURE: Failure = { status: undefined, code: undefined, retryAfterMs: 
 
 /**
  * What a model gets when the server sent no limits (an older server): the values every model had
- * before KOBE-259. A current server always sends the catalog's values or the install defaults.
+ * before KOBE-259. A current server always sends the catalog's values or the site defaults.
  */
 export const DEFAULT_MAX_OUTPUT_TOKENS = 16_384;
 export const DEFAULT_CONTEXT_WINDOW = 128_000;
@@ -104,7 +104,7 @@ export function kobeModel(gatewayUrl: string, model: ModelFileModel): Model {
     reasoning: api !== "openai-completions",
     input: ["text", "image"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    // KOBE-259: the catalog's limits (or the install defaults), resolved by the server. Pi sends
+    // KOBE-259: the catalog's limits (or the site defaults), resolved by the server. Pi sends
     // `maxTokens` as each call's `max_tokens`, clamped to what the window leaves after the input.
     contextWindow: model.context_window ?? DEFAULT_CONTEXT_WINDOW,
     maxTokens: model.max_output_tokens ?? DEFAULT_MAX_OUTPUT_TOKENS,

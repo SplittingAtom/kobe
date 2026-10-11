@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AuthVariables } from "../auth/session.js";
-import { requireInstallPermission } from "../authz/middleware.js";
+import { requireSitePermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { notifyAllTeams } from "../retention/notify.js";
 import { retentionPeriodSchema } from "../retention/periods.js";
@@ -10,15 +10,15 @@ import { cancelMaximumPending, readMaximum, setMaximum } from "../retention/sett
 const bodySchema = z.strictObject({ maximum: retentionPeriodSchema });
 
 /**
- * The install's retention maximum (`/v1/install/retention`, spec D6, D8, D18): the longest period
+ * The site's retention maximum (`/v1/site/retention`, spec D6, D8, D18): the longest period
  * any team may keep threads (default forever). Lowering it applies after a 7-day grace period
  * (cancellable; the admins of every team it shortens are emailed), raising it at once; team
  * choices are kept. Audited (`retention.maximum.changed`, `.change_cancelled`).
  */
-export function installRetentionRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
+export function siteRetentionRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
   const db = deps.database.db;
-  app.use(requireInstallPermission("install.retention.manage"));
+  app.use(requireSitePermission("site.retention.manage"));
 
   app.get("/", async (c) => c.json({ ...(await readMaximum(db)), paused: deps.retentionPaused }));
 

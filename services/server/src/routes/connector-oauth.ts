@@ -29,7 +29,7 @@ function flowDeps(deps: ServerDeps): OauthFlowDeps | undefined {
  *
  * POST /{connector_id}/oauth/start → 200 `{authorization_url}`: send the browser there. 404 not
  *   enabled; 422 `not_oauth` / `oauth_unsupported` / `registration_failed`; 502
- *   `oauth_unreachable`; 503 when the install has no envelope key.
+ *   `oauth_unreachable`; 503 when the site has no envelope key.
  * GET /oauth/callback?code&state&iss → 303 to `/?connector_oauth=connected|failed&connector=<id>`
  *   (`reason` on failure). A state that does not open for this user and team is a 400
  *   `invalid_state` and reveals nothing else.

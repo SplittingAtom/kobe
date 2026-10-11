@@ -21,7 +21,7 @@ import {
 const PUBLIC_URL = "http://kobe.test";
 const PASSWORD = "a long enough password";
 
-const PEOPLE = ["owner", "installAdmin", "alice", "bob", "carol", "dave", "erin"] as const;
+const PEOPLE = ["owner", "siteAdmin", "alice", "bob", "carol", "dave", "erin"] as const;
 type Person = (typeof PEOPLE)[number];
 const ids = Object.fromEntries(PEOPLE.map((p) => [p, ""])) as Record<Person, string>;
 const email = (who: Person) => `${who.toLowerCase()}@threads.test`;
@@ -118,10 +118,10 @@ beforeAll(async () => {
   });
   app = createApp(deps);
   for (const who of PEOPLE) {
-    const installRole = who === "owner" ? "owner" : who === "installAdmin" ? "admin" : undefined;
+    const siteRole = who === "owner" ? "owner" : who === "siteAdmin" ? "admin" : undefined;
     const user = await deps.createUserWithPassword(
       { email: email(who), name: who, password: PASSWORD },
-      installRole ? { installRole } : {},
+      siteRole ? { siteRole } : {},
     );
     ids[who] = user.id;
   }
@@ -130,7 +130,7 @@ beforeAll(async () => {
   ) as Record<Person, TestBrowser>;
 
   const create = async (slug: string, adminUser: Person) => {
-    const res = await as.owner.post("/v1/install/teams", {
+    const res = await as.owner.post("/v1/site/teams", {
       slug,
       name: slug,
       adminUserId: ids[adminUser],
@@ -249,8 +249,8 @@ describe("authorization per role (ac-3)", () => {
     }
   });
 
-  it("refuses install admins who are not members, and users without a team", async () => {
-    for (const who of ["installAdmin", "owner", "erin"] as const) {
+  it("refuses site admins who are not members, and users without a team", async () => {
+    for (const who of ["siteAdmin", "owner", "erin"] as const) {
       const res = await as[who].get("/v1/threads");
       expect(res, who).toMatchObject({ status: 409, json: { code: "no_active_team" } });
       const select = await as[who].put("/v1/me/teams/active", { teamId: finance });

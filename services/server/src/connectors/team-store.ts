@@ -14,7 +14,7 @@ import { recordAudit } from "../audit/record.js";
 
 /**
  * Team connector enablement (spec D27, KOBE-104). Connectors are off by default: no
- * `team_connectors` row = not enabled. A team admin enables an install connector with an
+ * `team_connectors` row = not enabled. A team admin enables a site connector with an
  * exposure (`read_only`: tools with readOnlyHint; `all`; `custom`: a tick list of Pi tool names).
  * The MCP proxy and the run offering read these rows (KOBE-106 enforces them at the proxy).
  */
@@ -101,7 +101,7 @@ export async function setTeamConnector(
   userId: string,
 ): Promise<SetTeamConnectorResult> {
   return withTeam(db, teamId, async (tx) => {
-    // FOR SHARE: the install admin's soft delete / disable waits until this commits.
+    // FOR SHARE: the site admin's soft delete / disable waits until this commits.
     const [row] = await tx
       .select()
       .from(connectors)

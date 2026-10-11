@@ -40,7 +40,7 @@ export const createThreadBodySchema = z.strictObject({
   /**
    * Agent to start with (D19): a team agent of the active team, one of the caller's personal
    * agents, or a gallery agent. The thread pins its current published version. Null or absent =
-   * the install default agent.
+   * the site default agent.
    */
   agent_id: uuidSchema.nullable().optional(),
   /** Project the thread belongs to (D23); private to its author until shared. */

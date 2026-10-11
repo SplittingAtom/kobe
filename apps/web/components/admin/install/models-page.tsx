@@ -10,7 +10,7 @@ import styles from "../admin.module.css";
 
 /**
  * Install console: models and providers (spec D6, D8, D30; KOBE-44 over KOBE-40's
- * `/v1/install/models`). Providers with write-only keys, the catalog, and whether the model
+ * `/v1/site/models`). Providers with write-only keys, the catalog, and whether the model
  * gateway (Bifrost) has caught up with the last change.
  */
 export function InstallModelsPage() {

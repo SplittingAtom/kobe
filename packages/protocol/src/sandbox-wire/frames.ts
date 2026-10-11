@@ -276,7 +276,7 @@ const tokenCount = z.number().int().min(1).max(MODEL_LIMITS_MAX_TOKENS);
 
 /**
  * The run model's token limits (KOBE-259), as the server resolved them: the catalog's values, else
- * the install defaults (reasoning models get a higher output default). The sandbox gives them to
+ * the site defaults (reasoning models get a higher output default). The sandbox gives them to
  * Pi as the model's `maxTokens` (each call's `max_tokens`) and `contextWindow`. A separate key, not
  * part of `model`, because `model` is strict and an older agent must still accept the frame.
  */

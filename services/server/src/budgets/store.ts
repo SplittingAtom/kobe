@@ -21,7 +21,7 @@ import {
 import { recordAudit } from "../audit/record.js";
 
 /**
- * Budgets and rate limits (KOBE-42, spec D6, D8, D30): the install's (install admins) and the
+ * Budgets and rate limits (KOBE-42, spec D6, D8, D30): the site's (site admins) and the
  * team's and members' (team admins), every change audited (`models.budget.changed`) and hinted to
  * the model-gateway shims (`budgets:<team|*>`). A change of the per-user request rate also bumps
  * the gateway's desired version, so the sync pushes the virtual keys' rate limits to Bifrost.
@@ -34,7 +34,7 @@ export interface BudgetAmounts {
   readonly daily_tokens: number | null;
 }
 
-export interface InstallLimitsView extends BudgetAmounts {
+export interface SiteLimitsView extends BudgetAmounts {
   readonly user_requests_per_minute: number;
   readonly updated_at: string;
 }
@@ -57,12 +57,12 @@ export interface MemberBudgetView extends BudgetAmounts {
 export interface TeamBudgetsView {
   readonly period: { readonly month: string; readonly day: string };
   /**
-   * The install budget's limits and how much of it is used, in percent only: the install's spend is
+   * The site budget's limits and how much of it is used, in percent only: the site's spend is
    * every team's together, which a team does not see in dollars.
    */
-  readonly install: {
+  readonly site: {
     readonly user_requests_per_minute: number;
-    /** Null where the install sets no such budget. */
+    /** Null where the site sets no such budget. */
     readonly percent_used: {
       readonly month_usd: number | null;
       readonly day_usd: number | null;
@@ -76,7 +76,7 @@ export interface TeamBudgetsView {
     /** The default budget of every member without one of their own (KOBE-42 review). */
     readonly member_default: BudgetAmounts;
   };
-  /** The per-user request rate members get (the install's, or the team's lower one). */
+  /** The per-user request rate members get (the site's, or the team's lower one). */
   readonly effective_requests_per_minute: number;
   readonly members: readonly MemberBudgetView[];
 }
@@ -86,7 +86,7 @@ type Row = Record<string, unknown>;
 const percentOf = (spent: number, limit: number | null): number | null =>
   limit === null ? null : limit <= 0 ? 100 : Math.min(100, Math.round((spent / limit) * 100));
 
-export async function getInstallLimits(db: KobeDb | KobeTx): Promise<InstallLimitsView> {
+export async function getSiteLimits(db: KobeDb | KobeTx): Promise<SiteLimitsView> {
   const [row] = await db.select().from(installModelLimits).where(eq(installModelLimits.id, 1));
   return {
     monthly_usd: row?.monthlyUsd ?? null,
@@ -98,7 +98,7 @@ export async function getInstallLimits(db: KobeDb | KobeTx): Promise<InstallLimi
   };
 }
 
-export interface InstallLimitsInput {
+export interface SiteLimitsInput {
   readonly monthly_usd?: number | null | undefined;
   readonly daily_usd?: number | null | undefined;
   readonly monthly_tokens?: number | null | undefined;
@@ -108,13 +108,13 @@ export interface InstallLimitsInput {
 
 const pick = <T>(next: T | undefined, before: T): T => (next === undefined ? before : next);
 
-export async function setInstallLimits(
+export async function setSiteLimits(
   db: KobeDb,
-  input: InstallLimitsInput,
+  input: SiteLimitsInput,
   actorId: string,
-): Promise<InstallLimitsView> {
+): Promise<SiteLimitsView> {
   return db.transaction(async (tx) => {
-    const before = await getInstallLimits(tx);
+    const before = await getSiteLimits(tx);
     const next = {
       monthlyUsd: pick(input.monthly_usd, before.monthly_usd),
       dailyUsd: pick(input.daily_usd, before.daily_usd),
@@ -139,7 +139,7 @@ export async function setInstallLimits(
         requestsPerMinute: next.userRequestsPerMinute,
       },
     });
-    return getInstallLimits(tx);
+    return getSiteLimits(tx);
   });
 }
 
@@ -178,8 +178,8 @@ export async function teamBudgetsView(
 ): Promise<TeamBudgetsView> {
   const starts = periodStarts(now);
   return withTeam(db, teamId, async (tx) => {
-    const install = await getInstallLimits(tx);
-    const installSpend = spendView(
+    const site = await getSiteLimits(tx);
+    const siteSpend = spendView(
       (
         await tx.execute<Row>(sql`
           SELECT ${SPEND(starts)} FROM install_model_spend_daily
@@ -222,13 +222,13 @@ export async function teamBudgetsView(
     const teamRpm = team?.rpm ?? null;
     return {
       period: starts,
-      install: {
-        user_requests_per_minute: install.user_requests_per_minute,
+      site: {
+        user_requests_per_minute: site.user_requests_per_minute,
         percent_used: {
-          month_usd: percentOf(installSpend.month_usd, install.monthly_usd),
-          day_usd: percentOf(installSpend.day_usd, install.daily_usd),
-          month_tokens: percentOf(installSpend.month_tokens, install.monthly_tokens),
-          day_tokens: percentOf(installSpend.day_tokens, install.daily_tokens),
+          month_usd: percentOf(siteSpend.month_usd, site.monthly_usd),
+          day_usd: percentOf(siteSpend.day_usd, site.daily_usd),
+          month_tokens: percentOf(siteSpend.month_tokens, site.monthly_tokens),
+          day_tokens: percentOf(siteSpend.day_tokens, site.daily_tokens),
         },
       },
       team: {
@@ -246,8 +246,8 @@ export async function teamBudgetsView(
         },
       },
       effective_requests_per_minute: Math.min(
-        install.user_requests_per_minute,
-        teamRpm ?? install.user_requests_per_minute,
+        site.user_requests_per_minute,
+        teamRpm ?? site.user_requests_per_minute,
       ),
       members: members.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")),
     };
@@ -259,7 +259,7 @@ export interface TeamBudgetInput {
   readonly daily_usd?: number | null | undefined;
   readonly monthly_tokens?: number | null | undefined;
   readonly daily_tokens?: number | null | undefined;
-  /** Null: use the install's rate. */
+  /** Null: use the site's rate. */
   readonly user_requests_per_minute?: number | null | undefined;
   /** Every member without a budget of their own (fields left out keep their value). */
   readonly member_default?:
@@ -406,7 +406,7 @@ export interface BudgetStatusLine {
   readonly scope: BudgetLine["scope"];
   readonly period: BudgetLine["period"];
   readonly unit: BudgetLine["unit"];
-  /** In `unit`; null for the install budget (its spend is every team's together). */
+  /** In `unit`; null for the site budget (its spend is every team's together). */
   readonly limit: number | null;
   readonly spent: number | null;
   readonly percent: number;

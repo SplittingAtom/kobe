@@ -9,7 +9,7 @@ import { resolveEffective } from "./resolver/resolve.js";
 import { buildResolveInput, loadSkillFacts, loadTeamFacts } from "./runs/resolver-input.js";
 
 /**
- * Install skill blocklist (KOBE-81, D22): a blocklisted bundle hash can't be uploaded, can't be
+ * Site skill blocklist (KOBE-81, D22): a blocklisted bundle hash can't be uploaded, can't be
  * approved by a team's review queue, and is dropped at every run start in every team, the moment
  * it is listed (nothing is cached).
  */
@@ -28,7 +28,7 @@ const id = (who: string): string => {
   return v;
 };
 let h: Harness;
-const BASE = "/v1/install/skill-blocklist";
+const BASE = "/v1/site/skill-blocklist";
 
 const zipOf = (name: string, note = "body") =>
   new RawBody(
@@ -225,7 +225,7 @@ describe("run start", () => {
 });
 
 describe("management API", () => {
-  it("is for install admins only", async () => {
+  it("is for site admins only", async () => {
     for (const who of ["alice", "bob"]) {
       expect((await as(who).get(BASE)).status).toBe(403);
       expect((await as(who).post(BASE, { contentHash: "a".repeat(64), reason: "x" })).status).toBe(

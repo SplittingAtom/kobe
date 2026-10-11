@@ -18,7 +18,7 @@ import { toolDescriptorSchema } from "./tools.js";
  * schedules (KOBE-65) run in `auto` mode.
  *
  * Evaluation order (D29):
- *   install deny → team deny → install/team ask → risk class → thread approval mode →
+ *   site deny → team deny → site/team ask → risk class → thread approval mode →
  *   user allow rules → prompt
  * Reading of that order used by this contract (KOBE-35 to confirm): a matching deny rule decides
  * `deny`; a matching ask rule decides `require_approval` (user allow rules cannot remove it); risk
@@ -49,7 +49,7 @@ export const policyInputSchema = z
     }),
     team_id: uuidSchema,
     agent: z.strictObject({
-      /** Null (with `version`) = the install default agent (threads.agent_id is nullable). */
+      /** Null (with `version`) = the site default agent (threads.agent_id is nullable). */
       agent_id: uuidSchema.nullable(),
       version: z.number().int().positive().nullable(),
       /** Agent frontmatter `tools.allow` / `tools.deny` (D19), glob grammar. */

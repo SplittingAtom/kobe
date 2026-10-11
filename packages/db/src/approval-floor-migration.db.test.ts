@@ -5,7 +5,7 @@ import pg from "pg";
 import { afterAll, beforeEach, describe, expect, inject, it } from "vitest";
 
 /**
- * The approval-floor unification (one install key, no team floor; spec D6) re-run against seeded
+ * The approval-floor unification (one site key, no team floor; spec D6) re-run against seeded
  * rows: the migration is plain idempotent SQL, so running it again after seeding shows what it
  * does to an install that had either key or a team floor.
  */
@@ -48,7 +48,7 @@ describe("approval floor unification migration", () => {
     ],
     // Unreadable values fail closed (the strictest mode), as both readers did.
     [{ "policy.approval_mode_floor": "yolo" }, "ask-all"],
-  ] as const)("moves %o into one install key (stricter wins)", async (seeded, expected) => {
+  ] as const)("moves %o into one site key (stricter wins)", async (seeded, expected) => {
     await seed(seeded);
     await owner.query(migrationSql);
     expect(await floors()).toEqual({ "policy.approval_floor": expected });

@@ -13,7 +13,7 @@ import { snapshotHash } from "./pin.js";
  * - a drifted tool whose live definition equals the approved one again: `pinned` again.
  *
  * `drifted` tools are never offered or callable (catalog, policy gate, proxy), so a change takes
- * effect as "disabled" until an install admin approves it.
+ * effect as "disabled" until a site admin approves it.
  */
 export interface DriftResult {
   readonly tools: PinnedTool[];

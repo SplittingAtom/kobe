@@ -33,16 +33,16 @@ function stubApi(routes: Record<string, [number, unknown?]>) {
 
 afterEach(() => vi.unstubAllGlobals());
 
-const me = (installRole: string | null) => ({
+const me = (siteRole: string | null) => ({
   user: { id: "u-1", name: "Ada", email: "a@x.io", twoFactorEnabled: false },
-  installRole,
+  siteRole,
 });
 
 describe("console access", () => {
   it("reads the install role from /v1/me; null is a plain user", async () => {
     stubApi({ "GET /v1/me": [200, me(null)] });
     const res = await fetchInstallAccess();
-    expect(res).toMatchObject({ ok: true, data: { console: "install", installRole: "user" } });
+    expect(res).toMatchObject({ ok: true, data: { console: "install", siteRole: "user" } });
   });
 
   it("reads team role and permissions from /v1/team", async () => {
@@ -82,60 +82,45 @@ describe("console access", () => {
 
 describe("install resources call the right routes", () => {
   it.each([
-    ["listUsers", () => users.listUsers(), "GET /v1/install/users", { users: [] }],
+    ["listUsers", () => users.listUsers(), "GET /v1/site/users", { users: [] }],
     [
       "deactivate",
       () => users.setUserActive("u 2", false),
-      "POST /v1/install/users/u%202/deactivate",
+      "POST /v1/site/users/u%202/deactivate",
       {},
     ],
-    [
-      "reactivate",
-      () => users.setUserActive("u2", true),
-      "POST /v1/install/users/u2/reactivate",
-      {},
-    ],
+    ["reactivate", () => users.setUserActive("u2", true), "POST /v1/site/users/u2/reactivate", {}],
     [
       "listInvites",
       () => invites.listInstallInvites(),
-      "GET /v1/install/invites",
+      "GET /v1/site/invites",
       { invitations: [] },
     ],
-    ["invite", () => invites.createInstallInvite("b@x.io"), "POST /v1/install/invites", {}],
-    ["resend", () => invites.resendInstallInvite("i1"), "POST /v1/install/invites/i1/resend", {}],
-    ["revoke", () => invites.revokeInstallInvite("i1"), "DELETE /v1/install/invites/i1", undefined],
-    ["roles", () => roles.listInstallRoles(), "GET /v1/install/roles", { roles: [] }],
-    ["grant", () => roles.setInstallRole("u2", "admin"), "PUT /v1/install/roles/u2", {}],
-    [
-      "transfer",
-      () => roles.transferOwnership("u2"),
-      "POST /v1/install/roles/transfer-ownership",
-      {},
-    ],
-    ["teams", () => teams.listInstallTeams(), "GET /v1/install/teams", { teams: [] }],
+    ["invite", () => invites.createInstallInvite("b@x.io"), "POST /v1/site/invites", {}],
+    ["resend", () => invites.resendInstallInvite("i1"), "POST /v1/site/invites/i1/resend", {}],
+    ["revoke", () => invites.revokeInstallInvite("i1"), "DELETE /v1/site/invites/i1", undefined],
+    ["roles", () => roles.listInstallRoles(), "GET /v1/site/roles", { roles: [] }],
+    ["grant", () => roles.setInstallRole("u2", "admin"), "PUT /v1/site/roles/u2", {}],
+    ["transfer", () => roles.transferOwnership("u2"), "POST /v1/site/roles/transfer-ownership", {}],
+    ["teams", () => teams.listInstallTeams(), "GET /v1/site/teams", { teams: [] }],
     [
       "createTeam",
       () => teams.createTeam({ slug: "fin", name: "Finance", adminUserId: "u2" }),
-      "POST /v1/install/teams",
+      "POST /v1/site/teams",
       { team: {} },
     ],
-    ["rename", () => teams.renameTeam("t1", "Fin"), "PATCH /v1/install/teams/t1", { team: {} }],
-    ["roster", () => teams.teamRoster("t1"), "GET /v1/install/teams/t1/members", { members: [] }],
-    ["settings", () => settings.getInstallSettings(), "GET /v1/install/settings", {}],
+    ["rename", () => teams.renameTeam("t1", "Fin"), "PATCH /v1/site/teams/t1", { team: {} }],
+    ["roster", () => teams.teamRoster("t1"), "GET /v1/site/teams/t1/members", { members: [] }],
+    ["settings", () => settings.getInstallSettings(), "GET /v1/site/settings", {}],
     [
       "putSettings",
       () => settings.putInstallSettings({ requireTwoFactor: true }),
-      "PUT /v1/install/settings",
+      "PUT /v1/site/settings",
       {},
     ],
-    ["isolation", () => isolation.getIsolation(), "GET /v1/install/isolation", {}],
-    ["recheck", () => isolation.recheckIsolation(), "POST /v1/install/isolation/check", {}],
-    [
-      "gallery",
-      () => gallery.listGalleryAgents(),
-      "GET /v1/install/gallery/agents",
-      { agents: [] },
-    ],
+    ["isolation", () => isolation.getIsolation(), "GET /v1/site/isolation", {}],
+    ["recheck", () => isolation.recheckIsolation(), "POST /v1/site/isolation/check", {}],
+    ["gallery", () => gallery.listGalleryAgents(), "GET /v1/site/gallery/agents", { agents: [] }],
   ] as const)("%s", async (_name, call, route, body) => {
     const calls = stubApi({ [route]: [200, body] });
     const res = await call();
@@ -148,8 +133,8 @@ describe("install resources call the right routes", () => {
 
   it("sends wire bodies the server's strict schemas accept", async () => {
     const calls = stubApi({
-      "POST /v1/install/teams": [201, { team: { id: "t", slug: "fin", name: "Finance" } }],
-      "PUT /v1/install/roles/u2": [200, {}],
+      "POST /v1/site/teams": [201, { team: { id: "t", slug: "fin", name: "Finance" } }],
+      "PUT /v1/site/roles/u2": [200, {}],
     });
     await teams.createTeam({ slug: "fin", name: "Finance", adminUserId: "u2" });
     await roles.setInstallRole("u2", "user");
@@ -162,7 +147,7 @@ describe("install resources call the right routes", () => {
   });
 
   it("unwraps list envelopes", async () => {
-    stubApi({ "GET /v1/install/users": [200, { users: [{ id: "u", deactivated_at: null }] }] });
+    stubApi({ "GET /v1/site/users": [200, { users: [{ id: "u", deactivated_at: null }] }] });
     expect(await users.listUsers()).toMatchObject({
       ok: true,
       data: [{ id: "u", deactivatedAt: null }],

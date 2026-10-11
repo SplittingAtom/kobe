@@ -1,7 +1,7 @@
-/** Install console: connector registry (`/v1/install/connectors`, install.connectors.manage; KOBE-100). */
+/** Install console: connector registry (`/v1/site/connectors`, install.connectors.manage; KOBE-100). */
 import { apiRequest, type ApiResult } from "../../../api/client";
 
-const BASE = "/v1/install/connectors";
+const BASE = "/v1/site/connectors";
 
 export type ConnectorAuthKind = "none" | "api_key" | "oauth";
 export type ConnectorStatus = "active" | "disabled";
