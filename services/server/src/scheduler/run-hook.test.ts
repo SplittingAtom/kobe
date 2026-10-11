@@ -3,7 +3,13 @@ import type { RunTransition, RunTransitionListener } from "@kobe/protocol";
 import { onScheduledRunEnded } from "./run-hook.js";
 
 const transition = (trigger: "user" | "schedule", to: string) =>
-  ({ run: { trigger }, from: "running", to, cause: "settled", at: "x" }) as unknown as RunTransition;
+  ({
+    run: { trigger },
+    from: "running",
+    to,
+    cause: "settled",
+    at: "x",
+  }) as unknown as RunTransition;
 
 describe("onScheduledRunEnded", () => {
   it("calls the listener for terminal transitions of scheduled runs only", () => {
