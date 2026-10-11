@@ -39,9 +39,9 @@ export const FAILURE_MESSAGES: Readonly<Record<string, string>> = {
   // KOBE-42: the gateway refused a model call because a budget is used up.
   model_budget_exhausted:
     "The model budget is used up, so the model call was refused. Ask your team admin about the budget.",
-  // KOBE-259: a budget's limit is below one call's cost (input + output limit): final, no retry.
+  // KOBE-259: the request's input alone exceeds a budget's limit: final, no retry.
   model_budget_too_small:
-    "The budget is smaller than one call to this model (its input plus its output limit), so the call was refused. Ask your team admin to raise the budget, or your site admin to lower the model's output limit.",
+    "The request's input is larger than the whole budget, so the model call was refused. Ask your team admin to raise the budget, or start a new conversation with less context.",
   // KOBE-258: the last model step stopped at the model's output limit (`stopReason: "length"`).
   model_output_limit:
     "The model hit its output limit before it finished, so its reply is incomplete. Ask for a shorter answer, or for the work to be written to files in smaller steps.",

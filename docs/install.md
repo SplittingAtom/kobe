@@ -411,9 +411,9 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
   members see a banner in the chat; at 100 % the model-gateway shim refuses new model calls (402
   `budget_exhausted`), new runs are refused (429 `budget_exhausted`), and running ones finish
   their current step and end `budget_stopped`, pending approvals expire; audited
-  `models.budget.reached`. A budget whose limit is smaller than one call (its input estimate plus
-  the model's output limit) refuses that call at once (402 `budget_below_call`, the run fails
-  `model_budget_too_small`): raise the budget or lower the model's output limit. Calls in flight are never cut; each shim replica reserves what an
+  `models.budget.reached`. A request whose input estimate alone exceeds a budget's limit is
+  refused at once (402 `budget_below_call`, the run fails `model_budget_too_small`). A budget below
+  one call's output allowance is fine: a call alone is admitted and may overshoot by that call. Calls in flight are never cut; each shim replica reserves what an
   admitted call may cost until its usage row lands (a member's reservations hold at most a quarter
   of what is left of a shared budget), so on one replica a budget is exceeded by at most the last admitted call plus estimation
   error. Replicas do not share reservations: with several, simultaneous calls can overshoot by up

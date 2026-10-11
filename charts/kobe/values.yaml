@@ -161,8 +161,8 @@ server:
   # a provider refuses calls above its own, so set the model's limits there when it allows less.
   # Each model call's budget reservation holds the output limit while the call runs, and a call
   # that is stopped or cut off without a usage report is charged the full output limit (hidden
-  # reasoning is never seen), so a higher limit makes interrupted calls cost more. A budget whose
-  # limit is below one call (input plus output limit) refuses that model's calls outright.
+  # reasoning is never seen), so a higher limit makes interrupted calls cost more. A budget below
+  # one call's output limit still serves calls (a call alone is admitted and may overshoot).
   modelDefaults:
     # Models that answer directly: what every model got before KOBE-259 (256..131072).
     maxOutputTokens: 16384

@@ -41,16 +41,19 @@
   clamped to window - input - 4,096 (pi-ai `clampMaxTokensToContext`).
 - **Gateway.** Reservation already used the request's cap; its ceiling
   (`MAX_CHARGED_OUTPUT_TOKENS`) was 65,536 and is now the catalog ceiling 131,072, so any configured
-  limit is reserved in full. ac-4 "a budget smaller than one call's allowance" means (review M1):
-  a budget whose **limit** (not what is left) is below one call's cost (input estimate + output
-  allowance) refuses every such call at once, alone or not: 402 `budget_below_call`, run error
-  `model_budget_too_small`, message naming the cause and the fix. Deterministic, no concurrency
-  involved. Every other budget keeps the old rules exactly: a lone call is admitted, overlapping
-  calls get 429 and retry, exhaustion ends `budget_stopped`.
-- **E2E adapted to that rule.** Gate 2 used $0.01 budgets (below one call): now $1,000, and the fake
-  model's tool step reports a 1,000,000-token prompt ($10,000 at the e2e price), so the step still
-  uses the budget up (run.sh, gate2.sh ac-1, docs/gates/gate-2.md). KOBE-121 replicas: the member
-  first spends 4 calls so its limit (spent + 1) is above one call (~25 tokens); checks unchanged.
+  limit is reserved in full. ac-4 "a budget smaller than one call fails clearly" means (review
+  rounds 1 and 2): a request whose **input estimate alone** exceeds a budget's **limit** (not what
+  is left) is refused at once, alone or not: 402 `budget_below_call`, run error
+  `model_budget_too_small`, message "the request's input is larger than the whole budget".
+  Comparing the full allowance refused modest budgets outright (20,000 tokens/day, $1/day at
+  $75/M output), a regression. A budget below one call's output allowance behaves exactly as
+  before: a lone call is admitted and may overshoot, overlapping calls get 429 and retry,
+  exhaustion ends `budget_stopped`.
+- **E2E still adapted to that rule.** Gate 2's $0.01 budget is below Pi's prompt as input (about
+  10k tokens, ~$100 at the e2e price), so it would now be refused: the budget is $1,000 and the fake
+  model's tool step reports a 1,000,000-token prompt so the step still uses it up (run.sh, gate2.sh
+  ac-1, docs/gates/gate-2.md). KOBE-121 replicas: limit = spent today + 1 is below one request's
+  input (~22 tokens) when the member spent little, so the member first spends 4 calls.
 - **Charges on interrupted calls (review L1).** A call stopped or cut off without a usage report is
   charged at least its output allowance (existing policy: hidden reasoning is never seen), which is
   now the model's limit: 2x for the reasoning default, up to 8x for a 131,072 admin limit. Documented

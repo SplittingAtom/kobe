@@ -58,8 +58,8 @@ _Filled in from the CI run and the real-cluster run; see the end of this file._
 
 ## ac-1 Budget at 100%: the step in flight finishes, then `run.budget_stopped`
 
-**Scenario.** The team admin sets a $1,000 monthly budget (`KOBE_GATE2_BUDGET_USD`; above one
-call's reservation, since a budget below one call refuses it outright, KOBE-259); the member sends a
+**Scenario.** The team admin sets a $1,000 monthly budget (`KOBE_GATE2_BUDGET_USD`; above the cost of
+Pi's prompt as input, since a request whose input exceeds the budget is refused outright, KOBE-259); the member sends a
 prompt that makes the model call `bash` (`sleep 3; echo step-done`). The fake model reports a
 1,000,000-token prompt for that call, so that one model call costs more than the budget.
 

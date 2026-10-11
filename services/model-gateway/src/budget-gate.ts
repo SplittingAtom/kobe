@@ -24,11 +24,11 @@ import type { CallContext, CallGate, GateDecision } from "./seams.js";
  *   call. Reservations live in a {@link ReservationStore}: Postgres in production (KOBE-120:
  *   shared by all replicas, atomic against the budget, each with an expiry so a crashed
  *   replica's reservations free themselves), memory for tests.
- * - **A budget limit below one call** (KOBE-259): a call whose cost alone (input estimate plus
- *   output allowance, i.e. the model's output limit) exceeds a budget's limit itself (not what is
- *   left) could never run within it, so it is refused at once, alone or not, with a final 402
- *   `budget_below_call` that names the fix (raise the budget or lower the model's output limit).
- *   Every other budget keeps the rules above: a lone call is admitted, overlapping calls wait.
+ * - **A request larger than the whole budget** (KOBE-259): a call whose input estimate alone (with
+ *   no output at all) exceeds a budget's limit itself (not what is left) could never fit, so it is
+ *   refused at once, alone or not, with a final 402 `budget_below_call`. A budget below one call's
+ *   output allowance is fine: the rules above apply unchanged (a lone call is admitted and may
+ *   overshoot, overlapping calls wait).
  * - More requests than the member's per-minute rate (the install's, or the team's lower one): 429
  *   `rate_limited` with Retry-After. A token bucket per member per shim replica; Bifrost's
  *   virtual-key rate limit is the install-wide backstop.
@@ -58,9 +58,10 @@ export function budgetMessage(line: BudgetLine): string {
   return `${budgetName(line)} is used up.`;
 }
 
-/** KOBE-259: the budget's limit is below one call's cost; waiting cannot help. */
+/** KOBE-259: the request's input alone exceeds the budget's limit; waiting cannot help. */
 export function budgetBelowCallMessage(line: BudgetLine): string {
-  return `${budgetName(line)} is smaller than one call to this model (its input plus its output limit). Ask an admin to raise the budget or lower the model's output limit.`;
+  const name = budgetName(line);
+  return `This request's input is larger than ${name.charAt(0).toLowerCase()}${name.slice(1)} in total. Ask an admin to raise the budget, or start a new conversation with less context.`;
 }
 
 interface Bucket {
@@ -131,8 +132,8 @@ export class BudgetGate implements CallGate {
     if (used) {
       return { ok: false, status: 402, code: "budget_exhausted", message: budgetMessage(used) };
     }
-    const cost = this.costOf(call, prices);
-    const below = state.lines.find((l) => cost[l.unit] > l.limit);
+    const input = this.inputCostOf(call, prices);
+    const below = state.lines.find((l) => input[l.unit] > l.limit);
     if (below) {
       return {
         ok: false,
@@ -160,7 +161,7 @@ export class BudgetGate implements CallGate {
         teamId: call.teamId,
         userId: call.userId,
         callId,
-        cost,
+        cost: this.costOf(call, prices),
         lines: state.lines,
       });
     } catch (err) {
@@ -195,6 +196,13 @@ export class BudgetGate implements CallGate {
       };
     }
     return { ok: true, release: this.releaser(call, callId) };
+  }
+
+  /** The call's input alone, at no output (KOBE-259 `budget_below_call`). */
+  private inputCostOf(call: CallContext, prices: ReadonlyMap<string, ModelPrice>): Cost {
+    const input = call.inputEstimate ?? 0;
+    const price = call.model ? prices.get(call.model) : undefined;
+    return { tokens: input, usd: price ? (input * price.input) / 1_000_000 : 0 };
   }
 
   private costOf(call: CallContext, prices: ReadonlyMap<string, ModelPrice>): Cost {

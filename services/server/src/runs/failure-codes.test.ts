@@ -9,11 +9,11 @@ describe("run failure messages", () => {
     }
   });
 
-  it("tells the user how to fix a budget below one model call (KOBE-259)", () => {
+  it("tells the user how to fix a request larger than the budget (KOBE-259)", () => {
     expect(failureInfo("model_budget_too_small", "model_error")).toEqual({
       code: "model_budget_too_small",
       message:
-        "The budget is smaller than one call to this model (its input plus its output limit), so the call was refused. Ask your team admin to raise the budget, or your site admin to lower the model's output limit.",
+        "The request's input is larger than the whole budget, so the model call was refused. Ask your team admin to raise the budget, or start a new conversation with less context.",
     });
   });
 });

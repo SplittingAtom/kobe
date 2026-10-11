@@ -223,8 +223,9 @@ if [[ "$STEPS" == *" budget "* ]]; then
     started=$(server_now)
     priced=$(step price "\"alias\":\"$MODEL_ALIAS\",\"action\":\"set\"")
     contains "the catalog model has a price (set only when it had none)" '^price=(set:200|kept)$' "$priced"
-    # Above one call's reservation (KOBE-259: a smaller budget refuses the call outright); the fake
-    # model's tool step reports a 1,000,000-token prompt ($10,000 at the e2e price), using it up.
+    # Above the request's input cost (Pi's prompt, about $100 at the e2e price; KOBE-259: a request
+    # whose input exceeds the budget is refused outright); the fake model's tool step reports a
+    # 1,000,000-token prompt ($10,000), using it up.
     BUDGET_USD="${KOBE_GATE2_BUDGET_USD:-1000}"
     contains "the team budget is set to \$$BUDGET_USD a month" '^budget_status=200$' \
       "$(step reset "\"admin\":$U_T1,\"budget\":$BUDGET_USD")"
@@ -273,8 +274,9 @@ if [[ "$STEPS" == *" replicas "* ]]; then
     rstep() { client "$(printf '{"mode":"replica-budget","base":"%s","admin":%s,"teamId":"%s","userId":"%s","action":"%s","headroom":%s}' "$BASE" "$U_T1" "$TEAM" "$T2" "$1" "$HEADROOM")"; }
     UNDO+=("client '$(printf '{"mode":"replica-budget","base":"%s","admin":%s,"teamId":"%s","userId":"%s","action":"clear"}' "$BASE" "$U_T1" "$TEAM" "$T2")'")
     body='{"model":"openai/gpt-fake","max_tokens":3,"messages":[{"role":"user","content":"hi"}]}'
-    # KOBE-259: a budget whose limit is below one call (about 25 tokens here) refuses it outright, so
-    # the member first spends a few calls today: the limit (spent + headroom) is then above one call.
+    # KOBE-259: a request whose input estimate (about 22 tokens here) exceeds the budget's limit is
+    # refused outright, so the member first spends a few calls today: the limit (spent + headroom)
+    # is then above one request's input.
     for _ in 1 2 3 4; do
       in_sbx "curl -s -m 30 --noproxy '*' -o /dev/null -X POST http://${mg_ips[0]:-0.0.0.0}:8080/v1/chat/completions \
         -H 'authorization: Bearer $rtoken' -H 'content-type: application/json' -d '$body'" >/dev/null
