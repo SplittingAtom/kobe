@@ -59,6 +59,22 @@ const schedules = {
   active_count: 1,
 };
 
+/** Holds the answers to `keys` ("METHOD /path") until released; everything else as stubbed. */
+function hold(...keys: string[]) {
+  const base = globalThis.fetch;
+  const gate = () => {
+    let resolve = () => {};
+    const promise = new Promise<void>((r) => (resolve = r));
+    return { promise, resolve };
+  };
+  const gates = new Map(keys.map((k) => [k, gate()] as const));
+  vi.stubGlobal("fetch", (url: string, init: RequestInit = {}) => {
+    const gate = gates.get(`${init.method ?? "GET"} ${url}`);
+    return gate ? gate.promise.then(() => base(url, init)) : base(url, init);
+  });
+  return (key: string) => gates.get(key)?.resolve();
+}
+
 function renderBell(onOpenThread = vi.fn()) {
   render(<NotificationBell teamId="t-1" onOpenThread={onOpenThread} />);
   return onOpenThread;
@@ -190,6 +206,88 @@ describe("notification bell (KOBE-181, ac-1)", () => {
     await panel.findByText("Scheduled run was interrupted");
     expect(panel.queryByRole("button", { name: "Load more" })).toBeNull();
     expect(summary(calls)).toEqual(expect.arrayContaining([UNREAD, `${UNREAD}&cursor=c2`]));
+  });
+
+  it("loads one more page at a time, keeps marks made meanwhile, and drops pages of an old filter", async () => {
+    const calls = stubApi({
+      [COUNT]: [200, page([note(N1)], 3)],
+      [ALL]: [200, page([note(N1)], 3, "c2")],
+      [`${ALL}&cursor=c2`]: [200, page([note(N2), note(N1)], 3)],
+      [UNREAD]: [200, page([note(N3, { kind: "schedule.run.interrupted" })], 3)],
+      [MINE]: [200, schedules],
+      [READ]: [200, { updated: 1, unread_count: 2 }],
+    });
+    const release = hold(`${ALL}&cursor=c2`);
+    renderBell();
+    const user = userEvent.setup();
+    await user.click(await bell());
+    const panel = within(await screen.findByRole("region", { name: "Notifications" }));
+    const more = await panel.findByRole("button", { name: "Load more" });
+    await user.click(more);
+    await user.click(more);
+    await user.click(panel.getByRole("button", { name: /^Mark read/ }));
+    release(`${ALL}&cursor=c2`);
+    await waitFor(() => expect(panel.getAllByRole("listitem")).toHaveLength(2));
+    expect(summary(calls).filter((c) => c === `${ALL}&cursor=c2`)).toHaveLength(1);
+    // N1 was marked read while the page loaded: it stays read; N2 is new and unread.
+    expect(panel.getAllByRole("button", { name: /^Mark read/ })).toHaveLength(1);
+
+    // A page that answers after the filter changed is dropped.
+    const release2 = hold(`${ALL}&cursor=c2`);
+    await user.click(panel.getByRole("checkbox", { name: "Unread only" }));
+    await panel.findByText("Scheduled run was interrupted");
+    release2(`${ALL}&cursor=c2`);
+    await waitFor(() => expect(panel.getAllByRole("listitem")).toHaveLength(1));
+  });
+
+  it("shows an error when loading more fails", async () => {
+    stubApi({
+      [COUNT]: [200, page([note(N1)], 1)],
+      [ALL]: [200, page([note(N1)], 1, "c2")],
+      [`${ALL}&cursor=c2`]: [400, { code: "invalid_request", message: "Unknown cursor." }],
+      [MINE]: [200, schedules],
+    });
+    renderBell();
+    const user = userEvent.setup();
+    await user.click(await bell());
+    const panel = within(await screen.findByRole("region", { name: "Notifications" }));
+    await user.click(await panel.findByRole("button", { name: "Load more" }));
+    expect((await panel.findByRole("alert")).textContent).toContain("Unknown cursor.");
+  });
+
+  it("names schedules neutrally until the caller's schedules have loaded", async () => {
+    stubApi({
+      [COUNT]: [200, page([note(N1)], 1)],
+      [ALL]: [200, page([note(N1)], 1)],
+      [MINE]: [200, schedules],
+    });
+    const release = hold(MINE);
+    renderBell();
+    const user = userEvent.setup();
+    await user.click(await bell());
+    const panel = within(await screen.findByRole("region", { name: "Notifications" }));
+    expect(await panel.findByText(/^One of your schedules ·/)).toBeTruthy();
+    expect(panel.queryByText(/no longer exists/)).toBeNull();
+    release(MINE);
+    expect(await panel.findByText(/^Every day at 09:00 \(Europe\/Berlin\) ·/)).toBeTruthy();
+  });
+
+  it("reads the list again on every open, the schedules only once", async () => {
+    const calls = stubApi({
+      [COUNT]: [200, page([], 0)],
+      [ALL]: [200, page([note(N1, { read_at: "2026-10-11T09:00:00Z" })], 0)],
+      [MINE]: [200, schedules],
+    });
+    renderBell();
+    const user = userEvent.setup();
+    await user.click(await bell());
+    await screen.findByText("Scheduled run finished");
+    await user.click(await bell());
+    expect(screen.queryByRole("region", { name: "Notifications" })).toBeNull();
+    await user.click(await bell());
+    await screen.findByRole("region", { name: "Notifications" });
+    await waitFor(() => expect(summary(calls).filter((c) => c === ALL)).toHaveLength(2));
+    expect(summary(calls).filter((c) => c === MINE)).toHaveLength(1);
   });
 
   it("shows the server's message when the list fails", async () => {

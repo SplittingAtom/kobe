@@ -215,6 +215,57 @@ describe("projectThread with a scheduled run's skipped-actions summary (KOBE-178
     expect([...p.lastEntryOfNode.values()]).not.toContain("ks-1");
   });
 
+  it("shows a failed run's summary under the prompt when the run left no answer", () => {
+    const entries = [user("u1", null, "nightly"), skippedSummary("ks-1", "u1", summaryText, 1)];
+    const p = projectThread(entries, "u1");
+    expect(shape(p)).toEqual([["u1", null, "user"]]);
+    expect(messageMeta(must(p.items[0]).message)).toMatchObject({
+      kind: "user",
+      skipped: [{ text: summaryText, count: 1 }],
+    });
+    expect(p.headId).toBe("u1");
+  });
+
+  it("shows a summary under a hidden root as the only message", () => {
+    const entries = [
+      entry("r0", null, null, "model_change"),
+      skippedSummary("ks-1", "r0", summaryText),
+    ];
+    const p = projectThread(entries, "r0");
+    expect(shape(p)).toEqual([["skipped:ks-1", null, "assistant"]]);
+    expect(content(p, "skipped:ks-1")).toEqual([
+      { type: "data-kobe-skipped", data: { text: summaryText, count: 1 } },
+    ]);
+    expect(p.headId).toBe("skipped:ks-1");
+  });
+
+  it("recognises an offloaded summary by its server id: still a card, never a branch", () => {
+    const offloaded = {
+      ...skippedSummary("ks-2", "a1", summaryText),
+      payload: {},
+      payloadOffloaded: true,
+    };
+    const entries = [
+      user("u1", null, "nightly"),
+      assistant("a1", "u1", text("done")),
+      offloaded,
+      user("u2", "a1", "thanks"),
+      assistant("a2", "u2", text("welcome")),
+    ];
+    const p = projectThread(entries, "a2");
+    expect(shape(p)).toEqual([
+      ["u1", null, "user"],
+      ["a1", "u1", "assistant"],
+      ["u2", "a1", "user"],
+      ["a2", "u2", "assistant"],
+    ]);
+    expect(content(p, "a1")?.at(-1)).toEqual({
+      type: "data-kobe-skipped",
+      data: { text: "", count: 0 },
+    });
+    expect(p.lastEntryOfNode.get("a1")).toBe("a1");
+  });
+
   it("drops a summary whose parent is not loaded", () => {
     const entries = [user("u1", null, "q"), skippedSummary("ks-1", "gone", summaryText)];
     const p = projectThread(entries, "u1");

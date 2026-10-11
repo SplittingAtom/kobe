@@ -7,10 +7,15 @@ import {
   type KobeNotification,
   type NotificationsApi,
 } from "../../lib/notifications/api";
-import { notificationTitle, scheduleLabel } from "../../lib/notifications/format";
+import {
+  notificationTitle,
+  scheduleLabel,
+  type ScheduleWhen,
+} from "../../lib/notifications/format";
 import { createSchedulesApi } from "../../lib/schedules/api";
 import { ErrorNotice } from "../admin/error-notice";
 import { DateTime } from "../admin/parts";
+import { useResource } from "../admin/use-resource";
 import { useNotificationList } from "./use-notification-list";
 import styles from "./chat.module.css";
 
@@ -82,6 +87,8 @@ function NotificationItem({
 
 function NotificationPanel({
   id,
+  open,
+  refresh,
   api,
   teamId,
   fetchFn,
@@ -89,21 +96,32 @@ function NotificationPanel({
   onOpenThread,
 }: {
   readonly id: string;
+  readonly open: boolean;
+  /** Bumped on every open: the list is read again, the schedules are not. */
+  readonly refresh: number;
   readonly api: NotificationsApi;
   readonly teamId: string;
   readonly fetchFn: typeof fetch | undefined;
   readonly onUnread: (count: number) => void;
   readonly onOpenThread: (threadId: string) => void;
 }) {
-  const schedules = useMemo(() => createSchedulesApi(teamId, fetchFn), [teamId, fetchFn]);
-  const list = useNotificationList(api, schedules, onUnread);
+  const schedules = useResource(() => createSchedulesApi(teamId, fetchFn).list());
+  // Until the caller's schedules are known (or if they fail), labels stay neutral.
+  const known = useMemo<ReadonlyMap<string, ScheduleWhen> | null>(
+    () =>
+      schedules.state.status === "ready"
+        ? new Map(schedules.state.data.schedules.map((s) => [s.scheduleId, s] as const))
+        : null,
+    [schedules.state],
+  );
+  const list = useNotificationList(api, onUnread, refresh);
   const { state } = list;
-  const open = async (n: KobeNotification, threadId: string) => {
+  const openThread = async (n: KobeNotification, threadId: string) => {
     if (n.readAt === null) await list.markRead([n.notificationId]);
     onOpenThread(threadId);
   };
   return (
-    <section id={id} className={styles.notePanel} aria-label="Notifications">
+    <section id={id} className={styles.notePanel} aria-label="Notifications" hidden={!open}>
       <p className={styles.noteToolbar}>
         <label>
           <input
@@ -132,8 +150,8 @@ function NotificationPanel({
             <NotificationItem
               key={n.notificationId}
               note={n}
-              label={scheduleLabel(n.scheduleId, list.known)}
-              onOpen={n.threadId === null ? null : () => void open(n, n.threadId as string)}
+              label={scheduleLabel(n.scheduleId, known)}
+              onOpen={n.threadId === null ? null : () => void openThread(n, n.threadId as string)}
               onMarkRead={() => void list.markRead([n.notificationId])}
             />
           ))}
@@ -141,8 +159,8 @@ function NotificationPanel({
       )}
       {state.status === "ready" && state.next !== null && (
         <p>
-          <button type="button" onClick={() => void list.loadMore()}>
-            Load more
+          <button type="button" disabled={list.loadingMore} onClick={() => void list.loadMore()}>
+            {list.loadingMore ? "Loading…" : "Load more"}
           </button>
         </p>
       )}
@@ -169,6 +187,9 @@ export function NotificationBell({
   const api = useMemo(() => createNotificationsApi(teamId, fetchFn), [teamId, fetchFn]);
   const [unread, setUnread] = useUnreadCount(api, pollMs);
   const [open, setOpen] = useState(false);
+  // Opened at least once: the panel then stays mounted (hidden when closed) and keeps what it
+  // loaded once (the caller's schedules); each open reads the list again.
+  const [opens, setOpens] = useState(0);
   const panelId = useId();
   const label = unread > 0 ? `Notifications, ${unread} unread` : "Notifications";
   return (
@@ -179,7 +200,10 @@ export function NotificationBell({
         aria-label={label}
         aria-expanded={open}
         aria-controls={panelId}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          if (!open) setOpens((n) => n + 1);
+          setOpen(!open);
+        }}
       >
         <BellIcon aria-hidden="true" size={18} />
         {unread > 0 && (
@@ -188,10 +212,12 @@ export function NotificationBell({
           </span>
         )}
       </button>
-      {open && (
+      {opens > 0 && (
         <NotificationPanel
           key={teamId}
           id={panelId}
+          open={open}
+          refresh={opens}
           api={api}
           teamId={teamId}
           fetchFn={fetchFn}

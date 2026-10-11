@@ -9,6 +9,11 @@ export interface MailMessage {
 }
 
 export interface Mailer {
+  /**
+   * True for a process with no mail relay (the scheduler, KOBE-174): queued email is left for a
+   * process that can send it rather than failed and backed off.
+   */
+  readonly disabled?: boolean;
   /** Resolves once the SMTP server accepted the message; rejects otherwise. */
   send(message: MailMessage): Promise<void>;
   close(): void;

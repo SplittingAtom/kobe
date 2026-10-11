@@ -110,22 +110,35 @@ function assistantProblem(message: Record<string, unknown>) {
 
 const MAX_SUMMARY = 20_000;
 
+/** The id prefix the server gives a summary entry (`ks-<run>`); Pi's entry ids are short hex. */
+const SKIPPED_SUMMARY_ID = "ks-";
+
+/**
+ * A summary is known by its `customType`, or by its server id when its body is offloaded (the
+ * payload is then empty): either way it must never enter the tree as a branch or a head.
+ */
+function isSkippedSummary(entry: ThreadEntry): boolean {
+  return (
+    entry.type === "custom_message" &&
+    (entry.payload.customType === SKIPPED_SUMMARY_TYPE ||
+      (entry.payloadOffloaded && entry.entryId.startsWith(SKIPPED_SUMMARY_ID)))
+  );
+}
+
 function skippedSummary(entry: ThreadEntry): ParsedEntry | undefined {
-  if (entry.type !== "custom_message" || entry.payload.customType !== SKIPPED_SUMMARY_TYPE) {
-    return undefined;
-  }
+  if (!isSkippedSummary(entry)) return undefined;
   const count = record(entry.payload.details)?.skipped_count;
   return {
     kind: "skipped",
-    text: contentText(entry.payload.content).slice(0, MAX_SUMMARY),
+    text: entry.payloadOffloaded ? "" : contentText(entry.payload.content).slice(0, MAX_SUMMARY),
     count: typeof count === "number" && Number.isInteger(count) && count > 0 ? count : 0,
   };
 }
 
 export function parseEntry(entry: ThreadEntry): ParsedEntry {
-  if (entry.payloadOffloaded) return { kind: "offloaded" };
   const skipped = skippedSummary(entry);
   if (skipped) return skipped;
+  if (entry.payloadOffloaded) return { kind: "offloaded" };
   if (entry.type !== "message") return { kind: "other", type: entry.type };
   const message = record(entry.payload.message);
   if (!message) return { kind: "other", type: entry.type };

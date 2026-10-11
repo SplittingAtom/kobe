@@ -544,16 +544,13 @@ const schedulerRunner =
     : undefined;
 schedulerRunner?.start(config.scheduler.tickSeconds * 1000);
 // A scheduled run ended (KOBE-174 hook): its notification and queued email were written with the
-// end (KOBE-179); send the email now rather than at the next sweep. Never throws. Server replicas
-// only: the scheduler has no mailer (a fire-time budget block ends there), and a kick from it would
-// fail the attempt and back the email off for minutes (KOBE-181); the server sweep sends it.
-const stopRunHook =
-  deps && isServer
-    ? onScheduledRunEnded(deps.runs, (t) => {
-        logger.debug({ run_id: t.run.run_id, status: t.to }, "scheduled run ended");
-        void deliverNotificationEmails(deps, t.run.team_id);
-      })
-    : undefined;
+// end (KOBE-179); send the email now rather than at the next sweep. Never throws.
+const stopRunHook = deps
+  ? onScheduledRunEnded(deps.runs, (t) => {
+      logger.debug({ run_id: t.run.run_id, status: t.to }, "scheduled run ended");
+      void deliverNotificationEmails(deps, t.run.team_id);
+    })
+  : undefined;
 
 // Evals whose driver died with a server (restart mid-eval) are finished or errored by any replica.
 const evalSweep = evalRunner

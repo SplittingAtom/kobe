@@ -70,6 +70,17 @@ describe("a scheduled run's thread (KOBE-181)", () => {
     expect(screen.queryByText(/^Version/)).toBeNull();
   });
 
+  it("shows the card under the prompt of a run that failed before answering", async () => {
+    const t = fake.addThread("Nightly report");
+    fake.setScheduleId(t, SCHEDULE);
+    const u1 = fake.addEntry(t, null, { role: "user", content: "nightly" });
+    fake.addSkippedSummary(t, u1, SUMMARY, 2);
+    openApp(fake, t);
+    const card = within(await screen.findByRole("region", { name: "Skipped actions" }));
+    expect(card.getByText("Skipped actions (2)")).toBeTruthy();
+    expect(screen.getByText("nightly")).toBeTruthy();
+  });
+
   it("the bell lists the run's notification and opens its Scheduled thread", async () => {
     fake.addThread("Plain chat");
     const t = fake.addThread("Morning digest");

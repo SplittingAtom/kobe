@@ -166,13 +166,16 @@ async function recipient(db: KobeDb, teamId: string, userId: string): Promise<st
   return res.rows[0]?.email ?? null;
 }
 
-type DeliverDeps = Pick<ServerDeps, "database" | "mailer" | "publicUrl">;
+export type DeliverDeps = Pick<ServerDeps, "database" | "mailer" | "publicUrl">;
 
 /** Sends the team's due notification emails. Never throws; returns how many were sent. */
 export async function deliverNotificationEmails(
   deps: DeliverDeps,
   teamId: string,
 ): Promise<number> {
+  // No relay here (the scheduler): claiming would fail the attempt and back the email off for
+  // minutes (KOBE-181); a server replica's kick or sweep sends it.
+  if (deps.mailer.disabled) return 0;
   const db = deps.database.db;
   let sent = 0;
   try {
@@ -221,6 +224,7 @@ export async function deliverNotificationEmails(
 
 /** Every team's due notification emails (the sweep). Never throws. */
 export async function sweepNotificationEmails(deps: DeliverDeps): Promise<number> {
+  if (deps.mailer.disabled) return 0;
   let sent = 0;
   try {
     const all = await deps.database.db.select({ id: teams.id }).from(teams);

@@ -9,6 +9,7 @@ import type { ServerDepsOptions } from "../deps.js";
  * process's memory (nothing can sign in to it, and no cookie or setup link it makes is usable).
  */
 export const disabledMailer: Mailer = {
+  disabled: true,
   send: () => Promise.reject(new Error("the scheduler process does not send email")),
   close: () => undefined,
 };

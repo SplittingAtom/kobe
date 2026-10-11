@@ -50,8 +50,17 @@
 - The e2e section runs in the `suite` shard only (skipped with the executor on).
 - Bug found by the e2e (KOBE-179 wiring, fixed here): the run-end email kick also ran in the
   scheduler process, which has no mailer (`disabledMailer`). A fire-time budget block ends there, so
-  the kick claimed the email, failed and backed it off 2 min (`attempts` 1). `index.ts` now kicks on
-  server replicas only; the server's 60 s sweep sends those emails. First CI run: everything else in
+  the kick claimed the email, failed and backed it off 2 min (`attempts` 1). `Mailer.disabled` now
+  marks such a mailer and `deliverNotificationEmails`/the sweep claim nothing with it (review item
+  6: safe in any process); the server's kick or 60 s sweep sends those emails.
+- Review of #237: the list drops answers of an older listing (filter change, reopen), runs one
+  "Load more" at a time, appends with functional updates (deduped) and re-applies marks made while
+  a page loaded; failures show through `ErrorNotice`. Schedule labels stay neutral until the
+  caller's schedules load (`useResource`). The panel stays mounted (hidden) after the first open:
+  schedules load once, the list again on each open. A summary whose run left no answer shows under
+  its prompt (user message meta); under a hidden root with nothing shown it is the only message.
+  Summaries are recognised before the offload check (by `customType`, or the server's `ks-` id when
+  offloaded). First CI run: everything else in
   the section passed ([run 38130008392](https://github.com/SplittingAtom/kobe/actions/runs/38130008392)).
 
 ## Open questions (for Chris or the coordinator)
