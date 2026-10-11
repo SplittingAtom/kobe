@@ -11,6 +11,8 @@ import {
   loadGatewayPrincipal,
 } from "./models/index.js";
 import {
+  MODEL_CONTEXT_WINDOW_RANGE,
+  MODEL_OUTPUT_TOKENS_RANGE,
   modelCatalog,
   modelGatewayKeys,
   modelGatewayState,
@@ -125,6 +127,31 @@ describe("providers and catalog", () => {
       .update(modelCatalog)
       .set({ inputModalities: ["text"] })
       .where(eq(modelCatalog.alias, alias));
+  });
+
+  it("output limit, context window and the reasoning flag: null/false by default, bounded (KOBE-259)", async () => {
+    const [row] = await app.db.select().from(modelCatalog).where(eq(modelCatalog.alias, alias));
+    expect(row).toMatchObject({ maxOutputTokens: null, contextWindow: null, reasoning: false });
+    const [minOut, maxOut] = MODEL_OUTPUT_TOKENS_RANGE;
+    const [minCtx, maxCtx] = MODEL_CONTEXT_WINDOW_RANGE;
+    const set = (values: Partial<typeof modelCatalog.$inferInsert>) =>
+      app.db.update(modelCatalog).set(values).where(eq(modelCatalog.alias, alias));
+    await set({ maxOutputTokens: maxOut, contextWindow: maxCtx, reasoning: true });
+    await set({ maxOutputTokens: minOut, contextWindow: null });
+    await set({ maxOutputTokens: null, contextWindow: minCtx });
+    for (const bad of [
+      { maxOutputTokens: minOut - 1, contextWindow: null },
+      { maxOutputTokens: maxOut + 1, contextWindow: null },
+      { maxOutputTokens: null, contextWindow: minCtx - 1 },
+      { maxOutputTokens: null, contextWindow: maxCtx + 1 },
+      // The output limit must leave room for input in the window.
+      { maxOutputTokens: 8_192, contextWindow: 8_192 },
+      { maxOutputTokens: 16_384, contextWindow: 8_192 },
+    ]) {
+      expect(pgCode(await failure(set(bad))), JSON.stringify(bad)).toBe("23514");
+    }
+    await set({ maxOutputTokens: 4_096, contextWindow: 8_192 });
+    await set({ maxOutputTokens: null, contextWindow: null, reasoning: false });
   });
 });
 
