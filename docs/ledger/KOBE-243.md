@@ -15,6 +15,15 @@
 - Removed members: the sweep also lists `teams/<t>/users/` folders (uuid shape) without a membership or workspace row and
   sweeps only their `workspace/incoming/<uuid>` with the same grace, reference and hold checks.
 
+## Review follow-up (#221)
+
+- The pause also gates the offboarding sweep/purge (`OffboardingContext.paused`) and workspace GC
+  (`createWorkspaceSync({paused})`, timed and quota kick). Other timers act on row age or ephemeral state (listed in the runbook).
+- Offboarding deletes use `deleteBounded`. `DeleteAbortedError.recover` + `withTeamRecovering`: after a timeout that removed
+  some objects, a short follow-up tx (hold lock, `legal_hold_covers` re-check) drops the rows of the gone keys (queue rows, memory
+  versions/files, orphan uploads, workspace files/blobs). Workspace GC needs none: its rows stay `deleting`.
+- `GET /v1/install/retention` returns `paused`; the retention admin page shows a banner.
+
 ## Evidence
 
 - `retention/bounded-delete.test.ts`, `orphans.db.test.ts` ("hanging delete": events order abort, settle, release),

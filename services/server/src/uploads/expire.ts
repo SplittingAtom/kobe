@@ -1,7 +1,8 @@
-import { SYSTEM_ACTOR, lockLegalHolds, sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
+import { SYSTEM_ACTOR, lockLegalHolds, sql, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { auditTimeout } from "../retention/locks.js";
 import type { BlobStore } from "../retention/blobs.js";
+import { withTeamRecovering } from "../retention/recovering.js";
 import { deleteBounded } from "../retention/bounded-delete.js";
 
 /**
@@ -37,7 +38,22 @@ async function expireBatch(
      FOR UPDATE SKIP LOCKED`);
   if (due.rows.length === 0) return { files: 0, bytes: 0, more: false };
   const keys = due.rows.map((r) => r.blob_ref);
-  await deleteBounded(blobs.objects, keys, blobs.deleteTimeoutMs);
+  await deleteBounded(
+    blobs.objects,
+    keys,
+    blobs.deleteTimeoutMs,
+    undefined,
+    (gone) => async (t) => {
+      await t.execute(sql`
+      DELETE FROM files
+       WHERE team_id = ${teamId} AND kind = 'upload' AND thread_id IS NULL
+         AND blob_ref = ANY(ARRAY[${sql.join(
+           gone.map((k) => sql`${k}`),
+           sql`, `,
+         )}]::text[])
+         AND NOT public.legal_hold_covers(team_id, user_id)`);
+    },
+  );
   await tx.execute(sql`
     DELETE FROM files WHERE team_id = ${teamId}
        AND id = ANY(ARRAY[${sql.join(
@@ -68,7 +84,9 @@ export async function expireOrphanUploads(
   let total = { files: 0, bytes: 0 };
   for (let i = 0; i < (options.maxBatches ?? 1000); i++) {
     if (options.stop?.()) break;
-    const r = await withTeam(db, teamId, (tx) => expireBatch(tx, teamId, blobs, orphanHours));
+    const r = await withTeamRecovering(db, teamId, (tx) =>
+      expireBatch(tx, teamId, blobs, orphanHours),
+    );
     total = { files: total.files + r.files, bytes: total.bytes + r.bytes };
     if (!r.more) break;
   }

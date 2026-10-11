@@ -17,6 +17,8 @@ export interface OffboardingContext {
   /** Object storage of the workspace copy; undefined when `s3.*` is not configured. */
   readonly blobs: BlobStore | undefined;
   readonly log: Pick<Logger, "info" | "warn" | "error">;
+  /** KOBE_RETENTION_PAUSED (KOBE-243): nothing is deleted and no departure is judged. */
+  readonly paused?: boolean;
   /** Who is recorded as the actor when no signed-in request is running (the sweep). */
   readonly actor?: () => AuditActor | undefined;
 }

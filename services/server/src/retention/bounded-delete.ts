@@ -1,3 +1,4 @@
+import type { KobeTx } from "@kobe/db";
 import type { ObjectStore } from "../workspace-sync/object-store.js";
 
 /** Longest one batch's object delete may take while the legal-hold lock is held. */
@@ -10,12 +11,21 @@ export const SETTLE_GRACE_MS = 10_000;
  * gone, `aborted` the rest (they may or may not exist; a retry deletes them again, which is
  * harmless). `unsettled`: the store ignored the abort and was still running when we gave up.
  */
+/** Follow-up work for the keys a timed-out delete did remove (runs in a new short transaction). */
+export type Recover = (tx: KobeTx) => Promise<void>;
+export type Forget = (deleted: readonly string[]) => Recover;
+
 export class DeleteAbortedError extends Error {
   constructor(
     readonly deleted: readonly string[],
     readonly aborted: readonly string[],
     readonly unsettled: boolean,
     ms: number,
+    /**
+     * Set when some keys were removed: makes the rows that pointed at them consistent. Run it
+     * with {@link withTeamRecovering}, in a transaction that holds the legal-hold lock.
+     */
+    readonly recover?: Recover,
   ) {
     super(
       `object store delete timed out after ${ms} ms (${deleted.length} deleted, ${aborted.length} aborted${
@@ -49,6 +59,7 @@ export async function deleteBounded(
   keys: readonly string[],
   ms: number = DELETE_TIMEOUT_MS,
   graceMs: number = SETTLE_GRACE_MS,
+  forget?: Forget,
 ): Promise<{ readonly deleted: readonly string[] }> {
   const controller = new AbortController();
   const call = objects.delete(keys, { signal: controller.signal }).then(
@@ -69,5 +80,6 @@ export async function deleteBounded(
     keys.filter((k) => !done.includes(k)),
     settled === "timer",
     ms,
+    forget && done.length > 0 ? forget(done) : undefined,
   );
 }

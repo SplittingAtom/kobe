@@ -1,4 +1,5 @@
 import { deleteBounded } from "./bounded-delete.js";
+import { withTeamRecovering } from "./recovering.js";
 import { auditTimeout } from "./locks.js";
 import {
   BLOB_REF_COLUMNS,
@@ -112,7 +113,22 @@ export async function deleteBlobBatchInTx(
     .map((r) => r.key);
   // Bounded and abortable: the transaction holds the legal-hold lock shared, and an approval
   // waits for it; on timeout the delete is aborted and settled before the lock is released.
-  if (doomed.length > 0) await deleteBounded(store.objects, doomed, store.deleteTimeoutMs);
+  if (doomed.length > 0)
+    await deleteBounded(
+      store.objects,
+      doomed,
+      store.deleteTimeoutMs,
+      undefined,
+      (gone) => async (t) => {
+        await t.execute(sql`
+        DELETE FROM retention_blob_deletions
+         WHERE team_id = ${teamId} AND key = ANY(ARRAY[${sql.join(
+           gone.map((k) => sql`${k}`),
+           sql`, `,
+         )}]::text[])
+           AND NOT public.legal_hold_covers(team_id, owner_user_id)`);
+      },
+    );
   await tx.execute(sql`
     DELETE FROM retention_blob_deletions
      WHERE team_id = ${teamId} AND key = ANY(ARRAY[${sql.join(
@@ -157,7 +173,7 @@ export async function deleteReleasedBlobs(
     if (options.stop?.()) break;
     let result: BlobDeletionCounts & { more: boolean };
     try {
-      result = await withTeam(db, teamId, (tx) =>
+      result = await withTeamRecovering(db, teamId, (tx) =>
         deleteBlobBatchInTx(tx, teamId, store, limit, record),
       );
     } catch (err) {
