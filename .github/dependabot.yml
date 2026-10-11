@@ -21,6 +21,10 @@ updates:
     directories: ["/", "/images/sandbox/pi"]
     schedule: { interval: weekly }
     open-pull-requests-limit: 10
+    ignore:
+      # Kobe runs on Node 24 (images and CI); the types follow the runtime's major version.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: pip
     directory: /images/sandbox
     schedule: { interval: weekly }
