@@ -9,6 +9,7 @@ import { SYSTEM_ACTOR, sql, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { auditExpiredApprovals, expireRunApprovalsInTx } from "../approvals/run-end.js";
 import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js";
+import { notifyScheduledRunEndInTx } from "../notifications/record.js";
 import { reportSkippedActionsInTx } from "../policy/skipped-summary.js";
 import type { RunEnd } from "./types.js";
 
@@ -157,6 +158,14 @@ export async function endRunInTx(
       run.rows[0]?.trigger === "schedule",
     ),
   ]);
+  // The owner hears about a scheduled run's end in the same transaction (D32, KOBE-179).
+  await notifyScheduledRunEndInTx(tx, {
+    teamId,
+    runId,
+    threadId,
+    trigger: run.rows[0]?.trigger ?? "user",
+    to,
+  });
   if (budgetScope && to === "budget_stopped") {
     await recordAudit(tx, {
       action: "run.budget_stopped",

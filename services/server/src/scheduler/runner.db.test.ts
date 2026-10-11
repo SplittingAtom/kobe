@@ -265,6 +265,12 @@ describe("the run gate at fire time (ac-2)", () => {
       [team, thread?.id],
     );
     expect(ev.map((e) => e.type)).toContain("run.failed");
+    // The owner is told, once, in the transaction that recorded the failure (KOBE-179).
+    const told = await rows<{ kind: string; user_id: string; schedule_id: string }>(
+      `SELECT kind, user_id, schedule_id FROM notifications WHERE team_id = $1 AND thread_id = $2`,
+      [team, thread?.id],
+    );
+    expect(told).toEqual([{ kind: "schedule.run.failed", user_id: bob, schedule_id: id }]);
     expect(await fires(id)).toHaveLength(1);
     expect((await nextDue(id))?.toISOString()).toBe("2026-10-11T09:00:00.000Z");
     // No retry storm: further ticks do nothing.

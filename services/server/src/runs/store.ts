@@ -17,6 +17,7 @@ import {
   expiryCauseOf,
 } from "../approvals/run-end.js";
 import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js";
+import { notifyScheduledRunEndInTx } from "../notifications/record.js";
 import { reportSkippedActionsInTx } from "../policy/skipped-summary.js";
 import { THREAD_LOCK_TIMEOUT } from "../threads/repository.js";
 import { RunError } from "./errors.js";
@@ -426,6 +427,16 @@ export async function applyTransition(
         )
       : event;
     await appendRunEventsInTx(tx, run.teamId, run.id, [reported]);
+  }
+  // A scheduled run's end notifies its owner in this transaction (D32, KOBE-179).
+  if (terminal) {
+    await notifyScheduledRunEndInTx(tx, {
+      teamId: run.teamId,
+      runId: run.id,
+      threadId: thread.id,
+      trigger: run.trigger,
+      to,
+    });
   }
   await auditExpiredApprovals(tx, run.teamId, expired);
   return {
