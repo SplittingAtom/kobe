@@ -336,14 +336,16 @@ describe("switches", () => {
 
   it("site level is AND-ed with the team and needs a site admin", async () => {
     const w = await world();
-    expect((await settings(w.admin, "install")).status).toBe(403);
-    expect((await settings(w.admin, "install", { memory_enabled: false })).status).toBe(403);
+    expect((await settings(w.admin, "site")).status).toBe(403);
+    expect((await settings(w.admin, "site", { memory_enabled: false })).status).toBe(403);
     const ia = await siteAdmin();
+    // KOBE-255: the level is `site`; the old name is no longer a level.
+    expect((await settings({ browser: ia } as Person, "install")).status).toBe(400);
     try {
-      const off = await settings({ browser: ia } as Person, "install", { memory_enabled: false });
+      const off = await settings({ browser: ia } as Person, "site", { memory_enabled: false });
       expect(off.json).toEqual({ memory_enabled: false, project_memory_enabled: true });
       expect((await put(w.member, "x.md", "x")).json).toMatchObject({ code: "memory_disabled" });
-      await settings({ browser: ia } as Person, "install", { memory_enabled: true });
+      await settings({ browser: ia } as Person, "site", { memory_enabled: true });
       expect((await put(w.member, "x.md", "x")).status).toBe(200);
       expect(
         await fx.admin.query(
@@ -351,7 +353,7 @@ describe("switches", () => {
         ),
       ).toMatchObject({ rowCount: 2 });
     } finally {
-      await settings({ browser: ia } as Person, "install", {
+      await settings({ browser: ia } as Person, "site", {
         memory_enabled: true,
         project_memory_enabled: true,
       });
