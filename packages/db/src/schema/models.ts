@@ -58,6 +58,15 @@ export const PROVIDER_MODEL_PATTERN = "^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$";
 export const INPUT_MODALITIES = ["text", "image"] as const;
 export type InputModality = (typeof INPUT_MODALITIES)[number];
 
+/**
+ * Bounds of a catalog model's output limit and context window in tokens (KOBE-259). The output
+ * ceiling matches the model gateway's per-call charge ceiling (`usage/charge.ts`), so a call's
+ * budget reservation is never less than the output it may produce; the window's ceiling is above
+ * any model offered today. Null means the install-wide default (server config, chart value).
+ */
+export const MODEL_OUTPUT_TOKENS_RANGE = [256, 131_072] as const;
+export const MODEL_CONTEXT_WINDOW_RANGE = [1_024, 10_000_000] as const;
+
 const ts = () => timestamp({ withTimezone: true }).notNull().defaultNow();
 
 /**
@@ -144,6 +153,19 @@ export const modelCatalog = pgTable(
       .array()
       .notNull()
       .default(sql`'{text}'::text[]`),
+    /**
+     * The most output tokens one call may ask for (KOBE-259; Pi's `maxTokens`, sent as the
+     * request's `max_tokens`). Reasoning tokens count against it. Null: the install default
+     * for the model's kind (see {@link reasoning}).
+     */
+    maxOutputTokens: integer(),
+    /** The model's context window in tokens (KOBE-259, absorbs KOBE-210). Null: the default. */
+    contextWindow: integer(),
+    /**
+     * The model reasons (thinks) before it answers, set by an admin (KOBE-259): such a model gets
+     * the higher default output limit, as its hidden reasoning spends the same allowance.
+     */
+    reasoning: boolean().notNull().default(false),
     createdBy: uuid()
       .notNull()
       .references(() => users.id),
@@ -170,6 +192,19 @@ export const modelCatalog = pgTable(
       "model_catalog_input_modalities",
       sql`${t.inputModalities} <@ ${sql.raw(`ARRAY[${INPUT_MODALITIES.map((m) => `'${m}'`).join(",")}]::text[]`)}
         AND ${t.inputModalities} @> ARRAY['text']::text[]`,
+    ),
+    check(
+      "model_catalog_max_output_tokens",
+      sql`${t.maxOutputTokens} IS NULL OR ${t.maxOutputTokens} BETWEEN ${sql.raw(String(MODEL_OUTPUT_TOKENS_RANGE[0]))} AND ${sql.raw(String(MODEL_OUTPUT_TOKENS_RANGE[1]))}`,
+    ),
+    check(
+      "model_catalog_context_window",
+      sql`${t.contextWindow} IS NULL OR ${t.contextWindow} BETWEEN ${sql.raw(String(MODEL_CONTEXT_WINDOW_RANGE[0]))} AND ${sql.raw(String(MODEL_CONTEXT_WINDOW_RANGE[1]))}`,
+    ),
+    // The output limit leaves room for input in the window.
+    check(
+      "model_catalog_output_within_context",
+      sql`${t.maxOutputTokens} IS NULL OR ${t.contextWindow} IS NULL OR ${t.maxOutputTokens} < ${t.contextWindow}`,
     ),
     check("model_catalog_alias", sql`${t.alias} ~ ${sql.raw(`'${MODEL_ALIAS_PATTERN}'`)}`),
     check("model_catalog_model", sql`${t.model} ~ ${sql.raw(`'${PROVIDER_MODEL_PATTERN}'`)}`),
