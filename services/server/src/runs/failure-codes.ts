@@ -10,6 +10,8 @@ export const FAILURE_MESSAGES: Readonly<Record<string, string>> = {
   agent_unavailable: "The run could not start: the thread's agent version is not available.",
   agent_suspended:
     "This agent is suspended, so it can't start new runs. Ask your team admin to reactivate it, or start a conversation with another agent.",
+  // KOBE-174: a scheduled run the budget refused at fire time (no retry; the next occurrence tries).
+  budget_exhausted: "The scheduled run did not start: the budget is used up.",
   timeout: "Your workspace did not answer in time, so the run could not start.",
   // KOBE-192: the pod was not Ready within the wake timeout (volume, scheduling, image pull).
   // Deliberately generic: the cluster's reason is for install admins (audit log, server log).

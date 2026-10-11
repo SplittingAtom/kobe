@@ -238,4 +238,26 @@ describe("loadConfig", () => {
       ).toBeUndefined();
     });
   });
+
+  describe("scheduler runner (KOBE-174)", () => {
+    it("defaults to a 15 s tick and a 60 minute grace window", () => {
+      expect(loadConfig(REQUIRED).scheduler).toEqual({ tickSeconds: 15, graceMinutes: 60 });
+    });
+
+    it("reads both settings and rejects values out of range", () => {
+      expect(
+        loadConfig({
+          ...REQUIRED,
+          KOBE_SCHEDULER_TICK_SECONDS: "30",
+          KOBE_SCHEDULER_GRACE_MINUTES: "120",
+        }).scheduler,
+      ).toEqual({ tickSeconds: 30, graceMinutes: 120 });
+      expect(() => loadConfig({ ...REQUIRED, KOBE_SCHEDULER_TICK_SECONDS: "1" })).toThrow(
+        /KOBE_SCHEDULER_TICK_SECONDS/,
+      );
+      expect(() => loadConfig({ ...REQUIRED, KOBE_SCHEDULER_GRACE_MINUTES: "0" })).toThrow(
+        /KOBE_SCHEDULER_GRACE_MINUTES/,
+      );
+    });
+  });
 });

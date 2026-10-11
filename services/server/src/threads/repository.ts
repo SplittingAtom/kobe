@@ -254,6 +254,8 @@ export async function createThread(
      */
     agent: AgentPin | DraftPin | null;
     isTest?: boolean;
+    /** The schedule that started the thread (KOBE-174): it sits in the user's Scheduled folder. */
+    scheduleId?: string;
     title: string | null;
     /** The thread's model alias (KOBE-44); the caller checked the team enabled it. */
     modelAlias?: string | null;

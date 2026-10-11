@@ -9,6 +9,8 @@
 {{- $reconcile := printf "- name: KOBE_TEAM_RECONCILE_SECONDS\n  value: %s" (.Values.server.teamReconcileSeconds | int | toString | quote) -}}
 {{- $refresh := printf "- name: KOBE_CONNECTOR_REFRESH_SECONDS\n  value: %s" (.Values.server.connectorRefreshSeconds | int | toString | quote) -}}
 {{- $sessionTtl := printf "- name: KOBE_SESSION_TOKEN_TTL_SECONDS\n  value: %s" (.Values.server.sessionTokenTtlSeconds | int | toString | quote) -}}
+{{- $schedTick := printf "- name: KOBE_SCHEDULER_TICK_SECONDS\n  value: %s" (.Values.scheduler.tickSeconds | int | toString | quote) -}}
+{{- $schedGrace := printf "- name: KOBE_SCHEDULER_GRACE_MINUTES\n  value: %s" (.Values.scheduler.catchUpGraceMinutes | int | toString | quote) -}}
 {{- include "kobe.nodeService" (dict "root" . "component" "web" "image" "web" "values" .Values.web
       "healthPath" "/api/healthz" "readyPath" "/api/healthz"
       "extraMounts" "- name: next-cache\n  mountPath: /app/apps/web/.next/cache"
@@ -24,7 +26,7 @@
 {{ include "kobe.nodeService" (dict "root" . "component" "scheduler" "image" "server" "values" .Values.scheduler
       "serviceAccount" (printf "%s-server" $fullname) "automountToken" true "preflight" true "migrations" true
       "annotations" $dbAnnotations
-      "env" (printf "- name: KOBE_PROCESS\n  value: scheduler\n%s\n%s\n%s\n%s" $runtime $common (include "kobe.telemetryEnv" .) (include "kobe.retentionEnv" .))) }}
+      "env" (printf "- name: KOBE_PROCESS\n  value: scheduler\n%s\n%s\n%s\n%s\n%s\n%s\n%s" $runtime $common (include "kobe.telemetryEnv" .) (include "kobe.retentionEnv" .) (include "kobe.sandboxConfigEnv" .) $schedTick $schedGrace)) }}
 ---
 {{/* MCP proxy (KOBE-58): no database; its own session key and the internal key only. */}}
 {{ include "kobe.nodeService" (dict "root" . "component" "mcp-proxy" "image" "mcp-proxy" "values" .Values.mcpProxy

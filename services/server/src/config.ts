@@ -86,6 +86,20 @@ const configSchema = z.object({
       "KOBE_CONNECTOR_REFRESH_SECONDS must be 0 or between 60 and 86400",
     )
     .default(3600),
+  // Scheduler runner (KOBE-174): seconds between scans for due schedules.
+  KOBE_SCHEDULER_TICK_SECONDS: z.coerce
+    .number({ error: "KOBE_SCHEDULER_TICK_SECONDS must be a number" })
+    .int("KOBE_SCHEDULER_TICK_SECONDS must be an integer")
+    .min(5, "KOBE_SCHEDULER_TICK_SECONDS must be between 5 and 3600")
+    .max(3600, "KOBE_SCHEDULER_TICK_SECONDS must be between 5 and 3600")
+    .default(15),
+  // Scheduler runner: how late an occurrence may still fire after downtime (older ones are skipped).
+  KOBE_SCHEDULER_GRACE_MINUTES: z.coerce
+    .number({ error: "KOBE_SCHEDULER_GRACE_MINUTES must be a number" })
+    .int("KOBE_SCHEDULER_GRACE_MINUTES must be an integer")
+    .min(1, "KOBE_SCHEDULER_GRACE_MINUTES must be between 1 and 1440")
+    .max(1440, "KOBE_SCHEDULER_GRACE_MINUTES must be between 1 and 1440")
+    .default(60),
   // Lifetime of sandbox session tokens (15 min, packages/session-token). Shorter only so the e2e
   // can run a real Pi past a token rotation (KOBE-241); the MCP proxy's expired-token cap stays
   // at twice the default.
@@ -162,6 +176,8 @@ export interface Config {
   readonly connectorRefreshSeconds: number;
   /** Sandbox session token lifetime in seconds (900 unless an e2e install shortens it). */
   readonly sessionTokenTtlSeconds: number;
+  /** Scheduler runner settings (KOBE-174); read by the scheduler process only. */
+  readonly scheduler: { readonly tickSeconds: number; readonly graceMinutes: number };
   /** SIEM forwarding of audit events (KOBE-19); empty when not configured. */
   readonly auditForwarding: AuditForwardingConfig;
   /** Present for the API server only. */
@@ -193,6 +209,10 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     teamReconcileSeconds: base.data.KOBE_TEAM_RECONCILE_SECONDS,
     connectorRefreshSeconds: base.data.KOBE_CONNECTOR_REFRESH_SECONDS,
     sessionTokenTtlSeconds: base.data.KOBE_SESSION_TOKEN_TTL_SECONDS,
+    scheduler: {
+      tickSeconds: base.data.KOBE_SCHEDULER_TICK_SECONDS,
+      graceMinutes: base.data.KOBE_SCHEDULER_GRACE_MINUTES,
+    },
     auditForwarding: loadAuditForwardingConfig(env),
   };
   if (config.process !== "server") return config;

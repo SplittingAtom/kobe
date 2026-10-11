@@ -172,9 +172,9 @@ const MIN_KEY_LENGTH = 32;
  * Returns undefined when KOBE_SANDBOX_CONFIG is unset (the sandbox provider stays disabled and
  * agent work fails with a clear error); throws when it is set but invalid or keys are missing.
  */
-export function loadSandboxConfig(
+export function loadSandboxSettings(
   env: Readonly<Record<string, string | undefined>>,
-): SandboxConfig | undefined {
+): SandboxSettings | undefined {
   const raw = env.KOBE_SANDBOX_CONFIG?.trim();
   if (!raw) return undefined;
   let json: unknown;
@@ -188,6 +188,15 @@ export function loadSandboxConfig(
     const issues = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
     throw new Error(`Invalid configuration: KOBE_SANDBOX_CONFIG ${issues}`);
   }
+  return parsed.data;
+}
+
+/** Settings and the session-token keys (the server, which signs and verifies tokens). */
+export function loadSandboxConfig(
+  env: Readonly<Record<string, string | undefined>>,
+): SandboxConfig | undefined {
+  const settings = loadSandboxSettings(env);
+  if (!settings) return undefined;
   const keys: Partial<Record<SessionTokenAudience, string>> = {};
   const problems: string[] = [];
   for (const audience of SESSION_TOKEN_AUDIENCES) {
@@ -205,5 +214,5 @@ export function loadSandboxConfig(
     problems.push("KOBE_SESSION_KEY_* must all differ (one key per audience)");
   }
   if (problems.length > 0) throw new Error(`Invalid configuration: ${problems.join("; ")}`);
-  return { settings: parsed.data, sessionKeys: keys as SessionKeys };
+  return { settings, sessionKeys: keys as SessionKeys };
 }

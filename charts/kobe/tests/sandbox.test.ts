@@ -255,6 +255,7 @@ describe("server sandbox configuration", () => {
       "KOBE_SESSION_KEY_MODEL_GATEWAY",
       "KOBE_SESSION_KEY_SANDBOX_WIRE",
     ]);
+    // The scheduler wakes sandboxes but never signs tokens (KOBE-174): it holds no session key.
     for (const d of ["kobe-scheduler", "kobe-web"]) {
       expect(names(d), d).toEqual([]);
     }

@@ -2,7 +2,12 @@ import { SYSTEM_ACTOR, type KobeDb } from "@kobe/db";
 import { currentAuditContext } from "../audit/context.js";
 import { recordAuditAfter, type ServerAuditEvent } from "../audit/record.js";
 import type { IsolationGate } from "../isolation/gate.js";
-import { loadSandboxConfig, type SandboxSettings, type SessionKeys } from "./config.js";
+import {
+  loadSandboxConfig,
+  loadSandboxSettings,
+  type SandboxSettings,
+  type SessionKeys,
+} from "./config.js";
 import { createKubeClient, type KubeClient } from "./kube.js";
 import { logger } from "../logger.js";
 import type { ReconcileLock } from "./reconcile-lock.js";
@@ -30,6 +35,9 @@ export interface SandboxRuntime {
   readonly settings: SandboxSettings;
 }
 
+/** The provider without session keys: enough to wake and create sandboxes (the scheduler). */
+export type SandboxProviderRuntime = Omit<SandboxRuntime, "sessionKeys">;
+
 /**
  * The sandbox provider wired to the in-cluster API, or undefined when the chart did not configure
  * sandboxes (KOBE_SANDBOX_CONFIG unset). Invalid configuration throws (fail fast at startup).
@@ -39,8 +47,24 @@ export function createSandboxRuntime(
   isolation: Pick<IsolationGate, "require">,
   /** Audit log (sandbox.created/destroyed); without it the events are not recorded. */
   db?: KobeDb,
-): SandboxRuntime | undefined {
-  const config = loadSandboxConfig(env);
+): SandboxRuntime | undefined;
+/**
+ * `providerOnly` (the scheduler, KOBE-174): no session keys are read or required. Tokens are
+ * signed only on the server's sandbox listener and wire, never by the process that wakes sandboxes.
+ */
+export function createSandboxRuntime(
+  env: Readonly<Record<string, string | undefined>>,
+  isolation: Pick<IsolationGate, "require">,
+  db: KobeDb | undefined,
+  options: { readonly providerOnly: true },
+): SandboxProviderRuntime | undefined;
+export function createSandboxRuntime(
+  env: Readonly<Record<string, string | undefined>>,
+  isolation: Pick<IsolationGate, "require">,
+  db?: KobeDb,
+  options?: { readonly providerOnly: boolean },
+): SandboxRuntime | SandboxProviderRuntime | undefined {
+  const config = options?.providerOnly ? providerOnlyConfig(env) : loadSandboxConfig(env);
   if (!config) return undefined;
   const runtimeClassName = env.KOBE_RUNTIME_CLASS?.trim();
   const kube = createKubeClient();
@@ -105,7 +129,12 @@ export function createSandboxRuntime(
       timer?.unref();
       return () => clearInterval(timer);
     },
-    sessionKeys: config.sessionKeys,
+    ...(config.sessionKeys ? { sessionKeys: config.sessionKeys } : {}),
     settings: config.settings,
-  };
+  } as SandboxRuntime;
+}
+
+function providerOnlyConfig(env: Readonly<Record<string, string | undefined>>) {
+  const settings = loadSandboxSettings(env);
+  return settings ? { settings, sessionKeys: undefined } : undefined;
 }

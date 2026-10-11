@@ -34,6 +34,9 @@ import { loadUploadSettings } from "./uploads/settings.js";
 import { createInternalApp } from "./routes/internal.js";
 import { createSandboxApp } from "./routes/sandbox.js";
 import { createSandboxRuntime } from "./sandbox/runtime.js";
+import { schedulerAuthStandIn } from "./scheduler/process-deps.js";
+import { onScheduledRunEnded } from "./scheduler/run-hook.js";
+import { SchedulerRunner } from "./scheduler/runner.js";
 import { skillSandboxRoutes } from "./skills/sandbox-routes.js";
 import { runTokenKeyFromEnv } from "./sandbox-wire/run-token.js";
 import { providerLiveness, sandboxWireVerifier } from "./sandbox-wire/provider-auth.js";
@@ -87,8 +90,20 @@ const bifrostAdmin = modelsConfig
 const runTokenKey = runTokenKeyFromEnv(process.env);
 // The wire is built before the sandbox provider exists: its waker is set once the provider is.
 const waker = createDeferredWaker();
+const isServer = config.process === "server";
 let deps: ServerDeps | undefined;
-if (config.auth && config.smtp) {
+if (config.process === "scheduler") {
+  // KOBE-174: the scheduler fires runs through the same orchestrator and sandbox wire router.
+  deps = createServerDeps({
+    databaseUrl: config.databaseUrl,
+    ...schedulerAuthStandIn(),
+    // No run-token key: the wire host that delivers run.start mints run tokens, not the scheduler.
+    sandboxWire: { waker },
+    connectors: loadConnectorUrlPolicy(process.env),
+    agents: { maxVersions: config.agentMaxVersions },
+    uploads: uploadSettings,
+  });
+} else if (config.auth && config.smtp) {
   const { approvalKey, ...auth } = config.auth;
   deps = createServerDeps({
     databaseUrl: config.databaseUrl,
@@ -175,22 +190,24 @@ deps?.runs.useIsolation(() => {
   const { state } = isolation.status();
   return state === "verified" ? "available" : state;
 });
+// The scheduler only fires runs: the server's background jobs below run on server replicas.
+const serverDeps = isServer ? deps : undefined;
 // Audit chain head in the server log at startup and every 5 minutes (KOBE-15): ship it off the box.
-deps?.auditAnchor.start();
+serverDeps?.auditAnchor.start();
 // Break-glass grants end at expires_at on their own; this records the end and notifies (KOBE-16).
-const breakGlassSweeper = deps ? new BreakGlassSweeper(deps) : undefined;
+const breakGlassSweeper = serverDeps ? new BreakGlassSweeper(serverDeps) : undefined;
 breakGlassSweeper?.start();
 // Audit rows lose their client IP and user agent after the retention period (KOBE-17).
-const auditPiiSweeper = deps ? new AuditPiiSweeper(deps.database.db) : undefined;
+const auditPiiSweeper = serverDeps ? new AuditPiiSweeper(serverDeps.database.db) : undefined;
 auditPiiSweeper?.start();
 // Optional SIEM forwarding (syslog, OTLP; KOBE-19): a sweep, one replica forwards at a time.
 const auditForwarder =
-  deps && destinationsOf(config.auditForwarding).length > 0
+  serverDeps && destinationsOf(config.auditForwarding).length > 0
     ? new AuditForwarder({
-        db: deps.database.db,
+        db: serverDeps.database.db,
         sinks: sinksFor(config.auditForwarding),
         lock: createPgReconcileLock(
-          deps.database.pool,
+          serverDeps.database.pool,
           (err) => logger.warn({ err }, "audit forwarding lock connection problem"),
           AUDIT_FORWARD_LOCK,
         ),
@@ -200,11 +217,11 @@ const auditForwarder =
 auditForwarder?.start();
 // Nightly retention (KOBE-18, D18): Trash and retention purges, run_events compaction, released
 // blobs. Every replica checks; an advisory lock lets one run a pass.
-const retentionJob = deps
+const retentionJob = serverDeps
   ? new RetentionJob({
-      db: deps.database.db,
-      pool: deps.database.pool,
-      blobs: deps.blobs,
+      db: serverDeps.database.db,
+      pool: serverDeps.database.pool,
+      blobs: serverDeps.blobs,
       uploadOrphanHours: uploadSettings.orphanHours,
       hourUtc: config.retentionHourUtc,
       paused: config.retentionPaused,
@@ -213,9 +230,9 @@ const retentionJob = deps
   : undefined;
 retentionJob?.start();
 // Pending approvals past their 1 h TTL whose waiting replica is gone (D29, KOBE-37).
-deps?.approvals.start();
+serverDeps?.approvals.start();
 // Budgets: spend hints from the model gateway and a sweep over every team (KOBE-42).
-deps?.budgets.start();
+serverDeps?.budgets.start();
 isolation.start().catch((err: unknown) => logger.error({ err }, "isolation check failed"));
 
 // Blocked egress attempts → `egress.blocked` run events (KOBE-38); every server replica listens.
@@ -268,12 +285,19 @@ if (config.process === "server" && !modelsConfig) {
   logger.warn("KOBE_BIFROST_URL is not set: the model gateway is not configured");
 }
 
-// Sandbox provider (KOBE-22); the scheduler starts sandboxes through it from KOBE-64 on.
-const sandbox =
-  config.process === "server"
-    ? createSandboxRuntime(process.env, isolation, deps?.database.db)
-    : undefined;
-if (config.process === "server" && !sandbox) {
+// Sandbox provider (KOBE-22): the server and the scheduler (scheduled runs, KOBE-174) both start
+// sandboxes through it.
+// The scheduler gets the provider only: it wakes sandboxes but holds no session-token key (tokens
+// are signed on the server's sandbox listener and wire), so a compromised scheduler can't forge them.
+const sandbox = isServer
+  ? createSandboxRuntime(process.env, isolation, deps?.database.db)
+  : undefined;
+const providerRuntime =
+  sandbox ??
+  (isServer
+    ? undefined
+    : createSandboxRuntime(process.env, isolation, deps?.database.db, { providerOnly: true }));
+if (!providerRuntime) {
   logger.error(
     "KOBE_SANDBOX_CONFIG is not set: sandboxes are disabled (install with the Helm chart)",
   );
@@ -283,7 +307,7 @@ if (config.process === "server" && !sandbox) {
 // sandboxes never hold object-store credentials. Off without a bucket (s3.bucket) or when disabled.
 const syncSettings = sandbox?.settings.workspaceSync;
 const workspaceSync =
-  sandbox && deps && s3 && objectStore && syncSettings?.enabled
+  isServer && sandbox && deps && s3 && objectStore && syncSettings?.enabled
     ? createWorkspaceSync({
         db: deps.database.db,
         objects: objectStore,
@@ -328,7 +352,7 @@ const stopCollector = workspaceSync?.startCollector((syncSettings?.collectSecond
 
 // Pre-publish Orbit evals (KOBE-93): Jobs in team namespaces, through the sandbox provider.
 const evalRunner =
-  sandbox && deps
+  isServer && sandbox && deps
     ? new EvalRunner({
         db: deps.database.db,
         kube: sandbox.kube,
@@ -340,10 +364,10 @@ const evalRunner =
       })
     : undefined;
 
-// The scheduler serves health endpoints only (its jobs arrive in KOBE-64).
+// The scheduler serves health endpoints only: no user API (it has no auth), just its runner below.
 const server = serve(
   {
-    fetch: createApp(deps, {
+    fetch: createApp(isServer ? deps : undefined, {
       isolation,
       ...(evalRunner ? { evals: evalRunner } : {}),
       ...(workspaceSync ? { workspaceFiles: { sync: workspaceSync, waker } } : {}),
@@ -356,32 +380,35 @@ const server = serve(
 );
 
 // Sandbox-facing listener: the only server port the sandbox NetworkPolicy allows (no user API).
-const sandboxServer = sandbox
-  ? serve(
-      {
-        fetch: createSandboxApp({
-          ...sandbox,
-          sessionTokenTtlSeconds: config.sessionTokenTtlSeconds,
-          ...(workspaceSync && sandboxAuth ? { workspace: workspaceSync.routes(sandboxAuth) } : {}),
-          // Skill bundles (KOBE-82): served from the same object store, to live sandboxes only.
-          ...(deps?.blobs && sandboxAuth
-            ? {
-                skills: skillSandboxRoutes({
-                  db: deps.database.db,
-                  blobs: deps.blobs,
-                  authenticate: sandboxAuth,
-                  log: logger,
-                }),
-              }
-            : {}),
-        }).fetch,
-        port: sandbox.settings.endpoints.server.targetPort,
-        // Workspace uploads (KOBE-27) may take a while: up to 1 GiB per file.
-        serverOptions: { requestTimeout: 60 * 60_000 },
-      },
-      (info) => logger.info({ port: info.port }, "sandbox listener"),
-    )
-  : undefined;
+const sandboxServer =
+  isServer && sandbox
+    ? serve(
+        {
+          fetch: createSandboxApp({
+            ...sandbox,
+            sessionTokenTtlSeconds: config.sessionTokenTtlSeconds,
+            ...(workspaceSync && sandboxAuth
+              ? { workspace: workspaceSync.routes(sandboxAuth) }
+              : {}),
+            // Skill bundles (KOBE-82): served from the same object store, to live sandboxes only.
+            ...(deps?.blobs && sandboxAuth
+              ? {
+                  skills: skillSandboxRoutes({
+                    db: deps.database.db,
+                    blobs: deps.blobs,
+                    authenticate: sandboxAuth,
+                    log: logger,
+                  }),
+                }
+              : {}),
+          }).fetch,
+          port: sandbox.settings.endpoints.server.targetPort,
+          // Workspace uploads (KOBE-27) may take a while: up to 1 GiB per file.
+          serverOptions: { requestTimeout: 60 * 60_000 },
+        },
+        (info) => logger.info({ port: info.port }, "sandbox listener"),
+      )
+    : undefined;
 // The sandbox wire (KOBE-24) on the sandbox listener only — never on the user-facing app.
 const liveness = sandbox && deps ? providerLiveness(sandbox.provider, deps.database.db) : undefined;
 if (sandbox && sandboxServer && deps && liveness) {
@@ -393,7 +420,7 @@ if (sandbox && sandboxServer && deps && liveness) {
 // Internal listener (KOBE-58): the MCP proxy's policy re-check. Its own port, admitted by the
 // release NetworkPolicy from the MCP proxy only, and keyed (routes/internal.ts).
 const internalServer =
-  sandbox && deps && liveness && config.mcpProxyInternalKey
+  isServer && sandbox && deps && liveness && config.mcpProxyInternalKey
     ? serve(
         {
           fetch: createInternalApp({
@@ -410,20 +437,20 @@ const internalServer =
         (info) => logger.info({ port: info.port }, "internal listener"),
       )
     : undefined;
-if (sandbox && deps && !config.mcpProxyInternalKey) {
+if (isServer && sandbox && deps && !config.mcpProxyInternalKey) {
   logger.error(
     "KOBE_MCP_PROXY_INTERNAL_KEY is not set: MCP calls are refused (install with the chart)",
   );
 }
 // Hibernation and wake (KOBE-25, D14): the router wakes sandboxes it finds disconnected; every
 // replica sweeps for idle ones (the sandboxes row lock keeps replicas from colliding).
-if (sandbox && deps) deps.offboarding.setProvider(sandbox.provider);
+if (providerRuntime && deps) deps.offboarding.setProvider(providerRuntime.provider);
 const lifecycle =
-  sandbox && deps
+  providerRuntime && deps
     ? createSandboxLifecycle({
         db: deps.database.db,
-        provider: sandbox.provider,
-        idleMinutes: sandbox.settings.hibernation.idleMinutes,
+        provider: providerRuntime.provider,
+        idleMinutes: providerRuntime.settings.hibernation.idleMinutes,
         // A returning member's offboarded sandbox is replaced by a new one (KOBE-28, D12).
         reinstate: (target) => deps.offboarding.reinstate(target),
       })
@@ -432,7 +459,7 @@ if (lifecycle) waker.set(lifecycle.waker);
 // Team namespaces follow the server version (KOBE-115): reconciled at start and on an interval,
 // one replica at a time. Awake sandboxes under changed NetworkPolicies are flagged, not killed.
 const stopTeamReconciler =
-  sandbox && deps
+  isServer && sandbox && deps
     ? sandbox.startTeamReconciler({
         lock: createPgReconcileLock(deps.database.pool, (err) =>
           logger.warn({ err }, "team reconcile lock connection problem"),
@@ -485,11 +512,11 @@ const stopConnectorRefresh =
       })
     : undefined;
 const stopHibernation =
-  lifecycle && sandbox?.settings.hibernation.enabled
+  isServer && lifecycle && sandbox?.settings.hibernation.enabled
     ? lifecycle.start(sandbox.settings.hibernation.sweepSeconds * 1000)
     : undefined;
 // Deletes sandbox pods found outside the verified isolation runtime (startup + every minute).
-const stopReconciler = sandbox?.startReconciler((result) => {
+const stopReconciler = (isServer ? sandbox : undefined)?.startReconciler((result) => {
   if (result.deleted.length > 0) {
     logger.error(
       { deleted: result.deleted, reason: result.reason },
@@ -497,6 +524,27 @@ const stopReconciler = sandbox?.startReconciler((result) => {
     );
   }
 });
+
+// Scheduled runs (KOBE-174, D32): every scheduler replica ticks; each due occurrence is claimed
+// under a row lease and a unique index, so it fires exactly once across replicas. Without a sandbox
+// provider (KOBE_SANDBOX_CONFIG) nothing could run, so the runner stays off rather than creating
+// runs that fail.
+const schedulerRunner =
+  !isServer && deps && providerRuntime
+    ? new SchedulerRunner({
+        db: deps.database.db,
+        runs: deps.runs,
+        graceMs: config.scheduler.graceMinutes * 60_000,
+      })
+    : undefined;
+schedulerRunner?.start(config.scheduler.tickSeconds * 1000);
+// Where a scheduled run ends (KOBE-178 reports skipped actions, KOBE-179 notifies): subscribe with
+// onScheduledRunEnded(deps.runs, ...) in the process that should react. Nothing reacts yet.
+const stopRunHook = deps
+  ? onScheduledRunEnded(deps.runs, (t) =>
+      logger.debug({ run_id: t.run.run_id, status: t.to }, "scheduled run ended"),
+    )
+  : undefined;
 
 // Evals whose driver died with a server (restart mid-eval) are finished or errored by any replica.
 const evalSweep = evalRunner
@@ -509,6 +557,8 @@ evalSweep?.unref();
 function shutdown(signal: string): void {
   logger.info({ signal }, "shutting down");
   isolation.stop();
+  schedulerRunner?.stop();
+  stopRunHook?.();
   stopReconciler?.();
   stopTeamReconciler?.();
   stopOffboarding?.();

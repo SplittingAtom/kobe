@@ -375,6 +375,16 @@
           "type": "integer",
           "minimum": 1
         },
+        "tickSeconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 3600
+        },
+        "catchUpGraceMinutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1440
+        },
         "resources": {
           "$ref": "#/$defs/resources"
         }
