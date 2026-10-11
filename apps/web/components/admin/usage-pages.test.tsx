@@ -2,9 +2,9 @@
 import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { InstallUsagePage } from "./install/usage-page";
+import { SiteUsagePage } from "./site/usage-page";
 import { TeamUsagePage } from "./team/usage-page";
-import { TEAM, renderInstall, renderTeam } from "./testing";
+import { TEAM, renderSite, renderTeam } from "./testing";
 
 const totals = (cost: number, calls: number) => ({
   calls,
@@ -76,10 +76,10 @@ describe("usage pages (KOBE-43)", () => {
       ...REPORT,
       by_team: [{ team_id: "t-1", slug: "fin", name: "Finance", ...totals(4.5, 3) }],
     });
-    renderInstall(<InstallUsagePage />);
+    renderSite(<SiteUsagePage />);
     const byTeam = await screen.findByRole("table", { name: "By team" });
     expect(within(byTeam).getByText("Finance")).toBeTruthy();
-    // KOBE-42: the install budget form sits on the same page.
+    // KOBE-42: the site budget form sits on the same page.
     expect(await screen.findByRole("button", { name: "Save site budget" })).toBeTruthy();
   });
 

@@ -1,6 +1,6 @@
 /** Team console: break-glass on this team (`/v1/team/break-glass`, team.audit.read). */
 import { apiRequest, type ApiResult } from "../../../api/client";
-import type { GrantStatus } from "../install/break-glass";
+import type { GrantStatus } from "../site/break-glass";
 
 export interface TeamGrant {
   readonly id: string;

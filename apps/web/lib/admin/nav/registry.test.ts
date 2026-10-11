@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CONSOLE_SEGMENTS,
   CONSOLE_TITLES,
-  INSTALL_SECTIONS,
+  SITE_SECTIONS,
   TEAM_SECTIONS,
   canOpenConsole,
   consoleHref,
@@ -16,18 +16,18 @@ import {
   visibleSections,
 } from "./registry";
 import {
-  defineInstallSection,
+  defineSiteSection,
   READY,
   type ConsoleAccess,
   type ConsoleSection,
-  type InstallAccess,
+  type SiteAccess,
   type TeamAccess,
 } from "./types";
 import { must } from "../../testing/must";
 
 const user = { id: "u-1", name: "Ada", email: "ada@example.com" };
-const install = (siteRole: InstallAccess["siteRole"]): InstallAccess => ({
-  console: "install",
+const site = (siteRole: SiteAccess["siteRole"]): SiteAccess => ({
+  console: "site",
   user,
   siteRole,
 });
@@ -77,12 +77,12 @@ const team = (role: TeamAccess["role"], permissions: string[]): TeamAccess => ({
 
 describe("registry contents", () => {
   it("has valid, unique entries in both consoles", () => {
-    expect(sectionProblems("install", INSTALL_SECTIONS)).toEqual([]);
+    expect(sectionProblems("site", SITE_SECTIONS)).toEqual([]);
     expect(sectionProblems("team", TEAM_SECTIONS)).toEqual([]);
   });
 
   // Derived from the filesystem, so a ticket that builds a section edits no shared test list.
-  it.each(["install", "team"] as const)(
+  it.each(["site", "team"] as const)(
     "%s: a READY section has its page; a placeholder has none and names its ticket",
     (kind) => {
       for (const s of sectionsOf(kind)) {
@@ -102,7 +102,7 @@ describe("registry contents", () => {
     },
   );
 
-  it.each(["install", "team"] as const)("%s: every page directory belongs to a section", (kind) => {
+  it.each(["site", "team"] as const)("%s: every page directory belongs to a section", (kind) => {
     const dir = new URL(`../../../app/admin/${CONSOLE_SEGMENTS[kind]}/`, import.meta.url);
     const pages = readdirSync(dir, { withFileTypes: true })
       .filter((d) => d.isDirectory() && !d.name.startsWith("["))
@@ -112,7 +112,7 @@ describe("registry contents", () => {
       expect(ids, `app/admin/${CONSOLE_SEGMENTS[kind]}/${page} has no nav entry`).toContain(page);
   });
 
-  it.each(["install", "team"] as const)(
+  it.each(["site", "team"] as const)(
     "%s: every section file is exported from the folder's index.ts",
     async (kind) => {
       const dir = new URL(`./${kind}/`, import.meta.url);
@@ -139,8 +139,8 @@ describe("registry contents", () => {
     },
   );
 
-  it("covers every install and team area of spec §6.1", () => {
-    const install = INSTALL_SECTIONS.map((s) => s.id);
+  it("covers every site and team area of spec §6.1", () => {
+    const site = SITE_SECTIONS.map((s) => s.id);
     for (const id of [
       "users",
       "invites",
@@ -156,7 +156,7 @@ describe("registry contents", () => {
       "audit",
       "backup",
     ]) {
-      expect(install).toContain(id);
+      expect(site).toContain(id);
     }
     const teamIds = TEAM_SECTIONS.map((s) => s.id);
     for (const id of [
@@ -176,14 +176,14 @@ describe("registry contents", () => {
   });
 
   it("orders by group then order, regardless of barrel line order", () => {
-    expect(INSTALL_SECTIONS.slice(0, 3).map((s) => s.id)).toEqual(["users", "invites", "roles"]);
+    expect(SITE_SECTIONS.slice(0, 3).map((s) => s.id)).toEqual(["users", "invites", "roles"]);
     expect(TEAM_SECTIONS.slice(0, 3).map((s) => s.id)).toEqual(["members", "invites", "agents"]);
   });
 });
 
 describe("sectionProblems", () => {
   it("catches duplicates, bad segments and entries filed under the wrong console", () => {
-    const ok = defineInstallSection({
+    const ok = defineSiteSection({
       id: "a",
       label: "A",
       description: "d",
@@ -204,11 +204,11 @@ describe("sectionProblems", () => {
 });
 
 describe("role gating", () => {
-  it("opens the install console to the Owner and Admins only", () => {
-    expect(canOpenConsole(install("owner"))).toBe(true);
-    expect(canOpenConsole(install("admin"))).toBe(true);
-    expect(canOpenConsole(install("user"))).toBe(false);
-    expect(visibleSections(install("user"))).toEqual([]);
+  it("opens the site console to the Owner and Admins only", () => {
+    expect(canOpenConsole(site("owner"))).toBe(true);
+    expect(canOpenConsole(site("admin"))).toBe(true);
+    expect(canOpenConsole(site("user"))).toBe(false);
+    expect(visibleSections(site("user"))).toEqual([]);
   });
 
   it("opens the team console to team admins and, for the agent builder, to builders", () => {
@@ -224,14 +224,14 @@ describe("role gating", () => {
   });
 
   it("never lets one console's access open the other's sections", () => {
-    const admin: ConsoleAccess = install("owner");
+    const admin: ConsoleAccess = site("owner");
     for (const s of TEAM_SECTIONS) expect(canSee(s, admin)).toBe(false);
     const teamAdmin = team("team_admin", TEAM_ADMIN);
-    for (const s of INSTALL_SECTIONS) expect(canSee(s, teamAdmin)).toBe(false);
+    for (const s of SITE_SECTIONS) expect(canSee(s, teamAdmin)).toBe(false);
   });
 
   it("honours owner-only sections", () => {
-    const ownerOnly = defineInstallSection({
+    const ownerOnly = defineSiteSection({
       id: "x",
       label: "X",
       description: "d",
@@ -240,8 +240,8 @@ describe("role gating", () => {
       minRole: "owner",
       status: READY,
     });
-    expect(canSee(ownerOnly, install("owner"))).toBe(true);
-    expect(canSee(ownerOnly, install("admin"))).toBe(false);
+    expect(canSee(ownerOnly, site("owner"))).toBe(true);
+    expect(canSee(ownerOnly, site("admin"))).toBe(false);
   });
 
   it("shows a team section only with its permission", () => {
@@ -253,21 +253,21 @@ describe("role gating", () => {
 
 describe("paths and groups", () => {
   it("maps sections to /admin/<console>/<id> and back", () => {
-    const users = must(INSTALL_SECTIONS.find((s) => s.id === "users"));
-    // KOBE-257: the install console is the Site console, served under /admin/site.
+    const users = must(SITE_SECTIONS.find((s) => s.id === "users"));
+    // KOBE-257: the Site console is served under /admin/site.
     expect(sectionHref(users)).toBe("/admin/site/users");
-    expect(consoleHref("install")).toBe("/admin/site");
-    expect(CONSOLE_TITLES.install).toBe("Site console");
-    expect(sectionForPath("install", "/admin/site/users")).toBe(users);
-    expect(sectionForPath("install", "/admin/site/users/abc")).toBe(users);
-    expect(sectionForPath("install", "/admin/site")).toBeNull();
-    expect(sectionForPath("install", "/admin/site/nope")).toBeNull();
-    expect(sectionForPath("install", "/admin/install/users")).toBeNull();
+    expect(consoleHref("site")).toBe("/admin/site");
+    expect(CONSOLE_TITLES.site).toBe("Site console");
+    expect(sectionForPath("site", "/admin/site/users")).toBe(users);
+    expect(sectionForPath("site", "/admin/site/users/abc")).toBe(users);
+    expect(sectionForPath("site", "/admin/site")).toBeNull();
+    expect(sectionForPath("site", "/admin/site/nope")).toBeNull();
+    expect(sectionForPath("site", "/admin/install/users")).toBeNull();
     expect(sectionForPath("team", "/admin/site/users")).toBeNull();
   });
 
   it("groups consecutive sections and keeps group order", () => {
-    const groups = groupSections(INSTALL_SECTIONS);
+    const groups = groupSections(SITE_SECTIONS);
     expect(groups.map((g) => g.group)).toEqual([
       "People",
       "Teams and agents",
@@ -276,7 +276,7 @@ describe("paths and groups", () => {
       "Governance",
       "System",
     ]);
-    expect(groups.flatMap((g) => g.sections)).toEqual(INSTALL_SECTIONS);
+    expect(groups.flatMap((g) => g.sections)).toEqual(SITE_SECTIONS);
   });
 });
 

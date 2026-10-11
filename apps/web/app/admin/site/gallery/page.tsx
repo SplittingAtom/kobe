@@ -1,4 +1,4 @@
-import { GalleryPage } from "../../../../components/admin/install/gallery-page";
+import { GalleryPage } from "../../../../components/admin/site/gallery-page";
 
 export default function Page() {
   return <GalleryPage />;

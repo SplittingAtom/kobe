@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { getIsolation } from "../../lib/admin/api/install/isolation";
+import { getIsolation } from "../../lib/admin/api/site/isolation";
 import { consoleHref } from "../../lib/admin/nav/registry";
 import styles from "./admin.module.css";
 
@@ -39,7 +39,7 @@ export function IsolationBanner({ hidden }: { readonly hidden: boolean }) {
   return (
     <div role="alert" className={styles.banner}>
       <strong>Agents are disabled:</strong> the isolation runtime is missing.{" "}
-      <Link href={`${consoleHref("install")}/isolation`}>See how to fix it</Link>.
+      <Link href={`${consoleHref("site")}/isolation`}>See how to fix it</Link>.
     </div>
   );
 }

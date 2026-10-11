@@ -14,7 +14,7 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: [...SECURITY_HEADERS] }];
   },
-  // KOBE-257: the install console is the Site console; old links and bookmarks still land.
+  // KOBE-257: the install console became the Site console; old /admin/install links and bookmarks still land.
   async redirects() {
     return consoleRedirects();
   },

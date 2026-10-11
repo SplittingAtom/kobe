@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../testing/must";
-import * as install from "./install/policy";
+import * as site from "./site/policy";
 import * as team from "./team/policy";
 
 function stub(status: number, body?: unknown) {
@@ -26,10 +26,10 @@ const RULE = {
   expires_at: null,
 };
 
-describe("install policy floor API", () => {
+describe("site policy floor API", () => {
   it("lists rules camelized, keeping arg pattern pointers", async () => {
     const fetchFn = stub(200, { rules: [RULE] });
-    const res = await install.listInstallRules();
+    const res = await site.listSiteRules();
     expect(res).toMatchObject({
       ok: true,
       data: [{ toolGlob: "mcp__github__*", argPattern: { "/repo_name": "secret-*" } }],
@@ -39,7 +39,7 @@ describe("install policy floor API", () => {
 
   it("creates with the strict snake_case body", async () => {
     const fetchFn = stub(201, { rule: RULE });
-    await install.createInstallRule({
+    await site.createSiteRule({
       effect: "ask",
       toolGlob: "bash",
       note: null,
@@ -58,10 +58,10 @@ describe("install policy floor API", () => {
 
   it("deletes and reads/writes settings", async () => {
     let fetchFn = stub(204);
-    await install.deleteInstallRule("r 1");
+    await site.deleteSiteRule("r 1");
     expect(must(fetchFn.mock.calls[0])[0]).toBe("/v1/site/policy/rules/r%201");
     fetchFn = stub(200, { promptSandboxWrites: true });
-    await install.putPolicySettings({ promptSandboxWrites: true });
+    await site.putPolicySettings({ promptSandboxWrites: true });
     const [url, init] = must(fetchFn.mock.calls[0]);
     expect([url, init?.method, init?.body]).toEqual([
       "/v1/site/policy/settings",

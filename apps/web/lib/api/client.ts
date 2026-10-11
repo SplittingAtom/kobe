@@ -54,9 +54,9 @@ const SHOWN_5XX_CODES: ReadonlySet<string> = new Set([
   "isolation_unavailable",
   "sandbox_unavailable",
   "search_timeout",
-  // KOBE-39: the install has no header-injection secret.
+  // KOBE-39: the site has no header-injection secret.
   "header_injection_unavailable",
-  // Connector API keys (KOBE-108): the install has no envelope key to store them with.
+  // Connector API keys (KOBE-108): the site has no envelope key to store them with.
   "credentials_unavailable",
   // Model admin (KOBE-40/44): fixed server messages naming the way out.
   "models_not_configured",

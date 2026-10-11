@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   TEAM_SLUG_RE,
   canChangeActivation,
-  canManageInstallRoles,
+  canManageSiteRoles,
   canTurnOffRequiredTwoFactor,
   slugFromTeamName,
 } from "./rules";
-import { TEAM_SLUG_PATTERN } from "./api/install/teams";
+import { TEAM_SLUG_PATTERN } from "./api/site/teams";
 
 describe("canChangeActivation", () => {
   const owner = { userId: "o", role: "owner" as const };
@@ -27,8 +27,8 @@ describe("canChangeActivation", () => {
 
 describe("owner-only actions", () => {
   it("are the Owner's", () => {
-    expect(canManageInstallRoles("owner")).toBe(true);
-    expect(canManageInstallRoles("admin")).toBe(false);
+    expect(canManageSiteRoles("owner")).toBe(true);
+    expect(canManageSiteRoles("admin")).toBe(false);
     expect(canTurnOffRequiredTwoFactor("owner")).toBe(true);
     expect(canTurnOffRequiredTwoFactor("admin")).toBe(false);
   });

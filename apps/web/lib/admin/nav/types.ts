@@ -1,6 +1,6 @@
 /**
  * Admin console navigation (KOBE-20). Each console section is one file under `install/` or
- * `team/` exporting one `defineInstallSection(…)` / `defineTeamSection(…)`, listed with one line in
+ * `team/` exporting one `defineSiteSection(…)` / `defineTeamSection(…)`, listed with one line in
  * that folder's `index.ts`. Order comes from `group` + `order`, never from line order.
  *
  * The barrels use git's `union` merge driver (.gitattributes). That only helps a local
@@ -14,10 +14,10 @@
  */
 import type { TeamRole } from "../../teams";
 
-export type ConsoleKind = "install" | "team";
+export type ConsoleKind = "site" | "team";
 
-/** Install role as `/v1/me` reports it (null there means a plain user). */
-export type InstallRole = "owner" | "admin" | "user";
+/** Site role as `/v1/me` reports it (null there means a plain user). */
+export type SiteRole = "owner" | "admin" | "user";
 
 /** Ticket ids for placeholders: `KOBE-44`. */
 export type TicketId = `KOBE-${number}`;
@@ -25,7 +25,7 @@ export type TicketId = `KOBE-${number}`;
 export type SectionStatus =
   { readonly kind: "ready" } | { readonly kind: "placeholder"; readonly ticket: TicketId };
 
-export const INSTALL_GROUPS = [
+export const SITE_GROUPS = [
   "People",
   "Teams and agents",
   "Models and connectors",
@@ -42,7 +42,7 @@ export const TEAM_GROUPS = [
   "Governance",
 ] as const;
 
-export type InstallGroup = (typeof INSTALL_GROUPS)[number];
+export type SiteGroup = (typeof SITE_GROUPS)[number];
 export type TeamGroup = (typeof TEAM_GROUPS)[number];
 
 interface SectionBase {
@@ -56,10 +56,10 @@ interface SectionBase {
   readonly status: SectionStatus;
 }
 
-export interface InstallSection extends SectionBase {
-  readonly console: "install";
-  readonly group: InstallGroup;
-  /** Least install role that may open it, mirroring the route's `install.*` permission. */
+export interface SiteSection extends SectionBase {
+  readonly console: "site";
+  readonly group: SiteGroup;
+  /** Least site role that may open it, mirroring the route's `install.*` permission. */
   readonly minRole: "admin" | "owner";
 }
 
@@ -70,10 +70,10 @@ export interface TeamSection extends SectionBase {
   readonly permission: string;
 }
 
-export type ConsoleSection = InstallSection | TeamSection;
+export type ConsoleSection = SiteSection | TeamSection;
 
-export function defineInstallSection(section: Omit<InstallSection, "console">): InstallSection {
-  return { console: "install", ...section };
+export function defineSiteSection(section: Omit<SiteSection, "console">): SiteSection {
+  return { console: "site", ...section };
 }
 
 export function defineTeamSection(section: Omit<TeamSection, "console">): TeamSection {
@@ -93,10 +93,10 @@ export interface CurrentUser {
   readonly email: string;
 }
 
-export interface InstallAccess {
-  readonly console: "install";
+export interface SiteAccess {
+  readonly console: "site";
   readonly user: CurrentUser;
-  readonly siteRole: InstallRole;
+  readonly siteRole: SiteRole;
 }
 
 export interface TeamAccess {
@@ -107,4 +107,4 @@ export interface TeamAccess {
   readonly permissions: readonly string[];
 }
 
-export type ConsoleAccess = InstallAccess | TeamAccess;
+export type ConsoleAccess = SiteAccess | TeamAccess;

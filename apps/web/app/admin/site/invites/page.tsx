@@ -1,5 +1,5 @@
-import { InstallInvitesPage } from "../../../../components/admin/install/invites-page";
+import { SiteInvitesPage } from "../../../../components/admin/site/invites-page";
 
 export default function Page() {
-  return <InstallInvitesPage />;
+  return <SiteInvitesPage />;
 }

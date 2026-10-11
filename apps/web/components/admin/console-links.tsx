@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { fetchInstallAccess, fetchTeamAccess } from "../../lib/admin/api/access";
+import { fetchSiteAccess, fetchTeamAccess } from "../../lib/admin/api/access";
 import { canOpenConsole, consoleHref } from "../../lib/admin/nav/registry";
 import type { ConsoleKind } from "../../lib/admin/nav/types";
 import { ACTIVE_TEAM_EVENT } from "../../lib/teams";
@@ -25,11 +25,11 @@ export function ConsoleLinks() {
 
   useEffect(() => {
     let current = true;
-    Promise.all([fetchInstallAccess(), fetchTeamAccess()]).then(
-      ([install, team]) => {
+    Promise.all([fetchSiteAccess(), fetchTeamAccess()]).then(
+      ([site, team]) => {
         if (!current) return;
         const kinds: ConsoleKind[] = [];
-        if (install.ok && canOpenConsole(install.data)) kinds.push("install");
+        if (site.ok && canOpenConsole(site.data)) kinds.push("site");
         if (team.ok && canOpenConsole(team.data)) kinds.push("team");
         setOpen(kinds);
       },
@@ -44,9 +44,9 @@ export function ConsoleLinks() {
   return (
     <nav aria-label="Administration">
       <ul>
-        {open.includes("install") && (
+        {open.includes("site") && (
           <li>
-            <Link href={consoleHref("install")}>Site console</Link>
+            <Link href={consoleHref("site")}>Site console</Link>
           </li>
         )}
         {open.includes("team") && (

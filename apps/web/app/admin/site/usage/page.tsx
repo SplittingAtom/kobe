@@ -1,5 +1,5 @@
-import { InstallUsagePage } from "../../../../components/admin/install/usage-page";
+import { SiteUsagePage } from "../../../../components/admin/site/usage-page";
 
 export default function Page() {
-  return <InstallUsagePage />;
+  return <SiteUsagePage />;
 }

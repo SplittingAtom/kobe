@@ -1,7 +1,7 @@
 /** Who the caller is to each console, as the server says (never cached client state). */
 import { apiRequest, type ApiResult } from "../../api/client";
 import type { TeamRole } from "../../teams";
-import type { CurrentUser, InstallAccess, InstallRole, TeamAccess } from "../nav/types";
+import type { CurrentUser, SiteAccess, SiteRole, TeamAccess } from "../nav/types";
 
 interface MeBody {
   readonly user: CurrentUser;
@@ -14,22 +14,20 @@ interface TeamBody {
   readonly permissions: readonly string[];
 }
 
-function installRoleOf(role: MeBody["siteRole"]): InstallRole {
+function siteRoleOf(role: MeBody["siteRole"]): SiteRole {
   return role === "owner" || role === "admin" ? role : "user";
 }
 
-export async function fetchInstallAccess(
-  fetchFn?: typeof fetch,
-): Promise<ApiResult<InstallAccess>> {
+export async function fetchSiteAccess(fetchFn?: typeof fetch): Promise<ApiResult<SiteAccess>> {
   const me = await apiRequest<MeBody>("/v1/me", { fetchFn });
   if (!me.ok) return me;
   const { id, name, email } = me.data.user;
   return {
     ...me,
     data: {
-      console: "install",
+      console: "site",
       user: { id, name, email },
-      siteRole: installRoleOf(me.data.siteRole),
+      siteRole: siteRoleOf(me.data.siteRole),
     },
   };
 }

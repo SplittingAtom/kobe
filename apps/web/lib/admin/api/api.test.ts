@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchInstallAccess, fetchTeamAccess } from "./access";
-import * as gallery from "./install/gallery";
-import * as invites from "./install/invites";
-import * as isolation from "./install/isolation";
-import * as roles from "./install/roles";
-import * as settings from "./install/settings";
-import * as teams from "./install/teams";
-import * as users from "./install/users";
+import { fetchSiteAccess, fetchTeamAccess } from "./access";
+import * as gallery from "./site/gallery";
+import * as invites from "./site/invites";
+import * as isolation from "./site/isolation";
+import * as roles from "./site/roles";
+import * as settings from "./site/settings";
+import * as teams from "./site/teams";
+import * as users from "./site/users";
 import * as teamAgents from "./team/agents";
 import * as teamInvites from "./team/invites";
 import * as members from "./team/members";
@@ -39,10 +39,10 @@ const me = (siteRole: string | null) => ({
 });
 
 describe("console access", () => {
-  it("reads the install role from /v1/me; null is a plain user", async () => {
+  it("reads the site role from /v1/me; null is a plain user", async () => {
     stubApi({ "GET /v1/me": [200, me(null)] });
-    const res = await fetchInstallAccess();
-    expect(res).toMatchObject({ ok: true, data: { console: "install", siteRole: "user" } });
+    const res = await fetchSiteAccess();
+    expect(res).toMatchObject({ ok: true, data: { console: "site", siteRole: "user" } });
   });
 
   it("reads team role and permissions from /v1/team", async () => {
@@ -90,19 +90,14 @@ describe("install resources call the right routes", () => {
       {},
     ],
     ["reactivate", () => users.setUserActive("u2", true), "POST /v1/site/users/u2/reactivate", {}],
-    [
-      "listInvites",
-      () => invites.listInstallInvites(),
-      "GET /v1/site/invites",
-      { invitations: [] },
-    ],
-    ["invite", () => invites.createInstallInvite("b@x.io"), "POST /v1/site/invites", {}],
-    ["resend", () => invites.resendInstallInvite("i1"), "POST /v1/site/invites/i1/resend", {}],
-    ["revoke", () => invites.revokeInstallInvite("i1"), "DELETE /v1/site/invites/i1", undefined],
-    ["roles", () => roles.listInstallRoles(), "GET /v1/site/roles", { roles: [] }],
-    ["grant", () => roles.setInstallRole("u2", "admin"), "PUT /v1/site/roles/u2", {}],
+    ["listInvites", () => invites.listSiteInvites(), "GET /v1/site/invites", { invitations: [] }],
+    ["invite", () => invites.createSiteInvite("b@x.io"), "POST /v1/site/invites", {}],
+    ["resend", () => invites.resendSiteInvite("i1"), "POST /v1/site/invites/i1/resend", {}],
+    ["revoke", () => invites.revokeSiteInvite("i1"), "DELETE /v1/site/invites/i1", undefined],
+    ["roles", () => roles.listSiteRoles(), "GET /v1/site/roles", { roles: [] }],
+    ["grant", () => roles.setSiteRole("u2", "admin"), "PUT /v1/site/roles/u2", {}],
     ["transfer", () => roles.transferOwnership("u2"), "POST /v1/site/roles/transfer-ownership", {}],
-    ["teams", () => teams.listInstallTeams(), "GET /v1/site/teams", { teams: [] }],
+    ["teams", () => teams.listSiteTeams(), "GET /v1/site/teams", { teams: [] }],
     [
       "createTeam",
       () => teams.createTeam({ slug: "fin", name: "Finance", adminUserId: "u2" }),
@@ -111,10 +106,10 @@ describe("install resources call the right routes", () => {
     ],
     ["rename", () => teams.renameTeam("t1", "Fin"), "PATCH /v1/site/teams/t1", { team: {} }],
     ["roster", () => teams.teamRoster("t1"), "GET /v1/site/teams/t1/members", { members: [] }],
-    ["settings", () => settings.getInstallSettings(), "GET /v1/site/settings", {}],
+    ["settings", () => settings.getSiteSettings(), "GET /v1/site/settings", {}],
     [
       "putSettings",
-      () => settings.putInstallSettings({ requireTwoFactor: true }),
+      () => settings.putSiteSettings({ requireTwoFactor: true }),
       "PUT /v1/site/settings",
       {},
     ],
@@ -137,7 +132,7 @@ describe("install resources call the right routes", () => {
       "PUT /v1/site/roles/u2": [200, {}],
     });
     await teams.createTeam({ slug: "fin", name: "Finance", adminUserId: "u2" });
-    await roles.setInstallRole("u2", "user");
+    await roles.setSiteRole("u2", "user");
     expect(JSON.parse(String(must(calls[0]).body))).toEqual({
       slug: "fin",
       name: "Finance",

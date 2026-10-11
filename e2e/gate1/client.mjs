@@ -1,5 +1,5 @@
 // Gate 1 (KOBE-1) harness, client side. Runs inside a Kobe server pod (`node --input-type=module
-// -e`, see e2e/gate1.sh), so it has the install's database URL and talks to the server through its
+// -e`, see e2e/gate1.sh), so it has the site's database URL and talks to the server through its
 // Service: requests spread over the server replicas like real users' do. Each simulated user sends
 // its own X-Forwarded-For address (TEST-NET-2), which the server trusts from the pod network, so
 // per-IP sign-in limits apply per user as they would behind the ingress.
@@ -7,7 +7,7 @@
 // Usage: node --input-type=module -e "$(cat e2e/gate1/client.mjs)" '<json config>'
 // The config's `mode` picks the step; every step prints `key=value` lines (and JSON lines for
 // trials) for e2e/gate1.sh to assert on. Nothing here bypasses the API except fixture setup
-// (install invitations are issued with the server's own function instead of a mail round trip).
+// (site invitations are issued with the server's own function instead of a mail round trip).
 
 const config = JSON.parse(process.argv[1] ?? "{}");
 const BASE = config.base;
@@ -215,9 +215,9 @@ async function fixtures() {
     const status = await clients.get(user.key).useTeam(teamIds[user.team]);
     out(`member_${user.key}`, status);
   }
-  // KOBE-41: each team's admin enables the install's `fast` model as the team default, so runs
+  // KOBE-41: each team's admin enables the site's `fast` model as the team default, so runs
   // get a real model (e2e/run.sh configured the catalog against the fake upstream). 404: no such
-  // catalog entry on this install (a real cluster's throwaway install): runs have no model.
+  // catalog entry on this site (a real cluster's throwaway install): runs have no model.
   for (const team of config.teams) {
     const admin = config.users.find((u) => u.team === team.key);
     const ac = clients.get(admin.key);
@@ -399,7 +399,7 @@ async function connections() {
   }
 }
 
-/** Sandbox-wire session tokens signed with the install's key (throwaway installs only). */
+/** Sandbox-wire session tokens signed with the site's key (throwaway installs only). */
 async function mint() {
   const { signSessionToken } = await import("/app/dist/sandbox/session-token.js");
   const { sessionKeyEnvName } = await import("/app/dist/sandbox/config.js");
@@ -426,7 +426,7 @@ async function mint() {
 // --- cross-team probe on the live install --------------------------------------------------
 
 /**
- * The cross-team probe against this install's real data (the CI `db` job runs the full suite on
+ * The cross-team probe against this site's real data (the CI `db` job runs the full suite on
  * seeded fixtures): every team table, read as the app role with raw SQL and no app filter.
  */
 async function probe() {

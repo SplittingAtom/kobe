@@ -8,7 +8,7 @@ type State =
   | { readonly step: "invalid" }
   | { readonly step: "form"; readonly token: string; readonly email: string };
 
-/** Accept an install invitation (U1): choose a name and password, then land signed in. */
+/** Accept a site invitation (U1): choose a name and password, then land signed in. */
 export default function InvitePage() {
   const [state, setState] = useState<State>({ step: "checking" });
   const [error, setError] = useState<string | null>(null);

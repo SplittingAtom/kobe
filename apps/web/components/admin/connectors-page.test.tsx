@@ -2,8 +2,8 @@
 import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ConnectorsPage } from "./install/connectors-page";
-import { renderInstall, stubApi } from "./testing";
+import { ConnectorsPage } from "./site/connectors-page";
+import { renderSite, stubApi } from "./testing";
 
 const BASE = "/v1/site/connectors";
 const connector = (over: Record<string, unknown> = {}) => ({
@@ -34,7 +34,7 @@ afterEach(() => {
 describe("Connector registry (KOBE-100)", () => {
   it("lists connectors with auth, status and icon", async () => {
     stubApi({ [`GET ${BASE}`]: [200, { connectors: [connector()] }] });
-    renderInstall(<ConnectorsPage />);
+    renderSite(<ConnectorsPage />);
     expect(await screen.findByRole("rowheader", { name: "github" })).toBeTruthy();
     expect(screen.getByText("https://mcp.github.example/mcp")).toBeTruthy();
     const table = within(screen.getByRole("table"));
@@ -45,7 +45,7 @@ describe("Connector registry (KOBE-100)", () => {
 
   it("says when nothing is registered", async () => {
     stubApi({ [`GET ${BASE}`]: [200, { connectors: [] }] });
-    renderInstall(<ConnectorsPage />);
+    renderSite(<ConnectorsPage />);
     expect(await screen.findByText("No connectors are registered.")).toBeTruthy();
   });
 
@@ -57,7 +57,7 @@ describe("Connector registry (KOBE-100)", () => {
       ],
       [`POST ${BASE}`]: [201, { connector: connector() }],
     });
-    renderInstall(<ConnectorsPage />);
+    renderSite(<ConnectorsPage />);
     await screen.findByText("No connectors are registered.");
     await userEvent.type(screen.getByLabelText("Name"), "github");
     await userEvent.type(screen.getByLabelText("Server URL"), "https://mcp.github.example/mcp");
@@ -79,7 +79,7 @@ describe("Connector registry (KOBE-100)", () => {
 
   it("checks the name before sending", async () => {
     const calls = stubApi({ [`GET ${BASE}`]: [200, { connectors: [] }] });
-    renderInstall(<ConnectorsPage />);
+    renderSite(<ConnectorsPage />);
     await screen.findByText("No connectors are registered.");
     await userEvent.type(screen.getByLabelText("Name"), "Bad Name");
     await userEvent.type(screen.getByLabelText("Server URL"), "https://x.example/mcp");
@@ -99,7 +99,7 @@ describe("Connector registry (KOBE-100)", () => {
         },
       ],
     });
-    renderInstall(<ConnectorsPage />);
+    renderSite(<ConnectorsPage />);
     await screen.findByText("No connectors are registered.");
     await userEvent.type(screen.getByLabelText("Name"), "meta");
     await userEvent.type(screen.getByLabelText("Server URL"), "https://169.254.169.254/x");
@@ -112,7 +112,7 @@ describe("Connector registry (KOBE-100)", () => {
       [`GET ${BASE}`]: [200, { connectors: [connector()] }],
       [`PATCH ${BASE}/c-1`]: [200, { connector: connector({ authKind: "api_key" }) }],
     });
-    renderInstall(<ConnectorsPage />);
+    renderSite(<ConnectorsPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Edit github" }));
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("github");
     await userEvent.selectOptions(screen.getByLabelText("Authentication"), "api_key");
@@ -127,7 +127,7 @@ describe("Connector registry (KOBE-100)", () => {
       [`GET ${BASE}`]: [200, { connectors: [connector()] }],
       [`PATCH ${BASE}/c-1`]: [200, { connector: connector({ status: "disabled" }) }],
     });
-    renderInstall(<ConnectorsPage />);
+    renderSite(<ConnectorsPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Disable github" }));
     await screen.findByText("Disabled.");
     expect(JSON.parse(String(calls.find((c) => c.method === "PATCH")?.body))).toEqual({
@@ -145,7 +145,7 @@ describe("Connector registry (KOBE-100)", () => {
       ],
       [`DELETE ${BASE}/c-1`]: [200, { removed: true, soft: true, teams: 2, message }],
     });
-    renderInstall(<ConnectorsPage />);
+    renderSite(<ConnectorsPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Remove github" }));
     expect(await screen.findByText(message)).toBeTruthy();
     expect(screen.getByText("No connectors are registered.")).toBeTruthy();
@@ -157,7 +157,7 @@ describe("Connector registry (KOBE-100)", () => {
       vi.fn(() => false),
     );
     const calls = stubApi({ [`GET ${BASE}`]: [200, { connectors: [connector()] }] });
-    renderInstall(<ConnectorsPage />);
+    renderSite(<ConnectorsPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Remove github" }));
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
   });
@@ -198,7 +198,7 @@ describe("Tool drift re-approval (KOBE-102)", () => {
 
   it("shows old and new definitions and approves one tool with the reviewed hash", async () => {
     const calls = stubApi(routes(["changed_tool"]));
-    renderInstall(<ConnectorsPage />);
+    renderSite(<ConnectorsPage />);
     await screen.findByText(/2 awaiting approval/);
     await userEvent.click(screen.getByRole("button", { name: /Review/ }));
     const article = await screen.findByRole("article", { name: "changed_tool" });
@@ -213,7 +213,7 @@ describe("Tool drift re-approval (KOBE-102)", () => {
 
   it("approves all pending tools at once", async () => {
     const calls = stubApi(routes(["changed_tool", "fresh_tool"]));
-    renderInstall(<ConnectorsPage />);
+    renderSite(<ConnectorsPage />);
     await userEvent.click(await screen.findByRole("button", { name: /Review/ }));
     await userEvent.click(await screen.findByRole("button", { name: "Approve all 2" }));
     const post = calls.find((c) => c.method === "POST");

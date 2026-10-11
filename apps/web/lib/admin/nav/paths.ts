@@ -3,15 +3,15 @@ import type { ConsoleKind } from "./types";
 
 export const CONSOLE_BASE = "/admin";
 
-/** URL segment per console: the install console is served as the Site console. */
+/** URL segment per console. */
 export const CONSOLE_SEGMENTS: Readonly<Record<ConsoleKind, string>> = {
-  install: "site",
+  site: "site",
   team: "team",
 };
 
 /** Segments a rename retired, with the console each now redirects to (old links keep working). */
 export const RETIRED_CONSOLE_SEGMENTS: Readonly<Record<string, ConsoleKind>> = {
-  install: "install",
+  install: "site",
 };
 
 export function consoleHref(kind: ConsoleKind): string {

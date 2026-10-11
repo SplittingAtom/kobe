@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Gate 1 (KOBE-1, Spine) against an installed Kobe: two teams of five users chat concurrently,
-# the cross-team probe on the install's own data, refresh mid-run resumes gapless, killing a
+# the cross-team probe on the site's own data, refresh mid-run resumes gapless, killing a
 # sandbox mid-run gives `interrupted` + Retry with history intact, and hibernated → first sandbox
 # answer over 20 trials. docs/gates/gate-1.md records what each check proves and what it does not.
 #
@@ -8,7 +8,7 @@
 #   KOBE_GATE1_NS=<release namespace> KOBE_GATE1_RELEASE=<release> e2e/gate1.sh
 # Non-destructive outside what it creates: users gate1-*@gate1.test, teams gate1-a/gate1-b (their
 # kobe-team-* namespaces and sandboxes, created by the server) and its own pods. It signs sandbox
-# wire tokens with the install's keys, so it refuses anything but a k3d context unless
+# wire tokens with the site's keys, so it refuses anything but a k3d context unless
 # KOBE_GATE1_CONTEXT names the context explicitly. Re-runnable: fixtures are reused.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -21,7 +21,7 @@ TRIALS="${KOBE_GATE1_TRIALS:-20}"
 P95_MAX="${KOBE_GATE1_P95_MS:-8000}"
 COLD_KEY="${KOBE_GATE1_COLD_USER:-c1}"
 # Model alias the fixtures make each team's default: CI's fake upstream (`fast`, set up by
-# e2e/run.sh) or a real install's catalog model (KOBE_GATE1_MODEL).
+# e2e/run.sh) or a real site's catalog model (KOBE_GATE1_MODEL).
 MODEL_ALIAS="${KOBE_GATE1_MODEL:-fast}"
 OWNER_EMAIL="${KOBE_GATE1_OWNER_EMAIL:-owner@e2e.test}"
 OWNER_PASSWORD="${KOBE_GATE1_OWNER_PASSWORD:-e2e owner password}"
@@ -78,15 +78,15 @@ fi
 ok "fixtures: two teams and their users"
 for k in $KEYS; do contains "user $k is a member of team $(team_of "$k")" "^member_$k=200$" "$fx"; done
 # KOBE-41: with a model enabled for both teams (the catalog e2e/run.sh set up against the fake
-# upstream), runs are answered by that model; without one (404: no catalog on this install) the
+# upstream), runs are answered by that model; without one (404: no catalog on this site) the
 # runs end as before a model existed and the cold step measures to Pi's refusal instead.
 if [[ "$(printf '%s\n' "$fx" | grep -c '^models_[ab]=200$')" == 2 ]]; then
   MODELS=1
-  ok "both teams enabled the install's model ($MODEL_ALIAS) as their default"
+  ok "both teams enabled the site's model ($MODEL_ALIAS) as their default"
   [[ "$MODEL_ALIAS" == fast ]] && ensure_fake_llm
 else
   MODELS=0
-  echo "     no model catalog on this install: runs end without a model answer ($(printf '%s\n' "$fx" | grep '^models_' | tr '\n' ' '))"
+  echo "     no model catalog on this site: runs end without a model answer ($(printf '%s\n' "$fx" | grep '^models_' | tr '\n' ' '))"
 fi
 team_id() { if [[ "$(team_of "$1")" == b ]]; then echo "$TEAM_B"; else echo "$TEAM_A"; fi; }
 team_ns() { echo "kobe-team-gate1-$(team_of "$1")"; }
@@ -220,7 +220,7 @@ if [[ "$STEPS" == *" chat-stream "* ]]; then
   for t in a b; do $KUBECTL -n "kobe-team-gate1-$t" delete pod gate1-agent --ignore-not-found --wait=false >/dev/null 2>&1 || true; done
 fi
 
-# 3. The cross-team probe on this install's own data (the CI db job runs the full suite).
+# 3. The cross-team probe on this site's own data (the CI db job runs the full suite).
 if [[ "$STEPS" == *" probe "* ]]; then
   echo "==> cross-team probe on the live install"
   probe=$(client "$(printf '{"mode":"probe","base":"%s","teams":["%s","%s"]}' "$BASE" "$TEAM_A" "$TEAM_B")")

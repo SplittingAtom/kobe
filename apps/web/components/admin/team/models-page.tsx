@@ -15,7 +15,7 @@ import styles from "../admin.module.css";
 
 /**
  * Team console: the team's models (spec D6, D30; `/v1/team/models`, team.models.manage). Team
- * admins enable a subset of the install catalog and pick the default; members choose among the
+ * admins enable a subset of the site catalog and pick the default; members choose among the
  * enabled ones per conversation.
  */
 export function TeamModelsPage() {

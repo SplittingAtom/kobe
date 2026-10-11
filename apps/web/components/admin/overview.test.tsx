@@ -6,7 +6,7 @@ import { must } from "../../lib/testing/must";
 import { ConsoleLinks } from "./console-links";
 import { ConsoleOverview } from "./overview";
 import { SectionPlaceholder } from "./placeholder";
-import { ME, renderInstall, renderTeam, stubApi } from "./testing";
+import { ME, renderSite, renderTeam, stubApi } from "./testing";
 
 afterEach(() => {
   cleanup();
@@ -15,7 +15,7 @@ afterEach(() => {
 
 describe("console overview", () => {
   it("lists the install sections with what each is for, placeholders marked", () => {
-    renderInstall(<ConsoleOverview kind="install" />);
+    renderSite(<ConsoleOverview kind="site" />);
     expect(screen.getByRole("heading", { level: 1, name: "Site console" })).toBeTruthy();
     const people = screen.getByRole("region", { name: "People" });
     expect(within(people).getByRole("link", { name: "Users" }).getAttribute("href")).toBe(
@@ -40,7 +40,7 @@ describe("console overview", () => {
 
 describe("section placeholder", () => {
   it("names the ticket that builds it", () => {
-    render(<SectionPlaceholder section={must(findSection("install", "web-search"))} />);
+    render(<SectionPlaceholder section={must(findSection("site", "web-search"))} />);
     expect(screen.getByRole("heading", { name: "Web search" })).toBeTruthy();
     expect(screen.getByRole("note").textContent).toBe("Coming in KOBE-63.");
   });
@@ -76,7 +76,7 @@ describe("console links on the home page", () => {
     expect(screen.queryByRole("navigation", { name: "Administration" })).toBeNull();
   });
 
-  it("shows the install console to an Admin with no active team", async () => {
+  it("shows the site console to an Admin with no active team", async () => {
     stubApi({ "GET /v1/me": me("admin"), "GET /v1/team": [409, { code: "no_active_team" }] });
     render(<ConsoleLinks />);
     const nav = await screen.findByRole("navigation", { name: "Administration" });

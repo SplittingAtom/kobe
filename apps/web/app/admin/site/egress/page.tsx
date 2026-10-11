@@ -1,4 +1,4 @@
-import { EgressCeilingPage } from "../../../../components/admin/install/egress-ceiling-page";
+import { EgressCeilingPage } from "../../../../components/admin/site/egress-ceiling-page";
 
 export default function Page() {
   return <EgressCeilingPage />;

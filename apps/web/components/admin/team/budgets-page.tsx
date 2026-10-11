@@ -46,7 +46,7 @@ export function tokensOf(spent: number, limit: number | null): string {
   return `${formatTokens(spent)} of ${formatTokens(limit)} tokens (${pct(spent, limit)} %)`;
 }
 
-/** The install budget, in percent only. */
+/** The site budget, in percent only. */
 export function usedOf(percent: number | null): string {
   return percent === null ? "No budget" : `${percent} % used`;
 }
@@ -127,15 +127,15 @@ function Body({
   );
   const [who, setWho] = useState("");
   const [invalid, setInvalid] = useState<string | null>(null);
-  const installRpm = budgets.site.userRequestsPerMinute;
+  const siteRpm = budgets.site.userRequestsPerMinute;
 
   function saveTeam(e: FormEvent) {
     e.preventDefault();
     const amounts = parseAmounts(team);
     const r = rpm.trim() === "" ? null : Number(rpm);
     if (typeof amounts === "string") return setInvalid(amounts);
-    if (r !== null && (!Number.isInteger(r) || r < 1 || r > installRpm)) {
-      return setInvalid(`The request rate is a whole number from 1 to ${installRpm} (the site's).`);
+    if (r !== null && (!Number.isInteger(r) || r < 1 || r > siteRpm)) {
+      return setInvalid(`The request rate is a whole number from 1 to ${siteRpm} (the site's).`);
     }
     setInvalid(null);
     void run(
@@ -194,11 +194,11 @@ function Body({
         <form className={styles.form} onSubmit={saveTeam} aria-label="Team budget">
           <AmountFields value={team} onChange={setTeam} prefix="Team " />
           <label>
-            Requests per minute (max {installRpm})
+            Requests per minute (max {siteRpm})
             <input
               inputMode="numeric"
               value={rpm}
-              placeholder={String(installRpm)}
+              placeholder={String(siteRpm)}
               onChange={(e) => setRpm(e.target.value)}
             />
           </label>
@@ -272,8 +272,8 @@ function Body({
         </form>
       </section>
 
-      <section aria-labelledby="install-budget">
-        <h2 id="install-budget">Site</h2>
+      <section aria-labelledby="site-budget">
+        <h2 id="site-budget">Site</h2>
         <p className={styles.hint}>
           Set by site admins; every team's spend counts against it (shown in percent).
         </p>

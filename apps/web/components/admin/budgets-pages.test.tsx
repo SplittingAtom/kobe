@@ -5,9 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import type { BudgetStatusLine } from "../../lib/admin/api/budgets";
 import { budgetBannerText } from "../chat/run-panel";
-import { InstallBudget } from "./install/install-budget";
+import { SiteBudget } from "./site/site-budget";
 import { TeamBudgetsPage, spentOf, tokensOf } from "./team/budgets-page";
-import { TEAM, renderInstall, renderTeam, stubApi } from "./testing";
+import { TEAM, renderSite, renderTeam, stubApi } from "./testing";
 
 const spend = (month: number, day: number, monthTokens = 0, dayTokens = 0) => ({
   month_usd: month,
@@ -75,7 +75,7 @@ describe("team budgets page (KOBE-42)", () => {
     renderTeam(<TeamBudgetsPage />);
     expect(await screen.findByText(/\$42\.00 of \$100\.00 \(42 %\)/)).toBeTruthy();
     expect(screen.getAllByText(/250k of 1M tokens \(25 %\)/).length).toBeGreaterThan(0);
-    // The install budget in percent only.
+    // The site budget in percent only.
     expect(screen.getByText(/Dollars: 12 % used/)).toBeTruthy();
     await userEvent.type(screen.getByLabelText("Team Daily ($)"), "5.5");
     await userEvent.type(screen.getByLabelText("Team Daily (tokens)"), "200,000");
@@ -107,7 +107,7 @@ describe("team budgets page (KOBE-42)", () => {
     });
   });
 
-  it("refuses a rate above the install's and amounts that are not numbers", async () => {
+  it("refuses a rate above the site's and amounts that are not numbers", async () => {
     const calls = stubApi({
       "GET /v1/team/budgets": [200, BUDGETS],
       "GET /v1/team/members": [200, MEMBERS],
@@ -146,14 +146,14 @@ describe("team budgets page (KOBE-42)", () => {
   });
 });
 
-describe("install budget (KOBE-42)", () => {
-  it("saves the install's dollar and token budgets and per-user rate", async () => {
+describe("site budget (KOBE-42)", () => {
+  it("saves the site's dollar and token budgets and per-user rate", async () => {
     const limits = { ...none, user_requests_per_minute: 60, updated_at: "2026-10-01T00:00:00Z" };
     const calls = stubApi({
       "GET /v1/site/budget": [200, limits],
       "PUT /v1/site/budget": [200, { ...limits, monthly_usd: 500 }],
     });
-    renderInstall(<InstallBudget />);
+    renderSite(<SiteBudget />);
     await userEvent.type(await screen.findByLabelText("Site Monthly ($)"), "500");
     await userEvent.type(screen.getByLabelText("Site Monthly (tokens)"), "9000000");
     await userEvent.click(screen.getByRole("button", { name: "Save site budget" }));

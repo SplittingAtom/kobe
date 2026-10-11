@@ -3,14 +3,14 @@ import { cleanup, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 import { must } from "../../lib/testing/must";
-import { MemorySwitchesSection } from "./install/memory-switches";
+import { MemorySwitchesSection } from "./site/memory-switches";
 import { TeamMemoryPage } from "./team/memory-page";
-import { renderInstall, renderTeam, stubApi } from "./testing";
+import { renderSite, renderTeam, stubApi } from "./testing";
 
 afterEach(cleanup);
 
 const TEAM = "/v1/memory/settings?level=team";
-const INSTALL = "/v1/memory/settings?level=site";
+const SITE = "/v1/memory/settings?level=site";
 const on = { memory_enabled: true, project_memory_enabled: true };
 
 describe("Team memory switches (KOBE-158, ac-3)", () => {
@@ -74,12 +74,12 @@ describe("Team memory switches (KOBE-158, ac-3)", () => {
 });
 
 describe("Install memory switches (KOBE-158, ac-3)", () => {
-  it("persists the install-wide switch", async () => {
+  it("persists the site-wide switch", async () => {
     const calls = stubApi({
-      [`GET ${INSTALL}`]: [200, on],
-      [`PUT ${INSTALL}`]: [200, { memory_enabled: false, project_memory_enabled: true }],
+      [`GET ${SITE}`]: [200, on],
+      [`PUT ${SITE}`]: [200, { memory_enabled: false, project_memory_enabled: true }],
     });
-    renderInstall(<MemorySwitchesSection />);
+    renderSite(<MemorySwitchesSection />);
     await userEvent.click(
       await screen.findByRole("checkbox", { name: /Allow memory on this site/ }),
     );

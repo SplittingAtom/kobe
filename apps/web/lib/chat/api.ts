@@ -74,7 +74,7 @@ export interface ChatApi {
   clearTestThreads(agentId: string): Promise<ApiResult<{ readonly cleared: number }>>;
   /** Sets the thread's model for its next runs (an enabled alias; null = the team default). */
   setThreadModel(threadId: string, model: string | null): Promise<ApiResult<ThreadSummary>>;
-  /** The install catalog with the team's enabled models and default (`GET /v1/team/models`). */
+  /** The site catalog with the team's enabled models and default (`GET /v1/team/models`). */
   listModels(): Promise<ApiResult<TeamModels>>;
   /** The thread with its entries after `after` (0 = from the start). */
   getThread(threadId: string, after?: number): Promise<ApiResult<ThreadDetail>>;
