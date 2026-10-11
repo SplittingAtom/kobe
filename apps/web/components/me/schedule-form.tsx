@@ -1,0 +1,162 @@
+"use client";
+
+import { SCHEDULE_PROMPT_MAX, SCHEDULE_WEEKDAYS, type ScheduleRecurrence } from "@kobe/protocol";
+import { useState, type FormEvent } from "react";
+import type { ApiError } from "../../lib/api/client";
+import type { Schedule, ScheduleAgent, ScheduleDraft } from "../../lib/schedules/api";
+import {
+  PRESET_LABELS,
+  WEEKDAY_LABELS,
+  browserTimeZone,
+  timeZoneOptions,
+  type PresetKind,
+} from "../../lib/schedules/format";
+import { ErrorNotice } from "../admin/error-notice";
+import styles from "../admin/admin.module.css";
+
+const DEFAULT_TIME = "09:00";
+const DEFAULT_CRON = "0 9 * * 1-5";
+const PRESETS = Object.keys(PRESET_LABELS) as PresetKind[];
+
+function initialDays(r: ScheduleRecurrence | undefined): readonly string[] {
+  return r?.kind === "weekly" ? r.days : [];
+}
+
+function timeOf(r: ScheduleRecurrence | undefined): string {
+  return r !== undefined && r.kind !== "cron" ? r.at : DEFAULT_TIME;
+}
+
+function buildRecurrence(
+  kind: PresetKind,
+  at: string,
+  days: readonly string[],
+  expr: string,
+): ScheduleRecurrence {
+  if (kind === "cron") return { kind, expr: expr.trim() };
+  if (kind === "weekly") {
+    const picked = SCHEDULE_WEEKDAYS.filter((d) => days.includes(d));
+    return { kind, days: picked, at };
+  }
+  return { kind, at };
+}
+
+/** Create or edit one schedule. Prompt and agent names render as plain text (React escapes). */
+export function ScheduleForm({
+  editing,
+  agents,
+  error,
+  pending,
+  onSubmit,
+  onCancel,
+}: {
+  readonly editing: Schedule | null;
+  readonly agents: readonly ScheduleAgent[];
+  readonly error: ApiError | null;
+  readonly pending: boolean;
+  readonly onSubmit: (draft: ScheduleDraft) => void;
+  readonly onCancel: () => void;
+}) {
+  const r = editing?.recurrence;
+  const [agentId, setAgentId] = useState(editing?.agentId ?? "");
+  const [prompt, setPrompt] = useState(editing?.prompt ?? "");
+  const [kind, setKind] = useState<PresetKind>(r?.kind ?? "daily");
+  const [at, setAt] = useState(timeOf(r));
+  const [days, setDays] = useState<readonly string[]>(initialDays(r));
+  const [expr, setExpr] = useState(r?.kind === "cron" ? r.expr : DEFAULT_CRON);
+  const [tz, setTz] = useState(editing?.tz ?? browserTimeZone());
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    onSubmit({ agentId, prompt, recurrence: buildRecurrence(kind, at, days, expr), tz });
+  };
+  const toggleDay = (d: string) =>
+    setDays((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d]));
+
+  return (
+    <form
+      className={styles.form}
+      onSubmit={submit}
+      aria-label={editing ? "Edit schedule" : "New schedule"}
+    >
+      <label>
+        Agent
+        <select value={agentId} required onChange={(e) => setAgentId(e.target.value)}>
+          <option value="" disabled>
+            Choose an agent
+          </option>
+          {agents.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Prompt
+        <textarea
+          value={prompt}
+          required
+          rows={4}
+          maxLength={SCHEDULE_PROMPT_MAX}
+          onChange={(e) => setPrompt(e.target.value)}
+        />
+      </label>
+      <label>
+        Repeats
+        <select value={kind} onChange={(e) => setKind(e.target.value as PresetKind)}>
+          {PRESETS.map((p) => (
+            <option key={p} value={p}>
+              {PRESET_LABELS[p]}
+            </option>
+          ))}
+        </select>
+      </label>
+      {kind === "weekly" && (
+        <fieldset>
+          <legend>On</legend>
+          {SCHEDULE_WEEKDAYS.map((d) => (
+            <label key={d}>
+              <input type="checkbox" checked={days.includes(d)} onChange={() => toggleDay(d)} />
+              {WEEKDAY_LABELS[d]}
+            </label>
+          ))}
+        </fieldset>
+      )}
+      {kind === "cron" ? (
+        <>
+          <label>
+            Cron expression
+            <input value={expr} required onChange={(e) => setExpr(e.target.value)} />
+          </label>
+          <p className={styles.hint}>
+            Five fields: minute hour day month weekday, in the time zone below.
+          </p>
+        </>
+      ) : (
+        <label>
+          At
+          <input type="time" value={at} required onChange={(e) => setAt(e.target.value)} />
+        </label>
+      )}
+      <label>
+        Time zone
+        <select value={tz} onChange={(e) => setTz(e.target.value)}>
+          {timeZoneOptions(tz).map((z) => (
+            <option key={z} value={z}>
+              {z}
+            </option>
+          ))}
+        </select>
+      </label>
+      {error && <ErrorNotice error={error} />}
+      <p className={styles.actions}>
+        <button type="submit" disabled={pending}>
+          Save schedule
+        </button>{" "}
+        <button type="button" onClick={onCancel}>
+          Cancel
+        </button>
+      </p>
+    </form>
+  );
+}

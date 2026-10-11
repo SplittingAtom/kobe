@@ -35,6 +35,8 @@ interface FakeThread {
   project_id?: string | null;
   visibility?: "private" | "project";
   read_only?: boolean;
+  /** Set on a thread a schedule started (KOBE-173); absent = a normal thread. */
+  schedule_id?: string | null;
   entries: FakeEntry[];
 }
 
@@ -214,6 +216,11 @@ export class FakeKobe {
       entries: [],
     });
     return id;
+  }
+
+  /** Marks a thread as started by a schedule (KOBE-175). */
+  setScheduleId(threadId: string, scheduleId: string): void {
+    this.#thread(threadId).schedule_id = scheduleId;
   }
 
   /** Adds a committed entry directly (history that exists before the test). */
@@ -415,6 +422,7 @@ export class FakeKobe {
       ...rest,
       owner_user_id: uuid(3, 1),
       project_id: thread.project_id ?? null,
+      schedule_id: thread.schedule_id ?? null,
       visibility: thread.visibility ?? "private",
       ...(thread.read_only === undefined ? {} : { read_only: thread.read_only }),
       agent_id: thread.agent_id ?? null,
