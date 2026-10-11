@@ -48,7 +48,7 @@ describe("Content Security Policy", () => {
     const [matcher] = config.matcher;
     const source = new RegExp(`^${matcher?.source ?? ""}$`);
     expect(source.test("/")).toBe(true);
-    expect(source.test("/admin/install/users")).toBe(true);
+    expect(source.test("/admin/site/users")).toBe(true);
     expect(source.test("/_next/static/chunks/a.js")).toBe(false);
     expect(source.test("/api/healthz")).toBe(false);
     expect(matcher?.missing.map((m) => m.key)).toEqual(["next-router-prefetch", "purpose"]);

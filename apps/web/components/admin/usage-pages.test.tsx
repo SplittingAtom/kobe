@@ -80,7 +80,7 @@ describe("usage pages (KOBE-43)", () => {
     const byTeam = await screen.findByRole("table", { name: "By team" });
     expect(within(byTeam).getByText("Finance")).toBeTruthy();
     // KOBE-42: the install budget form sits on the same page.
-    expect(await screen.findByRole("button", { name: "Save install budget" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Save site budget" })).toBeTruthy();
   });
 
   it("an empty range says so instead of drawing a chart", async () => {

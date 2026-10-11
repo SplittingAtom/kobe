@@ -12,9 +12,9 @@ export function TeamPolicyPage() {
     <>
       <h1>Policy</h1>
       <p className={styles.hint}>
-        Team rules apply inside the install floor: they can deny or ask for more, and allow rules
-        only pre-approve one built-in tool or one connector&apos;s tools. Install deny and ask rules
-        always win.
+        Team rules apply inside the site floor: they can deny or ask for more, and allow rules only
+        pre-approve one built-in tool or one connector&apos;s tools. Site deny and ask rules always
+        win.
       </p>
       <RulesEditor
         caption="Team rules"

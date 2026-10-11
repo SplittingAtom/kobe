@@ -49,7 +49,7 @@ export function connectorOauthRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
     const flow = flowDeps(deps);
     if (!flow) {
       return c.json(
-        { code: "credentials_unavailable", message: "This install cannot store credentials yet." },
+        { code: "credentials_unavailable", message: "This site cannot store credentials yet." },
         503,
       );
     }

@@ -243,7 +243,7 @@ export function webSearchTool(transport: ToolsTransport): ToolDefinitionLike {
     name: TOOL_WEB_SEARCH,
     label: "Web search",
     description:
-      "Search the web. Returns numbered results with title, URL and snippet. If web search is unavailable (not set up for this install or this team) the answer says so; tell the user that and do not guess.",
+      "Search the web. Returns numbered results with title, URL and snippet. If web search is unavailable (not set up for this site or this team) the answer says so; tell the user that and do not guess.",
     promptSnippet: "Search the web and get sources with URLs",
     promptGuidelines: [
       "Use web_search for current or external facts; cite the URL of every source you rely on.",

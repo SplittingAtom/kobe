@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
+import { consoleRedirects } from "./lib/admin/nav/paths";
 import { SECURITY_HEADERS } from "./lib/security/csp";
 
 const nextConfig: NextConfig = {
@@ -12,6 +13,10 @@ const nextConfig: NextConfig = {
   // Every response, static assets and API routes included; the CSP is set per request (proxy.ts).
   async headers() {
     return [{ source: "/:path*", headers: [...SECURITY_HEADERS] }];
+  },
+  // KOBE-257: the install console is the Site console; old links and bookmarks still land.
+  async redirects() {
+    return consoleRedirects();
   },
 };
 

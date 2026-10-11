@@ -12,10 +12,12 @@ import {
   type TeamSection,
 } from "./types";
 
-export const CONSOLE_BASE = "/admin";
+import { consoleHref } from "./paths";
+
+export { CONSOLE_BASE, CONSOLE_SEGMENTS, consoleHref } from "./paths";
 
 export const CONSOLE_TITLES: Readonly<Record<ConsoleKind, string>> = {
-  install: "Install console",
+  install: "Site console",
   team: "Team console",
 };
 
@@ -62,11 +64,7 @@ export function findSection(kind: ConsoleKind, id: string): ConsoleSection | und
 }
 
 export function sectionHref(section: ConsoleSection): string {
-  return `${CONSOLE_BASE}/${section.console}/${section.id}`;
-}
-
-export function consoleHref(kind: ConsoleKind): string {
-  return `${CONSOLE_BASE}/${kind}`;
+  return `${consoleHref(section.console)}/${section.id}`;
 }
 
 const INSTALL_RANK: Readonly<Record<InstallRole, number>> = { user: 0, admin: 1, owner: 2 };

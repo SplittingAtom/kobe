@@ -53,7 +53,7 @@ function toolError(id: JsonRpcId, text: string) {
 }
 
 const UPSTREAM_MESSAGES: Readonly<Record<UpstreamFailure, string>> = {
-  url_not_allowed: "The connector's address is not allowed by this Kobe install.",
+  url_not_allowed: "The connector's address is not allowed by this Kobe site.",
   forbidden_address: "The connector's server resolves to an address Kobe may not reach.",
   unreachable: "The connector's server could not be reached.",
   timeout: "The connector's server did not answer in time.",

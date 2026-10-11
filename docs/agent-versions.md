@@ -27,7 +27,7 @@ Run it as a **superuser**, because RLS is forced on team tables, including for t
 in **one transaction**, after a backup (`kobe backup`). Replace `:agent` with the agent's id.
 
 1. **Decide what happens to pinned threads.** Either delete them (for user erasure, they belong
-   to the same user), or keep them and clear their pin. A cleared pin runs on the install default
+   to the same user), or keep them and clear their pin. A cleared pin runs on the site default
    agent from then on, and its history no longer names the version.
 2. **Disable the immutability trigger** on the version table: `install_agent_versions` for
    personal and gallery agents, `team_agent_versions` for team agents. `ALTER TABLE` takes an

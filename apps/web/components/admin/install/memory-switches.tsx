@@ -15,7 +15,7 @@ export function MemorySwitchesSection() {
     <ResourceView state={state} label="memory settings">
       {(switches) => (
         <MemorySwitchesForm
-          where="on this install"
+          where="on this site"
           switches={switches}
           save={putInstallMemory}
           onSaved={reload}

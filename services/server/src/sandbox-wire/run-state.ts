@@ -62,7 +62,7 @@ type BudgetScope = "install" | "team" | "user";
 
 /** The terminal event of a budget stop (D30); same text as the orchestrator's. */
 function budgetStoppedEvent(scope: BudgetScope): NewRunEvent {
-  const whose = scope === "user" ? "your" : scope === "team" ? "the team's" : "the install's";
+  const whose = scope === "user" ? "your" : scope === "team" ? "the team's" : "the site's";
   return {
     type: "run.budget_stopped",
     payload: { scope, message: `The run stopped because ${whose} budget is used up.` },

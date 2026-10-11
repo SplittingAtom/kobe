@@ -28,7 +28,7 @@ export function teamModelsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
       : "not_in_catalog";
     if (result === "not_in_catalog") {
       return c.json(
-        { code: "model_not_found", message: "That model is not in the install's catalog." },
+        { code: "model_not_found", message: "That model is not in the site's catalog." },
         404,
       );
     }

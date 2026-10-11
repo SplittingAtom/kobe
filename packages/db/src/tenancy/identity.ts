@@ -73,18 +73,18 @@ export const identity = defineDomain({
       "Which team a sign-in session has active (D9): a pointer to `teams`, no team content; " +
       "membership is re-verified under team RLS on every request.",
     audit_log:
-      "Install-wide record (D6) whose events may belong to a team: team admins read their team's " +
+      "Site-wide record (D6) whose events may belong to a team: team admins read their team's " +
       "events through listTeamAuditEvents(), which always filters on team_id. No FK to `teams`. " +
       "Only metadata is stored (AUDIT_EVENTS allowlist), never team content.",
     break_glass_grants:
-      "Spec §5.4 marks it install-wide (†, D10): an install admin's request for read access to one " +
-      "team must exist before any team context and be visible to every install admin who may " +
+      "Spec §5.4 marks it site-wide (†, D10): a site admin's request for read access to one " +
+      "team must exist before any team context and be visible to every site admin who may " +
       "approve it. It holds the team id, an optional subject user and thread id, and the " +
       "requester's reason, never team content. Team content is read only through " +
       "readWithBreakGlass(), which verifies an active grant before setting kobe.team_id.",
     legal_holds:
-      "Spec §5.4 marks it install-wide (†, D18): an install admin's hold on one team (or one user " +
-      "in it) must exist before any team context and be visible to every install admin who may " +
+      "Spec §5.4 marks it site-wide (†, D18): a site admin's hold on one team (or one user " +
+      "in it) must exist before any team context and be visible to every site admin who may " +
       "approve or release it. It holds the team id, an optional user id and the requester's " +
       "reason, never team content.",
   },

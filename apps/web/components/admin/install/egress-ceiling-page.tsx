@@ -31,7 +31,7 @@ export function EgressCeilingPage() {
       <h1>Egress ceiling</h1>
       <p className={styles.hint}>
         Sandboxes reach the internet only through Kobe&apos;s egress proxy, over HTTPS, and only to
-        domains their team enabled. The ceiling is what teams may enable: a fresh install reaches
+        domains their team enabled. The ceiling is what teams may enable: a new site reaches
         nothing, and package registries sit in the ceiling but are off for every team until a team
         admin enables them. Sandboxes have no DNS of their own; the proxy resolves names and never
         connects to internal addresses.

@@ -100,7 +100,7 @@ export function teamSkillReviewRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
           return c.json(
             {
               code: "skill_blocklisted",
-              message: "This bundle is on the install's blocklist and can't be approved.",
+              message: "This bundle is on the site's blocklist and can't be approved.",
             },
             409,
           );

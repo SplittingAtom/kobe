@@ -79,12 +79,7 @@ function denyReasons(ctx: Prepared): PolicyReason[] {
   const { tool, rules, now, view } = ctx;
   return [
     ...matchingRules(rules.install, "deny", tool, view, now).map((r) =>
-      ruleReason(
-        r,
-        "install_deny_rule",
-        "install_deny",
-        `${tool.name} is blocked by install policy.`,
-      ),
+      ruleReason(r, "install_deny_rule", "install_deny", `${tool.name} is blocked by site policy.`),
     ),
     ...matchingRules(rules.team, "deny", tool, view, now).map((r) =>
       ruleReason(r, "team_deny_rule", "team_deny", `${tool.name} is blocked by team policy.`),
@@ -99,7 +94,7 @@ function askReasons(ctx: Prepared): PolicyReason[] {
   const { tool, rules, now, view } = ctx;
   return [
     ...matchingRules(rules.install, "ask", tool, view, now).map((r) =>
-      ruleReason(r, "install_ask_rule", "ask_rule", `Install policy asks before ${tool.name}.`),
+      ruleReason(r, "install_ask_rule", "ask_rule", `Site policy asks before ${tool.name}.`),
     ),
     ...matchingRules(rules.team, "ask", tool, view, now).map((r) =>
       ruleReason(r, "team_ask_rule", "ask_rule", `Team policy asks before ${tool.name}.`),

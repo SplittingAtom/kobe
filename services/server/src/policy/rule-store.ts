@@ -319,7 +319,7 @@ export async function createInstallRule(
       .insert(installToolRules)
       .values({ effect: body.effect, createdBy, ...columns(body) })
       .returning();
-    if (!row) throw new Error("install rule insert returned no row");
+    if (!row) throw new Error("site floor rule insert returned no row");
     await auditRule(tx, "policy.rule.created", storedInstall(row), null);
     return { ok: true, rule: storedInstall(row) } as const;
   });

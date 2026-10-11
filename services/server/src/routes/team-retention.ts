@@ -36,7 +36,7 @@ export function teamRetentionRoutes(deps: ServerDeps): Hono<{ Variables: TeamVar
       return c.json(
         {
           code: "exceeds_maximum",
-          message: `The install keeps threads at most ${result.maximum}. Choose a shorter period.`,
+          message: `The site keeps threads at most ${result.maximum}. Choose a shorter period.`,
           maximum: result.maximum,
         },
         409,

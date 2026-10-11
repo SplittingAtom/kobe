@@ -49,7 +49,7 @@ describe("Team retention (KOBE-18)", () => {
     });
     renderTeam(<TeamRetentionPage />);
     // The team chose forever, but the install caps it at a year.
-    expect(await screen.findByText(/The install keeps conversations at most 1 year/)).toBeTruthy();
+    expect(await screen.findByText(/The site keeps conversations at most 1 year/)).toBeTruthy();
     expect(screen.queryByRole("radio", { name: "Forever" })).toBeNull();
     expect(screen.getByRole("radio", { name: "1 year" })).toHaveProperty("checked", true);
     await userEvent.click(screen.getByRole("radio", { name: "90 days" }));
@@ -67,7 +67,7 @@ describe("Team retention (KOBE-18)", () => {
       "GET /v1/team/retention": [200, view("1y", "forever", "1y", ["30d", "90d", "1y", "forever"])],
       "PUT /v1/team/retention": [
         409,
-        { code: "exceeds_maximum", message: "The install keeps threads at most 90d." },
+        { code: "exceeds_maximum", message: "The site keeps threads at most 90d." },
       ],
     });
     renderTeam(<TeamRetentionPage />);

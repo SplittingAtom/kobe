@@ -154,10 +154,10 @@ describe("install budget (KOBE-42)", () => {
       "PUT /v1/install/budget": [200, { ...limits, monthly_usd: 500 }],
     });
     renderInstall(<InstallBudget />);
-    await userEvent.type(await screen.findByLabelText("Install Monthly ($)"), "500");
-    await userEvent.type(screen.getByLabelText("Install Monthly (tokens)"), "9000000");
-    await userEvent.click(screen.getByRole("button", { name: "Save install budget" }));
-    await screen.findByText("Install budget saved.");
+    await userEvent.type(await screen.findByLabelText("Site Monthly ($)"), "500");
+    await userEvent.type(screen.getByLabelText("Site Monthly (tokens)"), "9000000");
+    await userEvent.click(screen.getByRole("button", { name: "Save site budget" }));
+    await screen.findByText("Site budget saved.");
     expect(body(calls, "PUT")).toEqual({
       ...none,
       monthly_usd: 500,

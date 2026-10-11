@@ -30,7 +30,7 @@ export function teamWebSearchRoutes(deps: ServerDeps): Hono<{ Variables: TeamVar
       : c.json(
           {
             code: "web_search_unavailable",
-            message: "The install admin has not enabled a web search provider.",
+            message: "The site admin has not enabled a web search provider.",
           },
           409,
         );

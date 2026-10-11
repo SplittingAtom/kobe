@@ -39,7 +39,7 @@ export { MEMBER_SHARE };
 export const SETTLE_TIMEOUT_MS = 30_000;
 
 const SCOPE_NAMES: Readonly<Record<BudgetLine["scope"], string>> = {
-  install: "The install's",
+  install: "The site's",
   team: "Your team's",
   user: "Your",
 };

@@ -73,14 +73,14 @@ export function RolesPage() {
 
   return (
     <>
-      <h1>Install roles</h1>
+      <h1>Site roles</h1>
       <p className={styles.hint}>
-        One Owner, any number of Admins; everyone else is a User. Install roles give no access to
-        team content.
+        One Owner, any number of Admins; everyone else is a User. Site roles give no access to team
+        content.
         {!isOwner && " Only the Owner grants or revokes Admin and transfers ownership."}
       </p>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
-      <ResourceView state={state} label="install roles">
+      <ResourceView state={state} label="site roles">
         {({ holders, users }) => {
           const active = users.filter((u) => u.deactivatedAt === null);
           const candidates = active.filter((u) => u.installRole === "user");

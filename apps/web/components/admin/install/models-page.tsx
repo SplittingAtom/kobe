@@ -20,7 +20,7 @@ export function InstallModelsPage() {
     <>
       <h1>Models and providers</h1>
       <p className={styles.hint}>
-        Add the model providers your install may use, then publish their models in the catalog under
+        Add the model providers your site may use, then publish their models in the catalog under
         short aliases. Sandboxes reach models only through Kobe&apos;s model gateway, with a session
         token of their own; provider keys never enter a sandbox.
       </p>
@@ -66,7 +66,7 @@ export function GatewayStatusView({
   if (!configured) {
     return (
       <p className={styles.banner} role="status">
-        Model gateway: not configured on this install.
+        Model gateway: not configured on this site.
       </p>
     );
   }

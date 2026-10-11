@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { errorKind, type ApiError } from "../../lib/api/client";
+import { consoleHref } from "../../lib/admin/nav/registry";
 import styles from "./admin.module.css";
 
 /**
@@ -19,7 +20,7 @@ export function ErrorNotice({ error }: { readonly error: ApiError }) {
         </p>
       )}
       {kind === "forbidden" && (
-        <p>Your access may have changed. Ask an install or team admin if you need it.</p>
+        <p>Your access may have changed. Ask a site or team admin if you need it.</p>
       )}
       {kind === "chooseTeam" && (
         <p>
@@ -35,8 +36,8 @@ export function ErrorNotice({ error }: { readonly error: ApiError }) {
       )}
       {kind === "isolation" && (
         <p>
-          Agents are disabled until the cluster has a gVisor or Kata runtime. Install admins can see
-          the fix on the <Link href="/admin/install/isolation">Isolation</Link> page.
+          Agents are disabled until the cluster has a gVisor or Kata runtime. Site admins can see
+          the fix on the <Link href={`${consoleHref("install")}/isolation`}>Isolation</Link> page.
         </p>
       )}
     </div>

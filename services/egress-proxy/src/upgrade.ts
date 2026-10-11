@@ -427,8 +427,8 @@ async function decideFor(
       reply(
         res,
         403,
-        `Kobe egress blocked: ${host} is not allowed in this install`,
-        `Kobe egress: ${host} is not in this install's egress ceiling; an install admin must add it first.`,
+        `Kobe egress blocked: ${host} is not allowed on this site`,
+        `Kobe egress: ${host} is not in this site's egress ceiling; a site admin must add it first.`,
       );
     }
     return undefined;

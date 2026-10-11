@@ -15,6 +15,7 @@ import type { ServerDeps } from "../deps.js";
 import { logger } from "../logger.js";
 import type { MailMessage } from "../mail/mailer.js";
 import { oneLine } from "../mail/messages.js";
+import { CONSOLE_PATHS } from "../mail/console-paths.js";
 
 /**
  * Request-access emails (spec D28: "notifies the team admin"; KOBE-39). Rows are queued by
@@ -66,7 +67,7 @@ export function requestMessage(
         `A request to ${detail.domain} was blocked by the team's egress policy.`,
         ...(detail.threadId ? [`Thread: ${detail.threadId}`] : []),
         "",
-        `Approve or deny it in your team console: ${publicUrl}/admin/team/egress`,
+        `Approve or deny it in your team console: ${publicUrl}${CONSOLE_PATHS.teamEgress}`,
       ].join("\n"),
     };
   }

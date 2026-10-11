@@ -7,6 +7,7 @@ import {
   type DeactivationResult,
   type InstallUser,
 } from "../../../lib/admin/api/install/users";
+import { consoleHref } from "../../../lib/admin/nav/registry";
 import { canChangeActivation } from "../../../lib/admin/rules";
 import { useInstallAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
@@ -56,7 +57,8 @@ export function UsersPage() {
     <>
       <h1>Users</h1>
       <p className={styles.hint}>
-        People join Kobe by invitation. <Link href="/admin/install/invites">Invite someone</Link>.
+        People join Kobe by invitation.{" "}
+        <Link href={`${consoleHref("install")}/invites`}>Invite someone</Link>.
       </p>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="users">
@@ -68,7 +70,7 @@ export function UsersPage() {
                 <tr>
                   <th scope="col">Name</th>
                   <th scope="col">Email</th>
-                  <th scope="col">Install role</th>
+                  <th scope="col">Site role</th>
                   <th scope="col">2FA</th>
                   <th scope="col">Status</th>
                   <th scope="col">Joined</th>

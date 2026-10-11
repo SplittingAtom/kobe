@@ -6,11 +6,11 @@ bypass mode.
 
 ## When a call asks
 
-The policy engine (KOBE-35) evaluates every call in the D29 order: install deny, team deny,
-install/team ask, risk class, approval mode, user allow rules, prompt. A call asks for approval
+The policy engine (KOBE-35) evaluates every call in the D29 order: site deny, team deny,
+site/team ask, risk class, approval mode, user allow rules, prompt. A call asks for approval
 when:
 
-- an **ask rule** (install floor or team) matches it, or
+- an **ask rule** (site floor or team) matches it, or
 - its **risk class** prompts in the run's mode: in `ask-on-write` (the default), writes and deletes
   outside the sandbox (MCP tools, Kobe's own artifacts, shared files and project memory), or
 - the run's mode is **`ask-all`**.
@@ -21,8 +21,8 @@ mode and in scheduled runs nothing asks: a call that would ask is denied instead
 **Sandbox tools ask only when a policy rule says so** (user decision, 2026-10-03). `bash`, `write`,
 `edit` and the other sandbox built-ins have no default prompt. The sandbox, its egress policy and
 the audit log bound them (D29). To ask for them, a team admin adds an ask rule, for example
-`{"effect": "ask", "tool_glob": "bash"}` in `POST /v1/team/policy/rules`, or an install admin adds
-one to the install floor. The install switch `promptSandboxWrites` (`PUT
+`{"effect": "ask", "tool_glob": "bash"}` in `POST /v1/team/policy/rules`, or a site admin adds
+one to the site floor. The site switch `promptSandboxWrites` (`PUT
 /v1/install/policy/settings`, default `false`) is the explicit opt-in to prompting every sandbox
 write. Kobe seeds no rules.
 
@@ -52,7 +52,7 @@ write. Kobe seeds no rules.
 
 Only the **run's user**, the thread owner, may approve. The call runs in that user's sandbox with
 that user's connector credentials. D8 gives no role the power to consent for someone else, and
-install admins cannot read team content (D8, D10). Any other caller gets `404
+site admins cannot read team content (D8, D10). Any other caller gets `404
 approval_not_found`, the same answer as for a thread they cannot see. The caller must still be an
 active member of the team (`team.chat`).
 

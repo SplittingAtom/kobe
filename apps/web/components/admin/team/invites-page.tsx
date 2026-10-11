@@ -54,8 +54,8 @@ export function TeamInvitesPage() {
     <>
       <h1>Invitations</h1>
       <p className={styles.hint}>
-        Invitations last 14 days. Someone without a Kobe account also needs an install invitation
-        from an install admin; they see yours after they sign up.
+        Invitations last 14 days. Someone without a Kobe account also needs a site invitation from a
+        site admin; they see yours after they sign up.
       </p>
       <form onSubmit={onInvite} className={styles.form} aria-label="Invite to the team">
         <label>

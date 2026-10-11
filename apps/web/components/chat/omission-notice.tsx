@@ -12,7 +12,7 @@ const KIND_LABEL: Readonly<Record<Item["kind"], string>> = {
 const REASON_TEXT: Readonly<Record<Item["reason"], string>> = {
   agent_exclusive: "this agent uses only its own skills",
   team_disabled: "your team turned off personal skills",
-  blocklisted: "it is blocked by your install",
+  blocklisted: "it is blocked by your site",
   shadowed_by_agent: "the agent has its own skill with this name",
   not_team_enabled: "it is not enabled for your team",
   not_user_connected: "you have not connected it yet",

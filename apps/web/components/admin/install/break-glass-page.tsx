@@ -104,9 +104,9 @@ export function BreakGlassPage() {
     <>
       <h1>Break-glass</h1>
       <p className={styles.hint}>
-        Install admins can&apos;t read team content. Break-glass gives one install admin read-only
-        access to one team for a limited time, after a second install admin approves. The
-        team&apos;s admins are notified, and every read is recorded in the team&apos;s audit log.
+        Site admins can&apos;t read team content. Break-glass gives one site admin read-only access
+        to one team for a limited time, after a second site admin approves. The team&apos;s admins
+        are notified, and every read is recorded in the team&apos;s audit log.
       </p>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="break-glass grants">
@@ -176,8 +176,8 @@ function RequestForm({
         }),
       ({ grant: g }) =>
         soleAdmin
-          ? `Requested access to ${g.team.name}. You are the only install admin: you can approve it yourself (it will be flagged).`
-          : `Requested access to ${g.team.name}. A second install admin must approve it.`,
+          ? `Requested access to ${g.team.name}. You are the only site admin: you can approve it yourself (it will be flagged).`
+          : `Requested access to ${g.team.name}. A second site admin must approve it.`,
     );
     if (done) {
       setReason("");
@@ -273,8 +273,8 @@ function RequestForm({
       </form>
       {soleAdmin && (
         <p className={styles.hint}>
-          You are this install&apos;s only active admin, so you can approve your own request. The
-          grant is flagged as self-approved everywhere it appears.
+          You are this site&apos;s only active admin, so you can approve your own request. The grant
+          is flagged as self-approved everywhere it appears.
         </p>
       )}
     </>

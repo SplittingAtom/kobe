@@ -1,9 +1,12 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  CONSOLE_SEGMENTS,
+  CONSOLE_TITLES,
   INSTALL_SECTIONS,
   TEAM_SECTIONS,
   canOpenConsole,
+  consoleHref,
   canSee,
   groupSections,
   sectionForPath,
@@ -84,10 +87,13 @@ describe("registry contents", () => {
     (kind) => {
       for (const s of sectionsOf(kind)) {
         const page = existsSync(
-          new URL(`../../../app/admin/${kind}/${s.id}/page.tsx`, import.meta.url),
+          new URL(`../../../app/admin/${CONSOLE_SEGMENTS[kind]}/${s.id}/page.tsx`, import.meta.url),
         );
         if (s.status.kind === "ready") {
-          expect(page, `${s.id} is READY: add app/admin/${kind}/${s.id}/page.tsx`).toBe(true);
+          expect(
+            page,
+            `${s.id} is READY: add app/admin/${CONSOLE_SEGMENTS[kind]}/${s.id}/page.tsx`,
+          ).toBe(true);
         } else {
           expect(page, `${s.id} has a page: mark it READY`).toBe(false);
           expect(s.status.ticket).toMatch(/^KOBE-\d+$/);
@@ -97,13 +103,13 @@ describe("registry contents", () => {
   );
 
   it.each(["install", "team"] as const)("%s: every page directory belongs to a section", (kind) => {
-    const dir = new URL(`../../../app/admin/${kind}/`, import.meta.url);
+    const dir = new URL(`../../../app/admin/${CONSOLE_SEGMENTS[kind]}/`, import.meta.url);
     const pages = readdirSync(dir, { withFileTypes: true })
       .filter((d) => d.isDirectory() && !d.name.startsWith("["))
       .map((d) => d.name);
     const ids = sectionsOf(kind).map((s) => s.id);
     for (const page of pages)
-      expect(ids, `app/admin/${kind}/${page} has no nav entry`).toContain(page);
+      expect(ids, `app/admin/${CONSOLE_SEGMENTS[kind]}/${page} has no nav entry`).toContain(page);
   });
 
   it.each(["install", "team"] as const)(
@@ -248,12 +254,16 @@ describe("role gating", () => {
 describe("paths and groups", () => {
   it("maps sections to /admin/<console>/<id> and back", () => {
     const users = must(INSTALL_SECTIONS.find((s) => s.id === "users"));
-    expect(sectionHref(users)).toBe("/admin/install/users");
-    expect(sectionForPath("install", "/admin/install/users")).toBe(users);
-    expect(sectionForPath("install", "/admin/install/users/abc")).toBe(users);
-    expect(sectionForPath("install", "/admin/install")).toBeNull();
-    expect(sectionForPath("install", "/admin/install/nope")).toBeNull();
-    expect(sectionForPath("team", "/admin/install/users")).toBeNull();
+    // KOBE-257: the install console is the Site console, served under /admin/site.
+    expect(sectionHref(users)).toBe("/admin/site/users");
+    expect(consoleHref("install")).toBe("/admin/site");
+    expect(CONSOLE_TITLES.install).toBe("Site console");
+    expect(sectionForPath("install", "/admin/site/users")).toBe(users);
+    expect(sectionForPath("install", "/admin/site/users/abc")).toBe(users);
+    expect(sectionForPath("install", "/admin/site")).toBeNull();
+    expect(sectionForPath("install", "/admin/site/nope")).toBeNull();
+    expect(sectionForPath("install", "/admin/install/users")).toBeNull();
+    expect(sectionForPath("team", "/admin/site/users")).toBeNull();
   });
 
   it("groups consecutive sections and keeps group order", () => {

@@ -34,7 +34,7 @@ const ERRORS = {
   not_active: [409, "This legal hold is not in force."],
   self_approval_forbidden: [
     403,
-    "A second install admin must approve your request. You can approve your own only when you are the install's only admin.",
+    "A second site admin must approve your request. You can approve your own only when you are the site's only admin.",
   ],
   cannot_deny_own: [403, "Withdraw your own request instead of denying it."],
   not_requester: [403, "Only the admin who asked for the hold can withdraw the request."],
@@ -42,7 +42,7 @@ const ERRORS = {
   no_release_request: [409, "Nobody has asked to release this hold."],
   release_self_approval_forbidden: [
     403,
-    "A second install admin must approve the release you asked for. You can approve it yourself only when you are the install's only admin.",
+    "A second site admin must approve the release you asked for. You can approve it yourself only when you are the site's only admin.",
   ],
   cannot_deny_own_release: [403, "Withdraw your own release request instead of denying it."],
   not_release_requester: [403, "Only the admin who asked for the release can withdraw it."],

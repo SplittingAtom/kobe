@@ -43,7 +43,7 @@ apply`, or deleting the RuntimeClass later cannot run agents without isolation:
 - The **server** checks in process at startup, every minute, and live before every piece of
   agent work. Without a verified RuntimeClass it keeps serving sign-in
   and the admin console but **agents are disabled**: chat returns `isolation_runtime_missing`
-  (HTTP 503), the server logs the problem and the fix at `error` level, and install admins see
+  (HTTP 503), the server logs the problem and the fix at `error` level, and site admins see
   both at `GET /v1/install/isolation` (`POST /v1/install/isolation/check` re-checks immediately
   after you fix the cluster). `/readyz` does not disclose the result (it is unauthenticated); it is
   not ready only until the first check completes. Errors and timeouts talking to the Kubernetes
@@ -105,7 +105,7 @@ default; it changes nothing on clusters without Rancher.
 
 Private registries: the names in `global.imagePullSecrets` are copied into each team namespace for
 the kubelet (pods there cannot mount them). Alternatively configure registry credentials on the
-nodes (k3s `registries.yaml`). Kobe assumes one install per cluster (`kobe-team-*` names are
+nodes (k3s `registries.yaml`). Kobe assumes one site per cluster (`kobe-team-*` names are
 cluster-wide).
 
 ### Workspace storage
@@ -170,10 +170,10 @@ storage that cannot be scheduled (`LocalReplicaSchedulingFailure`, `FailedSchedu
 insufficient storage or no nodes available), `FailedAttachVolume` repeating (3 times or over a
 minute), or `ImagePullBackOff`/`ErrImagePull`. Only events of that wake about that pod and volume
 count. The run then fails with `workspace_unavailable` ("Your workspace could not be started because
-the cluster could not provide it. Ask your install admin to check the cluster."); members never
+the cluster could not provide it. Ask your site admin to check the cluster."); members never
 see node or volume names.
 
-Install admins find the reason in the install audit log: filter on action `sandbox.wake_stalled`
+Site admins find the reason in the site audit log: filter on action `sandbox.wake_stalled`
 (`GET /v1/install/audit?action=sandbox.wake_stalled`). `cause` is one of `volume_unschedulable`,
 `volume_attach`, `scheduling`, `image_pull`, `unknown`; `detail` is the cluster's own event text
 followed by a suggested remedy. The server log has the same line (level error, "sandbox not ready:
@@ -187,8 +187,8 @@ the next message starts a fresh sandbox. The server needs `list` on events in te
 
 Sandboxes reach the internet only through the **egress proxy** (spec D28), and only over HTTPS:
 `HTTPS_PROXY` points at it, the team NetworkPolicy allows nothing else, and the proxy admits only
-team namespaces. It is **default deny**: a fresh install reaches nothing. Install admins define the
-**ceiling** (Install console → Egress ceiling; presets: package registries, which start in the
+team namespaces. It is **default deny**: a new site reaches nothing. Site admins define the
+**ceiling** (Site console → Egress ceiling; presets: package registries, which start in the
 ceiling, and git hosts, which start out of it); team admins **enable** domains within it (Team
 console → Egress). `*.example.com` matches subdomains, never `example.com` itself. Changes apply
 within a second (Postgres `LISTEN/NOTIFY`), without restarts.
@@ -254,7 +254,7 @@ refused and the request stays open) and settles everyone's pending requests for 
 settles them too. Requesters are emailed the decision and the chat notice shows it. A member may
 have 20 open requests and make 10 per hour. Everything is audited (`egress.request.created`,
 `egress.request.decided`, `egress.domain.enabled`). Domains outside the ceiling offer no request:
-only an install admin can add them.
+only a site admin can add them.
 
 ### Header injection
 
@@ -319,10 +319,10 @@ domains you trust with that credential; a body that echoes the credential is not
 Sandboxes reach models only through **Bifrost** (Apache-2.0, `bifrost.image`, pinned by digest) and
 only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a sandbox.
 
-- **Configuration lives in Kobe.** Install admins add **providers** (OpenAI, Anthropic, Gemini,
+- **Configuration lives in Kobe.** Site admins add **providers** (OpenAI, Anthropic, Gemini,
   Ollama, or any OpenAI-compatible endpoint such as vLLM) with their API keys, and publish the
   **model catalog** (aliases such as `fast`, `smart`, `local`); team admins enable a subset and a
-  default (install console **Models and providers**, team console **Models**). Keys are stored
+  default (site console **Models and providers**, team console **Models**). Keys are stored
   sealed (AES-256-GCM) in Postgres, are write-only in the API, and are never logged or audited
   (only "key set/changed").
 - **Which model a run uses.** The agent's pinned model if it has one, else the model the person
@@ -339,14 +339,14 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
 - **Kobe pushes it to Bifrost.** The server reconciles Bifrost through Bifrost's admin API: on every
   change (Postgres `LISTEN/NOTIFY`, within seconds) and every 30 s. One server replica leads (a
   Postgres advisory lock); `GET /v1/install/models` reports `gateway.in_sync` and the last error.
-  Bifrost holds one customer (the install), one team per Kobe team and one virtual key per member
+  Bifrost holds one customer (the site), one team per Kobe team and one virtual key per member
   of each team, allowed exactly the team's enabled models. Kobe owns this Bifrost: anything else
   configured in it (by hand, through its UI) is removed by the next sync.
 - **Provider endpoints.** OpenAI, Anthropic and Gemini providers always use their vendor's
   endpoint; other providers' keys go only over `https://`; changing a keyed provider's endpoint
   requires entering the key again (a stored key is never sent somewhere new), and the audit log
   records the endpoint host. `bifrost.allowUnsafeProviderEndpoints` (Helm only, never the admin
-  API) lifts the first two rules for test installs (the e2e suite's fake provider).
+  API) lifts the first two rules for test sites (the e2e suite's fake provider).
 - **Sandboxes call the shim** (`model-gateway.kobe.internal`) with their short-lived
   `kobe.model-gateway` session token as the API key (`Authorization: Bearer`, `x-api-key`,
   `x-goog-api-key` or `?key=`). The shim verifies it, checks that the user is still an active member
@@ -392,12 +392,12 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
   append-only. Rows are written right after each call.
 - **Budgets and rate limits** (KOBE-42, D30): budgets in **dollars** (at catalog prices) and in
   **tokens** (input + output + cache reads + cache writes, every model; this is what caps models
-  without prices such as Ollama Cloud's), each monthly with an optional daily cap, for the install
-  (`PUT /v1/install/budget`, install admins; also the per-user request rate, default 60/min), each
+  without prices such as Ollama Cloud's), each monthly with an optional daily cap, for the site
+  (`PUT /v1/install/budget`, site admins; also the per-user request rate, default 60/min), each
   team, a team's **default member budget** (every member without one of their own) and single
   members (`/v1/team/budgets`, team admins; a team may only lower the rate). Periods are calendar
   months and days in **UTC**. At 80 % team admins (and the member, for their own budget; install
-  admins for the install's) get an email (at most one per budget and threshold per period; an 80 %
+  admins for the site's) get an email (at most one per budget and threshold per period; an 80 %
   warning is skipped once 100 % is reached; at most 20 budget emails per person per day) and
   members see a banner in the chat; at 100 % the model-gateway shim refuses new model calls (402
   `budget_exhausted`), new runs are refused (429 `budget_exhausted`), and running ones finish
@@ -408,7 +408,7 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
   error. Replicas do not share reservations: with several, simultaneous calls can overshoot by up
   to about the budget that was left, per replica (Postgres-backed reservations are a follow-up). Enforcement is at the identities the session token proves, never the advisory run
   id. The per-user request rate is enforced by each shim replica (so up to replicas × the rate in
-  total) and, install-wide, by Bifrost on each member's virtual key (pushed by the gateway sync).
+  total) and, site-wide, by Bifrost on each member's virtual key (pushed by the gateway sync).
   Bifrost's own dollar budgets are not used (it prices calls with its own list). Budget data is
   guarded in Postgres: spend counters change only through the ledger, alerts only for a budget
   really crossed in the current period, alert emails only with their alert.
@@ -417,7 +417,7 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
   cache prices default to the input price) on `POST/PATCH /v1/install/models/catalog`. Providers
   such as Ollama publish no prices: without input and output prices calls are counted in tokens
   with no cost. A call is priced when it is recorded (later price changes do not rewrite history).
-  Dashboards: team console **Usage** (`GET /v1/team/usage`, team admins) and install console
+  Dashboards: team console **Usage** (`GET /v1/team/usage`, team admins) and site console
   **Usage and spend** (`GET /v1/install/usage`, `install.usage.read`), both with `from`/`to` (at
   most 400 days) and `bucket` (`hour`/`day`); per run and per thread for whoever can read them
   (`GET /v1/runs/{id}/usage`, `GET /v1/threads/{id}/usage`).
@@ -425,7 +425,7 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
 ## MCP connectors
 
 Sandboxes reach remote MCP servers only through the **MCP proxy** (spec D27): Streamable HTTP
-servers only (no stdio), registered by install admins, enabled per team with an exposure
+servers only (no stdio), registered by site admins, enabled per team with an exposure
 (read-only, all, custom). The proxy holds no database credentials and no connector credentials of
 its own. For every request it checks the sandbox's `kobe.mcp-proxy` session token, then asks the
 server on its **internal port 8082** (reachable only from the proxy's pods, and keyed with the
@@ -436,7 +436,7 @@ valid signed approval for exactly that run, tool and input, used once. Every all
 written to the audit log (`mcp.tool_call`) before the proxy forwards it.
 
 The proxy connects to MCP servers **directly**, not through the egress proxy: the egress proxy
-enforces the teams' sandbox allowlists, while connectors are governed by the install registry, and
+enforces the teams' sandbox allowlists, while connectors are governed by the site registry, and
 the MCP proxy is not a sandbox. Its own NetworkPolicy allows DNS, the server's internal port, and
 public addresses on `mcpProxy.allowedPorts` (default 443). It resolves each connector's host itself
 and refuses private, loopback, link-local (cloud metadata) and reserved addresses unless listed in
@@ -491,7 +491,7 @@ content). Without `s3.bucket`, workspace sync stays off and the server logs a wa
 `s3.prefix` (default empty) puts every object under a key prefix, for a bucket shared with other
 applications. It must be relative and end in `/` (for example `kobe/`; letters, digits and
 `! _ . * ' ( ) / -` only); the chart rejects anything else. It is applied on the server and the
-scheduler (`KOBE_S3_PREFIX`). Changing it on an existing install hides the objects written under
+scheduler (`KOBE_S3_PREFIX`). Changing it on an existing site hides the objects written under
 the old prefix, so move them first or keep the old value. `kobe backup` and `kobe restore` read
 `KOBE_S3_PREFIX` too; set it to the same value.
 
@@ -586,7 +586,7 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
   - **Rolling back** to an older release restores the five and archives Kobe; the older release
     cannot read Kobe's versions or any agent using `connectors: all`.
 - **One approval floor (migration `0024_approval_floor_unify`).** The minimum approval mode is
-  install-wide only (spec D6), stored as `install_settings['policy.approval_floor']`. The older key
+  site-wide only (spec D6), stored as `install_settings['policy.approval_floor']`. The older key
   `policy.approval_mode_floor` is folded into it (the stricter value wins), and team floors
   (`teams.settings.approval_mode_floor`) are removed. Each team whose floor was stricter than
   `auto` is named in a notice (`kobe: dropped team approval floor <mode> of team <id>`): such a
@@ -607,7 +607,7 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
 
 - **Retention indexes (KOBE-18, migration `*_retention_rls`).** Two indexes are added with a
   plain `CREATE INDEX` (migrations run in one transaction), which blocks writes to `threads` and
-  `thread_entries` while it scans them. On a large install, build them first, outside the upgrade,
+  `thread_entries` while it scans them. On a large site, build them first, outside the upgrade,
   then upgrade (the migration skips existing indexes):
 
   ```sql
@@ -631,7 +631,7 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
 
 - **Schedule fire index (KOBE-172, migration `*_schedules_rls`).** A unique index on `events` is
   added with a plain `CREATE UNIQUE INDEX` (migrations run in one transaction), which blocks writes
-  to `events` while it scans. On a large install, build it first, then upgrade (the migration skips
+  to `events` while it scans. On a large site, build it first, then upgrade (the migration skips
   an existing index):
 
   ```sql

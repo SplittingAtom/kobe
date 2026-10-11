@@ -22,7 +22,7 @@ function scopeText(g: TeamGrant): string {
 function approval(g: TeamGrant): string {
   if (!g.approvedBy) return "";
   return g.selfApproved
-    ? `Self-approved by ${g.approvedBy.name}: single-admin install (flagged).`
+    ? `Self-approved by ${g.approvedBy.name}: single-admin site (flagged).`
     : `Approved by ${g.approvedBy.name}.`;
 }
 
@@ -37,7 +37,7 @@ export function BreakGlassBanners({ grants }: { readonly grants: readonly TeamGr
           role="note"
           aria-label="Active break-glass access"
         >
-          <strong>{g.requestedBy.name}</strong> (install admin) has read-only break-glass access to
+          <strong>{g.requestedBy.name}</strong> (site admin) has read-only break-glass access to
           this team until <DateTime value={g.expiresAt} />. Scope: {scopeText(g)}. {approval(g)}
           {g.reason && <> Reason: {g.reason}</>}
         </div>
@@ -59,15 +59,15 @@ export function TeamBreakGlassPage() {
     <>
       <h1>Break-glass access</h1>
       <p className={styles.hint}>
-        Install admins can read this team&apos;s content only through break-glass: read-only,
-        time-boxed, approved by a second install admin, and recorded read by read in the team&apos;s
+        Site admins can read this team&apos;s content only through break-glass: read-only,
+        time-boxed, approved by a second site admin, and recorded read by read in the team&apos;s
         audit log.
       </p>
       <ResourceView state={state} label="break-glass access">
         {({ active, recent }) => (
           <>
             {active.length === 0 ? (
-              <p role="status">No install admin has break-glass access to this team now.</p>
+              <p role="status">No site admin has break-glass access to this team now.</p>
             ) : (
               <BreakGlassBanners grants={active} />
             )}
@@ -80,7 +80,7 @@ export function TeamBreakGlassPage() {
                   <caption>Earlier grants</caption>
                   <thead>
                     <tr>
-                      <th scope="col">Install admin</th>
+                      <th scope="col">Site admin</th>
                       <th scope="col">Scope</th>
                       <th scope="col">Reason</th>
                       <th scope="col">From</th>

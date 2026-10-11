@@ -97,7 +97,7 @@ function RetentionForm({
         <p className={styles.banner} role="status">
           Conversations older than {periodText(retention.upcoming.period)} will be deleted from{" "}
           <DateTime value={retention.upcoming.effectiveAt} />
-          {retention.pending ? "." : " (the install maximum was lowered)."}
+          {retention.pending ? "." : " (the site maximum was lowered)."}
         </p>
       )}
       {retention.pending && (
@@ -111,7 +111,7 @@ function RetentionForm({
       )}
       {retention.effective !== retention.period && !retention.pending && (
         <p className={styles.hint}>
-          The install keeps conversations at most {periodText(retention.maximum)}, so that applies
+          The site keeps conversations at most {periodText(retention.maximum)}, so that applies
           instead of the team&apos;s choice ({periodText(retention.period)}).
         </p>
       )}
@@ -130,7 +130,7 @@ function RetentionForm({
           </label>
         ))}
         <p className={styles.hint}>
-          Install maximum: {periodText(retention.maximum)}. In force now:{" "}
+          Site maximum: {periodText(retention.maximum)}. In force now:{" "}
           {periodText(retention.effective)}.
         </p>
       </fieldset>

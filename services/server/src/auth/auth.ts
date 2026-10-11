@@ -49,7 +49,7 @@ export const RESET_TOKEN_TTL_SECONDS = 30 * 60;
 
 const ACCOUNT_DEACTIVATED = {
   code: "ACCOUNT_DEACTIVATED",
-  message: "This account is deactivated. Ask an install admin to reactivate it.",
+  message: "This account is deactivated. Ask a site admin to reactivate it.",
 };
 
 const PASSKEY_VERIFY_PATHS = new Set([

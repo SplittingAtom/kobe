@@ -16,7 +16,7 @@ export const FAILURE_MESSAGES: Readonly<Record<string, string>> = {
   // KOBE-192: the pod was not Ready within the wake timeout (volume, scheduling, image pull).
   // Deliberately generic: the cluster's reason is for install admins (audit log, server log).
   workspace_unavailable:
-    "Your workspace could not be started because the cluster could not provide it. Ask your install admin to check the cluster, then try again.",
+    "Your workspace could not be started because the cluster could not provide it. Ask your site admin to check the cluster, then try again.",
   thread_not_found: "The run could not start: the thread is not available to the workspace.",
   start_lost: "The run could not start: the server that started it stopped. Send it again.",
   start_failed: "The run could not start in your workspace.",

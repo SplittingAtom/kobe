@@ -56,8 +56,8 @@ export async function gatePublish(input: GateInput): Promise<GateOutcome> {
     return refused(
       503,
       "eval_unavailable",
-      "This team requires an Orbit eval before publishing, but evals are not set up on this install. " +
-        "Ask an install admin; nothing was published.",
+      "This team requires an Orbit eval before publishing, but evals are not set up on this site. " +
+        "Ask a site admin; nothing was published.",
     );
   }
   if (agent.archivedAt) return { kind: "publish_error", error: "archived" };

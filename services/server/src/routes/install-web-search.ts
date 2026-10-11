@@ -51,7 +51,7 @@ export function installWebSearchRoutes(deps: ServerDeps): Hono<{ Variables: Auth
     }
     if (!deps.envelope) {
       return c.json(
-        { code: "credentials_unavailable", message: "This install cannot store credentials yet." },
+        { code: "credentials_unavailable", message: "This site cannot store credentials yet." },
         503,
       );
     }

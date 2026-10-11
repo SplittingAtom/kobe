@@ -81,10 +81,10 @@ describe("Install memory switches (KOBE-158, ac-3)", () => {
     });
     renderInstall(<MemorySwitchesSection />);
     await userEvent.click(
-      await screen.findByRole("checkbox", { name: /Allow memory on this install/ }),
+      await screen.findByRole("checkbox", { name: /Allow memory on this site/ }),
     );
     await userEvent.click(screen.getByRole("button", { name: "Save memory settings" }));
-    await screen.findByText(/Memory is off on this install/);
+    await screen.findByText(/Memory is off on this site/);
     expect(JSON.parse(String(must(calls.find((c) => c.method === "PUT")).body))).toEqual({
       memory_enabled: false,
       project_memory_enabled: true,

@@ -38,7 +38,7 @@ const nameConflict = (c: Context, error: NameConflict) =>
   c.json({ code: error, message: CONFLICTS[error] }, 409);
 
 const PIN_MESSAGES: Record<Extract<PinOutcome, { ok: false }>["failure"], string> = {
-  url_not_allowed: "The address is not allowed by this install's connector policy.",
+  url_not_allowed: "The address is not allowed by this site's connector policy.",
   forbidden_address: "The server resolves to an address Kobe may not reach.",
   unreachable: "The server could not be reached.",
   timeout: "The server did not answer in time.",

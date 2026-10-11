@@ -116,7 +116,7 @@ export function runsOpenApiPaths(): Record<string, Record<string, unknown>> {
           ),
           "422": json(
             "Error",
-            "`attachments_unavailable` (this install has no workspace storage) or " +
+            "`attachments_unavailable` (this site has no workspace storage) or " +
               "`invalid_parent_entry` (`parent_entry_id` is a note from Kobe, not a message).",
           ),
           "429": json("Error", "`budget_exhausted`: no new runs at 100 % of a budget (D30)."),

@@ -253,6 +253,10 @@ ingress() { # method path [json]: full response (status line + body) via the Tra
     --header 'Content-Type: application/json' $data http://traefik.kube-system$2 2>&1"
 }
 contains "first-run setup is required on a fresh install" '"required":true' "$(ingress GET /v1/setup)"
+# KOBE-257: the install console became the Site console; old links redirect permanently.
+old_console=$(ingress GET /admin/install/users)
+contains "old /admin/install URLs redirect permanently (308)" 'HTTP/1.1 308' "$old_console"
+contains "and land on the same page under /admin/site" '[Ll]ocation: (https?://[^/]+)?/admin/site/users' "$old_console"
 contains "setup without the setup token is refused" 'HTTP/1.1 403|invalid_setup_token' \
   "$(ingress POST /v1/setup '{"email":"owner@e2e.test","name":"Owner","password":"e2e owner password"}')"
 # Built outside "$(...)": bash 3.2 keeps backslashes from \" inside quoted command substitutions.

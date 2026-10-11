@@ -27,7 +27,7 @@ export function SkillBlocklistPage() {
       <h1>Skill blocklist</h1>
       <p className={styles.hint}>
         A skill bundle is identified by the SHA-256 of its canonical bundle, shown on each skill
-        version. Blocking a hash stops that exact bundle everywhere in the install: it can&apos;t be
+        version. Blocking a hash stops that exact bundle everywhere on the site: it can&apos;t be
         uploaded again or approved by a team, and versions already uploaded are left out of runs
         from the next run on, in every team. Removing the hash lifts the block.
       </p>

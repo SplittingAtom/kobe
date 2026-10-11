@@ -22,9 +22,9 @@ export function InstallBudget() {
   const mutation = useMutation();
   return (
     <section aria-labelledby="install-budget">
-      <h2 id="install-budget">Install budget</h2>
+      <h2 id="install-budget">Site budget</h2>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
-      <ResourceView state={state} label="the install budget">
+      <ResourceView state={state} label="the site budget">
         {(limits) => (
           <Form
             key={limits.updatedAt}
@@ -33,7 +33,7 @@ export function InstallBudget() {
               if (
                 await mutation.run(
                   () => setInstallBudget(input),
-                  () => "Install budget saved.",
+                  () => "Site budget saved.",
                 )
               ) {
                 reload();
@@ -78,12 +78,12 @@ function Form({
           {invalid}
         </p>
       )}
-      <AmountFields value={amounts} onChange={setAmounts} prefix="Install " />
+      <AmountFields value={amounts} onChange={setAmounts} prefix="Site " />
       <label>
         Requests per minute per user
         <input inputMode="numeric" value={rpm} onChange={(e) => setRpm(e.target.value)} />
       </label>
-      <button type="submit">Save install budget</button>
+      <button type="submit">Save site budget</button>
       <p className={styles.hint}>
         Months and days are calendar periods in UTC. Token budgets count input, output and cached
         tokens and also cap models without prices.

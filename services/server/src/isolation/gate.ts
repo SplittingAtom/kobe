@@ -87,7 +87,7 @@ export class IsolationRuntimeMissingError extends Error {
     return {
       code: this.code,
       message:
-        "Isolation runtime missing: agents are disabled until an install admin fixes the " +
+        "Isolation runtime missing: agents are disabled until a site admin fixes the " +
         "cluster's gVisor or Kata runtime.",
     };
   }

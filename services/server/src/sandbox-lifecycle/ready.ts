@@ -8,7 +8,7 @@ import { SandboxWakeError } from "../sandbox-wire/types.js";
  * volume or event text. The reason is in the audit log (`sandbox.wake_stalled`) and the server log.
  */
 export const WORKSPACE_UNAVAILABLE_MESSAGE =
-  "Your workspace could not be started because the cluster could not provide it. Ask your install admin to check the cluster, then try again.";
+  "Your workspace could not be started because the cluster could not provide it. Ask your site admin to check the cluster, then try again.";
 
 /** What an install admin can do, by cause; appended to the audit detail (docs/install.md). */
 export const REMEDY: Readonly<Record<StallDiagnosis["cause"], string>> = {

@@ -183,7 +183,7 @@ function Report({
             {totals.unpricedCalls > 0 && (
               <p className={adminStyles.hint}>
                 * {totals.unpricedCalls} calls used models without a price in the catalog: their
-                tokens are counted, their cost is not. Install admins set prices per model.
+                tokens are counted, their cost is not. Site admins set prices per model.
               </p>
             )}
             {totals.estimatedCalls > 0 && (

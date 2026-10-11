@@ -56,7 +56,7 @@ describe("Install policy floor", () => {
   it("lists rules with their argument patterns and offers only deny and ask", async () => {
     stubApi(routes);
     renderInstall(<PolicyFloorPage />);
-    const table = await screen.findByRole("table", { name: /Install rules/ });
+    const table = await screen.findByRole("table", { name: /Site rules/ });
     expect(table.textContent).toMatch(/Deny.*mcp__github__\*/);
     expect(table.textContent).toMatch(/\/repo_name.*secret-\*/);
     expect(table.textContent).toMatch(/No GitHub/);

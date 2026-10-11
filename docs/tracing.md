@@ -7,7 +7,7 @@ Tracing is off unless an endpoint is set, and then registers nothing, so it cost
 telemetry:
   endpoint: http://otel-collector.observability:4318 # base URL; /v1/traces is appended
   headersSecret: otel-auth # optional Secret, key `headers` = name=value,name=value
-  captureContent: false # install-level opt-in, see below
+  captureContent: false # site-level opt-in, see below
 ```
 
 The proxies and the gateway restrict egress by NetworkPolicy: add the collector to

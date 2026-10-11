@@ -13,6 +13,7 @@ import { logger } from "../logger.js";
 import type { MailMessage, Mailer } from "../mail/mailer.js";
 import { oneLine } from "../mail/messages.js";
 import { driftRecipients, type DriftRecipient } from "./drift-recipients.js";
+import { CONSOLE_PATHS } from "../mail/console-paths.js";
 
 /**
  * Emails about connector tool drift (KOBE-103, D27). Driven by the audit log, so no table is
@@ -54,11 +55,11 @@ export function driftMessage(
     subject: `Connector ${name}: tools changed and are disabled`,
     text: [
       `The tools of the ${name} connector changed upstream. These tools are disabled in Kobe until`,
-      "an install admin reviews and re-approves them:",
+      "a site admin reviews and re-approves them:",
       ...shown,
       ...(more > 0 ? [`  ... and ${more} more`] : []),
       "",
-      `Install admins can review them at ${publicUrl}/admin/connectors`,
+      `Site admins can review them at ${publicUrl}${CONSOLE_PATHS.siteConnectors}`,
     ].join("\n"),
   };
 }

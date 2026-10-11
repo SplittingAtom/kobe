@@ -98,7 +98,7 @@ export const webSearchToolsRequestSchema = z.strictObject({
 export const WEB_SEARCH_UNAVAILABLE_MESSAGES: Readonly<
   Record<(typeof WEB_SEARCH_UNAVAILABLE_REASONS)[number], string>
 > = {
-  not_configured: "Web search is unavailable: this Kobe install has no web search provider set up.",
+  not_configured: "Web search is unavailable: this Kobe site has no web search provider set up.",
   team_not_enabled:
     "Web search is unavailable: your team has not turned it on. A team admin can enable it in team settings.",
 };

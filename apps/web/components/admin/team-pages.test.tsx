@@ -523,7 +523,7 @@ describe("Team agents", () => {
         {
           code: "isolation_runtime_missing",
           message:
-            "Isolation runtime missing: agents are disabled until an install admin fixes the cluster's gVisor or Kata runtime.",
+            "Isolation runtime missing: agents are disabled until a site admin fixes the cluster's gVisor or Kata runtime.",
         },
       ],
     });
@@ -531,7 +531,7 @@ describe("Team agents", () => {
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toMatch(/Isolation runtime missing/);
     expect(screen.getByRole("link", { name: "Isolation" }).getAttribute("href")).toBe(
-      "/admin/install/isolation",
+      "/admin/site/isolation",
     );
   });
 

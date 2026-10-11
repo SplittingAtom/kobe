@@ -385,6 +385,12 @@ describe("deactivation (ac-4)", () => {
     const signIn = await h
       .browser()
       .post("/api/auth/sign-in/email", { email: "admin2@life.test", password: PASSWORD });
-    expect(signIn).toMatchObject({ status: 403, json: { code: "ACCOUNT_DEACTIVATED" } });
+    expect(signIn).toMatchObject({
+      status: 403,
+      json: {
+        code: "ACCOUNT_DEACTIVATED",
+        message: "This account is deactivated. Ask a site admin to reactivate it.",
+      },
+    });
   });
 });

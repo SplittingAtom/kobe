@@ -154,7 +154,7 @@ describe("Team connectors (KOBE-105)", () => {
     stubApi({ [`GET ${BASE}`]: [200, { connectors: [connector({ status: "disabled" })] }] });
     renderTeam(<TeamConnectorsPage />);
     await screen.findByRole("article", { name: "jira" });
-    expect(card("jira").getByText(/disabled by an install admin/i)).toBeTruthy();
+    expect(card("jira").getByText(/disabled by a site admin/i)).toBeTruthy();
     expect(card("jira").queryByRole("button", { name: /Enable/ })).toBeNull();
   });
 

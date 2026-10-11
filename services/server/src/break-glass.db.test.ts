@@ -248,6 +248,8 @@ describe("requesting (POST /v1/install/break-glass)", () => {
     const ownerMail = await mailTo("owner", before.owner + 1);
     expect(ownerMail.at(-1)?.subject).toContain("needs a second admin");
     expect(ownerMail.at(-1)?.text).toContain("Incident 42");
+    // KOBE-257: the review link opens the Site console.
+    expect(ownerMail.at(-1)?.text).toContain("/admin/site/break-glass");
     await settled();
     // Nobody on the team hears about a request that grants nothing yet; the requester neither.
     expect(mailCounts()).toMatchObject({ ...before, owner: before.owner + 1 });

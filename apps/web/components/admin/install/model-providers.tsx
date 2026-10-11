@@ -99,7 +99,7 @@ export function ProvidersSection({
         <AddProviderForm providers={providers} mutation={mutation} onAdded={onChanged} />
       ) : (
         <p className={styles.banner}>
-          The model gateway is not configured on this install, so providers can&apos;t be added. Set
+          The model gateway is not configured on this site, so providers can&apos;t be added. Set
           the chart&apos;s <code>bifrost</code> values and upgrade.
         </p>
       )}
@@ -286,7 +286,7 @@ function EditProviderForm({
       {insecure && (
         <p role="alert" className={styles.banner}>
           The server sends API keys over https:// only (unless the operator allowed unsafe endpoints
-          for a test install). Use an https:// URL, or remove the key.
+          for a test site). Use an https:// URL, or remove the key.
         </p>
       )}
     </form>
@@ -424,7 +424,7 @@ function AddProviderForm({
         {insecure && (
           <p role="alert" className={styles.banner}>
             The server sends API keys over https:// only (unless the operator allowed unsafe
-            endpoints for a test install). Use an https:// URL, or leave the key empty.
+            endpoints for a test site). Use an https:// URL, or leave the key empty.
           </p>
         )}
       </form>
