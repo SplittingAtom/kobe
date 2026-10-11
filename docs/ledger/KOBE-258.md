@@ -1,6 +1,6 @@
 # KOBE-258: Run that hits the model output limit is lost
 
-- **Status:** in review (PR #)
+- **Status:** in review (PR #243)
 - **Branch / worktree:** `kobe-258-lost-run-output-limit` in `../Kobe-wt258`
 - **Depends on:** none (related: KOBE-259, per-model output limit)
 
