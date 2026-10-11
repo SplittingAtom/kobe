@@ -1,5 +1,6 @@
 import { isActiveRunStatus, isTerminalRunStatus } from "@kobe/protocol";
 import { SYSTEM_ACTOR, sql, withTeam, type KobeDb } from "@kobe/db";
+import type { Logger } from "pino";
 import { recordAudit } from "../audit/record.js";
 import { withAppendTx } from "../event-stream/append.js";
 import type { StopTarget } from "./dispatch.js";
@@ -22,6 +23,7 @@ export interface CancelScheduledContext {
   readonly emit: (teamId: string, transitions: readonly AppliedTransition[]) => void;
   /** Sends Pi the abort and then advances the thread's queue (in the background). */
   readonly stopThenAdvance: (target: StopTarget) => void;
+  readonly log: Pick<Logger, "error">;
 }
 
 /**
@@ -29,7 +31,9 @@ export interface CancelScheduledContext {
  * approval) of `userId` in one team (KOBE-180, D7/D32): the owner was deactivated or left the team,
  * so nothing they scheduled may keep working. Interactive runs are left to the sandbox teardown.
  * Each run ends like a Stop (`cancelled`, abort requested durably so the sweep re-sends it) and is
- * audited as the system. Returns the cancelled run ids.
+ * audited as the system. A run that cannot be cancelled (e.g. its thread stays locked) is logged
+ * and skipped so the others still stop; the function throws at the end if any failed (the caller
+ * reports the step incomplete). Returns the cancelled run ids.
  */
 export async function cancelScheduledRuns(
   ctx: CancelScheduledContext,
@@ -48,37 +52,47 @@ export async function cancelScheduledRuns(
     return res.rows;
   });
   const cancelled: string[] = [];
+  let failures = 0;
   for (const c of candidates) {
-    const outcome = await ctx.withRetry(() =>
-      withAppendTx(ctx.db, teamId, async (tx) => {
-        const thread = await lockThreadRow(tx, teamId, c.thread_id);
-        const run = await lockRunRow(tx, teamId, c.id);
-        if (!thread || !run || isTerminalRunStatus(run.status)) return undefined;
-        const wasActive = isActiveRunStatus(run.status);
-        const applied = await applyTransition(
-          tx,
-          thread,
-          run,
-          "cancelled",
-          "user_cancelled",
-          cancelledEvent(thread),
-        );
-        if (wasActive) await requestStop(tx, teamId, run.id, "abort");
-        await recordAudit(tx, {
-          action: "run.cancelled",
-          actor: SYSTEM_ACTOR,
-          teamId,
-          target: { runId: run.id, threadId: thread.id, wasActive, reason },
-        });
-        return { transition: applied.transition, wasActive };
-      }),
-    );
+    const outcome = await ctx
+      .withRetry(() =>
+        withAppendTx(ctx.db, teamId, async (tx) => {
+          const thread = await lockThreadRow(tx, teamId, c.thread_id);
+          const run = await lockRunRow(tx, teamId, c.id);
+          if (!thread || !run || isTerminalRunStatus(run.status)) return undefined;
+          const wasActive = isActiveRunStatus(run.status);
+          const applied = await applyTransition(
+            tx,
+            thread,
+            run,
+            "cancelled",
+            "user_cancelled",
+            cancelledEvent(thread),
+          );
+          if (wasActive) await requestStop(tx, teamId, run.id, "abort");
+          await recordAudit(tx, {
+            action: "run.cancelled",
+            actor: SYSTEM_ACTOR,
+            teamId,
+            target: { runId: run.id, threadId: thread.id, wasActive, reason },
+          });
+          return { transition: applied.transition, wasActive };
+        }),
+      )
+      .catch((err: unknown) => {
+        failures += 1;
+        ctx.log.error({ err, team_id: teamId, run_id: c.id }, "cancelling a scheduled run failed");
+        return undefined;
+      });
     if (!outcome) continue;
     cancelled.push(c.id);
     if (outcome.transition) ctx.emit(teamId, [outcome.transition]);
     if (outcome.wasActive) {
       ctx.stopThenAdvance({ teamId, ownerUserId: userId, runId: c.id, threadId: c.thread_id });
     }
+  }
+  if (failures > 0) {
+    throw new Error(`${failures} of ${candidates.length} scheduled runs could not be cancelled`);
   }
   return cancelled;
 }

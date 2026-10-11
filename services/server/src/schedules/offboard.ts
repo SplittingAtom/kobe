@@ -3,6 +3,7 @@ import {
   and,
   eq,
   listMemberships,
+  or,
   schedules,
   withTeam,
   type KobeDb,
@@ -14,8 +15,10 @@ import type { ServerRunOrchestrator } from "../runs/orchestrator.js";
 /**
  * Deactivation and team removal stop a user's schedules (KOBE-180, D7/D32). Their active schedules
  * are paused with `paused_by = deactivation` and stay paused after a reactivation or a return to
- * the team until the owner resumes each one (coordinator decision 2026-10-09); a team admin's pause
- * and the owner's own pause are left as they are. Their in-flight scheduled runs are cancelled.
+ * the team until the owner resumes each one (coordinator decision 2026-10-09). A team admin's pause
+ * becomes `deactivation` too (review of #235): left as `team_admin`, an admin could resume it and it
+ * would fire after reactivation without the owner's say. The owner's own pause is left as it is.
+ * Their in-flight scheduled runs are cancelled.
  *
  * Order matters: the pause UPDATE waits for any fire holding the schedule row (the runner's lease,
  * KOBE-174), so a run fired just before the pause is committed, and therefore visible, when the
@@ -25,8 +28,9 @@ import type { ServerRunOrchestrator } from "../runs/orchestrator.js";
 export type ScheduleStopCause = "deactivation" | "member_removed";
 
 /**
- * Pauses the user's active schedules in `teamId`, inside the caller's `withTeam()` transaction.
- * Audited as the system, one `schedule.deactivated` per schedule. Returns the paused ids.
+ * Pauses the user's active (and admin-paused) schedules in `teamId`, inside the caller's
+ * `withTeam()` transaction. Audited as the system, one `schedule.deactivated` per schedule.
+ * Returns the paused ids.
  */
 export async function pauseOwnerSchedulesInTx(
   tx: KobeTx,
@@ -38,7 +42,11 @@ export async function pauseOwnerSchedulesInTx(
     .update(schedules)
     .set({ active: false, pausedBy: "deactivation", nextDueAt: null, updatedAt: new Date() })
     .where(
-      and(eq(schedules.teamId, teamId), eq(schedules.userId, userId), eq(schedules.active, true)),
+      and(
+        eq(schedules.teamId, teamId),
+        eq(schedules.userId, userId),
+        or(eq(schedules.active, true), eq(schedules.pausedBy, "team_admin")),
+      ),
     )
     .returning({ id: schedules.id });
   for (const { id } of paused) {

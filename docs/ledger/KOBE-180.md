@@ -19,8 +19,16 @@ Tests first (`services/server/src/schedule-governance.db.test.ts`, inventory cas
 ## Decisions
 
 - Deactivation and team removal both set `paused_by = deactivation` (the only non-admin value the
-  KOBE-172 check allows); the audit `by` tells them apart (`deactivation` | `member_removed`). Only
-  ACTIVE schedules are touched: an admin pause (sticky, KOBE-173) and an owner pause stay as they were.
+  KOBE-172 check allows); the audit `by` tells them apart (`deactivation` | `member_removed`). Active
+  AND admin-paused schedules are stamped (review MEDIUM-1): left as `team_admin`, an admin could resume
+  it and it would fire after reactivation without the owner. Trade-off: the admin's pause is replaced,
+  so after reactivation the owner (not the admin) decides; the admin can pause again. Owner pauses stay.
+- Admin resume refuses `409 schedule_owner_inactive` unless the owner is active and still a member
+  (`principalActive`), whatever `paused_by` says (covers a failed hook or older rows).
+- Skip rows (review MEDIUM-2): `recordSkip` writes a `schedule.skip` only when the schedule's latest
+  fire/skip event is not already a skip for the same reason; `next_due_at` still advances. The lookup
+  scans the team's events via the `(team_id, id)` primary key (no index on `ref->>'schedule_id'` for
+  skips; one would need a migration). Alternating reasons each still record.
 - Reactivation / rejoining changes nothing: schedules stay paused until the owner resumes each
   (coordinator, 2026-10-09). The owner may resume a `deactivation` pause; a team admin cannot (404,
   the KOBE-173 rule "admins resume only admin-paused schedules").
@@ -36,6 +44,11 @@ Tests first (`services/server/src/schedule-governance.db.test.ts`, inventory cas
   for `cancelled`; abort requested durably; KOBE-178 skipped-actions report applies). Audit
   `run.cancelled` as the system with `reason` `owner_deactivated` | `member_removed`. Interactive runs
   are left to the existing sandbox teardown (offboarding).
+- One run that cannot be cancelled (lock timeout after retries) is logged and skipped; the rest are
+  cancelled, then the call throws so the step is reported incomplete (review LOW-2).
+- The run's own transition cause stays `user_cancelled` and its event reason `cancelled`: the
+  contract has no other cause for `cancelled` (protocol change, out of scope); the audit `reason` says
+  `owner_deactivated` | `member_removed`. KOBE-179 must not email a deactivated or removed owner.
 - Pause/cancel audits use `SYSTEM_ACTOR`: they are consequences; the triggering act
   (`identity.user.deactivated`, `identity.member.removed`) carries the human actor.
 - ac-2: no new `routes/team-schedules.ts`. KOBE-173 already serves the team-admin API on
@@ -50,13 +63,18 @@ Tests first (`services/server/src/schedule-governance.db.test.ts`, inventory cas
 
 ## Open questions (for Chris or the coordinator)
 
-- A suspended or unpublished agent's schedules write one `schedule.skip` per occurrence until the
-  agent is back (KOBE-174 behaviour). Pausing them instead would need a reason value the KOBE-172
-  check does not allow (a migration). Say if wanted.
+- Follow-up: nothing retries a failed step. A failed deactivation hook leaves schedules active (they
+  skip `user_inactive`, once per streak) until an admin re-POSTs deactivate (it re-emits the hooks); a
+  failed cancel after removal (`routes/team.ts`) or a crash between the removal commit and the cancel
+  leaves the run until the sandbox teardown ends it. A sweep would close both.
+- A removed member's paused schedules stay in the team (listed in the inventory; nobody can delete
+  them: the owner has no access, admins get 404 on delete). Say if admins should delete them.
 - Team removal reuses `paused_by = deactivation`; web shows "paused (owner deactivated or removed)".
 
 ## Evidence (acceptance criteria → test or command output)
 
+- Review fixes: same file "an admin pause does not outlive ...", "keeps going past a busy run", and the
+  second tick in "a personal agent the team suspends ..." (one skip row per streak).
 - ac-1: `schedule-governance.db.test.ts` "deactivation stops the user's schedules" (both teams paused,
   owner pause untouched, running and queued scheduled runs cancelled, audits, nothing fires and no skip
   rows next day, reactivation keeps them paused, owner resumes); "removal from a team stops only that

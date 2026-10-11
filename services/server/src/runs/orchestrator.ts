@@ -690,6 +690,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       emit: (team: string, transitions: readonly AppliedTransition[]) =>
         this.#emit(team, transitions),
       stopThenAdvance: (target: StopTarget) => this.#track(this.#dispatch.stopThenAdvance(target)),
+      log: this.#log,
     };
     return cancelScheduledRuns(ctx, teamId, userId, reason);
   }

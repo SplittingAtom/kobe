@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestDatabase, testServerUrl, type TestDatabase } from "@kobe/db/testing";
 import { createApp } from "./app.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
+import { cancelScheduledRuns } from "./runs/cancel-scheduled.js";
 import { SchedulerRunner } from "./scheduler/runner.js";
 import { waitForAppSessionsToClose } from "./testing/app-sessions.js";
 import { TestBrowser } from "./testing/browser.js";
@@ -23,9 +24,18 @@ const DUE = new Date("2026-10-10T09:00:00Z");
 const NOW = new Date("2026-10-10T09:20:00Z");
 const NEXT_DAY = new Date("2026-10-11T09:20:00Z");
 
-type Person = "admin" | "madmin" | "bob" | "erin" | "carol" | "dave";
+type Person = "admin" | "madmin" | "bob" | "erin" | "carol" | "dave" | "fred" | "gina";
 // Finance: admin team_admin; bob, erin, carol, dave builders. Marketing: madmin team_admin; bob, erin.
-const PEOPLE: readonly Person[] = ["admin", "madmin", "bob", "erin", "carol", "dave"];
+const PEOPLE: readonly Person[] = [
+  "admin",
+  "madmin",
+  "bob",
+  "erin",
+  "carol",
+  "dave",
+  "fred",
+  "gina",
+];
 const ids = {} as Record<Person, string>;
 const as = {} as Record<Person, TestBrowser>;
 const finance = randomUUID();
@@ -100,6 +110,8 @@ beforeAll(async () => {
     [finance, "erin", "builder"],
     [finance, "carol", "builder"],
     [finance, "dave", "builder"],
+    [finance, "fred", "builder"],
+    [finance, "gina", "builder"],
     [marketing, "madmin", "team_admin"],
     [marketing, "bob", "builder"],
     [marketing, "erin", "builder"],
@@ -398,6 +410,11 @@ describe("inventory lists schedules; suspended agents do not fire (ac-3)", () =>
     await runner(NOW).tick();
     expect(await threadCount(id)).toBe(0);
     expect(await skipReasons(id)).toEqual(["agent_unavailable"]);
+    // The next occurrence is skipped for the same reason: no second row, the schedule moves on.
+    await runner(NEXT_DAY).tick();
+    expect(await threadCount(id)).toBe(0);
+    expect(await skipReasons(id)).toEqual(["agent_unavailable"]);
+    expect((await scheduleRow(id))?.next_due_at?.toISOString()).toBe("2026-10-12T09:00:00.000Z");
   });
 
   it("an unpublished team agent does not fire", async () => {
@@ -417,5 +434,80 @@ describe("inventory lists schedules; suspended agents do not fire (ac-3)", () =>
         [financeAgent],
       );
     }
+  });
+});
+
+describe("an admin pause does not outlive the owner's deactivation or removal (review MEDIUM-1)", () => {
+  /** A team-admin pause left on an offboarded owner's schedule (e.g. a hook that failed). */
+  const forceAdminPause = (id: string) =>
+    adminPg.query(`UPDATE schedules SET paused_by = 'team_admin' WHERE id = $1`, [id]);
+
+  it("deactivation turns an admin pause into the owner's; only the owner resumes after reactivation", async () => {
+    const id = await schedule("fred", financeAgent);
+    expect((await as.admin.post(`/v1/schedules/${id}/pause`)).json.paused_by).toBe("team_admin");
+    expect((await installOwner.post(`/v1/install/users/${ids.fred}/deactivate`)).status).toBe(200);
+    expect((await scheduleRow(id))?.paused_by).toBe("deactivation");
+    expect((await as.admin.post(`/v1/schedules/${id}/resume`)).status).toBe(404);
+    await forceAdminPause(id);
+    const refused = await as.admin.post(`/v1/schedules/${id}/resume`);
+    expect(refused.status).toBe(409);
+    expect(refused.json.code).toBe("schedule_owner_inactive");
+    expect((await scheduleRow(id))?.active).toBe(false);
+    await adminPg.query(`UPDATE schedules SET paused_by = 'deactivation' WHERE id = $1`, [id]);
+    expect((await installOwner.post(`/v1/install/users/${ids.fred}/reactivate`)).status).toBe(200);
+    expect((await as.admin.post(`/v1/schedules/${id}/resume`)).status).toBe(404);
+    await signIn("fred", finance);
+    const resumed = await as.fred.post(`/v1/schedules/${id}/resume`);
+    expect(resumed.json).toMatchObject({ active: true, paused_by: null });
+  });
+
+  it("removal does the same, and an admin cannot revive a removed owner's schedule", async () => {
+    const id = await schedule("gina", financeAgent);
+    await as.admin.post(`/v1/schedules/${id}/pause`);
+    expect((await as.admin.request("DELETE", `/v1/team/members/${ids.gina}`)).status).toBe(204);
+    expect((await scheduleRow(id))?.paused_by).toBe("deactivation");
+    await forceAdminPause(id);
+    const refused = await as.admin.post(`/v1/schedules/${id}/resume`);
+    expect(refused.status).toBe(409);
+    expect(refused.json.code).toBe("schedule_owner_inactive");
+    expect((await scheduleRow(id))?.active).toBe(false);
+  });
+});
+
+describe("cancelling scheduled runs keeps going past a busy run (review LOW-2)", () => {
+  it("logs and skips the run it cannot lock, cancels the rest, then reports the failure", async () => {
+    await switchTo("erin", marketing);
+    const first = await schedule("erin", marketingAgent);
+    const second = await schedule("erin", marketingAgent);
+    const runIds = await fire([first, second]);
+    const errors: unknown[] = [];
+    let calls = 0;
+    const result = cancelScheduledRuns(
+      {
+        db: deps.database.db,
+        withRetry: (fn) => {
+          calls += 1;
+          return calls === 1 ? Promise.reject(new Error("thread busy")) : fn();
+        },
+        emit: () => undefined,
+        stopThenAdvance: () => undefined,
+        log: { error: (obj: unknown) => errors.push(obj) },
+      },
+      marketing,
+      ids.erin,
+      "member_removed",
+    );
+    await expect(result).rejects.toThrow(/could not be cancelled/);
+    // Whichever run hit the busy thread is still running; every other one is cancelled.
+    const left = await rows<{ status: string }>(
+      `SELECT r.status FROM runs r JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
+        WHERE r.team_id = $1 AND t.owner_user_id = $2 AND r.trigger = 'schedule'`,
+      [marketing, ids.erin],
+    );
+    expect(left.filter((r) => r.status === "running")).toHaveLength(1);
+    expect(left.filter((r) => r.status === "cancelled").length).toBeGreaterThanOrEqual(
+      runIds.length - 1,
+    );
+    expect(errors).toHaveLength(1);
   });
 });
