@@ -23,7 +23,7 @@
     "@kobe/protocol": "workspace:*",
     "@kobe/session-token": "workspace:*",
     "@kobe/telemetry": "workspace:*",
-    "hono": "^4.13.12",
+    "hono": "^4.13.13",
     "pino": "^10.3.1",
     "undici": "^8.11.2",
     "zod": "^4.0.0"
