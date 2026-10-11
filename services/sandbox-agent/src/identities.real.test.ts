@@ -1,9 +1,22 @@
 import { randomUUID } from "node:crypto";
-import { chmod, copyFile, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { existsSync } from "node:fs";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { openAgentTemp, writeFileAtomic } from "./atomic-file.js";
+import { writeAgentFile } from "./mcp/pi-mcp-config.js";
+import { preparePiPrivateDirs } from "./threads/exec-wiring.js";
 import type { ModelTokenSource } from "./models/types.js";
 import { loadPiIdentities, PI_UID_MIN, PiIdentities } from "./pi/identities.js";
 import { EXECUTOR_ENTRY } from "./testing/real-pi.js";
@@ -426,6 +439,61 @@ describe.runIf(HELPER !== undefined)("Pi identities with the real helper (KOBE-7
     expect(await readFile(path.join(h.workspace, "shared/f"), "utf8")).toBe("one\ntwo\n");
     // ...and by the agent (workspace sync), which shares the workspace group.
     await writeFile(path.join(h.workspace, "shared/f"), "agent\n");
+  });
+
+  it("KOBE-235: a tool squatting a kobe-pi-<name> directory in the sticky scratch volume cannot stop a Pi from starting (retry, fresh name; the squat stays the tool's)", async () => {
+    await twoThreads();
+    const scratchDir = path.join(shm, "scratch");
+    await mkdir(scratchDir);
+    await chmod(scratchDir, 0o1777);
+    const squat = await tool(
+      THREAD,
+      "8c9d0e1f-2a3b-4c4d-8e5f-6a7b8c9d0e1f",
+      `mkdir ${scratchDir}/kobe-pi-squatted && touch ${scratchDir}/kobe-pi-squatted/mine`,
+    );
+    expect(squat.code).toBe(0);
+    const names = ["kobe-pi-squatted", "kobe-pi-fresh"];
+    const pi = await launch(THREAD);
+    const dirs = await preparePiPrivateDirs(
+      scratchDir,
+      { uid: pi.uid, gid: pi.gid },
+      { partner: false, newName: () => names.shift() ?? "kobe-pi-extra" },
+    );
+    expect(dirs.root).toBe(path.join(scratchDir, "kobe-pi-fresh"));
+    const mine = await stat(path.join(scratchDir, "kobe-pi-squatted"));
+    expect(mine.uid).toBe(pi.uid);
+    expect(await readdir(path.join(scratchDir, "kobe-pi-squatted"))).toEqual(["mine"]);
+    expect((await stat(dirs.root)).uid).toBe(process.getuid?.());
+  });
+
+  it("KOBE-235: FIFOs and links a tool plants at the agent's temp paths neither stall nor redirect an atomic write", async () => {
+    await twoThreads();
+    const dir = path.join(h.workspace, "k235");
+    const victim = path.join(dir, "victim");
+    const planted = await tool(
+      THREAD,
+      "9d0e1f2a-3b4c-4d5e-8f6a-7b8c9d0e1f2a",
+      `mkdir -p ${dir} && chmod 2777 ${dir} && mkfifo ${dir}/mcp-token.tmp ${dir}/mcp-token ` +
+        `&& mkfifo ${dir}/fixed.tmp && echo keep > ${victim} && chmod 666 ${victim} ` +
+        `&& ln -s ${victim} ${dir}/link.tmp`,
+    );
+    expect(planted.code).toBe(0);
+    // Real MCP writer: the fixed `.tmp` name is never touched, the FIFO at the final name is replaced.
+    await writeAgentFile(dir, "mcp-token", "Bearer x\n", true);
+    const info = await stat(path.join(dir, "mcp-token"));
+    expect(info.isFile()).toBe(true);
+    expect(await readFile(path.join(dir, "mcp-token"), "utf8")).toBe("Bearer x\n");
+    expect((await stat(path.join(dir, "mcp-token.tmp"))).isFIFO()).toBe(true);
+    // A FIFO or symlink at the exact temp path (as if guessed) is refused at once, not waited on.
+    await expect(openAgentTemp(path.join(dir, "fixed.tmp"), 0o600)).rejects.toMatchObject({
+      code: "EEXIST",
+    });
+    await expect(openAgentTemp(path.join(dir, "link.tmp"), 0o600)).rejects.toMatchObject({
+      code: "EEXIST",
+    });
+    expect(await readFile(victim, "utf8")).toBe("keep\n");
+    await writeFileAtomic(path.join(dir, "plain"), "ok", 0o640);
+    expect(await readFile(path.join(dir, "plain"), "utf8")).toBe("ok");
   });
 
   it("kills everything a Pi left running and empties its directory before the identity is reused", async () => {

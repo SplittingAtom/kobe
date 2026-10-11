@@ -4,6 +4,7 @@ import { mkdir, open, readdir, rename, rm, stat, type FileHandle } from "node:fs
 import path from "node:path";
 import { uuidSchema, type PiSessionEntry, type PiSessionHeader } from "@kobe/protocol";
 import { LineSplitter, encodeJsonl } from "../jsonl.js";
+import { openAgentTemp } from "../atomic-file.js";
 import { assertOnVolume, shareOnVolume } from "../workspace/volume.js";
 import { PI_MAX_LINE_BYTES } from "./pi-process.js";
 
@@ -163,11 +164,9 @@ export class SessionRestore {
     if (part !== this.#nextPart) throw new Error(`expected part ${this.#nextPart}, got ${part}`);
     if (part > 0 && header !== undefined) throw new Error("header only allowed in part 0");
     if (part === 0) {
-      const flags =
-        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
       // 0660: under Pi identities (KOBE-71) the thread's Pi appends to it through the workspace
       // group; the session dir itself is the agent's and the group's only.
-      const handle = await open(this.#temp, flags, 0o660);
+      const handle = await openAgentTemp(this.#temp, 0o660);
       this.#handle = handle;
       if (this.#volume !== undefined) await assertOnVolume(handle, this.#volume, this.#temp);
       await handle.chmod(0o660);

@@ -110,14 +110,20 @@ describe("the token file and rotation", () => {
       for (const name of [MCP_CONFIG_FILE, MCP_TOKEN_FILE]) {
         await writeAgentFile(f.dir, name, "{}\n", true);
         expect((await stat(path.join(f.dir, name))).mode & 0o777).toBe(0o440);
-        // A rewrite (token rotation) over a leftover temp file of another mode keeps the mode exact.
-        await writeFile(path.join(f.dir, `${name}.tmp`), "old", { mode: 0o666 });
+        // A rewrite (token rotation) with the old fixed temp name taken (here by a FIFO a tool
+        // could plant, KOBE-235) neither stalls nor touches it, and keeps the mode exact.
+        const fifo = path.join(f.dir, `${name}.tmp`);
+        await rm(fifo, { force: true });
+        execFileSync("mkfifo", [fifo]);
         await writeAgentFile(f.dir, name, "{}\n", true);
         expect((await stat(path.join(f.dir, name))).mode & 0o777).toBe(0o440);
         await writeAgentFile(f.dir, name, "{}\n", false);
         expect((await stat(path.join(f.dir, name))).mode & 0o777).toBe(0o400);
       }
-      await expect(readdir(f.dir)).resolves.not.toContain(`${MCP_TOKEN_FILE}.tmp`);
+      // Only the planted entries remain: the writer's own random temp files are gone.
+      expect((await readdir(f.dir)).sort()).toEqual(
+        [MCP_CONFIG_FILE, `${MCP_CONFIG_FILE}.tmp`, MCP_TOKEN_FILE, `${MCP_TOKEN_FILE}.tmp`].sort(),
+      );
     } finally {
       process.umask(previous);
       await f.done();

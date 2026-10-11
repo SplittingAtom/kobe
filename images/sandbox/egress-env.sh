@@ -13,6 +13,9 @@
 # to its thread (Pi loads code from both: ~/.node_modules, caches), so the agent names the shared
 # ones in KOBE_TOOL_HOME / KOBE_TOOL_TMPDIR and every bash tool call switches to them here. Absolute
 # paths on one line only (never build a path from anything else).
+# KOBE-235: this block does not depend on egress. The agent names this script in BASH_ENV whenever
+# the executor is off, with or without an egress proxy, so tools always get the shared HOME/TMPDIR.
+# (Pi's own file tools resolve `~` against Pi's private HOME, not these: see docs/ledger/KOBE-235.md.)
 case "${KOBE_TOOL_HOME:-}" in /*) case "$KOBE_TOOL_HOME" in *[!A-Za-z0-9._/-]*) ;; *) export HOME="$KOBE_TOOL_HOME" ;; esac ;; esac
 case "${KOBE_TOOL_TMPDIR:-}" in /*) case "$KOBE_TOOL_TMPDIR" in *[!A-Za-z0-9._/-]*) ;; *) export TMPDIR="$KOBE_TOOL_TMPDIR" ;; esac ;; esac
 case "$-" in *x*) __kobe_egress_xtrace=1; set +x ;; *) __kobe_egress_xtrace="" ;; esac

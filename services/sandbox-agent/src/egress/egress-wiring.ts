@@ -1,5 +1,5 @@
-import { randomBytes } from "node:crypto";
-import { chmod, lstat, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, readFile } from "node:fs/promises";
+import { writeFileAtomic } from "../atomic-file.js";
 import type { ModelTokenSource } from "../models/types.js";
 
 /**
@@ -82,17 +82,8 @@ export class EgressTokenFile {
     const next = this.#chain.then(async () => {
       // Rewritten when the disk no longer holds it (tampered or removed), not only on rotation.
       if (this.#written === token && (await this.#onDisk()) === `${token}\n`) return;
-      const temp = `${this.path}.${randomBytes(8).toString("hex")}.tmp`;
-      try {
-        // `wx`: a symlink or FIFO planted at the temp path is never followed.
-        await writeFile(temp, `${token}\n`, { mode: this.#mode, flag: "wx" });
-        // writeFile's mode is filtered by the umask: set it exactly.
-        await chmod(temp, this.#mode);
-        await rename(temp, this.path);
-      } catch (error) {
-        await rm(temp, { force: true }).catch(() => undefined);
-        throw error;
-      }
+      // Random temp name, exclusive, no links, no FIFO stall (atomic-file.ts, KOBE-235).
+      await writeFileAtomic(this.path, `${token}\n`, this.#mode);
       this.#written = token;
     });
     this.#chain = next.catch(() => undefined);
