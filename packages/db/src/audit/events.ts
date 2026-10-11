@@ -611,7 +611,11 @@ export const AUDIT_EVENTS = {
   "schedule.updated": event("team", { scheduleId: id, agentId: id }),
   "schedule.deleted": event("team", { scheduleId: id }),
   "schedule.activated": event("team", { scheduleId: id, by: z.enum(["owner", "team_admin"]) }),
-  "schedule.deactivated": event("team", { scheduleId: id, by: z.enum(["owner", "team_admin"]) }),
+  /** `deactivation` / `member_removed`: the owner was deactivated or left the team (KOBE-180, system). */
+  "schedule.deactivated": event("team", {
+    scheduleId: id,
+    by: z.enum(["owner", "team_admin", "deactivation", "member_removed"]),
+  }),
 
   // ── thread: lifecycle metadata only, never titles or content (KOBE-34, D18, D23) ──
   "thread.trashed": event("team", { threadId: id }),
@@ -834,6 +838,8 @@ export const AUDIT_EVENTS = {
     threadId: id,
     wasActive: z.boolean(),
     queuePaused: z.literal(true).optional(),
+    /** A scheduled run the system cancelled because its owner was deactivated or removed (KOBE-180). */
+    reason: z.enum(["owner_deactivated", "member_removed"]).optional(),
   }),
   /** The thread owner retried an interrupted run; `runId` is the new run (D14; KOBE-30). */
   "run.retried": event("team", { runId: id, threadId: id, retryOfRunId: id }),

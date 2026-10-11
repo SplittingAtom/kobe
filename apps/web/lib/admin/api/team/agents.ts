@@ -55,6 +55,16 @@ export interface InventoryScore {
   readonly at: string | null;
 }
 
+/** A schedule of an inventory agent: owner and whether it fires (KOBE-180). */
+export interface InventorySchedule {
+  readonly scheduleId: string;
+  readonly ownerUserId: string;
+  readonly ownerName: string;
+  readonly status: "active" | "paused";
+  readonly pausedBy: "team_admin" | "deactivation" | null;
+  readonly nextDueAt: string | null;
+}
+
 /** One row of the team admin inventory (`GET /v1/agents/inventory`, KOBE-86). */
 export interface InventoryAgent {
   readonly id: string;
@@ -69,8 +79,8 @@ export interface InventoryAgent {
   readonly lastRunAt: string | null;
   /** Input plus output tokens; money is not shown (only exact cost may be). */
   readonly tokens: number;
-  /** Not built yet (KOBE-64): null. */
-  readonly schedules: null;
+  /** This team's schedules of the agent, any owner (KOBE-180). */
+  readonly schedules: readonly InventorySchedule[];
   /** The latest Orbit result (KOBE-94). */
   readonly orbitScore: InventoryScore;
   /** The caller may read this agent's definition, which exporting a version needs (KOBE-91). */

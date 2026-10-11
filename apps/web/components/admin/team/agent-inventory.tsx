@@ -6,6 +6,7 @@ import {
   setInventoryAgentStatus,
   type InventoryAgent,
   type InventoryPage,
+  type InventorySchedule,
 } from "../../../lib/admin/api/team/agents";
 import { scoreLabel } from "../../../lib/admin/orbit-score";
 import { MutationStatus } from "../error-notice";
@@ -20,7 +21,8 @@ const PLACEHOLDER = "—";
 /**
  * Inventory for team admins (KOBE-86, D19): team agents plus members' personal agents used in
  * this team, with owner, scope, status, versions, usage counts and the latest Orbit score
- * (KOBE-94). Schedules (KOBE-64) are a placeholder. Suspending a personal agent affects this team only.
+ * (KOBE-94) and the team's schedules of each agent (KOBE-180). Suspending a personal agent affects
+ * this team only; a suspended agent's schedules do not fire.
  */
 export function AgentInventory({
   teamId,
@@ -140,7 +142,9 @@ function InventoryTable({
                 <td>{a.runCount.toLocaleString("en-US")}</td>
                 <td>{a.lastRunAt === null ? PLACEHOLDER : <DateTime value={a.lastRunAt} />}</td>
                 <td>{a.tokens.toLocaleString("en-US")}</td>
-                <td>{PLACEHOLDER}</td>
+                <td>
+                  <ScheduleList schedules={a.schedules} />
+                </td>
                 <td>
                   {a.orbitScore.status === "none" ? (
                     PLACEHOLDER
@@ -189,5 +193,29 @@ function InventoryTable({
         </p>
       )}
     </>
+  );
+}
+
+const PAUSED_BY_LABEL = {
+  team_admin: "paused by a team admin",
+  deactivation: "paused (owner deactivated or removed)",
+} as const;
+
+function scheduleLabel(s: InventorySchedule): string {
+  if (s.status === "active") return "active";
+  return s.pausedBy === null ? "paused" : PAUSED_BY_LABEL[s.pausedBy];
+}
+
+/** Owner and status of each schedule; team admins pause them from the schedules API. */
+function ScheduleList({ schedules }: { readonly schedules: readonly InventorySchedule[] }) {
+  if (schedules.length === 0) return <>{PLACEHOLDER}</>;
+  return (
+    <ul>
+      {schedules.map((s) => (
+        <li key={s.scheduleId}>
+          {s.ownerName}: {scheduleLabel(s)}
+        </li>
+      ))}
+    </ul>
   );
 }
