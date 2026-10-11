@@ -39,8 +39,20 @@ export interface CatalogModel {
   readonly inputModalities: readonly string[];
   /** `<gateway provider>/<model>`: what sandboxes send to the model gateway. */
   readonly gatewayModel: string;
+  /** Output limit and context window in tokens (KOBE-259); null: the site default. */
+  readonly maxOutputTokens: number | null;
+  readonly contextWindow: number | null;
+  /** The model reasons before answering: it gets the higher default output limit. */
+  readonly reasoning: boolean;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+/** What a model without its own limits gets (chart values; KOBE-259). */
+export interface TokenDefaults {
+  readonly maxOutputTokens: number;
+  readonly reasoningMaxOutputTokens: number;
+  readonly contextWindow: number;
 }
 
 export interface GatewayStatus {
@@ -58,6 +70,8 @@ export interface InstallModels {
   readonly gateway: GatewayStatus;
   /** False when the install runs without the model gateway (no Bifrost settings). */
   readonly configured: boolean;
+  /** Absent from an older server. */
+  readonly tokenDefaults?: TokenDefaults;
 }
 
 export interface NewProvider {
@@ -86,6 +100,10 @@ export interface CatalogEntryInput {
   readonly label?: string | null | undefined;
   /** Sent as `["text", "image"]` or `["text"]`; absent: unchanged (update) or text only (add). */
   readonly inputModalities?: readonly string[] | undefined;
+  /** null: the site default (KOBE-259); absent: unchanged (update) or the default (add). */
+  readonly maxOutputTokens?: number | null | undefined;
+  readonly contextWindow?: number | null | undefined;
+  readonly reasoning?: boolean | undefined;
 }
 
 export type ModelDiscovery = "ok" | "failed" | "unknown";
@@ -155,6 +173,9 @@ export async function addCatalogModel(input: CatalogEntryInput): Promise<ApiResu
       model: input.model,
       label: input.label ?? undefined,
       input_modalities: input.inputModalities,
+      reasoning: input.reasoning,
+      max_output_tokens: input.maxOutputTokens ?? undefined,
+      context_window: input.contextWindow ?? undefined,
     }),
   });
   return res.ok ? { ...res, data: res.data.model } : res;
@@ -171,6 +192,9 @@ export async function updateCatalogModel(
       model: change.model,
       label: change.label,
       input_modalities: change.inputModalities,
+      reasoning: change.reasoning,
+      max_output_tokens: change.maxOutputTokens,
+      context_window: change.contextWindow,
     }),
   });
   return res.ok ? { ...res, data: res.data.model } : res;

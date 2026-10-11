@@ -96,6 +96,14 @@ const partialPrices = (c: Context) =>
     },
     400,
   );
+const outputLimitTooLarge = (c: Context, contextWindow: number) =>
+  c.json(
+    {
+      code: "output_limit_exceeds_context",
+      message: `The output limit must be below the model's context window (${contextWindow.toLocaleString("en-US")} tokens), so the input has room. Lower it, or set the model's context window.`,
+    },
+    400,
+  );
 const aliasNotFound = (c: Context) =>
   err(c, 404, "model_not_found", "That model is not in the catalog.");
 
@@ -115,7 +123,19 @@ export function installModelsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVar
       listCatalog(db),
       gatewayStatus(db),
     ]);
-    return c.json({ providers, catalog, gateway, configured: deps.models !== undefined });
+    const d = deps.modelTokenDefaults;
+    return c.json({
+      providers,
+      catalog,
+      gateway,
+      configured: deps.models !== undefined,
+      // KOBE-259: what a model without its own limits gets (chart values), for the page to show.
+      token_defaults: {
+        max_output_tokens: d.maxOutputTokens,
+        reasoning_max_output_tokens: d.reasoningMaxOutputTokens,
+        context_window: d.contextWindow,
+      },
+    });
   });
 
   app.post("/providers", async (c) => {
@@ -217,8 +237,16 @@ export function installModelsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVar
   app.post("/catalog", async (c) => {
     const parsed = await body(c, addCatalogSchema);
     if (!parsed.ok) return parsed.response;
-    const result = await addCatalogEntry(db, parsed.value, c.get("user").id);
+    const result = await addCatalogEntry(
+      db,
+      parsed.value,
+      c.get("user").id,
+      deps.modelTokenDefaults,
+    );
     if (result.ok) return c.json({ model: result.entry }, 201);
+    if (result.error === "output_limit_exceeds_context") {
+      return outputLimitTooLarge(c, result.contextWindow);
+    }
     if (result.error === "provider_not_found") return providerNotFound(c);
     if (result.error === "partial_prices") return partialPrices(c);
     return result.error === "exists"
@@ -231,8 +259,11 @@ export function installModelsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVar
     if (!alias.success) return aliasNotFound(c);
     const parsed = await body(c, updateCatalogSchema);
     if (!parsed.ok) return parsed.response;
-    const result = await updateCatalogEntry(db, alias.data, parsed.value);
+    const result = await updateCatalogEntry(db, alias.data, parsed.value, deps.modelTokenDefaults);
     if (result.ok) return c.json({ model: result.entry });
+    if (result.error === "output_limit_exceeds_context") {
+      return outputLimitTooLarge(c, result.contextWindow);
+    }
     if (result.error === "partial_prices") return partialPrices(c);
     return result.error === "not_found" ? aliasNotFound(c) : providerNotFound(c);
   });

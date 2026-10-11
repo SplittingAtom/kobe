@@ -27,6 +27,12 @@ import { openHarness, type Harness } from "./testing/harness.js";
  * `bifrost.int.test.ts` check against a local binary).
  */
 const PROVIDER_SECRET = "p".repeat(40);
+/** Install defaults for models without catalog limits (chart values; KOBE-259). */
+const TOKEN_DEFAULTS = {
+  maxOutputTokens: 12_000,
+  reasoningMaxOutputTokens: 48_000,
+  contextWindow: 100_000,
+};
 const VK_SECRET = "v".repeat(40);
 const providerBox = new SecretBox(PROVIDER_SECRET, PROVIDER_KEY_PURPOSE);
 const vkBox = new SecretBox(VK_SECRET, VIRTUAL_KEY_PURPOSE);
@@ -76,7 +82,10 @@ async function until<T>(fn: () => Promise<T> | T, ok: (v: T) => boolean, ms = 10
 }
 
 beforeAll(async () => {
-  h = await openHarness({ models: { providerKeySecrets: [PROVIDER_SECRET] } });
+  h = await openHarness({
+    models: { providerKeySecrets: [PROVIDER_SECRET] },
+    modelTokenDefaults: TOKEN_DEFAULTS,
+  });
   ids.owner = await h.createUser("owner@models.test", "owner");
   ids.installAdmin = await h.createUser("admin@models.test", "admin");
   ids.alice = await h.createUser("alice@models.test");
@@ -363,6 +372,92 @@ describe("catalog and team enablement", () => {
         .status,
     ).toBe(403);
     expect((await as.installAdmin.delete(`${MODELS}/catalog/vision`)).status).toBe(204);
+  });
+
+  it("install admins set a model's output limit, context window and reasoning flag (KOBE-259)", async () => {
+    const listed = await as.installAdmin.get(MODELS);
+    // What a model without its own values gets (chart values), for the page to show.
+    expect(listed.json.token_defaults).toEqual({
+      max_output_tokens: 12_000,
+      reasoning_max_output_tokens: 48_000,
+      context_window: 100_000,
+    });
+    const add = await as.installAdmin.post(`${MODELS}/catalog`, {
+      alias: "thinker",
+      provider_id: "openai",
+      model: "o-fake",
+    });
+    expect(add.status, JSON.stringify(add.json)).toBe(201);
+    expect(add.json.model).toMatchObject({
+      reasoning: false,
+      max_output_tokens: null,
+      context_window: null,
+    });
+    const set = await as.installAdmin.patch(`${MODELS}/catalog/thinker`, {
+      reasoning: true,
+      max_output_tokens: 65_536,
+      context_window: 200_000,
+    });
+    expect(set.status, JSON.stringify(set.json)).toBe(200);
+    expect(set.json.model).toMatchObject({
+      reasoning: true,
+      max_output_tokens: 65_536,
+      context_window: 200_000,
+    });
+    // A new entry may carry them too; a too-large limit is refused before anything is written.
+    const refused = await as.installAdmin.post(`${MODELS}/catalog`, {
+      alias: "thinker-2",
+      provider_id: "openai",
+      model: "o-fake-2",
+      max_output_tokens: 8_192,
+      context_window: 8_192,
+    });
+    expect(refused.json).toMatchObject({ code: "output_limit_exceeds_context" });
+    // Cleared back to the defaults; the flag kept.
+    const cleared = await as.installAdmin.patch(`${MODELS}/catalog/thinker`, {
+      max_output_tokens: null,
+      context_window: null,
+    });
+    expect(cleared.status, JSON.stringify(cleared.json)).toBe(200);
+    expect(cleared.json.model).toMatchObject({
+      reasoning: true,
+      max_output_tokens: null,
+      context_window: null,
+    });
+    // The output limit must leave room for input: in the model's own window, else the default's.
+    const tooBig = await as.installAdmin.patch(`${MODELS}/catalog/thinker`, {
+      max_output_tokens: 100_000,
+    });
+    expect(tooBig.status).toBe(400);
+    expect(tooBig.json).toMatchObject({ code: "output_limit_exceeds_context" });
+    expect(tooBig.json.message).toContain("100,000");
+    const fits = await as.installAdmin.patch(`${MODELS}/catalog/thinker`, {
+      max_output_tokens: 100_000,
+      context_window: 400_000,
+    });
+    expect(fits.status, JSON.stringify(fits.json)).toBe(200);
+    for (const bad of [
+      { max_output_tokens: 255 },
+      { max_output_tokens: 131_073 },
+      { max_output_tokens: 1.5 },
+      { context_window: 1_023 },
+      { context_window: 10_000_001 },
+      { reasoning: "yes" },
+    ]) {
+      const r = await as.installAdmin.patch(`${MODELS}/catalog/thinker`, bad);
+      expect(r.status, JSON.stringify(bad)).toBe(400);
+    }
+    expect((await as.bob.patch(`${MODELS}/catalog/thinker`, { reasoning: false })).status).toBe(
+      403,
+    );
+    // The chat's catalog (team models) carries them too (KOBE-210 ac-2).
+    const team = await as.bob.get("/v1/team/models");
+    expect(
+      (team.json.models as Record<string, unknown>[]).find((m) => m.alias === "thinker"),
+    ).toMatchObject({ max_output_tokens: 100_000, context_window: 400_000, reasoning: true });
+    const events = await audit("models.catalog");
+    expect(events.at(-1)?.target).toMatchObject({ alias: "thinker", limitsChanged: true });
+    expect((await as.installAdmin.delete(`${MODELS}/catalog/thinker`)).status).toBe(204);
   });
 
   it("members see the catalog; only team admins enable models and pick the default", async () => {

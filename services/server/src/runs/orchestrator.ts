@@ -80,6 +80,7 @@ import {
 import { lockOwnedThread, ownedRun } from "./access.js";
 import { RunDispatcher, type StopTarget } from "./dispatch.js";
 import { sweepRuns, type RunSweepResult } from "./sweeper.js";
+import { MODEL_TOKEN_DEFAULTS, type ModelTokenDefaults } from "../models/token-limits.js";
 
 /** Timings and limits (tests shorten them). */
 export interface RunTuning {
@@ -124,6 +125,8 @@ export interface RunOrchestratorOptions {
   readonly agents?: RunAgentResolver;
   readonly budget?: RunBudgetGate;
   readonly tuning?: Partial<RunTuning>;
+  /** Limits of models without their own in the catalog (KOBE-259); default `MODEL_TOKEN_DEFAULTS`. */
+  readonly modelTokenDefaults?: ModelTokenDefaults;
   /** Run the sweep on a timer (default true; tests call `sweep()`). */
   readonly sweep?: boolean;
   readonly log?: Logger;
@@ -217,6 +220,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       router: this.#router,
       agents: this.#agents,
       tuning: this.#tuning,
+      modelTokenDefaults: options.modelTokenDefaults ?? MODEL_TOKEN_DEFAULTS,
       log: this.#log,
       closed: () => this.#closed,
       emit: (teamId, transitions) => this.#emit(teamId, transitions),

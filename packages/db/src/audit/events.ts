@@ -521,6 +521,8 @@ export const AUDIT_EVENTS = {
     pricesChanged: z.boolean().optional(),
     /** Its input modalities (image input, KOBE-191) changed. */
     imageSupportChanged: z.boolean().optional(),
+    /** Its output limit, context window or reasoning flag changed (KOBE-259). */
+    limitsChanged: z.boolean().optional(),
   }),
   /** A team admin enabled or disabled a catalog alias for the team, or changed its default. */
   "models.team.changed": event("team", {

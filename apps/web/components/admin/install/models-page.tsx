@@ -43,6 +43,7 @@ export function InstallModelsPage() {
             <CatalogSection
               catalog={data.catalog}
               providers={data.providers}
+              tokenDefaults={data.tokenDefaults}
               mutation={mutation}
               onChanged={reload}
             />

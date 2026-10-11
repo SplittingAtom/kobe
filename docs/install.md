@@ -332,6 +332,13 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
   alias removed from the catalog and **added again** with another provider or model is used again
   by every conversation that chose it, on the new target, once a team enables it. Re-pointing an
   alias (Edit) changes its model everywhere at once in the same way.
+- **Output limit and context window** (KOBE-259): per catalog model, `max_output_tokens`
+  (256..131,072) and `context_window` (1,024..10,000,000) on `POST/PATCH /v1/install/models/catalog`
+  (site console **Models and providers**), plus a `reasoning` flag for models that think before
+  answering. Unset values use `server.modelDefaults`: 16,384 output tokens, 32,768 for reasoning
+  models (their hidden reasoning spends the same allowance), and a 128,000-token window. The run's
+  model gets them as Pi's `maxTokens` (each call's `max_tokens`) and `contextWindow`. They are not a
+  provider's maximum: set the values the provider documents; it refuses calls above its own.
 - **Model listing.** The catalog editor suggests model ids from Bifrost's list for the provider;
   "Ask the provider" has Bifrost call the provider's list-models API with the stored key (audited
   `models.provider.models_refreshed`, 6 per minute per provider). The server itself never calls a
@@ -386,8 +393,10 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
   when Pi names an active run). A response without a usage report (a stream cut short, a request
   that did not ask for usage) is charged an estimate: request size / 4 input tokens and generated
   text / 4 output tokens, and at least the output the request allowed
-  (`max_tokens` and kin, 8,192 when unset, capped at 65,536); a 5xx counts the same, a 4xx is
-  free. Background Responses (`background: true`, billed later) are refused. Per-call tool fees
+  (`max_tokens` and kin, 8,192 when unset, capped at 131,072); a 5xx counts the same, a 4xx is
+  free. So a call that is stopped or cut off is charged the model's full output limit (Pi sends it
+  as `max_tokens`): a higher limit, such as the reasoning default, makes interrupted calls cost
+  more. Background Responses (`background: true`, billed later) are refused. Per-call tool fees
   (hosted web search, image generation) are not in usage reports and not counted. The ledger is
   append-only. Rows are written right after each call.
 - **Budgets and rate limits** (KOBE-42, D30): budgets in **dollars** (at catalog prices) and in
@@ -402,7 +411,9 @@ only via Kobe's **model-gateway shim** (spec D30): no provider key ever enters a
   members see a banner in the chat; at 100 % the model-gateway shim refuses new model calls (402
   `budget_exhausted`), new runs are refused (429 `budget_exhausted`), and running ones finish
   their current step and end `budget_stopped`, pending approvals expire; audited
-  `models.budget.reached`. Calls in flight are never cut; each shim replica reserves what an
+  `models.budget.reached`. A request whose input estimate alone exceeds a budget's limit is
+  refused at once (402 `budget_below_call`, the run fails `model_budget_too_small`). A budget below
+  one call's output allowance is fine: a call alone is admitted and may overshoot by that call. Calls in flight are never cut; each shim replica reserves what an
   admitted call may cost until its usage row lands (a member's reservations hold at most a quarter
   of what is left of a shared budget), so on one replica a budget is exceeded by at most the last admitted call plus estimation
   error. Replicas do not share reservations: with several, simultaneous calls can overshoot by up

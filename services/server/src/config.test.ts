@@ -39,6 +39,34 @@ describe("loadConfig", () => {
     }
   });
 
+  it("model token defaults: 16384 output, 32768 for reasoning models, 128000 window, each configurable (KOBE-259)", () => {
+    expect(loadConfig(REQUIRED).modelTokenDefaults).toEqual({
+      maxOutputTokens: 16_384,
+      reasoningMaxOutputTokens: 32_768,
+      contextWindow: 128_000,
+    });
+    expect(
+      loadConfig({
+        ...REQUIRED,
+        KOBE_MODEL_DEFAULT_MAX_OUTPUT_TOKENS: "8192",
+        KOBE_MODEL_DEFAULT_REASONING_MAX_OUTPUT_TOKENS: "65536",
+        KOBE_MODEL_DEFAULT_CONTEXT_WINDOW: "200000",
+      }).modelTokenDefaults,
+    ).toEqual({ maxOutputTokens: 8_192, reasoningMaxOutputTokens: 65_536, contextWindow: 200_000 });
+    for (const [name, bad] of [
+      ["KOBE_MODEL_DEFAULT_MAX_OUTPUT_TOKENS", "255"],
+      ["KOBE_MODEL_DEFAULT_REASONING_MAX_OUTPUT_TOKENS", "131073"],
+      ["KOBE_MODEL_DEFAULT_CONTEXT_WINDOW", "1023"],
+      ["KOBE_MODEL_DEFAULT_CONTEXT_WINDOW", "x"],
+    ] as const) {
+      expect(() => loadConfig({ ...REQUIRED, [name]: bad }), name).toThrow(new RegExp(name));
+    }
+    // Either output default must leave room for input in the default window.
+    expect(() => loadConfig({ ...REQUIRED, KOBE_MODEL_DEFAULT_CONTEXT_WINDOW: "32768" })).toThrow(
+      /KOBE_MODEL_DEFAULT_REASONING_MAX_OUTPUT_TOKENS/,
+    );
+  });
+
   it("caps agent versions at 1000 by default, configurable within 1–100000 (KOBE-46)", () => {
     expect(loadConfig(REQUIRED).agentMaxVersions).toBe(1000);
     expect(loadConfig({ ...REQUIRED, KOBE_AGENT_MAX_VERSIONS: "50" }).agentMaxVersions).toBe(50);

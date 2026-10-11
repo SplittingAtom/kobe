@@ -2,6 +2,8 @@ import {
   INPUT_MODALITIES,
   MAX_USD_PER_MTOK,
   MODEL_ALIAS_PATTERN,
+  MODEL_CONTEXT_WINDOW_RANGE,
+  MODEL_OUTPUT_TOKENS_RANGE,
   MODEL_PROVIDER_KINDS,
   PROVIDER_ID_PATTERN,
   PROVIDER_MODEL_PATTERN,
@@ -115,6 +117,24 @@ const inputModalitiesSchema = z
   .max(INPUT_MODALITIES.length)
   .transform((v) => INPUT_MODALITIES.filter((m) => m === "text" || v.includes(m)));
 
+const tokenCount = (what: string, [min, max]: readonly [number, number]) =>
+  z
+    .number({ error: `${what} is a number of tokens` })
+    .int(`${what} is a whole number of tokens`)
+    .min(min, `${what} is between ${min} and ${max} tokens`)
+    .max(max, `${what} is between ${min} and ${max} tokens`)
+    .nullable();
+
+/**
+ * A model's output limit and context window (KOBE-259; null: the install default) and whether it
+ * reasons (it then gets the higher output default).
+ */
+const tokenLimitFields = {
+  max_output_tokens: tokenCount("the output limit", MODEL_OUTPUT_TOKENS_RANGE).optional(),
+  context_window: tokenCount("the context window", MODEL_CONTEXT_WINDOW_RANGE).optional(),
+  reasoning: z.boolean({ error: "reasoning is true or false" }).optional(),
+};
+
 export const addCatalogSchema = z.strictObject({
   alias: aliasSchema,
   provider_id: providerIdSchema,
@@ -122,6 +142,7 @@ export const addCatalogSchema = z.strictObject({
   label: labelSchema.optional(),
   input_modalities: inputModalitiesSchema.optional(),
   ...priceFields,
+  ...tokenLimitFields,
 });
 export type AddCatalogInput = z.infer<typeof addCatalogSchema>;
 
@@ -132,6 +153,7 @@ export const updateCatalogSchema = z
     label: labelSchema.nullable().optional(),
     input_modalities: inputModalitiesSchema.optional(),
     ...priceFields,
+    ...tokenLimitFields,
   })
   .refine((v) => Object.keys(v).length > 0, "nothing to change");
 export type UpdateCatalogInput = z.infer<typeof updateCatalogSchema>;

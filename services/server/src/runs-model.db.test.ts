@@ -16,8 +16,16 @@ const f = new RunFixture();
 /** Threads whose (fake) agent pins a model alias — what KOBE-47's resolver will supply. */
 const pinnedAliases = new Map<string, string>();
 
+/** Install defaults (chart values, KOBE-259): what a model without catalog limits gets. */
+const TOKEN_DEFAULTS = {
+  maxOutputTokens: 12_000,
+  reasoningMaxOutputTokens: 48_000,
+  contextWindow: 100_000,
+};
+
 beforeAll(async () => {
   await f.setup({
+    modelTokenDefaults: TOKEN_DEFAULTS,
     agents: {
       async resolve(tx, input) {
         const resolved = await PINNED_AGENTS.resolve(tx, input);
@@ -96,6 +104,7 @@ describe("run model resolution (D30)", () => {
     expect(await resolve("smart")).toEqual({
       ok: true,
       model: { alias: "smart", gateway_model: "anthropic/claude-fake", api: "anthropic-messages" },
+      limits: { maxOutputTokens: null, contextWindow: null, reasoning: false },
     });
     expect(await resolve("gem")).toMatchObject({
       model: { gateway_model: "gemini/gemini-fake", api: "google-generative-ai" },
@@ -133,6 +142,8 @@ describe("run model resolution (D30)", () => {
     const start = await ws.started(runId);
     expect(start.config).toEqual({
       model: { alias: "smart", gateway_model: "anthropic/claude-fake", api: "anthropic-messages" },
+      // KOBE-259: no catalog limits, not a reasoning model: the install defaults.
+      model_limits: { max_output_tokens: 12_000, context_window: 100_000 },
       agent: null,
       approval_mode: "ask-on-write",
     });
@@ -144,6 +155,46 @@ describe("run model resolution (D30)", () => {
     expect(await withTeam(db, w.team, (tx) => startedModelAlias(tx, w.team, runId))).toBe("smart");
     ws.reply(start, "hi");
     await f.until(w.team, runId, "completed");
+  });
+
+  it("run.start carries the catalog's limits, else the defaults: higher for reasoning models (KOBE-259)", async () => {
+    const w = await f.world();
+    await catalog(w.team, w.owner.id, [
+      { alias: "fast", isDefault: true },
+      { alias: "smart", isDefault: false },
+      { alias: "gem", isDefault: false },
+      { alias: "qwen", isDefault: false },
+    ]);
+    const admin = f.fx.admin;
+    const set = (alias: string, sql: string, values: unknown[]) =>
+      admin.query(`UPDATE model_catalog SET ${sql} WHERE alias = $1`, [alias, ...values]);
+    await set("smart", "max_output_tokens = $2, context_window = $3", [64_000, 200_000]);
+    await set("gem", "reasoning = true", []);
+    await set("qwen", "reasoning = true, context_window = $2", [32_768]);
+    const ws = await f.connect(w, 0);
+    const limits = async (alias: string) => {
+      const threadId = await f.thread(w.owner);
+      await admin.query(`UPDATE threads SET model_alias = $1 WHERE id = $2`, [alias, threadId]);
+      const runId = await f.message(w.owner, threadId, `limits ${alias}`);
+      const start = await ws.started(runId);
+      ws.reply(start, "ok");
+      await f.until(w.team, runId, "completed");
+      return start.config?.model_limits;
+    };
+    try {
+      // Catalog values win.
+      expect(await limits("smart")).toEqual({ max_output_tokens: 64_000, context_window: 200_000 });
+      // A reasoning model without its own limit gets the reasoning default.
+      expect(await limits("gem")).toEqual({ max_output_tokens: 48_000, context_window: 100_000 });
+      // A default that would fill a small window set in the catalog: half the window.
+      expect(await limits("qwen")).toEqual({ max_output_tokens: 16_384, context_window: 32_768 });
+      // Neither: the plain default.
+      expect(await limits("fast")).toEqual({ max_output_tokens: 12_000, context_window: 100_000 });
+    } finally {
+      await set("smart", "max_output_tokens = NULL, context_window = NULL", []);
+      await set("gem", "reasoning = false", []);
+      await set("qwen", "reasoning = false, context_window = NULL", []);
+    }
   });
 
   it("an agent pinned to a model the team did not enable fails the run naming the model (user decision)", async () => {

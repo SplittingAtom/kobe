@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   KOBE_EVENT_DROPPED_TYPE,
+  MODEL_LIMITS_MAX_TOKENS,
   SANDBOX_FRAME_MAX_BYTES_BY_TYPE,
   SANDBOX_MAX_FRAME_BYTES,
   SANDBOX_SMALL_FRAME_MAX_BYTES,
@@ -686,6 +687,46 @@ describe("run.start skill bundles (KOBE-82)", () => {
   });
 
   it("still accepts a config without bundles (older servers)", () => {
+    const frame = { ...serverFrames["run.start"], config: { skills: ["docx"] } };
+    expect(decodeServerFrame(JSON.stringify(frame))).toMatchObject({ ok: true });
+  });
+});
+
+describe("run.start model limits (KOBE-259)", () => {
+  const withLimits = (model_limits: unknown) => ({
+    ...serverFrames["run.start"],
+    config: {
+      model: { alias: "smart", gateway_model: "x/y", api: "openai-completions" },
+      model_limits,
+    },
+  });
+
+  it("carries the effective output limit and context window next to the model", () => {
+    const decoded = decodeServerFrame(
+      JSON.stringify(withLimits({ max_output_tokens: 32_768, context_window: 200_000 })),
+    );
+    expect(decoded).toMatchObject({
+      ok: true,
+      frame: { config: { model_limits: { max_output_tokens: 32_768, context_window: 200_000 } } },
+    });
+  });
+
+  it("refuses limits outside the bounds or an output limit that fills the window", () => {
+    for (const bad of [
+      { max_output_tokens: 0, context_window: 128_000 },
+      { max_output_tokens: 1.5, context_window: 128_000 },
+      { max_output_tokens: 16_384, context_window: MODEL_LIMITS_MAX_TOKENS + 1 },
+      { max_output_tokens: 128_000, context_window: 128_000 },
+      { max_output_tokens: 16_384 },
+      { max_output_tokens: 16_384, context_window: 128_000, extra: 1 },
+    ]) {
+      expect(decodeServerFrame(JSON.stringify(withLimits(bad))).ok, JSON.stringify(bad)).toBe(
+        false,
+      );
+    }
+  });
+
+  it("is optional (older servers send none)", () => {
     const frame = { ...serverFrames["run.start"], config: { skills: ["docx"] } };
     expect(decodeServerFrame(JSON.stringify(frame))).toMatchObject({ ok: true });
   });

@@ -1,3 +1,5 @@
+import { MODEL_OUTPUT_TOKENS_RANGE } from "@kobe/db";
+
 /**
  * What a call is charged when the provider's usage report is missing (KOBE-43 review): a stream
  * cut short (the sandbox hung up, an upstream reset), a 5xx or a call that never answered after
@@ -7,7 +9,8 @@
  * the request set no cap. Generous on purpose: hiding usage never makes a call cheaper.
  */
 export const DEFAULT_CHARGED_OUTPUT_TOKENS = 8_192;
-export const MAX_CHARGED_OUTPUT_TOKENS = 65_536;
+/** The catalog's highest output limit (KOBE-259), so a configured limit is reserved in full. */
+export const MAX_CHARGED_OUTPUT_TOKENS = MODEL_OUTPUT_TOKENS_RANGE[1];
 
 /**
  * The output a call is charged at least when its usage is unknown: per answer the requested cap
@@ -15,7 +18,7 @@ export const MAX_CHARGED_OUTPUT_TOKENS = 65_536;
  * `candidateCount`). Count-only endpoints (`count_tokens`, `countTokens`) generate nothing: 0.
  *
  * Residual risk (documented): the ceiling is one install-wide constant, not per model; hidden
- * reasoning beyond 65,536 tokens on a call whose usage report is lost is not charged.
+ * reasoning beyond 131,072 tokens on a call whose usage report is lost is not charged.
  */
 export function chargedOutput(
   requested: number | undefined,

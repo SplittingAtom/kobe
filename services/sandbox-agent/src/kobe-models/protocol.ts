@@ -24,6 +24,8 @@ export const PI_MODEL_APIS = [
 ] as const;
 export type PiModelApi = (typeof PI_MODEL_APIS)[number];
 export const KOBE_MODEL_ERROR_PREFIX = "kobe.model_error:";
+/** Bound of a model's context window and output limit (`MODEL_LIMITS_MAX_TOKENS`, KOBE-259). */
+export const MODEL_LIMITS_MAX_TOKENS = 10_000_000;
 export const MODEL_RUN_ERROR_CODES = [
   "model_not_enabled",
   "model_session_revoked",
@@ -32,6 +34,7 @@ export const MODEL_RUN_ERROR_CODES = [
   "model_not_configured",
   "model_error",
   "model_budget_exhausted",
+  "model_budget_too_small",
 ] as const;
 export type ModelRunErrorCode = (typeof MODEL_RUN_ERROR_CODES)[number];
 
@@ -48,6 +51,12 @@ export interface ModelFileModel {
   /** `<gateway provider>/<model>` (the catalog's `gateway_model`). */
   readonly gateway_model: string;
   readonly api: PiModelApi;
+  /**
+   * The model's output limit (each call's `max_tokens`) and context window, from `run.start`
+   * (KOBE-259). Both or neither; absent when the server sent none (Pi then uses the old defaults).
+   */
+  readonly max_output_tokens?: number;
+  readonly context_window?: number;
 }
 
 export interface ModelFileState {
@@ -71,6 +80,21 @@ const MAX_TOKEN_CHARS = 8192;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+const isTokenCount = (n: unknown): n is number =>
+  typeof n === "number" && Number.isInteger(n) && n >= 1 && n <= MODEL_LIMITS_MAX_TOKENS;
+
+/** The model's limits: both or neither, the output below the window (as `run.start` has them). */
+function parseLimits(
+  model: Record<string, unknown>,
+): { readonly max_output_tokens: number; readonly context_window: number } | undefined {
+  const { max_output_tokens: output, context_window: window } = model;
+  if (output === undefined && window === undefined) return undefined;
+  if (!isTokenCount(output) || !isTokenCount(window) || output >= window) {
+    throw new Error("model file model limits are invalid");
+  }
+  return { max_output_tokens: output, context_window: window };
 }
 
 /** Parse the model file; throws with the reason on anything but the exact shape. */
@@ -98,6 +122,7 @@ export function parseModelFile(text: string): ModelFileState {
   ) {
     throw new Error("model file model is invalid");
   }
+  const limits = model === null ? undefined : parseLimits(model as Record<string, unknown>);
   const token = raw.token;
   if (typeof token !== "string" || token.length < 20 || token.length > MAX_TOKEN_CHARS) {
     throw new Error("model file token is invalid");
@@ -112,7 +137,11 @@ export function parseModelFile(text: string): ModelFileState {
     model:
       model === null
         ? null
-        : { gateway_model: model.gateway_model as string, api: model.api as PiModelApi },
+        : {
+            gateway_model: model.gateway_model as string,
+            api: model.api as PiModelApi,
+            ...limits,
+          },
     token,
     run_id: runId === null ? null : runId.toLowerCase(),
   };

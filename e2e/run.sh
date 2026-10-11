@@ -1799,11 +1799,14 @@ SH
     as_owner "PUT /v1/team/models/fast {\"enabled\":true,\"is_default\":true}" >/dev/null
 
     # KOBE-42 / Gate 2: a budget stops a run after its current step. The fake model answers the
-    # first call with a bash tool call; that call alone ($0.08 at these prices) uses up the team's
-    # $0.01 budget, so the run's next model call never starts and the run ends budget_stopped.
+    # first call with a bash tool call reporting a 1,000,000-token prompt ($10,000 at these prices),
+    # which uses up the team's $1,000 budget, so the run's next model call never starts and the run
+    # ends budget_stopped. The budget is above the request's input estimate (Pi's prompt, about
+    # $100 at these prices): a request whose input exceeds the budget is refused outright
+    # (KOBE-259 budget_below_call).
     budget_setup=$(as_owner \
       "PATCH /v1/install/models/catalog/fast {\"input_usd_per_mtok\":10000,\"output_usd_per_mtok\":10000}" \
-      "PUT /v1/team/budgets/team {\"monthly_usd\":0.01}")
+      "PUT /v1/team/budgets/team {\"monthly_usd\":1000}")
     expect "the catalog model is priced and the team budget set" '^200 ' "$budget_setup"
     budget_out=$(chat_run "kobe-tool-step budget-$RANDOM" 300000)
     printf '     chat (budget): %s\n' "$(printf '%s' "$budget_out" | grep -v '^text=' | tr '\n' ' ')"

@@ -49,7 +49,8 @@ function gate(state: () => MemberBudgetState, now = { t: 0 }) {
 
 describe("BudgetGate (KOBE-42)", () => {
   it("admits calls under budget and refuses once any level is used up (402), widest first", async () => {
-    let lines: BudgetLine[] = [line({})];
+    // $1,000: above the call's $100 input (KOBE-259: a request larger than the budget is refused).
+    let lines: BudgetLine[] = [line({ limit: 1_000 })];
     const { g } = gate(() => ({ lines, requestsPerMinute: 1_000 }));
     const user = randomUUID();
     expect(await g.admit(call(user))).toMatchObject({ ok: true });
@@ -193,6 +194,101 @@ describe("BudgetGate (KOBE-42)", () => {
       requestsPerMinute: 10,
     }));
     expect((await g.admit(call(randomUUID()))).ok).toBe(false);
+  });
+
+  describe("large output allowances (KOBE-259)", () => {
+    const big = (userId: string): CallContext => ({
+      ...call(userId),
+      callId: randomUUID(),
+      inputEstimate: 1_000,
+      outputAllowance: 131_072,
+    });
+
+    it("reserves a large allowance in full: concurrent calls stop once the budget is reserved", async () => {
+      const { g } = gate(() => ({
+        lines: [line({ unit: "tokens", scope: "user", limit: 300_000, spent: 0 })],
+        requestsPerMinute: 1_000,
+      }));
+      const user = randomUUID();
+      const decisions = [];
+      for (let i = 0; i < 4; i++) decisions.push(await g.admit(big(user)));
+      // 3 × 132,072 reserved: the third overshoots by its own allowance at most; the fourth waits.
+      expect(decisions.map((d) => d.ok)).toEqual([true, true, true, false]);
+      expect(decisions[3]).toMatchObject({ status: 402, code: "budget_exhausted" });
+    });
+
+    it("a request whose input alone exceeds the budget's limit: refused deterministically, even alone", async () => {
+      const { g } = gate(() => ({
+        lines: [line({ unit: "tokens", scope: "team", limit: 500, spent: 0 })],
+        requestsPerMinute: 1_000,
+      }));
+      const user = randomUUID();
+      for (let i = 0; i < 3; i++) {
+        expect(await g.admit(big(user))).toEqual({
+          ok: false,
+          status: 402,
+          code: "budget_below_call",
+          message:
+            "This request's input is larger than your team's monthly token budget in total. Ask an admin to raise the budget, or start a new conversation with less context.",
+        });
+      }
+    });
+
+    it("a dollar budget below the request's priced input is refused the same way", async () => {
+      const { g } = gate(() => ({
+        lines: [line({ scope: "user", period: "day", limit: 0.5, spent: 0 })],
+        requestsPerMinute: 1_000,
+      }));
+      // $1 per token at the test price: 1,000 input tokens far exceed $0.50.
+      expect(await g.admit(big(randomUUID()))).toMatchObject({
+        status: 402,
+        code: "budget_below_call",
+        message: expect.stringContaining("larger than your daily model budget"),
+      });
+    });
+
+    it("a budget below one call's output allowance still serves a lone call, as before", async () => {
+      const { g } = gate(() => ({
+        lines: [line({ unit: "tokens", scope: "user", limit: 20_000, spent: 0 })],
+        requestsPerMinute: 1_000,
+      }));
+      const user = randomUUID();
+      // 1,000 input + 131,072 allowance: far above 20,000, but most calls use little output.
+      expect((await g.admit(big(user))).ok).toBe(true);
+      // Overlapping: the first call's reservation fills the budget; the old answer, not "too small".
+      expect(await g.admit(big(user))).toMatchObject({ status: 402, code: "budget_exhausted" });
+    });
+
+    it("a nearly spent budget above one call: a lone call runs, then it is used up (not 'too small')", async () => {
+      let spent = 999_000;
+      const { g } = gate(() => ({
+        lines: [line({ unit: "tokens", scope: "user", limit: 1_000_000, spent })],
+        requestsPerMinute: 1_000,
+      }));
+      const user = randomUUID();
+      expect((await g.admit(big(user))).ok).toBe(true);
+      // Overlapping: the reservation fills what is left.
+      expect(await g.admit(big(user))).toMatchObject({ status: 402, code: "budget_exhausted" });
+      spent = 1_000_100;
+      g.invalidateTeam(teamId);
+      expect(await g.admit(big(user))).toMatchObject({ status: 402, code: "budget_exhausted" });
+    });
+
+    it("overlapping calls under a normal budget still wait and retry (429), never 'too small'", async () => {
+      const { g } = gate(() => ({
+        lines: [line({ unit: "tokens", scope: "team", limit: 1_000_000, spent: 0 })],
+        requestsPerMinute: 1_000,
+      }));
+      const [a, b] = [randomUUID(), randomUUID()];
+      expect((await g.admit(big(a))).ok).toBe(true);
+      expect((await g.admit(big(b))).ok).toBe(true);
+      // b's second call would hold more than its quarter of what is left while a's runs.
+      expect(await g.admit(big(b))).toMatchObject({
+        status: 429,
+        code: "too_many_calls_in_flight",
+        retryAfterSeconds: 2,
+      });
+    });
   });
 
   describe("with a shared reservation store (KOBE-120)", () => {

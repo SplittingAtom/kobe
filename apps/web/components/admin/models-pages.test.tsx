@@ -28,6 +28,9 @@ const KIMI = {
   label: "Kimi K2.7 Code",
   gateway_model: "ollama/kimi-k2.7-code",
   input_modalities: ["text"],
+  max_output_tokens: null,
+  context_window: null,
+  reasoning: false,
   created_at: T,
   updated_at: T,
 };
@@ -39,7 +42,19 @@ const IN_SYNC = {
   last_attempt_at: T,
   last_error: null,
 };
-const MODELS = { providers: [OLLAMA], catalog: [KIMI], gateway: IN_SYNC, configured: true };
+/** The site's defaults for models without their own limits (chart values; KOBE-259). */
+const TOKEN_DEFAULTS = {
+  max_output_tokens: 16_384,
+  reasoning_max_output_tokens: 32_768,
+  context_window: 128_000,
+};
+const MODELS = {
+  providers: [OLLAMA],
+  catalog: [KIMI],
+  gateway: IN_SYNC,
+  configured: true,
+  token_defaults: TOKEN_DEFAULTS,
+};
 const LISTED = {
   provider_id: "ollama",
   models: ["glm-5.3", "kimi-k2.7-code"],
@@ -316,6 +331,106 @@ describe("install: models and providers", () => {
     await screen.findByText(/Saved kimi/);
     expect(bodyOf(calls.find((c) => c.method === "PATCH"))).toEqual({
       input_modalities: ["text", "image"],
+    });
+  });
+
+  it("shows each model's output limit and context window, and the site default when unset (KOBE-259)", async () => {
+    stubApi({
+      "GET /v1/install/models": [
+        200,
+        {
+          ...MODELS,
+          catalog: [
+            KIMI,
+            { ...KIMI, alias: "glm", reasoning: true },
+            { ...KIMI, alias: "big", max_output_tokens: 65_536, context_window: 200_000 },
+          ],
+        },
+      ],
+    });
+    renderInstall(<InstallModelsPage />);
+    const catalog = await screen.findByRole("table", { name: /Catalog models/ });
+    const row = (name: RegExp) => within(catalog).getByRole("row", { name }).textContent;
+    expect(row(/^kimi/)).toContain("Output 16,384 (site default)");
+    expect(row(/^kimi/)).toContain("Window 128,000 (site default)");
+    expect(row(/^glm/)).toContain("Output 32,768 (reasoning default)");
+    expect(row(/^glm/)).toContain("Reasons");
+    expect(row(/^big/)).toContain("Output 65,536");
+    expect(row(/^big/)).not.toContain("Output 65,536 (");
+    expect(row(/^big/)).toContain("Window 200,000");
+  });
+
+  it("renders entries from an older server without limits (rolling upgrade, KOBE-259)", async () => {
+    const { max_output_tokens: _m, context_window: _c, reasoning: _r, ...old } = KIMI;
+    const { token_defaults: _d, ...oldModels } = MODELS;
+    stubApi({ "GET /v1/install/models": [200, { ...oldModels, catalog: [old] }] });
+    renderInstall(<InstallModelsPage />);
+    const catalog = await screen.findByRole("table", { name: /Catalog models/ });
+    expect(within(catalog).getByRole("row", { name: /^kimi/ }).textContent).toContain(
+      "Output — (site default)",
+    );
+  });
+
+  it("sets a model's limits and reasoning flag, and clears them back to the defaults (KOBE-259)", async () => {
+    const calls = stubApi({
+      "GET /v1/install/models": [
+        200,
+        { ...MODELS, catalog: [KIMI, { ...KIMI, alias: "big", max_output_tokens: 65_536 }] },
+      ],
+      "GET /v1/install/models/providers/ollama/models": [200, LISTED],
+      "PATCH /v1/install/models/catalog/kimi": [200, { model: { ...KIMI, reasoning: true } }],
+      "PATCH /v1/install/models/catalog/big": [200, { model: { ...KIMI, alias: "big" } }],
+    });
+    renderInstall(<InstallModelsPage />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Edit kimi" }));
+    let form = screen.getByRole("form", { name: "Edit kimi" });
+    const output = within(form).getByLabelText(/Output limit/);
+    expect(output.getAttribute("placeholder")).toBe("Site default: 16,384");
+    await user.click(within(form).getByLabelText(/Reasons before answering/));
+    // The empty field now stands for the reasoning default.
+    expect(output.getAttribute("placeholder")).toBe("Site default: 32,768");
+    await user.type(output, "65536");
+    await user.type(within(form).getByLabelText(/Context window/), "200000");
+    await user.click(within(form).getByRole("button", { name: "Save kimi" }));
+    await screen.findByText(/Saved kimi/);
+    expect(bodyOf(calls.find((c) => c.url.endsWith("/catalog/kimi")))).toEqual({
+      reasoning: true,
+      max_output_tokens: 65_536,
+      context_window: 200_000,
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Edit big" }));
+    form = screen.getByRole("form", { name: "Edit big" });
+    await user.clear(within(form).getByLabelText(/Output limit/));
+    await user.click(within(form).getByRole("button", { name: "Save big" }));
+    await screen.findByText(/Saved big/);
+    expect(bodyOf(calls.find((c) => c.url.endsWith("/catalog/big")))).toEqual({
+      max_output_tokens: null,
+    });
+  });
+
+  it("adds a model with its own limits; empty fields keep the site defaults (KOBE-259)", async () => {
+    const calls = stubApi({
+      "GET /v1/install/models": [200, { ...MODELS, catalog: [] }],
+      "GET /v1/install/models/providers/ollama/models": [200, LISTED],
+      "POST /v1/install/models/catalog": [201, { model: { ...KIMI, alias: "glm" } }],
+    });
+    renderInstall(<InstallModelsPage />);
+    const user = userEvent.setup();
+    const form = await screen.findByRole("form", { name: "Add a catalog model" });
+    await user.type(within(form).getByLabelText("Alias"), "glm");
+    await user.type(within(form).getByLabelText("Model"), "glm-5.3");
+    await user.click(within(form).getByLabelText(/Reasons before answering/));
+    await user.type(within(form).getByLabelText(/Context window/), "200000");
+    await user.click(within(form).getByRole("button", { name: "Add to catalog" }));
+    await screen.findByText(/Published glm/);
+    expect(bodyOf(calls.find((c) => c.method === "POST"))).toEqual({
+      alias: "glm",
+      provider_id: "ollama",
+      model: "glm-5.3",
+      reasoning: true,
+      context_window: 200_000,
     });
   });
 

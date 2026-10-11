@@ -25,4 +25,11 @@ export interface ModelWiring {
 export interface RunModel {
   readonly gatewayModel: string;
   readonly api: PiModelApi;
+  /** `run.start.config.model_limits` (KOBE-259); absent from an older server. */
+  readonly limits?: RunModelLimits;
+}
+
+export interface RunModelLimits {
+  readonly maxOutputTokens: number;
+  readonly contextWindow: number;
 }

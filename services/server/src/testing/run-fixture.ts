@@ -9,6 +9,7 @@ import { approvalKeyring } from "../approvals/index.js";
 import type { StreamTimings } from "../event-stream/stream.js";
 import { EventStreamFixture, PUBLIC_URL, must, type Person } from "./event-stream-fixture.js";
 import { FakeSandbox, FakeSandboxAuth, isFake, sandboxListener } from "./fake-sandbox.js";
+import type { ModelTokenDefaults } from "../models/token-limits.js";
 
 /** Condition waits are bounded below the 30 s test timeout and sized for a loaded 2-CPU CI runner. */
 const WAIT_MS = 25_000;
@@ -174,12 +175,17 @@ export class RunFixture {
       readonly blobs?: BlobStore;
       /** Event stream timers for both replicas (e.g. a short `revalidateMs` for revocation tests). */
       readonly streamTimings?: Partial<StreamTimings>;
+      /** Limits of models without their own (KOBE-259). */
+      readonly modelTokenDefaults?: ModelTokenDefaults;
     } = {},
   ): Promise<void> {
     const timings = options.streamTimings === undefined ? {} : { timings: options.streamTimings };
     await this.fx.setup([timings, timings], () => ({
       approvalKeys: approvalKeyring("run-fixture-approval-key-".padEnd(48, "k")),
       ...(options.blobs === undefined ? {} : { blobs: options.blobs }),
+      ...(options.modelTokenDefaults === undefined
+        ? {}
+        : { modelTokenDefaults: options.modelTokenDefaults }),
       sandboxWire: {
         sweep: false,
         tuning: {

@@ -80,6 +80,10 @@ describe("gateway failure classification", () => {
     expect(code(openai(402, "insufficient_quota"))).toBe("model_error");
     expect(code(openai(402, "policy_budget_exceeded"))).toBe("model_budget_exhausted");
     expect(isTransient(classifyFailure(openai(402, "budget_exhausted"), undefined))).toBe(false);
+    // KOBE-259: one call's allowance exceeds the whole budget: final, with its own message.
+    expect(code(openai(402, "budget_below_call"))).toBe("model_budget_too_small");
+    expect(code(anthropic(402, "budget_below_call"))).toBe("model_budget_too_small");
+    expect(isTransient(classifyFailure(openai(402, "budget_below_call"), undefined))).toBe(false);
     expect(
       kobeErrorMessage(
         "model_budget_exhausted",

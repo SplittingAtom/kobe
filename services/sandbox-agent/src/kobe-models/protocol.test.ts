@@ -2,6 +2,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import {
   KOBE_MODEL_ERROR_PREFIX as PROTOCOL_PREFIX,
+  MODEL_LIMITS_MAX_TOKENS as PROTOCOL_MAX_TOKENS,
   MODEL_RUN_ERROR_CODES as PROTOCOL_CODES,
   PI_MODEL_APIS as PROTOCOL_APIS,
   piThreadConfigSchema,
@@ -9,6 +10,7 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   KOBE_MODEL_ERROR_PREFIX,
+  MODEL_LIMITS_MAX_TOKENS,
   MODEL_RUN_ERROR_CODES,
   PI_MODEL_APIS,
   gatewayBaseUrl,
@@ -29,6 +31,7 @@ describe("kobe-models protocol", () => {
     expect(KOBE_MODEL_ERROR_PREFIX).toBe(PROTOCOL_PREFIX);
     expect([...MODEL_RUN_ERROR_CODES]).toEqual([...PROTOCOL_CODES]);
     expect([...PI_MODEL_APIS]).toEqual([...PROTOCOL_APIS]);
+    expect(MODEL_LIMITS_MAX_TOKENS).toBe(PROTOCOL_MAX_TOKENS);
     // The gateway model pattern matches the contract's.
     for (const gateway_model of ["kobe-vllm/qwen3", "gemini/gemini-2.5-pro", "x/y:z"]) {
       expect(() =>
@@ -46,8 +49,27 @@ describe("kobe-models protocol", () => {
     expect(parseModelFile(JSON.stringify({ ...valid, model: null })).model).toBeNull();
   });
 
+  it("parses the model's output limit and context window when the agent wrote them (KOBE-259)", () => {
+    const model = { ...valid.model, max_output_tokens: 32_768, context_window: 200_000 };
+    expect(parseModelFile(JSON.stringify({ ...valid, model })).model).toEqual(model);
+  });
+
+  const withLimits = (limits: object) =>
+    JSON.stringify({ ...valid, model: { ...valid.model, ...limits } });
+
   it.each([
     ["not JSON", "{"],
+    ["an output limit without a context window", withLimits({ max_output_tokens: 1_000 })],
+    ["a zero output limit", withLimits({ max_output_tokens: 0, context_window: 8_192 })],
+    ["a fractional output limit", withLimits({ max_output_tokens: 1.5, context_window: 8_192 })],
+    [
+      "a window above the bound",
+      withLimits({ max_output_tokens: 1_000, context_window: MODEL_LIMITS_MAX_TOKENS + 1 }),
+    ],
+    [
+      "an output limit that fills the window",
+      withLimits({ max_output_tokens: 8_192, context_window: 8_192 }),
+    ],
     ["another version", JSON.stringify({ ...valid, v: 2 })],
     ["a gateway URL with a path", JSON.stringify({ ...valid, gateway_url: "http://gw/v1" })],
     ["a gateway URL with credentials", JSON.stringify({ ...valid, gateway_url: "http://u:p@gw" })],

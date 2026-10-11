@@ -11,10 +11,12 @@ import {
   type CatalogModel,
   type ModelProvider,
   type ProviderModels,
+  type TokenDefaults,
 } from "../../../lib/admin/api/install/models";
 import { confirmed } from "../parts";
 import type { Mutation } from "../use-resource";
 import { ALIAS_PATTERN } from "./model-kinds";
+import { LimitsFields, limitsChange, limitsText, useLimitsChoice } from "./model-limits";
 import styles from "../admin.module.css";
 
 /**
@@ -24,11 +26,14 @@ import styles from "../admin.module.css";
 export function CatalogSection({
   catalog,
   providers,
+  tokenDefaults,
   mutation,
   onChanged,
 }: {
   readonly catalog: readonly CatalogModel[];
   readonly providers: readonly ModelProvider[];
+  /** What models without their own limits get (KOBE-259); absent from an older server. */
+  readonly tokenDefaults: TokenDefaults | undefined;
   readonly mutation: Mutation;
   readonly onChanged: () => void;
 }) {
@@ -71,6 +76,7 @@ export function CatalogSection({
                 <th scope="col">Provider</th>
                 <th scope="col">Model</th>
                 <th scope="col">Input</th>
+                <th scope="col">Limits</th>
                 <th scope="col">
                   <span className={styles.visuallyHidden}>Actions</span>
                 </th>
@@ -83,6 +89,7 @@ export function CatalogSection({
                   model={m}
                   providerName={providerName(m.providerId)}
                   providers={providers}
+                  tokenDefaults={tokenDefaults}
                   editing={editing === m.alias}
                   mutation={mutation}
                   onEdit={() => {
@@ -103,7 +110,12 @@ export function CatalogSection({
       {providers.length === 0 ? (
         <p>Add a provider first.</p>
       ) : (
-        <AddCatalogForm providers={providers} mutation={mutation} onAdded={onChanged} />
+        <AddCatalogForm
+          providers={providers}
+          tokenDefaults={tokenDefaults}
+          mutation={mutation}
+          onAdded={onChanged}
+        />
       )}
     </section>
   );
@@ -113,6 +125,7 @@ function CatalogRow({
   model: m,
   providerName,
   providers,
+  tokenDefaults,
   editing,
   mutation,
   onEdit,
@@ -122,6 +135,7 @@ function CatalogRow({
   readonly model: CatalogModel;
   readonly providerName: string;
   readonly providers: readonly ModelProvider[];
+  readonly tokenDefaults: TokenDefaults | undefined;
   readonly editing: boolean;
   readonly mutation: Mutation;
   readonly onEdit: () => void;
@@ -144,6 +158,7 @@ function CatalogRow({
           </span>
         </td>
         <td>{m.inputModalities.includes("image") ? "Text, images" : "Text"}</td>
+        <td>{limitsText(m, tokenDefaults)}</td>
         <td>
           <div className={styles.actions}>
             <button
@@ -163,10 +178,11 @@ function CatalogRow({
       </tr>
       {editing && (
         <tr>
-          <td colSpan={6}>
+          <td colSpan={7}>
             <EditCatalogForm
               model={m}
               providers={providers}
+              tokenDefaults={tokenDefaults}
               mutation={mutation}
               onSaved={onSaved}
             />
@@ -180,11 +196,13 @@ function CatalogRow({
 function EditCatalogForm({
   model: m,
   providers,
+  tokenDefaults,
   mutation,
   onSaved,
 }: {
   readonly model: CatalogModel;
   readonly providers: readonly ModelProvider[];
+  readonly tokenDefaults: TokenDefaults | undefined;
   readonly mutation: Mutation;
   readonly onSaved: () => void;
 }) {
@@ -192,6 +210,7 @@ function EditCatalogForm({
   const [providerId, setProviderId] = useState(m.providerId);
   const [model, setModel] = useState(m.model);
   const images = useImageChoice(m.inputModalities.includes("image"));
+  const limits = useLimitsChoice(m);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -203,6 +222,7 @@ function EditCatalogForm({
       ...(images.checked !== m.inputModalities.includes("image")
         ? { inputModalities: modalitiesOf(images.checked) }
         : {}),
+      ...limitsChange(limits, m),
     };
     if (Object.keys(change).length === 0) {
       onSaved();
@@ -226,6 +246,7 @@ function EditCatalogForm({
         onReportsImages={images.suggest}
       />
       <ImagesField choice={images} />
+      <LimitsFields choice={limits} defaults={tokenDefaults} />
       <button type="submit" disabled={mutation.pending}>
         Save {m.alias}
       </button>
@@ -235,10 +256,12 @@ function EditCatalogForm({
 
 function AddCatalogForm({
   providers,
+  tokenDefaults,
   mutation,
   onAdded,
 }: {
   readonly providers: readonly ModelProvider[];
+  readonly tokenDefaults: TokenDefaults | undefined;
   readonly mutation: Mutation;
   readonly onAdded: () => void;
 }) {
@@ -248,6 +271,7 @@ function AddCatalogForm({
   const [providerId, setProviderId] = useState(providers[0]?.id ?? "");
   const [model, setModel] = useState("");
   const images = useImageChoice(false);
+  const limits = useLimitsChoice();
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -259,6 +283,7 @@ function AddCatalogForm({
           model: model.trim(),
           label: label.trim() === "" ? null : label.trim(),
           ...(images.checked ? { inputModalities: modalitiesOf(true) } : {}),
+          ...limitsChange(limits),
         }),
       (added) => `Published ${added.alias} (${added.gatewayModel}). Team admins can enable it now.`,
     );
@@ -267,6 +292,7 @@ function AddCatalogForm({
       setLabel("");
       setModel("");
       images.reset();
+      limits.reset();
       onAdded();
     }
   }
@@ -296,6 +322,7 @@ function AddCatalogForm({
           onReportsImages={images.suggest}
         />
         <ImagesField choice={images} />
+        <LimitsFields choice={limits} defaults={tokenDefaults} />
         <button type="submit" disabled={mutation.pending || providerId === ""}>
           Add to catalog
         </button>

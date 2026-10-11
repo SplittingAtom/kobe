@@ -22,6 +22,7 @@ import {
   type UpdateCatalogInput,
   type UpdateProviderInput,
 } from "./schemas.js";
+import { outputLimitProblem, type ModelTokenDefaults } from "./token-limits.js";
 
 /**
  * Install model administration (spec D6, D8, D30; `/v1/install/models`): providers with their API
@@ -52,6 +53,11 @@ export interface CatalogView {
   readonly label: string | null;
   /** What the model accepts as input: always `text`, plus `image` when it can see images. */
   readonly input_modalities: readonly string[];
+  /** Output limit and context window in tokens (KOBE-259); null: the install default. */
+  readonly max_output_tokens: number | null;
+  readonly context_window: number | null;
+  /** The model reasons before answering: it gets the higher default output limit. */
+  readonly reasoning: boolean;
   /** The model id to send to the gateway (`<gateway provider>/<model>`). */
   readonly gateway_model: string;
   /** Dollars per million tokens (KOBE-43); null: not set (cache prices then use the input's). */
@@ -95,6 +101,9 @@ export const catalogView = (r: CatalogRow, kind: ModelProviderKind): CatalogView
   model: r.model,
   label: r.label,
   input_modalities: r.inputModalities,
+  max_output_tokens: r.maxOutputTokens,
+  context_window: r.contextWindow,
+  reasoning: r.reasoning,
   gateway_model: `${gatewayProviderName(r.providerId, kind)}/${r.model}`,
   input_usd_per_mtok: r.inputUsdPerMtok,
   output_usd_per_mtok: r.outputUsdPerMtok,
@@ -314,12 +323,20 @@ export async function deleteProvider(db: KobeDb, id: string): Promise<DeleteProv
   });
 }
 
+/** The output limit does not fit the model's window (its own, else the default; KOBE-259). */
+export interface OutputLimitTooLarge {
+  readonly ok: false;
+  readonly error: "output_limit_exceeds_context";
+  readonly contextWindow: number;
+}
+
 export type AddCatalogResult =
   | { readonly ok: true; readonly entry: CatalogView }
   | {
       readonly ok: false;
       readonly error: "exists" | "provider_not_found" | "too_many" | "partial_prices";
-    };
+    }
+  | OutputLimitTooLarge;
 
 interface Prices {
   readonly inputUsdPerMtok: number | null;
@@ -343,7 +360,16 @@ export async function addCatalogEntry(
   db: KobeDb,
   input: AddCatalogInput,
   userId: string,
+  tokenDefaults: ModelTokenDefaults,
 ): Promise<AddCatalogResult> {
+  const limits = {
+    maxOutputTokens: input.max_output_tokens ?? null,
+    contextWindow: input.context_window ?? null,
+  };
+  const window = outputLimitProblem(limits.maxOutputTokens, limits.contextWindow, tokenDefaults);
+  if (window !== undefined) {
+    return { ok: false, error: "output_limit_exceeds_context", contextWindow: window };
+  }
   return db.transaction(async (tx) => {
     await tx.execute(sql`LOCK TABLE ${modelCatalog} IN SHARE ROW EXCLUSIVE MODE`);
     const [provider] = await tx
@@ -383,6 +409,8 @@ export async function addCatalogEntry(
         outputUsdPerMtok: input.output_usd_per_mtok ?? null,
         cacheReadUsdPerMtok: input.cache_read_usd_per_mtok ?? null,
         cacheWriteUsdPerMtok: input.cache_write_usd_per_mtok ?? null,
+        ...limits,
+        reasoning: input.reasoning ?? false,
         createdBy: userId,
       })
       .returning();
@@ -403,12 +431,14 @@ export async function addCatalogEntry(
 
 export type UpdateCatalogResult =
   | { readonly ok: true; readonly entry: CatalogView }
-  | { readonly ok: false; readonly error: "not_found" | "provider_not_found" | "partial_prices" };
+  | { readonly ok: false; readonly error: "not_found" | "provider_not_found" | "partial_prices" }
+  | OutputLimitTooLarge;
 
 export async function updateCatalogEntry(
   db: KobeDb,
   alias: string,
   input: UpdateCatalogInput,
+  tokenDefaults: ModelTokenDefaults,
 ): Promise<UpdateCatalogResult> {
   return db.transaction(async (tx) => {
     const [before] = await tx
@@ -431,6 +461,15 @@ export async function updateCatalogEntry(
       cacheWriteUsdPerMtok: keep(input.cache_write_usd_per_mtok, before.cacheWriteUsdPerMtok),
     };
     if (partialPrices(prices)) return { ok: false, error: "partial_prices" };
+    const limits = {
+      maxOutputTokens: keep(input.max_output_tokens, before.maxOutputTokens),
+      contextWindow: keep(input.context_window, before.contextWindow),
+    };
+    const window = outputLimitProblem(limits.maxOutputTokens, limits.contextWindow, tokenDefaults);
+    if (window !== undefined) {
+      return { ok: false, error: "output_limit_exceeds_context", contextWindow: window };
+    }
+    const reasoning = input.reasoning ?? before.reasoning;
     const [row] = await tx
       .update(modelCatalog)
       .set({
@@ -439,6 +478,8 @@ export async function updateCatalogEntry(
         label: input.label === undefined ? before.label : input.label,
         inputModalities: input.input_modalities ?? before.inputModalities,
         ...prices,
+        ...limits,
+        reasoning,
         updatedAt: new Date(),
       })
       .where(eq(modelCatalog.alias, alias))
@@ -453,6 +494,10 @@ export async function updateCatalogEntry(
         providerId,
         model: entry.model,
         imageSupportChanged: entry.inputModalities.join() !== before.inputModalities.join(),
+        limitsChanged:
+          entry.maxOutputTokens !== before.maxOutputTokens ||
+          entry.contextWindow !== before.contextWindow ||
+          entry.reasoning !== before.reasoning,
         pricesChanged:
           entry.inputUsdPerMtok !== before.inputUsdPerMtok ||
           entry.outputUsdPerMtok !== before.outputUsdPerMtok ||

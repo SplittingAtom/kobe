@@ -4,6 +4,7 @@ import type { Logger } from "pino";
 import { recordAudit } from "../audit/record.js";
 import { withAppendTx } from "../event-stream/append.js";
 import type { CommandOutcome, SandboxRouter } from "../sandbox-wire/types.js";
+import { effectiveModelLimits, type ModelTokenDefaults } from "../models/token-limits.js";
 import { budgetStoppedEvent, failedEvent, restartPlanInTx, type StartPlan } from "./lifecycle.js";
 import type { RunAgentResolver } from "./seams.js";
 import {
@@ -30,6 +31,8 @@ export interface DispatchHost {
   readonly router: SandboxRouter;
   readonly agents: RunAgentResolver;
   readonly tuning: DispatchTuning;
+  /** Limits of models without their own in the catalog (KOBE-259). */
+  readonly modelTokenDefaults: ModelTokenDefaults;
   readonly log: Logger;
   closed(): boolean;
   emit(teamId: string, transitions: readonly AppliedTransition[]): void;
@@ -79,6 +82,11 @@ export class RunDispatcher {
         ...(plan.parentEntryId !== null ? { parentEntryId: plan.parentEntryId } : {}),
         config: {
           ...plan.config,
+          ...(plan.modelLimits === undefined
+            ? {}
+            : {
+                model_limits: effectiveModelLimits(plan.modelLimits, this.#h.modelTokenDefaults),
+              }),
           agent:
             plan.agent === null || plan.agent.version === null
               ? null
