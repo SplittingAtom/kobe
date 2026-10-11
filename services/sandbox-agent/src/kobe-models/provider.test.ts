@@ -9,7 +9,13 @@ import type {
   Provider,
   StreamOptions,
 } from "@earendil-works/pi-ai";
-import { RETRY_BUDGET_MS, createKobeProvider, kobeModel } from "./provider.js";
+import {
+  DEFAULT_CONTEXT_WINDOW,
+  DEFAULT_MAX_OUTPUT_TOKENS,
+  RETRY_BUDGET_MS,
+  createKobeProvider,
+  kobeModel,
+} from "./provider.js";
 import { KOBE_MODEL_ERROR_PREFIX, type ModelFileModel, type ModelFileState } from "./protocol.js";
 
 /**
@@ -182,6 +188,19 @@ describe("kobe provider", () => {
     expect(setup([], [state({ model: null })]).provider.getModels()).toEqual([]);
     const { provider } = setup([]);
     expect(provider.getModels().map((m) => m.id)).toEqual(["openai/gpt-fake"]);
+  });
+
+  it("takes the output limit and context window from the model file, else the old defaults (KOBE-259)", () => {
+    const base = { gateway_model: "ollama/glm-5.3", api: "openai-completions" } as const;
+    expect(
+      kobeModel("http://gw", { ...base, max_output_tokens: 65_536, context_window: 200_000 }),
+    ).toMatchObject({ maxTokens: 65_536, contextWindow: 200_000 });
+    // An older server sends no limits: what every model had before.
+    expect(kobeModel("http://gw", base)).toMatchObject({
+      maxTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+      contextWindow: DEFAULT_CONTEXT_WINDOW,
+    });
+    expect([DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_CONTEXT_WINDOW]).toEqual([16_384, 128_000]);
   });
 
   it("sends the current token as the API key and the active run as x-kobe-run-id", async () => {

@@ -18,7 +18,7 @@ it("pins the header name to the protocol's", () => {
   expect(RUN_TOKEN_HEADER).toBe(PROTOCOL_HEADER);
 });
 
-async function setup(states: () => ModelFileState) {
+async function setup(states: () => ModelFileState, selected: unknown[] = []) {
   const handlers: ((e: unknown, ctx: InputContextLike) => Promise<void>)[] = [];
   const registered: {
     auth: { apiKey: { resolve: () => Promise<{ auth: { headers: object } }> } };
@@ -26,7 +26,10 @@ async function setup(states: () => ModelFileState) {
   const api = {
     registerProvider: (p: unknown) => void registered.push(p as (typeof registered)[number]),
     on: (_: "input", h: (typeof handlers)[number]) => void handlers.push(h),
-    setModel: async () => true,
+    setModel: async (m: unknown) => {
+      selected.push(m);
+      return true;
+    },
   } as unknown as ExtensionApiLike;
   await registerKobeModels(api, {
     env: { KOBE_MODEL_FILE: "/x/model.json" },
@@ -97,5 +100,32 @@ describe("run token in kobe-models", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("model limits in kobe-models (KOBE-259)", () => {
+  it("re-selects the same model when only its limits changed, so the next call uses them", async () => {
+    const limited = (max_output_tokens: number): ModelFileState => ({
+      ...state(RUN),
+      model: {
+        gateway_model: "openai/gpt-fake",
+        api: "openai-completions",
+        max_output_tokens,
+        context_window: 200_000,
+      },
+    });
+    let current = limited(32_768);
+    const selected: unknown[] = [];
+    const { fire } = await setup(() => current, selected);
+    const ctx = { model: { provider: "kobe", id: "openai/gpt-fake" } };
+    await fire(ctx);
+    expect(selected).toHaveLength(0); // registered with these limits; nothing to change
+    current = limited(65_536);
+    await fire(ctx);
+    expect(selected).toEqual([
+      expect.objectContaining({ maxTokens: 65_536, contextWindow: 200_000 }),
+    ]);
+    await fire(ctx);
+    expect(selected).toHaveLength(1);
   });
 });

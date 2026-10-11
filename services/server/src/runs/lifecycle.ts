@@ -33,6 +33,7 @@ import {
   threadModelNotEnabled,
 } from "./failure-codes.js";
 import type { Omission } from "../resolver/resolve.js";
+import type { CatalogTokenLimits } from "../models/token-limits.js";
 import { modelAcceptsImages, resolveRunModel, type RunModelConfig } from "./models.js";
 import type { AgentResolution, RunAgentResolver } from "./seams.js";
 
@@ -60,6 +61,8 @@ export interface StartPlan {
   readonly attachments?: readonly SandboxAttachment[];
   /** What the resolver left out of the run's configuration (KOBE-76). */
   readonly omissions: readonly Omission[];
+  /** The model's catalog limits (KOBE-259); the dispatcher fills in the install defaults. */
+  readonly modelLimits?: CatalogTokenLimits;
 }
 
 export interface Promotion {
@@ -209,7 +212,13 @@ export async function promoteInTx(
       transitions,
       plan: withProject(
         withAttachments(
-          planOf(thread, { ...next, parentEntryId, approvalMode }, resolved, model),
+          planOf(
+            thread,
+            { ...next, parentEntryId, approvalMode },
+            resolved,
+            model,
+            resolution.limits,
+          ),
           await listRunAttachments(
             tx,
             teamId,
@@ -288,6 +297,7 @@ function planOf(
   run: RunRow,
   resolved: Resolved,
   model: RunModelConfig | undefined,
+  modelLimits: CatalogTokenLimits | undefined,
 ): StartPlan {
   const { model: _requested, ...rest } = resolved.config ?? {};
   const config = { ...rest, ...(model === undefined ? {} : { model }) };
@@ -303,6 +313,7 @@ function planOf(
     omissions: resolved.omissions ?? [],
     ...(resolved.mcp === undefined ? {} : { mcp: resolved.mcp }),
     ...(Object.keys(config).length > 0 ? { config } : {}),
+    ...(model === undefined || modelLimits === undefined ? {} : { modelLimits }),
   };
 }
 
@@ -330,7 +341,7 @@ export async function restartPlanInTx(
   if (!resolution.ok) return undefined;
   return withProject(
     withAttachments(
-      planOf(thread, run, resolved, resolution.model),
+      planOf(thread, run, resolved, resolution.model, resolution.limits),
       await listRunAttachments(
         tx,
         run.teamId,

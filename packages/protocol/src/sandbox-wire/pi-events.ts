@@ -160,6 +160,11 @@ export const MODEL_RUN_ERROR_CODES = [
    * is used up; the server ends a budget-stopped run `budget_stopped`.
    */
   "model_budget_exhausted",
+  /**
+   * 402 `budget_below_call` from the shim (KOBE-259): one call's output allowance alone exceeds a
+   * budget's whole limit, so waiting cannot help; the model's output limit or the budget must change.
+   */
+  "model_budget_too_small",
 ] as const;
 export type ModelRunErrorCode = (typeof MODEL_RUN_ERROR_CODES)[number];
 

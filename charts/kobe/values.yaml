@@ -156,6 +156,18 @@ server:
   # Lifetime of sandbox session tokens, 10..900 s. Leave at 900 (15 min); only the e2e shortens it
   # to run a real Pi past a token rotation (KOBE-241).
   sessionTokenTtlSeconds: 900
+  # Output limit and context window (tokens) of catalog models that have none of their own
+  # (KOBE-259); site admins set either per model on the Models page. Not any provider's maximum:
+  # a provider refuses calls above its own, so set the model's limits there when it allows less.
+  # Each model call's budget reservation holds the output limit while the call runs.
+  modelDefaults:
+    # Models that answer directly: what every model got before KOBE-259 (256..131072).
+    maxOutputTokens: 16384
+    # Models flagged "reasons before answering": their hidden reasoning spends the same allowance,
+    # so they get twice that (256..131072).
+    reasoningMaxOutputTokens: 32768
+    # Context window (1024..10000000); both output limits must be below it.
+    contextWindow: 128000
   # File uploads (KOBE-143); these are the server's code defaults.
   uploads:
     # Largest single file (bytes): 100 MiB.

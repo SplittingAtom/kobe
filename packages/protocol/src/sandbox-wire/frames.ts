@@ -270,6 +270,23 @@ export const gatewayModelSchema = z
   .max(256)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\/[A-Za-z0-9][A-Za-z0-9._:/-]*$/);
 
+/** Upper bound of a model's context window (and so its output limit) on the wire (KOBE-259). */
+export const MODEL_LIMITS_MAX_TOKENS = 10_000_000;
+const tokenCount = z.number().int().min(1).max(MODEL_LIMITS_MAX_TOKENS);
+
+/**
+ * The run model's token limits (KOBE-259), as the server resolved them: the catalog's values, else
+ * the install defaults (reasoning models get a higher output default). The sandbox gives them to
+ * Pi as the model's `maxTokens` (each call's `max_tokens`) and `contextWindow`. A separate key, not
+ * part of `model`, because `model` is strict and an older agent must still accept the frame.
+ */
+export const modelLimitsSchema = z
+  .strictObject({ max_output_tokens: tokenCount, context_window: tokenCount })
+  .refine((l) => l.max_output_tokens < l.context_window, {
+    message: "max_output_tokens must be below context_window",
+  });
+export type ModelLimits = z.infer<typeof modelLimitsSchema>;
+
 /**
  * Unknown keys are ignored (stripped), not rejected, since KOBE-82: a future additive field must not
  * break an older agent. Known fields stay strictly validated; the frame itself is still strict.
@@ -287,6 +304,8 @@ export const piThreadConfigSchema = z.object({
       api: piModelApiSchema.optional(),
     })
     .optional(),
+  /** The model's output limit and context window (KOBE-259); absent from older servers. */
+  model_limits: modelLimitsSchema.optional(),
   thinking_level: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
   agent: z
     .strictObject({ agent_id: uuidSchema, version: z.number().int().positive() })

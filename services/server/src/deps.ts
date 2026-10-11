@@ -29,6 +29,7 @@ import { DEFAULT_VERSION_LIMITS } from "./agents/versions.js";
 import type { Mailer } from "./mail/mailer.js";
 import type { RateLimitRule } from "./rate-limit.js";
 import type { ModelDiscovery } from "./models/discovery.js";
+import { MODEL_TOKEN_DEFAULTS, type ModelTokenDefaults } from "./models/token-limits.js";
 import {
   createDbRunContextSource,
   createSandboxWire,
@@ -130,6 +131,8 @@ export interface ServerDepsOptions {
   readonly blobs?: BlobStore;
   /** Upload limits and the default team storage quota (KOBE-143); unset: the contract defaults. */
   readonly uploads?: UploadSettings;
+  /** Limits of models without their own (KOBE-259, chart values); unset: `MODEL_TOKEN_DEFAULTS`. */
+  readonly modelTokenDefaults?: ModelTokenDefaults;
 }
 
 /** Limits on publishing agent versions (KOBE-46 review M3). */
@@ -227,6 +230,8 @@ export interface ServerDeps {
   readonly blobs: BlobStore | undefined;
   /** Upload limits (KOBE-143); undefined: the contract defaults. */
   readonly uploads: UploadSettings | undefined;
+  /** Output limit and context window of models without their own (KOBE-259). */
+  readonly modelTokenDefaults: ModelTokenDefaults;
   /** Keeps members' `projects/` workspace area equal to their projects' files (KOBE-162). */
   readonly projectMounts: ProjectMounts;
   /** Creates an email+password user (and optional install role) atomically, without sign-up. */
@@ -321,8 +326,10 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     databaseUrl: options.databaseUrl,
   });
   const runAgents = options.runs?.agents ?? PINNED_AGENTS;
+  const modelTokenDefaults = options.modelTokenDefaults ?? MODEL_TOKEN_DEFAULTS;
   const runs: ServerRunOrchestrator = new DbRunOrchestrator({
     ...options.runs,
+    modelTokenDefaults,
     agents: runAgents,
     budget: options.runs?.budget ?? DB_RUN_BUDGET_GATE,
     db: database.db,
@@ -415,6 +422,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     budgets,
     blobs: options.blobs,
     uploads: options.uploads,
+    modelTokenDefaults,
     projectMounts,
     async createUserWithPassword({ email, name, password }, { installRole, recordSetup } = {}) {
       const ctx = await auth.$context;

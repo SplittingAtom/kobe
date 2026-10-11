@@ -355,6 +355,15 @@
           "minimum": 10,
           "maximum": 900
         },
+        "modelDefaults": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxOutputTokens": { "type": "integer", "minimum": 256, "maximum": 131072 },
+            "reasoningMaxOutputTokens": { "type": "integer", "minimum": 256, "maximum": 131072 },
+            "contextWindow": { "type": "integer", "minimum": 1024, "maximum": 10000000 }
+          }
+        },
         "uploads": {
           "type": "object",
           "additionalProperties": false,

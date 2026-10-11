@@ -126,12 +126,17 @@ function lastAssistantError(events: PiEvent[]): string | undefined {
 }
 
 type RunModelConfig = { alias: string; gateway_model: string; api: PiModelApi };
+type ModelLimits = { max_output_tokens: number; context_window: number };
 
-async function run(harness: Harness, runId: string, message: string, model: RunModelConfig) {
-  const result = await harness.server.command(
-    runStart(message, { run_id: runId, config: { model } }),
-    60_000,
-  );
+async function run(
+  harness: Harness,
+  runId: string,
+  message: string,
+  model: RunModelConfig,
+  model_limits?: ModelLimits,
+) {
+  const config = model_limits === undefined ? { model } : { model, model_limits };
+  const result = await harness.server.command(runStart(message, { run_id: runId, config }), 60_000);
   expect(result, JSON.stringify(result)).toMatchObject({ ok: true });
   await harness.server.waitFor(settled(runId), 60_000);
   return runEvents(harness, runId);
@@ -190,6 +195,20 @@ describe.skipIf(!PI_AVAILABLE)("kobe-models in real Pi, through the real model g
       ["gemini", "gemini/gemini-fake", RUN_3],
     ]);
     // One Pi for all three: the agent reported no exit and no second kobe-policy handshake.
+    expect(h.server.frames("pi.exited")).toEqual([]);
+  }, 120_000);
+
+  it("sends the run's output limit as max_tokens, and the gateway reserves that much (KOBE-259)", async () => {
+    const { h, gateway } = await start();
+    const limits = { max_output_tokens: 50_000, context_window: 200_000 };
+    expect(textOf(await run(h, RUN, "one", OPENAI, limits))).toBe("fake-openai: one");
+    expect(textOf(await run(h, RUN_2, "two", ANTHROPIC, limits))).toBe("fake-anthropic: two");
+    expect(textOf(await run(h, RUN_3, "three", GEMINI, limits))).toBe("fake-gemini: three");
+    // An older server sends no limits: the pre-KOBE-259 default.
+    expect(textOf(await run(h, RUN_4, "four", OPENAI))).toBe("fake-openai: four");
+    const asked = gateway.seen.flatMap((s) => (s.maxOutputTokens === undefined ? [] : [s]));
+    expect(asked.map((s) => s.maxOutputTokens)).toEqual([50_000, 50_000, 50_000, 16_384]);
+    expect(gateway.calls.map((c) => c.outputAllowance)).toEqual([50_000, 50_000, 50_000, 16_384]);
     expect(h.server.frames("pi.exited")).toEqual([]);
   }, 120_000);
 

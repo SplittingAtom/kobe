@@ -118,6 +118,7 @@ export function runErrorCode(failure: Failure): ModelRunErrorCode {
   if (failure.code !== undefined && BUDGET_CODES.has(failure.code)) {
     return "model_budget_exhausted";
   }
+  if (failure.code === "budget_below_call") return "model_budget_too_small";
   if (failure.code !== undefined && NOT_ENABLED_CODES.has(failure.code)) return "model_not_enabled";
   if (failure.status === 403 && failure.code === undefined) return "model_not_enabled";
   if (isUnauthorized(failure)) return "model_session_revoked";

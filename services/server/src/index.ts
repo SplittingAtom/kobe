@@ -102,6 +102,7 @@ if (config.process === "scheduler") {
     sandboxWire: { waker },
     connectors: loadConnectorUrlPolicy(process.env),
     agents: { maxVersions: config.agentMaxVersions },
+    modelTokenDefaults: config.modelTokenDefaults,
     uploads: uploadSettings,
   });
 } else if (config.auth && config.smtp) {
@@ -125,6 +126,7 @@ if (config.process === "scheduler") {
         }
       : {}),
     agents: { maxVersions: config.agentMaxVersions },
+    modelTokenDefaults: config.modelTokenDefaults,
     ...(egressHeaderSecrets ? { egressHeaderSecrets } : {}),
     ...(envelope ? { envelope } : {}),
     ...(s3 && objectStore ? { blobs: { objects: objectStore, prefix: s3.prefix } } : {}),

@@ -1,4 +1,5 @@
 import type { PiModelApi, PiThreadConfig } from "@kobe/protocol";
+import type { CatalogTokenLimits } from "../models/token-limits.js";
 import {
   and,
   eq,
@@ -43,6 +44,7 @@ interface EnabledModel {
   readonly isDefault: boolean;
   readonly gatewayModel: string;
   readonly api: PiModelApi;
+  readonly limits: CatalogTokenLimits;
 }
 
 /** The team's enabled models (RLS: inside `withTeam`). */
@@ -54,6 +56,9 @@ async function enabledModels(tx: KobeTx, teamId: string): Promise<EnabledModel[]
       providerId: modelCatalog.providerId,
       model: modelCatalog.model,
       kind: modelProviders.kind,
+      maxOutputTokens: modelCatalog.maxOutputTokens,
+      contextWindow: modelCatalog.contextWindow,
+      reasoning: modelCatalog.reasoning,
     })
     .from(teamModels)
     .innerJoin(modelCatalog, eq(modelCatalog.alias, teamModels.alias))
@@ -64,11 +69,24 @@ async function enabledModels(tx: KobeTx, teamId: string): Promise<EnabledModel[]
     isDefault: r.isDefault,
     gatewayModel: `${gatewayProviderName(r.providerId, r.kind)}/${r.model}`,
     api: apiForKind(r.kind),
+    limits: {
+      maxOutputTokens: r.maxOutputTokens,
+      contextWindow: r.contextWindow,
+      reasoning: r.reasoning,
+    },
   }));
 }
 
+/**
+ * `limits`: what the catalog says about the model's output limit and context window (KOBE-259);
+ * the dispatcher adds the install defaults when it sends `run.start`.
+ */
 export type RunModelResolution =
-  | { readonly ok: true; readonly model: RunModelConfig | undefined }
+  | {
+      readonly ok: true;
+      readonly model: RunModelConfig | undefined;
+      readonly limits?: CatalogTokenLimits;
+    }
   | { readonly ok: false; readonly code: "agent_model_not_enabled"; readonly alias: string };
 
 export async function resolveRunModel(
@@ -84,12 +102,11 @@ export async function resolveRunModel(
   if (requestedAlias !== undefined && chosen === undefined) {
     return { ok: false, code: "agent_model_not_enabled", alias: requestedAlias };
   }
+  if (chosen === undefined) return { ok: true, model: undefined };
   return {
     ok: true,
-    model:
-      chosen === undefined
-        ? undefined
-        : { alias: chosen.alias, gateway_model: chosen.gatewayModel, api: chosen.api },
+    model: { alias: chosen.alias, gateway_model: chosen.gatewayModel, api: chosen.api },
+    limits: chosen.limits,
   };
 }
 

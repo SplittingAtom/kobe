@@ -47,6 +47,13 @@ const RUN_ID_HEADER = "x-kobe-run-id";
 const ABORTED_MESSAGE = "Request was aborted";
 const NO_FAILURE: Failure = { status: undefined, code: undefined, retryAfterMs: undefined };
 
+/**
+ * What a model gets when the server sent no limits (an older server): the values every model had
+ * before KOBE-259. A current server always sends the catalog's values or the install defaults.
+ */
+export const DEFAULT_MAX_OUTPUT_TOKENS = 16_384;
+export const DEFAULT_CONTEXT_WINDOW = 128_000;
+
 /** pi-ai's provider helpers (Pi's copy at runtime; stand-ins in unit tests). */
 export interface PiAiLike {
   createProvider(options: CreateProviderOptions): Provider;
@@ -97,8 +104,10 @@ export function kobeModel(gatewayUrl: string, model: ModelFileModel): Model {
     reasoning: api !== "openai-completions",
     input: ["text", "image"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 128_000,
-    maxTokens: 16_384,
+    // KOBE-259: the catalog's limits (or the install defaults), resolved by the server. Pi sends
+    // `maxTokens` as each call's `max_tokens`, clamped to what the window leaves after the input.
+    contextWindow: model.context_window ?? DEFAULT_CONTEXT_WINDOW,
+    maxTokens: model.max_output_tokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
   };
 }
 

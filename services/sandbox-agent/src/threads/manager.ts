@@ -618,12 +618,23 @@ export class ThreadManager {
   }
 }
 
-/** The run's gateway model from `run.start.config` (both fields, else no model). */
+/** The run's gateway model from `run.start.config` (both fields, else no model) and its limits. */
 function runModelOf(frame: RunStartFrame | undefined): RunModel | null {
   const model = frame?.config?.model;
-  return model?.gateway_model !== undefined && model.api !== undefined
-    ? { gatewayModel: model.gateway_model, api: model.api }
-    : null;
+  const limits = frame?.config?.model_limits;
+  if (model?.gateway_model === undefined || model.api === undefined) return null;
+  return {
+    gatewayModel: model.gateway_model,
+    api: model.api,
+    ...(limits === undefined
+      ? {}
+      : {
+          limits: {
+            maxOutputTokens: limits.max_output_tokens,
+            contextWindow: limits.context_window,
+          },
+        }),
+  };
 }
 
 function dispositionOf(data: unknown): string | undefined {

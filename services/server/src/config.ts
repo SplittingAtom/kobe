@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { loadAuditForwardingConfig, type AuditForwardingConfig } from "./audit/forward/config.js";
 import { smtpSchema, type SmtpConfig } from "./mail/config.js";
+import { parseModelTokenDefaults, type ModelTokenDefaults } from "./models/token-limits.js";
 
 const configSchema = z.object({
   PORT: z.coerce
@@ -176,6 +177,8 @@ export interface Config {
   readonly connectorRefreshSeconds: number;
   /** Sandbox session token lifetime in seconds (900 unless an e2e install shortens it). */
   readonly sessionTokenTtlSeconds: number;
+  /** Output limit and context window of models without their own (KOBE-259, chart values). */
+  readonly modelTokenDefaults: ModelTokenDefaults;
   /** Scheduler runner settings (KOBE-174); read by the scheduler process only. */
   readonly scheduler: { readonly tickSeconds: number; readonly graceMinutes: number };
   /** SIEM forwarding of audit events (KOBE-19); empty when not configured. */
@@ -195,6 +198,8 @@ function fail(error: z.ZodError): never {
 export function loadConfig(env: Readonly<Record<string, string | undefined>>): Config {
   const base = configSchema.safeParse(env);
   if (!base.success) fail(base.error);
+  const tokenDefaults = parseModelTokenDefaults(env);
+  if (!tokenDefaults.success) fail(tokenDefaults.error);
   const config = {
     port: base.data.PORT,
     process: base.data.KOBE_PROCESS,
@@ -209,6 +214,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     teamReconcileSeconds: base.data.KOBE_TEAM_RECONCILE_SECONDS,
     connectorRefreshSeconds: base.data.KOBE_CONNECTOR_REFRESH_SECONDS,
     sessionTokenTtlSeconds: base.data.KOBE_SESSION_TOKEN_TTL_SECONDS,
+    modelTokenDefaults: tokenDefaults.data,
     scheduler: {
       tickSeconds: base.data.KOBE_SCHEDULER_TICK_SECONDS,
       graceMinutes: base.data.KOBE_SCHEDULER_GRACE_MINUTES,

@@ -1,6 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { writeFileAtomic } from "../atomic-file.js";
-import { MODEL_FILE_VERSION, type ModelFileState } from "../kobe-models/protocol.js";
+import {
+  MODEL_FILE_VERSION,
+  type ModelFileModel,
+  type ModelFileState,
+} from "../kobe-models/protocol.js";
 import type { RunModel } from "./types.js";
 
 /**
@@ -22,12 +26,20 @@ export function modelFileState(content: ModelFileContent): ModelFileState {
   return {
     v: MODEL_FILE_VERSION,
     gateway_url: content.gatewayUrl,
-    model:
-      content.model === null
-        ? null
-        : { gateway_model: content.model.gatewayModel, api: content.model.api },
+    model: content.model === null ? null : modelFileModel(content.model),
     token: content.token,
     run_id: content.runId,
+  };
+}
+
+function modelFileModel(model: RunModel): ModelFileModel {
+  const { gatewayModel, api, limits } = model;
+  return {
+    gateway_model: gatewayModel,
+    api,
+    ...(limits === undefined
+      ? {}
+      : { max_output_tokens: limits.maxOutputTokens, context_window: limits.contextWindow }),
   };
 }
 
@@ -36,7 +48,9 @@ function sameContent(a: ModelFileContent, b: ModelFileContent): boolean {
     a.token === b.token &&
     a.runId === b.runId &&
     a.model?.gatewayModel === b.model?.gatewayModel &&
-    a.model?.api === b.model?.api
+    a.model?.api === b.model?.api &&
+    a.model?.limits?.maxOutputTokens === b.model?.limits?.maxOutputTokens &&
+    a.model?.limits?.contextWindow === b.model?.limits?.contextWindow
   );
 }
 

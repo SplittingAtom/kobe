@@ -29,6 +29,15 @@ export interface SeenRequest {
   readonly credentials: Readonly<Record<string, string>>;
   /** Chat Completions: whether the request asked for its usage report (KOBE-43 e2e). */
   readonly includeUsage?: boolean;
+  /** The output cap the request asked for, any API style (KOBE-259); absent when it set none. */
+  readonly maxOutputTokens?: number;
+}
+
+/** `max_tokens` / `max_completion_tokens` (OpenAI, Anthropic) or Gemini's `maxOutputTokens`. */
+function requestedMaxOutput(body: Record<string, unknown>): number | undefined {
+  const generation = body.generationConfig as Record<string, unknown> | undefined;
+  const value = body.max_tokens ?? body.max_completion_tokens ?? generation?.maxOutputTokens;
+  return typeof value === "number" ? value : undefined;
 }
 
 const CREDENTIALS = ["authorization", "x-api-key", "x-goog-api-key", "api-key", "x-bf-vk"];
@@ -399,6 +408,7 @@ export function createFakeLlm(seen: SeenRequest[] = []): Server {
       return;
     }
     const options = body.stream_options as Record<string, unknown> | undefined;
+    const maxOutputTokens = requestedMaxOutput(body);
     seen.push({
       method: req.method ?? "",
       path: url.pathname,
@@ -406,6 +416,7 @@ export function createFakeLlm(seen: SeenRequest[] = []): Server {
       ...(url.pathname.endsWith("/chat/completions")
         ? { includeUsage: options?.include_usage === true }
         : {}),
+      ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
     });
     const text = lastUserText(body);
     const model = typeof body.model === "string" ? body.model : "fake-model";

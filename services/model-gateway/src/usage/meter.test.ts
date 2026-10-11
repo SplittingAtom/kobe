@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RouteKind } from "../routes.js";
+import { MODEL_OUTPUT_TOKENS_RANGE } from "@kobe/db";
 import { JsonUsageScanner } from "./json-scan.js";
 import {
   DEFAULT_CHARGED_OUTPUT_TOKENS,
@@ -124,6 +125,12 @@ describe("UsageMeter: streams (usage in the final events)", () => {
     expect(meter("openai", SSE, body, 7, true, chargedOutput(10_000_000)).counts.output).toBe(
       MAX_CHARGED_OUTPUT_TOKENS,
     );
+  });
+
+  it("charges and reserves up to the catalog's highest output limit (KOBE-259)", () => {
+    expect(MAX_CHARGED_OUTPUT_TOKENS).toBe(MODEL_OUTPUT_TOKENS_RANGE[1]);
+    expect(chargedOutput(MODEL_OUTPUT_TOKENS_RANGE[1])).toBe(MODEL_OUTPUT_TOKENS_RANGE[1]);
+    expect(chargedOutput(65_536, 2)).toBe(131_072);
   });
 
   it("estimates a stream cut short, keeping the input side already reported", () => {

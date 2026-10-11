@@ -195,6 +195,61 @@ describe("BudgetGate (KOBE-42)", () => {
     expect((await g.admit(call(randomUUID()))).ok).toBe(false);
   });
 
+  describe("large output allowances (KOBE-259)", () => {
+    const big = (userId: string): CallContext => ({
+      ...call(userId),
+      callId: randomUUID(),
+      inputEstimate: 1_000,
+      outputAllowance: 131_072,
+    });
+
+    it("reserves a large allowance in full: concurrent calls stop once the budget is reserved", async () => {
+      const { g } = gate(() => ({
+        lines: [line({ unit: "tokens", scope: "user", limit: 300_000, spent: 0 })],
+        requestsPerMinute: 1_000,
+      }));
+      const user = randomUUID();
+      const decisions = [];
+      for (let i = 0; i < 4; i++) decisions.push(await g.admit(big(user)));
+      // 3 × 132,072 reserved: the third overshoots by its own allowance at most; the fourth waits.
+      expect(decisions.map((d) => d.ok)).toEqual([true, true, true, false]);
+      expect(decisions[3]).toMatchObject({ status: 402, code: "budget_exhausted" });
+    });
+
+    it("a budget below one call's allowance: a lone call still runs, others fail clearly (no retry loop)", async () => {
+      const { g } = gate(() => ({
+        lines: [line({ unit: "tokens", scope: "team", limit: 100_000, spent: 0 })],
+        requestsPerMinute: 1_000,
+      }));
+      // Alone, the call is admitted, as every lone call is (the step in flight finishes, D30).
+      expect((await g.admit(big(randomUUID()))).ok).toBe(true);
+      // Another member's call meanwhile was a 429 retried until the first ended (a silent stall);
+      // the same member's second call said the budget was used up. Now: one clear, final 402.
+      for (const user of [randomUUID(), randomUUID()]) {
+        const refused = await g.admit(big(user));
+        expect(refused).toMatchObject({ ok: false, status: 402, code: "budget_below_call" });
+        expect(refused.ok ? "" : refused.message).toBe(
+          "One call to this model may use more than your team's monthly token budget (its output limit is reserved up front). Ask an admin to lower the model's output limit or raise the budget.",
+        );
+      }
+    });
+
+    it("a dollar budget below one priced call's allowance fails the same way", async () => {
+      const { g } = gate(() => ({
+        lines: [line({ scope: "user", period: "day", limit: 0.5, spent: 0 })],
+        requestsPerMinute: 1_000,
+      }));
+      const user = randomUUID();
+      // $1 per token at the test price: 132,072 tokens far exceed $0.50.
+      expect((await g.admit(big(user))).ok).toBe(true);
+      expect(await g.admit(big(user))).toMatchObject({
+        status: 402,
+        code: "budget_below_call",
+        message: expect.stringContaining("your daily model budget"),
+      });
+    });
+  });
+
   describe("with a shared reservation store (KOBE-120)", () => {
     const failing: ReservationStore = {
       reserve: async () => {

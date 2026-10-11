@@ -40,6 +40,7 @@ export async function openHarness(
     | "connectors"
     | "connectorProbe"
     | "envelope"
+    | "modelTokenDefaults"
   > = {},
   /** App options that need the deps (e.g. the Orbit eval runner, KOBE-93). */
   appOptions?: (deps: ServerDeps) => AppOptions,

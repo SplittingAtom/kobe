@@ -1,5 +1,10 @@
 import type { Model, Provider } from "@earendil-works/pi-ai";
-import { KOBE_PROVIDER_ID, RUN_TOKEN_UI_TITLE, type ModelFileState } from "./protocol.js";
+import {
+  KOBE_PROVIDER_ID,
+  RUN_TOKEN_UI_TITLE,
+  type ModelFileModel,
+  type ModelFileState,
+} from "./protocol.js";
 import { createKobeProvider, kobeModel, type KobeProviderDeps, type PiAiLike } from "./provider.js";
 import { takeModelFilePath } from "./state-file.js";
 
@@ -20,6 +25,10 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | undefined>
       },
     );
   });
+}
+
+function sameModelLimits(a: ModelFileModel, b: ModelFileModel): boolean {
+  return a.max_output_tokens === b.max_output_tokens && a.context_window === b.context_window;
 }
 
 /** The registration logic of kobe-models, apart from `index.ts` so tests can load it without Pi. */
@@ -105,8 +114,10 @@ export async function registerKobeModels(
     const wanted = state.model;
     if (wanted === null) return;
     const selected = ctx.model?.provider === KOBE_PROVIDER_ID ? ctx.model.id : undefined;
-    if (selected === wanted.gateway_model) return;
-    if (registered.model?.gateway_model !== wanted.gateway_model) {
+    // Limits changed (KOBE-259: an admin edited the catalog) re-select the same model.
+    const sameLimits = registered.model !== null && sameModelLimits(registered.model, wanted);
+    if (selected === wanted.gateway_model && sameLimits) return;
+    if (registered.model?.gateway_model !== wanted.gateway_model || !sameLimits) {
       api.registerProvider(build(state));
       registered = state;
     }

@@ -59,6 +59,35 @@ describe("ModelFile (agent side)", () => {
     expect((await stat(file.path)).mtimeMs).toBe(before.mtimeMs);
   });
 
+  it("writes the model's limits and rewrites when only they change (KOBE-259)", async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "kobe-model-file-"));
+    const model = { gatewayModel: "ollama/glm-5.3", api: "openai-completions" } as const;
+    const file = new ModelFile(path.join(dir, "model.json"), {
+      gatewayUrl: "http://gw",
+      model: { ...model, limits: { maxOutputTokens: 32_768, contextWindow: 200_000 } },
+      token: "t".repeat(40),
+      runId: null,
+    });
+    await file.create();
+    expect(parseModelFile(await readFile(file.path, "utf8")).model).toEqual({
+      gateway_model: "ollama/glm-5.3",
+      api: "openai-completions",
+      max_output_tokens: 32_768,
+      context_window: 200_000,
+    });
+    await file.update({
+      model: { ...model, limits: { maxOutputTokens: 65_536, contextWindow: 200_000 } },
+    });
+    expect(parseModelFile(await readFile(file.path, "utf8")).model).toMatchObject({
+      max_output_tokens: 65_536,
+    });
+    await file.update({ model });
+    expect(parseModelFile(await readFile(file.path, "utf8")).model).toEqual({
+      gateway_model: "ollama/glm-5.3",
+      api: "openai-completions",
+    });
+  });
+
   it("never follows a symlink at the file path, leaves no temp file, and verifies its own writes", async () => {
     dir = await mkdtemp(path.join(tmpdir(), "kobe-model-file-"));
     const victim = path.join(dir, "victim");

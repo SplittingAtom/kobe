@@ -39,6 +39,9 @@ export const FAILURE_MESSAGES: Readonly<Record<string, string>> = {
   // KOBE-42: the gateway refused a model call because a budget is used up.
   model_budget_exhausted:
     "The model budget is used up, so the model call was refused. Ask your team admin about the budget.",
+  // KOBE-259: one call's output allowance alone exceeds a budget's whole limit (final, no retry).
+  model_budget_too_small:
+    "One call to this model may cost more than the whole budget allows, so it was refused. Ask your site admin to lower the model's output limit, or your team admin to raise the budget.",
   // KOBE-82: the run has skills, but the workspace's agent is too old to load them.
   skills_unsupported:
     "Your workspace is running an older version that can't load this agent's skills. Ask your admin to upgrade it.",
