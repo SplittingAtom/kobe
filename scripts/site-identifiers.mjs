@@ -41,7 +41,11 @@ const IDENTIFIER = /[a-z0-9]Install|^install[A-Z]|^Install[A-Z]|INSTALL_|_INSTAL
 const PATTERNS = [
   { what: "API path", re: /\/v1\/install\b|[?&]level=install\b/g, keep: () => true },
   { what: "permission", re: /\binstall\.[a-z_]+\.[a-z_]+\b/g, keep: () => true },
-  { what: "module path", re: /\binstall-(?!gvisor|agent-sandbox)[\w-]+\.(?:js|ts|tsx)\b/g, keep: () => true },
+  {
+    what: "module path",
+    re: /\binstall-(?!gvisor|agent-sandbox)[\w-]+\.(?:js|ts|tsx)\b/g,
+    keep: () => true,
+  },
   {
     what: "identifier",
     re: /[\w$]*(?:install|Install|INSTALL)[\w$]*/g,
