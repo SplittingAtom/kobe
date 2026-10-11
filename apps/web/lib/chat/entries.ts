@@ -29,8 +29,11 @@ export type ParsedEntry =
   | {
       readonly kind: "assistant";
       readonly pieces: readonly AssistantPiece[];
-      /** Set when the model step ended in an error or was aborted. */
-      readonly problem?: { readonly reason: "error" | "aborted"; readonly message: string };
+      /** Set when the model step ended in an error, was aborted or hit the output limit. */
+      readonly problem?: {
+        readonly reason: "error" | "aborted" | "length";
+        readonly message: string;
+      };
     }
   | {
       readonly kind: "toolResult";
@@ -101,8 +104,12 @@ function assistantPieces(content: unknown): AssistantPiece[] {
   return pieces;
 }
 
+/** KOBE-258: Pi's `stopReason: "length"`; the run's own failure says what to do about it. */
+const OUTPUT_LIMIT = "The model hit its output limit here, so this reply is incomplete.";
+
 function assistantProblem(message: Record<string, unknown>) {
   const reason = message.stopReason;
+  if (reason === "length") return { reason, message: OUTPUT_LIMIT } as const;
   if (reason !== "error" && reason !== "aborted") return undefined;
   const fallback = reason === "error" ? "The model returned an error." : "This step was stopped.";
   return { reason, message: clip(str(message.errorMessage) ?? fallback).slice(0, 2000) } as const;

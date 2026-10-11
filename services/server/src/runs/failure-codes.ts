@@ -42,6 +42,12 @@ export const FAILURE_MESSAGES: Readonly<Record<string, string>> = {
   // KOBE-259: a budget's limit is below one call's cost (input + output limit): final, no retry.
   model_budget_too_small:
     "The budget is smaller than one call to this model (its input plus its output limit), so the call was refused. Ask your team admin to raise the budget, or your site admin to lower the model's output limit.",
+  // KOBE-258: the last model step stopped at the model's output limit (`stopReason: "length"`).
+  model_output_limit:
+    "The model hit its output limit before it finished, so its reply is incomplete. Ask for a shorter answer, or for the work to be written to files in smaller steps.",
+  // KOBE-258: the run's conversation entries could not be saved when it ended.
+  entries_not_saved:
+    "The run finished, but its messages could not be saved to the conversation, so they may be missing after a reload. If they are, send your message again.",
   // KOBE-82: the run has skills, but the workspace's agent is too old to load them.
   skills_unsupported:
     "Your workspace is running an older version that can't load this agent's skills. Ask your admin to upgrade it.",

@@ -49,7 +49,7 @@ function Reasoning({ text }: ReasoningMessagePartProps) {
 function Problem({ data }: DataMessagePartProps) {
   const problem = data as { readonly reason?: string; readonly message?: string };
   return (
-    <p className={problem.reason === "aborted" ? styles.notice : styles.denied} role="note">
+    <p className={problem.reason === "error" ? styles.denied : styles.notice} role="note">
       {problem.message}
     </p>
   );

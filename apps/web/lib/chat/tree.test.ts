@@ -147,6 +147,22 @@ describe("projectThread", () => {
     ]);
   });
 
+  it("marks a reply cut off at the model's output limit (KOBE-258)", () => {
+    const cut = entry("a1", "u1", {
+      role: "assistant",
+      content: [{ type: "thinking", thinking: "<html>" }],
+      stopReason: "length",
+    });
+    const p = projectThread([user("u1", null, "q"), cut], "a1");
+    expect(content(p, "a1")).toContainEqual({
+      type: "data-kobe-problem",
+      data: {
+        reason: "length",
+        message: "The model hit its output limit here, so this reply is incomplete.",
+      },
+    });
+  });
+
   it("never throws on malformed payloads", () => {
     const junk = [
       entry("x1", null, { role: "assistant", content: "plain string" }),
