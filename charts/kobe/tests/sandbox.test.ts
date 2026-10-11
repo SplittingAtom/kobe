@@ -255,9 +255,10 @@ describe("server sandbox configuration", () => {
       "KOBE_SESSION_KEY_MODEL_GATEWAY",
       "KOBE_SESSION_KEY_SANDBOX_WIRE",
     ]);
-    for (const d of ["kobe-scheduler", "kobe-web"]) {
-      expect(names(d), d).toEqual([]);
-    }
+    // The scheduler starts sandboxes for scheduled runs (KOBE-174): it holds the same keys as the
+    // server (and mints run tokens with the model-gateway one), but no approval key.
+    expect(names("kobe-scheduler").sort()).toEqual(names("kobe-server").sort());
+    expect(names("kobe-web")).toEqual([]);
     expect(names("kobe-egress-proxy")).toEqual(["KOBE_SESSION_KEY_EGRESS_PROXY"]);
     expect(names("kobe-mcp-proxy")).toEqual(["KOBE_SESSION_KEY_MCP_PROXY"]);
   });

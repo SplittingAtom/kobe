@@ -169,7 +169,14 @@ server:
     orphanHours: 24
 
 scheduler:
+  # Replicas > 1 are safe: each due occurrence is claimed under a row lease and a unique index
+  # (exactly once across replicas, KOBE-174); more replicas only add failover.
   replicas: 1
+  # Seconds between scans for due schedules (a schedule fires within one tick of its time).
+  tickSeconds: 15
+  # After downtime an overdue occurrence still fires once (the latest) if it is at most this many
+  # minutes late; older ones are skipped and recorded.
+  catchUpGraceMinutes: 60
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { cpu: 500m, memory: 512Mi }

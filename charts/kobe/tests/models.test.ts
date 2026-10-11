@@ -158,8 +158,13 @@ describe("who holds which secret", () => {
     });
   });
 
-  it("the scheduler holds no model secret", () => {
-    expect(secretKeys(env(ms, "kobe-scheduler")).filter((k) => k.includes("model"))).toEqual([]);
+  it("the scheduler holds no model secret beyond the session keys it starts sandboxes with", () => {
+    // KOBE-174: the model-gateway session key mints run tokens; provider and virtual keys stay out.
+    expect(
+      secretKeys(env(ms, "kobe-scheduler")).filter(
+        (k) => k.includes("model") && k !== "kobe-sandbox-session-keys/model-gateway",
+      ),
+    ).toEqual([]);
   });
 
   it("the shim holds only its own session key and the virtual-key secret", () => {

@@ -135,6 +135,21 @@ HMAC key (KOBE-37). The approval key is optional so a pre-created Secret without
 still starts: the server then denies every tool call that needs approval (fail closed) and logs it.
 */}}
 {{- define "kobe.sandboxEnv" -}}
+{{ include "kobe.sandboxSessionEnv" . }}
+- name: KOBE_APPROVAL_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "kobe.sessionKeysSecretName" . }}
+      key: approval-hmac
+      optional: true
+{{- end -}}
+
+{{/*
+Sandbox config and the session-token keys without the approval key: the scheduler (KOBE-174) starts
+sandboxes for scheduled runs, so it needs the provider's settings and keys, but it never signs or
+verifies approvals (a scheduled run is `auto`: nothing waits for one).
+*/}}
+{{- define "kobe.sandboxSessionEnv" -}}
 - name: KOBE_SANDBOX_CONFIG
   value: {{ include "kobe.sandboxConfig" . | quote }}
 {{- range $env, $key := include "kobe.sessionKeyNames" . | fromJson }}
@@ -144,10 +159,4 @@ still starts: the server then denies every tool call that needs approval (fail c
       name: {{ include "kobe.sessionKeysSecretName" $ }}
       key: {{ $key }}
 {{- end }}
-- name: KOBE_APPROVAL_KEY
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "kobe.sessionKeysSecretName" . }}
-      key: approval-hmac
-      optional: true
 {{- end -}}
