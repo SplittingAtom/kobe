@@ -13,14 +13,17 @@ import { scheduledRunMessage, type ScheduledRunOutcome } from "../mail/messages.
  * transaction that ends the run; this delivers them **at least once**, per team under its RLS:
  * claimed with a lease (`lease_until`, SKIP LOCKED) so replicas do not double-send, marked sent
  * once the SMTP server accepted the message, retried with backoff, given up (`failed`) after
- * {@link NOTIFICATION_EMAIL_MAX_ATTEMPTS}. A recipient who is deactivated or no longer a member of
+ * {@link NOTIFICATION_EMAIL_MAX_ATTEMPTS}. The claim's `attempts` is the fencing token: the lease
+ * is renewed before each send and every settle names it, so a replica whose lease ran out can
+ * neither send again nor overwrite the row (KOBE-179 review). A recipient who is deactivated or no longer a member of
  * the team is skipped. Delivery runs right after a scheduled run ends (index.ts) and from every
  * server replica's sweep. The message carries metadata only (see `scheduledRunMessage`).
  */
 export const NOTIFICATION_EMAIL_MAX_ATTEMPTS = 8;
 export const NOTIFICATION_EMAIL_SWEEP_MS = 60_000;
 const LEASE = "5 minutes";
-const BATCH = 50;
+/** Small enough that a batch of slow sends (≤ 40 s each, mailer timeouts) ends well inside a lease. */
+const BATCH = 5;
 const backoffMinutes = (attempts: number) => Math.min(2 ** attempts, 60);
 
 type Claimed = {
@@ -32,6 +35,8 @@ type Claimed = {
   skipped_count: number | null;
   recurrence: unknown;
   tz: string | null;
+  /** False once the owner turned email off for the schedule (null: schedule deleted). */
+  notify_email: boolean | null;
 };
 
 const OUTCOME: Partial<Record<NotificationKind, ScheduledRunOutcome>> = {
@@ -62,6 +67,12 @@ function whenOf(row: Claimed): string | null {
 
 async function claim(db: KobeDb, teamId: string): Promise<Claimed[]> {
   return withTeam(db, teamId, async (tx) => {
+    // A row whose last attempt never settled (crash, DB error) is given up once its lease ends.
+    await tx.execute(sql`
+      UPDATE notification_emails SET status = 'failed', last_error = 'max_attempts', lease_until = NULL
+       WHERE team_id = ${teamId} AND status = 'pending'
+         AND attempts >= ${NOTIFICATION_EMAIL_MAX_ATTEMPTS}
+         AND (lease_until IS NULL OR lease_until <= now())`);
     const result = await tx.execute<Claimed>(sql`
       WITH claimed AS (
         UPDATE notification_emails SET attempts = attempts + 1,
@@ -70,11 +81,12 @@ async function claim(db: KobeDb, teamId: string): Promise<Claimed[]> {
                SELECT id FROM notification_emails
                 WHERE team_id = ${teamId} AND status = 'pending' AND next_attempt_at <= now()
                   AND (lease_until IS NULL OR lease_until <= now())
+                  AND attempts < ${NOTIFICATION_EMAIL_MAX_ATTEMPTS}
                 ORDER BY created_at LIMIT ${BATCH}
                 FOR UPDATE SKIP LOCKED)
         RETURNING id, attempts, notification_id)
       SELECT c.id, c.attempts, n.user_id, n.kind, n.thread_id, n.skipped_count,
-             s.recurrence, s.tz
+             s.recurrence, s.tz, s.notify_email
         FROM claimed c
         JOIN notifications n ON n.team_id = ${teamId} AND n.id = c.notification_id
         LEFT JOIN schedules s ON s.team_id = ${teamId} AND s.id = n.schedule_id`);
@@ -89,7 +101,7 @@ async function settle(
   outcome: "sent" | "skipped" | "retry",
   error?: string,
 ): Promise<void> {
-  const where = and(eq(notificationEmails.teamId, teamId), eq(notificationEmails.id, row.id));
+  const where = fenced(teamId, row);
   const values =
     outcome === "sent"
       ? { status: "sent" as const, sentAt: sql`now()`, lastError: null }
@@ -113,6 +125,34 @@ async function settle(
       .set({ ...values, leaseUntil: null })
       .where(where),
   );
+}
+
+/** Our claim on the row: still pending and not re-claimed since (attempts is the token). */
+const fenced = (teamId: string, row: Claimed) =>
+  and(
+    eq(notificationEmails.teamId, teamId),
+    eq(notificationEmails.id, row.id),
+    eq(notificationEmails.status, "pending"),
+    eq(notificationEmails.attempts, row.attempts),
+  );
+
+/** Extends our lease right before a send; false when another replica owns the row now. */
+async function renew(db: KobeDb, teamId: string, row: Claimed): Promise<boolean> {
+  const renewed = await withTeam(db, teamId, (tx) =>
+    tx
+      .update(notificationEmails)
+      .set({ leaseUntil: sql`now() + ${LEASE}::interval` })
+      .where(fenced(teamId, row))
+      .returning({ id: notificationEmails.id }),
+  );
+  return renewed.length > 0;
+}
+
+/** Mail errors can quote the recipient's address: log the codes only. */
+function mailError(err: unknown): { code?: unknown; responseCode?: unknown; name?: unknown } {
+  if (typeof err !== "object" || err === null) return {};
+  const e = err as { code?: unknown; responseCode?: unknown; name?: unknown };
+  return { code: e.code, responseCode: e.responseCode, name: e.name };
 }
 
 /** The recipient's address while they are active and still in the team; null otherwise. */
@@ -146,6 +186,11 @@ export async function deliverNotificationEmails(
         await settle(db, teamId, row, "skipped", to === null ? "recipient_inactive" : "no_run");
         continue;
       }
+      if (row.notify_email === false) {
+        await settle(db, teamId, row, "skipped", "notify_off");
+        continue;
+      }
+      if (!(await renew(db, teamId, row))) continue;
       try {
         await deps.mailer.send(
           scheduledRunMessage({
@@ -162,7 +207,7 @@ export async function deliverNotificationEmails(
         sent++;
       } catch (err) {
         logger.warn(
-          { err, team: teamId, emailId: row.id },
+          { error: mailError(err), team: teamId, emailId: row.id },
           "notification email failed; will retry",
         );
         await settle(db, teamId, row, "retry", "smtp_error");

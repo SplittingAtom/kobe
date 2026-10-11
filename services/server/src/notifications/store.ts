@@ -23,7 +23,15 @@ export interface Viewer {
 
 /** Opaque keyset cursor: the last row's `created_at` (microseconds, as text) and id. */
 const cursorSchema = z.strictObject({
-  t: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/),
+  t: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/)
+    // A real instant (no month 13 or 30 February): Postgres would refuse the cast with a 500.
+    .refine((t) => {
+      const ms = `${t.slice(0, 23)}Z`;
+      const d = new Date(ms);
+      return !Number.isNaN(d.getTime()) && d.toISOString() === ms;
+    }),
   i: z.uuid(),
 });
 type Cursor = z.infer<typeof cursorSchema>;

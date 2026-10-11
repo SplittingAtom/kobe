@@ -1,5 +1,6 @@
 import type { NotificationKind, RunStatus } from "@kobe/protocol";
 import { sql, type KobeTx } from "@kobe/db";
+import { logger } from "../logger.js";
 import { loadSkippedReport } from "../policy/skipped-actions.js";
 
 /**
@@ -38,9 +39,27 @@ export interface EndedRun {
  * user-triggered runs, for ends that do not notify, or when the thread's schedule is gone (the
  * contract needs its id). `skipped_count` is set whenever actions were skipped (KOBE-178), on any
  * kind. Ids and counts only; the email is rendered at delivery.
+ *
+ * Never fails the run's end: the work runs in a savepoint, and an error (e.g. a deadlock with a
+ * schedule delete, which locks the schedule and then the thread, the opposite order; or the
+ * schedule deleted meanwhile) rolls back only the notification, logged. A lost notification is
+ * better than a run that cannot end (KOBE-179 review).
  */
 export async function notifyScheduledRunEndInTx(tx: KobeTx, run: EndedRun): Promise<void> {
   if (run.trigger !== "schedule" || notificationKindOf(run.to, 0) === null) return;
+  try {
+    await tx.transaction((sp) => recordInTx(sp, run));
+  } catch (err) {
+    const code = (err as { code?: unknown; cause?: { code?: unknown } }).code;
+    const cause = (err as { cause?: { code?: unknown } }).cause?.code;
+    logger.error(
+      { team: run.teamId, run_id: run.runId, code: code ?? cause ?? null },
+      "scheduled run notification not recorded",
+    );
+  }
+}
+
+async function recordInTx(tx: KobeTx, run: EndedRun): Promise<void> {
   const skipped = (await loadSkippedReport(tx, run.teamId, run.runId)).count;
   const kind = notificationKindOf(run.to, skipped);
   if (kind === null) return;

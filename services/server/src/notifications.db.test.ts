@@ -181,6 +181,33 @@ describe("a notification per scheduled run end (ac-1)", () => {
     expect(await emailsOf(w.team)).toEqual([]);
   });
 
+  it("a failing notify step never stops the run from ending (savepoint)", async () => {
+    const w = await world({ notifyEmail: true });
+    const r = await running(w);
+    const fn = `fail_notify_${w.team.replaceAll("-", "")}`;
+    await fx.admin.query(`
+      CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.team_id = '${w.team}' THEN RAISE EXCEPTION 'notify broken' USING ERRCODE = '40P01'; END IF;
+        RETURN NEW;
+      END $$;
+      CREATE TRIGGER ${fn} BEFORE INSERT ON notifications FOR EACH ROW EXECUTE FUNCTION ${fn}();`);
+    try {
+      expect(await end(w, r.runId, { status: "completed" })).toMatchObject({ ended: true });
+    } finally {
+      await fx.admin.query(`DROP TRIGGER ${fn} ON notifications; DROP FUNCTION ${fn}();`);
+    }
+    const { rows } = await fx.admin.query(
+      `SELECT r.status, (SELECT count(*)::int FROM run_events e
+                          WHERE e.team_id = r.team_id AND e.run_id = r.id AND e.type = 'run.completed') AS n
+         FROM runs r WHERE r.id = $1`,
+      [r.runId],
+    );
+    expect(rows[0]).toEqual({ status: "completed", n: 1 });
+    expect(await notificationsOf(w.team)).toEqual([]);
+    expect(await emailsOf(w.team)).toEqual([]);
+  });
+
   it("is idempotent per run (an at-least-once caller inserts once)", async () => {
     const w = await world({ notifyEmail: true });
     const r = await running(w);
@@ -268,6 +295,63 @@ describe("email through the outbox (ac-2)", () => {
       [w.team],
     );
     expect(await deliver(w.team)).toBe(1);
+  });
+
+  it("a replica whose lease ran out can neither send again nor overwrite the row", async () => {
+    const w = await world({ notifyEmail: true });
+    const r = await running(w);
+    await end(w, r.runId, { status: "completed" });
+    const m = mailer();
+    const original = m.send.bind(m);
+    let entered!: () => void;
+    const inSend = new Promise<void>((resolve) => (entered = resolve));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    // Replica A stalls in its send (a slow relay), then fails.
+    m.send = async () => {
+      m.send = original;
+      entered();
+      await gate;
+      throw new Error("421 too late");
+    };
+    const a = deliver(w.team);
+    await inSend;
+    // A's lease runs out; replica B takes the row over and sends it.
+    await fx.admin.query(
+      `UPDATE notification_emails SET lease_until = now() - interval '1 second' WHERE team_id = $1`,
+      [w.team],
+    );
+    expect(await deliver(w.team)).toBe(1);
+    release();
+    expect(await a).toBe(0);
+    expect(await emailsOf(w.team)).toMatchObject([
+      { status: "sent", attempts: 2, last_error: null, lease_until: null },
+    ]);
+    expect(mailer().to(w.owner.email)).toHaveLength(1);
+  });
+
+  it("a row at the attempt limit is given up, not claimed again", async () => {
+    const w = await world({ notifyEmail: true });
+    const r = await running(w);
+    await end(w, r.runId, { status: "completed" });
+    await fx.admin.query(`UPDATE notification_emails SET attempts = $2 WHERE team_id = $1`, [
+      w.team,
+      NOTIFICATION_EMAIL_MAX_ATTEMPTS,
+    ]);
+    expect(await deliver(w.team)).toBe(0);
+    expect(await emailsOf(w.team)).toMatchObject([
+      { status: "failed", attempts: NOTIFICATION_EMAIL_MAX_ATTEMPTS, last_error: "max_attempts" },
+    ]);
+    expect(mailer().to(w.owner.email)).toEqual([]);
+  });
+
+  it("email turned off after the run ended is not sent", async () => {
+    const w = await world({ notifyEmail: true });
+    const r = await running(w);
+    await end(w, r.runId, { status: "completed" });
+    await fx.admin.query(`UPDATE schedules SET notify_email = false WHERE id = $1`, [w.scheduleId]);
+    expect(await deliver(w.team)).toBe(0);
+    expect(await emailsOf(w.team)).toMatchObject([{ status: "skipped", last_error: "notify_off" }]);
   });
 
   it("nothing is queued when notify_email is off", async () => {

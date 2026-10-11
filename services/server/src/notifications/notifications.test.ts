@@ -68,6 +68,9 @@ describe("notification cursors", () => {
     const c = { t: "2026-10-11T09:00:00.123456Z", i: "0b6f8f6e-6f1e-4c1a-9f1e-2b7a3c4d5e6f" };
     expect(decodeCursor(encodeCursor(c))).toEqual(c);
     expect(decodeCursor("nope")).toBeNull();
+    const fake = (t: string) => Buffer.from(JSON.stringify({ t, i: c.i })).toString("base64url");
+    expect(decodeCursor(fake("2026-13-45T09:00:00.123456Z"))).toBeNull();
+    expect(decodeCursor(fake("2026-02-30T09:00:00.123456Z"))).toBeNull();
     expect(decodeCursor(Buffer.from('{"t":"x","i":"y"}').toString("base64url"))).toBeNull();
   });
 });

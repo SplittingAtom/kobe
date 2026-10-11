@@ -22,6 +22,9 @@ assertion in `scheduler/runner.db.test.ts`), then:
   `onScheduledRunEnded` listener: atomic with the terminal status, works on any replica, survives a
   crash. Idempotent by `notifications_run_kind_uniq` (`ON CONFLICT DO NOTHING`); the outbox row is
   written only when the notification was inserted (and `notification_emails_once`).
+- Never fails the run's end (review MEDIUM-1): the insert runs in a savepoint; an error (deadlock with
+  a schedule delete, which locks schedule then thread, the opposite order; or the schedule deleted
+  meanwhile) rolls back only the notification and is logged with its SQLSTATE.
 - Only `trigger = schedule` runs, only at their end (never per `schedule.skip`). A user's reply in a
   Scheduled thread is a user run: no notification.
 - Kinds: completed -> `succeeded`, or `skipped_actions` when the run skipped any call; failed and
@@ -34,8 +37,13 @@ assertion in `scheduler/runner.db.test.ts`), then:
   gone (deleted mid-run): the contract's `schedule_id` is a non-null uuid. For the same reason the list
   hides rows whose schedule was deleted later (FK `SET NULL`).
 - Email: per-schedule `notify_email`. Delivery is per team under RLS: claim with `lease_until`
-  (5 min, `FOR UPDATE SKIP LOCKED`, attempts + 1), sent / retry with backoff `min(2^n, 60)` min /
-  `failed` after 8 attempts (logged), lease cleared on settle. Skipped (`recipient_inactive`) when the
+  (5 min, `FOR UPDATE SKIP LOCKED`, attempts + 1, batch 5, only rows with attempts < 8), sent / retry
+  with backoff `min(2^n, 60)` min / `failed` after 8 attempts (logged), lease cleared on settle.
+  Review MEDIUM-2: the claimed `attempts` is a fencing token; the lease is renewed right before each
+  send and every settle requires `status = pending AND attempts = <claimed>`, so a replica whose lease
+  ran out neither sends again nor overwrites the row. A pending row at 8 attempts whose lease ended
+  (crash mid-attempt) is marked `failed` (`max_attempts`). Turned off after the run: `notify_off`.
+  Mail errors are logged by code only (an SMTP message can quote the address). Skipped (`recipient_inactive`) when the
   owner is deactivated or no longer a team member at delivery. Kicked right after the end via the
   KOBE-174 hook (any process), swept every 60 s on server replicas.
 - Email content: outcome, team name, when the schedule runs ("daily at 09:00 (Europe/Berlin)") and
@@ -46,13 +54,13 @@ assertion in `scheduler/runner.db.test.ts`), then:
   `requireTeam` only (any member); every query in `withTeam()` and filtered by the caller's
   `user_id`. Someone else's id in mark-read is silently not counted (`updated: 0`).
 - `schedule.paused` notifications are not emitted here (ticket scope is run ends).
+- No daily email cap (coordinator, review L2): email is opt-in in the API (`notify_email` false by
+  default), schedules fire at most every 15 min, at most 10 active per user, only to the owner.
 
 ## Open questions (for Chris or the coordinator)
 
 - `schedule.paused` (team-admin pause / deactivation, in the KOBE-176 contract) has no producer yet.
   Deactivation should not notify the deactivated owner; a team-admin pause probably should. Follow-up?
-- `notify_email` defaults to true; a 15-minute schedule can send ~96 emails a day. No per-recipient
-  daily cap (budgets have one). Add one if wanted.
 - No OpenAPI entry (the document covers threads/runs/approvals only).
 
 ## Evidence (acceptance criteria → test or command output)
@@ -61,7 +69,9 @@ assertion in `scheduler/runner.db.test.ts`), then:
   interrupted, budget stop, skipped actions with count; user runs and cancelled runs none; idempotent);
   `scheduler/runner.db.test.ts` "a budget-blocked run fails visibly" (one `schedule.run.failed`).
 - ac-2: same file "email through the outbox" (sent once to the owner, SMTP failure then retry after
-  backoff, give-up at 8, lease respected, none when off, deactivated/removed owner skipped).
+  backoff, give-up at 8, lease respected, stale replica is a no-op, row at 8 attempts not claimed,
+  `notify_off`, none when off, deactivated/removed owner skipped). Run end survives a failing notify
+  step: "a failing notify step never stops the run from ending (savepoint)". Bad cursor dates 400.
 - ac-3: same file "names that try to break a header", `SECRET` prompt/output never in mail or list;
   "the owner's list and mark read" (teammate and other team see nothing, paging, mark read own only).
 - `pnpm --filter @kobe/server test:db`, `pnpm verify`, CI on the PR.
