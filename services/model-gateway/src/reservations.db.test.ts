@@ -67,7 +67,7 @@ afterAll(() => app.close());
 
 describe("DbReservations through BudgetGate (KOBE-120)", () => {
   it("a second gate sees the first's reservation; release and settle end it", async () => {
-    const { gate: a } = gateOn(60_000);
+    const { gate: a, idle: aIdle } = gateOn(60_000);
     const { gate: b } = gateOn(60_000);
     const user = randomUUID();
     // 500 tokens per call, 1000 limit: two calls fit, the third is refused, on either gate.
@@ -77,7 +77,8 @@ describe("DbReservations through BudgetGate (KOBE-120)", () => {
     expect(await a.admit(call(user))).toMatchObject({ ok: false, code: "budget_exhausted" });
     expect(await b.admit(call(user))).toMatchObject({ ok: false, code: "budget_exhausted" });
     first.release?.(false);
-    await new Promise((r) => setTimeout(r, 100));
+    // The release is fire-and-forget: wait for it rather than a fixed delay (KOBE-253).
+    await aIdle();
     expect((await b.admit(call(user))).ok).toBe(true);
   });
 
