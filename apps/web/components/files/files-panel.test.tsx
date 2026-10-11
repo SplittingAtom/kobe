@@ -116,8 +116,11 @@ describe("workspace file panel", () => {
     const before = seen.filter((s) => s.url.startsWith("/v1/workspace/files")).length;
     await act(async () => release());
     await waitFor(() => expect(screen.queryByText(/last synced/i)).toBeNull());
-    expect(seen.filter((s) => s.url.startsWith("/v1/workspace/files")).length).toBeGreaterThan(
-      before,
+    // The refresh is a timer after the wake: wait for its request rather than racing it.
+    await waitFor(() =>
+      expect(seen.filter((s) => s.url.startsWith("/v1/workspace/files")).length).toBeGreaterThan(
+        before,
+      ),
     );
   });
 

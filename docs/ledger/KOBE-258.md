@@ -83,4 +83,4 @@ Pi itself is not changed (third party, pinned): the agent works around its lazy 
   exists); `session-continuity.real-pi.test.ts`; `sandbox-wire-entries.db.test.ts` "adopts Pi's
   session when it lost the cursor and Postgres has no conversation yet" (the incident replayed:
   entries mirrored, run completed, next run without restore).
-- `pnpm --filter @kobe/server test:db`, `pnpm verify`: see PR.
+- `pnpm verify` green; `pnpm --filter @kobe/server test:db` 1233 tests, the one failure (a restore test whose fixture had role-less messages) fixed and rerun green.
