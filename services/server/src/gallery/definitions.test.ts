@@ -22,7 +22,7 @@ describe("the one gallery agent, Kobe (KOBE-254)", () => {
   const parsed = parseGalleryDefinitions(GALLERY_DEFINITIONS);
   const kobe = parsed[0]?.definition;
   if (!kobe) throw new Error("no gallery definition");
-  const floor = { scope: "install", site: [], team: [], approvalFloor: "auto" } as const;
+  const floor = { scope: "site", site: [], team: [], approvalFloor: "auto" } as const;
   const manifest = computeToolManifest(kobe.frontmatter, floor, new Date());
 
   it("ships exactly one gallery agent, Kobe, at generation 2", () => {

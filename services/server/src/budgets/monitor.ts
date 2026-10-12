@@ -199,7 +199,7 @@ export class BudgetMonitor {
         try {
           if (await this.alert(teamId, line, threshold)) {
             alerts++;
-            if (line.scope === "install" && threshold === 100) siteReached = true;
+            if (line.scope === "site" && threshold === 100) siteReached = true;
           }
         } catch (err) {
           // One alert (e.g. its budget changed meanwhile) never blocks the others.
@@ -224,22 +224,20 @@ export class BudgetMonitor {
     threshold: BudgetThreshold,
   ): Promise<boolean> {
     const { db } = this.options;
-    const alertTeam = line.scope === "install" ? null : teamId;
-    // budget_alerts stores the site's scope as "site" (KOBE-256).
-    const alertScope = line.scope === "install" ? "site" : line.scope;
+    const alertTeam = line.scope === "site" ? null : teamId;
     const alertUser = line.scope === "user" ? (line.userId ?? null) : null;
     const write = async (tx: KobeTx): Promise<boolean> => {
       const known = await tx.execute(sql`
         SELECT 1 FROM budget_alerts
          WHERE team_id IS NOT DISTINCT FROM ${alertTeam}::uuid
            AND user_id IS NOT DISTINCT FROM ${alertUser}::uuid
-           AND scope = ${alertScope} AND unit = ${line.unit} AND period = ${line.period}
+           AND scope = ${line.scope} AND unit = ${line.unit} AND period = ${line.period}
            AND period_start = ${line.periodStart}::date AND threshold = ${threshold}`);
       if (known.rows.length > 0) return false;
       const inserted = await tx.execute<{ id: string }>(sql`
         INSERT INTO budget_alerts (team_id, user_id, scope, unit, period, period_start,
                                    threshold, limit_amount, spent_amount)
-        VALUES (${alertTeam}, ${alertUser}, ${alertScope}, ${line.unit}, ${line.period},
+        VALUES (${alertTeam}, ${alertUser}, ${line.scope}, ${line.unit}, ${line.period},
                 ${line.periodStart}::date, ${threshold}, ${line.limit}, ${line.spent})
         ON CONFLICT ON CONSTRAINT budget_alerts_once DO NOTHING
         RETURNING id, spent_amount`);

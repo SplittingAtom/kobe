@@ -1,5 +1,5 @@
 import { Hono, type Context } from "hono";
-import { asc, eq, installRoles, users } from "@kobe/db";
+import { asc, eq, siteRoles, users } from "@kobe/db";
 import type { AuthVariables } from "../auth/session.js";
 import { requireSitePermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
@@ -28,13 +28,13 @@ export function siteUsersRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
         id: users.id,
         name: users.name,
         email: users.email,
-        siteRole: installRoles.role,
+        siteRole: siteRoles.role,
         twoFactorEnabled: users.twoFactorEnabled,
         deactivatedAt: users.deactivatedAt,
         createdAt: users.createdAt,
       })
       .from(users)
-      .leftJoin(installRoles, eq(installRoles.userId, users.id))
+      .leftJoin(siteRoles, eq(siteRoles.userId, users.id))
       .orderBy(asc(users.name), asc(users.email));
     return c.json({
       users: rows.map((u) => ({
@@ -55,9 +55,9 @@ export function siteUsersRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
       );
     }
     const [target] = await db
-      .select({ id: users.id, role: installRoles.role })
+      .select({ id: users.id, role: siteRoles.role })
       .from(users)
-      .leftJoin(installRoles, eq(installRoles.userId, users.id))
+      .leftJoin(siteRoles, eq(siteRoles.userId, users.id))
       .where(eq(users.id, userId));
     if (!target)
       return c.json({ code: "user_not_found", message: "No Kobe user with that id." }, 404);

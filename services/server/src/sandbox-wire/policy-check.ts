@@ -38,11 +38,11 @@ export function clampApprovalMode(mode: ApprovalMode, floor: ApprovalMode): Appr
   return strictestApprovalMode(mode, floor);
 }
 
-/** Server-side denials decided before the engine runs (protocol policy.ts: stage `install_deny`). */
+/** Server-side denials decided before the engine runs (protocol policy.ts: stage `site_deny`). */
 export type ServerDenyCode = "policy_error" | "run_not_active" | "not_a_member" | "unknown_tool";
 
 export function denyReason(code: ServerDenyCode, message: string): PolicyReason {
-  return { code, stage: "install_deny", message: message.slice(0, 1000) };
+  return { code, stage: "site_deny", message: message.slice(0, 1000) };
 }
 
 type Deny = Extract<PolicyResultFrame, { decision: "deny" }>;

@@ -8,10 +8,10 @@ import type { GatewayLimits, KeySpec, ProviderSpec } from "./bifrost-admin.js";
  *
  * - One Bifrost provider per Kobe provider, with one key whose name carries a fingerprint of the
  *   key material (so a changed key or Ollama URL is pushed; Bifrost redacts key values on read).
- * - Hierarchy (D30): customer = the install, Bifrost team = Kobe team, virtual key = a member in a
+ * - Hierarchy (D30): customer = the site, Bifrost team = Kobe team, virtual key = a member in a
  *   team, allowed exactly the team's enabled catalog models (deny-by-default otherwise).
  */
-export const SITE_CUSTOMER = "kobe-install";
+export const SITE_CUSTOMER = "kobe-site";
 export const gatewayTeamName = (teamId: string) => `kobe-team-${teamId}`;
 export const virtualKeyName = (teamId: string, userId: string) => `kobe-vk-${teamId}-${userId}`;
 

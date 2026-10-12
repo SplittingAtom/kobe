@@ -124,25 +124,25 @@ const CASES: readonly Case[] = [
     name: "site deny beats team allow, user allow and a read-only tool",
     tool: read,
     rules: [
-      rule("install", "deny", "read"),
+      rule("site", "deny", "read"),
       rule("team", "allow", "read"),
       rule("user", "allow", "read"),
     ],
     effect: "deny",
-    codes: ["install_deny_rule"],
+    codes: ["site_deny_rule"],
   },
   {
     name: "site deny reports before team deny when both match",
     tool: bash,
-    rules: [rule("team", "deny", "bash"), rule("install", "deny", "ba*")],
+    rules: [rule("team", "deny", "bash"), rule("site", "deny", "ba*")],
     effect: "deny",
-    codes: ["install_deny_rule", "team_deny_rule"],
+    codes: ["site_deny_rule", "team_deny_rule"],
   },
   {
     name: "site deny with arg pattern only denies matching input",
     tool: bash,
     input: { command: "ls -la" },
-    rules: [rule("install", "deny", "bash", { arg_pattern: { "/command": "rm *" } })],
+    rules: [rule("site", "deny", "bash", { arg_pattern: { "/command": "rm *" } })],
     effect: "allow",
     codes: ["risk_destructive"],
   },
@@ -150,25 +150,25 @@ const CASES: readonly Case[] = [
     name: "site deny with arg pattern denies matching input",
     tool: bash,
     input: { command: "rm -rf /" },
-    rules: [rule("install", "deny", "bash", { arg_pattern: { "/command": "rm *" } })],
+    rules: [rule("site", "deny", "bash", { arg_pattern: { "/command": "rm *" } })],
     effect: "deny",
-    codes: ["install_deny_rule"],
+    codes: ["site_deny_rule"],
   },
   {
     name: "deny rule with an unresolvable pointer still applies (fail closed)",
     tool: bash,
     input: { command: "ls" },
-    rules: [rule("install", "deny", "bash", { arg_pattern: { "/cmd": "rm*" } })],
+    rules: [rule("site", "deny", "bash", { arg_pattern: { "/cmd": "rm*" } })],
     effect: "deny",
-    codes: ["install_deny_rule"],
+    codes: ["site_deny_rule"],
   },
   {
     name: "deny path rule matches a relative path resolved against /workspace/..",
     tool: read,
     input: { path: "../etc/passwd" },
-    rules: [rule("install", "deny", "read", { arg_pattern: { "/path": "/etc/*" } })],
+    rules: [rule("site", "deny", "read", { arg_pattern: { "/path": "/etc/*" } })],
     effect: "deny",
-    codes: ["install_deny_rule"],
+    codes: ["site_deny_rule"],
   },
   {
     name: "deny path rule sees through //, . and ..",
@@ -190,16 +190,16 @@ const CASES: readonly Case[] = [
     name: "grep with no path matches path rules as the cwd",
     tool: builtin("grep"),
     input: { pattern: "x" },
-    rules: [rule("install", "ask", "grep", { arg_pattern: { "/path": "/workspace*" } })],
+    rules: [rule("site", "ask", "grep", { arg_pattern: { "/path": "/workspace*" } })],
     effect: "require_approval",
-    codes: ["install_ask_rule"],
+    codes: ["site_ask_rule"],
   },
   // 2. team deny wins over ask, risk, mode and allow.
   {
     name: "team deny beats site ask and user allow",
     tool: kobeWrite,
     rules: [
-      rule("install", "ask", "share_file"),
+      rule("site", "ask", "share_file"),
       rule("team", "deny", "share_*"),
       rule("user", "allow", "share_file"),
     ],
@@ -209,7 +209,7 @@ const CASES: readonly Case[] = [
   {
     name: "expired deny rules are ignored",
     tool: read,
-    rules: [rule("install", "deny", "read", { expires_at: "2026-10-02T11:59:59.000Z" })],
+    rules: [rule("site", "deny", "read", { expires_at: "2026-10-02T11:59:59.000Z" })],
     effect: "allow",
     codes: ["risk_read"],
   },
@@ -238,9 +238,9 @@ const CASES: readonly Case[] = [
   {
     name: "site ask on a read-only tool prompts",
     tool: read,
-    rules: [rule("install", "ask", "read")],
+    rules: [rule("site", "ask", "read")],
     effect: "require_approval",
-    codes: ["install_ask_rule"],
+    codes: ["site_ask_rule"],
   },
   {
     name: "ask rule with an unresolvable pointer still applies (fail closed)",
@@ -252,9 +252,9 @@ const CASES: readonly Case[] = [
   {
     name: "user allow cannot remove a site ask",
     tool: write,
-    rules: [rule("install", "ask", "write"), rule("user", "allow", "write")],
+    rules: [rule("site", "ask", "write"), rule("user", "allow", "write")],
     effect: "require_approval",
-    codes: ["install_ask_rule"],
+    codes: ["site_ask_rule"],
   },
   {
     name: "user allow cannot remove a team ask",
@@ -273,9 +273,9 @@ const CASES: readonly Case[] = [
   {
     name: "both ask rules are reported, site first",
     tool: bash,
-    rules: [rule("team", "ask", "bash"), rule("install", "ask", "bash")],
+    rules: [rule("team", "ask", "bash"), rule("site", "ask", "bash")],
     effect: "require_approval",
-    codes: ["install_ask_rule", "team_ask_rule"],
+    codes: ["site_ask_rule", "team_ask_rule"],
   },
   {
     name: "ask rule in auto mode denies instead of prompting",
@@ -289,9 +289,9 @@ const CASES: readonly Case[] = [
     name: "ask rule in a scheduled run denies instead of prompting",
     tool: read,
     options: { mode: "auto", kind: "schedule" },
-    rules: [rule("install", "ask", "read"), rule("user", "allow", "read")],
+    rules: [rule("site", "ask", "read"), rule("user", "allow", "read")],
     effect: "deny",
-    codes: ["scheduled_run_no_prompt", "install_ask_rule"],
+    codes: ["scheduled_run_no_prompt", "site_ask_rule"],
   },
   // 4. risk class (ask-on-write).
   {
@@ -799,8 +799,8 @@ describe("evaluatePolicy: D29 order, table-driven", () => {
   });
 
   it("keeps the protocol's evaluation-order stages on every reason", () => {
-    const decision = run({ tool: bash, rules: [rule("install", "deny", "bash")] });
-    expect(decision.reasons[0]?.stage).toBe("install_deny");
+    const decision = run({ tool: bash, rules: [rule("site", "deny", "bash")] });
+    expect(decision.reasons[0]?.stage).toBe("site_deny");
   });
 });
 
@@ -823,11 +823,11 @@ describe("evaluatePolicy: invariants over every combination", () => {
   ];
   const ruleSets: PolicyRule[][] = [
     [],
-    [rule("install", "ask", "*")],
+    [rule("site", "ask", "*")],
     [rule("team", "ask", "*")],
     allowEverything("user"),
     [...allowEverything("team"), rule("team", "ask", "mcp__*")],
-    [rule("install", "deny", "bash"), ...allowEverything("user")],
+    [rule("site", "deny", "bash"), ...allowEverything("user")],
   ];
   const combos = APPROVAL_MODES.flatMap((mode) =>
     (["user", "schedule"] as const).flatMap((kind) =>
@@ -856,11 +856,11 @@ describe("evaluatePolicy: invariants over every combination", () => {
       const decision = run({
         tool: c.tool,
         options: { mode: c.mode, kind: c.kind },
-        rules: [...c.rules, rule("install", "deny", "*")],
+        rules: [...c.rules, rule("site", "deny", "*")],
         settings: c.settings,
       });
       expect(decision.effect).toBe("deny");
-      expect(decision.reasons[0]?.code).toBe("install_deny_rule");
+      expect(decision.reasons[0]?.code).toBe("site_deny_rule");
     }
   });
 

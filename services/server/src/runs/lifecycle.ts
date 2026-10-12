@@ -89,7 +89,7 @@ export function cancelledEvent(thread: ThreadRow): NewRunEvent {
   };
 }
 
-export function budgetStoppedEvent(scope: "install" | "team" | "user"): NewRunEvent {
+export function budgetStoppedEvent(scope: "site" | "team" | "user"): NewRunEvent {
   const whose = scope === "user" ? "your" : scope === "team" ? "the team's" : "the site's";
   return {
     type: "run.budget_stopped",

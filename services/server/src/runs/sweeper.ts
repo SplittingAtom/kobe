@@ -1,4 +1,4 @@
-import { sql, teams, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
+import { readBudgetStopScope, sql, teams, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import type { Logger } from "pino";
 
 /** A `running` run with no lease and no `run.start` in flight (its starter died). */
@@ -17,7 +17,7 @@ export interface PendingStop {
   readonly threadId: string;
   readonly ownerUserId: string;
   readonly mode: "abort" | "after_step";
-  readonly budgetScope: "install" | "team" | "user" | null;
+  readonly budgetScope: "site" | "team" | "user" | null;
   /** Since the stop was requested. */
   readonly ageMs: number;
 }
@@ -63,7 +63,7 @@ async function pendingStops(tx: KobeTx, teamId: string, resendMs: number): Promi
     thread_id: string;
     owner_user_id: string;
     stop_mode: "abort" | "after_step";
-    budget_stop_scope: "install" | "team" | "user" | null;
+    budget_stop_scope: string | null;
     age_ms: string | number;
   }>(sql`
     SELECT r.id, r.thread_id, t.owner_user_id, r.stop_mode, r.budget_stop_scope,
@@ -80,7 +80,7 @@ async function pendingStops(tx: KobeTx, teamId: string, resendMs: number): Promi
     threadId: r.thread_id,
     ownerUserId: r.owner_user_id,
     mode: r.stop_mode,
-    budgetScope: r.budget_stop_scope,
+    budgetScope: readBudgetStopScope(r.budget_stop_scope),
     ageMs: Number(r.age_ms),
   }));
 }

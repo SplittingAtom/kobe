@@ -209,7 +209,7 @@ type Combined =
 
 const POLICY_ERROR: PolicyReason = {
   code: "policy_error",
-  stage: "install_deny",
+  stage: "site_deny",
   message: "Policy could not be evaluated, so the call was denied.",
 };
 

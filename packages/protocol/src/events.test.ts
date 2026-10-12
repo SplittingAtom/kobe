@@ -316,3 +316,19 @@ describe("in-memory event log fake", () => {
     expect(() => log.append("r", "sandbox.waking", { reason: "nope" } as never)).toThrow();
   });
 });
+
+describe("events recorded before the site rename (KOBE-256)", () => {
+  it("still parses the install scope and the install policy names in stored events", () => {
+    const stopped = EVENT_PAYLOAD_SCHEMAS["run.budget_stopped"];
+    expect(stopped.parse({ scope: "site", message: "Site budget reached" }).scope).toBe("site");
+    expect(stopped.parse({ scope: "install", message: "Site budget reached" }).scope).toBe(
+      "install",
+    );
+    const denied = EVENT_PAYLOAD_EXAMPLES["policy.denied"];
+    const old = {
+      ...denied,
+      reasons: [{ code: "install_deny_rule", stage: "install_deny", message: "No." }],
+    };
+    expect(EVENT_PAYLOAD_SCHEMAS["policy.denied"].safeParse(old).success).toBe(true);
+  });
+});

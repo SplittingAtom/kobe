@@ -52,13 +52,22 @@ export const RUN_APPROVAL_MODES = ["ask-on-write", "ask-all", "auto"] as const;
 export type RunApprovalMode = (typeof RUN_APPROVAL_MODES)[number];
 
 /** Who a budget stop applies to (D30; `@kobe/protocol` `BudgetStopCommand.scope`). */
-export const BUDGET_STOP_SCOPES = ["install", "team", "user"] as const;
+export const BUDGET_STOP_SCOPES = ["site", "team", "user"] as const;
 export type BudgetStopScope = (typeof BUDGET_STOP_SCOPES)[number];
 /**
  * What `runs.budget_stop_scope` may hold: the scopes, as "site" from KOBE-256 on, and "install" on
  * runs stopped before it (run rows are history and are not rewritten).
  */
 export const STORED_BUDGET_STOP_SCOPES = ["site", "install", "team", "user"] as const;
+
+/** A stored `runs.budget_stop_scope` as a scope: "install" (before KOBE-256) reads as "site". */
+export function readBudgetStopScope(stored: string | null): BudgetStopScope | null {
+  if (stored === null) return null;
+  if (stored === "install") return "site";
+  return (BUDGET_STOP_SCOPES as readonly string[]).includes(stored)
+    ? (stored as BudgetStopScope)
+    : null;
+}
 
 /** Longest message a run carries (`@kobe/protocol` `submitMessageBodySchema.content`). */
 export const RUN_INPUT_MAX_CHARS = 200_000;

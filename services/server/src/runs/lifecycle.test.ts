@@ -27,7 +27,7 @@ describe("orchestrator events", () => {
         }),
       ),
     ).toEqual({ reason: "cancelled", last_entry_id: "abc", retryable: false });
-    for (const scope of ["install", "team", "user"] as const) {
+    for (const scope of ["site", "team", "user"] as const) {
       expect(valid(budgetStoppedEvent(scope))).toMatchObject({ scope });
     }
   });

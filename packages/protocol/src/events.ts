@@ -270,7 +270,8 @@ export const EVENT_PAYLOAD_SCHEMAS = {
     skipped_actions: skippedActionsSchema.optional(),
   }),
   "run.budget_stopped": z.strictObject({
-    scope: z.enum(["install", "team", "user"]),
+    /** `install`: recorded before KOBE-256 renamed the scope; read it as `site`. Never sent now. */
+    scope: z.enum(["site", "team", "user", "install"]),
     message: z.string().max(1000),
   }),
 } as const satisfies Record<KobeEventType, z.ZodType>;

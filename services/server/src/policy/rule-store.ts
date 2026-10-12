@@ -3,8 +3,8 @@ import {
   and,
   asc,
   eq,
-  installSettings,
-  installToolRules,
+  siteSettings,
+  siteToolRules,
   sql,
   toolRules,
   withTeam,
@@ -26,7 +26,7 @@ import {
 /** A stored rule as the admin API shows it (snake_case, like the protocol's `ToolRule`). */
 export interface StoredRule {
   readonly id: string;
-  readonly scope: "install" | "team" | "user";
+  readonly scope: "site" | "team" | "user";
   readonly scope_ref: string | null;
   readonly effect: RuleEffect;
   readonly tool_glob: string;
@@ -44,7 +44,7 @@ export interface RuleFields {
   readonly expires_at: string | null;
 }
 
-type SiteRow = typeof installToolRules.$inferSelect;
+type SiteRow = typeof siteToolRules.$inferSelect;
 type TeamRow = typeof toolRules.$inferSelect;
 
 /**
@@ -77,7 +77,7 @@ function compact<T>(values: readonly (T | undefined)[]): T[] {
 }
 
 const notExpired = (
-  column: typeof installToolRules.expiresAt | typeof toolRules.expiresAt,
+  column: typeof siteToolRules.expiresAt | typeof toolRules.expiresAt,
   now: Date,
 ) => sql`(${column} IS NULL OR ${column} > ${now.toISOString()}::timestamptz)`;
 
@@ -92,7 +92,7 @@ export function createDbRuleSource(db: KobeDb): PolicyRuleSource {
   return {
     async load(teamId, userId, now) {
       const [site, scoped] = await Promise.all([
-        db.select().from(installToolRules).where(notExpired(installToolRules.expiresAt, now)),
+        db.select().from(siteToolRules).where(notExpired(siteToolRules.expiresAt, now)),
         withTeam(db, teamId, (tx) =>
           tx
             .select()
@@ -106,7 +106,7 @@ export function createDbRuleSource(db: KobeDb): PolicyRuleSource {
         ),
       ]);
       return {
-        site: compact(site.map((r) => toPolicyRule(r, "install"))),
+        site: compact(site.map((r) => toPolicyRule(r, "site"))),
         team: compact(scoped.filter((r) => r.scope === "team").map((r) => toPolicyRule(r, "team"))),
         user: compact(scoped.filter((r) => r.scope === "user").map((r) => toPolicyRule(r, "user"))),
       };
@@ -119,9 +119,9 @@ const booleanSetting = z.enum(["true", "false"]).transform((v) => v === "true");
 /** The site's policy switches; an unreadable stored value takes the stricter setting. */
 export async function readPromptSandboxWrites(db: KobeDb): Promise<PolicySettings> {
   const [row] = await db
-    .select({ value: installSettings.value })
-    .from(installSettings)
-    .where(eq(installSettings.key, PROMPT_SANDBOX_WRITES_KEY));
+    .select({ value: siteSettings.value })
+    .from(siteSettings)
+    .where(eq(siteSettings.key, PROMPT_SANDBOX_WRITES_KEY));
   if (!row) return DEFAULT_POLICY_SETTINGS;
   const parsed = booleanSetting.safeParse(row.value);
   return { promptSandboxWrites: parsed.success ? parsed.data : true };
@@ -150,10 +150,10 @@ export async function writePromptSandboxWrites(db: KobeDb, value: boolean): Prom
   const text = String(value);
   await db.transaction(async (tx) => {
     await tx
-      .insert(installSettings)
+      .insert(siteSettings)
       .values({ key: PROMPT_SANDBOX_WRITES_KEY, value: text })
       .onConflictDoUpdate({
-        target: installSettings.key,
+        target: siteSettings.key,
         set: { value: text, updatedAt: new Date() },
       });
     await recordAudit(tx, {
@@ -194,7 +194,7 @@ export function auditRule(
 function storedSite(row: SiteRow): StoredRule {
   return {
     id: row.id,
-    scope: "install",
+    scope: "site",
     scope_ref: null,
     effect: row.effect,
     tool_glob: row.toolGlob,
@@ -250,12 +250,12 @@ async function lockScope(tx: KobeTx, key: string): Promise<void> {
 }
 
 type ScopeRef =
-  | { readonly table: "install" }
+  | { readonly table: "site" }
   | { readonly table: "team"; readonly teamId: string }
   | { readonly table: "user"; readonly teamId: string; readonly userId: string };
 
 function scopeKey(ref: ScopeRef): string {
-  if (ref.table === "install") return "kobe.site_tool_rules";
+  if (ref.table === "site") return "kobe.site_tool_rules";
   if (ref.table === "team") return `kobe.tool_rules.team.${ref.teamId}`;
   return `kobe.tool_rules.user.${ref.teamId}.${ref.userId}`;
 }
@@ -269,12 +269,12 @@ async function scopeUsage(
   const exclude = excludeId ?? "00000000-0000-0000-0000-000000000000";
   const entries = sql`coalesce(sum((SELECT count(*) FROM jsonb_object_keys(r.arg_pattern))), 0)::int`;
   const where =
-    ref.table === "install"
+    ref.table === "site"
       ? sql`r.id <> ${exclude}::uuid`
       : ref.table === "team"
         ? sql`r.id <> ${exclude}::uuid AND r.scope = 'team'`
         : sql`r.id <> ${exclude}::uuid AND r.scope = 'user' AND r.user_id = ${ref.userId}::uuid`;
-  const from = ref.table === "install" ? sql`site_tool_rules r` : sql`tool_rules r`;
+  const from = ref.table === "site" ? sql`site_tool_rules r` : sql`tool_rules r`;
   const result = await tx.execute<{ rules: number; entries: number }>(
     sql`SELECT count(*)::int AS rules, ${entries} AS entries FROM ${from} WHERE ${where}`,
   );
@@ -302,8 +302,8 @@ const TOO_MANY = { ok: false, error: "too_many_rules" } as const;
 export async function listSiteRules(db: KobeDb): Promise<StoredRule[]> {
   const rows = await db
     .select()
-    .from(installToolRules)
-    .orderBy(asc(installToolRules.createdAt), asc(installToolRules.id));
+    .from(siteToolRules)
+    .orderBy(asc(siteToolRules.createdAt), asc(siteToolRules.id));
   return rows.map(storedSite);
 }
 
@@ -314,9 +314,9 @@ export async function createSiteRule(
   limits: ScopeLimits,
 ): Promise<CreateResult> {
   return db.transaction(async (tx) => {
-    if (!(await fitsScope(tx, { table: "install" }, body.arg_pattern, limits))) return TOO_MANY;
+    if (!(await fitsScope(tx, { table: "site" }, body.arg_pattern, limits))) return TOO_MANY;
     const [row] = await tx
-      .insert(installToolRules)
+      .insert(siteToolRules)
       .values({ effect: body.effect, createdBy, ...columns(body) })
       .returning();
     if (!row) throw new Error("site floor rule insert returned no row");
@@ -332,11 +332,11 @@ export async function updateSiteRule(
   limits: ScopeLimits,
 ): Promise<UpdateResult> {
   return db.transaction(async (tx) => {
-    if (!(await fitsScope(tx, { table: "install" }, body.arg_pattern, limits, id))) return TOO_MANY;
+    if (!(await fitsScope(tx, { table: "site" }, body.arg_pattern, limits, id))) return TOO_MANY;
     const [row] = await tx
-      .update(installToolRules)
+      .update(siteToolRules)
       .set({ effect: body.effect, ...columns(body) })
-      .where(eq(installToolRules.id, id))
+      .where(eq(siteToolRules.id, id))
       .returning();
     if (!row) return NOT_FOUND;
     await auditRule(tx, "policy.rule.updated", storedSite(row), null);
@@ -348,7 +348,7 @@ const NOT_FOUND = { ok: false, error: "not_found" } as const;
 
 export async function deleteSiteRule(db: KobeDb, id: string): Promise<boolean> {
   return db.transaction(async (tx) => {
-    const [row] = await tx.delete(installToolRules).where(eq(installToolRules.id, id)).returning();
+    const [row] = await tx.delete(siteToolRules).where(eq(siteToolRules.id, id)).returning();
     if (!row) return false;
     await auditRule(tx, "policy.rule.deleted", storedSite(row), null);
     return true;

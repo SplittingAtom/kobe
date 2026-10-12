@@ -1,5 +1,5 @@
 import { hostname } from "node:os";
-import { count, eq, installRoles, SYSTEM_ACTOR, type KobeDb } from "@kobe/db";
+import { count, eq, siteRoles, SYSTEM_ACTOR, type KobeDb } from "@kobe/db";
 import type { IsolationStatus } from "../isolation/gate.js";
 import { recordAuditAfter } from "./record.js";
 
@@ -23,8 +23,8 @@ export function isolationAuditor(
     if (from === status.state || (from === "checking" && status.state === "verified")) return;
     const [owners] = await db
       .select({ n: count() })
-      .from(installRoles)
-      .where(eq(installRoles.role, "owner"))
+      .from(siteRoles)
+      .where(eq(siteRoles.role, "owner"))
       .catch(() => [{ n: 1 }]);
     if ((owners?.n ?? 0) === 0) return;
     await recordAuditAfter(db, {

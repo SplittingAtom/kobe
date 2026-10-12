@@ -118,7 +118,7 @@ export const teamSkills = pgTable(
 );
 
 /** Site-wide (†): personal skills, owned by one user and usable in any of their teams (D9). */
-export const installSkills = pgTable(
+export const siteSkills = pgTable(
   "site_skills",
   {
     id: uuid().primaryKey().defaultRandom(),
@@ -156,7 +156,7 @@ export const teamSkillVersions = pgTable(
 );
 
 /** Site-wide (†): immutable versions of personal skills (app role: SELECT and INSERT only). */
-export const installSkillVersions = pgTable(
+export const siteSkillVersions = pgTable(
   "site_skill_versions",
   {
     skillId: uuid().notNull(),
@@ -167,7 +167,7 @@ export const installSkillVersions = pgTable(
     foreignKey({
       name: "site_skill_versions_skill_fk",
       columns: [t.skillId],
-      foreignColumns: [installSkills.id],
+      foreignColumns: [siteSkills.id],
     }),
     ...versionChecks("site_skill_versions", t),
   ],

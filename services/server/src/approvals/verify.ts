@@ -174,7 +174,7 @@ export async function enforceMcpCall(
     decision = {
       effect: "deny",
       risk: input.tool.risk,
-      reasons: [{ code: "policy_error", stage: "install_deny", message: "Policy failed." }],
+      reasons: [{ code: "policy_error", stage: "site_deny", message: "Policy failed." }],
     };
   }
   if (decision.effect === "allow") return { decision: "allow", reasons: decision.reasons };

@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { and, asc, eq, installRoles, ne, users } from "@kobe/db";
+import { and, asc, eq, siteRoles, ne, users } from "@kobe/db";
 import type { AuthVariables } from "../auth/session.js";
 import { recordAudit } from "../audit/record.js";
 import { requireSitePermission } from "../authz/middleware.js";
@@ -20,14 +20,14 @@ export function siteRolesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
   app.get("/", requireSitePermission("site.users.manage"), async (c) => {
     const rows = await db
       .select({
-        userId: installRoles.userId,
+        userId: siteRoles.userId,
         name: users.name,
         email: users.email,
-        role: installRoles.role,
+        role: siteRoles.role,
       })
-      .from(installRoles)
-      .innerJoin(users, eq(users.id, installRoles.userId))
-      .orderBy(asc(installRoles.role), asc(users.name));
+      .from(siteRoles)
+      .innerJoin(users, eq(users.id, siteRoles.userId))
+      .orderBy(asc(siteRoles.role), asc(users.name));
     return c.json({ roles: rows });
   });
 
@@ -38,23 +38,23 @@ export function siteRolesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
     if (!(await findUserId(db, { id: userId.data }))) return c.json(userNotFound, 404);
     const result = await db.transaction(async (tx) => {
       const [current] = await tx
-        .select({ role: installRoles.role })
-        .from(installRoles)
-        .where(eq(installRoles.userId, userId.data))
+        .select({ role: siteRoles.role })
+        .from(siteRoles)
+        .where(eq(siteRoles.userId, userId.data))
         .for("update");
       if (current?.role === "owner") return "owner" as const;
       const changed =
         body.role === "admin"
           ? await tx
-              .insert(installRoles)
+              .insert(siteRoles)
               .values({ userId: userId.data, role: "admin" })
               .onConflictDoNothing()
-              .returning({ userId: installRoles.userId })
+              .returning({ userId: siteRoles.userId })
           : // Never the Owner row: a concurrent transfer may have made this user Owner meanwhile.
             await tx
-              .delete(installRoles)
-              .where(and(eq(installRoles.userId, userId.data), ne(installRoles.role, "owner")))
-              .returning({ userId: installRoles.userId });
+              .delete(siteRoles)
+              .where(and(eq(siteRoles.userId, userId.data), ne(siteRoles.role, "owner")))
+              .returning({ userId: siteRoles.userId });
       if (changed.length > 0) {
         await recordAudit(tx, {
           action:
@@ -83,15 +83,15 @@ export function siteRolesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
     const transferred = await db.transaction(async (tx) => {
       // Conditional on still being Owner: a concurrent transfer by the same Owner finds no row.
       const demoted = await tx
-        .update(installRoles)
+        .update(siteRoles)
         .set({ role: "admin" })
-        .where(and(eq(installRoles.userId, me), eq(installRoles.role, "owner")))
-        .returning({ userId: installRoles.userId });
+        .where(and(eq(siteRoles.userId, me), eq(siteRoles.role, "owner")))
+        .returning({ userId: siteRoles.userId });
       if (demoted.length === 0) return false;
       await tx
-        .insert(installRoles)
+        .insert(siteRoles)
         .values({ userId: body.userId, role: "owner" })
-        .onConflictDoUpdate({ target: installRoles.userId, set: { role: "owner" } });
+        .onConflictDoUpdate({ target: siteRoles.userId, set: { role: "owner" } });
       await recordAudit(tx, {
         action: "identity.ownership.transferred",
         target: { fromUserId: me, toUserId: body.userId },

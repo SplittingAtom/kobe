@@ -15,7 +15,7 @@ import {
   unique,
   uuid,
 } from "drizzle-orm/pg-core";
-import { agentScope, installAgentVersions, teamAgentVersions } from "./agents.js";
+import { agentScope, siteAgentVersions, teamAgentVersions } from "./agents.js";
 import { MODEL_ALIAS_PATTERN } from "./models.js";
 import { users } from "./auth.js";
 import { projects } from "./projects.js";
@@ -135,7 +135,7 @@ export const threads = pgTable(
     foreignKey({
       name: "threads_site_agent_version_fk",
       columns: [t.siteAgentId, t.agentVersion],
-      foreignColumns: [installAgentVersions.agentId, installAgentVersions.version],
+      foreignColumns: [siteAgentVersions.agentId, siteAgentVersions.version],
     }),
     foreignKey({
       name: "threads_project_fk",

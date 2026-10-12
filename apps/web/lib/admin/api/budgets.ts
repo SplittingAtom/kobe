@@ -66,7 +66,7 @@ export interface TeamBudgets {
 export type BudgetState = "ok" | "warning" | "exhausted";
 
 export interface BudgetStatusLine {
-  readonly scope: "install" | "team" | "user";
+  readonly scope: "site" | "team" | "user";
   readonly period: "month" | "day";
   readonly unit: "usd" | "tokens";
   /** Null for the site budget. */

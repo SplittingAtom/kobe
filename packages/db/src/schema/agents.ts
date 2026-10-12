@@ -38,8 +38,8 @@ export type AgentScope = (typeof agentScope.enumValues)[number];
 export const agentStatus = pgEnum("agent_status", ["active", "suspended"]);
 export type AgentStatus = (typeof agentStatus.enumValues)[number];
 
-export const installAgentScope = pgEnum("site_agent_scope", ["personal", "gallery"]);
-export type InstallAgentScope = (typeof installAgentScope.enumValues)[number];
+export const siteAgentScope = pgEnum("site_agent_scope", ["personal", "gallery"]);
+export type SiteAgentScope = (typeof siteAgentScope.enumValues)[number];
 
 /** Mirrors `agentSlugSchema` in @kobe/agent-file. */
 const SLUG_FORMAT = "^[a-z0-9]([a-z0-9-]{0,46}[a-z0-9])?$";
@@ -124,11 +124,11 @@ export const teamAgents = pgTable(
  * gallery agents (no owner; site admins curate, everyone reads, teams fork). No RLS: the
  * server confines personal agents to their owner. No team data and no team foreign keys.
  */
-export const installAgents = pgTable(
+export const siteAgents = pgTable(
   "site_agents",
   {
     id: uuid().primaryKey().defaultRandom(),
-    scope: installAgentScope().notNull(),
+    scope: siteAgentScope().notNull(),
     ownerUserId: uuid().references(() => users.id),
     /**
      * Gallery agents seeded from the repo (KOBE-87): the definition's key and its generation (a
@@ -148,7 +148,7 @@ export const installAgents = pgTable(
     foreignKey({
       name: "site_agents_current_version_fk",
       columns: [t.id, t.currentVersion],
-      foreignColumns: [installAgentVersions.agentId, installAgentVersions.version],
+      foreignColumns: [siteAgentVersions.agentId, siteAgentVersions.version],
     }),
     uniqueIndex("site_agents_personal_slug_unique")
       .on(t.ownerUserId, t.slug)
@@ -271,7 +271,7 @@ export const teamAgentVersions = pgTable(
  * SELECT and INSERT (tenancy grants); a trigger refuses changes from anyone else too. The server
  * confines personal versions to their agent's owner, as for `site_agents`.
  */
-export const installAgentVersions = pgTable(
+export const siteAgentVersions = pgTable(
   "site_agent_versions",
   {
     agentId: uuid().notNull(),
@@ -284,7 +284,7 @@ export const installAgentVersions = pgTable(
     foreignKey({
       name: "site_agent_versions_agent_fk",
       columns: [t.agentId],
-      foreignColumns: [installAgents.id],
+      foreignColumns: [siteAgents.id],
     }),
     ...versionChecks("site_agent_versions", t),
   ],

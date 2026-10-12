@@ -3,8 +3,8 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createDb, type KobeDatabase } from "./client.js";
 import {
-  installAgents,
-  installAgentVersions,
+  siteAgents,
+  siteAgentVersions,
   teamAgents,
   teamAgentVersions,
   teams,
@@ -88,20 +88,17 @@ async function publishedTeamAgent(teamId: string, count = 1): Promise<string> {
 
 async function publishedPersonalAgent(): Promise<string> {
   const [agent] = await app.db
-    .insert(installAgents)
+    .insert(siteAgents)
     .values({
       scope: "personal",
       ownerUserId: alice,
       slug: `p-${randomUUID().slice(0, 8)}`,
       frontmatter: { name: "P" },
     })
-    .returning({ id: installAgents.id });
+    .returning({ id: siteAgents.id });
   const agentId = agent?.id ?? "";
-  await app.db.insert(installAgentVersions).values({ agentId, ...version(1) });
-  await app.db
-    .update(installAgents)
-    .set({ currentVersion: 1 })
-    .where(eq(installAgents.id, agentId));
+  await app.db.insert(siteAgentVersions).values({ agentId, ...version(1) });
+  await app.db.update(siteAgents).set({ currentVersion: 1 }).where(eq(siteAgents.id, agentId));
   return agentId;
 }
 
@@ -149,15 +146,15 @@ describe("agent versions are immutable (D19)", () => {
 
   it("gives the app role no UPDATE or DELETE on site versions, and the trigger stops the owner", async () => {
     const agentId = await publishedPersonalAgent();
-    const where = eq(installAgentVersions.agentId, agentId);
+    const where = eq(siteAgentVersions.agentId, agentId);
+    expect(await sqlState(app.db.update(siteAgentVersions).set({ prompt: "x" }).where(where))).toBe(
+      "42501",
+    );
+    expect(await sqlState(app.db.delete(siteAgentVersions).where(where))).toBe("42501");
     expect(
-      await sqlState(app.db.update(installAgentVersions).set({ prompt: "x" }).where(where)),
-    ).toBe("42501");
-    expect(await sqlState(app.db.delete(installAgentVersions).where(where))).toBe("42501");
-    expect(
-      await sqlState(owner.db.update(installAgentVersions).set({ prompt: "x" }).where(where)),
+      await sqlState(owner.db.update(siteAgentVersions).set({ prompt: "x" }).where(where)),
     ).toBe("55000");
-    expect(await sqlState(owner.db.delete(installAgentVersions).where(where))).toBe("55000");
+    expect(await sqlState(owner.db.delete(siteAgentVersions).where(where))).toBe("55000");
   });
 
   it("refuses a duplicate version number (concurrent publishes can't both win)", async () => {
@@ -175,7 +172,7 @@ describe("agent versions are immutable (D19)", () => {
     );
     expect(await sqlState(del)).toBe("23503");
     const personal = await publishedPersonalAgent();
-    expect(await sqlState(app.db.delete(installAgents).where(eq(installAgents.id, personal)))).toBe(
+    expect(await sqlState(app.db.delete(siteAgents).where(eq(siteAgents.id, personal)))).toBe(
       "23503",
     );
   });
@@ -189,10 +186,7 @@ describe("agent versions are immutable (D19)", () => {
     const personal = await publishedPersonalAgent();
     expect(
       await sqlState(
-        app.db
-          .update(installAgents)
-          .set({ currentVersion: 5 })
-          .where(eq(installAgents.id, personal)),
+        app.db.update(siteAgents).set({ currentVersion: 5 }).where(eq(siteAgents.id, personal)),
       ),
     ).toBe("23503");
   });
@@ -281,15 +275,15 @@ describe("threads pin a published version", () => {
 
   it("lets anyone pin a gallery agent", async () => {
     const [agent] = await app.db
-      .insert(installAgents)
+      .insert(siteAgents)
       .values({
         scope: "gallery",
         slug: `g-${randomUUID().slice(0, 8)}`,
         frontmatter: { name: "G" },
       })
-      .returning({ id: installAgents.id });
+      .returning({ id: siteAgents.id });
     const agentId = agent?.id ?? "";
-    await app.db.insert(installAgentVersions).values({ agentId, ...version(1) });
+    await app.db.insert(siteAgentVersions).values({ agentId, ...version(1) });
     await expect(
       pinThread(teamA, { agentScope: "gallery", agentId, v: 1, owner: bob }),
     ).resolves.toHaveLength(1);

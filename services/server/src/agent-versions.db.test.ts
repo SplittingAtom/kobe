@@ -157,7 +157,7 @@ describe("publish (D19, D8)", () => {
   it("lets any member publish their own personal agent, against the site floor", async () => {
     const id = await create("carol", "personal", "Mine");
     const res = await published("carol", id);
-    expect(toolManifestSchema.parse(res.version.toolManifest).floor).toBe("install");
+    expect(toolManifestSchema.parse(res.version.toolManifest).floor).toBe("site");
     expect((await audited("agent.published", id))[0]?.team_id).toBeNull();
     expect((await publish("dave", id)).status).toBe(404);
   });
@@ -519,7 +519,7 @@ describe("frozen manifest against the floor (D6, D19, D29)", () => {
       expect(names).not.toContain("powershell");
       expect(v1.excluded).toContainEqual({
         name: "bash",
-        reason: "install_deny_rule",
+        reason: "site_deny_rule",
         rule_id: site.json.rule.id,
       });
       expect(v1.excluded).toContainEqual({

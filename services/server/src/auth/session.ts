@@ -1,5 +1,5 @@
 import { createMiddleware } from "hono/factory";
-import { eq, installRoles, installSettings, users } from "@kobe/db";
+import { eq, siteRoles, siteSettings, users } from "@kobe/db";
 import type { SiteRole } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
 
@@ -23,9 +23,9 @@ export const REQUIRE_TWO_FACTOR = "require_2fa";
 
 export async function readRequireTwoFactor(deps: ServerDeps): Promise<boolean> {
   const [row] = await deps.database.db
-    .select({ value: installSettings.value })
-    .from(installSettings)
-    .where(eq(installSettings.key, REQUIRE_TWO_FACTOR));
+    .select({ value: siteSettings.value })
+    .from(siteSettings)
+    .where(eq(siteSettings.key, REQUIRE_TWO_FACTOR));
   return row?.value === "true";
 }
 
@@ -40,9 +40,9 @@ export function requireSession(deps: ServerDeps) {
     if (!session) return c.json({ code: "unauthenticated", message: "Sign in to continue." }, 401);
     // Re-read per request: a deactivation or role change applies to the very next request.
     const [account] = await deps.database.db
-      .select({ deactivatedAt: users.deactivatedAt, role: installRoles.role })
+      .select({ deactivatedAt: users.deactivatedAt, role: siteRoles.role })
       .from(users)
-      .leftJoin(installRoles, eq(installRoles.userId, users.id))
+      .leftJoin(siteRoles, eq(siteRoles.userId, users.id))
       .where(eq(users.id, session.user.id));
     if (!account || account.deactivatedAt !== null) {
       // Sessions are deleted on deactivation; this catches anything that slipped through.

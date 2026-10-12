@@ -62,11 +62,11 @@ describe("db:rebase plan for hand-written migrations (KOBE-256)", () => {
 
   it("keeps a snapshot only when the base did not change the schema since the fork", () => {
     const hand = [{ name: "site_rename", handWritten: true, custom: false, sql: "" }];
-    const fork = snap("f", "e", { install_settings: {} });
+    const fork = snap("f", "e", { old_settings: {} });
     expect(handWrittenBaseProblem(hand, fork, { ...fork, id: "g", prevId: "f" })).toBeNull();
-    expect(
-      handWrittenBaseProblem(hand, fork, snap("g", "f", { install_settings: {}, x: {} })),
-    ).toMatch(/renumber it by hand/);
+    expect(handWrittenBaseProblem(hand, fork, snap("g", "f", { old_settings: {}, x: {} }))).toMatch(
+      /renumber it by hand/,
+    );
     expect(handWrittenBaseProblem([], fork, snap("g", "f", { x: {} }))).toBeNull();
   });
 

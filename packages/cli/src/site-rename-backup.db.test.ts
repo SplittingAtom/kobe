@@ -18,6 +18,7 @@ import { BLOB_REFS, freshTarget, memoryLister, rowsOf, sql, U1 } from "./testing
  * old tables and records the old migrations: a site on the renamed schema refuses it before loading
  * anything. It restores on the release it was taken with (that release's `kobe restore`); the
  * upgrade then renames in place (packages/db site-rename-migration.db.test.ts). docs/backup-restore.md
+ * It names the old tables on purpose (site-identifiers: allow-file).
  */
 const pgBinDir = process.env.KOBE_PG_BIN_DIR || undefined;
 const KEY = randomBytes(32);

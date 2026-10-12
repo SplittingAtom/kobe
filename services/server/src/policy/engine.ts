@@ -56,7 +56,7 @@ function deny(risk: RiskClass, reason: PolicyReason): PolicyDecision {
 const INTERNAL_ERROR: PolicyReason = {
   // Before the pipeline (or instead of it): reported at the first stage (protocol policy.ts).
   code: "policy_error",
-  stage: "install_deny",
+  stage: "site_deny",
   message: "Policy could not be evaluated, so the call was denied. Try again.",
 };
 
@@ -83,7 +83,7 @@ export function createPolicyEngine(deps: PolicyEngineDeps): PolicyEngine {
       // Unknown tools count as destructive (D29: unannotated = destructive + open-world).
       return deny("destructive", {
         code: "unknown_tool",
-        stage: "install_deny",
+        stage: "site_deny",
         message: `${input.tool.name.slice(0, 256)} is not a known tool.`,
       });
     }
@@ -108,7 +108,7 @@ export function createPolicyEngine(deps: PolicyEngineDeps): PolicyEngine {
       if (!parsed.success) {
         return deny(riskOf(raw), {
           code: "invalid_input",
-          stage: "install_deny",
+          stage: "site_deny",
           message: "The tool call could not be checked (invalid input), so it was denied.",
         });
       }

@@ -314,7 +314,7 @@ function RunUsageLine({
   );
 }
 
-const SCOPE_WORDS = { install: "The site's", team: "Your team's", user: "Your" } as const;
+const SCOPE_WORDS = { site: "The site's", team: "Your team's", user: "Your" } as const;
 
 /** The budget banner's sentence for the most used budget (KOBE-42, D30 "warn the user"). */
 export function budgetBannerText(status: BudgetStatus): string | null {

@@ -1,7 +1,7 @@
 # KOBE-256: Rename R3: Site replaces Install in the database (tables, enums, columns, constraints)
 
-- **Status:** in progress (PR a: migration)
-- **Branch / worktree:** `kobe-256-site-rename-db` in `../Kobe-wt256`
+- **Status:** in review: PR #248 (a: migration), PR #249 (b: code, stacked on #248)
+- **Branch / worktree:** `kobe-256-site-rename-db` (a), `kobe-256-site-rename-code` (b) in `../Kobe-wt256`
 - **Depends on:** R1 KOBE-257, R2 KOBE-255 (both merged).
 
 ## Plan
@@ -56,6 +56,29 @@ adds at the database boundary.
 - **Review fixes (#248):** rollback note (H1: `helm rollback` cannot undo 0091; back up first),
   scheduler pods and CLI version (L2), `kobe_reserve_budget` takes an `install` line from an old
   gateway as the site's (L1, `budget-reservations.db.test.ts`).
+- **(b) code:** drizzle objects `siteAgents`, `siteRoles`, `siteRole` (enum), … ; budget scope
+  `site` end to end (lines, gateway, alerts, run stops, `run.budget_stopped`, API, web), the (a)
+  boundary mappings dropped; `readBudgetStopScope` reads a stored run `install` as `site`.
+  Policy: stage `site_deny`, codes `site_deny_rule`/`site_ask_rule`, rule scope `site`, manifest
+  floor `site`. `@kobe/protocol` still _accepts_ `install_deny`, `install_deny_rule`,
+  `install_ask_rule` and `run.budget_stopped` scope `install` (stored approvals, run events,
+  notifications; `HISTORICAL_POLICY_NAMES`), never produces them. Frozen manifests are read with
+  `withSiteNames` (same content key, so no new versions or eval refusals after the upgrade).
+  Audit event schemas validate writes only: new events say `site`, old rows keep `install`.
+- **Bifrost:** customer `kobe-install` → `kobe-site` through the sync: the reconcile adds
+  `kobe-site`, moves every team to it, then deletes `kobe-install` (teams and virtual keys keep
+  their ids and values; Kobe holds the dollar budgets, the customer carries none). Tested in
+  `models/reconcile.test.ts` against the fake Bifrost.
+- **Kept "install":** web search `recordId: "install"` (bound into the sealed key; renaming needs a
+  re-seal), historical audit action names/categories, historical SQL migrations, stored history
+  above, the `/admin/install` redirect (R1), and the verb.
+- **Guard:** `scripts/site-identifiers.mjs` no longer allows the drizzle install identifiers and
+  flags snake_case `install_(settings|roles|role|model_*|budget_*|tool_rules|agent*|skill*)` in
+  code (the rename tests carry `site-identifiers: allow-file`).
+- **Review fixes (#249):** the reconcile deletes a stale customer only once the desired one exists
+  and a fresh team listing shows no team on it (M2; fake-Bifrost tests: `addCustomer` fails, one
+  `updateTeam` fails: `kobe-install` survives, the next pass removes it); upgrade note lines on
+  SIEM scope values and the Bifrost customer (L5).
 
 ## Open questions (for Chris or the coordinator)
 
@@ -73,3 +96,5 @@ adds at the database boundary.
   `packages/cli/src/site-rename-backup.db.test.ts` (pre-rename backup refused); both pass locally
   with libpq 18 (`KOBE_PG_BIN_DIR`).
 - **ac-4:** CI on both PRs.
+- **(b):** `agents/manifest.test.ts` (pre-rename manifest), `models/reconcile.test.ts` (Bifrost
+  customer), `schema/runs.test.ts`, protocol `policy.test.ts`/`events.test.ts` (historical names).

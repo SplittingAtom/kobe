@@ -10,7 +10,7 @@ import {
   type RunTrigger,
   type ThreadStatus,
 } from "@kobe/protocol";
-import { sql, type AgentScope, type KobeTx } from "@kobe/db";
+import { readBudgetStopScope, sql, type AgentScope, type KobeTx } from "@kobe/db";
 import {
   auditExpiredApprovals,
   expireRunApprovalsInTx,
@@ -42,7 +42,7 @@ export interface RunRow {
   readonly approvalMode: ApprovalMode;
   readonly input: string;
   readonly parentEntryId: string | null;
-  readonly budgetStopScope: "install" | "team" | "user" | null;
+  readonly budgetStopScope: "site" | "team" | "user" | null;
   readonly startedAt: Date | null;
   readonly endedAt: Date | null;
   /** 1-based position among the thread's queued runs (retries first); null unless queued. */
@@ -61,7 +61,8 @@ type RawRun = {
   approval_mode: ApprovalMode;
   input: string;
   parent_entry_id: string | null;
-  budget_stop_scope: "install" | "team" | "user" | null;
+  /** "install" on runs stopped before KOBE-256 (read as "site"). */
+  budget_stop_scope: string | null;
   started_at: Date | string | null;
   ended_at: Date | string | null;
   queue_rank: string | number | null;
@@ -83,7 +84,7 @@ function fromRaw(r: RawRun): RunRow {
     approvalMode: r.approval_mode,
     input: r.input,
     parentEntryId: r.parent_entry_id,
-    budgetStopScope: r.budget_stop_scope,
+    budgetStopScope: readBudgetStopScope(r.budget_stop_scope),
     startedAt: asDate(r.started_at),
     endedAt: asDate(r.ended_at),
     queueRank: r.queue_rank === null ? null : Number(r.queue_rank),

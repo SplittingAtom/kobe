@@ -481,16 +481,16 @@ describe("policy and thread events", () => {
     expect(
       rows.map((r) => [r.action, r.team_id, r.target.scope ?? null, r.target.effect ?? null]),
     ).toEqual([
-      ["policy.rule.created", null, "install", "deny"],
-      ["policy.rule.updated", null, "install", "ask"],
-      ["policy.rule.deleted", null, "install", "ask"],
+      ["policy.rule.created", null, "site", "deny"],
+      ["policy.rule.updated", null, "site", "ask"],
+      ["policy.rule.deleted", null, "site", "ask"],
       ["policy.settings.updated", null, null, null],
       ["policy.rule.created", finance, "team", "deny"],
       ["policy.rule.deleted", finance, "team", "deny"],
     ]);
     expect(rows[0]?.target).toEqual({
       ruleId: siteRule,
-      scope: "install",
+      scope: "site",
       effect: "deny",
       toolGlob: "bash",
       argPatternEntries: 1,

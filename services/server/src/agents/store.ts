@@ -3,7 +3,7 @@ import { AGENT_SLUG_MAX } from "@kobe/agent-file";
 import {
   and,
   eq,
-  installAgents,
+  siteAgents,
   isNull,
   sql,
   teamAgents,
@@ -60,7 +60,7 @@ export type CreateError = "slug_taken" | "limit_reached";
 export type UpdateError = "not_found" | "revision_mismatch" | "archived";
 export type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
 
-const columnsOf = (t: typeof teamAgents | typeof installAgents) => ({
+const columnsOf = (t: typeof teamAgents | typeof siteAgents) => ({
   id: t.id,
   ownerUserId: t.ownerUserId,
   slug: t.slug,
@@ -76,7 +76,7 @@ const columnsOf = (t: typeof teamAgents | typeof installAgents) => ({
   updatedAt: t.updatedAt,
 });
 export const TEAM = columnsOf(teamAgents);
-export const SITE = columnsOf(installAgents);
+export const SITE = columnsOf(siteAgents);
 
 export type Row = Omit<AgentRecord, "scope" | "frontmatter"> & {
   frontmatter: Record<string, unknown>;
@@ -96,14 +96,11 @@ const OWNER_ID = z.uuid();
  * every site_agents query goes through here and a personal location must name a valid owner.
  */
 export function siteWhere(location: Exclude<AgentLocation, { scope: "team" }>) {
-  if (location.scope === "gallery") return eq(installAgents.scope, "gallery");
+  if (location.scope === "gallery") return eq(siteAgents.scope, "gallery");
   if (!OWNER_ID.safeParse(location.ownerUserId).success) {
     throw new Error("store: personal agents need an owner (a user id)");
   }
-  return and(
-    eq(installAgents.scope, "personal"),
-    eq(installAgents.ownerUserId, location.ownerUserId),
-  );
+  return and(eq(siteAgents.scope, "personal"), eq(siteAgents.ownerUserId, location.ownerUserId));
 }
 
 /** How a definition arrived (audit): a JSON body, an imported agent file, or a fork. */
@@ -124,7 +121,7 @@ export async function listAgents(db: KobeDb, location: AgentLocation): Promise<A
   const rows: Row[] =
     location.scope === "team"
       ? await withTeam(db, location.teamId, (tx) => tx.select(TEAM).from(teamAgents))
-      : await db.select(SITE).from(installAgents).where(siteWhere(location));
+      : await db.select(SITE).from(siteAgents).where(siteWhere(location));
   return rows
     .map((r) => toRecord(location.scope, r))
     .sort(
@@ -162,8 +159,8 @@ export async function findAgent(
         )
       : await db
           .select(SITE)
-          .from(installAgents)
-          .where(and(siteWhere(location), eq(installAgents.id, id)));
+          .from(siteAgents)
+          .where(and(siteWhere(location), eq(siteAgents.id, id)));
   return row ? toRecord(location.scope, row) : null;
 }
 
@@ -224,7 +221,7 @@ export async function createAgent(
               .values({ ...values, teamId: location.teamId, ownerUserId: requireOwner(input) })
               .returning(TEAM)
           : await tx
-              .insert(installAgents)
+              .insert(siteAgents)
               .values({
                 ...values,
                 scope: location.scope,
@@ -271,8 +268,8 @@ async function takenSlugs(
   return location.scope === "team"
     ? tx.select({ slug: teamAgents.slug, archivedAt: teamAgents.archivedAt }).from(teamAgents)
     : tx
-        .select({ slug: installAgents.slug, archivedAt: installAgents.archivedAt })
-        .from(installAgents)
+        .select({ slug: siteAgents.slug, archivedAt: siteAgents.archivedAt })
+        .from(siteAgents)
         .where(siteWhere(location));
 }
 
@@ -310,16 +307,16 @@ export async function updateAgent(
             )
             .returning(TEAM)
         : await tx
-            .update(installAgents)
-            .set({ ...set, revision: sql`${installAgents.revision} + 1` })
+            .update(siteAgents)
+            .set({ ...set, revision: sql`${siteAgents.revision} + 1` })
             .where(
               and(
                 siteWhere(location),
-                eq(installAgents.id, id),
-                isNull(installAgents.archivedAt),
+                eq(siteAgents.id, id),
+                isNull(siteAgents.archivedAt),
                 expectedRevision === undefined
                   ? undefined
-                  : eq(installAgents.revision, expectedRevision),
+                  : eq(siteAgents.revision, expectedRevision),
               ),
             )
             .returning(SITE);
@@ -357,8 +354,8 @@ export async function lockAgent(
       ? await tx.select(TEAM).from(teamAgents).where(eq(teamAgents.id, id)).for("update")
       : await tx
           .select(SITE)
-          .from(installAgents)
-          .where(and(siteWhere(location), eq(installAgents.id, id)))
+          .from(siteAgents)
+          .where(and(siteWhere(location), eq(siteAgents.id, id)))
           .for("update");
   return row ? toRecord(location.scope, row) : null;
 }
@@ -379,9 +376,9 @@ export async function setAgentStatus(
             .where(eq(teamAgents.id, id))
             .returning(TEAM)
         : await tx
-            .update(installAgents)
+            .update(siteAgents)
             .set({ status, updatedAt: new Date() })
-            .where(and(siteWhere(location), eq(installAgents.id, id)))
+            .where(and(siteWhere(location), eq(siteAgents.id, id)))
             .returning(SITE);
     if (!row) return null;
     await recordAudit(tx, {

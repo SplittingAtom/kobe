@@ -102,7 +102,8 @@ actions were recorded under other names: `install.settings.updated` (now `site.s
 upgrade keep their names: the hash chain covers them and they are never rewritten. Filtering by
 either name (or by category `site` or `install`) returns both; exports and forwarding send each
 row's stored name, so a SIEM rule keyed on an old name should match the new one too. Payload
-values such as `scope: "install"` stay until the database rename (KOBE-256).
+values follow since KOBE-256: new `policy.rule.*`, `models.budget.*` and `run.budget_stopped`
+events say `scope: "site"`; rows recorded before say `scope: "install"` and keep it (same meaning).
 
 | Action                                       | Scope | Target fields (allowlist)                                                                                                                                                                                                                              | Recorded when                                                                                                                                                                                                                                                                              |
 | -------------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

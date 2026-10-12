@@ -3,7 +3,7 @@ import {
   RETENTION_MAXIMUM_PENDING_KEY,
   eq,
   inArray,
-  installSettings,
+  siteSettings,
   teamRetention,
   withTeam,
   type KobeDb,
@@ -48,9 +48,9 @@ function parsePending(value: string | undefined): Pick<Layer, "pending" | "pendi
 /** The site maximum's layer (row-locked with `forUpdate`). */
 export async function readMaximumLayer(db: Executor, forUpdate = false): Promise<Layer> {
   const query = db
-    .select({ key: installSettings.key, value: installSettings.value })
-    .from(installSettings)
-    .where(inArray(installSettings.key, [RETENTION_MAXIMUM_KEY, RETENTION_MAXIMUM_PENDING_KEY]));
+    .select({ key: siteSettings.key, value: siteSettings.value })
+    .from(siteSettings)
+    .where(inArray(siteSettings.key, [RETENTION_MAXIMUM_KEY, RETENTION_MAXIMUM_PENDING_KEY]));
   const rows = await (forUpdate ? query.for("update") : query);
   const value = (key: string) => rows.find((r) => r.key === key)?.value;
   return {
@@ -203,9 +203,9 @@ export async function readMaximum(db: Executor, now = new Date()): Promise<Maxim
 /** Upserts a site setting (the app role can't delete them: "" means none). */
 async function store(tx: KobeTx, key: string, value: string): Promise<void> {
   await tx
-    .insert(installSettings)
+    .insert(siteSettings)
     .values({ key, value })
-    .onConflictDoUpdate({ target: installSettings.key, set: { value, updatedAt: new Date() } });
+    .onConflictDoUpdate({ target: siteSettings.key, set: { value, updatedAt: new Date() } });
 }
 
 async function writeMaximumLayer(tx: KobeTx, layer: Layer): Promise<void> {

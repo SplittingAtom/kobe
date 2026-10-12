@@ -1,13 +1,4 @@
-import {
-  and,
-  eq,
-  installAgents,
-  isNull,
-  isNotNull,
-  sql,
-  SYSTEM_ACTOR,
-  type KobeDb,
-} from "@kobe/db";
+import { and, eq, siteAgents, isNull, isNotNull, sql, SYSTEM_ACTOR, type KobeDb } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { SITE, siteWhere } from "../agents/store.js";
 import { archiveAgent, publishAgent } from "../agents/versions.js";
@@ -45,11 +36,11 @@ async function ensureDraft(
     const [found] = await tx
       .select({
         ...SITE,
-        galleryGeneration: installAgents.galleryGeneration,
-        archivedBy: installAgents.archivedBy,
+        galleryGeneration: siteAgents.galleryGeneration,
+        archivedBy: siteAgents.archivedBy,
       })
-      .from(installAgents)
-      .where(and(siteWhere(GALLERY), eq(installAgents.galleryKey, key)))
+      .from(siteAgents)
+      .where(and(siteWhere(GALLERY), eq(siteAgents.galleryKey, key)))
       .for("update");
     const values = {
       frontmatter: definition.frontmatter,
@@ -65,12 +56,12 @@ async function ensureDraft(
       // An agent curated through the old site console under the same slug is adopted.
       const [legacy] = await tx
         .select({
-          id: installAgents.id,
-          slug: installAgents.slug,
-          archivedAt: installAgents.archivedAt,
+          id: siteAgents.id,
+          slug: siteAgents.slug,
+          archivedAt: siteAgents.archivedAt,
         })
-        .from(installAgents)
-        .where(and(siteWhere(GALLERY), eq(installAgents.slug, key)))
+        .from(siteAgents)
+        .where(and(siteWhere(GALLERY), eq(siteAgents.slug, key)))
         .for("update");
       // Archived by hand: never revived behind anyone's back (nor an error at every start).
       if (legacy?.archivedAt) {
@@ -79,12 +70,12 @@ async function ensureDraft(
       }
       const [row] = legacy
         ? await tx
-            .update(installAgents)
+            .update(siteAgents)
             .set({ ...values, galleryKey: key, galleryGeneration: generation, revision: bump() })
-            .where(eq(installAgents.id, legacy.id))
-            .returning({ id: installAgents.id, revision: installAgents.revision })
+            .where(eq(siteAgents.id, legacy.id))
+            .returning({ id: siteAgents.id, revision: siteAgents.revision })
         : await tx
-            .insert(installAgents)
+            .insert(siteAgents)
             .values({
               ...values,
               slug: key,
@@ -92,7 +83,7 @@ async function ensureDraft(
               galleryKey: key,
               galleryGeneration: generation,
             })
-            .returning({ id: installAgents.id, revision: installAgents.revision });
+            .returning({ id: siteAgents.id, revision: siteAgents.revision });
       if (!row) throw new Error("gallery seed: insert returned no row");
       const ref = target(row.id, key);
       await recordAudit(
@@ -121,9 +112,9 @@ async function ensureDraft(
         return { agentId: found.id, action: "skipped_archived", publish: false };
       }
       await tx
-        .update(installAgents)
+        .update(siteAgents)
         .set({ archivedAt: null, archivedBy: null, updatedAt: new Date() })
-        .where(eq(installAgents.id, found.id));
+        .where(eq(siteAgents.id, found.id));
       await recordAudit(tx, {
         actor: SYSTEM_ACTOR,
         action: "agent.unarchived",
@@ -141,10 +132,10 @@ async function ensureDraft(
       return { agentId: found.id, action: restored ? "restored" : "unchanged", publish: false };
     }
     const [row] = await tx
-      .update(installAgents)
+      .update(siteAgents)
       .set({ ...values, revision: bump() })
-      .where(eq(installAgents.id, found.id))
-      .returning({ revision: installAgents.revision });
+      .where(eq(siteAgents.id, found.id))
+      .returning({ revision: siteAgents.revision });
     if (!row) throw new Error("gallery seed: update returned no row");
     await recordAudit(tx, {
       actor: SYSTEM_ACTOR,
@@ -156,7 +147,7 @@ async function ensureDraft(
   });
 }
 
-const bump = () => sql`${installAgents.revision} + 1`;
+const bump = () => sql`${siteAgents.revision} + 1`;
 
 async function seedOne(db: KobeDb, parsed: ParsedGalleryDefinition): Promise<SeedResult> {
   let draft;
@@ -179,9 +170,9 @@ async function seedOne(db: KobeDb, parsed: ParsedGalleryDefinition): Promise<See
       throw new Error(`gallery seed: ${parsed.key} could not be published (${published.error})`);
     }
     await db
-      .update(installAgents)
+      .update(siteAgents)
       .set({ galleryGeneration: parsed.generation })
-      .where(and(siteWhere(GALLERY), eq(installAgents.id, agentId)));
+      .where(and(siteWhere(GALLERY), eq(siteAgents.id, agentId)));
   }
   return { key: parsed.key, agentId, action };
 }
@@ -193,14 +184,10 @@ async function seedOne(db: KobeDb, parsed: ParsedGalleryDefinition): Promise<See
  */
 async function retireRemoved(db: KobeDb, keys: readonly string[]): Promise<string[]> {
   const gone = await db
-    .select({ id: installAgents.id, key: installAgents.galleryKey })
-    .from(installAgents)
+    .select({ id: siteAgents.id, key: siteAgents.galleryKey })
+    .from(siteAgents)
     .where(
-      and(
-        siteWhere(GALLERY),
-        isNotNull(installAgents.galleryKey),
-        isNull(installAgents.archivedAt),
-      ),
+      and(siteWhere(GALLERY), isNotNull(siteAgents.galleryKey), isNull(siteAgents.archivedAt)),
     );
   const removed = gone.filter((g) => g.key !== null && !keys.includes(g.key));
   for (const { id } of removed) await archiveAgent(db, GALLERY, id, SYSTEM_ACTOR, "seed");

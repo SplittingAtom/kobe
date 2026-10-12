@@ -188,7 +188,7 @@ describe("site policy routes (D8: site Owner/Admin)", () => {
     });
     expect(created.status, JSON.stringify(created.json)).toBe(201);
     expect(created.json.rule).toMatchObject({
-      scope: "install",
+      scope: "site",
       scope_ref: null,
       effect: "ask",
       tool_glob: "mcp__*",
@@ -423,7 +423,7 @@ describe("D29 order end to end (rules from Postgres)", () => {
     const decision = await decide("bob", finance, "share_file", { path: "/workspace/a" });
     expect(decision.effect).toBe("deny");
     expect(decision.reasons[0]).toMatchObject({
-      code: "install_deny_rule",
+      code: "site_deny_rule",
       rule_id: created[0]?.id,
     });
     expect(policyDecisionSchema.safeParse(decision).success).toBe(true);
@@ -438,7 +438,7 @@ describe("D29 order end to end (rules from Postgres)", () => {
     expect((await remember("bob", finance, "remember", { tool_glob: "remember" })).ok).toBe(true);
     const asked = await decide("bob", finance, "remember");
     expect(asked).toMatchObject({ effect: "require_approval" });
-    expect(asked.reasons[0]).toMatchObject({ code: "install_ask_rule", rule_id: askId });
+    expect(asked.reasons[0]).toMatchObject({ code: "site_ask_rule", rule_id: askId });
     await cleanup();
     const allowed = await decide("bob", finance, "remember");
     expect(allowed.effect).toBe("allow");

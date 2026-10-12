@@ -15,7 +15,7 @@ const internalError: Evaluated = {
     reasons: [
       {
         code: "policy_error",
-        stage: "install_deny",
+        stage: "site_deny",
         message: "Policy could not be evaluated, so the call was denied. Try again.",
       },
     ],
@@ -26,7 +26,7 @@ const ruleDeny: Evaluated = {
   decision: {
     effect: "deny",
     risk: "write",
-    reasons: [{ code: "rule_deny", stage: "install_deny", message: "No." }],
+    reasons: [{ code: "rule_deny", stage: "site_deny", message: "No." }],
   } as unknown as PolicyDecision,
 };
 

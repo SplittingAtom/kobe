@@ -40,6 +40,12 @@ export class FakeBifrost implements BifrostAdmin {
   private readonly discovery = new Map<string, { status: string; description?: string }>();
   /** Make the next calls fail (unreachable) while true. */
   down = false;
+  /** Writes that fail with a 500, by their `calls` name (e.g. `customer.add kobe-site`). */
+  readonly failing = new Set<string>();
+
+  private failIf(op: string, method: string, path: string): void {
+    if (this.failing.has(op)) this.reject(method, path, 500);
+  }
 
   private check(method: string, path: string): void {
     if (this.down) throw new BifrostAdminError(method, path, undefined);
@@ -126,6 +132,7 @@ export class FakeBifrost implements BifrostAdmin {
   }
   async addCustomer(name: string) {
     this.check("POST", "/api/governance/customers");
+    this.failIf(`customer.add ${name}`, "POST", "/api/governance/customers");
     const c = { id: randomUUID(), name };
     this.calls.push(`customer.add ${name}`);
     this.customers.set(c.id, c);
@@ -151,6 +158,7 @@ export class FakeBifrost implements BifrostAdmin {
   async updateTeam(id: string, customerId: string) {
     this.check("PUT", "/api/governance/teams");
     const t = this.teams.get(id) ?? this.reject("PUT", "/api/governance/teams", 404);
+    this.failIf(`team.update ${t.name}`, "PUT", "/api/governance/teams");
     this.calls.push(`team.update ${t.name}`);
     this.teams.set(id, { ...t, customerId });
   }

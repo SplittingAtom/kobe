@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BUILTIN_TOOLS,
+  HISTORICAL_POLICY_NAMES,
   POLICY_EVALUATION_ORDER,
   POLICY_REASON_CODES,
   acceptsAudience,
@@ -12,6 +13,7 @@ import {
   isOpenWorld,
   policyDecisionSchema,
   policyInputSchema,
+  policyReasonSchema,
   riskFromAnnotations,
   sessionTokenClaimsSchema,
   toolRuleSchema,
@@ -41,7 +43,7 @@ const input: PolicyInput = policyInputSchema.parse({
 describe("policy contract", () => {
   it("follows the D29 evaluation order", () => {
     expect(POLICY_EVALUATION_ORDER).toEqual([
-      "install_deny",
+      "site_deny",
       "team_deny",
       "ask_rule",
       "risk_class",
@@ -255,6 +257,28 @@ describe("fake policy engine", () => {
     });
     expect([auto.effect, scheduled.effect]).toEqual(["deny", "deny"]);
     expect(policyDecisionSchema.parse(auto)).toEqual(auto);
+  });
+});
+
+describe("names recorded before the site rename (KOBE-256)", () => {
+  it("still reads the install stage and rule codes; produces only the site ones", () => {
+    for (const [old, now] of Object.entries(HISTORICAL_POLICY_NAMES)) {
+      expect(POLICY_REASON_CODES).not.toContain(old);
+      expect([...POLICY_REASON_CODES, ...POLICY_EVALUATION_ORDER]).toContain(now);
+    }
+    const stored = { code: "install_deny_rule", stage: "install_deny", message: "No." };
+    expect(policyReasonSchema.parse(stored)).toEqual(stored);
+    expect(
+      policyReasonSchema.parse({ ...stored, code: "install_ask_rule", stage: "ask_rule" }),
+    ).toBeTruthy();
+    const rule = {
+      id: EXAMPLE_IDS.approval,
+      scope_ref: EXAMPLE_IDS.team,
+      effect: "deny",
+      tool_glob: "bash",
+    };
+    expect(toolRuleSchema.safeParse({ ...rule, scope: "site" }).success).toBe(true);
+    expect(toolRuleSchema.safeParse({ ...rule, scope: "install" }).success).toBe(false);
   });
 });
 

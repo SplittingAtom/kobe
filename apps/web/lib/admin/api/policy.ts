@@ -5,7 +5,7 @@ export type RuleEffect = "deny" | "ask" | "allow";
 /** A stored rule (the server sends snake_case; it arrives camelized, `argPattern` kept verbatim). */
 export interface PolicyRule {
   readonly id: string;
-  readonly scope: "install" | "team" | "user";
+  readonly scope: "site" | "team" | "user";
   readonly effect: RuleEffect;
   readonly toolGlob: string;
   /** JSON pointer → glob over the tool input; keys are pointers, never camelized. */

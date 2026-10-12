@@ -30,6 +30,8 @@ const SITE_TEAM = "00000000-0000-0000-0000-000000000000";
 export const webSearchContext = {
   teamId: SITE_TEAM,
   kind: "web_search",
+  // A label bound into the sealed key (envelope AAD), kept from before KOBE-256 renamed the scope:
+  // changing it would leave the stored key unreadable until an admin re-entered it.
   recordId: "install",
 } as const;
 

@@ -12,9 +12,9 @@ import {
 import {
   budgetAlertEmails,
   budgetAlerts,
-  installModelLimits,
-  installRoles,
-  installModelSpendDaily,
+  siteModelLimits,
+  siteRoles,
+  siteModelSpendDaily,
   modelCatalog,
   modelProviders,
   modelSpendDaily,
@@ -69,7 +69,7 @@ beforeAll(async () => {
     { id: alice, name: "Alice", email: `${alice}@b.test` },
     { id: bob, name: "Bob", email: `${bob}@b.test` },
   ]);
-  await app.db.insert(installRoles).values({ userId: alice, role: "admin" });
+  await app.db.insert(siteRoles).values({ userId: alice, role: "admin" });
   await app.db.insert(modelProviders).values({
     id: provider,
     kind: "openai_compatible",
@@ -92,8 +92,8 @@ describe("daily spend counters (run_usage trigger)", () => {
   it("adds every inserted call to the team's (day, user) row and the site's day", async () => {
     const before = await app.db
       .select()
-      .from(installModelSpendDaily)
-      .where(eq(installModelSpendDaily.day, "2026-10-15"));
+      .from(siteModelSpendDaily)
+      .where(eq(siteModelSpendDaily.day, "2026-10-15"));
     await recordModelUsage(app.db, [
       usage({}),
       usage({}),
@@ -118,8 +118,8 @@ describe("daily spend counters (run_usage trigger)", () => {
     });
     const [day] = await app.db
       .select()
-      .from(installModelSpendDaily)
-      .where(eq(installModelSpendDaily.day, "2026-10-15"));
+      .from(siteModelSpendDaily)
+      .where(eq(siteModelSpendDaily.day, "2026-10-15"));
     expect((day?.costUsd ?? 0) - (before[0]?.costUsd ?? 0)).toBeCloseTo(4, 6);
     // Another team's counters stay behind its RLS.
     const seenByB = await withTeam(app.db, teamB, (tx) => tx.select().from(modelSpendDaily));
@@ -130,9 +130,9 @@ describe("daily spend counters (run_usage trigger)", () => {
 describe("budget state", () => {
   it("lists site, team and member budgets with their period's spend; the widest used-up one stops", async () => {
     await app.db
-      .update(installModelLimits)
+      .update(siteModelLimits)
       .set({ monthlyUsd: 1_000_000, userRequestsPerMinute: 100, updatedBy: alice })
-      .where(eq(installModelLimits.id, 1));
+      .where(eq(siteModelLimits.id, 1));
     await withTeam(app.db, teamA, (tx) =>
       tx.insert(teamBudgets).values([
         {
@@ -251,8 +251,8 @@ describe("integrity against the app role (KOBE-42 review)", () => {
         ),
       ),
     ).toBe("42501");
-    expect(await refused(app.db.update(installModelSpendDaily).set({ costUsd: 0 }))).toBe("42501");
-    expect(await refused(app.db.delete(installModelSpendDaily))).toBe("42501");
+    expect(await refused(app.db.update(siteModelSpendDaily).set({ costUsd: 0 }))).toBe("42501");
+    expect(await refused(app.db.delete(siteModelSpendDaily))).toBe("42501");
   });
 
   it("an alert is recorded only for a configured budget really crossed in the current period", async () => {
@@ -355,8 +355,8 @@ describe("integrity against the app role (KOBE-42 review)", () => {
 
   it("the site limits are changed by a site admin only", async () => {
     expect(
-      await refused(app.db.update(installModelLimits).set({ monthlyUsd: null, updatedBy: bob })),
+      await refused(app.db.update(siteModelLimits).set({ monthlyUsd: null, updatedBy: bob })),
     ).toBe("42501");
-    await app.db.update(installModelLimits).set({ monthlyUsd: null, updatedBy: alice });
+    await app.db.update(siteModelLimits).set({ monthlyUsd: null, updatedBy: alice });
   });
 });

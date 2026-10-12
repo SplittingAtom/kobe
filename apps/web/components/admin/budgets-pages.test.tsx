@@ -199,5 +199,11 @@ describe("chat budget banner text", () => {
         ],
       }),
     ).toMatch(/^Your daily token budget is used up: new messages can't start a run/);
+    expect(
+      budgetBannerText({
+        state: "warning",
+        lines: [line({ scope: "site", percent: 90, state: "warning" })],
+      }),
+    ).toBe("The site's monthly model budget is 90 % used.");
   });
 });

@@ -139,6 +139,55 @@ describe("reconcile", () => {
     expect(second.virtualKeys).toEqual(first.virtualKeys);
   });
 
+  it("KOBE-256: moves the teams of the old kobe-install customer to kobe-site, keeping every key", async () => {
+    const old = { ...desired(), customer: { name: "kobe-install", limits: undefined } };
+    const first = await reconcile(old, bifrost, logger);
+    expect([...bifrost.customers.values()].map((c) => c.name)).toEqual(["kobe-install"]);
+    const result = await reconcile(desired(), bifrost, logger);
+    expect(result.errors).toEqual([]);
+    expect(SITE_CUSTOMER).toBe("kobe-site");
+    const customers = [...bifrost.customers.values()];
+    expect(customers.map((c) => c.name)).toEqual([SITE_CUSTOMER]);
+    expect([...bifrost.teams.values()].map((t) => t.customerId)).toEqual(
+      [...bifrost.teams.values()].map(() => customers[0]?.id),
+    );
+    expect(result.virtualKeys).toEqual(first.virtualKeys);
+    expect(bifrost.calls.filter((c) => c.startsWith("vk."))).toEqual(
+      bifrost.calls.filter((c) => c.startsWith("vk.add")),
+    );
+  });
+
+  it("KOBE-256: keeps kobe-install with its teams when kobe-site cannot be created", async () => {
+    const old = { ...desired(), customer: { name: "kobe-install", limits: undefined } };
+    const first = await reconcile(old, bifrost, logger);
+    bifrost.failing.add(`customer.add ${SITE_CUSTOMER}`);
+    const result = await reconcile(desired(), bifrost, logger);
+    expect(result.errors).not.toEqual([]);
+    const [install] = [...bifrost.customers.values()];
+    expect([...bifrost.customers.values()].map((c) => c.name)).toEqual(["kobe-install"]);
+    expect([...bifrost.teams.values()].every((t) => t.customerId === install?.id)).toBe(true);
+    expect(bifrost.calls.some((c) => c.startsWith("customer.delete"))).toBe(false);
+    expect(result.virtualKeys).toEqual(first.virtualKeys);
+  });
+
+  it("KOBE-256: keeps kobe-install while a team could not be moved, and removes it on the next pass", async () => {
+    const old = { ...desired(), customer: { name: "kobe-install", limits: undefined } };
+    await reconcile(old, bifrost, logger);
+    bifrost.failing.add(`team.update ${gatewayTeamName(teamB)}`);
+    const partial = await reconcile(desired(), bifrost, logger);
+    expect(partial.errors).not.toEqual([]);
+    expect([...bifrost.customers.values()].map((c) => c.name).sort()).toEqual([
+      "kobe-install",
+      SITE_CUSTOMER,
+    ]);
+    bifrost.failing.clear();
+    const healed = await reconcile(desired(), bifrost, logger);
+    expect(healed.errors).toEqual([]);
+    const customers = [...bifrost.customers.values()];
+    expect(customers.map((c) => c.name)).toEqual([SITE_CUSTOMER]);
+    expect([...bifrost.teams.values()].every((t) => t.customerId === customers[0]?.id)).toBe(true);
+  });
+
   it("pushes a changed key (new key first, then the old one goes) and a changed URL", async () => {
     await reconcile(desired(), bifrost, logger);
     bifrost.calls.length = 0;
