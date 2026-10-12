@@ -115,6 +115,14 @@ export function ThreadSidebar({ listError }: { readonly listError: ApiError | nu
   const [view, setView] = useState<View>("threads");
   const [folded, setFolded] = useState(true);
   const hasMore = useAuiState((s) => s.threads.hasMore);
+  // On narrow screens the open list folds once a thread is on screen, however it was opened (the
+  // list, New, a search hit in the bar, the bell).
+  const threadId = useAuiState((s) => s.threadListItem.id);
+  const [seenThread, setSeenThread] = useState(threadId);
+  if (seenThread !== threadId) {
+    setSeenThread(threadId);
+    setFolded(true);
+  }
 
   return (
     <aside

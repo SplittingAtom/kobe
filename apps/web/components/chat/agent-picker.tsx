@@ -10,6 +10,25 @@ import { useChatSession } from "./kobe-runtime";
 
 type Agents = readonly RunnableAgent[];
 
+/** The team's models (to name an agent's pinned model), or null while loading or unreadable. */
+function useTeamModels(): TeamModels | null {
+  const session = useChatSession();
+  const [models, setModels] = useState<TeamModels | null>(null);
+  useEffect(() => {
+    let current = true;
+    session.models().then(
+      (res) => {
+        if (current && res.ok) setModels(res.data);
+      },
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+  }, [session]);
+  return models;
+}
+
 /** The team's runnable agents, or an empty list while loading or when they can't be read. */
 function useAgents(): Agents {
   const session = useChatSession();
@@ -48,28 +67,20 @@ const OPTION =
  * agents the server says the user can run here. Native radios, so Tab, arrow keys and Space work
  * and screen readers announce the group. Rendered only for a conversation not created yet.
  */
-function AgentPicker({ agents }: { readonly agents: Agents }) {
+function AgentPicker({
+  agents,
+  models,
+}: {
+  readonly agents: Agents;
+  readonly models: TeamModels | null;
+}) {
   const session = useChatSession();
   const id = useId();
-  const [models, setModels] = useState<TeamModels | null>(null);
   const chosen = useSyncExternalStore(
     session.subscribeDraftAgent,
     () => session.draftAgent,
     () => null,
   );
-
-  useEffect(() => {
-    let current = true;
-    session.models().then(
-      (res) => {
-        if (current && res.ok) setModels(res.data);
-      },
-      () => undefined,
-    );
-    return () => {
-      current = false;
-    };
-  }, [session]);
 
   const modelLabel = (alias: string) => {
     const m = models?.models.find((x) => x.alias === alias);
@@ -122,10 +133,12 @@ function AgentPicker({ agents }: { readonly agents: Agents }) {
 
 /**
  * The agent picker in bar row two (CE3, KOBE-197): a button naming the choice that opens the
- * radios in a popover. Renders nothing when there is no agent to pick.
+ * radios in a popover. Renders nothing when there is no agent to pick. The lists are read here,
+ * once, not by the popover's content, which mounts on every open.
  */
 export function AgentPickerMenu() {
   const agents = useAgents();
+  const models = useTeamModels();
   const chosen = useDraftAgentName();
   if (agents.length === 0) return null;
   return (
@@ -139,7 +152,7 @@ export function AgentPickerMenu() {
         sideOffset={4}
         className="bg-background z-50 w-80 rounded-lg border p-2 shadow-md"
       >
-        <AgentPicker agents={agents} />
+        <AgentPicker agents={agents} models={models} />
       </Popover.Content>
     </Popover.Root>
   );

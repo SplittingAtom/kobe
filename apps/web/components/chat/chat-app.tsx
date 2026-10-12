@@ -133,7 +133,7 @@ function ChatWorkspace({
   const filesApi = useMemo(() => createFilesApi(session.teamId, fetchFn), [session, fetchFn]);
   const [threadId, setThreadId] = useThreadUrl();
   // The consoles and builders return here, to this thread (CE4).
-  useEffect(() => rememberLastThread(threadId), [threadId]);
+  useEffect(() => rememberLastThread(session.teamId, threadId), [session, threadId]);
   const [listError, setListError] = useState<ApiError | null>(null);
   const adapter = useMemo(
     () => createThreadListAdapter(session, { onError: setListError }),

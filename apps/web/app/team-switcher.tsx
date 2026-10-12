@@ -11,6 +11,7 @@ import {
   type MyTeams,
 } from "../lib/teams";
 import { forgetLastThread } from "../lib/shell/last-thread";
+import { barMenuProps } from "../components/shell/bar-menu";
 
 function remember(teamId: string): void {
   try {
@@ -76,7 +77,7 @@ export function TeamSwitcher() {
   const active = my.teams.find((t) => t.id === my.activeTeamId);
   return (
     <nav aria-label="Teams">
-      <details>
+      <details {...barMenuProps}>
         <summary>
           {active ? active.name : "Choose a team"}
           {active && <small> · {roleLabel(active.role)}</small>}

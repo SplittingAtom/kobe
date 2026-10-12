@@ -1,10 +1,19 @@
 "use client";
 
-import { useState, type FormEvent, type KeyboardEvent } from "react";
+import { useAuiState } from "@assistant-ui/react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FocusEvent,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 import type { ApiError } from "../../lib/api/client";
 import type { ThreadSearchHit } from "../../lib/chat/types";
 import { ErrorNotice } from "../admin/error-notice";
 import { useChatSession } from "../chat/kobe-runtime";
+import chatStyles from "../chat/chat.module.css";
 import styles from "./shell.module.css";
 
 function SearchResults({
@@ -14,7 +23,7 @@ function SearchResults({
   readonly hits: readonly ThreadSearchHit[];
   readonly onOpen: (threadId: string) => void;
 }) {
-  if (hits.length === 0) return <p className={styles.hint}>No conversations match.</p>;
+  if (hits.length === 0) return <p className={chatStyles.hint}>No conversations match.</p>;
   return (
     <ul className={styles.hits} aria-label="Search results">
       {hits.map((hit) => (
@@ -41,50 +50,79 @@ function SearchResults({
 
 type SearchState =
   | { readonly status: "idle" }
-  | { readonly status: "searching"; readonly q: string }
+  | { readonly status: "searching"; readonly q: string; readonly seq: number }
   | { readonly status: "done"; readonly q: string; readonly hits: readonly ThreadSearchHit[] }
   | { readonly status: "error"; readonly q: string; readonly error: ApiError };
 
 /**
  * Global thread search in bar row one (CE3; KOBE-33 `?q=`). Results open beside the thread, as a
- * panel under the field (CE4); Escape or Clear closes it.
+ * panel under the field (CE4). Escape, Clear, a click or focus outside, and opening a thread close
+ * it; only the newest search's reply is ever shown.
  */
 export function ThreadSearch({ onOpenThread }: { readonly onOpenThread: (id: string) => void }) {
   const session = useChatSession();
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState<SearchState>({ status: "idle" });
+  const box = useRef<HTMLDivElement>(null);
+  const seq = useRef(0);
+  const close = () => setSearch({ status: "idle" });
+
+  // Another thread on screen (from the rail, a hit, the bell): the results have done their job.
+  const threadId = useAuiState((s) => s.threadListItem.id);
+  const [seenThread, setSeenThread] = useState(threadId);
+  if (seenThread !== threadId) {
+    setSeenThread(threadId);
+    close();
+  }
+
+  const open = search.status !== "idle";
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!box.current?.contains(e.target as Node)) setSearch({ status: "idle" });
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
 
   const runSearch = async (e: FormEvent) => {
     e.preventDefault();
     const q = query.trim();
     if (q === "") {
-      setSearch({ status: "idle" });
+      close();
       return;
     }
-    setSearch({ status: "searching", q });
+    const mine = ++seq.current;
+    setSearch({ status: "searching", q, seq: mine });
     const res = await session.api.searchThreads(q);
-    setSearch(
-      res.ok
-        ? { status: "done", q, hits: res.data.threads }
-        : { status: "error", q, error: res.error },
+    // Only into the search still waiting for it: closed meanwhile, or a newer one, drops it.
+    setSearch((cur) =>
+      cur.status !== "searching" || cur.seq !== mine
+        ? cur
+        : res.ok
+          ? { status: "done", q, hits: res.data.threads }
+          : { status: "error", q, error: res.error },
     );
   };
 
   const clear = () => {
     setQuery("");
-    setSearch({ status: "idle" });
+    close();
   };
   const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "Escape" && search.status !== "idle") {
+    if (e.key === "Escape" && open) {
       e.stopPropagation();
-      setSearch({ status: "idle" });
+      close();
     }
+  };
+  const onBlur = (e: FocusEvent) => {
+    if (open && !box.current?.contains(e.relatedTarget as Node | null)) close();
   };
 
   return (
-    <div className={styles.searchBox} onKeyDown={onKeyDown}>
+    <div ref={box} className={styles.searchBox} onKeyDown={onKeyDown} onBlur={onBlur}>
       <form role="search" onSubmit={(e) => void runSearch(e)}>
-        <label className={styles.visuallyHidden} htmlFor="kobe-search">
+        <label className="sr-only" htmlFor="kobe-search">
           Search conversations
         </label>
         <input
@@ -95,13 +133,18 @@ export function ThreadSearch({ onOpenThread }: { readonly onOpenThread: (id: str
           placeholder="Search conversations"
           onChange={(e) => setQuery(e.target.value)}
         />
-        <button type="submit" className={styles.visuallyHidden}>
+        <button type="submit" className="sr-only">
           Search
         </button>
       </form>
-      {search.status !== "idle" && (
-        <section className={styles.results} aria-label={`Results for ${search.q}`}>
-          <p className={styles.hint} role="status">
+      {open && (
+        <section
+          className={styles.results}
+          aria-label={`Results for ${search.q}`}
+          // Clicking a result keeps focus in the field, so the blur below never closes first.
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          <p className={chatStyles.hint} role="status">
             {search.status === "searching" ? "Searching…" : `Results for “${search.q}”`}{" "}
             <button type="button" onClick={clear}>
               Clear

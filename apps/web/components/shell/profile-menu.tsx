@@ -5,11 +5,12 @@ import Link from "next/link";
 import { useState } from "react";
 import { authClient } from "../../lib/auth-client";
 import { forgetLastThread } from "../../lib/shell/last-thread";
+import { barMenuProps } from "./bar-menu";
 import styles from "./shell.module.css";
 
 /**
  * The profile menu at the bar's right end (CE3): the member's other areas and sign-out. A
- * disclosure, like the team switcher. Slot: a member settings page joins this menu when one exists.
+ * disclosure, like the team switcher; one of the two is open at a time. Slot: a member settings page joins this menu when one exists.
  */
 export function ProfileMenu() {
   const [error, setError] = useState<string | null>(null);
@@ -30,10 +31,10 @@ export function ProfileMenu() {
   }
 
   return (
-    <details className={styles.menu}>
+    <details className={styles.menu} {...barMenuProps}>
       <summary className={styles.iconLink}>
         <CircleUserIcon aria-hidden size={18} />
-        <span className={styles.visuallyHidden}>Profile</span>
+        <span className="sr-only">Profile</span>
       </summary>
       <ul className={styles.menuList}>
         <li>

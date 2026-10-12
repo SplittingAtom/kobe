@@ -32,6 +32,11 @@
   border-top: 1px solid var(--admin-border);
 }
 
+/* Nothing to show (no team yet, signed out): no empty band. */
+.rowTwo:empty {
+  display: none;
+}
+
 .actions {
   display: flex;
   align-items: center;
@@ -140,12 +145,6 @@
   background: var(--admin-warn-bg);
 }
 
-.hint {
-  margin: 0.25rem 0;
-  color: var(--admin-muted);
-  font-size: 0.9rem;
-}
-
 /* --- profile menu -------------------------------------------------------------------------- */
 
 .menu {
@@ -185,15 +184,6 @@
   padding: 0.375rem 0.75rem;
   color: var(--admin-danger);
   font-size: 0.85rem;
-}
-
-.visuallyHidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
 }
 
 /* --- grid (CE5–CE7) ------------------------------------------------------------------------

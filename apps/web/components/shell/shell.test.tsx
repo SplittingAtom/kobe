@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
-import { forgetLastThread, lastThreadHref } from "../../lib/shell/last-thread";
+import { forgetLastThread, lastThreadHref, rememberLastThread } from "../../lib/shell/last-thread";
 import { must } from "../../lib/testing/must";
 import { composer, openApp } from "../chat/testing";
 import { ChatReturnLink } from "./chat-return-link";
@@ -75,8 +75,8 @@ describe("utility bar", () => {
     fake.runnableAgents.push({ id: "a-1", scope: "team", name: "Ledger Bot", model: null });
     openApp(fake);
     const two = within(row(2));
-    expect(screen.getByRole("group", { name: "Conversation context" })).toBe(row(2));
     expect(await two.findByRole("button", { name: "Chat with: No agent" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Conversation context" })).toBe(row(2));
     expect(await two.findByRole("combobox", { name: "Model for this conversation" })).toBeTruthy();
     expect(two.getByRole("button", { name: "Files" })).toBeTruthy();
   });
@@ -138,28 +138,181 @@ describe("return to the last thread (CE4)", () => {
     const t = fake.addThread("Budget review");
     openApp(fake, t);
     await composer();
-    await waitFor(() => expect(lastThreadHref()).toBe(`/?thread=${t}`));
+    await waitFor(() => expect(lastThreadHref(fake.teamId)).toBe(`/?thread=${t}`));
+    cleanup();
     render(<ChatReturnLink>Back to Kobe</ChatReturnLink>);
-    expect(screen.getByRole("link", { name: "Back to Kobe" }).getAttribute("href")).toBe(
-      `/?thread=${t}`,
-    );
+    const link = screen.getByRole("link", { name: "Back to Kobe" });
+    await waitFor(() => expect(link.getAttribute("href")).toBe(`/?thread=${t}`));
   });
 
   it("returns to a new conversation when no thread was open, and forgets on team switch", async () => {
     const t = fake.addThread("Budget review");
     openApp(fake, t);
-    await waitFor(() => expect(lastThreadHref()).toBe(`/?thread=${t}`));
+    await waitFor(() => expect(lastThreadHref(fake.teamId)).toBe(`/?thread=${t}`));
     await userEvent.setup().click(await screen.findByRole("button", { name: "New conversation" }));
-    await waitFor(() => expect(lastThreadHref()).toBe("/"));
+    await waitFor(() => expect(lastThreadHref(fake.teamId)).toBe("/"));
 
-    sessionStorage.setItem("kobe.lastThreadId", t);
-    expect(lastThreadHref()).toBe(`/?thread=${t}`);
+    rememberLastThread(fake.teamId, t);
+    expect(lastThreadHref(fake.teamId)).toBe(`/?thread=${t}`);
     forgetLastThread();
-    expect(lastThreadHref()).toBe("/");
+    expect(lastThreadHref(fake.teamId)).toBe("/");
+  });
+
+  it("never offers a thread of another team than the session's active one", async () => {
+    const t = "00000000-0000-4000-8000-0000000000aa";
+    rememberLastThread("team-a", t);
+    expect(lastThreadHref("team-a")).toBe(`/?thread=${t}`);
+    expect(lastThreadHref("team-b")).toBe("/");
+    expect(lastThreadHref(null)).toBe("/");
+    rememberLastThread(fake.teamId, t);
+    render(<ChatReturnLink>Kobe</ChatReturnLink>);
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: "Kobe" }).getAttribute("href")).toBe(`/?thread=${t}`),
+    );
+    cleanup();
+    rememberLastThread("team-a", t); // e.g. another tab switched the session's team since
+    render(<ChatReturnLink>Kobe</ChatReturnLink>);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByRole("link", { name: "Kobe" }).getAttribute("href")).toBe("/");
   });
 
   it("ignores a stored value that is not a thread id", () => {
-    sessionStorage.setItem("kobe.lastThreadId", "/evil?x=1");
-    expect(lastThreadHref()).toBe("/");
+    sessionStorage.setItem("kobe.lastThread", JSON.stringify({ teamId: "team-a", threadId: "/x" }));
+    expect(lastThreadHref("team-a")).toBe("/");
+    sessionStorage.setItem("kobe.lastThread", "not json");
+    expect(lastThreadHref("team-a")).toBe("/");
+  });
+});
+
+/** Holds each `?q=` search until the test releases it, so replies can arrive out of order. */
+function holdSearches(): Map<string, () => void> {
+  const held = new Map<string, () => void>();
+  const inner = fake.fetch;
+  const fetchFn: typeof fetch = async (input, init) => {
+    const url = new URL(String(input), "http://kobe.test");
+    const q = url.searchParams.get("q");
+    if (url.pathname === "/v1/threads" && q !== null) {
+      await new Promise<void>((resolve) => held.set(q, resolve));
+    }
+    return inner(input, init);
+  };
+  Object.defineProperty(fake, "fetch", { value: fetchFn });
+  return held;
+}
+
+const searchBox = () => screen.getByLabelText("Search conversations");
+const resultsPanel = () => screen.queryByRole("region", { name: /^Results for/ });
+
+describe("thread search in the bar", () => {
+  it("drops a reply that arrives after the panel was closed, or after a newer search", async () => {
+    fake.addThread("Quarterly revenue");
+    fake.addThread("Hiring plan");
+    const held = holdSearches();
+    openApp(fake);
+    await composer();
+    const user = userEvent.setup();
+
+    await user.type(searchBox(), "revenue{Enter}");
+    await waitFor(() => expect(held.has("revenue")).toBe(true));
+    await user.keyboard("{Escape}");
+    expect(resultsPanel()).toBeNull();
+    must(held.get("revenue"))();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(resultsPanel()).toBeNull();
+
+    await user.type(searchBox(), "{Enter}");
+    await waitFor(() => expect(held.size).toBe(1)); // "revenue" again replaced the entry
+    await user.clear(searchBox());
+    await user.type(searchBox(), "hiring{Enter}");
+    await waitFor(() => expect(held.has("hiring")).toBe(true));
+    const older = must(held.get("revenue"));
+    must(held.get("hiring"))();
+    const results = within(await screen.findByRole("list", { name: "Search results" }));
+    expect(results.getByRole("button", { name: "Hiring plan" })).toBeTruthy();
+    older();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByRole("region", { name: "Results for hiring" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Quarterly revenue", hidden: false })).toBeTruthy(); // the rail
+    expect(within(must(resultsPanel())).queryByText("Quarterly revenue")).toBeNull();
+  });
+
+  it("closes the results on a click outside, on focus leaving, and when a thread opens", async () => {
+    fake.addThread("Quarterly revenue");
+    const other = fake.addThread("Hiring plan");
+    openApp(fake);
+    await composer();
+    const user = userEvent.setup();
+    const search = async () => {
+      await user.click(searchBox());
+      await user.type(searchBox(), "{Enter}");
+      await screen.findByRole("list", { name: "Search results" });
+    };
+    await user.type(searchBox(), "revenue");
+    await search();
+    await user.click(document.body);
+    expect(resultsPanel()).toBeNull();
+
+    await search();
+    act(() => screen.getByRole("button", { name: "New conversation" }).focus()); // focus moves on
+    expect(resultsPanel()).toBeNull();
+
+    await search();
+    const rail = within(region("rail"));
+    fireEvent.click(await rail.findByRole("button", { name: "Hiring plan" }));
+    await waitFor(() => expect(window.location.search).toBe(`?thread=${other}`));
+    expect(resultsPanel()).toBeNull();
+  });
+
+  it("folds the rail on narrow screens when a search hit opens a thread", async () => {
+    const t = fake.addThread("Quarterly revenue");
+    openApp(fake);
+    await composer();
+    const user = userEvent.setup();
+    const toggle = screen.getByRole("button", { name: "Show conversations" });
+    await user.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    await user.type(searchBox(), "revenue{Enter}");
+    const results = within(await screen.findByRole("list", { name: "Search results" }));
+    await user.click(results.getByRole("button", { name: "Quarterly revenue" }));
+    await waitFor(() => expect(window.location.search).toBe(`?thread=${t}`));
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  });
+});
+
+describe("bar menus", () => {
+  const profile = () =>
+    must(
+      screen.getByText("Profile", { selector: "summary *" }).closest("details"),
+    ) as HTMLDetailsElement;
+  const teams = async () =>
+    must(
+      (await screen.findByRole("navigation", { name: "Teams" })).querySelector("details"),
+    ) as HTMLDetailsElement;
+
+  it("closes the profile menu on a click outside and on Escape", async () => {
+    openApp(fake);
+    await composer();
+    const user = userEvent.setup();
+    await user.click(must(profile().querySelector("summary")));
+    expect(profile().open).toBe(true);
+    await user.click(document.body);
+    expect(profile().open).toBe(false);
+
+    await user.click(must(profile().querySelector("summary")));
+    expect(profile().open).toBe(true);
+    await user.keyboard("{Escape}");
+    expect(profile().open).toBe(false);
+    expect(document.activeElement).toBe(profile().querySelector("summary"));
+  });
+
+  it("keeps at most one of the team switcher and the profile menu open", async () => {
+    openApp(fake);
+    await composer();
+    const switcher = await teams();
+    profile().open = true;
+    switcher.open = true; // e.g. from the keyboard: no click outside involved
+    await waitFor(() => expect(profile().open).toBe(false));
+    profile().open = true;
+    await waitFor(() => expect(switcher.open).toBe(false));
   });
 });

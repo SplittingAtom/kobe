@@ -1,33 +1,17 @@
 "use client";
 
 import { useAuiState } from "@assistant-ui/react";
-import { AgentPickerMenu, useDraftAgentName } from "../chat/agent-picker";
+import { AgentChips } from "../chat/agent-chips";
+import { AgentPickerMenu } from "../chat/agent-picker";
 import { useChatSession, useKobeExtras } from "../chat/kobe-runtime";
 import { ModelPicker } from "../chat/model-picker";
 import { FilesToggleButton } from "../files/files-panel";
 
-const CHIP = "text-muted-foreground rounded-full border px-2 text-xs";
-
 /** The thread's agent: the picker while the conversation is new, then its name (and state). */
 function AgentControl() {
   const session = useChatSession();
-  const state = useKobeExtras()?.state;
-  const summary = state?.summary;
-  const draftName = useDraftAgentName();
-  if (state?.threadId === null && session.canChooseAgent) return <AgentPickerMenu />;
-  const name = summary?.agentName ?? (summary?.agentId == null ? draftName : null);
-  if (!name) return null;
-  const status = summary?.agentStatus;
-  return (
-    <>
-      <span className={CHIP}>{`Agent: ${name}`}</span>
-      {(status === "suspended" || status === "archived") && (
-        <span className="text-destructive border-destructive/40 rounded-full border px-2 text-xs">
-          {status === "suspended" ? "Suspended" : "Archived"}
-        </span>
-      )}
-    </>
-  );
+  const isNew = useKobeExtras()?.state.threadId === null;
+  return isNew && session.canChooseAgent ? <AgentPickerMenu /> : <AgentChips />;
 }
 
 /**

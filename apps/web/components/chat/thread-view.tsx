@@ -9,7 +9,7 @@ import { isThreadRunning, type ThreadState } from "../../lib/chat/thread-state";
 import { ErrorNotice } from "../admin/error-notice";
 import { FilesToggleButton } from "../files/files-panel";
 import { ArtifactList } from "./artifact-list";
-import { useDraftAgentName } from "./agent-picker";
+import { AgentChips } from "./agent-chips";
 import { Composer } from "./composer";
 import { DraftProjectNote, ProjectBar } from "./project-bar";
 import { useKobeExtras } from "./kobe-runtime";
@@ -112,10 +112,6 @@ export function ThreadView({
   readonly contextInBar?: boolean;
 } = {}) {
   const extras = useKobeExtras();
-  const summary = extras?.state.summary;
-  const draftName = useDraftAgentName();
-  const agentName = summary?.agentName ?? (summary?.agentId == null ? draftName : null);
-  const agentStatus = summary?.agentStatus;
   const title = useAuiState((s) => s.threadListItem.title);
   const isEmpty = useAuiState((s) => s.thread.messages.length === 0);
   if (!extras) return null;
@@ -134,18 +130,7 @@ export function ThreadView({
             ? "New conversation"
             : (state.summary?.title ?? title ?? "Untitled conversation")}
         </h2>
-        {agentName && !contextInBar && (
-          <span className="text-muted-foreground rounded-full border px-2 text-xs">
-            {`Agent: ${agentName}`}
-          </span>
-        )}
-        {agentName &&
-          !contextInBar &&
-          (agentStatus === "suspended" || agentStatus === "archived") && (
-            <span className="text-destructive border-destructive/40 rounded-full border px-2 text-xs">
-              {agentStatus === "suspended" ? "Suspended" : "Archived"}
-            </span>
-          )}
+        {!contextInBar && <AgentChips />}
         {label && (
           <span className="text-muted-foreground rounded-full border px-2 text-xs">{label}</span>
         )}

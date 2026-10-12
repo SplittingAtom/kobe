@@ -23,8 +23,14 @@ picker, Files toggle), `ThreadSearch` (moved from the sidebar), `ProfileMenu`, `
   it through `agentChoices()` in `components/chat/testing.tsx`.
 - Builder test pane keeps its in-thread model picker (`ThreadView contextInBar` defaults false).
 - Files panel sits in the artifact column until A2 moves Files into the rail.
-- Last thread is per tab (sessionStorage), forgotten on team switch and sign-out; only a UUID is
-  ever turned into a link.
+- Last thread is per tab (sessionStorage) with its team; the return link asks the server for the
+  session's active team (`/v1/me/teams`) and offers the thread only for that team; forgotten on
+  team switch and sign-out; only a UUID is ever turned into a link.
+- Review (9 findings, all fixed): stale search replies dropped (sequence in state); results close on
+  outside click, blur and thread change; rail folds on any thread change; agent menu reads models
+  once; shared `AgentChips`; Tailwind `sr-only`/chat `.hint`; empty row two hidden; bar menus
+  (`bar-menu.ts`) close on outside click/Escape and exclude each other.
+- e2e caught a server-render crash (tooltip portal read `document`); fixed, with `ssr.test.tsx`.
 - Column floors (360/400) only at ≥ 1100 px; A5 owns the CE7 yield order.
 - Slots left: A2 rail, A4 artifact tabs, A5 breakpoints (`shell-grid.tsx`, `shell.module.css`),
   A7 `IconAction` (`bar-links.tsx`), gauge/Detail/branch indicator (`context-row.tsx`).
