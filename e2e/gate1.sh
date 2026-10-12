@@ -18,7 +18,7 @@ NS="${KOBE_GATE1_NS:-kobe-dev}"
 RELEASE="${KOBE_GATE1_RELEASE:-kobe}"
 STEPS=" ${KOBE_GATE1_STEPS:-chat-real chat-stream probe interrupt cold} "
 TRIALS="${KOBE_GATE1_TRIALS:-20}"
-P95_MAX="${KOBE_GATE1_P95_MS:-8000}"
+P95_MAX="${KOBE_GATE1_P95_MS:-20000}"
 COLD_KEY="${KOBE_GATE1_COLD_USER:-c1}"
 # Model alias the fixtures make each team's default: CI's fake upstream (`fast`, set up by
 # e2e/run.sh) or a real site's catalog model (KOBE_GATE1_MODEL).

@@ -140,6 +140,11 @@ first with history intact"; `e2e/run.sh` "interrupted runs and Retry (KOBE-26)";
 
 ## 5. Hibernated → first token, p95 ≤ 8 s over 20 trials
 
+The e2e checks (`e2e/gate1.sh`, `e2e/run.sh`, `e2e/executor/trials.sh`) gate on **p95 ≤ 20 s** since
+2026-10-12 (Chris's decision, after p95 8.0–8.3 s near-misses on hosted runners ejected PRs from the
+merge queue; KOBE-264). Override with `KOBE_GATE1_P95_MS` / `KOBE_COLD_START_P95_MS`. The D14 target
+below is unchanged.
+
 **Not measurable as specified until KOBE-40/41.** Two proxies, both lower bounds of first token:
 
 - **Pi ready** (KOBE-25 harness, `dist/cli/cold-start.js --probe pi`): router → waker → provider →
@@ -306,10 +311,10 @@ The miss on the real cluster is accepted for now (Chris, 2026-10-04); storage st
 KOBE_GATE1_CONTEXT=<context> KOBE_GATE1_NS=<release namespace> KOBE_GATE1_RELEASE=<release> \
   KOBE_GATE1_OWNER_EMAIL=<owner> KOBE_GATE1_OWNER_PASSWORD=<password> e2e/gate1.sh
 # Steps: KOBE_GATE1_STEPS="chat-real chat-stream probe interrupt cold"; KOBE_GATE1_TRIALS (20),
-# KOBE_GATE1_P95_MS (8000), KOBE_GATE1_COLD_USER (c1), KOBE_GATE1_SPACING_S (0).
+# KOBE_GATE1_P95_MS (20000), KOBE_GATE1_COLD_USER (c1), KOBE_GATE1_SPACING_S (0).
 # Pi-ready harness (KOBE-25):
 kubectl -n <ns> exec deploy/<release>-server -c server -- node dist/cli/cold-start.js \
-  --team-id <team> --user-id <user> --probe pi --trials 20 [--spacing-ms 30000] --p95-max-ms 8000
+  --team-id <team> --user-id <user> --probe pi --trials 20 [--spacing-ms 30000] --p95-max-ms 20000
 ```
 
 The script is re-runnable: users, teams and sandboxes are reused; each run adds threads.

@@ -52,9 +52,9 @@ executor_first_token_trials() {
   if ((${#fts[@]} == n)); then
     echo "     first-token (executor ${EXEC_LABEL}): n=$n p50=$(percentile 50 "${fts[@]}") ms p95=$(percentile 95 "${fts[@]}") ms"
     echo "     tool-run (executor ${EXEC_LABEL}, first tool after wake): n=${#tools[@]} p50=$(percentile 50 "${tools[@]}") ms p95=$(percentile 95 "${tools[@]}") ms"
-    if (($(percentile 95 "${fts[@]}") <= ${KOBE_COLD_START_P95_MS:-8000})); then
-      ok "hibernated → first token p95 within ${KOBE_COLD_START_P95_MS:-8000} ms (executor ${EXEC_LABEL})"
-    else fail "hibernated → first token p95 within ${KOBE_COLD_START_P95_MS:-8000} ms (executor ${EXEC_LABEL})"; fi
+    if (($(percentile 95 "${fts[@]}") <= ${KOBE_COLD_START_P95_MS:-20000})); then
+      ok "hibernated → first token p95 within ${KOBE_COLD_START_P95_MS:-20000} ms (executor ${EXEC_LABEL})"
+    else fail "hibernated → first token p95 within ${KOBE_COLD_START_P95_MS:-20000} ms (executor ${EXEC_LABEL})"; fi
   else fail "every cold-start trial produced a first token (${#fts[@]} of $n; executor ${EXEC_LABEL})"; fi
 }
 
