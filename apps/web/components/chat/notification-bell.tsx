@@ -198,6 +198,7 @@ export function NotificationBell({
       <IconAction
         command="notifications"
         badge={badge}
+        count={unread}
         className={shellStyles.iconLink}
         aria-expanded={open}
         aria-controls={panelId}

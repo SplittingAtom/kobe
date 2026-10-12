@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useId, type ComponentProps, type ReactNode } from "react";
+import { useId, type ComponentProps, type MouseEvent, type ReactNode } from "react";
 import {
   ariaKeyShortcuts,
   command,
@@ -17,7 +17,20 @@ import styles from "./icon-action.module.css";
 /** CE13: the tooltip opens after 300 ms. */
 export const TOOLTIP_DELAY_MS = 300;
 
+/**
+ * The one tooltip provider for IconActions, mounted at the root of each surface that renders them
+ * (the chat app, the agent builder's test pane), so neighbouring icons share Radix's skip-delay:
+ * after one tooltip, the next opens at once.
+ */
+export function IconActionProvider({ children }: { readonly children: ReactNode }) {
+  return <TooltipProvider delayDuration={TOOLTIP_DELAY_MS}>{children}</TooltipProvider>;
+}
+
 const SIZES = { sm: "size-6 p-1 active:scale-90", md: "size-8" } as const;
+
+// Disabled actions stay hoverable (the tooltip still names them) and focusable; they only look off.
+const INERT =
+  "aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:active:scale-100";
 
 interface OwnProps {
   /** The registry entry: icon, name, shortcut and (for navigation) href. */
@@ -26,6 +39,8 @@ interface OwnProps {
   readonly label?: string | undefined;
   /** What is new behind this icon ("2 unread"): shows the dot and joins the accessible label. */
   readonly badge?: string | undefined;
+  /** With `badge`: a visible count (1–99, then 99+) in place of the dot. */
+  readonly count?: number | undefined;
   /** A second tooltip line (why the action is unavailable); also the accessible description. */
   readonly description?: string | undefined;
   /** Overrides the registry's shortcut; `null` shows none. */
@@ -37,6 +52,7 @@ interface OwnProps {
   /** A `<details>` menu's disclosure. */
   readonly as?: "summary" | undefined;
   readonly size?: keyof typeof SIZES | undefined;
+  readonly variant?: "ghost" | "outline" | "default" | "destructive" | undefined;
   readonly side?: "top" | "bottom" | "left" | "right" | undefined;
   /** Replaces the command's icon (the copy action's check mark). */
   readonly children?: ReactNode;
@@ -49,25 +65,47 @@ function onMac(): boolean {
   return typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 }
 
+function isInert(disabled: boolean | undefined, ariaDisabled: unknown): boolean {
+  return disabled === true || ariaDisabled === true || ariaDisabled === "true";
+}
+
+function Badge({ count }: { readonly count: number | undefined }) {
+  if (count === undefined) return <span className={styles.dot} data-badge aria-hidden="true" />;
+  return (
+    <span className={styles.count} data-badge aria-hidden="true">
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
+
 /**
  * One navigation or action icon (CE13, KOBE-203): a lucide icon with a radix tooltip that names the
  * action and shows its shortcut. The name is also the accessible label; a dot badge marks a panel
  * with something new. Content (thread titles, names, markers, tables) stays text, never this.
- * Button props pass through, so assistant-ui primitives can render it with `asChild`.
+ *
+ * Props pass through, so assistant-ui primitives can render it with `asChild`, under one rule on
+ * every path: the action's own label, `data-command` and shortcut win over passed props, and a
+ * passed `aria-describedby` is kept alongside the description. `disabled` becomes `aria-disabled`
+ * with the click swallowed, so a disabled action still shows its tooltip. Needs an
+ * `IconActionProvider` above it.
  */
 export function IconAction({
   command: id,
   label,
   badge,
+  count,
   description,
   shortcut,
   href,
   download,
   as,
   size = "md",
+  variant = "ghost",
   side = "bottom",
   className,
   children,
+  disabled,
+  onClick,
   ...rest
 }: IconActionProps) {
   const cmd = command(id);
@@ -77,56 +115,65 @@ export function IconAction({
   const name = badge ? `${named}, ${badge}` : named;
   const keys = shortcut === undefined ? (SHORTCUTS_BOUND ? cmd.shortcut : undefined) : shortcut;
   const target = href ?? cmd.href;
+  const inert = isInert(disabled, rest["aria-disabled"]);
+  const describedBy = [rest["aria-describedby"], description ? descriptionId : undefined]
+    .filter(Boolean)
+    .join(" ");
 
-  const own = {
+  const props = {
+    ...rest,
     "aria-label": name,
     "data-command": id,
     ...(keys ? { "aria-keyshortcuts": ariaKeyShortcuts(keys) } : {}),
-    ...(description ? { "aria-describedby": descriptionId } : {}),
+    ...(describedBy ? { "aria-describedby": describedBy } : {}),
+    ...(inert ? { "aria-disabled": true } : {}),
+    onClick: (e: MouseEvent<HTMLElement>) => {
+      if (inert) {
+        e.preventDefault();
+        return;
+      }
+      onClick?.(e as MouseEvent<HTMLButtonElement>);
+    },
   };
   const face = (
     <>
       {children ?? <Icon aria-hidden />}
-      {badge && <span className={styles.dot} data-badge aria-hidden="true" />}
+      {badge && <Badge count={count} />}
     </>
   );
+  const linkProps = props as unknown as ComponentProps<"a">;
   // Links and summaries take the button's look through `asChild`; actions are buttons.
   const element =
     target !== undefined ? (
       download ? (
-        <a href={target} download {...own}>
+        <a {...linkProps} href={target} download>
           {face}
         </a>
       ) : (
-        <Link href={target} {...own}>
+        <Link {...(props as unknown as Omit<ComponentProps<typeof Link>, "href">)} href={target}>
           {face}
         </Link>
       )
     ) : as === "summary" ? (
-      <summary {...own}>{face}</summary>
-    ) : undefined;
-  const classes = cn(styles.action, SIZES[size], className);
+      <summary {...(props as unknown as ComponentProps<"summary">)}>{face}</summary>
+    ) : (
+      <button type="button" {...props}>
+        {face}
+      </button>
+    );
 
   return (
-    <TooltipProvider delayDuration={TOOLTIP_DELAY_MS}>
+    <>
       <Tooltip>
         <TooltipTrigger asChild>
-          {element === undefined ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className={classes}
-              {...own}
-              {...rest}
-            >
-              {face}
-            </Button>
-          ) : (
-            <Button asChild variant="ghost" size="icon" className={classes} {...rest}>
-              {element}
-            </Button>
-          )}
+          <Button
+            asChild
+            variant={variant}
+            size="icon"
+            className={cn(styles.action, SIZES[size], INERT, className)}
+          >
+            {element}
+          </Button>
         </TooltipTrigger>
         <TooltipContent side={side}>
           {name}
@@ -139,6 +186,6 @@ export function IconAction({
           {description}
         </span>
       )}
-    </TooltipProvider>
+    </>
   );
 }

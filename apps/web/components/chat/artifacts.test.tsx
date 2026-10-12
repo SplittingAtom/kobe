@@ -97,8 +97,8 @@ describe("versions and download", () => {
       within(panel).getByRole("link", { name: "Download version 2" }).getAttribute("href"),
     ).toBe(`/v1/artifacts/${id}/versions/2/content?team=${fake.teamId}`);
     expect(
-      (within(panel).getByRole("button", { name: "Next version" }) as HTMLButtonElement).disabled,
-    ).toBe(true);
+      within(panel).getByRole("button", { name: "Next version" }).getAttribute("aria-disabled"),
+    ).toBe("true");
 
     await user.click(within(panel).getByRole("button", { name: "Previous version" }));
     expect(await within(panel).findByText("first")).toBeTruthy();

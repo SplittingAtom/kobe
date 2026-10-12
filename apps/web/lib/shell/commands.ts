@@ -1,5 +1,7 @@
 import {
   ArchiveRestoreIcon,
+  ArrowDownIcon,
+  ArrowUpIcon,
   BellIcon,
   BotIcon,
   BrainIcon,
@@ -11,11 +13,15 @@ import {
   CopyIcon,
   DownloadIcon,
   FolderIcon,
+  FolderKanbanIcon,
+  MicIcon,
   PanelLeftIcon,
   PanelRightOpenIcon,
+  PaperclipIcon,
   PencilIcon,
   RefreshCwIcon,
   ServerCogIcon,
+  SquareIcon,
   SquarePenIcon,
   Trash2Icon,
   UsersIcon,
@@ -35,8 +41,8 @@ import type { ConsoleKind } from "../admin/nav/types";
  * because they act on the message or thread on screen; C6/C7 add a handler map for the palette.
  */
 
-/** Where the command's icon sits. */
-export type CommandScope = "bar" | "rail" | "message" | "artifact";
+/** Where the command's icon sits. `thread`: the conversation's own chrome (banner, jump pill). */
+export type CommandScope = "bar" | "rail" | "thread" | "message" | "composer" | "artifact";
 
 /** What availability depends on; grows with the palette (thread state, selection). */
 export interface CommandContext {
@@ -50,6 +56,8 @@ export interface Command {
   readonly name: string;
   readonly icon: LucideIcon;
   readonly scope: CommandScope;
+  /** Bar links render in two navs: the member's areas and the consoles. */
+  readonly group?: "areas" | "consoles";
   /** CE23 notation: `Mod` is Cmd on macOS and Ctrl elsewhere, e.g. `Mod+Shift+F`. */
   readonly shortcut?: string;
   /** Navigation commands: where they go. */
@@ -66,17 +74,33 @@ export const SHORTCUTS_BOUND = false;
 
 const LIST = [
   // Bar, row one: the member's areas, the consoles, notifications, profile.
-  { id: "my-memory", name: "My memory", icon: BrainIcon, scope: "bar", href: "/me/memory" },
+  {
+    id: "my-memory",
+    group: "areas",
+    name: "My memory",
+    icon: BrainIcon,
+    scope: "bar",
+    href: "/me/memory",
+  },
   {
     id: "my-schedules",
+    group: "areas",
     name: "My schedules",
     icon: CalendarClockIcon,
     scope: "bar",
     href: "/me/schedules",
   },
-  { id: "my-agents", name: "My agents", icon: BotIcon, scope: "bar", href: "/me/agents" },
+  {
+    id: "my-agents",
+    group: "areas",
+    name: "My agents",
+    icon: BotIcon,
+    scope: "bar",
+    href: "/me/agents",
+  },
   {
     id: "team-console",
+    group: "consoles",
     name: "Team console",
     icon: UsersIcon,
     scope: "bar",
@@ -85,6 +109,7 @@ const LIST = [
   },
   {
     id: "site-console",
+    group: "consoles",
     name: "Site console",
     icon: ServerCogIcon,
     scope: "bar",
@@ -115,13 +140,22 @@ const LIST = [
   { id: "restore-thread", name: "Restore", icon: ArchiveRestoreIcon, scope: "rail" },
   { id: "delete-thread", name: "Delete forever", icon: CircleXIcon, scope: "rail" },
   { id: "export-threads", name: "Export my conversations", icon: DownloadIcon, scope: "rail" },
+  // The conversation's chrome.
+  { id: "open-project", name: "Project", icon: FolderKanbanIcon, scope: "thread" },
+  { id: "jump-to-latest", name: "Scroll to bottom", icon: ArrowDownIcon, scope: "thread" },
   // Message actions.
   { id: "copy", name: "Copy", icon: CopyIcon, scope: "message" },
   { id: "edit", name: "Edit", icon: PencilIcon, scope: "message", shortcut: "Mod+Shift+E" },
   { id: "regenerate", name: "Regenerate", icon: RefreshCwIcon, scope: "message" },
   { id: "previous-branch", name: "Previous version", icon: ChevronLeftIcon, scope: "message" },
   { id: "next-branch", name: "Next version", icon: ChevronRightIcon, scope: "message" },
+  { id: "copy-code", name: "Copy code", icon: CopyIcon, scope: "message" },
   { id: "open-artifact", name: "Open artifact", icon: PanelRightOpenIcon, scope: "message" },
+  // Composer.
+  { id: "attach", name: "Attach files", icon: PaperclipIcon, scope: "composer" },
+  { id: "dictate", name: "Dictate", icon: MicIcon, scope: "composer" },
+  { id: "send", name: "Send", icon: ArrowUpIcon, scope: "composer" },
+  { id: "stop", name: "Stop", icon: SquareIcon, scope: "composer", shortcut: "Mod+." },
   // Artifact column (artifact and files panels).
   {
     id: "artifact-previous",
@@ -137,11 +171,14 @@ const LIST = [
 
 export type CommandId = (typeof LIST)[number]["id"];
 
-export const COMMANDS: readonly Command[] = LIST;
+/** A command of this registry: its id is known to the type system. */
+export type RegisteredCommand = Command & { readonly id: CommandId };
 
-const BY_ID: ReadonlyMap<string, Command> = new Map(LIST.map((c) => [c.id, c]));
+export const COMMANDS: readonly RegisteredCommand[] = LIST;
 
-export function command(id: CommandId): Command {
+const BY_ID: ReadonlyMap<string, RegisteredCommand> = new Map(LIST.map((c) => [c.id, c]));
+
+export function command(id: CommandId): RegisteredCommand {
   const found = BY_ID.get(id);
   if (!found) throw new Error(`Unknown command: ${id}`);
   return found;
@@ -152,19 +189,45 @@ export function isAvailable(cmd: Command, ctx: CommandContext): boolean {
 }
 
 /** The commands of one scope available in `ctx`, in registry order. */
-export function commandsIn(scope: CommandScope, ctx: CommandContext): readonly Command[] {
+export function commandsIn(scope: CommandScope, ctx: CommandContext): readonly RegisteredCommand[] {
   return COMMANDS.filter((c) => c.scope === scope && isAvailable(c, ctx));
 }
 
-/** A shortcut as the platform writes it: `⌘⇧F` on macOS, `Ctrl+Shift+F` elsewhere. */
-export function formatShortcut(shortcut: string, mac: boolean): string {
+const MAC_KEYS: Readonly<Record<string, string>> = {
+  Mod: "⌘",
+  Ctrl: "⌃",
+  Alt: "⌥",
+  Shift: "⇧",
+  Escape: "Esc",
+};
+const OTHER_KEYS: Readonly<Record<string, string>> = { Mod: "Ctrl", Escape: "Esc" };
+const ARIA_KEYS: Readonly<Record<string, string>> = { Ctrl: "Control" };
+
+/** `Mod+Shift+F` → `["Mod", "Shift", "F"]`; a trailing `+` is the plus key itself. */
+function keysOf(shortcut: string): readonly string[] {
   const keys = shortcut.split("+");
-  if (!mac) return keys.map((k) => (k === "Mod" ? "Ctrl" : k)).join("+");
-  const MAC: Readonly<Record<string, string>> = { Mod: "⌘", Shift: "⇧", Alt: "⌥" };
-  return keys.map((k) => MAC[k] ?? k).join("");
+  return keys.at(-1) === "" ? [...keys.slice(0, -2), "+"] : keys;
 }
 
-/** `aria-keyshortcuts` names both platforms' forms, so it is the same on server and client. */
+/**
+ * A shortcut as the platform writes it: macOS runs the symbols together (`⌘⇧F`, `⌃K`, `⇧?`),
+ * other systems join names with `+` (`Ctrl+Shift+F`). `Escape` is `Esc` on both.
+ */
+export function formatShortcut(shortcut: string, mac: boolean): string {
+  const keys = keysOf(shortcut);
+  return mac
+    ? keys.map((k) => MAC_KEYS[k] ?? k).join("")
+    : keys.map((k) => OTHER_KEYS[k] ?? k).join("+");
+}
+
+/**
+ * The `aria-keyshortcuts` value. A `Mod` shortcut names both platforms' forms (`Control+N Meta+N`),
+ * so server and client render the same; any other shortcut is one value (`Control+K`, `Escape`).
+ */
 export function ariaKeyShortcuts(shortcut: string): string {
-  return ["Control", "Meta"].map((mod) => shortcut.replace("Mod", mod)).join(" ");
+  const keys = keysOf(shortcut).map((k) => ARIA_KEYS[k] ?? k);
+  if (!keys.includes("Mod")) return keys.join("+");
+  return ["Control", "Meta"]
+    .map((mod) => keys.map((k) => (k === "Mod" ? mod : k)).join("+"))
+    .join(" ");
 }

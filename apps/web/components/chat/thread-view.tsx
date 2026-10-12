@@ -1,9 +1,8 @@
 "use client";
 
 import { AuiIf, SuggestionPrimitive, ThreadPrimitive, useAuiState } from "@assistant-ui/react";
-import { ArrowDownIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button";
+import { IconAction } from "../shell/icon-action";
 import { Skeleton } from "../ui/skeleton";
 import { isThreadRunning, type ThreadState } from "../../lib/chat/thread-state";
 import { ErrorNotice } from "../admin/error-notice";
@@ -74,13 +73,11 @@ function ThreadSuggestions() {
 function ScrollToBottom() {
   return (
     <ThreadPrimitive.ScrollToBottom asChild>
-      <TooltipIconButton
-        tooltip="Scroll to bottom"
+      <IconAction
+        command="jump-to-latest"
         variant="outline"
-        className="absolute -top-12 z-10 size-9 self-center rounded-full p-4 disabled:invisible"
-      >
-        <ArrowDownIcon />
-      </TooltipIconButton>
+        className="absolute -top-12 z-10 size-9 self-center rounded-full p-4 aria-disabled:invisible"
+      />
     </ThreadPrimitive.ScrollToBottom>
   );
 }

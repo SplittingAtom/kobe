@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { IconActionProvider } from "../shell/icon-action";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,7 +8,11 @@ import { Markdown, safeUrl } from "./markdown";
 afterEach(() => cleanup());
 
 function html(text: string): HTMLElement {
-  return render(<Markdown text={text} />).container;
+  return render(
+    <IconActionProvider>
+      <Markdown text={text} />
+    </IconActionProvider>,
+  ).container;
 }
 
 /** Nothing executable or loading: no script/iframe/img/object, no on* or style attributes. */

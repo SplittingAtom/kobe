@@ -2,7 +2,6 @@
 
 import "../../lib/security/zod-jitless";
 import { AssistantRuntimeProvider, Suggestions, useAui } from "@assistant-ui/react";
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { TeamInvites } from "../../app/team-invites";
 import type { ApiError } from "../../lib/api/client";
@@ -18,6 +17,8 @@ import { ArtifactPanel, ArtifactPanelProvider } from "./artifact-panel";
 import { FilesPanel, FilesPanelProvider } from "../files/files-panel";
 import { ContextRow } from "../shell/context-row";
 import { ShellGrid } from "../shell/shell-grid";
+import { IconActionProvider } from "../shell/icon-action";
+import { InlineLink } from "../shell/text-links";
 import { ShellSlot, ShellSlotsProvider } from "../shell/shell-slots";
 import { ThreadSearch } from "../shell/thread-search";
 import { UtilityBar } from "../shell/utility-bar";
@@ -230,7 +231,7 @@ export function ChatApp({
   else if (team.status === "signedOut") {
     body = (
       <p className={styles.empty}>
-        <Link href="/sign-in">Sign in</Link> to chat with your agents.
+        <InlineLink href="/sign-in">Sign in</InlineLink> to chat with your agents.
       </p>
     );
   } else if (team.status === "noTeam") {
@@ -250,16 +251,18 @@ export function ChatApp({
   }
 
   return (
-    <ShellSlotsProvider>
-      <div className={styles.app} data-kobe-chat>
-        {/* eslint-disable-next-line no-restricted-syntax -- a skip link is text by design (WCAG 2.4.1) */}
-        <a className={styles.skipLink} href="#kobe-chat-main">
-          Skip to the conversation
-        </a>
-        <UtilityBar teamId={teamId} fetchFn={fetchFn} onOpenThread={openThreadFromHeader} />
-        <TeamInvites />
-        {body}
-      </div>
-    </ShellSlotsProvider>
+    <IconActionProvider>
+      <ShellSlotsProvider>
+        <div className={styles.app} data-kobe-chat>
+          {/* eslint-disable-next-line no-restricted-syntax -- a skip link is text by design (WCAG 2.4.1) */}
+          <a className={styles.skipLink} href="#kobe-chat-main">
+            Skip to the conversation
+          </a>
+          <UtilityBar teamId={teamId} fetchFn={fetchFn} onOpenThread={openThreadFromHeader} />
+          <TeamInvites />
+          {body}
+        </div>
+      </ShellSlotsProvider>
+    </IconActionProvider>
   );
 }

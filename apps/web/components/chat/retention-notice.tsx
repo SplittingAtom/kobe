@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { XIcon } from "lucide-react";
 import { threadExportUrl, type TeamRetentionNotice } from "../../lib/chat/api";
-import { IconAction } from "../shell/icon-action";
+import { InlineLink } from "../shell/text-links";
 import { useChatSession } from "./kobe-runtime";
 import styles from "./chat.module.css";
 
@@ -69,14 +69,12 @@ export function RetentionNotice() {
         <time dateTime={upcoming.effectiveAt}>
           {when.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
         </time>
-        . Export your conversations to keep a copy.
+        .{" "}
+        <InlineLink href={threadExportUrl(session.teamId)} download>
+          Export your conversations
+        </InlineLink>{" "}
+        to keep a copy.
       </p>
-      <IconAction
-        command="export-threads"
-        label="Export your conversations"
-        href={threadExportUrl(session.teamId)}
-        download
-      />
       <button
         type="button"
         className="hover:bg-muted inline-flex size-7 shrink-0 items-center justify-center rounded-md"

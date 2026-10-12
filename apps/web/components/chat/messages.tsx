@@ -119,7 +119,7 @@ function PendingAction({ command }: { readonly command: "edit" | "regenerate" })
       size="sm"
       aria-disabled="true"
       description={ROOT_BRANCHING_PENDING}
-      className="cursor-not-allowed opacity-50 hover:bg-transparent"
+      className="hover:bg-transparent"
     />
   );
 }

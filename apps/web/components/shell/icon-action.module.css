@@ -33,3 +33,18 @@
   margin-top: 0.25rem;
   opacity: 0.85;
 }
+
+/* A visible count in place of the dot (the notification bell). */
+.count {
+  position: absolute;
+  top: -0.25rem;
+  right: -0.375rem;
+  min-width: 1.125rem;
+  padding: 0 0.25rem;
+  font-size: 0.6875rem;
+  line-height: 1.125rem;
+  text-align: center;
+  color: #fff;
+  background: var(--admin-danger, #c62828);
+  border-radius: 999px;
+}

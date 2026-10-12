@@ -11,6 +11,7 @@ import type { ApiError } from "../../lib/api/client";
 import { threadExportUrl } from "../../lib/chat/api";
 import { ErrorNotice } from "../admin/error-notice";
 import { IconAction } from "../shell/icon-action";
+import { InlineLink } from "../shell/text-links";
 import { useChatSession } from "./kobe-runtime";
 import styles from "./chat.module.css";
 
@@ -155,7 +156,9 @@ export function ThreadSidebar({ listError }: { readonly listError: ApiError | nu
             </button>
           </div>
           {view === "scheduled" && (
-            <p className={styles.hint}>Conversations your schedules started.</p>
+            <p className={styles.hint}>
+              Conversations your <InlineLink href="/me/schedules">schedules</InlineLink> started.
+            </p>
           )}
           {view === "trash" && (
             <p className={styles.hint}>

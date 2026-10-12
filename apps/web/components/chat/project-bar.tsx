@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { IconAction } from "../shell/icon-action";
 import { useEffect, useState } from "react";
 import { createProjectsApi } from "../../lib/projects/api";
 import { isBusy } from "../../lib/chat/thread-state";
@@ -66,7 +66,7 @@ export function ProjectBar({
           ? " Members of the project can read and fork this conversation."
           : " Only you can see this conversation."}
       </span>
-      <Link href={`/me/projects/${summary.projectId}`}>Project</Link>
+      <IconAction command="open-project" href={`/me/projects/${summary.projectId}`} size="sm" />
     </div>
   );
 }

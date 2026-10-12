@@ -3,6 +3,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubApi, summary } from "../admin/testing";
+import { IconActionProvider } from "../shell/icon-action";
 import { NotificationBell } from "./notification-bell";
 
 afterEach(() => {
@@ -76,7 +77,11 @@ function hold(...keys: string[]) {
 }
 
 function renderBell(onOpenThread = vi.fn()) {
-  render(<NotificationBell teamId="t-1" onOpenThread={onOpenThread} />);
+  render(
+    <IconActionProvider>
+      <NotificationBell teamId="t-1" onOpenThread={onOpenThread} />
+    </IconActionProvider>,
+  );
   return onOpenThread;
 }
 
@@ -89,8 +94,7 @@ describe("notification bell (KOBE-181, ac-1)", () => {
     await waitFor(async () =>
       expect((await bell()).getAttribute("aria-label")).toBe("Notifications, 2 unread"),
     );
-    // CE13: a dot badge; the count is in the label (and the tooltip).
-    expect((await bell()).querySelector("[data-badge]")).toBeTruthy();
+    expect(screen.getByText("2")).toBeTruthy();
   });
 
   it("has no badge when everything is read, and names the bell plainly", async () => {
