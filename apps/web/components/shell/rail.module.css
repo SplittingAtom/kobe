@@ -1,0 +1,184 @@
+/* The workspace rail (CE5, KOBE-198): team name, then Threads over Files, each scrolling on its
+   own. The grid gives it 280 px, or 48 px collapsed (shell.module.css). */
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--admin-panel);
+  border-bottom: 1px solid var(--admin-border);
+}
+
+.rail[data-collapsed] {
+  flex-direction: row;
+  gap: 0.25rem;
+  align-items: center;
+  padding: 0.25rem;
+}
+
+@media (min-width: 48rem) {
+  .rail {
+    height: 100%;
+    border-bottom: 0;
+    border-inline-end: 1px solid var(--admin-border);
+  }
+
+  .rail[data-collapsed] {
+    flex-direction: column;
+    padding: 0.5rem 0.25rem;
+  }
+}
+
+.header {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+  min-height: 2.75rem;
+  padding: 0.25rem 0.5rem 0.25rem 1rem;
+}
+
+.team {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Threads, divider, Files; the rows' split is set inline from the divider's position. */
+.sections {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  outline: none;
+}
+
+.sectionBody {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sectionHeader {
+  display: flex;
+  gap: 0.125rem;
+  align-items: center;
+  padding: 0.25rem 0.5rem 0.25rem 1rem;
+}
+
+.sectionTitle {
+  flex: 1;
+  margin: 0;
+  color: var(--admin-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.section:focus-visible .sectionTitle {
+  color: var(--admin-fg);
+  text-decoration: underline;
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  padding: 0 0.5rem 0.75rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.divider {
+  position: relative;
+  height: 0.5rem;
+  cursor: row-resize;
+  touch-action: none;
+  outline: none;
+}
+
+.divider::after {
+  position: absolute;
+  inset: calc(50% - 0.5px) 0 auto;
+  height: 1px;
+  background: var(--admin-border);
+  content: "";
+}
+
+.divider:hover::after,
+.divider:focus-visible::after {
+  inset: calc(50% - 1.5px) 0 auto;
+  height: 3px;
+  background: var(--admin-accent);
+}
+
+.group + .group {
+  margin-top: 0.25rem;
+}
+
+.groupHeading {
+  margin: 0;
+  font-size: inherit;
+}
+
+.groupToggle {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+  width: 100%;
+  padding: 0.25rem;
+  color: var(--admin-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: start;
+  background: none;
+  border: 0;
+  border-radius: 0.25rem;
+  cursor: pointer;
+}
+
+.groupToggle:hover {
+  color: var(--admin-fg);
+}
+
+.chevron {
+  width: 0.875rem;
+  height: 0.875rem;
+  transition: transform 120ms ease;
+}
+
+.groupToggle[aria-expanded="true"] .chevron {
+  transform: rotate(90deg);
+}
+
+.groupLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.groupCount {
+  font-weight: 400;
+}
+
+.loadMore {
+  margin: 0.5rem 0.25rem 0;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.8rem;
+  background: none;
+  border: 1px solid var(--admin-border);
+  border-radius: 0.375rem;
+  cursor: pointer;
+}

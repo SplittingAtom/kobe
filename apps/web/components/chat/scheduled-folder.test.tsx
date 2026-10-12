@@ -19,19 +19,17 @@ afterEach(() => {
 });
 
 describe("Scheduled folder (KOBE-175, ac-3)", () => {
-  it("holds only schedule threads and keeps them out of Conversations", async () => {
+  it("holds only schedule threads and keeps them out of the others", async () => {
     fake.addThread("Plain chat");
     const ran = fake.addThread("Morning digest");
     fake.setScheduleId(ran, SCHEDULE);
     openApp(fake);
-    const user = userEvent.setup();
-    const conversations = within(await screen.findByRole("list", { name: "Your conversations" }));
+    const conversations = within(await screen.findByRole("list", { name: "Your threads" }));
     await waitFor(() =>
       expect(conversations.getByRole("button", { name: "Plain chat" })).toBeTruthy(),
     );
     expect(conversations.queryByRole("button", { name: "Morning digest" })).toBeNull();
 
-    await user.click(screen.getByRole("button", { name: "Scheduled" }));
     const scheduled = within(await screen.findByRole("list", { name: "Scheduled" }));
     expect(scheduled.getByRole("button", { name: "Morning digest" })).toBeTruthy();
     expect(scheduled.queryByRole("button", { name: "Plain chat" })).toBeNull();

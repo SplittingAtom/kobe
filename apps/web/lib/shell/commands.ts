@@ -14,8 +14,9 @@ import {
   DownloadIcon,
   FolderIcon,
   FolderKanbanIcon,
+  MessagesSquareIcon,
   MicIcon,
-  PanelLeftIcon,
+  PanelLeftCloseIcon,
   PanelRightOpenIcon,
   PaperclipIcon,
   PencilIcon,
@@ -118,7 +119,7 @@ const LIST = [
   },
   { id: "notifications", name: "Notifications", icon: BellIcon, scope: "bar" },
   { id: "profile", name: "Profile", icon: CircleUserIcon, scope: "bar" },
-  // Bar, row two: the open thread's context.
+  // Bar, row two: the open thread's context. Files shows the rail's Files section.
   { id: "files", name: "Files", icon: FolderIcon, scope: "bar", shortcut: "Mod+Shift+F" },
   // Rail.
   {
@@ -130,11 +131,14 @@ const LIST = [
   },
   {
     id: "toggle-rail",
-    name: "Conversations",
-    icon: PanelLeftIcon,
+    name: "Collapse the rail",
+    icon: PanelLeftCloseIcon,
     scope: "rail",
     shortcut: "Mod+B",
   },
+  // The collapsed rail (48 px): new thread (above), threads and files; each expands it.
+  { id: "show-threads", name: "Show threads", icon: MessagesSquareIcon, scope: "rail" },
+  { id: "show-files", name: "Show files", icon: FolderIcon, scope: "rail" },
   { id: "rename-thread", name: "Rename", icon: PencilIcon, scope: "rail" },
   { id: "trash-thread", name: "Move to Trash", icon: Trash2Icon, scope: "rail" },
   { id: "restore-thread", name: "Restore", icon: ArchiveRestoreIcon, scope: "rail" },
@@ -156,7 +160,7 @@ const LIST = [
   { id: "dictate", name: "Dictate", icon: MicIcon, scope: "composer" },
   { id: "send", name: "Send", icon: ArrowUpIcon, scope: "composer" },
   { id: "stop", name: "Stop", icon: SquareIcon, scope: "composer", shortcut: "Mod+." },
-  // Artifact column (artifact and files panels).
+  // Artifact column.
   {
     id: "artifact-previous",
     name: "Previous version",
@@ -166,7 +170,6 @@ const LIST = [
   { id: "artifact-next", name: "Next version", icon: ChevronRightIcon, scope: "artifact" },
   { id: "artifact-download", name: "Download", icon: DownloadIcon, scope: "artifact" },
   { id: "artifact-close", name: "Close artifact", icon: XIcon, scope: "artifact" },
-  { id: "files-close", name: "Close files", icon: XIcon, scope: "artifact" },
 ] as const satisfies readonly Command[];
 
 export type CommandId = (typeof LIST)[number]["id"];

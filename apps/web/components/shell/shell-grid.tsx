@@ -6,7 +6,7 @@ import styles from "./shell.module.css";
  * artifact column takes no space while empty, so the conversation fills what the rail leaves.
  *
  * Slots for the Phase A tickets that plug in here:
- * - rail: A2 (KOBE-198) replaces the thread sidebar with Threads over Files, 280/48 px;
+ * - rail: the workspace rail (A2, KOBE-198), 280 px or 48 px collapsed;
  * - artifact: A4 (KOBE-200) puts the artifact tabs here, drag-resizable against the conversation;
  * - breakpoints: A5 (KOBE-201) owns the CE7 yield order and the overlay sheet (shell.module.css).
  */

@@ -1,10 +1,9 @@
 // @vitest-environment happy-dom
-import { IconActionProvider } from "../shell/icon-action";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createFilesApi } from "../../lib/files/api";
-import { FilesPanel, FilesPanelProvider, FilesToggleButton } from "./files-panel";
+import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
+import { ChatApp } from "../chat/chat-app";
 
 interface Seen {
   readonly method: string;
@@ -35,16 +34,22 @@ const TREE: Record<string, Entry[]> = {
 
 let seen: Seen[];
 let overrides: Record<string, () => Response>;
+let fake: FakeKobe;
+let wakeGate: Promise<void>;
 
+/** The workspace routes from TREE; everything else goes to the fake chat server. */
 const fetchFn: typeof fetch = async (input, init = {}) => {
   const url = String(input);
   const method = init.method ?? "GET";
+  if (!url.startsWith("/v1/workspace/")) return fake.fetch(input, init);
   seen.push({ method, url });
   const key = `${method} ${url.split("?")[0]}`;
   const override = overrides[key];
   if (override) return override();
-  if (key === "POST /v1/workspace/wake")
+  if (key === "POST /v1/workspace/wake") {
+    await wakeGate;
     return Response.json({ status: "waking" }, { status: 202 });
+  }
   if (key === "GET /v1/workspace/files") {
     const path = new URL(url, "http://x").searchParams.get("path") ?? "";
     const entries = TREE[path];
@@ -60,74 +65,82 @@ const fetchFn: typeof fetch = async (input, init = {}) => {
   return new Response(null, { status: 500 });
 };
 
-function mount(refreshAfterWakeMs = 0) {
-  const api = createFilesApi("team-1", fetchFn);
-  return render(
-    <IconActionProvider>
-      <FilesPanelProvider scope="team-1">
-        <FilesToggleButton />
-        <FilesPanel api={api} refreshAfterWakeMs={refreshAfterWakeMs} />
-      </FilesPanelProvider>
-    </IconActionProvider>,
-  );
+function mount() {
+  window.history.replaceState(null, "", "/");
+  return render(<ChatApp fetchFn={fetchFn} eventSource={fake.eventSource} />);
 }
 
+/** The rail's Files section, once the root is listed. */
 async function open() {
   const user = userEvent.setup();
   mount();
-  await user.click(screen.getByRole("button", { name: "Files" }));
-  const panel = await screen.findByRole("region", { name: "Workspace files" });
+  const panel = await screen.findByRole("region", { name: "Files" });
   await within(panel).findByText("report.csv");
   return { user, panel };
 }
 
+const woken = () => seen.some((s) => s.method === "POST" && s.url === "/v1/workspace/wake");
+
 beforeEach(() => {
   seen = [];
   overrides = {};
+  fake = new FakeKobe();
+  wakeGate = Promise.resolve();
+  sessionStorage.clear();
+  vi.stubGlobal("fetch", fetchFn);
 });
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
-describe("workspace file panel", () => {
-  it("opens as a labelled region, wakes the sandbox and lists the root", async () => {
-    const { panel } = await open();
-    expect(seen.some((s) => s.method === "POST" && s.url === "/v1/workspace/wake")).toBe(true);
+describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
+  it("lists /workspace with its folders, and wakes the sandbox only once Files is used", async () => {
+    const { user, panel } = await open();
     expect(within(panel).getByRole("button", { name: "Open folder notes" })).toBeTruthy();
+    expect(within(panel).getByRole("button", { name: "Open folder uploads" })).toBeTruthy();
     expect(within(panel).getAllByText("2 KB").length).toBeGreaterThan(0);
+    expect(woken()).toBe(false);
+    await user.click(within(panel).getByRole("button", { name: "Open folder notes" }));
+    await waitFor(() => expect(woken()).toBe(true));
+  });
+
+  it("shows Files from the bar: the section takes focus and the sandbox wakes", async () => {
+    const { user } = await open();
+    await user.click(screen.getByRole("button", { name: "Files" }));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("region", { name: "Files" })),
+    );
+    await waitFor(() => expect(woken()).toBe(true));
+  });
+
+  it("is gone from the artifact column: the old side panel is removed", async () => {
+    const { user } = await open();
+    await user.click(screen.getByRole("button", { name: "Files" }));
+    const artifact = document.querySelector('[data-shell-region="artifact"]');
+    expect(artifact?.childElementCount).toBe(0);
+    expect(screen.queryByRole("region", { name: "Workspace files" })).toBeNull();
   });
 
   it("shows the last synced listing while waking, then refreshes", async () => {
     let release: () => void = () => {};
-    const gate = new Promise<void>((r) => (release = r));
-    const original = fetchFn;
-    const slow: typeof fetch = async (input, init) => {
-      if (String(input) === "/v1/workspace/wake") await gate;
-      return original(input, init);
-    };
-    const user = userEvent.setup();
-    render(
-      <IconActionProvider>
-        <FilesPanelProvider scope="s">
-          <FilesToggleButton />
-          <FilesPanel api={createFilesApi("t", slow)} refreshAfterWakeMs={0} />
-        </FilesPanelProvider>
-      </IconActionProvider>,
-    );
+    wakeGate = new Promise<void>((r) => (release = r));
+    const { user, panel } = await open();
     await user.click(screen.getByRole("button", { name: "Files" }));
-    await screen.findByText("report.csv");
-    expect(screen.getByText(/last synced/i)).toBeTruthy();
+    expect(await within(panel).findByText(/last synced/i)).toBeTruthy();
     const before = seen.filter((s) => s.url.startsWith("/v1/workspace/files")).length;
     await act(async () => release());
-    await waitFor(() => expect(screen.queryByText(/last synced/i)).toBeNull());
-    // The refresh is a timer after the wake: wait for its request rather than racing it.
-    await waitFor(() =>
-      expect(seen.filter((s) => s.url.startsWith("/v1/workspace/files")).length).toBeGreaterThan(
-        before,
-      ),
+    // The refresh is a timer after the wake (4 s): wait for its request rather than racing it.
+    await waitFor(
+      () =>
+        expect(seen.filter((s) => s.url.startsWith("/v1/workspace/files")).length).toBeGreaterThan(
+          before,
+        ),
+      { timeout: 6000 },
     );
-  });
+    await waitFor(() => expect(within(panel).queryByText(/last synced/i)).toBeNull());
+  }, 10000);
 
   it("navigates into a folder and back with the breadcrumb", async () => {
     const { user, panel } = await open();
@@ -232,22 +245,14 @@ describe("workspace file panel", () => {
     expect((await within(panel).findByRole("alert")).textContent).toMatch(/already exists/);
   });
 
-  it("closes with Escape and returns focus to the toggle", async () => {
-    const { user } = await open();
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("region", { name: "Workspace files" })).toBeNull();
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Files" }));
-  });
-
   it("shows a listing error", async () => {
     overrides["GET /v1/workspace/files"] = () =>
       Response.json(
         { code: "sandbox_unavailable", message: "Workspace storage is not configured." },
         { status: 503 },
       );
-    const user = userEvent.setup();
     mount();
-    await user.click(screen.getByRole("button", { name: "Files" }));
-    expect((await screen.findByRole("alert")).textContent).toMatch(/Workspace storage/);
+    const panel = await screen.findByRole("region", { name: "Files" });
+    expect((await within(panel).findByRole("alert")).textContent).toMatch(/Workspace storage/);
   });
 });

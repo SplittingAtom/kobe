@@ -204,6 +204,15 @@
   min-height: 0;
 }
 
+/* The workspace rail is 280 px, 48 px while collapsed (CE5). */
+.grid {
+  --kobe-rail-width: 280px;
+}
+
+.grid:has(> .rail > [data-collapsed]) {
+  --kobe-rail-width: 48px;
+}
+
 .rail,
 .conversation {
   display: flex;
@@ -256,7 +265,7 @@
 
 @media (min-width: 48rem) {
   .grid {
-    grid-template-columns: 280px minmax(0, 1fr);
+    grid-template-columns: var(--kobe-rail-width) minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
   }
 
@@ -266,7 +275,7 @@
   }
 
   .grid:has(> .artifact:not(:empty)) {
-    grid-template-columns: 280px minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: var(--kobe-rail-width) minmax(0, 1fr) minmax(0, 1fr);
   }
 
   .artifact {
@@ -279,6 +288,6 @@
 /* Wide enough for every floor: artifact column ≥ 360 px, conversation ≥ 400 px (CE7). */
 @media (min-width: 1100px) {
   .grid:has(> .artifact:not(:empty)) {
-    grid-template-columns: 280px minmax(360px, 1fr) minmax(400px, 1fr);
+    grid-template-columns: var(--kobe-rail-width) minmax(360px, 1fr) minmax(400px, 1fr);
   }
 }

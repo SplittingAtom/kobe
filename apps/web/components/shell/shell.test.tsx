@@ -23,6 +23,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 const ME = { id: "u-1", name: "Ada", email: "ada@example.test", twoFactorEnabled: false };
@@ -143,17 +144,16 @@ describe("grid", () => {
       el.getAttribute("data-shell-region"),
     );
     expect(regions).toEqual(["rail", "artifact", "conversation"]);
-    expect(
-      within(region("rail")).getByRole("complementary", { name: "Conversations" }),
-    ).toBeTruthy();
+    expect(within(region("rail")).getByRole("complementary", { name: "Workspace" })).toBeTruthy();
     expect(region("conversation").querySelector("main#kobe-chat-main")).toBeTruthy();
     // Empty: the conversation takes the remaining width (the column collapses on `:empty`).
     expect(region("artifact").childElementCount).toBe(0);
 
+    // Files live in the rail (KOBE-198): the bar's Files shows them there.
     await userEvent.setup().click(within(row(2)).getByRole("button", { name: "Files" }));
-    expect(
-      await within(region("artifact")).findByRole("region", { name: "Workspace files" }),
-    ).toBeTruthy();
+    const files = within(region("rail")).getByRole("region", { name: "Files" });
+    await waitFor(() => expect(document.activeElement).toBe(files));
+    expect(region("artifact").childElementCount).toBe(0);
   });
 });
 
@@ -288,18 +288,20 @@ describe("thread search in the bar", () => {
   });
 
   it("folds the rail on narrow screens when a search hit opens a thread", async () => {
+    vi.spyOn(window, "matchMedia").mockImplementation(
+      (query) => ({ matches: query.includes("max-width"), media: query }) as MediaQueryList,
+    );
     const t = fake.addThread("Quarterly revenue");
     openApp(fake);
     await composer();
     const user = userEvent.setup();
-    const toggle = screen.getByRole("button", { name: "Show conversations" });
-    await user.click(toggle);
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    await user.click(screen.getByRole("button", { name: "Show threads" }));
+    expect(await screen.findByRole("button", { name: "Collapse the rail" })).toBeTruthy();
     await user.type(searchBox(), "revenue{Enter}");
     const results = within(await screen.findByRole("list", { name: "Search results" }));
     await user.click(results.getByRole("button", { name: "Quarterly revenue" }));
     await waitFor(() => expect(window.location.search).toBe(`?thread=${t}`));
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Show threads" })).toBeTruthy());
   });
 });
 

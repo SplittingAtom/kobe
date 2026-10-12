@@ -29,6 +29,8 @@ describe("thread list adapter", () => {
       [a, "archived", "A"],
     ]);
     expect(page.nextCursor).toBeUndefined();
+    // The rail groups by this (CE5).
+    expect(page.threads[0]?.custom).toEqual({ projectId: null, scheduled: false, shared: false });
   });
 
   it("creates a thread with the pending title and seeds its controller", async () => {
