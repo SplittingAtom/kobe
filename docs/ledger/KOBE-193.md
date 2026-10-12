@@ -1,6 +1,6 @@
 # KOBE-193: gate2.sh: fail fast and clearly when the sandbox pod is not Running
 
-- **Status:** in review (PR #)
+- **Status:** in review (PR #252)
 - **Branch / worktree:** `kobe-193-gate2-fail-fast` in `../Kobe-wt193`
 - **Depends on:** none
 
