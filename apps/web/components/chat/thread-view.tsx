@@ -9,10 +9,10 @@ import { isThreadRunning, type ThreadState } from "../../lib/chat/thread-state";
 import { ErrorNotice } from "../admin/error-notice";
 import { FilesToggleButton } from "../files/files-panel";
 import { ArtifactList } from "./artifact-list";
-import { AgentPicker, useDraftAgentName } from "./agent-picker";
+import { AgentChips } from "./agent-chips";
 import { Composer } from "./composer";
 import { DraftProjectNote, ProjectBar } from "./project-bar";
-import { useChatSession, useKobeExtras } from "./kobe-runtime";
+import { useKobeExtras } from "./kobe-runtime";
 import { AssistantMessage, EditComposer, UserMessage } from "./messages";
 import { RunPanel } from "./run-panel";
 
@@ -99,18 +99,19 @@ function LoadingSkeleton() {
   );
 }
 
-/** The conversation on screen: the active branch of the entry tree, the run panel and composer. */
+/**
+ * The conversation on screen: the active branch of the entry tree, the run panel and composer.
+ * In the chat shell (`contextInBar`) the agent, model and Files controls live in bar row two
+ * (KOBE-197); the builder's test pane keeps them here.
+ */
 export function ThreadView({
   onOpenThread,
+  contextInBar = false,
 }: {
   readonly onOpenThread?: ((threadId: string) => void) | undefined;
+  readonly contextInBar?: boolean;
 } = {}) {
   const extras = useKobeExtras();
-  const session = useChatSession();
-  const summary = extras?.state.summary;
-  const draftName = useDraftAgentName();
-  const agentName = summary?.agentName ?? (summary?.agentId == null ? draftName : null);
-  const agentStatus = summary?.agentStatus;
   const title = useAuiState((s) => s.threadListItem.title);
   const isEmpty = useAuiState((s) => s.thread.messages.length === 0);
   if (!extras) return null;
@@ -129,22 +130,15 @@ export function ThreadView({
             ? "New conversation"
             : (state.summary?.title ?? title ?? "Untitled conversation")}
         </h2>
-        {agentName && (
-          <span className="text-muted-foreground rounded-full border px-2 text-xs">
-            {`Agent: ${agentName}`}
-          </span>
-        )}
-        {agentName && (agentStatus === "suspended" || agentStatus === "archived") && (
-          <span className="text-destructive border-destructive/40 rounded-full border px-2 text-xs">
-            {agentStatus === "suspended" ? "Suspended" : "Archived"}
-          </span>
-        )}
+        {!contextInBar && <AgentChips />}
         {label && (
           <span className="text-muted-foreground rounded-full border px-2 text-xs">{label}</span>
         )}
-        <span className="ms-auto">
-          <FilesToggleButton />
-        </span>
+        {!contextInBar && (
+          <span className="ms-auto">
+            <FilesToggleButton />
+          </span>
+        )}
       </header>
       <div className="mx-auto w-full max-w-(--thread-max-width) px-4">
         <ProjectBar extras={extras} onOpenThread={onOpenThread} />
@@ -200,8 +194,7 @@ export function ThreadView({
           >
             <ScrollToBottom />
             <RunPanel extras={extras} />
-            {state.threadId === null && session.canChooseAgent && <AgentPicker />}
-            <Composer extras={extras} />
+            <Composer extras={extras} modelPicker={!contextInBar} />
             <AuiIf condition={(s) => s.thread.messages.length === 0 && s.composer.isEmpty}>
               {state.phase === "ready" && <ThreadSuggestions />}
             </AuiIf>

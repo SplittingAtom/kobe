@@ -10,6 +10,8 @@ import {
   teamToActivate,
   type MyTeams,
 } from "../lib/teams";
+import { forgetLastThread } from "../lib/shell/last-thread";
+import { barMenuProps } from "../components/shell/bar-menu";
 
 function remember(teamId: string): void {
   try {
@@ -60,6 +62,7 @@ export function TeamSwitcher() {
     try {
       await setActiveTeam(teamId);
       remember(teamId);
+      forgetLastThread(); // it belongs to the team being left (CE4)
       window.location.reload();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Could not switch teams.");
@@ -74,7 +77,7 @@ export function TeamSwitcher() {
   const active = my.teams.find((t) => t.id === my.activeTeamId);
   return (
     <nav aria-label="Teams">
-      <details>
+      <details {...barMenuProps}>
         <summary>
           {active ? active.name : "Choose a team"}
           {active && <small> · {roleLabel(active.role)}</small>}

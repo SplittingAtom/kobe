@@ -30,6 +30,8 @@ function TooltipTrigger({ ...props }: React.ComponentProps<typeof TooltipPrimiti
  * under <body> (where its colors would resolve to undefined variables).
  */
 function chatPortalContainer(): HTMLElement | undefined {
+  // Rendered on the server too (the bar's icon links, KOBE-197): no document there.
+  if (typeof document === "undefined") return undefined;
   return document.querySelector<HTMLElement>("[data-kobe-chat]") ?? undefined;
 }
 

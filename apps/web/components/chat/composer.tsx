@@ -20,7 +20,14 @@ import styles from "./chat.module.css";
  * once the server accepted it. The mic button dictates into the prompt (`lib/chat/dictation.ts`);
  * sending stops dictation.
  */
-export function Composer({ extras }: { readonly extras: KobeThreadExtras }) {
+export function Composer({
+  extras,
+  modelPicker = true,
+}: {
+  readonly extras: KobeThreadExtras;
+  /** False in the chat shell, where the model picker sits in bar row two (KOBE-197). */
+  readonly modelPicker?: boolean;
+}) {
   const aui = useAui();
   const session = useChatSession();
   const text = useAuiState((s) => s.composer.text);
@@ -152,7 +159,9 @@ export function Composer({ extras }: { readonly extras: KobeThreadExtras }) {
           >
             <PaperclipIcon className="size-4" />
           </TooltipIconButton>
-          <ModelPicker controller={controller} state={state} isNew={remoteId === undefined} />
+          {modelPicker && (
+            <ModelPicker controller={controller} state={state} isNew={remoteId === undefined} />
+          )}
           <span className="flex-1" />
           {dictation.supported && (
             <TooltipIconButton

@@ -20,6 +20,7 @@ import { ConsoleNav } from "./console-nav";
 import { ErrorNotice } from "./error-notice";
 import { IsolationBanner } from "./isolation-banner";
 import styles from "./admin.module.css";
+import { ChatReturnLink } from "../shell/chat-return-link";
 
 const DEFAULT_LOADERS: Readonly<Record<ConsoleKind, () => Promise<ApiResult<ConsoleAccess>>>> = {
   site: () => fetchSiteAccess(),
@@ -114,7 +115,7 @@ export function ConsoleShell({
         <main id="console-main" className={styles.main}>
           <h1>{title}</h1>
           <p role="alert" className={styles.error}>
-            {DENIED[kind]} <Link href="/">Back to Kobe</Link>
+            {DENIED[kind]} <ChatReturnLink>Back to Kobe</ChatReturnLink>
           </p>
         </main>
       </Frame>
@@ -196,7 +197,7 @@ function Frame({
       <header className={styles.header}>
         <div className={styles.brandRow}>
           <p className={styles.brand}>
-            <Link href="/">Kobe</Link> <span aria-hidden="true">/</span> {title}
+            <ChatReturnLink>Kobe</ChatReturnLink> <span aria-hidden="true">/</span> {title}
           </p>
           {/* Top-left, as everywhere (D9). Switching reloads, so access is checked again. */}
           {switcher && <TeamSwitcher />}

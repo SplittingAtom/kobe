@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
-import { chatRequests, composer, openApp } from "./testing";
+import { agentChoices, chatRequests, composer, openApp } from "./testing";
 
 /**
  * KOBE-122: choosing an agent for a new conversation. The list is the server's runnable set
@@ -44,7 +44,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const group = () => screen.findByRole("radiogroup", { name: "Chat with" });
+const group = agentChoices;
 const modelSelect = () =>
   screen.findByRole("combobox", {
     name: "Model for this conversation",
@@ -135,13 +135,13 @@ describe("agent picker", () => {
     fake.runnableAgents.length = 0;
     openApp(fake);
     await composer();
-    expect(screen.queryByRole("radiogroup")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Chat with:/ })).toBeNull();
     cleanup();
     fake.runnableAgents.push({ id: "x", scope: "team", name: "X", model: null });
     fake.failNext.set("GET /v1/agents/runnable", new Response("{}", { status: 503 }));
     openApp(fake);
     await composer();
-    expect(screen.queryByRole("radiogroup")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Chat with:/ })).toBeNull();
   });
 
   it("names the agent in the header of an existing conversation, even one no longer listed", async () => {
