@@ -69,6 +69,7 @@
 
 .iconLink:hover,
 .bar a.iconLink:hover,
+.iconLink[aria-expanded="true"],
 .menu[open] > .iconLink {
   color: var(--admin-fg);
   background: var(--admin-panel);

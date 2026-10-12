@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { IconActionProvider } from "../shell/icon-action";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -62,10 +63,12 @@ const fetchFn: typeof fetch = async (input, init = {}) => {
 function mount(refreshAfterWakeMs = 0) {
   const api = createFilesApi("team-1", fetchFn);
   return render(
-    <FilesPanelProvider scope="team-1">
-      <FilesToggleButton />
-      <FilesPanel api={api} refreshAfterWakeMs={refreshAfterWakeMs} />
-    </FilesPanelProvider>,
+    <IconActionProvider>
+      <FilesPanelProvider scope="team-1">
+        <FilesToggleButton />
+        <FilesPanel api={api} refreshAfterWakeMs={refreshAfterWakeMs} />
+      </FilesPanelProvider>
+    </IconActionProvider>,
   );
 }
 
@@ -105,10 +108,12 @@ describe("workspace file panel", () => {
     };
     const user = userEvent.setup();
     render(
-      <FilesPanelProvider scope="s">
-        <FilesToggleButton />
-        <FilesPanel api={createFilesApi("t", slow)} refreshAfterWakeMs={0} />
-      </FilesPanelProvider>,
+      <IconActionProvider>
+        <FilesPanelProvider scope="s">
+          <FilesToggleButton />
+          <FilesPanel api={createFilesApi("t", slow)} refreshAfterWakeMs={0} />
+        </FilesPanelProvider>
+      </IconActionProvider>,
     );
     await user.click(screen.getByRole("button", { name: "Files" }));
     await screen.findByText("report.csv");

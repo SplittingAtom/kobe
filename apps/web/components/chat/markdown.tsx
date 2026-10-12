@@ -18,7 +18,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button";
+import { IconAction } from "../shell/icon-action";
 
 const SAFE_PROTOCOLS: ReadonlySet<string> = new Set(["http:", "https:", "mailto:"]);
 
@@ -79,13 +79,14 @@ function CodeBlock({ children, code }: { readonly children: ReactNode; readonly 
   return (
     <div className="border-border bg-muted/40 my-3 overflow-hidden rounded-lg border">
       <div className="bg-muted/60 text-muted-foreground flex items-center justify-end px-2 py-1">
-        <TooltipIconButton
-          tooltip={copied ? "Copied" : "Copy code"}
-          type="button"
+        <IconAction
+          command="copy-code"
+          label={copied ? "Copied" : undefined}
+          size="sm"
           onClick={() => void copy()}
         >
-          {copied ? <CheckIcon /> : <CopyIcon />}
-        </TooltipIconButton>
+          {copied ? <CheckIcon aria-hidden /> : <CopyIcon aria-hidden />}
+        </IconAction>
       </div>
       <pre className="max-h-96 overflow-auto p-3 font-mono text-sm leading-normal whitespace-pre">
         {children}

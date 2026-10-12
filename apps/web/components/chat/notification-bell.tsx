@@ -1,6 +1,5 @@
 "use client";
 
-import { BellIcon } from "lucide-react";
 import { useEffect, useId, useMemo, useState } from "react";
 import {
   createNotificationsApi,
@@ -16,6 +15,8 @@ import { createSchedulesApi } from "../../lib/schedules/api";
 import { ErrorNotice } from "../admin/error-notice";
 import { DateTime } from "../admin/parts";
 import { useResource } from "../admin/use-resource";
+import { IconAction } from "../shell/icon-action";
+import shellStyles from "../shell/shell.module.css";
 import { useNotificationList } from "./use-notification-list";
 import styles from "./chat.module.css";
 
@@ -191,27 +192,21 @@ export function NotificationBell({
   // loaded once (the caller's schedules); each open reads the list again.
   const [opens, setOpens] = useState(0);
   const panelId = useId();
-  const label = unread > 0 ? `Notifications, ${unread} unread` : "Notifications";
+  const badge = unread > 0 ? `${unread} unread` : undefined;
   return (
     <div className={styles.bell}>
-      <button
-        type="button"
-        className={styles.bellButton}
-        aria-label={label}
+      <IconAction
+        command="notifications"
+        badge={badge}
+        count={unread}
+        className={shellStyles.iconLink}
         aria-expanded={open}
         aria-controls={panelId}
         onClick={() => {
           if (!open) setOpens((n) => n + 1);
           setOpen(!open);
         }}
-      >
-        <BellIcon aria-hidden="true" size={18} />
-        {unread > 0 && (
-          <span className={styles.bellBadge} aria-hidden="true">
-            {unread > 99 ? "99+" : unread}
-          </span>
-        )}
-      </button>
+      />
       {opens > 0 && (
         <NotificationPanel
           key={teamId}

@@ -1,11 +1,11 @@
 "use client";
 
-import { CircleUserIcon } from "lucide-react";
-import Link from "next/link";
 import { useState } from "react";
 import { authClient } from "../../lib/auth-client";
 import { forgetLastThread } from "../../lib/shell/last-thread";
 import { barMenuProps } from "./bar-menu";
+import { IconAction } from "./icon-action";
+import { MenuLink } from "./text-links";
 import styles from "./shell.module.css";
 
 /**
@@ -32,19 +32,16 @@ export function ProfileMenu() {
 
   return (
     <details className={styles.menu} {...barMenuProps}>
-      <summary className={styles.iconLink}>
-        <CircleUserIcon aria-hidden size={18} />
-        <span className="sr-only">Profile</span>
-      </summary>
+      <IconAction command="profile" as="summary" className={styles.iconLink} />
       <ul className={styles.menuList}>
         <li>
-          <Link href="/me/skills">My skills</Link>
+          <MenuLink href="/me/skills">My skills</MenuLink>
         </li>
         <li>
-          <Link href="/me/projects">Projects</Link>
+          <MenuLink href="/me/projects">Projects</MenuLink>
         </li>
         <li>
-          <Link href="/me/connectors">My connectors</Link>
+          <MenuLink href="/me/connectors">My connectors</MenuLink>
         </li>
         <li>
           <button type="button" onClick={() => void signOut()}>

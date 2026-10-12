@@ -11,20 +11,12 @@ import {
   type ReasoningMessagePartProps,
   type TextMessagePartProps,
 } from "@assistant-ui/react";
-import {
-  CheckIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  CopyIcon,
-  PencilIcon,
-  RefreshCwIcon,
-} from "lucide-react";
-import type { ComponentType } from "react";
+import { CheckIcon, CopyIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { ROOT_BRANCHING_AVAILABLE, ROOT_BRANCHING_PENDING } from "../../lib/chat/features";
 import { messageMeta, type KobeMessageMeta, type SkippedReport } from "../../lib/chat/tree";
 import { Button } from "../ui/button";
-import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button";
+import { IconAction } from "../shell/icon-action";
 import { useKobeExtras } from "./kobe-runtime";
 import { isReadOnlyThread } from "./project-bar";
 import { SentAttachments } from "./attachment-chips";
@@ -120,33 +112,15 @@ function useMeta(): KobeMessageMeta | undefined {
  * An action the first exchange can't take yet (root branching, `lib/chat/features.ts`): focusable,
  * announced as unavailable, with the reason as its description and tooltip.
  */
-function PendingAction({
-  label,
-  id,
-  icon: Icon,
-}: {
-  readonly label: string;
-  readonly id: string;
-  readonly icon: ComponentType;
-}) {
+function PendingAction({ command }: { readonly command: "edit" | "regenerate" }) {
   return (
-    <>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        aria-disabled="true"
-        aria-describedby={id}
-        title={ROOT_BRANCHING_PENDING}
-        className="size-6 cursor-not-allowed p-1 opacity-50 hover:bg-transparent"
-      >
-        <Icon />
-        <span className="sr-only">{label}</span>
-      </Button>
-      <span id={id} className="sr-only">
-        {ROOT_BRANCHING_PENDING}
-      </span>
-    </>
+    <IconAction
+      command={command}
+      size="sm"
+      aria-disabled="true"
+      description={ROOT_BRANCHING_PENDING}
+      className="hover:bg-transparent"
+    />
   );
 }
 
@@ -157,17 +131,13 @@ function BranchPicker({ className }: { readonly className?: string }) {
       className={cn("text-muted-foreground -ms-2 me-2 inline-flex items-center text-xs", className)}
     >
       <BranchPickerPrimitive.Previous asChild>
-        <TooltipIconButton tooltip="Previous version">
-          <ChevronLeftIcon />
-        </TooltipIconButton>
+        <IconAction command="previous-branch" size="sm" />
       </BranchPickerPrimitive.Previous>
       <span className="font-medium">
         Version <BranchPickerPrimitive.Number /> of <BranchPickerPrimitive.Count />
       </span>
       <BranchPickerPrimitive.Next asChild>
-        <TooltipIconButton tooltip="Next version">
-          <ChevronRightIcon />
-        </TooltipIconButton>
+        <IconAction command="next-branch" size="sm" />
       </BranchPickerPrimitive.Next>
     </BranchPickerPrimitive.Root>
   );
@@ -181,7 +151,6 @@ export function UserMessage() {
     !readOnly && meta?.kind === "user" && !meta.pending && meta.parentEntryId !== null;
   const firstMessage =
     !readOnly && meta?.kind === "user" && !meta.pending && meta.parentEntryId === null;
-  const messageId = useAuiState((s) => s.message.id);
   return (
     <MessagePrimitive.Root
       data-role="user"
@@ -205,15 +174,11 @@ export function UserMessage() {
             {canEdit && (
               <ActionBarPrimitive.Root hideWhenRunning>
                 <ActionBarPrimitive.Edit asChild>
-                  <TooltipIconButton tooltip="Edit">
-                    <PencilIcon />
-                  </TooltipIconButton>
+                  <IconAction command="edit" size="sm" />
                 </ActionBarPrimitive.Edit>
               </ActionBarPrimitive.Root>
             )}
-            {firstMessage && !ROOT_BRANCHING_AVAILABLE && (
-              <PendingAction label="Edit" id={`kobe-edit-pending-${messageId}`} icon={PencilIcon} />
-            )}
+            {firstMessage && !ROOT_BRANCHING_AVAILABLE && <PendingAction command="edit" />}
           </div>
         </div>
       </div>
@@ -247,7 +212,6 @@ export function AssistantMessage() {
   const running = useAuiState((s) => s.message.status?.type === "running");
   const readOnly = isReadOnlyThread(useKobeExtras());
   const regenerate = useRegenerate();
-  const messageId = useAuiState((s) => s.message.id);
   return (
     <MessagePrimitive.Root
       data-role="assistant"
@@ -270,28 +234,22 @@ export function AssistantMessage() {
           className="text-muted-foreground animate-in fade-in -ms-1 flex gap-1 duration-200"
         >
           <ActionBarPrimitive.Copy asChild>
-            <TooltipIconButton tooltip="Copy">
+            <IconAction command="copy" size="sm">
               <AuiIf condition={(s) => s.message.isCopied}>
-                <CheckIcon />
+                <CheckIcon aria-hidden />
               </AuiIf>
               <AuiIf condition={(s) => !s.message.isCopied}>
-                <CopyIcon />
+                <CopyIcon aria-hidden />
               </AuiIf>
-            </TooltipIconButton>
+            </IconAction>
           </ActionBarPrimitive.Copy>
           {!readOnly && regenerate === "yes" && (
             <ActionBarPrimitive.Reload asChild>
-              <TooltipIconButton tooltip="Regenerate">
-                <RefreshCwIcon />
-              </TooltipIconButton>
+              <IconAction command="regenerate" size="sm" />
             </ActionBarPrimitive.Reload>
           )}
           {!readOnly && regenerate === "root" && !ROOT_BRANCHING_AVAILABLE && (
-            <PendingAction
-              label="Regenerate"
-              id={`kobe-regenerate-pending-${messageId}`}
-              icon={RefreshCwIcon}
-            />
+            <PendingAction command="regenerate" />
           )}
         </ActionBarPrimitive.Root>
       </div>

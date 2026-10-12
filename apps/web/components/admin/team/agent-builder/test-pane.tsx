@@ -11,6 +11,7 @@ import { createThreadListAdapter } from "../../../../lib/chat/thread-list-adapte
 import type { ApiError } from "../../../../lib/api/client";
 import { ChatSessionContext, useKobeRuntime } from "../../../chat/kobe-runtime";
 import { ThreadView } from "../../../chat/thread-view";
+import { IconActionProvider } from "../../../shell/icon-action";
 import { ErrorNotice } from "../../error-notice";
 import adminStyles from "../../admin.module.css";
 import styles from "./agent-builder.module.css";
@@ -54,7 +55,9 @@ function TestConversation({
   return (
     <ChatSessionContext.Provider value={session}>
       <AssistantRuntimeProvider runtime={runtime}>
-        <ThreadView />
+        <IconActionProvider>
+          <ThreadView />
+        </IconActionProvider>
       </AssistantRuntimeProvider>
     </ChatSessionContext.Provider>
   );

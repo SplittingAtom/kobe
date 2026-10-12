@@ -1,72 +1,47 @@
 "use client";
 
 import {
-  BotIcon,
-  BrainIcon,
-  CalendarClockIcon,
-  ServerCogIcon,
-  UsersIcon,
-  type LucideIcon,
-} from "lucide-react";
-import Link from "next/link";
-import { consoleHref } from "../../lib/admin/nav/paths";
+  commandsIn,
+  type Command,
+  type CommandContext,
+  type RegisteredCommand,
+} from "../../lib/shell/commands";
 import { useOpenConsoles } from "../admin/console-links";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
+import { IconAction } from "./icon-action";
 import styles from "./shell.module.css";
 
-/** CE13: a 300 ms tooltip names the icon; the same name is the link's accessible label. */
-const TOOLTIP_DELAY_MS = 300;
+/** The bar's link icons of one registry group available in `ctx`. */
+function linksOf(
+  group: NonNullable<Command["group"]>,
+  ctx: CommandContext,
+): readonly RegisteredCommand[] {
+  return commandsIn("bar", ctx).filter((c) => c.group === group);
+}
 
-// Slot (A7, KOBE-203): these become `IconAction`s fed by the command registry, which adds the
-// shortcuts to the tooltips and the dot badges. Until then: an icon link with a tooltip.
-function BarLink({
-  href,
+function Links({
+  commands,
   label,
-  icon: Icon,
 }: {
-  readonly href: string;
+  readonly commands: readonly RegisteredCommand[];
   readonly label: string;
-  readonly icon: LucideIcon;
 }) {
+  if (commands.length === 0) return null;
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Link href={href} aria-label={label} className={styles.iconLink}>
-          <Icon aria-hidden size={18} />
-        </Link>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">{label}</TooltipContent>
-    </Tooltip>
+    <nav aria-label={label} className={styles.links}>
+      {commands.map((c) => (
+        <IconAction key={c.id} command={c.id} className={styles.iconLink} />
+      ))}
+    </nav>
   );
 }
 
 /** Bar row one, right side: the member's own areas (full pages for now; CE4 moves some beside). */
 export function AreaLinks() {
-  return (
-    <TooltipProvider delayDuration={TOOLTIP_DELAY_MS}>
-      <nav aria-label="My area" className={styles.links}>
-        <BarLink href="/me/memory" label="My memory" icon={BrainIcon} />
-        <BarLink href="/me/schedules" label="My schedules" icon={CalendarClockIcon} />
-        <BarLink href="/me/agents" label="My agents" icon={BotIcon} />
-      </nav>
-    </TooltipProvider>
-  );
+  return <Links commands={linksOf("areas", { consoles: [] })} label="My area" />;
 }
 
 /** The consoles, role-gated by the server's answer (CE3); full-page routes (CE4). */
 export function ConsoleIconLinks() {
-  const open = useOpenConsoles();
-  if (open.length === 0) return null;
-  return (
-    <TooltipProvider delayDuration={TOOLTIP_DELAY_MS}>
-      <nav aria-label="Administration" className={styles.links}>
-        {open.includes("team") && (
-          <BarLink href={consoleHref("team")} label="Team console" icon={UsersIcon} />
-        )}
-        {open.includes("site") && (
-          <BarLink href={consoleHref("site")} label="Site console" icon={ServerCogIcon} />
-        )}
-      </nav>
-    </TooltipProvider>
-  );
+  const consoles = useOpenConsoles();
+  return <Links commands={linksOf("consoles", { consoles })} label="Administration" />;
 }

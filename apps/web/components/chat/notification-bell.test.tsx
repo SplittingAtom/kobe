@@ -3,6 +3,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubApi, summary } from "../admin/testing";
+import { IconActionProvider } from "../shell/icon-action";
 import { NotificationBell } from "./notification-bell";
 
 afterEach(() => {
@@ -76,7 +77,11 @@ function hold(...keys: string[]) {
 }
 
 function renderBell(onOpenThread = vi.fn()) {
-  render(<NotificationBell teamId="t-1" onOpenThread={onOpenThread} />);
+  render(
+    <IconActionProvider>
+      <NotificationBell teamId="t-1" onOpenThread={onOpenThread} />
+    </IconActionProvider>,
+  );
   return onOpenThread;
 }
 

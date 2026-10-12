@@ -103,12 +103,10 @@ describe("composer attachments", () => {
     });
     expect((await screen.findByRole("alert")).textContent).toContain("virus scan rejected");
     await user.type(await composer(), "hello");
-    expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "Send" }).getAttribute("aria-disabled")).toBe("true");
     await user.click(screen.getByRole("button", { name: "Remove bad.exe" }));
     await waitFor(() =>
-      expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(
-        false,
-      ),
+      expect(screen.getByRole("button", { name: "Send" }).getAttribute("aria-disabled")).toBeNull(),
     );
   });
 
@@ -126,14 +124,14 @@ describe("composer attachments", () => {
   it("holds Send while uploading, then sends the file ids and shows chips on the message", async () => {
     const user = await pick(fileOf("data.csv", 1500));
     await user.type(await composer(), "Analyse this");
-    const send = screen.getByRole("button", { name: "Send" }) as HTMLButtonElement;
-    expect(send.disabled).toBe(true);
+    const send = screen.getByRole("button", { name: "Send" });
+    expect(send.getAttribute("aria-disabled")).toBe("true");
     expect(screen.getByText(/finish uploading/)).toBeTruthy();
 
     const call = calls[0];
     call?.finish(okOutcome(fileOf("data.csv", 1500)));
     await screen.findByText("Ready");
-    await waitFor(() => expect(send.disabled).toBe(false));
+    await waitFor(() => expect(send.getAttribute("aria-disabled")).toBeNull());
     await user.click(send);
 
     await waitFor(() =>

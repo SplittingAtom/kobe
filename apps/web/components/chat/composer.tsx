@@ -1,14 +1,14 @@
 "use client";
 
 import { ComposerPrimitive, useAui, useAuiState } from "@assistant-ui/react";
-import { ArrowUpIcon, MicIcon, PaperclipIcon, SquareIcon } from "lucide-react";
+import { MicIcon, SquareIcon } from "lucide-react";
 import { useRef, useState, type ChangeEvent, type DragEvent, type KeyboardEvent } from "react";
 import { NEW_DRAFT } from "../../lib/chat/attachments";
 import { useDictation } from "../../lib/chat/dictation";
 import { isBusy, isThreadRunning } from "../../lib/chat/thread-state";
 import { ComposerAttachments, useDraftFiles } from "./attachment-chips";
 import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
-import { TooltipIconButton } from "../assistant-ui/tooltip-icon-button";
+import { IconAction } from "../shell/icon-action";
 import { Button } from "../ui/button";
 import { ModelPicker } from "./model-picker";
 import styles from "./chat.module.css";
@@ -149,32 +149,29 @@ export function Composer({
             className="sr-only"
             onChange={onPick}
           />
-          <TooltipIconButton
-            tooltip="Attach files"
-            type="button"
-            variant="ghost"
-            size="icon"
+          <IconAction
+            command="attach"
             className="size-7 rounded-full"
             onClick={() => picker.current?.click()}
-          >
-            <PaperclipIcon className="size-4" />
-          </TooltipIconButton>
+          />
           {modelPicker && (
             <ModelPicker controller={controller} state={state} isNew={remoteId === undefined} />
           )}
           <span className="flex-1" />
           {dictation.supported && (
-            <TooltipIconButton
-              tooltip={dictation.listening ? "Stop dictation" : "Dictate"}
-              type="button"
+            <IconAction
+              command="dictate"
+              label={dictation.listening ? "Stop dictation" : "Dictate"}
               variant={dictation.listening ? "destructive" : "ghost"}
-              size="icon"
               className="size-7 rounded-full"
               aria-pressed={dictation.listening}
               onClick={() => (dictation.listening ? dictation.stop() : dictation.start(text))}
             >
-              <MicIcon className={dictation.listening ? "size-4 animate-pulse" : "size-4"} />
-            </TooltipIconButton>
+              <MicIcon
+                aria-hidden
+                className={dictation.listening ? "size-4 animate-pulse" : "size-4"}
+              />
+            </IconAction>
           )}
           {running ? (
             <>
@@ -198,30 +195,25 @@ export function Composer({
               >
                 Steer now
               </Button>
-              <TooltipIconButton
-                tooltip="Stop"
-                type="button"
+              <IconAction
+                command="stop"
                 variant="default"
-                size="icon"
                 className="size-7 rounded-full"
                 onClick={() => void controller?.stop()}
                 disabled={isBusy(state, "stop")}
               >
-                <SquareIcon className="size-3.5 fill-current" />
-              </TooltipIconButton>
+                <SquareIcon aria-hidden className="size-3.5 fill-current" />
+              </IconAction>
             </>
           ) : (
             <ComposerPrimitive.Send asChild>
-              <TooltipIconButton
-                tooltip="Send"
+              <IconAction
+                command="send"
                 type="button"
                 variant="default"
-                size="icon"
                 className="size-7 rounded-full"
                 disabled={blocker !== undefined}
-              >
-                <ArrowUpIcon className="size-4" />
-              </TooltipIconButton>
+              />
             </ComposerPrimitive.Send>
           )}
         </div>
