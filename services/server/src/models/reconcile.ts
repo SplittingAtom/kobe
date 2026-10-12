@@ -191,8 +191,15 @@ export async function reconcile(
     for (const team of observedTeams.filter((t) => !wantedTeams.has(t.name))) {
       await write(`delete team ${team.name}`, () => admin.deleteTeam(team.id));
     }
-    for (const c of customers.filter((c) => c.id !== customer?.id)) {
-      await write(`delete customer ${c.name}`, () => admin.deleteCustomer(c.id));
+    // A stale customer (e.g. `kobe-install` before KOBE-256) goes only once the desired one
+    // exists and no team points at it any more: teams are listed again, so a failed move or
+    // team removal keeps its customer until a later pass succeeds.
+    const remaining = customer ? await attempt("list teams", () => admin.listTeams()) : undefined;
+    if (customer && remaining) {
+      const owners = new Set(remaining.map((t) => t.customerId));
+      for (const c of customers.filter((c) => c.id !== customer.id && !owners.has(c.id))) {
+        await write(`delete customer ${c.name}`, () => admin.deleteCustomer(c.id));
+      }
     }
     const wantedProviders = new Set(desired.providers.map((p) => p.name));
     for (const p of observedProviders.filter((p) => !wantedProviders.has(p.name))) {

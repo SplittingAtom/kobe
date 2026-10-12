@@ -72,7 +72,13 @@ adds at the database boundary.
 - **Kept "install":** web search `recordId: "install"` (bound into the sealed key; renaming needs a
   re-seal), historical audit action names/categories, historical SQL migrations, stored history
   above, the `/admin/install` redirect (R1), and the verb.
-- **Guard:** `scripts/site-identifiers.mjs` no longer allows the drizzle install identifiers.
+- **Guard:** `scripts/site-identifiers.mjs` no longer allows the drizzle install identifiers and
+  flags snake_case `install_(settings|roles|role|model_*|budget_*|tool_rules|agent*|skill*)` in
+  code (the rename tests carry `site-identifiers: allow-file`).
+- **Review fixes (#249):** the reconcile deletes a stale customer only once the desired one exists
+  and a fresh team listing shows no team on it (M2; fake-Bifrost tests: `addCustomer` fails, one
+  `updateTeam` fails: `kobe-install` survives, the next pass removes it); upgrade note lines on
+  SIEM scope values and the Bifrost customer (L5).
 
 ## Open questions (for Chris or the coordinator)
 

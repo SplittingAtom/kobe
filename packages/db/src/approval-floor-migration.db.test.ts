@@ -14,7 +14,7 @@ const file = readdirSync(dir).find((f) => /^\d{4}_approval_floor_unify\.sql$/.te
 // The migration predates KOBE-256, which renamed its table: re-run it against today's name.
 const migrationSql = readFileSync(`${dir}${file ?? "missing.sql"}`, "utf8")
   .replaceAll("--> statement-breakpoint", "")
-  .replaceAll("install_settings", "site_settings");
+  .replaceAll("install_settings", "site_settings"); // site-identifiers: allow
 
 const owner = new pg.Pool({ connectionString: inject("ownerUrl") });
 afterAll(() => owner.end());

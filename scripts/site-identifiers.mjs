@@ -1,8 +1,7 @@
 // KOBE-255: "Site" replaced "Install" in the API and code; KOBE-256 in the database and the drizzle
 // objects that mirror it. Fails when code (tests included) under the scanned areas still names the
 // scope "install" in an identifier, an API path, a permission or a file name. Kept on purpose: the
-// historical audit action names (hash-chained rows keep them), snake_case names in historical SQL
-// and stored values, and the verb (helm install, installMemoryHooks). Run by check-site-wording.mjs.
+// historical audit action names (hash-chained rows keep them), stored values, and the verb (helm install, installMemoryHooks). Run by check-site-wording.mjs.
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 
@@ -27,6 +26,12 @@ const PATTERNS = [
     keep: () => true,
   },
   {
+    // KOBE-256 renamed the tables, types and columns: SQL in code must use the site_* names.
+    what: "database name",
+    re: /\binstall_(?:settings|roles|role(?![.\w])|model_\w+|budget_\w+|tool_rules|agent\w*|skill\w*)\b/g,
+    keep: () => true,
+  },
+  {
     what: "identifier",
     re: /[\w$]*(?:install|Install|INSTALL)[\w$]*/g,
     keep: (t) => IDENTIFIER.test(t),
@@ -35,9 +40,12 @@ const PATTERNS = [
 
 /** A line that refers to an old name on purpose (e.g. a test that it is gone) says so. */
 const ALLOW_MARK = "site-identifiers: allow";
+/** A whole file about the rename itself (its upgrade tests) says so once, with the reason. */
+const ALLOW_FILE_MARK = "site-identifiers: allow-file";
 
 /** Every place a source text names the scope "install" in code. */
 export function identifierFindings(source) {
+  if (source.includes(ALLOW_FILE_MARK)) return [];
   const code = source
     .split("\n")
     .filter((line) => !line.includes(ALLOW_MARK))
@@ -64,12 +72,15 @@ export function selfTestIdentifiers() {
     "export function InstallUsagePage() {}",
     'await import("/app/dist/invitations/install-invites.js")',
     "db.select().from(installRoles)",
+    "SELECT value FROM install_settings WHERE key = $1",
+    "JOIN install_agents a ON a.id = t.site_agent_id",
   ];
   const good = [
     "db.select().from(siteRoles).where(eq(siteSettings.key, k))",
     'action: "install.settings.updated", // historical',
     "helm install kobe charts/kobe; installMemoryHooks(pi)",
-    "INSERT INTO install_tool_rules; scope: 'install'",
+    "INSERT INTO site_tool_rules; scope: 'install'",
+    'action: "memory.install_settings_changed", // historical',
   ];
   const missed = bad.filter((s) => identifierFindings(s).length === 0);
   const flagged = good.filter((s) => identifierFindings(s).length > 0);

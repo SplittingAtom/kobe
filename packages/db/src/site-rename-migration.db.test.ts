@@ -15,6 +15,7 @@ import {
  * before the rename, with rows in every renamed table, upgrades in place: every install_* object
  * is renamed (metadata only: same relation, same data files), the stored scope values of the
  * small site tables move to the new names, and the database's own functions work on the new names.
+ * It names the old tables on purpose (site-identifiers: allow-file).
  */
 
 const RENAMED_TABLES = {
