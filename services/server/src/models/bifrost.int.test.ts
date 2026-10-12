@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import pino from "pino";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHttpBifrostAdmin } from "./bifrost-admin.js";
-import { buildDesiredState, virtualKeyName, type ProviderInput } from "./desired.js";
+import { SITE_CUSTOMER, buildDesiredState, virtualKeyName, type ProviderInput } from "./desired.js";
 import { reconcile } from "./reconcile.js";
 
 /**
@@ -281,5 +281,31 @@ describe.skipIf(!BIN)("against a real Bifrost", () => {
     const raised = await reconcile(desired(100), admin, logger);
     expect(raised.errors).toEqual([]);
     expect(raised.changes).toBeGreaterThan(0);
+  }, 60_000);
+
+  it("KOBE-265: an install synced under kobe-install converges on the site customer", async () => {
+    const admin = createHttpBifrostAdmin({ baseUrl: base, username: "kobe", password: PASSWORD });
+    const teams = [0, 1, 2].map(() => ({
+      teamId: randomUUID(),
+      members: [randomUUID(), randomUUID()],
+      aliases: [],
+    }));
+    const desired = buildDesiredState({ providers: [], catalog: [], teams }, "f".repeat(40));
+    const old = { ...desired, customer: { name: "kobe-install", limits: undefined } };
+    const before = await reconcile(old, admin, logger);
+    expect(before.errors).toEqual([]);
+    const [legacy] = await admin.listCustomers();
+    // Bifrost v2.2.5 keeps a team's customer on update: KOBE-256's move left every team behind.
+    const stray = await admin.addCustomer(SITE_CUSTOMER);
+    for (const t of await admin.listTeams()) await admin.updateTeam(t.id, stray.id);
+    expect((await admin.listTeams()).map((t) => t.customerId)).toEqual(teams.map(() => legacy?.id));
+
+    const first = await reconcile(desired, admin, logger);
+    expect(first.errors).toEqual([]);
+    expect(await admin.listCustomers()).toEqual([{ id: legacy?.id, name: SITE_CUSTOMER }]);
+    expect((await admin.listTeams()).map((t) => t.customerId)).toEqual(teams.map(() => legacy?.id));
+    const second = await reconcile(desired, admin, logger);
+    expect(second.changes).toBe(0);
+    expect(second.virtualKeys).toEqual(before.virtualKeys);
   }, 60_000);
 });

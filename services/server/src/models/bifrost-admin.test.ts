@@ -3,10 +3,15 @@ import { BifrostAdminError, createHttpBifrostAdmin } from "./bifrost-admin.js";
 
 /** KOBE-44: the model listing calls of the Bifrost admin client (Bifrost v2.2 `/api/*`). */
 function stub(replies: Record<string, [number, unknown]>) {
-  const seen: { method: string; url: string; auth: string | null }[] = [];
+  const seen: { method: string; url: string; auth: string | null; body?: unknown }[] = [];
   const fetchFn = (async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? "GET";
-    seen.push({ method, url, auth: new Headers(init.headers).get("authorization") });
+    seen.push({
+      method,
+      url,
+      auth: new Headers(init.headers).get("authorization"),
+      ...(typeof init.body === "string" ? { body: JSON.parse(init.body) as unknown } : {}),
+    });
     const path = url.replace("http://bifrost:8080", "");
     const [status, body] = replies[`${method} ${path}`] ?? [404, {}];
     return new Response(JSON.stringify(body), { status });
@@ -88,6 +93,20 @@ describe("Bifrost admin model listing", () => {
     });
     expect(await admin.listKeys("ollama")).toEqual([
       { id: "k1", name: "kobe-ollama-ab", status: "list_models_failed", description: "401" },
+    ]);
+  });
+});
+
+describe("Bifrost admin customers (KOBE-265)", () => {
+  it("renames a customer in place through the customer update route", async () => {
+    const { admin, seen } = stub({ "PUT /api/governance/customers/c%201": [200, {}] });
+    await admin.updateCustomer("c 1", "kobe-site");
+    expect(seen).toEqual([
+      expect.objectContaining({
+        method: "PUT",
+        url: "http://bifrost:8080/api/governance/customers/c%201",
+        body: { name: "kobe-site" },
+      }),
     ]);
   });
 });
