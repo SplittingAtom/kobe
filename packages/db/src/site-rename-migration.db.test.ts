@@ -217,8 +217,11 @@ const LEFTOVER_OBJECTS = `
    WHERE schemaname = 'public' AND indexdef ILIKE '%install%'
   ORDER BY 1`;
 
-/** Run rows are history (the stop scope a run ended with): the check still admits the old value. */
-const KEPT = ["constraint runs.runs_budget_stop_scope"];
+/**
+ * Run rows are history (the stop scope a run ended with): the check still admits the old value.
+ * kobe_reserve_budget takes an `install` line (a gateway of the release before) as the site's.
+ */
+const KEPT = ["constraint runs.runs_budget_stop_scope", "function kobe_reserve_budget"];
 
 let before: Relation[] = [];
 let after: Relation[] = [];
@@ -243,7 +246,7 @@ afterAll(async () => {
 });
 
 describe("site rename migration on an existing database (KOBE-256)", () => {
-  it("renames every install_* object; only the run history check keeps the old value", async () => {
+  it("renames every install_* object; only the run history check and the reserve function keep the old value", async () => {
     const hits = await withClient(database().adminUrl, (c) =>
       c.query<{ hit: string }>(LEFTOVER_OBJECTS).then((r) => r.rows.map((row) => row.hit)),
     );

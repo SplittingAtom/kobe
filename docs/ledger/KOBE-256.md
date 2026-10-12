@@ -48,10 +48,18 @@ adds at the database boundary.
   restore into an old schema (its restore SQL names `site_settings`), consistent with the
   same-version rule.
 
+- **0091 is hand-written** (first line `-- kobe:hand-written`): never regenerate it. If `main`
+  gains a migration first, renumber by hand (move SQL and snapshot to the next index, fix journal
+  `idx`/`when`, re-chain `prevId`). `db:rebase` now keeps a marked migration's SQL and snapshot and
+  only renumbers it; it refuses when the base changed the schema since the fork, or when the
+  branch also has generated migrations (`scripts/migration-plan.mjs`, unit-tested).
+- **Review fixes (#248):** rollback note (H1: `helm rollback` cannot undo 0091; back up first),
+  scheduler pods and CLI version (L2), `kobe_reserve_budget` takes an `install` line from an old
+  gateway as the site's (L1, `budget-reservations.db.test.ts`).
+
 ## Open questions (for Chris or the coordinator)
 
-- Accept the short error window of old pods during the upgrade (above), or add temporary
-  compatibility views in a follow-up?
+- Old-pod error window during the upgrade: accepted by the coordinator, no compatibility views.
 
 ## Evidence (acceptance criteria → test or command output)
 

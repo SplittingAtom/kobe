@@ -1,3 +1,5 @@
+-- kobe:hand-written
+-- (db:rebase keeps this SQL and its snapshot and only renumbers it: never regenerate it.)
 -- KOBE-256 (R3): "Site" replaces "Install" in the database. Every install_* object is renamed in
 -- place (ALTER ... RENAME: catalog only, no table rewrite, no data copied), so an existing site
 -- upgrades with its rows intact. The migration Job runs before the new pods start; server and
@@ -635,7 +637,7 @@ BEGIN
     RAISE EXCEPTION 'kobe_reserve_budget: another team is in force' USING ERRCODE = '42501';
   END IF;
   PERFORM set_config('kobe.team_id', p_team::text, true);
-  has_site := EXISTS (SELECT 1 FROM jsonb_array_elements(p_lines) l WHERE l->>'scope' = 'site');
+  has_site := EXISTS (SELECT 1 FROM jsonb_array_elements(p_lines) l WHERE l->>'scope' IN ('site', 'install'));
   PERFORM pg_advisory_xact_lock(hashtextextended('kobe.budget:team:' || p_team::text, 0));
   IF has_site THEN
     PERFORM pg_advisory_xact_lock(hashtextextended('kobe.budget:site', 0));
@@ -656,7 +658,7 @@ BEGIN
     cost := CASE WHEN unit_usd THEN p_usd ELSE p_tokens END;
     share := CASE WHEN line->>'scope' = 'user' THEN 'Infinity'::numeric
                   ELSE greatest(0, lim - spent) * p_member_share END;
-    self_key := CASE WHEN line->>'scope' = 'site' THEN v_member_key
+    self_key := CASE WHEN line->>'scope' IN ('site', 'install') THEN v_member_key
                      ELSE p_user::text END;
     SELECT COALESCE(sum(least(m.amt, share)), 0),
            COALESCE(sum(m.amt) FILTER (WHERE m.member = self_key), 0),
@@ -672,7 +674,7 @@ BEGIN
           UNION ALL
           SELECT member_key, CASE WHEN unit_usd THEN usd ELSE tokens::numeric END
             FROM "site_budget_reservations"
-            WHERE line->>'scope' = 'site'
+            WHERE line->>'scope' IN ('site', 'install')
               AND expires_at > clock_timestamp() AND NOT (team_key = v_team_key AND call_id = p_call)
         ) r GROUP BY r.member
       ) m;
