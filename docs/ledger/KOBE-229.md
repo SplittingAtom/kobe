@@ -1,6 +1,6 @@
 # KOBE-229: Index memory_doc_versions (team_id, run_id, tool_call_id) for remember idempotency
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #253)
 - **Branch / worktree:** `kobe-229-memory-versions-index` in `../Kobe-wt229`
 - **Depends on:** KOBE-156 (merged)
 
