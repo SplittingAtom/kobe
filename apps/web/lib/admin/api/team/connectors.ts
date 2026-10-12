@@ -17,7 +17,7 @@ export interface TeamConnectorTool {
   readonly readOnly: boolean;
   /** MCP default is open-world, so an unannotated tool is write + open-world. */
   readonly openWorld: boolean;
-  /** `drifted` tools are never offered until an install admin re-approves them (KOBE-102). */
+  /** `drifted` tools are never offered until a site admin re-approves them (KOBE-102). */
   readonly status: "pinned" | "drifted";
 }
 
@@ -25,7 +25,7 @@ export interface TeamConnector {
   readonly id: string;
   readonly name: string;
   readonly authKind: "oauth" | "api_key" | "none";
-  /** The install admin's switch; a disabled connector cannot be enabled by a team. */
+  /** The site admin's switch; a disabled connector cannot be enabled by a team. */
   readonly status: "active" | "disabled";
   readonly iconUrl: string | null;
   readonly enabled: boolean;

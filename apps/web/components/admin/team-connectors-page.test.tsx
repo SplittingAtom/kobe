@@ -150,7 +150,7 @@ describe("Team connectors (KOBE-105)", () => {
     expect(calls.some((c) => c.method === "DELETE")).toBe(true);
   });
 
-  it("cannot enable a connector the install admin disabled", async () => {
+  it("cannot enable a connector the site admin disabled", async () => {
     stubApi({ [`GET ${BASE}`]: [200, { connectors: [connector({ status: "disabled" })] }] });
     renderTeam(<TeamConnectorsPage />);
     await screen.findByRole("article", { name: "jira" });

@@ -5,6 +5,6 @@ import "../admin-global.css";
 
 export const metadata: Metadata = { title: "Site console · Kobe" };
 
-export default function InstallConsoleLayout({ children }: { readonly children: ReactNode }) {
-  return <ConsoleRoute kind="install">{children}</ConsoleRoute>;
+export default function SiteConsoleLayout({ children }: { readonly children: ReactNode }) {
+  return <ConsoleRoute kind="site">{children}</ConsoleRoute>;
 }

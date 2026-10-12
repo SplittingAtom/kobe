@@ -1,5 +1,5 @@
-import { InstallModelsPage } from "../../../../components/admin/install/models-page";
+import { SiteModelsPage } from "../../../../components/admin/site/models-page";
 
 export default function Page() {
-  return <InstallModelsPage />;
+  return <SiteModelsPage />;
 }

@@ -242,7 +242,7 @@ contains "Bifrost is not reachable from other namespaces" '^bifrost=BLOCKED$' "$
 np=$(probe "$NS" "$(gated http://kobe-web/api/healthz bifrost http://kobe-bifrost:8080/health)")
 contains "control: a release-namespace probe reaches the web app" '^control=REACHED$' "$np"
 contains "Bifrost refuses other pods of the release namespace (only server and shim)" '^bifrost=BLOCKED$' "$np"
-# First-run setup through the ingress (KOBE-12): needs the install's setup token.
+# First-run setup through the ingress (KOBE-12): needs the site's setup token.
 setup_token=$($KUBECTL -n "$NS" get secret kobe-auth -o jsonpath='{.data.setup-token}' | base64 -d)
 ingress() { # method path [json]: full response (status line + body) via the Traefik ingress
   local data=""
@@ -813,7 +813,7 @@ contains "Stop deletes the queued message (or stops it once it started)" '^cance
 contains "the event stream records the start and the stop, then ends" '^events=run.started,(sandbox.waking,)?run.interrupted$' "$runs_out"
 contains "a cancelled run cannot be retried (interrupted runs only)" '^retry=invalid_transition$' "$runs_out"
 
-# Throwaway clusters only: this section mints sandbox-wire tokens with the install's real keys.
+# Throwaway clusters only: this section mints sandbox-wire tokens with the site's real keys.
 # KOBE-26 (Gate 1: "killing a sandbox mid-run yields interrupted + Retry and history survives").
 # No model answers in e2e yet (KOBE-40/41), so real Pi cannot be mid-run: a scripted agent holds
 # the owner's sandbox identity (a live claim + a wire token minted with the real keys) from a
@@ -1188,7 +1188,7 @@ $KUBECTL -n "$TEAM_NS" delete pod e2e-approver --grace-period=1 --wait=false >/d
 psql_kobe "DELETE FROM tool_rules WHERE team_id = '$E2E_TEAM_ID' AND scope = 'team' AND tool_glob = 'bash';" >/dev/null
 
 # KOBE-38: sandboxes reach the internet only through the egress proxy (HTTPS CONNECT, SNI match),
-# only to domains their team enabled within the install ceiling; never internal addresses.
+# only to domains their team enabled within the site ceiling; never internal addresses.
 echo "==> egress proxy (KOBE-38)"
 UPSTREAM_HOST="upstream.$UPSTREAM_NS.svc.cluster.local"
 INTERNAL_HOST="kobe-server.$NS.svc.cluster.local"
@@ -1285,7 +1285,7 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_pod:-}" ]]; then
   contains "direct egress to the upstream (bypassing the proxy) is blocked by NetworkPolicy" '^up=BLOCKED$' "$direct"
   contains "direct egress to the internet (bypassing the proxy) is blocked by NetworkPolicy" '^internet=BLOCKED$' "$direct"
 
-  # An install admin adds the domains to the ceiling; the team admin enables them (D28).
+  # A site admin adds the domains to the ceiling; the team admin enables them (D28).
   psql_kobe "INSERT INTO egress_domains (domain, in_ceiling) VALUES ('$UPSTREAM_HOST', true), ('$INTERNAL_HOST', true) ON CONFLICT DO NOTHING;
     INSERT INTO team_egress (team_id, domain, enabled_by) VALUES ('$E2E_TEAM_ID', '$UPSTREAM_HOST', '$E2E_USER_ID'),
       ('$E2E_TEAM_ID', '$INTERNAL_HOST', '$E2E_USER_ID') ON CONFLICT DO NOTHING;" >/dev/null
@@ -2208,7 +2208,7 @@ JS
     # Owner's real sandbox reads it under /workspace/uploads/<thread>/ (the fake model answers
     # "bash: <command>" with a bash tool call; `exit 0` ends the command before the attachment
     # note the agent appends to the prompt). Then the thread is deleted forever: its object leaves
-    # S3. ClamAV is off in this install (its image and signature download cost minutes and
+    # S3. ClamAV is off in this site (its image and signature download cost minutes and
     # ~1 GiB of memory per cluster): uploads report scan "skipped". The scan itself (EICAR
     # rejected, clamd down = 503) runs when KOBE_E2E_CLAMAV=1 (the nightly and manual runs).
     echo "==> uploads (KOBE-146)"
@@ -2581,7 +2581,7 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_id:-}" && "${client_ready:-0
   contains "the denied write is audited with why its approval was missing" '^risk_write\|no_approval$' \
     "$(psql_kobe "SELECT (target->>'reason') || '|' || (target->>'approvalFailure') FROM audit_log
       WHERE team_id = '$E2E_TEAM_ID' AND action = 'mcp.tool_call' AND target->>'decision' = 'denied' ORDER BY seq DESC LIMIT 1")"
-  # The user approves the write (KOBE-37 stores and signs it with the install key in the server;
+  # The user approves the write (KOBE-37 stores and signs it with the site key in the server;
   # here the same row is written directly, signed in the server pod with the real key). The same
   # direct call then runs exactly once.
   approve() { # tool-call-id input-json → kid|expires_at|mac|canonical input

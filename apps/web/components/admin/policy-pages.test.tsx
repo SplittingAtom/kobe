@@ -3,9 +3,9 @@ import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
-import { PolicyFloorPage } from "./install/policy-floor-page";
+import { PolicyFloorPage } from "./site/policy-floor-page";
 import { TeamPolicyPage } from "./team/policy-page";
-import { TEAM, renderInstall, renderTeam, stubApi, summary } from "./testing";
+import { TEAM, renderSite, renderTeam, stubApi, summary } from "./testing";
 
 const rule = (
   id: string,
@@ -37,7 +37,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("Install policy floor", () => {
+describe("Site policy floor", () => {
   const routes = {
     "GET /v1/site/policy/rules": [
       200,
@@ -55,7 +55,7 @@ describe("Install policy floor", () => {
 
   it("lists rules with their argument patterns and offers only deny and ask", async () => {
     stubApi(routes);
-    renderInstall(<PolicyFloorPage />);
+    renderSite(<PolicyFloorPage />);
     const table = await screen.findByRole("table", { name: /Site rules/ });
     expect(table.textContent).toMatch(/Deny.*mcp__github__\*/);
     expect(table.textContent).toMatch(/\/repo_name.*secret-\*/);
@@ -74,7 +74,7 @@ describe("Install policy floor", () => {
       "POST /v1/site/policy/rules": [201, { rule: rule("r-2", "ask", "bash") }],
       "DELETE /v1/site/policy/rules/r-1": [204],
     });
-    renderInstall(<PolicyFloorPage />);
+    renderSite(<PolicyFloorPage />);
     const form = await screen.findByRole("form", { name: "Add a rule" });
     await userEvent.selectOptions(within(form).getByLabelText("Effect"), "ask");
     await userEvent.type(within(form).getByLabelText("Tool pattern"), "bash");
@@ -104,7 +104,7 @@ describe("Install policy floor", () => {
         },
       ],
     });
-    renderInstall(<PolicyFloorPage />);
+    renderSite(<PolicyFloorPage />);
     const form = await screen.findByRole("form", { name: "Add a rule" });
     await userEvent.type(within(form).getByLabelText("Tool pattern"), "x");
     await userEvent.click(within(form).getByRole("button", { name: "Add rule" }));
@@ -116,7 +116,7 @@ describe("Install policy floor", () => {
       ...routes,
       "PUT /v1/site/policy/settings": [200, { promptSandboxWrites: true }],
     });
-    renderInstall(<PolicyFloorPage />);
+    renderSite(<PolicyFloorPage />);
     await userEvent.click(
       await screen.findByRole("checkbox", { name: /Ask before shell and file writes/ }),
     );
@@ -137,7 +137,7 @@ describe("Install policy floor", () => {
         { code: "forbidden", message: "You don't have permission to do that." },
       ],
     });
-    renderInstall(<PolicyFloorPage />);
+    renderSite(<PolicyFloorPage />);
     expect((await screen.findAllByRole("alert"))[0]?.textContent).toMatch(/permission/);
   });
 });

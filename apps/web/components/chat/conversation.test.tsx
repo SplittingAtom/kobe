@@ -174,7 +174,7 @@ describe("streaming a run (D16)", () => {
       expect.stringContaining("pypi.org"),
       expect.stringContaining("example.com"),
     ]);
-    // KOBE-39: only the domain inside the install's ceiling offers Request access.
+    // KOBE-39: only the domain inside the site's ceiling offers Request access.
     const ask = screen.getAllByRole("button", { name: /Request access/ });
     expect(ask).toHaveLength(1);
     expect(ask[0]?.textContent).toContain("pypi.org");

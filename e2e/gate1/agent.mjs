@@ -1,7 +1,7 @@
 // Gate 1 (KOBE-1) scripted sandbox agent. No model answers in a sandbox yet (Bifrost and Pi's
 // model wiring are KOBE-40/41), so real Pi cannot stream an answer. This stands in for the
 // sandbox side only: it holds real sandbox identities (live claims + wire tokens signed with the
-// install's keys, e2e/gate1.sh), speaks the real wire frames from a gVisor pod in the team's
+// site's keys, e2e/gate1.sh), speaks the real wire frames from a gVisor pod in the team's
 // namespace, and streams an answer for each run.start as Pi would (deltas, then the entries the
 // server mirrors). Everything from the wire inwards (routing, translation, batching, the event
 // log, the stream, resume) is the real server.

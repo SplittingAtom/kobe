@@ -44,7 +44,7 @@ describe("Team web search opt-in (KOBE-230)", () => {
     });
   });
 
-  it("hides the toggle when the install has no provider configured", async () => {
+  it("hides the toggle when the site has no provider configured", async () => {
     stubApi({
       "GET /v1/team/web-search": [200, { available: false, enabled: false, provider: null }],
     });

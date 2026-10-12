@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ApiError, ApiResult } from "../../lib/api/client";
-import { fetchInstallAccess, fetchTeamAccess } from "../../lib/admin/api/access";
+import { fetchSiteAccess, fetchTeamAccess } from "../../lib/admin/api/access";
 import {
   CONSOLE_TITLES,
   canOpenConsole,
@@ -22,12 +22,12 @@ import { IsolationBanner } from "./isolation-banner";
 import styles from "./admin.module.css";
 
 const DEFAULT_LOADERS: Readonly<Record<ConsoleKind, () => Promise<ApiResult<ConsoleAccess>>>> = {
-  install: () => fetchInstallAccess(),
+  site: () => fetchSiteAccess(),
   team: () => fetchTeamAccess(),
 };
 
 const DENIED: Readonly<Record<ConsoleKind, string>> = {
-  install: "The site console is for the site Owner and Admins.",
+  site: "The site console is for the site Owner and Admins.",
   team: "The team console is for team admins of the active team.",
 };
 
@@ -155,10 +155,10 @@ function Console({
       <Frame title={title} access={access}>
         <ConsoleNav kind={kind} sections={visibleSections(access)} current={section} />
         <main id="console-main" className={styles.main} tabIndex={-1} ref={main}>
-          {kind === "install" && <IsolationBanner hidden={section?.id === "isolation"} />}
+          {kind === "site" && <IsolationBanner hidden={section?.id === "isolation"} />}
           {allowed ? (
             // Keyed by team: a page never carries one team's state into another's.
-            <Fragment key={access.console === "team" ? access.team.id : "install"}>
+            <Fragment key={access.console === "team" ? access.team.id : "site"}>
               {children}
             </Fragment>
           ) : (
@@ -209,7 +209,7 @@ function Frame({
 }
 
 function Who({ access }: { readonly access: ConsoleAccess }) {
-  if (access.console === "install") {
+  if (access.console === "site") {
     const role = access.siteRole === "owner" ? "Owner" : "Admin";
     return (
       <p className={styles.who}>

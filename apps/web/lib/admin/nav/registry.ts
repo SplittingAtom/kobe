@@ -1,14 +1,14 @@
 /** The admin console registry: which sections exist, who sees them, and in what order. */
-import * as installModules from "./install";
+import * as siteModules from "./site";
 import * as teamModules from "./team";
 import {
-  INSTALL_GROUPS,
+  SITE_GROUPS,
   TEAM_GROUPS,
   type ConsoleAccess,
   type ConsoleKind,
   type ConsoleSection,
-  type InstallRole,
-  type InstallSection,
+  type SiteRole,
+  type SiteSection,
   type TeamSection,
 } from "./types";
 
@@ -17,12 +17,12 @@ import { consoleHref } from "./paths";
 export { CONSOLE_BASE, CONSOLE_SEGMENTS, consoleHref } from "./paths";
 
 export const CONSOLE_TITLES: Readonly<Record<ConsoleKind, string>> = {
-  install: "Site console",
+  site: "Site console",
   team: "Team console",
 };
 
 const GROUPS: Readonly<Record<ConsoleKind, readonly string[]>> = {
-  install: INSTALL_GROUPS,
+  site: SITE_GROUPS,
   team: TEAM_GROUPS,
 };
 
@@ -35,11 +35,11 @@ function sorted<T extends ConsoleSection>(sections: readonly T[]): readonly T[] 
   });
 }
 
-export const INSTALL_SECTIONS: readonly InstallSection[] = sorted(Object.values(installModules));
+export const SITE_SECTIONS: readonly SiteSection[] = sorted(Object.values(siteModules));
 export const TEAM_SECTIONS: readonly TeamSection[] = sorted(Object.values(teamModules));
 
 export function sectionsOf(kind: ConsoleKind): readonly ConsoleSection[] {
-  return kind === "install" ? INSTALL_SECTIONS : TEAM_SECTIONS;
+  return kind === "site" ? SITE_SECTIONS : TEAM_SECTIONS;
 }
 
 /** Mistakes a new entry can make (duplicate id, bad segment, wrong console); empty when valid. */
@@ -67,14 +67,12 @@ export function sectionHref(section: ConsoleSection): string {
   return `${consoleHref(section.console)}/${section.id}`;
 }
 
-const INSTALL_RANK: Readonly<Record<InstallRole, number>> = { user: 0, admin: 1, owner: 2 };
+const SITE_RANK: Readonly<Record<SiteRole, number>> = { user: 0, admin: 1, owner: 2 };
 
 /** Whether `access` may open `section`. Presentation only: the section's API decides. */
 export function canSee(section: ConsoleSection, access: ConsoleAccess): boolean {
-  if (section.console === "install") {
-    return (
-      access.console === "install" && INSTALL_RANK[access.siteRole] >= INSTALL_RANK[section.minRole]
-    );
+  if (section.console === "site") {
+    return access.console === "site" && SITE_RANK[access.siteRole] >= SITE_RANK[section.minRole];
   }
   return access.console === "team" && access.permissions.includes(section.permission);
 }

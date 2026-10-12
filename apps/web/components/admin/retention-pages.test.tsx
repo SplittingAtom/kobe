@@ -3,9 +3,9 @@ import { cleanup, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
-import { RetentionMaximumPage } from "./install/retention-page";
+import { RetentionMaximumPage } from "./site/retention-page";
 import { TeamRetentionPage } from "./team/retention-page";
-import { TEAM, renderInstall, renderTeam, stubApi } from "./testing";
+import { TEAM, renderSite, renderTeam, stubApi } from "./testing";
 
 const view = (
   period: string,
@@ -48,7 +48,7 @@ describe("Team retention (KOBE-18)", () => {
       ],
     });
     renderTeam(<TeamRetentionPage />);
-    // The team chose forever, but the install caps it at a year.
+    // The team chose forever, but the site caps it at a year.
     expect(await screen.findByText(/The site keeps conversations at most 1 year/)).toBeTruthy();
     expect(screen.queryByRole("radio", { name: "Forever" })).toBeNull();
     expect(screen.getByRole("radio", { name: "1 year" })).toHaveProperty("checked", true);
@@ -81,7 +81,7 @@ describe("Team retention (KOBE-18)", () => {
   });
 });
 
-describe("Install retention maximum (KOBE-18)", () => {
+describe("Site retention maximum (KOBE-18)", () => {
   it("lowers the maximum after confirming", async () => {
     const calls = stubApi({
       "GET /v1/site/retention": [
@@ -97,7 +97,7 @@ describe("Install retention maximum (KOBE-18)", () => {
         { maximum: "forever", applied: "forever", pending: null },
       ],
     });
-    renderInstall(<RetentionMaximumPage />);
+    renderSite(<RetentionMaximumPage />);
     expect(await screen.findByRole("radio", { name: "Forever" })).toHaveProperty("checked", true);
     await userEvent.click(screen.getByRole("radio", { name: "1 year" }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));

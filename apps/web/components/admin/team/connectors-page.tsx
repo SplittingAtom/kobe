@@ -10,7 +10,7 @@ import {
   type TeamConnector,
   type TeamConnectorTool,
 } from "../../../lib/admin/api/team/connectors";
-import { AUTH_LABELS } from "../../../lib/admin/api/install/connectors";
+import { AUTH_LABELS } from "../../../lib/admin/api/site/connectors";
 import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
 import { ResourceView, confirmed } from "../parts";
@@ -20,7 +20,7 @@ import styles from "../admin.module.css";
 /**
  * Team console: connectors (spec D27; `/v1/team/connectors`, team.connectors.manage). Off by
  * default. A team admin enables a registered connector and chooses what it exposes: read-only
- * tools, all, or a chosen list. Drifted tools wait for an install admin and cannot be chosen.
+ * tools, all, or a chosen list. Drifted tools wait for a site admin and cannot be chosen.
  */
 export function TeamConnectorsPage() {
   const teamId = useTeamAccess().team.id;

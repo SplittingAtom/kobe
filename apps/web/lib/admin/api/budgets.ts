@@ -1,7 +1,7 @@
 /**
  * Budgets and rate limits (KOBE-42, D30): `/v1/team/budgets` (team.budgets.manage),
  * `/v1/team/budgets/status` (any member, the chat banner), `/v1/site/budget`
- * (install.budgets.manage). Responses arrive camelized; request bodies use the routes' snake_case.
+ * (site.budgets.manage). Responses arrive camelized; request bodies use the routes' snake_case.
  */
 import { apiRequest, type ApiResult } from "../../api/client";
 
@@ -30,7 +30,7 @@ export interface BudgetAmountsInput {
   readonly daily_tokens: number | null;
 }
 
-export interface InstallLimits extends BudgetAmounts {
+export interface SiteLimits extends BudgetAmounts {
   readonly userRequestsPerMinute: number;
   readonly updatedAt: string;
 }
@@ -44,7 +44,7 @@ export interface MemberBudget extends BudgetAmounts {
 
 export interface TeamBudgets {
   readonly period: { readonly month: string; readonly day: string };
-  /** The install's spend is every team's together: shown in percent only. */
+  /** The site's spend is every team's together: shown in percent only. */
   readonly site: {
     readonly userRequestsPerMinute: number;
     readonly percentUsed: {
@@ -69,7 +69,7 @@ export interface BudgetStatusLine {
   readonly scope: "install" | "team" | "user";
   readonly period: "month" | "day";
   readonly unit: "usd" | "tokens";
-  /** Null for the install budget. */
+  /** Null for the site budget. */
   readonly limit: number | null;
   readonly spent: number | null;
   readonly percent: number;
@@ -121,14 +121,14 @@ export function getBudgetStatus(teamId: string): Promise<ApiResult<BudgetStatus>
   return apiRequest<BudgetStatus>("/v1/team/budgets/status", { teamId });
 }
 
-export function getInstallBudget(): Promise<ApiResult<InstallLimits>> {
-  return apiRequest<InstallLimits>("/v1/site/budget");
+export function getSiteBudget(): Promise<ApiResult<SiteLimits>> {
+  return apiRequest<SiteLimits>("/v1/site/budget");
 }
 
-export function setInstallBudget(
+export function setSiteBudget(
   input: BudgetAmountsInput & { readonly user_requests_per_minute: number },
-): Promise<ApiResult<InstallLimits>> {
-  return apiRequest<InstallLimits>("/v1/site/budget", { method: "PUT", json: input });
+): Promise<ApiResult<SiteLimits>> {
+  return apiRequest<SiteLimits>("/v1/site/budget", { method: "PUT", json: input });
 }
 
 /** "12.5" → 12.5, "" → null, anything else → undefined (invalid). */

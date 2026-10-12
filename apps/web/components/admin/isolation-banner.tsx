@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { getIsolation } from "../../lib/admin/api/install/isolation";
+import { getIsolation } from "../../lib/admin/api/site/isolation";
 import { consoleHref } from "../../lib/admin/nav/registry";
 import styles from "./admin.module.css";
 
@@ -10,7 +10,7 @@ import styles from "./admin.module.css";
 export const ISOLATION_EVENT = "kobe:isolation";
 
 /**
- * Spec D4: without a gVisor/Kata runtime "the admin console shows the fix". Install pages show
+ * Spec D4: without a gVisor/Kata runtime "the admin console shows the fix". Site pages show
  * this banner while agents are disabled; the Isolation page has the details and the fix.
  */
 export function IsolationBanner({ hidden }: { readonly hidden: boolean }) {
@@ -39,7 +39,7 @@ export function IsolationBanner({ hidden }: { readonly hidden: boolean }) {
   return (
     <div role="alert" className={styles.banner}>
       <strong>Agents are disabled:</strong> the isolation runtime is missing.{" "}
-      <Link href={`${consoleHref("install")}/isolation`}>See how to fix it</Link>.
+      <Link href={`${consoleHref("site")}/isolation`}>See how to fix it</Link>.
     </div>
   );
 }

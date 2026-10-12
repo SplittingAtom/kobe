@@ -2,7 +2,7 @@
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiResult } from "../../lib/api/client";
-import type { ConsoleAccess, InstallAccess, TeamAccess } from "../../lib/admin/nav/types";
+import type { ConsoleAccess, SiteAccess, TeamAccess } from "../../lib/admin/nav/types";
 import { ACTIVE_TEAM_EVENT } from "../../lib/teams";
 import { must } from "../../lib/testing/must";
 import { ConsoleShell } from "./console-shell";
@@ -12,8 +12,8 @@ const user = { id: "u-1", name: "Ada", email: "a@x.io" };
 const ok = <T,>(data: T): Promise<ApiResult<T>> => Promise.resolve({ ok: true, status: 200, data });
 const fail = (status: number, code: string, message: string): Promise<ApiResult<ConsoleAccess>> =>
   Promise.resolve({ ok: false, error: { status, code, message } });
-const install = (siteRole: InstallAccess["siteRole"]) => () =>
-  ok<ConsoleAccess>({ console: "install", user, siteRole });
+const site = (siteRole: SiteAccess["siteRole"]) => () =>
+  ok<ConsoleAccess>({ console: "site", user, siteRole });
 const TEAM_ADMIN = [
   "team.members.manage",
   "team.agents.build",
@@ -61,7 +61,7 @@ function Page() {
 
 beforeEach(() => {
   pageMounted.mockClear();
-  // The install shell's isolation banner asks for the status (verified unless a test says
+  // The site shell's isolation banner asks for the status (verified unless a test says
   // otherwise); the team console's switcher asks for the caller's teams.
   stubFetch({ state: "verified", agentsEnabled: true });
 });
@@ -70,10 +70,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("install console", () => {
+describe("site console", () => {
   it.each(["owner", "admin"] as const)("opens for the %s with grouped navigation", async (role) => {
     render(
-      <ConsoleShell kind="install" pathname="/admin/site/users" loadAccess={install(role)}>
+      <ConsoleShell kind="site" pathname="/admin/site/users" loadAccess={site(role)}>
         <Page />
       </ConsoleShell>,
     );
@@ -88,7 +88,7 @@ describe("install console", () => {
 
   it("refuses a plain user and never mounts the page", async () => {
     render(
-      <ConsoleShell kind="install" pathname="/admin/site/users" loadAccess={install("user")}>
+      <ConsoleShell kind="site" pathname="/admin/site/users" loadAccess={site("user")}>
         <Page />
       </ConsoleShell>,
     );
@@ -100,7 +100,7 @@ describe("install console", () => {
   it("shows checking state, then a sign-in link when the session is gone", async () => {
     render(
       <ConsoleShell
-        kind="install"
+        kind="site"
         pathname="/admin/site"
         loadAccess={() => fail(401, "unauthenticated", "Sign in to continue.")}
       >
@@ -121,7 +121,7 @@ describe("install console", () => {
       docs: "",
     });
     render(
-      <ConsoleShell kind="install" pathname="/admin/site/users" loadAccess={install("admin")}>
+      <ConsoleShell kind="site" pathname="/admin/site/users" loadAccess={site("admin")}>
         <Page />
       </ConsoleShell>,
     );
@@ -222,7 +222,7 @@ describe("team console", () => {
 describe("navigation on narrow screens", () => {
   it("folds the section list behind a labelled toggle", async () => {
     const { container } = render(
-      <ConsoleShell kind="install" pathname="/admin/site/users" loadAccess={install("admin")}>
+      <ConsoleShell kind="site" pathname="/admin/site/users" loadAccess={site("admin")}>
         <Page />
       </ConsoleShell>,
     );
@@ -262,7 +262,7 @@ describe("isolation banner", () => {
   it("clears when the Isolation page re-checks successfully", async () => {
     stubFetch({ state: "missing", agentsEnabled: false, message: "x", checkedAt: "", docs: "" });
     render(
-      <ConsoleShell kind="install" pathname="/admin/site/users" loadAccess={install("admin")}>
+      <ConsoleShell kind="site" pathname="/admin/site/users" loadAccess={site("admin")}>
         <Page />
       </ConsoleShell>,
     );

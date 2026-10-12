@@ -139,7 +139,7 @@ export class FakeKobe {
   readonly workspaceFiles = new Map<string, Uint8Array>();
   /** Folders listed so far (`GET /v1/workspace/files`), to assert one request per thread. */
   readonly workspaceListings: string[] = [];
-  /** The install catalog with the team's choice (KOBE-44); empty = no models route answers. */
+  /** The site catalog with the team's choice (KOBE-44); empty = no models route answers. */
   readonly teamModels: FakeTeamModel[] = [];
   /** `GET /v1/agents/runnable` (KOBE-122), in this order; `runnablePageSize` pages it. */
   readonly runnableAgents: FakeRunnableAgent[] = [];

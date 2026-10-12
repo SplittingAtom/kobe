@@ -3,7 +3,7 @@
  * requests and injected headers (KOBE-39). Header values are write-only: sent, never read back.
  */
 import { apiRequest, type ApiResult } from "../../../api/client";
-import type { EgressPreset } from "../install/egress";
+import type { EgressPreset } from "../site/egress";
 
 const enc = encodeURIComponent;
 const BASE = "/v1/team/egress";
@@ -11,7 +11,7 @@ const BASE = "/v1/team/egress";
 export interface TeamEgressDomain {
   readonly domain: string;
   readonly preset: EgressPreset | null;
-  /** In the install ceiling now; enablement only takes effect while it is. */
+  /** In the site ceiling now; enablement only takes effect while it is. */
   readonly inCeiling: boolean;
   /** Shared hosting or a CDN: domain fronting may reach other sites behind it. */
   readonly sharedHosting: boolean;

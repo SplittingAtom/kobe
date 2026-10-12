@@ -8,7 +8,7 @@
 #                  enablement the same request succeeds
 #   ac-3 mcp       a sandbox with a tampered kobe-policy extension cannot execute an MCP write
 #                  without a valid signed approval: mcp-proxy refuses, nothing reaches the server
-#   ac-4 break-glass  needs a second install admin's approval, notifies the team's admins, and
+#   ac-4 break-glass  needs a second site admin's approval, notifies the team's admins, and
 #                  audits every read
 #   ac-5 scan      a running sandbox holds no provider API key, no connector token and no internal
 #                  key of the install (its own Secrets and sealed provider keys, compared by value)
@@ -22,7 +22,7 @@
 # Temporary changes to the install, undone on exit: a price on the catalog model when it has none,
 # the test upstream in the egress ceiling, and (the one that rolls pods) the egress and MCP proxy
 # allow-lists for the two fake servers, restored from the release's saved values unless on k3d.
-# It signs sandbox tokens with the install's keys, so it refuses anything but a k3d context unless
+# It signs sandbox tokens with the site's keys, so it refuses anything but a k3d context unless
 # KOBE_GATE2_CONTEXT names the context explicitly. Re-runnable: fixtures are reused.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -73,14 +73,14 @@ cleanup() {
 trap cleanup EXIT
 
 # Fixtures: team gate2-a with an admin (t1) and a member (t2) whose sandbox is the one under test,
-# and a second install admin (ia) for break-glass (the install Owner is the first).
+# and a second site admin (ia) for break-glass (the site Owner is the first).
 user_json() { # key team → fixture JSON
   printf '{"key":"%s","email":"gate2-%s@gate2.test","name":"Gate2 %s","team":"%s","ip":"198.51.100.%s"}' \
     "$1" "$1" "$1" "$2" "$3"
 }
 USERS="[$(user_json t1 a 41),$(user_json t2 a 42),$(user_json ia x 43)]"
 
-echo "==> fixtures: team $TEAM_SLUG (admin, member), a second install admin"
+echo "==> fixtures: team $TEAM_SLUG (admin, member), a second site admin"
 setup_token=$($KUBECTL -n "$NS" get secret "$RELEASE-auth" -o jsonpath='{.data.setup-token}' 2>/dev/null | base64 -d 2>/dev/null || true)
 fx=$(client "$(printf '{"mode":"fixtures","base":"%s","modelAlias":"%s","owner":{"email":"%s","password":"%s"},"setupToken":"%s","users":%s,"teams":[{"key":"a","slug":"%s","name":"Gate 2 A"}]}' \
   "$BASE" "$MODEL_ALIAS" "$OWNER_EMAIL" "$OWNER_PASSWORD" "$setup_token" "$USERS" "$TEAM_SLUG")")
@@ -102,7 +102,7 @@ if [[ "$(field models_a "$fx")" == 200 ]]; then
   [[ "$MODEL_ALIAS" == fast ]] && ensure_fake_llm
 else
   MODELS=0
-  echo "     no model catalog entry '$MODEL_ALIAS' on this install: the budget and egress steps need one"
+  echo "     no model catalog entry '$MODEL_ALIAS' on this site: the budget and egress steps need one"
 fi
 ip_of() { case "$1" in t1) echo 198.51.100.41 ;; t2) echo 198.51.100.42 ;; *) echo 198.51.100.43 ;; esac; }
 user_obj() { # key id [with team] → chat user JSON
@@ -118,8 +118,8 @@ SERVER_IMAGE=$($KUBECTL -n "$NS" get "$SERVER" -o jsonpath='{.spec.template.spec
 SANDBOX_IMAGE="${KOBE_GATE2_SANDBOX_IMAGE:-${SERVER_IMAGE/kobe-server/kobe-sandbox}}"
 
 grant=$(step grant "\"userId\":\"$IA\"")
-contains "ia is an install admin; the install has at least two (Owner + admins)" '^role_status=(200|204)$' "$grant"
-contains "so a request has a second admin who can approve" '^install_admins=([2-9]|[1-9][0-9]+)$' "$grant"
+contains "ia is a site admin; the site has at least two (Owner + admins)" '^role_status=(200|204)$' "$grant"
+contains "so a request has a second admin who can approve" '^site_admins=([2-9]|[1-9][0-9]+)$' "$grant"
 
 # The sandbox of t2: pod, claim uid (= sandbox id) and exec.
 claim_uid() { $KUBECTL -n "$TNS" get sandboxclaim "u-$T2" -o jsonpath='{.metadata.uid}' 2>/dev/null || true; }
@@ -322,7 +322,7 @@ if [[ "$STEPS" == *" egress "* ]]; then
   if ((MODELS)); then
     started=$(server_now)
     ceil=$(step ceiling "\"domain\":\"$UP_HOST\",\"action\":\"add\"")
-    contains "the test upstream is in the install's egress ceiling (not yet enabled for the team)" '^ceiling=(added|present)' "$ceil"
+    contains "the test upstream is in the site's egress ceiling (not yet enabled for the team)" '^ceiling=(added|present)' "$ceil"
     [[ "$ceil" == *ceiling=added* ]] && UNDO+=("client '$(printf '{"mode":"ceiling","base":"%s","owner":%s,"domain":"%s","action":"remove"}' "$BASE" "$OWNER_JSON" "$UP_HOST")'")
     step reset "\"admin\":$U_T1,\"domain\":\"$UP_HOST\"" >/dev/null
     UNDO+=("client '$(printf '{"mode":"reset","base":"%s","admin":%s,"domain":"%s"}' "$BASE" "$U_T1" "$UP_HOST")'")
@@ -428,13 +428,13 @@ if [[ "$STEPS" == *" break-glass "* ]]; then
   bg=$(client "$(printf '{"mode":"break-glass","base":"%s","owner":%s,"requester":%s,"teamAdmin":%s,"teamId":"%s","threadId":"%s"}' \
     "$BASE" "$OWNER_JSON" "$U_IA" "$U_T1" "$TEAM" "$HELLO_THREAD")")
   printf '%s\n' "$bg" | sed 's/^/     /'
-  contains "an install admin requests access to the team (pending)" '^request=201:pending$' "$bg"
+  contains "a site admin requests access to the team (pending)" '^request=201:pending$' "$bg"
   contains "the requester can't approve their own request (second admin required)" '^self_approve=403:self_approval_forbidden$' "$bg"
   contains "nothing can be read before approval" '^read_before_approval=403:grant_not_active$' "$bg"
-  contains "the other install admin approves it" '^approve=200:active$' "$bg"
+  contains "the other site admin approves it" '^approve=200:active$' "$bg"
   contains "it is a two-person approval, not a self-approval" '^approve_self_approved=false$' "$bg"
   contains "the team's admins are queued for the notification" '^approve_team_admins_queued=[1-9]' "$bg"
-  contains "the notification is durable in the outbox (delivery depends on the install's mail)" '^notification=team_admin/approved/(sent|pending|failed)=[1-9]' "$bg"
+  contains "the notification is durable in the outbox (delivery depends on the site's mail)" '^notification=team_admin/approved/(sent|pending|failed)=[1-9]' "$bg"
   contains "the team admin sees the active grant in the team's banner" '^team_banner=active:' "$bg"
   contains "the three reads under the grant succeed" '^reads=200,200,200$' "$bg"
   contains "the grant is not honored by normal team routes" '^normal_route_with_grant=(403|404|409)$' "$bg"

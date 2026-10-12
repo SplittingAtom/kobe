@@ -3,9 +3,9 @@
 # contains, in_sbx, sbx_pod, client, chat, ...) and variables (KUBECTL, NS, TNS, TEAM, T2, BASE, WORK).
 #
 # The secrets are collected on the CI side only and never printed or sent into the sandbox: the
-# install's Kubernetes Secrets (every value of the release namespace and of its dependencies'
+# site's Kubernetes Secrets (every value of the release namespace and of its dependencies'
 # namespaces: internal signing/sealing keys, database and S3 credentials, the Bifrost admin
-# password), the plaintext provider API keys (opened in a server pod with the install's own key),
+# password), the plaintext provider API keys (opened in a server pod with the site's own key),
 # and any extra values in KOBE_GATE2_EXTRA_SECRETS_FILE (connector tokens, a real provider key kept
 # outside the cluster). What the sandbox holds is copied out and searched with `grep -F -f`; a hit is
 # reported by the secret's label and the file it was found in, never by value.
@@ -136,8 +136,8 @@ run_secret_scan() {
     add_secret_value "$dir" "extra secrets file" "$KOBE_GATE2_EXTRA_SECRETS_FILE"
   fi
   n=$(wc -l <"$dir/labels" | tr -d ' ')
-  contains "the install's secret values were collected (CI side only: $n secrets/keys; values never printed)" '^[1-9][0-9]*$' "$n"
-  contains "the install's provider API keys were collected from the sealed store" '^provider API key' \
+  contains "the site's secret values were collected (CI side only: $n secrets/keys; values never printed)" '^[1-9][0-9]*$' "$n"
+  contains "the site's provider API keys were collected from the sealed store" '^provider API key' \
     "$(cut -f2 "$dir/labels" | grep -m1 '^provider API key' || echo 'none (no provider key in the install)')"
 
   # 2. Positive controls: a canary in a file and in a process environment must be found.

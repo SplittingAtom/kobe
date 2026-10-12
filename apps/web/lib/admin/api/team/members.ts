@@ -1,7 +1,7 @@
 /** Team console: members and roles (`/v1/team/members`). Every call names the team (`X-Kobe-Team`). */
 import { apiRequest, type ApiResult } from "../../../api/client";
 import type { TeamRole } from "../../../teams";
-import type { RosterMember } from "../install/teams";
+import type { RosterMember } from "../site/teams";
 
 const enc = encodeURIComponent;
 

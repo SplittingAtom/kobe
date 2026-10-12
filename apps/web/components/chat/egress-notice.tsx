@@ -39,7 +39,7 @@ function statusText(view: View, domain: string): string | null {
 }
 
 /**
- * U12 / D28: a blocked domain is a clear notice; when the domain is in the install's ceiling the
+ * U12 / D28: a blocked domain is a clear notice; when the domain is in the site's ceiling the
  * member can **Request access**, which notifies the team's admins (domain + this thread's id). No
  * self-allow: the button only asks. The notice shows the request's state (read back on mount, so a
  * reload keeps it, and re-read while pending).

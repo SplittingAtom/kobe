@@ -1,4 +1,4 @@
-import { IsolationPage } from "../../../../components/admin/install/isolation-page";
+import { IsolationPage } from "../../../../components/admin/site/isolation-page";
 
 export default function Page() {
   return <IsolationPage />;

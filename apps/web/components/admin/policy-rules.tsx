@@ -15,7 +15,7 @@ const EFFECT_LABEL: Readonly<Record<RuleEffect, string>> = {
 };
 
 /**
- * Tool rules for one scope (install floor or team, KOBE-35). The server validates every rule (glob
+ * Tool rules for one scope (site floor or team, KOBE-35). The server validates every rule (glob
  * grammar, allow scoping, limits) and decides every tool call; this lists, adds and removes.
  * Argument patterns are shown; adding them waits for a fuller editor.
  */

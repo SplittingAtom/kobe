@@ -37,7 +37,7 @@ export function ErrorNotice({ error }: { readonly error: ApiError }) {
       {kind === "isolation" && (
         <p>
           Agents are disabled until the cluster has a gVisor or Kata runtime. Site admins can see
-          the fix on the <Link href={`${consoleHref("install")}/isolation`}>Isolation</Link> page.
+          the fix on the <Link href={`${consoleHref("site")}/isolation`}>Isolation</Link> page.
         </p>
       )}
     </div>

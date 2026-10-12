@@ -1,7 +1,7 @@
 import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { vi } from "vitest";
-import type { InstallAccess, TeamAccess } from "../../lib/admin/nav/types";
+import type { SiteAccess, TeamAccess } from "../../lib/admin/nav/types";
 import { ConsoleAccessContext } from "./console-context";
 
 export interface RecordedCall {
@@ -50,8 +50,8 @@ export function stubApi(routes: Record<string, Reply | readonly Reply[]>): Recor
 
 export const ME = { id: "u-me", name: "Ada", email: "ada@x.io" };
 
-export function renderInstall(ui: ReactElement, siteRole: InstallAccess["siteRole"] = "admin") {
-  const access: InstallAccess = { console: "install", user: ME, siteRole };
+export function renderSite(ui: ReactElement, siteRole: SiteAccess["siteRole"] = "admin") {
+  const access: SiteAccess = { console: "site", user: ME, siteRole };
   return render(<ConsoleAccessContext.Provider value={access}>{ui}</ConsoleAccessContext.Provider>);
 }
 

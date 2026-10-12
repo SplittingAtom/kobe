@@ -36,7 +36,7 @@ function actorName(e: TeamAuditEvent): string {
 /**
  * The team's audit view (spec D6; `/v1/team/audit`): every event recorded for this team, newest
  * first, with a banner for each active break-glass grant (D10). Break-glass reads appear as
- * `governance.break_glass.read`, one per page an install admin opened.
+ * `governance.break_glass.read`, one per page a site admin opened.
  */
 export function TeamAuditPage() {
   const teamId = useTeamAccess().team.id;

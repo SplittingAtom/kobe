@@ -3,11 +3,11 @@ import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
-import { BreakGlassPage } from "./install/break-glass-page";
-import { entryText } from "./install/break-glass-reader";
+import { BreakGlassPage } from "./site/break-glass-page";
+import { entryText } from "./site/break-glass-reader";
 import { TeamAuditPage } from "./team/audit-page";
 import { TeamBreakGlassPage } from "./team/break-glass-page";
-import { ME, TEAM, renderInstall, renderTeam, stubApi, summary } from "./testing";
+import { ME, TEAM, renderSite, renderTeam, stubApi, summary } from "./testing";
 
 const TEAMS = { teams: [{ id: "t-1", slug: "fin", name: "Finance" }] };
 const ROSTER = {
@@ -60,7 +60,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("install break-glass page", () => {
+describe("site break-glass page", () => {
   it("requests access narrowed to one user, with reason, duration and legal hold", async () => {
     const calls = stubApi({
       "GET /v1/site/break-glass": [200, { grants: [], selfApprovalAllowed: false }],
@@ -71,7 +71,7 @@ describe("install break-glass page", () => {
         { grant: grant({ scope: "user" }), notified: { recipients: 1 }, warnings: [] },
       ],
     });
-    renderInstall(<BreakGlassPage />);
+    renderSite(<BreakGlassPage />);
     const form = await screen.findByRole("form", { name: "Request break-glass access" });
     await userEvent.selectOptions(within(form).getByLabelText("Team"), "t-1");
     await userEvent.click(within(form).getByLabelText("One user's threads"));
@@ -105,7 +105,7 @@ describe("install break-glass page", () => {
         },
       ],
     });
-    renderInstall(<BreakGlassPage />);
+    renderSite(<BreakGlassPage />);
     const row = (await screen.findByText("Incident 42")).closest("tr") as HTMLElement;
     expect(within(row).getByText("Waiting for approval")).toBeTruthy();
     await userEvent.click(within(row).getByRole("button", { name: "Approve" }));
@@ -140,7 +140,7 @@ describe("install break-glass page", () => {
         },
       ],
     });
-    renderInstall(<BreakGlassPage />);
+    renderSite(<BreakGlassPage />);
     const row = (await screen.findByText("Incident 42")).closest("tr") as HTMLElement;
     expect(row.textContent).toContain("Legal hold: the subject is not notified");
     await userEvent.click(within(row).getByRole("button", { name: "Approve" }));
@@ -148,7 +148,7 @@ describe("install break-glass page", () => {
     await screen.findByText(/No active team admin of this team could be notified/);
   });
 
-  it("explains self-approval on a single-admin install and shows the flag", async () => {
+  it("explains self-approval on a single-admin site and shows the flag", async () => {
     stubApi({
       "GET /v1/site/break-glass": [
         200,
@@ -168,7 +168,7 @@ describe("install break-glass page", () => {
       ],
       "GET /v1/site/teams": [200, TEAMS],
     });
-    renderInstall(<BreakGlassPage />);
+    renderSite(<BreakGlassPage />);
     await screen.findByText(/only active admin/);
     expect(screen.getByText(/Self-approved by Ivy \(flagged\)/)).toBeTruthy();
   });
@@ -221,7 +221,7 @@ describe("install break-glass page", () => {
         },
       ],
     });
-    renderInstall(<BreakGlassPage />);
+    renderSite(<BreakGlassPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Read" }));
     expect(await screen.findByRole("note")).toBeTruthy();
     await userEvent.click(await screen.findByRole("button", { name: "Open" }));
@@ -246,7 +246,7 @@ describe("install break-glass page", () => {
         },
       ],
     });
-    renderInstall(<BreakGlassPage />);
+    renderSite(<BreakGlassPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Read" }));
     expect((await screen.findByRole("alert")).textContent).toContain("doesn't give access now");
   });

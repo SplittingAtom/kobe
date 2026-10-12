@@ -1,6 +1,6 @@
 /**
  * Uploads from the composer (KOBE-145; contract in `@kobe/protocol` uploads.ts, KOBE-141):
- * `POST /v1/uploads` multipart, one file per request, progress from XHR. Limits are the install
+ * `POST /v1/uploads` multipart, one file per request, progress from XHR. Limits are the site
  * defaults, used only for client-side pre-checks; the server's own limit (`limit_bytes` in the
  * error) is what a refusal reports.
  */

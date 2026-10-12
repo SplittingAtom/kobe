@@ -3,9 +3,9 @@ import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
-import { EgressCeilingPage } from "./install/egress-ceiling-page";
+import { EgressCeilingPage } from "./site/egress-ceiling-page";
 import { TeamEgressPage } from "./team/egress-page";
-import { TEAM, renderInstall, renderTeam, stubApi, summary } from "./testing";
+import { TEAM, renderSite, renderTeam, stubApi, summary } from "./testing";
 
 const entry = (domain: string, preset: string | null, in_ceiling: boolean) => ({
   domain,
@@ -39,10 +39,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("Install egress ceiling", () => {
+describe("Site egress ceiling", () => {
   it("lists domains by preset and offers delete for custom domains only", async () => {
     stubApi({ "GET /v1/site/egress-ceiling": [200, CEILING] });
-    renderInstall(<EgressCeilingPage />);
+    renderSite(<EgressCeilingPage />);
     const registries = await screen.findByRole("table", { name: "Package registries" });
     expect(registries.textContent).toContain("pypi.org");
     expect(within(registries).queryByRole("button", { name: /Delete/ })).toBeNull();
@@ -68,7 +68,7 @@ describe("Install egress ceiling", () => {
       "PUT /v1/site/egress-ceiling/presets/package_registries": [200, CEILING],
       "DELETE /v1/site/egress-ceiling/*.example.com": [204],
     });
-    renderInstall(<EgressCeilingPage />);
+    renderSite(<EgressCeilingPage />);
     await userEvent.click(
       await screen.findByRole("checkbox", { name: "github.com in the ceiling" }),
     );
@@ -97,7 +97,7 @@ describe("Install egress ceiling", () => {
         ],
       ],
     });
-    renderInstall(<EgressCeilingPage />);
+    renderSite(<EgressCeilingPage />);
     const form = await screen.findByRole("form", { name: "Add a domain" });
     await userEvent.type(within(form).getByLabelText("Domain"), "api.vendor.io");
     await userEvent.type(within(form).getByLabelText("Note (optional)"), "Vendor");
@@ -125,7 +125,7 @@ describe("Domain fronting warnings", () => {
         ],
       ],
     });
-    renderInstall(<EgressCeilingPage />);
+    renderSite(<EgressCeilingPage />);
     const custom = await screen.findByRole("table", { name: "Custom domains" });
     expect(custom.textContent).toMatch(/d111\.cloudfront\.net.*domain fronting/);
     expect(screen.getByRole("table", { name: "Package registries" }).textContent).not.toMatch(

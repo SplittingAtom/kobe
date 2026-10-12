@@ -22,13 +22,13 @@ export interface PendingRetention {
 export interface TeamRetention {
   /** What the team admins chose (in force, or pending). */
   readonly period: RetentionPeriod;
-  /** The install maximum as chosen. */
+  /** The site maximum as chosen. */
   readonly maximum: RetentionPeriod;
   /** What the nightly job applies now. */
   readonly effective: RetentionPeriod;
   /** The team's own pending shortening (team admins can cancel it). */
   readonly pending: PendingRetention | null;
-  /** The next shortening of what applies, from the team or the install (the banner). */
+  /** The next shortening of what applies, from the team or the site (the banner). */
   readonly upcoming: PendingRetention | null;
   /** Periods the team may choose under the maximum. */
   readonly allowed: readonly RetentionPeriod[];

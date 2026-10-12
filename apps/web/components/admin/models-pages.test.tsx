@@ -3,11 +3,11 @@ import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
-import { InstallModelsPage } from "./install/models-page";
+import { SiteModelsPage } from "./site/models-page";
 import { TeamModelsPage } from "./team/models-page";
-import { TEAM, renderInstall, renderTeam, stubApi, summary, type RecordedCall } from "./testing";
+import { TEAM, renderSite, renderTeam, stubApi, summary, type RecordedCall } from "./testing";
 
-/** KOBE-44: install Models and providers, team Models (over KOBE-40's API, snake_case wire). */
+/** KOBE-44: site Models and providers, team Models (over KOBE-40's API, snake_case wire). */
 const T = "2026-10-03T10:00:00Z";
 const OLLAMA = {
   id: "ollama",
@@ -78,10 +78,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("install: models and providers", () => {
+describe("site: models and providers", () => {
   it("shows providers with only whether a key is set, the catalog, and the gateway in sync", async () => {
     const calls = stubApi({ "GET /v1/site/models": [200, MODELS] });
-    renderInstall(<InstallModelsPage />);
+    renderSite(<SiteModelsPage />);
     const providers = await screen.findByRole("table", { name: /Providers/ });
     const row = within(providers).getByRole("row", { name: /Ollama Cloud/ });
     expect(row.textContent).toContain("https://ollama.com");
@@ -109,7 +109,7 @@ describe("install: models and providers", () => {
         },
       ],
     });
-    renderInstall(<InstallModelsPage />);
+    renderSite(<SiteModelsPage />);
     expect(await screen.findByText(/Not in sync: the last attempt/)).toBeTruthy();
     expect(screen.getByText("bifrost_unreachable")).toBeTruthy();
   });
@@ -119,7 +119,7 @@ describe("install: models and providers", () => {
       "GET /v1/site/models": [200, { ...MODELS, providers: [], catalog: [] }],
       "POST /v1/site/models/providers": [201, { provider: OLLAMA }],
     });
-    renderInstall(<InstallModelsPage />);
+    renderSite(<SiteModelsPage />);
     const user = userEvent.setup();
     const form = await screen.findByRole("form", { name: "Add a provider" });
     await user.selectOptions(within(form).getByLabelText("Kind"), "ollama");
@@ -149,7 +149,7 @@ describe("install: models and providers", () => {
         { provider: { ...OLLAMA, id: "vllm", kind: "openai_compatible", name: "vLLM" } },
       ],
     });
-    renderInstall(<InstallModelsPage />);
+    renderSite(<SiteModelsPage />);
     const user = userEvent.setup();
     const form = await screen.findByRole("form", { name: "Add a provider" });
     const kind = within(form).getByLabelText("Kind");
@@ -177,7 +177,7 @@ describe("install: models and providers", () => {
       "GET /v1/site/models": [200, MODELS],
       "PATCH /v1/site/models/providers/ollama": [200, { provider: OLLAMA }],
     });
-    renderInstall(<InstallModelsPage />);
+    renderSite(<SiteModelsPage />);
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Edit Ollama Cloud" }));
     const form = screen.getByRole("form", { name: "Edit Ollama Cloud" });
@@ -208,7 +208,7 @@ describe("install: models and providers", () => {
         },
       ],
     });
-    renderInstall(<InstallModelsPage />);
+    renderSite(<SiteModelsPage />);
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Edit Ollama Cloud" }));
     const form = screen.getByRole("form", { name: "Edit Ollama Cloud" });
@@ -240,7 +240,7 @@ describe("install: models and providers", () => {
         },
       ],
     });
-    renderInstall(<InstallModelsPage />);
+    renderSite(<SiteModelsPage />);
     const user = userEvent.setup();
     const form = await screen.findByRole("form", { name: "Add a catalog model" });
     expect(await within(form).findByText(/No models listed yet/)).toBeTruthy();
@@ -267,7 +267,7 @@ describe("install: models and providers", () => {
       "GET /v1/site/models/providers/ollama/models": [200, LISTED],
       "POST /v1/site/models/catalog": [201, { model: { ...KIMI, alias: "see" } }],
     });
-    renderInstall(<InstallModelsPage />);
+    renderSite(<SiteModelsPage />);
     const user = userEvent.setup();
     const form = await screen.findByRole("form", { name: "Add a catalog model" });
     await within(form).findByText(/2 models available/);
@@ -291,7 +291,7 @@ describe("install: models and providers", () => {
       "GET /v1/site/models": [200, { ...MODELS, catalog: [] }],
       "GET /v1/site/models/providers/ollama/models": [200, LISTED],
     });
-    renderInstall(<InstallModelsPage />);
+    renderSite(<SiteModelsPage />);
     const user = userEvent.setup();
     const form = await screen.findByRole("form", { name: "Add a catalog model" });
     await within(form).findByText(/2 models available/);
@@ -317,7 +317,7 @@ describe("install: models and providers", () => {
         { model: { ...KIMI, input_modalities: ["text", "image"] } },
       ],
     });
-    renderInstall(<InstallModelsPage />);
+    renderSite(<SiteModelsPage />);
     const user = userEvent.setup();
     const catalog = await screen.findByRole("table", { name: /Catalog models/ });
     expect(within(catalog).getByRole("row", { name: /eye/ }).textContent).toContain("Text, images");
@@ -348,7 +348,7 @@ describe("install: models and providers", () => {
         },
       ],
     });
-    renderInstall(<InstallModelsPage />);
+    renderSite(<SiteModelsPage />);
     const catalog = await screen.findByRole("table", { name: /Catalog models/ });
     const row = (name: RegExp) => within(catalog).getByRole("row", { name }).textContent;
     expect(row(/^kimi/)).toContain("Output 16,384 (site default)");
@@ -364,7 +364,7 @@ describe("install: models and providers", () => {
     const { max_output_tokens: _m, context_window: _c, reasoning: _r, ...old } = KIMI;
     const { token_defaults: _d, ...oldModels } = MODELS;
     stubApi({ "GET /v1/site/models": [200, { ...oldModels, catalog: [old] }] });
-    renderInstall(<InstallModelsPage />);
+    renderSite(<SiteModelsPage />);
     const catalog = await screen.findByRole("table", { name: /Catalog models/ });
     expect(within(catalog).getByRole("row", { name: /^kimi/ }).textContent).toContain(
       "Output — (site default)",
@@ -381,7 +381,7 @@ describe("install: models and providers", () => {
       "PATCH /v1/site/models/catalog/kimi": [200, { model: { ...KIMI, reasoning: true } }],
       "PATCH /v1/site/models/catalog/big": [200, { model: { ...KIMI, alias: "big" } }],
     });
-    renderInstall(<InstallModelsPage />);
+    renderSite(<SiteModelsPage />);
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Edit kimi" }));
     let form = screen.getByRole("form", { name: "Edit kimi" });
@@ -416,7 +416,7 @@ describe("install: models and providers", () => {
       "GET /v1/site/models/providers/ollama/models": [200, LISTED],
       "POST /v1/site/models/catalog": [201, { model: { ...KIMI, alias: "glm" } }],
     });
-    renderInstall(<InstallModelsPage />);
+    renderSite(<SiteModelsPage />);
     const user = userEvent.setup();
     const form = await screen.findByRole("form", { name: "Add a catalog model" });
     await user.type(within(form).getByLabelText("Alias"), "glm");
@@ -442,7 +442,7 @@ describe("install: models and providers", () => {
         { ...LISTED, models: [], discovery: "failed", detail: "401 unauthorized" },
       ],
     });
-    renderInstall(<InstallModelsPage />);
+    renderSite(<SiteModelsPage />);
     expect(
       await screen.findByText(/The provider refused to list its models: 401 unauthorized/),
     ).toBeTruthy();
@@ -455,7 +455,7 @@ describe("install: models and providers", () => {
       "PATCH /v1/site/models/catalog/kimi": [200, { model: { ...KIMI, label: "Kimi" } }],
       "DELETE /v1/site/models/catalog/kimi": [204],
     });
-    renderInstall(<InstallModelsPage />);
+    renderSite(<SiteModelsPage />);
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Edit kimi" }));
     const form = screen.getByRole("form", { name: "Edit kimi" });
@@ -474,7 +474,7 @@ describe("install: models and providers", () => {
     stubApi({
       "GET /v1/site/models": [200, { ...MODELS, providers: [], catalog: [], configured: false }],
     });
-    renderInstall(<InstallModelsPage />);
+    renderSite(<SiteModelsPage />);
     expect(await screen.findByText(/Model gateway: not configured/)).toBeTruthy();
     expect(screen.queryByRole("form", { name: "Add a provider" })).toBeNull();
   });

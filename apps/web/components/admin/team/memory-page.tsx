@@ -8,7 +8,7 @@ import { MemorySwitchesForm } from "./memory-switches-form";
 
 /**
  * Team memory switches (`/v1/memory/settings?level=team`, KOBE-155): all memory, and project
- * memory. Effective only while the install allows it too; turning a switch off removes
+ * memory. Effective only while the site allows it too; turning a switch off removes
  * `remember`/`recall` and the memory index from the team's next runs.
  */
 export function TeamMemoryPage() {

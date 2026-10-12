@@ -2,13 +2,13 @@
  * Which actions a console offers, mirroring the server's rules so people aren't shown buttons
  * that can only fail. The server decides; these never grant anything.
  */
-import type { InstallUser } from "./api/install/users";
-import type { InstallRole } from "./nav/types";
+import type { SiteUser } from "./api/site/users";
+import type { SiteRole } from "./nav/types";
 
 /** Deactivation (KOBE-13): Admins act on Users, only the Owner on Admins; nobody on the Owner or themselves. */
 export function canChangeActivation(
-  me: { readonly userId: string; readonly role: InstallRole },
-  target: Pick<InstallUser, "id" | "siteRole">,
+  me: { readonly userId: string; readonly role: SiteRole },
+  target: Pick<SiteUser, "id" | "siteRole">,
 ): boolean {
   if (target.id === me.userId || target.siteRole === "owner") return false;
   if (target.siteRole === "admin") return me.role === "owner";
@@ -16,12 +16,12 @@ export function canChangeActivation(
 }
 
 /** Granting/revoking Admin and transferring ownership are the Owner's (KOBE-14). */
-export function canManageInstallRoles(role: InstallRole): boolean {
+export function canManageSiteRoles(role: SiteRole): boolean {
   return role === "owner";
 }
 
-/** Turning required 2FA off weakens every account: Owner only (install-settings route). */
-export function canTurnOffRequiredTwoFactor(role: InstallRole): boolean {
+/** Turning required 2FA off weakens every account: Owner only (site-settings route). */
+export function canTurnOffRequiredTwoFactor(role: SiteRole): boolean {
   return role === "owner";
 }
 

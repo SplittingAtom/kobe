@@ -52,9 +52,9 @@ async function follow(c, runId, timeoutMs) {
   return { events, terminal };
 }
 
-// --- install-level setup ------------------------------------------------------------------
+// --- site-level setup ------------------------------------------------------------------
 
-/** Makes a user an install admin (the second admin break-glass needs). */
+/** Makes a user a site admin (the second admin break-glass needs). */
 async function grant() {
   const owner = await ownerClient();
   const res = await owner.call("PUT", `/v1/site/roles/${config.userId}`, { role: "admin" });
@@ -63,7 +63,7 @@ async function grant() {
   const privileged = (roles.json.roles ?? []).filter(
     (r) => r.role === "admin" || r.role === "owner",
   );
-  out("install_admins", privileged.length);
+  out("site_admins", privileged.length);
 }
 
 /** Prices the catalog model only when it has no price (so a budget can be reached); restores. */
@@ -94,7 +94,7 @@ async function price() {
   out("price", `set:${res.status}`);
 }
 
-/** Puts a domain into the install's egress ceiling (or takes away what this harness added). */
+/** Puts a domain into the site's egress ceiling (or takes away what this harness added). */
 async function ceiling() {
   const owner = await ownerClient();
   if (config.action === "remove") {
@@ -335,7 +335,7 @@ async function mcpClean() {
   }
 }
 
-/** Session tokens signed with the install's keys, per audience (throwaway installs only). */
+/** Session tokens signed with the site's keys, per audience (throwaway installs only). */
 async function mint2() {
   const { signSessionToken } = await import("/app/dist/sandbox/session-token.js");
   const { sessionKeyEnvName } = await import("/app/dist/sandbox/config.js");
@@ -358,7 +358,7 @@ async function mint2() {
   }
 }
 
-/** The user's approval of one write, signed with the install key and stored as the server does. */
+/** The user's approval of one write, signed with the site key and stored as the server does. */
 async function approve() {
   const { approvalKeyring } = await import("/app/dist/approvals/keys.js");
   const { signApproval } = await import("/app/node_modules/@kobe/protocol/dist/node/index.js");
@@ -527,7 +527,7 @@ async function breakGlass() {
   }
 }
 
-/** The install's plaintext provider API keys, for the CI-side secret scan (never printed there). */
+/** The site's plaintext provider API keys, for the CI-side secret scan (never printed there). */
 async function providerKeys() {
   const kdb = await import("/app/node_modules/@kobe/db/dist/index.js");
   const { SecretBox, PROVIDER_KEY_PURPOSE, providerKeyContext, modelProviders } = kdb;

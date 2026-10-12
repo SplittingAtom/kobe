@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../testing/must";
-import * as install from "./install/egress";
+import * as site from "./site/egress";
 import * as team from "./team/egress";
 
 function stub(status: number, body?: unknown) {
@@ -24,32 +24,32 @@ const ENTRY = {
   updated_at: "2026-10-01T10:00:00Z",
 };
 
-describe("install egress ceiling API", () => {
+describe("site egress ceiling API", () => {
   it("reads the ceiling camelized", async () => {
     stub(200, { domains: [ENTRY], presets: ["package_registries"] });
-    const res = await install.getEgressCeiling();
+    const res = await site.getEgressCeiling();
     expect(res).toMatchObject({ ok: true, data: { domains: [{ inCeiling: true }] } });
   });
 
   it("adds with a snake_case body and URL-encodes wildcard domains", async () => {
     let fetchFn = stub(201, { domain: ENTRY });
-    await install.addCeilingDomain("*.example.com", null);
+    await site.addCeilingDomain("*.example.com", null);
     let [url, init] = must(fetchFn.mock.calls[0]);
     expect(url).toBe("/v1/site/egress-ceiling");
     expect(JSON.parse(String(init?.body))).toEqual({ domain: "*.example.com", note: null });
 
     fetchFn = stub(200, { domain: ENTRY });
-    await install.setCeilingMembership("*.example.com", false);
+    await site.setCeilingMembership("*.example.com", false);
     [url, init] = must(fetchFn.mock.calls[0]);
     expect(url).toBe("/v1/site/egress-ceiling/*.example.com");
     expect(JSON.parse(String(init?.body))).toEqual({ in_ceiling: false });
 
     fetchFn = stub(204);
-    await install.deleteCeilingDomain("a b.com");
+    await site.deleteCeilingDomain("a b.com");
     expect(must(fetchFn.mock.calls[0])[0]).toBe("/v1/site/egress-ceiling/a%20b.com");
 
     fetchFn = stub(200, { domains: [], presets: [] });
-    await install.setPresetMembership("git_hosts", true);
+    await site.setPresetMembership("git_hosts", true);
     expect(must(fetchFn.mock.calls[0])[0]).toBe("/v1/site/egress-ceiling/presets/git_hosts");
   });
 });

@@ -2,8 +2,8 @@
 import { cleanup, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SkillBlocklistPage } from "./install/skill-blocklist-page";
-import { renderInstall, stubApi } from "./testing";
+import { SkillBlocklistPage } from "./site/skill-blocklist-page";
+import { renderSite, stubApi } from "./testing";
 
 const BASE = "/v1/site/skill-blocklist";
 const H1 = "a".repeat(64);
@@ -32,7 +32,7 @@ describe("Skill blocklist (KOBE-81)", () => {
       [`GET ${BASE}`]: [200, { entries: [entry(H1, "malware")], nextCursor: "c1" }],
       [`GET ${BASE}?cursor=c1`]: [200, { entries: [entry(H2, "typosquat")], nextCursor: null }],
     });
-    renderInstall(<SkillBlocklistPage />);
+    renderSite(<SkillBlocklistPage />);
     expect((await screen.findAllByText(H1)).length).toBeGreaterThan(0);
     await userEvent.click(screen.getByRole("button", { name: "Load more" }));
     expect((await screen.findAllByText(H2)).length).toBeGreaterThan(0);
@@ -48,7 +48,7 @@ describe("Skill blocklist (KOBE-81)", () => {
       ],
       [`POST ${BASE}`]: [201, { entry: entry(H1, "bad bundle") }],
     });
-    renderInstall(<SkillBlocklistPage />);
+    renderSite(<SkillBlocklistPage />);
     expect(await screen.findByText("No hashes are blocked.")).toBeTruthy();
     await userEvent.type(screen.getByLabelText("Bundle hash (SHA-256)"), `  ${H1.toUpperCase()} `);
     await userEvent.type(screen.getByLabelText("Reason"), "bad bundle");
@@ -66,7 +66,7 @@ describe("Skill blocklist (KOBE-81)", () => {
       ],
       [`DELETE ${BASE}/${H1}`]: [204],
     });
-    renderInstall(<SkillBlocklistPage />);
+    renderSite(<SkillBlocklistPage />);
     await userEvent.click(await screen.findByRole("button", { name: `Remove ${H1}` }));
     expect(await screen.findByText("No hashes are blocked.")).toBeTruthy();
     expect(calls.some((c) => c.method === "DELETE")).toBe(true);
@@ -80,7 +80,7 @@ describe("Skill blocklist (KOBE-81)", () => {
         { code: "already_blocked", message: "That hash is already blocked." },
       ],
     });
-    renderInstall(<SkillBlocklistPage />);
+    renderSite(<SkillBlocklistPage />);
     await screen.findByText("No hashes are blocked.");
     await userEvent.type(screen.getByLabelText("Bundle hash (SHA-256)"), H1);
     await userEvent.type(screen.getByLabelText("Reason"), "x");

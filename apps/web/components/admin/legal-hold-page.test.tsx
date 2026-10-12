@@ -3,9 +3,9 @@ import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
-import { LegalHoldPage } from "./install/legal-hold-page";
-import { SettingsPage } from "./install/settings-page";
-import { ME, renderInstall, stubApi } from "./testing";
+import { LegalHoldPage } from "./site/legal-hold-page";
+import { SettingsPage } from "./site/settings-page";
+import { ME, renderSite, stubApi } from "./testing";
 
 const TEAMS = { teams: [{ id: "t-1", slug: "fin", name: "Finance" }] };
 const ROSTER = {
@@ -78,7 +78,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("install legal hold page", () => {
+describe("site legal hold page", () => {
   it("requests a hold on one user's data with a reason", async () => {
     const calls = stubApi({
       "GET /v1/site/legal-hold": [200, { holds: [], selfApprovalAllowed: false }],
@@ -86,7 +86,7 @@ describe("install legal hold page", () => {
       "GET /v1/site/teams/t-1/members": [200, ROSTER],
       "POST /v1/site/legal-hold": [201, { hold: hold({ scope: "user" }) }],
     });
-    renderInstall(<LegalHoldPage />);
+    renderSite(<LegalHoldPage />);
     const form = await screen.findByRole("form", { name: "Request a legal hold" });
     await userEvent.selectOptions(within(form).getByLabelText("Team"), "t-1");
     await userEvent.click(within(form).getByLabelText("One user's data in this team"));
@@ -109,7 +109,7 @@ describe("install legal hold page", () => {
       "GET /v1/site/teams": [200, TEAMS],
       "POST /v1/site/legal-hold/h-1/approve": [200, { hold: hold({ status: "active" }) }],
     });
-    renderInstall(<LegalHoldPage />);
+    renderSite(<LegalHoldPage />);
     const table = await screen.findByRole("table", { name: "Holds and requests" });
     expect(within(table).getByText(/Placed by Ada alone \(self-approved, flagged\)/)).toBeTruthy();
     expect(within(table).getByText("Data of Bob")).toBeTruthy();
@@ -128,7 +128,7 @@ describe("install legal hold page", () => {
         { hold: hold({ id: "h-3", status: "released" }) },
       ],
     });
-    renderInstall(<LegalHoldPage />);
+    renderSite(<LegalHoldPage />);
     const table = await screen.findByRole("table", { name: "Holds and requests" });
     expect(within(table).getByText(/Matter settled/)).toBeTruthy();
     await userEvent.click(within(table).getByRole("button", { name: "Ask to release" }));
@@ -155,7 +155,7 @@ describe("audit log privacy setting", () => {
       "GET /v1/site/settings": [200, { requireTwoFactor: false, auditPiiRetentionHours: 12 }],
       "PUT /v1/site/settings": [200, { requireTwoFactor: false, auditPiiRetentionHours: 48 }],
     });
-    renderInstall(<SettingsPage />, "admin");
+    renderSite(<SettingsPage />, "admin");
     const form = await screen.findByRole("form", { name: "Audit log privacy" });
     const input = within(form).getByRole("spinbutton");
     await userEvent.clear(input);

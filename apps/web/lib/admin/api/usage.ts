@@ -1,6 +1,6 @@
 /**
  * Usage dashboards and run usage (KOBE-43): `/v1/team/usage` (team.budgets.manage),
- * `/v1/site/usage` (install.usage.read), `/v1/runs/{id}/usage` (the run's readers).
+ * `/v1/site/usage` (site.usage.read), `/v1/runs/{id}/usage` (the run's readers).
  * Responses arrive camelized.
  */
 import { apiRequest, type ApiResult } from "../../api/client";
@@ -51,7 +51,7 @@ export interface UsageReport {
   readonly byUser: readonly UserUsage[];
   readonly byModel: readonly ModelUsage[];
   readonly byAgent: readonly AgentUsage[];
-  /** Install report only. */
+  /** Site report only. */
   readonly byTeam?: readonly TeamUsageSummary[];
 }
 
@@ -71,7 +71,7 @@ export function getTeamUsage(teamId: string, q: UsageQuery): Promise<ApiResult<U
   return apiRequest<UsageReport>(`/v1/team/usage${query(q)}`, { teamId });
 }
 
-export function getInstallUsage(q: UsageQuery): Promise<ApiResult<UsageReport>> {
+export function getSiteUsage(q: UsageQuery): Promise<ApiResult<UsageReport>> {
   return apiRequest<UsageReport>(`/v1/site/usage${query(q)}`);
 }
 

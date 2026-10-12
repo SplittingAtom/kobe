@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import * as install from "./install/models";
+import * as site from "./site/models";
 import * as team from "./team/models";
 
 /** KOBE-44: the model admin resources send each route's wire casing and unwrap its envelope. */
@@ -24,10 +24,10 @@ function stubApi(reply: unknown, status = 200) {
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("install model resources", () => {
+describe("site model resources", () => {
   it("sends only what changed and unwraps the provider", async () => {
     const calls = stubApi({ provider: { id: "openai", key_set: true } });
-    const res = await install.updateProvider("openai", { apiKey: "sk-x", name: undefined });
+    const res = await site.updateProvider("openai", { apiKey: "sk-x", name: undefined });
     expect(res).toMatchObject({ ok: true, data: { id: "openai", keySet: true } });
     expect(calls).toEqual([
       {
@@ -41,15 +41,15 @@ describe("install model resources", () => {
 
   it("removes a key with null, re-points and clears a label, deletes", async () => {
     const calls = stubApi({ model: { alias: "fast" } });
-    await install.updateProvider("ollama", { apiKey: null });
-    await install.updateCatalogModel("fast", { providerId: "openai", model: "gpt-5", label: null });
+    await site.updateProvider("ollama", { apiKey: null });
+    await site.updateCatalogModel("fast", { providerId: "openai", model: "gpt-5", label: null });
     expect(calls.map((c) => c.body)).toEqual([
       { api_key: null },
       { provider_id: "openai", model: "gpt-5", label: null },
     ]);
     const del = stubApi(undefined, 204);
-    expect((await install.deleteProvider("vllm")).ok).toBe(true);
-    await install.deleteCatalogModel("a.b");
+    expect((await site.deleteProvider("vllm")).ok).toBe(true);
+    await site.deleteCatalogModel("a.b");
     expect(del.map((c) => `${c.method} ${c.url}`)).toEqual([
       "DELETE /v1/site/models/providers/vllm",
       "DELETE /v1/site/models/catalog/a.b",
@@ -58,8 +58,8 @@ describe("install model resources", () => {
 
   it("lists and refreshes a provider's models", async () => {
     const calls = stubApi({ provider_id: "ollama", models: ["glm-5.3"], discovery: "ok" });
-    const listed = await install.listProviderModels("ollama");
-    await install.refreshProviderModels("ollama");
+    const listed = await site.listProviderModels("ollama");
+    await site.refreshProviderModels("ollama");
     expect(listed).toMatchObject({ ok: true, data: { providerId: "ollama", models: ["glm-5.3"] } });
     expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
       "GET /v1/site/models/providers/ollama/models",

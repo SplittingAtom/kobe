@@ -1,10 +1,10 @@
 /**
  * Team console and chat: the team's models (`/v1/team/models`; read with team.read, change with
- * team.models.manage; KOBE-40 API, KOBE-44 UI). The whole install catalog, each with whether the
+ * team.models.manage; KOBE-40 API, KOBE-44 UI). The whole site catalog, each with whether the
  * team enabled it and which one is the team's default.
  */
 import { apiRequest, type ApiResult } from "../../../api/client";
-import type { CatalogModel, ProviderKind } from "../install/models";
+import type { CatalogModel, ProviderKind } from "../site/models";
 
 const enc = encodeURIComponent;
 const BASE = "/v1/team/models";

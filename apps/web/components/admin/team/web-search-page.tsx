@@ -16,7 +16,7 @@ const PROVIDER_LABELS: Record<string, string> = { brave: "Brave", tavily: "Tavil
 
 /**
  * Team opt-in to web search (`/v1/team/web-search`, KOBE-113 API). Off by default. The toggle is
- * shown only while the install offers a provider; otherwise the page says an install admin must
+ * shown only while the site offers a provider; otherwise the page says a site admin must
  * set one up.
  */
 export function TeamWebSearchPage() {

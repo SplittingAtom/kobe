@@ -1,6 +1,6 @@
 # KOBE-255: Rename R2: Site replaces Install in the API and code
 
-- **Status:** in review (PR (a) server, protocol, CLI; PR (b) web, e2e)
+- **Status:** PR #246 (a: server, protocol, CLI) merged; PR #247 (b: web, e2e) in review
 - **Branch / worktree:** `kobe-255-site-rename-api-code` (a), `kobe-255-site-rename-web` (b) in `../Kobe-wt255`
 - **Depends on:** R1 KOBE-257 (merged). Followed by R3 KOBE-256 (database).
 
