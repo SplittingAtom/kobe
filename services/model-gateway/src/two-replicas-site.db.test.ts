@@ -25,7 +25,7 @@ const dbs: KobeDatabase[] = [];
 /** The simulated ledger: tokens already written for the install. */
 const ledger = { spent: 0 };
 const siteLine = (): BudgetLine => ({
-  scope: "install",
+  scope: "site",
   userId: undefined,
   period: "day",
   periodStart: "2026-10-10",

@@ -14,7 +14,7 @@ const rule = (
   extra: Record<string, unknown> = {},
 ) => ({
   id,
-  scope: "install",
+  scope: "site",
   scope_ref: null,
   effect,
   tool_glob,

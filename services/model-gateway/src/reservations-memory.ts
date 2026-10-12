@@ -26,7 +26,7 @@ export class MemoryReservations implements ReservationStore {
   async reserve(r: ReserveRequest): Promise<ReserveVerdict> {
     const member = `${r.teamId}:${r.userId}`;
     const keys = {
-      install: "install",
+      site: "site",
       team: `team:${r.teamId}`,
       user: `user:${r.teamId}:${r.userId}`,
     };
@@ -35,7 +35,7 @@ export class MemoryReservations implements ReservationStore {
       const verdict = this.inFlight(l, keys[l.scope], member, r.cost);
       if (verdict !== "ok") return { ok: false, verdict, line: index };
     }
-    const all = [keys.install, keys.team, keys.user];
+    const all = [keys.site, keys.team, keys.user];
     for (const k of all) this.add(k, member, r.cost, 1);
     this.held.set(r.callId, { keys: all, member, cost: r.cost });
     return { ok: true };

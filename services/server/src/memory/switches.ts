@@ -2,7 +2,7 @@ import {
   MEMORY_SITE_ENABLED_KEY,
   eq,
   inArray,
-  installSettings,
+  siteSettings,
   teamMemorySettings,
   type KobeTx,
 } from "@kobe/db";
@@ -32,11 +32,9 @@ export interface MemorySwitches {
 
 export async function readSiteSwitches(tx: KobeTx): Promise<SwitchPair> {
   const rows = await tx
-    .select({ key: installSettings.key, value: installSettings.value })
-    .from(installSettings)
-    .where(
-      inArray(installSettings.key, [MEMORY_SITE_ENABLED_KEY, MEMORY_SITE_PROJECT_ENABLED_KEY]),
-    );
+    .select({ key: siteSettings.key, value: siteSettings.value })
+    .from(siteSettings)
+    .where(inArray(siteSettings.key, [MEMORY_SITE_ENABLED_KEY, MEMORY_SITE_PROJECT_ENABLED_KEY]));
   const off = (key: string) => rows.some((r) => r.key === key && r.value === "false");
   return {
     memoryEnabled: !off(MEMORY_SITE_ENABLED_KEY),
@@ -115,9 +113,9 @@ export async function writeSiteSwitches(
   for (const [key, on] of entries) {
     const value = String(on);
     await tx
-      .insert(installSettings)
+      .insert(siteSettings)
       .values({ key, value })
-      .onConflictDoUpdate({ target: installSettings.key, set: { value, updatedAt: new Date() } });
+      .onConflictDoUpdate({ target: siteSettings.key, set: { value, updatedAt: new Date() } });
   }
   return next;
 }

@@ -65,7 +65,7 @@ export function periodStarts(now: Date): { readonly month: string; readonly day:
 }
 
 /** Scopes from the widest: a stop names the widest budget that is used up. */
-const SCOPE_ORDER: Readonly<Record<BudgetScope, number>> = { install: 0, team: 1, user: 2 };
+const SCOPE_ORDER: Readonly<Record<BudgetScope, number>> = { site: 0, team: 1, user: 2 };
 
 /** Percent of the limit spent; a zero budget counts as used up (it allows nothing). */
 export const percentUsed = (line: BudgetLine): number =>
@@ -190,7 +190,7 @@ async function budgetLines(
                        AND (b.user_id IS NULL OR s.user_id = b.user_id)) sp
      WHERE b.team_id = ${teamId}::uuid
        ${member === undefined ? sql`` : sql`AND (b.user_id IS NULL OR b.user_id = ${member}::uuid)`}`);
-  const lines = linesOf("install", undefined, site.row, starts);
+  const lines = linesOf("site", undefined, site.row, starts);
   let rpm = site.rpm;
   const own = new Set<string>();
   let defaults: Row | undefined;

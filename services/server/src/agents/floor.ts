@@ -1,4 +1,4 @@
-import { eq, installToolRules, toolRules, type KobeTx } from "@kobe/db";
+import { eq, siteToolRules, toolRules, type KobeTx } from "@kobe/db";
 import { readApprovalFloor } from "../policy/approval-floor.js";
 import { toPolicyRule } from "../policy/rule-store.js";
 import type { PolicyRule } from "../policy/rules.js";
@@ -17,7 +17,7 @@ export async function readPublishFloor(
   tx: KobeTx,
   scope: PublishFloor["scope"],
 ): Promise<PublishFloor> {
-  const site = await tx.select().from(installToolRules);
+  const site = await tx.select().from(siteToolRules);
   const team: PolicyRule[] =
     scope === "team"
       ? compact(
@@ -28,7 +28,7 @@ export async function readPublishFloor(
       : [];
   return {
     scope,
-    site: compact(site.map((r) => toPolicyRule(r, "install"))),
+    site: compact(site.map((r) => toPolicyRule(r, "site"))),
     team,
     approvalFloor: await readApprovalFloor(tx),
   };

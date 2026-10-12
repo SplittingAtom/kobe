@@ -30,7 +30,7 @@ const RISK_LABEL: Readonly<Record<RiskClass, string>> = {
 const REASON_LABEL: Readonly<Partial<Record<PolicyReasonCode, string>>> = {
   scheduled_run_no_prompt: "scheduled runs cannot ask for approval and it is not allow-listed",
   mode_auto_not_allowlisted: "auto mode only runs allow-listed tools",
-  install_deny_rule: "blocked by policy",
+  site_deny_rule: "blocked by policy",
   team_deny_rule: "blocked by policy",
   agent_tool_deny: "blocked by the agent's tool list",
   connector_exposure: "not exposed to agents in this team",

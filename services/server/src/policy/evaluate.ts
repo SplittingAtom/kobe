@@ -79,7 +79,7 @@ function denyReasons(ctx: Prepared): PolicyReason[] {
   const { tool, rules, now, view } = ctx;
   return [
     ...matchingRules(rules.site, "deny", tool, view, now).map((r) =>
-      ruleReason(r, "install_deny_rule", "install_deny", `${tool.name} is blocked by site policy.`),
+      ruleReason(r, "site_deny_rule", "site_deny", `${tool.name} is blocked by site policy.`),
     ),
     ...matchingRules(rules.team, "deny", tool, view, now).map((r) =>
       ruleReason(r, "team_deny_rule", "team_deny", `${tool.name} is blocked by team policy.`),
@@ -94,7 +94,7 @@ function askReasons(ctx: Prepared): PolicyReason[] {
   const { tool, rules, now, view } = ctx;
   return [
     ...matchingRules(rules.site, "ask", tool, view, now).map((r) =>
-      ruleReason(r, "install_ask_rule", "ask_rule", `Site policy asks before ${tool.name}.`),
+      ruleReason(r, "site_ask_rule", "ask_rule", `Site policy asks before ${tool.name}.`),
     ),
     ...matchingRules(rules.team, "ask", tool, view, now).map((r) =>
       ruleReason(r, "team_ask_rule", "ask_rule", `Team policy asks before ${tool.name}.`),
@@ -203,7 +203,7 @@ export function evaluatePolicy(ctx: EvaluationContext): PolicyDecision {
     return {
       effect: "deny",
       risk: ctx.tool.risk,
-      reasons: [{ code: "invalid_input", stage: "install_deny", message: prepared.message }],
+      reasons: [{ code: "invalid_input", stage: "site_deny", message: prepared.message }],
     };
   }
   const p: Prepared = { ...ctx, view: prepared.view };

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createDb, type KobeDatabase } from "./client.js";
-import { installAgents, teamAgents, teams, users } from "./schema/index.js";
+import { siteAgents, teamAgents, teams, users } from "./schema/index.js";
 import { withTeam } from "./with-team.js";
 
 /**
@@ -53,16 +53,16 @@ const teamAgent = (
       .returning({ id: teamAgents.id }),
   );
 
-const siteAgent = (values: Partial<typeof installAgents.$inferInsert> & { slug: string }) =>
+const siteAgent = (values: Partial<typeof siteAgents.$inferInsert> & { slug: string }) =>
   app.db
-    .insert(installAgents)
+    .insert(siteAgents)
     .values({
       scope: "personal",
       ownerUserId: alice,
       frontmatter: { name: values.slug },
       ...values,
     })
-    .returning({ id: installAgents.id });
+    .returning({ id: siteAgents.id });
 
 describe("team_agents", () => {
   it("keeps slugs unique per team, not across teams", async () => {
@@ -139,13 +139,13 @@ describe("site_agents (personal and gallery)", () => {
     const [row] = await siteAgent({ slug: "temp" });
     const id = row?.id ?? "";
     await app.db
-      .update(installAgents)
+      .update(siteAgents)
       .set({ prompt: "changed", revision: 2 })
-      .where(eq(installAgents.id, id));
+      .where(eq(siteAgents.id, id));
     const deleted = await app.db
-      .delete(installAgents)
-      .where(eq(installAgents.id, id))
-      .returning({ id: installAgents.id });
+      .delete(siteAgents)
+      .where(eq(siteAgents.id, id))
+      .returning({ id: siteAgents.id });
     expect(deleted).toHaveLength(1);
   });
 

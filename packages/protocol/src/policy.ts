@@ -29,7 +29,7 @@ import { toolDescriptorSchema } from "./tools.js";
  * Patterns in rules use the glob grammar in glob.ts — never regular expressions.
  */
 export const POLICY_EVALUATION_ORDER = [
-  "install_deny",
+  "site_deny",
   "team_deny",
   "ask_rule",
   "risk_class",
@@ -38,6 +38,19 @@ export const POLICY_EVALUATION_ORDER = [
   "prompt",
 ] as const;
 export type PolicyStage = (typeof POLICY_EVALUATION_ORDER)[number];
+
+/**
+ * Stage and reason codes recorded before KOBE-256 renamed the "install" scope to "site", with their
+ * successors. Stored approvals, run events and notifications keep them, so the schemas below still
+ * accept them (a reader treats each as its successor); nothing produces them any more.
+ */
+export const HISTORICAL_POLICY_NAMES = {
+  install_deny: "site_deny",
+  install_deny_rule: "site_deny_rule",
+  install_ask_rule: "site_ask_rule",
+} as const;
+const HISTORICAL_STAGES = ["install_deny"] as const;
+const HISTORICAL_REASON_CODES = ["install_deny_rule", "install_ask_rule"] as const;
 
 /** The thing being decided. Built by the server from its own state; `tool` from its registry. */
 export const policyInputSchema = z
@@ -98,20 +111,20 @@ export type PolicyInput = z.infer<typeof policyInputSchema>;
  *
  * Codes for denials decided before the pipeline runs (`unknown_tool`, `invalid_input`,
  * `policy_error`, `run_not_active`, `not_a_member`, `sandbox_policy_unavailable`) carry stage
- * `install_deny`, the first stage: nothing later was evaluated. `team_allow_rule` carries stage
+ * `site_deny`, the first stage: nothing later was evaluated. `team_allow_rule` carries stage
  * `user_allow` (the allow-listing stage), `not_available` stage `team_deny`. Appending codes is
  * backward compatible; consumers must treat an unknown code as a deny/prompt reason by its stage.
  */
 export const POLICY_REASON_CODES = [
   "unknown_tool", // not built in and not in a pinned connector snapshot → deny
   "invalid_input", // input fails toolInputSchema (U+0000, __proto__, unsafe integer) → deny
-  "install_deny_rule",
+  "site_deny_rule",
   "team_deny_rule",
   "agent_tool_deny",
   "connector_not_enabled",
   "connector_exposure",
   "tool_drifted", // MCP tool changed since pinned; disabled until re-approved (D27)
-  "install_ask_rule",
+  "site_ask_rule",
   "team_ask_rule",
   "risk_read",
   "risk_write",
@@ -133,12 +146,14 @@ export const POLICY_REASON_CODES = [
   // (policy channel closed, timed out, extension refused). Never produced by the server.
   "sandbox_policy_unavailable",
 ] as const;
-export const policyReasonCodeSchema = z.enum(POLICY_REASON_CODES);
+/** A reason code as stored or sent: the current codes plus the historical ones (read only). */
+export const policyReasonCodeSchema = z.enum([...POLICY_REASON_CODES, ...HISTORICAL_REASON_CODES]);
+/** Includes the historical codes: a reader may meet them in stored data. */
 export type PolicyReasonCode = z.infer<typeof policyReasonCodeSchema>;
 
 export const policyReasonSchema = z.strictObject({
   code: policyReasonCodeSchema,
-  stage: z.enum(POLICY_EVALUATION_ORDER),
+  stage: z.enum([...POLICY_EVALUATION_ORDER, ...HISTORICAL_STAGES]),
   message: z.string().max(1000),
   /** `tool_rules.id` when a rule matched. */
   rule_id: uuidSchema.optional(),
@@ -215,7 +230,7 @@ export type ApprovalResolutionCause = z.infer<typeof approvalResolutionCauseSche
 /** `tool_rules` row shape (spec §5.4), as the engine reads it. Storage is KOBE-35's (jsonb arg_pattern). */
 export const toolRuleSchema = z.strictObject({
   id: uuidSchema,
-  scope: z.enum(["install", "team", "user"]),
+  scope: z.enum(["site", "team", "user"]),
   scope_ref: uuidSchema,
   effect: z.enum(["deny", "ask", "allow"]),
   tool_glob: globSchema,

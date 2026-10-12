@@ -3,7 +3,7 @@ import { z } from "zod";
 import {
   AUDIT_PII_RETENTION_KEY,
   auditPiiRetentionHoursSchema,
-  installSettings,
+  siteSettings,
   readAuditPiiRetentionHours,
   type KobeTx,
 } from "@kobe/db";
@@ -24,9 +24,9 @@ const settingsSchema = z
 
 async function store(tx: KobeTx, key: string, value: string): Promise<void> {
   await tx
-    .insert(installSettings)
+    .insert(siteSettings)
     .values({ key, value })
-    .onConflictDoUpdate({ target: installSettings.key, set: { value, updatedAt: new Date() } });
+    .onConflictDoUpdate({ target: siteSettings.key, set: { value, updatedAt: new Date() } });
 }
 
 /** Site settings (site Owner/Admin only). Each change is audited. */

@@ -56,7 +56,7 @@ describe("BudgetGate (KOBE-42)", () => {
     expect(await g.admit(call(user))).toMatchObject({ ok: true });
     lines = [
       line({ scope: "user", userId: user, period: "day", limit: 1, spent: 1 }),
-      line({ scope: "install", spent: 10 }),
+      line({ scope: "site", spent: 10 }),
     ];
     g.invalidateTeam(teamId);
     expect(await g.admit(call(user))).toEqual({

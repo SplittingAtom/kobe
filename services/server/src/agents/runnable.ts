@@ -3,8 +3,8 @@ import {
   and,
   eq,
   inArray,
-  installAgents,
-  installAgentVersions,
+  siteAgents,
+  siteAgentVersions,
   or,
   teamAgents,
   teamAgentSuspensions,
@@ -92,8 +92,8 @@ export async function listRunnableAgents(
   return withTeam(db, viewer.teamId, async (tx) => {
     const team = await tx.select(TEAM).from(teamAgents).where(eq(teamAgents.teamId, viewer.teamId));
     const site = await tx
-      .select({ ...SITE, scope: installAgents.scope, galleryKey: installAgents.galleryKey })
-      .from(installAgents)
+      .select({ ...SITE, scope: siteAgents.scope, galleryKey: siteAgents.galleryKey })
+      .from(siteAgents)
       .where(siteVisibleTo(viewer.userId));
     const galleryKeys = new Map(
       site.flatMap((r) => (r.galleryKey === null ? [] : [[r.id, r.galleryKey] as const])),
@@ -144,7 +144,7 @@ async function pinnedModels(tx: Tx, page: readonly Published[]): Promise<Map<str
   const out = new Map<string, string>();
   for (const [t, inTable] of [
     [teamAgentVersions, page.filter((p) => p.agent.scope === "team")],
-    [installAgentVersions, page.filter((p) => p.agent.scope !== "team")],
+    [siteAgentVersions, page.filter((p) => p.agent.scope !== "team")],
   ] as const) {
     if (inTable.length === 0) continue;
     const rows = await tx

@@ -163,13 +163,13 @@ export class RunDispatcher {
   }
 
   /** D30: let the current step finish, then end the run `budget_stopped` if Pi didn't settle it. */
-  async budgetStopActive(run: StopTarget, scope: "install" | "team" | "user"): Promise<void> {
+  async budgetStopActive(run: StopTarget, scope: "site" | "team" | "user"): Promise<void> {
     await this.sendStop(run, "after_step");
     if (this.#h.closed()) return;
     await this.#endBudgetStopped(run, scope);
   }
 
-  async #endBudgetStopped(run: StopTarget, scope: "install" | "team" | "user"): Promise<void> {
+  async #endBudgetStopped(run: StopTarget, scope: "site" | "team" | "user"): Promise<void> {
     const { teamId, runId, threadId } = run;
     const ended = await withAppendTx(this.#h.db, teamId, async (tx) => {
       const thread = await lockThreadRow(tx, teamId, threadId);

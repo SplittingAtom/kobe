@@ -5,7 +5,7 @@ import {
   type RunTransitionCause,
   type ThreadStatus,
 } from "@kobe/protocol";
-import { SYSTEM_ACTOR, sql, type KobeTx } from "@kobe/db";
+import { SYSTEM_ACTOR, readBudgetStopScope, sql, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { auditExpiredApprovals, expireRunApprovalsInTx } from "../approvals/run-end.js";
 import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js";
@@ -58,7 +58,7 @@ const CAUSE: Record<RunEnd["status"], RunTransitionCause> = {
   interrupted: "sandbox_lost",
 };
 
-type BudgetScope = "install" | "team" | "user";
+type BudgetScope = "site" | "team" | "user";
 
 /** The terminal event of a budget stop (D30); same text as the orchestrator's. */
 function budgetStoppedEvent(scope: BudgetScope): NewRunEvent {
@@ -109,7 +109,7 @@ export async function endRunInTx(
      WHERE team_id = ${teamId} AND id = ${threadId} FOR NO KEY UPDATE`);
   const run = await tx.execute<{
     status: RunStatus;
-    budget_stop_scope: BudgetScope | null;
+    budget_stop_scope: string | null;
     trigger: "user" | "schedule";
   }>(sql`
     SELECT status, budget_stop_scope, trigger FROM runs
@@ -120,7 +120,7 @@ export async function endRunInTx(
   // A budget stop is pending (KOBE-30/42): Pi settling after the step ends the run budget_stopped,
   // and so does a run whose next model call the gateway's budget gate refused before the stop
   // reached Pi (`model_budget_exhausted`). Any other failure keeps its own code.
-  const budgetScope = run.rows[0]?.budget_stop_scope ?? null;
+  const budgetScope = readBudgetStopScope(run.rows[0]?.budget_stop_scope ?? null);
   const budgetEnded =
     end.status === "completed" ||
     (end.status === "failed" && end.error.code === "model_budget_exhausted");

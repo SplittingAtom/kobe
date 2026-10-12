@@ -12,8 +12,8 @@ import { teams } from "./teams.js";
 // suspension is not worth blocking its deletion; a row for a deleted agent is inert.
 
 /** Scopes a team can suspend through this table. */
-export const SUSPENDABLE_INSTALL_SCOPES = ["personal", "gallery"] as const;
-export type SuspendableInstallScope = (typeof SUSPENDABLE_INSTALL_SCOPES)[number];
+export const SUSPENDABLE_SITE_SCOPES = ["personal", "gallery"] as const;
+export type SuspendableSiteScope = (typeof SUSPENDABLE_SITE_SCOPES)[number];
 
 export const teamAgentSuspensions = pgTable(
   "team_agent_suspensions",
@@ -22,7 +22,7 @@ export const teamAgentSuspensions = pgTable(
       .notNull()
       .references(() => teams.id, { onDelete: "cascade" }),
     agentId: uuid().notNull(),
-    agentScope: text().$type<SuspendableInstallScope>().notNull(),
+    agentScope: text().$type<SuspendableSiteScope>().notNull(),
     // Users are never deleted (NO ACTION).
     suspendedBy: uuid()
       .notNull()

@@ -68,7 +68,7 @@ const isolationState = z.enum(["checking", "verified", "missing"]);
 /** A tool rule (KOBE-35) by its policy metadata; never its free-text note or arg values. */
 const toolRule = {
   ruleId: id,
-  scope: z.enum(["install", "team", "user"]),
+  scope: z.enum(["site", "team", "user"]),
   effect: z.enum(["deny", "ask", "allow"]),
   /** Tool-name glob (e.g. `mcp__jira__*`), policy metadata. */
   toolGlob: z.string().min(1).max(512),
@@ -851,7 +851,7 @@ export const AUDIT_EVENTS = {
   "run.budget_stopped": event("team", {
     runId: id,
     threadId: id,
-    scope: z.enum(["install", "team", "user"]),
+    scope: z.enum(["site", "team", "user"]),
   }),
 
   // ── approval: tool-call approvals (D29; KOBE-37); never the tool input or the signed token ──

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { count, eq, installRoles } from "@kobe/db";
+import { count, eq, siteRoles } from "@kobe/db";
 import type { ServerDeps } from "../deps.js";
 
 /** Serializes first-run setup across server replicas. */
@@ -24,8 +24,8 @@ export function setupRoutes(deps: ServerDeps): Hono {
   const ownerExists = async (): Promise<boolean> => {
     const [row] = await deps.database.db
       .select({ n: count() })
-      .from(installRoles)
-      .where(eq(installRoles.role, "owner"));
+      .from(siteRoles)
+      .where(eq(siteRoles.role, "owner"));
     return (row?.n ?? 0) > 0;
   };
   const complete = { code: "setup_complete", message: "Kobe is already set up." } as const;

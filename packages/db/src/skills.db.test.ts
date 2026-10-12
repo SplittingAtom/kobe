@@ -3,8 +3,8 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createDb, type KobeDatabase } from "./client.js";
 import {
-  installSkills,
-  installSkillVersions,
+  siteSkills,
+  siteSkillVersions,
   teams,
   teamSkills,
   teamSkillVersions,
@@ -78,11 +78,11 @@ async function teamSkillWithVersion(teamId: string): Promise<string> {
 
 async function personalSkillWithVersion(): Promise<string> {
   const [skill] = await app.db
-    .insert(installSkills)
+    .insert(siteSkills)
     .values({ ownerUserId: alice, slug: `p-${randomUUID().slice(0, 8)}`, description: "d" })
-    .returning({ id: installSkills.id });
+    .returning({ id: siteSkills.id });
   if (!skill) throw new Error("no skill");
-  await app.db.insert(installSkillVersions).values({ skillId: skill.id, ...version(1) });
+  await app.db.insert(siteSkillVersions).values({ skillId: skill.id, ...version(1) });
   return skill.id;
 }
 
@@ -107,15 +107,15 @@ describe("skill versions are immutable", () => {
 
   it("gives the app role no UPDATE or DELETE on personal versions; the trigger stops the owner", async () => {
     const skillId = await personalSkillWithVersion();
-    const where = eq(installSkillVersions.skillId, skillId);
+    const where = eq(siteSkillVersions.skillId, skillId);
     expect(
-      await sqlState(app.db.update(installSkillVersions).set({ storageKey: "x" }).where(where)),
+      await sqlState(app.db.update(siteSkillVersions).set({ storageKey: "x" }).where(where)),
     ).toBe("42501");
-    expect(await sqlState(app.db.delete(installSkillVersions).where(where))).toBe("42501");
+    expect(await sqlState(app.db.delete(siteSkillVersions).where(where))).toBe("42501");
     expect(
-      await sqlState(owner.db.update(installSkillVersions).set({ storageKey: "x" }).where(where)),
+      await sqlState(owner.db.update(siteSkillVersions).set({ storageKey: "x" }).where(where)),
     ).toBe("55000");
-    expect(await sqlState(owner.db.delete(installSkillVersions).where(where))).toBe("55000");
+    expect(await sqlState(owner.db.delete(siteSkillVersions).where(where))).toBe("55000");
   });
 
   it("refuses a duplicate version number and a malformed hash", async () => {

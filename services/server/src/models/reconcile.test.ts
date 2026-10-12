@@ -139,6 +139,24 @@ describe("reconcile", () => {
     expect(second.virtualKeys).toEqual(first.virtualKeys);
   });
 
+  it("KOBE-256: moves the teams of the old kobe-install customer to kobe-site, keeping every key", async () => {
+    const old = { ...desired(), customer: { name: "kobe-install", limits: undefined } };
+    const first = await reconcile(old, bifrost, logger);
+    expect([...bifrost.customers.values()].map((c) => c.name)).toEqual(["kobe-install"]);
+    const result = await reconcile(desired(), bifrost, logger);
+    expect(result.errors).toEqual([]);
+    expect(SITE_CUSTOMER).toBe("kobe-site");
+    const customers = [...bifrost.customers.values()];
+    expect(customers.map((c) => c.name)).toEqual([SITE_CUSTOMER]);
+    expect([...bifrost.teams.values()].map((t) => t.customerId)).toEqual(
+      [...bifrost.teams.values()].map(() => customers[0]?.id),
+    );
+    expect(result.virtualKeys).toEqual(first.virtualKeys);
+    expect(bifrost.calls.filter((c) => c.startsWith("vk."))).toEqual(
+      bifrost.calls.filter((c) => c.startsWith("vk.add")),
+    );
+  });
+
   it("pushes a changed key (new key first, then the old one goes) and a changed URL", async () => {
     await reconcile(desired(), bifrost, logger);
     bifrost.calls.length = 0;

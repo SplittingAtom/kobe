@@ -3,7 +3,7 @@ import {
   asc,
   connectors,
   eq,
-  installRoles,
+  siteRoles,
   listMemberships,
   isNull,
   parseToolsSnapshot,
@@ -46,8 +46,8 @@ async function teamsUsing(db: KobeDb, connectorId: string): Promise<string[]> {
 export async function driftRecipients(db: KobeDb, connectorId: string): Promise<DriftRecipient[]> {
   const siteAdmins = await db
     .select({ userId: users.id, email: users.email })
-    .from(installRoles)
-    .innerJoin(users, eq(users.id, installRoles.userId))
+    .from(siteRoles)
+    .innerJoin(users, eq(users.id, siteRoles.userId))
     .where(isNull(users.deactivatedAt));
   const using = await teamsUsing(db, connectorId);
   const teamAdmins: DriftRecipient[] = [];

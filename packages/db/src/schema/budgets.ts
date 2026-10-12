@@ -36,11 +36,8 @@ export const DEFAULT_REQUESTS_PER_MINUTE = 60;
 /** D30: warn at 80 %, stop at 100 %. */
 export const BUDGET_THRESHOLDS = [80, 100] as const;
 export type BudgetThreshold = (typeof BUDGET_THRESHOLDS)[number];
-export const BUDGET_SCOPES = ["install", "team", "user"] as const;
+export const BUDGET_SCOPES = ["site", "team", "user"] as const;
 export type BudgetScope = (typeof BUDGET_SCOPES)[number];
-/** `budget_alerts.scope`: the site's alerts are stored as "site" (KOBE-256). */
-export const BUDGET_ALERT_SCOPES = ["site", "team", "user"] as const;
-export type BudgetAlertScope = (typeof BUDGET_ALERT_SCOPES)[number];
 export const BUDGET_PERIODS = ["month", "day"] as const;
 export type BudgetPeriod = (typeof BUDGET_PERIODS)[number];
 /** What a budget counts: dollars at catalog prices, or tokens (any model, priced or not). */
@@ -63,7 +60,7 @@ const ts = () => timestamp({ withTimezone: true }).notNull().defaultNow();
  * Site-wide (†), one row (seeded): the site budget (Bifrost customer level, D30) and the
  * per-user request rate every team gets unless it sets a lower one.
  */
-export const installModelLimits = pgTable(
+export const siteModelLimits = pgTable(
   "site_model_limits",
   {
     id: smallint().primaryKey().default(1),
@@ -157,7 +154,7 @@ export const modelSpendDaily = pgTable(
 );
 
 /** Site-wide (†): spend of every team per day (site budget); no team ids. */
-export const installModelSpendDaily = pgTable("site_model_spend_daily", {
+export const siteModelSpendDaily = pgTable("site_model_spend_daily", {
   day: date({ mode: "string" }).primaryKey(),
   costUsd: numeric({ precision: 24, scale: 10, mode: "number" }).notNull().default(0),
   tokens: bigint({ mode: "number" }).notNull().default(0),
@@ -175,7 +172,7 @@ export const budgetAlerts = pgTable(
     teamId: uuid(),
     /** Set for a user-in-team budget. */
     userId: uuid(),
-    scope: text().$type<BudgetAlertScope>().notNull(),
+    scope: text().$type<BudgetScope>().notNull(),
     period: text().$type<BudgetPeriod>().notNull(),
     periodStart: date({ mode: "string" }).notNull(),
     threshold: smallint().$type<BudgetThreshold>().notNull(),
@@ -190,7 +187,7 @@ export const budgetAlerts = pgTable(
       .on(t.teamId, t.userId, t.scope, t.unit, t.period, t.periodStart, t.threshold)
       .nullsNotDistinct(),
     index("budget_alerts_team_idx").on(t.teamId, t.createdAt),
-    check("budget_alerts_scope", sql`${t.scope} IN (${list(BUDGET_ALERT_SCOPES)})`),
+    check("budget_alerts_scope", sql`${t.scope} IN (${list(BUDGET_SCOPES)})`),
     check("budget_alerts_period", sql`${t.period} IN (${list(BUDGET_PERIODS)})`),
     check("budget_alerts_threshold", sql`${t.threshold} IN (${list(BUDGET_THRESHOLDS)})`),
     // A threshold is only recorded once crossed (a forged early row could not pre-empt it).

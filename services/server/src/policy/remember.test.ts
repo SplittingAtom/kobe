@@ -84,7 +84,7 @@ describe("toPolicyRule (stored rows fail closed)", () => {
   });
 
   it("widens an unreadable deny/ask rule instead of dropping it", () => {
-    expect(toPolicyRule({ ...base, effect: "deny", toolGlob: "bad\\" }, "install")).toMatchObject({
+    expect(toPolicyRule({ ...base, effect: "deny", toolGlob: "bad\\" }, "site")).toMatchObject({
       tool_glob: "*",
     });
     const ask = toPolicyRule(
@@ -99,7 +99,7 @@ describe("toPolicyRule (stored rows fail closed)", () => {
     expect(
       toPolicyRule(
         { ...base, effect: "deny", toolGlob: "x", expiresAt: new Date("2027-01-01T00:00:00Z") },
-        "install",
+        "site",
       ),
     ).toMatchObject({ expires_at: "2027-01-01T00:00:00.000Z" });
   });

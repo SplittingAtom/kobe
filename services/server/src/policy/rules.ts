@@ -8,7 +8,7 @@ import {
 } from "./patterns.js";
 
 /** Where a rule comes from. */
-export type RuleScope = "install" | "team" | "user";
+export type RuleScope = "site" | "team" | "user";
 export type RuleEffect = "deny" | "ask" | "allow";
 
 /** A tool rule as the engine evaluates it (rows from `site_tool_rules` and `tool_rules`). */

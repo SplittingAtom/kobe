@@ -57,7 +57,7 @@ export const budgetReservations = pgTable(
  * secret the gateways share), enough for equality (a team ends only its own holds; the
  * per-member share) and useless for reading who reserved. Computed inside the functions.
  */
-export const installBudgetReservations = pgTable(
+export const siteBudgetReservations = pgTable(
   "site_budget_reservations",
   {
     teamKey: text().notNull(),

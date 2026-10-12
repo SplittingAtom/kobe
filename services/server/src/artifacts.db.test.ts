@@ -33,7 +33,7 @@ const engine: PolicyEngine = {
             effect: "deny" as const,
             risk: "write" as const,
             reasons: [
-              { code: "install_deny_rule" as const, stage: "install_deny" as const, message: "no" },
+              { code: "site_deny_rule" as const, stage: "site_deny" as const, message: "no" },
             ],
           }
         : {

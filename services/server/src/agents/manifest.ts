@@ -46,7 +46,7 @@ export const TOOL_MANIFEST_FORMAT = 1;
 export const EXCLUSION_REASONS = [
   "agent_tools_deny",
   "agent_tools_allow",
-  "install_deny_rule",
+  "site_deny_rule",
   "team_deny_rule",
   /** Not available in this version of Kobe (MCP resource tools, gates.ts). */
   "unavailable",
@@ -63,7 +63,7 @@ const manifestToolSchema = z.strictObject({
 export const toolManifestSchema = z.strictObject({
   format: z.literal(TOOL_MANIFEST_FORMAT),
   /** The floor it was computed against: site only (personal, gallery) or site + team. */
-  floor: z.enum(["install", "team"]),
+  floor: z.enum(["site", "team"]),
   /** Built-in tools (Pi and kobe-tools) this version may call, by name. */
   tools: z.array(manifestToolSchema),
   /**
@@ -94,10 +94,31 @@ export const toolManifestSchema = z.strictObject({
 export type ToolManifest = z.infer<typeof toolManifestSchema>;
 type Excluded = ToolManifest["excluded"][number];
 
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * A stored manifest with today's names. Versions published before KOBE-256 froze `floor: "install"`
+ * and the exclusion reason `install_deny_rule` for the site; their rows are never rewritten, so a
+ * reader renames them to `site` / `site_deny_rule` before parsing (same content, same content key).
+ */
+export function withSiteNames(stored: unknown): unknown {
+  if (!isRecord(stored)) return stored;
+  const excluded = Array.isArray(stored.excluded)
+    ? {
+        excluded: stored.excluded.map((e: unknown) =>
+          isRecord(e) && e.reason === "install_deny_rule" ? { ...e, reason: "site_deny_rule" } : e,
+        ),
+      }
+    : {};
+  const floor = stored.floor === "install" ? { floor: "site" } : {};
+  return { ...stored, ...floor, ...excluded };
+}
+
 /** The policy floor a version is published against. */
 export interface PublishFloor {
-  /** `install` (the site; stored name until KOBE-256) for personal and gallery agents (they run in many teams), `team` for team agents. */
-  readonly scope: "install" | "team";
+  /** `site` for personal and gallery agents (they run in many teams), `team` for team agents. */
+  readonly scope: "site" | "team";
   readonly site: readonly PolicyRule[];
   /** The team's own rules; ignored unless `scope` is `team`. */
   readonly team: readonly PolicyRule[];
@@ -149,7 +170,7 @@ function exclusion(
     });
   if (!allowed) return { name, reason: "agent_tools_allow" };
   const site = wholeToolDeny(floor.site, name, now);
-  if (site) return { name, reason: "install_deny_rule", rule_id: site.id };
+  if (site) return { name, reason: "site_deny_rule", rule_id: site.id };
   const team = floor.scope === "team" ? wholeToolDeny(floor.team, name, now) : undefined;
   if (team) return { name, reason: "team_deny_rule", rule_id: team.id };
   return undefined;

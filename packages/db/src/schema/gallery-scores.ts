@@ -11,7 +11,7 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
-import { installAgentVersions, installAgents } from "./agents.js";
+import { siteAgentVersions, siteAgents } from "./agents.js";
 
 /**
  * Published Orbit scores of gallery agent versions (KOBE-94). Site-wide (†): gallery agents
@@ -25,7 +25,7 @@ export const galleryAgentScores = pgTable(
     id: uuid().primaryKey().defaultRandom(),
     agentId: uuid()
       .notNull()
-      .references(() => installAgents.id),
+      .references(() => siteAgents.id),
     version: integer().notNull(),
     status: text().$type<"passed" | "blocked">().notNull(),
     attackSuccessRate: doublePrecision().notNull(),
@@ -41,7 +41,7 @@ export const galleryAgentScores = pgTable(
     foreignKey({
       name: "gallery_agent_scores_version_fk",
       columns: [t.agentId, t.version],
-      foreignColumns: [installAgentVersions.agentId, installAgentVersions.version],
+      foreignColumns: [siteAgentVersions.agentId, siteAgentVersions.version],
     }),
     index("gallery_agent_scores_agent_idx").on(t.agentId, t.version, t.evaluatedAt.desc()),
     check("gallery_agent_scores_status", sql`${t.status} IN ('passed', 'blocked')`),

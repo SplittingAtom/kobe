@@ -178,7 +178,7 @@ describe("createPolicyEngine", () => {
   });
 
   it("never returns require_approval in auto mode or for scheduled runs", async () => {
-    const e = createPolicyEngine({ rules: rulesOf([rule("install", "ask", "*")]), now: () => NOW });
+    const e = createPolicyEngine({ rules: rulesOf([rule("site", "ask", "*")]), now: () => NOW });
     for (const options of [{ mode: "auto" as const }, { kind: "schedule" as const }]) {
       const decision = await e.decide(policyInput(builtin("read"), {}, options));
       expect(decision.effect).toBe("deny");

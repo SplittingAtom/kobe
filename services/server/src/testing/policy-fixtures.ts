@@ -86,7 +86,7 @@ export function rule(
 
 export function ruleSet(rules: readonly PolicyRule[]): PolicyRuleSet {
   return {
-    site: rules.filter((r) => r.scope === "install"),
+    site: rules.filter((r) => r.scope === "site"),
     team: rules.filter((r) => r.scope === "team"),
     user: rules.filter((r) => r.scope === "user"),
   };

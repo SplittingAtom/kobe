@@ -7,7 +7,7 @@ import {
   eq,
   getMembership,
   inArray,
-  installRoles,
+  siteRoles,
   isNull,
   ne,
   or,
@@ -93,8 +93,8 @@ export async function activeSiteAdmins(
 ): Promise<{ id: string; name: string; email: string }[]> {
   return db
     .select({ id: users.id, name: users.name, email: users.email })
-    .from(installRoles)
-    .innerJoin(users, eq(users.id, installRoles.userId))
+    .from(siteRoles)
+    .innerJoin(users, eq(users.id, siteRoles.userId))
     .where(and(isNull(users.deactivatedAt), except ? ne(users.id, except) : undefined));
 }
 

@@ -8,6 +8,7 @@ import {
   manifestAllowsTool,
   toolManifestSchema,
   versionAllowsCall,
+  withSiteNames,
   type PublishFloor,
 } from "./manifest.js";
 
@@ -25,7 +26,7 @@ const floor = (extra: Partial<PublishFloor> = {}): PublishFloor => ({
 
 const rule = (extra: Partial<PolicyRule> & Pick<PolicyRule, "tool_glob">): PolicyRule => ({
   id: RULE_A,
-  scope: "install",
+  scope: "site",
   effect: "deny",
   ...extra,
 });
@@ -99,7 +100,7 @@ describe("computeToolManifest (D19 frozen tool manifest)", () => {
     expect(names(m)).not.toContain("powershell");
     expect(m.excluded).toContainEqual({
       name: "bash",
-      reason: "install_deny_rule",
+      reason: "site_deny_rule",
       rule_id: RULE_A,
     });
     expect(m.excluded).toContainEqual({
@@ -112,11 +113,28 @@ describe("computeToolManifest (D19 frozen tool manifest)", () => {
   it("ignores team rules for a site-floor manifest (personal and gallery agents)", () => {
     const m = computeToolManifest(
       fm(),
-      floor({ scope: "install", team: [rule({ scope: "team", tool_glob: "bash" })] }),
+      floor({ scope: "site", team: [rule({ scope: "team", tool_glob: "bash" })] }),
       NOW,
     );
     expect(names(m)).toContain("bash");
-    expect(m.floor).toBe("install");
+    expect(m.floor).toBe("site");
+  });
+
+  it("reads a manifest frozen before KOBE-256 (install floor and reason) with the site names", () => {
+    const m = computeToolManifest(
+      fm(),
+      floor({ scope: "site", site: [rule({ tool_glob: "bash" })] }),
+      NOW,
+    );
+    const stored = JSON.parse(
+      JSON.stringify(m)
+        .replace('"floor":"site"', '"floor":"install"')
+        .replaceAll('"site_deny_rule"', '"install_deny_rule"'),
+    ) as unknown;
+    expect(toolManifestSchema.safeParse(stored).success).toBe(false);
+    expect(toolManifestSchema.parse(withSiteNames(stored))).toEqual(m);
+    expect(withSiteNames(m)).toEqual(m);
+    expect(withSiteNames({ tampered: true })).toEqual({ tampered: true });
   });
 
   it("keeps rules that only restrict arguments, expire, ask or allow as live checks", () => {

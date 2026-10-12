@@ -15,7 +15,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 const RULE = {
   id: "r-1",
-  scope: "install",
+  scope: "site",
   scope_ref: null,
   effect: "deny",
   tool_glob: "mcp__github__*",

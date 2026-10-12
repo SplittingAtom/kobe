@@ -110,7 +110,7 @@ export interface BudgetStopCommand {
   readonly team_id: string;
   /** Limit the stop to one user's runs (user-in-team budget); absent = whole team. */
   readonly user_id?: string;
-  readonly scope: "install" | "team" | "user";
+  readonly scope: "site" | "team" | "user";
 }
 
 export interface RunTransition {

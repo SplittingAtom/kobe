@@ -3,7 +3,7 @@ import {
   desc,
   eq,
   galleryAgentScores,
-  installAgents,
+  siteAgents,
   sql,
   type KobeDb,
   type KobeTx,
@@ -74,11 +74,11 @@ export async function currentGalleryScores(db: KobeDb): Promise<GalleryScore[]> 
     })
     .from(galleryAgentScores)
     .innerJoin(
-      installAgents,
+      siteAgents,
       and(
-        eq(installAgents.id, galleryAgentScores.agentId),
-        eq(installAgents.scope, "gallery"),
-        sql`${installAgents.currentVersion} = ${galleryAgentScores.version}`,
+        eq(siteAgents.id, galleryAgentScores.agentId),
+        eq(siteAgents.scope, "gallery"),
+        sql`${siteAgents.currentVersion} = ${galleryAgentScores.version}`,
       ),
     )
     .orderBy(galleryAgentScores.agentId, desc(galleryAgentScores.evaluatedAt));

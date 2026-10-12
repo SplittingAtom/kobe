@@ -4271,13 +4271,13 @@
                   "enum": [
                     "unknown_tool",
                     "invalid_input",
-                    "install_deny_rule",
+                    "site_deny_rule",
                     "team_deny_rule",
                     "agent_tool_deny",
                     "connector_not_enabled",
                     "connector_exposure",
                     "tool_drifted",
-                    "install_ask_rule",
+                    "site_ask_rule",
                     "team_ask_rule",
                     "risk_read",
                     "risk_write",
@@ -4295,19 +4295,22 @@
                     "policy_error",
                     "run_not_active",
                     "not_a_member",
-                    "sandbox_policy_unavailable"
+                    "sandbox_policy_unavailable",
+                    "install_deny_rule",
+                    "install_ask_rule"
                   ]
                 },
                 "stage": {
                   "type": "string",
                   "enum": [
-                    "install_deny",
+                    "site_deny",
                     "team_deny",
                     "ask_rule",
                     "risk_class",
                     "approval_mode",
                     "user_allow",
-                    "prompt"
+                    "prompt",
+                    "install_deny"
                   ]
                 },
                 "message": {
@@ -4486,13 +4489,13 @@
                         "enum": [
                           "unknown_tool",
                           "invalid_input",
-                          "install_deny_rule",
+                          "site_deny_rule",
                           "team_deny_rule",
                           "agent_tool_deny",
                           "connector_not_enabled",
                           "connector_exposure",
                           "tool_drifted",
-                          "install_ask_rule",
+                          "site_ask_rule",
                           "team_ask_rule",
                           "risk_read",
                           "risk_write",
@@ -4510,19 +4513,22 @@
                           "policy_error",
                           "run_not_active",
                           "not_a_member",
-                          "sandbox_policy_unavailable"
+                          "sandbox_policy_unavailable",
+                          "install_deny_rule",
+                          "install_ask_rule"
                         ]
                       },
                       "stage": {
                         "type": "string",
                         "enum": [
-                          "install_deny",
+                          "site_deny",
                           "team_deny",
                           "ask_rule",
                           "risk_class",
                           "approval_mode",
                           "user_allow",
-                          "prompt"
+                          "prompt",
+                          "install_deny"
                         ]
                       },
                       "message": {

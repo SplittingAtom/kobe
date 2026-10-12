@@ -32,7 +32,7 @@ const ARG_PATTERN_CHECK = (column: unknown) =>
   sql`${column} IS NULL OR jsonb_typeof(${column}) = 'object'`;
 
 /** Site-wide (†): the site policy floor, managed by site Owner/Admins (D6, D8). */
-export const installToolRules = pgTable(
+export const siteToolRules = pgTable(
   "site_tool_rules",
   {
     id: uuid().primaryKey().defaultRandom(),

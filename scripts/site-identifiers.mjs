@@ -1,36 +1,16 @@
-// KOBE-255: "Site" replaced "Install" in the API and code. Fails when code (tests included) under
-// the scanned areas still names the scope "install" in an identifier, an API path, a permission or
-// a file name. Kept on purpose: database names until KOBE-256 renames them (snake_case install_*,
-// the drizzle schema objects that mirror them), the historical audit action names (hash-chained
-// rows keep them), and the verb (helm install, installMemoryHooks). Run by check-site-wording.mjs.
+// KOBE-255: "Site" replaced "Install" in the API and code; KOBE-256 in the database and the drizzle
+// objects that mirror it. Fails when code (tests included) under the scanned areas still names the
+// scope "install" in an identifier, an API path, a permission or a file name. Kept on purpose: the
+// historical audit action names (hash-chained rows keep them), snake_case names in historical SQL
+// and stored values, and the verb (helm install, installMemoryHooks). Run by check-site-wording.mjs.
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 
 const SKIP_DIRS = new Set(["node_modules", "dist", ".next", ".turbo", "coverage", "drizzle"]);
 const SOURCE = /\.(ts|tsx|mts|mjs|js|sh)$/;
 
-/** Identifiers that are database names (KOBE-256 renames them with the tables) or a verb. */
-const ALLOWED = new Set([
-  // drizzle schema objects named after their tables, enums and columns
-  "installAgents",
-  "installAgentVersions",
-  "installAgentScope",
-  "InstallAgentScope",
-  "installAgentId",
-  "installRoles",
-  "installSettings",
-  "installToolRules",
-  "installSkills",
-  "installSkillVersions",
-  "installSkillScans",
-  "installModelLimits",
-  "installModelSpendDaily",
-  "installBudgetReservations",
-  "SUSPENDABLE_INSTALL_SCOPES",
-  "SuspendableInstallScope",
-  // installing something
-  "installMemoryHooks",
-]);
+/** Identifiers that mean installing something (a verb), not the scope. */
+const ALLOWED = new Set(["installMemoryHooks"]);
 
 /** Audit actions recorded before the rename (HISTORICAL_AUDIT_ACTIONS); readers accept them. */
 const HISTORICAL = /^(?:install\.settings\.updated|identity\.install_role\.(?:granted|revoked))$/;
@@ -83,9 +63,10 @@ export function selfTestIdentifiers() {
     "apiRequest('/v1/memory/settings?level=install')",
     "export function InstallUsagePage() {}",
     'await import("/app/dist/invitations/install-invites.js")',
+    "db.select().from(installRoles)",
   ];
   const good = [
-    "db.select().from(installRoles).where(eq(installSettings.key, k))",
+    "db.select().from(siteRoles).where(eq(siteSettings.key, k))",
     'action: "install.settings.updated", // historical',
     "helm install kobe charts/kobe; installMemoryHooks(pi)",
     "INSERT INTO install_tool_rules; scope: 'install'",

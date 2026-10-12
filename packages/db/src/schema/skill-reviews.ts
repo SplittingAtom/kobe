@@ -14,7 +14,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { users } from "./auth.js";
-import { installSkillVersions } from "./skills.js";
+import { siteSkillVersions } from "./skills.js";
 import { teams } from "./teams.js";
 
 // Scan results and review state of team skill versions (KOBE-80, spec D22). They live beside the
@@ -39,7 +39,7 @@ export interface StoredFinding {
 export const skillReviewScope = ["team", "personal"] as const;
 
 /** Site-wide: the scan of a personal skill version, made with the (immutable) version. */
-export const installSkillScans = pgTable(
+export const siteSkillScans = pgTable(
   "site_skill_scans",
   {
     skillId: uuid().notNull(),
@@ -55,7 +55,7 @@ export const installSkillScans = pgTable(
     foreignKey({
       name: "site_skill_scans_version_fk",
       columns: [t.skillId, t.version],
-      foreignColumns: [installSkillVersions.skillId, installSkillVersions.version],
+      foreignColumns: [siteSkillVersions.skillId, siteSkillVersions.version],
     }),
   ],
 );

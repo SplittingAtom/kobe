@@ -3,7 +3,7 @@ import {
   asc,
   eq,
   gt,
-  installSettings,
+  siteSettings,
   teams,
   withTeam,
   type KobeDb,
@@ -295,17 +295,17 @@ export function passDue(last: Date | null, now: Date, hourUtc: number): boolean 
 
 async function readSetting(db: KobeDb, key: string): Promise<string | undefined> {
   const [row] = await db
-    .select({ value: installSettings.value })
-    .from(installSettings)
-    .where(eq(installSettings.key, key));
+    .select({ value: siteSettings.value })
+    .from(siteSettings)
+    .where(eq(siteSettings.key, key));
   return row?.value;
 }
 
 async function writeSetting(db: KobeDb, key: string, value: string): Promise<void> {
   await db
-    .insert(installSettings)
+    .insert(siteSettings)
     .values({ key, value })
-    .onConflictDoUpdate({ target: installSettings.key, set: { value, updatedAt: new Date() } });
+    .onConflictDoUpdate({ target: siteSettings.key, set: { value, updatedAt: new Date() } });
 }
 
 function parseDate(value: string | undefined): Date | null {

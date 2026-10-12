@@ -4,8 +4,8 @@ import {
   and,
   desc,
   eq,
-  installAgents,
-  installAgentVersions,
+  siteAgents,
+  siteAgentVersions,
   lt,
   sql,
   teamAgents,
@@ -20,7 +20,12 @@ import { canonicalJson } from "@kobe/protocol";
 import { recordAudit } from "../audit/record.js";
 import { agentAccess, type AgentActor } from "./access.js";
 import { readPublishFloor } from "./floor.js";
-import { computeToolManifest, toolManifestSchema, type ToolManifest } from "./manifest.js";
+import {
+  computeToolManifest,
+  toolManifestSchema,
+  withSiteNames,
+  type ToolManifest,
+} from "./manifest.js";
 import {
   auditTeam,
   inLocation,
@@ -88,14 +93,14 @@ export interface Published {
   readonly version: AgentVersionRecord;
 }
 
-const SUMMARY_COLUMNS = (t: typeof teamAgentVersions | typeof installAgentVersions) => ({
+const SUMMARY_COLUMNS = (t: typeof teamAgentVersions | typeof siteAgentVersions) => ({
   version: t.version,
   publishedBy: t.publishedBy,
   publishedAt: t.publishedAt,
   draftRevision: t.draftRevision,
   republishedFrom: t.republishedFrom,
 });
-const FULL_COLUMNS = (t: typeof teamAgentVersions | typeof installAgentVersions) => ({
+const FULL_COLUMNS = (t: typeof teamAgentVersions | typeof siteAgentVersions) => ({
   ...SUMMARY_COLUMNS(t),
   agentId: t.agentId,
   frontmatter: t.frontmatter,
@@ -128,7 +133,7 @@ export class UnreadableVersionError extends Error {
  */
 function toVersion(row: FullRow): AgentVersionRecord {
   const { frontmatter, prompt, toolManifest, ...rest } = row;
-  const manifest = toolManifestSchema.safeParse(toolManifest);
+  const manifest = toolManifestSchema.safeParse(withSiteNames(toolManifest));
   if (!manifest.success) throw new UnreadableVersionError(row.agentId, row.version);
   return {
     ...rest,
@@ -147,7 +152,7 @@ export async function listVersions(
 ): Promise<AgentVersionSummary[] | null> {
   return inLocation(db, location, async (tx) => {
     if (!(await agentExists(tx, location, agentId))) return null;
-    const t = location.scope === "team" ? teamAgentVersions : installAgentVersions;
+    const t = location.scope === "team" ? teamAgentVersions : siteAgentVersions;
     return tx
       .select(SUMMARY_COLUMNS(t))
       .from(t)
@@ -175,9 +180,9 @@ async function agentExists(tx: KobeTx, location: AgentLocation, id: string): Pro
     location.scope === "team"
       ? await tx.select({ id: teamAgents.id }).from(teamAgents).where(eq(teamAgents.id, id))
       : await tx
-          .select({ id: installAgents.id })
-          .from(installAgents)
-          .where(and(siteWhere(location), eq(installAgents.id, id)));
+          .select({ id: siteAgents.id })
+          .from(siteAgents)
+          .where(and(siteWhere(location), eq(siteAgents.id, id)));
   return rows.length > 0;
 }
 
@@ -188,7 +193,7 @@ async function readVersion(
   agentId: string,
   version: number,
 ): Promise<AgentVersionRecord | null> {
-  const t = scope === "team" ? teamAgentVersions : installAgentVersions;
+  const t = scope === "team" ? teamAgentVersions : siteAgentVersions;
   const [row] = await tx
     .select(FULL_COLUMNS(t))
     .from(t)
@@ -243,7 +248,7 @@ async function insertVersion(
   input: NewVersion,
 ): Promise<Result<Published, "unchanged" | "version_limit" | "eval_stale">> {
   const now = new Date();
-  const floor = await readPublishFloor(tx, location.scope === "team" ? "team" : "install");
+  const floor = await readPublishFloor(tx, location.scope === "team" ? "team" : "site");
   const manifest = computeToolManifest(input.definition.frontmatter, floor, now);
   if (input.expectedManifest && canonicalJson(input.expectedManifest) !== canonicalJson(manifest)) {
     return { ok: false, error: "eval_stale" };
@@ -280,13 +285,13 @@ async function insertVersion(
       .returning(TEAM);
   } else {
     [row] = await tx
-      .insert(installAgentVersions)
+      .insert(siteAgentVersions)
       .values(values)
-      .returning(FULL_COLUMNS(installAgentVersions));
+      .returning(FULL_COLUMNS(siteAgentVersions));
     [updated] = await tx
-      .update(installAgents)
+      .update(siteAgents)
       .set({ currentVersion: values.version, updatedAt: now })
-      .where(and(siteWhere(location), eq(installAgents.id, agent.id)))
+      .where(and(siteWhere(location), eq(siteAgents.id, agent.id)))
       .returning(SITE);
   }
   if (!row || !updated) throw new Error("agent version insert returned no row");
@@ -465,7 +470,7 @@ export async function deleteOrArchiveAgent(
       if (location.scope === "team") {
         await tx.delete(teamAgents).where(eq(teamAgents.id, id));
       } else {
-        await tx.delete(installAgents).where(and(siteWhere(location), eq(installAgents.id, id)));
+        await tx.delete(siteAgents).where(and(siteWhere(location), eq(siteAgents.id, id)));
       }
       await recordAudit(tx, {
         ...(actor ? { actor } : {}),
@@ -546,9 +551,9 @@ async function setArchived(
     location.scope === "team"
       ? await tx.update(teamAgents).set(set).where(eq(teamAgents.id, id)).returning(TEAM)
       : await tx
-          .update(installAgents)
+          .update(siteAgents)
           .set({ ...set, archivedBy })
-          .where(and(siteWhere(location), eq(installAgents.id, id)))
+          .where(and(siteWhere(location), eq(siteAgents.id, id)))
           .returning(SITE);
   if (!row) throw new Error("agent archive update returned no row");
   return toRecord(location.scope, row);
@@ -598,9 +603,9 @@ export async function findPinnableAgent(
   const [team]: Row[] = await (options.lock ? teamQuery.for("share") : teamQuery);
   if (team) return toRecord("team", team);
   const siteQuery = tx
-    .select({ ...SITE, scope: installAgents.scope })
-    .from(installAgents)
-    .where(and(eq(installAgents.id, agentId), siteVisibleTo(viewer.userId)));
+    .select({ ...SITE, scope: siteAgents.scope })
+    .from(siteAgents)
+    .where(and(eq(siteAgents.id, agentId), siteVisibleTo(viewer.userId)));
   const [own]: (Row & { scope: "personal" | "gallery" })[] = await (options.lock
     ? siteQuery.for("share")
     : siteQuery);
@@ -621,7 +626,7 @@ export function agentStatusOf(agent: AgentRecord): "active" | "suspended" | "arc
 
 /** Site-wide agents a user sees: the gallery and their own personal agents. */
 export const siteVisibleTo = (userId: string) =>
-  sql`(${installAgents.scope} = 'gallery' OR (${installAgents.scope} = 'personal' AND ${installAgents.ownerUserId} = ${userId}::uuid))`;
+  sql`(${siteAgents.scope} = 'gallery' OR (${siteAgents.scope} = 'personal' AND ${siteAgents.ownerUserId} = ${userId}::uuid))`;
 
 /** Why an agent can't be pinned by a new thread or a switch, if it can't. */
 function unavailable(agent: AgentRecord): boolean {
@@ -778,7 +783,7 @@ export async function resolveDraftAgent(
   const draft = validateAgentDefinition({ frontmatter: agent.frontmatter, prompt: agent.prompt });
   if (!draft.ok) return { ok: false, error: "version_unreadable" };
   const now = new Date();
-  const floor = await readPublishFloor(tx, agent.scope === "team" ? "team" : "install");
+  const floor = await readPublishFloor(tx, agent.scope === "team" ? "team" : "site");
   return {
     ok: true,
     agent,

@@ -3,7 +3,7 @@ import {
   and,
   bumpModelsConfig,
   eq,
-  installModelLimits,
+  siteModelLimits,
   isNull,
   loadMemberBudgetState,
   notifyModels,
@@ -87,7 +87,7 @@ const percentOf = (spent: number, limit: number | null): number | null =>
   limit === null ? null : limit <= 0 ? 100 : Math.min(100, Math.round((spent / limit) * 100));
 
 export async function getSiteLimits(db: KobeDb | KobeTx): Promise<SiteLimitsView> {
-  const [row] = await db.select().from(installModelLimits).where(eq(installModelLimits.id, 1));
+  const [row] = await db.select().from(siteModelLimits).where(eq(siteModelLimits.id, 1));
   return {
     monthly_usd: row?.monthlyUsd ?? null,
     daily_usd: row?.dailyUsd ?? null,
@@ -123,15 +123,15 @@ export async function setSiteLimits(
       userRequestsPerMinute: pick(input.user_requests_per_minute, before.user_requests_per_minute),
     };
     await tx
-      .update(installModelLimits)
+      .update(siteModelLimits)
       .set({ ...next, updatedBy: actorId, updatedAt: new Date() })
-      .where(eq(installModelLimits.id, 1));
+      .where(eq(siteModelLimits.id, 1));
     if (next.userRequestsPerMinute !== before.user_requests_per_minute) await bumpModelsConfig(tx);
     await notifyModels(tx, `${MODELS_BUDGETS_PREFIX}*`);
     await recordAudit(tx, {
       action: "models.budget.changed",
       target: {
-        scope: "install",
+        scope: "site",
         monthlyUsd: next.monthlyUsd,
         dailyUsd: next.dailyUsd,
         monthlyVolume: next.monthlyTokens,
@@ -432,8 +432,8 @@ export async function memberBudgetStatus(
     scope: l.scope,
     period: l.period,
     unit: l.unit,
-    limit: l.scope === "install" ? null : l.limit,
-    spent: l.scope === "install" ? null : Math.round(l.spent * 1e6) / 1e6,
+    limit: l.scope === "site" ? null : l.limit,
+    spent: l.scope === "site" ? null : Math.round(l.spent * 1e6) / 1e6,
     percent: Math.min(100, Math.round(percentUsed(l))),
     state: stateOf(l),
   }));

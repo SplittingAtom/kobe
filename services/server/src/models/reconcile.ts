@@ -117,7 +117,7 @@ export async function reconcile(
     }
   }
 
-  // ── customer (the install) ──
+  // ── customer (the site; renamed from kobe-install by KOBE-256: its teams move, then it goes) ──
   const customers = (await attempt("list customers", () => admin.listCustomers())) ?? [];
   let customer = customers.find((c) => c.name === desired.customer.name);
   if (!customer) {

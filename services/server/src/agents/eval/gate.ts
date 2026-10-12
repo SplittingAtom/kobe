@@ -94,7 +94,7 @@ export async function gatePublish(input: GateInput): Promise<GateOutcome> {
     );
   }
   const floor = await withTeam(db, input.team.id, (tx) =>
-    readPublishFloor(tx, location.scope === "team" ? "team" : "install"),
+    readPublishFloor(tx, location.scope === "team" ? "team" : "site"),
   );
   const toolManifest = computeToolManifest(definition.frontmatter, floor, new Date());
   if (rollbackFrom === undefined && agent.currentVersion !== null) {

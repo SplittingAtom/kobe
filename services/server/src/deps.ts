@@ -8,7 +8,7 @@ import {
   type Envelope,
   accounts,
   createDb,
-  installRoles,
+  siteRoles,
   users,
   type KobeDatabase,
 } from "@kobe/db";
@@ -440,7 +440,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
           providerId: "credential",
           password: hash,
         });
-        if (siteRole) await tx.insert(installRoles).values({ userId: user.id, role: siteRole });
+        if (siteRole) await tx.insert(siteRoles).values({ userId: user.id, role: siteRole });
         if (recordSetup) {
           await recordAudit(tx, {
             action: "identity.setup.completed",
