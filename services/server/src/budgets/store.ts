@@ -182,7 +182,7 @@ export async function teamBudgetsView(
     const siteSpend = spendView(
       (
         await tx.execute<Row>(sql`
-          SELECT ${SPEND(starts)} FROM install_model_spend_daily
+          SELECT ${SPEND(starts)} FROM site_model_spend_daily
            WHERE day >= ${starts.month}::date`)
       ).rows[0],
     );

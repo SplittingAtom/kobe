@@ -3,7 +3,7 @@ import { eq, installSettings, type KobeTx } from "@kobe/db";
 
 /**
  * The site's minimum approval mode (spec D6 "policy floor: … minimum approval mode", D19
- * "approval mode can only be stricter than the floor", D29 modes). Stored in `install_settings`
+ * "approval mode can only be stricter than the floor", D29 modes). Stored in `site_settings`
  * under {@link APPROVAL_FLOOR_KEY}, the only floor key: read at run creation and Retry (KOBE-30),
  * at run start and publish (KOBE-46) and per `policy.check` (KOBE-24). Migration
  * `0024_approval_floor_unify` folded KOBE-24's `policy.approval_mode_floor` into it. No admin

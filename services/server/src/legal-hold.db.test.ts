@@ -181,7 +181,7 @@ describe("placing a hold (ac-2, ac-3)", () => {
 
   it("lets a single-admin site self-approve placing and releasing, flagged (D10)", async () => {
     const { rows } = await h.admin.query<{ user_id: string; role: string }>(
-      `DELETE FROM install_roles WHERE user_id <> $1 RETURNING user_id, role::text`,
+      `DELETE FROM site_roles WHERE user_id <> $1 RETURNING user_id, role::text`,
       [ids.owner],
     );
     try {
@@ -202,7 +202,7 @@ describe("placing a hold (ac-2, ac-3)", () => {
       ).toMatchObject({ selfApproved: true });
     } finally {
       for (const r of rows) {
-        await h.admin.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, $2)`, [
+        await h.admin.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, $2)`, [
           r.user_id,
           r.role,
         ]);
@@ -214,7 +214,7 @@ describe("placing a hold (ac-2, ac-3)", () => {
 describe("a hold on the only other site admin", () => {
   it("is placed by the requester alone, flagged: the held admin can't approve", async () => {
     const { rows } = await h.admin.query<{ user_id: string; role: string }>(
-      `DELETE FROM install_roles WHERE user_id NOT IN ($1, $2) RETURNING user_id, role::text`,
+      `DELETE FROM site_roles WHERE user_id NOT IN ($1, $2) RETURNING user_id, role::text`,
       [ids.owner, ids.heldAdmin],
     );
     try {
@@ -228,7 +228,7 @@ describe("a hold on the only other site admin", () => {
       expect(done.json.hold).toMatchObject({ status: "released", releaseSelfApproved: true });
     } finally {
       for (const r of rows) {
-        await h.admin.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, $2)`, [
+        await h.admin.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, $2)`, [
           r.user_id,
           r.role,
         ]);

@@ -424,7 +424,7 @@ encoding; the action is the log body, fields are `kobe.audit.*` attributes; auth
 Secret). Both carry the same fields as the site export, including the chain hashes.
 
 - **Cursor.** Each destination keeps its last delivered `seq` and its health in
-  `install_settings['audit.forward.<destination>']`. It advances only after the collector accepted
+  `site_settings['audit.forward.<destination>']`. It advances only after the collector accepted
   a batch, so a failure or a crash repeats a batch and never skips one: de-duplicate on the event
   `id`. A destination enabled for the first time starts at the newest event; use the export for
   history.
@@ -481,7 +481,7 @@ holds `UPDATE` on those three columns only. A superuser can still erase early; t
 information but can't change any other field undetected.
 
 **The job.** Every server replica runs it every 10 minutes; a try-lock lets one work at a time.
-It walks the log by `seq` from a stored position (`install_settings['audit.pii_sweep_seq']`) in
+It walks the log by `seq` from a stored position (`site_settings['audit.pii_sweep_seq']`) in
 pages of 5000 rows (at most 100 pages a run), erases the due rows, moves past held rows, and stops
 at the first row still inside the period: each row is read about once, and held rows are not
 re-read every run. Releasing a hold resets the position (the `legal_holds_guard` trigger), so the

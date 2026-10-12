@@ -316,7 +316,7 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
       });
 
       for (const t of manifest.tables.filter(
-        (t) => t.name !== "audit_log" && t.name !== "install_settings",
+        (t) => t.name !== "audit_log" && t.name !== "site_settings",
       )) {
         expect(await rowsOf(dst.adminUrl, t.name), t.name).toEqual(
           await rowsOf(src.adminUrl, t.name),
@@ -327,13 +327,13 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
       const settings = (url: string) =>
         sql<{ key: string; value: string }>(
           url,
-          `SELECT key, value FROM install_settings WHERE key <> 'audit.pii_sweep_resume_at' ORDER BY key`,
+          `SELECT key, value FROM site_settings WHERE key <> 'audit.pii_sweep_resume_at' ORDER BY key`,
         );
       expect(await settings(dst.adminUrl)).toEqual(await settings(src.adminUrl));
       const [pause] = await sql<{ hours: number }>(
         dst.adminUrl,
         `SELECT round(extract(epoch FROM value::timestamptz - now()) / 3600)::int AS hours
-         FROM install_settings WHERE key = 'audit.pii_sweep_resume_at'`,
+         FROM site_settings WHERE key = 'audit.pii_sweep_resume_at'`,
       );
       expect(pause?.hours).toBe(24);
       // Audit log (KOBE-15): restored verbatim (seq, hashes), then the restore's own event

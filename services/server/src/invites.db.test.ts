@@ -238,7 +238,7 @@ describe("site invitations (ac-1)", () => {
       expect((await b.get("/v1/me")).status).toBe(200);
     } finally {
       // The Owner is not enrolled; turning the requirement off needs a fresh owner session.
-      await h.admin.query(`UPDATE install_settings SET value = 'false' WHERE key = 'require_2fa'`);
+      await h.admin.query(`UPDATE site_settings SET value = 'false' WHERE key = 'require_2fa'`);
     }
   });
 });

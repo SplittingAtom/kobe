@@ -178,7 +178,7 @@ async function teamReport(
            ${TOTALS}
       FROM run_usage u
       LEFT JOIN team_agents ta ON ta.team_id = u.team_id AND ta.id = u.agent_id
-      LEFT JOIN install_agents ia ON ia.id = u.agent_id
+      LEFT JOIN site_agents ia ON ia.id = u.agent_id
      WHERE ${where} GROUP BY u.agent_id ${ORDER} ${LIMIT}`);
   return {
     totals: totalsOf(totals.rows[0]),

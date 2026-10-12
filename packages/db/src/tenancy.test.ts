@@ -34,7 +34,7 @@ describe("tenancy registry", () => {
   });
 
   it("explicitly lists the spec's site-wide tables", () => {
-    for (const t of ["users", "teams", "install_roles", "connectors", "audit_log"]) {
+    for (const t of ["users", "teams", "site_roles", "connectors", "audit_log"]) {
       expect(SITE_WIDE_TABLES).toContain(t);
     }
   });

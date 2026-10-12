@@ -698,7 +698,7 @@ describe("a busy audit chain", () => {
       await h.admin.query("ROLLBACK");
     }
     const { rows } = await h.admin.query<{ value: string }>(
-      `SELECT value FROM install_settings WHERE key = 'require_2fa'`,
+      `SELECT value FROM site_settings WHERE key = 'require_2fa'`,
     );
     expect(rows[0]?.value).toBe("false");
   });

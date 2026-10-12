@@ -19,7 +19,7 @@ import type { AgentScope } from "./access.js";
 /**
  * Agent definitions in Postgres (spec D19). Team agents live in the team table `team_agents` and
  * are always read and written inside `withTeam`; personal and gallery agents live in the
- * site-wide `install_agents`, where every query is pinned to its scope (and, for personal
+ * site-wide `site_agents`, where every query is pinned to its scope (and, for personal
  * agents, to the owner). A row is the agent's editable draft; published versions, archive and
  * thread pins are `versions.ts` (KOBE-46).
  */
@@ -92,8 +92,8 @@ export const toRecord = (scope: AgentScope, row: Row): AgentRecord => ({
 const OWNER_ID = z.uuid();
 
 /**
- * The only wall between users' personal agents: install_agents has no RLS (site-wide, D6), so
- * every install_agents query goes through here and a personal location must name a valid owner.
+ * The only wall between users' personal agents: site_agents has no RLS (site-wide, D6), so
+ * every site_agents query goes through here and a personal location must name a valid owner.
  */
 export function siteWhere(location: Exclude<AgentLocation, { scope: "team" }>) {
   if (location.scope === "gallery") return eq(installAgents.scope, "gallery");

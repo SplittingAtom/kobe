@@ -213,7 +213,7 @@ async function lockActiveGrant(tx: KobeTx, access: BreakGlassAccess): Promise<Br
     SELECT g.id, g.team_id, g.user_id, g.thread_id, g.legal_hold, g.expires_at
     FROM ${breakGlassGrants} g
     JOIN users u ON u.id = g.admin_id AND u.deactivated_at IS NULL
-    JOIN install_roles r ON r.user_id = g.admin_id
+    JOIN site_roles r ON r.user_id = g.admin_id
     WHERE g.id = ${access.grantId} AND g.admin_id = ${access.adminId}
       AND g.status = 'approved' AND g.starts_at <= statement_timestamp()
       AND g.expires_at > statement_timestamp()

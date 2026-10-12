@@ -31,8 +31,7 @@ async function user(name: string, role?: "admin"): Promise<string> {
     name,
     `${id}@bg.test`,
   ]);
-  if (role)
-    await admin.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, $2)`, [id, role]);
+  if (role) await admin.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, $2)`, [id, role]);
   return id;
 }
 
@@ -263,7 +262,7 @@ describe("break_glass_grants guard trigger", () => {
 
   it("counts only active admins as a second approver (D10: when one exists)", async () => {
     const { rows } = await admin.query<{ user_id: string }>(
-      `UPDATE users u SET deactivated_at = now() FROM install_roles r
+      `UPDATE users u SET deactivated_at = now() FROM site_roles r
        WHERE r.user_id = u.id AND u.id <> $1 AND u.deactivated_at IS NULL RETURNING u.id AS user_id`,
       [requester],
     );
@@ -284,7 +283,7 @@ describe("break_glass_grants guard trigger", () => {
     await admin.query(`UPDATE users SET deactivated_at = now() WHERE id = $1`, [former]);
     expect(await errorCode(approve(id, former))).toBe("42501");
     await admin.query(`UPDATE users SET deactivated_at = NULL WHERE id = $1`, [former]);
-    await admin.query(`DELETE FROM install_roles WHERE user_id = $1`, [former]);
+    await admin.query(`DELETE FROM site_roles WHERE user_id = $1`, [former]);
     expect(await errorCode(approve(id, former))).toBe("42501");
     expect((await grantRow(id)).status).toBe("pending");
   });
@@ -292,7 +291,7 @@ describe("break_glass_grants guard trigger", () => {
   it("serializes a self-approval behind a concurrent promotion of a second admin", async () => {
     // Only the requester is an active admin; a promotion is in flight when they self-approve.
     const { rows } = await admin.query<{ user_id: string; role: string }>(
-      `DELETE FROM install_roles WHERE user_id <> $1 RETURNING user_id, role::text`,
+      `DELETE FROM site_roles WHERE user_id <> $1 RETURNING user_id, role::text`,
       [requester],
     );
     const promoter = new pg.Client({ connectionString: inject("appUrl") });
@@ -300,7 +299,7 @@ describe("break_glass_grants guard trigger", () => {
     try {
       const id = await request();
       await promoter.query("BEGIN");
-      await promoter.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, 'admin')`, [
+      await promoter.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, 'admin')`, [
         mallory,
       ]);
       const selfApproval = errorCode(approve(id, requester));
@@ -311,9 +310,9 @@ describe("break_glass_grants guard trigger", () => {
       expect((await grantRow(id)).status).toBe("pending");
     } finally {
       await promoter.end();
-      await admin.query(`DELETE FROM install_roles WHERE user_id = $1`, [mallory]);
+      await admin.query(`DELETE FROM site_roles WHERE user_id = $1`, [mallory]);
       for (const r of rows) {
-        await admin.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, $2)`, [
+        await admin.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, $2)`, [
           r.user_id,
           r.role,
         ]);
@@ -337,7 +336,7 @@ describe("break_glass_grants guard trigger", () => {
   it("lets a single-admin site self-approve, flagged (D10)", async () => {
     // Every other site role is removed for the duration of this test.
     const { rows } = await admin.query<{ user_id: string; role: string }>(
-      `DELETE FROM install_roles WHERE user_id <> $1 RETURNING user_id, role::text`,
+      `DELETE FROM site_roles WHERE user_id <> $1 RETURNING user_id, role::text`,
       [requester],
     );
     try {
@@ -350,7 +349,7 @@ describe("break_glass_grants guard trigger", () => {
       });
     } finally {
       for (const r of rows) {
-        await admin.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, $2)`, [
+        await admin.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, $2)`, [
           r.user_id,
           r.role,
         ]);
@@ -473,13 +472,11 @@ describe("readWithBreakGlass", () => {
     expect(await errorCode(read(randomUUID(), { kind: "threads", limit: 5 }))).toBe(
       "grant_not_found",
     );
-    await admin.query(`DELETE FROM install_roles WHERE user_id = $1`, [requester]);
+    await admin.query(`DELETE FROM site_roles WHERE user_id = $1`, [requester]);
     try {
       expect(await errorCode(read(id, { kind: "threads", limit: 5 }))).toBe("grant_not_active");
     } finally {
-      await admin.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, 'admin')`, [
-        requester,
-      ]);
+      await admin.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, 'admin')`, [requester]);
     }
   });
 

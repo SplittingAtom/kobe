@@ -24,7 +24,7 @@ import { teams } from "./teams.js";
 export const toolRuleEffect = pgEnum("tool_rule_effect", ["deny", "ask", "allow"]);
 export type ToolRuleEffect = (typeof toolRuleEffect.enumValues)[number];
 
-/** Scope of a row in `tool_rules` (site rules live in `install_tool_rules`). */
+/** Scope of a row in `tool_rules` (site rules live in `site_tool_rules`). */
 export const toolRuleScope = pgEnum("tool_rule_scope", ["team", "user"]);
 
 const GLOB_LENGTH_CHECK = (column: unknown) => sql`char_length(${column}) BETWEEN 1 AND 256`;
@@ -33,7 +33,7 @@ const ARG_PATTERN_CHECK = (column: unknown) =>
 
 /** Site-wide (†): the site policy floor, managed by site Owner/Admins (D6, D8). */
 export const installToolRules = pgTable(
-  "install_tool_rules",
+  "site_tool_rules",
   {
     id: uuid().primaryKey().defaultRandom(),
     effect: toolRuleEffect().notNull(),
@@ -48,10 +48,10 @@ export const installToolRules = pgTable(
   },
   (t) => [
     // The floor only tightens: site allow rules would loosen every team at once.
-    check("install_tool_rules_effect", sql`${t.effect} IN ('deny', 'ask')`),
-    check("install_tool_rules_glob", GLOB_LENGTH_CHECK(t.toolGlob)),
-    check("install_tool_rules_arg_pattern", ARG_PATTERN_CHECK(t.argPattern)),
-    check("install_tool_rules_note", sql`${t.note} IS NULL OR char_length(${t.note}) <= 500`),
+    check("site_tool_rules_effect", sql`${t.effect} IN ('deny', 'ask')`),
+    check("site_tool_rules_glob", GLOB_LENGTH_CHECK(t.toolGlob)),
+    check("site_tool_rules_arg_pattern", ARG_PATTERN_CHECK(t.argPattern)),
+    check("site_tool_rules_note", sql`${t.note} IS NULL OR char_length(${t.note}) <= 500`),
   ],
 );
 

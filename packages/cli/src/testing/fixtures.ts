@@ -114,8 +114,8 @@ export async function seed(db: TestDatabase): Promise<void> {
      -- A future OAuth/SSO provider (Better Auth stores these tokens in plaintext by default).
      INSERT INTO accounts (user_id, account_id, provider_id, access_token, refresh_token, id_token)
        VALUES ($4, 'gh-42', 'github', '${SECRETS.oauthAccess}', '${SECRETS.oauthRefresh}', '${SECRETS.oauthId}');
-     INSERT INTO install_roles (user_id, role) VALUES ($3, 'owner');
-     INSERT INTO install_settings (key, value) VALUES ('require_2fa', 'false');
+     INSERT INTO site_roles (user_id, role) VALUES ($3, 'owner');
+     INSERT INTO site_settings (key, value) VALUES ('require_2fa', 'false');
      INSERT INTO two_factors (user_id, secret, backup_codes) VALUES ($3, 'enc:totp', 'enc:codes');
      INSERT INTO sessions (user_id, token, expires_at) VALUES ($3, '${SESSION_TOKEN}', now() + interval '1 day');
      INSERT INTO verifications (identifier, value, expires_at) VALUES ('reset', '${RESET_TOKEN}', now() + interval '1 hour');

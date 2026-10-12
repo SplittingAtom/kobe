@@ -10,7 +10,7 @@ and its audit row commit or roll back together (server code uses `recordAudit(tx
 fills in the request's actor and client address). Events are typed by `AUDIT_EVENTS`: each action
 has a strict allowlist of metadata fields, and anything else (secrets, tokens, prompts, message
 text) is rejected. `audit_log` is append-only in Postgres (INSERT/SELECT grants, refusal triggers,
-SHA-256 hash chain; `verifyAuditChain()`). Read with `listAuditEvents()` (install) and
+SHA-256 hash chain; `verifyAuditChain()`). Read with `listAuditEvents()` (site) and
 `listTeamAuditEvents()` (team view).
 
 Design, field allowlist, taxonomy and the events later tickets must add:
@@ -43,7 +43,7 @@ update and stays allowed. Add the same guards to any new table a purge deletes f
 ## Retention (KOBE-18)
 
 `team_retention` (team period, `30d|90d|1y|forever`, no row = forever) and
-`install_settings['retention.maximum']` (site maximum): the nightly job applies the shorter.
+`site_settings['retention.maximum']` (site maximum): the nightly job applies the shorter.
 Purges queue the object keys of thread-owned blob columns (`BLOB_REF_COLUMNS` entries with
 `thread: true`) in `retention_blob_deletions` inside the purge transaction; the bytes go later,
 only when no registered column of the team references the key and no hold covers its owner. **A

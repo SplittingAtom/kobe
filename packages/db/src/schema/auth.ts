@@ -141,11 +141,11 @@ export const rateLimits = pgTable("rate_limits", {
   lastRequest: bigint({ mode: "number" }).notNull(),
 });
 
-export const installRole = pgEnum("install_role", ["owner", "admin"]); // site-identifiers: allow (KOBE-256)
+export const installRole = pgEnum("site_role", ["owner", "admin"]); // site-identifiers: allow (KOBE-256)
 
 /** Site roles (spec D8): one Owner (enforced), any number of Admins; absent row = User. */
 export const installRoles = pgTable(
-  "install_roles",
+  "site_roles",
   {
     userId: userRef(),
     role: installRole().notNull(), // site-identifiers: allow (KOBE-256)
@@ -153,14 +153,14 @@ export const installRoles = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.userId] }),
-    uniqueIndex("install_roles_single_owner")
+    uniqueIndex("site_roles_single_owner")
       .on(t.role)
       .where(sql`${t.role} = 'owner'`),
   ],
 );
 
 /** Site-wide settings (e.g. require_2fa), one row per key. */
-export const installSettings = pgTable("install_settings", {
+export const installSettings = pgTable("site_settings", {
   key: text().primaryKey(),
   value: text().notNull(),
   updatedAt: updatedAt(),

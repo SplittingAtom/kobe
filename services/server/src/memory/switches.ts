@@ -12,7 +12,7 @@ import type { MemoryScope } from "@kobe/protocol";
  * The memory switches (D24), in one place. Two levels (site admins, team admins), each with
  * `memory_enabled` and `project_memory_enabled` (default on). A scope is effective only when both
  * levels allow it; `project` also needs `memory_enabled`. The site level is two
- * `install_settings` keys (`false` = off, absent = on), the team level `team_memory_settings`
+ * `site_settings` keys (`false` = off, absent = on), the team level `team_memory_settings`
  * (no row = both on).
  */
 

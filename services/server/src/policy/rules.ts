@@ -11,9 +11,9 @@ import {
 export type RuleScope = "install" | "team" | "user";
 export type RuleEffect = "deny" | "ask" | "allow";
 
-/** A tool rule as the engine evaluates it (rows from `install_tool_rules` and `tool_rules`). */
+/** A tool rule as the engine evaluates it (rows from `site_tool_rules` and `tool_rules`). */
 export interface PolicyRule {
-  /** `install_tool_rules.id` / `tool_rules.id`. */
+  /** `site_tool_rules.id` / `tool_rules.id`. */
   readonly id: string;
   readonly scope: RuleScope;
   readonly effect: RuleEffect;

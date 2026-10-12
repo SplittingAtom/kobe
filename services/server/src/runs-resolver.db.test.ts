@@ -247,17 +247,17 @@ async function seedTeamSkill(
 
 async function seedPersonalSkill(userId: string, slug: string, flagged = false) {
   const { rows } = await f.fx.admin.query<{ id: string }>(
-    `INSERT INTO install_skills (owner_user_id, slug, description) VALUES ($1, $2, 'd') RETURNING id`,
+    `INSERT INTO site_skills (owner_user_id, slug, description) VALUES ($1, $2, 'd') RETURNING id`,
     [userId, slug],
   );
   await f.fx.admin.query(
-    `INSERT INTO install_skill_versions (skill_id, version, frontmatter, source, content_hash,
+    `INSERT INTO site_skill_versions (skill_id, version, frontmatter, source, content_hash,
        storage_key, size_bytes, file_count, uncompressed_bytes, uploaded_by)
      VALUES ($1, 1, '{}', 'zip', $2, 'k', 1, 1, 1, $3)`,
     [rows[0]?.id, "b".repeat(64), userId],
   );
   await f.fx.admin.query(
-    `INSERT INTO install_skill_scans (skill_id, version, flagged, findings, scripts, skipped)
+    `INSERT INTO site_skill_scans (skill_id, version, flagged, findings, scripts, skipped)
      VALUES ($1, 1, $2, '[]', '[]', '[]')`,
     [rows[0]?.id, flagged],
   );

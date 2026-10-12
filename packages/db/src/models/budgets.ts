@@ -152,8 +152,8 @@ async function sitePart(
   const res = await tx.execute<Row>(sql`
     SELECT l.monthly_usd, l.daily_usd, l.monthly_tokens, l.daily_tokens,
            l.user_requests_per_minute, sp.*
-      FROM install_model_limits l,
-           LATERAL (SELECT ${spendColumns(starts)} FROM install_model_spend_daily s
+      FROM site_model_limits l,
+           LATERAL (SELECT ${spendColumns(starts)} FROM site_model_spend_daily s
                      WHERE s.day >= ${starts.month}::date) sp
      WHERE l.id = 1`);
   const row = res.rows[0] ?? {};

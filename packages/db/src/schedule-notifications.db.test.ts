@@ -217,7 +217,7 @@ describe("removal with the thread (ac-2)", () => {
           id,
           `${id}@n.test`,
         ]);
-        await admin.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, 'admin')`, [id]);
+        await admin.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, 'admin')`, [id]);
       }
       const { rows } = await admin.query<{ id: string }>(
         `INSERT INTO legal_holds (team_id, user_id, reason, placed_by) VALUES ($1, $2, 'matter', $3) RETURNING id`,

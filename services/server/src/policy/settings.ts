@@ -1,7 +1,7 @@
 import type { JsonObject, RiskClass, ToolDescriptor } from "@kobe/protocol";
 
 /**
- * Site-level policy switches. Stored in `install_settings` (one row per key), so an install
+ * Site-level policy switches. Stored in `site_settings` (one row per key), so an install
  * Owner/Admin flips them through `PUT /v1/site/policy/settings` — no code change, no redeploy.
  */
 export interface PolicySettings {
@@ -19,7 +19,7 @@ export interface PolicySettings {
 
 export const DEFAULT_POLICY_SETTINGS: PolicySettings = { promptSandboxWrites: false };
 
-/** `install_settings.key` for {@link PolicySettings.promptSandboxWrites}. */
+/** `site_settings.key` for {@link PolicySettings.promptSandboxWrites}. */
 export const PROMPT_SANDBOX_WRITES_KEY = "policy.ask_on_write.prompt_sandbox_writes";
 
 /** Kobe tools that never prompt by risk class in `ask-on-write` (rules and `ask-all` still apply). */

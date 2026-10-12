@@ -54,6 +54,11 @@ export type RunApprovalMode = (typeof RUN_APPROVAL_MODES)[number];
 /** Who a budget stop applies to (D30; `@kobe/protocol` `BudgetStopCommand.scope`). */
 export const BUDGET_STOP_SCOPES = ["install", "team", "user"] as const;
 export type BudgetStopScope = (typeof BUDGET_STOP_SCOPES)[number];
+/**
+ * What `runs.budget_stop_scope` may hold: the scopes, as "site" from KOBE-256 on, and "install" on
+ * runs stopped before it (run rows are history and are not rewritten).
+ */
+export const STORED_BUDGET_STOP_SCOPES = ["site", "install", "team", "user"] as const;
 
 /** Longest message a run carries (`@kobe/protocol` `submitMessageBodySchema.content`). */
 export const RUN_INPUT_MAX_CHARS = 200_000;
@@ -204,7 +209,7 @@ export const runs = pgTable(
     check("runs_retry_not_self", sql`${t.retryOfRunId} IS NULL OR ${t.retryOfRunId} <> ${t.id}`),
     check(
       "runs_budget_stop_scope",
-      sql`${t.budgetStopScope} IS NULL OR ${t.budgetStopScope} IN (${textList(BUDGET_STOP_SCOPES)})`,
+      sql`${t.budgetStopScope} IS NULL OR ${t.budgetStopScope} IN (${textList(STORED_BUDGET_STOP_SCOPES)})`,
     ),
     check(
       "runs_events_compacted_at",

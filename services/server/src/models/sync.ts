@@ -325,7 +325,7 @@ export class ModelGatewaySync {
       const rate = await tx.execute<{ rpm: number }>(sql`
         SELECT LEAST(l.user_requests_per_minute,
                      COALESCE(b.user_requests_per_minute, l.user_requests_per_minute)) AS rpm
-          FROM install_model_limits l
+          FROM site_model_limits l
           LEFT JOIN team_budgets b ON b.team_id = ${team.id}::uuid AND b.user_id IS NULL
          WHERE l.id = 1`);
       const keys = await tx

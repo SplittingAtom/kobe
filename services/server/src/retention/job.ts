@@ -45,7 +45,7 @@ import {
  * lets exactly one replica run (the lock goes with the connection if the replica dies; an error on
  * that connection stops the pass at once). A new pass starts once a day in the configured UTC hour
  * (or at once when the last completed pass is more than two days old); a pass that stopped early
- * (budget, lost lock, crash) stays open in `install_settings['retention.cursor']` and the next
+ * (budget, lost lock, crash) stays open in `site_settings['retention.cursor']` and the next
  * check resumes it after the last team done, so late teams aren't starved. The period applied is
  * the one in force: a shortening still in its 7-day grace period doesn't count yet.
  */

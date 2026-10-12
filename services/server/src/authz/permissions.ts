@@ -8,7 +8,7 @@ import type { TeamRole } from "@kobe/db";
  * Custom roles are out of scope for v1.
  */
 
-/** Site role as stored in `install_roles`; null is a plain User. */
+/** Site role as stored in `site_roles`; null is a plain User. */
 export type SiteRole = "owner" | "admin" | null;
 
 const SITE_RANK = { user: 0, admin: 1, owner: 2 } as const;

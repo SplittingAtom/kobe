@@ -176,11 +176,11 @@ describe("catalog: skill version triggers", () => {
     const triggers = await owner.pool.query<{ rel: string; name: string }>(
       `SELECT tgrelid::regclass::text AS rel, tgname AS name FROM pg_trigger
        WHERE NOT tgisinternal
-         AND tgrelid IN ('team_skill_versions'::regclass, 'install_skill_versions'::regclass)
+         AND tgrelid IN ('team_skill_versions'::regclass, 'site_skill_versions'::regclass)
        ORDER BY 1, 2`,
     );
     expect(triggers.rows).toEqual([
-      { rel: "install_skill_versions", name: "install_skill_versions_immutable" },
+      { rel: "site_skill_versions", name: "site_skill_versions_immutable" },
       { rel: "team_skill_versions", name: "team_skill_versions_immutable" },
     ]);
     const functions = await owner.pool.query<{ name: string }>(

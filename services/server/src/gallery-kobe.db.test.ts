@@ -35,7 +35,7 @@ const galleryRows = async () =>
       current_version: number | null;
     }>(
       `SELECT id, gallery_key, archived_at, archived_by, current_version
-         FROM install_agents WHERE scope = 'gallery' ORDER BY gallery_key`,
+         FROM site_agents WHERE scope = 'gallery' ORDER BY gallery_key`,
     )
   ).rows;
 
@@ -81,9 +81,7 @@ describe("the one gallery agent (KOBE-254)", () => {
     const { rows: versions } = await h.admin.query<{
       frontmatter: Record<string, unknown>;
       tool_manifest: { connectors: unknown; excluded: { reason: string }[] };
-    }>(`SELECT frontmatter, tool_manifest FROM install_agent_versions WHERE agent_id = $1`, [
-      kobeId,
-    ]);
+    }>(`SELECT frontmatter, tool_manifest FROM site_agent_versions WHERE agent_id = $1`, [kobeId]);
     expect(versions).toHaveLength(1);
     expect(versions[0]?.frontmatter).toMatchObject({ name: "Kobe", connectors: "all" });
     expect(versions[0]?.frontmatter).not.toHaveProperty("tools");
@@ -107,7 +105,7 @@ describe("the one gallery agent (KOBE-254)", () => {
     }
     // An old row that never got a version (an interrupted seed): archived as well, never deleted.
     const { rows: drafted } = await h.admin.query<{ id: string }>(
-      `INSERT INTO install_agents (scope, slug, gallery_key, gallery_generation, frontmatter, prompt)
+      `INSERT INTO site_agents (scope, slug, gallery_key, gallery_generation, frontmatter, prompt)
        VALUES ('gallery', 'unpublished-old', 'unpublished-old', 1, '{"name":"Draft"}', 'x') RETURNING id`,
     );
     const draftId = drafted[0]?.id ?? "";

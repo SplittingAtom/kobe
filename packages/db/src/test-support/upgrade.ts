@@ -1,5 +1,8 @@
-import { readFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import pg from "pg";
+import { DEFAULT_MIGRATIONS_FOLDER } from "../migrate.js";
 
 export interface JournalEntry {
   readonly idx: number;
@@ -56,4 +59,24 @@ export async function assertAllMigrationsApplied(ownerUrl: string, folder: strin
   } finally {
     await client.end();
   }
+}
+
+/**
+ * A temporary copy of the migrations folder that ends just before the first migration whose SQL
+ * contains `marker`: the schema of the release before that migration. The caller removes it.
+ */
+export function migrationsBefore(marker: string): string {
+  const dir = mkdtempSync(join(tmpdir(), "kobe-migrations-"));
+  cpSync(DEFAULT_MIGRATIONS_FOLDER, dir, { recursive: true });
+  const journalPath = join(dir, "meta", "_journal.json");
+  const journal = JSON.parse(readFileSync(journalPath, "utf8")) as { entries: JournalEntry[] };
+  const first = journal.entries.findIndex((e) =>
+    readFileSync(join(dir, `${e.tag}.sql`), "utf8").includes(marker),
+  );
+  if (first < 0) throw new Error(`no migration contains ${JSON.stringify(marker)}`);
+  writeFileSync(
+    journalPath,
+    JSON.stringify({ ...journal, entries: journal.entries.slice(0, first) }),
+  );
+  return dir;
 }

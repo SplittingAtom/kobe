@@ -11,10 +11,10 @@ import { afterAll, beforeEach, describe, expect, inject, it } from "vitest";
  */
 const dir = fileURLToPath(new URL("../drizzle/", import.meta.url));
 const file = readdirSync(dir).find((f) => /^\d{4}_approval_floor_unify\.sql$/.test(f));
-const migrationSql = readFileSync(`${dir}${file ?? "missing.sql"}`, "utf8").replaceAll(
-  "--> statement-breakpoint",
-  "",
-);
+// The migration predates KOBE-256, which renamed its table: re-run it against today's name.
+const migrationSql = readFileSync(`${dir}${file ?? "missing.sql"}`, "utf8")
+  .replaceAll("--> statement-breakpoint", "")
+  .replaceAll("install_settings", "site_settings");
 
 const owner = new pg.Pool({ connectionString: inject("ownerUrl") });
 afterAll(() => owner.end());
@@ -23,21 +23,21 @@ const KEYS = ["policy.approval_floor", "policy.approval_mode_floor"];
 
 async function floors(): Promise<Record<string, string>> {
   const res = await owner.query<{ key: string; value: string }>(
-    `SELECT key, value FROM install_settings WHERE key = ANY($1)`,
+    `SELECT key, value FROM site_settings WHERE key = ANY($1)`,
     [KEYS],
   );
   return Object.fromEntries(res.rows.map((r) => [r.key, r.value]));
 }
 
 async function seed(values: Partial<Record<(typeof KEYS)[number], string>>) {
-  await owner.query(`DELETE FROM install_settings WHERE key = ANY($1)`, [KEYS]);
+  await owner.query(`DELETE FROM site_settings WHERE key = ANY($1)`, [KEYS]);
   for (const [key, value] of Object.entries(values)) {
-    await owner.query(`INSERT INTO install_settings (key, value) VALUES ($1, $2)`, [key, value]);
+    await owner.query(`INSERT INTO site_settings (key, value) VALUES ($1, $2)`, [key, value]);
   }
 }
 
 describe("approval floor unification migration", () => {
-  beforeEach(() => owner.query(`DELETE FROM install_settings WHERE key = ANY($1)`, [KEYS]));
+  beforeEach(() => owner.query(`DELETE FROM site_settings WHERE key = ANY($1)`, [KEYS]));
 
   it.each([
     [{ "policy.approval_mode_floor": "ask-on-write" }, "ask-on-write"],

@@ -58,7 +58,7 @@ export const budgetReservations = pgTable(
  * per-member share) and useless for reading who reserved. Computed inside the functions.
  */
 export const installBudgetReservations = pgTable(
-  "install_budget_reservations",
+  "site_budget_reservations",
   {
     teamKey: text().notNull(),
     callId: text().notNull(),
@@ -69,11 +69,8 @@ export const installBudgetReservations = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.teamKey, t.callId] }),
-    check(
-      "install_budget_reservations_call_id_len",
-      sql`char_length(${t.callId}) BETWEEN 1 AND 128`,
-    ),
-    check("install_budget_reservations_amounts", sql`${t.usd} >= 0 AND ${t.tokens} >= 0`),
-    index("install_budget_reservations_expiry_idx").on(t.expiresAt),
+    check("site_budget_reservations_call_id_len", sql`char_length(${t.callId}) BETWEEN 1 AND 128`),
+    check("site_budget_reservations_amounts", sql`${t.usd} >= 0 AND ${t.tokens} >= 0`),
+    index("site_budget_reservations_expiry_idx").on(t.expiresAt),
   ],
 );

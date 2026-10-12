@@ -210,7 +210,7 @@ describe("RLS catalog check (ac-1)", () => {
       "g.status = 'approved'",
       "g.starts_at <= statement_timestamp() AND g.expires_at > statement_timestamp()",
       'JOIN "public"."users" u ON u.id = g.admin_id AND u.deactivated_at IS NULL',
-      'JOIN "public"."install_roles" r ON r.user_id = g.admin_id',
+      'JOIN "public"."site_roles" r ON r.user_id = g.admin_id',
     ]) {
       expect(body).toContain(clause);
     }
