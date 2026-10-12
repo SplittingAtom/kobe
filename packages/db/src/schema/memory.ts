@@ -127,6 +127,9 @@ export const memoryDocVersions = pgTable(
       foreignColumns: [memoryDocs.teamId, memoryDocs.id],
     }).onDelete("cascade"),
     index("memory_doc_versions_blob_ref_idx").on(t.teamId, t.blobRef),
+    // KOBE-229 adds a SQL-only partial index for the remember replay lookup (migration
+    // *_memory_versions_tool_call_idx, IF NOT EXISTS so operators can build it CONCURRENTLY first):
+    // memory_doc_versions_tool_call_idx (team_id, run_id, tool_call_id) WHERE both are set.
     check("memory_doc_versions_version", sql`${t.version} >= 1`),
     check(
       "memory_doc_versions_size",

@@ -675,6 +675,20 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
   As above, a failed `CONCURRENTLY` build leaves an INVALID index: check `pg_index.indisvalid` for
   `events_schedule_fire_uniq` and `DROP INDEX CONCURRENTLY IF EXISTS` it before upgrading.
 
+- **Memory replay index (KOBE-229, migration `*_memory_versions_tool_call_idx`).** An index on
+  `memory_doc_versions` is added with a plain `CREATE INDEX`, which blocks new memory writes while
+  it scans that table (one small row per memory write, so usually brief). On a large site, build it
+  first, then upgrade (the migration skips an existing index):
+
+  ```sql
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS memory_doc_versions_tool_call_idx
+    ON memory_doc_versions (team_id, run_id, tool_call_id)
+    WHERE run_id IS NOT NULL AND tool_call_id IS NOT NULL;
+  ```
+
+  As above, check `pg_index.indisvalid` for `memory_doc_versions_tool_call_idx` and
+  `DROP INDEX CONCURRENTLY IF EXISTS` an invalid leftover before upgrading.
+
 - **Retention job (KOBE-18).** One server replica at a time runs the nightly retention pass under
   a session-level advisory lock, so the server needs a direct (or session-mode pooled) Postgres
   connection; transaction-mode poolers break session locks. `KOBE_RETENTION_HOUR_UTC` (0-23,
