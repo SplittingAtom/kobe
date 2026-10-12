@@ -51,6 +51,10 @@ jobs:
       # file capabilities and to give the test its supplementary groups).
       - name: Sandbox privilege separation (real helper)
         run: services/sandbox-agent/scripts/test-identities.sh
+      # KOBE-193: Gate 2's harness fails once, clearly, on a sandbox that is not running, and its
+      # secret scan says INVALID (never ok) when its controls fail; a fake kubectl, no cluster.
+      - name: Gate 2 harness failure paths
+        run: e2e/gate2/sandbox.test.sh
       - run: pnpm license:check
 
   db:

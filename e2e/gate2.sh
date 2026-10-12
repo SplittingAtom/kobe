@@ -33,6 +33,7 @@ NS="${KOBE_GATE2_NS:-kobe-dev}"
 RELEASE="${KOBE_GATE2_RELEASE:-kobe}"
 CHART="${KOBE_GATE2_CHART:-charts/kobe}"
 STEPS=" ${KOBE_GATE2_STEPS:-budget replicas egress mcp break-glass scan} "
+SBX_WAIT="${KOBE_GATE2_SANDBOX_WAIT:-180}" # seconds t2's sandbox pod may take to be Running and Ready
 MODEL_ALIAS="${KOBE_GATE2_MODEL:-fast}"
 OWNER_EMAIL="${KOBE_GATE2_OWNER_EMAIL:-owner@e2e.test}"
 OWNER_PASSWORD="${KOBE_GATE2_OWNER_PASSWORD:-e2e owner password}"
@@ -57,6 +58,8 @@ RESTORE_HELM="${KOBE_GATE2_RESTORE_HELM:-$([[ "$context" == k3d-* ]] && echo 0 |
 source e2e/lib/gate-common.sh
 # shellcheck source=gate2/scan.sh
 source e2e/gate2/scan.sh
+# shellcheck source=gate2/sandbox.sh
+source e2e/gate2/sandbox.sh
 
 # The Gate 1 client's helpers (everything above its MODES) plus the Gate 2 steps.
 CLIENT_JS="$(sed '/^const MODES = {/,$d' e2e/gate1/client.mjs; cat e2e/gate2/client.mjs)"
@@ -127,8 +130,16 @@ sbx_pod() {
   $KUBECTL -n "$TNS" get pods -l "agents.x-k8s.io/claim-uid=$(claim_uid)" --field-selector=status.phase=Running \
     -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | head -1
 }
-sbx_ready() { [[ -n "$(sbx_pod)" ]]; }
-in_sbx() { $KUBECTL -n "$TNS" exec "$(sbx_pod)" -c agent -- sh -c "$1" 2>&1 || true; }
+sbx_ready() { sbx_running_ready; }
+in_sbx() {
+  local pod
+  pod=$(sbx_pod)
+  if [[ -z "$pod" ]]; then
+    echo "in_sbx: t2's sandbox has no Running pod"
+    return 0
+  fi
+  $KUBECTL -n "$TNS" exec "$pod" -c agent -- sh -c "$1" 2>&1 || true
+}
 chat() { # content [thread] [ask] → the run step's key=value lines (t2 chats)
   local thread=null
   [[ -n "${2:-}" ]] && thread="\"$2\""
@@ -152,21 +163,30 @@ wake() { # a short chat wakes the sandbox and leaves a thread to read later (ac-
   if [[ -n "$thread" ]]; then
     HELLO_THREAD=$thread
   elif [[ -z "$HELLO_THREAD" ]]; then
-    fail "wake: the hello chat returned no thread id after 3 attempts"
+    fail "wake: the hello chat returned no thread id after 3 attempts (sandbox: $(sbx_summary))"
+    sbx_diagnose
     exit 1
   else
     fail "wake: the hello chat returned no thread id after 3 attempts (keeping thread $HELLO_THREAD)"
   fi
   until_ok 120 sbx_ready || true
 }
+# A step that needs the sandbox: a sleeping one is woken, then it must be Running and Ready within
+# SBX_WAIT. The first time it is not, one FAIL with the pod's phase and events; later steps skip.
+sbx_need() { # label
+  ((SBX_DOWN)) || sbx_ready || wake
+  sbx_await "$SBX_WAIT" "$1"
+}
 wake
-contains "t2's sandbox runs (gVisor, own namespace) and answers" '^[0-9a-f-]{36}$' "$(claim_uid)"
+if sbx_await "$SBX_WAIT" "the fixtures"; then
+  contains "t2's sandbox runs (gVisor, own namespace) and answers" '^[0-9a-f-]{36}$' "$(claim_uid)"
+  contains "the sandbox pod runs under gVisor" '^gvisor$' \
+    "$($KUBECTL -n "$TNS" get pod "$(sbx_pod)" -o jsonpath='{.spec.runtimeClassName}' 2>/dev/null)"
+fi
 SBX_ID=$(claim_uid)
-contains "the sandbox pod runs under gVisor" '^gvisor$' \
-  "$($KUBECTL -n "$TNS" get pod "$(sbx_pod)" -o jsonpath='{.spec.runtimeClassName}' 2>/dev/null)"
 
 # ---- infrastructure for ac-2 and ac-3: a TLS upstream and a plain-HTTP MCP server ------------------
-if [[ "$STEPS" == *" egress "* || "$STEPS" == *" mcp "* ]]; then
+if [[ "$STEPS" == *" egress "* || "$STEPS" == *" mcp "* ]] && ((!SBX_DOWN)); then
   echo "==> test servers in $INFRA_NS and the proxies' allow-lists"
   $KUBECTL create namespace "$INFRA_NS" --dry-run=client -o yaml | $KUBECTL apply -f - >/dev/null
   if [[ "$($KUBECTL -n "$INFRA_NS" get pod upstream -o jsonpath='{.status.phase}' 2>/dev/null)" != Running ]]; then
@@ -217,7 +237,7 @@ if [[ "$STEPS" == *" egress "* || "$STEPS" == *" mcp "* ]]; then
 fi
 
 # ---- ac-1: a team budget at 100% ------------------------------------------------------------------
-if [[ "$STEPS" == *" budget "* ]]; then
+if [[ "$STEPS" == *" budget "* ]] && sbx_need "ac-1 (budget)"; then
   echo "==> ac-1: budget used up mid-run: the step in flight finishes, then run.budget_stopped"
   if ((MODELS)); then
     started=$(server_now)
@@ -256,13 +276,12 @@ if [[ "$STEPS" == *" budget "* ]]; then
 fi
 
 # ---- KOBE-121: two model-gateway replicas, one hard budget --------------------------------------------
-if [[ "$STEPS" == *" replicas "* ]]; then
+if [[ "$STEPS" == *" replicas "* ]] && sbx_need "replicas"; then
   echo "==> replicas: concurrent calls at both model-gateway pods stay within a member's token budget by one call"
   if ((MODELS)); then
     mg_ips=($($KUBECTL -n "$NS" get pods -l app.kubernetes.io/component=model-gateway --field-selector=status.phase=Running \
       -o jsonpath='{range .items[*]}{.status.podIP}{"\n"}{end}'))
     contains "the chart runs two model-gateway replicas" '^2$' "${#mg_ips[@]}"
-    sbx_ready || wake
     # The fake model reports 5 + 3 tokens a call; a call reserves its input estimate (about 21) plus
     # max_tokens (3), more than the headroom. A shared gate admits the first call of the burst and
     # refuses the rest (402) until its ledger row lands, which exhausts the budget: 8 tokens, 7 over.
@@ -317,7 +336,7 @@ if [[ "$STEPS" == *" replicas "* ]]; then
 fi
 
 # ---- ac-2: blocked domain -> Request access -> enablement ------------------------------------------
-if [[ "$STEPS" == *" egress "* ]]; then
+if [[ "$STEPS" == *" egress "* ]] && sbx_need "ac-2 (egress)"; then
   echo "==> ac-2: blocked domain, Request access, team-admin enablement, then the same request works"
   if ((MODELS)); then
     started=$(server_now)
@@ -357,9 +376,8 @@ if [[ "$STEPS" == *" egress "* ]]; then
 fi
 
 # ---- ac-3: tampered kobe-policy cannot execute an MCP write ------------------------------------------
-if [[ "$STEPS" == *" mcp "* ]]; then
+if [[ "$STEPS" == *" mcp "* ]] && sbx_need "ac-3 (mcp)"; then
   echo "==> ac-3: tampered kobe-policy: an MCP write needs a valid signed approval"
-  sbx_ready || wake
   POLICY=/opt/kobe/pi-extensions/kobe-policy
   tamper=$(in_sbx "f=$POLICY/index.js
     echo before=\$(sha256sum \$f | cut -d' ' -f1)
@@ -446,9 +464,8 @@ if [[ "$STEPS" == *" break-glass "* ]]; then
 fi
 
 # ---- ac-5: secret scan of the running sandbox -------------------------------------------------------------
-if [[ "$STEPS" == *" scan "* ]]; then
+if [[ "$STEPS" == *" scan "* ]] && sbx_need "ac-5 (scan)"; then
   echo "==> ac-5: secret scan of t2's running sandbox"
-  sbx_ready || wake
   run_secret_scan
 fi
 
