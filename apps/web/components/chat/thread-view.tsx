@@ -1,6 +1,8 @@
 "use client";
 
 import { AuiIf, SuggestionPrimitive, ThreadPrimitive, useAuiState } from "@assistant-ui/react";
+import { useState } from "react";
+import { newSince, shownCount } from "../../lib/chat/scroll-follow";
 import { cn } from "../../lib/utils";
 import { IconAction } from "../shell/icon-action";
 import { Skeleton } from "../ui/skeleton";
@@ -11,9 +13,10 @@ import { ArtifactList } from "./artifact-list";
 import { AgentChips } from "./agent-chips";
 import { Composer } from "./composer";
 import { DraftProjectNote, ProjectBar } from "./project-bar";
-import { useKobeExtras } from "./kobe-runtime";
+import { useKobeExtras, type KobeThreadExtras } from "./kobe-runtime";
 import { AssistantMessage, EditComposer, UserMessage } from "./messages";
 import { RunPanel } from "./run-panel";
+import { useFollowLatest } from "./use-follow";
 
 function statusLabel(state: ThreadState): string | undefined {
   if (state.summary?.deletedAt != null) return "In Trash";
@@ -70,15 +73,27 @@ function ThreadSuggestions() {
   );
 }
 
-function ScrollToBottom() {
+/**
+ * The floating Jump to latest pill (CE9): mounted while the member is scrolled up, so the count
+ * starts from what was on screen then. assistant-ui's ScrollToBottom scrolls and re-pins.
+ */
+function JumpToLatest() {
+  const count = useAuiState((s) => shownCount(s.thread.messages));
+  const [atUnpin] = useState(count);
+  const fresh = newSince(atUnpin, count);
   return (
-    <ThreadPrimitive.ScrollToBottom asChild>
-      <IconAction
-        command="jump-to-latest"
-        variant="outline"
-        className="absolute -top-12 z-10 size-9 self-center rounded-full p-4 aria-disabled:invisible"
-      />
-    </ThreadPrimitive.ScrollToBottom>
+    <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
+      <ThreadPrimitive.ScrollToBottom asChild>
+        <IconAction
+          command="jump-to-latest"
+          variant="outline"
+          side="top"
+          badge={fresh > 0 ? `${fresh} new ${fresh === 1 ? "message" : "messages"}` : undefined}
+          count={fresh > 0 ? fresh : undefined}
+          className="bg-background pointer-events-auto size-9 rounded-full shadow-md"
+        />
+      </ThreadPrimitive.ScrollToBottom>
+    </div>
   );
 }
 
@@ -97,7 +112,86 @@ function LoadingSkeleton() {
 }
 
 /**
+ * The message list over the composer (CE9, KOBE-205). Once a thread has messages the list is its
+ * own scroll container and the composer a fixed footer below it, outside the scroll; an empty
+ * thread centres the welcome and the composer instead. Scroll anchoring (`overflow-anchor`) keeps
+ * what is on screen still while content above it grows, such as a tool card.
+ */
+function MessagesAndComposer({
+  extras,
+  welcome,
+  modelPicker,
+}: {
+  readonly extras: KobeThreadExtras;
+  readonly welcome: boolean;
+  readonly modelPicker: boolean;
+}) {
+  const { state } = extras;
+  const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
+  const hasMessages = useAuiState((s) => s.thread.messages.length > 0);
+  const pinned = useFollowLatest(viewport, state.threadId, state.phase === "ready" && hasMessages);
+  return (
+    <>
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <ThreadPrimitive.Viewport
+          ref={setViewport}
+          autoScroll
+          scrollToBottomOnRunStart={false}
+          scrollToBottomOnInitialize={false}
+          scrollToBottomOnThreadSwitch={false}
+          role="region"
+          aria-labelledby="kobe-thread-title"
+          data-kobe-scroll="messages"
+          className="flex min-h-0 flex-1 flex-col overflow-x-auto overflow-y-auto overscroll-contain scroll-smooth [overflow-anchor:auto] motion-reduce:scroll-auto"
+        >
+          <div
+            className={cn(
+              "mx-auto flex w-full max-w-(--thread-max-width) flex-col px-4 pt-4 pb-14",
+              welcome ? "mt-auto pb-6" : "flex-1",
+            )}
+          >
+            {state.phase === "loading" && <LoadingSkeleton />}
+            <ThreadPrimitive.Empty>
+              {state.phase === "ready" && <ThreadWelcome />}
+            </ThreadPrimitive.Empty>
+            <div className="flex flex-col gap-y-6 empty:hidden">
+              <ThreadPrimitive.Messages>
+                {({ message }) =>
+                  message.role === "user" ? (
+                    message.composer.isEditing ? (
+                      <EditComposer />
+                    ) : (
+                      <UserMessage />
+                    )
+                  ) : (
+                    <AssistantMessage />
+                  )
+                }
+              </ThreadPrimitive.Messages>
+            </div>
+          </div>
+        </ThreadPrimitive.Viewport>
+        {!pinned && hasMessages && <JumpToLatest />}
+      </div>
+      <div data-kobe-composer className={cn("bg-background shrink-0", welcome && "flex-1")}>
+        <div className="mx-auto flex w-full max-w-(--thread-max-width) flex-col gap-3 px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] md:pb-6">
+          {/* A long queue scrolls on its own, so it never pushes the composer away. */}
+          <div className="max-h-[30dvh] overflow-y-auto overscroll-contain empty:hidden">
+            <RunPanel extras={extras} />
+          </div>
+          <Composer extras={extras} modelPicker={modelPicker} />
+          <AuiIf condition={(s) => s.thread.messages.length === 0 && s.composer.isEmpty}>
+            {state.phase === "ready" && <ThreadSuggestions />}
+          </AuiIf>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/**
  * The conversation on screen: the active branch of the entry tree, the run panel and composer.
+ * It fills its column and never grows past it: only the message list scrolls (KOBE-205).
  * In the chat shell (`contextInBar`) the agent, model and Files controls live in bar row two
  * (KOBE-197); the builder's test pane keeps them here.
  */
@@ -118,7 +212,7 @@ export function ThreadView({
 
   return (
     <ThreadPrimitive.Root
-      className="bg-background @container flex min-h-0 flex-1 flex-col"
+      className="bg-background @container flex min-h-0 flex-1 flex-col overflow-hidden"
       style={COMPOSER_VARS}
     >
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pt-3 pb-2">
@@ -152,52 +246,9 @@ export function ThreadView({
           )}
         </div>
       )}
-      <ThreadPrimitive.Viewport
-        turnAnchor="top"
-        role="region"
-        aria-labelledby="kobe-thread-title"
-        className="relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth"
-      >
-        <div
-          className={cn(
-            "mx-auto flex w-full max-w-(--thread-max-width) flex-1 flex-col px-4 pt-4",
-            welcome && "justify-center",
-          )}
-        >
-          {state.phase === "loading" && <LoadingSkeleton />}
-          <ThreadPrimitive.Empty>
-            {state.phase === "ready" && <ThreadWelcome />}
-          </ThreadPrimitive.Empty>
-          <div className="mb-14 flex flex-col gap-y-6 empty:hidden">
-            <ThreadPrimitive.Messages>
-              {({ message }) =>
-                message.role === "user" ? (
-                  message.composer.isEditing ? (
-                    <EditComposer />
-                  ) : (
-                    <UserMessage />
-                  )
-                ) : (
-                  <AssistantMessage />
-                )
-              }
-            </ThreadPrimitive.Messages>
-          </div>
-          <ThreadPrimitive.ViewportFooter
-            className={cn(
-              "bg-background flex flex-col gap-3 overflow-visible pb-4 md:pb-6",
-              !welcome && "sticky bottom-0 mt-auto rounded-t-2xl",
-            )}
-          >
-            <ScrollToBottom />
-            <RunPanel extras={extras} />
-            <Composer extras={extras} modelPicker={!contextInBar} />
-            <AuiIf condition={(s) => s.thread.messages.length === 0 && s.composer.isEmpty}>
-              {state.phase === "ready" && <ThreadSuggestions />}
-            </AuiIf>
-          </ThreadPrimitive.ViewportFooter>
-        </div>
-      </ThreadPrimitive.Viewport>
+      <ThreadPrimitive.ViewportProvider>
+        <MessagesAndComposer extras={extras} welcome={welcome} modelPicker={!contextInBar} />
+      </ThreadPrimitive.ViewportProvider>
       <p role="status" aria-live="polite" className="sr-only">
         {state.announcement}
         {/* A changing no-break space makes a repeated message a change screen readers announce. */}

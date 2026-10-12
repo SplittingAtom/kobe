@@ -1,0 +1,128 @@
+// @vitest-environment happy-dom
+import { readFileSync } from "node:fs";
+import { cleanup, renderHook, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { viewport } from "../../app/layout";
+import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
+import { must } from "../../lib/testing/must";
+import { composer, openApp } from "../chat/testing";
+import { useViewportHeight } from "../chat/use-viewport-height";
+
+/**
+ * KOBE-205 (CE9, ac-3, ac-4): the page never scrolls, each column scrolls on its own and the
+ * composer is a fixed footer of the conversation. happy-dom has no layout engine, so this pins the
+ * CSS and DOM contract that layout rests on; the real widths are checked in a browser on gate1.
+ */
+const css = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
+const SHELL = css("./shell.module.css");
+const CHAT = css("../chat/chat.module.css");
+
+/** Every declaration block whose selector list names `selector`, media blocks included. */
+function rules(source: string, selector: string): string[] {
+  const out: string[] = [];
+  const re = /([^{}]+)\{([^{}]*)\}/g;
+  for (const [, selectors = "", body = ""] of source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .matchAll(re)) {
+    if (selectors.split(",").some((s) => s.trim() === selector)) out.push(body);
+  }
+  return out;
+}
+
+const declares = (source: string, selector: string, declaration: string) =>
+  rules(source, selector).some((body) => body.includes(declaration));
+
+describe("CSS contract", () => {
+  it("the chat is exactly as tall as the window and never scrolls the page", () => {
+    expect(declares(CHAT, ".app", "height: var(--kobe-viewport-height, 100dvh);")).toBe(true);
+    expect(declares(CHAT, ".app", "overflow: hidden;")).toBe(true);
+    expect(declares(CHAT, ".main", "overflow: hidden;")).toBe(true);
+    expect(viewport.interactiveWidget).toBe("resizes-content");
+  });
+
+  it("the rail and the artifact column scroll on their own; the conversation leaves it to its list", () => {
+    expect(declares(SHELL, ".rail", "overflow-y: auto;")).toBe(true);
+    expect(declares(SHELL, ".artifact", "overflow-y: auto;")).toBe(true);
+    expect(declares(SHELL, ".rail", "overscroll-behavior: contain;")).toBe(true);
+    expect(declares(SHELL, ".conversation", "overflow: hidden;")).toBe(true);
+  });
+
+  it("the grid's row is bounded at every width, so no column can push the page taller", () => {
+    const grid = rules(SHELL, ".grid");
+    expect(grid.some((b) => b.includes("grid-template-rows: auto minmax(0, 1fr) auto;"))).toBe(
+      true,
+    );
+    expect(grid.some((b) => b.includes("grid-template-rows: minmax(0, 1fr);"))).toBe(true);
+    expect(grid.some((b) => b.includes("min-height: 0;"))).toBe(true);
+  });
+});
+
+describe("DOM contract", () => {
+  let kobe: FakeKobe;
+  beforeEach(() => {
+    sessionStorage.clear();
+    kobe = new FakeKobe();
+    vi.stubGlobal("fetch", kobe.fetch);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("the composer sits in the conversation column, below and outside the message list's scroll", async () => {
+    const t = kobe.addThread("Sales");
+    kobe.addEntry(t, null, { role: "user", content: "q1" });
+    openApp(kobe, t);
+    const input = await composer();
+    expect(await screen.findByText("q1")).toBeTruthy();
+
+    const list = must(document.querySelector<HTMLElement>('[data-kobe-scroll="messages"]'));
+    const footer = must(input.closest<HTMLElement>("[data-kobe-composer]"));
+    const conversation = must(document.querySelector('[data-shell-region="conversation"]'));
+    expect(list.contains(input)).toBe(false);
+    expect(conversation.contains(list) && conversation.contains(footer)).toBe(true);
+    expect(list.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(list.className).toMatch(/\boverflow-y-auto\b/);
+    expect(list.className).toMatch(/\[overflow-anchor:auto\]/);
+    expect(footer.className).toMatch(/\bshrink-0\b/);
+    expect(list.getAttribute("role")).toBe("region");
+    expect(list.getAttribute("aria-labelledby")).toBe("kobe-thread-title");
+  });
+});
+
+describe("on-screen keyboard (visualViewport)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function fakeVisualViewport(height: number, scale = 1) {
+    const listeners = new Set<() => void>();
+    const vv = {
+      height,
+      scale,
+      addEventListener: (_: string, fn: () => void) => listeners.add(fn),
+      removeEventListener: (_: string, fn: () => void) => listeners.delete(fn),
+      fire: () => listeners.forEach((fn) => fn()),
+    };
+    vi.stubGlobal("visualViewport", vv);
+    return vv;
+  }
+
+  it("sizes the chat to what is visible, and leaves zoom alone", () => {
+    const vv = fakeVisualViewport(800);
+    const el = document.createElement("div");
+    const { unmount } = renderHook(() => useViewportHeight(el));
+    expect(el.style.getPropertyValue("--kobe-viewport-height")).toBe("800px");
+
+    vv.height = 420; // the keyboard opened
+    vv.fire();
+    expect(el.style.getPropertyValue("--kobe-viewport-height")).toBe("420px");
+
+    vv.scale = 2; // pinch zoom
+    vv.fire();
+    expect(el.style.getPropertyValue("--kobe-viewport-height")).toBe("");
+
+    vv.scale = 1;
+    vv.fire();
+    unmount();
+    expect(el.style.getPropertyValue("--kobe-viewport-height")).toBe("");
+  });
+});
