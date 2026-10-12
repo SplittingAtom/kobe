@@ -1,5 +1,7 @@
 "use client";
 
+import { ChevronDownIcon } from "lucide-react";
+import { Popover } from "radix-ui";
 import { useEffect, useId, useState, useSyncExternalStore } from "react";
 import { modelName, type TeamModels } from "../../lib/admin/api/team/models";
 import type { RunnableAgent } from "../../lib/chat/types";
@@ -44,13 +46,11 @@ const OPTION =
 /**
  * Who a new conversation is with (KOBE-122): no agent (a plain chat, the default) or one of the
  * agents the server says the user can run here. Native radios, so Tab, arrow keys and Space work
- * and screen readers announce the group. Rendered only for a conversation not created yet; renders
- * nothing when there is no agent to pick.
+ * and screen readers announce the group. Rendered only for a conversation not created yet.
  */
-export function AgentPicker() {
+function AgentPicker({ agents }: { readonly agents: Agents }) {
   const session = useChatSession();
   const id = useId();
-  const agents = useAgents();
   const [models, setModels] = useState<TeamModels | null>(null);
   const chosen = useSyncExternalStore(
     session.subscribeDraftAgent,
@@ -71,7 +71,6 @@ export function AgentPicker() {
     };
   }, [session]);
 
-  if (agents.length === 0) return null;
   const modelLabel = (alias: string) => {
     const m = models?.models.find((x) => x.alias === alias);
     return m ? modelName(m) : alias;
@@ -118,5 +117,30 @@ export function AgentPicker() {
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * The agent picker in bar row two (CE3, KOBE-197): a button naming the choice that opens the
+ * radios in a popover. Renders nothing when there is no agent to pick.
+ */
+export function AgentPickerMenu() {
+  const agents = useAgents();
+  const chosen = useDraftAgentName();
+  if (agents.length === 0) return null;
+  return (
+    <Popover.Root>
+      <Popover.Trigger className="hover:bg-muted inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs">
+        {`Chat with: ${chosen ?? "No agent"}`}
+        <ChevronDownIcon aria-hidden className="size-3.5" />
+      </Popover.Trigger>
+      <Popover.Content
+        align="start"
+        sideOffset={4}
+        className="bg-background z-50 w-80 rounded-lg border p-2 shadow-md"
+      >
+        <AgentPicker agents={agents} />
+      </Popover.Content>
+    </Popover.Root>
   );
 }

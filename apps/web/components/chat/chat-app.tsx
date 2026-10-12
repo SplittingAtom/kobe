@@ -5,7 +5,6 @@ import { AssistantRuntimeProvider, Suggestions, useAui } from "@assistant-ui/rea
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { TeamInvites } from "../../app/team-invites";
-import { TeamSwitcher } from "../../app/team-switcher";
 import type { ApiError } from "../../lib/api/client";
 import { createChatApi } from "../../lib/chat/api";
 import { ChatSession } from "../../lib/chat/session";
@@ -14,10 +13,14 @@ import type { UploadTransport } from "../../lib/chat/uploads";
 import { createThreadListAdapter } from "../../lib/chat/thread-list-adapter";
 import { ACTIVE_TEAM_EVENT, fetchMyTeams } from "../../lib/teams";
 import { createFilesApi } from "../../lib/files/api";
-import { ConsoleLinks } from "../admin/console-links";
+import { rememberLastThread } from "../../lib/shell/last-thread";
 import { ArtifactPanel, ArtifactPanelProvider } from "./artifact-panel";
-import { NotificationBell } from "./notification-bell";
 import { FilesPanel, FilesPanelProvider } from "../files/files-panel";
+import { ContextRow } from "../shell/context-row";
+import { ShellGrid } from "../shell/shell-grid";
+import { ShellSlot, ShellSlotsProvider } from "../shell/shell-slots";
+import { ThreadSearch } from "../shell/thread-search";
+import { UtilityBar } from "../shell/utility-bar";
 import { ChatSessionContext, useKobeRuntime } from "./kobe-runtime";
 import { RetentionNotice } from "./retention-notice";
 import { ThreadSidebar } from "./thread-sidebar";
@@ -52,7 +55,7 @@ function useThreadUrl(): readonly [string | undefined, (id: string | undefined) 
   return [threadId, change];
 }
 
-/** Opens a thread from outside the workspace (the notification bell): `useThreadUrl` follows. */
+/** Opens a thread from outside the workspace (the bell in the bar): `useThreadUrl` follows. */
 function openThreadFromHeader(id: string): void {
   const url = new URL(window.location.href);
   url.searchParams.set(THREAD_PARAM, id);
@@ -129,6 +132,8 @@ function ChatWorkspace({
 }) {
   const filesApi = useMemo(() => createFilesApi(session.teamId, fetchFn), [session, fetchFn]);
   const [threadId, setThreadId] = useThreadUrl();
+  // The consoles and builders return here, to this thread (CE4).
+  useEffect(() => rememberLastThread(threadId), [threadId]);
   const [listError, setListError] = useState<ApiError | null>(null);
   const adapter = useMemo(
     () => createThreadListAdapter(session, { onError: setListError }),
@@ -149,16 +154,26 @@ function ChatWorkspace({
       <RetentionNotice />
       <FilesPanelProvider scope={session.teamId}>
         <ArtifactPanelProvider scope={`${session.teamId}:${threadId ?? ""}`}>
-          <div className={styles.body}>
-            <ThreadSidebar listError={listError} onOpenThread={setThreadId} />
-            <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
-              <ThreadView onOpenThread={setThreadId} />
-            </main>
-            <div className={styles.sidePanels}>
-              <ArtifactPanel className={styles.sidePanel} />
-              <FilesPanel api={filesApi} className={styles.sidePanel} />
-            </div>
-          </div>
+          <ShellSlot name="search">
+            <ThreadSearch onOpenThread={setThreadId} />
+          </ShellSlot>
+          <ShellSlot name="context">
+            <ContextRow />
+          </ShellSlot>
+          <ShellGrid
+            rail={<ThreadSidebar listError={listError} />}
+            artifact={
+              <>
+                <ArtifactPanel />
+                <FilesPanel api={filesApi} />
+              </>
+            }
+            conversation={
+              <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
+                <ThreadView onOpenThread={setThreadId} contextInBar />
+              </main>
+            }
+          />
         </ArtifactPanelProvider>
       </FilesPanelProvider>
     </AssistantRuntimeProvider>
@@ -175,8 +190,8 @@ export interface ChatAppProps {
 }
 
 /**
- * The chat app (KOBE-32): team switcher and console links on top, the thread list on the left,
- * the conversation on the right. Everything goes through the server's APIs with the session
+ * The chat app (KOBE-32; v1.1 shell KOBE-197): the two-row utility bar on top, then the rail,
+ * artifact column and conversation. Everything goes through the server's APIs with the session
  * cookie from this browser; nothing is fetched or cached on the Next.js server.
  */
 export function ChatApp({
@@ -235,25 +250,15 @@ export function ChatApp({
   }
 
   return (
-    <div className={styles.app} data-kobe-chat>
-      <a className={styles.skipLink} href="#kobe-chat-main">
-        Skip to the conversation
-      </a>
-      <header className={styles.header}>
-        <h1 className={styles.brand}>Kobe</h1>
-        <TeamSwitcher />
-        <nav aria-label="My area">
-          <Link href="/me/agents">My agents</Link> <Link href="/me/skills">My skills</Link>{" "}
-          <Link href="/me/memory">My memory</Link> <Link href="/me/schedules">My schedules</Link>{" "}
-          <Link href="/me/projects">Projects</Link>
-        </nav>
-        {teamId !== null && (
-          <NotificationBell teamId={teamId} fetchFn={fetchFn} onOpenThread={openThreadFromHeader} />
-        )}
-        <ConsoleLinks />
-      </header>
-      <TeamInvites />
-      {body}
-    </div>
+    <ShellSlotsProvider>
+      <div className={styles.app} data-kobe-chat>
+        <a className={styles.skipLink} href="#kobe-chat-main">
+          Skip to the conversation
+        </a>
+        <UtilityBar teamId={teamId} fetchFn={fetchFn} onOpenThread={openThreadFromHeader} />
+        <TeamInvites />
+        {body}
+      </div>
+    </ShellSlotsProvider>
   );
 }

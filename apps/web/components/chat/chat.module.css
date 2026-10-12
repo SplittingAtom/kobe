@@ -51,64 +51,7 @@
   padding: 0.5rem 1rem;
 }
 
-.header {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1.5rem;
-  align-items: baseline;
-  justify-content: space-between;
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--admin-border);
-}
-
-.brand {
-  margin: 0;
-  font-size: 1.25rem;
-}
-
-.body {
-  display: grid;
-  flex: 1;
-  grid-template-columns: minmax(0, 1fr);
-  min-height: 0;
-}
-
-@media (min-width: 48rem) {
-  .body {
-    grid-template-columns: 17rem minmax(0, 1fr);
-  }
-}
-
-/* The side panels (artifact panel KOBE-130, file panel KOBE-151) share a third column beside the
-   thread on wide screens, and sit below it on narrow ones. Empty = no column. */
-.sidePanels {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.sidePanels:empty {
-  display: none;
-}
-
-.sidePanel {
-  border-top: 1px solid var(--admin-border);
-  flex: 1;
-}
-
-@media (min-width: 48rem) {
-  .body:has(.sidePanels > *) {
-    grid-template-columns: 17rem minmax(0, 1fr) minmax(20rem, 32rem);
-  }
-
-  .sidePanel {
-    border-top: 0;
-  }
-
-  .sidePanel + .sidePanel {
-    border-top: 1px solid var(--admin-border);
-  }
-}
+/* The bar and the grid are the shell's (components/shell/shell.module.css, KOBE-197). */
 
 /* --- sidebar ------------------------------------------------------------------------------- */
 
@@ -122,7 +65,7 @@
   .sidebar {
     border-bottom: none;
     border-right: 1px solid var(--admin-border);
-    min-height: calc(100vh - 3.5rem);
+    min-height: 100%;
   }
 }
 
@@ -208,17 +151,6 @@
 .iconButton {
   padding: 0.125rem 0.375rem;
   font-size: 0.85rem;
-}
-
-.hit {
-  margin: 0.25rem 0 0;
-  color: var(--admin-muted);
-  font-size: 0.85rem;
-}
-
-.hit mark {
-  color: inherit;
-  background: var(--admin-warn-bg);
 }
 
 .hint {

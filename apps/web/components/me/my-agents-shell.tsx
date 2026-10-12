@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { fetchTeamAccess } from "../../lib/admin/api/access";
 import type { ApiError, ApiResult } from "../../lib/api/client";
@@ -10,6 +9,7 @@ import { ACTIVE_TEAM_EVENT } from "../../lib/teams";
 import { ConsoleAccessContext } from "../admin/console-context";
 import { ErrorNotice } from "../admin/error-notice";
 import styles from "../admin/admin.module.css";
+import { ChatReturnLink } from "../shell/chat-return-link";
 
 type State =
   | { readonly status: "loading" }
@@ -70,7 +70,7 @@ export function MyAgentsShell({
       <header className={styles.header}>
         <div className={styles.brandRow}>
           <p className={styles.brand}>
-            <Link href="/">Kobe</Link> <span aria-hidden="true">/</span> My area
+            <ChatReturnLink>Kobe</ChatReturnLink> <span aria-hidden="true">/</span> My area
           </p>
           <TeamSwitcher />
         </div>

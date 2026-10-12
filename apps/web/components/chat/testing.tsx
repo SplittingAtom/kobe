@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect } from "vitest";
 import type { UploadTransport } from "../../lib/chat/uploads";
 import type { FakeKobe } from "../../lib/chat/testing/fake-kobe";
@@ -48,4 +48,12 @@ export async function composer() {
 export function announcement(): string {
   const live = document.querySelector('[aria-live="polite"]');
   return (live?.textContent ?? "").replace(/\u00a0/g, "");
+}
+
+/** The agent radios (KOBE-122), in bar row two's popover since KOBE-197: opened when closed. */
+export async function agentChoices(): Promise<HTMLElement> {
+  const open = screen.queryByRole("radiogroup", { name: "Chat with" });
+  if (open) return open;
+  fireEvent.click(await screen.findByRole("button", { name: /^Chat with:/ }));
+  return screen.findByRole("radiogroup", { name: "Chat with" });
 }

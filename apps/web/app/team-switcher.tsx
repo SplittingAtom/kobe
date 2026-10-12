@@ -10,6 +10,7 @@ import {
   teamToActivate,
   type MyTeams,
 } from "../lib/teams";
+import { forgetLastThread } from "../lib/shell/last-thread";
 
 function remember(teamId: string): void {
   try {
@@ -60,6 +61,7 @@ export function TeamSwitcher() {
     try {
       await setActiveTeam(teamId);
       remember(teamId);
+      forgetLastThread(); // it belongs to the team being left (CE4)
       window.location.reload();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Could not switch teams.");

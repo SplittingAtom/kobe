@@ -8,10 +8,10 @@ import type { ConsoleKind } from "../../lib/admin/nav/types";
 import { ACTIVE_TEAM_EVENT } from "../../lib/teams";
 
 /**
- * Links to the admin consoles the caller can open, decided from the server's answer about their
- * roles. Hiding a link is a convenience; the consoles and their APIs check again.
+ * The admin consoles the caller can open, decided from the server's answer about their roles.
+ * Hiding a link is a convenience; the consoles and their APIs check again.
  */
-export function ConsoleLinks() {
+export function useOpenConsoles(): readonly ConsoleKind[] {
   const [open, setOpen] = useState<readonly ConsoleKind[]>([]);
 
   const [attempt, setAttempt] = useState(0);
@@ -39,7 +39,12 @@ export function ConsoleLinks() {
       current = false;
     };
   }, [attempt]);
+  return open;
+}
 
+/** Links to the admin consoles the caller can open (the /admin page). */
+export function ConsoleLinks() {
+  const open = useOpenConsoles();
   if (open.length === 0) return null;
   return (
     <nav aria-label="Administration">

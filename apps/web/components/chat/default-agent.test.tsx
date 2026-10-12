@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
-import { chatRequests, composer, openApp } from "./testing";
+import { agentChoices, chatRequests, composer, openApp } from "./testing";
 
 /** KOBE-124, KOBE-254: new chats preselect the gallery agent Kobe (by gallery key) when it is runnable. */
 let fake: FakeKobe;
@@ -29,7 +29,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const group = () => screen.findByRole("radiogroup", { name: "Chat with" });
+const group = agentChoices;
 const checked = async () =>
   (within(await group()).getAllByRole("radio") as HTMLInputElement[])
     .filter((r) => r.checked)

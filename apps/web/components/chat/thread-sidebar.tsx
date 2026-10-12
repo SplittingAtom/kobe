@@ -9,7 +9,6 @@ import {
 import { useState, type FormEvent } from "react";
 import type { ApiError } from "../../lib/api/client";
 import { threadExportUrl } from "../../lib/chat/api";
-import type { ThreadSearchHit } from "../../lib/chat/types";
 import { ErrorNotice } from "../admin/error-notice";
 import { useChatSession } from "./kobe-runtime";
 import styles from "./chat.module.css";
@@ -110,83 +109,12 @@ function ThreadItem({ archived, view }: { readonly archived: boolean; readonly v
   );
 }
 
-function SearchResults({
-  hits,
-  onOpen,
-}: {
-  readonly hits: readonly ThreadSearchHit[];
-  readonly onOpen: (threadId: string) => void;
-}) {
-  if (hits.length === 0) return <p className={styles.hint}>No conversations match.</p>;
-  return (
-    <ul className={styles.threadList} aria-label="Search results">
-      {hits.map((hit) => (
-        <li key={hit.threadId}>
-          <button
-            type="button"
-            className={styles.threadTrigger}
-            onClick={() => onOpen(hit.threadId)}
-          >
-            {hit.title ?? "Untitled conversation"}
-          </button>
-          {hit.snippet && (
-            <p className={styles.hit}>
-              {hit.snippet.map((segment, i) =>
-                segment.highlight ? (
-                  <mark key={i}>{segment.text}</mark>
-                ) : (
-                  <span key={i}>{segment.text}</span>
-                ),
-              )}
-            </p>
-          )}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-type SearchState =
-  | { readonly status: "idle" }
-  | { readonly status: "searching"; readonly q: string }
-  | { readonly status: "done"; readonly q: string; readonly hits: readonly ThreadSearchHit[] }
-  | { readonly status: "error"; readonly q: string; readonly error: ApiError };
-
-/** Thread list (D16 RemoteThreadListAdapter), search (KOBE-33 `?q=`) and Trash (D18). */
-export function ThreadSidebar({
-  listError,
-  onOpenThread,
-}: {
-  readonly listError: ApiError | null;
-  readonly onOpenThread: (threadId: string) => void;
-}) {
+/** Thread list (D16 RemoteThreadListAdapter) and Trash (D18); search moved to the bar (KOBE-197). */
+export function ThreadSidebar({ listError }: { readonly listError: ApiError | null }) {
   const session = useChatSession();
   const [view, setView] = useState<View>("threads");
-  const [query, setQuery] = useState("");
-  const [search, setSearch] = useState<SearchState>({ status: "idle" });
   const [folded, setFolded] = useState(true);
   const hasMore = useAuiState((s) => s.threads.hasMore);
-
-  const runSearch = async (e: FormEvent) => {
-    e.preventDefault();
-    const q = query.trim();
-    if (q === "") {
-      setSearch({ status: "idle" });
-      return;
-    }
-    setSearch({ status: "searching", q });
-    const res = await session.api.searchThreads(q);
-    setSearch(
-      res.ok
-        ? { status: "done", q, hits: res.data.threads }
-        : { status: "error", q, error: res.error },
-    );
-  };
-
-  const clearSearch = () => {
-    setQuery("");
-    setSearch({ status: "idle" });
-  };
 
   return (
     <aside
@@ -207,100 +135,55 @@ export function ThreadSidebar({
           <ThreadListPrimitive.New onClick={() => setFolded(true)}>
             New conversation
           </ThreadListPrimitive.New>
-          <form role="search" className={styles.search} onSubmit={(e) => void runSearch(e)}>
-            <label className={styles.visuallyHidden} htmlFor="kobe-search">
-              Search conversations
-            </label>
-            <input
-              id="kobe-search"
-              type="search"
-              value={query}
-              maxLength={256}
-              placeholder="Search conversations"
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            <button type="submit">Search</button>
-          </form>
           {listError && <ErrorNotice error={listError} />}
-          {search.status !== "idle" ? (
-            <section aria-label={`Results for ${search.q}`}>
-              <p className={styles.hint} role="status">
-                {search.status === "searching" ? "Searching…" : `Results for “${search.q}”`}{" "}
-                <button type="button" onClick={clearSearch}>
-                  Clear
-                </button>
-              </p>
-              {search.status === "error" && <ErrorNotice error={search.error} />}
-              {search.status === "done" && (
-                <SearchResults
-                  hits={search.hits}
-                  onOpen={(id) => {
-                    setFolded(true);
-                    onOpenThread(id);
-                  }}
-                />
-              )}
-            </section>
-          ) : (
-            <>
-              <div className={styles.tabs} role="group" aria-label="Show">
-                <button
-                  type="button"
-                  aria-pressed={view === "threads"}
-                  onClick={() => setView("threads")}
-                >
-                  Conversations
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={view === "scheduled"}
-                  onClick={() => setView("scheduled")}
-                >
-                  Scheduled
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={view === "trash"}
-                  onClick={() => setView("trash")}
-                >
-                  Trash
-                </button>
-              </div>
-              {view === "scheduled" && (
-                <p className={styles.hint}>
-                  Conversations your <a href="/me/schedules">schedules</a> started.
-                </p>
-              )}
-              {view === "trash" && (
-                <p className={styles.hint}>
-                  Conversations in Trash are deleted for good after 30 days.
-                </p>
-              )}
-              <ul
-                className={styles.threadList}
-                aria-label={
-                  view === "trash"
-                    ? "Trash"
-                    : view === "scheduled"
-                      ? "Scheduled"
-                      : "Your conversations"
-                }
-              >
-                <ThreadListPrimitive.Items archived={view === "trash"}>
-                  {() => <ThreadItem archived={view === "trash"} view={view} />}
-                </ThreadListPrimitive.Items>
-              </ul>
-              {view !== "trash" && hasMore && (
-                <ThreadListPrimitive.LoadMore>Load more</ThreadListPrimitive.LoadMore>
-              )}
-              <p className={styles.hint}>
-                <a href={threadExportUrl(session.teamId)} download>
-                  Export my conversations
-                </a>{" "}
-                (this team&apos;s, as Pi sessions and Markdown in a zip)
-              </p>
-            </>
+          <div className={styles.tabs} role="group" aria-label="Show">
+            <button
+              type="button"
+              aria-pressed={view === "threads"}
+              onClick={() => setView("threads")}
+            >
+              Conversations
+            </button>
+            <button
+              type="button"
+              aria-pressed={view === "scheduled"}
+              onClick={() => setView("scheduled")}
+            >
+              Scheduled
+            </button>
+            <button type="button" aria-pressed={view === "trash"} onClick={() => setView("trash")}>
+              Trash
+            </button>
+          </div>
+          {view === "scheduled" && (
+            <p className={styles.hint}>
+              Conversations your <a href="/me/schedules">schedules</a> started.
+            </p>
           )}
+          {view === "trash" && (
+            <p className={styles.hint}>
+              Conversations in Trash are deleted for good after 30 days.
+            </p>
+          )}
+          <ul
+            className={styles.threadList}
+            aria-label={
+              view === "trash" ? "Trash" : view === "scheduled" ? "Scheduled" : "Your conversations"
+            }
+          >
+            <ThreadListPrimitive.Items archived={view === "trash"}>
+              {() => <ThreadItem archived={view === "trash"} view={view} />}
+            </ThreadListPrimitive.Items>
+          </ul>
+          {view !== "trash" && hasMore && (
+            <ThreadListPrimitive.LoadMore>Load more</ThreadListPrimitive.LoadMore>
+          )}
+          <p className={styles.hint}>
+            <a href={threadExportUrl(session.teamId)} download>
+              Export my conversations
+            </a>{" "}
+            (this team&apos;s, as Pi sessions and Markdown in a zip)
+          </p>
         </ThreadListPrimitive.Root>
       </div>
     </aside>
