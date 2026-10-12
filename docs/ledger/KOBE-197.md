@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #254)
 - **Branch / worktree:** `kobe-197-shell-layout` in `../Kobe-wt197`
 - **Depends on:** none (started before Gate 4 with the user's approval, overriding CE1)
 
