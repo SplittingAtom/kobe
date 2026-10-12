@@ -36,6 +36,7 @@ KOBE_GATE2_EXTRA_SECRETS_FILE=~/kobe-gate1/ollama.key \
 | `KOBE_GATE2_EXTRA_SECRETS_FILE`               | none                | Extra values to scan for, one per line: a provider key kept outside the cluster, connector tokens.         |
 | `KOBE_GATE2_RESTORE_HELM`                     | 0 on k3d, 1 else    | Restore the release's saved values on exit.                                                                |
 | `KOBE_GATE2_OWNER_EMAIL` / `_PASSWORD`        | CI owner            | The install Owner (first-run setup runs only on a fresh install).                                          |
+| `KOBE_GATE2_SANDBOX_WAIT`                     | `180`               | Seconds t2's sandbox pod may take to be Running and Ready before the steps that need it are skipped.       |
 
 **What it creates.** Users `gate2-{t1,t2,ia}@gate2.test`, team `gate2-a` (namespace
 `kobe-team-gate2-a`, t2's sandbox), namespace `kobe-gate2-infra` (a TLS upstream pod and a
@@ -51,6 +52,17 @@ allow-lists and enables plain HTTP and port 80 on the MCP proxy, which the fake 
 starts from `helm get values -o yaml` with `--reset-values` (never `--reuse-values`), rolls the
 proxies and server once, and on a real cluster is reverted from the saved values on exit. On a real
 cluster, run it on a throwaway install, not on one with users.
+
+**When t2's sandbox does not start (KOBE-193).** ac-1, replicas, ac-2, ac-3 and ac-5 need t2's
+sandbox pod. After the fixtures (and again before each of those steps) the script waits up to
+`KOBE_GATE2_SANDBOX_WAIT` seconds for it to be Running and Ready. If it is not, it prints one
+`FAIL t2's sandbox pod is not Running and Ready ...` with the pod's phase and its containers' waiting
+reasons (for example `phase=Pending ready=False (agent:ContainerCreating)`), then the pod's last
+events, and skips every step that needs the sandbox (`skip ac-3 (mcp): ...`) and the proxy
+`helm upgrade`. ac-4 still runs. ac-5 checks its own controls first (values collected, dumps taken,
+a planted canary found, the pod spec readable): when one fails, every "nothing found" result prints
+`INVALID`, never `ok`, and the scan ends with one `FAIL ac-5 INVALID: ...`.
+`e2e/gate2/sandbox.test.sh` exercises these paths with a fake kubectl and runs in CI's `checks` job.
 
 ## Verdict
 
@@ -232,7 +244,8 @@ Gate 2 holds on both. Sign-off is the user's (KOBE-2).
   still guarded by `storage-minimal-available-percentage`) fixed it, and the 17:10 rerun passed
   every check. Follow-ups: KOBE-192 (surface a sandbox stuck on an unattachable volume instead of
   leaving the user waiting) and KOBE-193 (`gate2.sh` fails fast with one clear message when the
-  sandbox pod is not Running, and ac-5 never prints `ok` when its controls fail).
+  sandbox pod is not Running, and ac-5 never prints `ok` when its controls fail; done, see "When t2's
+  sandbox does not start" above).
 - **ac-5 scope on the real cluster:** 24 install secrets and sealed provider keys searched in 2533
   files plus every process's environment and command line. The only tokens present are Kobe's own
   short-lived ones, checked by audience (`kobe.model-gateway`, `kobe.egress-proxy`, and the bootstrap

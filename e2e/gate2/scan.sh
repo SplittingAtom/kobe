@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ac-5 of e2e/gate2.sh: the secret scan of a running sandbox. Sourced; uses its helpers (ok, fail,
-# contains, in_sbx, sbx_pod, client, chat, ...) and variables (KUBECTL, NS, TNS, TEAM, T2, BASE, WORK).
+# contains, in_sbx, sbx_pod, sbx_summary, client, chat, ...) and variables (KUBECTL, NS, TNS, TEAM, T2, BASE, WORK).
 #
 # The secrets are collected on the CI side only and never printed or sent into the sandbox: the
 # site's Kubernetes Secrets (every value of the release namespace and of its dependencies'
@@ -103,6 +103,29 @@ generic_unexpected_by_kind() {
   esac
 }
 
+# Controls and verdicts (KOBE-193). A failing control (no values collected, no dump, a planted canary
+# not found) makes every "nothing found" result of the scan meaningless: those print INVALID, never
+# ok, and the scan ends with one FAIL naming the failed controls.
+SCAN_BAD=""
+scan_control() { # name regex actual: a precondition of the scan
+  if printf '%s\n' "$3" | grep -Eq "$2"; then
+    ok "$1"
+  else
+    fail "$1: got [$(printf '%s\n' "$3" | tail -3)]"
+    SCAN_BAD="${SCAN_BAD:+$SCAN_BAD; }$1"
+  fi
+}
+scan_ok() { # name: a negative result, ok only when every control passed
+  if [[ -n "$SCAN_BAD" ]]; then echo "INVALID $1 (not shown: a control failed)"; else ok "$1"; fi
+}
+scan_check() { # name regex actual: like contains, with scan_ok for the pass
+  if printf '%s\n' "$3" | grep -Eq "$2"; then scan_ok "$1"; else fail "$1: got [$(printf '%s\n' "$3" | tail -3)]"; fi
+}
+scan_verdict() {
+  [[ -z "$SCAN_BAD" ]] && return 0
+  fail "ac-5 INVALID: the scan's own controls failed ($SCAN_BAD); its INVALID lines above prove nothing"
+}
+
 jwt_class() { # token → "own <aud>" for this sandbox's user and team, else "foreign"
   local payload pad json
   payload=$(printf '%s' "$1" | cut -d. -f2 | tr '_-' '/+')
@@ -121,11 +144,16 @@ jwt_class() { # token → "own <aud>" for this sandbox's user and team, else "fo
 }
 
 run_secret_scan() {
-  local dir="$WORK/scan" pod labels n label hits canary canary_file ctl
+  local dir="$WORK/scan" pod labels n label hits canary canary_file ctl spec
+  SCAN_BAD=""
   mkdir -p "$dir/values" "$dir/files"
   chmod 700 "$dir"
   : >"$dir/labels"
   pod=$(sbx_pod)
+  if [[ -z "$pod" ]]; then
+    fail "ac-5 INVALID: t2's sandbox has no Running pod to scan ($(sbx_summary))"
+    return
+  fi
 
   # 1. What is to be looked for.
   local deps=(kobe-deps "$NS-deps" ${KOBE_GATE2_DEPS_NS:-})
@@ -136,8 +164,8 @@ run_secret_scan() {
     add_secret_value "$dir" "extra secrets file" "$KOBE_GATE2_EXTRA_SECRETS_FILE"
   fi
   n=$(wc -l <"$dir/labels" | tr -d ' ')
-  contains "the site's secret values were collected (CI side only: $n secrets/keys; values never printed)" '^[1-9][0-9]*$' "$n"
-  contains "the site's provider API keys were collected from the sealed store" '^provider API key' \
+  scan_control "the site's secret values were collected (CI side only: $n secrets/keys; values never printed)" '^[1-9][0-9]*$' "$n"
+  scan_control "the site's provider API keys were collected from the sealed store" '^provider API key' \
     "$(cut -f2 "$dir/labels" | grep -m1 '^provider API key' || echo 'none (no provider key in the install)')"
 
   # 2. Positive controls: a canary in a file and in a process environment must be found.
@@ -147,7 +175,7 @@ run_secret_scan() {
 
   # 3. What the sandbox holds: the processes (as the agent, and as Pi's tools) and the files.
   in_sbx "$PROC_DUMP" >"$dir/files/procs-agent.txt"
-  contains "the agent user's view lists the sandbox's processes" '^## [0-9]+ comm=' "$(head -c 20000 "$dir/files/procs-agent.txt")"
+  scan_control "the agent user's view lists the sandbox's processes" '^## [0-9]+ comm=' "$(head -c 20000 "$dir/files/procs-agent.txt")"
   procs=$(grep -c '^## ' "$dir/files/procs-agent.txt" || true)
   unreadable=$(grep -c 'environ UNREADABLE' "$dir/files/procs-agent.txt" || true)
   echo "     agent view: $procs processes, environment unreadable for $unreadable (other identities)"
@@ -155,13 +183,16 @@ run_secret_scan() {
   mkdir -p "$dir/files/fs"
   tar -xf "$dir/files/fs.tar" -C "$dir/files/fs" 2>/dev/null || true
   rm -f "$dir/files/fs.tar"
-  contains "the sandbox's writable and mounted files were copied out" '^[1-9][0-9]*$' "$(find "$dir/files/fs" -type f | wc -l | tr -d ' ')"
+  scan_control "the sandbox's writable and mounted files were copied out" '^[1-9][0-9]*$' "$(find "$dir/files/fs" -type f | wc -l | tr -d ' ')"
   scan_as_pi "$dir" "$pod"
 
   # 4. Controls first: the scan must be able to find a planted value.
   ctl=$(awk -v can="$canary" '/^## /{sec=$0} index($0, can) {print sec}' "$dir/files/procs-agent.txt" | grep -c ' comm=sleep ' || true)
-  contains "control: a canary in a process environment is found in /proc/<pid>/environ" '^[1-9]' "$ctl"
-  contains "control: a canary in a file is found in the file scan" '^[1-9]' "$(grep -rlaF -- "$canary" "$dir/files/fs" 2>/dev/null | wc -l | tr -d ' ')"
+  scan_control "control: a canary in a process environment is found in /proc/<pid>/environ" '^[1-9]' "$ctl"
+  scan_control "control: a canary in a file is found in the file scan" '^[1-9]' "$(grep -rlaF -- "$canary" "$dir/files/fs" 2>/dev/null | wc -l | tr -d ' ')"
+  # An unreadable pod spec reads as empty, which step 7 would take for "no Secret": a control too.
+  spec=$($KUBECTL -n "$TNS" get pod "$pod" -o jsonpath='{.metadata.name}' 2>/dev/null || true)
+  scan_control "control: the sandbox pod's spec can be read" "^$pod\$" "$spec"
   in_sbx "rm -f $canary_file; kill \$(for p in /proc/[0-9]*; do [ \"\$(cat \$p/comm 2>/dev/null)\" = sleep ] && echo \${p#/proc/}; done) 2>/dev/null; true" >/dev/null
 
   # 5. The check: no secret value anywhere (every value, every file).
@@ -173,7 +204,7 @@ run_secret_scan() {
       fail "ac-5: $label is in the sandbox: $(printf '%s' "$found" | tr '\n' ' ')"
     fi
   done <"$dir/labels"
-  ((hits == 0)) && ok "no secret value of the install (internal keys, credentials, provider keys) is in the sandbox: $(wc -l <"$dir/labels" | tr -d ' ') values searched in $(find "$dir/files" -type f | wc -l | tr -d ' ') files, every process's environment and command line"
+  ((hits == 0)) && scan_ok "no secret value of the install (internal keys, credentials, provider keys) is in the sandbox: $(wc -l <"$dir/labels" | tr -d ' ') values searched in $(find "$dir/files" -type f | wc -l | tr -d ' ') files, every process's environment and command line"
 
   # 6. Generic key shapes, and which Kobe tokens the sandbox holds.
   local entry pat name generic=0 matches
@@ -183,7 +214,7 @@ run_secret_scan() {
     matches=$(grep -raoE -- "$pat" "$dir/files" 2>/dev/null | generic_unexpected "$name" | sed -E "s#^$dir/files/##; s#(://[^:/]+:)[^@]*@#\\1***@#" | sort -u | cut -c1-200 | head -3 | tr '\n' ' ' || true)
     if [[ -n "$matches" ]]; then generic=1; fail "ac-5: a $name-shaped value is in the sandbox: $matches"; fi
   done
-  ((generic == 0)) && ok "no generic API key, private key or credential-bearing URL shape is in the sandbox"
+  ((generic == 0)) && scan_ok "no generic API key, private key or credential-bearing URL shape is in the sandbox"
   tokens_ok=1
   auds=""
   while IFS=: read -r tokfile tok; do
@@ -191,16 +222,17 @@ run_secret_scan() {
     class=$(jwt_class "$tok")
     if [[ "$class" == own* ]]; then auds+="${class#own } "; else tokens_ok=0; echo "     unexpected token in $tokfile: $class"; fi
   done < <(grep -raoE -- "$JWT_RE" "$dir/files" 2>/dev/null | sed "s#^$dir/files/##" | grep -a -v -E "$FIXTURE_RE" | sort -u -t: -k2,2)
-  if ((tokens_ok)); then ok "every JWT in the sandbox is Kobe's own session token for this user and team (audiences: ${auds:-none found})"
+  if ((tokens_ok)); then scan_ok "every JWT in the sandbox is Kobe's own session token for this user and team (audiences: ${auds:-none found})"
   else fail "ac-5: a JWT in the sandbox is not Kobe's session token for this sandbox's user and team"; fi
 
   # 7. Mounted secrets: the pod spec mounts no Secret and injects none into an environment.
-  contains "no Secret volume is mounted into the sandbox pod (volumes: $($KUBECTL -n "$TNS" get pod "$pod" -o jsonpath='{range .spec.volumes[*]}{.name}{" "}{end}'))" '^$' \
-    "$($KUBECTL -n "$TNS" get pod "$pod" -o jsonpath='{range .spec.volumes[*]}{.secret.secretName}{end}')"
-  contains "no environment variable of the sandbox pod comes from a Secret" '^$' \
-    "$($KUBECTL -n "$TNS" get pod "$pod" -o jsonpath='{range .spec.containers[*]}{range .env[*]}{.valueFrom.secretKeyRef.name}{end}{range .envFrom[*]}{.secretRef.name}{end}{end}')"
-  contains "the projected volume carries only a short-lived ServiceAccount token (the bootstrap token)" '^[a-z0-9.:/-]*$' \
-    "$($KUBECTL -n "$TNS" get pod "$pod" -o jsonpath='{range .spec.volumes[*]}{range .projected.sources[*]}{.serviceAccountToken.audience}{end}{end}')"
+  scan_check "no Secret volume is mounted into the sandbox pod (volumes: $($KUBECTL -n "$TNS" get pod "$pod" -o jsonpath='{range .spec.volumes[*]}{.name}{" "}{end}' 2>/dev/null || true))" '^$' \
+    "$($KUBECTL -n "$TNS" get pod "$pod" -o jsonpath='{range .spec.volumes[*]}{.secret.secretName}{end}' 2>/dev/null || true)"
+  scan_check "no environment variable of the sandbox pod comes from a Secret" '^$' \
+    "$($KUBECTL -n "$TNS" get pod "$pod" -o jsonpath='{range .spec.containers[*]}{range .env[*]}{.valueFrom.secretKeyRef.name}{end}{range .envFrom[*]}{.secretRef.name}{end}{end}' 2>/dev/null || true)"
+  scan_check "the projected volume carries only a short-lived ServiceAccount token (the bootstrap token)" '^[a-z0-9.:/-]*$' \
+    "$($KUBECTL -n "$TNS" get pod "$pod" -o jsonpath='{range .spec.volumes[*]}{range .projected.sources[*]}{.serviceAccountToken.audience}{end}{end}' 2>/dev/null || true)"
+  scan_verdict
 }
 
 # Pi's tools see another /proc than the agent (their own uid): the bash tool runs the dump there.
@@ -217,7 +249,7 @@ chmod 755 /tmp/gate2-proc-dump.sh" >/dev/null
   out=$(chat "bash: sh /tmp/gate2-proc-dump.sh > /workspace/.gate2-pi-procs.txt 2>&1")
   in_sbx "cat /workspace/.gate2-pi-procs.txt" >"$dir/files/procs-pi.txt"
   in_sbx "rm -f /workspace/.gate2-pi-procs.txt /tmp/gate2-proc-dump.sh" >/dev/null
-  contains "Pi's tools ran the dump as their own identity (their environment is in the scan)" '^## [0-9]+ comm=.*' "$(head -c 20000 "$dir/files/procs-pi.txt")"
-  contains "that environment holds the BASH_ENV script (control: it is Pi's, not the agent's)" 'BASH_ENV=' "$(grep -a BASH_ENV "$dir/files/procs-pi.txt" | head -1)"
+  scan_control "Pi's tools ran the dump as their own identity (their environment is in the scan)" '^## [0-9]+ comm=.*' "$(head -c 20000 "$dir/files/procs-pi.txt")"
+  scan_control "that environment holds the BASH_ENV script (control: it is Pi's, not the agent's)" 'BASH_ENV=' "$(grep -a BASH_ENV "$dir/files/procs-pi.txt" | head -1)"
   : "$out"
 }
