@@ -482,7 +482,7 @@ describe("authorization and thread state", () => {
     const ws = await f.connect(w);
     const threadId = await f.thread(w.owner);
     await f.fx.admin.query(
-      `INSERT INTO install_settings (key, value) VALUES ('policy.approval_floor', 'ask-all')
+      `INSERT INTO site_settings (key, value) VALUES ('policy.approval_floor', 'ask-all')
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
     );
     try {
@@ -490,7 +490,7 @@ describe("authorization and thread state", () => {
       expect((await f.run(w.team, run)).approval_mode).toBe("ask-all");
       expect((await ws.started(run)).config?.approval_mode).toBe("ask-all");
     } finally {
-      await f.fx.admin.query(`DELETE FROM install_settings WHERE key = 'policy.approval_floor'`);
+      await f.fx.admin.query(`DELETE FROM site_settings WHERE key = 'policy.approval_floor'`);
     }
   });
 });

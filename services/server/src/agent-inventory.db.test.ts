@@ -262,10 +262,8 @@ describe("inventory queries use indexes (KOBE-86)", () => {
       await plan(`SELECT id FROM threads WHERE team_id = $1 AND team_agent_id = gen_random_uuid()`),
     ).toMatch(/threads_team_agent_idx/);
     expect(
-      await plan(
-        `SELECT id FROM threads WHERE team_id = $1 AND install_agent_id = gen_random_uuid()`,
-      ),
-    ).toMatch(/threads_install_agent_idx/);
+      await plan(`SELECT id FROM threads WHERE team_id = $1 AND site_agent_id = gen_random_uuid()`),
+    ).toMatch(/threads_site_agent_idx/);
     expect(
       await plan(
         `SELECT sum(input_tokens) FROM run_usage WHERE team_id = $1 AND agent_id = gen_random_uuid()`,

@@ -36,9 +36,9 @@ const teamRef = () =>
 /**
  * A conversation. `leaf_entry_id` marks the active branch of the entry tree. `agent_scope`/
  * `agent_id`/`agent_version` pin the published agent version the thread started on (D19, KOBE-46).
- * Agents live in two tables (team_agents, install_agents), so the pin's foreign keys go through
+ * Agents live in two tables (team_agents, site_agents), so the pin's foreign keys go through
  * two generated columns: `team_agent_id` (set for team agents) → team_agent_versions and
- * `install_agent_id` (personal and gallery agents) → install_agent_versions; MATCH SIMPLE skips
+ * `site_agent_id` (personal and gallery agents) → site_agent_versions; MATCH SIMPLE skips
  * the null one. Both are NO ACTION, so a pinned version can never be deleted. Null agent = the
  * site default agent. `project_id` → projects (KOBE-160) is ON DELETE RESTRICT: a project is
  * archived, and a hard delete must first detach or delete its threads (they are authors' private
@@ -66,7 +66,7 @@ export const threads = pgTable(
     /** Generated: `agent_id` when the pinned agent is a team agent (foreign key target). */
     teamAgentId: uuid().generatedAlwaysAs(sql`CASE WHEN agent_scope = 'team' THEN agent_id END`),
     /** Generated: `agent_id` when the pinned agent is personal or gallery (foreign key target). */
-    installAgentId: uuid().generatedAlwaysAs(
+    siteAgentId: uuid().generatedAlwaysAs(
       sql`CASE WHEN agent_scope IN ('personal', 'gallery') THEN agent_id END`,
     ),
     title: text(),
@@ -133,8 +133,8 @@ export const threads = pgTable(
       ],
     }),
     foreignKey({
-      name: "threads_install_agent_version_fk",
-      columns: [t.installAgentId, t.agentVersion],
+      name: "threads_site_agent_version_fk",
+      columns: [t.siteAgentId, t.agentVersion],
       foreignColumns: [installAgentVersions.agentId, installAgentVersions.version],
     }),
     foreignKey({
@@ -149,9 +149,9 @@ export const threads = pgTable(
     index("threads_team_agent_idx")
       .on(t.teamId, t.teamAgentId, t.agentVersion)
       .where(sql`${t.teamAgentId} IS NOT NULL`),
-    index("threads_install_agent_idx")
-      .on(t.teamId, t.installAgentId, t.agentVersion)
-      .where(sql`${t.installAgentId} IS NOT NULL`),
+    index("threads_site_agent_idx")
+      .on(t.teamId, t.siteAgentId, t.agentVersion)
+      .where(sql`${t.siteAgentId} IS NOT NULL`),
     check(
       "threads_agent_pin",
       sql`(${t.agentId} IS NULL) = (${t.agentScope} IS NULL) AND ((${t.agentId} IS NULL) = (${t.agentVersion} IS NULL) OR (${t.isTest} AND ${t.agentId} IS NOT NULL AND ${t.agentVersion} IS NULL)) AND (${t.agentVersion} IS NULL OR ${t.agentVersion} > 0)`,

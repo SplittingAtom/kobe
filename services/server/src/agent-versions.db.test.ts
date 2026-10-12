@@ -336,7 +336,7 @@ describe("archive instead of delete (KOBE-45 decision 6)", () => {
       { key: "old-gallery", generation: 1, file: "---\nname: Old Gallery\n---\nOld.\n" },
     ]);
     const id = seeded?.agentId ?? "";
-    await h.admin.query(`UPDATE install_agents SET archived_at = now() WHERE id = $1`, [id]);
+    await h.admin.query(`UPDATE site_agents SET archived_at = now() WHERE id = $1`, [id]);
     expect((await as.carol.post("/v1/threads", { agent_id: id })).status).toBe(409);
   });
 });
@@ -483,7 +483,7 @@ describe("threads pin the version they started on (D19, U8, Gate 3)", () => {
 
     // A gallery row nobody published (only by hand in the database) can't start threads.
     const unpublished = await h.admin.query<{ id: string }>(
-      `INSERT INTO install_agents (scope, slug, frontmatter, prompt)
+      `INSERT INTO site_agents (scope, slug, frontmatter, prompt)
        VALUES ('gallery', 'unpublished', '{"name":"Unpublished"}', 'x') RETURNING id`,
     );
     expect((await as.carol.post("/v1/threads", { agent_id: unpublished.rows[0]?.id })).status).toBe(
@@ -509,7 +509,7 @@ describe("frozen manifest against the floor (D6, D19, D29)", () => {
     });
     expect(team.status, json(team)).toBe(201);
     await h.admin.query(
-      `INSERT INTO install_settings (key, value) VALUES ('policy.approval_floor', 'ask-on-write')`,
+      `INSERT INTO site_settings (key, value) VALUES ('policy.approval_floor', 'ask-on-write')`,
     );
     try {
       const teamAgent = await create("bob", "team", "Floored", { approval_mode: "auto" });
@@ -548,8 +548,8 @@ describe("frozen manifest against the floor (D6, D19, D29)", () => {
       const v2 = toolManifestSchema.parse((await published("bob", teamAgent)).version.toolManifest);
       expect(v2.tools.map((t) => t.name)).toContain("bash");
     } finally {
-      await h.admin.query(`DELETE FROM install_settings WHERE key = 'policy.approval_floor'`);
-      await h.admin.query(`DELETE FROM install_tool_rules`);
+      await h.admin.query(`DELETE FROM site_settings WHERE key = 'policy.approval_floor'`);
+      await h.admin.query(`DELETE FROM site_tool_rules`);
       await h.admin.query(`DELETE FROM tool_rules`);
     }
   });
@@ -587,9 +587,7 @@ describe("forks of gallery agents", () => {
     ]);
     const id = seeded?.agentId ?? "";
     // A draft in progress (set by hand: nothing in the API edits gallery drafts any more).
-    await h.admin.query(`UPDATE install_agents SET prompt = 'Work in progress.' WHERE id = $1`, [
-      id,
-    ]);
+    await h.admin.query(`UPDATE site_agents SET prompt = 'Work in progress.' WHERE id = $1`, [id]);
     const fork = await as.carol.post(`/v1/agents/${id}/fork`, { scope: "personal" });
     expect(fork.status, json(fork)).toBe(201);
     expect(fork.json.agent.prompt).toBe("Published prompt.");

@@ -37,7 +37,7 @@ async function user(name: string, role?: "admin"): Promise<string> {
     `${id}@lh.test`,
   ]);
   if (role) {
-    await admin.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, $2)`, [id, role]);
+    await admin.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, $2)`, [id, role]);
   }
   return id;
 }
@@ -130,14 +130,14 @@ async function errorCode(promise: Promise<unknown>): Promise<string | undefined>
 /** Runs `fn` with every site admin but `keep` removed, then restores them. */
 async function asSoleAdmin(keep: string, fn: () => Promise<void>): Promise<void> {
   const { rows } = await admin.query<{ user_id: string; role: string }>(
-    `DELETE FROM install_roles WHERE user_id <> $1 RETURNING user_id, role::text`,
+    `DELETE FROM site_roles WHERE user_id <> $1 RETURNING user_id, role::text`,
     [keep],
   );
   try {
     await fn();
   } finally {
     for (const r of rows) {
-      await admin.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, $2)`, [
+      await admin.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, $2)`, [
         r.user_id,
         r.role,
       ]);
@@ -228,7 +228,7 @@ describe("legal_holds_guard: the two-person rule in Postgres (ac-2)", () => {
       await askRelease(id, requester);
       await release(id, requester);
       expect(await holdRow(id)).toMatchObject({ status: "released", release_self_approved: true });
-      await admin.query(`DELETE FROM install_roles WHERE user_id = $1`, [held]);
+      await admin.query(`DELETE FROM site_roles WHERE user_id = $1`, [held]);
     });
   });
 

@@ -19,7 +19,7 @@ async function user(isAdmin = false): Promise<string> {
     `${id}@m.test`,
   ]);
   if (isAdmin)
-    await admin.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, 'admin')`, [id]);
+    await admin.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, 'admin')`, [id]);
   return id;
 }
 

@@ -367,9 +367,7 @@ describe("two-person approval", () => {
   });
 
   it("hides a legal hold from a subject who is a site admin, who can't end it either", async () => {
-    await admin.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, 'admin')`, [
-      ids.carol,
-    ]);
+    await admin.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, 'admin')`, [ids.carol]);
     try {
       const grantId = await activeGrant({ userId: ids.carol, legalHold: true });
       const list = await as.carol.get("/v1/site/break-glass");
@@ -386,7 +384,7 @@ describe("two-person approval", () => {
       await settled();
       expect(mailer.to(email("carol")).filter((m) => /break-glass/i.test(m.subject))).toEqual([]);
     } finally {
-      await admin.query(`DELETE FROM install_roles WHERE user_id = $1`, [ids.carol]);
+      await admin.query(`DELETE FROM site_roles WHERE user_id = $1`, [ids.carol]);
     }
   });
 

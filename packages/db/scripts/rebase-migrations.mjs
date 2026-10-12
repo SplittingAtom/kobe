@@ -14,12 +14,22 @@
 //   pnpm db:rebase [base]        # steps 1-4; stops after 3 if the merge has conflicts
 //   pnpm db:rebase --apply       # step 4 only, after resolving conflicts and committing the merge
 //
+// Hand-written migrations (first line `-- kobe:hand-written`, migration-plan.mjs) keep their SQL
+// and snapshot and are only renumbered; the script refuses when it can't do that safely.
+//
 // Generated migrations always come before custom ones after regeneration. That suits the usual
 // shape (create tables, then enable RLS); a custom data migration that must sit between two
 // schema changes needs splitting across branches.
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+  handWrittenBaseProblem,
+  isHandWritten,
+  rechainSnapshot,
+  regenerationSteps,
+  sameSchema,
+} from "./migration-plan.mjs";
 
 const DRIZZLE = "drizzle";
 const JOURNAL = `${DRIZZLE}/meta/_journal.json`;
@@ -43,21 +53,15 @@ function readJson(path, ref) {
   return JSON.parse(text);
 }
 
-/** JSON with object keys sorted: drizzle-kit does not write snapshot keys in a stable order. */
-function canonical(value) {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value === null || typeof value !== "object") return value;
-  return Object.fromEntries(
-    Object.keys(value)
-      .sort()
-      .map((k) => [k, canonical(value[k])]),
-  );
-}
-
 /** A custom migration leaves the schema snapshot unchanged apart from its id chain. */
 function isCustom(idx) {
-  const strip = ({ id: _id, prevId: _prevId, ...rest }) => JSON.stringify(canonical(rest));
-  return strip(readJson(snapshotPath(idx))) === strip(readJson(snapshotPath(idx - 1)));
+  return sameSchema(readJson(snapshotPath(idx)), readJson(snapshotPath(idx - 1)));
+}
+
+/** The newest snapshot at `ref`. */
+function lastSnapshot(ref) {
+  const { entries } = readJson(JOURNAL, ref);
+  return readJson(snapshotPath(entries[entries.length - 1].idx), ref);
 }
 
 function nameOf(tag) {
@@ -75,11 +79,24 @@ function stash(base) {
     console.log("db:rebase: no branch-only migrations; plain `git rebase` is enough");
     return null;
   }
-  const migrations = own.map((e) => ({
-    name: nameOf(e.tag),
-    custom: isCustom(e.idx),
-    sql: readFileSync(join(DRIZZLE, `${e.tag}.sql`), "utf8"),
-  }));
+  const migrations = own.map((e) => {
+    const sql = readFileSync(join(DRIZZLE, `${e.tag}.sql`), "utf8");
+    const handWritten = isHandWritten(sql);
+    return {
+      name: nameOf(e.tag),
+      custom: !handWritten && isCustom(e.idx),
+      handWritten,
+      sql,
+      ...(handWritten ? { snapshot: readJson(snapshotPath(e.idx)) } : {}),
+    };
+  });
+  const problem = handWrittenBaseProblem(migrations, lastSnapshot(mergeBase), lastSnapshot(base));
+  if (problem) fail(problem);
+  try {
+    regenerationSteps(migrations);
+  } catch (error) {
+    fail(error.message);
+  }
   writeFileSync(STASH, `${JSON.stringify({ base, migrations }, null, 2)}\n`);
   for (const e of own) {
     rmSync(join(DRIZZLE, `${e.tag}.sql`));
@@ -144,13 +161,20 @@ function apply() {
 }
 
 function regenerate(migrations) {
-  const generated = migrations.filter((m) => !m.custom);
-  if (generated.length > 0) {
-    drizzleGenerate("--name", generated.map((m) => m.name).join("_"));
-  }
-  for (const m of migrations.filter((x) => x.custom)) {
-    drizzleGenerate("--custom", "--name", m.name);
-    writeFileSync(join(DRIZZLE, `${newestTag()}.sql`), m.sql);
+  for (const step of regenerationSteps(migrations)) {
+    if (step.kind === "generate") {
+      drizzleGenerate("--name", step.name);
+      continue;
+    }
+    drizzleGenerate("--custom", "--name", step.name);
+    writeFileSync(join(DRIZZLE, `${newestTag()}.sql`), step.sql);
+    if (step.kind === "hand-written") {
+      const { entries } = readJson(JOURNAL);
+      const path = snapshotPath(entries[entries.length - 1].idx);
+      const placed = readJson(path);
+      const kept = rechainSnapshot(step.snapshot, { id: placed.id, prevId: placed.prevId });
+      writeFileSync(path, JSON.stringify(kept, null, 2));
+    }
   }
 }
 

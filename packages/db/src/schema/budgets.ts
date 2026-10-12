@@ -22,7 +22,7 @@ import { teams } from "./teams.js";
 // 2026-10-04: token budgets cap models without catalog prices), monthly with an optional daily
 // cap, at the site, team and user-in-team levels; per-user request rate limits at the gateway.
 // Spend is the `run_usage` ledger (KOBE-43), summed per day by a trigger into `model_spend_daily`
-// (team) and `install_model_spend_daily` (install), so a budget check reads at most 31 small rows.
+// (team) and `site_model_spend_daily` (site), so a budget check reads at most 31 small rows.
 // Tokens count every token a call processed: input + output + cache reads + cache writes.
 // Periods are calendar months and days in UTC.
 
@@ -38,6 +38,9 @@ export const BUDGET_THRESHOLDS = [80, 100] as const;
 export type BudgetThreshold = (typeof BUDGET_THRESHOLDS)[number];
 export const BUDGET_SCOPES = ["install", "team", "user"] as const;
 export type BudgetScope = (typeof BUDGET_SCOPES)[number];
+/** `budget_alerts.scope`: the site's alerts are stored as "site" (KOBE-256). */
+export const BUDGET_ALERT_SCOPES = ["site", "team", "user"] as const;
+export type BudgetAlertScope = (typeof BUDGET_ALERT_SCOPES)[number];
 export const BUDGET_PERIODS = ["month", "day"] as const;
 export type BudgetPeriod = (typeof BUDGET_PERIODS)[number];
 /** What a budget counts: dollars at catalog prices, or tokens (any model, priced or not). */
@@ -61,7 +64,7 @@ const ts = () => timestamp({ withTimezone: true }).notNull().defaultNow();
  * per-user request rate every team gets unless it sets a lower one.
  */
 export const installModelLimits = pgTable(
-  "install_model_limits",
+  "site_model_limits",
   {
     id: smallint().primaryKey().default(1),
     monthlyUsd: usd(),
@@ -73,12 +76,12 @@ export const installModelLimits = pgTable(
     updatedAt: ts(),
   },
   (t) => [
-    check("install_model_limits_singleton", sql`${t.id} = 1`),
+    check("site_model_limits_singleton", sql`${t.id} = 1`),
     check(
-      "install_model_limits_amounts",
+      "site_model_limits_amounts",
       sql`${amountOk(t.monthlyUsd)} AND ${amountOk(t.dailyUsd)} AND ${tokensOk(t.monthlyTokens)} AND ${tokensOk(t.dailyTokens)}`,
     ),
-    check("install_model_limits_rpm", rpmOk(t.userRequestsPerMinute)),
+    check("site_model_limits_rpm", rpmOk(t.userRequestsPerMinute)),
   ],
 );
 
@@ -154,7 +157,7 @@ export const modelSpendDaily = pgTable(
 );
 
 /** Site-wide (†): spend of every team per day (site budget); no team ids. */
-export const installModelSpendDaily = pgTable("install_model_spend_daily", {
+export const installModelSpendDaily = pgTable("site_model_spend_daily", {
   day: date({ mode: "string" }).primaryKey(),
   costUsd: numeric({ precision: 24, scale: 10, mode: "number" }).notNull().default(0),
   tokens: bigint({ mode: "number" }).notNull().default(0),
@@ -172,7 +175,7 @@ export const budgetAlerts = pgTable(
     teamId: uuid(),
     /** Set for a user-in-team budget. */
     userId: uuid(),
-    scope: text().$type<BudgetScope>().notNull(),
+    scope: text().$type<BudgetAlertScope>().notNull(),
     period: text().$type<BudgetPeriod>().notNull(),
     periodStart: date({ mode: "string" }).notNull(),
     threshold: smallint().$type<BudgetThreshold>().notNull(),
@@ -187,7 +190,7 @@ export const budgetAlerts = pgTable(
       .on(t.teamId, t.userId, t.scope, t.unit, t.period, t.periodStart, t.threshold)
       .nullsNotDistinct(),
     index("budget_alerts_team_idx").on(t.teamId, t.createdAt),
-    check("budget_alerts_scope", sql`${t.scope} IN (${list(BUDGET_SCOPES)})`),
+    check("budget_alerts_scope", sql`${t.scope} IN (${list(BUDGET_ALERT_SCOPES)})`),
     check("budget_alerts_period", sql`${t.period} IN (${list(BUDGET_PERIODS)})`),
     check("budget_alerts_threshold", sql`${t.threshold} IN (${list(BUDGET_THRESHOLDS)})`),
     // A threshold is only recorded once crossed (a forged early row could not pre-empt it).
@@ -198,7 +201,7 @@ export const budgetAlerts = pgTable(
     ),
     check(
       "budget_alerts_subject",
-      sql`(${t.scope} = 'install' AND ${t.teamId} IS NULL AND ${t.userId} IS NULL)
+      sql`(${t.scope} = 'site' AND ${t.teamId} IS NULL AND ${t.userId} IS NULL)
         OR (${t.scope} = 'team' AND ${t.teamId} IS NOT NULL AND ${t.userId} IS NULL)
         OR (${t.scope} = 'user' AND ${t.teamId} IS NOT NULL AND ${t.userId} IS NOT NULL)`,
     ),

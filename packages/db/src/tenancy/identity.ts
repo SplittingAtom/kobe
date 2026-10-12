@@ -22,8 +22,8 @@ export const identity = defineDomain({
     "invitations",
     // Identity and governance
     "teams",
-    "install_roles",
-    "install_settings",
+    "site_roles",
+    "site_settings",
     // Active team per session (KOBE-14)
     "session_active_teams",
     "break_glass_grants",
@@ -44,8 +44,8 @@ export const identity = defineDomain({
     // Signing keys are only ever inserted (no rotation configured).
     jwks: ["SELECT", "INSERT"],
     rate_limits: ALL_PRIVILEGES,
-    install_roles: ALL_PRIVILEGES,
-    install_settings: ["SELECT", "INSERT", "UPDATE"],
+    site_roles: ALL_PRIVILEGES,
+    site_settings: ["SELECT", "INSERT", "UPDATE"],
     // A pointer only; rows also go away with their session (cascade from `sessions`).
     session_active_teams: ALL_PRIVILEGES,
     // Kept as the record of who invited whom: revoked or accepted, never deleted (KOBE-13).

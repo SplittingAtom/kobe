@@ -138,7 +138,7 @@ export const BREAK_GLASS_NOTIFICATION_EVENTS = [
 export type BreakGlassNotificationEvent = (typeof BREAK_GLASS_NOTIFICATION_EVENTS)[number];
 
 export const BREAK_GLASS_RECIPIENT_ROLES = [
-  "install_admin",
+  "site_admin",
   "team_admin",
   "subject",
   "requester",
@@ -185,7 +185,7 @@ export const breakGlassNotifications = pgTable(
     ),
     check(
       "break_glass_notifications_role",
-      sql`${t.recipientRole} IN ('install_admin', 'team_admin', 'subject', 'requester')`,
+      sql`${t.recipientRole} IN ('site_admin', 'team_admin', 'subject', 'requester')`,
     ),
     check("break_glass_notifications_last_error", sql`char_length(${t.lastError}) <= 64`),
   ],

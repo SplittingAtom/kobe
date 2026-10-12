@@ -21,7 +21,7 @@ import { teams } from "./teams.js";
 // scope because a team table's team_id is NOT NULL (D5):
 //   - team skills live in the team table `team_skills` (RLS on team_id);
 //   - personal skills (they follow the user into every team, D9) live in site-wide
-//     `install_skills`; the server confines them to their owner.
+//     `site_skills`; the server confines them to their owner.
 // Each upload creates an immutable numbered version (`*_skill_versions`): the bundle is a zip in
 // object storage (`storage_key`) with its SHA-256 (`content_hash`, what the blocklist and
 // materialization use). A trigger refuses UPDATE and direct DELETE of versions. Scan results and
@@ -119,7 +119,7 @@ export const teamSkills = pgTable(
 
 /** Site-wide (†): personal skills, owned by one user and usable in any of their teams (D9). */
 export const installSkills = pgTable(
-  "install_skills",
+  "site_skills",
   {
     id: uuid().primaryKey().defaultRandom(),
     ownerUserId: uuid()
@@ -128,8 +128,8 @@ export const installSkills = pgTable(
     ...skillColumns(),
   },
   (t): PgTableExtraConfigValue[] => [
-    unique("install_skills_slug_unique").on(t.ownerUserId, t.slug),
-    ...skillChecks("install_skills", t),
+    unique("site_skills_slug_unique").on(t.ownerUserId, t.slug),
+    ...skillChecks("site_skills", t),
   ],
 );
 
@@ -157,7 +157,7 @@ export const teamSkillVersions = pgTable(
 
 /** Site-wide (†): immutable versions of personal skills (app role: SELECT and INSERT only). */
 export const installSkillVersions = pgTable(
-  "install_skill_versions",
+  "site_skill_versions",
   {
     skillId: uuid().notNull(),
     ...versionColumns(),
@@ -165,10 +165,10 @@ export const installSkillVersions = pgTable(
   (t): PgTableExtraConfigValue[] => [
     primaryKey({ columns: [t.skillId, t.version] }),
     foreignKey({
-      name: "install_skill_versions_skill_fk",
+      name: "site_skill_versions_skill_fk",
       columns: [t.skillId],
       foreignColumns: [installSkills.id],
     }),
-    ...versionChecks("install_skill_versions", t),
+    ...versionChecks("site_skill_versions", t),
   ],
 );

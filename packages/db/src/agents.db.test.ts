@@ -114,7 +114,7 @@ describe("team_agents", () => {
   });
 });
 
-describe("install_agents (personal and gallery)", () => {
+describe("site_agents (personal and gallery)", () => {
   it("requires an owner for personal agents and forbids one for gallery agents", async () => {
     expect(await sqlState(siteAgent({ slug: "no-owner", ownerUserId: null }))).toBe("23514");
     expect(await sqlState(siteAgent({ slug: "owned-gallery", scope: "gallery" }))).toBe("23514");

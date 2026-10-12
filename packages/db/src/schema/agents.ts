@@ -22,10 +22,10 @@ import { teams } from "./teams.js";
 // scope, because a team table's team_id is NOT NULL (D5):
 //   - team agents live in the team table `team_agents` (RLS on team_id);
 //   - personal agents (follow the user site-wide, D6/D9) and gallery agents (site-wide,
-//     admin-curated, read-only to teams) live in the site-wide `install_agents`.
+//     admin-curated, read-only to teams) live in the site-wide `site_agents`.
 // Each row is the agent's editable draft: `frontmatter` (the file's YAML as JSON, validated by
 // @kobe/agent-file) and `prompt` (the body). Publish (KOBE-46) copies the draft into an immutable
-// numbered version with a frozen tool manifest (`team_agent_versions` / `install_agent_versions`)
+// numbered version with a frozen tool manifest (`team_agent_versions` / `site_agent_versions`)
 // and points `current_version` at it (a foreign key, so it always names an existing version).
 // Versions are immutable in the database (a trigger refuses UPDATE and direct DELETE) and threads
 // pin them with NO ACTION foreign keys, so a pinned version can never disappear; an agent with
@@ -38,7 +38,7 @@ export type AgentScope = (typeof agentScope.enumValues)[number];
 export const agentStatus = pgEnum("agent_status", ["active", "suspended"]);
 export type AgentStatus = (typeof agentStatus.enumValues)[number];
 
-export const installAgentScope = pgEnum("install_agent_scope", ["personal", "gallery"]);
+export const installAgentScope = pgEnum("site_agent_scope", ["personal", "gallery"]);
 export type InstallAgentScope = (typeof installAgentScope.enumValues)[number];
 
 /** Mirrors `agentSlugSchema` in @kobe/agent-file. */
@@ -125,7 +125,7 @@ export const teamAgents = pgTable(
  * server confines personal agents to their owner. No team data and no team foreign keys.
  */
 export const installAgents = pgTable(
-  "install_agents",
+  "site_agents",
   {
     id: uuid().primaryKey().defaultRandom(),
     scope: installAgentScope().notNull(),
@@ -146,51 +146,48 @@ export const installAgents = pgTable(
   },
   (t): PgTableExtraConfigValue[] => [
     foreignKey({
-      name: "install_agents_current_version_fk",
+      name: "site_agents_current_version_fk",
       columns: [t.id, t.currentVersion],
       foreignColumns: [installAgentVersions.agentId, installAgentVersions.version],
     }),
-    uniqueIndex("install_agents_personal_slug_unique")
+    uniqueIndex("site_agents_personal_slug_unique")
       .on(t.ownerUserId, t.slug)
       .where(sql`${t.scope} = 'personal'`),
-    uniqueIndex("install_agents_gallery_slug_unique")
+    uniqueIndex("site_agents_gallery_slug_unique")
       .on(t.slug)
       .where(sql`${t.scope} = 'gallery'`),
-    uniqueIndex("install_agents_gallery_key_unique")
+    uniqueIndex("site_agents_gallery_key_unique")
       .on(t.galleryKey)
       .where(sql`${t.galleryKey} IS NOT NULL`),
     check(
-      "install_agents_gallery_generation",
+      "site_agents_gallery_generation",
       sql`${t.galleryGeneration} IS NULL OR ${t.galleryGeneration} > 0`,
     ),
     check(
-      "install_agents_archived_by",
+      "site_agents_archived_by",
       sql`${t.archivedBy} IS NULL OR (${t.archivedBy} = 'seed' AND ${t.archivedAt} IS NOT NULL)`,
     ),
+    check("site_agents_gallery_key_scope", sql`${t.galleryKey} IS NULL OR ${t.scope} = 'gallery'`),
     check(
-      "install_agents_gallery_key_scope",
-      sql`${t.galleryKey} IS NULL OR ${t.scope} = 'gallery'`,
-    ),
-    check(
-      "install_agents_fork_version",
+      "site_agents_fork_version",
       sql`${t.forkedFromVersion} IS NULL OR (${t.forkedFromAgentId} IS NOT NULL AND ${t.forkedFromVersion} > 0)`,
     ),
     check(
-      "install_agents_owner_by_scope",
+      "site_agents_owner_by_scope",
       sql`(${t.scope} = 'personal') = (${t.ownerUserId} IS NOT NULL)`,
     ),
-    check("install_agents_slug_format", sql`${t.slug} ~ ${sql.raw(`'${SLUG_FORMAT}'`)}`),
+    check("site_agents_slug_format", sql`${t.slug} ~ ${sql.raw(`'${SLUG_FORMAT}'`)}`),
     check(
-      "install_agents_prompt_size",
+      "site_agents_prompt_size",
       sql`octet_length(${t.prompt}) <= ${sql.raw(String(PROMPT_MAX_BYTES))}`,
     ),
     check(
-      "install_agents_frontmatter_object",
+      "site_agents_frontmatter_object",
       sql`jsonb_typeof(${t.frontmatter}) = 'object' AND octet_length(${t.frontmatter}::text) <= ${sql.raw(String(FRONTMATTER_MAX_BYTES))}`,
     ),
-    check("install_agents_revision_positive", sql`${t.revision} > 0`),
+    check("site_agents_revision_positive", sql`${t.revision} > 0`),
     check(
-      "install_agents_current_version_positive",
+      "site_agents_current_version_positive",
       sql`${t.currentVersion} IS NULL OR ${t.currentVersion} > 0`,
     ),
   ],
@@ -272,10 +269,10 @@ export const teamAgentVersions = pgTable(
 /**
  * Site-wide (†): published versions of personal and gallery agents. The app role may only
  * SELECT and INSERT (tenancy grants); a trigger refuses changes from anyone else too. The server
- * confines personal versions to their agent's owner, as for `install_agents`.
+ * confines personal versions to their agent's owner, as for `site_agents`.
  */
 export const installAgentVersions = pgTable(
-  "install_agent_versions",
+  "site_agent_versions",
   {
     agentId: uuid().notNull(),
     ...versionColumns(),
@@ -285,10 +282,10 @@ export const installAgentVersions = pgTable(
   (t): PgTableExtraConfigValue[] => [
     primaryKey({ columns: [t.agentId, t.version] }),
     foreignKey({
-      name: "install_agent_versions_agent_fk",
+      name: "site_agent_versions_agent_fk",
       columns: [t.agentId],
       foreignColumns: [installAgents.id],
     }),
-    ...versionChecks("install_agent_versions", t),
+    ...versionChecks("site_agent_versions", t),
   ],
 );

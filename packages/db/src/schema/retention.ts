@@ -23,7 +23,7 @@ export type RetentionPeriod = (typeof RETENTION_PERIODS)[number];
 
 const periodList = sql.raw(RETENTION_PERIODS.map((p) => `'${p}'`).join(", "));
 
-/** Site setting (`install_settings`) holding the site maximum; absent = `forever`. */
+/** Site setting (`site_settings`) holding the site maximum; absent = `forever`. */
 export const RETENTION_MAXIMUM_KEY = "retention.maximum";
 
 /** Site setting holding a scheduled lowering of the maximum: `<period>@<ISO time>`. */

@@ -32,7 +32,7 @@ export type MemoryActorKind = (typeof MEMORY_ACTOR_KIND_VALUES)[number];
 export const MEMORY_FILE_MAX_BYTES = 64 * 1024;
 
 /**
- * Site setting (`install_settings`) holding the site-wide memory switch: `false` turns
+ * Site setting (`site_settings`) holding the site-wide memory switch: `false` turns
  * memory off for every team; absent or anything else = on. Effective = site AND team (D24).
  */
 export const MEMORY_SITE_ENABLED_KEY = "memory.enabled";

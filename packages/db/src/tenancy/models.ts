@@ -19,11 +19,11 @@ export const models = defineDomain({
     "model_providers",
     "model_catalog",
     "model_gateway_state",
-    "install_model_limits",
-    "install_model_spend_daily",
+    "site_model_limits",
+    "site_model_spend_daily",
     "budget_alerts",
     "budget_alert_emails",
-    "install_budget_reservations",
+    "site_budget_reservations",
   ],
   grants: {
     // Providers and their sealed keys (KOBE-40): no team data; catalog entries RESTRICT deletes.
@@ -35,11 +35,11 @@ export const models = defineDomain({
     // Gateway sync progress (one row, seeded by the migration): read and advanced, never added.
     model_gateway_state: ["SELECT", "UPDATE"],
     // KOBE-42: the site budget and default rate (one row, seeded): read and changed, never added.
-    install_model_limits: ["SELECT", "UPDATE"],
+    site_model_limits: ["SELECT", "UPDATE"],
     // Spend of all teams per day, kept by the run_usage trigger (invoker's rights: the repo has
     // no SECURITY DEFINER functions, catalog.db.test.ts). The privileges serve that trigger only:
     // a guard trigger refuses any write that does not come from it (0046_budgets_rls.sql).
-    install_model_spend_daily: ["SELECT", "INSERT", "UPDATE"],
+    site_model_spend_daily: ["SELECT", "INSERT", "UPDATE"],
     // Budget thresholds crossed (once per period): insert-only, and an insert is verified against
     // the configured budget and the real spend counters (budget_alerts_verify). RLS: a team's rows
     // only in its context, site rows everywhere.
@@ -49,7 +49,7 @@ export const models = defineDomain({
     budget_alert_emails: ["SELECT", "INSERT"],
     // KOBE-120: reservations against the site budget (spans teams, so not a team table):
     // created, shortened on settle, deleted on settle or by the expiry sweep. No team or user ids.
-    install_budget_reservations: ALL_PRIVILEGES,
+    site_budget_reservations: ALL_PRIVILEGES,
   },
   columnGrants: {
     budget_alert_emails: {

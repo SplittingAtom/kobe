@@ -315,6 +315,10 @@ How restore works:
 
 - Only same-version restores are supported. To move a backup to a newer Kobe, restore it on its
   own version and then run `helm upgrade`, which runs the migrations as usual.
+  For example, a backup taken before KOBE-256 (migration `0091_site_rename`) names the old
+  `install_*` tables: a site on a newer release refuses it ("schema does not match the backup")
+  before loading anything. Restore it on its own release with that release's `kobe restore`, then
+  upgrade: the migration renames the tables in place with their rows.
 - Foreign keys: inside the transaction, every non-deferrable foreign key is made `DEFERRABLE
 INITIALLY DEFERRED` (the owner may do this), so FK cycles such as `threads.leaf_entry_id` ⇄
   `thread_entries` load in any order. All keys are checked before the commit and then made

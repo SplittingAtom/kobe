@@ -127,7 +127,7 @@ export async function readPromptSandboxWrites(db: KobeDb): Promise<PolicySetting
   return { promptSandboxWrites: parsed.success ? parsed.data : true };
 }
 
-/** Policy switches from `install_settings`, cached for `ttlMs` (default 5 s) across decisions. */
+/** Policy switches from `site_settings`, cached for `ttlMs` (default 5 s) across decisions. */
 export function createDbSettingsSource(db: KobeDb, ttlMs = 5_000): PolicySettingsSource {
   let cached: { at: number; value: Promise<PolicySettings> } | undefined;
   return {
@@ -255,7 +255,7 @@ type ScopeRef =
   | { readonly table: "user"; readonly teamId: string; readonly userId: string };
 
 function scopeKey(ref: ScopeRef): string {
-  if (ref.table === "install") return "kobe.install_tool_rules";
+  if (ref.table === "install") return "kobe.site_tool_rules";
   if (ref.table === "team") return `kobe.tool_rules.team.${ref.teamId}`;
   return `kobe.tool_rules.user.${ref.teamId}.${ref.userId}`;
 }
@@ -274,7 +274,7 @@ async function scopeUsage(
       : ref.table === "team"
         ? sql`r.id <> ${exclude}::uuid AND r.scope = 'team'`
         : sql`r.id <> ${exclude}::uuid AND r.scope = 'user' AND r.user_id = ${ref.userId}::uuid`;
-  const from = ref.table === "install" ? sql`install_tool_rules r` : sql`tool_rules r`;
+  const from = ref.table === "install" ? sql`site_tool_rules r` : sql`tool_rules r`;
   const result = await tx.execute<{ rules: number; entries: number }>(
     sql`SELECT count(*)::int AS rules, ${entries} AS entries FROM ${from} WHERE ${where}`,
   );

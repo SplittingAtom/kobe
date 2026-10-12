@@ -442,14 +442,14 @@ describe("switches", () => {
     const w = await world();
     const sb = await started(w);
     await fx.admin.query(
-      `INSERT INTO install_settings (key, value) VALUES ('memory.enabled', 'false')
+      `INSERT INTO site_settings (key, value) VALUES ('memory.enabled', 'false')
        ON CONFLICT (key) DO UPDATE SET value = 'false'`,
     );
     try {
       const refused = await put(sb, w, "d1", { scope: "user", path: "a.md", content: "x" });
       expect(errorCode(refused)).toBe("memory_disabled");
     } finally {
-      await fx.admin.query(`DELETE FROM install_settings WHERE key = 'memory.enabled'`);
+      await fx.admin.query(`DELETE FROM site_settings WHERE key = 'memory.enabled'`);
     }
     const ok = await put(sb, w, "d2", { scope: "user", path: "a.md", content: "x" });
     expect(ok.status).toBe("applied");
@@ -679,7 +679,7 @@ describe("project memory", () => {
       w.runId,
     ]);
     await fx.admin.query(
-      `INSERT INTO install_settings (key, value) VALUES ('policy.approval_floor', 'ask-on-write')
+      `INSERT INTO site_settings (key, value) VALUES ('policy.approval_floor', 'ask-on-write')
        ON CONFLICT (key) DO UPDATE SET value = 'ask-on-write'`,
     );
     try {
@@ -689,7 +689,7 @@ describe("project memory", () => {
         status: "pending_approval",
       });
     } finally {
-      await fx.admin.query(`DELETE FROM install_settings WHERE key = 'policy.approval_floor'`);
+      await fx.admin.query(`DELETE FROM site_settings WHERE key = 'policy.approval_floor'`);
     }
   });
 

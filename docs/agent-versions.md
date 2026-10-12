@@ -29,7 +29,7 @@ in **one transaction**, after a backup (`kobe backup`). Replace `:agent` with th
 1. **Decide what happens to pinned threads.** Either delete them (for user erasure, they belong
    to the same user), or keep them and clear their pin. A cleared pin runs on the site default
    agent from then on, and its history no longer names the version.
-2. **Disable the immutability trigger** on the version table: `install_agent_versions` for
+2. **Disable the immutability trigger** on the version table: `site_agent_versions` for
    personal and gallery agents, `team_agent_versions` for team agents. `ALTER TABLE` takes an
    ACCESS EXCLUSIVE lock, so do this in a quiet window.
 3. **Remove the pins**, then **clear `current_version`**, **delete the versions** and **delete the
@@ -40,19 +40,19 @@ in **one transaction**, after a backup (`kobe backup`). Replace `:agent` with th
 
 ```sql
 BEGIN;
-ALTER TABLE install_agent_versions DISABLE TRIGGER install_agent_versions_immutable;
+ALTER TABLE site_agent_versions DISABLE TRIGGER site_agent_versions_immutable;
 
 -- Either delete the threads that pin the agent (entries, runs and events cascade) …
-DELETE FROM threads WHERE install_agent_id = :'agent';
+DELETE FROM threads WHERE site_agent_id = :'agent';
 -- … or keep them and clear the pin:
 -- UPDATE threads SET agent_scope = NULL, agent_id = NULL, agent_version = NULL
---   WHERE install_agent_id = :'agent';
+--   WHERE site_agent_id = :'agent';
 
-UPDATE install_agents SET current_version = NULL WHERE id = :'agent';
-DELETE FROM install_agent_versions WHERE agent_id = :'agent';
-DELETE FROM install_agents WHERE id = :'agent';
+UPDATE site_agents SET current_version = NULL WHERE id = :'agent';
+DELETE FROM site_agent_versions WHERE agent_id = :'agent';
+DELETE FROM site_agents WHERE id = :'agent';
 
-ALTER TABLE install_agent_versions ENABLE TRIGGER install_agent_versions_immutable;
+ALTER TABLE site_agent_versions ENABLE TRIGGER site_agent_versions_immutable;
 COMMIT;
 ```
 

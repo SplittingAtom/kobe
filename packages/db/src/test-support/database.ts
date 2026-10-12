@@ -3,6 +3,8 @@ import pg from "pg";
 import { DEFAULT_MIGRATIONS_FOLDER, runMigrations } from "../migrate.js";
 import { assertAllMigrationsApplied, assertJournalExtendsBase } from "./upgrade.js";
 
+export { migrationsBefore } from "./upgrade.js";
+
 export interface TestDatabase {
   /** Superuser URL to the throwaway database (tests only). */
   readonly adminUrl: string;
@@ -13,13 +15,24 @@ export interface TestDatabase {
   drop(): Promise<void>;
 }
 
+export interface TestDatabaseOptions {
+  /**
+   * Migrate with this folder only (e.g. `migrationsBefore()`: a site of an older release),
+   * ignoring KOBE_TEST_BASE_MIGRATIONS.
+   */
+  readonly migrationsFolder?: string;
+}
+
 /**
  * Creates a throwaway database with a separate owner role (runs migrations) and app role
  * (NOSUPERUSER NOBYPASSRLS, owns nothing), migrated from scratch, or, when
  * KOBE_TEST_BASE_MIGRATIONS names a base branch's migrations folder, upgraded from it. `serverUrl` is a superuser URL
  * to a Postgres 17 server, used only to create and drop the database and roles.
  */
-export async function createTestDatabase(serverUrl: string): Promise<TestDatabase> {
+export async function createTestDatabase(
+  serverUrl: string,
+  options: TestDatabaseOptions = {},
+): Promise<TestDatabase> {
   const suffix = randomBytes(4).toString("hex");
   const dbName = `kobe_test_${suffix}`;
   const ownerRole = `kobe_owner_${suffix}`;
@@ -51,7 +64,13 @@ export async function createTestDatabase(serverUrl: string): Promise<TestDatabas
     );
     await admin.query(`CREATE DATABASE ${dbName} OWNER ${ownerRole}`);
     const baseFolder = process.env.KOBE_TEST_BASE_MIGRATIONS;
-    if (baseFolder) {
+    if (options.migrationsFolder) {
+      await runMigrations({
+        databaseUrl: urlFor(ownerRole),
+        appRole,
+        migrationsFolder: options.migrationsFolder,
+      });
+    } else if (baseFolder) {
       // Upgrade path (KOBE-69): the base branch's migrations first, then this branch's on top,
       // through the same runner the chart's migration Job uses.
       assertJournalExtendsBase(baseFolder, DEFAULT_MIGRATIONS_FOLDER);

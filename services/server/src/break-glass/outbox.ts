@@ -86,14 +86,14 @@ export async function recipientsFor(
   const list: Recipient[] = [];
   if (event === "requested") {
     for (const a of await activeSiteAdmins(tx, grant.adminId)) {
-      list.push({ id: a.id, role: "install_admin" });
+      list.push({ id: a.id, role: "site_admin" });
     }
   } else if (reachesTeam(event, options.wasActive)) {
     for (const a of await activeTeamAdmins(tx, grant.teamId)) {
       list.push({ id: a.id, role: "team_admin" });
     }
     for (const a of await activeSiteAdmins(tx)) {
-      list.push({ id: a.id, role: a.id === grant.adminId ? "requester" : "install_admin" });
+      list.push({ id: a.id, role: a.id === grant.adminId ? "requester" : "site_admin" });
     }
     if (grant.userId && !grant.legalHold && (await isActiveUser(tx, grant.userId))) {
       list.push({ id: grant.userId, role: "subject" });
@@ -258,7 +258,7 @@ export async function deliverBreakGlassNotifications(
         continue;
       }
       const message = grantMessage(deps, detail, row.event, to, {
-        isSiteAdmin: row.recipient_role === "install_admin" || row.recipient_role === "requester",
+        isSiteAdmin: row.recipient_role === "site_admin" || row.recipient_role === "requester",
         wasActive: row.was_active,
       });
       try {

@@ -61,7 +61,7 @@ const audited = async (action: string, agentId: string) =>
 const versions = async (agentId: string) =>
   (
     await h.admin.query<{ version: number; published_by: string | null }>(
-      `SELECT version, published_by FROM install_agent_versions WHERE agent_id = $1 ORDER BY version`,
+      `SELECT version, published_by FROM site_agent_versions WHERE agent_id = $1 ORDER BY version`,
       [agentId],
     )
   ).rows;
@@ -184,7 +184,7 @@ describe("seeding from the repo's definitions", () => {
 
   it("skips an archived agent with the same slug and keeps starting, restart after restart", async () => {
     await h.admin.query(
-      `INSERT INTO install_agents (scope, slug, frontmatter, prompt, archived_at)
+      `INSERT INTO site_agents (scope, slug, frontmatter, prompt, archived_at)
        VALUES ('gallery', 'old-archived', '{"name":"Old"}', 'old', now())`,
     );
     const def = { key: "old-archived", generation: 1, file: file("Old", "New.") };
@@ -199,13 +199,13 @@ describe("seeding from the repo's definitions", () => {
     const bad = { key: "fixture-bad", generation: 1, file: file("Fixture Bad", "Bad.") };
     const good = { key: "fixture-good", generation: 1, file: file("Fixture Good", "Fine.") };
     await h.admin.query(
-      `ALTER TABLE install_agents ADD CONSTRAINT tmp_fail CHECK (slug <> 'fixture-bad') NOT VALID`,
+      `ALTER TABLE site_agents ADD CONSTRAINT tmp_fail CHECK (slug <> 'fixture-bad') NOT VALID`,
     );
     try {
       const results = await seed(FIXTURE_NEXT, RACE, bad, good);
       expect(results.map((r) => r.action)).toEqual(["unchanged", "unchanged", "failed", "created"]);
     } finally {
-      await h.admin.query(`ALTER TABLE install_agents DROP CONSTRAINT tmp_fail`);
+      await h.admin.query(`ALTER TABLE site_agents DROP CONSTRAINT tmp_fail`);
     }
   });
 
@@ -221,7 +221,7 @@ describe("seeding from the repo's definitions", () => {
 
   it("adopts a gallery agent that already has the key as its slug", async () => {
     await h.admin.query(
-      `INSERT INTO install_agents (scope, slug, frontmatter, prompt) VALUES ('gallery', 'legacy-one', '{"name":"Legacy"}', 'old')`,
+      `INSERT INTO site_agents (scope, slug, frontmatter, prompt) VALUES ('gallery', 'legacy-one', '{"name":"Legacy"}', 'old')`,
     );
     const [, , result] = await seed(FIXTURE_NEXT, RACE, {
       key: "legacy-one",
@@ -432,7 +432,7 @@ describe("retiring removed definitions", () => {
     await seed(FIXTURE_NEXT, RACE, old);
     const oldId = await galleryId("carol", "fixture-old");
     await h.admin.query(
-      `ALTER TABLE install_agents ADD CONSTRAINT tmp_fail_next CHECK (slug <> 'fixture-next') NOT VALID`,
+      `ALTER TABLE site_agents ADD CONSTRAINT tmp_fail_next CHECK (slug <> 'fixture-next') NOT VALID`,
     );
     try {
       const results = await seed(FIXTURE_NEXT, RACE, next);
@@ -440,7 +440,7 @@ describe("retiring removed definitions", () => {
       expect(await audited("agent.archived", oldId)).toEqual([]);
       expect(await galleryId("carol", "fixture-old")).toBe(oldId);
     } finally {
-      await h.admin.query(`ALTER TABLE install_agents DROP CONSTRAINT tmp_fail_next`);
+      await h.admin.query(`ALTER TABLE site_agents DROP CONSTRAINT tmp_fail_next`);
     }
     // The next start seeds the new definition, then retires the old one.
     expect((await seed(FIXTURE_NEXT, RACE, next))[2]?.action).toBe("created");
@@ -460,7 +460,7 @@ describe("retiring removed definitions", () => {
   it("never restores an agent an admin archived", async () => {
     const def = { key: "fixture-admin", generation: 1, file: file("Fixture Admin", "A.") };
     const [, , first] = await seed(FIXTURE_NEXT, RACE, def);
-    await h.admin.query(`UPDATE install_agents SET archived_at = now() WHERE id = $1`, [
+    await h.admin.query(`UPDATE site_agents SET archived_at = now() WHERE id = $1`, [
       first?.agentId,
     ]);
     expect((await seed(FIXTURE_NEXT, RACE, def))[2]?.action).toBe("skipped_archived");

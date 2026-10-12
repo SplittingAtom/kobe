@@ -25,7 +25,7 @@ import {
 } from "./periods.js";
 
 /**
- * Where the periods live (D6): the site maximum in `install_settings` (site admins), the
+ * Where the periods live (D6): the site maximum in `site_settings` (site admins), the
  * team's period in `team_retention` (team admins, behind team RLS). Both default to forever. A
  * shortening of either waits 7 days as a pending change (user decision 2026-10-04), cancellable
  * meanwhile; a lengthening applies at once. Reads settle a pending change whose date has come, so

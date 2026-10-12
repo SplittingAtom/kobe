@@ -139,11 +139,8 @@ beforeEach(async () => {
 });
 
 const galleryId = async (key: string): Promise<string> =>
-  (
-    await h.admin.query<{ id: string }>(`SELECT id FROM install_agents WHERE gallery_key = $1`, [
-      key,
-    ])
-  ).rows[0]?.id as string;
+  (await h.admin.query<{ id: string }>(`SELECT id FROM site_agents WHERE gallery_key = $1`, [key]))
+    .rows[0]?.id as string;
 
 const runEval = (id: string, teamId = finance, who: TestBrowser = owner) =>
   who.post(`/v1/site/gallery/agents/${id}/eval`, { teamId });
@@ -152,7 +149,7 @@ describe("gallery scores (site level)", () => {
   it("runs the eval in the admin's team, publishes nothing and stores the score", async () => {
     const id = await galleryId("kobe");
     const before = (
-      await h.admin.query(`SELECT current_version FROM install_agents WHERE id = $1`, [id])
+      await h.admin.query(`SELECT current_version FROM site_agents WHERE id = $1`, [id])
     ).rows[0];
     const res = await runEval(id);
     expect(res.status, JSON.stringify(res.json)).toBe(202);
@@ -170,8 +167,7 @@ describe("gallery scores (site level)", () => {
     });
     expect(scores[0].evaluatedAt).toMatch(/^\d{4}-/);
     expect(
-      (await h.admin.query(`SELECT current_version FROM install_agents WHERE id = $1`, [id]))
-        .rows[0],
+      (await h.admin.query(`SELECT current_version FROM site_agents WHERE id = $1`, [id])).rows[0],
     ).toEqual(before);
     const [job] = kube.all("Job") as unknown as { metadata: { namespace: string } }[];
     expect(job?.metadata.namespace).toBe("kobe-team-finance");
@@ -237,12 +233,12 @@ describe("gallery scores (site level)", () => {
     expect((await runEval(id)).status).toBe(202);
     await h.deps.background.idle();
     await h.admin.query(
-      `INSERT INTO install_agent_versions (agent_id, version, frontmatter, prompt, tool_manifest, draft_revision)
-       SELECT agent_id, 2, frontmatter, prompt, tool_manifest, 1 FROM install_agent_versions
+      `INSERT INTO site_agent_versions (agent_id, version, frontmatter, prompt, tool_manifest, draft_revision)
+       SELECT agent_id, 2, frontmatter, prompt, tool_manifest, 1 FROM site_agent_versions
         WHERE agent_id = $1 AND version = 1`,
       [id],
     );
-    await h.admin.query(`UPDATE install_agents SET current_version = 2 WHERE id = $1`, [id]);
+    await h.admin.query(`UPDATE site_agents SET current_version = 2 WHERE id = $1`, [id]);
     expect((await builder.get("/v1/agents/gallery-scores")).json.scores).toEqual([]);
   });
 

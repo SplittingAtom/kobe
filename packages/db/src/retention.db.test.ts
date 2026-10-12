@@ -28,7 +28,7 @@ async function user(name: string, role?: "admin"): Promise<string> {
     `${id}@ret.test`,
   ]);
   if (role) {
-    await admin.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, $2)`, [id, role]);
+    await admin.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, $2)`, [id, role]);
   }
   return id;
 }

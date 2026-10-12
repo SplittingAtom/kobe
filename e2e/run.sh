@@ -1838,7 +1838,7 @@ SH
     # without approval unless a rule asks (KOBE-37 left one).
     echo "==> gallery agent Kobe (KOBE-89, KOBE-254)"
     psql_kobe "DELETE FROM tool_rules WHERE team_id = '$E2E_TEAM_ID' AND scope = 'team';" >/dev/null
-    gallery_id() { psql_kobe "SELECT id FROM install_agents WHERE scope = 'gallery' AND gallery_key = '$1' AND archived_at IS NULL"; }
+    gallery_id() { psql_kobe "SELECT id FROM site_agents WHERE scope = 'gallery' AND gallery_key = '$1' AND archived_at IS NULL"; }
     gallery_run() { # key content [timeout-ms] → CHAT_JS output for a thread with that gallery agent
       local id
       id=$(gallery_id "$1")
@@ -1847,9 +1847,9 @@ SH
     }
     gal_dir='cd "${TMPDIR:-/tmp}" && rm -rf g89 && mkdir g89 && cd g89 && SK=/opt/kobe/skills'
     contains "the gallery holds exactly one agent, Kobe (key kobe)" '^kobe$' \
-      "$(psql_kobe "SELECT string_agg(gallery_key, ',') FROM install_agents WHERE scope = 'gallery' AND archived_at IS NULL")"
+      "$(psql_kobe "SELECT string_agg(gallery_key, ',') FROM site_agents WHERE scope = 'gallery' AND archived_at IS NULL")"
     contains "Kobe asks for every team connector and narrows no tool" '^all:none$' \
-      "$(psql_kobe "SELECT (v.frontmatter->>'connectors') || ':' || coalesce(v.frontmatter->>'tools', 'none') FROM install_agent_versions v JOIN install_agents a ON a.id = v.agent_id AND v.version = a.current_version WHERE a.gallery_key = 'kobe'")"
+      "$(psql_kobe "SELECT (v.frontmatter->>'connectors') || ':' || coalesce(v.frontmatter->>'tools', 'none') FROM site_agent_versions v JOIN site_agents a ON a.id = v.agent_id AND v.version = a.current_version WHERE a.gallery_key = 'kobe'")"
     g_out=$(gallery_run kobe "hello-kobe-$RANDOM")
     printf '     gallery kobe: %s\n' "$(printf '%s' "$g_out" | grep -v '^text=' | tr '\n' ' ')"
     contains "Kobe: a thread with it starts (201, team default model)" '^thread=201:default$' "$g_out"
@@ -1869,7 +1869,7 @@ SH
       '^text=fake-openai: system said: .*Web search is not available here, so I can only work from the material you give me\.' "$g_out"
     contains "Kobe: its published prompt has it say plainly that web search is unavailable" \
       'Web search is not available here, so I can only work from the material you give me\.' \
-      "$(psql_kobe "SELECT v.prompt FROM install_agent_versions v JOIN install_agents a ON a.id = v.agent_id AND v.version = a.current_version WHERE a.gallery_key = 'kobe'")"
+      "$(psql_kobe "SELECT v.prompt FROM site_agent_versions v JOIN site_agents a ON a.id = v.agent_id AND v.version = a.current_version WHERE a.gallery_key = 'kobe'")"
     g_out=$(gallery_run kobe "bash: $gal_dir && python \$SK/docx/scripts/md_to_docx.py \$SK/docx/scripts/sample.md out.docx --title T >/dev/null && python \$SK/docx/scripts/docx_text.py out.docx | grep -c 'south | 310.35' && python \$SK/pdf/scripts/md_to_pdf.py \$SK/pdf/scripts/sample.md out.pdf --title T >/dev/null && test -s out.pdf && echo docx-and-pdf-produced")
     printf '     kobe documents: %s\n' "$(printf '%s' "$g_out" | tr '\n' ' ' | cut -c1-400)"
     contains "Kobe documents: the docx and pdf skills produced and read back the files offline" \
@@ -2674,19 +2674,19 @@ elif [[ -n "${KOBE_SANDBOX_IMAGE:-}" && "$(type -t chat_run)" == function && -n 
   ROT_AGENT=6a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d
   rot_t0=$SECONDS
   # A published personal agent of the owner: Kobe's definition with only the e2e-fake connector.
-  psql_kobe "DELETE FROM install_agents WHERE id = '$ROT_AGENT' AND current_version IS NULL;
-    INSERT INTO install_agents (id, scope, owner_user_id, slug, frontmatter, prompt)
+  psql_kobe "DELETE FROM site_agents WHERE id = '$ROT_AGENT' AND current_version IS NULL;
+    INSERT INTO site_agents (id, scope, owner_user_id, slug, frontmatter, prompt)
       SELECT '$ROT_AGENT', 'personal', '$owner_id', 'e2e-mcp-rotation',
         (a.frontmatter - 'tools') || '{\"name\":\"E2E MCP rotation\",\"connectors\":[\"e2e-fake\"]}'::jsonb, a.prompt
-      FROM install_agents a WHERE a.gallery_key = 'kobe' ON CONFLICT DO NOTHING;
-    INSERT INTO install_agent_versions (agent_id, version, frontmatter, prompt, tool_manifest, draft_revision)
+      FROM site_agents a WHERE a.gallery_key = 'kobe' ON CONFLICT DO NOTHING;
+    INSERT INTO site_agent_versions (agent_id, version, frontmatter, prompt, tool_manifest, draft_revision)
       SELECT a.id, 1, a.frontmatter, a.prompt,
-        (SELECT v.tool_manifest FROM install_agent_versions v JOIN install_agents g ON g.id = v.agent_id AND v.version = g.current_version
+        (SELECT v.tool_manifest FROM site_agent_versions v JOIN site_agents g ON g.id = v.agent_id AND v.version = g.current_version
           WHERE g.gallery_key = 'kobe') || '{\"connectors\":[\"e2e-fake\"]}'::jsonb, 1
-      FROM install_agents a WHERE a.id = '$ROT_AGENT' ON CONFLICT DO NOTHING;
-    UPDATE install_agents SET current_version = 1 WHERE id = '$ROT_AGENT';" >/dev/null
+      FROM site_agents a WHERE a.id = '$ROT_AGENT' ON CONFLICT DO NOTHING;
+    UPDATE site_agents SET current_version = 1 WHERE id = '$ROT_AGENT';" >/dev/null
   contains "the owner has a published agent with the e2e-fake connector" '^1$' \
-    "$(psql_kobe "SELECT current_version FROM install_agents WHERE id = '$ROT_AGENT'")"
+    "$(psql_kobe "SELECT current_version FROM site_agents WHERE id = '$ROT_AGENT'")"
   owner_lifecycle() { # hibernate|wake for the owner's sandbox
     $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node dist/cli/lifecycle.js "$1" \
       --team-id "$E2E_TEAM_ID" --user-id "$owner_id" 2>&1 | grep -E '^\{"(hibernated|woken)"' || true

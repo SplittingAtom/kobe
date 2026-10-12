@@ -278,9 +278,7 @@ describe("chain v2 upgrade of a KOBE-15 audit log", () => {
 
   it("refuses to erase v1 rows before the seal", async () => {
     await withClient(up.adminUrl, (c) =>
-      c.query(
-        `INSERT INTO install_settings (key, value) VALUES ('audit.pii_retention_hours', '1')`,
-      ),
+      c.query(`INSERT INTO site_settings (key, value) VALUES ('audit.pii_retention_hours', '1')`),
     );
     const erased = await withClient(up.adminUrl, (c) =>
       c.query(`SELECT audit_log_v1_erasable() AS ok`),

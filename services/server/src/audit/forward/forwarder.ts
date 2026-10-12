@@ -40,7 +40,7 @@ function describe(err: unknown): string {
 /**
  * Forwards new audit events to the configured SIEM destinations (KOBE-19). Runs as a sweep on
  * every replica; a session advisory lock lets one forward at a time. Each destination has a
- * durable cursor (the last delivered `seq`) in `install_settings`, advanced only after a batch was
+ * durable cursor (the last delivered `seq`) in `site_settings`, advanced only after a batch was
  * accepted, so a crash or a failure repeats a batch (the event id de-duplicates) and never skips
  * one. A failure doubles the wait before the next attempt (5 s to 15 min); the state is the admin
  * health view. A destination enabled for the first time starts at the current head: the past is

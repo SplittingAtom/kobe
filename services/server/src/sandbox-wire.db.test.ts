@@ -833,7 +833,7 @@ describe("policy.check", () => {
     await fx.admin.query(`UPDATE teams SET settings = '{}' WHERE id = $1`, [w.team]);
     const setFloor = (value: string) =>
       fx.admin.query(
-        `INSERT INTO install_settings (key, value) VALUES ('policy.approval_floor', $1)
+        `INSERT INTO site_settings (key, value) VALUES ('policy.approval_floor', $1)
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
         [value],
       );
@@ -846,7 +846,7 @@ describe("policy.check", () => {
       await setFloor("yolo");
       expect((await decide("f3")).decision).toBe("deny");
     } finally {
-      await fx.admin.query(`DELETE FROM install_settings WHERE key = 'policy.approval_floor'`);
+      await fx.admin.query(`DELETE FROM site_settings WHERE key = 'policy.approval_floor'`);
     }
     expect((await decide("f4")).decision).toBe("allow");
   });

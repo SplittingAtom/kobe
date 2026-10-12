@@ -1,7 +1,7 @@
 import { sql, type KobeDb } from "@kobe/db";
 import type { ForwardDestination } from "./types.js";
 
-/** Cursor and health of one destination, kept in `install_settings` (one row, written atomically). */
+/** Cursor and health of one destination, kept in `site_settings` (one row, written atomically). */
 export interface ForwardState {
   /** Every event up to and including this `seq` was delivered. */
   readonly seq: number;
@@ -44,7 +44,7 @@ export async function readState(
   name: ForwardDestination,
 ): Promise<ForwardState | null> {
   const { rows } = await db.execute<{ value: string }>(
-    sql`SELECT value FROM public.install_settings WHERE key = ${stateKey(name)}`,
+    sql`SELECT value FROM public.site_settings WHERE key = ${stateKey(name)}`,
   );
   return parseState(rows[0]?.value);
 }
@@ -55,7 +55,7 @@ export async function writeState(
   state: ForwardState,
 ): Promise<void> {
   await db.execute(sql`
-    INSERT INTO public.install_settings (key, value) VALUES (${stateKey(name)}, ${JSON.stringify(state)})
+    INSERT INTO public.site_settings (key, value) VALUES (${stateKey(name)}, ${JSON.stringify(state)})
     ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = now()`);
 }
 

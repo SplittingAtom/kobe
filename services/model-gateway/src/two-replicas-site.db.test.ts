@@ -63,7 +63,7 @@ const replica = (reservationTtlMs: number) => {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const liveHolds = async () => {
   const r = await owner.db.execute<{ n: string }>(
-    sql`SELECT count(*) AS n FROM install_budget_reservations WHERE expires_at > clock_timestamp()`,
+    sql`SELECT count(*) AS n FROM site_budget_reservations WHERE expires_at > clock_timestamp()`,
   );
   return Number(r.rows[0]?.n ?? 0);
 };

@@ -10,7 +10,7 @@ import { lockLegalHolds } from "../legal-hold/index.js";
  * values, so it still verifies (docs/audit-log.md, "IP and user agent").
  */
 
-/** `install_settings.key` of the retention period, in whole hours. */
+/** `site_settings.key` of the retention period, in whole hours. */
 export const AUDIT_PII_RETENTION_KEY = "audit.pii_retention_hours";
 export const AUDIT_PII_RETENTION_DEFAULT_HOURS = 12;
 /** Bounds, enforced here and again in SQL (`audit_pii_retention_hours()` clamps). */
@@ -31,7 +31,7 @@ export async function readAuditPiiRetentionHours(db: KobeDb | KobeTx): Promise<n
   return Number(rows[0]?.hours ?? AUDIT_PII_RETENTION_DEFAULT_HOURS);
 }
 
-/** Where the sweep continues (`install_settings`): every row before it has been dealt with. */
+/** Where the sweep continues (`site_settings`): every row before it has been dealt with. */
 export const AUDIT_PII_SWEEP_SEQ_KEY = "audit.pii_sweep_seq";
 /** Written by `kobe restore`: no erasure until then (ISO time, 24 h after the restore). */
 export const AUDIT_PII_SWEEP_RESUME_KEY = "audit.pii_sweep_resume_at";
@@ -66,7 +66,7 @@ export function pausedUntil(value: string | null | undefined): number {
 
 async function setSetting(tx: KobeTx, key: string, value: string): Promise<void> {
   await tx.execute(sql`
-    INSERT INTO public.install_settings (key, value) VALUES (${key}, ${value})
+    INSERT INTO public.site_settings (key, value) VALUES (${key}, ${value})
     ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = now()`);
 }
 
@@ -99,11 +99,11 @@ export async function eraseExpiredAuditPii(
     now: Date;
   }>(
     sql`SELECT
-          (SELECT value FROM public.install_settings WHERE key = ${AUDIT_PII_SWEEP_SEQ_KEY}) AS position,
-          (SELECT value FROM public.install_settings WHERE key = ${AUDIT_PII_SWEEP_RESUME_KEY}) AS resume_at,
+          (SELECT value FROM public.site_settings WHERE key = ${AUDIT_PII_SWEEP_SEQ_KEY}) AS position,
+          (SELECT value FROM public.site_settings WHERE key = ${AUDIT_PII_SWEEP_RESUME_KEY}) AS resume_at,
           now() AS now,
           public.audit_log_v1_erasable() AS v1_open,
-          EXISTS (SELECT 1 FROM public.install_settings WHERE key = ${V1_OPEN_KEY}) AS v1_marked`,
+          EXISTS (SELECT 1 FROM public.site_settings WHERE key = ${V1_OPEN_KEY}) AS v1_marked`,
   );
   const s = state.rows[0];
   // Paused after a restore (holds are as of the backup; admins re-place newer ones meanwhile).

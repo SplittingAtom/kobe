@@ -143,8 +143,8 @@ export function toInventoryItem(
 
 /** Site-wide agents this team uses: pinned by a live thread or by a schedule (KOBE-180). */
 const usedSiteAgentIds = (teamId: string) => sql`
-  SELECT t.install_agent_id FROM threads t
-   WHERE t.team_id = ${teamId} AND t.install_agent_id IS NOT NULL AND t.deleted_at IS NULL
+  SELECT t.site_agent_id FROM threads t
+   WHERE t.team_id = ${teamId} AND t.site_agent_id IS NOT NULL AND t.deleted_at IS NULL
      AND NOT t.is_test
   UNION
   SELECT s.agent_id FROM schedules s WHERE s.team_id = ${teamId}`;
@@ -158,7 +158,7 @@ const inventoryRows = (teamId: string) => sql`
   SELECT i.scope::text, i.id, i.slug, i.frontmatter->>'name', i.owner_user_id,
          CASE WHEN i.status = 'suspended' OR s.agent_id IS NOT NULL THEN 'suspended' ELSE 'active' END,
          i.current_version, i.archived_at
-    FROM install_agents i
+    FROM site_agents i
     LEFT JOIN team_agent_suspensions s ON s.team_id = ${teamId} AND s.agent_id = i.id
    WHERE i.id IN (${usedSiteAgentIds(teamId)})`;
 
@@ -180,7 +180,7 @@ export async function listInventory(
           JOIN LATERAL (
             SELECT t.id FROM threads t WHERE t.team_id = ${teamId} AND t.team_agent_id = page.id AND NOT t.is_test
             UNION ALL
-            SELECT t.id FROM threads t WHERE t.team_id = ${teamId} AND t.install_agent_id = page.id AND NOT t.is_test
+            SELECT t.id FROM threads t WHERE t.team_id = ${teamId} AND t.site_agent_id = page.id AND NOT t.is_test
           ) th ON true
           JOIN runs r ON r.team_id = ${teamId} AND r.thread_id = th.id
          GROUP BY page.id),
@@ -277,7 +277,7 @@ async function usedSiteAgent(
   id: string,
 ): Promise<{ slug: string; scope: "personal" | "gallery" } | null> {
   const result = await tx.execute<{ slug: string; scope: "personal" | "gallery" }>(sql`
-    SELECT i.slug, i.scope::text AS scope FROM install_agents i
+    SELECT i.slug, i.scope::text AS scope FROM site_agents i
      WHERE i.id = ${id}::uuid AND i.id IN (${usedSiteAgentIds(teamId)})`);
   return result.rows[0] ?? null;
 }

@@ -165,7 +165,7 @@ describe("first-run setup (ac-1)", () => {
       ).status,
     ).toBe(409);
     const { rows } = await admin.query(
-      `SELECT u.email, r.role FROM install_roles r JOIN users u ON u.id = r.user_id`,
+      `SELECT u.email, r.role FROM site_roles r JOIN users u ON u.id = r.user_id`,
     );
     expect(rows).toEqual([{ email: OWNER.email, role: "owner" }]);
   });
@@ -309,9 +309,7 @@ describe("required 2FA (ac-2)", () => {
 
   it("lets only the Owner lower the 2FA requirement", async () => {
     const { rows } = await admin.query(`SELECT id FROM users WHERE email = $1`, [MEMBER.email]);
-    await admin.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, 'admin')`, [
-      rows[0].id,
-    ]);
+    await admin.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, 'admin')`, [rows[0].id]);
     const adminUser = new Browser();
     const first = await adminUser.post("/api/auth/sign-in/email", {
       email: MEMBER.email,

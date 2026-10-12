@@ -566,9 +566,9 @@ them from becoming ready and fails `helm install --wait`.
 The migration runner refuses a superuser or `BYPASSRLS` owner, and an app role that is
 superuser, `BYPASSRLS`, owns tables, or is a member of another role.
 
-Migrations are written expand/contract: the previous release keeps serving while an upgrade's
-migration runs, and `helm rollback` runs older code against the newer schema (no down
-migrations). A migration that waits more than 10 s for a lock fails the Job instead of stalling
+Migrations are written expand/contract, except where an upgrade note says otherwise: the
+previous release keeps serving while an upgrade's migration runs, and `helm rollback` runs older
+code against the newer schema (no down migrations). A migration that waits more than 10 s for a lock fails the Job instead of stalling
 live traffic. Rolling a bundled-CloudNativePG release back to its first revision re-runs that
 revision's initial migration Job, which resets app-role grants to that build's matrix; the next
 upgrade restores them.
@@ -579,6 +579,23 @@ Migrations report what an upgrade changed in the migration Job's log (`"msg":"mi
 from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it during the upgrade
 (`kubectl logs -f job/<release>-migrate`) or read it from your log aggregation afterwards.
 
+- **Site names in the database (KOBE-256, migration `0091_site_rename`).** The `install_*` tables
+  become `site_*` (`site_settings`, `site_roles`, `site_agents`, …), with their constraints,
+  indexes and triggers; the types `install_role` and `install_agent_scope` become `site_role` and
+  `site_agent_scope`, `threads.install_agent_id` becomes `site_agent_id`, and the functions
+  `break_glass_is_install_admin` and `kobe_install_limits_guard` become `break_glass_is_site_admin`
+  and `kobe_site_limits_guard`. Everything is renamed in place (catalog only: no table is
+  rewritten, no row copied). The site's budget alerts and the break-glass notifications to site
+  admins switch to the stored names `site` and `site_admin`; runs stopped by the site budget
+  before the upgrade keep `install` as their stop scope. Server, scheduler and gateway pods of the
+  previous release fail on the renamed tables from the end of the migration Job until Helm
+  replaces them, so expect errors for that short window; so does a `kobe` CLI of the previous
+  release: use the CLI of the release you run. Queries, dashboards or scripts of your own that read
+  `install_*` tables must use the new names. A backup taken before this release restores only on
+  the release it was taken with ([backup and restore](backup-restore.md#limits)).
+  **This upgrade cannot be undone with `helm rollback`:** the previous release fails on the
+  renamed tables. Take a `kobe backup` first. To go back, reinstall the previous release and
+  restore that backup (changes made after the upgrade are lost).
 - **One gallery agent, Kobe (KOBE-254).** The gallery now holds one general-purpose agent, Kobe
   (key `kobe`), preselected for new chats. It pins no model, narrows no tool and asks for every
   connector the team enables (`connectors: all`): team policy, the approval floor, connector
@@ -597,7 +614,7 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
   - **Rolling back** to an older release restores the five and archives Kobe; the older release
     cannot read Kobe's versions or any agent using `connectors: all`.
 - **One approval floor (migration `0024_approval_floor_unify`).** The minimum approval mode is
-  site-wide only (spec D6), stored as `install_settings['policy.approval_floor']`. The older key
+  site-wide only (spec D6), stored as `site_settings['policy.approval_floor']`. The older key
   `policy.approval_mode_floor` is folded into it (the stricter value wins), and team floors
   (`teams.settings.approval_mode_floor`) are removed. Each team whose floor was stricter than
   `auto` is named in a notice (`kobe: dropped team approval floor <mode> of team <id>`): such a

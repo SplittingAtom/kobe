@@ -142,7 +142,7 @@ describe("site roles (ac-3)", () => {
     // The former Owner can no longer transfer; the new one hands it back.
     expect((await as.owner.post(path, { userId: ids.owner })).status).toBe(403);
     expect((await as.siteAdmin.post(path, { userId: ids.owner })).status).toBe(200);
-    const { rows } = await admin.query(`SELECT user_id, role FROM install_roles ORDER BY role`);
+    const { rows } = await admin.query(`SELECT user_id, role FROM site_roles ORDER BY role`);
     expect(rows).toEqual([
       { user_id: ids.owner, role: "owner" },
       { user_id: ids.siteAdmin, role: "admin" },
@@ -155,13 +155,13 @@ describe("site roles (ac-3)", () => {
         as.owner.post(path, { userId: ids.dave }),
         as.owner.put(`/v1/site/roles/${ids.dave}`, { role: "user" }),
       ]);
-      const { rows } = await admin.query(`SELECT user_id FROM install_roles WHERE role = 'owner'`);
+      const { rows } = await admin.query(`SELECT user_id FROM site_roles WHERE role = 'owner'`);
       expect(rows).toHaveLength(1);
       // Restore: the Owner, the site admin, and Dave as a plain user.
       if (rows[0].user_id === ids.dave) await as.dave.post(path, { userId: ids.owner });
       await as.owner.put(`/v1/site/roles/${ids.dave}`, { role: "user" });
     }
-    const { rows } = await admin.query(`SELECT user_id, role FROM install_roles ORDER BY role`);
+    const { rows } = await admin.query(`SELECT user_id, role FROM site_roles ORDER BY role`);
     expect(rows).toEqual([
       { user_id: ids.owner, role: "owner" },
       { user_id: ids.siteAdmin, role: "admin" },

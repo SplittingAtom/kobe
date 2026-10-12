@@ -29,7 +29,7 @@ type Claimed = {
   attempts: number;
   recipient_id: string;
   team_id: string | null;
-  scope: "install" | "team" | "user";
+  scope: "site" | "team" | "user";
   user_id: string | null;
   period: "month" | "day";
   threshold: number;
@@ -58,7 +58,7 @@ export function budgetAlertMessage(input: {
 }): MailMessage {
   const team = input.teamName ? oneLine(input.teamName) : null;
   const whose =
-    input.scope === "install"
+    input.scope === "site"
       ? "The site's"
       : input.scope === "team"
         ? `The ${team ?? "team"} team's`
@@ -92,7 +92,7 @@ export function budgetAlertMessage(input: {
  * team's budgets.
  */
 export function budgetAlertPath(scope: Claimed["scope"], own: boolean): string {
-  if (scope === "install") return CONSOLE_PATHS.siteUsage;
+  if (scope === "site") return CONSOLE_PATHS.siteUsage;
   if (scope === "user" && own) return CONSOLE_PATHS.chat;
   return CONSOLE_PATHS.teamBudgets;
 }

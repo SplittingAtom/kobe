@@ -66,7 +66,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await app.db.execute(sql`DELETE FROM install_budget_reservations`);
+  await app.db.execute(sql`DELETE FROM site_budget_reservations`);
   await app.close();
 });
 
@@ -109,11 +109,26 @@ describe("kobe_reserve_budget", () => {
   });
 
   it("counts the site line across teams, with the site-wide rows", async () => {
-    await app.db.execute(sql`DELETE FROM install_budget_reservations`);
-    const lines = [line("install", "tokens", 100)];
+    await app.db.execute(sql`DELETE FROM site_budget_reservations`);
+    const lines = [line("site", "tokens", 100)];
     expect(await reserve(teamA, randomUUID(), randomUUID(), 60, lines, 60_000, 1)).toBe("ok");
     expect(await reserve(teamB, randomUUID(), randomUUID(), 60, lines, 60_000, 1)).toBe("ok");
     expect(await reserve(teamA, randomUUID(), randomUUID(), 1, lines, 60_000, 1)).toBe("full:0");
+  });
+
+  it("KOBE-256: counts an install line (a gateway of the release before) as the site line", async () => {
+    await app.db.execute(sql`DELETE FROM site_budget_reservations`);
+    const site = [line("site", "tokens", 100)];
+    const install = [line("install", "tokens", 100)];
+    expect(await reserve(teamA, randomUUID(), randomUUID(), 60, install, 60_000, 1)).toBe("ok");
+    const [held] = (
+      await app.db.execute<{ n: string }>(sql`SELECT count(*) AS n FROM site_budget_reservations`)
+    ).rows;
+    expect(Number(held?.n)).toBe(1);
+    // One pool: the install hold and a site hold together fill the site budget for both names.
+    expect(await reserve(teamB, randomUUID(), randomUUID(), 60, site, 60_000, 1)).toBe("ok");
+    expect(await reserve(teamA, randomUUID(), randomUUID(), 1, site, 60_000, 1)).toBe("full:0");
+    expect(await reserve(teamB, randomUUID(), randomUUID(), 1, install, 60_000, 1)).toBe("full:0");
   });
 
   it("a repeated call id replaces its reservation", async () => {
@@ -141,13 +156,13 @@ describe("site holds are scoped to their team", () => {
   const siteRows = async () =>
     (
       await app.db.execute<{ team_key: string; call_id: string; member_key: string; n: string }>(
-        sql`SELECT team_key, call_id, member_key, tokens AS n FROM install_budget_reservations`,
+        sql`SELECT team_key, call_id, member_key, tokens AS n FROM site_budget_reservations`,
       )
     ).rows;
 
   it("stores no raw team or user id, and team B can neither end nor overwrite team A's hold", async () => {
-    await app.db.execute(sql`DELETE FROM install_budget_reservations`);
-    const lines = [line("install", "tokens", 1000)];
+    await app.db.execute(sql`DELETE FROM site_budget_reservations`);
+    const lines = [line("site", "tokens", 1000)];
     const who = randomUUID();
     const call = randomUUID();
     expect(await reserve(teamA, who, call, 10, lines, 60_000, 1)).toBe("ok");

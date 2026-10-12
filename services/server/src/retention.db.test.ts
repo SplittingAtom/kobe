@@ -240,7 +240,7 @@ beforeEach(async () => {
   await h.admin.query(`DELETE FROM threads WHERE team_id IN ($1, $2)`, [team, other]);
   await h.admin.query(`DELETE FROM retention_blob_deletions`);
   await h.admin.query(`DELETE FROM team_retention`);
-  await h.admin.query(`DELETE FROM install_settings WHERE key LIKE 'retention.%'`);
+  await h.admin.query(`DELETE FROM site_settings WHERE key LIKE 'retention.%'`);
   objects.objects.clear();
   objects.deleted.length = 0;
   h.mailer.sent.length = 0;
@@ -818,7 +818,7 @@ describe("pass interruptions (review M3, L2, L6)", () => {
     // Nothing was purged and the pass stays open: the next check resumes it, even outside the hour.
     expect(await threadIds()).toEqual([old]);
     const cursor = await h.admin.query<{ value: string }>(
-      `SELECT value FROM install_settings WHERE key = 'retention.cursor'`,
+      `SELECT value FROM site_settings WHERE key = 'retention.cursor'`,
     );
     expect(cursor.rows[0]?.value).toBe("start");
     expect(await job(h.deps.database.pool, new Date("2026-10-05T12:00:00Z")).tick()).toBe("ran");
@@ -834,7 +834,7 @@ describe("pass interruptions (review M3, L2, L6)", () => {
     const b = await thread({ teamId: second, owner: ids.bob, activity: ago(40) });
     // A pass crashed after finishing `first` (whose thread then came back, e.g. a restore).
     await h.admin.query(
-      `INSERT INTO install_settings (key, value) VALUES ('retention.cursor', $1)
+      `INSERT INTO site_settings (key, value) VALUES ('retention.cursor', $1)
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
       [first],
     );
@@ -843,7 +843,7 @@ describe("pass interruptions (review M3, L2, L6)", () => {
     expect(await threadIds(second)).toEqual([]);
     expect(b).toBeTruthy();
     const settings = await h.admin.query<{ key: string; value: string }>(
-      `SELECT key, value FROM install_settings WHERE key IN ('retention.cursor', 'retention.last_pass_at')`,
+      `SELECT key, value FROM site_settings WHERE key IN ('retention.cursor', 'retention.last_pass_at')`,
     );
     expect(Object.fromEntries(settings.rows.map((r) => [r.key, r.value]))).toMatchObject({
       "retention.cursor": "",

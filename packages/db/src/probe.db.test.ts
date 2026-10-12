@@ -171,7 +171,7 @@ describe("break-glass probe", () => {
         id,
         `${id}@probe.test`,
       ]);
-      await app.pool.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, 'admin')`, [id]);
+      await app.pool.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, 'admin')`, [id]);
     }
     requester = admins[0] ?? "";
     approver = admins[1] ?? "";
@@ -327,7 +327,7 @@ describe("break-glass probe", () => {
   it("exposes nothing once the grant is revoked", async () => {
     const [other] = (
       await app.pool.query<{ user_id: string }>(
-        `SELECT user_id FROM install_roles WHERE user_id <> $1 AND role = 'admin' LIMIT 1`,
+        `SELECT user_id FROM site_roles WHERE user_id <> $1 AND role = 'admin' LIMIT 1`,
         [requester],
       )
     ).rows;

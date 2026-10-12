@@ -23,7 +23,8 @@ export class DbReservations implements ReservationStore {
   async reserve(r: ReserveRequest): Promise<ReserveVerdict> {
     const lines = JSON.stringify(
       r.lines.map((l) => ({
-        scope: l.scope,
+        // kobe_reserve_budget names the site's line "site" (KOBE-256).
+        scope: l.scope === "install" ? "site" : l.scope,
         unit: l.unit,
         limit: l.limitExact ?? String(l.limit),
         spent: l.spentExact ?? String(l.spent),

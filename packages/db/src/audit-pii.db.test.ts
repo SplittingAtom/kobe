@@ -151,8 +151,7 @@ async function user(name: string, role?: "admin"): Promise<string> {
     name,
     `${id}@pii.test`,
   ]);
-  if (role)
-    await admin.query(`INSERT INTO install_roles (user_id, role) VALUES ($1, 'admin')`, [id]);
+  if (role) await admin.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, 'admin')`, [id]);
   return id;
 }
 
@@ -179,7 +178,7 @@ afterEach(async () => {
       [id, approver],
     );
   }
-  await admin.query(`DELETE FROM install_settings WHERE key = $1`, [AUDIT_PII_RETENTION_KEY]);
+  await admin.query(`DELETE FROM site_settings WHERE key = $1`, [AUDIT_PII_RETENTION_KEY]);
 });
 
 afterAll(async () => {
@@ -237,7 +236,7 @@ describe("erasure (ac-4)", () => {
     expect(await errorCode(erase(elevenHours))).toBe("42501");
     expect((await row(elevenHours)).ip).toBe(IP);
     // A shorter period (an audited site setting) makes it erasable.
-    await admin.query(`INSERT INTO install_settings (key, value) VALUES ($1, '10')`, [
+    await admin.query(`INSERT INTO site_settings (key, value) VALUES ($1, '10')`, [
       AUDIT_PII_RETENTION_KEY,
     ]);
     await erase(elevenHours);
@@ -285,7 +284,7 @@ describe("eraseExpiredAuditPii (the sweep's step)", () => {
   const position = async () =>
     Number(
       (
-        await admin.query<{ value: string }>(`SELECT value FROM install_settings WHERE key = $1`, [
+        await admin.query<{ value: string }>(`SELECT value FROM site_settings WHERE key = $1`, [
           AUDIT_PII_SWEEP_SEQ_KEY,
         ])
       ).rows[0]?.value,
@@ -296,7 +295,7 @@ describe("eraseExpiredAuditPii (the sweep's step)", () => {
     const heldRow = await recordedAgo(13, { actorId: randomUUID(), teamId: teamA });
     const young = await recordedAgo(1);
     await admin.query(
-      `INSERT INTO install_settings (key, value) VALUES ($1, $2)
+      `INSERT INTO site_settings (key, value) VALUES ($1, $2)
        ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
       [AUDIT_PII_SWEEP_SEQ_KEY, String(due[0])],
     );
@@ -330,16 +329,16 @@ describe("eraseExpiredAuditPii (the sweep's step)", () => {
   it("pauses after a restore until the time kobe restore set", async () => {
     const seq = await recordedAgo(40);
     await admin.query(
-      `INSERT INTO install_settings (key, value) VALUES ('audit.pii_sweep_resume_at', $1)`,
+      `INSERT INTO site_settings (key, value) VALUES ('audit.pii_sweep_resume_at', $1)`,
       [new Date(Date.now() + 3_600_000).toISOString()],
     );
     expect(await sweep(100_000)).toEqual({ rows: 0, olderThanHours: 12, more: false });
     expect((await row(seq)).ip).toBe(IP);
     await admin.query(
-      `UPDATE install_settings SET value = $1 WHERE key = 'audit.pii_sweep_resume_at'`,
+      `UPDATE site_settings SET value = $1 WHERE key = 'audit.pii_sweep_resume_at'`,
       [new Date(Date.now() - 1000).toISOString()],
     );
-    await admin.query(`UPDATE install_settings SET value = '0' WHERE key = $1`, [
+    await admin.query(`UPDATE site_settings SET value = '0' WHERE key = $1`, [
       AUDIT_PII_SWEEP_SEQ_KEY,
     ]);
     await sweep(100_000);
@@ -348,13 +347,13 @@ describe("eraseExpiredAuditPii (the sweep's step)", () => {
 
   it("ignores a malformed pause instead of failing every run", async () => {
     await admin.query(
-      `INSERT INTO install_settings (key, value) VALUES ('audit.pii_sweep_resume_at', '2026-13-45T99:00:00Z')
+      `INSERT INTO site_settings (key, value) VALUES ('audit.pii_sweep_resume_at', '2026-13-45T99:00:00Z')
        ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
     );
     expect(await sweep(10)).not.toBeNull();
     expect(pausedUntil("not a time")).toBe(0);
     expect(pausedUntil("2026-10-04T10:00:00.000Z")).toBe(Date.parse("2026-10-04T10:00:00.000Z"));
-    await admin.query(`DELETE FROM install_settings WHERE key = 'audit.pii_sweep_resume_at'`);
+    await admin.query(`DELETE FROM site_settings WHERE key = 'audit.pii_sweep_resume_at'`);
   });
 
   it("lets a hold release's restart win over a sweep in flight (review N2)", async () => {
@@ -369,7 +368,7 @@ describe("eraseExpiredAuditPii (the sweep's step)", () => {
     try {
       await sweeper.query("BEGIN");
       await sweeper.query(`SELECT legal_hold_lock_shared()`);
-      await sweeper.query(`SELECT value FROM install_settings WHERE key = $1`, [
+      await sweeper.query(`SELECT value FROM site_settings WHERE key = $1`, [
         AUDIT_PII_SWEEP_SEQ_KEY,
       ]);
       let releasedAt = 0;
@@ -382,7 +381,7 @@ describe("eraseExpiredAuditPii (the sweep's step)", () => {
       await new Promise((r) => setTimeout(r, 300));
       expect(releasedAt).toBe(0);
       await sweeper.query(
-        `INSERT INTO install_settings (key, value) VALUES ($1, '987654')
+        `INSERT INTO site_settings (key, value) VALUES ($1, '987654')
          ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
         [AUDIT_PII_SWEEP_SEQ_KEY],
       );
@@ -418,7 +417,7 @@ describe("eraseExpiredAuditPii (the sweep's step)", () => {
       ["twelve", 12],
     ] as const) {
       await admin.query(
-        `INSERT INTO install_settings (key, value) VALUES ($1, $2)
+        `INSERT INTO site_settings (key, value) VALUES ($1, $2)
          ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
         [AUDIT_PII_RETENTION_KEY, value],
       );

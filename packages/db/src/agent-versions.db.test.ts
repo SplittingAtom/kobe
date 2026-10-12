@@ -127,7 +127,7 @@ const pinThread = (
       .returning({
         id: threads.id,
         teamAgentId: threads.teamAgentId,
-        installAgentId: threads.installAgentId,
+        siteAgentId: threads.siteAgentId,
       }),
   );
 
@@ -228,13 +228,13 @@ describe("threads pin a published version", () => {
   it("pins a team version through the generated team_agent_id", async () => {
     const agentId = await publishedTeamAgent(teamA);
     const [row] = await pinThread(teamA, { agentScope: "team", agentId, v: 1 });
-    expect(row).toMatchObject({ teamAgentId: agentId, installAgentId: null });
+    expect(row).toMatchObject({ teamAgentId: agentId, siteAgentId: null });
   });
 
-  it("pins a personal version through the generated install_agent_id", async () => {
+  it("pins a personal version through the generated site_agent_id", async () => {
     const agentId = await publishedPersonalAgent();
     const [row] = await pinThread(teamA, { agentScope: "personal", agentId, v: 1 });
-    expect(row).toMatchObject({ teamAgentId: null, installAgentId: agentId });
+    expect(row).toMatchObject({ teamAgentId: null, siteAgentId: agentId });
   });
 
   it("refuses a version that was never published", async () => {
@@ -347,11 +347,11 @@ describe("catalog: version tables' triggers (L4)", () => {
     const triggers = await owner.pool.query<{ rel: string; name: string }>(
       `SELECT tgrelid::regclass::text AS rel, tgname AS name FROM pg_trigger
        WHERE NOT tgisinternal
-         AND tgrelid IN ('team_agent_versions'::regclass, 'install_agent_versions'::regclass)
+         AND tgrelid IN ('team_agent_versions'::regclass, 'site_agent_versions'::regclass)
        ORDER BY 1, 2`,
     );
     expect(triggers.rows).toEqual([
-      { rel: "install_agent_versions", name: "install_agent_versions_immutable" },
+      { rel: "site_agent_versions", name: "site_agent_versions_immutable" },
       { rel: "team_agent_versions", name: "team_agent_versions_immutable" },
     ]);
     const functions = await owner.pool.query<{ name: string }>(
