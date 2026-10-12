@@ -1,6 +1,6 @@
 # KOBE-265: Bifrost ignores customer_id on team update: the kobe-install → kobe-site move never converges
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #251)
 - **Branch / worktree:** `kobe-265-bifrost-customer` in `../Kobe-wt265`
 - **Depends on:** KOBE-256 (done)
 
