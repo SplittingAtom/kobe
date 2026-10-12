@@ -91,9 +91,17 @@ export interface BifrostAdmin {
   deleteKey(provider: string, id: string): Promise<void>;
   listCustomers(): Promise<ObservedCustomer[]>;
   addCustomer(name: string, limits?: GatewayLimits): Promise<ObservedCustomer>;
+  /** Renames a customer in place: its teams (and their virtual keys) stay with it (KOBE-265). */
+  updateCustomer(id: string, name: string, limits?: GatewayLimits): Promise<void>;
+  /** Deletes a customer; Bifrost detaches its teams (they stay, with no customer). */
   deleteCustomer(id: string): Promise<void>;
   listTeams(): Promise<ObservedTeam[]>;
   addTeam(name: string, customerId: string, limits?: GatewayLimits): Promise<ObservedTeam>;
+  /**
+   * Sets a team's customer. Bifrost v2.2.5 honours this only for a team without a customer: for
+   * a team that has one it answers 200 and keeps the old customer (KOBE-265: its update handler
+   * saves the team with the preloaded customer, which wins over `customer_id`).
+   */
   updateTeam(id: string, customerId: string): Promise<void>;
   deleteTeam(id: string): Promise<void>;
   listVirtualKeys(): Promise<ObservedVirtualKey[]>;
@@ -308,6 +316,9 @@ export function createHttpBifrostAdmin(options: HttpBifrostAdminOptions): Bifros
       const res = await call("POST", "/api/governance/customers", { name, ...limitsBody(limits) });
       const c = record(res.customer);
       return { id: str(c.id) ?? "", name: str(c.name) ?? name };
+    },
+    async updateCustomer(id, name, limits) {
+      await call("PUT", `/api/governance/customers/${enc(id)}`, { name, ...limitsBody(limits) });
     },
     async deleteCustomer(id) {
       await call("DELETE", `/api/governance/customers/${enc(id)}`);

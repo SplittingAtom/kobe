@@ -1427,6 +1427,55 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" ]]; then
   printf '     gateway in sync after %ss\n' "$((SECONDS - t0))"
   if [[ "$SHARD" == gate1-prep ]]; then exit "$failed"; fi
 
+  # KOBE-265: an install synced before KOBE-256 (every team under customer kobe-install), plus the
+  # empty kobe-site that KOBE-256's create-and-move left on kobe-gate1, converges on the real
+  # Bifrost: kobe-install is renamed in place, the stray goes, virtual keys keep their ids and
+  # values, and the next pass writes nothing. Bifrost's admin API is reachable from the server pod
+  # only; key values are hashed, never printed.
+  gw_customers() { # state|legacy → "customers=<names> teams_on=<their customers> vks=<hash>"
+    $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "
+      const { createHttpBifrostAdmin } = await import('/app/dist/models/bifrost-admin.js');
+      const { createHash } = await import('node:crypto');
+      const admin = createHttpBifrostAdmin({ baseUrl: process.env.KOBE_BIFROST_URL,
+        username: process.env.KOBE_BIFROST_ADMIN_USERNAME || 'kobe', password: process.env.KOBE_BIFROST_ADMIN_PASSWORD });
+      if (process.argv[1] === 'legacy') {
+        const [site] = await admin.listCustomers();
+        await admin.updateCustomer(site.id, 'kobe-install');
+        const stray = await admin.addCustomer('kobe-site');
+        for (const t of await admin.listTeams()) await admin.updateTeam(t.id, stray.id);
+      }
+      const customers = await admin.listCustomers();
+      const name = (id) => customers.find((c) => c.id === id)?.name ?? 'none';
+      const teamsOn = [...new Set((await admin.listTeams()).map((t) => name(t.customerId)))].sort();
+      const vks = (await admin.listVirtualKeys()).map((v) => v.id + ':' + v.value).sort().join(',');
+      console.log('customers=' + customers.map((c) => c.name).sort().join(',') + ' teams_on=' + teamsOn.join(',')
+        + ' vks=' + createHash('sha256').update(vks).digest('hex').slice(0, 16));
+    " "$1" 2>&1 | tail -1
+  }
+  gw_pass() { # bumps the desired version (as an admin change does) and waits for the pass
+    psql_kobe "UPDATE model_gateway_state SET desired_version = desired_version + 1 WHERE id = 1; SELECT pg_notify('kobe_models', 'config');" >/dev/null
+    wait_for 60 '^in_sync=true error=-$' gateway_state
+  }
+  gw_synced_lines() { # sync passes that wrote to Bifrost in the last $1 seconds, on any server pod
+    local pod
+    for pod in $($KUBECTL -n "$NS" get pods -l app.kubernetes.io/component=server -o name); do
+      $KUBECTL -n "$NS" logs "$pod" -c server --since="$1s" 2>/dev/null || true
+    done | grep -cE '"msg":"model gateway (synced|sync incomplete)"' || true
+  }
+  gw_before=$(gw_customers state)
+  contains "Bifrost holds one site customer with every team (before the upgrade check)" \
+    '^customers=kobe-site teams_on=kobe-site vks=' "$gw_before"
+  contains "Bifrost v2.2.5 keeps a team's customer on update (KOBE-256's move left the teams behind)" \
+    '^customers=kobe-install,kobe-site teams_on=kobe-install vks=' "$(gw_customers legacy)"
+  contains "upgrade from kobe-install: the sync pass reports in sync" '^in_sync=true error=-$' "$(gw_pass)"
+  contains "upgrade from kobe-install: renamed in place, stray removed, virtual keys unchanged (KOBE-265)" \
+    "^customers=kobe-site teams_on=kobe-site ${gw_before##* }\$" "$(gw_customers state)"
+  sleep 3 # the log window below must not reach back to the pass above
+  t_pass=$SECONDS
+  contains "upgrade from kobe-install: the next pass is in sync" '^in_sync=true error=-$' "$(gw_pass)"
+  contains "upgrade from kobe-install: the next pass writes nothing to Bifrost (converged)" '^0$' \
+    "$(gw_synced_lines $((SECONDS - t_pass + 1)))"
+
   # KOBE-44: the catalog's model listing asks the real Bifrost to call a provider with its key. A
   # provider on a private address WITHOUT allow_private_network must not be reached that way.
   priv_add=$(as_owner "POST /v1/site/models/providers {\"kind\":\"openai_compatible\",\"id\":\"e2epriv\",\"name\":\"Private, not allowed\",\"api_key\":\"e2e-private-key\",\"base_url\":\"$LLM\",\"allow_private_network\":false}")

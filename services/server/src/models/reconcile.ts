@@ -3,7 +3,9 @@ import {
   BifrostAdminError,
   vkActive,
   type BifrostAdmin,
+  type ObservedCustomer,
   type ObservedProvider,
+  type ObservedTeam,
   type ObservedVirtualKey,
 } from "./bifrost-admin.js";
 import type { DesiredProvider, DesiredState, DesiredVirtualKey } from "./desired.js";
@@ -59,6 +61,48 @@ const vkDiffers = (want: DesiredVirtualKey, teamId: string, have: ObservedVirtua
   !sameModels(want.models, have.models) ||
   (wantedPerMinute(want) !== undefined && wantedPerMinute(want) !== have.requestsPerMinute) ||
   (want.limits?.budgets !== undefined && want.limits.budgets.length > 0);
+
+/** Customer names Kobe used before: `kobe-install` until KOBE-256 renamed it to the site's. */
+export const LEGACY_CUSTOMERS: readonly string[] = ["kobe-install"];
+
+interface SiteCustomer {
+  readonly customer: ObservedCustomer | undefined;
+  /** No site customer yet: the caller adds it. */
+  readonly create: boolean;
+  /** A customer deleted here (an empty stray holding the site's name). */
+  readonly deleted?: string;
+}
+
+/**
+ * Picks the site customer (KOBE-265). Bifrost cannot move a team to another customer (see
+ * `updateTeam`), so a legacy customer is renamed in place: its teams and their virtual keys stay
+ * as they are. An empty customer already holding the site's name (left by KOBE-256's
+ * create-and-move) is deleted first, as names are unique.
+ */
+async function siteCustomer(
+  want: DesiredState["customer"],
+  customers: readonly ObservedCustomer[],
+  teams: readonly ObservedTeam[],
+  admin: BifrostAdmin,
+  write: (what: string, fn: () => Promise<unknown>) => Promise<boolean>,
+): Promise<SiteCustomer> {
+  const site = customers.find((c) => c.name === want.name);
+  const legacy = customers.find((c) => LEGACY_CUSTOMERS.includes(c.name));
+  const owns = (c: ObservedCustomer) => teams.some((t) => t.customerId === c.id);
+  if (!legacy) return { customer: site, create: !site };
+  if (site && (owns(site) || !owns(legacy))) return { customer: site, create: false };
+  if (site && !(await write(`delete customer ${site.name}`, () => admin.deleteCustomer(site.id)))) {
+    return { customer: legacy, create: false };
+  }
+  const renamed = await write(`rename customer ${legacy.name}`, () =>
+    admin.updateCustomer(legacy.id, want.name, want.limits),
+  );
+  return {
+    customer: renamed ? { ...legacy, name: want.name } : legacy,
+    create: false,
+    ...(site ? { deleted: site.id } : {}),
+  };
+}
 
 export async function reconcile(
   desired: DesiredState,
@@ -117,26 +161,33 @@ export async function reconcile(
     }
   }
 
-  // ── customer (the site; renamed from kobe-install by KOBE-256: its teams move, then it goes) ──
-  const customers = (await attempt("list customers", () => admin.listCustomers())) ?? [];
-  let customer = customers.find((c) => c.name === desired.customer.name);
-  if (!customer) {
+  // ── customer (the site) and teams ──
+  const customers = await attempt("list customers", () => admin.listCustomers());
+  const observedTeams = await attempt("list teams", () => admin.listTeams());
+  // Without both listings nothing is created, renamed or deleted (and no team is added).
+  const site: SiteCustomer =
+    customers && observedTeams
+      ? await siteCustomer(desired.customer, customers, observedTeams, admin, write)
+      : { customer: undefined, create: false };
+  let customer = site.customer;
+  if (site.create) {
     customer = await attempt("add customer", () =>
       admin.addCustomer(desired.customer.name, desired.customer.limits),
     );
     if (customer) changes++;
   }
 
-  // ── teams ──
-  const observedTeams = (await attempt("list teams", () => admin.listTeams())) ?? [];
   const teamIds = new Map<string, string>(); // Kobe team id → Bifrost team id
-  const haveTeams = new Map(observedTeams.map((t) => [t.name, t]));
+  const haveTeams = new Map((observedTeams ?? []).map((t) => [t.name, t]));
   for (const want of desired.teams) {
     const have = haveTeams.get(want.name);
     if (have) {
       teamIds.set(want.teamId, have.id);
-      if (customer && have.customerId !== customer.id) {
-        await write(`move team ${want.name}`, () => admin.updateTeam(have.id, customer.id));
+      if (customer && have.customerId === undefined) {
+        await write(`attach team ${want.name}`, () => admin.updateTeam(have.id, customer.id));
+      } else if (customer && have.customerId !== customer.id) {
+        // Bifrost cannot move a team between customers (see `updateTeam`); it keeps working.
+        logger.warn({ team: want.name }, "model gateway team belongs to another Bifrost customer");
       }
       continue;
     }
@@ -188,16 +239,17 @@ export async function reconcile(
   // ── removals: teams, customers, providers no longer desired ──
   if (observedVks) {
     const wantedTeams = new Set(desired.teams.map((t) => t.name));
-    for (const team of observedTeams.filter((t) => !wantedTeams.has(t.name))) {
+    for (const team of (observedTeams ?? []).filter((t) => !wantedTeams.has(t.name))) {
       await write(`delete team ${team.name}`, () => admin.deleteTeam(team.id));
     }
-    // A stale customer (e.g. `kobe-install` before KOBE-256) goes only once the desired one
-    // exists and no team points at it any more: teams are listed again, so a failed move or
-    // team removal keeps its customer until a later pass succeeds.
+    // Another customer (an empty stray, or one whose teams were all removed) goes only once the
+    // site customer exists and no team points at it any more: teams are listed again, so a failed
+    // team removal keeps its customer until a later pass succeeds (Bifrost would detach them).
     const remaining = customer ? await attempt("list teams", () => admin.listTeams()) : undefined;
     if (customer && remaining) {
       const owners = new Set(remaining.map((t) => t.customerId));
-      for (const c of customers.filter((c) => c.id !== customer.id && !owners.has(c.id))) {
+      const others = (customers ?? []).filter((c) => c.id !== customer.id && c.id !== site.deleted);
+      for (const c of others.filter((c) => !owners.has(c.id))) {
         await write(`delete customer ${c.name}`, () => admin.deleteCustomer(c.id));
       }
     }

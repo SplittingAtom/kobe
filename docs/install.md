@@ -598,8 +598,9 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
   restore that backup (changes made after the upgrade are lost).
   SIEM: new `policy.rule.*`, `models.budget.*` and `run.budget_stopped` audit events say
   `scope: "site"` (rows recorded before keep `"install"`); update rules that match `"install"`.
-  Bifrost: the model-gateway sync replaces the customer `kobe-install` with `kobe-site` (it moves
-  every team, then removes the old customer; teams and virtual keys stay).
+  Bifrost: the model-gateway sync renames the customer `kobe-install` to `kobe-site` in place
+  (teams and virtual keys stay; KOBE-265), first removing an empty `kobe-site` an earlier build
+  of this release may have created.
 - **One gallery agent, Kobe (KOBE-254).** The gallery now holds one general-purpose agent, Kobe
   (key `kobe`), preselected for new chats. It pins no model, narrows no tool and asks for every
   connector the team enables (`connectors: all`): team policy, the approval floor, connector

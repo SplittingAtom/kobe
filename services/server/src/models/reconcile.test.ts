@@ -139,53 +139,119 @@ describe("reconcile", () => {
     expect(second.virtualKeys).toEqual(first.virtualKeys);
   });
 
-  it("KOBE-256: moves the teams of the old kobe-install customer to kobe-site, keeping every key", async () => {
+  /** An install synced before KOBE-256: every team under the old `kobe-install` customer. */
+  const syncedBeforeRename = async () => {
     const old = { ...desired(), customer: { name: "kobe-install", limits: undefined } };
     const first = await reconcile(old, bifrost, logger);
     expect([...bifrost.customers.values()].map((c) => c.name)).toEqual(["kobe-install"]);
+    bifrost.calls.length = 0;
+    return { first, legacy: [...bifrost.customers.values()][0] };
+  };
+  const teamCustomers = () => [...bifrost.teams.values()].map((t) => t.customerId);
+  const vkWrites = () => bifrost.calls.filter((c) => c.startsWith("vk."));
+
+  it("KOBE-265: Bifrost keeps a team's customer on update (the fake matches v2.2.5)", async () => {
+    const { legacy } = await syncedBeforeRename();
+    const other = await bifrost.addCustomer("other");
+    const [team] = [...bifrost.teams.values()];
+    await bifrost.updateTeam(team?.id ?? "", other.id);
+    expect(bifrost.teams.get(team?.id ?? "")?.customerId).toBe(legacy?.id);
+    // Deleting a customer detaches its teams; a team without a customer can be attached.
+    await bifrost.deleteCustomer(legacy?.id ?? "");
+    expect(bifrost.teams.get(team?.id ?? "")?.customerId).toBeUndefined();
+    await bifrost.updateTeam(team?.id ?? "", other.id);
+    expect(bifrost.teams.get(team?.id ?? "")?.customerId).toBe(other.id);
+  });
+
+  it("KOBE-265: renames kobe-install to the site customer in place, then converges", async () => {
+    expect(SITE_CUSTOMER).toBe("kobe-site");
+    const { first, legacy } = await syncedBeforeRename();
     const result = await reconcile(desired(), bifrost, logger);
     expect(result.errors).toEqual([]);
-    expect(SITE_CUSTOMER).toBe("kobe-site");
-    const customers = [...bifrost.customers.values()];
-    expect(customers.map((c) => c.name)).toEqual([SITE_CUSTOMER]);
-    expect([...bifrost.teams.values()].map((t) => t.customerId)).toEqual(
-      [...bifrost.teams.values()].map(() => customers[0]?.id),
-    );
+    expect(bifrost.calls).toEqual([`customer.update kobe-install ${SITE_CUSTOMER}`]);
+    expect([...bifrost.customers.values()]).toEqual([{ id: legacy?.id, name: SITE_CUSTOMER }]);
+    expect(teamCustomers()).toEqual([legacy?.id, legacy?.id]);
     expect(result.virtualKeys).toEqual(first.virtualKeys);
-    expect(bifrost.calls.filter((c) => c.startsWith("vk."))).toEqual(
-      bifrost.calls.filter((c) => c.startsWith("vk.add")),
-    );
+    expect(vkWrites()).toEqual([]);
+    const again = await reconcile(desired(), bifrost, logger);
+    expect(again.changes).toBe(0);
+    expect(again.errors).toEqual([]);
   });
 
-  it("KOBE-256: keeps kobe-install with its teams when kobe-site cannot be created", async () => {
-    const old = { ...desired(), customer: { name: "kobe-install", limits: undefined } };
-    const first = await reconcile(old, bifrost, logger);
-    bifrost.failing.add(`customer.add ${SITE_CUSTOMER}`);
+  it("KOBE-265: after KOBE-256's create-and-move, deletes the empty kobe-site, then renames", async () => {
+    const { first, legacy } = await syncedBeforeRename();
+    // What KOBE-256 left on kobe-gate1: kobe-site created, every team still on kobe-install.
+    await bifrost.addCustomer(SITE_CUSTOMER);
+    for (const t of bifrost.teams.values()) await bifrost.updateTeam(t.id, "ignored");
+    bifrost.calls.length = 0;
     const result = await reconcile(desired(), bifrost, logger);
-    expect(result.errors).not.toEqual([]);
-    const [install] = [...bifrost.customers.values()];
-    expect([...bifrost.customers.values()].map((c) => c.name)).toEqual(["kobe-install"]);
-    expect([...bifrost.teams.values()].every((t) => t.customerId === install?.id)).toBe(true);
-    expect(bifrost.calls.some((c) => c.startsWith("customer.delete"))).toBe(false);
+    expect(result.errors).toEqual([]);
+    expect(bifrost.calls).toEqual([
+      `customer.delete ${SITE_CUSTOMER}`,
+      `customer.update kobe-install ${SITE_CUSTOMER}`,
+    ]);
+    expect([...bifrost.customers.values()]).toEqual([{ id: legacy?.id, name: SITE_CUSTOMER }]);
+    expect(teamCustomers()).toEqual([legacy?.id, legacy?.id]);
     expect(result.virtualKeys).toEqual(first.virtualKeys);
+    expect((await reconcile(desired(), bifrost, logger)).changes).toBe(0);
   });
 
-  it("KOBE-256: keeps kobe-install while a team could not be moved, and removes it on the next pass", async () => {
-    const old = { ...desired(), customer: { name: "kobe-install", limits: undefined } };
-    await reconcile(old, bifrost, logger);
-    bifrost.failing.add(`team.update ${gatewayTeamName(teamB)}`);
-    const partial = await reconcile(desired(), bifrost, logger);
-    expect(partial.errors).not.toEqual([]);
+  it("KOBE-265: keeps kobe-install with its teams while the rename fails, then heals", async () => {
+    const { first, legacy } = await syncedBeforeRename();
+    bifrost.failing.add("customer.update kobe-install");
+    const failed = await reconcile(desired(), bifrost, logger);
+    expect(failed.errors).not.toEqual([]);
+    expect([...bifrost.customers.values()]).toEqual([{ id: legacy?.id, name: "kobe-install" }]);
+    expect(teamCustomers()).toEqual([legacy?.id, legacy?.id]);
+    expect(bifrost.calls.some((c) => c.startsWith("customer.delete"))).toBe(false);
+    expect(failed.virtualKeys).toEqual(first.virtualKeys);
+    bifrost.failing.clear();
+    expect((await reconcile(desired(), bifrost, logger)).errors).toEqual([]);
+    expect([...bifrost.customers.values()].map((c) => c.name)).toEqual([SITE_CUSTOMER]);
+    expect((await reconcile(desired(), bifrost, logger)).changes).toBe(0);
+  });
+
+  it("KOBE-265: renames nothing while the stray kobe-site cannot be deleted", async () => {
+    const { legacy } = await syncedBeforeRename();
+    await bifrost.addCustomer(SITE_CUSTOMER);
+    bifrost.failing.add(`customer.delete ${SITE_CUSTOMER}`);
+    const failed = await reconcile(desired(), bifrost, logger);
+    expect(failed.errors).not.toEqual([]);
     expect([...bifrost.customers.values()].map((c) => c.name).sort()).toEqual([
       "kobe-install",
       SITE_CUSTOMER,
     ]);
+    expect(teamCustomers()).toEqual([legacy?.id, legacy?.id]);
     bifrost.failing.clear();
-    const healed = await reconcile(desired(), bifrost, logger);
-    expect(healed.errors).toEqual([]);
-    const customers = [...bifrost.customers.values()];
-    expect(customers.map((c) => c.name)).toEqual([SITE_CUSTOMER]);
-    expect([...bifrost.teams.values()].every((t) => t.customerId === customers[0]?.id)).toBe(true);
+    expect((await reconcile(desired(), bifrost, logger)).errors).toEqual([]);
+    expect([...bifrost.customers.values()]).toEqual([{ id: legacy?.id, name: SITE_CUSTOMER }]);
+  });
+
+  it("KOBE-265: a new team joins the legacy customer that is being renamed", async () => {
+    const { legacy } = await syncedBeforeRename();
+    const teamC = randomUUID();
+    const more = desired({ teams: [...teams, { teamId: teamC, members: [bob], aliases: [] }] });
+    expect((await reconcile(more, bifrost, logger)).errors).toEqual([]);
+    expect(teamCustomers()).toEqual([legacy?.id, legacy?.id, legacy?.id]);
+    expect([...bifrost.customers.values()].map((c) => c.name)).toEqual([SITE_CUSTOMER]);
+  });
+
+  it("KOBE-265: attaches a team that lost its customer; leaves one under a foreign customer", async () => {
+    await reconcile(desired(), bifrost, logger);
+    const [site] = [...bifrost.customers.values()];
+    const [a, b] = [...bifrost.teams.values()];
+    if (!a || !b) throw new Error("expected two teams");
+    bifrost.teams.set(a.id, { ...a, customerId: undefined });
+    const foreign = await bifrost.addCustomer("someone-else");
+    bifrost.teams.set(b.id, { ...b, customerId: foreign.id });
+    bifrost.calls.length = 0;
+    const result = await reconcile(desired(), bifrost, logger);
+    expect(result.errors).toEqual([]);
+    expect(bifrost.calls).toEqual([`team.update ${a.name}`]);
+    expect(teamCustomers()).toEqual([site?.id, foreign.id]);
+    // The foreign customer still owns a team: never deleted (Bifrost would detach the team).
+    expect((await reconcile(desired(), bifrost, logger)).changes).toBe(0);
+    expect(vkWrites()).toEqual([]);
   });
 
   it("pushes a changed key (new key first, then the old one goes) and a changed URL", async () => {
