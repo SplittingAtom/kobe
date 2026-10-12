@@ -26,6 +26,7 @@ import { ChatSessionContext, useKobeRuntime } from "./kobe-runtime";
 import { RetentionNotice } from "./retention-notice";
 import { ThreadSidebar } from "./thread-sidebar";
 import { ThreadView } from "./thread-view";
+import { useViewportHeight } from "./use-viewport-height";
 import styles from "./chat.module.css";
 
 const THREAD_PARAM = "thread";
@@ -220,6 +221,8 @@ export function ChatApp({
     [teamId, fetchFn, eventSource, newKey, reopenDelayMs, uploadTransport],
   );
   useEffect(() => () => session?.dispose(), [session]);
+  const [appEl, setAppEl] = useState<HTMLDivElement | null>(null);
+  useViewportHeight(appEl);
 
   let body: ReactNode;
   if (team.status === "loading")
@@ -253,7 +256,7 @@ export function ChatApp({
   return (
     <IconActionProvider>
       <ShellSlotsProvider>
-        <div className={styles.app} data-kobe-chat>
+        <div ref={setAppEl} className={styles.app} data-kobe-chat>
           {/* eslint-disable-next-line no-restricted-syntax -- a skip link is text by design (WCAG 2.4.1) */}
           <a className={styles.skipLink} href="#kobe-chat-main">
             Skip to the conversation

@@ -142,7 +142,7 @@ const LIST = [
   { id: "export-threads", name: "Export my conversations", icon: DownloadIcon, scope: "rail" },
   // The conversation's chrome.
   { id: "open-project", name: "Project", icon: FolderKanbanIcon, scope: "thread" },
-  { id: "jump-to-latest", name: "Scroll to bottom", icon: ArrowDownIcon, scope: "thread" },
+  { id: "jump-to-latest", name: "Jump to latest", icon: ArrowDownIcon, scope: "thread" },
   // Message actions.
   { id: "copy", name: "Copy", icon: CopyIcon, scope: "message" },
   { id: "edit", name: "Edit", icon: PencilIcon, scope: "message", shortcut: "Mod+Shift+E" },

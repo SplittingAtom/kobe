@@ -1,10 +1,17 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { connection } from "next/server";
 import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
   title: "Kobe",
   description: "Self-hosted conversational agent platform",
+};
+
+/** The on-screen keyboard shrinks the layout, so the chat's composer stays above it (KOBE-205). */
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  interactiveWidget: "resizes-content",
 };
 
 /**
