@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** paused before PR: diff over the ~600-line cap, split proposed to the coordinator
+- **Status:** in review (PR pending)
 - **Branch / worktree:** `kobe-197-shell-layout` in `../Kobe-wt197`
 - **Depends on:** none (started before Gate 4 with the user's approval, overriding CE1)
 
@@ -31,9 +31,8 @@ picker, Files toggle), `ThreadSearch` (moved from the sidebar), `ProfileMenu`, `
 
 ## Open questions (for Chris or the coordinator)
 
-- Diff is ~880 added / ~240 removed non-test lines (ignoring whitespace), over the ~600 cap.
-  Proposed split: (1) grid + bar rows + pickers/Files moved + console links; (2) thread search into
-  the bar + profile menu + CE4 return link.
+- Diff is ~880 added / ~240 removed non-test lines, over the ~600 cap; the coordinator chose one
+  PR (one cohesive layout change, much of it moves).
 
 ## Evidence (acceptance criteria → test or command output)
 
