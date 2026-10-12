@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
+import { command, commandsIn, type CommandId } from "../../lib/shell/commands";
 import { forgetLastThread, lastThreadHref, rememberLastThread } from "../../lib/shell/last-thread";
 import { must } from "../../lib/testing/must";
 import { composer, openApp } from "../chat/testing";
@@ -64,7 +65,7 @@ describe("utility bar", () => {
       ["My schedules", "/me/schedules"],
       ["My agents", "/me/agents"],
     ]);
-    const profile = one.getByText("Profile", { selector: "summary *" }).closest("details");
+    const profile = row(1).querySelector('summary[aria-label="Profile"]')?.closest("details");
     const menu = within(must(profile));
     expect(menu.getByRole("link", { name: "My skills" }).getAttribute("href")).toBe("/me/skills");
     expect(menu.getByRole("link", { name: "Projects" }).getAttribute("href")).toBe("/me/projects");
@@ -99,6 +100,29 @@ describe("utility bar", () => {
       ["Team console", "/admin/team"],
       ["Site console", "/admin/site"],
     ]);
+  });
+
+  it("renders every bar action through IconAction from the command registry (KOBE-203 ac-2)", async () => {
+    withAccess("owner", "team_admin", ["team.members.manage"]);
+    fake.runnableAgents.push({ id: "a-1", scope: "team", name: "Ledger Bot", model: null });
+    openApp(fake);
+    await within(row(1)).findByRole("navigation", { name: "Administration" });
+    await within(row(2)).findByRole("button", { name: "Files" });
+    const bar = [row(1), row(2)];
+    // Icons, not content: the team switcher, the search, open menus and the context row's
+    // agent and model names stay text.
+    const content =
+      '[aria-label="Teams"], [role="search"], details ul, section, [data-bar-row="2"]';
+    const icons = bar
+      .flatMap((r) => [...r.querySelectorAll<HTMLElement>("a, button, summary")])
+      .filter((el) => el.closest(content) === null || el.hasAttribute("data-command"));
+    expect(icons.filter((el) => !el.hasAttribute("data-command"))).toEqual([]);
+    const rendered = icons.map((el) => el.getAttribute("data-command"));
+    const registered = commandsIn("bar", { consoles: ["team", "site"] }).map((c) => c.id);
+    expect([...rendered].sort()).toEqual([...registered].sort());
+    for (const el of icons) {
+      expect(el.getAttribute("aria-label")).toBe(command(el.dataset.command as CommandId).name);
+    }
   });
 
   it("links only the team console to a team admin who has no site role", async () => {
@@ -282,7 +306,7 @@ describe("thread search in the bar", () => {
 describe("bar menus", () => {
   const profile = () =>
     must(
-      screen.getByText("Profile", { selector: "summary *" }).closest("details"),
+      document.querySelector('summary[aria-label="Profile"]')?.closest("details"),
     ) as HTMLDetailsElement;
   const teams = async () =>
     must(

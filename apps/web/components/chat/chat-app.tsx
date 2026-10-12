@@ -252,6 +252,7 @@ export function ChatApp({
   return (
     <ShellSlotsProvider>
       <div className={styles.app} data-kobe-chat>
+        {/* eslint-disable-next-line no-restricted-syntax -- a skip link is text by design (WCAG 2.4.1) */}
         <a className={styles.skipLink} href="#kobe-chat-main">
           Skip to the conversation
         </a>

@@ -89,7 +89,8 @@ describe("notification bell (KOBE-181, ac-1)", () => {
     await waitFor(async () =>
       expect((await bell()).getAttribute("aria-label")).toBe("Notifications, 2 unread"),
     );
-    expect(screen.getByText("2")).toBeTruthy();
+    // CE13: a dot badge; the count is in the label (and the tooltip).
+    expect((await bell()).querySelector("[data-badge]")).toBeTruthy();
   });
 
   it("has no badge when everything is read, and names the bell plainly", async () => {

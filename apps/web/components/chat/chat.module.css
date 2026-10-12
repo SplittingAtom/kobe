@@ -148,11 +148,6 @@
   gap: 0.125rem;
 }
 
-.iconButton {
-  padding: 0.125rem 0.375rem;
-  font-size: 0.85rem;
-}
-
 .hint {
   margin: 0.25rem 0;
   color: var(--admin-muted);
@@ -392,36 +387,6 @@
 
 .bell {
   position: relative;
-}
-
-.bellButton {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  padding: 0.25rem;
-  background: none;
-  border: 1px solid transparent;
-  border-radius: 0.375rem;
-  cursor: pointer;
-}
-
-.bellButton:hover,
-.bellButton[aria-expanded="true"] {
-  border-color: var(--admin-border);
-}
-
-.bellBadge {
-  position: absolute;
-  top: -0.25rem;
-  right: -0.375rem;
-  min-width: 1.125rem;
-  padding: 0 0.25rem;
-  font-size: 0.6875rem;
-  line-height: 1.125rem;
-  text-align: center;
-  color: #fff;
-  background: var(--admin-danger);
-  border-radius: 999px;
 }
 
 .notePanel {

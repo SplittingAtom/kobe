@@ -1,0 +1,35 @@
+/* IconAction (CE13, KOBE-203). */
+
+.action {
+  position: relative;
+  list-style: none;
+}
+
+.action::-webkit-details-marker {
+  display: none;
+}
+
+/* Something new behind the icon (approval waiting, unread notification). */
+.dot {
+  position: absolute;
+  top: 0.125rem;
+  right: 0.125rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--admin-danger, #c62828);
+  box-shadow: 0 0 0 2px var(--admin-bg, #fff);
+}
+
+.keys {
+  margin-inline-start: 0.5rem;
+  font-family: inherit;
+  opacity: 0.75;
+}
+
+.description {
+  display: block;
+  max-width: 18rem;
+  margin-top: 0.25rem;
+  opacity: 0.85;
+}

@@ -16,9 +16,9 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { FolderIcon, XIcon } from "lucide-react";
 import type { FilesApi } from "../../lib/files/api";
 import { cn } from "../../lib/utils";
+import { IconAction } from "../shell/icon-action";
 import { FileBrowser } from "./file-browser";
 
 interface FilesPanelApi {
@@ -65,17 +65,7 @@ export function FilesPanelProvider({
 export function FilesToggleButton() {
   const panel = useFilesPanel();
   if (!panel) return null;
-  return (
-    <button
-      type="button"
-      className="hover:bg-muted inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs"
-      aria-expanded={panel.open}
-      onClick={panel.toggle}
-    >
-      <FolderIcon aria-hidden className="size-3.5" />
-      Files
-    </button>
-  );
+  return <IconAction command="files" aria-expanded={panel.open} onClick={panel.toggle} />;
 }
 
 export function FilesPanel({
@@ -117,14 +107,7 @@ export function FilesPanel({
         <h2 id="kobe-files-title" className="min-w-0 flex-1 truncate text-sm font-medium">
           Workspace files
         </h2>
-        <button
-          type="button"
-          className="hover:bg-muted inline-flex size-7 items-center justify-center rounded-md border"
-          aria-label="Close files"
-          onClick={panel.close}
-        >
-          <XIcon aria-hidden className="size-4" />
-        </button>
+        <IconAction command="files-close" onClick={panel.close} />
       </header>
       <FileBrowser
         api={api}

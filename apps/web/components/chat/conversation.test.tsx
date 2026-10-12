@@ -525,7 +525,6 @@ describe("branches: switch, edit and regenerate (D15)", () => {
     // shown unavailable, with the reason.
     const [first, second] = screen.getAllByRole("button", { name: "Edit" });
     expect(first?.getAttribute("aria-disabled")).toBe("true");
-    expect(first?.getAttribute("title")).toMatch(/coming soon/);
     expect(
       document.getElementById(must(first?.getAttribute("aria-describedby")))?.textContent,
     ).toMatch(/coming soon/);

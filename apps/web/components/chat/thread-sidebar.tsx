@@ -10,6 +10,7 @@ import { useState, type FormEvent } from "react";
 import type { ApiError } from "../../lib/api/client";
 import { threadExportUrl } from "../../lib/chat/api";
 import { ErrorNotice } from "../admin/error-notice";
+import { IconAction } from "../shell/icon-action";
 import { useChatSession } from "./kobe-runtime";
 import styles from "./chat.module.css";
 
@@ -60,27 +61,22 @@ function ThreadItem({ archived, view }: { readonly archived: boolean; readonly v
         {draft === null && (
           <span className={styles.itemActions}>
             {!archived && (
-              <button
-                type="button"
-                className={styles.iconButton}
-                aria-label={`Rename ${title}`}
+              <IconAction
+                command="rename-thread"
+                label={`Rename ${title}`}
+                size="sm"
                 onClick={() => setDraft(title)}
-              >
-                Rename
-              </button>
+              />
             )}
             {archived ? (
               <>
-                <ThreadListItemPrimitive.Unarchive
-                  className={styles.iconButton}
-                  aria-label={`Restore ${title}`}
-                >
-                  Restore
+                <ThreadListItemPrimitive.Unarchive asChild>
+                  <IconAction command="restore-thread" label={`Restore ${title}`} size="sm" />
                 </ThreadListItemPrimitive.Unarchive>
-                <button
-                  type="button"
-                  className={styles.iconButton}
-                  aria-label={`Delete ${title} forever`}
+                <IconAction
+                  command="delete-thread"
+                  label={`Delete ${title} forever`}
+                  size="sm"
                   onClick={() => {
                     if (
                       window.confirm(
@@ -90,16 +86,11 @@ function ThreadItem({ archived, view }: { readonly archived: boolean; readonly v
                       void aui.threadListItem.delete();
                     }
                   }}
-                >
-                  Delete forever
-                </button>
+                />
               </>
             ) : (
-              <ThreadListItemPrimitive.Archive
-                className={styles.iconButton}
-                aria-label={`Move ${title} to Trash`}
-              >
-                Trash
+              <ThreadListItemPrimitive.Archive asChild>
+                <IconAction command="trash-thread" label={`Move ${title} to Trash`} size="sm" />
               </ThreadListItemPrimitive.Archive>
             )}
           </span>
@@ -129,19 +120,19 @@ export function ThreadSidebar({ listError }: { readonly listError: ApiError | nu
       className={`${styles.sidebar} ${folded ? styles.sidebarFolded : ""}`}
       aria-label="Conversations"
     >
-      <button
-        type="button"
+      <IconAction
+        command="toggle-rail"
+        label={folded ? "Show conversations" : "Hide conversations"}
+        side="right"
         className={styles.sidebarToggle}
         aria-expanded={!folded}
         aria-controls="kobe-sidebar-body"
         onClick={() => setFolded((f) => !f)}
-      >
-        {folded ? "Show conversations" : "Hide conversations"}
-      </button>
+      />
       <div id="kobe-sidebar-body" className={styles.sidebarBody}>
         <ThreadListPrimitive.Root>
-          <ThreadListPrimitive.New onClick={() => setFolded(true)}>
-            New conversation
+          <ThreadListPrimitive.New asChild onClick={() => setFolded(true)}>
+            <IconAction command="new-thread" side="right" />
           </ThreadListPrimitive.New>
           {listError && <ErrorNotice error={listError} />}
           <div className={styles.tabs} role="group" aria-label="Show">
@@ -164,9 +155,7 @@ export function ThreadSidebar({ listError }: { readonly listError: ApiError | nu
             </button>
           </div>
           {view === "scheduled" && (
-            <p className={styles.hint}>
-              Conversations your <a href="/me/schedules">schedules</a> started.
-            </p>
+            <p className={styles.hint}>Conversations your schedules started.</p>
           )}
           {view === "trash" && (
             <p className={styles.hint}>
@@ -186,12 +175,13 @@ export function ThreadSidebar({ listError }: { readonly listError: ApiError | nu
           {view !== "trash" && hasMore && (
             <ThreadListPrimitive.LoadMore>Load more</ThreadListPrimitive.LoadMore>
           )}
-          <p className={styles.hint}>
-            <a href={threadExportUrl(session.teamId)} download>
-              Export my conversations
-            </a>{" "}
-            (this team&apos;s, as Pi sessions and Markdown in a zip)
-          </p>
+          <IconAction
+            command="export-threads"
+            href={threadExportUrl(session.teamId)}
+            download
+            description="This team's, as Pi sessions and Markdown in a zip"
+            side="right"
+          />
         </ThreadListPrimitive.Root>
       </div>
     </aside>

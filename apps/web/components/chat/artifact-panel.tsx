@@ -18,11 +18,11 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { ChevronLeftIcon, ChevronRightIcon, DownloadIcon, XIcon } from "lucide-react";
 import { artifactContentUrl, type ArtifactDetailView } from "../../lib/chat/artifacts";
 import type { ApiError } from "../../lib/api/client";
 import { cn } from "../../lib/utils";
 import { ErrorNotice } from "../admin/error-notice";
+import { IconAction } from "../shell/icon-action";
 import { ArtifactBody } from "./artifact-views";
 import { useChatSession, useKobeExtras } from "./kobe-runtime";
 
@@ -141,29 +141,19 @@ function VersionNav({
   const index = versions.indexOf(current);
   const prev = versions[index - 1];
   const next = versions[index + 1];
-  const button =
-    "hover:bg-muted focus-visible:ring-ring/50 inline-flex size-7 items-center justify-center rounded-md border disabled:opacity-40";
   return (
     <div role="group" aria-label="Versions" className="flex items-center gap-1 text-xs">
-      <button
-        type="button"
-        className={button}
-        aria-label="Previous version"
+      <IconAction
+        command="artifact-previous"
         disabled={prev === undefined}
         onClick={() => prev !== undefined && onChange(prev)}
-      >
-        <ChevronLeftIcon aria-hidden className="size-4" />
-      </button>
+      />
       <span aria-live="polite">{`Version ${current} of ${versions.at(-1) ?? current}`}</span>
-      <button
-        type="button"
-        className={button}
-        aria-label="Next version"
+      <IconAction
+        command="artifact-next"
         disabled={next === undefined}
         onClick={() => next !== undefined && onChange(next)}
-      >
-        <ChevronRightIcon aria-hidden className="size-4" />
-      </button>
+      />
     </div>
   );
 }
@@ -197,25 +187,15 @@ function PanelContent({
               current={version}
               onChange={(v) => setPinned(v === latest ? null : v)}
             />
-            <a
-              className="hover:bg-muted inline-flex size-7 items-center justify-center rounded-md border"
+            <IconAction
+              command="artifact-download"
               href={artifactContentUrl(artifact.id, version, session.teamId)}
               download
-              aria-label={`Download version ${version}`}
-              title="Download"
-            >
-              <DownloadIcon aria-hidden className="size-4" />
-            </a>
+              label={`Download version ${version}`}
+            />
           </>
         )}
-        <button
-          type="button"
-          className="hover:bg-muted inline-flex size-7 items-center justify-center rounded-md border"
-          aria-label="Close artifact"
-          onClick={() => panel?.close()}
-        >
-          <XIcon aria-hidden className="size-4" />
-        </button>
+        <IconAction command="artifact-close" onClick={() => panel?.close()} />
       </header>
       <div className="min-h-0 flex-1 overflow-auto p-3">
         {!artifact && !detail.error && <p role="status">Loading the artifact…</p>}
@@ -283,14 +263,13 @@ export function OpenArtifactButton({
   const panel = useArtifactPanel();
   if (!panel) return null;
   return (
-    <button
-      type="button"
-      className="hover:bg-muted ms-2 rounded-md border px-2 py-0.5 text-xs"
-      aria-label={`Open artifact: ${title}`}
+    <IconAction
+      command="open-artifact"
+      label={`Open artifact: ${title}`}
+      size="sm"
+      className="ms-2"
       aria-expanded={panel.openId === id}
       onClick={() => panel.openArtifact(id, version)}
-    >
-      Open
-    </button>
+    />
   );
 }
