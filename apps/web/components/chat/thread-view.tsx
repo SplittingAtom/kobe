@@ -74,8 +74,9 @@ function ThreadSuggestions() {
 }
 
 /**
- * The floating Jump to latest pill (CE9): mounted while the member is scrolled up, so the count
- * starts from what was on screen then. assistant-ui's ScrollToBottom scrolls and re-pins.
+ * The floating Jump to latest pill (CE9): mounted while the member is scrolled up, once per thread
+ * (keyed), so the count starts from what was on screen then. assistant-ui's ScrollToBottom scrolls
+ * and re-pins.
  */
 function JumpToLatest() {
   const count = useAuiState((s) => shownCount(s.thread.messages));
@@ -115,7 +116,9 @@ function LoadingSkeleton() {
  * The message list over the composer (CE9, KOBE-205). Once a thread has messages the list is its
  * own scroll container and the composer a fixed footer below it, outside the scroll; an empty
  * thread centres the welcome and the composer instead. Scroll anchoring (`overflow-anchor`) keeps
- * what is on screen still while content above it grows, such as a tool card.
+ * what is on screen still while content above it grows, such as a tool card. `turnAnchor` stays
+ * assistant-ui's default (bottom) on purpose: Chris asked for the chat to follow the stream, and
+ * `top` does not follow during a run. assistant-ui follows only while `useFollowLatest` is pinned.
  */
 function MessagesAndComposer({
   extras,
@@ -129,13 +132,13 @@ function MessagesAndComposer({
   const { state } = extras;
   const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
   const hasMessages = useAuiState((s) => s.thread.messages.length > 0);
-  const pinned = useFollowLatest(viewport, state.threadId, state.phase === "ready" && hasMessages);
+  const follow = useFollowLatest(viewport, state.threadId, state.phase === "ready" && hasMessages);
   return (
     <>
       <div className="relative flex min-h-0 flex-1 flex-col">
         <ThreadPrimitive.Viewport
           ref={setViewport}
-          autoScroll
+          autoScroll={follow === "pinned"}
           scrollToBottomOnRunStart={false}
           scrollToBottomOnInitialize={false}
           scrollToBottomOnThreadSwitch={false}
@@ -171,7 +174,7 @@ function MessagesAndComposer({
             </div>
           </div>
         </ThreadPrimitive.Viewport>
-        {!pinned && hasMessages && <JumpToLatest />}
+        {follow === "unpinned" && hasMessages && <JumpToLatest key={state.threadId ?? ""} />}
       </div>
       <div data-kobe-composer className={cn("bg-background shrink-0", welcome && "flex-1")}>
         <div className="mx-auto flex w-full max-w-(--thread-max-width) flex-col gap-3 px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] md:pb-6">

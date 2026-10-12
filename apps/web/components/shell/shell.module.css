@@ -193,12 +193,14 @@
 
 /* Each column scrolls on its own and the page never does (KOBE-205): the grid fills the height
    under the bar, the rail and the artifact column scroll, and the conversation leaves scrolling to
-   its message list so the composer stays put. One column: rail, conversation, artifact. */
+   its message list so the composer stays put. One column: rail, conversation, artifact. The
+   conversation row keeps at least 20rem (the composer plus some list) and the rail and the
+   artifact column yield first; A5 (KOBE-201) owns the full yield order. */
 .grid {
   display: grid;
   flex: 1;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, auto) minmax(min(20rem, 100%), 1fr) minmax(0, auto);
   min-height: 0;
 }
 

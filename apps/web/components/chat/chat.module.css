@@ -18,6 +18,10 @@
   /* The page never scrolls; the columns do (KOBE-205). dvh tracks the browser's toolbars and, with
      interactive-widget=resizes-content (app/layout.tsx), the on-screen keyboard; Safari, which
      ignores that, gets the visible height from visualViewport (use-viewport-height.ts). */
+  position: relative;
+  /* Where iOS has panned the visual viewport to (keyboard open); `top`, not a transform, so fixed
+     descendants keep the window as their containing block. */
+  top: var(--kobe-viewport-offset, 0px);
   height: 100vh;
   height: var(--kobe-viewport-height, 100dvh);
   overflow: hidden;

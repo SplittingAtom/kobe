@@ -1,69 +1,68 @@
 "use client";
 
-import { useAuiEvent, useThreadViewportStore } from "@assistant-ui/react";
+import { useAuiEvent, useAuiState, useThreadViewportStore } from "@assistant-ui/react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { distanceFromBottom, isPinned, loadScroll, saveScroll } from "../../lib/chat/scroll-follow";
+import {
+  createScrollSaver,
+  isPinned,
+  loadScroll,
+  overflows,
+  scrollDirection,
+  type ScrollMark,
+} from "../../lib/chat/scroll-follow";
 
 /**
- * CE9 on the message list (KOBE-205). assistant-ui's viewport `autoScroll` follows the stream while
- * the list is exactly at the bottom; this adds the rest:
- * - pinned means within 48 px of the bottom: content growth then scrolls to the bottom too;
- * - scrolling further up unpins (the caller shows the Jump to latest pill), sending re-pins;
- * - opening a thread restores the position this tab left it at, else lands at the bottom;
- * - every scroll of an opened thread is remembered for this tab (sessionStorage).
+ * Whether the message list follows new content. `pending` while a thread opens (until its position
+ * is restored); then `pinned` or `unpinned`, which shows the Jump to latest pill.
+ */
+export type FollowMode = "pending" | "pinned" | "unpinned";
+
+type Viewport = NonNullable<ReturnType<typeof useThreadViewportStore>>;
+
+/**
+ * CE9 on the message list (KOBE-205), driven through assistant-ui's viewport store: the caller
+ * passes `autoScroll={mode === "pinned"}` to `ThreadPrimitive.Viewport`, so assistant-ui's own
+ * resize observer does the following and nothing else scrolls on growth.
+ * - Pinned: on any request for the bottom (the pill, a send, a restore) and when the store reports
+ *   `isAtBottom`. Scrolling down to within 48 px of the bottom asks for the bottom.
+ * - Unpinned: as soon as the member scrolls up, however little (wheel, touch, keys, scrollbar).
+ * - Opening a thread restores this tab's position for it (sessionStorage), else the bottom.
  *
- * Call inside `ThreadPrimitive.ViewportProvider`: its `scrollToBottom` reaches the viewport.
- * `ready` is true once the thread's messages are on screen.
+ * Call inside `ThreadPrimitive.ViewportProvider`. `ready`: the thread's messages are on screen.
  */
 export function useFollowLatest(
   el: HTMLElement | null,
   threadId: string | null,
   ready: boolean,
-): boolean {
+): FollowMode {
   const viewport = useThreadViewportStore();
-  const [pinned, setPinnedState] = useState(true);
-  const pinnedRef = useRef(true);
-  // The thread whose position has been restored; scrolls before that belong to the switch.
+  const [mode, setModeState] = useState<FollowMode>("pending");
+  const modeRef = useRef<FollowMode>("pending");
+  const threadRef = useRef(threadId);
+  // The thread whose position has been restored; until then its scroll events are the switch's.
   const restoredRef = useRef<string | null | undefined>(undefined);
+  const [saver] = useState(createScrollSaver);
 
-  const setPinned = useCallback((value: boolean) => {
-    pinnedRef.current = value;
-    setPinnedState(value);
+  const setMode = useCallback((next: FollowMode) => {
+    modeRef.current = next;
+    setModeState(next);
   }, []);
+  const isRestored = useCallback(() => restoredRef.current === threadRef.current, []);
+  // Pinned first, so the scroll this causes is already recorded as the bottom.
+  const requestBottom = useCallback(() => {
+    setMode("pinned");
+    viewport.getState().scrollToBottom({ behavior: "instant" });
+  }, [viewport, setMode]);
 
-  const toBottom = useCallback(
-    (behavior: ScrollBehavior) => {
-      setPinned(true);
-      viewport.getState().scrollToBottom({ behavior });
-    },
-    [viewport, setPinned],
-  );
+  usePinOnRequest(viewport, setMode, modeRef);
+  useMemberScroll(el, { setMode, requestBottom, modeRef, threadRef, isRestored, saver });
 
+  // A thread switch: write the old thread's position at once, wait for the new one's restore.
   useEffect(() => {
-    if (!el) return;
-    const onScroll = () => {
-      const now = isPinned(el);
-      if (now !== pinnedRef.current) setPinned(now);
-      if (threadId !== null && restoredRef.current === threadId) {
-        saveScroll(threadId, now ? "bottom" : el.scrollTop);
-      }
-    };
-    el.addEventListener("scroll", onScroll, { passive: true });
-    return () => el.removeEventListener("scroll", onScroll);
-  }, [el, threadId, setPinned]);
-
-  // Growth while pinned but not exactly at the bottom (assistant-ui follows only from there).
-  useEffect(() => {
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
-      if (pinnedRef.current && distanceFromBottom(el) > 0) {
-        el.scrollTo({ top: el.scrollHeight, behavior: "instant" });
-      }
-    });
-    observer.observe(el);
-    if (el.firstElementChild) observer.observe(el.firstElementChild);
-    return () => observer.disconnect();
-  }, [el]);
+    threadRef.current = threadId;
+    if (restoredRef.current !== threadId) setMode("pending");
+    return () => saver.flush();
+  }, [threadId, saver, setMode]);
 
   useEffect(() => {
     if (!el || !ready || restoredRef.current === threadId) return;
@@ -72,17 +71,111 @@ export function useFollowLatest(
     const frame = requestAnimationFrame(() => {
       restoredRef.current = threadId;
       if (typeof saved === "number") {
+        setMode("unpinned");
         el.scrollTo({ top: saved, behavior: "instant" });
-        setPinned(isPinned(el));
+        if (isPinned(el)) requestBottom();
       } else {
-        toBottom("instant");
+        requestBottom();
       }
     });
     return () => cancelAnimationFrame(frame);
-  }, [el, ready, threadId, toBottom, setPinned]);
+  }, [el, ready, threadId, setMode, requestBottom]);
 
-  // Any send re-pins: the thread's composer and an edited message alike.
-  useAuiEvent({ scope: "*", event: "composer.send" }, () => toBottom("auto"));
+  useRepinOnSend(viewport);
+  return mode;
+}
 
-  return pinned;
+/** Any request for the bottom pins, and so does reaching it. */
+function usePinOnRequest(
+  viewport: Viewport,
+  setMode: (mode: FollowMode) => void,
+  modeRef: { readonly current: FollowMode },
+) {
+  useEffect(() => {
+    const offRequest = viewport.getState().onScrollToBottom(() => setMode("pinned"));
+    const offBottom = viewport.subscribe((state, prev) => {
+      if (state.isAtBottom && !prev.isAtBottom && modeRef.current === "unpinned") {
+        setMode("pinned");
+      }
+    });
+    return () => {
+      offRequest();
+      offBottom();
+    };
+  }, [viewport, setMode, modeRef]);
+}
+
+interface MemberScrollState {
+  readonly setMode: (mode: FollowMode) => void;
+  readonly requestBottom: () => void;
+  readonly modeRef: { readonly current: FollowMode };
+  readonly threadRef: { readonly current: string | null };
+  readonly isRestored: () => boolean;
+  readonly saver: ReturnType<typeof createScrollSaver>;
+}
+
+/** The member's own scrolling: up unpins at once; down into the 48 px band re-pins. */
+function useMemberScroll(el: HTMLElement | null, s: MemberScrollState) {
+  const { setMode, requestBottom, modeRef, threadRef, isRestored, saver } = s;
+  useEffect(() => {
+    if (!el) return;
+    let last: ScrollMark = { top: el.scrollTop, height: el.scrollHeight };
+    let touchY: number | null = null;
+    const unpin = () => {
+      if (isRestored() && overflows(el)) setMode("unpinned");
+    };
+    const onScroll = () => {
+      const now = { top: el.scrollTop, height: el.scrollHeight };
+      const direction = scrollDirection(last, now);
+      last = now;
+      if (!isRestored()) return;
+      if (direction === "up") setMode("unpinned");
+      else if (direction === "down" && modeRef.current === "unpinned" && isPinned(el)) {
+        requestBottom();
+      }
+      const thread = threadRef.current;
+      if (thread !== null)
+        saver.schedule(thread, modeRef.current === "pinned" ? "bottom" : now.top);
+    };
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) unpin();
+    };
+    const onTouchStart = (e: TouchEvent) => {
+      touchY = e.touches[0]?.clientY ?? null;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      const y = e.touches[0]?.clientY;
+      // A finger moving down drags the content down: the member is scrolling up.
+      if (touchY !== null && y !== undefined && y > touchY) unpin();
+    };
+    const options = { passive: true } as const;
+    el.addEventListener("scroll", onScroll, options);
+    el.addEventListener("wheel", onWheel, options);
+    el.addEventListener("touchstart", onTouchStart, options);
+    el.addEventListener("touchmove", onTouchMove, options);
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+    };
+  }, [el, setMode, requestBottom, modeRef, threadRef, isRestored, saver]);
+}
+
+/**
+ * Sending re-pins: at once, and again when the sent message has rendered (the list grew after the
+ * first jump). Instant, so `scroll-smooth` never animates towards a bottom that has since moved.
+ */
+function useRepinOnSend(viewport: Viewport) {
+  const count = useAuiState((s) => s.thread.messages.length);
+  const awaitingRender = useRef(false);
+  useAuiEvent({ scope: "*", event: "composer.send" }, () => {
+    awaitingRender.current = true;
+    viewport.getState().scrollToBottom({ behavior: "instant" });
+  });
+  useEffect(() => {
+    if (!awaitingRender.current) return;
+    awaitingRender.current = false;
+    viewport.getState().scrollToBottom({ behavior: "instant" });
+  }, [count, viewport]);
 }

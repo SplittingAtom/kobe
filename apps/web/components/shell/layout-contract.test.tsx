@@ -36,6 +36,7 @@ describe("CSS contract", () => {
   it("the chat is exactly as tall as the window and never scrolls the page", () => {
     expect(declares(CHAT, ".app", "height: var(--kobe-viewport-height, 100dvh);")).toBe(true);
     expect(declares(CHAT, ".app", "overflow: hidden;")).toBe(true);
+    expect(declares(CHAT, ".app", "top: var(--kobe-viewport-offset, 0px);")).toBe(true);
     expect(declares(CHAT, ".main", "overflow: hidden;")).toBe(true);
     expect(viewport.interactiveWidget).toBe("resizes-content");
   });
@@ -49,9 +50,10 @@ describe("CSS contract", () => {
 
   it("the grid's row is bounded at every width, so no column can push the page taller", () => {
     const grid = rules(SHELL, ".grid");
-    expect(grid.some((b) => b.includes("grid-template-rows: auto minmax(0, 1fr) auto;"))).toBe(
-      true,
-    );
+    // One column: the conversation keeps 20rem (or all there is); the rail and artifact yield.
+    const narrow =
+      "grid-template-rows: minmax(0, auto) minmax(min(20rem, 100%), 1fr) minmax(0, auto);";
+    expect(grid.some((b) => b.includes(narrow))).toBe(true);
     expect(grid.some((b) => b.includes("grid-template-rows: minmax(0, 1fr);"))).toBe(true);
     expect(grid.some((b) => b.includes("min-height: 0;"))).toBe(true);
   });
@@ -98,7 +100,12 @@ describe("on-screen keyboard (visualViewport)", () => {
     const vv = {
       height,
       scale,
-      addEventListener: (_: string, fn: () => void) => listeners.add(fn),
+      offsetTop: 0,
+      events: new Set<string>(),
+      addEventListener: (type: string, fn: () => void) => {
+        vv.events.add(type);
+        listeners.add(fn);
+      },
       removeEventListener: (_: string, fn: () => void) => listeners.delete(fn),
       fire: () => listeners.forEach((fn) => fn()),
     };
@@ -111,14 +118,18 @@ describe("on-screen keyboard (visualViewport)", () => {
     const el = document.createElement("div");
     const { unmount } = renderHook(() => useViewportHeight(el));
     expect(el.style.getPropertyValue("--kobe-viewport-height")).toBe("800px");
+    expect([...vv.events].sort()).toEqual(["resize", "scroll"]);
 
-    vv.height = 420; // the keyboard opened
+    vv.height = 420; // the keyboard opened, and iOS panned the page down to the input
+    vv.offsetTop = 380;
     vv.fire();
     expect(el.style.getPropertyValue("--kobe-viewport-height")).toBe("420px");
+    expect(el.style.getPropertyValue("--kobe-viewport-offset")).toBe("380px");
 
     vv.scale = 2; // pinch zoom
     vv.fire();
     expect(el.style.getPropertyValue("--kobe-viewport-height")).toBe("");
+    expect(el.style.getPropertyValue("--kobe-viewport-offset")).toBe("");
 
     vv.scale = 1;
     vv.fire();

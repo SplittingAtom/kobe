@@ -80,10 +80,11 @@ function restoreGeometry() {
 
 const list = () => must(document.querySelector<HTMLElement>('[data-kobe-scroll="messages"]'));
 
-/** The member scrolls the message list (wheel gesture, then the scroll it causes). */
+/** The member scrolls the message list: the wheel turn, then the scroll it causes. */
 function scrollTo(top: number) {
   act(() => {
-    list().dispatchEvent(new Event("wheel"));
+    const deltaY = top - list().scrollTop;
+    list().dispatchEvent(new WheelEvent("wheel", { deltaY }));
     list().scrollTop = top;
     list().dispatchEvent(new Event("scroll"));
   });
@@ -136,23 +137,39 @@ async function send(text: string) {
   return user;
 }
 
+async function startRun(t: string, text: string) {
+  await send(text);
+  const run = must(await waitFor(() => must(kobe.activeRun(t))));
+  await streaming(kobe, run.run_id);
+  return run.run_id;
+}
+
 describe("following the stream (ac-5)", () => {
-  it("keeps the newest content in view while pinned, also from within 48 px of the bottom", async () => {
+  it("keeps the newest content in view while pinned, through assistant-ui's resize observer", async () => {
     const t = threadWithHistory("Sales");
     await openAtBottom(t, "Sales");
-    await send("draw a chart");
-    const run = must(await waitFor(() => must(kobe.activeRun(t))));
-    await streaming(kobe, run.run_id);
+    const runId = await startRun(t, "draw a chart");
 
-    act(() => kobe.agent.delta(run.run_id, "m1", "Here is "));
+    act(() => kobe.agent.delta(runId, "m1", "Here is "));
     grow(300);
     await waitFor(() => expect(list().scrollTop).toBe(maxTop()));
-
-    // 30 px above the bottom still counts as at the bottom.
-    scrollTo(maxTop() - 30);
     grow(200);
     await waitFor(() => expect(list().scrollTop).toBe(maxTop()));
     expect(pill()).toBeNull();
+  });
+
+  it("scrolling back down to within 48 px of the bottom re-pins", async () => {
+    const t = threadWithHistory("Sales");
+    await openAtBottom(t, "Sales");
+    await startRun(t, "draw a chart");
+    scrollTo(200);
+    expect(await screen.findByRole("button", { name: "Jump to latest" })).toBeTruthy();
+
+    scrollTo(maxTop() - 30);
+    await waitFor(() => expect(list().scrollTop).toBe(maxTop()));
+    await waitFor(() => expect(pill()).toBeNull());
+    grow(200);
+    await waitFor(() => expect(list().scrollTop).toBe(maxTop()));
   });
 });
 
@@ -161,14 +178,12 @@ describe("Jump to latest (ac-1)", () => {
     const t = threadWithHistory("Sales");
     await openAtBottom(t, "Sales");
     expect(pill()).toBeNull();
-    await send("draw a chart");
-    const run = must(await waitFor(() => must(kobe.activeRun(t))));
-    await streaming(kobe, run.run_id);
+    const runId = await startRun(t, "draw a chart");
 
     scrollTo(200);
     expect(await screen.findByRole("button", { name: "Jump to latest" })).toBeTruthy();
 
-    act(() => kobe.agent.delta(run.run_id, "m1", "Here is the chart"));
+    act(() => kobe.agent.delta(runId, "m1", "Here is the chart"));
     expect(await screen.findByText("Here is the chart")).toBeTruthy();
     grow(600);
     expect(list().scrollTop).toBe(200);
@@ -180,42 +195,126 @@ describe("Jump to latest (ac-1)", () => {
     await waitFor(() => expect(pill()).toBeNull());
   });
 
-  it("sending re-pins", async () => {
+  it("any scroll up unpins, even a few pixels, and the stream then leaves the view alone", async () => {
+    const t = threadWithHistory("Sales");
+    await openAtBottom(t, "Sales");
+    const runId = await startRun(t, "draw a chart");
+
+    scrollTo(maxTop() - 10);
+    expect(await screen.findByRole("button", { name: "Jump to latest" })).toBeTruthy();
+    const held = list().scrollTop;
+    act(() => kobe.agent.delta(runId, "m1", "Here is the chart"));
+    grow(400);
+    grow(400);
+    expect(list().scrollTop).toBe(held);
+  });
+
+  it("sending re-pins, also once the sent message has rendered", async () => {
     const t = threadWithHistory("Sales");
     await openAtBottom(t, "Sales");
     scrollTo(100);
     expect(await screen.findByRole("button", { name: "Jump to latest" })).toBeTruthy();
 
     await send("one more thing");
+    expect(await screen.findByText("one more thing")).toBeTruthy();
+    grow(300);
     await waitFor(() => expect(list().scrollTop).toBe(maxTop()));
     await waitFor(() => expect(pill()).toBeNull());
   });
 });
 
 describe("scroll position per thread (ac-2)", () => {
+  const titles = () => within(screen.getByRole("list", { name: "Your conversations" }));
+
   it("a thread opens at the bottom, and reopening one restores where it was left", async () => {
     const a = threadWithHistory("Alpha");
     threadWithHistory("Beta");
     await openAtBottom(a, "Alpha");
     scrollTo(300);
-    expect(sessionStorage.getItem(`kobe.scroll:${a}`)).toBe("300");
+    await waitFor(() => expect(sessionStorage.getItem(`kobe.scroll:${a}`)).toBe("300"));
 
     const user = userEvent.setup();
-    const threads = within(await screen.findByRole("list", { name: "Your conversations" }));
-    await user.click(threads.getByRole("button", { name: "Beta" }));
+    await user.click(titles().getByRole("button", { name: "Beta" }));
     expect(await screen.findByText("Beta answer")).toBeTruthy();
     await waitFor(() => expect(list().scrollTop).toBe(maxTop()));
 
-    await user.click(threads.getByRole("button", { name: "Alpha" }));
+    await user.click(titles().getByRole("button", { name: "Alpha" }));
     expect(await screen.findByText("Alpha answer")).toBeTruthy();
     await waitFor(() => expect(list().scrollTop).toBe(300));
     expect(await screen.findByRole("button", { name: "Jump to latest" })).toBeTruthy();
   });
 
+  it("a restored position stays put while content grows", async () => {
+    const a = threadWithHistory("Alpha");
+    sessionStorage.setItem(`kobe.scroll:${a}`, "300");
+    openApp(kobe, a);
+    expect(await screen.findByText("Alpha answer")).toBeTruthy();
+    await waitFor(() => expect(list().scrollTop).toBe(300));
+    grow(400);
+    grow(400);
+    expect(list().scrollTop).toBe(300);
+  });
+
   it("a thread left at the bottom reopens at the bottom", async () => {
     const a = threadWithHistory("Alpha");
     await openAtBottom(a, "Alpha");
-    scrollTo(maxTop() - 10);
-    expect(sessionStorage.getItem(`kobe.scroll:${a}`)).toBe("bottom");
+    scrollTo(300);
+    scrollTo(maxTop());
+    await waitFor(() => expect(sessionStorage.getItem(`kobe.scroll:${a}`)).toBe("bottom"));
+  });
+
+  it("leaving a thread saves its position at once, under its own key only", async () => {
+    const a = threadWithHistory("Alpha");
+    const b = threadWithHistory("Beta");
+    // Beta's history waits until the test lets them through, so the switch can be caught midway.
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const serve = kobe.fetch;
+    Object.defineProperty(kobe, "fetch", {
+      value: async (input: string, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes(`/v1/threads/${b}?`) && url.includes("limit=500")) await gate;
+        return serve(input, init);
+      },
+    });
+    await openAtBottom(a, "Alpha");
+    scrollTo(300);
+    expect(sessionStorage.getItem(`kobe.scroll:${a}`)).toBeNull(); // not written yet: debounced
+
+    await userEvent.setup().click(titles().getByRole("button", { name: "Beta" }));
+    await waitFor(() => expect(pill()).toBeNull()); // Alpha left, Beta not restored yet
+    expect(sessionStorage.getItem(`kobe.scroll:${a}`)).toBe("300");
+    // A late scroll while Beta loads belongs to neither thread.
+    act(() => {
+      list().scrollTop = 900;
+      list().dispatchEvent(new Event("scroll"));
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300)); // past the save delay
+    expect(sessionStorage.getItem(`kobe.scroll:${a}`)).toBe("300");
+    expect(sessionStorage.getItem(`kobe.scroll:${b}`)).toBeNull();
+    release();
+    expect(await screen.findByText("Beta answer")).toBeTruthy();
+    await waitFor(() => expect(list().scrollTop).toBe(maxTop()));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(sessionStorage.getItem(`kobe.scroll:${a}`)).toBe("300");
+    expect(sessionStorage.getItem(`kobe.scroll:${b}`) ?? "bottom").toBe("bottom");
+  });
+
+  it("the pill's count starts again in each thread", async () => {
+    const a = threadWithHistory("Alpha");
+    const b = threadWithHistory("Beta");
+    sessionStorage.setItem(`kobe.scroll:${b}`, "100");
+    await openAtBottom(a, "Alpha");
+    const runId = await startRun(a, "draw a chart");
+    scrollTo(200);
+    act(() => kobe.agent.delta(runId, "m1", "Here is the chart"));
+    expect(
+      await screen.findByRole("button", { name: "Jump to latest, 1 new message" }),
+    ).toBeTruthy();
+
+    await userEvent.setup().click(titles().getByRole("button", { name: "Beta" }));
+    expect(await screen.findByText("Beta answer")).toBeTruthy();
+    await waitFor(() => expect(list().scrollTop).toBe(100));
+    expect(await screen.findByRole("button", { name: "Jump to latest" })).toBeTruthy();
   });
 });

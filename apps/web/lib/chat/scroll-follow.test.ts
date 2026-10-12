@@ -2,11 +2,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   PIN_DISTANCE_PX,
+  createScrollSaver,
   distanceFromBottom,
   isPinned,
   loadScroll,
   newSince,
+  overflows,
   saveScroll,
+  scrollDirection,
   shownCount,
 } from "./scroll-follow";
 
@@ -33,6 +36,24 @@ describe("pinned within 48 px of the bottom", () => {
 
   it("a list that fits without scrolling is pinned", () => {
     expect(isPinned(box(0, 300, 500))).toBe(true);
+  });
+});
+
+describe("who moved the list", () => {
+  it("a move over unchanged content is the member's, in its direction", () => {
+    expect(scrollDirection({ top: 500, height: 2000 }, { top: 490, height: 2000 })).toBe("up");
+    expect(scrollDirection({ top: 500, height: 2000 }, { top: 520, height: 2000 })).toBe("down");
+  });
+
+  it("growth, shrinking and scroll anchoring are not", () => {
+    expect(scrollDirection({ top: 500, height: 2000 }, { top: 480, height: 1980 })).toBeNull();
+    expect(scrollDirection({ top: 500, height: 2000 }, { top: 700, height: 2200 })).toBeNull();
+    expect(scrollDirection({ top: 500, height: 2000 }, { top: 500, height: 2000 })).toBeNull();
+  });
+
+  it("only an overflowing list can be scrolled away from the bottom", () => {
+    expect(overflows(box(0, 2000))).toBe(true);
+    expect(overflows(box(0, 500))).toBe(false);
   });
 });
 
@@ -71,6 +92,30 @@ describe("scroll memory per thread (sessionStorage)", () => {
     expect(loadScroll("t1")).toBeNull();
     expect(loadScroll("t2")).toBeNull();
     expect(loadScroll("t3")).toBeNull();
+  });
+
+  it("coalesces writes until scrolling settles, and flushes at once", () => {
+    vi.useFakeTimers();
+    try {
+      const saver = createScrollSaver(200);
+      saver.schedule("t1", 10);
+      saver.schedule("t1", 20);
+      expect(loadScroll("t1")).toBeNull();
+      vi.advanceTimersByTime(200);
+      expect(loadScroll("t1")).toBe(20);
+
+      saver.schedule("t1", 30);
+      saver.flush();
+      expect(loadScroll("t1")).toBe(30);
+      // A position for another thread first writes the pending one under its own key.
+      saver.schedule("t1", 40);
+      saver.schedule("t2", 50);
+      expect(loadScroll("t1")).toBe(40);
+      saver.flush();
+      expect(loadScroll("t2")).toBe(50);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("works without storage (private mode, blocked site data)", () => {
