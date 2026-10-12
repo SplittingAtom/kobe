@@ -205,7 +205,7 @@ jobs:
           # elsewhere), or Google's public mirror on GitHub-hosted runners.
           KOBE_DOCKERHUB_MIRROR: ${{ runner.environment == 'github-hosted' && 'https://mirror.gcr.io' || 'http://dockerhub-mirror.kobe-ci-runners.svc.cluster.local:5000' }}
         run: scripts/dev-cluster.sh
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: e2e-image-*
           path: ${{ runner.temp }}/e2e-images
