@@ -72,7 +72,9 @@ describe("queue order", () => {
     await f.until(w.team, active, "completed");
     ws.reply(await ws.started(q3), "three");
     await f.until(w.team, q3, "completed");
-    expect(ws.starts().map((s) => s.run_id)).toEqual([active, q3]);
+    // q3's end promotes q1 at once, so wait for that start rather than racing it (KOBE-270).
+    await ws.started(q1);
+    expect(ws.starts().map((s) => s.run_id)).toEqual([active, q3, q1]);
     expect(await auditTargets(w.team, "run.queue_reordered")).toEqual([{ threadId, queued: 3 }]);
   });
 
