@@ -40,6 +40,32 @@ export const WORKSPACE_SYNC_PATH = "/v1/sandbox/workspace";
 
 /** Areas only the server writes (read-only to the agent). Trailing slash included. */
 export const WORKSPACE_SERVER_OWNED_PREFIXES = ["uploads/", "projects/"] as const;
+/**
+ * The member's drop folder (CE5, KOBE-199): a file dropped on the rail lands directly in
+ * `uploads/`. The one spot of a server-owned area the member may write and delete; every other
+ * `uploads/` path is a thread's (`uploads/<thread id>/<name>`, KOBE-144).
+ */
+export const WORKSPACE_DROP_FOLDER = "uploads";
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Zero-width and invisible characters a lookalike could hide in (ZWSP, ZWNJ, ZWJ, WJ, BOM, SHY).
+const INVISIBLE = /[\u200b-\u200d\u2060\ufeff\u00ad]/gu;
+
+/**
+ * Whether a name reads as a thread's folder name (a UUID), after trimming, NFKC (fullwidth
+ * digits) and dropping invisible characters, so a lookalike cannot pass as one.
+ */
+export function isThreadFolderName(name: string): boolean {
+  return UUID_SHAPE.test(name.normalize("NFKC").replace(INVISIBLE, "").trim());
+}
+
+/** A member's drop: `uploads/<name>`, a direct child whose name is not a thread folder's. */
+export function isMemberDropPath(path: string): boolean {
+  const prefix = `${WORKSPACE_DROP_FOLDER}/`;
+  if (!path.startsWith(prefix)) return false;
+  const name = path.slice(prefix.length);
+  return name !== "" && !name.includes("/") && !isThreadFolderName(name);
+}
+
 /** Agent-internal; never synced (session JSONL is rebuilt from Postgres). */
 export const WORKSPACE_EXCLUDED_PREFIXES = [".kobe/"] as const;
 

@@ -3,7 +3,10 @@ import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { Hono, type Context } from "hono";
 import { isUnderLegalHold, lockLegalHolds, withTeam } from "@kobe/db";
 import {
+  isMemberDropPath,
+  isThreadFolderName,
   UPLOAD_DEFAULT_MAX_FILE_BYTES,
+  WORKSPACE_DROP_FOLDER,
   workspaceDeleteQuerySchema,
   workspaceDownloadQuerySchema,
   workspaceListQuerySchema,
@@ -171,11 +174,16 @@ export function workspaceFileRoutes(
     if (!workspacePathSchema.safeParse(target).success || isInternalPath(target)) {
       return refuse(badPath(c));
     }
+    // The rail drop (CE5, KOBE-199): `uploads/<name>` is the member's; thread folder names are not.
+    if (folder === WORKSPACE_DROP_FOLDER && isThreadFolderName(upload.name)) {
+      return refuse(fail(c, 400, "invalid_path", "That name is kept for thread uploads."));
+    }
     if (isReadOnlyPath(target)) return refuse(readOnly(c));
     const result = await uploadToWorkspace(db, sync, ownerOf(c), target, {
       body: upload.file,
       limitBytes: maxBytes,
       teamQuotaDefaultBytes: (deps.uploads ?? DEFAULT_UPLOAD_SETTINGS).defaultQuotaBytes,
+      drop: isMemberDropPath(target),
     });
     if (!result.ok) return fail(c, result.status, result.code, result.message);
     return c.json(fileEntry(result.entry), 201);
@@ -187,12 +195,15 @@ export function workspaceFileRoutes(
     const { path } = query.data;
     if (isInternalPath(path)) return badPath(c);
     if (isReadOnlyPath(path)) return readOnly(c);
+    // A member's drop (KOBE-199) deletes that one file only, never anything under the same name.
+    const drop = isMemberDropPath(path);
     const owner = ownerOf(c);
     const outcome = await withTeam(db, owner.teamId, async (tx) => {
       // Deleting lets the workspace collector free content later: never past a legal hold.
       await lockLegalHolds(tx);
       if (await isUnderLegalHold(tx, owner.teamId, owner.userId)) return "held" as const;
-      const files = await liveFilesUnder(tx, owner, path, DELETE_MAX_FILES + 1);
+      const under = await liveFilesUnder(tx, owner, path, DELETE_MAX_FILES + 1);
+      const files = drop ? under.filter((f) => f.path === path) : under;
       if (files.length === 0) return "missing" as const;
       if (files.length > DELETE_MAX_FILES) return "too_many" as const;
       for (const file of files) await sync.deleteServerFile(tx, owner, file.path);

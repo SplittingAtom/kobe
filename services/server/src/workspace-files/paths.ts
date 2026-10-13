@@ -1,5 +1,7 @@
 import {
+  isMemberDropPath,
   WORKSPACE_EXCLUDED_PREFIXES,
+  WORKSPACE_SEGMENT_MAX_BYTES,
   WORKSPACE_SERVER_OWNED_PREFIXES,
   type WorkspaceArea,
 } from "@kobe/protocol";
@@ -20,9 +22,12 @@ export function areaOf(path: string): WorkspaceArea {
   return "workspace";
 }
 
-/** Read-only in the browser: the server-owned areas (project mounts, thread uploads). */
+/**
+ * Read-only in the browser: the server-owned areas (project mounts, thread uploads), except a
+ * member's own drop directly in uploads/ (KOBE-199), which they may add and delete.
+ */
 export function isReadOnlyPath(path: string): boolean {
-  return areaOf(path) !== "workspace";
+  return areaOf(path) !== "workspace" && !isMemberDropPath(path);
 }
 
 /** Agent-internal paths that are never synced and never browsable. */
@@ -62,4 +67,27 @@ export function attachmentDisposition(path: string): string {
     (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
   );
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+}
+
+const ENCODER = new TextEncoder();
+const bytes = (s: string) => ENCODER.encode(s).length;
+
+/**
+ * The `n`th copy of a file's path after a name clash: `dir/report (1).pdf`. A name over the
+ * segment limit loses characters from its stem, never its extension (an extension too long to
+ * keep is treated as part of the stem).
+ */
+export function copyPath(path: string, n: number): string {
+  const slash = path.lastIndexOf("/");
+  const dir = path.slice(0, slash + 1);
+  const name = path.slice(slash + 1);
+  const suffix = ` (${n})`;
+  const dot = name.lastIndexOf(".");
+  let ext = dot > 0 ? name.slice(dot) : "";
+  if (bytes(suffix + ext) > WORKSPACE_SEGMENT_MAX_BYTES) ext = "";
+  const stem = [...name.slice(0, name.length - ext.length)];
+  while (stem.length > 0 && bytes(stem.join("") + suffix + ext) > WORKSPACE_SEGMENT_MAX_BYTES) {
+    stem.pop();
+  }
+  return `${dir}${stem.join("")}${suffix}${ext}`;
 }

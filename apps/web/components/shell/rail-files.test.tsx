@@ -29,7 +29,15 @@ const TREE: Record<string, Entry[]> = {
     entry("report.csv", "report.csv", "file"),
   ],
   notes: [entry("todo.md", "notes/todo.md", "file")],
-  uploads: [entry("brief.pdf", "uploads/brief.pdf", "file", "uploads")],
+  uploads: [
+    entry(
+      "0b7f3c1e-2d4a-4e5b-8c6d-7e8f9a0b1c2d",
+      "uploads/0b7f3c1e-2d4a-4e5b-8c6d-7e8f9a0b1c2d",
+      "dir",
+      "uploads",
+    ), // a thread's attachments
+    entry("brief.pdf", "uploads/brief.pdf", "file", "uploads"),
+  ],
 };
 
 let seen: Seen[];
@@ -239,13 +247,17 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
     expect((await within(panel).findByRole("alert")).textContent).toMatch(/legal hold/i);
   });
 
-  it("marks uploads and projects read-only, with no upload or delete there", async () => {
+  it("marks uploads and projects read-only, with no upload there; rail drops can be deleted", async () => {
     const { user, panel } = await open();
     expect(within(panel).getAllByText("Read-only").length).toBeGreaterThan(0);
     expect(within(panel).queryByRole("button", { name: "Delete uploads" })).toBeNull();
     await user.click(within(panel).getByRole("button", { name: "Open folder uploads" }));
     await within(panel).findByText("brief.pdf");
-    expect(within(panel).queryByRole("button", { name: "Delete brief.pdf" })).toBeNull();
+    expect(
+      within(panel).queryByRole("button", { name: "Delete 0b7f3c1e-2d4a-4e5b-8c6d-7e8f9a0b1c2d" }),
+    ).toBeNull();
+    // A file directly in uploads/ is a rail drop (KOBE-199): its owner may delete it.
+    expect(within(panel).getByRole("button", { name: "Delete brief.pdf" })).toBeTruthy();
     expect(within(panel).queryByLabelText(/Upload a file/)).toBeNull();
     expect(within(panel).getByText(/read-only/i, { selector: "p" })).toBeTruthy();
     expect(within(panel).getByRole("button", { name: "Download brief.pdf" })).toBeTruthy();

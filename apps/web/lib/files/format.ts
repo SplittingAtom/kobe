@@ -1,10 +1,14 @@
+import { isMemberDropPath } from "@kobe/protocol";
 import type { ApiError } from "../api/client";
 
-/** Server-owned areas of `/workspace` (D-file-browser): read-only for the user and the agent. */
+/**
+ * Server-owned areas of `/workspace` (D-file-browser): read-only for the user and the agent, except
+ * the member's own drops directly in uploads/ (KOBE-199, the protocol's `isMemberDropPath`).
+ */
 const READ_ONLY_ROOTS: ReadonlySet<string> = new Set(["uploads", "projects"]);
 
 export function isReadOnlyPath(path: string): boolean {
-  return READ_ONLY_ROOTS.has(path.split("/")[0] ?? "");
+  return READ_ONLY_ROOTS.has(path.split("/")[0] ?? "") && !isMemberDropPath(path);
 }
 
 export function parentPath(path: string): string {

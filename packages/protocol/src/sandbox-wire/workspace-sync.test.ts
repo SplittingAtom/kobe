@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  isMemberDropPath,
+  isThreadFolderName,
   isExcludedPath,
   isServerOwnedPath,
   workspaceChangeSchema,
@@ -96,5 +98,33 @@ describe("workspace entry header", () => {
     expect(decodeWorkspaceEntryHeader(header)).toEqual(entry);
     expect(decodeWorkspaceEntryHeader("not base64!")).toBeUndefined();
     expect(decodeWorkspaceEntryHeader(undefined)).toBeUndefined();
+  });
+});
+
+describe("member drop path (KOBE-199)", () => {
+  const thread = "0b7f3c1e-2d4a-4e5b-8c6d-7e8f9a0b1c2d";
+
+  it("is a direct child of uploads/ only", () => {
+    expect(isMemberDropPath("uploads/brief.pdf")).toBe(true);
+    expect(isMemberDropPath(`uploads/${thread}.txt`)).toBe(true);
+    for (const path of ["uploads", "uploads/", "uploads/a/b.txt", "projects/a", "brief.pdf"]) {
+      expect(isMemberDropPath(path), path).toBe(false);
+    }
+  });
+
+  it("refuses thread folder names and their lookalikes", () => {
+    const fullwidth = thread.replace(/[0-9]/g, (d) => String.fromCharCode(0xff10 + Number(d)));
+    for (const name of [
+      thread,
+      thread.toUpperCase(),
+      ` ${thread} `,
+      `${thread}\u200d`,
+      `\u200b${thread}`,
+      fullwidth,
+    ]) {
+      expect(isThreadFolderName(name), JSON.stringify(name)).toBe(true);
+      expect(isMemberDropPath(`uploads/${name}`)).toBe(false);
+    }
+    expect(isThreadFolderName("report.pdf")).toBe(false);
   });
 });

@@ -7,6 +7,12 @@ import type { FilesApi } from "../../lib/files/api";
 import { FileBrowser } from "../files/file-browser";
 import { IconAction } from "./icon-action";
 import { RailDivider } from "./rail-divider";
+import {
+  RailDropNotice,
+  RailDropOverlay,
+  useRailDropZone,
+  type DropStatus,
+} from "./rail-drop-zone";
 import { isNarrowScreen, sectionRows, useRail, type RailApi } from "./rail-state";
 import { RailThreads } from "./rail-threads";
 import styles from "./rail.module.css";
@@ -51,7 +57,24 @@ function CollapsedIcons({ rail }: { readonly rail: RailApi }) {
  * The Files section: nothing is listed or woken until the member asks (Open files, Show files,
  * the bar's Files); each ask, and Refresh, wakes the sandbox and lists again.
  */
-function RailFiles({ rail, api }: { readonly rail: RailApi; readonly api: FilesApi }) {
+function RailFiles({
+  rail,
+  api,
+  drop,
+  showFolder,
+  clearDrop,
+}: {
+  readonly rail: RailApi;
+  readonly api: FilesApi;
+  readonly drop: DropStatus;
+  readonly showFolder: { readonly path: string; readonly seq: number } | null;
+  /** A Files action (open, refresh) clears the last drop's notice and errors. */
+  clearDrop(): void;
+}) {
+  const request = () => {
+    clearDrop();
+    rail.requestFiles();
+  };
   return (
     <section
       id={SECTION_IDS.files}
@@ -64,17 +87,18 @@ function RailFiles({ rail, api }: { readonly rail: RailApi; readonly api: FilesA
           Files
         </h3>
         {rail.filesRequests > 0 && (
-          <IconAction command="refresh-files" size="sm" side="right" onClick={rail.requestFiles} />
+          <IconAction command="refresh-files" size="sm" side="right" onClick={request} />
         )}
       </div>
+      <RailDropNotice status={drop} />
       {rail.filesRequests === 0 ? (
         <div className={styles.scroll}>
-          <button type="button" className={styles.loadMore} onClick={rail.requestFiles}>
+          <button type="button" className={styles.loadMore} onClick={request}>
             Open files
           </button>
         </div>
       ) : (
-        <FileBrowser api={api} wakeKey={rail.filesRequests} />
+        <FileBrowser api={api} wakeKey={rail.filesRequests} showFolder={showFolder} />
       )}
     </section>
   );
@@ -84,7 +108,7 @@ function RailFiles({ rail, api }: { readonly rail: RailApi; readonly api: FilesA
  * The workspace rail (CE2, CE5, KOBE-198): the active team's name, then Threads over Files with a
  * draggable divider, each scrolling on its own; 280 px, or 48 px collapsed to three icons. The
  * sections stay mounted (hidden) while collapsed, so their state survives and nothing re-wakes.
- * Slot (A3, KOBE-199): the whole rail becomes the drop zone for files.
+ * The whole rail is the drop zone for files (A3, KOBE-199, `rail-drop-zone.tsx`).
  */
 export function WorkspaceRail({
   teamName,
@@ -103,13 +127,16 @@ export function WorkspaceRail({
   useRevealFocus(rail);
   const sections = useRef<HTMLDivElement>(null);
   const { collapsed } = rail;
+  const drop = useRailDropZone(filesApi, rail);
 
   return (
     <aside
       aria-label="Workspace"
       className={styles.rail}
       {...(collapsed ? { "data-collapsed": "" } : {})}
+      {...drop.handlers}
     >
+      {drop.active && <RailDropOverlay />}
       {collapsed && <CollapsedIcons rail={rail} />}
       <div className={styles.expanded} hidden={collapsed}>
         <div className={styles.header}>
@@ -144,7 +171,13 @@ export function WorkspaceRail({
             container={sections}
             controls={SECTION_IDS.threads}
           />
-          <RailFiles rail={rail} api={filesApi} />
+          <RailFiles
+            rail={rail}
+            api={filesApi}
+            drop={drop.status}
+            showFolder={drop.showFolder}
+            clearDrop={drop.clear}
+          />
         </div>
       </div>
     </aside>

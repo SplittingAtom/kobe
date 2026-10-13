@@ -61,6 +61,8 @@ const SHOWN_5XX_CODES: ReadonlySet<string> = new Set([
   // Model admin (KOBE-40/44): fixed server messages naming the way out.
   "models_not_configured",
   "gateway_unavailable",
+  // Workspace and team storage full (507, KOBE-148/143): a fixed message; KOBE-199 shows it.
+  "quota_exceeded",
 ]);
 
 function fallback(status: number): ApiError {
