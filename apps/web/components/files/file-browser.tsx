@@ -5,7 +5,12 @@ import { ChevronRightIcon, DownloadIcon, FileIcon, FolderIcon, Trash2Icon } from
 import type { ApiError } from "../../lib/api/client";
 import type { FileEntry, FilesApi } from "../../lib/files/api";
 import { saveBytes } from "../../lib/files/save";
-import { describeFileError, formatBytes, isReadOnlyPath } from "../../lib/files/format";
+import {
+  describeFileError,
+  formatBytes,
+  isDroppedUpload,
+  isReadOnlyPath,
+} from "../../lib/files/format";
 import { ErrorNotice } from "../admin/error-notice";
 import { useFolder } from "./use-folder";
 
@@ -175,7 +180,7 @@ function Row({
           <DownloadIcon aria-hidden className="size-4" />
         </button>
       )}
-      {!readOnly && (
+      {(!readOnly || isDroppedUpload(entry)) && (
         <button
           type="button"
           className={iconButton}
@@ -193,13 +198,17 @@ export function FileBrowser({
   api,
   refreshAfterWakeMs = DEFAULT_REFRESH_AFTER_WAKE_MS,
   wakeKey = 0,
+  showFolder = null,
 }: {
   readonly api: FilesApi;
   readonly refreshAfterWakeMs?: number;
   /** A new value wakes the sandbox and lists again (Show files, refresh). */
   readonly wakeKey?: number;
+  /** Opens this folder, once per `seq` (uploads/ after a rail drop, KOBE-199). */
+  readonly showFolder?: { readonly path: string; readonly seq: number } | null;
 }) {
-  const [path, setPath] = useState("");
+  const [path, setPath] = useState(showFolder?.path ?? "");
+  const shownSeq = useRef(showFolder?.seq ?? 0);
   const folder = useFolder(api, path);
   const waking = useWake(api, folder.reload, refreshAfterWakeMs, wakeKey);
   const [pending, setPending] = useState<FileEntry | null>(null);
@@ -214,6 +223,11 @@ export function FileBrowser({
     setActionError(null);
     setNotice("");
   }, []);
+  useEffect(() => {
+    if (!showFolder || showFolder.seq === shownSeq.current) return;
+    shownSeq.current = showFolder.seq;
+    open(showFolder.path);
+  }, [showFolder, open]);
 
   const download = async (entry: FileEntry) => {
     setActionError(null);
@@ -265,7 +279,9 @@ export function FileBrowser({
       )}
       {readOnly ? (
         <p className="text-muted-foreground text-xs">
-          This folder is read-only: files here cannot be uploaded or deleted.
+          {path === "uploads"
+            ? "Drop files on the rail to add them here. Files your threads attached are read-only."
+            : "This folder is read-only: files here cannot be uploaded or deleted."}
         </p>
       ) : (
         <label className="text-xs">

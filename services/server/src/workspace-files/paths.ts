@@ -25,6 +25,20 @@ export function isReadOnlyPath(path: string): boolean {
   return areaOf(path) !== "workspace";
 }
 
+/** The folder a member's rail drop lands in (CE5, KOBE-199); every other uploads/ path is a thread's. */
+export const DROP_FOLDER = "uploads";
+const UUID_NAME = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * A rail drop's own file: a direct child `uploads/<name>`, never nested and never a UUID (the
+ * shape of a thread's attachment folder, `uploads/<thread>/`). The one writable spot in uploads/.
+ */
+export function isDropPath(path: string): boolean {
+  if (!path.startsWith(`${DROP_FOLDER}/`)) return false;
+  const name = path.slice(DROP_FOLDER.length + 1);
+  return name !== "" && !name.includes("/") && !UUID_NAME.test(name);
+}
+
 /** Agent-internal paths that are never synced and never browsable. */
 export function isInternalPath(path: string): boolean {
   return WORKSPACE_EXCLUDED_PREFIXES.some((p) => path === p.slice(0, -1) || path.startsWith(p));

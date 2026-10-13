@@ -120,7 +120,9 @@ export const workspaceDownloadQuerySchema = z.strictObject({ path: workspacePath
  * `POST .../workspace/files` (multipart/form-data): text field `path` = target folder (absent =
  * root), then one file part (name per `uploadFileNameSchema`). 201 body: the new
  * {@link workspaceFileEntrySchema}. Writes land in the synced copy; the agent receives them on its
- * next sync. Server-owned areas (`uploads/`, `projects/`) are refused (`read_only`).
+ * next sync. Server-owned areas (`uploads/`, `projects/`) are refused (`read_only`), except the
+ * rail drop (KOBE-199): `path` exactly `uploads`, a new file directly in it (a UUID-shaped name,
+ * a thread's folder, is `invalid_path`), which the member may also delete.
  */
 export const workspaceUploadFieldsSchema = z.strictObject({ path: dirPath.optional() });
 

@@ -426,13 +426,13 @@ describe("POST /v1/workspace/files (upload)", () => {
 
   it("refuses the server-owned areas and the agent-internal one", async () => {
     const w = await world();
-    for (const folder of ["uploads", "uploads/t1", "projects/p", ".kobe", ".kobe/s"]) {
+    for (const folder of ["uploads/t1", "projects", "projects/p", ".kobe", ".kobe/s"]) {
       const res = await upload(w.a, folder, "x.txt", "x");
       expect(res.status, folder).toBe(folder.startsWith(".kobe") ? 400 : 403);
     }
-    expect(workspaceFileErrorSchema.parse((await upload(w.a, "uploads", "x", "x")).json).code).toBe(
-      "read_only",
-    );
+    expect(
+      workspaceFileErrorSchema.parse((await upload(w.a, "uploads/t1", "x", "x")).json).code,
+    ).toBe("read_only");
   });
 
   it("validates the request: file name, folder, fields, parts, length", async () => {
@@ -653,6 +653,108 @@ describe("DELETE /v1/workspace/files", () => {
     const stray = new TestBrowser(app, PUBLIC_URL);
     for (const [k, v] of w.alice.browser.cookies) stray.cookies.set(k, v);
     expect((await stray.request("DELETE", "/v1/workspace/files?path=a")).status).toBe(400);
+  });
+});
+
+describe("rail drop into uploads/ (KOBE-199)", () => {
+  const THREAD = "0b7f3c1e-2d4a-4e5b-8c6d-7e8f9a0b1c2d";
+  const uploadRows = async (w: World) =>
+    (
+      await fx.admin.query<{ path: string }>(
+        `SELECT path FROM workspace_files WHERE team_id = $1 AND user_id = $2 AND path LIKE 'uploads/%' AND NOT deleted ORDER BY path`,
+        [w.team, w.alice.id],
+      )
+    ).rows.map((r) => r.path);
+
+  it("stores a direct child of uploads/ as a server write, audited like any upload", async () => {
+    const w = await world();
+    const res = await upload(w.a, "uploads", "brief.pdf", "pdf!");
+    expect(res.status, res.text).toBe(201);
+    expect(workspaceFileEntrySchema.parse(res.json)).toMatchObject({
+      path: "uploads/brief.pdf",
+      area: "uploads",
+      size_bytes: 4,
+    });
+    const { rows } = await fx.admin.query<{ origin: string }>(
+      `SELECT origin FROM workspace_files WHERE team_id = $1 AND user_id = $2 AND path = 'uploads/brief.pdf'`,
+      [w.team, w.alice.id],
+    );
+    expect(rows[0]).toMatchObject({ origin: "server" });
+    expect(await auditRows(w.team, "workspace.file_uploaded")).toEqual([
+      { userId: w.alice.id, bytes: 4 },
+    ]);
+    expect((await w.a.get("/v1/workspace/file?path=uploads/brief.pdf")).text).toBe("pdf!");
+  });
+
+  it("refuses nested paths, thread folders and UUID-shaped names", async () => {
+    const w = await world();
+    await seed(w, w.alice, `uploads/${THREAD}/a.txt`, "a", "uploads");
+    for (const folder of [`uploads/${THREAD}`, "uploads/new", "uploads/a/b"]) {
+      const res = await upload(w.a, folder, "x.txt", "x");
+      expect(res.status, folder).toBe(403);
+      expect(workspaceFileErrorSchema.parse(res.json).code).toBe("read_only");
+    }
+    for (const name of [THREAD, THREAD.toUpperCase()]) {
+      const res = await upload(w.a, "uploads", name, "x");
+      expect(res.status, name).toBe(400);
+      expect(workspaceFileErrorSchema.parse(res.json).code).toBe("invalid_path");
+    }
+    expect(await uploadRows(w)).toEqual([`uploads/${THREAD}/a.txt`]);
+  });
+
+  it("never overwrites: a clash with a file or a folder is already_exists", async () => {
+    const w = await world();
+    await seed(w, w.alice, "uploads/notes.txt", "old", "uploads");
+    await seed(w, w.alice, "uploads/legacy/f.txt", "f", "uploads");
+    for (const name of ["notes.txt", "legacy"]) {
+      const res = await upload(w.a, "uploads", name, "new");
+      expect(res.status, name).toBe(409);
+      expect(workspaceFileErrorSchema.parse(res.json).code).toBe("already_exists");
+    }
+    expect((await w.a.get("/v1/workspace/file?path=uploads/notes.txt")).text).toBe("old");
+  });
+
+  it("deletes a dropped file, but never a folder or a thread's files in uploads/", async () => {
+    const w = await world();
+    expect((await upload(w.a, "uploads", "oops.txt", "x")).status).toBe(201);
+    await seed(w, w.alice, `uploads/${THREAD}/a.txt`, "a", "uploads");
+    await seed(w, w.alice, "uploads/legacy/f.txt", "f", "uploads");
+    for (const path of [
+      `uploads/${THREAD}`,
+      `uploads/${THREAD}/a.txt`,
+      "uploads/legacy",
+      "uploads",
+    ]) {
+      const res = await w.a.request("DELETE", `/v1/workspace/files?path=${path}`);
+      expect(res.status, path).toBe(403);
+      expect(workspaceFileErrorSchema.parse(res.json).code).toBe("read_only");
+    }
+    expect((await w.a.request("DELETE", "/v1/workspace/files?path=uploads/oops.txt")).status).toBe(
+      204,
+    );
+    expect(await uploadRows(w)).toEqual([`uploads/${THREAD}/a.txt`, "uploads/legacy/f.txt"]);
+    expect(await auditRows(w.team, "workspace.file_deleted")).toEqual([
+      { userId: w.alice.id, files: 1, bytes: 1 },
+    ]);
+  });
+
+  it("stays in the caller's own workspace: no other team, no teammate's file", async () => {
+    const w = await world();
+    const other = await world();
+    // Not her team: refused before any write (the session's team never matches).
+    const res = await upload(browserFor(w.alice, other.team), "uploads", "in.txt", "x");
+    expect(res.status).toBe(409);
+    expect((res.json as { code: string }).code).toBe("team_mismatch");
+    expect((await upload(w.a, "uploads", "mine.txt", "x")).status).toBe(201);
+    expect((await w.b.request("DELETE", "/v1/workspace/files?path=uploads/mine.txt")).status).toBe(
+      404,
+    );
+    expect(await uploadRows(w)).toEqual(["uploads/mine.txt"]);
+    const { rows } = await fx.admin.query(
+      `SELECT 1 FROM workspace_files WHERE team_id = $1 AND path LIKE 'uploads/%'`,
+      [other.team],
+    );
+    expect(rows).toEqual([]);
   });
 });
 

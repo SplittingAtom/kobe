@@ -7,6 +7,24 @@ export function isReadOnlyPath(path: string): boolean {
   return READ_ONLY_ROOTS.has(path.split("/")[0] ?? "");
 }
 
+const UUID_NAME = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * A file the member dropped on the rail (KOBE-199): directly in uploads/, never a thread's
+ * attachment folder (named by its UUID). The one deletable spot of a read-only area.
+ */
+export function isDroppedUpload(entry: { readonly path: string; readonly type: string }): boolean {
+  const [root, name, ...rest] = entry.path.split("/");
+  return (
+    entry.type === "file" &&
+    root === "uploads" &&
+    name !== undefined &&
+    name !== "" &&
+    rest.length === 0 &&
+    !UUID_NAME.test(name)
+  );
+}
+
 export function parentPath(path: string): string {
   const i = path.lastIndexOf("/");
   return i < 0 ? "" : path.slice(0, i);
